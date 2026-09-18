@@ -29,7 +29,7 @@ describe("GetAppMetadata (Android)", () => {
   });
 
   test("parses full dumpsys package output", async () => {
-    fakeAdb.setCommandResponse("shell dumpsys package com.example.app", {
+    fakeAdb.setCommandResponse("shell dumpsys package 'com.example.app'", {
       stdout: [
         "Packages:",
         "  Package [com.example.app] (abc123):",
@@ -65,7 +65,7 @@ describe("GetAppMetadata (Android)", () => {
   });
 
   test("returns null when package not found", async () => {
-    fakeAdb.setCommandResponse("shell dumpsys package com.missing.app", {
+    fakeAdb.setCommandResponse("shell dumpsys package 'com.missing.app'", {
       stdout: "Unable to find package: com.missing.app",
       stderr: "",
       toString() {
@@ -86,7 +86,7 @@ describe("GetAppMetadata (Android)", () => {
   });
 
   test("returns null when adb command throws", async () => {
-    fakeAdb.setCommandError("shell dumpsys package", new Error("device offline"));
+    fakeAdb.setCommandError("shell dumpsys package 'com.example.app'", new Error("device offline"));
 
     const metadata = new GetAppMetadata(androidDevice, fakeAdbFactory(fakeAdb));
     const result = await metadata.execute("com.example.app");
@@ -95,7 +95,7 @@ describe("GetAppMetadata (Android)", () => {
   });
 
   test("passes optional ADB lookup timeout and cancellation without warning", async () => {
-    fakeAdb.setCommandError("shell dumpsys package", new Error("device offline"));
+    fakeAdb.setCommandError("shell dumpsys package 'com.example.app'", new Error("device offline"));
     const controller = new AbortController();
     const warnSpy = spyOn(logger, "warn");
     const debugSpy = spyOn(logger, "debug");
@@ -110,7 +110,7 @@ describe("GetAppMetadata (Android)", () => {
       expect(result).toBeNull();
       expect(fakeAdb.getCommandCalls()).toEqual([
         {
-          command: "shell dumpsys package com.example.app",
+          command: "shell dumpsys package 'com.example.app'",
           timeoutMs: 2000,
           maxBuffer: undefined,
           noRetry: undefined,
@@ -126,7 +126,7 @@ describe("GetAppMetadata (Android)", () => {
   });
 
   test("returns null when output has no useful fields", async () => {
-    fakeAdb.setCommandResponse("shell dumpsys package com.empty.app", {
+    fakeAdb.setCommandResponse("shell dumpsys package 'com.empty.app'", {
       stdout: "Packages:\n  Package [com.empty.app]:\n    flags=0\n",
       stderr: "",
       toString() {
@@ -147,7 +147,7 @@ describe("GetAppMetadata (Android)", () => {
   });
 
   test("handles missing optional timestamps", async () => {
-    fakeAdb.setCommandResponse("shell dumpsys package com.example.app", {
+    fakeAdb.setCommandResponse("shell dumpsys package 'com.example.app'", {
       stdout: [
         "Packages:",
         "  Package [com.example.app]:",

@@ -304,7 +304,7 @@ describe("TerminateApp (Android)", () => {
     fakeAdb.setForegroundApp({ packageName: "com.example.app", userId: 0 });
     fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 0x4000, running: true }]);
     fakeAdb.setCommandResult(
-      "shell pm list packages --user 0 -f com.example.app | grep -c com.example.app",
+      "shell pm list packages --user 0 -f 'com.example.app' | grep -c 'com.example.app'",
       "1",
     );
     fakeAdb.setCommandResult("shell dumpsys activity processes", "3220:com.example.app/u0a123");
@@ -325,7 +325,7 @@ describe("TerminateApp (Android)", () => {
     fakeAdb.setForegroundApp({ packageName: "com.android.settings", userId: 0 });
     fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 0x4000, running: true }]);
     fakeAdb.setCommandResult(
-      "shell pm list packages --user 0 -f com.android.settings | grep -c com.android.settings",
+      "shell pm list packages --user 0 -f 'com.android.settings' | grep -c 'com.android.settings'",
       "1",
     );
     fakeAdb.setCommandResult(
@@ -348,7 +348,7 @@ describe("TerminateApp (Android)", () => {
     fakeAdb.setForegroundApp({ packageName: "com.example.app", userId: 0 });
     fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 0x4000, running: true }]);
     fakeAdb.setCommandResult(
-      "shell pm list packages --user 0 -f com.example.app | grep -c com.example.app",
+      "shell pm list packages --user 0 -f 'com.example.app' | grep -c 'com.example.app'",
       "1",
     );
     fakeAdb.setCommandResult("shell dumpsys activity processes", "3220:com.example.app/u0a123");
@@ -384,7 +384,7 @@ describe("TerminateApp (Android)", () => {
     fakeAdb.setForegroundApp(null);
     fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 0x4000, running: true }]);
     fakeAdb.setCommandResult(
-      "shell pm list packages --user 0 -f com.example.app | grep -c com.example.app",
+      "shell pm list packages --user 0 -f 'com.example.app' | grep -c 'com.example.app'",
       "1",
     );
     fakeAdb.setCommandResult("shell dumpsys activity processes", "3271:com.example.other/u0a123");
@@ -416,7 +416,7 @@ describe("TerminateApp (Android)", () => {
     fakeAdb.setForegroundApp(null);
     fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 0x4000, running: true }]);
     fakeAdb.setCommandResult(
-      "shell pm list packages --user 0 -f com.example.app | grep -c com.example.app",
+      "shell pm list packages --user 0 -f 'com.example.app' | grep -c 'com.example.app'",
       "0",
     );
 
@@ -445,7 +445,7 @@ describe("TerminateApp (Android)", () => {
     fakeAdb.setForegroundApp(null);
     fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 0x4000, running: true }]);
     fakeAdb.setCommandResult(
-      "shell pm list packages --user 0 -f com.example.app | grep -c com.example.app",
+      "shell pm list packages --user 0 -f 'com.example.app' | grep -c 'com.example.app'",
       "0",
     );
 
@@ -464,7 +464,7 @@ describe("TerminateApp (Android)", () => {
     fakeAdb.setForegroundApp(null);
     fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 0x4000, running: true }]);
     fakeAdb.setCommandResult(
-      "shell pm list packages --user 0 -f com.example.app | grep -c com.example.app",
+      "shell pm list packages --user 0 -f 'com.example.app' | grep -c 'com.example.app'",
       "1",
     );
     // grep exits 1 when there are no matching processes. This is the expected
@@ -493,7 +493,7 @@ describe("TerminateApp (Android)", () => {
     fakeAdb.setForegroundApp(null);
     fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 0x4000, running: true }]);
     fakeAdb.setCommandResult(
-      "shell pm list packages --user 0 -f com.example.app | grep -c com.example.app",
+      "shell pm list packages --user 0 -f 'com.example.app' | grep -c 'com.example.app'",
       "1",
     );
     fakeAdb.setCommandError("shell dumpsys activity processes", new Error("dumpsys unavailable"));
@@ -514,7 +514,7 @@ describe("TerminateApp (Android)", () => {
     // fake matches errors by exact command, so a substring key never fires and
     // the catch-and-degrade path stays untested (issue #4169 item 5).
     fakeAdb.setCommandError(
-      "shell pm list packages --user 0 -f com.example.app | grep -c com.example.app",
+      "shell pm list packages --user 0 -f 'com.example.app' | grep -c 'com.example.app'",
       new Error("Command failed with exit code 1"),
     );
 
@@ -717,7 +717,7 @@ describe("TerminateApp (observed interaction, perf-tree ownership)", () => {
     fakeAdb.setForegroundApp({ packageName: "com.example.app", userId: 0 });
     fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 0x4000, running: true }]);
     fakeAdb.setCommandResult(
-      "shell pm list packages --user 0 -f com.example.app | grep -c com.example.app",
+      "shell pm list packages --user 0 -f 'com.example.app' | grep -c 'com.example.app'",
       "1",
     );
     fakeAdb.setCommandResult("shell dumpsys activity processes", "3220:com.example.app/u0a123");

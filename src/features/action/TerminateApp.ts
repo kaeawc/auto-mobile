@@ -141,7 +141,7 @@ export class TerminateApp extends BaseVisualChange {
           logger.debug(`[TerminateApp] CtrlProxy install check failed: ${error}`, error);
         }
         try {
-          const isInstalledCmd = `shell pm list packages --user ${targetUserId} -f ${packageName} | grep -c ${packageName}`;
+          const isInstalledCmd = `shell pm list packages --user ${targetUserId} -f ${shellQuote(packageName)} | grep -c ${shellQuote(packageName)}`;
           const isInstalledOutput = await this.adb.executeCommand(
             isInstalledCmd,
             undefined,

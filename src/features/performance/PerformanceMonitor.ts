@@ -1,5 +1,6 @@
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { logger } from "../../utils/logger";
+import { shellQuote } from "../../utils/shellQuote";
 import {
   getPerformancePushServer,
   LivePerformanceData,
@@ -1017,7 +1018,7 @@ export class PerformanceMonitor {
       // Read and reset gfxinfo in one command to get fresh interval data
       // The 'reset' flag clears stats after reading, so next read reflects only new frames
       const { stdout } = await adb.executeCommand(
-        `shell dumpsys gfxinfo ${device.packageName} reset`,
+        `shell dumpsys gfxinfo ${shellQuote(device.packageName)} reset`,
         PerformanceMonitor.ANDROID_COMMAND_TIMEOUT_MS,
         undefined,
         undefined,
@@ -1103,7 +1104,7 @@ export class PerformanceMonitor {
 
       // Get the process ID
       const { stdout: pidOut } = await adb.executeCommand(
-        `shell pidof ${device.packageName}`,
+        `shell pidof ${shellQuote(device.packageName)}`,
         PerformanceMonitor.ANDROID_COMMAND_TIMEOUT_MS,
         undefined,
         undefined,
@@ -1117,16 +1118,19 @@ export class PerformanceMonitor {
 
       // Get CPU stats from /proc/stat
       const { stdout: statOut } = await adb.executeCommand(
-        `shell cat /proc/${pid}/stat`,
+        `shell cat /proc/${shellQuote(pid)}/stat`,
         PerformanceMonitor.ANDROID_COMMAND_TIMEOUT_MS,
         undefined,
         undefined,
         signal,
         true,
       );
-      const fields = statOut.split(" ");
-      const utime = parseInt(fields[13] || "0", 10);
-      const stime = parseInt(fields[14] || "0", 10);
+      const fields = statOut
+        .slice(statOut.lastIndexOf(")") + 1)
+        .trim()
+        .split(/\s+/);
+      const utime = parseInt(fields[11] || "0", 10);
+      const stime = parseInt(fields[12] || "0", 10);
 
       // Get system uptime
       const { stdout: uptimeOut } = await adb.executeCommand(
@@ -1189,7 +1193,7 @@ export class PerformanceMonitor {
       });
 
       const { stdout } = await adb.executeCommand(
-        `shell dumpsys meminfo ${device.packageName}`,
+        `shell dumpsys meminfo ${shellQuote(device.packageName)}`,
         PerformanceMonitor.ANDROID_COMMAND_TIMEOUT_MS,
         undefined,
         undefined,

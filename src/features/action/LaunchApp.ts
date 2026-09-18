@@ -213,11 +213,11 @@ export class LaunchApp extends BaseVisualChange {
       // Try multiple approaches to find the main activity
       const approaches = [
         // Approach 1: Direct pm dump with specific grep
-        `shell pm dump ${packageName} | grep -A 5 -B 5 "android.intent.action.MAIN"`,
+        `shell pm dump ${shellQuote(packageName)} | grep -A 5 -B 5 "android.intent.action.MAIN"`,
         // Approach 2: Query resolver activities
-        `shell cmd package query-activities --brief android.intent.action.MAIN android.intent.category.LAUNCHER | grep ${packageName}`,
+        `shell cmd package query-activities --brief android.intent.action.MAIN android.intent.category.LAUNCHER | grep ${shellQuote(packageName)}`,
         // Approach 3: Direct pm list activities
-        `shell pm list packages -f ${packageName} && pm dump ${packageName} | grep -A 10 "Activity filter"`,
+        `shell pm list packages -f ${shellQuote(packageName)} && pm dump ${shellQuote(packageName)} | grep -A 10 "Activity filter"`,
       ];
 
       for (let i = 0; i < approaches.length; i++) {
@@ -290,7 +290,7 @@ export class LaunchApp extends BaseVisualChange {
           const simpleResult = perf
             ? await perf.track("activityFallback", () =>
                 this.adb.executeCommand(
-                  `shell pm dump ${packageName}`,
+                  `shell pm dump ${shellQuote(packageName)}`,
                   undefined,
                   undefined,
                   undefined,
@@ -298,7 +298,7 @@ export class LaunchApp extends BaseVisualChange {
                 ),
               )
             : await this.adb.executeCommand(
-                `shell pm dump ${packageName}`,
+                `shell pm dump ${shellQuote(packageName)}`,
                 undefined,
                 undefined,
                 undefined,

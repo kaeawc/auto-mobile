@@ -92,7 +92,7 @@ describe("resolveAppLabel", () => {
 
     try {
       expect(await resolveAppLabel(androidDevice, "com.example.app")).toBe("Example App");
-      expect(fakeAdb.wasCommandExecuted("shell dumpsys package com.example.app")).toBe(true);
+      expect(fakeAdb.wasCommandExecuted("shell dumpsys package 'com.example.app'")).toBe(true);
     } finally {
       spy.mockRestore();
     }
@@ -169,7 +169,7 @@ describe("resolveAppLabel", () => {
       expect(await resolveAppLabel(androidDevice, "com.example.app")).toBeNull();
       // Prove the null came from the dumpsys failure path, not from ADB never
       // being invoked (the fake records the command before it throws).
-      expect(fakeAdb.wasCommandExecuted("shell dumpsys package com.example.app")).toBe(true);
+      expect(fakeAdb.wasCommandExecuted("shell dumpsys package 'com.example.app'")).toBe(true);
     } finally {
       spy.mockRestore();
     }

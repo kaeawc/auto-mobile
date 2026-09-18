@@ -11,6 +11,7 @@ import { throwIfAborted } from "../../utils/toolUtils";
 import type { AwaitIdle as AwaitIdleInterface, UiStabilityState } from "./interfaces/AwaitIdle";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { withRemainingBudget } from "../../utils/withRemainingBudget";
+import { shellQuote } from "../../utils/shellQuote";
 
 export class AwaitIdle implements AwaitIdleInterface {
   private adb: AdbExecutor;
@@ -90,7 +91,7 @@ export class AwaitIdle implements AwaitIdleInterface {
     try {
       await withRemainingBudget(deadlineMs, this.timer, signal, (activeSignal, remainingMs) =>
         this.adb.executeCommand(
-          `shell dumpsys gfxinfo ${packageName} reset`,
+          `shell dumpsys gfxinfo ${shellQuote(packageName)} reset`,
           remainingMs,
           undefined,
           undefined,
@@ -298,7 +299,7 @@ export class AwaitIdle implements AwaitIdleInterface {
         const finalGfxInfo = await perf.track("finalGfxinfo", async () => {
           return withRemainingBudget(deadlineMs, this.timer, signal, (activeSignal, remainingMs) =>
             this.adb.executeCommand(
-              `shell dumpsys gfxinfo ${packageName}`,
+              `shell dumpsys gfxinfo ${shellQuote(packageName)}`,
               remainingMs,
               undefined,
               undefined,

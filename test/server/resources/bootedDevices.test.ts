@@ -1594,7 +1594,7 @@ describe("booted device readiness", () => {
 
   test("reads Android package versions via ADB without constructing CtrlProxy", async () => {
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("shell dumpsys package com.example.ctrlproxy", {
+    adb.setCommandResponse("shell dumpsys package 'com.example.ctrlproxy'", {
       stdout: "versionCode=45\nversionName=1.2.3\ncodePath=/data/app/ctrlproxy",
       stderr: "",
     });

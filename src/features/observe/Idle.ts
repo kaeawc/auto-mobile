@@ -13,6 +13,7 @@ import {
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { parseWindowManagerRotation } from "../../utils/android-cmdline-tools/parseWindowManagerRotation";
+import { shellQuote } from "../../utils/shellQuote";
 
 export class Idle {
   private adb: AdbExecutor;
@@ -178,7 +179,7 @@ export class Idle {
     try {
       // Reset the gfxinfo stats for the package
       await perf.track("adbGfxinfoReset", () =>
-        this.adb.executeCommand(`shell dumpsys gfxinfo ${packageName} reset`),
+        this.adb.executeCommand(`shell dumpsys gfxinfo ${shellQuote(packageName)} reset`),
       );
 
       // Wait for measurement period to accumulate data. Use the injected timer
@@ -225,7 +226,7 @@ export class Idle {
     try {
       const { stdout } = await perf.track("adbGfxinfo", () =>
         this.adb.executeCommand(
-          `shell dumpsys gfxinfo ${packageName}`,
+          `shell dumpsys gfxinfo ${shellQuote(packageName)}`,
           options.timeoutMs,
           undefined,
           undefined,

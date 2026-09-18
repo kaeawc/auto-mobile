@@ -336,7 +336,7 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
     try {
       // Launch the app to restore foreground state
       await this.adb.executeCommand(
-        `shell am start -a android.intent.action.MAIN -c android.intent.category.LAUNCHER ${packageName}`,
+        `shell am start -a android.intent.action.MAIN -c android.intent.category.LAUNCHER ${shellQuote(packageName)}`,
       );
       logger.info(`Launched ${packageName}`);
     } catch (error) {

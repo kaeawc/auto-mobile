@@ -27,7 +27,7 @@ describe("DeepLinkManager", () => {
     fakeAdbFactory = { create: () => fakeAdb };
 
     // Set up default responses for dumpsys package
-    fakeAdb.setCommandResponse("dumpsys package com.example.app", {
+    fakeAdb.setCommandResponse("dumpsys package 'com.example.app'", {
       stdout: `Package [com.example.app] (12345):
   userId=10123
   pkg=Package{abcdef com.example.app}

@@ -213,7 +213,7 @@ describe("InstallApp", () => {
     );
     fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 0x13, running: true }]);
     fakeAdb.setCommandResponse(
-      "shell pm list packages --user 0 -f com.example.app",
+      "shell pm list packages --user 0 -f 'com.example.app'",
       createExecResult("0"),
     );
     fakeAdb.setCommandResponse(`install --user 0 -r "${apkPath}"`, createExecResult("Success"));
@@ -551,7 +551,7 @@ describe("InstallApp", () => {
       createExecResult("package: name='com.example.app' versionCode='1'"),
     );
     fakeAdb.setCommandResponse(
-      "shell pm list packages --user 0 -f com.example.app",
+      "shell pm list packages --user 0 -f 'com.example.app'",
       createExecResult("0"),
     );
 
@@ -580,7 +580,7 @@ describe("InstallApp", () => {
       createExecResult("package: name='com.example.app' versionCode='1'"),
     );
     fakeAdb.setCommandResponse(
-      "shell pm list packages --user 0 -f com.example.app",
+      "shell pm list packages --user 0 -f 'com.example.app'",
       createExecResult("0"),
     );
 
@@ -813,7 +813,7 @@ describe("InstallApp", () => {
       createExecResult("package: name='com.example.app' versionCode='2'"),
     );
     fakeAdb.setCommandResponse(
-      "shell pm list packages --user 0 -f com.example.app",
+      "shell pm list packages --user 0 -f 'com.example.app'",
       createExecResult("1"),
     );
     fakeAdb.setCommandResponse(`install --user 0 -r "${apkPath}"`, createExecResult("Success"));
@@ -835,7 +835,7 @@ describe("InstallApp", () => {
       createExecResult("package: name='com.example.app' versionCode='1'"),
     );
     fakeAdb.setCommandResponse(
-      "shell pm list packages --user 0 -f com.example.app",
+      "shell pm list packages --user 0 -f 'com.example.app'",
       createExecResult("0"),
     );
     fakeAdb.setCommandResponse('install --user 0 -r "/tmp/app.APK"', createExecResult("Success"));
@@ -877,7 +877,7 @@ describe("InstallApp", () => {
     );
     fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 13, running: true }]);
     fakeAdb.setCommandResponse(
-      "shell pm list packages --user 0 -f com.example.app",
+      "shell pm list packages --user 0 -f 'com.example.app'",
       createExecResult("1"),
     );
     fakeAdb.setCommandResponseSequence(`install --user 0 -r "${apkPath}"`, [
@@ -920,7 +920,7 @@ describe("InstallApp", () => {
     );
     fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 13, running: true }]);
     fakeAdb.setCommandResponse(
-      "shell pm list packages --user 0 -f com.example.app",
+      "shell pm list packages --user 0 -f 'com.example.app'",
       createExecResult("1"),
     );
     fakeAdb.setCommandResponseSequence(`install --user 0 -r "${apkPath}"`, [
@@ -972,7 +972,7 @@ describe("InstallApp", () => {
       createExecResult("package: name='com.example.app' versionCode='1'"),
     );
     fakeAdb.setCommandResponse(
-      "shell pm list packages --user 0 -f com.example.app",
+      "shell pm list packages --user 0 -f 'com.example.app'",
       createExecResult("0"),
     );
     fakeAdb.setCommandError(

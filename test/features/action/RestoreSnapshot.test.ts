@@ -66,7 +66,7 @@ describe("RestoreSnapshot", () => {
     // Setup default command results
     fakeAdb.setCommandResult("shell pm clear com.example.app", "Success");
     fakeAdb.setCommandResult(
-      "shell am start -a android.intent.action.MAIN -c android.intent.category.LAUNCHER com.example.app",
+      "shell am start -a android.intent.action.MAIN -c android.intent.category.LAUNCHER 'com.example.app'",
       "",
     );
   });
@@ -649,7 +649,7 @@ describe("RestoreSnapshot", () => {
       );
       expect(
         fakeAdb.wasCommandExecuted(
-          "shell am start -a android.intent.action.MAIN -c android.intent.category.LAUNCHER com.example.app",
+          "shell am start -a android.intent.action.MAIN -c android.intent.category.LAUNCHER 'com.example.app'",
         ),
       ).toBe(true);
 

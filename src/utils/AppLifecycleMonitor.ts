@@ -5,6 +5,7 @@ import {
 } from "./android-cmdline-tools/AdbClientFactory";
 import { logger } from "./logger";
 import { BootedDevice } from "../models";
+import { shellQuote } from "./shellQuote";
 
 /**
  * Interface for AppLifecycleMonitor
@@ -137,7 +138,7 @@ export class DefaultAppLifecycleMonitor extends EventEmitter implements AppLifec
     try {
       // Create ADB client for this device
       const adb = this.adbFactory.create(device);
-      const result = await adb.executeCommand(`shell pidof ${packageName} || true`);
+      const result = await adb.executeCommand(`shell pidof ${shellQuote(packageName)} || true`);
 
       // pidof returns empty stdout if package is not running
       return result.stdout.trim().length > 0;

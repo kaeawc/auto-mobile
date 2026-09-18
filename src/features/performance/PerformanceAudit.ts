@@ -13,6 +13,7 @@ import { serverConfig } from "../../utils/ServerConfig";
 import { PerformanceAuditRepository } from "../../db/performanceAuditRepository";
 import { defaultTimer } from "../../utils/SystemTimer";
 import { selectTopContributors } from "../../utils/topContributors";
+import { shellQuote } from "../../utils/shellQuote";
 
 /**
  * Performance metrics collected during audit
@@ -218,7 +219,7 @@ export class PerformanceAudit {
   ): Promise<Partial<PerformanceMetrics>> {
     try {
       const { stdout } = await perf.track("adbGfxinfo", () =>
-        this.adb.executeCommand(`shell dumpsys gfxinfo ${packageName}`),
+        this.adb.executeCommand(`shell dumpsys gfxinfo ${shellQuote(packageName)}`),
       );
 
       const metrics = this.idle.parseMetrics(stdout);
@@ -266,7 +267,7 @@ export class PerformanceAudit {
     try {
       // Get process ID
       const { stdout: pidOutput } = await perf.track("adbGetPid", () =>
-        this.adb.executeCommand(`shell pidof ${packageName}`),
+        this.adb.executeCommand(`shell pidof ${shellQuote(packageName)}`),
       );
 
       const pid = pidOutput.trim();
@@ -281,20 +282,27 @@ export class PerformanceAudit {
 
       // Get thread count
       const { stdout: threadOutput } = await perf.track("adbThreadCount", () =>
-        this.adb.executeCommand(`shell ps -T -p ${pid} | wc -l`),
+        this.adb.executeCommand(`shell ps -T -p ${shellQuote(pid)} | wc -l`),
       );
       const threadCount = parseInt(threadOutput.trim(), 10) - 1; // Subtract header line
 
       // Get CPU stats from /proc/{pid}/stat
       const { stdout: statOutput } = await perf.track("adbCpuStat", () =>
-        this.adb.executeCommand(`shell cat /proc/${pid}/stat`),
+        this.adb.executeCommand(`shell cat /proc/${shellQuote(pid)}/stat`),
       );
 
       // Parse CPU usage
       // Format: pid (comm) state ppid pgrp session tty_nr tpgid flags minflt cminflt majflt cmajflt utime stime cutime cstime...
-      const statFields = statOutput.split(" ");
-      const utime = parseInt(statFields[13] || "0", 10); // User time
-      const stime = parseInt(statFields[14] || "0", 10); // System time
+      const commEnd = statOutput.lastIndexOf(")");
+      const statFields =
+        commEnd >= 0
+          ? statOutput
+              .slice(commEnd + 1)
+              .trim()
+              .split(/\s+/)
+          : [];
+      const utime = parseInt(statFields[11] || "0", 10); // User time
+      const stime = parseInt(statFields[12] || "0", 10); // System time
       const totalTime = utime + stime;
 
       // Get system uptime to calculate CPU percentage
@@ -466,7 +474,7 @@ export class PerformanceAudit {
   ): Promise<number | null> {
     try {
       const { stdout } = await perf.track("adbGfxinfoFrameRate", () =>
-        this.adb.executeCommand(`shell dumpsys gfxinfo ${packageName}`),
+        this.adb.executeCommand(`shell dumpsys gfxinfo ${shellQuote(packageName)}`),
       );
 
       // Parse "Total frames rendered: N"
@@ -587,7 +595,7 @@ export class PerformanceAudit {
       while (elapsedMs < maxWaitMs) {
         // Reset gfxinfo to start fresh measurement
         await perf.track("adbGfxinfoTtiReset", () =>
-          this.adb.executeCommand(`shell dumpsys gfxinfo ${packageName} reset`),
+          this.adb.executeCommand(`shell dumpsys gfxinfo ${shellQuote(packageName)} reset`),
         );
 
         // Wait for check interval
@@ -596,7 +604,7 @@ export class PerformanceAudit {
 
         // Get metrics after interval
         const { stdout: afterStdout } = await perf.track("adbGfxinfoTtiAfter", () =>
-          this.adb.executeCommand(`shell dumpsys gfxinfo ${packageName}`),
+          this.adb.executeCommand(`shell dumpsys gfxinfo ${shellQuote(packageName)}`),
         );
 
         const metrics = this.idle.parseMetrics(afterStdout);

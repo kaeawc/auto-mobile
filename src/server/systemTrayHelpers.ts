@@ -12,6 +12,7 @@ import { isStabilityDiffEmpty } from "../features/observe/SettleObserve";
 import type { Timer } from "../utils/SystemTimer";
 import { waitForScrollIdle } from "../utils/scrollIdle";
 import { defaultTimer } from "../utils/SystemTimer";
+import { shellQuote } from "../utils/shellQuote";
 import {
   ActionableError,
   BootedDevice,
@@ -441,7 +442,7 @@ export const resolveAppLabel = async (
     const { adbFactory } = getSystemTrayDependencies();
     const adb = adbFactory(device);
     const result = await adb.executeCommand(
-      `shell dumpsys package ${appId}`,
+      `shell dumpsys package ${shellQuote(appId)}`,
       undefined,
       undefined,
       true,

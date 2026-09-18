@@ -260,7 +260,7 @@ export class PostNotification {
     const command =
       `shell am broadcast -n ${component} -a ${NOTIFICATION_ACTION} ${extras.join(" ")}`.trim();
 
-    const probeCommand = `shell cmd package query-receivers --brief -a ${NOTIFICATION_ACTION} -p ${appId}`;
+    const probeCommand = `shell cmd package query-receivers --brief -a ${NOTIFICATION_ACTION} -p ${shellQuote(appId)}`;
     try {
       const probeResult = await this.adb.executeCommand(
         probeCommand,

@@ -50,11 +50,11 @@ done < <(find "$module_dir" -path "*/src/androidTest" -type d -print0 2>/dev/nul
 if ((${#paths[@]})); then
 if [[ "$DRY_RUN" == "true" ]]; then
 echo "  Would remove androidTest from: $module_dir"
-for path in "${paths[@]}"; do
+for path in ${paths[@]+"${paths[@]}"}; do
 echo "$path"
 done
 else
-rm -rf -- "${paths[@]}"
+rm -rf -- ${paths[@]+"${paths[@]}"}
 echo "  Removed androidTest from: $module_dir"
 fi
 fi

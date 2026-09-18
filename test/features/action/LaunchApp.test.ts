@@ -4,7 +4,7 @@ import * as os from "os";
 import * as nodePath from "path";
 import { LaunchApp } from "../../../src/features/action/LaunchApp";
 import { buildLaunchAppResponse } from "../../../src/server/appTools";
-import { BootedDevice, ObserveResult } from "../../../src/models";
+import { BackStackInfo, BootedDevice, ObserveResult } from "../../../src/models";
 import { DefaultPerformanceTracker } from "../../../src/utils/PerformanceTracker";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
@@ -33,12 +33,13 @@ describe("LaunchApp", () => {
 
   const packageName = "com.example.app";
 
-  const createObserveResult = (appId?: string): ObserveResult => ({
+  const createObserveResult = (appId?: string, backStack?: BackStackInfo): ObserveResult => ({
     updatedAt: Date.now(),
     screenSize: { width: 1080, height: 1920 },
     systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
     viewHierarchy: appId ? ({ node: {}, packageName: appId } as any) : { node: {} },
     activeWindow: appId ? { appId, activityName: "MainActivity", layoutSeqSum: 1 } : undefined,
+    backStack,
   });
 
   const configureInstalledApp = () => {
@@ -437,6 +438,71 @@ describe("LaunchApp", () => {
     );
     expect(result.observation).toBeUndefined();
     expect(result.observationOmitted?.reason).toBe("stale_launch_observation");
+  });
+
+  test("accepts a helper-package activity in a task rooted at the launched app", async () => {
+    fakeTimer.enableAutoAdvance();
+    const settingsPackageName = "com.android.settings";
+    const helperPackageName = "com.google.android.settings.intelligence";
+    const helperObservation = createObserveResult(helperPackageName, {
+      depth: 1,
+      activities: [],
+      currentTaskId: 8,
+      tasks: [
+        {
+          id: 8,
+          packageName: settingsPackageName,
+          rootActivity: `${settingsPackageName}/.Settings`,
+          topActivity: `${helperPackageName}/.modules.search.SearchActivity`,
+        },
+      ],
+    });
+
+    fakeAdb.setForegroundApp({ packageName: settingsPackageName, userId: 0 });
+    fakeAdb.setCommandResponse("shell pm list packages --user 0", {
+      stdout: `package:${settingsPackageName}\n`,
+      stderr: "",
+    });
+    fakeAdb.setCommandResponse("shell dumpsys activity processes", { stdout: "0\n", stderr: "" });
+    fakeObserveScreen.setObserveResult(helperObservation);
+
+    const result = await launchApp.execute(settingsPackageName, false, false);
+
+    expect(result.success).toBe(true);
+    expect(result.foregroundActivityPackage).toBe(helperPackageName);
+    expect(result.verifiedBy).toBe("task-root");
+    expect(result.observation).toBeDefined();
+    expect(result.observation?.backStack).toEqual(helperObservation.backStack);
+  });
+
+  test("rejects a foreground task rooted at a different package with recovery guidance", async () => {
+    fakeTimer.enableAutoAdvance();
+    const otherPackageName = "com.example.other";
+    const otherTaskObservation = createObserveResult(otherPackageName, {
+      depth: 1,
+      activities: [],
+      currentTaskId: 9,
+      tasks: [
+        {
+          id: 9,
+          packageName: otherPackageName,
+          rootActivity: `${otherPackageName}/.MainActivity`,
+        },
+      ],
+    });
+
+    fakeAdb.setForegroundApp({ packageName, userId: 0 });
+    fakeAdb.setCommandResponse("shell dumpsys activity processes", {
+      stdout: "123:com.example.app/u0a123\n",
+      stderr: "",
+    });
+    fakeObserveScreen.setObserveResult(otherTaskObservation);
+
+    const result = await launchApp.execute(packageName, false, false);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain(otherPackageName);
+    expect(result.error).toContain("coldBoot: true");
   });
 
   test("recognizes a running app whose process uses a numeric system UID", async () => {
@@ -1034,6 +1100,8 @@ describe("LaunchApp", () => {
     expect(result.success).toBe(true);
     expect(result.observation?.activeWindow?.appId).toBe(packageName);
     expect(result.observation?.viewHierarchy?.packageName).toBe(packageName);
+    expect(result.foregroundActivityPackage).toBeUndefined();
+    expect(result.verifiedBy).toBeUndefined();
     expect(fakeObserveScreen.getExecuteCallCount()).toBeGreaterThan(1);
     expect(
       fakeObserveScreen

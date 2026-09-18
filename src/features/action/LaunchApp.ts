@@ -1288,15 +1288,25 @@ export class LaunchApp extends BaseVisualChange {
         skipPerformanceAudit: true,
       });
       signal?.throwIfAborted();
-      if (this.launchObservationMatchesPackage(latestObservation, expectedPackageName)) {
-        result.observation = this.preserveLaunchObservationMetadata(
-          latestObservation,
-          result.observation,
-        );
+      if (this.settleLaunchObservation(result, latestObservation, expectedPackageName)) {
         return result;
       }
     }
 
+    return this.resolveLaunchObservationTimeout(
+      result,
+      latestObservation,
+      expectedPackageName,
+      timeoutMs,
+    );
+  }
+
+  private resolveLaunchObservationTimeout(
+    result: LaunchAppResult,
+    latestObservation: ObserveResult,
+    expectedPackageName: string,
+    timeoutMs: number,
+  ): LaunchAppResult {
     // Distinguish "genuinely launched but no foreground window could be read at
     // all" from "observed a different/stale app" (issue #6220 follow-up). The
     // latter is a real mismatch — reject and strip the stale observation, as
@@ -1318,8 +1328,12 @@ export class LaunchApp extends BaseVisualChange {
       );
       result.observation = this.preserveLaunchObservationMetadata(
         latestObservation,
-        result.observation,
+        result.observation ?? latestObservation,
       );
+      return result;
+    }
+
+    if (this.verifyLaunchObservationFromTaskRoot(result, latestObservation, expectedPackageName)) {
       return result;
     }
 
@@ -1327,11 +1341,27 @@ export class LaunchApp extends BaseVisualChange {
       {
         ...result,
         success: false,
-        error: `Timed out waiting for launch observation to show ${expectedPackageName}; last observation reported ${this.describeLaunchObservationPackages(latestObservation)}`,
+        error: `Timed out waiting for launch observation to show ${expectedPackageName}; last observation reported ${this.describeLaunchObservationPackages(latestObservation)} in the foreground — pass coldBoot: true to reset to the launcher activity, or call terminateApp first.`,
       },
       expectedPackageName,
       latestObservation,
     );
+  }
+
+  private settleLaunchObservation(
+    result: LaunchAppResult,
+    observation: ObserveResult,
+    expectedPackageName: string,
+  ): boolean {
+    if (this.launchObservationMatchesPackage(observation, expectedPackageName)) {
+      result.observation = this.preserveLaunchObservationMetadata(
+        observation,
+        result.observation ?? observation,
+      );
+      return true;
+    }
+
+    return this.verifyLaunchObservationFromTaskRoot(result, observation, expectedPackageName);
   }
 
   private withoutStaleLaunchObservation(
@@ -1445,6 +1475,50 @@ export class LaunchApp extends BaseVisualChange {
 
     const fallbackPackageName = this.packageFromForegroundActivity(observation);
     return fallbackPackageName ? [fallbackPackageName] : [];
+  }
+
+  /**
+   * Whether the foreground task belongs to the launched app even though its top
+   * activity belongs to a helper package (issue #7218).
+   */
+  private isForegroundTaskRootedAtPackage(
+    observation: ObserveResult,
+    expectedPackageName: string,
+  ): boolean {
+    const currentTaskId = observation.backStack?.currentTaskId;
+    if (currentTaskId === undefined) {
+      return false;
+    }
+
+    const currentTask = observation.backStack?.tasks.find((task) => task.id === currentTaskId);
+    return (
+      currentTask?.packageName === expectedPackageName ||
+      currentTask?.rootActivity?.split("/")[0] === expectedPackageName
+    );
+  }
+
+  private verifyLaunchObservationFromTaskRoot(
+    result: LaunchAppResult,
+    observation: ObserveResult,
+    expectedPackageName: string,
+  ): boolean {
+    const foregroundActivityPackage = this.getLaunchObservationPackageNames(observation).find(
+      (packageName) => packageName !== expectedPackageName,
+    );
+    if (
+      !foregroundActivityPackage ||
+      !this.isForegroundTaskRootedAtPackage(observation, expectedPackageName)
+    ) {
+      return false;
+    }
+
+    result.observation = this.preserveLaunchObservationMetadata(
+      observation,
+      result.observation ?? observation,
+    );
+    result.foregroundActivityPackage = foregroundActivityPackage;
+    result.verifiedBy = "task-root";
+    return true;
   }
 
   /**

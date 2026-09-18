@@ -19,13 +19,15 @@ export interface HeartbeatSessionSource {
 type SessionHeartbeatReleaseReason =
   | "missing-first-heartbeat"
   | "heartbeat-timeout"
-  | "cli-idle-timeout";
+  | "cli-idle-timeout"
+  | "rehydration-owner-timeout";
 
 /** Log prose for each release reason, so the sweep loop carries no branching. */
 const STALE_REASON_DESCRIPTION: Record<SessionHeartbeatReleaseReason, string> = {
   "missing-first-heartbeat": "never received first heartbeat",
   "heartbeat-timeout": "heartbeat timeout",
   "cli-idle-timeout": "idle past the CLI idle timeout",
+  "rehydration-owner-timeout": "awaiting reconnect past rehydration grace",
 };
 
 export interface SessionHeartbeatMonitorConfig {
@@ -142,7 +144,8 @@ export class SessionHeartbeatMonitor {
       if (this.hasActiveExecutions(session.sessionId)) {
         continue;
       }
-      const reason = this.staleReason(session, now);
+      const reason =
+        this.rehydrationOwnerStaleReason(session, now) ?? this.staleReason(session, now);
       if (reason) {
         logger.warn(
           `Session ${session.sessionId} ${STALE_REASON_DESCRIPTION[reason]}, cancelling (reason=${reason})`,
@@ -183,5 +186,18 @@ export class SessionHeartbeatMonitor {
     }
 
     return now - lastHeartbeat > timeoutMs ? "heartbeat-timeout" : undefined;
+  }
+
+  private rehydrationOwnerStaleReason(
+    session: Session,
+    now: number,
+  ): SessionHeartbeatReleaseReason | undefined {
+    if (session.ownership !== "awaiting-owner") {
+      return undefined;
+    }
+    const awaitingOwnerSince = session.awaitingOwnerSince ?? now;
+    return now - awaitingOwnerSince > session.heartbeatTimeoutMs
+      ? "rehydration-owner-timeout"
+      : undefined;
   }
 }

@@ -111,6 +111,43 @@ describe("DeviceSessionRepository", () => {
     });
   });
 
+  test("lists recoverable daemon releases newest first", async () => {
+    for (const [sessionUuid, lastUsedAtMs, reason] of [
+      ["older", 1000, "daemon-restart"],
+      ["newer", 2000, "daemon-shutdown"],
+      ["terminal", 3000, "device-killed"],
+    ] as const) {
+      await repo.upsertActiveSession({
+        sessionUuid,
+        deviceId: `${sessionUuid}-device`,
+        platform: "android",
+        createdAtMs: 1,
+        lastUsedAtMs,
+        expiresAtMs: 60_000,
+        sessionTimeoutMs: 60_000,
+        heartbeatTimeoutMs: 10_000,
+        hasReceivedHeartbeat: false,
+      });
+      await repo.markReleased(sessionUuid, "expired", 4000, reason);
+    }
+    await repo.upsertActiveSession({
+      sessionUuid: "active-without-release",
+      deviceId: "emulator-5560",
+      platform: "android",
+      createdAtMs: 1,
+      lastUsedAtMs: 4000,
+      expiresAtMs: 60_000,
+      sessionTimeoutMs: 60_000,
+      heartbeatTimeoutMs: 10_000,
+      hasReceivedHeartbeat: false,
+    });
+
+    expect((await repo.listRecoverableSessions()).map((row) => row.session_uuid)).toEqual([
+      "newer",
+      "older",
+    ]);
+  });
+
   test("persists the liveness contract used to recover daemon sessions", async () => {
     await repo.upsertActiveSession({
       sessionUuid: "liveness-session",

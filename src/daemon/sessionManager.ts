@@ -26,6 +26,7 @@ import {
 } from "./constants";
 import { isAndroidEmulatorSerial, isAndroidTransportAddressSerial } from "../utils/androidSerial";
 import { Mutex } from "async-mutex";
+import { errorMessage } from "../utils/describeUnknownError";
 
 /**
  * Device-label → session-UUID map. `buildDeviceLabelMap` assigns each configured
@@ -139,6 +140,10 @@ export interface Session {
   heartbeatTimeoutMs: number; // Heartbeat timeout for this session
   heartbeatTimeoutSource: "default" | "custom"; // Whether the heartbeat timeout was defaulted or explicitly provided
   hasReceivedHeartbeat: boolean; // Whether any heartbeat has been received
+  /** Whether this daemon has heard from the client that owns this session. */
+  ownership: "owned" | "awaiting-owner";
+  /** Set only while a rehydrated session is waiting for its previous owner. */
+  awaitingOwnerSince?: number;
   livenessPolicy: SessionLivenessPolicy; // How this session's liveness is judged (#6870)
   /**
    * The current token authorized to refresh this session's liveness. It is
@@ -363,6 +368,14 @@ export interface SessionRecoveryTarget {
   androidEmulator?: boolean;
   /** Liveness contract recorded before the daemon restart. */
   liveness?: SessionRecoveryLiveness;
+  /** A startup rehydration reserves the device until its prior owner reconnects. */
+  initialOwnership?: "owned" | "awaiting-owner";
+}
+
+export interface RehydrationSummary {
+  rehydrated: string[];
+  terminalized: Array<{ sessionUuid: string; reason: string }>;
+  skipped: Array<{ sessionUuid: string; reason: string }>;
 }
 
 /**
@@ -492,6 +505,7 @@ const EXPIRY_RELEASE_REASONS = new Set([
   "missing-first-heartbeat",
   "heartbeat-timeout",
   "cli-idle-timeout",
+  "rehydration-owner-timeout",
 ]);
 
 class UnissuedSessionError extends ActionableError {}
@@ -524,6 +538,7 @@ function isTerminalReleaseReason(releaseReason: string): boolean {
     releaseReason === "missing-first-heartbeat" ||
     releaseReason === "heartbeat-timeout" ||
     releaseReason === "cli-idle-timeout" ||
+    releaseReason === "rehydration-owner-timeout" ||
     releaseReason === "device-killed" ||
     releaseReason === "session-creation-cancelled" ||
     releaseReason.startsWith("identity-recovery-") ||
@@ -817,6 +832,7 @@ export class SessionManager {
     heartbeatTimeoutMs?: number,
     stableDeviceId?: string,
     recoveredLiveness?: SessionRecoveryLiveness,
+    initialOwnership: "owned" | "awaiting-owner" = "owned",
   ): Promise<Session> {
     getAbortSignal()?.throwIfAborted();
     if (!this.acceptingSessionCreations) {
@@ -866,6 +882,10 @@ export class SessionManager {
       cacheData: {},
       lastHeartbeat: now,
       ...liveness,
+      ownership: initialOwnership,
+      ...(initialOwnership === "awaiting-owner"
+        ? { awaitingOwnerSince: now, hasReceivedHeartbeat: false }
+        : {}),
     };
 
     const creation: PendingSessionCreation = { promise: this.persistAndPublishSession(session) };
@@ -1116,6 +1136,10 @@ export class SessionManager {
       // whose tools never write session cache (e.g. autolock CLI/agent clients
       // that do not send explicit heartbeats).
       const now = this.timer.now();
+      if (existing.ownership === "awaiting-owner") {
+        existing.ownership = "owned";
+        existing.awaitingOwnerSince = undefined;
+      }
       existing.lastUsedAt = now;
       existing.lastHeartbeat = now;
       existing.expiresAt = now + existing.sessionTimeoutMs;
@@ -1251,14 +1275,6 @@ export class SessionManager {
           "Acquire a device with getAndroid or getApple before using its sessionUuid.",
       );
     }
-    const recoveryTarget = devicePool
-      ? await this.recoveryTargetFromPersisted(sessionId, persisted, platform)
-      : undefined;
-
-    logger.info(
-      `[SessionManager] Creating new session ${sessionId}, calling devicePool.assignDeviceToSession()`,
-    );
-
     // Need to create new session - assign device from pool
     if (!devicePool) {
       throw new UnissuedSessionError(
@@ -1267,6 +1283,24 @@ export class SessionManager {
       );
     }
 
+    return await this.recoverPersistedSession(sessionId, devicePool, platform, persisted);
+  }
+
+  /** Reuse the on-demand recovery path for startup rehydration. */
+  private async recoverPersistedSession(
+    sessionId: string,
+    devicePool: SessionDeviceAssigner,
+    platform: Platform | undefined,
+    persisted: DeviceSession | undefined,
+    initialOwnership: "owned" | "awaiting-owner" = "owned",
+  ): Promise<Session> {
+    const recoveryTarget = await this.recoveryTargetFromPersisted(sessionId, persisted, platform);
+    if (recoveryTarget && initialOwnership === "awaiting-owner") {
+      recoveryTarget.initialOwnership = initialOwnership;
+    }
+    logger.info(
+      `[SessionManager] Creating new session ${sessionId}, calling devicePool.assignDeviceToSession()`,
+    );
     await this.assignUnseenSessionToDevicePool(
       sessionId,
       devicePool,
@@ -1274,18 +1308,59 @@ export class SessionManager {
       recoveryTarget,
       persisted,
     );
-
-    // Session now exists, return it
     const session = this.getSession(sessionId);
     if (!session) {
       throw new Error(`Session ${sessionId} creation failed after device assignment`);
     }
     await this.restorePersistedLivenessOwnership(session, persisted);
-
     logger.info(
       `[SessionManager] Successfully created session ${sessionId} with device ${session.assignedDevice}`,
     );
     return session;
+  }
+
+  async rehydratePersistedSessions(devicePool: SessionDeviceAssigner): Promise<RehydrationSummary> {
+    const summary: RehydrationSummary = { rehydrated: [], terminalized: [], skipped: [] };
+    const persistedSessions =
+      (await this.deviceSessionRepository.listRecoverableSessions?.()) ?? [];
+    for (const persisted of persistedSessions) {
+      const sessionId = persisted.session_uuid;
+      if (!this.isRecoverablePersistedSession(persisted)) {
+        summary.skipped.push({ sessionUuid: sessionId, reason: "not-recoverable" });
+        continue;
+      }
+      if (this.sessions.has(sessionId)) {
+        summary.skipped.push({ sessionUuid: sessionId, reason: "already-live" });
+        continue;
+      }
+      try {
+        await this.recoverPersistedSession(
+          sessionId,
+          devicePool,
+          persisted.platform,
+          persisted,
+          "awaiting-owner",
+        );
+        summary.rehydrated.push(sessionId);
+      } catch (error) {
+        const terminalRelease = this.getTerminalReleaseSnapshot(sessionId);
+        if (terminalRelease) {
+          summary.terminalized.push({
+            sessionUuid: sessionId,
+            reason: terminalRelease.releaseReason,
+          });
+        } else {
+          const reason = errorMessage(error);
+          logger.warn(`[SessionManager] Failed to rehydrate session ${sessionId}: ${reason}`);
+          summary.skipped.push({ sessionUuid: sessionId, reason });
+        }
+      }
+    }
+    logger.info(
+      `[SessionManager] Rehydration: ${summary.rehydrated.length} rehydrated, ` +
+        `${summary.terminalized.length} terminalized, ${summary.skipped.length} skipped`,
+    );
+    return summary;
   }
 
   private async restorePersistedLivenessOwnership(
@@ -3249,6 +3324,10 @@ export class SessionManager {
     session.lastUsedAt = now;
     session.expiresAt = now + session.sessionTimeoutMs;
     session.hasReceivedHeartbeat = true;
+    if (session.ownership === "awaiting-owner") {
+      session.ownership = "owned";
+      session.awaitingOwnerSince = undefined;
+    }
     void this.getBarrier()
       .track(() => this.recordSessionActivity(session))
       .catch((error) =>

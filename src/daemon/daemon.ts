@@ -624,6 +624,14 @@ export class Daemon {
       // This establishes WebSocket connections early so observe calls are fast
       await startupBenchmark.runPhase("iosServices", () => this.initializeIosServices());
 
+      try {
+        await startupBenchmark.runPhase("sessionRehydration", () =>
+          this.sessionManager.rehydratePersistedSessions(this.devicePool),
+        );
+      } catch (error) {
+        logger.warn(`[Daemon] Session rehydration failed; continuing startup: ${error}`);
+      }
+
       // Start Unix socket server AFTER device pool is ready
       logger.info(`Daemon host: "${this.host}", port: ${this.port}`);
       logger.info(`MCP_STREAMABLE_PATH: "${MCP_STREAMABLE_PATH}"`);

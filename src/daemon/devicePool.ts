@@ -5303,6 +5303,7 @@ export class DevicePool {
         recoveryTarget?.liveness?.heartbeatTimeoutMs,
         this.stableDeviceIdFor(device),
         recoveryTarget?.liveness,
+        recoveryTarget?.initialOwnership,
       ),
     );
     if (session.assignedDevice !== device.id) {

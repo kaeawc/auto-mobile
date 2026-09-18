@@ -12303,6 +12303,10 @@
           "description": "Enable preTapStability and retryIfNoChange",
           "type": "boolean"
         },
+        "ensureChecked": {
+          "description": "Skip tapping if the resolved toggle element's checked state already matches this value; otherwise tap and verify it flipped. Requires the element to have the toggle affordance and action \"tap\".",
+          "type": "boolean"
+        },
         "platform": {
           "type": "string",
           "enum": ["android", "ios"]
@@ -12360,6 +12364,11 @@
             }
           },
           "ensureTap": {
+            "not": {
+              "const": true
+            }
+          },
+          "ensureChecked": {
             "not": {
               "const": true
             }

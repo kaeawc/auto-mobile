@@ -59,6 +59,7 @@ export interface TapOnElementOptions {
   preTapStability?: boolean;
   retryIfNoChange?: boolean;
   ensureTap?: boolean;
+  ensureChecked?: boolean;
 
   /** Semantic accessibility link inside the element selected by the outer selector. */
   subtext?: TapOnSubtextTarget;

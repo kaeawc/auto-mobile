@@ -289,6 +289,12 @@ export const tapOnSchema = withJsonSchemaOverride(
           .optional()
           .describe("Retry once if the view hierarchy is unchanged after tap"),
         ensureTap: z.boolean().optional().describe("Enable preTapStability and retryIfNoChange"),
+        ensureChecked: z
+          .boolean()
+          .optional()
+          .describe(
+            'Skip tapping if the resolved toggle element\'s checked state already matches this value; otherwise tap and verify it flipped. Requires the element to have the toggle affordance and action "tap".',
+          ),
         // #5870: a `sessionUuid` resolves the platform, so `platform` is not
         // required — a device handle from getAndroid is sufficient on its own.
         platform: platformSchema.optional(),
@@ -322,8 +328,15 @@ export const tapOnSchema = withJsonSchemaOverride(
     addIssue(
       value.retryIfNoChange || value.ensureTap,
       "semantic link activation cannot retry an acknowledged link activation",
-      value.retryIfNoChange ? ["retryIfNoChange"] : ["ensureTap"],
+      value.retryIfNoChange
+        ? ["retryIfNoChange"]
+        : value.ensureTap
+          ? ["ensureTap"]
+          : ["ensureChecked"],
     );
+    addIssue(value.ensureChecked, "semantic link activation cannot ensure checked state", [
+      "ensureChecked",
+    ]);
     addIssue(value.searchUntil, "semantic link activation cannot use searchUntil", ["searchUntil"]);
     addIssue(
       value.subtext && value.index !== undefined,
@@ -354,6 +367,7 @@ export const tapOnSchema = withJsonSchemaOverride(
         sibling: { not: { const: true } },
         retryIfNoChange: { not: { const: true } },
         ensureTap: { not: { const: true } },
+        ensureChecked: { not: { const: true } },
         searchUntil: { not: {} },
       },
       allOf: [
@@ -1585,6 +1599,7 @@ export async function tapOnHandler(
       preTapStability: args.preTapStability,
       retryIfNoChange: args.retryIfNoChange,
       ensureTap: args.ensureTap,
+      ensureChecked: args.ensureChecked,
       subtext: args.subtext,
     },
     progress,

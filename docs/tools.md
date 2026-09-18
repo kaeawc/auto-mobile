@@ -23,22 +23,22 @@ the exact arguments supported by your connection.
 
 ## Interact with the UI
 
-| Tool                          | What it does                                                         |
-| ----------------------------- | -------------------------------------------------------------------- |
-| 👆 <code>tapOn</code>         | Taps by text, content description, resource ID, or Android test tag. |
-| 🎯 <code>tapAny</code>        | Taps any clickable element, optionally scoped to a container.        |
-| 👉 <code>swipeOn</code>       | Swipes or scrolls the screen or an element.                          |
-| ↔️ <code>dragAndDrop</code>   | Drags one element to another.                                        |
-| 🤏 <code>pinchOn</code>       | Pinches to zoom.                                                     |
-| ⌨️ <code>sendKeys</code>      | Runs ordered text, clear, raw-key, and semantic-key commands.        |
-| ⌨️ <code>inputText</code>     | Legacy text input retained for compatibility; disabled by default.   |
-| 🧩 <code>setUIState</code>    | Sets multiple form fields to a desired state.                        |
-| 🗑️ <code>clearText</code>     | Legacy focused-input clear; disabled by default.                     |
-| ✨ <code>selectAllText</code> | Selects all text in the focused input.                               |
-| ↩️ <code>imeAction</code>     | Legacy standalone IME action; disabled by default.                   |
-| 🔘 <code>pressButton</code>   | Presses a device or navigation button.                               |
-| ⌨️ <code>keyboard</code>      | Opens, closes, or detects the on-screen keyboard.                    |
-| 📋 <code>clipboard</code>     | Copies, pastes, clears, or reads the clipboard.                      |
+| Tool                          | What it does                                                                                                                   |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| 👆 <code>tapOn</code>         | Taps by text, content description, resource ID, or Android test tag; can idempotently ensure a toggle is checked or unchecked. |
+| 🎯 <code>tapAny</code>        | Taps any clickable element, optionally scoped to a container.                                                                  |
+| 👉 <code>swipeOn</code>       | Swipes or scrolls the screen or an element.                                                                                    |
+| ↔️ <code>dragAndDrop</code>   | Drags one element to another.                                                                                                  |
+| 🤏 <code>pinchOn</code>       | Pinches to zoom.                                                                                                               |
+| ⌨️ <code>sendKeys</code>      | Runs ordered text, clear, raw-key, and semantic-key commands.                                                                  |
+| ⌨️ <code>inputText</code>     | Legacy text input retained for compatibility; disabled by default.                                                             |
+| 🧩 <code>setUIState</code>    | Sets multiple form fields to a desired state.                                                                                  |
+| 🗑️ <code>clearText</code>     | Legacy focused-input clear; disabled by default.                                                                               |
+| ✨ <code>selectAllText</code> | Selects all text in the focused input.                                                                                         |
+| ↩️ <code>imeAction</code>     | Legacy standalone IME action; disabled by default.                                                                             |
+| 🔘 <code>pressButton</code>   | Presses a device or navigation button.                                                                                         |
+| ⌨️ <code>keyboard</code>      | Opens, closes, or detects the on-screen keyboard.                                                                              |
+| 📋 <code>clipboard</code>     | Copies, pastes, clears, or reads the clipboard.                                                                                |
 
 `sendKeys` accepts one optional field selector and an ordered sequence of up to
 100 commands:

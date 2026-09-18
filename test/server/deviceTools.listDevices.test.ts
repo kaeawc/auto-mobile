@@ -140,6 +140,14 @@ describe("listDevices tool (#5870)", () => {
     ).toBe(true);
   });
 
+  test("keeps unknown booted form factors null in deprecated aliases", async () => {
+    const payload = await callListDevices({ platform: "android" });
+    const device = payload.devices[0];
+
+    expect(device.formFactor).toBeNull();
+    expect(device.display.formFactor).toBeNull();
+  });
+
   test("provides structuredContent for the authenticated acceptance forwarding path", async () => {
     const response = await callListDevicesResponse({ platform: "android" });
 

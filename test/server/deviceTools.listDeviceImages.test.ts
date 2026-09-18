@@ -165,6 +165,28 @@ describe("listDeviceImages", function () {
     });
   });
 
+  test("preserves Android AVD discovery errors in the canonical availability field", async function () {
+    const fakeDeviceManager = new FakeDeviceManager([
+      { name: "Pixel_8", platform: "android", isRunning: false },
+    ]);
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => fakeDeviceManager,
+      avdManagerFactory: () => ({
+        listDeviceImages: async () => [
+          { name: "Pixel_8", error: "AVD configuration is unreadable" },
+        ],
+      }),
+    });
+    registerDeviceTools();
+
+    const response = await ToolRegistry.getRegisteredTool("listDeviceImages")!.handler({
+      platform: "android",
+    });
+    const image = JSON.parse(response.content[0].text).images[0];
+
+    expect(image.availabilityError).toBe("AVD configuration is unreadable");
+  });
+
   test("does not collapse a failed discovery into a complete empty inventory", async function () {
     const fakeDeviceManager = new FakeDeviceManager();
     fakeDeviceManager.failedPlatforms.add("android");

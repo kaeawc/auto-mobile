@@ -1,8 +1,11 @@
 # Device resources
 
-Device records use the shared `DeviceDescription` projection. Runtime versions are
-`runtime.osVersion`, runtime identifiers are `runtime.runtimeId`, and unknown facts
-are explicit `null` values. See [the device-description audit](device-description-audit.md).
+Device records use the shared `DeviceDescription` projection. In canonical shape phase 1,
+static facts such as `osVersion`, `runtimeId`, and `formFactor` are top-level, while live state
+such as lifecycle, readiness, session, lock, and orientation is grouped under `runtime`.
+Every projection temporarily remains a superset containing the former nested aliases, and
+unknown facts are explicit `null` values. See
+[the device-description audit](device-description-audit.md).
 
 `DeviceResource` describes observed resource state for one device. Its `resources`
 property is a JSON object keyed by logical resource name. `AndroidDeviceResource`

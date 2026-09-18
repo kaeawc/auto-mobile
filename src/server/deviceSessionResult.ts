@@ -15,18 +15,24 @@ export const DEVICE_SESSION_ACQUISITION_TOOLS = [
 ] as const;
 
 /**
- * The subset of `DEVICE_SESSION_ACQUISITION_TOOLS` a client on a DEFAULT
- * connection can actually discover and call, and therefore the only ones worth
- * naming in recovery guidance. Two registration flags disqualify a tool:
- * `startDevice` is `hidden: true` (`src/server/deviceTools.ts`), so it never
- * appears in `tools/list` and cannot be enabled through `setToolEnabled`
- * either; `provisionDevice` is `defaultEnabled: false`, so default discovery
- * omits it and call enforcement rejects it (`src/server/index.ts`) — a client
- * following advice that named either had nothing to call. Advertised in every
- * `session_ownership_lost` / `no_active_device_session` recovery payload
- * (`src/server/index.ts`, `src/server/proxyServer.ts`) and in the prose that
- * accompanies them (`src/daemon/daemonMcpProxy.ts`). Pinned to the registry by
- * `test/server/deviceSessionRecoveryTools.test.ts`.
+ * The subset of `DEVICE_SESSION_ACQUISITION_TOOLS` worth naming in recovery
+ * guidance: the tools a client with a lost session can call DIRECTLY, with only
+ * an optional `deviceId`, to reacquire. Two of the four acquisition tools are
+ * disqualified for different reasons:
+ *
+ * - `startDevice` is `hidden: true` (`src/server/deviceTools.ts`), so it never
+ *   appears in `tools/list` and cannot be enabled through `setToolEnabled`
+ *   either — a client following advice that named it had nothing to call.
+ * - `provisionDevice` is discoverable and callable on a default connection
+ *   (`defaultEnabled: true`), but it is not directly-actionable recovery advice:
+ *   it requires a full device `spec` and a caller-generated `operationId`, so a
+ *   lost-session client cannot just "call provisionDevice" to get back a
+ *   session the way it can with getAndroid/getApple.
+ *
+ * Advertised in every `session_ownership_lost` / `no_active_device_session`
+ * recovery payload (`src/server/index.ts`, `src/server/proxyServer.ts`) and in
+ * the prose that accompanies them (`src/daemon/daemonMcpProxy.ts`). Pinned to
+ * the registry by `test/server/deviceSessionRecoveryTools.test.ts`.
  */
 export const DEVICE_SESSION_RECOVERY_TOOLS = ["getAndroid", "getApple"] as const;
 

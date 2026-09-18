@@ -1,6 +1,7 @@
 import { toJSONSchema } from "zod/v4";
 import { errorMessage } from "../utils/describeUnknownError";
 import { ToolRegistry } from "../server/toolRegistry";
+import { SET_TOOL_ENABLED_TOOL_NAME } from "../features/toolSelection/toolSelectionControl";
 import { logger } from "../utils/logger";
 import { ActionableError } from "../models";
 import { DaemonClient, DaemonUnavailableError } from "../daemon/client";
@@ -414,6 +415,38 @@ export function resetDaemonProxyFactoryForTesting(): void {
   daemonProxyFactory = (config) => new DaemonMcpProxy(config);
 }
 
+/**
+ * A `--cli` invocation is a trusted, deliberate local operator action, so it must
+ * NEVER require a separate `setToolEnabled` step: `--cli <tool>` always runs. A
+ * tool a fresh connection gates off (`defaultEnabled: false`, e.g. `deleteDevice`)
+ * is transparently enabled on THIS one-shot proxy's own connection profile before
+ * the call. `setToolEnabled` is itself always enabled, and enabling then calling
+ * over the same proxy connection resolves the same connection profile the daemon
+ * checks in `assertToolEnabledForAnySession` (src/server/index.ts). Default-enabled
+ * tools (the majority, and `provisionDevice` since it is an acquisition tool) skip
+ * the extra round-trip. This is CLI-only: a remote MCP client never runs this path,
+ * so it opens no tool-gating bypass for non-CLI callers.
+ */
+async function ensureCliToolEnabled(proxy: CliDaemonProxy, toolName: string): Promise<void> {
+  if (toolName === SET_TOOL_ENABLED_TOOL_NAME) {
+    return;
+  }
+  initializeCliTools();
+  const registered = ToolRegistry.getRegisteredTool(toolName);
+  if (!registered || registered.defaultEnabled !== false) {
+    return;
+  }
+  try {
+    await proxy.callTool(SET_TOOL_ENABLED_TOOL_NAME, { toolName, enabled: true });
+  } catch (error) {
+    // Non-fatal: fall through to the actual tool call, which surfaces the real
+    // gate error if enabling genuinely could not apply (e.g. a tool the daemon
+    // does not treat as user-configurable). Swallowing here only avoids masking
+    // that actionable reason with a pre-step failure.
+    logger.debug(`CLI pre-enable of ${toolName} did not apply: ${errorMessage(error)}`);
+  }
+}
+
 async function runToolViaDaemon(
   toolName: string,
   params: Record<string, any>,
@@ -422,6 +455,7 @@ async function runToolViaDaemon(
   const proxy = daemonProxyFactory({ daemonOptions });
 
   try {
+    await ensureCliToolEnabled(proxy, toolName);
     const result = await proxy.callTool(toolName, params);
     if (result === null) {
       throw new ActionableError(

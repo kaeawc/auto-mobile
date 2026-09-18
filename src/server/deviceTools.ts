@@ -9375,12 +9375,20 @@ export function registerDeviceTools() {
     hidden: true,
   });
 
+  // provisionDevice is a device-session ACQUISITION tool: like getAndroid /
+  // getApple / startDevice it mints and binds its own session, so it must be
+  // callable on a fresh, unbound connection (and from the CLI) with no prior
+  // setToolEnabled. Keeping it `defaultEnabled: false` made call enforcement
+  // check the still-unbound session, miss the override, and reject it with
+  // "disabled for device session (not yet bound)" — a chicken-and-egg, since
+  // provisionDevice is one of the tools you call BEFORE you have a device.
+  // deleteDevice stays gated (destructive), but provisioning is not.
   ToolRegistry.register(
     "provisionDevice",
     "Provision exact virtual device",
     provisionDeviceSchema,
     provisionDeviceHandler,
-    { defaultEnabled: false },
+    { defaultEnabled: true },
   );
 
   ToolRegistry.register("killDevice", "Kill device", killDeviceSchema, killDeviceHandler, {

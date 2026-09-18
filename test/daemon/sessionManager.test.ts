@@ -19,6 +19,7 @@ import type {
   DeviceSessionPersistence,
   DeviceSessionRecord,
 } from "../../src/db/deviceSessionRepository";
+import { DEVICE_SESSION_RETENTION_MAX_AGE_MS } from "../../src/db/deviceSessionRepository";
 import type { DeviceSession, DeviceSessionStatus } from "../../src/db/types";
 import type { ViewHierarchyResult } from "../../src/models/ViewHierarchyResult";
 import type { KeepScreenAwakeState } from "../../src/utils/KeepScreenAwakeManager";
@@ -121,6 +122,30 @@ const HEARTBEAT_ENV_KEYS = [
   "AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS",
   "AUTO_MOBILE_SESSION_HEARTBEAT_TIMEOUT_MS",
 ] as const;
+
+function persistedRecoverySession(overrides: Partial<DeviceSession> = {}): DeviceSession {
+  return {
+    session_uuid: "persisted-session",
+    device_id: "emulator-5554",
+    platform: "android",
+    status: "expired",
+    source: null,
+    autolock_enabled: 0,
+    mcp_session_id: null,
+    daemon_session_id: "old-daemon",
+    created_at_ms: 0,
+    last_used_at_ms: 0,
+    expires_at_ms: 1_000,
+    released_at_ms: 0,
+    release_reason: "daemon-restart",
+    session_timeout_ms: 60_000,
+    heartbeat_timeout_ms: 10_000,
+    has_received_heartbeat: 1,
+    created_at: "2026-09-18T00:00:00.000Z",
+    updated_at: "2026-09-18T00:00:00.000Z",
+    ...overrides,
+  };
+}
 
 test("resetDeviceReadinessForDevice drops restored automation readiness", async () => {
   const manager = new SessionManager(new FakeTimer(), new FakeDeviceSessionPersistence());
@@ -625,6 +650,81 @@ describe("SessionManager", () => {
         });
       } finally {
         restarted.stopCleanupTimer();
+      }
+    });
+
+    test("rejects and terminalizes an on-demand recovery whose expiry has passed", async () => {
+      fakeTimer.advanceTime(1_000);
+      const persisted = persistedRecoverySession({
+        status: "active",
+        expires_at_ms: 1_000,
+      });
+      const persistence: DeviceSessionPersistence = {
+        async getSession() {
+          return persisted;
+        },
+        async upsertActiveSession() {},
+        async recordActivity() {},
+        async markReleased(_sessionUuid, status, releasedAtMs, releaseReason) {
+          persisted.status = status;
+          persisted.released_at_ms = releasedAtMs;
+          persisted.release_reason = releaseReason;
+        },
+      };
+      const manager = new SessionManager(fakeTimer, persistence);
+      let assignments = 0;
+      const devicePool: SessionDeviceAssigner = {
+        async assignDeviceToSession(): Promise<string> {
+          assignments++;
+          return "emulator-5556";
+        },
+      };
+
+      try {
+        await expect(
+          manager.getOrCreateSession("persisted-session", devicePool, "android", undefined, true),
+        ).rejects.toThrow("not found");
+        expect(assignments).toBe(0);
+        expect(persisted).toMatchObject({
+          status: "expired",
+          released_at_ms: 1_000,
+          release_reason: "expired",
+        });
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+
+    test("rejects an on-demand recovery past the retention window", async () => {
+      const persisted = persistedRecoverySession({
+        released_at_ms: -DEVICE_SESSION_RETENTION_MAX_AGE_MS - 1,
+        expires_at_ms: 1_000,
+      });
+      const persistence: DeviceSessionPersistence = {
+        async getSession() {
+          return persisted;
+        },
+        async upsertActiveSession() {},
+        async recordActivity() {},
+        async markReleased() {},
+      };
+      const manager = new SessionManager(fakeTimer, persistence);
+      let assignments = 0;
+      const devicePool: SessionDeviceAssigner = {
+        async assignDeviceToSession(): Promise<string> {
+          assignments++;
+          return "emulator-5556";
+        },
+      };
+
+      try {
+        await expect(
+          manager.getOrCreateSession("persisted-session", devicePool, "android", undefined, true),
+        ).rejects.toThrow("not found");
+        expect(assignments).toBe(0);
+        expect(persisted.release_reason).toBe("daemon-restart");
+      } finally {
+        manager.stopCleanupTimer();
       }
     });
 

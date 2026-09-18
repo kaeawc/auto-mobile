@@ -12,8 +12,16 @@ import { toActionableError } from "../models/ActionableError";
 // row transitions terminal (by both `markReleased` and
 // `markStaleActiveSessionsExpired`), so it is a reliable "became terminal" age
 // marker without a migration.
-const DEVICE_SESSION_RETENTION_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+export const DEVICE_SESSION_RETENTION_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 export const RECOVERABLE_DAEMON_RELEASE_REASONS = new Set(["daemon-shutdown", "daemon-restart"]);
+
+export function isRecoverableDeviceSession(session: DeviceSession, nowMs: number): boolean {
+  const retentionCutoffMs = nowMs - DEVICE_SESSION_RETENTION_MAX_AGE_MS;
+  return (
+    session.expires_at_ms > nowMs &&
+    (session.released_at_ms === null || session.released_at_ms >= retentionCutoffMs)
+  );
+}
 
 function shouldRetainLivenessOwner(reason: string): boolean {
   return RECOVERABLE_DAEMON_RELEASE_REASONS.has(reason);
@@ -383,6 +391,7 @@ export class DeviceSessionRepository {
   async listRecoverableSessions(): Promise<DeviceSession[]> {
     const db = await this.getDb();
     const nowMs = this.timer.now();
+    await this.pruneExpiredSessions(nowMs);
     const reasons = Array.from(RECOVERABLE_DAEMON_RELEASE_REASONS);
     const expired = await db
       .selectFrom("device_sessions")
@@ -393,12 +402,16 @@ export class DeviceSessionRepository {
     for (const row of expired) {
       await this.markReleased(row.session_uuid, "expired", nowMs, "expired");
     }
-    const retentionCutoffMs = nowMs - DEVICE_SESSION_RETENTION_MAX_AGE_MS;
     return await db
       .selectFrom("device_sessions")
       .selectAll()
       .where("release_reason", "in", reasons)
-      .where("released_at_ms", ">=", retentionCutoffMs)
+      .where((eb) =>
+        eb.or([
+          eb("released_at_ms", "is", null),
+          eb("released_at_ms", ">=", nowMs - DEVICE_SESSION_RETENTION_MAX_AGE_MS),
+        ]),
+      )
       .where("expires_at_ms", ">", nowMs)
       .orderBy("last_used_at_ms", "desc")
       .execute();

@@ -178,10 +178,66 @@ describe("DeviceSessionRepository", () => {
     await timer.advanceTimeAsync(sevenDaysMs + 1_000);
 
     expect(await repo.listRecoverableSessions()).toEqual([]);
-    expect(await repo.getSession("spent-session")).toMatchObject({
+    // Thread 3: past-retention rows are pruned before expiry marking, so their
+    // released_at_ms is never reset to extend DEVICE_SESSION_RETENTION_MAX_AGE_MS.
+    expect(await repo.getSession("spent-session")).toBeUndefined();
+  });
+
+  test("does not reset an expired row already past retention", async () => {
+    const nowMs = 10 * 24 * 60 * 60 * 1000;
+    const eightDaysMs = 8 * 24 * 60 * 60 * 1000;
+    await timer.advanceTimeAsync(nowMs);
+    await repo.upsertActiveSession({
+      sessionUuid: "past-retention-expired",
+      deviceId: "emulator-5558",
+      platform: "android",
+      createdAtMs: 0,
+      lastUsedAtMs: 0,
+      expiresAtMs: 1,
+      sessionTimeoutMs: 60_000,
+      heartbeatTimeoutMs: 10_000,
+      hasReceivedHeartbeat: false,
+    });
+    await repo.markReleased(
+      "past-retention-expired",
+      "released",
+      nowMs - eightDaysMs,
+      "daemon-restart",
+    );
+
+    await repo.listRecoverableSessions();
+
+    expect(await repo.getSession("past-retention-expired")).toBeUndefined();
+  });
+
+  test("marks an expired row within retention at the current time", async () => {
+    const nowMs = 10 * 24 * 60 * 60 * 1000;
+    const yesterdayMs = 24 * 60 * 60 * 1000;
+    await timer.advanceTimeAsync(nowMs);
+    await repo.upsertActiveSession({
+      sessionUuid: "in-retention-expired",
+      deviceId: "emulator-5560",
+      platform: "android",
+      createdAtMs: 0,
+      lastUsedAtMs: 0,
+      expiresAtMs: 1,
+      sessionTimeoutMs: 60_000,
+      heartbeatTimeoutMs: 10_000,
+      hasReceivedHeartbeat: false,
+    });
+    await repo.markReleased(
+      "in-retention-expired",
+      "released",
+      nowMs - yesterdayMs,
+      "daemon-restart",
+    );
+
+    await repo.listRecoverableSessions();
+
+    expect(await repo.getSession("in-retention-expired")).toMatchObject({
       status: "expired",
       release_reason: "expired",
-      released_at_ms: sevenDaysMs + 1_000,
+      released_at_ms: nowMs,
     });
   });
 

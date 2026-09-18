@@ -3838,6 +3838,95 @@ describe("DaemonMcpProxy", () => {
       }
     });
 
+    test("reconnects and reclaims a result-minted daemon-restart handoff", async () => {
+      const mintingResult = (sessionUuid: string) => ({
+        content: [{ type: "text", text: JSON.stringify({ sessionId: sessionUuid }) }],
+      });
+      const staleClient = new FakeDaemonClient({
+        daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+        toolResultFor: (toolName) =>
+          toolName === "getAndroid" ? mintingResult("session-a") : undefined,
+      });
+      const recoveredClient = new FakeDaemonClient({
+        toolResult: { content: [{ type: "text", text: "reclaimed" }] },
+      });
+      const clients = [staleClient, recoveredClient];
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => clients.shift()!,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        await proxy.listTools();
+        await proxy.callTool("getAndroid", {});
+        staleClient.emitNotification(
+          SESSION_RELEASED_NOTIFICATION_METHOD,
+          "session-a",
+          "daemon-restart",
+        );
+
+        await expect(proxy.callTool("observe", {})).resolves.toEqual({
+          content: [{ type: "text", text: "reclaimed" }],
+        });
+        expect(staleClient.callToolCalls).toHaveLength(1);
+        expect(recoveredClient.callToolCalls).toEqual([
+          {
+            toolName: "observe",
+            params: { sessionUuid: "session-a" },
+          },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("reconnects and reclaims a result-minted daemon-shutdown handoff", async () => {
+      const mintingResult = (sessionUuid: string) => ({
+        content: [{ type: "text", text: JSON.stringify({ sessionId: sessionUuid }) }],
+      });
+      const staleClient = new FakeDaemonClient({
+        daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+        toolResultFor: (toolName) =>
+          toolName === "getAndroid" ? mintingResult("session-a") : undefined,
+      });
+      const recoveredClient = new FakeDaemonClient({
+        toolResult: { content: [{ type: "text", text: "reclaimed" }] },
+      });
+      const clients = [staleClient, recoveredClient];
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => clients.shift()!,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        await proxy.listTools();
+        await proxy.callTool("getAndroid", {});
+        staleClient.emitNotification(
+          SESSION_RELEASED_NOTIFICATION_METHOD,
+          "session-a",
+          "daemon-shutdown",
+        );
+
+        await expect(proxy.callTool("observe", {})).resolves.toEqual({
+          content: [{ type: "text", text: "reclaimed" }],
+        });
+        expect(staleClient.callToolCalls).toHaveLength(1);
+        expect(recoveredClient.callToolCalls).toEqual([
+          {
+            toolName: "observe",
+            params: { sessionUuid: "session-a" },
+          },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
     test("terminally fences a reconnected handoff when the bound UUID is lost", async () => {
       const staleClient = new FakeDaemonClient({
         daemonMethodResults: new Map([["tools/list", { tools: [] }]]),

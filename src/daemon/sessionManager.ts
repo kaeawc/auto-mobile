@@ -5,6 +5,7 @@ import { BootedDevice, Platform } from "../models";
 import { KeepScreenAwakeManager, KeepScreenAwakeState } from "../utils/KeepScreenAwakeManager";
 import {
   DeviceSessionRepository,
+  isRecoverableDeviceSession,
   type DeviceSessionPersistence,
 } from "../db/deviceSessionRepository";
 import type { DeviceSession } from "../db/types";
@@ -1019,8 +1020,26 @@ export class SessionManager {
   private isRecoverablePersistedSession(persisted: DeviceSession | undefined): boolean {
     return Boolean(
       persisted &&
-      (!persisted.release_reason || !isTerminalReleaseReason(persisted.release_reason)),
+      (!persisted.release_reason || !isTerminalReleaseReason(persisted.release_reason)) &&
+      isRecoverableDeviceSession(persisted, this.timer.now()),
     );
+  }
+
+  private async terminalizeExpiredPersistedSession(
+    persisted: DeviceSession | undefined,
+  ): Promise<void> {
+    if (
+      persisted &&
+      persisted.expires_at_ms <= this.timer.now() &&
+      (!persisted.release_reason || !isTerminalReleaseReason(persisted.release_reason))
+    ) {
+      await this.deviceSessionRepository.markReleased(
+        persisted.session_uuid,
+        "expired",
+        this.timer.now(),
+        "expired",
+      );
+    }
   }
 
   private terminalReleaseFromPersisted(
@@ -1303,10 +1322,7 @@ export class SessionManager {
       this.terminalReleaseSnapshots.set(sessionId, persistedTerminalRelease);
       throw new TerminalSessionError(sessionId, persistedTerminalRelease);
     }
-    if (
-      persisted &&
-      (!persisted.release_reason || !isTerminalReleaseReason(persisted.release_reason))
-    ) {
+    if (persisted && this.isRecoverablePersistedSession(persisted)) {
       return undefined;
     }
     throw unissuedSessionError;
@@ -1338,6 +1354,7 @@ export class SessionManager {
     // was bypassed by the call path — the ownership bypass this closes. The
     // pool-less `if (!devicePool)` throw below stays as a secondary safety net.
     if (requireIssuedSession && !this.isRecoverablePersistedSession(persisted)) {
+      await this.terminalizeExpiredPersistedSession(persisted);
       throw new UnissuedSessionError(
         `Session ${sessionId} is not an active daemon session (not found). ` +
           "Acquire a device with getAndroid or getApple before using its sessionUuid.",

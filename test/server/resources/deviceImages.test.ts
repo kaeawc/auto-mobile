@@ -15,6 +15,7 @@ import type {
 } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
 import type { AvdManager } from "../../../src/utils/android-cmdline-tools/interfaces/AvdManager";
 import type { DeviceImageDiscovery, PlatformDeviceManager } from "../../../src/utils/deviceUtils";
+import { AndroidAvdProvenanceCache } from "../../../src/utils/AndroidAvdProvenanceCache";
 
 describe("Device Image Resources with Fakes", () => {
   let fakeDeviceUtils: FakeDeviceUtils;
@@ -22,6 +23,7 @@ describe("Device Image Resources with Fakes", () => {
   let fakeSimCtl: FakeSimCtlClient;
 
   beforeEach(() => {
+    AndroidAvdProvenanceCache.resetForTests();
     fakeDeviceUtils = new FakeDeviceUtils();
     fakeAvdManager = new FakeAvdManager();
     fakeSimCtl = new FakeSimCtlClient();

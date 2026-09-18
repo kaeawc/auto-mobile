@@ -20,6 +20,8 @@ import { matchesDeviceCriteria, type DeviceMatcher } from "./deviceMatcher";
 import type { DeviceProvisioner, DeviceProvisioningIdentityHooks } from "./deviceProvisioning";
 import { NoopDeviceBootRecovery, type DeviceBootRecovery } from "./deviceBootRecovery";
 import { defaultTimer, type Timer } from "./SystemTimer";
+import { errorMessage } from "./describeUnknownError";
+import { logger } from "./logger";
 import { runWithAbortSignal } from "./AbortContext";
 import type { StableVirtualDeviceIdentity } from "./virtualDeviceLifecycleCoordinator";
 import {
@@ -514,35 +516,74 @@ export class DeviceBootService {
     context: BootDeadlineContext,
     progress: DeviceBootProgress | undefined,
   ): Promise<DeviceBootResult> {
-    // Exact identity is already authoritative when no metadata constraints were
-    // requested. Avoid a second inventory listing when the running iOS row also
-    // carries the runtime metadata required by CtrlProxy readiness (#7160).
-    const needsIosRuntimeMetadata =
-      running.platform === "ios" &&
-      running.iosVersion === undefined &&
-      running.osVersion === undefined;
-    const resolvedRunning =
-      hasExplicitConstraints || needsIosRuntimeMetadata
-        ? await this.enrichBootedDeviceFromImage(running, context)
-        : running;
+    const enriched = await this.enrichKnownRunningDevice(
+      running,
+      request.deviceId,
+      hasExplicitConstraints,
+      context,
+    );
+    const resolvedRunning = enriched.device;
     if (hasExplicitConstraints && !matchesDeviceCriteria(resolvedRunning, criteria)) {
       throw new ActionableError(
         `Device '${request.deviceId}' does not satisfy the requested platform, version, or form-factor constraints.`,
       );
     }
-    return this.waitForRunningDevice(resolvedRunning, context, progress);
+    const result = await this.waitForRunningDevice(resolvedRunning, context, progress);
+    return enriched.image
+      ? {
+          ...result,
+          device: enrichBootedDevice(result.device, enriched.image),
+          sourceImage: enriched.image,
+        }
+      : result;
+  }
+
+  private async enrichKnownRunningDevice(
+    running: BootedDevice,
+    requestedDeviceId: string,
+    hasExplicitConstraints: boolean,
+    context: BootDeadlineContext,
+  ): Promise<{ device: BootedDevice; image: DeviceInfo | undefined }> {
+    // Exact identity is authoritative, but a virtual device's configured image
+    // remains the source of static display/capability/profile metadata.
+    const needsIosRuntimeMetadata =
+      running.platform === "ios" &&
+      running.iosVersion === undefined &&
+      running.osVersion === undefined;
+    const needsConfiguredImage =
+      running.platform === "android"
+        ? isAndroidEmulatorSerial(running.deviceId)
+        : running.deviceId.includes("-") && running.deviceId.length > 30;
+    if (hasExplicitConstraints || needsIosRuntimeMetadata || needsConfiguredImage) {
+      try {
+        return await this.enrichBootedDeviceFromImage(running, context);
+      } catch (error) {
+        if (hasExplicitConstraints) {
+          throw error;
+        }
+        logger.warn(
+          `[DeviceBootService] Exact device '${requestedDeviceId}' metadata enrichment failed; adopting discovered device: ${errorMessage(error)}`,
+          error,
+        );
+      }
+    }
+    return { device: running, image: undefined };
   }
 
   private async enrichBootedDeviceFromImage(
     device: BootedDevice,
     context: BootDeadlineContext,
-  ): Promise<BootedDevice> {
+  ): Promise<{ device: BootedDevice; image: DeviceInfo | undefined }> {
     const images = await this.runPhase(
       context,
       `resolving ${device.platform} device metadata`,
       (signal) => this.dependencies.deviceManager.listDeviceImages(device.platform, signal),
     );
-    return enrichBootedDevicesFromImages([device], images)[0]!;
+    const image = findImageForBootedDevice(device, images);
+    return {
+      device: image ? enrichBootedDevice(device, image) : device,
+      image,
+    };
   }
 
   private async bootMatchingDevice(
@@ -643,7 +684,11 @@ export class DeviceBootService {
       return undefined;
     }
     await this.reportProgress(context, progress, 100, "Found matching running device");
-    return this.waitForRunningDevice(match, context, progress);
+    const image = findImageForBootedDevice(match, images);
+    const result = await this.waitForRunningDevice(match, context, progress);
+    return image
+      ? { ...result, device: enrichBootedDevice(result.device, image), sourceImage: image }
+      : result;
   }
 
   private async bootMatchedImage(
@@ -714,7 +759,7 @@ export class DeviceBootService {
       context,
       progress,
     );
-    return { ...result, device: enrichBootedDevice(result.device, image) };
+    return { ...result, device: enrichBootedDevice(result.device, image), sourceImage: image };
   }
 
   private async provisionAndBoot(
@@ -766,6 +811,9 @@ export class DeviceBootService {
       deviceId: provisioned.deviceId,
       isRunning: false,
       formFactor: request.formFactor,
+      runtimeId: provisioned.runtimeId,
+      runtime: provisioned.runtime,
+      deviceType: provisioned.deviceType,
     } as DeviceInfo;
     return this.bootImage(createdImage, context, progress, true);
   }
@@ -1123,6 +1171,7 @@ export class DeviceBootService {
   }
 }
 
+// oxlint-disable-next-line complexity -- explicit per-field fallback keeps configured-image precedence auditable.
 export function enrichBootedDevice(device: BootedDevice, image: DeviceInfo): BootedDevice {
   return {
     ...device,
@@ -1130,11 +1179,30 @@ export function enrichBootedDevice(device: BootedDevice, image: DeviceInfo): Boo
     apiLevel: device.apiLevel ?? image.apiLevel,
     osVersion: device.osVersion ?? image.osVersion,
     runtimeId: device.runtimeId ?? image.runtimeId,
+    runtime: device.runtime ?? image.runtime,
     deviceType: device.deviceType ?? image.deviceType,
     formFactor: device.formFactor ?? image.formFactor,
     screenWidth: device.screenWidth ?? image.screenWidth,
     screenHeight: device.screenHeight ?? image.screenHeight,
+    screenDensity: device.screenDensity ?? image.screenDensity,
+    model: device.model ?? image.model,
+    architecture: device.architecture ?? image.architecture,
+    capabilityInventory: device.capabilityInventory ?? image.capabilityInventory,
   };
+}
+
+function findImageForBootedDevice(
+  device: BootedDevice,
+  images: readonly DeviceInfo[],
+): DeviceInfo | undefined {
+  return images.find(
+    (image) =>
+      image.platform === device.platform &&
+      (image.deviceId === device.deviceId ||
+        (device.platform === "android" &&
+          isAndroidEmulatorSerial(device.deviceId) &&
+          image.name === device.name)),
+  );
 }
 
 export function enrichBootedDevicesFromImages(

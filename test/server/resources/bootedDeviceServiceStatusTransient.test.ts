@@ -33,6 +33,8 @@ const readyServiceStatus: DeviceServiceStatus = {
   installedSha256: null,
   expectedSha256: "",
   isCompatible: true,
+  version: "0.0.75",
+  versionInfo: { build: "0.0.75", source: "ios-runner-bundle" },
   supportedCommandsComplete: true,
   supportedFeaturesComplete: true,
 };
@@ -156,6 +158,7 @@ describe("booted iOS service-status transient handling (#7053)", () => {
     expect(devices2).toHaveLength(1);
     expect(devices2[0].deviceId).toBe("SIM-A");
     expect(devices2[0].serviceStatus).toEqual(readyServiceStatus);
+    expect(devices2[0].runtime.serviceStatus).toEqual(readyServiceStatus);
     expect(devices2[0].serviceStatusDiagnostic).toBeUndefined();
   });
 });

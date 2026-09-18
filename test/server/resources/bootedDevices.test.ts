@@ -16,6 +16,7 @@ import { FakeDeviceSessionPersistence } from "../../fakes/FakeDeviceSessionPersi
 import {
   setDeviceManager,
   setDeviceLockProbe,
+  setOrientationReaderFactory,
   notifyBootedDeviceResourcesUpdated,
   BootedDevicesResourceContent,
   DeviceLockStatesResourceContent,
@@ -37,6 +38,8 @@ import { defaultAdbClientFactory } from "../../../src/utils/android-cmdline-tool
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { resolveApkChecksum, resolveIpaChecksum } from "../../../src/constants/release";
 import { z } from "zod/v4";
+import { FakeOrientationReader } from "../../fakes/FakeOrientationReader";
+import { AndroidAvdProvenanceCache } from "../../../src/utils/AndroidAvdProvenanceCache";
 
 describe("MCP Booted Device Resources", () => {
   let fixture: McpTestFixture;
@@ -77,6 +80,7 @@ describe("MCP Booted Device Resources", () => {
   });
 
   beforeEach(() => {
+    AndroidAvdProvenanceCache.resetForTests();
     // Set up fake device utils before each test
     fakeDeviceUtils = new FakeDeviceUtils();
     setDeviceManager(fakeDeviceUtils);
@@ -88,6 +92,7 @@ describe("MCP Booted Device Resources", () => {
     }
     // Restore the real (adb-backed) lock probe so a test's fake never leaks into the next.
     setDeviceLockProbe(null);
+    setOrientationReaderFactory(null);
   });
 
   afterAll(async () => {
@@ -145,6 +150,39 @@ describe("MCP Booted Device Resources", () => {
         formFactor: "phone",
       }),
     ]);
+  });
+
+  test("attaches Android AVD provenance to configured booted-image lookups", async () => {
+    fakeDeviceUtils.setDeviceImages("android", [
+      {
+        name: mockAndroidDevice1.name,
+        platform: "android",
+        isRunning: true,
+        runtimeId: "system-images;android-36;google_apis;arm64-v8a",
+      },
+    ]);
+
+    const configured = await configuredImagesForBootedPlatform(
+      "android",
+      fakeDeviceUtils,
+      new FakeTimer(),
+      {
+        listDeviceImages: async () => [
+          {
+            name: mockAndroidDevice1.name,
+            path: "/tmp/Pixel_7_API_34.avd",
+            target: "Google APIs",
+            basedOn: "Android 16 google_apis/arm64-v8a",
+          },
+        ],
+      },
+    );
+
+    expect([...configured.values()][0]?.image).toEqual({
+      path: "/tmp/Pixel_7_API_34.avd",
+      target: "Google APIs",
+      basedOn: "Android 16 google_apis/arm64-v8a",
+    });
   });
 
   test("preserves physical iOS completeness when simulator discovery fails", async () => {
@@ -528,6 +566,22 @@ describe("MCP Booted Device Resources", () => {
       );
       expect(locked?.locked).toBe(true);
       expect(unlocked?.locked).toBe(false);
+    });
+
+    test("includes bounded orientation from the injected OrientationReader", async function () {
+      fakeDeviceUtils.setBootedDevices("android", [mockAndroidDevice1]);
+      const orientationReader = new FakeOrientationReader();
+      orientationReader.setResult("landscape");
+      setOrientationReaderFactory(() => orientationReader);
+
+      const { client } = fixture.getContext();
+      const result = await client.request(
+        { method: "resources/read", params: { uri: "automobile:devices/booted/android" } },
+        z.object({ contents: z.array(z.object({ text: z.string() })) }),
+      );
+      const data: BootedDevicesResourceContent = JSON.parse(result.contents[0].text);
+
+      expect(data.devices[0].runtime.orientation).toBe("landscape");
     });
 
     test("omits lock state for a device the probe cannot read", async function () {
@@ -1695,7 +1749,8 @@ describe("booted device readiness", () => {
 
     expect(status).toEqual({
       ...withoutVersion,
-      version: { versionName: "1.2.3", versionCode: "45", source: "android-package" },
+      version: "1.2.3",
+      versionInfo: { versionName: "1.2.3", versionCode: "45", source: "android-package" },
     });
   });
 
@@ -1773,7 +1828,8 @@ describe("booted device readiness", () => {
         { getVersion: async () => ({ build: "200", source: "ios-runner-bundle" }) },
       );
 
-      expect(status?.version).toEqual({ build: "200", source: "ios-runner-bundle" });
+      expect(status?.version).toBe("200");
+      expect(status?.versionInfo).toEqual({ build: "200", source: "ios-runner-bundle" });
     } finally {
       installedSpy.mockRestore();
       runningSpy.mockRestore();
@@ -1929,7 +1985,11 @@ describe("booted device readiness", () => {
         source: "local",
       });
 
-      expect(status?.version).toEqual({ build: "2026.9.13", source: "ios-runner-bundle" });
+      expect(status?.version).toBe("2026.9.13");
+      expect(status?.versionInfo).toEqual({
+        build: "2026.9.13",
+        source: "ios-runner-bundle",
+      });
     } finally {
       installedSpy.mockRestore();
       runningSpy.mockRestore();

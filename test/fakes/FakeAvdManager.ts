@@ -6,6 +6,7 @@ import {
   AvdInfo,
   DeviceProfile,
 } from "../../src/utils/android-cmdline-tools/avdmanager";
+import type { Timer } from "../../src/utils/SystemTimer";
 
 /**
  * Fake implementation of AvdManager for testing
@@ -25,6 +26,7 @@ export class FakeAvdManager implements AvdManager {
   };
   private listDeviceImagesResponse: AvdInfo[] = [];
   private listDeviceImagesHangs: boolean = false;
+  private listDeviceImagesDelay: { timer: Timer; ms: number } | undefined;
   private createAvdResponse: { success: boolean; message: string; avdName?: string } = {
     success: true,
     message: "AVD created successfully",
@@ -88,6 +90,11 @@ export class FakeAvdManager implements AvdManager {
    */
   setListDeviceImagesHangs(hangs: boolean): void {
     this.listDeviceImagesHangs = hangs;
+  }
+
+  /** Delay image enumeration through an injected clock for deterministic cache tests. */
+  setListDeviceImagesDelay(timer: Timer, ms: number): void {
+    this.listDeviceImagesDelay = { timer, ms };
   }
 
   setCreateAvdResponse(response: { success: boolean; message: string; avdName?: string }): void {
@@ -215,6 +222,9 @@ export class FakeAvdManager implements AvdManager {
           });
         }
       });
+    }
+    if (this.listDeviceImagesDelay) {
+      await this.listDeviceImagesDelay.timer.sleep(this.listDeviceImagesDelay.ms);
     }
     return this.listDeviceImagesResponse;
   }

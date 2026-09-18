@@ -12,4 +12,8 @@ describe("formFactorFrom", () => {
   ] as const)("returns %s", (_name, input, expected) => {
     expect(formFactorFrom(input)).toBe(expected);
   });
+
+  test("documents deviceType fold precedence before an explicit phone hint", () => {
+    expect(formFactorFrom({ deviceType: "pixel_fold", hint: "phone" })).toBe("foldable");
+  });
 });

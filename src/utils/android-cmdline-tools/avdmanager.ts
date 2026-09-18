@@ -15,6 +15,7 @@ import {
   type SdkManagerClientDependencies,
 } from "./SdkManagerClient";
 import { parseAndroidSystemImageRuntime } from "./AndroidSystemImageRuntime";
+import { AndroidAvdProvenanceCache } from "../AndroidAvdProvenanceCache";
 
 /** Dependencies shared by the functional AVD facade and its two typed clients. */
 export type AvdManagerDependencies = Omit<
@@ -131,7 +132,11 @@ export async function createAvd(
   dependencies = createDefaultDependencies(),
   signal?: AbortSignal,
 ): Promise<{ success: boolean; message: string; avdName?: string }> {
-  return createAvdManagerClient(dependencies).createAvd(params, { signal });
+  const result = await createAvdManagerClient(dependencies).createAvd(params, { signal });
+  if (result.success) {
+    AndroidAvdProvenanceCache.getInstance().invalidate();
+  }
+  return result;
 }
 
 /** Delete an AVD through the dedicated avdmanager boundary. */
@@ -140,7 +145,11 @@ export async function deleteAvd(
   dependencies: AvdManagerDependencies = createDefaultDependencies(),
   options: AvdManagerExecutionOptions = {},
 ): Promise<{ success: boolean; message: string }> {
-  return createAvdManagerClient(dependencies).deleteAvd(name, options);
+  const result = await createAvdManagerClient(dependencies).deleteAvd(name, options);
+  if (result.success) {
+    AndroidAvdProvenanceCache.getInstance().invalidate();
+  }
+  return result;
 }
 
 /** List device profiles through the dedicated avdmanager boundary. */

@@ -388,6 +388,7 @@ describe("DefaultDeviceProvisioner", () => {
       deviceId: "NEW-UDID",
       deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
       runtime: "com.apple.CoreSimulator.SimRuntime.iOS-26-3",
+      runtimeId: "com.apple.CoreSimulator.SimRuntime.iOS-26-3",
     });
     expect(simctl.createCalls).toEqual([
       {
@@ -667,6 +668,7 @@ describe("DefaultDeviceProvisioner", () => {
       name: "AutoMobile-android-34-uuid1",
       deviceType: "system-images;android-34;google_apis;arm64-v8a",
       runtime: "android-34",
+      runtimeId: "system-images;android-34;google_apis;arm64-v8a",
     });
     expect(avd.createCalls).toEqual([
       {

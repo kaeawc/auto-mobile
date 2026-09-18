@@ -54,6 +54,20 @@ class FakeExactDeviceProvisioner implements ExactDeviceProvisioner {
         name: request.name,
         platform: request.platform,
         isRunning: false,
+        runtimeId: request.spec.runtime,
+        runtime: request.spec.runtime,
+        deviceType: request.spec.deviceType,
+        ...(request.platform === "android" && request.spec.configuration
+          ? {
+              screenWidth: request.spec.configuration.screenWidth,
+              screenHeight: request.spec.configuration.screenHeight,
+              screenDensity: request.spec.configuration.screenDensity,
+            }
+          : {}),
+        capabilityInventory: {
+          schemaVersion: 1,
+          capabilities: [{ id: "test.fake.capability", state: "available" }],
+        },
       },
       resolvedSpec: {
         ...request.spec,
@@ -527,6 +541,7 @@ describe("provisionDevice handler", () => {
     teardownOperationStore = new FakeDeviceTeardownOperationStore();
     setDeviceToolsDependencies({
       deviceManagerFactory: () => deviceManager,
+      avdManagerFactory: () => ({ listDeviceImages: async () => [] }),
       exactDeviceProvisionerFactory: () => exactProvisioner,
       provisionDeviceOperationStoreFactory: () => operationStore,
       teardownDeviceOperationStoreFactory: () => teardownOperationStore,
@@ -1104,7 +1119,12 @@ describe("provisionDevice handler", () => {
           runtime: "system-images;android-36;google_apis;x86_64",
           deviceType: "pixel_9",
           displayCutout: "hole_punch",
-          configuration: { memoryMb: 4096 },
+          configuration: {
+            memoryMb: 4096,
+            screenWidth: 1080,
+            screenHeight: 2400,
+            screenDensity: 420,
+          },
         },
       },
       boot: false,
@@ -1131,7 +1151,12 @@ describe("provisionDevice handler", () => {
         runtime: "system-images;android-36;google_apis;x86_64",
         deviceType: "pixel_9",
         displayCutout: "hole_punch",
-        configuration: { memoryMb: 4096 },
+        configuration: {
+          memoryMb: 4096,
+          screenWidth: 1080,
+          screenHeight: 2400,
+          screenDensity: 420,
+        },
       },
     });
     expect(exactProvisioner.requests[0]?.signal).toBeInstanceOf(AbortSignal);
@@ -1144,10 +1169,58 @@ describe("provisionDevice handler", () => {
       device: {
         name: "phone-api-36-a",
         platform: "android",
+        runtimeId: "system-images;android-36;google_apis;x86_64",
+        deviceType: "pixel_9",
+        display: { width: 1080, height: 2400, density: 420 },
+        capabilityInventory: expect.any(Object),
       },
       displayCutout: "hole_punch",
     });
     expect(second).toEqual(first);
+  });
+
+  test("provisionDevice.device preserves the configured display and capability inventory", async () => {
+    const image = {
+      name: "phone-api-36-parity",
+      platform: "android" as const,
+      isRunning: false,
+      runtimeId: "system-images;android-36;google_apis;x86_64",
+      runtime: "system-images;android-36;google_apis;x86_64",
+      deviceType: "pixel_9",
+      screenWidth: 1080,
+      screenHeight: 2400,
+      screenDensity: 420,
+      capabilityInventory: {
+        schemaVersion: 1,
+        capabilities: [{ id: "test.fake.capability", state: "available" as const }],
+      },
+    };
+    deviceManager.setDeviceImages("android", [image]);
+    deviceManager.setBootedDevices("android", [
+      { name: image.name, platform: "android", deviceId: "emulator-5554" },
+    ]);
+    const provisionTool = ToolRegistry.getTool("provisionDevice")!;
+    const provisioned = JSON.parse(
+      (
+        (await provisionTool.handler({
+          operationId: "operation-device-description-parity",
+          device: {
+            platform: "android",
+            name: image.name,
+            spec: { runtime: image.runtimeId, deviceType: image.deviceType },
+          },
+          boot: true,
+          readiness: "none",
+        })) as any
+      ).content[0].text,
+    );
+    const listed = JSON.parse(
+      ((await ToolRegistry.getTool("listDevices")!.handler({ platform: "android" })) as any)
+        .content[0].text,
+    );
+
+    expect(provisioned.device.display).toEqual(listed.devices[0].display);
+    expect(provisioned.device.capabilityInventory).toEqual(listed.devices[0].capabilityInventory);
   });
 
   test("releases the replay claim when nothing about the persisted result changed", async () => {

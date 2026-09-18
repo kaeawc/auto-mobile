@@ -127,6 +127,48 @@ describe("DeviceBootService", () => {
     ]);
   });
 
+  it("adopts an unconstrained exact running Android emulator when image inventory fails", async () => {
+    const devices = new FakeDeviceUtils();
+    const running: BootedDevice = {
+      name: "Pixel_9_API_35",
+      platform: "android",
+      deviceId: "emulator-5554",
+    };
+    devices.setBootedDevices("android", [running]);
+    devices.listDeviceImages = async () => {
+      throw new Error("image inventory unavailable");
+    };
+
+    const result = await service(devices).boot({
+      platform: "android",
+      deviceId: running.deviceId,
+    });
+
+    expect(result).toMatchObject({ source: "booted", device: running });
+    expect(result.sourceImage).toBeUndefined();
+  });
+
+  it("keeps image inventory failures fatal when exact-device constraints need metadata", async () => {
+    const devices = new FakeDeviceUtils();
+    const running: BootedDevice = {
+      name: "Pixel_9_API_35",
+      platform: "android",
+      deviceId: "emulator-5554",
+    };
+    devices.setBootedDevices("android", [running]);
+    devices.listDeviceImages = async () => {
+      throw new Error("image inventory unavailable");
+    };
+
+    await expect(
+      service(devices).boot({
+        platform: "android",
+        deviceId: running.deviceId,
+        minOsVersion: "35",
+      }),
+    ).rejects.toThrow("image inventory unavailable");
+  });
+
   it("enriches an exact running Android emulator before applying metadata constraints", async () => {
     const devices = new FakeDeviceUtils();
     const running: BootedDevice = {
@@ -493,6 +535,7 @@ describe("DeviceBootService", () => {
               platform: "android" as const,
               name: createdName,
               deviceType: image.packageName,
+              runtimeId: image.packageName,
               runtime: `android-${image.apiLevel}`,
             };
           },
@@ -514,6 +557,8 @@ describe("DeviceBootService", () => {
       expect(provisionCalls).toBe(1);
       expect(first.provisioned).toBe(true);
       expect(first.device.name).toBe(createdName);
+      expect(first.device.runtimeId).toBe("system-images;android-34;google_apis;arm64-v8a");
+      expect(first.sourceImage?.runtimeId).toBe("system-images;android-34;google_apis;arm64-v8a");
 
       const second = await boot.boot(request);
       expect(provisionCalls).toBe(1);
@@ -1460,7 +1505,7 @@ describe("DeviceBootService", () => {
     const result = await service(devices, matcher).boot({ platform: "android" });
 
     expect(result.source).toBe("booted");
-    expect(result.sourceImage).toBeUndefined();
+    expect(result.sourceImage).toEqual(image);
     expect(result.processHandle).toBeUndefined();
     expect(result.processId).toBeUndefined();
     expect(devices.getExecutedOperations()).toContain("waitForDeviceReady:Pixel_9_API_35:180000");

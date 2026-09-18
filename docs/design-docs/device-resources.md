@@ -7,6 +7,22 @@ Every projection temporarily remains a superset containing the former nested ali
 unknown facts are explicit `null` values. See
 [the device-description audit](device-description-audit.md).
 
+Configured-image enrichment is shared by tools and resources. A booted virtual device retains
+its configured `display`, `capabilityInventory`, `deviceType`, `runtimeId`, and Android
+`image.{path,target,basedOn}` provenance when those facts are available. Physical devices and
+virtual devices started outside AutoMobile keep unavailable image-only facts as `null`.
+`runtime.locked` is populated only by the existing Android keyguard probe; otherwise it is
+`null`. `runtime.orientation` comes from a bounded live orientation probe (Android) and remains
+`null` where no safe read signal exists (currently iOS).
+
+`runtime.serviceStatus`, when observed, carries the complete service diagnostic: installation,
+enablement, running and compatibility flags; nullable installed and expected checksums; structured
+runner `version`; and nullable `supportedCommandsComplete` / `supportedFeaturesComplete` flags.
+The deprecated top-level `serviceStatus` sibling remains during phase 1 and contains the same
+values. The deprecated flat `listDevices.formFactor` alias is nullable when discovery has no
+metadata, while canonical top-level `formFactor` always uses `phone`, `tablet`, `foldable`, or
+`unknown`.
+
 `DeviceResource` describes observed resource state for one device. Its `resources`
 property is a JSON object keyed by logical resource name. `AndroidDeviceResource`
 and `AppleDeviceResource` add platform-specific keys and preserve AutoMobile's

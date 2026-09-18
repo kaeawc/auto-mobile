@@ -120,6 +120,10 @@ import { getInstalledAppsCacheWriteCoordinator } from "../db/installedAppsCacheW
 import { getDbWriteBarrier } from "../db/dbWriteBarrier";
 import { isAdbMissingDeviceError } from "../utils/android-cmdline-tools/AdbDeviceHealth";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import {
+  AndroidAvdProvenanceCache,
+  CONFIGURED_IMAGE_FALLBACK_TIMEOUT_MS,
+} from "../utils/AndroidAvdProvenanceCache";
 import { combineAbortSignals, getAbortSignal, runWithAbortSignal } from "../utils/AbortContext";
 import { ResourceRegistry } from "./resourceRegistry";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
@@ -1088,11 +1092,9 @@ function initializedDeviceSessionUuid(deviceId: string): string | undefined {
   return daemonState.getDeviceSessionRegistry().getByDeviceId(deviceId)?.deviceSessionUuid;
 }
 
-// This is best-effort enrichment: a wedged `emulator -list-avds` must not hang listDevices.
-const CONFIGURED_IMAGE_FALLBACK_TIMEOUT_MS = 2_000;
-
 async function configuredImagesForBootedDevices(
   deviceManager: PlatformDeviceManager,
+  avdManager: Pick<AvdManager, "listDeviceImages">,
   booted: readonly BootedDevice[],
   timer: Timer,
 ): Promise<ReadonlyMap<string, StableConfiguredDeviceImage>> {
@@ -1110,11 +1112,27 @@ async function configuredImagesForBootedDevices(
             ),
           );
         }, CONFIGURED_IMAGE_FALLBACK_TIMEOUT_MS);
-        const discovery = await deviceManager.getDeviceImagesDetailed(platform, {
-          signal: controller.signal,
-        });
+        const [discovery, androidProvenance] = await Promise.all([
+          deviceManager.getDeviceImagesDetailed(platform, { signal: controller.signal }),
+          platform === "android"
+            ? AndroidAvdProvenanceCache.getInstance().getByName(avdManager, timer)
+            : Promise.resolve(new Map()),
+        ]);
         for (const [key, image] of configuredImagesByStableId(platform, discovery)) {
-          images.set(key, image);
+          const provenance = androidProvenance.get(image.name);
+          images.set(
+            key,
+            provenance
+              ? {
+                  ...image,
+                  image: {
+                    path: provenance.path,
+                    target: provenance.target,
+                    basedOn: provenance.basedOn,
+                  },
+                }
+              : image,
+          );
         }
       } catch (error) {
         logger.warn(
@@ -6218,16 +6236,9 @@ function availableDeviceResourceNote() {
 
 async function androidProvenanceByAvdName(
   avdManager: Pick<AvdManager, "listDeviceImages">,
+  timer: Timer,
 ): Promise<ReadonlyMap<string, AvdInfo>> {
-  try {
-    return new Map((await avdManager.listDeviceImages()).map((avd) => [avd.name, avd]));
-  } catch (error) {
-    logger.warn(
-      `listDeviceImages Android AVD provenance lookup failed: ${errorMessage(error)}`,
-      error,
-    );
-    return new Map();
-  }
+  return AndroidAvdProvenanceCache.getInstance().getByName(avdManager, timer);
 }
 
 export function registerDeviceTools() {
@@ -6245,7 +6256,7 @@ export function registerDeviceTools() {
       });
       const androidProvenance =
         args.platform === "android"
-          ? await androidProvenanceByAvdName(deps.avdManagerFactory())
+          ? await androidProvenanceByAvdName(deps.avdManagerFactory(), deps.timer)
           : undefined;
       const images = projection.sourceImages.map((image) => {
         const description = describeDevice({
@@ -6364,6 +6375,7 @@ export function registerDeviceTools() {
 
     const configuredImages = await configuredImagesForBootedDevices(
       deviceManager,
+      deps.avdManagerFactory(),
       booted,
       deps.timer,
     );
@@ -8026,6 +8038,7 @@ export function registerDeviceTools() {
     device: BootedDevice;
     sessionId: string;
     source: "booted" | "cold-boot";
+    sourceImage?: DeviceInfo;
     resources?: DeviceResourceConfigurationResult;
   }> {
     const requestedIdentity = `platform=${args.device.platform} name=${args.device.name}`;
@@ -8212,6 +8225,7 @@ export function registerDeviceTools() {
         device: boot.device,
         sessionId,
         source: boot.source,
+        sourceImage: boot.sourceImage,
         resources,
       };
     } catch (error) {
@@ -8347,7 +8361,12 @@ export function registerDeviceTools() {
     createdByOperation: boolean,
     perf: ReturnType<typeof createPerformanceTracker>,
     booted:
-      | { device: BootedDevice; sessionId: string; resources?: DeviceResourceConfigurationResult }
+      | {
+          device: BootedDevice;
+          sessionId: string;
+          sourceImage?: DeviceInfo;
+          resources?: DeviceResourceConfigurationResult;
+        }
       | undefined,
   ): Record<string, unknown> {
     const pooled = booted
@@ -8359,6 +8378,7 @@ export function registerDeviceTools() {
       provisioned,
       booted: booted?.device,
       pooled,
+      discovery: booted?.sourceImage,
       session: booted ? { sessionId: booted.sessionId } : undefined,
       serviceStatus: booted
         ? args.readiness === "automation"

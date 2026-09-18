@@ -17,6 +17,7 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { defaultTimer } from "../../src/utils/SystemTimer";
+import { AndroidAvdProvenanceCache } from "../../src/utils/AndroidAvdProvenanceCache";
 
 const resolveWithFakeTimer = async <T>(
   promise: Promise<T>,
@@ -92,6 +93,16 @@ describe("listDevices tool (#5870)", () => {
     fakeDeviceUtils = new FakeDeviceUtils();
     setDeviceToolsDependencies({
       deviceManagerFactory: () => fakeDeviceUtils,
+      avdManagerFactory: () => ({
+        listDeviceImages: async () => [
+          {
+            name: android.name,
+            path: "/tmp/Pixel_9_API_36.avd",
+            target: "Google APIs",
+            basedOn: "Android 16 google_apis/arm64-v8a",
+          },
+        ],
+      }),
     });
 
     if (!ToolRegistry.getTool("listDevices")) {
@@ -380,14 +391,31 @@ describe("listDevices tool (#5870)", () => {
         screenHeight: 2400,
         screenDensity: 420,
         formFactor: "phone",
+        runtimeId: "system-images;android-36;google_apis;arm64-v8a",
+        deviceType: "pixel_9",
+        capabilityInventory: {
+          schemaVersion: 1,
+          capabilities: [{ id: "android.hardware.camera", state: "available" }],
+        },
       },
     ]);
 
     const payload = await callListDevices({ platform: "android" });
 
     expect(payload.devices[0]).toMatchObject({
-      runtime: { apiLevel: 36, osVersion: "16" },
-      display: { formFactor: "phone" },
+      runtime: {
+        apiLevel: 36,
+        osVersion: "16",
+        runtimeId: "system-images;android-36;google_apis;arm64-v8a",
+        deviceType: "pixel_9",
+      },
+      display: { width: 1080, height: 2400, density: 420, formFactor: "phone" },
+      capabilityInventory: expect.any(Object),
+      image: {
+        path: "/tmp/Pixel_9_API_36.avd",
+        target: "Google APIs",
+        basedOn: "Android 16 google_apis/arm64-v8a",
+      },
       apiLevel: 36,
       osVersion: "16",
       formFactor: "phone",
@@ -561,4 +589,7 @@ describe("listDevices tool (#5870)", () => {
       sessionManager.stopCleanupTimer();
     }
   });
+});
+beforeEach(() => {
+  AndroidAvdProvenanceCache.resetForTests();
 });

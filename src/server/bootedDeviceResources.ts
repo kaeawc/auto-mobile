@@ -21,6 +21,7 @@ import type {
 import {
   describeDevice,
   projectBootedDevice,
+  withDeviceRuntimeObservation,
   withDeviceServiceStatus,
   type BootedDeviceDescription,
   type DeviceDescription,
@@ -39,7 +40,18 @@ import {
 import { resolveApkChecksum, resolveIpaChecksum } from "../constants/release";
 import { type DiscoverySource, sourcesForPlatform } from "../utils/discoverySource";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import {
+  AndroidAvdProvenanceCache,
+  CONFIGURED_IMAGE_FALLBACK_TIMEOUT_MS,
+} from "../utils/AndroidAvdProvenanceCache";
 import { withRemainingBudget } from "../utils/withRemainingBudget";
+import {
+  AndroidOrientationReader,
+  IOSOrientationReader,
+  type OrientationReader,
+} from "../features/action/OrientationReader";
+import { AvdManagerService } from "../utils/android-cmdline-tools/AvdManagerService";
+import type { AvdManager } from "../utils/android-cmdline-tools/interfaces/AvdManager";
 
 // Resource URIs
 export const BOOTED_DEVICE_RESOURCE_URIS = {
@@ -94,7 +106,8 @@ export interface DeviceServiceStatus {
    * or when installation is not confirmed true for this device.
    * Readiness and compatibility remain represented by isCompatible and runner feature status.
    */
-  version?: CtrlProxyVersionInfo;
+  version?: string;
+  versionInfo?: CtrlProxyVersionInfo;
   /**
    * iOS only: whether the running runner advertises the full feature command set.
    * The iOS runner exposes no version/hash (installedSha256 stays null), so this
@@ -282,6 +295,25 @@ function activeLockProbe(): DeviceLockProbe | null {
   return injectedLockProbe ?? (serviceStatusEnabled ? realDeviceLockProbe : null);
 }
 
+export type OrientationReaderFactory = (device: BootedDevice) => OrientationReader;
+
+let injectedOrientationReaderFactory: OrientationReaderFactory | null = null;
+
+/** Inject deterministic orientation readers for resource tests (or null to restore production). */
+export function setOrientationReaderFactory(factory: OrientationReaderFactory | null): void {
+  injectedOrientationReaderFactory = factory;
+}
+
+function realOrientationReader(device: BootedDevice): OrientationReader {
+  return device.platform === "android"
+    ? new AndroidOrientationReader(defaultAdbClientFactory.create(device))
+    : new IOSOrientationReader();
+}
+
+function activeOrientationReaderFactory(): OrientationReaderFactory | null {
+  return injectedOrientationReaderFactory ?? (serviceStatusEnabled ? realOrientationReader : null);
+}
+
 /**
  * Resolve a device's lock state via [lockProbe], bounded by a per-device timeout so a slow/failed
  * read leaves it `undefined` rather than stalling the caller. Clears the losing timer when the probe
@@ -444,13 +476,14 @@ function toBootedDeviceInfo(
   };
 }
 
-// This is best-effort enrichment: a wedged `emulator -list-avds` must not hang devices/booted.
-const CONFIGURED_IMAGE_FALLBACK_TIMEOUT_MS = 2_000;
-
 export async function configuredImagesForBootedPlatform(
   platform: Platform,
   deviceManager: PlatformDeviceManager = PlatformDeviceManagerFactory.getInstance(),
   timer: Timer = defaultTimer,
+  avdManager: Pick<AvdManager, "listDeviceImages"> | undefined = serviceStatusEnabled &&
+  platform === "android"
+    ? new AvdManagerService()
+    : undefined,
 ): Promise<ReadonlyMap<string, StableConfiguredDeviceImage>> {
   const controller = new AbortController();
   let timeoutHandle: NodeJS.Timeout | undefined;
@@ -462,10 +495,30 @@ export async function configuredImagesForBootedPlatform(
         ),
       );
     }, CONFIGURED_IMAGE_FALLBACK_TIMEOUT_MS);
-    const discovery = await deviceManager.getDeviceImagesDetailed(platform, {
-      signal: controller.signal,
-    });
-    return configuredImagesByStableId(platform, discovery);
+    const [discovery, androidProvenance] = await Promise.all([
+      deviceManager.getDeviceImagesDetailed(platform, { signal: controller.signal }),
+      avdManager
+        ? AndroidAvdProvenanceCache.getInstance().getByName(avdManager, timer)
+        : Promise.resolve(new Map()),
+    ]);
+    return new Map(
+      [...configuredImagesByStableId(platform, discovery)].map(([key, image]) => {
+        const provenance = androidProvenance.get(image.name);
+        return [
+          key,
+          provenance
+            ? {
+                ...image,
+                image: {
+                  path: provenance.path,
+                  target: provenance.target,
+                  basedOn: provenance.basedOn,
+                },
+              }
+            : image,
+        ];
+      }),
+    );
   } catch (error) {
     logger.warn(
       `[BootedDeviceResources] Failed to get configured ${platform} device images: ${errorMessage(error)}`,
@@ -941,14 +994,7 @@ function withServiceStatus(
   device: BootedDeviceInfo,
   serviceStatus: DeviceServiceStatus,
 ): BootedDeviceInfo {
-  const updated = withDeviceServiceStatus(device, {
-    installed: serviceStatus.installed,
-    enabled: serviceStatus.enabled,
-    running: serviceStatus.running,
-    isCompatible: serviceStatus.isCompatible,
-    ...(serviceStatus.installedSha256 ? { installedSha256: serviceStatus.installedSha256 } : {}),
-    expectedSha256: serviceStatus.expectedSha256,
-  });
+  const updated = withDeviceServiceStatus(device, serviceStatus);
   return {
     ...device,
     runtime: { ...device.runtime, ...updated.runtime },
@@ -988,9 +1034,81 @@ async function enrichDeviceLockStates(devices: BootedDeviceInfo[]): Promise<void
     if (result.status === "fulfilled" && result.value !== undefined) {
       devices[i] = {
         ...devices[i],
-        runtime: { ...devices[i].runtime, locked: result.value },
+        runtime: {
+          ...devices[i].runtime,
+          ...withDeviceRuntimeObservation(devices[i], { locked: result.value }).runtime,
+        },
         locked: result.value,
       };
+    }
+  }
+}
+
+const ORIENTATION_TIMEOUT_MS = 3_000;
+
+export async function probeDeviceOrientation(
+  device: BootedDevice,
+  reader: OrientationReader,
+  deadlineMs: number,
+  timer: Timer,
+): Promise<"portrait" | "landscape" | null> {
+  let timeoutHandle: NodeJS.Timeout | undefined;
+  try {
+    return await withRemainingBudget(deadlineMs, timer, undefined, async (_signal, remainingMs) => {
+      const controller = new AbortController();
+      return await Promise.race([
+        reader.readOrientation(device, controller.signal),
+        new Promise<null>((resolve) => {
+          timeoutHandle = timer.setTimeout(() => {
+            const error = new Error(
+              `[BootedDeviceResources] Orientation timeout for ${device.deviceId}`,
+            );
+            controller.abort(error);
+            logger.warn(error.message);
+            resolve(null);
+          }, remainingMs);
+        }),
+      ]);
+    });
+  } catch (error) {
+    logger.warn(
+      `[BootedDeviceResources] Failed to query orientation for ${device.deviceId}: ${errorMessage(error)}`,
+      error,
+    );
+    return null;
+  } finally {
+    if (timeoutHandle) {
+      timer.clearTimeout(timeoutHandle);
+    }
+  }
+}
+
+async function enrichDeviceOrientations(
+  devices: BootedDeviceInfo[],
+  timer: Timer = defaultTimer,
+): Promise<void> {
+  const readerFactory = activeOrientationReaderFactory();
+  if (!readerFactory) {
+    return;
+  }
+  const deadlineMs = timer.now() + ORIENTATION_TIMEOUT_MS;
+  const orientations = await Promise.all(
+    devices.map(async (device) =>
+      isProbeableDevice(device)
+        ? await probeDeviceOrientation(
+            probeTarget(device),
+            readerFactory(probeTarget(device)),
+            deadlineMs,
+            timer,
+          )
+        : null,
+    ),
+  );
+  for (let i = 0; i < devices.length; i++) {
+    const orientation = orientations[i];
+    if (orientation) {
+      const updated = withDeviceRuntimeObservation(devices[i], { orientation });
+      devices[i] = { ...devices[i], runtime: { ...devices[i].runtime, ...updated.runtime } };
     }
   }
 }
@@ -1021,8 +1139,11 @@ async function getBootedDevicesForPlatforms(
     }
   }
 
-  await enrichDeviceServiceStatuses(devices);
-  await enrichDeviceLockStates(devices);
+  await Promise.all([
+    enrichDeviceServiceStatuses(devices),
+    enrichDeviceLockStates(devices),
+    enrichDeviceOrientations(devices),
+  ]);
 
   const virtualCount = devices.filter((device) => device.isVirtual).length;
   const physicalCount = devices.length - virtualCount;
@@ -1109,6 +1230,10 @@ const noOpCtrlProxyVersionLookup: CtrlProxyVersionLookup = {
 
 const CTRL_PROXY_VERSION_TIMEOUT_MS = 2000;
 
+function legacyVersion(version: CtrlProxyVersionInfo): string | undefined {
+  return version.versionName ?? version.build ?? version.versionCode;
+}
+
 async function getCtrlProxyVersion(
   device: BootedDevice,
   versionLookup: CtrlProxyVersionLookup,
@@ -1183,7 +1308,12 @@ export async function queryDeviceServiceStatus(
         installedSha256,
         expectedSha256,
         isCompatible,
-        ...(installed && version ? { version } : {}),
+        ...(installed && version
+          ? {
+              versionInfo: version,
+              ...(legacyVersion(version) ? { version: legacyVersion(version) } : {}),
+            }
+          : {}),
       };
     } else if (device.platform === "ios") {
       const manager = IOSCtrlProxyManager.getInstance(bootedDevice);
@@ -1238,7 +1368,12 @@ export async function queryDeviceServiceStatus(
         expectedSha256,
         isCompatible,
         // isInstalled() is host-wide/unconditional for simulators; running is the per-device signal.
-        ...(running && version ? { version } : {}),
+        ...(running && version
+          ? {
+              versionInfo: version,
+              ...(legacyVersion(version) ? { version: legacyVersion(version) } : {}),
+            }
+          : {}),
         supportedCommandsComplete,
         supportedFeaturesComplete,
       };

@@ -16,17 +16,27 @@ function orientationFromRotation(
 }
 
 export interface OrientationReader {
-  readOrientation(device: BootedDevice): Promise<"portrait" | "landscape" | null>;
+  readOrientation(
+    device: BootedDevice,
+    signal?: AbortSignal,
+  ): Promise<"portrait" | "landscape" | null>;
 }
 
 /** Reads Android's live WindowManager rotation through an injected ADB executor. */
 export class AndroidOrientationReader implements OrientationReader {
   constructor(private readonly adb: AdbExecutor) {}
 
-  async readOrientation(_device: BootedDevice): Promise<"portrait" | "landscape" | null> {
+  async readOrientation(
+    _device: BootedDevice,
+    signal?: AbortSignal,
+  ): Promise<"portrait" | "landscape" | null> {
     try {
       const { stdout } = await this.adb.executeCommand(
         'shell dumpsys window | grep -i "mRotation="',
+        undefined,
+        undefined,
+        undefined,
+        signal,
       );
       const rotation = parseWindowManagerRotation(stdout);
       if (rotation === null) {
@@ -35,7 +45,13 @@ export class AndroidOrientationReader implements OrientationReader {
 
       let naturalLandscape: boolean | null = null;
       try {
-        const { stdout: sizeOutput } = await this.adb.executeCommand("shell wm size");
+        const { stdout: sizeOutput } = await this.adb.executeCommand(
+          "shell wm size",
+          undefined,
+          undefined,
+          undefined,
+          signal,
+        );
         // Keep this parser aligned with AxisRanges.ts's queryDisplaySize parser.
         const size = sizeOutput.match(/Physical size:\s*(\d+)x(\d+)/);
         if (size) {
@@ -59,7 +75,10 @@ export class AndroidOrientationReader implements OrientationReader {
  * read-only orientation query, so this seam cannot safely report an iOS value yet.
  */
 export class IOSOrientationReader implements OrientationReader {
-  async readOrientation(_device: BootedDevice): Promise<"portrait" | "landscape" | null> {
+  async readOrientation(
+    _device: BootedDevice,
+    _signal?: AbortSignal,
+  ): Promise<"portrait" | "landscape" | null> {
     return null;
   }
 }

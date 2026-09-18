@@ -86,6 +86,7 @@ describe("platform device preparation tools", () => {
     timer = new FakeTimer();
     setDeviceToolsDependencies({
       deviceManagerFactory: () => deviceUtils,
+      avdManagerFactory: () => ({ listDeviceImages: async () => [] }),
       deviceMatcherFactory: () => matcher,
       ensureCtrlProxyReady: async () => {},
       notifyResourcesChanged: async () => {},
@@ -103,7 +104,7 @@ describe("platform device preparation tools", () => {
   });
 
   async function callTool(
-    name: "getAndroid" | "getApple" | "startDevice",
+    name: "getAndroid" | "getApple" | "startDevice" | "listDevices",
     args: Record<string, unknown>,
   ) {
     const tool = ToolRegistry.getTool(name);
@@ -255,6 +256,15 @@ describe("platform device preparation tools", () => {
       isRunning: true,
       apiLevel: 36,
       osVersion: "16",
+      runtimeId: "system-images;android-36;google_apis;arm64-v8a",
+      deviceType: "pixel_9",
+      screenWidth: 1080,
+      screenHeight: 2400,
+      screenDensity: 420,
+      capabilityInventory: {
+        schemaVersion: 1,
+        capabilities: [{ id: "android.hardware.camera", state: "available" as const }],
+      },
     };
     deviceUtils.setDeviceImages("android", [image]);
     deviceUtils.setBootedDevices("android", [emulator]);
@@ -262,7 +272,17 @@ describe("platform device preparation tools", () => {
 
     const result = await callTool("getAndroid", { avdName: emulator.name });
 
+    const listed = await callTool("listDevices", { platform: "android" });
+
+    expect(result).toMatchObject({
+      runtimeId: image.runtimeId,
+      deviceType: image.deviceType,
+      display: { width: 1080, height: 2400, density: 420 },
+      capabilityInventory: expect.any(Object),
+    });
     expect(result.runtime).toMatchObject({ apiLevel: 36, osVersion: "16" });
+    expect(result.display).toEqual(listed.devices[0].display);
+    expect(result.capabilityInventory).toEqual(listed.devices[0].capabilityInventory);
   });
 
   test("getApple accepts only a simulator UDID and returns its simulator identity", async () => {
@@ -271,6 +291,16 @@ describe("platform device preparation tools", () => {
       name: "iPhone 17",
       deviceId: "E2F46BCE-4C97-4AA0-BD9D-544756FAB545",
       isRunning: false,
+      runtimeId: "com.apple.CoreSimulator.SimRuntime.iOS-26-5",
+      runtime: "com.apple.CoreSimulator.SimRuntime.iOS-26-5",
+      deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
+      screenWidth: 1206,
+      screenHeight: 2622,
+      screenDensity: 460,
+      capabilityInventory: {
+        schemaVersion: 1,
+        capabilities: [{ id: "ios.simulator.camera", state: "available" }],
+      },
     };
     let readinessOperationName: string | undefined;
     deviceUtils.setDeviceImages("ios", [simulator]);
@@ -281,15 +311,22 @@ describe("platform device preparation tools", () => {
     });
 
     const result = await callTool("getApple", { udid: simulator.deviceId });
+    const listed = await callTool("listDevices", { platform: "ios" });
 
     expect(result).toMatchObject({
       platform: "ios",
       name: simulator.name,
       identity: { stableId: simulator.deviceId, deviceId: simulator.deviceId },
+      runtimeId: simulator.runtimeId,
+      deviceType: simulator.deviceType,
+      display: { width: 1206, height: 2622, density: 460 },
+      capabilityInventory: expect.any(Object),
     });
     expect(deviceUtils.getExecutedOperations()).toContain(
       `startDevice:${simulator.name}:${DEFAULT_DEVICE_READY_TIMEOUT_MS}`,
     );
+    expect(result.display).toEqual(listed.devices[0].display);
+    expect(result.capabilityInventory).toEqual(listed.devices[0].capabilityInventory);
     expect(readinessOperationName).toBe("getApple");
   });
 

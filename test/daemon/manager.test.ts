@@ -57,6 +57,27 @@ import {
   getCliSessionIdleTimeoutMs,
 } from "../../src/daemon/constants";
 
+function writeStopPidFile(
+  pidFilePath: string,
+  pid: number,
+  socketPath: string,
+  processGenerationToken = `stop-generation-${pid}`,
+  startedAt = 1,
+): void {
+  writeFileSync(
+    pidFilePath,
+    JSON.stringify({
+      pid,
+      socketPath,
+      port: 3000,
+      startedAt,
+      processStartedAt: startedAt,
+      processGenerationToken,
+      version: "test",
+    }),
+  );
+}
+
 describe("daemonBuildIdentityStatusLines", () => {
   const client: BuildIdentity = {
     entryScript: "/wt/dist/src/index.js",
@@ -858,6 +879,209 @@ describe("DaemonManager acceptance-session restart", () => {
       }
     }
   });
+
+  test("preserves replacement daemon files when acceptance restart observes PID reuse", async () => {
+    const originalSecret = process.env.AUTOMOBILE_DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET;
+    process.env.AUTOMOBILE_DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET =
+      "live-acceptance-startup-secret-123456";
+    const directory = mkdtempSync(join(tmpdir(), "acceptance-session-pid-reuse-"));
+    const pidFilePath = join(directory, "daemon.pid");
+    const socketPath = join(directory, "daemon.sock");
+    const pid = 1002;
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    writeStopPidFile(pidFilePath, pid, socketPath);
+    writeFileSync(socketPath, "old socket");
+    let records: DaemonProcessRecord[] = [
+      {
+        pid,
+        ppid: 1,
+        command: "bun /acceptance/dist/src/index.js --daemon-mode",
+        startedAt: 100,
+        processGenerationToken: "generation-1",
+      },
+    ];
+    const client = new FakeDaemonClient({});
+    const rpcSpy = spyOn(client, "callDaemonMethod").mockImplementation(async (method) => {
+      if (method === DAEMON_RESTART_ACCEPTANCE_SESSION_METHOD) {
+        return { accepted: true, restartToken: "acceptance-restart-1" };
+      }
+      expect(method).toBe(DAEMON_COMMIT_ACCEPTANCE_RESTART_METHOD);
+      return { committed: true };
+    });
+    const signaler = new FakeDaemonProcessSignaler((_targetPid, signal) => {
+      if (signal === "SIGKILL") {
+        records = [
+          {
+            pid,
+            ppid: 1,
+            command: "bun /replacement/dist/src/index.js --daemon-mode",
+            startedAt: 200,
+            processGenerationToken: "generation-2",
+          },
+        ];
+        writeStopPidFile(pidFilePath, pid, socketPath, "generation-2", 200);
+        writeFileSync(socketPath, "replacement socket");
+      }
+    });
+    const manager = new DaemonManager(
+      () => client,
+      undefined,
+      timer,
+      join(directory, "daemon.lock"),
+      pidFilePath,
+      socketPath,
+      {
+        findDaemonProcesses: () => records,
+        isProcessRunning: (targetPid) => targetPid === pid,
+      },
+      undefined,
+      undefined,
+      undefined,
+      signaler,
+    );
+    const statusSpy = spyOn(manager, "status").mockResolvedValue({
+      running: true,
+      pid,
+      startedAt: 100,
+      processGenerationToken: "generation-1",
+      version: "0.0.73",
+      buildId: "acceptance-build",
+      entryScript: "/acceptance/dist/src/index.js",
+      socketPath,
+    });
+    const startSpy = spyOn(
+      manager as unknown as { startUnlocked(options: { strictPort: boolean }): Promise<"started"> },
+      "startUnlocked",
+    ).mockResolvedValue("started");
+
+    try {
+      await expect(
+        manager.restartAcceptanceSession({
+          sessionUuid: "session-1",
+          platform: "ios",
+          stableDeviceId: "simulator-1",
+          controls: {
+            androidSiblingAvdName: "sibling",
+            androidDuplicateSerial: "emulator-5556",
+            iosSameNameSiblingUdid: "simulator-2",
+          },
+          expiresAt: 10_000,
+        }),
+      ).resolves.toBe("restarted");
+      expect(signaler.signals).toEqual([{ pid, signal: "SIGKILL" }]);
+      expect(existsSync(pidFilePath)).toBe(true);
+      expect(existsSync(socketPath)).toBe(true);
+      expect(readFileSync(socketPath, "utf8")).toBe("replacement socket");
+    } finally {
+      rpcSpy.mockRestore();
+      statusSpy.mockRestore();
+      startSpy.mockRestore();
+      rmSync(directory, { recursive: true, force: true });
+      if (originalSecret === undefined) {
+        delete process.env.AUTOMOBILE_DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET;
+      } else {
+        process.env.AUTOMOBILE_DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET = originalSecret;
+      }
+    }
+  });
+});
+
+describe("DaemonManager control-state recovery", () => {
+  test("preserves replacement daemon files when recovery observes PID reuse", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "daemon-manager-recovery-pid-reuse-"));
+    const pidFilePath = join(directory, "daemon.pid");
+    const socketPath = join(directory, "daemon.sock");
+    const pid = 4601;
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    writeStopPidFile(pidFilePath, pid, socketPath);
+    writeFileSync(socketPath, "old socket");
+    let records: DaemonProcessRecord[] = [
+      {
+        pid,
+        ppid: 1,
+        command: "bun /old/dist/src/index.js --daemon-mode",
+        startedAt: 1,
+        processGenerationToken: "old-generation",
+      },
+    ];
+    let replacementObserved = false;
+    const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
+      findDaemonProcesses: () => {
+        if (replacementObserved) {
+          return [];
+        }
+        return records;
+      },
+      isProcessRunning: (targetPid) => targetPid === pid,
+    };
+    const signaler = new FakeDaemonProcessSignaler((_targetPid, signal) => {
+      if (signal === "SIGTERM") {
+        records = [
+          {
+            pid,
+            ppid: 1,
+            command: "bun /replacement/dist/src/index.js --daemon-mode",
+            startedAt: 2,
+            processGenerationToken: "replacement-generation",
+          },
+        ];
+        writeStopPidFile(pidFilePath, pid, socketPath, "replacement-generation", 2);
+        writeFileSync(socketPath, "replacement socket");
+      }
+    });
+    const manager = new DaemonManager(
+      undefined,
+      undefined,
+      timer,
+      join(directory, "daemon.lock"),
+      pidFilePath,
+      socketPath,
+      {
+        findDaemonProcesses: (timeoutMs) => {
+          const found = processFinder.findDaemonProcesses(timeoutMs);
+          if (records[0]?.processGenerationToken === "replacement-generation") {
+            replacementObserved = true;
+          }
+          return found;
+        },
+        isProcessRunning: processFinder.isProcessRunning,
+      },
+      undefined,
+      undefined,
+      undefined,
+      signaler,
+      undefined,
+      undefined,
+      undefined,
+      new FakeDaemonPortAvailabilityChecker(),
+    );
+    const statusSpy = spyOn(manager, "status").mockResolvedValue({
+      running: true,
+      pid,
+      socketPath,
+      startedAt: 1,
+      processGenerationToken: "old-generation",
+      entryScript: "/old/dist/src/index.js",
+    });
+    const startSpy = spyOn(
+      manager as unknown as { startUnlocked(options: DaemonOptions): Promise<"started"> },
+      "startUnlocked",
+    ).mockResolvedValue("started");
+
+    try {
+      await expect(manager.recoverControlState({}, async () => false)).resolves.toBe("restarted");
+      expect(signaler.signals).toEqual([{ pid, signal: "SIGTERM" }]);
+      expect(existsSync(pidFilePath)).toBe(true);
+      expect(existsSync(socketPath)).toBe(true);
+      expect(readFileSync(socketPath, "utf8")).toBe("replacement socket");
+    } finally {
+      statusSpy.mockRestore();
+      startSpy.mockRestore();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("DaemonManager stop", () => {
@@ -896,21 +1120,6 @@ describe("DaemonManager stop", () => {
       undefined,
       undefined,
       processSignaler,
-    );
-  }
-
-  function writeStopPidFile(pidFilePath: string, pid: number, socketPath: string): void {
-    writeFileSync(
-      pidFilePath,
-      JSON.stringify({
-        pid,
-        socketPath,
-        port: 3000,
-        startedAt: 1,
-        processStartedAt: 1,
-        processGenerationToken: `stop-generation-${pid}`,
-        version: "test",
-      }),
     );
   }
 
@@ -4286,12 +4495,82 @@ describe("Daemon manager process detection", () => {
     const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
 
     try {
-      await expect(manager.restart()).rejects.toThrow("verified daemon PID was reused");
+      await expect(manager.restart()).rejects.toThrow("still running an AutoMobile daemon");
       expect(signaler.signals).toEqual([{ pid: candidatePid, signal: "SIGTERM" }]);
       expect(startSpy).not.toHaveBeenCalled();
     } finally {
       startSpy.mockRestore();
       statusSpy.mockRestore();
+    }
+  });
+
+  test("explicit restart waits generation-aware when a candidate PID is reused", async () => {
+    const fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+    const candidatePid = 454;
+    let records: DaemonProcessRecord[] = [
+      {
+        pid: candidatePid,
+        ppid: 1,
+        command: "bun /other-checkout/dist/src/index.js --daemon-mode",
+        startedAt: 1_000,
+        processGenerationToken: "original-generation",
+      },
+    ];
+    let replacementObserved = false;
+    const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
+      findDaemonProcesses: () => (replacementObserved ? [] : records),
+      isProcessRunning: (pid) => pid === candidatePid,
+    };
+    const signaler = new FakeDaemonProcessSignaler((_pid, signal) => {
+      if (signal === "SIGTERM") {
+        records = [
+          {
+            pid: candidatePid,
+            ppid: 1,
+            command: "bun /replacement/dist/src/index.js --daemon-mode",
+            startedAt: 2_000,
+            processGenerationToken: "replacement-generation",
+          },
+        ];
+      }
+    });
+    const manager = new DaemonManager(
+      undefined,
+      undefined,
+      fakeTimer,
+      undefined,
+      undefined,
+      undefined,
+      {
+        findDaemonProcesses: (timeoutMs) => {
+          const found = processFinder.findDaemonProcesses(timeoutMs);
+          if (records[0]?.processGenerationToken === "replacement-generation") {
+            replacementObserved = true;
+          }
+          return found;
+        },
+        isProcessRunning: processFinder.isProcessRunning,
+      },
+      undefined,
+      undefined,
+      undefined,
+      signaler,
+      undefined,
+      undefined,
+      undefined,
+      new FakeDaemonPortAvailabilityChecker(),
+    );
+    const statusSpy = spyOn(manager, "status").mockResolvedValue({ running: false });
+    const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
+
+    try {
+      await expect(manager.restart()).resolves.toBe("restarted");
+      expect(signaler.signals).toEqual([{ pid: candidatePid, signal: "SIGTERM" }]);
+      expect(startSpy).toHaveBeenCalledWith({ strictPort: true });
+    } finally {
+      statusSpy.mockRestore();
+      startSpy.mockRestore();
     }
   });
 

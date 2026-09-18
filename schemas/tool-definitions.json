@@ -3219,7 +3219,14 @@
                     ]
                   },
                   "locked": {
-                    "type": "boolean"
+                    "anyOf": [
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   },
                   "orientation": {
                     "anyOf": [
@@ -3347,8 +3354,15 @@
                     ]
                   },
                   "formFactor": {
-                    "type": "string",
-                    "enum": ["phone", "tablet", "foldable", "unknown"]
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": ["phone", "tablet", "foldable", "unknown"]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
                 },
                 "required": ["width", "height", "density", "formFactor"],
@@ -4071,7 +4085,14 @@
                     ]
                   },
                   "locked": {
-                    "type": "boolean"
+                    "anyOf": [
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   },
                   "orientation": {
                     "anyOf": [
@@ -4199,8 +4220,15 @@
                     ]
                   },
                   "formFactor": {
-                    "type": "string",
-                    "enum": ["phone", "tablet", "foldable", "unknown"]
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": ["phone", "tablet", "foldable", "unknown"]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
                 },
                 "required": ["width", "height", "density", "formFactor"],
@@ -9965,7 +9993,14 @@
                   ]
                 },
                 "locked": {
-                  "type": "boolean"
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 },
                 "orientation": {
                   "anyOf": [
@@ -10093,8 +10128,15 @@
                   ]
                 },
                 "formFactor": {
-                  "type": "string",
-                  "enum": ["phone", "tablet", "foldable", "unknown"]
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": ["phone", "tablet", "foldable", "unknown"]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 }
               },
               "required": ["width", "height", "density", "formFactor"],

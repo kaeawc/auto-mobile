@@ -74,7 +74,7 @@ export interface DeviceDescription {
       ownership: DeviceSessionOwnership | null;
     } | null;
     serviceStatus: DeviceServiceStatusLike | null;
-    locked: boolean;
+    locked: boolean | null;
     orientation: "portrait" | "landscape" | null;
   };
 }
@@ -100,12 +100,30 @@ interface AndroidProvenance {
 interface LegacySourceFacts {
   deviceId: string | null;
   isAvailable: boolean | null;
+  formFactor: FormFactor | null;
 }
 
 // The phase-1 canonical shape intentionally excludes configured-image transport identity and
 // availability. Retain those source facts privately long enough for legacyAliases() to reproduce
 // the pre-canonical wire values without polluting the canonical record.
 const legacySourceFacts = new WeakMap<DeviceDescription, LegacySourceFacts>();
+
+function setLegacySourceFacts(
+  description: DeviceDescription,
+  deviceId: string | null,
+  isAvailable: boolean | null,
+  formFactor: FormFactor | undefined,
+): void {
+  legacySourceFacts.set(description, {
+    deviceId,
+    isAvailable,
+    formFactor: formFactor ?? null,
+  });
+}
+
+function legacyFormFactor(description: DeviceDescription): FormFactor | null {
+  return legacySourceFacts.get(description)?.formFactor ?? null;
+}
 
 export type DeviceDescriptionInput =
   | {
@@ -197,7 +215,7 @@ function bootedImageFacts(
 function describeImage(
   image: ImageLike,
   androidProvenance?: AndroidProvenance,
-  locked = false,
+  locked: boolean | null = null,
   orientation?: "portrait" | "landscape",
 ): DeviceDescription {
   const platform = image.platform;
@@ -240,10 +258,12 @@ function describeImage(
       orientation: orientation ?? null,
     },
   };
-  legacySourceFacts.set(description, {
-    deviceId: image.deviceId ?? null,
-    isAvailable: platform === "ios" ? (image.isAvailable ?? null) : null,
-  });
+  setLegacySourceFacts(
+    description,
+    image.deviceId ?? null,
+    platform === "ios" ? (image.isAvailable ?? null) : null,
+    image.formFactor,
+  );
   return description;
 }
 
@@ -256,7 +276,7 @@ function describeBooted(
   session: DeviceSessionLike | undefined,
   deviceSessionUuid: string | undefined,
   serviceStatus: DeviceServiceStatusLike | undefined,
-  locked = false,
+  locked: boolean | null = null,
   orientation?: "portrait" | "landscape",
 ): DeviceDescription {
   const merged = mergeRuntimeFacts(device, admittedImage, admittedImageAuthoritative);
@@ -274,7 +294,7 @@ function describeBooted(
       : device.deviceId;
   const ownership = session ? (session.ownership ?? "owned") : null;
   const staticFacts = staticFactsFrom(merged);
-  return {
+  const description: DeviceDescription = {
     name: device.name,
     platform: device.platform,
     isVirtual,
@@ -303,6 +323,8 @@ function describeBooted(
       orientation: orientation ?? null,
     },
   };
+  setLegacySourceFacts(description, device.deviceId, null, merged.formFactor);
+  return description;
 }
 
 // oxlint-disable-next-line complexity -- each optional runtime fact follows documented precedence.
@@ -443,7 +465,7 @@ export interface LegacyAliases {
     ownership: DeviceSessionOwnership | null;
     poolStatus: DevicePoolStatus | null;
   };
-  display: { formFactor: FormFactor };
+  display: { formFactor: FormFactor | null };
   provenance: {
     android: {
       path: string | null;
@@ -495,7 +517,7 @@ export function legacyAliases(description: DeviceDescription): LegacyAliases {
       ownership,
       poolStatus: description.runtime.poolStatus,
     },
-    display: { formFactor: description.formFactor },
+    display: { formFactor: legacyFormFactor(description) },
     provenance:
       description.platform === "android"
         ? {
@@ -632,7 +654,7 @@ export const deviceDescriptionSchema = z.object({
       })
       .nullable(),
     serviceStatus: serviceStatusSchema,
-    locked: z.boolean(),
+    locked: z.boolean().nullable(),
     orientation: z.enum(["portrait", "landscape"]).nullable(),
     osVersion: nullableString,
     apiLevel: nullableNumber,
@@ -645,7 +667,7 @@ export const deviceDescriptionSchema = z.object({
     width: nullableNumber,
     height: nullableNumber,
     density: nullableNumber,
-    formFactor: formFactorSchema,
+    formFactor: formFactorSchema.nullable(),
   }),
   lifecycle: lifecycleSchema,
   readiness: readinessSchema,

@@ -1350,12 +1350,21 @@ describe("provisionDevice handler", () => {
     expect(readinessRequest).toMatchObject({
       device: { name: "phone-api-36-a", platform: "android" },
     });
+    const sessionId = result.sessionId;
+    const runtimeSessionUuid = result.device.runtime.session.sessionUuid;
     expect(result).toMatchObject({
       lifecycleState: "ready",
       readiness: { mode: "automation", status: "automation_ready" },
       sessionUuid: expect.any(String),
       sessionId: expect.any(String),
+      device: {
+        runtime: {
+          session: { sessionUuid: expect.any(String) },
+          readiness: { state: "ready" },
+        },
+      },
     });
+    expect(runtimeSessionUuid).toBe(sessionId);
   });
 
   test.each(["android", "ios"] as const)(

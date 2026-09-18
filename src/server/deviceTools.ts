@@ -1071,7 +1071,7 @@ function legacyListDevicesAliases(description: ListDevicesEntry) {
     // Deprecated aliases retain a platform-independent, always-present shape.
     apiLevel: description.apiLevel,
     osVersion: description.osVersion,
-    formFactor: description.formFactor,
+    formFactor: description.display.formFactor,
   };
 }
 
@@ -6272,7 +6272,6 @@ export function registerDeviceTools() {
   /** Deprecated listDeviceImages fields, preserving raw discovery state where required. */
   function legacyListDeviceImageAliases(description: ConfiguredImage, image: DeviceInfo) {
     const androidProvenance = description.provenance.android;
-    const iosProvenance = description.provenance.ios;
     return {
       // Deprecated alias for identity.stableId.
       stableId: description.identity.stableId,
@@ -6290,8 +6289,6 @@ export function registerDeviceTools() {
       state: image.state ?? null,
       // Deprecated alias for lifecycle.state.
       isAvailable: description.lifecycle.state !== "unavailable",
-      // Deprecated alias for provenance.ios.availabilityError.
-      availabilityError: iosProvenance?.availabilityError ?? null,
       // Deprecated alias for runtime.osVersion.
       iosVersion: legacyIosVersion(description),
       // Deprecated alias for runtime.deviceType.
@@ -8362,6 +8359,12 @@ export function registerDeviceTools() {
       provisioned,
       booted: booted?.device,
       pooled,
+      session: booted ? { sessionId: booted.sessionId } : undefined,
+      serviceStatus: booted
+        ? args.readiness === "automation"
+          ? { installed: true, enabled: true, running: true, isCompatible: true }
+          : { installed: true, enabled: true, running: false, isCompatible: true }
+        : undefined,
     });
     return {
       operationId: args.operationId,

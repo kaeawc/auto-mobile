@@ -313,6 +313,24 @@ describe("Device Image Resources with Fakes", () => {
       });
     });
 
+    test("preserves Android AVD discovery errors in image resource descriptions", async () => {
+      fakeDeviceUtils.setDeviceImages("android", [
+        { name: "Pixel_9", platform: "android", isRunning: false },
+      ]);
+      fakeAvdManager.setListDeviceImagesResponse([
+        { name: "Pixel_9", error: "AVD configuration is unreadable" },
+      ]);
+
+      const handler = createDeviceImageResourcesHandler({
+        deviceManager: fakeDeviceUtils,
+        avdManager: fakeAvdManager,
+        simctl: fakeSimCtl,
+      });
+      const result = await handler.getDeviceImagesForPlatforms(["android"]);
+
+      expect(result.images[0]?.availabilityError).toBe("AVD configuration is unreadable");
+    });
+
     test("merges installed-only Android system images into the complete catalog", async () => {
       fakeDeviceUtils.setDeviceImages("android", []);
       const availableImage = {

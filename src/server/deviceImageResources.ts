@@ -670,7 +670,6 @@ function toDeviceImageInfo(
 /** Deprecated image fields, preserving raw discovery state where required. */
 function legacyImageAliases(description: ConfiguredImage, image: StableConfiguredDeviceImage) {
   const androidProvenance = description.provenance.android;
-  const iosProvenance = description.provenance.ios;
   return {
     // Deprecated alias for identity.stableId.
     stableId: description.identity.stableId,
@@ -688,8 +687,6 @@ function legacyImageAliases(description: ConfiguredImage, image: StableConfigure
     state: image.state ?? null,
     // Deprecated alias for lifecycle.state.
     isAvailable: description.lifecycle.state !== "unavailable",
-    // Deprecated alias for provenance.ios.availabilityError.
-    availabilityError: iosProvenance?.availabilityError ?? null,
     // Deprecated alias for runtime.osVersion.
     iosVersion: legacyIosVersion(description),
     // Deprecated alias for runtime.deviceType.

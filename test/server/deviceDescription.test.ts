@@ -152,6 +152,7 @@ describe("device description projections", () => {
     expect(description.runtimeId).toBeNull();
     expect(description.display.density).toBeNull();
     expect(description.runtime.session).toBeNull();
+    expect(description.runtime.locked).toBeNull();
     expect(Object.keys(description).sort()).toEqual(Object.keys(projectionKeys).sort());
   });
 
@@ -486,7 +487,7 @@ describe("device description projections", () => {
       poolStatus: null,
       session: null,
       serviceStatus: null,
-      locked: false,
+      locked: null,
       orientation: null,
     });
   });
@@ -506,6 +507,27 @@ describe("device description projections", () => {
       formFactor: value,
     } as unknown as DeviceInfo;
     expect(describeDevice({ kind: "image", image }).formFactor).toBe(expected);
+  });
+
+  test("preserves raw unknown form factors for the legacy display alias", () => {
+    const description = describeDevice({
+      kind: "image",
+      image: { name: "Unknown form factor", platform: "android", isRunning: false },
+    });
+
+    expect(description.formFactor).toBe("unknown");
+    expect(projectConfiguredImage(description).display.formFactor).toBeNull();
+  });
+
+  test("preserves explicitly observed lock state", () => {
+    for (const locked of [true, false]) {
+      const description = describeDevice({
+        kind: "booted",
+        device: { name: "Pixel", platform: "android", deviceId: "emulator-5554" },
+        locked,
+      });
+      expect(description.runtime.locked).toBe(locked);
+    }
   });
 
   test("legacyAliases exposes the complete explicit shared alias set", () => {
@@ -530,7 +552,6 @@ describe("device description projections", () => {
           "error:",
           "state:",
           "isAvailable:",
-          "availabilityError:",
           "iosVersion:",
           "deviceType:",
           "legacyRuntimeId:",
@@ -551,7 +572,6 @@ describe("device description projections", () => {
           "error:",
           "state:",
           "isAvailable:",
-          "availabilityError:",
           "iosVersion:",
           "deviceType:",
           "legacyRuntimeId:",

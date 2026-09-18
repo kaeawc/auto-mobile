@@ -437,6 +437,10 @@ function linuxProcessState(pid: number, stat: string): string | undefined {
   return state;
 }
 
+function isConfirmedNoSuchProcessError(error: unknown): boolean {
+  return (error as NodeJS.ErrnoException)?.code === "ESRCH";
+}
+
 export function isProcessRunning(pid: number, options: ProcessLivenessOptions = {}): boolean {
   // `process.kill(pid, 0)` treats non-positive PIDs specially rather than
   // naming a single process: pid 0 signals the CURRENT process group and
@@ -455,10 +459,10 @@ export function isProcessRunning(pid: number, options: ProcessLivenessOptions = 
   try {
     signalProcess(pid);
   } catch (error) {
-    // ESRCH (no such process) or EPERM both mean the pid is not a live process
-    // we own; reporting "not running" is the safe, correct answer here.
+    // Keep this aligned with logPruner.ts's defaultIsProcessAlive: ESRCH is the
+    // only probe result that proves absence. Everything else is alive or uncertain.
     logSafeDebug(`src/daemon/daemonFiles.ts liveness check failed: ${error}`, error);
-    return false;
+    return !isConfirmedNoSuchProcessError(error);
   }
 
   if ((options.platform ?? process.platform) !== "linux") {

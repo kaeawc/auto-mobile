@@ -179,6 +179,11 @@ export interface DaemonProcessFinder {
 
 class DaemonGenerationExitedBeforeSignalError extends Error {}
 
+interface WaitForStopResult {
+  stopped: boolean;
+  replacedByOtherGeneration: boolean;
+}
+
 export const DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES = 16 * 1024 * 1024;
 
 /**
@@ -2302,6 +2307,27 @@ export class DaemonManager implements DaemonManagerLike {
     );
   }
 
+  private isConfirmedDifferentDaemonGeneration(
+    expected: DaemonProcessRecord,
+    candidate: DaemonProcessRecord,
+  ): boolean {
+    if (expected.pid !== candidate.pid) {
+      return false;
+    }
+    if (expected.processGenerationToken !== undefined) {
+      return (
+        candidate.processGenerationToken !== undefined &&
+        candidate.processGenerationToken !== expected.processGenerationToken
+      );
+    }
+    return (
+      expected.startedAt !== undefined &&
+      candidate.startedAt !== undefined &&
+      Math.abs(candidate.startedAt - expected.startedAt) >
+        DAEMON_PROCESS_BIRTH_IDENTITY_TOLERANCE_MS
+    );
+  }
+
   private assertRecoveryCandidateIsScoped(
     status: DaemonStatus,
     candidates: number[],
@@ -2437,9 +2463,10 @@ export class DaemonManager implements DaemonManagerLike {
       }
 
       // Wait for process to exit
-      const stopped = await this.waitForStop(pid, timeout);
+      let waitResult = await this.waitForStop(pid, timeout, expected);
+      let replacedByOtherGeneration = waitResult.replacedByOtherGeneration;
 
-      if (!stopped) {
+      if (!waitResult.stopped) {
         stderrLog(`Daemon did not stop gracefully, sending SIGKILL...`);
         this.signalVerifiedDaemonGeneration(
           expected,
@@ -2447,16 +2474,20 @@ export class DaemonManager implements DaemonManagerLike {
           `Daemon generation ${pid} exited before stop could force-stop it.`,
         );
 
-        if (!(await this.waitForStop(pid, DAEMON_FORCED_STOP_TIMEOUT_MS))) {
+        waitResult = await this.waitForStop(pid, DAEMON_FORCED_STOP_TIMEOUT_MS, expected);
+        replacedByOtherGeneration ||= waitResult.replacedByOtherGeneration;
+        if (!waitResult.stopped) {
           throw new Error(`Daemon process ${pid} did not exit after SIGKILL`);
         }
       }
 
-      await cleanupDaemonFiles({
-        pidFilePath: this.pidFilePath,
-        socketPaths: this.cleanupSocketPaths(status.socketPath),
-        expectedPid: pid,
-      });
+      if (!replacedByOtherGeneration) {
+        await cleanupDaemonFiles({
+          pidFilePath: this.pidFilePath,
+          socketPaths: this.cleanupSocketPaths(status.socketPath),
+          expectedPid: pid,
+        });
+      }
 
       stderrLog("Daemon stopped");
     } catch (error) {
@@ -2485,11 +2516,7 @@ export class DaemonManager implements DaemonManagerLike {
       stderrLog(error.message);
       return;
     }
-    // Process doesn't exist or we don't have permission.
-    if (
-      error instanceof Error &&
-      (error.message.includes("ESRCH") || error.message.includes("EPERM"))
-    ) {
+    if (error instanceof Error && error.message.includes("ESRCH")) {
       await cleanupDaemonFiles({
         pidFilePath: this.pidFilePath,
         socketPaths: this.cleanupSocketPaths(status.socketPath),
@@ -2497,6 +2524,13 @@ export class DaemonManager implements DaemonManagerLike {
       });
       stderrLog("Daemon was not running (cleaned up stale PID file)");
       return;
+    }
+    if (error instanceof Error && error.message.includes("EPERM")) {
+      throw new ActionableError(
+        `Cannot stop daemon process ${pid}: this user cannot signal it (EPERM). ` +
+          "Run stop as the process's owning user, or via launchctl/systemd if managed that way.",
+        { cause: error },
+      );
     }
     throw error;
   }
@@ -2883,7 +2917,7 @@ export class DaemonManager implements DaemonManagerLike {
       if (this.verifyAcceptanceGenerationBeforeSignal(status, generation)) {
         this.processSignaler.signal(status.pid!, "SIGKILL");
         signalSent = true;
-        if (!(await this.waitForStop(status.pid!, DAEMON_FORCED_STOP_TIMEOUT_MS))) {
+        if (!(await this.waitForStop(status.pid!, DAEMON_FORCED_STOP_TIMEOUT_MS)).stopped) {
           throw new ActionableError(
             `Acceptance-session restart daemon process ${status.pid} did not exit after SIGKILL.`,
           );
@@ -3222,10 +3256,12 @@ export class DaemonManager implements DaemonManagerLike {
     }
 
     if (
-      await this.waitForStop(
-        expected.pid,
-        this.stopWaitTimeout(DAEMON_SHUTDOWN_TIMEOUT_MS, recoveryDeadline),
-      )
+      (
+        await this.waitForStop(
+          expected.pid,
+          this.stopWaitTimeout(DAEMON_SHUTDOWN_TIMEOUT_MS, recoveryDeadline),
+        )
+      ).stopped
     ) {
       return;
     }
@@ -3248,10 +3284,12 @@ export class DaemonManager implements DaemonManagerLike {
     }
 
     if (
-      !(await this.waitForStop(
-        expected.pid,
-        this.stopWaitTimeout(DAEMON_FORCED_STOP_TIMEOUT_MS, recoveryDeadline),
-      ))
+      !(
+        await this.waitForStop(
+          expected.pid,
+          this.stopWaitTimeout(DAEMON_FORCED_STOP_TIMEOUT_MS, recoveryDeadline),
+        )
+      ).stopped
     ) {
       throw new ActionableError(
         `Verified daemon process ${expected.pid} did not exit after SIGKILL`,
@@ -3277,7 +3315,7 @@ export class DaemonManager implements DaemonManagerLike {
       );
     }
 
-    if (await this.waitForStop(expected.pid, DAEMON_SHUTDOWN_TIMEOUT_MS)) {
+    if ((await this.waitForStop(expected.pid, DAEMON_SHUTDOWN_TIMEOUT_MS)).stopped) {
       return;
     }
 
@@ -3299,7 +3337,7 @@ export class DaemonManager implements DaemonManagerLike {
       );
     }
 
-    if (!(await this.waitForStop(expected.pid, DAEMON_FORCED_STOP_TIMEOUT_MS))) {
+    if (!(await this.waitForStop(expected.pid, DAEMON_FORCED_STOP_TIMEOUT_MS)).stopped) {
       throw new ActionableError(
         `Verified daemon process ${expected.pid} did not exit after SIGKILL`,
       );
@@ -3877,18 +3915,52 @@ export class DaemonManager implements DaemonManagerLike {
   /**
    * Wait for daemon process to stop
    */
-  private async waitForStop(pid: number, timeout: number): Promise<boolean> {
-    const startTime = this.timer.now();
+  private async waitForStop(
+    pid: number,
+    timeout: number,
+    expectedGeneration?: DaemonProcessRecord,
+  ): Promise<WaitForStopResult> {
+    const deadline = this.timer.now() + timeout;
     const pollInterval = 100;
 
-    while (this.timer.now() - startTime < timeout) {
+    const replacementWasObserved = (): boolean => {
+      if (expectedGeneration === undefined) {
+        return false;
+      }
+      const scanBudget = this.remainingTime(deadline);
+      if (scanBudget <= 0) {
+        return false;
+      }
+      try {
+        return this.findLiveDaemonProcessRecords(scanBudget).some((candidate) =>
+          this.isConfirmedDifferentDaemonGeneration(expectedGeneration, candidate),
+        );
+      } catch (error) {
+        // Safe: pre-SIGKILL generation verification remains the authoritative signaling gate.
+        logger.debug(
+          `[DaemonManager] replacement scan failed during stop; treating this poll as inconclusive: ${errorMessage(error)}`,
+        );
+        return false;
+      }
+    };
+
+    while (this.remainingTime(deadline) > 0) {
       if (!this.isProcessRunning(pid)) {
-        return true;
+        return { stopped: true, replacedByOtherGeneration: false };
+      }
+      if (replacementWasObserved()) {
+        return { stopped: true, replacedByOtherGeneration: true };
       }
       await this.timer.sleep(pollInterval);
     }
 
-    return !this.isProcessRunning(pid);
+    if (!this.isProcessRunning(pid)) {
+      return { stopped: true, replacedByOtherGeneration: false };
+    }
+    if (replacementWasObserved()) {
+      return { stopped: true, replacedByOtherGeneration: true };
+    }
+    return { stopped: false, replacedByOtherGeneration: false };
   }
 
   /**

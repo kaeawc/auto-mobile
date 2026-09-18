@@ -78,14 +78,16 @@ describe("device session liveness writer fence migration", () => {
 
     const originalPrepare = bunDb.prepare;
     bunDb.prepare = ((query: string) => {
-      if (query.includes("DROP TRIGGER IF EXISTS clear_stale_device_session_liveness_contract")) {
-        throw new Error("injected trigger drop failure");
+      if (query.toLowerCase().includes('drop column "liveness_contract_generation"')) {
+        throw new Error("injected liveness generation column drop failure");
       }
       return originalPrepare.call(bunDb, query);
     }) as typeof bunDb.prepare;
 
     try {
-      await expect(livenessWriterFenceDown(db)).rejects.toThrow("injected trigger drop failure");
+      await expect(livenessWriterFenceDown(db)).rejects.toThrow(
+        "injected liveness generation column drop failure",
+      );
     } finally {
       bunDb.prepare = originalPrepare;
     }

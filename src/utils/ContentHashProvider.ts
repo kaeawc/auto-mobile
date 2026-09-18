@@ -10,6 +10,7 @@ import { DefaultChecksumCalculator, type ChecksumCalculator } from "./ChecksumCa
 import { defaultAdbClientFactory } from "./android-cmdline-tools/AdbClientFactory";
 import { toActionableError } from "../models/ActionableError";
 import { logger } from "./logger";
+import { shellQuote } from "./shellQuote";
 
 /**
  * Derives the content hash of an installed app from its installed bytes (#4984).
@@ -198,8 +199,8 @@ export class AndroidApkContentHasher implements AppContentHasher {
     // found" merged-stderr case) falls back to the pull path.
     let digests: string[] = [];
     try {
-      const script = apkPaths.map((p) => `sha256sum "${p}"`).join("; ");
-      const onDevice = await this.adb.executeCommand(`shell sh -c '${script}'`);
+      const script = apkPaths.map((p) => `sha256sum ${shellQuote(p)}`).join("; ");
+      const onDevice = await this.adb.executeCommand(`shell sh -c ${shellQuote(script)}`);
       digests = extractApkDigests(onDevice.stdout ?? "");
     } catch (error) {
       logger.debug(`[ContentHash] on-device sha256sum failed for ${packageId}: ${error}`);
@@ -216,7 +217,7 @@ export class AndroidApkContentHasher implements AppContentHasher {
   }
 
   private async resolveApkPaths(packageId: string): Promise<string[]> {
-    const listing = await this.adb.executeCommand(`shell pm path ${packageId}`);
+    const listing = await this.adb.executeCommand(`shell pm path ${shellQuote(packageId)}`);
     return parsePmPathOutput(listing.stdout ?? "");
   }
 

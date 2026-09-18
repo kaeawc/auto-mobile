@@ -10,6 +10,7 @@ import { isProcessAlreadyGoneError } from "../../utils/ios-cmdline-tools/iosProc
 import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { logger } from "../../utils/logger";
+import { shellQuote } from "../../utils/shellQuote";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { ListInstalledApps } from "../observe/ListInstalledApps";
 import { getIosInstalledAppBundleId } from "../../utils/ios-cmdline-tools/iosInstalledApp";
@@ -216,7 +217,9 @@ export class TerminateApp extends BaseVisualChange {
       });
 
       await perf.track("forceStop", async () => {
-        await this.adb.executeCommand(`shell am force-stop --user ${targetUserId} ${packageName}`);
+        await this.adb.executeCommand(
+          `shell am force-stop --user ${targetUserId} ${shellQuote(packageName)}`,
+        );
       });
 
       // The process is now gone, so any cached window/hierarchy record for it is

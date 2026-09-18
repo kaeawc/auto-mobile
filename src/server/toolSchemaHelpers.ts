@@ -51,6 +51,20 @@ export const appIdFieldAliases = [
   "application_id",
 ] as const;
 
+const APP_ID_PATTERN = /^[A-Za-z0-9._-]+$/;
+const APP_ID_MAX_LENGTH = 256;
+
+export const appIdSchema = z
+  .string()
+  .trim()
+  .refine(
+    (appId) => appId.length > 0 && appId.length <= APP_ID_MAX_LENGTH && APP_ID_PATTERN.test(appId),
+    {
+      error: (issue) =>
+        `appId must be a reverse-DNS identifier such as com.example.app; got: ${issue.input}`,
+    },
+  );
+
 export type FieldAliasMap = Record<string, readonly string[]>;
 
 export type JsonSchemaOverride = (jsonSchema: Record<string, unknown>) => void;
@@ -265,7 +279,34 @@ export function withFieldAliases<T extends z.ZodTypeAny>(schema: T, aliases: Fie
 }
 
 export function withAppIdAliases<T extends z.ZodTypeAny>(schema: T): T {
-  return withFieldAliases(schema, { appId: appIdFieldAliases });
+  const appIdAliases = withFieldAliases(schema, { appId: appIdFieldAliases }).superRefine(
+    (value, ctx) => {
+      if (!isPlainObject(value) || typeof value.appId !== "string") {
+        return;
+      }
+      const result = appIdSchema.safeParse(value.appId);
+      if (!result.success) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["appId"],
+          message:
+            "appId must be a reverse-DNS identifier such as com.example.app; " +
+            `got: ${value.appId}`,
+        });
+      }
+    },
+  );
+  return withJsonSchemaOverride(appIdAliases, applyAppIdJsonSchema) as T;
+}
+
+function applyAppIdJsonSchema(jsonSchema: Record<string, unknown>): void {
+  const appId = getJsonObject(getJsonObject(jsonSchema.properties)?.appId);
+  if (!appId) {
+    return;
+  }
+  appId.minLength = 1;
+  appId.maxLength = APP_ID_MAX_LENGTH;
+  appId.pattern = APP_ID_PATTERN.source;
 }
 
 function normalizeFieldAliases(input: unknown, aliases: FieldAliasMap): unknown {

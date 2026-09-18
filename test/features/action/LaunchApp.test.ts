@@ -55,7 +55,7 @@ describe("LaunchApp", () => {
       .some(
         (command) =>
           command.includes("shell am start --user 0") ||
-          command.includes(`shell monkey -p ${packageName}`),
+          command.includes(`shell monkey -p '${packageName}'`),
       );
 
   beforeEach(() => {
@@ -666,7 +666,7 @@ describe("LaunchApp", () => {
           controller.signal,
         ),
       ).rejects.toBe(deviceLoss);
-      expect(fakeAdb.wasCommandExecuted(`shell monkey -p ${packageName}`)).toBe(false);
+      expect(fakeAdb.wasCommandExecuted(`shell monkey -p '${packageName}'`)).toBe(false);
     } finally {
       executeSpy.mockRestore();
     }
@@ -682,7 +682,7 @@ describe("LaunchApp", () => {
       stdout: "Error: launcher intent unavailable",
       stderr: "",
     });
-    fakeAdb.setCommandError(`shell monkey -p ${packageName}`, new Error("monkey unavailable"));
+    fakeAdb.setCommandError(`shell monkey -p '${packageName}'`, new Error("monkey unavailable"));
     const getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
       async requestLaunchIntent() {
         controller.abort(deviceLoss);
@@ -821,7 +821,7 @@ describe("LaunchApp", () => {
   test("launches an Android app whose launcher activity is not MainActivity with the package resolver", async () => {
     fakeTimer.enableAutoAdvance();
     const settingsPackageName = "com.android.settings";
-    const resolverCommand = `shell am start --user 0 -a android.intent.action.MAIN -c android.intent.category.LAUNCHER ${settingsPackageName}`;
+    const resolverCommand = `shell am start --user 0 -a android.intent.action.MAIN -c android.intent.category.LAUNCHER '${settingsPackageName}'`;
 
     fakeAdb.setCommandResponse("shell pm list packages --user 0", {
       stdout: `package:${settingsPackageName}\n`,
@@ -851,7 +851,7 @@ describe("LaunchApp", () => {
             command.includes("android.intent.category.LAUNCHER"),
         ),
     ).toEqual([resolverCommand]);
-    expect(fakeAdb.wasCommandExecuted(`shell monkey -p ${settingsPackageName}`)).toBe(false);
+    expect(fakeAdb.wasCommandExecuted(`shell monkey -p '${settingsPackageName}'`)).toBe(false);
   });
 
   test("clears Android app data through the injected action before relaunch", async () => {
@@ -900,7 +900,7 @@ describe("LaunchApp", () => {
     expect(result.success).toBe(true);
     expect(clearCalls).toEqual([{ device, packageName, userId: 0 }]);
     expect(coldBootCalls).toEqual([]);
-    expect(fakeAdb.wasCommandExecuted(`shell monkey -p ${packageName} --user 0 1`)).toBe(true);
+    expect(fakeAdb.wasCommandExecuted(`shell monkey -p '${packageName}' --user 0 1`)).toBe(true);
   });
 
   test("clears Android app data through the injected action before relaunch when not running", async () => {
@@ -930,7 +930,7 @@ describe("LaunchApp", () => {
 
     expect(result.success).toBe(true);
     expect(clearCalls).toEqual([{ device, packageName, userId: 0 }]);
-    expect(fakeAdb.wasCommandExecuted(`shell monkey -p ${packageName} --user 0 1`)).toBe(true);
+    expect(fakeAdb.wasCommandExecuted(`shell monkey -p '${packageName}' --user 0 1`)).toBe(true);
   });
 
   test("cold boots Android through the injected action before relaunch", async () => {
@@ -981,7 +981,7 @@ describe("LaunchApp", () => {
         options: { skipObservation: true, userId: 0 },
       },
     ]);
-    expect(fakeAdb.wasCommandExecuted(`shell monkey -p ${packageName} --user 0 1`)).toBe(true);
+    expect(fakeAdb.wasCommandExecuted(`shell monkey -p '${packageName}' --user 0 1`)).toBe(true);
   });
 
   test("waits for foreground before returning observation", async () => {

@@ -308,7 +308,7 @@ describe("TerminateApp (Android)", () => {
       "1",
     );
     fakeAdb.setCommandResult("shell dumpsys activity processes", "3220:com.example.app/u0a123");
-    fakeAdb.setCommandResult("shell am force-stop --user 0 com.example.app", "");
+    fakeAdb.setCommandResult("shell am force-stop --user 0 'com.example.app'", "");
 
     const terminateApp = new TerminateApp(androidDevice, fakeAdb as any, null, fakeTimer);
     const result = await terminateApp.execute("com.example.app", { skipObservation: true });
@@ -332,14 +332,14 @@ describe("TerminateApp (Android)", () => {
       "shell dumpsys activity processes",
       "*APP* UID 1000 ProcessRecord{3dc154f 30779:com.android.settings/1000}",
     );
-    fakeAdb.setCommandResult("shell am force-stop --user 0 com.android.settings", "");
+    fakeAdb.setCommandResult("shell am force-stop --user 0 'com.android.settings'", "");
 
     const terminateApp = new TerminateApp(androidDevice, fakeAdb as any, null, fakeTimer);
     const result = await terminateApp.execute("com.android.settings", { skipObservation: true });
 
     expect(result.wasRunning).toBe(true);
     expect(result.wasForeground).toBe(true);
-    expect(fakeAdb.wasCommandExecuted("shell am force-stop --user 0 com.android.settings")).toBe(
+    expect(fakeAdb.wasCommandExecuted("shell am force-stop --user 0 'com.android.settings'")).toBe(
       true,
     );
   });
@@ -352,7 +352,7 @@ describe("TerminateApp (Android)", () => {
       "1",
     );
     fakeAdb.setCommandResult("shell dumpsys activity processes", "3220:com.example.app/u0a123");
-    fakeAdb.setCommandResult("shell am force-stop --user 0 com.example.app", "");
+    fakeAdb.setCommandResult("shell am force-stop --user 0 'com.example.app'", "");
 
     const invalidated: BootedDevice[] = [];
     const cacheInvalidator = {
@@ -721,7 +721,7 @@ describe("TerminateApp (observed interaction, perf-tree ownership)", () => {
       "1",
     );
     fakeAdb.setCommandResult("shell dumpsys activity processes", "3220:com.example.app/u0a123");
-    fakeAdb.setCommandResult("shell am force-stop --user 0 com.example.app", "");
+    fakeAdb.setCommandResult("shell am force-stop --user 0 'com.example.app'", "");
 
     const terminateApp = new TerminateApp(androidDevice, fakeAdb as any, null, fakeTimer);
     wireDeps(terminateApp);

@@ -20,10 +20,32 @@ describe("DatabaseInspector", () => {
 
   beforeEach(() => {
     fakeAdb = new FakeAdbClient();
+    const setCommandResult = fakeAdb.setCommandResult.bind(fakeAdb);
+    fakeAdb.setCommandResult = (command, stdout, stderr = "") => {
+      setCommandResult(
+        command.replace(/--uri (content:\/\/.+?) --method/, "--uri '$1' --method"),
+        stdout,
+        stderr,
+      );
+    };
     inspector = new DatabaseInspector(device, fakeAdb);
   });
 
   describe("listDatabases", () => {
+    test("keeps a hostile provider URI inside one device-shell word", async () => {
+      const hostileAppId = "com.example; input keyevent 3";
+      fakeAdb.setCommandResult(
+        `shell content call --uri content://${hostileAppId}.automobile.database --method listDatabases`,
+        `Bundle[{success=true, result={"databases":[]}}]`,
+      );
+
+      await inspector.listDatabases(hostileAppId);
+
+      expect(fakeAdb.getCommandCalls().map((call) => call.command)).toContain(
+        "shell content call --uri 'content://com.example; input keyevent 3.automobile.database' --method listDatabases",
+      );
+    });
+
     test("parses database list from ContentProvider response", async () => {
       const response = `Bundle[{success=true, result={"databases":[{"name":"app.db","path":"/data/data/com.example.app/databases/app.db"},{"name":"cache.db","path":"/data/data/com.example.app/databases/cache.db"}]}}]`;
 

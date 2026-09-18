@@ -7,6 +7,7 @@ import {
   canonicalizeDiscriminatedUnionJsonSchema,
   platformSchema,
   withFieldAliases,
+  withAppIdAliases,
 } from "../../src/server/toolSchemaHelpers";
 import { accessibilitySchema } from "../../src/server/accessibilityTools";
 import {
@@ -259,6 +260,47 @@ describe("withFieldAliases", () => {
     if (result.success) {
       expect(result.data.value).toBe(date);
     }
+  });
+});
+
+describe("app ID schemas", () => {
+  const appIdAliasSchema = withAppIdAliases(
+    z
+      .object({
+        appId: z.string(),
+      })
+      .strict(),
+  );
+
+  test.each([
+    "com.example; input keyevent 3",
+    "com.example.$(id)",
+    "com.example.`id`",
+    "com.example app",
+    "",
+    "   ",
+  ])("rejects shell-unsafe appId %p with actionable guidance", (appId) => {
+    const result = appIdAliasSchema.safeParse({ packageName: appId });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]?.message).toBe(
+        `appId must be a reverse-DNS identifier such as com.example.app; got: ${appId}`,
+      );
+    }
+  });
+
+  test.each(["com.example.app", "com.example-ios.App_2"])(
+    "accepts a cross-platform app ID %s",
+    (appId) => {
+      expect(appIdAliasSchema.safeParse({ appId }).success).toBe(true);
+    },
+  );
+
+  test("leaves iOS bundle identifiers accepted by platform-agnostic app tools", () => {
+    expect(
+      launchAppSchema.safeParse({ appId: "com.my-company.app", platform: "ios" }).success,
+    ).toBe(true);
   });
 });
 

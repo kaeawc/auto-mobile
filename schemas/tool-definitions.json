@@ -694,7 +694,9 @@
       "properties": {
         "appId": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
         },
         "platform": {
           "type": "string",
@@ -1952,7 +1954,10 @@
       "type": "object",
       "properties": {
         "appId": {
-          "type": "string"
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
         },
         "permissions": {
           "description": "Optional permissions or simulator privacy services to query",
@@ -1990,7 +1995,10 @@
       "type": "object",
       "properties": {
         "appId": {
-          "type": "string"
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
         },
         "adapterName": {
           "description": "Name the host app registered its DataStore adapter under (AutoMobile SDK)",
@@ -2028,7 +2036,10 @@
       "type": "object",
       "properties": {
         "appId": {
-          "type": "string"
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
         },
         "platform": {
           "type": "string",
@@ -2188,7 +2199,9 @@
       "properties": {
         "appId": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
         },
         "platform": {
           "type": "string",
@@ -2766,7 +2779,10 @@
       "type": "object",
       "properties": {
         "appId": {
-          "type": "string"
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
         },
         "clearAppData": {
           "description": "Clear app data before launch (default false)",
@@ -2854,7 +2870,10 @@
       "type": "object",
       "properties": {
         "appId": {
-          "type": "string"
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
         },
         "adapterName": {
           "description": "Name the host app registered its DataStore adapter under (AutoMobile SDK)",
@@ -8214,7 +8233,9 @@
         "appId": {
           "description": "Android target package name or iOS target bundle ID; Android defaults to the live foreground app when omitted",
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
         },
         "platform": {
           "type": "string",
@@ -9444,7 +9465,9 @@
         "appId": {
           "description": "App package name or bundle identifier",
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
         },
         "container": {
           "description": "Logical app container that holds the log files",
@@ -9492,7 +9515,9 @@
         "appId": {
           "description": "Required. The app whose Keychain/Keystore state to reset. NOTE: iOS Simulator only supports a device-wide reset and erases EVERY app's Keychain regardless of this value.",
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
         },
         "confirm": {
           "description": "Required. Must be true to proceed. On iOS Simulator this erases the Keychain for EVERY app on the target simulator, not just appId.",
@@ -10683,7 +10708,9 @@
       "properties": {
         "appId": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
         },
         "policyAccess": {
           "description": "Android: allow DND policy access",
@@ -11205,7 +11232,10 @@
       "type": "object",
       "properties": {
         "appId": {
-          "type": "string"
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
         },
         "databasePath": {
           "description": "Database path",
@@ -15032,7 +15062,10 @@
       "type": "object",
       "properties": {
         "appId": {
-          "type": "string"
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
         },
         "raw": {
           "description": "Return the raw view hierarchy instead of the compact skeleton",
@@ -15071,7 +15104,10 @@
       "type": "object",
       "properties": {
         "appId": {
-          "type": "string"
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
         },
         "keepData": {
           "description": "Keep app data after uninstall (Android only, default false)",

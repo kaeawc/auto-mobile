@@ -4,7 +4,7 @@ import {
   type ChildProcess,
   type SpawnOptions,
 } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync } from "node:fs";
 import { posix, win32 } from "node:path";
 import { ActionableError } from "../models";
 import { trackProcess, waitForExit, type TrackedChildProcess } from "../utils/ChildProcessTracker";
@@ -28,11 +28,18 @@ function normalizeEntryScriptPath(entryScript: string): string {
 
 type CheckoutProvenanceProbe = (checkoutRoot: string) => boolean;
 
+// A stalled remote mount remains an accepted residual risk because this scan is synchronous by
+// design and bounded by `ps`; only siblings of the active checkout are probed, limiting the blast radius.
 const defaultCheckoutProbe: CheckoutProvenanceProbe = (checkoutRoot) => {
   try {
-    const packageJson = JSON.parse(
-      readFileSync(posix.join(checkoutRoot, "package.json"), "utf8"),
-    ) as {
+    const packageJsonPath = checkoutRoot.includes("\\")
+      ? win32.join(checkoutRoot, "package.json")
+      : posix.join(checkoutRoot, "package.json");
+    const packageJsonStat = lstatSync(packageJsonPath);
+    if (!packageJsonStat.isFile() || packageJsonStat.size > 1_048_576) {
+      return false;
+    }
+    const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8")) as {
       name?: unknown;
     };
     return packageJson.name === "@kaeawc/auto-mobile";
@@ -46,6 +53,8 @@ const defaultCheckoutProbe: CheckoutProvenanceProbe = (checkoutRoot) => {
 function isSiblingJjWorkspaceEntryScript(
   normalizedEntryScript: string,
   normalizedActiveEntryScript: string | undefined,
+  entryScript: string,
+  activeEntryScript: string | undefined,
   probe: CheckoutProvenanceProbe,
 ): boolean {
   const distributionSuffix = "/dist/src/index.js";
@@ -58,9 +67,20 @@ function isSiblingJjWorkspaceEntryScript(
 
   const activeCheckoutRoot = normalizedActiveEntryScript.slice(0, -distributionSuffix.length);
   const candidateCheckoutRoot = normalizedEntryScript.slice(0, -distributionSuffix.length);
+  const nativeDistributionSuffix = entryScript.includes("\\")
+    ? "\\dist\\src\\index.js"
+    : distributionSuffix;
+  const nativeCandidateCheckoutRoot = entryScript.slice(0, -nativeDistributionSuffix.length);
+  const nativeActiveCheckoutRoot = activeEntryScript?.endsWith(nativeDistributionSuffix)
+    ? activeEntryScript.slice(0, -nativeDistributionSuffix.length)
+    : undefined;
   return (
     posix.dirname(candidateCheckoutRoot) === posix.dirname(activeCheckoutRoot) &&
-    probe(candidateCheckoutRoot)
+    nativeActiveCheckoutRoot !== undefined &&
+    (entryScript.includes("\\")
+      ? win32.dirname(nativeCandidateCheckoutRoot) === win32.dirname(nativeActiveCheckoutRoot)
+      : true) &&
+    probe(nativeCandidateCheckoutRoot)
   );
 }
 
@@ -105,7 +125,13 @@ export function isDaemonEntryScriptPath(
   // segment; with --daemon-mode checked by the caller, this is safe for #7242.
   return (
     (isDistributionEntryScript && normalized === normalizedActiveEntryScript) ||
-    isSiblingJjWorkspaceEntryScript(normalized, normalizedActiveEntryScript, probe) ||
+    isSiblingJjWorkspaceEntryScript(
+      normalized,
+      normalizedActiveEntryScript,
+      entryScript,
+      activeEntryScript,
+      probe,
+    ) ||
     (isDistributionEntryScript && /\/auto-mobile\/.*\/dist\/src\/index\.js$/.test(normalized)) ||
     /\/(?:@kaeawc\/)?auto-mobile\/dist\/src\/index\.js$/.test(normalized) ||
     /\/auto-mobile\/(?:[^/]+\/)?libexec\/dist\/src\/index\.js$/.test(normalized)

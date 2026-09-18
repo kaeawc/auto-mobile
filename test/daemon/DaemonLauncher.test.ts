@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test";
+import { execFileSync } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, win32 } from "node:path";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 import {
   DaemonLauncher,
@@ -145,6 +146,52 @@ describe("DaemonLauncher", () => {
     } finally {
       rmSync(checkoutRoot, { recursive: true, force: true });
     }
+  });
+
+  test("rejects a FIFO provenance package without blocking", () => {
+    if (process.platform === "win32") {
+      return;
+    }
+    const checkoutRoot = mkdtempSync(join(tmpdir(), "auto-mobile-provenance-fifo-"));
+    const activeEntryScript = join(dirname(checkoutRoot), "auto-mobile", "dist/src/index.js");
+    const entryScript = join(checkoutRoot, "dist/src/index.js");
+    const packageJsonPath = join(checkoutRoot, "package.json");
+
+    try {
+      execFileSync("mkfifo", [packageJsonPath]);
+      const startedAt = Date.now();
+      expect(isDaemonEntryScriptPath(entryScript, activeEntryScript)).toBe(false);
+      expect(Date.now() - startedAt).toBeLessThan(100);
+    } finally {
+      rmSync(checkoutRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("preserves native UNC and POSIX provenance roots", () => {
+    const probeRoots: string[] = [];
+    const probe = (checkoutRoot: string): boolean => {
+      probeRoots.push(checkoutRoot);
+      return true;
+    };
+    const activeUncEntryScript = "\\\\server\\share\\auto-mobile\\dist\\src\\index.js";
+    const candidateUncEntryScript = "\\\\server\\share\\feature\\dist\\src\\index.js";
+
+    expect(isDaemonEntryScriptPath(candidateUncEntryScript, activeUncEntryScript, probe)).toBe(
+      true,
+    );
+    expect(probeRoots).toEqual([
+      win32.dirname(win32.dirname(win32.dirname(candidateUncEntryScript))),
+    ]);
+
+    probeRoots.length = 0;
+    expect(
+      isDaemonEntryScriptPath(
+        "/workspace/feature/dist/src/index.js",
+        "/workspace/auto-mobile/dist/src/index.js",
+        probe,
+      ),
+    ).toBe(true);
+    expect(probeRoots).toEqual(["/workspace/feature"]);
   });
 
   test("uses POSIX PATH semantics for an injected Linux platform", () => {

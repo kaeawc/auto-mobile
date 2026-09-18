@@ -24,6 +24,16 @@ export interface LaunchAppResult extends BaseActionResult {
    */
   alreadyForeground?: boolean;
   /**
+   * The helper package currently hosting the foreground activity when launch
+   * verification succeeded from the expected task root (issue #7218).
+   */
+  foregroundActivityPackage?: string;
+  /**
+   * Present only when launch verification succeeded from the expected task root
+   * while a helper-package activity was on top (issue #7218).
+   */
+  verifiedBy?: "task-root";
+  /**
    * Explains a deliberately-omitted `observation` (issue #5872) so the launch
    * payload has a deterministic, self-describing shape: rather than silently
    * dropping the observation when it still reports the previous app, the response

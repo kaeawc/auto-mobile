@@ -127,12 +127,30 @@ describe("DevicePool", () => {
     }
   }
 
+  class RunningProbeCountingFakeDeviceManager extends FakeDeviceManager {
+    runningProbeCalls = 0;
+
+    override async isDeviceImageRunning(device: DeviceInfo): Promise<boolean> {
+      this.runningProbeCalls++;
+      return await super.isDeviceImageRunning(device);
+    }
+  }
+
   class TransportAwareFakeDeviceManager extends FakeDeviceManager {
-    discoveryOptions: Array<{ bypassAndroidDeviceListCache?: boolean } | undefined> = [];
+    discoveryOptions: Array<
+      | {
+          bypassAndroidDeviceListCache?: boolean;
+          bypassIosDeviceListCache?: boolean;
+        }
+      | undefined
+    > = [];
 
     override async getBootedDevicesDetailed(
       platform: SomePlatform,
-      options?: { bypassAndroidDeviceListCache?: boolean },
+      options?: {
+        bypassAndroidDeviceListCache?: boolean;
+        bypassIosDeviceListCache?: boolean;
+      },
     ) {
       this.discoveryOptions.push(options);
       return await super.getBootedDevicesDetailed(platform);
@@ -1683,7 +1701,7 @@ describe("DevicePool", () => {
       expect(secondEpoch?.deviceSessionUuid).not.toBe(firstEpoch.deviceSessionUuid);
       expect(registry.getByUuid(firstEpoch.deviceSessionUuid)).toBeUndefined();
       expect(transportAwareDeviceManager.discoveryOptions).toEqual([
-        { bypassAndroidDeviceListCache: true },
+        { bypassAndroidDeviceListCache: true, bypassIosDeviceListCache: true },
       ]);
     });
 
@@ -6593,6 +6611,29 @@ describe("DevicePool", () => {
       ]);
       expect(fakeDeviceManager.startDeviceTimeouts).toEqual([1000, 1000]);
       expect(devicePool.getTotalDeviceCount()).toBe(2);
+    });
+
+    test("selects a known-not-running image without a per-image running probe", async () => {
+      const image: DeviceInfo = {
+        name: "Pixel 8",
+        platform: "android",
+        isRunning: false,
+        deviceId: "emulator-5554",
+      };
+      const manager = new RunningProbeCountingFakeDeviceManager([image]);
+      devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        fakeAppsRepo,
+        manager,
+        new DefaultRetryExecutor(fakeTimer),
+      );
+
+      const assignments = await devicePool.assignMultipleDevices(["session-1"], 1_000, "android");
+
+      expect(assignments.get("session-1")).toBe("emulator-5554");
+      expect(manager.runningProbeCalls).toBe(0);
     });
 
     test("should boot a platform replacement when a stale pooled iOS simulator masked the shortage", async () => {

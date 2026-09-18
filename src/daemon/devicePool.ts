@@ -1112,6 +1112,7 @@ export class DevicePool {
       perf.startOperation("deviceDiscovery");
       const discovery = await this.deviceManager.getBootedDevicesDetailed("either", {
         bypassAndroidDeviceListCache: true,
+        bypassIosDeviceListCache: true,
       });
       perf.endOperation("deviceDiscovery");
       const bootedDevices = discovery.devices;
@@ -2479,6 +2480,7 @@ export class DevicePool {
 
     const bootedDevices = await this.deviceManager.getBootedDevices(platform);
     const bootedIds = new Set(bootedDevices.map((device) => device.deviceId));
+    const bootedNames = new Set(bootedDevices.map((device) => device.name));
     const candidates: DeviceInfo[] = [];
 
     for (const image of availableImages) {
@@ -2497,8 +2499,7 @@ export class DevicePool {
       if (image.deviceId && bootedIds.has(image.deviceId)) {
         continue;
       }
-      const running =
-        image.isRunning === true ? true : await this.deviceManager.isDeviceImageRunning(image);
+      const running = await this.isDeviceImageRunningForCandidate(image, bootedIds, bootedNames);
       if (running) {
         continue;
       }
@@ -2506,6 +2507,20 @@ export class DevicePool {
     }
 
     return candidates;
+  }
+
+  private async isDeviceImageRunningForCandidate(
+    image: DeviceInfo,
+    bootedIds: Set<string>,
+    bootedNames: Set<string>,
+  ): Promise<boolean> {
+    if (image.isRunning === true) {
+      return true;
+    }
+    if (image.isRunningStateKnown !== false) {
+      return image.deviceId ? bootedIds.has(image.deviceId) : bootedNames.has(image.name);
+    }
+    return await this.deviceManager.isDeviceImageRunning(image);
   }
 
   private isAutoStartSuppressed(image: DeviceInfo): boolean {

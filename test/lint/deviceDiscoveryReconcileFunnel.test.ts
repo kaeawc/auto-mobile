@@ -59,8 +59,10 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
       reason: "The pool IS the funnel: refresh sweep and assignment-time liveness check.",
     },
     "src/utils/deviceUtils.ts": {
-      calls: 8,
-      reason: "PlatformDeviceManager — declares and implements the discovery API.",
+      calls: 9,
+      reason:
+        "PlatformDeviceManager — declares and implements the discovery API. The ninth call is " +
+        "the checked Android liveness guard before startDevice launches an AVD; it reads no pooled identity.",
     },
     "src/utils/android-cmdline-tools/AndroidEmulatorClient.ts": {
       calls: 9,

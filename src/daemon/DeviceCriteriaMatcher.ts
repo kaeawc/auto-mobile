@@ -180,6 +180,9 @@ export class DeviceCriteriaMatcher {
     if (image.isAvailable === false) {
       return false;
     }
+    if (image.platform === "android" && image.isRunning === true) {
+      return false;
+    }
     if (image.platform === "android" && image.isRunningStateKnown === false) {
       return false;
     }

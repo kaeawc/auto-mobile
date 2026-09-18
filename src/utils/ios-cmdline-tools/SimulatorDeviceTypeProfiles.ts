@@ -59,8 +59,16 @@ export class SimCtlSimulatorDeviceTypeProfiles implements SimulatorDeviceTypePro
       return this.profiles.get(deviceTypeId) ?? null;
     }
 
+    let deviceTypes: AppleDeviceType[];
     try {
-      const deviceTypes = await this.getDeviceTypes(options.signal);
+      deviceTypes = await this.getDeviceTypes(options.signal);
+    } catch (error) {
+      // Device type listing is optional best-effort enrichment, so a transient failure is safe to swallow and retry.
+      logger.debug(`Failed to list iOS simulator device types: ${String(error)}`);
+      return null;
+    }
+
+    try {
       const deviceType = deviceTypes.find((candidate) => candidate.identifier === deviceTypeId);
       if (!deviceType?.bundlePath) {
         this.profiles.set(deviceTypeId, null);
@@ -95,7 +103,12 @@ export class SimCtlSimulatorDeviceTypeProfiles implements SimulatorDeviceTypePro
   }
 
   private getDeviceTypes(signal?: AbortSignal): Promise<AppleDeviceType[]> {
-    this.deviceTypes ??= this.deviceTypeLister.getDeviceTypes(signal);
+    if (!this.deviceTypes) {
+      this.deviceTypes = this.deviceTypeLister.getDeviceTypes(signal).catch((error) => {
+        this.deviceTypes = undefined;
+        throw error;
+      });
+    }
     return this.deviceTypes;
   }
 }

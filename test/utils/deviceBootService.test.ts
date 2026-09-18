@@ -6,6 +6,7 @@ import {
   DeviceBootService,
   DeviceBootTimeoutError,
   enrichBootedDevicesFromImages,
+  type DeviceBootServiceDependencies,
   type DeviceBootProgress,
 } from "../../src/utils/deviceBootService";
 import { FakeDeviceMatcher } from "../fakes/FakeDeviceMatcher";
@@ -37,6 +38,10 @@ function service(
   bootRecovery?: DeviceBootRecovery,
   timer?: Pick<Timer, "now" | "setTimeout" | "clearTimeout">,
   lifecycleCoordinator?: VirtualDeviceLifecycleCoordinator,
+  lifecycleOptions?: Pick<
+    DeviceBootServiceDependencies,
+    "allowExternalLeaseAdoptionRecheck" | "lifecycleLease"
+  >,
 ): DeviceBootService {
   return new DeviceBootService({
     deviceManager,
@@ -51,6 +56,7 @@ function service(
     bootRecovery,
     timer: timer ?? new FakeTimer(),
     lifecycleCoordinator,
+    ...lifecycleOptions,
   });
 }
 
@@ -1824,6 +1830,178 @@ describe("DeviceBootService", () => {
 
       expect(adoptedLaunch.source).toBe("booted");
       expect(starts).toBe(1);
+    });
+
+    it("adopts an in-flight launch after transport visibility reaches its post-lease re-check", async () => {
+      const devices = new FakeDeviceUtils();
+      const timer = new FakeTimer();
+      const lifecycleCoordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
+      const ownerBootService = service(devices, undefined, undefined, timer, lifecycleCoordinator);
+      const adopterBootService = service(
+        devices,
+        undefined,
+        undefined,
+        timer,
+        lifecycleCoordinator,
+      );
+      const ownerHandle = { kill: () => true, pid: 42 } as ChildProcess;
+      devices.setDeviceImages("android", [
+        { ...image, deviceId: "emulator-5554", isRunning: false },
+      ]);
+      devices.setMockChildProcess(image.name, ownerHandle);
+
+      let starts = 0;
+      const originalStartDevice = devices.startDevice.bind(devices);
+      devices.startDevice = async (device, timeoutMs) => {
+        starts++;
+        return await originalStartDevice(device, timeoutMs);
+      };
+
+      const originalWaitForDeviceReady = devices.waitForDeviceReady.bind(devices);
+      let releaseOwnerReadiness!: () => void;
+      const ownerReadinessGate = new Promise<void>((resolve) => {
+        releaseOwnerReadiness = resolve;
+      });
+      let signalOwnerReadiness!: () => void;
+      const ownerReadinessStarted = new Promise<void>((resolve) => {
+        signalOwnerReadiness = resolve;
+      });
+      devices.waitForDeviceReady = async (device, timeoutMs, handle, signal, options) => {
+        if (handle === ownerHandle) {
+          signalOwnerReadiness();
+          await ownerReadinessGate;
+        }
+        return await originalWaitForDeviceReady(device, timeoutMs, handle, signal, options);
+      };
+
+      const originalGetBootedDevicesDetailed = devices.getBootedDevicesDetailed.bind(devices);
+      let transportVisible = false;
+      let hiddenAdopterDiscoveries = 0;
+      devices.getBootedDevicesDetailed = async (platform, options) => {
+        if (
+          platform === "android" &&
+          options.bypassAndroidDeviceListCache === true &&
+          !transportVisible
+        ) {
+          hiddenAdopterDiscoveries++;
+          return {
+            devices: [],
+            succeededPlatforms: new Set(["android"]),
+            succeededSources: new Set(["android"]),
+            discoveryErrors: {},
+          };
+        }
+        return await originalGetBootedDevicesDetailed(platform, options);
+      };
+
+      const owner = ownerBootService.boot({ platform: "android", deviceId: image.name });
+      await ownerReadinessStarted;
+      const discoveriesBeforeAdopter = hiddenAdopterDiscoveries;
+      let adopterSettled = false;
+      const adopter = adopterBootService
+        .boot({ platform: "android", deviceId: image.name })
+        .finally(() => {
+          adopterSettled = true;
+        });
+
+      for (let attempt = 0; attempt < 20; attempt++) {
+        await Promise.resolve();
+      }
+      expect(hiddenAdopterDiscoveries - discoveriesBeforeAdopter).toBeGreaterThanOrEqual(2);
+      expect(adopterSettled).toBe(false);
+
+      releaseOwnerReadiness();
+      await owner;
+      transportVisible = true;
+      const adoptedLaunch = await adopter;
+
+      expect(starts).toBe(1);
+      expect(adoptedLaunch.source).toBe("booted");
+    });
+
+    it("re-checks a completed in-flight launch for an externally managed lease", async () => {
+      const devices = new FakeDeviceUtils();
+      const timer = new FakeTimer();
+      const lifecycleCoordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
+      const ownerLease: VirtualDeviceLifecycleLease = {
+        signal: new AbortController().signal,
+        identity: { kind: "selector", platform: "android", selector: "external-owner" },
+        bindCanonicalIdentity: async () => {},
+        transitionToTeardown: () => {},
+        release: () => {},
+      };
+      let releaseAdopterBinding!: () => void;
+      const adopterBindingGate = new Promise<void>((resolve) => {
+        releaseAdopterBinding = resolve;
+      });
+      let signalAdopterBinding!: () => void;
+      const adopterBindingStarted = new Promise<void>((resolve) => {
+        signalAdopterBinding = resolve;
+      });
+      const adopterLease: VirtualDeviceLifecycleLease = {
+        signal: new AbortController().signal,
+        identity: { kind: "selector", platform: "android", selector: "external-adopter" },
+        bindCanonicalIdentity: async () => {
+          signalAdopterBinding();
+          await adopterBindingGate;
+        },
+        transitionToTeardown: () => {},
+        release: () => {},
+      };
+      const ownerBootService = service(devices, undefined, undefined, timer, lifecycleCoordinator, {
+        lifecycleLease: ownerLease,
+        allowExternalLeaseAdoptionRecheck: true,
+      });
+      const adopterBootService = service(
+        devices,
+        undefined,
+        undefined,
+        timer,
+        lifecycleCoordinator,
+        { lifecycleLease: adopterLease, allowExternalLeaseAdoptionRecheck: true },
+      );
+      const ownerHandle = { kill: () => true, pid: 42 } as ChildProcess;
+      devices.setDeviceImages("android", [
+        { ...image, deviceId: "emulator-5554", isRunning: false },
+      ]);
+      devices.setMockChildProcess(image.name, ownerHandle);
+
+      let starts = 0;
+      const originalStartDevice = devices.startDevice.bind(devices);
+      devices.startDevice = async (device, timeoutMs) => {
+        starts++;
+        return await originalStartDevice(device, timeoutMs);
+      };
+
+      const originalWaitForDeviceReady = devices.waitForDeviceReady.bind(devices);
+      let releaseOwnerReadiness!: () => void;
+      const ownerReadinessGate = new Promise<void>((resolve) => {
+        releaseOwnerReadiness = resolve;
+      });
+      let signalOwnerReadiness!: () => void;
+      const ownerReadinessStarted = new Promise<void>((resolve) => {
+        signalOwnerReadiness = resolve;
+      });
+      devices.waitForDeviceReady = async (device, timeoutMs, handle, signal, options) => {
+        if (handle === ownerHandle) {
+          signalOwnerReadiness();
+          await ownerReadinessGate;
+        }
+        return await originalWaitForDeviceReady(device, timeoutMs, handle, signal, options);
+      };
+
+      const owner = ownerBootService.boot({ platform: "android", deviceId: image.name });
+      await ownerReadinessStarted;
+      const adopter = adopterBootService.boot({ platform: "android", deviceId: image.name });
+      await adopterBindingStarted;
+
+      releaseOwnerReadiness();
+      await owner;
+      releaseAdopterBinding();
+      const adoptedLaunch = await adopter;
+
+      expect(starts).toBe(1);
+      expect(adoptedLaunch.source).toBe("booted");
     });
 
     it("cold-boots after an in-flight owner's boot fails", async () => {

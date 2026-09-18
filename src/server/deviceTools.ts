@@ -7800,6 +7800,7 @@ export function registerDeviceTools() {
       matchingStrategy: DEVICE_POOL_MATCHING,
       timer: deps.timer,
       lifecycleLease,
+      allowExternalLeaseAdoptionRecheck: true,
       lifecycleCoordinator: deps.lifecycleCoordinator,
     });
     let boot: DeviceBootResult | undefined;
@@ -8412,6 +8413,7 @@ export function registerDeviceTools() {
       matchingStrategy: DEVICE_POOL_MATCHING,
       timer: deps.timer,
       lifecycleLease,
+      allowExternalLeaseAdoptionRecheck: true,
       lifecycleCoordinator: deps.lifecycleCoordinator,
     });
     perf.startOperation("bootDevice");
@@ -8572,7 +8574,7 @@ export function registerDeviceTools() {
                   await bindBootedDeviceSession(
                     state.boot!.device,
                     args,
-                    state.boot!.source === "cold-boot" && !readinessResult.preservedSessionId
+                    state.boot!.sourceImage && !readinessResult.preservedSessionId
                       ? sourceImage
                       : undefined,
                     // Recovery already registered this process and its output tail.

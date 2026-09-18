@@ -260,6 +260,8 @@ export interface DeviceBootServiceDependencies {
   lifecycleCoordinator?: VirtualDeviceLifecycleCoordinator;
   /** Existing lease held by a caller through later session/readiness work. */
   lifecycleLease?: VirtualDeviceLifecycleLease;
+  /** Opts an injected daemon lease into post-bind re-checks; deviceTools' reservation races tolerate shared cold boots. */
+  allowExternalLeaseAdoptionRecheck?: boolean;
 }
 
 interface BootDeadlineContext {
@@ -675,17 +677,26 @@ export class DeviceBootService {
     // caller explicitly wants a cold boot: uniqueness and completeness must
     // be proven before starting a same-name AVD. An in-flight transport is
     // likewise kept on the shared-launch path rather than adopted here.
-    if (!running) {
-      return this.bootImage(image, context, progress, false);
-    }
     const hasInFlightColdBoot =
       image.platform === "android" &&
       hasInFlightAndroidColdBoot(this.lifecycleCoordinator, image.name);
     const explicitlyRequestedColdBoot = preferRunning === false && !image.isRunning;
-    // An injected lease extends through callers' later session/readiness
-    // handoff. Only a lease this service owns is released by boot() after its
-    // readiness settles, which is the boundary this post-lease re-check needs.
-    const canAdoptAfterLease = context.ownsLifecycleLease && !explicitlyRequestedColdBoot;
+    // The daemon's externally managed lease is held through its later
+    // reservation/session handoff, which tolerates this shared-cold-boot
+    // re-check via throwIfFreshStartAlreadyBound in deviceTools.
+    const canAdoptAfterLease =
+      (context.ownsLifecycleLease ||
+        this.dependencies.allowExternalLeaseAdoptionRecheck === true) &&
+      !explicitlyRequestedColdBoot;
+    if (!running) {
+      return this.bootImage(
+        image,
+        context,
+        progress,
+        false,
+        hasInFlightColdBoot && canAdoptAfterLease,
+      );
+    }
     if (hasInFlightColdBoot || explicitlyRequestedColdBoot) {
       // An in-flight owner may finish while this selector reservation waits to
       // bind the AVD's stable identity. Re-check only that case after binding:
@@ -826,7 +837,13 @@ export class DeviceBootService {
       );
       const running = findUniqueBootedAndroidDeviceByName(booted, image.name);
       if (running && !hasInFlightAndroidColdBoot(this.lifecycleCoordinator, image.name)) {
-        return this.waitForRunningDevice(enrichBootedDevice(running, image), context, progress);
+        const adopted = await this.waitForRunningDevice(
+          enrichBootedDevice(running, image),
+          context,
+          progress,
+        );
+        // Another launch for this AVD may have just finished, so preserve the shared-boot marker for downstream session-conflict detection.
+        return { ...adopted, sourceImage: image };
       }
     }
     // This outer marker spans every bootImageOnce invocation made by this

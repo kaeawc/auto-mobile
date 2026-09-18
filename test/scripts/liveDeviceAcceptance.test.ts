@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { createHmac } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import { chmodSync, existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -10,6 +10,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import {
   assertMode,
   defaultWriteEvidence,
+  ensureFreshAcceptanceDaemon,
   parseArgs,
   recordOwnershipManifest,
   runAcceptanceMatrix,
@@ -710,6 +711,58 @@ function assertReadinessImmediatelyFollowsSuccess(harness: Harness, sessionUuid:
 }
 
 describe("live device acceptance harness", () => {
+  test("restarts a reachable stale daemon and logs the previous-run diagnosis", async () => {
+    const commands: string[][] = [];
+    const errors: string[] = [];
+    const capability = "acceptance-capability-for-test";
+    await ensureFreshAcceptanceDaemon({
+      createDaemonClient: async () => ({
+        callDaemonMethod: async () => ({ acceptanceCapabilityFingerprint: "stale000" }),
+        close: async () => {},
+      }),
+      spawnCli: async (command) => {
+        commands.push(command);
+        return { stdout: "" };
+      },
+      build: { entryScript: "/test/index.js", buildId: "test" },
+      expectedCapability: capability,
+      signal: new AbortController().signal,
+      logger: { debug: () => {}, error: (message) => errors.push(message) },
+    });
+    expect(commands).toEqual([[process.execPath, "/test/index.js", "--daemon", "restart"]]);
+    expect(errors[0]).toContain("stale daemon from a previous acceptance run");
+  });
+
+  test("does not restart a matching daemon or an unavailable daemon", async () => {
+    const capability = "acceptance-capability-for-test";
+    const commands: string[][] = [];
+    const expected = createHash("sha256").update(capability).digest("hex").slice(0, 8);
+    const common = {
+      spawnCli: async (command: string[]) => {
+        commands.push(command);
+        return { stdout: "" };
+      },
+      build: { entryScript: "/test/index.js", buildId: "test" },
+      expectedCapability: capability,
+      signal: new AbortController().signal,
+      logger: { debug: () => {}, error: () => {} },
+    };
+    await ensureFreshAcceptanceDaemon({
+      ...common,
+      createDaemonClient: async () => ({
+        callDaemonMethod: async () => ({ acceptanceCapabilityFingerprint: expected }),
+        close: async () => {},
+      }),
+    });
+    await ensureFreshAcceptanceDaemon({
+      ...common,
+      createDaemonClient: async () => {
+        throw new Error("socket unavailable");
+      },
+    });
+    expect(commands).toHaveLength(0);
+  });
+
   test("rejects the unsupported recovery scenario before any device mutation", async () => {
     expect(() => parseArgs(["--platform", "android", "--scenario", "recovery"])).toThrow(
       "--scenario must be full; recovery is not implemented",
@@ -1189,7 +1242,7 @@ describe("live device acceptance harness", () => {
     await expect(runAcceptanceMatrix(iosArgs, harness.dependencies)).rejects.toThrow(
       "Exact iOS UUID target and same-name sibling must remain the only two named controls",
     );
-    expect(harness.calls.filter((call) => call.name === "killDevice")).toHaveLength(0);
+    expect(harness.calls.filter((call) => call.name === "killDevice")).toHaveLength(1);
     expect(
       harness.calls.some((call) =>
         JSON.stringify(call.arguments).includes("00000000-0000-0000-0000-000000000002"),
@@ -1516,6 +1569,86 @@ describe("live device acceptance harness", () => {
     expect(harness.events).toContain("close:provision");
     expect(harness.evidence[0]).not.toContain("provision-1");
     expect(harness.evidence[0]).not.toContain("release failed");
+  });
+
+  test("does not kill the provisioned target again after confirmed deletion", async () => {
+    const harness = createHarness();
+
+    await runAcceptanceMatrix(androidArgs, harness.dependencies);
+
+    const deletion = harness.calls.findIndex((call) => call.name === "deleteDevice");
+    expect(deletion).toBeGreaterThanOrEqual(0);
+    expect(harness.calls.slice(deletion + 1).some((call) => call.name === "killDevice")).toBe(
+      false,
+    );
+  });
+
+  test("uses the cleanup budget to kill a provisioned target after the work budget expires", async () => {
+    const harness = createHarness();
+    const createMcpClient = harness.dependencies.createMcpClient!;
+    let exhaustedWorkBudget = false;
+    harness.dependencies.createMcpClient = async (owner, signal, presentationOrder) => {
+      const client = await createMcpClient(owner, signal, presentationOrder);
+      return {
+        async callTool(name, arguments_, callSignal) {
+          if (
+            !exhaustedWorkBudget &&
+            name === "getDeviceState" &&
+            arguments_.sessionUuid === "start-5"
+          ) {
+            exhaustedWorkBudget = true;
+            harness.timer.advanceTime(6_750);
+          }
+          return await client.callTool(name, arguments_, callSignal);
+        },
+        async close() {
+          await client.close();
+        },
+      };
+    };
+
+    await expect(runAcceptanceMatrix(androidArgs, harness.dependencies)).rejects.toThrow(
+      "Acceptance",
+    );
+
+    expect(
+      harness.calls.some(
+        (call) =>
+          call.owner === "provision" &&
+          call.name === "killDevice" &&
+          (call.arguments.device as Record<string, unknown>).deviceId === "emulator-5560",
+      ),
+    ).toBe(true);
+  });
+
+  test("cleans up the reacquired Android target when a later readiness check fails", async () => {
+    const harness = createHarness({ failObserveFor: "start-5" });
+
+    await expect(runAcceptanceMatrix(androidArgs, harness.dependencies)).rejects.toThrow(
+      "observe failed for start-5",
+    );
+
+    expect(
+      harness.calls.find((call) => call.owner === "provision" && call.name === "killDevice")
+        ?.arguments,
+    ).toEqual({
+      device: { name: "Pixel_8_API_35", deviceId: "emulator-5560", platform: "android" },
+    });
+  });
+
+  test("tracks the provisioned target before readiness can fail", async () => {
+    const harness = createHarness({ failObserveFor: "provision-1" });
+
+    await expect(runAcceptanceMatrix(androidArgs, harness.dependencies)).rejects.toThrow(
+      "observe failed for provision-1",
+    );
+
+    expect(
+      harness.calls.find((call) => call.owner === "provision" && call.name === "killDevice")
+        ?.arguments,
+    ).toEqual({
+      device: { name: "Pixel_8_API_35", deviceId: "emulator-5556" },
+    });
   });
 
   test("attempts every daemon and MCP close even when close cleanup fails", async () => {

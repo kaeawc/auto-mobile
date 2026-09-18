@@ -651,6 +651,7 @@ export class Daemon {
             setImmediate(() => process.kill(process.pid, "SIGTERM"));
           },
           liveAcceptanceStartupSecret: this.liveAcceptanceStartupSecret,
+          acceptanceDiscoveryCapability: this.acceptanceDiscoveryCapability,
         },
         this.idGenerator,
         // A hand-launched daemon (no startup lock) must refuse to unlink a live
@@ -2418,6 +2419,7 @@ export class Daemon {
               setImmediate(() => process.kill(process.pid, "SIGTERM"));
             },
             liveAcceptanceStartupSecret: this.liveAcceptanceStartupSecret,
+            acceptanceDiscoveryCapability: this.acceptanceDiscoveryCapability,
           },
           this.idGenerator,
           // Recovery reuses the same ownership evidence as initial startup. A

@@ -282,6 +282,8 @@ export interface DaemonStatus {
   buildId?: string;
   /** Whether this daemon generation is currently executing provisionDevice. */
   activeProvisioning?: boolean;
+  /** Non-secret fingerprint of the acceptance discovery capability bound at startup. */
+  acceptanceCapabilityFingerprint?: string | null;
   /** Options used to start the daemon */
   options?: DaemonOptions;
 }

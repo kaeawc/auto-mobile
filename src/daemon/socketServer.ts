@@ -1,4 +1,5 @@
 import { createServer, Server as NetServer, Socket } from "node:net";
+import { createHash } from "node:crypto";
 import { unlink } from "node:fs/promises";
 import { existsSync, statSync } from "node:fs";
 import path from "node:path";
@@ -601,6 +602,7 @@ export class UnixSocketServer {
   private readonly startupOptions: DaemonOptions;
   private readonly onRestartAccepted?: () => void;
   private readonly liveAcceptanceStartupSecret: string | undefined;
+  private readonly acceptanceDiscoveryCapability: string | undefined;
   private maintenanceAdmissionToken: string | undefined;
   private maintenanceAdmissionExpiresAt: number | undefined;
   private maintenanceAdmissionExpiryTimer: NodeJS.Timeout | undefined;
@@ -683,6 +685,7 @@ export class UnixSocketServer {
       enforce?: boolean;
       onRestartAccepted?: () => void;
       liveAcceptanceStartupSecret?: string;
+      acceptanceDiscoveryCapability?: string;
       sessionToolSelectionService?: Pick<SessionToolSelectionService, "isEnabled" | "setEnabled">;
     } = {},
     idGenerator: IdGenerator = defaultIdGenerator,
@@ -722,6 +725,7 @@ export class UnixSocketServer {
     this.startupOptions = snapshotDaemonOptions(handshakeConfig.startupOptions);
     this.onRestartAccepted = handshakeConfig.onRestartAccepted;
     this.liveAcceptanceStartupSecret = handshakeConfig.liveAcceptanceStartupSecret;
+    this.acceptanceDiscoveryCapability = handshakeConfig.acceptanceDiscoveryCapability;
     logger.info(`UnixSocketServer initialized with endpoint: "${mcpEndpoint}"`);
     if (!mcpEndpoint) {
       logger.error("ERROR: mcpEndpoint is empty or undefined!");
@@ -3568,6 +3572,12 @@ export class UnixSocketServer {
           pid: process.pid,
           buildId: this.daemonIdentity.build.buildId,
           entryScript: this.daemonIdentity.build.entryScript,
+          acceptanceCapabilityFingerprint: this.acceptanceDiscoveryCapability
+            ? createHash("sha256")
+                .update(this.acceptanceDiscoveryCapability)
+                .digest("hex")
+                .slice(0, 8)
+            : null,
           startedAt: this.identityStartedAt,
           options: this.startupOptions,
           ...(this.processGenerationToken === undefined

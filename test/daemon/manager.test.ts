@@ -1175,6 +1175,123 @@ describe("DaemonManager stop", () => {
     }
   });
 
+  test("does not treat a missing generation token as a replacement during graceful stop", async () => {
+    const directory = mkdtempSync(
+      join(tmpdir(), "u3-daemon-stop-eperm-r3-missing-generation-token-"),
+    );
+    const pidFilePath = join(directory, "daemon.pid");
+    const socketPath = join(directory, "daemon.sock");
+    const pid = 42464;
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    writeStopPidFile(pidFilePath, pid, socketPath);
+    writeFileSync(socketPath, "daemon socket");
+    let processAlive = true;
+    const signaler = new FakeDaemonProcessSignaler((_targetPid, signal) => {
+      if (signal === "SIGKILL") {
+        processAlive = false;
+      }
+    });
+    const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
+      findDaemonProcesses: () => [
+        {
+          pid,
+          ppid: 1,
+          command: "bun /repo/src/index.ts --daemon-mode",
+          startedAt: 1,
+          ...(timer.now() === 0 && signaler.signals.some(({ signal }) => signal === "SIGTERM")
+            ? {}
+            : { processGenerationToken: `stop-generation-${pid}` }),
+        },
+      ],
+      isProcessRunning: (targetPid) => targetPid === pid && processAlive,
+    };
+    const manager = new DaemonManager(
+      undefined,
+      undefined,
+      timer,
+      join(directory, "daemon.lock"),
+      pidFilePath,
+      socketPath,
+      processFinder,
+      undefined,
+      undefined,
+      undefined,
+      signaler,
+    );
+
+    try {
+      await expect(manager.stop(100)).resolves.toBeUndefined();
+
+      expect(signaler.signals).toEqual([
+        { pid, signal: "SIGTERM" },
+        { pid, signal: "SIGKILL" },
+      ]);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("treats a graceful-stop generation scan failure as inconclusive", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "u3-daemon-stop-eperm-r3-scan-timeout-"));
+    const pidFilePath = join(directory, "daemon.pid");
+    const socketPath = join(directory, "daemon.sock");
+    const pid = 42465;
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    writeStopPidFile(pidFilePath, pid, socketPath);
+    writeFileSync(socketPath, "daemon socket");
+    let processAlive = true;
+    let scanCalls = 0;
+    const signaler = new FakeDaemonProcessSignaler((_targetPid, signal) => {
+      if (signal === "SIGKILL") {
+        processAlive = false;
+      }
+    });
+    const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
+      findDaemonProcesses: () => {
+        scanCalls++;
+        if (scanCalls === 2) {
+          throw new Error("scan timed out");
+        }
+        return [
+          {
+            pid,
+            ppid: 1,
+            command: "bun /repo/src/index.ts --daemon-mode",
+            startedAt: 1,
+            processGenerationToken: `stop-generation-${pid}`,
+          },
+        ];
+      },
+      isProcessRunning: (targetPid) => targetPid === pid && processAlive,
+    };
+    const manager = new DaemonManager(
+      undefined,
+      undefined,
+      timer,
+      join(directory, "daemon.lock"),
+      pidFilePath,
+      socketPath,
+      processFinder,
+      undefined,
+      undefined,
+      undefined,
+      signaler,
+    );
+
+    try {
+      await expect(manager.stop(100)).resolves.toBeUndefined();
+
+      expect(signaler.signals).toEqual([
+        { pid, signal: "SIGTERM" },
+        { pid, signal: "SIGKILL" },
+      ]);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   test("bounds generation scans by the remaining stop timeout", async () => {
     const directory = mkdtempSync(join(tmpdir(), "u3-daemon-stop-eperm-r2-stop-scan-budget-"));
     const pidFilePath = join(directory, "daemon.pid");

@@ -2307,6 +2307,27 @@ export class DaemonManager implements DaemonManagerLike {
     );
   }
 
+  private isConfirmedDifferentDaemonGeneration(
+    expected: DaemonProcessRecord,
+    candidate: DaemonProcessRecord,
+  ): boolean {
+    if (expected.pid !== candidate.pid) {
+      return false;
+    }
+    if (expected.processGenerationToken !== undefined) {
+      return (
+        candidate.processGenerationToken !== undefined &&
+        candidate.processGenerationToken !== expected.processGenerationToken
+      );
+    }
+    return (
+      expected.startedAt !== undefined &&
+      candidate.startedAt !== undefined &&
+      Math.abs(candidate.startedAt - expected.startedAt) >
+        DAEMON_PROCESS_BIRTH_IDENTITY_TOLERANCE_MS
+    );
+  }
+
   private assertRecoveryCandidateIsScoped(
     status: DaemonStatus,
     candidates: number[],
@@ -3910,11 +3931,17 @@ export class DaemonManager implements DaemonManagerLike {
       if (scanBudget <= 0) {
         return false;
       }
-      return this.findLiveDaemonProcessRecords(scanBudget).some(
-        (candidate) =>
-          candidate.pid === pid &&
-          !this.matchesObservedDaemonGeneration(expectedGeneration, candidate),
-      );
+      try {
+        return this.findLiveDaemonProcessRecords(scanBudget).some((candidate) =>
+          this.isConfirmedDifferentDaemonGeneration(expectedGeneration, candidate),
+        );
+      } catch (error) {
+        // Safe: pre-SIGKILL generation verification remains the authoritative signaling gate.
+        logger.debug(
+          `[DaemonManager] replacement scan failed during stop; treating this poll as inconclusive: ${errorMessage(error)}`,
+        );
+        return false;
+      }
     };
 
     while (this.remainingTime(deadline) > 0) {

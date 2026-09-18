@@ -4755,6 +4755,48 @@ describe("DaemonMcpProxy", () => {
       }
     });
 
+    test("routes surviving owned observation resources after the latest binding is released", async () => {
+      const fakeClient = new FakeDaemonClient({
+        daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+        toolResultFor: (toolName) =>
+          toolName === "getAndroid"
+            ? mintingResult("session-android")
+            : mintingResult("session-ios"),
+        resourceResult: { contents: [{ uri: "x", blob: "x" }] },
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => fakeClient,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        await proxy.callTool("getAndroid", {});
+        await proxy.callTool("getApple", {});
+        fakeClient.emitNotification(SESSION_RELEASED_NOTIFICATION_METHOD, "session-ios");
+
+        await proxy.readResource("automobile:observation/session/session-android/latest");
+        await proxy.readResource(
+          "automobile:observation/session/session-android/latest/screenshot",
+        );
+
+        expect(fakeClient.readResourceParams).toEqual([
+          { sessionUuid: "session-android" },
+          { sessionUuid: "session-android" },
+        ]);
+        await expect(
+          proxy.readResource("automobile:observation/session/session-ios/latest"),
+        ).rejects.toThrow(/released/i);
+        await expect(
+          proxy.readResource("automobile:observation/session/session-ios/latest/screenshot"),
+        ).rejects.toThrow(/released/i);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
     test("routes concurrent fresh screenshot reads each to their owning session", async () => {
       // AC2: concurrent reads during/after acquisition (concurrent MCP init) must
       // each carry their own owner session, independent of ordering or a delayed

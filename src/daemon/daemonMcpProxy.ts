@@ -3346,17 +3346,21 @@ export class DaemonMcpProxy {
   // owning session, so the just-established owner is authorized instead of denied
   // with SCREENSHOT_ACCESS_DENIED (issue #5663). Returns undefined for any other
   // URI, a foreign/unowned session (which must keep forwarding this connection's
-  // own binding and stay denied), or the current binding / a fenced connection
-  // (both already handled by withBoundSessionUuid and the released-session path).
+  // own binding and stay denied), or the current binding (already handled by
+  // withBoundSessionUuid). A terminally fenced connection can still forward to a
+  // different live owned session through canUseSurvivingSession.
   private freshScreenshotOwnerForwardParams(uri: string): Record<string, unknown> | undefined {
-    if (this.terminalBoundSession) {
-      return undefined;
-    }
     const uriSessionUuid = sessionScopedObservationUriSessionUuid(uri);
     if (
       !uriSessionUuid ||
       uriSessionUuid === this.boundSessionUuid ||
       !this.ownedDeviceSessions.has(uriSessionUuid)
+    ) {
+      return undefined;
+    }
+    if (
+      this.terminalBoundSession &&
+      !this.canUseSurvivingSession({ sessionUuid: uriSessionUuid }, false)
     ) {
       return undefined;
     }
@@ -3376,18 +3380,22 @@ export class DaemonMcpProxy {
     // fresh-screenshot exemption, by contrast, must still target the released
     // session it belongs to.
     const isToolOutput = isToolOutputResourceUri(uri);
+    const isReleasedSessionScreenshot =
+      terminalSessionUuid !== undefined && isFreshSessionScreenshotUri(uri, terminalSessionUuid);
+    const ownerForwardedParams = isToolOutput
+      ? undefined
+      : this.freshScreenshotOwnerForwardParams(uri);
     const allowReleasedSession =
-      isToolOutput ||
-      (terminalSessionUuid !== undefined && isFreshSessionScreenshotUri(uri, terminalSessionUuid));
+      isToolOutput || isReleasedSessionScreenshot || ownerForwardedParams !== undefined;
     const forwardedParams = isToolOutput
       ? {}
-      : allowReleasedSession
+      : isReleasedSessionScreenshot
         ? {
             sessionUuid: terminalSessionUuid,
             [DAEMON_BOUND_SESSION_PARAM]: terminalSessionUuid,
             [DAEMON_RELEASED_SESSION_PARAM]: terminalSessionUuid,
           }
-        : (this.freshScreenshotOwnerForwardParams(uri) ?? this.withBoundSessionUuid({}));
+        : (ownerForwardedParams ?? this.withBoundSessionUuid({}));
     return await this.withRecoverableReconnect(
       () => this.client!.readResource(uri, forwardedParams),
       this.sessionUuidFromArgs(forwardedParams),

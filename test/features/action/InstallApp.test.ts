@@ -3,7 +3,11 @@ import {
   InstallApp as ProductionInstallApp,
   type DeviceAppInstaller,
 } from "../../../src/features/action/InstallApp";
-import { createPerformanceTracker, type TimingEntry } from "../../../src/utils/PerformanceTracker";
+import {
+  createPerformanceTracker,
+  setDebugPerfEnabled,
+  type TimingEntry,
+} from "../../../src/utils/PerformanceTracker";
 import type { BootedDevice, ExecResult } from "../../../src/models";
 import { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
@@ -147,6 +151,7 @@ describe("InstallApp", () => {
   });
 
   afterEach(() => {
+    setDebugPerfEnabled(false);
     if (originalLaunchCwd === undefined) {
       delete process.env[DAEMON_LAUNCH_CWD_ENV];
     } else {
@@ -200,6 +205,57 @@ describe("InstallApp", () => {
     const installEntry = timings[0];
     expect(installEntry.name).toBe("installApp");
     expect((installEntry.children as TimingEntry[]).length).toBeGreaterThan(0);
+  });
+
+  test("returns the install timing tree when --debug-perf is enabled", async () => {
+    const apkPath = "/tmp/app-debug.apk";
+    setDebugPerfEnabled(true);
+    fakeLocator.setTool({ tool: "aapt2", path: "/sdk/build-tools/35.0.0/aapt2" });
+    fakeHost.setCommandResponse(
+      "aapt2",
+      createExecResult("package: name='com.example.app' versionCode='1'"),
+    );
+    fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 0x13, running: true }]);
+    fakeAdb.setCommandResponse(
+      "shell pm list packages --user 0 -f 'com.example.app'",
+      createExecResult("0"),
+    );
+    fakeAdb.setCommandResponse(`install --user 0 -r "${apkPath}"`, createExecResult("Success"));
+
+    const result = await new InstallApp(device, fakeAdbFactory, fakeHost, fakeLocator, () =>
+      createPerformanceTracker(true, fakeTimer),
+    ).execute(apkPath);
+
+    expect(result.perfTiming).toBeDefined();
+    expect((result.perfTiming as TimingEntry[])[0]?.name).toBe("installApp");
+  });
+
+  test("omits perfTiming when --debug-perf is disabled", async () => {
+    const apkPath = "/tmp/app-debug.apk";
+    fakeLocator.setTool({ tool: "aapt2", path: "/sdk/build-tools/35.0.0/aapt2" });
+    fakeHost.setCommandResponse(
+      "aapt2",
+      createExecResult("package: name='com.example.app' versionCode='1'"),
+    );
+    fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 0x13, running: true }]);
+    fakeAdb.setCommandResponse(
+      "shell pm list packages --user 0 -f 'com.example.app'",
+      createExecResult("0"),
+    );
+    fakeAdb.setCommandResponse(`install --user 0 -r "${apkPath}"`, createExecResult("Success"));
+
+    const result = await new InstallApp(device, fakeAdbFactory, fakeHost, fakeLocator, () =>
+      createPerformanceTracker(false, fakeTimer),
+    ).execute(apkPath);
+
+    expect(result).toEqual({
+      success: true,
+      upgrade: false,
+      userId: 0,
+      packageName: "com.example.app",
+      warning: undefined,
+    });
+    expect("perfTiming" in result).toBe(false);
   });
 
   test("marks the Android installed-apps cache stale after a successful install", async () => {

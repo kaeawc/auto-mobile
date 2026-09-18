@@ -1,4 +1,5 @@
 import { errorMessage } from "../describeUnknownError";
+import { trackAmbient } from "../PerfContext";
 import { promises as fs } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -425,7 +426,12 @@ export class DeviceAppManager implements DeviceUrlLauncher {
   }
 
   private execute(file: string, args: string[]): Promise<ExecResult> {
-    return this.deps.execute(file, args);
+    // One span per command, named by stable subcommand tokens so app
+    // identifiers, UDIDs, and artifact paths do not fragment timing aggregation.
+    const spanArgs = args[0] === "simctl" ? args.slice(0, 2) : args.slice(0, 4);
+    return trackAmbient(`${file} ${spanArgs.join(" ")}`.trimEnd(), () =>
+      this.deps.execute(file, args),
+    );
   }
 
   private getLaunchPrecondition(): LaunchPreconditionResult {

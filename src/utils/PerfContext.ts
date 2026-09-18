@@ -52,6 +52,39 @@ export function runWithPerfTracker<T>(
 }
 
 /**
+ * Whether a request has already established an ambient performance tracker.
+ *
+ * Lifecycle actions use this before creating their own ambient scope so nested
+ * app-tool work continues to attribute command spans to the request that owns
+ * the timing tree instead of redirecting them to a short-lived inner tracker.
+ */
+export function hasAmbientPerfTracker(): boolean {
+  return perfContext.getStore() !== undefined;
+}
+
+/**
+ * Run app-tool work with `tracker` ambient only when no request tracker is
+ * already in scope.
+ *
+ * InstallApp, UninstallApp, LaunchApp, and TerminateApp each create a tracker
+ * for their explicit phase spans. When called directly, making that tracker
+ * ambient lets its adb/simctl/devicectl command spans join the same tree that
+ * callers later read with `getTimings()`. When one of those actions runs inside
+ * another lifecycle scope, replacing the existing ambient tracker would detach
+ * command spans from its owning request, so the nested callback instead keeps
+ * the established tracker unchanged.
+ */
+export function runWithNestedPerfTracker<T>(
+  tracker: PerformanceTracker,
+  fn: () => Promise<T>,
+): Promise<T> {
+  if (hasAmbientPerfTracker()) {
+    return fn();
+  }
+  return runWithPerfTracker(ambientPerfFor(tracker), fn);
+}
+
+/**
  * The tracker currently in scope, or a shared no-op when none is established.
  * Never returns undefined, so callers can record unconditionally.
  */

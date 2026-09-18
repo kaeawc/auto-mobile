@@ -1,4 +1,4 @@
-import { expect, describe, test, beforeEach } from "bun:test";
+import { expect, describe, test, beforeEach, afterEach } from "bun:test";
 import {
   UninstallApp as ProductionUninstallApp,
   DeviceAppUninstaller,
@@ -10,6 +10,7 @@ import { FakeInstalledAppsRepository } from "../../fakes/FakeInstalledAppsReposi
 import { AdbCommandTimeoutError } from "../../../src/utils/android-cmdline-tools/AdbClient";
 import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
 import { resetDbWriteBarrier } from "../../../src/db/dbWriteBarrier";
+import { setDebugPerfEnabled, type TimingEntry } from "../../../src/utils/PerformanceTracker";
 
 // Keep action tests isolated from the production SQLite repository even when a
 // scenario does not need to inspect stale-marker rows explicitly.
@@ -56,6 +57,10 @@ describe("UninstallApp (iOS simulator)", () => {
     fakeUninstaller = new FakeDeviceAppUninstaller();
   });
 
+  afterEach(() => {
+    setDebugPerfEnabled(false);
+  });
+
   test("uninstalls installed simulator app", async () => {
     fakeSimctl.setInstalledApps([{ bundleId: "com.example.app" }]);
 
@@ -94,6 +99,40 @@ describe("UninstallApp (iOS simulator)", () => {
     expect(result.success).toBe(true);
     expect(result.wasInstalled).toBe(false);
     expect(fakeUninstaller.calls).toHaveLength(0);
+  });
+
+  test("returns the uninstall timing tree when --debug-perf is enabled", async () => {
+    setDebugPerfEnabled(true);
+    fakeSimctl.setInstalledApps([]);
+
+    const result = await new UninstallApp(
+      iosSimDevice,
+      nullAdbFactory,
+      fakeSimctl,
+      fakeUninstaller,
+    ).execute("com.example.app");
+
+    expect(result.perfTiming).toBeDefined();
+    expect((result.perfTiming as TimingEntry[])[0]?.name).toBe("uninstallApp");
+  });
+
+  test("omits perfTiming when --debug-perf is disabled", async () => {
+    fakeSimctl.setInstalledApps([]);
+
+    const result = await new UninstallApp(
+      iosSimDevice,
+      nullAdbFactory,
+      fakeSimctl,
+      fakeUninstaller,
+    ).execute("com.example.app");
+
+    expect(result).toEqual({
+      success: true,
+      packageName: "com.example.app",
+      wasInstalled: false,
+      keepData: false,
+    });
+    expect("perfTiming" in result).toBe(false);
   });
 
   test("returns failure when uninstall does not remove app", async () => {

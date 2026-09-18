@@ -13,6 +13,7 @@ import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { DeviceAppManager } from "../../utils/ios-cmdline-tools/DeviceAppManager";
 import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
+import { hasAmbientPerfTracker, runWithNestedPerfTracker } from "../../utils/PerfContext";
 import { logger } from "../../utils/logger";
 import { shellQuote } from "../../utils/shellQuote";
 import { IOSCtrlProxyClient } from "../observe/ios";
@@ -68,8 +69,28 @@ export class UninstallApp {
     userId?: number,
     signal?: AbortSignal,
   ): Promise<UninstallAppResult> {
-    throwIfAborted(signal);
     const perf = createGlobalPerformanceTracker();
+    const nested = hasAmbientPerfTracker();
+    const result = await runWithNestedPerfTracker(perf, () =>
+      this.executeInner(packageName, keepData, userId, perf, signal),
+    );
+    if (!nested && perf.isEnabled()) {
+      const timings = perf.getTimings();
+      if (timings) {
+        return { ...result, perfTiming: timings };
+      }
+    }
+    return result;
+  }
+
+  private async executeInner(
+    packageName: string,
+    keepData: boolean,
+    userId: number | undefined,
+    perf: ReturnType<typeof createGlobalPerformanceTracker>,
+    signal?: AbortSignal,
+  ): Promise<UninstallAppResult> {
+    throwIfAborted(signal);
     perf.serial("uninstallApp");
 
     // Validate package name

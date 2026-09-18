@@ -13,6 +13,9 @@ import {
 import { isProcessAlreadyGoneError } from "../../../src/utils/ios-cmdline-tools/iosProcessErrors";
 import { hashAppBundle } from "../../../src/utils/ios-cmdline-tools/AppBundleHasher";
 import { ActionableError } from "../../../src/models/ActionableError";
+import { DefaultPerformanceTracker, type TimingEntry } from "../../../src/utils/PerformanceTracker";
+import { runWithPerfTracker } from "../../../src/utils/PerfContext";
+import { FakeTimer } from "../../fakes/FakeTimer";
 
 const bundleId = "dev.jasonpearson.automobile.ctrlproxy";
 
@@ -51,6 +54,72 @@ const parseArgValue = (command: string, arg: string): string | null => {
 };
 
 describe("DeviceAppManager", () => {
+  const createCommandSpanManager = (commands: string[]) =>
+    new DeviceAppManager({
+      platform: () => "darwin",
+      execute: async (file, args) => {
+        commands.push([file, ...args].join(" "));
+        return {
+          stdout: "",
+          stderr: "",
+          toString: () => "",
+          trim: () => "",
+          includes: () => false,
+        };
+      },
+      readFile: async () => "",
+      mkdtemp: async () => "/tmp/device-app-manager",
+      rm: async () => undefined,
+      readdir: async () => [],
+      stat: async () => ({ isDirectory: () => false }),
+      tmpdir,
+      logger: createFakeLogger(),
+    });
+
+  test("records a devicectl command span into the ambient tracker", async () => {
+    const commands: string[] = [];
+    const tracker = new DefaultPerformanceTracker(new FakeTimer());
+    const manager = createCommandSpanManager(commands);
+
+    await runWithPerfTracker(tracker, () => manager.installApp("device-udid", "/tmp/App.ipa"));
+
+    expect(commands).toEqual([
+      "xcrun devicectl device install app --device device-udid /tmp/App.ipa --quiet",
+    ]);
+    expect((tracker.getTimings() as TimingEntry[]).map((entry) => entry.name)).toContain(
+      "xcrun devicectl device install app",
+    );
+  });
+
+  test("uses a stable span name for simulator uninstall commands", async () => {
+    const commands: string[] = [];
+    const tracker = new DefaultPerformanceTracker(new FakeTimer());
+    const manager = createCommandSpanManager(commands);
+
+    await runWithPerfTracker(tracker, async () => {
+      await manager.uninstallApp("simulator-udid-1", "com.example.first", true);
+      await manager.uninstallApp("simulator-udid-2", "com.example.second", true);
+    });
+
+    expect(commands).toEqual([
+      "xcrun simctl uninstall simulator-udid-1 com.example.first",
+      "xcrun simctl uninstall simulator-udid-2 com.example.second",
+    ]);
+    expect((tracker.getTimings() as TimingEntry[]).map((entry) => entry.name)).toEqual([
+      "xcrun simctl uninstall",
+      "xcrun simctl uninstall",
+    ]);
+  });
+
+  test("runs a devicectl command without an ambient tracker", async () => {
+    const commands: string[] = [];
+    await createCommandSpanManager(commands).uninstallApp("device-udid", "com.example.app");
+
+    expect(commands).toEqual([
+      "xcrun devicectl device uninstall app --device device-udid com.example.app --quiet",
+    ]);
+  });
+
   test("computes installed app hash via devicectl copy", async () => {
     const workDir = await createTempDir();
     const fixtureApp = await createFixtureApp(workDir);

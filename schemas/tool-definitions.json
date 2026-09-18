@@ -3251,6 +3251,126 @@
                     "type": "null"
                   }
                 ]
+              },
+              "stableId": {
+                "type": "string"
+              },
+              "deviceId": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "path": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "target": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "basedOn": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "error": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "state": {
+                "type": "string",
+                "enum": ["configured", "booting", "booted", "shutting-down", "unavailable"]
+              },
+              "isAvailable": {
+                "type": "boolean"
+              },
+              "availabilityError": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "iosVersion": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "deviceType": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "legacyRuntimeId": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "model": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "architecture": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               }
             },
             "required": [
@@ -3263,7 +3383,21 @@
               "display",
               "lifecycle",
               "provenance",
-              "capabilityInventory"
+              "capabilityInventory",
+              "stableId",
+              "deviceId",
+              "path",
+              "target",
+              "basedOn",
+              "error",
+              "state",
+              "isAvailable",
+              "availabilityError",
+              "iosVersion",
+              "deviceType",
+              "legacyRuntimeId",
+              "model",
+              "architecture"
             ],
             "additionalProperties": false
           }
@@ -3511,6 +3645,36 @@
                 },
                 "required": ["sessionUuid"],
                 "additionalProperties": false
+              },
+              "apiLevel": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "osVersion": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "formFactor": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               }
             },
             "required": [
@@ -8908,7 +9072,7 @@
             }
           },
           "required": ["identity", "name", "platform", "runtime", "display", "lifecycle"],
-          "additionalProperties": false
+          "additionalProperties": {}
         },
         "requestedSpec": {},
         "resolvedSpec": {},

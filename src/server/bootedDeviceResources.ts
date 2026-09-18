@@ -118,8 +118,20 @@ export interface ServiceStatusDiagnostic {
 interface BootedDeviceInfo extends DeviceDescription {
   /** Compatibility alias mirroring identity.deviceId for the desktop decoder. */
   deviceId: string;
+  /** Compatibility alias mirroring identity.deviceSessionUuid when present. */
+  deviceSessionUuid?: string;
   /** Compatibility alias mirroring lifecycle.state for the desktop decoder. */
-  status: "booted";
+  status: DeviceDescription["lifecycle"]["state"];
+  /** Compatibility alias mirroring lifecycle.state. */
+  lifecycleState: DeviceDescription["lifecycle"]["state"];
+  /** The former runtime string now mirrors runtime.osVersion. */
+  legacyRuntimeVersion: string | null;
+  /** Compatibility alias mirroring display.formFactor. */
+  formFactor: string | null;
+  /** Compatibility alias mirroring session.poolStatus when present. */
+  poolStatus?: DeviceDescription["session"]["poolStatus"];
+  /** Compatibility alias mirroring session.sessionUuid when present. */
+  assignedSession?: string;
   recoveryEligibility: DeviceRecoveryEligibility | null;
   serviceStatus: DeviceServiceStatus | null;
   /**
@@ -342,6 +354,32 @@ async function getDeviceLockStates(): Promise<ResourceContent> {
   };
 }
 
+/** Deprecated booted-resource fields, each derived from the canonical description. */
+function legacyAliases(description: DeviceDescription) {
+  return {
+    // Deprecated alias for identity.deviceId.
+    deviceId: description.identity.deviceId!,
+    // Deprecated alias for lifecycle.state.
+    status: description.lifecycle.state,
+    // Deprecated alias for lifecycle.state.
+    lifecycleState: description.lifecycle.state,
+    // `runtime` is canonical object data; its former OS-version string is legacyRuntimeVersion.
+    legacyRuntimeVersion: description.runtime.osVersion,
+    // Deprecated alias for display.formFactor.
+    formFactor: description.display.formFactor,
+    // Deprecated alias for identity.deviceSessionUuid, preserving pre-image omission behavior.
+    ...(description.identity.deviceSessionUuid
+      ? { deviceSessionUuid: description.identity.deviceSessionUuid }
+      : {}),
+    // Deprecated alias for session.poolStatus, preserving pre-image omission behavior.
+    ...(description.session.poolStatus ? { poolStatus: description.session.poolStatus } : {}),
+    // Deprecated alias for session.sessionUuid, preserving pre-image omission behavior.
+    ...(description.session.sessionUuid
+      ? { assignedSession: description.session.sessionUuid }
+      : {}),
+  };
+}
+
 // Convert BootedDevice to BootedDeviceInfo
 function toBootedDeviceInfo(
   device: BootedDevice,
@@ -351,17 +389,18 @@ function toBootedDeviceInfo(
     kind: "booted",
     device,
     pooled: poolContext?.pooled,
-    session: poolContext?.session,
+    // Preserve the pool's already-published assignment in the canonical session
+    // when the optional session-detail map is unavailable for this observation.
+    session:
+      poolContext?.session ??
+      (poolContext?.poolInfo.assignedSession
+        ? { sessionId: poolContext.poolInfo.assignedSession }
+        : undefined),
     deviceSessionUuid: poolContext?.deviceSessionUuid,
   });
   return {
     ...projectBootedDevice(description),
-    // Compatibility aliases mirroring identity.deviceId / lifecycle.state for the desktop decoder.
-    deviceId: description.identity.deviceId!,
-    status: "booted",
-    ...(description.identity.deviceSessionUuid
-      ? { deviceSessionUuid: description.identity.deviceSessionUuid }
-      : {}),
+    ...legacyAliases(description),
     recoveryEligibility: poolContext?.poolInfo.recoveryEligibility ?? null,
     serviceStatus: null,
     locked: null,

@@ -42,11 +42,13 @@ import {
 import {
   describeDevice,
   projectBootedDevice,
+  projectConfiguredImage,
   projectListDevicesEntry,
   projectProvisionedDevice,
   listDevicesEntrySchema,
   provisionedDeviceSchema,
   configuredImageSchema,
+  type DeviceDescription,
 } from "./deviceDescription";
 import {
   notifyInstalledAppResourceListChanged,
@@ -1034,10 +1036,25 @@ function listDevicePayloads(booted: BootedDevice[], devicePool: DevicePool | und
     });
     return {
       ...projectListDevicesEntry(description),
-      // Compatibility alias for identity.deviceId, kept for existing CLI/script/BATS/Kotlin consumers; see docs/design-docs/device-description-audit.md.
-      deviceId: description.identity.deviceId!,
+      ...legacyListDevicesAliases(description),
     };
   });
+}
+
+/** Deprecated listDevices fields, each derived from the canonical description. */
+function legacyListDevicesAliases(description: DeviceDescription) {
+  return {
+    // Deprecated alias for identity.deviceId.
+    deviceId: description.identity.deviceId!,
+    // Deprecated alias for runtime.apiLevel; it was only emitted for known Android values.
+    ...(description.platform === "android" && description.runtime.apiLevel !== null
+      ? { apiLevel: description.runtime.apiLevel }
+      : {}),
+    // Deprecated alias for runtime.osVersion; it was only emitted for truthy values.
+    ...(description.runtime.osVersion ? { osVersion: description.runtime.osVersion } : {}),
+    // Deprecated alias for display.formFactor; it was only emitted for truthy values.
+    ...(description.display.formFactor ? { formFactor: description.display.formFactor } : {}),
+  };
 }
 
 function initializedDevicePool(): DevicePool | undefined {
@@ -6140,11 +6157,18 @@ export function registerDeviceTools() {
       const configuredInventory = createConfiguredInventoryContract([args.platform], {
         [args.platform]: projection.observation,
       });
+      const images = projection.sourceImages.map((image) => {
+        const description = describeDevice({ kind: "image", image });
+        return {
+          ...projectConfiguredImage(description),
+          ...legacyListDeviceImageAliases(description),
+        };
+      });
 
       return createStructuredToolResponse({
-        message: `Found ${projection.images.length} configured ${args.platform} device images`,
-        images: projection.images,
-        count: projection.images.length,
+        message: `Found ${images.length} configured ${args.platform} device images`,
+        images,
+        count: images.length,
         platform: args.platform,
         configuredInventory,
       });
@@ -6152,6 +6176,42 @@ export function registerDeviceTools() {
       throw new ActionableError(`Failed to list ${args.platform} AVDs: ${error}`);
     }
   };
+
+  /** Deprecated listDeviceImages fields, each derived from the canonical description. */
+  function legacyListDeviceImageAliases(description: DeviceDescription) {
+    const androidProvenance = description.provenance.android;
+    const iosProvenance = description.provenance.ios;
+    return {
+      // Deprecated alias for identity.stableId.
+      stableId: description.identity.stableId,
+      // Deprecated alias for identity.deviceId.
+      deviceId: description.identity.deviceId,
+      // Deprecated alias for provenance.android.path.
+      path: androidProvenance?.path ?? null,
+      // Deprecated alias for provenance.android.target.
+      target: androidProvenance?.target ?? null,
+      // Deprecated alias for provenance.android.basedOn.
+      basedOn: androidProvenance?.basedOn ?? null,
+      // Deprecated alias for provenance.android.error.
+      error: androidProvenance?.error ?? null,
+      // Deprecated alias for lifecycle.state.
+      state: description.lifecycle.state,
+      // Deprecated alias for lifecycle.state.
+      isAvailable: description.lifecycle.state !== "unavailable",
+      // Deprecated alias for provenance.ios.availabilityError.
+      availabilityError: iosProvenance?.availabilityError ?? null,
+      // Deprecated alias for runtime.osVersion.
+      iosVersion: description.runtime.osVersion,
+      // Deprecated alias for runtime.deviceType.
+      deviceType: description.runtime.deviceType,
+      // `runtime` is canonical object data; its former string is legacyRuntimeId.
+      legacyRuntimeId: description.runtime.runtimeId,
+      // Deprecated alias for runtime.model.
+      model: description.runtime.model,
+      // Deprecated alias for runtime.architecture.
+      architecture: description.runtime.architecture,
+    };
+  }
 
   const listDevicesHandler = async (args: ListDevicesArgs & Record<string, unknown>) => {
     // #5870: a tool named `listDevices` returns the devices. The data is right
@@ -8115,6 +8175,24 @@ export function registerDeviceTools() {
     });
   }
 
+  /**
+   * Preserve the raw provisioned model while the canonical projection replaces
+   * colliding fields below. Raw fields are the pre-image compatibility aliases;
+   * legacyRuntimeId is derived from runtime.runtimeId because canonical runtime
+   * is now an object.
+   */
+  function legacyProvisionDeviceAliases(
+    rawDevice: DeviceInfo | BootedDevice,
+    description: DeviceDescription,
+  ) {
+    return {
+      // Deprecated aliases for the corresponding canonical identity/runtime/display/lifecycle fields.
+      ...rawDevice,
+      // `runtime` is canonical object data; its former string is legacyRuntimeId.
+      legacyRuntimeId: description.runtime.runtimeId,
+    };
+  }
+
   // oxlint-disable-next-line complexity -- operation fields and canonical device projection share one response boundary.
   function buildProvisionDeviceResult(
     args: ProvisionDeviceArgs,
@@ -8128,17 +8206,21 @@ export function registerDeviceTools() {
     const pooled = booted
       ? (initializedDevicePool()?.getDevice(booted.device.deviceId) ?? undefined)
       : undefined;
+    const rawDevice = booted?.device ?? provisioned.device;
+    const description = describeDevice({
+      kind: "provisioned",
+      provisioned,
+      booted: booted?.device,
+      pooled,
+    });
     return {
       operationId: args.operationId,
       ...(booted?.resources ? { resources: booted.resources } : {}),
-      device: projectProvisionedDevice(
-        describeDevice({
-          kind: "provisioned",
-          provisioned,
-          booted: booted?.device,
-          pooled,
-        }),
-      ),
+      // Canonical fields intentionally win over same-named raw compatibility fields.
+      device: {
+        ...legacyProvisionDeviceAliases(rawDevice, description),
+        ...projectProvisionedDevice(description),
+      },
       requestedSpec: args.device.spec,
       resolvedSpec: provisioned.resolvedSpec,
       displayCutout:
@@ -9089,6 +9171,33 @@ export function registerDeviceTools() {
     daemonState.getSessionManager().setDeviceReadiness(sessionId, achievedReadiness);
   }
 
+  /** Deprecated startDevice/getAndroid/getApple fields derived from the canonical description. */
+  function legacyBootedResponseAliases(
+    description: DeviceDescription,
+    device: BootedDevice,
+    sourceImage: DeviceInfo | undefined,
+  ) {
+    return {
+      // Deprecated alias for identity.deviceId.
+      deviceId: description.identity.deviceId,
+      // Deprecated alias for runtime.apiLevel.
+      apiLevel: description.runtime.apiLevel,
+      // Deprecated alias for runtime.osVersion.
+      osVersion: description.runtime.osVersion,
+      // Deprecated alias for display.formFactor.
+      formFactor: description.display.formFactor,
+      // Deprecated alias for display.width and display.height.
+      screenSize:
+        description.display.width !== null && description.display.height !== null
+          ? { width: description.display.width, height: description.display.height }
+          : null,
+      // Deprecated alias for session.sessionUuid.
+      sessionUuid: description.session.sessionUuid,
+      // Deprecated compatibility payload for identity; preserves runner endpoint metadata.
+      deviceIdentity: deviceIdentityPayload(device, sourceImage),
+    };
+  }
+
   async function buildBootedResponse(
     device: BootedDevice,
     source: "booted" | "cold-boot",
@@ -9106,16 +9215,14 @@ export function registerDeviceTools() {
       discovery: sourceImage,
       session: { sessionId },
     });
+    const acquisition = source === "booted" ? "already-booted" : "cold-boot";
     return createStructuredToolResponse({
       message: `${device.platform} '${device.name}' is ready (${source})`,
       ...projectBootedDevice(description),
-      // Compatibility aliases for identity.deviceId / session.sessionUuid, kept for existing CLI/script/BATS/Kotlin consumers; see docs/design-docs/device-description-audit.md.
-      deviceId: description.identity.deviceId,
-      sessionUuid: description.session.sessionUuid,
-      deviceIdentity: deviceIdentityPayload(device, sourceImage),
+      ...legacyBootedResponseAliases(description, device, sourceImage),
       processId: processId ?? null,
       isReady: true,
-      acquisition: source === "booted" ? "already-booted" : "cold-boot",
+      acquisition,
       // TimingData's runtime shape is serialized as the legacy flat result.
       // oxlint-disable-next-line auto-mobile/no-unknown-cast
       timing: (timing ?? {}) as unknown as Record<string, number>,

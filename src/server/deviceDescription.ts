@@ -138,7 +138,9 @@ export function describeDevice(input: DeviceDescriptionInput): DeviceDescription
       ? pooled.androidImage
       : input.discovery?.platform === booted.platform
         ? input.discovery
-        : undefined;
+        : input.kind === "provisioned"
+          ? input.provisioned.device
+          : undefined;
   return describeBooted(
     booted,
     image,
@@ -530,24 +532,46 @@ export const listDevicesEntrySchema = z.object({
   display: z.object({ formFactor: nullableString }),
   lifecycle: deviceDescriptionSchema.shape.lifecycle,
   session: z.object({ sessionUuid: nullableString }),
+  apiLevel: nullableNumber.optional(),
+  osVersion: nullableString.optional(),
+  formFactor: nullableString.optional(),
 });
-export const provisionedDeviceSchema = deviceDescriptionSchema.pick({
-  identity: true,
-  name: true,
-  platform: true,
-  runtime: true,
-  display: true,
-  lifecycle: true,
-});
-export const configuredImageSchema = deviceDescriptionSchema.pick({
-  identity: true,
-  name: true,
-  platform: true,
-  isVirtual: true,
-  source: true,
-  runtime: true,
-  display: true,
-  lifecycle: true,
-  provenance: true,
-  capabilityInventory: true,
-});
+export const provisionedDeviceSchema = deviceDescriptionSchema
+  .pick({
+    identity: true,
+    name: true,
+    platform: true,
+    runtime: true,
+    display: true,
+    lifecycle: true,
+  })
+  .passthrough();
+export const configuredImageSchema = deviceDescriptionSchema
+  .pick({
+    identity: true,
+    name: true,
+    platform: true,
+    isVirtual: true,
+    source: true,
+    runtime: true,
+    display: true,
+    lifecycle: true,
+    provenance: true,
+    capabilityInventory: true,
+  })
+  .extend({
+    stableId: z.string(),
+    deviceId: nullableString,
+    path: nullableString,
+    target: nullableString,
+    basedOn: nullableString,
+    error: nullableString,
+    state: z.enum(["configured", "booting", "booted", "shutting-down", "unavailable"]),
+    isAvailable: z.boolean(),
+    availabilityError: nullableString,
+    iosVersion: nullableString,
+    deviceType: nullableString,
+    legacyRuntimeId: nullableString,
+    model: nullableString,
+    architecture: nullableString,
+  });

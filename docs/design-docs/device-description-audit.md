@@ -12,15 +12,15 @@ Every canonical key is present; an unavailable fact is `null`, not omitted.
 | session                 | nulls                 | nulls                 | assigned session                       | assigned session     | idle/null session | awaiting-owner when restored |
 | provenance/capabilities | image facts           | image facts           | retained facts or null                 | same                 | same              | same                         |
 
-Renames and drops:
+Canonical fields and deprecated aliases:
 
-- `status` and `lifecycleState` device literals became `lifecycle.state`.
-- `isRunning` is derived by the canonical lifecycle mapping and is not emitted.
-- `iosVersion`, `osVersion`, and booted-resource string `runtime` became `runtime.osVersion`; runtime identifiers use `runtime.runtimeId`.
-- `screenSize` became `display`; density is `display.density`.
+- `status` and `lifecycleState` remain deprecated aliases for `lifecycle.state`.
+- `isRunning` remains on `provisionDevice.device` from its raw pre-image model; canonical lifecycle data takes precedence for colliding fields.
+- `iosVersion` and `osVersion` remain deprecated aliases for `runtime.osVersion`; runtime identifiers use `runtime.runtimeId`.
+- `screenSize` remains a deprecated alias for `display.width` and `display.height`; density is `display.density`.
 - `identity.connectionId` is the pool-incarnation epoch, `session.sessionUuid` is the durable MCP device-session id, and `identity.deviceSessionUuid` is the DeviceSessionRegistry per-connection routing key used by desktop stream subscriptions. The routing key is intentionally distinct from both other identities and is omitted when the registry has no live record.
-- Flat `poolStatus`, `assignedSession`, and legacy session detail collapsed into `session`.
-- `capabilities.automation` was removed from the booted resource. `serviceStatus` is retained as the sole automation-status sibling because it includes integrity and runner diagnostics.
+- Flat `poolStatus` and `assignedSession` remain deprecated aliases for `session.poolStatus` and `session.sessionUuid`; the canonical `session` object remains at its existing key.
+- `capabilities.automation` is the one intentional exception to the compatibility rule for the booted resource. `serviceStatus` remains the sole automation-status sibling because it includes integrity and runner diagnostics.
 - Capability inventory entries now use `{ id, state: "supported"|"unsupported"|"unknown", reason, source }`, with explicit nulls.
 - iOS simulator configured-image records carry the static simulator inventory. If an
   upstream simulator discovery record omitted it, the canonical builder supplies the same
@@ -32,6 +32,31 @@ Renames and drops:
 The Simctl discovery expectation includes those three static unsupported entries;
 they belong on simulator image inventories, rather than being treated as absent
 or as a runtime probe failure.
+
+## Deferred removals
+
+The following compatibility aliases remain until the desktop Kotlin
+`DeviceModels.kt`, `scripts/live-device-acceptance.ts`, and CI jq consumers have
+migrated to the canonical description:
+
+- Image surfaces (`listDeviceImages` and `automobile:devices/images`): `stableId`,
+  `deviceId`, `path`, `target`, `basedOn`, `error`, `state`, `isAvailable`,
+  `availabilityError`, `iosVersion`, `deviceType`, `model`, and `architecture`.
+- `listDevices`: `deviceId`, `apiLevel`, `osVersion`, and `formFactor`.
+- `provisionDevice.device`: the raw pre-image `DeviceInfo`/`BootedDevice` fields,
+  including `deviceId`, `isRunning`, runtime/display metadata, availability
+  metadata, and capability inventory.
+- `startDevice`, `getAndroid`, and `getApple`: `deviceId`, `apiLevel`,
+  `osVersion`, `formFactor`, `screenSize`, `sessionUuid`, and `deviceIdentity`.
+- `automobile:devices/booted`: `deviceId`, `deviceSessionUuid`, `status`,
+  `lifecycleState`, `formFactor`, `poolStatus`, and `assignedSession`.
+- The flat image `runtime` string could not be restored verbatim because this
+  PR's canonical schema uses `runtime` for an object; the value is available at
+  `runtime.runtimeId` (canonical) and `legacyRuntimeId` (alias) instead. The
+  same collision applies to `provisionDevice.device`.
+- The booted-resource flat `runtime` string had different OS-version semantics;
+  it is available at `runtime.osVersion` (canonical) and
+  `legacyRuntimeVersion` (alias) instead.
 
 ## Uncertain — not changed without evidence
 

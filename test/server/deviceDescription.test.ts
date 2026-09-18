@@ -200,17 +200,161 @@ describe("device description projections", () => {
     });
   });
 
-  test("keeps retired output literals out of every producer", () => {
-    const producers = [
-      "../../src/server/deviceTools.ts",
-      "../../src/utils/configuredDeviceInventory.ts",
-      "../../src/server/deviceImageResources.ts",
-      "../../src/server/bootedDeviceResources.ts",
+  test("uses a booted provisioned image when pool and discovery have no match", () => {
+    const description = describeDevice({
+      kind: "provisioned",
+      provisioned: {
+        created: false,
+        resolvedSpec: {
+          runtime: "com.apple.CoreSimulator.SimRuntime.iOS-26-5",
+          deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
+          displayCutout: "dynamic_island",
+        },
+        device: {
+          name: "iPhone 17",
+          platform: "ios",
+          deviceId: "IOS-UDID",
+          isRunning: false,
+          iosVersion: "26.5",
+          runtime: "com.apple.CoreSimulator.SimRuntime.iOS-26-5",
+          deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
+          model: "iPhone 17",
+          architecture: "arm64",
+          screenWidth: 1206,
+          screenHeight: 2622,
+          screenDensity: 460,
+          formFactor: "phone",
+          capabilityInventory: {
+            schemaVersion: 1,
+            capabilities: [{ id: "ios.simulator.camera", state: "available" }],
+          },
+        },
+      },
+      booted: { name: "iPhone 17", platform: "ios", deviceId: "IOS-UDID" },
+    });
+
+    expect(description.runtime).toMatchObject({
+      runtimeId: "com.apple.CoreSimulator.SimRuntime.iOS-26-5",
+      deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
+      model: "iPhone 17",
+      architecture: "arm64",
+    });
+    expect(description.display).toEqual({
+      width: 1206,
+      height: 2622,
+      density: 460,
+      formFactor: "phone",
+    });
+    expect(description.capabilityInventory?.capabilities).toEqual([
+      {
+        id: "ios.simulator.camera",
+        state: "supported",
+        reason: null,
+        source: null,
+      },
+    ]);
+  });
+
+  test("keeps legacy keys present at every device-description producer", () => {
+    const surfaces = [
+      {
+        surface: "listDeviceImages",
+        producer: "../../src/server/deviceTools.ts",
+        aliases: [
+          "legacyListDeviceImageAliases",
+          "stableId:",
+          "deviceId:",
+          "path:",
+          "target:",
+          "basedOn:",
+          "error:",
+          "state:",
+          "isAvailable:",
+          "availabilityError:",
+          "iosVersion:",
+          "deviceType:",
+          "legacyRuntimeId:",
+          "model:",
+          "architecture:",
+        ],
+      },
+      {
+        surface: "automobile:devices/images",
+        producer: "../../src/server/deviceImageResources.ts",
+        aliases: [
+          "function legacyAliases",
+          "stableId:",
+          "deviceId:",
+          "path:",
+          "target:",
+          "basedOn:",
+          "error:",
+          "state:",
+          "isAvailable:",
+          "availabilityError:",
+          "iosVersion:",
+          "deviceType:",
+          "legacyRuntimeId:",
+          "model:",
+          "architecture:",
+        ],
+      },
+      {
+        surface: "listDevices",
+        producer: "../../src/server/deviceTools.ts",
+        aliases: [
+          "legacyListDevicesAliases",
+          "deviceId:",
+          "apiLevel:",
+          "osVersion:",
+          "formFactor:",
+        ],
+      },
+      {
+        surface: "provisionDevice.device",
+        producer: "../../src/server/deviceTools.ts",
+        aliases: ["legacyProvisionDeviceAliases", "...rawDevice", "legacyRuntimeId:"],
+      },
+      {
+        surface: "startDevice/getAndroid/getApple",
+        producer: "../../src/server/deviceTools.ts",
+        aliases: [
+          "legacyBootedResponseAliases",
+          "deviceId:",
+          "apiLevel:",
+          "osVersion:",
+          "formFactor:",
+          "screenSize:",
+          "sessionUuid:",
+          "deviceIdentity:",
+        ],
+      },
+      {
+        surface: "automobile:devices/booted",
+        producer: "../../src/server/bootedDeviceResources.ts",
+        aliases: [
+          "function legacyAliases",
+          "deviceId:",
+          "deviceSessionUuid:",
+          "status:",
+          "lifecycleState:",
+          "legacyRuntimeVersion:",
+          "formFactor:",
+          "poolStatus:",
+          "assignedSession:",
+        ],
+      },
     ];
-    for (const producer of producers) {
+
+    for (const { surface, producer, aliases } of surfaces) {
       const source = readFileSync(new URL(producer, import.meta.url), "utf8");
-      expect(source).not.toMatch(/lifecycleState:\s*["']booted["']/);
-      expect(source).not.toMatch(/\biosVersion\s*:/);
+      const [helper, ...fields] = aliases;
+      const helperOffset = source.indexOf(helper);
+      expect(helperOffset, `${surface} must retain ${helper}`).toBeGreaterThanOrEqual(0);
+      const helperSource = source.slice(helperOffset, helperOffset + 2_500);
+      for (const field of fields) {
+        expect(helperSource, `${surface} must retain ${field}`).toContain(field);
+      }
     }
   });
 

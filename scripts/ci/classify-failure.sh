@@ -60,7 +60,7 @@ terminal_attempt_evidence() {
   local diagnostics_marker='First emulator attempt failed; captured diagnostics follow:'
 
   if [[ "$evidence" == *"$RETRY_MARKER"* ]]; then
-    printf '%s' "${evidence#*"$RETRY_MARKER"}"
+    printf '%s' "${evidence##*"$RETRY_MARKER"}"
   elif [[ "$evidence" == *"$diagnostics_marker"* ]]; then
     printf '%s' "$evidence"
   else

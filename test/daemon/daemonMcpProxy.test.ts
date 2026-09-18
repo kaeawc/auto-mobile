@@ -4722,6 +4722,39 @@ describe("DaemonMcpProxy", () => {
       }
     });
 
+    test.each([
+      "automobile:observation/session/session-android/latest",
+      "automobile:observation/session/session-android/latest/screenshot",
+      "automobile:device-session/session-android/screenshot",
+    ])("routes an owned session resource to its URI session: %s", async (uri) => {
+      const fakeClient = new FakeDaemonClient({
+        daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+        toolResultFor: (toolName) =>
+          toolName === "getAndroid"
+            ? mintingResult("session-android")
+            : mintingResult("session-ios"),
+        resourceResult: { contents: [{ uri: "x", blob: "x" }] },
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => fakeClient,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        await proxy.callTool("getAndroid", {});
+        await proxy.callTool("getApple", {});
+
+        await proxy.readResource(uri);
+
+        expect(fakeClient.readResourceParams).toEqual([{ sessionUuid: "session-android" }]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
     test("routes concurrent fresh screenshot reads each to their owning session", async () => {
       // AC2: concurrent reads during/after acquisition (concurrent MCP init) must
       // each carry their own owner session, independent of ordering or a delayed

@@ -162,12 +162,14 @@ function isToolOutputResourceUri(uri: string): boolean {
   return uri.startsWith("automobile:tool-output/");
 }
 
-// The session UUID embedded in a fresh-session-screenshot resource URI
-// (`automobile:device-session/<uuid>/screenshot`), or undefined for any other
-// URI. Kept in lockstep with {@link isFreshSessionScreenshotUri}.
-function freshSessionScreenshotUriSessionUuid(uri: string): string | undefined {
-  const match = uri.match(/^automobile:device-session\/([^/]+)\/screenshot$/);
-  return match?.[1];
+// The session UUID embedded in a session-scoped observation resource URI, or
+// undefined for any other URI. Kept in lockstep with RESOURCE_URIS in
+// src/server/observationResources.ts.
+function sessionScopedObservationUriSessionUuid(uri: string): string | undefined {
+  const match = uri.match(
+    /^automobile:(?:observation\/session\/([^/]+)\/latest(?:\/screenshot)?|device-session\/([^/]+)\/screenshot)$/,
+  );
+  return match?.[1] ?? match?.[2];
 }
 
 function heartbeatIntervalMs(config: DaemonMcpProxyConfig): number {
@@ -3337,7 +3339,7 @@ export class DaemonMcpProxy {
     }
   }
 
-  // Route a fresh-session-screenshot read to the session named in its URI when
+  // Route a session-scoped observation read to the session named in its URI when
   // this connection owns that session but has since bound a newer one (e.g.
   // getApple after getAndroid). Forwarding the URI's session — not the latest
   // binding — makes the daemon seed the loopback SessionToolBinding with the
@@ -3350,7 +3352,7 @@ export class DaemonMcpProxy {
     if (this.terminalBoundSession) {
       return undefined;
     }
-    const uriSessionUuid = freshSessionScreenshotUriSessionUuid(uri);
+    const uriSessionUuid = sessionScopedObservationUriSessionUuid(uri);
     if (
       !uriSessionUuid ||
       uriSessionUuid === this.boundSessionUuid ||

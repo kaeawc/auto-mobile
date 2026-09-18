@@ -4621,8 +4621,13 @@ describe("Daemon manager process detection", () => {
       findDaemonProcesses: () => (replacementObserved ? [] : records),
       isProcessRunning: (pid) => pid === candidatePid,
     };
+    // The successor is this namespace's own: the PID record names its generation.
+    const directory = mkdtempSync(join(tmpdir(), "daemon-manager-restart-pid-reuse-"));
+    const pidFilePath = join(directory, "daemon.pid");
+    const socketPath = join(directory, "daemon.sock");
     const signaler = new FakeDaemonProcessSignaler((_pid, signal) => {
       if (signal === "SIGTERM") {
+        writeStopPidFile(pidFilePath, candidatePid, socketPath, "replacement-generation", 2_000);
         records = [
           {
             pid: candidatePid,
@@ -4638,9 +4643,9 @@ describe("Daemon manager process detection", () => {
       undefined,
       undefined,
       fakeTimer,
-      undefined,
-      undefined,
-      undefined,
+      join(directory, "daemon.lock"),
+      pidFilePath,
+      socketPath,
       {
         findDaemonProcesses: (timeoutMs) => {
           const found = processFinder.findDaemonProcesses(timeoutMs);

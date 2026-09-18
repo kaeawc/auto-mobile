@@ -11,6 +11,7 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import type { TapOnArgs } from "../../src/server/interactionToolTypes";
 import { getStructuredField } from "../../src/utils/toolUtils";
 import type { BootedDevice, TapOnElementResult, TapOnSelectedElement } from "../../src/models";
+import { tapOnResultSchema } from "../../src/server/toolOutputSchemas";
 
 const selected = (overrides: Partial<TapOnSelectedElement>): TapOnSelectedElement => ({
   text: "",
@@ -265,6 +266,26 @@ describe("tapOnHandler (registered handler wiring)", () => {
       'Tapped on element (matched text="Internet"; 1 match; 2 view hierarchy changes over 5 requests within 300ms)',
     );
     expect(getStructuredField(response, "success")).toBe(true);
+  });
+
+  test("an already-checked toggle reports a skipped tap and exposes it in the payload", async () => {
+    setTapOnElementFactory(() => ({
+      execute: async () =>
+        fakeResult({
+          success: true,
+          skipped: "already-checked",
+          selectedElement: selected({ text: "Wi-Fi" }),
+        }),
+    }));
+
+    const response = await tapOnHandler(fakeDevice, args);
+    const message = parseMessage(response);
+    expect(message).toBe("Skipped tap: toggle already checked state matches ensureChecked");
+    expect(message).not.toContain("Tapped on element");
+    expect(getStructuredField(response, "skipped")).toBe("already-checked");
+    expect(tapOnResultSchema.parse({ success: true, skipped: "already-checked" }).skipped).toBe(
+      "already-checked",
+    );
   });
 });
 

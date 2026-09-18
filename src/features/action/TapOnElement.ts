@@ -286,6 +286,9 @@ export class TapOnElement extends BaseVisualChange {
     if (options.ensureChecked !== undefined && options.action !== "tap") {
       return 'tapOn ensureChecked requires action "tap"';
     }
+    if (options.ensureChecked !== undefined && options.selectionStrategy === "random") {
+      return "tapOn ensureChecked cannot use random selection; use a unique selector or index";
+    }
     const selectorCount = [
       options.text,
       options.elementId,
@@ -2107,6 +2110,24 @@ export class TapOnElement extends BaseVisualChange {
               selectedElementMetadata,
               stable.selection,
             );
+            const stableElement = stable.selection.element;
+            if (!stableElement) {
+              perf.end();
+              return {
+                success: false,
+                error: "Android tap aborted: refreshed stable target selection was empty",
+              };
+            }
+            const ensureCheckedResult = this.ensureCheckedBeforeTap(
+              options,
+              stableElement,
+              selectedElementMetadata,
+              searchOutcome.stats,
+            );
+            if (ensureCheckedResult) {
+              perf.end();
+              return ensureCheckedResult;
+            }
           }
 
           this.logClickableParentSelection(usedParent);

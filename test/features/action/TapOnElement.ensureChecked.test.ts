@@ -22,7 +22,7 @@ function toggle(checked: boolean | string): Element {
 function createTap(
   initial: Element,
   afterTap = initial,
-): { tap: TapOnElement; calls: () => number } {
+): { tap: TapOnElement; calls: () => number; setNextElement: (element: Element) => void } {
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
   const selector = new FakeElementSelector(initial);
@@ -56,7 +56,11 @@ function createTap(
     const result = await block(observation);
     return { ...(result as object), observation };
   };
-  return { tap, calls: () => tapCalls };
+  return {
+    tap,
+    calls: () => tapCalls,
+    setNextElement: (element) => selector.setNextElement(element),
+  };
 }
 
 describe("tapOn ensureChecked", () => {
@@ -77,6 +81,50 @@ describe("tapOn ensureChecked", () => {
     expect(result.success).toBe(true);
     expect(result.skipped).toBeUndefined();
     expect(calls()).toBe(1);
+  });
+
+  test("rechecks the refreshed stable toggle before tapping", async () => {
+    const initial = toggle("false");
+    const refreshed = toggle("true");
+    const { tap, calls, setNextElement } = createTap(initial);
+    (tap as any).strategy.shouldRunPreTapStability = () => true;
+    (tap as any).resolveAndroidStableTapTargetAfterRefreshes = async () => {
+      setNextElement(refreshed);
+      return {
+        ok: true,
+        viewHierarchy: hierarchy,
+        tapElement: refreshed,
+        usedParent: false,
+        selection: {
+          element: refreshed,
+          indexInMatches: 0,
+          totalMatches: 1,
+          strategy: "first",
+        },
+      };
+    };
+
+    const result = await tap.execute({ text: "Wi-Fi", action: "tap", ensureChecked: true });
+
+    expect(result).toMatchObject({ success: true, skipped: "already-checked" });
+    expect(calls()).toBe(0);
+  });
+
+  test("rejects random selection with ensureChecked", async () => {
+    const { tap, calls } = createTap(toggle("false"));
+
+    const result = await tap.execute({
+      text: "Wi-Fi",
+      action: "tap",
+      ensureChecked: true,
+      selectionStrategy: "random",
+    });
+
+    expect(result).toMatchObject({
+      success: false,
+      error: "tapOn ensureChecked cannot use random selection; use a unique selector or index",
+    });
+    expect(calls()).toBe(0);
   });
 
   test("returns a typed failure when the checked state does not change", async () => {

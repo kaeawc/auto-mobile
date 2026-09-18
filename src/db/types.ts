@@ -924,7 +924,7 @@ export type NewTestEdgeCoverage = Insertable<TestEdgeCoverageTable>;
 // Failure tracking tables
 interface FailureGroupsTable {
   id: string;
-  type: "crash" | "anr" | "tool_failure";
+  type: "crash" | "anr" | "tool_failure" | "nonfatal";
   signature: string;
   title: string;
   message: string;
@@ -979,7 +979,7 @@ interface FailureNotificationsTable {
   id: Generated<number>;
   occurrence_id: string;
   group_id: string;
-  type: "crash" | "anr" | "tool_failure";
+  type: "crash" | "anr" | "tool_failure" | "nonfatal";
   severity: "critical" | "high" | "medium" | "low";
   title: string;
   timestamp: number;

@@ -1318,7 +1318,11 @@ export class DeviceSessionManager implements DeviceSessionManager {
               `[DeviceSessionManager] Rolling back created iOS simulator '${provisioned.name}' ` +
                 `(${provisioned.deviceId}) after boot/verify failure: ${errorMessage(error)}`,
             );
-            await this.simctl!.deleteSimulator(provisioned.deviceId!).catch((deleteError) => {
+            // Cancellation cleanup must not inherit an already-aborted request signal.
+            const cleanupSignal = new AbortController().signal;
+            await this.simctl!.deleteSimulator(provisioned.deviceId!, {
+              signal: cleanupSignal,
+            }).catch((deleteError) => {
               logger.warn(
                 `[DeviceSessionManager] Failed to roll back created iOS simulator ` +
                   `'${provisioned.name}' (${provisioned.deviceId}): ${errorMessage(deleteError)}`,

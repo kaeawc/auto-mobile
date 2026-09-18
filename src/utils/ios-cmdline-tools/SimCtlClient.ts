@@ -30,6 +30,10 @@ import { Mutex } from "async-mutex";
 import { iosSimulatorCapabilityInventory } from "../../features/device-control/virtualDeviceCapabilities";
 import { compareSimctlVersions, parseSimctlVersion } from "./simctlVersion";
 import { compareStrictNumericVersions } from "../deviceMatcher";
+import {
+  SimCtlSimulatorDeviceTypeProfiles,
+  type SimulatorDeviceTypeProfileSource,
+} from "./SimulatorDeviceTypeProfiles";
 
 const COMMAND_SETTLEMENT_GRACE_MS = 1_000;
 const SIMCTL_AVAILABILITY_PROBE_TIMEOUT_MS = 10_000;
@@ -75,6 +79,7 @@ export interface AppleDeviceType {
   name: string;
   identifier: string;
   productFamily: string;
+  modelIdentifier?: string;
 }
 
 export interface SimCtlFileSystem {
@@ -559,6 +564,7 @@ interface SimulatorBootLease {
 }
 
 export class SimCtlClient implements SimCtl {
+  private readonly deviceTypeProfiles: SimulatorDeviceTypeProfileSource;
   device: BootedDevice | null;
   execAsync: (
     file: string,
@@ -641,6 +647,7 @@ export class SimCtlClient implements SimCtl {
     bootOptions: SimCtlBootOptions = DEFAULT_SIMCTL_BOOT_OPTIONS,
     private readonly plist: PlistReader = new PlistClient(),
     private readonly observationSequence: DiscoveryObservationSequence = defaultDiscoveryObservationSequence,
+    deviceTypeProfiles?: SimulatorDeviceTypeProfileSource,
   ) {
     this.device = device;
     this.execAsync = execAsyncFn || execAsync;
@@ -648,6 +655,7 @@ export class SimCtlClient implements SimCtl {
     this.platform = platform;
     this.spawnProcess = spawnProcess;
     this.fileSystem = fileSystem;
+    this.deviceTypeProfiles = deviceTypeProfiles ?? new SimCtlSimulatorDeviceTypeProfiles(this);
     this.bootOptions = {
       maxAttempts: Math.max(1, bootOptions.maxAttempts),
       retryBackoffMs: Math.max(0, bootOptions.retryBackoffMs),
@@ -1920,12 +1928,19 @@ export class SimCtlClient implements SimCtl {
   }
 
   /** Map a raw `simctl list devices --json` payload into sorted {@link DeviceInfo} records. */
-  private static mapSimulatorListToDeviceInfos(simulatorList: SimulatorList): DeviceInfo[] {
+  private async mapSimulatorListToDeviceInfos(
+    simulatorList: SimulatorList,
+    timeoutMs: number | undefined,
+    signal: AbortSignal | undefined,
+  ): Promise<DeviceInfo[]> {
     const devices: DeviceInfo[] = [];
     for (const [runtimeId, runtimeDevices] of Object.entries(simulatorList.devices)) {
       for (const device of runtimeDevices) {
         logger.debug(`Found iOS simulator: ${device.name} (${device.udid}) state=${device.state}`);
         const iosVersion = normalizeIosVersion(runtimeId, device.os_version);
+        const profile = device.deviceTypeIdentifier
+          ? await this.profileForDeviceType(device.deviceTypeIdentifier, timeoutMs, signal)
+          : null;
         devices.push({
           name: device.name,
           platform: "ios",
@@ -1941,6 +1956,9 @@ export class SimCtlClient implements SimCtl {
           runtime: runtimeId,
           model: device.model,
           architecture: device.architecture,
+          screenWidth: profile?.pixelWidth ?? undefined,
+          screenHeight: profile?.pixelHeight ?? undefined,
+          screenDensity: profile?.dpi ?? undefined,
           capabilityInventory: iosSimulatorCapabilityInventory({
             isAvailable: device.isAvailable,
             availabilityError: device.availabilityError,
@@ -1951,6 +1969,59 @@ export class SimCtlClient implements SimCtl {
     }
     devices.sort((a, b) => (a.deviceId || "").localeCompare(b.deviceId || ""));
     return devices;
+  }
+
+  private async profileForDeviceType(
+    deviceTypeIdentifier: string,
+    timeoutMs: number | undefined,
+    signal: AbortSignal | undefined,
+  ): Promise<Awaited<ReturnType<SimulatorDeviceTypeProfileSource["profileFor"]>>> {
+    const profile =
+      timeoutMs === undefined && signal === undefined
+        ? this.deviceTypeProfiles.profileFor(deviceTypeIdentifier)
+        : this.deviceTypeProfiles.profileFor(deviceTypeIdentifier, { timeoutMs, signal });
+    if (timeoutMs === undefined && signal === undefined) {
+      return profile;
+    }
+
+    let timeoutHandle: NodeJS.Timeout | undefined;
+    let abortListener: (() => void) | undefined;
+    const contenders: Array<Promise<Awaited<typeof profile>>> = [profile];
+    if (timeoutMs !== undefined) {
+      contenders.push(
+        new Promise<never>((_resolve, reject) => {
+          timeoutHandle = this.timer.setTimeout(
+            () => reject(new Error(`Timed out reading iOS simulator device type profile`)),
+            timeoutMs,
+          );
+        }),
+      );
+    }
+    if (signal) {
+      contenders.push(
+        new Promise<never>((_resolve, reject) => {
+          abortListener = () =>
+            reject(signal.reason ?? new Error("iOS simulator profile lookup aborted"));
+          signal.addEventListener("abort", abortListener, { once: true });
+        }),
+      );
+    }
+
+    try {
+      return await Promise.race(contenders);
+    } catch (error) {
+      // Display dimensions are optional best-effort enrichment; a bounded
+      // profile lookup must not fail the simulator listing.
+      logger.debug(`Failed to enrich iOS simulator display dimensions: ${errorMessage(error)}`);
+      return null;
+    } finally {
+      if (timeoutHandle) {
+        this.timer.clearTimeout(timeoutHandle);
+      }
+      if (signal && abortListener) {
+        signal.removeEventListener("abort", abortListener);
+      }
+    }
   }
 
   /** Write a successful physical listing unless invalidation or a newer success superseded it. */
@@ -2089,7 +2160,7 @@ export class SimCtlClient implements SimCtl {
     signal: AbortSignal | undefined,
   ): Promise<DeviceInfo[]> {
     const simulatorList = await this.listSimulators(timeoutMs, signal);
-    return SimCtlClient.mapSimulatorListToDeviceInfos(simulatorList);
+    return this.mapSimulatorListToDeviceInfos(simulatorList, timeoutMs, signal);
   }
 
   /**

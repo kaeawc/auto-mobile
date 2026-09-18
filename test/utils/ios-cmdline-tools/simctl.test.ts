@@ -5,6 +5,7 @@ import type { ChildProcess, SpawnOptions } from "node:child_process";
 import { createExecResult } from "../../../src/utils/execResult";
 import { runWithAbortSignal } from "../../../src/utils/AbortContext";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeSimulatorDeviceTypeProfiles } from "../../fakes/FakeSimulatorDeviceTypeProfiles";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../../../src/utils/deviceTimeouts";
 
 function resetSimctlCaches(): void {
@@ -522,7 +523,18 @@ describe("Simctl", function () {
         throw new Error(`Unexpected command: ${file} ${args.join(" ")}`);
       };
 
-      simctl = new Simctl(null, mockExecAsync, undefined, "darwin");
+      simctl = new Simctl(
+        null,
+        mockExecAsync,
+        undefined,
+        "darwin",
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        new FakeSimulatorDeviceTypeProfiles(),
+      );
 
       const devices = await simctl.listSimulatorImages();
 
@@ -559,6 +571,95 @@ describe("Simctl", function () {
         ],
       });
       expect(commands).toEqual(["xcrun simctl list devices --json"]);
+    });
+
+    test("enriches a simulator with its injected device type display profile", async function () {
+      const deviceTypeId = "com.apple.CoreSimulator.SimDeviceType.iPhone-17";
+      const profiles = new FakeSimulatorDeviceTypeProfiles(
+        new Map([
+          [
+            deviceTypeId,
+            {
+              deviceTypeId,
+              productFamily: "iPhone",
+              modelIdentifier: "iPhone18,3",
+              pixelWidth: 1206,
+              pixelHeight: 2622,
+              scale: 3,
+              dpi: 460,
+            },
+          ],
+        ]),
+      );
+      mockExecAsync = async (_file, args) =>
+        createExecResult(
+          args.join(" ") === "simctl list devices --json"
+            ? simulatorListPayload([
+                {
+                  udid: "iphone-17-udid",
+                  name: "iPhone 17",
+                  state: "Booted",
+                  isAvailable: true,
+                  deviceTypeIdentifier: deviceTypeId,
+                },
+              ])
+            : "",
+          "",
+        );
+      simctl = new Simctl(
+        null,
+        mockExecAsync,
+        undefined,
+        "darwin",
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        profiles,
+      );
+
+      const [device] = await simctl.listSimulatorImages();
+
+      expect(device).toMatchObject({ screenWidth: 1206, screenHeight: 2622, screenDensity: 460 });
+      expect(profiles.calls).toBe(1);
+    });
+
+    test("leaves display dimensions undefined when no profile is available", async function () {
+      const profiles = new FakeSimulatorDeviceTypeProfiles();
+      mockExecAsync = async (_file, args) =>
+        createExecResult(
+          args.join(" ") === "simctl list devices --json"
+            ? simulatorListPayload([
+                {
+                  udid: "iphone-17-udid",
+                  name: "iPhone 17",
+                  state: "Booted",
+                  isAvailable: true,
+                  deviceTypeIdentifier: "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
+                },
+              ])
+            : "",
+          "",
+        );
+      simctl = new Simctl(
+        null,
+        mockExecAsync,
+        undefined,
+        "darwin",
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        profiles,
+      );
+
+      const [device] = await simctl.listSimulatorImages();
+
+      expect(device?.screenWidth).toBeUndefined();
+      expect(device?.screenHeight).toBeUndefined();
+      expect(device?.screenDensity).toBeUndefined();
     });
 
     test("should not cache an empty simulator discovery result", async function () {

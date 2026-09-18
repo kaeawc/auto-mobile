@@ -92,6 +92,17 @@ const strictCases: StrictCase[] = [
 ];
 
 describe("issues #6712/#6613: object-shaped tool inputs reject undeclared arguments", () => {
+  test("getIosSimulatorCapabilities accepts optional session targeting fields", () => {
+    expect(
+      getIosSimulatorCapabilitiesSchema.safeParse({
+        deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-16",
+        runtime: "iOS-18-0",
+        sessionUuid: "11111111-2222-3333-4444-555555555555",
+        keepScreenAwake: true,
+      }).success,
+    ).toBe(true);
+  });
+
   for (const { name, schema, valid, deviceTargeted = true } of strictCases) {
     test(`${name} rejects an undeclared top-level argument`, () => {
       const result = schema.safeParse({ ...valid, ...UNDECLARED_PROBE });

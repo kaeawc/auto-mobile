@@ -81,6 +81,7 @@ terminal_attempt_evidence() {
   local diagnostics_marker='First emulator attempt failed; captured diagnostics follow:'
   local line normalized in_group=0 after_marker=0 terminal=''
 
+  # shellcheck disable=SC2310 # A predicate: a false result is expected control flow.
   if executed_retry_marker_present "$evidence"; then
     while IFS= read -r line || [[ -n "$line" ]]; do
       if [[ "$line" == *'##[group]Run'* ]]; then
@@ -113,6 +114,7 @@ ambiguous_terminal_attempt() {
   local evidence="$1"
   local diagnostics_marker='First emulator attempt failed; captured diagnostics follow:'
 
+  # shellcheck disable=SC2310 # A predicate: a false result is expected control flow.
   [[ "$evidence" == *"$diagnostics_marker"* ]] \
     && ! executed_retry_marker_present "$evidence"
 }

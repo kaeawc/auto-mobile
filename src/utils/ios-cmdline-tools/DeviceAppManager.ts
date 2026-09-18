@@ -426,10 +426,10 @@ export class DeviceAppManager implements DeviceUrlLauncher {
   }
 
   private execute(file: string, args: string[]): Promise<ExecResult> {
-    // One span per physical-device command, named by the stable subcommand
-    // tokens so app identifiers, UDIDs, and artifact paths do not fragment
-    // timing aggregation (for example, `xcrun devicectl device install`).
-    return trackAmbient(`${file} ${args.slice(0, 4).join(" ")}`.trimEnd(), () =>
+    // One span per command, named by stable subcommand tokens so app
+    // identifiers, UDIDs, and artifact paths do not fragment timing aggregation.
+    const spanArgs = args[0] === "simctl" ? args.slice(0, 2) : args.slice(0, 4);
+    return trackAmbient(`${file} ${spanArgs.join(" ")}`.trimEnd(), () =>
       this.deps.execute(file, args),
     );
   }

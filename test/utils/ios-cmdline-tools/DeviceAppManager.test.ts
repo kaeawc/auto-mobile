@@ -91,6 +91,26 @@ describe("DeviceAppManager", () => {
     );
   });
 
+  test("uses a stable span name for simulator uninstall commands", async () => {
+    const commands: string[] = [];
+    const tracker = new DefaultPerformanceTracker(new FakeTimer());
+    const manager = createCommandSpanManager(commands);
+
+    await runWithPerfTracker(tracker, async () => {
+      await manager.uninstallApp("simulator-udid-1", "com.example.first", true);
+      await manager.uninstallApp("simulator-udid-2", "com.example.second", true);
+    });
+
+    expect(commands).toEqual([
+      "xcrun simctl uninstall simulator-udid-1 com.example.first",
+      "xcrun simctl uninstall simulator-udid-2 com.example.second",
+    ]);
+    expect((tracker.getTimings() as TimingEntry[]).map((entry) => entry.name)).toEqual([
+      "xcrun simctl uninstall",
+      "xcrun simctl uninstall",
+    ]);
+  });
+
   test("runs a devicectl command without an ambient tracker", async () => {
     const commands: string[] = [];
     await createCommandSpanManager(commands).uninstallApp("device-udid", "com.example.app");

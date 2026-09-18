@@ -905,7 +905,6 @@ export class LaunchApp extends BaseVisualChange {
             return this.createAndroidClearAppData(this.device).execute(packageName, targetUserId);
           });
           this.assertLaunchNotAborted(signal);
-          didTerminateOrClear = true;
         }
       }
 

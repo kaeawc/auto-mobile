@@ -2529,12 +2529,9 @@ export class DaemonMcpProxy {
         this.toolSelectionProfileUuid = responseProfileUuid;
       }
     } else if (responseProfileUuid === explicitSessionUuid) {
-      // The daemon only echoes the SAME UUID when its process-wide
-      // toolSelectionProfileRegistry accepts the reaffirm (src/server/index.ts).
-      // Retaining that successful self-reaffirm lets withToolSelectionProfile()
-      // attach it to this proxy's later sessionless acquisition calls. A
-      // differing or absent UUID is a device-session update or rejected/stale
-      // reaffirm, so never adopt an unrelated or failed profile on this proxy.
+      // toolSelectionProfileUuidFromResponse only returns server-confirmed
+      // connection-profile responses. Retain a successful self-reaffirm so
+      // withToolSelectionProfile() can attach it to later acquisitions.
       this.toolSelectionProfileUuid = responseProfileUuid;
     }
     // Do not depend solely on the daemon's best-effort list_changed delivery.

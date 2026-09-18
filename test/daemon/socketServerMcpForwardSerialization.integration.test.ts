@@ -622,7 +622,12 @@ describe("UnixSocketServer MCP forward serialization", () => {
     server.mcpClientFactory = async () => {
       const client: FakeMcpClient = {
         callTool: async () => ({
-          content: [{ type: "text", text: JSON.stringify({ sessionUuid: "profile-a" }) }],
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({ sessionUuid: "profile-a", scope: "connection-profile" }),
+            },
+          ],
         }),
         listTools: async () => ({ tools: [{ name: `profile-client-${clients.length}` }] }),
         listResources: async () => ({ resources: [] }),
@@ -691,7 +696,12 @@ describe("UnixSocketServer MCP forward serialization", () => {
     // This is the same response shape that normally creates the socket's
     // generated tool-selection-profile binding.
     lateResult.resolve({
-      content: [{ type: "text", text: JSON.stringify({ sessionUuid: "profile-late" }) }],
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({ sessionUuid: "profile-late", scope: "connection-profile" }),
+        },
+      ],
     });
     for (let attempt = 0; attempt < 20; attempt++) {
       await new Promise<void>((resolve) => setImmediate(resolve));
@@ -706,7 +716,12 @@ describe("UnixSocketServer MCP forward serialization", () => {
       factoryArguments.push([sessionUuid, toolSelectionProfileUuid]);
       return {
         callTool: async () => ({
-          content: [{ type: "text", text: JSON.stringify({ sessionUuid: "profile-a" }) }],
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({ sessionUuid: "profile-a", scope: "connection-profile" }),
+            },
+          ],
         }),
         listTools: async () => ({ tools: [] }),
         listResources: async () => ({ resources: [] }),

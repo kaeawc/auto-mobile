@@ -1,12 +1,16 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import fs from "node:fs";
-import path from "node:path";
 import {
   runCliCommand,
   setDaemonProxyFactoryForTesting,
   resetDaemonProxyFactoryForTesting,
 } from "../../src/cli";
-import { cliToolSelectionProfilePath } from "../../src/cli/cliToolSelectionProfile";
+import {
+  cliToolSelectionProfilePath,
+  ensureCliToolSelectionProfileStoreWritable,
+  persistCliToolSelectionProfile,
+} from "../../src/cli/cliToolSelectionProfile";
+import { ActionableError } from "../../src/models";
 import { isolateCliDataDir, type IsolatedCliDataDir } from "../helpers/cliDataDirIsolation";
 
 /**
@@ -42,7 +46,10 @@ describe("CLI transparently enables gated tools", () => {
             content: [
               {
                 type: "text",
-                text: JSON.stringify({ sessionUuid: "11111111-1111-4111-8111-111111111111" }),
+                text: JSON.stringify({
+                  sessionUuid: "11111111-1111-4111-8111-111111111111",
+                  scope: "connection-profile",
+                }),
               },
             ],
           };
@@ -183,7 +190,10 @@ describe("CLI transparently enables gated tools", () => {
           content: [
             {
               type: "text",
-              text: JSON.stringify({ sessionUuid: "11111111-1111-4111-8111-111111111111" }),
+              text: JSON.stringify({
+                sessionUuid: "11111111-1111-4111-8111-111111111111",
+                scope: "connection-profile",
+              }),
             },
           ],
         };
@@ -201,11 +211,65 @@ describe("CLI transparently enables gated tools", () => {
     expect(calls[0].params).toMatchObject({ toolName: "listDevices", enabled: true });
   });
 
+  test("fails before minting when the profile store cannot create its profile file", async () => {
+    const profilePath = cliToolSelectionProfilePath(process.env);
+    fs.mkdirSync(profilePath, { mode: 0o700 });
+    const calls: Array<{ name: string; params: unknown }> = [];
+    recordProxy(calls);
+    expect(() => ensureCliToolSelectionProfileStoreWritable()).toThrow(ActionableError);
+
+    const originalProcessExit = process.exit;
+    const originalConsoleError = console.error;
+    const exitCodes: number[] = [];
+    process.exit = ((code?: number) => {
+      exitCodes.push(code ?? 0);
+    }) as typeof process.exit;
+    console.error = (() => {}) as typeof console.error;
+    try {
+      await runCliCommand(["listDevices", "--platform", "android"]);
+    } finally {
+      process.exit = originalProcessExit;
+      console.error = originalConsoleError;
+    }
+
+    expect(exitCodes).toEqual([1]);
+    expect(calls).toHaveLength(0);
+  });
+
+  test("reaffirms a valid persisted profile even when its file is read-only", async () => {
+    const persistedProfileUuid = "55555555-5555-4555-8555-555555555555";
+    persistCliToolSelectionProfile(persistedProfileUuid);
+    fs.chmodSync(cliToolSelectionProfilePath(process.env), 0o400);
+    const calls: Array<{ name: string; params: unknown }> = [];
+    recordProxy(calls, async (name, params) => {
+      if (name === "setToolEnabled") {
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                sessionUuid: persistedProfileUuid,
+                scope: "connection-profile",
+              }),
+            },
+          ],
+        };
+      }
+      return { content: [{ type: "text", text: "{}" }] };
+    });
+
+    await runCliCommand(["listDevices", "--platform", "android"]);
+
+    expect(calls[0]).toMatchObject({
+      name: "setToolEnabled",
+      params: { sessionUuid: persistedProfileUuid },
+    });
+  });
+
   test("re-mints when the persisted profile is stale/rejected by the daemon", async () => {
     const staleProfileUuid = "33333333-3333-4333-8333-333333333333";
     const freshProfileUuid = "22222222-2222-4222-8222-222222222222";
-    fs.mkdirSync(path.dirname(cliToolSelectionProfilePath(process.env)), { recursive: true });
-    fs.writeFileSync(cliToolSelectionProfilePath(process.env), staleProfileUuid);
+    persistCliToolSelectionProfile(staleProfileUuid);
     const calls: Array<{ name: string; params: unknown }> = [];
     recordProxy(calls, async (name, params) => {
       if (name === "setToolEnabled" && params.sessionUuid === staleProfileUuid) {
@@ -222,7 +286,12 @@ describe("CLI transparently enables gated tools", () => {
       if (name === "setToolEnabled") {
         expect(params).not.toHaveProperty("sessionUuid");
         return {
-          content: [{ type: "text", text: JSON.stringify({ sessionUuid: freshProfileUuid }) }],
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({ sessionUuid: freshProfileUuid, scope: "connection-profile" }),
+            },
+          ],
         };
       }
       return { content: [{ type: "text", text: "{}" }] };
@@ -244,14 +313,18 @@ describe("CLI transparently enables gated tools", () => {
 
   test("treats a corrupted persisted profile file as absent and mints fresh", async () => {
     const freshProfileUuid = "44444444-4444-4444-8444-444444444444";
-    fs.mkdirSync(path.dirname(cliToolSelectionProfilePath(process.env)), { recursive: true });
-    fs.writeFileSync(cliToolSelectionProfilePath(process.env), "not-a-uuid");
+    persistCliToolSelectionProfile("not-a-uuid");
     const calls: Array<{ name: string; params: unknown }> = [];
     recordProxy(calls, async (name, params) => {
       if (name === "setToolEnabled") {
         expect(params).not.toHaveProperty("sessionUuid");
         return {
-          content: [{ type: "text", text: JSON.stringify({ sessionUuid: freshProfileUuid }) }],
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({ sessionUuid: freshProfileUuid, scope: "connection-profile" }),
+            },
+          ],
         };
       }
       return { content: [{ type: "text", text: "{}" }] };

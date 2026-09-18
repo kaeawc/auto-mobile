@@ -67,7 +67,12 @@ function createProxy(client: FakeDaemonClient): DaemonMcpProxy {
 
 function toolSelectionResponse(sessionUuid: string) {
   return {
-    content: [{ type: "text" as const, text: JSON.stringify({ sessionUuid }) }],
+    content: [
+      {
+        type: "text" as const,
+        text: JSON.stringify({ sessionUuid, scope: "connection-profile" }),
+      },
+    ],
   };
 }
 
@@ -131,6 +136,39 @@ describe("reaffirmed tool-selection profile acquisition forwarding", () => {
         toolName: "provisionDevice",
         enabled: true,
         sessionUuid: requestedProfileUuid,
+      });
+      await proxy.callTool("provisionDevice", {});
+
+      expect(client.callToolCalls.at(-1)).toEqual({ toolName: "provisionDevice", params: {} });
+    } finally {
+      isAvailableSpy.mockRestore();
+      await proxy.close();
+    }
+  });
+
+  test("does not replay a device-session tool update as a connection profile", async () => {
+    const deviceSessionUuid = "device-session-a";
+    const client = new FakeDaemonClient({
+      toolResultFor: (toolName) =>
+        toolName === "setToolEnabled"
+          ? {
+              content: [
+                {
+                  type: "text" as const,
+                  text: JSON.stringify({ sessionUuid: deviceSessionUuid, scope: "device-session" }),
+                },
+              ],
+            }
+          : undefined,
+    });
+    const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+    const proxy = createProxy(client);
+
+    try {
+      await proxy.callTool("setToolEnabled", {
+        toolName: "provisionDevice",
+        enabled: true,
+        sessionUuid: deviceSessionUuid,
       });
       await proxy.callTool("provisionDevice", {});
 

@@ -117,6 +117,21 @@ function resolveSelectionSessionUuid(
   return sessionUuid;
 }
 
+function selectionScopeForSessionUuid(
+  sessionUuid: string,
+  connectionProfileUuid: string | undefined,
+  routingSessionUuid: string | undefined,
+): "connection-profile" | "device-session" {
+  // Match resolveSelectionSessionUuid's connection-profile-first fallback order.
+  if (sessionUuid === connectionProfileUuid) {
+    return "connection-profile";
+  }
+  if (sessionUuid === routingSessionUuid) {
+    return "device-session";
+  }
+  throw new ActionableError("Unable to determine the scope of this tool-selection session.");
+}
+
 /**
  * Reject every name that is not a user-configurable tool, naming them all at
  * once. This runs BEFORE the first write (and, for `enableTools`, before the
@@ -264,6 +279,11 @@ export function registerToolSelectionTools(): void {
         context?.toolSelectionProfileUuid,
         context?.routingSessionUuid,
       );
+      const scope = selectionScopeForSessionUuid(
+        sessionUuid,
+        context?.toolSelectionProfileUuid,
+        context?.routingSessionUuid,
+      );
       const enabled = args.enabled ?? true;
       const requested = await applyToolSelection(
         context?.sessionToolSelectionService,
@@ -274,6 +294,7 @@ export function registerToolSelectionTools(): void {
       ToolRegistry.notifyToolListChanged();
       const response = {
         sessionUuid,
+        scope,
         // The single-name request keeps its original `toolName` echo; a batch
         // echoes the applied `toolNames` instead (#6869).
         ...(args.toolNames ? { toolNames: requested } : { toolName: args.toolName }),

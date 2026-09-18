@@ -124,6 +124,7 @@ describe("setToolEnabled sessionUuid validation (#6148)", () => {
     const text = result.content?.find((c) => c.type === "text")?.text ?? "";
     expect(JSON.parse(text)).toMatchObject({
       sessionUuid: "S1",
+      scope: "device-session",
       toolName: "clipboard",
       enabled: true,
     });
@@ -188,6 +189,7 @@ describe("setToolEnabled sessionUuid validation (#6148)", () => {
     const text = result.content?.find((c) => c.type === "text")?.text ?? "";
     expect(JSON.parse(text)).toMatchObject({
       sessionUuid: "server-issued-profile-uuid",
+      scope: "connection-profile",
       toolName: "clipboard",
       enabled: true,
     });
@@ -234,6 +236,7 @@ describe("setToolEnabled sessionUuid validation (#6148)", () => {
     const secondText = second.content?.find((c) => c.type === "text")?.text ?? "";
     expect(JSON.parse(secondText)).toMatchObject({
       sessionUuid: mintedProfileUuid,
+      scope: "connection-profile",
       toolName: "clipboard",
       enabled: false,
     });

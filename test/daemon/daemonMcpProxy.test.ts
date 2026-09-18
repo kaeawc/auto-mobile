@@ -5247,6 +5247,7 @@ describe("DaemonMcpProxy", () => {
                     type: "text",
                     text: JSON.stringify({
                       sessionUuid: "device-session-a",
+                      scope: "device-session",
                       toolName: "openLink",
                       enabled: true,
                     }),
@@ -5279,13 +5280,7 @@ describe("DaemonMcpProxy", () => {
         expect(client.callDaemonMethodCalls.filter((call) => call.method === "tools/list")).toEqual(
           [
             { method: "tools/list", params: { sessionUuid: "device-session-a" } },
-            {
-              method: "tools/list",
-              params: {
-                sessionUuid: "device-session-a",
-                [DAEMON_TOOL_SELECTION_PROFILE_PARAM]: "device-session-a",
-              },
-            },
+            { method: "tools/list", params: { sessionUuid: "device-session-a" } },
           ],
         );
       } finally {
@@ -5304,6 +5299,7 @@ describe("DaemonMcpProxy", () => {
                     type: "text",
                     text: JSON.stringify({
                       sessionUuid: "device-session-a",
+                      scope: "device-session",
                       toolName: "openLink",
                       enabled: true,
                     }),
@@ -5338,10 +5334,7 @@ describe("DaemonMcpProxy", () => {
         expect(await proxy.listTools()).toEqual([{ name: "setToolEnabled" }, { name: "openLink" }]);
         expect(replacementClient.callDaemonMethodCalls).toContainEqual({
           method: "tools/list",
-          params: {
-            sessionUuid: "device-session-a",
-            [DAEMON_TOOL_SELECTION_PROFILE_PARAM]: "device-session-a",
-          },
+          params: { sessionUuid: "device-session-a" },
         });
       } finally {
         isAvailableSpy.mockRestore();
@@ -5355,7 +5348,11 @@ describe("DaemonMcpProxy", () => {
           content: [
             {
               type: "text",
-              text: JSON.stringify({ sessionUuid: "profile-a", toolName: "clipboard" }),
+              text: JSON.stringify({
+                sessionUuid: "profile-a",
+                scope: "connection-profile",
+                toolName: "clipboard",
+              }),
             },
           ],
         },
@@ -5395,7 +5392,11 @@ describe("DaemonMcpProxy", () => {
           content: [
             {
               type: "text",
-              text: JSON.stringify({ sessionUuid: "profile-a", toolName: "executePlan" }),
+              text: JSON.stringify({
+                sessionUuid: "profile-a",
+                scope: "connection-profile",
+                toolName: "executePlan",
+              }),
             },
           ],
         },
@@ -5444,7 +5445,11 @@ describe("DaemonMcpProxy", () => {
           content: [
             {
               type: "text",
-              text: JSON.stringify({ sessionUuid: "profile-a", toolName: "clipboard" }),
+              text: JSON.stringify({
+                sessionUuid: "profile-a",
+                scope: "connection-profile",
+                toolName: "clipboard",
+              }),
             },
           ],
         },
@@ -5491,7 +5496,11 @@ describe("DaemonMcpProxy", () => {
                 content: [
                   {
                     type: "text",
-                    text: JSON.stringify({ sessionUuid: "profile-a", toolName: "clipboard" }),
+                    text: JSON.stringify({
+                      sessionUuid: "profile-a",
+                      scope: "connection-profile",
+                      toolName: "clipboard",
+                    }),
                   },
                 ],
               }

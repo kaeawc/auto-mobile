@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { ActionableError } from "../models";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
 import { ensureSecureTempDirSync } from "../utils/tempDir";
@@ -29,6 +30,31 @@ export function loadPersistedCliToolSelectionProfile(
     // A read failure only means the next CLI invocation must mint again.
     logger.debug(`Unable to load the persisted CLI tool-selection profile: ${errorMessage(error)}`);
     return undefined;
+  }
+}
+
+/**
+ * Fail before minting a daemon-side profile when this CLI process cannot
+ * persist its UUID for a later invocation.
+ */
+export function ensureCliToolSelectionProfileStoreWritable(
+  env: NodeJS.ProcessEnv = process.env,
+): void {
+  const profilePath = cliToolSelectionProfilePath(env);
+  const storePath = path.dirname(profilePath);
+  try {
+    fs.accessSync(storePath, fs.constants.W_OK);
+    if (fs.existsSync(profilePath)) {
+      if (!fs.statSync(profilePath).isFile()) {
+        throw new Error("profile path is not a regular file");
+      }
+      fs.accessSync(profilePath, fs.constants.W_OK);
+    }
+  } catch (error) {
+    throw new ActionableError(
+      `CLI tool-selection profile store is not writable: ${profilePath}. Fix its permissions or set AUTOMOBILE_DATA_DIR/AUTO_MOBILE_DATA_DIR to a writable directory so the CLI can persist a stable tool-selection profile across invocations.`,
+      { cause: error },
+    );
   }
 }
 

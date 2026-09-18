@@ -29,6 +29,7 @@ import { serverConfig } from "../utils/ServerConfig";
 import { cliStderr, cliStdout, renderCliToolOutput, type CliByteSink } from "./toolOutput";
 import type { CliTerminationRequest } from "./termination";
 import {
+  ensureCliToolSelectionProfileStoreWritable,
   loadPersistedCliToolSelectionProfile,
   persistCliToolSelectionProfile,
 } from "./cliToolSelectionProfile";
@@ -446,36 +447,40 @@ async function ensureCliToolEnabled(proxy: CliDaemonProxy, toolName: string): Pr
   const params: Record<string, unknown> = { toolName, enabled: true };
   if (persistedProfileUuid) {
     params.sessionUuid = persistedProfileUuid;
+  } else {
+    ensureCliToolSelectionProfileStoreWritable();
   }
+  let result: Awaited<ReturnType<CliDaemonProxy["callTool"]>>;
   try {
-    const result = await proxy.callTool(SET_TOOL_ENABLED_TOOL_NAME, params);
-    const returnedProfileUuid = toolSelectionProfileUuidFromResponse(result);
-    if (!persistedProfileUuid && returnedProfileUuid) {
-      persistCliToolSelectionProfile(returnedProfileUuid);
-    }
-    if (!persistedProfileUuid) {
-      return;
-    }
+    result = await proxy.callTool(SET_TOOL_ENABLED_TOOL_NAME, params);
+  } catch (error) {
+    // Non-fatal: the actual tool call surfaces the real gate error if enabling failed.
+    logger.debug(`CLI pre-enable of ${toolName} did not apply: ${errorMessage(error)}`);
+    return;
+  }
+  const returnedProfileUuid = toolSelectionProfileUuidFromResponse(result);
+  if (!persistedProfileUuid) {
+    persistCliToolSelectionProfile(returnedProfileUuid ?? "");
+    return;
+  }
 
-    const reaffirmFailed =
-      result?.isError === true ||
-      returnedProfileUuid === undefined ||
-      returnedProfileUuid !== persistedProfileUuid;
-    if (!reaffirmFailed) {
-      return;
-    }
+  const reaffirmFailed =
+    result?.isError === true ||
+    returnedProfileUuid === undefined ||
+    returnedProfileUuid !== persistedProfileUuid;
+  if (!reaffirmFailed) {
+    return;
+  }
 
-    logger.debug(
-      `CLI tool-selection profile ${persistedProfileUuid} is stale; re-minting a profile`,
-    );
+  logger.debug(`CLI tool-selection profile ${persistedProfileUuid} is stale; re-minting a profile`);
+  ensureCliToolSelectionProfileStoreWritable();
+  try {
     const retryResult = await proxy.callTool(SET_TOOL_ENABLED_TOOL_NAME, {
       toolName,
       enabled: true,
     });
     const remintedProfileUuid = toolSelectionProfileUuidFromResponse(retryResult);
-    if (remintedProfileUuid) {
-      persistCliToolSelectionProfile(remintedProfileUuid);
-    }
+    persistCliToolSelectionProfile(remintedProfileUuid ?? "");
   } catch (error) {
     // Non-fatal: the actual tool call surfaces the real gate error if enabling failed.
     logger.debug(`CLI pre-enable of ${toolName} did not apply: ${errorMessage(error)}`);

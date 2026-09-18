@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import path from "node:path";
 import { TakeScreenshot } from "../../../src/features/observe/TakeScreenshot";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
@@ -71,12 +72,8 @@ describe("TakeScreenshot path generation", function () {
     expect(
       generated.endsWith(screenshotFileName(1234567890123, "127.0.0.1:5555", "capture-1", "png")),
     ).toBe(true);
-    expect(pathBasename(generated)).toMatch(
+    expect(path.basename(generated)).toMatch(
       /^screenshot_1234567890123_127-0-0-1-5555-[0-9a-f]+_capture-1\.png$/,
     );
   });
 });
-
-function pathBasename(value: string): string {
-  return value.slice(value.lastIndexOf("/") + 1);
-}

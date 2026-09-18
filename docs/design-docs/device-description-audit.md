@@ -76,8 +76,9 @@ Observed against the shared local daemon. Read-only calls only: `listDevices`,
 
 Provenance caveats, so nobody reads more into the table than it supports:
 
-- The daemon that answered was built from `596475d1a`, three commits behind the
-  main head this doc lives on. Two of those commits touch these surfaces:
+- The daemon that answered was built from `596475d1a`, five commits behind the
+  main head this doc lives on (two of them README badge bumps). Two of the
+  remaining three touch these surfaces:
   #7238 changed the image `state` alias to the raw discovery token and added
   `session.sessionUuid`/canonical readiness on acquisitions. Values marked
   `(pre-#7238)` below were observed on the older build and are expected to
@@ -94,8 +95,9 @@ Provenance caveats, so nobody reads more into the table than it supports:
 
 Lifecycle states that were **not observable** and therefore have no column:
 `configured` (not booted) on either platform (all images were booted),
-`assigned` (no device held a session; none was created), `booting`,
-`shutting-down`, and `unavailable`. Physical devices: none attached.
+`booting`, `shutting-down`, and `unavailable`. Likewise unobserved on the
+session/pool axis (`session.poolStatus`, not a lifecycle state): `assigned`
+(no device held a session; none was created). Physical devices: none attached.
 
 Cell legend: value as emitted, `null`, `—` when the surface omits the key
 entirely. Long ids are abbreviated (`4E8A6FF9…`). Where the three Android

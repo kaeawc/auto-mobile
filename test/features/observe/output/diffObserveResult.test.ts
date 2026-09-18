@@ -774,6 +774,149 @@ describe("diffObserveResult", () => {
     expect(DIFF_SCALAR_FIELDS).toContain("layoutWarnings");
   });
 
+  test("skeleton layout-warning diffs emit per-entry additions and removals", () => {
+    const node = { "resource-id": "a", bounds: { left: 0, top: 0, right: 10, bottom: 10 } };
+    const warning = (text: string) => ({
+      type: "important-content-under-inset",
+      severity: "warning",
+      element: { text, bounds: { left: 0, top: 0, right: 100, bottom: 30 } },
+      categories: ["text"],
+      insetTypes: ["safeArea"],
+      sides: ["top"],
+      overflowPx: { top: 30 },
+      insetPx: { top: 59.5 },
+      overlapPercent: 100,
+      confidence: "high",
+    });
+    const removed = warning("Old title");
+    const added = warning("New title");
+
+    const diff = diffObserveResult(
+      obs(node, { layoutWarnings: { scope: "full", warnings: [removed] } }),
+      obs(node, { layoutWarnings: { scope: "full", warnings: [added] } }),
+      { layoutWarningsDiffMode: "perEntry" },
+    );
+
+    expect(diff.fields!.layoutWarnings).toEqual({ added: [added], removed: [removed] });
+  });
+
+  test("skeleton layout-warning diffs emit envelope-only changes", () => {
+    const node = { "resource-id": "a", bounds: { left: 0, top: 0, right: 10, bottom: 10 } };
+    const warning = {
+      type: "important-content-under-inset",
+      severity: "warning",
+      element: { text: "Title", bounds: { left: 0, top: 0, right: 100, bottom: 30 } },
+      categories: ["text"],
+      insetTypes: ["safeArea"],
+      sides: ["top"],
+      overflowPx: { top: 30 },
+      insetPx: { top: 59.5 },
+      overlapPercent: 100,
+      confidence: "high",
+    } as const;
+    const warnings = [warning];
+
+    const diff = diffObserveResult(
+      obs(node, { layoutWarnings: { scope: "truncated", total: 100, warnings } }),
+      obs(node, { layoutWarnings: { scope: "truncated", total: 140, warnings } }),
+      { layoutWarningsDiffMode: "perEntry" },
+    );
+
+    expect(diff.fields!.layoutWarnings).toEqual({
+      added: [],
+      removed: [],
+      total: { from: 100, to: 140 },
+    });
+  });
+
+  test("skeleton layout-warning diffs ignore confidence-only churn and systemui notification chrome", () => {
+    const node = { "resource-id": "a", bounds: { left: 0, top: 0, right: 10, bottom: 10 } };
+    const appWarning = (confidence: string) => ({
+      type: "important-content-under-inset",
+      severity: "warning",
+      element: { text: "Title", bounds: { left: 0, top: 0, right: 100, bottom: 30 } },
+      categories: ["text"],
+      insetTypes: ["safeArea"],
+      sides: ["top"],
+      overflowPx: { top: 30 },
+      insetPx: { top: 59.5 },
+      overlapPercent: 100,
+      confidence,
+    });
+    const systemUiWarning = (description: string) => ({
+      ...appWarning("high"),
+      element: { contentDesc: description, bounds: { left: 0, top: 0, right: 100, bottom: 30 } },
+    });
+
+    expect(
+      diffObserveResult(
+        obs(node, { layoutWarnings: { scope: "full", warnings: [appWarning("high")] } }),
+        obs(node, { layoutWarnings: { scope: "full", warnings: [appWarning("medium")] } }),
+        { layoutWarningsDiffMode: "perEntry" },
+      ).fields,
+    ).toBeUndefined();
+    expect(
+      diffObserveResult(
+        obs(node, {
+          layoutWarnings: { scope: "full", warnings: [systemUiWarning("Messages notification:")] },
+        }),
+        obs(node, {
+          layoutWarnings: { scope: "full", warnings: [systemUiWarning("Clock notification:")] },
+        }),
+        { layoutWarningsDiffMode: "perEntry" },
+      ).fields,
+    ).toBeUndefined();
+  });
+
+  test("skeleton added and removed nodes retain compact actionable rows and keys", () => {
+    const baseline = obs({
+      "resource-id": "root",
+      bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+      node: [
+        {
+          "resource-id": "old",
+          text: "Old",
+          clickable: true,
+          bounds: { left: 1, top: 1, right: 20, bottom: 20 },
+          actions: ["click"],
+        },
+      ],
+    });
+    const next = obs({
+      "resource-id": "root",
+      bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+      node: [
+        {
+          "resource-id": "new",
+          text: "New",
+          clickable: true,
+          bounds: { left: 1, top: 1, right: 20, bottom: 20 },
+          actions: ["click"],
+        },
+        { "resource-id": "container", bounds: { left: 30, top: 1, right: 50, bottom: 20 } },
+      ],
+    });
+
+    const diff = diffObserveResult(baseline, next, {
+      projectAddedRemoved: true,
+      contentIdentity: false,
+    });
+
+    expect(diff.added).toHaveLength(1);
+    expect(diff.removed).toHaveLength(1);
+    expect(diff.added[0]).toEqual({
+      key: expect.any(String),
+      attributes: {
+        elementId: "new",
+        label: "New",
+        affordances: ["tap"],
+        bounds: [1, 1, 20, 20],
+      },
+    });
+    expect(diff.removed[0].attributes).toMatchObject({ elementId: "old", affordances: ["tap"] });
+    expect(diff.added[0].key).toContain("new");
+  });
+
   test("the emitted focusedElement is stripped of its `node` child subtree", () => {
     // parseNodeBounds shallow-copies the source node, so a mirror element can
     // carry a full child subtree — the only unbounded part of an Element.

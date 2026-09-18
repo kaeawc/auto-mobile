@@ -2140,7 +2140,7 @@ describe("finalizeToolResponse", () => {
       expect(JSON.stringify(next)).toBe(before);
     });
 
-    test("the emitted diff carries tuple-shaped bounds in its node attributes", () => {
+    test("skeleton diffs carry tuple-shaped bounds in compact added rows", () => {
       // The diff runs on the sanitized (always-compacted) observation, so a node
       // surfaced in the diff carries the tuple bounds, not the object shape.
       const { store } = makeStore();
@@ -2167,7 +2167,11 @@ describe("finalizeToolResponse", () => {
 
       const next = withBounds();
       (next.viewHierarchy!.hierarchy.node as any).node = [
-        { "resource-id": "com.example:id/added", bounds: { left: 5, top: 6, right: 7, bottom: 8 } },
+        {
+          "resource-id": "com.example:id/added",
+          clickable: true,
+          bounds: { left: 5, top: 6, right: 7, bottom: 8 },
+        },
       ];
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: next }),
@@ -2177,8 +2181,118 @@ describe("finalizeToolResponse", () => {
       const obsSc = (finalized.structuredContent as any).observation;
       expect(obsSc.isDiff).toBe(true);
       expect(obsSc.added).toHaveLength(1);
-      expect(obsSc.added[0].attributes.bounds).toEqual([5, 6, 7, 8]);
+      expect(obsSc.added[0].attributes).toEqual({
+        elementId: "com.example:id/added",
+        affordances: ["tap"],
+        bounds: [5, 6, 7, 8],
+      });
       expectObservationDiff(finalized, { mode: "diff", reason: "diff_emitted" });
+    });
+    test("skeleton action diffs stay compact while full projection preserves raw warning and node shapes", () => {
+      const statusWarning = (description: string) => ({
+        type: "important-content-under-inset" as const,
+        severity: "warning" as const,
+        element: {
+          contentDesc: description,
+          bounds: { left: 0, top: 0, right: 20, bottom: 20 },
+        },
+        categories: ["text"] as Array<"text">,
+        insetTypes: ["systemBars"] as Array<"systemBars">,
+        sides: ["top"] as Array<"top">,
+        overflowPx: { top: 20 },
+        insetPx: { top: 24 },
+        overlapPercent: 100,
+        confidence: "high" as const,
+      });
+      const makeListObservation = (
+        notificationPrefix: string,
+        includeRows: boolean,
+      ): ObserveResult => ({
+        ...sameScreenObserve(),
+        layoutWarnings: {
+          scope: "full",
+          warnings: Array.from({ length: 8 }, (_, index) =>
+            statusWarning(`${notificationPrefix} ${index} notification:`),
+          ),
+        },
+        viewHierarchy: {
+          packageName: "com.example",
+          hierarchy: {
+            node: {
+              "resource-id": "com.example:id/root",
+              bounds: { left: 0, top: 0, right: 1080, bottom: 1920 },
+              node: includeRows
+                ? Array.from({ length: 30 }, (_, index) => ({
+                    "resource-id": `com.example:id/result_${index}`,
+                    text: `Search result ${index}`,
+                    clickable: true,
+                    actions: ["click", "long_click"],
+                    class: "android.widget.TextView",
+                    occlusionState: "visible",
+                    bounds: {
+                      left: 0,
+                      top: 100 + index * 40,
+                      right: 1080,
+                      bottom: 136 + index * 40,
+                    },
+                  }))
+                : [],
+            } as any,
+          },
+        },
+      });
+      const baseline = makeListObservation("Old", false);
+      const next = makeListObservation("New", true);
+
+      const { store: skeletonStore } = makeStore();
+      finalizeToolResponse(createStructuredToolResponse(baseline), {
+        name: "observe",
+        sessionUuid: "skeleton",
+        baselineStore: skeletonStore,
+      });
+      const skeleton = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: next }),
+        {
+          name: "tapOn",
+          sessionUuid: "skeleton",
+          baselineStore: skeletonStore,
+        },
+      );
+      const skeletonObservation = (skeleton.structuredContent as any).observation;
+      expect(
+        Buffer.byteLength(stringifyToolResponse(skeleton.structuredContent), "utf8"),
+      ).toBeLessThan(8 * 1024);
+      expect(skeletonObservation.skeleton).toBeDefined();
+      expect(skeletonObservation.fields?.layoutWarnings).toBeUndefined();
+      expect(skeletonObservation.added[0].attributes).toEqual({
+        elementId: "com.example:id/result_0",
+        label: "Search result 0",
+        affordances: ["tap", "long-press"],
+        bounds: [0, 100, 1080, 136],
+      });
+
+      const { store: fullStore } = makeStore();
+      finalizeToolResponse(createStructuredToolResponse(baseline), {
+        name: "observe",
+        sessionUuid: "full",
+        baselineStore: fullStore,
+      });
+      const full = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: next }),
+        {
+          name: "tapOn",
+          args: { project: "full" },
+          sessionUuid: "full",
+          baselineStore: fullStore,
+        },
+      );
+      const fullObservation = (full.structuredContent as any).observation;
+      expect(fullObservation.fields.layoutWarnings.from.warnings).toHaveLength(8);
+      expect(fullObservation.fields.layoutWarnings.to.warnings).toHaveLength(8);
+      expect(fullObservation.fields.layoutWarnings.from.warnings[0].element.bounds).toEqual([
+        0, 0, 20, 20,
+      ]);
+      expect(fullObservation.added[0].attributes.actions).toEqual(["click", "long_click"]);
     });
   });
 
@@ -2337,16 +2451,24 @@ describe("finalizeToolResponse", () => {
 
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: next }),
-        { name: "tapOn", sessionUuid: "s1", baselineStore: store, artifactWriter: writer } as any,
+        {
+          name: "tapOn",
+          sessionUuid: "s1",
+          args: { project: "full" },
+          baselineStore: store,
+          artifactWriter: writer,
+        } as any,
       );
 
       expect((writer.writes[0].data as any).isDiff).toBe(true);
       expect(writer.writes[0].payload).toBe("ObserveDiff");
       expect((writer.writes[0].data as any).added[0].attributes.bounds).toEqual([5, 6, 7, 8]);
+      expect((writer.writes[0].data as any).skeleton).toBeUndefined();
       expect((finalized.structuredContent as any).observation.artifact.path).toBe(
         "/tmp/auto-mobile/tapOn-1.json",
       );
       expect((finalized.structuredContent as any).observation.artifact.payload).toBe("ObserveDiff");
+      expect((finalized.structuredContent as any).observation.skeleton).toBeDefined();
       expect((finalized.structuredContent as any).observationDiff).toMatchObject({
         mode: "diff",
         reason: "diff_emitted",

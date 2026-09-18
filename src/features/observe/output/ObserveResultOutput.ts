@@ -1,6 +1,8 @@
+import type { Element } from "../../../models/Element";
+import type { LayoutWarning, LayoutWarningsScope } from "../../../models/ObservationInsets";
 import type { ObserveResult, SkeletonElement } from "../../../models/ObserveResult";
 import type { ViewHierarchyNode } from "../../../models/ViewHierarchyResult";
-import { projectSkeleton } from "./SkeletonProjection";
+import { projectSkeleton, projectSkeletonElement } from "./SkeletonProjection";
 import { capLayoutWarnings } from "../audits/SafeAreaAuditor";
 import { captureFidelityTruncationReasons } from "../truncationReasons";
 
@@ -582,6 +584,11 @@ export interface ObserveDiffNode {
    * above), or act on a `skeleton` row.
    */
   key: string;
+  /**
+   * Full-mode diffs retain the raw hierarchy attributes. Skeleton-mode diffs
+   * carry the compact skeleton row fields instead and omit zero-affordance
+   * nodes, while preserving this entry's positional {@link key}.
+   */
   attributes: Record<string, unknown>;
 }
 
@@ -704,14 +711,30 @@ export interface ObserveDiff {
   /**
    * Changed top-level fields: scalars (`rotation`, `wakefulness`, …) and the
    * Element mirror fields (`focusedElement`, `accessibilityFocusedElement`,
-   * `awaitedElement` — #3052), each as `{from, to}`.
+   * `awaitedElement` — #3052), each as `{from, to}`. In skeleton mode only,
+   * `layoutWarnings` is a per-entry `{added, removed}` pair after system UI
+   * status-bar chrome is excluded, with sparse envelope deltas when completeness
+   * metadata changes.
    */
-  fields?: Record<string, { from?: unknown; to?: unknown }>;
+  fields?: Record<
+    string,
+    | { from?: unknown; to?: unknown }
+    | {
+        added: LayoutWarning[];
+        removed: LayoutWarning[];
+        scope?: { from?: LayoutWarningsScope; to?: LayoutWarningsScope };
+        total?: { from?: number; to?: number };
+      }
+  >;
 }
 
 export interface DiffObserveConfig {
   /** Compact output suppresses captured IME subtrees; full/raw diffs retain them. */
   collapseKeyboard?: boolean;
+  /** Skeleton-only per-warning layout diff; defaults to the full `{from,to}` envelope. */
+  layoutWarningsDiffMode?: "full" | "perEntry";
+  /** Skeleton-only projection for added/removed nodes; defaults to raw attributes. */
+  projectAddedRemoved?: boolean;
   /**
    * Top-level scalar ObserveResult fields to diff. Defaults to
    * `DIFF_SCALAR_FIELDS`. `updatedAt` is deliberately excluded from the default
@@ -1094,6 +1117,128 @@ function layoutWarningsEqual(a: unknown, b: unknown): boolean {
   return valuesEqual(withoutDerivedConfidence(a), withoutDerivedConfidence(b));
 }
 
+/** Layout-warning identity is stable across bounds and confidence churn. */
+function layoutWarningIdentity(warning: LayoutWarning): string {
+  return [
+    warning.type,
+    warning.element.viewId ?? warning.element.resourceId ?? "",
+    warning.element.contentDesc ?? warning.element.text ?? "",
+  ].join("\0");
+}
+
+function layoutWarningWithoutConfidence(warning: LayoutWarning): Omit<LayoutWarning, "confidence"> {
+  return {
+    type: warning.type,
+    severity: warning.severity,
+    element: warning.element,
+    categories: warning.categories,
+    insetTypes: warning.insetTypes,
+    sides: warning.sides,
+    overflowPx: warning.overflowPx,
+    insetPx: warning.insetPx,
+    overlapPercent: warning.overlapPercent,
+  };
+}
+
+/**
+ * SystemUI's own notification icons live in the status bar rather than app
+ * content. #7217 excludes only that narrow false-positive family from compact
+ * diffs; app warnings of the same type remain actionable diagnostics.
+ */
+function isSystemUiStatusBarWarning(warning: LayoutWarning): boolean {
+  if (warning.type !== "important-content-under-inset") {
+    return false;
+  }
+  const { resourceId, contentDesc, text } = warning.element;
+  if (resourceId?.startsWith("com.android.systemui:id/")) {
+    return true;
+  }
+  return !resourceId && (contentDesc ?? text)?.endsWith("notification:") === true;
+}
+
+function layoutWarningsForPerEntryDiff(value: unknown): LayoutWarning[] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return [];
+  }
+  const warnings = (value as Record<string, unknown>).warnings;
+  return Array.isArray(warnings)
+    ? (warnings.filter((warning): warning is LayoutWarning =>
+        Boolean(warning && typeof warning === "object" && !Array.isArray(warning)),
+      ) as LayoutWarning[])
+    : [];
+}
+
+function diffLayoutWarningsPerEntry(
+  baseline: unknown,
+  next: unknown,
+): {
+  added: LayoutWarning[];
+  removed: LayoutWarning[];
+  scope?: { from?: LayoutWarningsScope; to?: LayoutWarningsScope };
+  total?: { from?: number; to?: number };
+} {
+  const envelope = (value: unknown): { scope?: LayoutWarningsScope; total?: number } => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return {};
+    }
+    const record = value as Record<string, unknown>;
+    return {
+      scope: record.scope as LayoutWarningsScope | undefined,
+      total: record.total as number | undefined,
+    };
+  };
+  const baselineEnvelope = envelope(baseline);
+  const nextEnvelope = envelope(next);
+  const byIdentity = (warnings: LayoutWarning[]): Map<string, LayoutWarning[]> => {
+    const grouped = new Map<string, LayoutWarning[]>();
+    for (const warning of warnings.filter((warning) => !isSystemUiStatusBarWarning(warning))) {
+      const identity = layoutWarningIdentity(warning);
+      const entries = grouped.get(identity);
+      if (entries) {
+        entries.push(warning);
+      } else {
+        grouped.set(identity, [warning]);
+      }
+    }
+    return grouped;
+  };
+  const baselineByIdentity = byIdentity(layoutWarningsForPerEntryDiff(baseline));
+  const nextByIdentity = byIdentity(layoutWarningsForPerEntryDiff(next));
+  const added: LayoutWarning[] = [];
+  const removed: LayoutWarning[] = [];
+  for (const identity of new Set([...baselineByIdentity.keys(), ...nextByIdentity.keys()])) {
+    const from = baselineByIdentity.get(identity) ?? [];
+    const to = nextByIdentity.get(identity) ?? [];
+    const paired = Math.min(from.length, to.length);
+    for (let index = 0; index < paired; index++) {
+      if (
+        !valuesEqual(
+          layoutWarningWithoutConfidence(from[index]),
+          layoutWarningWithoutConfidence(to[index]),
+        )
+      ) {
+        removed.push(from[index]);
+        added.push(to[index]);
+      }
+    }
+    removed.push(...from.slice(paired));
+    added.push(...to.slice(paired));
+  }
+  const diff: {
+    added: LayoutWarning[];
+    removed: LayoutWarning[];
+    scope?: { from?: LayoutWarningsScope; to?: LayoutWarningsScope };
+    total?: { from?: number; to?: number };
+  } = { added, removed };
+  if (!valuesEqual(baselineEnvelope.scope, nextEnvelope.scope)) {
+    diff.scope = { from: baselineEnvelope.scope, to: nextEnvelope.scope };
+  }
+  if (!valuesEqual(baselineEnvelope.total, nextEnvelope.total)) {
+    diff.total = { from: baselineEnvelope.total, to: nextEnvelope.total };
+  }
+  return diff;
+}
+
 /**
  * A node's *stable content* identity key (issue #3053): `resource-id / view-id /
  * content-desc / text`, NUL-joined. Deliberately excludes `bounds` and sibling
@@ -1405,8 +1550,18 @@ function repairByIosStableIdentity(
  * where {@link deriveDiffSelector} actually earns its bytes — see its use in
  * {@link diffObserveResult}.
  */
-function toObserveDiffNode(node: DiffRepairNode): ObserveDiffNode {
-  return { key: node.key, attributes: node.attributes };
+function toObserveDiffNode(
+  node: DiffRepairNode,
+  projectAddedRemoved: boolean,
+): ObserveDiffNode | undefined {
+  if (!projectAddedRemoved) {
+    return { key: node.key, attributes: node.attributes };
+  }
+  const skeleton = projectSkeletonElement(node.attributes as Element);
+  if (!skeleton || skeleton.affordances.length === 0) {
+    return undefined;
+  }
+  return { key: node.key, attributes: { ...skeleton } };
 }
 
 /** Group flattened nodes by their positional `pathKey`, preserving encounter order. */
@@ -1541,14 +1696,18 @@ export function diffObserveResult(
     // (`finalizeToolResponse`) overwrites this with the actionable-only
     // skeleton it independently re-projects from the pre-drop payload.
     skeleton: [],
-    added: finalAdded.map(toObserveDiffNode),
-    removed: finalRemoved.map(toObserveDiffNode),
+    added: finalAdded
+      .map((node) => toObserveDiffNode(node, cfg?.projectAddedRemoved === true))
+      .filter((node): node is ObserveDiffNode => node !== undefined),
+    removed: finalRemoved
+      .map((node) => toObserveDiffNode(node, cfg?.projectAddedRemoved === true))
+      .filter((node): node is ObserveDiffNode => node !== undefined),
     changed,
   };
 
   const scalarFields = cfg?.scalarFields ?? DIFF_SCALAR_FIELDS;
   const elementFields = cfg?.elementFields ?? DIFF_ELEMENT_FIELDS;
-  const fields: Record<string, { from?: unknown; to?: unknown }> = {};
+  const fields: NonNullable<ObserveDiff["fields"]> = {};
   const baseRecord = baseline as unknown as Record<string, unknown>;
   const nextRecord = next as unknown as Record<string, unknown>;
   for (const field of scalarFields) {
@@ -1556,7 +1715,17 @@ export function diffObserveResult(
       field === "layoutWarnings"
         ? layoutWarningsEqual(baseRecord[field], nextRecord[field])
         : valuesEqual(baseRecord[field], nextRecord[field]);
-    if (!equal) {
+    if (field === "layoutWarnings" && cfg?.layoutWarningsDiffMode === "perEntry") {
+      const layoutWarnings = diffLayoutWarningsPerEntry(baseRecord[field], nextRecord[field]);
+      if (
+        layoutWarnings.added.length > 0 ||
+        layoutWarnings.removed.length > 0 ||
+        layoutWarnings.scope !== undefined ||
+        layoutWarnings.total !== undefined
+      ) {
+        fields[field] = layoutWarnings;
+      }
+    } else if (!equal) {
       fields[field] = { from: baseRecord[field], to: nextRecord[field] };
     }
   }

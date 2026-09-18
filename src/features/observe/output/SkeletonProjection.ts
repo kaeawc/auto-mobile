@@ -123,6 +123,13 @@ function deriveAffordances(el: Element): Affordance[] {
 /** Flatten an element's object bounds to the compact `[left, top, right, bottom]` tuple. */
 function boundsTuple(el: Element): SkeletonElement["bounds"] | undefined {
   const b = el.bounds;
+  if (
+    Array.isArray(b) &&
+    b.length === 4 &&
+    b.every((value) => typeof value === "number" && Number.isFinite(value))
+  ) {
+    return [b[0], b[1], b[2], b[3]];
+  }
   if (!b || typeof b !== "object") {
     return undefined;
   }
@@ -131,6 +138,32 @@ function boundsTuple(el: Element): SkeletonElement["bounds"] | undefined {
     return undefined;
   }
   return [left, top, right, bottom];
+}
+
+/**
+ * Project one already-flattened diff node into the compact skeleton row shape.
+ * Unlike {@link projectSkeleton}, this deliberately has no sibling or ancestry
+ * context, so it cannot hoist labels or assign duplicate indexes.
+ */
+export function projectSkeletonElement(element: Element): SkeletonElement | undefined {
+  const bounds = boundsTuple(element);
+  if (!bounds) {
+    return undefined;
+  }
+  const affordances = deriveAffordances(element);
+  const entry: SkeletonElement = { bounds, affordances };
+  const elementId = deriveId(element);
+  const label = deriveLabel(element);
+  if (elementId !== undefined) {
+    entry.elementId = elementId;
+  }
+  if (label !== undefined) {
+    entry.label = label.trim();
+  }
+  if (affordances.includes("toggle")) {
+    entry.checked = isTruthy(element.checked);
+  }
+  return entry;
 }
 
 /** Working accumulator for one merged skeleton row, keyed by `(elementId, label, bounds)`. */

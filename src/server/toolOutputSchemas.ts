@@ -311,6 +311,26 @@ const layoutWarningSchema = z.object({
   confidence: z.enum(["high", "medium"]),
 });
 
+const layoutWarningsPerEntryDiffSchema = z
+  .object({
+    added: z.array(layoutWarningSchema),
+    removed: z.array(layoutWarningSchema),
+    scope: z
+      .object({
+        from: z.enum(["full", "truncated", "scoped"]).optional(),
+        to: z.enum(["full", "truncated", "scoped"]).optional(),
+      })
+      .strict()
+      .optional(),
+    total: z.object({ from: z.number().optional(), to: z.number().optional() }).strict().optional(),
+  })
+  .strict();
+
+const layoutWarningsDiffFieldSchema = z.union([
+  z.object({ from: z.unknown().optional(), to: z.unknown().optional() }).strict(),
+  layoutWarningsPerEntryDiffSchema,
+]);
+
 const predictionTargetSchema = z
   .object({
     text: z.string().optional(),
@@ -956,9 +976,7 @@ export const observeDiffSchema = z
     added: z.array(observeDiffNodeSchema),
     removed: z.array(observeDiffNodeSchema),
     changed: z.array(observeDiffNodeChangeSchema),
-    fields: z
-      .record(z.string(), z.object({ from: z.unknown().optional(), to: z.unknown().optional() }))
-      .optional(),
+    fields: z.record(z.string(), layoutWarningsDiffFieldSchema).optional(),
   })
   .passthrough();
 requireObservationJoinKeysOnTheWire(observeDiffSchema);

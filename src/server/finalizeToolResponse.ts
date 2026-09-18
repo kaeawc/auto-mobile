@@ -573,6 +573,8 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
         ) {
           const diff = diffObserveResult(baseline, sanitized, {
             collapseKeyboard: servedObservation.skeleton !== undefined,
+            layoutWarningsDiffMode: servedObservation.skeleton !== undefined ? "perEntry" : "full",
+            projectAddedRemoved: servedObservation.skeleton !== undefined,
           });
           // Always attach a usable selector surface alongside the diff (issue #6221
           // item 4.1): a client that gets a diff must never be left with no
@@ -673,9 +675,12 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
         ...writeObservationArtifact(ctx, sanitizedPayload),
       };
     } else {
+      const observation = sanitizedPayload.observation;
       sanitizedPayload = {
         ...sanitizedPayload,
-        observation: writeObservationArtifact(ctx, sanitizedPayload.observation),
+        observation: isObserveDiff(observation)
+          ? writeObserveDiffBodyArtifact(ctx, observation)
+          : writeObservationArtifact(ctx, observation),
       };
     }
   }
@@ -972,6 +977,30 @@ function writeObservationArtifact(
     ctx,
     getObservationArtifactPayload(observationPayload),
     observationPayload,
+  );
+}
+
+/**
+ * Keep a diff's compact selector surface and capture metadata inline; only its
+ * potentially unbounded body belongs in the artifact (#7217).
+ */
+function writeObserveDiffBodyArtifact(
+  ctx: FinalizeToolResponseContext,
+  observation: Record<string, unknown>,
+): Record<string, unknown> {
+  const { added, removed, changed, fields, ...inline } = observation;
+  const body: Record<string, unknown> = { isDiff: true, added, removed, changed };
+  if (fields !== undefined) {
+    body.fields = fields;
+  }
+  return { ...inline, ...writeObservationArtifact(ctx, body) };
+}
+
+function isObserveDiff(observation: unknown): observation is Record<string, unknown> {
+  return (
+    observation !== null &&
+    typeof observation === "object" &&
+    (observation as Record<string, unknown>).isDiff === true
   );
 }
 

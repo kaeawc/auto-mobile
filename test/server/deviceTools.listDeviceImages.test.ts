@@ -98,13 +98,31 @@ describe("listDeviceImages", function () {
     });
     registerDeviceTools();
 
-    const response = await ToolRegistry.getRegisteredTool("listDeviceImages")!.handler({
-      platform: "ios",
-    });
+    const tool = ToolRegistry.getRegisteredTool("listDeviceImages")!;
+    const response = await tool.handler({ platform: "ios" });
     const payload = JSON.parse(response.content[0].text);
 
     expect(payload.images[0].state).toBe("Shutdown");
     expect(payload.images[0].lifecycle).toEqual({ state: "configured", known: true });
+    // The raw alias must stay inside the advertised output schema (strict MCP clients validate it).
+    expect(tool.outputSchema.safeParse(payload).success).toBe(true);
+  });
+
+  test("advertises a null state alias for images without a platform state", async function () {
+    const fakeDeviceManager = new FakeDeviceManager([
+      { name: "Pixel_8", platform: "android", deviceId: "Pixel_8", isRunning: false },
+    ]);
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => fakeDeviceManager,
+    });
+    registerDeviceTools();
+
+    const tool = ToolRegistry.getRegisteredTool("listDeviceImages")!;
+    const response = await tool.handler({ platform: "android" });
+    const payload = JSON.parse(response.content[0].text);
+
+    expect(payload.images[0].state).toBeNull();
+    expect(tool.outputSchema.safeParse(payload).success).toBe(true);
   });
 
   test("does not collapse a failed discovery into a complete empty inventory", async function () {

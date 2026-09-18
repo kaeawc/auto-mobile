@@ -423,8 +423,9 @@ export function resetDaemonProxyFactoryForTesting(): void {
  * the call. `setToolEnabled` is itself always enabled, and enabling then calling
  * over the same proxy connection resolves the same connection profile the daemon
  * checks in `assertToolEnabledForAnySession` (src/server/index.ts). Default-enabled
- * tools (the majority, and `provisionDevice` since it is an acquisition tool) skip
- * the extra round-trip. This is CLI-only: a remote MCP client never runs this path,
+ * tools (the majority) skip the extra round-trip; `provisionDevice` is gated like
+ * `deleteDevice` and goes through the pre-enable step. This is CLI-only: a remote MCP
+ * client never runs this path,
  * so it opens no tool-gating bypass for non-CLI callers.
  */
 async function ensureCliToolEnabled(proxy: CliDaemonProxy, toolName: string): Promise<void> {

@@ -52,6 +52,30 @@ describe("CLI transparently enables gated tools", () => {
     expect(enable?.params).toMatchObject({ toolName: "deleteDevice", enabled: true });
   });
 
+  test("enables a gated tool (provisionDevice) before calling it", async () => {
+    const calls: Array<{ name: string; params: unknown }> = [];
+    recordProxy(calls);
+
+    await runCliCommand([
+      "provisionDevice",
+      "--operationId",
+      "00000000-0000-4000-8000-000000000abc",
+      "--device",
+      JSON.stringify({
+        platform: "android",
+        name: "test-avd",
+        spec: { runtime: "android-35", deviceType: "pixel_6" },
+      }),
+    ]);
+
+    const names = calls.map((c) => c.name);
+    expect(names).toContain("setToolEnabled");
+    expect(names).toContain("provisionDevice");
+    expect(names.indexOf("setToolEnabled")).toBeLessThan(names.indexOf("provisionDevice"));
+    const enable = calls.find((c) => c.name === "setToolEnabled");
+    expect(enable?.params).toMatchObject({ toolName: "provisionDevice", enabled: true });
+  });
+
   test("does NOT pre-enable a default-enabled tool", async () => {
     const calls: Array<{ name: string; params: unknown }> = [];
     recordProxy(calls);

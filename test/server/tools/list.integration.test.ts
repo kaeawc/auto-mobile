@@ -119,9 +119,7 @@ describe("MCP Tools List", () => {
       expect(toolNames).not.toContain("imeAction");
       expect(toolNames).not.toContain("clipboard");
       expect(toolNames).not.toContain("openLink");
-      // provisionDevice is an acquisition tool (defaultEnabled): a fresh
-      // connection must be able to discover and call it without a bound session.
-      expect(toolNames).toContain("provisionDevice");
+      expect(toolNames).not.toContain("provisionDevice");
       expect(toolNames).not.toContain("deleteDevice");
       expect(toolNames).not.toContain("settleObserve");
       expect(toolNames).not.toContain("waitForCondition");

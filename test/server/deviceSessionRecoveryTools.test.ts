@@ -25,23 +25,22 @@ describe("advertised device-session recovery tools", () => {
     ToolRegistry.clearTools();
   });
 
-  test("names only directly-callable, discoverable acquisition tools", () => {
-    // Recovery advice must be directly actionable: every advertised tool is a
-    // discoverable, default-enabled acquisition tool a lost-session client can
-    // call with just an optional deviceId.
-    for (const name of DEVICE_SESSION_RECOVERY_TOOLS) {
-      expect([...DEVICE_SESSION_ACQUISITION_TOOLS]).toContain(name);
-      expect(ToolRegistry.isUserConfigurableTool(name)).toBe(true);
-      expect(ToolRegistry.getRegisteredTool(name)?.defaultEnabled).toBe(true);
-    }
+  test("matches the acquisition tools a client can discover", () => {
+    const discoverable = DEVICE_SESSION_ACQUISITION_TOOLS.filter(
+      (name) =>
+        ToolRegistry.isUserConfigurableTool(name) &&
+        ToolRegistry.getRegisteredTool(name)?.defaultEnabled === true,
+    );
+    expect([...DEVICE_SESSION_RECOVERY_TOOLS]).toEqual([...discoverable]);
   });
 
-  test("excludes provisionDevice even though it is now discoverable", () => {
-    // provisionDevice is default-enabled and discoverable (it must be callable
-    // on a fresh, unbound connection), but it needs a full device spec +
-    // operationId, so it is not directly-actionable recovery advice.
-    expect(ToolRegistry.getRegisteredTool("provisionDevice")?.defaultEnabled).toBe(true);
-    expect(ToolRegistry.isUserConfigurableTool("provisionDevice")).toBe(true);
+  test("excludes acquisition tools that are not enabled on a default connection", () => {
+    // A default connection omits `defaultEnabled: false` tools from discovery
+    // AND rejects the call, so advertising one hands the client dead advice.
+    for (const name of DEVICE_SESSION_RECOVERY_TOOLS) {
+      expect(ToolRegistry.getRegisteredTool(name)?.defaultEnabled).toBe(true);
+    }
+    expect(ToolRegistry.getRegisteredTool("provisionDevice")?.defaultEnabled).toBe(false);
     expect([...DEVICE_SESSION_RECOVERY_TOOLS]).not.toContain("provisionDevice");
   });
 

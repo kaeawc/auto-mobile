@@ -41,9 +41,15 @@ describe("CLI --session-uuid with device-session acquisition tools", () => {
     async (toolName) => {
       installFakeProxy();
       await runCliCommand(["--session-uuid", "session-abc", toolName]);
-      expect(calls).toHaveLength(1);
-      expect(calls[0].toolName).toBe(toolName);
-      expect(calls[0].params).not.toHaveProperty("sessionUuid");
+      // provisionDevice is gated, so CLI pre-enable adds a leading setToolEnabled call.
+      expect(calls).toHaveLength(toolName === "provisionDevice" ? 2 : 1);
+      if (toolName === "provisionDevice") {
+        expect(calls[0].toolName).toBe("setToolEnabled");
+        expect(calls[0].params.toolName).toBe("provisionDevice");
+      }
+      const actualCall = calls[calls.length - 1];
+      expect(actualCall.toolName).toBe(toolName);
+      expect(actualCall.params).not.toHaveProperty("sessionUuid");
     },
   );
 

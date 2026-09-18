@@ -3,7 +3,11 @@ import { ToolRegistry, ProgressCallback } from "./toolRegistry";
 import { BiometricAuth, BiometricAuthOptions } from "../features/action/BiometricAuth";
 import { ActionableError, BootedDevice } from "../models";
 import { createJSONToolResponse } from "../utils/toolUtils";
-import { addDeviceTargetingToSchema, responseShapeControlFields } from "./toolSchemaHelpers";
+import {
+  addDeviceTargetingToSchema,
+  addSessionUuidToSchema,
+  responseShapeControlFields,
+} from "./toolSchemaHelpers";
 import { computeIosSimulatorCapabilities } from "../features/utility/iosSimulatorCapabilities";
 import { DeviceState, type BiometricEnrollment } from "../features/utility/DeviceState";
 import { DaemonState } from "../daemon/daemonState";
@@ -49,18 +53,20 @@ export const biometricAuthSchema = addDeviceTargetingToSchema(
   path: ["errorCode"],
 });
 
-export const getIosSimulatorCapabilitiesSchema = z
-  .object({
-    deviceType: z
-      .string()
-      .min(1)
-      .describe("CoreSimulator device-type identifier selected from automobile:devices/images."),
-    runtime: z
-      .string()
-      .min(1)
-      .describe("CoreSimulator runtime identifier selected from automobile:devices/images."),
-  })
-  .strict();
+export const getIosSimulatorCapabilitiesSchema = addSessionUuidToSchema(
+  z
+    .object({
+      deviceType: z
+        .string()
+        .min(1)
+        .describe("CoreSimulator device-type identifier selected from automobile:devices/images."),
+      runtime: z
+        .string()
+        .min(1)
+        .describe("CoreSimulator runtime identifier selected from automobile:devices/images."),
+    })
+    .strict(),
+);
 
 interface BiometricEnrollmentCapture {
   sessionManager?: SessionManager;

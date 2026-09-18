@@ -2117,6 +2117,13 @@
           "description": "CoreSimulator runtime identifier selected from automobile:devices/images.",
           "type": "string",
           "minLength": 1
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
         }
       },
       "required": ["deviceType", "runtime"],

@@ -120,6 +120,55 @@ describe("CLI transparently enables gated tools", () => {
     expect(enable?.params).toMatchObject({ toolName: "provisionDevice", enabled: true });
   });
 
+  test("enables getIosSimulatorCapabilities and forwards a supplied session UUID only", async () => {
+    const callsWithoutSession: Array<{ name: string; params: unknown }> = [];
+    recordProxy(callsWithoutSession);
+
+    await runCliCommand([
+      "getIosSimulatorCapabilities",
+      "--deviceType",
+      "com.apple.CoreSimulator.SimDeviceType.iPhone-16",
+      "--runtime",
+      "iOS-18-0",
+    ]);
+
+    const namesWithoutSession = callsWithoutSession.map((call) => call.name);
+    expect(namesWithoutSession.indexOf("setToolEnabled")).toBeLessThan(
+      namesWithoutSession.indexOf("getIosSimulatorCapabilities"),
+    );
+    const capabilitiesWithoutSession = callsWithoutSession.find(
+      (call) => call.name === "getIosSimulatorCapabilities",
+    );
+    expect(capabilitiesWithoutSession?.params).toEqual({
+      deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-16",
+      runtime: "iOS-18-0",
+    });
+
+    const callsWithSession: Array<{ name: string; params: unknown }> = [];
+    recordProxy(callsWithSession);
+    await runCliCommand([
+      "--session-uuid",
+      "11111111-1111-4111-8111-111111111111",
+      "getIosSimulatorCapabilities",
+      "--deviceType",
+      "com.apple.CoreSimulator.SimDeviceType.iPhone-16",
+      "--runtime",
+      "iOS-18-0",
+    ]);
+
+    const namesWithSession = callsWithSession.map((call) => call.name);
+    expect(namesWithSession.indexOf("setToolEnabled")).toBeLessThan(
+      namesWithSession.indexOf("getIosSimulatorCapabilities"),
+    );
+    expect(
+      callsWithSession.find((call) => call.name === "getIosSimulatorCapabilities")?.params,
+    ).toEqual({
+      deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-16",
+      runtime: "iOS-18-0",
+      sessionUuid: "11111111-1111-4111-8111-111111111111",
+    });
+  });
+
   test("enables a gated tool (resetAppLogs) before calling it", async () => {
     const calls: Array<{ name: string; params: unknown }> = [];
     recordProxy(calls);

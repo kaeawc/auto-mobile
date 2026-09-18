@@ -14,12 +14,6 @@ import type { DaemonMcpProxyConfig } from "../daemon/daemonMcpProxy";
 import type { DaemonOptions } from "../daemon/types";
 import { resolveDaemonInstallSpecifier } from "../constants/release";
 import {
-  repairDaemon,
-  waitForDaemonRecoveryCompletion,
-  type DaemonRecoveryResult,
-  type DoctorRepairOptions,
-} from "../doctor/daemonRecovery";
-import {
   DEVICE_SESSION_ACQUISITION_TOOLS,
   isDeviceSessionAcquisitionTool,
 } from "../server/deviceSessionResult";
@@ -487,8 +481,6 @@ async function runToolViaDaemon(
 export function doctorToolParams(params: Record<string, any>): Record<string, any> {
   const doctorParams = { ...params };
   delete doctorParams.json;
-  delete doctorParams.repair;
-  delete doctorParams.timeoutMs;
   return doctorParams;
 }
 
@@ -511,52 +503,15 @@ async function runDoctorViaDaemon(params: Record<string, any>): Promise<any> {
   }
 }
 
-/**
- * Run the doctor command with daemon fallback to direct execution
- */
-export interface DoctorCommandDependencies {
-  repairDaemon?: (options: DoctorRepairOptions) => Promise<DaemonRecoveryResult>;
-}
-
-async function runDoctorRepairCommand(
-  params: Record<string, any>,
-  dependencies: DoctorCommandDependencies,
-  daemonOptions?: DaemonOptions,
-): Promise<CliTerminationRequest | undefined> {
-  const recovery = await (dependencies.repairDaemon ?? repairDaemon)({
-    timeoutMs: params.timeoutMs,
-    android: params.android,
-    ios: params.ios,
-    daemonOptions,
-  });
-  writeCliToolOutput(recovery, "doctor");
-  if (recovery.status === "failed") {
-    // A deadline can be reported before an already-signalled manager lifecycle
-    // reaches its safe terminal state. Do not interrupt its final cleanup.
-    await waitForDaemonRecoveryCompletion(recovery);
-    // The read-only post-repair probe can ignore cancellation and retain sockets
-    // after the destructive daemon lifecycle has settled. The executable owner
-    // ends this one-shot process after its synchronous result write and log
-    // flush; reusable doctor orchestration never calls process.exit().
-    return { exitCode: 1 };
-  }
-}
-
 export async function runDoctorCommand(
   params: Record<string, any>,
-  dependencies: DoctorCommandDependencies = {},
-  daemonOptions?: DaemonOptions,
 ): Promise<CliTerminationRequest | undefined> {
   const jsonOutput = params.json === true;
 
-  if (Object.hasOwn(params, "repair") && typeof params.repair !== "boolean") {
-    throw new ActionableError("--repair must be a boolean (true or false).");
-  }
-
-  if (params.repair === true) {
-    // Repair is intentionally host-local: a missing, stale, or wrong-protocol
-    // control socket cannot serve the daemon's doctor tool.
-    return await runDoctorRepairCommand(params, dependencies, daemonOptions);
+  if (Object.hasOwn(params, "repair")) {
+    throw new ActionableError(
+      "doctor is status-only; use --daemon restart or --daemon diagnose for supported remedies.",
+    );
   }
 
   // Try daemon first
@@ -803,7 +758,7 @@ export async function runCliCommand(
 
     // Special handling for doctor command - try daemon first, fallback to direct
     if (toolName === "doctor") {
-      return await runDoctorCommand(params, {}, daemonOptions);
+      return await runDoctorCommand(params);
     }
 
     // All tool execution goes through daemon (mandatory)
@@ -966,14 +921,6 @@ function showToolHelp(toolName: string, output: CliOutput): void {
       });
     } else {
       output.log("  No parameters required");
-    }
-    if (toolName === "doctor") {
-      output.log("  --repair (optional)");
-      output.log("    Type: boolean");
-      output.log("    Run bounded host-local daemon control-state recovery.");
-      output.log("  --timeout-ms (optional)");
-      output.log("    Type: number");
-      output.log("    Total recovery deadline in milliseconds (used with --repair).");
     }
   } catch (error) {
     output.log("  Could not parse parameter schema");

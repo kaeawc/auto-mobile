@@ -54,30 +54,21 @@ import {
   type DaemonClientFactory,
   type DaemonClientFactoryOptions,
   type DaemonClientLike,
-  type DaemonMethodCallOptions,
 } from "./client";
 import {
   DAEMON_PREPARE_RESTART_METHOD,
-  DAEMON_APPLY_ACCEPTANCE_DOCTOR_FAULT_METHOD,
   DAEMON_COMMIT_ACCEPTANCE_RESTART_METHOD,
-  DAEMON_CORRUPT_CONTROL_METADATA_METHOD,
-  DAEMON_REPAIR_CONTROL_METADATA_METHOD,
   DAEMON_RELEASE_ACCEPTANCE_RESTART_METHOD,
   DAEMON_RESTART_ACCEPTANCE_SESSION_METHOD,
   DAEMON_RESTART_ADMITTED_METHOD,
   type AcceptanceSessionRestartScope,
-  type AcceptanceDoctorFault,
-  type DaemonAcceptanceDoctorFault,
   type DaemonAcceptanceRestartCommit,
   type DaemonAcceptanceSessionRestart,
   DaemonRestartDeferredError,
   type DaemonAdmittedRestart,
-  type DaemonControlMetadataCorruption,
-  type DaemonControlMetadataRepair,
   type DaemonRestartPreparation,
 } from "./daemonRestartAdmission";
 import {
-  createDaemonLiveAcceptanceCapability,
   createDaemonLiveAcceptanceScopedCapability,
   daemonGenerationIdentityFromStatus,
   daemonLiveAcceptanceStartupSecret,
@@ -781,25 +772,6 @@ const MAX_DAEMON_STARTUP_LOG_BYTES = 4000;
 
 /** An occupied port found by degraded process discovery has no known process-table PID. */
 const DAEMON_UNKNOWN_OWNER_PID = -1;
-
-const ACCEPTANCE_DOCTOR_CONTROL_STATES: Readonly<
-  Partial<Record<AcceptanceDoctorFault, NonNullable<DaemonAcceptanceDoctorFault["controlState"]>>>
-> = {
-  "missing-daemon": "daemon-missing",
-  "dead-daemon": "daemon-dead",
-};
-
-function assertAcceptanceDoctorControlState(
-  fault: AcceptanceDoctorFault,
-  result: Partial<DaemonAcceptanceDoctorFault> | null,
-): void {
-  const expectedControlState = ACCEPTANCE_DOCTOR_CONTROL_STATES[fault];
-  if (expectedControlState !== undefined && result?.controlState !== expectedControlState) {
-    throw new ActionableError(
-      `Daemon acceptance doctor fault did not confirm ${expectedControlState} control state.`,
-    );
-  }
-}
 
 /** Host a daemon binds when `--host` is not given; mirrors the CLI default. */
 const DEFAULT_DAEMON_HOST = "127.0.0.1";
@@ -2190,8 +2162,8 @@ export class DaemonManager implements DaemonManagerLike {
    * it. A concurrent recovery/start therefore publishes a healthy successor
    * that this call joins instead of deleting its socket or terminating it.
    *
-   * This is deliberately invoked only by the explicit doctor repair flow after
-   * the initial health check failed. It still stops only processes whose current
+   * This is deliberately invoked only after an initial health check fails. It
+   * still stops only processes whose current
    * command line identifies them as AutoMobile daemon-mode processes, never a
    * PID named solely by stale control metadata.
    */
@@ -2337,14 +2309,14 @@ export class DaemonManager implements DaemonManagerLike {
   ): void {
     if (candidates.length > 0 && (recordedCandidate === undefined || candidates.length > 1)) {
       throw new ActionableError(
-        "Doctor repair could not correlate the failed control socket with exactly one live " +
+        "Daemon recovery could not correlate the failed control socket with exactly one live " +
           "AutoMobile daemon process. Refusing to stop an uncorrelated daemon; inspect " +
           "`--daemon status` and retry after other daemon instances have stopped.",
       );
     }
     if (status.running && recordedCandidate === undefined) {
       throw new ActionableError(
-        "Doctor repair found live PID control metadata that does not match a current " +
+        "Daemon recovery found live PID control metadata that does not match a current " +
           "AutoMobile daemon process. Refusing to signal a potentially reused PID.",
       );
     }
@@ -2353,7 +2325,7 @@ export class DaemonManager implements DaemonManagerLike {
   private throwIfRecoveryCancelled(signal: AbortSignal | undefined): void {
     if (signal?.aborted) {
       throw new ActionableError(
-        "Doctor repair deadline elapsed before a safe daemon recovery transition could complete.",
+        "Daemon recovery deadline elapsed before a safe recovery transition could complete.",
       );
     }
   }
@@ -2380,7 +2352,7 @@ export class DaemonManager implements DaemonManagerLike {
     const remaining = this.remainingTime(recoveryDeadline);
     if (remaining <= 0) {
       throw new ActionableError(
-        "Doctor repair deadline elapsed before process-table inspection could complete.",
+        "Daemon recovery deadline elapsed before process-table inspection could complete.",
       );
     }
     return remaining;
@@ -2852,108 +2824,6 @@ export class DaemonManager implements DaemonManagerLike {
   }
 
   /**
-   * Ask a responsive daemon to republish its own PID metadata. The daemon
-   * validates this exact socket generation before performing the write, so a
-   * stale diagnostic cannot repair metadata on behalf of a replacement.
-   */
-  async repairControlMetadata(signal?: AbortSignal, recoveryDeadline?: number): Promise<boolean> {
-    const client = this.createClient({ clientIdentity: null });
-    const remainingTimeout = (): number | undefined => {
-      if (recoveryDeadline === undefined) {
-        return undefined;
-      }
-      const remaining = recoveryDeadline - this.timer.now();
-      if (remaining <= 0) {
-        throw new ActionableError("Daemon control metadata repair deadline elapsed");
-      }
-      return remaining;
-    };
-    const requestOptions = (): DaemonMethodCallOptions => {
-      const timeoutMs = remainingTimeout();
-      return {
-        ...(signal === undefined ? {} : { signal }),
-        ...(timeoutMs === undefined ? {} : { timeoutMs }),
-      };
-    };
-    try {
-      signal?.throwIfAborted();
-      const connectTimeout = remainingTimeout();
-      await client.connect(connectTimeout, signal);
-      signal?.throwIfAborted();
-      const status = await client.callDaemonMethod("ide/status", {}, requestOptions());
-      if (!status || typeof status !== "object" || Array.isArray(status)) {
-        return false;
-      }
-      signal?.throwIfAborted();
-      const result: unknown = await client.callDaemonMethod(
-        DAEMON_REPAIR_CONTROL_METADATA_METHOD,
-        status as Record<string, unknown>,
-        requestOptions(),
-      );
-      signal?.throwIfAborted();
-      return (result as Partial<DaemonControlMetadataRepair> | null)?.repaired === true;
-    } finally {
-      await client.close();
-    }
-  }
-
-  /**
-   * Create the live-acceptance control-metadata fault through the currently
-   * admitted daemon generation. The opaque maintenance token is the authority:
-   * without it, no daemon or device state is changed.
-   */
-  async corruptControlMetadataAdmitted(maintenanceToken: string): Promise<void> {
-    if (!maintenanceToken) {
-      throw new ActionableError(
-        "corrupt-control-metadata-admitted requires a maintenance admission token.",
-      );
-    }
-    const startupSecret = daemonLiveAcceptanceStartupSecret();
-    if (!startupSecret) {
-      throw new ActionableError(
-        "corrupt-control-metadata-admitted requires a live-acceptance daemon startup capability.",
-      );
-    }
-    const status = await this.status();
-    if (!status.running) {
-      throw new ActionableError(
-        "corrupt-control-metadata-admitted requires the admitted daemon generation to be running.",
-      );
-    }
-    const generation = daemonGenerationIdentityFromStatus(status);
-    if (!generation) {
-      throw new ActionableError(
-        "corrupt-control-metadata-admitted requires the admitted daemon generation identity.",
-      );
-    }
-    const acceptanceCapability = createDaemonLiveAcceptanceCapability(startupSecret, generation);
-    const client = this.createClient({ clientIdentity: null });
-    try {
-      await client.connect();
-      const result: unknown = await client.callDaemonMethod(
-        DAEMON_CORRUPT_CONTROL_METADATA_METHOD,
-        { ...status, maintenanceToken, acceptanceCapability },
-      );
-      if ((result as Partial<DaemonControlMetadataCorruption> | null)?.corrupted !== true) {
-        throw new ActionableError(
-          "Daemon declined the maintenance-admitted control metadata fault.",
-        );
-      }
-      // The intentionally broken PID record must not be confused with a dead
-      // socket. Prove the same responsive daemon still answers before doctor is
-      // asked to repair its metadata.
-      const liveStatus = await client.callDaemonMethod("ide/status", {});
-      if (!liveStatus || typeof liveStatus !== "object" || Array.isArray(liveStatus)) {
-        throw new ActionableError(
-          "Control metadata fault did not retain a responsive daemon protocol.",
-        );
-      }
-    } finally {
-      await client.close();
-    }
-  }
-
-  /**
    * Crash and replace one verified live-acceptance daemon generation without a
    * graceful shutdown. This preserves precisely one authenticated persisted
    * session row for recovery testing; the admission RPC rejects unrelated
@@ -3118,123 +2988,6 @@ export class DaemonManager implements DaemonManagerLike {
       logger.warn(
         `Failed to close acceptance restart control client after primary failure: ${errorMessage(closeError)}`,
       );
-    }
-  }
-
-  async applyAcceptanceDoctorFault(
-    fault: AcceptanceDoctorFault,
-    maintenanceToken: string,
-    expiresAt: number,
-  ): Promise<void> {
-    if (!maintenanceToken) {
-      throw new ActionableError("acceptance-doctor-fault requires a maintenance admission token.");
-    }
-    const startupSecret = daemonLiveAcceptanceStartupSecret();
-    if (!startupSecret) {
-      throw new ActionableError(
-        "acceptance-doctor-fault requires a live-acceptance daemon startup capability.",
-      );
-    }
-    if (!this.acquireLock()) {
-      throw new ActionableError(
-        "acceptance-doctor-fault could not acquire the daemon startup lock.",
-      );
-    }
-    try {
-      await this.applyAcceptanceDoctorFaultWhileLocked(
-        fault,
-        maintenanceToken,
-        expiresAt,
-        startupSecret,
-      );
-    } finally {
-      this.releaseLock();
-    }
-  }
-
-  private async applyAcceptanceDoctorFaultWhileLocked(
-    fault: AcceptanceDoctorFault,
-    maintenanceToken: string,
-    expiresAt: number,
-    startupSecret: string,
-  ): Promise<void> {
-    const status = await this.status();
-    const generation = status.running ? daemonGenerationIdentityFromStatus(status) : undefined;
-    if (!generation) {
-      throw new ActionableError(
-        "acceptance-doctor-fault requires the admitted daemon generation to be running.",
-      );
-    }
-    const scope = { fault, expiresAt };
-    const client = this.createClient({ clientIdentity: null });
-    try {
-      await client.connect();
-      const result: unknown = await client.callDaemonMethod(
-        DAEMON_APPLY_ACCEPTANCE_DOCTOR_FAULT_METHOD,
-        {
-          ...status,
-          maintenanceToken,
-          fault,
-          expiresAt,
-          acceptanceCapability: createDaemonLiveAcceptanceScopedCapability(
-            startupSecret,
-            generation,
-            scope,
-          ),
-        },
-      );
-      if ((result as Partial<DaemonAcceptanceDoctorFault> | null)?.accepted !== true) {
-        throw new ActionableError(
-          `Daemon declined the acceptance doctor fault (${(result as { reason?: string } | null)?.reason ?? "unknown"}).`,
-        );
-      }
-      assertAcceptanceDoctorControlState(
-        fault,
-        result as Partial<DaemonAcceptanceDoctorFault> | null,
-      );
-    } finally {
-      await client.close();
-    }
-    await this.applyAcceptanceDoctorLivenessFault(fault, status, generation);
-  }
-
-  private async applyAcceptanceDoctorLivenessFault(
-    fault: AcceptanceDoctorFault,
-    status: DaemonStatus,
-    generation: DaemonGenerationIdentity,
-  ): Promise<void> {
-    if (
-      (fault === "missing-daemon" || fault === "dead-daemon" || fault === "stale-socket") &&
-      this.verifyAcceptanceGenerationBeforeSignal(status, generation)
-    ) {
-      this.processSignaler.signal(status.pid!, "SIGKILL");
-      if (!(await this.waitForStop(status.pid!, DAEMON_FORCED_STOP_TIMEOUT_MS))) {
-        throw new ActionableError(
-          `Acceptance doctor fault daemon process ${status.pid} did not exit after SIGKILL.`,
-        );
-      }
-    }
-    if (fault === "missing-daemon") {
-      // A missing daemon has no control plane: remove its metadata so doctor
-      // performs fresh daemon discovery. A dead daemon intentionally leaves
-      // that metadata behind so doctor diagnoses and repairs stale control
-      // state instead of treating it as absent.
-      await cleanupDaemonFiles({
-        pidFilePath: this.pidFilePath,
-        socketPaths: this.cleanupSocketPaths(status.socketPath),
-        expectedPid: status.pid!,
-      });
-    }
-    if (fault === "stale-socket") {
-      // Leave the dead listener's pathname behind while removing PID metadata:
-      // this is the stale-socket state doctor must distinguish from both an
-      // unresponsive live daemon and a dead daemon with complete stale control
-      // metadata.
-      await cleanupDaemonFiles({
-        pidFilePath: this.pidFilePath,
-        socketPaths: [],
-        expectedPid: status.pid!,
-      });
     }
   }
 
@@ -3557,12 +3310,12 @@ export class DaemonManager implements DaemonManagerLike {
    * The recovery deadline is authoritative for the synchronous process-table
    * scan too. Check it before and after the scan because a blocking scan can
    * consume the final budget; signaling after that would violate fail-closed
-   * doctor recovery semantics.
+   * daemon recovery semantics.
    */
   private verifyDaemonGenerationBeforeSignal(
     expected: DaemonProcessRecord,
     recoveryDeadline: number | undefined,
-    context: string = "Doctor repair",
+    context: string = "Daemon recovery",
   ): boolean {
     if (expected.startedAt === undefined) {
       throw new ActionableError(
@@ -4407,36 +4160,6 @@ export function parseAcceptanceSessionRestartScope(args: string[]): AcceptanceSe
   };
 }
 
-export function parseAcceptanceDoctorFaultArgs(args: string[]): {
-  fault: AcceptanceDoctorFault;
-  maintenanceToken: string;
-  expiresAt: number;
-} {
-  const faultIndex = args.indexOf("--fault");
-  const fault = faultIndex === -1 ? undefined : args[faultIndex + 1];
-  if (
-    fault !== "missing-daemon" &&
-    fault !== "dead-daemon" &&
-    fault !== "unresponsive-daemon" &&
-    fault !== "missing-control-metadata" &&
-    fault !== "corrupt-control-metadata" &&
-    fault !== "missing-socket" &&
-    fault !== "stale-socket"
-  ) {
-    throw new ActionableError("--fault must name a supported acceptance doctor fault");
-  }
-  const expiresIndex = args.indexOf("--expires-at");
-  const expiresAt = expiresIndex === -1 ? NaN : Number(args[expiresIndex + 1]);
-  if (!Number.isFinite(expiresAt) || expiresAt <= 0) {
-    throw new ActionableError("--expires-at must be a positive finite timestamp");
-  }
-  return {
-    fault,
-    maintenanceToken: parseRestartAdmittedMaintenanceToken(args),
-    expiresAt,
-  };
-}
-
 /**
  * Build the `--daemon status` lines that surface the running daemon's build
  * identity (`buildId` + `entryScript`) and flag wrong-build skew against this
@@ -4533,23 +4256,8 @@ export async function runDaemonCommand(
         break;
       }
 
-      case "corrupt-control-metadata-admitted": {
-        await manager.corruptControlMetadataAdmitted(parseRestartAdmittedMaintenanceToken(args));
-        break;
-      }
-
       case "restart-acceptance-session": {
         await manager.restartAcceptanceSession(parseAcceptanceSessionRestartScope(args));
-        break;
-      }
-
-      case "acceptance-doctor-fault": {
-        const fault = parseAcceptanceDoctorFaultArgs(args);
-        await manager.applyAcceptanceDoctorFault(
-          fault.fault,
-          fault.maintenanceToken,
-          fault.expiresAt,
-        );
         break;
       }
 

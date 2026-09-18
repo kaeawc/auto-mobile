@@ -26,7 +26,7 @@ import {
   ACCEPTANCE_DISCOVERY_CAPABILITY_ENV,
 } from "./constants";
 import { DaemonOptions, PidFileData } from "./types";
-import { mkdir, unlink, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute } from "node:path";
 import { PID_FILE_PATH, DAEMON_VERSION } from "./constants";
 import { getCurrentBuildIdentity } from "./buildIdentity";
@@ -642,11 +642,6 @@ export class Daemon {
           onRestartAccepted: () => {
             setImmediate(() => process.kill(process.pid, "SIGTERM"));
           },
-          onControlMetadataRepair: async (signal) => await this.writePidFile(signal),
-          onControlMetadataCorruption: async (signal) =>
-            await this.corruptControlMetadataForAcceptance(signal),
-          onAcceptanceDoctorFault: async (fault, signal) =>
-            await this.applyAcceptanceDoctorFault(fault, signal),
           liveAcceptanceStartupSecret: this.liveAcceptanceStartupSecret,
         },
         this.idGenerator,
@@ -1245,50 +1240,6 @@ export class Daemon {
     await this.persistPidFileData(pidData, signal);
     signal?.throwIfAborted();
     logger.info(`PID file written to ${PID_FILE_PATH}`);
-  }
-
-  /**
-   * Acceptance-only, maintenance-token-gated fault. The responsive daemon and
-   * socket remain intact; only its own PID metadata is made unreadable so
-   * doctor must demonstrate the repair path.
-   */
-  private async corruptControlMetadataForAcceptance(signal?: AbortSignal): Promise<void> {
-    signal?.throwIfAborted();
-    await mkdir(dirname(PID_FILE_PATH), { recursive: true });
-    signal?.throwIfAborted();
-    await writeFile(PID_FILE_PATH, "{", {
-      encoding: "utf-8",
-      mode: 0o600,
-      signal,
-    });
-    signal?.throwIfAborted();
-    logger.info(`Acceptance control metadata fault written to ${PID_FILE_PATH}`);
-  }
-
-  /** Acceptance-only host-control faults; no device/session state is mutated. */
-  private async applyAcceptanceDoctorFault(
-    fault: "missing-control-metadata" | "corrupt-control-metadata" | "missing-socket",
-    signal?: AbortSignal,
-  ): Promise<void> {
-    signal?.throwIfAborted();
-    if (fault === "corrupt-control-metadata") {
-      await this.corruptControlMetadataForAcceptance(signal);
-      return;
-    }
-    const controlPath = fault === "missing-control-metadata" ? PID_FILE_PATH : SOCKET_PATH;
-    try {
-      await unlink(controlPath);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-        throw error;
-      }
-    }
-    signal?.throwIfAborted();
-    logger.info(
-      `Acceptance doctor fault removed ${
-        fault === "missing-control-metadata" ? "PID metadata" : "socket path"
-      }`,
-    );
   }
 
   private launchLogPath(): string | null {
@@ -2458,11 +2409,6 @@ export class Daemon {
             onRestartAccepted: () => {
               setImmediate(() => process.kill(process.pid, "SIGTERM"));
             },
-            onControlMetadataRepair: async (signal) => await this.writePidFile(signal),
-            onControlMetadataCorruption: async (signal) =>
-              await this.corruptControlMetadataForAcceptance(signal),
-            onAcceptanceDoctorFault: async (fault, signal) =>
-              await this.applyAcceptanceDoctorFault(fault, signal),
             liveAcceptanceStartupSecret: this.liveAcceptanceStartupSecret,
           },
           this.idGenerator,

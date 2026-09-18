@@ -26,12 +26,7 @@ import {
   DAEMON_VERSION,
   SOCKET_PATH,
 } from "../src/daemon/constants";
-import {
-  DAEMON_COMPLETE_MAINTENANCE_METHOD,
-  DAEMON_PREPARE_MAINTENANCE_METHOD,
-  type AcceptanceDoctorFault,
-  type AcceptanceSessionRestartScope,
-} from "../src/daemon/daemonRestartAdmission";
+import { type AcceptanceSessionRestartScope } from "../src/daemon/daemonRestartAdmission";
 import {
   daemonLiveAcceptanceStartupSecret,
   DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV,
@@ -161,20 +156,11 @@ export interface MatrixDependencies {
     presentationOrder?: DiscoveryPresentationOrder,
   ) => Promise<McpSessionClient>;
   createDaemonClient?: (signal: AbortSignal) => Promise<DaemonSessionClient>;
-  restartDaemon?: (
-    maintenanceToken: string,
-    timeoutMs: number,
-    signal: AbortSignal,
-  ) => Promise<void>;
   restartAcceptanceSession?: (
     scope: AcceptanceSessionRestartScope,
     timeoutMs: number,
     signal: AbortSignal,
   ) => Promise<void>;
-  inspectDoctorFaultState?: (status: JsonObject) => {
-    processIsLive: boolean;
-    socketPathExists: boolean;
-  };
   writeFile?: (path: string, content: string, signal: AbortSignal) => Promise<void>;
 }
 
@@ -185,13 +171,8 @@ interface Step {
   detail: JsonObject;
 }
 
-interface MaintenanceAdmission {
-  status: JsonObject;
-  maintenanceToken: string;
-}
-
 interface Evidence {
-  schemaVersion: 8;
+  schemaVersion: 9;
   authentication: EvidenceAuthentication;
   generatedAt: string;
   scenario: Scenario;
@@ -544,7 +525,7 @@ function parseEvidence(path: string): JsonObject {
     throw new Error(`Evidence is not valid JSON: ${path}`);
   }
   const evidence = asObject(candidate, "evidence");
-  if (evidence.schemaVersion !== 8) {
+  if (evidence.schemaVersion !== 9) {
     throw new Error("Evidence has an unsupported schema version");
   }
   return evidence;
@@ -1171,7 +1152,7 @@ function waitForChildExit(child: ChildProcess): Promise<number | null> {
 
 /**
  * Every driver-owned CLI is a detached POSIX process group. Group-directed
- * SIGKILL reaps the command and helpers it spawned before a timed-out doctor
+ * SIGKILL reaps the command and helpers it spawned before a timed-out CLI
  * can write daemon state after the matrix has moved on. The direct-handle
  * fallback covers Windows and unusual spawn implementations.
  */
@@ -1354,43 +1335,6 @@ function assertProvisionedIdentity(
   } else if ("configuration" in resolvedSpec) {
     throw new Error("provisionDevice unexpectedly resolved an iOS configuration");
   }
-}
-
-function doctorRepairCommand(
-  build: BuildIdentity,
-  platform: Platform,
-  remainingBudgetMs: number,
-): string[] {
-  return [
-    process.execPath,
-    build.entryScript,
-    "--cli",
-    "doctor",
-    "--repair",
-    `--${platform}`,
-    "--timeout-ms",
-    String(remainingBudgetMs),
-  ];
-}
-
-function acceptanceDoctorFaultCommand(
-  build: BuildIdentity,
-  fault: AcceptanceDoctorFault,
-  maintenanceToken: string,
-  expiresAt: number,
-): string[] {
-  return [
-    process.execPath,
-    build.entryScript,
-    "--daemon",
-    "acceptance-doctor-fault",
-    "--fault",
-    fault,
-    "--maintenance-token",
-    maintenanceToken,
-    "--expires-at",
-    String(expiresAt),
-  ];
 }
 
 function acceptanceSessionRestartScope(
@@ -1804,7 +1748,6 @@ export async function runAcceptanceMatrix(
   let iosControls: IosDiscoveryControls | undefined;
   let controlClient: McpSessionClient | undefined;
   let daemonClient: DaemonSessionClient | undefined;
-  let activeMaintenanceAdmission: { phase: string; admission: MaintenanceAdmission } | undefined;
   let primaryError: unknown;
   let iosRunnerRestartEvidence = {
     serviceEndpointExposed: false,
@@ -2700,284 +2643,6 @@ export async function runAcceptanceMatrix(
     });
   };
 
-  const admitMaintenance = async (phase: string, budget: Budget): Promise<MaintenanceAdmission> => {
-    daemonClient ??= await bounded(
-      `${phase} maintenance daemon connect`,
-      budget,
-      async (signal) => await createDaemonClient(signal),
-    );
-    const status = asObject(
-      await bounded(
-        `${phase} maintenance build identity check`,
-        budget,
-        async (signal) => await daemonClient!.callDaemonMethod("ide/status", {}, signal),
-        () => daemonClient!.close(),
-      ),
-      "ide/status",
-    );
-    if (status.buildId !== args.build.buildId || status.entryScript !== args.build.entryScript) {
-      throw new Error(`Refusing ${phase}: the daemon is not the built acceptance artifact`);
-    }
-    const admission = asObject(
-      await bounded(
-        `${phase} maintenance admission`,
-        budget,
-        async (signal) =>
-          await daemonClient!.callDaemonMethod(DAEMON_PREPARE_MAINTENANCE_METHOD, status, signal),
-        () => daemonClient!.close(),
-      ),
-      DAEMON_PREPARE_MAINTENANCE_METHOD,
-    );
-    if (admission.accepted !== true) {
-      throw new Error(
-        `Refusing ${phase}: daemon maintenance admission rejected ${
-          typeof admission.reason === "string" ? admission.reason : "an unknown condition"
-        }`,
-      );
-    }
-    const maintenanceToken = admission.maintenanceToken;
-    if (typeof maintenanceToken !== "string" || maintenanceToken.length === 0) {
-      throw new Error(`Refusing ${phase}: daemon returned no maintenance admission token`);
-    }
-    const accepted = { status, maintenanceToken };
-    activeMaintenanceAdmission = { phase, admission: accepted };
-    return accepted;
-  };
-
-  const forgetMaintenanceAdmission = (admission: MaintenanceAdmission): void => {
-    if (activeMaintenanceAdmission?.admission.maintenanceToken === admission.maintenanceToken) {
-      activeMaintenanceAdmission = undefined;
-    }
-  };
-
-  const completeMaintenance = async (
-    phase: string,
-    admission: MaintenanceAdmission,
-    budget: Budget,
-  ): Promise<void> => {
-    const result = asObject(
-      await bounded(
-        `${phase} maintenance completion`,
-        budget,
-        async (signal) =>
-          await daemonClient!.callDaemonMethod(
-            DAEMON_COMPLETE_MAINTENANCE_METHOD,
-            { ...admission.status, maintenanceToken: admission.maintenanceToken },
-            signal,
-          ),
-        () => daemonClient!.close(),
-      ),
-      DAEMON_COMPLETE_MAINTENANCE_METHOD,
-    );
-    if (result.completed !== true) {
-      throw new Error(`Daemon maintenance generation changed before ${phase} completed`);
-    }
-    forgetMaintenanceAdmission(admission);
-  };
-
-  const sameDaemonGeneration = (left: JsonObject, right: JsonObject): boolean => {
-    if (
-      typeof left.pid !== "number" ||
-      typeof right.pid !== "number" ||
-      typeof left.startedAt !== "number" ||
-      typeof right.startedAt !== "number" ||
-      left.pid !== right.pid ||
-      left.startedAt !== right.startedAt
-    ) {
-      return false;
-    }
-    const leftToken = left.processGenerationToken;
-    const rightToken = right.processGenerationToken;
-    if (leftToken === undefined || rightToken === undefined) {
-      return true;
-    }
-    return (
-      typeof leftToken === "string" && typeof rightToken === "string" && leftToken === rightToken
-    );
-  };
-
-  const finalizeActiveMaintenanceAdmission = async (): Promise<void> => {
-    const active = activeMaintenanceAdmission;
-    if (!active) {
-      return;
-    }
-    try {
-      await completeMaintenance(`${active.phase} cleanup`, active.admission, "cleanup");
-    } catch (error) {
-      cleanupFailures.push(
-        `${active.phase} maintenance completion: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-    }
-  };
-
-  const verifyDaemonProtocolAfterRepair = async (): Promise<JsonObject> => {
-    const start = timer.now();
-    const client = await bounded(
-      "post-doctor daemon protocol connect",
-      "work",
-      async (signal) => await createDaemonClient(signal),
-    );
-    try {
-      const status = asObject(
-        await bounded(
-          "post-doctor daemon protocol",
-          "work",
-          async (signal) => await client.callDaemonMethod("ide/status", {}, signal),
-          () => client.close(),
-        ),
-        "ide/status",
-      );
-      if (status.buildId !== args.build.buildId || status.entryScript !== args.build.entryScript) {
-        throw new Error("Post-doctor daemon protocol did not report the delivered build identity");
-      }
-      recordStep(steps, timer, "post-doctor-daemon-protocol", start, {
-        buildIdentityVerified: true,
-      });
-      return status;
-    } finally {
-      try {
-        await bounded(
-          "post-doctor daemon protocol close",
-          "cleanup",
-          async () => await client.close(),
-        );
-      } catch (error) {
-        cleanupFailures.push(
-          `post-doctor daemon protocol close: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-    }
-  };
-
-  const assertDoctorFaultPreRepairState = (
-    fault: AcceptanceDoctorFault,
-    status: JsonObject,
-  ): void => {
-    if (fault !== "stale-socket" && fault !== "unresponsive-daemon") {
-      return;
-    }
-    const inspectState =
-      dependencies.inspectDoctorFaultState ??
-      ((currentStatus: JsonObject) => {
-        const pid = typeof currentStatus.pid === "number" ? currentStatus.pid : undefined;
-        const socketPath =
-          typeof currentStatus.socketPath === "string" ? currentStatus.socketPath : undefined;
-        const processIsLive = (() => {
-          if (pid === undefined) {
-            return false;
-          }
-          try {
-            process.kill(pid, 0);
-            return true;
-          } catch {
-            return false;
-          }
-        })();
-        return {
-          processIsLive,
-          socketPathExists: socketPath !== undefined && existsSync(socketPath),
-        };
-      });
-    const { processIsLive, socketPathExists } = inspectState(status);
-    if (!socketPathExists) {
-      throw new Error(`owned ${fault} fault did not preserve its socket pathname`);
-    }
-    if (fault === "stale-socket" && processIsLive) {
-      throw new Error("owned stale-socket fault left a responsive process alive");
-    }
-    if (fault === "unresponsive-daemon" && !processIsLive) {
-      throw new Error("owned unresponsive-daemon fault terminated its listener process");
-    }
-  };
-
-  const exerciseOwnedDoctorRepair = async (): Promise<void> => {
-    const faults: AcceptanceDoctorFault[] = [
-      "corrupt-control-metadata",
-      "missing-control-metadata",
-      "missing-socket",
-      "stale-socket",
-      "unresponsive-daemon",
-      "missing-daemon",
-      "dead-daemon",
-    ];
-    for (const fault of faults) {
-      const admission = await admitMaintenance(`owned ${fault} fault`, "work");
-      const faultStart = timer.now();
-      await bounded(`owned ${fault} fault`, "work", async (signal) => {
-        const remainingBudgetMs = Math.max(1, workDeadline - timer.now());
-        await spawnCli(
-          acceptanceDoctorFaultCommand(args.build, fault, admission.maintenanceToken, workDeadline),
-          remainingBudgetMs,
-          signal,
-        );
-      });
-      assertDoctorFaultPreRepairState(fault, admission.status);
-      recordStep(steps, timer, `owned-${fault}`, faultStart, {
-        maintenanceAdmission: true,
-        faultScope: "acceptance-only-host-control",
-        buildIdentityVerified: true,
-      });
-
-      const repairStart = timer.now();
-      await bounded(`host-wide doctor repair after ${fault}`, "work", async (signal) => {
-        const remainingBudgetMs = Math.max(1, workDeadline - timer.now());
-        await spawnCli(
-          doctorRepairCommand(args.build, args.platform, remainingBudgetMs),
-          remainingBudgetMs,
-          signal,
-        );
-      });
-      recordStep(steps, timer, `host-wide-doctor-repair-${fault}`, repairStart, {
-        platform: args.platform,
-        platformFlagScope: "requested-filter",
-        repairScope: "host-wide",
-        buildIdentityVerified: true,
-        maintenanceAdmission: true,
-      });
-      const repairedStatus = await verifyDaemonProtocolAfterRepair();
-      if (sameDaemonGeneration(admission.status, repairedStatus)) {
-        await completeMaintenance(`owned ${fault} fault`, admission, "cleanup");
-      } else {
-        // The doctor intentionally replaced the admitted generation. Its
-        // single-use token cannot complete on a successor, so drop this client
-        // before the next generation is admitted.
-        forgetMaintenanceAdmission(admission);
-        await discardDaemonClient(`owned ${fault}`);
-      }
-
-      const cliStart = timer.now();
-      const recovered = await bounded(
-        `post-doctor ${fault} CLI acquisition`,
-        "work",
-        async (signal) =>
-          acquiredCliSession(
-            await spawnCli(
-              cliAcquisitionCommand(args),
-              Math.max(1, workDeadline - timer.now()),
-              signal,
-            ),
-            args,
-          ),
-      );
-      mint(`post-doctor-${fault}-cli`, recovered.sessionUuid);
-      const client = await bounded(
-        `post-doctor ${fault} MCP connect`,
-        "work",
-        async (signal) => await createMcpClient(`post-doctor-${fault}`, signal),
-      );
-      clients.push(client);
-      await verifyReadiness(client, recovered.sessionUuid, `post-doctor-${fault}`);
-      await release(recovered.sessionUuid, `post-doctor-${fault}-cli`);
-      recordStep(steps, timer, `post-doctor-cli-mcp-${fault}`, cliStart, {
-        sessionUuid: recovered.sessionUuid,
-        freshCliAcquisition: true,
-        independentMcpReadiness: true,
-      });
-    }
-  };
-
   const expectUnrelatedOwnerConflict = async (
     held: Pick<AcquiredSession, "sessionUuid" | "device">,
   ): Promise<void> => {
@@ -3144,12 +2809,6 @@ export async function runAcceptanceMatrix(
     }
     await release(busyReacquired.sessionUuid, "persisted-target-busy-explicit-target-reacquire");
 
-    await assertCurrentControls("before-host-wide-doctor-repair");
-    await exerciseOwnedDoctorRepair();
-    await assertCurrentControls("after-host-wide-doctor-repair");
-    const repaired = await acquire("reacquire-after-repair", "exact", "platform");
-    await release(repaired.sessionUuid, "reacquire-after-repair");
-
     const absent = await restartPersistedSession("target-absent");
     await deleteExactSignedTarget();
     await assertTargetAbsentFromPlatformInventory("persisted-target-absent");
@@ -3164,7 +2823,6 @@ export async function runAcceptanceMatrix(
   } catch (error) {
     primaryError = error;
   } finally {
-    await finalizeActiveMaintenanceAdmission();
     for (const session of minted.filter((candidate) => !candidate.released)) {
       try {
         await release(session.sessionUuid, `cleanup-${session.phase}`, "cleanup");
@@ -3215,7 +2873,7 @@ export async function runAcceptanceMatrix(
         ? undefined
         : String(primaryError);
   const evidence: Evidence = {
-    schemaVersion: 8,
+    schemaVersion: 9,
     authentication: {
       schemaVersion: 1,
       algorithm: "hmac-sha256",
@@ -3345,7 +3003,12 @@ export function evidenceFileName(args: AcceptanceArgs): string {
 if (import.meta.main) {
   try {
     const argv = Bun.argv.slice(2);
-    if (argv.includes("--verify-evidence")) {
+    if (argv.includes("--help")) {
+      console.log(
+        "Usage: bun scripts/live-device-acceptance.ts --platform <android|ios> --scenario full [options]",
+      );
+      process.exitCode = 0;
+    } else if (argv.includes("--verify-evidence")) {
       const verification = parseEvidenceVerificationArgs(argv);
       const evidence = verifyEvidenceFile(verification);
       console.log(

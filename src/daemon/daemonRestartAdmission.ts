@@ -4,12 +4,9 @@ export const DAEMON_PREPARE_RESTART_METHOD = "ide/prepareRestart";
 export const DAEMON_PREPARE_MAINTENANCE_METHOD = "ide/prepareMaintenance";
 export const DAEMON_COMPLETE_MAINTENANCE_METHOD = "ide/completeMaintenance";
 export const DAEMON_RESTART_ADMITTED_METHOD = "ide/restartAdmitted";
-export const DAEMON_REPAIR_CONTROL_METADATA_METHOD = "ide/repairControlMetadata";
-export const DAEMON_CORRUPT_CONTROL_METADATA_METHOD = "ide/corruptControlMetadata";
 export const DAEMON_RESTART_ACCEPTANCE_SESSION_METHOD = "ide/restartAcceptanceSession";
 export const DAEMON_COMMIT_ACCEPTANCE_RESTART_METHOD = "ide/commitAcceptanceRestart";
 export const DAEMON_RELEASE_ACCEPTANCE_RESTART_METHOD = "ide/releaseAcceptanceRestart";
-export const DAEMON_APPLY_ACCEPTANCE_DOCTOR_FAULT_METHOD = "ide/applyAcceptanceDoctorFault";
 const ACTIVE_PROVISIONING_RESTART_RETRY_MS = 1_000;
 
 export interface DaemonRestartPreparation {
@@ -45,26 +42,6 @@ export interface DaemonAdmittedRestart {
     | "restart_pending"
     | "shutdown_unavailable"
     | "sessions_unavailable";
-}
-
-export interface DaemonControlMetadataRepair {
-  repaired: boolean;
-  reason?: "generation_changed" | "repair_unavailable";
-}
-
-/**
- * Explicit, maintenance-token-gated fault used only by the operator-run live
- * acceptance matrix. It corrupts PID metadata while retaining the responsive
- * daemon socket, so doctor must prove its safe repair path.
- */
-export interface DaemonControlMetadataCorruption {
-  corrupted: boolean;
-  reason?:
-    | "generation_changed"
-    | "maintenance_token_invalid"
-    | "acceptance_capability_invalid"
-    | "active_sessions"
-    | "fault_unavailable";
 }
 
 /**
@@ -107,34 +84,6 @@ export interface DaemonAcceptanceRestartRelease {
 
 export interface DaemonAcceptanceRestartCommit {
   committed: boolean;
-}
-
-/** Host-local faults exercised only by the operator-run live acceptance matrix. */
-export type AcceptanceDoctorFault =
-  | "missing-daemon"
-  | "dead-daemon"
-  | "unresponsive-daemon"
-  | "missing-control-metadata"
-  | "corrupt-control-metadata"
-  | "missing-socket"
-  | "stale-socket";
-
-export interface DaemonAcceptanceDoctorFault {
-  accepted: boolean;
-  /**
-   * Only daemon-liveness faults expose a control state. The distinction makes
-   * the acceptance doctor prove whether it must recover absent metadata or
-   * diagnose a dead process with stale control metadata.
-   */
-  controlState?: "daemon-missing" | "daemon-dead";
-  reason?:
-    | "generation_changed"
-    | "maintenance_token_invalid"
-    | "acceptance_capability_invalid"
-    | "fault_invalid"
-    | "scope_expired"
-    | "active_sessions"
-    | "fault_unavailable";
 }
 
 /**

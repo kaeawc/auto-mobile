@@ -13,7 +13,6 @@ import { resolveMcpRequestTimeoutMs, ProgressExtendableDeadline } from "./mcpReq
 import { McpTimeoutError } from "./McpTimeoutError";
 import { DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import { errorMessage } from "../utils/describeUnknownError";
-import { combineAbortSignals } from "../utils/AbortContext";
 import {
   BOUND_SESSION_LOSS_CODE,
   DaemonNotification,
@@ -133,29 +132,21 @@ import type { DeviceService } from "../features/observe/DeviceService";
 import { executionTracker } from "../server/executionTracker";
 import {
   DAEMON_COMPLETE_MAINTENANCE_METHOD,
-  DAEMON_APPLY_ACCEPTANCE_DOCTOR_FAULT_METHOD,
   DAEMON_COMMIT_ACCEPTANCE_RESTART_METHOD,
-  DAEMON_CORRUPT_CONTROL_METADATA_METHOD,
   DAEMON_PREPARE_MAINTENANCE_METHOD,
   DAEMON_PREPARE_RESTART_METHOD,
-  DAEMON_REPAIR_CONTROL_METADATA_METHOD,
   DAEMON_RELEASE_ACCEPTANCE_RESTART_METHOD,
   DAEMON_RESTART_ACCEPTANCE_SESSION_METHOD,
   DAEMON_RESTART_ADMITTED_METHOD,
   type AcceptanceSessionRestartScope,
-  type AcceptanceDoctorFault,
-  type DaemonAcceptanceDoctorFault,
   type DaemonAcceptanceRestartCommit,
   type DaemonAcceptanceRestartRelease,
   type DaemonAcceptanceSessionRestart,
   type DaemonAdmittedRestart,
-  type DaemonControlMetadataCorruption,
-  type DaemonControlMetadataRepair,
   type DaemonMaintenancePreparation,
   type DaemonRestartPreparation,
 } from "./daemonRestartAdmission";
 import {
-  daemonLiveAcceptanceCapabilityMatches,
   daemonLiveAcceptanceScopedCapabilityMatches,
   type DaemonGenerationIdentity,
 } from "./liveAcceptanceCapability";
@@ -609,15 +600,6 @@ export class UnixSocketServer {
   private readonly processGenerationToken: string | undefined;
   private readonly startupOptions: DaemonOptions;
   private readonly onRestartAccepted?: () => void;
-  private readonly onControlMetadataRepair?: (signal?: AbortSignal) => Promise<void>;
-  private readonly onControlMetadataCorruption?: (signal?: AbortSignal) => Promise<void>;
-  private readonly onAcceptanceDoctorFault?: (
-    fault: Exclude<
-      AcceptanceDoctorFault,
-      "missing-daemon" | "dead-daemon" | "unresponsive-daemon" | "stale-socket"
-    >,
-    signal?: AbortSignal,
-  ) => Promise<void>;
   private readonly liveAcceptanceStartupSecret: string | undefined;
   private maintenanceAdmissionToken: string | undefined;
   private maintenanceAdmissionExpiresAt: number | undefined;
@@ -629,14 +611,10 @@ export class UnixSocketServer {
   private acceptanceRestartAdmissionCommitted = false;
   private acceptanceRestartAdmissionExpiresAt: number | undefined;
   private acceptanceRestartAdmissionExpiryTimer: NodeJS.Timeout | undefined;
-  private acceptanceFaultUnresponsive = false;
-  private acceptanceFaultMaintenanceToken: string | undefined;
   private readonly sessionToolSelectionService?: Pick<
     SessionToolSelectionService,
     "isEnabled" | "setEnabled"
   >;
-  /** Local control RPCs are cancelled when their owner disconnects or expires. */
-  private readonly localRequestAbortControllers = new Map<string, Set<AbortController>>();
   /** Forwarded MCP requests are cancelled when their owner socket disconnects. */
   private readonly mcpRequestAbortControllers = new Map<string, Set<AbortController>>();
   /**
@@ -704,15 +682,6 @@ export class UnixSocketServer {
       startupOptions?: DaemonOptions;
       enforce?: boolean;
       onRestartAccepted?: () => void;
-      onControlMetadataRepair?: (signal?: AbortSignal) => Promise<void>;
-      onControlMetadataCorruption?: (signal?: AbortSignal) => Promise<void>;
-      onAcceptanceDoctorFault?: (
-        fault: Exclude<
-          AcceptanceDoctorFault,
-          "missing-daemon" | "dead-daemon" | "unresponsive-daemon" | "stale-socket"
-        >,
-        signal?: AbortSignal,
-      ) => Promise<void>;
       liveAcceptanceStartupSecret?: string;
       sessionToolSelectionService?: Pick<SessionToolSelectionService, "isEnabled" | "setEnabled">;
     } = {},
@@ -752,9 +721,6 @@ export class UnixSocketServer {
     this.processGenerationToken = handshakeConfig.processGenerationToken;
     this.startupOptions = snapshotDaemonOptions(handshakeConfig.startupOptions);
     this.onRestartAccepted = handshakeConfig.onRestartAccepted;
-    this.onControlMetadataRepair = handshakeConfig.onControlMetadataRepair;
-    this.onControlMetadataCorruption = handshakeConfig.onControlMetadataCorruption;
-    this.onAcceptanceDoctorFault = handshakeConfig.onAcceptanceDoctorFault;
     this.liveAcceptanceStartupSecret = handshakeConfig.liveAcceptanceStartupSecret;
     logger.info(`UnixSocketServer initialized with endpoint: "${mcpEndpoint}"`);
     if (!mcpEndpoint) {
@@ -957,7 +923,6 @@ export class UnixSocketServer {
     if (this.clientSockets.get(sessionId) !== socket) {
       return;
     }
-    this.abortLocalRequests(sessionId);
     this.abortMcpRequests(sessionId);
     this.releaseAcceptanceRestartAdmissionForOwner(sessionId);
     this.sessions.delete(sessionId);
@@ -975,14 +940,6 @@ export class UnixSocketServer {
     void handler.then(
       () => this.activeRequestHandlers.delete(handler),
       () => this.activeRequestHandlers.delete(handler),
-    );
-  }
-
-  private abortLocalRequests(sessionId: string): void {
-    this.abortRequestControllers(
-      sessionId,
-      this.localRequestAbortControllers,
-      "Daemon control client disconnected",
     );
   }
 
@@ -1044,69 +1001,6 @@ export class UnixSocketServer {
   private isMcpRequestOwnerCurrent(sessionId: string, signal: AbortSignal): boolean {
     const socket = this.clientSockets.get(sessionId);
     return !signal.aborted && socket !== undefined && !socket.destroyed;
-  }
-
-  private localRequestSignal(
-    sessionId: string,
-    ownerSocket: Socket,
-    timeoutMs: number,
-  ): { signal: AbortSignal; dispose: () => void } {
-    if (timeoutMs <= 0) {
-      throw new McpTimeoutError({
-        toolName: DAEMON_REPAIR_CONTROL_METADATA_METHOD,
-        timeoutMs: 0,
-        origin: "UnixSocketServer.handleRequest",
-        detail: "spent the control-RPC deadline waiting in queue",
-      });
-    }
-    const controller = new AbortController();
-    const controllers =
-      this.localRequestAbortControllers.get(sessionId) ?? new Set<AbortController>();
-    controllers.add(controller);
-    this.localRequestAbortControllers.set(sessionId, controllers);
-    const timeout = this.timer.setTimeout(() => {
-      controller.abort(new Error("Daemon control request deadline elapsed"));
-    }, timeoutMs);
-    const socket = this.clientSockets.get(sessionId);
-    if (socket !== ownerSocket || ownerSocket.destroyed) {
-      controller.abort(new Error("Daemon control client disconnected"));
-    }
-    return {
-      signal: controller.signal,
-      dispose: () => {
-        this.timer.clearTimeout(timeout);
-        controllers.delete(controller);
-        if (
-          controllers.size === 0 &&
-          this.localRequestAbortControllers.get(sessionId) === controllers
-        ) {
-          this.localRequestAbortControllers.delete(sessionId);
-        }
-      },
-    };
-  }
-
-  private async handleBoundLocalSocketRequest(
-    request: DaemonRequest,
-    sessionId: string,
-    ownerSocket: Socket,
-    timeoutMs: number,
-  ): Promise<any | undefined> {
-    const mutatesControlMetadata =
-      request.method === DAEMON_REPAIR_CONTROL_METADATA_METHOD ||
-      request.method === DAEMON_CORRUPT_CONTROL_METADATA_METHOD ||
-      request.method === DAEMON_APPLY_ACCEPTANCE_DOCTOR_FAULT_METHOD;
-    if (!mutatesControlMetadata) {
-      return await this.handleLocalSocketRequest(request, sessionId);
-    }
-
-    const localRequest = this.localRequestSignal(sessionId, ownerSocket, timeoutMs);
-    try {
-      localRequest.signal.throwIfAborted();
-      return await this.handleLocalSocketRequest(request, sessionId, localRequest.signal);
-    } finally {
-      localRequest.dispose();
-    }
   }
 
   /**
@@ -1260,13 +1154,6 @@ export class UnixSocketServer {
         daemonShuttingDown: daemonShuttingDownFailure(),
       };
     }
-    if (this.acceptanceFaultUnresponsive) {
-      // Acceptance-only stale/unresponsive control state. Do not close the
-      // connection: doctor must distinguish a listening but non-responsive
-      // socket from a missing daemon under its own absolute deadline.
-      return await new Promise<DaemonResponse>(() => {});
-    }
-
     const handshakeError = this.rejectOnHandshakeMismatch(request);
     if (handshakeError) {
       return handshakeError;
@@ -1317,15 +1204,7 @@ export class UnixSocketServer {
           };
         }
 
-        // Metadata mutation is the one local operation whose late completion
-        // can alter daemon ownership state, so bind it to the client's
-        // connection lifetime and its remaining request budget.
-        const localResult = await this.handleBoundLocalSocketRequest(
-          request,
-          sessionId,
-          ownerSocket,
-          deadline.value - this.timer.now(),
-        );
+        const localResult = await this.handleLocalSocketRequest(request, sessionId);
         if (localResult !== undefined) {
           return {
             id: request.id,
@@ -3303,10 +3182,6 @@ export class UnixSocketServer {
       new Error("Daemon maintenance admission expired or was released"),
     );
     executionTracker.clearDaemonMaintenancePreparation();
-    if (this.acceptanceFaultMaintenanceToken === token) {
-      this.acceptanceFaultUnresponsive = false;
-      this.acceptanceFaultMaintenanceToken = undefined;
-    }
     this.maintenanceAdmissionToken = undefined;
     this.maintenanceAdmissionExpiresAt = undefined;
     this.maintenanceAdmissionExpiryTimer = undefined;
@@ -3557,150 +3432,6 @@ export class UnixSocketServer {
     };
   }
 
-  private async repairControlMetadata(
-    params: Record<string, unknown>,
-    signal?: AbortSignal,
-  ): Promise<DaemonControlMetadataRepair> {
-    if (!this.daemonGenerationMatches(params)) {
-      return { repaired: false, reason: "generation_changed" };
-    }
-    if (!this.onControlMetadataRepair) {
-      return { repaired: false, reason: "repair_unavailable" };
-    }
-    signal?.throwIfAborted();
-    await this.onControlMetadataRepair(signal);
-    signal?.throwIfAborted();
-    return { repaired: true };
-  }
-
-  private async corruptControlMetadata(
-    params: Record<string, unknown>,
-    signal?: AbortSignal,
-  ): Promise<DaemonControlMetadataCorruption> {
-    if (!this.daemonGenerationMatches(params)) {
-      return { corrupted: false, reason: "generation_changed" };
-    }
-    if (!this.daemonMaintenanceAdmissionMatches(params.maintenanceToken)) {
-      return { corrupted: false, reason: "maintenance_token_invalid" };
-    }
-    const mutationSignal = combineAbortSignals(
-      signal,
-      this.maintenanceAdmissionAbortController?.signal,
-    );
-    const identity: DaemonGenerationIdentity = {
-      pid: process.pid,
-      startedAt: this.identityStartedAt,
-      ...(this.processGenerationToken === undefined
-        ? {}
-        : { processGenerationToken: this.processGenerationToken }),
-      version: this.daemonIdentity.version,
-      buildId: this.daemonIdentity.build.buildId,
-      entryScript: this.daemonIdentity.build.entryScript,
-    };
-    if (
-      !daemonLiveAcceptanceCapabilityMatches(
-        this.liveAcceptanceStartupSecret,
-        identity,
-        params.acceptanceCapability,
-      )
-    ) {
-      return { corrupted: false, reason: "acceptance_capability_invalid" };
-    }
-    const sessions = this.daemonState.getSessionManager().getAllSessions?.();
-    if (!sessions || sessions.length > 0) {
-      return { corrupted: false, reason: "active_sessions" };
-    }
-    if (!this.onControlMetadataCorruption) {
-      return { corrupted: false, reason: "fault_unavailable" };
-    }
-    mutationSignal?.throwIfAborted();
-    await this.onControlMetadataCorruption(mutationSignal);
-    mutationSignal?.throwIfAborted();
-    return { corrupted: true };
-  }
-
-  // eslint-disable-next-line complexity -- fault selection is deliberately fail-closed and host-control-only.
-  private async applyAcceptanceDoctorFault(
-    params: Record<string, unknown>,
-    signal?: AbortSignal,
-  ): Promise<DaemonAcceptanceDoctorFault> {
-    if (!this.daemonGenerationMatches(params)) {
-      return { accepted: false, reason: "generation_changed" };
-    }
-    if (!this.daemonMaintenanceAdmissionMatches(params.maintenanceToken)) {
-      return { accepted: false, reason: "maintenance_token_invalid" };
-    }
-    const mutationSignal = combineAbortSignals(
-      signal,
-      this.maintenanceAdmissionAbortController?.signal,
-    );
-    const fault = params.fault;
-    if (
-      fault !== "missing-daemon" &&
-      fault !== "dead-daemon" &&
-      fault !== "unresponsive-daemon" &&
-      fault !== "missing-control-metadata" &&
-      fault !== "corrupt-control-metadata" &&
-      fault !== "missing-socket" &&
-      fault !== "stale-socket"
-    ) {
-      return { accepted: false, reason: "fault_invalid" };
-    }
-    const expiresAt = params.expiresAt;
-    if (typeof expiresAt !== "number" || !Number.isFinite(expiresAt)) {
-      return { accepted: false, reason: "scope_expired" };
-    }
-    if (expiresAt <= this.timer.now()) {
-      return { accepted: false, reason: "scope_expired" };
-    }
-    const identity: DaemonGenerationIdentity = {
-      pid: process.pid,
-      startedAt: this.identityStartedAt,
-      ...(this.processGenerationToken === undefined
-        ? {}
-        : { processGenerationToken: this.processGenerationToken }),
-      version: this.daemonIdentity.version,
-      buildId: this.daemonIdentity.build.buildId,
-      entryScript: this.daemonIdentity.build.entryScript,
-    };
-    const scope = { fault, expiresAt };
-    if (
-      !daemonLiveAcceptanceScopedCapabilityMatches(
-        this.liveAcceptanceStartupSecret,
-        identity,
-        scope,
-        params.acceptanceCapability,
-      )
-    ) {
-      return { accepted: false, reason: "acceptance_capability_invalid" };
-    }
-    const sessions = this.daemonState.getSessionManager().getAllSessions?.();
-    if (!sessions || sessions.length > 0) {
-      return { accepted: false, reason: "active_sessions" };
-    }
-    mutationSignal?.throwIfAborted();
-    if (fault === "unresponsive-daemon") {
-      this.acceptanceFaultUnresponsive = true;
-      this.acceptanceFaultMaintenanceToken = params.maintenanceToken as string;
-      return { accepted: true };
-    }
-    if (fault === "stale-socket") {
-      return { accepted: true };
-    }
-    if (fault === "missing-daemon") {
-      return { accepted: true, controlState: "daemon-missing" };
-    }
-    if (fault === "dead-daemon") {
-      return { accepted: true, controlState: "daemon-dead" };
-    }
-    if (!this.onAcceptanceDoctorFault) {
-      return { accepted: false, reason: "fault_unavailable" };
-    }
-    await this.onAcceptanceDoctorFault(fault, mutationSignal);
-    mutationSignal?.throwIfAborted();
-    return { accepted: true };
-  }
-
   private requireFeatureFlagService(): FeatureFlagService {
     if (!this.featureFlagService) {
       throw new Error("Feature flag service not available");
@@ -3811,15 +3542,6 @@ export class UnixSocketServer {
       }
       case DAEMON_RELEASE_ACCEPTANCE_RESTART_METHOD: {
         return this.releaseAcceptanceRestart(request.params, socketSessionId);
-      }
-      case DAEMON_REPAIR_CONTROL_METADATA_METHOD: {
-        return await this.repairControlMetadata(request.params, signal);
-      }
-      case DAEMON_CORRUPT_CONTROL_METADATA_METHOD: {
-        return await this.corruptControlMetadata(request.params, signal);
-      }
-      case DAEMON_APPLY_ACCEPTANCE_DOCTOR_FAULT_METHOD: {
-        return await this.applyAcceptanceDoctorFault(request.params, signal);
       }
       case "ide/status": {
         return {

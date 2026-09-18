@@ -1193,7 +1193,13 @@ export class SessionManager {
   ): Promise<Session> {
     const pendingAssignment = this.pendingSessionAssignments.get(sessionId);
     if (pendingAssignment) {
-      return await pendingAssignment;
+      const joined = await pendingAssignment;
+      // A client that joined a startup rehydration is the owner returning.
+      if (joined.ownership === "awaiting-owner") {
+        joined.ownership = "owned";
+        joined.awaitingOwnerSince = undefined;
+      }
+      return joined;
     }
 
     const pendingCreation = this.pendingSessionCreations.get(sessionId);
@@ -1321,6 +1327,36 @@ export class SessionManager {
     return session;
   }
 
+  private rehydrationSkipReason(sessionId: string): string | undefined {
+    if (this.sessions.has(sessionId)) {
+      return "already-live";
+    }
+    if (this.pendingSessionAssignments.has(sessionId)) {
+      return "already-pending";
+    }
+    return undefined;
+  }
+
+  private registerRehydrationRecovery(
+    sessionId: string,
+    devicePool: SessionDeviceAssigner,
+    persisted: DeviceSession,
+  ): Promise<Session> {
+    const recoveryPromise = this.recoverPersistedSession(
+      sessionId,
+      devicePool,
+      persisted.platform,
+      persisted,
+      "awaiting-owner",
+    ).finally(() => {
+      if (this.pendingSessionAssignments.get(sessionId) === recoveryPromise) {
+        this.pendingSessionAssignments.delete(sessionId);
+      }
+    });
+    this.pendingSessionAssignments.set(sessionId, recoveryPromise);
+    return recoveryPromise;
+  }
+
   async rehydratePersistedSessions(
     devicePool: SessionDeviceAssigner,
     options: { deadlineMs?: number } = {},
@@ -1363,8 +1399,9 @@ export class SessionManager {
         summary.skipped.push({ sessionUuid: sessionId, reason: "not-recoverable" });
         continue;
       }
-      if (this.sessions.has(sessionId)) {
-        summary.skipped.push({ sessionUuid: sessionId, reason: "already-live" });
+      const skipReason = this.rehydrationSkipReason(sessionId);
+      if (skipReason) {
+        summary.skipped.push({ sessionUuid: sessionId, reason: skipReason });
         continue;
       }
       if (this.timer.now() >= deadlineAt) {
@@ -1372,13 +1409,7 @@ export class SessionManager {
         break;
       }
       try {
-        const recoveryPromise = this.recoverPersistedSession(
-          sessionId,
-          devicePool,
-          persisted.platform,
-          persisted,
-          "awaiting-owner",
-        );
+        const recoveryPromise = this.registerRehydrationRecovery(sessionId, devicePool, persisted);
         const remaining = Math.max(0, deadlineAt - this.timer.now());
         const recoveryResult = await Promise.race([
           recoveryPromise,

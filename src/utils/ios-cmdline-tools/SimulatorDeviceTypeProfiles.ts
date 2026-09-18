@@ -16,7 +16,10 @@ export interface SimulatorDeviceTypeProfile {
 }
 
 export interface SimulatorDeviceTypeProfileSource {
-  profileFor(deviceTypeId: string): Promise<SimulatorDeviceTypeProfile | null>;
+  profileFor(
+    deviceTypeId: string,
+    options?: { timeoutMs?: number; signal?: AbortSignal },
+  ): Promise<SimulatorDeviceTypeProfile | null>;
 }
 
 export interface SimulatorDeviceTypeLister {
@@ -48,13 +51,16 @@ export class SimCtlSimulatorDeviceTypeProfiles implements SimulatorDeviceTypePro
     private readonly plist: PlistReader = new PlistClient(),
   ) {}
 
-  async profileFor(deviceTypeId: string): Promise<SimulatorDeviceTypeProfile | null> {
+  async profileFor(
+    deviceTypeId: string,
+    options: { timeoutMs?: number; signal?: AbortSignal } = {},
+  ): Promise<SimulatorDeviceTypeProfile | null> {
     if (this.profiles.has(deviceTypeId)) {
       return this.profiles.get(deviceTypeId) ?? null;
     }
 
     try {
-      const deviceTypes = await this.getDeviceTypes();
+      const deviceTypes = await this.getDeviceTypes(options.signal);
       const deviceType = deviceTypes.find((candidate) => candidate.identifier === deviceTypeId);
       if (!deviceType?.bundlePath) {
         this.profiles.set(deviceTypeId, null);
@@ -62,6 +68,7 @@ export class SimCtlSimulatorDeviceTypeProfiles implements SimulatorDeviceTypePro
       }
       const plist = await this.plist.readJsonFile(
         `${deviceType.bundlePath}/Contents/Resources/profile.plist`,
+        options,
       );
       const values = plist !== null && typeof plist === "object" ? plist : {};
       const profile = {
@@ -87,8 +94,8 @@ export class SimCtlSimulatorDeviceTypeProfiles implements SimulatorDeviceTypePro
     }
   }
 
-  private getDeviceTypes(): Promise<AppleDeviceType[]> {
-    this.deviceTypes ??= this.deviceTypeLister.getDeviceTypes();
+  private getDeviceTypes(signal?: AbortSignal): Promise<AppleDeviceType[]> {
+    this.deviceTypes ??= this.deviceTypeLister.getDeviceTypes(signal);
     return this.deviceTypes;
   }
 }

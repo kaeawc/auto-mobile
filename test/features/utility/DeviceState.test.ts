@@ -95,6 +95,38 @@ describe("DeviceState", () => {
     ]);
   });
 
+  test("reports unsupported iOS reads separately from healthy requested reads", async () => {
+    const simctl = new FakeSimCtlClient();
+    simctl.setCommandResult(IOS_BIOMETRIC_GET_COMMAND, `${IOS_BIOMETRIC_ENROLLMENT} 0\n`);
+
+    const result = await new DeviceState(iosSimulator, { simctl }).getState([
+      "doNotDisturb",
+      "biometrics",
+      "networkCondition",
+    ]);
+
+    expect(result.success).toBe(true);
+    expect(result.unsupported).toEqual(["doNotDisturb", "networkCondition"]);
+    expect(result).not.toHaveProperty("error");
+    expect(result.biometrics).toMatchObject({ supported: true, enrollment: "not_enrolled" });
+  });
+
+  test("reports a supported read failure above unsupported requested fields", async () => {
+    const simctl = new FakeSimCtlClient();
+    simctl.setCommandError(IOS_BIOMETRIC_GET_COMMAND, new Error("biometric read failed"));
+
+    const result = await new DeviceState(iosSimulator, { simctl }).getState([
+      "doNotDisturb",
+      "biometrics",
+      "networkCondition",
+    ]);
+
+    expect(result.success).toBe(false);
+    expect(result.unsupported).toEqual(["doNotDisturb", "networkCondition"]);
+    expect(result.error).toBe("biometric read failed");
+    expect(result.biometrics).toMatchObject({ supported: true, error: "biometric read failed" });
+  });
+
   test("reports biometric enrollment unsupported outside iOS Simulator", async () => {
     const deviceState = new DeviceState(androidDevice);
     const result = await deviceState.setState({ biometrics: { enrollment: "enrolled" } });
@@ -131,13 +163,14 @@ describe("DeviceState", () => {
     const deviceState = new DeviceState(ios18Simulator, { simctl });
     const result = await deviceState.getState();
 
-    expect(result.success).toBe(false);
+    expect(result.success).toBe(true);
     expect(result.doNotDisturb).toMatchObject({
       supported: false,
       capability: "unsupported",
     });
     expect(result.doNotDisturb?.error).toContain("donotdisturbd");
-    expect(result.error).toContain("donotdisturbd");
+    expect(result.unsupported).toEqual(["doNotDisturb", "connectivity"]);
+    expect(result).not.toHaveProperty("error");
     // No misleading `notifyutil -g` read is issued once we know the key is dead.
     const commands = simctl.getMethodCalls("executeCommand").map((c) => c.command as string);
     expect(commands.some((c) => c.includes("notifyutil"))).toBe(false);
@@ -249,7 +282,9 @@ describe("DeviceState", () => {
     const deviceState = new DeviceState(iosSimulator, { simctl });
     const result = await deviceState.getState();
 
-    expect(result.success).toBe(false);
+    expect(result.success).toBe(true);
+    expect(result.unsupported).toEqual(["doNotDisturb", "connectivity"]);
+    expect(result).not.toHaveProperty("error");
     expect(result.doNotDisturb).toMatchObject({
       supported: false,
       capability: "unsupported",

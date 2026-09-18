@@ -294,6 +294,8 @@ export interface DeviceStateResult {
   connectivity?: DeviceConnectivityState;
   biometrics?: BiometricEnrollmentState;
   networkCondition?: NetworkConditionState;
+  /** Requested fields skipped because the current platform cannot support them. */
+  unsupported?: DeviceStateField[];
   error?: string;
 }
 
@@ -1060,14 +1062,20 @@ export class DeviceState {
     const requestedStates = Object.values(selected).filter(
       (state): state is SelectedDeviceState => state !== undefined,
     );
-    const error = requestedStates.find((state) => state.error)?.error;
+    // Every read path uses supported:false only for a static platform limitation;
+    // supported reads carry errors for genuine probe failures.
+    const unsupported = Object.entries(selected)
+      .filter(([, state]) => state !== undefined && !state.supported)
+      .map(([field]) => field as DeviceStateField);
+    const failedState = requestedStates.find((state) => state.supported && state.error);
 
     return {
-      success: requestedStates.every((state) => state.supported && !state.error),
+      success: !failedState,
       deviceId: this.device.deviceId,
       platform: this.device.platform,
       ...selected,
-      ...(error ? { error } : {}),
+      ...(unsupported.length > 0 ? { unsupported } : {}),
+      ...(failedState?.error ? { error: failedState.error } : {}),
     };
   }
 

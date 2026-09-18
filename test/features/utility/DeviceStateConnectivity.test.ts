@@ -122,6 +122,8 @@ describe("DeviceState connectivity toggles (issue #6872)", () => {
     const result = await deviceState.getState();
 
     expect(result.success).toBe(true);
+    expect(result).not.toHaveProperty("unsupported");
+    expect(result).not.toHaveProperty("error");
     expect(result.doNotDisturb?.enabled).toBe(false);
     expect(result.connectivity?.airplaneMode).toBe(false);
     expect(result.connectivity?.locationEnabled).toBe(false);
@@ -312,7 +314,9 @@ describe("DeviceState connectivity toggles (issue #6872)", () => {
 
     const result = await deviceState.getState(["connectivity"]);
 
-    expect(result.success).toBe(false);
+    expect(result.success).toBe(true);
+    expect(result.unsupported).toEqual(["connectivity"]);
+    expect(result).not.toHaveProperty("error");
     expect(result.connectivity?.supported).toBe(false);
     expect(result.connectivity?.airplaneMode).toBeUndefined();
     expect(result.connectivity?.error).toContain("Airplane mode");

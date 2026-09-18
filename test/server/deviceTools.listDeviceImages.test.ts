@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { AndroidAvdProvenanceCache } from "../../src/utils/AndroidAvdProvenanceCache";
 import {
   listDeviceImagesSchema,
   registerDeviceTools,
@@ -15,6 +16,10 @@ import type { BootedDevice, DeviceInfo } from "../../src/models";
 import { FakeAvdManager } from "../fakes/FakeAvdManager";
 
 describe("listDeviceImages", function () {
+  beforeEach(function () {
+    AndroidAvdProvenanceCache.resetForTests();
+  });
+
   afterEach(function () {
     resetDeviceToolsDependencies();
     ToolRegistry.unregister("listDeviceImages");

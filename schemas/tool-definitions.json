@@ -3221,6 +3221,9 @@
                             ]
                           },
                           "version": {
+                            "type": "string"
+                          },
+                          "versionInfo": {
                             "type": "object",
                             "properties": {
                               "versionName": {
@@ -4145,6 +4148,9 @@
                             ]
                           },
                           "version": {
+                            "type": "string"
+                          },
+                          "versionInfo": {
                             "type": "object",
                             "properties": {
                               "versionName": {
@@ -10104,6 +10110,9 @@
                           ]
                         },
                         "version": {
+                          "type": "string"
+                        },
+                        "versionInfo": {
                           "type": "object",
                           "properties": {
                             "versionName": {

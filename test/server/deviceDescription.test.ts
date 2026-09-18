@@ -95,9 +95,14 @@ function assertSharedKnownValuesAgree(...descriptions: DeviceDescription[]): voi
 }
 
 function keyShape(value: unknown): unknown {
-  return value !== null && typeof value === "object"
-    ? Object.keys(value as Record<string, unknown>).sort()
-    : [];
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return [];
+  }
+  return Object.fromEntries(
+    Object.keys(value as Record<string, unknown>)
+      .sort()
+      .map((key) => [key, keyShape((value as Record<string, unknown>)[key])]),
+  );
 }
 
 const androidImage: DeviceDescriptionInput = {
@@ -202,6 +207,61 @@ describe("device description projections", () => {
     expect(bootedDescription.image).toEqual(configured.image);
     expect(bootedDescription.runtimeId).toBe(configured.runtimeId);
     expect(bootedDescription.deviceType).toBe(configured.deviceType);
+  });
+
+  test("uses configured AVD provenance beneath pooled image facts, per field", () => {
+    const configured = {
+      stableId: "Pixel_9_API_36",
+      name: "Pixel_9_API_36",
+      platform: "android" as const,
+      isRunning: true,
+      image: {
+        path: "/configured/Pixel_9_API_36.avd",
+        target: "Configured target",
+        basedOn: "Configured base",
+      },
+    };
+    const device = {
+      name: configured.name,
+      platform: "android" as const,
+      deviceId: "emulator-5554",
+    };
+    const pooled = {
+      id: device.deviceId,
+      name: device.name,
+      platform: "android" as const,
+      status: "idle" as const,
+      lastUsedAt: 0,
+      assignmentCount: 0,
+      incarnation: 1,
+      androidImage: { name: device.name, platform: "android" as const, isRunning: true },
+    };
+
+    expect(describeDevice({ kind: "booted", device, pooled, configured }).image).toEqual(
+      configured.image,
+    );
+    expect(
+      describeDevice({
+        kind: "booted",
+        device,
+        configured,
+        pooled: {
+          ...pooled,
+          androidImage: {
+            ...configured,
+            image: { path: "/pooled.avd", target: undefined, basedOn: "Pooled base" },
+          },
+        },
+      }).image,
+    ).toEqual({
+      path: "/pooled.avd",
+      target: "Configured target",
+      basedOn: "Pooled base",
+    });
+  });
+
+  test("compares nested device-description shape", () => {
+    expect(keyShape({ runtime: { orientation: null } })).not.toEqual(keyShape({ runtime: {} }));
   });
 
   test("keeps one canonical key set across lifecycle and ownership states", () => {
@@ -674,6 +734,33 @@ describe("device description projections", () => {
 
     expect(listDevicesEntrySchema.safeParse(payload).success).toBe(true);
     expect(() => listDevicesEntrySchema.parse({ ...payload, formFactor: "watch" })).toThrow();
+  });
+
+  test("keeps the legacy service-status version string beside structured version info", () => {
+    const projected = projectListDevicesEntry(
+      describeDevice({
+        kind: "booted",
+        device: { name: "Pixel", platform: "android", deviceId: "emulator-5554" },
+        serviceStatus: {
+          installed: true,
+          enabled: true,
+          running: true,
+          isCompatible: true,
+          version: "1.2.3",
+          versionInfo: {
+            versionName: "1.2.3",
+            versionCode: "45",
+            source: "android-package",
+          },
+        },
+      }),
+    );
+
+    const parsed = listDevicesEntrySchema.parse({ ...projected, deviceId: "emulator-5554" });
+    expect(parsed.runtime.serviceStatus).toMatchObject({
+      version: "1.2.3",
+      versionInfo: { versionName: "1.2.3", versionCode: "45", source: "android-package" },
+    });
   });
 
   test("preserves explicitly observed lock state", () => {

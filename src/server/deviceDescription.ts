@@ -83,7 +83,8 @@ export type DeviceServiceStatusLike = {
   isCompatible: boolean;
   installedSha256?: string | null;
   expectedSha256?: string | null;
-  version?: {
+  version?: string;
+  versionInfo?: {
     versionName?: string;
     versionCode?: string;
     build?: string;
@@ -198,6 +199,7 @@ export function describeDevice(input: DeviceDescriptionInput): DeviceDescription
     input.serviceStatus,
     input.locked,
     input.orientation,
+    input.kind === "booted" ? input.configured : undefined,
   );
 }
 
@@ -309,6 +311,7 @@ function describeBooted(
   serviceStatus: DeviceServiceStatusLike | undefined,
   locked: boolean | null = null,
   orientation?: "portrait" | "landscape",
+  configured?: StableConfiguredDeviceImage,
 ): DeviceDescription {
   const merged = mergeRuntimeFacts(device, admittedImage, admittedImageAuthoritative);
   // A cold-boot adapter can report a temporary non-emulator transport id even
@@ -334,7 +337,7 @@ function describeBooted(
     ...staticFacts,
     display: displayFrom(merged),
     capabilityInventory: capabilityInventory(merged, isVirtual),
-    image: imageLinkFrom(admittedImage),
+    image: imageLinkWithConfiguredFallback(admittedImage, configured),
     availabilityError: device.platform === "ios" ? (merged.availabilityError ?? null) : null,
     runtime: {
       deviceId: device.deviceId,
@@ -392,6 +395,19 @@ function imageLinkFrom(image: ImageLike | undefined): DeviceDescription["image"]
     path: link?.path ?? null,
     target: link?.target ?? null,
     basedOn: link?.basedOn ?? null,
+  };
+}
+
+function imageLinkWithConfiguredFallback(
+  admittedImage: ImageLike | undefined,
+  configured: StableConfiguredDeviceImage | undefined,
+): DeviceDescription["image"] {
+  const admitted = imageLinkFrom(admittedImage);
+  const fallback = imageLinkFrom(configured);
+  return {
+    path: admitted.path ?? fallback.path,
+    target: admitted.target ?? fallback.target,
+    basedOn: admitted.basedOn ?? fallback.basedOn,
   };
 }
 
@@ -694,7 +710,8 @@ const serviceStatusSchema = z
     isCompatible: z.boolean(),
     installedSha256: z.string().nullable().optional(),
     expectedSha256: z.string().nullable().optional(),
-    version: z
+    version: z.string().optional(),
+    versionInfo: z
       .object({
         versionName: z.string().optional(),
         versionCode: z.string().optional(),

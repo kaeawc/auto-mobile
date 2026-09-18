@@ -120,6 +120,10 @@ import { getInstalledAppsCacheWriteCoordinator } from "../db/installedAppsCacheW
 import { getDbWriteBarrier } from "../db/dbWriteBarrier";
 import { isAdbMissingDeviceError } from "../utils/android-cmdline-tools/AdbDeviceHealth";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import {
+  AndroidAvdProvenanceCache,
+  CONFIGURED_IMAGE_FALLBACK_TIMEOUT_MS,
+} from "../utils/AndroidAvdProvenanceCache";
 import { combineAbortSignals, getAbortSignal, runWithAbortSignal } from "../utils/AbortContext";
 import { ResourceRegistry } from "./resourceRegistry";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
@@ -1088,9 +1092,6 @@ function initializedDeviceSessionUuid(deviceId: string): string | undefined {
   return daemonState.getDeviceSessionRegistry().getByDeviceId(deviceId)?.deviceSessionUuid;
 }
 
-// This is best-effort enrichment: a wedged `emulator -list-avds` must not hang listDevices.
-const CONFIGURED_IMAGE_FALLBACK_TIMEOUT_MS = 2_000;
-
 async function configuredImagesForBootedDevices(
   deviceManager: PlatformDeviceManager,
   avdManager: Pick<AvdManager, "listDeviceImages">,
@@ -1114,18 +1115,11 @@ async function configuredImagesForBootedDevices(
         const [discovery, androidProvenance] = await Promise.all([
           deviceManager.getDeviceImagesDetailed(platform, { signal: controller.signal }),
           platform === "android"
-            ? avdManager.listDeviceImages(controller.signal).catch((error) => {
-                logger.warn(
-                  `listDevices Android AVD provenance lookup failed: ${errorMessage(error)}`,
-                  error,
-                );
-                return [];
-              })
-            : Promise.resolve([]),
+            ? AndroidAvdProvenanceCache.getInstance().getByName(avdManager, timer)
+            : Promise.resolve(new Map()),
         ]);
-        const provenanceByName = new Map(androidProvenance.map((avd) => [avd.name, avd]));
         for (const [key, image] of configuredImagesByStableId(platform, discovery)) {
-          const provenance = provenanceByName.get(image.name);
+          const provenance = androidProvenance.get(image.name);
           images.set(
             key,
             provenance
@@ -6242,16 +6236,9 @@ function availableDeviceResourceNote() {
 
 async function androidProvenanceByAvdName(
   avdManager: Pick<AvdManager, "listDeviceImages">,
+  timer: Timer,
 ): Promise<ReadonlyMap<string, AvdInfo>> {
-  try {
-    return new Map((await avdManager.listDeviceImages()).map((avd) => [avd.name, avd]));
-  } catch (error) {
-    logger.warn(
-      `listDeviceImages Android AVD provenance lookup failed: ${errorMessage(error)}`,
-      error,
-    );
-    return new Map();
-  }
+  return AndroidAvdProvenanceCache.getInstance().getByName(avdManager, timer);
 }
 
 export function registerDeviceTools() {
@@ -6269,7 +6256,7 @@ export function registerDeviceTools() {
       });
       const androidProvenance =
         args.platform === "android"
-          ? await androidProvenanceByAvdName(deps.avdManagerFactory())
+          ? await androidProvenanceByAvdName(deps.avdManagerFactory(), deps.timer)
           : undefined;
       const images = projection.sourceImages.map((image) => {
         const description = describeDevice({

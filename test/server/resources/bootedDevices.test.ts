@@ -39,6 +39,7 @@ import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { resolveApkChecksum, resolveIpaChecksum } from "../../../src/constants/release";
 import { z } from "zod/v4";
 import { FakeOrientationReader } from "../../fakes/FakeOrientationReader";
+import { AndroidAvdProvenanceCache } from "../../../src/utils/AndroidAvdProvenanceCache";
 
 describe("MCP Booted Device Resources", () => {
   let fixture: McpTestFixture;
@@ -79,6 +80,7 @@ describe("MCP Booted Device Resources", () => {
   });
 
   beforeEach(() => {
+    AndroidAvdProvenanceCache.resetForTests();
     // Set up fake device utils before each test
     fakeDeviceUtils = new FakeDeviceUtils();
     setDeviceManager(fakeDeviceUtils);
@@ -1747,7 +1749,8 @@ describe("booted device readiness", () => {
 
     expect(status).toEqual({
       ...withoutVersion,
-      version: { versionName: "1.2.3", versionCode: "45", source: "android-package" },
+      version: "1.2.3",
+      versionInfo: { versionName: "1.2.3", versionCode: "45", source: "android-package" },
     });
   });
 
@@ -1825,7 +1828,8 @@ describe("booted device readiness", () => {
         { getVersion: async () => ({ build: "200", source: "ios-runner-bundle" }) },
       );
 
-      expect(status?.version).toEqual({ build: "200", source: "ios-runner-bundle" });
+      expect(status?.version).toBe("200");
+      expect(status?.versionInfo).toEqual({ build: "200", source: "ios-runner-bundle" });
     } finally {
       installedSpy.mockRestore();
       runningSpy.mockRestore();
@@ -1981,7 +1985,11 @@ describe("booted device readiness", () => {
         source: "local",
       });
 
-      expect(status?.version).toEqual({ build: "2026.9.13", source: "ios-runner-bundle" });
+      expect(status?.version).toBe("2026.9.13");
+      expect(status?.versionInfo).toEqual({
+        build: "2026.9.13",
+        source: "ios-runner-bundle",
+      });
     } finally {
       installedSpy.mockRestore();
       runningSpy.mockRestore();

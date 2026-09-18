@@ -17,6 +17,7 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { defaultTimer } from "../../src/utils/SystemTimer";
+import { AndroidAvdProvenanceCache } from "../../src/utils/AndroidAvdProvenanceCache";
 
 const resolveWithFakeTimer = async <T>(
   promise: Promise<T>,
@@ -588,4 +589,7 @@ describe("listDevices tool (#5870)", () => {
       sessionManager.stopCleanupTimer();
     }
   });
+});
+beforeEach(() => {
+  AndroidAvdProvenanceCache.resetForTests();
 });

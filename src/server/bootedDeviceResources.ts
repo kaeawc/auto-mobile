@@ -40,6 +40,10 @@ import {
 import { resolveApkChecksum, resolveIpaChecksum } from "../constants/release";
 import { type DiscoverySource, sourcesForPlatform } from "../utils/discoverySource";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import {
+  AndroidAvdProvenanceCache,
+  CONFIGURED_IMAGE_FALLBACK_TIMEOUT_MS,
+} from "../utils/AndroidAvdProvenanceCache";
 import { withRemainingBudget } from "../utils/withRemainingBudget";
 import {
   AndroidOrientationReader,
@@ -102,7 +106,8 @@ export interface DeviceServiceStatus {
    * or when installation is not confirmed true for this device.
    * Readiness and compatibility remain represented by isCompatible and runner feature status.
    */
-  version?: CtrlProxyVersionInfo;
+  version?: string;
+  versionInfo?: CtrlProxyVersionInfo;
   /**
    * iOS only: whether the running runner advertises the full feature command set.
    * The iOS runner exposes no version/hash (installedSha256 stays null), so this
@@ -471,9 +476,6 @@ function toBootedDeviceInfo(
   };
 }
 
-// This is best-effort enrichment: a wedged `emulator -list-avds` must not hang devices/booted.
-const CONFIGURED_IMAGE_FALLBACK_TIMEOUT_MS = 2_000;
-
 export async function configuredImagesForBootedPlatform(
   platform: Platform,
   deviceManager: PlatformDeviceManager = PlatformDeviceManagerFactory.getInstance(),
@@ -496,19 +498,12 @@ export async function configuredImagesForBootedPlatform(
     const [discovery, androidProvenance] = await Promise.all([
       deviceManager.getDeviceImagesDetailed(platform, { signal: controller.signal }),
       avdManager
-        ? avdManager.listDeviceImages(controller.signal).catch((error) => {
-            logger.warn(
-              `[BootedDeviceResources] Failed to get Android AVD provenance: ${errorMessage(error)}`,
-              error,
-            );
-            return [];
-          })
-        : Promise.resolve([]),
+        ? AndroidAvdProvenanceCache.getInstance().getByName(avdManager, timer)
+        : Promise.resolve(new Map()),
     ]);
-    const provenanceByName = new Map(androidProvenance.map((avd) => [avd.name, avd]));
     return new Map(
       [...configuredImagesByStableId(platform, discovery)].map(([key, image]) => {
-        const provenance = provenanceByName.get(image.name);
+        const provenance = androidProvenance.get(image.name);
         return [
           key,
           provenance
@@ -1051,7 +1046,7 @@ async function enrichDeviceLockStates(devices: BootedDeviceInfo[]): Promise<void
 
 const ORIENTATION_TIMEOUT_MS = 3_000;
 
-async function probeDeviceOrientation(
+export async function probeDeviceOrientation(
   device: BootedDevice,
   reader: OrientationReader,
   deadlineMs: number,
@@ -1059,21 +1054,22 @@ async function probeDeviceOrientation(
 ): Promise<"portrait" | "landscape" | null> {
   let timeoutHandle: NodeJS.Timeout | undefined;
   try {
-    return await withRemainingBudget(
-      deadlineMs,
-      timer,
-      undefined,
-      async (_signal, remainingMs) =>
-        await Promise.race([
-          reader.readOrientation(device),
-          new Promise<null>((resolve) => {
-            timeoutHandle = timer.setTimeout(() => {
-              logger.warn(`[BootedDeviceResources] Orientation timeout for ${device.deviceId}`);
-              resolve(null);
-            }, remainingMs);
-          }),
-        ]),
-    );
+    return await withRemainingBudget(deadlineMs, timer, undefined, async (_signal, remainingMs) => {
+      const controller = new AbortController();
+      return await Promise.race([
+        reader.readOrientation(device, controller.signal),
+        new Promise<null>((resolve) => {
+          timeoutHandle = timer.setTimeout(() => {
+            const error = new Error(
+              `[BootedDeviceResources] Orientation timeout for ${device.deviceId}`,
+            );
+            controller.abort(error);
+            logger.warn(error.message);
+            resolve(null);
+          }, remainingMs);
+        }),
+      ]);
+    });
   } catch (error) {
     logger.warn(
       `[BootedDeviceResources] Failed to query orientation for ${device.deviceId}: ${errorMessage(error)}`,
@@ -1234,6 +1230,10 @@ const noOpCtrlProxyVersionLookup: CtrlProxyVersionLookup = {
 
 const CTRL_PROXY_VERSION_TIMEOUT_MS = 2000;
 
+function legacyVersion(version: CtrlProxyVersionInfo): string | undefined {
+  return version.versionName ?? version.build ?? version.versionCode;
+}
+
 async function getCtrlProxyVersion(
   device: BootedDevice,
   versionLookup: CtrlProxyVersionLookup,
@@ -1308,7 +1308,12 @@ export async function queryDeviceServiceStatus(
         installedSha256,
         expectedSha256,
         isCompatible,
-        ...(installed && version ? { version } : {}),
+        ...(installed && version
+          ? {
+              versionInfo: version,
+              ...(legacyVersion(version) ? { version: legacyVersion(version) } : {}),
+            }
+          : {}),
       };
     } else if (device.platform === "ios") {
       const manager = IOSCtrlProxyManager.getInstance(bootedDevice);
@@ -1363,7 +1368,12 @@ export async function queryDeviceServiceStatus(
         expectedSha256,
         isCompatible,
         // isInstalled() is host-wide/unconditional for simulators; running is the per-device signal.
-        ...(running && version ? { version } : {}),
+        ...(running && version
+          ? {
+              versionInfo: version,
+              ...(legacyVersion(version) ? { version: legacyVersion(version) } : {}),
+            }
+          : {}),
         supportedCommandsComplete,
         supportedFeaturesComplete,
       };

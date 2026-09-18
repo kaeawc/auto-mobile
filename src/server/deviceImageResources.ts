@@ -1,5 +1,6 @@
 import { errorMessage } from "../utils/describeUnknownError";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { AndroidAvdProvenanceCache } from "../utils/AndroidAvdProvenanceCache";
 import { ResourceRegistry, ResourceContent } from "./resourceRegistry";
 import { MultiPlatformDeviceManager, PlatformDeviceManager } from "../utils/deviceUtils";
 import { AvdManagerService } from "../utils/android-cmdline-tools/AvdManagerService";
@@ -254,6 +255,7 @@ export function createDeviceImageResourcesHandler(
 async function buildAndroidImages(
   deviceManager: PlatformDeviceManager,
   avdManager: AvdManager,
+  timer: Timer,
   signal?: AbortSignal,
 ): Promise<AndroidConfiguredInventoryResult> {
   try {
@@ -271,8 +273,7 @@ async function buildAndroidImages(
     if (!projection.observation.complete) {
       return { images: [], observation: projection.observation };
     }
-    const avdInfoList = await readAvdInfo(avdManager, signal);
-    const avdInfoByName = new Map(avdInfoList.map((avd) => [avd.name, avd]));
+    const avdInfoByName = await readAvdInfo(avdManager, timer);
     return {
       images: projection.sourceImages.map((device) =>
         toDeviceImageInfo(device, avdInfoByName.get(device.name)),
@@ -291,13 +292,11 @@ async function buildAndroidImages(
   }
 }
 
-async function readAvdInfo(avdManager: AvdManager, signal?: AbortSignal): Promise<AvdInfo[]> {
-  try {
-    return await avdManager.listDeviceImages(signal);
-  } catch (error) {
-    logger.warn(`[DeviceImageResources] Failed to get extended AVD info: ${error}`);
-    return [];
-  }
+async function readAvdInfo(
+  avdManager: AvdManager,
+  timer: Timer,
+): Promise<ReadonlyMap<string, AvdInfo>> {
+  return AndroidAvdProvenanceCache.getInstance().getByName(avdManager, timer);
 }
 
 async function buildIosImages(
@@ -368,9 +367,15 @@ async function generateAndroidResource(
   let completedInventory: AndroidConfiguredInventoryResult | undefined;
   try {
     return await Promise.race([
-      buildAndroidResourceResult(deviceManager, avdManager, controller.signal, (inventory) => {
-        completedInventory = inventory;
-      }),
+      buildAndroidResourceResult(
+        deviceManager,
+        avdManager,
+        timer,
+        controller.signal,
+        (inventory) => {
+          completedInventory = inventory;
+        },
+      ),
       new Promise<never>((_resolve, reject) => {
         timeoutHandle = timer.setTimeout(() => {
           timedOut = true;
@@ -428,10 +433,11 @@ async function generateAndroidResource(
 async function buildAndroidResourceResult(
   deviceManager: PlatformDeviceManager,
   avdManager: AvdManager,
+  timer: Timer,
   signal: AbortSignal,
   onInventoryComplete: (inventory: AndroidConfiguredInventoryResult) => void,
 ): Promise<PlatformResourceResult> {
-  const android = await buildAndroidImages(deviceManager, avdManager, signal);
+  const android = await buildAndroidImages(deviceManager, avdManager, timer, signal);
   onInventoryComplete(android);
   try {
     const [installedSystemImages, profiles] = await Promise.all([

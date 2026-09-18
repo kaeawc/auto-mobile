@@ -127,6 +127,48 @@ describe("DeviceBootService", () => {
     ]);
   });
 
+  it("adopts an unconstrained exact running Android emulator when image inventory fails", async () => {
+    const devices = new FakeDeviceUtils();
+    const running: BootedDevice = {
+      name: "Pixel_9_API_35",
+      platform: "android",
+      deviceId: "emulator-5554",
+    };
+    devices.setBootedDevices("android", [running]);
+    devices.listDeviceImages = async () => {
+      throw new Error("image inventory unavailable");
+    };
+
+    const result = await service(devices).boot({
+      platform: "android",
+      deviceId: running.deviceId,
+    });
+
+    expect(result).toMatchObject({ source: "booted", device: running });
+    expect(result.sourceImage).toBeUndefined();
+  });
+
+  it("keeps image inventory failures fatal when exact-device constraints need metadata", async () => {
+    const devices = new FakeDeviceUtils();
+    const running: BootedDevice = {
+      name: "Pixel_9_API_35",
+      platform: "android",
+      deviceId: "emulator-5554",
+    };
+    devices.setBootedDevices("android", [running]);
+    devices.listDeviceImages = async () => {
+      throw new Error("image inventory unavailable");
+    };
+
+    await expect(
+      service(devices).boot({
+        platform: "android",
+        deviceId: running.deviceId,
+        minOsVersion: "35",
+      }),
+    ).rejects.toThrow("image inventory unavailable");
+  });
+
   it("enriches an exact running Android emulator before applying metadata constraints", async () => {
     const devices = new FakeDeviceUtils();
     const running: BootedDevice = {

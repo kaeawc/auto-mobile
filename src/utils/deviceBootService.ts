@@ -20,6 +20,8 @@ import { matchesDeviceCriteria, type DeviceMatcher } from "./deviceMatcher";
 import type { DeviceProvisioner, DeviceProvisioningIdentityHooks } from "./deviceProvisioning";
 import { NoopDeviceBootRecovery, type DeviceBootRecovery } from "./deviceBootRecovery";
 import { defaultTimer, type Timer } from "./SystemTimer";
+import { errorMessage } from "./describeUnknownError";
+import { logger } from "./logger";
 import { runWithAbortSignal } from "./AbortContext";
 import type { StableVirtualDeviceIdentity } from "./virtualDeviceLifecycleCoordinator";
 import {
@@ -514,20 +516,12 @@ export class DeviceBootService {
     context: BootDeadlineContext,
     progress: DeviceBootProgress | undefined,
   ): Promise<DeviceBootResult> {
-    // Exact identity is authoritative, but a virtual device's configured image
-    // remains the source of static display/capability/profile metadata.
-    const needsIosRuntimeMetadata =
-      running.platform === "ios" &&
-      running.iosVersion === undefined &&
-      running.osVersion === undefined;
-    const needsConfiguredImage =
-      running.platform === "android"
-        ? isAndroidEmulatorSerial(running.deviceId)
-        : running.deviceId.includes("-") && running.deviceId.length > 30;
-    const enriched =
-      hasExplicitConstraints || needsIosRuntimeMetadata || needsConfiguredImage
-        ? await this.enrichBootedDeviceFromImage(running, context)
-        : { device: running, image: undefined };
+    const enriched = await this.enrichKnownRunningDevice(
+      running,
+      request.deviceId,
+      hasExplicitConstraints,
+      context,
+    );
     const resolvedRunning = enriched.device;
     if (hasExplicitConstraints && !matchesDeviceCriteria(resolvedRunning, criteria)) {
       throw new ActionableError(
@@ -542,6 +536,38 @@ export class DeviceBootService {
           sourceImage: enriched.image,
         }
       : result;
+  }
+
+  private async enrichKnownRunningDevice(
+    running: BootedDevice,
+    requestedDeviceId: string,
+    hasExplicitConstraints: boolean,
+    context: BootDeadlineContext,
+  ): Promise<{ device: BootedDevice; image: DeviceInfo | undefined }> {
+    // Exact identity is authoritative, but a virtual device's configured image
+    // remains the source of static display/capability/profile metadata.
+    const needsIosRuntimeMetadata =
+      running.platform === "ios" &&
+      running.iosVersion === undefined &&
+      running.osVersion === undefined;
+    const needsConfiguredImage =
+      running.platform === "android"
+        ? isAndroidEmulatorSerial(running.deviceId)
+        : running.deviceId.includes("-") && running.deviceId.length > 30;
+    if (hasExplicitConstraints || needsIosRuntimeMetadata || needsConfiguredImage) {
+      try {
+        return await this.enrichBootedDeviceFromImage(running, context);
+      } catch (error) {
+        if (hasExplicitConstraints) {
+          throw error;
+        }
+        logger.warn(
+          `[DeviceBootService] Exact device '${requestedDeviceId}' metadata enrichment failed; adopting discovered device: ${errorMessage(error)}`,
+          error,
+        );
+      }
+    }
+    return { device: running, image: undefined };
   }
 
   private async enrichBootedDeviceFromImage(

@@ -33,7 +33,8 @@ const readyServiceStatus: DeviceServiceStatus = {
   installedSha256: null,
   expectedSha256: "",
   isCompatible: true,
-  version: { build: "0.0.75", source: "ios-runner-bundle" },
+  version: "0.0.75",
+  versionInfo: { build: "0.0.75", source: "ios-runner-bundle" },
   supportedCommandsComplete: true,
   supportedFeaturesComplete: true,
 };

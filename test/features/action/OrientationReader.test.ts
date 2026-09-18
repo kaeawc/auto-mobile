@@ -61,6 +61,23 @@ describe("OrientationReader", () => {
     expect(await reader.readOrientation(device)).toBe("portrait");
   });
 
+  test("forwards an abort signal to both Android orientation commands", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse(
+      'shell dumpsys window | grep -i "mRotation="',
+      result("  mRotation=0 mAltOrientation=false"),
+    );
+    adb.setCommandResponse("shell wm size", result("Physical size: 1080x2400"));
+    const controller = new AbortController();
+
+    await new AndroidOrientationReader(adb).readOrientation(device, controller.signal);
+
+    expect(adb.getCommandCalls().map((call) => call.signal)).toEqual([
+      controller.signal,
+      controller.signal,
+    ]);
+  });
+
   test("returns null when WindowManager output has no authoritative rotation", async () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandResponse(

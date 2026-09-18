@@ -537,6 +537,25 @@ describe("Simctl", function () {
             source: "platform",
             reason: "iOS Simulator cannot emulate NFC hardware.",
           },
+          {
+            id: "ios.simulator.doNotDisturb",
+            state: "unsupported",
+            source: "platform",
+            reason: "Do Not Disturb cannot be read or set on an iOS simulator.",
+          },
+          {
+            id: "ios.simulator.networkCondition",
+            state: "unsupported",
+            source: "platform",
+            reason: "Network-condition simulation is unavailable on iOS Simulator.",
+          },
+          {
+            id: "ios.simulator.connectivity",
+            state: "unsupported",
+            source: "platform",
+            reason:
+              "iOS Simulator shares the host network stack and has no connectivity read verb.",
+          },
         ],
       });
       expect(commands).toEqual(["xcrun simctl list devices --json"]);

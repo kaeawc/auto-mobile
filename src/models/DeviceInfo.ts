@@ -52,4 +52,11 @@ export interface BootedDevice {
   formFactor?: FormFactor;
   screenWidth?: number;
   screenHeight?: number;
+  /** Optional live metadata threaded from discovery or the admitted image. */
+  screenDensity?: number;
+  runtime?: string;
+  deviceType?: string;
+  model?: string;
+  architecture?: string;
+  capabilityInventory?: VirtualDeviceCapabilityInventory;
 }

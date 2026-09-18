@@ -26,11 +26,7 @@ import {
 import { type DiscoverySource, sourcesForPlatform } from "../utils/discoverySource";
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import { ActionableError, BootedDevice, DeviceInfo, Platform, SomePlatform } from "../models";
-import type {
-  DeviceMatchCriteria,
-  FormFactor,
-  StartDeviceResult,
-} from "../models/DeviceMatchCriteria";
+import type { DeviceMatchCriteria, FormFactor } from "../models/DeviceMatchCriteria";
 import {
   BOOTED_DEVICE_RESOURCE_URIS,
   notifyBootedDeviceResourcesUpdated,
@@ -43,6 +39,15 @@ import {
   createConfiguredInventoryContract,
   projectConfiguredDeviceInventory,
 } from "../utils/configuredDeviceInventory";
+import {
+  describeDevice,
+  projectBootedDevice,
+  projectListDevicesEntry,
+  projectProvisionedDevice,
+  listDevicesEntrySchema,
+  provisionedDeviceSchema,
+  configuredImageSchema,
+} from "./deviceDescription";
 import {
   notifyInstalledAppResourceListChanged,
   syncInstalledAppResourceRegistry,
@@ -207,6 +212,37 @@ export const listDeviceImagesSchema = z.object({
 export const listDevicesSchema = z.object({
   platform: platformSchema.optional(),
 });
+
+const listDeviceImagesOutputSchema = z.object({
+  message: z.string(),
+  images: z.array(configuredImageSchema),
+  count: z.number(),
+  platform: platformSchema,
+  configuredInventory: z.unknown(),
+});
+
+const listDevicesOutputSchema = z.object({
+  message: z.string(),
+  devices: z.array(listDevicesEntrySchema),
+  count: z.number(),
+  discovery: z.unknown(),
+  note: z.unknown(),
+});
+
+const provisionDeviceOutputSchema = z
+  .object({
+    operationId: z.string(),
+    device: provisionedDeviceSchema,
+    requestedSpec: z.unknown(),
+    resolvedSpec: z.unknown(),
+    displayCutout: z.unknown(),
+    created: z.boolean(),
+    adopted: z.boolean(),
+    lifecycleState: z.enum(["ready", "created", "adopted"]),
+    readiness: z.object({ mode: z.enum(["automation", "none"]), status: z.string() }),
+    timing: z.unknown(),
+  })
+  .passthrough();
 
 const startDeviceParametersSchema = z.object({
   platform: platformSchema,
@@ -916,57 +952,6 @@ async function reserveStableDeviceLifecycle(
   }
 }
 
-function deviceIdentityPayload(
-  device: BootedDevice,
-  sourceImage?: DeviceInfo,
-): Record<string, unknown> {
-  if (device.platform === "android") {
-    return androidDeviceIdentityPayload(device, sourceImage);
-  }
-
-  const ctrlProxy = IOSCtrlProxyManager.getInstance(device);
-  return {
-    platform: "ios",
-    simulatorUdid: device.deviceId,
-    simulatorName: device.name,
-    // Runner readiness has already completed before startDevice/getApple
-    // builds this response. Expose the daemon-owned runner's current endpoint
-    // and successful-restart generation so callers can prove a targeted
-    // restart reached a fresh runner without conflating simulator display
-    // names with identity.
-    iosServicePort: ctrlProxy.getServicePort(),
-    iosRunnerGeneration: ctrlProxy.getRunnerGeneration(),
-  };
-}
-
-function androidDeviceIdentityPayload(
-  device: BootedDevice,
-  sourceImage: DeviceInfo | undefined,
-): Record<string, unknown> {
-  const portMatch = /^emulator-(\d+)$/.exec(device.deviceId);
-  const androidImage = sourceImage?.platform === "android" ? sourceImage : undefined;
-  const { apiLevel, osVersion } = androidBootedMetadata(device, sourceImage);
-  return {
-    platform: "android",
-    avdName: androidImage?.name ?? device.name,
-    adbSerial: device.deviceId,
-    emulatorConsolePort: portMatch ? Number(portMatch[1]) : null,
-    ...(apiLevel !== undefined ? { apiLevel } : {}),
-    ...(osVersion ? { osVersion } : {}),
-  };
-}
-
-function androidBootedMetadata(
-  device: BootedDevice,
-  sourceImage: DeviceInfo | undefined,
-): Pick<DeviceInfo, "apiLevel" | "osVersion"> {
-  const androidImage = sourceImage?.platform === "android" ? sourceImage : undefined;
-  return {
-    apiLevel: device.apiLevel ?? androidImage?.apiLevel,
-    osVersion: device.osVersion ?? androidImage?.osVersion,
-  };
-}
-
 function androidSourceImageWithBootedMetadata(
   device: BootedDevice,
   sourceImage: DeviceInfo | undefined,
@@ -993,25 +978,17 @@ function androidSourceImageWithBootedMetadata(
 }
 
 function listDevicePayloads(booted: BootedDevice[], devicePool: DevicePool | undefined) {
-  return booted.map((device) => {
-    const androidImage = devicePool?.describesPooledRuntime(device)
-      ? devicePool.getDevice(device.deviceId)?.androidImage
-      : undefined;
-    const osVersion =
-      device.platform === "android"
-        ? androidImage?.osVersion
-        : (device.osVersion ?? device.iosVersion);
-    return {
-      deviceId: device.deviceId,
-      name: device.name,
-      platform: device.platform,
-      ...(device.platform === "android" && androidImage?.apiLevel !== undefined
-        ? { apiLevel: androidImage.apiLevel }
-        : {}),
-      ...(osVersion ? { osVersion } : {}),
-      ...(device.formFactor ? { formFactor: device.formFactor } : {}),
-    };
-  });
+  return booted.map((device) =>
+    projectListDevicesEntry(
+      describeDevice({
+        kind: "booted",
+        device,
+        pooled: devicePool?.describesPooledRuntime(device)
+          ? (devicePool.getDevice(device.deviceId) ?? undefined)
+          : undefined,
+      }),
+    ),
+  );
 }
 
 function initializedDevicePool(): DevicePool | undefined {
@@ -6561,10 +6538,15 @@ export function registerDeviceTools() {
     if (deviceRecord.platform !== "android" && deviceRecord.platform !== "ios") {
       return undefined;
     }
+    const identity = deviceRecord.identity;
+    const identityRecord =
+      typeof identity === "object" && identity !== null && !Array.isArray(identity)
+        ? (identity as Record<string, unknown>)
+        : undefined;
     return {
       name: deviceRecord.name,
       platform: deviceRecord.platform,
-      deviceId: typeof deviceRecord.deviceId === "string" ? deviceRecord.deviceId : undefined,
+      deviceId: typeof identityRecord?.deviceId === "string" ? identityRecord.deviceId : undefined,
     };
   }
 
@@ -8084,6 +8066,7 @@ export function registerDeviceTools() {
     });
   }
 
+  // oxlint-disable-next-line complexity -- operation fields and canonical device projection share one response boundary.
   function buildProvisionDeviceResult(
     args: ProvisionDeviceArgs,
     provisioned: Awaited<ReturnType<ExactDeviceProvisioner["provision"]>>,
@@ -8093,10 +8076,20 @@ export function registerDeviceTools() {
       | { device: BootedDevice; sessionId: string; resources?: DeviceResourceConfigurationResult }
       | undefined,
   ): Record<string, unknown> {
+    const pooled = booted
+      ? (initializedDevicePool()?.getDevice(booted.device.deviceId) ?? undefined)
+      : undefined;
     return {
       operationId: args.operationId,
       ...(booted?.resources ? { resources: booted.resources } : {}),
-      device: booted?.device ?? provisioned.device,
+      device: projectProvisionedDevice(
+        describeDevice({
+          kind: "provisioned",
+          provisioned,
+          booted: booted?.device,
+          pooled,
+        }),
+      ),
       requestedSpec: args.device.spec,
       resolvedSpec: provisioned.resolvedSpec,
       displayCutout:
@@ -9057,37 +9050,23 @@ export function registerDeviceTools() {
   ) {
     perf.end();
     const timing = perf.getTimings();
-    const androidMetadata =
-      device.platform === "android" ? androidBootedMetadata(device, sourceImage) : undefined;
-
-    const result: StartDeviceResult = {
-      deviceId: device.deviceId,
-      name: device.name,
-      platform: device.platform,
-      apiLevel: androidMetadata?.apiLevel ?? device.apiLevel,
-      osVersion: androidMetadata?.osVersion ?? device.osVersion ?? device.iosVersion,
-      formFactor: device.formFactor,
-      screenSize:
-        device.screenWidth && device.screenHeight
-          ? { width: device.screenWidth, height: device.screenHeight }
-          : undefined,
-      sessionId,
-      processId,
+    return createStructuredToolResponse({
+      message: `${device.platform} '${device.name}' is ready (${source})`,
+      ...projectBootedDevice(
+        describeDevice({
+          kind: "booted",
+          device,
+          pooled: initializedDevicePool()?.getDevice(device.deviceId) ?? undefined,
+          discovery: sourceImage,
+          session: { sessionId },
+        }),
+      ),
+      processId: processId ?? null,
       isReady: true,
-      source,
+      acquisition: source === "booted" ? "already-booted" : "cold-boot",
       // TimingData's runtime shape is serialized as the legacy flat result.
       // oxlint-disable-next-line auto-mobile/no-unknown-cast
       timing: (timing ?? {}) as unknown as Record<string, number>,
-    };
-
-    // #5870: emit the session handle as `sessionUuid` — the key every consumer
-    // tool's schema declares — so the obvious copy-paste is correct.
-    const { sessionId: sessionUuid, ...resultWithoutSessionId } = result;
-    return createStructuredToolResponse({
-      message: `${device.platform} '${device.name}' is ready (${source})`,
-      ...resultWithoutSessionId,
-      sessionUuid,
-      deviceIdentity: deviceIdentityPayload(device, sourceImage),
     });
   }
 
@@ -9342,7 +9321,7 @@ export function registerDeviceTools() {
     "List device images",
     listDeviceImagesSchema,
     listDeviceImagesHandler,
-    { defaultEnabled: true },
+    { defaultEnabled: true, outputSchema: listDeviceImagesOutputSchema },
   );
 
   ToolRegistry.register(
@@ -9350,7 +9329,7 @@ export function registerDeviceTools() {
     "List booted devices; resource pointers for images and detail in the note",
     listDevicesSchema,
     listDevicesHandler,
-    { defaultEnabled: true },
+    { defaultEnabled: true, outputSchema: listDevicesOutputSchema },
   );
 
   ToolRegistry.register(
@@ -9380,7 +9359,7 @@ export function registerDeviceTools() {
     "Provision exact virtual device",
     provisionDeviceSchema,
     provisionDeviceHandler,
-    { defaultEnabled: false },
+    { defaultEnabled: false, outputSchema: provisionDeviceOutputSchema },
   );
 
   ToolRegistry.register("killDevice", "Kill device", killDeviceSchema, killDeviceHandler, {

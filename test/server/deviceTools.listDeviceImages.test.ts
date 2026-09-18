@@ -52,11 +52,16 @@ describe("listDeviceImages", function () {
 
     expect(response.structuredContent).toEqual(payload);
     expect(payload.images).toHaveLength(1);
-    expect(payload.images[0].stableId).toBe("iphone-17-pro-udid");
+    expect(payload.images[0].identity.stableId).toBe("iphone-17-pro-udid");
     expect(payload.images[0].capabilityInventory).toEqual({
       schemaVersion: 1,
       capabilities: [
-        { id: "ios.simulator.biometric", state: "available", source: "platform" },
+        {
+          id: "ios.simulator.biometric",
+          state: "supported",
+          source: "platform",
+          reason: null,
+        },
         {
           id: "ios.simulator.nfc",
           state: "unsupported",
@@ -141,10 +146,10 @@ describe("listDeviceImages", function () {
 
     expect(payload.images).toEqual([
       expect.objectContaining({
-        stableId: "Pixel_9",
+        identity: expect.objectContaining({ stableId: "Pixel_9" }),
         name: "Pixel_9",
         platform: "android",
-        isRunning: true,
+        lifecycle: expect.objectContaining({ state: "booted", known: true }),
       }),
     ]);
   });

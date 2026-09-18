@@ -2894,6 +2894,411 @@
       },
       "required": ["platform"],
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "images": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "identity": {
+                "type": "object",
+                "properties": {
+                  "stableId": {
+                    "type": "string"
+                  },
+                  "deviceId": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "connectionId": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": ["stableId", "deviceId", "connectionId"],
+                "additionalProperties": false
+              },
+              "name": {
+                "type": "string"
+              },
+              "platform": {
+                "type": "string",
+                "enum": ["android", "ios"]
+              },
+              "isVirtual": {
+                "type": "boolean"
+              },
+              "source": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": ["local", "remote"]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "runtime": {
+                "type": "object",
+                "properties": {
+                  "osVersion": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "apiLevel": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "runtimeId": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "deviceType": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "architecture": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "model": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "osVersion",
+                  "apiLevel",
+                  "runtimeId",
+                  "deviceType",
+                  "architecture",
+                  "model"
+                ],
+                "additionalProperties": false
+              },
+              "display": {
+                "type": "object",
+                "properties": {
+                  "width": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "height": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "density": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "formFactor": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": ["width", "height", "density", "formFactor"],
+                "additionalProperties": false
+              },
+              "lifecycle": {
+                "type": "object",
+                "properties": {
+                  "state": {
+                    "type": "string",
+                    "enum": ["configured", "booting", "booted", "shutting-down", "unavailable"]
+                  },
+                  "known": {
+                    "type": "boolean"
+                  }
+                },
+                "required": ["state", "known"],
+                "additionalProperties": false
+              },
+              "provenance": {
+                "type": "object",
+                "properties": {
+                  "android": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "path": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "target": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "basedOn": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "error": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "required": ["path", "target", "basedOn", "error"],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "ios": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "isAvailable": {
+                            "anyOf": [
+                              {
+                                "type": "boolean"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "availabilityError": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "required": ["isAvailable", "availabilityError"],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": ["android", "ios"],
+                "additionalProperties": false
+              },
+              "capabilityInventory": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "schemaVersion": {
+                        "type": "number"
+                      },
+                      "capabilities": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "state": {
+                              "type": "string",
+                              "enum": ["supported", "unsupported", "unknown"]
+                            },
+                            "reason": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "source": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "required": ["id", "state", "reason", "source"],
+                          "additionalProperties": false
+                        }
+                      }
+                    },
+                    "required": ["schemaVersion", "capabilities"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "identity",
+              "name",
+              "platform",
+              "isVirtual",
+              "source",
+              "runtime",
+              "display",
+              "lifecycle",
+              "provenance",
+              "capabilityInventory"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "count": {
+          "type": "number"
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "configuredInventory": {},
+        "artifact": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "format": {
+              "type": "string",
+              "const": "json"
+            },
+            "payload": {
+              "type": "string"
+            },
+            "bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "tool": {
+              "type": "string"
+            },
+            "resourceUri": {
+              "description": "automobile: resource URI to fetch this artifact's JSON in-band",
+              "type": "string"
+            }
+          },
+          "required": ["path", "format", "payload", "bytes", "tool"],
+          "additionalProperties": {}
+        }
+      },
+      "required": ["message", "images", "count", "platform", "configuredInventory"],
+      "additionalProperties": false
     }
   },
   {
@@ -2908,6 +3313,233 @@
           "enum": ["android", "ios"]
         }
       },
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "devices": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "identity": {
+                "type": "object",
+                "properties": {
+                  "stableId": {
+                    "type": "string"
+                  },
+                  "deviceId": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "connectionId": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": ["stableId", "deviceId", "connectionId"],
+                "additionalProperties": false
+              },
+              "name": {
+                "type": "string"
+              },
+              "platform": {
+                "type": "string",
+                "enum": ["android", "ios"]
+              },
+              "isVirtual": {
+                "type": "boolean"
+              },
+              "runtime": {
+                "type": "object",
+                "properties": {
+                  "osVersion": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "apiLevel": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "runtimeId": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "deviceType": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "architecture": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "model": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "osVersion",
+                  "apiLevel",
+                  "runtimeId",
+                  "deviceType",
+                  "architecture",
+                  "model"
+                ],
+                "additionalProperties": false
+              },
+              "display": {
+                "type": "object",
+                "properties": {
+                  "formFactor": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": ["formFactor"],
+                "additionalProperties": false
+              },
+              "lifecycle": {
+                "type": "object",
+                "properties": {
+                  "state": {
+                    "type": "string",
+                    "enum": ["configured", "booting", "booted", "shutting-down", "unavailable"]
+                  },
+                  "known": {
+                    "type": "boolean"
+                  }
+                },
+                "required": ["state", "known"],
+                "additionalProperties": false
+              },
+              "session": {
+                "type": "object",
+                "properties": {
+                  "sessionUuid": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": ["sessionUuid"],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "identity",
+              "name",
+              "platform",
+              "isVirtual",
+              "runtime",
+              "display",
+              "lifecycle",
+              "session"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "count": {
+          "type": "number"
+        },
+        "discovery": {},
+        "note": {},
+        "artifact": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "format": {
+              "type": "string",
+              "const": "json"
+            },
+            "payload": {
+              "type": "string"
+            },
+            "bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "tool": {
+              "type": "string"
+            },
+            "resourceUri": {
+              "description": "automobile: resource URI to fetch this artifact's JSON in-band",
+              "type": "string"
+            }
+          },
+          "required": ["path", "format", "payload", "bytes", "tool"],
+          "additionalProperties": {}
+        }
+      },
+      "required": ["message", "devices", "count", "discovery", "note"],
       "additionalProperties": false
     }
   },
@@ -8057,6 +8689,235 @@
           }
         }
       }
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "operationId": {
+          "type": "string"
+        },
+        "device": {
+          "type": "object",
+          "properties": {
+            "identity": {
+              "type": "object",
+              "properties": {
+                "stableId": {
+                  "type": "string"
+                },
+                "deviceId": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "connectionId": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": ["stableId", "deviceId", "connectionId"],
+              "additionalProperties": false
+            },
+            "name": {
+              "type": "string"
+            },
+            "platform": {
+              "type": "string",
+              "enum": ["android", "ios"]
+            },
+            "runtime": {
+              "type": "object",
+              "properties": {
+                "osVersion": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "apiLevel": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "runtimeId": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "deviceType": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "architecture": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "model": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "osVersion",
+                "apiLevel",
+                "runtimeId",
+                "deviceType",
+                "architecture",
+                "model"
+              ],
+              "additionalProperties": false
+            },
+            "display": {
+              "type": "object",
+              "properties": {
+                "width": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "height": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "density": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "formFactor": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": ["width", "height", "density", "formFactor"],
+              "additionalProperties": false
+            },
+            "lifecycle": {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "type": "string",
+                  "enum": ["configured", "booting", "booted", "shutting-down", "unavailable"]
+                },
+                "known": {
+                  "type": "boolean"
+                }
+              },
+              "required": ["state", "known"],
+              "additionalProperties": false
+            }
+          },
+          "required": ["identity", "name", "platform", "runtime", "display", "lifecycle"],
+          "additionalProperties": false
+        },
+        "requestedSpec": {},
+        "resolvedSpec": {},
+        "displayCutout": {},
+        "created": {
+          "type": "boolean"
+        },
+        "adopted": {
+          "type": "boolean"
+        },
+        "lifecycleState": {
+          "type": "string",
+          "enum": ["ready", "created", "adopted"]
+        },
+        "readiness": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": ["automation", "none"]
+            },
+            "status": {
+              "type": "string"
+            }
+          },
+          "required": ["mode", "status"],
+          "additionalProperties": false
+        },
+        "timing": {}
+      },
+      "required": [
+        "operationId",
+        "device",
+        "requestedSpec",
+        "resolvedSpec",
+        "displayCutout",
+        "created",
+        "adopted",
+        "lifecycleState",
+        "readiness",
+        "timing"
+      ],
+      "additionalProperties": {}
     }
   },
   {

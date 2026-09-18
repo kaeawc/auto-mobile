@@ -95,8 +95,8 @@ describe("startDevice --create-if-missing wiring", () => {
     expect(fakeProvisioner.requests[0].platform).toBe("ios");
     expect(fakeGate.calls).toEqual([true]);
     expect(result.name).toBe("AutoMobile-iPhone-17-abcd1234");
-    expect(result.deviceId).toBe("CREATED-UDID");
-    expect(result.source).toBe("cold-boot");
+    expect(result.identity).toMatchObject({ deviceId: "CREATED-UDID" });
+    expect(result.acquisition).toBe("cold-boot");
     expect(
       fakeDeviceUtils.getExecutedOperations().some((op) => op.startsWith("startDevice:")),
     ).toBe(true);
@@ -115,7 +115,7 @@ describe("startDevice --create-if-missing wiring", () => {
 
     expect(fakeProvisioner.requests[0].platform).toBe("android");
     expect(result.name).toBe("AutoMobile-android-34-abcd1234");
-    expect(result.source).toBe("cold-boot");
+    expect(result.acquisition).toBe("cold-boot");
   });
 
   it("forwards the matching criteria to the provisioner", async () => {

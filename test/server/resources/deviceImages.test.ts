@@ -209,17 +209,48 @@ describe("Device Image Resources with Fakes", () => {
         result.images.find((image) => image.platform === "android")?.capabilityInventory,
       ).toEqual({
         schemaVersion: 1,
-        capabilities: [{ id: "android.hardware.nfc", state: "unavailable", source: "avd_config" }],
+        capabilities: [
+          {
+            id: "android.hardware.nfc",
+            state: "unsupported",
+            source: "avd_config",
+            reason: null,
+          },
+        ],
       });
       expect(result.images.find((image) => image.platform === "ios")?.capabilityInventory).toEqual({
         schemaVersion: 1,
         capabilities: expect.arrayContaining([
-          { id: "ios.simulator.biometric", state: "available", source: "platform" },
+          {
+            id: "ios.simulator.biometric",
+            state: "supported",
+            source: "platform",
+            reason: null,
+          },
           {
             id: "ios.simulator.nfc",
             state: "unsupported",
             source: "platform",
             reason: "iOS Simulator cannot emulate NFC hardware.",
+          },
+          {
+            id: "ios.simulator.doNotDisturb",
+            state: "unsupported",
+            source: "platform",
+            reason: "Do Not Disturb cannot be read or set on an iOS simulator.",
+          },
+          {
+            id: "ios.simulator.networkCondition",
+            state: "unsupported",
+            source: "platform",
+            reason: "Network-condition simulation is unavailable on iOS Simulator.",
+          },
+          {
+            id: "ios.simulator.connectivity",
+            state: "unsupported",
+            source: "platform",
+            reason:
+              "iOS Simulator shares the host network stack and has no connectivity read verb.",
           },
         ]),
       });
@@ -249,7 +280,7 @@ describe("Device Image Resources with Fakes", () => {
         capabilities: [
           {
             id: "ios.simulator.biometric",
-            state: "unavailable",
+            state: "unsupported",
             source: "platform",
             reason: "iOS 18.0 runtime is not installed",
           },
@@ -258,6 +289,25 @@ describe("Device Image Resources with Fakes", () => {
             state: "unsupported",
             source: "platform",
             reason: "iOS Simulator cannot emulate NFC hardware.",
+          },
+          {
+            id: "ios.simulator.doNotDisturb",
+            state: "unsupported",
+            source: "platform",
+            reason: "Do Not Disturb cannot be read or set on an iOS simulator.",
+          },
+          {
+            id: "ios.simulator.networkCondition",
+            state: "unsupported",
+            source: "platform",
+            reason: "Network-condition simulation is unavailable on iOS Simulator.",
+          },
+          {
+            id: "ios.simulator.connectivity",
+            state: "unsupported",
+            source: "platform",
+            reason:
+              "iOS Simulator shares the host network stack and has no connectivity read verb.",
           },
         ],
       });
@@ -425,7 +475,7 @@ describe("Device Image Resources with Fakes", () => {
       expect(result.androidCount).toBe(1);
       expect(result.images).toEqual([
         expect.objectContaining({
-          stableId: "Pixel_9_API_35",
+          identity: expect.objectContaining({ stableId: "Pixel_9_API_35" }),
           name: "Pixel_9_API_35",
           platform: "android",
         }),
@@ -848,15 +898,19 @@ describe("Device Image Resources with Fakes", () => {
         expect.arrayContaining([
           expect.objectContaining({
             platform: "android",
-            stableId: "Pixel_9_API_35",
+            identity: expect.objectContaining({
+              stableId: "Pixel_9_API_35",
+              deviceId: "compat-android-id",
+            }),
             name: "Pixel_9_API_35",
-            deviceId: "compat-android-id",
           }),
           expect.objectContaining({
             platform: "ios",
-            stableId: "AAAA-BBBB-CCCC-DDDD",
+            identity: expect.objectContaining({
+              stableId: "AAAA-BBBB-CCCC-DDDD",
+              deviceId: "AAAA-BBBB-CCCC-DDDD",
+            }),
             name: "iPhone 17 Pro",
-            deviceId: "AAAA-BBBB-CCCC-DDDD",
           }),
         ]),
       );
@@ -976,15 +1030,17 @@ describe("Device Image Resources with Fakes", () => {
 
       const result = await handler.getDeviceImagesForPlatforms(["ios"]);
       expect(result.totalCount).toBe(1);
-      expect(result.images[0].state).toBe("Booted");
-      expect(result.images[0].isAvailable).toBe(true);
-      expect(result.images[0].iosVersion).toBe("17.4");
-      expect(result.images[0].deviceType).toBe(
+      expect(result.images[0].lifecycle).toEqual({ state: "booted", known: true });
+      expect(result.images[0].provenance.ios?.isAvailable).toBe(true);
+      expect(result.images[0].runtime.osVersion).toBe("17.4");
+      expect(result.images[0].runtime.deviceType).toBe(
         "com.apple.CoreSimulator.SimDeviceType.iPhone-15-Pro",
       );
-      expect(result.images[0].runtime).toBe("com.apple.CoreSimulator.SimRuntime.iOS-17-4");
-      expect(result.images[0].model).toBe("iPhone15,3");
-      expect(result.images[0].architecture).toBe("arm64");
+      expect(result.images[0].runtime.runtimeId).toBe(
+        "com.apple.CoreSimulator.SimRuntime.iOS-17-4",
+      );
+      expect(result.images[0].runtime.model).toBe("iPhone15,3");
+      expect(result.images[0].runtime.architecture).toBe("arm64");
     });
 
     test("should include extended AVD metadata for Android images", async () => {
@@ -1026,16 +1082,16 @@ describe("Device Image Resources with Fakes", () => {
       // Verify extended metadata for first device
       const pixel6 = result.images.find((img) => img.name === "Pixel_6_API_33");
       expect(pixel6).toBeDefined();
-      expect(pixel6?.path).toBe("/Users/test/.android/avd/Pixel_6_API_33.avd");
-      expect(pixel6?.target).toBe("Google APIs (Google Inc.)");
-      expect(pixel6?.basedOn).toBe("Android 13.0 (API 33)");
+      expect(pixel6?.provenance.android?.path).toBe("/Users/test/.android/avd/Pixel_6_API_33.avd");
+      expect(pixel6?.provenance.android?.target).toBe("Google APIs (Google Inc.)");
+      expect(pixel6?.provenance.android?.basedOn).toBe("Android 13.0 (API 33)");
 
       // Verify extended metadata for second device
       const pixel7 = result.images.find((img) => img.name === "Pixel_7_API_34");
       expect(pixel7).toBeDefined();
-      expect(pixel7?.path).toBe("/Users/test/.android/avd/Pixel_7_API_34.avd");
-      expect(pixel7?.target).toBe("Google Play (Google Inc.)");
-      expect(pixel7?.basedOn).toBe("Android 14 (API 34)");
+      expect(pixel7?.provenance.android?.path).toBe("/Users/test/.android/avd/Pixel_7_API_34.avd");
+      expect(pixel7?.provenance.android?.target).toBe("Google Play (Google Inc.)");
+      expect(pixel7?.provenance.android?.basedOn).toBe("Android 14 (API 34)");
     });
 
     test("should handle AVD info with errors", async () => {
@@ -1065,7 +1121,7 @@ describe("Device Image Resources with Fakes", () => {
       expect(result.totalCount).toBe(1);
       const corruptedAvd = result.images[0];
       expect(corruptedAvd.name).toBe("Corrupted_AVD");
-      expect(corruptedAvd.error).toBe("Error: config.ini is missing");
+      expect(corruptedAvd.provenance.android?.error).toBe("Error: config.ini is missing");
     });
 
     test("should handle missing AVD info gracefully", async () => {
@@ -1094,10 +1150,12 @@ describe("Device Image Resources with Fakes", () => {
       const device = result.images[0];
       expect(device.name).toBe("Device_Without_AVD_Info");
       expect(device.platform).toBe("android");
-      // Extended fields should be undefined when no AVD info match
-      expect(device.path).toBeUndefined();
-      expect(device.target).toBeUndefined();
-      expect(device.basedOn).toBeUndefined();
+      expect(device.provenance.android).toEqual({
+        path: null,
+        target: null,
+        basedOn: null,
+        error: null,
+      });
     });
 
     test("should not include extended AVD metadata for iOS images", async () => {
@@ -1120,10 +1178,7 @@ describe("Device Image Resources with Fakes", () => {
       expect(result.totalCount).toBe(1);
       const iosDevice = result.images[0];
       expect(iosDevice.platform).toBe("ios");
-      // Extended AVD fields should be undefined for iOS
-      expect(iosDevice.path).toBeUndefined();
-      expect(iosDevice.target).toBeUndefined();
-      expect(iosDevice.basedOn).toBeUndefined();
+      expect(iosDevice.provenance.android).toBeNull();
     });
   });
 

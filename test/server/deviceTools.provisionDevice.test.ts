@@ -756,7 +756,10 @@ describe("provisionDevice handler", () => {
     expect(JSON.parse((response as any).content[0].text)).toMatchObject({
       created: false,
       adopted: true,
-      device: { deviceId: "emulator-5556", name: "phone-api-36-a" },
+      device: {
+        identity: expect.objectContaining({ deviceId: "emulator-5556" }),
+        name: "phone-api-36-a",
+      },
     });
     expect(staleCacheManager.getExecutedOperations().join("|")).not.toContain("startDevice:");
     expect(staleCacheManager.detailedOptions).toEqual(
@@ -804,7 +807,7 @@ describe("provisionDevice handler", () => {
     expect(payload).toMatchObject({
       success: false,
       created: true,
-      device: { deviceId: "emulator-5554" },
+      device: { identity: expect.objectContaining({ deviceId: "emulator-5554" }) },
       sessionId: expect.any(String),
       readiness: { status: "automation_ready" },
       resources: { success: false, resources: { wallpaperRendering: { state: "unknown" } } },
@@ -889,7 +892,7 @@ describe("provisionDevice handler", () => {
     expect((response as any).isError).toBe(true);
     expect(JSON.parse((response as any).content[0].text)).toMatchObject({
       success: false,
-      device: { deviceId: "emulator-5554" },
+      device: { identity: expect.objectContaining({ deviceId: "emulator-5554" }) },
       resources: { resources: { wallpaperRendering: { state: "unsupported" } } },
     });
   });
@@ -1587,7 +1590,9 @@ describe("provisionDevice handler", () => {
         device: {
           name: provisioned.device.name,
           platform,
-          deviceId: platform === "android" ? "emulator-5554" : "SIM-123",
+          identity: expect.objectContaining({
+            deviceId: platform === "android" ? "emulator-5554" : "SIM-123",
+          }),
         },
       });
       expect(provisionCalls).toBe(2);
@@ -2533,7 +2538,7 @@ describe("provisionDevice handler", () => {
       readiness: { mode: "none", status: "device_ready" },
       sessionId: expect.any(String),
       device: {
-        deviceId: "emulator-5554",
+        identity: expect.objectContaining({ deviceId: "emulator-5554" }),
         name: "phone-api-36-a",
       },
     });
@@ -2613,7 +2618,7 @@ describe("provisionDevice handler", () => {
       readiness: { mode: "none", status: "device_ready" },
       sessionId: expect.any(String),
       device: {
-        deviceId: "requested-udid",
+        identity: expect.objectContaining({ deviceId: "requested-udid" }),
       },
     });
     expect(deviceManager.getExecutedOperations()).toContainEqual(

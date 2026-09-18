@@ -24,6 +24,7 @@ export class CtrlProxyScreenshot {
   async requestScreenshot(
     timeoutMs: number = 5000,
     perf?: PerformanceTracker,
+    signal?: AbortSignal,
   ): Promise<CtrlProxyScreenshotResult> {
     return sendCommand<CtrlProxyScreenshotResult>(this.context, {
       idPrefix: "screenshot",
@@ -31,6 +32,7 @@ export class CtrlProxyScreenshot {
       messageType: "request_screenshot",
       timeoutMs,
       perf,
+      abortSignal: signal,
       cancelScreenshotBackoff: false,
       notConnectedError: () => ({ success: false, error: "Not connected" }),
       timeoutError: (timeout) => ({

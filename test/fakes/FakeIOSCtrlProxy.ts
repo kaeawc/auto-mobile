@@ -33,6 +33,7 @@ import { PerformanceTracker } from "../../src/utils/PerformanceTracker";
 import { defaultTimer } from "../../src/utils/SystemTimer";
 import type { Timer } from "../../src/utils/SystemTimer";
 import type { InputKeyModifier, InputKeyName } from "../../src/features/action/InputKey";
+import { OPERATION_CANCELLED_MESSAGE } from "../../src/utils/constants";
 
 /**
  * Fake implementation of IOSCtrlProxy for testing
@@ -46,6 +47,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
   private hierarchyData: CtrlProxyHierarchy | null = null;
   private screenshotData: string | null = null;
   private screenshotFormat: string = "png";
+  private abortScreenshotController: AbortController | null = null;
   private performanceTiming: CtrlProxyPerfTiming | null = null;
   private isConnectedState: boolean = true;
   private hasCachedHierarchyState: boolean = false;
@@ -106,6 +108,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
   private pressKeyHistory: Array<{ key: InputKeyName; modifiers: InputKeyModifier[] }> = [];
 
   private screenshotRequestCount: number = 0;
+  private screenshotRequestSignals: Array<AbortSignal | undefined> = [];
   private hierarchyRequestCount: number = 0;
   private hierarchyRequestTimeouts: Array<number | undefined> = [];
   private keyboardOpen: boolean = false;
@@ -178,6 +181,11 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
   setScreenshotData(base64Data: string | null, format: string = "png"): void {
     this.screenshotData = base64Data;
     this.screenshotFormat = format;
+  }
+
+  /** Abort the supplied controller when a screenshot request reaches the fake. */
+  abortScreenshotOnRequest(controller: AbortController | null): void {
+    this.abortScreenshotController = controller;
   }
 
   /**
@@ -441,6 +449,10 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     return this.hierarchyRequestCount;
   }
 
+  getScreenshotRequestSignals(): Array<AbortSignal | undefined> {
+    return [...this.screenshotRequestSignals];
+  }
+
   /**
    * Get VoiceOver activate call history
    */
@@ -485,6 +497,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     this.setTextHistory = [];
     this.imeActionHistory = [];
     this.screenshotRequestCount = 0;
+    this.screenshotRequestSignals = [];
     this.hierarchyRequestCount = 0;
     this.hierarchyRequestTimeouts = [];
     this.keyboardOpen = false;
@@ -1049,7 +1062,16 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
   async requestScreenshot(
     timeoutMs: number = 5000,
     perf?: PerformanceTracker,
+    signal?: AbortSignal,
   ): Promise<CtrlProxyScreenshotResult> {
+    this.screenshotRequestSignals.push(signal);
+    this.abortScreenshotController?.abort();
+    if (signal?.aborted) {
+      return {
+        success: false,
+        error: OPERATION_CANCELLED_MESSAGE,
+      };
+    }
     this.screenshotRequestCount++;
     await this.applyDelay("screenshot");
     this.checkFailure("screenshot");

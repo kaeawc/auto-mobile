@@ -370,7 +370,10 @@ export class TakeScreenshot implements ScreenshotService {
       throwIfAborted(signal);
 
       // Request screenshot from CtrlProxy iOS
-      const result = await awaitWhileRequestIsLive(client.requestScreenshot(10000), signal);
+      const result = await awaitWhileRequestIsLive(
+        client.requestScreenshot(10000, undefined, signal),
+        signal,
+      );
       return await this.writeiOSScreenshot(finalPath, result, startTime, signal);
     } catch (error) {
       const errorMsg = errorMessage(error);
@@ -403,6 +406,9 @@ export class TakeScreenshot implements ScreenshotService {
     const imageBuffer = Buffer.from(result.data, "base64");
     await this.fileWriter.write(finalPath, imageBuffer);
     if (signal?.aborted) {
+      // A cancellation can land while the write is in flight. Remove the frame
+      // so findLatestScreenshotPath(deviceId) cannot surface it as current (#6605).
+      await this.fileWriter.remove(finalPath);
       return { success: false, error: OPERATION_CANCELLED_MESSAGE };
     }
 
@@ -544,22 +550,25 @@ export class TakeScreenshot implements ScreenshotService {
   ): Promise<ScreenshotResult> {
     const startTime = this.timer.now();
     logger.info(`[SCREENSHOT] Using file pull approach`);
+    const tempFile = `/sdcard/screenshot_${this.idGenerator.next()}.png`;
+    const tempLocalFile = `${finalPath}.temp`;
 
     try {
       // Use file pull approach instead of base64 to avoid stdout buffer issues
       const cmdStartTime = this.timer.now();
-      const tempFile = "/sdcard/screenshot.png";
-      const tempLocalFile = `${finalPath}.temp`;
 
       // Step 1: Take screenshot on device
       const screencapResult = await this.adb.executeCommand(
-        `shell screencap -p ${tempFile}`,
+        `shell "screencap -p '${tempFile}' ; echo AM_SCREENCAP_RC:$?"`,
         undefined,
         undefined,
         undefined,
         signal,
       );
-      if (screencapResult.stderr && screencapResult.stderr.includes("error")) {
+      if (
+        !/AM_SCREENCAP_RC:0(?:\s|$)/.test(screencapResult.stdout) ||
+        (screencapResult.stderr && screencapResult.stderr.includes("error"))
+      ) {
         throw new Error(`Screencap failed: ${screencapResult.stderr}`);
       }
 
@@ -574,15 +583,6 @@ export class TakeScreenshot implements ScreenshotService {
       if (pullResult.stderr && pullResult.stderr.includes("error")) {
         throw new Error(`Failed to pull screenshot: ${pullResult.stderr}`);
       }
-
-      // Step 3: Clean up temp file on device
-      await this.adb.executeCommand(
-        `shell rm ${tempFile}`,
-        undefined,
-        undefined,
-        undefined,
-        signal,
-      );
 
       const cmdDuration = this.timer.now() - cmdStartTime;
       logger.info(`[SCREENSHOT] Screenshot capture and pull took ${cmdDuration}ms`);
@@ -639,7 +639,6 @@ export class TakeScreenshot implements ScreenshotService {
 
       // Clean up any temp files
       try {
-        const tempLocalFile = `${finalPath}.temp`;
         if (await pathExists(tempLocalFile)) {
           await fsPromises.rm(tempLocalFile, { recursive: true, force: true });
         }
@@ -648,6 +647,17 @@ export class TakeScreenshot implements ScreenshotService {
       }
 
       throw err;
+    } finally {
+      await this.removeDeviceTempScreenshot(tempFile);
+    }
+  }
+
+  private async removeDeviceTempScreenshot(tempFile: string): Promise<void> {
+    try {
+      // Cleanup cannot change the completed capture result, so it is safe to swallow its failure.
+      await this.adb.executeCommand(`shell rm -f ${tempFile}`);
+    } catch (error) {
+      logger.debug(`[SCREENSHOT] Failed to remove device temp screenshot ${tempFile}: ${error}`);
     }
   }
 }

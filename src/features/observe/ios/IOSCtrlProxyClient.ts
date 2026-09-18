@@ -418,6 +418,7 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
   requestScreenshot(
     timeoutMs?: number,
     perf?: PerformanceTracker,
+    signal?: AbortSignal,
   ): Promise<CtrlProxyScreenshotResult>;
 
   requestScreenshotWithoutObservationStreamPush(
@@ -2786,8 +2787,9 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   async requestScreenshot(
     timeoutMs?: number,
     perf?: PerformanceTracker,
+    signal?: AbortSignal,
   ): Promise<CtrlProxyScreenshotResult> {
-    return this.screenshot.requestScreenshot(timeoutMs, perf);
+    return this.screenshot.requestScreenshot(timeoutMs, perf, signal);
   }
 
   async requestScreenshotWithoutObservationStreamPush(

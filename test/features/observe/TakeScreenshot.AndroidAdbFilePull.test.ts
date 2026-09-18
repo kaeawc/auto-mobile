@@ -5,6 +5,7 @@ import path from "node:path";
 import { TakeScreenshot } from "../../../src/features/observe/TakeScreenshot";
 import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
 import { shellQuote } from "../../../src/utils/shellQuote";
+import { screenshotTempIdToken } from "../../../src/utils/screenshot/screenshotFormats";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeIdGenerator } from "../../fakes/FakeIdGenerator";
@@ -28,7 +29,8 @@ describe("Android file-pull screenshots", function () {
     ).rejects.toThrow("Screencap failed");
     const commands = fakeAdb.getExecutedCommands();
     expect(commands.some((command) => command.startsWith("pull "))).toBe(false);
-    expect(commands).toContain(`shell rm -f ${shellQuote("/sdcard/screenshot_quiet-failure.png")}`);
+    const tempFile = `/sdcard/screenshot_${screenshotTempIdToken("quiet-failure")}.png`;
+    expect(commands).toContain(`shell rm -f ${shellQuote(tempFile)}`);
   });
 
   test("uses and removes a unique device-side file for every successful file pull", async function () {
@@ -53,15 +55,17 @@ describe("Android file-pull screenshots", function () {
       const removals = commands.filter((command) => command.startsWith("shell rm -f "));
       const pulls = commands.filter((command) => command.startsWith("pull "));
       expect(screencaps).toHaveLength(2);
-      expect(screencaps[0]).toContain("/sdcard/screenshot_first.png");
-      expect(screencaps[1]).toContain("/sdcard/screenshot_second.png");
+      const firstTempFile = `/sdcard/screenshot_${screenshotTempIdToken("first")}.png`;
+      const secondTempFile = `/sdcard/screenshot_${screenshotTempIdToken("second")}.png`;
+      expect(screencaps[0]).toContain(firstTempFile);
+      expect(screencaps[1]).toContain(secondTempFile);
       expect(removals).toEqual([
-        `shell rm -f ${shellQuote("/sdcard/screenshot_first.png")}`,
-        `shell rm -f ${shellQuote("/sdcard/screenshot_second.png")}`,
+        `shell rm -f ${shellQuote(firstTempFile)}`,
+        `shell rm -f ${shellQuote(secondTempFile)}`,
       ]);
       expect(pulls).toEqual([
-        `pull /sdcard/screenshot_first.png ${firstPath}.temp`,
-        `pull /sdcard/screenshot_second.png ${secondPath}.temp`,
+        `pull ${firstTempFile} ${firstPath}.temp`,
+        `pull ${secondTempFile} ${secondPath}.temp`,
       ]);
     } finally {
       await fsPromises.rm(localDir, { recursive: true, force: true });
@@ -93,7 +97,7 @@ describe("Android file-pull screenshots", function () {
       await expect(fsPromises.access(finalPath)).rejects.toThrow();
       await expect(fsPromises.access(`${finalPath}.temp`)).rejects.toThrow();
       expect(fakeAdb.getExecutedCommands()).toContain(
-        `shell rm -f ${shellQuote("/sdcard/screenshot_cancelled.png")}`,
+        `shell rm -f ${shellQuote(`/sdcard/screenshot_${screenshotTempIdToken("cancelled")}.png`)}`,
       );
     } finally {
       await fsPromises.rm(localDir, { recursive: true, force: true });
@@ -111,7 +115,7 @@ describe("Android file-pull screenshots", function () {
       new FakeIdGenerator(["../evil id; rm -rf /"]),
     );
     const finalPath = path.join(localDir, "malicious.png");
-    const tempFile = "/sdcard/screenshot_evilidrm-rf.png";
+    const tempFile = `/sdcard/screenshot_${screenshotTempIdToken("../evil id; rm -rf /")}.png`;
     try {
       await fsPromises.writeFile(`${finalPath}.temp`, "pulled frame");
       await (screenshot as any).captureScreenshotFilePull(finalPath, { format: "png" });
@@ -126,14 +130,18 @@ describe("Android file-pull screenshots", function () {
     }
   });
 
-  test("sanitizes normal ids and falls back to a fresh id when empty", function () {
+  test("preserves uniqueness when sanitized ids collide and never consumes a fallback id", function () {
     const screenshot = new TakeScreenshot(
       androidFilePullDevice,
       new FakeAdbClientFactory(new FakeAdbExecutor()),
       new FakeTimer(),
-      new FakeIdGenerator(["fallback/id"]),
+      new FakeIdGenerator(["unused"]),
     );
-    expect((screenshot as any).sanitizeDeviceTempId("normal-id../!")).toBe("normal-id");
-    expect((screenshot as any).sanitizeDeviceTempId(";../")).toBe("fallbackid");
+    const first = (screenshot as any).sanitizeDeviceTempId("a_b");
+    const second = (screenshot as any).sanitizeDeviceTempId("ab");
+    expect(first.startsWith("ab-")).toBe(true);
+    expect(second.startsWith("ab-")).toBe(true);
+    expect(first).not.toBe(second);
+    expect((screenshot as any).sanitizeDeviceTempId(";../")).toBe(screenshotTempIdToken(";../"));
   });
 });

@@ -37,6 +37,7 @@ import {
 import {
   screenshotExtensionForFormat,
   screenshotFileName,
+  screenshotTempIdToken,
 } from "../../utils/screenshot/screenshotFormats";
 import {
   defaultScreenshotFileWriter,
@@ -668,14 +669,7 @@ export class TakeScreenshot implements ScreenshotService {
   }
 
   private sanitizeDeviceTempId(rawId: string): string {
-    const sanitize = (value: string): string => value.replace(/[^A-Za-z0-9-]/g, "");
-    const sanitized = sanitize(rawId);
-    if (sanitized.length > 0) {
-      return sanitized;
-    }
-
-    const fallback = sanitize(this.idGenerator.next());
-    return fallback.length > 0 ? fallback : "tmp";
+    return screenshotTempIdToken(rawId);
   }
 
   private hasCommandError(stderr: string): boolean {

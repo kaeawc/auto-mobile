@@ -178,7 +178,10 @@ function constrainAdvertisedAppIdProperties(value: unknown): void {
   Object.values(jsonSchema).forEach(constrainAdvertisedAppIdProperties);
 }
 
-function toAdvertisedJsonSchema(schema: any): Record<string, unknown> {
+function toAdvertisedJsonSchema(
+  schema: any,
+  options: { constrainAppIds: boolean },
+): Record<string, unknown> {
   const jsonSchema = toJSONSchema(schema, {
     override: ({ zodSchema, jsonSchema }) => {
       applyJsonSchemaOverride(zodSchema, jsonSchema);
@@ -199,7 +202,9 @@ function toAdvertisedJsonSchema(schema: any): Record<string, unknown> {
   // flattening reduces to the cross-arm intersection or re-homes under a branch
   // discriminator. No-op for schemas without a registered post-flatten override.
   applyPostFlattenJsonSchemaOverride(schema, flattened);
-  constrainAdvertisedAppIdProperties(flattened);
+  if (options.constrainAppIds) {
+    constrainAdvertisedAppIdProperties(flattened);
+  }
   return flattened;
 }
 
@@ -1978,7 +1983,7 @@ export class ToolRegistryClass {
     let cached = this.toolDefinitionSchemaCache.get(tool.name);
     if (!cached) {
       cached = {
-        inputSchema: toAdvertisedJsonSchema(tool.schema),
+        inputSchema: toAdvertisedJsonSchema(tool.schema, { constrainAppIds: true }),
         outputSchemasByRuntimeFlags: new Map(),
       };
       this.toolDefinitionSchemaCache.set(tool.name, cached);
@@ -1989,7 +1994,9 @@ export class ToolRegistryClass {
       const outputSchema =
         toolHasOutputSchema(tool) && !suppressOutputSchema
           ? (advertiseBoundsForCompact(
-              addSpillArtifactToAdvertisedOutputSchema(toAdvertisedJsonSchema(tool.outputSchema)),
+              addSpillArtifactToAdvertisedOutputSchema(
+                toAdvertisedJsonSchema(tool.outputSchema, { constrainAppIds: false }),
+              ),
               compactBounds,
             ) as Record<string, unknown>)
           : undefined;

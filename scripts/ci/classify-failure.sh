@@ -55,12 +55,54 @@ match_signature() {
   printf '%s' 'UNKNOWN — no signature match, investigate'
 }
 
+executed_retry_marker_present() {
+  local evidence="$1" line normalized in_group=0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$line" == *'##[group]Run'* ]]; then
+      in_group=1
+    fi
+    if [[ "$line" == *'##[endgroup]'* ]]; then
+      in_group=0
+      continue
+    fi
+    normalized="$line"
+    if [[ "$normalized" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[^[:space:]]+Z[[:space:]](.*)$ ]]; then
+      normalized="${BASH_REMATCH[1]}"
+    fi
+    if [[ "$normalized" == "$RETRY_MARKER" && "$in_group" -eq 0 && "$line" != *'echo "'*"$RETRY_MARKER"*'"'* ]]; then
+      return 0
+    fi
+  done <<< "$evidence"
+  return 1
+}
+
 terminal_attempt_evidence() {
   local evidence="$1"
   local diagnostics_marker='First emulator attempt failed; captured diagnostics follow:'
+  local line normalized in_group=0 after_marker=0 terminal=''
 
-  if [[ "$evidence" == *"$RETRY_MARKER"* ]]; then
-    printf '%s' "${evidence#*"$RETRY_MARKER"}"
+  # shellcheck disable=SC2310 # A predicate: a false result is expected control flow.
+  if executed_retry_marker_present "$evidence"; then
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      if [[ "$line" == *'##[group]Run'* ]]; then
+        in_group=1
+      fi
+      if [[ "$line" == *'##[endgroup]'* ]]; then
+        in_group=0
+        continue
+      fi
+      normalized="$line"
+      if [[ "$normalized" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[^[:space:]]+Z[[:space:]](.*)$ ]]; then
+        normalized="${BASH_REMATCH[1]}"
+      fi
+      if [[ "$normalized" == "$RETRY_MARKER" && "$in_group" -eq 0 && "$line" != *'echo "'*"$RETRY_MARKER"*'"'* ]]; then
+        after_marker=1
+        terminal=''
+      elif [[ "$after_marker" -eq 1 ]]; then
+        terminal+="$line"$'\n'
+      fi
+    done <<< "$evidence"
+    printf '%s' "${terminal%$'\n'}"
   elif [[ "$evidence" == *"$diagnostics_marker"* ]]; then
     printf '%s' "$evidence"
   else
@@ -72,8 +114,9 @@ ambiguous_terminal_attempt() {
   local evidence="$1"
   local diagnostics_marker='First emulator attempt failed; captured diagnostics follow:'
 
+  # shellcheck disable=SC2310 # A predicate: a false result is expected control flow.
   [[ "$evidence" == *"$diagnostics_marker"* ]] \
-    && [[ "$evidence" != *"$RETRY_MARKER"* ]]
+    && ! executed_retry_marker_present "$evidence"
 }
 
 # Gate outcomes are emitted only when every failed upstream job in this run is
@@ -183,6 +226,9 @@ while IFS=$'\t' read -r job_id job_name steps; do
   # shellcheck disable=SC2310 # A non-match is expected classifier control flow.
   if advisory_only_gate "$job_name"; then
     verdict='CHECK-UPSTREAM-FIRST — aggregator is red because of an advisory (non-required) lane; inspect the upstream rows above before rerunning or filing an issue'
+  elif [[ "${head_branch} ${annotation_text} ${log_text}" == *"$RETRY_MARKER"* ]] \
+    && ! executed_retry_marker_present "${head_branch} ${annotation_text} ${log_text}"; then
+    verdict='UNKNOWN — retry attempt never executed; echoed retry marker is not terminal-attempt evidence'
   elif ambiguous_terminal_attempt "${head_branch} ${annotation_text} ${log_text}"; then
     verdict='UNKNOWN — log predates the retry marker; attempt-one diagnostics are not authoritative for the terminal attempt'
   else

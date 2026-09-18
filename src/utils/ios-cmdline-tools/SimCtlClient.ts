@@ -1930,7 +1930,7 @@ export class SimCtlClient implements SimCtl {
   /** Map a raw `simctl list devices --json` payload into sorted {@link DeviceInfo} records. */
   private async mapSimulatorListToDeviceInfos(
     simulatorList: SimulatorList,
-    timeoutMs: number | undefined,
+    deadlineMs: number | undefined,
     signal: AbortSignal | undefined,
   ): Promise<DeviceInfo[]> {
     const devices: DeviceInfo[] = [];
@@ -1939,7 +1939,7 @@ export class SimCtlClient implements SimCtl {
         logger.debug(`Found iOS simulator: ${device.name} (${device.udid}) state=${device.state}`);
         const iosVersion = normalizeIosVersion(runtimeId, device.os_version);
         const profile = device.deviceTypeIdentifier
-          ? await this.profileForDeviceType(device.deviceTypeIdentifier, timeoutMs, signal)
+          ? await this.profileForDeviceType(device.deviceTypeIdentifier, deadlineMs, signal)
           : null;
         devices.push({
           name: device.name,
@@ -1974,26 +1974,48 @@ export class SimCtlClient implements SimCtl {
 
   private async profileForDeviceType(
     deviceTypeIdentifier: string,
-    timeoutMs: number | undefined,
+    deadlineMs: number | undefined,
     signal: AbortSignal | undefined,
   ): Promise<Awaited<ReturnType<SimulatorDeviceTypeProfileSource["profileFor"]>>> {
-    const profile =
-      timeoutMs === undefined && signal === undefined
-        ? this.deviceTypeProfiles.profileFor(deviceTypeIdentifier)
-        : this.deviceTypeProfiles.profileFor(deviceTypeIdentifier, { timeoutMs, signal });
-    if (timeoutMs === undefined && signal === undefined) {
-      return profile;
+    const remainingMs = deadlineMs === undefined ? undefined : deadlineMs - this.timer.now();
+    if (remainingMs !== undefined && remainingMs <= 0) {
+      return null;
     }
+    if (remainingMs === undefined && signal === undefined) {
+      return this.deviceTypeProfiles.profileFor(deviceTypeIdentifier);
+    }
+    // The remaining budget bounds only this caller's wait (the race below); the shared,
+    // memoizing source gets the caller's signal but its own default timeout, so a
+    // near-deadline listing cannot poison the profile cache with a transient timeout.
+    const profile = this.deviceTypeProfiles.profileFor(deviceTypeIdentifier, { signal });
+    try {
+      return await this.raceWithDeadlineAndAbort(profile, remainingMs, signal);
+    } catch (error) {
+      if (signal?.aborted) {
+        throw error;
+      }
+      // Display dimensions are optional best-effort enrichment; a bounded
+      // profile lookup must not fail the simulator listing.
+      logger.debug(`Failed to enrich iOS simulator display dimensions: ${errorMessage(error)}`);
+      return null;
+    }
+  }
 
+  /** Race an optional lookup against the remaining budget and the caller's abort signal. */
+  private async raceWithDeadlineAndAbort<T>(
+    operation: Promise<T>,
+    remainingMs: number | undefined,
+    signal: AbortSignal | undefined,
+  ): Promise<T> {
     let timeoutHandle: NodeJS.Timeout | undefined;
     let abortListener: (() => void) | undefined;
-    const contenders: Array<Promise<Awaited<typeof profile>>> = [profile];
-    if (timeoutMs !== undefined) {
+    const contenders: Array<Promise<T>> = [operation];
+    if (remainingMs !== undefined) {
       contenders.push(
         new Promise<never>((_resolve, reject) => {
           timeoutHandle = this.timer.setTimeout(
             () => reject(new Error(`Timed out reading iOS simulator device type profile`)),
-            timeoutMs,
+            remainingMs,
           );
         }),
       );
@@ -2007,14 +2029,8 @@ export class SimCtlClient implements SimCtl {
         }),
       );
     }
-
     try {
       return await Promise.race(contenders);
-    } catch (error) {
-      // Display dimensions are optional best-effort enrichment; a bounded
-      // profile lookup must not fail the simulator listing.
-      logger.debug(`Failed to enrich iOS simulator display dimensions: ${errorMessage(error)}`);
-      return null;
     } finally {
       if (timeoutHandle) {
         this.timer.clearTimeout(timeoutHandle);
@@ -2163,8 +2179,9 @@ export class SimCtlClient implements SimCtl {
     timeoutMs: number | undefined,
     signal: AbortSignal | undefined,
   ): Promise<DeviceInfo[]> {
+    const deadlineMs = timeoutMs === undefined ? undefined : this.timer.now() + timeoutMs;
     const simulatorList = await this.listSimulators(timeoutMs, signal);
-    return this.mapSimulatorListToDeviceInfos(simulatorList, timeoutMs, signal);
+    return this.mapSimulatorListToDeviceInfos(simulatorList, deadlineMs, signal);
   }
 
   /**

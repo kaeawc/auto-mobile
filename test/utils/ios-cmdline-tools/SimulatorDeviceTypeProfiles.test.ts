@@ -95,6 +95,31 @@ describe("SimCtlSimulatorDeviceTypeProfiles", () => {
     ).resolves.toBeNull();
   });
 
+  test("retries a transient device type listing failure", async () => {
+    let calls = 0;
+    const profiles = new SimCtlSimulatorDeviceTypeProfiles(
+      {
+        getDeviceTypes: async () => {
+          calls++;
+          if (calls === 1) {
+            throw new Error("transient failure");
+          }
+          return [deviceType()];
+        },
+      },
+      plistReader({ mainScreenWidth: 1206 }),
+    );
+
+    await expect(
+      profiles.profileFor("com.apple.CoreSimulator.SimDeviceType.iPhone-17"),
+    ).resolves.toBeNull();
+    await expect(
+      profiles.profileFor("com.apple.CoreSimulator.SimDeviceType.iPhone-17"),
+    ).resolves.toMatchObject({ pixelWidth: 1206 });
+    await profiles.profileFor("com.apple.CoreSimulator.SimDeviceType.iPhone-17");
+    expect(calls).toBe(2);
+  });
+
   test("returns null when the profile read fails", async () => {
     const plist = plistReader({});
     plist.readJsonFile = async () => Promise.reject(new Error("failed"));

@@ -3972,7 +3972,9 @@ export class DaemonManager implements DaemonManagerLike {
           pid: pidData.pid,
           ppid: 0,
           command: "",
-          startedAt: pidData.startedAt,
+          // Birth time, not daemon construction time: the process-table matcher
+          // compares against the OS birth timestamp within a 2s tolerance.
+          startedAt: pidData.processStartedAt ?? pidData.startedAt,
           ...(pidData.processGenerationToken === undefined
             ? {}
             : { processGenerationToken: pidData.processGenerationToken }),

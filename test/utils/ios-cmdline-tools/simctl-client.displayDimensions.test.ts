@@ -105,7 +105,8 @@ describe("SimCtlClient display dimension enrichment", () => {
     timer.advanceTime(2);
     await expect(listing).resolves.toHaveLength(1);
     expect(profileCalls).toBe(1);
-    expect(timeouts).toEqual([2]);
+    // The remaining budget bounds the outer race only; the shared cache never sees it.
+    expect(timeouts).toEqual([-1]);
 
     const expired = new FakeTimer();
     let expiredCalls = 0;

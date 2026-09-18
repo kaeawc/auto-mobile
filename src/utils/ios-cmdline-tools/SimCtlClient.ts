@@ -1984,10 +1984,10 @@ export class SimCtlClient implements SimCtl {
     if (remainingMs === undefined && signal === undefined) {
       return this.deviceTypeProfiles.profileFor(deviceTypeIdentifier);
     }
-    const profile = this.deviceTypeProfiles.profileFor(deviceTypeIdentifier, {
-      timeoutMs: remainingMs,
-      signal,
-    });
+    // The remaining budget bounds only this caller's wait (the race below); the shared,
+    // memoizing source gets the caller's signal but its own default timeout, so a
+    // near-deadline listing cannot poison the profile cache with a transient timeout.
+    const profile = this.deviceTypeProfiles.profileFor(deviceTypeIdentifier, { signal });
     try {
       return await this.raceWithDeadlineAndAbort(profile, remainingMs, signal);
     } catch (error) {

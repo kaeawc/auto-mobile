@@ -97,7 +97,11 @@ export class SimCtlSimulatorDeviceTypeProfiles implements SimulatorDeviceTypePro
       logger.debug(
         `Failed to read iOS simulator device type profile for ${deviceTypeId}: ${String(error)}`,
       );
-      this.profiles.set(deviceTypeId, null);
+      // A cancelled/timed-out read says nothing about the profile; only a completed
+      // failure is worth remembering.
+      if (!isAbortOrTimeout(error)) {
+        this.profiles.set(deviceTypeId, null);
+      }
       return null;
     }
   }
@@ -111,4 +115,11 @@ export class SimCtlSimulatorDeviceTypeProfiles implements SimulatorDeviceTypePro
     }
     return this.deviceTypes;
   }
+}
+
+function isAbortOrTimeout(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  return error.name === "AbortError" || /timed out|timeout/i.test(error.message);
 }

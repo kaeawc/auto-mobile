@@ -510,7 +510,7 @@ export async function runDoctorCommand(
 
   if (Object.hasOwn(params, "repair") || Object.hasOwn(params, "timeoutMs")) {
     throw new ActionableError(
-      "doctor is status-only; --repair and --timeout-ms were removed. Use --daemon restart or --daemon diagnose for supported remedies.",
+      "doctor is status-only; --repair and --timeout-ms were removed. Use --daemon restart to recover the daemon; --daemon diagnose only gathers further diagnostics.",
     );
   }
 

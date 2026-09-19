@@ -203,7 +203,14 @@ internal fun availableDeviceImages(
   booted: List<BootedDevice>,
   platform: String,
 ): List<DeviceImageInfo> {
-  val bootedStableIds = booted.mapNotNull { it.knownSourceImageId() }.toSet()
+  val bootedStableIds =
+    booted
+      .filter { device ->
+        val isIOS = device.type == DeviceType.iOSSimulator || device.type == DeviceType.iOSPhysical
+        if (platform == "ios") isIOS else !isIOS
+      }
+      .mapNotNull { it.knownSourceImageId() }
+      .toSet()
   return images.filter { it.platform == platform && it.identity.stableId !in bootedStableIds }
 }
 

@@ -111,4 +111,50 @@ class AvailableDeviceImagesTest {
 
     assertEquals(listOf(runtimeId, unknownRuntimeId), available.map { it.identity.stableId })
   }
+
+  @Test
+  fun `booted Android stableId does not hide iOS image`() {
+    val sharedStableId = "shared-id-123"
+
+    assertEquals(
+      listOf(sharedStableId),
+      availableDeviceImages(
+          images = listOf(image(sharedStableId, platform = "ios")),
+          booted =
+            listOf(
+              BootedDevice(
+                id = "android-runtime-id",
+                name = "Android device",
+                type = DeviceType.AndroidEmulator,
+                stableId = sharedStableId,
+              )
+            ),
+          platform = "ios",
+        )
+        .map { it.identity.stableId },
+    )
+  }
+
+  @Test
+  fun `booted iOS stableId does not hide Android image`() {
+    val sharedStableId = "shared-id-123"
+
+    assertEquals(
+      listOf(sharedStableId),
+      availableDeviceImages(
+          images = listOf(image(sharedStableId)),
+          booted =
+            listOf(
+              BootedDevice(
+                id = sharedStableId,
+                name = "iOS device",
+                type = DeviceType.iOSSimulator,
+                stableId = sharedStableId,
+              )
+            ),
+          platform = "android",
+        )
+        .map { it.identity.stableId },
+    )
+  }
 }

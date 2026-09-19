@@ -8,11 +8,20 @@ setup() {
   ARGS_FILE="$(mktemp)"
   FAKE_HOME="$(mktemp -d)"
 
-  cat > "$STUB_BIN/bats" <<EOF
+cat > "$STUB_BIN/bats" <<EOF
 #!/usr/bin/env bash
 printf 'bats:%s\n' "\$1" >> "$ARGS_FILE"
 case "\$1" in
-  *fail*) exit 1 ;;
+  *signal-pass*|*signal-column-pass*)
+    printf '1..2\nok 1 first\nok 2 second\n'
+    kill -TERM "\$\$"
+    ;;
+  *not-ok*) printf '1..1\nnot ok 1 real failure\n' ;;
+  *fail*)
+    printf '1..1\nok 1 stub failure\n'
+    exit 1
+    ;;
+  *) printf '1..1\nok 1 stub pass\n' ;;
 esac
 EOF
 
@@ -32,11 +41,33 @@ for ((i = 0; i < \${#args[@]}; i += 1)); do
 done
 if [[ -n "\$joblog" ]]; then
   printf 'Seq Host Starttime JobRuntime Send Receive Exitval Signal Command\n' > "\$joblog"
-  printf '1 : 0 2.000 0 0 0 0 bats %s\n' "$FIXTURES/unit.bats" >> "\$joblog"
 fi
 rc=0
+sequence=0
+command=""
+for ((i = 0; i < \${#args[@]}; i += 1)); do
+  if [[ "\${args[\$i]}" == "-0" ]]; then
+    command="\${args[\$((i + 1))]}"
+  fi
+done
+if [[ "\$command" =~ \>\ \"([^\"]+)\"/\\{#\\}\.out ]]; then
+  output_dir="\${BASH_REMATCH[1]}"
+else
+  exit 2
+fi
 while IFS= read -r -d '' file; do
-  "$STUB_BIN/bats" "\$file" || rc=1
+  sequence=\$((sequence + 1))
+  "$STUB_BIN/bats" "\$file" > "\$output_dir/\${sequence}.out" 2>&1
+  bats_status=\$?
+  exitval=\$bats_status
+  signal=0
+  if [[ "\$file" == *signal-column-pass* ]] && (( bats_status > 128 )); then
+    signal=\$((bats_status - 128))
+  fi
+  printf '%s : 0 2.000 0 0 %s %s bats %s\n' "\$sequence" "\$exitval" "\$signal" "\$file" >> "\$joblog"
+  if (( bats_status != 0 )); then
+    rc=1
+  fi
 done
 exit "\$rc"
 EOF
@@ -110,6 +141,33 @@ run_runner() {
   [ "$status" -ne 0 ]
   grep -q "^bats:$FIXTURES/parallel-fail.bats$" "$ARGS_FILE"
   grep -q "^bats:$FIXTURES/serial-fail.bats$" "$ARGS_FILE"
+}
+
+@test "parallel shell-wrapper exit after a complete TAP plan is treated as pass" {
+  printf '@test "signal pass" { true; }\n' > "$FIXTURES/parallel-signal-pass.bats"
+
+  run_runner unit
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"parallel-signal-pass.bats plan complete despite trailing signal 15; treating as pass"* ]]
+}
+
+@test "parallel Signal-column termination after a complete TAP plan is treated as pass" {
+  printf '@test "signal column pass" { true; }\n' > "$FIXTURES/parallel-signal-column-pass.bats"
+
+  run_runner unit
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"parallel-signal-column-pass.bats plan complete despite trailing signal 15; treating as pass"* ]]
+}
+
+@test "parallel TAP not ok fails even when bats exits zero" {
+  printf '@test "not ok" { false; }\n' > "$FIXTURES/parallel-not-ok.bats"
+
+  run_runner unit
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"parallel-not-ok.bats did not produce a complete passing BATS TAP plan"* ]]
 }
 
 @test "job count override reaches GNU Parallel" {

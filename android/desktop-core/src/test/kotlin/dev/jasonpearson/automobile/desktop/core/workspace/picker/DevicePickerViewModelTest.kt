@@ -249,6 +249,50 @@ class DevicePickerViewModelTest {
     }
 
   @Test
+  fun `an unavailable iOS image absent from booted devices is listed`() = testScope.runTest {
+    val client = fake()
+    client.bootedDevicesResponse = bootedResponse()
+    client.deviceImagesResponse =
+      imageResponse(
+        imageEntry(
+          "Unavailable iPhone",
+          "unavailable-iphone",
+          platform = "ios",
+          lifecycleState = "unavailable",
+        )
+      )
+
+    val devices = content(vm(client)).devices
+
+    assertTrue(devices.any { it.id == "unavailable-iphone" && it.state == DeviceState.Shutdown })
+  }
+
+  @Test
+  fun `a booting iOS image absent from booted devices surfaces a refresh error`() =
+    testScope.runTest {
+      val client = fake()
+      client.bootedDevicesResponse = bootedResponse()
+      client.deviceImagesResponse =
+        imageResponse(
+          imageEntry(
+            "Booting iPhone",
+            "booting-iphone",
+            platform = "ios",
+            lifecycleState = "booting",
+          )
+        )
+
+      val state = vm(client).state.value
+
+      assertTrue(state is DevicePickerUiState.Error)
+      assertTrue(
+        (state as DevicePickerUiState.Error)
+          .message
+          .contains("Device inventory changed during discovery")
+      )
+    }
+
+  @Test
   fun `loads and unifies booted + images with dedupe and iOS architecture`() = testScope.runTest {
     val vm =
       DevicePickerViewModel(fake(), FakeDeviceBootController(), this, UnconfinedTestDispatcher())

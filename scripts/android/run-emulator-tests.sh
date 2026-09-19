@@ -8,7 +8,8 @@
 # 3. Runs the test script
 #
 # Usage:
-#   ./scripts/android/run-emulator-tests.sh <apk-path> <test-script>
+#   ./scripts/android/run-emulator-tests.sh <apk-path-or-empty> <test-script>
+#   The APK path is optional; pass "" to skip APK installation.
 #
 # Example:
 #   ./scripts/android/run-emulator-tests.sh \
@@ -31,9 +32,10 @@ APK_PATH="${1:-}"
 TEST_SCRIPT="${2:-}"
 
 # Validate arguments
-if [ -z "$APK_PATH" ] || [ -z "$TEST_SCRIPT" ]; then
+if [ -z "$TEST_SCRIPT" ]; then
   echo -e "${RED}Error: Missing required arguments${NC}"
-  echo "Usage: $0 <apk-path> <test-script>"
+  echo "Usage: $0 <apk-path-or-empty> <test-script>"
+  echo "The APK path is optional; pass an empty string to skip APK installation."
   echo "Example: $0 'control-proxy/build/outputs/apk/debug/control-proxy-debug.apk' './gradlew :junit-runner:test'"
   exit 1
 fi

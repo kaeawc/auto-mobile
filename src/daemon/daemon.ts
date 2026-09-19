@@ -157,6 +157,9 @@ import {
 } from "../server/videoRecordingManager";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { IdGenerator, defaultIdGenerator } from "../utils/IdGenerator";
+import { AndroidAvdProvenanceCache } from "../utils/AndroidAvdProvenanceCache";
+import { AvdManagerService } from "../utils/android-cmdline-tools/AvdManagerService";
+import type { AvdManager } from "../utils/android-cmdline-tools/interfaces/AvdManager";
 import {
   evaluateDeviceDisconnects,
   recordingCandidateIncarnations,
@@ -345,6 +348,8 @@ export class Daemon {
   private shutdownFallbackReleaseNotifications: Set<string> | null = null;
   /** Identities captured before concurrent shutdown release begins. */
   private shutdownSessionIds: string[] = [];
+  /** Exposed for tests only: the in-flight or settled startup provenance warm. */
+  private androidAvdProvenanceWarmPromise: Promise<unknown> | undefined;
 
   constructor(
     options: DaemonOptions = {},
@@ -367,6 +372,8 @@ export class Daemon {
     processGenerationToken: DaemonProcessGenerationTokenProvider = currentDaemonProcessGenerationToken,
     private readonly liveDaemonSessionIdProvider: LiveDaemonSessionIdProvider = new PidFileLiveDaemonSessionIdProvider(),
     incumbentOwnerGuard: IncumbentOwnerGuard = new IncumbentOwnerGuard(),
+    private readonly avdManagerFactory: () => Pick<AvdManager, "listDeviceImages"> = () =>
+      new AvdManagerService(),
   ) {
     this.options = { ...options };
     this.port = options.port || DEFAULT_DAEMON_PORT;
@@ -605,6 +612,10 @@ export class Daemon {
         }),
       );
 
+      this.warmAndroidAvdProvenanceCache();
+      // iOS device-type profiles are memoized per SimCtlClient and populated inline
+      // during its simulator inventory; there is no process-wide profile cache to warm.
+
       // Find an available port. In strict-port mode (issue #6260, restart's
       // atomic guard) we deliberately skip findAvailablePort()'s probe-then-
       // release preflight and its port+1..3 fallback: that preflight releases
@@ -760,6 +771,23 @@ export class Daemon {
     // failure in any later startup step (recorded before its fatal exit) isn't
     // erased by a preflight that merely got past migrations (issue #2784).
     this.startupFailureTracker.reset();
+  }
+
+  /**
+   * Warm the process-wide Android AVD provenance cache at daemon startup so it
+   * is populated, or at least in flight, before a client's first acquisition.
+   * The acquisition response path remains a synchronous cache-only read and
+   * never waits on or fails because of this best-effort scan.
+   */
+  private warmAndroidAvdProvenanceCache(): void {
+    this.androidAvdProvenanceWarmPromise = Promise.resolve()
+      .then(() =>
+        AndroidAvdProvenanceCache.getInstance().getByName(this.avdManagerFactory(), this.timer),
+      )
+      .catch((error: unknown) => {
+        // Best-effort enrichment is optional, so SDK/factory failures are safe to swallow.
+        logger.debug(`Android AVD provenance startup warm failed: ${errorMessage(error)}`);
+      });
   }
 
   /**

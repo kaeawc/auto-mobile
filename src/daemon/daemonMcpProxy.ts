@@ -3156,6 +3156,10 @@ export class DaemonMcpProxy {
     if (name === SET_TOOL_ENABLED_TOOL_NAME) {
       return;
     }
+    if (name === "listDevices") {
+      // Inventory observation must not bind or heartbeat a session it does not own.
+      return;
+    }
     // A release for the FORWARDED UUID observed WHILE this call was in flight
     // already recorded that UUID's release (handleDaemonNotification).
     // Re-remembering it now would resurrect the freed session and let the next
@@ -3214,6 +3218,8 @@ export class DaemonMcpProxy {
   // (issue #4610). Excluded, because none of them refreshed a live session:
   //   - executePlan owns its own binding lifecycle via the release signal; leave
   //     it untouched so a pre-handler plan rejection does not strand the binding.
+  //   - listDevices is observation-only and its read-only admission did not
+  //     acquire or refresh the forwarded session.
   //   - a recoverable error (DaemonUnavailableError transport/connect failure,
   //     "Session not found", or an unknown-tool build-skew), or a device-control
   //     connect-phase failure never reached the handler with a live session; a
@@ -3229,6 +3235,7 @@ export class DaemonMcpProxy {
       name === "executePlan" ||
       name === "setActiveDevice" ||
       name === SET_TOOL_ENABLED_TOOL_NAME ||
+      name === "listDevices" ||
       error instanceof DaemonBoundSessionExpiredError ||
       error instanceof DaemonBoundSessionLostError ||
       this.isRecoverableDaemonSessionError(error) ||
@@ -3271,8 +3278,9 @@ export class DaemonMcpProxy {
    * Three further answers establish nothing:
    *   - a connection already fenced terminally — its session is gone;
    *   - a tool that owns its own binding lifecycle (`executePlan`), does not
-   *     route by device session (`setToolEnabled`, `setActiveDevice`), or mints
-   *     its session in the RESULT (the acquisition tools, handled above);
+   *     route by device session (`setToolEnabled`, `setActiveDevice`), only
+   *     observes inventory (`listDevices`), or mints its session in the RESULT
+   *     (the acquisition tools, handled above);
    *   - an envelope that declares the named session gone
    *     ({@link declaresDeviceSessionInvalid}) — resurrecting it would heartbeat
    *     a dead session instead of leaving the connection unbound.
@@ -3312,6 +3320,7 @@ export class DaemonMcpProxy {
       name === "executePlan" ||
       name === "setActiveDevice" ||
       name === SET_TOOL_ENABLED_TOOL_NAME ||
+      name === "listDevices" ||
       isDeviceSessionAcquisitionTool(name)
     ) {
       return false;

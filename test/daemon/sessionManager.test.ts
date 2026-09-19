@@ -5021,7 +5021,7 @@ describe("SessionManager", () => {
     }
   });
 
-  test("joins a slow startup recovery from a concurrent getOrCreateSession call", async () => {
+  test("promotes a slow startup recovery joined by an acquiring admission", async () => {
     const persistence = new FakeDeviceSessionPersistence();
     const sessionUuid = "joined-startup-recovery";
     await persistence.upsertActiveSession({
@@ -5065,7 +5065,7 @@ describe("SessionManager", () => {
       await Promise.resolve();
       await Promise.resolve();
       await Promise.resolve();
-      const joined = restarted.getOrCreateSession(sessionUuid, devicePool, "android");
+      const joined = restarted.admitIssuedSessionForAutomation(sessionUuid);
       resolveAssignment();
       const [summary, session] = await Promise.all([rehydration, joined]);
       expect(assignments).toBe(1);
@@ -5076,7 +5076,71 @@ describe("SessionManager", () => {
         timedOut: false,
       });
       expect(session).toBe(restarted.getSession(sessionUuid));
+      expect(session?.ownership).toBe("owned");
     } finally {
+      restarted.stopCleanupTimer();
+    }
+  });
+
+  test("does not promote a pending startup recovery joined by read-only admission", async () => {
+    const persistence = new FakeDeviceSessionPersistence();
+    const sessionUuid = "read-only-joined-startup-recovery";
+    await persistence.upsertActiveSession({
+      sessionUuid,
+      deviceId: "emulator-5554",
+      stableDeviceId: "Pixel_8_API_35",
+      platform: "android",
+      createdAtMs: 1,
+      lastUsedAtMs: 20,
+      expiresAtMs: 60_020,
+      sessionTimeoutMs: 60_000,
+      heartbeatTimeoutMs: 15_000,
+      hasReceivedHeartbeat: true,
+    });
+    await persistence.markReleased(sessionUuid, "released", 30, "daemon-restart");
+    const restarted = new SessionManager(fakeTimer, persistence);
+    const assignmentStarted = Promise.withResolvers<void>();
+    const releaseAssignment = Promise.withResolvers<void>();
+    let assignments = 0;
+    const devicePool: SessionDeviceAssigner = {
+      async assignDeviceToSession(sessionId, _platform, target): Promise<string> {
+        assignments += 1;
+        assignmentStarted.resolve();
+        await releaseAssignment.promise;
+        const session = await restarted.createSession(
+          sessionId,
+          "emulator-5554",
+          "android",
+          target?.liveness?.sessionTimeoutMs,
+          target?.liveness?.heartbeatTimeoutMs,
+          target?.stableDeviceId,
+          target?.liveness,
+          target?.initialOwnership,
+        );
+        return session.assignedDevice;
+      },
+    };
+    try {
+      const rehydration = restarted.rehydratePersistedSessions(devicePool, { deadlineMs: 10_000 });
+      await assignmentStarted.promise;
+      const observed = restarted.admitIssuedSessionForAutomation(sessionUuid, undefined, {
+        access: "read-only",
+      });
+
+      releaseAssignment.resolve();
+      const [summary, session] = await Promise.all([rehydration, observed]);
+
+      expect(assignments).toBe(1);
+      expect(summary).toEqual({
+        rehydrated: [sessionUuid],
+        terminalized: [],
+        skipped: [],
+        timedOut: false,
+      });
+      expect(session).toBe(restarted.getSession(sessionUuid));
+      expect(session?.ownership).toBe("awaiting-owner");
+    } finally {
+      releaseAssignment.resolve();
       restarted.stopCleanupTimer();
     }
   });

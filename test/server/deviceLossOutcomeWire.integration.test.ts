@@ -7,7 +7,7 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import { TerminalSessionError } from "../../src/daemon/sessionManager";
 import { RealObserveScreen } from "../../src/features/observe/ObserveScreen";
 import { executionTracker } from "../../src/server/executionTracker";
-import { McpTestFixture } from "../fixtures/mcpTestFixture";
+import { McpTestFixture, MCP_TEST_REQUEST_TIMEOUT_MS } from "../fixtures/mcpTestFixture";
 
 describe("device loss MCP outcome", () => {
   const toolName = "__device_lost_wire_probe__";
@@ -331,10 +331,14 @@ describe("device loss MCP outcome", () => {
     });
     await fixture.setup();
 
-    const resultPromise = fixture.client.callTool({
-      name: "observe",
-      arguments: { platform: "android" },
-    });
+    const resultPromise = fixture.client.callTool(
+      {
+        name: "observe",
+        arguments: { platform: "android" },
+      },
+      undefined,
+      { timeout: MCP_TEST_REQUEST_TIMEOUT_MS },
+    );
     await observeStarted.promise;
     await executionTracker.cancelDeviceSessionExecutions(
       "device-session-a",

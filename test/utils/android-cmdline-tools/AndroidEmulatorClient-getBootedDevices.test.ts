@@ -190,6 +190,50 @@ describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
     ]);
   });
 
+  test("falls back to the runtime CPU ABI when a booted emulator has no readable AVD config", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setDevices([
+      { name: "ignored", platform: "android", deviceId: "emulator-5554" } satisfies BootedDevice,
+    ]);
+    adb.setCommandResponse("emu avd name", execResult("Pixel_9_API_36\n"));
+    adb.setCommandResponse("shell getprop ro.product.cpu.abi", execResult("arm64-v8a\n"));
+    const client = new AndroidEmulatorClient(
+      null,
+      null,
+      new FakeTimer(),
+      new FakeAdbClientFactory(adb),
+      new FakeAvdConfigReader(null),
+    );
+
+    await expect(client.getBootedDevicesChecked()).resolves.toEqual([
+      expect.objectContaining({ architecture: "arm64-v8a" }),
+    ]);
+  });
+
+  test("prefers the configured AVD architecture over the runtime ABI for a booted emulator", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setDevices([
+      { name: "ignored", platform: "android", deviceId: "emulator-5554" } satisfies BootedDevice,
+    ]);
+    adb.setCommandResponse("emu avd name", execResult("Pixel_9_API_36\n"));
+    adb.setCommandResponse("shell getprop ro.product.cpu.abi", execResult("x86_64\n"));
+    const client = new AndroidEmulatorClient(
+      null,
+      null,
+      new FakeTimer(),
+      new FakeAdbClientFactory(adb),
+      new FakeAvdConfigReader({
+        systemImagePackage: "system-images;android-36;google_apis;arm64-v8a",
+        architecture: "arm64",
+      }),
+    );
+
+    await expect(client.getBootedDevicesChecked()).resolves.toEqual([
+      expect.objectContaining({ architecture: "arm64-v8a" }),
+    ]);
+    expect(adb.getExecutedCommands()).not.toContain("shell getprop ro.product.cpu.abi");
+  });
+
   test("stamps an emulator observation after its AVD name resolves", async () => {
     let stamp = 0;
     const observationSequence: DiscoveryObservationSequence = {
@@ -260,6 +304,7 @@ describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
       "emu avd name",
       "shell getprop ro.boot.qemu.avd_name",
       "shell getprop ro.product.model",
+      "shell getprop ro.product.cpu.abi",
     ]);
   });
 

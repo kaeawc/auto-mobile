@@ -1830,8 +1830,15 @@ export class AndroidEmulatorClient implements AndroidEmulator {
           options.skipNameEnrichment === true,
           signal,
         );
+        const architecture = await this.resolveEmulatorArchitecture(
+          device,
+          avdName,
+          infoTimeoutMs,
+          options.skipNameEnrichment === true,
+          signal,
+        );
 
-        runningDevices.push(this.discoveredEmulatorDevice(device, avdName, model));
+        runningDevices.push(this.discoveredEmulatorDevice(device, avdName, model, architecture));
       }
 
       for (const device of physicalDevices) {
@@ -1917,10 +1924,42 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     return await this.resolveDeviceModel(device, infoTimeoutMs, skipNameEnrichment, signal);
   }
 
+  private async resolveEmulatorArchitecture(
+    device: BootedDevice,
+    avdName: { name: string; consoleBusyDuringProbe?: boolean },
+    infoTimeoutMs: number,
+    skipNameEnrichment: boolean,
+    signal?: AbortSignal,
+  ): Promise<string | undefined> {
+    if (skipNameEnrichment || avdName.consoleBusyDuringProbe || !avdName.name) {
+      return undefined;
+    }
+
+    try {
+      const config = await this.avdConfigReader.readConfig(avdName.name);
+      if (config) {
+        const architecture = configuredAvdArchitecture(config, undefined);
+        if (architecture) {
+          return architecture;
+        }
+      }
+    } catch (error) {
+      logger.debug(`Failed to read AVD config for ${avdName.name}: ${error}`);
+    }
+
+    return this.resolvePhysicalDeviceArchitecture(
+      device,
+      infoTimeoutMs,
+      skipNameEnrichment,
+      signal,
+    );
+  }
+
   private discoveredEmulatorDevice(
     device: BootedDevice,
     avdName: { name: string; consoleBusyDuringProbe?: boolean },
     model: string | undefined,
+    architecture: string | undefined,
   ): BootedDevice {
     return {
       ...device,
@@ -1934,6 +1973,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
           consoleBusyDuringProbe: avdName.consoleBusyDuringProbe,
         }),
       ...(model ? { model } : {}),
+      ...(architecture ? { architecture } : {}),
     };
   }
 
@@ -1954,8 +1994,8 @@ export class AndroidEmulatorClient implements AndroidEmulator {
   }
 
   /**
-   * Physical devices have no configured system-image ABI, so their CPU ABI is
-   * the booted-device fallback. Cache it per serial to avoid repeated ADB calls.
+   * Resolve a booted device's CPU ABI from the runtime and cache it per serial
+   * to avoid repeated ADB calls.
    */
   private async resolvePhysicalDeviceArchitecture(
     device: BootedDevice,
@@ -1990,7 +2030,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       logger.debug(`Got CPU architecture for ${device.deviceId}: "${architecture}"`);
       return architecture;
     } catch (error) {
-      // A physical device can still be described without this optional metadata.
+      // A device can still be described without this optional metadata.
       logger.debug(`Failed to get CPU architecture for ${device.deviceId}: ${error}`);
       return undefined;
     }

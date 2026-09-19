@@ -294,6 +294,11 @@ export interface DaemonStatus {
 export interface PidFileData {
   /** Process ID */
   pid: number;
+  /**
+   * Opaque session identity owned by this daemon process generation. Optional
+   * for compatibility with PID files written before peer-liveness discovery.
+   */
+  daemonSessionId?: string;
   /** Unix socket path */
   socketPath: string;
   /** Unix socket paths exposed by the daemon, keyed by purpose */

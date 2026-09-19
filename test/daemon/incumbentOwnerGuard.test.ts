@@ -125,6 +125,17 @@ describe("IncumbentOwnerGuard (issue #6232)", () => {
     expect(guard.hasLiveForeignOwner()).toBe(false);
   });
 
+  test("exposes the daemon session ID only for a captured live committed incumbent", () => {
+    const { guard, file, running } = makeGuard();
+    file.data = { ...record(INCUMBENT_PID), daemonSessionId: "incumbent-daemon-session" };
+
+    guard.captureIncumbentBeforeOverwrite();
+
+    expect(guard.capturedLiveIncumbentDaemonSessionId()).toBe("incumbent-daemon-session");
+    running.delete(INCUMBENT_PID);
+    expect(guard.capturedLiveIncumbentDaemonSessionId()).toBeUndefined();
+  });
+
   test("P2: restores the captured incumbent record after a refused bind", () => {
     const { guard, file, writes } = makeGuard();
 
@@ -216,6 +227,19 @@ describe("IncumbentOwnerGuard (issue #6232)", () => {
       // Restoring the contender's PID would clobber the true incumbent's record.
       expect(guard.restoreIncumbentAfterRefusal()).toBe(false);
       expect(writes).toHaveLength(0);
+    });
+
+    test("does not expose a live contender's uncommitted daemon session ID", () => {
+      const { guard, file, running } = makeGuard();
+      running.add(CONTENDER_PID);
+      file.data = {
+        ...earlyRecord(CONTENDER_PID),
+        daemonSessionId: "uncommitted-contender-session",
+      };
+
+      guard.captureIncumbentBeforeOverwrite();
+
+      expect(guard.capturedLiveIncumbentDaemonSessionId()).toBeUndefined();
     });
   });
 });

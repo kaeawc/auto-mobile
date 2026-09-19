@@ -8,12 +8,99 @@ import {
   clearDaemonLaunchLogOwnerTombstoneSync,
   daemonLaunchLogOwnerTombstonePath,
   isProcessRunning,
+  listDaemonPidFilePathsOrThrow,
   listDaemonPidFilesSync,
+  PidFileLiveDaemonSessionIdProvider,
   readDaemonOwnerForRetentionSync,
   readDaemonLaunchLogOwnerTombstoneSync,
 } from "../../src/daemon/daemonFiles";
 import { DEFAULT_PID_FILE_PATH } from "../../src/daemon/constants";
 import type { PidFileData } from "../../src/daemon/types";
+
+describe("PidFileLiveDaemonSessionIdProvider", () => {
+  test("returns session IDs only for discovered PID records with live processes", () => {
+    const records = new Map<string, PidFileData>([
+      [
+        "live.pid",
+        {
+          pid: 101,
+          daemonSessionId: "live-daemon",
+          socketPath: "live.sock",
+          port: 3000,
+          startedAt: 1,
+          version: "test",
+        },
+      ],
+      [
+        "dead.pid",
+        {
+          pid: 202,
+          daemonSessionId: "dead-daemon",
+          socketPath: "dead.sock",
+          port: 3001,
+          startedAt: 2,
+          version: "test",
+        },
+      ],
+      [
+        "legacy.pid",
+        {
+          pid: 303,
+          socketPath: "legacy.sock",
+          port: 3002,
+          startedAt: 3,
+          version: "test",
+        },
+      ],
+    ]);
+    const provider = new PidFileLiveDaemonSessionIdProvider({
+      listDaemonPidFiles: () => [...records.keys()],
+      readPidFileData: (pidFilePath) => records.get(pidFilePath!) ?? null,
+      isProcessRunning: (pid) => pid === 101 || pid === 303,
+    });
+
+    expect(provider.collectLiveDaemonSessionIds()).toEqual(new Set(["live-daemon"]));
+  });
+
+  test("surfaces a directory-enumeration failure", () => {
+    const enumerationError = Object.assign(new Error("pid directory unavailable"), {
+      code: "EIO",
+    });
+    const provider = new PidFileLiveDaemonSessionIdProvider({
+      listDaemonPidFiles: () => {
+        throw enumerationError;
+      },
+    });
+
+    expect(() => provider.collectLiveDaemonSessionIds()).toThrow(enumerationError);
+  });
+});
+
+describe("listDaemonPidFilePathsOrThrow", () => {
+  const tempDirs: string[] = [];
+
+  afterEach(() => {
+    for (const dir of tempDirs) {
+      rmSync(dir, { recursive: true, force: true });
+    }
+    tempDirs.length = 0;
+  });
+
+  test("treats an absent PID directory as no co-located peers", () => {
+    const missing = join(tmpdir(), `no-such-peer-dir-${Date.now()}-${Math.random()}`, "daemon.pid");
+
+    expect(listDaemonPidFilePathsOrThrow(missing)).toEqual([missing]);
+  });
+
+  test("throws when the PID directory exists but cannot be enumerated", () => {
+    const dir = mkdtempSync(join(tmpdir(), "daemon-peer-enum-error-test-"));
+    tempDirs.push(dir);
+    const notDirectory = join(dir, "not-a-directory");
+    writeFileSync(notDirectory, "x");
+
+    expect(() => listDaemonPidFilePathsOrThrow(join(notDirectory, "daemon.pid"))).toThrow();
+  });
+});
 
 describe("daemon file cleanup", () => {
   const tempDirs: string[] = [];

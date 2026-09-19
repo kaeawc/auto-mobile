@@ -351,14 +351,17 @@ export class DeviceSessionRepository {
    * missing/malformed (a broken DB), which the startup circuit breaker must treat
    * as fatal so the daemon exits/backs off instead of starting with broken
    * session state (issue #2784). Do not add a local catch — the caller owns the
-   * fatal/backoff decision.
+   * fatal/backoff decision. Active sessions owned by a daemon in
+   * `liveDaemonSessionIds` are peer-owned and must remain untouched.
    */
   async markStaleActiveSessionsExpired(
     currentDaemonSessionId: string,
     releasedAtMs: number,
     reason: string = "daemon-restart",
+    liveDaemonSessionIds: ReadonlySet<string> = new Set(),
   ): Promise<void> {
     const db = await this.getDb();
+    const liveDaemonSessionIdList = Array.from(liveDaemonSessionIds);
     await db
       .updateTable("device_sessions")
       .set({
@@ -369,12 +372,14 @@ export class DeviceSessionRepository {
         updated_at: new Date().toISOString(),
       })
       .where("status", "=", "active")
-      .where((eb) =>
-        eb.or([
-          eb("daemon_session_id", "is", null),
-          eb("daemon_session_id", "!=", currentDaemonSessionId),
-        ]),
-      )
+      .where((eb) => {
+        const nonCurrentOwner = eb("daemon_session_id", "!=", currentDaemonSessionId);
+        const deadOwner =
+          liveDaemonSessionIdList.length === 0
+            ? nonCurrentOwner
+            : eb.and([nonCurrentOwner, eb("daemon_session_id", "not in", liveDaemonSessionIdList)]);
+        return eb.or([eb("daemon_session_id", "is", null), deadOwner]);
+      })
       .execute();
   }
 

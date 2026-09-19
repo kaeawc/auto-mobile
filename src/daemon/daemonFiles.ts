@@ -12,8 +12,10 @@ import { unlink } from "node:fs/promises";
 import { PID_FILE_PATH, SOCKET_PATH } from "./constants";
 import { getSocketPath, type SocketServerConfig } from "./socketServer/index";
 import type { AuxiliaryDaemonSocketName, PidFileData } from "./types";
+import { compareStrictNumericVersions } from "../utils/deviceMatcher";
 import { logger } from "../utils/logger";
 import type { DaemonLaunchLogOwner, DaemonPidFileEnumeration } from "../utils/logPruner";
+import { releaseVersion } from "../utils/mcpVersion";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
 
 export const VIDEO_RECORDING_SOCKET_CONFIG: SocketServerConfig = {
@@ -408,12 +410,31 @@ export interface PidFileLiveDaemonSessionIdProviderDependencies {
 }
 
 /**
+ * A live peer is safe to preempt only when its release is confidently older.
+ * Missing or non-numeric versions fail closed to preserving the peer.
+ */
+export function shouldProtectLiveDaemonVersion(
+  peerVersion: unknown,
+  currentDaemonVersion: string,
+): boolean {
+  if (typeof peerVersion !== "string") {
+    return true;
+  }
+  const comparison = compareStrictNumericVersions(
+    releaseVersion(peerVersion.trim()),
+    releaseVersion(currentDaemonVersion.trim()),
+  );
+  return !Number.isFinite(comparison) || comparison >= 0;
+}
+
+/**
  * Discovers daemon-session owners whose PID records still name a live process.
  *
  * The current daemon is intentionally included when its record is discovered;
  * the repository independently excludes its session ID from stale-session
- * cleanup. Directory discovery throws on ambiguity so startup cannot mistake
- * an unreadable peer namespace for an empty live set.
+ * cleanup. Every live peer is protected unconditionally. Directory discovery
+ * throws on ambiguity so startup cannot mistake an unreadable peer namespace
+ * for an empty live set.
  */
 export class PidFileLiveDaemonSessionIdProvider implements LiveDaemonSessionIdProvider {
   private readonly listDaemonPidFiles: (pidFilePath?: string) => string[];

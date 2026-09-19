@@ -13,6 +13,7 @@ import {
   PidFileLiveDaemonSessionIdProvider,
   readDaemonOwnerForRetentionSync,
   readDaemonLaunchLogOwnerTombstoneSync,
+  shouldProtectLiveDaemonVersion,
 } from "../../src/daemon/daemonFiles";
 import { DEFAULT_PID_FILE_PATH } from "../../src/daemon/constants";
 import type { PidFileData } from "../../src/daemon/types";
@@ -73,6 +74,86 @@ describe("PidFileLiveDaemonSessionIdProvider", () => {
     });
 
     expect(() => provider.collectLiveDaemonSessionIds()).toThrow(enumerationError);
+  });
+
+  test("protects every live peer regardless of recorded version", () => {
+    const records = new Map<string, PidFileData>([
+      [
+        "older.pid",
+        {
+          pid: 101,
+          daemonSessionId: "older-daemon",
+          socketPath: "older.sock",
+          port: 3000,
+          startedAt: 1,
+          version: "2.3.3+golder",
+        },
+      ],
+      [
+        "same.pid",
+        {
+          pid: 102,
+          daemonSessionId: "same-daemon",
+          socketPath: "same.sock",
+          port: 3001,
+          startedAt: 2,
+          version: "2.3.4+gpeer",
+        },
+      ],
+      [
+        "newer.pid",
+        {
+          pid: 103,
+          daemonSessionId: "newer-daemon",
+          socketPath: "newer.sock",
+          port: 3002,
+          startedAt: 3,
+          version: "2.4.0",
+        },
+      ],
+      [
+        "unparseable.pid",
+        {
+          pid: 104,
+          daemonSessionId: "unparseable-daemon",
+          socketPath: "unparseable.sock",
+          port: 3003,
+          startedAt: 4,
+          version: "development",
+        },
+      ],
+      [
+        "missing.pid",
+        {
+          pid: 105,
+          daemonSessionId: "missing-version-daemon",
+          socketPath: "missing.sock",
+          port: 3004,
+          startedAt: 5,
+        } as PidFileData,
+      ],
+    ]);
+    const provider = new PidFileLiveDaemonSessionIdProvider({
+      listDaemonPidFiles: () => [...records.keys()],
+      readPidFileData: (pidFilePath) => records.get(pidFilePath!) ?? null,
+      isProcessRunning: () => true,
+    });
+
+    expect(provider.collectLiveDaemonSessionIds()).toEqual(
+      new Set([
+        "older-daemon",
+        "same-daemon",
+        "newer-daemon",
+        "unparseable-daemon",
+        "missing-version-daemon",
+      ]),
+    );
+  });
+
+  test("fails closed when either release version cannot be compared", () => {
+    expect(shouldProtectLiveDaemonVersion("", "2.3.4")).toBe(true);
+    expect(shouldProtectLiveDaemonVersion(undefined, "2.3.4")).toBe(true);
+    expect(shouldProtectLiveDaemonVersion("2.3.3", "development")).toBe(true);
   });
 });
 

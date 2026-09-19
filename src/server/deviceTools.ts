@@ -1059,7 +1059,7 @@ function listDevicePayloads(
  * The acquisition boot already resolved its selected image. Re-project that
  * known image rather than rediscovering the entire configured inventory while
  * returning the session response. Android provenance is optional cache-only
- * enrichment; a cold cache deliberately leaves the nullable image link empty.
+ * enrichment; acquisition starts its shared warm-up before booting.
  */
 function configuredImageForAcquiredDevice(
   device: BootedDevice,
@@ -8679,6 +8679,13 @@ export function registerDeviceTools() {
       allowExternalLeaseAdoptionRecheck: true,
       lifecycleCoordinator: deps.lifecycleCoordinator,
     });
+    // AVD discovery is shared and bounded by AndroidAvdProvenanceCache. Start it
+    // alongside the much longer boot so final response projection remains a
+    // cache-only read without adding a serial inventory scan to acquisition.
+    const androidProvenanceWarmup =
+      args.platform === "android"
+        ? androidProvenanceByAvdName(deps.avdManagerFactory(), deps.timer)
+        : undefined;
     perf.startOperation("bootDevice");
     const recoveryTargets =
       args.platform === "android"
@@ -8884,6 +8891,10 @@ export function registerDeviceTools() {
     });
     state.ownershipTransferred = true;
 
+    // This scan has run concurrently with boot and is normally already settled.
+    // Await its bounded, in-flight result so the cache-only response projection
+    // below includes Android image provenance even on a cold daemon.
+    await androidProvenanceWarmup;
     refreshResourcesAfterCommittedBoot(state.boot, deps);
     return buildBootedResponse(
       state.boot.device,

@@ -206,6 +206,27 @@ describe("startDevice handler", () => {
     expect(listed?.image).toEqual(acquisition.image);
   });
 
+  it("warms Android provenance during a cold-cache acquisition", async () => {
+    const provenance = {
+      name: androidImage.name,
+      path: "/tmp/Pixel_7_API_34.avd",
+      target: "Google APIs",
+      basedOn: "Android 14 google_apis/x86_64",
+    };
+    AndroidAvdProvenanceCache.resetForTests();
+    fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
+    fakeDeviceUtils.setDeviceImages("android", [androidImage]);
+    fakeMatcher.setBootedResult(androidDevice);
+
+    const acquisition = await callStartDevice({ platform: "android" });
+
+    expect(acquisition.image).toEqual({
+      path: provenance.path,
+      target: provenance.target,
+      basedOn: provenance.basedOn,
+    });
+  });
+
   it("does not reach runner readiness or session binding after an externally cancelled boot", async () => {
     const controller = new AbortController();
     let resolveImages!: (images: DeviceInfo[]) => void;

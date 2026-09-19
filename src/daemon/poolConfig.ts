@@ -85,12 +85,17 @@ export function getDeviceRecoveryPolicy(): DeviceRecoveryPolicy {
 }
 
 /**
- * A session already bound to an AutoMobile-owned Android emulator survives a
- * lost runtime connection by default. The broad recovery policy above remains
+ * A session already bound to an AutoMobile-owned virtual device survives a lost
+ * runtime connection by default. The broad Android recovery policy above remains
  * opt-in for idle/unbound devices; an explicit zero disables both behaviors.
  */
-export function isAndroidEmulatorSessionContinuityEnabled(env: Environment = process.env): boolean {
+export function isDeviceSessionContinuityEnabled(env: Environment = process.env): boolean {
   return firstDefined(env, DEVICE_RECOVERY_ON_LOSS_KEYS) !== "0";
+}
+
+/** Backward-compatible name for callers that predate iOS simulator continuity. */
+export function isAndroidEmulatorSessionContinuityEnabled(env: Environment = process.env): boolean {
+  return isDeviceSessionContinuityEnabled(env);
 }
 
 /**

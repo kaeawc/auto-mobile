@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   DEFAULT_DEVICE_RECOVERY_MAX_ATTEMPTS,
   isAndroidEmulatorSessionContinuityEnabled,
+  isDeviceSessionContinuityEnabled,
   parseDeviceRecoveryPolicy,
 } from "../../src/daemon/poolConfig";
 
@@ -14,6 +15,7 @@ describe("device recovery policy", () => {
       },
       warnings: [],
     });
+    expect(isDeviceSessionContinuityEnabled({})).toBe(true);
     expect(isAndroidEmulatorSessionContinuityEnabled({})).toBe(true);
   });
 
@@ -38,6 +40,7 @@ describe("device recovery policy", () => {
       onLoss: false,
       maxAttempts: DEFAULT_DEVICE_RECOVERY_MAX_ATTEMPTS,
     });
+    expect(isDeviceSessionContinuityEnabled(env)).toBe(false);
     expect(isAndroidEmulatorSessionContinuityEnabled(env)).toBe(false);
   });
 

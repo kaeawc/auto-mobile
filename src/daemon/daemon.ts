@@ -9,7 +9,7 @@ import { SessionManager, type ActiveSessionExecutionQuery, type Session } from "
 import { SessionHeartbeatMonitor } from "./SessionHeartbeatMonitor";
 import { SingleFlightInterval } from "./SingleFlightInterval";
 import { DevicePool, type PooledDevice } from "./devicePool";
-import { isAndroidEmulatorSessionContinuityEnabled, parseDeviceRecoveryPolicy } from "./poolConfig";
+import { isDeviceSessionContinuityEnabled, parseDeviceRecoveryPolicy } from "./poolConfig";
 import { deviceLossCancellationReason } from "./emulatorLossIncident";
 import { DaemonState } from "./daemonState";
 import { DeviceSessionRegistry } from "./deviceSessionRegistry";
@@ -498,7 +498,7 @@ export class Daemon {
       this.idGenerator,
       undefined,
       undefined,
-      isAndroidEmulatorSessionContinuityEnabled(recoveryPolicyEnvironment),
+      isDeviceSessionContinuityEnabled(recoveryPolicyEnvironment),
     );
     // Initialize singleton for daemon state access
     DaemonState.getInstance().initialize(
@@ -1812,7 +1812,7 @@ export class Daemon {
       return false;
     }
     this.devicePool.finishSessionPreservingRecoveryPreparation(preparation);
-    const recovery = await this.devicePool.recoverSessionBoundAndroidDeviceAfterLoss(
+    const recovery = await this.devicePool.recoverSessionBoundDeviceAfterLoss(
       deviceId,
       incidentId,
       pooledDevice,

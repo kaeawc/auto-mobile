@@ -119,8 +119,10 @@ environment variable is set. Created devices can be removed with
 `xcrun simctl delete <udid>` or `avdmanager delete avd -n <name>`.
 
 Session continuity is enabled by default for a session-bound Android emulator
-that AutoMobile owns. If its runtime connection disappears, AutoMobile restarts
-the same AVD and retains the session. To disable that continuity explicitly:
+or iOS simulator that AutoMobile owns. If its runtime connection disappears,
+AutoMobile retains the session for that virtual device's stable identity. Android
+may restart the same AVD; iOS recovery is passive and waits for the same simulator
+UDID to become booted again. To disable that continuity explicitly:
 
 ```bash
 export AUTOMOBILE_DEVICE_RECOVERY_ON_LOSS=0
@@ -129,7 +131,8 @@ export AUTOMOBILE_DEVICE_RECOVERY_MAX_ATTEMPTS=2
 
 Setting `AUTOMOBILE_DEVICE_RECOVERY_ON_LOSS=1` also enables the broader recovery
 policy for eligible idle or unbound AutoMobile-owned Android AVDs. Physical
-devices, externally started emulators, and iOS simulators are not restarted.
+devices and externally started Android emulators are not restarted. iOS
+simulators are never actively restarted by session continuity.
 
 ## Shared ADB server
 

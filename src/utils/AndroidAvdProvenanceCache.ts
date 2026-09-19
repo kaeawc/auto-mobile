@@ -47,6 +47,15 @@ export class AndroidAvdProvenanceCache {
     return inFlight;
   }
 
+  /**
+   * Returns the last complete provenance observation without starting discovery.
+   * Hot device-acquisition responses may use this optional enrichment, but must
+   * never make an AVD inventory scan part of their completion path.
+   */
+  getCachedByName(): ReadonlyMap<string, AvdInfo> | undefined {
+    return this.cached;
+  }
+
   invalidate(): void {
     this.generation++;
     this.cached = undefined;

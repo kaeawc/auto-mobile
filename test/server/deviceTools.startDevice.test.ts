@@ -30,6 +30,9 @@ import { SystemUiAnrRecoveryRequiredError } from "../../src/utils/RunnerReadines
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/utils/virtualDeviceLifecycleCoordinator";
 import { DefaultDeviceMatcher } from "../../src/utils/deviceMatcher";
+import { AndroidAvdProvenanceCache } from "../../src/utils/AndroidAvdProvenanceCache";
+import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
+import { setDeviceManager } from "../../src/server/bootedDeviceResources";
 import * as os from "os";
 
 const AUTOLOCK_ENV_KEYS = [
@@ -70,12 +73,23 @@ describe("startDevice handler", () => {
     setDeviceToolsDependencies({
       deviceManagerFactory: () => fakeDeviceUtils,
       deviceMatcherFactory: () => fakeMatcher,
+      avdManagerFactory: () => ({
+        listDeviceImages: async () => [
+          {
+            name: androidImage.name,
+            path: "/tmp/Pixel_7_API_34.avd",
+            target: "Google APIs",
+            basedOn: "Android 14 google_apis/x86_64",
+          },
+        ],
+      }),
       notifyResourcesChanged: async () => {},
       notifyDeviceInventoryResourcesChanged: async () => {},
       syncInstalledAppResourceRegistry: async () => false,
       ensureCtrlProxyReady: async () => {},
       timer: bootTimer,
     });
+    setDeviceManager(fakeDeviceUtils);
 
     registerDeviceTools();
   });
@@ -86,6 +100,8 @@ describe("startDevice handler", () => {
     clearDirectSessionDevices();
     DaemonState.getInstance().reset();
     daemonSessionManager?.stopCleanupTimer();
+    PlatformDeviceManagerFactory.reset();
+    AndroidAvdProvenanceCache.resetForTests();
   });
 
   async function callStartDevice(
@@ -98,6 +114,17 @@ describe("startDevice handler", () => {
       throw new Error("startDevice not registered");
     }
     const result = await tool.handler(args, progress, signal);
+    return JSON.parse(
+      typeof result === "string" ? result : ((result as any).content?.[0]?.text ?? "{}"),
+    );
+  }
+
+  async function callListDevices(): Promise<Record<string, unknown>> {
+    const tool = ToolRegistry.getTool("listDevices");
+    if (!tool) {
+      throw new Error("listDevices not registered");
+    }
+    const result = await tool.handler({ platform: "android" });
     return JSON.parse(
       typeof result === "string" ? result : ((result as any).content?.[0]?.text ?? "{}"),
     );
@@ -147,6 +174,36 @@ describe("startDevice handler", () => {
     expect(result.osVersion).toBe("14");
     expect(result.runtime.session.sessionUuid).toBeDefined();
     expect(typeof result.runtime.session.sessionUuid).toBe("string");
+  });
+
+  it("returns the configured Android image link that listDevices reports", async () => {
+    const provenance = {
+      name: androidImage.name,
+      path: "/tmp/Pixel_7_API_34.avd",
+      target: "Google APIs",
+      basedOn: "Android 14 google_apis/x86_64",
+    };
+    setDeviceManager(null);
+    PlatformDeviceManagerFactory.setInstance(fakeDeviceUtils);
+    await AndroidAvdProvenanceCache.getInstance().getByName(
+      { listDeviceImages: async () => [provenance] },
+      bootTimer,
+    );
+    fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
+    fakeDeviceUtils.setDeviceImages("android", [androidImage]);
+    fakeMatcher.setBootedResult(androidDevice);
+
+    const acquisition = await callStartDevice({ platform: "android" });
+    const listed = (await callListDevices()).devices.find(
+      (device: Record<string, unknown>) => device.runtime.deviceId === androidDevice.deviceId,
+    );
+
+    expect(acquisition.image).toEqual({
+      path: provenance.path,
+      target: provenance.target,
+      basedOn: provenance.basedOn,
+    });
+    expect(listed?.image).toEqual(acquisition.image);
   });
 
   it("does not reach runner readiness or session binding after an externally cancelled boot", async () => {

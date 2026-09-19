@@ -1037,9 +1037,7 @@ export class IOSCtrlProxyBuilder {
     }
     // For device platform, check generic overrides and the release constant (device build hash)
     if (platform === "device") {
-      const genericOverride =
-        process.env.AUTOMOBILE_IOS_CTRL_PROXY_APP_HASH ??
-        process.env.AUTOMOBILE_IOS_IOS_CTRL_PROXY_APP_HASH;
+      const genericOverride = process.env.AUTOMOBILE_IOS_CTRL_PROXY_APP_HASH;
       if (genericOverride && genericOverride.trim().length > 0) {
         return genericOverride.trim();
       }

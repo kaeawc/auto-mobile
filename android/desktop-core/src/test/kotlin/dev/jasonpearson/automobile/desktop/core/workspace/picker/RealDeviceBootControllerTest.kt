@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.desktop.core.workspace.picker
 
 import dev.jasonpearson.automobile.desktop.core.daemon.StartDeviceResult
+import dev.jasonpearson.automobile.desktop.core.daemon.StartDeviceRuntime
 import dev.jasonpearson.automobile.desktop.core.testing.FakeAutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.workspace.Platform
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -29,7 +30,11 @@ class RealDeviceBootControllerTest {
   fun `boot returns the daemon runtime id on success`() = runTest {
     val client =
       FakeAutoMobileClient().apply {
-        startDeviceResult = StartDeviceResult(success = true, deviceId = "emulator-5556")
+        startDeviceResult =
+          StartDeviceResult(
+            success = true,
+            runtime = StartDeviceRuntime(deviceId = "emulator-5556"),
+          )
       }
     assertEquals("emulator-5556", controller(client).boot(device).getOrNull())
   }

@@ -53,17 +53,23 @@ describe("device acquisition ergonomics (#5870)", () => {
     });
   });
 
-  describe("getDeviceSessionIdFromResult reads the renamed key", () => {
+  describe("getDeviceSessionIdFromResult reads the canonical key", () => {
     const envelope = (payload: Record<string, unknown>) => ({
       content: [{ type: "text", text: JSON.stringify(payload) }],
     });
 
-    test("reads `sessionUuid` from an acquisition result", () => {
-      expect(getDeviceSessionIdFromResult(envelope({ sessionUuid: "abc-123" }))).toBe("abc-123");
+    test("reads `runtime.session.sessionUuid` from an acquisition result", () => {
+      expect(
+        getDeviceSessionIdFromResult(
+          envelope({ runtime: { session: { sessionUuid: "abc-123" } } }),
+        ),
+      ).toBe("abc-123");
     });
 
-    test("still tolerates the legacy `sessionId` key", () => {
-      expect(getDeviceSessionIdFromResult(envelope({ sessionId: "legacy-9" }))).toBe("legacy-9");
+    test("reads provisionDevice's envelope `sessionId`", () => {
+      expect(getDeviceSessionIdFromResult(envelope({ sessionId: "provision-9" }))).toBe(
+        "provision-9",
+      );
     });
   });
 });

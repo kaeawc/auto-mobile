@@ -918,18 +918,12 @@ describe("Device Image Resources with Fakes", () => {
         expect.arrayContaining([
           expect.objectContaining({
             platform: "android",
-            identity: expect.objectContaining({
-              stableId: "Pixel_9_API_35",
-              deviceId: "compat-android-id",
-            }),
+            identity: { stableId: "Pixel_9_API_35" },
             name: "Pixel_9_API_35",
           }),
           expect.objectContaining({
             platform: "ios",
-            identity: expect.objectContaining({
-              stableId: "AAAA-BBBB-CCCC-DDDD",
-              deviceId: "AAAA-BBBB-CCCC-DDDD",
-            }),
+            identity: { stableId: "AAAA-BBBB-CCCC-DDDD" },
             name: "iPhone 17 Pro",
           }),
         ]),
@@ -1050,21 +1044,18 @@ describe("Device Image Resources with Fakes", () => {
 
       const result = await handler.getDeviceImagesForPlatforms(["ios"]);
       expect(result.totalCount).toBe(1);
-      expect(result.images[0].state).toBe("Booted");
-      expect(result.images[0].lifecycle).toEqual({ state: "booted", known: true });
-      expect(result.images[0].provenance.ios?.isAvailable).toBe(true);
-      expect(result.images[0].runtime.osVersion).toBe("17.4");
-      expect(result.images[0].runtime.deviceType).toBe(
+      expect(result.images[0]).not.toHaveProperty("state");
+      expect(result.images[0].runtime.lifecycle).toEqual({ state: "booted", known: true });
+      expect(result.images[0].osVersion).toBe("17.4");
+      expect(result.images[0].deviceType).toBe(
         "com.apple.CoreSimulator.SimDeviceType.iPhone-15-Pro",
       );
-      expect(result.images[0].runtime.runtimeId).toBe(
-        "com.apple.CoreSimulator.SimRuntime.iOS-17-4",
-      );
-      expect(result.images[0].runtime.model).toBe("iPhone15,3");
-      expect(result.images[0].runtime.architecture).toBe("arm64");
+      expect(result.images[0].runtimeId).toBe("com.apple.CoreSimulator.SimRuntime.iOS-17-4");
+      expect(result.images[0].model).toBe("iPhone15,3");
+      expect(result.images[0].architecture).toBe("arm64");
     });
 
-    test("preserves a stopped iOS simulator's raw state alias", async () => {
+    test("normalizes a stopped iOS simulator's lifecycle", async () => {
       fakeDeviceUtils.setDeviceImages("ios", [
         {
           name: "iPhone 15",
@@ -1083,8 +1074,8 @@ describe("Device Image Resources with Fakes", () => {
 
       const result = await handler.getDeviceImagesForPlatforms(["ios"]);
 
-      expect(result.images[0].state).toBe("Shutdown");
-      expect(result.images[0].lifecycle).toEqual({ state: "configured", known: true });
+      expect(result.images[0]).not.toHaveProperty("state");
+      expect(result.images[0].runtime.lifecycle).toEqual({ state: "configured", known: true });
     });
 
     test("should include extended AVD metadata for Android images", async () => {
@@ -1126,16 +1117,16 @@ describe("Device Image Resources with Fakes", () => {
       // Verify extended metadata for first device
       const pixel6 = result.images.find((img) => img.name === "Pixel_6_API_33");
       expect(pixel6).toBeDefined();
-      expect(pixel6?.provenance.android?.path).toBe("/Users/test/.android/avd/Pixel_6_API_33.avd");
-      expect(pixel6?.provenance.android?.target).toBe("Google APIs (Google Inc.)");
-      expect(pixel6?.provenance.android?.basedOn).toBe("Android 13.0 (API 33)");
+      expect(pixel6?.image.path).toBe("/Users/test/.android/avd/Pixel_6_API_33.avd");
+      expect(pixel6?.image.target).toBe("Google APIs (Google Inc.)");
+      expect(pixel6?.image.basedOn).toBe("Android 13.0 (API 33)");
 
       // Verify extended metadata for second device
       const pixel7 = result.images.find((img) => img.name === "Pixel_7_API_34");
       expect(pixel7).toBeDefined();
-      expect(pixel7?.provenance.android?.path).toBe("/Users/test/.android/avd/Pixel_7_API_34.avd");
-      expect(pixel7?.provenance.android?.target).toBe("Google Play (Google Inc.)");
-      expect(pixel7?.provenance.android?.basedOn).toBe("Android 14 (API 34)");
+      expect(pixel7?.image.path).toBe("/Users/test/.android/avd/Pixel_7_API_34.avd");
+      expect(pixel7?.image.target).toBe("Google Play (Google Inc.)");
+      expect(pixel7?.image.basedOn).toBe("Android 14 (API 34)");
     });
 
     test("should handle AVD info with errors", async () => {
@@ -1165,7 +1156,7 @@ describe("Device Image Resources with Fakes", () => {
       expect(result.totalCount).toBe(1);
       const corruptedAvd = result.images[0];
       expect(corruptedAvd.name).toBe("Corrupted_AVD");
-      expect(corruptedAvd.provenance.android?.error).toBe("Error: config.ini is missing");
+      expect(corruptedAvd.availabilityError).toBe("Error: config.ini is missing");
     });
 
     test("should handle missing AVD info gracefully", async () => {
@@ -1194,12 +1185,8 @@ describe("Device Image Resources with Fakes", () => {
       const device = result.images[0];
       expect(device.name).toBe("Device_Without_AVD_Info");
       expect(device.platform).toBe("android");
-      expect(device.provenance.android).toEqual({
-        path: null,
-        target: null,
-        basedOn: null,
-        error: null,
-      });
+      expect(device.image).toEqual({ path: null, target: null, basedOn: null });
+      expect(device.availabilityError).toBeNull();
     });
 
     test("should not include extended AVD metadata for iOS images", async () => {
@@ -1222,7 +1209,7 @@ describe("Device Image Resources with Fakes", () => {
       expect(result.totalCount).toBe(1);
       const iosDevice = result.images[0];
       expect(iosDevice.platform).toBe("ios");
-      expect(iosDevice.provenance.android).toBeNull();
+      expect(iosDevice.image).toEqual({ path: null, target: null, basedOn: null });
     });
   });
 

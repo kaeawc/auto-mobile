@@ -1736,7 +1736,7 @@
           "minLength": 1
         },
         "deviceId": {
-          "description": "Booted device serial, e.g. emulator-5554 (the `deviceId` field of automobile:devices/booted/android), or a defined AVD image name, which is cold-booted by name. Prefer avdName to boot or coordinate a named AVD.",
+          "description": "Booted device serial, e.g. emulator-5554 (the `runtime.deviceId` field of automobile:devices/booted/android), or a defined AVD image name, which is cold-booted by name. Prefer avdName to boot or coordinate a named AVD.",
           "type": "string",
           "minLength": 1
         },
@@ -1856,12 +1856,12 @@
           "maximum": 890000
         },
         "udid": {
-          "description": "iOS Simulator UDID (the `deviceId` field of automobile:devices/booted/ios or automobile:devices/images/ios)",
+          "description": "iOS Simulator UDID (the `runtime.deviceId` field of automobile:devices/booted/ios or the `identity.stableId` field of automobile:devices/images/ios)",
           "type": "string",
           "minLength": 1
         },
         "deviceId": {
-          "description": "Booted device identifier (the `deviceId` field of automobile:devices/booted/ios); alias for udid",
+          "description": "Booted device identifier (the `runtime.deviceId` field of automobile:devices/booted/ios); alias for udid",
           "type": "string",
           "minLength": 1
         },
@@ -2959,39 +2959,9 @@
                 "properties": {
                   "stableId": {
                     "type": "string"
-                  },
-                  "deviceId": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "connectionId": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "deviceSessionUuid": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
                   }
                 },
-                "required": ["stableId", "deviceId", "connectionId", "deviceSessionUuid"],
+                "required": ["stableId"],
                 "additionalProperties": false
               },
               "name": {
@@ -3292,66 +3262,6 @@
                         "type": "null"
                       }
                     ]
-                  },
-                  "osVersion": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "apiLevel": {
-                    "anyOf": [
-                      {
-                        "type": "number"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "runtimeId": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "deviceType": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "architecture": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "model": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
                   }
                 },
                 "required": [
@@ -3364,13 +3274,7 @@
                   "session",
                   "serviceStatus",
                   "locked",
-                  "orientation",
-                  "osVersion",
-                  "apiLevel",
-                  "runtimeId",
-                  "deviceType",
-                  "architecture",
-                  "model"
+                  "orientation"
                 ],
                 "additionalProperties": false
               },
@@ -3406,179 +3310,9 @@
                         "type": "null"
                       }
                     ]
-                  },
-                  "formFactor": {
-                    "anyOf": [
-                      {
-                        "type": "string",
-                        "enum": ["phone", "tablet", "foldable", "unknown"]
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
                   }
                 },
-                "required": ["width", "height", "density", "formFactor"],
-                "additionalProperties": false
-              },
-              "lifecycle": {
-                "type": "object",
-                "properties": {
-                  "state": {
-                    "type": "string",
-                    "enum": ["configured", "booting", "booted", "shutting-down", "unavailable"]
-                  },
-                  "known": {
-                    "type": "boolean"
-                  }
-                },
-                "required": ["state", "known"],
-                "additionalProperties": false
-              },
-              "readiness": {
-                "type": "object",
-                "properties": {
-                  "state": {
-                    "type": "string",
-                    "enum": ["unknown", "not_ready", "ready"]
-                  }
-                },
-                "required": ["state"],
-                "additionalProperties": false
-              },
-              "session": {
-                "type": "object",
-                "properties": {
-                  "sessionUuid": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "ownership": {
-                    "anyOf": [
-                      {
-                        "type": "string",
-                        "enum": ["owned", "awaiting-owner"]
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "poolStatus": {
-                    "anyOf": [
-                      {
-                        "type": "string",
-                        "enum": ["idle", "assigned", "error"]
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  }
-                },
-                "required": ["sessionUuid", "ownership", "poolStatus"],
-                "additionalProperties": false
-              },
-              "provenance": {
-                "type": "object",
-                "properties": {
-                  "android": {
-                    "anyOf": [
-                      {
-                        "type": "object",
-                        "properties": {
-                          "path": {
-                            "anyOf": [
-                              {
-                                "type": "string"
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          },
-                          "target": {
-                            "anyOf": [
-                              {
-                                "type": "string"
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          },
-                          "basedOn": {
-                            "anyOf": [
-                              {
-                                "type": "string"
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          },
-                          "error": {
-                            "anyOf": [
-                              {
-                                "type": "string"
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          }
-                        },
-                        "required": ["path", "target", "basedOn", "error"],
-                        "additionalProperties": false
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "ios": {
-                    "anyOf": [
-                      {
-                        "type": "object",
-                        "properties": {
-                          "isAvailable": {
-                            "anyOf": [
-                              {
-                                "type": "boolean"
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          },
-                          "availabilityError": {
-                            "anyOf": [
-                              {
-                                "type": "string"
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          }
-                        },
-                        "required": ["isAvailable", "availabilityError"],
-                        "additionalProperties": false
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  }
-                },
-                "required": ["android", "ios"],
+                "required": ["width", "height", "density"],
                 "additionalProperties": false
               },
               "capabilityInventory": {
@@ -3681,92 +3415,6 @@
                     "type": "null"
                   }
                 ]
-              },
-              "stableId": {
-                "type": "string"
-              },
-              "deviceId": {
-                "anyOf": [
-                  {
-                    "type": "string"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
-              },
-              "path": {
-                "anyOf": [
-                  {
-                    "type": "string"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
-              },
-              "target": {
-                "anyOf": [
-                  {
-                    "type": "string"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
-              },
-              "basedOn": {
-                "anyOf": [
-                  {
-                    "type": "string"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
-              },
-              "error": {
-                "anyOf": [
-                  {
-                    "type": "string"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
-              },
-              "state": {
-                "anyOf": [
-                  {
-                    "type": "string"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
-              },
-              "isAvailable": {
-                "type": "boolean"
-              },
-              "iosVersion": {
-                "anyOf": [
-                  {
-                    "type": "string"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
-              },
-              "legacyRuntimeId": {
-                "anyOf": [
-                  {
-                    "type": "string"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
               }
             },
             "required": [
@@ -3784,23 +3432,9 @@
               "runtimeId",
               "runtime",
               "display",
-              "lifecycle",
-              "readiness",
-              "session",
-              "provenance",
               "capabilityInventory",
               "image",
-              "availabilityError",
-              "stableId",
-              "deviceId",
-              "path",
-              "target",
-              "basedOn",
-              "error",
-              "state",
-              "isAvailable",
-              "iosVersion",
-              "legacyRuntimeId"
+              "availabilityError"
             ],
             "additionalProperties": false
           }
@@ -3879,39 +3513,9 @@
                 "properties": {
                   "stableId": {
                     "type": "string"
-                  },
-                  "deviceId": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "connectionId": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "deviceSessionUuid": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
                   }
                 },
-                "required": ["stableId", "deviceId", "connectionId", "deviceSessionUuid"],
+                "required": ["stableId"],
                 "additionalProperties": false
               },
               "name": {
@@ -3936,15 +3540,8 @@
                 ]
               },
               "formFactor": {
-                "anyOf": [
-                  {
-                    "type": "string",
-                    "enum": ["phone", "tablet", "foldable", "unknown"]
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
+                "type": "string",
+                "enum": ["phone", "tablet", "foldable", "unknown"]
               },
               "deviceType": {
                 "anyOf": [
@@ -4219,66 +3816,6 @@
                         "type": "null"
                       }
                     ]
-                  },
-                  "osVersion": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "apiLevel": {
-                    "anyOf": [
-                      {
-                        "type": "number"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "runtimeId": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "deviceType": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "architecture": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "model": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
                   }
                 },
                 "required": [
@@ -4291,13 +3828,7 @@
                   "session",
                   "serviceStatus",
                   "locked",
-                  "orientation",
-                  "osVersion",
-                  "apiLevel",
-                  "runtimeId",
-                  "deviceType",
-                  "architecture",
-                  "model"
+                  "orientation"
                 ],
                 "additionalProperties": false
               },
@@ -4333,179 +3864,9 @@
                         "type": "null"
                       }
                     ]
-                  },
-                  "formFactor": {
-                    "anyOf": [
-                      {
-                        "type": "string",
-                        "enum": ["phone", "tablet", "foldable", "unknown"]
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
                   }
                 },
-                "required": ["width", "height", "density", "formFactor"],
-                "additionalProperties": false
-              },
-              "lifecycle": {
-                "type": "object",
-                "properties": {
-                  "state": {
-                    "type": "string",
-                    "enum": ["configured", "booting", "booted", "shutting-down", "unavailable"]
-                  },
-                  "known": {
-                    "type": "boolean"
-                  }
-                },
-                "required": ["state", "known"],
-                "additionalProperties": false
-              },
-              "readiness": {
-                "type": "object",
-                "properties": {
-                  "state": {
-                    "type": "string",
-                    "enum": ["unknown", "not_ready", "ready"]
-                  }
-                },
-                "required": ["state"],
-                "additionalProperties": false
-              },
-              "session": {
-                "type": "object",
-                "properties": {
-                  "sessionUuid": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "ownership": {
-                    "anyOf": [
-                      {
-                        "type": "string",
-                        "enum": ["owned", "awaiting-owner"]
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "poolStatus": {
-                    "anyOf": [
-                      {
-                        "type": "string",
-                        "enum": ["idle", "assigned", "error"]
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  }
-                },
-                "required": ["sessionUuid", "ownership", "poolStatus"],
-                "additionalProperties": false
-              },
-              "provenance": {
-                "type": "object",
-                "properties": {
-                  "android": {
-                    "anyOf": [
-                      {
-                        "type": "object",
-                        "properties": {
-                          "path": {
-                            "anyOf": [
-                              {
-                                "type": "string"
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          },
-                          "target": {
-                            "anyOf": [
-                              {
-                                "type": "string"
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          },
-                          "basedOn": {
-                            "anyOf": [
-                              {
-                                "type": "string"
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          },
-                          "error": {
-                            "anyOf": [
-                              {
-                                "type": "string"
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          }
-                        },
-                        "required": ["path", "target", "basedOn", "error"],
-                        "additionalProperties": false
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "ios": {
-                    "anyOf": [
-                      {
-                        "type": "object",
-                        "properties": {
-                          "isAvailable": {
-                            "anyOf": [
-                              {
-                                "type": "boolean"
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          },
-                          "availabilityError": {
-                            "anyOf": [
-                              {
-                                "type": "string"
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          }
-                        },
-                        "required": ["isAvailable", "availabilityError"],
-                        "additionalProperties": false
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  }
-                },
-                "required": ["android", "ios"],
+                "required": ["width", "height", "density"],
                 "additionalProperties": false
               },
               "capabilityInventory": {
@@ -4608,9 +3969,6 @@
                     "type": "null"
                   }
                 ]
-              },
-              "deviceId": {
-                "type": "string"
               }
             },
             "required": [
@@ -4628,16 +3986,11 @@
               "runtimeId",
               "runtime",
               "display",
-              "lifecycle",
-              "readiness",
-              "session",
-              "provenance",
               "capabilityInventory",
               "image",
-              "availabilityError",
-              "deviceId"
+              "availabilityError"
             ],
-            "additionalProperties": {}
+            "additionalProperties": false
           }
         },
         "count": {
@@ -9848,39 +9201,9 @@
               "properties": {
                 "stableId": {
                   "type": "string"
-                },
-                "deviceId": {
-                  "anyOf": [
-                    {
-                      "type": "string"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "connectionId": {
-                  "anyOf": [
-                    {
-                      "type": "string"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "deviceSessionUuid": {
-                  "anyOf": [
-                    {
-                      "type": "string"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
                 }
               },
-              "required": ["stableId", "deviceId", "connectionId", "deviceSessionUuid"],
+              "required": ["stableId"],
               "additionalProperties": false
             },
             "name": {
@@ -10181,66 +9504,6 @@
                       "type": "null"
                     }
                   ]
-                },
-                "osVersion": {
-                  "anyOf": [
-                    {
-                      "type": "string"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "apiLevel": {
-                  "anyOf": [
-                    {
-                      "type": "number"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "runtimeId": {
-                  "anyOf": [
-                    {
-                      "type": "string"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "deviceType": {
-                  "anyOf": [
-                    {
-                      "type": "string"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "architecture": {
-                  "anyOf": [
-                    {
-                      "type": "string"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "model": {
-                  "anyOf": [
-                    {
-                      "type": "string"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
                 }
               },
               "required": [
@@ -10253,13 +9516,7 @@
                 "session",
                 "serviceStatus",
                 "locked",
-                "orientation",
-                "osVersion",
-                "apiLevel",
-                "runtimeId",
-                "deviceType",
-                "architecture",
-                "model"
+                "orientation"
               ],
               "additionalProperties": false
             },
@@ -10295,179 +9552,9 @@
                       "type": "null"
                     }
                   ]
-                },
-                "formFactor": {
-                  "anyOf": [
-                    {
-                      "type": "string",
-                      "enum": ["phone", "tablet", "foldable", "unknown"]
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
                 }
               },
-              "required": ["width", "height", "density", "formFactor"],
-              "additionalProperties": false
-            },
-            "lifecycle": {
-              "type": "object",
-              "properties": {
-                "state": {
-                  "type": "string",
-                  "enum": ["configured", "booting", "booted", "shutting-down", "unavailable"]
-                },
-                "known": {
-                  "type": "boolean"
-                }
-              },
-              "required": ["state", "known"],
-              "additionalProperties": false
-            },
-            "readiness": {
-              "type": "object",
-              "properties": {
-                "state": {
-                  "type": "string",
-                  "enum": ["unknown", "not_ready", "ready"]
-                }
-              },
-              "required": ["state"],
-              "additionalProperties": false
-            },
-            "session": {
-              "type": "object",
-              "properties": {
-                "sessionUuid": {
-                  "anyOf": [
-                    {
-                      "type": "string"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "ownership": {
-                  "anyOf": [
-                    {
-                      "type": "string",
-                      "enum": ["owned", "awaiting-owner"]
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "poolStatus": {
-                  "anyOf": [
-                    {
-                      "type": "string",
-                      "enum": ["idle", "assigned", "error"]
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                }
-              },
-              "required": ["sessionUuid", "ownership", "poolStatus"],
-              "additionalProperties": false
-            },
-            "provenance": {
-              "type": "object",
-              "properties": {
-                "android": {
-                  "anyOf": [
-                    {
-                      "type": "object",
-                      "properties": {
-                        "path": {
-                          "anyOf": [
-                            {
-                              "type": "string"
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "target": {
-                          "anyOf": [
-                            {
-                              "type": "string"
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "basedOn": {
-                          "anyOf": [
-                            {
-                              "type": "string"
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "error": {
-                          "anyOf": [
-                            {
-                              "type": "string"
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        }
-                      },
-                      "required": ["path", "target", "basedOn", "error"],
-                      "additionalProperties": false
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "ios": {
-                  "anyOf": [
-                    {
-                      "type": "object",
-                      "properties": {
-                        "isAvailable": {
-                          "anyOf": [
-                            {
-                              "type": "boolean"
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "availabilityError": {
-                          "anyOf": [
-                            {
-                              "type": "string"
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        }
-                      },
-                      "required": ["isAvailable", "availabilityError"],
-                      "additionalProperties": false
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                }
-              },
-              "required": ["android", "ios"],
+              "required": ["width", "height", "density"],
               "additionalProperties": false
             },
             "capabilityInventory": {
@@ -10587,15 +9674,11 @@
             "runtimeId",
             "runtime",
             "display",
-            "lifecycle",
-            "readiness",
-            "session",
-            "provenance",
             "capabilityInventory",
             "image",
             "availabilityError"
           ],
-          "additionalProperties": {}
+          "additionalProperties": false
         },
         "requestedSpec": {},
         "resolvedSpec": {},

@@ -86,7 +86,7 @@ export async function runBootDeviceCommand(args: string[]): Promise<void> {
       deviceId: result.device.deviceId,
       name: result.device.name,
       platform: result.device.platform,
-      osVersion: result.device.osVersion ?? result.device.iosVersion,
+      osVersion: result.device.osVersion,
       source: result.source,
       processId: result.processId,
       provisioned: result.provisioned,

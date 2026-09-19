@@ -5775,7 +5775,7 @@ describe("Daemon manager available-devices", () => {
             },
             devices: [
               {
-                deviceId: "emulator-5554",
+                runtime: { deviceId: "emulator-5554" },
                 platform: "android",
                 recoveryEligibility: { eligible: true, action: "restart" },
               },

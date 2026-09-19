@@ -10,12 +10,16 @@ import { getStructuredField, type StructuredToolResponse } from "../../src/utils
 
 /** The server-computed fields an acquisition envelope carries (#6869, #6886). */
 type AcquisitionPayload = {
-  sessionUuid?: string;
+  runtime?: { session?: { sessionUuid?: string } };
+  sessionId?: string;
   gatedTools?: string[];
   enabledTools?: string[];
   enableToolsError?: string;
   skipped?: Array<{ toolName: string; reason: "always-on" }>;
 };
+
+const acquiredSessionUuid = (payload: AcquisitionPayload): string | undefined =>
+  payload.runtime?.session?.sessionUuid ?? payload.sessionId;
 
 /**
  * #6869 — a client had to acquire a device, read `gatedTools`, and then spend
@@ -30,7 +34,16 @@ describe("acquisition-time enableTools (#6869)", () => {
   const registerAcquisition = (
     name: string,
     handler: () => Promise<Record<string, unknown>> = async () => ({
-      content: [{ type: "text", text: JSON.stringify({ sessionUuid: "acquired-session" }) }],
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(
+            name === "provisionDevice"
+              ? { sessionId: "acquired-session" }
+              : { runtime: { session: { sessionUuid: "acquired-session" } } },
+          ),
+        },
+      ],
     }),
     options: Record<string, unknown> = {},
   ) => {
@@ -102,7 +115,7 @@ describe("acquisition-time enableTools (#6869)", () => {
         enableTools: ["inputText", "clearText"],
       });
 
-      expect(payload.sessionUuid).toBe("acquired-session");
+      expect(acquiredSessionUuid(payload)).toBe("acquired-session");
       expect(payload.gatedTools).toEqual([]);
       expect(payload.enabledTools).toEqual(["clearText", "inputText", "observe"]);
       expect((await fixture!.client.listTools()).tools.map((tool) => tool.name)).toContain(
@@ -128,7 +141,12 @@ describe("acquisition-time enableTools (#6869)", () => {
         async () => {
           acquisitionsRun += 1;
           return {
-            content: [{ type: "text", text: JSON.stringify({ sessionUuid: "acquired-session" }) }],
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({ runtime: { session: { sessionUuid: "acquired-session" } } }),
+              },
+            ],
           };
         },
         { defaultEnabled: true },
@@ -191,7 +209,7 @@ describe("acquisition-time enableTools (#6869)", () => {
       ],
     });
 
-    expect(payload.sessionUuid).toBe("acquired-session");
+    expect(acquiredSessionUuid(payload)).toBe("acquired-session");
     expect(payload.enabledTools).toEqual(gatedNames.sort());
     expect(payload.skipped).toEqual([{ toolName: "setToolEnabled", reason: "always-on" }]);
   });
@@ -232,7 +250,7 @@ describe("acquisition-time enableTools (#6869)", () => {
 
         const { payload } = await acquire(acquisition, { enableTools: ["inputText"] });
 
-        expect(payload.sessionUuid).toBe("acquired-session");
+        expect(acquiredSessionUuid(payload)).toBe("acquired-session");
         expect(payload.enableToolsError).toContain("selection storage unavailable");
         expect(payload.enableToolsError).toContain("inputText");
         expect(payload.gatedTools).toContain("inputText");
@@ -245,7 +263,7 @@ describe("acquisition-time enableTools (#6869)", () => {
 
       const { payload } = await acquire("provisionDevice", { enableTools: ["inputText"] });
 
-      expect(payload.sessionUuid).toBe("acquired-session");
+      expect(acquiredSessionUuid(payload)).toBe("acquired-session");
       expect(payload.enableToolsError).toContain("selection storage unavailable");
       expect(payload.enabledTools).not.toContain("inputText");
     });
@@ -276,19 +294,19 @@ describe("acquisition-time enableTools (#6869)", () => {
             {
               type: "text",
               text: JSON.stringify({
-                sessionUuid: "acquired-session",
+                sessionId: "acquired-session",
                 success: false,
                 message: "requested resource configuration was not fully applied",
               }),
             },
           ],
-          structuredContent: { sessionUuid: "acquired-session", success: false },
+          structuredContent: { sessionId: "acquired-session", success: false },
           isError: true,
           // Declaring an output schema keeps `structuredContent` past the
           // wire-boundary strip (#2759), so the enrichment can be asserted on
           // BOTH halves of the envelope, as provisionDevice itself carries it.
         }),
-        { outputSchema: z.looseObject({ sessionUuid: z.string() }) },
+        { outputSchema: z.looseObject({ sessionId: z.string() }) },
       );
 
     test("provisionDevice still grants enableTools when resources failed", async () => {
@@ -299,7 +317,7 @@ describe("acquisition-time enableTools (#6869)", () => {
       });
 
       expect(response.isError).toBe(true);
-      expect(payload.sessionUuid).toBe("acquired-session");
+      expect(acquiredSessionUuid(payload)).toBe("acquired-session");
       expect(payload.enabledTools).toEqual(["inputText", "observe", "provisionDevice"]);
       expect(getStructuredField(response, "enabledTools")).toEqual([
         "inputText",
@@ -320,7 +338,7 @@ describe("acquisition-time enableTools (#6869)", () => {
       });
 
       expect(response.isError).toBe(true);
-      expect(payload.sessionUuid).toBe("acquired-session");
+      expect(acquiredSessionUuid(payload)).toBe("acquired-session");
       expect(payload.enableToolsError).toContain("selection storage unavailable");
       expect(getStructuredField(response, "enableToolsError")).toContain(
         "selection storage unavailable",
@@ -349,7 +367,7 @@ describe("acquisition-time enableTools (#6869)", () => {
 
     const { payload } = await acquire("provisionDevice", { enableTools: ["inputText"] });
 
-    expect(payload.sessionUuid).toBe("acquired-session");
+    expect(acquiredSessionUuid(payload)).toBe("acquired-session");
     expect(payload.enabledTools).toEqual(["inputText", "observe", "provisionDevice"]);
   });
 });

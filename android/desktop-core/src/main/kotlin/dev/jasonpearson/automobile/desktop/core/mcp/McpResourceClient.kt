@@ -48,18 +48,62 @@ class FakeMcpResourceClient : McpResourceClient {
             {
                 "name": "Pixel 8 API 35",
                 "platform": "android",
-                "deviceId": "emulator-5554",
                 "source": "local",
                 "isVirtual": true,
-                "status": "booted"
+                "identity": {"stableId": "Pixel_8_API_35"},
+                "formFactor": "phone",
+                "deviceType": null,
+                "model": null,
+                "architecture": null,
+                "osVersion": "15",
+                "apiLevel": 35,
+                "runtimeId": "android-35",
+                "display": {"width": null, "height": null, "density": null},
+                "capabilityInventory": null,
+                "image": {"path": null, "target": "android-35", "basedOn": null},
+                "availabilityError": null,
+                "runtime": {
+                    "deviceId": "emulator-5554",
+                    "connectionId": "emulator-5554#1",
+                    "deviceSessionUuid": null,
+                    "lifecycle": {"state": "booted", "known": true},
+                    "readiness": {"state": "unknown"},
+                    "poolStatus": "idle",
+                    "session": null,
+                    "serviceStatus": null,
+                    "locked": null,
+                    "orientation": null
+                }
             },
             {
                 "name": "Pixel 7 API 34",
                 "platform": "android",
-                "deviceId": "emulator-5556",
                 "source": "local",
                 "isVirtual": true,
-                "status": "booted"
+                "identity": {"stableId": "Pixel_7_API_34"},
+                "formFactor": "phone",
+                "deviceType": null,
+                "model": null,
+                "architecture": null,
+                "osVersion": "14",
+                "apiLevel": 34,
+                "runtimeId": "android-34",
+                "display": {"width": null, "height": null, "density": null},
+                "capabilityInventory": null,
+                "image": {"path": null, "target": "android-34", "basedOn": null},
+                "availabilityError": null,
+                "runtime": {
+                    "deviceId": "emulator-5556",
+                    "connectionId": "emulator-5556#1",
+                    "deviceSessionUuid": null,
+                    "lifecycle": {"state": "booted", "known": true},
+                    "readiness": {"state": "unknown"},
+                    "poolStatus": "idle",
+                    "session": null,
+                    "serviceStatus": null,
+                    "locked": null,
+                    "orientation": null
+                }
             }
         ]
     }
@@ -74,11 +118,66 @@ class FakeMcpResourceClient : McpResourceClient {
         "iosCount": 2,
         "lastUpdated": "2024-01-24T23:00:00Z",
         "images": [
-            {"name": "Pixel 8 API 35", "platform": "android", "deviceId": "Pixel_8_API_35"},
-            {"name": "Pixel 7 API 34", "platform": "android", "deviceId": "Pixel_7_API_34"},
-            {"name": "Pixel 6 API 33", "platform": "android", "deviceId": "Pixel_6_API_33"},
-            {"name": "iPhone 15 Pro", "platform": "ios", "deviceId": "iphone-15-pro"},
-            {"name": "iPhone 14", "platform": "ios", "deviceId": "iphone-14"}
+            {
+                "name": "Pixel 8 API 35", "platform": "android", "isVirtual": true,
+                "source": "local", "identity": {"stableId": "Pixel_8_API_35"},
+                "formFactor": "phone", "deviceType": null, "model": null,
+                "architecture": null, "osVersion": "15", "apiLevel": 35,
+                "runtimeId": "android-35", "display": {"width": null, "height": null, "density": null},
+                "capabilityInventory": null, "image": {"path": null, "target": "android-35", "basedOn": null},
+                "availabilityError": null,
+                "runtime": {"deviceId": null, "connectionId": null, "deviceSessionUuid": null,
+                    "lifecycle": {"state": "configured", "known": true}, "readiness": {"state": "unknown"},
+                    "poolStatus": null, "session": null, "serviceStatus": null, "locked": null, "orientation": null}
+            },
+            {
+                "name": "Pixel 7 API 34", "platform": "android", "isVirtual": true,
+                "source": "local", "identity": {"stableId": "Pixel_7_API_34"},
+                "formFactor": "phone", "deviceType": null, "model": null,
+                "architecture": null, "osVersion": "14", "apiLevel": 34,
+                "runtimeId": "android-34", "display": {"width": null, "height": null, "density": null},
+                "capabilityInventory": null, "image": {"path": null, "target": "android-34", "basedOn": null},
+                "availabilityError": null,
+                "runtime": {"deviceId": null, "connectionId": null, "deviceSessionUuid": null,
+                    "lifecycle": {"state": "configured", "known": true}, "readiness": {"state": "unknown"},
+                    "poolStatus": null, "session": null, "serviceStatus": null, "locked": null, "orientation": null}
+            },
+            {
+                "name": "Pixel 6 API 33", "platform": "android", "isVirtual": true,
+                "source": "local", "identity": {"stableId": "Pixel_6_API_33"},
+                "formFactor": "phone", "deviceType": null, "model": null,
+                "architecture": null, "osVersion": "13", "apiLevel": 33,
+                "runtimeId": "android-33", "display": {"width": null, "height": null, "density": null},
+                "capabilityInventory": null, "image": {"path": null, "target": "android-33", "basedOn": null},
+                "availabilityError": null,
+                "runtime": {"deviceId": null, "connectionId": null, "deviceSessionUuid": null,
+                    "lifecycle": {"state": "configured", "known": true}, "readiness": {"state": "unknown"},
+                    "poolStatus": null, "session": null, "serviceStatus": null, "locked": null, "orientation": null}
+            },
+            {
+                "name": "iPhone 15 Pro", "platform": "ios", "isVirtual": true,
+                "source": "local", "identity": {"stableId": "iphone-15-pro"},
+                "formFactor": "phone", "deviceType": "iPhone 15 Pro", "model": null,
+                "architecture": "arm64", "osVersion": "17.0", "apiLevel": null,
+                "runtimeId": "iOS-17-0", "display": {"width": null, "height": null, "density": null},
+                "capabilityInventory": null, "image": {"path": null, "target": null, "basedOn": null},
+                "availabilityError": null,
+                "runtime": {"deviceId": null, "connectionId": null, "deviceSessionUuid": null,
+                    "lifecycle": {"state": "configured", "known": true}, "readiness": {"state": "unknown"},
+                    "poolStatus": null, "session": null, "serviceStatus": null, "locked": null, "orientation": null}
+            },
+            {
+                "name": "iPhone 14", "platform": "ios", "isVirtual": true,
+                "source": "local", "identity": {"stableId": "iphone-14"},
+                "formFactor": "phone", "deviceType": "iPhone 14", "model": null,
+                "architecture": "arm64", "osVersion": "16.0", "apiLevel": null,
+                "runtimeId": "iOS-16-0", "display": {"width": null, "height": null, "density": null},
+                "capabilityInventory": null, "image": {"path": null, "target": null, "basedOn": null},
+                "availabilityError": null,
+                "runtime": {"deviceId": null, "connectionId": null, "deviceSessionUuid": null,
+                    "lifecycle": {"state": "configured", "known": true}, "readiness": {"state": "unknown"},
+                    "poolStatus": null, "session": null, "serviceStatus": null, "locked": null, "orientation": null}
+            }
         ]
     }
     """

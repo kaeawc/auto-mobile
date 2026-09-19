@@ -800,9 +800,11 @@ class McpDaemonClient(
         ?.jsonPrimitive
         ?.contentOrNull ?: return
     val payload = runCatching { json.parseToJsonElement(text) as? JsonObject }.getOrNull() ?: return
+    val runtime = payload["runtime"] as? JsonObject
+    val session = runtime?.get("session") as? JsonObject
     val minted =
-      payload["sessionUuid"]?.jsonPrimitive?.contentOrNull
-        ?: payload["sessionId"]?.jsonPrimitive?.contentOrNull
+      (session?.get("sessionUuid") as? JsonPrimitive)?.contentOrNull
+        ?: (payload["sessionId"] as? JsonPrimitive)?.contentOrNull
     if (!minted.isNullOrBlank()) {
       ownedSessionUuids.add(minted)
     }

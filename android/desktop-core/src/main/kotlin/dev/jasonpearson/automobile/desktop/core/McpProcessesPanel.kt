@@ -277,16 +277,15 @@ internal fun McpProcessesPanel(
   LaunchedEffect(bootedDevices, suppressAutoSelect) {
     if (!suppressAutoSelect && bootedDevices.size == 1 && selectingDevice == null) {
       val autoSelectDevice = bootedDevices.first()
-      LOG.debug(
-        "[McpProcessesPanel] Auto-selecting device: ${autoSelectDevice.name} (${autoSelectDevice.deviceId})"
-      )
+      val deviceId = autoSelectDevice.runtime.deviceId ?: autoSelectDevice.identity.stableId
+      LOG.debug("[McpProcessesPanel] Auto-selecting device: ${autoSelectDevice.name} ($deviceId)")
       selectingDevice = autoSelectDevice
-      onDeviceSelected(autoSelectDevice.deviceId, autoSelectDevice.name)
+      onDeviceSelected(deviceId, autoSelectDevice.name)
       // Also set the active device on the MCP server
       kotlinx.coroutines.withContext(Dispatchers.IO) {
         try {
           graph.autoMobileClient.setActiveDevice(
-            autoSelectDevice.deviceId,
+            deviceId,
             autoSelectDevice.platform,
           )
           LOG.debug(
@@ -354,7 +353,7 @@ internal fun McpProcessesPanel(
   // Boot device action (non-blocking coroutine)
   val onBootDeviceAction: (dev.jasonpearson.automobile.desktop.core.mcp.DeviceImageInfo) -> Unit =
     { image ->
-      val deviceKey = image.deviceId ?: image.name
+      val deviceKey = image.identity.stableId
       bootingDeviceIds = bootingDeviceIds + deviceKey
       bootErrors = bootErrors - deviceKey
       scope.launch(Dispatchers.IO) {
@@ -364,7 +363,7 @@ internal fun McpProcessesPanel(
             graph.autoMobileClient.startDevice(
               name = image.name,
               platform = image.platform,
-              deviceId = image.deviceId,
+              deviceId = image.identity.stableId,
             )
           if (result.success) {
             LOG.debug("[AutoMobile IDE] Device booted successfully: ${image.name}")
@@ -386,15 +385,16 @@ internal fun McpProcessesPanel(
   val onSelectDeviceAction:
     (dev.jasonpearson.automobile.desktop.core.mcp.BootedDeviceInfo) -> Unit =
     { device ->
+      val deviceId = device.runtime.deviceId ?: device.identity.stableId
       LOG.debug(
-        "[AutoMobile IDE] Select clicked for device: ${device.name}, deviceId: ${device.deviceId}, platform: ${device.platform}"
+        "[AutoMobile IDE] Select clicked for device: ${device.name}, deviceId: $deviceId, platform: ${device.platform}"
       )
       selectingDevice = device
       selectError = null
-      onDeviceSelected(device.deviceId, device.name)
+      onDeviceSelected(deviceId, device.name)
       scope.launch(Dispatchers.IO) {
         try {
-          val result = graph.autoMobileClient.setActiveDevice(device.deviceId, device.platform)
+          val result = graph.autoMobileClient.setActiveDevice(deviceId, device.platform)
           if (result.success) {
             LOG.debug("[AutoMobile IDE] Device selected successfully: ${device.name}")
             selectError = null
@@ -413,17 +413,18 @@ internal fun McpProcessesPanel(
   // Kill device action (non-blocking coroutine)
   val onKillDeviceAction: (dev.jasonpearson.automobile.desktop.core.mcp.BootedDeviceInfo) -> Unit =
     { device ->
-      killingDeviceIds = killingDeviceIds + device.deviceId
-      killErrors = killErrors - device.deviceId
+      val deviceId = device.runtime.deviceId ?: device.identity.stableId
+      killingDeviceIds = killingDeviceIds + deviceId
+      killErrors = killErrors - deviceId
       scope.launch(Dispatchers.IO) {
         try {
           LOG.warn(
-            "[AutoMobile IDE] Killing device: ${device.name} (${device.deviceId}, ${device.platform})"
+            "[AutoMobile IDE] Killing device: ${device.name} ($deviceId, ${device.platform})"
           )
           val result =
             graph.autoMobileClient.killDevice(
               name = device.name,
-              deviceId = device.deviceId,
+              deviceId = deviceId,
               platform = device.platform,
             )
           if (result.success) {
@@ -432,13 +433,13 @@ internal fun McpProcessesPanel(
             refreshCounter++
           } else {
             LOG.warn("[AutoMobile IDE] Failed to kill device: ${result.message}")
-            killErrors = killErrors + (device.deviceId to (result.message ?: "Failed to kill"))
+            killErrors = killErrors + (deviceId to (result.message ?: "Failed to kill"))
           }
         } catch (e: Exception) {
           LOG.warn("[AutoMobile IDE] Exception killing device: ${e.javaClass.name}: ${e.message}")
-          killErrors = killErrors + (device.deviceId to (e.message ?: "Error killing device"))
+          killErrors = killErrors + (deviceId to (e.message ?: "Error killing device"))
         }
-        killingDeviceIds = killingDeviceIds - device.deviceId
+        killingDeviceIds = killingDeviceIds - deviceId
       }
     }
 
@@ -446,13 +447,14 @@ internal fun McpProcessesPanel(
   val onUpdateServiceAction:
     (dev.jasonpearson.automobile.desktop.core.mcp.BootedDeviceInfo) -> Unit =
     { device ->
-      updatingServiceDeviceIds = updatingServiceDeviceIds + device.deviceId
+      val deviceId = device.runtime.deviceId ?: device.identity.stableId
+      updatingServiceDeviceIds = updatingServiceDeviceIds + deviceId
       scope.launch(Dispatchers.IO) {
         try {
           LOG.warn(
-            "[AutoMobile IDE] Updating service for device: ${device.name} (${device.deviceId}, ${device.platform})"
+            "[AutoMobile IDE] Updating service for device: ${device.name} ($deviceId, ${device.platform})"
           )
-          val result = graph.autoMobileClient.updateService(device.deviceId, device.platform)
+          val result = graph.autoMobileClient.updateService(deviceId, device.platform)
           if (result.success) {
             LOG.warn("[AutoMobile IDE] Service updated successfully for: ${device.name}")
             kotlinx.coroutines.delay(1000)
@@ -463,7 +465,7 @@ internal fun McpProcessesPanel(
         } catch (e: Exception) {
           LOG.warn("[AutoMobile IDE] Exception updating service: ${e.javaClass.name}: ${e.message}")
         }
-        updatingServiceDeviceIds = updatingServiceDeviceIds - device.deviceId
+        updatingServiceDeviceIds = updatingServiceDeviceIds - deviceId
       }
     }
 

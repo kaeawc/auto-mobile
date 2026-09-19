@@ -217,7 +217,7 @@ are supported only on Android.
   `matchExactName`, `androidAvdName`, and a `stableTarget` for exact AVD-identity
   and lifecycle coordination. `deviceId` is the copy-paste-from-discovery
   convenience: it accepts either an _already-booted_ serial such as
-  `emulator-5554` (the `deviceId` field of `automobile:devices/booted/android`)
+  `emulator-5554` (the `runtime.deviceId` field of `automobile:devices/booted/android`)
   **or** an AVD image name — if it names a defined-but-unbooted AVD, `getAndroid`
   cold-boots that image by name. The difference is the coordination hints the
   `avdName` path passes up front — `matchExactName`, an `androidAvdName`
@@ -225,12 +225,12 @@ are supported only on Android.
   specifically want to boot or coordinate a named AVD; use `deviceId` to attach
   to a running device or to boot straight from a discovered identifier.
 - **`getApple`** — `udid` is the iOS Simulator UDID. `deviceId` is an accepted
-  **alias** for `udid`: a booted simulator's `deviceId` (from
+  **alias** for `udid`: a booted simulator's `runtime.deviceId` (from
   `automobile:devices/booted/ios`) _is_ its `udid`, so both fields resolve to the
   same value.
 
-The `deviceId` fields exist so the value that `listDevices` and the
-`automobile:devices/booted/*` resources lead with can be copied straight into
+The `deviceId` fields exist so the value at `runtime.deviceId` in `listDevices` and the
+`automobile:devices/booted/*` resources can be copied straight into
 `getAndroid`/`getApple` — the discovery→acquire path (#5870). See the
 [FAQ](faq.md#how-do-i-see-or-start-a-device) for the CLI equivalents.
 

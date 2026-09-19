@@ -934,6 +934,12 @@ function acquiredIdentity(
   };
 }
 
+function acquisitionSessionUuid(payload: JsonObject, tool: string): string {
+  const runtime = asObject(payload.runtime, `${tool}.runtime`);
+  const session = asObject(runtime.session, `${tool}.runtime.session`);
+  return stringField(session, "sessionUuid", `${tool}.runtime.session`);
+}
+
 function provisionRequest(args: AcceptanceArgs): JsonObject {
   return {
     operationId: crypto.randomUUID(),
@@ -1340,19 +1346,20 @@ function assertProvisionedIdentity(
   expectedAndroidDeviceId?: string,
 ): void {
   const device = asObject(payload.device, "provisionDevice.device");
+  const runtime = asObject(device.runtime, "provisionDevice.device.runtime");
   if (stringField(device, "name", "provisionDevice.device") !== targetDeviceName(args)) {
     throw new Error("provisionDevice returned a different named device");
   }
   if (
     args.platform === "android" &&
     expectedAndroidDeviceId !== undefined &&
-    stringField(device, "deviceId", "provisionDevice.device") !== expectedAndroidDeviceId
+    stringField(runtime, "deviceId", "provisionDevice.device.runtime") !== expectedAndroidDeviceId
   ) {
     throw new Error("provisionDevice returned a different Android target instance");
   }
   if (
     args.platform === "ios" &&
-    stringField(device, "deviceId", "provisionDevice.device") !== args.target.simulatorUdid
+    stringField(runtime, "deviceId", "provisionDevice.device.runtime") !== args.target.simulatorUdid
   ) {
     throw new Error("provisionDevice returned a different simulator UDID");
   }
@@ -1473,7 +1480,7 @@ function acquiredCliSession(
   if (!payload) {
     throw new Error(`${tool} did not return an acquisition payload`);
   }
-  const sessionUuid = stringField(payload, "sessionUuid", tool);
+  const sessionUuid = acquisitionSessionUuid(payload, tool);
   const { identity, device } = acquiredIdentity(payload, args);
   return { sessionUuid, identity, device };
 }
@@ -1985,7 +1992,7 @@ export async function runAcceptanceMatrix(
     const tool = acquisitionTool(args, kind);
     acquisitionRequests.push({ phase, range, kind, tool, request });
     const payload = toolPayload(await callTool(client, tool, request, phase), tool);
-    const sessionUuid = stringField(payload, "sessionUuid", tool);
+    const sessionUuid = acquisitionSessionUuid(payload, tool);
     mint(phase, sessionUuid);
     await verifyReadiness(client, sessionUuid, phase);
     const { identity, device } = acquiredIdentity(payload, args);
@@ -2031,7 +2038,7 @@ export async function runAcceptanceMatrix(
     });
     if (!response.isError) {
       const payload = toolPayload(response, "startDevice");
-      const unexpectedSession = stringField(payload, "sessionUuid", "startDevice");
+      const unexpectedSession = acquisitionSessionUuid(payload, "startDevice");
       mint(phase, unexpectedSession);
       throw new Error(
         `startDevice accepted incompatible ${edge}OsVersion ${value} for the owned target`,
@@ -2107,7 +2114,11 @@ export async function runAcceptanceMatrix(
       }
       return {
         name: stringField(device, "name", "listDevices.devices"),
-        deviceId: stringField(device, "deviceId", "listDevices.devices"),
+        deviceId: stringField(
+          asObject(device.runtime, "listDevices.devices.runtime"),
+          "deviceId",
+          "listDevices.devices.runtime",
+        ),
         platform,
       } as DiscoveryDevice;
     });
@@ -2303,7 +2314,8 @@ export async function runAcceptanceMatrix(
         image.platform === args.platform &&
         (args.platform === "android"
           ? image.name === targetIdentity(args)
-          : image.deviceId === targetIdentity(args)),
+          : asObject(image.identity, "listDeviceImages.image.identity").stableId ===
+            targetIdentity(args)),
     );
     if (targetRemains) {
       throw new Error(`Original signed target remained in platform inventory during ${stage}`);
@@ -2313,7 +2325,8 @@ export async function runAcceptanceMatrix(
         image.platform === args.platform &&
         (args.platform === "android"
           ? image.name === controls.sibling.name
-          : image.deviceId === controls.sibling.deviceId),
+          : asObject(image.identity, "listDeviceImages.image.identity").stableId ===
+            controls.sibling.deviceId),
     );
     if (!siblingPresent) {
       throw new Error(`Signed sibling was absent from platform inventory during ${stage}`);
@@ -2498,7 +2511,7 @@ export async function runAcceptanceMatrix(
           }
         : { deviceId: controls.sibling.deviceId, enableTools: [...ENABLED_TOOLS] };
     const payload = toolPayload(await callTool(client, tool, request, phase), tool);
-    const sessionUuid = stringField(payload, "sessionUuid", tool);
+    const sessionUuid = acquisitionSessionUuid(payload, tool);
     mint(phase, sessionUuid);
     await verifyReadiness(client, sessionUuid, phase);
     const identity = asObject(payload.deviceIdentity, `${tool}.deviceIdentity`);
@@ -2634,7 +2647,7 @@ export async function runAcceptanceMatrix(
           await callTool(client, "getAndroid", request, selectionPhase),
           "getAndroid",
         );
-        const selectedSessionUuid = stringField(selected, "sessionUuid", "getAndroid");
+        const selectedSessionUuid = acquisitionSessionUuid(selected, "getAndroid");
         mint(selectionPhase, selectedSessionUuid);
         await verifyReadiness(client, selectedSessionUuid, selectionPhase);
         const selectedIdentity = acquiredIdentity(selected, args);
@@ -2676,7 +2689,7 @@ export async function runAcceptanceMatrix(
           await callTool(client, "getApple", request, selectionPhase),
           "getApple",
         );
-        const selectedSessionUuid = stringField(selected, "sessionUuid", "getApple");
+        const selectedSessionUuid = acquisitionSessionUuid(selected, "getApple");
         mint(selectionPhase, selectedSessionUuid);
         await verifyReadiness(client, selectedSessionUuid, selectionPhase);
         const selectedIdentity = acquiredIdentity(selected, args);
@@ -2734,7 +2747,7 @@ export async function runAcceptanceMatrix(
     );
     if (!response.isError) {
       const payload = toolPayload(response, tool);
-      const accidentalSession = stringField(payload, "sessionUuid", tool);
+      const accidentalSession = acquisitionSessionUuid(payload, tool);
       mint("unrelated-owner-unexpected", accidentalSession);
       await verifyReadiness(client, accidentalSession, "unrelated-owner-unexpected");
       throw new Error(
@@ -2773,9 +2786,18 @@ export async function runAcceptanceMatrix(
       await callTool(provisionClient, "provisionDevice", provisionRequest(args), "provision"),
       "provisionDevice",
     );
-    const provisionSessionUuid = stringField(provisionPayload, "sessionUuid", "provisionDevice");
+    const provisionSessionUuid = stringField(provisionPayload, "sessionId", "provisionDevice");
     mint("provision", provisionSessionUuid);
-    provisionedDevice = asObject(provisionPayload.device, "provisionDevice.device");
+    const provisionedDescription = asObject(provisionPayload.device, "provisionDevice.device");
+    const provisionedRuntime = asObject(
+      provisionedDescription.runtime,
+      "provisionDevice.device.runtime",
+    );
+    provisionedDevice = {
+      name: stringField(provisionedDescription, "name", "provisionDevice.device"),
+      deviceId: stringField(provisionedRuntime, "deviceId", "provisionDevice.device.runtime"),
+      platform: stringField(provisionedDescription, "platform", "provisionDevice.device"),
+    };
     await verifyReadiness(provisionClient, provisionSessionUuid, "provision");
     assertProvisionedIdentity(provisionPayload, args, androidControls?.target.deviceId);
     await release(provisionSessionUuid, "provision");

@@ -7,22 +7,22 @@ import {
   type ServiceStatusProbe,
 } from "../../../src/server/bootedDeviceResources";
 import type { DeviceServiceStatus } from "../../../src/server/bootedDeviceResources";
+import { describeDevice } from "../../../src/server/deviceDescription";
 
 // A booted iOS simulator entry as the resource builds it from discovery, before service-status
 // enrichment. `readiness.unknown` and `capabilities.automation === null` are the freshly-discovered
 // defaults; a transient probe failure must leave them untouched (#7053).
 function bootedIosDevice(deviceId: string) {
+  const description = describeDevice({
+    kind: "booted",
+    device: { name: "iPhone 15 Pro", platform: "ios", deviceId },
+  });
   return {
-    name: "iPhone 15 Pro",
-    platform: "ios" as const,
-    deviceId,
-    identity: { stableId: deviceId, connectionId: deviceId },
-    source: "local" as const,
-    isVirtual: true,
-    status: "booted" as const,
-    lifecycleState: "booted" as const,
-    readiness: { state: "unknown" as const },
-    capabilities: { automation: null },
+    ...description,
+    recoveryEligibility: null,
+    serviceStatus: null,
+    locked: null,
+    identityUnresolved: false,
   };
 }
 
@@ -129,12 +129,12 @@ describe("booted iOS service-status transient handling (#7053)", () => {
 
     // Present, still one device, still booted — not dropped.
     expect(devices).toHaveLength(1);
-    expect(devices[0].deviceId).toBe("SIM-A");
-    expect(devices[0].status).toBe("booted");
+    expect(devices[0].runtime.deviceId).toBe("SIM-A");
+    expect(devices[0].runtime.lifecycle.state).toBe("booted");
     // Transient marker attached; readiness untouched (never demoted to not_ready).
     expect(devices[0].serviceStatusDiagnostic?.state).toBe("timeout");
-    expect(devices[0].serviceStatus).toBeUndefined();
-    expect(devices[0].readiness).toEqual({ state: "unknown" });
+    expect(devices[0].serviceStatus).toBeNull();
+    expect(devices[0].runtime.readiness).toEqual({ state: "unknown" });
   });
 
   test("two consecutive observations do not flap presence: timeout then success both keep the device present", async () => {
@@ -156,7 +156,7 @@ describe("booted iOS service-status transient handling (#7053)", () => {
     await enrichDeviceServiceStatuses(devices2, timer2);
 
     expect(devices2).toHaveLength(1);
-    expect(devices2[0].deviceId).toBe("SIM-A");
+    expect(devices2[0].runtime.deviceId).toBe("SIM-A");
     expect(devices2[0].serviceStatus).toEqual(readyServiceStatus);
     expect(devices2[0].runtime.serviceStatus).toEqual(readyServiceStatus);
     expect(devices2[0].serviceStatusDiagnostic).toBeUndefined();

@@ -66,7 +66,9 @@ function daemonStateFor(manager: SessionManager): any {
 function deviceStartResult(sessionUuid: string): {
   content: Array<{ type: string; text: string }>;
 } {
-  return { content: [{ type: "text", text: JSON.stringify({ sessionUuid }) }] };
+  return {
+    content: [{ type: "text", text: JSON.stringify({ runtime: { session: { sessionUuid } } }) }],
+  };
 }
 
 /**

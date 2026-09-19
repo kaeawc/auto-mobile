@@ -9,6 +9,7 @@ import dev.jasonpearson.automobile.desktop.core.daemon.ObserveResult
 import dev.jasonpearson.automobile.desktop.core.daemon.ObserveScreenSize
 import dev.jasonpearson.automobile.desktop.core.daemon.SetKeyValueResult
 import dev.jasonpearson.automobile.desktop.core.daemon.StartDeviceResult
+import dev.jasonpearson.automobile.desktop.core.daemon.StartDeviceRuntime
 import kotlinx.serialization.json.JsonObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -64,11 +65,15 @@ class FakeAutoMobileClientTest {
   @Test
   fun `returns configurable startDevice result`() {
     val client = FakeAutoMobileClient()
-    client.startDeviceResult = StartDeviceResult(success = true, deviceId = "emulator-5554")
+    client.startDeviceResult =
+      StartDeviceResult(
+        success = true,
+        runtime = StartDeviceRuntime(deviceId = "emulator-5554"),
+      )
 
     val result = client.startDevice("Pixel", "android")
     assertTrue(result.success)
-    assertEquals("emulator-5554", result.deviceId)
+    assertEquals("emulator-5554", result.resolvedDeviceId)
   }
 
   @Test

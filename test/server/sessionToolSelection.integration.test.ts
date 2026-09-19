@@ -26,6 +26,16 @@ import {
   resolveDirectSessionDevice,
 } from "../../src/server/directSessionDeviceRegistry";
 
+function acquisitionPayload(
+  sessionUuid: string,
+  extras: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    ...extras,
+    runtime: { session: { sessionUuid } },
+  };
+}
+
 describe("per-session exact-tool selection", () => {
   let fixture: McpTestFixture | undefined;
   let restoreToolPipeline: (() => void) | undefined;
@@ -136,7 +146,9 @@ describe("per-session exact-tool selection", () => {
             await releaseLookup.promise;
           }
           return {
-            content: [{ type: "text", text: JSON.stringify({ sessionUuid: "released-session" }) }],
+            content: [
+              { type: "text", text: JSON.stringify(acquisitionPayload("released-session")) },
+            ],
           };
         },
         { defaultEnabled: true },
@@ -194,7 +206,7 @@ describe("per-session exact-tool selection", () => {
         "acquire",
         z.object({}),
         async () => ({
-          content: [{ type: "text", text: JSON.stringify({ sessionUuid: "new-session" }) }],
+          content: [{ type: "text", text: JSON.stringify(acquisitionPayload("new-session")) }],
         }),
         { defaultEnabled: true },
       );
@@ -209,7 +221,7 @@ describe("per-session exact-tool selection", () => {
         z.any(),
       );
       expect(JSON.parse(response.content[0].text)).toEqual({
-        sessionUuid: "new-session",
+        runtime: { session: { sessionUuid: "new-session" } },
         gatedTools: ["inputText"],
         // #6869 — the complement of gatedTools, so a client confirms the
         // resulting capability set without a second listTools.
@@ -243,7 +255,7 @@ describe("per-session exact-tool selection", () => {
         "acquire",
         z.object({ target: z.string() }),
         async (args) => ({
-          content: [{ type: "text", text: JSON.stringify({ sessionUuid: args.target }) }],
+          content: [{ type: "text", text: JSON.stringify(acquisitionPayload(args.target)) }],
         }),
         { defaultEnabled: true },
       );
@@ -275,7 +287,7 @@ describe("per-session exact-tool selection", () => {
       try {
         await lookupStarted.promise;
         expect(await acquire("session-b")).toEqual({
-          sessionUuid: "session-b",
+          runtime: { session: { sessionUuid: "session-b" } },
           gatedTools: [],
           enabledTools: ["inputText", "inspectRouting"].sort(),
         });
@@ -286,7 +298,7 @@ describe("per-session exact-tool selection", () => {
         releaseLookup.resolve();
       }
       expect(await first).toEqual({
-        sessionUuid: "session-a",
+        runtime: { session: { sessionUuid: "session-a" } },
         gatedTools: ["inputText"],
         enabledTools: ["inspectRouting"],
       });
@@ -321,7 +333,9 @@ describe("per-session exact-tool selection", () => {
           content: [
             {
               type: "text",
-              text: JSON.stringify({ sessionUuid: "acquired-session", timing: { total: 1 } }),
+              text: JSON.stringify(
+                acquisitionPayload("acquired-session", { timing: { total: 1 } }),
+              ),
             },
           ],
         }),
@@ -336,7 +350,7 @@ describe("per-session exact-tool selection", () => {
       );
       expect(response.isError).not.toBe(true);
       expect(JSON.parse(response.content[0].text)).toEqual({
-        sessionUuid: "acquired-session",
+        runtime: { session: { sessionUuid: "acquired-session" } },
         timing: { total: 1 },
       });
     });
@@ -355,7 +369,9 @@ describe("per-session exact-tool selection", () => {
             content: [
               {
                 type: "text",
-                text: JSON.stringify({ sessionUuid: "acquired-session", timing: { total: 1 } }),
+                text: JSON.stringify(
+                  acquisitionPayload("acquired-session", { timing: { total: 1 } }),
+                ),
               },
             ],
           }),
@@ -377,7 +393,7 @@ describe("per-session exact-tool selection", () => {
           return JSON.parse(response.content[0].text);
         };
         const payload = await acquire();
-        expect(payload.sessionUuid).toBe("acquired-session");
+        expect(payload.runtime.session.sessionUuid).toBe("acquired-session");
         expect(payload.timing).toEqual({ total: 1 });
         expect(payload.gatedTools).toEqual(["inputText"]);
         const listed = await fixture.client.listTools();
@@ -663,7 +679,7 @@ describe("per-session exact-tool selection", () => {
       "acquire",
       z.object({}),
       async () => ({
-        content: [{ type: "text", text: JSON.stringify({ sessionUuid: "acquired-session" }) }],
+        content: [{ type: "text", text: JSON.stringify(acquisitionPayload("acquired-session")) }],
       }),
       { defaultEnabled: true },
     );
@@ -1274,13 +1290,15 @@ describe("post-handler cancellation guard scope", () => {
           await siblingReused.promise;
           await executionTracker.cancelSessionExecutions(sessionId, "test-cancel");
           return {
-            content: [{ type: "text" as const, text: JSON.stringify({ sessionUuid }) }],
+            content: [
+              { type: "text" as const, text: JSON.stringify(acquisitionPayload(sessionUuid)) },
+            ],
           };
         }
         await minted.promise;
         const reused = await pool.autolockDevice(device.deviceId, "android", sessionId);
         return {
-          content: [{ type: "text" as const, text: JSON.stringify({ sessionUuid: reused }) }],
+          content: [{ type: "text" as const, text: JSON.stringify(acquisitionPayload(reused)) }],
         };
       },
       { defaultEnabled: true },
@@ -1297,7 +1315,9 @@ describe("post-handler cancellation guard scope", () => {
 
     const siblingResponse = await siblingCall;
     const mintedSessionUuid = await minted.promise;
-    expect(JSON.parse(siblingResponse.content[0].text).sessionUuid).toBe(mintedSessionUuid);
+    expect(JSON.parse(siblingResponse.content[0].text).runtime.session.sessionUuid).toBe(
+      mintedSessionUuid,
+    );
     siblingReused.resolve();
 
     await expect(minterCall).rejects.toThrow(/cancelled during acquisition/);
@@ -1352,7 +1372,10 @@ describe("post-handler cancellation guard scope", () => {
         await executionTracker.cancelSessionExecutions(sessionId, "test-cancel");
         return {
           content: [
-            { type: "text" as const, text: JSON.stringify({ sessionUuid: mintedSessionUuid }) },
+            {
+              type: "text" as const,
+              text: JSON.stringify(acquisitionPayload(mintedSessionUuid)),
+            },
           ],
         };
       },
@@ -1424,7 +1447,7 @@ describe("post-handler cancellation guard scope", () => {
           content: [
             {
               type: "text" as const,
-              text: JSON.stringify({ sessionUuid: "direct-minted-session" }),
+              text: JSON.stringify(acquisitionPayload("direct-minted-session")),
             },
           ],
         };

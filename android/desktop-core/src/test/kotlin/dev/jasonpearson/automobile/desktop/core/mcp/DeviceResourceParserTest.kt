@@ -30,11 +30,14 @@ class DeviceResourceParserTest {
               {
                   "name": "Pixel 8 API 35",
                   "platform": "android",
-                  "deviceId": "emulator-5554",
                   "source": "local",
                   "isVirtual": true,
-                  "status": "booted",
-                  "identity": { "stableId": "Pixel_8", "connectionId": "emulator-5554#3" }
+                  "identity": { "stableId": "Pixel_8" },
+                  "runtime": {
+                    "deviceId": "emulator-5554",
+                    "connectionId": "emulator-5554#3",
+                    "lifecycle": { "state": "booted", "known": true }
+                  }
               }
           ]
       }
@@ -46,11 +49,11 @@ class DeviceResourceParserTest {
     assertEquals(false, result.observationComplete)
     assertEquals(true, result.sourceObservations["ios-simulator"]?.observationComplete)
     assertEquals(false, result.sourceObservations["ios-physical"]?.observationComplete)
-    assertEquals("Pixel_8", result.devices.single().identity?.stableId)
+    assertEquals("Pixel_8", result.devices.single().identity.stableId)
     // The connection epoch is what distinguishes one occupant of a reused
     // serial from the next, so a parser regression that drops or mangles it
     // must not pass on the stableId assertion alone.
-    assertEquals("emulator-5554#3", result.devices.single().identity?.connectionId)
+    assertEquals("emulator-5554#3", result.devices.single().runtime.connectionId)
     assertEquals(1, result.totalCount)
     assertEquals(1, result.androidCount)
     assertEquals(0, result.iosCount)
@@ -58,10 +61,10 @@ class DeviceResourceParserTest {
     with(result.devices[0]) {
       assertEquals("Pixel 8 API 35", name)
       assertEquals("android", platform)
-      assertEquals("emulator-5554", deviceId)
+      assertEquals("emulator-5554", runtime.deviceId)
       assertEquals("local", source)
       assertTrue(isVirtual)
-      assertEquals("booted", status)
+      assertEquals("booted", runtime.lifecycle.state)
     }
   }
 
@@ -80,10 +83,14 @@ class DeviceResourceParserTest {
               {
                   "name": "Pixel 8",
                   "platform": "android",
-                  "deviceId": "emulator-5554",
                   "source": "local",
                   "isVirtual": true,
-                  "status": "booted",
+                  "identity": { "stableId": "Pixel_8" },
+                  "runtime": {
+                    "deviceId": "emulator-5554",
+                    "connectionId": "emulator-5554",
+                    "lifecycle": { "state": "booted", "known": true }
+                  },
                   "serviceStatus": {
                       "installed": true,
                       "enabled": true,
@@ -125,10 +132,14 @@ class DeviceResourceParserTest {
               {
                   "name": "Pixel 8",
                   "platform": "android",
-                  "deviceId": "emulator-5554",
                   "source": "local",
                   "isVirtual": true,
-                  "status": "booted",
+                  "identity": { "stableId": "Pixel_8" },
+                  "runtime": {
+                    "deviceId": "emulator-5554",
+                    "connectionId": "emulator-5554",
+                    "lifecycle": { "state": "booted", "known": true }
+                  },
                   "anotherUnknownField": 42
               }
           ]
@@ -168,9 +179,9 @@ class DeviceResourceParserTest {
           "iosCount": 1,
           "lastUpdated": "2024-01-24T23:00:00Z",
           "images": [
-              {"name": "Pixel 8 API 35", "platform": "android", "deviceId": "Pixel_8_API_35"},
-              {"name": "Pixel 7 API 34", "platform": "android", "deviceId": "Pixel_7_API_34"},
-              {"name": "iPhone 15 Pro",  "platform": "ios",     "deviceId": "iphone-15-pro"}
+              {"name": "Pixel 8 API 35", "platform": "android", "identity": {"stableId": "Pixel_8_API_35"}, "runtime": {"lifecycle": {"state": "configured", "known": true}}},
+              {"name": "Pixel 7 API 34", "platform": "android", "identity": {"stableId": "Pixel_7_API_34"}, "runtime": {"lifecycle": {"state": "configured", "known": true}}},
+              {"name": "iPhone 15 Pro",  "platform": "ios",     "identity": {"stableId": "iphone-15-pro"}, "runtime": {"lifecycle": {"state": "configured", "known": true}}}
           ]
       }
       """
@@ -199,10 +210,13 @@ class DeviceResourceParserTest {
               {
                   "name": "Pixel 8 API 35",
                   "platform": "android",
-                  "deviceId": "Pixel_8_API_35",
-                  "path": "/home/user/.android/avd/Pixel_8_API_35.avd",
-                  "target": "android-35",
-                  "basedOn": "Google APIs"
+                  "identity": { "stableId": "Pixel_8_API_35" },
+                  "runtime": { "lifecycle": { "state": "configured", "known": true } },
+                  "image": {
+                    "path": "/home/user/.android/avd/Pixel_8_API_35.avd",
+                    "target": "android-35",
+                    "basedOn": "Google APIs"
+                  }
               }
           ]
       }
@@ -212,9 +226,9 @@ class DeviceResourceParserTest {
     val result = DeviceResourceParser.parseDeviceImages(json)
     assertNotNull(result)
     with(result.images[0]) {
-      assertEquals("/home/user/.android/avd/Pixel_8_API_35.avd", path)
-      assertEquals("android-35", target)
-      assertEquals("Google APIs", basedOn)
+      assertEquals("/home/user/.android/avd/Pixel_8_API_35.avd", image.path)
+      assertEquals("android-35", image.target)
+      assertEquals("Google APIs", image.basedOn)
     }
   }
 

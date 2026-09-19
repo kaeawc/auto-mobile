@@ -1,10 +1,9 @@
 # Device resources
 
-Device records use the shared `DeviceDescription` projection. In canonical shape phase 1,
+Device records use the shared `DeviceDescription` projection. In the canonical shape,
 static facts such as `osVersion`, `runtimeId`, and `formFactor` are top-level, while live state
 such as lifecycle, readiness, session, lock, and orientation is grouped under `runtime`.
-Every projection temporarily remains a superset containing the former nested aliases, and
-unknown facts are explicit `null` values. See
+Legacy aliases were removed in phase 3, and unknown facts are explicit `null` values. See
 [the device-description audit](device-description-audit.md).
 
 Configured-image enrichment is shared by tools and resources. A booted virtual device retains
@@ -18,10 +17,9 @@ virtual devices started outside AutoMobile keep unavailable image-only facts as 
 `runtime.serviceStatus`, when observed, carries the complete service diagnostic: installation,
 enablement, running and compatibility flags; nullable installed and expected checksums; structured
 runner `version`; and nullable `supportedCommandsComplete` / `supportedFeaturesComplete` flags.
-The deprecated top-level `serviceStatus` sibling remains during phase 1 and contains the same
-values. The deprecated flat `listDevices.formFactor` alias is nullable when discovery has no
-metadata, while canonical top-level `formFactor` always uses `phone`, `tablet`, `foldable`, or
-`unknown`.
+The booted resource's top-level `serviceStatus` is a resource-specific diagnostic sibling, not a
+`DeviceDescription` alias. Canonical top-level `formFactor` always uses `phone`, `tablet`,
+`foldable`, or `unknown`.
 
 `DeviceResource` describes observed resource state for one device. Its `resources`
 property is a JSON object keyed by logical resource name. `AndroidDeviceResource`

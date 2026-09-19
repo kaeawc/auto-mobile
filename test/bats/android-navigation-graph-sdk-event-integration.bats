@@ -148,7 +148,7 @@ if [ "$1" = "--debug" ] && [ "$2" = "--embedded-sdk" ] && [ "$3" = "--cli" ] && 
     echo "getAndroid acquired without automation-ready timeout" >&2
     exit 1
   }
-  printf "{\"sessionUuid\":\"%s\"}\n" "$ACQUIRED_SESSION_UUID"
+  printf "{\"runtime\":{\"session\":{\"sessionUuid\":\"%s\"}}}\n" "$ACQUIRED_SESSION_UUID"
   exit 0
 fi
 if [ "$1" = "--debug" ] && [ "$2" = "--embedded-sdk" ] && [ "$3" = "--cli" ] && [ "$4" = "--session-uuid" ]; then
@@ -219,6 +219,45 @@ exit 1
   session_uuid_calls="$(grep -c -- "--session-uuid ${ACQUIRED_SESSION_UUID}" "$AUTO_MOBILE_LOG")"
   [ "$session_uuid_calls" -ge 3 ]
   ! grep -q -- '--session-uuid 52150000-0000-4000-8000-000000000000' "$AUTO_MOBILE_LOG"
+}
+
+@test "forwards a legacy Android graph session UUID" {
+  make_mock adb '
+if [ "$1" = "devices" ]; then
+  printf "List of devices attached\nemulator-5554\tdevice\n"
+  exit 0
+fi
+if [[ "$*" == *"TEST_EMIT_SDK_NAVIGATION"* ]]; then
+  touch "$EVENT_TRIGGERED_FILE"
+fi
+'
+  make_mock sleep 'exit 0'
+  make_mock jq '
+if [ "$1" = "-er" ]; then
+  exec "$REAL_JQ" "$@"
+fi
+exit 0
+'
+  make_mock auto-mobile '
+printf "%s\n" "$*" >> "$AUTO_MOBILE_LOG"
+if [ "$4" = "getAndroid" ]; then
+  printf "{\"sessionUuid\":\"legacy-android-session\"}\n"
+  exit 0
+fi
+if [ "$4" = "--session-uuid" ]; then
+  [ "$5" = "legacy-android-session" ] || exit 1
+  if [ "$6" = "getNavigationGraph" ]; then
+    printf "{\"screens\":[]}\n"
+  fi
+  exit 0
+fi
+exit 1
+'
+
+  run env PATH="${MOCK_BIN}:${PATH}" bash "$SCRIPT" "emulator-5554"
+
+  [ "$status" -eq 0 ]
+  grep -q -- "--session-uuid legacy-android-session" "$AUTO_MOBILE_LOG"
 }
 
 @test "uses the workspace CLI entrypoint when the global auto-mobile install is unavailable" {

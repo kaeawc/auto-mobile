@@ -4775,7 +4775,12 @@ describe("DaemonMcpProxy", () => {
               : name === "getAndroid"
                 ? {
                     content: [
-                      { type: "text", text: JSON.stringify({ sessionUuid: "released-session" }) },
+                      {
+                        type: "text",
+                        text: JSON.stringify({
+                          runtime: { session: { sessionUuid: "released-session" } },
+                        }),
+                      },
                     ],
                   }
                 : undefined,

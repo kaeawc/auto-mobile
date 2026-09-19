@@ -130,6 +130,65 @@ function ownerDiagnostic(deviceId: string): string {
   );
 }
 
+function deviceDescriptionFixture({
+  name,
+  platform,
+  stableId,
+  deviceId = null,
+  sessionUuid,
+  lifecycleState = deviceId === null ? "configured" : "booted",
+  apiLevel = platform === "android" ? 35 : null,
+  osVersion = platform === "ios" ? "17.2" : "15",
+  architecture = platform === "ios" ? "arm64" : null,
+  isVirtual = true,
+}: {
+  name: string;
+  platform: "android" | "ios";
+  stableId: string;
+  deviceId?: string | null;
+  sessionUuid?: string;
+  lifecycleState?: "configured" | "booting" | "booted";
+  apiLevel?: number | null;
+  osVersion?: string | null;
+  architecture?: string | null;
+  isVirtual?: boolean;
+}): Record<string, unknown> {
+  return {
+    name,
+    platform,
+    isVirtual,
+    source: "local",
+    identity: { stableId },
+    formFactor: "phone",
+    deviceType: null,
+    model: null,
+    architecture,
+    osVersion,
+    apiLevel,
+    runtimeId: null,
+    display: { width: null, height: null, density: null },
+    capabilityInventory: null,
+    image: {
+      path: null,
+      target: platform === "android" ? `android-${apiLevel ?? 35}` : null,
+      basedOn: null,
+    },
+    availabilityError: null,
+    runtime: {
+      deviceId,
+      connectionId: deviceId,
+      deviceSessionUuid: null,
+      lifecycle: { state: lifecycleState, known: true },
+      readiness: { state: "ready" },
+      poolStatus: deviceId === null ? null : "assigned",
+      session: sessionUuid ? { sessionUuid, ownership: "owned" } : null,
+      serviceStatus: null,
+      locked: null,
+      orientation: null,
+    },
+  };
+}
+
 function createHarness(
   options: {
     failObserveFor?: string;
@@ -250,43 +309,54 @@ function createHarness(
           ? [
               ...(iosTargetPresent
                 ? [
-                    {
-                      platform: "ios",
+                    deviceDescriptionFixture({
                       name: "iPhone 16 Pro",
+                      platform: "ios",
+                      stableId: IOS_UDID,
                       deviceId: IOS_UDID,
-                    },
+                    }),
                   ]
                 : []),
               ...(iosSiblingPresent
                 ? [
-                    {
-                      platform: "ios",
+                    deviceDescriptionFixture({
                       name: "iPhone 16 Pro",
+                      platform: "ios",
+                      stableId: "00000000-0000-0000-0000-000000000002",
                       deviceId: "00000000-0000-0000-0000-000000000002",
-                    },
+                    }),
                   ]
                 : []),
             ]
           : [
               ...(androidSiblingPresent
-                ? [{ platform: "android", name: "Pixel_8_Sibling", deviceId: "emulator-5558" }]
+                ? [
+                    deviceDescriptionFixture({
+                      platform: "android",
+                      name: "Pixel_8_Sibling",
+                      stableId: "Pixel_8_Sibling",
+                      deviceId: "emulator-5558",
+                    }),
+                  ]
                 : []),
               ...(androidDuplicatePresent
                 ? [
-                    {
+                    deviceDescriptionFixture({
                       platform: "android",
                       name: "Pixel_8_API_35",
+                      stableId: "Pixel_8_API_35",
                       deviceId: "emulator-5554",
-                    },
+                    }),
                   ]
                 : []),
               ...(androidTargetPresent
                 ? [
-                    {
+                    deviceDescriptionFixture({
                       platform: "android",
                       name: "Pixel_8_API_35",
+                      stableId: "Pixel_8_API_35",
                       deviceId: androidTargetSerial,
-                    },
+                    }),
                   ]
                 : []),
             ];
@@ -308,33 +378,33 @@ function createHarness(
                   ...(targetDeleted
                     ? []
                     : [
-                        {
+                        deviceDescriptionFixture({
                           platform: "ios",
                           name: "iPhone 16 Pro",
-                          deviceId: IOS_UDID,
-                        },
+                          stableId: IOS_UDID,
+                        }),
                       ]),
-                  {
+                  deviceDescriptionFixture({
                     platform: "ios",
                     name: "iPhone 16 Pro",
-                    deviceId: "00000000-0000-0000-0000-000000000002",
-                  },
+                    stableId: "00000000-0000-0000-0000-000000000002",
+                  }),
                 ]
               : [
                   ...(targetDeleted
                     ? []
                     : [
-                        {
+                        deviceDescriptionFixture({
                           platform: "android",
                           name: "Pixel_8_API_35",
-                          deviceId: androidTargetSerial,
-                        },
+                          stableId: "Pixel_8_API_35",
+                        }),
                       ]),
-                  {
+                  deviceDescriptionFixture({
                     platform: "android",
                     name: "Pixel_8_Sibling",
-                    deviceId: "emulator-5558",
-                  },
+                    stableId: "Pixel_8_Sibling",
+                  }),
                 ],
           },
         };
@@ -350,11 +420,14 @@ function createHarness(
         }
         return {
           structuredContent: {
-            sessionUuid: "provision-1",
-            device: {
-              name: device.name,
+            sessionId: "provision-1",
+            device: deviceDescriptionFixture({
+              name: String(device.name),
+              platform: isIos ? "ios" : "android",
+              stableId: isIos ? IOS_UDID : String(device.name),
               deviceId: isIos ? IOS_UDID : androidTargetSerial,
-            },
+              sessionUuid: "provision-1",
+            }),
             resolvedSpec: {
               runtime: spec.runtime,
               deviceType: spec.deviceType,
@@ -420,7 +493,13 @@ function createHarness(
           mintedSessionByOwner.set(owner, sessionUuid);
           return {
             structuredContent: {
-              sessionUuid,
+              ...deviceDescriptionFixture({
+                name: isIos ? "iPhone 16 Pro" : "Pixel_8_Sibling",
+                platform: isIos ? "ios" : "android",
+                stableId: isIos ? "00000000-0000-0000-0000-000000000002" : "Pixel_8_Sibling",
+                deviceId: isIos ? "00000000-0000-0000-0000-000000000002" : "emulator-5558",
+                sessionUuid,
+              }),
               deviceIdentity: isIos
                 ? {
                     simulatorUdid: "00000000-0000-0000-0000-000000000002",
@@ -457,7 +536,13 @@ function createHarness(
         if (isIos) {
           return {
             structuredContent: {
-              sessionUuid,
+              ...deviceDescriptionFixture({
+                name: options.iosSimulatorName ?? "iPhone 16 Pro",
+                platform: "ios",
+                stableId: IOS_UDID,
+                deviceId: IOS_UDID,
+                sessionUuid,
+              }),
               deviceIdentity: {
                 simulatorUdid: IOS_UDID,
                 simulatorName: options.iosSimulatorName ?? "iPhone 16 Pro",
@@ -484,7 +569,13 @@ function createHarness(
         const port = Number(androidTargetSerial.slice("emulator-".length));
         return {
           structuredContent: {
-            sessionUuid,
+            ...deviceDescriptionFixture({
+              name: "Pixel_8_API_35",
+              platform: "android",
+              stableId: "Pixel_8_API_35",
+              deviceId: `emulator-${port}`,
+              sessionUuid,
+            }),
             deviceIdentity: {
               avdName: "Pixel_8_API_35",
               adbSerial: `emulator-${port}`,
@@ -664,7 +755,13 @@ function createHarness(
         const isIos = command.includes("getApple");
         cliAcquisitionCount += 1;
         const acquisition = {
-          sessionUuid: `cli-acquired-${cliAcquisitionCount}`,
+          ...deviceDescriptionFixture({
+            name: isIos ? (options.iosSimulatorName ?? "iPhone 16 Pro") : "Pixel_8_API_35",
+            platform: isIos ? "ios" : "android",
+            stableId: isIos ? IOS_UDID : "Pixel_8_API_35",
+            deviceId: isIos ? IOS_UDID : androidTargetSerial,
+            sessionUuid: `cli-acquired-${cliAcquisitionCount}`,
+          }),
           deviceIdentity: isIos
             ? {
                 simulatorUdid: IOS_UDID,
@@ -1647,7 +1744,7 @@ describe("live device acceptance harness", () => {
       harness.calls.find((call) => call.owner === "provision" && call.name === "killDevice")
         ?.arguments,
     ).toEqual({
-      device: { name: "Pixel_8_API_35", deviceId: "emulator-5556" },
+      device: { name: "Pixel_8_API_35", deviceId: "emulator-5556", platform: "android" },
     });
   });
 

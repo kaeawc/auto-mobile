@@ -94,13 +94,14 @@ session_result="$(auto-mobile --debug --embedded-sdk --cli getApple --deviceId "
 if ! session_uuid="$(
   jq -er '
     (
-      if .sessionUuid? then .sessionUuid
+      if (.runtime?.session?.sessionUuid // .sessionUuid) then
+        (.runtime.session.sessionUuid // .sessionUuid)
       elif .content? then
         .content[]
         | select(.type == "text")
         | .text
         | fromjson
-        | .sessionUuid
+        | (.runtime.session.sessionUuid // .sessionUuid)
       else empty
       end
     )

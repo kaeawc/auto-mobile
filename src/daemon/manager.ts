@@ -4463,11 +4463,11 @@ export async function runDaemonCommand(
                   data?.poolStatus?.recoveryPolicy,
                   data?.devices?.map(
                     (device: {
-                      deviceId: string;
                       platform: string;
+                      runtime?: { deviceId?: string | null };
                       recoveryEligibility?: unknown;
                     }) => ({
-                      deviceId: device.deviceId,
+                      deviceId: device.runtime?.deviceId ?? "unknown",
                       platform: device.platform,
                       recoveryEligibility: device.recoveryEligibility,
                     }),

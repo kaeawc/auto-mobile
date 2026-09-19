@@ -2,7 +2,7 @@ import { logger } from "../utils/logger";
 
 /**
  * The tools that acquire a device and mint a device session, returning its
- * `sessionUuid` in the tool RESULT (not the request args). Both the direct MCP
+ * session UUID in the tool RESULT (not the request args). Both the direct MCP
  * server (`src/server/index.ts`) and the daemon proxy (`DaemonMcpProxy`) must
  * bind the session these tools mint — the proxy additionally heartbeats it so
  * the daemon does not reap a result-minted session (issue #5689).
@@ -44,10 +44,9 @@ export function isDeviceSessionAcquisitionTool(name: string): boolean {
 
 /**
  * Extract the session id a device-start tool minted, from its MCP tool result.
- * The canonical device description carries it in `session.sessionUuid`.
- * Legacy top-level `sessionUuid` and `sessionId` keys remain accepted for
- * provisionDevice and older envelopes. Returns undefined when the result is
- * not a device-start envelope.
+ * The canonical device description carries it in `runtime.session.sessionUuid`.
+ * The provisionDevice envelope's distinct top-level `sessionId` remains
+ * accepted. Returns undefined when the result is not a device-start envelope.
  */
 export function getDeviceSessionIdFromResult(result: unknown): string | undefined {
   if (!result || typeof result !== "object" || !("content" in result)) {
@@ -71,11 +70,10 @@ export function getDeviceSessionIdFromResult(result: unknown): string | undefine
   }
   try {
     const payload = JSON.parse(text.text) as {
-      session?: { sessionUuid?: unknown };
-      sessionUuid?: unknown;
+      runtime?: { session?: { sessionUuid?: unknown } };
       sessionId?: unknown;
     };
-    const minted = payload.session?.sessionUuid ?? payload.sessionUuid ?? payload.sessionId;
+    const minted = payload.runtime?.session?.sessionUuid ?? payload.sessionId;
     return typeof minted === "string" && minted.trim().length > 0 ? minted : undefined;
   } catch (error) {
     logger.debug("[MCP] Device-start response did not contain JSON", { error });

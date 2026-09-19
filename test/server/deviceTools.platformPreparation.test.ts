@@ -224,17 +224,14 @@ describe("platform device preparation tools", () => {
 
     const result = await callTool("getAndroid", { avdName: "Pixel_9_API_36" });
 
-    expect(result.session.sessionUuid).toBeDefined();
+    expect(result.runtime.session.sessionUuid).toBeDefined();
     expect(result).not.toHaveProperty("sessionId");
-    expect(result.identity).toEqual({
-      stableId: "Pixel_9_API_36",
-      deviceId: "emulator-5562",
-      connectionId: "emulator-5562",
-      deviceSessionUuid: null,
-    });
+    expect(result.identity).toEqual({ stableId: "Pixel_9_API_36" });
     expect(result).toMatchObject({
-      deviceId: "emulator-5562",
-      sessionUuid: result.session.sessionUuid,
+      runtime: {
+        deviceId: "emulator-5562",
+        session: { sessionUuid: result.runtime.session.sessionUuid },
+      },
       deviceIdentity: {
         platform: "android",
         avdName: "Pixel_9_API_36",
@@ -280,7 +277,7 @@ describe("platform device preparation tools", () => {
       display: { width: 1080, height: 2400, density: 420 },
       capabilityInventory: expect.any(Object),
     });
-    expect(result.runtime).toMatchObject({ apiLevel: 36, osVersion: "16" });
+    expect(result).toMatchObject({ apiLevel: 36, osVersion: "16" });
     expect(result.display).toEqual(listed.devices[0].display);
     expect(result.capabilityInventory).toEqual(listed.devices[0].capabilityInventory);
   });
@@ -316,7 +313,8 @@ describe("platform device preparation tools", () => {
     expect(result).toMatchObject({
       platform: "ios",
       name: simulator.name,
-      identity: { stableId: simulator.deviceId, deviceId: simulator.deviceId },
+      identity: { stableId: simulator.deviceId },
+      runtime: { deviceId: simulator.deviceId },
       runtimeId: simulator.runtimeId,
       deviceType: simulator.deviceType,
       display: { width: 1206, height: 2622, density: 460 },
@@ -348,7 +346,10 @@ describe("platform device preparation tools", () => {
 
     const result = await callTool("getApple", { udid: simulator.deviceId });
 
-    expect(result.identity).toMatchObject({ stableId: "UDID-A", deviceId: "UDID-A" });
+    expect(result).toMatchObject({
+      identity: { stableId: "UDID-A" },
+      runtime: { deviceId: "UDID-A" },
+    });
     expect(deviceUtils.getExecutedOperations()).toContain(
       `startDevice:${simulator.name}:${DEFAULT_DEVICE_READY_TIMEOUT_MS}`,
     );
@@ -403,8 +404,8 @@ describe("platform device preparation tools", () => {
 
     const result = await callTool("getAndroid", { deviceId: "emulator-5554" });
 
-    expect(result.session.sessionUuid).toBeDefined();
-    expect(result.identity).toMatchObject({ deviceId: "emulator-5554" });
+    expect(result.runtime.session.sessionUuid).toBeDefined();
+    expect(result.runtime.deviceId).toBe("emulator-5554");
   });
 
   test("getAndroid reuses an already-running AVD named through deviceId (#5870)", async () => {
@@ -436,7 +437,7 @@ describe("platform device preparation tools", () => {
 
     const result = await callTool("getAndroid", { deviceId: running.name });
 
-    expect(result.identity).toMatchObject({ deviceId: running.deviceId });
+    expect(result.runtime.deviceId).toBe(running.deviceId);
     expect(guarded.getExecutedOperations().join("|")).not.toContain("startDevice:");
   });
 
@@ -451,9 +452,9 @@ describe("platform device preparation tools", () => {
 
     const result = await callTool("getApple", { deviceId: simulator.deviceId });
 
-    expect(result.identity).toMatchObject({
-      stableId: simulator.deviceId,
-      deviceId: simulator.deviceId,
+    expect(result).toMatchObject({
+      identity: { stableId: simulator.deviceId },
+      runtime: { deviceId: simulator.deviceId },
     });
   });
 
@@ -499,16 +500,16 @@ describe("platform device preparation tools", () => {
         __mcpSessionId: "owner-connection",
       });
 
-      expect(sameOwner.session.sessionUuid).toBe(owner.session.sessionUuid);
+      expect(sameOwner.runtime.session.sessionUuid).toBe(owner.runtime.session.sessionUuid);
       await pool.restoreOwnedDeviceSessionsForMcpSession(
-        [owner.session.sessionUuid as string],
+        [owner.runtime.session.sessionUuid as string],
         "reconnected-owner-connection",
       );
       const reconnectedOwner = await callTool(toolName, {
         ...request,
         __mcpSessionId: "reconnected-owner-connection",
       });
-      expect(reconnectedOwner.session.sessionUuid).toBe(owner.session.sessionUuid);
+      expect(reconnectedOwner.runtime.session.sessionUuid).toBe(owner.runtime.session.sessionUuid);
       await expect(
         callTool(toolName, {
           ...request,
@@ -519,14 +520,17 @@ describe("platform device preparation tools", () => {
           "Acquire a different device or wait for its owner to release it.",
       );
 
-      await sessionManager.releaseSession(owner.session.sessionUuid as string, "explicit-release");
-      await pool.releaseDevice(device.deviceId, owner.session.sessionUuid as string);
+      await sessionManager.releaseSession(
+        owner.runtime.session.sessionUuid as string,
+        "explicit-release",
+      );
+      await pool.releaseDevice(device.deviceId, owner.runtime.session.sessionUuid as string);
 
       const successor = await callTool(toolName, {
         ...request,
         __mcpSessionId: "unrelated-connection",
       });
-      expect(successor.session.sessionUuid).not.toBe(owner.session.sessionUuid);
+      expect(successor.runtime.session.sessionUuid).not.toBe(owner.runtime.session.sessionUuid);
     },
   );
 
@@ -546,9 +550,9 @@ describe("platform device preparation tools", () => {
       __mcpLiveDeadlineKey: "daemon-deadline-key",
     });
 
-    expect(result.identity).toMatchObject({
-      stableId: simulator.deviceId,
-      deviceId: simulator.deviceId,
+    expect(result).toMatchObject({
+      identity: { stableId: simulator.deviceId },
+      runtime: { deviceId: simulator.deviceId },
     });
   });
 
@@ -567,7 +571,10 @@ describe("platform device preparation tools", () => {
       deviceId: emulator.deviceId,
     });
 
-    expect(result.identity).toMatchObject({ stableId: emulator.name, deviceId: emulator.deviceId });
+    expect(result).toMatchObject({
+      identity: { stableId: emulator.name },
+      runtime: { deviceId: emulator.deviceId },
+    });
   });
 
   test("getAndroid validates an avdName and serial pair after its startup lease", async () => {
@@ -610,7 +617,8 @@ describe("platform device preparation tools", () => {
       await pool.releaseAdbServerResetCohortReservations(detached.devices);
 
       await expect(preparation).resolves.toMatchObject({
-        identity: { stableId: emulator.name, deviceId: emulator.deviceId },
+        identity: { stableId: emulator.name },
+        runtime: { deviceId: emulator.deviceId },
       });
     } finally {
       await pool.releaseAdbServerResetCohortReservations(detached.devices);
@@ -708,7 +716,10 @@ describe("platform device preparation tools", () => {
       deviceId: "emulator-5554",
     });
 
-    expect(result.identity).toMatchObject({ stableId: "Duplicate_AVD", deviceId: "emulator-5554" });
+    expect(result).toMatchObject({
+      identity: { stableId: "Duplicate_AVD" },
+      runtime: { deviceId: "emulator-5554" },
+    });
   });
 
   test("getAndroid rejects an avdName paired with a serial that is not running before booting", async () => {
@@ -761,7 +772,10 @@ describe("platform device preparation tools", () => {
     const result = await callTool("getAndroid", { avdName: exact.name });
 
     expect(result.name).toBe(exact.name);
-    expect(result.identity).toMatchObject({ stableId: exact.name, deviceId: exact.deviceId });
+    expect(result).toMatchObject({
+      identity: { stableId: exact.name },
+      runtime: { deviceId: exact.deviceId },
+    });
   });
 
   test.each([false, true])(
@@ -800,7 +814,10 @@ describe("platform device preparation tools", () => {
       deviceId: "emulator-5554",
     });
 
-    expect(result.identity).toMatchObject({ stableId: "Duplicate_AVD", deviceId: "emulator-5554" });
+    expect(result).toMatchObject({
+      identity: { stableId: "Duplicate_AVD" },
+      runtime: { deviceId: "emulator-5554" },
+    });
   });
 
   test("getAndroid rejects an explicit serial that resolves to a different AVD after discovery", async () => {
@@ -1207,7 +1224,7 @@ describe("platform device preparation tools", () => {
       apiLevel: 36,
       osVersion: "16",
     });
-    expect(result.runtime).toMatchObject({ apiLevel: 36, osVersion: "16" });
+    expect(result).toMatchObject({ apiLevel: 36, osVersion: "16" });
   });
 
   test("preserves all admitted Android metadata for a serial-targeted warm acquisition", async () => {
@@ -1304,9 +1321,9 @@ describe("platform device preparation tools", () => {
     // The acquisition is already committed by the time the notification runs;
     // failing it would strand a busy device under a session UUID the caller
     // never receives.
-    expect(result.session.sessionUuid).toBeDefined();
+    expect(result.runtime.session.sessionUuid).toBeDefined();
     expect(pool.getDevice(`mock-${image.name}`)).toMatchObject({
-      sessionId: result.session.sessionUuid,
+      sessionId: result.runtime.session.sessionUuid,
     });
   });
 
@@ -1421,7 +1438,7 @@ describe("platform device preparation tools", () => {
         const [sessionId] = sessionManager.getAllSessionIds();
         expect(sessionId).toBeDefined();
         const result = await request;
-        expect(result.session.sessionUuid).toBe(sessionId);
+        expect(result.runtime.session.sessionUuid).toBe(sessionId);
         expect(sessionManager.getSession(sessionId!)?.assignedDevice).toBe(expectedDeviceId);
       } finally {
         releaseSync.resolve();

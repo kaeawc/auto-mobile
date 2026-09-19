@@ -44,7 +44,14 @@ beforeEach(async () => {
   ] as const) {
     ToolRegistry.register(name, name, z.object({}), async () => {
       registerDirectSessionDevice(sessionUuid, device);
-      return { content: [{ type: "text" as const, text: JSON.stringify({ sessionUuid }) }] };
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify({ runtime: { session: { sessionUuid } } }),
+          },
+        ],
+      };
     });
   }
   const schema = z.object({

@@ -103,11 +103,12 @@ internal fun DevicesSection(
             color = colors.text.normal.copy(alpha = 0.6f),
           )
           bootedDevices.forEach { device ->
+            val deviceId = device.runtime.deviceId ?: device.identity.stableId
             BootedDeviceRow(
               device = device,
-              isKilling = device.deviceId in killingDeviceIds,
-              killError = killErrors[device.deviceId],
-              isUpdatingService = device.deviceId in updatingServiceDeviceIds,
+              isKilling = deviceId in killingDeviceIds,
+              killError = killErrors[deviceId],
+              isUpdatingService = deviceId in updatingServiceDeviceIds,
               onSelect = { onSelectDevice(device) },
               onKill = { onKillDevice(device) },
               onUpdateService = { onUpdateService(device) },
@@ -192,12 +193,6 @@ private fun DaemonStatusInfo(
   }
 }
 
-internal fun extractApiLevel(target: String?): Int? {
-  if (target == null) return null
-  val match = Regex("""android-(\d+)""").find(target)
-  return match?.groupValues?.get(1)?.toIntOrNull()
-}
-
 private fun extractIosVersion(iosVersion: String?): String? {
   if (iosVersion == null) return null
   val major = iosVersion.split(".").firstOrNull() ?: return null
@@ -224,10 +219,10 @@ private fun DeviceImagesGrouped(
     deviceImages
       .groupBy { image ->
         if (image.platform == "android") {
-          val api = extractApiLevel(image.target)
+          val api = image.apiLevel
           if (api != null) "API $api" else "Android (Unknown)"
         } else {
-          extractIosVersion(image.iosVersion) ?: "iOS (Unknown)"
+          extractIosVersion(image.osVersion) ?: "iOS (Unknown)"
         }
       }
       .map { (label, images) ->
@@ -304,7 +299,7 @@ private fun CollapsibleDeviceGroup(
         verticalArrangement = Arrangement.spacedBy(4.dp),
       ) {
         group.images.forEach { image ->
-          val deviceKey = image.deviceId ?: image.name
+          val deviceKey = image.identity.stableId
           DeviceImageRow(
             image = image,
             isBooting = deviceKey in bootingDeviceIds,
@@ -389,7 +384,7 @@ private fun BootedDeviceRow(
           }
         }
         Text(
-          device.deviceId,
+          device.runtime.deviceId ?: device.identity.stableId,
           fontSize = 9.sp,
           color = colors.text.normal.copy(alpha = 0.5f),
           maxLines = 1,
@@ -550,7 +545,7 @@ private fun DeviceImageRow(
           overflow = TextOverflow.Ellipsis,
         )
       } else {
-        image.target?.let { target ->
+        image.image.target?.let { target ->
           Text(
             target,
             fontSize = 9.sp,

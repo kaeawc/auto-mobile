@@ -6684,6 +6684,11 @@ export function registerDeviceTools() {
     }
   }
 
+  const asRecord = (value: unknown): Record<string, unknown> | undefined =>
+    typeof value === "object" && value !== null && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : undefined;
+
   interface PersistedProvisionDevice {
     name: string;
     platform: "android" | "ios";
@@ -6693,26 +6698,26 @@ export function registerDeviceTools() {
   function getPersistedProvisionDevice(
     result: Record<string, unknown>,
   ): PersistedProvisionDevice | undefined {
-    const device = result.device;
-    if (typeof device !== "object" || device === null || Array.isArray(device)) {
+    const deviceRecord = asRecord(result.device);
+    if (!deviceRecord) {
       return undefined;
     }
-    const deviceRecord = device as Record<string, unknown>;
     if (typeof deviceRecord.name !== "string") {
       return undefined;
     }
     if (deviceRecord.platform !== "android" && deviceRecord.platform !== "ios") {
       return undefined;
     }
-    const runtime = deviceRecord.runtime;
-    const runtimeRecord =
-      typeof runtime === "object" && runtime !== null && !Array.isArray(runtime)
-        ? (runtime as Record<string, unknown>)
-        : undefined;
+    const runtimeRecord = asRecord(deviceRecord.runtime);
+    const identityRecord = asRecord(deviceRecord.identity);
+    const runtimeDeviceId =
+      typeof runtimeRecord?.deviceId === "string" ? runtimeRecord.deviceId : undefined;
+    const stableId =
+      typeof identityRecord?.stableId === "string" ? identityRecord.stableId : undefined;
     return {
       name: deviceRecord.name,
       platform: deviceRecord.platform,
-      deviceId: typeof runtimeRecord?.deviceId === "string" ? runtimeRecord.deviceId : undefined,
+      deviceId: runtimeDeviceId ?? stableId,
     };
   }
 

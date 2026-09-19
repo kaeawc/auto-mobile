@@ -1,7 +1,7 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { PID_FILE_PATH } from "./constants";
-import { isProcessRunning, readPidFileDataSync } from "./daemonFiles";
+import { isProcessRunning, readPidFileDataSync, writePidFileDataAtomicSync } from "./daemonFiles";
 import type { SocketOwnerLiveness, SocketOwnerStatus } from "./socketServer";
 import type { PidFileData } from "./types";
 import { logger } from "../utils/logger";
@@ -231,8 +231,5 @@ function isCommittedOwnerRecord(record: PidFileData): boolean {
 
 function defaultPersistPidFile(data: PidFileData): void {
   mkdirSync(dirname(PID_FILE_PATH), { recursive: true });
-  writeFileSync(PID_FILE_PATH, JSON.stringify(data, null, 2), {
-    encoding: "utf-8",
-    mode: 0o600,
-  });
+  writePidFileDataAtomicSync(PID_FILE_PATH, data);
 }

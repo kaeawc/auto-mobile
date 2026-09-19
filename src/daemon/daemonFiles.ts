@@ -8,8 +8,8 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { unlink } from "node:fs/promises";
-import { PID_FILE_PATH, SOCKET_PATH } from "./constants";
+import { rename, unlink, writeFile } from "node:fs/promises";
+import { DEFAULT_PID_FILE_PATH, PID_FILE_PATH, SOCKET_PATH } from "./constants";
 import { getSocketPath, type SocketServerConfig } from "./socketServer/index";
 import type { AuxiliaryDaemonSocketName, PidFileData } from "./types";
 import { compareStrictNumericVersions } from "../utils/deviceMatcher";
@@ -114,6 +114,108 @@ export interface DaemonFileCleanupOptions {
    * for callers that do not track socket ownership.
    */
   socketBindCommitted?: boolean;
+}
+
+export interface AtomicPidFileWriteDependencies {
+  createTemporaryPath: (pidFilePath: string) => string;
+  writeTemporaryFile: (
+    temporaryPath: string,
+    contents: string,
+    signal?: AbortSignal,
+  ) => Promise<void>;
+  replaceFile: (temporaryPath: string, pidFilePath: string) => Promise<void>;
+  removeTemporaryFile: (temporaryPath: string) => Promise<void>;
+}
+
+export interface AtomicPidFileWriteSyncDependencies {
+  createTemporaryPath: (pidFilePath: string) => string;
+  writeTemporaryFile: (temporaryPath: string, contents: string) => void;
+  replaceFile: (temporaryPath: string, pidFilePath: string) => void;
+  removeTemporaryFile: (temporaryPath: string) => void;
+}
+
+let pidFileTemporaryPathSequence = 0;
+
+function createPidFileTemporaryPath(pidFilePath: string): string {
+  pidFileTemporaryPathSequence += 1;
+  return `${pidFilePath}.${process.pid}.${pidFileTemporaryPathSequence}.tmp`;
+}
+
+const defaultAtomicPidFileWriteDependencies: AtomicPidFileWriteDependencies = {
+  createTemporaryPath: createPidFileTemporaryPath,
+  writeTemporaryFile: async (temporaryPath, contents, signal) => {
+    await writeFile(temporaryPath, contents, {
+      encoding: "utf-8",
+      mode: 0o600,
+      signal,
+    });
+  },
+  replaceFile: rename,
+  removeTemporaryFile: unlink,
+};
+
+const defaultAtomicPidFileWriteSyncDependencies: AtomicPidFileWriteSyncDependencies = {
+  createTemporaryPath: createPidFileTemporaryPath,
+  writeTemporaryFile: (temporaryPath, contents) => {
+    writeFileSync(temporaryPath, contents, { encoding: "utf-8", mode: 0o600 });
+  },
+  replaceFile: renameSync,
+  removeTemporaryFile: unlinkSync,
+};
+
+/**
+ * Publish a complete PID record with a same-directory atomic replacement.
+ * A per-process sequence prevents concurrent writes in this process from
+ * sharing a temporary path; the PID prevents collisions with other processes.
+ */
+export async function writePidFileDataAtomic(
+  pidFilePath: string,
+  data: PidFileData,
+  signal?: AbortSignal,
+  dependencies: AtomicPidFileWriteDependencies = defaultAtomicPidFileWriteDependencies,
+): Promise<void> {
+  const temporaryPath = dependencies.createTemporaryPath(pidFilePath);
+  try {
+    await dependencies.writeTemporaryFile(temporaryPath, JSON.stringify(data, null, 2), signal);
+    await dependencies.replaceFile(temporaryPath, pidFilePath);
+  } catch (writeError) {
+    try {
+      await dependencies.removeTemporaryFile(temporaryPath);
+    } catch (cleanupError) {
+      if ((cleanupError as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw new AggregateError(
+          [writeError, cleanupError],
+          `Failed to publish PID file ${pidFilePath} and remove its temporary file`,
+        );
+      }
+    }
+    throw writeError;
+  }
+}
+
+/** Synchronous counterpart used by the lock-less incumbent restore path. */
+export function writePidFileDataAtomicSync(
+  pidFilePath: string,
+  data: PidFileData,
+  dependencies: AtomicPidFileWriteSyncDependencies = defaultAtomicPidFileWriteSyncDependencies,
+): void {
+  const temporaryPath = dependencies.createTemporaryPath(pidFilePath);
+  try {
+    dependencies.writeTemporaryFile(temporaryPath, JSON.stringify(data, null, 2));
+    dependencies.replaceFile(temporaryPath, pidFilePath);
+  } catch (writeError) {
+    try {
+      dependencies.removeTemporaryFile(temporaryPath);
+    } catch (cleanupError) {
+      if ((cleanupError as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw new AggregateError(
+          [writeError, cleanupError],
+          `Failed to publish PID file ${pidFilePath} and remove its temporary file`,
+        );
+      }
+    }
+    throw writeError;
+  }
 }
 
 /** Durable companion to a manager's launch-capture log. */
@@ -360,29 +462,72 @@ export function listDaemonPidFilesSync(
 }
 
 /**
- * Enumerate co-located daemon PID files for the startup peer-liveness gate.
- * Unlike log-retention discovery, an unreadable existing directory must not
- * degrade to "no live peers": only an absent directory proves there are no
- * sibling records to discover yet.
+ * Enumerate daemon PID files for the startup peer-liveness gate from both the
+ * current namespace's directory and the built-in/default namespace directory.
+ *
+ * PID-path isolation and DB-path isolation are independent: `constants.ts`
+ * resolves `AUTOMOBILE_DAEMON_PID_FILE_PATH`, while
+ * `database.ts#resolveDatabasePathFromEnvironment` separately resolves
+ * `AUTOMOBILE_DB_PATH`/`AUTOMOBILE_DB_DIR`. `scripts/benchmark-startup.sh` is a
+ * shipped example that changes the PID/socket paths without changing the DB.
+ * Including `defaultPidFilePath` therefore prevents a custom-location daemon
+ * from losing a default-location peer (and preserves the existing co-located
+ * scan of the caller's own directory).
+ *
+ * The default PID directory (`/tmp`) is world-shared on a multi-user host, so
+ * it is NEVER wildcard-scanned here: a prefix-only filename match there would
+ * enumerate (and then attempt to read) another uid's
+ * `auto-mobile-daemon-<otheruid>.pid` (mode 0o600). That file legitimately
+ * throws `EACCES` on read, and `collectLiveDaemonSessionIds` now (correctly)
+ * treats a non-ENOENT read failure on a discovered path as ambiguous-but-live
+ * and throws -- so a wildcard scan here would make every daemon startup on a
+ * shared host fatal because of a stale FOREIGN pid file it has no business
+ * reading. `defaultPidFilePath` is already computed as this uid's own exact
+ * filename (`DEFAULT_PID_FILE_PATH` in `constants.ts`), so simply including
+ * that literal path below is the entire extent of default-directory discovery:
+ * no directory listing of `/tmp` is ever performed.
+ *
+ * The caller's own explicitly-configured PID directory (`pidFilePath`'s
+ * directory) IS scanned in full by prefix, as before: it is a location this
+ * same principal chose, not a directory shared with other login users.
+ *
+ * This deliberately does not claim to enumerate arbitrary third directories:
+ * no process-local filesystem scan can discover an unconstrained custom path.
+ * Supporting that topology completely requires a central namespace registry or
+ * an explicit configured directory list; recursively scanning the filesystem is
+ * neither bounded nor reliable. Unlike log retention, startup cannot simply
+ * fail on that ever-present theoretical uncertainty without making every daemon
+ * startup fatal, so this is the bounded mitigation for known/default peers.
+ *
+ * An unreadable existing directory throws rather than degrading to "no live
+ * peers". An absent directory is confidently empty and is safe to skip.
  */
-export function listDaemonPidFilePathsOrThrow(pidFilePath: string = PID_FILE_PATH): string[] {
-  const dir = path.dirname(pidFilePath);
-  const found = new Set<string>([pidFilePath]);
-  try {
-    for (const entry of readdirSync(dir)) {
-      if (entry.startsWith(DAEMON_PID_FILE_BASENAME_PREFIX) && entry.endsWith(".pid")) {
-        found.add(path.join(dir, entry));
-      }
+export function listDaemonPidFilePathsOrThrow(
+  pidFilePath: string = PID_FILE_PATH,
+  defaultPidFilePath: string = DEFAULT_PID_FILE_PATH,
+): string[] {
+  const found = new Set<string>([pidFilePath, defaultPidFilePath]);
+  const customDir = path.dirname(pidFilePath);
+  for (const entry of readPidDirectoryEntriesOrThrow(customDir)) {
+    if (entry.startsWith(DAEMON_PID_FILE_BASENAME_PREFIX) && entry.endsWith(".pid")) {
+      found.add(path.join(customDir, entry));
     }
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") {
-      throw error;
-    }
-    // No PID directory has been created yet, so there cannot be a co-located
-    // peer record. Keep the caller's own path for consistent per-file handling.
-    logSafeDebug(`src/daemon/daemonFiles.ts pidfile dir does not exist: ${error}`, error);
   }
   return [...found];
+}
+
+function readPidDirectoryEntriesOrThrow(dir: string): string[] {
+  let entries: string[] = [];
+  try {
+    entries = readdirSync(dir);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
+    // An absent directory is expected before this namespace has ever started.
+    logSafeDebug(`src/daemon/daemonFiles.ts pidfile dir does not exist: ${error}`, error);
+  }
+  return entries;
 }
 
 export function readPidFileDataSync(pidFilePath: string = PID_FILE_PATH): PidFileData | null {
@@ -403,9 +548,35 @@ export interface LiveDaemonSessionIdProvider {
   collectLiveDaemonSessionIds(): ReadonlySet<string>;
 }
 
+export type LiveDaemonPidFileRead = { status: "absent" } | { status: "present"; data: unknown };
+
+/**
+ * Read a PID record for the startup liveness gate without collapsing a present
+ * but unreadable/malformed record into absence. Only ENOENT is a confident
+ * absence; every other read/parse failure propagates so startup fails closed.
+ */
+export function readLiveDaemonPidFileSync(
+  pidFilePath: string = PID_FILE_PATH,
+): LiveDaemonPidFileRead {
+  let contents: string | undefined;
+  try {
+    contents = readFileSync(pidFilePath, "utf-8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
+    // PID files legitimately disappear during peer shutdown; ENOENT proves
+    // there is no record at this path to protect.
+    logSafeDebug(`src/daemon/daemonFiles.ts live pidfile does not exist: ${error}`, error);
+  }
+  return contents === undefined
+    ? { status: "absent" }
+    : { status: "present", data: JSON.parse(contents) as unknown };
+}
+
 export interface PidFileLiveDaemonSessionIdProviderDependencies {
   listDaemonPidFiles?: (pidFilePath?: string) => string[];
-  readPidFileData?: (pidFilePath?: string) => PidFileData | null;
+  readPidFile?: (pidFilePath?: string) => LiveDaemonPidFileRead;
   isProcessRunning?: (pid: number) => boolean;
 }
 
@@ -432,18 +603,22 @@ export function shouldProtectLiveDaemonVersion(
  *
  * The current daemon is intentionally included when its record is discovered;
  * the repository independently excludes its session ID from stale-session
- * cleanup. Every live peer is protected unconditionally. Directory discovery
- * throws on ambiguity so startup cannot mistake an unreadable peer namespace
- * for an empty live set.
+ * cleanup. Every live peer WITH a `daemonSessionId` is protected
+ * unconditionally. A live peer WITHOUT one is a pre-PA2 legacy record (see
+ * `daemonSessionId`'s doc comment in `types.ts`) -- there is no session id to
+ * protect, so it is logged and skipped rather than treated as ambiguous.
+ * Directory discovery and any other read/parse failure on this uid's own
+ * pid file still throw on ambiguity, so startup cannot mistake genuine local
+ * damage (an unreadable peer namespace, corrupt JSON) for an empty live set.
  */
 export class PidFileLiveDaemonSessionIdProvider implements LiveDaemonSessionIdProvider {
   private readonly listDaemonPidFiles: (pidFilePath?: string) => string[];
-  private readonly readPidFileData: (pidFilePath?: string) => PidFileData | null;
+  private readonly readPidFile: (pidFilePath?: string) => LiveDaemonPidFileRead;
   private readonly processIsRunning: (pid: number) => boolean;
 
   constructor(dependencies: PidFileLiveDaemonSessionIdProviderDependencies = {}) {
     this.listDaemonPidFiles = dependencies.listDaemonPidFiles ?? listDaemonPidFilePathsOrThrow;
-    this.readPidFileData = dependencies.readPidFileData ?? readPidFileDataSync;
+    this.readPidFile = dependencies.readPidFile ?? readLiveDaemonPidFileSync;
     this.processIsRunning = dependencies.isProcessRunning ?? isProcessRunning;
   }
 
@@ -451,14 +626,36 @@ export class PidFileLiveDaemonSessionIdProvider implements LiveDaemonSessionIdPr
     const liveDaemonSessionIds = new Set<string>();
     const pidFiles = this.listDaemonPidFiles();
     for (const pidFile of pidFiles) {
-      const pidData = this.readPidFileData(pidFile);
-      if (
-        typeof pidData?.daemonSessionId === "string" &&
-        pidData.daemonSessionId.length > 0 &&
-        this.processIsRunning(pidData.pid)
-      ) {
-        liveDaemonSessionIds.add(pidData.daemonSessionId);
+      const read = this.readPidFile(pidFile);
+      if (read.status === "absent") {
+        continue;
       }
+      if (typeof read.data !== "object" || read.data === null) {
+        throw new Error(`Pid file at ${pidFile} is present but is not a JSON object`);
+      }
+      const pidData = read.data as Record<string, unknown>;
+      const pid = pidData.pid;
+      if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 0) {
+        throw new Error(`Pid file at ${pidFile} is present but does not contain a valid pid`);
+      }
+      if (!this.processIsRunning(pid)) {
+        continue;
+      }
+      const daemonSessionId = pidData.daemonSessionId;
+      if (typeof daemonSessionId !== "string" || daemonSessionId.length === 0) {
+        // `daemonSessionId` is documented optional (`types.ts`) for PID files
+        // written before peer-liveness discovery shipped. A pre-PA2 live
+        // daemon has no session id to add to the protected set either way, so
+        // throwing here protects nothing while making a newer daemon
+        // unstartable alongside a legacy one it should be able to supersede
+        // -- log and skip this record instead of failing startup closed.
+        logger.warn(
+          `Pid file at ${pidFile} names live process ${pid} but has no daemon session id; ` +
+            "treating it as a pre-liveness-discovery legacy record",
+        );
+        continue;
+      }
+      liveDaemonSessionIds.add(daemonSessionId);
     }
     return liveDaemonSessionIds;
   }

@@ -26,7 +26,7 @@ import {
   ACCEPTANCE_DISCOVERY_CAPABILITY_ENV,
 } from "./constants";
 import { DaemonOptions, PidFileData } from "./types";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import { dirname, isAbsolute } from "node:path";
 import { PID_FILE_PATH, DAEMON_VERSION } from "./constants";
 import { getCurrentBuildIdentity } from "./buildIdentity";
@@ -36,6 +36,7 @@ import {
   PidFileLiveDaemonSessionIdProvider,
   readPidFileDataSync,
   type LiveDaemonSessionIdProvider,
+  writePidFileDataAtomic,
 } from "./daemonFiles";
 import { IncumbentOwnerGuard } from "./incumbentOwnerGuard";
 import { daemonLiveAcceptanceStartupSecret } from "./liveAcceptanceCapability";
@@ -1173,11 +1174,7 @@ export class Daemon {
   private async persistPidFileData(pidData: PidFileData, signal?: AbortSignal): Promise<void> {
     await mkdir(dirname(PID_FILE_PATH), { recursive: true });
     signal?.throwIfAborted();
-    await writeFile(PID_FILE_PATH, JSON.stringify(pidData, null, 2), {
-      encoding: "utf-8",
-      mode: 0o600,
-      signal,
-    });
+    await writePidFileDataAtomic(PID_FILE_PATH, pidData, signal);
     this.pidFileWritten = true;
   }
 

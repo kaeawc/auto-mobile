@@ -119,7 +119,7 @@ class McpDaemonClientInputTest {
   @Test
   fun `result minted ownership is restored across per-request sockets`() {
     val acquisitionResult =
-      """{"content":[{"type":"text","text":"{\"success\":true,\"deviceId\":\"emulator-5554\",\"sessionUuid\":\"owned-session\"}"}]}"""
+      """{"content":[{"type":"text","text":"{\"success\":true,\"runtime\":{\"deviceId\":\"emulator-5554\",\"session\":{\"sessionUuid\":\"owned-session\"}}}"}]}"""
     TestDaemonSocket(
         responses =
           listOf(

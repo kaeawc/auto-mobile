@@ -1,26 +1,32 @@
 # Device-description audit
 
-All device-facing projections are now built by `src/server/deviceDescription.ts`.
-Every canonical key is present; an unavailable fact is `null`, not omitted.
+All device-facing projections are built by `src/server/deviceDescription.ts`.
+Phase 3 is complete: public surfaces emit only the canonical
+`DeviceDescription` keys, and every canonical key is present. An unavailable
+fact is `null`, not omitted.
 
-| Field group             | configured            | booting               | booted                                 | booted-no-automation | idle-adopted      | rehydrated (awaiting-owner)  |
-| ----------------------- | --------------------- | --------------------- | -------------------------------------- | -------------------- | ----------------- | ---------------------------- |
-| identity                | configured stable id  | configured stable id  | stable id plus connection id           | same                 | same              | same                         |
-| runtime/display         | configuration or null | configuration or null | admitted image, discovery, then config | same                 | same              | same                         |
-| lifecycle               | configured            | booting               | booted                                 | booted               | booted            | booted                       |
-| readiness               | unknown               | unknown               | ready                                  | unknown              | ready or unknown  | ready or unknown             |
-| session                 | nulls                 | nulls                 | assigned session                       | assigned session     | idle/null session | awaiting-owner when restored |
-| provenance/capabilities | image facts           | image facts           | retained facts or null                 | same                 | same              | same                         |
+| Field group        | configured            | booting               | booted                                 | booted-no-automation | idle-adopted     | rehydrated (awaiting-owner)  |
+| ------------------ | --------------------- | --------------------- | -------------------------------------- | -------------------- | ---------------- | ---------------------------- |
+| identity           | configured stable id  | configured stable id  | configured stable id                   | same                 | same             | same                         |
+| runtime/display    | configuration or null | configuration or null | admitted image, discovery, then config | same                 | same             | same                         |
+| runtime.lifecycle  | configured            | booting               | booted                                 | booted               | booted           | booted                       |
+| runtime.readiness  | unknown               | unknown               | ready                                  | unknown              | ready or unknown | ready or unknown             |
+| runtime.session    | null                  | null                  | assigned session                       | assigned session     | null             | awaiting-owner when restored |
+| image/capabilities | image facts           | image facts           | retained facts or null                 | same                 | same             | same                         |
 
-Canonical fields and deprecated aliases:
+Canonical fields after phase 3:
 
-- `status` and `lifecycleState` remain deprecated aliases for `lifecycle.state`.
-- `isRunning` remains on `provisionDevice.device` from its raw pre-image model; canonical lifecycle data takes precedence for colliding fields.
-- `iosVersion` and `osVersion` remain deprecated aliases for `runtime.osVersion`; runtime identifiers use `runtime.runtimeId`.
-- `screenSize` remains a deprecated alias for `display.width` and `display.height`; density is `display.density`.
-- `identity.connectionId` is the pool-incarnation epoch, `session.sessionUuid` is the durable MCP device-session id, and `identity.deviceSessionUuid` is the DeviceSessionRegistry per-connection routing key used by desktop stream subscriptions. The routing key is intentionally distinct from both other identities and is omitted when the registry has no live record.
-- Flat `poolStatus` and `assignedSession` remain deprecated aliases for `session.poolStatus` and `session.sessionUuid`; the canonical `session` object remains at its existing key.
-- `capabilities.automation` is the one intentional exception to the compatibility rule for the booted resource. `serviceStatus` remains the sole automation-status sibling because it includes integrity and runner diagnostics.
+- `identity.stableId` is the durable configured identity. Runtime identifiers
+  (`deviceId`, `connectionId`, and `deviceSessionUuid`) live under `runtime`.
+- `osVersion`, `apiLevel`, `runtimeId`, `deviceType`, `model`, `architecture`,
+  and `formFactor` are top-level static facts.
+- `runtime.lifecycle`, `runtime.readiness`, `runtime.poolStatus`, and
+  `runtime.session` describe observed state and ownership.
+- Image provenance is `image.{path,target,basedOn}`; availability failures use
+  top-level `availabilityError`.
+- `runtime.serviceStatus` carries automation integrity and runner diagnostics.
+  The booted resource also has its documented resource-specific
+  `serviceStatus` sibling.
 - Capability inventory entries now use `{ id, state: "supported"|"unsupported"|"unknown", reason, source }`, with explicit nulls.
 - iOS simulator configured-image records carry the static simulator inventory. If an
   upstream simulator discovery record omitted it, the canonical builder supplies the same
@@ -33,32 +39,30 @@ The Simctl discovery expectation includes those three static unsupported entries
 they belong on simulator image inventories, rather than being treated as absent
 or as a runtime probe failure.
 
-## Deferred removals
+## Phase 3 removals (complete)
 
-The following compatibility aliases remain until the desktop Kotlin
-`DeviceModels.kt`, `scripts/live-device-acceptance.ts`, and CI jq consumers have
-migrated to the canonical description:
+The desktop Kotlin models, live-device acceptance checks, daemon consumer, CLI,
+and tests now read the canonical description. The following compatibility
+fields were removed from every producer:
 
 - Image surfaces (`listDeviceImages` and `automobile:devices/images`): `stableId`,
   `deviceId`, `path`, `target`, `basedOn`, `error`, `state`, `isAvailable`,
   `availabilityError`, `iosVersion`, `deviceType`, `model`, and `architecture`.
-  The deprecated `state` alias remains the raw discovery string (for example,
-  `Shutdown`), rather than the normalized `lifecycle.state` value.
+  The former raw `state` string is represented by normalized
+  `runtime.lifecycle.state`.
 - `listDevices`: `deviceId`, `apiLevel`, `osVersion`, and `formFactor`.
 - `provisionDevice.device`: the raw pre-image `DeviceInfo`/`BootedDevice` fields,
   including `deviceId`, `isRunning`, runtime/display metadata, availability
   metadata, and capability inventory.
 - `startDevice`, `getAndroid`, and `getApple`: `deviceId`, `apiLevel`,
-  `osVersion`, `formFactor`, `screenSize`, `sessionUuid`, and `deviceIdentity`.
+  `osVersion`, `formFactor`, `screenSize`, and `sessionUuid`. The separate
+  `deviceIdentity` diagnostic remains because it is not a description alias.
 - `automobile:devices/booted`: `deviceId`, `deviceSessionUuid`, `status`,
   `lifecycleState`, `formFactor`, `poolStatus`, and `assignedSession`.
-- The flat image `runtime` string could not be restored verbatim because this
-  PR's canonical schema uses `runtime` for an object; the value is available at
-  `runtime.runtimeId` (canonical) and `legacyRuntimeId` (alias) instead. The
-  same collision applies to `provisionDevice.device`.
-- The booted-resource flat `runtime` string had different OS-version semantics;
-  it is available at `runtime.osVersion` (canonical) and
-  `legacyRuntimeVersion` (alias) instead.
+- The old flat image `runtime` string and `legacyRuntimeId` alias were replaced
+  by top-level `runtimeId`.
+- The booted-resource `legacyRuntimeVersion` alias was replaced by top-level
+  `osVersion`.
 
 ## Uncertain — not changed without evidence
 
@@ -66,7 +70,12 @@ The no-CtrlProxy readiness asymmetry was not justified by a producer comment. It
 therefore normalized to `unknown` for Android and iOS: a missing observed connection
 is inconclusive, while a failed install/enable/compatibility check remains `not_ready`.
 
-## Live values pass (2026-09-18)
+## Historical pre-phase-3 live values pass (2026-09-18)
+
+The tables below preserve the phase-1/2 audit evidence. They describe the
+superset payload observed before phase 3 and are not the current wire contract;
+rows labelled `alias` were removed, and older canonical paths in these tables
+were superseded by the shape documented above.
 
 Observed against the shared local daemon. Read-only calls only: `listDevices`,
 `listDeviceImages` (both platforms), and the `automobile:devices/booted`,
@@ -103,7 +112,7 @@ Cell legend: value as emitted, `null`, `—` when the surface omits the key
 entirely. Long ids are abbreviated (`4E8A6FF9…`). Where the three Android
 emulators or the two simulators differ, the cell says so.
 
-### `automobile:devices/booted` (full canonical description plus aliases)
+### `automobile:devices/booted` (historical canonical description plus removed aliases)
 
 | Field                            | booted Android (no session)                                                                                        | booted iOS (no session)                                                                                              |
 | -------------------------------- | ------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
@@ -148,7 +157,7 @@ emulators or the two simulators differ, the cell says so.
 `{ deviceId, locked: false }`; iOS entries `{ deviceId }` with the `locked`
 key omitted (the booted resource says `locked: null` for the same simulators).
 
-### `listDevices` (projection plus aliases)
+### `listDevices` (historical projection plus removed aliases)
 
 | Field                            | booted Android (no session)                  | booted iOS (no session)                 |
 | -------------------------------- | -------------------------------------------- | --------------------------------------- |

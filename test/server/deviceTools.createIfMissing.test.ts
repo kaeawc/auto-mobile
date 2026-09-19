@@ -95,7 +95,7 @@ describe("startDevice --create-if-missing wiring", () => {
     expect(fakeProvisioner.requests[0].platform).toBe("ios");
     expect(fakeGate.calls).toEqual([true]);
     expect(result.name).toBe("AutoMobile-iPhone-17-abcd1234");
-    expect(result.identity).toMatchObject({ deviceId: "CREATED-UDID" });
+    expect(result.runtime.deviceId).toBe("CREATED-UDID");
     expect(result.acquisition).toBe("cold-boot");
     expect(
       fakeDeviceUtils.getExecutedOperations().some((op) => op.startsWith("startDevice:")),

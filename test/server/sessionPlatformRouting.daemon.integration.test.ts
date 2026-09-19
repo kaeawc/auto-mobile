@@ -199,7 +199,14 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
               device.platform,
               toolArgs.__mcpSessionId,
             );
-            return { content: [{ type: "text" as const, text: JSON.stringify({ sessionUuid }) }] };
+            return {
+              content: [
+                {
+                  type: "text" as const,
+                  text: JSON.stringify({ runtime: { session: { sessionUuid } } }),
+                },
+              ],
+            };
           },
         );
       }
@@ -324,8 +331,10 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
     await expect(
       proxy.callTool("routingProbe", { platform: "ios", keepScreenAwake: false }),
     ).rejects.toThrow();
-    await expect(proxy.callTool("routingProbe", {})).rejects.toThrow();
-    await expect(proxy.callTool("routingProbe", { sessionUuid: apple })).rejects.toThrow();
+    // The released iOS binding must not prevent an unqualified call from using
+    // the still-owned Android binding.
+    await proxy.callTool("routingProbe", {});
+    expect((await proxy.callTool("routingProbe", { sessionUuid: apple })).isError).toBe(true);
     await proxy.callTool("routingProbe", { platform: "android", keepScreenAwake: false });
     await proxy.callTool("routingProbe", { sessionUuid: android, keepScreenAwake: false });
 

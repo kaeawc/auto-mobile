@@ -51,6 +51,48 @@ fi
   [[ "$output" == *"could not acquire navigation graph session"* ]]
 }
 
+@test "forwards a legacy iOS graph session UUID" {
+  make_mock xcrun 'exit 0'
+  make_mock curl 'exit 0'
+  make_mock base64 'cat'
+  make_mock sleep 'exit 0'
+  make_mock jq '
+if [ "$1" = "-er" ] && [[ "$2" == *"iosServicePort"* ]]; then
+  printf "8768\n"
+  exit 0
+fi
+if [ "$1" = "-er" ]; then
+  exec "$REAL_JQ" "$@"
+fi
+if [ "$1" = "-cn" ]; then
+  printf "{}\n"
+  exit 0
+fi
+exit 0
+'
+  make_mock auto-mobile '
+printf "%s\n" "$*" >> "$INVOCATION_FILE"
+if [ "$4" = "getApple" ]; then
+  printf "{\"sessionUuid\":\"legacy-ios-session\"}\n"
+  exit 0
+fi
+if [ "$1" = "--daemon" ]; then
+  [ "$3" = "legacy-ios-session" ] || exit 1
+  exit 0
+fi
+if [ "$4" = "--session-uuid" ]; then
+  [ "$5" = "legacy-ios-session" ] || exit 1
+  exit 0
+fi
+exit 1
+'
+
+  run env PATH="${MOCK_BIN}:${PATH}" bash "$SCRIPT" "simulator-udid"
+
+  [ "$status" -eq 0 ]
+  grep -q -- "--session-uuid legacy-ios-session" "$INVOCATION_FILE"
+}
+
 @test "renews the graph session while retrying post-bind CtrlProxy health" {
   make_mock xcrun 'exit 0'
   make_mock curl '
@@ -85,7 +127,7 @@ exit 0
   make_mock auto-mobile '
 printf "%s\n" "$*" >> "$INVOCATION_FILE"
 if [ "$1" = "--debug" ] && [ "$2" = "--embedded-sdk" ] && [ "$3" = "--cli" ] && [ "$4" = "getApple" ] && [ "$5" = "--deviceId" ] && [ "$6" = "simulator-udid" ]; then
-  printf "{\"sessionUuid\":\"44600000-0000-4000-8000-000000000000\",\"deviceIdentity\":{\"iosServicePort\":8768}}\\n"
+  printf "{\"runtime\":{\"session\":{\"sessionUuid\":\"44600000-0000-4000-8000-000000000000\"}},\"deviceIdentity\":{\"iosServicePort\":8768}}\\n"
   exit 0
 fi
 if [ "$1" = "--daemon" ] && [ "$2" = "heartbeat" ] && [ "$3" = "44600000-0000-4000-8000-000000000000" ]; then

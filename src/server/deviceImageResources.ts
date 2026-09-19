@@ -31,12 +31,7 @@ import {
   type ConfiguredDeviceInventoryObservation,
   type StableConfiguredDeviceImage,
 } from "../utils/configuredDeviceInventory";
-import {
-  describeDevice,
-  legacyIosVersion,
-  projectConfiguredImage,
-  type ConfiguredImage,
-} from "./deviceDescription";
+import { describeDevice, projectConfiguredImage, type ConfiguredImage } from "./deviceDescription";
 
 /**
  * Wall-clock budget for the COMPLETE Android resource path — the device-image
@@ -57,7 +52,7 @@ export const DEVICE_IMAGE_RESOURCE_URIS = {
 } as const;
 
 // Device image info for resource response
-export type DeviceImageInfo = ConfiguredImage & ReturnType<typeof legacyImageAliases>;
+export type DeviceImageInfo = ConfiguredImage;
 
 interface ProvisioningRuntime {
   platform: Platform;
@@ -669,41 +664,7 @@ function toDeviceImageInfo(
   avdInfo?: AvdInfo,
 ): DeviceImageInfo {
   const description = describeDevice({ kind: "image", image: device, androidProvenance: avdInfo });
-  const projected = projectConfiguredImage(description);
-  return { ...projected, ...legacyImageAliases(projected, device) };
-}
-
-/** Deprecated image fields, preserving raw discovery state where required. */
-function legacyImageAliases(description: ConfiguredImage, image: StableConfiguredDeviceImage) {
-  const androidProvenance = description.provenance.android;
-  return {
-    // Deprecated alias for identity.stableId.
-    stableId: description.identity.stableId,
-    // Deprecated alias for identity.deviceId.
-    deviceId: description.identity.deviceId,
-    // Deprecated alias for provenance.android.path.
-    path: androidProvenance?.path ?? null,
-    // Deprecated alias for provenance.android.target.
-    target: androidProvenance?.target ?? null,
-    // Deprecated alias for provenance.android.basedOn.
-    basedOn: androidProvenance?.basedOn ?? null,
-    // Deprecated alias for provenance.android.error.
-    error: androidProvenance?.error ?? null,
-    // Deprecated raw discovery state alias.
-    state: image.state ?? null,
-    // Deprecated alias for lifecycle.state.
-    isAvailable: description.lifecycle.state !== "unavailable",
-    // Deprecated alias for runtime.osVersion.
-    iosVersion: legacyIosVersion(description),
-    // Deprecated alias for runtime.deviceType.
-    deviceType: description.deviceType,
-    // `runtime` is canonical object data; its former string is legacyRuntimeId.
-    legacyRuntimeId: description.runtimeId,
-    // Deprecated alias for runtime.model.
-    model: description.model,
-    // Deprecated alias for runtime.architecture.
-    architecture: description.architecture,
-  };
+  return projectConfiguredImage(description);
 }
 
 // Register all device image resources

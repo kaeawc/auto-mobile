@@ -664,7 +664,9 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
               content: [
                 {
                   type: "text",
-                  text: JSON.stringify({ sessionUuid: "replacement-session" }),
+                  text: JSON.stringify({
+                    runtime: { session: { sessionUuid: "replacement-session" } },
+                  }),
                 },
               ],
             }
@@ -696,7 +698,9 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
         content: [
           {
             type: "text",
-            text: JSON.stringify({ sessionUuid: "replacement-session" }),
+            text: JSON.stringify({
+              runtime: { session: { sessionUuid: "replacement-session" } },
+            }),
           },
         ],
       });

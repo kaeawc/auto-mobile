@@ -38,7 +38,9 @@ fun parseDeviceLockStates(content: String): Map<String, Boolean> =
 fun parseBootedLockStates(content: String): Map<String, Boolean> =
   DeviceResourceParser.parseBootedDevices(content)
     ?.devices
-    ?.mapNotNull { device -> device.locked?.let { device.deviceId to it } }
+    ?.mapNotNull { device ->
+      device.locked?.let { (device.runtime.deviceId ?: device.identity.stableId) to it }
+    }
     ?.toMap() ?: emptyMap()
 
 /**
@@ -49,5 +51,9 @@ fun parseBootedLockStates(content: String): Map<String, Boolean> =
 fun parseBootedDeviceSessionUuids(content: String): Map<String, String> =
   DeviceResourceParser.parseBootedDevices(content)
     ?.devices
-    ?.mapNotNull { device -> device.deviceSessionUuid?.let { device.deviceId to it } }
+    ?.mapNotNull { device ->
+      device.runtime.deviceSessionUuid?.let {
+        (device.runtime.deviceId ?: device.identity.stableId) to it
+      }
+    }
     ?.toMap() ?: emptyMap()

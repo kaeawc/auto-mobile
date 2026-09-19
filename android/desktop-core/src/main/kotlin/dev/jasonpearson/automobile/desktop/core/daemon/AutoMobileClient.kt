@@ -285,12 +285,18 @@ data class ClearKeyValueResult(
   val warning: String? = null,
 )
 
+@Serializable data class StartDeviceRuntime(val deviceId: String? = null)
+
 @Serializable
 data class StartDeviceResult(
   val success: Boolean = true,
   val deviceId: String? = null,
+  val runtime: StartDeviceRuntime? = null,
   val message: String? = null,
-)
+) {
+  val resolvedDeviceId: String?
+    get() = runtime?.deviceId ?: deviceId
+}
 
 @Serializable
 data class SetActiveDeviceResult(

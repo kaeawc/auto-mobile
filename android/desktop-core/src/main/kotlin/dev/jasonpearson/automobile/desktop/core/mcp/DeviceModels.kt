@@ -20,12 +20,64 @@ data class BootedDevicesResponse(
 
 @Serializable data class DevicePlatformObservation(val observationComplete: Boolean = false)
 
+@Serializable data class DeviceIdentity(val stableId: String)
+
 @Serializable
-data class DeviceIdentity(
-  val stableId: String,
+data class DeviceLifecycle(
+  val state: String,
+  val known: Boolean,
+)
+
+@Serializable data class DeviceReadiness(val state: String = "unknown")
+
+@Serializable
+data class DeviceSession(
+  val sessionUuid: String? = null,
+  val ownership: String? = null,
+)
+
+@Serializable
+data class DeviceDisplay(
+  val width: Int? = null,
+  val height: Int? = null,
+  val density: Double? = null,
+)
+
+@Serializable
+data class DeviceImage(
+  val path: String? = null,
+  val target: String? = null,
+  val basedOn: String? = null,
+)
+
+@Serializable
+data class DeviceCapability(
+  val id: String,
+  val state: String,
+  val reason: String? = null,
+  val source: String? = null,
+)
+
+@Serializable
+data class DeviceCapabilityInventory(
+  val schemaVersion: Int,
+  val capabilities: List<DeviceCapability>,
+)
+
+@Serializable
+data class DeviceRuntime(
+  val deviceId: String? = null,
   // Key for one connection epoch of the device: `<deviceId>#<incarnation>` when the daemon's pool
   // knows the incarnation, otherwise the bare serial, which carries no epoch information.
-  val connectionId: String,
+  val connectionId: String? = null,
+  val deviceSessionUuid: String? = null,
+  val lifecycle: DeviceLifecycle,
+  val readiness: DeviceReadiness = DeviceReadiness(),
+  val poolStatus: String? = null,
+  val session: DeviceSession? = null,
+  val serviceStatus: DeviceServiceStatus? = null,
+  val locked: Boolean? = null,
+  val orientation: String? = null,
 )
 
 @Serializable
@@ -42,23 +94,25 @@ data class DeviceServiceStatus(
 data class BootedDeviceInfo(
   val name: String,
   val platform: String, // "android" or "ios"
-  val deviceId: String,
-  val source: String, // "local" or "remote"
-  val isVirtual: Boolean,
-  val status: String, // "booted"
+  val isVirtual: Boolean = true,
+  val source: String? = null, // "local" or "remote"
+  val identity: DeviceIdentity,
+  val formFactor: String = "unknown",
+  val deviceType: String? = null,
+  val model: String? = null,
+  val architecture: String? = null,
+  val osVersion: String? = null,
+  val apiLevel: Int? = null,
+  val runtimeId: String? = null,
+  val display: DeviceDisplay = DeviceDisplay(),
+  val capabilityInventory: DeviceCapabilityInventory? = null,
+  val image: DeviceImage = DeviceImage(),
+  val availabilityError: String? = null,
+  val runtime: DeviceRuntime,
+  // Resource-specific diagnostic siblings outside the canonical description.
   val serviceStatus: DeviceServiceStatus? = null,
-  val batteryLevel: Int? = null, // 0-100, null if unknown
-  val connectionType: String? = null, // "usb", "wifi", or null if unknown
-  // Whether the device's keyguard/lock screen is currently obscuring the app. Android-only (from
-  // `dumpsys window policy`). The daemon deliberately OMITS this when it can't read it — a
-  // transient
-  // probe timeout, or iOS — so `null` means "unknown, keep the pane's current state" rather than
-  // "unlocked". A non-null value gates the pane Unlock control.
   val locked: Boolean? = null,
-  // Daemon-minted identity for this live device epoch. Older daemons omit it, so it must remain
-  // optional while UUID-scoped consumers fail closed.
-  val deviceSessionUuid: String? = null,
-  val identity: DeviceIdentity? = null,
+  val identityUnresolved: Boolean = false,
 )
 
 @Serializable
@@ -96,20 +150,21 @@ data class DeviceImagesResponse(
 data class DeviceImageInfo(
   val name: String,
   val platform: String, // "android" or "ios"
-  val deviceId: String? = null,
-  val source: String = "local",
-  // Extended AVD info (Android only)
-  val path: String? = null,
-  val target: String? = null,
-  val basedOn: String? = null,
-  // iOS simulator metadata
-  val state: String? = null,
-  val isAvailable: Boolean? = null,
-  val iosVersion: String? = null,
+  val isVirtual: Boolean = true,
+  val source: String? = null,
+  val identity: DeviceIdentity,
+  val formFactor: String = "unknown",
   val deviceType: String? = null,
-  // CPU architecture (e.g. "arm64", "x86_64"). Already emitted by the iOS images resource;
-  // Android abi is not yet plumbed through the daemon (tracked as a follow-up).
+  val model: String? = null,
   val architecture: String? = null,
+  val osVersion: String? = null,
+  val apiLevel: Int? = null,
+  val runtimeId: String? = null,
+  val display: DeviceDisplay = DeviceDisplay(),
+  val capabilityInventory: DeviceCapabilityInventory? = null,
+  val image: DeviceImage = DeviceImage(),
+  val availabilityError: String? = null,
+  val runtime: DeviceRuntime,
 )
 
 /** Response from the lightweight automobile:devices/lockStates resource (issue #5056). */

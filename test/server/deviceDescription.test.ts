@@ -1,22 +1,23 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
 import {
   describeDevice,
-  legacyAliases,
   projectBootedDevice,
   projectConfiguredImage,
   projectListDevicesEntry,
   projectProvisionedDevice,
   listDevicesEntrySchema,
   type DeviceDescription,
-  type DeviceDescriptionWithLegacyAliases,
   type DeviceDescriptionInput,
 } from "../../src/server/deviceDescription";
 import type { DeviceInfo } from "../../src/models";
 
 type Assert<T extends true> = T;
-type ProjectionCanonicalSuperset<T> = Assert<
-  Exclude<keyof DeviceDescription, keyof T> extends never ? true : false
+type ProjectionCanonicalExact<T> = Assert<
+  keyof T extends keyof DeviceDescription
+    ? keyof DeviceDescription extends keyof T
+      ? true
+      : false
+    : false
 >;
 
 const projectionKeys = {
@@ -38,31 +39,6 @@ const projectionKeys = {
   availabilityError: true,
   runtime: true,
 } satisfies Record<keyof DeviceDescription, boolean>;
-
-const legacyAliasKeys = {
-  topLevel: ["lifecycle", "readiness", "session", "provenance"],
-  identity: ["deviceId", "connectionId", "deviceSessionUuid"],
-  display: ["formFactor"],
-  runtime: ["osVersion", "apiLevel", "runtimeId", "deviceType", "architecture", "model"],
-} as const;
-
-function stripLegacyAliases(value: DeviceDescriptionWithLegacyAliases): DeviceDescription {
-  const canonical = structuredClone(value) as unknown as Record<string, unknown>;
-  for (const key of legacyAliasKeys.topLevel) {
-    delete canonical[key];
-  }
-  for (const [group, keys] of Object.entries({
-    identity: legacyAliasKeys.identity,
-    display: legacyAliasKeys.display,
-    runtime: legacyAliasKeys.runtime,
-  })) {
-    const nested = canonical[group] as Record<string, unknown>;
-    for (const key of keys) {
-      delete nested[key];
-    }
-  }
-  return canonical as unknown as DeviceDescription;
-}
 
 function assertSharedKnownValuesAgree(...descriptions: DeviceDescription[]): void {
   const assertValuesAgree = (left: unknown, right: unknown, path: string): void => {
@@ -152,7 +128,7 @@ describe("device description projections", () => {
       projectConfiguredImage(canonical),
       projectBootedDevice(canonical),
     ]) {
-      expect(stripLegacyAliases(projection)).toEqual(canonical);
+      expect(projection).toBe(canonical);
     }
   });
 
@@ -555,7 +531,7 @@ describe("device description projections", () => {
     ]);
   });
 
-  test("preserves the booted Android projection as a legacy-compatible superset", () => {
+  test("projects booted Android state in the canonical shape", () => {
     const description = describeDevice({
       kind: "booted",
       device: {
@@ -585,60 +561,49 @@ describe("device description projections", () => {
     const projected = projectBootedDevice(description);
 
     expect(projected).toMatchObject({
-      identity: {
-        stableId: "Pixel_9",
+      identity: { stableId: "Pixel_9" },
+      osVersion: "16",
+      apiLevel: 36,
+      runtimeId: null,
+      deviceType: null,
+      architecture: null,
+      model: null,
+      formFactor: "phone",
+      runtime: {
         deviceId: "emulator-5554",
         connectionId: "emulator-5554#4",
         deviceSessionUuid: "connection-session-1",
-      },
-      runtime: {
-        osVersion: "16",
-        apiLevel: 36,
-        runtimeId: null,
-        deviceType: null,
-        architecture: null,
-        model: null,
-      },
-      display: { formFactor: "phone" },
-      lifecycle: { state: "booted", known: true },
-      readiness: { state: "ready" },
-      session: { sessionUuid: "session-1", ownership: "owned", poolStatus: "assigned" },
-      provenance: {
-        android: { path: null, target: null, basedOn: null, error: null },
-        ios: null,
+        lifecycle: { state: "booted", known: true },
+        readiness: { state: "ready" },
+        poolStatus: "assigned",
+        session: { sessionUuid: "session-1", ownership: "owned" },
       },
     });
   });
 
-  test("preserves configured iOS aliases and values in the canonical superset", () => {
+  test("projects configured iOS values in the canonical shape", () => {
     const description = describeDevice(iosImage);
     const projected = projectConfiguredImage(description);
 
     expect(projected).toMatchObject({
-      identity: {
-        stableId: "IOS-UDID",
-        deviceId: "IOS-UDID",
+      identity: { stableId: "IOS-UDID" },
+      osVersion: "26.5",
+      apiLevel: null,
+      runtimeId: "com.apple.CoreSimulator.SimRuntime.iOS-26-5",
+      deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
+      architecture: null,
+      model: null,
+      formFactor: "phone",
+      runtime: {
+        deviceId: null,
         connectionId: null,
         deviceSessionUuid: null,
-      },
-      runtime: {
-        osVersion: "26.5",
-        apiLevel: null,
-        runtimeId: "com.apple.CoreSimulator.SimRuntime.iOS-26-5",
-        deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
-        architecture: null,
-        model: null,
-      },
-      display: { width: null, height: null, density: null, formFactor: "phone" },
-      lifecycle: { state: "configured", known: true },
-      provenance: {
-        android: null,
-        ios: { isAvailable: true, availabilityError: null },
+        lifecycle: { state: "configured", known: true },
       },
     });
   });
 
-  test("preserves provisioned-device aliases and values in the canonical superset", () => {
+  test("projects provisioned-device values in the canonical shape", () => {
     const description = describeDevice({
       kind: "provisioned",
       provisioned: {
@@ -660,22 +625,17 @@ describe("device description projections", () => {
     const projected = projectProvisionedDevice(description);
 
     expect(projected).toMatchObject({
-      identity: {
-        stableId: "Pixel_9_API_36",
-        deviceId: "Pixel_9_API_36",
-        connectionId: null,
-        deviceSessionUuid: null,
-      },
+      identity: { stableId: "Pixel_9_API_36" },
+      osVersion: "16",
+      apiLevel: 36,
+      runtimeId: "android-36",
+      deviceType: "pixel_9",
+      architecture: null,
+      model: null,
+      formFactor: "phone",
       runtime: {
-        osVersion: "16",
-        apiLevel: 36,
-        runtimeId: "android-36",
-        deviceType: "pixel_9",
-        architecture: null,
-        model: null,
+        lifecycle: { state: "configured", known: true },
       },
-      display: { formFactor: "phone" },
-      lifecycle: { state: "configured", known: true },
     });
   });
 
@@ -713,30 +673,34 @@ describe("device description projections", () => {
     expect(describeDevice({ kind: "image", image }).formFactor).toBe(expected);
   });
 
-  test("preserves raw unknown form factors for the legacy display alias", () => {
+  test("normalizes missing form factors without adding a display alias", () => {
     const description = describeDevice({
       kind: "image",
       image: { name: "Unknown form factor", platform: "android", isRunning: false },
     });
 
     expect(description.formFactor).toBe("unknown");
-    expect(projectConfiguredImage(description).display.formFactor).toBeNull();
+    expect(projectConfiguredImage(description).display).toEqual({
+      width: null,
+      height: null,
+      density: null,
+    });
   });
 
-  test("accepts the nullable listDevices flat formFactor alias while keeping canonical strict", () => {
+  test("rejects removed listDevices aliases", () => {
     const projected = projectListDevicesEntry(
       describeDevice({
         kind: "booted",
         device: { name: "Unknown AVD", platform: "android", deviceId: "emulator-5554" },
       }),
     );
-    const payload = { ...projected, deviceId: "emulator-5554", formFactor: null };
-
-    expect(listDevicesEntrySchema.safeParse(payload).success).toBe(true);
-    expect(() => listDevicesEntrySchema.parse({ ...payload, formFactor: "watch" })).toThrow();
+    expect(listDevicesEntrySchema.safeParse(projected).success).toBe(true);
+    expect(() =>
+      listDevicesEntrySchema.parse({ ...projected, deviceId: "emulator-5554" }),
+    ).toThrow();
   });
 
-  test("keeps the legacy service-status version string beside structured version info", () => {
+  test("keeps service-status version metadata in canonical runtime state", () => {
     const projected = projectListDevicesEntry(
       describeDevice({
         kind: "booted",
@@ -756,7 +720,7 @@ describe("device description projections", () => {
       }),
     );
 
-    const parsed = listDevicesEntrySchema.parse({ ...projected, deviceId: "emulator-5554" });
+    const parsed = listDevicesEntrySchema.parse(projected);
     expect(parsed.runtime.serviceStatus).toMatchObject({
       version: "1.2.3",
       versionInfo: { versionName: "1.2.3", versionCode: "45", source: "android-package" },
@@ -774,120 +738,73 @@ describe("device description projections", () => {
     }
   });
 
-  test("legacyAliases exposes the complete explicit shared alias set", () => {
-    const aliases = legacyAliases(describeDevice(androidImage));
-    expect(Object.keys(aliases).sort()).toEqual(
-      [...legacyAliasKeys.topLevel, "identity", "display", "runtime"].sort(),
-    );
-  });
-
-  test("keeps legacy keys present at every device-description producer", () => {
-    const surfaces = [
+  test.each([
+    ["image", androidImage],
+    [
+      "booted",
+      { kind: "booted", device: { name: "Pixel", platform: "android", deviceId: "emulator-5554" } },
+    ],
+    [
+      "provisioned",
       {
-        surface: "listDeviceImages",
-        producer: "../../src/server/deviceTools.ts",
-        aliases: [
-          "legacyListDeviceImageAliases",
-          "stableId:",
-          "deviceId:",
-          "path:",
-          "target:",
-          "basedOn:",
-          "error:",
-          "state:",
-          "isAvailable:",
-          "iosVersion:",
-          "deviceType:",
-          "legacyRuntimeId:",
-          "model:",
-          "architecture:",
-        ],
+        kind: "provisioned",
+        provisioned: {
+          created: true,
+          resolvedSpec: { runtime: "android-36", deviceType: "pixel_9" },
+          device: { name: "Pixel", platform: "android", deviceId: "Pixel", isRunning: false },
+        },
       },
-      {
-        surface: "automobile:devices/images",
-        producer: "../../src/server/deviceImageResources.ts",
-        aliases: [
-          "function legacyImageAliases",
-          "stableId:",
-          "deviceId:",
-          "path:",
-          "target:",
-          "basedOn:",
-          "error:",
-          "state:",
-          "isAvailable:",
-          "iosVersion:",
-          "deviceType:",
-          "legacyRuntimeId:",
-          "model:",
-          "architecture:",
-        ],
-      },
-      {
-        surface: "listDevices",
-        producer: "../../src/server/deviceTools.ts",
-        aliases: [
-          "legacyListDevicesAliases",
-          "deviceId:",
-          "apiLevel:",
-          "osVersion:",
-          "formFactor:",
-        ],
-      },
-      {
-        surface: "provisionDevice.device",
-        producer: "../../src/server/deviceTools.ts",
-        aliases: ["legacyProvisionDeviceAliases", "...rawDevice", "legacyRuntimeId:"],
-      },
-      {
-        surface: "startDevice/getAndroid/getApple",
-        producer: "../../src/server/deviceTools.ts",
-        aliases: [
-          "legacyBootedResponseAliases",
-          "deviceId:",
-          "apiLevel:",
-          "osVersion:",
-          "formFactor:",
-          "screenSize:",
-          "sessionUuid:",
-          "deviceIdentity:",
-        ],
-      },
-      {
-        surface: "automobile:devices/booted",
-        producer: "../../src/server/bootedDeviceResources.ts",
-        aliases: [
-          "function legacyResourceAliases",
-          "deviceId:",
-          "deviceSessionUuid:",
-          "status:",
-          "lifecycleState:",
-          "legacyRuntimeVersion:",
-          "formFactor:",
-          "poolStatus:",
-          "assignedSession:",
-        ],
-      },
-    ];
-
-    for (const { surface, producer, aliases } of surfaces) {
-      const source = readFileSync(new URL(producer, import.meta.url), "utf8");
-      const [helper, ...fields] = aliases;
-      const helperOffset = source.indexOf(helper);
-      expect(helperOffset, `${surface} must retain ${helper}`).toBeGreaterThanOrEqual(0);
-      const helperSource = source.slice(helperOffset, helperOffset + 2_500);
-      for (const field of fields) {
-        expect(helperSource, `${surface} must retain ${field}`).toContain(field);
+    ],
+  ] as const)(
+    "emits only canonical keys for the %s producer and every projection",
+    (_name, input) => {
+      const description = describeDevice(input as DeviceDescriptionInput);
+      const expectedShape = keyShape(description);
+      for (const projection of [
+        description,
+        projectListDevicesEntry(description),
+        projectProvisionedDevice(description),
+        projectConfiguredImage(description),
+        projectBootedDevice(description),
+      ]) {
+        expect(keyShape(projection)).toEqual(expectedShape);
+        expect(Object.keys(projection.identity)).toEqual(["stableId"]);
+        expect(Object.keys(projection.display).sort()).toEqual(["density", "height", "width"]);
+        for (const removed of [
+          "lifecycle",
+          "readiness",
+          "session",
+          "provenance",
+          "stableId",
+          "deviceId",
+          "path",
+          "target",
+          "basedOn",
+          "error",
+          "state",
+          "isAvailable",
+          "iosVersion",
+          "legacyRuntimeId",
+          "legacyRuntimeVersion",
+          "status",
+          "lifecycleState",
+          "poolStatus",
+          "assignedSession",
+          "screenSize",
+          "sessionUuid",
+        ]) {
+          expect(projection).not.toHaveProperty(removed);
+        }
       }
-    }
-  });
+    },
+  );
 
-  test("projections are type-level supersets of the canonical record", () => {
+  test("projections are type-level exact matches for the canonical record", () => {
     const subsets: [
-      ProjectionCanonicalSuperset<ReturnType<typeof projectListDevicesEntry>>,
-      ProjectionCanonicalSuperset<ReturnType<typeof projectProvisionedDevice>>,
-      ProjectionCanonicalSuperset<ReturnType<typeof projectConfiguredImage>>,
-      ProjectionCanonicalSuperset<ReturnType<typeof projectBootedDevice>>,
+      ProjectionCanonicalExact<ReturnType<typeof projectListDevicesEntry>>,
+      ProjectionCanonicalExact<ReturnType<typeof projectProvisionedDevice>>,
+      ProjectionCanonicalExact<ReturnType<typeof projectConfiguredImage>>,
+      ProjectionCanonicalExact<ReturnType<typeof projectBootedDevice>>,
     ] = [true, true, true, true];
     expect(subsets).toEqual([true, true, true, true]);
   });

@@ -46,9 +46,9 @@ function matchingDaemonManager(): FakeDaemonManager {
 function deviceStartResult(sessionUuid: string): {
   content: Array<{ type: string; text: string }>;
 } {
-  // Acquisition tools emit `sessionUuid` (#5870); mirror the production shape so
-  // this exercises the primary read, not the legacy `sessionId` fallback.
-  return { content: [{ type: "text", text: JSON.stringify({ sessionUuid }) }] };
+  return {
+    content: [{ type: "text", text: JSON.stringify({ runtime: { session: { sessionUuid } } }) }],
+  };
 }
 
 interface AcquiringClientOptions {

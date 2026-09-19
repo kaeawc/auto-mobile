@@ -44,8 +44,8 @@ class DeviceLockStatePollTest {
       """
       {"totalCount":2,"androidCount":2,"iosCount":0,"virtualCount":2,"physicalCount":0,
        "lastUpdated":"x","devices":[
-         {"name":"P8","platform":"android","deviceId":"emulator-5554","source":"local","isVirtual":true,"status":"booted","locked":true},
-         {"name":"P9","platform":"android","deviceId":"emulator-5556","source":"local","isVirtual":true,"status":"booted"}]}
+         {"name":"P8","platform":"android","source":"local","isVirtual":true,"identity":{"stableId":"Pixel_8"},"runtime":{"deviceId":"emulator-5554","lifecycle":{"state":"booted","known":true}},"locked":true},
+         {"name":"P9","platform":"android","source":"local","isVirtual":true,"identity":{"stableId":"Pixel_9"},"runtime":{"deviceId":"emulator-5556","lifecycle":{"state":"booted","known":true}}}]}
       """
         .trimIndent()
     assertEquals(mapOf("emulator-5554" to true), parseBootedLockStates(payload))
@@ -63,8 +63,8 @@ class DeviceLockStatePollTest {
       """
       {"totalCount":2,"androidCount":2,"iosCount":0,"virtualCount":2,"physicalCount":0,
        "lastUpdated":"x","devices":[
-         {"name":"P8","platform":"android","deviceId":"emulator-5554","source":"local","isVirtual":true,"status":"booted","deviceSessionUuid":"epoch-a"},
-         {"name":"P9","platform":"android","deviceId":"emulator-5556","source":"local","isVirtual":true,"status":"booted"}]}
+         {"name":"P8","platform":"android","source":"local","isVirtual":true,"identity":{"stableId":"Pixel_8"},"runtime":{"deviceId":"emulator-5554","deviceSessionUuid":"epoch-a","lifecycle":{"state":"booted","known":true}}},
+         {"name":"P9","platform":"android","source":"local","isVirtual":true,"identity":{"stableId":"Pixel_9"},"runtime":{"deviceId":"emulator-5556","lifecycle":{"state":"booted","known":true}}}]}
       """
         .trimIndent()
 

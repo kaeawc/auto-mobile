@@ -1,6 +1,5 @@
 package dev.jasonpearson.automobile.desktop.core.shell
 
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -22,11 +21,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.PointerButton
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.PointerIcon
@@ -114,7 +109,7 @@ fun DeviceListSection(
   LaunchedEffect(bootedDevices, suppressAutoSelect) {
     if (!suppressAutoSelect && bootedDevices.size == 1 && activeDeviceId == null) {
       val device = bootedDevices.first()
-      onDeviceSelected(device.deviceId, device.name)
+      onDeviceSelected(device.runtime.deviceId ?: device.identity.stableId, device.name)
     }
   }
 
@@ -122,7 +117,9 @@ fun DeviceListSection(
   val sortedDevices =
     remember(bootedDevices, favoriteDeviceIds) {
       bootedDevices.sortedWith(
-        compareByDescending<BootedDeviceInfo> { it.deviceId in favoriteDeviceIds }
+        compareByDescending<BootedDeviceInfo> {
+            (it.runtime.deviceId ?: it.identity.stableId) in favoriteDeviceIds
+          }
           .thenBy { it.name }
       )
     }
@@ -230,15 +227,16 @@ private fun DevicePlatformGroup(
       softWrap = false,
     )
     devices.forEach { device ->
+      val deviceId = device.runtime.deviceId ?: device.identity.stableId
       DeviceRow(
         device = device,
-        isSelected = device.deviceId == activeDeviceId,
-        isFavorite = device.deviceId in favoriteDeviceIds,
-        onSelect = { onDeviceSelected(device.deviceId, device.name) },
-        onToggleFavorite = { onToggleFavorite?.invoke(device.deviceId) },
+        isSelected = deviceId == activeDeviceId,
+        isFavorite = deviceId in favoriteDeviceIds,
+        onSelect = { onDeviceSelected(deviceId, device.name) },
+        onToggleFavorite = { onToggleFavorite?.invoke(deviceId) },
         onDeviceAction =
           onDeviceAction?.let { callback ->
-            { action: String -> callback(device.deviceId, action) }
+            { action: String -> callback(deviceId, action) }
           },
       )
     }
@@ -298,7 +296,7 @@ private fun DeviceRow(
           overflow = TextOverflow.Ellipsis,
         )
         Text(
-          "${device.status} \u00B7 ${device.deviceId}",
+          "${device.runtime.lifecycle.state} \u00B7 ${device.runtime.deviceId ?: device.identity.stableId}",
           fontSize = 10.sp,
           color = colors.text.normal.copy(alpha = 0.5f),
           maxLines = 1,
@@ -311,12 +309,6 @@ private fun DeviceRow(
         horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalAlignment = Alignment.CenterVertically,
       ) {
-        ConnectionTypeIcon(connectionType = device.connectionType)
-
-        if (device.batteryLevel != null) {
-          BatteryIcon(level = device.batteryLevel)
-        }
-
         if (isSelected) {
           Text(
             "\u2713",
@@ -352,100 +344,6 @@ private fun DeviceRow(
           onDeviceAction?.invoke("clearAppData")
         },
       )
-    }
-  }
-}
-
-@Composable
-private fun BatteryIcon(level: Int) {
-  val batteryColor =
-    when {
-      level <= 15 -> Color(0xFFE53935)
-      level <= 40 -> Color(0xFFFFA726)
-      else -> Color(0xFF4CAF50)
-    }
-
-  Canvas(modifier = Modifier.size(width = 16.dp, height = 10.dp)) {
-    val bodyWidth = size.width * 0.85f
-    val bodyHeight = size.height
-    val tipWidth = size.width - bodyWidth
-    val tipHeight = bodyHeight * 0.4f
-
-    // Battery body outline
-    drawRoundRect(
-      color = Color.Gray,
-      topLeft = Offset.Zero,
-      size = Size(bodyWidth, bodyHeight),
-      cornerRadius = CornerRadius(2f, 2f),
-      style = Stroke(width = 1.5f),
-    )
-
-    // Battery tip (positive terminal)
-    drawRoundRect(
-      color = Color.Gray,
-      topLeft = Offset(bodyWidth, (bodyHeight - tipHeight) / 2f),
-      size = Size(tipWidth, tipHeight),
-      cornerRadius = CornerRadius(1f, 1f),
-    )
-
-    // Fill level
-    val fillPadding = 2f
-    val maxFillWidth = bodyWidth - fillPadding * 2
-    val fillWidth = maxFillWidth * (level / 100f)
-    if (fillWidth > 0) {
-      drawRoundRect(
-        color = batteryColor,
-        topLeft = Offset(fillPadding, fillPadding),
-        size = Size(fillWidth, bodyHeight - fillPadding * 2),
-        cornerRadius = CornerRadius(1f, 1f),
-      )
-    }
-  }
-}
-
-/** Connection type indicator icon (USB or WiFi). */
-@Composable
-private fun ConnectionTypeIcon(connectionType: String?) {
-  when (connectionType) {
-    "usb" -> {
-      val color = Color(0xFF4CAF50)
-      Canvas(modifier = Modifier.size(10.dp)) {
-        val cx = size.width / 2f
-        drawLine(color, Offset(cx, 1f), Offset(cx, size.height - 1f), strokeWidth = 1.5f)
-        drawLine(color, Offset(cx - 3f, 2f), Offset(cx + 3f, 2f), strokeWidth = 1.5f)
-        drawLine(
-          color,
-          Offset(cx - 2f, size.height - 2f),
-          Offset(cx + 2f, size.height - 2f),
-          strokeWidth = 1.5f,
-        )
-      }
-    }
-    "wifi" -> {
-      val color = Color(0xFF2196F3)
-      Canvas(modifier = Modifier.size(10.dp)) {
-        val cx = size.width / 2f
-        val bottom = size.height - 1f
-        drawCircle(color, radius = 1.5f, center = Offset(cx, bottom))
-        drawArc(
-          color = color,
-          startAngle = 210f,
-          sweepAngle = 120f,
-          useCenter = false,
-          topLeft = Offset(cx - 4f, bottom - 6f),
-          size = Size(8f, 8f),
-          style = Stroke(width = 1.2f),
-        )
-        drawArc(
-          color = color,
-          startAngle = 210f,
-          sweepAngle = 120f,
-          useCenter = false,
-          topLeft = Offset(cx - 6f, bottom - 9f),
-          size = Size(12f, 12f),
-          style = Stroke(width = 1.2f),
-        )
-      }
     }
   }
 }

@@ -1047,10 +1047,10 @@ fun AutoMobileContent(
                     else -> DeviceType.AndroidPhysical
                   }
                 BootedDevice(
-                  id = dev.deviceId,
+                  id = dev.runtime.deviceId ?: dev.identity.stableId,
                   name = dev.name,
                   type = deviceType,
-                  status = dev.status,
+                  status = dev.runtime.lifecycle.state,
                 )
               }
               realDevices = allBootedDevices
@@ -1116,7 +1116,9 @@ fun AutoMobileContent(
                 val allDevices = parsed?.devices ?: emptyList()
                 val newDevices =
                   allDevices
-                    .filter { it.name != "Unknown" && it.status == "booted" }
+                    .filter {
+                      it.name != "Unknown" && it.runtime.lifecycle.state == "booted"
+                    }
                     .map { dev ->
                       val deviceType =
                         when {
@@ -1126,10 +1128,10 @@ fun AutoMobileContent(
                           else -> DeviceType.AndroidPhysical
                         }
                       BootedDevice(
-                        id = dev.deviceId,
+                        id = dev.runtime.deviceId ?: dev.identity.stableId,
                         name = dev.name,
                         type = deviceType,
-                        status = dev.status,
+                        status = dev.runtime.lifecycle.state,
                       )
                     }
                 realDevices = newDevices
@@ -2321,10 +2323,10 @@ fun AutoMobileContent(
               Spacer(Modifier.height(4.dp))
               val bootedIds = devices.map { it.id }.toSet()
               val androidImages = deviceImages.filter {
-                it.platform == "android" && (it.deviceId == null || it.deviceId !in bootedIds)
+                it.platform == "android" && it.identity.stableId !in bootedIds
               }
               val iosImages = deviceImages.filter {
-                it.platform == "ios" && (it.deviceId == null || it.deviceId !in bootedIds)
+                it.platform == "ios" && it.identity.stableId !in bootedIds
               }
               var showAndroid by remember { mutableStateOf(true) }
               var showIos by remember { mutableStateOf(true) }
@@ -2401,14 +2403,14 @@ fun AutoMobileContent(
                     androidImages
                       .filter { image ->
                         val apiLevel =
-                          extractApiLevel(image.target)
+                          image.apiLevel
                             ?: Regex("""(?i)api[_-]?(\d+)""")
                               .find(image.name)
                               ?.groupValues
                               ?.get(1)
                               ?.toIntOrNull()
                         val hasGoogleApis =
-                          image.target?.contains("google", ignoreCase = true) == true ||
+                          image.image.target?.contains("google", ignoreCase = true) == true ||
                             image.name.contains("-ga-", ignoreCase = true) ||
                             image.name.contains("Google", ignoreCase = true)
                         if (googleApisOnly && !hasGoogleApis) return@filter false
@@ -2443,7 +2445,7 @@ fun AutoMobileContent(
                                     ?.startDevice(
                                       image.name,
                                       image.platform,
-                                      image.deviceId,
+                                      image.identity.stableId,
                                     )
                                 } catch (e: Exception) {
                                   LOG.warn("Failed to start device ${image.name}: ${e.message}")
@@ -2499,7 +2501,7 @@ fun AutoMobileContent(
                   val allVersions =
                     remember(iosImages) {
                       iosImages
-                        .mapNotNull { it.iosVersion }
+                        .mapNotNull { it.osVersion }
                         .distinct()
                         .sortedWith(
                           compareBy(
@@ -2591,7 +2593,7 @@ fun AutoMobileContent(
                   val filteredIos =
                     iosImages
                       .filter { image ->
-                        val ver = image.iosVersion
+                        val ver = image.osVersion
                         val inRange = ver == null || ver in selectedVersions
                         val isIphone = image.name.contains("iPhone", ignoreCase = true)
                         val isIpad = image.name.contains("iPad", ignoreCase = true)
@@ -2608,7 +2610,7 @@ fun AutoMobileContent(
                   // Group by version, sorted descending
                   val iosByVersion =
                     filteredIos
-                      .groupBy { it.iosVersion ?: "Unknown" }
+                      .groupBy { it.osVersion ?: "Unknown" }
                       .toSortedMap(compareByDescending { it })
                   iosByVersion.forEach { (version, images) ->
                     Text(
@@ -2644,7 +2646,7 @@ fun AutoMobileContent(
                                       ?.startDevice(
                                         image.name,
                                         image.platform,
-                                        image.deviceId,
+                                        image.identity.stableId,
                                       )
                                   } catch (e: Exception) {
                                     LOG.warn("Failed to start device ${image.name}: ${e.message}")

@@ -44,7 +44,7 @@ class RealDeviceBootController(
             platform = device.platform.wireName(),
             deviceId = device.id,
           )
-        val runtimeId = result.deviceId
+        val runtimeId = result.resolvedDeviceId
         when {
           !result.success -> {
             val message = result.message ?: "Failed to boot ${device.name}"

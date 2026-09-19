@@ -14,12 +14,12 @@ with grep before citing. Full bug history: `references/history.md`.
 
 ## 1. Four identifiers, three lifecycles — never conflate them
 
-| Identifier               | Minted by                                                                                                             | Meaning                                                                                                                                                  | Persisted                               |
-| ------------------------ | --------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- |
-| `sessionUuid`            | `IdGenerator` in startDevice (`src/server/deviceTools.ts`), autolock (`src/daemon/devicePool.ts`), or client-supplied | **Who is driving**: client/test session owning one device; caches, tool-selection profile                                                                | yes (`device_sessions` table)           |
-| `deviceSessionUuid`      | `src/daemon/deviceSessionRegistry.ts`                                                                                 | **One device connection epoch**: minted per pool incarnation, retired on disconnect, re-minted on reconnect even for the same serial. Stream routing key | no — meaningless across daemon restarts |
-| `__mcpSessionId`         | socket-server connection / MCP transport                                                                              | Per-connection transport identity; implicit autolock resolution                                                                                          | no                                      |
-| `deviceId` (serial/UDID) | adb / simctl                                                                                                          | Human label + adb target only. **Mutable across reboots — never an identity key**                                                                        | n/a                                     |
+| Identifier                  | Minted by                                                                                                             | Meaning                                                                                                                                                  | Persisted                               |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- |
+| `sessionUuid`               | `IdGenerator` in startDevice (`src/server/deviceTools.ts`), autolock (`src/daemon/devicePool.ts`), or client-supplied | **Who is driving**: client/test session owning one device; caches, tool-selection profile                                                                | yes (`device_sessions` table)           |
+| `runtime.deviceSessionUuid` | `src/daemon/deviceSessionRegistry.ts`                                                                                 | **One device connection epoch**: minted per pool incarnation, retired on disconnect, re-minted on reconnect even for the same serial. Stream routing key | no — meaningless across daemon restarts |
+| `__mcpSessionId`            | socket-server connection / MCP transport                                                                              | Per-connection transport identity; implicit autolock resolution                                                                                          | no                                      |
+| `deviceId` (serial/UDID)    | adb / simctl                                                                                                          | Human label + adb target only. **Mutable across reboots — never an identity key**                                                                        | n/a                                     |
 
 Three lifecycles overlap: (A) pooled device (`PooledDevice.status` +
 `incarnation` in `devicePool.ts`), (B) device-session epoch (registry),
@@ -138,7 +138,7 @@ is kept — same session, same `incarnation` — but:
   device-attributed frames instead of broadcasting them to all-device
   subscribers — logged once per quarantine, not once per frame. The registry
   record is untouched underneath, so lifting the quarantine resumes the SAME
-  `deviceSessionUuid`; a replacement instead mints a new incarnation, whose uuid
+  `runtime.deviceSessionUuid`; a replacement instead mints a new incarnation, whose uuid
   routes while the retired one stays unresolvable.
 
 **Two funnels enforce this structurally — there is no per-site gating left.**
@@ -296,7 +296,7 @@ distinguished by the result type (`AppendTextFailureSource`), never by inspectin
 
 ## 2. Invariants (the contract every fix must preserve)
 
-1. **Epoch identity**: `deviceSessionUuid` = one device connection epoch.
+1. **Epoch identity**: `runtime.deviceSessionUuid` = one device connection epoch.
    Mint idempotent per incarnation; fresh mint on reconnect even with an
    identical serial; mint correctness must never depend on retire having
    fired (#5257).
@@ -521,7 +521,7 @@ comments. **A refactor that drops a comment silently drops an invariant.**
   `/manual-test` sweep, or
   `--cli startDevice`/`killDevice` against a real emulator; with ≥2
   emulators, sanity-check returned `deviceId` against `adb emu avd name`.
-- Streaming changes (`deviceSessionUuid` stamping, subscription routing)
+- Streaming changes (`runtime.deviceSessionUuid` stamping, subscription routing)
   are not exercised by standard device tools — they need a stream
   subscriber. A streaming-consumer smoke test is a known release-checklist
   gap; don't mark such changes verified off tool calls alone.

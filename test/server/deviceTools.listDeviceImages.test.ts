@@ -89,7 +89,7 @@ describe("listDeviceImages", function () {
     ]);
   });
 
-  test("preserves a stopped iOS simulator's raw state alias", async function () {
+  test("normalizes a stopped iOS simulator into canonical lifecycle state", async function () {
     const fakeDeviceManager = new FakeDeviceManager([
       {
         name: "iPhone 15",
@@ -108,13 +108,12 @@ describe("listDeviceImages", function () {
     const response = await tool.handler({ platform: "ios" });
     const payload = JSON.parse(response.content[0].text);
 
-    expect(payload.images[0].state).toBe("Shutdown");
-    expect(payload.images[0].lifecycle).toEqual({ state: "configured", known: true });
-    // The raw alias must stay inside the advertised output schema (strict MCP clients validate it).
+    expect(payload.images[0]).not.toHaveProperty("state");
+    expect(payload.images[0].runtime.lifecycle).toEqual({ state: "configured", known: true });
     expect(tool.outputSchema.safeParse(payload).success).toBe(true);
   });
 
-  test("advertises a null state alias for images without a platform state", async function () {
+  test("omits the removed raw state alias for images without a platform state", async function () {
     const fakeDeviceManager = new FakeDeviceManager([
       { name: "Pixel_8", platform: "android", deviceId: "Pixel_8", isRunning: false },
     ]);
@@ -128,7 +127,8 @@ describe("listDeviceImages", function () {
     const response = await tool.handler({ platform: "android" });
     const payload = JSON.parse(response.content[0].text);
 
-    expect(payload.images[0].state).toBeNull();
+    expect(payload.images[0]).not.toHaveProperty("state");
+    expect(payload.images[0].runtime.lifecycle).toEqual({ state: "configured", known: true });
     expect(tool.outputSchema.safeParse(payload).success).toBe(true);
   });
 
@@ -156,18 +156,14 @@ describe("listDeviceImages", function () {
     });
     const image = JSON.parse(response.content[0].text).images[0];
 
-    expect(image.provenance.android).toEqual({
+    expect(image.image).toEqual({
       path: "/tmp/Pixel_8.avd",
       target: "Google APIs",
       basedOn: "Android 16",
-      error: null,
     });
-    expect(image).toMatchObject({
-      path: "/tmp/Pixel_8.avd",
-      target: "Google APIs",
-      basedOn: "Android 16",
-      iosVersion: null,
-    });
+    expect(image.availabilityError).toBeNull();
+    expect(image).not.toHaveProperty("path");
+    expect(image).not.toHaveProperty("iosVersion");
   });
 
   test("preserves Android AVD discovery errors in the canonical availability field", async function () {
@@ -260,7 +256,9 @@ describe("listDeviceImages", function () {
         identity: expect.objectContaining({ stableId: "Pixel_9" }),
         name: "Pixel_9",
         platform: "android",
-        lifecycle: expect.objectContaining({ state: "booted", known: true }),
+        runtime: expect.objectContaining({
+          lifecycle: expect.objectContaining({ state: "booted", known: true }),
+        }),
       }),
     ]);
   });

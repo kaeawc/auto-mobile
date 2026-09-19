@@ -44,29 +44,22 @@ data class PickerDevice(
 
 /** An unresolved Android AVD probe reports a runtime label, not a source-image identity. */
 internal fun BootedDeviceInfo.knownSourceImageId(): String? =
-  identity?.stableId?.takeUnless {
+  identity.stableId.takeUnless {
+    val deviceId = runtime.deviceId
     platform.equals("android", ignoreCase = true) && (it == deviceId || it == "Unknown ($deviceId)")
   }
-
-private val ANDROID_TARGET = Regex("android-(\\d+)")
-private val API_IN_NAME = Regex("API (\\d+)")
 
 internal fun platformOf(raw: String): Platform =
   if (raw.equals("ios", ignoreCase = true)) Platform.Ios else Platform.Android
 
-private fun androidApiFromName(name: String): String? =
-  API_IN_NAME.find(name)?.groupValues?.getOrNull(1)
-
 private fun osOfImage(image: DeviceImageInfo): Pair<String?, String?> =
   when {
     image.platform.equals("ios", ignoreCase = true) -> {
-      val major = image.iosVersion?.substringBefore(".")?.takeIf { it.isNotBlank() }
+      val major = image.osVersion?.substringBefore(".")?.takeIf { it.isNotBlank() }
       major to major?.let { "iOS $it" }
     }
     else -> {
-      val api =
-        ANDROID_TARGET.find(image.target ?: "")?.groupValues?.getOrNull(1)
-          ?: androidApiFromName(image.name)
+      val api = image.apiLevel?.toString()
       api to api?.let { "API $it" }
     }
   }
@@ -87,33 +80,41 @@ private fun osOfImage(image: DeviceImageInfo): Pair<String?, String?> =
  * Physical devices are not re-keyed, so they dedup by exact id only and never hide a distinct
  * same-named shut-down image. This keeps devices that merely share a display name (common for
  * simulators) from vanishing when a sibling boots. Booted devices carry no OS/architecture from the
- * daemon today, so Android API is best-effort parsed from the name.
+ * daemon today.
  */
 fun buildPickerDevices(
   booted: List<BootedDeviceInfo>,
   images: List<DeviceImageInfo>,
   sourceImageToRuntimeId: Map<String, String> = emptyMap(),
 ): List<PickerDevice> {
-  val bootedIds = booted.map { platformOf(it.platform) to it.deviceId }.toSet()
-  val imageIds = images.map { platformOf(it.platform) to (it.deviceId ?: it.name) }.toSet()
+  val bootedIds =
+    booted.map { platformOf(it.platform) to (it.runtime.deviceId ?: it.identity.stableId) }.toSet()
+  val imageIds = images.map { platformOf(it.platform) to it.identity.stableId }.toSet()
   val runtimeToSourceImage =
     sourceImageToRuntimeId.entries.associate { (source, rt) -> rt to source }
 
   val bootedDevices = booted.map { device ->
-    val api =
-      androidApiFromName(device.name).takeIf { platformOf(device.platform) == Platform.Android }
+    val (osKey, osLabel) =
+      if (device.platform.equals("ios", ignoreCase = true)) {
+        val major = device.osVersion?.substringBefore(".")?.takeIf { it.isNotBlank() }
+        major to major?.let { "iOS $it" }
+      } else {
+        val api = device.apiLevel?.toString()
+        api to api?.let { "API $it" }
+      }
+    val deviceId = device.runtime.deviceId ?: device.identity.stableId
     PickerDevice(
-      id = device.deviceId,
+      id = deviceId,
       name = device.name,
       platform = platformOf(device.platform),
       state = DeviceState.Booted,
-      osKey = api,
-      osLabel = api?.let { "API $it" },
+      osKey = osKey,
+      osLabel = osLabel,
       architecture = null,
       // Seed value only; an unknown (null) lock state seeds unlocked and the host poll refines it.
       locked = device.locked == true,
       isVirtual = device.isVirtual,
-      deviceSessionUuid = device.deviceSessionUuid,
+      deviceSessionUuid = device.runtime.deviceSessionUuid,
     )
   }
 
@@ -126,22 +127,23 @@ fun buildPickerDevices(
         // The daemon can still carry its unresolved AVD-name sentinel as stableId. It is
         // not a new identity and must not replace an attribution from a successful boot.
         val stableId = device.knownSourceImageId()
-        (stableId ?: runtimeToSourceImage[device.deviceId])?.let {
+        val deviceId = device.runtime.deviceId ?: device.identity.stableId
+        (stableId ?: runtimeToSourceImage[deviceId])?.let {
           platformOf(device.platform) to it
         }
       }
       .toSet()
 
-  // Legacy resources carry no stable identity. A name can only reconcile an unambiguous
+  // An unresolved stable identity can only reconcile an unambiguous
   // same-platform image; never hide an arbitrary sibling with the same display name.
   val imageNameCounts = images.groupingBy { platformOf(it.platform) to it.name }.eachCount()
   val hideByName =
     booted
       .filter {
         it.isVirtual &&
-          it.identity == null &&
-          (platformOf(it.platform) to it.deviceId) !in imageIds &&
-          it.deviceId !in runtimeToSourceImage
+          it.knownSourceImageId() == null &&
+          (platformOf(it.platform) to (it.runtime.deviceId ?: it.identity.stableId)) !in imageIds &&
+          (it.runtime.deviceId ?: it.identity.stableId) !in runtimeToSourceImage
       }
       .groupingBy { platformOf(it.platform) to it.name }
       .eachCount()
@@ -150,13 +152,13 @@ fun buildPickerDevices(
 
   val shutdownDevices =
     images
-      .filter { (platformOf(it.platform) to (it.deviceId ?: it.name)) !in bootedIds }
-      .filter { (platformOf(it.platform) to (it.deviceId ?: it.name)) !in attributedSourceIds }
+      .filter { (platformOf(it.platform) to it.identity.stableId) !in bootedIds }
+      .filter { (platformOf(it.platform) to it.identity.stableId) !in attributedSourceIds }
       .filter { (platformOf(it.platform) to it.name) !in hideByName }
       .map { image ->
         val (osKey, osLabel) = osOfImage(image)
         PickerDevice(
-          id = image.deviceId ?: image.name,
+          id = image.identity.stableId,
           name = image.name,
           platform = platformOf(image.platform),
           state = DeviceState.Shutdown,

@@ -248,10 +248,10 @@ class DevicePickerViewModel(
       check(
         images.none { image ->
           image.platform.equals("ios", ignoreCase = true) &&
-            image.state != null &&
-            !image.state.equals("Shutdown", ignoreCase = true) &&
+            image.runtime.lifecycle.state != "configured" &&
             booted.none {
-              it.platform.equals(image.platform, ignoreCase = true) && it.deviceId == image.deviceId
+              it.platform.equals(image.platform, ignoreCase = true) &&
+                (it.runtime.deviceId ?: it.identity.stableId) == image.identity.stableId
             }
         }
       ) {
@@ -277,11 +277,12 @@ class DevicePickerViewModel(
       check(
         devices.none { it.platform == Platform.Android && it.state == DeviceState.Shutdown } ||
           booted.none {
+            val deviceId = it.runtime.deviceId ?: it.identity.stableId
             it.platform.equals("android", ignoreCase = true) &&
               it.isVirtual &&
               it.knownSourceImageId() == null &&
-              (it.name == it.deviceId || it.name == "Unknown (${it.deviceId})") &&
-              it.deviceId !in bootedImageRuntimeIds[Platform.Android].orEmpty().values
+              (it.name == deviceId || it.name == "Unknown ($deviceId)") &&
+              deviceId !in bootedImageRuntimeIds[Platform.Android].orEmpty().values
           }
       ) {
         "Android emulator identity is unavailable; refresh after its AVD name can be discovered"

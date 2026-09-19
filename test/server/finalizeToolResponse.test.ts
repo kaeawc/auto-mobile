@@ -2633,14 +2633,14 @@ describe("finalizeToolResponse", () => {
         const finalized = finalizeToolResponse(
           createStructuredToolResponse({
             success: true,
-            sessionUuid,
+            sessionId: sessionUuid,
             operationId: "o".repeat(DEFAULT_OBSERVATION_INLINE_MAX_BYTES + 1),
           }),
           { name: "provisionDevice", artifactMode: "oversized", artifactWriter: writer } as any,
         );
 
         expect(writer.writes).toHaveLength(1);
-        expect((finalized.structuredContent as any).sessionUuid).toBe(sessionUuid);
+        expect((finalized.structuredContent as any).sessionId).toBe(sessionUuid);
         expect(getDeviceSessionIdFromResult({ content: finalized.content })).toBe(sessionUuid);
       });
 

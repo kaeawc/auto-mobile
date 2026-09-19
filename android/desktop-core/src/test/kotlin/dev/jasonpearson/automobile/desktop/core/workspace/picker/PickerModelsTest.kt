@@ -3,6 +3,8 @@ package dev.jasonpearson.automobile.desktop.core.workspace.picker
 import dev.jasonpearson.automobile.desktop.core.mcp.BootedDeviceInfo
 import dev.jasonpearson.automobile.desktop.core.mcp.DeviceIdentity
 import dev.jasonpearson.automobile.desktop.core.mcp.DeviceImageInfo
+import dev.jasonpearson.automobile.desktop.core.mcp.DeviceLifecycle
+import dev.jasonpearson.automobile.desktop.core.mcp.DeviceRuntime
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -13,14 +15,24 @@ class PickerModelsTest {
     BootedDeviceInfo(
       name = name,
       platform = "android",
-      deviceId = deviceId,
       source = "local",
       isVirtual = isVirtual,
-      status = "booted",
+      identity = DeviceIdentity(deviceId),
+      runtime =
+        DeviceRuntime(
+          deviceId = deviceId,
+          connectionId = deviceId,
+          lifecycle = DeviceLifecycle("booted", true),
+        ),
     )
 
   private fun image(name: String, deviceId: String) =
-    DeviceImageInfo(name = name, platform = "android", deviceId = deviceId)
+    DeviceImageInfo(
+      name = name,
+      platform = "android",
+      identity = DeviceIdentity(deviceId),
+      runtime = DeviceRuntime(lifecycle = DeviceLifecycle("configured", true)),
+    )
 
   @Test
   fun `an unresolved AVD probe preserves the successful boot attribution`() {
@@ -29,7 +41,7 @@ class PickerModelsTest {
         booted =
           listOf(
             booted("Unknown (emulator-5554)", "emulator-5554", true)
-              .copy(identity = DeviceIdentity("Unknown (emulator-5554)", "emulator-5554"))
+              .copy(identity = DeviceIdentity("Unknown (emulator-5554)"))
           ),
         images = listOf(image("Pixel", "avd_a")),
         sourceImageToRuntimeId = mapOf("avd_a" to "emulator-5554"),
@@ -45,8 +57,14 @@ class PickerModelsTest {
           listOf(
             booted("Unknown (emulator-5554)", "emulator-5554", true)
               .copy(
-                identity = DeviceIdentity("avd_b", "transport-new"),
-                deviceSessionUuid = "epoch-new",
+                identity = DeviceIdentity("avd_b"),
+                runtime =
+                  DeviceRuntime(
+                    deviceId = "emulator-5554",
+                    connectionId = "transport-new",
+                    deviceSessionUuid = "epoch-new",
+                    lifecycle = DeviceLifecycle("booted", true),
+                  ),
               )
           ),
         images = listOf(image("Pixel", "avd_a"), image("Pixel", "avd_b")),
@@ -126,16 +144,65 @@ class PickerModelsTest {
             BootedDeviceInfo(
               name = "iPhone 15",
               platform = "ios",
-              deviceId = "udid-1",
               source = "local",
               isVirtual = false,
-              status = "booted",
+              identity = DeviceIdentity("udid-1"),
+              runtime =
+                DeviceRuntime(
+                  deviceId = "udid-1",
+                  connectionId = "udid-1",
+                  lifecycle = DeviceLifecycle("booted", true),
+                ),
             )
           ),
         images = emptyList(),
       )
 
     assertEquals(false, physical.single().isVirtual)
+  }
+
+  @Test
+  fun `booted devices derive OS grouping from their platform`() {
+    val devices =
+      buildPickerDevices(
+        booted =
+          listOf(
+            BootedDeviceInfo(
+              name = "iPhone 15",
+              platform = "ios",
+              source = "local",
+              isVirtual = true,
+              identity = DeviceIdentity("ios-udid"),
+              osVersion = "17.0",
+              runtime =
+                DeviceRuntime(
+                  deviceId = "ios-udid",
+                  connectionId = "ios-udid",
+                  lifecycle = DeviceLifecycle("booted", true),
+                ),
+            ),
+            BootedDeviceInfo(
+              name = "Pixel 8",
+              platform = "android",
+              source = "local",
+              isVirtual = true,
+              identity = DeviceIdentity("android-id"),
+              apiLevel = 34,
+              runtime =
+                DeviceRuntime(
+                  deviceId = "android-id",
+                  connectionId = "android-id",
+                  lifecycle = DeviceLifecycle("booted", true),
+                ),
+            ),
+          ),
+        images = emptyList(),
+      )
+
+    assertEquals("17", devices.first { it.id == "ios-udid" }.osKey)
+    assertEquals("iOS 17", devices.first { it.id == "ios-udid" }.osLabel)
+    assertEquals("34", devices.first { it.id == "android-id" }.osKey)
+    assertEquals("API 34", devices.first { it.id == "android-id" }.osLabel)
   }
 
   @Test
@@ -147,11 +214,16 @@ class PickerModelsTest {
             BootedDeviceInfo(
               name = "Pixel 8",
               platform = "android",
-              deviceId = "emulator-5554",
               source = "local",
               isVirtual = true,
-              status = "booted",
-              deviceSessionUuid = "epoch-a",
+              identity = DeviceIdentity("Pixel_8"),
+              runtime =
+                DeviceRuntime(
+                  deviceId = "emulator-5554",
+                  connectionId = "emulator-5554",
+                  deviceSessionUuid = "epoch-a",
+                  lifecycle = DeviceLifecycle("booted", true),
+                ),
             )
           ),
         images = emptyList(),

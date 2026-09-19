@@ -102,34 +102,6 @@ interface AndroidProvenance {
   error?: string;
 }
 
-interface LegacySourceFacts {
-  deviceId: string | null;
-  isAvailable: boolean | null;
-  formFactor: FormFactor | null;
-}
-
-// The phase-1 canonical shape intentionally excludes configured-image transport identity and
-// availability. Retain those source facts privately long enough for legacyAliases() to reproduce
-// the pre-canonical wire values without polluting the canonical record.
-const legacySourceFacts = new WeakMap<DeviceDescription, LegacySourceFacts>();
-
-function setLegacySourceFacts(
-  description: DeviceDescription,
-  deviceId: string | null,
-  isAvailable: boolean | null,
-  formFactor: FormFactor | undefined,
-): void {
-  legacySourceFacts.set(description, {
-    deviceId,
-    isAvailable,
-    formFactor: formFactor ?? null,
-  });
-}
-
-function legacyFormFactor(description: DeviceDescription): FormFactor | null {
-  return legacySourceFacts.get(description)?.formFactor ?? null;
-}
-
 export type DeviceDescriptionInput =
   | {
       kind: "image";
@@ -256,7 +228,7 @@ function describeImage(
         : (image.deviceId ?? image.name);
   const lifecycle = imageLifecycle(image);
   const staticFacts = staticFactsFrom(image);
-  const description: DeviceDescription = {
+  return {
     name: image.name,
     platform,
     isVirtual: true,
@@ -291,13 +263,6 @@ function describeImage(
       orientation: orientation ?? null,
     },
   };
-  setLegacySourceFacts(
-    description,
-    image.deviceId ?? null,
-    platform === "ios" ? (image.isAvailable ?? null) : null,
-    image.formFactor,
-  );
-  return description;
 }
 
 // oxlint-disable-next-line complexity -- one exhaustive canonical booted projection preserves precedence.
@@ -328,7 +293,7 @@ function describeBooted(
       : device.deviceId;
   const ownership = session ? (session.ownership ?? "owned") : null;
   const staticFacts = staticFactsFrom(merged);
-  const description: DeviceDescription = {
+  return {
     name: device.name,
     platform: device.platform,
     isVirtual,
@@ -357,8 +322,6 @@ function describeBooted(
       orientation: orientation ?? null,
     },
   };
-  setLegacySourceFacts(description, device.deviceId, null, merged.formFactor);
-  return description;
 }
 
 // oxlint-disable-next-line complexity -- each optional runtime fact follows documented precedence.
@@ -520,135 +483,25 @@ function capabilityInventory(device: DeviceInfo, isVirtual: boolean): Capability
   };
 }
 
-export interface LegacyAliases {
-  identity: {
-    deviceId: string | null;
-    connectionId: string | null;
-    deviceSessionUuid: string | null;
-  };
-  lifecycle: DeviceDescription["runtime"]["lifecycle"];
-  readiness: DeviceDescription["runtime"]["readiness"];
-  session: {
-    sessionUuid: string | null;
-    ownership: DeviceSessionOwnership | null;
-    poolStatus: DevicePoolStatus | null;
-  };
-  display: { formFactor: FormFactor | null };
-  provenance: {
-    android: {
-      path: string | null;
-      target: string | null;
-      basedOn: string | null;
-      error: string | null;
-    } | null;
-    ios: { isAvailable: boolean | null; availabilityError: string | null } | null;
-  };
-  runtime: {
-    osVersion: string | null;
-    apiLevel: number | null;
-    runtimeId: string | null;
-    deviceType: string | null;
-    architecture: string | null;
-    model: string | null;
-  };
-}
-
-export type DeviceDescriptionWithLegacyAliases = Omit<
-  DeviceDescription,
-  "identity" | "display" | "runtime"
-> &
-  Omit<LegacyAliases, "identity" | "display" | "runtime"> & {
-    identity: DeviceDescription["identity"] & LegacyAliases["identity"];
-    display: DeviceDescription["display"] & LegacyAliases["display"];
-    runtime: DeviceDescription["runtime"] & LegacyAliases["runtime"];
-  };
-
-export type ListDevicesEntry = DeviceDescriptionWithLegacyAliases;
-export type ProvisionedDevice = DeviceDescriptionWithLegacyAliases;
-export type ConfiguredImage = DeviceDescriptionWithLegacyAliases;
-export type BootedDeviceDescription = DeviceDescriptionWithLegacyAliases;
-
-export function legacyAliases(description: DeviceDescription): LegacyAliases {
-  const sourceFacts = legacySourceFacts.get(description);
-  const sessionUuid = description.runtime.session?.sessionUuid ?? null;
-  const ownership = description.runtime.session?.ownership ?? null;
-  return {
-    identity: {
-      deviceId: description.runtime.deviceId ?? sourceFacts?.deviceId ?? null,
-      connectionId: description.runtime.connectionId,
-      deviceSessionUuid: description.runtime.deviceSessionUuid,
-    },
-    lifecycle: description.runtime.lifecycle,
-    readiness: description.runtime.readiness,
-    session: {
-      sessionUuid,
-      ownership,
-      poolStatus: description.runtime.poolStatus,
-    },
-    display: { formFactor: legacyFormFactor(description) },
-    provenance:
-      description.platform === "android"
-        ? {
-            android: {
-              path: description.image.path,
-              target: description.image.target,
-              basedOn: description.image.basedOn,
-              error: description.availabilityError,
-            },
-            ios: null,
-          }
-        : {
-            android: null,
-            ios: {
-              isAvailable: sourceFacts?.isAvailable ?? null,
-              availabilityError: description.availabilityError,
-            },
-          },
-    runtime: {
-      osVersion: description.osVersion,
-      apiLevel: description.apiLevel,
-      runtimeId: description.runtimeId,
-      deviceType: description.deviceType,
-      architecture: description.architecture,
-      model: description.model,
-    },
-  };
-}
-
-function projectWithLegacyAliases(
-  description: DeviceDescription,
-): DeviceDescriptionWithLegacyAliases {
-  const aliases = legacyAliases(description);
-  return {
-    ...description,
-    ...aliases,
-    identity: { ...description.identity, ...aliases.identity },
-    display: { ...description.display, ...aliases.display },
-    runtime: { ...description.runtime, ...aliases.runtime },
-  };
-}
+export type ListDevicesEntry = DeviceDescription;
+export type ProvisionedDevice = DeviceDescription;
+export type ConfiguredImage = DeviceDescription;
+export type BootedDeviceDescription = DeviceDescription;
 
 export function projectListDevicesEntry(description: DeviceDescription): ListDevicesEntry {
-  return projectWithLegacyAliases(description);
+  return description;
 }
 
 export function projectProvisionedDevice(description: DeviceDescription): ProvisionedDevice {
-  return projectWithLegacyAliases(description);
+  return description;
 }
 
 export function projectConfiguredImage(description: DeviceDescription): ConfiguredImage {
-  return projectWithLegacyAliases(description);
+  return description;
 }
 
 export function projectBootedDevice(description: DeviceDescription): BootedDeviceDescription {
-  return projectWithLegacyAliases(description);
-}
-
-/** Deprecated `iosVersion` applies only to iOS image records. */
-export function legacyIosVersion(
-  description: Pick<DeviceDescription, "platform" | "osVersion">,
-): string | null {
-  return description.platform === "ios" ? description.osVersion : null;
+  return description;
 }
 
 /** Applies a later automation probe without letting a producer reimplement readiness mapping. */
@@ -656,7 +509,7 @@ export function withDeviceServiceStatus(
   description: DeviceDescription,
   serviceStatus: DeviceServiceStatusLike | undefined,
 ): DeviceDescription {
-  const updated: DeviceDescription = {
+  return {
     ...description,
     runtime: {
       ...description.runtime,
@@ -664,11 +517,6 @@ export function withDeviceServiceStatus(
       serviceStatus: serviceStatus ?? null,
     },
   };
-  const sourceFacts = legacySourceFacts.get(description);
-  if (sourceFacts) {
-    legacySourceFacts.set(updated, sourceFacts);
-  }
-  return updated;
 }
 
 /** Applies observed live state without rebuilding or reinterpreting static device facts. */
@@ -679,7 +527,7 @@ export function withDeviceRuntimeObservation(
     orientation?: "portrait" | "landscape";
   },
 ): DeviceDescription {
-  const updated: DeviceDescription = {
+  return {
     ...description,
     runtime: {
       ...description.runtime,
@@ -687,21 +535,18 @@ export function withDeviceRuntimeObservation(
       ...(observation.orientation === undefined ? {} : { orientation: observation.orientation }),
     },
   };
-  const sourceFacts = legacySourceFacts.get(description);
-  if (sourceFacts) {
-    legacySourceFacts.set(updated, sourceFacts);
-  }
-  return updated;
 }
 
 const nullableString = z.string().nullable();
 const nullableNumber = z.number().nullable();
 const formFactorSchema = z.enum(["phone", "tablet", "foldable", "unknown"]);
-const lifecycleSchema = z.object({
-  state: z.enum(["configured", "booting", "booted", "shutting-down", "unavailable"]),
-  known: z.boolean(),
-});
-const readinessSchema = z.object({ state: z.enum(["unknown", "not_ready", "ready"]) });
+const lifecycleSchema = z
+  .object({
+    state: z.enum(["configured", "booting", "booted", "shutting-down", "unavailable"]),
+    known: z.boolean(),
+  })
+  .strict();
+const readinessSchema = z.object({ state: z.enum(["unknown", "not_ready", "ready"]) }).strict();
 const serviceStatusSchema = z
   .object({
     installed: z.boolean(),
@@ -718,120 +563,81 @@ const serviceStatusSchema = z
         build: z.string().optional(),
         source: z.enum(["android-package", "ios-runner-bundle"]),
       })
+      .strict()
       .optional(),
     supportedCommandsComplete: z.boolean().nullable().optional(),
     supportedFeaturesComplete: z.boolean().nullable().optional(),
   })
+  .strict()
   .nullable();
-export const deviceDescriptionSchema = z.object({
-  identity: z.object({
-    stableId: z.string(),
-    deviceId: nullableString,
-    connectionId: nullableString,
-    deviceSessionUuid: nullableString,
-  }),
-  name: z.string(),
-  platform: z.enum(["android", "ios"]),
-  isVirtual: z.boolean(),
-  source: z.enum(["local", "remote"]).nullable(),
-  formFactor: formFactorSchema,
-  deviceType: nullableString,
-  model: nullableString,
-  architecture: nullableString,
-  osVersion: nullableString,
-  apiLevel: nullableNumber,
-  runtimeId: nullableString,
-  runtime: z.object({
-    deviceId: nullableString,
-    connectionId: nullableString,
-    deviceSessionUuid: nullableString,
-    lifecycle: lifecycleSchema,
-    readiness: readinessSchema,
-    poolStatus: z.enum(["idle", "assigned", "error"]).nullable(),
-    session: z
+export const deviceDescriptionSchema = z
+  .object({
+    identity: z
       .object({
-        sessionUuid: nullableString,
-        ownership: z.enum(["owned", "awaiting-owner"]).nullable(),
+        stableId: z.string(),
       })
-      .nullable(),
-    serviceStatus: serviceStatusSchema,
-    locked: z.boolean().nullable(),
-    orientation: z.enum(["portrait", "landscape"]).nullable(),
+      .strict(),
+    name: z.string(),
+    platform: z.enum(["android", "ios"]),
+    isVirtual: z.boolean(),
+    source: z.enum(["local", "remote"]).nullable(),
+    formFactor: formFactorSchema,
+    deviceType: nullableString,
+    model: nullableString,
+    architecture: nullableString,
     osVersion: nullableString,
     apiLevel: nullableNumber,
     runtimeId: nullableString,
-    deviceType: nullableString,
-    architecture: nullableString,
-    model: nullableString,
-  }),
-  display: z.object({
-    width: nullableNumber,
-    height: nullableNumber,
-    density: nullableNumber,
-    formFactor: formFactorSchema.nullable(),
-  }),
-  lifecycle: lifecycleSchema,
-  readiness: readinessSchema,
-  session: z.object({
-    sessionUuid: nullableString,
-    ownership: z.enum(["owned", "awaiting-owner"]).nullable(),
-    poolStatus: z.enum(["idle", "assigned", "error"]).nullable(),
-  }),
-  provenance: z.object({
-    android: z
+    runtime: z
       .object({
-        path: nullableString,
-        target: nullableString,
-        basedOn: nullableString,
-        error: nullableString,
+        deviceId: nullableString,
+        connectionId: nullableString,
+        deviceSessionUuid: nullableString,
+        lifecycle: lifecycleSchema,
+        readiness: readinessSchema,
+        poolStatus: z.enum(["idle", "assigned", "error"]).nullable(),
+        session: z
+          .object({
+            sessionUuid: nullableString,
+            ownership: z.enum(["owned", "awaiting-owner"]).nullable(),
+          })
+          .strict()
+          .nullable(),
+        serviceStatus: serviceStatusSchema,
+        locked: z.boolean().nullable(),
+        orientation: z.enum(["portrait", "landscape"]).nullable(),
       })
+      .strict(),
+    display: z
+      .object({
+        width: nullableNumber,
+        height: nullableNumber,
+        density: nullableNumber,
+      })
+      .strict(),
+    capabilityInventory: z
+      .object({
+        schemaVersion: z.number(),
+        capabilities: z.array(
+          z
+            .object({
+              id: z.string(),
+              state: z.enum(["supported", "unsupported", "unknown"]),
+              reason: nullableString,
+              source: nullableString,
+            })
+            .strict(),
+        ),
+      })
+      .strict()
       .nullable(),
-    ios: z
-      .object({ isAvailable: z.boolean().nullable(), availabilityError: nullableString })
-      .nullable(),
-  }),
-  capabilityInventory: z
-    .object({
-      schemaVersion: z.number(),
-      capabilities: z.array(
-        z.object({
-          id: z.string(),
-          state: z.enum(["supported", "unsupported", "unknown"]),
-          reason: nullableString,
-          source: nullableString,
-        }),
-      ),
-    })
-    .nullable(),
-  image: z.object({ path: nullableString, target: nullableString, basedOn: nullableString }),
-  availabilityError: nullableString,
-});
-
-export const listDevicesEntrySchema = deviceDescriptionSchema
-  .extend({
-    deviceId: z.string(),
-    apiLevel: nullableNumber,
-    osVersion: nullableString,
-    formFactor: formFactorSchema.nullable(),
+    image: z
+      .object({ path: nullableString, target: nullableString, basedOn: nullableString })
+      .strict(),
+    availabilityError: nullableString,
   })
-  .passthrough();
-export const provisionedDeviceSchema = deviceDescriptionSchema.passthrough();
-export const configuredImageSchema = deviceDescriptionSchema.extend({
-  stableId: z.string(),
-  deviceId: nullableString,
-  path: nullableString,
-  target: nullableString,
-  basedOn: nullableString,
-  error: nullableString,
-  // Compat alias carrying the RAW platform state (simctl `Shutdown`/`Booted`/…; null when
-  // the platform has none) — the desktop picker string-compares it. Normalized state is in
-  // `lifecycle.state`.
-  state: nullableString,
-  isAvailable: z.boolean(),
-  availabilityError: nullableString,
-  iosVersion: nullableString,
-  deviceType: nullableString,
-  legacyRuntimeId: nullableString,
-  model: nullableString,
-  architecture: nullableString,
-});
+  .strict();
+
+export const listDevicesEntrySchema = deviceDescriptionSchema;
+export const provisionedDeviceSchema = deviceDescriptionSchema;
+export const configuredImageSchema = deviceDescriptionSchema;

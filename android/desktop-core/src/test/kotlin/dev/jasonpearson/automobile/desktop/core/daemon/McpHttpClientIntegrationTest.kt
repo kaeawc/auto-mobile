@@ -152,15 +152,30 @@ class McpHttpClientIntegrationTest {
   fun `callTool passes arguments through`() {
     daemon.setToolResponse(
       "startDevice",
-      mcpToolResponse("""{"success":true,"message":"started"}"""),
+      mcpToolResponse(
+        """{"success":true,"runtime":{"deviceId":"emulator-5554"},"message":"started"}"""
+      ),
     )
 
     val result =
       client.startDevice(name = "Pixel_6", platform = "android", deviceId = "emulator-5554")
 
     assertTrue(result.success)
+    assertEquals("emulator-5554", result.resolvedDeviceId)
     assertEquals("started", result.message)
     assertTrue(daemon.calls.contains("tools/call:startDevice"))
+  }
+
+  @Test
+  fun `startDevice retains the legacy top-level runtime id`() {
+    daemon.setToolResponse(
+      "startDevice",
+      mcpToolResponse("""{"success":true,"deviceId":"emulator-5554"}"""),
+    )
+
+    val result = client.startDevice(name = "Pixel_6", platform = "android")
+
+    assertEquals("emulator-5554", result.resolvedDeviceId)
   }
 
   @Test

@@ -132,14 +132,14 @@ describe("listDevices tool (#5870)", () => {
       expect.arrayContaining([
         expect.objectContaining({
           platform: "android",
-          deviceId: "emulator-5554",
-          identity: expect.objectContaining({ deviceId: "emulator-5554" }),
+          runtime: expect.objectContaining({ deviceId: "emulator-5554" }),
           name: "Pixel_9_API_36",
         }),
         expect.objectContaining({
           platform: "ios",
-          deviceId: "E2F46BCE-4C97-4AA0-BD9D-544756FAB545",
-          identity: expect.objectContaining({ deviceId: "E2F46BCE-4C97-4AA0-BD9D-544756FAB545" }),
+          runtime: expect.objectContaining({
+            deviceId: "E2F46BCE-4C97-4AA0-BD9D-544756FAB545",
+          }),
           name: "iPhone 17",
         }),
       ]),
@@ -151,12 +151,12 @@ describe("listDevices tool (#5870)", () => {
     ).toBe(true);
   });
 
-  test("keeps unknown booted form factors null in deprecated aliases", async () => {
+  test("normalizes unknown booted form factors canonically", async () => {
     const payload = await callListDevices({ platform: "android" });
     const device = payload.devices[0];
 
-    expect(device.formFactor).toBeNull();
-    expect(device.display.formFactor).toBeNull();
+    expect(device.formFactor).toBe("unknown");
+    expect(device.display).not.toHaveProperty("formFactor");
   });
 
   test("provides structuredContent for the authenticated acceptance forwarding path", async () => {
@@ -167,7 +167,7 @@ describe("listDevices tool (#5870)", () => {
       count: 1,
       devices: [
         expect.objectContaining({
-          identity: expect.objectContaining({ deviceId: "emulator-5554" }),
+          runtime: expect.objectContaining({ deviceId: "emulator-5554" }),
         }),
       ],
     });
@@ -250,7 +250,7 @@ describe("listDevices tool (#5870)", () => {
     expect(payload.devices).toEqual([
       expect.objectContaining({
         platform: "android",
-        identity: expect.objectContaining({ deviceId: "emulator-5554" }),
+        runtime: expect.objectContaining({ deviceId: "emulator-5554" }),
       }),
     ]);
 
@@ -301,17 +301,17 @@ describe("listDevices tool (#5870)", () => {
       expect.arrayContaining([
         expect.objectContaining({
           platform: "android",
-          identity: expect.objectContaining({ deviceId: "emulator-5554" }),
+          runtime: expect.objectContaining({ deviceId: "emulator-5554" }),
         }),
         expect.objectContaining({
           platform: "ios",
-          identity: expect.objectContaining({ deviceId: "00008120-001A2D3E4F5B6A2E" }),
+          runtime: expect.objectContaining({ deviceId: "00008120-001A2D3E4F5B6A2E" }),
         }),
       ]),
     );
     expect(
       payload.devices.some(
-        (d: { identity: { deviceId: string } }) => d.identity.deviceId === ios.deviceId,
+        (d: { runtime: { deviceId: string } }) => d.runtime.deviceId === ios.deviceId,
       ),
     ).toBe(false);
 
@@ -367,7 +367,7 @@ describe("listDevices tool (#5870)", () => {
     expect(payload.devices).toEqual([
       expect.objectContaining({
         platform: "android",
-        identity: expect.objectContaining({ deviceId: "emulator-5554" }),
+        runtime: expect.objectContaining({ deviceId: "emulator-5554" }),
       }),
     ]);
   });
@@ -375,8 +375,8 @@ describe("listDevices tool (#5870)", () => {
   test("omits Android version metadata when no admitted image has it", async () => {
     const payload = await callListDevices({ platform: "android" });
 
-    expect(payload.devices[0].runtime.apiLevel).toBeNull();
-    expect(payload.devices[0].runtime.osVersion).toBeNull();
+    expect(payload.devices[0].apiLevel).toBeNull();
+    expect(payload.devices[0].osVersion).toBeNull();
   });
 
   test("uses configured image facts when an idle booted Android device has no admitted image", async () => {
@@ -403,13 +403,9 @@ describe("listDevices tool (#5870)", () => {
     const payload = await callListDevices({ platform: "android" });
 
     expect(payload.devices[0]).toMatchObject({
-      runtime: {
-        apiLevel: 36,
-        osVersion: "16",
-        runtimeId: "system-images;android-36;google_apis;arm64-v8a",
-        deviceType: "pixel_9",
-      },
-      display: { width: 1080, height: 2400, density: 420, formFactor: "phone" },
+      runtimeId: "system-images;android-36;google_apis;arm64-v8a",
+      deviceType: "pixel_9",
+      display: { width: 1080, height: 2400, density: 420 },
       capabilityInventory: expect.any(Object),
       image: {
         path: "/tmp/Pixel_9_API_36.avd",
@@ -438,7 +434,7 @@ describe("listDevices tool (#5870)", () => {
       const payload = JSON.parse(response.content?.[0]?.text ?? "{}");
       const configuredDiscoveryCall = fakeDeviceUtils.getGetDeviceImagesDetailedCalls().at(-1);
 
-      expect(payload.devices[0].runtime.apiLevel).toBeNull();
+      expect(payload.devices[0].apiLevel).toBeNull();
       expect(configuredDiscoveryCall).toEqual(
         expect.objectContaining({
           platform: "android",
@@ -478,8 +474,9 @@ describe("listDevices tool (#5870)", () => {
       expect(payload.devices).toEqual([
         expect.objectContaining({
           platform: "android",
-          identity: expect.objectContaining({ deviceId: android.deviceId }),
-          runtime: expect.objectContaining({ apiLevel: 36, osVersion: "16" }),
+          runtime: expect.objectContaining({ deviceId: android.deviceId }),
+          apiLevel: 36,
+          osVersion: "16",
         }),
       ]);
     } finally {
@@ -506,7 +503,7 @@ describe("listDevices tool (#5870)", () => {
     try {
       const payload = await callListDevices({ platform: "android" });
 
-      expect(payload.devices[0].session.sessionUuid).toBe("busy-session");
+      expect(payload.devices[0].runtime.session.sessionUuid).toBe("busy-session");
     } finally {
       DaemonState.getInstance().reset();
       sessionManager.stopCleanupTimer();
@@ -535,7 +532,7 @@ describe("listDevices tool (#5870)", () => {
 
     try {
       const payload = await callListDevices({ platform: "android" });
-      expect(payload.devices[0].identity.deviceSessionUuid).toBe(
+      expect(payload.devices[0].runtime.deviceSessionUuid).toBe(
         registry.getByDeviceId(android.deviceId)?.deviceSessionUuid,
       );
     } finally {
@@ -576,14 +573,14 @@ describe("listDevices tool (#5870)", () => {
     try {
       const payload = await callListDevices({ platform: "android" });
       const device = payload.devices.find(
-        (entry: { identity: { deviceId: string } }) =>
-          entry.identity.deviceId === replacement.deviceId,
+        (entry: { runtime: { deviceId: string } }) =>
+          entry.runtime.deviceId === replacement.deviceId,
       );
 
       expect(pool.isPooledIdentityUnresolved(android.deviceId)).toBe(true);
-      expect(device?.runtime.apiLevel).toBeNull();
-      expect(device?.runtime.osVersion).toBeNull();
-      expect(device?.identity.deviceSessionUuid).toBeNull();
+      expect(device?.apiLevel).toBeNull();
+      expect(device?.osVersion).toBeNull();
+      expect(device?.runtime.deviceSessionUuid).toBeNull();
     } finally {
       DaemonState.getInstance().reset();
       sessionManager.stopCleanupTimer();

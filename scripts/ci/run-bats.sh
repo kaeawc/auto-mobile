@@ -128,21 +128,96 @@ classify_files() {
   done < <(find "$bats_dir" -type f -name '*.bats' -print0)
 }
 
+tap_plan_complete() {
+  local output_file="$1"
+  awk '
+    /^1\.\.[0-9]+$/ {
+      plan_count += 1
+      plan = substr($0, 4)
+    }
+    /^ok [0-9]+ / { ok_count += 1 }
+    /^not ok / { failed = 1 }
+    END {
+      exit(plan_count == 1 && !failed && ok_count == plan ? 0 : 1)
+    }
+  ' "$output_file"
+}
+
 run_parallel_files() {
   local list_file="$1"
   local jobs="$2"
   local joblog="$3"
+  local output_dir sequence=0 bats_file output_file job_status exitval signal trailing_signal
+  local parallel_status=0 rc=0
   if [[ ! -s "$list_file" ]]; then
     return 0
   fi
 
+  output_dir="$(mktemp -d)"
   parallel \
     --jobs "$jobs" \
     --keep-order \
     --halt never \
     --joblog "$joblog" \
     -0 \
-    bats {} < "$list_file"
+    "bats {} > \"${output_dir}\"/{#}.out 2>&1" < "$list_file" || parallel_status=$?
+
+  while IFS= read -r -d '' bats_file; do
+    sequence=$((sequence + 1))
+    output_file="${output_dir}/${sequence}.out"
+    if [[ ! -f "$output_file" ]]; then
+      log "ERROR: GNU Parallel did not capture BATS output for ${bats_file}"
+      rc=1
+      continue
+    fi
+    cat "$output_file" || rc=1
+
+    job_status="$(awk -v sequence="$sequence" 'NR > 1 && $1 == sequence { print $7, $8; exit }' "$joblog")"
+    if [[ -z "$job_status" ]]; then
+      log "ERROR: GNU Parallel did not write a job log entry for ${bats_file}"
+      rc=1
+      continue
+    fi
+    read -r exitval signal <<< "$job_status"
+    if ! [[ "$exitval" =~ ^[0-9]+$ && "$signal" =~ ^[0-9]+$ ]]; then
+      log "ERROR: invalid GNU Parallel job log status for ${bats_file}: ${job_status}"
+      rc=1
+      continue
+    fi
+    if ! tap_plan_complete "$output_file"; then
+      log "ERROR: ${bats_file} did not produce a complete passing BATS TAP plan"
+      rc=1
+      continue
+    fi
+    if [[ "$exitval" == "0" && "$signal" == "0" ]]; then
+      continue
+    fi
+    # Redirection in the command string makes GNU Parallel run a shell wrapper.
+    # If BATS is terminated, that wrapper commonly exits 128+signal instead of
+    # being reported in the job log's Signal column. Accept either indicator,
+    # but only after the complete passing TAP-plan guard above.
+    trailing_signal=0
+    if [[ "$signal" != "0" ]]; then
+      trailing_signal="$signal"
+    elif [[ "$exitval" -gt 128 && "$exitval" -le 192 ]]; then
+      trailing_signal=$((exitval - 128))
+    fi
+    if [[ "$trailing_signal" != "0" ]]; then
+      log "note: ${bats_file} plan complete despite trailing signal ${trailing_signal}; treating as pass — see #5813"
+      continue
+    fi
+    log "ERROR: ${bats_file} exited ${exitval} without a signal"
+    rc=1
+  done < "$list_file"
+
+  rm -rf "$output_dir"
+  # GNU Parallel reports a non-zero aggregate status for signalled jobs. The
+  # per-file job-log and TAP checks above distinguish the benign #5813 case
+  # from real failures, including missing job records and incomplete plans.
+  if [[ "$parallel_status" != "0" && "$rc" == "0" ]]; then
+    return 0
+  fi
+  return "$rc"
 }
 
 run_serial_files() {

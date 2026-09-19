@@ -5,6 +5,7 @@ import path from "node:path";
 import { DefaultFileDownloader } from "../../src/utils/FileDownloader";
 
 type NodeHttpDownloader = {
+  onFirstResponseByte?: () => void;
   downloadWithNodeHttp(
     url: string,
     destination: string,
@@ -74,12 +75,17 @@ describe("DefaultFileDownloader downloadWithNodeHttp (end to end, real socket)",
     // response — so it proves the `downloadWithNodeHttp` -> `pipeResponseToFile`
     // wiring, not just the helper in isolation, detects it.
     const partial = Buffer.from("partial body");
+    let markFirstByteReceived!: () => void;
+    const firstByteReceived = new Promise<void>((resolve) => {
+      markFirstByteReceived = resolve;
+    });
     const server = http.createServer((request, response) => {
       response.writeHead(200, { "content-length": String(partial.length * 5) });
-      // The write callback runs after Node has handed the partial body to
-      // the socket. Closing there makes the mid-body close explicit without
-      // relying on a load-sensitive timer.
-      response.write(partial, () => request.socket.destroy());
+      // Gate the socket destruction on the client observing the first body
+      // chunk, making the mid-body close deterministic without a timer.
+      response.write(partial, () => {
+        void firstByteReceived.then(() => request.socket.destroy());
+      });
     });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const address = server.address();
@@ -93,6 +99,7 @@ describe("DefaultFileDownloader downloadWithNodeHttp (end to end, real socket)",
     tempDir = await fs.mkdtemp(path.join(scratchDir, "node-http-mid-close-"));
     const destination = path.join(tempDir, "file.bin");
     const downloader = asNodeHttpDownloader(new DefaultFileDownloader());
+    downloader.onFirstResponseByte = markFirstByteReceived;
 
     try {
       // Bun's `node:http` client surfaces a real mid-body socket close as

@@ -1334,6 +1334,45 @@ describe("provisionDevice handler", () => {
     expect(exactProvisioner.requests).toHaveLength(1);
   });
 
+  test("coordinates configured iOS provisioning replays with teardown", async () => {
+    const timer = new FakeTimer();
+    const lifecycleCoordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
+    setDeviceToolsDependencies({ timer, lifecycleCoordinator });
+    registerDeviceTools();
+    const tool = ToolRegistry.getTool("provisionDevice");
+    if (!tool) {
+      throw new Error("provisionDevice not registered");
+    }
+    const args = {
+      ...provisionTestArgs("ios", "operation-replay-ios-lifecycle"),
+      boot: false,
+      readiness: "none" as const,
+    };
+    exactProvisioner.provision = async (request) => {
+      exactProvisioner.requests.push(request);
+      return provisionedTestDevice("ios", false);
+    };
+    await tool.handler(args);
+    await Promise.resolve();
+    const teardownLease = await lifecycleCoordinator.reserve(
+      { kind: "stable", platform: "ios", stableId: "SIM-123" },
+      { operation: "teardown", deadlineMs: 1_000 },
+    );
+    let replaySettled = false;
+    const replay = tool.handler(args).finally(() => {
+      replaySettled = true;
+    });
+
+    for (let attempt = 0; attempt < 10; attempt++) {
+      await Promise.resolve();
+    }
+    expect(replaySettled).toBe(false);
+
+    teardownLease.release();
+    await replay;
+    expect(exactProvisioner.requests).toHaveLength(1);
+  });
+
   test("slices one absolute deadline across a replay instead of re-granting timeoutMs", async () => {
     const timer = new FakeTimer();
     const lifecycleCoordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);

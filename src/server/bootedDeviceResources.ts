@@ -137,24 +137,17 @@ export interface ServiceStatusDiagnostic {
   reason: string;
 }
 
-// The resource keeps its diagnostic siblings alongside the full canonical description.
+// The resource keeps resource-specific metadata alongside the full canonical description.
 interface BootedDeviceInfo extends BootedDeviceDescription {
   recoveryEligibility: DeviceRecoveryEligibility | null;
-  serviceStatus: DeviceServiceStatus | null;
   /**
    * Set when the bounded service-status probe for this observation timed out or
    * failed (CtrlProxy loopback refused/reset). The device stays booted and
    * present; this only says the automation-service snapshot is momentarily
-   * unknown, never that the device is unavailable. Distinct from `serviceStatus`
+   * unknown, never that the device is unavailable. Distinct from `runtime.serviceStatus`
    * simply being absent for a non-probeable (quarantined) entry (#7053).
    */
   serviceStatusDiagnostic?: ServiceStatusDiagnostic;
-  /**
-   * Whether the device's keyguard/lock screen currently obscures the app. Android only (from
-   * `dumpsys window policy`); omitted when unread or on iOS, where no lock-state probe exists yet.
-   * Consumed by the desktop workspace to gate the contextual Unlock control (issue #4694).
-   */
-  locked: boolean | null;
   /**
    * Set when the pool holds this serial under an IDENTITY QUARANTINE: the serial
    * resolves, but which AVD answers on it does not.
@@ -427,8 +420,6 @@ function toBootedDeviceInfo(
   return {
     ...projected,
     recoveryEligibility: poolContext?.poolInfo.recoveryEligibility ?? null,
-    serviceStatus: null,
-    locked: null,
     identityUnresolved: false,
   };
 }
@@ -955,7 +946,6 @@ function withServiceStatus(
   return {
     ...device,
     runtime: { ...device.runtime, ...updated.runtime },
-    serviceStatus,
     // A confirmed status supersedes any transient diagnostic from an earlier failed probe.
     serviceStatusDiagnostic: undefined,
   };
@@ -994,7 +984,6 @@ async function enrichDeviceLockStates(devices: BootedDeviceInfo[]): Promise<void
           ...devices[i].runtime,
           ...withDeviceRuntimeObservation(devices[i], { locked: result.value }).runtime,
         },
-        locked: result.value,
       };
     }
   }

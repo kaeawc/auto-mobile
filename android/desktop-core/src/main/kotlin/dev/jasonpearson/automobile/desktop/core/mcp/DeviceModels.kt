@@ -109,9 +109,6 @@ data class BootedDeviceInfo(
   val image: DeviceImage = DeviceImage(),
   val availabilityError: String? = null,
   val runtime: DeviceRuntime,
-  // Resource-specific diagnostic siblings outside the canonical description.
-  val serviceStatus: DeviceServiceStatus? = null,
-  val locked: Boolean? = null,
   val identityUnresolved: Boolean = false,
 )
 

@@ -89,15 +89,15 @@ class DeviceResourceParserTest {
                   "runtime": {
                     "deviceId": "emulator-5554",
                     "connectionId": "emulator-5554",
-                    "lifecycle": { "state": "booted", "known": true }
-                  },
-                  "serviceStatus": {
+                    "lifecycle": { "state": "booted", "known": true },
+                    "serviceStatus": {
                       "installed": true,
                       "enabled": true,
                       "running": true,
                       "installedSha256": "abc123",
                       "expectedSha256": "abc123",
                       "isCompatible": true
+                    }
                   }
               }
           ]
@@ -107,7 +107,7 @@ class DeviceResourceParserTest {
 
     val result = DeviceResourceParser.parseBootedDevices(json)
     assertNotNull(result)
-    val status = result.devices[0].serviceStatus
+    val status = result.devices[0].runtime.serviceStatus
     assertNotNull(status)
     assertTrue(status.installed)
     assertTrue(status.running)

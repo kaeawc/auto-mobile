@@ -20,8 +20,6 @@ function bootedIosDevice(deviceId: string) {
   return {
     ...description,
     recoveryEligibility: null,
-    serviceStatus: null,
-    locked: null,
     identityUnresolved: false,
   };
 }
@@ -133,7 +131,8 @@ describe("booted iOS service-status transient handling (#7053)", () => {
     expect(devices[0].runtime.lifecycle.state).toBe("booted");
     // Transient marker attached; readiness untouched (never demoted to not_ready).
     expect(devices[0].serviceStatusDiagnostic?.state).toBe("timeout");
-    expect(devices[0].serviceStatus).toBeNull();
+    expect(devices[0].runtime.serviceStatus).toBeNull();
+    expect("serviceStatus" in devices[0]).toBe(false);
     expect(devices[0].runtime.readiness).toEqual({ state: "unknown" });
   });
 
@@ -157,8 +156,8 @@ describe("booted iOS service-status transient handling (#7053)", () => {
 
     expect(devices2).toHaveLength(1);
     expect(devices2[0].runtime.deviceId).toBe("SIM-A");
-    expect(devices2[0].serviceStatus).toEqual(readyServiceStatus);
     expect(devices2[0].runtime.serviceStatus).toEqual(readyServiceStatus);
+    expect("serviceStatus" in devices2[0]).toBe(false);
     expect(devices2[0].serviceStatusDiagnostic).toBeUndefined();
   });
 });

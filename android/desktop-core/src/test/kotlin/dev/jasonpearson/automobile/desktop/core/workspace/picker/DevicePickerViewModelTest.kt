@@ -1082,7 +1082,7 @@ class DevicePickerViewModelTest {
     ): String {
       val api = apiLevel?.toString() ?: "null"
       val lock = locked?.toString() ?: "null"
-      return """{"name":"$name","platform":"$platform","isVirtual":$isVirtual,"source":"local","identity":{"stableId":"$stableId"},"formFactor":"phone","deviceType":null,"model":null,"architecture":null,"osVersion":null,"apiLevel":$api,"runtimeId":null,"display":{"width":null,"height":null,"density":null},"capabilityInventory":null,"image":{"path":null,"target":null,"basedOn":null},"availabilityError":null,"runtime":{"deviceId":"$deviceId","connectionId":"$deviceId#1","deviceSessionUuid":null,"lifecycle":{"state":"booted","known":true},"readiness":{"state":"unknown"},"poolStatus":"idle","session":null,"serviceStatus":null,"locked":$lock,"orientation":null},"serviceStatus":null,"locked":$lock,"identityUnresolved":false}"""
+      return """{"name":"$name","platform":"$platform","isVirtual":$isVirtual,"source":"local","identity":{"stableId":"$stableId"},"formFactor":"phone","deviceType":null,"model":null,"architecture":null,"osVersion":null,"apiLevel":$api,"runtimeId":null,"display":{"width":null,"height":null,"density":null},"capabilityInventory":null,"image":{"path":null,"target":null,"basedOn":null},"availabilityError":null,"runtime":{"deviceId":"$deviceId","connectionId":"$deviceId#1","deviceSessionUuid":null,"lifecycle":{"state":"booted","known":true},"readiness":{"state":"unknown"},"poolStatus":"idle","session":null,"serviceStatus":null,"locked":$lock,"orientation":null},"identityUnresolved":false}"""
     }
 
     private fun imageResponse(vararg images: String): String {

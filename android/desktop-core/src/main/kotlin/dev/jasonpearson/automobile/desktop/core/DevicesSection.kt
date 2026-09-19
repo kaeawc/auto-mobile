@@ -450,7 +450,7 @@ private fun BootedDeviceRow(
     }
 
     // Service status row
-    val serviceStatus = device.serviceStatus
+    val serviceStatus = device.runtime.serviceStatus
     if (serviceStatus != null) {
       Row(
         horizontalArrangement = Arrangement.spacedBy(6.dp),

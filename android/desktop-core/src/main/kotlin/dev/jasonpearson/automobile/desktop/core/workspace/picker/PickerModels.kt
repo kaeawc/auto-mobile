@@ -112,7 +112,7 @@ fun buildPickerDevices(
       osLabel = osLabel,
       architecture = null,
       // Seed value only; an unknown (null) lock state seeds unlocked and the host poll refines it.
-      locked = device.locked == true,
+      locked = device.runtime.locked == true,
       isVirtual = device.isVirtual,
       deviceSessionUuid = device.runtime.deviceSessionUuid,
     )

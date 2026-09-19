@@ -12,7 +12,8 @@ const val DEVICE_LOCK_STATES_RESOURCE_URI = "automobile:devices/lockStates"
 /**
  * URI of the full booted-devices resource. The poll falls back to this when a daemon does not
  * expose [DEVICE_LOCK_STATES_RESOURCE_URI] — an older server reached over a non-reconciling HTTP or
- * STDIO transport — since `automobile:devices/booted` also carries each device's `locked` flag.
+ * STDIO transport — since `automobile:devices/booted` also carries each device's `runtime.locked`
+ * flag.
  */
 const val BOOTED_DEVICES_RESOURCE_URI = "automobile:devices/booted"
 
@@ -31,15 +32,14 @@ fun parseDeviceLockStates(content: String): Map<String, Boolean> =
 
 /**
  * Fallback for older daemons that lack [DEVICE_LOCK_STATES_RESOURCE_URI]: derive the same `deviceId
- * -> locked` snapshot from the full `automobile:devices/booted` payload, whose
- * [dev.jasonpearson.automobile.desktop.core.mcp.BootedDeviceInfo.locked] flag was added in #4694.
- * Same omit-when-unknown / empty-on-malformed contract as [parseDeviceLockStates].
+ * -> locked` snapshot from the full `automobile:devices/booted` payload. Same omit-when-unknown /
+ * empty-on-malformed contract as [parseDeviceLockStates].
  */
 fun parseBootedLockStates(content: String): Map<String, Boolean> =
   DeviceResourceParser.parseBootedDevices(content)
     ?.devices
     ?.mapNotNull { device ->
-      device.locked?.let { (device.runtime.deviceId ?: device.identity.stableId) to it }
+      device.runtime.locked?.let { (device.runtime.deviceId ?: device.identity.stableId) to it }
     }
     ?.toMap() ?: emptyMap()
 

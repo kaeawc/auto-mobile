@@ -634,7 +634,11 @@ async function runToolViaDaemon(
     // every follow-up `--cli` call failed with `session_ownership_lost`. Runs on
     // the failure path too: a tool call that threw still leaves the session the
     // caller will retry against. Never throws (see adoptCliSessionLiveness).
-    await proxy.adoptCliSessionLiveness();
+    // listDevices is observation only. Declaring CLI liveness after it would
+    // turn an awaiting-owner session into owned merely because it was listed.
+    if (toolName !== "listDevices") {
+      await proxy.adoptCliSessionLiveness();
+    }
     // Always close the proxy connection to prevent connection leaks
     await proxy.close();
   }

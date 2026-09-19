@@ -1259,10 +1259,14 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         // tools carry their admitted identity into execution in ToolRegistry.
         await DaemonState.getInstance()
           .getSessionManager()
-          .admitIssuedSessionForAutomation(providedSessionUuid, {
-            executionId: execution.id,
-            startTime: execution.startTime,
-          });
+          .admitIssuedSessionForAutomation(
+            providedSessionUuid,
+            {
+              executionId: execution.id,
+              startTime: execution.startTime,
+            },
+            name === "listDevices" ? { access: "read-only" } : undefined,
+          );
       }
       const runToolHandler = () =>
         runWithToolSelectionContext(

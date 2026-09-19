@@ -18,6 +18,13 @@ import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepositor
 import { FakeTimer } from "../fakes/FakeTimer";
 import { defaultTimer } from "../../src/utils/SystemTimer";
 import { AndroidAvdProvenanceCache } from "../../src/utils/AndroidAvdProvenanceCache";
+import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
+import { createTestDatabase } from "../db/testDbHelper";
+import {
+  BOOTED_DEVICE_RESOURCE_URIS,
+  registerBootedDeviceResources,
+  setDeviceManager,
+} from "../../src/server/bootedDeviceResources";
 
 const resolveWithFakeTimer = async <T>(
   promise: Promise<T>,
@@ -87,6 +94,41 @@ describe("listDevices tool (#5870)", () => {
     expect(tool).toBeDefined();
     const fakeTimer = new FakeTimer();
     return await resolveWithFakeTimer(tool!.handler(args), fakeTimer);
+  };
+
+  const createAwaitingOwnerHarness = async () => {
+    const db = await createTestDatabase();
+    const timer = new FakeTimer();
+    const repository = new DeviceSessionRepository(db, timer);
+    const sessionManager = new SessionManager(timer, repository);
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      fakeDeviceUtils,
+      new DefaultRetryExecutor(timer),
+      repository,
+    );
+    await pool.addDevice(android, { platform: "android", name: android.name, isRunning: true });
+    await pool.assignDeviceToSession("rehydrated-session", "android", {
+      platform: "android",
+      stableDeviceId: android.name,
+      deviceId: android.deviceId,
+      androidEmulator: true,
+      initialOwnership: "awaiting-owner",
+    });
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    return {
+      db,
+      sessionManager,
+      pool,
+      close: async () => {
+        DaemonState.getInstance().reset();
+        sessionManager.stopCleanupTimer();
+        await db.destroy();
+      },
+    };
   };
 
   beforeAll(() => {
@@ -507,6 +549,65 @@ describe("listDevices tool (#5870)", () => {
     } finally {
       DaemonState.getInstance().reset();
       sessionManager.stopCleanupTimer();
+    }
+  });
+
+  test("read-only admission does not reclaim an awaiting-owner session", async () => {
+    const harness = await createAwaitingOwnerHarness();
+    try {
+      await harness.sessionManager.admitIssuedSessionForAutomation(
+        "rehydrated-session",
+        undefined,
+        { access: "read-only" },
+      );
+
+      expect(harness.sessionManager.getSession("rehydrated-session")?.ownership).toBe(
+        "awaiting-owner",
+      );
+    } finally {
+      await harness.close();
+    }
+  });
+
+  test("listDevices and the booted-devices resource project the same ownership", async () => {
+    const harness = await createAwaitingOwnerHarness();
+    const previousResource = ResourceRegistry.getResource(BOOTED_DEVICE_RESOURCE_URIS.ALL_BOOTED);
+    setDeviceManager(fakeDeviceUtils);
+    if (!previousResource) {
+      registerBootedDeviceResources();
+    }
+    try {
+      const listed = await callListDevices({ platform: "android" });
+      const resource = ResourceRegistry.getResource(BOOTED_DEVICE_RESOURCE_URIS.ALL_BOOTED);
+      expect(resource).toBeDefined();
+      const resourceContent = await resource!.handler();
+      const resourcePayload = JSON.parse(resourceContent.text ?? "{}");
+      const listedOwnership = listed.devices.find(
+        (device: any) => device.runtime.session?.sessionUuid === "rehydrated-session",
+      )?.runtime.session.ownership;
+      const resourceOwnership = resourcePayload.devices.find(
+        (device: any) => device.runtime.session?.sessionUuid === "rehydrated-session",
+      )?.runtime.session.ownership;
+
+      expect(listedOwnership).toBe("awaiting-owner");
+      expect(resourceOwnership).toBe(listedOwnership);
+    } finally {
+      setDeviceManager(null);
+      if (!previousResource) {
+        ResourceRegistry.unregister(BOOTED_DEVICE_RESOURCE_URIS.ALL_BOOTED);
+      }
+      await harness.close();
+    }
+  });
+
+  test("ordinary admission still reclaims an awaiting-owner session", async () => {
+    const harness = await createAwaitingOwnerHarness();
+    try {
+      await harness.sessionManager.admitIssuedSessionForAutomation("rehydrated-session");
+
+      expect(harness.sessionManager.getSession("rehydrated-session")?.ownership).toBe("owned");
+    } finally {
+      await harness.close();
     }
   });
 

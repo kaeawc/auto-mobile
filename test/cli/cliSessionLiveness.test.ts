@@ -690,6 +690,22 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
     expect(declarations).toHaveLength(1);
   });
 
+  test("runCliCommand does not declare ownership after listDevices", async () => {
+    const declarations: number[] = [];
+    setDaemonProxyFactoryForTesting((): any => ({
+      callTool: async (): Promise<any> => ({ success: true }),
+      adoptCliSessionLiveness: async (): Promise<string | undefined> => {
+        declarations.push(1);
+        return "awaiting-owner-session";
+      },
+      close: async (): Promise<void> => {},
+    }));
+
+    await runCliCommand(["listDevices"]);
+
+    expect(declarations).toEqual([]);
+  });
+
   test("runCliCommand still declares the policy when the tool call throws", async () => {
     const declarations: number[] = [];
     setDaemonProxyFactoryForTesting((): any => ({

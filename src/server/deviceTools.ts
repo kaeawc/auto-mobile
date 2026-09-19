@@ -1033,16 +1033,22 @@ function listDevicePayloads(
   devicePool: DevicePool | undefined,
   configuredImages: ReadonlyMap<string, StableConfiguredDeviceImage>,
 ) {
+  const sessionManager = DaemonState.getInstance().isInitialized()
+    ? DaemonState.getInstance().getSessionManager()
+    : undefined;
   return booted.map((device) => {
     const pooled = devicePool?.describesPooledRuntime(device)
       ? (devicePool.getDevice(device.deviceId) ?? undefined)
+      : undefined;
+    const session = pooled?.sessionId
+      ? (sessionManager?.getSession(pooled.sessionId) ?? { sessionId: pooled.sessionId })
       : undefined;
     const description = describeDevice({
       kind: "booted",
       device,
       pooled,
       configured: configuredImageForBootedDevice(device, configuredImages),
-      session: pooled?.sessionId ? { sessionId: pooled.sessionId } : undefined,
+      session,
       deviceSessionUuid: pooled ? initializedDeviceSessionUuid(device.deviceId) : undefined,
     });
     return projectListDevicesEntry(description);

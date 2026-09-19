@@ -390,6 +390,8 @@ export interface SessionDeviceAssigner {
   ): Promise<string>;
 }
 
+type SessionAccess = "acquire" | "read-only";
+
 /** Persisted identity required before recovering a session after daemon restart. */
 export interface SessionRecoveryTarget {
   platform: Platform;
@@ -1183,6 +1185,16 @@ export class SessionManager {
     }
   }
 
+  private async refreshExistingSessionForAccess(
+    existing: Session,
+    access: SessionAccess,
+  ): Promise<void> {
+    if (access === "read-only") {
+      return;
+    }
+    await this.reclaimAndRefreshExistingSession(existing);
+  }
+
   async getOrCreateSession(
     sessionId: string,
     devicePool?: SessionDeviceAssigner,
@@ -1195,6 +1207,7 @@ export class SessionManager {
     // device just because a device pool is in scope. Internal fresh mints
     // (device-label derived sessions) leave it false and keep minting.
     requireIssuedSession = false,
+    access: SessionAccess = "acquire",
   ): Promise<Session> {
     const pendingRebind = this.pendingSessionRebinds.get(sessionId);
     if (pendingRebind) {
@@ -1205,6 +1218,7 @@ export class SessionManager {
         platform,
         execution,
         requireIssuedSession,
+        access,
       );
     }
 
@@ -1219,12 +1233,13 @@ export class SessionManager {
           platform,
           undefined,
           requireIssuedSession,
+          access,
         );
       }
       logger.info(
         `[SessionManager] Found existing session ${sessionId} with device ${existing.assignedDevice}`,
       );
-      await this.reclaimAndRefreshExistingSession(existing);
+      await this.refreshExistingSessionForAccess(existing, access);
       return existing;
     }
 
@@ -1248,6 +1263,7 @@ export class SessionManager {
         platform,
         undefined,
         requireIssuedSession,
+        access,
       );
     }
 
@@ -1256,6 +1272,7 @@ export class SessionManager {
       devicePool,
       platform,
       requireIssuedSession,
+      access,
     );
   }
 
@@ -1269,12 +1286,13 @@ export class SessionManager {
     devicePool: SessionDeviceAssigner | undefined,
     platform: Platform | undefined,
     requireIssuedSession: boolean,
+    access: SessionAccess,
   ): Promise<Session> {
     const pendingAssignment = this.pendingSessionAssignments.get(sessionId);
     if (pendingAssignment) {
       const joined = await pendingAssignment;
-      // A client that joined a startup rehydration is the owner returning.
-      if (joined.ownership === "awaiting-owner") {
+      // An acquiring client that joined a startup rehydration is the owner returning.
+      if (access === "acquire" && joined.ownership === "awaiting-owner") {
         joined.ownership = "owned";
         joined.awaitingOwnerSince = undefined;
       }
@@ -1304,10 +1322,28 @@ export class SessionManager {
   async admitIssuedSessionForAutomation(
     sessionId: string,
     execution?: SessionExecutionMetadata,
+    options: { access?: SessionAccess } = {},
   ): Promise<Session | undefined> {
     let unissuedSessionError: UnissuedSessionError | undefined;
     try {
-      return await this.getOrCreateSession(sessionId, undefined, undefined, execution);
+      if (options.access === "read-only") {
+        // Inventory reads still validate the forwarded identity, but observing a
+        // startup-rehydrated session is not proof that its owner returned. In
+        // particular, do not enter reclaimAndRefreshExistingSession(), whose
+        // acquisition semantics promote awaiting-owner to owned.
+        const existing = this.getSessionForNewExecution(sessionId, execution);
+        if (existing) {
+          return existing;
+        }
+      }
+      return await this.getOrCreateSession(
+        sessionId,
+        undefined,
+        undefined,
+        execution,
+        false,
+        options.access,
+      );
     } catch (error) {
       if (!(error instanceof UnissuedSessionError)) {
         throw error;

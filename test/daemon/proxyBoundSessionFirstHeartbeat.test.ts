@@ -90,6 +90,151 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
     clearHeartbeatEnv();
   });
 
+  test("does not bind or heartbeat an awaiting-owner session from listDevices", async () => {
+    await sessionManager.createSession(
+      BOUND_SESSION,
+      "emulator-5554",
+      "android",
+      60_000,
+      undefined,
+      undefined,
+      undefined,
+      "awaiting-owner",
+    );
+    const fakeClient = new FakeDaemonClient({
+      toolResultFor: (toolName) =>
+        toolName === "listDevices"
+          ? {
+              content: [{ type: "text", text: JSON.stringify({ devices: [] }) }],
+              structuredContent: { devices: [] },
+            }
+          : undefined,
+      onCallDaemonMethod: (method, params) => {
+        if (method === "daemon/heartbeat" && typeof params.sessionId === "string") {
+          sessionManager.recordHeartbeat(params.sessionId);
+        }
+      },
+    });
+    const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+    const proxy = new DaemonMcpProxy({
+      clientFactory: () => fakeClient,
+      daemonManager: matchingDaemonManager(),
+      autoStartDaemon: false,
+      timer,
+    });
+    const pendingIntervalsBefore = timer.getPendingIntervalCount();
+
+    try {
+      await expect(
+        proxy.callTool("listDevices", { sessionUuid: BOUND_SESSION }),
+      ).resolves.toMatchObject({ structuredContent: { devices: [] } });
+
+      expect(
+        fakeClient.callDaemonMethodCalls.filter((call) => call.method === "daemon/heartbeat"),
+      ).toEqual([]);
+      expect(timer.getPendingIntervalCount()).toBe(pendingIntervalsBefore);
+      expect(sessionManager.getSession(BOUND_SESSION)?.ownership).toBe("awaiting-owner");
+    } finally {
+      isAvailableSpy.mockRestore();
+      await proxy.close();
+    }
+  });
+
+  test.each(["error result", "thrown error"] as const)(
+    "does not bind or heartbeat listDevices after an %s",
+    async (failureKind) => {
+      const sessionId = `${BOUND_SESSION}-${failureKind.replace(" ", "-")}`;
+      await sessionManager.createSession(
+        sessionId,
+        "emulator-5554",
+        "android",
+        60_000,
+        undefined,
+        undefined,
+        undefined,
+        "awaiting-owner",
+      );
+      const fakeClient = new FakeDaemonClient({
+        toolResult:
+          failureKind === "error result"
+            ? { isError: true, content: [{ type: "text", text: "inventory failed" }] }
+            : undefined,
+        onCallTool: () => {
+          if (failureKind === "thrown error") {
+            throw new Error("inventory failed");
+          }
+        },
+        onCallDaemonMethod: (method, params) => {
+          if (method === "daemon/heartbeat" && typeof params.sessionId === "string") {
+            sessionManager.recordHeartbeat(params.sessionId);
+          }
+        },
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => fakeClient,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+        timer,
+      });
+      const pendingIntervalsBefore = timer.getPendingIntervalCount();
+
+      try {
+        const call = proxy.callTool("listDevices", { sessionUuid: sessionId });
+        if (failureKind === "thrown error") {
+          await expect(call).rejects.toThrow("inventory failed");
+        } else {
+          await expect(call).resolves.toMatchObject({ isError: true });
+        }
+
+        expect(
+          fakeClient.callDaemonMethodCalls.filter((entry) => entry.method === "daemon/heartbeat"),
+        ).toEqual([]);
+        expect(timer.getPendingIntervalCount()).toBe(pendingIntervalsBefore);
+        expect(sessionManager.getSession(sessionId)?.ownership).toBe("awaiting-owner");
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    },
+  );
+
+  test("still binds and heartbeats an awaiting-owner session from a real session tool", async () => {
+    await sessionManager.createSession(
+      BOUND_SESSION,
+      "emulator-5554",
+      "android",
+      60_000,
+      undefined,
+      undefined,
+      undefined,
+      "awaiting-owner",
+    );
+    const fakeClient = heartbeatForwardingClient(sessionManager);
+    const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+    const proxy = new DaemonMcpProxy({
+      clientFactory: () => fakeClient,
+      daemonManager: matchingDaemonManager(),
+      autoStartDaemon: false,
+      timer,
+    });
+    const pendingIntervalsBefore = timer.getPendingIntervalCount();
+
+    try {
+      await proxy.callTool("tapOn", { sessionUuid: BOUND_SESSION, x: 10, y: 20 });
+      await Promise.resolve();
+
+      expect(
+        fakeClient.callDaemonMethodCalls.filter((call) => call.method === "daemon/heartbeat"),
+      ).toHaveLength(1);
+      expect(timer.getPendingIntervalCount()).toBe(pendingIntervalsBefore + 1);
+      expect(sessionManager.getSession(BOUND_SESSION)?.ownership).toBe("owned");
+    } finally {
+      isAvailableSpy.mockRestore();
+      await proxy.close();
+    }
+  });
+
   // AC1 + AC2 (default timeout path): a bound session allocated shortly before
   // the proxy starts survives because the first heartbeat is delivered as part of
   // connection establishment.

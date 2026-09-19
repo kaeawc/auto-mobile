@@ -1,5 +1,39 @@
 # Changelog
 
+## [v0.0.76] - 2026-09-19
+
+### Added
+
+- Device session continuity across iOS simulator restart (same device + session, updated connection) ([#7305](https://github.com/kaeawc/auto-mobile/issues/7305)) (ios, needs-device-verify, daemon)
+- Device session continuity across emulator restart / port reassignment (same device + session, updated connection) ([#7304](https://github.com/kaeawc/auto-mobile/issues/7304)) (android, needs-device-verify, daemon)
+- perf: extend device-lifecycle perf spans to app-tool wrapping (install/launch/terminate/uninstall) + DeviceAppManager ambient funnel ([#7223](https://github.com/kaeawc/auto-mobile/issues/7223)) (performance, bot-filed, routine:tracker-hygiene)
+
+### Fixed
+
+- getAndroid acquisition result drops the AVD image link (image.path/target/basedOn all null) that listDevices reports for the same device ([#7279](https://github.com/kaeawc/auto-mobile/issues/7279)) (bot-filed, routine:manual-test)
+- Quote the remaining package/pid/path device-shell sinks (perf, memory, lifecycle, install, snapshot) ([#7237](https://github.com/kaeawc/auto-mobile/issues/7237))
+- CLI: two gated tools are unreachable from the CLI because their schemas reject `sessionUuid` ([#7228](https://github.com/kaeawc/auto-mobile/issues/7228))
+- getDeviceState: `getDeviceState` reports `success: false` for a perfectly healthy iOS simulator ([#7227](https://github.com/kaeawc/auto-mobile/issues/7227))
+- Sessionless setToolEnabled(provisionDevice) is dropped by the acquisition route added in #7159 ([#7224](https://github.com/kaeawc/auto-mobile/issues/7224))
+
+### Other
+
+- live-acceptance harness: a reused daemon keeps a previous run's discovery capability, so the reverse-order seam is silently ignored ([#7256](https://github.com/kaeawc/auto-mobile/issues/7256))
+- device description: booted surfaces drop runtime/display facts the image surfaces have; listDeviceImages tool drops Android provenance ([#7246](https://github.com/kaeawc/auto-mobile/issues/7246))
+- daemon: process scan cannot see a daemon launched from a worktree checkout; restart reports it exited and refuses on the busy port ([#7242](https://github.com/kaeawc/auto-mobile/issues/7242))
+- flake/regression: `iOS Device Capture to WHEP` red on every On-Merge (main) — post-connect keyframe-recovery / egress phase fails (recurrence of cured #7081, new signature) ([#7222](https://github.com/kaeawc/auto-mobile/issues/7222)) (bot-filed, needs-human, routine:flake-sentinel)
+- tapOn: add ensureChecked for toggle-affordance elements so 'turn on X' is one idempotent call ([#7220](https://github.com/kaeawc/auto-mobile/issues/7220)) (bot-filed, routine:dogfood)
+- tapOn selection: skeleton hands out s2 ids it then rejects as ambiguous (error suggests nonexistent 'bounds' selector), and text match prefers the EditText holding the typed query over the result row ([#7219](https://github.com/kaeawc/auto-mobile/issues/7219)) (bot-filed, routine:dogfood)
+- launchApp hard-fails when the app's own task has a helper-package activity on top (Settings → settings.intelligence SearchActivity), with no next step in the error ([#7218](https://github.com/kaeawc/auto-mobile/issues/7218)) (bot-filed, routine:dogfood)
+- Action tools under project:skeleton return 50–128 KB: whole-array layoutWarnings from/to diff, raw NUL-keyed added/removed nodes, and artifact spill takes the skeleton with it ([#7217](https://github.com/kaeawc/auto-mobile/issues/7217)) (bot-filed, routine:dogfood)
+- observe(ios): soft keyboard still floods the skeleton with ~33 per-keycap nodes and emits no <ime> row — #6871's collapse landed on Android only ([#7214](https://github.com/kaeawc/auto-mobile/issues/7214)) (bot-filed, routine:dogfood)
+- enableTools[]/toolNames[] list non-configurable tools (setToolEnabled, getAndroid...) in their enum, and the all-or-nothing batch rejects the whole call over one — reintroducing the #6815/#6817 schema-vs-runtime mismatch ([#7213](https://github.com/kaeawc/auto-mobile/issues/7213)) (bot-filed, routine:dogfood)
+- flake/regression: `DefaultFileDownloader pipeResponseToFile … closes mid-body` red on On-Merge TS Code Coverage (main) — new signature, guards fixed #6131 ([#6744](https://github.com/kaeawc/auto-mobile/issues/6744)) (bot-filed, needs-human, routine:flake-sentinel)
+- flake: Node Host Integration Tests (ubuntu-latest) hangs → exit 124 (15-min timeout) — recurrence of cured #6236, now also on main On-Merge (deviceLossOutcomeWire) ([#6322](https://github.com/kaeawc/auto-mobile/issues/6322)) (bot-filed, needs-human, routine:flake-sentinel)
+- flake: Node Unit (ubuntu) intermittently red — "Plan execution lock" + "MCP Navigation Graph Resource" cascade (25 fail / 23 errors) — new signature ([#6060](https://github.com/kaeawc/auto-mobile/issues/6060)) (bot-filed, needs-human, routine:flake-sentinel)
+- BATS ubuntu parallel pass prints `Terminated` and exits 1 after all tests pass (new flake signature) ([#5813](https://github.com/kaeawc/auto-mobile/issues/5813)) (bot-filed, needs-human, routine:flake-sentinel)
+- Nightly red: two deterministic non-flake breaks (Swift sweep xctestrunner tools-version mismatch + Android H264 empty apk-path arg) ([#5747](https://github.com/kaeawc/auto-mobile/issues/5747)) (bot-filed, needs-human, routine:flake-sentinel)
+
 ## [v0.0.75] - 2026-09-17
 
 ### Fixed

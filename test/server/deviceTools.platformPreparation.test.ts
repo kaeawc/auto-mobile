@@ -246,6 +246,7 @@ describe("platform device preparation tools", () => {
       platform: "android",
       name: "Pixel_9_API_36",
       deviceId: "emulator-5562",
+      model: "sdk_gphone64_arm64",
     };
     const image = {
       platform: "android" as const,
@@ -254,6 +255,7 @@ describe("platform device preparation tools", () => {
       apiLevel: 36,
       osVersion: "16",
       runtimeId: "system-images;android-36;google_apis;arm64-v8a",
+      architecture: "arm64-v8a",
       deviceType: "pixel_9",
       screenWidth: 1080,
       screenHeight: 2400,
@@ -274,12 +276,18 @@ describe("platform device preparation tools", () => {
     expect(result).toMatchObject({
       runtimeId: image.runtimeId,
       deviceType: image.deviceType,
+      model: emulator.model,
+      architecture: image.architecture,
       display: { width: 1080, height: 2400, density: 420 },
       capabilityInventory: expect.any(Object),
     });
     expect(result).toMatchObject({ apiLevel: 36, osVersion: "16" });
     expect(result.display).toEqual(listed.devices[0].display);
     expect(result.capabilityInventory).toEqual(listed.devices[0].capabilityInventory);
+    expect(listed.devices[0]).toMatchObject({
+      model: emulator.model,
+      architecture: image.architecture,
+    });
   });
 
   test("getApple accepts only a simulator UDID and returns its simulator identity", async () => {

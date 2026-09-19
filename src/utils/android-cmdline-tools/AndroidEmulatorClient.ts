@@ -22,6 +22,7 @@ import {
 } from "../ios/IOSHostPortAvailabilityChecker";
 import type { AvdConfig, AvdConfigReader } from "./AvdConfigReader";
 import { FileAvdConfigReader, MIN_AVD_RAM_MB } from "./AvdConfigReader";
+import { parseAndroidSystemImageRuntime } from "./AndroidSystemImageRuntime";
 import type { RunningAvdAdvertisementReader } from "./RunningAvdAdvertisementReader";
 import { TmpdirRunningAvdAdvertisementReader } from "./RunningAvdAdvertisementReader";
 import { WakeAndUnlock } from "../../features/action/WakeAndUnlock";
@@ -169,6 +170,22 @@ function resolveEmulatorExecAsync(
   execAsyncFn: ((file: string, args: string[], signal?: AbortSignal) => Promise<ExecResult>) | null,
 ): (file: string, args: string[], signal?: AbortSignal) => Promise<ExecResult> {
   return execAsyncFn || execAsync;
+}
+
+function configuredAvdArchitecture(
+  config: AvdConfig,
+  fallback: string | undefined,
+): string | undefined {
+  if (!config.systemImagePackage) {
+    return config.architecture ?? fallback;
+  }
+  // The image ABI is the configured guest architecture. Prefer it over
+  // config.ini's emulator-normalized architecture (for example, arm64-v8a vs arm64).
+  return (
+    parseAndroidSystemImageRuntime(config.systemImagePackage)?.abi ??
+    config.architecture ??
+    fallback
+  );
 }
 
 /**
@@ -609,6 +626,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
   private timer: Timer;
   private adbFactory: AdbClientFactory;
   private modelNameCache = new Map<string, string>();
+  private architectureCache = new Map<string, string>();
   private avdConfigReader: AvdConfigReader;
   private platform: NodeJS.Platform;
   private hostArchitecture: string;
@@ -847,6 +865,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
             osVersion: config.osVersion ?? device.osVersion,
             runtimeId: config.systemImagePackage ?? device.runtimeId,
             deviceType: config.deviceName ?? device.deviceType,
+            architecture: configuredAvdArchitecture(config, device.architecture),
             screenWidth: config.screenWidth ?? device.screenWidth,
             screenHeight: config.screenHeight ?? device.screenHeight,
             screenDensity: config.screenDensity ?? device.screenDensity,
@@ -1798,41 +1817,39 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       const diagnostics: ReadinessDiagnostic[] = [];
       perf.startOperation("avdNameResolution");
       for (const device of emulatorDevices) {
-        const deviceId = device.deviceId;
         const avdName = options.skipNameEnrichment
           ? { name: "", diagnostic: undefined }
           : await this.getRunningAVDName(device, infoTimeoutMs, signal);
         if (avdName.diagnostic) {
           diagnostics.push(avdName.diagnostic);
         }
+        const model = await this.modelForBootedEmulator(
+          device,
+          avdName,
+          infoTimeoutMs,
+          options.skipNameEnrichment === true,
+          signal,
+        );
 
-        runningDevices.push({
-          ...device,
-          name: avdName.name || this.unknownEmulatorName(deviceId),
-          platform: "android",
-          deviceId: deviceId,
-          observedAt: this.observationSequence.next(),
-          source: "local",
-          ...(avdName.name === "" &&
-            avdName.consoleBusyDuringProbe === true && {
-              consoleBusyDuringProbe: avdName.consoleBusyDuringProbe,
-            }),
-        });
+        runningDevices.push(this.discoveredEmulatorDevice(device, avdName, model));
       }
 
       for (const device of physicalDevices) {
-        runningDevices.push({
-          ...device,
-          name: await this.resolvePhysicalDeviceName(
+        const [model, architecture] = await Promise.all([
+          this.resolveDeviceModel(
             device,
             infoTimeoutMs,
             options.skipNameEnrichment === true,
             signal,
           ),
-          platform: "android",
-          deviceId: device.deviceId,
-          source: "local",
-        });
+          this.resolvePhysicalDeviceArchitecture(
+            device,
+            infoTimeoutMs,
+            options.skipNameEnrichment === true,
+            signal,
+          ),
+        ]);
+        runningDevices.push(this.discoveredPhysicalDevice(device, model, architecture));
       }
       perf.endOperation("avdNameResolution");
 
@@ -1841,17 +1858,16 @@ export class AndroidEmulatorClient implements AndroidEmulator {
   }
 
   /**
-   * A handset's display name is `ro.product.model`, cached per serial because a
-   * handset cannot change model under a fixed serial. The serial is the
-   * fallback: the model is a label, never an identity, so failing to read it
-   * costs nothing but a nicer name.
+   * `ro.product.model` is cached per serial because a device cannot change
+   * models under a fixed serial. It remains metadata rather than identity, so
+   * a failed read is safe to omit from discovery.
    */
-  private async resolvePhysicalDeviceName(
+  private async resolveDeviceModel(
     device: BootedDevice,
     infoTimeoutMs: number,
     skipNameEnrichment: boolean,
     signal?: AbortSignal,
-  ): Promise<string> {
+  ): Promise<string | undefined> {
     const cachedModel = this.modelNameCache.get(device.deviceId);
     if (cachedModel) {
       logger.debug(`Got model name for ${device.deviceId}: "${cachedModel}" (cached)`);
@@ -1859,7 +1875,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     }
     if (skipNameEnrichment) {
       logger.debug(`Serial-only scan: not asking ${device.deviceId} for its model name`);
-      return device.deviceId;
+      return undefined;
     }
     try {
       const adbWithDevice = this.adbFactory.create(device);
@@ -1872,17 +1888,111 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       );
       const modelName = result.stdout.trim();
       if (!modelName || modelName === "unknown") {
-        logger.debug(`No model name found for ${device.deviceId}, using device ID`);
-        return device.deviceId;
+        logger.debug(`No model name found for ${device.deviceId}`);
+        return undefined;
       }
       this.modelNameCache.set(device.deviceId, modelName);
       logger.debug(`Got model name for ${device.deviceId}: "${modelName}"`);
       return modelName;
     } catch (error) {
-      // A missing model name is cosmetic: the serial already identifies the
-      // handset, so discovery continues under it.
+      // A missing model is cosmetic: the serial/AVD name still identifies the
+      // discovered device, so discovery continues without this metadata.
       logger.debug(`Failed to get model name for ${device.deviceId}: ${error}`);
-      return device.deviceId;
+      return undefined;
+    }
+  }
+
+  private async modelForBootedEmulator(
+    device: BootedDevice,
+    avdName: { consoleBusyDuringProbe?: boolean },
+    infoTimeoutMs: number,
+    skipNameEnrichment: boolean,
+    signal?: AbortSignal,
+  ): Promise<string | undefined> {
+    if (avdName.consoleBusyDuringProbe) {
+      // The AVD identity is unresolved, so model metadata is not worth
+      // contending with the destructive console operation.
+      return undefined;
+    }
+    return await this.resolveDeviceModel(device, infoTimeoutMs, skipNameEnrichment, signal);
+  }
+
+  private discoveredEmulatorDevice(
+    device: BootedDevice,
+    avdName: { name: string; consoleBusyDuringProbe?: boolean },
+    model: string | undefined,
+  ): BootedDevice {
+    return {
+      ...device,
+      name: avdName.name || this.unknownEmulatorName(device.deviceId),
+      platform: "android",
+      deviceId: device.deviceId,
+      observedAt: this.observationSequence.next(),
+      source: "local",
+      ...(avdName.name === "" &&
+        avdName.consoleBusyDuringProbe === true && {
+          consoleBusyDuringProbe: avdName.consoleBusyDuringProbe,
+        }),
+      ...(model ? { model } : {}),
+    };
+  }
+
+  private discoveredPhysicalDevice(
+    device: BootedDevice,
+    model: string | undefined,
+    architecture: string | undefined,
+  ): BootedDevice {
+    return {
+      ...device,
+      name: model ?? device.deviceId,
+      platform: "android",
+      deviceId: device.deviceId,
+      source: "local",
+      ...(model ? { model } : {}),
+      ...(architecture ? { architecture } : {}),
+    };
+  }
+
+  /**
+   * Physical devices have no configured system-image ABI, so their CPU ABI is
+   * the booted-device fallback. Cache it per serial to avoid repeated ADB calls.
+   */
+  private async resolvePhysicalDeviceArchitecture(
+    device: BootedDevice,
+    infoTimeoutMs: number,
+    skipNameEnrichment: boolean,
+    signal?: AbortSignal,
+  ): Promise<string | undefined> {
+    const cachedArchitecture = this.architectureCache.get(device.deviceId);
+    if (cachedArchitecture) {
+      logger.debug(`Got CPU architecture for ${device.deviceId}: "${cachedArchitecture}" (cached)`);
+      return cachedArchitecture;
+    }
+    if (skipNameEnrichment) {
+      // This scan explicitly forbids optional runtime metadata probes.
+      return undefined;
+    }
+    try {
+      const adbWithDevice = this.adbFactory.create(device);
+      const result = await adbWithDevice.executeCommand(
+        "shell getprop ro.product.cpu.abi",
+        infoTimeoutMs,
+        undefined,
+        true,
+        signal,
+      );
+      const architecture = result.stdout.trim();
+      if (!architecture || architecture === "unknown") {
+        logger.debug(`No CPU architecture found for ${device.deviceId}`);
+        return undefined;
+      }
+      this.architectureCache.set(device.deviceId, architecture);
+      logger.debug(`Got CPU architecture for ${device.deviceId}: "${architecture}"`);
+      return architecture;
+    } catch (error) {
+      // A physical device can still be described without this optional metadata.
+      logger.debug(`Failed to get CPU architecture for ${device.deviceId}: ${error}`);
+      return undefined;
     }
   }
 

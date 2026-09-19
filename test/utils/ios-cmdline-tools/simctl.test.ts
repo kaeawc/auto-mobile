@@ -621,7 +621,13 @@ describe("Simctl", function () {
 
       const [device] = await simctl.listSimulatorImages();
 
-      expect(device).toMatchObject({ screenWidth: 1206, screenHeight: 2622, screenDensity: 460 });
+      expect(device).toMatchObject({
+        model: "iPhone18,3",
+        architecture: process.arch,
+        screenWidth: 1206,
+        screenHeight: 2622,
+        screenDensity: 460,
+      });
       expect(profiles.calls).toBe(1);
     });
 

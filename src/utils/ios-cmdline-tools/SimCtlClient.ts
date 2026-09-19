@@ -32,6 +32,7 @@ import { compareSimctlVersions, parseSimctlVersion } from "./simctlVersion";
 import { compareStrictNumericVersions } from "../deviceMatcher";
 import {
   SimCtlSimulatorDeviceTypeProfiles,
+  type SimulatorDeviceTypeProfile,
   type SimulatorDeviceTypeProfileSource,
 } from "./SimulatorDeviceTypeProfiles";
 
@@ -563,8 +564,16 @@ interface SimulatorBootLease {
   release(): void;
 }
 
+function simulatorModel(
+  model: string | undefined,
+  profile: SimulatorDeviceTypeProfile | null,
+): string | undefined {
+  return model ?? profile?.modelIdentifier ?? undefined;
+}
+
 export class SimCtlClient implements SimCtl {
   private readonly deviceTypeProfiles: SimulatorDeviceTypeProfileSource;
+  private readonly hostArchitecture = process.arch;
   device: BootedDevice | null;
   execAsync: (
     file: string,
@@ -1955,8 +1964,10 @@ export class SimCtlClient implements SimCtl {
           deviceType: device.deviceTypeIdentifier,
           runtimeId,
           runtime: runtimeId,
-          model: device.model,
-          architecture: device.architecture,
+          model: simulatorModel(device.model, profile),
+          // Simulator processes execute on the host architecture; this does not
+          // require another simctl invocation.
+          architecture: this.hostArchitecture,
           screenWidth: profile?.pixelWidth ?? undefined,
           screenHeight: profile?.pixelHeight ?? undefined,
           screenDensity: profile?.dpi ?? undefined,
@@ -2169,6 +2180,8 @@ export class SimCtlClient implements SimCtl {
             runtimeId: device.runtimeId,
             runtime: device.runtime,
             deviceType: device.deviceType,
+            model: device.model,
+            architecture: device.architecture,
           }) as BootedDevice,
       )
       .sort((a, b) => a.deviceId.localeCompare(b.deviceId));

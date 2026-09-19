@@ -30,7 +30,13 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute } from "node:path";
 import { PID_FILE_PATH, DAEMON_VERSION } from "./constants";
 import { getCurrentBuildIdentity } from "./buildIdentity";
-import { cleanupDaemonFiles, cleanupDaemonFilesSync, readPidFileDataSync } from "./daemonFiles";
+import {
+  cleanupDaemonFiles,
+  cleanupDaemonFilesSync,
+  PidFileLiveDaemonSessionIdProvider,
+  readPidFileDataSync,
+  type LiveDaemonSessionIdProvider,
+} from "./daemonFiles";
 import { IncumbentOwnerGuard } from "./incumbentOwnerGuard";
 import { daemonLiveAcceptanceStartupSecret } from "./liveAcceptanceCapability";
 import { currentDaemonProcessGenerationToken } from "./processGeneration";
@@ -298,7 +304,7 @@ export class Daemon {
   // Preserves a live incumbent daemon's PID record across our own early-owner
   // overwrite so the lock-less bind guard can (a) still see the live sibling on
   // an inconclusive probe and (b) restore its record if we refuse (issue #6232).
-  private readonly incumbentOwnerGuard = new IncumbentOwnerGuard();
+  private readonly incumbentOwnerGuard: IncumbentOwnerGuard;
   private deviceDisconnectMisses: Map<string, number> = new Map();
   private deviceDisconnectMissIncarnations: Map<string, DisconnectCandidateIncarnation> = new Map();
   private confirmedDisconnectedDeviceIds: Set<string> = new Set();
@@ -358,6 +364,8 @@ export class Daemon {
     private readonly httpServerFactory: () => HttpServer = () => createHttpServer(),
     processBirthTime: DaemonProcessBirthTimeProvider = defaultDaemonProcessBirthTime,
     processGenerationToken: DaemonProcessGenerationTokenProvider = currentDaemonProcessGenerationToken,
+    private readonly liveDaemonSessionIdProvider: LiveDaemonSessionIdProvider = new PidFileLiveDaemonSessionIdProvider(),
+    incumbentOwnerGuard: IncumbentOwnerGuard = new IncumbentOwnerGuard(),
   ) {
     this.options = { ...options };
     this.port = options.port || DEFAULT_DAEMON_PORT;
@@ -372,6 +380,7 @@ export class Daemon {
     this.generationStartedAt = this.timer.now();
     this.processStartedAt = processBirthTime();
     this.processGenerationToken = processGenerationToken();
+    this.incumbentOwnerGuard = incumbentOwnerGuard;
     this.liveAcceptanceStartupSecret = daemonLiveAcceptanceStartupSecret();
     this.databaseInitializer = databaseInitializer;
     this.toolSelectionProfileProvenanceLoader = toolSelectionProfileProvenanceLoader;
@@ -1190,7 +1199,8 @@ export class Daemon {
    * TOCTOU (a daemon opening the DB immediately after the guard's check) is covered
    * by the migration cross-process lock (#2794). Issue #2871.
    *
-   * The record is minimal by design (pid, dbPath, socketPath, startedAt, processStartedAt, version).
+   * The record is minimal by design (pid, daemonSessionId, dbPath, socketPath,
+   * startedAt, processStartedAt, version).
    * Consumers that gate on daemon readiness — `status()`/`waitForReady()` — key on
    * the socket file plus `verifyDaemonConnection`, not on the PID file's `port`, so
    * a partial record written before the socket exists cannot make the daemon look
@@ -1199,6 +1209,7 @@ export class Daemon {
   private async writeEarlyOwnerRecord(): Promise<void> {
     const pidData: PidFileData = {
       pid: process.pid,
+      daemonSessionId: this.daemonSessionId,
       socketPath: SOCKET_PATH,
       port: this.port,
       dbPath: getDatabasePath(),
@@ -1229,6 +1240,7 @@ export class Daemon {
     const buildIdentity = getCurrentBuildIdentity();
     const pidData: PidFileData = {
       pid: process.pid,
+      daemonSessionId: this.daemonSessionId,
       socketPath: SOCKET_PATH,
       sockets: getDaemonSocketPathsByName(),
       port: this.port,
@@ -2592,10 +2604,22 @@ export class Daemon {
       await this.toolSelectionProfileProvenanceLoader.load();
       // Clear installed apps cache from previous daemon sessions
       await this.installedAppsRepository.clearOldDaemonSessions(this.daemonSessionId);
+      // A discovery failure is intentionally startup-fatal through this method's
+      // catch: treating it as an empty live set would let this daemon steal a
+      // live peer's sessions, which is less safe than refusing startup.
+      const liveDaemonSessionIds = new Set(
+        this.liveDaemonSessionIdProvider.collectLiveDaemonSessionIds(),
+      );
+      const incumbentDaemonSessionId =
+        this.incumbentOwnerGuard.capturedLiveIncumbentDaemonSessionId();
+      if (incumbentDaemonSessionId !== undefined) {
+        liveDaemonSessionIds.add(incumbentDaemonSessionId);
+      }
       await this.deviceSessionRepository.markStaleActiveSessionsExpired(
         this.daemonSessionId,
         this.timer.now(),
         "daemon-restart",
+        liveDaemonSessionIds,
       );
       logger.info(
         `[Daemon] Cleared old daemon session caches, current session: ${this.daemonSessionId}`,

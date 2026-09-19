@@ -143,6 +143,19 @@ export class IncumbentOwnerGuard {
     return this.sawLiveContender || this.isLiveForeign(this.incumbent);
   }
 
+  /**
+   * Return the captured committed owner's session identity while it remains a
+   * live foreign process. The peer-liveness gate needs this narrow snapshot
+   * because our early-owner write has already replaced the shared PID file by
+   * the time database cleanup discovers live daemon sessions.
+   *
+   * A live contender's uncommitted record is deliberately excluded: it is not
+   * trustworthy evidence of the incumbent daemon's identity.
+   */
+  capturedLiveIncumbentDaemonSessionId(): string | undefined {
+    return this.isLiveForeign(this.incumbent) ? this.incumbent.daemonSessionId : undefined;
+  }
+
   private getOwnerStatus(): SocketOwnerStatus {
     if (this.sawLiveContender) {
       return "unknown";

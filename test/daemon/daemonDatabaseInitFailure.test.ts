@@ -10,6 +10,11 @@ import { FakeDatabaseInitializer } from "../fakes/FakeDatabaseInitializer";
 import { FakeStartupFailureTracker } from "../fakes/FakeStartupFailureTracker";
 import { DefaultDatabaseHealthProbe } from "../../src/db/DatabaseHealthProbe";
 import { FakeToolSelectionProfileProvenanceLoader } from "../fakes/FakeToolSelectionProfileProvenanceLoader";
+import type { LiveDaemonSessionIdProvider } from "../../src/daemon/daemonFiles";
+import {
+  IncumbentOwnerGuard,
+  type IncumbentOwnerGuardDeps,
+} from "../../src/daemon/incumbentOwnerGuard";
 
 /**
  * Issue #2784: startup DB/migration failure must be FATAL — `initializeDatabase()`
@@ -19,14 +24,25 @@ import { FakeToolSelectionProfileProvenanceLoader } from "../fakes/FakeToolSelec
  */
 class SpyDeviceSessionRepository extends DeviceSessionRepository {
   markStaleCalls = 0;
+  liveDaemonSessionIds: ReadonlySet<string> | undefined;
+  incumbentSessionStatus: "active" | "expired" = "active";
   private failure: unknown = null;
 
   failWith(error: unknown): void {
     this.failure = error;
   }
 
-  override async markStaleActiveSessionsExpired(): Promise<void> {
+  override async markStaleActiveSessionsExpired(
+    _currentDaemonSessionId: string,
+    _releasedAtMs: number,
+    _reason: string,
+    liveDaemonSessionIds: ReadonlySet<string>,
+  ): Promise<void> {
     this.markStaleCalls += 1;
+    this.liveDaemonSessionIds = liveDaemonSessionIds;
+    if (!liveDaemonSessionIds.has("same-namespace-incumbent")) {
+      this.incumbentSessionStatus = "expired";
+    }
     if (this.failure !== null) {
       throw this.failure;
     }
@@ -43,6 +59,8 @@ function buildDaemon(overrides: {
   timer: FakeTimer;
   deviceSessionRepository?: SpyDeviceSessionRepository;
   installedAppsRepository?: FakeInstalledAppsRepository;
+  liveDaemonSessionIdProvider?: LiveDaemonSessionIdProvider;
+  incumbentOwnerGuard?: IncumbentOwnerGuard;
 }): {
   daemon: Daemon;
   deviceSessionRepository: SpyDeviceSessionRepository;
@@ -66,6 +84,13 @@ function buildDaemon(overrides: {
     undefined,
     // Never resolve the production default (real getDatabase()) — issue #3067.
     new FakeToolSelectionProfileProvenanceLoader(),
+    undefined,
+    undefined,
+    undefined,
+    overrides.liveDaemonSessionIdProvider ?? {
+      collectLiveDaemonSessionIds: () => new Set(["live-peer-daemon"]),
+    },
+    overrides.incumbentOwnerGuard,
   );
   return { daemon, deviceSessionRepository, installedAppsRepository };
 }
@@ -109,11 +134,51 @@ describe("Daemon.initializeDatabase fatality", () => {
 
     expect(initializer.initializeCalls).toBe(1);
     expect(deviceSessionRepository.markStaleCalls).toBe(1);
+    expect(deviceSessionRepository.liveDaemonSessionIds).toEqual(new Set(["live-peer-daemon"]));
     expect(tracker.recorded).toHaveLength(0);
     // Reset happens only at the END of start() (after all startup DB reads),
     // not here — a later permanent failure recorded before its fatal exit must
     // not be erased by a bring-up that merely got past migrations (issue #2784).
     expect(tracker.resetCalls).toBe(0);
+  });
+
+  test("unions a captured live same-namespace incumbent into stale-session protection", async () => {
+    const incumbentRecord = {
+      pid: 9001,
+      daemonSessionId: "same-namespace-incumbent",
+      socketPath: "/tmp/incumbent.sock",
+      port: 3000,
+      startedAt: 1,
+      version: "test",
+      entryScript: "/opt/auto-mobile/index.js",
+      buildId: "incumbent-build",
+    };
+    const guardDependencies: IncumbentOwnerGuardDeps = {
+      readPidFile: () => incumbentRecord,
+      persistPidFile: () => {},
+      isProcessRunning: (pid) => pid === incumbentRecord.pid,
+      selfPid: 4242,
+    };
+    const incumbentOwnerGuard = new IncumbentOwnerGuard(guardDependencies);
+    incumbentOwnerGuard.captureIncumbentBeforeOverwrite();
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const { daemon, deviceSessionRepository } = buildDaemon({
+      initializer: new FakeDatabaseInitializer(),
+      tracker: new FakeStartupFailureTracker(),
+      timer,
+      liveDaemonSessionIdProvider: {
+        collectLiveDaemonSessionIds: () => new Set(["sibling-worktree-daemon"]),
+      },
+      incumbentOwnerGuard,
+    });
+
+    await (daemon as unknown as DaemonInternals).initializeDatabase();
+
+    expect(deviceSessionRepository.liveDaemonSessionIds).toEqual(
+      new Set(["sibling-worktree-daemon", "same-namespace-incumbent"]),
+    );
+    expect(deviceSessionRepository.incumbentSessionStatus).toBe("active");
   });
 
   test("permanent failures back off with increasing delay to avoid a restart hot-loop", async () => {
@@ -178,5 +243,28 @@ describe("Daemon.initializeDatabase fatality", () => {
     ).rejects.toBeInstanceOf(ActionableError);
     expect(tracker.recorded).toHaveLength(1);
     expect(tracker.resetCalls).toBe(0);
+  });
+
+  test("a live-daemon discovery failure is fatal instead of assuming no peers are live", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const initializer = new FakeDatabaseInitializer();
+    const tracker = new FakeStartupFailureTracker();
+    const { daemon, deviceSessionRepository } = buildDaemon({
+      initializer,
+      tracker,
+      timer,
+      liveDaemonSessionIdProvider: {
+        collectLiveDaemonSessionIds: () => {
+          throw new Error("peer discovery unavailable");
+        },
+      },
+    });
+
+    await expect(
+      (daemon as unknown as DaemonInternals).initializeDatabase(),
+    ).rejects.toBeInstanceOf(ActionableError);
+    expect(deviceSessionRepository.markStaleCalls).toBe(0);
+    expect(tracker.recorded).toHaveLength(1);
   });
 });

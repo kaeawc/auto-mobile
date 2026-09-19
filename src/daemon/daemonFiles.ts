@@ -357,6 +357,32 @@ export function listDaemonPidFilesSync(
   return { pidFiles: [...found], uncertain };
 }
 
+/**
+ * Enumerate co-located daemon PID files for the startup peer-liveness gate.
+ * Unlike log-retention discovery, an unreadable existing directory must not
+ * degrade to "no live peers": only an absent directory proves there are no
+ * sibling records to discover yet.
+ */
+export function listDaemonPidFilePathsOrThrow(pidFilePath: string = PID_FILE_PATH): string[] {
+  const dir = path.dirname(pidFilePath);
+  const found = new Set<string>([pidFilePath]);
+  try {
+    for (const entry of readdirSync(dir)) {
+      if (entry.startsWith(DAEMON_PID_FILE_BASENAME_PREFIX) && entry.endsWith(".pid")) {
+        found.add(path.join(dir, entry));
+      }
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") {
+      throw error;
+    }
+    // No PID directory has been created yet, so there cannot be a co-located
+    // peer record. Keep the caller's own path for consistent per-file handling.
+    logSafeDebug(`src/daemon/daemonFiles.ts pidfile dir does not exist: ${error}`, error);
+  }
+  return [...found];
+}
+
 export function readPidFileDataSync(pidFilePath: string = PID_FILE_PATH): PidFileData | null {
   if (!existsSync(pidFilePath)) {
     return null;
@@ -368,6 +394,52 @@ export function readPidFileDataSync(pidFilePath: string = PID_FILE_PATH): PidFil
     // written it yet; treating it as "no daemon" is the correct degraded behavior.
     logSafeDebug(`src/daemon/daemonFiles.ts pidfile parse failed: ${error}`, error);
     return null;
+  }
+}
+
+export interface LiveDaemonSessionIdProvider {
+  collectLiveDaemonSessionIds(): ReadonlySet<string>;
+}
+
+export interface PidFileLiveDaemonSessionIdProviderDependencies {
+  listDaemonPidFiles?: (pidFilePath?: string) => string[];
+  readPidFileData?: (pidFilePath?: string) => PidFileData | null;
+  isProcessRunning?: (pid: number) => boolean;
+}
+
+/**
+ * Discovers daemon-session owners whose PID records still name a live process.
+ *
+ * The current daemon is intentionally included when its record is discovered;
+ * the repository independently excludes its session ID from stale-session
+ * cleanup. Directory discovery throws on ambiguity so startup cannot mistake
+ * an unreadable peer namespace for an empty live set.
+ */
+export class PidFileLiveDaemonSessionIdProvider implements LiveDaemonSessionIdProvider {
+  private readonly listDaemonPidFiles: (pidFilePath?: string) => string[];
+  private readonly readPidFileData: (pidFilePath?: string) => PidFileData | null;
+  private readonly processIsRunning: (pid: number) => boolean;
+
+  constructor(dependencies: PidFileLiveDaemonSessionIdProviderDependencies = {}) {
+    this.listDaemonPidFiles = dependencies.listDaemonPidFiles ?? listDaemonPidFilePathsOrThrow;
+    this.readPidFileData = dependencies.readPidFileData ?? readPidFileDataSync;
+    this.processIsRunning = dependencies.isProcessRunning ?? isProcessRunning;
+  }
+
+  collectLiveDaemonSessionIds(): ReadonlySet<string> {
+    const liveDaemonSessionIds = new Set<string>();
+    const pidFiles = this.listDaemonPidFiles();
+    for (const pidFile of pidFiles) {
+      const pidData = this.readPidFileData(pidFile);
+      if (
+        typeof pidData?.daemonSessionId === "string" &&
+        pidData.daemonSessionId.length > 0 &&
+        this.processIsRunning(pidData.pid)
+      ) {
+        liveDaemonSessionIds.add(pidData.daemonSessionId);
+      }
+    }
+    return liveDaemonSessionIds;
   }
 }
 

@@ -3,6 +3,7 @@ import { type Kysely, sql } from "kysely";
 import type { Database } from "../../src/db/types";
 import {
   DeviceSessionRepository,
+  RECOVERABLE_DAEMON_RELEASE_REASONS,
   type DeviceSessionRecord,
 } from "../../src/db/deviceSessionRepository";
 import { logger } from "../../src/utils/logger";
@@ -467,6 +468,67 @@ describe("DeviceSessionRepository", () => {
     expect(currentRow!.status).toBe("active");
     expect(currentRow!.released_at_ms).toBeNull();
     expect(currentRow!.liveness_owner_token).toBe("current-owner");
+  });
+
+  test("leaves a live peer daemon's active session untouched", async () => {
+    await repo.upsertActiveSession({
+      sessionUuid: "live-peer-session",
+      deviceId: "emulator-5554",
+      platform: "android",
+      source: "autolock",
+      daemonSessionId: "live-peer-daemon",
+      createdAtMs: 1000,
+      lastUsedAtMs: 1000,
+      expiresAtMs: 61_000,
+      sessionTimeoutMs: 60_000,
+      heartbeatTimeoutMs: 60_000,
+      hasReceivedHeartbeat: false,
+    });
+
+    await repo.markStaleActiveSessionsExpired(
+      "current-daemon",
+      5000,
+      "daemon-restart",
+      new Set(["live-peer-daemon"]),
+    );
+
+    expect(await repo.getSession("live-peer-session")).toMatchObject({
+      status: "active",
+      released_at_ms: null,
+      release_reason: null,
+    });
+  });
+
+  test("expires a dead predecessor's session as recoverable after daemon restart", async () => {
+    await repo.upsertActiveSession({
+      sessionUuid: "dead-predecessor-session",
+      deviceId: "emulator-5554",
+      platform: "android",
+      source: "autolock",
+      daemonSessionId: "dead-predecessor-daemon",
+      createdAtMs: 1000,
+      lastUsedAtMs: 1000,
+      expiresAtMs: 61_000,
+      sessionTimeoutMs: 60_000,
+      heartbeatTimeoutMs: 60_000,
+      hasReceivedHeartbeat: false,
+    });
+
+    await repo.markStaleActiveSessionsExpired(
+      "current-daemon",
+      5000,
+      "daemon-restart",
+      new Set(["different-live-daemon"]),
+    );
+
+    const deadPredecessor = await repo.getSession("dead-predecessor-session");
+    expect(deadPredecessor).toMatchObject({
+      status: "expired",
+      released_at_ms: 5000,
+      release_reason: "daemon-restart",
+    });
+    expect(RECOVERABLE_DAEMON_RELEASE_REASONS.has(deadPredecessor!.release_reason!)).toBe(true);
+    expect(await repo.listRecoverableSessions()).toContainEqual(deadPredecessor!);
   });
 
   test.each(["released", "expired"] as const)(

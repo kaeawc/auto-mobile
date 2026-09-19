@@ -1049,6 +1049,48 @@ function listDevicePayloads(
   });
 }
 
+/**
+ * The acquisition boot already resolved its selected image. Re-project that
+ * known image rather than rediscovering the entire configured inventory while
+ * returning the session response. Android provenance is optional cache-only
+ * enrichment; a cold cache deliberately leaves the nullable image link empty.
+ */
+function configuredImageForAcquiredDevice(
+  device: BootedDevice,
+  sourceImage: DeviceInfo | undefined,
+): StableConfiguredDeviceImage | undefined {
+  if (sourceImage?.platform !== device.platform) {
+    return undefined;
+  }
+  const image =
+    device.platform === "ios" && !sourceImage.deviceId
+      ? { ...sourceImage, deviceId: device.deviceId }
+      : sourceImage;
+  const configured = configuredImageForBootedDevice(
+    device,
+    configuredImagesByStableId(device.platform, {
+      devices: [image],
+      succeededPlatforms: new Set([device.platform]),
+    }),
+  );
+  if (!configured || device.platform !== "android") {
+    return configured;
+  }
+  const provenance = AndroidAvdProvenanceCache.getInstance()
+    .getCachedByName()
+    ?.get(configured.name);
+  return provenance
+    ? {
+        ...configured,
+        image: {
+          path: provenance.path,
+          target: provenance.target,
+          basedOn: provenance.basedOn,
+        },
+      }
+    : configured;
+}
+
 function initializedDevicePool(): DevicePool | undefined {
   const daemonState = DaemonState.getInstance();
   return daemonState.isInitialized() ? daemonState.getDevicePool() : undefined;
@@ -8837,13 +8879,14 @@ export function registerDeviceTools() {
     state.ownershipTransferred = true;
 
     refreshResourcesAfterCommittedBoot(state.boot, deps);
-    return await buildBootedResponse(
+    return buildBootedResponse(
       state.boot.device,
       state.boot.source,
       perf,
       sessionId,
       state.boot.processId,
       sourceImage,
+      configuredImageForAcquiredDevice(state.boot.device, sourceImage),
     );
   };
 
@@ -9262,13 +9305,14 @@ export function registerDeviceTools() {
     daemonState.getSessionManager().setDeviceReadiness(sessionId, achievedReadiness);
   }
 
-  async function buildBootedResponse(
+  function buildBootedResponse(
     device: BootedDevice,
     source: "booted" | "cold-boot",
     perf: ReturnType<typeof createPerformanceTracker>,
     sessionId: string,
     processId?: number,
     sourceImage?: DeviceInfo,
+    configuredImage?: StableConfiguredDeviceImage,
     achievedReadiness: DeviceReadinessLevel = "automationReady",
   ) {
     perf.end();
@@ -9278,6 +9322,7 @@ export function registerDeviceTools() {
       device,
       pooled: initializedDevicePool()?.getDevice(device.deviceId) ?? undefined,
       discovery: sourceImage,
+      configured: configuredImage,
       session: { sessionId },
       serviceStatus:
         achievedReadiness === "automationReady"

@@ -1,6 +1,6 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import {
   cleanupDaemonFiles,
@@ -14,8 +14,11 @@ import {
   readDaemonOwnerForRetentionSync,
   readDaemonLaunchLogOwnerTombstoneSync,
   shouldProtectLiveDaemonVersion,
+  writePidFileDataAtomic,
+  writePidFileDataAtomicSync,
 } from "../../src/daemon/daemonFiles";
 import { DEFAULT_PID_FILE_PATH } from "../../src/daemon/constants";
+import { logger } from "../../src/utils/logger";
 import type { PidFileData } from "../../src/daemon/types";
 
 describe("PidFileLiveDaemonSessionIdProvider", () => {
@@ -56,8 +59,11 @@ describe("PidFileLiveDaemonSessionIdProvider", () => {
     ]);
     const provider = new PidFileLiveDaemonSessionIdProvider({
       listDaemonPidFiles: () => [...records.keys()],
-      readPidFileData: (pidFilePath) => records.get(pidFilePath!) ?? null,
-      isProcessRunning: (pid) => pid === 101 || pid === 303,
+      readPidFile: (pidFilePath) => {
+        const data = records.get(pidFilePath!);
+        return data === undefined ? { status: "absent" } : { status: "present", data };
+      },
+      isProcessRunning: (pid) => pid === 101,
     });
 
     expect(provider.collectLiveDaemonSessionIds()).toEqual(new Set(["live-daemon"]));
@@ -74,6 +80,81 @@ describe("PidFileLiveDaemonSessionIdProvider", () => {
     });
 
     expect(() => provider.collectLiveDaemonSessionIds()).toThrow(enumerationError);
+  });
+
+  test("warns and skips a pre-PA2 legacy live record with no daemon session ID", () => {
+    // `daemonSessionId` is documented optional (types.ts) for PID files
+    // written before peer-liveness discovery shipped: a legacy record that
+    // parses fine and names a live process is an EXPECTED non-error, not
+    // ambiguous local damage, so it must not block startup.
+    const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const provider = new PidFileLiveDaemonSessionIdProvider({
+        listDaemonPidFiles: () => ["live-partial.pid"],
+        readPidFile: () => ({ status: "present", data: { pid: 404 } }),
+        isProcessRunning: (pid) => pid === 404,
+      });
+
+      expect(provider.collectLiveDaemonSessionIds()).toEqual(new Set());
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy.mock.calls[0]?.[0]).toContain(
+        "names live process 404 but has no daemon session id",
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  test("still throws startup-fatal on a corrupt/unreadable own PID file", () => {
+    // Regression guard: only the legacy-live shape (parseable, running, no
+    // daemonSessionId) is demoted to warn+skip. Genuine local damage -- a
+    // non-ENOENT read failure on this uid's own record -- must remain fatal.
+    const readError = Object.assign(new Error("permission denied"), { code: "EACCES" });
+    const provider = new PidFileLiveDaemonSessionIdProvider({
+      listDaemonPidFiles: () => ["own-daemon.pid"],
+      readPidFile: () => {
+        throw readError;
+      },
+      isProcessRunning: () => {
+        throw new Error("liveness must not be checked for an unreadable record");
+      },
+    });
+
+    expect(() => provider.collectLiveDaemonSessionIds()).toThrow(readError);
+  });
+
+  test("fails closed when a present partial record has no recoverable PID", () => {
+    const dir = mkdtempSync(join(tmpdir(), "daemon-live-partial-test-"));
+    try {
+      const pidFile = join(dir, "daemon.pid");
+      writeFileSync(pidFile, '{"pid":');
+      const provider = new PidFileLiveDaemonSessionIdProvider({
+        listDaemonPidFiles: () => [pidFile],
+        isProcessRunning: () => {
+          throw new Error("liveness must not be guessed without a recoverable PID");
+        },
+      });
+
+      expect(() => provider.collectLiveDaemonSessionIds()).toThrow(SyntaxError);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("treats ENOENT as a clean non-throwing skip", () => {
+    const dir = mkdtempSync(join(tmpdir(), "daemon-live-absent-test-"));
+    try {
+      const provider = new PidFileLiveDaemonSessionIdProvider({
+        listDaemonPidFiles: () => [join(dir, "missing.pid")],
+        isProcessRunning: () => {
+          throw new Error("an absent record has no process to inspect");
+        },
+      });
+
+      expect(provider.collectLiveDaemonSessionIds()).toEqual(new Set());
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test("protects every live peer regardless of recorded version", () => {
@@ -135,7 +216,10 @@ describe("PidFileLiveDaemonSessionIdProvider", () => {
     ]);
     const provider = new PidFileLiveDaemonSessionIdProvider({
       listDaemonPidFiles: () => [...records.keys()],
-      readPidFileData: (pidFilePath) => records.get(pidFilePath!) ?? null,
+      readPidFile: (pidFilePath) => {
+        const data = records.get(pidFilePath!);
+        return data === undefined ? { status: "absent" } : { status: "present", data };
+      },
       isProcessRunning: () => true,
     });
 
@@ -157,6 +241,76 @@ describe("PidFileLiveDaemonSessionIdProvider", () => {
   });
 });
 
+describe("atomic PID file writes", () => {
+  const data: PidFileData = {
+    pid: 1234,
+    daemonSessionId: "daemon-session",
+    socketPath: "/tmp/daemon.sock",
+    port: 3000,
+    startedAt: 1,
+    version: "test",
+  };
+
+  test("async publication writes a unique sibling temp file before rename", async () => {
+    const target = "/state/daemon.pid";
+    const temporary = "/state/daemon.pid.1234.1.tmp";
+    const operations: string[] = [];
+
+    await writePidFileDataAtomic(target, data, undefined, {
+      createTemporaryPath: () => temporary,
+      writeTemporaryFile: async (path, contents) => {
+        operations.push(`write:${path}:${JSON.parse(contents).daemonSessionId}`);
+      },
+      replaceFile: async (from, to) => {
+        operations.push(`rename:${from}:${to}`);
+      },
+      removeTemporaryFile: async (path) => {
+        operations.push(`remove:${path}`);
+      },
+    });
+
+    expect(dirname(temporary)).toBe(dirname(target));
+    expect(operations).toEqual([
+      `write:${temporary}:daemon-session`,
+      `rename:${temporary}:${target}`,
+    ]);
+  });
+
+  test("synchronous publication writes the temp file before rename", () => {
+    const target = "/state/daemon.pid";
+    const temporary = "/state/daemon.pid.1234.2.tmp";
+    const operations: string[] = [];
+
+    writePidFileDataAtomicSync(target, data, {
+      createTemporaryPath: () => temporary,
+      writeTemporaryFile: (path) => operations.push(`write:${path}`),
+      replaceFile: (from, to) => operations.push(`rename:${from}:${to}`),
+      removeTemporaryFile: (path) => operations.push(`remove:${path}`),
+    });
+
+    expect(operations).toEqual([`write:${temporary}`, `rename:${temporary}:${target}`]);
+  });
+
+  test("removes the temporary file when atomic publication fails", async () => {
+    const writeError = new Error("disk full");
+    const removed: string[] = [];
+
+    await expect(
+      writePidFileDataAtomic("/state/daemon.pid", data, undefined, {
+        createTemporaryPath: () => "/state/daemon.pid.tmp",
+        writeTemporaryFile: async () => {
+          throw writeError;
+        },
+        replaceFile: async () => {},
+        removeTemporaryFile: async (path) => {
+          removed.push(path);
+        },
+      }),
+    ).rejects.toBe(writeError);
+    expect(removed).toEqual(["/state/daemon.pid.tmp"]);
+  });
+});
+
 describe("listDaemonPidFilePathsOrThrow", () => {
   const tempDirs: string[] = [];
 
@@ -170,7 +324,7 @@ describe("listDaemonPidFilePathsOrThrow", () => {
   test("treats an absent PID directory as no co-located peers", () => {
     const missing = join(tmpdir(), `no-such-peer-dir-${Date.now()}-${Math.random()}`, "daemon.pid");
 
-    expect(listDaemonPidFilePathsOrThrow(missing)).toEqual([missing]);
+    expect(listDaemonPidFilePathsOrThrow(missing, missing)).toEqual([missing]);
   });
 
   test("throws when the PID directory exists but cannot be enumerated", () => {
@@ -179,7 +333,45 @@ describe("listDaemonPidFilePathsOrThrow", () => {
     const notDirectory = join(dir, "not-a-directory");
     writeFileSync(notDirectory, "x");
 
-    expect(() => listDaemonPidFilePathsOrThrow(join(notDirectory, "daemon.pid"))).toThrow();
+    const pidFile = join(notDirectory, "daemon.pid");
+    expect(() => listDaemonPidFilePathsOrThrow(pidFile, pidFile)).toThrow();
+  });
+
+  test("discovers this uid's own default-namespace peer from a custom PID namespace", () => {
+    const customDir = mkdtempSync(join(tmpdir(), "daemon-custom-pid-dir-test-"));
+    const defaultDir = mkdtempSync(join(tmpdir(), "daemon-default-pid-dir-test-"));
+    tempDirs.push(customDir, defaultDir);
+    const customPidFile = join(customDir, "custom-daemon.pid");
+    const defaultPidFile = join(defaultDir, "auto-mobile-daemon-1000.pid");
+    writeFileSync(defaultPidFile, "{}");
+
+    // PID and DB overrides are independent. benchmark-startup.sh changes only
+    // PID/socket paths, while resolveDatabasePathFromEnvironment owns DB paths;
+    // `defaultPidFilePath` is included so the custom namespace cannot lose
+    // this uid's own default-namespace peer.
+    expect(listDaemonPidFilePathsOrThrow(customPidFile, defaultPidFile)).toContain(defaultPidFile);
+  });
+
+  test("never enumerates a foreign-uid sibling in the default PID directory", () => {
+    const customDir = mkdtempSync(join(tmpdir(), "daemon-custom-pid-dir-test-"));
+    const defaultDir = mkdtempSync(join(tmpdir(), "daemon-default-pid-dir-test-"));
+    tempDirs.push(customDir, defaultDir);
+    const customPidFile = join(customDir, "custom-daemon.pid");
+    // This uid's own default pid file, per constants.ts's exact-filename shape.
+    const defaultPidFile = join(defaultDir, "auto-mobile-daemon-1000.pid");
+    // Another user's default pid file living in the SAME shared /tmp-style
+    // directory. It matches the shared basename prefix but belongs to a
+    // different uid (mode 0o600 in the real filesystem) -- a wildcard scan of
+    // this directory would enumerate it and a later read would throw EACCES,
+    // making every daemon startup on a shared host fatal (review FIX 1).
+    const foreignUidPidFile = join(defaultDir, "auto-mobile-daemon-9999.pid");
+    writeFileSync(defaultPidFile, "{}");
+    writeFileSync(foreignUidPidFile, "{}");
+
+    const discovered = listDaemonPidFilePathsOrThrow(customPidFile, defaultPidFile);
+
+    expect(discovered).toContain(defaultPidFile);
+    expect(discovered).not.toContain(foreignUidPidFile);
   });
 });
 

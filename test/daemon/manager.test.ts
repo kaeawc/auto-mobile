@@ -2775,10 +2775,14 @@ describe("Daemon manager process detection", () => {
   // bound is silently lost.
   test("clamps a zero requested timeout to a positive floor instead of forwarding execSync's unbounded 0", () => {
     const calls: Array<{ options: { timeout: number } }> = [];
-    const finder = new PsDaemonProcessFinder((_command, options) => {
-      calls.push({ options: options as { timeout: number } });
-      return "";
-    });
+    const finder = new PsDaemonProcessFinder(
+      (_command, options) => {
+        calls.push({ options: options as { timeout: number } });
+        return "";
+      },
+      "linux",
+      new FakeTimer(),
+    );
 
     finder.findDaemonProcesses(0);
 
@@ -2788,10 +2792,14 @@ describe("Daemon manager process detection", () => {
 
   test("clamps a negative requested timeout to a positive floor", () => {
     const calls: Array<{ options: { timeout: number } }> = [];
-    const finder = new PsDaemonProcessFinder((_command, options) => {
-      calls.push({ options: options as { timeout: number } });
-      return "";
-    });
+    const finder = new PsDaemonProcessFinder(
+      (_command, options) => {
+        calls.push({ options: options as { timeout: number } });
+        return "";
+      },
+      "linux",
+      new FakeTimer(),
+    );
 
     finder.findDaemonProcesses(-50);
 
@@ -2801,10 +2809,14 @@ describe("Daemon manager process detection", () => {
 
   test("still caps a requested timeout at the scan ceiling", () => {
     const calls: Array<{ options: { timeout: number } }> = [];
-    const finder = new PsDaemonProcessFinder((_command, options) => {
-      calls.push({ options: options as { timeout: number } });
-      return "";
-    });
+    const finder = new PsDaemonProcessFinder(
+      (_command, options) => {
+        calls.push({ options: options as { timeout: number } });
+        return "";
+      },
+      "linux",
+      new FakeTimer(),
+    );
 
     finder.findDaemonProcesses(DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS * 10);
 

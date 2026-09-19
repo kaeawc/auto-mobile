@@ -16,7 +16,14 @@ data class BootedDevice(
   val status: String = "Running",
   val foregroundApp: String? = null,
   val connectedAt: Long = System.currentTimeMillis(),
+  val stableId: String? = null,
 )
+
+/** An unresolved Android AVD probe reports a runtime label, not a source-image identity. */
+internal fun BootedDevice.knownSourceImageId(): String? = stableId?.takeUnless {
+  (type == DeviceType.AndroidEmulator || type == DeviceType.AndroidPhysical) &&
+    (it == id || it == "Unknown ($id)")
+}
 
 /** Available emulator/simulator that can be booted. */
 data class AvailableEmulator(

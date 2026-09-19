@@ -112,6 +112,7 @@ import dev.jasonpearson.automobile.desktop.core.layout.rememberLayoutInspectorSt
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.core.mcp.AvailableEmulator
 import dev.jasonpearson.automobile.desktop.core.mcp.BootedDevice
+import dev.jasonpearson.automobile.desktop.core.mcp.DeviceImageInfo
 import dev.jasonpearson.automobile.desktop.core.mcp.DeviceResourceParser
 import dev.jasonpearson.automobile.desktop.core.mcp.DeviceType
 import dev.jasonpearson.automobile.desktop.core.mcp.McpConnectionType
@@ -120,6 +121,7 @@ import dev.jasonpearson.automobile.desktop.core.mcp.McpResourceClientFactory
 import dev.jasonpearson.automobile.desktop.core.mcp.RealMcpProcessDetector
 import dev.jasonpearson.automobile.desktop.core.mcp.ResourceReadResult
 import dev.jasonpearson.automobile.desktop.core.mcp.SystemImage
+import dev.jasonpearson.automobile.desktop.core.mcp.knownSourceImageId
 import dev.jasonpearson.automobile.desktop.core.mcp.supportsDaemonInput
 import dev.jasonpearson.automobile.desktop.core.navigation.NavigationMockData
 import dev.jasonpearson.automobile.desktop.core.navigation.NavigationScreenshotLoader
@@ -194,6 +196,15 @@ internal fun activeDeviceConnectionLostEvent(
 
 internal fun isActiveDeviceStreamFrame(deviceId: String?, activeDeviceId: String?): Boolean {
   return activeDeviceId != null && deviceId == activeDeviceId
+}
+
+internal fun availableDeviceImages(
+  images: List<DeviceImageInfo>,
+  booted: List<BootedDevice>,
+  platform: String,
+): List<DeviceImageInfo> {
+  val bootedStableIds = booted.mapNotNull { it.knownSourceImageId() }.toSet()
+  return images.filter { it.platform == platform && it.identity.stableId !in bootedStableIds }
 }
 
 /**
@@ -1051,6 +1062,7 @@ fun AutoMobileContent(
                   name = dev.name,
                   type = deviceType,
                   status = dev.runtime.lifecycle.state,
+                  stableId = dev.identity.stableId,
                 )
               }
               realDevices = allBootedDevices
@@ -1132,6 +1144,7 @@ fun AutoMobileContent(
                         name = dev.name,
                         type = deviceType,
                         status = dev.runtime.lifecycle.state,
+                        stableId = dev.identity.stableId,
                       )
                     }
                 realDevices = newDevices
@@ -2321,13 +2334,8 @@ fun AutoMobileContent(
 
             if (imagesExpanded) {
               Spacer(Modifier.height(4.dp))
-              val bootedIds = devices.map { it.id }.toSet()
-              val androidImages = deviceImages.filter {
-                it.platform == "android" && it.identity.stableId !in bootedIds
-              }
-              val iosImages = deviceImages.filter {
-                it.platform == "ios" && it.identity.stableId !in bootedIds
-              }
+              val androidImages = availableDeviceImages(deviceImages, devices, "android")
+              val iosImages = availableDeviceImages(deviceImages, devices, "ios")
               var showAndroid by remember { mutableStateOf(true) }
               var showIos by remember { mutableStateOf(true) }
 

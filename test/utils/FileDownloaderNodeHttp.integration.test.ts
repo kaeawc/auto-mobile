@@ -3,7 +3,6 @@ import fs from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
 import { DefaultFileDownloader } from "../../src/utils/FileDownloader";
-import { defaultTimer } from "../../src/utils/SystemTimer";
 
 type NodeHttpDownloader = {
   downloadWithNodeHttp(
@@ -77,12 +76,10 @@ describe("DefaultFileDownloader downloadWithNodeHttp (end to end, real socket)",
     const partial = Buffer.from("partial body");
     const server = http.createServer((request, response) => {
       response.writeHead(200, { "content-length": String(partial.length * 5) });
-      response.write(partial);
-      // A short delay lets the partial body actually reach the client's
-      // response stream before the socket goes away, so the close lands
-      // as a mid-body stream event rather than a connection-level failure
-      // the client sees before it ever starts reading the response.
-      defaultTimer.setTimeout(() => request.socket.destroy(), 50);
+      // The write callback runs after Node has handed the partial body to
+      // the socket. Closing there makes the mid-body close explicit without
+      // relying on a load-sensitive timer.
+      response.write(partial, () => request.socket.destroy());
     });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const address = server.address();

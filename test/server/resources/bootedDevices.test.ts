@@ -345,9 +345,10 @@ describe("MCP Booted Device Resources", () => {
           connectionId: "emulator-5554",
           lifecycle: { state: "booted", known: true },
           readiness: { state: "unknown" },
+          serviceStatus: null,
         },
-        serviceStatus: null,
       });
+      expect("serviceStatus" in data.devices[0]).toBe(false);
       expect(data.devices[2]).toMatchObject({
         identity: { stableId: "A1B2C3D4-E5F6-7890-ABCD-EF1234567890" },
         runtime: {
@@ -564,8 +565,10 @@ describe("MCP Booted Device Resources", () => {
       const unlocked = data.devices.find(
         (device) => device.runtime.deviceId === mockAndroidDevice2.deviceId,
       );
-      expect(locked?.locked).toBe(true);
-      expect(unlocked?.locked).toBe(false);
+      expect(locked?.runtime.locked).toBe(true);
+      expect(unlocked?.runtime.locked).toBe(false);
+      expect(locked && "locked" in locked).toBe(false);
+      expect(unlocked && "locked" in unlocked).toBe(false);
     });
 
     test("includes bounded orientation from the injected OrientationReader", async function () {
@@ -613,7 +616,8 @@ describe("MCP Booted Device Resources", () => {
       );
 
       const data: BootedDevicesResourceContent = JSON.parse(result.contents[0].text!);
-      expect(data.devices[0].locked).toBeNull();
+      expect(data.devices[0].runtime.locked).toBeNull();
+      expect("locked" in data.devices[0]).toBe(false);
     });
 
     test("lock-states resource surfaces per-device lock from the probe", async function () {
@@ -1171,9 +1175,11 @@ describe("MCP Booted Device Resources", () => {
         expect(devicePool.isPooledIdentityUnresolved(mockAndroidDevice1.deviceId)).toBe(true);
         expect(lockProbes).toEqual([mockAndroidDevice2.deviceId]);
         expect(quarantined?.identityUnresolved).toBe(true);
-        expect(quarantined?.locked).toBeNull();
+        expect(quarantined?.runtime.locked).toBeNull();
         expect(healthy?.identityUnresolved).toBe(false);
-        expect(healthy?.locked).toBe(true);
+        expect(healthy?.runtime.locked).toBe(true);
+        expect(quarantined && "locked" in quarantined).toBe(false);
+        expect(healthy && "locked" in healthy).toBe(false);
       } finally {
         sessionManager.stopCleanupTimer();
       }

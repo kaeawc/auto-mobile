@@ -38,13 +38,14 @@ class DeviceLockStatePollTest {
 
   @Test
   fun `booted-devices fallback derives lock from the full payload, omitting unread devices`() {
-    // Older daemons expose lock only via automobile:devices/booted; the poll's fallback derives the
-    // same deviceId -> locked snapshot from its `locked` field, omitting a device that lacks it.
+    // Older daemons without the lightweight resource still expose lock via
+    // automobile:devices/booted; the fallback reads runtime.locked and omits a device that lacks
+    // it.
     val payload =
       """
       {"totalCount":2,"androidCount":2,"iosCount":0,"virtualCount":2,"physicalCount":0,
        "lastUpdated":"x","devices":[
-         {"name":"P8","platform":"android","source":"local","isVirtual":true,"identity":{"stableId":"Pixel_8"},"runtime":{"deviceId":"emulator-5554","lifecycle":{"state":"booted","known":true}},"locked":true},
+         {"name":"P8","platform":"android","source":"local","isVirtual":true,"identity":{"stableId":"Pixel_8"},"runtime":{"deviceId":"emulator-5554","lifecycle":{"state":"booted","known":true},"locked":true}},
          {"name":"P9","platform":"android","source":"local","isVirtual":true,"identity":{"stableId":"Pixel_9"},"runtime":{"deviceId":"emulator-5556","lifecycle":{"state":"booted","known":true}}}]}
       """
         .trimIndent()

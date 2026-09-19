@@ -11,7 +11,12 @@ import org.junit.Test
 
 class PickerModelsTest {
 
-  private fun booted(name: String, deviceId: String, isVirtual: Boolean) =
+  private fun booted(
+    name: String,
+    deviceId: String,
+    isVirtual: Boolean,
+    locked: Boolean? = null,
+  ) =
     BootedDeviceInfo(
       name = name,
       platform = "android",
@@ -23,6 +28,7 @@ class PickerModelsTest {
           deviceId = deviceId,
           connectionId = deviceId,
           lifecycle = DeviceLifecycle("booted", true),
+          locked = locked,
         ),
     )
 
@@ -33,6 +39,17 @@ class PickerModelsTest {
       identity = DeviceIdentity(deviceId),
       runtime = DeviceRuntime(lifecycle = DeviceLifecycle("configured", true)),
     )
+
+  @Test
+  fun `booted picker device seeds lock state from canonical runtime`() {
+    val devices =
+      buildPickerDevices(
+        booted = listOf(booted("Pixel 8", "emulator-5554", isVirtual = true, locked = true)),
+        images = emptyList(),
+      )
+
+    assertTrue(devices.single().locked)
+  }
 
   @Test
   fun `an unresolved AVD probe preserves the successful boot attribution`() {

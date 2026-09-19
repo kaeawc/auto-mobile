@@ -44,6 +44,7 @@ import {
   DAEMON_RELEASE_ACCEPTANCE_RESTART_METHOD,
   DAEMON_RESTART_ACCEPTANCE_SESSION_METHOD,
   DAEMON_RESTART_ADMITTED_METHOD,
+  DaemonRestartDeferredError,
 } from "../../src/daemon/daemonRestartAdmission";
 import { INCOMPLETE_EXTRACTION_CODE } from "../../src/db/migrationDependencyIntegrity";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -52,7 +53,11 @@ import { logger } from "../../src/utils/logger";
 import {
   DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS,
   DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS,
+  DAEMON_RESTART_HANDOFF_DELAY_MS,
+  DAEMON_SHUTDOWN_TIMEOUT_MS,
   DAEMON_STARTUP_TIMEOUT_MS,
+  DAEMON_VERSION,
+  DAEMON_VERSION_RESTART_COOLDOWN_MS,
   CLI_SESSION_LIVENESS_POLICY,
   getCliSessionIdleTimeoutMs,
 } from "../../src/daemon/constants";
@@ -2932,6 +2937,233 @@ describe("Daemon manager process detection", () => {
       }),
     );
   }
+
+  function managerStartingAgainstVersion(
+    directory: string,
+    peerVersion: string | undefined,
+    events: string[] = [],
+    configuration: {
+      startedAt?: number;
+      statusOptions?: DaemonOptions;
+      now?: number;
+    } = {},
+  ): { manager: DaemonManager; status: DaemonStatus; timer: FakeTimer } {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    if (configuration.now !== undefined) {
+      timer.setCurrentTime(configuration.now);
+    }
+    const status: DaemonStatus = {
+      running: true,
+      pid: 101,
+      port: 3000,
+      options: configuration.statusOptions ?? { debug: true },
+      ...(peerVersion === undefined ? {} : { version: peerVersion }),
+      ...(configuration.startedAt === undefined ? {} : { startedAt: configuration.startedAt }),
+    };
+    const processSpawner: DaemonProcessSpawner = {
+      spawn: () => {
+        events.push("launch");
+        return {
+          unref() {},
+          once() {
+            return this;
+          },
+          off() {
+            return this;
+          },
+        } as ChildProcess;
+      },
+    };
+
+    class TestDaemonManager extends DaemonManager {
+      override async status(): Promise<DaemonStatus> {
+        return status;
+      }
+
+      override async waitForReady(): Promise<boolean> {
+        return true;
+      }
+    }
+
+    return {
+      manager: new TestDaemonManager(
+        undefined,
+        undefined,
+        timer,
+        join(directory, "daemon.lock"),
+        join(directory, "daemon.pid"),
+        join(directory, "daemon.sock"),
+        new FakeDaemonProcessFinder([]),
+        processSpawner,
+      ),
+      status,
+      timer,
+    };
+  }
+
+  test("start stops a strictly older daemon through verified takeover before launching its replacement", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "daemon-manager-upgrade-takeover-test-"));
+    process.env.AUTOMOBILE_DATA_DIR = directory;
+    const events: string[] = [];
+    const { manager, status, timer } = managerStartingAgainstVersion(directory, "0.0.0", events);
+    const preparationSpy = spyOn(
+      manager as any,
+      "prepareDaemonForConditionalRestart",
+    ).mockImplementation(async (receivedStatus: DaemonStatus) => {
+      expect(receivedStatus).toBe(status);
+      events.push("admission");
+      return { accepted: true };
+    });
+    const stopRunningSpy = spyOn(manager as any, "stopRunningDaemon").mockImplementation(
+      async () => {
+        events.push("stop");
+      },
+    );
+    const stopSpy = spyOn(manager, "stop").mockResolvedValue(undefined);
+    const survivorCheckSpy = spyOn(
+      manager as any,
+      "assertNoSurvivingDaemonBeforeRestart",
+    ).mockImplementation(async (options: DaemonOptions) => {
+      expect(options).toEqual({ debug: true, port: 3131, strictPort: true });
+      events.push("survivor-check");
+    });
+    const sleepSpy = spyOn(timer, "sleep").mockImplementation(async (durationMs: number) => {
+      expect(durationMs).toBe(DAEMON_RESTART_HANDOFF_DELAY_MS);
+      events.push("sleep");
+    });
+    const launchOptionsSpy = spyOn(manager as any, "withDaemonOptions");
+
+    try {
+      await expect(manager.start({ port: 3131, debug: undefined })).resolves.toBe("started");
+
+      expect(preparationSpy).toHaveBeenCalledWith(status);
+      expect(stopRunningSpy).toHaveBeenCalledWith(status, DAEMON_SHUTDOWN_TIMEOUT_MS, false);
+      expect(stopSpy).not.toHaveBeenCalled();
+      expect(survivorCheckSpy).toHaveBeenCalledTimes(1);
+      expect(sleepSpy).toHaveBeenCalledWith(DAEMON_RESTART_HANDOFF_DELAY_MS);
+      expect(launchOptionsSpy.mock.calls[0]?.[1]).toEqual({
+        debug: true,
+        port: 3131,
+        strictPort: true,
+      });
+      expect(events).toEqual(["admission", "stop", "survivor-check", "sleep", "launch"]);
+    } finally {
+      launchOptionsSpy.mockRestore();
+      sleepSpy.mockRestore();
+      survivorCheckSpy.mockRestore();
+      stopSpy.mockRestore();
+      stopRunningSpy.mockRestore();
+      preparationSpy.mockRestore();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("start defers a strictly older daemon takeover while a device operation is active", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "daemon-manager-upgrade-active-test-"));
+    const events: string[] = [];
+    const { manager } = managerStartingAgainstVersion(directory, "0.0.0", events);
+    const preparationSpy = spyOn(
+      manager as any,
+      "prepareDaemonForConditionalRestart",
+    ).mockResolvedValue({ accepted: false, reason: "active_operations" });
+    const stopRunningSpy = spyOn(manager as any, "stopRunningDaemon").mockResolvedValue(undefined);
+    const stopSpy = spyOn(manager, "stop").mockResolvedValue(undefined);
+
+    try {
+      const start = manager.start();
+      await expect(start).rejects.toBeInstanceOf(DaemonRestartDeferredError);
+      await expect(start).rejects.toThrow("a device operation is active");
+
+      expect(preparationSpy).toHaveBeenCalledTimes(1);
+      expect(stopRunningSpy).not.toHaveBeenCalled();
+      expect(stopSpy).not.toHaveBeenCalled();
+      expect(events).toEqual([]);
+    } finally {
+      stopSpy.mockRestore();
+      stopRunningSpy.mockRestore();
+      preparationSpy.mockRestore();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("start defers a strictly older daemon takeover during the version restart cooldown", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "daemon-manager-upgrade-cooldown-test-"));
+    const now = 20_000;
+    const events: string[] = [];
+    const { manager } = managerStartingAgainstVersion(directory, "0.0.0", events, {
+      now,
+      startedAt: now - (DAEMON_VERSION_RESTART_COOLDOWN_MS - 1),
+    });
+    const preparationSpy = spyOn(
+      manager as any,
+      "prepareDaemonForConditionalRestart",
+    ).mockResolvedValue({ accepted: true });
+    const stopRunningSpy = spyOn(manager as any, "stopRunningDaemon").mockResolvedValue(undefined);
+    const stopSpy = spyOn(manager, "stop").mockResolvedValue(undefined);
+    const warnSpy = spyOn(logger, "warn").mockImplementation(() => undefined);
+
+    try {
+      const start = manager.start();
+      await expect(start).rejects.toBeInstanceOf(DaemonRestartDeferredError);
+      await expect(start).rejects.toThrow("cooldown");
+
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("due to cooldown"));
+      expect(preparationSpy).not.toHaveBeenCalled();
+      expect(stopRunningSpy).not.toHaveBeenCalled();
+      expect(stopSpy).not.toHaveBeenCalled();
+      expect(events).toEqual([]);
+    } finally {
+      warnSpy.mockRestore();
+      stopSpy.mockRestore();
+      stopRunningSpy.mockRestore();
+      preparationSpy.mockRestore();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test.each([
+    ["same-version", DAEMON_VERSION],
+    ["newer-version", "999999.0.0"],
+    ["unparseable-version", "development"],
+    ["missing-version", undefined],
+  ] as const)("start joins a %s live daemon without stopping it", async (_case, peerVersion) => {
+    const directory = mkdtempSync(join(tmpdir(), "daemon-manager-protected-peer-test-"));
+    const events: string[] = [];
+    const { manager } = managerStartingAgainstVersion(directory, peerVersion, events);
+    const preparationSpy = spyOn(
+      manager as any,
+      "prepareDaemonForConditionalRestart",
+    ).mockResolvedValue({ accepted: true });
+    const stopRunningSpy = spyOn(manager as any, "stopRunningDaemon").mockResolvedValue(undefined);
+    const stopSpy = spyOn(manager, "stop").mockResolvedValue(undefined);
+    const stopUnrecordedSpy = spyOn(
+      manager as any,
+      "stopUnrecordedDaemonsForExplicitRestart",
+    ).mockResolvedValue(undefined);
+    const survivorCheckSpy = spyOn(
+      manager as any,
+      "assertNoSurvivingDaemonBeforeRestart",
+    ).mockResolvedValue(undefined);
+
+    try {
+      await expect(manager.start()).resolves.toBe("joined");
+
+      expect(preparationSpy).not.toHaveBeenCalled();
+      expect(stopRunningSpy).not.toHaveBeenCalled();
+      expect(stopSpy).not.toHaveBeenCalled();
+      expect(stopUnrecordedSpy).not.toHaveBeenCalled();
+      expect(survivorCheckSpy).not.toHaveBeenCalled();
+      expect(events).toEqual([]);
+    } finally {
+      survivorCheckSpy.mockRestore();
+      stopUnrecordedSpy.mockRestore();
+      stopSpy.mockRestore();
+      stopRunningSpy.mockRestore();
+      preparationSpy.mockRestore();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
 
   test("reports a shell-launched daemon once using the long-lived daemon child PID", () => {
     const manager = managerWithProcesses([

@@ -41,6 +41,8 @@ import {
   DEFAULT_DAEMON_PORT,
   CLI_SESSION_LIVENESS_POLICY,
   getCliSessionIdleTimeoutMs,
+  DAEMON_VERSION,
+  DAEMON_VERSION_RESTART_COOLDOWN_MS,
 } from "./constants";
 import { DaemonStatus, PidFileData, DaemonOptions } from "./types";
 import {
@@ -94,6 +96,7 @@ import {
   clearDaemonLaunchLogOwnerTombstoneSync,
   isProcessRunning as isDaemonProcessRunning,
   readPidFileDataSync,
+  shouldProtectLiveDaemonVersion,
 } from "./daemonFiles";
 import { parseLockContent, releaseExclusiveLock, tryAcquireExclusiveLock } from "../utils/fileLock";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
@@ -1532,8 +1535,55 @@ export class DaemonManager implements DaemonManagerLike {
     const status = await this.status();
     this.throwIfRecoveryCancelled(recoverySignal);
     if (status.running) {
-      stderrLog(`Daemon is already running (PID ${status.pid}, port ${status.port})`);
-      return "joined";
+      // ensureVersionMatches/compareStrictNumericVersions treat empty/unparseable as older (+Infinity); this start guard deliberately protects it.
+      if (shouldProtectLiveDaemonVersion(status.version, DAEMON_VERSION)) {
+        stderrLog(`Daemon is already running (PID ${status.pid}, port ${status.port})`);
+        return "joined";
+      }
+      if (status.startedAt) {
+        const daemonAgeMs = this.timer.now() - status.startedAt;
+        if (daemonAgeMs < DAEMON_VERSION_RESTART_COOLDOWN_MS) {
+          logger.warn(
+            `[DaemonManager] Skipping strictly-older daemon takeover due to cooldown: daemon ${status.version} is ${daemonAgeMs}ms old, current version is ${DAEMON_VERSION}`,
+          );
+          throw new DaemonRestartDeferredError("restart is in cooldown");
+        }
+      }
+
+      const preparation = await this.prepareDaemonForConditionalRestart(status);
+      if (!preparation.accepted) {
+        if (
+          preparation.reason === "generation_changed" ||
+          preparation.reason === "restart_pending"
+        ) {
+          stderrLog("Daemon restart is already in progress; joining its successor");
+          return "joined";
+        }
+        if (preparation.reason === "active_operations") {
+          throw new DaemonRestartDeferredError("a device operation is active");
+        }
+        if (preparation.reason === "shutdown_unavailable") {
+          throw new DaemonRestartDeferredError("the daemon could not initiate its own shutdown");
+        }
+        throw new DaemonRestartDeferredError(
+          "the daemon returned an unrecognized safe-restart admission result",
+        );
+      }
+
+      const requestedOptions = Object.fromEntries(
+        Object.entries(options).filter(([, value]) => value !== undefined),
+      ) as DaemonOptions;
+      options = {
+        ...(status.options ?? {}),
+        ...requestedOptions,
+        strictPort: true,
+      };
+      stderrLog(
+        `Detected strictly older AutoMobile daemon version ${status.version} (PID ${status.pid}); stopping it before upgrade...`,
+      );
+      await this.stopRunningDaemon(status, DAEMON_SHUTDOWN_TIMEOUT_MS, false);
+      await this.assertNoSurvivingDaemonBeforeRestart(options);
+      await this.timer.sleep(DAEMON_RESTART_HANDOFF_DELAY_MS);
     }
 
     // A missing or stale PID record must not turn an ordinary start request into

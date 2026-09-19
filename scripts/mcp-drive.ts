@@ -32,8 +32,12 @@
  * hint — never a retry storm — when it hits a daemon/client build mismatch.
  */
 import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { isCliToolFailure } from "../src/cli/index";
+import { coerceCliValue, getDeclaredParamTypes } from "../src/cli/cliValueCoercion";
+import { getDeviceSessionIdFromResult } from "../src/server/deviceSessionResult";
 import { readToolEnvelopePayload } from "../src/server/toolEnvelopePayload";
 
 export interface DriveStep {
@@ -55,31 +59,6 @@ export const SESSION_MINTING_TOOLS = new Set(["getAndroid", "getApple", "provisi
 
 export function isSessionMintingTool(name: string): boolean {
   return SESSION_MINTING_TOOLS.has(name);
-}
-
-/**
- * Coerce a `--key value` string the way the built-in `--cli` does: JSON when it
- * parses (objects, arrays, numbers, booleans), otherwise the raw string, so
- * `--text 12345` stays the string "12345" only when it is not valid JSON — matching
- * caller expectations that `--selector '{"text":"x"}'` and `--index 0` both work.
- */
-export function coerceValue(raw: string): unknown {
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return raw;
-  }
-}
-
-/** Pull the session UUID a minting tool returned, if present. */
-export function sessionUuidFromPayload(payload: unknown): string | undefined {
-  if (payload && typeof payload === "object") {
-    const value = (payload as Record<string, unknown>).sessionUuid;
-    if (typeof value === "string" && value.length > 0) {
-      return value;
-    }
-  }
-  return undefined;
 }
 
 /**
@@ -188,16 +167,27 @@ export async function runDrive(options: DriveOptions, deps: DriveDeps): Promise<
       }
       const envelope = await client.callTool(step.tool, step.args);
       const { payload, errorText } = readEnvelope(envelope);
-      const mintedSession = sessionUuidFromPayload(payload);
+      const mintedSession = getDeviceSessionIdFromResult(envelope);
       if (isSessionMintingTool(step.tool) && mintedSession) {
         session = mintedSession;
       }
       const hint = buildMismatchHint(errorText);
-      const stepOk = !errorText;
-      results.push({ tool: step.tool, ok: stepOk, payload, errorText, mismatchHint: hint });
+      const stepOk = !errorText && !isCliToolFailure(envelope);
+      const failureText =
+        errorText ??
+        (payload && typeof payload.message === "string"
+          ? payload.message
+          : "tool reported success:false");
+      results.push({
+        tool: step.tool,
+        ok: stepOk,
+        payload,
+        errorText: stepOk ? undefined : failureText,
+        mismatchHint: hint,
+      });
       if (!stepOk) {
         ok = false;
-        deps.log(`### ${step.tool} ERROR: ${errorText}`);
+        deps.log(`### ${step.tool} ERROR: ${failureText}`);
         if (hint) {
           deps.log(hint);
           break; // a mismatch will not fix itself across the rest of the plan
@@ -205,7 +195,9 @@ export async function runDrive(options: DriveOptions, deps: DriveDeps): Promise<
         continue;
       }
       const message =
-        payload && typeof payload.message === "string" ? payload.message : "(no message)";
+        payload && typeof payload.message === "string"
+          ? payload.message
+          : JSON.stringify(payload ?? {});
       deps.log(`### ${step.tool}: ${message}`);
       if (options.json) {
         deps.log(JSON.stringify(envelope, null, 2));
@@ -223,6 +215,7 @@ export function parseDriveArgs(argv: string[], readPlan: (path: string) => strin
   let planPath: string | undefined;
   let tool: string | undefined;
   const args: Record<string, unknown> = {};
+  const rawValues: Record<string, string> = {};
   let i = 0;
   while (i < argv.length) {
     const token = argv[i]!;
@@ -248,14 +241,14 @@ export function parseDriveArgs(argv: string[], readPlan: (path: string) => strin
         .filter(Boolean);
       i += 1;
     } else if (token.startsWith("--")) {
-      // A tool parameter: --key value (value coerced JSON-if-possible).
+      // A tool parameter: preserve bare-flag behavior while deferring schema-aware coercion.
       const key = token.slice(2);
       const next = argv[i + 1];
       if (next === undefined || next.startsWith("--")) {
         args[key] = true; // bare flag
         i += 1;
       } else {
-        args[key] = coerceValue(next);
+        rawValues[key] = next;
         i += 2;
       }
     } else if (!tool) {
@@ -284,6 +277,11 @@ export function parseDriveArgs(argv: string[], readPlan: (path: string) => strin
       return { tool: step.tool, args: (step.args as Record<string, unknown>) ?? {} };
     });
   } else if (tool) {
+    // Options may precede the positional tool name, so coerce after the scan once its schema is known.
+    const declaredTypes = getDeclaredParamTypes(tool);
+    for (const [key, value] of Object.entries(rawValues)) {
+      args[key] = coerceCliValue(value, declaredTypes?.[key]);
+    }
     options.steps = [{ tool, args }];
   } else {
     throw new Error("Provide a <tool> name or --plan <file>.");
@@ -307,7 +305,7 @@ async function createSdkClient(serverPath: string): Promise<DriveClient> {
 }
 
 function defaultServerPath(): string {
-  return resolve(new URL("../dist/src/index.js", import.meta.url).pathname);
+  return resolve(fileURLToPath(new URL("../dist/src/index.js", import.meta.url)));
 }
 
 async function main(): Promise<void> {

@@ -2,11 +2,9 @@ import { describe, expect, test } from "bun:test";
 import {
   applySession,
   buildMismatchHint,
-  coerceValue,
   isSessionMintingTool,
   parseDriveArgs,
   runDrive,
-  sessionUuidFromPayload,
   type DriveClient,
   type DriveStep,
 } from "../../scripts/mcp-drive";
@@ -34,25 +32,10 @@ class FakeClient implements DriveClient {
   }
 }
 
-describe("coerceValue", () => {
-  test("parses JSON, falls back to string", () => {
-    expect(coerceValue("0")).toBe(0);
-    expect(coerceValue("true")).toBe(true);
-    expect(coerceValue('{"text":"x"}')).toEqual({ text: "x" });
-    expect(coerceValue("emulator-5554")).toBe("emulator-5554");
-  });
-});
-
 describe("session helpers", () => {
   test("minting tools are recognized", () => {
     expect(isSessionMintingTool("getAndroid")).toBe(true);
     expect(isSessionMintingTool("tapOn")).toBe(false);
-  });
-
-  test("sessionUuidFromPayload reads a non-empty string only", () => {
-    expect(sessionUuidFromPayload({ sessionUuid: "abc" })).toBe("abc");
-    expect(sessionUuidFromPayload({ sessionUuid: "" })).toBeUndefined();
-    expect(sessionUuidFromPayload({})).toBeUndefined();
   });
 
   test("applySession injects for a normal tool but not a minting one or an explicit override", () => {
@@ -80,15 +63,15 @@ describe("parseDriveArgs", () => {
     throw new Error("no plan expected");
   };
 
-  test("one-shot tool with coerced params", () => {
-    const options = parseDriveArgs(
-      ["tapOn", "--selector", '{"text":"Save"}', "--index", "0"],
-      noPlan,
-    );
+  test("one-shot tool preserves numeric strings and coerces declared numbers", () => {
+    const textOptions = parseDriveArgs(["inputText", "--text", "12345"], noPlan);
+    expect(textOptions.steps[0]).toEqual({ tool: "inputText", args: { text: "12345" } });
+
+    const options = parseDriveArgs(["shake", "--duration", "0"], noPlan);
     expect(options.steps).toHaveLength(1);
     expect(options.steps[0]).toEqual({
-      tool: "tapOn",
-      args: { selector: { text: "Save" }, index: 0 },
+      tool: "shake",
+      args: { duration: 0 },
     });
   });
 
@@ -130,7 +113,10 @@ describe("runDrive", () => {
 
   test("captures a minted session and injects it into later calls", async () => {
     const client = new FakeClient({
-      getAndroid: envelope({ message: "ready", sessionUuid: "sess-1" }),
+      getAndroid: envelope({
+        message: "ready",
+        runtime: { session: { sessionUuid: "sess-1" } },
+      }),
       observe: envelope({ message: "observed" }),
     });
     const result = await runDrive(
@@ -152,7 +138,9 @@ describe("runDrive", () => {
   });
 
   test("merges --enable into the first minting call only", async () => {
-    const client = new FakeClient({ getAndroid: envelope({ message: "ready", sessionUuid: "s" }) });
+    const client = new FakeClient({
+      getAndroid: envelope({ message: "ready", runtime: { session: { sessionUuid: "s" } } }),
+    });
     await runDrive(
       {
         json: false,
@@ -173,6 +161,28 @@ describe("runDrive", () => {
     );
     expect(result.ok).toBe(false);
     expect(result.results[0].errorText).toBe("boom");
+  });
+
+  test("success:false makes the run non-ok without an error field", async () => {
+    const client = new FakeClient({ observe: envelope({ success: false, message: "failed" }) });
+    const result = await runDrive(
+      { json: false, quiet: false, steps: [{ tool: "observe", args: {} }] },
+      deps(client),
+    );
+    expect(result.ok).toBe(false);
+    expect(result.results[0].ok).toBe(false);
+    expect(result.results[0].errorText).toBe("failed");
+  });
+
+  test("default output renders payloads without a message", async () => {
+    const logs: string[] = [];
+    const client = new FakeClient({ observe: envelope({ hierarchy: { root: "screen" } }) });
+    await runDrive(
+      { json: false, quiet: false, steps: [{ tool: "observe", args: {} }] },
+      { ...deps(client), log: (message) => logs.push(message) },
+    );
+    expect(logs).toContain('### observe: {"hierarchy":{"root":"screen"}}');
+    expect(logs.join("\n")).not.toContain("(no message)");
   });
 
   test("a build mismatch stops the plan with a hint", async () => {

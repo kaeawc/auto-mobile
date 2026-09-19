@@ -842,11 +842,10 @@ describe("provisionDevice handler", () => {
     expect(readinessBudget).toBeGreaterThan(0);
     expect((response as any).isError).toBe(true);
     const payload = JSON.parse((response as any).content[0].text);
-    expect(Object.hasOwn(payload, "sessionUuid")).toBe(true);
+    expect(Object.hasOwn(payload, "sessionUuid")).toBe(false);
     expect(Object.hasOwn(payload, "sessionId")).toBe(true);
-    expect(payload.sessionUuid).toBe(payload.sessionId);
     const persisted = operationStore.getStoredResult("resource-timeout")!;
-    expect(persisted.sessionId).toBe(payload.sessionUuid);
+    expect(persisted.sessionId).toBe(payload.sessionId);
     expect(Object.hasOwn(persisted, "sessionUuid")).toBe(false);
     expect(payload).toMatchObject({
       success: false,
@@ -1467,7 +1466,6 @@ describe("provisionDevice handler", () => {
     expect(result).toMatchObject({
       lifecycleState: "ready",
       readiness: { mode: "automation", status: "automation_ready" },
-      sessionUuid: expect.any(String),
       sessionId: expect.any(String),
       device: {
         runtime: {
@@ -1480,7 +1478,7 @@ describe("provisionDevice handler", () => {
   });
 
   test.each(["android", "ios"] as const)(
-    "exposes sessionUuid for fresh booted %s provisioning while retaining sessionId",
+    "exposes sessionId without a top-level sessionUuid for fresh booted %s provisioning",
     async (platform) => {
       exactProvisioner.provision = async () => provisionedTestDevice(platform, false);
       deviceManager.setBootedDevices(platform, [
@@ -1500,12 +1498,11 @@ describe("provisionDevice handler", () => {
         ).content[0].text,
       );
 
-      expect(response.sessionUuid).toEqual(expect.any(String));
-      expect(Object.hasOwn(response, "sessionUuid")).toBe(true);
+      expect(response.sessionId).toEqual(expect.any(String));
+      expect(Object.hasOwn(response, "sessionUuid")).toBe(false);
       expect(Object.hasOwn(response, "sessionId")).toBe(true);
-      expect(response.sessionUuid).toBe(response.sessionId);
       const persisted = operationStore.getStoredResult(`operation-public-session-${platform}`)!;
-      expect(persisted.sessionId).toBe(response.sessionUuid);
+      expect(persisted.sessionId).toBe(response.sessionId);
       expect(Object.hasOwn(persisted, "sessionUuid")).toBe(false);
     },
   );
@@ -3080,18 +3077,17 @@ describe("provisionDevice handler", () => {
     expect(exactProvisioner.requests[1]?.reconcileExistingConfiguration).toBe(false);
     expect(deviceManager.getCallCount("getBootedDevices")).toBeGreaterThanOrEqual(2);
     for (const response of [first, second]) {
-      expect(Object.hasOwn(response, "sessionUuid")).toBe(true);
+      expect(Object.hasOwn(response, "sessionUuid")).toBe(false);
       expect(Object.hasOwn(response, "sessionId")).toBe(true);
-      expect(response.sessionUuid).toBe(response.sessionId);
     }
+    const persisted = operationStore.getStoredResult(args.operationId)!;
+    expect(persisted.sessionId).toBe(second.sessionId);
+    expect(Object.hasOwn(persisted, "sessionUuid")).toBe(false);
+    expect(second.sessionId).not.toBe(first.sessionId);
     expect(second).toMatchObject({
       lifecycleState: "ready",
       sessionId: expect.any(String),
     });
-    expect(second.sessionUuid).not.toBe(first.sessionUuid);
-    const persisted = operationStore.getStoredResult(args.operationId)!;
-    expect(persisted.sessionId).toBe(second.sessionUuid);
-    expect(Object.hasOwn(persisted, "sessionUuid")).toBe(false);
   });
 
   test.each([false, true])(
@@ -3155,13 +3151,12 @@ describe("provisionDevice handler", () => {
       const second = JSON.parse(((await tool.handler(args)) as any).content[0].text);
 
       for (const response of [first, second]) {
-        expect(Object.hasOwn(response, "sessionUuid")).toBe(true);
+        expect(Object.hasOwn(response, "sessionUuid")).toBe(false);
         expect(Object.hasOwn(response, "sessionId")).toBe(true);
-        expect(response.sessionUuid).toBe(response.sessionId);
       }
       expect(second).toEqual(first);
       const persisted = operationStore.getStoredResult(args.operationId)!;
-      expect(persisted.sessionId).toBe(second.sessionUuid);
+      expect(persisted.sessionId).toBe(second.sessionId);
       expect(Object.hasOwn(persisted, "sessionUuid")).toBe(false);
       expect(exactProvisioner.requests).toHaveLength(1);
       expect(deviceManager.getCallCount("startDevice")).toBe(1);
@@ -3179,17 +3174,16 @@ describe("provisionDevice handler", () => {
         const drift = await tool.handler(args);
         expect((drift as any).isError).toBe(true);
         const driftPayload = JSON.parse((drift as any).content[0].text);
-        expect(Object.hasOwn(driftPayload, "sessionUuid")).toBe(true);
+        expect(Object.hasOwn(driftPayload, "sessionUuid")).toBe(false);
         expect(Object.hasOwn(driftPayload, "sessionId")).toBe(true);
-        expect(driftPayload.sessionUuid).toBe(driftPayload.sessionId);
-        expect(driftPayload.sessionUuid).toBe(first.sessionUuid);
+        expect(driftPayload.sessionId).toBe(first.sessionId);
         expect(exactProvisioner.requests).toHaveLength(1);
         expect(readinessCalls).toBe(3);
         expect(operationStore.getStoredResult(args.operationId)?.resources).toMatchObject({
           success: false,
         });
         const persistedDrift = operationStore.getStoredResult(args.operationId)!;
-        expect(persistedDrift.sessionId).toBe(driftPayload.sessionUuid);
+        expect(persistedDrift.sessionId).toBe(driftPayload.sessionId);
         expect(Object.hasOwn(persistedDrift, "sessionUuid")).toBe(false);
       }
       sessionManager.stopCleanupTimer();
@@ -3250,9 +3244,8 @@ describe("provisionDevice handler", () => {
     );
 
     expect(readinessCalls).toBe(0);
-    expect(response.sessionUuid).toEqual(expect.any(String));
     expect(response.sessionId).toEqual(expect.any(String));
-    expect(sessionManager.getDeviceReadiness(response.sessionUuid)).toBe("booted");
+    expect(sessionManager.getDeviceReadiness(response.sessionId)).toBe("booted");
     sessionManager.stopCleanupTimer();
   });
 
@@ -3307,9 +3300,9 @@ describe("provisionDevice handler", () => {
           })) as any
         ).content[0].text,
       );
-      const sessionUuid = response.sessionUuid as string;
-      expect(response.sessionId).toEqual(expect.any(String));
-      expect(sessionManager.getDeviceReadiness(sessionUuid)).toBe("booted");
+      const sessionId = response.sessionId as string;
+      expect(sessionId).toEqual(expect.any(String));
+      expect(sessionManager.getDeviceReadiness(sessionId)).toBe("booted");
 
       ToolRegistry.registerDeviceAware(
         "automationReadyAfterProvisionProbe",
@@ -3323,14 +3316,14 @@ describe("provisionDevice handler", () => {
         "automationReadyAfterProvisionProbe",
       )!.handler({
         platform: "android",
-        sessionUuid,
+        sessionUuid: sessionId,
         // This probe verifies readiness setup, not host ADB keep-awake behavior.
         keepScreenAwake: false,
       });
 
       expect(automationResponse).toMatchObject({ success: true });
       expect(ctrlProxySetup.setupCallCount()).toBe(1);
-      expect(sessionManager.getDeviceReadiness(sessionUuid)).toBe("automationReady");
+      expect(sessionManager.getDeviceReadiness(sessionId)).toBe("automationReady");
     } finally {
       ctrlProxySetup.restore();
       sessionManager.stopCleanupTimer();
@@ -3449,16 +3442,15 @@ describe("provisionDevice handler", () => {
       );
 
       for (const response of [first, second]) {
-        expect(Object.hasOwn(response, "sessionUuid")).toBe(true);
+        expect(Object.hasOwn(response, "sessionUuid")).toBe(false);
         expect(Object.hasOwn(response, "sessionId")).toBe(true);
-        expect(response.sessionUuid).toBe(response.sessionId);
       }
       expect(second).toEqual(first);
       expect(pool.resolveAutolockSessionForMcpSession("mcp-session-reconnected", "android")).toBe(
         first.sessionId,
       );
       const persisted = operationStore.getStoredResult(args.operationId)!;
-      expect(persisted.sessionId).toBe(second.sessionUuid);
+      expect(persisted.sessionId).toBe(second.sessionId);
       expect(Object.hasOwn(persisted, "sessionUuid")).toBe(false);
     } finally {
       sessionManager.stopCleanupTimer();
@@ -3576,18 +3568,17 @@ describe("provisionDevice handler", () => {
     const second = JSON.parse(((await tool.handler(args)) as any).content[0].text);
 
     for (const response of [first, second]) {
-      expect(Object.hasOwn(response, "sessionUuid")).toBe(true);
+      expect(Object.hasOwn(response, "sessionUuid")).toBe(false);
       expect(Object.hasOwn(response, "sessionId")).toBe(true);
-      expect(response.sessionUuid).toBe(response.sessionId);
     }
+    const persisted = operationStore.getStoredResult(args.operationId)!;
+    expect(persisted.sessionId).toBe(second.sessionId);
+    expect(Object.hasOwn(persisted, "sessionUuid")).toBe(false);
+    expect(second.sessionId).not.toBe(first.sessionId);
     expect(second).toMatchObject({
       lifecycleState: "ready",
       sessionId: expect.any(String),
     });
-    expect(second.sessionUuid).not.toBe(first.sessionUuid);
-    const persisted = operationStore.getStoredResult(args.operationId)!;
-    expect(persisted.sessionId).toBe(second.sessionUuid);
-    expect(Object.hasOwn(persisted, "sessionUuid")).toBe(false);
     expect(exactProvisioner.requests).toHaveLength(2);
     expect(pool.getDevice(bootedDevice.deviceId)?.status).toBe("busy");
     sessionManager.stopCleanupTimer();
@@ -4485,8 +4476,8 @@ describe("provisionDevice handler", () => {
           expect(payload.error.message).toContain("original readiness failure");
           expect(sessionManager.getAllSessionIds()).toEqual([]);
         } else {
-          expect(payload.sessionUuid).toBeDefined();
-          expect(sessionManager.getSession(payload.sessionUuid)?.assignedDevice).toBe(
+          expect(payload.sessionId).toBeDefined();
+          expect(sessionManager.getSession(payload.sessionId)?.assignedDevice).toBe(
             booted.deviceId,
           );
         }

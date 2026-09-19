@@ -54,9 +54,11 @@ fields were removed from every producer:
 - `provisionDevice.device`: the raw pre-image `DeviceInfo`/`BootedDevice` fields,
   including `deviceId`, `isRunning`, runtime/display metadata, availability
   metadata, and capability inventory.
-- `startDevice`, `getAndroid`, and `getApple`: `deviceId`, `apiLevel`,
-  `osVersion`, `formFactor`, `screenSize`, and `sessionUuid`. The separate
-  `deviceIdentity` diagnostic remains because it is not a description alias.
+- `startDevice`, `getAndroid`, and `getApple`: duplicate `deviceIdentity`
+  copies of `deviceId`, `apiLevel`, `osVersion`, `formFactor`, `screenSize`,
+  and `sessionUuid`; canonical values remain at their top-level or runtime
+  locations. The separate `deviceIdentity` diagnostic remains for its unique
+  platform diagnostics, not as a description alias.
 - `automobile:devices/booted`: `deviceId`, `deviceSessionUuid`, `status`,
   `lifecycleState`, `formFactor`, `poolStatus`, and `assignedSession`.
 - The old flat image `runtime` string and `legacyRuntimeId` alias were replaced

@@ -1020,25 +1020,11 @@ function androidDeviceIdentityPayload(
 ): Record<string, unknown> {
   const portMatch = /^emulator-(\d+)$/.exec(device.deviceId);
   const androidImage = sourceImage?.platform === "android" ? sourceImage : undefined;
-  const { apiLevel, osVersion } = androidBootedMetadata(device, sourceImage);
   return {
     platform: "android",
     avdName: androidImage?.name ?? device.name,
     adbSerial: device.deviceId,
     emulatorConsolePort: portMatch ? Number(portMatch[1]) : null,
-    ...(apiLevel !== undefined ? { apiLevel } : {}),
-    ...(osVersion ? { osVersion } : {}),
-  };
-}
-
-function androidBootedMetadata(
-  device: BootedDevice,
-  sourceImage: DeviceInfo | undefined,
-): Pick<DeviceInfo, "apiLevel" | "osVersion"> {
-  const androidImage = sourceImage?.platform === "android" ? sourceImage : undefined;
-  return {
-    apiLevel: device.apiLevel ?? androidImage?.apiLevel,
-    osVersion: device.osVersion ?? androidImage?.osVersion,
   };
 }
 
@@ -4967,9 +4953,9 @@ function createProvisionDeviceResponse(result: Record<string, unknown>) {
       message: `${device.platform} '${device.name}' provisioned (${result.lifecycleState})${resourceFailure ? "; requested resource configuration was not fully applied" : ""}`,
       ...result,
       // `sessionId` remains the persisted daemon-internal handle for replay and
-      // recovery. Public preparation APIs use `sessionUuid`; retain sessionId
-      // as a compatibility alias for provisionDevice's existing consumers.
-      ...(sessionId ? { sessionUuid: sessionId, sessionId } : {}),
+      // recovery. Canonical readers use `runtime.session.sessionUuid` or this
+      // `sessionId`; the former top-level `sessionUuid` alias was unused.
+      ...(sessionId ? { sessionId } : {}),
       ...(resources ? { success: resources.success } : {}),
     }),
     ...(resourceFailure ? { isError: true } : {}),

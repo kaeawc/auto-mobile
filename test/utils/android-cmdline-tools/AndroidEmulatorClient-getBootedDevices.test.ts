@@ -5,6 +5,7 @@ import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeEmulatorConsoleBusyRegistry } from "../../fakes/FakeEmulatorConsoleBusyRegistry";
+import { FakeAvdConfigReader } from "../../fakes/FakeAvdConfigReader";
 import type { AdbExecuteOptions } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { DiscoveryObservationSequence } from "../../../src/utils/DiscoveryObservationSequence";
 
@@ -116,6 +117,79 @@ class SequencedDeferredAvdNameAdbExecutor extends FakeAdbExecutor {
 }
 
 describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
+  test("exposes a cached getprop model on a booted emulator", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setDevices([
+      { name: "ignored", platform: "android", deviceId: "emulator-5554" } satisfies BootedDevice,
+    ]);
+    adb.setCommandResponse("emu avd name", execResult("Pixel_9_API_36\n"));
+    adb.setCommandResponse("shell getprop ro.product.model", execResult("sdk_gphone64_arm64\n"));
+    const client = new AndroidEmulatorClient(
+      null,
+      null,
+      new FakeTimer(),
+      new FakeAdbClientFactory(adb),
+    );
+
+    await expect(client.getBootedDevicesChecked()).resolves.toEqual([
+      expect.objectContaining({ model: "sdk_gphone64_arm64" }),
+    ]);
+    await client.getBootedDevicesChecked();
+
+    expect(
+      adb.getExecutedCommands().filter((command) => command === "shell getprop ro.product.model"),
+    ).toHaveLength(1);
+  });
+
+  test("uses cached CPU ABI metadata for a physical device without an AVD image", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setDevices([
+      { name: "ignored", platform: "android", deviceId: "R58M12ABCDE" } satisfies BootedDevice,
+    ]);
+    adb.setCommandResponse("shell getprop ro.product.model", execResult("Pixel 9\n"));
+    adb.setCommandResponse("shell getprop ro.product.cpu.abi", execResult("arm64-v8a\n"));
+    const client = new AndroidEmulatorClient(
+      null,
+      null,
+      new FakeTimer(),
+      new FakeAdbClientFactory(adb),
+    );
+
+    await expect(client.getBootedDevicesChecked()).resolves.toEqual([
+      expect.objectContaining({
+        name: "Pixel 9",
+        model: "Pixel 9",
+        architecture: "arm64-v8a",
+      }),
+    ]);
+    await client.getBootedDevicesChecked();
+
+    expect(
+      adb.getExecutedCommands().filter((command) => command === "shell getprop ro.product.cpu.abi"),
+    ).toHaveLength(1);
+  });
+
+  test("uses the configured system-image ABI for an AVD image", async () => {
+    const config = new FakeAvdConfigReader({
+      systemImagePackage: "system-images;android-36;google_apis;arm64-v8a",
+      architecture: "arm64",
+    });
+    const client = new AndroidEmulatorClient(
+      async (_file, args) => execResult(args[0] === "-list-avds" ? "Pixel_9_API_36\n" : ""),
+      null,
+      new FakeTimer(),
+      new FakeAdbClientFactory(new FakeAdbExecutor()),
+      config,
+    );
+
+    await expect(client.listAvds()).resolves.toEqual([
+      expect.objectContaining({
+        name: "Pixel_9_API_36",
+        architecture: "arm64-v8a",
+      }),
+    ]);
+  });
+
   test("stamps an emulator observation after its AVD name resolves", async () => {
     let stamp = 0;
     const observationSequence: DiscoveryObservationSequence = {
@@ -185,6 +259,7 @@ describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
     expect(adb.getExecutedCommands()).toEqual([
       "emu avd name",
       "shell getprop ro.boot.qemu.avd_name",
+      "shell getprop ro.product.model",
     ]);
   });
 

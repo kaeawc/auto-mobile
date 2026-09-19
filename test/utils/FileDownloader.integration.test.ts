@@ -25,8 +25,18 @@ const asPipeResponseToFile = (downloader: DefaultFileDownloader): PipeResponseTo
  * no-op listener below reproduces that internal safety net so the fake
  * behaves like a real response stream in this one respect.
  */
-const createFakeResponse = (): Readable => {
-  const response = new Readable({ read() {} });
+const createFakeResponse = (): Readable & { waitForRead(): Promise<void> } => {
+  let resolveRead: (() => void) | undefined;
+  const read = new Promise<void>((resolve) => {
+    resolveRead = resolve;
+  });
+  const response = new Readable({
+    read() {
+      resolveRead?.();
+      resolveRead = undefined;
+    },
+  }) as Readable & { waitForRead(): Promise<void> };
+  response.waitForRead = () => read;
   response.on("error", () => {
     // Real IncomingMessage instances never throw an unhandled error for a
     // premature close; see the comment above.
@@ -94,7 +104,7 @@ describe("DefaultFileDownloader pipeResponseToFile", function () {
     // directly against the pre-fix code, which timed out well past this
     // test's bound.
     //
-    // The destroy is scheduled AFTER `pipeResponseToFile` is called (not
+    // The destroy happens only after `pipeResponseToFile` starts reading (not
     // before) so the source is destroyed while `stream.pipeline` is
     // actively consuming it, not before piping even starts — otherwise an
     // implementation that merely checks `response.destroyed` at entry
@@ -106,12 +116,16 @@ describe("DefaultFileDownloader pipeResponseToFile", function () {
     const downloader = asPipeResponseToFile(new DefaultFileDownloader());
 
     const result = downloader.pipeResponseToFile(response, destination, "https://example.com/file");
-    queueMicrotask(() => response.destroy());
+    // Wait for pipeline to request input before closing the source. This is
+    // the exact synchronization point the former 100 ms test deadline was
+    // trying to approximate, without making the assertion load-sensitive.
+    await response.waitForRead();
+    response.destroy();
 
     await expect(result).rejects.toThrow(/premature close/i);
 
     expect(await fs.readdir(tempDir)).toEqual([]);
-  }, 100);
+  });
 
   test("a failed attempt never removes a file another attempt already wrote to the same destination", async function () {
     // Regression guard: failure cleanup must only ever remove the failed
@@ -129,12 +143,13 @@ describe("DefaultFileDownloader pipeResponseToFile", function () {
     const downloader = asPipeResponseToFile(new DefaultFileDownloader());
 
     const result = downloader.pipeResponseToFile(response, destination, "https://example.com/file");
-    queueMicrotask(() => response.destroy());
+    await response.waitForRead();
+    response.destroy();
 
     await expect(result).rejects.toThrow(/premature close/i);
 
     expect(await fs.readFile(destination)).toEqual(existingPayload);
-  }, 100);
+  });
 
   test("resolves and writes the full file for a complete response", async function () {
     const payload = Buffer.from("complete download payload");

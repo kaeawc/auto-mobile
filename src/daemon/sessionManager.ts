@@ -5,6 +5,7 @@ import { BootedDevice, Platform } from "../models";
 import { KeepScreenAwakeManager, KeepScreenAwakeState } from "../utils/KeepScreenAwakeManager";
 import {
   DeviceSessionRepository,
+  isDeviceRestartReleaseReason,
   isRecoverableDeviceSession,
   type DeviceSessionPersistence,
 } from "../db/deviceSessionRepository";
@@ -2574,6 +2575,12 @@ export class SessionManager {
         throw toActionableError(
           error,
           `Failed to persist terminal release for session ${snapshot.sessionId}`,
+        );
+      }
+      if (isDeviceRestartReleaseReason(snapshot.releaseReason)) {
+        throw toActionableError(
+          error,
+          `Failed to persist recoverable device-restart release for session ${snapshot.sessionId}`,
         );
       }
     }

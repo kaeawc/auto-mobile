@@ -2,7 +2,9 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { type Kysely, sql } from "kysely";
 import type { Database } from "../../src/db/types";
 import {
+  deviceRestartReleaseReason,
   DeviceSessionRepository,
+  isRecoverableDaemonReleaseReason,
   RECOVERABLE_DAEMON_RELEASE_REASONS,
   type DeviceSessionRecord,
 } from "../../src/db/deviceSessionRepository";
@@ -116,6 +118,7 @@ describe("DeviceSessionRepository", () => {
     for (const [sessionUuid, lastUsedAtMs, reason] of [
       ["older", 1000, "daemon-restart"],
       ["newer", 2000, "daemon-shutdown"],
+      ["emulator-restart", 2500, deviceRestartReleaseReason("Pixel_8_API_35")],
       ["terminal", 3000, "device-killed"],
     ] as const) {
       await repo.upsertActiveSession({
@@ -144,9 +147,76 @@ describe("DeviceSessionRepository", () => {
     });
 
     expect((await repo.listRecoverableSessions()).map((row) => row.session_uuid)).toEqual([
+      "emulator-restart",
       "newer",
       "older",
     ]);
+  });
+
+  test("rehydrates a device-restart release onto the same AVD after its adb port changes", async () => {
+    const originalManager = new SessionManager(timer, repo);
+    try {
+      await originalManager.createSession(
+        "emulator-session",
+        "emulator-5554",
+        "android",
+        60_000,
+        10_000,
+        "Pixel_8_API_35",
+      );
+      await originalManager.releaseSession(
+        "emulator-session",
+        deviceRestartReleaseReason("Pixel_8_API_35"),
+      );
+    } finally {
+      originalManager.stopCleanupTimer();
+    }
+
+    const returned = {
+      name: "Pixel_8_API_35",
+      platform: "android" as const,
+      deviceId: "emulator-5580",
+    };
+    const fakeDeviceUtils = new FakeDeviceUtils();
+    fakeDeviceUtils.setBootedDevices("android", [returned]);
+    const restartedManager = new SessionManager(timer, repo);
+    const restartedPool = new DevicePool(
+      restartedManager,
+      "new-daemon-session",
+      timer,
+      undefined,
+      fakeDeviceUtils,
+    );
+    await restartedPool.initializeWithDevices([returned]);
+
+    try {
+      await expect(restartedManager.rehydratePersistedSessions(restartedPool)).resolves.toEqual({
+        rehydrated: ["emulator-session"],
+        terminalized: [],
+        skipped: [],
+        timedOut: false,
+      });
+      expect(restartedManager.getSession("emulator-session")).toMatchObject({
+        sessionId: "emulator-session",
+        assignedDevice: "emulator-5580",
+        stableDeviceId: "Pixel_8_API_35",
+        ownership: "awaiting-owner",
+      });
+      expect(await repo.getSession("emulator-session")).toMatchObject({
+        device_id: "emulator-5580",
+        stable_device_id: "Pixel_8_API_35",
+        release_reason: null,
+        status: "active",
+      });
+    } finally {
+      restartedManager.stopCleanupTimer();
+    }
+  });
+
+  test("only the stableId-keyed emulator restart reason extends daemon recoverability", () => {
+    expect(isRecoverableDaemonReleaseReason("device-restart:Pixel_8_API_35")).toBe(true);
+    expect(isRecoverableDaemonReleaseReason("device-restart:")).toBe(false);
+    expect(isRecoverableDaemonReleaseReason("device-disconnected:emulator-5554")).toBe(false);
   });
 
   test("does not recover rows past retention or their persisted expiry", async () => {
@@ -702,6 +772,45 @@ describe("DeviceSessionRepository", () => {
       expect(row!.release_reason).toMatch(
         /^device-disconnected:emulator-5554;incident=emulator-loss-/,
       );
+    } finally {
+      sessionManager.stopCleanupTimer();
+    }
+  });
+
+  test("physical Android disconnect remains a terminal device-disconnected release", async () => {
+    const physicalDevice = {
+      name: "Pixel 8 Pro",
+      platform: "android" as const,
+      deviceId: "39081FDJG00042",
+    };
+    const fakeDeviceUtils = new FakeDeviceUtils();
+    fakeDeviceUtils.setBootedDevices("android", [physicalDevice]);
+    const sessionManager = new SessionManager(timer, repo);
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session-1",
+      timer,
+      undefined,
+      fakeDeviceUtils,
+    );
+
+    try {
+      await pool.initializeWithDevices([physicalDevice]);
+      await pool.bindOrReuseDeviceSession("physical-session", physicalDevice.deviceId, "android");
+      fakeDeviceUtils.setBootedDevices("android", []);
+
+      await expect(
+        pool.bindOrReuseDeviceSession("replacement-session", physicalDevice.deviceId, "android"),
+      ).rejects.toThrow(/not available|shut down|disconnected/);
+
+      expect(sessionManager.getSession("physical-session")).toBeNull();
+      expect(await repo.getSession("physical-session")).toMatchObject({
+        release_reason: `device-disconnected:${physicalDevice.deviceId}`,
+        status: "released",
+      });
+      await expect(
+        sessionManager.getOrCreateSession("physical-session", pool, "android"),
+      ).rejects.toThrow("terminal");
     } finally {
       sessionManager.stopCleanupTimer();
     }

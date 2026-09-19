@@ -1,5 +1,5 @@
 import {
-  RECOVERABLE_DAEMON_RELEASE_REASONS,
+  isRecoverableDaemonReleaseReason,
   type DeviceSessionActivityUpdate,
   type DeviceSessionPersistence,
   type DeviceSessionRecord,
@@ -56,9 +56,7 @@ export class FakeDeviceSessionPersistence implements DeviceSessionPersistence {
 
   async listRecoverableSessions(): Promise<DeviceSession[]> {
     return Array.from(this.rows.values())
-      .filter(
-        (row) => row.release_reason && RECOVERABLE_DAEMON_RELEASE_REASONS.has(row.release_reason),
-      )
+      .filter((row) => row.release_reason && isRecoverableDaemonReleaseReason(row.release_reason))
       .sort((a, b) => b.last_used_at_ms - a.last_used_at_ms);
   }
 
@@ -109,7 +107,7 @@ export class FakeDeviceSessionPersistence implements DeviceSessionPersistence {
     row.status = status;
     row.released_at_ms = releasedAtMs;
     row.release_reason = reason;
-    if (!RECOVERABLE_DAEMON_RELEASE_REASONS.has(reason)) {
+    if (!isRecoverableDaemonReleaseReason(reason)) {
       row.liveness_owner_token = null;
     }
   }

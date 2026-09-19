@@ -118,15 +118,18 @@ An explicit `--create-if-missing false` disables creation even when the
 environment variable is set. Created devices can be removed with
 `xcrun simctl delete <udid>` or `avdmanager delete avd -n <name>`.
 
-Enable device recovery only when AutoMobile owns the virtual device:
+Session continuity is enabled by default for a session-bound Android emulator
+that AutoMobile owns. If its runtime connection disappears, AutoMobile restarts
+the same AVD and retains the session. To disable that continuity explicitly:
 
 ```bash
-export AUTOMOBILE_DEVICE_RECOVERY_ON_LOSS=1
+export AUTOMOBILE_DEVICE_RECOVERY_ON_LOSS=0
 export AUTOMOBILE_DEVICE_RECOVERY_MAX_ATTEMPTS=2
 ```
 
-Recovery restarts eligible AutoMobile-owned Android AVDs. Physical devices,
-externally started emulators, and iOS simulators are not restarted.
+Setting `AUTOMOBILE_DEVICE_RECOVERY_ON_LOSS=1` also enables the broader recovery
+policy for eligible idle or unbound AutoMobile-owned Android AVDs. Physical
+devices, externally started emulators, and iOS simulators are not restarted.
 
 ## Shared ADB server
 

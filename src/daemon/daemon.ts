@@ -9,7 +9,7 @@ import { SessionManager, type ActiveSessionExecutionQuery, type Session } from "
 import { SessionHeartbeatMonitor } from "./SessionHeartbeatMonitor";
 import { SingleFlightInterval } from "./SingleFlightInterval";
 import { DevicePool, type PooledDevice } from "./devicePool";
-import { parseDeviceRecoveryPolicy } from "./poolConfig";
+import { isAndroidEmulatorSessionContinuityEnabled, parseDeviceRecoveryPolicy } from "./poolConfig";
 import { deviceLossCancellationReason } from "./emulatorLossIncident";
 import { DaemonState } from "./daemonState";
 import { DeviceSessionRegistry } from "./deviceSessionRegistry";
@@ -496,6 +496,9 @@ export class Daemon {
       (sessionId, reason, options) =>
         this.cancelAndDrainDeviceSessionExecutions(sessionId, reason, options),
       this.idGenerator,
+      undefined,
+      undefined,
+      isAndroidEmulatorSessionContinuityEnabled(recoveryPolicyEnvironment),
     );
     // Initialize singleton for daemon state access
     DaemonState.getInstance().initialize(

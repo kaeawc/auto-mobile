@@ -16,6 +16,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import {
+  deviceRestartReleaseReason,
   type DeviceSessionPersistence,
   type DeviceSessionRecord,
 } from "../../src/db/deviceSessionRepository";
@@ -4873,6 +4874,9 @@ describe("DevicePool", () => {
           releaseCalls.push({ sessionId, deviceId, reason });
           await sessionManager.releaseSession(sessionId, reason);
         },
+        undefined,
+        undefined,
+        { onLoss: false, maxAttempts: 2 },
       );
 
       const assignments = await devicePool.assignMultipleDevices(["session-1"], 1000, "android");
@@ -4885,7 +4889,7 @@ describe("DevicePool", () => {
       expect(releaseCalls[0]).toEqual({
         sessionId: "session-1",
         deviceId: "emulator-5554",
-        reason: expect.stringMatching(/^device-disconnected:emulator-5554;incident=emulator-loss-/),
+        reason: deviceRestartReleaseReason("Pixel 8"),
       });
       expect(devicePool.getDevice("emulator-5554")).toBeNull();
       expect(sessionManager.getSession("session-1")).toBeNull();
@@ -4972,8 +4976,12 @@ describe("DevicePool", () => {
     });
 
     test("keeps criteria auto-start available after a process exit when recovery is disabled", async () => {
+      const originalRecoveryOnLoss = process.env.AUTOMOBILE_DEVICE_RECOVERY_ON_LOSS;
+      const originalRecoveryOnLossAlias = process.env.AUTO_MOBILE_DEVICE_RECOVERY_ON_LOSS;
       const originalRebootOnDeath = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
       const originalRebootOnDeathAlias = process.env.AUTO_MOBILE_ANDROID_REBOOT_ON_DEATH;
+      process.env.AUTOMOBILE_DEVICE_RECOVERY_ON_LOSS = "0";
+      delete process.env.AUTO_MOBILE_DEVICE_RECOVERY_ON_LOSS;
       delete process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
       delete process.env.AUTO_MOBILE_ANDROID_REBOOT_ON_DEATH;
       try {
@@ -5006,6 +5014,16 @@ describe("DevicePool", () => {
         ).resolves.toEqual(new Map([["session-2", "emulator-5554"]]));
         expect(manager.startedDevices).toHaveLength(2);
       } finally {
+        if (originalRecoveryOnLoss === undefined) {
+          delete process.env.AUTOMOBILE_DEVICE_RECOVERY_ON_LOSS;
+        } else {
+          process.env.AUTOMOBILE_DEVICE_RECOVERY_ON_LOSS = originalRecoveryOnLoss;
+        }
+        if (originalRecoveryOnLossAlias === undefined) {
+          delete process.env.AUTO_MOBILE_DEVICE_RECOVERY_ON_LOSS;
+        } else {
+          process.env.AUTO_MOBILE_DEVICE_RECOVERY_ON_LOSS = originalRecoveryOnLossAlias;
+        }
         if (originalRebootOnDeath === undefined) {
           delete process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
         } else {
@@ -5409,6 +5427,9 @@ describe("DevicePool", () => {
         },
       ];
       const manager = new FakeDeviceManagerWithFailingRecoveryStart(images);
+      const persistence = new FakeDeviceSessionPersistence();
+      sessionManager.stopCleanupTimer();
+      sessionManager = new SessionManager(fakeTimer, persistence);
       const incidents = new InMemoryEmulatorLossIncidentStore(
         fakeTimer,
         new CountingIdGenerator("incident"),
@@ -5457,6 +5478,10 @@ describe("DevicePool", () => {
         outcome: "exhausted",
       });
       expect(sessionManager.getSession("session-1")).toBeNull();
+      expect(await persistence.getSession?.("session-1")).toMatchObject({
+        release_reason: deviceRestartReleaseReason("Pixel 8"),
+        stable_device_id: "Pixel 8",
+      });
       await expect(
         sessionManager.getOrCreateSession("session-1", devicePool, "android"),
       ).rejects.toThrow("terminal");

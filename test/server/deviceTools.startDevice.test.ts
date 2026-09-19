@@ -659,15 +659,6 @@ describe("startDevice handler", () => {
   });
 
   it("tracks the process handle for a public Android cold boot", async () => {
-    const recoveryKeys = [
-      "AUTOMOBILE_ANDROID_REBOOT_ON_DEATH",
-      "AUTO_MOBILE_ANDROID_REBOOT_ON_DEATH",
-    ] as const;
-    const originalRecoveryEnv = new Map(recoveryKeys.map((key) => [key, process.env[key]]));
-    for (const key of recoveryKeys) {
-      delete process.env[key];
-    }
-
     const timer = new FakeTimer();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
@@ -676,6 +667,13 @@ describe("startDevice handler", () => {
       timer,
       undefined,
       fakeDeviceUtils,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { onLoss: false, maxAttempts: 2 },
     );
     DaemonState.getInstance().initialize(daemonSessionManager, pool);
 
@@ -689,30 +687,19 @@ describe("startDevice handler", () => {
     fakeMatcher.setBootedResult(null);
     fakeMatcher.setImageResult(coldBootImage);
 
-    try {
-      const result = await callStartDevice({ platform: "android" });
-      expect(
-        daemonSessionManager.getSession(result.runtime.session.sessionUuid as string),
-      ).not.toBeNull();
+    const result = await callStartDevice({ platform: "android" });
+    expect(
+      daemonSessionManager.getSession(result.runtime.session.sessionUuid as string),
+    ).not.toBeNull();
 
-      childProcess.emit("exit", 1, null);
-      await new Promise((resolve) => setImmediate(resolve));
-      await new Promise((resolve) => setImmediate(resolve));
+    childProcess.emit("exit", 1, null);
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
 
-      expect(
-        daemonSessionManager.getSession(result.runtime.session.sessionUuid as string),
-      ).toBeNull();
-      expect(pool.getDevice(androidDevice.deviceId)).toBeNull();
-    } finally {
-      for (const key of recoveryKeys) {
-        const original = originalRecoveryEnv.get(key);
-        if (original === undefined) {
-          delete process.env[key];
-        } else {
-          process.env[key] = original;
-        }
-      }
-    }
+    expect(
+      daemonSessionManager.getSession(result.runtime.session.sessionUuid as string),
+    ).toBeNull();
+    expect(pool.getDevice(androidDevice.deviceId)).toBeNull();
   });
 
   it("reserves a public cold boot before resource notifications", async () => {

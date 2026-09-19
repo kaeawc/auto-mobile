@@ -1,11 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import {
   DEFAULT_DEVICE_RECOVERY_MAX_ATTEMPTS,
+  isAndroidEmulatorSessionContinuityEnabled,
   parseDeviceRecoveryPolicy,
 } from "../../src/daemon/poolConfig";
 
 describe("device recovery policy", () => {
-  test("defaults to disabled recovery with the existing two-attempt budget", () => {
+  test("keeps broad recovery disabled while session continuity defaults on", () => {
     expect(parseDeviceRecoveryPolicy({})).toEqual({
       policy: {
         onLoss: false,
@@ -13,6 +14,7 @@ describe("device recovery policy", () => {
       },
       warnings: [],
     });
+    expect(isAndroidEmulatorSessionContinuityEnabled({})).toBe(true);
   });
 
   test("accepts only strict binary and base-ten integer values", () => {
@@ -28,6 +30,15 @@ describe("device recovery policy", () => {
       },
       warnings: [],
     });
+  });
+
+  test("keeps zero as an explicit opt-out", () => {
+    const env = { AUTOMOBILE_DEVICE_RECOVERY_ON_LOSS: "0" };
+    expect(parseDeviceRecoveryPolicy(env).policy).toEqual({
+      onLoss: false,
+      maxAttempts: DEFAULT_DEVICE_RECOVERY_MAX_ATTEMPTS,
+    });
+    expect(isAndroidEmulatorSessionContinuityEnabled(env)).toBe(false);
   });
 
   test.each([

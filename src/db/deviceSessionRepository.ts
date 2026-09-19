@@ -14,6 +14,22 @@ import { toActionableError } from "../models/ActionableError";
 // marker without a migration.
 export const DEVICE_SESSION_RETENTION_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 export const RECOVERABLE_DAEMON_RELEASE_REASONS = new Set(["daemon-shutdown", "daemon-restart"]);
+export const DEVICE_RESTART_RELEASE_REASON_PREFIX = "device-restart:";
+
+export function deviceRestartReleaseReason(stableDeviceId: string): string {
+  return `${DEVICE_RESTART_RELEASE_REASON_PREFIX}${stableDeviceId}`;
+}
+
+export function isDeviceRestartReleaseReason(reason: string): boolean {
+  return (
+    reason.startsWith(DEVICE_RESTART_RELEASE_REASON_PREFIX) &&
+    reason.length > DEVICE_RESTART_RELEASE_REASON_PREFIX.length
+  );
+}
+
+export function isRecoverableDaemonReleaseReason(reason: string): boolean {
+  return RECOVERABLE_DAEMON_RELEASE_REASONS.has(reason) || isDeviceRestartReleaseReason(reason);
+}
 
 export function isRecoverableDeviceSession(session: DeviceSession, nowMs: number): boolean {
   const retentionCutoffMs = nowMs - DEVICE_SESSION_RETENTION_MAX_AGE_MS;
@@ -24,7 +40,7 @@ export function isRecoverableDeviceSession(session: DeviceSession, nowMs: number
 }
 
 function shouldRetainLivenessOwner(reason: string): boolean {
-  return RECOVERABLE_DAEMON_RELEASE_REASONS.has(reason);
+  return isRecoverableDaemonReleaseReason(reason);
 }
 
 export interface DeviceSessionRecord {
@@ -401,7 +417,12 @@ export class DeviceSessionRepository {
     const expired = await db
       .selectFrom("device_sessions")
       .select("session_uuid")
-      .where("release_reason", "in", reasons)
+      .where((eb) =>
+        eb.or([
+          eb("release_reason", "in", reasons),
+          eb("release_reason", "like", `${DEVICE_RESTART_RELEASE_REASON_PREFIX}_%`),
+        ]),
+      )
       .where("expires_at_ms", "<=", nowMs)
       .execute();
     for (const row of expired) {
@@ -410,7 +431,12 @@ export class DeviceSessionRepository {
     return await db
       .selectFrom("device_sessions")
       .selectAll()
-      .where("release_reason", "in", reasons)
+      .where((eb) =>
+        eb.or([
+          eb("release_reason", "in", reasons),
+          eb("release_reason", "like", `${DEVICE_RESTART_RELEASE_REASON_PREFIX}_%`),
+        ]),
+      )
       .where((eb) =>
         eb.or([
           eb("released_at_ms", "is", null),

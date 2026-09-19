@@ -27,18 +27,56 @@ const image: DeviceInfo = {
   isRunning: true,
   source: "local",
 };
+const RECOVERY_ENV_KEYS = [
+  "AUTOMOBILE_DEVICE_RECOVERY_ON_LOSS",
+  "AUTO_MOBILE_DEVICE_RECOVERY_ON_LOSS",
+  "AUTOMOBILE_ANDROID_REBOOT_ON_DEATH",
+  "AUTO_MOBILE_ANDROID_REBOOT_ON_DEATH",
+] as const;
+
+async function withRecoveryEnvUnset<T>(action: () => Promise<T>): Promise<T> {
+  const originalValues = new Map(RECOVERY_ENV_KEYS.map((key) => [key, process.env[key]] as const));
+  for (const key of RECOVERY_ENV_KEYS) {
+    delete process.env[key];
+  }
+  try {
+    return await action();
+  } finally {
+    for (const [key, value] of originalValues) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  }
+}
+
 class LaggingShutdownManager extends FakeDeviceManager {
   readonly killAccepted = Promise.withResolvers<void>();
+
+  constructor(private readonly replacementDeviceId = "emulator-5560") {
+    super();
+  }
+
   override async killDevice(): Promise<void> {
     this.killAccepted.resolve();
   }
   override async startDevice(device: DeviceInfo): Promise<ChildProcess> {
     this.startedDevices.push(device);
-    this.bootedDevices = [{ ...original, deviceId: "emulator-5560" }];
+    this.bootedDevices = [{ ...original, deviceId: this.replacementDeviceId }];
     return { pid: 0 } as ChildProcess;
   }
   override async waitForDeviceReady(): Promise<BootedDevice> {
     return this.bootedDevices[0];
+  }
+}
+class KillTrackingShutdownManager extends LaggingShutdownManager {
+  readonly kills: string[] = [];
+
+  override async killDevice(device: BootedDevice): Promise<void> {
+    this.kills.push(device.deviceId);
+    await super.killDevice();
   }
 }
 class BlockingRecoveryReadyManager extends LaggingShutdownManager {
@@ -139,6 +177,44 @@ async function setup(
   return { timer, sessions, manager, pool, captured, persistence };
 }
 
+async function setupAwaitingOwner(manager: LaggingShutdownManager) {
+  const timer = new FakeTimer();
+  const persistence = new FakeDeviceSessionPersistence();
+  await persistence.upsertActiveSession({
+    sessionUuid: "session",
+    deviceId: original.deviceId,
+    stableDeviceId: original.name,
+    platform: "android",
+    createdAtMs: 0,
+    lastUsedAtMs: 0,
+    expiresAtMs: 60_000,
+    sessionTimeoutMs: 60_000,
+    heartbeatTimeoutMs: 10_000,
+    hasReceivedHeartbeat: true,
+  });
+  await persistence.markReleased("session", "expired", 0, "daemon-restart");
+  const sessions = new SessionManager(timer, persistence);
+  const pool = new DevicePool(
+    sessions,
+    "restarted-daemon",
+    timer,
+    new FakeInstalledAppsRepository(),
+    manager,
+    new DefaultRetryExecutor(timer),
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    { onLoss: true, maxAttempts: 1 },
+  );
+  manager.bootedDevices = [original];
+  await pool.addDevice(original, image);
+  await sessions.rehydratePersistedSessions(pool);
+  const captured = pool.getDevice(original.deviceId)!;
+  return { timer, sessions, manager, pool, captured, persistence };
+}
+
 interface DaemonDisconnectInternals {
   devicePool: DevicePool;
   sessionManager: SessionManager;
@@ -217,6 +293,256 @@ test("recovery waits for checked disappearance after an untracked emulator ackno
     timer.advanceTime(1_000);
     expect(await recovery).toBe(true);
     expect(manager.startedDevices).toHaveLength(1);
+  } finally {
+    sessions.stopCleanupTimer();
+  }
+});
+
+test("onLoss recovery still actively relaunches an owned emulator and preserves its session", async () => {
+  const manager = new LaggingShutdownManager(original.deviceId);
+  const { timer, sessions, pool, captured } = await setup(manager);
+  const originalSession = sessions.getSession("session");
+  const originalConnectionId = `${captured.id}#${captured.incarnation}`;
+  try {
+    const recovery = pool.recoverSessionBoundAndroidDeviceAfterLoss(
+      original.deviceId,
+      undefined,
+      captured,
+    );
+    await manager.killAccepted.promise;
+    manager.bootedDevices = [];
+    timer.advanceTime(1_000);
+
+    await expect(recovery).resolves.toBe("recovered");
+    expect(manager.startedDevices).toEqual([
+      {
+        name: original.name,
+        platform: "android",
+        isRunning: false,
+        source: "local",
+      },
+    ]);
+    const replacement = pool.getDevice(original.deviceId)!;
+    expect(sessions.getSession("session")).toBe(originalSession);
+    expect(sessions.getSession("session")).toMatchObject({
+      sessionId: "session",
+      assignedDevice: original.deviceId,
+      stableDeviceId: original.name,
+      ownership: "owned",
+    });
+    expect(replacement).toMatchObject({ sessionId: "session", status: "busy" });
+    expect(`${replacement.id}#${replacement.incarnation}`).not.toBe(originalConnectionId);
+  } finally {
+    sessions.stopCleanupTimer();
+  }
+});
+
+test("same-serial emulator continuity is enabled when the recovery environment is unset", async () => {
+  await withRecoveryEnvUnset(async () => {
+    const timer = new FakeTimer();
+    const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const manager = new KillTrackingShutdownManager(original.deviceId);
+    const releaseCancellation = Promise.withResolvers<void>();
+    let cancellationCalls = 0;
+    const pool = new DevicePool(
+      sessions,
+      "daemon",
+      timer,
+      new FakeInstalledAppsRepository(),
+      manager,
+      new DefaultRetryExecutor(timer),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { onLoss: false, maxAttempts: 1 },
+      undefined,
+      undefined,
+      async () => {
+        cancellationCalls++;
+        await releaseCancellation.promise;
+        return 0;
+      },
+    );
+    manager.bootedDevices = [original];
+    await pool.addDevice(original, image);
+    await pool.bindOrReuseDeviceSession(
+      "session",
+      original.deviceId,
+      "android",
+      image,
+      undefined,
+      original,
+    );
+    const captured = pool.getDevice(original.deviceId)!;
+    try {
+      expect(pool.getRecoveryPolicy().onLoss).toBe(false);
+      const recovery = pool.recoverSessionBoundAndroidDeviceAfterLoss(
+        original.deviceId,
+        undefined,
+        captured,
+      );
+      await flush();
+      expect(cancellationCalls).toBe(1);
+
+      await pool.releaseDevice(original.deviceId, "session");
+      await pool.removeDevice(original.deviceId, true, captured);
+      await pool.addDevice(original, image);
+      const replacement = pool.getDevice(original.deviceId);
+      releaseCancellation.resolve();
+
+      await expect(recovery).resolves.toBe("recovered");
+      expect(pool.getDevice(original.deviceId)).toBe(replacement);
+      expect(sessions.getSession("session")).toMatchObject({
+        sessionId: "session",
+        assignedDevice: original.deviceId,
+      });
+      expect(manager.kills).toEqual([]);
+      expect(manager.startedDevices).toEqual([]);
+    } finally {
+      releaseCancellation.resolve();
+      sessions.stopCleanupTimer();
+    }
+  });
+});
+
+test("continuity releases an externally closed emulator without relaunch and rehydrates it on return", async () => {
+  const timer = new FakeTimer();
+  const persistence = new FakeDeviceSessionPersistence();
+  const sessions = new SessionManager(timer, persistence);
+  const manager = new KillTrackingShutdownManager("emulator-5599");
+  const pool = new DevicePool(
+    sessions,
+    "daemon",
+    timer,
+    new FakeInstalledAppsRepository(),
+    manager,
+    new DefaultRetryExecutor(timer),
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    { onLoss: false, maxAttempts: 1 },
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    true,
+  );
+  manager.bootedDevices = [original];
+  await pool.addDevice(original, image);
+  await pool.bindOrReuseDeviceSession(
+    "session",
+    original.deviceId,
+    "android",
+    image,
+    undefined,
+    original,
+  );
+  const captured = pool.getDevice(original.deviceId)!;
+  const originalConnectionId = `${captured.id}#${captured.incarnation}`;
+  manager.bootedDevices = [];
+
+  try {
+    await expect(
+      pool.recoverSessionBoundAndroidDeviceAfterLoss(original.deviceId, undefined, captured),
+    ).resolves.toBe("released");
+    expect(manager.kills).toEqual([]);
+    expect(manager.startedDevices).toEqual([]);
+    expect(await persistence.getSession?.("session")).toMatchObject({
+      status: "released",
+      release_reason: `device-restart:${original.name}`,
+    });
+    expect(sessions.getSession("session")).toBeNull();
+    assertNoRecoveryReservationsRemain(pool, "session");
+
+    const returned = { ...original, deviceId: "emulator-5599" };
+    manager.bootedDevices = [returned];
+    await pool.addDevice(returned, image);
+    await expect(sessions.rehydratePersistedSessions(pool)).resolves.toEqual({
+      rehydrated: ["session"],
+      terminalized: [],
+      skipped: [],
+      timedOut: false,
+    });
+
+    const replacement = pool.getDevice(returned.deviceId)!;
+    expect(sessions.getSession("session")).toMatchObject({
+      sessionId: "session",
+      assignedDevice: returned.deviceId,
+      stableDeviceId: original.name,
+    });
+    expect(replacement).toMatchObject({ sessionId: "session", status: "busy" });
+    expect(`${replacement.id}#${replacement.incarnation}`).not.toBe(originalConnectionId);
+  } finally {
+    sessions.stopCleanupTimer();
+  }
+});
+
+test("awaiting-owner emulator loss and same-serial return preserve the rehydrated session", async () => {
+  const manager = new LaggingShutdownManager(original.deviceId);
+  const { timer, sessions, pool, captured } = await setupAwaitingOwner(manager);
+  const originalSession = sessions.getSession("session");
+  const originalConnectionId = `${captured.id}#${captured.incarnation}`;
+  try {
+    expect(originalSession).toMatchObject({ ownership: "awaiting-owner" });
+    const recovery = pool.recoverSessionBoundAndroidDeviceAfterLoss(
+      original.deviceId,
+      undefined,
+      captured,
+    );
+    await manager.killAccepted.promise;
+    manager.bootedDevices = [];
+    timer.advanceTime(1_000);
+
+    await expect(recovery).resolves.toBe("recovered");
+    const replacement = pool.getDevice(original.deviceId)!;
+    expect(sessions.getSession("session")).toBe(originalSession);
+    expect(sessions.getSession("session")).toMatchObject({
+      sessionId: "session",
+      assignedDevice: original.deviceId,
+      stableDeviceId: original.name,
+      ownership: "awaiting-owner",
+    });
+    expect(replacement).toMatchObject({ sessionId: "session", status: "busy" });
+    expect(`${replacement.id}#${replacement.incarnation}`).not.toBe(originalConnectionId);
+  } finally {
+    sessions.stopCleanupTimer();
+  }
+});
+
+test("emulator loss and port change preserve the session while updating its runtime device", async () => {
+  const { timer, sessions, manager, pool, captured } = await setup();
+  const originalSession = sessions.getSession("session");
+  const originalConnectionId = `${captured.id}#${captured.incarnation}`;
+  try {
+    const recovery = pool.recoverSessionBoundAndroidDeviceAfterLoss(
+      original.deviceId,
+      undefined,
+      captured,
+    );
+    await manager.killAccepted.promise;
+    manager.bootedDevices = [];
+    timer.advanceTime(1_000);
+
+    await expect(recovery).resolves.toBe("recovered");
+    const replacement = pool.getDevice("emulator-5560")!;
+    expect(sessions.getSession("session")).toBe(originalSession);
+    expect(sessions.getSession("session")).toMatchObject({
+      sessionId: "session",
+      assignedDevice: "emulator-5560",
+      stableDeviceId: original.name,
+    });
+    expect(replacement).toMatchObject({
+      avdName: original.name,
+      sessionId: "session",
+      status: "busy",
+    });
+    expect(`${replacement.id}#${replacement.incarnation}`).not.toBe(originalConnectionId);
   } finally {
     sessions.stopCleanupTimer();
   }

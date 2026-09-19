@@ -73,7 +73,7 @@ import {
   mergedExactToolSelections,
   REUSE_CRITICAL_ARRAY_OPTION_KEYS,
 } from "./daemonOptionSelections";
-import { RECOVERABLE_DAEMON_RELEASE_REASONS } from "../db/deviceSessionRepository";
+import { isRecoverableDaemonReleaseReason } from "../db/deviceSessionRepository";
 
 export { DaemonRestartDeferredError } from "./daemonRestartAdmission";
 export { REUSE_CRITICAL_ARRAY_OPTION_KEYS } from "./daemonOptionSelections";
@@ -1178,8 +1178,7 @@ export class DaemonMcpProxy {
       return;
     }
     const isRecoverableHandoff =
-      notification.reason !== undefined &&
-      RECOVERABLE_DAEMON_RELEASE_REASONS.has(notification.reason);
+      notification.reason !== undefined && isRecoverableDaemonReleaseReason(notification.reason);
     if (notification.reason === "daemon-shutdown") {
       // Daemon shutdown is connection-wide. Arm the successor barrier even when
       // this UUID belongs to an unresolved acquisition result that has not become

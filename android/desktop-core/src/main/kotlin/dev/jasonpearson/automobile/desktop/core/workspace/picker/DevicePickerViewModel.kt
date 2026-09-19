@@ -248,7 +248,7 @@ class DevicePickerViewModel(
       check(
         images.none { image ->
           image.platform.equals("ios", ignoreCase = true) &&
-            image.runtime.lifecycle.state != "configured" &&
+            image.runtime.lifecycle.state in setOf("booting", "booted", "shutting-down") &&
             booted.none {
               it.platform.equals(image.platform, ignoreCase = true) &&
                 (it.runtime.deviceId ?: it.identity.stableId) == image.identity.stableId

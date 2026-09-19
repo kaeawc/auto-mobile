@@ -15,6 +15,13 @@ export interface DeviceRecoveryPolicyParseResult {
 
 type Environment = Record<string, string | undefined>;
 
+const DEVICE_RECOVERY_ON_LOSS_KEYS = [
+  "AUTOMOBILE_DEVICE_RECOVERY_ON_LOSS",
+  "AUTO_MOBILE_DEVICE_RECOVERY_ON_LOSS",
+  "AUTOMOBILE_ANDROID_REBOOT_ON_DEATH",
+  "AUTO_MOBILE_ANDROID_REBOOT_ON_DEATH",
+] as const;
+
 function firstDefined(env: Environment, keys: readonly string[]): string | undefined {
   for (const key of keys) {
     if (env[key] !== undefined) {
@@ -31,12 +38,7 @@ function firstDefined(env: Environment, keys: readonly string[]): string | undef
  */
 export function parseDeviceRecoveryPolicy(env: Environment): DeviceRecoveryPolicyParseResult {
   const warnings: string[] = [];
-  const onLossValue = firstDefined(env, [
-    "AUTOMOBILE_DEVICE_RECOVERY_ON_LOSS",
-    "AUTO_MOBILE_DEVICE_RECOVERY_ON_LOSS",
-    "AUTOMOBILE_ANDROID_REBOOT_ON_DEATH",
-    "AUTO_MOBILE_ANDROID_REBOOT_ON_DEATH",
-  ]);
+  const onLossValue = firstDefined(env, DEVICE_RECOVERY_ON_LOSS_KEYS);
   let onLoss = false;
   if (onLossValue !== undefined) {
     if (onLossValue === "1") {
@@ -80,6 +82,15 @@ export function parseDeviceRecoveryPolicy(env: Environment): DeviceRecoveryPolic
 
 export function getDeviceRecoveryPolicy(): DeviceRecoveryPolicy {
   return parseDeviceRecoveryPolicy(process.env).policy;
+}
+
+/**
+ * A session already bound to an AutoMobile-owned Android emulator survives a
+ * lost runtime connection by default. The broad recovery policy above remains
+ * opt-in for idle/unbound devices; an explicit zero disables both behaviors.
+ */
+export function isAndroidEmulatorSessionContinuityEnabled(env: Environment = process.env): boolean {
+  return firstDefined(env, DEVICE_RECOVERY_ON_LOSS_KEYS) !== "0";
 }
 
 /**

@@ -3795,48 +3795,53 @@ describe("DaemonMcpProxy", () => {
     // instead of waiting out the replay-TTL guess. The TTL stays as a
     // dropped-frame backstop.
 
-    test("reconnects and reclaims a daemon-restart handoff instead of fencing it", async () => {
-      const staleClient = new FakeDaemonClient({
-        daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
-      });
-      const recoveredClient = new FakeDaemonClient({
-        toolResult: { content: [{ type: "text", text: "reclaimed" }] },
-      });
-      const clients = [staleClient, recoveredClient];
-      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
-      const proxy = new DaemonMcpProxy({
-        initialSessionUuid: "session-a",
-        clientFactory: () => clients.shift()!,
-        daemonManager: matchingDaemonManager(),
-        autoStartDaemon: false,
-      });
-
-      try {
-        await proxy.listTools();
-        staleClient.emitNotification(
-          SESSION_RELEASED_NOTIFICATION_METHOD,
-          "session-a",
-          "daemon-restart",
-        );
-
-        const result = await proxy.callTool("observe", { deviceId: "device-a" }).catch((error) => {
-          throw new Error(`recoverable handoff failed: ${error}`);
+    test.each(["daemon-restart", "device-restart:Pixel_8_API_35"])(
+      "reconnects and reclaims a %s handoff instead of fencing it",
+      async (releaseReason) => {
+        const staleClient = new FakeDaemonClient({
+          daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
         });
-        expect(result).toEqual({
-          content: [{ type: "text", text: "reclaimed" }],
+        const recoveredClient = new FakeDaemonClient({
+          toolResult: { content: [{ type: "text", text: "reclaimed" }] },
         });
-        expect(staleClient.callToolCalls).toEqual([]);
-        expect(recoveredClient.callToolCalls).toEqual([
-          {
-            toolName: "observe",
-            params: { sessionUuid: "session-a", deviceId: "device-a" },
-          },
-        ]);
-      } finally {
-        isAvailableSpy.mockRestore();
-        await proxy.close();
-      }
-    });
+        const clients = [staleClient, recoveredClient];
+        const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+        const proxy = new DaemonMcpProxy({
+          initialSessionUuid: "session-a",
+          clientFactory: () => clients.shift()!,
+          daemonManager: matchingDaemonManager(),
+          autoStartDaemon: false,
+        });
+
+        try {
+          await proxy.listTools();
+          staleClient.emitNotification(
+            SESSION_RELEASED_NOTIFICATION_METHOD,
+            "session-a",
+            releaseReason,
+          );
+
+          const result = await proxy
+            .callTool("observe", { deviceId: "device-a" })
+            .catch((error) => {
+              throw new Error(`recoverable handoff failed: ${error}`);
+            });
+          expect(result).toEqual({
+            content: [{ type: "text", text: "reclaimed" }],
+          });
+          expect(staleClient.callToolCalls).toEqual([]);
+          expect(recoveredClient.callToolCalls).toEqual([
+            {
+              toolName: "observe",
+              params: { sessionUuid: "session-a", deviceId: "device-a" },
+            },
+          ]);
+        } finally {
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
+      },
+    );
 
     test("reconnects and reclaims a result-minted daemon-restart handoff", async () => {
       const mintingResult = (sessionUuid: string) => ({

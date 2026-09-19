@@ -20,6 +20,8 @@ export interface FileDownloader {
 }
 
 export class DefaultFileDownloader implements FileDownloader {
+  private onFirstResponseByte?: () => void;
+
   constructor(private readonly idGenerator: IdGenerator = defaultIdGenerator) {}
 
   public async download(url: string, destination: string, signal?: AbortSignal): Promise<void> {
@@ -164,6 +166,7 @@ export class DefaultFileDownloader implements FileDownloader {
     const tempDestination = `${destination}.download-${this.idGenerator.next()}.tmp`;
     const fileStream = createWriteStream(tempDestination);
     try {
+      response.once("readable", () => this.onFirstResponseByte?.());
       await pipeline(response, fileStream);
       await fs.rename(tempDestination, destination);
     } catch (error) {

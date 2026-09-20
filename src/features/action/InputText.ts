@@ -58,12 +58,32 @@ export interface TextInputTargetFocuser {
   ): Promise<{
     success: boolean;
     error?: string;
+    focusVerified?: boolean;
     matchedId?: string;
     matchedText?: string;
   }>;
 }
 
 type TextInputTargetFocuserFactory = (device: BootedDevice) => TextInputTargetFocuser;
+
+function isFocusResultConfirmed(
+  result: Awaited<ReturnType<TextInputTargetFocuser["focus"]>>,
+): boolean {
+  return result.success && result.focusVerified === true;
+}
+
+function describeFocusTarget(
+  result: Awaited<ReturnType<TextInputTargetFocuser["focus"]>>,
+  selector: TextInputTargetSelector,
+): string {
+  const target =
+    result.matchedText ??
+    selector.text ??
+    selector.textAny?.[0] ??
+    selector.elementId ??
+    selector.testTag;
+  return target ? JSON.stringify(target) : "for the selector";
+}
 
 const defaultTargetFocuserFactory: TextInputTargetFocuserFactory = (device) => ({
   focus: async (selector, signal) => {
@@ -75,6 +95,7 @@ const defaultTargetFocuserFactory: TextInputTargetFocuserFactory = (device) => (
     return {
       success: result.success,
       error: result.error,
+      focusVerified: result.focusVerified === true,
       matchedId: result.selectedElement?.resourceId,
       matchedText: result.selectedElement?.text,
     };
@@ -178,12 +199,14 @@ export class InputText extends BaseVisualChange {
     if (selector) {
       assertInputNotAborted(signal);
       const focusResult = await this.targetFocuser.focus(selector, signal);
-      if (!focusResult.success) {
+      if (!isFocusResultConfirmed(focusResult)) {
         perf.end();
         return {
           success: false,
           text,
-          error: focusResult.error ?? "Failed to focus the target element before typing",
+          error:
+            focusResult.error ??
+            `Failed to confirm focus on editable input ${describeFocusTarget(focusResult, selector)} before typing`,
           method: this.device.platform === "android" ? resolvedMode : "a11y",
         };
       }

@@ -23,6 +23,7 @@ import { registerCriticalSectionTools } from "../src/server/criticalSectionTools
 import { registerBarrierTools } from "../src/server/barrierTools";
 import { registerVideoRecordingTools } from "../src/server/videoRecordingTools";
 import { registerSnapshotTools } from "../src/server/snapshotTools";
+import { registerScreenshotTools } from "../src/server/screenshotTools";
 import { registerBiometricTools } from "../src/server/biometricTools";
 import { registerTelephonyTools } from "../src/server/telephonyTools";
 import { registerHighlightTools } from "../src/server/highlightTools";
@@ -55,6 +56,7 @@ function registerAllTools(): void {
   registerCriticalSectionTools();
   registerBarrierTools();
   registerVideoRecordingTools();
+  registerScreenshotTools();
   registerSnapshotTools();
   registerBiometricTools();
   registerTelephonyTools();

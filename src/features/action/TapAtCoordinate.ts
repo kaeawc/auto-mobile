@@ -1,13 +1,18 @@
+import { isDeepStrictEqual } from "node:util";
 import {
   ActionableError,
   BootedDevice,
   ObserveResult,
   TapAtOptions,
   TapAtResult,
+  toActionableError,
 } from "../../models";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { errorMessage } from "../../utils/describeUnknownError";
-import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
+import {
+  createGlobalPerformanceTracker,
+  type PerformanceTracker,
+} from "../../utils/PerformanceTracker";
 import type { Timer } from "../../utils/SystemTimer";
 import { throwIfAborted } from "../../utils/toolUtils";
 import { AndroidCtrlProxyClient } from "../observe/android";
@@ -17,10 +22,21 @@ import {
   type CoordinateTapClient,
   dispatchAndroidCoordinateTap,
   dispatchIosCoordinateTap,
+  isStaleFrameContextRejection,
 } from "./coordinateTapDispatch";
 
 const ANDROID_TAP_DURATION_MS = 10;
 const IOS_TAP_DURATION_MS = 50;
+
+// These capture-only fields are documented by the observation diff as nondeterministic between
+// captures of one unchanged Android screen. They cannot establish that a coordinate was retargeted.
+const VOLATILE_TAP_LAYOUT_FIELDS = new Set([
+  "extras",
+  "view-id",
+  "occlusionState",
+  "occludedBy",
+  "occludedByViewId",
+]);
 
 type AndroidCoordinateTapDispatch = typeof dispatchAndroidCoordinateTap;
 type IosCoordinateTapDispatch = typeof dispatchIosCoordinateTap;
@@ -34,6 +50,73 @@ function hasPositiveScreenSize(screenSize: ObserveResult["screenSize"] | undefin
     Number.isFinite(screenSize.height) &&
     screenSize.width > 0 &&
     screenSize.height > 0
+  );
+}
+
+function withoutVolatileTapLayoutFields(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(withoutVolatileTapLayoutFields);
+  }
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([key]) => !VOLATILE_TAP_LAYOUT_FIELDS.has(key))
+      .map(([key, child]) => [key, withoutVolatileTapLayoutFields(child)]),
+  );
+}
+
+function tapTargetingLayout(observation: ObserveResult): unknown | null {
+  const rotation = observation.rotation ?? observation.viewHierarchy?.rotation;
+  if (!Number.isInteger(rotation) || !observation.viewHierarchy) {
+    return null;
+  }
+
+  const hierarchy = observation.viewHierarchy;
+  return {
+    screenSize: {
+      width: observation.screenSize?.width,
+      height: observation.screenSize?.height,
+    },
+    rotation,
+    systemInsets: observation.systemInsets,
+    insets: observation.insets,
+    activeWindow: {
+      appId: observation.activeWindow?.appId,
+      activityName: observation.activeWindow?.activityName,
+    },
+    screenIdentity: observation.screenIdentity
+      ? {
+          platform: observation.screenIdentity.platform,
+          source: observation.screenIdentity.source,
+          key: observation.screenIdentity.key,
+        }
+      : undefined,
+    hierarchy: {
+      tree: withoutVolatileTapLayoutFields(hierarchy.hierarchy),
+      windows: withoutVolatileTapLayoutFields(hierarchy.windows),
+      packageName: hierarchy.packageName,
+      foregroundActivity: hierarchy.foregroundActivity,
+      screenWidth: hierarchy.screenWidth,
+      screenHeight: hierarchy.screenHeight,
+      pixelWidth: hierarchy.pixelWidth,
+      pixelHeight: hierarchy.pixelHeight,
+      nativeScale: hierarchy.nativeScale,
+      rotation: hierarchy.rotation,
+      systemInsets: hierarchy.systemInsets,
+      insets: hierarchy.insets,
+    },
+  };
+}
+
+function hasSameTapTargetingLayout(previous: ObserveResult, refreshed: ObserveResult): boolean {
+  const previousLayout = tapTargetingLayout(previous);
+  const refreshedLayout = tapTargetingLayout(refreshed);
+  return (
+    previousLayout !== null &&
+    refreshedLayout !== null &&
+    isDeepStrictEqual(previousLayout, refreshedLayout)
   );
 }
 
@@ -91,13 +174,11 @@ export class TapAtCoordinate extends BaseVisualChange {
           const frameContext = observeResult.viewHierarchy?.frameContext;
           switch (this.device.platform) {
             case "android":
-              await this.androidCoordinateTap(
-                this.androidClient,
-                this.adb,
-                resolved.x,
-                resolved.y,
-                ANDROID_TAP_DURATION_MS,
-                frameContext,
+              await this.dispatchAndroidTapWithOneFreshRetry(
+                options,
+                resolved,
+                observeResult,
+                perf,
                 signal,
               );
               break;
@@ -139,6 +220,61 @@ export class TapAtCoordinate extends BaseVisualChange {
       };
     } finally {
       perf.end();
+    }
+  }
+
+  private async dispatchAndroidTapWithOneFreshRetry(
+    options: TapAtOptions,
+    resolved: { x: number; y: number },
+    observeResult: ObserveResult,
+    perf: PerformanceTracker,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const frameContext = observeResult.viewHierarchy?.frameContext;
+    try {
+      await this.androidCoordinateTap(
+        this.androidClient,
+        this.adb,
+        resolved.x,
+        resolved.y,
+        ANDROID_TAP_DURATION_MS,
+        frameContext,
+        signal,
+      );
+      return;
+    } catch (error) {
+      const actionable = toActionableError(error, "Failed to dispatch Android coordinate tap");
+      if (frameContext === undefined || !isStaleFrameContextRejection(actionable.message)) {
+        throw actionable;
+      }
+
+      // One fresh capture distinguishes Android's benign generation churn from a layout-invalidating
+      // advance. Any unprovable or changed targeting state preserves the original fail-closed error.
+      throwIfAborted(signal);
+      const refreshedObservation = await this.observeScreen.execute({ signal, perf });
+      const refreshed = this.resolveCoordinates(options, refreshedObservation);
+      const refreshedFrameContext = refreshedObservation.viewHierarchy?.frameContext;
+      if (
+        "error" in refreshed ||
+        refreshed.x !== resolved.x ||
+        refreshed.y !== resolved.y ||
+        !hasSameTapTargetingLayout(observeResult, refreshedObservation) ||
+        !refreshedFrameContext
+      ) {
+        throw actionable;
+      }
+
+      // Deliberately no loop: if this single retry also races a frame advance, its actionable stale
+      // rejection escapes and the caller can choose a new point from another explicit observation.
+      await this.androidCoordinateTap(
+        this.androidClient,
+        this.adb,
+        refreshed.x,
+        refreshed.y,
+        ANDROID_TAP_DURATION_MS,
+        refreshedFrameContext,
+        signal,
+      );
     }
   }
 

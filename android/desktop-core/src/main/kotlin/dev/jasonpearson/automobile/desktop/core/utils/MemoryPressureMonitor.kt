@@ -5,7 +5,8 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -35,8 +36,9 @@ class MemoryPressureMonitor(
   var heapUsagePercent by mutableFloatStateOf(0f)
     private set
 
-  private val scope = CoroutineScope(Dispatchers.Default)
-  private var job: Job? = null
+  // Recreated on each start() and cancelled in stop() so the monitor never outlives its polling
+  // loop. SupervisorJob keeps a thrown sample/callback from poisoning the scope before restart.
+  private var scope: CoroutineScope? = null
 
   /** Whether the critical callback has already fired for the current pressure spike. */
   private var trimFired = false
@@ -44,7 +46,9 @@ class MemoryPressureMonitor(
   /** Start periodic heap monitoring. Safe to call multiple times (restarts). */
   fun start() {
     stop()
-    job = scope.launch {
+    val pollScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    scope = pollScope
+    pollScope.launch {
       while (isActive) {
         val usage = sampleHeapUsage()
         heapUsagePercent = usage
@@ -66,10 +70,10 @@ class MemoryPressureMonitor(
     }
   }
 
-  /** Stop monitoring. */
+  /** Stop monitoring and cancel the polling scope. */
   fun stop() {
-    job?.cancel()
-    job = null
+    scope?.cancel()
+    scope = null
   }
 
   /** Sample current JVM heap usage. Extracted for testability. Returns a value in 0.0..1.0. */

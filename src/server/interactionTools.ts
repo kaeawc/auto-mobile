@@ -2377,14 +2377,12 @@ export function registerInteractionTools() {
             signal,
           );
           expectedCount = listed.notifications.length;
-          // Silent-section rows have no app header, but their dumpsys-correlated
-          // content text lets the existing row matcher isolate them (#7320).
+          // All correlated rows' content text lets the existing row matcher
+          // isolate them, whether ownership comes from a header or dumpsys.
           clearMatchTexts = [
             ...new Set([
               ...appMatchTexts,
-              ...listed.notifications
-                .filter((listedNotification) => listedNotification.ownership === "dumpsys")
-                .flatMap((listedNotification) => listedNotification.texts),
+              ...listed.notifications.flatMap((listedNotification) => listedNotification.texts),
             ]),
           ];
         }

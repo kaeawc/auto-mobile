@@ -28,6 +28,16 @@ This is separate from the daemon observation-stream's
 That stream contract is intentional and does not transform MCP `observe` or
 native absolute-input coordinates.
 
+`observe`, `observe.screenSize`, and `tapAt` use the device's current-orientation
+native coordinate space described above. `captureScreenshot` returns a
+native-scale PNG whose orientation follows the device framebuffer: on the iOS
+Simulator, the framebuffer can remain portrait after `rotate`, even while the
+device orientation is landscape (this is simulator framebuffer behavior, not an
+AutoMobile bug); on Android, the raster rotates with the device. Therefore,
+after rotation, callers must apply a platform- and orientation-specific
+transform before correlating iOS `observe` or `tapAt` coordinates with
+`captureScreenshot` pixels. No such transform is needed on Android.
+
 | Tool                                 | What it does                                               |
 | ------------------------------------ | ---------------------------------------------------------- |
 | 👀 <code>observe</code>              | Gets the current screen view hierarchy.                    |

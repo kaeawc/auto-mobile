@@ -464,7 +464,7 @@
   },
   {
     "name": "captureScreenshot",
-    "description": "Capture the entire selected device screen as a PNG file.",
+    "description": "Capture the entire selected device screen as a PNG file. On iOS Simulator, the image reflects the device framebuffer's native orientation and may not match observe's current rotated orientation; Android's image does rotate.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",

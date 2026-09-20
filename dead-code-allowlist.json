@@ -6,13 +6,13 @@
     "src/features/action/swipeon/index.ts",
     "src/features/appearance/index.ts",
     "src/features/observe/android/index.ts",
-    "src/features/observe/interfaces/index.ts",
     "src/features/observe/ios/index.ts",
     "src/features/screen-stream/index.ts",
     "src/features/snapshot/index.ts",
     "src/features/video/index.ts",
     "src/features/webrtc/index.ts",
     "src/models/index.ts",
+    "src/server/deviceMatcher.ts",
     "src/utils/screenshot-utils.ts",
     "src/vision/index.ts",
     "test/helpers/test-database.ts"
@@ -163,6 +163,66 @@
       "file": "src/utils/virtualDeviceLifecycleCoordinator.ts",
       "name": "resetVirtualDeviceLifecycleCoordinatorForTests",
       "reason": "Test-only DI seam for the coordinator singleton (getX/setXForTests/resetXForTests pattern)"
+    },
+    {
+      "file": "src/cli/index.ts",
+      "name": "setCliOutputSinksForTesting",
+      "reason": "Test-only output-sink injection seam (used by test/cli/doctorCommand.test.ts and test/cli/toolOutputSpill.test.ts)"
+    },
+    {
+      "file": "src/cli/index.ts",
+      "name": "resetCliOutputSinksForTesting",
+      "reason": "Test-only output-sink injection seam (used by test/cli/toolOutputSpill.test.ts)"
+    },
+    {
+      "file": "src/db/types.ts",
+      "name": "ToolSelectionProfileProvenanceRow",
+      "reason": "Kysely Selectable table type, part of the DB type API surface"
+    },
+    {
+      "file": "src/db/types.ts",
+      "name": "NewToolSelectionProfileProvenanceRow",
+      "reason": "Kysely Insertable table type, part of the DB type API surface"
+    },
+    {
+      "file": "src/doctor/index.ts",
+      "name": "DoctorProbeOptions",
+      "reason": "Doctor module barrel type re-export, part of the doctor API surface"
+    },
+    {
+      "file": "src/features/action/InputKey.ts",
+      "name": "satisfies",
+      "reason": "ts-prune parser artifact: misreads the `as const satisfies Record<...>` annotation as an export named 'satisfies'"
+    },
+    {
+      "file": "src/models/AndroidAvdConfiguration.ts",
+      "name": "satisfies",
+      "reason": "ts-prune parser artifact: misreads the `as const satisfies Record<...>` annotation as an export named 'satisfies'"
+    },
+    {
+      "file": "src/models/AndroidAvdConfiguration.ts",
+      "name": "Record",
+      "reason": "ts-prune parser artifact: misreads the `as const satisfies Record<...>` annotation as an export named 'Record'"
+    },
+    {
+      "file": "src/utils/iosDeviceResourceCatalog.ts",
+      "name": "satisfies",
+      "reason": "ts-prune parser artifact: misreads the `as const satisfies Partial<Record<...>>` annotation as an export named 'satisfies'"
+    },
+    {
+      "file": "src/utils/iosDeviceResourceCatalog.ts",
+      "name": "Partial",
+      "reason": "ts-prune parser artifact: misreads the `as const satisfies Partial<Record<...>>` annotation as an export named 'Partial'"
+    },
+    {
+      "file": "test/fakes/FakeIOSCtrlProxy.typecheck.ts",
+      "name": "FakeIOSCtrlProxyContractChecks",
+      "reason": "Compile-only type assertion; the export exists solely so the contract check is evaluated at type-check time"
+    },
+    {
+      "file": "test/models/DeviceResource.typecheck.ts",
+      "name": "DeviceResourceContractChecks",
+      "reason": "Compile-only type assertion; the export exists solely so the contract check is evaluated at type-check time"
     }
   ]
 }

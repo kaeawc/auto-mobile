@@ -119,10 +119,6 @@ export function getSessionLogService(): SessionLogService {
   return sessionLogService;
 }
 
-export function setSessionLogServiceForTesting(service: SessionLogService | null): void {
-  sessionLogService = service;
-}
-
 export function createSessionLogService(
   deps: SessionLogServiceDependencies = {},
 ): SessionLogService {

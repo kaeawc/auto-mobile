@@ -82,7 +82,7 @@ export function registerScreenshotTools(
 ): void {
   ToolRegistry.registerDeviceAware(
     "captureScreenshot",
-    "Capture the entire selected device screen as a PNG file.",
+    "Capture the entire selected device screen as a PNG file. On iOS Simulator, the image reflects the device framebuffer's native orientation and may not match observe's current rotated orientation; Android's image does rotate.",
     captureScreenshotSchema,
     createCaptureScreenshotHandler(dependencies),
     { defaultEnabled: true, outputSchema: captureScreenshotResultSchema },

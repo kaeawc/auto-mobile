@@ -279,7 +279,7 @@ describe("daemon tool-profile diagnostics", () => {
 
       expect(result.exitCode).toBe(1);
       expect(result.stdout).toBe("");
-      expect(result.stderr).toContain("Unknown tool name 'getAndroid'");
+      expect(result.stderr).toContain("is not a session-configurable tool name");
     },
     TEST_TIMEOUT_MS,
   );

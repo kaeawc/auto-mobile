@@ -3,14 +3,23 @@ import {
   buildInputTextResultMessage,
   buildTapOnResultMessage,
   registerInteractionTools,
+  resetTapAtElementFactory,
   resetTapOnElementFactory,
+  setTapAtElementFactory,
   setTapOnElementFactory,
+  tapAtHandler,
+  tapAtSchema,
   tapOnHandler,
 } from "../../src/server/interactionTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import type { TapOnArgs } from "../../src/server/interactionToolTypes";
+import type { TapAtArgs, TapOnArgs } from "../../src/server/interactionToolTypes";
 import { getStructuredField } from "../../src/utils/toolUtils";
-import type { BootedDevice, TapOnElementResult, TapOnSelectedElement } from "../../src/models";
+import type {
+  BootedDevice,
+  TapAtResult,
+  TapOnElementResult,
+  TapOnSelectedElement,
+} from "../../src/models";
 import { tapOnResultSchema } from "../../src/server/toolOutputSchemas";
 
 const selected = (overrides: Partial<TapOnSelectedElement>): TapOnSelectedElement => ({
@@ -178,6 +187,7 @@ describe("tapOnHandler (registered handler wiring)", () => {
   const args: TapOnArgs = { selector: { text: "ZZZ_NO_SUCH_TEXT_ZZZ" }, platform: "android" };
 
   afterEach(() => {
+    resetTapAtElementFactory();
     resetTapOnElementFactory();
     ToolRegistry.clearTools();
   });
@@ -304,6 +314,66 @@ describe("tapOnHandler (registered handler wiring)", () => {
     expect(message).toContain("was unchecked");
     expect(message).toContain("now checked");
     expect(message).toContain("(verified)");
+  });
+});
+
+describe("tapAtHandler (registered handler wiring)", () => {
+  const fakeDevice = { deviceId: "fake", platform: "android" } as unknown as BootedDevice;
+  const args: TapAtArgs = { x: 12, y: 34, platform: "android" };
+
+  afterEach(() => {
+    resetTapAtElementFactory();
+    ToolRegistry.clearTools();
+  });
+
+  test("the module-scope handler is the one registered for tapAt", () => {
+    registerInteractionTools();
+    expect(ToolRegistry.getTool("tapAt")?.deviceAwareHandler).toBe(tapAtHandler);
+  });
+
+  test("accepts only coordinates, response controls, and shared device targeting", () => {
+    expect(
+      tapAtSchema.safeParse({
+        x: 12,
+        y: 34,
+        platform: "android",
+        sessionUuid: "session-123",
+        keepScreenAwake: true,
+        device: "Pixel",
+        deviceId: "emulator-5554",
+        raw: true,
+        project: "full",
+      }).success,
+    ).toBe(true);
+    expect(tapAtSchema.safeParse({ x: 12, y: 34, selector: { text: "Nope" } }).success).toBe(false);
+    expect(tapAtSchema.safeParse({ x: 12, y: 34, duration: 10 }).success).toBe(false);
+  });
+
+  test("serializes a successful native-coordinate tap", async () => {
+    setTapAtElementFactory(() => ({
+      execute: async () => ({ success: true, x: 12, y: 34 }) as TapAtResult,
+    }));
+
+    const response = await tapAtHandler(fakeDevice, args);
+
+    expect(response.isError).toBeUndefined();
+    expect(getStructuredField(response, "message")).toBe("Tapped at (12, 34)");
+    expect(getStructuredField(response, "x")).toBe(12);
+    expect(getStructuredField(response, "y")).toBe(34);
+  });
+
+  test("marks a coordinate-tap failure as an MCP error", async () => {
+    setTapAtElementFactory(() => ({
+      execute: async () =>
+        ({ success: false, x: 10, y: 34, error: "outside screen bounds" }) as TapAtResult,
+    }));
+
+    const response = await tapAtHandler(fakeDevice, args);
+
+    expect(response.isError).toBe(true);
+    expect(getStructuredField(response, "message")).toBe(
+      "Failed to tap at (10, 34): outside screen bounds",
+    );
   });
 });
 

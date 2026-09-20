@@ -1,6 +1,7 @@
 import { z } from "zod/v4";
 import { ToolRegistry, ProgressCallback } from "./toolRegistry";
 import { TapOnElement } from "../features/action/TapOnElement";
+import { TapAtCoordinate } from "../features/action/TapAtCoordinate";
 import { TapAnyElement } from "../features/action/TapAnyElement";
 import { InputText } from "../features/action/InputText";
 import { WakeAndUnlock } from "../features/action/WakeAndUnlock";
@@ -99,6 +100,7 @@ import type {
   WakeAndUnlockArgs,
   OpenLinkArgs,
   TapOnArgs,
+  TapAtArgs,
   TapAnyArgs,
   DragAndDropArgs,
   SwipeOnArgs,
@@ -431,6 +433,26 @@ export const tapOnSchema = withJsonSchemaOverride(
         },
       },
     ];
+  },
+);
+
+export const tapAtSchema = withJsonSchemaOverride(
+  addDeviceTargetingToSchema(
+    z
+      .object({
+        x: z
+          .number()
+          .describe("Absolute screen x coordinate in the native observe coordinate space"),
+        y: z
+          .number()
+          .describe("Absolute screen y coordinate in the native observe coordinate space"),
+        ...responseShapeControlFields,
+      })
+      .strict(),
+  ),
+  (js) => {
+    js.description =
+      "Tap one absolute point in the platform-native coordinate space returned by observe.";
   },
 );
 
@@ -1361,6 +1383,19 @@ export function resetTapOnElementFactory(): void {
   tapOnElementFactory = (device) => new TapOnElement(device);
 }
 
+export type TapAtElementLike = Pick<TapAtCoordinate, "execute">;
+
+let tapAtElementFactory: (device: BootedDevice) => TapAtElementLike = (device) =>
+  new TapAtCoordinate(device);
+
+export function setTapAtElementFactory(factory: (device: BootedDevice) => TapAtElementLike): void {
+  tapAtElementFactory = factory;
+}
+
+export function resetTapAtElementFactory(): void {
+  tapAtElementFactory = (device) => new TapAtCoordinate(device);
+}
+
 const VISIBLE_HIERARCHY_TEXT_KEYS = new Set([
   "text",
   "label",
@@ -1696,6 +1731,22 @@ export async function tapOnHandler(
   const message = result.success
     ? buildTapOnSuccessMessage(result, searchSummary, args.ensureChecked)
     : `Failed to tap: ${result.error || "unknown error"}${searchSummary ? ` (${searchSummary})` : ""}`;
+  const payload = { message, observation: result.observation, ...result };
+  const response: StructuredToolResponse<typeof payload> & { isError?: true } =
+    createStructuredToolResponse(payload);
+  return result.success ? response : { ...response, isError: true as const };
+}
+
+export async function tapAtHandler(
+  device: BootedDevice,
+  args: TapAtArgs,
+  progress?: ProgressCallback,
+) {
+  RecompositionTracker.getInstance().recordInteraction();
+  const result = await tapAtElementFactory(device).execute({ x: args.x, y: args.y }, progress);
+  const message = result.success
+    ? `Tapped at (${result.x}, ${result.y})`
+    : `Failed to tap at (${result.x}, ${result.y}): ${result.error || "unknown error"}`;
   const payload = { message, observation: result.observation, ...result };
   const response: StructuredToolResponse<typeof payload> & { isError?: true } =
     createStructuredToolResponse(payload);
@@ -2691,6 +2742,14 @@ export function registerInteractionTools() {
     tapOnSchema,
     tapOnHandler,
     { defaultEnabled: true, supportsProgress: true, outputSchema: tapOnResultSchema },
+  );
+
+  ToolRegistry.registerDeviceAware(
+    "tapAt",
+    "Tap one absolute platform-native screen coordinate visible through observe.",
+    tapAtSchema,
+    tapAtHandler,
+    { defaultEnabled: true, supportsProgress: true },
   );
 
   ToolRegistry.registerDeviceAware(

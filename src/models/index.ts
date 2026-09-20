@@ -88,6 +88,8 @@ export * from "./SwipeOnResult";
 export * from "./SystemInsets";
 export * from "./ObservationInsets";
 export * from "./TapAnyElementOptions";
+export * from "./TapAtOptions";
+export * from "./TapAtResult";
 export * from "./TapOnElementOptions";
 export * from "./TapOnElementResult";
 export * from "./TapOptions";

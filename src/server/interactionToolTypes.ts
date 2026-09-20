@@ -116,6 +116,14 @@ export interface TapOnArgs {
   project?: "full" | "skeleton";
 }
 
+export interface TapAtArgs {
+  x: number;
+  y: number;
+  platform?: Platform;
+  raw?: boolean;
+  project?: "full" | "skeleton";
+}
+
 export interface TapAnyArgs {
   container?: {
     elementId?: string;

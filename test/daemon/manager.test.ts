@@ -2496,6 +2496,66 @@ describe("Daemon manager process detection", () => {
     ]);
   });
 
+  test("recognizes a daemon entry point after runtime flags", () => {
+    const activeEntryScript = "/Users/x/auto-mobile/dist/src/index.js";
+    const bunCommand = `bun --config= ${activeEntryScript} --daemon-mode`;
+    const nodeCommand = `/usr/local/bin/node --enable-source-maps --no-warnings ${activeEntryScript} --daemon-mode`;
+
+    expect(
+      parseDaemonProcessTable(
+        [`42 1 ${bunCommand}`, `43 1 ${nodeCommand}`].join("\n"),
+        Date.now(),
+        activeEntryScript,
+      ),
+    ).toEqual([
+      { pid: 42, ppid: 1, command: bunCommand },
+      { pid: 43, ppid: 1, command: nodeCommand },
+    ]);
+  });
+
+  test("still recognizes a daemon entry point immediately after the runtime", () => {
+    const activeEntryScript = "/Users/x/auto-mobile/dist/src/index.js";
+    const command = `bun ${activeEntryScript} --daemon-mode`;
+
+    expect(parseDaemonProcessTable(`42 1 ${command}`, Date.now(), activeEntryScript)).toEqual([
+      {
+        pid: 42,
+        ppid: 1,
+        command,
+      },
+    ]);
+  });
+
+  test("does not relocate the runtime or entry point while skipping runtime flags", () => {
+    const activeEntryScript = "/Users/x/auto-mobile/dist/src/index.js";
+
+    expect(
+      parseDaemonProcessTable(
+        [
+          `40 1 python worker.py --note bun --config= ${activeEntryScript} --daemon-mode`,
+          "41 1 bun --config= /Users/x/unrelated/dist/src/index.js --daemon-mode",
+          `42 1 bun --config /tmp/bunfig.toml ${activeEntryScript} --daemon-mode`,
+          `43 1 bun -- ${activeEntryScript} --daemon-mode`,
+          `44 1 bun --daemon-mode ${activeEntryScript}`,
+        ].join("\n"),
+        Date.now(),
+        activeEntryScript,
+      ),
+    ).toEqual([]);
+  });
+
+  test("requires daemon mode when runtime flags precede the entry point", () => {
+    const activeEntryScript = "/Users/x/auto-mobile/dist/src/index.js";
+
+    expect(
+      parseDaemonProcessTable(
+        `42 1 bun --config= ${activeEntryScript}`,
+        Date.now(),
+        activeEntryScript,
+      ),
+    ).toEqual([]);
+  });
+
   test("anchors runtime process detection at the invocation start", () => {
     const activeEntryScript = "/Users/x/auto-mobile/dist/src/index.js";
     const records = parseDaemonProcessTable(

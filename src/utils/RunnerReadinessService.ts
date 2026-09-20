@@ -169,6 +169,12 @@ export interface AndroidRunnerConnectDiagnostic {
   primaryUserStartState?: string;
 }
 
+export interface AndroidRunnerHealthDiagnostic {
+  sysBootCompleted: string;
+  adbDevices: string;
+  emulatorQemuHealth: string;
+}
+
 export interface AndroidFrameworkReadinessResult {
   ready: boolean;
   unavailableResources?: string[];
@@ -197,6 +203,10 @@ export interface RunnerReadinessDependencies {
     device: BootedDevice,
     signal: AbortSignal,
   ): Promise<AndroidRunnerConnectDiagnostic>;
+  getAndroidRunnerHealthDiagnostic?(
+    device: BootedDevice,
+    signal: AbortSignal,
+  ): Promise<AndroidRunnerHealthDiagnostic>;
 }
 
 export interface RunnerReadinessRequest {
@@ -222,6 +232,7 @@ interface ReadinessAttemptContext extends RunnerReadinessRequest {
    * phases are bounded by `totalDeadlineMs` directly (#5376).
    */
   healthDeadlineMs: number | null;
+  phaseElapsedMs: Partial<Record<RunnerReadinessPhase, number>>;
 }
 
 export class RunnerReadinessService {
@@ -231,7 +242,11 @@ export class RunnerReadinessService {
     // Setup/provision phases run against `totalDeadlineMs`; the connect/health
     // window is opened later (see `startHealthWindow`) so a cold launch cannot
     // starve it (#5376).
-    const context: ReadinessAttemptContext = { ...request, healthDeadlineMs: null };
+    const context: ReadinessAttemptContext = {
+      ...request,
+      healthDeadlineMs: null,
+      phaseElapsedMs: {},
+    };
     const key = deviceReadinessLockKey(request.device.platform, request.device.deviceId);
     const release = await this.acquireReadinessTurn(context, key);
     try {
@@ -973,7 +988,10 @@ export class RunnerReadinessService {
         this.fail(context, phase, attempts, lastConnectionFailure);
       }
     }
-    const diagnostic = await this.runnerConnectFailureDiagnostic(context, phase);
+    const diagnostic =
+      phase === "runner-connect"
+        ? await this.runnerConnectFailureDiagnostic(context)
+        : await this.runnerHealthFailureDiagnostic(context, phase);
     this.fail(
       context,
       phase,
@@ -983,15 +1001,59 @@ export class RunnerReadinessService {
     );
   }
 
-  private async runnerConnectFailureDiagnostic(
-    context: ReadinessAttemptContext,
-    phase: RunnerReadinessPhase,
-  ): Promise<string> {
+  private async runnerConnectFailureDiagnostic(context: ReadinessAttemptContext): Promise<string> {
     const getDiagnostic = this.dependencies.getAndroidRunnerConnectDiagnostic;
-    if (context.device.platform !== "android" || phase !== "runner-connect" || !getDiagnostic) {
+    if (context.device.platform !== "android" || !getDiagnostic) {
       return "";
     }
 
+    const diagnostic = await this.collectBoundedAndroidDiagnostic(
+      context,
+      getDiagnostic,
+      "runner-connect",
+    );
+    if (!diagnostic) {
+      return "";
+    }
+    const details = [
+      diagnostic.primaryUserStartState
+        ? `primaryUserStartState=${diagnostic.primaryUserStartState}`
+        : undefined,
+      diagnostic.deviceLock
+        ? `deviceLock=${diagnostic.deviceLock.locked ? "locked" : "unlocked"}`
+        : undefined,
+    ].filter((detail): detail is string => Boolean(detail));
+    return details.length > 0 ? `; ${details.join(" ")}` : "";
+  }
+
+  private async runnerHealthFailureDiagnostic(
+    context: ReadinessAttemptContext,
+    phase: RunnerReadinessPhase,
+  ): Promise<string> {
+    const getDiagnostic = this.dependencies.getAndroidRunnerHealthDiagnostic;
+    if (context.device.platform !== "android" || phase !== "runner-health" || !getDiagnostic) {
+      return "";
+    }
+
+    const diagnostic = await this.collectBoundedAndroidDiagnostic(
+      context,
+      getDiagnostic,
+      "runner-health",
+    );
+    if (!diagnostic) {
+      return "";
+    }
+    return (
+      `; sys.boot_completed=${diagnostic.sysBootCompleted} adbDevices=${diagnostic.adbDevices} ` +
+      `emulatorQemuHealth=${diagnostic.emulatorQemuHealth}`
+    );
+  }
+
+  private async collectBoundedAndroidDiagnostic<T>(
+    context: ReadinessAttemptContext,
+    getDiagnostic: (device: BootedDevice, signal: AbortSignal) => Promise<T>,
+    phase: "runner-connect" | "runner-health",
+  ): Promise<T | undefined> {
     const controller = new AbortController();
     const signal = context.signal
       ? AbortSignal.any([context.signal, controller.signal])
@@ -1006,27 +1068,19 @@ export class RunnerReadinessService {
         diagnosticPromise,
         new Promise<undefined>((resolve) => {
           timeoutHandle = this.dependencies.timer.setTimeout(() => {
-            controller.abort(new Error("runner-connect diagnostic timed out"));
+            controller.abort(new Error(`${phase} diagnostic timed out`));
             resolve(undefined);
           }, RUNNER_CONNECT_DIAGNOSTIC_TIMEOUT_MS);
         }),
       ]);
       if (!diagnostic) {
-        return "";
+        return undefined;
       }
-      const details = [
-        diagnostic.primaryUserStartState
-          ? `primaryUserStartState=${diagnostic.primaryUserStartState}`
-          : undefined,
-        diagnostic.deviceLock
-          ? `deviceLock=${diagnostic.deviceLock.locked ? "locked" : "unlocked"}`
-          : undefined,
-      ].filter((detail): detail is string => Boolean(detail));
-      return details.length > 0 ? `; ${details.join(" ")}` : "";
+      return diagnostic;
     } catch (error) {
-      // This supplemental probe must not hide the original runner-connect timeout.
-      logger.debug(`Failed to collect Android runner-connect diagnostic: ${errorMessage(error)}`);
-      return "";
+      // This supplemental probe must not hide the original readiness timeout.
+      logger.debug(`Failed to collect Android ${phase} diagnostic: ${errorMessage(error)}`);
+      return undefined;
     } finally {
       if (timeoutHandle) {
         this.dependencies.timer.clearTimeout(timeoutHandle);
@@ -1046,6 +1100,16 @@ export class RunnerReadinessService {
       });
     }
     const remainingMs = this.remainingForPhase(context, phase);
+    const phaseStartedMs = this.dependencies.timer.now();
+    let elapsedRecorded = false;
+    const recordElapsed = (): void => {
+      if (elapsedRecorded) {
+        return;
+      }
+      elapsedRecorded = true;
+      const elapsedMs = Math.max(0, this.dependencies.timer.now() - phaseStartedMs);
+      context.phaseElapsedMs[phase] = (context.phaseElapsedMs[phase] ?? 0) + elapsedMs;
+    };
     const controller = new AbortController();
     const signal = context.signal
       ? AbortSignal.any([context.signal, controller.signal])
@@ -1061,7 +1125,7 @@ export class RunnerReadinessService {
     );
     void operationPromise.catch(() => {});
     try {
-      return await Promise.race([
+      const result = await Promise.race([
         operationPromise,
         new Promise<never>((_resolve, reject) => {
           timeoutHandle = this.dependencies.timer.setTimeout(() => {
@@ -1070,7 +1134,12 @@ export class RunnerReadinessService {
           }, remainingMs);
         }),
       ]);
+      recordElapsed();
+      return result;
     } catch (error) {
+      // Capture the phase duration at the deadline, excluding any grace period
+      // spent waiting for an aborted platform command to settle.
+      recordElapsed();
       if (controller.signal.aborted) {
         await this.awaitAbortSettlement(operationPromise);
       }
@@ -1084,6 +1153,7 @@ export class RunnerReadinessService {
       if (timeoutHandle) {
         this.dependencies.timer.clearTimeout(timeoutHandle);
       }
+      recordElapsed();
     }
   }
 
@@ -1172,14 +1242,32 @@ export class RunnerReadinessService {
       `platform=${device.platform} requested=[${context.requestedIdentity}] ` +
       `resolved=[${device.name} (${device.deviceId})]`;
     const remainingBudgetMs = this.remainingForPhase(context, phase);
+    const phaseElapsed = Object.entries(context.phaseElapsedMs)
+      .map(([trackedPhase, elapsedMs]) => `${phaseElapsedLabel(trackedPhase)}=${elapsedMs}`)
+      .join(" ");
     throw new RunnerReadinessError(
       `${context.operationName ?? "startDevice"} automation runner readiness failed: ${mapping} phase=${phase} ` +
-        `attempts=${attempts} remainingBudgetMs=${remainingBudgetMs}: ${normalizeDiagnostic(detail)}`,
+        `attempts=${attempts} remainingBudgetMs=${remainingBudgetMs}${phaseElapsed ? ` ${phaseElapsed}` : ""}: ${normalizeDiagnostic(detail)}`,
       device.platform === "android" &&
         RunnerReadinessService.isSetupPhase(phase) &&
         isAndroidFrameworkUnavailable(detail),
       options?.deadlineExhausted ?? false,
     );
+  }
+}
+
+function phaseElapsedLabel(phase: string): string {
+  switch (phase) {
+    case "package-compatibility":
+      return "packageCompatibilityElapsedMs";
+    case "runner-setup":
+      return "runnerSetupElapsedMs";
+    case "runner-connect":
+      return "connectElapsedMs";
+    case "runner-health":
+      return "healthElapsedMs";
+    default:
+      return `${phase}ElapsedMs`;
   }
 }
 
@@ -1241,6 +1329,39 @@ async function getDefaultAndroidFrameworkReadiness(
   };
 }
 
+function compactDiagnosticValue(value: string): string {
+  return normalizeDiagnostic(value).replace(/\s+/g, " ").trim() || "empty";
+}
+
+async function getDefaultAndroidRunnerHealthDiagnostic(
+  device: BootedDevice,
+  signal: AbortSignal,
+): Promise<AndroidRunnerHealthDiagnostic> {
+  const deviceAdb = defaultAdbClientFactory.create(device);
+  // Use an unbound client for `adb devices -l`, which is a server-wide view.
+  const adbServer = defaultAdbClientFactory.create();
+  const options = {
+    timeoutMs: RUNNER_CONNECT_DIAGNOSTIC_TIMEOUT_MS,
+    noRetry: true,
+    signal,
+  };
+  const [bootCompleted, adbDevices, emulatorQemuHealth] = await Promise.allSettled([
+    deviceAdb.execute(["shell", "getprop", "sys.boot_completed"], options),
+    adbServer.execute(["devices", "-l"], options),
+    adbServer.execute(["-s", device.deviceId, "get-state"], options),
+  ]);
+
+  const output = (result: PromiseSettledResult<{ stdout: string; stderr: string }>): string =>
+    result.status === "fulfilled"
+      ? compactDiagnosticValue(result.value.stdout || result.value.stderr)
+      : `unavailable (${compactDiagnosticValue(errorMessage(result.reason))})`;
+  return {
+    sysBootCompleted: output(bootCompleted),
+    adbDevices: output(adbDevices),
+    emulatorQemuHealth: output(emulatorQemuHealth),
+  };
+}
+
 export function createDefaultRunnerReadinessService(
   timer: Timer = defaultTimer,
 ): RunnerReadinessService {
@@ -1262,5 +1383,6 @@ export function createDefaultRunnerReadinessService(
       const primaryUser = users.find((user) => user.profileType === "primary" || user.userId === 0);
       return { deviceLock, primaryUserStartState: primaryUser?.startState };
     },
+    getAndroidRunnerHealthDiagnostic: getDefaultAndroidRunnerHealthDiagnostic,
   });
 }

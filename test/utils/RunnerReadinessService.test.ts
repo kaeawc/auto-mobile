@@ -217,6 +217,11 @@ function createService(
       deviceLock: { locked: boolean; keyguardShowing: boolean; secure?: boolean } | null;
       primaryUserStartState?: string;
     }>;
+    getAndroidRunnerHealthDiagnostic?: () => Promise<{
+      sysBootCompleted: string;
+      adbDevices: string;
+      emulatorQemuHealth: string;
+    }>;
   } = {},
 ) {
   const timer = options.timer ?? new FakeTimer();
@@ -243,6 +248,7 @@ function createService(
       checkIosOverride: async () => ({ present: false, usable: true }),
       awaitIosStartupMaintenance: options.awaitIosStartupMaintenance ?? (async () => {}),
       getAndroidRunnerConnectDiagnostic: options.getAndroidRunnerConnectDiagnostic,
+      getAndroidRunnerHealthDiagnostic: options.getAndroidRunnerHealthDiagnostic,
     }),
   };
 }
@@ -1624,6 +1630,58 @@ describe("RunnerReadinessService", () => {
     );
   });
 
+  test("reports cumulative per-phase elapsed time when runner health exhausts its deadline", async () => {
+    const timer = new FakeTimer();
+    const client = new FakeReadinessClient();
+    client.verifyServiceReady = async () => {
+      await timer.sleep(2_000);
+      return false;
+    };
+    const { service } = createService({ timer, androidClient: client, autoAdvance: false });
+
+    const pending = service
+      .ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "platform=android deviceId=emulator-5554",
+        totalDeadlineMs: 1_000,
+        readinessTimeoutMs: 1_000,
+      })
+      .catch((error: unknown) => error);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await timer.advanceTimeAsync(2_000);
+
+    expect(((await pending) as Error).message).toMatch(/phase=runner-health.*healthElapsedMs=1000/);
+  });
+
+  test("appends Android boot diagnostics when runner health exhausts its deadline", async () => {
+    const client = new FakeReadinessClient();
+    client.healthResults = [];
+    let healthDiagnosticCalls = 0;
+    const { service } = createService({
+      androidClient: client,
+      getAndroidRunnerHealthDiagnostic: async () => {
+        healthDiagnosticCalls++;
+        return {
+          sysBootCompleted: "0",
+          adbDevices: "List of devices attached emulator-5554 offline",
+          emulatorQemuHealth: "offline",
+        };
+      },
+    });
+
+    await expect(
+      service.ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "platform=android deviceId=emulator-5554",
+        totalDeadlineMs: 1_000,
+        readinessTimeoutMs: 1_000,
+      }),
+    ).rejects.toThrow(
+      /phase=runner-health.*sys\.boot_completed=0.*adbDevices=List of devices attached emulator-5554 offline.*emulatorQemuHealth=offline/,
+    );
+    expect(healthDiagnosticCalls).toBe(1);
+  });
+
   test("surfaces a known connect-attempt failure instead of the generic unresponsive message (issue #6260)", async () => {
     const client = new FakeReadinessClient();
     client.connected = false;
@@ -1804,12 +1862,21 @@ describe("RunnerReadinessService", () => {
     const client = new FakeReadinessClient();
     client.connected = false;
     client.connectionResults = [];
+    let healthDiagnosticCalls = 0;
     const { service } = createService({
       androidClient: client,
       getAndroidRunnerConnectDiagnostic: async () => ({
         deviceLock: { locked: true, keyguardShowing: true, secure: true },
         primaryUserStartState: "RUNNING_LOCKED",
       }),
+      getAndroidRunnerHealthDiagnostic: async () => {
+        healthDiagnosticCalls++;
+        return {
+          sysBootCompleted: "0",
+          adbDevices: "emulator-5554 offline",
+          emulatorQemuHealth: "offline",
+        };
+      },
     });
 
     await expect(
@@ -1820,5 +1887,6 @@ describe("RunnerReadinessService", () => {
         readinessTimeoutMs: 1_000,
       }),
     ).rejects.toThrow(/phase=runner-connect.*RUNNING_LOCKED/);
+    expect(healthDiagnosticCalls).toBe(0);
   });
 });

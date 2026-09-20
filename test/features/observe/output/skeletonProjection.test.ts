@@ -129,6 +129,59 @@ describe("toSkeleton — acceptance criteria", () => {
     });
   });
 
+  describe("editable value labels", () => {
+    test("uses an iOS editable value when text and content-desc are absent", () => {
+      const field: Element = {
+        bounds: bounds(0, 0, 100, 50),
+        "resource-id": "search",
+        role: "textfield",
+        value: "parity.check",
+        actions: ["set_text"],
+      };
+
+      const skeleton = toSkeleton(makeElements({ clickable: [field] }));
+
+      expect(skeleton[0].label).toBe("parity.check");
+      expect(skeleton[0].affordances).toContain("input");
+    });
+
+    test("does not use value as a non-editable label", () => {
+      const slider: Element = {
+        bounds: bounds(0, 0, 100, 50),
+        "resource-id": "volume",
+        class: "android.widget.SeekBar",
+        value: "50",
+        clickable: true,
+      };
+
+      const skeleton = toSkeleton(makeElements({ clickable: [slider] }));
+
+      expect(skeleton[0].label).toBeUndefined();
+    });
+
+    test("preserves Android text and prefers text or content-desc over value", () => {
+      const androidField: Element = {
+        bounds: bounds(0, 0, 100, 50),
+        "resource-id": "android-field",
+        class: "android.widget.EditText",
+        text: "hello",
+        value: "ignored",
+      };
+      const contentDescField: Element = {
+        bounds: bounds(0, 60, 100, 110),
+        "resource-id": "ios-field",
+        actions: ["set_text"],
+        "content-desc": "Search field",
+        value: "ignored too",
+      };
+
+      const skeleton = toSkeleton(makeElements({ clickable: [androidField, contentDescField] }));
+
+      expect(findById(skeleton, "android-field")?.label).toBe("hello");
+      expect(findById(skeleton, "ios-field")?.label).toBe("Search field");
+    });
+  });
+
   test("retains compact semantic links and a Compose owner test tag when present, in context (issue #6221 item 1)", () => {
     const composeText: Element = {
       bounds: bounds(0, 0, 200, 40),

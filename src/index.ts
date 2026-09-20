@@ -2,7 +2,7 @@
 import "./runtime/reflectMetadata";
 import { errorMessage } from "./utils/describeUnknownError";
 import { bootstrapEnvironment } from "./utils/envBootstrap";
-import { writeEmergencyLog } from "./utils/loggingConfig";
+import { resolveAutomobileLogSink, writeEmergencyLog } from "./utils/loggingConfig";
 import { DAEMON_LAUNCH_CWD_ENV, safeProcessCwd } from "./utils/workingDirectory";
 
 // Run before any other imports that may resolve tool paths at module load time.
@@ -56,6 +56,11 @@ function logFatal(label: string, error: unknown): void {
   const message = error instanceof Error ? (error.stack ?? error.message) : String(error);
   if (fatalLogger) {
     fatalLogger.error(`${label}: ${message}`);
+    if (resolveAutomobileLogSink() === "file") {
+      // Foreground CLI/MCP failures must remain visible even though the default
+      // logger sink is a PID-scoped file that the invoking client cannot read.
+      writeEmergencyLog(label, message);
+    }
   } else {
     // The file logger isn't loaded yet (crash during startup imports) — fall
     // back to stderr so the failure is never silently swallowed.
@@ -238,6 +243,14 @@ async function main() {
       enabledTools,
       disabledTools,
     } = parseArgs(process.argv.slice(2), logger);
+    if (daemonCommand === "status") {
+      // Status is a read-only control-plane probe. It must remain available
+      // even when this caller inherited a stale tool profile that normal MCP
+      // startup would reject before reaching daemon command dispatch.
+      await runDaemonCommand(daemonCommand, daemonArgs);
+      await logger.closeAfterFlush();
+      process.exit(0);
+    }
     configureToolSelectionCliDefaults(enabledTools, disabledTools);
     // Validate exact startup names before daemon/direct listeners can publish
     // readiness. createMcpServer repeats this registration for direct embedded

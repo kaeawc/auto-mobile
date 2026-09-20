@@ -3406,9 +3406,13 @@
                         "type": "null"
                       }
                     ]
+                  },
+                  "units": {
+                    "type": "string",
+                    "const": "physical-pixels"
                   }
                 },
-                "required": ["width", "height", "density"],
+                "required": ["width", "height", "density", "units"],
                 "additionalProperties": false
               },
               "capabilityInventory": {
@@ -3960,9 +3964,13 @@
                         "type": "null"
                       }
                     ]
+                  },
+                  "units": {
+                    "type": "string",
+                    "const": "physical-pixels"
                   }
                 },
-                "required": ["width", "height", "density"],
+                "required": ["width", "height", "density", "units"],
                 "additionalProperties": false
               },
               "capabilityInventory": {
@@ -4807,6 +4815,10 @@
               "type": "integer",
               "minimum": -9007199254740991,
               "maximum": 9007199254740991
+            },
+            "units": {
+              "type": "string",
+              "enum": ["physical-pixels", "points", "unknown"]
             }
           },
           "required": ["width", "height"],
@@ -9650,9 +9662,13 @@
                       "type": "null"
                     }
                   ]
+                },
+                "units": {
+                  "type": "string",
+                  "const": "physical-pixels"
                 }
               },
-              "required": ["width", "height", "density"],
+              "required": ["width", "height", "density", "units"],
               "additionalProperties": false
             },
             "capabilityInventory": {
@@ -13686,7 +13702,7 @@
                   "additionalProperties": {}
                 },
                 "screenSize": {
-                  "description": "Same platform-native coordinate space as a full observation's `screenSize` and hierarchy/skeleton bounds. Populated from the post-action observation, not by `diffObserveResult` itself.",
+                  "description": "Same platform-native coordinate space as a full observation's `screenSize` and hierarchy/skeleton bounds; `units` identifies that space when present. Populated from the post-action observation, not by `diffObserveResult` itself.",
                   "type": "object",
                   "properties": {
                     "width": {
@@ -13698,6 +13714,10 @@
                       "type": "integer",
                       "minimum": -9007199254740991,
                       "maximum": 9007199254740991
+                    },
+                    "units": {
+                      "type": "string",
+                      "enum": ["physical-pixels", "points", "unknown"]
                     }
                   },
                   "required": ["width", "height"],

@@ -224,6 +224,10 @@ const tapEffectSchema = z
   })
   .passthrough();
 
+/**
+ * Current-orientation MCP screen dimensions: Android physical pixels or iOS
+ * XCTest logical points, in the same native space as hierarchy/skeleton bounds.
+ */
 export const screenSizeSchema = z.object({
   width: z.number().int(),
   height: z.number().int(),
@@ -945,6 +949,13 @@ export const observeDiffSchema = z
           "client no single accessor for 'is this capture fresh' across full and " +
           "diff modes. Populated from the post-transition observation, not by " +
           "`diffObserveResult` itself.",
+      ),
+    screenSize: screenSizeSchema
+      .optional()
+      .describe(
+        "Same platform-native coordinate space as a full observation's `screenSize` " +
+          "and hierarchy/skeleton bounds. Populated from the post-action observation, " +
+          "not by `diffObserveResult` itself.",
       ),
     truncationReasons: z
       .array(z.string())

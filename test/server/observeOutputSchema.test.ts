@@ -183,6 +183,19 @@ describe("observe.outputSchema: requires usable screenshot-resource join keys on
     ).not.toThrow();
   });
 
+  test("the diff schema accepts the same platform-native screenSize as a full observation (#7335)", () => {
+    const diff = observeDiffSchema.parse({
+      isDiff: true,
+      skeleton: [],
+      added: [],
+      removed: [],
+      changed: [],
+      screenSize: { width: 393, height: 852 },
+    });
+
+    expect(diff.screenSize).toEqual({ width: 393, height: 852 });
+  });
+
   test("the embedded diff arm requires identities while declaring the screenshot URI optional (it is nested, not top-level flattened)", () => {
     // observeDiffSchema is only ever nested (inside observationOutputSchema /
     // action-tool `.observation`), so it never hits top-level union flattening

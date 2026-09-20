@@ -209,6 +209,7 @@ function resolveDiffContext(
 export const DIFF_PASSTHROUGH_METADATA_FIELDS = [
   "activeWindow",
   "freshness",
+  "screenSize",
   "observationId",
   "deviceId",
   "settled",

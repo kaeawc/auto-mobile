@@ -11,6 +11,23 @@ the exact arguments supported by your connection.
 
 ## Observe & navigate
 
+### Screen-coordinate contract
+
+`observe` reports platform-native, current-orientation screen coordinates. The
+origin is the top-left of the complete current screen, including system UI:
+
+- Android uses physical pixels; iOS uses XCTest logical points.
+- `screenSize`, skeleton bounds, full-hierarchy bounds, and future absolute
+  coordinate input use that same platform-native coordinate space.
+- Valid coordinates are half-open: `0 <= x < width` and `0 <= y < height`.
+- A point already in the platform-native space is not density-, inset-,
+  Retina-scale-, canonical-pixel-, or rotation-transformed.
+
+This is separate from the daemon observation-stream's
+[canonical-pixel mapping](design-docs/mcp/daemon/screen-control-mapping.md).
+That stream contract is intentional and does not transform MCP `observe` or
+native absolute-input coordinates.
+
 | Tool                                 | What it does                                               |
 | ------------------------------------ | ---------------------------------------------------------- |
 | 👀 <code>observe</code>              | Gets the current screen view hierarchy.                    |

@@ -43,7 +43,8 @@ export function loadAndroidHomeObserve(): { raw: string; observe: ObserveResult 
  * `hierarchy.bounds` with optional left/top in points,
  * `screenScale`/`screenWidth`/`screenHeight`, XCUIElement class names) and
  * carries the fractional values the iOS points coordinate space legitimately
- * produces (thirds from @3x retina, `.5` sub-point layout). It pins that the
+ * produces (thirds from @3x retina, `.5` sub-point layout). Its `screenSize`
+ * and hierarchy dimensions are both logical points. It pins that the
  * advertised output schemas never claim `integer` for a points-based
  * coordinate. Replace with a real simulator capture when one is taken (needs
  * hardware; see issue #3206 verification notes).

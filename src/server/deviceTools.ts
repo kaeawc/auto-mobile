@@ -9614,7 +9614,7 @@ export function registerDeviceTools() {
 
   ToolRegistry.register(
     "getAndroid",
-    "Find or recover an Android AVD and prepare it for automation.",
+    "Find or recover an Android AVD and prepare it for automation. See the automobile:tools resource for every tool's default enabled/gated state before acquiring a device.",
     getAndroidSchema,
     getAndroidHandler,
     { defaultEnabled: true, supportsProgress: true },
@@ -9622,7 +9622,7 @@ export function registerDeviceTools() {
 
   ToolRegistry.register(
     "getApple",
-    "Find or recover an iOS Simulator and prepare it for automation.",
+    "Find or recover an iOS Simulator and prepare it for automation. See the automobile:tools resource for every tool's default enabled/gated state before acquiring a device.",
     getAppleSchema,
     getAppleHandler,
     { defaultEnabled: true, supportsProgress: true },

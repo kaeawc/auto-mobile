@@ -257,6 +257,8 @@ The `deviceId` fields exist so the value at `runtime.deviceId` in `listDevices` 
 | 🎯 <code>accessibilityFocus</code> | Sets or clears Android TalkBack focus by resource ID, text, or content description.                                                                                                                                      |
 | 🔀 <code>setToolEnabled</code>     | Enables or disables AutoMobile tools for the current MCP session — one exact name via `toolName`, or a batch via `toolNames`; unknown or hidden names reject the batch, while always-on names are returned in `skipped`. |
 
+Before acquiring a device, read `automobile:tools` for every tool's default enabled/gated state.
+
 On Android and iOS, compact observations fold soft-keyboard keys into a single
 `keyboard: { visible: true, package: "…" }` summary plus at most one skeleton row:
 

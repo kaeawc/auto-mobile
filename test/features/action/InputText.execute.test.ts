@@ -216,6 +216,7 @@ describe("InputText.execute", () => {
       (inputText as any).targetFocuser = {
         focus: async () => ({
           success: true,
+          focusVerified: false,
           matchedText: "Phone notification: ",
         }),
       };

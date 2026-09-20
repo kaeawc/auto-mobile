@@ -1170,7 +1170,7 @@ export class TapOnElement extends BaseVisualChange {
     return Boolean(
       candidate &&
       isEditableElementProperties(candidate) &&
-      this.finder.isElementFocused(candidate) &&
+      this.finder.isElementKeyboardFocused(candidate) &&
       this.isSameFocusTarget(target, candidate),
     );
   }
@@ -2121,7 +2121,7 @@ export class TapOnElement extends BaseVisualChange {
             focusTarget = element;
 
             // Check if element is already focused
-            const isFocused = this.finder.isElementFocused(element);
+            const isFocused = this.finder.isElementKeyboardFocused(element);
 
             if (isFocused) {
               logger.info(`Element is already focused, no action needed`);

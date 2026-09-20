@@ -178,6 +178,57 @@ describe("DefaultElementFinder", () => {
       expect(results[0].class).toBe("android.widget.EditText");
     });
 
+    test("uses an editable partial match when another window has a non-editable exact match", () => {
+      const hierarchy = makeHierarchy([]);
+      hierarchy.windows = [
+        {
+          windowLayer: 2,
+          hierarchy: {
+            $: { bounds: bounds(0, 0, 100, 100) },
+            node: [
+              {
+                $: {
+                  class: "android.widget.TextView",
+                  text: "Phone",
+                  bounds: bounds(0, 0, 100, 50),
+                },
+              },
+            ],
+          },
+        },
+        {
+          windowLayer: 1,
+          hierarchy: {
+            $: { bounds: bounds(0, 0, 100, 100) },
+            node: [
+              {
+                $: {
+                  class: "android.widget.EditText",
+                  text: "Phone number",
+                  bounds: bounds(0, 50, 100, 100),
+                },
+              },
+            ],
+          },
+        },
+      ];
+
+      const results = finder.findElementsByText(
+        hierarchy,
+        "Phone",
+        null,
+        true,
+        false,
+        false,
+        true,
+        "focus-input",
+      );
+
+      expect(results).toHaveLength(1);
+      expect(results[0].class).toBe("android.widget.EditText");
+      expect(results[0].text).toBe("Phone number");
+    });
+
     test("demotes custom editable nodes for tap selection", () => {
       const hierarchy = makeHierarchy([
         {
@@ -600,6 +651,40 @@ describe("DefaultElementFinder", () => {
     test("returns false for unfocused element", () => {
       expect(finder.isElementFocused({ focused: "false" })).toBe(false);
       expect(finder.isElementFocused({})).toBe(false);
+    });
+  });
+
+  describe("isElementKeyboardFocused", () => {
+    test("does not treat selection as keyboard focus", () => {
+      expect(finder.isElementKeyboardFocused({ selected: "true" })).toBe(false);
+      expect(finder.isElementKeyboardFocused({ selected: true })).toBe(false);
+    });
+
+    test("returns true for keyboard focus attributes", () => {
+      expect(finder.isElementKeyboardFocused({ focused: "true" })).toBe(true);
+      expect(finder.isElementKeyboardFocused({ focused: true })).toBe(true);
+      expect(finder.isElementKeyboardFocused({ isFocused: "true" })).toBe(true);
+      expect(finder.isElementKeyboardFocused({ isFocused: true })).toBe(true);
+      expect(finder.isElementKeyboardFocused({ "has-keyboard-focus": "true" })).toBe(true);
+      expect(finder.isElementKeyboardFocused({ "has-keyboard-focus": true })).toBe(true);
+    });
+
+    test("returns true for Android accessibility focus spellings", () => {
+      expect(finder.isElementKeyboardFocused({ "accessibility-focused": "true" })).toBe(true);
+      expect(finder.isElementKeyboardFocused({ accessibilityFocused: true })).toBe(true);
+    });
+
+    test("returns false without a true focus attribute", () => {
+      expect(
+        finder.isElementKeyboardFocused({
+          focused: "false",
+          isFocused: false,
+          "has-keyboard-focus": "false",
+          "accessibility-focused": false,
+          accessibilityFocused: "false",
+        }),
+      ).toBe(false);
+      expect(finder.isElementKeyboardFocused({})).toBe(false);
     });
   });
 

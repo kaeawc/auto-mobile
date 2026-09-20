@@ -130,7 +130,10 @@ function readEnvelope(envelope: unknown): {
   } else if (payload && payload.error && typeof payload.error === "object") {
     errorText = JSON.stringify(payload.error);
   } else if (isError) {
-    errorText = view?.textPart?.text ?? "tool reported isError";
+    errorText =
+      view?.textPart?.text ??
+      (envelope as { content?: Array<{ text?: string }> } | undefined)?.content?.[0]?.text ??
+      JSON.stringify(envelope);
   }
   return { payload, errorText };
 }
@@ -188,6 +191,9 @@ export async function runDrive(options: DriveOptions, deps: DriveDeps): Promise<
       if (!stepOk) {
         ok = false;
         deps.log(`### ${step.tool} ERROR: ${failureText}`);
+        if (options.json) {
+          deps.log(JSON.stringify(envelope, null, 2));
+        }
         if (hint) {
           deps.log(hint);
           break; // a mismatch will not fix itself across the rest of the plan

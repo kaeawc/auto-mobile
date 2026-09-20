@@ -163,6 +163,38 @@ describe("runDrive", () => {
     expect(result.results[0].errorText).toBe("boom");
   });
 
+  test("preserves plain-text transport errors", async () => {
+    const transportError = {
+      content: [{ type: "text", text: "MCP error -32603: Freshly started device is not ready" }],
+      isError: true,
+    };
+    const client = new FakeClient({ observe: transportError });
+    const result = await runDrive(
+      { json: false, quiet: false, steps: [{ tool: "observe", args: {} }] },
+      deps(client),
+    );
+    expect(result.results[0].errorText).toBe(
+      "MCP error -32603: Freshly started device is not ready",
+    );
+    expect(result.results[0].errorText).not.toBe("tool reported isError");
+  });
+
+  test("JSON output renders failed tool envelopes", async () => {
+    const logs: string[] = [];
+    const failedEnvelope = envelope({ error: "boom", detail: "failed" }, true);
+    const client = new FakeClient({ observe: failedEnvelope });
+    await runDrive(
+      { json: true, quiet: false, steps: [{ tool: "observe", args: {} }] },
+      { ...deps(client), log: (message) => logs.push(message) },
+    );
+    const dumpedEnvelope = JSON.parse(logs[1]);
+    expect(dumpedEnvelope).toEqual(failedEnvelope);
+    expect(dumpedEnvelope.isError).toBe(true);
+    expect(dumpedEnvelope.content).toEqual([
+      { type: "text", text: '{"error":"boom","detail":"failed"}' },
+    ]);
+  });
+
   test("success:false makes the run non-ok without an error field", async () => {
     const client = new FakeClient({ observe: envelope({ success: false, message: "failed" }) });
     const result = await runDrive(

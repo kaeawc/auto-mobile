@@ -655,6 +655,10 @@ export class DevicePool {
    */
   private readonly mcpSessionAcquiredDeviceSessions = new Map<string, Set<string>>();
   private readonly mcpSessionAcquiredAutolocks = new Map<string, Set<string>>();
+  // This map keeps only the latest autolock per MCP session, overwriting the
+  // prior entry; re-acquiring an older owned autolock can therefore hit the
+  // reservation-race path through this benign, over-strict false-negative,
+  // not a false grant. Use mcpSessionAcquiredAutolocks if this needs fixing.
   private readonly mcpSessionAutolockMap: Map<string, string> = new Map();
   private readonly mcpSessionRecoveryDevices: Map<string, McpSessionRecoveryLease> = new Map();
   private readonly refreshMissingDeviceMisses: Map<string, number> = new Map();

@@ -72,11 +72,53 @@ describe("TapAtCoordinate", () => {
     expect(iosDispatches).toEqual([{ x: 1.25, y: 2.75, frameContext: "frame-123" }]);
   });
 
+  test("dispatches resolved Android pixels and iOS points byte-for-byte without daemon conversion (#7336 bullets 2 and 5)", async () => {
+    const android = createTapAt(androidDevice, 1080, 2400);
+    const androidResult = await android.tapAt.execute({ x: 640.6, y: 1200.4 });
+    expect(androidResult).toMatchObject({ success: true, x: 641, y: 1200 });
+    expect(android.androidDispatches).toEqual([{ x: 641, y: 1200, frameContext: "frame-123" }]);
+
+    const ios = createTapAt(iosDevice, 393, 852);
+    const iosResult = await ios.tapAt.execute({ x: 20.5, y: 68.33333333333333 });
+    expect(iosResult).toMatchObject({ success: true, x: 20.5, y: 68.33333333333333 });
+    expect(ios.iosDispatches).toEqual([
+      { x: 20.5, y: 68.33333333333333, frameContext: "frame-123" },
+    ]);
+  });
+
+  test("keeps iOS tapAt dispatch in logical points across scale metadata (#7336 bullet 4)", async () => {
+    const { tapAt, observeScreen, iosDispatches } = createTapAt(iosDevice, 393, 852);
+    const logicalPoint = { x: 20.5, y: 68.33333333333333 };
+    const scaleMetadata = [
+      { nativeScale: 2, screenScale: 2, pixelWidth: 786, pixelHeight: 1704 },
+      { nativeScale: 3, screenScale: 3, pixelWidth: 1179, pixelHeight: 2556 },
+      { nativeScale: 2.61, screenScale: 3, pixelWidth: 1026, pixelHeight: 2224 },
+      { nativeScale: 2.88, screenScale: 3, pixelWidth: 1132, pixelHeight: 2454 },
+    ];
+
+    for (const metadata of scaleMetadata) {
+      observeScreen.setObserveResult({
+        ...observation(393, 852),
+        viewHierarchy: { hierarchy: { node: {} }, frameContext: "frame-123", ...metadata },
+      } as ObserveResult);
+      await expect(tapAt.execute(logicalPoint)).resolves.toMatchObject({
+        success: true,
+        ...logicalPoint,
+      });
+    }
+
+    expect(iosDispatches).toEqual(
+      scaleMetadata.map(() => ({ ...logicalPoint, frameContext: "frame-123" })),
+    );
+  });
+
   test.each([
+    // #7336 bullet 6: both native spaces reject all non-finite coordinates.
     { x: 10, y: 0, label: "right edge" },
     { x: 0, y: 10, label: "bottom edge" },
     { x: -1, y: 0, label: "negative x" },
     { x: 0, y: -1, label: "negative y" },
+    { x: Number.NEGATIVE_INFINITY, y: 0, label: "negative Infinity" },
     { x: Number.NaN, y: 0, label: "NaN" },
     { x: 0, y: Number.POSITIVE_INFINITY, label: "Infinity" },
   ])("rejects Android $label without dispatch", async ({ x, y }) => {
@@ -93,6 +135,8 @@ describe("TapAtCoordinate", () => {
     { x: 10, y: 0, label: "right edge" },
     { x: 0, y: 10, label: "bottom edge" },
     { x: -0.01, y: 0, label: "negative x" },
+    { x: 0, y: -0.01, label: "negative y" },
+    { x: Number.NEGATIVE_INFINITY, y: 0, label: "negative Infinity" },
     { x: 0, y: Number.NaN, label: "NaN" },
     { x: Number.POSITIVE_INFINITY, y: 0, label: "Infinity" },
   ])("rejects iOS $label without dispatch", async ({ x, y }) => {

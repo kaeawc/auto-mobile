@@ -15,7 +15,7 @@ export interface CoordinateTapClient {
   ): Promise<{ success: boolean; error?: string }>;
 }
 
-function isStaleFrameContextRejection(error: string | undefined): boolean {
+export function isStaleFrameContextRejection(error: string | undefined): boolean {
   return typeof error === "string" && error.toLowerCase().includes("stale frame context");
 }
 

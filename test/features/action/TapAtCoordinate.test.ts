@@ -19,13 +19,43 @@ const iosDevice = {
   deviceId: "ios-test-device",
 } as BootedDevice;
 
-function observation(width: number, height: number, frameContext = "frame-123"): ObserveResult {
+function observation(
+  width: number,
+  height: number,
+  frameContext = "frame-123",
+  rotation = 0,
+  node: Record<string, unknown> = {},
+): ObserveResult {
   return {
     observationId: "test-observation",
     timestamp: 1,
     screenSize: { width, height },
-    viewHierarchy: { hierarchy: { node: {} }, frameContext },
+    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+    rotation,
+    viewHierarchy: {
+      hierarchy: { node },
+      frameContext,
+      rotation,
+      screenWidth: width,
+      screenHeight: height,
+    },
   } as ObserveResult;
+}
+
+function createAndroidTapAtWithClient(
+  observations: ObserveResult[],
+  androidClient: CoordinateTapClient,
+) {
+  const observeScreen = new FakeObserveScreen();
+  observeScreen.setObserveSequence(observations);
+  const adb = new FakeAdbExecutor();
+  const tapAt = new TapAtCoordinate(androidDevice, adb, {
+    timer: new FakeTimer(),
+    androidClient,
+    iosClient: androidClient,
+  });
+  tapAt.observeScreen = observeScreen;
+  return { tapAt, observeScreen, adb };
 }
 
 function createTapAt(device: BootedDevice, width = 10, height = 10) {
@@ -210,5 +240,115 @@ describe("TapAtCoordinate", () => {
       dispatchAndroidCoordinateTap(staleClient, adb, 1, 2, 10, "frame-123"),
     ).rejects.toThrow("Stale frame context");
     expect(adb.wasCommandExecuted("shell input touchscreen tap 1 2")).toBe(false);
+  });
+
+  test("re-observes and retries one Android stale-frame rejection when targeting layout is unchanged", async () => {
+    const dispatches: Array<{ x: number; y: number; frameContext?: string }> = [];
+    const client: CoordinateTapClient = {
+      requestTapCoordinates: async (x, y, _duration, _timeout, _perf, frameContext) => {
+        dispatches.push({ x, y, frameContext });
+        return dispatches.length === 1
+          ? {
+              success: false,
+              error: "Stale frame context for input/tap; observe a fresh frame before retrying",
+            }
+          : { success: true };
+      },
+    };
+    const stableNode = {
+      class: "android.widget.TextView",
+      text: "Settings",
+      bounds: { left: 0, top: 0, right: 100, bottom: 40 },
+    };
+    const initial = observation(100, 200, "epoch:1", 0, {
+      ...stableNode,
+      extras: { traversalIndex: 1 },
+      "view-id": "capture-id-1",
+    });
+    const refreshed = observation(100, 200, "epoch:2", 0, {
+      ...stableNode,
+      extras: { traversalIndex: 2 },
+      "view-id": "capture-id-2",
+    });
+    const { tapAt, observeScreen, adb } = createAndroidTapAtWithClient(
+      [initial, refreshed],
+      client,
+    );
+
+    const result = await tapAt.execute({ x: 20, y: 30 });
+
+    expect(result).toMatchObject({ success: true, x: 20, y: 30 });
+    expect(dispatches).toEqual([
+      { x: 20, y: 30, frameContext: "epoch:1" },
+      { x: 20, y: 30, frameContext: "epoch:2" },
+    ]);
+    expect(observeScreen.getExecuteCallCount()).toBe(3);
+    expect(adb.wasCommandExecuted("shell input touchscreen tap 20 30")).toBe(false);
+  });
+
+  test.each([
+    {
+      label: "resize",
+      refreshed: observation(101, 200, "epoch:2", 0, { text: "Settings" }),
+    },
+    {
+      label: "rotation",
+      refreshed: observation(100, 200, "epoch:2", 1, { text: "Settings" }),
+    },
+    {
+      label: "navigation",
+      refreshed: observation(100, 200, "epoch:2", 0, { text: "Network & internet" }),
+    },
+  ])("preserves stale rejection after a genuine Android $label", async ({ refreshed }) => {
+    const dispatches: string[] = [];
+    const client: CoordinateTapClient = {
+      requestTapCoordinates: async (_x, _y, _duration, _timeout, _perf, frameContext) => {
+        dispatches.push(frameContext ?? "missing");
+        return {
+          success: false,
+          error: "Stale frame context for input/tap; observe a fresh frame before retrying",
+        };
+      },
+    };
+    const initial = observation(100, 200, "epoch:1", 0, { text: "Settings" });
+    const { tapAt, observeScreen, adb } = createAndroidTapAtWithClient(
+      [initial, refreshed],
+      client,
+    );
+
+    const result = await tapAt.execute({ x: 20, y: 30 });
+
+    expect(result).toMatchObject({
+      success: false,
+      error: expect.stringContaining("Stale frame context"),
+    });
+    expect(dispatches).toEqual(["epoch:1"]);
+    expect(observeScreen.getExecuteCallCount()).toBe(2);
+    expect(adb.wasCommandExecuted("shell input touchscreen tap 20 30")).toBe(false);
+  });
+
+  test("bounds Android stale-frame recovery to one retry", async () => {
+    const dispatches: string[] = [];
+    const client: CoordinateTapClient = {
+      requestTapCoordinates: async (_x, _y, _duration, _timeout, _perf, frameContext) => {
+        dispatches.push(frameContext ?? "missing");
+        return {
+          success: false,
+          error: "Stale frame context for input/tap; observe a fresh frame before retrying",
+        };
+      },
+    };
+    const initial = observation(100, 200, "epoch:1", 0, { text: "Settings" });
+    const refreshed = observation(100, 200, "epoch:2", 0, { text: "Settings" });
+    const { tapAt, observeScreen } = createAndroidTapAtWithClient([initial, refreshed], client);
+
+    const result = await tapAt.execute({ x: 20, y: 30 });
+
+    expect(result).toMatchObject({
+      success: false,
+      error: expect.stringContaining("Stale frame context"),
+    });
+    expect(dispatches).toEqual(["epoch:1", "epoch:2"]);
+    expect(observeScreen.getExecuteCallCount()).toBe(2);
   });
 });

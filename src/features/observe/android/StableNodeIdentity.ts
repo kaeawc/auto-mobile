@@ -24,31 +24,37 @@ import { getToggleContentDescription } from "../../../utils/elementProperties";
  * therefore keeps the same id before and after a scroll, and two rows with
  * different content can never share one.
  *
- * Descendant text/content-desc stability (issue #6230). A node's id must not
- * change merely because some *descendant's* `text`/`content-desc` ticked
- * between captures — a row wrapping a live timer child ("1 second" → "2
- * seconds") is still the same row, and the `s2-…` id an `observe(project:
- * "skeleton")` emitted must still resolve on the fresh capture a later
- * `tapOn`/`inputText` runs against. So a child contributes only its
- * **structural** hash to an ancestor — class/className, `resource-id`,
- * `test-tag`, and (recursively) its own children's structural hashes — with the
- * volatile display fields (`text`, `content-desc`) omitted from that upward
- * contribution. A node's *own* id still mixes in its own `text`/`content-desc`
- * (a node's own text edit remains a new identity, matching
- * `nodeKey`/`contentIdentityKey` semantics), so leaf text nodes stay distinct
- * and the timer leaf's own id still churns — only its ancestors are shielded.
- * Nodes that differ only by a descendant's display text share one structural
- * identity (ordinal-suffixed as a duplicate group below); nodes differing in
- * structure — a distinct `resource-id`, `class`, or `test-tag` anywhere in the
- * subtree — still get distinct ids.
+ * Descendant text stability (issue #6230). A node's id must not change merely
+ * because some *descendant's* `text` ticked between captures — a row wrapping
+ * a live timer child ("1 second" → "2 seconds") is still the same row, and the
+ * `s2-…` id an `observe(project: "skeleton")` emitted must still resolve on the
+ * fresh capture a later `tapOn`/`inputText` runs against. So a child contributes
+ * only its **structural** hash to an ancestor — class/className, `resource-id`,
+ * `content-desc`, `test-tag`, and (recursively) its own children's structural
+ * hashes — with volatile display `text` omitted from that upward contribution.
+ * A node's *own* id still mixes in its own `text`/`content-desc` (a node's own
+ * text edit remains a new identity, matching `nodeKey`/`contentIdentityKey`
+ * semantics), so leaf text nodes stay distinct and the timer leaf's own id still
+ * churns — only its ancestors are shielded from descendant text. A descendant's
+ * `content-desc` now deliberately restamps its ancestors: Android icon buttons
+ * commonly put their accessible label on a child, so rolling that label upward
+ * keeps otherwise-identical clickable containers distinct (issue #7311). That
+ * accepted content-derived-id churn matches the module's existing trade-off for
+ * a node's own content. Nodes that differ only by descendant text share one
+ * structural identity (ordinal-suffixed as a duplicate group below); nodes
+ * differing in a descendant `content-desc` or structure — a distinct
+ * `resource-id`, `class`, or `test-tag` anywhere in the subtree — get distinct
+ * ids.
  *
  * Content-identical duplicates (repeated spacer rows, empty Compose click
  * surfaces) share a hash by construction, so the k-th duplicate (document
- * order) gets an ordinal `-k` suffix — and, critically, so does the FIRST
- * (`-1`): whenever a hash occurs more than once in a capture, EVERY occurrence
- * is ordinal-suffixed, and the bare `s-<hash>` form is emitted only for a hash
- * that occurs exactly once. That keeps `view-id` unique within a capture (a
- * property the path UUIDs provided) and lets the diff layer's
+ * order, scoped independently to app and IME-window subtrees) gets an ordinal
+ * `-k` suffix — and, critically, so does the FIRST (`-1`): whenever a hash
+ * occurs more than once in its namespace, EVERY occurrence is
+ * ordinal-suffixed, and the bare `s-<hash>` form is emitted only for a hash
+ * that occurs exactly once there. Separating the IME namespace means keyboard
+ * nodes appearing, disappearing, or changing size cannot shift an app node's
+ * ordinal (issue #7311). The scheme lets the diff layer's
  * uniqueness-on-both-sides guard re-pair duplicates in encounter order — the
  * same best-effort heuristic `diffObserveResult` already applies to identical
  * same-path siblings. Distinct rows still cannot false-merge: an ordinal only
@@ -115,18 +121,18 @@ export const STABLE_VIEW_ID_HASH_LENGTH = 16;
 const CONTENT_FIELDS: readonly string[] = ["resource-id", "content-desc", "text", "test-tag"];
 
 /**
- * Node fields a child contributes *upward* to its ancestors' ids (issue #6230):
- * the structural identifiers that do not churn as displayed content updates.
- * `text` and `content-desc` are deliberately omitted here — a descendant whose
- * label ticks between captures (a timer, a live counter, streaming text) must
- * not restamp its ancestors' ids, or the `s2-…` selector an `observe(project:
- * "skeleton")` emitted stops resolving on the fresh capture a `tapOn` runs
- * against. A node's own `text`/`content-desc` still count toward *its own* id
- * via {@link CONTENT_FIELDS}; they are excluded only from the ancestor rollup.
- * #7219 considered folding a row's first text child into that row's hash, but
- * doing so would reopen this guarantee for rows with ticking descendant text.
+ * Node fields a child contributes *upward* to its ancestors' ids. `content-desc`
+ * is intentionally included so a child accessibility label distinguishes its
+ * otherwise-identical clickable ancestors (issue #7311). `text` is deliberately
+ * omitted: a descendant whose visible label ticks between captures (a timer, a
+ * live counter, streaming text) must not restamp its ancestors' ids (issue
+ * #6230), or the `s2-…` selector an `observe(project: "skeleton")` emitted
+ * stops resolving on the fresh capture a `tapOn` runs against. A node's own
+ * `text`/`content-desc` still count toward *its own* id via
+ * {@link CONTENT_FIELDS}. #7219 considered folding a row's first text child
+ * into that row's hash, but doing so would reopen the ticking-text guarantee.
  */
-const STRUCTURAL_FIELDS: readonly string[] = ["resource-id", "test-tag"];
+const STRUCTURAL_FIELDS: readonly string[] = ["resource-id", "content-desc", "test-tag"];
 
 /** Normalize the `node` child slot (absent / single object / array) to an array. */
 function toChildArray(node: Record<string, unknown>): Record<string, unknown>[] {
@@ -149,6 +155,20 @@ function attributesOf(node: Record<string, unknown>): Record<string, unknown> {
   return attributes && typeof attributes === "object" && !Array.isArray(attributes)
     ? (attributes as Record<string, unknown>)
     : node;
+}
+
+/** Whether this node is in the IME window subtree identified at Android ingest. */
+function isInImeWindow(node: Record<string, unknown>, parentIsInImeWindow: boolean): boolean {
+  if (parentIsInImeWindow) {
+    return true;
+  }
+  const extras = attributesOf(node).extras;
+  return (
+    !!extras &&
+    typeof extras === "object" &&
+    !Array.isArray(extras) &&
+    Boolean((extras as Record<string, unknown>)["automobile:imePackage"])
+  );
 }
 
 /** Read either platform's spelling for attributes before conversion normalizes it. */
@@ -240,9 +260,10 @@ export function assignStableViewIds(root: unknown): Map<string, string> {
   // *hashes* of the children (not their raw subtrees) so cost stays O(n).
   //
   //  - structuralHash: class + STRUCTURAL_FIELDS + children's structuralHashes.
-  //    This is what a node contributes to its ANCESTORS, so it excludes the
-  //    volatile `text`/`content-desc` — a descendant's label ticking between
-  //    captures must not restamp any ancestor's id (#6230).
+  //    This is what a node contributes to its ANCESTORS, so it includes a
+  //    descendant `content-desc` to distinguish Android icon-button containers
+  //    (#7311), but excludes volatile descendant `text` so a ticking label does
+  //    not restamp any ancestor's id (#6230).
   //  - contentHash (emitted): class + CONTENT_FIELDS (incl. the node's OWN
   //    `text`/`content-desc`) + children's structuralHashes. The node's own
   //    display text still defines its own identity, but descendants roll up
@@ -250,9 +271,10 @@ export function assignStableViewIds(root: unknown): Map<string, string> {
   //
   // Two nodes sharing a contentHash are content-identical up to descendant
   // display text; they are ordinal-suffixed as a duplicate group in pass 2b
-  // exactly as fully-identical subtrees already were. Distinct structure
-  // anywhere in the subtree — a differing `resource-id`, `class`, or `test-tag`
-  // — still yields distinct structuralHashes and therefore distinct ids.
+  // exactly as fully-identical subtrees already were. A distinct descendant
+  // `content-desc` or structure — a differing `resource-id`, `class`, or
+  // `test-tag` anywhere in the subtree — yields distinct structuralHashes and
+  // therefore distinct ids.
   const contentHash = new Map<Record<string, unknown>, string>();
   const hashCanonical = (
     fields: readonly string[],
@@ -287,43 +309,52 @@ export function assignStableViewIds(root: unknown): Map<string, string> {
   };
   compute(rootNode);
 
-  // Pass 2a (pre-order): count, per content hash, how many nodes this pass will
-  // actually rewrite. A hash rewritten more than once is a content-identical
-  // duplicate group; one rewritten exactly once is unique content. Only
+  // Pass 2a (pre-order): count, per content hash and IME-window namespace, how
+  // many nodes this pass will actually rewrite. A hash rewritten more than once
+  // in its namespace is a content-identical duplicate group; one rewritten
+  // exactly once there is unique content. IME nodes use an independent counter
+  // so keyboard capture churn cannot change an app node's ordinal (#7311). Only
   // rewritten (generated-view-id) nodes count — a resource-id-backed node that
   // happens to share a content hash is left untouched and never competes for
   // the bare form.
-  const rewrittenCounts = new Map<string, number>();
-  const countRewritten = (node: Record<string, unknown>): void => {
+  const rewrittenCounts = new Map<string, [outsideIme: number, insideIme: number]>();
+  const countRewritten = (node: Record<string, unknown>, parentIsInImeWindow: boolean): void => {
+    const nodeIsInImeWindow = isInImeWindow(node, parentIsInImeWindow);
     const attributes = attributesOf(node);
     const viewId = attributeValue(attributes, "view-id");
     if (typeof viewId === "string" && GENERATED_VIEW_ID_PATTERN.test(viewId)) {
       const hash = contentHash.get(node)!;
-      rewrittenCounts.set(hash, (rewrittenCounts.get(hash) ?? 0) + 1);
+      const counts = rewrittenCounts.get(hash) ?? [0, 0];
+      counts[nodeIsInImeWindow ? 1 : 0] += 1;
+      rewrittenCounts.set(hash, counts);
     }
     for (const child of toChildArray(node)) {
-      countRewritten(child);
+      countRewritten(child, nodeIsInImeWindow);
     }
   };
-  countRewritten(rootNode);
+  countRewritten(rootNode, false);
 
-  // Pass 2b (pre-order): assign ids. A hash that occurs once gets the bare
-  // `s-<hash>` form; a content-identical duplicate group gets a 1-based
-  // document-order ordinal on EVERY member — including the first (`-1`) — so
-  // the bare form is reserved for unique content and can never be silently
-  // reassigned to a since-removed peer's suffixed id (issue #6229). Ordinals
-  // stay unique within the capture, preserving the diff layer's encounter-order
-  // re-pair of duplicates.
-  const occurrences = new Map<string, number>();
+  // Pass 2b (pre-order): assign ids. A hash that occurs once in its app/IME
+  // namespace gets the bare `s-<hash>` form; a content-identical duplicate
+  // group gets a 1-based document-order ordinal on EVERY member — including the
+  // first (`-1`) — so the bare form is reserved for unique content and can
+  // never be silently reassigned to a since-removed peer's suffixed id (issue
+  // #6229). Independent IME counters keep keyboard-capture changes from
+  // perturbing app ordinals (#7311).
+  const occurrences = new Map<string, [outsideIme: number, insideIme: number]>();
   const rewrittenViewIds = new Map<string, string>();
-  const assign = (node: Record<string, unknown>): void => {
+  const assign = (node: Record<string, unknown>, parentIsInImeWindow: boolean): void => {
+    const nodeIsInImeWindow = isInImeWindow(node, parentIsInImeWindow);
     const attributes = attributesOf(node);
     const viewId = attributeValue(attributes, "view-id");
     if (typeof viewId === "string" && GENERATED_VIEW_ID_PATTERN.test(viewId)) {
       const hash = contentHash.get(node)!;
-      const seen = (occurrences.get(hash) ?? 0) + 1;
-      occurrences.set(hash, seen);
-      const isDuplicateGroup = (rewrittenCounts.get(hash) ?? 0) > 1;
+      const counts = occurrences.get(hash) ?? [0, 0];
+      const namespace = nodeIsInImeWindow ? 1 : 0;
+      counts[namespace] += 1;
+      occurrences.set(hash, counts);
+      const seen = counts[namespace];
+      const isDuplicateGroup = (rewrittenCounts.get(hash)?.[namespace] ?? 0) > 1;
       const stableViewId = isDuplicateGroup
         ? `${STABLE_VIEW_ID_PREFIX}${hash}-${seen}`
         : `${STABLE_VIEW_ID_PREFIX}${hash}`;
@@ -331,10 +362,10 @@ export function assignStableViewIds(root: unknown): Map<string, string> {
       rewrittenViewIds.set(viewId, stableViewId);
     }
     for (const child of toChildArray(node)) {
-      assign(child);
+      assign(child, nodeIsInImeWindow);
     }
   };
-  assign(rootNode);
+  assign(rootNode, false);
 
   // Keep occlusion links pointing at the final emitted hierarchy ids. The
   // runner fills occludedByViewId from the occluding node's pre-ingest view-id;

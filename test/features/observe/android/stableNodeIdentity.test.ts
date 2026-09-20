@@ -213,6 +213,89 @@ describe("assignStableViewIds (#3228)", () => {
     expect(ids[2]).toBe(`${base}-3`);
   });
 
+  test("distinct child accessibility labels give Android icon-button containers distinct ids (#7311)", () => {
+    // Contacts puts these labels on a child ImageView, not the clickable
+    // container. The containers otherwise have the same empty shape.
+    const labels = [
+      "Add photo",
+      "Delete",
+      "Add phone",
+      "Save",
+      "More options",
+      "Add email",
+      "Add address",
+      "Add event",
+      "Add note",
+      "Add website",
+    ];
+    const root = node(
+      { "view-id": generatedUuid("root") },
+      labels.map((label) =>
+        node({ "view-id": generatedUuid(`button-${label}`), class: "android.widget.ImageButton" }, [
+          node({
+            "view-id": generatedUuid(`icon-${label}`),
+            class: "android.widget.ImageView",
+            "content-desc": label,
+          }),
+        ]),
+      ),
+    );
+
+    assignStableViewIds(root);
+
+    const ids = (root.node as Record<string, unknown>[]).map(
+      (button) => button["view-id"] as string,
+    );
+    expect(new Set(ids).size).toBe(labels.length);
+    for (const id of ids) {
+      expect(id).toMatch(new RegExp(`^${STABLE_VIEW_ID_PREFIX}[0-9a-f]{16}$`));
+    }
+  });
+
+  test("IME subtree presence does not change app duplicate ordinals (#7311)", () => {
+    const appDuplicate = (seed: string) =>
+      node({
+        "view-id": generatedUuid(seed),
+        class: "android.widget.FrameLayout",
+        "content-desc": "Unlabeled action",
+      });
+    const imeSubtree = (childCount: number) =>
+      node(
+        {
+          "view-id": generatedUuid("ime-root"),
+          class: "android.inputmethodservice.InputMethodService",
+          extras: { "automobile:imePackage": "some.keyboard.package" },
+        },
+        // These intentionally share the app duplicates' content hash. Their
+        // only separation is the inherited IME-window namespace.
+        Array.from({ length: childCount }, (_, index) => appDuplicate(`ime-child-${index}`)),
+      );
+    const capture = (imeChildCount?: number) => {
+      const children = [
+        appDuplicate("app-one"),
+        appDuplicate("app-two"),
+        appDuplicate("app-three"),
+      ];
+      if (imeChildCount !== undefined) {
+        children.splice(1, 0, imeSubtree(imeChildCount));
+      }
+      const root = node({ "view-id": generatedUuid("root") }, children);
+      assignStableViewIds(root);
+      return (root.node as Record<string, unknown>[])
+        .filter((child) => child["content-desc"] === "Unlabeled action")
+        .map((child) => child["view-id"] as string);
+    };
+
+    const withoutIme = capture();
+    expect(withoutIme).toEqual([
+      expect.stringMatching(new RegExp(`^${STABLE_VIEW_ID_PREFIX}[0-9a-f]{16}-1$`)),
+      expect.stringMatching(new RegExp(`^${STABLE_VIEW_ID_PREFIX}[0-9a-f]{16}-2$`)),
+      expect.stringMatching(new RegExp(`^${STABLE_VIEW_ID_PREFIX}[0-9a-f]{16}-3$`)),
+    ]);
+    expect(capture(1)).toEqual(withoutIme);
+    expect(capture(10)).toEqual(withoutIme);
+  });
+
   test("a content hash that occurs exactly once still gets the bare, un-suffixed id (#6229)", () => {
     // The bare form must remain the invariant for unique content — only
     // duplicate groups are ordinal-suffixed.

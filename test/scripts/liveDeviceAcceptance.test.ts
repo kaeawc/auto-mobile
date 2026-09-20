@@ -12,11 +12,17 @@ import {
   defaultWriteEvidence,
   ensureFreshAcceptanceDaemon,
   parseArgs,
+  parseCoordinateAcceptanceArgs,
   recordOwnershipManifest,
+  runCoordinateOrientationCheck,
   runAcceptanceMatrix,
+  runTapAtMultiDeviceRefusalCheck,
+  runTapAtReliabilityLoop,
   normalizeMcpTransportDiagnostic,
   verifyEvidenceFile,
   type AcceptanceArgs,
+  type CoordinateAcceptanceArgs,
+  type CoordinateAcceptanceDependencies,
   type DaemonSessionClient,
   type MatrixDependencies,
   type McpSessionClient,
@@ -2248,5 +2254,314 @@ describe("live device acceptance harness", () => {
         "--test-owned-devices",
       ]),
     ).toThrow("Missing required --operator-key-file");
+  });
+});
+
+function coordinateArgs(
+  platform: "android" | "ios",
+  overrides: Partial<CoordinateAcceptanceArgs> = {},
+): CoordinateAcceptanceArgs {
+  return {
+    platform,
+    sessionUuid: `${platform}-session`,
+    timeoutMs: 10_000,
+    iterations: 20,
+    expectedDeviceId: `${platform}-device`,
+    ...overrides,
+  };
+}
+
+function coordinateDependencies(
+  client: McpSessionClient,
+  readPngDimensions: CoordinateAcceptanceDependencies["readPngDimensions"] = async () => ({
+    width: 1080,
+    height: 2400,
+  }),
+): CoordinateAcceptanceDependencies {
+  return {
+    timer: new FakeTimer(),
+    createMcpClient: async () => client,
+    readPngDimensions,
+  };
+}
+
+function success(payload: Record<string, unknown>): { structuredContent: Record<string, unknown> } {
+  return { structuredContent: { success: true, ...payload } };
+}
+
+describe("additive absolute-coordinate live-device acceptance gates", () => {
+  test("runs every reliability repetition in portrait and landscape", async () => {
+    const rotations: string[] = [];
+    let orientation: "portrait" | "landscape" = "portrait";
+    let taps = 0;
+    const client: McpSessionClient = {
+      async callTool(name, arguments_) {
+        if (name === "rotate") {
+          orientation = arguments_.orientation as "portrait" | "landscape";
+          rotations.push(orientation);
+          return success({});
+        }
+        if (name === "observe") {
+          return success({
+            screenSize:
+              orientation === "portrait"
+                ? { width: 1080, height: 2400 }
+                : { width: 2400, height: 1080 },
+          });
+        }
+        if (name === "tapAt") {
+          taps += 1;
+          return success({ x: arguments_.x, y: arguments_.y, deviceId: "android-device" });
+        }
+        throw new Error(`Unexpected tool ${name}`);
+      },
+      async close() {},
+    };
+
+    const result = await runTapAtReliabilityLoop(
+      coordinateArgs("android"),
+      coordinateDependencies(client),
+    );
+
+    expect(result).toEqual({
+      iterationsPerOrientation: 20,
+      passes: 40,
+      failures: 0,
+      orientations: ["portrait", "landscape"],
+    });
+    expect(rotations).toEqual(["portrait", "landscape"]);
+    expect(taps).toBe(40);
+  });
+
+  test("reports the failed reliability repetition and orientation", async () => {
+    let orientation: "portrait" | "landscape" = "portrait";
+    let landscapeTaps = 0;
+    const client: McpSessionClient = {
+      async callTool(name, arguments_) {
+        if (name === "rotate") {
+          orientation = arguments_.orientation as "portrait" | "landscape";
+          return success({});
+        }
+        if (name === "observe") {
+          return success({
+            screenSize:
+              orientation === "portrait"
+                ? { width: 1080, height: 2400 }
+                : { width: 2400, height: 1080 },
+          });
+        }
+        if (name === "tapAt" && orientation === "landscape") {
+          landscapeTaps += 1;
+          if (landscapeTaps === 3) {
+            return {
+              isError: true,
+              structuredContent: { error: "stale frame context after retry" },
+            };
+          }
+        }
+        if (name === "tapAt") {
+          return success({ x: arguments_.x, y: arguments_.y, deviceId: "android-device" });
+        }
+        throw new Error(`Unexpected tool ${name}`);
+      },
+      async close() {},
+    };
+
+    await expect(
+      runTapAtReliabilityLoop(coordinateArgs("android"), coordinateDependencies(client)),
+    ).rejects.toThrow(
+      "landscape repetition 3/20; passes=22; failures=1; diagnostic=tapAt returned an MCP error: stale frame context after retry",
+    );
+  });
+
+  test("rejects a false multi-device success and accepts an explicit target for Android and iOS", async () => {
+    for (const platform of ["android", "ios"] as const) {
+      let unqualified = true;
+      const client: McpSessionClient = {
+        async callTool(name, arguments_) {
+          if (name === "listDevices") {
+            return success({ devices: [{}, {}] });
+          }
+          if (name === "observe") {
+            return success({ screenSize: { width: 1080, height: 2400 } });
+          }
+          if (name === "tapAt") {
+            if (unqualified) {
+              unqualified = false;
+              return success({ x: arguments_.x, y: arguments_.y, deviceId: "wrong-first-device" });
+            }
+            return success({ x: arguments_.x, y: arguments_.y, deviceId: `${platform}-device` });
+          }
+          throw new Error(`Unexpected tool ${name}`);
+        },
+        async close() {},
+      };
+      await expect(
+        runTapAtMultiDeviceRefusalCheck(coordinateArgs(platform), coordinateDependencies(client)),
+      ).rejects.toThrow(`tapAt accepted an unqualified call with 2 booted ${platform} devices`);
+    }
+
+    for (const platform of ["android", "ios"] as const) {
+      const client: McpSessionClient = {
+        async callTool(name, arguments_) {
+          if (name === "listDevices") {
+            return success({ devices: [{}, {}] });
+          }
+          if (name === "observe") {
+            return success({ screenSize: { width: 1080, height: 2400 } });
+          }
+          if (name === "tapAt" && arguments_.sessionUuid === undefined) {
+            return {
+              isError: true,
+              structuredContent: { error: `Multiple ${platform} devices detected` },
+            };
+          }
+          if (name === "tapAt") {
+            return success({ x: arguments_.x, y: arguments_.y, deviceId: `${platform}-device` });
+          }
+          throw new Error(`Unexpected tool ${name}`);
+        },
+        async close() {},
+      };
+
+      await expect(
+        runTapAtMultiDeviceRefusalCheck(coordinateArgs(platform), coordinateDependencies(client)),
+      ).resolves.toEqual({
+        platform,
+        bootedDeviceCount: 2,
+        targetedDeviceId: `${platform}-device`,
+      });
+    }
+  });
+
+  test("fails a targeted multi-device result that omits deviceId", async () => {
+    const client: McpSessionClient = {
+      async callTool(name, arguments_) {
+        if (name === "listDevices") {
+          return success({ devices: [{}, {}] });
+        }
+        if (name === "observe") {
+          return success({ screenSize: { width: 1080, height: 2400 } });
+        }
+        if (name === "tapAt" && arguments_.sessionUuid === undefined) {
+          return {
+            isError: true,
+            structuredContent: { error: "Multiple Android devices detected" },
+          };
+        }
+        if (name === "tapAt") {
+          return success({ x: arguments_.x, y: arguments_.y });
+        }
+        throw new Error(`Unexpected tool ${name}`);
+      },
+      async close() {},
+    };
+
+    await expect(
+      runTapAtMultiDeviceRefusalCheck(coordinateArgs("android"), coordinateDependencies(client)),
+    ).rejects.toThrow("tapAt targeted response.deviceId must be a non-empty string");
+  });
+
+  test("enforces the documented Android and iOS screenshot orientation contracts", async () => {
+    for (const platform of ["android", "ios"] as const) {
+      let orientation: "portrait" | "landscape" = "portrait";
+      const client: McpSessionClient = {
+        async callTool(name, arguments_) {
+          if (name === "rotate") {
+            orientation = arguments_.orientation as "portrait" | "landscape";
+            return success({});
+          }
+          if (name === "observe") {
+            return success({
+              screenSize:
+                orientation === "portrait"
+                  ? { width: 1080, height: 2400 }
+                  : { width: 2400, height: 1080 },
+            });
+          }
+          if (name === "captureScreenshot") {
+            return success({
+              path: `${platform}-${orientation}.png`,
+              deviceId: `${platform}-device`,
+            });
+          }
+          if (name === "tapAt") {
+            return success({ x: arguments_.x, y: arguments_.y, deviceId: `${platform}-device` });
+          }
+          throw new Error(`Unexpected tool ${name}`);
+        },
+        async close() {},
+      };
+      const result = await runCoordinateOrientationCheck(
+        coordinateArgs(platform),
+        coordinateDependencies(client, async (path) => {
+          if (platform === "ios") {
+            return { width: 1179, height: 2556 };
+          }
+          return path.includes("portrait")
+            ? { width: 1080, height: 2400 }
+            : { width: 2400, height: 1080 };
+        }),
+      );
+      expect(result.landscape).toEqual({ width: 2400, height: 1080 });
+    }
+  });
+
+  test("fails a raster fixture that violates each platform orientation contract", async () => {
+    for (const platform of ["android", "ios"] as const) {
+      let orientation: "portrait" | "landscape" = "portrait";
+      const client: McpSessionClient = {
+        async callTool(name, arguments_) {
+          if (name === "rotate") {
+            orientation = arguments_.orientation as "portrait" | "landscape";
+            return success({});
+          }
+          if (name === "observe") {
+            return success({
+              screenSize:
+                orientation === "portrait"
+                  ? { width: 1080, height: 2400 }
+                  : { width: 2400, height: 1080 },
+            });
+          }
+          if (name === "captureScreenshot") {
+            return success({ path: `${platform}-${orientation}.png` });
+          }
+          if (name === "tapAt") {
+            return success({ x: arguments_.x, y: arguments_.y });
+          }
+          throw new Error(`Unexpected tool ${name}`);
+        },
+        async close() {},
+      };
+      await expect(
+        runCoordinateOrientationCheck(
+          coordinateArgs(platform, { expectedDeviceId: undefined }),
+          coordinateDependencies(client, async () =>
+            platform === "android"
+              ? { width: 1080, height: 2400 }
+              : orientation === "portrait"
+                ? { width: 1179, height: 2556 }
+                : { width: 2556, height: 1179 },
+          ),
+        ),
+      ).rejects.toThrow(
+        platform === "android" ? "Android screenshot raster" : "iOS Simulator framebuffer",
+      );
+    }
+  });
+
+  test("parses a direct additive gate without changing matrix arguments", () => {
+    expect(() =>
+      parseCoordinateAcceptanceArgs([
+        "--reliability-loop",
+        "--platform",
+        "android",
+        "--session-uuid",
+        "session",
+        "--entrypoint",
+        "missing-entrypoint.js",
+      ]),
+    ).toThrow("Cannot compute a build identity");
   });
 });

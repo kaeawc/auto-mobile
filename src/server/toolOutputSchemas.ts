@@ -1180,3 +1180,12 @@ export const observeToolResultSchema = z.union([
   toolOutputArtifactMetadataSchema,
 ]);
 requireObservationJoinKeysOnFlattenedUnion(observeToolResultSchema);
+
+export const captureScreenshotResultSchema = z.object({
+  success: z.boolean(),
+  deviceId: z.string(),
+  platform: z.enum(["android", "ios"]),
+  path: z.string(),
+  screenshotFormat: z.literal("png"),
+  screenshotMimeType: z.literal("image/png"),
+});

@@ -199,7 +199,7 @@ test("does not return a reused UUID released during activity persistence", async
   });
 });
 
-test("same-client reuse cannot bypass the fresh-start ownership guard", async () => {
+test("same MCP client reuses its live autolock after a fresh start", async () => {
   await withAutolock(async () => {
     const h = await harness();
     try {
@@ -211,7 +211,30 @@ test("same-client reuse cannot bypass the fresh-start ownership guard", async ()
           isRunning: false,
           source: "local",
         }),
-      ).rejects.toThrow("Freshly started device");
+      ).resolves.toBe(first);
+      expect(h.pool.getDevice("emulator-5554")?.sessionId).toBe(first);
+      expect(h.pool.getDevice("emulator-5554")?.assignmentCount).toBe(1);
+    } finally {
+      await h.close();
+    }
+  });
+});
+
+test("fresh-start autolock still rejects a different MCP session with the reservation race", async () => {
+  await withAutolock(async () => {
+    const h = await harness();
+    try {
+      const first = (await h.pool.autolockDevice("emulator-5554", "android", "agent-A"))!;
+      await expect(
+        h.pool.autolockDevice("emulator-5554", "android", "agent-B", {
+          name: "Agent A AVD",
+          platform: "android",
+          isRunning: false,
+          source: "local",
+        }),
+      ).rejects.toThrow(
+        `Freshly started device 'emulator-5554' was assigned to session ${first} before its owning session could reserve it.`,
+      );
       expect(h.pool.getDevice("emulator-5554")?.sessionId).toBe(first);
     } finally {
       await h.close();

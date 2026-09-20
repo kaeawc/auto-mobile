@@ -146,7 +146,7 @@ describe("MCP Booted Device Resources", () => {
       expect.objectContaining({
         apiLevel: 36,
         osVersion: "16",
-        display: { width: 1080, height: 2400, density: 420 },
+        display: { width: 1080, height: 2400, density: 420, units: "physical-pixels" },
         formFactor: "phone",
       }),
     ]);

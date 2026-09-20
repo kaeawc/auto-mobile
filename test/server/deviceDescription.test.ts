@@ -120,6 +120,22 @@ const iosImage: DeviceDescriptionInput = {
 };
 
 describe("device description projections", () => {
+  test.each([
+    [androidImage, { width: 1080, height: 2424, density: 420 }],
+    [
+      {
+        ...iosImage,
+        image: { ...iosImage.image, screenWidth: 1206, screenHeight: 2622, screenDensity: 460 },
+      },
+      { width: 1206, height: 2622, density: 460 },
+    ],
+  ] as const)("labels %s display dimensions as physical pixels", (input, expectedDisplay) => {
+    const display = describeDevice(input).display;
+
+    expect(display).toMatchObject(expectedDisplay);
+    expect(display.units).toBe("physical-pixels");
+  });
+
   test.each([androidImage, iosImage])("projects one canonical record for %s", (input) => {
     const canonical = describeDevice(input);
     for (const projection of [
@@ -519,6 +535,7 @@ describe("device description projections", () => {
       width: 1206,
       height: 2622,
       density: 460,
+      units: "physical-pixels",
     });
     expect(description.formFactor).toBe("phone");
     expect(description.capabilityInventory?.capabilities).toEqual([
@@ -684,6 +701,7 @@ describe("device description projections", () => {
       width: null,
       height: null,
       density: null,
+      units: "physical-pixels",
     });
   });
 
@@ -769,7 +787,12 @@ describe("device description projections", () => {
       ]) {
         expect(keyShape(projection)).toEqual(expectedShape);
         expect(Object.keys(projection.identity)).toEqual(["stableId"]);
-        expect(Object.keys(projection.display).sort()).toEqual(["density", "height", "width"]);
+        expect(Object.keys(projection.display).sort()).toEqual([
+          "density",
+          "height",
+          "units",
+          "width",
+        ]);
         for (const removed of [
           "lifecycle",
           "readiness",

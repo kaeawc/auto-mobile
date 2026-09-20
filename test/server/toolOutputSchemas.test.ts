@@ -7,6 +7,7 @@ import {
   observationSummarySchema,
   observeDiffSchema,
   observeResultSchema,
+  screenSizeSchema,
   tapOnResultSchema,
   toolOutputArtifactMetadataSchema,
   viewHierarchyResultSchema,
@@ -61,6 +62,28 @@ test("truncationReasons descriptions distinguish skeleton completeness from diff
   for (const [schema, expectedDescription] of descriptions) {
     expect(schema.shape.truncationReasons.description).toBe(expectedDescription);
   }
+});
+
+describe("screenSizeSchema coordinate units (#7371)", () => {
+  test("accepts the shared inset-unit vocabulary without changing dimensions", () => {
+    const dimensions = { width: 393, height: 852 };
+
+    expect(screenSizeSchema.parse({ ...dimensions, units: "points" })).toEqual({
+      ...dimensions,
+      units: "points",
+    });
+    expect(screenSizeSchema.parse({ ...dimensions, units: "physical-pixels" })).toEqual({
+      ...dimensions,
+      units: "physical-pixels",
+    });
+    expect(screenSizeSchema.parse(dimensions)).toEqual(dimensions);
+  });
+
+  test("rejects an unknown coordinate-unit spelling", () => {
+    expect(() =>
+      screenSizeSchema.parse({ width: 393, height: 852, units: "logical-points" }),
+    ).toThrow();
+  });
 });
 
 /**

@@ -6,6 +6,7 @@ import type { ExactProvisionedDevice } from "../utils/exactDeviceProvisioning";
 import type { StableConfiguredDeviceImage } from "../utils/configuredDeviceInventory";
 import { iosSimulatorCapabilityInventory } from "../features/device-control/virtualDeviceCapabilities";
 import type { FormFactor } from "../models/DeviceMatchCriteria";
+import type { ObservationInsets } from "../models/ObservationInsets";
 import { formFactorFrom } from "../models/formFactor";
 
 export type DevicePlatform = "android" | "ios";
@@ -50,6 +51,7 @@ export interface DeviceDescription {
     width: number | null;
     height: number | null;
     density: number | null;
+    units: Extract<ObservationInsets["units"], "physical-pixels">;
   };
   capabilityInventory: CapabilityInventory | null;
   image: {
@@ -404,6 +406,7 @@ function displayFrom(
     width: device.screenWidth ?? null,
     height: device.screenHeight ?? null,
     density: device.screenDensity ?? null,
+    units: "physical-pixels",
   };
 }
 
@@ -613,6 +616,7 @@ export const deviceDescriptionSchema = z
         width: nullableNumber,
         height: nullableNumber,
         density: nullableNumber,
+        units: z.literal("physical-pixels"),
       })
       .strict(),
     capabilityInventory: z

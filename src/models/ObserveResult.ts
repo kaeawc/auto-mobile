@@ -20,6 +20,11 @@ import type { LayoutWarnings, ObservationInsets } from "./ObservationInsets";
 import type { ObserveScopeMetadata } from "./ObserveScope";
 import type { SemanticLink } from "./SemanticLink";
 
+/** Output-only screen dimensions with an optional coordinate-unit marker. */
+export interface ScreenSizeWithUnits extends ScreenSize {
+  units?: ObservationInsets["units"];
+}
+
 export interface PredictionTarget {
   text?: string;
   elementId?: string;
@@ -187,8 +192,8 @@ export interface ObserveResult {
    */
   updatedAt: string | number;
 
-  /** Screen dimensions */
-  screenSize: ScreenSize;
+  /** Screen dimensions in the coordinate space identified by `units` when present. */
+  screenSize: ScreenSizeWithUnits;
 
   /** System UI insets */
   systemInsets: SystemInsets;

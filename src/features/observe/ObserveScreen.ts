@@ -758,6 +758,12 @@ export class RealObserveScreen implements ObserveScreen {
 
       const postCaptureForeground = await this.reconcileActiveWindowAttribution(result, signal);
 
+      // Hierarchy collection and accepted recaptures each replace `screenSize`.
+      // Stamp its output-only unit marker after all of them, before the result is
+      // cached, so every served and cached observation uses one platform source
+      // of truth without changing the platform-native numeric coordinates.
+      this.stampScreenSizeUnits(result);
+
       // Uncapped here; the output boundary (sanitizeObserveResult / the observe
       // served path in finalizeToolResponse) caps AFTER any scope narrowing so an
       // in-scope warning is never lost to a cap taken against the full tree (#5074).
@@ -902,6 +908,7 @@ export class RealObserveScreen implements ObserveScreen {
         `Observation failed: ${errorMessage}`,
       );
       const fallback = this.createBaseResult();
+      this.stampScreenSizeUnits(fallback);
       appendObserveError(fallback, {
         phase: "critical",
         message: "Observation failed due to device access error",
@@ -1024,6 +1031,14 @@ export class RealObserveScreen implements ObserveScreen {
       screenSize: { width: 0, height: 0 },
       systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
       insets: { available: false, source: "unavailable", units: "unknown" },
+    };
+  }
+
+  /** Attach the output coordinate unit without changing the captured dimensions. */
+  private stampScreenSizeUnits(result: ObserveResult): void {
+    result.screenSize = {
+      ...result.screenSize,
+      units: this.device.platform === "ios" ? "points" : "physical-pixels",
     };
   }
 

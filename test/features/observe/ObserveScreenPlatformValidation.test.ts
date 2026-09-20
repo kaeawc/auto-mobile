@@ -77,7 +77,7 @@ describe("ObserveScreen.execute cross-platform hierarchy rejection", () => {
     // The iOS package must not leak through activeWindow.
     expect(result.activeWindow).toBeUndefined();
     // The iOS logical screen size (390x844) must not survive to mislead tap scaling.
-    expect(result.screenSize).toEqual({ width: 0, height: 0 });
+    expect(result.screenSize).toEqual({ width: 0, height: 0, units: "physical-pixels" });
     expect(result.error).toContain("iOS hierarchy for Android device");
   });
 

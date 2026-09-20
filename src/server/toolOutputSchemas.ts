@@ -231,6 +231,7 @@ const tapEffectSchema = z
 export const screenSizeSchema = z.object({
   width: z.number().int(),
   height: z.number().int(),
+  units: z.enum(["physical-pixels", "points", "unknown"]).optional(),
 });
 
 export const systemInsetsSchema = z.object({
@@ -954,7 +955,8 @@ export const observeDiffSchema = z
       .optional()
       .describe(
         "Same platform-native coordinate space as a full observation's `screenSize` " +
-          "and hierarchy/skeleton bounds. Populated from the post-action observation, " +
+          "and hierarchy/skeleton bounds; `units` identifies that space when present. " +
+          "Populated from the post-action observation, " +
           "not by `diffObserveResult` itself.",
       ),
     truncationReasons: z

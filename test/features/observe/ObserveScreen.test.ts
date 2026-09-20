@@ -137,6 +137,8 @@ describe("ObserveScreen", function () {
 
         const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
 
+        expect(result.screenSize).toMatchObject({ width: 1080, height: 1920 });
+        expect(result.screenSize.units).toBe("physical-pixels");
         expect(result.elements?.clickable).toHaveLength(1);
         expect(result.elements?.clickable[0]["resource-id"]).toBe("com.example:id/action");
         expect(result.elements?.text).toHaveLength(1);
@@ -441,6 +443,8 @@ describe("ObserveScreen", function () {
 
         const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
 
+        expect(result.screenSize).toMatchObject({ width: 402, height: 874 });
+        expect(result.screenSize.units).toBe("points");
         expect(result.screenIdentity?.platform).toBe("ios");
         expect(result.screenIdentity?.source).toBe("heuristic");
         expect(result.screenIdentity?.confidence).toBe("high");

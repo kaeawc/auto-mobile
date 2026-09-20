@@ -278,14 +278,32 @@ describe("tapOnHandler (registered handler wiring)", () => {
         }),
     }));
 
-    const response = await tapOnHandler(fakeDevice, args);
+    const response = await tapOnHandler(fakeDevice, { ...args, ensureChecked: true });
     const message = parseMessage(response);
-    expect(message).toBe("Skipped tap: toggle already checked state matches ensureChecked");
-    expect(message).not.toContain("Tapped on element");
+    expect(message).toContain("already");
+    expect(message).toContain("no tap");
+    expect(message).not.toContain("Tapped");
     expect(getStructuredField(response, "skipped")).toBe("already-checked");
     expect(tapOnResultSchema.parse({ success: true, skipped: "already-checked" }).skipped).toBe(
       "already-checked",
     );
+  });
+
+  test("a verified ensureChecked tap reports the checked-state transition", async () => {
+    setTapOnElementFactory(() => ({
+      execute: async () =>
+        fakeResult({
+          success: true,
+          element: { checked: "false", bounds: { left: 0, top: 0, right: 0, bottom: 0 } },
+          selectedElement: selected({ text: "Wi-Fi" }),
+        }),
+    }));
+
+    const response = await tapOnHandler(fakeDevice, { ...args, ensureChecked: true });
+    const message = parseMessage(response);
+    expect(message).toContain("was unchecked");
+    expect(message).toContain("now checked");
+    expect(message).toContain("(verified)");
   });
 });
 
@@ -294,16 +312,18 @@ describe("buildInputTextResultMessage", () => {
     expect(
       buildInputTextResultMessage({
         success: true,
+        text: "John",
         matchedId: "com.test:id/first_name",
         matchedText: "First name",
       }),
-    ).toBe('Input text into element (id=com.test:id/first_name text="First name")');
+    ).toBe('Typed "John" into id=com.test:id/first_name text="First name"');
   });
 
   test("reports selector failures as failures", () => {
     expect(
       buildInputTextResultMessage({
         success: false,
+        text: "John",
         error: "Element not found with provided text 'Missing'",
       }),
     ).toBe("Failed to input text: Element not found with provided text 'Missing'");

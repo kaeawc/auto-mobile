@@ -79,6 +79,7 @@ import {
   responseShapeControlFields,
 } from "./toolSchemaHelpers";
 import { serverConfig } from "../utils/ServerConfig";
+import { isTruthyFlag } from "../utils/elementProperties";
 import {
   createElementIdTextSelectorSchema,
   elementContainerSchema,
@@ -1265,7 +1266,7 @@ export async function inputTextHandler(
 }
 
 export function buildInputTextResultMessage(
-  result: Pick<SendTextResult, "success" | "error" | "matchedId" | "matchedText">,
+  result: Pick<SendTextResult, "success" | "error" | "matchedId" | "matchedText" | "text">,
 ): string {
   if (!result.success) {
     return `Failed to input text: ${result.error ?? "unknown error"}`;
@@ -1278,7 +1279,8 @@ export function buildInputTextResultMessage(
   if (result.matchedText) {
     identity.push(`text=${JSON.stringify(result.matchedText)}`);
   }
-  return identity.length > 0 ? `Input text into element (${identity.join(" ")})` : "Input text";
+  const typed = `Typed ${JSON.stringify(result.text)}`;
+  return identity.length > 0 ? `${typed} into ${identity.join(" ")}` : typed;
 }
 
 /**
@@ -1295,6 +1297,15 @@ export function buildTapOnResultMessage(
   searchSummary: string | undefined,
   activatedSubtext?: { text: string; occurrence: number },
 ): string {
+  const details = buildTapOnResultDetails(selectedElement, searchSummary, activatedSubtext);
+  return details.length > 0 ? `Tapped on element (${details.join("; ")})` : "Tapped on element";
+}
+
+function buildTapOnResultDetails(
+  selectedElement: TapOnSelectedElement | undefined,
+  searchSummary: string | undefined,
+  activatedSubtext?: { text: string; occurrence: number },
+): string[] {
   const details: string[] = [];
   if (selectedElement) {
     // Include every available identity field, not just the resource id: Android
@@ -1330,7 +1341,7 @@ export function buildTapOnResultMessage(
   if (searchSummary) {
     details.push(searchSummary);
   }
-  return details.length > 0 ? `Tapped on element (${details.join("; ")})` : "Tapped on element";
+  return details;
 }
 
 // Injection seam for the tapOn handler (mirrors the pinchOn factory seam above).
@@ -1615,11 +1626,34 @@ function buildTapOnSearchSummary(
 function buildTapOnSuccessMessage(
   result: TapOnElementResult,
   searchSummary: string | undefined,
+  ensureChecked: boolean | undefined,
 ): string {
+  const label = tapOnElementLabel(result);
   if (result.skipped === "already-checked") {
-    return `Skipped tap: toggle already checked state matches ensureChecked${searchSummary ? ` (${searchSummary})` : ""}`;
+    const state = ensureChecked ? "checked" : "unchecked";
+    return `${label} already ${state}, no tap${searchSummary ? ` (${searchSummary})` : ""}`;
+  }
+  if (ensureChecked !== undefined && !result.error) {
+    const beforeState = isTruthyFlag(result.element.checked) ? "checked" : "unchecked";
+    const afterState = ensureChecked ? "checked" : "unchecked";
+    const details = buildTapOnResultDetails(
+      result.selectedElement,
+      searchSummary,
+      result.activatedSubtext,
+    );
+    return `${label} was ${beforeState}, tapped, now ${afterState} (verified)${details.length > 0 ? `; ${details.join("; ")}` : ""}`;
   }
   return buildTapOnResultMessage(result.selectedElement, searchSummary, result.activatedSubtext);
+}
+
+function tapOnElementLabel(result: TapOnElementResult): string {
+  return (
+    result.selectedElement?.text ||
+    result.selectedElement?.resourceId ||
+    result.selectedElement?.testTag ||
+    result.element.text ||
+    "toggle"
+  );
 }
 
 export async function tapOnHandler(
@@ -1660,7 +1694,7 @@ export async function tapOnHandler(
   // non-empty fallback (#4183 P4). The failure keeps the search summary so the
   // user still sees how long the selector was looked for before it missed.
   const message = result.success
-    ? buildTapOnSuccessMessage(result, searchSummary)
+    ? buildTapOnSuccessMessage(result, searchSummary, args.ensureChecked)
     : `Failed to tap: ${result.error || "unknown error"}${searchSummary ? ` (${searchSummary})` : ""}`;
   const payload = { message, observation: result.observation, ...result };
   const response: StructuredToolResponse<typeof payload> & { isError?: true } =

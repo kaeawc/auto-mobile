@@ -1,8 +1,9 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import Ajv from "ajv";
 import fs from "node:fs";
 import path from "node:path";
 import { registerUtilityTools } from "../../src/server/utilityTools";
+import { DeviceState } from "../../src/features/utility/DeviceState";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -99,6 +100,36 @@ describe("device state tools", () => {
     ).not.toThrow();
     // 5g was dropped (identical to none) → no longer a valid enum value.
     expect(() => setTool!.schema.parse({ networkCondition: { profile: "5g" } })).toThrow();
+  });
+
+  test("reports supported device-state outcomes in the getDeviceState message", async () => {
+    const getState = spyOn(DeviceState.prototype, "getState").mockResolvedValue({
+      success: true,
+      deviceId: "fake",
+      platform: "android",
+      doNotDisturb: { supported: true, enabled: false },
+      connectivity: {
+        supported: true,
+        wifiEnabled: true,
+        bluetoothEnabled: true,
+        locationEnabled: true,
+        airplaneMode: false,
+      },
+    });
+    try {
+      const getTool = ToolRegistry.getTool("getDeviceState");
+      const response = await getTool!.deviceAwareHandler!(createBootedDevice("fake"), {
+        include: ["doNotDisturb", "connectivity"],
+      });
+      const payload = JSON.parse(
+        (response as { content: Array<{ text: string }> }).content[0].text,
+      );
+
+      expect(payload.message).toContain("DND off");
+      expect(payload.message).toContain("Wi-Fi on");
+    } finally {
+      getState.mockRestore();
+    }
   });
 
   // #6090: the ADVERTISED JSON schema (tool-definitions.json) must encode the same

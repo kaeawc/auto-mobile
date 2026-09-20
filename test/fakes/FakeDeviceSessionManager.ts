@@ -227,9 +227,24 @@ export class FakeDeviceSessionManager implements DeviceSessionManager {
     } else {
       // Find device for the specified platform
       if (platform === "either") {
-        selectedDevice = this.connectedDevices[0];
+        const hasAndroid = this.connectedDevices.some((device) => device.platform === "android");
+        const hasIos = this.connectedDevices.some((device) => device.platform === "ios");
+        if (hasAndroid && hasIos && !this.currentDevice) {
+          throw new ActionableError(
+            "Both Android and iOS devices are connected. For a device tool call, pass sessionUuid (from getAndroid/getApple), platform, or a bound device label on this call to select the target. Alternatively, call setActiveDevice to select an active device.",
+          );
+        }
+        const resolvedPlatform =
+          hasAndroid && hasIos ? this.currentPlatform : hasAndroid ? "android" : "ios";
+        selectedDevice =
+          this.currentPlatform === resolvedPlatform
+            ? this.currentDevice
+            : this.connectedDevices.find((device) => device.platform === resolvedPlatform);
       } else {
-        selectedDevice = this.connectedDevices.find((d) => d.platform === platform);
+        selectedDevice =
+          this.currentPlatform === platform
+            ? this.currentDevice
+            : this.connectedDevices.find((d) => d.platform === platform);
       }
 
       if (!selectedDevice) {

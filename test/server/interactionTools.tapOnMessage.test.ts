@@ -358,6 +358,8 @@ describe("tapAtHandler (registered handler wiring)", () => {
 
     expect(response.isError).toBeUndefined();
     expect(getStructuredField(response, "message")).toBe("Tapped at (12, 34)");
+    expect(getStructuredField(response, "deviceId")).toBe(fakeDevice.deviceId);
+    expect(getStructuredField(response, "platform")).toBe(fakeDevice.platform);
     expect(getStructuredField(response, "x")).toBe(12);
     expect(getStructuredField(response, "y")).toBe(34);
   });
@@ -374,6 +376,8 @@ describe("tapAtHandler (registered handler wiring)", () => {
     expect(getStructuredField(response, "message")).toBe(
       "Failed to tap at (10, 34): outside screen bounds",
     );
+    expect(getStructuredField(response, "deviceId")).toBe(fakeDevice.deviceId);
+    expect(getStructuredField(response, "platform")).toBe(fakeDevice.platform);
   });
 });
 

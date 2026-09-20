@@ -77,6 +77,7 @@ import type {
   WaitForConditionResult,
 } from "../observe/interfaces/WaitForCondition";
 import { hierarchyUpdatedAtToMillis } from "../observe/observeTimestamp";
+import { dispatchAndroidCoordinateTap, dispatchIosCoordinateTap } from "./coordinateTapDispatch";
 
 type SearchUntilStats = NonNullable<TapOnElementResult["searchUntil"]>;
 
@@ -2517,19 +2518,19 @@ export class TapOnElement extends BaseVisualChange {
   ): Promise<void> {
     throwIfAborted(signal);
     const requiresAdbInput = isAndroidDocumentsUiRow(element);
-    const result = requiresAdbInput
-      ? { success: false, error: "documentsui-row-input-recovery" }
-      : await this.accessibilityService.requestTapCoordinates(x, y, 10);
-    if (result.success) {
+    if (!requiresAdbInput) {
+      await dispatchAndroidCoordinateTap(
+        this.accessibilityService,
+        this.adb,
+        x,
+        y,
+        10,
+        undefined,
+        signal,
+      );
       return;
     }
-    if (requiresAdbInput) {
-      logger.info(`[TapOnElement] Using ADB input recovery for DocumentsUI row at (${x}, ${y})`);
-    } else {
-      logger.warn(
-        `[TapOnElement] dispatchGesture tap failed (${result.error}), falling back to ADB input`,
-      );
-    }
+    logger.info(`[TapOnElement] Using ADB input recovery for DocumentsUI row at (${x}, ${y})`);
     await this.adb.executeCommand(
       `shell input touchscreen tap ${x} ${y}`,
       undefined,
@@ -2758,23 +2759,14 @@ export class TapOnElement extends BaseVisualChange {
 
     if (action === "doubleTap") {
       // Double tap - perform two taps
-      const firstResult = await client.requestTapCoordinates(x, y, tapDuration);
-      if (!firstResult.success) {
-        throw new ActionableError(`CtrlProxy iOS tap failed: ${firstResult.error}`);
-      }
+      await dispatchIosCoordinateTap(client, x, y, tapDuration);
 
       await this.timer.sleep(200);
 
-      const secondResult = await client.requestTapCoordinates(x, y, tapDuration);
-      if (!secondResult.success) {
-        throw new ActionableError(`CtrlProxy iOS second tap failed: ${secondResult.error}`);
-      }
+      await dispatchIosCoordinateTap(client, x, y, tapDuration, undefined, "second tap");
     } else {
       // Single tap or long press
-      const result = await client.requestTapCoordinates(x, y, tapDuration);
-      if (!result.success) {
-        throw new ActionableError(`CtrlProxy iOS tap failed: ${result.error}`);
-      }
+      await dispatchIosCoordinateTap(client, x, y, tapDuration);
     }
   }
 

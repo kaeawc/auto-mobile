@@ -1824,6 +1824,7 @@
               "swipeOn",
               "systemTray",
               "tapAny",
+              "tapAt",
               "tapOn",
               "terminateApp",
               "uninstallApp",
@@ -1949,6 +1950,7 @@
               "swipeOn",
               "systemTray",
               "tapAny",
+              "tapAt",
               "tapOn",
               "terminateApp",
               "uninstallApp",
@@ -9157,6 +9159,7 @@
               "swipeOn",
               "systemTray",
               "tapAny",
+              "tapAt",
               "tapOn",
               "terminateApp",
               "uninstallApp",
@@ -11518,6 +11521,7 @@
             "swipeOn",
             "systemTray",
             "tapAny",
+            "tapAt",
             "tapOn",
             "terminateApp",
             "uninstallApp",
@@ -11609,6 +11613,7 @@
               "swipeOn",
               "systemTray",
               "tapAny",
+              "tapAt",
               "tapOn",
               "terminateApp",
               "uninstallApp",
@@ -12709,6 +12714,51 @@
         }
       },
       "additionalProperties": false
+    }
+  },
+  {
+    "name": "tapAt",
+    "description": "Tap one absolute platform-native screen coordinate visible through observe.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "x": {
+          "description": "Absolute screen x coordinate in the native observe coordinate space",
+          "type": "number"
+        },
+        "y": {
+          "description": "Absolute screen y coordinate in the native observe coordinate space",
+          "type": "number"
+        },
+        "raw": {
+          "description": "Return the raw view hierarchy instead of the compact skeleton",
+          "type": "boolean"
+        },
+        "project": {
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
+          "type": "string",
+          "enum": ["full", "skeleton"]
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["x", "y"],
+      "additionalProperties": false,
+      "description": "Tap one absolute point in the platform-native coordinate space returned by observe."
     }
   },
   {

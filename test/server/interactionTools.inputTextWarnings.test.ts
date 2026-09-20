@@ -53,7 +53,7 @@ describe("inputTextHandler (registered handler wiring, #6868)", () => {
     expect(payload.error).toBeUndefined();
     expect(payload.keyboardDismissed).toBe(false);
     expect(payload.warnings).toEqual(["keyboard dismissal failed: Failed to close keyboard"]);
-    expect(payload.message).toBe("Input text");
+    expect(payload.message).toBe('Typed "5125550147"');
   });
 
   test("a confirmed dismissal reports keyboardDismissed with no warnings", async () => {

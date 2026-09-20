@@ -1994,6 +1994,34 @@ function formatTrayListMessage(
   return `${listed} (${result.unattributedRows} shade ${rows} carry no app header and could not be correlated to ${appId})`;
 }
 
+function formatClearAllResult(
+  appId: string | undefined,
+  dismissed: number,
+  expectedCount: number | undefined,
+): { message: string; success: boolean } {
+  if (expectedCount === undefined) {
+    return {
+      message:
+        dismissed > 0
+          ? `Cleared ${dismissed} notification(s) for ${appId}`
+          : `No notifications found for ${appId}`,
+      success: true,
+    };
+  }
+  if (expectedCount === 0) {
+    return { message: `No notifications found for ${appId}`, success: true };
+  }
+  if (dismissed >= expectedCount) {
+    return { message: `Cleared ${dismissed} notification(s) for ${appId}`, success: true };
+  }
+  return {
+    message:
+      `Cleared ${dismissed} of ${expectedCount} notification(s) for ${appId}; ` +
+      `${expectedCount - dismissed} could not be matched on screen.`,
+    success: false,
+  };
+}
+
 // ============================================================================
 // Tool Registration
 // ============================================================================
@@ -2252,13 +2280,36 @@ export function registerInteractionTools() {
 
       if (args.action === "clearAll") {
         let dismissed = 0;
+        let expectedCount: number | undefined;
+        let clearMatchTexts = appMatchTexts;
+        if (device.platform === "android" && notification.appId) {
+          const listed = await listSystemTrayNotifications(
+            device,
+            notification.appId,
+            appLabel,
+            awaitTimeoutMs,
+            progress,
+            signal,
+          );
+          expectedCount = listed.notifications.length;
+          // Silent-section rows have no app header, but their dumpsys-correlated
+          // content text lets the existing row matcher isolate them (#7320).
+          clearMatchTexts = [
+            ...new Set([
+              ...appMatchTexts,
+              ...listed.notifications
+                .filter((listedNotification) => listedNotification.ownership === "dumpsys")
+                .flatMap((listedNotification) => listedNotification.texts),
+            ]),
+          ];
+        }
         const { timer } = getSystemTrayDependencies();
 
         for (let i = 0; i < SYSTEM_TRAY_CLEAR_MAX_ITERATIONS; i++) {
           const { match } = await waitForNotificationMatch(
             device,
             notification,
-            appMatchTexts,
+            clearMatchTexts,
             500,
             progress,
           );
@@ -2267,7 +2318,7 @@ export function registerInteractionTools() {
             break;
           }
 
-          const swipeTarget = resolveNotificationSwipeElement(match, notification, appMatchTexts);
+          const swipeTarget = resolveNotificationSwipeElement(match, notification, clearMatchTexts);
           if (!swipeTarget) {
             break;
           }
@@ -2285,14 +2336,17 @@ export function registerInteractionTools() {
         });
         await captureSystemTrayTerminalEvidence(device, nextObservation);
 
+        const { message, success } = formatClearAllResult(
+          notification.appId,
+          dismissed,
+          expectedCount,
+        );
         return createJSONToolResponse({
-          message:
-            dismissed > 0
-              ? `Cleared ${dismissed} notification(s) for ${notification.appId}`
-              : `No notifications found for ${notification.appId}`,
           dismissedCount: dismissed,
+          ...(expectedCount === undefined ? {} : { expectedCount }),
+          message,
           observation: nextObservation,
-          success: true,
+          success,
         });
       }
 

@@ -13538,6 +13538,24 @@
                   "required": ["isFresh"],
                   "additionalProperties": {}
                 },
+                "screenSize": {
+                  "description": "Same platform-native coordinate space as a full observation's `screenSize` and hierarchy/skeleton bounds. Populated from the post-action observation, not by `diffObserveResult` itself.",
+                  "type": "object",
+                  "properties": {
+                    "width": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "height": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": ["width", "height"],
+                  "additionalProperties": false
+                },
                 "truncationReasons": {
                   "description": "Why the captured hierarchy is incomplete (issue #6601) — the same field a full observation carries, so a client reads it the same way in both modes. In diff mode (issue #6933), any reason — host-cap (max_children[...]) or capture-fidelity (max_nodes, max_depth, cancelled) — may originate from either comparison input (baseline or current capture), so its presence means the comparison may be incomplete, not that this diff's own `skeleton`/`context` omit rows.",
                   "type": "array",

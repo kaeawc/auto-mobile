@@ -9,6 +9,7 @@ import {
 import {
   loadAndroidHomeObserve,
   loadAndroidRawTrimCandidatesObserve,
+  loadIosFractionalObserve,
   loadIosRemindersNoiseObservePair,
   measureValue,
 } from "../../../fixtures/observe/observeFixture";
@@ -115,6 +116,37 @@ describe("sanitizeObserveResult", () => {
       expect(sanitizeObserveResult(observe, COMPACT).screenIdentity).toEqual(
         observe.screenIdentity,
       );
+    });
+  });
+
+  describe("platform-native screen-coordinate contract (#7335)", () => {
+    test("full and skeleton projections preserve Android physical-pixel geometry", () => {
+      const { observe } = loadAndroidHomeObserve();
+      const full = sanitizeObserveResult(observe, { ...DROP_NONE, project: "full" });
+      const skeleton = sanitizeObserveResult(observe, { ...DROP_NONE, project: "skeleton" });
+      const root = (full.viewHierarchy!.hierarchy.node as ViewHierarchyNode[])[0];
+
+      expect(full.screenSize).toEqual({ width: 1080, height: 2400 });
+      expect(skeleton.screenSize).toEqual(full.screenSize);
+      expect(root.bounds).toEqual({ left: 0, top: 0, right: 1080, bottom: 2400 });
+      expect(Object.values(full.screenSize!).every(Number.isInteger)).toBe(true);
+    });
+
+    test("full and skeleton projections preserve iOS logical points and fractional bounds", () => {
+      const observe = loadIosFractionalObserve();
+      const full = sanitizeObserveResult(observe, { ...DROP_NONE, project: "full" });
+      const skeleton = sanitizeObserveResult(observe, { ...DROP_NONE, project: "skeleton" });
+      const root = full.viewHierarchy!.hierarchy.node as ViewHierarchyNode;
+
+      expect(full.screenSize).toEqual({ width: 393, height: 852 });
+      expect(skeleton.screenSize).toEqual(full.screenSize);
+      expect(root.bounds).toEqual({ left: 0, top: 0, right: 393, bottom: 851.6666666666666 });
+      expect((root.node as ViewHierarchyNode[])[0].bounds).toEqual({
+        left: 0,
+        top: 59.333333333333336,
+        right: 393,
+        bottom: 103.66666666666667,
+      });
     });
   });
 

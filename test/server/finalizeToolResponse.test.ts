@@ -22,6 +22,7 @@ import {
 } from "../../src/server/observationResources";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import { z } from "zod/v4";
+import { loadIosFractionalObserve } from "../fixtures/observe/observeFixture";
 
 /**
  * Build a minimal ObserveResult whose hierarchy carries trimmable attributes:
@@ -1217,6 +1218,42 @@ describe("finalizeToolResponse", () => {
         expect(obsSc[field]).toEqual(next[field]);
       }
     });
+
+    test("full and diff action observations retain native iOS point geometry (#7335)", () => {
+      const { store } = makeStore();
+      const baseline = loadIosFractionalObserve();
+      baseline.activeWindow = {
+        appId: "com.apple.reminders",
+        activityName: "",
+        layoutSeqSum: 0,
+      };
+
+      const full = finalizeToolResponse(createStructuredToolResponse(baseline), {
+        name: "observe",
+        args: { project: "full" },
+        sessionUuid: "s1",
+        baselineStore: store,
+      });
+      const fullObservation = full.structuredContent as ObserveResult;
+      const fullRoot = fullObservation.viewHierarchy!.hierarchy.node as any;
+      expect(fullObservation.screenSize).toEqual({ width: 393, height: 852 });
+      expect(fullRoot.bounds).toEqual([0, 0, 393, 851.6666666666666]);
+
+      const next = loadIosFractionalObserve();
+      next.activeWindow = baseline.activeWindow;
+      ((next.viewHierarchy!.hierarchy.node as any).node[0] as Record<string, unknown>).text =
+        "Changed title";
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: next }),
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
+      );
+
+      const diff = (finalized.structuredContent as any).observation;
+      expect(diff.isDiff).toBe(true);
+      expect(diff.screenSize).toEqual({ width: 393, height: 852 });
+      expect(JSON.parse(finalized.content[0].text).observation.screenSize).toEqual(diff.screenSize);
+    });
+
     // A diff REPLACES the projected observation, so the truncation provenance
     // the skeleton projection lifts to the top level (issue #6601) is dropped
     // with it — review thread PRRT_kwDOP-GF5M6h4v0N on PR #6912. The agent then

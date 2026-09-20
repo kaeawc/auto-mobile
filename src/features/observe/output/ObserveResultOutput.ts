@@ -682,6 +682,13 @@ export interface ObserveDiff {
    */
   freshness?: ObserveResult["freshness"];
   /**
+   * Same name/shape as a full observation's platform-native `screenSize`.
+   * Populated by the `finalizeToolResponse` call site from the post-action
+   * observation, not by {@link diffObserveResult}, so diff and full modes use
+   * the same coordinate space.
+   */
+  screenSize?: ObserveResult["screenSize"];
+  /**
    * Why the accessibility audit did not run for this capture (issue #6926).
    * Populated by the `finalizeToolResponse` call site from the post-action
    * observation, not by {@link diffObserveResult}, so clients receive the

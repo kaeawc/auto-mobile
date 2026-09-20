@@ -114,6 +114,8 @@ export interface ElementFinder {
 
   isElementFocused(element: any): boolean;
 
+  isElementKeyboardFocused(element: any): boolean;
+
   validateElementText(
     foundElement: { element: Element; text?: string },
     expectedText?: string,

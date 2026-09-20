@@ -21,6 +21,7 @@ export class FakeElementFinder implements ElementFinder {
   nextSpannables: Element[] | null = null;
   nextFocusedTextInput: any = null;
   nextIsElementFocused: boolean = false;
+  nextIsElementKeyboardFocused: boolean = false;
   nextValidateElementText: boolean = true;
 
   lastFindByTextArgs?: {
@@ -157,6 +158,10 @@ export class FakeElementFinder implements ElementFinder {
 
   isElementFocused(_element: any): boolean {
     return this.nextIsElementFocused;
+  }
+
+  isElementKeyboardFocused(_element: any): boolean {
+    return this.nextIsElementKeyboardFocused;
   }
 
   validateElementText(

@@ -825,7 +825,9 @@ export class DefaultElementFinder implements ElementFinder {
       return [mainMatches, ...windowMatches].flatMap((matches) => matches.partialMatches);
     }
 
-    const matchesByWindowOrder = [...windowMatches, mainMatches];
+    const matchesByWindowOrder = [...windowMatches, mainMatches].map((matches) =>
+      this.filterTextMatchesForSelectionIntent(matches, selectionIntent),
+    );
     const hasExactMatches = matchesByWindowOrder.some((matches) => matches.exactMatches.length > 0);
     return matchesByWindowOrder.flatMap((matches) =>
       this.rankTextMatches(
@@ -1401,6 +1403,25 @@ export class DefaultElementFinder implements ElementFinder {
       element["has-keyboard-focus"] === "true" || element["has-keyboard-focus"] === true;
 
     return focused || selected || isFocused || hasKeyboardFocus;
+  }
+
+  /**
+   * Check whether an editable element owns input focus, excluding selection state.
+   * Android control-proxy nodes expose accessibility focus with the serialized
+   * `accessibility-focused` key; accept its raw camelCase spelling as well.
+   */
+  isElementKeyboardFocused(element: any): boolean {
+    const focused = element.focused === "true" || element.focused === true;
+    const isFocused = element.isFocused === "true" || element.isFocused === true;
+    const hasKeyboardFocus =
+      element["has-keyboard-focus"] === "true" || element["has-keyboard-focus"] === true;
+    const accessibilityFocused =
+      element["accessibility-focused"] === "true" ||
+      element["accessibility-focused"] === true ||
+      element.accessibilityFocused === "true" ||
+      element.accessibilityFocused === true;
+
+    return focused || isFocused || hasKeyboardFocus || accessibilityFocused;
   }
 
   /**

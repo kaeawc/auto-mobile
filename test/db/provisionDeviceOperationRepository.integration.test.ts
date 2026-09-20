@@ -71,7 +71,11 @@ describe("ProvisionDeviceOperationRepository", () => {
     // the session the winner returned.
     expect(
       await repository.begin("operation-replay", "request-a", "attempt-3", 0, FAR_FUTURE_EXPIRY_MS),
-    ).toEqual({ started: false, inProgress: true });
+    ).toEqual({
+      started: false,
+      inProgress: true,
+      lifecycle: { state: "provisioning", phase: "admission" },
+    });
 
     // The first replay still owns the fence and can finish.
     expect(
@@ -204,6 +208,113 @@ describe("ProvisionDeviceOperationRepository", () => {
     ).toEqual({
       started: false,
       inProgress: true,
+      lifecycle: {
+        state: "provisioning",
+        phase: "admission",
+      },
+    });
+    const cleanupLifecycle = {
+      state: "cleanup_in_progress" as const,
+      phase: "cleanup",
+      device: {
+        platform: "android" as const,
+        stableId: "phone-api-36-a",
+        name: "phone-api-36-a",
+        runtimeDeviceId: "emulator-5554",
+      },
+      reason: {
+        code: "timeout",
+        message: "automation readiness exceeded the request deadline",
+        retryable: true,
+      },
+      cleanup: {
+        status: "in_progress" as const,
+        reason: "readiness_timeout",
+      },
+    };
+    await repository.recordLifecycleOutcome("operation-running", "attempt-1", cleanupLifecycle);
+    expect(
+      await repository.begin("operation-running", "request-a", "attempt-3", 6_000, 10_000),
+    ).toEqual({
+      started: false,
+      failed: true,
+      errorCode: "timeout",
+      message: "automation readiness exceeded the request deadline",
+      lifecycle: cleanupLifecycle,
+    });
+    await repository.fail(
+      "operation-running",
+      "attempt-1",
+      "cleanup_failed",
+      "cleanup still in progress",
+    );
+    const removedLifecycle = {
+      ...cleanupLifecycle,
+      state: "removed" as const,
+      cleanup: { ...cleanupLifecycle.cleanup, status: "succeeded" as const },
+    };
+    expect(
+      await repository.recordLifecycleOutcome("operation-running", "attempt-1", removedLifecycle),
+    ).toBe(true);
+    expect(
+      await repository.begin("operation-running", "request-a", "attempt-4", 7_000, 10_000),
+    ).toEqual({
+      started: false,
+      failed: true,
+      errorCode: "timeout",
+      message: "automation readiness exceeded the request deadline",
+      lifecycle: removedLifecycle,
+    });
+  });
+
+  test("replays a durable terminal lifecycle failure without provisioning again", async () => {
+    const repository = new ProvisionDeviceOperationRepository(db);
+    const lifecycle = {
+      state: "removed" as const,
+      phase: "cleanup",
+      device: {
+        platform: "android" as const,
+        stableId: "phone-api-36-a",
+        name: "phone-api-36-a",
+        runtimeDeviceId: "emulator-5554",
+      },
+      reason: {
+        code: "timeout",
+        message: "automation readiness exceeded the request deadline",
+      },
+      cleanup: {
+        status: "succeeded" as const,
+        reason: "readiness_timeout",
+      },
+    };
+
+    await repository.begin("operation-terminal", "request-a", "attempt-1", 0, FAR_FUTURE_EXPIRY_MS);
+    expect(
+      await repository.recordLifecycleOutcome("operation-terminal", "attempt-1", lifecycle),
+    ).toBe(true);
+    expect(
+      await repository.fail(
+        "operation-terminal",
+        "attempt-1",
+        "timeout",
+        "automation readiness exceeded the request deadline",
+      ),
+    ).toBe(true);
+
+    expect(
+      await repository.begin(
+        "operation-terminal",
+        "request-a",
+        "attempt-2",
+        1,
+        FAR_FUTURE_EXPIRY_MS,
+      ),
+    ).toEqual({
+      started: false,
+      failed: true,
+      errorCode: "timeout",
+      message: "automation readiness exceeded the request deadline",
+      lifecycle,
     });
   });
 
@@ -217,7 +328,11 @@ describe("ProvisionDeviceOperationRepository", () => {
     // operation's fence until finalization writes its terminal result.
     expect(
       await repository.begin("operation-finalizing", "request-a", "attempt-2", 101, 201),
-    ).toEqual({ started: false, inProgress: true });
+    ).toEqual({
+      started: false,
+      inProgress: true,
+      lifecycle: { state: "provisioning", phase: "admission" },
+    });
 
     expect(
       await repository.fail(
@@ -331,7 +446,11 @@ describe("ProvisionDeviceOperationRepository", () => {
         2_000,
         FAR_FUTURE_EXPIRY_MS,
       ),
-    ).toEqual({ started: false, inProgress: true });
+    ).toEqual({
+      started: false,
+      inProgress: true,
+      lifecycle: { state: "provisioning", phase: "admission" },
+    });
   });
 
   test("renews the row expiry for the attempt it admits", async () => {
@@ -412,7 +531,11 @@ describe("ProvisionDeviceOperationRepository", () => {
 
     expect(
       await repository.begin("operation-fence", "request-a", "attempt-3", 21_000, 1_020_000),
-    ).toEqual({ started: false, inProgress: true });
+    ).toEqual({
+      started: false,
+      inProgress: true,
+      lifecycle: { state: "provisioning", phase: "admission" },
+    });
   });
 
   test("prunes expired rows on a later begin() call instead of growing without bound (#6652 defect 2)", async () => {

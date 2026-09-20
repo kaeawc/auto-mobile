@@ -556,12 +556,21 @@ export interface ProvisionDeviceOperationsTable {
   attempt_id: Generated<string>;
   status: string;
   result_json: string | null;
+  /** Latest durable lifecycle snapshot for deadline-safe status queries. */
+  lifecycle_json: string | null;
   error_code: string | null;
   error_message: string | null;
   creation_started: number;
   expires_at_ms: number;
   created_at: Generated<string>;
   updated_at: Generated<string>;
+}
+
+export interface ProvisionedDeviceTransportTombstonesTable {
+  device_id: string;
+  stable_id: string;
+  reason: string;
+  retired_at_ms: number;
 }
 
 export interface DeviceTeardownOperationsTable {
@@ -823,6 +832,7 @@ export interface Database {
   device_locks: DeviceLocksTable;
   emulator_loss_incidents: EmulatorLossIncidentsTable;
   provision_device_operations: ProvisionDeviceOperationsTable;
+  provisioned_device_transport_tombstones: ProvisionedDeviceTransportTombstonesTable;
   device_teardown_operations: DeviceTeardownOperationsTable;
   tool_selection_profile_provenance: ToolSelectionProfileProvenanceTable;
 }

@@ -325,8 +325,12 @@ echo ""
 # Increase daemon startup timeout for CI environments (default 30s is too short)
 # The emulator environment is slower, so we give the daemon more time to start
 export AUTOMOBILE_DAEMON_STARTUP_TIMEOUT_MS=60000
+# Hosted ubuntu-24.04 runners need a wider steady-state runner-health window than fast local hosts (#7347).
+# Keep this CI-only value below the 120s product maximum so wedged boots still fail promptly.
+export AUTOMOBILE_RUNNER_READINESS_TIMEOUT_MS=90000
 echo "AutoMobile configuration:"
 echo "  Daemon startup timeout: ${AUTOMOBILE_DAEMON_STARTUP_TIMEOUT_MS}ms"
+echo "  Runner readiness timeout: ${AUTOMOBILE_RUNNER_READINESS_TIMEOUT_MS}ms"
 echo ""
 
 echo "Retry configuration:"

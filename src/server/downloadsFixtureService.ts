@@ -56,12 +56,6 @@ export function getDownloadsFixtureService(): DownloadsFixtureService {
   return downloadsFixtureService;
 }
 
-export function setDownloadsFixtureServiceForTesting(
-  service: DownloadsFixtureService | null,
-): void {
-  downloadsFixtureService = service;
-}
-
 export function createDownloadsFixtureService(
   deps: DownloadsFixtureServiceDependencies = {},
 ): DownloadsFixtureService {

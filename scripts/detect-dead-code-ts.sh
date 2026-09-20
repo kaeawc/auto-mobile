@@ -73,9 +73,13 @@ echo ""
 # ============================================================================
 echo "📦 Running ts-prune..."
 
-# Run ts-prune (it exits with non-zero when issues found, that's okay)
+# Run ts-prune (it exits with non-zero when issues found, that's okay).
+# `-i src/db/migrations` mirrors the `dead-code:ts:prune` package.json script:
+# Kysely migrations export `up`/`down` consumed dynamically by the migration
+# runner, which ts-prune cannot see (tsconfig `exclude` does not stop ts-prune
+# from analysing them).
 set +e  # Temporarily disable exit on error
-bunx ts-prune --error --project tsconfig.dead-code.json > "$TS_PRUNE_OUTPUT" 2>&1
+bunx ts-prune --error --project tsconfig.dead-code.json -i src/db/migrations > "$TS_PRUNE_OUTPUT" 2>&1
 TS_PRUNE_EXIT=$?
 set -e  # Re-enable exit on error
 

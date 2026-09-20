@@ -486,8 +486,8 @@ describe("rotation waits for the old stream to fully close before reopening (#61
     const logDir = mkdtempSync(join(tmpdir(), "am-logger-rotate-race-"));
     const targetLogFile = join(logDir, `stdio-${process.pid}.log`);
     // Pre-seed the target past the rotation threshold (a real file, so
-    // io.ts's directly-captured `statAsync`/`renameAsync` bindings — not
-    // interceptable via spyOn, since they copy the function reference at
+    // io.ts's directly-captured `statAsync` binding — not
+    // interceptable via spyOn, since it copies the function reference at
     // import time rather than reading it through the module object on every
     // call — see and hit the real rotation path).
     seedOversizedLogFile(targetLogFile, 11 * 1024 * 1024);
@@ -725,7 +725,7 @@ describe("the oversized-file check itself is serialized, not just the rotation (
       return stream as unknown as fs.WriteStream;
     });
     // `fs.existsSync` is called through the `fs` namespace object (unlike
-    // io.ts's statAsync/renameAsync, which are destructured at import time
+    // io.ts's statAsync, which is destructured at import time
     // and so can't be spied on), making it a reliable probe for how many
     // independent check-and-maybe-rotate cycles actually ran their own stat.
     const existsSyncSpy = spyOn(fs, "existsSync");

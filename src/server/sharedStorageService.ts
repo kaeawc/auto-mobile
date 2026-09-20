@@ -77,14 +77,6 @@ export function getSharedStorageService(): SharedStorageService {
   return sharedStorageService;
 }
 
-export function setSharedStorageServiceForTesting(service: SharedStorageService): void {
-  sharedStorageService = service;
-}
-
-export function resetSharedStorageServiceForTesting(): void {
-  sharedStorageService = null;
-}
-
 export function createSharedStorageServiceForTesting(
   dependencies: SharedStorageServiceDependencies = {},
 ): SharedStorageService {

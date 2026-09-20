@@ -376,7 +376,7 @@ describe("DeviceState connectivity toggles (issue #6872)", () => {
     expect(client.getAllCommands()).toEqual([ANDROID_CONNECTIVITY_READ_COMMAND]);
   });
 
-  test("turning Airplane mode on writes its setting and broadcast before verification", async () => {
+  test("turning Airplane mode on and off uses the connectivity command before verification", async () => {
     const adbFactory = new FakeAdbClientFactory();
     const client = adbFactory.getFakeClient();
     client.setCommandResultSequence(ANDROID_CONNECTIVITY_READ_COMMAND, [
@@ -392,19 +392,32 @@ describe("DeviceState connectivity toggles (issue #6872)", () => {
         bluetoothEnabled: "2",
         locationEnabled: "3",
       }),
+      connectivityOutput({
+        airplaneMode: "1",
+        wifiEnabled: "3",
+        bluetoothEnabled: "2",
+        locationEnabled: "3",
+      }),
+      connectivityOutput({
+        airplaneMode: "0",
+        wifiEnabled: "1",
+        bluetoothEnabled: "1",
+        locationEnabled: "3",
+      }),
     ]);
 
-    const result = await new DeviceState(androidDevice, { adbFactory }).setState({
+    const deviceState = new DeviceState(androidDevice, { adbFactory });
+    const enabled = await deviceState.setState({
       connectivity: { airplaneMode: true },
     });
+    const disabled = await deviceState.setState({
+      connectivity: { airplaneMode: false },
+    });
 
-    expect(result.connectivity).toMatchObject({ airplaneMode: true, verified: true });
-    expect(client.getAllCommands()).toEqual([
-      ANDROID_CONNECTIVITY_READ_COMMAND,
-      "shell settings put global airplane_mode_on 1",
-      "shell am broadcast -a android.intent.action.AIRPLANE_MODE --ez state true",
-      ANDROID_CONNECTIVITY_READ_COMMAND,
-    ]);
+    expect(enabled.connectivity).toMatchObject({ airplaneMode: true, verified: true });
+    expect(disabled.connectivity).toMatchObject({ airplaneMode: false, verified: true });
+    expect(client.getAllCommands()).toContain("shell cmd connectivity airplane-mode enable");
+    expect(client.getAllCommands()).toContain("shell cmd connectivity airplane-mode disable");
   });
 
   test("turns Bluetooth on with the Android svc command", async () => {
@@ -483,6 +496,34 @@ describe("DeviceState connectivity toggles (issue #6872)", () => {
 
     expect(result.success).toBe(false);
     expect(result.connectivity).toMatchObject({ wifiEnabled: true, verified: false });
+    expect(result.connectivity?.warning).toContain("wifiEnabled");
+  });
+
+  test("does not verify a field when its write command fails despite matching read-back", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    const client = adbFactory.getFakeClient();
+    client.setCommandResultSequence(ANDROID_CONNECTIVITY_READ_COMMAND, [
+      connectivityOutput({
+        airplaneMode: "0",
+        wifiEnabled: "1",
+        bluetoothEnabled: "0",
+        locationEnabled: "0",
+      }),
+      connectivityOutput({
+        airplaneMode: "0",
+        wifiEnabled: "0",
+        bluetoothEnabled: "0",
+        locationEnabled: "0",
+      }),
+    ]);
+    client.setCommandResult("shell svc wifi disable", "", "error: wifi service not available");
+
+    const result = await new DeviceState(androidDevice, { adbFactory }).setState({
+      connectivity: { wifiEnabled: false },
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.connectivity).toMatchObject({ wifiEnabled: false, verified: false });
     expect(result.connectivity?.warning).toContain("wifiEnabled");
   });
 

@@ -1400,11 +1400,12 @@ export class DeviceState {
       return { ...before, verified: true };
     }
 
-    const wrote = await this.applyAndroidConnectivityWrites(fieldsToWrite, input);
+    const writes = await this.applyAndroidConnectivityWrites(fieldsToWrite, input);
     return this.withConnectivityVerification(
-      wrote ? await this.getAndroidConnectivity() : before,
+      writes.wrote ? await this.getAndroidConnectivity() : before,
       input,
       requestedFields,
+      writes.failedFields,
     );
   }
 
@@ -1412,7 +1413,7 @@ export class DeviceState {
   private async applyAndroidConnectivityWrites(
     fieldsToWrite: readonly DeviceConnectivityField[],
     input: NonNullable<SetDeviceStateInput["connectivity"]>,
-  ): Promise<boolean> {
+  ): Promise<{ wrote: boolean; failedFields: Set<DeviceConnectivityField> }> {
     let adb: AdbExecutor;
     try {
       adb = this.adbFactory.create(this.device);
@@ -1421,13 +1422,16 @@ export class DeviceState {
         `[DeviceState] connectivity writer creation failed: ${errorMessage(error)}`,
         error,
       );
-      return false;
+      return { wrote: false, failedFields: new Set() };
     }
 
+    const failedFields = new Set<DeviceConnectivityField>();
     for (const field of fieldsToWrite) {
-      await this.applyAndroidConnectivityField(adb, field, input[field]!);
+      if (await this.applyAndroidConnectivityField(adb, field, input[field]!)) {
+        failedFields.add(field);
+      }
     }
-    return true;
+    return { wrote: true, failedFields };
   }
 
   /** Log a typed, best-effort failure and continue with the other requested toggles. */
@@ -1435,18 +1439,21 @@ export class DeviceState {
     adb: AdbExecutor,
     field: DeviceConnectivityField,
     enabled: boolean,
-  ): Promise<void> {
+  ): Promise<boolean> {
     try {
       const commandError = await this.setAndroidConnectivityField(adb, field, enabled);
       if (commandError) {
         logger.warn(`[DeviceState] connectivity write for ${field} failed: ${commandError}`);
+        return true;
       }
+      return false;
     } catch (error) {
       // A failed toggle must not prevent the other requested desired states from applying.
       logger.warn(
         `[DeviceState] connectivity write for ${field} failed: ${errorMessage(error)}`,
         error,
       );
+      return true;
     }
   }
 
@@ -1455,8 +1462,11 @@ export class DeviceState {
     state: DeviceConnectivityState,
     input: NonNullable<SetDeviceStateInput["connectivity"]>,
     requestedFields: readonly DeviceConnectivityField[],
+    failedFields: ReadonlySet<DeviceConnectivityField>,
   ): DeviceConnectivityState {
-    const unverified = requestedFields.filter((field) => state[field] !== input[field]);
+    const unverified = requestedFields.filter(
+      (field) => failedFields.has(field) || state[field] !== input[field],
+    );
     if (unverified.length === 0) {
       return { ...state, verified: true };
     }
@@ -1484,19 +1494,11 @@ export class DeviceState {
           adb,
           `shell svc bluetooth ${enabled ? "enable" : "disable"}`,
         );
-      case "airplaneMode": {
-        const settingError = await this.runAndroidConnectivityCommand(
-          adb,
-          `shell settings put global airplane_mode_on ${enabled ? "1" : "0"}`,
-        );
-        if (settingError) {
-          return settingError;
-        }
+      case "airplaneMode":
         return this.runAndroidConnectivityCommand(
           adb,
-          `shell am broadcast -a android.intent.action.AIRPLANE_MODE --ez state ${enabled}`,
+          `shell cmd connectivity airplane-mode ${enabled ? "enable" : "disable"}`,
         );
-      }
       case "locationEnabled":
         return this.setAndroidLocationEnabled(adb, enabled);
     }

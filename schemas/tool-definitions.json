@@ -1713,7 +1713,7 @@
   },
   {
     "name": "getAndroid",
-    "description": "Find or recover an Android AVD and prepare it for automation.",
+    "description": "Find or recover an Android AVD and prepare it for automation. See the automobile:tools resource for every tool's default enabled/gated state before acquiring a device.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -1838,7 +1838,7 @@
   },
   {
     "name": "getApple",
-    "description": "Find or recover an iOS Simulator and prepare it for automation.",
+    "description": "Find or recover an iOS Simulator and prepare it for automation. See the automobile:tools resource for every tool's default enabled/gated state before acquiring a device.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -11411,6 +11411,7 @@
     "description": "Enable or disable AutoMobile tools for this MCP session: one exact name via toolName, or a whole batch in one call via toolNames. Returns enabledTools, or enabledToolsError instead if post-write readback fails (the change still applies).",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "description": "Enable or disable configurable AutoMobile tools for an active session. It can ungate a tool after a device session already exists without reacquiring the device.",
       "type": "object",
       "properties": {
         "toolName": {

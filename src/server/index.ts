@@ -336,6 +336,7 @@ import { registerSessionLogResources } from "./sessionLogResources";
 import { registerSharedStorageResources } from "./sharedStorageResources";
 import { registerFeatureFlagResources } from "./featureFlagResources";
 import { registerHostToolchainResources } from "./hostToolchainResources";
+import { registerToolCatalogResources } from "./toolCatalogResource";
 import { registerNetworkResources } from "./networkResources";
 import { registerEmulatorLossIncidentResources } from "./emulatorLossIncidentResources";
 import { FeatureFlagService } from "../features/featureFlags/FeatureFlagService";
@@ -600,6 +601,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
   registerSharedStorageResources();
   registerFeatureFlagResources();
   registerHostToolchainResources();
+  registerToolCatalogResources();
   registerNetworkResources();
   registerEmulatorLossIncidentResources();
   startupBenchmark.endPhase("resourceRegistration");

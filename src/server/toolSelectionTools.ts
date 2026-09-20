@@ -83,7 +83,10 @@ export const setToolEnabledSchema = withJsonSchemaOverride(
           path: ["toolName"],
         });
       }
-    }),
+    })
+    .describe(
+      "Enable or disable configurable AutoMobile tools for an active session. It can ungate a tool after a device session already exists without reacquiring the device.",
+    ),
   // The runtime refinement above only protects a caller that already sent the
   // request. Zod emits no JSON Schema for `.superRefine`, so without this
   // override `tools/list` and schemas/tool-definitions.json would advertise both

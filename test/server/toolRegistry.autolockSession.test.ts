@@ -35,6 +35,11 @@ describe("ToolRegistry autolock session enforcement", () => {
     deviceId: "emulator-5556",
     platform: "android",
   };
+  const iosA: BootedDevice = {
+    name: "iPhone A",
+    deviceId: "ios-device-a",
+    platform: "ios",
+  };
 
   let fakeDeviceSessionManager: FakeDeviceSessionManager;
   let originalDeviceSessionManager: unknown;
@@ -68,14 +73,14 @@ describe("ToolRegistry autolock session enforcement", () => {
     setAutolock(false);
   });
 
-  test("requires sessionUuid when autolock is on and multiple Android devices exist", async () => {
+  test("the always-on Android ambiguity guard takes precedence when autolock is on", async () => {
     setAutolock(true);
     fakeDeviceSessionManager.setConnectedDevices([androidA, androidB]);
 
     const tool = registerTool("autolockMultiAndroid");
 
     await expect(tool.handler({ platform: "android" })).rejects.toThrow(
-      "Device pool autolock is enabled and multiple devices are available.",
+      "Multiple Android devices detected. Provide sessionUuid to target a specific device.",
     );
     expect(fakeDeviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
   });
@@ -113,20 +118,21 @@ describe("ToolRegistry autolock session enforcement", () => {
     expect(fakeDeviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(1);
   });
 
-  test("does not require sessionUuid when autolock is disabled, even with multiple devices", async () => {
+  test("requires an explicit target for multiple Android devices when autolock is disabled", async () => {
     setAutolock(false);
     fakeDeviceSessionManager.setConnectedDevices([androidA, androidB]);
 
     const tool = registerTool("autolockDisabledMultiAndroid");
 
-    const response = await tool.handler({ platform: "android" });
-    expect(response).toEqual({ success: true });
-    expect(fakeDeviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(1);
+    await expect(tool.handler({ platform: "android" })).rejects.toThrow(
+      "Multiple Android devices detected. Provide sessionUuid to target a specific device.",
+    );
+    expect(fakeDeviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
   });
 
-  test("requires sessionUuid for platform 'either' when multiple devices exist", async () => {
+  test("keeps the broader autolock guard for mixed-platform ambiguity", async () => {
     setAutolock(true);
-    fakeDeviceSessionManager.setConnectedDevices([androidA, androidB]);
+    fakeDeviceSessionManager.setConnectedDevices([androidA, iosA]);
 
     const tool = registerTool("autolockEitherPlatform");
 

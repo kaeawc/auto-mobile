@@ -2,7 +2,13 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { toJSONSchema } from "zod/v4";
 import { isAlwaysOnTool } from "../features/toolSelection/toolSelectionControl";
 import { DeviceSessionManager, type DeviceReadinessLevel } from "../utils/DeviceSessionManager";
-import { ActionableError, BootedDevice, SomePlatform, type ViewHierarchyResult } from "../models";
+import {
+  ActionableError,
+  BootedDevice,
+  SomePlatform,
+  type Platform,
+  type ViewHierarchyResult,
+} from "../models";
 import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
 import { UIStateExtractor } from "../features/navigation/UIStateExtractor";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
@@ -650,7 +656,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         // that ToolRegistry selected.
         args.sessionUuid = sessionUuid;
       }
-      await this.enforceSessionUuidForMultipleIos(
+      await this.enforceSessionUuidForMultipleDevices(
         platform,
         sessionUuid,
         providedDeviceId,
@@ -811,7 +817,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     };
   }
 
-  private async enforceSessionUuidForMultipleIos(
+  private async enforceSessionUuidForMultipleDevices(
     platform: SomePlatform,
     sessionUuid: string | undefined,
     providedDeviceId: string | undefined,
@@ -823,30 +829,43 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
 
     const currentDevice = deviceSessionManager.getCurrentDevice();
     const currentPlatform = deviceSessionManager.getCurrentPlatform();
-    if (currentDevice && currentPlatform === "ios" && platform === "ios") {
-      return;
-    }
-
-    if (platform !== "ios" && platform !== "either") {
+    if (this.hasActiveDeviceForNamedPlatform(platform, currentDevice, currentPlatform)) {
       return;
     }
 
     const connectedPlatforms = await deviceSessionManager.detectConnectedPlatforms();
-    const iosDevices = connectedPlatforms.filter((device) => device.platform === "ios");
-    if (iosDevices.length <= 1) {
+    const detectedPlatforms = new Set(connectedPlatforms.map((device) => device.platform));
+    // Mixed-platform ambiguity belongs to ensureDeviceReady, including its
+    // intentional setActiveDevice/current-device bypass (#5870).
+    if (platform === "either" && detectedPlatforms.size > 1) {
       return;
     }
 
-    if (platform === "either") {
-      const androidDevices = connectedPlatforms.filter((device) => device.platform === "android");
-      if (androidDevices.length > 0) {
-        return;
-      }
+    const candidatePlatform = platform === "either" ? connectedPlatforms[0]?.platform : platform;
+    if (!candidatePlatform) {
+      return;
+    }
+
+    const candidateCount = connectedPlatforms.filter(
+      (device) => device.platform === candidatePlatform,
+    ).length;
+    if (candidateCount <= 1) {
+      return;
     }
 
     throw new ActionableError(
-      "Multiple iOS simulators detected. Provide sessionUuid to target a specific simulator.",
+      candidatePlatform === "ios"
+        ? "Multiple iOS simulators detected. Provide sessionUuid to target a specific simulator."
+        : "Multiple Android devices detected. Provide sessionUuid to target a specific device.",
     );
+  }
+
+  private hasActiveDeviceForNamedPlatform(
+    platform: SomePlatform,
+    currentDevice: BootedDevice | undefined,
+    currentPlatform: Platform | undefined,
+  ): boolean {
+    return Boolean(currentDevice && platform !== "either" && currentPlatform === platform);
   }
 
   private resolveImplicitAutolockSession(

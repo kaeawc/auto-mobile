@@ -1747,7 +1747,13 @@ export async function tapAtHandler(
   const message = result.success
     ? `Tapped at (${result.x}, ${result.y})`
     : `Failed to tap at (${result.x}, ${result.y}): ${result.error || "unknown error"}`;
-  const payload = { message, observation: result.observation, ...result };
+  const payload = {
+    message,
+    observation: result.observation,
+    ...result,
+    deviceId: device.deviceId,
+    platform: device.platform,
+  };
   const response: StructuredToolResponse<typeof payload> & { isError?: true } =
     createStructuredToolResponse(payload);
   return result.success ? response : { ...response, isError: true as const };

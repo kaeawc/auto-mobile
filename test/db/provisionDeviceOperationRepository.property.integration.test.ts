@@ -60,7 +60,11 @@ class OperationModel {
       return { conflict: true };
     }
     if (this.row.status === "running" || this.row.status === "replaying") {
-      return { started: false, inProgress: true };
+      return {
+        started: false,
+        inProgress: true,
+        lifecycle: { state: "provisioning", phase: "admission" },
+      };
     }
     if (this.row.status === "succeeded" && this.row.result) {
       const reconcile = this.row.creationStarted;

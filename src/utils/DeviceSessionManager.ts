@@ -57,6 +57,7 @@ import {
   isUnresolvedAndroidEmulatorName,
 } from "../daemon/deviceIdentityEvidence";
 import { isAndroidEmulatorSerial } from "./androidSerial";
+import { throwIfProvisionedDeviceTransportRetired } from "./provisionedDeviceTransportFence";
 
 /**
  * Render a device list for a "not found" error.
@@ -571,6 +572,9 @@ export class DeviceSessionManager implements DeviceSessionManager {
     logger.info(
       `[DeviceSessionManager] ensureDeviceReady called with platform=${platform}, providedDeviceId=${providedDeviceId}`,
     );
+    if (providedDeviceId) {
+      await throwIfProvisionedDeviceTransportRetired(providedDeviceId);
+    }
 
     // Detect all connected devices
     const connectedPlatforms = await this.detectConnectedPlatforms();

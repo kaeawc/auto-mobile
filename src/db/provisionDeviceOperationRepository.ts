@@ -4,6 +4,35 @@ import { getDatabase } from "./database";
 import type { Database } from "./types";
 import { logger } from "../utils/logger";
 
+export type ProvisionDeviceLifecycleState =
+  | "provisioning"
+  | "created_not_ready"
+  | "cleanup_in_progress"
+  | "removed"
+  | "retained"
+  | "no_device_created";
+
+export interface ProvisionDeviceLifecycleOutcome {
+  state: ProvisionDeviceLifecycleState;
+  phase: string;
+  device?: {
+    platform: "android" | "ios";
+    stableId: string;
+    name: string;
+    runtimeDeviceId?: string;
+  };
+  reason?: {
+    code: string;
+    message: string;
+    retryable?: boolean;
+  };
+  cleanup?: {
+    status: "in_progress" | "succeeded" | "failed";
+    reason?: string;
+    operationId?: string;
+  };
+}
+
 export type ProvisionDeviceOperationBeginResult =
   | { started: true; reconcileExistingConfiguration: boolean }
   | {
@@ -11,7 +40,18 @@ export type ProvisionDeviceOperationBeginResult =
       result: Record<string, unknown>;
       reconcileExistingConfiguration: boolean;
     }
-  | { started: false; inProgress: true };
+  | {
+      started: false;
+      inProgress: true;
+      lifecycle?: ProvisionDeviceLifecycleOutcome;
+    }
+  | {
+      started: false;
+      failed: true;
+      errorCode: string;
+      message: string;
+      lifecycle: ProvisionDeviceLifecycleOutcome;
+    };
 
 /**
  * One row per idempotency key, fenced by an ATTEMPT token so a stale attempt
@@ -41,6 +81,11 @@ export interface ProvisionDeviceOperationStore {
     expiresAtMs: number,
   ): Promise<ProvisionDeviceOperationBeginResult>;
   markDeviceCreationStarted(operationId: string, attemptId: string): Promise<boolean>;
+  recordLifecycleOutcome(
+    operationId: string,
+    attemptId: string,
+    lifecycle: ProvisionDeviceLifecycleOutcome,
+  ): Promise<boolean>;
   extend(operationId: string, attemptId: string, expiresAtMs: number): Promise<boolean>;
   complete(
     operationId: string,
@@ -52,7 +97,10 @@ export interface ProvisionDeviceOperationStore {
     attemptId: string,
     errorCode: string,
     message: string,
-    options?: { clearCreationStarted?: boolean },
+    options?: {
+      clearCreationStarted?: boolean;
+      lifecycleOutcome?: ProvisionDeviceLifecycleOutcome;
+    },
   ): Promise<boolean>;
 }
 
@@ -74,7 +122,10 @@ export class ProvisionDeviceOperationSupersededError extends Error {
 }
 
 export class ProvisionDeviceOperationInProgressError extends Error {
-  constructor(operationId: string) {
+  constructor(
+    operationId: string,
+    readonly lifecycle?: ProvisionDeviceLifecycleOutcome,
+  ) {
     super(
       `operationId '${operationId}' is still being provisioned by an earlier attempt with no ` +
         "terminal result yet; wait for it to finish or retry with a new operationId",
@@ -83,9 +134,26 @@ export class ProvisionDeviceOperationInProgressError extends Error {
   }
 }
 
+export class ProvisionDeviceOperationFailedError extends Error {
+  constructor(
+    readonly operationId: string,
+    readonly errorCode: string,
+    message: string,
+    readonly lifecycle: ProvisionDeviceLifecycleOutcome,
+  ) {
+    super(message);
+    this.name = "ProvisionDeviceOperationFailedError";
+  }
+}
+
 interface StoredResult {
   result: Record<string, unknown>;
 }
+
+const INITIAL_LIFECYCLE_OUTCOME: ProvisionDeviceLifecycleOutcome = {
+  state: "provisioning",
+  phase: "admission",
+};
 
 function decodeResult(value: string): Record<string, unknown> | undefined {
   try {
@@ -104,6 +172,101 @@ function decodeResult(value: string): Record<string, unknown> | undefined {
     logger.warn(`[ProvisionDeviceOperationRepository] Invalid stored result: ${error}`);
   }
   return undefined;
+}
+
+function decodeLifecycle(value: string | null): ProvisionDeviceLifecycleOutcome | undefined {
+  if (!value) {
+    return undefined;
+  }
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      !Array.isArray(parsed) &&
+      "state" in parsed &&
+      typeof parsed.state === "string" &&
+      "phase" in parsed &&
+      typeof parsed.phase === "string"
+    ) {
+      return parsed as ProvisionDeviceLifecycleOutcome;
+    }
+  } catch (error) {
+    logger.warn(`[ProvisionDeviceOperationRepository] Invalid stored lifecycle outcome: ${error}`);
+  }
+  return undefined;
+}
+
+function isTerminalLifecycleOutcome(lifecycle: ProvisionDeviceLifecycleOutcome): boolean {
+  return (
+    lifecycle.state === "cleanup_in_progress" ||
+    lifecycle.state === "removed" ||
+    lifecycle.state === "retained" ||
+    lifecycle.state === "no_device_created"
+  );
+}
+
+function inProgressBeginResult(lifecycleJson: string | null): ProvisionDeviceOperationBeginResult {
+  const lifecycle = decodeLifecycle(lifecycleJson);
+  return {
+    started: false,
+    inProgress: true,
+    ...(lifecycle ? { lifecycle } : {}),
+  };
+}
+
+function failedOperationDetails(
+  lifecycle: ProvisionDeviceLifecycleOutcome,
+  stored: { errorCode: string; message: string },
+): { errorCode: string; message: string } {
+  return lifecycle.cleanup?.status === "succeeded" && lifecycle.reason
+    ? {
+        errorCode: lifecycle.reason.code,
+        message: lifecycle.reason.message,
+      }
+    : stored;
+}
+
+function failedBeginResult(existing: {
+  status: string;
+  error_code: string | null;
+  error_message: string | null;
+  lifecycle_json: string | null;
+}): ProvisionDeviceOperationBeginResult | undefined {
+  const lifecycle = decodeLifecycle(existing.lifecycle_json);
+  if (
+    existing.status !== "failed" ||
+    !existing.error_code ||
+    !existing.error_message ||
+    !lifecycle ||
+    !isTerminalLifecycleOutcome(lifecycle)
+  ) {
+    return undefined;
+  }
+  const details = failedOperationDetails(lifecycle, {
+    errorCode: existing.error_code,
+    message: existing.error_message,
+  });
+  return {
+    started: false,
+    failed: true,
+    ...details,
+    lifecycle,
+  };
+}
+
+function activeBeginResult(lifecycleJson: string | null): ProvisionDeviceOperationBeginResult {
+  const lifecycle = decodeLifecycle(lifecycleJson);
+  if (lifecycle && isTerminalLifecycleOutcome(lifecycle) && lifecycle.reason) {
+    return {
+      started: false,
+      failed: true,
+      errorCode: lifecycle.reason.code,
+      message: lifecycle.reason.message,
+      lifecycle,
+    };
+  }
+  return inProgressBeginResult(lifecycleJson);
 }
 
 export class ProvisionDeviceOperationRepository implements ProvisionDeviceOperationStore {
@@ -151,6 +314,7 @@ export class ProvisionDeviceOperationRepository implements ProvisionDeviceOperat
           attempt_id: attemptId,
           status: "running",
           result_json: null,
+          lifecycle_json: JSON.stringify(INITIAL_LIFECYCLE_OUTCOME),
           error_code: null,
           error_message: null,
           creation_started: 0,
@@ -215,6 +379,24 @@ export class ProvisionDeviceOperationRepository implements ProvisionDeviceOperat
     return Number(update.numUpdatedRows) > 0;
   }
 
+  async recordLifecycleOutcome(
+    operationId: string,
+    attemptId: string,
+    lifecycle: ProvisionDeviceLifecycleOutcome,
+  ): Promise<boolean> {
+    const update = await this.getDb()
+      .updateTable("provision_device_operations")
+      .set({
+        lifecycle_json: JSON.stringify(lifecycle),
+        updated_at: new Date().toISOString(),
+      })
+      .where("operation_id", "=", operationId)
+      .where("attempt_id", "=", attemptId)
+      .where("status", "in", ["running", "replaying", "failed"])
+      .executeTakeFirst();
+    return Number(update.numUpdatedRows) > 0;
+  }
+
   async extend(operationId: string, attemptId: string, expiresAtMs: number): Promise<boolean> {
     // Option 1 deliberately refreshes the existing TTL instead of adding a
     // finalizing status: the existing attempt fence already identifies the
@@ -237,7 +419,10 @@ export class ProvisionDeviceOperationRepository implements ProvisionDeviceOperat
     attemptId: string,
     errorCode: string,
     message: string,
-    options?: { clearCreationStarted?: boolean },
+    options?: {
+      clearCreationStarted?: boolean;
+      lifecycleOutcome?: ProvisionDeviceLifecycleOutcome;
+    },
   ): Promise<boolean> {
     const db = this.getDb();
     // A failed REPLAY must not erase the completed provision it was replaying:
@@ -251,6 +436,9 @@ export class ProvisionDeviceOperationRepository implements ProvisionDeviceOperat
         error_code: errorCode,
         error_message: message,
         ...(options?.clearCreationStarted ? { creation_started: 0 } : {}),
+        ...(options?.lifecycleOutcome
+          ? { lifecycle_json: JSON.stringify(options.lifecycleOutcome) }
+          : {}),
         updated_at: new Date().toISOString(),
       })
       .where("operation_id", "=", operationId)
@@ -267,6 +455,9 @@ export class ProvisionDeviceOperationRepository implements ProvisionDeviceOperat
         error_code: errorCode,
         error_message: message,
         ...(options?.clearCreationStarted ? { creation_started: 0 } : {}),
+        ...(options?.lifecycleOutcome
+          ? { lifecycle_json: JSON.stringify(options.lifecycleOutcome) }
+          : {}),
         updated_at: new Date().toISOString(),
       })
       .where("operation_id", "=", operationId)
@@ -293,6 +484,7 @@ export class ProvisionDeviceOperationRepository implements ProvisionDeviceOperat
       error_code: string | null;
       error_message: string | null;
       creation_started: number;
+      lifecycle_json: string | null;
     },
   ): Promise<ProvisionDeviceOperationBeginResult> {
     if (existing.request_fingerprint !== requestFingerprint) {
@@ -320,7 +512,7 @@ export class ProvisionDeviceOperationRepository implements ProvisionDeviceOperat
           "replaying",
         );
         if (!claimed) {
-          return { started: false, inProgress: true };
+          return inProgressBeginResult(existing.lifecycle_json);
         }
         return {
           started: false,
@@ -332,12 +524,15 @@ export class ProvisionDeviceOperationRepository implements ProvisionDeviceOperat
     // A "running" row that survived the expiry sweep above is still within its
     // TTL, so a prior attempt (this process or another) may genuinely be
     // executing it right now. Report in-progress rather than silently
-    // re-entering the provisioning lifecycle (#6652 defect 1) -- unlike
-    // "failed", which stays retryable immediately.
+    // re-entering the provisioning lifecycle (#6652 defect 1).
     // `replaying` is the same contract for a completed operation whose replay
     // is currently owned by another attempt (see the claim above).
     if (existing.status === "running" || existing.status === "replaying") {
-      return { started: false, inProgress: true };
+      return activeBeginResult(existing.lifecycle_json);
+    }
+    const failed = failedBeginResult(existing);
+    if (failed) {
+      return failed;
     }
     // Admission is a compare-and-set, not a read-then-hope: the retry only
     // starts if it can move the row to "running" under its own fence. That
@@ -373,7 +568,13 @@ export class ProvisionDeviceOperationRepository implements ProvisionDeviceOperat
         status,
         attempt_id: attemptId,
         expires_at_ms: expiresAtMs,
-        ...(status === "running" ? { error_code: null, error_message: null } : {}),
+        ...(status === "running"
+          ? {
+              error_code: null,
+              error_message: null,
+              lifecycle_json: JSON.stringify(INITIAL_LIFECYCLE_OUTCOME),
+            }
+          : {}),
         updated_at: new Date().toISOString(),
       })
       .where("operation_id", "=", operationId)

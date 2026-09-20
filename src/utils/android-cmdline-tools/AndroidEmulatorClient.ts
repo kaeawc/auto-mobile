@@ -1909,6 +1909,36 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     }
   }
 
+  private async resolveFoundDeviceModel(
+    foundDeviceModel: string | undefined,
+    foundDeviceId: string,
+    avdName: string,
+    signal?: AbortSignal,
+  ): Promise<string | undefined> {
+    return (
+      foundDeviceModel ??
+      (await this.resolveDeviceModel(
+        { name: avdName, platform: "android", deviceId: foundDeviceId },
+        2000,
+        false,
+        signal,
+      ))
+    );
+  }
+
+  private foundBootedDevice(
+    avdName: string,
+    foundDeviceId: string,
+    model: string | undefined,
+  ): BootedDevice {
+    return {
+      name: avdName,
+      platform: "android",
+      deviceId: foundDeviceId,
+      ...(model ? { model } : {}),
+    } as BootedDevice;
+  }
+
   private async modelForBootedEmulator(
     device: BootedDevice,
     avdName: { consoleBusyDuringProbe?: boolean },
@@ -3767,6 +3797,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
 
     // Start background polling immediately with configurable intervals
     let foundDeviceId: string | null = null;
+    let foundDeviceModel: string | undefined;
     let correlationFailure: string | undefined;
     let lastDiagnostic: ReadinessDiagnostic | undefined;
     const offlineTracker: OfflineTracker = { deviceId: null, since: null };
@@ -3954,6 +3985,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
                       `[PARALLEL] ✅ No package manager errors detected - marking emulator as ready`,
                     );
                     foundDeviceId = emulator.deviceId;
+                    foundDeviceModel = emulator.model;
                     return;
                   }
                 }
@@ -4037,11 +4069,13 @@ export class AndroidEmulatorClient implements AndroidEmulator {
         perf.endOperation("devicePolling");
         cleanupProcessListeners();
         logger.info(`Emulator '${avdName}' is ready! Device ID: ${foundDeviceId}`);
-        const bootedDevice = {
-          name: avdName,
-          platform: "android",
-          deviceId: foundDeviceId,
-        } as BootedDevice;
+        const model = await this.resolveFoundDeviceModel(
+          foundDeviceModel,
+          foundDeviceId,
+          avdName,
+          signal,
+        );
+        const bootedDevice = this.foundBootedDevice(avdName, foundDeviceId, model);
         await this.wakeAndUnlockAfterReadiness(bootedDevice, signal, options, perf);
         return bootedDevice;
       }
@@ -4060,11 +4094,13 @@ export class AndroidEmulatorClient implements AndroidEmulator {
 
     if (foundDeviceId) {
       logger.info(`Emulator '${avdName}' is ready! Device ID: ${foundDeviceId}`);
-      const bootedDevice = {
-        name: avdName,
-        platform: "android",
-        deviceId: foundDeviceId,
-      } as BootedDevice;
+      const model = await this.resolveFoundDeviceModel(
+        foundDeviceModel,
+        foundDeviceId,
+        avdName,
+        signal,
+      );
+      const bootedDevice = this.foundBootedDevice(avdName, foundDeviceId, model);
       await this.wakeAndUnlockAfterReadiness(bootedDevice, signal, options, perf);
       return bootedDevice;
     }

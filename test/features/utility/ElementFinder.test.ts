@@ -121,7 +121,7 @@ describe("DefaultElementFinder", () => {
       );
     });
 
-    test("excludes non-editable system UI matches for input focus", () => {
+    test("keeps a non-editable match for input focus when no input matches", () => {
       const hierarchy = makeHierarchy({
         $: {
           class: "android.widget.TextView",
@@ -132,18 +132,19 @@ describe("DefaultElementFinder", () => {
         },
       });
 
-      expect(
-        finder.findElementsByText(
-          hierarchy,
-          "Phone",
-          null,
-          true,
-          false,
-          false,
-          false,
-          "focus-input",
-        ),
-      ).toEqual([]);
+      const results = finder.findElementsByText(
+        hierarchy,
+        "Phone",
+        null,
+        true,
+        false,
+        false,
+        false,
+        "focus-input",
+      );
+      expect(results).toHaveLength(1);
+      expect(results[0].text).toBe("Phone notification: ");
+      expect(results[0].class).toBe("android.widget.TextView");
     });
 
     test("uses a partial editable match when the exact match is non-editable", () => {

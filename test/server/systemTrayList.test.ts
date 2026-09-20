@@ -881,6 +881,41 @@ describe("systemTray clearAll dumpsys ownership", () => {
     ).toHaveLength(3);
   });
 
+  test("clears header-owned rows attributed to the app", async () => {
+    const notifications = [
+      ["First shell notification", "First body"],
+      ["Second shell notification", "Second body"],
+    ] as const;
+    const { adb, timer } = setup(
+      [
+        page(...notifications.map(([title]) => row(title, shellLabel))),
+        page(...notifications.slice(1).map(([title]) => row(title, shellLabel))),
+        page(),
+      ],
+      false,
+    );
+    adb.setCommandResponse(
+      "dumpsys notification",
+      execResult(dumpsys(...notifications.map(([title, body], id) => record(id + 1, title, body)))),
+    );
+    const installedAppsSpy = spyOn(ListInstalledApps.prototype, "execute").mockResolvedValue([
+      SHELL,
+    ]);
+    installClearAllDependencies(timer, adb);
+
+    try {
+      const payload = JSON.parse((await clearAll()).content[0].text);
+      expect(payload).toMatchObject({ dismissedCount: 2, expectedCount: 2, success: true });
+      expect(payload.message).toBe(`Cleared 2 notification(s) for ${SHELL}`);
+    } finally {
+      installedAppsSpy.mockRestore();
+    }
+
+    expect(
+      adb.getExecutedCommands().filter((command) => command.includes("input swipe")),
+    ).toHaveLength(2);
+  });
+
   test("reports an honest failure when dumpsys-owned rows cannot all be cleared", async () => {
     const notifications = [
       ["First shell notification", "First body"],

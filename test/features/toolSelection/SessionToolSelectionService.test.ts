@@ -162,7 +162,9 @@ describe("getEnvironmentToolDefaults", () => {
   test("rejects unknown names, wrong casing, and same-layer conflicts", () => {
     expect(() =>
       getEnvironmentToolDefaults({ AUTOMOBILE_ENABLED_TOOLS: "Clipboard" }, knownTools),
-    ).toThrow("Unknown tool name 'Clipboard'");
+    ).toThrow(
+      "Tool 'Clipboard' is not a session-configurable tool name; AUTOMOBILE_ENABLED_TOOLS/AUTOMOBILE_DISABLED_TOOLS accept session-configurable tools only (see the automobile:tools resource).",
+    );
     expect(() =>
       getEnvironmentToolDefaults(
         {

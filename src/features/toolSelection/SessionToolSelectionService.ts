@@ -104,7 +104,9 @@ export function getEnvironmentToolDefaults(
   const disabled = parseToolNames(environment.AUTOMOBILE_DISABLED_TOOLS);
   const unknown = [...enabled, ...disabled].find((toolName) => !knownToolNames.has(toolName));
   if (unknown) {
-    throw new Error(`Unknown tool name '${unknown}' in AutoMobile tool defaults.`);
+    throw new Error(
+      `Tool '${unknown}' is not a session-configurable tool name; AUTOMOBILE_ENABLED_TOOLS/AUTOMOBILE_DISABLED_TOOLS accept session-configurable tools only (see the automobile:tools resource).`,
+    );
   }
   const disabledSet = new Set(disabled);
   const conflict = enabled.find((toolName) => disabledSet.has(toolName));
@@ -125,7 +127,9 @@ function assertKnownToolNames(
 ): void {
   const unknown = toolNames.find((toolName) => !knownToolNames.has(toolName));
   if (unknown) {
-    throw new Error(`Unknown tool name '${unknown}' in AutoMobile tool defaults.`);
+    throw new Error(
+      `Tool '${unknown}' is not a session-configurable tool name; AUTOMOBILE_ENABLED_TOOLS/AUTOMOBILE_DISABLED_TOOLS accept session-configurable tools only (see the automobile:tools resource).`,
+    );
   }
 }
 

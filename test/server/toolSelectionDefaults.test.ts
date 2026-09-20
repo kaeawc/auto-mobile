@@ -19,7 +19,7 @@ describe("tool selection default declarations", () => {
     configureToolSelectionCliDefaults(["typo"], []);
 
     expect(() => registerMcpTools(false)).toThrow(
-      "Unknown tool name 'typo' in AutoMobile tool defaults.",
+      "Tool 'typo' is not a session-configurable tool name; AUTOMOBILE_ENABLED_TOOLS/AUTOMOBILE_DISABLED_TOOLS accept session-configurable tools only (see the automobile:tools resource).",
     );
   });
 });

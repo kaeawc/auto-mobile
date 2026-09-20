@@ -3,6 +3,8 @@ package dev.jasonpearson.automobile.desktop.core.utils
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.setValue
+import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -10,6 +12,8 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+
+private val LOG = LoggerFactory.getLogger("MemoryPressureMonitor")
 
 /**
  * Monitors JVM heap usage and emits warnings when memory pressure is high.
@@ -50,19 +54,27 @@ class MemoryPressureMonitor(
     scope = pollScope
     pollScope.launch {
       while (isActive) {
-        val usage = sampleHeapUsage()
-        heapUsagePercent = usage
+        // Survive a transient sample/callback failure: a throw here would otherwise kill the
+        // sole polling child and silently stop monitoring until the next start(). SupervisorJob
+        // keeps the scope alive but does not restart this coroutine, so catch-and-continue here.
+        try {
+          val usage = sampleHeapUsage()
+          heapUsagePercent = usage
 
-        if (usage >= CRITICAL_THRESHOLD) {
-          if (!trimFired) {
-            trimFired = true
-            onTrimRequested?.invoke()
+          if (usage >= CRITICAL_THRESHOLD) {
+            if (!trimFired) {
+              trimFired = true
+              onTrimRequested?.invoke()
+            }
+          } else if (usage >= WARNING_THRESHOLD) {
+            trimFired = false
+            onWarning?.invoke()
+          } else {
+            trimFired = false
           }
-        } else if (usage >= WARNING_THRESHOLD) {
-          trimFired = false
-          onWarning?.invoke()
-        } else {
-          trimFired = false
+        } catch (e: Exception) {
+          if (e is CancellationException) throw e
+          LOG.warn("Heap usage poll failed; continuing to monitor: ${e.message}", e)
         }
 
         delay(pollIntervalMs)

@@ -1,4 +1,4 @@
-import type { BaseActionResult } from "./BaseActionResult";
+import { BaseActionResult } from "./BaseActionResult";
 
 /** Result of a platform-native absolute coordinate tap. */
 export interface TapAtResult extends BaseActionResult {

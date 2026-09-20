@@ -77,6 +77,7 @@ const EXTENDS_TYPES: Record<string, string> = {
   ShakeResult: "intensity",
   SwipeOnResult: "targetType",
   SwipeResult: "x1",
+  TapAtResult: "x",
   TapOnElementResult: "action",
   TapResult: "x",
   TerminateAppResult: "wasForeground",

@@ -10,6 +10,10 @@ import {
 } from "node:fs";
 import { rename, unlink, writeFile } from "node:fs/promises";
 import { DEFAULT_PID_FILE_PATH, PID_FILE_PATH, SOCKET_PATH } from "./constants";
+import {
+  readDarwinProcessGenerationToken,
+  readLinuxProcessGenerationToken,
+} from "./processGeneration";
 import { getSocketPath, type SocketServerConfig } from "./socketServer/index";
 import type { AuxiliaryDaemonSocketName, PidFileData } from "./types";
 import { compareStrictNumericVersions } from "../utils/deviceMatcher";
@@ -578,6 +582,17 @@ export interface PidFileLiveDaemonSessionIdProviderDependencies {
   listDaemonPidFiles?: (pidFilePath?: string) => string[];
   readPidFile?: (pidFilePath?: string) => LiveDaemonPidFileRead;
   isProcessRunning?: (pid: number) => boolean;
+  readProcessGenerationToken?: (pid: number) => string | undefined;
+}
+
+function readProcessGenerationTokenForPid(pid: number): string | undefined {
+  if (process.platform === "darwin") {
+    return readDarwinProcessGenerationToken(pid);
+  }
+  if (process.platform === "linux") {
+    return readLinuxProcessGenerationToken(pid);
+  }
+  return undefined;
 }
 
 /**
@@ -603,8 +618,9 @@ export function shouldProtectLiveDaemonVersion(
  *
  * The current daemon is intentionally included when its record is discovered;
  * the repository independently excludes its session ID from stale-session
- * cleanup. Every live peer WITH a `daemonSessionId` is protected
- * unconditionally. A live peer WITHOUT one is a pre-PA2 legacy record (see
+ * cleanup. Every live peer WITH a `daemonSessionId` is protected unless its
+ * current OS birth identity definitely differs from the recorded identity.
+ * A live peer WITHOUT one is a pre-PA2 legacy record (see
  * `daemonSessionId`'s doc comment in `types.ts`) -- there is no session id to
  * protect, so it is logged and skipped rather than treated as ambiguous.
  * Directory discovery and any other read/parse failure on this uid's own
@@ -615,11 +631,45 @@ export class PidFileLiveDaemonSessionIdProvider implements LiveDaemonSessionIdPr
   private readonly listDaemonPidFiles: (pidFilePath?: string) => string[];
   private readonly readPidFile: (pidFilePath?: string) => LiveDaemonPidFileRead;
   private readonly processIsRunning: (pid: number) => boolean;
+  private readonly readProcessGenerationToken: (pid: number) => string | undefined;
 
   constructor(dependencies: PidFileLiveDaemonSessionIdProviderDependencies = {}) {
     this.listDaemonPidFiles = dependencies.listDaemonPidFiles ?? listDaemonPidFilePathsOrThrow;
     this.readPidFile = dependencies.readPidFile ?? readLiveDaemonPidFileSync;
     this.processIsRunning = dependencies.isProcessRunning ?? isProcessRunning;
+    this.readProcessGenerationToken =
+      dependencies.readProcessGenerationToken ?? readProcessGenerationTokenForPid;
+  }
+
+  private isConfirmedRecycledProcess(
+    pid: number,
+    pidData: Record<string, unknown>,
+    pidFile: string,
+  ): boolean {
+    const recordedToken = pidData.processGenerationToken;
+    if (typeof recordedToken === "string") {
+      try {
+        const currentToken = this.readProcessGenerationToken(pid);
+        return typeof currentToken === "string" && currentToken !== recordedToken;
+      } catch (error) {
+        logger.warn(
+          `Failed to read process generation token for live PID ${pid} from ${pidFile}: ${error}`,
+          error,
+        );
+        // The reader failure leaves ownership uncertain, so preserve the peer.
+        return false;
+      }
+    }
+
+    if (typeof pidData.processStartedAt === "number") {
+      // The direct cross-platform PID probes expose only opaque tokens. Without
+      // a recorded token, no current wall-clock start value exists to compare.
+      return false;
+    }
+
+    // Fully legacy records have no birth identity to compare. Uncertainty must
+    // preserve the peer rather than downgrade its sessions to recoverable.
+    return false;
   }
 
   collectLiveDaemonSessionIds(): ReadonlySet<string> {
@@ -653,6 +703,9 @@ export class PidFileLiveDaemonSessionIdProvider implements LiveDaemonSessionIdPr
           `Pid file at ${pidFile} names live process ${pid} but has no daemon session id; ` +
             "treating it as a pre-liveness-discovery legacy record",
         );
+        continue;
+      }
+      if (this.isConfirmedRecycledProcess(pid, pidData, pidFile)) {
         continue;
       }
       liveDaemonSessionIds.add(daemonSessionId);

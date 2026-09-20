@@ -233,8 +233,11 @@ function isAutoMobileDaemonCommand(
     return false;
   }
 
+  // Runtime flags are allowed only in the contiguous run immediately after the
+  // anchored executable. Bare separators, the daemon marker, and non-flag values
+  // are not skipped, so the next token remains the sole entry-script candidate.
   const runtimeEntrypoint = invocation.match(
-    /^(?:(?:"?(?:env|\/usr\/bin\/env)"?)\s+)?(?:"(?:[^"]*\/)?(?:bun|node)(?:\.exe)?"|(?:(?:[A-Za-z]:\/[^"']*\/|[^"'\s]*\/)?(?:bun|node)(?:\.exe)?))\s+(?:"([^"]+)"|'([^']+)'|([^\s"']+))/i,
+    /^(?:(?:"?(?:env|\/usr\/bin\/env)"?)\s+)?(?:"(?:[^"]*\/)?(?:bun|node)(?:\.exe)?"|(?:(?:[A-Za-z]:\/[^"']*\/|[^"'\s]*\/)?(?:bun|node)(?:\.exe)?))\s+(?:(?!--daemon-mode(?:\s|$))-{1,2}[A-Za-z0-9][^\s"']*\s+)*(?:"([^"]+)"|'([^']+)'|([^\s"']+))/i,
   );
   const runsBundledEntrypoint =
     runtimeEntrypoint !== null &&

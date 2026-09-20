@@ -63,6 +63,9 @@ describe("device state tools", () => {
     ).not.toThrow();
     expect(() => setTool!.schema.parse({})).toThrow();
 
+    expect(() => setTool!.schema.parse({ connectivity: { wifiEnabled: false } })).not.toThrow();
+    expect(() => setTool!.schema.parse({ connectivity: {} })).toThrow();
+
     // #6012: networkCondition is a first-class device-state field.
     expect(() => getTool!.schema.parse({ include: ["networkCondition"] })).not.toThrow();
     expect(() => setTool!.schema.parse({ networkCondition: { profile: "3g" } })).not.toThrow();
@@ -157,6 +160,27 @@ describe("device state tools", () => {
       capability: "unsupported",
       requestedProfile: "3g",
     });
+  });
+
+  test("threads connectivity through the setDeviceState handler", async () => {
+    // iOS exits through the static unsupported path without creating an adb or
+    // simctl client, so the returned connectivity result proves the handler
+    // passed the field through to DeviceState.setState.
+    const setTool = ToolRegistry.getTool("setDeviceState");
+    const iosSimulator = createBootedDevice(
+      "12345678-1234-1234-1234-123456789ABC",
+      "ios",
+      "iPhone 16",
+    );
+
+    const response = await setTool!.deviceAwareHandler!(iosSimulator, {
+      connectivity: { wifiEnabled: false },
+    });
+
+    const payload = JSON.parse((response as { content: Array<{ text: string }> }).content[0].text);
+    expect(payload.success).toBe(false);
+    expect(payload.connectivity).toMatchObject({ supported: false, verified: false });
+    expect(payload.connectivity.error).toContain("cannot be set on iOS");
   });
 
   test("rejects networkCondition.expiresInSeconds in sessionless mode where no lifecycle owner can enforce it (#6085)", async () => {

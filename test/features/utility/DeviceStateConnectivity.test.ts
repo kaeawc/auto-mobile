@@ -323,6 +323,193 @@ describe("DeviceState connectivity toggles (issue #6872)", () => {
     expect(simctl.getMethodCalls("executeCommand")).toHaveLength(0);
   });
 
+  test("turns Wi-Fi off and verifies the fresh Android read", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    const client = adbFactory.getFakeClient();
+    client.setCommandResultSequence(ANDROID_CONNECTIVITY_READ_COMMAND, [
+      connectivityOutput({
+        airplaneMode: "0",
+        wifiEnabled: "1",
+        bluetoothEnabled: "0",
+        locationEnabled: "0",
+      }),
+      connectivityOutput({
+        airplaneMode: "0",
+        wifiEnabled: "0",
+        bluetoothEnabled: "0",
+        locationEnabled: "0",
+      }),
+    ]);
+
+    const result = await new DeviceState(androidDevice, { adbFactory }).setState({
+      connectivity: { wifiEnabled: false },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.connectivity).toMatchObject({ wifiEnabled: false, verified: true });
+    expect(client.getAllCommands()).toEqual([
+      ANDROID_CONNECTIVITY_READ_COMMAND,
+      "shell svc wifi disable",
+      ANDROID_CONNECTIVITY_READ_COMMAND,
+    ]);
+  });
+
+  test("leaves an already-disabled Wi-Fi state as an idempotent no-op", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    const client = adbFactory.getFakeClient();
+    client.setCommandResult(
+      ANDROID_CONNECTIVITY_READ_COMMAND,
+      connectivityOutput({
+        airplaneMode: "0",
+        wifiEnabled: "0",
+        bluetoothEnabled: "0",
+        locationEnabled: "0",
+      }),
+    );
+
+    const result = await new DeviceState(androidDevice, { adbFactory }).setState({
+      connectivity: { wifiEnabled: false },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.connectivity).toMatchObject({ wifiEnabled: false, verified: true });
+    expect(client.getAllCommands()).toEqual([ANDROID_CONNECTIVITY_READ_COMMAND]);
+  });
+
+  test("turning Airplane mode on writes its setting and broadcast before verification", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    const client = adbFactory.getFakeClient();
+    client.setCommandResultSequence(ANDROID_CONNECTIVITY_READ_COMMAND, [
+      connectivityOutput({
+        airplaneMode: "0",
+        wifiEnabled: "1",
+        bluetoothEnabled: "1",
+        locationEnabled: "3",
+      }),
+      connectivityOutput({
+        airplaneMode: "1",
+        wifiEnabled: "3",
+        bluetoothEnabled: "2",
+        locationEnabled: "3",
+      }),
+    ]);
+
+    const result = await new DeviceState(androidDevice, { adbFactory }).setState({
+      connectivity: { airplaneMode: true },
+    });
+
+    expect(result.connectivity).toMatchObject({ airplaneMode: true, verified: true });
+    expect(client.getAllCommands()).toEqual([
+      ANDROID_CONNECTIVITY_READ_COMMAND,
+      "shell settings put global airplane_mode_on 1",
+      "shell am broadcast -a android.intent.action.AIRPLANE_MODE --ez state true",
+      ANDROID_CONNECTIVITY_READ_COMMAND,
+    ]);
+  });
+
+  test("turns Bluetooth on with the Android svc command", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    const client = adbFactory.getFakeClient();
+    client.setCommandResultSequence(ANDROID_CONNECTIVITY_READ_COMMAND, [
+      connectivityOutput({
+        airplaneMode: "0",
+        wifiEnabled: "1",
+        bluetoothEnabled: "0",
+        locationEnabled: "3",
+      }),
+      connectivityOutput({
+        airplaneMode: "0",
+        wifiEnabled: "1",
+        bluetoothEnabled: "1",
+        locationEnabled: "3",
+      }),
+    ]);
+
+    const result = await new DeviceState(androidDevice, { adbFactory }).setState({
+      connectivity: { bluetoothEnabled: true },
+    });
+
+    expect(result.connectivity).toMatchObject({ bluetoothEnabled: true, verified: true });
+    expect(client.getAllCommands()).toContain("shell svc bluetooth enable");
+  });
+
+  test("turns Location off with the modern Android location command", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    const client = adbFactory.getFakeClient();
+    client.setCommandResultSequence(ANDROID_CONNECTIVITY_READ_COMMAND, [
+      connectivityOutput({
+        airplaneMode: "0",
+        wifiEnabled: "1",
+        bluetoothEnabled: "1",
+        locationEnabled: "3",
+      }),
+      connectivityOutput({
+        airplaneMode: "0",
+        wifiEnabled: "1",
+        bluetoothEnabled: "1",
+        locationEnabled: "0",
+      }),
+    ]);
+
+    const result = await new DeviceState(androidDevice, { adbFactory }).setState({
+      connectivity: { locationEnabled: false },
+    });
+
+    expect(result.connectivity).toMatchObject({ locationEnabled: false, verified: true });
+    expect(client.getAllCommands()).toContain("shell cmd location set-location-enabled false");
+  });
+
+  test("reports a warning and unverified result when the post-write state disagrees", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    const client = adbFactory.getFakeClient();
+    client.setCommandResultSequence(ANDROID_CONNECTIVITY_READ_COMMAND, [
+      connectivityOutput({
+        airplaneMode: "0",
+        wifiEnabled: "1",
+        bluetoothEnabled: "0",
+        locationEnabled: "0",
+      }),
+      connectivityOutput({
+        airplaneMode: "0",
+        wifiEnabled: "1",
+        bluetoothEnabled: "0",
+        locationEnabled: "0",
+      }),
+    ]);
+
+    const result = await new DeviceState(androidDevice, { adbFactory }).setState({
+      connectivity: { wifiEnabled: false },
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.connectivity).toMatchObject({ wifiEnabled: true, verified: false });
+    expect(result.connectivity?.warning).toContain("wifiEnabled");
+  });
+
+  test("rejects an empty connectivity object without touching Android", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+
+    const result = await new DeviceState(androidDevice, { adbFactory }).setState({
+      connectivity: {},
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("Provide at least one connectivity field to set");
+    expect(adbFactory.getFakeClient().getAllCommands()).toHaveLength(0);
+  });
+
+  test("reports iOS connectivity writes as unsupported without issuing simctl", async () => {
+    const simctl = new FakeSimCtlClient();
+    const result = await new DeviceState(iosSimulator, { simctl }).setState({
+      connectivity: { wifiEnabled: false },
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.connectivity).toMatchObject({ supported: false, verified: false });
+    expect(result.connectivity?.error).toContain("cannot be set on iOS");
+    expect(simctl.getMethodCalls("executeCommand")).toHaveLength(0);
+  });
+
   test("every setDeviceState-writable field has a getDeviceState-readable counterpart", () => {
     for (const field of DEVICE_STATE_WRITABLE_FIELDS) {
       expect(DEVICE_STATE_READABLE_FIELDS).toContain(field);

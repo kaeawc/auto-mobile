@@ -132,6 +132,22 @@ const biometricStateInputSchema = z.object({
     .describe("Set iOS Simulator biometric enrollment state."),
 });
 
+const connectivityStateInputSchema = z
+  .object({
+    airplaneMode: z.boolean().optional().describe("Enable or disable Airplane mode on Android."),
+    wifiEnabled: z.boolean().optional().describe("Enable or disable Wi-Fi on Android."),
+    bluetoothEnabled: z.boolean().optional().describe("Enable or disable Bluetooth on Android."),
+    locationEnabled: z.boolean().optional().describe("Enable or disable Location on Android."),
+  })
+  .refine(
+    (values) =>
+      values.airplaneMode !== undefined ||
+      values.wifiEnabled !== undefined ||
+      values.bluetoothEnabled !== undefined ||
+      values.locationEnabled !== undefined,
+    { message: "Provide at least one connectivity field to set" },
+  );
+
 // In direct/sessionless mode there is no session lifecycle owner to enforce a
 // networkCondition TTL, so accepting `expiresInSeconds` there would echo a TTL we
 // will never honor and leave the emulator shaped indefinitely (issue #6085 review
@@ -371,6 +387,9 @@ export const setDeviceStateSchema = withJsonSchemaOverride(
       biometrics: biometricStateInputSchema
         .optional()
         .describe("iOS Simulator biometric enrollment state to apply."),
+      connectivity: connectivityStateInputSchema
+        .optional()
+        .describe("Android connectivity toggles to apply."),
       networkCondition: networkConditionInputSchema
         .optional()
         .describe("Device-wide network condition to apply (Android emulator only)."),
@@ -379,6 +398,7 @@ export const setDeviceStateSchema = withJsonSchemaOverride(
     (values) =>
       values.doNotDisturb !== undefined ||
       values.biometrics !== undefined ||
+      values.connectivity !== undefined ||
       values.networkCondition !== undefined,
     {
       message: "At least one device state field must be provided",
@@ -799,6 +819,7 @@ export function registerUtilityTools() {
         {
           doNotDisturb: args.doNotDisturb,
           biometrics: args.biometrics,
+          connectivity: args.connectivity,
           networkCondition: args.networkCondition,
         },
         capture.failure,
@@ -813,6 +834,7 @@ export function registerUtilityTools() {
       deviceState.setState({
         doNotDisturb: args.doNotDisturb,
         biometrics: args.biometrics,
+        connectivity: args.connectivity,
         networkCondition: args.networkCondition,
       });
 
@@ -883,7 +905,7 @@ export function registerUtilityTools() {
 
   ToolRegistry.registerDeviceAware(
     "setDeviceState",
-    "Set device state such as Do Not Disturb, iOS Simulator biometric enrollment, and device-wide network condition. Degraded network profiles (offline/veryBad/2g/3g/4g) are best-effort cellular shaping on an Android emulator, reported `partial` (they may not affect Wi-Fi/app traffic); only reset to `none` is fully verified. A session always restores the network to a clean `none` state on release/rebind.",
+    "Set device state such as Do Not Disturb, Android connectivity toggles (airplaneMode, wifiEnabled, bluetoothEnabled, locationEnabled), iOS Simulator biometric enrollment, and device-wide network condition. Connectivity values are desired end states and are verified by a fresh Android read; iOS connectivity writes are unsupported. Degraded network profiles (offline/veryBad/2g/3g/4g) are best-effort cellular shaping on an Android emulator, reported `partial` (they may not affect Wi-Fi/app traffic); only reset to `none` is fully verified. A session always restores the network to a clean `none` state on release/rebind.",
     setDeviceStateSchema,
     setDeviceStateHandler,
     { defaultEnabled: false },

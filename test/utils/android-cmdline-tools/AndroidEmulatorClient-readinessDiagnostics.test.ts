@@ -120,6 +120,7 @@ function configureReadyDevice(adb: ReadinessAdbExecutor): void {
   adb.setCommandResponse("shell pm list packages", result("package:android\n"));
   adb.setCommandResponse("shell getprop sys.boot_completed", result("1\n"));
   adb.setCommandResponse("shell getprop init.svc.bootanim", result("stopped\n"));
+  adb.setCommandResponse("shell getprop ro.product.model", result("sdk_gphone64_arm64\n"));
 }
 
 describe("Android emulator readiness diagnostics", () => {
@@ -336,6 +337,25 @@ describe("Android emulator readiness diagnostics", () => {
     );
 
     expect(device.deviceId).toBe("emulator-5554");
+  });
+
+  test("returns the model resolved during a cold-boot readiness wait", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const adb = new ReadinessAdbExecutor();
+    configureReadyDevice(adb);
+
+    const device = await clientWith(adb, timer).waitForEmulatorReady(
+      "Pixel_9_Pro",
+      5_000,
+      null,
+      "emulator-5554",
+    );
+
+    expect(device).toMatchObject({
+      deviceId: "emulator-5554",
+      model: "sdk_gphone64_arm64",
+    });
   });
 
   test("keeps a listed target out of absent state while its console is busy", async () => {

@@ -1,5 +1,37 @@
 # Changelog
 
+## [v0.0.77] - 2026-09-20
+
+### Added
+
+- daemon: recycled-PID (birth-time) hardening for stale-session recovery liveness ([#7293](https://github.com/kaeawc/auto-mobile/issues/7293)) (bot-filed, routine:tracker-hygiene)
+- bugReport iOS hardening follow-ups (from #5641) ([#5653](https://github.com/kaeawc/auto-mobile/issues/5653)) (ios)
+
+### Changed
+
+- ci(swift): Swift Code Coverage self-hosted runner ships Swift 6.2.4 but control-proxy requires 6.3.0 ([#7294](https://github.com/kaeawc/auto-mobile/issues/7294)) (ios, bot-filed, routine:tracker-hygiene)
+- device description: finish canonical-shape cleanup (DD-F6/F7/F8 — drop residual duplicate fields) ([#7292](https://github.com/kaeawc/auto-mobile/issues/7292)) (bot-filed, routine:tracker-hygiene)
+
+### Fixed
+
+- daemon: isAutoMobileDaemonCommand regex misparses a runtime flag before the entry script, so --daemon stop/restart can't verify/reap the daemon ([#7356](https://github.com/kaeawc/auto-mobile/issues/7356)) (daemon)
+- daemon: status and MCP clients exit silently when tool profile differs from shared daemon ([#7353](https://github.com/kaeawc/auto-mobile/issues/7353)) (devxp, daemon)
+
+### Other
+
+- Emulator lanes flake on getAndroid runner-health readiness deadline (rerun-masked) ([#7347](https://github.com/kaeawc/auto-mobile/issues/7347)) (android, flaky test, ci)
+- flake→regression: `listDevices tool (#5870).read-only admission does not reclaim an awaiting-owner session` exceeds 100ms unit budget on 3 consecutive main On-Merge runs ([#7324](https://github.com/kaeawc/auto-mobile/issues/7324)) (bot-filed, needs-human, routine:flake-sentinel)
+- setDeviceState(airplaneMode) reports verified:true while the radios stay up — the AIRPLANE_MODE broadcast is denied on API 36 and the verification re-reads the tool's own settings write ([#7323](https://github.com/kaeawc/auto-mobile/issues/7323)) (bot-filed, routine:exploratory)
+- mcp-drive: --json prints nothing for failed steps, and swallows transport-level error text as "tool reported isError" ([#7322](https://github.com/kaeawc/auto-mobile/issues/7322)) (bot-filed, routine:manual-test)
+- getAndroid: cold-boot response reports model:null while claiming isReady/booted (booted path and listDevices both carry it) ([#7321](https://github.com/kaeawc/auto-mobile/issues/7321)) (bot-filed, routine:manual-test)
+- systemTray(clearAll): reports "No notifications found" with success:true for an appId that list enumerates ([#7320](https://github.com/kaeawc/auto-mobile/issues/7320)) (bot-filed, routine:manual-test)
+- enableTools[] is settable only at acquisition but the gated list is only knowable after it — no way to learn the 43 gated tools before taking a device, or to ungate one after ([#7314](https://github.com/kaeawc/auto-mobile/issues/7314)) (bot-filed, routine:dogfood)
+- Tool responses report the operation, not the outcome: getDeviceState says 'Read device state', ensureChecked never says whether it flipped, inputText echoes the selector ([#7313](https://github.com/kaeawc/auto-mobile/issues/7313)) (bot-filed, routine:dogfood)
+- setDeviceState: no connectivity verb, so getDeviceState can read wifiEnabled/airplaneMode but 'turn off Wi-Fi' costs five layout-dependent Settings calls ([#7312](https://github.com/kaeawc/auto-mobile/issues/7312)) (bot-filed, routine:dogfood)
+- observe: synthetic s2- elementIds exclude contentDescription, so ten unrelated icon buttons collide on one id with an IME-unstable positional suffix ([#7311](https://github.com/kaeawc/auto-mobile/issues/7311)) (bot-filed, routine:dogfood)
+- inputText: selector resolves to non-input system-UI nodes (a status-bar 'Phone notification:' icon), then silently types into the previously focused field and reports success — overwriting data ([#7310](https://github.com/kaeawc/auto-mobile/issues/7310)) (bot-filed, routine:dogfood)
+- getAndroid: re-acquiring a device the caller already owns fails as a race against the caller's own session, with no release verb and no safe retry ([#7309](https://github.com/kaeawc/auto-mobile/issues/7309)) (bot-filed, routine:dogfood)
+
 ## [v0.0.76] - 2026-09-19
 
 ### Added

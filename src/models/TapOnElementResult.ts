@@ -53,6 +53,8 @@ export interface TapOnElementResult extends BaseActionResult {
   pressRecognized?: boolean;
   contextMenuOpened?: boolean;
   selectionStarted?: boolean;
+  /** Whether a focus action was confirmed on the resolved editable target. */
+  focusVerified?: boolean;
   searchUntil?: {
     durationMs: number;
     requestCount: number;

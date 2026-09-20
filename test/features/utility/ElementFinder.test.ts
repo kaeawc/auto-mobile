@@ -101,7 +101,7 @@ describe("DefaultElementFinder", () => {
         false,
         "focus-input",
       );
-      expect(focusResults).toHaveLength(2);
+      expect(focusResults).toHaveLength(1);
       expect(focusResults[0].class).toBe("android.widget.EditText");
 
       const tapResults = finder.findElementsByText(
@@ -119,6 +119,63 @@ describe("DefaultElementFinder", () => {
       expect(finder.findElementByText(hierarchy, "Dark theme")!.class).toBe(
         "android.widget.EditText",
       );
+    });
+
+    test("excludes non-editable system UI matches for input focus", () => {
+      const hierarchy = makeHierarchy({
+        $: {
+          class: "android.widget.TextView",
+          package: "com.android.systemui",
+          text: "Phone notification: ",
+          clickable: "true",
+          bounds: bounds(0, 0, 100, 50),
+        },
+      });
+
+      expect(
+        finder.findElementsByText(
+          hierarchy,
+          "Phone",
+          null,
+          true,
+          false,
+          false,
+          false,
+          "focus-input",
+        ),
+      ).toEqual([]);
+    });
+
+    test("uses a partial editable match when the exact match is non-editable", () => {
+      const hierarchy = makeHierarchy([
+        {
+          $: {
+            class: "android.widget.TextView",
+            text: "Phone",
+            bounds: bounds(0, 0, 100, 50),
+          },
+        },
+        {
+          $: {
+            class: "android.widget.EditText",
+            text: "Phone number",
+            bounds: bounds(0, 50, 100, 100),
+          },
+        },
+      ]);
+
+      const results = finder.findElementsByText(
+        hierarchy,
+        "Phone",
+        null,
+        true,
+        false,
+        false,
+        false,
+        "focus-input",
+      );
+      expect(results).toHaveLength(1);
+      expect(results[0].class).toBe("android.widget.EditText");
     });
 
     test("demotes custom editable nodes for tap selection", () => {

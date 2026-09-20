@@ -166,6 +166,7 @@ describe("InputText.execute", () => {
           focusCalls.push(selector);
           return {
             success: true,
+            focusVerified: true,
             matchedId: "com.test:id/first_name",
             matchedText: "First name",
           };
@@ -202,6 +203,30 @@ describe("InputText.execute", () => {
       // Focus failed, so nothing was ever typed.
       expect(fakeA11yService.getTextInputHistory()).toEqual([]);
       expect(fakeAdb.getExecutedCommands().some((cmd) => cmd.includes("keyevent"))).toBe(false);
+    });
+
+    test("does not type into the previously focused field when focus is not verified", async () => {
+      serverConfig.setEventAllMarkers([]);
+      getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
+        fakeA11yService as unknown as AndroidCtrlProxyClient,
+      );
+
+      const inputText = new InputText(androidDevice, fakeAdb as any);
+      wireFakes(inputText);
+      (inputText as any).targetFocuser = {
+        focus: async () => ({
+          success: true,
+          matchedText: "Phone notification: ",
+        }),
+      };
+
+      const result = await inputText.execute("555-0100", undefined, false, undefined, undefined, {
+        text: "Phone",
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Phone notification");
+      expect(fakeA11yService.getTextInputHistory()).toEqual([]);
     });
   });
 });

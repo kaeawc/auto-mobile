@@ -65,4 +65,33 @@ describe("TapOnElement selectionStrategy", () => {
     );
     expect(fakeSelector.lastTextSelectionIntent).toBe("focus-input");
   });
+
+  test("fails focus on a non-editable match without tapping it", async () => {
+    const fakeSelector = new FakeElementSelector({
+      text: "Phone notification: ",
+      class: "android.widget.TextView",
+      bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+    } as any);
+    const tapOnElement = new TapOnElement(
+      {
+        name: "test-device",
+        platform: "android",
+        deviceId: "emulator-5554",
+      } as any,
+      new FakeAdbClient() as any,
+      { timer: new FakeTimer(), elementSelector: fakeSelector },
+    );
+    let tapped = false;
+    (tapOnElement as any).observedInteraction = async (action: (observation: unknown) => unknown) =>
+      action({ viewHierarchy: { hierarchy: { node: {} } } });
+    (tapOnElement as any).executeAndroidTap = async () => {
+      tapped = true;
+    };
+
+    const result = await tapOnElement.execute({ text: "Phone", action: "focus" });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Phone notification");
+    expect(tapped).toBe(false);
+  });
 });

@@ -680,6 +680,19 @@ export class DefaultElementFinder implements ElementFinder {
     return isEditableElementProperties(props);
   }
 
+  private filterTextMatchesForSelectionIntent(
+    matches: { exactMatches: Element[]; partialMatches: Element[] },
+    selectionIntent?: TextSelectionIntent,
+  ): { exactMatches: Element[]; partialMatches: Element[] } {
+    if (selectionIntent !== "focus-input") {
+      return matches;
+    }
+    return {
+      exactMatches: matches.exactMatches.filter((element) => this.isAndroidInputNode(element)),
+      partialMatches: matches.partialMatches.filter((element) => this.isAndroidInputNode(element)),
+    };
+  }
+
   private rankTextMatches(matches: Element[], selectionIntent?: TextSelectionIntent): Element[] {
     matches.sort(
       (a, b) =>
@@ -744,8 +757,14 @@ export class DefaultElementFinder implements ElementFinder {
       exactMatches: Element[];
       partialMatches: Element[];
     }): Element[] => {
+      const eligibleMatches = this.filterTextMatchesForSelectionIntent(matches, selectionIntent);
       const selectedMatches =
-        matches.exactMatches.length > 0 ? matches.exactMatches : matches.partialMatches;
+        eligibleMatches.exactMatches.length > 0
+          ? eligibleMatches.exactMatches
+          : eligibleMatches.partialMatches;
+      // A text input selector may share label text with non-input UI (including
+      // status-bar notifications). Those nodes are never valid focus targets:
+      // ranking them below inputs still lets one win when no input matches.
       return preserveTraversalOrder
         ? selectedMatches
         : this.rankTextMatches(selectedMatches, selectionIntent);

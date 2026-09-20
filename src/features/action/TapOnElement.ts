@@ -52,6 +52,7 @@ import { androidViewHierarchyIndicatesLikelyBlockingLoading } from "../../utils/
 import {
   getToggleContentDescription,
   hasAccessibilityAction,
+  isEditableElementProperties,
   isTruthyFlag,
 } from "../../utils/elementProperties";
 import {
@@ -1127,6 +1128,52 @@ export class TapOnElement extends BaseVisualChange {
     };
   }
 
+  private isSameFocusTarget(target: Element, candidate: Element): boolean {
+    for (const key of ["resource-id", "view-id", "test-tag"] as const) {
+      const targetValue = target[key];
+      const candidateValue = candidate[key];
+      if (
+        typeof targetValue === "string" &&
+        targetValue.length > 0 &&
+        typeof candidateValue === "string" &&
+        candidateValue.length > 0
+      ) {
+        return targetValue === candidateValue;
+      }
+    }
+    return boundsEqual(target.bounds, candidate.bounds);
+  }
+
+  private describeFocusTarget(element: Element, options: TapOnElementOptions): string {
+    const text =
+      element.text ??
+      element["content-desc"] ??
+      element["ios-accessibility-label"] ??
+      options.text ??
+      options.textAny?.[0];
+    return typeof text === "string" && text.length > 0
+      ? JSON.stringify(text)
+      : "the matched element";
+  }
+
+  private verifyFocusedInputTarget(
+    options: TapOnElementOptions,
+    target: Element,
+    observation?: ObserveResult,
+  ): boolean {
+    if (!observation?.viewHierarchy) {
+      return false;
+    }
+    const candidate = this.findElementInHierarchy(options, observation.viewHierarchy).selection
+      .element;
+    return Boolean(
+      candidate &&
+      isEditableElementProperties(candidate) &&
+      this.finder.isElementFocused(candidate) &&
+      this.isSameFocusTarget(target, candidate),
+    );
+  }
+
   private requireTestTag(options: TapOnElementOptions): string {
     if (!options.testTag) {
       throw new ActionableError(
@@ -1944,6 +1991,8 @@ export class TapOnElement extends BaseVisualChange {
       return this.createErrorResult(options.action, "tap on action is required");
     }
 
+    const requestedAction = options.action;
+
     if (options.ensureTap) {
       options = { ...options, preTapStability: true, retryIfNoChange: true };
     }
@@ -1958,6 +2007,7 @@ export class TapOnElement extends BaseVisualChange {
     let previousObserveResult: ObserveResult | null = null;
     let selectionCapture: SelectionCaptureState | null = null;
     let searchUntilStats: SearchUntilStats | undefined;
+    let focusTarget: Element | undefined;
 
     try {
       throwIfAborted(signal);
@@ -2055,6 +2105,20 @@ export class TapOnElement extends BaseVisualChange {
           const longPressDuration = this.getLongPressDuration(options);
 
           if (action === "focus") {
+            if (!isEditableElementProperties(element)) {
+              perf.end();
+              return {
+                success: false,
+                action,
+                element,
+                selectedElement: selectedElementMetadata,
+                searchUntil: searchOutcome.stats,
+                error: `Cannot focus ${this.describeFocusTarget(element, options)} because it is not an editable input`,
+              };
+            }
+
+            focusTarget = element;
+
             // Check if element is already focused
             const isFocused = this.finder.isElementFocused(element);
 
@@ -2069,6 +2133,7 @@ export class TapOnElement extends BaseVisualChange {
                 searchUntil: searchOutcome.stats,
                 wasAlreadyFocused: true,
                 focusChanged: false,
+                focusVerified: true,
                 x: initialTapPoint.x,
                 y: initialTapPoint.y,
               };
@@ -2276,6 +2341,19 @@ export class TapOnElement extends BaseVisualChange {
           result.observation.selectedElements = selectedElements;
         }
         this.enforceFreshnessConsistencyWithEffect(previousObserveResult, result);
+      }
+
+      if (requestedAction === "focus" && result.success) {
+        const target = focusTarget ?? result.element;
+        result.focusVerified = this.verifyFocusedInputTarget(
+          { ...options, action: "focus" },
+          target,
+          result.observation,
+        );
+        if (!result.focusVerified) {
+          result.success = false;
+          result.error = `Failed to confirm focus on editable input ${this.describeFocusTarget(target, options)}`;
+        }
       }
 
       if (options.action === "longPress") {

@@ -1,7 +1,7 @@
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import Ajv2020 from "ajv/dist/2020";
 import generatedDefinitions from "../../schemas/tool-definitions.json";
-import { afterEach, beforeAll, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import {
   listSystemTrayNotifications,
   resolveUniqueTrayAppLabel,
@@ -10,6 +10,7 @@ import {
   type SystemTrayDependencies,
 } from "../../src/server/systemTrayHelpers";
 import { registerInteractionTools, systemTraySchema } from "../../src/server/interactionTools";
+import { ListInstalledApps } from "../../src/features/observe/ListInstalledApps";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeObserveScreen } from "../fakes/FakeObserveScreen";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -68,6 +69,7 @@ function setup(pages: ObserveResult[], markScrollBoundary = true) {
   }
   const adb = new FakeAdbExecutor();
   const observer = new FakeObserveScreen();
+  const timer = new FakeTimer();
   // A real tray only changes when a scroll gesture moves it, so page turns are
   // driven by executed swipes rather than by observation count. That keeps
   // settle polling (which re-observes without swiping) reading one page.
@@ -80,9 +82,9 @@ function setup(pages: ObserveResult[], markScrollBoundary = true) {
   setSystemTrayDependencies({
     adbFactory: () => adb,
     observeScreenFactory: () => observer,
-    timer: new FakeTimer(),
+    timer,
   });
-  return { adb, observer };
+  return { adb, observer, timer };
 }
 const list = () => listSystemTrayNotifications(device, "com.example.messages", "Messages", 5000);
 class FakeTrayApps {
@@ -798,6 +800,130 @@ describe("systemTray list silent-section ownership", () => {
     expect(payload.notifications).toEqual([]);
     expect(payload.unattributedRows).toBe(1);
     expect(payload.message).toContain("1 shade row");
+  });
+});
+
+describe("systemTray clearAll dumpsys ownership", () => {
+  const SHELL = "com.android.shell";
+  const shellLabel = "Shell";
+  const execResult = (stdout: string) => ({
+    stdout,
+    stderr: "",
+    toString: () => stdout,
+    trim: () => stdout.trim(),
+    includes: (search: string) => stdout.includes(search),
+  });
+  const silentRow = (title: string, body: string) =>
+    node("com.android.systemui:id/expandableNotificationRow", "", [
+      node("android:id/title", title),
+      node("android:id/text", body),
+    ]);
+  const dumpsys = (...records: string[]) =>
+    ["Current Notification Manager state:", "  Notification List:", ...records].join("\n");
+  const record = (id: number, title: string, text: string) =>
+    [
+      `    NotificationRecord(0x${id}: pkg=${SHELL} user=UserHandle{0} id=${id} tag=null key=0|${SHELL}|${id}|null|10164)`,
+      "      extras={",
+      `        android.title=String (${title})`,
+      `        android.text=String (${text})`,
+      "      }",
+    ].join("\n");
+  const handler = () => ToolRegistry.getTool("systemTray")!.deviceAwareHandler!;
+  const clearAll = () =>
+    handler()(device, {
+      action: "clearAll",
+      notification: { appId: SHELL },
+    });
+  const installClearAllDependencies = (timer: FakeTimer, adb: FakeAdbExecutor) => {
+    timer.enableAutoAdvance();
+    setSystemTrayDependencies({
+      adbFactory: () => adb,
+      appLabelResolver: async () => shellLabel,
+      timer,
+    });
+    registerInteractionTools();
+  };
+
+  test("clears header-less rows attributed to the app by dumpsys", async () => {
+    const notifications = [
+      ["First shell notification", "First body"],
+      ["Second shell notification", "Second body"],
+      ["Third shell notification", "Third body"],
+    ] as const;
+    const { adb, timer } = setup(
+      [
+        page(...notifications.map(([title, body]) => silentRow(title, body))),
+        page(...notifications.slice(1).map(([title, body]) => silentRow(title, body))),
+        page(...notifications.slice(2).map(([title, body]) => silentRow(title, body))),
+        page(),
+      ],
+      false,
+    );
+    adb.setCommandResponse(
+      "dumpsys notification",
+      execResult(dumpsys(...notifications.map(([title, body], id) => record(id + 1, title, body)))),
+    );
+    const installedAppsSpy = spyOn(ListInstalledApps.prototype, "execute").mockResolvedValue([
+      SHELL,
+    ]);
+    installClearAllDependencies(timer, adb);
+
+    try {
+      const payload = JSON.parse((await clearAll()).content[0].text);
+      expect(payload).toMatchObject({ dismissedCount: 3, expectedCount: 3, success: true });
+      expect(payload.message).toBe(`Cleared 3 notification(s) for ${SHELL}`);
+    } finally {
+      installedAppsSpy.mockRestore();
+    }
+
+    expect(
+      adb.getExecutedCommands().filter((command) => command.includes("input swipe")),
+    ).toHaveLength(3);
+  });
+
+  test("reports an honest failure when dumpsys-owned rows cannot all be cleared", async () => {
+    const notifications = [
+      ["First shell notification", "First body"],
+      ["Second shell notification", "Second body"],
+    ] as const;
+    const { adb, timer } = setup(
+      [page(...notifications.map(([title, body]) => silentRow(title, body))), page()],
+      false,
+    );
+    adb.setCommandResponse(
+      "dumpsys notification",
+      execResult(dumpsys(...notifications.map(([title, body], id) => record(id + 1, title, body)))),
+    );
+    const installedAppsSpy = spyOn(ListInstalledApps.prototype, "execute").mockResolvedValue([
+      SHELL,
+    ]);
+    installClearAllDependencies(timer, adb);
+
+    try {
+      const payload = JSON.parse((await clearAll()).content[0].text);
+      expect(payload).toMatchObject({ dismissedCount: 1, expectedCount: 2, success: false });
+      expect(payload.message).not.toBe(`No notifications found for ${SHELL}`);
+      expect(payload.message).toContain("Cleared 1 of 2 notification(s)");
+    } finally {
+      installedAppsSpy.mockRestore();
+    }
+  });
+
+  test("reports a dumpsys-verified empty tray as successful", async () => {
+    const { adb, timer } = setup([page(silentRow("Other app", "Other body"))], false);
+    adb.setCommandResponse("dumpsys notification", execResult(dumpsys()));
+    const installedAppsSpy = spyOn(ListInstalledApps.prototype, "execute").mockResolvedValue([
+      SHELL,
+    ]);
+    installClearAllDependencies(timer, adb);
+
+    try {
+      const payload = JSON.parse((await clearAll()).content[0].text);
+      expect(payload).toMatchObject({ dismissedCount: 0, expectedCount: 0, success: true });
+      expect(payload.message).toBe(`No notifications found for ${SHELL}`);
+    } finally {
+      installedAppsSpy.mockRestore();
+    }
   });
 });
 

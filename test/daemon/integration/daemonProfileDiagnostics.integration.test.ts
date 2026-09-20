@@ -27,6 +27,7 @@ function createIsolatedDaemonEnvironment(): IsolatedDaemonEnvironment {
     socketPath: join(directory, "daemon.sock"),
     environment: {
       ...process.env,
+      HOME: directory,
       AUTOMOBILE_DATA_DIR: dataDirectory,
       AUTOMOBILE_LOG_DIR: logDirectory,
       AUTOMOBILE_DB_PATH: join(directory, "auto-mobile.db"),
@@ -171,6 +172,48 @@ describe("daemon tool-profile diagnostics", () => {
       expect(staleProfile.exitCode).toBe(0);
       expect(staleProfile.stdout).toContain("Daemon is running");
       expect(staleProfile.stderr).toBe("");
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  test.skipIf(process.platform === "win32")(
+    "stop remains reachable when the caller tool profile is stale",
+    async () => {
+      const isolated = createIsolatedDaemonEnvironment();
+      tempDirectories.push(isolated.directory);
+      // Deliberately omits the `--config=` flag the other cases in this file use
+      // to disable bunfig.toml loading (harmless here since bunfig's [test]
+      // section only affects `bun test`). `--daemon stop` verifies the daemon's
+      // process-table entry via a regex that expects the entry script to
+      // immediately follow the bun/node executable in `ps` output; `--config=`
+      // interposed between them makes that regex capture "--config=" as the
+      // entry script and silently fail to match the real daemon, so stop would
+      // never actually find/reap it (tracked separately; not fixed here).
+      const daemon = Bun.spawn([process.execPath, ENTRYPOINT, "--daemon-mode"], {
+        cwd: REPOSITORY_ROOT,
+        env: {
+          ...isolated.environment,
+          AUTOMOBILE_ENABLED_TOOLS: "listDevices,provisionDevice,deleteDevice",
+        },
+        stdout: "ignore",
+        stderr: "ignore",
+      });
+      processes.push(daemon);
+      await waitForSocket(daemon, isolated.socketPath);
+
+      const result = await runEntrypoint(
+        ["--daemon", "stop"],
+        {
+          ...isolated.environment,
+          AUTOMOBILE_ENABLED_TOOLS: "getAndroid",
+        },
+        processes,
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stderr).not.toContain("Unknown tool name \'getAndroid\'");
+      await expect(daemon.exited).resolves.toBe(0);
+      expect(existsSync(isolated.socketPath)).toBe(false);
     },
     TEST_TIMEOUT_MS,
   );

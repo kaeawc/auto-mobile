@@ -283,6 +283,8 @@ export interface DeviceConnectivityState {
   rawValues?: Partial<Record<DeviceConnectivityField, string>>;
   /** Names the keys that could not be read, when at least one other could. */
   warning?: string;
+  /** Whether every requested connectivity toggle read back at its desired state. */
+  verified?: boolean;
   error?: string;
 }
 
@@ -306,6 +308,12 @@ export interface SetDeviceStateInput {
   };
   biometrics?: {
     enrollment: BiometricEnrollment;
+  };
+  connectivity?: {
+    airplaneMode?: boolean;
+    wifiEnabled?: boolean;
+    bluetoothEnabled?: boolean;
+    locationEnabled?: boolean;
   };
   networkCondition?: SetNetworkConditionInput;
 }
@@ -336,6 +344,7 @@ export type DeviceStateField = (typeof DEVICE_STATE_READABLE_FIELDS)[number];
 const DEVICE_STATE_WRITABLE_FIELD_PRESENCE: Record<keyof SetDeviceStateInput, true> = {
   doNotDisturb: true,
   biometrics: true,
+  connectivity: true,
   networkCondition: true,
 };
 
@@ -901,6 +910,12 @@ const IOS_CONNECTIVITY_UNSUPPORTED_ERROR =
   "override` only paints the status bar without changing real connectivity. Read these from " +
   "Settings on the device instead.";
 
+const IOS_CONNECTIVITY_WRITE_UNSUPPORTED_ERROR =
+  "Device connectivity toggles cannot be set on iOS: Airplane mode, Wi-Fi, Bluetooth and " +
+  "Location have no simctl or devicectl write verb. A simulator shares the host's network stack " +
+  "(so changing its Wi-Fi/Bluetooth state would change the Mac, not the device under test), and " +
+  "`simctl status_bar override` only paints the status bar without changing real connectivity.";
+
 /**
  * `settings get` prints the literal `null` for an absent key, and the batched
  * script prints an empty value for a key whose read failed. Anything that is not
@@ -1017,7 +1032,7 @@ export const EMPTY_STATE_SELECTION_ERROR = "At least one device state field must
 
 /** True when a `setState` call carries no device-state field to apply. */
 function setDeviceStateInputIsEmpty(input: SetDeviceStateInput): boolean {
-  return !input.doNotDisturb && !input.biometrics && !input.networkCondition;
+  return !input.doNotDisturb && !input.biometrics && !input.connectivity && !input.networkCondition;
 }
 
 function doNotDisturbInputError(input: SetDeviceStateInput["doNotDisturb"]): string | undefined {
@@ -1028,6 +1043,23 @@ function doNotDisturbInputError(input: SetDeviceStateInput["doNotDisturb"]): str
     return `doNotDisturb.enabled=${input.enabled} conflicts with doNotDisturb.mode="${input.mode}"`;
   }
   return undefined;
+}
+
+function connectivityInputError(input: SetDeviceStateInput["connectivity"]): string | undefined {
+  if (
+    input &&
+    input.airplaneMode === undefined &&
+    input.wifiEnabled === undefined &&
+    input.bluetoothEnabled === undefined &&
+    input.locationEnabled === undefined
+  ) {
+    return "Provide at least one connectivity field to set";
+  }
+  return undefined;
+}
+
+function setDeviceStateInputError(input: SetDeviceStateInput): string | undefined {
+  return doNotDisturbInputError(input.doNotDisturb) ?? connectivityInputError(input.connectivity);
 }
 
 export class DeviceState {
@@ -1109,7 +1141,7 @@ export class DeviceState {
       };
     }
 
-    const inputError = doNotDisturbInputError(input.doNotDisturb);
+    const inputError = setDeviceStateInputError(input);
     if (inputError) {
       return {
         success: false,
@@ -1119,18 +1151,15 @@ export class DeviceState {
       };
     }
 
-    const doNotDisturb = input.doNotDisturb
-      ? await this.writeDoNotDisturb(input.doNotDisturb)
-      : undefined;
-    const biometrics = input.biometrics
-      ? await this.setBiometricEnrollmentState(input.biometrics.enrollment)
-      : undefined;
-    const networkCondition = input.networkCondition
-      ? await this.writeNetworkCondition(input.networkCondition)
-      : undefined;
-    const requestedStates = [doNotDisturb, biometrics, networkCondition].filter(
-      (state): state is DoNotDisturbState | BiometricEnrollmentState | NetworkConditionState =>
-        state !== undefined,
+    const states = await this.writeRequestedStates(input);
+    const requestedStates = Object.values(states).filter(
+      (
+        state,
+      ): state is
+        | DoNotDisturbState
+        | BiometricEnrollmentState
+        | DeviceConnectivityState
+        | NetworkConditionState => state !== undefined,
     );
     const error = requestedStates.find((state) => state.error)?.error;
 
@@ -1140,10 +1169,30 @@ export class DeviceState {
       ),
       deviceId: this.device.deviceId,
       platform: this.device.platform,
-      ...(doNotDisturb ? { doNotDisturb } : {}),
-      ...(biometrics ? { biometrics } : {}),
-      ...(networkCondition ? { networkCondition } : {}),
+      ...states,
       ...(error ? { error } : {}),
+    };
+  }
+
+  /** Write exactly the mutation fields supplied by the caller. */
+  private async writeRequestedStates(
+    input: SetDeviceStateInput,
+  ): Promise<
+    Pick<DeviceStateResult, "doNotDisturb" | "biometrics" | "connectivity" | "networkCondition">
+  > {
+    return {
+      ...(input.doNotDisturb
+        ? { doNotDisturb: await this.writeDoNotDisturb(input.doNotDisturb) }
+        : {}),
+      ...(input.biometrics
+        ? { biometrics: await this.setBiometricEnrollmentState(input.biometrics.enrollment) }
+        : {}),
+      ...(input.connectivity
+        ? { connectivity: await this.writeConnectivity(input.connectivity) }
+        : {}),
+      ...(input.networkCondition
+        ? { networkCondition: await this.writeNetworkCondition(input.networkCondition) }
+        : {}),
     };
   }
 
@@ -1256,6 +1305,19 @@ export class DeviceState {
       : { supported: false, error: IOS_CONNECTIVITY_UNSUPPORTED_ERROR };
   }
 
+  /** Platform dispatch for writing device-level connectivity toggles. */
+  private writeConnectivity(
+    input: NonNullable<SetDeviceStateInput["connectivity"]>,
+  ): Promise<DeviceConnectivityState> {
+    return this.device.platform === "android"
+      ? this.setAndroidConnectivity(input)
+      : Promise.resolve({
+          supported: false,
+          verified: false,
+          error: IOS_CONNECTIVITY_WRITE_UNSUPPORTED_ERROR,
+        });
+  }
+
   /**
    * Read airplane/Wi-Fi/Bluetooth/location in a single adb round-trip
    * (issue #6872). Failure policy, per field:
@@ -1318,6 +1380,164 @@ export class DeviceState {
       };
     }
     return base;
+  }
+
+  /**
+   * Set requested Android connectivity toggles to their desired end states.
+   * The initial batched read makes already-achieved requests no-ops; a fresh
+   * read after writes is the source of the returned state and verification.
+   */
+  private async setAndroidConnectivity(
+    input: NonNullable<SetDeviceStateInput["connectivity"]>,
+  ): Promise<DeviceConnectivityState> {
+    const requestedFields = ANDROID_CONNECTIVITY_READS.map((read) => read.field).filter(
+      (field) => input[field] !== undefined,
+    );
+    const before = await this.getAndroidConnectivity();
+    const fieldsToWrite = requestedFields.filter((field) => before[field] !== input[field]);
+
+    if (fieldsToWrite.length === 0) {
+      return { ...before, verified: true };
+    }
+
+    const wrote = await this.applyAndroidConnectivityWrites(fieldsToWrite, input);
+    return this.withConnectivityVerification(
+      wrote ? await this.getAndroidConnectivity() : before,
+      input,
+      requestedFields,
+    );
+  }
+
+  /** Apply every needed connectivity write without letting one failed radio block its siblings. */
+  private async applyAndroidConnectivityWrites(
+    fieldsToWrite: readonly DeviceConnectivityField[],
+    input: NonNullable<SetDeviceStateInput["connectivity"]>,
+  ): Promise<boolean> {
+    let adb: AdbExecutor;
+    try {
+      adb = this.adbFactory.create(this.device);
+    } catch (error) {
+      logger.warn(
+        `[DeviceState] connectivity writer creation failed: ${errorMessage(error)}`,
+        error,
+      );
+      return false;
+    }
+
+    for (const field of fieldsToWrite) {
+      await this.applyAndroidConnectivityField(adb, field, input[field]!);
+    }
+    return true;
+  }
+
+  /** Log a typed, best-effort failure and continue with the other requested toggles. */
+  private async applyAndroidConnectivityField(
+    adb: AdbExecutor,
+    field: DeviceConnectivityField,
+    enabled: boolean,
+  ): Promise<void> {
+    try {
+      const commandError = await this.setAndroidConnectivityField(adb, field, enabled);
+      if (commandError) {
+        logger.warn(`[DeviceState] connectivity write for ${field} failed: ${commandError}`);
+      }
+    } catch (error) {
+      // A failed toggle must not prevent the other requested desired states from applying.
+      logger.warn(
+        `[DeviceState] connectivity write for ${field} failed: ${errorMessage(error)}`,
+        error,
+      );
+    }
+  }
+
+  /** Build a verified write result from the state freshly read from Android. */
+  private withConnectivityVerification(
+    state: DeviceConnectivityState,
+    input: NonNullable<SetDeviceStateInput["connectivity"]>,
+    requestedFields: readonly DeviceConnectivityField[],
+  ): DeviceConnectivityState {
+    const unverified = requestedFields.filter((field) => state[field] !== input[field]);
+    if (unverified.length === 0) {
+      return { ...state, verified: true };
+    }
+    const verificationWarning = `Could not verify requested connectivity state: ${unverified.join(
+      ", ",
+    )}.`;
+    return {
+      ...state,
+      verified: false,
+      warning: [state.warning, verificationWarning].filter(Boolean).join(" "),
+    };
+  }
+
+  /** Execute the Android commands for one connectivity field, returning a shell failure message. */
+  private async setAndroidConnectivityField(
+    adb: AdbExecutor,
+    field: DeviceConnectivityField,
+    enabled: boolean,
+  ): Promise<string | undefined> {
+    switch (field) {
+      case "wifiEnabled":
+        return this.runAndroidConnectivityCommand(adb, wifiToggleCommand(!enabled));
+      case "bluetoothEnabled":
+        return this.runAndroidConnectivityCommand(
+          adb,
+          `shell svc bluetooth ${enabled ? "enable" : "disable"}`,
+        );
+      case "airplaneMode": {
+        const settingError = await this.runAndroidConnectivityCommand(
+          adb,
+          `shell settings put global airplane_mode_on ${enabled ? "1" : "0"}`,
+        );
+        if (settingError) {
+          return settingError;
+        }
+        return this.runAndroidConnectivityCommand(
+          adb,
+          `shell am broadcast -a android.intent.action.AIRPLANE_MODE --ez state ${enabled}`,
+        );
+      }
+      case "locationEnabled":
+        return this.setAndroidLocationEnabled(adb, enabled);
+    }
+  }
+
+  /** Prefer the API-31 location command, then fall back to the legacy secure setting. */
+  private async setAndroidLocationEnabled(
+    adb: AdbExecutor,
+    enabled: boolean,
+  ): Promise<string | undefined> {
+    const primaryCommand = `shell cmd location set-location-enabled ${enabled}`;
+    try {
+      const primaryError = await this.runAndroidConnectivityCommand(adb, primaryCommand);
+      if (!primaryError) {
+        return undefined;
+      }
+      logger.debug(
+        `[DeviceState] location command '${primaryCommand}' reported '${primaryError}'; falling back`,
+      );
+    } catch (error) {
+      logger.debug(
+        `[DeviceState] location command '${primaryCommand}' failed: ${errorMessage(error)}; falling back`,
+      );
+    }
+    return this.runAndroidConnectivityCommand(
+      adb,
+      `shell settings put secure location_mode ${enabled ? "3" : "0"}`,
+    );
+  }
+
+  /** Return a shell-reported failure without turning an expected writer failure into a throw. */
+  private async runAndroidConnectivityCommand(
+    adb: AdbExecutor,
+    command: string,
+  ): Promise<string | undefined> {
+    const result = await adb.executeCommand(command, undefined, undefined, true);
+    const stdout = result.stdout ?? "";
+    const stderr = result.stderr ?? "";
+    return outputLooksLikeShellFailure(stdout, stderr)
+      ? `${stdout}\n${stderr}`.trim() || `${command} reported an error`
+      : undefined;
   }
 
   /** Platform dispatch for writing Do Not Disturb. */

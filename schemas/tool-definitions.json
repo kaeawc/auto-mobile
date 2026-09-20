@@ -11024,7 +11024,7 @@
   },
   {
     "name": "setDeviceState",
-    "description": "Set device state such as Do Not Disturb, iOS Simulator biometric enrollment, and device-wide network condition. Degraded network profiles (offline/veryBad/2g/3g/4g) are best-effort cellular shaping on an Android emulator, reported `partial` (they may not affect Wi-Fi/app traffic); only reset to `none` is fully verified. A session always restores the network to a clean `none` state on release/rebind.",
+    "description": "Set device state such as Do Not Disturb, Android connectivity toggles (airplaneMode, wifiEnabled, bluetoothEnabled, locationEnabled), iOS Simulator biometric enrollment, and device-wide network condition. Connectivity values are desired end states and are verified by a fresh Android read; iOS connectivity writes are unsupported. Degraded network profiles (offline/veryBad/2g/3g/4g) are best-effort cellular shaping on an Android emulator, reported `partial` (they may not affect Wi-Fi/app traffic); only reset to `none` is fully verified. A session always restores the network to a clean `none` state on release/rebind.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -11056,6 +11056,29 @@
             }
           },
           "required": ["enrollment"],
+          "additionalProperties": false
+        },
+        "connectivity": {
+          "description": "Android connectivity toggles to apply.",
+          "type": "object",
+          "properties": {
+            "airplaneMode": {
+              "description": "Enable or disable Airplane mode on Android.",
+              "type": "boolean"
+            },
+            "wifiEnabled": {
+              "description": "Enable or disable Wi-Fi on Android.",
+              "type": "boolean"
+            },
+            "bluetoothEnabled": {
+              "description": "Enable or disable Bluetooth on Android.",
+              "type": "boolean"
+            },
+            "locationEnabled": {
+              "description": "Enable or disable Location on Android.",
+              "type": "boolean"
+            }
+          },
           "additionalProperties": false
         },
         "networkCondition": {

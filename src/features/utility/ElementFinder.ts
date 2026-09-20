@@ -687,9 +687,14 @@ export class DefaultElementFinder implements ElementFinder {
     if (selectionIntent !== "focus-input") {
       return matches;
     }
+    const isInput = (element: Element): boolean => this.isAndroidInputNode(element);
+    const anyInput = [...matches.exactMatches, ...matches.partialMatches].some(isInput);
+    if (!anyInput) {
+      return matches;
+    }
     return {
-      exactMatches: matches.exactMatches.filter((element) => this.isAndroidInputNode(element)),
-      partialMatches: matches.partialMatches.filter((element) => this.isAndroidInputNode(element)),
+      exactMatches: matches.exactMatches.filter(isInput),
+      partialMatches: matches.partialMatches.filter(isInput),
     };
   }
 
@@ -825,11 +830,26 @@ export class DefaultElementFinder implements ElementFinder {
       return [mainMatches, ...windowMatches].flatMap((matches) => matches.partialMatches);
     }
 
-    const matchesByWindowOrder = [...windowMatches, mainMatches].map((matches) =>
-      this.filterTextMatchesForSelectionIntent(matches, selectionIntent),
+    const matchesByWindowOrder = [...windowMatches, mainMatches];
+    const filteredMatches = this.filterTextMatchesForSelectionIntent(
+      {
+        exactMatches: matchesByWindowOrder.flatMap((matches) => matches.exactMatches),
+        partialMatches: matchesByWindowOrder.flatMap((matches) => matches.partialMatches),
+      },
+      selectionIntent,
     );
-    const hasExactMatches = matchesByWindowOrder.some((matches) => matches.exactMatches.length > 0);
-    return matchesByWindowOrder.flatMap((matches) =>
+    const allowedMatches = new Set([
+      ...filteredMatches.exactMatches,
+      ...filteredMatches.partialMatches,
+    ]);
+    const eligibleMatchesByWindow = matchesByWindowOrder.map((matches) => ({
+      exactMatches: matches.exactMatches.filter((element) => allowedMatches.has(element)),
+      partialMatches: matches.partialMatches.filter((element) => allowedMatches.has(element)),
+    }));
+    const hasExactMatches = eligibleMatchesByWindow.some(
+      (matches) => matches.exactMatches.length > 0,
+    );
+    return eligibleMatchesByWindow.flatMap((matches) =>
       this.rankTextMatches(
         hasExactMatches ? matches.exactMatches : matches.partialMatches,
         selectionIntent,

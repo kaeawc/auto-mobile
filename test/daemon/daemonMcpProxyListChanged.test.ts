@@ -194,6 +194,38 @@ describe("DaemonMcpProxy list-changed forwarding", () => {
     expect(listCalls).toBe(1);
   });
 
+  test("failed device acquisition preserves the advertised tool set", async () => {
+    mockDaemonAvailable();
+    const fakeClient = new FakeDaemonClient({
+      daemonMethodResults: new Map<string, any>([["tools/list", TOOLS_V1]]),
+      onCallTool: (toolName) => {
+        if (toolName === "getAndroid") {
+          throw new Error(
+            "Freshly started device 'emulator-5554' was assigned before its owner could reserve it.",
+          );
+        }
+      },
+    });
+    const proxy = createProxy(fakeClient);
+    const kinds: string[] = [];
+    proxy.onListChanged((kind) => {
+      kinds.push(kind);
+    });
+
+    const before = await proxy.listTools();
+    await expect(proxy.callTool("getAndroid", { deviceId: "emulator-5554" })).rejects.toThrow(
+      "Freshly started device",
+    );
+    const after = await proxy.listTools();
+
+    expect(after).toEqual(before);
+    expect(after.map((tool) => tool.name)).toContain("toolA");
+    expect(kinds).toEqual([]);
+    expect(
+      fakeClient.callDaemonMethodCalls.filter((call) => call.method === "tools/list"),
+    ).toHaveLength(1);
+  });
+
   test("unsubscribed onListChanged listener stops receiving events", async () => {
     mockDaemonAvailable();
     const fakeClient = createFakeClient();

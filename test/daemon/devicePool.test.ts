@@ -818,6 +818,131 @@ describe("DevicePool", () => {
     await release();
   });
 
+  test("reuses a freshly started device already owned by the same MCP session", async () => {
+    const device = createBootedDevice("emulator-5554", "android", "Pixel 8");
+    const sourceImage: DeviceInfo = {
+      name: "Pixel 8",
+      platform: "android",
+      isRunning: false,
+      source: "local",
+    };
+    await initializeLiveDevices([device]);
+    await devicePool.bindOrReuseDeviceSession(
+      "owner-session",
+      device.deviceId,
+      "android",
+      undefined,
+      undefined,
+      undefined,
+      false,
+      undefined,
+      undefined,
+      undefined,
+      "owner-mcp-session",
+    );
+
+    await expect(
+      devicePool.bindOrReuseDeviceSession(
+        "newly-generated-session",
+        device.deviceId,
+        "android",
+        sourceImage,
+        undefined,
+        undefined,
+        false,
+        undefined,
+        undefined,
+        undefined,
+        "owner-mcp-session",
+      ),
+    ).resolves.toBe("owner-session");
+    expect(devicePool.getDevice(device.deviceId)?.assignmentCount).toBe(1);
+  });
+
+  test("rejects a freshly started device owned by a different MCP session", async () => {
+    const device = createBootedDevice("emulator-5554", "android", "Pixel 8");
+    const sourceImage: DeviceInfo = {
+      name: "Pixel 8",
+      platform: "android",
+      isRunning: false,
+      source: "local",
+    };
+    await initializeLiveDevices([device]);
+    await devicePool.bindOrReuseDeviceSession(
+      "owner-session",
+      device.deviceId,
+      "android",
+      undefined,
+      undefined,
+      undefined,
+      false,
+      undefined,
+      undefined,
+      undefined,
+      "owner-mcp-session",
+    );
+
+    await expect(
+      devicePool.bindOrReuseDeviceSession(
+        "newly-generated-session",
+        device.deviceId,
+        "android",
+        sourceImage,
+        undefined,
+        undefined,
+        false,
+        undefined,
+        undefined,
+        undefined,
+        "other-mcp-session",
+      ),
+    ).rejects.toThrow("already assigned to another session");
+    expect(devicePool.getDevice(device.deviceId)?.sessionId).toBe("owner-session");
+  });
+
+  test("rejects an anonymous re-acquisition of a freshly started device", async () => {
+    const device = createBootedDevice("emulator-5554", "android", "Pixel 8");
+    const sourceImage: DeviceInfo = {
+      name: "Pixel 8",
+      platform: "android",
+      isRunning: false,
+      source: "local",
+    };
+    await initializeLiveDevices([device]);
+    await devicePool.bindOrReuseDeviceSession(
+      "owner-session",
+      device.deviceId,
+      "android",
+      undefined,
+      undefined,
+      undefined,
+      false,
+      undefined,
+      undefined,
+      undefined,
+      "owner-mcp-session",
+    );
+
+    await expect(
+      devicePool.bindOrReuseDeviceSession(
+        "newly-generated-session",
+        device.deviceId,
+        "android",
+        sourceImage,
+        undefined,
+        undefined,
+        false,
+        undefined,
+        undefined,
+        undefined,
+      ),
+    ).rejects.toThrow(
+      "Freshly started device 'emulator-5554' was assigned to session " +
+        "owner-session before its owning session could reserve it.",
+    );
+    expect(devicePool.getDevice(device.deviceId)?.sessionId).toBe("owner-session");
+  });
+
   describe("assertSessionReadyForAutomation shutdown admission (#5494)", () => {
     const sourceImage: DeviceInfo = {
       name: "Pixel 8",

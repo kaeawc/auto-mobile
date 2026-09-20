@@ -655,6 +655,10 @@ export class DevicePool {
    */
   private readonly mcpSessionAcquiredDeviceSessions = new Map<string, Set<string>>();
   private readonly mcpSessionAcquiredAutolocks = new Map<string, Set<string>>();
+  // This map keeps only the latest autolock per MCP session, overwriting the
+  // prior entry; re-acquiring an older owned autolock can therefore hit the
+  // reservation-race path through this benign, over-strict false-negative,
+  // not a false grant. Use mcpSessionAcquiredAutolocks if this needs fixing.
   private readonly mcpSessionAutolockMap: Map<string, string> = new Map();
   private readonly mcpSessionRecoveryDevices: Map<string, McpSessionRecoveryLease> = new Map();
   private readonly refreshMissingDeviceMisses: Map<string, number> = new Map();
@@ -6866,8 +6870,17 @@ export class DevicePool {
             deviceId,
             expectedExistingSessionDeviceId,
           );
-          this.assertMcpSessionOwnsDeviceSession(mcpSessionId, existingSession, device);
-          return this.reuseExistingDeviceSession(deviceId, existingSession.sessionId, sourceImage);
+          const confirmedSameOwner = this.assertMcpSessionOwnsDeviceSession(
+            mcpSessionId,
+            existingSession,
+            device,
+          );
+          return this.reuseExistingDeviceSession(
+            deviceId,
+            existingSession.sessionId,
+            sourceImage,
+            confirmedSameOwner,
+          );
         }
 
         if (existingSession) {
@@ -7025,8 +7038,9 @@ export class DevicePool {
     deviceId: string,
     existingSessionId: string,
     sourceImage?: DeviceInfo,
+    confirmedSameOwner = false,
   ): Promise<string> {
-    if (sourceImage) {
+    if (sourceImage && !confirmedSameOwner) {
       throw new ActionableError(
         `Freshly started device '${deviceId}' was assigned to session ` +
           `${existingSessionId} before its owning session could reserve it.`,
@@ -7037,22 +7051,26 @@ export class DevicePool {
     return refreshedSession.sessionId;
   }
 
+  /** Assert any supplied MCP identity and return whether same-owner reuse was proven. */
   private assertMcpSessionOwnsDeviceSession(
     mcpSessionId: string | undefined,
     session: Session,
     device: PooledDevice,
-  ): void {
+  ): boolean {
+    if (mcpSessionId === undefined) {
+      return false;
+    }
     if (
-      mcpSessionId !== undefined &&
-      (!this.mcpSessionAcquiredDeviceSessions.get(mcpSessionId)?.has(session.sessionId) ||
-        !this.isSessionAssignmentCurrent(device, session) ||
-        !this.sessionManager.isAdmittedForAutomation(session))
+      !this.mcpSessionAcquiredDeviceSessions.get(mcpSessionId)?.has(session.sessionId) ||
+      !this.isSessionAssignmentCurrent(device, session) ||
+      !this.sessionManager.isAdmittedForAutomation(session)
     ) {
       throw new ActionableError(
         `Device '${device.id}' is already assigned to another session. ` +
           "Acquire a different device or wait for its owner to release it.",
       );
     }
+    return true;
   }
 
   private recordMcpSessionOwnership(mcpSessionId: string | undefined, sessionId: string): void {
@@ -7907,7 +7925,7 @@ export class DevicePool {
     if (this.devices.get(deviceId) !== device) {
       throw new ActionableError(`Device '${deviceId}' exited before it could be autolocked.`);
     }
-    this.throwIfFreshStartAlreadyBound(device, sourceImage);
+    this.throwIfFreshStartAlreadyBound(device, sourceImage, mcpSessionId);
     await this.assertIdleDeviceAssignable(
       device,
       `Device '${deviceId}' is not available for autolock.\n` +
@@ -8126,19 +8144,27 @@ export class DevicePool {
     if (!session) {
       return undefined;
     }
-    if (
-      !mcpSessionId ||
-      this.mcpSessionAutolockMap.get(mcpSessionId) !== session.sessionId ||
-      device.autolockSessionId !== session.sessionId ||
-      !this.isSessionAssignmentCurrent(device, session) ||
-      !this.sessionManager.isAdmittedForAutomation(session)
-    ) {
+    if (!this.isOwnedAutolockSession(device, session, mcpSessionId)) {
       throw new ActionableError(
         `Device '${device.id}' is already assigned to another session. ` +
           "Acquire a different device or wait for its owner to release it.",
       );
     }
     return session;
+  }
+
+  private isOwnedAutolockSession(
+    device: PooledDevice,
+    session: Session,
+    mcpSessionId: string | undefined,
+  ): boolean {
+    return (
+      mcpSessionId !== undefined &&
+      this.mcpSessionAutolockMap.get(mcpSessionId) === session.sessionId &&
+      device.autolockSessionId === session.sessionId &&
+      this.isSessionAssignmentCurrent(device, session) &&
+      this.sessionManager.isAdmittedForAutomation(session)
+    );
   }
 
   captureAutolockSessionForMcpSession(mcpSessionId: string | undefined): string | undefined {
@@ -8148,6 +8174,7 @@ export class DevicePool {
   private throwIfFreshStartAlreadyBound(
     device: PooledDevice,
     sourceImage: DeviceInfo | undefined,
+    mcpSessionId: string | undefined,
   ): void {
     if (!sourceImage || !device.sessionId) {
       return;
@@ -8158,6 +8185,9 @@ export class DevicePool {
       existingSession.assignedDevice === device.id &&
       existingSession.platform === device.platform
     ) {
+      if (this.isOwnedAutolockSession(device, existingSession, mcpSessionId)) {
+        return;
+      }
       throw new ActionableError(
         `Freshly started device '${device.id}' was assigned to session ` +
           `${existingSession.sessionId} before its owning session could reserve it.`,

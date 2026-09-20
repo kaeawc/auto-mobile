@@ -16,6 +16,7 @@ import type {
   ScreenshotJobOptions,
 } from "../../src/utils/ScreenshotJobTracker";
 import { pathExists } from "../../src/utils/filesystem/DefaultFileSystem";
+import { loadIosFractionalObserve } from "../fixtures/observe/observeFixture";
 
 const device: BootedDevice = {
   deviceId: "emulator-5554",
@@ -78,6 +79,11 @@ describe("captureScreenshot", () => {
       "imageDelivery",
       "waitFor",
       "project",
+      // #7336 bullet 7: captureScreenshot has no coordinate-shaped input.
+      "x",
+      "y",
+      "screenSize",
+      "bounds",
     ]) {
       expect(field in captureScreenshotSchema.shape).toBe(false);
     }
@@ -132,6 +138,44 @@ describe("captureScreenshot", () => {
     } finally {
       await rm(tempDir, { force: true, recursive: true });
     }
+  });
+
+  test("returns the capture-service PNG file without reading logical coordinate state (#7336 bullets 2, 3, and 7)", async () => {
+    const iosDevice: BootedDevice = { ...device, deviceId: "ios-test-device", platform: "ios" };
+    const iosObserve = loadIosFractionalObserve();
+    const coordinateState = {
+      screenSize: iosObserve.screenSize,
+      bounds: (iosObserve.viewHierarchy!.hierarchy.node as any).bounds,
+    };
+    const capturedPath = "/tmp/ios-native-raster.png";
+    let requestedOptions: ScreenshotOptions | undefined;
+
+    registerScreenshotTools({
+      createScreenshotService: () => ({
+        startTrackedCapture(options) {
+          requestedOptions = options;
+          return trackedResult({ success: true, path: capturedPath });
+        },
+      }),
+      pathExists: async () => true,
+    });
+
+    const response = await captureScreenshotHandler()(iosDevice, {});
+    const metadata = response.structuredContent as Record<string, unknown>;
+
+    expect(requestedOptions).toEqual({ format: "png" });
+    expect(metadata).toEqual({
+      success: true,
+      deviceId: iosDevice.deviceId,
+      platform: iosDevice.platform,
+      path: capturedPath,
+      screenshotFormat: "png",
+      screenshotMimeType: "image/png",
+    });
+    expect(metadata).not.toHaveProperty("screenSize");
+    expect(metadata).not.toHaveProperty("bounds");
+    expect(JSON.stringify(metadata)).not.toContain(JSON.stringify(coordinateState.screenSize));
+    expect(JSON.stringify(metadata)).not.toContain(JSON.stringify(coordinateState.bounds));
   });
 
   test("throws an actionable error when capture fails", async () => {

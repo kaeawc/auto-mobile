@@ -22,7 +22,10 @@ import {
 } from "../../src/server/observationResources";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import { z } from "zod/v4";
-import { loadIosFractionalObserve } from "../fixtures/observe/observeFixture";
+import {
+  loadAndroidHomeObserve,
+  loadIosFractionalObserve,
+} from "../fixtures/observe/observeFixture";
 
 /**
  * Build a minimal ObserveResult whose hierarchy carries trimmable attributes:
@@ -206,6 +209,46 @@ describe("finalizeToolResponse", () => {
   // (issue #5872): the same response-shape control `observe` already has, so a
   // client no longer pays the full raw hierarchy on every tapOn/inputText/launchApp.
   describe("action-tool skeleton default (#5872)", () => {
+    test.each([
+      { label: "Android physical pixels", load: () => loadAndroidHomeObserve().observe },
+      { label: "iOS logical points", load: loadIosFractionalObserve },
+    ])(
+      "standalone and embedded full/skeleton observations retain the same native geometry (#7336 bullet 1)",
+      ({ load }) => {
+        const standaloneFull = finalizeToolResponse(createStructuredToolResponse(load()), {
+          name: "observe",
+          args: { project: "full" },
+        }).structuredContent as ObserveResult;
+        const embeddedFull = (
+          finalizeToolResponse(
+            createStructuredToolResponse({ success: true, observation: load() }),
+            { name: "tapOn", args: { project: "full" } },
+          ).structuredContent as { observation: ObserveResult }
+        ).observation;
+        const standaloneSkeleton = finalizeToolResponse(createStructuredToolResponse(load()), {
+          name: "observe",
+          args: { project: "skeleton" },
+        }).structuredContent as ObserveResult;
+        const embeddedSkeleton = (
+          finalizeToolResponse(
+            createStructuredToolResponse({ success: true, observation: load() }),
+            { name: "tapOn", args: { project: "skeleton" } },
+          ).structuredContent as { observation: ObserveResult }
+        ).observation;
+        const rootBounds = (observation: ObserveResult) => {
+          const root = observation.viewHierarchy!.hierarchy.node as any;
+          return (Array.isArray(root) ? root[0] : root).bounds;
+        };
+
+        // The action response is an agent-facing observation of the same fixture,
+        // never a canonical-pixel reinterpretation of it.
+        expect(embeddedFull.screenSize).toEqual(standaloneFull.screenSize);
+        expect(rootBounds(embeddedFull)).toEqual(rootBounds(standaloneFull));
+        expect(embeddedSkeleton.screenSize).toEqual(standaloneSkeleton.screenSize);
+        expect(embeddedSkeleton.skeleton).toEqual(standaloneSkeleton.skeleton);
+      },
+    );
+
     test("an action observation defaults to the compact skeleton (no viewHierarchy)", () => {
       const response = createStructuredToolResponse({
         success: true,
@@ -1253,6 +1296,47 @@ describe("finalizeToolResponse", () => {
       expect(diff.screenSize).toEqual({ width: 393, height: 852 });
       expect(JSON.parse(finalized.content[0].text).observation.screenSize).toEqual(diff.screenSize);
     });
+
+    test.each([
+      { label: "Android physical pixels", load: () => loadAndroidHomeObserve().observe },
+      { label: "iOS logical points", load: loadIosFractionalObserve },
+    ])(
+      "embedded diffs retain the standalone fixture screenSize and root bounds (#7336 bullet 1)",
+      ({ load }) => {
+        const { store } = makeStore();
+        const baseline = load();
+        baseline.activeWindow = {
+          appId: "com.example.coordinate-parity",
+          activityName: "",
+          layoutSeqSum: 0,
+        };
+        const standaloneFull = finalizeToolResponse(createStructuredToolResponse(baseline), {
+          name: "observe",
+          args: { project: "full" },
+          sessionUuid: "s1",
+          baselineStore: store,
+        }).structuredContent as ObserveResult;
+        const next = load();
+        next.activeWindow = baseline.activeWindow;
+        const root = next.viewHierarchy!.hierarchy.node as any;
+        (Array.isArray(root) ? root[0] : root)["content-desc"] = "changed";
+
+        const finalized = finalizeToolResponse(
+          createStructuredToolResponse({ success: true, observation: next }),
+          { name: "tapOn", sessionUuid: "s1", baselineStore: store },
+        );
+        const diff = (finalized.structuredContent as any).observation;
+        const standaloneRoot = standaloneFull.viewHierarchy!.hierarchy.node as any;
+        const standaloneBounds = (
+          Array.isArray(standaloneRoot) ? standaloneRoot[0] : standaloneRoot
+        ).bounds as number[];
+
+        expect(diff.isDiff).toBe(true);
+        expect(diff.screenSize).toEqual(standaloneFull.screenSize);
+        // Diff identity keys retain the compacted native root bounds verbatim.
+        expect(diff.changed[0].key).toContain(`\0${standaloneBounds.join(",")}\0`);
+      },
+    );
 
     // A diff REPLACES the projected observation, so the truncation provenance
     // the skeleton projection lifts to the top level (issue #6601) is dropped

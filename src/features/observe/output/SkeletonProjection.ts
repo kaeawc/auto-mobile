@@ -79,7 +79,10 @@ function deriveId(el: Element): string | undefined {
 /** Named toggles use their accessibility identity; other nodes prefer visible text. */
 function deriveLabel(el: Element): string | undefined {
   return (
-    getToggleContentDescription(el) ?? nonEmptyString(el.text) ?? nonEmptyString(el["content-desc"])
+    getToggleContentDescription(el) ??
+    nonEmptyString(el.text) ??
+    nonEmptyString(el["content-desc"]) ??
+    (isEditableElementProperties(el) ? nonEmptyString(el.value) : undefined)
   );
 }
 

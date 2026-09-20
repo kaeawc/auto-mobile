@@ -18,8 +18,6 @@ import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepositor
 import { FakeTimer } from "../fakes/FakeTimer";
 import { defaultTimer } from "../../src/utils/SystemTimer";
 import { AndroidAvdProvenanceCache } from "../../src/utils/AndroidAvdProvenanceCache";
-import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
-import { createTestDatabase } from "../db/testDbHelper";
 import {
   BOOTED_DEVICE_RESOURCE_URIS,
   registerBootedDeviceResources,
@@ -97,10 +95,8 @@ describe("listDevices tool (#5870)", () => {
   };
 
   const createAwaitingOwnerHarness = async () => {
-    const db = await createTestDatabase();
     const timer = new FakeTimer();
-    const repository = new DeviceSessionRepository(db, timer);
-    const sessionManager = new SessionManager(timer, repository);
+    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
       sessionManager,
       "daemon-session",
@@ -108,7 +104,6 @@ describe("listDevices tool (#5870)", () => {
       new FakeInstalledAppsRepository(),
       fakeDeviceUtils,
       new DefaultRetryExecutor(timer),
-      repository,
     );
     await pool.addDevice(android, { platform: "android", name: android.name, isRunning: true });
     await pool.assignDeviceToSession("rehydrated-session", "android", {
@@ -120,13 +115,11 @@ describe("listDevices tool (#5870)", () => {
     });
     DaemonState.getInstance().initialize(sessionManager, pool);
     return {
-      db,
       sessionManager,
       pool,
       close: async () => {
         DaemonState.getInstance().reset();
         sessionManager.stopCleanupTimer();
-        await db.destroy();
       },
     };
   };

@@ -209,15 +209,17 @@ async function acquireVideoRecordingSession(deviceId: string): Promise<string> {
   if (!text) {
     throw new Error(`getApple response did not contain text JSON: ${JSON.stringify(response)}`);
   }
-  const session = JSON.parse(text) as { sessionUuid?: unknown } | null;
-  if (
-    !session ||
-    typeof session.sessionUuid !== "string" ||
-    session.sessionUuid.trim().length === 0
-  ) {
+  // The canonical MCP device-session UUID lives at `runtime.session.sessionUuid`.
+  // The former top-level `sessionUuid` alias was dropped in #7281 as a duplicate
+  // device-description field, so read the canonical location here.
+  const parsed = JSON.parse(text) as {
+    runtime?: { session?: { sessionUuid?: unknown } | null } | null;
+  } | null;
+  const sessionUuid = parsed?.runtime?.session?.sessionUuid;
+  if (typeof sessionUuid !== "string" || sessionUuid.trim().length === 0) {
     throw new Error(`getApple did not return a session UUID: ${JSON.stringify(response)}`);
   }
-  return session.sessionUuid;
+  return sessionUuid;
 }
 
 async function bindVideoRecordingSession(sessionUuid: string, deviceId: string): Promise<void> {

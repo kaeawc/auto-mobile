@@ -5,7 +5,8 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.util.Log
 
-private const val TAG = "InstalledPackageLaunchability"
+// Android's Log tag limit is 23 chars on API < 26 (minSdk 24), so keep this short.
+private const val TAG = "InstalledPkgLaunch"
 
 internal data class LaunchablePackages(
   val packageNames: Set<String>,

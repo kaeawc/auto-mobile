@@ -3,12 +3,17 @@ package dev.jasonpearson.automobile.desktop.core.utils
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.setValue
+import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+
+private val LOG = LoggerFactory.getLogger("MemoryPressureMonitor")
 
 /**
  * Monitors JVM heap usage and emits warnings when memory pressure is high.
@@ -35,8 +40,9 @@ class MemoryPressureMonitor(
   var heapUsagePercent by mutableFloatStateOf(0f)
     private set
 
-  private val scope = CoroutineScope(Dispatchers.Default)
-  private var job: Job? = null
+  // Recreated on each start() and cancelled in stop() so the monitor never outlives its polling
+  // loop. SupervisorJob keeps a thrown sample/callback from poisoning the scope before restart.
+  private var scope: CoroutineScope? = null
 
   /** Whether the critical callback has already fired for the current pressure spike. */
   private var trimFired = false
@@ -44,21 +50,31 @@ class MemoryPressureMonitor(
   /** Start periodic heap monitoring. Safe to call multiple times (restarts). */
   fun start() {
     stop()
-    job = scope.launch {
+    val pollScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    scope = pollScope
+    pollScope.launch {
       while (isActive) {
-        val usage = sampleHeapUsage()
-        heapUsagePercent = usage
+        // Survive a transient sample/callback failure: a throw here would otherwise kill the
+        // sole polling child and silently stop monitoring until the next start(). SupervisorJob
+        // keeps the scope alive but does not restart this coroutine, so catch-and-continue here.
+        try {
+          val usage = sampleHeapUsage()
+          heapUsagePercent = usage
 
-        if (usage >= CRITICAL_THRESHOLD) {
-          if (!trimFired) {
-            trimFired = true
-            onTrimRequested?.invoke()
+          if (usage >= CRITICAL_THRESHOLD) {
+            if (!trimFired) {
+              trimFired = true
+              onTrimRequested?.invoke()
+            }
+          } else if (usage >= WARNING_THRESHOLD) {
+            trimFired = false
+            onWarning?.invoke()
+          } else {
+            trimFired = false
           }
-        } else if (usage >= WARNING_THRESHOLD) {
-          trimFired = false
-          onWarning?.invoke()
-        } else {
-          trimFired = false
+        } catch (e: Exception) {
+          if (e is CancellationException) throw e
+          LOG.warn("Heap usage poll failed; continuing to monitor: ${e.message}", e)
         }
 
         delay(pollIntervalMs)
@@ -66,10 +82,10 @@ class MemoryPressureMonitor(
     }
   }
 
-  /** Stop monitoring. */
+  /** Stop monitoring and cancel the polling scope. */
   fun stop() {
-    job?.cancel()
-    job = null
+    scope?.cancel()
+    scope = null
   }
 
   /** Sample current JVM heap usage. Extracted for testability. Returns a value in 0.0..1.0. */

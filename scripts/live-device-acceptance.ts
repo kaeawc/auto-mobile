@@ -47,7 +47,14 @@ import { inferIosFormFactor } from "../src/utils/ios-cmdline-tools/iosDeviceType
 import { stableStringify } from "../src/utils/stableStringify";
 import { defaultTimer, type Timer } from "../src/utils/SystemTimer";
 
-const ENABLED_TOOLS = ["observe", "getDeviceState", "killDevice"] as const;
+const ENABLED_TOOLS = [
+  "observe",
+  "getDeviceState",
+  "killDevice",
+  "tapAt",
+  "captureScreenshot",
+  "rotate",
+] as const;
 const MAX_CLEANUP_RESERVE_MS = 15_000;
 const MAX_EVIDENCE_RESERVE_MS = 5_000;
 const MAX_REAP_RESERVE_MS = 1_000;
@@ -109,6 +116,11 @@ interface ExactDevice {
   platform: Platform;
 }
 
+interface ScreenDimensions {
+  width: number;
+  height: number;
+}
+
 interface AcquiredSession {
   phase: string;
   client: McpSessionClient;
@@ -148,6 +160,8 @@ export interface DaemonSessionClient {
 export interface MatrixDependencies {
   /** Explicit test seam; production calls must satisfy the live safeguards below. */
   testOnly?: boolean;
+  /** Keeps unrelated deadline tests focused; accepted only with testOnly. */
+  skipCoordinateAcceptance?: boolean;
   timer?: Timer;
   spawnCli?: (command: string[], timeoutMs: number, signal: AbortSignal) => Promise<CliResult>;
   createMcpClient?: (
@@ -161,6 +175,7 @@ export interface MatrixDependencies {
     timeoutMs: number,
     signal: AbortSignal,
   ) => Promise<void>;
+  readPngDimensions?: (path: string, signal: AbortSignal) => Promise<ScreenDimensions>;
   writeFile?: (path: string, content: string, signal: AbortSignal) => Promise<void>;
 }
 
@@ -222,7 +237,7 @@ interface Step {
 }
 
 interface Evidence {
-  schemaVersion: 9;
+  schemaVersion: 10;
   authentication: EvidenceAuthentication;
   generatedAt: string;
   scenario: Scenario;
@@ -575,7 +590,7 @@ function parseEvidence(path: string): JsonObject {
     throw new Error(`Evidence is not valid JSON: ${path}`);
   }
   const evidence = asObject(candidate, "evidence");
-  if (evidence.schemaVersion !== 9) {
+  if (evidence.schemaVersion !== 10) {
     throw new Error("Evidence has an unsupported schema version");
   }
   return evidence;
@@ -607,6 +622,10 @@ export function verifyEvidenceFile(args: EvidenceVerificationArgs): Evidence {
   }
   const expectedMac = evidenceMac(evidence as Evidence, args.build, manifest, args.operatorKey);
   assertMatchingMac(authentication.mac, expectedMac, "Evidence");
+  const outcome = asObject(evidence.outcome, "evidence.outcome");
+  if (outcome.passed !== true) {
+    throw new Error("Evidence is authentic but records a failed acceptance outcome");
+  }
   return evidence as Evidence;
 }
 
@@ -872,15 +891,6 @@ export interface CoordinateAcceptanceArgs {
   expectedDeviceId?: string;
 }
 
-export interface CoordinateAcceptanceCliArgs extends CoordinateAcceptanceArgs {
-  build: BuildIdentity;
-}
-
-interface ScreenDimensions {
-  width: number;
-  height: number;
-}
-
 /**
  * Deliberately small live-device seam. The matrix dependencies remain separate:
  * these checks neither mint sessions nor write matrix evidence.
@@ -904,6 +914,30 @@ export interface MultiDeviceRefusalResult {
   targetedDeviceId: string;
 }
 
+function expectedPlatformAmbiguityDiagnostic(platform: Platform): string {
+  return platform === "ios"
+    ? "Multiple iOS simulators detected. Provide sessionUuid to target a specific simulator."
+    : "Multiple Android devices detected. Provide sessionUuid to target a specific device.";
+}
+
+function assertAmbiguousTapDiagnostic(
+  response: ToolResponse,
+  platform: Platform,
+  kind: "bare" | "platform-only",
+): void {
+  const diagnostic = normalizeMcpTransportDiagnostic(toolDiagnostic(response, "tapAt"));
+  const platformDiagnostic = expectedPlatformAmbiguityDiagnostic(platform);
+  const mixedPlatformDiagnostic =
+    "Both Android and iOS devices are connected. For a device tool call, pass sessionUuid";
+  const accepted =
+    response.isError === true &&
+    (diagnostic === platformDiagnostic ||
+      (kind === "bare" && diagnostic.startsWith(mixedPlatformDiagnostic)));
+  if (!accepted) {
+    throw new Error(`tapAt ${kind} ambiguity returned an unexpected diagnostic: ${diagnostic}`);
+  }
+}
+
 export interface OrientationCheckResult {
   platform: Platform;
   portrait: ScreenDimensions;
@@ -915,6 +949,8 @@ export interface OrientationCheckResult {
 const COORDINATE_ORIENTATIONS = ["portrait", "landscape"] as const;
 const DEFAULT_COORDINATE_ACCEPTANCE_ITERATIONS = 24;
 const DEFAULT_COORDINATE_ACCEPTANCE_TIMEOUT_MS = 60_000;
+const COORDINATE_CLIENT_CLOSE_TIMEOUT_MS = 1_000;
+const COORDINATE_RESTORE_TIMEOUT_MS = 5_000;
 const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 
 function positiveIntegerField(value: JsonObject, field: string, context: string): number {
@@ -935,6 +971,10 @@ function successfulToolPayload(response: ToolResponse, tool: string): JsonObject
 
 function screenDimensionsFromObserve(response: ToolResponse): ScreenDimensions {
   const payload = toolPayload(response, "observe");
+  return screenDimensionsFromPayload(payload);
+}
+
+function screenDimensionsFromPayload(payload: JsonObject): ScreenDimensions {
   const screenSize = asObject(payload.screenSize, "observe.screenSize");
   return {
     width: positiveIntegerField(screenSize, "width", "observe.screenSize"),
@@ -976,6 +1016,60 @@ async function defaultReadPngDimensions(
   return dimensions;
 }
 
+async function closeCoordinateClient(
+  client: McpSessionClient,
+  phase: string,
+  timer: Timer,
+): Promise<void> {
+  let timeout: NodeJS.Timeout | undefined;
+  const timedOut = new Promise<never>((_, reject) => {
+    timeout = timer.setTimeout(
+      () => reject(new Error(`Coordinate acceptance client close timed out during ${phase}`)),
+      COORDINATE_CLIENT_CLOSE_TIMEOUT_MS,
+    );
+  });
+  try {
+    await Promise.race([client.close(), timedOut]);
+  } finally {
+    if (timeout !== undefined) {
+      timer.clearTimeout(timeout);
+    }
+  }
+}
+
+async function closeLateCoordinateClient(
+  clientPromise: Promise<McpSessionClient>,
+  phase: string,
+  timer: Timer,
+): Promise<unknown> {
+  const didNotSettle = Symbol("late-client-did-not-settle");
+  let timeout: NodeJS.Timeout | undefined;
+  const waitExpired = new Promise<typeof didNotSettle>((resolve) => {
+    timeout = timer.setTimeout(() => resolve(didNotSettle), COORDINATE_CLIENT_CLOSE_TIMEOUT_MS);
+  });
+  const lateClient = await Promise.race([clientPromise.catch(() => undefined), waitExpired]);
+  if (timeout !== undefined) {
+    timer.clearTimeout(timeout);
+  }
+  if (lateClient === didNotSettle) {
+    void clientPromise.then(
+      async (client) => {
+        await closeCoordinateClient(client, `${phase}-late`, timer).catch(() => undefined);
+      },
+      () => undefined,
+    );
+    return new Error(`Coordinate acceptance client did not settle after timeout during ${phase}`);
+  }
+  if (lateClient) {
+    try {
+      await closeCoordinateClient(lateClient, `${phase}-late`, timer);
+    } catch (error) {
+      return error;
+    }
+  }
+  return undefined;
+}
+
 async function withCoordinateAcceptanceClient<T>(
   phase: string,
   args: CoordinateAcceptanceArgs,
@@ -995,26 +1089,45 @@ async function withCoordinateAcceptanceClient<T>(
   });
   let client: McpSessionClient | undefined;
   const clientPromise = dependencies.createMcpClient(phase, controller.signal);
-  void clientPromise.then(
-    (lateClient) => {
-      if (controller.signal.aborted) {
-        void lateClient.close();
-      }
-    },
-    () => undefined,
-  );
+  let outcome: { ok: true; value: T } | { ok: false; error: unknown };
+  let work: Promise<T> | undefined;
   try {
     client = await Promise.race([clientPromise, timedOut]);
     controller.signal.throwIfAborted();
-    return await Promise.race([run(client, controller.signal), timedOut]);
+    work = run(client, controller.signal);
+    outcome = { ok: true, value: await Promise.race([work, timedOut]) };
   } catch (error) {
-    throw deadlineError ?? error;
-  } finally {
-    if (timeout !== undefined) {
-      timer.clearTimeout(timeout);
+    if (deadlineError && work) {
+      await settleWithin(work, COORDINATE_RESTORE_TIMEOUT_MS, timer);
     }
-    await client?.close();
+    outcome = { ok: false, error: deadlineError ?? error };
   }
+  if (timeout !== undefined) {
+    timer.clearTimeout(timeout);
+  }
+  let closeError: unknown;
+  if (client) {
+    try {
+      await closeCoordinateClient(client, phase, timer);
+    } catch (error) {
+      closeError = error;
+    }
+  } else if (deadlineError) {
+    closeError = await closeLateCoordinateClient(clientPromise, phase, timer);
+  }
+  if (closeError !== undefined) {
+    if (!outcome.ok) {
+      throw new AggregateError(
+        [outcome.error, closeError],
+        `Coordinate acceptance ${phase} failed and client cleanup also failed`,
+      );
+    }
+    throw closeError;
+  }
+  if (!outcome.ok) {
+    throw outcome.error;
+  }
+  return outcome.value;
 }
 
 async function callCoordinateTool(
@@ -1031,12 +1144,22 @@ async function callCoordinateTool(
 
 async function rotateCoordinateDevice(
   client: McpSessionClient,
+  platform: Platform,
   sessionUuid: string,
   orientation: "portrait" | "landscape",
   signal: AbortSignal,
 ): Promise<void> {
   successfulToolPayload(
-    await callCoordinateTool(client, "rotate", { orientation, sessionUuid }, signal),
+    await callCoordinateTool(
+      client,
+      "rotate",
+      {
+        orientation,
+        sessionUuid,
+        ...(platform === "android" ? { lockOrientation: true } : {}),
+      },
+      signal,
+    ),
     "rotate",
   );
 }
@@ -1045,6 +1168,7 @@ function assertTapAtResult(
   response: ToolResponse,
   expected: { x: number; y: number },
   context: string,
+  expectedDevice?: { deviceId: string; platform: Platform },
 ): JsonObject {
   const payload = successfulToolPayload(response, "tapAt");
   if (payload.x !== expected.x || payload.y !== expected.y) {
@@ -1052,7 +1176,172 @@ function assertTapAtResult(
       `${context}: tapAt reported (${String(payload.x)}, ${String(payload.y)}), expected (${expected.x}, ${expected.y})`,
     );
   }
+  if (
+    expectedDevice &&
+    (payload.deviceId !== expectedDevice.deviceId || payload.platform !== expectedDevice.platform)
+  ) {
+    throw new Error(`${context}: tapAt did not report the exact target device and platform`);
+  }
   return payload;
+}
+
+function assertStaticTapResult(payload: JsonObject, context: string): void {
+  const metadata = asObject(payload.observationDiff, `${context}.observationDiff`);
+  const observation = asObject(payload.observation, `${context}.observation`);
+  if (
+    metadata.reason !== "diff_emitted" ||
+    observation.isDiff !== true ||
+    objectArrayField(observation, "added", `${context}.observation`).length !== 0 ||
+    objectArrayField(observation, "removed", `${context}.observation`).length !== 0 ||
+    objectArrayField(observation, "changed", `${context}.observation`).length !== 0 ||
+    observation.fields !== undefined
+  ) {
+    throw new Error(`${context}: tapAt changed the static reliability screen`);
+  }
+}
+
+function containsExactString(value: unknown, expected: string): boolean {
+  if (value === expected) {
+    return true;
+  }
+  if (Array.isArray(value)) {
+    return value.some((item) => containsExactString(item, expected));
+  }
+  if (value && typeof value === "object") {
+    return Object.values(value as JsonObject).some((item) => containsExactString(item, expected));
+  }
+  return false;
+}
+
+function containsElementId(value: unknown, elementId: string): boolean {
+  if (Array.isArray(value)) {
+    return value.some((item) => containsElementId(item, elementId));
+  }
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const object = value as JsonObject;
+  return (
+    object.elementId === elementId ||
+    Object.values(object).some((item) => containsElementId(item, elementId))
+  );
+}
+
+function objectArrayOrEmpty(value: JsonObject, field: string): JsonObject[] {
+  return value[field] === undefined ? [] : objectArrayField(value, field, "tapAt observation");
+}
+
+function assertLandscapeTargetTransition(tap: JsonObject, target: JsonObject): void {
+  const elementId = stringField(target, "elementId", "landscape target");
+  const label = typeof target.label === "string" ? target.label : undefined;
+  const metadata = asObject(tap.observationDiff, "tapAt landscape observationDiff");
+  const observation = asObject(tap.observation, "tapAt landscape observation");
+  if (metadata.reason === "diff_emitted") {
+    const targetChanged = [
+      ...objectArrayOrEmpty(observation, "changed"),
+      ...objectArrayOrEmpty(observation, "removed"),
+    ].some((entry) => containsElementId(entry, elementId));
+    if (targetChanged) {
+      return;
+    }
+  }
+  if (metadata.reason === "screen_changed") {
+    const fromScreen = asObject(metadata.fromScreen, "tapAt landscape fromScreen");
+    const toScreen = asObject(metadata.toScreen, "tapAt landscape toScreen");
+    const becameDestination =
+      label !== undefined &&
+      !sameJson(fromScreen, toScreen) &&
+      containsExactString(toScreen, label) &&
+      objectArrayOrEmpty(observation, "context").some((entry) =>
+        containsExactString(entry, label),
+      ) &&
+      !objectArrayOrEmpty(observation, "skeleton").some((entry) =>
+        containsElementId(entry, elementId),
+      );
+    if (becameDestination) {
+      return;
+    }
+  }
+  throw new Error("Landscape coordinate tap did not prove the selected target transitioned");
+}
+
+async function restoreCoordinateOrientation(
+  client: McpSessionClient,
+  args: CoordinateAcceptanceArgs,
+  orientation: "portrait" | "landscape",
+  androidLockState: "locked" | "unlocked" | undefined,
+  timer: Timer,
+): Promise<void> {
+  const controller = new AbortController();
+  let timeout: NodeJS.Timeout | undefined;
+  const timedOut = new Promise<never>((_, reject) => {
+    timeout = timer.setTimeout(() => {
+      const error = new Error("Coordinate acceptance orientation restoration timed out");
+      controller.abort(error);
+      reject(error);
+    }, COORDINATE_RESTORE_TIMEOUT_MS);
+  });
+  try {
+    successfulToolPayload(
+      await Promise.race([
+        callCoordinateTool(
+          client,
+          "rotate",
+          {
+            orientation,
+            sessionUuid: args.sessionUuid,
+            ...(args.platform === "android"
+              ? { lockOrientation: androidLockState === "locked" }
+              : {}),
+          },
+          controller.signal,
+        ),
+        timedOut,
+      ]),
+      "rotate",
+    );
+  } finally {
+    if (timeout !== undefined) {
+      timer.clearTimeout(timeout);
+    }
+  }
+}
+
+async function inspectInitialCoordinateState(
+  client: McpSessionClient,
+  args: CoordinateAcceptanceArgs,
+  signal: AbortSignal,
+): Promise<{
+  orientation: "portrait" | "landscape";
+  androidLockState: "locked" | "unlocked" | undefined;
+}> {
+  const observation = toolPayload(
+    await callCoordinateTool(client, "observe", { sessionUuid: args.sessionUuid }, signal),
+    "observe",
+  );
+  const rotation = nonNegativeIntegerField(observation, "rotation", "initial observe");
+  if (rotation !== 0 && rotation !== 1) {
+    throw new Error(
+      `Coordinate acceptance requires restorable rotation 0 or 1; initial rotation was ${rotation}`,
+    );
+  }
+  const orientation = rotation === 0 ? "portrait" : "landscape";
+  if (args.platform === "ios") {
+    return { orientation, androidLockState: undefined };
+  }
+  const probe = successfulToolPayload(
+    await callCoordinateTool(
+      client,
+      "rotate",
+      { sessionUuid: args.sessionUuid, orientation },
+      signal,
+    ),
+    "rotate",
+  );
+  if (probe.orientationLockState !== "locked" && probe.orientationLockState !== "unlocked") {
+    throw new Error("Coordinate acceptance could not determine the initial Android rotation lock");
+  }
+  return { orientation, androidLockState: probe.orientationLockState };
 }
 
 /**
@@ -1074,37 +1363,59 @@ export async function runTapAtReliabilityLoop(
     args,
     dependencies,
     async (client, signal) => {
-      for (const orientation of COORDINATE_ORIENTATIONS) {
-        await rotateCoordinateDevice(client, args.sessionUuid, orientation, signal);
-        for (let repetition = 1; repetition <= args.iterations; repetition += 1) {
-          try {
-            const screen = screenDimensionsFromObserve(
-              await callCoordinateTool(
-                client,
-                "observe",
-                { sessionUuid: args.sessionUuid },
-                signal,
-              ),
-            );
-            const point = coordinateForScreen(screen);
-            assertTapAtResult(
-              await callCoordinateTool(
-                client,
-                "tapAt",
-                { ...point, sessionUuid: args.sessionUuid },
-                signal,
-              ),
-              point,
-              `tapAt reliability ${orientation} repetition ${repetition}`,
-            );
-            passes += 1;
-          } catch (error) {
-            failures += 1;
-            throw new Error(
-              `tapAt reliability failed at ${orientation} repetition ${repetition}/${args.iterations}; passes=${passes}; failures=${failures}; diagnostic=${errorMessage(error)}`,
-            );
+      const initial = await inspectInitialCoordinateState(client, args, signal);
+      try {
+        for (const orientation of COORDINATE_ORIENTATIONS) {
+          await rotateCoordinateDevice(
+            client,
+            args.platform,
+            args.sessionUuid,
+            orientation,
+            signal,
+          );
+          for (let repetition = 1; repetition <= args.iterations; repetition += 1) {
+            try {
+              const screen = screenDimensionsFromObserve(
+                await callCoordinateTool(
+                  client,
+                  "observe",
+                  { sessionUuid: args.sessionUuid },
+                  signal,
+                ),
+              );
+              const point = { x: Math.floor(screen.width / 2), y: 0 };
+              const context = `tapAt reliability ${orientation} repetition ${repetition}`;
+              const payload = assertTapAtResult(
+                await callCoordinateTool(
+                  client,
+                  "tapAt",
+                  { ...point, sessionUuid: args.sessionUuid },
+                  signal,
+                ),
+                point,
+                context,
+                args.expectedDeviceId
+                  ? { deviceId: args.expectedDeviceId, platform: args.platform }
+                  : undefined,
+              );
+              assertStaticTapResult(payload, context);
+              passes += 1;
+            } catch (error) {
+              failures += 1;
+              throw new Error(
+                `tapAt reliability failed at ${orientation} repetition ${repetition}/${args.iterations}; passes=${passes}; failures=${failures}; diagnostic=${errorMessage(error)}`,
+              );
+            }
           }
         }
+      } finally {
+        await restoreCoordinateOrientation(
+          client,
+          args,
+          initial.orientation,
+          initial.androidLockState,
+          dependencies.timer ?? defaultTimer,
+        );
       }
       return {
         iterationsPerOrientation: args.iterations,
@@ -1136,7 +1447,22 @@ export async function runTapAtMultiDeviceRefusalCheck(
         await callCoordinateTool(client, "listDevices", { platform: args.platform }, signal),
         "listDevices",
       );
-      const devices = objectArrayField(inventory, "devices", "listDevices");
+      const devices = objectArrayField(inventory, "devices", "listDevices").filter((device) => {
+        const runtime = device.runtime;
+        if (!runtime || typeof runtime !== "object" || Array.isArray(runtime)) {
+          return false;
+        }
+        const runtimeObject = runtime as JsonObject;
+        const lifecycle = runtimeObject.lifecycle;
+        return (
+          typeof runtimeObject.deviceId === "string" &&
+          runtimeObject.deviceId.length > 0 &&
+          lifecycle !== null &&
+          typeof lifecycle === "object" &&
+          !Array.isArray(lifecycle) &&
+          (lifecycle as JsonObject).state === "booted"
+        );
+      });
       if (devices.length <= 1) {
         throw new Error(
           `tapAt ${args.platform}-multiple-booted requires more than one booted ${args.platform} device; found ${devices.length}`,
@@ -1147,11 +1473,14 @@ export async function runTapAtMultiDeviceRefusalCheck(
       );
       const point = coordinateForScreen(screen);
       const ambiguous = await callCoordinateTool(client, "tapAt", point, signal);
-      if (!ambiguous.isError) {
-        throw new Error(
-          `tapAt accepted an unqualified call with ${devices.length} booted ${args.platform} devices; expected a fail-closed refusal`,
-        );
-      }
+      assertAmbiguousTapDiagnostic(ambiguous, args.platform, "bare");
+      const platformOnly = await callCoordinateTool(
+        client,
+        "tapAt",
+        { ...point, platform: args.platform },
+        signal,
+      );
+      assertAmbiguousTapDiagnostic(platformOnly, args.platform, "platform-only");
       const targeted = assertTapAtResult(
         await callCoordinateTool(
           client,
@@ -1161,6 +1490,7 @@ export async function runTapAtMultiDeviceRefusalCheck(
         ),
         point,
         `tapAt ${args.platform}-multiple-booted targeted call`,
+        { deviceId: args.expectedDeviceId, platform: args.platform },
       );
       const deviceId = stringField(targeted, "deviceId", "tapAt targeted response");
       if (deviceId !== args.expectedDeviceId) {
@@ -1223,6 +1553,20 @@ function assertRasterOrientationContract(
       `iOS Simulator framebuffer must remain portrait across rotation: portrait raster=${portraitRaster.width}x${portraitRaster.height}; landscape raster=${landscapeRaster.width}x${landscapeRaster.height}; landscape observe=${landscape.width}x${landscape.height}`,
     );
   }
+  const widthScale = portraitRaster.width / portrait.width;
+  const heightScale = portraitRaster.height / portrait.height;
+  const roundingTolerance = Math.max(1 / portrait.width, 1 / portrait.height);
+  if (
+    !Number.isFinite(widthScale) ||
+    !Number.isFinite(heightScale) ||
+    widthScale <= 0 ||
+    heightScale <= 0 ||
+    Math.abs(widthScale - heightScale) > roundingTolerance
+  ) {
+    throw new Error(
+      `iOS screenshot raster must scale uniformly from observe.screenSize: raster=${portraitRaster.width}x${portraitRaster.height}; observe=${portrait.width}x${portrait.height}`,
+    );
+  }
 }
 
 /**
@@ -1239,11 +1583,14 @@ export async function runCoordinateOrientationCheck(
     args,
     dependencies,
     async (client, signal) => {
+      const initial = await inspectInitialCoordinateState(client, args, signal);
       const sample = async (orientation: "portrait" | "landscape") => {
-        await rotateCoordinateDevice(client, args.sessionUuid, orientation, signal);
-        const screen = screenDimensionsFromObserve(
+        await rotateCoordinateDevice(client, args.platform, args.sessionUuid, orientation, signal);
+        const observation = toolPayload(
           await callCoordinateTool(client, "observe", { sessionUuid: args.sessionUuid }, signal),
+          "observe",
         );
+        const screen = screenDimensionsFromPayload(observation);
         const screenshot = successfulToolPayload(
           await callCoordinateTool(
             client,
@@ -1264,103 +1611,86 @@ export async function runCoordinateOrientationCheck(
               `captureScreenshot reported deviceId ${screenshotDeviceId}, expected ${args.expectedDeviceId}`,
             );
           }
+          if (screenshot.platform !== args.platform) {
+            throw new Error(
+              `captureScreenshot reported platform ${String(screenshot.platform)}, expected ${args.platform}`,
+            );
+          }
         }
         const path = stringField(screenshot, "path", "captureScreenshot response");
-        return { screen, raster: await readPngDimensions(path, signal) };
+        return { observation, screen, raster: await readPngDimensions(path, signal) };
       };
 
-      const portrait = await sample("portrait");
-      const landscape = await sample("landscape");
-      assertScreenRotation(portrait.screen, landscape.screen, args.platform);
-      assertRasterOrientationContract(
-        args.platform,
-        portrait.screen,
-        landscape.screen,
-        portrait.raster,
-        landscape.raster,
-      );
-      const point = coordinateForScreen(landscape.screen);
-      assertTapAtResult(
-        await callCoordinateTool(
+      try {
+        const portrait = await sample("portrait");
+        const landscape = await sample("landscape");
+        assertScreenRotation(portrait.screen, landscape.screen, args.platform);
+        assertRasterOrientationContract(
+          args.platform,
+          portrait.screen,
+          landscape.screen,
+          portrait.raster,
+          landscape.raster,
+        );
+        const skeleton = objectArrayField(landscape.observation, "skeleton", "landscape observe");
+        const candidates = skeleton.filter(
+          (element) =>
+            Array.isArray(element.affordances) &&
+            element.affordances.includes("tap") &&
+            Array.isArray(element.bounds) &&
+            element.bounds.length === 4 &&
+            typeof element.elementId === "string",
+        );
+        const target = candidates.find(
+          (candidate) =>
+            skeleton.filter((other) => other.elementId === candidate.elementId).length === 1,
+        );
+        if (!target) {
+          throw new Error(
+            "Landscape observe returned no uniquely identified tappable target with bounds",
+          );
+        }
+        const bounds = target.bounds as unknown[];
+        if (bounds.some((value) => typeof value !== "number" || !Number.isFinite(value))) {
+          throw new Error("Landscape tappable target returned invalid bounds");
+        }
+        const [left, top, right, bottom] = bounds as number[];
+        const point = {
+          x: Math.floor((left + right) / 2),
+          y: Math.floor((top + bottom) / 2),
+        };
+        const tap = assertTapAtResult(
+          await callCoordinateTool(
+            client,
+            "tapAt",
+            { ...point, sessionUuid: args.sessionUuid },
+            signal,
+          ),
+          point,
+          "tapAt landscape-space coordinate",
+          args.expectedDeviceId
+            ? { deviceId: args.expectedDeviceId, platform: args.platform }
+            : undefined,
+        );
+        assertLandscapeTargetTransition(tap, target);
+        return {
+          platform: args.platform,
+          portrait: portrait.screen,
+          landscape: landscape.screen,
+          portraitRaster: portrait.raster,
+          landscapeRaster: landscape.raster,
+        };
+      } finally {
+        await restoreCoordinateOrientation(
           client,
-          "tapAt",
-          { ...point, sessionUuid: args.sessionUuid },
-          signal,
-        ),
-        point,
-        "tapAt landscape-space coordinate",
-      );
-      return {
-        platform: args.platform,
-        portrait: portrait.screen,
-        landscape: landscape.screen,
-        portraitRaster: portrait.raster,
-        landscapeRaster: landscape.raster,
-      };
+          args,
+          initial.orientation,
+          initial.androidLockState,
+          dependencies.timer ?? defaultTimer,
+        );
+      }
     },
   );
-}
-
-/** Parse the direct CLI used by the three additive absolute-coordinate gates. */
-export function parseCoordinateAcceptanceArgs(argv: string[]): CoordinateAcceptanceCliArgs {
-  const values = new Map<string, string>();
-  const booleanFlags = new Set([
-    "reliability-loop",
-    "multi-device-refusal-check",
-    "orientation-check",
-  ]);
-  const supported = new Set([
-    ...booleanFlags,
-    "platform",
-    "session-uuid",
-    "device-id",
-    "entrypoint",
-    "iterations",
-    "timeout-ms",
-  ]);
-  for (let index = 0; index < argv.length;) {
-    const flag = argv[index];
-    if (!flag?.startsWith("--") || !supported.has(flag.slice(2))) {
-      throw new Error(`Unsupported coordinate acceptance flag: ${flag ?? ""}`);
-    }
-    const name = flag.slice(2);
-    if (booleanFlags.has(name)) {
-      values.set(name, "true");
-      index += 1;
-      continue;
-    }
-    const value = argv[index + 1];
-    if (!value || value.startsWith("--")) {
-      throw new Error(`Expected a value for --${name}`);
-    }
-    values.set(name, value);
-    index += 2;
-  }
-  const selectedModes = [...booleanFlags].filter((flag) => values.get(flag) === "true");
-  if (selectedModes.length !== 1) {
-    throw new Error("Select exactly one coordinate acceptance check");
-  }
-  const platform = requiredFlag(values, "platform");
-  if (platform !== "android" && platform !== "ios") {
-    throw new Error("--platform must be android or ios");
-  }
-  const entrypoint = requiredFlag(values, "entrypoint");
-  const build = computeBuildIdentity(entrypoint);
-  if (build.buildId === "unknown") {
-    throw new Error(`Cannot compute a build identity for --entrypoint ${entrypoint}`);
-  }
-  return {
-    platform,
-    sessionUuid: requiredFlag(values, "session-uuid"),
-    timeoutMs: values.has("timeout-ms")
-      ? parseInteger(values.get("timeout-ms")!, "timeout-ms")
-      : DEFAULT_COORDINATE_ACCEPTANCE_TIMEOUT_MS,
-    iterations: values.has("iterations")
-      ? parseInteger(values.get("iterations")!, "iterations")
-      : DEFAULT_COORDINATE_ACCEPTANCE_ITERATIONS,
-    expectedDeviceId: values.get("device-id"),
-    build,
-  };
 }
 
 function targetIdentity(args: AcceptanceArgs): string {
@@ -2379,6 +2709,45 @@ export async function runAcceptanceMatrix(
     }
   };
 
+  const runCoordinateAcceptanceGates = async (session: AcquiredSession): Promise<void> => {
+    if (dependencies.skipCoordinateAcceptance) {
+      if (!dependencies.testOnly) {
+        throw new Error("skipCoordinateAcceptance is available only to injected tests");
+      }
+      return;
+    }
+    const start = timer.now();
+    const remaining = workDeadline - timer.now();
+    const perGateBudget = Math.floor((remaining - 3 * COORDINATE_CLIENT_CLOSE_TIMEOUT_MS) / 3);
+    if (perGateBudget <= 0) {
+      throw new Error("Acceptance deadline has no time left for coordinate contract gates");
+    }
+    const coordinateArgs: CoordinateAcceptanceArgs = {
+      platform: args.platform,
+      sessionUuid: session.sessionUuid,
+      timeoutMs: Math.min(DEFAULT_COORDINATE_ACCEPTANCE_TIMEOUT_MS, perGateBudget),
+      iterations: DEFAULT_COORDINATE_ACCEPTANCE_ITERATIONS,
+      expectedDeviceId: session.device.deviceId,
+    };
+    const coordinateDependencies: CoordinateAcceptanceDependencies = {
+      timer,
+      createMcpClient: async (owner, signal) =>
+        await createMcpClient(`coordinate-${owner}`, signal),
+      readPngDimensions: dependencies.readPngDimensions,
+    };
+    const reliability = await runTapAtReliabilityLoop(coordinateArgs, coordinateDependencies);
+    const multiDevice = await runTapAtMultiDeviceRefusalCheck(
+      coordinateArgs,
+      coordinateDependencies,
+    );
+    const orientation = await runCoordinateOrientationCheck(coordinateArgs, coordinateDependencies);
+    recordStep(steps, timer, "coordinate-live-device-contract", start, {
+      reliability,
+      multiDevice,
+      orientation,
+    });
+  };
+
   const release = async (
     sessionUuid: string,
     phase: string,
@@ -3167,6 +3536,14 @@ export async function runAcceptanceMatrix(
           tool: "getAndroid",
           request,
         });
+        if (order === "forward") {
+          await runCoordinateAcceptanceGates({
+            phase: selectionPhase,
+            client,
+            sessionUuid: selectedSessionUuid,
+            ...selectedIdentity,
+          });
+        }
         await release(selectedSessionUuid, selectionPhase);
       }
     } else {
@@ -3209,6 +3586,14 @@ export async function runAcceptanceMatrix(
           tool: "getApple",
           request,
         });
+        if (order === "forward") {
+          await runCoordinateAcceptanceGates({
+            phase: selectionPhase,
+            client,
+            sessionUuid: selectedSessionUuid,
+            ...selectedIdentity,
+          });
+        }
         await release(selectedSessionUuid, selectionPhase);
       }
     }
@@ -3498,7 +3883,7 @@ export async function runAcceptanceMatrix(
         ? undefined
         : String(primaryError);
   const evidence: Evidence = {
-    schemaVersion: 9,
+    schemaVersion: 10,
     authentication: {
       schemaVersion: 1,
       algorithm: "hmac-sha256",
@@ -3542,6 +3927,9 @@ export async function runAcceptanceMatrix(
       controlledDiscoveryOrderDeterministicallyReversed: reversedDiscoveryOrder,
       controlledSiblingUntouched: steps.some(
         (step) => step.name === "controlled-discovery" && step.passed,
+      ),
+      coordinateLiveDeviceContractPassed: steps.some(
+        (step) => step.name === "coordinate-live-device-contract" && step.passed,
       ),
       destructiveControlChecks: destructiveControlChecks >= 8,
       ...(args.platform === "android"
@@ -3630,8 +4018,7 @@ if (import.meta.main) {
     const argv = Bun.argv.slice(2);
     if (argv.includes("--help")) {
       console.log(
-        "Usage: bun scripts/live-device-acceptance.ts --platform <android|ios> --scenario full [options]\n" +
-          "   or: bun scripts/live-device-acceptance.ts --reliability-loop|--multi-device-refusal-check|--orientation-check --platform <android|ios> --session-uuid <uuid> --entrypoint <built-entrypoint> [--device-id <id>] [--iterations <n>] [--timeout-ms <n>]",
+        "Usage: bun scripts/live-device-acceptance.ts --platform <android|ios> --scenario full [options]",
       );
       process.exitCode = 0;
     } else if (argv.includes("--verify-evidence")) {
@@ -3641,32 +4028,6 @@ if (import.meta.main) {
         `Verified live-device acceptance evidence (${evidence.platform}/${evidence.scenario}); evidence=${basename(verification.evidencePath)}`,
       );
       process.exitCode = 0;
-    } else if (
-      argv.includes("--reliability-loop") ||
-      argv.includes("--multi-device-refusal-check") ||
-      argv.includes("--orientation-check")
-    ) {
-      const args = parseCoordinateAcceptanceArgs(argv);
-      const dependencies: CoordinateAcceptanceDependencies = {
-        createMcpClient: async (owner, signal) =>
-          await defaultCreateMcpClient(owner, args.build, signal),
-      };
-      if (argv.includes("--reliability-loop")) {
-        const result = await runTapAtReliabilityLoop(args, dependencies);
-        console.log(
-          `tapAt reliability loop passed (${args.platform}); passes=${result.passes}; failures=${result.failures}; iterations=${result.iterationsPerOrientation}`,
-        );
-      } else if (argv.includes("--multi-device-refusal-check")) {
-        const result = await runTapAtMultiDeviceRefusalCheck(args, dependencies);
-        console.log(
-          `tapAt multi-device refusal passed (${result.platform}); booted=${result.bootedDeviceCount}; deviceId=${result.targetedDeviceId}`,
-        );
-      } else {
-        const result = await runCoordinateOrientationCheck(args, dependencies);
-        console.log(
-          `coordinate orientation passed (${result.platform}); portrait=${result.portrait.width}x${result.portrait.height}; landscape=${result.landscape.width}x${result.landscape.height}`,
-        );
-      }
     } else {
       const args = parseArgs(argv);
       if (args.recordOwnershipManifest) {

@@ -12,7 +12,6 @@ import {
   defaultWriteEvidence,
   ensureFreshAcceptanceDaemon,
   parseArgs,
-  parseCoordinateAcceptanceArgs,
   recordOwnershipManifest,
   runCoordinateOrientationCheck,
   runAcceptanceMatrix,
@@ -51,6 +50,14 @@ interface Harness {
 
 const IOS_UDID = "00000000-0000-0000-0000-000000000001";
 const LIVE_ACCEPTANCE_ENV = "AUTOMOBILE_ACCEPTANCE_LIVE";
+const ENABLED_ACCEPTANCE_TOOLS = [
+  "observe",
+  "getDeviceState",
+  "killDevice",
+  "tapAt",
+  "captureScreenshot",
+  "rotate",
+];
 const posixTest = process.platform === "win32" ? test.skip : test;
 const androidArgs: AcceptanceArgs = {
   platform: "android",
@@ -239,6 +246,8 @@ function createHarness(
   let targetDeleted = false;
   let cliAcquisitionCount = 0;
   let restartedSessionUuid: string | undefined;
+  let currentOrientation: "portrait" | "landscape" = "portrait";
+  let matrixPlatform: "android" | "ios" = "android";
   const persistedStates = new Map<string, "target-absent" | "target-busy">();
   const terminalPersistedSessions = new Set<string>();
   const daemonGeneration = 1;
@@ -311,6 +320,7 @@ function createHarness(
       }
       if (name === "listDevices") {
         const isIos = arguments_.platform === "ios";
+        matrixPlatform = isIos ? "ios" : "android";
         const devices = isIos
           ? [
               ...(iosTargetPresent
@@ -602,7 +612,92 @@ function createHarness(
         if (arguments_.sessionUuid === options.failObserveFor) {
           throw new Error(`observe failed for ${options.failObserveFor}`);
         }
-        return { structuredContent: { tree: [] } };
+        const screenSize =
+          currentOrientation === "portrait"
+            ? matrixPlatform === "ios"
+              ? { width: 402, height: 874 }
+              : { width: 1080, height: 2400 }
+            : matrixPlatform === "ios"
+              ? { width: 874, height: 402 }
+              : { width: 2400, height: 1080 };
+        return {
+          structuredContent: {
+            screenSize,
+            rotation: currentOrientation === "portrait" ? 0 : 1,
+            skeleton: [
+              {
+                elementId: "test-target",
+                label: "Test target",
+                bounds: [10, 10, 100, 100],
+                affordances: ["tap"],
+              },
+            ],
+          },
+        };
+      }
+      if (name === "rotate") {
+        const sessionUuid = String(arguments_.sessionUuid);
+        requireMintedSessionCapability(sessionUuid, "rotate");
+        currentOrientation = arguments_.orientation as "portrait" | "landscape";
+        return {
+          structuredContent: {
+            success: true,
+            orientation: currentOrientation,
+            ...(matrixPlatform === "android" ? { orientationLockState: "unlocked" } : {}),
+          },
+        };
+      }
+      if (name === "captureScreenshot") {
+        const sessionUuid = String(arguments_.sessionUuid);
+        requireMintedSessionCapability(sessionUuid, "captureScreenshot");
+        return {
+          structuredContent: {
+            success: true,
+            deviceId: matrixPlatform === "ios" ? IOS_UDID : androidTargetSerial,
+            platform: matrixPlatform,
+            path: `${matrixPlatform}-${currentOrientation}.png`,
+          },
+        };
+      }
+      if (name === "tapAt") {
+        if (arguments_.sessionUuid === undefined) {
+          return {
+            isError: true,
+            structuredContent: { error: ambiguityDiagnostic(matrixPlatform) },
+          };
+        }
+        const sessionUuid = String(arguments_.sessionUuid);
+        requireMintedSessionCapability(sessionUuid, "tapAt");
+        const reliabilityTap = arguments_.y === 0;
+        return {
+          structuredContent: {
+            success: true,
+            x: arguments_.x,
+            y: arguments_.y,
+            deviceId: matrixPlatform === "ios" ? IOS_UDID : androidTargetSerial,
+            platform: matrixPlatform,
+            observationDiff: reliabilityTap
+              ? { mode: "diff", reason: "diff_emitted" }
+              : {
+                  mode: "full",
+                  reason: "screen_changed",
+                  fromScreen: { screenIdentity: { key: "before" } },
+                  toScreen: { screenIdentity: { key: "after", label: "Test target" } },
+                },
+            observation: reliabilityTap
+              ? { isDiff: true, skeleton: [], added: [], removed: [], changed: [] }
+              : {
+                  context: [
+                    {
+                      elementId: "test-target",
+                      label: "Test target",
+                      bounds: [0, 0, 1, 1],
+                      affordances: [],
+                    },
+                  ],
+                },
+          },
+        };
       }
       if (name === "getDeviceState") {
         const sessionUuid = String(arguments_.sessionUuid);
@@ -793,6 +888,15 @@ function createHarness(
         events.push(`restart-acceptance-session:${scope.sessionUuid}`);
         restartedSessionUuid = scope.sessionUuid;
       },
+      async readPngDimensions(path) {
+        if (path.includes("android-portrait")) {
+          return { width: 1080, height: 2400 };
+        }
+        if (path.includes("android-landscape")) {
+          return { width: 2400, height: 1080 };
+        }
+        return { width: 1206, height: 2622 };
+      },
       writeFile:
         options.writeFile ??
         (async (_path, content) => {
@@ -938,7 +1042,7 @@ describe("live device acceptance harness", () => {
           configuration: { memoryMb: 4096, cpuCores: 4 },
         },
       },
-      enableTools: ["observe", "getDeviceState", "killDevice"],
+      enableTools: ENABLED_ACCEPTANCE_TOOLS,
     });
     expect(
       harness.calls
@@ -968,7 +1072,7 @@ describe("live device acceptance harness", () => {
     expect(exactAcquisitions.at(-1)?.arguments).toEqual({
       avdName: "Pixel_8_Sibling",
       deviceId: "emulator-5558",
-      enableTools: ["observe", "getDeviceState", "killDevice"],
+      enableTools: ENABLED_ACCEPTANCE_TOOLS,
     });
     expect(
       harness.calls.filter((call) => call.name === "startDevice").map((call) => call.arguments),
@@ -977,14 +1081,14 @@ describe("live device acceptance harness", () => {
         platform: "android",
         avdName: "Pixel_8_API_35",
         preferRunning: true,
-        enableTools: ["observe", "getDeviceState", "killDevice"],
+        enableTools: ENABLED_ACCEPTANCE_TOOLS,
       },
       {
         platform: "android",
         avdName: "Pixel_8_API_35",
         preferRunning: true,
         minOsVersion: "34",
-        enableTools: ["observe", "getDeviceState", "killDevice"],
+        enableTools: ENABLED_ACCEPTANCE_TOOLS,
       },
       {
         platform: "android",
@@ -992,27 +1096,27 @@ describe("live device acceptance harness", () => {
         preferRunning: true,
         minOsVersion: "34",
         maxOsVersion: "35",
-        enableTools: ["observe", "getDeviceState", "killDevice"],
+        enableTools: ENABLED_ACCEPTANCE_TOOLS,
       },
       {
         platform: "android",
         avdName: "Pixel_8_API_35",
         preferRunning: true,
         minOsVersion: "9999",
-        enableTools: ["observe", "getDeviceState", "killDevice"],
+        enableTools: ENABLED_ACCEPTANCE_TOOLS,
       },
       {
         platform: "android",
         avdName: "Pixel_8_API_35",
         preferRunning: true,
         maxOsVersion: "0",
-        enableTools: ["observe", "getDeviceState", "killDevice"],
+        enableTools: ENABLED_ACCEPTANCE_TOOLS,
       },
       {
         platform: "android",
         avdName: "Pixel_8_API_35",
         preferRunning: true,
-        enableTools: ["observe", "getDeviceState", "killDevice"],
+        enableTools: ENABLED_ACCEPTANCE_TOOLS,
       },
     ]);
     expect(harness.cliCommands.find((command) => command.includes("getAndroid"))).toEqual([
@@ -1023,7 +1127,7 @@ describe("live device acceptance harness", () => {
       "--avd-name",
       "Pixel_8_API_35",
       "--enable-tools",
-      '["observe","getDeviceState","killDevice"]',
+      '["observe","getDeviceState","killDevice","tapAt","captureScreenshot","rotate"]',
     ]);
     expect(
       harness.calls.find(
@@ -1074,6 +1178,7 @@ describe("live device acceptance harness", () => {
       controlledDiscoveryPasses: true,
       controlledDiscoveryOrderDeterministicallyReversed: true,
       controlledSiblingUntouched: true,
+      coordinateLiveDeviceContractPassed: true,
       signedAndroidDuplicateRemoved: true,
       exactAndroidControlSelected: true,
       destructiveControlChecks: true,
@@ -1088,7 +1193,7 @@ describe("live device acceptance harness", () => {
     ).toEqual({
       avdName: "Pixel_8_API_35",
       deviceId: "emulator-5556",
-      enableTools: ["observe", "getDeviceState", "killDevice"],
+      enableTools: ENABLED_ACCEPTANCE_TOOLS,
     });
     expect(
       harness.calls.some(
@@ -1128,7 +1233,7 @@ describe("live device acceptance harness", () => {
         deviceId: IOS_UDID,
         preferRunning: true,
         formFactor: "phone",
-        enableTools: ["observe", "getDeviceState", "killDevice"],
+        enableTools: ENABLED_ACCEPTANCE_TOOLS,
       },
       {
         platform: "ios",
@@ -1136,7 +1241,7 @@ describe("live device acceptance harness", () => {
         preferRunning: true,
         formFactor: "phone",
         minOsVersion: "17.0",
-        enableTools: ["observe", "getDeviceState", "killDevice"],
+        enableTools: ENABLED_ACCEPTANCE_TOOLS,
       },
       {
         platform: "ios",
@@ -1145,7 +1250,7 @@ describe("live device acceptance harness", () => {
         formFactor: "phone",
         minOsVersion: "17.0",
         maxOsVersion: "18.0",
-        enableTools: ["observe", "getDeviceState", "killDevice"],
+        enableTools: ENABLED_ACCEPTANCE_TOOLS,
       },
       {
         platform: "ios",
@@ -1153,7 +1258,7 @@ describe("live device acceptance harness", () => {
         preferRunning: true,
         formFactor: "phone",
         minOsVersion: "9999.0",
-        enableTools: ["observe", "getDeviceState", "killDevice"],
+        enableTools: ENABLED_ACCEPTANCE_TOOLS,
       },
       {
         platform: "ios",
@@ -1161,21 +1266,21 @@ describe("live device acceptance harness", () => {
         preferRunning: true,
         formFactor: "phone",
         maxOsVersion: "0.0",
-        enableTools: ["observe", "getDeviceState", "killDevice"],
+        enableTools: ENABLED_ACCEPTANCE_TOOLS,
       },
       {
         platform: "ios",
         deviceId: IOS_UDID,
         preferRunning: true,
         formFactor: "tablet",
-        enableTools: ["observe", "getDeviceState", "killDevice"],
+        enableTools: ENABLED_ACCEPTANCE_TOOLS,
       },
       {
         platform: "ios",
         deviceId: IOS_UDID,
         preferRunning: true,
         formFactor: "phone",
-        enableTools: ["observe", "getDeviceState", "killDevice"],
+        enableTools: ENABLED_ACCEPTANCE_TOOLS,
       },
     ]);
     expect(harness.cliCommands.find((command) => command.includes("getApple"))).toEqual([
@@ -1186,16 +1291,16 @@ describe("live device acceptance harness", () => {
       "--device-id",
       IOS_UDID,
       "--enable-tools",
-      '["observe","getDeviceState","killDevice"]',
+      '["observe","getDeviceState","killDevice","tapAt","captureScreenshot","rotate"]',
     ]);
     expect(
       harness.calls.filter((call) => call.name === "getApple").map((call) => call.arguments),
     ).toEqual(
       expect.arrayContaining([
-        { deviceId: IOS_UDID, enableTools: ["observe", "getDeviceState", "killDevice"] },
+        { deviceId: IOS_UDID, enableTools: ENABLED_ACCEPTANCE_TOOLS },
         {
           deviceId: "00000000-0000-0000-0000-000000000002",
-          enableTools: ["observe", "getDeviceState", "killDevice"],
+          enableTools: ENABLED_ACCEPTANCE_TOOLS,
         },
       ]),
     );
@@ -1609,9 +1714,9 @@ describe("live device acceptance harness", () => {
 
     expect(harness.releases).toEqual(["start-1", "start-2"]);
     expect(harness.events.indexOf("release:start-2")).toBeLessThan(
-      harness.events.findIndex((event) => event.startsWith("close:")),
+      harness.events.indexOf("close:controlled-discovery-forward"),
     );
-    expect(harness.events.filter((event) => event.startsWith("close:"))).toHaveLength(3);
+    expect(harness.events.filter((event) => event.startsWith("close:")).length).toBeGreaterThan(3);
     expect(harness.evidence[0]).not.toContain("start-2");
     const evidence = JSON.parse(harness.evidence[0]);
     expect(evidence.checks.readinessObserveThenState).toBe(false);
@@ -1782,7 +1887,7 @@ describe("live device acceptance harness", () => {
     expect(harness.evidence[0]).toContain("hmac-sha256:");
   });
 
-  test("authenticates schema-9 evidence and rejects body, build, and manifest tampering", async () => {
+  test("authenticates schema-10 evidence and rejects body, build, and manifest tampering", async () => {
     const fixture = createProductionAcceptanceFixture();
     const harness = createHarness({
       writeFile: async (path, content) => {
@@ -1843,6 +1948,33 @@ describe("live device acceptance harness", () => {
     }
   });
 
+  test("rejects authentic evidence that records a failed acceptance outcome", async () => {
+    const fixture = createProductionAcceptanceFixture();
+    const harness = createHarness({
+      failObserveFor: "start-2",
+      writeFile: async (path, content) => {
+        writeFileSync(path, content, { mode: 0o600 });
+        chmodSync(path, 0o600);
+      },
+    });
+    try {
+      await expect(runAcceptanceMatrix(fixture.android, harness.dependencies)).rejects.toThrow(
+        "observe failed for start-2",
+      );
+      expect(() =>
+        verifyEvidenceFile({
+          evidencePath: fixture.android.evidencePath,
+          ownershipManifestPath: fixture.android.ownershipManifestPath,
+          operatorKeyPath: fixture.android.operatorKeyPath,
+          operatorKey: fixture.android.operatorKey,
+          build: fixture.android.build,
+        }),
+      ).toThrow("Evidence is authentic but records a failed acceptance outcome");
+    } finally {
+      fixture.dispose();
+    }
+  });
+
   test("returns by the absolute deadline when an injected MCP connection ignores AbortSignal", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
@@ -1859,7 +1991,7 @@ describe("live device acceptance harness", () => {
       });
       return await new Promise<McpSessionClient>(() => {});
     };
-    const result = runAcceptanceMatrix({ ...androidArgs, timeoutMs: 100 }, harness.dependencies);
+    const result = runAcceptanceMatrix({ ...androidArgs, timeoutMs: 10_000 }, harness.dependencies);
 
     await expect(
       Promise.race([
@@ -1870,7 +2002,7 @@ describe("live device acceptance harness", () => {
       ]),
     ).rejects.toThrow("Acceptance deadline elapsed during provision MCP connect");
     expect(aborted).toBe(true);
-    expect(timer.now()).toBeLessThanOrEqual(100);
+    expect(timer.now()).toBeLessThanOrEqual(10_000);
   });
 
   test("returns by the deadline when a late session-bearing response ignores abort", async () => {
@@ -1947,6 +2079,7 @@ describe("live device acceptance harness", () => {
       },
     });
     harness.dependencies.timer = timer;
+    harness.dependencies.skipCoordinateAcceptance = true;
 
     const result = runAcceptanceMatrix({ ...androidArgs, timeoutMs: 100 }, harness.dependencies);
     const rejection = expect(result).rejects.toThrow(
@@ -2289,9 +2422,39 @@ function success(payload: Record<string, unknown>): { structuredContent: Record<
   return { structuredContent: { success: true, ...payload } };
 }
 
+function staticTapSuccess(
+  arguments_: Record<string, unknown>,
+  platform: "android" | "ios",
+): { structuredContent: Record<string, unknown> } {
+  return success({
+    x: arguments_.x,
+    y: arguments_.y,
+    deviceId: `${platform}-device`,
+    platform,
+    observationDiff: { mode: "diff", reason: "diff_emitted" },
+    observation: { isDiff: true, skeleton: [], added: [], removed: [], changed: [] },
+  });
+}
+
+function bootedDeviceFixture(platform: "android" | "ios", deviceId: string) {
+  return deviceDescriptionFixture({
+    name: deviceId,
+    platform,
+    stableId: deviceId,
+    deviceId,
+  });
+}
+
+function ambiguityDiagnostic(platform: "android" | "ios"): string {
+  return platform === "ios"
+    ? "Multiple iOS simulators detected. Provide sessionUuid to target a specific simulator."
+    : "Multiple Android devices detected. Provide sessionUuid to target a specific device.";
+}
+
 describe("additive absolute-coordinate live-device acceptance gates", () => {
   test("runs every reliability repetition in portrait and landscape", async () => {
     const rotations: string[] = [];
+    const lockRequests: unknown[] = [];
     let orientation: "portrait" | "landscape" = "portrait";
     let taps = 0;
     const client: McpSessionClient = {
@@ -2299,7 +2462,8 @@ describe("additive absolute-coordinate live-device acceptance gates", () => {
         if (name === "rotate") {
           orientation = arguments_.orientation as "portrait" | "landscape";
           rotations.push(orientation);
-          return success({});
+          lockRequests.push(arguments_.lockOrientation);
+          return success({ orientationLockState: "unlocked" });
         }
         if (name === "observe") {
           return success({
@@ -2307,11 +2471,12 @@ describe("additive absolute-coordinate live-device acceptance gates", () => {
               orientation === "portrait"
                 ? { width: 1080, height: 2400 }
                 : { width: 2400, height: 1080 },
+            rotation: orientation === "portrait" ? 0 : 1,
           });
         }
         if (name === "tapAt") {
           taps += 1;
-          return success({ x: arguments_.x, y: arguments_.y, deviceId: "android-device" });
+          return staticTapSuccess(arguments_, "android");
         }
         throw new Error(`Unexpected tool ${name}`);
       },
@@ -2329,8 +2494,53 @@ describe("additive absolute-coordinate live-device acceptance gates", () => {
       failures: 0,
       orientations: ["portrait", "landscape"],
     });
-    expect(rotations).toEqual(["portrait", "landscape"]);
+    expect(rotations).toEqual(["portrait", "portrait", "landscape", "portrait"]);
+    expect(lockRequests).toEqual([undefined, true, true, false]);
     expect(taps).toBe(40);
+  });
+
+  test("fails a passing gate when coordinate client cleanup fails", async () => {
+    let orientation: "portrait" | "landscape" = "portrait";
+    const client: McpSessionClient = {
+      async callTool(name, arguments_) {
+        if (name === "rotate") {
+          orientation = arguments_.orientation as "portrait" | "landscape";
+          return success({ orientationLockState: "unlocked" });
+        }
+        if (name === "observe") {
+          return success({
+            screenSize:
+              orientation === "portrait"
+                ? { width: 1080, height: 2400 }
+                : { width: 2400, height: 1080 },
+            rotation: orientation === "portrait" ? 0 : 1,
+          });
+        }
+        if (name === "tapAt") {
+          return staticTapSuccess(arguments_, "android");
+        }
+        throw new Error(`Unexpected tool ${name}`);
+      },
+      async close() {
+        throw new Error("coordinate close failed");
+      },
+    };
+
+    await expect(
+      runTapAtReliabilityLoop(coordinateArgs("android"), coordinateDependencies(client)),
+    ).rejects.toThrow("coordinate close failed");
+  });
+
+  test("reports a coordinate client that remains unresolved after deadline", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+
+    await expect(
+      runTapAtReliabilityLoop(coordinateArgs("android", { timeoutMs: 100 }), {
+        timer,
+        createMcpClient: async () => await new Promise<McpSessionClient>(() => {}),
+      }),
+    ).rejects.toThrow("failed and client cleanup also failed");
   });
 
   test("reports the failed reliability repetition and orientation", async () => {
@@ -2340,7 +2550,7 @@ describe("additive absolute-coordinate live-device acceptance gates", () => {
       async callTool(name, arguments_) {
         if (name === "rotate") {
           orientation = arguments_.orientation as "portrait" | "landscape";
-          return success({});
+          return success({ orientationLockState: "unlocked" });
         }
         if (name === "observe") {
           return success({
@@ -2348,6 +2558,7 @@ describe("additive absolute-coordinate live-device acceptance gates", () => {
               orientation === "portrait"
                 ? { width: 1080, height: 2400 }
                 : { width: 2400, height: 1080 },
+            rotation: orientation === "portrait" ? 0 : 1,
           });
         }
         if (name === "tapAt" && orientation === "landscape") {
@@ -2360,7 +2571,7 @@ describe("additive absolute-coordinate live-device acceptance gates", () => {
           }
         }
         if (name === "tapAt") {
-          return success({ x: arguments_.x, y: arguments_.y, deviceId: "android-device" });
+          return staticTapSuccess(arguments_, "android");
         }
         throw new Error(`Unexpected tool ${name}`);
       },
@@ -2374,13 +2585,117 @@ describe("additive absolute-coordinate live-device acceptance gates", () => {
     );
   });
 
+  test("restores orientation with a fresh cleanup signal after deadline abort", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    let orientation: "portrait" | "landscape" = "portrait";
+    const rotateRequests: Array<Record<string, unknown>> = [];
+    const client: McpSessionClient = {
+      async callTool(name, arguments_, signal) {
+        if (name === "rotate") {
+          orientation = arguments_.orientation as "portrait" | "landscape";
+          rotateRequests.push(arguments_);
+          return success({ orientationLockState: "unlocked" });
+        }
+        if (name === "observe") {
+          return success({
+            screenSize:
+              orientation === "portrait"
+                ? { width: 1080, height: 2400 }
+                : { width: 2400, height: 1080 },
+            rotation: orientation === "portrait" ? 0 : 1,
+          });
+        }
+        if (name === "tapAt" && orientation === "landscape") {
+          return await new Promise((_, reject) => {
+            signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+          });
+        }
+        if (name === "tapAt") {
+          return staticTapSuccess(arguments_, "android");
+        }
+        throw new Error(`Unexpected tool ${name}`);
+      },
+      async close() {},
+    };
+
+    await expect(
+      runTapAtReliabilityLoop(coordinateArgs("android", { timeoutMs: 1_000 }), {
+        ...coordinateDependencies(client),
+        timer,
+      }),
+    ).rejects.toThrow("Coordinate acceptance deadline elapsed");
+    expect(rotateRequests.at(-1)).toMatchObject({
+      orientation: "portrait",
+      lockOrientation: false,
+    });
+  });
+
+  test("rejects a reliability tap that changes the static control screen", async () => {
+    let orientation: "portrait" | "landscape" = "portrait";
+    const client: McpSessionClient = {
+      async callTool(name, arguments_) {
+        if (name === "rotate") {
+          orientation = arguments_.orientation as "portrait" | "landscape";
+          return success({ orientationLockState: "unlocked" });
+        }
+        if (name === "observe") {
+          return success({
+            screenSize:
+              orientation === "portrait"
+                ? { width: 1080, height: 2400 }
+                : { width: 2400, height: 1080 },
+            rotation: orientation === "portrait" ? 0 : 1,
+          });
+        }
+        if (name === "tapAt") {
+          return success({
+            x: arguments_.x,
+            y: arguments_.y,
+            deviceId: "android-device",
+            platform: "android",
+            observationDiff: { mode: "full", reason: "screen_changed" },
+            observation: { screenSize: { width: 1080, height: 2400 } },
+          });
+        }
+        throw new Error(`Unexpected tool ${name}`);
+      },
+      async close() {},
+    };
+
+    await expect(
+      runTapAtReliabilityLoop(coordinateArgs("android"), coordinateDependencies(client)),
+    ).rejects.toThrow("tapAt changed the static reliability screen");
+  });
+
+  test("refuses a reverse rotation that the public rotate contract cannot restore exactly", async () => {
+    const client: McpSessionClient = {
+      async callTool(name) {
+        if (name === "observe") {
+          return success({ screenSize: { width: 1080, height: 2400 }, rotation: 2 });
+        }
+        throw new Error(`Unexpected tool ${name}`);
+      },
+      async close() {},
+    };
+
+    await expect(
+      runTapAtReliabilityLoop(coordinateArgs("android"), coordinateDependencies(client)),
+    ).rejects.toThrow("initial rotation was 2");
+  });
+
   test("rejects a false multi-device success and accepts an explicit target for Android and iOS", async () => {
     for (const platform of ["android", "ios"] as const) {
       let unqualified = true;
       const client: McpSessionClient = {
         async callTool(name, arguments_) {
           if (name === "listDevices") {
-            return success({ devices: [{}, {}] });
+            return success({
+              devices: [
+                bootedDeviceFixture(platform, `${platform}-device`),
+                bootedDeviceFixture(platform, `${platform}-sibling`),
+              ],
+            });
           }
           if (name === "observe") {
             return success({ screenSize: { width: 1080, height: 2400 } });
@@ -2398,14 +2713,19 @@ describe("additive absolute-coordinate live-device acceptance gates", () => {
       };
       await expect(
         runTapAtMultiDeviceRefusalCheck(coordinateArgs(platform), coordinateDependencies(client)),
-      ).rejects.toThrow(`tapAt accepted an unqualified call with 2 booted ${platform} devices`);
+      ).rejects.toThrow("tapAt bare ambiguity returned an unexpected diagnostic");
     }
 
     for (const platform of ["android", "ios"] as const) {
       const client: McpSessionClient = {
         async callTool(name, arguments_) {
           if (name === "listDevices") {
-            return success({ devices: [{}, {}] });
+            return success({
+              devices: [
+                bootedDeviceFixture(platform, `${platform}-device`),
+                bootedDeviceFixture(platform, `${platform}-sibling`),
+              ],
+            });
           }
           if (name === "observe") {
             return success({ screenSize: { width: 1080, height: 2400 } });
@@ -2413,11 +2733,16 @@ describe("additive absolute-coordinate live-device acceptance gates", () => {
           if (name === "tapAt" && arguments_.sessionUuid === undefined) {
             return {
               isError: true,
-              structuredContent: { error: `Multiple ${platform} devices detected` },
+              structuredContent: { error: ambiguityDiagnostic(platform) },
             };
           }
           if (name === "tapAt") {
-            return success({ x: arguments_.x, y: arguments_.y, deviceId: `${platform}-device` });
+            return success({
+              x: arguments_.x,
+              y: arguments_.y,
+              deviceId: `${platform}-device`,
+              platform,
+            });
           }
           throw new Error(`Unexpected tool ${name}`);
         },
@@ -2438,7 +2763,12 @@ describe("additive absolute-coordinate live-device acceptance gates", () => {
     const client: McpSessionClient = {
       async callTool(name, arguments_) {
         if (name === "listDevices") {
-          return success({ devices: [{}, {}] });
+          return success({
+            devices: [
+              bootedDeviceFixture("android", "android-device"),
+              bootedDeviceFixture("android", "android-sibling"),
+            ],
+          });
         }
         if (name === "observe") {
           return success({ screenSize: { width: 1080, height: 2400 } });
@@ -2446,7 +2776,7 @@ describe("additive absolute-coordinate live-device acceptance gates", () => {
         if (name === "tapAt" && arguments_.sessionUuid === undefined) {
           return {
             isError: true,
-            structuredContent: { error: "Multiple Android devices detected" },
+            structuredContent: { error: ambiguityDiagnostic("android") },
           };
         }
         if (name === "tapAt") {
@@ -2459,7 +2789,75 @@ describe("additive absolute-coordinate live-device acceptance gates", () => {
 
     await expect(
       runTapAtMultiDeviceRefusalCheck(coordinateArgs("android"), coordinateDependencies(client)),
-    ).rejects.toThrow("tapAt targeted response.deviceId must be a non-empty string");
+    ).rejects.toThrow("tapAt did not report the exact target device and platform");
+  });
+
+  test("rejects a platform-only tap that silently selects one of multiple devices", async () => {
+    const client: McpSessionClient = {
+      async callTool(name, arguments_) {
+        if (name === "listDevices") {
+          return success({
+            devices: [
+              bootedDeviceFixture("android", "android-device"),
+              bootedDeviceFixture("android", "android-sibling"),
+            ],
+          });
+        }
+        if (name === "observe") {
+          return success({ screenSize: { width: 1080, height: 2400 } });
+        }
+        if (name === "tapAt" && arguments_.platform === undefined) {
+          return {
+            isError: true,
+            structuredContent: { error: ambiguityDiagnostic("android") },
+          };
+        }
+        if (name === "tapAt" && arguments_.sessionUuid === undefined) {
+          return success({
+            x: arguments_.x,
+            y: arguments_.y,
+            deviceId: "android-device",
+            platform: "android",
+          });
+        }
+        throw new Error(`Unexpected tool ${name}`);
+      },
+      async close() {},
+    };
+
+    await expect(
+      runTapAtMultiDeviceRefusalCheck(coordinateArgs("android"), coordinateDependencies(client)),
+    ).rejects.toThrow("tapAt platform-only ambiguity returned an unexpected diagnostic");
+  });
+
+  test("rejects an unrelated MCP error as ambiguity evidence", async () => {
+    const client: McpSessionClient = {
+      async callTool(name) {
+        if (name === "listDevices") {
+          return success({
+            devices: [
+              bootedDeviceFixture("android", "android-device"),
+              bootedDeviceFixture("android", "android-sibling"),
+            ],
+          });
+        }
+        if (name === "observe") {
+          return success({ screenSize: { width: 1080, height: 2400 } });
+        }
+        if (name === "tapAt") {
+          return {
+            isError: true,
+            structuredContent: { error: "Tool crashed for an unrelated reason" },
+          };
+        }
+        throw new Error(`Unexpected tool ${name}`);
+      },
+      async close() {},
+    };
+
+    await expect(
+      runTapAtMultiDeviceRefusalCheck(coordinateArgs("android"), coordinateDependencies(client)),
+    ).rejects.toThrow("tapAt bare ambiguity returned an unexpected diagnostic");
   });
 
   test("enforces the documented Android and iOS screenshot orientation contracts", async () => {
@@ -2469,24 +2867,51 @@ describe("additive absolute-coordinate live-device acceptance gates", () => {
         async callTool(name, arguments_) {
           if (name === "rotate") {
             orientation = arguments_.orientation as "portrait" | "landscape";
-            return success({});
+            return success({ orientationLockState: "unlocked" });
           }
           if (name === "observe") {
-            return success({
-              screenSize:
-                orientation === "portrait"
+            const screenSize =
+              platform === "ios"
+                ? orientation === "portrait"
+                  ? { width: 393, height: 852 }
+                  : { width: 852, height: 393 }
+                : orientation === "portrait"
                   ? { width: 1080, height: 2400 }
-                  : { width: 2400, height: 1080 },
+                  : { width: 2400, height: 1080 };
+            return success({
+              screenSize,
+              rotation: orientation === "portrait" ? 0 : 1,
+              skeleton: [
+                {
+                  elementId: "target",
+                  label: "Target",
+                  bounds: [10, 10, 100, 100],
+                  affordances: ["tap"],
+                },
+              ],
             });
           }
           if (name === "captureScreenshot") {
             return success({
               path: `${platform}-${orientation}.png`,
               deviceId: `${platform}-device`,
+              platform,
             });
           }
           if (name === "tapAt") {
-            return success({ x: arguments_.x, y: arguments_.y, deviceId: `${platform}-device` });
+            return success({
+              x: arguments_.x,
+              y: arguments_.y,
+              deviceId: `${platform}-device`,
+              platform,
+              observationDiff: {
+                mode: "full",
+                reason: "screen_changed",
+                fromScreen: { screenIdentity: { key: "before" } },
+                toScreen: { screenIdentity: { key: "after", label: "Target" } },
+              },
+              observation: { context: [{ label: "Target" }], skeleton: [] },
+            });
           }
           throw new Error(`Unexpected tool ${name}`);
         },
@@ -2496,15 +2921,173 @@ describe("additive absolute-coordinate live-device acceptance gates", () => {
         coordinateArgs(platform),
         coordinateDependencies(client, async (path) => {
           if (platform === "ios") {
-            return { width: 1179, height: 2556 };
+            return { width: 1132, height: 2454 };
           }
           return path.includes("portrait")
             ? { width: 1080, height: 2400 }
             : { width: 2400, height: 1080 };
         }),
       );
-      expect(result.landscape).toEqual({ width: 2400, height: 1080 });
+      expect(result.landscape).toEqual(
+        platform === "ios" ? { width: 852, height: 393 } : { width: 2400, height: 1080 },
+      );
     }
+  });
+
+  test("rejects a landscape tap result that does not identify the selected target", async () => {
+    let orientation: "portrait" | "landscape" = "portrait";
+    const client: McpSessionClient = {
+      async callTool(name, arguments_) {
+        if (name === "rotate") {
+          orientation = arguments_.orientation as "portrait" | "landscape";
+          return success({ orientationLockState: "unlocked" });
+        }
+        if (name === "observe") {
+          return success({
+            screenSize:
+              orientation === "portrait"
+                ? { width: 393, height: 852 }
+                : { width: 852, height: 393 },
+            rotation: orientation === "portrait" ? 0 : 1,
+            skeleton: [
+              {
+                elementId: "target",
+                label: "Target",
+                bounds: [10, 10, 100, 100],
+                affordances: ["tap"],
+              },
+            ],
+          });
+        }
+        if (name === "captureScreenshot") {
+          return success({
+            path: `ios-${orientation}.png`,
+            deviceId: "ios-device",
+            platform: "ios",
+          });
+        }
+        if (name === "tapAt") {
+          return success({
+            x: arguments_.x,
+            y: arguments_.y,
+            deviceId: "ios-device",
+            platform: "ios",
+            observationDiff: {
+              mode: "full",
+              reason: "screen_changed",
+              fromScreen: { screenIdentity: { key: "before" } },
+              toScreen: { screenIdentity: { key: "after", label: "Different target" } },
+            },
+            observation: { context: [{ label: "Different target" }], skeleton: [] },
+          });
+        }
+        throw new Error(`Unexpected tool ${name}`);
+      },
+      async close() {},
+    };
+
+    await expect(
+      runCoordinateOrientationCheck(
+        coordinateArgs("ios"),
+        coordinateDependencies(client, async () => ({ width: 1132, height: 2454 })),
+      ),
+    ).rejects.toThrow("Landscape coordinate tap did not prove the selected target transitioned");
+  });
+
+  test("refuses duplicate elementIds instead of attributing another node's transition", async () => {
+    let orientation: "portrait" | "landscape" = "portrait";
+    const client: McpSessionClient = {
+      async callTool(name, arguments_) {
+        if (name === "rotate") {
+          orientation = arguments_.orientation as "portrait" | "landscape";
+          return success({ orientationLockState: "unlocked" });
+        }
+        if (name === "observe") {
+          return success({
+            screenSize:
+              orientation === "portrait"
+                ? { width: 393, height: 852 }
+                : { width: 852, height: 393 },
+            rotation: orientation === "portrait" ? 0 : 1,
+            skeleton: [
+              {
+                elementId: "duplicate",
+                label: "First",
+                bounds: [10, 10, 100, 100],
+                affordances: ["tap"],
+              },
+              {
+                elementId: "duplicate",
+                label: "Second",
+                bounds: [110, 10, 200, 100],
+                affordances: ["input"],
+              },
+            ],
+          });
+        }
+        if (name === "captureScreenshot") {
+          return success({
+            path: `ios-${orientation}.png`,
+            deviceId: "ios-device",
+            platform: "ios",
+          });
+        }
+        throw new Error(`Unexpected tool ${name}`);
+      },
+      async close() {},
+    };
+
+    await expect(
+      runCoordinateOrientationCheck(
+        coordinateArgs("ios"),
+        coordinateDependencies(client, async () => ({ width: 1132, height: 2454 })),
+      ),
+    ).rejects.toThrow("no uniquely identified tappable target");
+  });
+
+  test("rejects a portrait-shaped iOS raster with non-uniform coordinate scaling", async () => {
+    let orientation: "portrait" | "landscape" = "portrait";
+    const client: McpSessionClient = {
+      async callTool(name, arguments_) {
+        if (name === "rotate") {
+          orientation = arguments_.orientation as "portrait" | "landscape";
+          return success({ orientationLockState: "unlocked" });
+        }
+        if (name === "observe") {
+          return success({
+            screenSize:
+              orientation === "portrait"
+                ? { width: 393, height: 852 }
+                : { width: 852, height: 393 },
+            rotation: orientation === "portrait" ? 0 : 1,
+            skeleton: [
+              {
+                elementId: "target",
+                label: "Target",
+                bounds: [10, 10, 100, 100],
+                affordances: ["tap"],
+              },
+            ],
+          });
+        }
+        if (name === "captureScreenshot") {
+          return success({
+            path: `ios-${orientation}.png`,
+            deviceId: "ios-device",
+            platform: "ios",
+          });
+        }
+        throw new Error(`Unexpected tool ${name}`);
+      },
+      async close() {},
+    };
+
+    await expect(
+      runCoordinateOrientationCheck(
+        coordinateArgs("ios"),
+        coordinateDependencies(client, async () => ({ width: 100, height: 200 })),
+      ),
+    ).rejects.toThrow("iOS screenshot raster must scale uniformly");
   });
 
   test("fails a raster fixture that violates each platform orientation contract", async () => {
@@ -2514,14 +3097,28 @@ describe("additive absolute-coordinate live-device acceptance gates", () => {
         async callTool(name, arguments_) {
           if (name === "rotate") {
             orientation = arguments_.orientation as "portrait" | "landscape";
-            return success({});
+            return success({ orientationLockState: "unlocked" });
           }
           if (name === "observe") {
-            return success({
-              screenSize:
-                orientation === "portrait"
+            const screenSize =
+              platform === "ios"
+                ? orientation === "portrait"
+                  ? { width: 393, height: 852 }
+                  : { width: 852, height: 393 }
+                : orientation === "portrait"
                   ? { width: 1080, height: 2400 }
-                  : { width: 2400, height: 1080 },
+                  : { width: 2400, height: 1080 };
+            return success({
+              screenSize,
+              rotation: orientation === "portrait" ? 0 : 1,
+              skeleton: [
+                {
+                  elementId: "target",
+                  label: "Target",
+                  bounds: [10, 10, 100, 100],
+                  affordances: ["tap"],
+                },
+              ],
             });
           }
           if (name === "captureScreenshot") {
@@ -2541,27 +3138,13 @@ describe("additive absolute-coordinate live-device acceptance gates", () => {
             platform === "android"
               ? { width: 1080, height: 2400 }
               : orientation === "portrait"
-                ? { width: 1179, height: 2556 }
-                : { width: 2556, height: 1179 },
+                ? { width: 1132, height: 2454 }
+                : { width: 2454, height: 1132 },
           ),
         ),
       ).rejects.toThrow(
         platform === "android" ? "Android screenshot raster" : "iOS Simulator framebuffer",
       );
     }
-  });
-
-  test("parses a direct additive gate without changing matrix arguments", () => {
-    expect(() =>
-      parseCoordinateAcceptanceArgs([
-        "--reliability-loop",
-        "--platform",
-        "android",
-        "--session-uuid",
-        "session",
-        "--entrypoint",
-        "missing-entrypoint.js",
-      ]),
-    ).toThrow("Cannot compute a build identity");
   });
 });

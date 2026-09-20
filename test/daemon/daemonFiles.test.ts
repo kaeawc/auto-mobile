@@ -69,6 +69,136 @@ describe("PidFileLiveDaemonSessionIdProvider", () => {
     expect(provider.collectLiveDaemonSessionIds()).toEqual(new Set(["live-daemon"]));
   });
 
+  test("protects a live PID when its process generation token matches", () => {
+    const provider = new PidFileLiveDaemonSessionIdProvider({
+      listDaemonPidFiles: () => ["matching.pid"],
+      readPidFile: () => ({
+        status: "present",
+        data: {
+          pid: 404,
+          daemonSessionId: "matching-daemon",
+          processGenerationToken: "linux:boot-id:100",
+        },
+      }),
+      isProcessRunning: () => true,
+      readProcessGenerationToken: (pid) => {
+        expect(pid).toBe(404);
+        return "linux:boot-id:100";
+      },
+    });
+
+    expect(provider.collectLiveDaemonSessionIds()).toEqual(new Set(["matching-daemon"]));
+  });
+
+  test("does not protect a recycled PID with a different process generation token", () => {
+    const provider = new PidFileLiveDaemonSessionIdProvider({
+      listDaemonPidFiles: () => ["recycled.pid"],
+      readPidFile: () => ({
+        status: "present",
+        data: {
+          pid: 404,
+          daemonSessionId: "recycled-daemon",
+          processGenerationToken: "linux:boot-id:100",
+        },
+      }),
+      isProcessRunning: () => true,
+      readProcessGenerationToken: () => "linux:boot-id:200",
+    });
+
+    expect(provider.collectLiveDaemonSessionIds()).toEqual(new Set());
+  });
+
+  test("fails closed when the process generation token cannot be read", () => {
+    const provider = new PidFileLiveDaemonSessionIdProvider({
+      listDaemonPidFiles: () => ["uncertain.pid"],
+      readPidFile: () => ({
+        status: "present",
+        data: {
+          pid: 404,
+          daemonSessionId: "uncertain-daemon",
+          processGenerationToken: "linux:boot-id:100",
+        },
+      }),
+      isProcessRunning: () => true,
+      readProcessGenerationToken: () => undefined,
+    });
+
+    expect(provider.collectLiveDaemonSessionIds()).toEqual(new Set(["uncertain-daemon"]));
+  });
+
+  test("warns and fails closed when the process generation token reader throws", () => {
+    const readError = new Error("generation read failed");
+    const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const provider = new PidFileLiveDaemonSessionIdProvider({
+        listDaemonPidFiles: () => ["throwing.pid"],
+        readPidFile: () => ({
+          status: "present",
+          data: {
+            pid: 404,
+            daemonSessionId: "throwing-daemon",
+            processGenerationToken: "linux:boot-id:100",
+          },
+        }),
+        isProcessRunning: () => true,
+        readProcessGenerationToken: () => {
+          throw readError;
+        },
+      });
+
+      expect(provider.collectLiveDaemonSessionIds()).toEqual(new Set(["throwing-daemon"]));
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy.mock.calls[0]?.[0]).toContain(
+        "Failed to read process generation token for live PID 404",
+      );
+      expect(warnSpy.mock.calls[0]?.[1]).toBe(readError);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  test("fails closed for a processStartedAt-only legacy record", () => {
+    let tokenReadCount = 0;
+    const provider = new PidFileLiveDaemonSessionIdProvider({
+      listDaemonPidFiles: () => ["started-at-only.pid"],
+      readPidFile: () => ({
+        status: "present",
+        data: {
+          pid: 404,
+          daemonSessionId: "started-at-only-daemon",
+          processStartedAt: 1_000,
+        },
+      }),
+      isProcessRunning: () => true,
+      readProcessGenerationToken: () => {
+        tokenReadCount += 1;
+        return "linux:boot-id:200";
+      },
+    });
+
+    expect(provider.collectLiveDaemonSessionIds()).toEqual(new Set(["started-at-only-daemon"]));
+    expect(tokenReadCount).toBe(0);
+  });
+
+  test("fails closed for a fully legacy record with no process birth identity", () => {
+    let tokenReadCount = 0;
+    const provider = new PidFileLiveDaemonSessionIdProvider({
+      listDaemonPidFiles: () => ["fully-legacy.pid"],
+      readPidFile: () => ({
+        status: "present",
+        data: { pid: 404, daemonSessionId: "fully-legacy-daemon" },
+      }),
+      isProcessRunning: () => true,
+      readProcessGenerationToken: () => {
+        tokenReadCount += 1;
+        return "linux:boot-id:200";
+      },
+    });
+
+    expect(provider.collectLiveDaemonSessionIds()).toEqual(new Set(["fully-legacy-daemon"]));
+    expect(tokenReadCount).toBe(0);
+  });
+
   test("surfaces a directory-enumeration failure", () => {
     const enumerationError = Object.assign(new Error("pid directory unavailable"), {
       code: "EIO",

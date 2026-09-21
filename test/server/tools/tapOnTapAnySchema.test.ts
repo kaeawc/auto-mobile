@@ -116,6 +116,10 @@ describe("tapOn schema", () => {
   test.each([
     ["a non-tap action", { action: "longPress" }],
     ["random selection", { selectionStrategy: "random" }],
+    [
+      "random selection when ensuring unchecked",
+      { ensureChecked: false, selectionStrategy: "random" },
+    ],
   ])("rejects ensureChecked with %s", (_label, incompatible) => {
     const issue = zodIssues(() =>
       tapOnSchema.parse({

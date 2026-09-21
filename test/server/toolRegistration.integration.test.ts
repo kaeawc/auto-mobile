@@ -186,6 +186,14 @@ describe("Tool Registration Validation (Integration Tests)", () => {
       validate({
         ...baseInput,
         platform: "android",
+        ensureChecked: false,
+        selectionStrategy: "random",
+      }),
+    ).toBe(false);
+    expect(
+      validate({
+        ...baseInput,
+        platform: "android",
         subtext: { text: "Privacy Policy" },
       }),
     ).toBe(false);

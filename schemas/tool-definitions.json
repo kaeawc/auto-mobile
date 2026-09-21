@@ -13198,11 +13198,8 @@
           }
         ]
       },
-      "else": {
-        "if": {
-          "required": ["ensureChecked"]
-        },
-        "then": {
+      "dependentSchemas": {
+        "ensureChecked": {
           "properties": {
             "action": {
               "const": "tap"

@@ -419,14 +419,11 @@ export const tapOnSchema = withJsonSchemaOverride(
       ],
     };
     // Claude Code omits an entire MCP tool from ToolSearch when its input
-    // schema has top-level allOf. Preserve the independent ensureChecked
-    // constraint in the false branch of the semantic-link condition instead;
-    // runtime validation remains authoritative for every combination.
-    js.else = {
-      if: {
-        required: ["ensureChecked"],
-      },
-      then: {
+    // schema has top-level allOf. dependentSchemas expresses the same
+    // sibling-field constraint with fewer nodes and applies for either boolean
+    // value; runtime validation remains authoritative for every combination.
+    js.dependentSchemas = {
+      ensureChecked: {
         properties: {
           action: { const: "tap" },
           selectionStrategy: { not: { const: "random" } },

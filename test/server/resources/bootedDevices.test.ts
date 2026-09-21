@@ -25,6 +25,8 @@ import {
   configuredImagesForBootedPlatform,
   type AndroidServiceStatusLookup,
   type CtrlProxyVersionLookup,
+  getBootedDevicesForPlatforms,
+  resetBootedDevicesResourceCache,
 } from "../../../src/server/bootedDeviceResources";
 import { BootedDevice, Platform } from "../../../src/models";
 import { DaemonState } from "../../../src/daemon/daemonState";
@@ -81,6 +83,7 @@ describe("MCP Booted Device Resources", () => {
 
   beforeEach(() => {
     AndroidAvdProvenanceCache.resetForTests();
+    resetBootedDevicesResourceCache();
     // Set up fake device utils before each test
     fakeDeviceUtils = new FakeDeviceUtils();
     setDeviceManager(fakeDeviceUtils);
@@ -93,6 +96,7 @@ describe("MCP Booted Device Resources", () => {
     // Restore the real (adb-backed) lock probe so a test's fake never leaks into the next.
     setDeviceLockProbe(null);
     setOrientationReaderFactory(null);
+    resetBootedDevicesResourceCache();
   });
 
   afterAll(async () => {
@@ -101,6 +105,29 @@ describe("MCP Booted Device Resources", () => {
     }
     // Reset to default device manager
     setDeviceManager(null);
+  });
+
+  test("coalesces and caches the full Android booted-device resource snapshot", async () => {
+    const timer = new FakeTimer();
+    fakeDeviceUtils.setBootedDevices("android", [mockAndroidDevice1]);
+
+    const concurrentResults = await Promise.all(
+      Array.from({ length: 4 }, () => getBootedDevicesForPlatforms(["android"], timer)),
+    );
+
+    expect(concurrentResults).toHaveLength(4);
+    expect(fakeDeviceUtils.getCallCount("getBootedDevices:android")).toBe(1);
+
+    await getBootedDevicesForPlatforms(["android"], timer);
+    expect(fakeDeviceUtils.getCallCount("getBootedDevices:android")).toBe(1);
+
+    timer.advanceTime(2_501);
+    await getBootedDevicesForPlatforms(["android"], timer);
+    expect(fakeDeviceUtils.getCallCount("getBootedDevices:android")).toBe(2);
+
+    resetBootedDevicesResourceCache();
+    await getBootedDevicesForPlatforms(["android"], timer);
+    expect(fakeDeviceUtils.getCallCount("getBootedDevices:android")).toBe(3);
   });
 
   test("marks iOS physical discovery failure incomplete even when simctl succeeds", async () => {
@@ -833,6 +860,7 @@ describe("MCP Booted Device Resources", () => {
         ]);
         expect(partial.poolStatus).toMatchObject({ total: 2, idle: 1, assigned: 1 });
         fakeDeviceUtils.failedSources.clear();
+        resetBootedDevicesResourceCache();
         const complete = await read();
         expect(complete.observationComplete).toBe(true);
         expect(complete.poolStatus?.total).toBe(1);

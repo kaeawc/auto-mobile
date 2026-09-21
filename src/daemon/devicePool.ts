@@ -42,6 +42,8 @@ import {
   DeviceAllocationRequest,
 } from "./DeviceCriteriaMatcher";
 import { resetAdbDeviceListCache } from "../utils/android-cmdline-tools/AdbClient";
+import { resetBootedDevicesResourceCache } from "../server/bootedDeviceResources";
+import { resetAndroidDeviceImageResourceCache } from "../server/deviceImageResources";
 import { hasMutableDisplayName, isIosPhysicalUdid } from "../utils/ios-cmdline-tools/iosDeviceType";
 import { isAndroidEmulatorSerial } from "../utils/androidSerial";
 import {
@@ -1795,6 +1797,8 @@ export class DevicePool {
     const avdName = device.avdName;
     try {
       resetAdbDeviceListCache();
+      resetBootedDevicesResourceCache();
+      resetAndroidDeviceImageResourceCache();
       const discovery = await this.deviceManager.getBootedDevicesDetailed("android");
       if (!discovery.succeededPlatforms.has("android")) {
         logger.warn(
@@ -2716,6 +2720,8 @@ export class DevicePool {
     }
 
     resetAdbDeviceListCache();
+    resetBootedDevicesResourceCache();
+    resetAndroidDeviceImageResourceCache();
     const discovery = await this.deviceManager.getBootedDevicesDetailed(device.platform);
     if (!discovery.succeededPlatforms.has(device.platform)) {
       logger.warn(

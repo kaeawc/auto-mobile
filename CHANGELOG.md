@@ -1,5 +1,19 @@
 # Changelog
 
+## [v0.0.79] - 2026-09-21
+
+### Fixed
+
+- Bound concurrent inventory reads through the shared daemon ([#7404](https://github.com/kaeawc/auto-mobile/issues/7404)) (android, performance, daemon)
+- Recover recorded AVD identity after incomplete runtime discovery ([#7403](https://github.com/kaeawc/auto-mobile/issues/7403)) (android, daemon)
+- ctrlproxy(ios): in-service failure boundary so any XCTest synthesis failure can't terminate testRunService ([#7401](https://github.com/kaeawc/auto-mobile/issues/7401)) (ios)
+- ctrlproxy(ios): action-level XCTest failure terminates testRunService and demotes a booted simulator to not_ready ([#7398](https://github.com/kaeawc/auto-mobile/issues/7398)) (ios)
+- daemon: heartbeat CLI exits nonzero after successfully recording the session heartbeat ([#7397](https://github.com/kaeawc/auto-mobile/issues/7397)) (daemon)
+
+### Other
+
+- deleteDevice(android): reports successful destruction while a booted AVD remains running and defined ([#7405](https://github.com/kaeawc/auto-mobile/issues/7405))
+
 ## [v0.0.78] - 2026-09-21
 
 ### Fixed

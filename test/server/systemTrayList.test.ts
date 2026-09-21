@@ -828,6 +828,19 @@ describe("systemTray clearAll dumpsys ownership", () => {
       `        android.text=String (${text})`,
       "      }",
     ].join("\n");
+  const groupedRows = (...rows: any[]) =>
+    node("com.android.systemui:id/expandableNotificationRow", "", [
+      node("com.android.systemui:id/notification_children_container", "", rows),
+    ]);
+  const unswipeableSilentRow = (title: string, body: string) => {
+    const result = silentRow(title, body);
+    const removeBounds = (current: any) => {
+      delete current.$.bounds;
+      current.node.forEach(removeBounds);
+    };
+    removeBounds(result);
+    return result;
+  };
   const handler = () => ToolRegistry.getTool("systemTray")!.deviceAwareHandler!;
   const clearAll = () =>
     handler()(device, {
@@ -921,8 +934,45 @@ describe("systemTray clearAll dumpsys ownership", () => {
       ["First shell notification", "First body"],
       ["Second shell notification", "Second body"],
     ] as const;
+    const remaining = ["Replacement shell notification", "Replacement body"] as const;
     const { adb, timer } = setup(
-      [page(...notifications.map(([title, body]) => silentRow(title, body))), page()],
+      [
+        page(...notifications.map(([title, body]) => silentRow(title, body))),
+        // This row remains after the first dismissal but is not among the
+        // initial correlated texts, so the clear loop cannot swipe it.
+        page(unswipeableSilentRow(...remaining)),
+      ],
+      false,
+    );
+    adb.setCommandResponseSequence("dumpsys notification", [
+      execResult(dumpsys(...notifications.map(([title, body], id) => record(id + 1, title, body)))),
+      execResult(dumpsys(...notifications.map(([title, body], id) => record(id + 1, title, body)))),
+      execResult(dumpsys(record(3, ...remaining))),
+      execResult(dumpsys(record(3, ...remaining))),
+    ]);
+    const installedAppsSpy = spyOn(ListInstalledApps.prototype, "execute").mockResolvedValue([
+      SHELL,
+    ]);
+    installClearAllDependencies(timer, adb);
+
+    try {
+      const payload = JSON.parse((await clearAll()).content[0].text);
+      expect(payload).toMatchObject({ dismissedCount: 1, expectedCount: 2, success: false });
+      expect(payload.message).not.toBe(`No notifications found for ${SHELL}`);
+      expect(payload.message).toContain("Cleared 1 of 2 notification(s)");
+    } finally {
+      installedAppsSpy.mockRestore();
+    }
+  });
+
+  test("reports a grouped swipe that clears every correlated notification as successful", async () => {
+    const notifications = [
+      ["First shell notification", "First body"],
+      ["Second shell notification", "Second body"],
+      ["Third shell notification", "Third body"],
+    ] as const;
+    const { adb, timer } = setup(
+      [page(groupedRows(...notifications.map(([title, body]) => silentRow(title, body)))), page()],
       false,
     );
     adb.setCommandResponse(
@@ -936,9 +986,50 @@ describe("systemTray clearAll dumpsys ownership", () => {
 
     try {
       const payload = JSON.parse((await clearAll()).content[0].text);
-      expect(payload).toMatchObject({ dismissedCount: 1, expectedCount: 2, success: false });
-      expect(payload.message).not.toBe(`No notifications found for ${SHELL}`);
-      expect(payload.message).toContain("Cleared 1 of 2 notification(s)");
+      expect(payload).toMatchObject({ dismissedCount: 1, expectedCount: 3, success: true });
+      expect(payload.message).toBe(`Cleared 3 notification(s) for ${SHELL}`);
+    } finally {
+      installedAppsSpy.mockRestore();
+    }
+
+    expect(
+      adb.getExecutedCommands().filter((command) => command.includes("input swipe")),
+    ).toHaveLength(1);
+  });
+
+  test("reports a genuine partial from the remaining notification count, not swipes", async () => {
+    const notifications = [
+      ["First shell notification", "First body"],
+      ["Second shell notification", "Second body"],
+      ["Third shell notification", "Third body"],
+    ] as const;
+    const remaining = ["Replacement shell notification", "Replacement body"] as const;
+    const { adb, timer } = setup(
+      [
+        page(groupedRows(...notifications.map(([title, body]) => silentRow(title, body)))),
+        // The only remaining row was not present in the initial correlation,
+        // so one group swipe leaves one notification the loop cannot match.
+        page(unswipeableSilentRow(...remaining)),
+      ],
+      false,
+    );
+    adb.setCommandResponseSequence("dumpsys notification", [
+      execResult(dumpsys(...notifications.map(([title, body], id) => record(id + 1, title, body)))),
+      execResult(dumpsys(...notifications.map(([title, body], id) => record(id + 1, title, body)))),
+      execResult(dumpsys(record(4, ...remaining))),
+      execResult(dumpsys(record(4, ...remaining))),
+    ]);
+    const installedAppsSpy = spyOn(ListInstalledApps.prototype, "execute").mockResolvedValue([
+      SHELL,
+    ]);
+    installClearAllDependencies(timer, adb);
+
+    try {
+      const payload = JSON.parse((await clearAll()).content[0].text);
+      expect(payload).toMatchObject({ dismissedCount: 1, expectedCount: 3, success: false });
+      expect(payload.message).toBe(
+        `Cleared 2 of 3 notification(s) for ${SHELL}; 1 could not be matched on screen.`,
+      );
     } finally {
       installedAppsSpy.mockRestore();
     }

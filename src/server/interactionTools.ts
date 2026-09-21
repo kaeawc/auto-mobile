@@ -2089,6 +2089,7 @@ function formatClearAllResult(
   appId: string | undefined,
   dismissed: number,
   expectedCount: number | undefined,
+  remainingCount?: number,
 ): { message: string; success: boolean } {
   if (expectedCount === undefined) {
     return {
@@ -2102,13 +2103,15 @@ function formatClearAllResult(
   if (expectedCount === 0) {
     return { message: `No notifications found for ${appId}`, success: true };
   }
-  if (dismissed >= expectedCount) {
-    return { message: `Cleared ${dismissed} notification(s) for ${appId}`, success: true };
+  const remaining = remainingCount ?? expectedCount;
+  const cleared = expectedCount - remaining;
+  if (remaining === 0) {
+    return { message: `Cleared ${cleared} notification(s) for ${appId}`, success: true };
   }
   return {
     message:
-      `Cleared ${dismissed} of ${expectedCount} notification(s) for ${appId}; ` +
-      `${expectedCount - dismissed} could not be matched on screen.`,
+      `Cleared ${cleared} of ${expectedCount} notification(s) for ${appId}; ` +
+      `${remaining} could not be matched on screen.`,
     success: false,
   };
 }
@@ -2372,6 +2375,7 @@ export function registerInteractionTools() {
       if (args.action === "clearAll") {
         let dismissed = 0;
         let expectedCount: number | undefined;
+        let remainingCount: number | undefined;
         let clearMatchTexts = appMatchTexts;
         if (device.platform === "android" && notification.appId) {
           const listed = await listSystemTrayNotifications(
@@ -2417,6 +2421,18 @@ export function registerInteractionTools() {
           await timer.sleep(SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS + 100);
         }
 
+        if (expectedCount !== undefined && expectedCount > 0 && notification.appId) {
+          const remaining = await listSystemTrayNotifications(
+            device,
+            notification.appId,
+            appLabel,
+            awaitTimeoutMs,
+            progress,
+            signal,
+          );
+          remainingCount = remaining.notifications.length;
+        }
+
         const { observeScreenFactory } = getSystemTrayDependencies();
         const observeScreen = observeScreenFactory(device);
         const nextObservation = await observeScreen.execute({
@@ -2429,6 +2445,7 @@ export function registerInteractionTools() {
           notification.appId,
           dismissed,
           expectedCount,
+          remainingCount,
         );
         return createJSONToolResponse({
           dismissedCount: dismissed,

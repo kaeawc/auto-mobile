@@ -1,5 +1,26 @@
 # Changelog
 
+## [v0.0.78] - 2026-09-21
+
+### Fixed
+
+- daemon: scope tool presentation options to each MCP client ([#7385](https://github.com/kaeawc/auto-mobile/issues/7385)) (daemon)
+- provisionDevice: timeout can leave Android lifecycle outcome ambiguous ([#7377](https://github.com/kaeawc/auto-mobile/issues/7377)) (android)
+
+### Other
+
+- captureScreenshot(ios): PNG is 1px narrower than the screen on odd-width devices (iPhone 15: 1178 vs simctl/listDevices 1179) ([#7384](https://github.com/kaeawc/auto-mobile/issues/7384)) (bot-filed, routine:manual-test)
+- systemTray(clearAll): reports "Cleared 1 of 3 ... could not be matched" with success:false after dismissing all 3 — dismissed counts swipes, expectedCount counts notifications ([#7383](https://github.com/kaeawc/auto-mobile/issues/7383)) (bot-filed, routine:manual-test)
+- observe(ios): skeleton still hides a text field's value — #7366 ranks el.text above el.value, but on iOS text is the placeholder ([#7382](https://github.com/kaeawc/auto-mobile/issues/7382)) (bot-filed, routine:manual-test)
+- devices: listDevices reports iOS display in physical pixels while observe reports logical points, with no unit marker on either ([#7371](https://github.com/kaeawc/auto-mobile/issues/7371)) (bot-filed, routine:manual-test)
+- test(acceptance): the tapAt/captureScreenshot parity suite is fake-only, so runner-side reliability, multi-device resolution and rotation have no gate ([#7370](https://github.com/kaeawc/auto-mobile/issues/7370)) (bot-filed, routine:manual-test)
+- captureScreenshot/observe: image orientation tracks rotation on Android but not iOS, and nothing in the payload lets a caller map between them ([#7369](https://github.com/kaeawc/auto-mobile/issues/7369)) (bot-filed, routine:manual-test)
+- tapAt/captureScreenshot: tapAt silently picks a device where captureScreenshot refuses, and platform-only disambiguation is Android/iOS asymmetric ([#7368](https://github.com/kaeawc/auto-mobile/issues/7368)) (bot-filed, routine:manual-test)
+- tapAt(android): intermittently rejects a valid coordinate as "Stale frame context" despite an immediately-preceding observe (11/54, up to 9/12; iOS clean) ([#7367](https://github.com/kaeawc/auto-mobile/issues/7367)) (bot-filed, routine:manual-test)
+- observe(ios): skeleton drops a text field's value, so the default projection cannot verify typed text (Android surfaces it) ([#7363](https://github.com/kaeawc/auto-mobile/issues/7363)) (bot-filed, routine:manual-test)
+- inputText: non-editable selector now reports "Element not found" instead of the editability reason (#7360 Gap-2 filter shadows the #7310 message) ([#7362](https://github.com/kaeawc/auto-mobile/issues/7362)) (bot-filed, routine:manual-test)
+- systemTray(clearAll): #7332 widening filters on ownership==="dumpsys" but list reports these rows as "header", so nothing is ever cleared ([#7361](https://github.com/kaeawc/auto-mobile/issues/7361)) (bot-filed, routine:manual-test)
+
 ## [v0.0.77] - 2026-09-20
 
 ### Added

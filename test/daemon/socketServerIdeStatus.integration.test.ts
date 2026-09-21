@@ -21,6 +21,7 @@ import { PlatformDeviceManagerFactory } from "../../src/utils/factories/Platform
 import type { BootedDevice } from "../../src/models";
 import { RELEASE_CHECKSUM_REGISTRY, IOS_CTRL_PROXY_APP_HASH } from "../../src/constants/release";
 import { executionTracker } from "../../src/server/executionTracker";
+import { isDebugModeEnabled, setDebugModeEnabled } from "../../src/utils/debug";
 import {
   DAEMON_COMMIT_ACCEPTANCE_RESTART_METHOD,
   DAEMON_COMPLETE_MAINTENANCE_METHOD,
@@ -168,6 +169,22 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
 
     expect(response.success).toBe(true);
     expect(response.result).toMatchObject({ options: startupOptions });
+  });
+
+  test("ide/status reports the daemon's live effective debug state", async () => {
+    const originalDebug = isDebugModeEnabled();
+    try {
+      setDebugModeEnabled(false);
+      const disabled = await sendRequest(socketPath, "ide/status");
+      expect(disabled.result).toMatchObject({ effectiveDebug: false });
+
+      setDebugModeEnabled(true);
+      const enabled = await sendRequest(socketPath, "ide/status");
+      expect(enabled.result).toMatchObject({ effectiveDebug: true });
+      expect(enabled.result).toMatchObject({ options: startupOptions });
+    } finally {
+      setDebugModeEnabled(originalDebug);
+    }
   });
 
   test("ide/status exposes only the acceptance capability fingerprint", async () => {

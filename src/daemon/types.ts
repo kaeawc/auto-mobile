@@ -312,6 +312,12 @@ export interface DaemonStatus {
   activeProvisioning?: boolean;
   /** Non-secret fingerprint of the acceptance discovery capability bound at startup. */
   acceptanceCapabilityFingerprint?: string | null;
+  /**
+   * Daemon's live effective debug state after the launch flag and persisted
+   * `debug` feature flag have been applied. Unlike {@link options}.debug, this
+   * value is not the frozen launch option used for restart reconciliation.
+   */
+  effectiveDebug?: boolean;
   /** Options used to start the daemon */
   options?: DaemonOptions;
 }

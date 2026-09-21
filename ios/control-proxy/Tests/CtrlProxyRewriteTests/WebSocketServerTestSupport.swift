@@ -15,11 +15,11 @@ struct FakeCommandHandling: CommandHandling {
 /// the server's use of it is orchestration, so calls aren't recorded here).
 struct FakePerfTracking: PerfTracking {
     let flushResult: [PerfTiming]?
-    func serial(_ name: String) {}
+    func serial(_: String) {}
     func end() {}
     func flush() -> [PerfTiming]? { flushResult }
     func clear() {}
-    func withScope<T>(_ body: nonisolated(nonsending) () async throws -> T) async rethrows -> T {
+    func withScope<T>(_ body: nonisolated(nonsending)() async throws -> T) async rethrows -> T {
         try await body()
     }
 
@@ -30,7 +30,7 @@ struct FakePerfTracking: PerfTracking {
 
 struct FakeFrameContextRecording: FrameContextRecording {
     let token: String?
-    func recordTransition(to hierarchy: ViewHierarchy) -> String? { token }
+    func recordTransition(to _: ViewHierarchy) -> String? { token }
 }
 
 /// Captures outbound frames pushed to a responder. Sends arrive on the command
@@ -61,6 +61,7 @@ final class ValueBox<Element: Sendable>: @unchecked Sendable {
 }
 
 func makeTestServer(
+    failureCoordinator: CommandFailureCoordinator? = nil,
     handler: @escaping @Sendable (WebSocketRequest) -> any WebSocketResponsePayload = { _ in
         WebSocketResponse(type: "noop")
     },
@@ -68,12 +69,15 @@ func makeTestServer(
     frameToken: String? = nil,
     onPresence: (@Sendable (Bool) -> Void)? = nil,
     broadcastSink: (@Sendable (Data) -> Void)? = nil
-) -> WebSocketServer {
+)
+    -> WebSocketServer
+{
     WebSocketServer(
         port: 8765,
         commandHandler: FakeCommandHandling(handler: handler),
         perf: FakePerfTracking(flushResult: flush),
         frameContext: FakeFrameContextRecording(token: frameToken),
+        failureCoordinator: failureCoordinator,
         onSdkEventBatch: nil,
         drainLogEvents: nil,
         onClientPresenceChanged: onPresence,

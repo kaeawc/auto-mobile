@@ -33,9 +33,17 @@ import XCTest
 @MainActor
 final class CtrlProxyUITests: XCTestCase {
     private var service: CtrlProxy?
+    private let commandFailureCoordinator = CommandFailureCoordinator()
 
     override func setUpWithError() throws {
         continueAfterFailure = true
+    }
+
+    override nonisolated func record(_ issue: XCTIssue) {
+        if commandFailureCoordinator.recordDeflectedFailure(issue.compactDescription) {
+            return
+        }
+        super.record(issue)
     }
 
     // No `tearDownWithError` override: XCTest's teardown is nonisolated, so touching the
@@ -63,7 +71,7 @@ final class CtrlProxyUITests: XCTestCase {
         print("Protocol: Android AccessibilityService compatible")
         print("========================================")
 
-        service = CtrlProxy(port: port)
+        service = CtrlProxy(port: port, coordinator: commandFailureCoordinator)
         defer { service?.stop() }
 
         if let bundleId = bundleId {

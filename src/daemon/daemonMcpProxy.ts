@@ -960,20 +960,10 @@ export class DaemonMcpProxy {
           logger.warn(`[DaemonMcpProxy] Failed to subscribe to daemon notifications: ${error}`);
         })
       : Promise.resolve();
-    await this.applyConnectionPresentationProfile(client);
-    //
-    // On the FIRST establishment mark the proxy `connected` only AFTER the
-    // establishment heartbeat lands (issue #5643). ensureConnected()'s fast path
-    // returns as soon as `connected && client` is true; setting the flag before the
-    // awaited first heartbeat would let a CONCURRENT ensureConnected() (a parallel
-    // listTools/callTool during MCP startup) resolve and forward a request in the
-    // sub-millisecond window before the daemon has recorded ownership. Deferring the
-    // flip holds those concurrent callers on the `connecting` guard until ownership
-    // is recorded; the heartbeat guards key off the live transport (`transportLive`),
-    // not this flag, so the first heartbeat still fires while it is still false. On a
-    // RECONNECT there is no ownership to wait for, so establishBoundSessionHeartbeat
-    // flips `connected` itself before dispatching the keeper heartbeat (see there).
-    await this.establishBoundSessionHeartbeat();
+    const [firstConnectionStep, secondConnectionStep] =
+      this.connectionOwnershipAndPresentationSteps(client);
+    await firstConnectionStep();
+    await secondConnectionStep();
     // Re-check closing before the deferred flip: the establishment heartbeat awaits a
     // real daemon round-trip, and a close() landing during it already set
     // connected=false and nulled the client. Without this guard doConnect would
@@ -1002,6 +992,37 @@ export class DaemonMcpProxy {
       this.servedStaticResourceList = false;
       this.notifyListChanged("resources");
     }
+  }
+
+  private connectionOwnershipAndPresentationSteps(
+    client: DaemonClientLike,
+  ): readonly [() => Promise<void>, () => Promise<void>] {
+    // Capture this before applying the profile: the first successful write
+    // mints and stores the UUID. On first connect the profile must exist before
+    // ownership establishment can publish `connected`; on reconnect the UUID is
+    // already attached to concurrent calls, so reassert ownership first and
+    // reapply the DB-backed presentation writes afterward. Keeping reconnect's
+    // heartbeat ahead of those writes preserves the pre-first-heartbeat reclaim
+    // grace guarantee (#5637).
+    const isFirstPresentationProfileApplication = this.toolSelectionProfileUuid === undefined;
+    const applyPresentationProfile = () => this.applyConnectionPresentationProfile(client);
+
+    // On the FIRST establishment mark the proxy `connected` only AFTER the
+    // establishment heartbeat lands (issue #5643). ensureConnected()'s fast path
+    // returns as soon as `connected && client` is true; setting the flag before the
+    // awaited first heartbeat would let a CONCURRENT ensureConnected() (a parallel
+    // listTools/callTool during MCP startup) resolve and forward a request in the
+    // sub-millisecond window before the daemon has recorded ownership. Deferring the
+    // flip holds those concurrent callers on the `connecting` guard until ownership
+    // is recorded; the heartbeat guards key off the live transport (`transportLive`),
+    // not this flag, so the first heartbeat still fires while it is still false. On a
+    // RECONNECT there is no ownership to wait for, so establishBoundSessionHeartbeat
+    // flips `connected` itself before dispatching the keeper heartbeat (see there).
+    const establishOwnership = () => this.establishBoundSessionHeartbeat();
+
+    return isFirstPresentationProfileApplication
+      ? [applyPresentationProfile, establishOwnership]
+      : [establishOwnership, applyPresentationProfile];
   }
 
   /**

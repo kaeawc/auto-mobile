@@ -1791,25 +1791,53 @@ describe("DaemonMcpProxy", () => {
         }
       });
 
-      test("reapplies connection presentation to the retained profile after reconnect", async () => {
-        const firstClient = presentationClient("profile-reconnect");
-        const replacementClient = presentationClient("profile-reconnect");
+      test("applies presentation before the first heartbeat but re-heartbeats before reconnect reapply", async () => {
+        const firstEvents: string[] = [];
+        const reconnectEvents: string[] = [];
+        const proxyRef: { current?: DaemonMcpProxy } = {};
+        const clientWithEvents = (events: string[]) =>
+          new FakeDaemonClient({
+            toolResultFor: (toolName) =>
+              toolName === "setToolEnabled"
+                ? connectionProfileResult("profile-reconnect")
+                : undefined,
+            daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+            onCallTool: (toolName) => {
+              if (toolName === "setToolEnabled") {
+                events.push(`presentation:${proxyRef.current!.isConnected()}`);
+              }
+            },
+            onCallDaemonMethod: (method) => {
+              if (method === "daemon/heartbeat") {
+                events.push(`heartbeat:${proxyRef.current!.isConnected()}`);
+              }
+            },
+          });
+        const firstClient = clientWithEvents(firstEvents);
+        const replacementClient = clientWithEvents(reconnectEvents);
         const clients: DaemonClientLike[] = [firstClient, replacementClient];
         const fakeManager = new FakeDaemonManager();
+        const timer = new FakeTimer();
         fakeManager.statusResult = runningStatus({});
         const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
         const proxy = new DaemonMcpProxy({
+          initialSessionUuid: "live-session",
           clientFactory: () => clients.shift()!,
           daemonManager: fakeManager,
           daemonOptions: { toolResultsNoStructuredContent: true },
+          timer,
         });
+        proxyRef.current = proxy;
 
         try {
           await proxy.listTools();
+          expect(firstEvents).toEqual(["presentation:false", "heartbeat:false"]);
+
           firstClient.emitConnectionClosed();
           await Promise.resolve();
           await proxy.listTools();
 
+          expect(reconnectEvents).toEqual(["heartbeat:true", "presentation:true"]);
           expect(replacementClient.callToolCalls[0]).toEqual({
             toolName: "setToolEnabled",
             params: {

@@ -130,11 +130,12 @@ describe("toSkeleton — acceptance criteria", () => {
   });
 
   describe("editable value labels", () => {
-    test("uses an iOS editable value when text and content-desc are absent", () => {
+    test("prefers an iOS editable value over the placeholder text", () => {
       const field: Element = {
         bounds: bounds(0, 0, 100, 50),
         "resource-id": "search",
         role: "textfield",
+        text: "Search",
         value: "parity.check",
         actions: ["set_text"],
       };
@@ -143,6 +144,33 @@ describe("toSkeleton — acceptance criteria", () => {
 
       expect(skeleton[0].label).toBe("parity.check");
       expect(skeleton[0].affordances).toContain("input");
+    });
+
+    test("falls back to the iOS placeholder when the editable value is absent", () => {
+      const field: Element = {
+        bounds: bounds(0, 0, 100, 50),
+        "resource-id": "search",
+        role: "textfield",
+        text: "Search",
+        actions: ["set_text"],
+      };
+
+      const skeleton = toSkeleton(makeElements({ clickable: [field] }));
+
+      expect(skeleton[0].label).toBe("Search");
+    });
+
+    test("preserves Android editable text when value is absent", () => {
+      const field: Element = {
+        bounds: bounds(0, 0, 100, 50),
+        "resource-id": "android-field",
+        class: "android.widget.EditText",
+        text: "hello",
+      };
+
+      const skeleton = toSkeleton(makeElements({ clickable: [field] }));
+
+      expect(skeleton[0].label).toBe("hello");
     });
 
     test("does not use value as a non-editable label", () => {
@@ -159,26 +187,19 @@ describe("toSkeleton — acceptance criteria", () => {
       expect(skeleton[0].label).toBeUndefined();
     });
 
-    test("preserves Android text and prefers text or content-desc over value", () => {
-      const androidField: Element = {
-        bounds: bounds(0, 0, 100, 50),
-        "resource-id": "android-field",
-        class: "android.widget.EditText",
-        text: "hello",
-        value: "ignored",
-      };
-      const contentDescField: Element = {
+    test("keeps non-editable content-desc behavior even when value is present", () => {
+      const field: Element = {
         bounds: bounds(0, 60, 100, 110),
-        "resource-id": "ios-field",
-        actions: ["set_text"],
+        "resource-id": "non-editable",
+        text: "Visible text",
         "content-desc": "Search field",
         value: "ignored too",
+        clickable: true,
       };
 
-      const skeleton = toSkeleton(makeElements({ clickable: [androidField, contentDescField] }));
+      const skeleton = toSkeleton(makeElements({ clickable: [field] }));
 
-      expect(findById(skeleton, "android-field")?.label).toBe("hello");
-      expect(findById(skeleton, "ios-field")?.label).toBe("Search field");
+      expect(findById(skeleton, "non-editable")?.label).toBe("Visible text");
     });
   });
 

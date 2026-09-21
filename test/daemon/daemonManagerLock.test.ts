@@ -5,6 +5,13 @@ import { tmpdir } from "node:os";
 import { DaemonManager } from "../../src/daemon/manager";
 import { parseLockContent } from "../../src/utils/fileLock";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
+
+function unavailableDaemonClient() {
+  const client = new FakeDaemonClient();
+  client.shouldFailConnect = true;
+  return client;
+}
 
 describe("DaemonManager file lock", () => {
   const tempDirs: string[] = [];
@@ -182,7 +189,7 @@ describe("DaemonManager file lock", () => {
       }
 
       const manager = new TestDaemonManager(
-        undefined,
+        unavailableDaemonClient,
         undefined,
         fakeTimer,
         lockPath,
@@ -240,7 +247,7 @@ describe("DaemonManager file lock", () => {
       }
 
       const manager = new TestDaemonManager(
-        undefined,
+        unavailableDaemonClient,
         undefined,
         fakeTimer,
         lockPath,
@@ -302,7 +309,7 @@ describe("DaemonManager file lock", () => {
       }
 
       const manager = new TestDaemonManager(
-        undefined,
+        unavailableDaemonClient,
         undefined,
         fakeTimer,
         lockPath,
@@ -358,7 +365,7 @@ describe("DaemonManager file lock", () => {
       }
 
       const manager = new TestDaemonManager(
-        undefined,
+        unavailableDaemonClient,
         undefined,
         fakeTimer,
         lockPath,

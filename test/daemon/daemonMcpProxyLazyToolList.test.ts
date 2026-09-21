@@ -91,34 +91,41 @@ describe("DaemonMcpProxy.listAdvertisedTools (lazy tools/list — issue #5879)",
     }
   });
 
-  test("once connected, preserves static schemas while augmenting them with live definitions (AC4)", async () => {
-    const fakeClient = new FakeDaemonClient({
-      daemonMethodResults: new Map([
-        ["tools/list", { tools: [{ name: "liveOnlyTool", inputSchema: {} }] }],
-      ]),
-    });
-    const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
-    const proxy = new DaemonMcpProxy({
-      clientFactory: () => fakeClient,
-      daemonManager: matchingDaemonManager(),
-      autoStartDaemon: false,
-      staticToolDefinitionsProvider: () => [
-        { name: "staticTool", inputSchema: { type: "object" } },
-      ],
-    });
+  test.each(["android", "ios"] as const)(
+    "once connected, preserves the tapOn schema for a filtered %s tool list (AC4)",
+    async (platform) => {
+      const liveToolName = `${platform}LiveTool`;
+      const tapOnSchema = {
+        type: "object",
+        properties: { platform: { const: platform } },
+      };
+      const fakeClient = new FakeDaemonClient({
+        daemonMethodResults: new Map([
+          ["tools/list", { tools: [{ name: liveToolName, inputSchema: {} }] }],
+        ]),
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => fakeClient,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+        staticToolDefinitionsProvider: () => [{ name: "tapOn", inputSchema: tapOnSchema }],
+      });
 
-    try {
-      // Force a connection via a tool call.
-      await proxy.callTool("observe", {});
-      expect(proxy.isConnected()).toBe(true);
+      try {
+        // Force a connection via a tool call.
+        await proxy.callTool("observe", {});
+        expect(proxy.isConnected()).toBe(true);
 
-      const tools = await proxy.listAdvertisedTools();
-      expect(tools.map((tool) => tool.name)).toEqual(["staticTool", "liveOnlyTool"]);
-    } finally {
-      isAvailableSpy.mockRestore();
-      await proxy.close();
-    }
-  });
+        const tools = await proxy.listAdvertisedTools();
+        expect(tools.map((tool) => tool.name)).toEqual(["tapOn", liveToolName]);
+        expect(tools.find((tool) => tool.name === "tapOn")?.inputSchema).toEqual(tapOnSchema);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    },
+  );
 
   test("serves the static surface after an idle daemon connection closes", async () => {
     const fakeClient = new FakeDaemonClient({

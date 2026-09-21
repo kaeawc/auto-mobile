@@ -23,6 +23,21 @@ export function daemonProcessOptions(options: DaemonOptions | undefined): Daemon
   return processOptions;
 }
 
+/** Keep connection tool flags out of daemon-wide startup defaults. */
+export function toolSelectionStartupOptions(
+  daemonMode: boolean,
+  enabledTools: readonly string[],
+  disabledTools: readonly string[],
+): Required<Pick<DaemonOptions, "enabledTools" | "disabledTools">> {
+  if (daemonMode) {
+    return { enabledTools: [], disabledTools: [] };
+  }
+  return {
+    enabledTools: [...enabledTools],
+    disabledTools: [...disabledTools],
+  };
+}
+
 /** Prevent a spawned daemon from re-importing connection presentation through inherited env. */
 export function daemonProcessEnvironment(environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const processEnvironment = { ...environment };

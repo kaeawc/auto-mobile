@@ -19,6 +19,7 @@ bootstrapEnvironment();
 process.env[DAEMON_LAUNCH_CWD_ENV] ??= safeProcessCwd();
 
 import type { DaemonOptions } from "./daemon/types";
+import { toolSelectionStartupOptions } from "./daemon/daemonOptionScopes";
 import { configureToolSelectionCliDefaults } from "./features/toolSelection/SessionToolSelectionService";
 import type { FeatureFlagKey } from "./features/featureFlags/FeatureFlagDefinitions";
 import { OUTPUT_REDUCTION_FLAG_SPECS } from "./utils/outputReductionFlags";
@@ -261,12 +262,13 @@ async function main() {
       await exitAfterSuccessfulDaemonCommand(logger, process);
       return;
     }
-    // Startup defaults are the shared worker policy. Per-connection profiles
-    // still layer over these defaults, but a daemon must seed its initial
-    // tools/list response from AUTOMOBILE_ENABLED_TOOLS/AUTOMOBILE_DISABLED_TOOLS
-    // so discovery does not hide policy-enabled tools before a client profile
-    // has been materialized.
-    configureToolSelectionCliDefaults(enabledTools, disabledTools);
+    // A directly launched daemon imports shared environment policy while
+    // keeping CLI tool flags scoped to the connection that supplied them.
+    const startupToolOptions = toolSelectionStartupOptions(daemonMode, enabledTools, disabledTools);
+    configureToolSelectionCliDefaults(
+      startupToolOptions.enabledTools,
+      startupToolOptions.disabledTools,
+    );
     // Validate exact startup names before daemon/direct listeners can publish
     // readiness. createMcpServer repeats this registration for direct embedded
     // consumers, but daemon mode creates MCP servers lazily on first request.

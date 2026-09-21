@@ -1130,7 +1130,7 @@ describe("DaemonManager control-state recovery", () => {
     });
   });
 
-  test("drops connection presentation options during daemon recovery", async () => {
+  test("preserves requested daemon-wide tool defaults during recovery", async () => {
     const { lock, pid, socket } = paths();
     const manager = new DaemonManager(undefined, undefined, new FakeTimer(), lock, pid, socket, {
       findDaemonProcesses: () => [],
@@ -1158,6 +1158,10 @@ describe("DaemonManager control-state recovery", () => {
       },
     );
 
-    expect(recoveryOptions).toEqual({ strictPort: true });
+    expect(recoveryOptions).toEqual({
+      enabledTools: ["tapOn"],
+      disabledTools: ["observe"],
+      strictPort: true,
+    });
   });
 });

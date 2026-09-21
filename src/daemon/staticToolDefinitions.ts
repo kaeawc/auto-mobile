@@ -1,5 +1,6 @@
 import toolDefinitionsJson from "../../schemas/tool-definitions.json";
 import type { ProxiedToolDefinition } from "./daemonMcpProxy";
+import type { DaemonOptions } from "./types";
 
 /**
  * The committed, static MCP tool surface.
@@ -40,17 +41,37 @@ interface RawToolDefinition {
 // Parse once at module load; the per-call mapping below is cheap (tools/list is
 // not a hot path) and must re-read the always-load env each call.
 const RAW_DEFINITIONS: RawToolDefinition[] = toolDefinitionsJson as RawToolDefinition[];
+const DEBUG_ONLY_META_KEY = "automobile/debugOnly";
+const EMBEDDED_SDK_ONLY_META_KEY = "automobile/embeddedSdkOnly";
 const PLAN_ONLY_META_KEY = "automobile/planOnly";
 
-function toolDefinitions(includePlanOnly: boolean): ProxiedToolDefinition[] {
+function isConnectedFallbackAvailable(
+  tool: RawToolDefinition,
+  daemonOptions: DaemonOptions | undefined,
+): boolean {
+  const meta = tool._meta;
+  return (
+    meta?.[PLAN_ONLY_META_KEY] !== true &&
+    (meta?.[DEBUG_ONLY_META_KEY] !== true || daemonOptions?.debug === true) &&
+    (meta?.[EMBEDDED_SDK_ONLY_META_KEY] !== true || daemonOptions?.embeddedSdk === true)
+  );
+}
+
+function toolDefinitions(
+  connectedDaemonOptions: DaemonOptions | undefined | false,
+): ProxiedToolDefinition[] {
   const alwaysLoad = process.env.AUTOMOBILE_ALWAYS_LOAD_TOOLS === "true";
   return RAW_DEFINITIONS.filter(
-    (tool) => includePlanOnly || tool._meta?.[PLAN_ONLY_META_KEY] !== true,
+    (tool) =>
+      connectedDaemonOptions === false ||
+      isConnectedFallbackAvailable(tool, connectedDaemonOptions),
   ).map((tool) => {
     const meta: Record<string, unknown> = {
       ...(tool._meta ?? {}),
       ...(alwaysLoad ? { "anthropic/alwaysLoad": true } : {}),
     };
+    delete meta[DEBUG_ONLY_META_KEY];
+    delete meta[EMBEDDED_SDK_ONLY_META_KEY];
     delete meta[PLAN_ONLY_META_KEY];
     const definition: ProxiedToolDefinition = {
       name: tool.name,
@@ -75,10 +96,12 @@ function toolDefinitions(includePlanOnly: boolean): ProxiedToolDefinition[] {
  * (see the file docstring).
  */
 export function getStaticToolDefinitions(): ProxiedToolDefinition[] {
-  return toolDefinitions(true);
+  return toolDefinitions(false);
 }
 
 /** Static schemas eligible to supplement a connected daemon's live tool list. */
-export function getConnectedStaticToolDefinitions(): ProxiedToolDefinition[] {
-  return toolDefinitions(false);
+export function getConnectedStaticToolDefinitions(
+  daemonOptions?: DaemonOptions,
+): ProxiedToolDefinition[] {
+  return toolDefinitions(daemonOptions);
 }

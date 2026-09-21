@@ -507,6 +507,8 @@ async function main() {
         toolOutputsDir,
         networkMockable,
         embeddedSdk,
+        enabledTools,
+        disabledTools,
         dismissKeyboardAfterInput,
         ...eventAllMarkerDaemonOptions,
         noUiPerfMode: !uiPerfMode,
@@ -533,7 +535,9 @@ async function main() {
     }
 
     if (daemonCommand) {
-      await runDaemonCommand(daemonCommand, daemonArgs);
+      await runDaemonCommand(daemonCommand, daemonArgs, {
+        startupToolDefaults: { enabledTools, disabledTools },
+      });
       // Exit explicitly after daemon command completes to prevent process from hanging
       // Same issue as CLI mode - event loop may have pending operations
       await logger.closeAfterFlush();

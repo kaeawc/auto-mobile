@@ -7,6 +7,7 @@ import {
   CONNECTION_PRESENTATION_OPTION_KEYS,
   daemonProcessEnvironment,
   daemonProcessOptions,
+  daemonReuseOptions,
 } from "../../src/daemon/daemonOptionScopes";
 import { OUTPUT_REDUCTION_FLAG_SPECS } from "../../src/utils/outputReductionFlags";
 import type { DaemonOptions } from "../../src/daemon/types";
@@ -210,7 +211,7 @@ describe("reuse-critical drift guard", () => {
     expect(REUSE_CRITICAL_OPTION_KEYS).not.toContain("toolResultsNoStructuredContent");
   });
 
-  test("connection presentation options are removed before daemon lifecycle actions", () => {
+  test("startup tool defaults reach the daemon without becoming reuse-critical", () => {
     expect(CONNECTION_PRESENTATION_OPTION_KEYS).toEqual([
       "enabledTools",
       "disabledTools",
@@ -218,6 +219,18 @@ describe("reuse-critical drift guard", () => {
     ]);
     expect(
       daemonProcessOptions({
+        debug: true,
+        enabledTools: ["clipboard"],
+        disabledTools: ["observe"],
+        toolResultsNoStructuredContent: true,
+      }),
+    ).toEqual({
+      debug: true,
+      enabledTools: ["clipboard"],
+      disabledTools: ["observe"],
+    });
+    expect(
+      daemonReuseOptions({
         debug: true,
         enabledTools: ["clipboard"],
         disabledTools: ["observe"],

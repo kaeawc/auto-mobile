@@ -11,6 +11,10 @@ export const CONNECTION_PRESENTATION_OPTION_KEYS = [
   "toolResultsNoStructuredContent",
 ] as const satisfies readonly (keyof DaemonOptions)[];
 
+const DAEMON_CHILD_EXCLUDED_OPTION_KEYS = [
+  "toolResultsNoStructuredContent",
+] as const satisfies readonly (keyof DaemonOptions)[];
+
 /** Environment equivalents that belong to the spawning MCP connection, not its child daemon. */
 export const CONNECTION_PRESENTATION_ENV_KEYS = [
   "AUTOMOBILE_ENABLED_TOOLS",
@@ -18,13 +22,22 @@ export const CONNECTION_PRESENTATION_ENV_KEYS = [
   "AUTOMOBILE_TOOL_RESULTS_NO_STRUCTURED_CONTENT",
 ] as const;
 
-/** Remove connection presentation fields before a daemon lifecycle action. */
+/** Remove presentation fields that can never become daemon-wide startup policy. */
 export function daemonProcessOptions(options: DaemonOptions | undefined): DaemonOptions {
   const processOptions: DaemonOptions = { ...(options ?? {}) };
-  for (const key of CONNECTION_PRESENTATION_OPTION_KEYS) {
+  for (const key of DAEMON_CHILD_EXCLUDED_OPTION_KEYS) {
     delete processOptions[key];
   }
   return processOptions;
+}
+
+/** Ignore per-connection tool choices when deciding whether a shared daemon must restart. */
+export function daemonReuseOptions(options: DaemonOptions | undefined): DaemonOptions {
+  const reuseOptions: DaemonOptions = { ...(options ?? {}) };
+  for (const key of CONNECTION_PRESENTATION_OPTION_KEYS) {
+    delete reuseOptions[key];
+  }
+  return reuseOptions;
 }
 
 /** Prevent a spawned daemon from re-importing connection presentation through inherited env. */

@@ -134,7 +134,7 @@ describe("daemonBuildIdentityStatusLines", () => {
 });
 
 describe("DaemonManager restart", () => {
-  test("preserves PID-recorded global options but drops legacy presentation options", async () => {
+  test("preserves PID-recorded global and daemon-wide tool options", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const manager = new DaemonManager(
@@ -185,6 +185,8 @@ describe("DaemonManager restart", () => {
       debug: true,
       toolOutputsDir: "/tmp/automobile-artifacts",
       eventAllMarkers: ["@", "#"],
+      enabledTools: ["clipboard"],
+      disabledTools: ["observe"],
       strictPort: true,
     });
   });

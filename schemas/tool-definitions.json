@@ -355,6 +355,9 @@
       },
       "required": ["success"],
       "additionalProperties": {}
+    },
+    "_meta": {
+      "automobile/debugOnly": true
     }
   },
   {
@@ -670,6 +673,9 @@
       },
       "required": ["appId"],
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/embeddedSdkOnly": true
     }
   },
   {
@@ -700,6 +706,9 @@
         }
       },
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/embeddedSdkOnly": true
     }
   },
   {
@@ -1076,6 +1085,9 @@
         }
       },
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/debugOnly": true
     }
   },
   {
@@ -1718,6 +1730,10 @@
         }
       },
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/debugOnly": true,
+      "automobile/embeddedSdkOnly": true
     }
   },
   {
@@ -2143,6 +2159,9 @@
       },
       "required": ["appId", "adapterName", "name"],
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/embeddedSdkOnly": true
     }
   },
   {
@@ -2274,6 +2293,10 @@
         }
       },
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/debugOnly": true,
+      "automobile/embeddedSdkOnly": true
     }
   },
   {
@@ -2315,6 +2338,9 @@
         }
       },
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/embeddedSdkOnly": true
     }
   },
   {
@@ -2649,6 +2675,9 @@
         }
       },
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/debugOnly": true
     }
   },
   {
@@ -3027,6 +3056,9 @@
       },
       "required": ["appId", "adapterName"],
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/embeddedSdkOnly": true
     }
   },
   {
@@ -4210,6 +4242,9 @@
       },
       "required": ["host", "path"],
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/embeddedSdkOnly": true
     }
   },
   {
@@ -4242,6 +4277,10 @@
       },
       "required": ["targetScreen"],
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/debugOnly": true,
+      "automobile/embeddedSdkOnly": true
     }
   },
   {
@@ -4316,6 +4355,9 @@
         }
       },
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/embeddedSdkOnly": true
     }
   },
   {
@@ -10170,6 +10212,9 @@
       },
       "required": ["appId", "key"],
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/embeddedSdkOnly": true
     }
   },
   {
@@ -11443,6 +11488,9 @@
       },
       "required": ["appId", "key", "value", "type"],
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/embeddedSdkOnly": true
     }
   },
   {
@@ -11929,6 +11977,9 @@
       },
       "required": ["success", "fields", "totalAttempts"],
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/debugOnly": true
     }
   },
   {
@@ -12013,6 +12064,9 @@
       },
       "required": ["appId", "databasePath", "query"],
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/embeddedSdkOnly": true
     }
   },
   {

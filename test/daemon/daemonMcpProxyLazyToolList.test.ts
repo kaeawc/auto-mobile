@@ -147,6 +147,94 @@ describe("DaemonMcpProxy.listAdvertisedTools (lazy tools/list — issue #5879)",
       expect(toolNames).toContain("liveOnlyTool");
       expect(toolNames).not.toContain("barrier");
       expect(toolNames).not.toContain("criticalSection");
+      expect(toolNames).not.toContain("debugSearch");
+      expect(toolNames).not.toContain("sqlQuery");
+    } finally {
+      await proxy.close();
+    }
+  });
+
+  test("connected fallback retains launch-gated schemas only when the daemon enabled them", async () => {
+    const fakeClient = new FakeDaemonClient({
+      daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+    });
+    const daemonManager = matchingDaemonManager();
+    daemonManager.statusResult = {
+      ...daemonManager.statusResult,
+      options: { debug: true, embeddedSdk: true },
+    };
+    const proxy = new DaemonMcpProxy({
+      clientFactory: () => fakeClient,
+      daemonManager,
+      daemonAvailabilityProbe: async () => true,
+      autoStartDaemon: false,
+    });
+
+    try {
+      await proxy.callTool("observe", {});
+      const toolNames = (await proxy.listAdvertisedTools()).map((tool) => tool.name);
+
+      expect(toolNames).toContain("debugSearch");
+      expect(toolNames).toContain("sqlQuery");
+    } finally {
+      await proxy.close();
+    }
+  });
+
+  test("serves connected static schemas when the live tools list fails", async () => {
+    const fakeClient = new FakeDaemonClient({
+      onCallDaemonMethod: (method) => {
+        if (method === "tools/list") {
+          throw new Error("wedged live list");
+        }
+      },
+    });
+    const proxy = new DaemonMcpProxy({
+      clientFactory: () => fakeClient,
+      daemonManager: matchingDaemonManager(),
+      daemonAvailabilityProbe: async () => true,
+      autoStartDaemon: false,
+      staticToolDefinitionsProvider: () => [{ name: "tapOn", inputSchema: { type: "object" } }],
+    });
+
+    try {
+      await proxy.callTool("observe", {});
+      await expect(proxy.listAdvertisedTools()).resolves.toEqual([
+        { name: "tapOn", inputSchema: { type: "object" } },
+      ]);
+    } finally {
+      await proxy.close();
+    }
+  });
+
+  test("deduplicates malformed live-only definitions by name", async () => {
+    const fakeClient = new FakeDaemonClient({
+      daemonMethodResults: new Map([
+        [
+          "tools/list",
+          {
+            tools: [
+              { name: "liveOnly", description: "first", inputSchema: {} },
+              { name: "liveOnly", description: "last", inputSchema: {} },
+            ],
+          },
+        ],
+      ]),
+    });
+    const proxy = new DaemonMcpProxy({
+      clientFactory: () => fakeClient,
+      daemonManager: matchingDaemonManager(),
+      daemonAvailabilityProbe: async () => true,
+      autoStartDaemon: false,
+      staticToolDefinitionsProvider: () => [],
+    });
+
+    try {
+      await proxy.callTool("observe", {});
+      const tools = await proxy.listAdvertisedTools();
+
+      expect(tools).toHaveLength(1);
+      expect(tools[0]?.description).toBe("last");
     } finally {
       await proxy.close();
     }

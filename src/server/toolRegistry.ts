@@ -1922,6 +1922,8 @@ export class ToolRegistryClass {
         outputSchema?: Record<string, unknown>;
         _meta?: {
           "anthropic/alwaysLoad"?: boolean;
+          "automobile/debugOnly"?: boolean;
+          "automobile/embeddedSdkOnly"?: boolean;
           "automobile/planOnly"?: boolean;
           ui?: { resourceUri: string };
         };
@@ -1949,6 +1951,12 @@ export class ToolRegistryClass {
       // exclude plan-only tools after a live connection is available.
       if (tool.planOnly) {
         definition._meta = { ...definition._meta, "automobile/planOnly": true };
+      }
+      if (tool.debugOnly) {
+        definition._meta = { ...definition._meta, "automobile/debugOnly": true };
+      }
+      if (tool.embeddedSdkOnly) {
+        definition._meta = { ...definition._meta, "automobile/embeddedSdkOnly": true };
       }
       // MCP Apps UI pointer (issue #4669) — additive; non-Apps hosts ignore it.
       if (tool.appUiResourceUri) {

@@ -68,13 +68,14 @@ import {
   getCurrentBuildIdentity,
 } from "./buildIdentity";
 import { DeviceControlTransportError } from "./deviceControlTransportFailure";
+import { McpOverloadError } from "./McpTimeoutError";
 import {
   getConnectedStaticToolDefinitions,
   getStaticToolDefinitions,
 } from "./staticToolDefinitions";
 import { DaemonRestartDeferredError } from "./daemonRestartAdmission";
 import { isRecoverableDaemonReleaseReason } from "../db/deviceSessionRepository";
-import { daemonProcessOptions } from "./daemonOptionScopes";
+import { daemonProcessOptions, daemonReuseOptions } from "./daemonOptionScopes";
 
 export { DaemonRestartDeferredError } from "./daemonRestartAdmission";
 export type VersionMismatchReason =
@@ -402,7 +403,9 @@ export interface DaemonMcpProxyConfig {
    * Supplies static schemas eligible to supplement a connected daemon's live
    * list. Defaults to the static catalog without plan-only definitions.
    */
-  connectedStaticToolDefinitionsProvider?: () => ProxiedToolDefinition[];
+  connectedStaticToolDefinitionsProvider?: (
+    daemonOptions?: DaemonOptions,
+  ) => ProxiedToolDefinition[];
   /**
    * Private live-acceptance configuration. It is set only while constructing
    * the dedicated harness proxy; MCP tool callers cannot set it.
@@ -432,7 +435,7 @@ export interface ProxiedToolDefinition {
 
 function connectedStaticToolDefinitionsProvider(
   config: DaemonMcpProxyConfig,
-): () => ProxiedToolDefinition[] {
+): (daemonOptions?: DaemonOptions) => ProxiedToolDefinition[] {
   return (
     config.connectedStaticToolDefinitionsProvider ??
     config.staticToolDefinitionsProvider ??
@@ -643,8 +646,8 @@ function mergeDaemonOptions(
   running: DaemonOptions | undefined,
   requested: DaemonOptions | undefined,
 ): DaemonOptions {
-  const runningOptions = daemonProcessOptions(running);
-  const requestedOptions = daemonProcessOptions(requested);
+  const runningOptions = daemonReuseOptions(running);
+  const requestedOptions = daemonReuseOptions(requested);
   const merged: DaemonOptions = { ...runningOptions, ...requestedOptions };
   const mergedRecord = merged as Record<string, unknown>;
   for (const [key, value] of Object.entries(runningOptions)) {
@@ -802,7 +805,9 @@ export class DaemonMcpProxy {
   // Supplies the static tool surface for listAdvertisedTools() before a daemon
   // connection exists (issue #5879).
   private readonly staticToolDefinitionsProvider: () => ProxiedToolDefinition[];
-  private readonly connectedStaticToolDefinitionsProvider: () => ProxiedToolDefinition[];
+  private readonly connectedStaticToolDefinitionsProvider: (
+    daemonOptions?: DaemonOptions,
+  ) => ProxiedToolDefinition[];
   // Set when listAdvertisedTools() served the static surface without a live
   // connection. On the next successful connect the proxy emits a tools
   // list_changed so the client re-fetches the accurate (session-scoped) list.
@@ -2127,13 +2132,31 @@ export class DaemonMcpProxy {
       this.servedStaticToolList = true;
       return this.staticToolDefinitionsProvider();
     }
-    const staticTools = this.connectedStaticToolDefinitionsProvider();
-    const liveTools = await this.listTools();
+    const daemonStatus = await this.reconciliationStatus();
+    const staticTools = this.connectedStaticToolDefinitionsProvider(daemonStatus.options);
+    let liveTools: ProxiedToolDefinition[];
+    try {
+      liveTools = await this.listTools();
+    } catch (error) {
+      if (
+        error instanceof DaemonBoundSessionExpiredError ||
+        error instanceof DaemonConnectionSessionReleasedError ||
+        error instanceof DeviceControlTransportError ||
+        error instanceof McpOverloadError
+      ) {
+        throw error;
+      }
+      logger.warn(
+        `[DaemonMcpProxy] Live tools/list failed; serving connected static fallback: ${errorMessage(error)}`,
+        error,
+      );
+      return staticTools;
+    }
     const liveToolsByName = new Map(liveTools.map((tool) => [tool.name, tool]));
     const staticToolNames = new Set(staticTools.map((tool) => tool.name));
     return [
       ...staticTools.map((tool) => liveToolsByName.get(tool.name) ?? tool),
-      ...liveTools.filter((tool) => !staticToolNames.has(tool.name)),
+      ...[...liveToolsByName.values()].filter((tool) => !staticToolNames.has(tool.name)),
     ];
   }
 

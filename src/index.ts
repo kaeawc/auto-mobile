@@ -535,13 +535,20 @@ async function main() {
     }
 
     if (daemonCommand) {
-      const hasStartupToolDefaults =
-        enabledTools.length > 0 ||
-        disabledTools.length > 0 ||
-        process.env.AUTOMOBILE_ENABLED_TOOLS !== undefined ||
-        process.env.AUTOMOBILE_DISABLED_TOOLS !== undefined;
+      const hasEnabledToolDefaults =
+        enabledTools.length > 0 || process.env.AUTOMOBILE_ENABLED_TOOLS !== undefined;
+      const hasDisabledToolDefaults =
+        disabledTools.length > 0 || process.env.AUTOMOBILE_DISABLED_TOOLS !== undefined;
+      const hasStartupToolDefaults = hasEnabledToolDefaults || hasDisabledToolDefaults;
       await runDaemonCommand(daemonCommand, daemonArgs, {
-        ...(hasStartupToolDefaults ? { startupToolDefaults: { enabledTools, disabledTools } } : {}),
+        ...(hasStartupToolDefaults
+          ? {
+              startupToolDefaults: {
+                ...(hasEnabledToolDefaults ? { enabledTools } : {}),
+                ...(hasDisabledToolDefaults ? { disabledTools } : {}),
+              },
+            }
+          : {}),
       });
       // Exit explicitly after daemon command completes to prevent process from hanging
       // Same issue as CLI mode - event loop may have pending operations

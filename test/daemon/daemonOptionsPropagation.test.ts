@@ -205,6 +205,41 @@ describe("daemon startup-option propagation", () => {
       }),
     ).toMatchObject({ enabledTools: [], disabledTools: [] });
   });
+
+  test("daemon command tool defaults are independently optional per side", () => {
+    expect(
+      daemonCommandOptions([], {
+        startupToolDefaults: { enabledTools: ["clipboard"] },
+      }),
+    ).toMatchObject({ enabledTools: ["clipboard"] });
+    expect(
+      daemonCommandOptions([], {
+        startupToolDefaults: { enabledTools: ["clipboard"] },
+      }).disabledTools,
+    ).toBeUndefined();
+
+    expect(
+      daemonCommandOptions([], {
+        startupToolDefaults: { disabledTools: ["observe"] },
+      }),
+    ).toMatchObject({ disabledTools: ["observe"] });
+    expect(
+      daemonCommandOptions([], {
+        startupToolDefaults: { disabledTools: ["observe"] },
+      }).enabledTools,
+    ).toBeUndefined();
+
+    expect(
+      daemonCommandOptions([], {
+        startupToolDefaults: { enabledTools: [] },
+      }),
+    ).toMatchObject({ enabledTools: [] });
+    expect(
+      daemonCommandOptions([], {
+        startupToolDefaults: { enabledTools: [] },
+      }).disabledTools,
+    ).toBeUndefined();
+  });
 });
 
 describe("reuse-critical drift guard", () => {

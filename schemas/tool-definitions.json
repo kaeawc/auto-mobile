@@ -13088,7 +13088,7 @@
           "type": "boolean"
         },
         "ensureChecked": {
-          "description": "Skip tapping if the resolved toggle element's checked state already matches this value; otherwise tap and verify it flipped. Requires the element to have the toggle affordance and action \"tap\".",
+          "description": "Skip tapping if the resolved toggle element's checked state already matches this value; otherwise tap and verify it flipped. Requires the element to have the toggle affordance, action \"tap\", and a non-random selection strategy.",
           "type": "boolean"
         },
         "platform": {
@@ -13198,30 +13198,23 @@
           }
         ]
       },
-      "allOf": [
-        {
-          "if": {
-            "required": ["ensureChecked"],
-            "properties": {
-              "ensureChecked": {
-                "const": true
-              }
-            }
-          },
-          "then": {
-            "properties": {
-              "action": {
-                "const": "tap"
-              },
-              "selectionStrategy": {
-                "not": {
-                  "const": "random"
-                }
+      "else": {
+        "if": {
+          "required": ["ensureChecked"]
+        },
+        "then": {
+          "properties": {
+            "action": {
+              "const": "tap"
+            },
+            "selectionStrategy": {
+              "not": {
+                "const": "random"
               }
             }
           }
         }
-      ]
+      }
     },
     "outputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",

@@ -207,6 +207,20 @@ describe("Tool Registration Validation (Integration Tests)", () => {
     ).toBe(false);
   });
 
+  test("committed tool schemas avoid top-level allOf for Claude ToolSearch", async () => {
+    const fs = await import("fs/promises");
+    const path = await import("path");
+    const schemaPath = path.join(process.cwd(), "schemas", "tool-definitions.json");
+    const schemas = JSON.parse(await fs.readFile(schemaPath, "utf-8")) as ToolSchemaDefinition[];
+
+    // Claude Code silently omits an MCP tool from both ToolSearch and direct
+    // invocation when its advertised input schema has top-level allOf.
+    const incompatible = schemas
+      .filter((schema) => Object.hasOwn(schema.inputSchema, "allOf"))
+      .map((schema) => schema.name);
+    expect(incompatible).toEqual([]);
+  });
+
   // R9 (issue #4183): a negative assertion so the compile check cannot silently
   // pass on anything — a structurally-invalid schema (`type` not an allowed
   // keyword) must be rejected, proving compileJsonSchema is a real gate.

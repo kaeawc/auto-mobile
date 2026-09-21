@@ -317,7 +317,7 @@ export const tapOnSchema = withJsonSchemaOverride(
           .boolean()
           .optional()
           .describe(
-            'Skip tapping if the resolved toggle element\'s checked state already matches this value; otherwise tap and verify it flipped. Requires the element to have the toggle affordance and action "tap".',
+            'Skip tapping if the resolved toggle element\'s checked state already matches this value; otherwise tap and verify it flipped. Requires the element to have the toggle affordance, action "tap", and a non-random selection strategy.',
           ),
         // #5870: a `sessionUuid` resolves the platform, so `platform` is not
         // required — a device handle from getAndroid is sufficient on its own.
@@ -418,22 +418,21 @@ export const tapOnSchema = withJsonSchemaOverride(
         },
       ],
     };
-    const allOf = Array.isArray(js.allOf) ? js.allOf : [];
-    js.allOf = [
-      ...allOf,
-      {
-        if: {
-          required: ["ensureChecked"],
-          properties: { ensureChecked: { const: true } },
-        },
-        then: {
-          properties: {
-            action: { const: "tap" },
-            selectionStrategy: { not: { const: "random" } },
-          },
+    // Claude Code omits an entire MCP tool from ToolSearch when its input
+    // schema has top-level allOf. Preserve the independent ensureChecked
+    // constraint in the false branch of the semantic-link condition instead;
+    // runtime validation remains authoritative for every combination.
+    js.else = {
+      if: {
+        required: ["ensureChecked"],
+      },
+      then: {
+        properties: {
+          action: { const: "tap" },
+          selectionStrategy: { not: { const: "random" } },
         },
       },
-    ];
+    };
   },
 );
 

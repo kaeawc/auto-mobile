@@ -7,7 +7,6 @@ import {
   CONNECTION_PRESENTATION_OPTION_KEYS,
   daemonProcessEnvironment,
   daemonProcessOptions,
-  toolSelectionStartupOptions,
 } from "../../src/daemon/daemonOptionScopes";
 import { OUTPUT_REDUCTION_FLAG_SPECS } from "../../src/utils/outputReductionFlags";
 import type { DaemonOptions } from "../../src/daemon/types";
@@ -225,17 +224,6 @@ describe("reuse-critical drift guard", () => {
         toolResultsNoStructuredContent: true,
       }),
     ).toEqual({ debug: true });
-  });
-
-  test("direct daemon startup keeps tool flags connection-scoped", () => {
-    expect(toolSelectionStartupOptions(true, ["clipboard"], ["observe"])).toEqual({
-      enabledTools: [],
-      disabledTools: [],
-    });
-    expect(toolSelectionStartupOptions(false, ["clipboard"], ["observe"])).toEqual({
-      enabledTools: ["clipboard"],
-      disabledTools: ["observe"],
-    });
   });
 
   test("connection presentation environment does not leak into a spawned daemon", () => {

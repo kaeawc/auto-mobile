@@ -1,6 +1,10 @@
 import type { DaemonOptions } from "./types";
 
-/** Options whose meaning belongs to one MCP connection, never the daemon process. */
+/**
+ * Options scoped to one proxy connection when relayed to a spawned daemon.
+ * An operator launching `--daemon-mode` directly may still use the same flags
+ * to seed that daemon's shared startup policy.
+ */
 export const CONNECTION_PRESENTATION_OPTION_KEYS = [
   "enabledTools",
   "disabledTools",
@@ -21,21 +25,6 @@ export function daemonProcessOptions(options: DaemonOptions | undefined): Daemon
     delete processOptions[key];
   }
   return processOptions;
-}
-
-/** Keep connection tool flags out of daemon-wide startup defaults. */
-export function toolSelectionStartupOptions(
-  daemonMode: boolean,
-  enabledTools: readonly string[],
-  disabledTools: readonly string[],
-): Required<Pick<DaemonOptions, "enabledTools" | "disabledTools">> {
-  if (daemonMode) {
-    return { enabledTools: [], disabledTools: [] };
-  }
-  return {
-    enabledTools: [...enabledTools],
-    disabledTools: [...disabledTools],
-  };
 }
 
 /** Prevent a spawned daemon from re-importing connection presentation through inherited env. */

@@ -641,6 +641,7 @@ export class LaunchApp extends BaseVisualChange {
         undefined,
         undefined,
         signal,
+        coldBoot,
       );
       await this.captureTerminalObservationScreenshot(settledResult.observation, perf, signal);
       return settledResult;
@@ -946,6 +947,7 @@ export class LaunchApp extends BaseVisualChange {
           ANDROID_LAUNCH_OBSERVATION_TIMEOUT_MS,
           undefined,
           signal,
+          coldBoot,
         );
         await this.captureTerminalObservationScreenshot(settledResult.observation, perf, signal);
         return settledResult;
@@ -1017,6 +1019,7 @@ export class LaunchApp extends BaseVisualChange {
         ANDROID_LAUNCH_OBSERVATION_TIMEOUT_MS,
         undefined,
         signal,
+        coldBoot,
       );
       await this.captureTerminalObservationScreenshot(
         settledLaunchResult.observation,
@@ -1262,8 +1265,10 @@ export class LaunchApp extends BaseVisualChange {
     timeoutMs: number = LAUNCH_OBSERVATION_TIMEOUT_MS,
     pollIntervalMs: number = LAUNCH_OBSERVATION_POLL_INTERVAL_MS,
     signal?: AbortSignal,
+    coldBoot?: boolean,
   ): Promise<LaunchAppResult> {
     signal?.throwIfAborted();
+    result = await this.collapseNotificationShadeIfCovering(result, signal);
     if (
       !result.observation ||
       this.launchObservationMatchesPackage(result.observation, expectedPackageName)
@@ -1306,7 +1311,49 @@ export class LaunchApp extends BaseVisualChange {
       latestObservation,
       expectedPackageName,
       timeoutMs,
+      coldBoot,
     );
+  }
+
+  private async collapseNotificationShadeIfCovering(
+    result: LaunchAppResult,
+    signal?: AbortSignal,
+  ): Promise<LaunchAppResult> {
+    const activeWindow = result.observation?.activeWindow;
+    if (
+      this.device.platform !== "android" ||
+      activeWindow?.appId !== "com.android.systemui" ||
+      activeWindow.systemOverlay !== true
+    ) {
+      return result;
+    }
+
+    try {
+      await this.adb.executeCommand("shell cmd statusbar collapse");
+    } catch (error) {
+      logger.warn(
+        `[LaunchApp] Failed to collapse notification shade: ${errorMessage(error)}`,
+        error,
+      );
+      return result;
+    }
+
+    try {
+      const observation = await this.observeScreen.execute({
+        skipWaitForFresh: false,
+        signal,
+        skipScreenshot: true,
+        skipAccessibilityAudit: true,
+        skipPerformanceAudit: true,
+      });
+      return { ...result, observation };
+    } catch (error) {
+      logger.warn(
+        `[LaunchApp] Failed to re-observe after collapsing notification shade: ${errorMessage(error)}`,
+        error,
+      );
+      return result;
+    }
   }
 
   private resolveLaunchObservationTimeout(
@@ -1314,6 +1361,7 @@ export class LaunchApp extends BaseVisualChange {
     latestObservation: ObserveResult,
     expectedPackageName: string,
     timeoutMs: number,
+    coldBoot?: boolean,
   ): LaunchAppResult {
     // Distinguish "genuinely launched but no foreground window could be read at
     // all" from "observed a different/stale app" (issue #6220 follow-up). The
@@ -1345,15 +1393,34 @@ export class LaunchApp extends BaseVisualChange {
       return result;
     }
 
+    const foregroundDescription = this.describeLaunchObservationPackages(latestObservation);
     return this.withoutStaleLaunchObservation(
       {
         ...result,
         success: false,
-        error: `Timed out waiting for launch observation to show ${expectedPackageName}; last observation reported ${this.describeLaunchObservationPackages(latestObservation)} in the foreground — pass coldBoot: true to reset to the launcher activity, or call terminateApp first.`,
+        error: `Timed out waiting for launch observation to show ${expectedPackageName}; last observation reported ${foregroundDescription} in the foreground — ${this.describeLaunchObservationBlocker(latestObservation, foregroundDescription, expectedPackageName, coldBoot)}`,
       },
       expectedPackageName,
       latestObservation,
     );
+  }
+
+  private describeLaunchObservationBlocker(
+    latestObservation: ObserveResult,
+    foregroundDescription: string,
+    expectedPackageName: string,
+    coldBoot?: boolean,
+  ): string {
+    const activeWindow = latestObservation.activeWindow;
+    if (activeWindow?.appId === "com.android.systemui" && activeWindow.systemOverlay === true) {
+      return "the system UI (notification shade) is covering the app.";
+    }
+
+    if (coldBoot) {
+      return `\`${foregroundDescription}\` is in the foreground instead of \`${expectedPackageName}\`; terminate it or verify the launch target.`;
+    }
+
+    return "pass coldBoot: true to reset to the launcher activity, or call terminateApp first.";
   }
 
   private settleLaunchObservation(

@@ -553,6 +553,83 @@ describe("LaunchApp", () => {
     expect(fakeObserveScreen.getExecuteCallCount()).toBeGreaterThan(1);
   });
 
+  test("collapses a notification shade covering the launched Android app", async () => {
+    fakeTimer.enableAutoAdvance();
+    const controller = new AbortController();
+    const notificationShadeObservation = {
+      ...createObserveResult(),
+      activeWindow: {
+        appId: "com.android.systemui",
+        activityName: "NotificationShade",
+        layoutSeqSum: 1,
+        systemOverlay: true,
+      },
+    };
+    const observations = [notificationShadeObservation, createObserveResult(packageName)];
+
+    fakeAdb.setForegroundApp({ packageName, userId: 0 });
+    fakeAdb.setCommandResponse("shell dumpsys activity processes", { stdout: "0\n", stderr: "" });
+    fakeObserveScreen.setObserveResult(
+      () => observations.shift() ?? createObserveResult(packageName),
+    );
+
+    const result = await launchApp.execute(
+      packageName,
+      false,
+      false,
+      undefined,
+      undefined,
+      undefined,
+      controller.signal,
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.observation?.activeWindow?.appId).toBe(packageName);
+    expect(
+      fakeAdb.getExecutedCommands().filter((command) => command === "shell cmd statusbar collapse"),
+    ).toHaveLength(1);
+  });
+
+  test("reports a notification shade blocker after cold boot launch verification times out", async () => {
+    fakeTimer.enableAutoAdvance();
+    const notificationShadeObservation = {
+      ...createObserveResult(),
+      activeWindow: {
+        appId: "com.android.systemui",
+        activityName: "NotificationShade",
+        layoutSeqSum: 1,
+        systemOverlay: true,
+      },
+    };
+
+    fakeAdb.setForegroundApp({ packageName, userId: 0 });
+    fakeAdb.setCommandResponse("shell dumpsys activity processes", { stdout: "0\n", stderr: "" });
+    fakeObserveScreen.setObserveResult(() => notificationShadeObservation);
+
+    const result = await launchApp.execute(packageName, false, true);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("notification shade");
+    expect(result.error).not.toContain("coldBoot: true");
+  });
+
+  test("reports the actual foreground blocker after cold boot launch verification times out", async () => {
+    fakeTimer.enableAutoAdvance();
+    const otherPackageName = "com.example.other";
+
+    fakeAdb.setForegroundApp({ packageName, userId: 0 });
+    fakeAdb.setCommandResponse("shell dumpsys activity processes", { stdout: "0\n", stderr: "" });
+    fakeObserveScreen.setObserveResult(() => createObserveResult(otherPackageName));
+
+    const result = await launchApp.execute(packageName, false, true);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain(otherPackageName);
+    expect(result.error).toContain(packageName);
+    expect(result.error).not.toContain("notification shade");
+    expect(result.error).not.toContain("coldBoot: true");
+  });
+
   test("waits for a fresh observation before accepting a rooted helper task", async () => {
     fakeTimer.enableAutoAdvance();
     const settingsPackageName = "com.android.settings";

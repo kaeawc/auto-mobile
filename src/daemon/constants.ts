@@ -328,6 +328,10 @@ export const DAEMON_TOOL_SELECTION_PROFILE_HEADER = "x-auto-mobile-tool-selectio
 /** Socket RPC field consumed before tool arguments reach the MCP server. */
 export const DAEMON_TOOL_SELECTION_PROFILE_PARAM = "__autoMobileToolSelectionProfileUuid";
 
+/** Loopback-only presentation preference applied to the connection profile. */
+export const INTERNAL_TOOL_RESULTS_NO_STRUCTURED_CONTENT_PARAM =
+  "__autoMobileToolResultsNoStructuredContent";
+
 /**
  * Socket RPC field identifying a session UUID injected from a connection-bound
  * route rather than explicitly selected by the caller.
@@ -370,6 +374,7 @@ export const INTERNAL_TOOL_PARAM_NAMES = [
   INTERNAL_LIVE_DEADLINE_KEY_PARAM,
   INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM,
   INTERNAL_ACCEPTANCE_DISCOVERY_CAPABILITY_PARAM,
+  INTERNAL_TOOL_RESULTS_NO_STRUCTURED_CONTENT_PARAM,
   DAEMON_NON_FINITE_ENCODED_PARAM,
 ] as const;
 

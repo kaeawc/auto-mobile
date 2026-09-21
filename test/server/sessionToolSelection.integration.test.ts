@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
+import { INTERNAL_TOOL_RESULTS_NO_STRUCTURED_CONTENT_PARAM } from "../../src/daemon/constants";
 import type { SessionToolSelectionService } from "../../src/features/toolSelection/SessionToolSelectionService";
 import { buildToolSelectionCandidateRoutes } from "../../src/features/toolSelection/toolSelectionPolicy";
 import {
@@ -25,6 +26,8 @@ import {
   registerDirectSessionDevice,
   resolveDirectSessionDevice,
 } from "../../src/server/directSessionDeviceRegistry";
+import { createStructuredToolResponse } from "../../src/utils/toolUtils";
+import { serverConfig } from "../../src/utils/ServerConfig";
 
 function acquisitionPayload(
   sessionUuid: string,
@@ -548,6 +551,176 @@ describe("per-session exact-tool selection", () => {
         z.any(),
       ),
     ).rejects.toThrow("Tool observe is disabled");
+  });
+
+  test("two connection profiles keep disjoint tool and structured-content policies", async () => {
+    const overrides = new Map<string, Map<string, boolean>>();
+    const selectionService: Pick<
+      SessionToolSelectionService,
+      "isEnabled" | "getOverride" | "setEnabled"
+    > = {
+      isEnabled: async (sessionUuid, toolName, declaredDefault) =>
+        (sessionUuid ? overrides.get(sessionUuid)?.get(toolName) : undefined) ?? declaredDefault,
+      getOverride: async (sessionUuid, toolName) => overrides.get(sessionUuid)?.get(toolName),
+      setEnabled: async (sessionUuid, toolName, enabled) => {
+        const profile = overrides.get(sessionUuid) ?? new Map<string, boolean>();
+        profile.set(toolName, enabled);
+        overrides.set(sessionUuid, profile);
+      },
+    };
+    const registry = new InMemoryToolSelectionProfileRegistry();
+    registry.record("profile-a");
+    registry.record("profile-b");
+    const first = new McpTestFixture({
+      daemonMode: true,
+      sessionContext: { initialToolSelectionProfile: "profile-a" },
+      sessionToolSelectionService: selectionService,
+      toolSelectionProfileRegistry: registry,
+    });
+    const second = new McpTestFixture({
+      daemonMode: true,
+      sessionContext: { initialToolSelectionProfile: "profile-b" },
+      sessionToolSelectionService: selectionService,
+      toolSelectionProfileRegistry: registry,
+    });
+
+    try {
+      await Promise.all([first.setup(), second.setup()]);
+      ToolRegistry.clearTools();
+      for (const toolName of ["profileATool", "profileBTool"]) {
+        ToolRegistry.register(
+          toolName,
+          toolName,
+          z.object({}),
+          async () => ({ content: [{ type: "text" as const, text: toolName }] }),
+          { defaultEnabled: false },
+        );
+      }
+      ToolRegistry.register(
+        "schemaTool",
+        "schema tool",
+        z.object({}),
+        async () => createStructuredToolResponse({ success: true }),
+        { defaultEnabled: true, outputSchema: z.object({ success: z.boolean() }) },
+      );
+      registerToolSelectionTools();
+
+      const apply = async (
+        client: typeof first.client,
+        toolName: string,
+        otherToolName: string,
+        omitStructuredContent: boolean,
+      ) => {
+        await client.request(
+          {
+            method: "tools/call",
+            params: {
+              name: "setToolEnabled",
+              arguments: {
+                toolName,
+                enabled: true,
+                [INTERNAL_TOOL_RESULTS_NO_STRUCTURED_CONTENT_PARAM]: omitStructuredContent,
+              },
+            },
+          },
+          z.any(),
+        );
+        await client.request(
+          {
+            method: "tools/call",
+            params: {
+              name: "setToolEnabled",
+              arguments: { toolName: otherToolName, enabled: false },
+            },
+          },
+          z.any(),
+        );
+      };
+      await Promise.all([
+        apply(first.client, "profileATool", "profileBTool", true),
+        apply(second.client, "profileBTool", "profileATool", false),
+      ]);
+
+      const [firstTools, secondTools] = await Promise.all([
+        first.client.listTools(),
+        second.client.listTools(),
+      ]);
+      expect(firstTools.tools.map(({ name }) => name)).toContain("profileATool");
+      expect(firstTools.tools.map(({ name }) => name)).not.toContain("profileBTool");
+      expect(secondTools.tools.map(({ name }) => name)).toContain("profileBTool");
+      expect(secondTools.tools.map(({ name }) => name)).not.toContain("profileATool");
+      expect(
+        firstTools.tools.find(({ name }) => name === "schemaTool")?.outputSchema,
+      ).toBeUndefined();
+      expect(
+        secondTools.tools.find(({ name }) => name === "schemaTool")?.outputSchema,
+      ).toBeDefined();
+
+      await expect(
+        first.client.request(
+          { method: "tools/call", params: { name: "profileBTool", arguments: {} } },
+          z.any(),
+        ),
+      ).rejects.toThrow("Tool profileBTool is disabled");
+      await expect(
+        second.client.request(
+          { method: "tools/call", params: { name: "profileATool", arguments: {} } },
+          z.any(),
+        ),
+      ).rejects.toThrow("Tool profileATool is disabled");
+
+      const [firstResult, secondResult] = await Promise.all([
+        first.client.request(
+          { method: "tools/call", params: { name: "schemaTool", arguments: {} } },
+          z.any(),
+        ),
+        second.client.request(
+          { method: "tools/call", params: { name: "schemaTool", arguments: {} } },
+          z.any(),
+        ),
+      ]);
+      expect(firstResult.structuredContent).toBeUndefined();
+      expect(secondResult.structuredContent).toEqual({ success: true });
+    } finally {
+      await Promise.all([first.teardown(), second.teardown()]);
+    }
+  });
+
+  test("falls back to the daemon structured-content default when profile lookup fails", async () => {
+    const previousDefault = serverConfig.isToolResultsNoStructuredContentEnabled();
+    serverConfig.setToolResultsNoStructuredContentEnabled(true);
+    const registry = new InMemoryToolSelectionProfileRegistry();
+    registry.record("profile-fallback");
+    registry.getToolResultsNoStructuredContent = () => {
+      throw new Error("profile lookup failed");
+    };
+    fixture = new McpTestFixture({
+      daemonMode: true,
+      sessionContext: { initialToolSelectionProfile: "profile-fallback" },
+      toolSelectionProfileRegistry: registry,
+    });
+
+    try {
+      await fixture.setup();
+      ToolRegistry.clearTools();
+      ToolRegistry.register(
+        "schemaTool",
+        "schema tool",
+        z.object({}),
+        async () => createStructuredToolResponse({ success: true }),
+        { defaultEnabled: true, outputSchema: z.object({ success: z.boolean() }) },
+      );
+
+      const listed = await fixture.client.listTools();
+      expect(listed.tools.find(({ name }) => name === "schemaTool")?.outputSchema).toBeUndefined();
+      const result = await fixture.client.request(
+        { method: "tools/call", params: { name: "schemaTool", arguments: {} } },
+        z.any(),
+      );
+      expect(result.structuredContent).toBeUndefined();
+    } finally {
+      serverConfig.setToolResultsNoStructuredContentEnabled(previousDefault);
+    }
   });
 
   test("an omitted update after routing binds creates an independent connection profile", async () => {

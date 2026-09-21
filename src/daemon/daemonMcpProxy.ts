@@ -19,6 +19,7 @@ import {
   DAEMON_VERSION_RESTART_COOLDOWN_MS,
   DAEMON_BOUND_SESSION_REPLAY_TTL_MS,
   DAEMON_TOOL_SELECTION_PROFILE_PARAM,
+  INTERNAL_TOOL_RESULTS_NO_STRUCTURED_CONTENT_PARAM,
   DAEMON_BOUND_SESSION_PARAM,
   DAEMON_OWNED_SESSIONS_PARAM,
   DAEMON_RELEASED_SESSION_PARAM,
@@ -69,15 +70,10 @@ import {
 import { DeviceControlTransportError } from "./deviceControlTransportFailure";
 import { getStaticToolDefinitions } from "./staticToolDefinitions";
 import { DaemonRestartDeferredError } from "./daemonRestartAdmission";
-import {
-  mergedExactToolSelections,
-  REUSE_CRITICAL_ARRAY_OPTION_KEYS,
-} from "./daemonOptionSelections";
 import { isRecoverableDaemonReleaseReason } from "../db/deviceSessionRepository";
+import { daemonProcessOptions } from "./daemonOptionScopes";
 
 export { DaemonRestartDeferredError } from "./daemonRestartAdmission";
-export { REUSE_CRITICAL_ARRAY_OPTION_KEYS } from "./daemonOptionSelections";
-
 export type VersionMismatchReason =
   | "autoStartDisabled"
   | "cooldown"
@@ -125,29 +121,10 @@ function daemonRestartCommand(clientVersion: string, clientBuild?: BuildIdentity
     : "the same installed auto-mobile package";
 }
 
-function exactToolRestartArgs(options: DaemonOptions | undefined): string {
-  return [
-    ...(options?.enabledTools ?? []).map((toolName) => ` --enable-tool ${shellQuote(toolName)}`),
-    ...(options?.disabledTools ?? []).map((toolName) => ` --disable-tool ${shellQuote(toolName)}`),
-  ].join("");
-}
-
-function startupOptionRecoveryGuidance(
-  requested: DaemonOptions | undefined,
-  clientVersion: string,
-  clientBuild: BuildIdentity,
-): string {
-  const exactToolArgs = exactToolRestartArgs(requested);
-  if (exactToolArgs.length === 0) {
-    return (
-      "Close and relaunch this configured MCP client once so it owns the next bounded " +
-      "reconciliation attempt; do not delete daemon control files manually."
-    );
-  }
+function startupOptionRecoveryGuidance(): string {
   return (
-    "Run one supported recovery restart from this client's build with the requested exact-tool " +
-    `profile: ${daemonRestartCommand(clientVersion, clientBuild)}${exactToolArgs}. Then reconnect ` +
-    "this configured client and retry once; do not delete daemon control files manually."
+    "Close and relaunch this configured MCP client once so it owns the next bounded " +
+    "reconciliation attempt; do not delete daemon control files manually."
   );
 }
 
@@ -394,7 +371,7 @@ export interface DaemonMcpProxyConfig {
   daemonStatusProbe?: () => Promise<DaemonStatus>;
   /** Custom daemon manager (for testing) */
   daemonManager?: DaemonManagerLike;
-  /** Options to pass when auto-starting the daemon */
+  /** Requested daemon-global options plus connection presentation options. */
   daemonOptions?: DaemonOptions;
   /** Timer for restart cooldown checks and bound-session heartbeats. */
   timer?: Timer;
@@ -466,12 +443,12 @@ export interface ProxiedResourceTemplate {
 /**
  * The daemon startup options that change its observable MCP behavior and so must
  * match before a running daemon can be reused: `debug`, `embeddedSdk`, `networkMockable`,
- * every feature-flag CLI override, marker-based eventAll promotion config, plus every
- * output-reduction flag. A
+ * every process-global feature-flag CLI override, marker-based eventAll promotion config,
+ * plus every process-global output-reduction flag. A
  * same-build MCP client that requests one of these against an already-running
  * daemon started without it (or vice versa) would otherwise silently get the
- * wrong tool-output or inputText behavior until a manual restart (issue #2759 —
- * the `toolResultsNoStructuredContent` case). `debug`, `embeddedSdk`, and `networkMockable`
+ * wrong tool-output or inputText behavior until a manual restart. `debug`, `embeddedSdk`,
+ * and `networkMockable`
  * additionally gate whole tool families out of the registry, so reusing a daemon
  * that lacks the requested flag makes those tools unreachable (issue #4247). The
  * output-reduction fields are derived from `OUTPUT_REDUCTION_FLAG_SPECS` (whose
@@ -490,7 +467,9 @@ export const REUSE_CRITICAL_OPTION_KEYS: (keyof DaemonOptions)[] = [
   "rawElementSearch",
   "mcpRecording",
   "noNavigationScreenshots",
-  ...OUTPUT_REDUCTION_FLAG_SPECS.map((spec) => spec.field),
+  ...OUTPUT_REDUCTION_FLAG_SPECS.filter(
+    (spec) => spec.field !== "toolResultsNoStructuredContent",
+  ).map((spec) => spec.field),
 ];
 
 const REUSE_CRITICAL_STRING_OPTION_KEYS: (keyof DaemonOptions)[] = [
@@ -508,7 +487,6 @@ export const STARTUP_OPTION_DEFICIT_KEYS: readonly (keyof DaemonOptions)[] = [
   ...REUSE_CRITICAL_STRING_OPTION_KEYS,
   ...REUSE_CRITICAL_NUMBER_OPTION_KEYS,
   "accessibilityUseBaseline",
-  ...REUSE_CRITICAL_ARRAY_OPTION_KEYS,
   "eventAllMarkers",
 ];
 
@@ -543,43 +521,6 @@ function arraysEqual(left: readonly string[], right: readonly string[]): boolean
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
-function applyExactToolSelections(
-  assignments: Map<string, boolean>,
-  options: DaemonOptions | undefined,
-): void {
-  for (const toolName of stringArrayOption(options, "enabledTools") ?? []) {
-    assignments.set(toolName, true);
-  }
-  for (const toolName of stringArrayOption(options, "disabledTools") ?? []) {
-    assignments.set(toolName, false);
-  }
-}
-
-function exactToolSelectionDeficits(
-  requested: DaemonOptions | undefined,
-  running: DaemonOptions | undefined,
-): string[] {
-  const requestedAssignments = new Map<string, boolean>();
-  const runningAssignments = new Map<string, boolean>();
-  applyExactToolSelections(requestedAssignments, requested);
-  applyExactToolSelections(runningAssignments, running);
-  return Array.from(requestedAssignments).flatMap(([toolName, enabled]) =>
-    runningAssignments.get(toolName) === enabled
-      ? []
-      : [
-          `${enabled ? "enabledTools" : "disabledTools"} ` +
-            `(tool=${toolName}, requested=${enabled ? "enabled" : "disabled"}, ` +
-            `running=${
-              runningAssignments.has(toolName)
-                ? runningAssignments.get(toolName)
-                  ? "enabled"
-                  : "disabled"
-                : "unset"
-            })`,
-        ],
-  );
-}
-
 function requestedOptionDeficits<T>(
   keys: readonly (keyof DaemonOptions)[],
   requested: DaemonOptions | undefined,
@@ -610,8 +551,8 @@ function requestedOptionDeficits<T>(
  * particular caller (e.g. a bare short-lived CLI client) didn't request it.
  * Booleans are compared strictly (`=== true`), so `undefined` and `false` both
  * read as "no opinion"; strings and marker arrays count only when the client
- * supplies one that differs from the daemon's. Exact-tool defaults are checked
- * assignment by assignment, so a running daemon may retain additional choices.
+ * supplies one that differs from the daemon's. Connection presentation options
+ * are intentionally absent from this comparison.
  * Returns a human-readable list (empty when the daemon already satisfies every
  * requested flag) for logging and error messages.
  */
@@ -651,7 +592,6 @@ function startupOptionDeficits(
           : undefined,
       (options) => options?.accessibilityUseBaseline === true,
     ),
-    ...exactToolSelectionDeficits(requested, running),
     ...requestedOptionDeficits(
       ["eventAllMarkers"],
       requested,
@@ -677,8 +617,8 @@ function mergeDaemonOptions(
   running: DaemonOptions | undefined,
   requested: DaemonOptions | undefined,
 ): DaemonOptions {
-  const runningOptions = running ?? {};
-  const requestedOptions = requested ?? {};
+  const runningOptions = daemonProcessOptions(running);
+  const requestedOptions = daemonProcessOptions(requested);
   const merged: DaemonOptions = { ...runningOptions, ...requestedOptions };
   const mergedRecord = merged as Record<string, unknown>;
   for (const [key, value] of Object.entries(runningOptions)) {
@@ -700,10 +640,6 @@ function mergeDaemonOptions(
     if (numberOption(requested, key) === undefined && runningNumber !== undefined) {
       mergedRecord[key] = runningNumber;
     }
-  }
-  const exactToolSelections = mergedExactToolSelections(running, requested);
-  if (exactToolSelections) {
-    Object.assign(merged, exactToolSelections);
   }
   return merged;
 }
@@ -1024,19 +960,10 @@ export class DaemonMcpProxy {
           logger.warn(`[DaemonMcpProxy] Failed to subscribe to daemon notifications: ${error}`);
         })
       : Promise.resolve();
-    //
-    // On the FIRST establishment mark the proxy `connected` only AFTER the
-    // establishment heartbeat lands (issue #5643). ensureConnected()'s fast path
-    // returns as soon as `connected && client` is true; setting the flag before the
-    // awaited first heartbeat would let a CONCURRENT ensureConnected() (a parallel
-    // listTools/callTool during MCP startup) resolve and forward a request in the
-    // sub-millisecond window before the daemon has recorded ownership. Deferring the
-    // flip holds those concurrent callers on the `connecting` guard until ownership
-    // is recorded; the heartbeat guards key off the live transport (`transportLive`),
-    // not this flag, so the first heartbeat still fires while it is still false. On a
-    // RECONNECT there is no ownership to wait for, so establishBoundSessionHeartbeat
-    // flips `connected` itself before dispatching the keeper heartbeat (see there).
-    await this.establishBoundSessionHeartbeat();
+    const [firstConnectionStep, secondConnectionStep] =
+      this.connectionOwnershipAndPresentationSteps(client);
+    await firstConnectionStep();
+    await secondConnectionStep();
     // Re-check closing before the deferred flip: the establishment heartbeat awaits a
     // real daemon round-trip, and a close() landing during it already set
     // connected=false and nulled the client. Without this guard doConnect would
@@ -1064,6 +991,96 @@ export class DaemonMcpProxy {
     if (this.servedStaticResourceList) {
       this.servedStaticResourceList = false;
       this.notifyListChanged("resources");
+    }
+  }
+
+  private connectionOwnershipAndPresentationSteps(
+    client: DaemonClientLike,
+  ): readonly [() => Promise<void>, () => Promise<void>] {
+    // Capture this before applying the profile: the first successful write
+    // mints and stores the UUID. On first connect the profile must exist before
+    // ownership establishment can publish `connected`; on reconnect the UUID is
+    // already attached to concurrent calls, so reassert ownership first and
+    // reapply the DB-backed presentation writes afterward. Keeping reconnect's
+    // heartbeat ahead of those writes preserves the pre-first-heartbeat reclaim
+    // grace guarantee (#5637).
+    const isFirstPresentationProfileApplication = this.toolSelectionProfileUuid === undefined;
+    const applyPresentationProfile = () => this.applyConnectionPresentationProfile(client);
+
+    // On the FIRST establishment mark the proxy `connected` only AFTER the
+    // establishment heartbeat lands (issue #5643). ensureConnected()'s fast path
+    // returns as soon as `connected && client` is true; setting the flag before the
+    // awaited first heartbeat would let a CONCURRENT ensureConnected() (a parallel
+    // listTools/callTool during MCP startup) resolve and forward a request in the
+    // sub-millisecond window before the daemon has recorded ownership. Deferring the
+    // flip holds those concurrent callers on the `connecting` guard until ownership
+    // is recorded; the heartbeat guards key off the live transport (`transportLive`),
+    // not this flag, so the first heartbeat still fires while it is still false. On a
+    // RECONNECT there is no ownership to wait for, so establishBoundSessionHeartbeat
+    // flips `connected` itself before dispatching the keeper heartbeat (see there).
+    const establishOwnership = () => this.establishBoundSessionHeartbeat();
+
+    return isFirstPresentationProfileApplication
+      ? [applyPresentationProfile, establishOwnership]
+      : [establishOwnership, applyPresentationProfile];
+  }
+
+  /**
+   * Materialize this frontend's presentation options on its daemon-issued
+   * connection profile. The profile survives socket reconnects in this proxy,
+   * while reapplying the writes makes daemon replacement safe without promoting
+   * any of these options back to process-global startup state.
+   */
+  private async applyConnectionPresentationProfile(client: DaemonClientLike): Promise<void> {
+    const enabledTools = this.config.daemonOptions?.enabledTools ?? [];
+    const disabledTools = this.config.daemonOptions?.disabledTools ?? [];
+    const toolResultsNoStructuredContent =
+      this.config.daemonOptions?.toolResultsNoStructuredContent;
+    if (
+      enabledTools.length === 0 &&
+      disabledTools.length === 0 &&
+      toolResultsNoStructuredContent === undefined
+    ) {
+      return;
+    }
+
+    const updates: Array<{ toolNames: string[]; enabled: boolean }> = [];
+    if (enabledTools.length > 0) {
+      updates.push({ toolNames: [...enabledTools], enabled: true });
+    }
+    if (disabledTools.length > 0) {
+      updates.push({ toolNames: [...disabledTools], enabled: false });
+    }
+    if (updates.length === 0) {
+      // setToolEnabled is always-on; reaffirming it is a no-op that mints the
+      // connection profile needed to carry a structured-content-only policy.
+      updates.push({ toolNames: [SET_TOOL_ENABLED_TOOL_NAME], enabled: true });
+    }
+
+    for (const update of updates) {
+      const requestedArgs = {
+        ...update,
+        ...(toolResultsNoStructuredContent !== undefined
+          ? {
+              [INTERNAL_TOOL_RESULTS_NO_STRUCTURED_CONTENT_PARAM]: toolResultsNoStructuredContent,
+            }
+          : {}),
+      };
+      const forwardedArgs = this.withToolSelectionProfile(requestedArgs);
+      const result = await runPreflightTransport(() =>
+        client.callTool(SET_TOOL_ENABLED_TOOL_NAME, forwardedArgs),
+      );
+      if (result?.isError) {
+        throw new DaemonUnavailableError(
+          `Failed to apply connection presentation profile: ${JSON.stringify(result)}`,
+        );
+      }
+      this.rememberToolSelectionProfile(SET_TOOL_ENABLED_TOOL_NAME, requestedArgs, result);
+      if (!this.toolSelectionProfileUuid) {
+        throw new DaemonUnavailableError(
+          "Daemon did not return a connection profile while applying presentation options",
+        );
+      }
     }
   }
 
@@ -1785,7 +1802,7 @@ export class DaemonMcpProxy {
           `Daemon process handoff completed (pid ${status.pid ?? "unknown"} -> pid ${restartedStatus.pid ?? "unknown"}), ` +
             `but the successor for the shared per-user daemon still does not satisfy the requested startup options ` +
             `(${remaining.join(", ")}). A different owner or launch path may control the replacement configuration. ` +
-            startupOptionRecoveryGuidance(requested, this.clientVersion, this.buildIdentity),
+            startupOptionRecoveryGuidance(),
         );
       }
       return;
@@ -1804,7 +1821,7 @@ export class DaemonMcpProxy {
     if (!status.running) {
       logger.info("[DaemonMcpProxy] Starting daemon...");
       // Pass through daemon options (debug flags, video defaults, etc.)
-      await this.daemonManager.start(this.config.daemonOptions ?? {});
+      await this.daemonManager.start(daemonProcessOptions(this.config.daemonOptions));
 
       // Wait for daemon to be ready
       const ready = await this.daemonManager.waitForReady(DAEMON_STARTUP_TIMEOUT_MS);
@@ -2182,7 +2199,11 @@ export class DaemonMcpProxy {
       const discoveryEpoch = this.discoveryEpoch;
       const forwardedParams = this.withToolSelectionProfile(this.withBoundSessionUuid({}));
       const result = await this.withRecoverableReconnect(
-        () => this.client!.callDaemonMethod("tools/list", forwardedParams),
+        () =>
+          this.client!.callDaemonMethod(
+            "tools/list",
+            this.withToolSelectionProfile(forwardedParams),
+          ),
         this.sessionUuidFromArgs(forwardedParams),
       );
       const tools = result?.tools ?? [];
@@ -2229,6 +2250,7 @@ export class DaemonMcpProxy {
     delete callerArgs[DAEMON_OWNED_SESSIONS_PARAM];
     delete callerArgs[DAEMON_RELEASED_SESSION_PARAM];
     delete callerArgs[DAEMON_TOOL_SELECTION_PROFILE_PARAM];
+    delete callerArgs[INTERNAL_TOOL_RESULTS_NO_STRUCTURED_CONTENT_PARAM];
     // The acceptance controls are configuration of the dedicated harness proxy,
     // never client-provided tool arguments. Remove both before routing so a
     // caller cannot forge or override that configuration.
@@ -2269,7 +2291,11 @@ export class DaemonMcpProxy {
       const result = await this.withRecoverableReconnect(
         () => {
           this.throwIfForwardedSessionReleasedSince(forwardedArgs, callReleaseEpoch);
-          return this.client!.callTool(name, forwardedArgs, progressToken);
+          return this.client!.callTool(
+            name,
+            this.withToolSelectionProfile(forwardedArgs),
+            progressToken,
+          );
         },
         forwardedSessionUuid,
         // Acquisition is admitted while fenced; the terminal fence is cleared once

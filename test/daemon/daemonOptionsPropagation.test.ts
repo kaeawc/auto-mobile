@@ -1,10 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import { DaemonManager, parseDaemonArgs } from "../../src/daemon/manager";
 import { parseArgs } from "../../src/cli/parseArgs";
+import { REUSE_CRITICAL_OPTION_KEYS } from "../../src/daemon/daemonMcpProxy";
 import {
-  REUSE_CRITICAL_ARRAY_OPTION_KEYS,
-  REUSE_CRITICAL_OPTION_KEYS,
-} from "../../src/daemon/daemonMcpProxy";
+  CONNECTION_PRESENTATION_ENV_KEYS,
+  CONNECTION_PRESENTATION_OPTION_KEYS,
+  daemonProcessEnvironment,
+  daemonProcessOptions,
+} from "../../src/daemon/daemonOptionScopes";
 import { OUTPUT_REDUCTION_FLAG_SPECS } from "../../src/utils/outputReductionFlags";
 import type { DaemonOptions } from "../../src/daemon/types";
 
@@ -194,18 +197,48 @@ describe("daemon startup-option propagation", () => {
 });
 
 describe("reuse-critical drift guard", () => {
-  test("every output-reduction flag (incl. observe-scope) is reuse-critical", () => {
+  test("every process-global output-reduction flag is reuse-critical", () => {
     // A reuse-critical flag forces a preserving daemon restart when a client
     // requests it and the running daemon lacks it — the mechanism that makes the
     // observe-scope flags propagate to an already-running daemon. Spec-driven, so
     // a new output-reduction flag is covered automatically; this pins that.
-    for (const spec of OUTPUT_REDUCTION_FLAG_SPECS) {
+    for (const spec of OUTPUT_REDUCTION_FLAG_SPECS.filter(
+      ({ field }) => field !== "toolResultsNoStructuredContent",
+    )) {
       expect(REUSE_CRITICAL_OPTION_KEYS).toContain(spec.field);
     }
+    expect(REUSE_CRITICAL_OPTION_KEYS).not.toContain("toolResultsNoStructuredContent");
   });
 
-  test("explicit tool defaults participate in daemon reuse reconciliation", () => {
-    expect(REUSE_CRITICAL_ARRAY_OPTION_KEYS).toContain("enabledTools");
-    expect(REUSE_CRITICAL_ARRAY_OPTION_KEYS).toContain("disabledTools");
+  test("connection presentation options are removed before daemon lifecycle actions", () => {
+    expect(CONNECTION_PRESENTATION_OPTION_KEYS).toEqual([
+      "enabledTools",
+      "disabledTools",
+      "toolResultsNoStructuredContent",
+    ]);
+    expect(
+      daemonProcessOptions({
+        debug: true,
+        enabledTools: ["clipboard"],
+        disabledTools: ["observe"],
+        toolResultsNoStructuredContent: true,
+      }),
+    ).toEqual({ debug: true });
+  });
+
+  test("connection presentation environment does not leak into a spawned daemon", () => {
+    expect(CONNECTION_PRESENTATION_ENV_KEYS).toEqual([
+      "AUTOMOBILE_ENABLED_TOOLS",
+      "AUTOMOBILE_DISABLED_TOOLS",
+      "AUTOMOBILE_TOOL_RESULTS_NO_STRUCTURED_CONTENT",
+    ]);
+    expect(
+      daemonProcessEnvironment({
+        AUTOMOBILE_ENABLED_TOOLS: "observe",
+        AUTOMOBILE_DISABLED_TOOLS: "tapOn",
+        AUTOMOBILE_TOOL_RESULTS_NO_STRUCTURED_CONTENT: "1",
+        AUTOMOBILE_DEBUG: "1",
+      }),
+    ).toEqual({ AUTOMOBILE_DEBUG: "1" });
   });
 });

@@ -253,7 +253,17 @@ async function main() {
       await logger.closeAfterFlush();
       process.exit(0);
     }
-    configureToolSelectionCliDefaults(enabledTools, disabledTools);
+    // In daemon mode, tool selection belongs to each socket-backed MCP
+    // connection. The spawning frontend applies its values through that
+    // connection profile; inherited environment and launch flags must not become
+    // daemon-wide defaults for unrelated clients.
+    configureToolSelectionCliDefaults(
+      daemonMode ? [] : enabledTools,
+      daemonMode ? [] : disabledTools,
+      {
+        includeEnvironment: !daemonMode,
+      },
+    );
     // Validate exact startup names before daemon/direct listeners can publish
     // readiness. createMcpServer repeats this registration for direct embedded
     // consumers, but daemon mode creates MCP servers lazily on first request.
@@ -496,8 +506,6 @@ async function main() {
         toolOutputsDir,
         networkMockable,
         embeddedSdk,
-        ...(enabledTools.length > 0 ? { enabledTools } : {}),
-        ...(disabledTools.length > 0 ? { disabledTools } : {}),
         dismissKeyboardAfterInput,
         ...eventAllMarkerDaemonOptions,
         noUiPerfMode: !uiPerfMode,
@@ -583,6 +591,11 @@ async function main() {
       ...(noOcclusion ? { noOcclusion: true } : {}),
       // OutputReductionFlags field names match these DaemonOptions fields 1:1.
       ...outputReduction,
+      // The positive flag is an explicit connection preference. Its absence is
+      // no preference, so the daemon's global fallback remains authoritative.
+      toolResultsNoStructuredContent: outputReduction.toolResultsNoStructuredContent
+        ? true
+        : undefined,
     };
 
     if (cliMode) {

@@ -156,13 +156,16 @@ export function getStartupToolDefaults(
 let defaultService: SessionToolSelectionService | undefined;
 let configuredEnabledTools: readonly string[] = [];
 let configuredDisabledTools: readonly string[] = [];
+let includeEnvironmentDefaults = true;
 
 export function configureToolSelectionCliDefaults(
   enabledTools: readonly string[],
   disabledTools: readonly string[],
+  options: { includeEnvironment?: boolean } = {},
 ): void {
   configuredEnabledTools = [...enabledTools];
   configuredDisabledTools = [...disabledTools];
+  includeEnvironmentDefaults = options.includeEnvironment ?? true;
   defaultService = undefined;
 }
 
@@ -171,7 +174,7 @@ export function validateConfiguredToolSelectionDefaults(
   environment: Readonly<Record<string, string | undefined>> = process.env,
 ): void {
   getStartupToolDefaults(
-    environment,
+    includeEnvironmentDefaults ? environment : {},
     knownToolNames,
     configuredEnabledTools,
     configuredDisabledTools,
@@ -190,7 +193,7 @@ export function getSessionToolSelectionService(): SessionToolSelectionService {
     defaultService = new SessionToolSelectionService(
       new SqliteSessionToolSelectionRepository(),
       getStartupToolDefaults(
-        process.env,
+        includeEnvironmentDefaults ? process.env : {},
         knownToolNames,
         configuredEnabledTools,
         configuredDisabledTools,

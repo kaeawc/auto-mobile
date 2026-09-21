@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { configureToolSelectionCliDefaults } from "../../src/features/toolSelection/SessionToolSelectionService";
+import {
+  configureToolSelectionCliDefaults,
+  validateConfiguredToolSelectionDefaults,
+} from "../../src/features/toolSelection/SessionToolSelectionService";
 import { registerMcpTools } from "../../src/server";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 
@@ -21,5 +24,15 @@ describe("tool selection default declarations", () => {
     expect(() => registerMcpTools(false)).toThrow(
       "Tool 'typo' is not a session-configurable tool name; AUTOMOBILE_ENABLED_TOOLS/AUTOMOBILE_DISABLED_TOOLS accept session-configurable tools only (see the automobile:tools resource).",
     );
+  });
+
+  test("daemon mode excludes inherited connection defaults from global startup defaults", () => {
+    configureToolSelectionCliDefaults([], [], { includeEnvironment: false });
+
+    expect(() =>
+      validateConfiguredToolSelectionDefaults(new Set(["observe"]), {
+        AUTOMOBILE_ENABLED_TOOLS: "not-a-tool",
+      }),
+    ).not.toThrow();
   });
 });

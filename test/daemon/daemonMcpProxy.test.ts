@@ -22,6 +22,7 @@ import {
   DAEMON_VERSION_RESTART_COOLDOWN_MS,
   DAEMON_BOUND_SESSION_REPLAY_TTL_MS,
   DAEMON_TOOL_SELECTION_PROFILE_PARAM,
+  INTERNAL_TOOL_RESULTS_NO_STRUCTURED_CONTENT_PARAM,
   DAEMON_BOUND_SESSION_PARAM,
   DAEMON_OWNED_SESSIONS_PARAM,
   DAEMON_STARTUP_TIMEOUT_MS,
@@ -44,6 +45,25 @@ const NEWER_VERSION = "9999.0.0";
 // (numeric) comparison semantics, so the client version is injected explicitly.
 const CLIENT_VERSION = "0.0.39";
 const ANCIENT_TIMESTAMP = 1;
+
+function connectionProfileResult(profileUuid: string) {
+  return {
+    content: [
+      {
+        type: "text" as const,
+        text: JSON.stringify({ sessionUuid: profileUuid, scope: "connection-profile" }),
+      },
+    ],
+  };
+}
+
+function presentationClient(profileUuid: string): FakeDaemonClient {
+  return new FakeDaemonClient({
+    toolResultFor: (toolName) =>
+      toolName === "setToolEnabled" ? connectionProfileResult(profileUuid) : undefined,
+    daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+  });
+}
 
 // A FakeDaemonManager reporting a running daemon whose version matches this
 // client (the ambient stamped DAEMON_VERSION). Forwarding/recovery tests use a
@@ -644,10 +664,8 @@ describe("DaemonMcpProxy", () => {
       }
     });
 
-    test("observes the socket without cleanup before auto-starting", async () => {
-      const fakeClient = new FakeDaemonClient({
-        daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
-      });
+    test("auto-start forwards global options but not connection presentation", async () => {
+      const fakeClient = presentationClient("profile-new-daemon");
       const fakeManager = new FakeDaemonManager();
       fakeManager.statusResult = { running: false };
 
@@ -662,12 +680,18 @@ describe("DaemonMcpProxy", () => {
         clientFactory: () => fakeClient,
         daemonManager: fakeManager,
         autoStartDaemon: true,
+        daemonOptions: {
+          debug: true,
+          enabledTools: ["clipboard"],
+          toolResultsNoStructuredContent: true,
+        },
       });
 
       try {
         await proxy.listTools();
 
         expect(fakeManager.startCalled).toBe(true);
+        expect(fakeManager.startOptions).toEqual({ debug: true });
         expect(isAvailableSpy).toHaveBeenCalledWith(expect.any(String));
       } finally {
         isAvailableSpy.mockRestore();
@@ -1598,17 +1622,14 @@ describe("DaemonMcpProxy", () => {
         }
       });
 
-      test("restarts daemon when toolResultsNoStructuredContent differs (issue #2759)", async () => {
-        const fakeClient = new FakeDaemonClient({
-          daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
-        });
+      test("serves a read-only call during active device work without restarting for structured-content policy (#7385)", async () => {
+        const fakeClient = presentationClient("profile-structured");
         const fakeManager = new FakeDaemonManager();
-        fakeManager.statusResults = [
-          runningStatus({ toolResultsNoStructuredContent: false }), // ensureVersionMatches
-          runningStatus({ toolResultsNoStructuredContent: false }), // ensureBuildMatches
-          runningStatus({ toolResultsNoStructuredContent: false }), // ensureStartupOptionsMatch (mismatch)
-          runningStatus({ toolResultsNoStructuredContent: true }), // post-restart verify
-        ];
+        const activeStatus = {
+          ...runningStatus({ toolResultsNoStructuredContent: false }),
+          activeProvisioning: true,
+        };
+        fakeManager.statusResults = [activeStatus, activeStatus, activeStatus];
         const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
         const proxy = new DaemonMcpProxy({
           clientFactory: () => fakeClient,
@@ -1617,9 +1638,26 @@ describe("DaemonMcpProxy", () => {
         });
 
         try {
-          await proxy.listTools();
-          expect(fakeManager.restartCalled).toBe(true);
-          expect(fakeManager.restartOptions).toEqual({ toolResultsNoStructuredContent: true });
+          await expect(proxy.callTool("listDeviceImages", {})).resolves.toMatchObject({
+            content: [{ type: "text", text: "success" }],
+          });
+          expect(fakeManager.restartCalled).toBe(false);
+          expect(fakeClient.callToolCalls).toEqual([
+            {
+              toolName: "setToolEnabled",
+              params: {
+                toolNames: ["setToolEnabled"],
+                enabled: true,
+                [INTERNAL_TOOL_RESULTS_NO_STRUCTURED_CONTENT_PARAM]: true,
+              },
+            },
+            {
+              toolName: "listDeviceImages",
+              params: {
+                [DAEMON_TOOL_SELECTION_PROFILE_PARAM]: "profile-structured",
+              },
+            },
+          ]);
         } finally {
           isAvailableSpy.mockRestore();
           await proxy.close();
@@ -1713,25 +1751,102 @@ describe("DaemonMcpProxy", () => {
         }
       });
 
-      test("does not restart daemon when output-reduction flags match", async () => {
-        const fakeClient = new FakeDaemonClient({
-          daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
-        });
+      test("opposing structured-content clients initialize independent profiles without restarting", async () => {
+        const firstClient = presentationClient("profile-strip");
+        const secondClient = presentationClient("profile-keep");
         const fakeManager = new FakeDaemonManager();
-        fakeManager.statusResults = [
-          runningStatus({ toolResultsNoStructuredContent: true }), // ensureVersionMatches
-          runningStatus({ toolResultsNoStructuredContent: true }), // ensureBuildMatches
-          runningStatus({ toolResultsNoStructuredContent: true }), // ensureStartupOptionsMatch
-        ];
+        fakeManager.statusResult = runningStatus({});
         const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
-        const proxy = new DaemonMcpProxy({
-          clientFactory: () => fakeClient,
+        const firstProxy = new DaemonMcpProxy({
+          clientFactory: () => firstClient,
           daemonManager: fakeManager,
           daemonOptions: { toolResultsNoStructuredContent: true },
         });
+        const secondProxy = new DaemonMcpProxy({
+          clientFactory: () => secondClient,
+          daemonManager: fakeManager,
+          daemonOptions: { toolResultsNoStructuredContent: false },
+        });
+
+        try {
+          await expect(
+            Promise.all([firstProxy.listTools(), secondProxy.listTools()]),
+          ).resolves.toEqual([[], []]);
+          expect(fakeManager.restartCalled).toBe(false);
+          expect(firstClient.callToolCalls[0]?.params).toMatchObject({
+            [INTERNAL_TOOL_RESULTS_NO_STRUCTURED_CONTENT_PARAM]: true,
+          });
+          expect(secondClient.callToolCalls[0]?.params).toMatchObject({
+            [INTERNAL_TOOL_RESULTS_NO_STRUCTURED_CONTENT_PARAM]: false,
+          });
+          expect(firstClient.callDaemonMethodCalls.at(-1)?.params).toEqual({
+            [DAEMON_TOOL_SELECTION_PROFILE_PARAM]: "profile-strip",
+          });
+          expect(secondClient.callDaemonMethodCalls.at(-1)?.params).toEqual({
+            [DAEMON_TOOL_SELECTION_PROFILE_PARAM]: "profile-keep",
+          });
+        } finally {
+          isAvailableSpy.mockRestore();
+          await Promise.all([firstProxy.close(), secondProxy.close()]);
+        }
+      });
+
+      test("applies presentation before the first heartbeat but re-heartbeats before reconnect reapply", async () => {
+        const firstEvents: string[] = [];
+        const reconnectEvents: string[] = [];
+        const proxyRef: { current?: DaemonMcpProxy } = {};
+        const clientWithEvents = (events: string[]) =>
+          new FakeDaemonClient({
+            toolResultFor: (toolName) =>
+              toolName === "setToolEnabled"
+                ? connectionProfileResult("profile-reconnect")
+                : undefined,
+            daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+            onCallTool: (toolName) => {
+              if (toolName === "setToolEnabled") {
+                events.push(`presentation:${proxyRef.current!.isConnected()}`);
+              }
+            },
+            onCallDaemonMethod: (method) => {
+              if (method === "daemon/heartbeat") {
+                events.push(`heartbeat:${proxyRef.current!.isConnected()}`);
+              }
+            },
+          });
+        const firstClient = clientWithEvents(firstEvents);
+        const replacementClient = clientWithEvents(reconnectEvents);
+        const clients: DaemonClientLike[] = [firstClient, replacementClient];
+        const fakeManager = new FakeDaemonManager();
+        const timer = new FakeTimer();
+        fakeManager.statusResult = runningStatus({});
+        const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+        const proxy = new DaemonMcpProxy({
+          initialSessionUuid: "live-session",
+          clientFactory: () => clients.shift()!,
+          daemonManager: fakeManager,
+          daemonOptions: { toolResultsNoStructuredContent: true },
+          timer,
+        });
+        proxyRef.current = proxy;
 
         try {
           await proxy.listTools();
+          expect(firstEvents).toEqual(["presentation:false", "heartbeat:false"]);
+
+          firstClient.emitConnectionClosed();
+          await Promise.resolve();
+          await proxy.listTools();
+
+          expect(reconnectEvents).toEqual(["heartbeat:true", "presentation:true"]);
+          expect(replacementClient.callToolCalls[0]).toEqual({
+            toolName: "setToolEnabled",
+            params: {
+              toolNames: ["setToolEnabled"],
+              enabled: true,
+              [INTERNAL_TOOL_RESULTS_NO_STRUCTURED_CONTENT_PARAM]: true,
+              [DAEMON_TOOL_SELECTION_PROFILE_PARAM]: "profile-reconnect",
+            },
+          });
           expect(fakeManager.restartCalled).toBe(false);
         } finally {
           isAvailableSpy.mockRestore();
@@ -1791,149 +1906,47 @@ describe("DaemonMcpProxy", () => {
         }
       });
 
-      test("does not restart for permutation-equivalent exact-tool selections", async () => {
-        const fakeClient = new FakeDaemonClient({
-          daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
-        });
+      test("opposing exact-tool clients initialize disjoint connection profiles without restarting", async () => {
+        const firstClient = presentationClient("profile-a");
+        const secondClient = presentationClient("profile-b");
         const fakeManager = new FakeDaemonManager();
-        fakeManager.statusResults = [
-          runningStatus({ enabledTools: ["sqlQuery", "clipboard"] }),
-          runningStatus({ enabledTools: ["sqlQuery", "clipboard"] }),
-          runningStatus({ enabledTools: ["sqlQuery", "clipboard"] }),
-        ];
+        fakeManager.statusResult = runningStatus({ enabledTools: ["legacy-global"] });
         const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
-        const proxy = new DaemonMcpProxy({
-          clientFactory: () => fakeClient,
+        const firstProxy = new DaemonMcpProxy({
+          clientFactory: () => firstClient,
           daemonManager: fakeManager,
-          daemonOptions: { enabledTools: ["clipboard", "sqlQuery"] },
+          daemonOptions: { enabledTools: ["clipboard"], disabledTools: ["observe"] },
+        });
+        const secondProxy = new DaemonMcpProxy({
+          clientFactory: () => secondClient,
+          daemonManager: fakeManager,
+          daemonOptions: { enabledTools: ["observe"], disabledTools: ["clipboard"] },
         });
 
         try {
-          await proxy.listTools();
+          await expect(
+            Promise.all([firstProxy.listTools(), secondProxy.listTools()]),
+          ).resolves.toEqual([[], []]);
           expect(fakeManager.restartCalled).toBe(false);
+          expect(firstClient.callToolCalls.map(({ params }) => params)).toEqual([
+            { toolNames: ["clipboard"], enabled: true },
+            {
+              toolNames: ["observe"],
+              enabled: false,
+              [DAEMON_TOOL_SELECTION_PROFILE_PARAM]: "profile-a",
+            },
+          ]);
+          expect(secondClient.callToolCalls.map(({ params }) => params)).toEqual([
+            { toolNames: ["observe"], enabled: true },
+            {
+              toolNames: ["clipboard"],
+              enabled: false,
+              [DAEMON_TOOL_SELECTION_PROFILE_PARAM]: "profile-b",
+            },
+          ]);
         } finally {
           isAvailableSpy.mockRestore();
-          await proxy.close();
-        }
-      });
-
-      test("does not restart when running exact-tool selections satisfy the requested subset", async () => {
-        const fakeClient = new FakeDaemonClient({
-          daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
-        });
-        const fakeManager = new FakeDaemonManager();
-        fakeManager.statusResults = [
-          runningStatus({ enabledTools: ["clipboard", "sqlQuery"] }),
-          runningStatus({ enabledTools: ["clipboard", "sqlQuery"] }),
-          runningStatus({ enabledTools: ["clipboard", "sqlQuery"] }),
-          runningStatus({ enabledTools: ["clipboard"] }),
-        ];
-        const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
-        const proxy = new DaemonMcpProxy({
-          clientFactory: () => fakeClient,
-          daemonManager: fakeManager,
-          daemonOptions: { enabledTools: ["clipboard"] },
-        });
-
-        try {
-          await proxy.listTools();
-          expect(fakeManager.restartCalled).toBe(false);
-        } finally {
-          isAvailableSpy.mockRestore();
-          await proxy.close();
-        }
-      });
-
-      test("preserves running same-polarity exact-tool selections when adding a requested override", async () => {
-        const fakeClient = new FakeDaemonClient({
-          daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
-        });
-        const fakeManager = new FakeDaemonManager();
-        fakeManager.statusResults = [
-          runningStatus({ disabledTools: ["tapOn"] }),
-          runningStatus({ disabledTools: ["tapOn"] }),
-          runningStatus({ disabledTools: ["tapOn"] }),
-          runningStatus({ disabledTools: ["tapOn", "swipeOn"] }),
-        ];
-        const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
-        const proxy = new DaemonMcpProxy({
-          clientFactory: () => fakeClient,
-          daemonManager: fakeManager,
-          daemonOptions: { disabledTools: ["swipeOn"] },
-        });
-
-        try {
-          await proxy.listTools();
-          expect(fakeManager.restartCalled).toBe(true);
-          expect(fakeManager.restartOptions).toEqual({
-            enabledTools: [],
-            disabledTools: ["tapOn", "swipeOn"],
-          });
-        } finally {
-          isAvailableSpy.mockRestore();
-          await proxy.close();
-        }
-      });
-
-      test("a requested disable removes the running daemon's opposite enable on restart", async () => {
-        const fakeClient = new FakeDaemonClient({
-          daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
-        });
-        const fakeManager = new FakeDaemonManager();
-        fakeManager.statusResults = [
-          runningStatus({ enabledTools: ["observe"] }),
-          runningStatus({ enabledTools: ["observe"] }),
-          runningStatus({ enabledTools: ["observe"] }),
-          runningStatus({ disabledTools: ["observe"] }),
-        ];
-        const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
-        const proxy = new DaemonMcpProxy({
-          clientFactory: () => fakeClient,
-          daemonManager: fakeManager,
-          daemonOptions: { disabledTools: ["observe"] },
-        });
-
-        try {
-          await proxy.listTools();
-          expect(fakeManager.restartCalled).toBe(true);
-          expect(fakeManager.restartOptions).toEqual({
-            enabledTools: [],
-            disabledTools: ["observe"],
-          });
-        } finally {
-          isAvailableSpy.mockRestore();
-          await proxy.close();
-        }
-      });
-
-      test("a requested enable removes the running daemon's opposite disable on restart", async () => {
-        const fakeClient = new FakeDaemonClient({
-          daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
-        });
-        const fakeManager = new FakeDaemonManager();
-        fakeManager.statusResults = [
-          runningStatus({ disabledTools: ["clipboard"] }),
-          runningStatus({ disabledTools: ["clipboard"] }),
-          runningStatus({ disabledTools: ["clipboard"] }),
-          runningStatus({ enabledTools: ["clipboard"] }),
-        ];
-        const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
-        const proxy = new DaemonMcpProxy({
-          clientFactory: () => fakeClient,
-          daemonManager: fakeManager,
-          daemonOptions: { enabledTools: ["clipboard"] },
-        });
-
-        try {
-          await proxy.listTools();
-          expect(fakeManager.restartCalled).toBe(true);
-          expect(fakeManager.restartOptions).toEqual({
-            disabledTools: [],
-            enabledTools: ["clipboard"],
-          });
-        } finally {
-          isAvailableSpy.mockRestore();
-          await proxy.close();
+          await Promise.all([firstProxy.close(), secondProxy.close()]);
         }
       });
 
@@ -1982,21 +1995,19 @@ describe("DaemonMcpProxy", () => {
         }
       });
 
-      test("restart to gain a requested flag preserves the daemon's other flags (issue #3846)", async () => {
-        const fakeClient = new FakeDaemonClient({
-          daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
-        });
+      test("global reconciliation preserves global flags and excludes connection presentation (#3846, #7385)", async () => {
+        const fakeClient = presentationClient("profile-global-restart");
         const fakeManager = new FakeDaemonManager();
-        // Daemon already has embeddedSdk; client additionally wants
-        // toolResultsNoStructuredContent. The restart must ADD the requested
-        // flag while PRESERVING the daemon's existing one, not reset to bare.
+        // Daemon already has embeddedSdk; client additionally wants debug and a
+        // connection-only structured-content policy. The restart must add debug
+        // and preserve embeddedSdk without promoting presentation state globally.
         fakeManager.statusResults = [
           runningStatus({ embeddedSdk: true, runnerReadinessTimeoutMs: 45_000 }), // ensureVersionMatches
           runningStatus({ embeddedSdk: true, runnerReadinessTimeoutMs: 45_000 }), // ensureBuildMatches
           runningStatus({ embeddedSdk: true, runnerReadinessTimeoutMs: 45_000 }), // ensureStartupOptionsMatch (deficit)
           runningStatus({
             embeddedSdk: true,
-            toolResultsNoStructuredContent: true,
+            debug: true,
             runnerReadinessTimeoutMs: 45_000,
           }), // post-restart verify
         ];
@@ -2004,7 +2015,7 @@ describe("DaemonMcpProxy", () => {
         const proxy = new DaemonMcpProxy({
           clientFactory: () => fakeClient,
           daemonManager: fakeManager,
-          daemonOptions: { toolResultsNoStructuredContent: true },
+          daemonOptions: { debug: true, toolResultsNoStructuredContent: true },
         });
 
         try {
@@ -2012,7 +2023,7 @@ describe("DaemonMcpProxy", () => {
           expect(fakeManager.restartCalled).toBe(true);
           expect(fakeManager.restartOptions).toEqual({
             embeddedSdk: true,
-            toolResultsNoStructuredContent: true,
+            debug: true,
             runnerReadinessTimeoutMs: 45_000,
           });
         } finally {
@@ -2257,11 +2268,11 @@ describe("DaemonMcpProxy", () => {
 
       test("concurrent narrow and superset clients converge after the narrow restart wins (#7111)", async () => {
         const narrowOptions = {
-          enabledTools: ["deleteDevice", "listDevices", "provisionDevice"],
+          embeddedSdk: true,
         };
         const supersetOptions = {
-          enabledTools: [...narrowOptions.enabledTools, "getAndroid"],
-          toolResultsNoStructuredContent: true,
+          ...narrowOptions,
+          networkMockable: true,
         };
         class ConcurrentOptionsManager extends FakeDaemonManager {
           private currentOptions: DaemonOptions = {};
@@ -2402,10 +2413,10 @@ describe("DaemonMcpProxy", () => {
         try {
           await proxy.listTools();
           expect(fakeManager.restartCalled).toBe(true);
-          // The bare client must NOT strip the daemon's flags on a version restart.
+          // The bare client preserves process-global flags while dropping legacy
+          // presentation options from the replacement daemon's startup state.
           expect(fakeManager.restartOptions).toEqual({
             embeddedSdk: true,
-            toolResultsNoStructuredContent: true,
           });
         } finally {
           isAvailableSpy.mockRestore();
@@ -5704,7 +5715,9 @@ describe("DaemonMcpProxy", () => {
 
       try {
         proxy.setToolSelectionProfileUuid("profile-a");
-        await proxy.callTool("observe", {});
+        await proxy.callTool("observe", {
+          [INTERNAL_TOOL_RESULTS_NO_STRUCTURED_CONTENT_PARAM]: false,
+        });
         proxy.setToolSelectionProfileUuid(undefined);
         await proxy.callTool("observe", {});
 
@@ -6041,7 +6054,7 @@ describe("DaemonMcpProxy", () => {
       clientFactory: () => new FakeDaemonClient(),
       daemonStatusProbe: async () => socketStatuses.shift()!,
       daemonManager: manager,
-      daemonOptions: { enabledTools: ["listDevices", "provisionDevice", "deleteDevice"] },
+      daemonOptions: { embeddedSdk: true },
       clientVersion: CLIENT_VERSION,
       buildIdentity: clientBuild,
     });
@@ -6051,8 +6064,7 @@ describe("DaemonMcpProxy", () => {
       expect(failure).toBeInstanceOf(Error);
       expect(String(failure)).toContain("shared per-user daemon");
       expect(String(failure)).toContain("pid 1001 -> pid 1002");
-      expect(String(failure)).toContain("--enable-tool 'listDevices'");
-      expect(String(failure)).toContain("retry once");
+      expect(String(failure)).toContain("Close and relaunch this configured MCP client once");
     } finally {
       isAvailableSpy.mockRestore();
       await proxy.close();

@@ -71,6 +71,16 @@ describe("InMemoryToolSelectionProfileRegistry (#6148)", () => {
     expect(registry.has("")).toBe(false);
     expect(registry.has("   ")).toBe(false);
   });
+
+  test("keeps structured-content preferences independent per live profile", () => {
+    const registry = new InMemoryToolSelectionProfileRegistry();
+    registry.setToolResultsNoStructuredContent("profile-a", true);
+    registry.setToolResultsNoStructuredContent("profile-b", false);
+
+    expect(registry.getToolResultsNoStructuredContent("profile-a")).toBe(true);
+    expect(registry.getToolResultsNoStructuredContent("profile-b")).toBe(false);
+    expect(registry.getToolResultsNoStructuredContent("profile-c")).toBeUndefined();
+  });
 });
 
 /**
@@ -146,6 +156,19 @@ describe("PersistentToolSelectionProfileRegistry (#6225)", () => {
 
     // Reaffirmation succeeds without re-minting.
     expect(after.has("minted-uuid")).toBe(true);
+  });
+
+  test("structured-content preference is live-only and must be reapplied after restart", async () => {
+    const sharedRepo = new FakeToolSelectionProfileProvenanceStore();
+    const before = new PersistentToolSelectionProfileRegistry(sharedRepo);
+    before.record("minted-uuid");
+    before.setToolResultsNoStructuredContent("minted-uuid", true);
+
+    const after = new PersistentToolSelectionProfileRegistry(sharedRepo);
+    await after.load();
+
+    expect(after.has("minted-uuid")).toBe(true);
+    expect(after.getToolResultsNoStructuredContent("minted-uuid")).toBeUndefined();
   });
 
   test("simulated daemon restart: a fabricated/never-minted value is still rejected after load()", async () => {

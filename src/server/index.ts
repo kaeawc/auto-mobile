@@ -26,6 +26,7 @@ import {
   INTERNAL_EXECUTION_ID_PARAM,
   INTERNAL_LIVE_DEADLINE_KEY_PARAM,
   INTERNAL_MCP_SESSION_PARAM,
+  INTERNAL_TOOL_RESULTS_NO_STRUCTURED_CONTENT_PARAM,
   deleteInternalToolParams,
   INTERNAL_TOOL_PARAM_NAMES,
 } from "../daemon/constants";
@@ -353,6 +354,7 @@ import {
   isToolEnabledForAnyRoute,
 } from "../features/toolSelection/toolSelectionPolicy";
 import { runWithToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
+import { serverConfig } from "../utils/ServerConfig";
 import {
   resolveToolSelectionBaseSessionUuid,
   type ToolSelectionSessionManager,
@@ -455,6 +457,55 @@ function extractInternalLiveDeadlineKey(params: unknown): string | undefined {
   }
   const value = (params as Record<string, unknown>)[INTERNAL_LIVE_DEADLINE_KEY_PARAM];
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function extractInternalToolResultsNoStructuredContent(params: unknown): boolean | undefined {
+  if (!params || typeof params !== "object" || Array.isArray(params)) {
+    return undefined;
+  }
+  const value = (params as Record<string, unknown>)[
+    INTERNAL_TOOL_RESULTS_NO_STRUCTURED_CONTENT_PARAM
+  ];
+  return typeof value === "boolean" ? value : undefined;
+}
+
+function resolveToolResultsNoStructuredContent(
+  registry: ToolSelectionProfileRegistry,
+  connectionProfileUuid: string | undefined,
+): boolean {
+  const daemonDefault = serverConfig.isToolResultsNoStructuredContentEnabled();
+  if (!connectionProfileUuid) {
+    return daemonDefault;
+  }
+  try {
+    return registry.getToolResultsNoStructuredContent(connectionProfileUuid) ?? daemonDefault;
+  } catch (error) {
+    // Presentation lookup is fail-safe: keep serving with the daemon default.
+    logger.warn("[MCP] Could not resolve connection structured-content preference", {
+      connectionProfileUuid,
+      error,
+    });
+    return daemonDefault;
+  }
+}
+
+function rememberToolResultsNoStructuredContent(
+  registry: ToolSelectionProfileRegistry,
+  connectionProfileUuid: string | undefined,
+  preference: boolean | undefined,
+): void {
+  if (!connectionProfileUuid || preference === undefined) {
+    return;
+  }
+  try {
+    registry.setToolResultsNoStructuredContent(connectionProfileUuid, preference);
+  } catch (error) {
+    // Presentation storage is best-effort: this request uses the daemon default.
+    logger.warn("[MCP] Could not store connection structured-content preference", {
+      connectionProfileUuid,
+      error,
+    });
+  }
 }
 
 function extractInternalAcceptanceDiscoveryOrder(
@@ -704,7 +755,12 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       routingSessionUuid,
       selectionSessionManager,
     );
-    const definitions = ToolRegistry.getToolDefinitions();
+    const definitions = ToolRegistry.getToolDefinitions({
+      suppressOutputSchema: resolveToolResultsNoStructuredContent(
+        toolSelectionProfileRegistry,
+        connectionProfileUuid,
+      ),
+    });
     // Advertise a tool when EITHER the bound base session OR any of its derived
     // `${base}:${label}` device-label sessions enables it — the same UNION the
     // `tools/call` gate applies (issue #4611). The call-gate accepts a
@@ -818,6 +874,9 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     let routingSessionUuid = sessionToolBinding.effectiveSessionUuid(sessionId, toolParams);
     let resolvedImplicitAutolockSessionUuid: string | undefined;
     let connectionProfileUuid = sessionToolBinding.connectionToolSelectionProfileUuid(sessionId);
+    const requestedToolResultsNoStructuredContent = daemonMode
+      ? extractInternalToolResultsNoStructuredContent(toolParams)
+      : undefined;
     const rawRequestedToolSelectionProfileUuid = (toolParams as Record<string, unknown>)
       .sessionUuid;
     const requestedToolSelectionProfileUuid =
@@ -959,6 +1018,15 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       connectionProfileUuid = sessionToolBinding.createAndBindToolSelectionProfile(sessionId);
       toolSelectionProfileRegistry.record(connectionProfileUuid);
     }
+    rememberToolResultsNoStructuredContent(
+      toolSelectionProfileRegistry,
+      connectionProfileUuid,
+      name === SET_TOOL_ENABLED_TOOL_NAME ? requestedToolResultsNoStructuredContent : undefined,
+    );
+    const toolResultsNoStructuredContent = resolveToolResultsNoStructuredContent(
+      toolSelectionProfileRegistry,
+      connectionProfileUuid,
+    );
     // Tool selection honors the UNION of the base and the derived
     // `${base}:${label}` device-label sessions (issue #4611): a tool is enabled
     // when EITHER grants it. This public MCP boundary is an EARLIER gate than the
@@ -1437,7 +1505,10 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       // intact without changing normal client output reduction.
       const omissionReason =
         requestAcceptanceDiscoveryOrder === undefined
-          ? structuredContentOmissionReason(toolHasOutputSchema(tool))
+          ? structuredContentOmissionReason(
+              toolHasOutputSchema(tool),
+              toolResultsNoStructuredContent,
+            )
           : null;
       if (omissionReason !== null && responseCarriesStructuredContent(result)) {
         logger.debug("[MCP] Omitted structuredContent", { tool: name, reason: omissionReason });
@@ -1468,7 +1539,10 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
           ? result
           : stripToolResultStructuredContent(
               result,
-              structuredContentOmissionReason(toolHasOutputSchema(tool)),
+              structuredContentOmissionReason(
+                toolHasOutputSchema(tool),
+                toolResultsNoStructuredContent,
+              ),
             );
       }
       if (error instanceof TerminalSessionError) {

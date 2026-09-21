@@ -21,9 +21,9 @@ import type { ProxiedToolDefinition } from "./daemonMcpProxy";
  * use" intent.
  *
  * `outputSchema` is deliberately NOT advertised cold. Whether the daemon
- * suppresses it depends on `toolResultsNoStructuredContent`, which can be set by
- * CLI, by persisted feature-flag DB state, or by a runtime toggle — none of
- * which this proxy can read without connecting. Advertising an output schema the
+ * suppresses it depends on the connection's `toolResultsNoStructuredContent`
+ * preference and the daemon fallback, neither of which this proxy can resolve
+ * before connecting. Advertising an output schema the
  * daemon may then strip from results would violate the MCP contract before the
  * client can call anything. The cold list therefore carries only the
  * flag-independent shape (name, description, inputSchema, `_meta`); the

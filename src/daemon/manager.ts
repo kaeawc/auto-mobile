@@ -123,7 +123,7 @@ import {
   RUNNER_READINESS_TIMEOUT_FLAG,
   parseRunnerReadinessTimeout,
 } from "../utils/runnerReadinessConfig";
-import { mergedExactToolSelections } from "./daemonOptionSelections";
+import { daemonProcessEnvironment, daemonProcessOptions } from "./daemonOptionScopes";
 import { darwinProcessGenerationToken, readLinuxProcessGenerationToken } from "./processGeneration";
 
 export type { DaemonLaunchCommand, DaemonProcessSpawner } from "./DaemonLauncher";
@@ -1526,6 +1526,7 @@ export class DaemonManager implements DaemonManagerLike {
     options: DaemonOptions,
     recoverySignal?: AbortSignal,
   ): Promise<DaemonStartResult> {
+    options = daemonProcessOptions(options);
     // The overall start budget, captured before any work so the post-exit peer
     // rejoin (issue #6103) can only ever spend time the caller still has. The
     // client times its `tools/list` out at DAEMON_STARTUP_TIMEOUT_MS; launchAndWait
@@ -1573,11 +1574,13 @@ export class DaemonManager implements DaemonManagerLike {
         );
       }
 
-      const requestedOptions = Object.fromEntries(
-        Object.entries(options).filter(([, value]) => value !== undefined),
-      ) as DaemonOptions;
+      const requestedOptions = daemonProcessOptions(
+        Object.fromEntries(
+          Object.entries(options).filter(([, value]) => value !== undefined),
+        ) as DaemonOptions,
+      );
       options = {
-        ...(status.options ?? {}),
+        ...daemonProcessOptions(status.options),
         ...requestedOptions,
         strictPort: true,
       };
@@ -1654,7 +1657,7 @@ export class DaemonManager implements DaemonManagerLike {
     // filename inside it is not exposed to other users.
     // Propagate any non-default file paths to the child so its constants module
     // resolves to the same locations this manager polls.
-    const childEnv = { ...process.env };
+    const childEnv = daemonProcessEnvironment(process.env);
     childEnv[DAEMON_LAUNCH_CWD_ENV] = resolveDaemonLaunchWorkingDirectory();
     if (this.pidFilePath !== PID_FILE_PATH) {
       childEnv.AUTOMOBILE_DAEMON_PID_FILE_PATH = this.pidFilePath;
@@ -2450,15 +2453,16 @@ export class DaemonManager implements DaemonManagerLike {
     // CLI parsing materializes omitted one-way flags as false. False has no
     // corresponding "disable" argument, so forwarding it here would erase a
     // PID-recorded true option without an explicit user request.
-    const requestedOptions = Object.fromEntries(
-      Object.entries(options).filter(([, value]) => value !== undefined && value !== false),
-    ) as DaemonOptions;
-    const recoveryOptions = { ...recordedOptions, ...requestedOptions, strictPort: true };
-    const exactToolSelections = mergedExactToolSelections(recordedOptions, requestedOptions);
-    if (exactToolSelections) {
-      Object.assign(recoveryOptions, exactToolSelections);
-    }
-    return recoveryOptions;
+    const requestedOptions = daemonProcessOptions(
+      Object.fromEntries(
+        Object.entries(options).filter(([, value]) => value !== undefined && value !== false),
+      ) as DaemonOptions,
+    );
+    return {
+      ...daemonProcessOptions(recordedOptions),
+      ...requestedOptions,
+      strictPort: true,
+    };
   }
 
   private async readRecoveryOptionsFromPidFile(): Promise<DaemonOptions> {
@@ -2768,10 +2772,12 @@ export class DaemonManager implements DaemonManagerLike {
     // that replacement cannot silently discard configuration such as debug,
     // output, or accessibility flags.
     const status = await this.status();
-    const runningOptions = status.options ?? {};
-    const requestedOptions = Object.fromEntries(
-      Object.entries(options).filter(([, value]) => value !== undefined),
-    ) as DaemonOptions;
+    const runningOptions = daemonProcessOptions(status.options);
+    const requestedOptions = daemonProcessOptions(
+      Object.fromEntries(
+        Object.entries(options).filter(([, value]) => value !== undefined),
+      ) as DaemonOptions,
+    );
     // Force the authoritative bind-or-fail guard (issue #6260, PRRT ft82d):
     // the preflight check in assertNoSurvivingDaemonBeforeRestart below is
     // fast feedback only — it releases its probe socket before this sleep and
@@ -2887,8 +2893,10 @@ export class DaemonManager implements DaemonManagerLike {
     }
 
     const restartOptions: DaemonOptions = {
-      ...(status.options ?? {}),
-      ...Object.fromEntries(Object.entries(options).filter(([, value]) => value !== undefined)),
+      ...daemonProcessOptions(status.options),
+      ...daemonProcessOptions(
+        Object.fromEntries(Object.entries(options).filter(([, value]) => value !== undefined)),
+      ),
       strictPort: true,
     };
     // The admitted daemon has already initiated its own SIGTERM before it
@@ -3009,7 +3017,7 @@ export class DaemonManager implements DaemonManagerLike {
     await this.cleanupAcceptanceRestartFiles(status, replacedByOtherGeneration);
     await this.timer.sleep(DAEMON_RESTART_HANDOFF_DELAY_MS);
     return restartResultFromStart(
-      await this.startUnlocked({ ...(status.options ?? {}), strictPort: true }),
+      await this.startUnlocked({ ...daemonProcessOptions(status.options), strictPort: true }),
     );
   }
 

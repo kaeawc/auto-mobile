@@ -12,6 +12,7 @@ import {
   isDaemonNotification,
   PROGRESS_NOTIFICATION_METHOD,
   sanitizeBoundSessionLoss,
+  sanitizeDaemonRequestFailureCause,
 } from "./types";
 import type { BoundSessionLoss } from "./types";
 import {
@@ -26,7 +27,7 @@ import {
 import { isDaemonShuttingDownFailure } from "./daemonShutdownOutcome";
 import { type BuildIdentity, getCurrentBuildIdentity } from "./buildIdentity";
 import { resolveMcpRequestTimeoutMs, ProgressExtendableDeadline } from "./mcpRequestTimeout";
-import { McpTimeoutError } from "./McpTimeoutError";
+import { McpOverloadError, McpTimeoutError, sanitizeMcpOverloadFailure } from "./McpTimeoutError";
 import { type Timer, defaultTimer } from "../utils/SystemTimer";
 import { type IdGenerator, defaultIdGenerator } from "../utils/IdGenerator";
 import {
@@ -119,8 +120,8 @@ export class DaemonHandshakeMismatchError extends ActionableError {
  * Custom error thrown when daemon is unavailable
  */
 export class DaemonUnavailableError extends Error {
-  constructor(message: string) {
-    super(message);
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
     this.name = "DaemonUnavailableError";
   }
 }
@@ -163,7 +164,61 @@ export function toDaemonTransportError(error: Error): DaemonUnavailableError {
   if (error instanceof DaemonUnavailableError) {
     return error;
   }
-  return new DaemonUnavailableError(`Daemon socket connection lost: ${error.message}`);
+  return new DaemonUnavailableError(`Daemon socket connection lost: ${error.message}`, {
+    cause: error,
+  });
+}
+
+function daemonLifecycleResponseError(response: DaemonResponse): Error | undefined {
+  if (isDaemonHandshakeFailure(response.handshakeFailure)) {
+    return new DaemonHandshakeMismatchError(
+      response.handshakeFailure,
+      response.error || "Daemon identity mismatch",
+    );
+  }
+  if (isDaemonShuttingDownFailure(response.daemonShuttingDown)) {
+    return new DaemonShuttingDownError();
+  }
+  const overloadFailure = sanitizeMcpOverloadFailure(response.overloadFailure);
+  if (overloadFailure) {
+    return new McpOverloadError(
+      response.error || "Daemon rejected overloaded MCP work",
+      overloadFailure,
+    );
+  }
+  return undefined;
+}
+
+function daemonSessionResponseError(response: DaemonResponse): Error | undefined {
+  const boundSessionLoss = sanitizeBoundSessionLoss(response.boundSessionLoss);
+  if (boundSessionLoss) {
+    return new DaemonBoundSessionLostError(boundSessionLoss);
+  }
+  const transportFailure = sanitizeDeviceControlTransportFailure(response.transportFailure);
+  if (transportFailure) {
+    return new DeviceControlTransportError(
+      response.error || "Device-control transport failure",
+      transportFailure,
+    );
+  }
+  return undefined;
+}
+
+function daemonFallbackResponseError(response: DaemonResponse): Error {
+  const requestFailureCause = sanitizeDaemonRequestFailureCause(response.requestFailureCause);
+  const cause = requestFailureCause ? new Error(requestFailureCause.message) : undefined;
+  if (cause && requestFailureCause) {
+    cause.name = requestFailureCause.name;
+  }
+  return new ActionableError(response.error || "Unknown error from daemon", { cause });
+}
+
+function daemonResponseError(response: DaemonResponse): Error {
+  return (
+    daemonLifecycleResponseError(response) ??
+    daemonSessionResponseError(response) ??
+    daemonFallbackResponseError(response)
+  );
 }
 
 /**
@@ -238,6 +293,8 @@ export class DaemonClient {
       deadline?: ProgressExtendableDeadline;
       requestTimeoutMs?: number;
       removeAbortListener?: () => void;
+      /** Per-request deadline context retained if the shared socket closes. */
+      disconnectCause: McpTimeoutError;
     }
   > = new Map();
   private buffer: string = "";
@@ -469,7 +526,9 @@ export class DaemonClient {
     }
 
     if (signal?.aborted) {
-      throw new DaemonUnavailableError("Daemon connection attempt aborted");
+      throw new DaemonUnavailableError("Daemon connection attempt aborted", {
+        cause: signal.reason,
+      });
     }
 
     if (!this.socketPathObservable()) {
@@ -480,11 +539,16 @@ export class DaemonClient {
       let settled = false;
       let removeAbortListener = () => {};
 
-      const rejectPendingRequests = (error: Error) => {
-        for (const [, { reject, timeout, removeAbortListener }] of this.pendingRequests) {
+      const rejectPendingRequests = (error: Error, preserveRequestCause: boolean = false) => {
+        for (const [, { reject, timeout, removeAbortListener, disconnectCause }] of this
+          .pendingRequests) {
           this.timer.clearTimeout(timeout);
           removeAbortListener?.();
-          reject(error);
+          reject(
+            preserveRequestCause
+              ? new DaemonUnavailableError(error.message, { cause: disconnectCause })
+              : error,
+          );
         }
         this.pendingRequests.clear();
       };
@@ -515,7 +579,12 @@ export class DaemonClient {
       }, connectionTimeout);
 
       if (signal) {
-        const onAbort = () => fail(new DaemonUnavailableError("Daemon connection attempt aborted"));
+        const onAbort = () =>
+          fail(
+            new DaemonUnavailableError("Daemon connection attempt aborted", {
+              cause: signal.reason,
+            }),
+          );
         signal.addEventListener("abort", onAbort, { once: true });
         removeAbortListener = () => signal.removeEventListener("abort", onAbort);
       }
@@ -557,6 +626,7 @@ export class DaemonClient {
         if (this.pendingRequests.size > 0) {
           rejectPendingRequests(
             new DaemonUnavailableError("Daemon socket connection lost: connection closed"),
+            true,
           );
         }
       });
@@ -731,25 +801,7 @@ export class DaemonClient {
     if (response.success) {
       pending.resolve(response);
     } else {
-      const transportFailure = sanitizeDeviceControlTransportFailure(response.transportFailure);
-      const boundSessionLoss = sanitizeBoundSessionLoss(response.boundSessionLoss);
-      pending.reject(
-        isDaemonHandshakeFailure(response.handshakeFailure)
-          ? new DaemonHandshakeMismatchError(
-              response.handshakeFailure,
-              response.error || "Daemon identity mismatch",
-            )
-          : isDaemonShuttingDownFailure(response.daemonShuttingDown)
-            ? new DaemonShuttingDownError()
-            : boundSessionLoss
-              ? new DaemonBoundSessionLostError(boundSessionLoss)
-              : transportFailure
-                ? new DeviceControlTransportError(
-                    response.error || "Device-control transport failure",
-                    transportFailure,
-                  )
-                : new ActionableError(response.error || "Unknown error from daemon"),
-      );
+      pending.reject(daemonResponseError(response));
     }
   }
 
@@ -842,6 +894,11 @@ export class DaemonClient {
 
     const requestTimeoutMs = Math.max(resolveMcpRequestTimeoutMs(request), this.connectionTimeout);
     const toolName = method === "tools/call" ? (params?.name ?? method) : method;
+    const disconnectCause = new McpTimeoutError({
+      toolName,
+      timeoutMs: requestTimeoutMs,
+      origin: "DaemonClient.sendRequest",
+    });
     // Only a progress-emitting tools/call gets an extendable deadline -- a
     // request with no progressToken (the vast majority: reads, non-progress
     // tools, etc.) keeps its exact original fixed timer, untouched below
@@ -865,6 +922,7 @@ export class DaemonClient {
         progressToken,
         deadline,
         requestTimeoutMs,
+        disconnectCause,
       });
 
       if (!this.socket) {
@@ -891,7 +949,9 @@ export class DaemonClient {
       throw new DaemonUnavailableError(`Daemon request ${method} has no remaining timeout`);
     }
     if (options.signal?.aborted) {
-      throw new DaemonUnavailableError(`Daemon request ${method} aborted`);
+      throw new DaemonUnavailableError(`Daemon request ${method} aborted`, {
+        cause: options.signal.reason,
+      });
     }
     const deadlineMs = this.timer.now() + timeoutMs;
     if (!this.connected) {
@@ -901,7 +961,9 @@ export class DaemonClient {
     // this request installs its listener so an abort in that handoff cannot be
     // missed and followed by a control RPC.
     if (options.signal?.aborted) {
-      throw new DaemonUnavailableError(`Daemon request ${method} aborted`);
+      throw new DaemonUnavailableError(`Daemon request ${method} aborted`, {
+        cause: options.signal.reason,
+      });
     }
     const remainingTimeoutMs = deadlineMs - this.timer.now();
     if (remainingTimeoutMs <= 0) {
@@ -913,6 +975,11 @@ export class DaemonClient {
     }
 
     const requestId = this.idGenerator.next();
+    const disconnectCause = new McpTimeoutError({
+      toolName: method,
+      timeoutMs,
+      origin: "DaemonClient.callDaemonMethod",
+    });
 
     const request: DaemonRequest = {
       id: requestId,
@@ -947,7 +1014,11 @@ export class DaemonClient {
           // caller would leave a delayed metadata repair free to publish after
           // doctor has already reported its deadline.
           this.socket?.destroy();
-          reject(new DaemonUnavailableError(`Daemon request ${method} aborted`));
+          reject(
+            new DaemonUnavailableError(`Daemon request ${method} aborted`, {
+              cause: options.signal?.reason,
+            }),
+          );
         };
         options.signal.addEventListener("abort", onAbort, { once: true });
         removeAbortListener = () => options.signal?.removeEventListener("abort", onAbort);
@@ -961,6 +1032,7 @@ export class DaemonClient {
         timeout,
         toolName: method,
         removeAbortListener,
+        disconnectCause,
       });
 
       if (!this.socket) {
@@ -986,21 +1058,22 @@ export class DaemonClient {
    * Close the connection
    */
   async close(): Promise<void> {
+    this.connected = false;
+
+    // Reject before destroy emits "close", preserving each request's own
+    // deadline context instead of replacing all diagnostics with one generic
+    // transport message.
+    for (const [, { timeout, reject, removeAbortListener, disconnectCause }] of this
+      .pendingRequests) {
+      this.timer.clearTimeout(timeout);
+      removeAbortListener?.();
+      reject(new DaemonUnavailableError("Socket connection closed", { cause: disconnectCause }));
+    }
+    this.pendingRequests.clear();
     if (this.socket) {
       this.socket.destroy();
       this.socket = null;
     }
-
-    this.connected = false;
-
-    // Reject all pending requests
-    const closeError = new DaemonUnavailableError("Socket connection closed");
-    for (const [, { timeout, reject, removeAbortListener }] of this.pendingRequests) {
-      this.timer.clearTimeout(timeout);
-      removeAbortListener?.();
-      reject(closeError);
-    }
-    this.pendingRequests.clear();
     this.notificationHandlers.clear();
     this.connectionClosedHandlers.clear();
   }

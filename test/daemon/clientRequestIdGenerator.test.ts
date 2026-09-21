@@ -2,6 +2,7 @@ import { describe, expect, test, beforeEach } from "bun:test";
 import { Duplex } from "node:stream";
 import { DaemonClient, DaemonShuttingDownError } from "../../src/daemon/client";
 import { DAEMON_SHUTTING_DOWN_ERROR_CODE } from "../../src/daemon/constants";
+import { McpOverloadError } from "../../src/daemon/McpTimeoutError";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -119,6 +120,71 @@ describe("DaemonClient request id comes from the injected IdGenerator", () => {
     );
 
     await expect(pending).rejects.not.toBeInstanceOf(DaemonShuttingDownError);
+    await client.close();
+  });
+
+  test("classifies a structured overload response as retryable", async () => {
+    const idGenerator = new CountingIdGenerator("req");
+    const writes: string[] = [];
+    const client = createConnectedClient(fakeTimer, idGenerator, writes);
+
+    const pending = client.callTool("tapOn", {});
+    (client as any).handleData(
+      Buffer.from(
+        JSON.stringify({
+          id: "req-1",
+          type: "mcp_response",
+          success: false,
+          error: "Retry after 250ms",
+          overloadFailure: {
+            code: "daemon_overloaded",
+            retryable: true,
+            retryAfterMs: 250,
+            reason: "insufficient_forward_budget",
+            queueWaitMs: 450,
+            remainingTimeoutMs: 50,
+          },
+        }) + "\n",
+      ),
+    );
+
+    const error = await pending.catch((cause: unknown) => cause);
+    expect(error).toBeInstanceOf(McpOverloadError);
+    expect((error as McpOverloadError).failure).toMatchObject({
+      code: "daemon_overloaded",
+      retryable: true,
+      retryAfterMs: 250,
+    });
+    await client.close();
+  });
+
+  test("restores the daemon's original request failure cause", async () => {
+    const idGenerator = new CountingIdGenerator("req");
+    const writes: string[] = [];
+    const client = createConnectedClient(fakeTimer, idGenerator, writes);
+
+    const pending = client.callTool("listDevices", { platform: "android" });
+    (client as any).handleData(
+      Buffer.from(
+        JSON.stringify({
+          id: "req-1",
+          type: "mcp_response",
+          success: false,
+          error: "The operation was aborted",
+          requestFailureCause: {
+            name: "Error",
+            message: "Daemon MCP client disconnected",
+          },
+        }) + "\n",
+      ),
+    );
+
+    const error = (await pending.catch((cause: unknown) => cause)) as Error;
+    expect(error.cause).toBeInstanceOf(Error);
+    expect(error.cause).toMatchObject({
+      name: "Error",
+      message: "Daemon MCP client disconnected",
+    });
     await client.close();
   });
 });

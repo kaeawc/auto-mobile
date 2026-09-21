@@ -21,6 +21,15 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
 import type { DeviceLabelMap, Session } from "../../src/daemon/sessionManager";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
+import { McpTimeoutError } from "../../src/daemon/McpTimeoutError";
+import {
+  AdbClient,
+  resetAdbDeviceListCache,
+} from "../../src/utils/android-cmdline-tools/AdbClient";
+import { MultiPlatformDeviceManager } from "../../src/utils/deviceUtils";
+import type { AndroidEmulatorClient } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
+import type { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
+import type { ExecResult } from "../../src/models";
 
 interface FakeMcpClient {
   callTool: (...args: unknown[]) => Promise<unknown>;
@@ -49,6 +58,17 @@ function createFakeSession(
     heartbeatTimeoutMs: 10_000,
     heartbeatTimeoutSource: "default",
     hasReceivedHeartbeat: false,
+  };
+}
+
+function adbDeviceListResult(deviceId: string): ExecResult {
+  const stdout = `List of devices attached\n${deviceId}\tdevice\n`;
+  return {
+    stdout,
+    stderr: "",
+    toString: () => stdout,
+    trim: () => stdout.trim(),
+    includes: (search: string) => stdout.includes(search),
   };
 }
 
@@ -332,6 +352,86 @@ describe("UnixSocketServer MCP forward serialization", () => {
     }
   });
 
+  test("serves eight clients' three Android inventory reads from one bounded snapshot", async () => {
+    resetAdbDeviceListCache();
+    const inventoryTimer = new FakeTimer();
+    let adbDeviceListCalls = 0;
+    const adb = new AdbClient(
+      null,
+      async () => {
+        adbDeviceListCalls += 1;
+        if (adbDeviceListCalls === 1) {
+          await inventoryTimer.sleep(25);
+          return adbDeviceListResult("emulator-5554");
+        }
+        return adbDeviceListResult("emulator-5556");
+      },
+      null,
+      undefined,
+      inventoryTimer,
+    );
+    const emulator = {
+      getBootedDevicesChecked: async (
+        _onlyEmulators: boolean,
+        _options: unknown,
+        signal?: AbortSignal,
+      ) => await adb.getBootedAndroidDevices({ throwOnMissingAdb: true, signal }),
+      listAvds: async () => [{ name: "Pixel_9", platform: "android", isRunning: false } as const],
+    } as unknown as AndroidEmulatorClient;
+    const manager = new MultiPlatformDeviceManager(
+      adb,
+      {} as SimCtlClient,
+      emulator,
+      undefined,
+      inventoryTimer,
+    );
+    server.mcpClientFactory = async () => ({
+      listTools: async () => ({ tools: [] }),
+      callTool: async () => await manager.getBootedDevicesDetailed("android"),
+      listResources: async () => ({ resources: [] }),
+      readResource: async (...args: unknown[]) => {
+        const uri = (args[0] as { uri: string }).uri;
+        return uri.includes("/images/")
+          ? await manager.getDeviceImagesDetailed("android")
+          : await manager.getBootedDevicesDetailed("android");
+      },
+      listResourceTemplates: async () => ({ resourceTemplates: [] }),
+      close: async () => {},
+    });
+
+    const clients = Array.from(
+      { length: 8 },
+      () => new DaemonClient(socketPath, 1_000, undefined, {}, null),
+    );
+    try {
+      await Promise.all(clients.map(async (client) => await client.connect()));
+      const reads = clients.flatMap((client) => [
+        client.callTool("listDevices", { platform: "android" }),
+        client.readResource("automobile:devices/booted/android"),
+        client.readResource("automobile:devices/images/android"),
+      ]);
+      for (let attempt = 0; adbDeviceListCalls === 0 && attempt < 20; attempt += 1) {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      }
+      expect(adbDeviceListCalls).toBe(1);
+
+      inventoryTimer.advanceTime(25);
+      await expect(Promise.all(reads)).resolves.toHaveLength(24);
+      expect(inventoryTimer.now()).toBe(25);
+      expect(adbDeviceListCalls).toBe(1);
+
+      inventoryTimer.advanceTime(4_999);
+      await clients[0]!.callTool("listDevices", { platform: "android" });
+      expect(adbDeviceListCalls).toBe(1);
+      inventoryTimer.advanceTime(1);
+      await clients[0]!.callTool("listDevices", { platform: "android" });
+      expect(adbDeviceListCalls).toBe(2);
+    } finally {
+      await Promise.all(clients.map(async (client) => await client.close()));
+      resetAdbDeviceListCache();
+    }
+  });
+
   test("releases socket-scoped device-pool bindings when a client disconnects", async () => {
     server.mcpClientFactory = async () => ({
       callTool: async () => ({ content: [] }),
@@ -609,7 +709,11 @@ describe("UnixSocketServer MCP forward serialization", () => {
       await expect(first).resolves.toMatchObject({ success: true });
       await expect(queued).resolves.toMatchObject({
         success: false,
-        error: expect.stringContaining("exceeded 500ms"),
+        overloadFailure: {
+          code: "daemon_overloaded",
+          retryable: true,
+          remainingTimeoutMs: 0,
+        },
       });
       expect(callCount).toBe(1);
     } finally {
@@ -2302,5 +2406,153 @@ describe("UnixSocketServer MCP forward serialization", () => {
     expect(firstResult.success).toBe(true);
     expect(secondResult.success).toBe(false);
     expect(secondResult.error).toContain("waiting in queue");
+  });
+
+  test("rejects queue-depleted work with a structured retryable overload before deadline", async () => {
+    const started = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    let readCount = 0;
+    server.mcpClientFactory = async () => ({
+      listTools: async () => ({ tools: [] }),
+      callTool: async () => ({ content: [] }),
+      listResources: async () => ({ resources: [] }),
+      readResource: async () => {
+        readCount += 1;
+        if (readCount === 1) {
+          started.resolve();
+          await release.promise;
+        }
+        return { contents: [] };
+      },
+      listResourceTemplates: async () => ({ resourceTemplates: [] }),
+      close: async () => {},
+    });
+
+    const first = sendRequest(socketPath, {
+      id: randomUUID(),
+      type: "mcp_request",
+      method: "resources/read",
+      params: { uri: "automobile:devices/booted/android" },
+      timeoutMs: 500,
+    });
+    await started.promise;
+    const second = sendRequest(socketPath, {
+      id: randomUUID(),
+      type: "mcp_request",
+      method: "resources/read",
+      params: { uri: "automobile:devices/booted/android" },
+      timeoutMs: 500,
+    });
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+
+    fakeTimer.advanceTime(450);
+    release.resolve();
+
+    await expect(first).resolves.toMatchObject({ success: true });
+    await expect(second).resolves.toMatchObject({
+      success: false,
+      overloadFailure: {
+        code: "daemon_overloaded",
+        retryable: true,
+        retryAfterMs: 250,
+        reason: "insufficient_forward_budget",
+        queueWaitMs: 450,
+        remainingTimeoutMs: 50,
+      },
+    });
+    expect(readCount).toBe(1);
+  });
+
+  test("closing one client cancels only its resource read and lets the next client finish", async () => {
+    const firstStarted = Promise.withResolvers<void>();
+    const secondStarted = Promise.withResolvers<void>();
+    const forwardedSignals: AbortSignal[] = [];
+    let readCount = 0;
+    server.mcpClientFactory = async () => ({
+      listTools: async () => ({ tools: [] }),
+      callTool: async () => ({ content: [] }),
+      listResources: async () => ({ resources: [] }),
+      readResource: async (...args: unknown[]) => {
+        readCount += 1;
+        const signal = (args[2] as { signal?: AbortSignal } | undefined)?.signal;
+        expect(signal).toBeDefined();
+        forwardedSignals.push(signal!);
+        if (readCount === 1) {
+          firstStarted.resolve();
+          return await new Promise<never>((_resolve, reject) => {
+            signal!.addEventListener("abort", () => reject(signal!.reason), { once: true });
+          });
+        }
+        secondStarted.resolve();
+        return { contents: [] };
+      },
+      listResourceTemplates: async () => ({ resourceTemplates: [] }),
+      close: async () => {},
+    });
+
+    const firstSocket = new Socket();
+    await new Promise<void>((resolve, reject) => {
+      firstSocket.once("error", reject);
+      firstSocket.connect(socketPath, resolve);
+    });
+    firstSocket.write(
+      JSON.stringify({
+        id: randomUUID(),
+        type: "mcp_request",
+        method: "resources/read",
+        params: { uri: "automobile:devices/booted/android" },
+      }) + "\n",
+    );
+    await firstStarted.promise;
+
+    const secondClient = new PersistentSocketClient();
+    await secondClient.connect(socketPath);
+    const second = secondClient.request("resources/read", {
+      uri: "automobile:devices/booted/android",
+    });
+    firstSocket.destroy();
+
+    await secondStarted.promise;
+    await expect(second).resolves.toMatchObject({ success: true });
+    expect(forwardedSignals).toHaveLength(2);
+    expect(forwardedSignals[0]?.aborted).toBe(true);
+    expect((forwardedSignals[0]?.reason as Error).message).toBe("Daemon MCP client disconnected");
+    expect(forwardedSignals[1]?.aborted).toBe(false);
+    secondClient.close();
+  });
+
+  test("returns the original timeout as a structured request failure cause", async () => {
+    server.mcpClientFactory = async () => ({
+      listTools: async () => ({ tools: [] }),
+      callTool: async () => {
+        throw new McpTimeoutError({
+          toolName: "listDevices",
+          timeoutMs: 500,
+          origin: "inventory-test",
+        });
+      },
+      listResources: async () => ({ resources: [] }),
+      readResource: async () => ({ contents: [] }),
+      listResourceTemplates: async () => ({ resourceTemplates: [] }),
+      close: async () => {},
+    });
+
+    const response = await sendRequest(socketPath, {
+      id: randomUUID(),
+      type: "mcp_request",
+      method: "tools/call",
+      params: { name: "listDevices", arguments: { platform: "android" } },
+      timeoutMs: 500,
+    });
+
+    expect(response).toMatchObject({
+      success: false,
+      requestFailureCause: {
+        name: "McpTimeoutError",
+        message: expect.stringContaining("inventory-test"),
+      },
+    });
   });
 });

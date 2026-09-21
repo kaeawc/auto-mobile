@@ -290,6 +290,23 @@ describe("DaemonClient per-request timeout", () => {
       await client.close();
     }
   });
+
+  test("preserves each pending request's timeout context when the client closes", async () => {
+    const client = createConnectedClient(fakeTimer);
+    const tool = client.callTool("tapOn", {}).catch((error: unknown) => error);
+    const resource = client
+      .readResource("automobile:devices/booted/android")
+      .catch((error: unknown) => error);
+    await client.close();
+
+    const [toolError, resourceError] = (await Promise.all([tool, resource])) as Error[];
+    expect(toolError).toBeInstanceOf(DaemonUnavailableError);
+    expect(resourceError).toBeInstanceOf(DaemonUnavailableError);
+    expect(toolError.cause).toBeInstanceOf(McpTimeoutError);
+    expect(resourceError.cause).toBeInstanceOf(McpTimeoutError);
+    expect((toolError.cause as McpTimeoutError).toolName).toBe("tapOn");
+    expect((resourceError.cause as McpTimeoutError).toolName).toBe("resources/read");
+  });
 });
 
 /**

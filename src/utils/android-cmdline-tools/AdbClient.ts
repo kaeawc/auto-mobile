@@ -33,6 +33,7 @@ import { trackAmbient } from "../PerfContext";
 import { OPERATION_CANCELLED_MESSAGE } from "../constants";
 import { RetryExecutor, defaultRetryExecutor } from "../retry/RetryExecutor";
 import { TTLCache } from "../cache/Cache";
+import { SingleFlight } from "../cache/SingleFlight";
 import { Timer, defaultTimer } from "../SystemTimer";
 import { isAdbMissingDeviceError, notifyAdbMissingDevice } from "./AdbDeviceHealth";
 import { DefaultSystemDetection, type SystemDetection } from "../system/SystemDetection";
@@ -91,6 +92,7 @@ export class AdbUnavailableError extends Error {
 // Module-level cache configuration and instances
 const moduleTimer: Timer = defaultTimer;
 let deviceListCache: TTLCache<string, BootedDevice[]> | null = null;
+let deviceListSingleFlight = new SingleFlight<string, BootedDevice[]>();
 // Keep production clients sharing the resolved path while isolating injected
 // execution seams. A module-wide path cache keyed only by "adbPath" lets one
 // test/client reuse another client's incomplete or synthetic discovery result.
@@ -99,9 +101,9 @@ let adbPathCaches = new WeakMap<ExecFileAsync, TTLCache<string, string>>();
 const DEVICE_LIST_CACHE_TTL_MS = 5000; // 5 seconds
 const ADB_PATH_CACHE_TTL_MS = 60000; // 1 minute - ADB path rarely changes
 
-function getDeviceListCache(): TTLCache<string, BootedDevice[]> {
+function getDeviceListCache(timer: Timer): TTLCache<string, BootedDevice[]> {
   if (!deviceListCache) {
-    deviceListCache = new TTLCache(moduleTimer, { ttlMs: DEVICE_LIST_CACHE_TTL_MS });
+    deviceListCache = new TTLCache(timer, { ttlMs: DEVICE_LIST_CACHE_TTL_MS });
   }
   return deviceListCache;
 }
@@ -117,11 +119,13 @@ function getAdbPathCache(execAsync: ExecFileAsync): TTLCache<string, string> {
 
 export function resetAdbClientCaches(): void {
   deviceListCache = null;
+  deviceListSingleFlight = new SingleFlight();
   adbPathCaches = new WeakMap();
 }
 
 export function resetAdbDeviceListCache(): void {
   deviceListCache = null;
+  deviceListSingleFlight = new SingleFlight();
 }
 
 // Route the execFile leg through the shared exec seam (issue #5459) so the option
@@ -1251,63 +1255,71 @@ export class AdbClient implements AdbExecutor {
     }
 
     // Check cache first - TTLCache handles expiration automatically
-    const cache = getDeviceListCache();
+    const cache = getDeviceListCache(this.timer);
     const cachedDevices = options.bypassCache ? undefined : cache.get("devices");
     if (cachedDevices) {
       logger.debug("Getting list of connected devices (cached)");
       return cachedDevices;
     }
 
-    logger.debug("Getting list of connected devices");
-    let result: ExecResult;
+    const timeoutMs = options.timeoutMs ?? AdbClient.DEVICE_LIST_TIMEOUT_MS;
+    const flightKey = `devices:${timeoutMs}`;
     try {
-      result = await this.executeCommand(
-        "devices -l",
-        options.timeoutMs ?? AdbClient.DEVICE_LIST_TIMEOUT_MS,
-        undefined,
-        true,
+      return await deviceListSingleFlight.run(
+        flightKey,
+        async () => {
+          // The shared subprocess has its own bounded timeout but deliberately
+          // does not inherit a waiter's signal. Each caller races its signal in
+          // SingleFlight, so one disconnected client cannot cancel discovery
+          // for the other clients sharing this cold read.
+          logger.debug("Getting list of connected devices");
+          let result: ExecResult;
+          try {
+            result = await this.executeCommand("devices -l", timeoutMs, undefined, true);
+          } catch (error) {
+            if (this.isMissingExecutableError(error)) {
+              this.recordMissingAdbProbe();
+              throw new AdbUnavailableError(
+                `ADB executable is unavailable: ${(error as Error).message}`,
+              );
+            }
+            throw error;
+          }
+          const lines = result.stdout.split("\n").slice(1);
+
+          const observedAt = this.observationSequence.next();
+          const devices = lines
+            .filter((line) => line.trim().length > 0)
+            .flatMap((line) => {
+              const [deviceId, state] = line.trim().split(/\s+/);
+              if (!deviceId || state !== "device") {
+                return [];
+              }
+              // `adb devices -l` also reports `transport_id:`, deliberately not read:
+              // it is a per-connection handle, and a device identity that carried it
+              // invited callers to treat "transport unchanged" as proof of an unbroken
+              // connection. The pool's `incarnation` is the one epoch token.
+              return [
+                {
+                  name: deviceId,
+                  platform: "android",
+                  deviceId,
+                  observedAt,
+                } satisfies BootedDevice,
+              ];
+            });
+
+          cache.set("devices", devices);
+          return devices;
+        },
         options.signal,
       );
     } catch (error) {
-      if (this.isMissingExecutableError(error)) {
-        this.recordMissingAdbProbe();
-        if (options.throwOnMissingAdb) {
-          throw new AdbUnavailableError(
-            `ADB executable is unavailable: ${(error as Error).message}`,
-          );
-        }
+      if (error instanceof AdbUnavailableError && !options.throwOnMissingAdb) {
         return [];
       }
       throw error;
     }
-    const lines = result.stdout.split("\n").slice(1); // Skip the first line which is the header
-
-    const observedAt = this.observationSequence.next();
-    const devices = lines
-      .filter((line) => line.trim().length > 0)
-      .flatMap((line) => {
-        const [deviceId, state] = line.trim().split(/\s+/);
-        if (!deviceId || state !== "device") {
-          return [];
-        }
-        // `adb devices -l` also reports `transport_id:`, deliberately not read:
-        // it is a per-connection handle, and a device identity that carried it
-        // invited callers to treat "transport unchanged" as proof of an unbroken
-        // connection. The pool's `incarnation` is the one epoch token.
-        return [
-          {
-            name: deviceId,
-            platform: "android",
-            deviceId,
-            observedAt,
-          } satisfies BootedDevice,
-        ];
-      });
-
-    // Cache the result
-    cache.set("devices", devices);
-
-    return devices;
   }
 
   /**

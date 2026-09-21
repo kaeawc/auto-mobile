@@ -11,7 +11,7 @@ import {
 } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { logger } from "../utils/logger";
 import { resolveMcpRequestTimeoutMs, ProgressExtendableDeadline } from "./mcpRequestTimeout";
-import { McpTimeoutError } from "./McpTimeoutError";
+import { McpOverloadError, McpTimeoutError } from "./McpTimeoutError";
 import { DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import { errorMessage } from "../utils/describeUnknownError";
 import {
@@ -22,6 +22,7 @@ import {
   PROGRESS_NOTIFICATION_METHOD,
   SessionContext,
   type BoundSessionLoss,
+  type DaemonRequestFailureCause,
   type DaemonOptions,
 } from "./types";
 import {
@@ -162,6 +163,43 @@ import {
   type DeviceControlTransportFailure,
   type DeviceControlTransportPhase,
 } from "./deviceControlTransportFailure";
+
+const MCP_FORWARD_START_HEADROOM_MS = 100;
+const MCP_OVERLOAD_RETRY_AFTER_MS = 250;
+
+function requestFailureCause(
+  error: unknown,
+  requestSignal?: AbortSignal,
+): DaemonRequestFailureCause | undefined {
+  const cause = requestSignal?.aborted
+    ? requestSignal.reason
+    : error instanceof McpTimeoutError
+      ? error
+      : undefined;
+  if (cause === undefined) {
+    return undefined;
+  }
+  return {
+    name: cause instanceof Error ? cause.name : "Error",
+    message: errorMessage(cause),
+  };
+}
+
+function logRequestFailureCause(cause: DaemonRequestFailureCause | undefined): void {
+  if (cause) {
+    logger.error(`Original MCP request failure cause: ${cause.name}: ${cause.message}`);
+  }
+}
+
+function mcpRequestFailureDetails(
+  error: unknown,
+  cause: DaemonRequestFailureCause | undefined,
+): Pick<DaemonResponse, "overloadFailure" | "requestFailureCause"> {
+  return {
+    ...(error instanceof McpOverloadError ? { overloadFailure: error.failure } : {}),
+    ...(cause ? { requestFailureCause: cause } : {}),
+  };
+}
 
 function resolveIdentityStartedAt(value: number | undefined, timer: Timer): number {
   return value === undefined ? timer.now() : value;
@@ -1195,6 +1233,7 @@ export class UnixSocketServer {
     // (see ProgressExtendableDeadline) -- untouched for a request that never
     // emits progress, which keeps its exact original deadline.
     const deadline = new ProgressExtendableDeadline(receivedAtMs, totalTimeoutMs);
+    let activeRequestSignal: AbortSignal | undefined;
 
     // Enqueue request to maintain order
     return this.enqueueRequest(session, async () => {
@@ -1224,6 +1263,7 @@ export class UnixSocketServer {
         const initialRoute = this.getMcpForwardRoute(request, sessionId);
 
         const mcpRequest = this.mcpRequestSignal(sessionId, ownerSocket);
+        activeRequestSignal = mcpRequest.signal;
         try {
           const result = await this.runMcpForwardForCurrentRoute(
             initialRoute,
@@ -1237,18 +1277,12 @@ export class UnixSocketServer {
                 `[McpForward] start executionKey=${route.executionKey} clientKey=${route.clientKey} socketSession=${sessionId} requestId=${request.id} ${forwardLabel} queueWaitMs=${queueWaitMs} remainingTimeoutMs=${remainingTimeoutMs}`,
               );
 
-              if (remainingTimeoutMs <= 0) {
-                const toolName =
-                  request.method === "tools/call"
-                    ? (request.params?.name ?? request.method)
-                    : request.method;
-                throw new McpTimeoutError({
-                  toolName,
-                  timeoutMs: totalTimeoutMs,
-                  origin: "UnixSocketServer.handleRequest",
-                  detail: `spent ${queueWaitMs}ms waiting in queue`,
-                });
-              }
+              this.requireRemainingMcpForwardBudget(
+                request,
+                totalTimeoutMs,
+                deadline,
+                "waiting in queue",
+              );
 
               const forwardStartMs = this.timer.now();
               try {
@@ -1305,8 +1339,10 @@ export class UnixSocketServer {
         }
       } catch (error) {
         const errorMsg = errorMessage(error);
+        const preservedCause = requestFailureCause(error, activeRequestSignal);
         const errorStack = error instanceof Error ? error.stack : "no stack";
         logger.error(`Error forwarding request to MCP server: ${errorMsg}`);
+        logRequestFailureCause(preservedCause);
         logger.error(`Error stack: ${errorStack}`);
         logger.error(`Full error: ${JSON.stringify(error)}`);
         return {
@@ -1320,6 +1356,7 @@ export class UnixSocketServer {
           ...(error instanceof ReleasedBoundSessionError
             ? { boundSessionLoss: error.failure }
             : {}),
+          ...mcpRequestFailureDetails(error, preservedCause),
           ...(error instanceof InputTypeTextAppendError ? { charsSent: error.charsSent } : {}),
         };
       }
@@ -1336,11 +1373,31 @@ export class UnixSocketServer {
     // started may already have pushed `deadline.value` out (issue #6222
     // review, P1) -- caching it earlier would silently ignore that extension.
     const remainingTimeoutMs = deadline.value - this.timer.now();
-    if (remainingTimeoutMs > 0) {
+    const queueWaitMs = Math.max(0, totalTimeoutMs - remainingTimeoutMs);
+    if (
+      remainingTimeoutMs > 0 &&
+      (queueWaitMs === 0 || remainingTimeoutMs > MCP_FORWARD_START_HEADROOM_MS)
+    ) {
       return remainingTimeoutMs;
     }
     const toolName =
       request.method === "tools/call" ? (request.params?.name ?? request.method) : request.method;
+    if (queueWaitMs > 0) {
+      const failure = {
+        code: "daemon_overloaded",
+        retryable: true,
+        retryAfterMs: MCP_OVERLOAD_RETRY_AFTER_MS,
+        reason: "insufficient_forward_budget",
+        queueWaitMs,
+        remainingTimeoutMs: Math.max(0, remainingTimeoutMs),
+      } as const;
+      throw new McpOverloadError(
+        `Daemon overloaded while handling ${toolName}: spent ${queueWaitMs}ms ${phase}, leaving ` +
+          `${failure.remainingTimeoutMs}ms of the ${totalTimeoutMs}ms deadline. ` +
+          `Retry after ${failure.retryAfterMs}ms.`,
+        failure,
+      );
+    }
     throw new McpTimeoutError({
       toolName,
       timeoutMs: totalTimeoutMs,

@@ -36,6 +36,7 @@ import { WEBRTC_ENV } from "./features/webrtc/webrtcStreamingConfig";
 import { EVENT_ALL_MARKERS_FLAG } from "./utils/eventAllMarkers";
 import { parseArgs } from "./cli/parseArgs";
 import { terminateCliProcess } from "./cli/termination";
+import { exitAfterSuccessfulDaemonCommand } from "./cli/daemonCommandExit";
 import {
   installProcessLifecycleHandlers,
   installStdinShutdownHandlers,
@@ -52,10 +53,17 @@ interface FatalLogger {
 
 let fatalLogger: FatalLogger | undefined;
 
-// These commands only inspect or tear down an existing daemon and never publish
-// tools. Start and restart commands are excluded because they configure the
-// spawned daemon with the caller's tool profile.
-const PROFILE_TOLERANT_DAEMON_COMMANDS = new Set(["status", "stop", "health", "diagnose"]);
+// These commands interact only with an existing daemon and never publish tools.
+// Start and restart commands are excluded because they configure the spawned
+// daemon with the caller's tool profile. heartbeat must return as soon as the
+// daemon commits it; it must not kick off detached CtrlProxy prefetch work.
+const PROFILE_TOLERANT_DAEMON_COMMANDS = new Set([
+  "status",
+  "stop",
+  "health",
+  "diagnose",
+  "heartbeat",
+]);
 
 function logFatal(label: string, error: unknown): void {
   const message = error instanceof Error ? (error.stack ?? error.message) : String(error);
@@ -250,8 +258,8 @@ async function main() {
     } = parseArgs(process.argv.slice(2), logger);
     if (daemonCommand && PROFILE_TOLERANT_DAEMON_COMMANDS.has(daemonCommand)) {
       await runDaemonCommand(daemonCommand, daemonArgs);
-      await logger.closeAfterFlush();
-      process.exit(0);
+      await exitAfterSuccessfulDaemonCommand(logger, process);
+      return;
     }
     // In daemon mode, tool selection belongs to each socket-backed MCP
     // connection. The spawning frontend applies its values through that

@@ -6263,6 +6263,57 @@ describe("Daemon manager heartbeat", () => {
     expect(output).toContain("Session session-1 heartbeat recorded");
   });
 
+  test("reports a rejected heartbeat without printing the success message", async () => {
+    const fakeClient = new FakeDaemonClient({});
+    fakeClient.callDaemonMethod = async (method, params) => {
+      fakeClient.callDaemonMethodCalls.push({ method, params });
+      throw new Error("Session not found: session-1");
+    };
+    const output: string[] = [];
+    const errors: string[] = [];
+    const exitCodes: number[] = [];
+    const originalExit = process.exit;
+    const logSpy = spyOn(console, "log").mockImplementation((...args) => {
+      output.push(args.join(" "));
+    });
+    const errorSpy = spyOn(console, "error").mockImplementation((...args) => {
+      errors.push(args.join(" "));
+    });
+    process.exit = ((exitCode?: number) => {
+      exitCodes.push(exitCode ?? 0);
+    }) as typeof process.exit;
+
+    try {
+      await runDaemonCommand("heartbeat", ["session-1"], {
+        clientFactory: () => fakeClient,
+        stateProvider: () =>
+          ({
+            isInitialized: () => false,
+            getDevicePool: () => {
+              throw new Error("Device pool unavailable");
+            },
+            getSessionManager: () => {
+              throw new Error("Session manager unavailable");
+            },
+            getDeviceSessionRegistry: () => {
+              throw new Error("Device session registry unavailable");
+            },
+          }) satisfies DaemonStateLike,
+      });
+    } finally {
+      process.exit = originalExit;
+      logSpy.mockRestore();
+      errorSpy.mockRestore();
+    }
+
+    expect(fakeClient.callDaemonMethodCalls).toHaveLength(1);
+    expect(errors).toEqual([
+      "Error: Failed to record session heartbeat: Session not found: session-1",
+    ]);
+    expect(output).not.toContain("Session session-1 heartbeat recorded");
+    expect(exitCodes).toEqual([1]);
+  });
+
   test("forwards the stable owner token for a recurring heartbeat keeper", async () => {
     const fakeClient = new FakeDaemonClient({});
     const logSpy = spyOn(console, "log").mockImplementation(() => {});

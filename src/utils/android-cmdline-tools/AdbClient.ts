@@ -33,6 +33,7 @@ import { trackAmbient } from "../PerfContext";
 import { OPERATION_CANCELLED_MESSAGE } from "../constants";
 import { RetryExecutor, defaultRetryExecutor } from "../retry/RetryExecutor";
 import { TTLCache } from "../cache/Cache";
+import { SingleFlight } from "../cache/SingleFlight";
 import { Timer, defaultTimer } from "../SystemTimer";
 import { isAdbMissingDeviceError, notifyAdbMissingDevice } from "./AdbDeviceHealth";
 import { DefaultSystemDetection, type SystemDetection } from "../system/SystemDetection";
@@ -91,6 +92,9 @@ export class AdbUnavailableError extends Error {
 // Module-level cache configuration and instances
 const moduleTimer: Timer = defaultTimer;
 let deviceListCache: TTLCache<string, BootedDevice[]> | null = null;
+let deviceListSingleFlight = new SingleFlight<string, BootedDevice[]>();
+let deviceListGeneration = 0;
+let deviceListPublishedGeneration = 0;
 // Keep production clients sharing the resolved path while isolating injected
 // execution seams. A module-wide path cache keyed only by "adbPath" lets one
 // test/client reuse another client's incomplete or synthetic discovery result.
@@ -99,9 +103,9 @@ let adbPathCaches = new WeakMap<ExecFileAsync, TTLCache<string, string>>();
 const DEVICE_LIST_CACHE_TTL_MS = 5000; // 5 seconds
 const ADB_PATH_CACHE_TTL_MS = 60000; // 1 minute - ADB path rarely changes
 
-function getDeviceListCache(): TTLCache<string, BootedDevice[]> {
+function getDeviceListCache(timer: Timer): TTLCache<string, BootedDevice[]> {
   if (!deviceListCache) {
-    deviceListCache = new TTLCache(moduleTimer, { ttlMs: DEVICE_LIST_CACHE_TTL_MS });
+    deviceListCache = new TTLCache(timer, { ttlMs: DEVICE_LIST_CACHE_TTL_MS });
   }
   return deviceListCache;
 }
@@ -117,11 +121,15 @@ function getAdbPathCache(execAsync: ExecFileAsync): TTLCache<string, string> {
 
 export function resetAdbClientCaches(): void {
   deviceListCache = null;
+  deviceListSingleFlight = new SingleFlight();
+  deviceListPublishedGeneration = ++deviceListGeneration;
   adbPathCaches = new WeakMap();
 }
 
 export function resetAdbDeviceListCache(): void {
   deviceListCache = null;
+  deviceListSingleFlight = new SingleFlight();
+  deviceListPublishedGeneration = ++deviceListGeneration;
 }
 
 // Route the execFile leg through the shared exec seam (issue #5459) so the option
@@ -1251,36 +1259,58 @@ export class AdbClient implements AdbExecutor {
     }
 
     // Check cache first - TTLCache handles expiration automatically
-    const cache = getDeviceListCache();
+    const cache = getDeviceListCache(this.timer);
     const cachedDevices = options.bypassCache ? undefined : cache.get("devices");
     if (cachedDevices) {
       logger.debug("Getting list of connected devices (cached)");
       return cachedDevices;
     }
 
-    logger.debug("Getting list of connected devices");
-    let result: ExecResult;
+    const timeoutMs = options.timeoutMs ?? AdbClient.DEVICE_LIST_TIMEOUT_MS;
+    const flightKey = `devices:${timeoutMs}`;
     try {
-      result = await this.executeCommand(
-        "devices -l",
-        options.timeoutMs ?? AdbClient.DEVICE_LIST_TIMEOUT_MS,
-        undefined,
-        true,
+      // A bypass caller needs its own fresh snapshot and must not inherit the
+      // result of a non-bypass request that was already in flight.
+      if (options.bypassCache) {
+        return await this.readDeviceListFromAdb(timeoutMs, options.signal);
+      }
+
+      return await deviceListSingleFlight.run(
+        flightKey,
+        () => {
+          // The shared subprocess has its own bounded timeout but deliberately
+          // does not inherit a waiter's signal. Each caller races its signal in
+          // SingleFlight, so one disconnected client cannot cancel discovery
+          // for the other clients sharing this cold read.
+          return this.readDeviceListFromAdb(timeoutMs);
+        },
         options.signal,
       );
     } catch (error) {
-      if (this.isMissingExecutableError(error)) {
-        this.recordMissingAdbProbe();
-        if (options.throwOnMissingAdb) {
-          throw new AdbUnavailableError(
-            `ADB executable is unavailable: ${(error as Error).message}`,
-          );
-        }
+      if (error instanceof AdbUnavailableError && !options.throwOnMissingAdb) {
         return [];
       }
       throw error;
     }
-    const lines = result.stdout.split("\n").slice(1); // Skip the first line which is the header
+  }
+
+  private async readDeviceListFromAdb(
+    timeoutMs: number,
+    signal?: AbortSignal,
+  ): Promise<BootedDevice[]> {
+    const generation = ++deviceListGeneration;
+    logger.debug("Getting list of connected devices");
+    let result: ExecResult;
+    try {
+      result = await this.executeCommand("devices -l", timeoutMs, undefined, true, signal);
+    } catch (error) {
+      if (this.isMissingExecutableError(error)) {
+        this.recordMissingAdbProbe();
+        throw new AdbUnavailableError(`ADB executable is unavailable: ${(error as Error).message}`);
+      }
+      throw error;
+    }
+    const lines = result.stdout.split("\n").slice(1);
 
     const observedAt = this.observationSequence.next();
     const devices = lines
@@ -1304,9 +1334,10 @@ export class AdbClient implements AdbExecutor {
         ];
       });
 
-    // Cache the result
-    cache.set("devices", devices);
-
+    if (generation >= deviceListPublishedGeneration) {
+      deviceListPublishedGeneration = generation;
+      getDeviceListCache(this.timer).set("devices", devices);
+    }
     return devices;
   }
 

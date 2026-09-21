@@ -2,6 +2,7 @@ import type { DeviceControlTransportFailure } from "./deviceControlTransportFail
 import type { SessionReleaseSnapshot } from "./sessionManager";
 import type { DaemonHandshakeFailure } from "./daemonHandshake";
 import type { DaemonShuttingDownFailure } from "./daemonShutdownOutcome";
+import type { McpOverloadFailure } from "./McpTimeoutError";
 
 /**
  * Request sent from CLI client to daemon
@@ -70,12 +71,39 @@ export interface DaemonResponse {
   boundSessionLoss?: BoundSessionLoss;
   /** Retryable daemon lifecycle transition that rejected new session admission. */
   daemonShuttingDown?: DaemonShuttingDownFailure;
+  /** Retryable rejection issued before a queue-depleted deadline expires. */
+  overloadFailure?: McpOverloadFailure;
+  /** Original timeout/abort reason retained when transport errors obscure it. */
+  requestFailureCause?: DaemonRequestFailureCause;
   /**
    * Number of leading characters delivered by a failed Android
    * `input/typeText` append request. Present only when the append operation
    * reached the device before failing, or explicitly reports zero progress.
    */
   charsSent?: number;
+}
+
+export interface DaemonRequestFailureCause {
+  name: string;
+  message: string;
+}
+
+export function sanitizeDaemonRequestFailureCause(
+  value: unknown,
+): DaemonRequestFailureCause | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const cause = value as Record<string, unknown>;
+  if (
+    typeof cause.name !== "string" ||
+    cause.name.length === 0 ||
+    typeof cause.message !== "string" ||
+    cause.message.length === 0
+  ) {
+    return undefined;
+  }
+  return { name: cause.name, message: cause.message };
 }
 
 export const BOUND_SESSION_LOSS_CODE = "bound_session_lost";

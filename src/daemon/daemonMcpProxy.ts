@@ -2076,10 +2076,15 @@ export class DaemonMcpProxy {
    * #5879). A wedged or absent daemon therefore never hides the tool surface at
    * `tools/list` time; the client still gets one clear error on first use.
    *
-   * Once a connection is established, it delegates to {@link listTools} so the
-   * accurate (session-scoped) list is served. The first successful connect after
-   * a static serve emits a tools `list_changed` (see {@link doConnect}) so the
-   * client re-fetches and reconciles any difference.
+   * Once a connection is established, live definitions augment the static
+   * surface, but cannot remove a static definition. Connection-profile updates
+   * and session binding can transiently narrow the daemon's live `tools/list`
+   * response while it is still legal for a caller to enable or invoke a tool.
+   * Keeping the schema superset prevents ToolSearch clients from losing the
+   * name and input schema needed to reach that capability; the live call gate
+   * remains authoritative for whether an advertised tool can execute. The first
+   * successful connect after a static serve emits a tools `list_changed` (see
+   * {@link doConnect}) so the client re-fetches enhanced live definitions.
    *
    * The static path deliberately does NOT call `throwIfBoundSessionUnavailable()`
    * (unlike {@link listTools}): re-coupling `tools/list` to daemon/session state
@@ -2088,11 +2093,18 @@ export class DaemonMcpProxy {
    * through {@link callTool}'s gate.
    */
   async listAdvertisedTools(): Promise<ProxiedToolDefinition[]> {
-    if (this.connected && this.client) {
-      return this.listTools();
+    const staticTools = this.staticToolDefinitionsProvider();
+    if (!this.connected || !this.client) {
+      this.servedStaticToolList = true;
+      return staticTools;
     }
-    this.servedStaticToolList = true;
-    return this.staticToolDefinitionsProvider();
+    const liveTools = await this.listTools();
+    const liveToolsByName = new Map(liveTools.map((tool) => [tool.name, tool]));
+    const staticToolNames = new Set(staticTools.map((tool) => tool.name));
+    return [
+      ...staticTools.map((tool) => liveToolsByName.get(tool.name) ?? tool),
+      ...liveTools.filter((tool) => !staticToolNames.has(tool.name)),
+    ];
   }
 
   /**

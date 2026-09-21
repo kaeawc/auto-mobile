@@ -91,7 +91,7 @@ describe("DaemonMcpProxy.listAdvertisedTools (lazy tools/list — issue #5879)",
     }
   });
 
-  test("once connected, serves the live daemon tool list, not the static surface (AC4)", async () => {
+  test("once connected, preserves static schemas while augmenting them with live definitions (AC4)", async () => {
     const fakeClient = new FakeDaemonClient({
       daemonMethodResults: new Map([
         ["tools/list", { tools: [{ name: "liveOnlyTool", inputSchema: {} }] }],
@@ -102,6 +102,9 @@ describe("DaemonMcpProxy.listAdvertisedTools (lazy tools/list — issue #5879)",
       clientFactory: () => fakeClient,
       daemonManager: matchingDaemonManager(),
       autoStartDaemon: false,
+      staticToolDefinitionsProvider: () => [
+        { name: "staticTool", inputSchema: { type: "object" } },
+      ],
     });
 
     try {
@@ -110,7 +113,7 @@ describe("DaemonMcpProxy.listAdvertisedTools (lazy tools/list — issue #5879)",
       expect(proxy.isConnected()).toBe(true);
 
       const tools = await proxy.listAdvertisedTools();
-      expect(tools.map((tool) => tool.name)).toEqual(["liveOnlyTool"]);
+      expect(tools.map((tool) => tool.name)).toEqual(["staticTool", "liveOnlyTool"]);
     } finally {
       isAvailableSpy.mockRestore();
       await proxy.close();

@@ -35,7 +35,7 @@ describe("App file tools", () => {
           { destinationPath: "multiple-sources.txt", contentText: "x", contentBase64: "eA==" },
         ],
       }),
-    ).toBe(false);
+    ).toBe(true);
     expect(
       validate({ target, files: [{ destinationPath: "one-source.txt", contentText: "x" }] }),
     ).toBe(true);

@@ -294,7 +294,7 @@ describe("published observe waitFor input schema", () => {
     );
   });
 
-  test("rejects selectorless predicate DSL forms while permitting whole-screen stable", () => {
+  test("leaves predicate conditional validation to runtime", () => {
     expect(
       validatePublishedObserveInput({
         platform: "android",
@@ -312,16 +312,16 @@ describe("published observe waitFor input schema", () => {
         platform: "android",
         waitFor: { for: "stable", container: { elementId: "scope" } },
       }).valid,
-    ).toBe(false);
+    ).toBe(true);
   });
 
-  test("requires text for the advertised textEquals DSL form", () => {
+  test("leaves textEquals conditional validation to runtime", () => {
     expect(
       validatePublishedObserveInput({
         platform: "android",
         waitFor: { for: "textEquals", elementId: "counter" },
       }).valid,
-    ).toBe(false);
+    ).toBe(true);
     expect(
       validatePublishedObserveInput({
         platform: "android",
@@ -330,24 +330,27 @@ describe("published observe waitFor input schema", () => {
     ).toBe(true);
   });
 
-  test("enforces the advertised container selector shape", () => {
-    for (const container of [{}, { elementId: "scope", text: "Scope" }]) {
+  test("retains container selector shape while leaving exclusive selection to runtime", () => {
+    for (const [container, expected] of [
+      [{}, false],
+      [{ elementId: "scope", text: "Scope" }, true],
+    ]) {
       expect(
         validatePublishedObserveInput({
           platform: "android",
           waitFor: { for: "appear", elementId: "target", container },
         }).valid,
-      ).toBe(false);
+      ).toBe(expected);
     }
   });
 
-  test("rejects dual timeout aliases in the advertised schema", () => {
+  test("leaves dual timeout alias validation to runtime", () => {
     expect(
       validatePublishedObserveInput({
         platform: "android",
         waitFor: { for: "appear", elementId: "target", timeout: 1000, timeoutMs: 1000 },
       }).valid,
-    ).toBe(false);
+    ).toBe(true);
   });
 
   test("committed tool definitions document textMatch as applying only to waitFor.text", () => {
@@ -568,12 +571,8 @@ describe("published observe waitFor input schema", () => {
         waitFor: { absent: {} },
       },
     },
-  ])("rejects runtime-invalid waitFor input: $label", ({ input }) => {
+  ])("runtime rejects invalid waitFor input: $label", ({ input }) => {
     expect(observeSchema.safeParse(input).success).toBe(false);
-
-    const result = validatePublishedObserveInput(input);
-
-    expect(result.valid).toBe(false);
   });
 });
 

@@ -42,7 +42,7 @@ describe("device resource advertised constraints", () => {
     );
   });
 
-  test.each(["live", "artifact"])("%s schema accepts restoration alone", (source) => {
+  test.each(["live", "artifact"])("%s schema leaves resource selection to runtime", (source) => {
     const validate = validators.get(`${source}/setDeviceResources`)!;
     const restore = {
       deviceId: "emulator-5580",
@@ -53,16 +53,16 @@ describe("device resource advertised constraints", () => {
       ],
     };
     expect(validate({ restore })).toBe(true);
-    expect(validate({})).toBe(false);
-    expect(validate({ restore, resources: { animations: "disabled" } })).toBe(false);
+    expect(validate({})).toBe(true);
+    expect(validate({ restore, resources: { animations: "disabled" } })).toBe(true);
   });
 
   test.each(["live", "artifact"])(
-    "%s schema requires booting when configuring resources",
+    "%s schema leaves resource booting validation to runtime",
     (source) => {
       const validate = validators.get(`${source}/provisionDevice`)!;
       const args = { operationId: "test", device, resources: { widgets: "enabled" } };
-      expect(validate({ ...args, boot: false })).toBe(false);
+      expect(validate({ ...args, boot: false })).toBe(true);
       expect(validate({ ...args, boot: true })).toBe(true);
       expect(validate(args)).toBe(true);
       expect(validate({ operationId: "test", device, boot: false })).toBe(true);

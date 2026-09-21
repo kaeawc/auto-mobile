@@ -55,6 +55,7 @@ import {
   applyJsonSchemaOverride,
   applyPostFlattenJsonSchemaOverride,
   canonicalizeDiscriminatedUnionJsonSchema,
+  enforceAnthropicToolSchemaSubset,
   isInjectedDeviceIdSchema,
 } from "./toolSchemaHelpers";
 import {
@@ -187,7 +188,7 @@ function constrainAdvertisedAppIdProperties(value: unknown): void {
 
 function toAdvertisedJsonSchema(
   schema: any,
-  options: { constrainAppIds: boolean },
+  options: { constrainAppIds: boolean; anthropicSubset?: boolean },
 ): Record<string, unknown> {
   const jsonSchema = toJSONSchema(schema, {
     override: ({ zodSchema, jsonSchema }) => {
@@ -211,6 +212,9 @@ function toAdvertisedJsonSchema(
   applyPostFlattenJsonSchemaOverride(schema, flattened);
   if (options.constrainAppIds) {
     constrainAdvertisedAppIdProperties(flattened);
+  }
+  if (options.anthropicSubset) {
+    enforceAnthropicToolSchemaSubset(flattened);
   }
   return flattened;
 }
@@ -2024,7 +2028,10 @@ export class ToolRegistryClass {
     let cached = this.toolDefinitionSchemaCache.get(tool.name);
     if (!cached) {
       cached = {
-        inputSchema: toAdvertisedJsonSchema(tool.schema, { constrainAppIds: true }),
+        inputSchema: toAdvertisedJsonSchema(tool.schema, {
+          constrainAppIds: true,
+          anthropicSubset: true,
+        }),
         outputSchemasByRuntimeFlags: new Map(),
       };
       this.toolDefinitionSchemaCache.set(tool.name, cached);

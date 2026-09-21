@@ -1058,7 +1058,7 @@ describe("provisionDevice handler", () => {
     ).toThrow();
   });
 
-  test("advertises the platform-discriminated device schema with deterministic oneOf", () => {
+  test("advertises the platform-discriminated device schema with deterministic anyOf", () => {
     const definition = ToolRegistry.getToolDefinitions().find(
       (candidate) => candidate.name === "provisionDevice",
     );
@@ -1066,8 +1066,8 @@ describe("provisionDevice handler", () => {
       | Record<string, Record<string, unknown>>
       | undefined;
 
-    expect(properties?.device.oneOf).toBeArray();
-    expect(properties?.device.anyOf).toBeUndefined();
+    expect(properties?.device.oneOf).toBeUndefined();
+    expect(properties?.device.anyOf).toBeArray();
   });
 
   test.each([

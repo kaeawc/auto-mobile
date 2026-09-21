@@ -116,7 +116,7 @@ describe("notification tools", () => {
     expect(schema.allOf).toBeUndefined();
   });
 
-  test("generated tool definition conditionally requires appId on iOS", () => {
+  test("generated tool definition leaves iOS appId validation to runtime", () => {
     const toolDefinition = ToolRegistry.getToolDefinitions().find(
       (tool) => tool.name === "postNotification",
     );
@@ -125,15 +125,8 @@ describe("notification tools", () => {
     const schema = toolDefinition!.inputSchema as any;
     // #6154: platform is optional wherever deviceId/session resolves it.
     expect(schema.required).toEqual(["title", "body"]);
-    expect(schema.if).toEqual({
-      properties: {
-        platform: { const: "ios" },
-      },
-      required: ["platform"],
-    });
-    expect(schema.then).toEqual({
-      required: ["appId"],
-    });
+    expect(schema.if).toBeUndefined();
+    expect(schema.then).toBeUndefined();
     expect(schema.required).not.toContain("appId");
   });
 });

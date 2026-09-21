@@ -645,8 +645,8 @@ export const provisionDeviceSchema = withJsonSchemaOverride(
     }),
   (jsonSchema) => {
     // Both fields carry the same consequent, so they share one conditional.
-    // The combinator stays nested inside `if` — a top-level `allOf` is not
-    // publishable (#5870).
+    // enforceAnthropicToolSchemaSubset strips this root conditional downstream,
+    // so it never reaches the advertised wire schema.
     jsonSchema.if = {
       anyOf: ["resources", "enableTools"].map((field) => ({ required: [field] })),
     };

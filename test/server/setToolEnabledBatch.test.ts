@@ -388,7 +388,7 @@ describe("setToolEnabled batch enable (#6869)", () => {
       expect(validate({ deviceId: "emulator-5554", enableTools: ["notATool"] })).toBe(false);
     });
 
-    test("advertises the exactly-one-name rule so a client cannot build a rejected call", () => {
+    test("leaves the exactly-one-name rule to runtime validation", () => {
       const definition = ToolRegistry.getToolDefinitions().find(
         (tool) => tool.name === SET_TOOL_ENABLED_TOOL_NAME,
       )!;
@@ -396,8 +396,8 @@ describe("setToolEnabled batch enable (#6869)", () => {
 
       expect(validate({ toolName: "inputText" })).toBe(true);
       expect(validate({ toolNames: ["inputText"] })).toBe(true);
-      expect(validate({ toolName: "inputText", toolNames: ["clearText"] })).toBe(false);
-      expect(validate({ enabled: true })).toBe(false);
+      expect(validate({ toolName: "inputText", toolNames: ["clearText"] })).toBe(true);
+      expect(validate({ enabled: true })).toBe(true);
     });
 
     test("keeps the advertised setToolEnabled schema free of top-level combinators", () => {

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { DaemonManager, parseDaemonArgs } from "../../src/daemon/manager";
+import { daemonCommandOptions, DaemonManager, parseDaemonArgs } from "../../src/daemon/manager";
 import { parseArgs } from "../../src/cli/parseArgs";
 import { REUSE_CRITICAL_OPTION_KEYS } from "../../src/daemon/daemonMcpProxy";
 import {
@@ -194,6 +194,16 @@ describe("daemon startup-option propagation", () => {
     };
 
     expect(parseDaemonArgs(serialize(options))).toMatchObject(options);
+  });
+
+  test("bare daemon commands preserve recorded tool defaults while explicit empties clear them", () => {
+    expect(daemonCommandOptions([], {}).enabledTools).toBeUndefined();
+    expect(daemonCommandOptions([], {}).disabledTools).toBeUndefined();
+    expect(
+      daemonCommandOptions([], {
+        startupToolDefaults: { enabledTools: [], disabledTools: [] },
+      }),
+    ).toMatchObject({ enabledTools: [], disabledTools: [] });
   });
 });
 

@@ -4261,7 +4261,10 @@ export interface RunDaemonCommandOptions {
   startupToolDefaults?: Required<Pick<DaemonOptions, "enabledTools" | "disabledTools">>;
 }
 
-function daemonCommandOptions(args: string[], options: RunDaemonCommandOptions): DaemonOptions {
+export function daemonCommandOptions(
+  args: string[],
+  options: RunDaemonCommandOptions,
+): DaemonOptions {
   const parsed = parseDaemonArgs(args);
   if (!options.startupToolDefaults) {
     return parsed;

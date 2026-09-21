@@ -15,10 +15,10 @@ import type { ProxiedToolDefinition } from "./daemonMcpProxy";
  * read, so a subset would risk hiding a live tool — the exact failure #5879
  * fixes). It over-advertises plan-only tools (`barrier`, `criticalSection`) and
  * flag-gated tools that a given daemon may not serve; calling one before connect
- * yields a clean actionable error, and the reconciliation `tools/list_changed`
- * (see `DaemonMcpProxy.doConnect`) narrows the client to the accurate list once
- * connected. This matches the issue's "show the tools, one clear error on first
- * use" intent.
+ * yields a clean actionable error. Once connected, plan-only definitions are
+ * removed while externally callable static definitions remain available through
+ * transient live-list filtering. This matches the issue's "show the tools, one
+ * clear error on first use" intent without advertising plan-only calls forever.
  *
  * `outputSchema` is deliberately NOT advertised cold. Whether the daemon
  * suppresses it depends on the connection's `toolResultsNoStructuredContent`
@@ -40,22 +40,18 @@ interface RawToolDefinition {
 // Parse once at module load; the per-call mapping below is cheap (tools/list is
 // not a hot path) and must re-read the always-load env each call.
 const RAW_DEFINITIONS: RawToolDefinition[] = toolDefinitionsJson as RawToolDefinition[];
+const PLAN_ONLY_META_KEY = "automobile/planOnly";
 
-/**
- * The static tool surface served by `tools/list` before a daemon connection is
- * established. `_meta` (e.g. the MCP Apps UI pointer, issue #4669) is preserved
- * verbatim, and `_meta["anthropic/alwaysLoad"]` is synthesized when
- * `AUTOMOBILE_ALWAYS_LOAD_TOOLS=true`, both matching
- * `ToolRegistry.getToolDefinitions()`. `outputSchema` is intentionally omitted
- * (see the file docstring).
- */
-export function getStaticToolDefinitions(): ProxiedToolDefinition[] {
+function toolDefinitions(includePlanOnly: boolean): ProxiedToolDefinition[] {
   const alwaysLoad = process.env.AUTOMOBILE_ALWAYS_LOAD_TOOLS === "true";
-  return RAW_DEFINITIONS.map((tool) => {
+  return RAW_DEFINITIONS.filter(
+    (tool) => includePlanOnly || tool._meta?.[PLAN_ONLY_META_KEY] !== true,
+  ).map((tool) => {
     const meta: Record<string, unknown> = {
       ...(tool._meta ?? {}),
       ...(alwaysLoad ? { "anthropic/alwaysLoad": true } : {}),
     };
+    delete meta[PLAN_ONLY_META_KEY];
     const definition: ProxiedToolDefinition = {
       name: tool.name,
       inputSchema: tool.inputSchema,
@@ -68,4 +64,21 @@ export function getStaticToolDefinitions(): ProxiedToolDefinition[] {
     }
     return definition;
   });
+}
+
+/**
+ * The static tool surface served by `tools/list` before a daemon connection is
+ * established. `_meta` (e.g. the MCP Apps UI pointer, issue #4669) is preserved
+ * verbatim, and `_meta["anthropic/alwaysLoad"]` is synthesized when
+ * `AUTOMOBILE_ALWAYS_LOAD_TOOLS=true`, both matching
+ * `ToolRegistry.getToolDefinitions()`. `outputSchema` is intentionally omitted
+ * (see the file docstring).
+ */
+export function getStaticToolDefinitions(): ProxiedToolDefinition[] {
+  return toolDefinitions(true);
+}
+
+/** Static schemas eligible to supplement a connected daemon's live tool list. */
+export function getConnectedStaticToolDefinitions(): ProxiedToolDefinition[] {
+  return toolDefinitions(false);
 }

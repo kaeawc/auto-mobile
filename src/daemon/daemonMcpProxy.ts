@@ -68,7 +68,10 @@ import {
   getCurrentBuildIdentity,
 } from "./buildIdentity";
 import { DeviceControlTransportError } from "./deviceControlTransportFailure";
-import { getStaticToolDefinitions } from "./staticToolDefinitions";
+import {
+  getConnectedStaticToolDefinitions,
+  getStaticToolDefinitions,
+} from "./staticToolDefinitions";
 import { DaemonRestartDeferredError } from "./daemonRestartAdmission";
 import { isRecoverableDaemonReleaseReason } from "../db/deviceSessionRepository";
 import { daemonProcessOptions } from "./daemonOptionScopes";
@@ -394,6 +397,11 @@ export interface DaemonMcpProxyConfig {
    */
   staticToolDefinitionsProvider?: () => ProxiedToolDefinition[];
   /**
+   * Supplies static schemas eligible to supplement a connected daemon's live
+   * list. Defaults to the static catalog without plan-only definitions.
+   */
+  connectedStaticToolDefinitionsProvider?: () => ProxiedToolDefinition[];
+  /**
    * Private live-acceptance configuration. It is set only while constructing
    * the dedicated harness proxy; MCP tool callers cannot set it.
    *
@@ -418,6 +426,16 @@ export interface ProxiedToolDefinition {
   // surface (cold path) — e.g. the MCP Apps UI pointer `_meta.ui.resourceUri`
   // (issue #4669). Non-Apps hosts ignore it.
   _meta?: Record<string, unknown>;
+}
+
+function connectedStaticToolDefinitionsProvider(
+  config: DaemonMcpProxyConfig,
+): () => ProxiedToolDefinition[] {
+  return (
+    config.connectedStaticToolDefinitionsProvider ??
+    config.staticToolDefinitionsProvider ??
+    getConnectedStaticToolDefinitions
+  );
 }
 
 /**
@@ -775,6 +793,7 @@ export class DaemonMcpProxy {
   // Supplies the static tool surface for listAdvertisedTools() before a daemon
   // connection exists (issue #5879).
   private readonly staticToolDefinitionsProvider: () => ProxiedToolDefinition[];
+  private readonly connectedStaticToolDefinitionsProvider: () => ProxiedToolDefinition[];
   // Set when listAdvertisedTools() served the static surface without a live
   // connection. On the next successful connect the proxy emits a tools
   // list_changed so the client re-fetches the accurate (session-scoped) list.
@@ -846,6 +865,7 @@ export class DaemonMcpProxy {
     }
     this.staticToolDefinitionsProvider =
       config.staticToolDefinitionsProvider ?? getStaticToolDefinitions;
+    this.connectedStaticToolDefinitionsProvider = connectedStaticToolDefinitionsProvider(config);
     this.buildIdentity = config.buildIdentity ?? getCurrentBuildIdentity();
     this.clientVersion = config.clientVersion ?? DAEMON_VERSION;
     this.clientAssetVersion = isExplicitPin() ? resolveAssetVersion(resolvePinnedVersion()) : null;
@@ -2093,11 +2113,11 @@ export class DaemonMcpProxy {
    * through {@link callTool}'s gate.
    */
   async listAdvertisedTools(): Promise<ProxiedToolDefinition[]> {
-    const staticTools = this.staticToolDefinitionsProvider();
     if (!this.connected || !this.client) {
       this.servedStaticToolList = true;
-      return staticTools;
+      return this.staticToolDefinitionsProvider();
     }
+    const staticTools = this.connectedStaticToolDefinitionsProvider();
     const liveTools = await this.listTools();
     const liveToolsByName = new Map(liveTools.map((tool) => [tool.name, tool]));
     const staticToolNames = new Set(staticTools.map((tool) => tool.name));

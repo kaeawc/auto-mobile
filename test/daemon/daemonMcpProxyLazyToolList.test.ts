@@ -127,6 +127,33 @@ describe("DaemonMcpProxy.listAdvertisedTools (lazy tools/list — issue #5879)",
     },
   );
 
+  test("connected fallback retains tapOn without re-advertising plan-only tools", async () => {
+    const fakeClient = new FakeDaemonClient({
+      daemonMethodResults: new Map([
+        ["tools/list", { tools: [{ name: "liveOnlyTool", inputSchema: {} }] }],
+      ]),
+    });
+    const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+    const proxy = new DaemonMcpProxy({
+      clientFactory: () => fakeClient,
+      daemonManager: matchingDaemonManager(),
+      autoStartDaemon: false,
+    });
+
+    try {
+      await proxy.callTool("observe", {});
+      const toolNames = (await proxy.listAdvertisedTools()).map((tool) => tool.name);
+
+      expect(toolNames).toContain("tapOn");
+      expect(toolNames).toContain("liveOnlyTool");
+      expect(toolNames).not.toContain("barrier");
+      expect(toolNames).not.toContain("criticalSection");
+    } finally {
+      isAvailableSpy.mockRestore();
+      await proxy.close();
+    }
+  });
+
   test("serves the static surface after an idle daemon connection closes", async () => {
     const fakeClient = new FakeDaemonClient({
       daemonMethodResults: new Map([

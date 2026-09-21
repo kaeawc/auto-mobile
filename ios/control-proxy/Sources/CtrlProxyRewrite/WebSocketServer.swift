@@ -2,6 +2,51 @@ import Foundation
 import Network
 import os
 
+/// Coordinates failures recorded while one WebSocket command is in flight.
+///
+/// The server executes commands serially, so one lock-confined slot is sufficient. The
+/// coordinator deliberately knows nothing about the framework that records a failure: callers
+/// translate failures to strings at the boundary, keeping the production target framework-free.
+public final class CommandFailureCoordinator: Sendable {
+    private struct InFlightCommand: Sendable {
+        let requestId: String?
+        var failures: [String] = []
+    }
+
+    private let inFlightCommand = OSAllocatedUnfairLock<InFlightCommand?>(initialState: nil)
+
+    public init() {}
+
+    public func begin(requestId: String?) {
+        inFlightCommand.withLock { $0 = InFlightCommand(requestId: requestId) }
+    }
+
+    public func end() {
+        inFlightCommand.withLock { $0 = nil }
+    }
+
+    /// Records a failure for the current command, returning whether the caller should deflect it.
+    public func recordDeflectedFailure(_ description: String) -> Bool {
+        inFlightCommand.withLock { state in
+            guard var command = state else { return false }
+            command.failures.append(description)
+            state = command
+            return true
+        }
+    }
+
+    /// Drains failures recorded for the current command without ending its in-flight window.
+    public func takeDeflectedFailures() -> [String] {
+        inFlightCommand.withLock { state in
+            guard var command = state else { return [] }
+            let failures = command.failures
+            command.failures.removeAll()
+            state = command
+            return failures
+        }
+    }
+}
+
 /// WebSocket server for CtrlProxy (RFC 6455 over TCP), plus the `/health` and
 /// `/sdk-events` HTTP endpoints (handled per-connection).
 ///
@@ -33,6 +78,7 @@ final class WebSocketServer: @unchecked Sendable {
     private let commandHandler: any CommandHandling
     private let perf: any PerfTracking
     private let frameContext: any FrameContextRecording
+    private let failureCoordinator: CommandFailureCoordinator?
     /// Called with the `POST /sdk-events` body (SDK-hierarchy extraction lives here,
     /// filled in the SDK phase); forwarded to every connection.
     private let onSdkEventBatch: (@Sendable (Data) -> Void)?
@@ -72,6 +118,7 @@ final class WebSocketServer: @unchecked Sendable {
         commandHandler: any CommandHandling,
         perf: any PerfTracking,
         frameContext: any FrameContextRecording,
+        failureCoordinator: CommandFailureCoordinator? = nil,
         onSdkEventBatch: (@Sendable (Data) -> Void)? = nil,
         drainLogEvents: (@Sendable () -> [Data])? = nil,
         onClientPresenceChanged: (@Sendable (Bool) -> Void)? = nil,
@@ -87,6 +134,7 @@ final class WebSocketServer: @unchecked Sendable {
         self.commandHandler = commandHandler
         self.perf = perf
         self.frameContext = frameContext
+        self.failureCoordinator = failureCoordinator
         self.onSdkEventBatch = onSdkEventBatch
         self.drainLogEvents = drainLogEvents
         self.onClientPresenceChanged = onClientPresenceChanged
@@ -247,6 +295,10 @@ final class WebSocketServer: @unchecked Sendable {
     /// `@MainActor` collaborators, same task) accumulates — without it every perf call is a
     /// silent no-op (§9.5). Runs on the serial command task-chain.
     func handleMessage(_ data: Data, responder: any WebSocketResponding) async {
+        let inFlightRequestId = failureCoordinator == nil ? nil : WireError.extractRequestId(from: data)
+        failureCoordinator?.begin(requestId: inFlightRequestId)
+        defer { failureCoordinator?.end() }
+
         do {
             let request = try JSONDecoder().decode(WebSocketRequest.self, from: data)
             print(
@@ -263,12 +315,29 @@ final class WebSocketServer: @unchecked Sendable {
                 let perfTiming = self.flushPerfTiming()
                 return try self.encodeResponse(response, totalTimeMs: totalTimeMs, perfTiming: perfTiming)
             }
-            responder.send(responseData)
+            let deflectedFailures = failureCoordinator?.takeDeflectedFailures() ?? []
+            if deflectedFailures.isEmpty {
+                responder.send(responseData)
+            } else {
+                responder.send(ErrorResponse.build(
+                    requestId: inFlightRequestId,
+                    error: DeflectedCommandError(failures: deflectedFailures)
+                ))
+            }
         } catch {
             print("[WebSocketServer] Error handling message: \(error)")
             perf.clear()
+            let deflectedFailures = failureCoordinator?.takeDeflectedFailures() ?? []
+            let responseError: any Error = if deflectedFailures.isEmpty {
+                error
+            } else {
+                DeflectedCommandError(
+                    failures: deflectedFailures,
+                    underlyingMessage: WireError.message(for: error)
+                )
+            }
             let requestId = WireError.extractRequestId(from: data)
-            responder.send(ErrorResponse.build(requestId: requestId, error: error))
+            responder.send(ErrorResponse.build(requestId: requestId, error: responseError))
         }
     }
 
@@ -381,5 +450,23 @@ final class WebSocketServer: @unchecked Sendable {
         } catch {
             print("[WebSocketServer] Failed to encode performance update: \(error)")
         }
+    }
+}
+
+private struct DeflectedCommandError: LocalizedError, Sendable {
+    let failures: [String]
+    let underlyingMessage: String?
+
+    init(failures: [String], underlyingMessage: String? = nil) {
+        self.failures = failures
+        self.underlyingMessage = underlyingMessage
+    }
+
+    var errorDescription: String? {
+        let failureSummary = failures.joined(separator: "\n")
+        if let underlyingMessage {
+            return "\(underlyingMessage)\nRecorded command failure(s): \(failureSummary)"
+        }
+        return "Recorded command failure(s): \(failureSummary)"
     }
 }

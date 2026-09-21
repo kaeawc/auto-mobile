@@ -57,9 +57,15 @@ public final class CtrlProxy {
     /// test (`CtrlProxyLifecycleTests`) that substitutes a `FakeProxyTimer`.
     public convenience init(
         port: UInt16 = defaultPort,
-        storageInspector: (any StorageInspecting)? = DefaultStorageInspecting()
+        storageInspector: (any StorageInspecting)? = DefaultStorageInspecting(),
+        coordinator: CommandFailureCoordinator? = nil
     ) {
-        self.init(port: port, storageInspector: storageInspector, hierarchyPollTimer: SystemTimer())
+        self.init(
+            port: port,
+            storageInspector: storageInspector,
+            hierarchyPollTimer: SystemTimer(),
+            coordinator: coordinator
+        )
     }
 
     /// Designated initializer. `hierarchyPollTimer` is injected so tests can drive the
@@ -73,6 +79,7 @@ public final class CtrlProxy {
         port: UInt16 = defaultPort,
         storageInspector: (any StorageInspecting)? = DefaultStorageInspecting(),
         hierarchyPollTimer: any ProxyTimer,
+        coordinator: CommandFailureCoordinator? = nil,
         hasClients: (@Sendable () -> Bool)? = nil,
         startServer: (@Sendable () throws -> Void)? = nil
     ) {
@@ -118,6 +125,7 @@ public final class CtrlProxy {
             commandHandler: commandHandler,
             perf: perf,
             frameContext: frameContext,
+            failureCoordinator: coordinator,
             onSdkEventBatch: { [sdkHierarchyCache, coordinatorBox] data in
                 SdkHierarchyExtractor.extractIfPresent(from: data, into: sdkHierarchyCache) {
                     Task { @MainActor in coordinatorBox.coordinator?.publishSdkHierarchyRefresh() }

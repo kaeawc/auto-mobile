@@ -21,7 +21,11 @@ import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { type IdGenerator, defaultIdGenerator } from "../utils/IdGenerator";
 import type { InstalledAppsStore } from "../db/installedAppsRepository";
 import { InstalledAppsRepository } from "../db/installedAppsRepository";
-import { RetryExecutor, defaultRetryExecutor } from "../utils/retry/RetryExecutor";
+import {
+  DEFAULT_RETRY_OPTIONS,
+  type RetryExecutor,
+  defaultRetryExecutor,
+} from "../utils/retry/RetryExecutor";
 import { createGlobalPerformanceTracker } from "../utils/PerformanceTracker";
 import {
   getDeviceRecoveryPolicy,
@@ -138,6 +142,8 @@ const failedReleaseRetryBackoff = exponentialBackoff({
 const UNCONFIRMED_RECOVERY_SHUTDOWN_COOLDOWN_MS = 30_000;
 const RECOVERING_IMAGE_SETTLEMENT_MISSING_RETRY_MS = 250;
 const MAX_DEFERRED_RECOVERY_SHUTDOWNS = 1;
+/** Initial unreadable observation plus two cache-bypassing rediscovery attempts. */
+const POOLED_IDENTITY_RECONCILE_MAX_ATTEMPTS = DEFAULT_RETRY_OPTIONS.maxAttempts;
 class UnconfirmedRecoveryShutdownError extends ActionableError {
   constructor(avdName: string, cause: unknown) {
     super(
@@ -260,9 +266,18 @@ export interface PooledDevice {
    */
   incarnation: number;
   /**
-   * Quarantine flag: the LATEST discovery observation for this LIVE entry
-   * carried the `Unknown (<serial>)` placeholder, so the pool no longer knows
-   * which AVD is on the serial.
+   * Number of retry attempts consumed by the bounded reconciliation currently
+   * checking a temporarily unreadable runtime AVD name. Defined only while the
+   * reconciliation is in progress; the last confirmed `avdName` remains the
+   * identity evidence and the entry remains actionable during this window.
+   */
+  identityReconcileAttempts?: number;
+  /** Injected-timer start time for the active bounded reconciliation. */
+  identityReconcileStartedAt?: number;
+  /**
+   * Terminal quarantine flag: bounded unreadable-name reconciliation was
+   * exhausted, or a resolved runtime name disagreed with this LIVE entry, so
+   * the pool no longer knows which AVD is on the serial.
    *
    * The placeholder is not evidence of a replacement (it would evict a live
    * emulator on a transient console read) and it is not evidence of continuity
@@ -290,8 +305,11 @@ export interface PooledDevice {
    * The transitions, all of them, applied by
    * {@link DevicePool.reconcileObservedPooledIdentity}:
    *
-   * - **enter** — the observation is the placeholder. Entering also CANCELS AND
-   *   DRAINS the bound session's in-flight executions through the injected
+   * - **reconcile, then enter** — the observation is the placeholder for an
+   *   entry with a confirmed `avdName`. Three attempts are made through
+   *   the injected retry executor. The entry stays actionable while they run;
+   *   only exhaustion enters quarantine. Entering also CANCELS AND DRAINS the
+   *   bound session's in-flight executions through the injected
    *   `cancelDeviceSessionExecutions` seam
    *   ({@link DevicePool.enterPooledIdentityQuarantine}): FUNNEL 2 only refuses
    *   LATER calls, while an execution already registered keeps issuing
@@ -345,8 +363,10 @@ export interface PooledDevice {
   /**
    * The `BootedDevice.observedAt` of the newest identity observation folded into
    * this entry, when that observation carried one — in EITHER direction: the
-   * placeholder or disagreement that entered {@link identityUnresolved}, and the
-   * resolved name that confirmed or lifted it.
+   * terminal placeholder exhaustion or disagreement that entered
+   * {@link identityUnresolved}, and the resolved name that confirmed or lifted
+   * it. In-progress unreadable observations are deliberately not recorded here:
+   * they are no new identity evidence.
    *
    * Discovery calls run concurrently and finish out of order, so the observation
    * a funnel folds in is not necessarily the newest one. Recording it on the
@@ -7134,9 +7154,10 @@ export class DevicePool {
    * ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
    *
    * It applies exactly the transitions the refresh sweep applies to the entry's
-   * IDENTITY — enter on the placeholder, restore on a matching resolved name,
-   * enter on a disagreeing one — because it shares the sweep's implementation of
-   * them ({@link reconcileObservedPooledIdentity}).
+   * IDENTITY — retry a placeholder before terminal quarantine, restore on a
+   * matching resolved name, enter immediately on a disagreeing one — because it
+   * shares the sweep's implementation of them
+   * ({@link reconcileObservedPooledIdentity}).
    *
    * What it deliberately does NOT do is change pool MEMBERSHIP. Installing a
    * replacement evicts an incarnation and retires its session, and that belongs to
@@ -7203,7 +7224,8 @@ export class DevicePool {
    * rules cannot drift between them.
    *
    * Three outcomes, and only three: the observation agrees and resolves the name
-   * (restore), agrees but carries the placeholder (enter), or disagrees (enter).
+   * (restore), agrees but carries the placeholder (bounded reconciliation, then
+   * terminal quarantine on exhaustion), or disagrees (enter immediately).
    * Handsets short-circuit inside {@link reconcilePooledIdentityResolution} /
    * {@link quarantineDisagreeingPooledIdentity}: their serial is never reassigned
    * and their name is not identity.
@@ -7407,6 +7429,10 @@ export class DevicePool {
     ) {
       return;
     }
+    if (this.shouldReconcileUnresolvedEmulatorName(pooled, discovered)) {
+      await this.reconcileUnresolvedEmulatorName(pooled, discovered, options);
+      return;
+    }
     if (this.shouldQuarantineUnresolvedEmulatorName(pooled, discovered)) {
       await this.enterPooledIdentityQuarantine(
         pooled,
@@ -7427,6 +7453,7 @@ export class DevicePool {
     // not it is quarantined; recording it on the LIVE path too is what lets a
     // later straggler be recognised as stale before it quarantines anything.
     this.recordIdentityObservation(pooled, this.identityEvidenceForBootedDevice(discovered));
+    this.clearPooledIdentityReconciliation(pooled);
     if (pooled.identityUnresolved !== true) {
       return;
     }
@@ -7435,6 +7462,140 @@ export class DevicePool {
       `[DevicePool] Lifting the identity quarantine on ${pooled.id}: discovery read ` +
         `'${discovered.name}'`,
     );
+  }
+
+  /**
+   * Whether an unreadable runtime name should get the bounded continuity check
+   * instead of immediately destroying trust in a confirmed AVD mapping.
+   */
+  private shouldReconcileUnresolvedEmulatorName(
+    pooled: PooledDevice,
+    discovered: Pick<BootedDevice, "deviceId" | "name" | "platform" | "consoleBusyDuringProbe">,
+  ): boolean {
+    return (
+      pooled.avdName !== undefined &&
+      pooled.identityUnresolved !== true &&
+      this.hasUnresolvedEmulatorName(discovered) &&
+      discovered.name !== discovered.deviceId &&
+      !discovered.consoleBusyDuringProbe
+    );
+  }
+
+  /**
+   * Preserve the last confirmed AVD identity while retrying an unreadable probe.
+   * The retry executor's three-attempt default is deliberately the whole bound:
+   * the caller's observation is attempt one and two cache-bypassing Android
+   * discovery calls are attempts two and three. Delays are zero because each
+   * discovery performs the runtime probes itself; this keeps admission latency
+   * bounded by those probes and unit tests below the repository's 100ms budget.
+   */
+  private async reconcileUnresolvedEmulatorName(
+    pooled: PooledDevice,
+    discovered: Pick<
+      BootedDevice,
+      "deviceId" | "name" | "platform" | "observedAt" | "consoleBusyDuringProbe"
+    >,
+    options: DiscoveryReconcileOptions,
+  ): Promise<void> {
+    if (pooled.identityReconcileAttempts !== undefined) {
+      logger.debug(
+        `[DevicePool] Retaining ${pooled.id}: bounded AVD-name reconciliation is already in progress`,
+      );
+      return;
+    }
+
+    pooled.identityReconcileAttempts = 0;
+    pooled.identityReconcileStartedAt = this.timer.now();
+    let latestUnresolved = discovered;
+    const result = await this.retryExecutor.execute(
+      async (attempt) => {
+        if (
+          this.devices.get(pooled.id) !== pooled ||
+          pooled.identityReconcileAttempts !== attempt - 1
+        ) {
+          return { kind: "superseded" } as const;
+        }
+        pooled.identityReconcileAttempts = attempt;
+        const observation =
+          attempt === 1 ? discovered : await this.rediscoverPooledAndroidIdentity(pooled, options);
+
+        // A concurrent resolved observation clears the attempt state. Likewise,
+        // replacing/removing the entry makes this retry belong to an old epoch.
+        if (
+          this.devices.get(pooled.id) !== pooled ||
+          pooled.identityReconcileAttempts !== attempt
+        ) {
+          return { kind: "superseded" } as const;
+        }
+
+        if (observation !== undefined) {
+          if (this.comparePooledIdentityEvidence(pooled, observation) === "stale") {
+            return { kind: "superseded" } as const;
+          }
+          if (!this.hasUnresolvedEmulatorName(observation)) {
+            return { kind: "resolved", observation } as const;
+          }
+          if (observation.name === observation.deviceId || observation.consoleBusyDuringProbe) {
+            return { kind: "no-evidence" } as const;
+          }
+          latestUnresolved = observation;
+        }
+
+        logger.debug(
+          `[DevicePool] Retaining ${pooled.id} under confirmed AVD '${pooled.avdName}': ` +
+            `runtime name unreadable on reconciliation attempt ${attempt}/${POOLED_IDENTITY_RECONCILE_MAX_ATTEMPTS}`,
+        );
+        throw new DevicePoolError(`Runtime AVD name for '${pooled.id}' remains unreadable`, true);
+      },
+      {
+        maxAttempts: POOLED_IDENTITY_RECONCILE_MAX_ATTEMPTS,
+        delays: 0,
+        signal: options.signal,
+      },
+    );
+
+    if (result.success) {
+      this.clearPooledIdentityReconciliation(pooled);
+      if (result.value?.kind === "resolved") {
+        await this.reconcileObservedPooledIdentity(pooled, result.value.observation, options);
+      }
+      return;
+    }
+    if (
+      options.signal?.aborted ||
+      this.devices.get(pooled.id) !== pooled ||
+      pooled.identityReconcileAttempts !== POOLED_IDENTITY_RECONCILE_MAX_ATTEMPTS
+    ) {
+      this.clearPooledIdentityReconciliation(pooled);
+      return;
+    }
+
+    const elapsedMs = this.timer.now() - (pooled.identityReconcileStartedAt ?? this.timer.now());
+    this.clearPooledIdentityReconciliation(pooled);
+    await this.enterPooledIdentityQuarantine(
+      pooled,
+      `discovery could not read the AVD name after ${POOLED_IDENTITY_RECONCILE_MAX_ATTEMPTS} ` +
+        `attempts (${elapsedMs}ms), so the pooled identity '${pooled.avdName}' can no longer be ` +
+        "tied to the runtime",
+      this.identityEvidenceForBootedDevice(latestUnresolved),
+      options,
+    );
+  }
+
+  private async rediscoverPooledAndroidIdentity(
+    pooled: PooledDevice,
+    options: DiscoveryReconcileOptions,
+  ): Promise<BootedDevice | undefined> {
+    const discovery = await this.deviceManager.getBootedDevicesDetailed("android", {
+      bypassAndroidDeviceListCache: true,
+      signal: options.signal,
+    });
+    return discovery.devices.find((device) => device.deviceId === pooled.id);
+  }
+
+  private clearPooledIdentityReconciliation(pooled: PooledDevice): void {
+    delete pooled.identityReconcileAttempts;
+    delete pooled.identityReconcileStartedAt;
   }
 
   private shouldQuarantineUnresolvedEmulatorName(
@@ -7451,7 +7612,10 @@ export class DevicePool {
       return false;
     }
     if (!discovered.consoleBusyDuringProbe) {
-      return true;
+      // A confirmed mapping takes the bounded retry path above. Entries without
+      // one have no stable identity evidence to preserve and still quarantine
+      // immediately, as do already-terminal entries being observed again.
+      return pooled.avdName === undefined || pooled.identityUnresolved === true;
     }
     // `adb devices` already proved this serial is present. A daemon-owned VM
     // snapshot command monopolizes the emulator console, so its timed-out
@@ -7624,6 +7788,7 @@ export class DevicePool {
     // but older than the latest one cannot lift the quarantine
     // ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
     this.recordIdentityObservation(pooled, evidence);
+    this.clearPooledIdentityReconciliation(pooled);
     if (pooled.identityUnresolved === true) {
       return;
     }
@@ -7705,9 +7870,10 @@ export class DevicePool {
    *    handsets stay on strict name equality behind their unique serial.
    *
    * The placeholder tolerance exists ONLY to avoid that eviction. It is not
-   * agreement: {@link reconcilePooledIdentityResolution} quarantines the entry
-   * the moment a sweep tolerates one, and every consumer that would ACT on the
-   * pooled identity reads that state instead of this predicate.
+   * agreement: {@link reconcilePooledIdentityResolution} starts bounded
+   * reconciliation for a confirmed mapping and quarantines on exhaustion; every
+   * consumer that would ACT on a terminally untrusted identity reads that state
+   * instead of this predicate.
    */
   private namesAgreeOnIdentity(
     pooled: PooledDevice,

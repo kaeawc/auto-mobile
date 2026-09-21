@@ -2229,6 +2229,34 @@ jobs:
             -only-testing:CtrlProxyUITests/HierarchyIntegrationTests/testHierarchyIncludesTypedTextInputsMissingFromSnapshotTree \
             -only-testing:CtrlProxyUITests/HierarchyIntegrationTests/testScreenshotCapturesScreenAfterTrackedAppTerminates
 
+      # The shared simulator continues into long video/navigation workflows below.
+      # Keep the odd-width regression on its own serial simulator so iPhone 15's
+      # slower lifecycle cannot consume those unrelated steps' timeout budgets.
+      - name: "Run odd-width CtrlProxy screenshot test (iPhone 15)"
+        timeout-minutes: 12
+        run: |
+          ios_version="$(xcrun --sdk iphonesimulator --show-sdk-version)"
+          result="$(bun run src/index.ts --boot-device --platform ios --create-if-missing --timeout-ms 600000 --name "iPhone 15" --min-os-version "${ios_version}" --max-os-version "${ios_version}")"
+          odd_width_udid="$(printf '%s' "${result}" | jq -r '.deviceId')"
+          if [[ -z "${odd_width_udid}" || "${odd_width_udid}" == "null" ]]; then
+            echo "::error::AutoMobile product boot returned no iPhone 15 deviceId." >&2
+            exit 1
+          fi
+          trap 'xcrun simctl shutdown "${odd_width_udid}" >/dev/null 2>&1 || true' EXIT
+          simulator_device_type="$(
+            xcrun simctl list devices --json |
+              jq -r --arg udid "${odd_width_udid}" '.devices[][] | select(.udid == $udid) | .deviceTypeIdentifier'
+          )"
+          if [[ "${simulator_device_type}" != "com.apple.CoreSimulator.SimDeviceType.iPhone-15" ]]; then
+            echo "::error::Expected iPhone 15 for odd-width screenshot coverage; got '${simulator_device_type:-unknown}'." >&2
+            exit 1
+          fi
+          XCTESTRUN=$(find /tmp/automobile-ctrl-proxy/Build/Products -name "*.xctestrun" | head -1)
+          xcodebuild test-without-building \
+            -xctestrun "${XCTESTRUN}" \
+            -destination "id=${odd_width_udid}" \
+            -only-testing:CtrlProxyUITests/HierarchyIntegrationTests/testScreenshotMatchesNativeDimensionsOnOddWidthDevice
+
       # Bring the daemon to ready and warm CtrlProxy on the freshly-booted sim
       # BEFORE any simulator workflow that opens an in-process session — including
       # the videoRecording test below. When videoRecording ran first (issue #5376),

@@ -41,6 +41,8 @@ const RECORD_LINE = /NotificationRecord\(.*?\bpkg=([^\s]+)/;
 // so a key-shaped line is where the previous entry ended.
 const EXTRA_KEY_LINE = /^[A-Za-z][A-Za-z0-9_$.]*=/;
 const CUSTOM_LAYOUT_FIELD = /^(?:contentView|bigContentView|headsUpContentView)=(?!null$).+$/;
+const RECORD_FLAGS = /^flags=(.+)$/;
+const GROUP_SUMMARY_FLAG = 0x200;
 
 // The dump prints several record-bearing sections: the active `Notification
 // List:` the shade renders, plus snoozed and enqueued records it does not. A
@@ -55,6 +57,18 @@ const ACTIVE_SECTION = "Notification List";
 interface PendingExtra {
   key: string;
   lines: string[];
+}
+
+interface ParsedDumpsysNotificationRecord {
+  correlation: DumpsysNotificationRecord;
+  key: string | null;
+  isGroupSummary: boolean;
+}
+
+interface ParsedDumpsysNotificationSnapshot {
+  records: ParsedDumpsysNotificationRecord[];
+  activeSectionRecognized: boolean;
+  complete: boolean;
 }
 
 const addExtra = (record: DumpsysNotificationRecord, key: string, value: string): void => {
@@ -125,18 +139,69 @@ const applyExtras = (record: DumpsysNotificationRecord, lines: readonly string[]
   }
 };
 
-/** Parse `dumpsys notification --noredact` into per-package correlation records. */
-export const parseDumpsysNotificationRecords = (output: string): DumpsysNotificationRecord[] => {
-  const records: DumpsysNotificationRecord[] = [];
-  let current: DumpsysNotificationRecord | null = null;
+const readNotificationKey = (line: string): string | null => {
+  const start = line.indexOf(" key=");
+  if (start < 0) {
+    return null;
+  }
+  const valueStart = start + " key=".length;
+  const notificationSuffix = line.indexOf(": Notification(", valueStart);
+  const valueEnd = notificationSuffix >= 0 ? notificationSuffix : line.lastIndexOf(")");
+  return valueEnd > valueStart ? line.slice(valueStart, valueEnd) : null;
+};
+
+const startParsedRecord = (
+  line: string,
+  inActiveSection: boolean,
+  records: ParsedDumpsysNotificationRecord[],
+): { complete: boolean; current: ParsedDumpsysNotificationRecord | null } => {
+  const match = RECORD_LINE.exec(line);
+  if (!match) {
+    return { complete: !inActiveSection, current: null };
+  }
+  if (!inActiveSection) {
+    return { complete: true, current: null };
+  }
+  const key = readNotificationKey(line);
+  const current = {
+    correlation: {
+      pkg: match[1],
+      titles: [],
+      bodies: [],
+      hasCustomLayout: false,
+    },
+    key,
+    isGroupSummary: false,
+  };
+  records.push(current);
+  return { complete: key !== null, current };
+};
+
+const readRecordMetadata = (current: ParsedDumpsysNotificationRecord, line: string): boolean => {
+  current.correlation.hasCustomLayout ||= CUSTOM_LAYOUT_FIELD.test(line);
+  const flags = RECORD_FLAGS.exec(line);
+  if (flags) {
+    const numericFlags = Number(flags[1]);
+    current.isGroupSummary ||=
+      flags[1].split("|").includes("GROUP_SUMMARY") ||
+      (Number.isFinite(numericFlags) && (numericFlags & GROUP_SUMMARY_FLAG) !== 0);
+  }
+  return line.startsWith("extras={");
+};
+
+const parseDumpsysNotificationSnapshot = (output: string): ParsedDumpsysNotificationSnapshot => {
+  const records: ParsedDumpsysNotificationRecord[] = [];
+  let current: ParsedDumpsysNotificationRecord | null = null;
   // Records before the first heading belong to no declared section: a dump
   // without section headings is read whole rather than discarded.
   let inActiveSection = true;
+  let activeSectionRecognized = false;
+  let complete = true;
   // The physical lines of the extras block being read, or `null` outside one.
   let extrasLines: string[] | null = null;
   const flushExtras = (): void => {
     if (current && extrasLines) {
-      applyExtras(current, extrasLines);
+      applyExtras(current.correlation, extrasLines);
     }
     extrasLines = null;
   };
@@ -145,26 +210,22 @@ export const parseDumpsysNotificationRecords = (output: string): DumpsysNotifica
     const heading = extrasLines === null ? SECTION_HEADING.exec(trimmed) : null;
     if (heading) {
       inActiveSection = heading[1] === ACTIVE_SECTION;
+      activeSectionRecognized ||= inActiveSection;
       current = null;
       continue;
     }
-    const record = RECORD_LINE.exec(trimmed);
-    if (record) {
+    if (trimmed.includes("NotificationRecord(")) {
       flushExtras();
-      current = inActiveSection
-        ? { pkg: record[1], titles: [], bodies: [], hasCustomLayout: false }
-        : null;
-      if (current) {
-        records.push(current);
-      }
+      const started = startParsedRecord(trimmed, inActiveSection, records);
+      current = started.current;
+      complete &&= started.complete;
       continue;
     }
     if (!current) {
       continue;
     }
     if (extrasLines === null) {
-      current.hasCustomLayout ||= CUSTOM_LAYOUT_FIELD.test(trimmed);
-      if (trimmed.startsWith("extras={")) {
+      if (readRecordMetadata(current, trimmed)) {
         extrasLines = [];
       }
       continue;
@@ -176,7 +237,35 @@ export const parseDumpsysNotificationRecords = (output: string): DumpsysNotifica
     extrasLines.push(line);
   }
   flushExtras();
-  return records;
+  return { records, activeSectionRecognized, complete };
+};
+
+/** Parse `dumpsys notification --noredact` into per-package correlation records. */
+export const parseDumpsysNotificationRecords = (output: string): DumpsysNotificationRecord[] =>
+  parseDumpsysNotificationSnapshot(output).records.map((record) => record.correlation);
+
+/**
+ * Return stable active-record identities for one package, excluding synthetic
+ * group summaries. Undefined means the dump was not trustworthy enough for
+ * before/after accounting.
+ */
+export const parseActiveNotificationKeysForApp = (
+  output: string,
+  appId: string,
+): string[] | undefined => {
+  const snapshot = parseDumpsysNotificationSnapshot(output);
+  if (!snapshot.activeSectionRecognized || !snapshot.complete) {
+    return undefined;
+  }
+  return [
+    ...new Set(
+      snapshot.records.flatMap((record) =>
+        record.correlation.pkg === appId && !record.isGroupSummary && record.key
+          ? [record.key]
+          : [],
+      ),
+    ),
+  ];
 };
 
 /** The extras categories this record actually populated. */

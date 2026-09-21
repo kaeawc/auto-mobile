@@ -820,14 +820,24 @@ describe("systemTray clearAll dumpsys ownership", () => {
     ]);
   const dumpsys = (...records: string[]) =>
     ["Current Notification Manager state:", "  Notification List:", ...records].join("\n");
-  const record = (id: number, title: string, text: string) =>
+  const record = (id: number, title: string, text: string, flags: number | string = 0) =>
     [
       `    NotificationRecord(0x${id}: pkg=${SHELL} user=UserHandle{0} id=${id} tag=null key=0|${SHELL}|${id}|null|10164)`,
+      `      flags=${flags}`,
       "      extras={",
       `        android.title=String (${title})`,
       `        android.text=String (${text})`,
       "      }",
     ].join("\n");
+  const groupedRows = (notifications: readonly (readonly [string, string])[]) =>
+    node("com.android.systemui:id/expandableNotificationRow", "", [
+      node("android:id/app_name_text", shellLabel),
+      node(
+        "com.android.systemui:id/notification_children_container",
+        "",
+        notifications.map(([title]) => row(title, "")),
+      ),
+    ]);
   const handler = () => ToolRegistry.getTool("systemTray")!.deviceAwareHandler!;
   const clearAll = () =>
     handler()(device, {
@@ -859,10 +869,15 @@ describe("systemTray clearAll dumpsys ownership", () => {
       ],
       false,
     );
-    adb.setCommandResponse(
-      "dumpsys notification",
-      execResult(dumpsys(...notifications.map(([title, body], id) => record(id + 1, title, body)))),
+    const initialDump = execResult(
+      dumpsys(...notifications.map(([title, body], id) => record(id + 1, title, body))),
     );
+    adb.setCommandResponseSequence("dumpsys notification", [
+      initialDump,
+      initialDump,
+      initialDump,
+      execResult(dumpsys()),
+    ]);
     const installedAppsSpy = spyOn(ListInstalledApps.prototype, "execute").mockResolvedValue([
       SHELL,
     ]);
@@ -870,7 +885,12 @@ describe("systemTray clearAll dumpsys ownership", () => {
 
     try {
       const payload = JSON.parse((await clearAll()).content[0].text);
-      expect(payload).toMatchObject({ dismissedCount: 3, expectedCount: 3, success: true });
+      expect(payload).toMatchObject({
+        dismissedCount: 3,
+        expectedCount: 3,
+        remainingCount: 0,
+        success: true,
+      });
       expect(payload.message).toBe(`Cleared 3 notification(s) for ${SHELL}`);
     } finally {
       installedAppsSpy.mockRestore();
@@ -894,10 +914,10 @@ describe("systemTray clearAll dumpsys ownership", () => {
       ],
       false,
     );
-    adb.setCommandResponse(
-      "dumpsys notification",
+    adb.setCommandResponseSequence("dumpsys notification", [
       execResult(dumpsys(...notifications.map(([title, body], id) => record(id + 1, title, body)))),
-    );
+      execResult(dumpsys()),
+    ]);
     const installedAppsSpy = spyOn(ListInstalledApps.prototype, "execute").mockResolvedValue([
       SHELL,
     ]);
@@ -905,7 +925,12 @@ describe("systemTray clearAll dumpsys ownership", () => {
 
     try {
       const payload = JSON.parse((await clearAll()).content[0].text);
-      expect(payload).toMatchObject({ dismissedCount: 2, expectedCount: 2, success: true });
+      expect(payload).toMatchObject({
+        dismissedCount: 2,
+        expectedCount: 2,
+        remainingCount: 0,
+        success: true,
+      });
       expect(payload.message).toBe(`Cleared 2 notification(s) for ${SHELL}`);
     } finally {
       installedAppsSpy.mockRestore();
@@ -914,6 +939,130 @@ describe("systemTray clearAll dumpsys ownership", () => {
     expect(
       adb.getExecutedCommands().filter((command) => command.includes("input swipe")),
     ).toHaveLength(2);
+  });
+
+  test("counts every notification when one grouped-row swipe clears them all", async () => {
+    const notifications = [
+      ["First shell notification", "First body"],
+      ["Second shell notification", "Second body"],
+      ["Third shell notification", "Third body"],
+    ] as const;
+    const { adb, timer } = setup([page(groupedRows(notifications)), page()], false);
+    adb.setCommandResponseSequence("dumpsys notification", [
+      execResult(
+        dumpsys(
+          ...notifications.map(([title, body], id) => record(id + 1, title, body)),
+          record(99, "3 new notifications", "", "LOCAL_ONLY|GROUP_SUMMARY|AUTOGROUP_SUMMARY"),
+        ),
+      ),
+      execResult(dumpsys()),
+    ]);
+    const installedAppsSpy = spyOn(ListInstalledApps.prototype, "execute").mockResolvedValue([
+      SHELL,
+    ]);
+    installClearAllDependencies(timer, adb);
+
+    try {
+      const payload = JSON.parse((await clearAll()).content[0].text);
+      expect(payload).toMatchObject({
+        dismissedCount: 3,
+        expectedCount: 3,
+        remainingCount: 0,
+        success: true,
+      });
+      expect(payload.message).toBe(`Cleared 3 notification(s) for ${SHELL}`);
+    } finally {
+      installedAppsSpy.mockRestore();
+    }
+
+    expect(
+      adb.getExecutedCommands().filter((command) => command.includes("input swipe")),
+    ).toHaveLength(1);
+  });
+
+  test("reports no progress when every notification remains after swiping", async () => {
+    const notifications = [
+      ["First shell notification", "First body"],
+      ["Second shell notification", "Second body"],
+    ] as const;
+    const { adb, timer } = setup(
+      [page(...notifications.map(([title]) => row(title, shellLabel))), page()],
+      false,
+    );
+    const unchangedDump = execResult(
+      dumpsys(...notifications.map(([title, body], id) => record(id + 1, title, body))),
+    );
+    adb.setCommandResponseSequence("dumpsys notification", [unchangedDump, unchangedDump]);
+    const installedAppsSpy = spyOn(ListInstalledApps.prototype, "execute").mockResolvedValue([
+      SHELL,
+    ]);
+    installClearAllDependencies(timer, adb);
+
+    try {
+      const payload = JSON.parse((await clearAll()).content[0].text);
+      expect(payload).toMatchObject({
+        dismissedCount: 0,
+        expectedCount: 2,
+        remainingCount: 2,
+        success: false,
+      });
+      expect(payload.message).toContain("2 remain after clearing");
+    } finally {
+      installedAppsSpy.mockRestore();
+    }
+  });
+
+  test("reports arrivals without hiding which original notifications were cleared", async () => {
+    const notifications = [
+      ["First shell notification", "First body"],
+      ["Second shell notification", "Second body"],
+    ] as const;
+    const { adb, timer } = setup(
+      [page(...notifications.map(([title]) => row(title, shellLabel))), page()],
+      false,
+    );
+    adb.setCommandResponseSequence("dumpsys notification", [
+      execResult(dumpsys(...notifications.map(([title, body], id) => record(id + 1, title, body)))),
+      execResult(dumpsys(record(3, "New shell notification", "New body"))),
+    ]);
+    const installedAppsSpy = spyOn(ListInstalledApps.prototype, "execute").mockResolvedValue([
+      SHELL,
+    ]);
+    installClearAllDependencies(timer, adb);
+
+    try {
+      const payload = JSON.parse((await clearAll()).content[0].text);
+      expect(payload).toMatchObject({
+        arrivedCount: 1,
+        dismissedCount: 2,
+        expectedCount: 2,
+        remainingCount: 1,
+        success: false,
+      });
+      expect(payload.message).toContain("1 notification(s) arrived during the operation");
+    } finally {
+      installedAppsSpy.mockRestore();
+    }
+  });
+
+  test("fails explicitly when the post-clear dump is unrecognized", async () => {
+    const { adb, timer } = setup([page(row("Shell notification", shellLabel)), page()], false);
+    adb.setCommandResponseSequence("dumpsys notification", [
+      execResult(dumpsys(record(1, "Shell notification", "Body"))),
+      execResult("unrecognized but successful output"),
+    ]);
+    const installedAppsSpy = spyOn(ListInstalledApps.prototype, "execute").mockResolvedValue([
+      SHELL,
+    ]);
+    installClearAllDependencies(timer, adb);
+
+    try {
+      await expect(clearAll()).rejects.toThrow(
+        `Could not verify how many notifications remain for ${SHELL}`,
+      );
+    } finally {
+      installedAppsSpy.mockRestore();
+    }
   });
 
   test("reports an honest failure when dumpsys-owned rows cannot all be cleared", async () => {
@@ -925,10 +1074,15 @@ describe("systemTray clearAll dumpsys ownership", () => {
       [page(...notifications.map(([title, body]) => silentRow(title, body))), page()],
       false,
     );
-    adb.setCommandResponse(
-      "dumpsys notification",
-      execResult(dumpsys(...notifications.map(([title, body], id) => record(id + 1, title, body)))),
+    const initialDump = execResult(
+      dumpsys(...notifications.map(([title, body], id) => record(id + 1, title, body))),
     );
+    adb.setCommandResponseSequence("dumpsys notification", [
+      initialDump,
+      initialDump,
+      initialDump,
+      execResult(dumpsys(record(2, ...notifications[1]))),
+    ]);
     const installedAppsSpy = spyOn(ListInstalledApps.prototype, "execute").mockResolvedValue([
       SHELL,
     ]);
@@ -936,7 +1090,12 @@ describe("systemTray clearAll dumpsys ownership", () => {
 
     try {
       const payload = JSON.parse((await clearAll()).content[0].text);
-      expect(payload).toMatchObject({ dismissedCount: 1, expectedCount: 2, success: false });
+      expect(payload).toMatchObject({
+        dismissedCount: 1,
+        expectedCount: 2,
+        remainingCount: 1,
+        success: false,
+      });
       expect(payload.message).not.toBe(`No notifications found for ${SHELL}`);
       expect(payload.message).toContain("Cleared 1 of 2 notification(s)");
     } finally {

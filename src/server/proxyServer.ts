@@ -18,7 +18,7 @@ import {
   type DaemonMcpProxyConfig,
 } from "../daemon/daemonMcpProxy";
 import { DaemonShuttingDownError } from "../daemon/client";
-import { McpOverloadError } from "../daemon/McpTimeoutError";
+import { McpOverloadError, McpTimeoutError } from "../daemon/McpTimeoutError";
 import { ActionableError } from "../models";
 import { daemonShuttingDownMcpOutcome } from "../daemon/daemonShutdownOutcome";
 import { getMcpServerVersion } from "../utils/mcpVersion";
@@ -170,10 +170,8 @@ export function daemonRestartDeferredResult(
   };
 }
 
-export function mcpOverloadResult(
-  error: McpOverloadError,
-): CallToolResult & { structuredContent: Record<string, unknown> } {
-  const payload = {
+function mcpOverloadPayload(error: McpOverloadError) {
+  return {
     error: {
       code: error.failure.code,
       message: error.message,
@@ -183,25 +181,50 @@ export function mcpOverloadResult(
       remainingTimeoutMs: error.failure.remainingTimeoutMs,
     },
   };
-  return {
+}
+
+export function mcpOverloadResult(
+  error: McpOverloadError,
+): CallToolResult & { structuredContent: Record<string, unknown> };
+export function mcpOverloadResult(
+  error: McpOverloadError,
+  hasOutputSchema: boolean,
+): CallToolResult;
+export function mcpOverloadResult(error: McpOverloadError, hasOutputSchema = true): CallToolResult {
+  const payload = mcpOverloadPayload(error);
+  const result = {
     content: [{ type: "text", text: JSON.stringify(payload) }],
     structuredContent: payload,
     isError: true,
   };
+  return stripToolResultStructuredContent(
+    result,
+    // This must mirror daemonShuttingDownResult: the live daemon's advertised
+    // schema accounts for its runtime result-shaping flag.
+    structuredContentOmissionReason(hasOutputSchema, false),
+  );
 }
 
 export function mcpOverloadError(error: McpOverloadError): McpError {
-  const payload = {
-    error: {
-      code: error.failure.code,
-      message: error.message,
-      retryable: error.failure.retryable,
-      retryAfterMs: error.failure.retryAfterMs,
-      queueWaitMs: error.failure.queueWaitMs,
-      remainingTimeoutMs: error.failure.remainingTimeoutMs,
-    },
-  };
+  const payload = mcpOverloadPayload(error);
   return new McpError(-32603, JSON.stringify(payload), payload);
+}
+
+/**
+ * Safely preserve the request-level timeout or abort context attached when a
+ * daemon socket disappears. Arbitrary nested error messages can contain daemon
+ * internals, so only expose the known request-control causes.
+ */
+function safeForwardedRequestErrorMessage(error: unknown): string {
+  const message = errorMessage(error);
+  const cause = error instanceof Error ? error.cause : undefined;
+  if (cause instanceof McpTimeoutError) {
+    return `${message} (request timed out after ${cause.timeoutMs}ms while handling ${cause.toolName})`;
+  }
+  if (cause instanceof Error && (cause.name === "AbortError" || cause.name === "TimeoutError")) {
+    return `${message} (request ${cause.name === "TimeoutError" ? "timed out" : "was aborted"})`;
+  }
+  return message;
 }
 
 export function deviceControlTransportFailureResult(
@@ -330,7 +353,10 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
         throw mcpOverloadError(error);
       }
       logger.error(`[ProxyServer] Failed to list tools: ${error}`);
-      throw new ActionableError(`Failed to list tools from daemon: ${errorMessage(error)}`);
+      throw new ActionableError(
+        `Failed to list tools from daemon: ${safeForwardedRequestErrorMessage(error)}`,
+        { cause: error },
+      );
     }
   });
 
@@ -352,7 +378,7 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
       return daemonRestartDeferredResult(error);
     }
     if (error instanceof McpOverloadError) {
-      return mcpOverloadResult(error);
+      return mcpOverloadResult(error, advertisedToolOutputSchemas.get(name) ?? false);
     }
     if (error instanceof DeviceControlTransportError) {
       logger.warn(
@@ -363,7 +389,7 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
     logger.error(`[ProxyServer] Tool call failed: ${name} - ${error}`);
     // Return error as tool result (not throwing) to match expected MCP behavior
     return {
-      content: [{ type: "text", text: `Error: ${errorMessage(error)}` }],
+      content: [{ type: "text", text: `Error: ${safeForwardedRequestErrorMessage(error)}` }],
       isError: true,
     };
   };
@@ -430,7 +456,10 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
         throw mcpOverloadError(error);
       }
       logger.error(`[ProxyServer] Failed to list resources: ${error}`);
-      throw new ActionableError(`Failed to list resources from daemon: ${errorMessage(error)}`);
+      throw new ActionableError(
+        `Failed to list resources from daemon: ${safeForwardedRequestErrorMessage(error)}`,
+        { cause: error },
+      );
     }
   });
 
@@ -452,7 +481,8 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
       }
       logger.error(`[ProxyServer] Failed to list resource templates: ${error}`);
       throw new ActionableError(
-        `Failed to list resource templates from daemon: ${errorMessage(error)}`,
+        `Failed to list resource templates from daemon: ${safeForwardedRequestErrorMessage(error)}`,
+        { cause: error },
       );
     }
   });
@@ -481,7 +511,10 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
         throw mcpOverloadError(error);
       }
       logger.error(`[ProxyServer] Resource read failed: ${uri} - ${error}`);
-      throw new ActionableError(`Failed to read resource from daemon: ${errorMessage(error)}`);
+      throw new ActionableError(
+        `Failed to read resource from daemon: ${safeForwardedRequestErrorMessage(error)}`,
+        { cause: error },
+      );
     }
   });
 

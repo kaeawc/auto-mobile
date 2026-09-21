@@ -52,6 +52,8 @@ import {
 } from "../features/action/OrientationReader";
 import { AvdManagerService } from "../utils/android-cmdline-tools/AvdManagerService";
 import type { AvdManager } from "../utils/android-cmdline-tools/interfaces/AvdManager";
+import { TTLCache } from "../utils/cache/Cache";
+import { SingleFlight } from "../utils/cache/SingleFlight";
 
 // Resource URIs
 export const BOOTED_DEVICE_RESOURCE_URIS = {
@@ -64,6 +66,29 @@ export const BOOTED_DEVICE_RESOURCE_URIS = {
 // every device — too heavy for the desktop's frequent lock poll (issue #5056). This resource
 // enumerates booted devices and runs ONLY the keyguard probe.
 export const DEVICE_LOCK_STATES_RESOURCE_URI = "automobile:devices/lockStates";
+
+const BOOTED_DEVICES_RESOURCE_CACHE_TTL_MS = 2_500; // Stay below adb's ~5s device-list cache.
+let bootedDevicesResourceCache: TTLCache<string, BootedDevicesResourceContent> | null = null;
+let bootedDevicesResourceSingleFlight = new SingleFlight<string, BootedDevicesResourceContent>();
+let bootedDevicesResourceGeneration = 0;
+let bootedDevicesResourcePublishedGeneration = 0;
+
+function getBootedDevicesResourceCache(
+  timer: Timer,
+): TTLCache<string, BootedDevicesResourceContent> {
+  if (!bootedDevicesResourceCache) {
+    bootedDevicesResourceCache = new TTLCache(timer, {
+      ttlMs: BOOTED_DEVICES_RESOURCE_CACHE_TTL_MS,
+    });
+  }
+  return bootedDevicesResourceCache;
+}
+
+export function resetBootedDevicesResourceCache(): void {
+  bootedDevicesResourceCache = null;
+  bootedDevicesResourceSingleFlight = new SingleFlight();
+  bootedDevicesResourcePublishedGeneration = ++bootedDevicesResourceGeneration;
+}
 
 // Per-device lock state. `locked` is Android-only (from the keyguard probe) and omitted when it
 // could not be read — a transient failure, or iOS, which has no lock probe.
@@ -1058,8 +1083,8 @@ async function enrichDeviceOrientations(
   }
 }
 
-// Core function to fetch booted devices for specified platforms
-async function getBootedDevicesForPlatforms(
+// Core computation to fetch booted devices for specified platforms
+async function computeBootedDevicesForPlatforms(
   platforms: Platform[],
 ): Promise<BootedDevicesResourceContent> {
   const devices: BootedDeviceInfo[] = [];
@@ -1112,6 +1137,28 @@ async function getBootedDevicesForPlatforms(
     poolStatus,
     devices,
   };
+}
+
+export async function getBootedDevicesForPlatforms(
+  platforms: Platform[],
+  timer: Timer = defaultTimer,
+): Promise<BootedDevicesResourceContent> {
+  const canonicalPlatforms = [...new Set(platforms)].sort();
+  const cacheKey = canonicalPlatforms.join(",");
+  const cached = getBootedDevicesResourceCache(timer).get(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
+  return await bootedDevicesResourceSingleFlight.run(cacheKey, async () => {
+    const generation = ++bootedDevicesResourceGeneration;
+    const result = await computeBootedDevicesForPlatforms(canonicalPlatforms);
+    if (generation >= bootedDevicesResourcePublishedGeneration) {
+      bootedDevicesResourcePublishedGeneration = generation;
+      getBootedDevicesResourceCache(timer).set(cacheKey, result);
+    }
+    return result;
+  });
 }
 
 export interface AndroidServiceStatusLookup {

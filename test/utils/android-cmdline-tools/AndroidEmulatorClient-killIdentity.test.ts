@@ -276,9 +276,9 @@ const AVD_NAME_PROBE_BUDGET_MS = 2000;
 
 /**
  * Every attached emulator has a wedged console: `emu avd name` (and the
- * `getprop` fallback) burn their whole budget and then fail. `setCurrentTime`
- * moves the clock without firing the client's own pending timeouts, so the cost
- * is charged exactly the way a stalled adb round trip charges it.
+ * `getprop` fallback) burn their whole budget and then fail. FakeTimer drives
+ * every stalled round trip together so concurrent probes consume one shared
+ * wall-clock budget, matching the production execution shape.
  */
 function wedgedConsoleFactory(attached: string[]): {
   factory: AdbClientFactory;
@@ -308,7 +308,7 @@ function wedgedConsoleFactory(attached: string[]): {
             };
           }
           if (joined.includes("avd name") || joined.includes("ro.boot.qemu.avd_name")) {
-            timer.setCurrentTime(timer.now() + AVD_NAME_PROBE_BUDGET_MS);
+            await timer.sleep(AVD_NAME_PROBE_BUDGET_MS);
             throw new Error("emulator console did not respond");
           }
           return {
@@ -366,9 +366,15 @@ test("an unforced kill still enriches discovery with the AVD-name probe", async 
   const client = new AndroidEmulatorClient(null, null, timer, factory);
   const startedAt = timer.now();
 
-  await expect(client.killDevice(original)).rejects.toThrow(/identity|could not name itself/);
-
+  const kill = client.killDevice(original);
+  for (let turn = 0; turn < 20 && nameProbes(commands).length < 3; turn++) {
+    await Promise.resolve();
+  }
   expect(nameProbes(commands).length).toBe(3);
-  expect(timer.now() - startedAt).toBe(3 * AVD_NAME_PROBE_BUDGET_MS);
+  timer.advanceTime(AVD_NAME_PROBE_BUDGET_MS);
+
+  await expect(kill).rejects.toThrow(/identity|could not name itself/);
+  expect(nameProbes(commands).length).toBe(3);
+  expect(timer.now() - startedAt).toBe(AVD_NAME_PROBE_BUDGET_MS);
   expect(commands.some((args) => args.slice(-2).join(" ") === "emu kill")).toBe(false);
 });

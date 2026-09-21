@@ -1816,29 +1816,37 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       const infoTimeoutMs = 2000;
       const diagnostics: ReadinessDiagnostic[] = [];
       perf.startOperation("avdNameResolution");
-      for (const device of emulatorDevices) {
-        const avdName = options.skipNameEnrichment
-          ? { name: "", diagnostic: undefined }
-          : await this.getRunningAVDName(device, infoTimeoutMs, signal);
-        if (avdName.diagnostic) {
-          diagnostics.push(avdName.diagnostic);
-        }
-        const model = await this.modelForBootedEmulator(
-          device,
-          avdName,
-          infoTimeoutMs,
-          options.skipNameEnrichment === true,
-          signal,
-        );
-        const architecture = await this.resolveEmulatorArchitecture(
-          device,
-          avdName,
-          infoTimeoutMs,
-          options.skipNameEnrichment === true,
-          signal,
-        );
+      const emulatorResults = await Promise.all(
+        emulatorDevices.map(async (device) => {
+          const avdName = options.skipNameEnrichment
+            ? { name: "", diagnostic: undefined }
+            : await this.getRunningAVDName(device, infoTimeoutMs, signal);
+          const model = await this.modelForBootedEmulator(
+            device,
+            avdName,
+            infoTimeoutMs,
+            options.skipNameEnrichment === true,
+            signal,
+          );
+          const architecture = await this.resolveEmulatorArchitecture(
+            device,
+            avdName,
+            infoTimeoutMs,
+            options.skipNameEnrichment === true,
+            signal,
+          );
 
-        runningDevices.push(this.discoveredEmulatorDevice(device, avdName, model, architecture));
+          return {
+            device: this.discoveredEmulatorDevice(device, avdName, model, architecture),
+            diagnostic: avdName.diagnostic,
+          };
+        }),
+      );
+      for (const result of emulatorResults) {
+        runningDevices.push(result.device);
+        if (result.diagnostic) {
+          diagnostics.push(result.diagnostic);
+        }
       }
 
       for (const device of physicalDevices) {

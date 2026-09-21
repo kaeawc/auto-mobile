@@ -122,6 +122,7 @@ import {
   getSystemTrayDependencies,
   waitForNotificationMatch,
   listSystemTrayNotifications,
+  readActiveNotificationKeysForApp,
   resolveUniqueTrayAppLabel,
   resolveSystemTrayAwaitTimeout,
   ensureSystemTrayOpen,
@@ -2087,31 +2088,83 @@ function formatTrayListMessage(
 
 function formatClearAllResult(
   appId: string | undefined,
-  dismissed: number,
-  expectedCount: number | undefined,
-): { message: string; success: boolean } {
-  if (expectedCount === undefined) {
+  swipeCount: number,
+  accounting:
+    | {
+        expectedKeys: readonly string[];
+        remainingKeys: readonly string[];
+      }
+    | undefined,
+): {
+  arrivedCount?: number;
+  dismissedCount: number;
+  expectedCount?: number;
+  message: string;
+  remainingCount?: number;
+  success: boolean;
+} {
+  if (!accounting) {
     return {
       message:
-        dismissed > 0
-          ? `Cleared ${dismissed} notification(s) for ${appId}`
+        swipeCount > 0
+          ? `Cleared ${swipeCount} notification(s) for ${appId}`
           : `No notifications found for ${appId}`,
+      dismissedCount: swipeCount,
       success: true,
     };
   }
-  if (expectedCount === 0) {
-    return { message: `No notifications found for ${appId}`, success: true };
-  }
-  if (dismissed >= expectedCount) {
-    return { message: `Cleared ${dismissed} notification(s) for ${appId}`, success: true };
+  const expectedKeys = new Set(accounting.expectedKeys);
+  const remainingKeys = new Set(accounting.remainingKeys);
+  const expectedCount = expectedKeys.size;
+  const remainingCount = remainingKeys.size;
+  const dismissedCount = [...expectedKeys].filter((key) => !remainingKeys.has(key)).length;
+  const arrivedCount = [...remainingKeys].filter((key) => !expectedKeys.has(key)).length;
+  if (remainingCount === 0) {
+    return expectedCount === 0
+      ? {
+          dismissedCount,
+          expectedCount,
+          message: `No notifications found for ${appId}`,
+          remainingCount,
+          success: true,
+        }
+      : {
+          dismissedCount,
+          expectedCount,
+          message: `Cleared ${dismissedCount} notification(s) for ${appId}`,
+          remainingCount,
+          success: true,
+        };
   }
   return {
+    ...(arrivedCount === 0 ? {} : { arrivedCount }),
+    dismissedCount,
+    expectedCount,
     message:
-      `Cleared ${dismissed} of ${expectedCount} notification(s) for ${appId}; ` +
-      `${expectedCount - dismissed} could not be matched on screen.`,
+      `Cleared ${dismissedCount} of ${expectedCount} notification(s) for ${appId}; ` +
+      `${remainingCount} remain after clearing.` +
+      (arrivedCount === 0 ? "" : ` ${arrivedCount} notification(s) arrived during the operation.`),
+    remainingCount,
     success: false,
   };
 }
+
+const readRequiredActiveNotificationKeys = async (
+  device: BootedDevice,
+  appId: string,
+  phase: "before" | "after",
+  signal?: AbortSignal,
+): Promise<string[]> => {
+  const keys = await readActiveNotificationKeysForApp(device, appId, signal);
+  if (keys === undefined) {
+    throw new ActionableError(
+      phase === "before"
+        ? `Could not verify how many notifications exist for ${appId}.`
+        : `Could not verify how many notifications remain for ${appId}.`,
+    );
+  }
+  return keys;
+};
 
 // ============================================================================
 // Tool Registration
@@ -2370,8 +2423,8 @@ export function registerInteractionTools() {
       }
 
       if (args.action === "clearAll") {
-        let dismissed = 0;
-        let expectedCount: number | undefined;
+        let swipeCount = 0;
+        let expectedKeys: string[] | undefined;
         let clearMatchTexts = appMatchTexts;
         if (device.platform === "android" && notification.appId) {
           const listed = await listSystemTrayNotifications(
@@ -2382,7 +2435,12 @@ export function registerInteractionTools() {
             progress,
             signal,
           );
-          expectedCount = listed.notifications.length;
+          expectedKeys = await readRequiredActiveNotificationKeys(
+            device,
+            notification.appId,
+            "before",
+            signal,
+          );
           // All correlated rows' content text lets the existing row matcher
           // isolate them, whether ownership comes from a header or dumpsys.
           clearMatchTexts = [
@@ -2413,9 +2471,14 @@ export function registerInteractionTools() {
           }
 
           await swipeElement(device, swipeTarget);
-          dismissed++;
+          swipeCount++;
           await timer.sleep(SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS + 100);
         }
+
+        const remainingKeys =
+          expectedKeys === undefined || !notification.appId
+            ? undefined
+            : await readRequiredActiveNotificationKeys(device, notification.appId, "after", signal);
 
         const { observeScreenFactory } = getSystemTrayDependencies();
         const observeScreen = observeScreenFactory(device);
@@ -2425,17 +2488,14 @@ export function registerInteractionTools() {
         });
         await captureSystemTrayTerminalEvidence(device, nextObservation);
 
-        const { message, success } = formatClearAllResult(
+        const result = formatClearAllResult(
           notification.appId,
-          dismissed,
-          expectedCount,
+          swipeCount,
+          expectedKeys && remainingKeys ? { expectedKeys, remainingKeys } : undefined,
         );
         return createJSONToolResponse({
-          dismissedCount: dismissed,
-          ...(expectedCount === undefined ? {} : { expectedCount }),
-          message,
+          ...result,
           observation: nextObservation,
-          success,
         });
       }
 

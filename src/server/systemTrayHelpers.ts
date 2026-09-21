@@ -35,6 +35,7 @@ import { createNotificationUIDetector } from "./system-tray/createNotificationUI
 import {
   attributeRowByDumpsys,
   intersectDumpsysRecordsForRow,
+  parseActiveNotificationKeysForApp,
   parseDumpsysNotificationRecords,
   type DumpsysNotificationRecord,
 } from "./system-tray/notificationDumpsys";
@@ -2164,10 +2165,10 @@ const trayAtScrollEnd = (hierarchy: ViewHierarchyResult): boolean =>
 // outright and leaves every header-less row unattributed.
 const DUMPSYS_NOTIFICATION_MAX_BUFFER = 8 * 1024 * 1024;
 
-const readDumpsysNotificationRecords = async (
+const readDumpsysNotificationOutput = async (
   adb: SystemTrayAdb,
   signal?: AbortSignal,
-): Promise<DumpsysNotificationRecord[] | undefined> => {
+): Promise<string | undefined> => {
   try {
     const result = await adb.executeCommand(
       "shell dumpsys notification --noredact",
@@ -2176,15 +2177,36 @@ const readDumpsysNotificationRecords = async (
       true,
       signal,
     );
-    return parseDumpsysNotificationRecords(result.stdout ?? "");
+    return result.stdout ?? "";
   } catch (error) {
     signal?.throwIfAborted();
     logger.warn(
-      `[systemTray] could not read dumpsys notification for shade ownership: ${errorMessage(error)}`,
+      `[systemTray] could not read dumpsys notification evidence: ${errorMessage(error)}`,
       error,
     );
     return undefined;
   }
+};
+
+const readDumpsysNotificationRecords = async (
+  adb: SystemTrayAdb,
+  signal?: AbortSignal,
+): Promise<DumpsysNotificationRecord[] | undefined> => {
+  const output = await readDumpsysNotificationOutput(adb, signal);
+  return output === undefined ? undefined : parseDumpsysNotificationRecords(output);
+};
+
+/** Read stable active notification identities for one Android package. */
+export const readActiveNotificationKeysForApp = async (
+  device: BootedDevice,
+  appId: string,
+  signal?: AbortSignal,
+): Promise<string[] | undefined> => {
+  const output = await readDumpsysNotificationOutput(
+    getSystemTrayDependencies().adbFactory(device),
+    signal,
+  );
+  return output === undefined ? undefined : parseActiveNotificationKeysForApp(output, appId);
 };
 
 type TrayRowAttribution = TrayOwnershipEvidence | "other" | "unknown";

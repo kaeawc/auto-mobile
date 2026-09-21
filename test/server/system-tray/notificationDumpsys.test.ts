@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   attributeRowByDumpsys,
   intersectDumpsysRecordsForRow,
+  parseActiveNotificationKeysForApp,
   parseDumpsysNotificationRecords,
 } from "../../../src/server/system-tray/notificationDumpsys";
 
@@ -47,6 +48,39 @@ describe("dumpsys notification records", () => {
       "com.google.android.apps.messaging",
     ]);
     expect(records[1].titles).toEqual(["(555) 123-4567"]);
+  });
+
+  test("returns stable active keys while excluding synthetic group summaries", () => {
+    expect(
+      parseActiveNotificationKeysForApp(
+        dump(
+          "Current Notification Manager state:",
+          "  Notification List:",
+          "    NotificationRecord(0x1: pkg=com.example.app user=UserHandle{0} id=1 tag=child key=0|com.example.app|1|child|10100: Notification(channel=messages flags=0))",
+          "      flags=0",
+          "    NotificationRecord(0x2: pkg=com.example.app user=UserHandle{0} id=2 tag=summary key=0|com.example.app|2|summary|10100: Notification(channel=messages flags=LOCAL_ONLY|GROUP_SUMMARY|AUTOGROUP_SUMMARY))",
+          "      flags=LOCAL_ONLY|GROUP_SUMMARY|AUTOGROUP_SUMMARY",
+          "  Snoozed notifications:",
+          "    NotificationRecord(0x3: pkg=com.example.app user=UserHandle{0} id=3 tag=snoozed key=0|com.example.app|3|snoozed|10100: Notification(channel=messages flags=0))",
+        ),
+        "com.example.app",
+      ),
+    ).toEqual(["0|com.example.app|1|child|10100"]);
+  });
+
+  test("rejects unrecognized output as unavailable accounting evidence", () => {
+    expect(
+      parseActiveNotificationKeysForApp("unrecognized but successful output", "com.example.app"),
+    ).toBeUndefined();
+  });
+
+  test("accepts a recognized empty active section", () => {
+    expect(
+      parseActiveNotificationKeysForApp(
+        dump("Current Notification Manager state:", "  Notification List:", "  Snoozed:"),
+        "com.example.app",
+      ),
+    ).toEqual([]);
   });
 
   test("yields no correlation evidence from a redacted dump", () => {

@@ -76,13 +76,13 @@ function deriveId(el: Element): string | undefined {
   return nonEmptyString(el["resource-id"]) ?? nonEmptyString(el["view-id"]);
 }
 
-/** Named toggles use their accessibility identity; other nodes prefer visible text. */
+/** Named toggles use their accessibility identity; editable nodes prefer their current value. */
 function deriveLabel(el: Element): string | undefined {
   return (
     getToggleContentDescription(el) ??
+    (isEditableElementProperties(el) ? nonEmptyString(el.value) : undefined) ??
     nonEmptyString(el.text) ??
-    nonEmptyString(el["content-desc"]) ??
-    (isEditableElementProperties(el) ? nonEmptyString(el.value) : undefined)
+    nonEmptyString(el["content-desc"])
   );
 }
 

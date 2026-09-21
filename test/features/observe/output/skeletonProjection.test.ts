@@ -145,6 +145,43 @@ describe("toSkeleton — acceptance criteria", () => {
       expect(skeleton[0].affordances).toContain("input");
     });
 
+    test("an iOS search field's typed value outranks its placeholder (#7382)", () => {
+      const emptyField: Element = {
+        bounds: bounds(16, 484, 325, 522),
+        "view-id": "s2-2db9314144440d83",
+        className: "UISearchBar",
+        role: "textfield",
+        focused: true,
+        "hint-text": "Search",
+        text: "Search",
+        value: "",
+        actions: ["set_text", "clear_text"],
+      };
+      const filledField: Element = { ...emptyField, value: "parity.check" };
+
+      const before = toSkeleton(makeElements({ clickable: [emptyField] }));
+      const after = toSkeleton(makeElements({ clickable: [filledField] }));
+
+      expect(before[0].label).toBe("Search");
+      expect(after[0].label).toBe("parity.check");
+      expect(after[0]).not.toEqual(before[0]);
+    });
+
+    test("an editable value outranks content-desc when it identifies a placeholder (#7382)", () => {
+      const urlField: Element = {
+        bounds: bounds(0, 0, 100, 50),
+        "resource-id": "URL",
+        role: "textfield",
+        "content-desc": "Address",
+        value: "example.com",
+        actions: ["set_text"],
+      };
+
+      const skeleton = toSkeleton(makeElements({ clickable: [urlField] }));
+
+      expect(skeleton[0].label).toBe("example.com");
+    });
+
     test("does not use value as a non-editable label", () => {
       const slider: Element = {
         bounds: bounds(0, 0, 100, 50),
@@ -159,23 +196,22 @@ describe("toSkeleton — acceptance criteria", () => {
       expect(skeleton[0].label).toBeUndefined();
     });
 
-    test("preserves Android text and prefers text or content-desc over value", () => {
+    test("preserves Android text and falls back to an editable placeholder when value is empty", () => {
       const androidField: Element = {
         bounds: bounds(0, 0, 100, 50),
         "resource-id": "android-field",
         class: "android.widget.EditText",
         text: "hello",
-        value: "ignored",
       };
-      const contentDescField: Element = {
+      const emptyIosField: Element = {
         bounds: bounds(0, 60, 100, 110),
         "resource-id": "ios-field",
         actions: ["set_text"],
         "content-desc": "Search field",
-        value: "ignored too",
+        value: " ",
       };
 
-      const skeleton = toSkeleton(makeElements({ clickable: [androidField, contentDescField] }));
+      const skeleton = toSkeleton(makeElements({ clickable: [androidField, emptyIosField] }));
 
       expect(findById(skeleton, "android-field")?.label).toBe("hello");
       expect(findById(skeleton, "ios-field")?.label).toBe("Search field");

@@ -372,6 +372,8 @@ export interface DaemonMcpProxyConfig {
   clientFactory?: DaemonClientFactory;
   /** Socket-owner identity probe; custom client factories inject this separately. */
   daemonStatusProbe?: () => Promise<DaemonStatus>;
+  /** Observation-only socket availability probe; injectable for deterministic tests. */
+  daemonAvailabilityProbe?: (socketPath: string) => Promise<boolean>;
   /** Custom daemon manager (for testing) */
   daemonManager?: DaemonManagerLike;
   /** Requested daemon-global options plus connection presentation options. */
@@ -436,6 +438,12 @@ function connectedStaticToolDefinitionsProvider(
     config.staticToolDefinitionsProvider ??
     getConnectedStaticToolDefinitions
   );
+}
+
+function daemonAvailabilityProbe(
+  config: DaemonMcpProxyConfig,
+): (socketPath: string) => Promise<boolean> {
+  return config.daemonAvailabilityProbe ?? ((socketPath) => DaemonClient.isAvailable(socketPath));
 }
 
 /**
@@ -678,6 +686,7 @@ export class DaemonMcpProxy {
   private daemonManager: DaemonManagerLike;
   private clientFactory: DaemonClientFactory;
   private readonly daemonStatusProbe?: () => Promise<DaemonStatus>;
+  private readonly daemonAvailabilityProbe: (socketPath: string) => Promise<boolean>;
   private reconciliationSnapshot?: Promise<DaemonStatus>;
   private readonly timer: Timer;
   private readonly heartbeatKeeper: SingleFlightInterval;
@@ -841,6 +850,7 @@ export class DaemonMcpProxy {
       config.clientFactory ??
       (() => new DaemonClient(this.config.socketPath, this.config.connectionTimeoutMs));
     this.daemonStatusProbe = this.createStatusProbe(config);
+    this.daemonAvailabilityProbe = daemonAvailabilityProbe(config);
     this.timer = config.timer ?? defaultTimer;
     this.livenessOwnerToken = (config.idGenerator ?? defaultIdGenerator).next();
     this.heartbeatKeeper = new SingleFlightInterval(
@@ -926,7 +936,7 @@ export class DaemonMcpProxy {
     // the filesystem). A daemon from another checkout may own this namespace's
     // socket without its PID record; cleaning the path before DaemonManager can
     // verify that candidate would sever a live daemon.
-    const isAvailable = await DaemonClient.isAvailable(socketPath);
+    const isAvailable = await this.daemonAvailabilityProbe(socketPath);
 
     if (!isAvailable) {
       if (!this.config.autoStartDaemon) {
@@ -1323,7 +1333,7 @@ export class DaemonMcpProxy {
       this.timer.now() + Math.max(DAEMON_STARTUP_TIMEOUT_MS, DAEMON_RESTART_HANDOFF_TIMEOUT_MS);
     let emptyHandoffDeadline: number | undefined;
     while (!this.closing && this.timer.now() < deadline) {
-      if (await DaemonClient.isAvailable(socketPath)) {
+      if (await this.daemonAvailabilityProbe(socketPath)) {
         return;
       }
       const status = await this.daemonManager.status();

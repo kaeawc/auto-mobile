@@ -104,10 +104,10 @@ describe("DaemonMcpProxy.listAdvertisedTools (lazy tools/list — issue #5879)",
           ["tools/list", { tools: [{ name: liveToolName, inputSchema: {} }] }],
         ]),
       });
-      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
       const proxy = new DaemonMcpProxy({
         clientFactory: () => fakeClient,
         daemonManager: matchingDaemonManager(),
+        daemonAvailabilityProbe: async () => true,
         autoStartDaemon: false,
         staticToolDefinitionsProvider: () => [{ name: "tapOn", inputSchema: tapOnSchema }],
       });
@@ -121,7 +121,6 @@ describe("DaemonMcpProxy.listAdvertisedTools (lazy tools/list — issue #5879)",
         expect(tools.map((tool) => tool.name)).toEqual(["tapOn", liveToolName]);
         expect(tools.find((tool) => tool.name === "tapOn")?.inputSchema).toEqual(tapOnSchema);
       } finally {
-        isAvailableSpy.mockRestore();
         await proxy.close();
       }
     },
@@ -133,10 +132,10 @@ describe("DaemonMcpProxy.listAdvertisedTools (lazy tools/list — issue #5879)",
         ["tools/list", { tools: [{ name: "liveOnlyTool", inputSchema: {} }] }],
       ]),
     });
-    const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
     const proxy = new DaemonMcpProxy({
       clientFactory: () => fakeClient,
       daemonManager: matchingDaemonManager(),
+      daemonAvailabilityProbe: async () => true,
       autoStartDaemon: false,
     });
 
@@ -149,7 +148,6 @@ describe("DaemonMcpProxy.listAdvertisedTools (lazy tools/list — issue #5879)",
       expect(toolNames).not.toContain("barrier");
       expect(toolNames).not.toContain("criticalSection");
     } finally {
-      isAvailableSpy.mockRestore();
       await proxy.close();
     }
   });

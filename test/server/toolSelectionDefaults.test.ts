@@ -26,13 +26,15 @@ describe("tool selection default declarations", () => {
     );
   });
 
-  test("daemon mode excludes inherited connection defaults from global startup defaults", () => {
-    configureToolSelectionCliDefaults([], [], { includeEnvironment: false });
+  test("daemon startup validates inherited shared tool defaults", () => {
+    configureToolSelectionCliDefaults([], []);
 
     expect(() =>
       validateConfiguredToolSelectionDefaults(new Set(["observe"]), {
         AUTOMOBILE_ENABLED_TOOLS: "not-a-tool",
       }),
-    ).not.toThrow();
+    ).toThrow(
+      "Tool 'not-a-tool' is not a session-configurable tool name; AUTOMOBILE_ENABLED_TOOLS/AUTOMOBILE_DISABLED_TOOLS accept session-configurable tools only (see the automobile:tools resource).",
+    );
   });
 });

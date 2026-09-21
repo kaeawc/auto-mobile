@@ -4258,7 +4258,7 @@ export function parseDaemonArgs(
 export interface RunDaemonCommandOptions {
   clientFactory?: DaemonClientFactory;
   stateProvider?: () => DaemonStateLike;
-  startupToolDefaults?: Required<Pick<DaemonOptions, "enabledTools" | "disabledTools">>;
+  startupToolDefaults?: Pick<DaemonOptions, "enabledTools" | "disabledTools">;
 }
 
 export function daemonCommandOptions(
@@ -4271,8 +4271,12 @@ export function daemonCommandOptions(
   }
   return {
     ...parsed,
-    enabledTools: [...options.startupToolDefaults.enabledTools],
-    disabledTools: [...options.startupToolDefaults.disabledTools],
+    ...(options.startupToolDefaults.enabledTools !== undefined
+      ? { enabledTools: [...options.startupToolDefaults.enabledTools] }
+      : {}),
+    ...(options.startupToolDefaults.disabledTools !== undefined
+      ? { disabledTools: [...options.startupToolDefaults.disabledTools] }
+      : {}),
   };
 }
 

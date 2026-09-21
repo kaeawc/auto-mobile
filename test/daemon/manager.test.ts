@@ -191,6 +191,75 @@ describe("DaemonManager restart", () => {
     });
   });
 
+  test.each([
+    {
+      name: "bare restart",
+      requested: {},
+      recorded: { enabledTools: ["clipboard"], disabledTools: ["observe"] },
+      expected: { enabledTools: ["clipboard"], disabledTools: ["observe"] },
+    },
+    {
+      name: "enabled-only override",
+      requested: { enabledTools: ["sqlQuery"] },
+      recorded: { enabledTools: ["clipboard"], disabledTools: ["observe"] },
+      expected: { enabledTools: ["sqlQuery"], disabledTools: ["observe"] },
+    },
+    {
+      name: "disabled-only override",
+      requested: { disabledTools: ["tapOn"] },
+      recorded: { enabledTools: ["clipboard"], disabledTools: ["observe"] },
+      expected: { enabledTools: ["clipboard"], disabledTools: ["tapOn"] },
+    },
+    {
+      name: "explicit empty enabled side",
+      requested: { enabledTools: [] },
+      recorded: { enabledTools: ["clipboard"], disabledTools: ["observe"] },
+      expected: { enabledTools: [], disabledTools: ["observe"] },
+    },
+    {
+      name: "enabled side wins without clearing recorded disabled side",
+      requested: { enabledTools: ["clipboard"] },
+      recorded: { enabledTools: ["sqlQuery"], disabledTools: ["clipboard"] },
+      expected: { enabledTools: ["clipboard"], disabledTools: ["clipboard"] },
+    },
+  ])(
+    "restart preserves unspecified tool side for $name",
+    async ({ requested, recorded, expected }) => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const manager = new DaemonManager(
+        undefined,
+        undefined,
+        timer,
+        undefined,
+        undefined,
+        undefined,
+        { findDaemonProcesses: () => [], isProcessRunning: () => false },
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        new FakeDaemonPortAvailabilityChecker(),
+      );
+      const statusSpy = spyOn(manager, "status").mockResolvedValue({
+        running: false,
+        options: recorded,
+      });
+      const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
+
+      try {
+        await manager.restart(requested);
+        expect(startSpy).toHaveBeenCalledWith({ ...expected, strictPort: true });
+      } finally {
+        startSpy.mockRestore();
+        statusSpy.mockRestore();
+      }
+    },
+  );
+
   test("conditional restart does not terminate a successor generation", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();

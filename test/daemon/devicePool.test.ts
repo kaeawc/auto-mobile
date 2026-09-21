@@ -7471,7 +7471,7 @@ describe("DevicePool", () => {
       await devicePool.refreshDevices();
     };
 
-    test("quarantines a live entry whose latest observation is the placeholder", async () => {
+    test("immediately quarantines a live entry without a confirmed AVD identity", async () => {
       const device = poolDevice("emulator-5554", "Pixel_8_API_35");
       await initializeLiveDevices([device]);
       const incarnation = devicePool.getDevice("emulator-5554")?.incarnation;
@@ -7481,6 +7481,134 @@ describe("DevicePool", () => {
       expect(devicePool.isPooledIdentityUnresolved("emulator-5554")).toBe(true);
       // Kept, not evicted: same entry, same incarnation.
       expect(devicePool.getDevice("emulator-5554")?.incarnation).toBe(incarnation!);
+    });
+
+    test("keeps a confirmed session actionable while unreadable identity retries recover", async () => {
+      const device = { ...poolDevice("emulator-5554", "Pixel_8_API_35"), observedAt: 1 };
+      const firstOmission = { ...unresolved(device.deviceId), observedAt: 2 };
+      const secondOmission = { ...unresolved(device.deviceId), observedAt: 3 };
+      const recovered = { ...device, observedAt: 4 };
+      fakeDeviceManager.bootedDevices = [device];
+      await devicePool.initializeWithDevices([device]);
+      await devicePool.bindOrReuseDeviceSession(
+        "owner-session",
+        device.deviceId,
+        "android",
+        androidImage,
+      );
+      const pooled = devicePool.getDevice(device.deviceId);
+      const incarnation = pooled?.incarnation;
+      const assignmentCount = pooled?.assignmentCount;
+      const finalRetryStarted = Promise.withResolvers<void>();
+      const releaseFinalRetry = Promise.withResolvers<void>();
+      const getBootedDevicesDetailed =
+        fakeDeviceManager.getBootedDevicesDetailed.bind(fakeDeviceManager);
+      let retryCalls = 0;
+      fakeDeviceManager.getBootedDevicesDetailed = async (platform, options) => {
+        retryCalls++;
+        if (retryCalls === 1) {
+          fakeDeviceManager.bootedDevices = [secondOmission];
+          return await getBootedDevicesDetailed(platform, options);
+        }
+        finalRetryStarted.resolve();
+        await releaseFinalRetry.promise;
+        fakeDeviceManager.bootedDevices = [recovered];
+        return await getBootedDevicesDetailed(platform, options);
+      };
+
+      const reconciliation = devicePool.reconcileDiscoveryObservation(
+        [firstOmission],
+        "test:temporary-name-omission",
+      );
+      await finalRetryStarted.promise;
+
+      expect(devicePool.getDevice(device.deviceId)).toMatchObject({
+        identityReconcileAttempts: 3,
+        identityObservedAt: 1,
+        sessionId: "owner-session",
+      });
+      expect(devicePool.isPooledIdentityUnresolved(device.deviceId)).toBe(false);
+      expect(() => devicePool.assertDeviceActionable(device.deviceId, "test action")).not.toThrow();
+      expect(() => devicePool.assertSessionReadyForAutomation("owner-session")).not.toThrow();
+
+      releaseFinalRetry.resolve();
+      await reconciliation;
+
+      expect(retryCalls).toBe(2);
+      expect(devicePool.getDevice(device.deviceId)).toMatchObject({
+        avdName: device.name,
+        assignmentCount,
+        incarnation,
+        identityObservedAt: 4,
+        sessionId: "owner-session",
+      });
+      expect(devicePool.getDevice(device.deviceId)?.identityReconcileAttempts).toBeUndefined();
+      expect(devicePool.isPooledIdentityUnresolved(device.deviceId)).toBe(false);
+    });
+
+    test("immediately fences a different resolved name during identity retries", async () => {
+      const device = poolDevice("emulator-5554", "Pixel_8_API_35");
+      const different = poolDevice(device.deviceId, "Pixel_7_API_34");
+      fakeDeviceManager.bootedDevices = [device];
+      await devicePool.initializeWithDevices([device]);
+      await devicePool.bindOrReuseDeviceSession(
+        "owner-session",
+        device.deviceId,
+        "android",
+        androidImage,
+      );
+      fakeDeviceManager.bootedDevices = [different];
+      const getBootedDevicesDetailed =
+        fakeDeviceManager.getBootedDevicesDetailed.bind(fakeDeviceManager);
+      let retryCalls = 0;
+      fakeDeviceManager.getBootedDevicesDetailed = async (platform, options) => {
+        retryCalls++;
+        return await getBootedDevicesDetailed(platform, options);
+      };
+
+      await devicePool.reconcileDiscoveryObservation(
+        [unresolved(device.deviceId)],
+        "test:mismatch-during-name-retry",
+      );
+
+      expect(retryCalls).toBe(1);
+      expect(devicePool.isPooledIdentityUnresolved(device.deviceId)).toBe(true);
+      expect(() => devicePool.assertDeviceActionable(device.deviceId, "test action")).toThrow(
+        /identity is unresolved/,
+      );
+      expect(devicePool.getDevice(device.deviceId)?.sessionId).toBe("owner-session");
+    });
+
+    test("terminally quarantines a confirmed identity after the retry bound", async () => {
+      const device = poolDevice("emulator-5554", "Pixel_8_API_35");
+      fakeDeviceManager.bootedDevices = [device];
+      await devicePool.initializeWithDevices([device]);
+      await devicePool.bindOrReuseDeviceSession(
+        "owner-session",
+        device.deviceId,
+        "android",
+        androidImage,
+      );
+      fakeDeviceManager.bootedDevices = [unresolved(device.deviceId)];
+      const getBootedDevicesDetailed =
+        fakeDeviceManager.getBootedDevicesDetailed.bind(fakeDeviceManager);
+      let retryCalls = 0;
+      fakeDeviceManager.getBootedDevicesDetailed = async (platform, options) => {
+        retryCalls++;
+        return await getBootedDevicesDetailed(platform, options);
+      };
+
+      await devicePool.reconcileDiscoveryObservation(
+        [unresolved(device.deviceId)],
+        "test:permanently-unreadable-name",
+      );
+
+      expect(retryCalls).toBe(2);
+      expect(devicePool.getDevice(device.deviceId)?.identityReconcileAttempts).toBeUndefined();
+      expect(devicePool.isPooledIdentityUnresolved(device.deviceId)).toBe(true);
+      expect(() => devicePool.assertSessionReadyForAutomation("owner-session")).toThrow(
+        /identity is unresolved/,
+      );
     });
 
     test("restores a quarantined entry when the same AVD name is read again", async () => {
@@ -7933,6 +8061,7 @@ describe("DevicePool", () => {
         "android",
         androidImage,
       );
+      fakeDeviceManager.bootedDevices = [unresolved("emulator-5554")];
 
       await devicePool.reconcileDiscoveryObservation([unresolved("emulator-5554")], "test:kill", {
         excludeExecutionId: "kill-execution",

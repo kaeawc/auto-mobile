@@ -2142,7 +2142,8 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       return true;
     }
     if (!this.xcTestProcessId) {
-      return true;
+      logger.warn("[IOSCtrlProxy] XCTest process is not tracked, health endpoint not responding");
+      return false;
     }
 
     const processRunning = this.useRemoteRunner()

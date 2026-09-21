@@ -902,6 +902,8 @@ public final class GesturePerformer: GesturePerforming {
                 }
             }
 
+            try requireKeyboardFocus(app: app, context: "ensure a text field is focused before pressing a key")
+
             try catchingObjCException {
                 app.typeKey(keyboardKey, modifierFlags: modifierFlags)
             }

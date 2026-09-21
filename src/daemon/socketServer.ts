@@ -14,6 +14,7 @@ import { resolveMcpRequestTimeoutMs, ProgressExtendableDeadline } from "./mcpReq
 import { McpOverloadError, McpTimeoutError } from "./McpTimeoutError";
 import { DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import { errorMessage } from "../utils/describeUnknownError";
+import { isDebugModeEnabled } from "../utils/debug";
 import {
   BOUND_SESSION_LOSS_CODE,
   DaemonNotification,
@@ -3644,6 +3645,7 @@ export class UnixSocketServer {
                 .slice(0, 8)
             : null,
           startedAt: this.identityStartedAt,
+          effectiveDebug: isDebugModeEnabled(),
           options: this.startupOptions,
           ...(this.processGenerationToken === undefined
             ? {}

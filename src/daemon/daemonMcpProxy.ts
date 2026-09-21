@@ -820,6 +820,8 @@ export class DaemonMcpProxy {
   private servedStaticResourceList = false;
   private backgroundConnectRetry: NodeJS.Timeout | null = null;
   private backgroundConnectRetryAttempt = 0;
+  private connectedFallbackReconcile: NodeJS.Timeout | null = null;
+  private connectedFallbackReconcileAttempt = 0;
 
   // Cached definitions from daemon
   private cachedTools: ProxiedToolDefinition[] | null = null;
@@ -2133,7 +2135,8 @@ export class DaemonMcpProxy {
       return this.staticToolDefinitionsProvider();
     }
     const daemonStatus = await this.reconciliationStatus();
-    const staticTools = this.connectedStaticToolDefinitionsProvider(daemonStatus.options);
+    const fallbackOptions = await this.connectedFallbackDaemonOptions(daemonStatus);
+    const staticTools = this.connectedStaticToolDefinitionsProvider(fallbackOptions);
     let liveTools: ProxiedToolDefinition[];
     try {
       liveTools = await this.listTools();
@@ -2150,6 +2153,7 @@ export class DaemonMcpProxy {
         `[DaemonMcpProxy] Live tools/list failed; serving connected static fallback: ${errorMessage(error)}`,
         error,
       );
+      this.scheduleConnectedFallbackReconcile();
       return staticTools;
     }
     const liveToolsByName = new Map(liveTools.map((tool) => [tool.name, tool]));
@@ -2158,6 +2162,31 @@ export class DaemonMcpProxy {
       ...staticTools.map((tool) => liveToolsByName.get(tool.name) ?? tool),
       ...[...liveToolsByName.values()].filter((tool) => !staticToolNames.has(tool.name)),
     ];
+  }
+
+  private async connectedFallbackDaemonOptions(daemonStatus: DaemonStatus): Promise<DaemonOptions> {
+    let effectiveDebug = daemonStatus.effectiveDebug;
+    try {
+      const liveStatus: unknown = await this.client?.callDaemonMethod("ide/status", {});
+      if (
+        typeof liveStatus === "object" &&
+        liveStatus !== null &&
+        "effectiveDebug" in liveStatus &&
+        typeof liveStatus.effectiveDebug === "boolean"
+      ) {
+        effectiveDebug = liveStatus.effectiveDebug;
+      }
+    } catch (error) {
+      // The immutable launch option remains a backward-compatible fallback when
+      // a legacy or unhealthy daemon cannot report its live debug state.
+      logger.debug(
+        `[DaemonMcpProxy] Live effective debug status unavailable; using reconciled status: ${errorMessage(error)}`,
+      );
+    }
+    return {
+      ...daemonStatus.options,
+      debug: effectiveDebug ?? daemonStatus.options?.debug,
+    };
   }
 
   /**
@@ -2243,6 +2272,48 @@ export class DaemonMcpProxy {
       this.backgroundConnectRetry = null;
     }
     this.backgroundConnectRetryAttempt = 0;
+  }
+
+  private scheduleConnectedFallbackReconcile(): void {
+    if (this.closing || !this.connected || this.connectedFallbackReconcile) {
+      return;
+    }
+    const delay = COLD_RESOURCE_CONNECT_RETRY_DELAYS_MS[this.connectedFallbackReconcileAttempt];
+    if (delay === undefined) {
+      return;
+    }
+    this.connectedFallbackReconcileAttempt += 1;
+    this.connectedFallbackReconcile = this.timer.setTimeout(() => {
+      void this.attemptConnectedFallbackReconcile();
+    }, delay);
+  }
+
+  private async attemptConnectedFallbackReconcile(): Promise<void> {
+    this.connectedFallbackReconcile = null;
+    if (this.closing || !this.connected) {
+      return;
+    }
+    this.invalidateListCache("tools");
+    try {
+      await this.listTools();
+      this.connectedFallbackReconcileAttempt = 0;
+      this.notifyListChanged("tools");
+    } catch (error) {
+      // Best-effort: callable static schemas were already returned, and the
+      // bounded retry can safely wait for the daemon's live list to recover.
+      logger.debug(
+        `[DaemonMcpProxy] connected static fallback reconciliation failed: ${errorMessage(error)}`,
+      );
+      this.scheduleConnectedFallbackReconcile();
+    }
+  }
+
+  private cancelConnectedFallbackReconcile(): void {
+    if (this.connectedFallbackReconcile) {
+      this.timer.clearTimeout(this.connectedFallbackReconcile);
+      this.connectedFallbackReconcile = null;
+    }
+    this.connectedFallbackReconcileAttempt = 0;
   }
 
   /**
@@ -3588,6 +3659,7 @@ export class DaemonMcpProxy {
     this.closing = true;
     this.completeDaemonShutdownDisconnect();
     this.cancelBackgroundConnectRetry();
+    this.cancelConnectedFallbackReconcile();
     this.connectionCloseReject?.(new DaemonUnavailableError("MCP proxy is closing"));
     await this.stopBoundSessionHeartbeat();
     if (this.client) {

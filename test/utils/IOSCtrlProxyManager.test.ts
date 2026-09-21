@@ -3178,6 +3178,139 @@ describe("IOSCtrlProxyManager", function () {
       expect(alive).toBe(false);
     });
 
+    test("xctest process supervisor restarts once when health is down and the tracked PID is missing", async function () {
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeTimer,
+        undefined,
+        fakeExecutor,
+      );
+      const internal = manager as unknown as {
+        xcTestProcessId: number | null;
+        isSupervisedCtrlProxyProcessAlive: () => Promise<boolean>;
+        processSupervisor: { start: () => Promise<void> };
+      };
+      fakeExecutor.setCommandResponse("curl -s", createExecResult("", ""));
+
+      // Prime the public status cache with the dead runner state. The supervisor's
+      // onExit callback must clear it so readiness can observe the replacement.
+      expect(await manager.isRunning()).toBe(false);
+      expect(await internal.isSupervisedCtrlProxyProcessAlive()).toBe(false);
+      expect(fakeExecutor.wasCommandExecuted("kill -0")).toBe(false);
+
+      let restartAttempts = 0;
+      spyOn(manager, "start").mockImplementation(async () => {
+        restartAttempts++;
+        internal.xcTestProcessId = 67890;
+        fakeExecutor.setCommandResponse(
+          "curl -s",
+          createExecResult(JSON.stringify({ status: "ok", deviceId: testDevice.deviceId }), ""),
+        );
+      });
+
+      await internal.processSupervisor.start();
+      fakeTimer.advanceTime(30000);
+      for (let i = 0; i < 5; i++) {
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+
+      expect(restartAttempts).toBe(0);
+      expect(fakeTimer.getPendingTimeouts()).toEqual([2000]);
+
+      fakeTimer.advanceTime(2000);
+      for (let i = 0; i < 5; i++) {
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+
+      expect(restartAttempts).toBe(1);
+      expect(internal.xcTestProcessId).toBe(67890);
+      expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
+      expect(fakeTimer.getPendingIntervals()).toEqual([30000]);
+      expect(await manager.isRunning()).toBe(true);
+
+      fakeTimer.advanceTime(30000);
+      for (let i = 0; i < 5; i++) {
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+      expect(restartAttempts).toBe(1);
+      expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
+    });
+
+    test("a second liveness signal while a restart is already scheduled does not double-schedule (ProcessSupervisor.ts scheduleRestart's restartTimeout guard, ProcessSupervisor.ts:125)", async function () {
+      // Reproduces the state the follow-up review asked for: xcTestProcessId is
+      // null (as onExit would leave it) AND the health endpoint is dead AND a
+      // restart has already been scheduled (backoff timer pending) when a second
+      // "runner is dead" signal arrives — e.g. a duplicate/racing liveness poll,
+      // or a stray event-driven exit callback. `DefaultProcessSupervisor.scheduleRestart`
+      // (src/utils/ProcessSupervisor.ts:124-141) guards on `this.restartTimeout`
+      // being already set and returns immediately without incrementing
+      // `restartAttempts` or touching the pending timeout, so this is a single,
+      // deterministic assertion on that structural guard rather than a new
+      // production behavior.
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeTimer,
+        undefined,
+        fakeExecutor,
+      );
+      const internal = manager as unknown as {
+        xcTestProcessId: number | null;
+        isSupervisedCtrlProxyProcessAlive: () => Promise<boolean>;
+        processSupervisor: { start: () => Promise<void>; processExited: () => void };
+      };
+      fakeExecutor.setCommandResponse("curl -s", createExecResult("", ""));
+
+      expect(await internal.isSupervisedCtrlProxyProcessAlive()).toBe(false);
+
+      let restartAttempts = 0;
+      spyOn(manager, "start").mockImplementation(async () => {
+        restartAttempts++;
+        internal.xcTestProcessId = 67890;
+        fakeExecutor.setCommandResponse(
+          "curl -s",
+          createExecResult(JSON.stringify({ status: "ok", deviceId: testDevice.deviceId }), ""),
+        );
+      });
+
+      await internal.processSupervisor.start();
+
+      // First "dead" signal: the 30s monitor tick observes health down + no
+      // tracked PID, and schedules a bounded restart.
+      fakeTimer.advanceTime(30000);
+      for (let i = 0; i < 5; i++) {
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+      expect(fakeTimer.getPendingTimeouts()).toEqual([2000]);
+      expect(restartAttempts).toBe(0);
+
+      // Second "dead" signal arrives while the restart is already in flight
+      // (backoff timer pending, xcTestProcessId still null, health still down).
+      // This simulates a racing/duplicate liveness detection rather than the
+      // 30s interval, since `handleProcessExit` already stopped the monitor
+      // interval for this generation.
+      internal.processSupervisor.processExited();
+      for (let i = 0; i < 5; i++) {
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+
+      // No second/concurrent restart was scheduled: still exactly one pending
+      // timeout, at the original 2000ms delay (not re-scheduled to a fresh
+      // attempt), and no restart has fired yet.
+      expect(fakeTimer.getPendingTimeoutCount()).toBe(1);
+      expect(fakeTimer.getPendingTimeouts()).toEqual([2000]);
+      expect(restartAttempts).toBe(0);
+
+      // Let the single scheduled restart fire.
+      fakeTimer.advanceTime(2000);
+      for (let i = 0; i < 5; i++) {
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+
+      // Exactly one restart total, despite two "dead" signals.
+      expect(restartAttempts).toBe(1);
+      expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
+    });
+
     describe("iproxy monitor uses process liveness not health endpoint", function () {
       beforeEach(function () {
         fakeExecutor.setCommandResponse(

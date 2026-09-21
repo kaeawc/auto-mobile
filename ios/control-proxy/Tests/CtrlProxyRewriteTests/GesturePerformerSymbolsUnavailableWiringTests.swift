@@ -66,6 +66,20 @@ final class GesturePerformerSymbolsUnavailableWiringTests: XCTestCase {
         )
     }
 
+    func testPressKeyRequiresKeyboardFocusBeforeSynthesis() throws {
+        let pressKey = try gesturePerformerFunction(named: "pressKey(")
+        let focusGuard = try XCTUnwrap(pressKey.range(
+            of: "try requireKeyboardFocus(app: app, context: \"ensure a text field is focused before pressing a key\")"
+        ))
+        let synthesis = try XCTUnwrap(pressKey.range(of: "app.typeKey(keyboardKey, modifierFlags: modifierFlags)"))
+
+        XCTAssertLessThan(
+            focusGuard.lowerBound,
+            synthesis.lowerBound,
+            "pressKey must require keyboard focus before synthesizing a key event"
+        )
+    }
+
     private func gesturePerformerFunction(named name: String) throws -> String {
         let packageRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
@@ -81,6 +95,6 @@ final class GesturePerformerSymbolsUnavailableWiringTests: XCTestCase {
         ].compactMap { $0 }.min()
         let functionEnd = nextDeclaration ?? source.endIndex
 
-        return String(source[functionStart.lowerBound..<functionEnd])
+        return String(source[functionStart.lowerBound ..< functionEnd])
     }
 }

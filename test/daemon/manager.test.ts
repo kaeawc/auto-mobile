@@ -5752,6 +5752,9 @@ describe("Daemon manager process detection", () => {
         processSpawner,
         cleaner,
         () => ({ command: process.execPath, args: [entryScript, "--daemon-mode"] }),
+        undefined,
+        undefined,
+        { isReachable: async () => false },
       );
 
       await expect(manager.start()).rejects.toThrow(
@@ -5817,6 +5820,9 @@ describe("Daemon manager process detection", () => {
         processSpawner,
         cleaner,
         () => ({ command: process.execPath, args: [entryScript, "--daemon-mode"] }),
+        undefined,
+        undefined,
+        { isReachable: async () => false },
       );
 
       await manager.start({ port: 1234 });
@@ -6013,6 +6019,9 @@ describe("Daemon manager process detection", () => {
         processSpawner,
         cleaner,
         () => ({ command: process.execPath, args: [entryScript, "--daemon-mode"] }),
+        undefined,
+        undefined,
+        { isReachable: async () => false },
       );
 
       await expect(manager.start()).rejects.toThrow(
@@ -6062,6 +6071,9 @@ describe("Daemon manager process detection", () => {
         processSpawner,
         cleaner,
         () => ({ command: process.execPath, args: [join(dir, "entry.js"), "--daemon-mode"] }),
+        undefined,
+        undefined,
+        { isReachable: async () => false },
       );
 
       await expect(manager.start()).rejects.toThrow(

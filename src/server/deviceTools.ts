@@ -4001,21 +4001,96 @@ async function readTeardownTargetDiscovery(
     : await readTeardownBootedDiscovery(context, undefined, "name-aware");
 }
 
+interface TeardownInventoryDiscovery extends DeviceImageDiscovery {
+  androidSources?: {
+    emulatorAvdNames: Set<string>;
+    avdManagerAvdNames: Set<string>;
+    incompleteSources: string[];
+  };
+}
+
 async function readTeardownInventory(
   context: TeardownContext,
   platform: SomePlatform,
   detail: string,
-): Promise<DeviceImageDiscovery> {
+): Promise<TeardownInventoryDiscovery> {
   return await runWithinShutdownDeadline(
     context.deadlineDevice,
     context.dependencies.timer,
     context.deadlineMs,
     detail,
     context.requestAbortSignal,
-    async () =>
-      await context.deviceManager.getDeviceImagesDetailed(platform, {
+    async (signal) => {
+      const platformInventory = await context.deviceManager.getDeviceImagesDetailed(platform, {
         bypassIosDeviceListCache: true,
-      }),
+        signal,
+      });
+      if (platform !== "android") {
+        return platformInventory;
+      }
+
+      const avdManagerResult = await Promise.allSettled([
+        context.dependencies.avdManagerFactory().listDeviceImages(signal),
+      ]);
+      const [avdManagerInventory] = avdManagerResult;
+      if (avdManagerInventory.status === "rejected") {
+        signal.throwIfAborted();
+        const message = `avdmanager list avd failed: ${errorMessage(avdManagerInventory.reason)}`;
+        logger.warn(`[DeviceTools] ${message}`, avdManagerInventory.reason);
+        const succeededPlatforms = new Set(platformInventory.succeededPlatforms);
+        succeededPlatforms.delete("android");
+        const incompleteSources = platformInventory.succeededPlatforms.has("android")
+          ? []
+          : ["emulator -list-avds"];
+        const existingAndroidError = platformInventory.discoveryErrors?.android;
+        return {
+          ...platformInventory,
+          succeededPlatforms,
+          discoveryErrors: {
+            ...platformInventory.discoveryErrors,
+            android: existingAndroidError
+              ? {
+                  ...existingAndroidError,
+                  message: `${existingAndroidError.message} ${message}`,
+                }
+              : { code: "failed", message },
+          },
+          androidSources: {
+            emulatorAvdNames: new Set(
+              platformInventory.devices
+                .filter((device) => device.platform === "android")
+                .map((device) => device.name),
+            ),
+            avdManagerAvdNames: new Set(),
+            incompleteSources: [...incompleteSources, "avdmanager list avd"],
+          },
+        };
+      }
+
+      const emulatorAvdNames = new Set(
+        platformInventory.devices
+          .filter((device) => device.platform === "android")
+          .map((device) => device.name),
+      );
+      const avdManagerAvdNames = new Set(avdManagerInventory.value.map((avd) => avd.name));
+      const devices = [...platformInventory.devices];
+      for (const avd of avdManagerInventory.value) {
+        if (!emulatorAvdNames.has(avd.name)) {
+          devices.push({ platform: "android", name: avd.name, isRunning: false });
+        }
+      }
+      return {
+        ...platformInventory,
+        devices,
+        androidSources: {
+          emulatorAvdNames,
+          avdManagerAvdNames,
+          incompleteSources: platformInventory.succeededPlatforms.has("android")
+            ? []
+            : ["emulator -list-avds"],
+        },
+      };
+    },
     context.timeoutMs,
   );
 }
@@ -4659,11 +4734,67 @@ function serialOnlyAndroidTeardownRestartFailure(
   );
 }
 
-async function verifyTeardownAbsence(
+function androidInventorySourcesListingTarget(
+  inventory: TeardownInventoryDiscovery,
+  targetName: string,
+): string[] {
+  const sources = inventory.androidSources;
+  if (!sources) {
+    return [];
+  }
+  return [
+    ...(sources.emulatorAvdNames.has(targetName) ? ["emulator -list-avds"] : []),
+    ...(sources.avdManagerAvdNames.has(targetName) ? ["avdmanager list avd"] : []),
+  ];
+}
+
+function teardownInventoryVerificationFailure(
   context: TeardownContext,
   target: TeardownResolvedTarget,
-  stop: "accepted" | "not_required",
-): Promise<TeardownToolResponse> {
+  inventory: TeardownInventoryDiscovery,
+): TeardownToolResponse | undefined {
+  const targetName = target.device.name;
+  const listedBy = androidInventorySourcesListingTarget(inventory, targetName);
+  if (!completedInventoryFor(inventory, target.device.platform)) {
+    const incompleteSources = inventory.androidSources?.incompleteSources ?? [];
+    const sourceDetail =
+      incompleteSources.length > 0 ? ` Incomplete checks: ${incompleteSources.join(", ")}.` : "";
+    const diagnosticDetail = inventory.discoveryErrors?.[target.device.platform]?.message
+      ? ` ${inventory.discoveryErrors[target.device.platform]?.message}`
+      : "";
+    const presenceDetail =
+      listedBy.length > 0
+        ? ` Target '${targetName}' remained listed by ${listedBy.join(" and ")}.`
+        : "";
+    return createTeardownFailureResponse(
+      context.args,
+      "verification",
+      "inventory_incomplete",
+      "The platform deletion command completed, but durable absence could not be verified." +
+        sourceDetail +
+        diagnosticDetail +
+        presenceDetail,
+      target.device,
+    );
+  }
+  if (!inventoryContainsTarget(inventory, target)) {
+    return undefined;
+  }
+  const sourceDetail =
+    listedBy.length > 0 ? ` It remained listed by ${listedBy.join(" and ")}.` : "";
+  return createTeardownFailureResponse(
+    context.args,
+    "verification",
+    "target_still_present",
+    `The platform deletion command completed, but target '${targetName}' is still present in inventory.${sourceDetail}`,
+    target.device,
+  );
+}
+
+async function readTeardownAbsenceFailure(
+  context: TeardownContext,
+  target: TeardownResolvedTarget,
+): Promise<TeardownToolResponse | undefined> {
   const restarted = await checkForRestartedTeardownTarget(context, target, "verification");
   if (restarted) {
     return restarted;
@@ -4673,32 +4804,116 @@ async function verifyTeardownAbsence(
     target.device.platform,
     "post-delete platform inventory did not complete",
   );
-  if (!completedInventoryFor(inventory, target.device.platform)) {
-    return createTeardownFailureResponse(
-      context.args,
-      "verification",
-      "inventory_incomplete",
-      "The platform deletion command completed, but durable absence could not be verified.",
-      target.device,
-    );
-  }
-  if (inventoryContainsTarget(inventory, target)) {
-    return createTeardownFailureResponse(
-      context.args,
-      "verification",
-      "target_still_present",
-      "The platform deletion command completed, but the target is still present in inventory.",
-      target.device,
-    );
-  }
-  void notifyResourcesAfterShutdown(context.dependencies);
-  return createTeardownResponse(
+  return teardownInventoryVerificationFailure(context, target, inventory);
+}
+
+function createTeardownVerificationDeadlineFailure(
+  context: TeardownContext,
+  target: TeardownResolvedTarget,
+  lastFailure?: TeardownToolResponse,
+): TeardownToolResponse {
+  const lastFailureMessage = lastFailure
+    ? (
+        JSON.parse(lastFailure.content[0].text) as {
+          failure?: { message?: string };
+        }
+      ).failure?.message
+    : undefined;
+  const message =
+    "The teardown deadline elapsed before durable target absence could be verified." +
+    (lastFailureMessage ? ` ${lastFailureMessage}` : "");
+  return createTeardownFailureResponse(
     context.args,
-    "destroyed",
-    { stop, destroy: "accepted" },
-    { notRunning: "confirmed", inventory: "complete_absence_confirmed" },
+    "verification",
+    "verification_deadline_exceeded",
+    message,
     target.device,
   );
+}
+
+/**
+ * Sleep for `delay` ms, racing against `signal` for prompt cancellation.
+ * Mirrors RetryExecutor.sleepUnlessAborted's cleanup pattern so neither the
+ * timer handle nor the abort listener remains registered after the race.
+ */
+async function sleepUnlessAborted(
+  timer: Timer,
+  delay: number,
+  signal: AbortSignal | undefined,
+): Promise<boolean> {
+  if (!signal) {
+    await timer.sleep(delay);
+    return false;
+  }
+  if (signal.aborted) {
+    return true;
+  }
+  let onAbort: (() => void) | undefined;
+  let handle: NodeJS.Timeout | undefined;
+  try {
+    return await new Promise<boolean>((resolve) => {
+      handle = timer.setTimeout(() => resolve(false), delay);
+      if (signal.aborted) {
+        resolve(true);
+        return;
+      }
+      onAbort = () => resolve(true);
+      signal.addEventListener("abort", onAbort, { once: true });
+    });
+  } finally {
+    if (handle !== undefined) {
+      timer.clearTimeout(handle);
+    }
+    if (onAbort) {
+      signal.removeEventListener("abort", onAbort);
+    }
+  }
+}
+
+async function verifyTeardownAbsence(
+  context: TeardownContext,
+  target: TeardownResolvedTarget,
+  stop: "accepted" | "not_required",
+): Promise<TeardownToolResponse> {
+  let lastFailure: TeardownToolResponse | undefined;
+  for (;;) {
+    context.requestAbortSignal?.throwIfAborted();
+    if (context.dependencies.timer.now() >= context.deadlineMs) {
+      return createTeardownVerificationDeadlineFailure(context, target, lastFailure);
+    }
+
+    let failure: TeardownToolResponse | undefined;
+    try {
+      failure = await readTeardownAbsenceFailure(context, target);
+    } catch (error) {
+      if (context.requestAbortSignal?.aborted || !isShutdownTimeoutError(error)) {
+        throw error;
+      }
+      logger.warn("[DeviceTools] Teardown verification read reached the shutdown deadline", error);
+      return createTeardownVerificationDeadlineFailure(context, target, lastFailure);
+    }
+    if (!failure) {
+      void notifyResourcesAfterShutdown(context.dependencies);
+      return createTeardownResponse(
+        context.args,
+        "destroyed",
+        { stop, destroy: "accepted" },
+        { notRunning: "confirmed", inventory: "complete_absence_confirmed" },
+        target.device,
+      );
+    }
+    lastFailure = failure;
+
+    const remainingMs = context.deadlineMs - context.dependencies.timer.now();
+    if (remainingMs <= 0) {
+      return createTeardownVerificationDeadlineFailure(context, target, lastFailure);
+    }
+    await sleepUnlessAborted(
+      context.dependencies.timer,
+      Math.min(DEVICE_SHUTDOWN_POLL_INTERVAL_MS, remainingMs),
+      context.requestAbortSignal,
+    );
+  }
 }
 
 let moduleDependencies: DeviceToolsDependencies | null = null;

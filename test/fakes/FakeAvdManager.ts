@@ -25,6 +25,7 @@ export class FakeAvdManager implements AvdManager {
     message: "System image installed successfully",
   };
   private listDeviceImagesResponse: AvdInfo[] = [];
+  private listDeviceImagesResponseQueue: AvdInfo[][] = [];
   private listDeviceImagesHangs: boolean = false;
   private listDeviceImagesDelay: { timer: Timer; ms: number } | undefined;
   private createAvdResponse: { success: boolean; message: string; avdName?: string } = {
@@ -80,6 +81,13 @@ export class FakeAvdManager implements AvdManager {
 
   setListDeviceImagesResponse(response: AvdInfo[]): void {
     this.listDeviceImagesResponse = response;
+    this.listDeviceImagesResponseQueue = [];
+  }
+
+  /** Return successive AVD inventories, then retain the final response. */
+  setListDeviceImagesResponses(responses: AvdInfo[][]): void {
+    this.listDeviceImagesResponseQueue = responses.map((response) => [...response]);
+    this.listDeviceImagesResponse = responses.at(-1) ?? [];
   }
 
   /**
@@ -225,6 +233,10 @@ export class FakeAvdManager implements AvdManager {
     }
     if (this.listDeviceImagesDelay) {
       await this.listDeviceImagesDelay.timer.sleep(this.listDeviceImagesDelay.ms);
+    }
+    if (this.listDeviceImagesResponseQueue.length > 0) {
+      const response = this.listDeviceImagesResponseQueue.shift();
+      return response ?? this.listDeviceImagesResponse;
     }
     return this.listDeviceImagesResponse;
   }

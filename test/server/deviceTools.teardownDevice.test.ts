@@ -51,6 +51,7 @@ import type {
   DeviceShutdownOptions,
 } from "../../src/utils/deviceUtils";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
+import { FakeAvdManager } from "../fakes/FakeAvdManager";
 import { FakeDeviceTeardownOperationStore } from "../fakes/FakeDeviceTeardownOperationStore";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -253,6 +254,7 @@ function request(
 
 describe("deleteDevice handler", () => {
   let manager: TeardownDeviceManager;
+  let avdManager: FakeAvdManager;
   let teardownOperationStore: FakeDeviceTeardownOperationStore;
   // What `emu avd name` answers for a serial whose discovered runtime name is
   // `Unknown (<serial>)`. undefined == the console did not answer, which leaves
@@ -270,6 +272,7 @@ describe("deleteDevice handler", () => {
     runtimeAvdNameProbes = [];
     runtimeAvdNameProbeTimeouts = [];
     manager = new TeardownDeviceManager();
+    avdManager = new FakeAvdManager();
     teardownOperationStore = new FakeDeviceTeardownOperationStore();
     await setVideoRecordingManagerDependencies({
       videoRecorderService: {} as never,
@@ -283,6 +286,7 @@ describe("deleteDevice handler", () => {
     });
     setDeviceToolsDependencies({
       deviceManagerFactory: () => manager,
+      avdManagerFactory: () => avdManager,
       notifyResourcesChanged: async () => {},
       ensureCtrlProxyReady: async () => {},
       clearInstalledAppsForDevice: async () => {},
@@ -1435,6 +1439,268 @@ describe("deleteDevice handler", () => {
     ).toBe(true);
   });
 
+  test("polls until a booted Android AVD is absent from adb and both AVD inventories", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    setDeviceToolsDependencies({ timer });
+    const avdName = "Pixel_8_API_35";
+    const target: BootedDevice = {
+      platform: "android",
+      name: avdName,
+      deviceId: "emulator-5556",
+    };
+    manager.setBootedDevices("android", [target]);
+    manager.setDeviceImages("android", [{ platform: "android", name: avdName, isRunning: true }]);
+    // The deletion command has returned and emulator -list-avds is already
+    // empty, but avdmanager still reports the exact AVD for two verification
+    // ticks before its registry settles.
+    avdManager.setListDeviceImagesResponses([[{ name: avdName }], [{ name: avdName }], []]);
+
+    const body = responseBody(await teardownTool().handler(request("android", avdName, avdName)));
+
+    expect(body.state).toBe("destroyed");
+    expect(avdManager.getListDeviceImagesCalls()).toHaveLength(3);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+    expect(await manager.getBootedDevices("android")).toEqual([]);
+    expect(await manager.listDeviceImages("android")).toEqual([]);
+  });
+
+  test("fails when avdmanager still lists an AVD that emulator inventory reports absent", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    setDeviceToolsDependencies({ timer });
+    const avdName = "Pixel_8_API_35";
+    manager.setDeviceImages("android", [{ platform: "android", name: avdName, isRunning: false }]);
+    avdManager.setListDeviceImagesResponse([{ name: avdName }]);
+
+    const body = responseBody(
+      await teardownTool().handler({
+        ...request("android", avdName, avdName),
+        timeoutMs: 2_500,
+      }),
+    );
+
+    expect(body.state).toBe("failed");
+    expect(body.failure).toEqual(
+      expect.objectContaining({
+        code: "verification_deadline_exceeded",
+        phase: "verification",
+      }),
+    );
+    expect(String((body.failure as Record<string, unknown>).message)).toContain(
+      "avdmanager list avd",
+    );
+    expect(manager.destroyRequests).toHaveLength(1);
+    expect(await manager.listDeviceImages("android")).toEqual([]);
+  });
+
+  test("maps an in-flight verification inventory timeout to verification_deadline_exceeded", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    setDeviceToolsDependencies({ timer });
+    const avdName = "Pixel_8_API_35";
+    manager.setBootedDevices("android", [
+      { platform: "android", name: avdName, deviceId: "emulator-5556" },
+    ]);
+    manager.setDeviceImages("android", [{ platform: "android", name: avdName, isRunning: true }]);
+
+    manager.destroyStarted = () => {
+      avdManager.setListDeviceImagesHangs(true);
+    };
+    const listDeviceImages = avdManager.listDeviceImages.bind(avdManager);
+    avdManager.listDeviceImages = async (signal) => {
+      return await listDeviceImages(signal);
+    };
+
+    const body = responseBody(
+      await teardownTool().handler({
+        ...request("android", avdName, avdName),
+        timeoutMs: 2_500,
+      }),
+    );
+
+    expect(body.state).toBe("failed");
+    expect(body.failure).toEqual(
+      expect.objectContaining({
+        code: "verification_deadline_exceeded",
+        phase: "verification",
+      }),
+    );
+    expect(body.failure).not.toEqual(expect.objectContaining({ code: "operation_failed" }));
+  });
+
+  test("preserves request cancellation for an in-flight verification inventory read", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    setDeviceToolsDependencies({ timer });
+    const avdName = "Pixel_8_API_35";
+    manager.setBootedDevices("android", [
+      { platform: "android", name: avdName, deviceId: "emulator-5556" },
+    ]);
+    manager.setDeviceImages("android", [{ platform: "android", name: avdName, isRunning: true }]);
+    const controller = new AbortController();
+    let verificationRead = false;
+    manager.destroyStarted = () => {
+      verificationRead = true;
+      avdManager.setListDeviceImagesHangs(true);
+    };
+    const listDeviceImages = avdManager.listDeviceImages.bind(avdManager);
+    avdManager.listDeviceImages = async (signal) => {
+      if (verificationRead && !controller.signal.aborted) {
+        controller.abort(new Error("deleteDevice caller stopped waiting"));
+      }
+      return await listDeviceImages(signal);
+    };
+
+    const body = responseBody(
+      await teardownTool().handler(
+        {
+          ...request("android", avdName, avdName),
+          timeoutMs: 2_500,
+          cancellationPolicy: "cancel-on-request-abort",
+        },
+        undefined,
+        controller.signal,
+      ),
+    );
+
+    expect(body.state).toBe("failed");
+    expect(body.failure).toEqual(expect.objectContaining({ code: "operation_cancelled" }));
+    expect(body.failure).not.toEqual(
+      expect.objectContaining({ code: "verification_deadline_exceeded" }),
+    );
+  });
+
+  test("cancels promptly during the verification backoff interval", async () => {
+    const timer = new FakeTimer();
+    setDeviceToolsDependencies({ timer });
+    const avdName = "Pixel_8_API_35";
+    manager.setBootedDevices("android", [
+      { platform: "android", name: avdName, deviceId: "emulator-5556" },
+    ]);
+    manager.setDeviceImages("android", [{ platform: "android", name: avdName, isRunning: true }]);
+    avdManager.setListDeviceImagesResponse([{ name: avdName }]);
+
+    const controller = new AbortController();
+    const originalSetTimeout = timer.setTimeout.bind(timer);
+    let backoffScheduled = false;
+    timer.setTimeout = (callback, ms) => {
+      const handle = originalSetTimeout(callback, ms);
+      if (ms === 1_000 && !backoffScheduled) {
+        backoffScheduled = true;
+        queueMicrotask(() => controller.abort(new Error("deleteDevice caller stopped waiting")));
+      }
+      return handle;
+    };
+
+    const body = responseBody(
+      await teardownTool().handler(
+        {
+          ...request("android", avdName, avdName),
+          timeoutMs: 2_500,
+          cancellationPolicy: "cancel-on-request-abort",
+        },
+        undefined,
+        controller.signal,
+      ),
+    );
+
+    expect(backoffScheduled).toBe(true);
+    expect(timer.getPendingTimeouts()).not.toContain(1_000);
+    expect(body.state).toBe("failed");
+    expect(body.failure).toEqual(expect.objectContaining({ code: "operation_cancelled" }));
+    expect(body.failure).not.toEqual(
+      expect.objectContaining({ code: "verification_deadline_exceeded" }),
+    );
+  });
+
+  test("reports both incomplete Android inventory sources and diagnostics", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    setDeviceToolsDependencies({ timer });
+    const avdName = "Pixel_8_API_35";
+    manager.setBootedDevices("android", [
+      { platform: "android", name: avdName, deviceId: "emulator-5556" },
+    ]);
+    manager.setDeviceImages("android", [{ platform: "android", name: avdName, isRunning: true }]);
+    let verificationInventory = false;
+    const getDeviceImagesDetailed = manager.getDeviceImagesDetailed.bind(manager);
+    manager.getDeviceImagesDetailed = async (platform, options) => {
+      if (verificationInventory && platform === "android") {
+        return {
+          devices: [],
+          succeededPlatforms: new Set(),
+          discoveryErrors: {
+            android: { code: "unavailable", message: "emulator discovery failed" },
+          },
+        };
+      }
+      return await getDeviceImagesDetailed(platform, options);
+    };
+    manager.destroyStarted = () => {
+      verificationInventory = true;
+    };
+
+    avdManager.listDeviceImages = async () => {
+      if (verificationInventory) {
+        throw new Error("avd registry failed");
+      }
+      return [];
+    };
+
+    const body = responseBody(
+      await teardownTool().handler({
+        ...request("android", avdName, avdName),
+        timeoutMs: 2_500,
+      }),
+    );
+
+    expect(body.state).toBe("failed");
+    expect(body.failure).toEqual(
+      expect.objectContaining({
+        code: "verification_deadline_exceeded",
+        phase: "verification",
+      }),
+    );
+    const message = String((body.failure as Record<string, unknown>).message);
+    expect(message).toContain("emulator -list-avds");
+    expect(message).toContain("avdmanager list avd");
+    expect(message).toContain("emulator discovery failed");
+    expect(message).toContain("avd registry failed");
+  });
+
+  test("does not false-verify or stop a same-name replacement during absence polling", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    setDeviceToolsDependencies({ timer });
+    const avdName = "Pixel_8_API_35";
+    const replacement: BootedDevice = {
+      platform: "android",
+      name: avdName,
+      deviceId: "emulator-5560",
+    };
+    manager.setDeviceImages("android", [{ platform: "android", name: avdName, isRunning: false }]);
+    manager.bootedDevicesAfterDestroy = [replacement];
+
+    const body = responseBody(
+      await teardownTool().handler({
+        ...request("android", avdName, avdName),
+        timeoutMs: 2_500,
+      }),
+    );
+
+    expect(body.state).toBe("failed");
+    expect(body.failure).toEqual(
+      expect.objectContaining({
+        code: "verification_deadline_exceeded",
+        phase: "verification",
+      }),
+    );
+    expect(manager.killedDevices).toEqual([]);
+    expect(await manager.getBootedDevices("android")).toEqual([replacement]);
+    expect(manager.destroyRequests).toHaveLength(1);
+  });
+
   // The serial-only scan is a FAST PATH, not a replacement. An emulator this
   // daemon did not start has no pooled label, so a serial-only scan can only
   // answer the placeholder for it -- and a forced teardown must not become the
@@ -1925,6 +2191,8 @@ describe("deleteDevice handler", () => {
 
   test("force reports the target still running when it reappears on a peer serial after destroy", async () => {
     const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    setDeviceToolsDependencies({ timer });
     const target: BootedDevice = {
       platform: "android",
       name: "Pixel_8_API_35",
@@ -1960,13 +2228,14 @@ describe("deleteDevice handler", () => {
       await teardownTool().handler({
         ...request("android", target.name, target.name),
         force: true,
+        timeoutMs: 2_500,
       }),
     );
 
     expect(body.state).toBe("failed");
     expect(body.failure).toEqual(
       expect.objectContaining({
-        code: "target_still_running",
+        code: "verification_deadline_exceeded",
         phase: "verification",
       }),
     );
@@ -1974,7 +2243,8 @@ describe("deleteDevice handler", () => {
     expect(failureMessage).toContain(peer.deviceId);
     expect(failureMessage).toMatch(/reappeared|still running/i);
     expect(failureMessage).not.toContain("restarted after shutdown confirmation");
-    expect(runtimeAvdNameProbes).toEqual([peer.deviceId]);
+    expect(runtimeAvdNameProbes.length).toBeGreaterThan(1);
+    expect(new Set(runtimeAvdNameProbes)).toEqual(new Set([peer.deviceId]));
     expect(manager.destroyRequests).toHaveLength(1);
   });
 
@@ -2897,6 +3167,8 @@ describe("deleteDevice handler", () => {
   });
 
   test("holds the resolved Android stable target before a serial-selected warm start", async () => {
+    const timer = new FakeTimer();
+    setDeviceToolsDependencies({ timer });
     const device: DeviceInfo = {
       platform: "android",
       name: "Pixel_8_API_35",
@@ -2911,7 +3183,10 @@ describe("deleteDevice handler", () => {
     });
     manager.setDeviceImages("android", [device]);
 
-    const teardown = teardownTool().handler(request("android", device.name, device.name));
+    const teardown = teardownTool().handler({
+      ...request("android", device.name, device.name),
+      timeoutMs: 2_500,
+    });
     await destroyStarted;
     manager.setBootedDevices("android", [
       {
@@ -2932,7 +3207,14 @@ describe("deleteDevice handler", () => {
     expect(manager.wasMethodCalled("startDevice")).toBe(false);
 
     releaseDestroy();
-    await teardown;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await timer.advanceTimeAsync(2_500);
+    expect(responseBody(await teardown).failure).toEqual(
+      expect.objectContaining({
+        code: "verification_deadline_exceeded",
+        phase: "verification",
+      }),
+    );
     await start;
   });
 

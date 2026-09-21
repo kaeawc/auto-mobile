@@ -261,17 +261,10 @@ async function main() {
       await exitAfterSuccessfulDaemonCommand(logger, process);
       return;
     }
-    // In daemon mode, tool selection belongs to each socket-backed MCP
-    // connection. The spawning frontend applies its values through that
-    // connection profile; inherited environment and launch flags must not become
-    // daemon-wide defaults for unrelated clients.
-    configureToolSelectionCliDefaults(
-      daemonMode ? [] : enabledTools,
-      daemonMode ? [] : disabledTools,
-      {
-        includeEnvironment: !daemonMode,
-      },
-    );
+    // Startup defaults are daemon-wide policy. Per-connection profiles still
+    // layer over them, while environment and launch flags seed the shared
+    // fallback before a client profile has been materialized.
+    configureToolSelectionCliDefaults(enabledTools, disabledTools);
     // Validate exact startup names before daemon/direct listeners can publish
     // readiness. createMcpServer repeats this registration for direct embedded
     // consumers, but daemon mode creates MCP servers lazily on first request.
@@ -514,6 +507,8 @@ async function main() {
         toolOutputsDir,
         networkMockable,
         embeddedSdk,
+        enabledTools,
+        disabledTools,
         dismissKeyboardAfterInput,
         ...eventAllMarkerDaemonOptions,
         noUiPerfMode: !uiPerfMode,
@@ -540,7 +535,14 @@ async function main() {
     }
 
     if (daemonCommand) {
-      await runDaemonCommand(daemonCommand, daemonArgs);
+      const hasStartupToolDefaults =
+        enabledTools.length > 0 ||
+        disabledTools.length > 0 ||
+        process.env.AUTOMOBILE_ENABLED_TOOLS !== undefined ||
+        process.env.AUTOMOBILE_DISABLED_TOOLS !== undefined;
+      await runDaemonCommand(daemonCommand, daemonArgs, {
+        ...(hasStartupToolDefaults ? { startupToolDefaults: { enabledTools, disabledTools } } : {}),
+      });
       // Exit explicitly after daemon command completes to prevent process from hanging
       // Same issue as CLI mode - event loop may have pending operations
       await logger.closeAfterFlush();

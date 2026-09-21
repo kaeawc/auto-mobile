@@ -4258,6 +4258,22 @@ export function parseDaemonArgs(
 export interface RunDaemonCommandOptions {
   clientFactory?: DaemonClientFactory;
   stateProvider?: () => DaemonStateLike;
+  startupToolDefaults?: Required<Pick<DaemonOptions, "enabledTools" | "disabledTools">>;
+}
+
+export function daemonCommandOptions(
+  args: string[],
+  options: RunDaemonCommandOptions,
+): DaemonOptions {
+  const parsed = parseDaemonArgs(args);
+  if (!options.startupToolDefaults) {
+    return parsed;
+  }
+  return {
+    ...parsed,
+    enabledTools: [...options.startupToolDefaults.enabledTools],
+    disabledTools: [...options.startupToolDefaults.disabledTools],
+  };
 }
 
 export interface DaemonHeartbeatCommandArgs {
@@ -4386,7 +4402,7 @@ export async function runDaemonCommand(
   try {
     switch (command) {
       case "start": {
-        await manager.start(parseDaemonArgs(args));
+        await manager.start(daemonCommandOptions(args, options));
         break;
       }
 
@@ -4430,13 +4446,13 @@ export async function runDaemonCommand(
       }
 
       case "restart": {
-        await manager.restart(parseDaemonArgs(args));
+        await manager.restart(daemonCommandOptions(args, options));
         break;
       }
 
       case "restart-admitted": {
         await manager.restartAdmitted(
-          parseDaemonArgs(args),
+          daemonCommandOptions(args, options),
           parseRestartAdmittedMaintenanceToken(args),
         );
         break;

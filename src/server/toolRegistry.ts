@@ -1920,7 +1920,13 @@ export class ToolRegistryClass {
         description: string;
         inputSchema: Record<string, unknown>;
         outputSchema?: Record<string, unknown>;
-        _meta?: { "anthropic/alwaysLoad"?: boolean; ui?: { resourceUri: string } };
+        _meta?: {
+          "anthropic/alwaysLoad"?: boolean;
+          "automobile/debugOnly"?: boolean;
+          "automobile/embeddedSdkOnly"?: boolean;
+          "automobile/planOnly"?: boolean;
+          ui?: { resourceUri: string };
+        };
       } = {
         name: tool.name,
         description: tool.description,
@@ -1939,6 +1945,18 @@ export class ToolRegistryClass {
       }
       if (alwaysLoad) {
         definition._meta = { ...definition._meta, "anthropic/alwaysLoad": true };
+      }
+      // The committed static catalog includes unavailable tools for schema
+      // completeness. Preserve enough generated metadata for the proxy to
+      // exclude plan-only tools after a live connection is available.
+      if (tool.planOnly) {
+        definition._meta = { ...definition._meta, "automobile/planOnly": true };
+      }
+      if (tool.debugOnly) {
+        definition._meta = { ...definition._meta, "automobile/debugOnly": true };
+      }
+      if (tool.embeddedSdkOnly) {
+        definition._meta = { ...definition._meta, "automobile/embeddedSdkOnly": true };
       }
       // MCP Apps UI pointer (issue #4669) — additive; non-Apps hosts ignore it.
       if (tool.appUiResourceUri) {

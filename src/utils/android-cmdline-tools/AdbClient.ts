@@ -93,6 +93,8 @@ export class AdbUnavailableError extends Error {
 const moduleTimer: Timer = defaultTimer;
 let deviceListCache: TTLCache<string, BootedDevice[]> | null = null;
 let deviceListSingleFlight = new SingleFlight<string, BootedDevice[]>();
+let deviceListGeneration = 0;
+let deviceListPublishedGeneration = 0;
 // Keep production clients sharing the resolved path while isolating injected
 // execution seams. A module-wide path cache keyed only by "adbPath" lets one
 // test/client reuse another client's incomplete or synthetic discovery result.
@@ -120,12 +122,14 @@ function getAdbPathCache(execAsync: ExecFileAsync): TTLCache<string, string> {
 export function resetAdbClientCaches(): void {
   deviceListCache = null;
   deviceListSingleFlight = new SingleFlight();
+  deviceListPublishedGeneration = ++deviceListGeneration;
   adbPathCaches = new WeakMap();
 }
 
 export function resetAdbDeviceListCache(): void {
   deviceListCache = null;
   deviceListSingleFlight = new SingleFlight();
+  deviceListPublishedGeneration = ++deviceListGeneration;
 }
 
 // Route the execFile leg through the shared exec seam (issue #5459) so the option
@@ -1265,52 +1269,20 @@ export class AdbClient implements AdbExecutor {
     const timeoutMs = options.timeoutMs ?? AdbClient.DEVICE_LIST_TIMEOUT_MS;
     const flightKey = `devices:${timeoutMs}`;
     try {
+      // A bypass caller needs its own fresh snapshot and must not inherit the
+      // result of a non-bypass request that was already in flight.
+      if (options.bypassCache) {
+        return await this.readDeviceListFromAdb(timeoutMs, options.signal);
+      }
+
       return await deviceListSingleFlight.run(
         flightKey,
-        async () => {
+        () => {
           // The shared subprocess has its own bounded timeout but deliberately
           // does not inherit a waiter's signal. Each caller races its signal in
           // SingleFlight, so one disconnected client cannot cancel discovery
           // for the other clients sharing this cold read.
-          logger.debug("Getting list of connected devices");
-          let result: ExecResult;
-          try {
-            result = await this.executeCommand("devices -l", timeoutMs, undefined, true);
-          } catch (error) {
-            if (this.isMissingExecutableError(error)) {
-              this.recordMissingAdbProbe();
-              throw new AdbUnavailableError(
-                `ADB executable is unavailable: ${(error as Error).message}`,
-              );
-            }
-            throw error;
-          }
-          const lines = result.stdout.split("\n").slice(1);
-
-          const observedAt = this.observationSequence.next();
-          const devices = lines
-            .filter((line) => line.trim().length > 0)
-            .flatMap((line) => {
-              const [deviceId, state] = line.trim().split(/\s+/);
-              if (!deviceId || state !== "device") {
-                return [];
-              }
-              // `adb devices -l` also reports `transport_id:`, deliberately not read:
-              // it is a per-connection handle, and a device identity that carried it
-              // invited callers to treat "transport unchanged" as proof of an unbroken
-              // connection. The pool's `incarnation` is the one epoch token.
-              return [
-                {
-                  name: deviceId,
-                  platform: "android",
-                  deviceId,
-                  observedAt,
-                } satisfies BootedDevice,
-              ];
-            });
-
-          cache.set("devices", devices);
-          return devices;
+          return this.readDeviceListFromAdb(timeoutMs);
         },
         options.signal,
       );
@@ -1320,6 +1292,53 @@ export class AdbClient implements AdbExecutor {
       }
       throw error;
     }
+  }
+
+  private async readDeviceListFromAdb(
+    timeoutMs: number,
+    signal?: AbortSignal,
+  ): Promise<BootedDevice[]> {
+    const generation = ++deviceListGeneration;
+    logger.debug("Getting list of connected devices");
+    let result: ExecResult;
+    try {
+      result = await this.executeCommand("devices -l", timeoutMs, undefined, true, signal);
+    } catch (error) {
+      if (this.isMissingExecutableError(error)) {
+        this.recordMissingAdbProbe();
+        throw new AdbUnavailableError(`ADB executable is unavailable: ${(error as Error).message}`);
+      }
+      throw error;
+    }
+    const lines = result.stdout.split("\n").slice(1);
+
+    const observedAt = this.observationSequence.next();
+    const devices = lines
+      .filter((line) => line.trim().length > 0)
+      .flatMap((line) => {
+        const [deviceId, state] = line.trim().split(/\s+/);
+        if (!deviceId || state !== "device") {
+          return [];
+        }
+        // `adb devices -l` also reports `transport_id:`, deliberately not read:
+        // it is a per-connection handle, and a device identity that carried it
+        // invited callers to treat "transport unchanged" as proof of an unbroken
+        // connection. The pool's `incarnation` is the one epoch token.
+        return [
+          {
+            name: deviceId,
+            platform: "android",
+            deviceId,
+            observedAt,
+          } satisfies BootedDevice,
+        ];
+      });
+
+    if (generation >= deviceListPublishedGeneration) {
+      deviceListPublishedGeneration = generation;
+      getDeviceListCache(this.timer).set("devices", devices);
+    }
+    return devices;
   }
 
   /**

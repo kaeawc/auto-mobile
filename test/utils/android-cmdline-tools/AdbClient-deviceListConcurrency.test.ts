@@ -3,6 +3,7 @@ import type { ExecResult } from "../../../src/models";
 import {
   AdbClient,
   resetAdbClientCaches,
+  resetAdbDeviceListCache,
 } from "../../../src/utils/android-cmdline-tools/AdbClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
@@ -65,6 +66,91 @@ describe("AdbClient concurrent device-list snapshots", () => {
 
     timer.advanceTime(1);
     await expect(clients[0].getBootedAndroidDevices()).resolves.toMatchObject([
+      { deviceId: "emulator-5556" },
+    ]);
+    expect(adbDeviceListCalls).toBe(2);
+  });
+
+  test("bypass reads execute separately from an in-flight coalesced read", async () => {
+    const timer = new FakeTimer();
+    let adbDeviceListCalls = 0;
+    const execute = async (command: string): Promise<ExecResult> => {
+      expect(command).toContain("devices -l");
+      adbDeviceListCalls += 1;
+      if (adbDeviceListCalls === 1) {
+        await timer.sleep(25);
+        return resultFor("emulator-5554");
+      }
+      return resultFor("emulator-5556");
+    };
+    const client = new AdbClient(null, execute, null, undefined, timer);
+
+    const coalescedRead = client.getBootedAndroidDevices();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(adbDeviceListCalls).toBe(1);
+
+    const bypassRead = client.getBootedAndroidDevices({ bypassCache: true });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(adbDeviceListCalls).toBe(2);
+    await expect(bypassRead).resolves.toMatchObject([{ deviceId: "emulator-5556" }]);
+
+    timer.advanceTime(25);
+    await expect(coalescedRead).resolves.toMatchObject([{ deviceId: "emulator-5554" }]);
+  });
+
+  test("does not let an older read overwrite a newer cache publication", async () => {
+    const timer = new FakeTimer();
+    let adbDeviceListCalls = 0;
+    const execute = async (command: string): Promise<ExecResult> => {
+      expect(command).toContain("devices -l");
+      adbDeviceListCalls += 1;
+      if (adbDeviceListCalls === 1) {
+        await timer.sleep(25);
+        return resultFor("emulator-5554");
+      }
+      return resultFor("emulator-5556");
+    };
+    const client = new AdbClient(null, execute, null, undefined, timer);
+
+    const olderRead = client.getBootedAndroidDevices();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const newerRead = client.getBootedAndroidDevices({ bypassCache: true });
+    await expect(newerRead).resolves.toMatchObject([{ deviceId: "emulator-5556" }]);
+
+    timer.advanceTime(25);
+    await expect(olderRead).resolves.toMatchObject([{ deviceId: "emulator-5554" }]);
+    await expect(client.getBootedAndroidDevices()).resolves.toMatchObject([
+      { deviceId: "emulator-5556" },
+    ]);
+  });
+
+  test("does not let a pre-reset read repopulate the cleared cache", async () => {
+    const timer = new FakeTimer();
+    let adbDeviceListCalls = 0;
+    const execute = async (command: string): Promise<ExecResult> => {
+      expect(command).toContain("devices -l");
+      adbDeviceListCalls += 1;
+      if (adbDeviceListCalls === 1) {
+        await timer.sleep(25);
+        return resultFor("emulator-5554");
+      }
+      return resultFor("emulator-5556");
+    };
+    const client = new AdbClient(null, execute, null, undefined, timer);
+
+    const preResetRead = client.getBootedAndroidDevices();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(adbDeviceListCalls).toBe(1);
+
+    resetAdbDeviceListCache();
+    await expect(client.getBootedAndroidDevices()).resolves.toMatchObject([
+      { deviceId: "emulator-5556" },
+    ]);
+    expect(adbDeviceListCalls).toBe(2);
+
+    timer.advanceTime(25);
+    await expect(preResetRead).resolves.toMatchObject([{ deviceId: "emulator-5554" }]);
+    await expect(client.getBootedAndroidDevices()).resolves.toMatchObject([
       { deviceId: "emulator-5556" },
     ]);
     expect(adbDeviceListCalls).toBe(2);

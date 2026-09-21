@@ -565,7 +565,7 @@ export class DaemonClient {
         // wedged by a daemon restart (#2599/#2737) instead of surfacing a raw
         // ECONNRESET/EPIPE/"socket hang up" that its recovery does not match.
         const failure = toDaemonTransportError(error);
-        rejectPendingRequests(failure);
+        rejectPendingRequests(failure, true);
         if (!settled) {
           settled = true;
           reject(failure);
@@ -1070,8 +1070,24 @@ export class DaemonClient {
       reject(new DaemonUnavailableError("Socket connection closed", { cause: disconnectCause }));
     }
     this.pendingRequests.clear();
-    if (this.socket) {
-      this.socket.destroy();
+    const socket = this.socket;
+    if (socket) {
+      await new Promise<void>((resolve) => {
+        const finish = (timedOut: boolean): void => {
+          socket.off("close", onClose);
+          this.timer.clearTimeout(timeout);
+          if (timedOut) {
+            logger.warn(
+              "Daemon socket close did not complete before the bounded teardown timeout; proceeding safely",
+            );
+          }
+          resolve();
+        };
+        const onClose = (): void => finish(false);
+        const timeout = this.timer.setTimeout(() => finish(true), 1_000);
+        socket.once("close", onClose);
+        socket.destroy();
+      });
       this.socket = null;
     }
     this.notificationHandlers.clear();

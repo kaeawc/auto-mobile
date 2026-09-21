@@ -18,6 +18,7 @@ import {
   type DaemonMcpProxyConfig,
 } from "../daemon/daemonMcpProxy";
 import { DaemonShuttingDownError } from "../daemon/client";
+import { McpOverloadError } from "../daemon/McpTimeoutError";
 import { ActionableError } from "../models";
 import { daemonShuttingDownMcpOutcome } from "../daemon/daemonShutdownOutcome";
 import { getMcpServerVersion } from "../utils/mcpVersion";
@@ -169,6 +170,40 @@ export function daemonRestartDeferredResult(
   };
 }
 
+export function mcpOverloadResult(
+  error: McpOverloadError,
+): CallToolResult & { structuredContent: Record<string, unknown> } {
+  const payload = {
+    error: {
+      code: error.failure.code,
+      message: error.message,
+      retryable: error.failure.retryable,
+      retryAfterMs: error.failure.retryAfterMs,
+      queueWaitMs: error.failure.queueWaitMs,
+      remainingTimeoutMs: error.failure.remainingTimeoutMs,
+    },
+  };
+  return {
+    content: [{ type: "text", text: JSON.stringify(payload) }],
+    structuredContent: payload,
+    isError: true,
+  };
+}
+
+export function mcpOverloadError(error: McpOverloadError): McpError {
+  const payload = {
+    error: {
+      code: error.failure.code,
+      message: error.message,
+      retryable: error.failure.retryable,
+      retryAfterMs: error.failure.retryAfterMs,
+      queueWaitMs: error.failure.queueWaitMs,
+      remainingTimeoutMs: error.failure.remainingTimeoutMs,
+    },
+  };
+  return new McpError(-32603, JSON.stringify(payload), payload);
+}
+
 export function deviceControlTransportFailureResult(
   error: DeviceControlTransportError,
 ): CallToolResult {
@@ -291,10 +326,47 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
       if (error instanceof DaemonConnectionSessionReleasedError) {
         throw noActiveDeviceSessionError(error);
       }
+      if (error instanceof McpOverloadError) {
+        throw mcpOverloadError(error);
+      }
       logger.error(`[ProxyServer] Failed to list tools: ${error}`);
       throw new ActionableError(`Failed to list tools from daemon: ${errorMessage(error)}`);
     }
   });
+
+  // Maps a caught daemon error to its structured tool result. Extracted so the
+  // tools/call handler stays under the complexity ceiling as branches accrue.
+  const resolveCallToolErrorResult = (error: unknown, name: string): CallToolResult => {
+    if (error instanceof DaemonBoundSessionExpiredError) {
+      logger.warn(`[ProxyServer] Session ownership lost for ${error.sessionUuid}: ${error.reason}`);
+      return sessionOwnershipLostResult(error);
+    }
+    if (error instanceof DaemonConnectionSessionReleasedError) {
+      logger.warn(`[ProxyServer] No active device session (released: ${error.reason})`);
+      return noActiveDeviceSessionResult(error);
+    }
+    if (error instanceof DaemonShuttingDownError) {
+      return daemonShuttingDownResult(advertisedToolOutputSchemas.get(name) ?? false);
+    }
+    if (error instanceof DaemonRestartDeferredError) {
+      return daemonRestartDeferredResult(error);
+    }
+    if (error instanceof McpOverloadError) {
+      return mcpOverloadResult(error);
+    }
+    if (error instanceof DeviceControlTransportError) {
+      logger.warn(
+        `[ProxyServer] Device-control transport failure for ${error.failure.toolName} during ${error.failure.phase}`,
+      );
+      return deviceControlTransportFailureResult(error);
+    }
+    logger.error(`[ProxyServer] Tool call failed: ${name} - ${error}`);
+    // Return error as tool result (not throwing) to match expected MCP behavior
+    return {
+      content: [{ type: "text", text: `Error: ${errorMessage(error)}` }],
+      isError: true,
+    };
+  };
 
   // Register tools/call handler - forward to daemon
   server.server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
@@ -335,39 +407,7 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
       const result = await proxy.callTool(name, args, requestProgressToken, onProgress);
       return result;
     } catch (error) {
-      if (error instanceof DaemonBoundSessionExpiredError) {
-        logger.warn(
-          `[ProxyServer] Session ownership lost for ${error.sessionUuid}: ${error.reason}`,
-        );
-        return sessionOwnershipLostResult(error);
-      }
-      if (error instanceof DaemonConnectionSessionReleasedError) {
-        logger.warn(`[ProxyServer] No active device session (released: ${error.reason})`);
-        return noActiveDeviceSessionResult(error);
-      }
-      if (error instanceof DaemonShuttingDownError) {
-        return daemonShuttingDownResult(advertisedToolOutputSchemas.get(name) ?? false);
-      }
-      if (error instanceof DaemonRestartDeferredError) {
-        return daemonRestartDeferredResult(error);
-      }
-      if (error instanceof DeviceControlTransportError) {
-        logger.warn(
-          `[ProxyServer] Device-control transport failure for ${error.failure.toolName} during ${error.failure.phase}`,
-        );
-        return deviceControlTransportFailureResult(error);
-      }
-      logger.error(`[ProxyServer] Tool call failed: ${name} - ${error}`);
-      // Return error as tool result (not throwing) to match expected MCP behavior
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Error: ${errorMessage(error)}`,
-          },
-        ],
-        isError: true,
-      };
+      return resolveCallToolErrorResult(error, name);
     }
   });
 
@@ -386,6 +426,9 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
       if (error instanceof DaemonConnectionSessionReleasedError) {
         throw noActiveDeviceSessionError(error);
       }
+      if (error instanceof McpOverloadError) {
+        throw mcpOverloadError(error);
+      }
       logger.error(`[ProxyServer] Failed to list resources: ${error}`);
       throw new ActionableError(`Failed to list resources from daemon: ${errorMessage(error)}`);
     }
@@ -403,6 +446,9 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
       }
       if (error instanceof DaemonConnectionSessionReleasedError) {
         throw noActiveDeviceSessionError(error);
+      }
+      if (error instanceof McpOverloadError) {
+        throw mcpOverloadError(error);
       }
       logger.error(`[ProxyServer] Failed to list resource templates: ${error}`);
       throw new ActionableError(
@@ -430,6 +476,9 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
       }
       if (error instanceof DaemonConnectionSessionReleasedError) {
         throw noActiveDeviceSessionError(error);
+      }
+      if (error instanceof McpOverloadError) {
+        throw mcpOverloadError(error);
       }
       logger.error(`[ProxyServer] Resource read failed: ${uri} - ${error}`);
       throw new ActionableError(`Failed to read resource from daemon: ${errorMessage(error)}`);

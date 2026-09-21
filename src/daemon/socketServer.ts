@@ -164,7 +164,7 @@ import {
   type DeviceControlTransportPhase,
 } from "./deviceControlTransportFailure";
 
-const MCP_FORWARD_START_HEADROOM_MS = 100;
+export const MCP_FORWARD_START_HEADROOM_MS = 100;
 const MCP_OVERLOAD_RETRY_AFTER_MS = 250;
 
 function requestFailureCause(
@@ -1382,6 +1382,14 @@ export class UnixSocketServer {
     }
     const toolName =
       request.method === "tools/call" ? (request.params?.name ?? request.method) : request.method;
+    if (remainingTimeoutMs <= 0) {
+      throw new McpTimeoutError({
+        toolName,
+        timeoutMs: totalTimeoutMs,
+        origin: "UnixSocketServer.handleRequest",
+        detail: `spent ${totalTimeoutMs - remainingTimeoutMs}ms ${phase}`,
+      });
+    }
     if (queueWaitMs > 0) {
       const failure = {
         code: "daemon_overloaded",

@@ -41,7 +41,7 @@ describe("sequential startup-option reconciliation", () => {
   });
 
   test.skipIf(process.platform === "win32")(
-    "a configured client recognizes its exact tools before successor PID metadata is finalized",
+    "a configured client applies exact tools without restarting the daemon",
     async () => {
       socketPath = join(tmpdir(), `am-options-${randomUUID()}.sock`);
       const timer = new FakeTimer();
@@ -66,6 +66,7 @@ describe("sequential startup-option reconciliation", () => {
         options: {},
       };
       let restartedWith: DaemonOptions | undefined;
+      const connectionProfileUuid = randomUUID();
       const manager: DaemonManagerLike = {
         status: async () => recordedStatus,
         start: async () => "started",
@@ -105,13 +106,27 @@ describe("sequential startup-option reconciliation", () => {
         daemonStatusProbe: async () => await new DaemonClient(socketPath).getDaemonStatus(),
         clientFactory: () =>
           new FakeDaemonClient({
+            toolResultFor: (toolName) =>
+              toolName === "setToolEnabled"
+                ? {
+                    content: [
+                      {
+                        type: "text",
+                        text: JSON.stringify({
+                          sessionUuid: connectionProfileUuid,
+                          scope: "connection-profile",
+                        }),
+                      },
+                    ],
+                  }
+                : undefined,
             daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
           }),
       });
 
       try {
         expect(await proxy.listTools()).toEqual([]);
-        expect(restartedWith).toMatchObject(requestedOptions);
+        expect(restartedWith).toBeUndefined();
       } finally {
         await proxy.close();
       }

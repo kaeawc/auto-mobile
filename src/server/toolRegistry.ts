@@ -321,6 +321,8 @@ interface DeviceAwareToolOptions<T = any> extends ToolRegistrationOptions {
 
 interface ToolListingOptions {
   includeUnavailable?: boolean;
+  /** Override the process default for one connection-scoped tools/list response. */
+  suppressOutputSchema?: boolean;
 }
 
 interface CachedToolDefinitionSchemas {
@@ -1894,7 +1896,8 @@ export class ToolRegistryClass {
     // advertise an `outputSchema` in `tools/list`: an MCP server that declares an
     // output schema is expected to return matching `structuredContent`, so keeping
     // both consistent avoids advertising output the finalize step will strip.
-    const suppressOutputSchema = serverConfig.isToolResultsNoStructuredContentEnabled();
+    const suppressOutputSchema =
+      options.suppressOutputSchema ?? serverConfig.isToolResultsNoStructuredContentEnabled();
     // Bounds compaction is now an unconditional default, so the tuple arm is always
     // emitted and therefore always advertised — keeping the advertised shape in sync
     // with the wire (issue #2990), the same way `suppressOutputSchema` above keeps the

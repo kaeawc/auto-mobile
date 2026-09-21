@@ -50,6 +50,10 @@ export interface ToolSelectionProfileRegistry {
   record(profileUuid: string): void;
   /** True only for a uuid previously passed to `record`. */
   has(profileUuid: string): boolean;
+  /** Set this live connection profile's structured-content presentation preference. */
+  setToolResultsNoStructuredContent(profileUuid: string, enabled: boolean): void;
+  /** Read a live profile preference, or undefined when the profile expressed none. */
+  getToolResultsNoStructuredContent(profileUuid: string): boolean | undefined;
 }
 
 /**
@@ -68,6 +72,9 @@ export interface ToolSelectionProfileProvenanceLoader {
 
 export class InMemoryToolSelectionProfileRegistry implements ToolSelectionProfileRegistry {
   private readonly minted = new Set<string>();
+  // Deliberately live-only: a reconnecting proxy reapplies its preference, and
+  // a replacement daemon must not inherit presentation state from old clients.
+  private readonly toolResultsNoStructuredContent = new Map<string, boolean>();
 
   record(profileUuid: string): void {
     if (profileUuid.trim().length > 0) {
@@ -77,6 +84,16 @@ export class InMemoryToolSelectionProfileRegistry implements ToolSelectionProfil
 
   has(profileUuid: string): boolean {
     return this.minted.has(profileUuid);
+  }
+
+  setToolResultsNoStructuredContent(profileUuid: string, enabled: boolean): void {
+    if (profileUuid.trim().length > 0) {
+      this.toolResultsNoStructuredContent.set(profileUuid, enabled);
+    }
+  }
+
+  getToolResultsNoStructuredContent(profileUuid: string): boolean | undefined {
+    return this.toolResultsNoStructuredContent.get(profileUuid);
   }
 }
 
@@ -121,6 +138,14 @@ export class PersistentToolSelectionProfileRegistry
 
   has(profileUuid: string): boolean {
     return this.memory.has(profileUuid);
+  }
+
+  setToolResultsNoStructuredContent(profileUuid: string, enabled: boolean): void {
+    this.memory.setToolResultsNoStructuredContent(profileUuid, enabled);
+  }
+
+  getToolResultsNoStructuredContent(profileUuid: string): boolean | undefined {
+    return this.memory.getToolResultsNoStructuredContent(profileUuid);
   }
 
   async load(): Promise<void> {

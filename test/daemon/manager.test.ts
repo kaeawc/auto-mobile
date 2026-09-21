@@ -134,7 +134,7 @@ describe("daemonBuildIdentityStatusLines", () => {
 });
 
 describe("DaemonManager restart", () => {
-  test("preserves PID-recorded options when no replacement options are requested", async () => {
+  test("preserves PID-recorded global options but drops legacy presentation options", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const manager = new DaemonManager(
@@ -161,6 +161,9 @@ describe("DaemonManager restart", () => {
       debug: true,
       toolOutputsDir: "/tmp/automobile-artifacts",
       eventAllMarkers: ["@", "#"],
+      enabledTools: ["clipboard"],
+      disabledTools: ["observe"],
+      toolResultsNoStructuredContent: true,
     };
     const statusSpy = spyOn(manager, "status").mockResolvedValue({
       running: true,
@@ -178,7 +181,12 @@ describe("DaemonManager restart", () => {
     // ft82d) so the child's own listen() call — not a preflight probe that
     // releases its socket before the child binds — is the authoritative
     // bind-or-fail guard against the port-fallback split-brain.
-    expect(startSpy).toHaveBeenCalledWith({ ...recordedOptions, strictPort: true });
+    expect(startSpy).toHaveBeenCalledWith({
+      debug: true,
+      toolOutputsDir: "/tmp/automobile-artifacts",
+      eventAllMarkers: ["@", "#"],
+      strictPort: true,
+    });
   });
 
   test("conditional restart does not terminate a successor generation", async () => {

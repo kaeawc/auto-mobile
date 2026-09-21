@@ -219,7 +219,7 @@ describe("daemon tool-profile diagnostics", () => {
   );
 
   test.skipIf(process.platform === "win32")(
-    "stdio returns a structured profile mismatch without closing stdout",
+    "stdio applies its own disabled-tool profile without restarting the daemon",
     async () => {
       const isolated = createIsolatedDaemonEnvironment();
       tempDirectories.push(isolated.directory);
@@ -241,7 +241,8 @@ describe("daemon tool-profile diagnostics", () => {
         cwd: REPOSITORY_ROOT,
         env: definedEnvironment({
           ...isolated.environment,
-          AUTOMOBILE_ENABLED_TOOLS: "observe,listDevices",
+          AUTOMOBILE_ENABLED_TOOLS: undefined,
+          AUTOMOBILE_DISABLED_TOOLS: "listDevices",
         }),
         stderr: "pipe",
       });
@@ -254,9 +255,7 @@ describe("daemon tool-profile diagnostics", () => {
         timeout: 5_000,
       });
       expect(result.isError).toBe(true);
-      expect(JSON.stringify(result.content)).toMatch(
-        /enabledTools \(tool=observe, requested=enabled, running=unset\).*auto-start is disabled/,
-      );
+      expect(JSON.stringify(result.content)).toContain("Tool listDevices is disabled");
       expect(daemon.exitCode).toBeNull();
     },
     TEST_TIMEOUT_MS,

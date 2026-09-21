@@ -31,6 +31,9 @@ describe("DaemonManager launch", () => {
     delete process.env.AUTOMOBILE_LOG_DIR;
     delete process.env.AUTOMOBILE_LOG_FORMAT;
     delete process.env.AUTOMOBILE_LOG_SINK;
+    delete process.env.AUTOMOBILE_ENABLED_TOOLS;
+    delete process.env.AUTOMOBILE_DISABLED_TOOLS;
+    delete process.env.AUTOMOBILE_TOOL_RESULTS_NO_STRUCTURED_CONTENT;
     delete process.env[EVENT_ALL_MARKERS_ENV];
     for (const dir of tempDirs) {
       rmSync(dir, { recursive: true, force: true });
@@ -57,14 +60,19 @@ describe("DaemonManager launch", () => {
     expect(writes).toEqual(["daemon structured record\n"]);
   });
 
-  test("writes the daemon launch log under the stable data dir, not an ephemeral mkdtemp", async () => {
+  test("writes stable logs and excludes connection presentation from the child daemon", async () => {
     const stateDir = createTempDir("daemon-launch-state-");
     const dataDir = createTempDir("daemon-data-dir-");
     process.env.AUTOMOBILE_DATA_DIR = dataDir;
+    process.env.AUTOMOBILE_ENABLED_TOOLS = "observe";
+    process.env.AUTOMOBILE_DISABLED_TOOLS = "tapOn";
+    process.env.AUTOMOBILE_TOOL_RESULTS_NO_STRUCTURED_CONTENT = "1";
 
     let capturedEnv: NodeJS.ProcessEnv | undefined;
+    let capturedArgs: string[] = [];
     const processSpawner: DaemonProcessSpawner = {
-      spawn: (_command: string, _args: string[], options: SpawnOptions) => {
+      spawn: (_command: string, args: string[], options: SpawnOptions) => {
+        capturedArgs = [...args];
         capturedEnv = options.env;
         return {
           unref() {},
@@ -105,13 +113,25 @@ describe("DaemonManager launch", () => {
       processSpawner,
     );
 
-    await manager.start();
+    await manager.start({
+      debug: true,
+      enabledTools: ["clipboard"],
+      disabledTools: ["observe"],
+      toolResultsNoStructuredContent: true,
+    });
 
     const logsDir = join(dataDir, "logs");
     expect(existsSync(logsDir)).toBe(true);
     const launchLogs = readdirSync(logsDir).filter((name) => name.startsWith("daemon-launch"));
     expect(launchLogs.length).toBeGreaterThan(0);
     expect(capturedEnv?.AUTOMOBILE_DAEMON_LAUNCH_LOG_PATH).toBe(join(logsDir, launchLogs[0]));
+    expect(capturedArgs).toContain("--debug");
+    expect(capturedArgs).not.toContain("--enable-tool");
+    expect(capturedArgs).not.toContain("--disable-tool");
+    expect(capturedArgs).not.toContain("--tool-results-no-structured-content");
+    expect(capturedEnv?.AUTOMOBILE_ENABLED_TOOLS).toBeUndefined();
+    expect(capturedEnv?.AUTOMOBILE_DISABLED_TOOLS).toBeUndefined();
+    expect(capturedEnv?.AUTOMOBILE_TOOL_RESULTS_NO_STRUCTURED_CONTENT).toBeUndefined();
   });
 
   test("pipes stderr without a launch capture when structured stderr logging is enabled", async () => {

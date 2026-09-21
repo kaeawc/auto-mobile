@@ -62,6 +62,7 @@ import {
   waitForSchema,
 } from "./observeTools";
 import { defaultTimer } from "../utils/SystemTimer";
+import { redactUri } from "../utils/redactUri";
 import {
   createJSONToolResponse,
   createStructuredToolResponse,
@@ -964,16 +965,26 @@ export const buildOpenLinkPayload = (
   openResult: OpenURLResult,
   waitOutcome: OpenLinkWaitOutcome | null,
 ) => {
+  const redactedUrl = redactUri(openResult.url);
+  const safeOpenResult = openResult.success
+    ? openResult
+    : {
+        ...openResult,
+        url: redactedUrl,
+        error: openResult.error
+          ?.replaceAll(url, redactedUrl)
+          .replaceAll(openResult.url, redactedUrl),
+      };
   if (!waitOutcome) {
     return {
-      message: `Opened link ${url}`,
-      ...openResult,
-      observation: openResult.observation,
+      message: `Opened link ${safeOpenResult.success ? url : safeOpenResult.url}`,
+      ...safeOpenResult,
+      observation: safeOpenResult.observation,
     };
   }
   return {
-    message: `Opened link ${url}`,
-    ...openResult,
+    message: `Opened link ${safeOpenResult.success ? url : safeOpenResult.url}`,
+    ...safeOpenResult,
     observation: waitOutcome.observation,
     awaitedElement: waitOutcome.awaitedElement,
     awaitDuration: waitOutcome.awaitDuration,

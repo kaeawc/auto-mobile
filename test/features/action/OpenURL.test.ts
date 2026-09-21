@@ -5,6 +5,7 @@ import { LaunchApp } from "../../../src/features/action/LaunchApp";
 import { IOSCtrlProxyManager } from "../../../src/utils/IOSCtrlProxyManager";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios/IOSCtrlProxyClient";
 import { BootedDevice } from "../../../src/models";
+import { ActionableError } from "../../../src/models/ActionableError";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
 import { FakeDeviceUrlLauncher } from "../../fakes/FakeDeviceUrlLauncher";
@@ -277,6 +278,56 @@ describe("OpenURL Android parity (regression guard)", () => {
     expect(fakeAdb.getExecutedArgv()).toEqual([
       ["shell", "am start -a android.intent.action.VIEW -d 'https://example.com/x'"],
     ]);
+  });
+
+  test("redacts credential-bearing Android command failures before they reach the public error", async () => {
+    const deviceId = "emulator-5554";
+    const rawUrl = "myapp://user:hunter2@host.example/path/x?token=supersecret123#frag";
+    const fakeAdb = new FakeAdbExecutor();
+    const commandError = Object.assign(
+      new Error(
+        `Command failed: adb -s ${deviceId} shell am start -a android.intent.action.VIEW -d '${rawUrl}'\n` +
+          "stderr line 1\nstderr line 2",
+      ),
+      { stderr: `am start rejected ${rawUrl}`, code: 42 },
+    );
+    fakeAdb.setCommandError("android.intent.action.VIEW", commandError);
+    const openURL = new OpenURL(
+      { name: "pixel", platform: "android", deviceId },
+      fakeAdb as unknown as any,
+    );
+
+    let thrown: unknown;
+    try {
+      await (openURL as any).executeAndroidOpenURL(rawUrl);
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(ActionableError);
+    const actionableError = thrown as ActionableError;
+    expect(actionableError.message).toContain(deviceId);
+    expect(actionableError.message).toContain("myapp://host.example/<redacted>");
+    expect(actionableError.message).toContain("exit status 42");
+    for (const secret of [rawUrl, "supersecret123", "hunter2", "/path/x", "#frag"]) {
+      expect(actionableError.message).not.toContain(secret);
+      expect(JSON.stringify(actionableError)).not.toContain(secret);
+    }
+    expect(actionableError.cause).toBeUndefined();
+  });
+
+  test("masks malformed credential-bearing destinations in Android command failures", async () => {
+    const rawUrl = "not a URL token=supersecret123";
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setDefaultError(new Error(`Command failed: adb shell am start -d '${rawUrl}'`));
+    const openURL = new OpenURL(
+      { name: "pixel", platform: "android", deviceId: "emulator-5554" },
+      fakeAdb as unknown as any,
+    );
+
+    await expect((openURL as any).executeAndroidOpenURL(rawUrl)).rejects.toMatchObject({
+      message: expect.stringContaining("<redacted>"),
+    });
   });
 });
 

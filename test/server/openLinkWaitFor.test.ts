@@ -357,6 +357,25 @@ describe("buildOpenLinkPayload", () => {
     expect("awaitedElement" in payload).toBe(false);
   });
 
+  test("redacts a failed open URL in the structured response", () => {
+    const payload = buildOpenLinkPayload(
+      "myapp://user:hunter2@host.example/path?token=supersecret123",
+      {
+        success: false,
+        url: "myapp://user:hunter2@host.example/path?token=supersecret123",
+        error:
+          "Android command failed for myapp://user:hunter2@host.example/path?token=supersecret123",
+      },
+      null,
+    );
+
+    expect(payload.url).toBe("myapp://host.example/<redacted>");
+    expect(payload.message).not.toContain("hunter2");
+    expect(payload.message).not.toContain("supersecret123");
+    expect(payload.error).not.toContain("hunter2");
+    expect(payload.error).not.toContain("supersecret123");
+  });
+
   test("surfaces the awaited observation and await fields when a wait occurred", () => {
     const awaited = makeObservation("home");
     const awaitedElement = { "resource-id": "home_tab_bar" } as unknown as Element;

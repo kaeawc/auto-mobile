@@ -2,7 +2,7 @@ import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/A
 import { BaseVisualChange } from "./BaseVisualChange";
 import { BootedDevice, OpenURLResult } from "../../models";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
-import { toActionableError } from "../../models/ActionableError";
+import { ActionableError, toActionableError } from "../../models/ActionableError";
 import {
   DeviceAppManager,
   DeviceUrlLauncher,
@@ -11,11 +11,57 @@ import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType"
 import { IOSCtrlProxyManager } from "../../utils/IOSCtrlProxyManager";
 import { logger } from "../../utils/logger";
 import { shellQuote } from "../../utils/shellQuote";
+import { redactAndroidCommandOutput } from "../../utils/android-cmdline-tools/redactAndroidCommandOutput";
+import { redactUri } from "../../utils/redactUri";
 import { LaunchApp } from "./LaunchApp";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { IOSCtrlProxyClient } from "../observe/ios/IOSCtrlProxyClient";
 
 const SAFARI_BUNDLE_ID = "com.apple.mobilesafari";
+const ANDROID_OPEN_URL_DIAGNOSTIC_MAX_LENGTH = 500;
+
+const getErrorStringProperty = (error: unknown, property: "message" | "stderr"): string | null => {
+  if (typeof error !== "object" || error === null) {
+    return null;
+  }
+  try {
+    const value = (error as Record<string, unknown>)[property];
+    return typeof value === "string" ? value : null;
+  } catch {
+    logger.warn(`[OpenURL] Unable to read Android command ${property} diagnostic property`);
+    return null;
+  }
+};
+
+const getErrorExitStatus = (error: unknown): string | null => {
+  if (typeof error !== "object" || error === null) {
+    return null;
+  }
+  try {
+    const value = (error as Record<string, unknown>).code;
+    return typeof value === "number" || typeof value === "string" ? String(value) : null;
+  } catch {
+    logger.warn("[OpenURL] Unable to read Android command exit-status diagnostic property");
+    return null;
+  }
+};
+
+const redactAndroidOpenUrlDiagnostic = (
+  error: unknown,
+  url: string,
+  destination: string,
+): string => {
+  const diagnostic = [
+    getErrorStringProperty(error, "message"),
+    getErrorStringProperty(error, "stderr"),
+  ]
+    .filter((value): value is string => value !== null)
+    .join("\n")
+    .slice(0, ANDROID_OPEN_URL_DIAGNOSTIC_MAX_LENGTH);
+  return redactAndroidCommandOutput(
+    diagnostic.replaceAll(shellQuote(url), destination).replaceAll(url, destination),
+  );
+};
 
 /**
  * URL schemes that iOS resolves to a *system* handler (Mail, Phone, Messages,
@@ -162,10 +208,25 @@ export class OpenURL extends BaseVisualChange {
     // sees it; adb hands that element to the device's `sh`, which does parse it,
     // so the URL is single-quoted for that shell (issue #4213). Double quotes
     // would leave `"`, `$`, backticks and `\` live.
-    await this.adb.execute([
-      "shell",
-      `am start -a android.intent.action.VIEW -d ${shellQuote(url)}`,
-    ]);
+    try {
+      await this.adb.execute([
+        "shell",
+        `am start -a android.intent.action.VIEW -d ${shellQuote(url)}`,
+      ]);
+    } catch (error) {
+      const destination = redactUri(url);
+      const diagnostic = redactAndroidOpenUrlDiagnostic(error, url, destination);
+      const exitStatus = getErrorExitStatus(error);
+      const message = [
+        `openLink Android failed for device ${this.device.deviceId} opening ${destination}`,
+        exitStatus ? `exit status ${exitStatus}` : null,
+        diagnostic || null,
+      ]
+        .filter((value): value is string => value !== null)
+        .join(": ");
+      logger.warn(`[OpenURL] ${message}`);
+      throw new ActionableError(message);
+    }
 
     return {
       success: true,

@@ -1,3 +1,4 @@
+import UIKit
 import XCTest
 
 // On-device (simulator) integration test for the Swift-6 rewrite's `@MainActor` UI domain —
@@ -30,6 +31,28 @@ final class HierarchyIntegrationTests: XCTestCase {
 
         XCTAssertFalse(try gestures.getScreenshot().isEmpty)
         XCTAssertFalse(try gestures.getScreenshotCapture().data.isEmpty)
+    }
+
+    func testScreenshotMatchesNativeDimensionsOnOddWidthDevice() throws {
+        let app = XCUIApplication()
+        app.launch()
+
+        let locator = ElementLocator(application: app, perf: PerfProvider())
+        let gestures = GesturePerformer(application: app, elementLocator: locator)
+        let nativeScale = UIScreen.main.nativeScale
+        let appFrame = app.frame
+        let expected = (
+            width: Int((appFrame.width * nativeScale).rounded()),
+            height: Int((appFrame.height * nativeScale).rounded())
+        )
+        XCTAssertEqual(expected.width, 1179, "CI must run this regression on an iPhone 15")
+        XCTAssertEqual(expected.height, 2556, "CI must run this regression on an iPhone 15")
+
+        let screenshot = try gestures.getScreenshotCapture().data
+        let dimensions = pngDimensions(screenshot)
+
+        XCTAssertEqual(dimensions.width, expected.width)
+        XCTAssertEqual(dimensions.height, expected.height)
     }
 
     func testHierarchyIncludesTypedTextInputsMissingFromSnapshotTree() throws {
@@ -101,6 +124,19 @@ final class HierarchyIntegrationTests: XCTestCase {
 
     private func hierarchyNodes(in element: UIElementInfo) -> [UIElementInfo] {
         [element] + (element.node ?? []).flatMap { hierarchyNodes(in: $0) }
+    }
+
+    private func pngDimensions(_ data: Data) -> (width: Int, height: Int) {
+        let pngSignature = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
+        guard data.count >= 24, data.prefix(pngSignature.count) == pngSignature else {
+            XCTFail("screenshot was not a PNG")
+            return (width: 0, height: 0)
+        }
+
+        func uint32(at offset: Int) -> Int {
+            data[offset ..< offset + 4].reduce(0) { ($0 << 8) | Int($1) }
+        }
+        return (width: uint32(at: 16), height: uint32(at: 20))
     }
 
     private func waitForMessageKeyboardFocus(_ element: XCUIElement) -> Bool {

@@ -28,7 +28,7 @@ describe("iOS CI product boot lifecycle", () => {
     expect(steps.some((step) => step.run?.includes("boot-simulator.sh"))).toBe(false);
   });
 
-  test("the CtrlProxy UI boot remains available to its Xcode test without a shutdown and second boot", () => {
+  test("keeps the shared CtrlProxy simulator stable while isolating odd-width coverage", () => {
     const steps = loadJobSteps(
       ".github/workflows/pull_request.yml",
       "ios-xctest-runner-simulator-tests",
@@ -40,8 +40,24 @@ describe("iOS CI product boot lifecycle", () => {
     expect(boot?.run).toContain(
       '--min-os-version "${ios_version}" --max-os-version "${ios_version}"',
     );
+    expect(boot?.run).not.toContain('--name "iPhone 15"');
     expect(boot?.run).toContain("simulator_udid=");
     expect(steps.some((step) => step.name === "Shutdown iOS Simulators")).toBe(false);
     expect(steps.some((step) => step.name === "Boot iOS Simulator (Xcode 26.5)")).toBe(false);
+
+    const uiTests = stepNamed(steps, "Run selected CtrlProxy iOS tests (Xcode 26.5)");
+    expect(uiTests?.run).not.toContain(
+      "-only-testing:CtrlProxyUITests/HierarchyIntegrationTests/testScreenshotMatchesNativeDimensionsOnOddWidthDevice",
+    );
+
+    const oddWidthTest = stepNamed(steps, "Run odd-width CtrlProxy screenshot test (iPhone 15)");
+    expect(oddWidthTest?.run).toContain(PRODUCT_BOOT);
+    expect(oddWidthTest?.run).toContain('--name "iPhone 15"');
+    expect(oddWidthTest?.run).toContain("com.apple.CoreSimulator.SimDeviceType.iPhone-15");
+    expect(oddWidthTest?.run).toContain(".deviceTypeIdentifier");
+    expect(oddWidthTest?.run).toContain("xcrun simctl shutdown");
+    expect(oddWidthTest?.run).toContain(
+      "-only-testing:CtrlProxyUITests/HierarchyIntegrationTests/testScreenshotMatchesNativeDimensionsOnOddWidthDevice",
+    );
   });
 });

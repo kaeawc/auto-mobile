@@ -305,18 +305,20 @@ describe("provisionDeviceSchema enableTools (property-based)", () => {
     expect(provisionDeviceSchema.safeParse({ ...base, boot: false }).success).toBe(true);
   });
 
-  test("advertises the boot requirement for both enableTools and resources", () => {
+  test("does not advertise the boot requirement as a schema conditional (runtime-enforced)", () => {
+    // The boot requirement is enforced at runtime by the zod `.refine` (covered
+    // by the safeParse property tests above). It is no longer emitted as an
+    // `if`/`then` conditional: `enforceAnthropicToolSchemaSubset` strips
+    // conditional/combinator keywords from the advertised wire schema (they are
+    // rejected by the Anthropic input_schema subset, #7429), so the emitter that
+    // used to add them was removed as dead.
     const schema = toJSONSchema(provisionDeviceSchema, {
       io: "input",
       override: ({ zodSchema, jsonSchema }) => applyJsonSchemaOverride(zodSchema, jsonSchema),
     }) as Record<string, unknown>;
 
-    expect(schema.if).toEqual({
-      anyOf: [{ required: ["resources"] }, { required: ["enableTools"] }],
-    });
-    expect(schema.then).toEqual({ properties: { boot: { const: true } } });
-    // A top-level combinator is not publishable (#5870), so the conditional
-    // keeps its `anyOf` nested inside `if`.
+    expect(schema.if).toBeUndefined();
+    expect(schema.then).toBeUndefined();
     expect(schema.allOf).toBeUndefined();
     expect(schema.anyOf).toBeUndefined();
     expect(schema.oneOf).toBeUndefined();

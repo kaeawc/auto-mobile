@@ -127,10 +127,7 @@ export const stageSessionDownloadsSchema = withJsonSchemaOverride(
     const files = properties.files as Record<string, unknown> | undefined;
     const item = files?.items as Record<string, unknown> | undefined;
     if (item) {
-      // Mirror putAppFileSchema's exact-one-source oneOf so the served schema
-      // rejects both zero and multiple content sources, not only the runtime
-      // superRefine.
-      item.oneOf = [
+      item.anyOf = [
         { required: ["sourcePath"] },
         { required: ["contentText"] },
         { required: ["contentBase64"] },

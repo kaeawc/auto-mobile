@@ -73,49 +73,36 @@ const changeLocalizationBaseSchema = z.object({
     .describe("iOS bundle ID to relaunch after locale change"),
 });
 
-export const changeLocalizationSchema = withJsonSchemaOverride(
-  withAppIdAliases(addDeviceTargetingToSchema(changeLocalizationBaseSchema)).superRefine(
-    (values, ctx) => {
-      if (
-        !values.locale &&
-        !values.timeZone &&
-        !values.textDirection &&
-        !values.timeFormat &&
-        !values.calendarSystem
-      ) {
-        ctx.addIssue({
-          code: "custom",
-          message:
-            "At least one of locale, timeZone, textDirection, timeFormat, or calendarSystem must be provided.",
-        });
-      }
-      if (values.appId && !values.locale) {
-        ctx.addIssue({
-          code: "custom",
-          path: ["appId"],
-          message: "appId only applies when locale is provided.",
-        });
-      }
-      // #6154 follow-up: `platform` is optional here (resolved from
-      // deviceId/session), so a platform-dependent check at parse time would
-      // run before that resolution and could miss real violations, or reject
-      // valid requests, when the caller omitted platform. Those checks
-      // (`appId` requires/implies Android) run in `changeLocalizationHandler`
-      // instead, against the resolved `device.platform`.
-    },
-  ),
-  (jsonSchema) => {
-    jsonSchema.if = {
-      properties: {
-        platform: { const: "android" },
-      },
-      required: ["platform", "locale"],
-    };
-    jsonSchema.then = {
-      required: ["appId"],
-    };
-  },
-);
+export const changeLocalizationSchema = withAppIdAliases(
+  addDeviceTargetingToSchema(changeLocalizationBaseSchema),
+).superRefine((values, ctx) => {
+  if (
+    !values.locale &&
+    !values.timeZone &&
+    !values.textDirection &&
+    !values.timeFormat &&
+    !values.calendarSystem
+  ) {
+    ctx.addIssue({
+      code: "custom",
+      message:
+        "At least one of locale, timeZone, textDirection, timeFormat, or calendarSystem must be provided.",
+    });
+  }
+  if (values.appId && !values.locale) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["appId"],
+      message: "appId only applies when locale is provided.",
+    });
+  }
+  // #6154 follow-up: `platform` is optional here (resolved from
+  // deviceId/session), so a platform-dependent check at parse time would
+  // run before that resolution and could miss real violations, or reject
+  // valid requests, when the caller omitted platform. Those checks
+  // (`appId` requires/implies Android) run in `changeLocalizationHandler`
+  // instead, against the resolved `device.platform`.
+});
 
 const doNotDisturbStateInputSchema = z
   .object({
@@ -245,70 +232,49 @@ const networkConditionInputSchema = z
 // client can restore. Android supports all three fields; the iOS Simulator
 // supports theme only (via `simctl ui appearance`); physical iOS has no
 // automatable per-device control for any field.
-export const displayConfigSchema = withJsonSchemaOverride(
-  addDeviceTargetingToSchema(
-    z.object({
-      fontScale: z
-        .union([z.number().min(0.1).max(10), z.literal("default")])
-        .optional()
-        .describe(
-          "System text scale, or 'default' to remove Android's explicit override and restore " +
-            "its inherited default. Android only. Omit to leave unchanged.",
-        ),
-      density: z
-        .union([z.number().min(72), z.enum(["smaller", "default", "larger"])])
-        .optional()
-        .describe(
-          "Effective display density: an explicit dpi (e.g. 480), or a relative bucket " +
-            "(smaller/default/larger). Android only; best-effort on physical devices. Omit to " +
-            "leave unchanged.",
-        ),
-      theme: z
-        .enum(["light", "dark", "system", "custom"])
-        .optional()
-        .describe(
-          "Light, dark, system (follow-device), or custom (Android user-defined night-mode " +
-            "schedule) theme / night mode. Supported on Android; the iOS Simulator supports only " +
-            "'light'/'dark'. 'custom' mainly exists to restore a device previously on a custom " +
-            "schedule (from an earlier call's `previous.theme`). Omit to leave unchanged.",
-        ),
-      reset: z
-        .boolean()
-        .optional()
-        .describe("Restore font scale, density, and theme to device defaults."),
-    }),
-  ).superRefine((values, ctx) => {
-    if (
-      values.reset === true &&
-      (values.fontScale !== undefined || values.density !== undefined || values.theme !== undefined)
-    ) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["reset"],
-        message:
-          "reset cannot be combined with fontScale, density, or theme; send reset on its own.",
-      });
-    }
+export const displayConfigSchema = addDeviceTargetingToSchema(
+  z.object({
+    fontScale: z
+      .union([z.number().min(0.1).max(10), z.literal("default")])
+      .optional()
+      .describe(
+        "System text scale, or 'default' to remove Android's explicit override and restore " +
+          "its inherited default. Android only. Omit to leave unchanged.",
+      ),
+    density: z
+      .union([z.number().min(72), z.enum(["smaller", "default", "larger"])])
+      .optional()
+      .describe(
+        "Effective display density: an explicit dpi (e.g. 480), or a relative bucket " +
+          "(smaller/default/larger). Android only; best-effort on physical devices. Omit to " +
+          "leave unchanged.",
+      ),
+    theme: z
+      .enum(["light", "dark", "system", "custom"])
+      .optional()
+      .describe(
+        "Light, dark, system (follow-device), or custom (Android user-defined night-mode " +
+          "schedule) theme / night mode. Supported on Android; the iOS Simulator supports only " +
+          "'light'/'dark'. 'custom' mainly exists to restore a device previously on a custom " +
+          "schedule (from an earlier call's `previous.theme`). Omit to leave unchanged.",
+      ),
+    reset: z
+      .boolean()
+      .optional()
+      .describe("Restore font scale, density, and theme to device defaults."),
   }),
-  (jsonSchema) => {
-    // The runtime refinement above protects direct callers. Repeat the
-    // reset=true exclusivity in the advertised JSON schema so generated tool
-    // clients cannot construct a request that will only fail after dispatch.
-    // `if`/`then` (not a top-level `allOf`/`anyOf`/`oneOf`) matches the
-    // networkCondition schema's convention above and keeps the top-level
-    // schema combinator-free, which `schema.integration.test.ts` gates
-    // repo-wide (issue #6303 review).
-    jsonSchema.if = {
-      required: ["reset"],
-      properties: { reset: { const: true } },
-    };
-    jsonSchema.then = {
-      not: {
-        anyOf: ["fontScale", "density", "theme"].map((field) => ({ required: [field] })),
-      },
-    };
-  },
-);
+).superRefine((values, ctx) => {
+  if (
+    values.reset === true &&
+    (values.fontScale !== undefined || values.density !== undefined || values.theme !== undefined)
+  ) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["reset"],
+      message: "reset cannot be combined with fontScale, density, or theme; send reset on its own.",
+    });
+  }
+});
 
 export const getDeviceStateSchema = addDeviceTargetingToSchema(
   z.object({
@@ -343,40 +309,11 @@ const NETWORK_CONDITION_REQUIRED_ANY_OF = [
   { required: ["profile"] },
   { required: ["cancel"], properties: { cancel: { const: true } } },
   { required: ["reset"], properties: { reset: { const: true } } },
-  { required: ["delayMs"], properties: { delayMs: { not: { const: 0 } } } },
-  { required: ["downloadKbps"], properties: { downloadKbps: { not: { const: 0 } } } },
-  { required: ["uploadKbps"], properties: { uploadKbps: { not: { const: 0 } } } },
-  { required: ["packetLossPercent"], properties: { packetLossPercent: { not: { const: 0 } } } },
+  { required: ["delayMs"], properties: { delayMs: {} } },
+  { required: ["downloadKbps"], properties: { downloadKbps: {} } },
+  { required: ["uploadKbps"], properties: { uploadKbps: {} } },
+  { required: ["packetLossPercent"], properties: { packetLossPercent: {} } },
 ];
-
-// `offline` cuts the link, so a shaping override cannot apply — mirror the
-// runtime `invalid` rejection in JSON schema so tools/list matches invocation
-// (issue #6012 review): if profile is offline, forbid delayMs/downloadKbps/uploadKbps.
-// The rejection is cancel/reset-aware (issue #6090): `cancel`/`reset` win at the
-// runtime classifier ("make it clean"), so an offline+override request that also
-// carries a true cancel/reset is a valid reset and must NOT be false-rejected —
-// the `if` therefore only fires when NO true cancel/reset is present.
-const NETWORK_CONDITION_OFFLINE_NO_OVERRIDE = {
-  if: {
-    required: ["profile"],
-    properties: { profile: { const: "offline" } },
-    not: {
-      anyOf: [
-        { required: ["cancel"], properties: { cancel: { const: true } } },
-        { required: ["reset"], properties: { reset: { const: true } } },
-      ],
-    },
-  },
-  then: {
-    not: {
-      anyOf: [
-        { required: ["delayMs"] },
-        { required: ["downloadKbps"] },
-        { required: ["uploadKbps"] },
-      ],
-    },
-  },
-};
 
 export const setDeviceStateSchema = withJsonSchemaOverride(
   addDeviceTargetingToSchema(
@@ -409,8 +346,6 @@ export const setDeviceStateSchema = withJsonSchemaOverride(
     const networkCondition = properties?.networkCondition;
     if (networkCondition) {
       networkCondition.anyOf = NETWORK_CONDITION_REQUIRED_ANY_OF;
-      networkCondition.if = NETWORK_CONDITION_OFFLINE_NO_OVERRIDE.if;
-      networkCondition.then = NETWORK_CONDITION_OFFLINE_NO_OVERRIDE.then;
     }
   },
 );

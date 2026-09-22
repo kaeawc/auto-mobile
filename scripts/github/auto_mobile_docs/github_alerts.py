@@ -13,7 +13,7 @@ GitHub renders that natively; this hook rewrites it to the equivalent
 import re
 
 _ALERT = re.compile(r"^> \[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*$")
-_FENCE = re.compile(r"^\s*(```|~~~)")
+_FENCE = re.compile(r"^\s*(`{3,}|~{3,})(.*)$")
 
 # GitHub alert type -> (Material admonition type, title).
 _TYPES = {
@@ -28,13 +28,20 @@ _TYPES = {
 def convert(markdown: str) -> str:
     lines = markdown.split("\n")
     out = []
-    in_fence = False
+    fence = ""
     i = 0
     while i < len(lines):
         line = lines[i]
-        if _FENCE.match(line):
-            in_fence = not in_fence
-        match = None if in_fence else _ALERT.match(line)
+        fence_match = _FENCE.match(line)
+        if fence_match:
+            run, rest = fence_match.groups()
+            if not fence:
+                fence = run
+            # Close only on the opener's character, at least as long, with
+            # nothing after it (CommonMark); shorter fences inside are content.
+            elif run[0] == fence[0] and len(run) >= len(fence) and not rest.strip():
+                fence = ""
+        match = None if fence or fence_match else _ALERT.match(line)
         if not match:
             out.append(line)
             i += 1

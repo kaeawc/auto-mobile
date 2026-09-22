@@ -82,3 +82,30 @@ EOF
   [[ "$output" == *"nested/bad.md:8: attr_list"* ]]
   [[ "$output" == *"nested/bad.md:9: snippet include"* ]]
 }
+
+@test "a shorter fence inside a longer fence does not end the code block" {
+  cat >"$DOCS_DIR/nested-fence.md" <<'EOF2'
+````markdown
+```
+=== "Tab"
+```
+````
+
+!!! note "Real violation"
+EOF2
+  run bash "$SCRIPT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"nested-fence.md:7: MkDocs admonition"* ]]
+  [[ "$output" != *"nested-fence.md:3"* ]]
+}
+
+@test "flags key/value and colon-prefixed attr_list forms" {
+  cat >"$DOCS_DIR/attrs.md" <<'EOF2'
+[Link](https://example.com){ target=_blank }
+## Heading {: #custom-id }
+EOF2
+  run bash "$SCRIPT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"attrs.md:1: attr_list"* ]]
+  [[ "$output" == *"attrs.md:2: attr_list"* ]]
+}

@@ -37,6 +37,35 @@ MKDOCS_ONLY = {
 }
 
 
+class _CodeText(HTMLParser):
+    """Collects the text of each <pre> block, ignoring highlighting markup."""
+
+    def __init__(self):
+        super().__init__()
+        self.blocks = []
+        self._depth = 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "pre":
+            self._depth += 1
+            if self._depth == 1:
+                self.blocks.append("")
+
+    def handle_endtag(self, tag):
+        if tag == "pre" and self._depth:
+            self._depth -= 1
+
+    def handle_data(self, data):
+        if self._depth:
+            self.blocks[-1] += data
+
+
+def code_text(html):
+    parser = _CodeText()
+    parser.feed(html)
+    return [block.strip("\n") for block in parser.blocks]
+
+
 class _RawTagFinder(HTMLParser):
     def __init__(self):
         super().__init__()
@@ -70,6 +99,13 @@ def check_text(text, names, configs):
         for ext in names
         if ext in MKDOCS_ONLY and render(text, [n for n in names if n != ext], configs) != full
     ]
+    # CodeHilite drops a leading `#!lang` / `:::lang` line from indented code
+    # blocks. Removing it changes all highlighting markup, so compare only
+    # the code text.
+    if "codehilite" in names and code_text(
+        render(text, [n for n in names if n != "codehilite"], configs)
+    ) != code_text(full):
+        reasons.append("#!lang / :::lang first line in an indented code block (use a fenced block)")
     # Removing `toc` would also drop heading permalinks, so disable only its
     # marker ([TOC] by default) and compare.
     if "toc" in names:

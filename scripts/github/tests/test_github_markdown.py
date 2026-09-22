@@ -54,6 +54,14 @@ class CheckGithubMarkdownTest(unittest.TestCase):
     def test_headings_alone_do_not_trip_toc_check(self):
         self.assertEqual(self.check("# Page\n\n## Section\n\nText.\n"), [])
 
+    def test_flags_codehilite_lexer_markers(self):
+        self.assertFlags("Text.\n\n    #!python\n    print(1)\n", "indented code block")
+        self.assertFlags("Text.\n\n    :::python\n    print(1)\n", "indented code block")
+
+    def test_ordinary_code_blocks_do_not_trip_codehilite_check(self):
+        text = "Text.\n\n    print(1)\n\n```python\n#!/usr/bin/env python\nprint(1)\n```\n"
+        self.assertEqual(self.check(text), [])
+
     def test_flags_inline_hilite(self):
         self.assertFlags('Run `#!python print("hi")` first.\n', "inline highlighting")
 

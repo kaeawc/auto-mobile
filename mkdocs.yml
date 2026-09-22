@@ -78,7 +78,10 @@ markdown_extensions:
       repo_url_shorthand: true
       user: kaeawc
       repo: auto-mobile
-  - pymdownx.smartsymbols
+  - pymdownx.smartsymbols:
+      # Fractions turned "1/2/4 concurrent" and "phase-1/2" into "½/4" and
+      # "phase-½" on the site; GitHub shows the source as written.
+      fractions: false
   - pymdownx.superfences:
       custom_fences:
         - name: mermaid

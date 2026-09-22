@@ -34,4 +34,5 @@ data class KeyboardUiState(
   val rows: List<List<KeyboardKey>>,
   val shiftState: ShiftState,
   val page: KeyPage,
+  val enterLabel: String = "↵",
 )

@@ -93,6 +93,41 @@ class KeyboardControllerTest {
     assertCharacterOutputs(controller)
   }
 
+  @Test
+  fun `enter label follows editor actions`() {
+    val labels = mapOf(2 to "Go", 3 to "Search", 4 to "Send", 5 to "Next", 6 to "Done", 7 to "Prev")
+    labels.forEach { (action, label) ->
+      val controller = KeyboardController()
+      controller.configure(EditorConfig(InputType.TYPE_CLASS_TEXT, action))
+      assertEquals(label, controller.uiState().enterLabel)
+    }
+  }
+
+  @Test
+  fun `enter label falls back for unspecified action`() {
+    val controller = KeyboardController()
+    controller.configure(EditorConfig(InputType.TYPE_CLASS_TEXT, 0))
+    assertEquals("↵", controller.uiState().enterLabel)
+    controller.configure(EditorConfig(InputType.TYPE_CLASS_TEXT, 1))
+    assertEquals("↵", controller.uiState().enterLabel)
+  }
+
+  @Test
+  fun `no enter action flag overrides editor action label`() {
+    val controller = KeyboardController()
+    controller.configure(EditorConfig(InputType.TYPE_CLASS_TEXT, 0x40000000 or 3))
+    assertEquals("↵", controller.uiState().enterLabel)
+  }
+
+  @Test
+  fun `multiline input overrides editor action label`() {
+    val controller = KeyboardController()
+    controller.configure(
+      EditorConfig(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE, 3)
+    )
+    assertEquals("↵", controller.uiState().enterLabel)
+  }
+
   private fun character(controller: KeyboardController, label: String): KeyboardKey =
     controller.uiState().rows.flatten().first { it.type == KeyType.CHAR && it.label == label }
 

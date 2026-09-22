@@ -5,10 +5,12 @@ import android.text.InputType
 class KeyboardController {
   private var shiftState = ShiftState.OFF
   private var page = KeyPage.LETTERS
+  private var enterLabel = "↵"
 
   fun configure(config: EditorConfig) {
     page = if (config.inputType.isNumericOrPhone()) KeyPage.SYMBOLS else KeyPage.LETTERS
     shiftState = if (config.inputType.hasCapSentences()) ShiftState.SHIFTED else ShiftState.OFF
+    enterLabel = config.enterLabel()
   }
 
   fun uiState(): KeyboardUiState =
@@ -21,6 +23,7 @@ class KeyboardController {
         },
       shiftState = shiftState,
       page = page,
+      enterLabel = enterLabel,
     )
 
   fun press(key: KeyboardKey): KeyAction? =
@@ -93,7 +96,7 @@ class KeyboardController {
       special(KeyType.GLOBE, "◎"),
       special(KeyType.SPACE, "space", widthWeight = 4f),
       KeyboardKey(type = KeyType.CHAR, label = ".", output = "."),
-      special(KeyType.ENTER, "↵"),
+      special(KeyType.ENTER, enterLabel),
     )
 
   private fun special(type: KeyType, label: String, widthWeight: Float = 1f): KeyboardKey =
@@ -104,6 +107,29 @@ class KeyboardController {
       setOf(InputType.TYPE_CLASS_NUMBER, InputType.TYPE_CLASS_PHONE)
 
   private fun Int.hasCapSentences(): Boolean = this and InputType.TYPE_TEXT_FLAG_CAP_SENTENCES != 0
+
+  private fun EditorConfig.enterLabel(): String {
+    // These values mirror android.view.inputmethod.EditorInfo action and flag constants.
+    val actionMask = 0xff
+    val actionGo = 2
+    val actionSearch = 3
+    val actionSend = 4
+    val actionNext = 5
+    val actionDone = 6
+    val actionPrevious = 7
+    val noEnterAction = 0x40000000
+    val multiline = 0x20000
+    if (imeOptions and noEnterAction != 0 || inputType and multiline != 0) return "↵"
+    return when (imeOptions and actionMask) {
+      actionGo -> "Go"
+      actionSearch -> "Search"
+      actionSend -> "Send"
+      actionNext -> "Next"
+      actionDone -> "Done"
+      actionPrevious -> "Prev"
+      else -> "↵"
+    }
+  }
 
   private fun ShiftState.next(): ShiftState =
     when (this) {

@@ -4,6 +4,7 @@ data class KeyboardProfile(
   val id: String,
   val displayName: String,
   val behavior: TypingBehavior,
+  val style: KeyboardStyle,
 )
 
 object KeyboardProfiles {
@@ -11,6 +12,19 @@ object KeyboardProfiles {
     KeyboardProfile(
       id = "direct",
       displayName = "Direct",
+      style =
+        KeyboardStyle(
+          52f,
+          40f,
+          4f,
+          6f,
+          0xFF202124,
+          0xFF414347,
+          0xFF55575B,
+          0xFF707278,
+          0xFFFFFFFF,
+          0xFF8AB4F8,
+        ),
       behavior =
         TypingBehavior(
           composeWords = false,
@@ -30,6 +44,19 @@ object KeyboardProfiles {
     KeyboardProfile(
       id = "gboard",
       displayName = "Gboard",
+      style =
+        KeyboardStyle(
+          52f,
+          40f,
+          5f,
+          10f,
+          0xFF20232A,
+          0xFF4B5059,
+          0xFF626874,
+          0xFF79818E,
+          0xFFFFFFFF,
+          0xFF8AB4F8,
+        ),
       behavior =
         TypingBehavior(
           composeWords = true,
@@ -49,6 +76,19 @@ object KeyboardProfiles {
     KeyboardProfile(
       id = "samsung",
       displayName = "Samsung",
+      style =
+        KeyboardStyle(
+          56f,
+          42f,
+          4f,
+          8f,
+          0xFF1C1D21,
+          0xFF40434A,
+          0xFF575B64,
+          0xFF747985,
+          0xFFFFFFFF,
+          0xFFA9D26F,
+        ),
       behavior =
         TypingBehavior(
           composeWords = true,

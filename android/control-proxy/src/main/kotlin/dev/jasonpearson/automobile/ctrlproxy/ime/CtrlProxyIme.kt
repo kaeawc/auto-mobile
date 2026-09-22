@@ -23,10 +23,14 @@ import androidx.savedstate.SavedStateRegistryOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import dev.jasonpearson.automobile.ctrlproxy.ime.keyboard.EditorConfig
 import dev.jasonpearson.automobile.ctrlproxy.ime.keyboard.KeyboardController
+import dev.jasonpearson.automobile.ctrlproxy.ime.keyboard.profile.ImeOp
+import dev.jasonpearson.automobile.ctrlproxy.ime.keyboard.profile.KeyboardProfiles
+import dev.jasonpearson.automobile.ctrlproxy.ime.keyboard.ui.KeyboardCallbacks
 import dev.jasonpearson.automobile.ctrlproxy.ime.keyboard.ui.KeyboardScreen
 import dev.jasonpearson.automobile.ctrlproxy.ime.session.ImeConnection
 import dev.jasonpearson.automobile.ctrlproxy.ime.session.ImeSwitcher
 import dev.jasonpearson.automobile.ctrlproxy.ime.session.InputConnectionAdapter
+import dev.jasonpearson.automobile.ctrlproxy.ime.session.InputConnectionDriver
 import dev.jasonpearson.automobile.ctrlproxy.ime.session.KeyboardSession
 import dev.jasonpearson.automobile.ctrlproxy.ime.session.SharedPreferencesKeyboardProfileStore
 
@@ -50,6 +54,7 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
     )
   }
   private var uiState by mutableStateOf(KeyboardController().uiState())
+  private var activeProfile by mutableStateOf(KeyboardProfiles.DEFAULT)
   private val mainHandler by lazy { Handler(Looper.getMainLooper()) }
   private var idleRestore: Runnable? = null
   private var lastDriver: ImeCommitDriver? = null
@@ -59,14 +64,17 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
     super.onCreate()
     savedStateRegistryController.performRestore(null)
     lifecycleRegistry.currentState = Lifecycle.State.CREATED
+    activeProfile = session.activeProfile()
     instance = this
   }
 
   override fun onDestroy() {
-    lifecycleRegistry.currentState = Lifecycle.State.DESTROYED
     idleRestore?.let(mainHandler::removeCallbacks)
     if (instance === this) instance = null
+    // InputMethodService.onDestroy() finishes the input view, which calls onFinishInputView();
+    // run it while the lifecycle is still live, then mark it destroyed.
     super.onDestroy()
+    moveLifecycleTo(Lifecycle.State.DESTROYED)
   }
 
   override fun onCreateInputView(): View {
@@ -78,9 +86,21 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
       setContent {
         KeyboardScreen(
           uiState = uiState,
-          onKey = { key ->
-            uiState = session.onKey(key, connectionAdapter())
-          },
+          profile = activeProfile,
+          profiles = KeyboardProfiles.all,
+          callbacks =
+            KeyboardCallbacks(
+              onKey = { key -> uiState = session.onKey(key, connectionAdapter()) },
+              onSelectProfile = { id ->
+                connectionAdapter()?.let { connection ->
+                  InputConnectionDriver(connection).execute(listOf(ImeOp.FinishComposingText))
+                }
+                if (session.setActiveProfile(id)) activeProfile = session.activeProfile()
+              },
+              onShowImePicker = {
+                getSystemService(InputMethodManager::class.java).showInputMethodPicker()
+              },
+            ),
         )
       }
     }
@@ -88,11 +108,11 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
 
   override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
     super.onStartInputView(info, restarting)
-    lifecycleRegistry.currentState = Lifecycle.State.RESUMED
+    moveLifecycleTo(Lifecycle.State.RESUMED)
   }
 
   override fun onFinishInputView(finishingInput: Boolean) {
-    lifecycleRegistry.currentState = Lifecycle.State.STARTED
+    moveLifecycleTo(Lifecycle.State.STARTED)
     super.onFinishInputView(finishingInput)
   }
 
@@ -107,6 +127,7 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
           attribute.initialSelStart,
           attribute.initialSelEnd,
         )
+      activeProfile = session.activeProfile()
     }
   }
 
@@ -235,6 +256,14 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
     clearRememberedRestore(driver, priorImeId)
   }
 
+  // A destroyed LifecycleRegistry rejects every further transition, and the platform can deliver
+  // input-view callbacks during teardown; never move a destroyed lifecycle.
+  private fun moveLifecycleTo(state: Lifecycle.State) {
+    if (lifecycleRegistry.currentState != Lifecycle.State.DESTROYED) {
+      lifecycleRegistry.currentState = state
+    }
+  }
+
   private fun connectionAdapter(): ImeConnection? = currentInputConnection?.let {
     InputConnectionAdapter(it, this)
   }
@@ -259,6 +288,11 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
 
     fun current(): CtrlProxyIme? = instance
 
-    fun setActiveProfile(id: String): Boolean = instance?.session?.setActiveProfile(id) ?: false
+    fun setActiveProfile(id: String): Boolean {
+      val service = instance ?: return false
+      if (!service.session.setActiveProfile(id)) return false
+      service.activeProfile = service.session.activeProfile()
+      return true
+    }
   }
 }

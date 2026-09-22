@@ -100,6 +100,12 @@ describe("dumpsys notification records", () => {
     ).toEqual([]);
   });
 
+  test("does not treat a manager-state header truncated before trailing state as empty", () => {
+    expect(
+      parseActiveNotificationKeysForApp("Current Notification Manager state:", "com.example.app"),
+    ).toBeUndefined();
+  });
+
   test("does not trust a manager-state dump with records but no active-list heading", () => {
     expect(
       parseActiveNotificationKeysForApp(

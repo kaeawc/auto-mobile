@@ -920,6 +920,23 @@ describe("systemTray clearAll dumpsys ownership", () => {
       `        android.text=String (${text})`,
       "      }",
     ].join("\n");
+  const customLayoutRow = (label: string) =>
+    node("com.android.systemui:id/expandableNotificationRow", "", [
+      node("com.android.systemui:id/notification_header", "", [
+        node("com.android.systemui:id/custom_app_name_text", label),
+      ]),
+      node("android:id/chronometer", "00:09:57"),
+    ]);
+  const customRecord = () =>
+    [
+      `    NotificationRecord(0x06b3f5ad: pkg=${SHELL} user=UserHandle{0} id=2147483641 tag=null key=0|${SHELL}|2147483641|null|10164: Notification(channel=Timers contentView=${SHELL}/0x7f0e0042))`,
+      `      contentView=${SHELL}/0x7f0e0042 (0 bytes): android.widget.RemoteViews@224e730`,
+      "      extras={",
+      "        android.title=null",
+      "        android.template=String (android.app.Notification$DecoratedCustomViewStyle)",
+      "        android.text=null",
+      "      }",
+    ].join("\n");
   const groupedRows = (notifications: readonly (readonly [string, string])[]) =>
     node("com.android.systemui:id/expandableNotificationRow", "", [
       node("android:id/app_name_text", shellLabel),
@@ -944,6 +961,66 @@ describe("systemTray clearAll dumpsys ownership", () => {
     });
     registerInteractionTools();
   };
+
+  test("fails closed for a shared label on a header-less content-less custom layout", async () => {
+    const OTHER_APP = "com.example.other";
+    const { adb, timer } = setup([page(customLayoutRow(shellLabel))], false);
+    adb.setCommandResponse("dumpsys notification", execResult(dumpsys(customRecord())));
+    const installedAppsSpy = spyOn(ListInstalledApps.prototype, "execute").mockResolvedValue([
+      SHELL,
+      OTHER_APP,
+    ]);
+    timer.enableAutoAdvance();
+    setSystemTrayDependencies({
+      adbFactory: () => adb,
+      appLabelResolver: async (_device, appId) =>
+        appId === SHELL || appId === OTHER_APP ? shellLabel : null,
+      timer,
+    });
+    registerInteractionTools();
+
+    try {
+      await expect(clearAll()).rejects.toThrow(
+        `Notification records for ${SHELL} have no title/text extras to correlate with shade rows (custom layout).`,
+      );
+    } finally {
+      installedAppsSpy.mockRestore();
+    }
+
+    expect(
+      adb.getExecutedCommands().filter((command) => command.includes("input swipe")),
+    ).toHaveLength(0);
+  });
+
+  test("clears a header-less content-less custom layout when its label is unique", async () => {
+    const { adb, timer } = setup([page(customLayoutRow(shellLabel)), page()], false);
+    adb.setCommandResponseSequence("dumpsys notification", [
+      execResult(dumpsys(customRecord())),
+      execResult(dumpsys(customRecord())),
+      execResult(dumpsys(customRecord())),
+      execResult(api36EmptyDumpsys()),
+    ]);
+    const installedAppsSpy = spyOn(ListInstalledApps.prototype, "execute").mockResolvedValue([
+      SHELL,
+    ]);
+    installClearAllDependencies(timer, adb);
+
+    try {
+      const payload = JSON.parse((await clearAll()).content[0].text);
+      expect(payload).toMatchObject({
+        dismissedCount: 1,
+        expectedCount: 1,
+        remainingCount: 0,
+        success: true,
+      });
+    } finally {
+      installedAppsSpy.mockRestore();
+    }
+
+    expect(
+      adb.getExecutedCommands().filter((command) => command.includes("input swipe")),
+    ).toHaveLength(1);
+  });
 
   test("clears header-less rows attributed to the app by dumpsys", async () => {
     const notifications = [

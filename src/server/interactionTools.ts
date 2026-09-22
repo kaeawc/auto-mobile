@@ -62,6 +62,7 @@ import {
   waitForSchema,
 } from "./observeTools";
 import { defaultTimer } from "../utils/SystemTimer";
+import { logger } from "../utils/logger";
 import {
   createJSONToolResponse,
   createStructuredToolResponse,
@@ -2096,6 +2097,31 @@ const readRequiredActiveNotificationKeys = async (
   return keys;
 };
 
+// Resolve the label used to attribute shade rows for a destructive clearAll.
+// A unique label is required (an ambiguous one could attribute another app's
+// row); resolveUniqueTrayAppLabel throws on ambiguity, which we treat as "no
+// attribution label" (null) so the header fallback fails closed rather than
+// swiping the wrong notification.
+const resolveClearAllAttributionLabel = async (
+  device: BootedDevice,
+  appId: string,
+  installedApps: string[],
+  signal?: AbortSignal,
+): Promise<string | null> => {
+  try {
+    return await resolveUniqueTrayAppLabel(device, appId, installedApps, signal);
+  } catch (error) {
+    if (!(error instanceof ActionableError)) {
+      throw error;
+    }
+    logger.debug(
+      `[systemTray] could not verify a unique label for clearAll attribution: ${error}`,
+      error,
+    );
+    return null;
+  }
+};
+
 // ============================================================================
 // Tool Registration
 // ============================================================================
@@ -2190,10 +2216,11 @@ export function registerInteractionTools() {
       const notification = args.notification ?? {};
       let appLabel: string | null = null;
       let appMatchTexts: string[] = [];
+      let installedApps: string[] = [];
 
       if (notification.appId) {
         const listInstalledApps = new ListInstalledApps(device);
-        const installedApps = await listInstalledApps.execute();
+        installedApps = await listInstalledApps.execute();
         if (!installedApps.includes(notification.appId)) {
           throw new ActionableError(`App ${notification.appId} is not installed.`);
         }
@@ -2357,10 +2384,16 @@ export function registerInteractionTools() {
         let expectedKeys: string[] | undefined;
         let clearMatchTexts = appMatchTexts;
         if (device.platform === "android" && notification.appId) {
+          const attributionLabel = await resolveClearAllAttributionLabel(
+            device,
+            notification.appId,
+            installedApps,
+            signal,
+          );
           const listed = await listSystemTrayNotifications(
             device,
             notification.appId,
-            appLabel,
+            attributionLabel,
             awaitTimeoutMs,
             progress,
             signal,

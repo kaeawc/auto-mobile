@@ -53,6 +53,8 @@ const GROUP_SUMMARY_FLAG = 0x200;
 const SECTION_HEADING = /^([A-Za-z][A-Za-z0-9 .'()_$-]*):$/;
 const ACTIVE_SECTION = "Notification List";
 const MANAGER_STATE_HEADER = "Current Notification Manager state:";
+// These print after the omitted active list, so a dump truncated at its header cannot mimic empty.
+const EMPTY_ACTIVE_SET_TRAILING_MARKERS = ["mArchive=", "Snoozed notifications:"];
 
 /** A CharSequence extra whose closing delimiter has not been read yet. */
 interface PendingExtra {
@@ -262,7 +264,8 @@ export const parseActiveNotificationKeysForApp = (
   const wellFormedEmptyActiveSet =
     output.includes(MANAGER_STATE_HEADER) &&
     !output.includes(`${ACTIVE_SECTION}:`) &&
-    !output.includes("NotificationRecord(");
+    !output.includes("NotificationRecord(") &&
+    EMPTY_ACTIVE_SET_TRAILING_MARKERS.some((marker) => output.includes(marker));
   if (!snapshot.complete || (!snapshot.activeSectionRecognized && !wellFormedEmptyActiveSet)) {
     return undefined;
   }

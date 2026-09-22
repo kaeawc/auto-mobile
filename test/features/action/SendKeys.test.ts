@@ -239,8 +239,7 @@ describe("SendKeys", () => {
 });
 
 describe("DefaultSendKeysCommandExecutor", () => {
-  const commitImeId =
-    "dev.jasonpearson.automobile.ctrlproxy/dev.jasonpearson.automobile.ctrlproxy.ime.CtrlProxyIme";
+  const commitImeId = "dev.jasonpearson.automobile.ctrlproxy/.ime.CtrlProxyIme";
   const priorImeId = "com.example.keyboard/.Ime";
 
   test("ime mode activates the companion IME, commits with the prior id, and restores it", async () => {

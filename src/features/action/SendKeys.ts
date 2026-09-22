@@ -382,7 +382,10 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   }
 
   private async activateCommitIme(): Promise<boolean> {
-    const imeId = `${AndroidCtrlProxyManager.PACKAGE}/${AndroidCtrlProxyManager.PACKAGE}.ime.CtrlProxyIme`;
+    // Android IME ids are ComponentName.flattenToShortString(): the class is
+    // abbreviated to a leading "." because it lives under the package, and that
+    // short form is what `settings get secure default_input_method` stores.
+    const imeId = `${AndroidCtrlProxyManager.PACKAGE}/.ime.CtrlProxyIme`;
     try {
       const enableResult = await this.adb.executeCommand(`shell ime enable ${imeId}`);
       if (enableResult.stderr.trim()) {

@@ -215,8 +215,10 @@ run_lychee_pass() {
 }
 
 # Builds the MkDocs site into $SITE_STAGE/built from a staged copy of docs/, so
-# the working tree is never mutated. Mirrors the deploy by staging
-# .github/CONTRIBUTING.md as docs/contributing.md (the nav's Contributing page).
+# the working tree is never mutated. Mirrors copy_required_files() in
+# scripts/github/deploy_pages.py by staging .github/CONTRIBUTING.md as
+# docs/contributing.md (the nav's Contributing page) and CHANGELOG.md as
+# docs/changelog.md, so the built-site pass sees every page the deploy publishes.
 # Sets BUILD_STATUS: 0 on success, 3 when MkDocs is unavailable, 1 when the
 # build fails. Always returns 0 so set -e stays armed for the staging copies.
 BUILD_STATUS=0
@@ -224,6 +226,7 @@ build_site() {
     cp -R "$PROJECT_ROOT/docs" "$SITE_STAGE/docs"
     cp "$PROJECT_ROOT/mkdocs.yml" "$SITE_STAGE/mkdocs.yml"
     cp "$PROJECT_ROOT/.github/CONTRIBUTING.md" "$SITE_STAGE/docs/contributing.md"
+    cp "$PROJECT_ROOT/CHANGELOG.md" "$SITE_STAGE/docs/changelog.md"
 
     local -a mkdocs_cmd
     if command -v uv >/dev/null 2>&1 && [[ -f "$PROJECT_ROOT/scripts/github/uv.lock" ]]; then

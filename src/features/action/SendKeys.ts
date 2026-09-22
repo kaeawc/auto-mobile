@@ -28,6 +28,7 @@ import {
   type KeyEventPlan,
 } from "./asciiKeyEvents";
 import type { ProgressCallback } from "./BaseVisualChange";
+import { containsWysiwygTriggerChar } from "./wysiwygTriggerChars";
 
 export const SEND_KEYS_TYPING_MODES = [
   "auto",
@@ -205,7 +206,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     signal?.throwIfAborted();
     const operation = command.operation ?? "insert";
     const requestedMode = command.mode ?? "auto";
-    const resolvedMode = this.resolveMode(operation, requestedMode);
+    const resolvedMode = this.resolveMode(command.text, operation, requestedMode);
     const baseResult = {
       index: -1,
       action: "type" as const,
@@ -279,11 +280,16 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   }
 
   private resolveMode(
+    text: string,
     operation: SendKeysOperation,
     requestedMode: SendKeysTypingMode,
   ): AndroidSendKeysTypingMode {
     if (requestedMode !== "auto") {
       return requestedMode;
+    }
+    // WYSIWYG per-key delivery for shifted triggers (_ * ~) needs API 31+; older devices batch them through eventAll's per-character fallback.
+    if (operation === "replace" && containsWysiwygTriggerChar(text)) {
+      return "eventAll";
     }
     return operation === "insert" ? "eventAll" : "a11y";
   }

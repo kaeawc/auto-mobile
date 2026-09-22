@@ -314,6 +314,86 @@ describe("DefaultSendKeysCommandExecutor", () => {
     expect(calls).toEqual(["insert:🙂"]);
   });
 
+  test("auto replace uses eventAll for WYSIWYG/markdown trigger characters", async () => {
+    for (const text of ["```code```", "*bold*", "_x_", "~s~"]) {
+      const adb = new FakeAdbExecutor();
+      const { client } = createTextClient();
+      const executor = new DefaultSendKeysCommandExecutor(
+        androidDevice,
+        createAdbFactory(adb),
+        createObserver(focusedAndroidObservation()),
+        { textClient: client },
+      );
+
+      const result = await executor.type({ action: "type", text, operation: "replace" });
+
+      expect(result).toMatchObject({
+        success: true,
+        operation: "replace",
+        requestedMode: "auto",
+        resolvedMode: "eventAll",
+      });
+    }
+  });
+
+  test("auto replace uses a11y for ordinary text", async () => {
+    const { client, calls } = createTextClient();
+    const executor = new DefaultSendKeysCommandExecutor(
+      androidDevice,
+      createAdbFactory(new FakeAdbExecutor()),
+      createObserver(),
+      { textClient: client },
+    );
+
+    const result = await executor.type({
+      action: "type",
+      text: "hello world",
+      operation: "replace",
+    });
+
+    expect(result).toMatchObject({ success: true, resolvedMode: "a11y" });
+    expect(calls).toEqual(["replace:hello world"]);
+  });
+
+  test("auto insert keeps eventAll for WYSIWYG/markdown trigger characters", async () => {
+    const adb = new FakeAdbExecutor();
+    const { client } = createTextClient();
+    const executor = new DefaultSendKeysCommandExecutor(
+      androidDevice,
+      createAdbFactory(adb),
+      createObserver(focusedAndroidObservation()),
+      { textClient: client },
+    );
+
+    const result = await executor.type({ action: "type", text: "*bold*" });
+
+    expect(result).toMatchObject({ success: true, resolvedMode: "eventAll" });
+  });
+
+  test("explicit a11y mode wins over WYSIWYG/markdown trigger routing", async () => {
+    const { client, calls } = createTextClient();
+    const executor = new DefaultSendKeysCommandExecutor(
+      androidDevice,
+      createAdbFactory(new FakeAdbExecutor()),
+      createObserver(),
+      { textClient: client },
+    );
+
+    const result = await executor.type({
+      action: "type",
+      text: "*bold*",
+      operation: "replace",
+      mode: "a11y",
+    });
+
+    expect(result).toMatchObject({
+      success: true,
+      requestedMode: "a11y",
+      resolvedMode: "a11y",
+    });
+    expect(calls).toEqual(["replace:*bold*"]);
+  });
+
   test("marks a late eventAll insertion failure as partially applied", async () => {
     const adb = new FakeAdbExecutor();
     const { client } = createTextClient();

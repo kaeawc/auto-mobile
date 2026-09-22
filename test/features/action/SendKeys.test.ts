@@ -61,8 +61,15 @@ function focusedAndroidObservation(
   } as ObserveResult;
 }
 
-function createTextClient() {
+function createTextClient(
+  options: {
+    supportsImeCommit?: boolean;
+    commitViaIme?: (text: string, priorImeId: string | null) => Promise<{ success: boolean }>;
+  } = {},
+) {
   const calls: string[] = [];
+  const commitViaImeCalls: Array<{ text: string; priorImeId: string | null }> = [];
+  let supportsImeCommitCalls = 0;
   const client: SendKeysTextClient = {
     replace: async (text) => {
       calls.push(`replace:${text}`);
@@ -80,8 +87,23 @@ function createTextClient() {
       calls.push(`ime:${action}`);
       return { success: true };
     },
+    supportsImeCommit: async () => {
+      supportsImeCommitCalls++;
+      calls.push("supportsImeCommit");
+      return options.supportsImeCommit ?? true;
+    },
+    commitViaIme: async (text, priorImeId) => {
+      calls.push(`commitViaIme:${text}:${priorImeId ?? "none"}`);
+      commitViaImeCalls.push({ text, priorImeId });
+      return options.commitViaIme ? options.commitViaIme(text, priorImeId) : { success: true };
+    },
   };
-  return { client, calls };
+  return {
+    client,
+    calls,
+    commitViaImeCalls,
+    getSupportsImeCommitCalls: () => supportsImeCommitCalls,
+  };
 }
 
 function createAdbFactory(adb: FakeAdbExecutor): AdbClientFactory {
@@ -217,6 +239,104 @@ describe("SendKeys", () => {
 });
 
 describe("DefaultSendKeysCommandExecutor", () => {
+  const commitImeId = "dev.jasonpearson.automobile.ctrlproxy/.ime.CtrlProxyIme";
+  const priorImeId = "com.example.keyboard/.Ime";
+
+  test("ime mode activates the companion IME, commits with the prior id, and restores it", async () => {
+    const events: string[] = [];
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponseSequence("shell settings get secure default_input_method", [
+      { stdout: `${priorImeId}\n`, stderr: "" },
+      { stdout: `${commitImeId}\n`, stderr: "" },
+    ]);
+    const executeCommand = adb.executeCommand.bind(adb);
+    adb.executeCommand = async (command, ...options) => {
+      events.push(`adb:${command}`);
+      return executeCommand(command, ...options);
+    };
+    const textClient = createTextClient({
+      commitViaIme: async (text, prior) => {
+        events.push(`commit:${text}:${prior ?? "none"}`);
+        return { success: true };
+      },
+    });
+    const executor = new DefaultSendKeysCommandExecutor(
+      androidDevice,
+      createAdbFactory(adb),
+      createObserver(),
+      { textClient: textClient.client },
+    );
+
+    const result = await executor.type({ action: "type", text: "**bold**", mode: "ime" });
+
+    expect(result).toMatchObject({ success: true, resolvedMode: "ime" });
+    expect(textClient.getSupportsImeCommitCalls()).toBe(1);
+    expect(textClient.commitViaImeCalls).toEqual([{ text: "**bold**", priorImeId }]);
+    expect(events).toEqual([
+      "adb:shell settings get secure default_input_method",
+      `adb:shell ime enable ${commitImeId}`,
+      `adb:shell ime set ${commitImeId}`,
+      "adb:shell settings get secure default_input_method",
+      `commit:**bold**:${priorImeId}`,
+      `adb:shell ime set ${priorImeId}`,
+    ]);
+  });
+
+  test("ime mode fails closed before switching when the command is not advertised", async () => {
+    const adb = new FakeAdbExecutor();
+    const textClient = createTextClient({ supportsImeCommit: false });
+    const executor = new DefaultSendKeysCommandExecutor(
+      androidDevice,
+      createAdbFactory(adb),
+      createObserver(),
+      { textClient: textClient.client },
+    );
+
+    const result = await executor.type({ action: "type", text: "value", mode: "ime" });
+
+    expect(result).toMatchObject({
+      success: false,
+      resolvedMode: "ime",
+      error: expect.stringContaining("IME commit is not available"),
+    });
+    expect(textClient.getSupportsImeCommitCalls()).toBe(1);
+    expect(textClient.commitViaImeCalls).toEqual([]);
+    expect(adb.getExecutedCommands()).toEqual([]);
+  });
+
+  test("ime mode restores the prior IME when commit rejects", async () => {
+    const events: string[] = [];
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponseSequence("shell settings get secure default_input_method", [
+      { stdout: priorImeId, stderr: "" },
+      { stdout: commitImeId, stderr: "" },
+    ]);
+    const executeCommand = adb.executeCommand.bind(adb);
+    adb.executeCommand = async (command, ...options) => {
+      events.push(`adb:${command}`);
+      return executeCommand(command, ...options);
+    };
+    const textClient = createTextClient({
+      commitViaIme: async () => {
+        events.push("commit:rejected");
+        throw new Error("commit rejected");
+      },
+    });
+    const executor = new DefaultSendKeysCommandExecutor(
+      androidDevice,
+      createAdbFactory(adb),
+      createObserver(),
+      { textClient: textClient.client },
+    );
+
+    const result = await executor.type({ action: "type", text: "value", mode: "ime" });
+
+    expect(result).toMatchObject({ success: false, resolvedMode: "ime", error: "commit rejected" });
+    expect(textClient.commitViaImeCalls).toEqual([{ text: "value", priorImeId }]);
+    expect(events.at(-2)).toBe("commit:rejected");
+    expect(events.at(-1)).toBe(`adb:shell ime set ${priorImeId}`);
+  });
+
   test("eventOnly replacement rejects unavailable text before mutation but accepts empty text", async () => {
     for (const text of [undefined, ""]) {
       const adb = new FakeAdbExecutor();
@@ -573,7 +693,7 @@ describe("DefaultSendKeysCommandExecutor", () => {
   });
 
   test("iOS accepts every mode and reports its XCUITest mechanism", async () => {
-    for (const mode of ["a11y", "eventLast", "eventAll", "eventOnly"] as const) {
+    for (const mode of ["a11y", "eventLast", "eventAll", "eventOnly", "ime"] as const) {
       const adb = new FakeAdbExecutor();
       const { client, calls } = createTextClient();
       const executor = new DefaultSendKeysCommandExecutor(

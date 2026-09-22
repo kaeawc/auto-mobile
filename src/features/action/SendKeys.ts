@@ -3,6 +3,7 @@ import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClie
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { readAndroidDeviceApiLevel } from "../../utils/android-cmdline-tools/readAndroidDeviceApiLevel";
+import { AndroidCtrlProxyManager } from "../../utils/CtrlProxyManager";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { defaultTimer } from "../../utils/SystemTimer";
@@ -26,6 +27,7 @@ export const SEND_KEYS_TYPING_MODES = [
   "eventLast",
   "eventAll",
   "eventOnly",
+  "ime",
 ] as const;
 export type SendKeysTypingMode = (typeof SEND_KEYS_TYPING_MODES)[number];
 export type ResolvedSendKeysTypingMode = Exclude<SendKeysTypingMode, "auto"> | "xcuiTypeText";
@@ -142,7 +144,13 @@ export interface SendKeysTextClient {
   insert(text: string): Promise<TextActionResult>;
   clear(): Promise<TextActionResult>;
   ime(action: ImeAction): Promise<TextActionResult>;
+  supportsImeCommit(): Promise<boolean>;
+  commitViaIme(text: string, priorImeId: string | null): Promise<TextActionResult>;
 }
+
+type DefaultImeReadResult =
+  | { success: true; imeId: string | null }
+  | { success: false; error: string };
 
 export interface SendKeysInputKey {
   press(
@@ -308,6 +316,118 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         return this.executeAndroidEventAll(text, operation, signal);
       case "eventOnly":
         return this.executeAndroidEventOnly(text, operation, signal);
+      case "ime":
+        return this.executeAndroidImeCommit(text, operation, signal);
+    }
+  }
+
+  private async executeAndroidImeCommit(
+    text: string,
+    operation: SendKeysOperation,
+    signal?: AbortSignal,
+  ): Promise<TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode }> {
+    signal?.throwIfAborted();
+    if (!(await this.textClient.supportsImeCommit())) {
+      const error =
+        "IME commit is not available: the installed control-proxy build does not advertise request_commit_text (re-cut/update the APK).";
+      logger.warn(`[SendKeys] ${error}`);
+      return { success: false, error };
+    }
+
+    const priorResult = await this.readDefaultIme();
+    if (!priorResult.success) {
+      return priorResult;
+    }
+    const prior = priorResult.imeId;
+
+    if (!(await this.activateCommitIme())) {
+      await this.restoreIme(prior);
+      return { success: false, error: "Failed to activate the IME for text commit." };
+    }
+
+    try {
+      if (operation === "replace") {
+        const clearResult = await this.textClient.clear();
+        if (!clearResult.success) {
+          return { ...clearResult, resolvedMode: "ime" };
+        }
+      }
+      const result = await this.textClient.commitViaIme(text, prior);
+      return { ...result, resolvedMode: "ime" };
+    } finally {
+      await this.restoreIme(prior);
+    }
+  }
+
+  private async readDefaultIme(): Promise<DefaultImeReadResult> {
+    try {
+      const result = await this.adb.executeCommand(
+        "shell settings get secure default_input_method",
+      );
+      const stderr = result.stderr.trim();
+      if (stderr) {
+        const error = `Failed to read the current default IME: ${stderr}`;
+        logger.warn(`[SendKeys] ${error}`);
+        return { success: false, error };
+      }
+      const imeId = result.stdout.trim();
+      return { success: true, imeId: !imeId || imeId === "null" ? null : imeId };
+    } catch (error) {
+      logger.warn("[SendKeys] Failed to read the current default IME", error);
+      return {
+        success: false,
+        error: `Failed to read the current default IME: ${errorMessage(error)}`,
+      };
+    }
+  }
+
+  private async activateCommitIme(): Promise<boolean> {
+    // Android IME ids are ComponentName.flattenToShortString(): the class is
+    // abbreviated to a leading "." because it lives under the package, and that
+    // short form is what `settings get secure default_input_method` stores.
+    const imeId = `${AndroidCtrlProxyManager.PACKAGE}/.ime.CtrlProxyIme`;
+    try {
+      const enableResult = await this.adb.executeCommand(`shell ime enable ${imeId}`);
+      if (enableResult.stderr.trim()) {
+        logger.warn(
+          `[SendKeys] Failed to enable the text-commit IME: ${enableResult.stderr.trim()}`,
+        );
+        return false;
+      }
+      const setResult = await this.adb.executeCommand(`shell ime set ${imeId}`);
+      if (setResult.stderr.trim()) {
+        logger.warn(`[SendKeys] Failed to select the text-commit IME: ${setResult.stderr.trim()}`);
+        return false;
+      }
+      const activeResult = await this.readDefaultIme();
+      if (!activeResult.success) {
+        return false;
+      }
+      if (activeResult.imeId !== imeId) {
+        logger.warn(
+          `[SendKeys] Text-commit IME activation verification failed: expected ${imeId}, got ${activeResult.imeId ?? "none"}`,
+        );
+        return false;
+      }
+      return true;
+    } catch (error) {
+      logger.warn("[SendKeys] Failed to activate the text-commit IME", error);
+      return false;
+    }
+  }
+
+  private async restoreIme(priorImeId: string | null): Promise<void> {
+    if (priorImeId === null) {
+      return;
+    }
+    try {
+      const result = await this.adb.executeCommand(`shell ime set ${priorImeId}`);
+      if (result.stderr.trim()) {
+        logger.warn(`[SendKeys] Failed to restore the prior IME: ${result.stderr.trim()}`);
+      }
+    } catch (error) {
+      // Restoration is best-effort so it cannot mask the text-commit result.
+      logger.warn("[SendKeys] Failed to restore the prior IME", error);
     }
   }
 
@@ -581,6 +701,14 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         insert: async (text) => client.requestInsertText(text),
         clear: async () => client.requestClearText(),
         ime: async (action) => client.requestImeAction(action),
+        supportsImeCommit: async () => client.supportsCommand("request_commit_text"),
+        commitViaIme: async (text, priorImeId) => {
+          const result = await client.commitViaIme(text, priorImeId ?? undefined);
+          return {
+            success: result.success,
+            ...(result.error ? { error: result.error } : {}),
+          };
+        },
       };
     }
 
@@ -593,6 +721,8 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       insert: async (text) => client.requestAppendText(text),
       clear: async () => client.requestClearText(),
       ime: async (action) => client.requestImeAction(action),
+      supportsImeCommit: async () => false,
+      commitViaIme: async () => ({ success: false, error: "IME commit is Android-only" }),
     };
   }
 }

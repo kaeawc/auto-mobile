@@ -2211,6 +2211,9 @@ export const readActiveNotificationKeysForApp = async (
 
 type TrayRowAttribution = TrayOwnershipEvidence | "other" | "unknown";
 
+const isContentlessCustomLayout = (record: DumpsysNotificationRecord): boolean =>
+  record.hasCustomLayout && record.titles.length === 0 && record.bodies.length === 0;
+
 // The before snapshot is only evidence when it precedes every swipe. Once a
 // read fails, a later page must not retry it: a post-swipe dump stored as
 // "before" would present the requested package as the stable owner of a row
@@ -2229,6 +2232,20 @@ const attributeTrayRow = (
 ): TrayRowAttribution => {
   if (row.notification.appLabel !== null) {
     return appLabel && row.notification.appLabel === appLabel ? "header" : "other";
+  }
+  const requestedRecords = afterRecords.filter((record) => record.pkg === appId);
+  // Some custom RemoteViews (for example Clock timers) expose neither title
+  // nor text extras, but render their app label under an unrecognized view id.
+  // That resolved, unique label is header evidence only when every requested
+  // record is content-less custom layout; ordinary header-less correlation
+  // remains fail-closed for ambiguous or opaque records (#6875).
+  if (
+    appLabel !== null &&
+    row.correlationTexts.includes(appLabel) &&
+    requestedRecords.length > 0 &&
+    requestedRecords.every(isContentlessCustomLayout)
+  ) {
+    return "header";
   }
   const owner = attributeRowByDumpsys(
     intersectDumpsysRecordsForRow(beforeRecords, afterRecords, new Set(row.correlationTexts)),
@@ -2396,10 +2413,9 @@ export const listSystemTrayNotifications = async (
   );
   // Partial attribution stays useful; only zero attributed rows plus positive
   // posting evidence is unsafe to present as a confident empty list (#6875).
+  const requestedRecords = afterRecords.filter((record) => record.pkg === appId);
   const hasUnmatchedRequestedRecords =
-    beforeRecords !== undefined &&
-    afterRecords.some((record) => record.pkg === appId) &&
-    notifications.length === 0;
+    beforeRecords !== undefined && requestedRecords.length > 0 && notifications.length === 0;
   signal?.throwIfAborted();
   await detector.collapseTray();
   signal?.throwIfAborted();
@@ -2410,7 +2426,9 @@ export const listSystemTrayNotifications = async (
   );
   if (hasUnmatchedRequestedRecords) {
     throw new ActionableError(
-      `Notification records exist for ${appId}, but no shade row could be matched to them. Retry the list operation; the row's rendered text may have changed.`,
+      requestedRecords.every(isContentlessCustomLayout)
+        ? `Notification records for ${appId} have no title/text extras to correlate with shade rows (custom layout).`
+        : `Notification records for ${appId} could not be correlated with shade rows.`,
     );
   }
   return { notifications, unattributedRows, observation, swipes, order: "encounter" };

@@ -52,6 +52,7 @@ const GROUP_SUMMARY_FLAG = 0x200;
 // body line is: those all carry `=`.
 const SECTION_HEADING = /^([A-Za-z][A-Za-z0-9 .'()_$-]*):$/;
 const ACTIVE_SECTION = "Notification List";
+const MANAGER_STATE_HEADER = "Current Notification Manager state:";
 
 /** A CharSequence extra whose closing delimiter has not been read yet. */
 interface PendingExtra {
@@ -254,7 +255,15 @@ export const parseActiveNotificationKeysForApp = (
   appId: string,
 ): string[] | undefined => {
   const snapshot = parseDumpsysNotificationSnapshot(output);
-  if (!snapshot.activeSectionRecognized || !snapshot.complete) {
+  // API 36 omits `Notification List:` entirely after the last active
+  // notification is cleared. The manager-state header plus the absence of
+  // both an active-list heading and records is a complete, trustworthy empty
+  // active set; records without an active heading remain untrusted.
+  const wellFormedEmptyActiveSet =
+    output.includes(MANAGER_STATE_HEADER) &&
+    !output.includes(`${ACTIVE_SECTION}:`) &&
+    !output.includes("NotificationRecord(");
+  if (!snapshot.complete || (!snapshot.activeSectionRecognized && !wellFormedEmptyActiveSet)) {
     return undefined;
   }
   return [

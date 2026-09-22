@@ -511,7 +511,7 @@ describe("per-session exact-tool selection", () => {
     expect(listed.tools.map((tool) => tool.name)).toContain("setToolEnabled");
   });
 
-  test("a connection-profile disable still rejects calls after device routing binds", async () => {
+  test("a connection-profile disable keeps calls available after device routing binds", async () => {
     const overrides = new Map<string, Map<string, boolean>>([
       ["connection-profile", new Map([["observe", false]])],
     ]);
@@ -545,12 +545,11 @@ describe("per-session exact-tool selection", () => {
     expect((await fixture.client.listTools()).tools.map((tool) => tool.name)).not.toContain(
       "observe",
     );
-    await expect(
-      fixture.client.request(
-        { method: "tools/call", params: { name: "observe", arguments: {} } },
-        z.any(),
-      ),
-    ).rejects.toThrow("Tool observe is disabled");
+    const result = await fixture.client.request(
+      { method: "tools/call", params: { name: "observe", arguments: {} } },
+      z.any(),
+    );
+    expect(result.content[0]?.text).toBe("ran");
   });
 
   test("two connection profiles keep disjoint tool and structured-content policies", async () => {
@@ -656,18 +655,18 @@ describe("per-session exact-tool selection", () => {
         secondTools.tools.find(({ name }) => name === "schemaTool")?.outputSchema,
       ).toBeDefined();
 
-      await expect(
+      const [firstUnadvertisedResult, secondUnadvertisedResult] = await Promise.all([
         first.client.request(
           { method: "tools/call", params: { name: "profileBTool", arguments: {} } },
           z.any(),
         ),
-      ).rejects.toThrow("Tool profileBTool is disabled");
-      await expect(
         second.client.request(
           { method: "tools/call", params: { name: "profileATool", arguments: {} } },
           z.any(),
         ),
-      ).rejects.toThrow("Tool profileATool is disabled");
+      ]);
+      expect(firstUnadvertisedResult.content[0]?.text).toBe("profileBTool");
+      expect(secondUnadvertisedResult.content[0]?.text).toBe("profileATool");
 
       const [firstResult, secondResult] = await Promise.all([
         first.client.request(
@@ -1207,24 +1206,35 @@ describe("per-session exact-tool selection", () => {
       "observe",
       z.object({}),
       async () => ({ content: [{ type: "text", text: "ran" }] }),
-      { defaultEnabled: true },
+      {
+        defaultEnabled: true,
+        shouldEnsureDevice: () => false,
+        nonDeviceHandler: async () => ({ content: [{ type: "text", text: "ran" }] }),
+      },
     );
 
     expect((await fixture.client.listTools()).tools.map((tool) => tool.name)).toContain("observe");
-    await expect(
-      fixture.client.request(
-        {
-          method: "tools/call",
-          params: { name: "observe", arguments: { device: "A" } },
-        },
-        z.any(),
-      ),
-    ).rejects.toThrow("Tool observe is disabled");
+    const enabledRouteResult = await fixture.client.request(
+      {
+        method: "tools/call",
+        params: { name: "observe", arguments: { device: "A" } },
+      },
+      z.any(),
+    );
+    expect(enabledRouteResult.content[0]?.text).toBe("ran");
 
     overrides.set("base-session", false);
     expect((await fixture.client.listTools()).tools.map((tool) => tool.name)).not.toContain(
       "observe",
     );
+    const unadvertisedResult = await fixture.client.request(
+      {
+        method: "tools/call",
+        params: { name: "observe", arguments: { device: "A" } },
+      },
+      z.any(),
+    );
+    expect(unadvertisedResult.content[0]?.text).toBe("ran");
   });
 
   test("resolves a sibling label from the base when bound to a derived route", async () => {
@@ -1277,7 +1287,7 @@ describe("per-session exact-tool selection", () => {
     expect(resolvedSessionUuid).toBe("base-session");
   });
 
-  test("does not authorize a targeted label from the ambient sibling route", async () => {
+  test("allows a targeted label even when its selection route is disabled", async () => {
     const overrides = new Map<string, boolean>([
       ["base-session:B", true],
       ["base-session", false],
@@ -1303,18 +1313,21 @@ describe("per-session exact-tool selection", () => {
       "observe",
       z.object({ device: z.string().optional() }),
       async () => ({ content: [{ type: "text", text: "ran" }] }),
-      { defaultEnabled: false },
+      {
+        defaultEnabled: false,
+        shouldEnsureDevice: () => false,
+        nonDeviceHandler: async () => ({ content: [{ type: "text", text: "ran" }] }),
+      },
     );
 
-    await expect(
-      fixture.client.request(
-        {
-          method: "tools/call",
-          params: { name: "observe", arguments: { device: "A" } },
-        },
-        z.any(),
-      ),
-    ).rejects.toThrow("Tool observe is disabled");
+    const result = await fixture.client.request(
+      {
+        method: "tools/call",
+        params: { name: "observe", arguments: { device: "A" } },
+      },
+      z.any(),
+    );
+    expect(result.content[0]?.text).toBe("ran");
   });
 
   test("rejects unknown and structural targets while skipping self-disable", async () => {

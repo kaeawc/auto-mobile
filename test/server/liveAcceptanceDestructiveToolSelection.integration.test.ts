@@ -6,9 +6,8 @@ import { McpTestFixture } from "../fixtures/mcpTestFixture";
 
 /**
  * The acceptance harness uses a fresh client for each destructive operation.
- * Exercise the real MCP dispatch gate here: default-disabled tools must be
- * rejected before their handler, then become callable only after the supported
- * public setToolEnabled declaration on that same connection.
+ * Exercise the real MCP dispatch path here: default-disabled destructive tools
+ * stay absent from a fresh connection's advertised list, but remain callable.
  */
 describe("live acceptance destructive tool selection", () => {
   let provisionCalls = 0;
@@ -21,7 +20,7 @@ describe("live acceptance destructive tool selection", () => {
     await deleteClient.setup();
     // McpTestFixture registers the repository's normal server tools while
     // setting up. Replace only this test's registry after both fresh clients
-    // are connected, so dispatch still uses the production selection gate.
+    // are connected, so dispatch uses the production availability gate.
     ToolRegistry.clearTools();
     ToolRegistry.register(
       "provisionDevice",
@@ -52,24 +51,9 @@ describe("live acceptance destructive tool selection", () => {
     ToolRegistry.clearTools();
   });
 
-  test("requires each fresh client to opt into only its destructive tool", async () => {
-    await expect(
-      provisionClient.client.request(
-        { method: "tools/call", params: { name: "provisionDevice", arguments: {} } },
-        z.any(),
-      ),
-    ).rejects.toThrow("Tool provisionDevice is disabled");
-    expect(provisionCalls).toBe(0);
-
-    await provisionClient.client.request(
-      {
-        method: "tools/call",
-        params: {
-          name: "setToolEnabled",
-          arguments: { toolName: "provisionDevice", enabled: true },
-        },
-      },
-      z.any(),
+  test("keeps each fresh client's destructive tool unadvertised but callable", async () => {
+    expect((await provisionClient.client.listTools()).tools.map(({ name }) => name)).not.toContain(
+      "provisionDevice",
     );
     await provisionClient.client.request(
       { method: "tools/call", params: { name: "provisionDevice", arguments: {} } },
@@ -77,23 +61,8 @@ describe("live acceptance destructive tool selection", () => {
     );
     expect(provisionCalls).toBe(1);
 
-    await expect(
-      deleteClient.client.request(
-        { method: "tools/call", params: { name: "deleteDevice", arguments: {} } },
-        z.any(),
-      ),
-    ).rejects.toThrow("Tool deleteDevice is disabled");
-    expect(deleteCalls).toBe(0);
-
-    await deleteClient.client.request(
-      {
-        method: "tools/call",
-        params: {
-          name: "setToolEnabled",
-          arguments: { toolName: "deleteDevice", enabled: true },
-        },
-      },
-      z.any(),
+    expect((await deleteClient.client.listTools()).tools.map(({ name }) => name)).not.toContain(
+      "deleteDevice",
     );
     await deleteClient.client.request(
       { method: "tools/call", params: { name: "deleteDevice", arguments: {} } },

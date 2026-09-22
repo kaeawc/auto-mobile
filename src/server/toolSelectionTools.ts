@@ -13,7 +13,6 @@ import {
 import { ActionableError } from "../models";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
-import { withJsonSchemaOverride } from "./toolSchemaHelpers";
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import { ToolRegistry } from "./toolRegistry";
 
@@ -45,62 +44,47 @@ export const enableToolsSchemaField = z
       "Unknown or hidden names reject the call before device work; always-on names are returned in skipped.",
   );
 
-export const setToolEnabledSchema = withJsonSchemaOverride(
-  z
-    .object({
-      toolName: z
-        .string()
-        .min(1)
-        .optional()
-        .describe(
-          "Exact case-sensitive AutoMobile tool name to enable or disable. The listed choices include optional tools absent from tools/list until enabled. Provide either toolName or toolNames.",
-        ),
-      toolNames: z
-        .array(z.string().min(1))
-        .min(1)
-        .optional()
-        .describe(
-          "Exact case-sensitive AutoMobile tool names to enable or disable in ONE call. Unknown or hidden names reject the whole request before anything is written; always-on names are returned in skipped. Provide either toolName or toolNames.",
-        ),
-      enabled: z
-        .boolean()
-        .default(true)
-        .optional()
-        .describe("Whether to enable the tools (default: true)."),
-      sessionUuid: z
-        .string()
-        .min(1)
-        .optional()
-        .describe(
-          "Active connection or routing-session profile to update. Omit to update this MCP connection's profile.",
-        ),
-    })
-    .superRefine((value, ctx) => {
-      if ((value.toolName === undefined) === (value.toolNames === undefined)) {
-        ctx.addIssue({
-          code: "custom",
-          message: "Provide exactly one of toolName (one tool) or toolNames (a batch).",
-          path: ["toolName"],
-        });
-      }
-    })
-    .describe(
-      "Enable or disable configurable AutoMobile tools for an active session. It can ungate a tool after a device session already exists without reacquiring the device.",
-    ),
-  // The runtime refinement above only protects a caller that already sent the
-  // request. Zod emits no JSON Schema for `.superRefine`, so without this
-  // override `tools/list` and schemas/tool-definitions.json would advertise both
-  // a nameless request and a `toolName` + `toolNames` request as valid while
-  // invocation rejects them. `if`/`then`/`else` encodes the exclusive-or exactly
-  // and — unlike a top-level `oneOf` — keeps the advertised schema free of
-  // top-level combinators, which `schema.integration.test.ts` gates repo-wide
-  // (same convention as setDeviceState's reset exclusivity).
-  (jsonSchema) => {
-    jsonSchema.if = { required: ["toolName"] };
-    jsonSchema.then = { not: { required: ["toolNames"] } };
-    jsonSchema.else = { required: ["toolNames"] };
-  },
-);
+export const setToolEnabledSchema = z
+  .object({
+    toolName: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        "Exact case-sensitive AutoMobile tool name to enable or disable. The listed choices include optional tools absent from tools/list until enabled. Provide either toolName or toolNames.",
+      ),
+    toolNames: z
+      .array(z.string().min(1))
+      .min(1)
+      .optional()
+      .describe(
+        "Exact case-sensitive AutoMobile tool names to enable or disable in ONE call. Unknown or hidden names reject the whole request before anything is written; always-on names are returned in skipped. Provide either toolName or toolNames.",
+      ),
+    enabled: z
+      .boolean()
+      .default(true)
+      .optional()
+      .describe("Whether to enable the tools (default: true)."),
+    sessionUuid: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        "Active connection or routing-session profile to update. Omit to update this MCP connection's profile.",
+      ),
+  })
+  .superRefine((value, ctx) => {
+    if ((value.toolName === undefined) === (value.toolNames === undefined)) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Provide exactly one of toolName (one tool) or toolNames (a batch).",
+        path: ["toolName"],
+      });
+    }
+  })
+  .describe(
+    "Enable or disable configurable AutoMobile tools for an active session. It can ungate a tool after a device session already exists without reacquiring the device.",
+  );
 
 function resolveSelectionSessionUuid(
   requestedSessionUuid: string | undefined,

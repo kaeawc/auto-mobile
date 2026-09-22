@@ -376,64 +376,6 @@ export const tapOnSchema = withJsonSchemaOverride(
   }),
   (js) => {
     compactExclusiveSelectorProperties(js, ["selector", "container"]);
-    js.if = {
-      anyOf: [
-        { required: ["subtext"] },
-        {
-          properties: {
-            selector: { required: ["accessibilityLink"] },
-          },
-        },
-      ],
-    };
-    js.then = {
-      properties: {
-        action: { const: "tap" },
-        sibling: { not: { const: true } },
-        retryIfNoChange: { not: { const: true } },
-        ensureTap: { not: { const: true } },
-        ensureChecked: { not: { const: true } },
-        searchUntil: { not: {} },
-      },
-      allOf: [
-        {
-          not: {
-            required: ["subtext"],
-            properties: {
-              selector: { required: ["accessibilityLink"] },
-            },
-          },
-        },
-        {
-          if: { required: ["subtext"] },
-          then: { not: { required: ["index"] } },
-        },
-        {
-          if: { required: ["subtext"] },
-          then: {
-            properties: {
-              selectionStrategy: { not: { const: "random" } },
-            },
-          },
-        },
-      ],
-    };
-    const allOf = Array.isArray(js.allOf) ? js.allOf : [];
-    js.allOf = [
-      ...allOf,
-      {
-        if: {
-          required: ["ensureChecked"],
-          properties: { ensureChecked: { const: true } },
-        },
-        then: {
-          properties: {
-            action: { const: "tap" },
-            selectionStrategy: { not: { const: "random" } },
-          },
-        },
-      },
-    ];
   },
 );
 
@@ -724,18 +666,6 @@ export const systemTraySchema = withJsonSchemaOverride(
       notificationProperties,
       Object.fromEntries(appIdFieldAliases.map((alias) => [alias, { type: "string" }])),
     );
-    jsonSchema.if = { required: ["action"], properties: { action: { const: "list" } } };
-    jsonSchema.then = {
-      required: ["notification"],
-      properties: {
-        notification: {
-          anyOf: ["appId", ...appIdFieldAliases].map((field) => ({
-            required: [field],
-            properties: { [field]: { type: "string", minLength: 1 } },
-          })),
-        },
-      },
-    };
   },
 );
 

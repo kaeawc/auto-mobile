@@ -37,7 +37,7 @@ const matchingCase = uniqueKeys.map((keys) => ({
 describe("compactExclusiveSelectorProperties (property-based)", () => {
   // The source iterates `branches` in array order, pushing into `merged` (a
   // plain object — insertion order preserved for our non-numeric string keys)
-  // and `oneOf` in that same order, so the compacted output preserves the
+  // and `anyOf` in that same order, so the compacted output preserves the
   // original branches' key order rather than merely containing the same set.
   test("collapses matching anyOf branches into one object, preserving branch order", () => {
     fc.assert(
@@ -45,13 +45,13 @@ describe("compactExclusiveSelectorProperties (property-based)", () => {
         compactExclusiveSelectorProperties(jsonSchema, ["myProp"]);
         const myProp = (jsonSchema.properties as Record<string, any>).myProp;
         const resultKeys = Object.keys(myProp.properties);
-        const oneOfKeys = (myProp.oneOf as Array<{ required: string[] }>).map((o) => o.required[0]);
+        const anyOfKeys = (myProp.anyOf as Array<{ required: string[] }>).map((o) => o.required[0]);
         return (
           myProp.type === "object" &&
           myProp.additionalProperties === false &&
           myProp.description === "pick one" &&
           JSON.stringify(resultKeys) === JSON.stringify(keys) &&
-          JSON.stringify(oneOfKeys) === JSON.stringify(keys)
+          JSON.stringify(anyOfKeys) === JSON.stringify(keys)
         );
       }),
       RUN_OPTIONS,
@@ -59,7 +59,7 @@ describe("compactExclusiveSelectorProperties (property-based)", () => {
   });
 
   // After compaction `myProp` no longer has an `anyOf`/`oneOf`-of-branches
-  // shape (its `oneOf` entries are `{required:[key]}`, with no `type` or
+  // shape (its `anyOf` entries are `{required:[key]}`, with no `type` or
   // `properties`), so the pattern match fails on a second pass and the
   // function skips it — the object should be byte-for-byte unchanged.
   test("a second compaction call is a no-op (idempotent)", () => {

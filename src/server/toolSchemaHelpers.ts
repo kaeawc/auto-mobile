@@ -105,30 +105,10 @@ export function withCanonicalDiscriminatedUnionJsonSchema<T extends z.ZodTypeAny
 ): T {
   const advertisedSchema = description ? (schema.describe(description) as T) : schema;
   return withJsonSchemaOverride(advertisedSchema, (jsonSchema) => {
-    if (Array.isArray(jsonSchema.anyOf)) {
-      jsonSchema.oneOf = jsonSchema.anyOf;
-      delete jsonSchema.anyOf;
-    }
     if (description) {
       jsonSchema.description = description;
     }
   });
-}
-
-export function canonicalizeDiscriminatedUnionJsonSchema(value: unknown): void {
-  if (Array.isArray(value)) {
-    value.forEach(canonicalizeDiscriminatedUnionJsonSchema);
-    return;
-  }
-  if (!isJsonObject(value)) {
-    return;
-  }
-
-  if (Array.isArray(value.anyOf) && hasUniqueDiscriminator(value.anyOf)) {
-    value.oneOf = value.anyOf;
-    delete value.anyOf;
-  }
-  Object.values(value).forEach(canonicalizeDiscriminatedUnionJsonSchema);
 }
 
 /**
@@ -253,44 +233,11 @@ function mergeRootAllOf(root: Record<string, unknown>, allOf: unknown[]): void {
   }
 }
 
-function hasUniqueDiscriminator(branches: unknown[]): boolean {
-  if (branches.length < 2 || !branches.every(isJsonObject)) {
-    return false;
-  }
-  const firstProperties = getJsonObject(branches[0].properties);
-  if (!firstProperties) {
-    return false;
-  }
-  return Object.keys(firstProperties).some((key) => hasUniqueConstValues(branches, key));
-}
-
-function hasUniqueConstValues(branches: Record<string, unknown>[], key: string): boolean {
-  if (!branches.every((branch) => getRequiredProperties(branch).includes(key))) {
-    return false;
-  }
-  const values = branches.map((branch) => getPropertyConst(branch, key));
-  if (values.some((entry) => !entry.found)) {
-    return false;
-  }
-  return new Set(values.map((entry) => JSON.stringify(entry.value))).size === branches.length;
-}
-
 function getRequiredProperties(branch: Record<string, unknown>): string[] {
   const required = branch.required;
   return Array.isArray(required) && required.every((value) => typeof value === "string")
     ? required
     : [];
-}
-
-function getPropertyConst(
-  branch: Record<string, unknown>,
-  key: string,
-): { found: boolean; value?: unknown } {
-  const properties = getJsonObject(branch.properties);
-  const property = properties && getJsonObject(properties[key]);
-  return property && Object.hasOwn(property, "const")
-    ? { found: true, value: property.const }
-    : { found: false };
 }
 
 function getJsonObject(value: unknown): Record<string, unknown> | undefined {
@@ -330,7 +277,7 @@ export function isInjectedDeviceIdSchema(zodSchema: object): boolean {
  * an `anyOf` where every branch re-inlines a full object schema — costly in
  * `tools/list`. When a named property matches that pattern (each branch a strict
  * object requiring exactly one key), rewrite it to a single flat object that
- * lists all keys once with `oneOf: [{required:[k]}, ...]` — same accepted shape
+ * lists all keys once with `anyOf: [{required:[k]}, ...]` — same accepted shape
  * and the same "exactly one" hint at roughly half the tokens.
  *
  * Runtime validation is unaffected: this only mutates the advertised JSON schema
@@ -352,7 +299,7 @@ export function compactExclusiveSelectorProperties(
       continue;
     }
     const merged: Record<string, unknown> = {};
-    const oneOf: Array<{ required: string[] }> = [];
+    const anyOf: Array<{ required: string[] }> = [];
     let matchesPattern = true;
     for (const branch of branches) {
       const b = branch as Record<string, any>;
@@ -371,7 +318,7 @@ export function compactExclusiveSelectorProperties(
         break;
       }
       merged[key] = b.properties[key];
-      oneOf.push({ required: [key] });
+      anyOf.push({ required: [key] });
     }
     if (!matchesPattern) {
       continue;
@@ -380,11 +327,11 @@ export function compactExclusiveSelectorProperties(
       type: "object",
       additionalProperties: false,
       properties: merged,
-      oneOf,
     };
     if (typeof prop.description === "string") {
       compact.description = prop.description;
     }
+    compact.anyOf = anyOf;
     props[name] = compact;
   }
 }

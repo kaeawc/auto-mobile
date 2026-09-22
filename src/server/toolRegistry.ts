@@ -54,7 +54,6 @@ import {
   APP_ID_PATTERN,
   applyJsonSchemaOverride,
   applyPostFlattenJsonSchemaOverride,
-  canonicalizeDiscriminatedUnionJsonSchema,
   enforceAnthropicToolSchemaSubset,
   isInjectedDeviceIdSchema,
 } from "./toolSchemaHelpers";
@@ -202,7 +201,6 @@ function toAdvertisedJsonSchema(
       }
     },
   });
-  canonicalizeDiscriminatedUnionJsonSchema(jsonSchema);
   const flattened = flattenTopLevelUnion(jsonSchema);
   // Re-assert any wire contract that must survive union flattening (e.g. the
   // observe join keys required on the successful-observation arm, issue #7018):

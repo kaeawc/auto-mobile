@@ -289,6 +289,73 @@ describe("CtrlProxyManager", function () {
     });
   });
 
+  describe("accessibility service binding health", function () {
+    const serviceComponent = `${AndroidCtrlProxyManager.PACKAGE}/${AndroidCtrlProxyManager.PACKAGE}.CtrlProxy`;
+    const otherService = "com.example.reader/com.example.reader.ReaderService";
+
+    test("reports healthy when CtrlProxy is bound", async function () {
+      fakeAdb.setCommandResponse("shell dumpsys accessibility", {
+        stdout: `Bound services:{{${serviceComponent}}}\nCrashed services:{}`,
+        stderr: "",
+      });
+
+      expect(await accessibilityServiceClient.isAccessibilityServiceHealthy()).toBe(true);
+      expect(await accessibilityServiceClient.rebindIfUnhealthy()).toBe(false);
+      expect(fakeAdb.wasCommandExecuted("settings put secure enabled_accessibility_services")).toBe(
+        false,
+      );
+    });
+
+    test("rebinds a crashed service without removing another enabled service", async function () {
+      fakeAdb.setCommandResponse("shell dumpsys accessibility", {
+        stdout: `Bound services:{}\nCrashed services:{{${serviceComponent}}}`,
+        stderr: "",
+      });
+      fakeAdb.setCommandResponse("shell settings get secure enabled_accessibility_services", {
+        stdout: `${otherService}:${serviceComponent}`,
+        stderr: "",
+      });
+
+      expect(await accessibilityServiceClient.isAccessibilityServiceHealthy()).toBe(false);
+      expect(await accessibilityServiceClient.rebindIfUnhealthy()).toBe(true);
+      expect(
+        fakeAdb
+          .getExecutedCommands()
+          .filter((command) =>
+            command.startsWith("shell settings put secure enabled_accessibility_services"),
+          ),
+      ).toEqual([
+        `shell settings put secure enabled_accessibility_services "${otherService}"`,
+        `shell settings put secure enabled_accessibility_services "${otherService}:${serviceComponent}"`,
+      ]);
+    });
+
+    test("preserves every co-listed accessibility service while re-toggling CtrlProxy", async function () {
+      const secondService = "com.example.screenreader/com.example.screenreader.ScreenReader";
+      fakeAdb.setCommandResponse("shell dumpsys accessibility", {
+        stdout: "Bound services:{}\nCrashed services:{}",
+        stderr: "",
+      });
+      fakeAdb.setCommandResponse("shell settings get secure enabled_accessibility_services", {
+        stdout: `${otherService}:${serviceComponent}:${secondService}`,
+        stderr: "",
+      });
+
+      await accessibilityServiceClient.rebindIfUnhealthy();
+
+      expect(
+        fakeAdb
+          .getExecutedCommands()
+          .filter((command) =>
+            command.startsWith("shell settings put secure enabled_accessibility_services"),
+          ),
+      ).toEqual([
+        `shell settings put secure enabled_accessibility_services "${otherService}:${secondService}"`,
+        `shell settings put secure enabled_accessibility_services "${otherService}:${secondService}:${serviceComponent}"`,
+      ]);
+    });
+  });
+
   describe("isAvailable", function () {
     test("should return true when service is both installed and enabled", async function () {
       fakeAdb.setCommandResponse(

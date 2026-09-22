@@ -45,6 +45,15 @@ class CheckGithubMarkdownTest(unittest.TestCase):
         self.assertFlags("[Link](https://example.com){ target=_blank } trailing prose\n", "attr list")
         self.assertFlags("## Heading {: #custom-id }\n", "attr list")
 
+    def test_flags_metadata_header(self):
+        self.assertFlags("Title: Internal title\nAuthor: Me\n\nBody.\n", "metadata header")
+
+    def test_flags_toc_marker(self):
+        self.assertFlags("# Page\n\n[TOC]\n\n## Section\n", "[TOC] marker")
+
+    def test_headings_alone_do_not_trip_toc_check(self):
+        self.assertEqual(self.check("# Page\n\n## Section\n\nText.\n"), [])
+
     def test_flags_inline_hilite(self):
         self.assertFlags('Run `#!python print("hi")` first.\n', "inline highlighting")
 

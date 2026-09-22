@@ -33,6 +33,7 @@ MKDOCS_ONLY = {
     "pymdownx.tilde": "~~delete~~ / ~subscript~ (use <sub>)",
     "pymdownx.mark": "==mark== (use <mark>)",
     "def_list": "definition list (use a table or bullets)",
+    "meta": "Key: value metadata header (GitHub shows it as text; remove it)",
 }
 
 
@@ -69,6 +70,12 @@ def check_text(text, names, configs):
         for ext in names
         if ext in MKDOCS_ONLY and render(text, [n for n in names if n != ext], configs) != full
     ]
+    # Removing `toc` would also drop heading permalinks, so disable only its
+    # marker ([TOC] by default) and compare.
+    if "toc" in names:
+        no_marker = {**configs, "toc": {**configs.get("toc", {}), "marker": ""}}
+        if render(text, names, no_marker) != full:
+            reasons.append("[TOC] marker (GitHub shows it as text; remove it)")
     finder = _RawTagFinder()
     finder.feed(full)
     reasons += [f"inline <{tag}> (move to docs/assets via mkdocs.yml)" for tag in sorted(finder.found)]

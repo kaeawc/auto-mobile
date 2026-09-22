@@ -41,19 +41,37 @@ violations="$(
       }
       return out
     }
-    FNR == 1 { fence = "" }
-    # A fence closes only on the same character, at least as long as its
-    # opener, with nothing after it (CommonMark), so a shorter fence line
-    # inside a longer fence is content, not a close. Fences are indented at
-    # most three spaces; four or more is an indented code line, not a fence.
-    match($0, /^ ? ? ?(```+|~~~+)/) {
-      run = substr($0, RSTART, RLENGTH)
-      sub(/^ */, "", run)
-      rest = substr($0, RSTART + RLENGTH)
-      if (fence == "") { fence = run; next }
-      if (substr(run, 1, 1) == substr(fence, 1, 1) && length(run) >= length(fence) && rest ~ /^[[:space:]]*$/) { fence = ""; next }
+    FNR == 1 { fence = ""; depth = 0 }
+    # Fences follow CommonMark:
+    # - a fence may be indented at most three spaces past the content column
+    #   of the enclosing list item (0 at top level); deeper is an indented
+    #   code line, not a fence;
+    # - a backtick opener whose info string contains a backtick is not a fence;
+    # - a fence closes only on the same character, at least as long as its
+    #   opener, with nothing after it, so a shorter fence line inside a longer
+    #   fence is content, not a close.
+    match($0, /^ *(```+|~~~+)/) {
+      indent = match($0, /[^ ]/) - 1
+      run = substr($0, indent + 1)
+      match(run, /^(`+|~+)/)
+      rest = substr(run, RLENGTH + 1)
+      run = substr(run, 1, RLENGTH)
+      base = depth > 0 ? stack[depth] : 0
+      if (fence == "") {
+        if (indent - base <= 3 && !(run ~ /^`/ && rest ~ /`/)) { fence = run; next }
+      } else if (substr(run, 1, 1) == substr(fence, 1, 1) && length(run) >= length(fence) && rest ~ /^[[:space:]]*$/) {
+        fence = ""; next
+      }
     }
     fence != "" { next }
+    # Track list-item content columns so nested fences are measured relative
+    # to their container. A non-blank line left of a content column closes
+    # that list item.
+    /[^[:space:]]/ {
+      indent = match($0, /[^ ]/) - 1
+      while (depth > 0 && indent < stack[depth]) depth--
+      if (match($0, /^ *([-*+]|[0-9]+[.)]) +/)) stack[++depth] = RLENGTH
+    }
     {
       line = strip_code_spans($0)
       reason = ""
@@ -61,7 +79,7 @@ violations="$(
       else if (line ~ /^[[:space:]]*!!! /) reason = "MkDocs admonition (use > [!NOTE])"
       else if (line ~ /^[[:space:]]*\?\?\?\+? /) reason = "MkDocs collapsible (use <details markdown=\"1\">)"
       else if (tolower(line) ~ /<(style|script)[[:space:]>]/) reason = "inline <style>/<script> (move to docs/assets)"
-      else if (line ~ /\{:? ?([.#][A-Za-z]|[A-Za-z_][A-Za-z0-9_-]*=)[^}]*\}[[:space:]]*$/) reason = "attr_list { .class } / { key=value } (use HTML attributes)"
+      else if (line ~ /\{:? ?([.#][A-Za-z]|[A-Za-z_][A-Za-z0-9_-]*=)[^}]*\}[[:space:]]*$/ || line ~ /[])*_]\{:? ?([.#][A-Za-z]|[A-Za-z_][A-Za-z0-9_-]*=)[^}]*\}/) reason = "attr_list { .class } / { key=value } (use HTML attributes)"
       else if (line ~ /--8<--/) reason = "snippet include"
       if (reason != "") printf "%s:%d: %s\n", FILENAME, FNR, reason
     }

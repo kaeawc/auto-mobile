@@ -37,12 +37,14 @@ def convert(markdown: str) -> str:
         if fence_match:
             run, rest = fence_match.groups()
             if not fence:
-                fence = run
+                # A backtick info string may not contain a backtick.
+                if not (run[0] == "`" and "`" in rest):
+                    fence = run
             # Close only on the opener's character, at least as long, with
             # nothing after it (CommonMark); shorter fences inside are content.
             elif run[0] == fence[0] and len(run) >= len(fence) and not rest.strip():
                 fence = ""
-        match = None if fence or fence_match else _ALERT.match(line)
+        match = None if fence else _ALERT.match(line)
         if not match:
             out.append(line)
             i += 1

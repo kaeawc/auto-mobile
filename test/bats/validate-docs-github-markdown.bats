@@ -129,3 +129,31 @@ EOF2
   [ "$status" -eq 1 ]
   [[ "$output" == *"unmatched.md:1: MkDocs admonition"* ]]
 }
+
+@test "a fence nested in a list item is measured from the item's content column" {
+  printf '%s\n' '- Example:' '' '    ```markdown' '    !!! note "Literal example"' '    ```' '' '1. Step' '' '      ```' '      === "Tab"' '      ```' >"$DOCS_DIR/list.md"
+  run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+}
+
+@test "a list-nested fence still cannot sit four columns past the item content" {
+  printf '%s\n' '- Item' '' '      ```' '' '!!! note "Real violation"' >"$DOCS_DIR/list-deep.md"
+  run bash "$SCRIPT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"list-deep.md:5: MkDocs admonition"* ]]
+}
+
+@test "a backtick opener with a backtick in its info string is not a fence" {
+  printf '%s\n' '```foo`bar' '!!! note "Real violation"' >"$DOCS_DIR/info.md"
+  run bash "$SCRIPT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"info.md:2: MkDocs admonition"* ]]
+}
+
+@test "flags inline attr lists followed by more text" {
+  printf '%s\n' '[Link](https://example.com){ target=_blank } trailing prose' '**Bold**{ .x } and more' >"$DOCS_DIR/inline-attrs.md"
+  run bash "$SCRIPT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"inline-attrs.md:1: attr_list"* ]]
+  [[ "$output" == *"inline-attrs.md:2: attr_list"* ]]
+}

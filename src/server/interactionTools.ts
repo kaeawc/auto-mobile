@@ -18,6 +18,7 @@ import { Rotate } from "../features/action/Rotate";
 import { OpenURL } from "../features/action/OpenURL";
 import { Clipboard } from "../features/action/Clipboard";
 import { Keyboard } from "../features/action/Keyboard";
+import { KEYBOARD_PROFILE_IDS } from "../features/action/keyboardProfiles";
 import {
   SEND_KEYS_OPERATIONS,
   SEND_KEYS_SEMANTIC_KEYS,
@@ -173,13 +174,43 @@ export const shakeSchema = addDeviceTargetingToSchema(
 
 export const keyboardSchema = addDeviceTargetingToSchema(
   z.object({
-    action: z.enum(["open", "close", "detect"]).describe("Keyboard action"),
+    action: z.enum(["open", "close", "detect", "setProfile"]).describe("Keyboard action"),
+    profile: z
+      .enum(KEYBOARD_PROFILE_IDS)
+      .optional()
+      .describe("Android keyboard behavior profile; required for setProfile"),
     // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
     // not required — a device handle from getAndroid/getApple is sufficient on
     // its own.
     platform: platformSchema.optional(),
   }),
 );
+
+export async function setKeyboardProfileForTool(
+  device: BootedDevice,
+  profile: KeyboardArgs["profile"],
+  client?: Pick<AndroidCtrlProxyClient, "supportsCommand" | "setKeyboardProfile">,
+): Promise<{ activeProfileId?: string; previousProfileId?: string }> {
+  if (!profile) {
+    throw new ActionableError(
+      `keyboard setProfile requires profile: ${KEYBOARD_PROFILE_IDS.join(", ")}.`,
+    );
+  }
+  if (device.platform !== "android") {
+    throw new ActionableError("Keyboard profiles are Android-only; select an Android device.");
+  }
+  const profileClient = client ?? AndroidCtrlProxyClient.getInstance(device);
+  if (!(await profileClient.supportsCommand("request_set_keyboard_profile"))) {
+    throw new ActionableError(
+      "The installed control-proxy build does not support keyboard profiles; update/re-cut the APK.",
+    );
+  }
+  const result = await profileClient.setKeyboardProfile(profile);
+  if (!result.success) {
+    throw new ActionableError(result.error ?? "Failed to set keyboard profile.");
+  }
+  return { activeProfileId: result.activeProfileId, previousProfileId: result.previousProfileId };
+}
 
 const tapOnSelectorSchema = z
   .union([
@@ -716,8 +747,21 @@ const sendKeysCommandSchema = withCanonicalDiscriminatedUnionJsonSchema(
           .describe(
             "Android delivery mode. ime is an opt-in companion input method for WYSIWYG/markdown rich-text editors. iOS accepts these values for cross-platform plans and reports xcuiTypeText as the resolved mode",
           ),
+        keyboardProfile: z
+          .enum(KEYBOARD_PROFILE_IDS)
+          .optional()
+          .describe("Android keyboard behavior profile for this IME type call; restored afterward"),
       })
-      .strict(),
+      .strict()
+      .superRefine((command, context) => {
+        if (command.keyboardProfile && command.mode !== "auto" && command.mode !== "ime") {
+          context.addIssue({
+            code: "custom",
+            path: ["mode"],
+            message: "keyboardProfile requires mode: ime or auto",
+          });
+        }
+      }),
     z
       .object({
         action: z.literal("key"),
@@ -2408,6 +2452,9 @@ export function registerInteractionTools() {
   // Keyboard handler
   const keyboardHandler = async (device: BootedDevice, args: KeyboardArgs) => {
     try {
+      if (args.action === "setProfile") {
+        return createJSONToolResponse(await setKeyboardProfileForTool(device, args.profile));
+      }
       const keyboard = new Keyboard(device);
       const result = await keyboard.execute(args.action);
 
@@ -2582,7 +2629,7 @@ export function registerInteractionTools() {
 
   ToolRegistry.registerDeviceAware(
     "keyboard",
-    "Open, close, or detect the on-screen keyboard",
+    "Open, close, detect, or switch the on-screen keyboard profile",
     keyboardSchema,
     keyboardHandler,
     { defaultEnabled: true },

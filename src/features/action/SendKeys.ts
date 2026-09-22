@@ -12,6 +12,7 @@ import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { clearTextWithKeyEvents, getFocusedTextLength, hasFocusedTextInput } from "./ClearText";
 import { InputKey, type InputKeyModifier, type InputKeyName } from "./InputKey";
+import type { KeyboardProfileId } from "./keyboardProfiles";
 import { TapOnElement } from "./TapOnElement";
 import {
   ANDROID_KEYCOMBINATION_MIN_API_LEVEL,
@@ -59,6 +60,7 @@ export interface SendKeysTypeCommand {
   text: string;
   operation?: SendKeysOperation;
   mode?: SendKeysTypingMode;
+  keyboardProfile?: KeyboardProfileId;
 }
 
 export interface SendKeysKeyCommand {
@@ -145,6 +147,10 @@ export interface SendKeysTextClient {
   clear(): Promise<TextActionResult>;
   ime(action: ImeAction): Promise<TextActionResult>;
   supportsImeCommit(): Promise<boolean>;
+  supportsKeyboardProfiles(): Promise<boolean>;
+  setKeyboardProfile(
+    id: string,
+  ): Promise<{ success: boolean; previousProfileId?: string; error?: string }>;
   commitViaIme(text: string, priorImeId: string | null): Promise<TextActionResult>;
 }
 
@@ -189,7 +195,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     signal?.throwIfAborted();
     const operation = command.operation ?? "insert";
     const requestedMode = command.mode ?? "auto";
-    const resolvedMode = this.resolveMode(operation, requestedMode);
+    const resolvedMode = this.resolveMode(operation, requestedMode, command.keyboardProfile);
     const baseResult = {
       index: -1,
       action: "type" as const,
@@ -200,10 +206,20 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     };
 
     try {
+      const profileError = this.validateKeyboardProfile(command);
+      if (profileError) {
+        return { ...baseResult, success: false, error: profileError };
+      }
       const result: TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode } =
         this.device.platform === "ios"
           ? await this.executeIosType(command.text, operation, signal)
-          : await this.executeAndroidType(command.text, operation, resolvedMode, signal);
+          : await this.executeAndroidType(
+              command.text,
+              operation,
+              resolvedMode,
+              command.keyboardProfile,
+              signal,
+            );
       return {
         ...baseResult,
         success: result.success,
@@ -216,6 +232,19 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       logger.warn("[SendKeys] Text command failed", error);
       return { ...baseResult, success: false, error: errorMessage(error) };
     }
+  }
+
+  private validateKeyboardProfile(command: SendKeysTypeCommand): string | null {
+    if (!command.keyboardProfile) {
+      return null;
+    }
+    if (command.mode && command.mode !== "auto" && command.mode !== "ime") {
+      return "keyboardProfile requires mode: ime (or auto).";
+    }
+    if (this.device.platform !== "android") {
+      return "keyboardProfile is Android-only; select an Android device.";
+    }
+    return null;
   }
 
   async key(command: SendKeysKeyCommand, signal?: AbortSignal): Promise<SendKeysCommandResult> {
@@ -265,9 +294,13 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   private resolveMode(
     operation: SendKeysOperation,
     requestedMode: SendKeysTypingMode,
+    keyboardProfile?: KeyboardProfileId,
   ): AndroidSendKeysTypingMode {
     if (requestedMode !== "auto") {
       return requestedMode;
+    }
+    if (keyboardProfile) {
+      return "ime";
     }
     return operation === "insert" ? "eventAll" : "a11y";
   }
@@ -303,6 +336,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     text: string,
     operation: SendKeysOperation,
     mode: AndroidSendKeysTypingMode,
+    keyboardProfile: KeyboardProfileId | undefined,
     signal?: AbortSignal,
   ): Promise<TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode }> {
     switch (mode) {
@@ -317,13 +351,14 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       case "eventOnly":
         return this.executeAndroidEventOnly(text, operation, signal);
       case "ime":
-        return this.executeAndroidImeCommit(text, operation, signal);
+        return this.executeAndroidImeCommit(text, operation, keyboardProfile, signal);
     }
   }
 
   private async executeAndroidImeCommit(
     text: string,
     operation: SendKeysOperation,
+    keyboardProfile: KeyboardProfileId | undefined,
     signal?: AbortSignal,
   ): Promise<TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode }> {
     signal?.throwIfAborted();
@@ -334,14 +369,26 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       return { success: false, error };
     }
 
+    const profileSupport = await this.checkKeyboardProfileSupport(keyboardProfile);
+    if (!profileSupport.success) {
+      return { ...profileSupport, resolvedMode: "ime" };
+    }
+
     const priorResult = await this.readDefaultIme();
     if (!priorResult.success) {
       return priorResult;
     }
     const prior = priorResult.imeId;
 
+    const profileResult = await this.setRequestedKeyboardProfile(keyboardProfile);
+    if (!profileResult.success) {
+      return { ...profileResult, resolvedMode: "ime" };
+    }
+    const previousProfileId = profileResult.previousProfileId;
+
     if (!(await this.activateCommitIme())) {
       await this.restoreIme(prior);
+      await this.restoreKeyboardProfileIfNeeded(keyboardProfile, previousProfileId);
       return { success: false, error: "Failed to activate the IME for text commit." };
     }
 
@@ -355,7 +402,54 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       const result = await this.textClient.commitViaIme(text, prior);
       return { ...result, resolvedMode: "ime" };
     } finally {
+      await this.restoreKeyboardProfileIfNeeded(keyboardProfile, previousProfileId);
       await this.restoreIme(prior);
+    }
+  }
+
+  private async checkKeyboardProfileSupport(
+    profile?: KeyboardProfileId,
+  ): Promise<TextActionResult> {
+    if (!profile || (await this.textClient.supportsKeyboardProfiles())) {
+      return { success: true };
+    }
+    const error =
+      "The installed control-proxy build does not support keyboard profiles; update/re-cut the APK.";
+    logger.warn(`[SendKeys] ${error}`);
+    return { success: false, error };
+  }
+
+  private async setRequestedKeyboardProfile(
+    profile?: KeyboardProfileId,
+  ): Promise<{ success: boolean; previousProfileId?: string; error?: string }> {
+    if (!profile) {
+      return { success: true };
+    }
+    const result = await this.textClient.setKeyboardProfile(profile);
+    return result.success
+      ? result
+      : { success: false, error: result.error ?? "Failed to set keyboard profile." };
+  }
+
+  private async restoreKeyboardProfileIfNeeded(
+    requested?: KeyboardProfileId,
+    previous?: string,
+  ): Promise<void> {
+    if (requested && previous && previous !== requested) {
+      await this.restoreKeyboardProfile(previous);
+    }
+  }
+
+  private async restoreKeyboardProfile(profileId: string): Promise<void> {
+    try {
+      const result = await this.textClient.setKeyboardProfile(profileId);
+      if (!result.success) {
+        logger.warn(
+          `[SendKeys] Failed to restore keyboard profile: ${result.error ?? "unknown error"}`,
+        );
+      }
+    } catch (error) {
+      logger.warn("[SendKeys] Failed to restore keyboard profile", error);
     }
   }
 
@@ -702,6 +796,9 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         clear: async () => client.requestClearText(),
         ime: async (action) => client.requestImeAction(action),
         supportsImeCommit: async () => client.supportsCommand("request_commit_text"),
+        supportsKeyboardProfiles: async () =>
+          client.supportsCommand("request_set_keyboard_profile"),
+        setKeyboardProfile: async (id) => client.setKeyboardProfile(id),
         commitViaIme: async (text, priorImeId) => {
           const result = await client.commitViaIme(text, priorImeId ?? undefined);
           return {
@@ -722,6 +819,11 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       clear: async () => client.requestClearText(),
       ime: async (action) => client.requestImeAction(action),
       supportsImeCommit: async () => false,
+      supportsKeyboardProfiles: async () => false,
+      setKeyboardProfile: async () => ({
+        success: false,
+        error: "Keyboard profiles are Android-only",
+      }),
       commitViaIme: async () => ({ success: false, error: "IME commit is Android-only" }),
     };
   }

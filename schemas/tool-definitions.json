@@ -2616,7 +2616,7 @@
   },
   {
     "name": "keyboard",
-    "description": "Open, close, or detect the on-screen keyboard",
+    "description": "Open, close, detect, or switch the on-screen keyboard profile",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -2624,7 +2624,12 @@
         "action": {
           "description": "Keyboard action",
           "type": "string",
-          "enum": ["open", "close", "detect"]
+          "enum": ["open", "close", "detect", "setProfile"]
+        },
+        "profile": {
+          "description": "Android keyboard behavior profile; required for setProfile",
+          "type": "string",
+          "enum": ["direct", "gboard", "samsung"]
         },
         "platform": {
           "type": "string",
@@ -10020,6 +10025,11 @@
                     "default": "auto",
                     "type": "string",
                     "enum": ["auto", "a11y", "eventLast", "eventAll", "eventOnly", "ime"]
+                  },
+                  "keyboardProfile": {
+                    "description": "Android keyboard behavior profile for this IME type call; restored afterward",
+                    "type": "string",
+                    "enum": ["direct", "gboard", "samsung"]
                   }
                 },
                 "required": ["action", "text"],

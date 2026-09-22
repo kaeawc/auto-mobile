@@ -131,4 +131,56 @@ describe("Android CtrlProxyText", () => {
       await client.close();
     }
   });
+
+  test("resolves setKeyboardProfile from a set_keyboard_profile_result frame", async () => {
+    const timer = new FakeTimer();
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setCommandResponse("forward", { stdout: "8765", stderr: "" });
+    fakeAdb.setScreenState(true);
+    const device: BootedDevice = {
+      deviceId: "test-device-profile",
+      platform: "android",
+      isEmulator: true,
+      name: "Test Device",
+    };
+    let socket: CapturingWebSocket | null = null;
+    const client = AndroidCtrlProxyClient.createForTesting(
+      device,
+      fakeAdb,
+      (url: string) => {
+        socket = new CapturingWebSocket(url, "none", 0, timer);
+        return socket;
+      },
+      timer,
+    );
+    try {
+      expect(await client.ensureConnected()).toBe(true);
+      if (!socket) {
+        throw new Error("Expected the WebSocket factory to create a socket");
+      }
+      await waitForSocketOpen(socket);
+      const resultPromise = client.setKeyboardProfile("samsung");
+      const request = await waitForRequest(socket, "request_set_keyboard_profile");
+      expect(request).toMatchObject({ profileId: "samsung" });
+      expect(request.requestId).toStartWith("setKeyboardProfile_");
+      socket.simulateMessage(
+        JSON.stringify({
+          type: "set_keyboard_profile_result",
+          timestamp: 1,
+          requestId: request.requestId,
+          success: true,
+          activeProfileId: "samsung",
+          previousProfileId: "direct",
+        }),
+      );
+      expect(await resultPromise).toEqual({
+        success: true,
+        activeProfileId: "samsung",
+        previousProfileId: "direct",
+        error: undefined,
+      });
+    } finally {
+      await client.close();
+    }
+  });
 });

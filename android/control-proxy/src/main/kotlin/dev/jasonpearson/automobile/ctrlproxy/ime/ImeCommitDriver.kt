@@ -9,6 +9,12 @@ interface ImeCommitSink {
   /** Commit a single char to the InputConnection; false if the connection is gone. */
   fun commitChar(ch: CharSequence): Boolean
 
+  /**
+   * Finalize any composing span the active typing profile left open (composing profiles keep the
+   * last word composing until a separator); false if the connection is gone.
+   */
+  fun finishComposing(): Boolean
+
   /** Switch the system IME back to the given id (InputMethodService.switchInputMethod). */
   fun switchToIme(imeId: String)
 }
@@ -42,6 +48,11 @@ class ImeCommitDriver(private val sink: ImeCommitSink) {
       if (!sink.commitChar(ch.toString())) {
         return failure("Input connection lost during commit")
       }
+    }
+    // Without this the trailing word stays uncommitted whenever no IME switch follows (the user
+    // already selected this keyboard), and editors that react to commits never see it.
+    if (!sink.finishComposing()) {
+      return failure("Input connection lost while finishing composition")
     }
     return ImeCommitResult(success = true, error = null)
   }

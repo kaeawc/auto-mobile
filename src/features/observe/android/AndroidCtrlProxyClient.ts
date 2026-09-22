@@ -327,6 +327,10 @@ interface WsSetTextResultMessage extends WsRequestBase {
   type: "set_text_result";
 }
 
+interface WsCommitTextResultMessage extends WsRequestBase {
+  type: "commit_text_result";
+}
+
 interface WsInsertTextResultMessage extends WsRequestBase {
   type: "insert_text_result";
   partialApplication?: boolean;
@@ -796,6 +800,7 @@ type WebSocketMessage =
   | WsDragResultMessage
   | WsPinchResultMessage
   | WsSetTextResultMessage
+  | WsCommitTextResultMessage
   | WsInsertTextResultMessage
   | WsImeActionResultMessage
   | WsSelectAllResultMessage
@@ -3928,6 +3933,15 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
       // Handle set text result
       if (message.type === "set_text_result" && message.requestId) {
+        this.requestManager.resolve<A11ySetTextResult>(message.requestId, {
+          success: message.success,
+          totalTimeMs: message.totalTimeMs,
+          error: message.error,
+          perfTiming: message.perfTiming,
+        });
+      }
+
+      if (message.type === "commit_text_result" && message.requestId) {
         this.requestManager.resolve<A11ySetTextResult>(message.requestId, {
           success: message.success,
           totalTimeMs: message.totalTimeMs,

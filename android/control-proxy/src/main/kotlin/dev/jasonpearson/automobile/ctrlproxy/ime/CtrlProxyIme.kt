@@ -59,7 +59,7 @@ class CtrlProxyIme : InputMethodService() {
     deadlineMs: Long,
     onResult: (ImeCommitResult) -> Unit,
   ) {
-    if (currentInputConnection != null) {
+    if (currentInputStarted && currentInputConnection != null) {
       onResult(driver.commit(text, priorImeId))
       scheduleIdleRestore(driver, priorImeId)
       return
@@ -82,7 +82,8 @@ class CtrlProxyIme : InputMethodService() {
 
   private fun createSink(): ImeCommitSink =
     object : ImeCommitSink {
-      override fun editorInputType(): Int? = currentInputEditorInfo?.inputType
+      override fun editorInputType(): Int? =
+        if (currentInputStarted) currentInputEditorInfo?.inputType else null
 
       override fun commitChar(ch: CharSequence): Boolean =
         currentInputConnection?.commitText(ch, NEW_CURSOR_POSITION) ?: false

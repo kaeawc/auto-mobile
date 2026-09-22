@@ -4,6 +4,12 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { pruneLogFiles } from "../../src/utils/logPruner";
 
+// "Every file is already stale by mtime." Not -1: the pruner keeps a file while
+// `now - mtimeMs <= abandonedMaxAgeMs`, and on Windows Date.now()'s coarse
+// (~15.6ms) tick can trail a just-written file's precise mtime by more than 1ms,
+// so -1 intermittently retained the file and the sweep never unlinked it.
+const STALE_IMMEDIATELY = Number.NEGATIVE_INFINITY;
+
 async function withTempLogDir(fn: (dir: string) => Promise<void>): Promise<void> {
   const dir = await mkdtemp(path.join(tmpdir(), "logpruner-test-"));
   try {
@@ -93,7 +99,7 @@ describe("logPruner isOwnedBy (via pruneLogFiles)", () => {
         dir,
         ownPrefix: "daemon",
         maxOwnFiles: 10,
-        abandonedMaxAgeMs: -1, // treat every file as already stale
+        abandonedMaxAgeMs: STALE_IMMEDIATELY, // treat every file as already stale
         isProcessAlive: () => false, // owner pid 4242 has exited
       });
 
@@ -112,7 +118,7 @@ describe("logPruner isOwnedBy (via pruneLogFiles)", () => {
         dir,
         ownPrefix: "daemon",
         maxOwnFiles: 10,
-        abandonedMaxAgeMs: -1,
+        abandonedMaxAgeMs: STALE_IMMEDIATELY,
         isProcessAlive: () => true, // owner pid 9999 still running
       });
 
@@ -135,7 +141,7 @@ describe("logPruner daemon-launch inherited-fd guard (issue #6194)", () => {
         dir,
         ownPrefix: "stdio-111",
         maxOwnFiles: 10,
-        abandonedMaxAgeMs: -1, // every file is already stale by mtime
+        abandonedMaxAgeMs: STALE_IMMEDIATELY, // every file is already stale by mtime
         isProcessAlive: () => false, // spawning manager 4242 has exited
         isDaemonRunning: () => true, // ...but the daemon it spawned is still alive
       });
@@ -185,7 +191,7 @@ describe("logPruner daemon-launch inherited-fd guard (issue #6194)", () => {
         dir,
         ownPrefix: "stdio-111",
         maxOwnFiles: 10,
-        abandonedMaxAgeMs: -1,
+        abandonedMaxAgeMs: STALE_IMMEDIATELY,
         isProcessAlive: () => false, // both owners exited
         isDaemonRunning: () => true, // guards only daemon-launch logs
       });
@@ -216,7 +222,7 @@ describe("logPruner cross-namespace launch-log retention (issue #6194)", () => {
         dir,
         ownPrefix: "stdio-111", // pruning from namespace B, no daemon of its own
         maxOwnFiles: 10,
-        abandonedMaxAgeMs: -1, // every file already stale by mtime
+        abandonedMaxAgeMs: STALE_IMMEDIATELY, // every file already stale by mtime
         // The spawning manager 4242 is dead, but daemon 5000 (namespace A) is alive.
         isProcessAlive: (pid) => pid === daemonPidA,
         daemonPidFiles: () => ({ pidFiles: [pidFileB, pidFileA], uncertain: false }),
@@ -242,7 +248,7 @@ describe("logPruner cross-namespace launch-log retention (issue #6194)", () => {
         dir,
         ownPrefix: "stdio-111",
         maxOwnFiles: 10,
-        abandonedMaxAgeMs: -1,
+        abandonedMaxAgeMs: STALE_IMMEDIATELY,
         isProcessAlive: (pid) => pid === 5001,
         daemonPidFiles: () => ({ pidFiles: [pidFileA, pidFileB], uncertain: false }),
         readDaemonOwner: (pidFile) => ({
@@ -264,7 +270,7 @@ describe("logPruner cross-namespace launch-log retention (issue #6194)", () => {
         dir,
         ownPrefix: "stdio-111",
         maxOwnFiles: 10,
-        abandonedMaxAgeMs: -1,
+        abandonedMaxAgeMs: STALE_IMMEDIATELY,
         isProcessAlive: () => false, // manager AND every namespace's daemon dead
         daemonPidFiles: () => ({ pidFiles: [pidFileB, pidFileA], uncertain: false }),
         readDaemonOwner: (p) =>
@@ -290,7 +296,7 @@ describe("logPruner cross-namespace launch-log retention (issue #6194)", () => {
         dir,
         ownPrefix: "stdio-111",
         maxOwnFiles: 10,
-        abandonedMaxAgeMs: -1,
+        abandonedMaxAgeMs: STALE_IMMEDIATELY,
         isProcessAlive: (pid) => pid === daemonPidA, // only ns A's daemon alive
         daemonPidFiles: () => ({ pidFiles: [pidFileB, pidFileA], uncertain: false }),
         readDaemonOwner: (p) =>
@@ -315,7 +321,7 @@ describe("logPruner cross-namespace launch-log retention (issue #6194)", () => {
         dir,
         ownPrefix: "stdio-111",
         maxOwnFiles: 10,
-        abandonedMaxAgeMs: -1,
+        abandonedMaxAgeMs: STALE_IMMEDIATELY,
         isProcessAlive: () => false,
         daemonPidFiles: () => ({ pidFiles: [pidFileA], uncertain: false }),
         readDaemonOwner: () => {
@@ -346,7 +352,7 @@ describe("logPruner enumeration-uncertainty retention (issue #6194)", () => {
         dir,
         ownPrefix: "stdio-111",
         maxOwnFiles: 10,
-        abandonedMaxAgeMs: -1,
+        abandonedMaxAgeMs: STALE_IMMEDIATELY,
         isProcessAlive: () => false, // every pid we can see is dead
         daemonPidFiles: () => ({ pidFiles: [ownPidFile], uncertain: true }),
         readDaemonOwner: () => undefined, // our own namespace records no live daemon
@@ -367,7 +373,7 @@ describe("logPruner enumeration-uncertainty retention (issue #6194)", () => {
         dir,
         ownPrefix: "stdio-111",
         maxOwnFiles: 10,
-        abandonedMaxAgeMs: -1,
+        abandonedMaxAgeMs: STALE_IMMEDIATELY,
         // File timestamp granularity on Windows can place a just-created file
         // slightly after Date.now(); use an explicit future sweep clock so this
         // test exercises its ownership verdict rather than filesystem timing.
@@ -393,7 +399,7 @@ describe("logPruner enumeration-uncertainty retention (issue #6194)", () => {
         dir,
         ownPrefix: "stdio-111",
         maxOwnFiles: 10,
-        abandonedMaxAgeMs: -1,
+        abandonedMaxAgeMs: STALE_IMMEDIATELY,
         // See the matching dead-owner test above: avoid depending on a fresh
         // Windows file's timestamp being earlier than the test clock.
         now: Date.now() + 60_000,
@@ -421,7 +427,7 @@ describe("logPruner enumeration-uncertainty retention (issue #6194)", () => {
         dir,
         ownPrefix: "stdio-111",
         maxOwnFiles: 10,
-        abandonedMaxAgeMs: -1,
+        abandonedMaxAgeMs: STALE_IMMEDIATELY,
         // A fresh Windows mtime can be ahead of Date.now(), which would skip
         // the intentional -1ms stale-file path before unlink is exercised.
         now: mtimeMs,
@@ -448,7 +454,7 @@ describe("logPruner enumeration-uncertainty retention (issue #6194)", () => {
         dir,
         ownPrefix: "stdio-111",
         maxOwnFiles: 10,
-        abandonedMaxAgeMs: -1,
+        abandonedMaxAgeMs: STALE_IMMEDIATELY,
         isProcessAlive: (pid) => pid === 5000,
         daemonPidFiles: () => ({ pidFiles: [ownPidFile], uncertain: false }),
         readDaemonOwner: () => ({ pid: 5000, launchLogPath: path.join(dir, liveOwnerLog) }),
@@ -469,7 +475,7 @@ describe("logPruner enumeration-uncertainty retention (issue #6194)", () => {
         dir,
         ownPrefix: "stdio-111",
         maxOwnFiles: 10,
-        abandonedMaxAgeMs: -1,
+        abandonedMaxAgeMs: STALE_IMMEDIATELY,
         isProcessAlive: () => false,
         daemonPidFiles: () => ({ pidFiles: [ownPidFile], uncertain: false }),
         readDaemonOwner: () => ({ pid: 5000, launchLogPath: undefined }),
@@ -496,7 +502,7 @@ describe("logPruner daemon-discovery caching per sweep (issue #6194)", () => {
         dir,
         ownPrefix: "stdio-111",
         maxOwnFiles: 10,
-        abandonedMaxAgeMs: -1,
+        abandonedMaxAgeMs: STALE_IMMEDIATELY,
         // Windows file mtimes can be ahead of Date.now(); age is not under test.
         now: Date.now() + 60_000,
         isProcessAlive: () => false, // every spawning manager AND discovered pid is dead
@@ -534,7 +540,7 @@ describe("logPruner daemon-discovery caching per sweep (issue #6194)", () => {
         dir,
         ownPrefix: "stdio-111",
         maxOwnFiles: 10,
-        abandonedMaxAgeMs: -1,
+        abandonedMaxAgeMs: STALE_IMMEDIATELY,
         isProcessAlive: () => false,
         daemonPidFiles: () => {
           enumerateCalls += 1;
@@ -564,7 +570,7 @@ describe("logPruner transient unlink failures (Windows EBUSY/EPERM)", () => {
   const deadNamespace = {
     ownPrefix: "stdio-111",
     maxOwnFiles: 10,
-    abandonedMaxAgeMs: -1,
+    abandonedMaxAgeMs: STALE_IMMEDIATELY,
     isProcessAlive: () => false,
     daemonPidFiles: () => ({ pidFiles: [], uncertain: false }),
     readDaemonOwner: () => undefined,

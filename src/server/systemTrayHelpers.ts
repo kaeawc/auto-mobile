@@ -2032,6 +2032,10 @@ interface TrayObservedRow {
   // The row's app-supplied text, carried beside the reported fields so
   // correlation never sees SystemUI's chrome (#6875).
   correlationTexts: string[];
+  // The app-label text rendered under the row's structural notification-header
+  // node (distinct from title/body content), used only as fail-closed evidence
+  // for content-less custom layouts; null when no structural header node is present.
+  headerAppLabel: string | null;
   bounds?: Element["bounds"];
 }
 
@@ -2042,10 +2046,13 @@ const readTrayNotifications = (hierarchy: ViewHierarchyResult): TrayObservedRow[
     const label =
       fields.appLabel ||
       (candidate.groupNode ? readTrayNotificationFields(candidate.groupNode).appLabel : null);
+    const headerAppLabel =
+      findHeaderAppLabel(getNotificationGroupHeader(candidate.groupNode ?? candidate.node)) ?? null;
     const nodeId = getNodeProperties(candidate.node)?.["unique-id"];
     notifications.push({
       bounds: candidate.element?.bounds,
       correlationTexts: [...new Set(fields.contentTexts)],
+      headerAppLabel,
       notification: {
         id: typeof nodeId === "string" && nodeId.length > 0 ? nodeId : null,
         appLabel: label,
@@ -2235,13 +2242,14 @@ const attributeTrayRow = (
   }
   const requestedRecords = afterRecords.filter((record) => record.pkg === appId);
   // Some custom RemoteViews (for example Clock timers) expose neither title
-  // nor text extras, but render their app label under an unrecognized view id.
-  // That resolved, unique label is header evidence only when every requested
-  // record is content-less custom layout; ordinary header-less correlation
+  // nor text extras, but render their app label in the row's own notification
+  // header chrome. That structural label cannot be spoofed by same-named
+  // title/body content elsewhere in the row, and is evidence only when every
+  // requested record is content-less custom layout; absent header evidence
   // remains fail-closed for ambiguous or opaque records (#6875).
   if (
     appLabel !== null &&
-    row.correlationTexts.includes(appLabel) &&
+    row.headerAppLabel === appLabel &&
     requestedRecords.length > 0 &&
     requestedRecords.every(isContentlessCustomLayout)
   ) {

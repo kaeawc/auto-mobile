@@ -814,11 +814,13 @@ describe("systemTray list content-less custom layouts", () => {
     trim: () => stdout.trim(),
     includes: (search: string) => stdout.includes(search),
   });
-  // Clock renders its label through a generic custom-layout node, rather than
-  // the app-name resource ids read as `notification.appLabel`.
+  // Clock renders its label under structural notification-header chrome, rather
+  // than the app-name resource ids read as `notification.appLabel`.
   const customLayoutRow = (label: string) =>
     node("com.android.systemui:id/expandableNotificationRow", "", [
-      node("com.android.systemui:id/custom_header", label),
+      node("com.android.systemui:id/notification_header", "", [
+        node("com.android.systemui:id/custom_app_name_text", label),
+      ]),
       node("android:id/chronometer", "00:09:57"),
     ]);
   const dumpsys = (...records: string[]) =>
@@ -847,6 +849,22 @@ describe("systemTray list content-less custom layouts", () => {
 
   test("fails closed when a content-less custom layout lacks rendered app-label evidence", async () => {
     const { adb } = setup([page(customLayoutRow("Timer"))]);
+    const snapshot = execResult(dumpsys(customRecord()));
+    adb.setCommandResponseSequence("dumpsys notification", [snapshot, snapshot]);
+
+    await expect(listSystemTrayNotifications(device, CLOCK, clockLabel, 5000)).rejects.toThrow(
+      `Notification records for ${CLOCK} have no title/text extras to correlate with shade rows (custom layout).`,
+    );
+  });
+
+  test("does not attribute a header-less row to Clock just because its title text says Clock", async () => {
+    // Under the old correlationTexts.includes(appLabel) fallback, this title
+    // would have matched Clock despite belonging to an unspecified other app.
+    const headerlessImpostor = node("com.android.systemui:id/expandableNotificationRow", "", [
+      node("android:id/title", "Clock"),
+      node("android:id/text", "Alarm reminder"),
+    ]);
+    const { adb } = setup([page(headerlessImpostor)]);
     const snapshot = execResult(dumpsys(customRecord()));
     adb.setCommandResponseSequence("dumpsys notification", [snapshot, snapshot]);
 

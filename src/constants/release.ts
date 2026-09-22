@@ -65,6 +65,24 @@ export interface ReleaseChecksumEntry {
  */
 export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry[] = [
   {
+    version: "0.0.81",
+    apkSha256: "229d88e79e1cd49a13a333facc0094f6cc86ae42e0012510674d64790d07f464",
+    ipaSha256: "d212b907ae6c2b61f78a656c01d5fc81c86b198f2e4d93b65fb6dd7155b60ddb",
+    runnerSha256: "128ceb368ffad8c6e659fa813cdf7db644e19d4ef75f6bc8ec5ca31b4b93fb1d",
+    runnerSha256Target: "xctest",
+    videoJarSha256: "345887c28a2e0272d09c9e85ab1f571f1d05b68b24bc2c9f082b3e4518cc777e",
+    screenCaptureHelperSha256: "8a9fd37ea1aa65ac503749678550c2d2ad2bd9f64695c03a822a463a3cd749c6",
+  },
+  {
+    version: "0.0.80",
+    apkSha256: "867aab935373cdb5ab7ee4ac422eab85c1dd404ab0dc027cf29146589d974a45",
+    ipaSha256: "4ca6098eec92da0fd4f6cf4d5a97d6bcdb66195a455488ddc8df0a4011c31031",
+    runnerSha256: "ae2f1c5aa3db6ff645800f9aa6c15bb22921c827120ee05ad9c3577ec4febfdf",
+    runnerSha256Target: "xctest",
+    videoJarSha256: "345887c28a2e0272d09c9e85ab1f571f1d05b68b24bc2c9f082b3e4518cc777e",
+    screenCaptureHelperSha256: "a175ba047df328f0850d7935381f2a4f4bcdde7549e316bf6fdd6da48a706499",
+  },
+  {
     version: "0.0.79",
     apkSha256: "734c22d3b190459f9a16a4ff07e49f7114c4732a6f6e17955f1ebbedadd1b25d",
     ipaSha256: "5005eb0ea29e27cc3d14f46f8e8fc8d690c3e31a4d27c9355baad7e2bd4f0f69",
@@ -536,11 +554,11 @@ export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry[] = [
  */
 export const NIGHTLY_CHECKSUM_ENTRY: ReleaseChecksumEntry = {
   version: "nightly",
-  apkSha256: "1b6a55327805a09bff46f749e3690eeddd31cebc1655d965867b16969320e3ad",
-  ipaSha256: "dfd1f6777a19a81127ecd82f57c63737188a9433efa889d383cf6349c4d42695",
+  apkSha256: "7d4232b4abffacb202ff7950a0d4f1632075111f630a936fba1e97c6cfa7791a",
+  ipaSha256: "fa266bf394d78dba716e9c2ca000beba8fac99b995fc3de92cfaef591ed3032d",
   runnerSha256Target: "xctest",
   videoJarSha256: "345887c28a2e0272d09c9e85ab1f571f1d05b68b24bc2c9f082b3e4518cc777e",
-  runnerSha256: "f28e7eb6501213347e3579cb5a32086c2eb777d6877c3d84ad561614c3404268",
+  runnerSha256: "51b412ba0426057a5981639f1a27fcd56214e45bc4acaf135442548bd1aff398",
 };
 
 /**

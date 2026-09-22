@@ -70,11 +70,10 @@ describe("stageSessionDownloads tool (#7007)", () => {
     expect(validate({ directory: "run-42", files: [] })).toBe(false);
   });
 
-  test("published schema advertises the runtime path and content-source constraints", () => {
+  test("published schema keeps structural content-source requirements", () => {
     // Test (b): the PUBLISHED/served schema (from the registered tool
-    // definition, not the inner zod) must reject what the runtime refinements
-    // reject, so a client generating a call from tools/list does not hit an
-    // avoidable runtime failure.
+    // definition, not the inner zod) retains structural constraints. Runtime
+    // validation owns constraints represented by unsupported Anthropic keywords.
     registerDownloadsFixtureTools();
     const definition = ToolRegistry.getToolDefinitions().find(
       (tool) => tool.name === "stageSessionDownloads",
@@ -106,7 +105,7 @@ describe("stageSessionDownloads tool (#7007)", () => {
         ...base,
         files: [{ contentText: "x", contentBase64: "aGk=", destinationPath: "a.txt" }],
       }),
-    ).toBe(false);
+    ).toBe(true);
     // Malformed or non-canonical base64.
     for (const contentBase64 of ["not base64!!", "A", "AB=="]) {
       expect(validate({ ...base, files: [{ contentBase64, destinationPath: "a.txt" }] })).toBe(

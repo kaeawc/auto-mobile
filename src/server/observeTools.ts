@@ -319,7 +319,6 @@ const ABSENT_PREDICATE_ADVERTISED_SCHEMA: Record<string, unknown> = {
 const COMPACT_WAITFOR_ADVERTISED_SCHEMA: Record<string, unknown> = {
   type: "object",
   additionalProperties: false,
-  not: { required: ["timeout", "timeoutMs"] },
   properties: {
     for: {
       type: "string",
@@ -365,7 +364,7 @@ const COMPACT_WAITFOR_ADVERTISED_SCHEMA: Record<string, unknown> = {
       type: "object",
       properties: { elementId: { type: "string" }, text: { type: "string" } },
       additionalProperties: false,
-      oneOf: [{ required: ["elementId"] }, { required: ["text"] }],
+      anyOf: [{ required: ["elementId"] }, { required: ["text"] }],
     },
     timeout: { type: "number" },
     timeoutMs: { type: "number" },
@@ -378,25 +377,16 @@ const COMPACT_WAITFOR_ADVERTISED_SCHEMA: Record<string, unknown> = {
     {
       properties: { for: { const: "stable" } },
       required: ["for"],
-      not: { required: ["container"] },
     },
     {
-      properties: { for: { not: { enum: ["stable", "textEquals"] } } },
+      properties: { for: {} },
       required: ["for", "elementId"],
     },
-    { properties: { for: { not: { const: "stable" } } }, required: ["for", "text"] },
+    { properties: { for: {} }, required: ["for", "text"] },
     {
       required: ["textAny"],
-      not: {
-        anyOf: [
-          ...ELEMENT_PREDICATE_REQUIRED,
-          { required: ["matchType"] },
-          { required: ["textMatch"] },
-        ],
-      },
     },
     {
-      not: { anyOf: [{ required: ["textAny"] }, { required: ["for"] }] },
       anyOf: [
         ...ELEMENT_PREDICATE_REQUIRED,
         { required: ["activeWindow"] },
@@ -497,29 +487,6 @@ export function assertActiveWindowWaitForSupportedOnPlatform(
 // the iOS activityName rule, require waitFor whenever settled is present, and
 // swap the verbose generated `waitFor` schema for the compact advertised form.
 export const overrideWaitForJsonSchema: JsonSchemaOverride = (jsonSchema) => {
-  jsonSchema.if = {
-    required: ["platform", "waitFor"],
-    properties: {
-      platform: { const: "ios" },
-      waitFor: {
-        required: ["activeWindow"],
-        properties: {
-          activeWindow: {
-            required: ["activityName"],
-            not: {
-              anyOf: [
-                { required: ["appId"] },
-                { required: ["bundleId"] },
-                { required: ["packageName"] },
-              ],
-            },
-          },
-        },
-      },
-    },
-  };
-  jsonSchema.then = false;
-
   // settled has no meaning without a waitFor predicate to settle after.
   jsonSchema.dependentRequired = {
     ...(jsonSchema.dependentRequired as Record<string, string[]> | undefined),
@@ -528,9 +495,7 @@ export const overrideWaitForJsonSchema: JsonSchemaOverride = (jsonSchema) => {
 
   // Replace the verbose generated `waitFor` schema with the compact advertised
   // form. Runtime validation still uses the full zod `waitForSchema`; this only
-  // shrinks what `tools/list` carries (~2064 -> ~473 tokens). The `if`/`then`
-  // above evaluates against the request data, not this schema, so it is
-  // unaffected.
+  // shrinks what `tools/list` carries (~2064 -> ~473 tokens).
   const props = jsonSchema.properties as Record<string, unknown> | undefined;
   if (props && props.waitFor) {
     props.waitFor = COMPACT_WAITFOR_ADVERTISED_SCHEMA;

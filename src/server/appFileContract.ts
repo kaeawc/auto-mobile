@@ -58,15 +58,6 @@ const MEDIA_LIBRARY_EXTENSION_NAMES = [
 ] as const;
 
 const MEDIA_LIBRARY_EXTENSIONS = new Set<string>(MEDIA_LIBRARY_EXTENSION_NAMES);
-const MEDIA_LIBRARY_EXTENSION_PATTERN = `\\.(?:${MEDIA_LIBRARY_EXTENSION_NAMES.map((extension) =>
-  extension
-    .split("")
-    .map((character) =>
-      character >= "a" && character <= "z" ? `[${character}${character.toUpperCase()}]` : character,
-    )
-    .join(""),
-).join("|")})$`;
-
 const SIMULATOR_MEDIA_EXTENSIONS = new Set([
   "avif",
   "bmp",
@@ -423,41 +414,15 @@ export const putAppFileSchema = withJsonSchemaOverride(
     const properties = jsonSchema.properties as Record<string, unknown> | undefined;
     if (properties) {
       delete properties.legacySingleFile;
-      const target = properties.target as Record<string, unknown> | undefined;
-      if (target && Array.isArray(target.anyOf)) {
-        target.oneOf = target.anyOf;
-        delete target.anyOf;
-      }
       const files = properties.files as Record<string, unknown> | undefined;
       const file = files?.items as Record<string, unknown> | undefined;
       if (file) {
-        file.oneOf = [
+        file.anyOf = [
           { required: ["sourcePath"] },
           { required: ["contentText"] },
           { required: ["contentBase64"] },
         ];
       }
-
-      jsonSchema.if = {
-        properties: {
-          target: {
-            properties: { domain: { const: "media_library" } },
-            required: ["domain"],
-          },
-        },
-        required: ["target"],
-      };
-      jsonSchema.then = {
-        properties: {
-          files: {
-            items: {
-              properties: {
-                destinationPath: { pattern: MEDIA_LIBRARY_EXTENSION_PATTERN },
-              },
-            },
-          },
-        },
-      };
     }
     if (Array.isArray(jsonSchema.required)) {
       jsonSchema.required = jsonSchema.required.filter((field) => field !== "legacySingleFile");

@@ -68,10 +68,14 @@ import {
   getCurrentBuildIdentity,
 } from "./buildIdentity";
 import { DeviceControlTransportError } from "./deviceControlTransportFailure";
-import { getStaticToolDefinitions } from "./staticToolDefinitions";
+import { McpOverloadError } from "./McpTimeoutError";
+import {
+  getConnectedStaticToolDefinitions,
+  getStaticToolDefinitions,
+} from "./staticToolDefinitions";
 import { DaemonRestartDeferredError } from "./daemonRestartAdmission";
 import { isRecoverableDaemonReleaseReason } from "../db/deviceSessionRepository";
-import { daemonProcessOptions } from "./daemonOptionScopes";
+import { daemonProcessOptions, daemonReuseOptions } from "./daemonOptionScopes";
 
 export { DaemonRestartDeferredError } from "./daemonRestartAdmission";
 export type VersionMismatchReason =
@@ -369,6 +373,8 @@ export interface DaemonMcpProxyConfig {
   clientFactory?: DaemonClientFactory;
   /** Socket-owner identity probe; custom client factories inject this separately. */
   daemonStatusProbe?: () => Promise<DaemonStatus>;
+  /** Observation-only socket availability probe; injectable for deterministic tests. */
+  daemonAvailabilityProbe?: (socketPath: string) => Promise<boolean>;
   /** Custom daemon manager (for testing) */
   daemonManager?: DaemonManagerLike;
   /** Requested daemon-global options plus connection presentation options. */
@@ -394,6 +400,13 @@ export interface DaemonMcpProxyConfig {
    */
   staticToolDefinitionsProvider?: () => ProxiedToolDefinition[];
   /**
+   * Supplies static schemas eligible to supplement a connected daemon's live
+   * list. Defaults to the static catalog without plan-only definitions.
+   */
+  connectedStaticToolDefinitionsProvider?: (
+    daemonOptions?: DaemonOptions,
+  ) => ProxiedToolDefinition[];
+  /**
    * Private live-acceptance configuration. It is set only while constructing
    * the dedicated harness proxy; MCP tool callers cannot set it.
    *
@@ -418,6 +431,22 @@ export interface ProxiedToolDefinition {
   // surface (cold path) — e.g. the MCP Apps UI pointer `_meta.ui.resourceUri`
   // (issue #4669). Non-Apps hosts ignore it.
   _meta?: Record<string, unknown>;
+}
+
+function connectedStaticToolDefinitionsProvider(
+  config: DaemonMcpProxyConfig,
+): (daemonOptions?: DaemonOptions) => ProxiedToolDefinition[] {
+  return (
+    config.connectedStaticToolDefinitionsProvider ??
+    config.staticToolDefinitionsProvider ??
+    getConnectedStaticToolDefinitions
+  );
+}
+
+function daemonAvailabilityProbe(
+  config: DaemonMcpProxyConfig,
+): (socketPath: string) => Promise<boolean> {
+  return config.daemonAvailabilityProbe ?? ((socketPath) => DaemonClient.isAvailable(socketPath));
 }
 
 /**
@@ -617,8 +646,8 @@ function mergeDaemonOptions(
   running: DaemonOptions | undefined,
   requested: DaemonOptions | undefined,
 ): DaemonOptions {
-  const runningOptions = daemonProcessOptions(running);
-  const requestedOptions = daemonProcessOptions(requested);
+  const runningOptions = daemonReuseOptions(running);
+  const requestedOptions = daemonReuseOptions(requested);
   const merged: DaemonOptions = { ...runningOptions, ...requestedOptions };
   const mergedRecord = merged as Record<string, unknown>;
   for (const [key, value] of Object.entries(runningOptions)) {
@@ -660,6 +689,7 @@ export class DaemonMcpProxy {
   private daemonManager: DaemonManagerLike;
   private clientFactory: DaemonClientFactory;
   private readonly daemonStatusProbe?: () => Promise<DaemonStatus>;
+  private readonly daemonAvailabilityProbe: (socketPath: string) => Promise<boolean>;
   private reconciliationSnapshot?: Promise<DaemonStatus>;
   private readonly timer: Timer;
   private readonly heartbeatKeeper: SingleFlightInterval;
@@ -775,6 +805,9 @@ export class DaemonMcpProxy {
   // Supplies the static tool surface for listAdvertisedTools() before a daemon
   // connection exists (issue #5879).
   private readonly staticToolDefinitionsProvider: () => ProxiedToolDefinition[];
+  private readonly connectedStaticToolDefinitionsProvider: (
+    daemonOptions?: DaemonOptions,
+  ) => ProxiedToolDefinition[];
   // Set when listAdvertisedTools() served the static surface without a live
   // connection. On the next successful connect the proxy emits a tools
   // list_changed so the client re-fetches the accurate (session-scoped) list.
@@ -787,6 +820,8 @@ export class DaemonMcpProxy {
   private servedStaticResourceList = false;
   private backgroundConnectRetry: NodeJS.Timeout | null = null;
   private backgroundConnectRetryAttempt = 0;
+  private connectedFallbackReconcile: NodeJS.Timeout | null = null;
+  private connectedFallbackReconcileAttempt = 0;
 
   // Cached definitions from daemon
   private cachedTools: ProxiedToolDefinition[] | null = null;
@@ -822,6 +857,7 @@ export class DaemonMcpProxy {
       config.clientFactory ??
       (() => new DaemonClient(this.config.socketPath, this.config.connectionTimeoutMs));
     this.daemonStatusProbe = this.createStatusProbe(config);
+    this.daemonAvailabilityProbe = daemonAvailabilityProbe(config);
     this.timer = config.timer ?? defaultTimer;
     this.livenessOwnerToken = (config.idGenerator ?? defaultIdGenerator).next();
     this.heartbeatKeeper = new SingleFlightInterval(
@@ -846,6 +882,7 @@ export class DaemonMcpProxy {
     }
     this.staticToolDefinitionsProvider =
       config.staticToolDefinitionsProvider ?? getStaticToolDefinitions;
+    this.connectedStaticToolDefinitionsProvider = connectedStaticToolDefinitionsProvider(config);
     this.buildIdentity = config.buildIdentity ?? getCurrentBuildIdentity();
     this.clientVersion = config.clientVersion ?? DAEMON_VERSION;
     this.clientAssetVersion = isExplicitPin() ? resolveAssetVersion(resolvePinnedVersion()) : null;
@@ -906,7 +943,7 @@ export class DaemonMcpProxy {
     // the filesystem). A daemon from another checkout may own this namespace's
     // socket without its PID record; cleaning the path before DaemonManager can
     // verify that candidate would sever a live daemon.
-    const isAvailable = await DaemonClient.isAvailable(socketPath);
+    const isAvailable = await this.daemonAvailabilityProbe(socketPath);
 
     if (!isAvailable) {
       if (!this.config.autoStartDaemon) {
@@ -1303,7 +1340,7 @@ export class DaemonMcpProxy {
       this.timer.now() + Math.max(DAEMON_STARTUP_TIMEOUT_MS, DAEMON_RESTART_HANDOFF_TIMEOUT_MS);
     let emptyHandoffDeadline: number | undefined;
     while (!this.closing && this.timer.now() < deadline) {
-      if (await DaemonClient.isAvailable(socketPath)) {
+      if (await this.daemonAvailabilityProbe(socketPath)) {
         return;
       }
       const status = await this.daemonManager.status();
@@ -2076,10 +2113,13 @@ export class DaemonMcpProxy {
    * #5879). A wedged or absent daemon therefore never hides the tool surface at
    * `tools/list` time; the client still gets one clear error on first use.
    *
-   * Once a connection is established, it delegates to {@link listTools} so the
-   * accurate (session-scoped) list is served. The first successful connect after
-   * a static serve emits a tools `list_changed` (see {@link doConnect}) so the
-   * client re-fetches and reconciles any difference.
+   * Once a connection is established, this returns the daemon's live,
+   * session-scoped list for this connection. The static superset is used only
+   * for the cold bootstrap above and if the live list fails below. Connection-
+   * profile updates and session binding can transiently narrow the live
+   * `tools/list` response; the explicit tools `list_changed` notifications and
+   * cache invalidation for those updates prompt clients to re-fetch under the
+   * current scope, so a stale-superset merge is not needed for completeness.
    *
    * The static path deliberately does NOT call `throwIfBoundSessionUnavailable()`
    * (unlike {@link listTools}): re-coupling `tools/list` to daemon/session state
@@ -2088,11 +2128,60 @@ export class DaemonMcpProxy {
    * through {@link callTool}'s gate.
    */
   async listAdvertisedTools(): Promise<ProxiedToolDefinition[]> {
-    if (this.connected && this.client) {
-      return this.listTools();
+    if (!this.connected || !this.client) {
+      this.servedStaticToolList = true;
+      return this.staticToolDefinitionsProvider();
     }
-    this.servedStaticToolList = true;
-    return this.staticToolDefinitionsProvider();
+    // The live per-connection list is the post-connect contract (#5879); the
+    // static fallback is only built when the live call fails, so its cost — a
+    // reconciliationStatus() + connectedFallbackDaemonOptions() ide/status RPC —
+    // stays off the success path (and can't fail a list whose live call would
+    // have succeeded, e.g. daemonManager.status() throwing during a restart).
+    try {
+      return await this.listTools();
+    } catch (error) {
+      if (
+        error instanceof DaemonBoundSessionExpiredError ||
+        error instanceof DaemonConnectionSessionReleasedError ||
+        error instanceof DeviceControlTransportError ||
+        error instanceof McpOverloadError
+      ) {
+        throw error;
+      }
+      logger.warn(
+        `[DaemonMcpProxy] Live tools/list failed; serving connected static fallback: ${errorMessage(error)}`,
+        error,
+      );
+      this.scheduleConnectedFallbackReconcile();
+      const daemonStatus = await this.reconciliationStatus();
+      const fallbackOptions = await this.connectedFallbackDaemonOptions(daemonStatus);
+      return this.connectedStaticToolDefinitionsProvider(fallbackOptions);
+    }
+  }
+
+  private async connectedFallbackDaemonOptions(daemonStatus: DaemonStatus): Promise<DaemonOptions> {
+    let effectiveDebug = daemonStatus.effectiveDebug;
+    try {
+      const liveStatus: unknown = await this.client?.callDaemonMethod("ide/status", {});
+      if (
+        typeof liveStatus === "object" &&
+        liveStatus !== null &&
+        "effectiveDebug" in liveStatus &&
+        typeof liveStatus.effectiveDebug === "boolean"
+      ) {
+        effectiveDebug = liveStatus.effectiveDebug;
+      }
+    } catch (error) {
+      // The immutable launch option remains a backward-compatible fallback when
+      // a legacy or unhealthy daemon cannot report its live debug state.
+      logger.debug(
+        `[DaemonMcpProxy] Live effective debug status unavailable; using reconciled status: ${errorMessage(error)}`,
+      );
+    }
+    return {
+      ...daemonStatus.options,
+      debug: effectiveDebug ?? daemonStatus.options?.debug,
+    };
   }
 
   /**
@@ -2178,6 +2267,48 @@ export class DaemonMcpProxy {
       this.backgroundConnectRetry = null;
     }
     this.backgroundConnectRetryAttempt = 0;
+  }
+
+  private scheduleConnectedFallbackReconcile(): void {
+    if (this.closing || !this.connected || this.connectedFallbackReconcile) {
+      return;
+    }
+    const delay = COLD_RESOURCE_CONNECT_RETRY_DELAYS_MS[this.connectedFallbackReconcileAttempt];
+    if (delay === undefined) {
+      return;
+    }
+    this.connectedFallbackReconcileAttempt += 1;
+    this.connectedFallbackReconcile = this.timer.setTimeout(() => {
+      void this.attemptConnectedFallbackReconcile();
+    }, delay);
+  }
+
+  private async attemptConnectedFallbackReconcile(): Promise<void> {
+    this.connectedFallbackReconcile = null;
+    if (this.closing || !this.connected) {
+      return;
+    }
+    this.invalidateListCache("tools");
+    try {
+      await this.listTools();
+      this.connectedFallbackReconcileAttempt = 0;
+      this.notifyListChanged("tools");
+    } catch (error) {
+      // Best-effort: callable static schemas were already returned, and the
+      // bounded retry can safely wait for the daemon's live list to recover.
+      logger.debug(
+        `[DaemonMcpProxy] connected static fallback reconciliation failed: ${errorMessage(error)}`,
+      );
+      this.scheduleConnectedFallbackReconcile();
+    }
+  }
+
+  private cancelConnectedFallbackReconcile(): void {
+    if (this.connectedFallbackReconcile) {
+      this.timer.clearTimeout(this.connectedFallbackReconcile);
+      this.connectedFallbackReconcile = null;
+    }
+    this.connectedFallbackReconcileAttempt = 0;
   }
 
   /**
@@ -3523,6 +3654,7 @@ export class DaemonMcpProxy {
     this.closing = true;
     this.completeDaemonShutdownDisconnect();
     this.cancelBackgroundConnectRetry();
+    this.cancelConnectedFallbackReconcile();
     this.connectionCloseReject?.(new DaemonUnavailableError("MCP proxy is closing"));
     await this.stopBoundSessionHeartbeat();
     if (this.client) {

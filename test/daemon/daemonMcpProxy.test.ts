@@ -664,21 +664,20 @@ describe("DaemonMcpProxy", () => {
       }
     });
 
-    test("auto-start forwards global options but not connection presentation", async () => {
+    test("auto-start seeds daemon-wide tool defaults and keeps result presentation scoped", async () => {
       const fakeClient = presentationClient("profile-new-daemon");
       const fakeManager = new FakeDaemonManager();
       fakeManager.statusResult = { running: false };
 
-      // Mock DaemonClient.isAvailable to return false initially, then true after start
       let isAvailableCalls = 0;
-      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockImplementation(async () => {
-        isAvailableCalls++;
-        return isAvailableCalls > 1;
-      });
 
       const proxy = new DaemonMcpProxy({
         clientFactory: () => fakeClient,
         daemonManager: fakeManager,
+        daemonAvailabilityProbe: async () => {
+          isAvailableCalls++;
+          return isAvailableCalls > 1;
+        },
         autoStartDaemon: true,
         daemonOptions: {
           debug: true,
@@ -691,10 +690,11 @@ describe("DaemonMcpProxy", () => {
         await proxy.listTools();
 
         expect(fakeManager.startCalled).toBe(true);
-        expect(fakeManager.startOptions).toEqual({ debug: true });
-        expect(isAvailableSpy).toHaveBeenCalledWith(expect.any(String));
+        expect(fakeManager.startOptions).toEqual({
+          debug: true,
+          enabledTools: ["clipboard"],
+        });
       } finally {
-        isAvailableSpy.mockRestore();
         await proxy.close();
       }
     });

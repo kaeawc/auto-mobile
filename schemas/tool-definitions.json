@@ -355,6 +355,9 @@
       },
       "required": ["success"],
       "additionalProperties": {}
+    },
+    "_meta": {
+      "automobile/debugOnly": true
     }
   },
   {
@@ -402,6 +405,9 @@
       },
       "required": ["lock", "deviceCount"],
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/planOnly": true
     }
   },
   {
@@ -614,18 +620,7 @@
           "type": "string"
         }
       },
-      "additionalProperties": false,
-      "if": {
-        "properties": {
-          "platform": {
-            "const": "android"
-          }
-        },
-        "required": ["platform", "locale"]
-      },
-      "then": {
-        "required": ["appId"]
-      }
+      "additionalProperties": false
     }
   },
   {
@@ -667,6 +662,9 @@
       },
       "required": ["appId"],
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/embeddedSdkOnly": true
     }
   },
   {
@@ -697,6 +695,9 @@
         }
       },
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/embeddedSdkOnly": true
     }
   },
   {
@@ -768,18 +769,7 @@
         }
       },
       "required": ["action"],
-      "additionalProperties": false,
-      "if": {
-        "properties": {
-          "action": {
-            "const": "copy"
-          }
-        },
-        "required": ["action"]
-      },
-      "then": {
-        "required": ["text"]
-      }
+      "additionalProperties": false
     }
   },
   {
@@ -993,6 +983,9 @@
       },
       "required": ["lock", "steps", "deviceCount"],
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/planOnly": true
     }
   },
   {
@@ -1070,6 +1063,9 @@
         }
       },
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/debugOnly": true
     }
   },
   {
@@ -1210,18 +1206,7 @@
         }
       },
       "required": ["action"],
-      "additionalProperties": false,
-      "if": {
-        "properties": {
-          "action": {
-            "const": "restore"
-          }
-        },
-        "required": ["action"]
-      },
-      "then": {
-        "required": ["snapshotName"]
-      }
+      "additionalProperties": false
     }
   },
   {
@@ -1283,30 +1268,7 @@
           "type": "string"
         }
       },
-      "additionalProperties": false,
-      "if": {
-        "required": ["reset"],
-        "properties": {
-          "reset": {
-            "const": true
-          }
-        }
-      },
-      "then": {
-        "not": {
-          "anyOf": [
-            {
-              "required": ["fontScale"]
-            },
-            {
-              "required": ["density"]
-            },
-            {
-              "required": ["theme"]
-            }
-          ]
-        }
-      }
+      "additionalProperties": false
     }
   },
   {
@@ -1329,15 +1291,15 @@
               "type": "string"
             }
           },
-          "oneOf": [
+          "description": "Source element",
+          "anyOf": [
             {
               "required": ["elementId"]
             },
             {
               "required": ["text"]
             }
-          ],
-          "description": "Source element"
+          ]
         },
         "target": {
           "type": "object",
@@ -1352,15 +1314,15 @@
               "type": "string"
             }
           },
-          "oneOf": [
+          "description": "Target element",
+          "anyOf": [
             {
               "required": ["elementId"]
             },
             {
               "required": ["text"]
             }
-          ],
-          "description": "Target element"
+          ]
         },
         "pressDurationMs": {
           "description": "Press duration ms (min: 600, max: 3000, default: 600)",
@@ -1712,6 +1674,10 @@
         }
       },
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/debugOnly": true,
+      "automobile/embeddedSdkOnly": true
     }
   },
   {
@@ -2137,6 +2103,9 @@
       },
       "required": ["appId", "adapterName", "name"],
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/embeddedSdkOnly": true
     }
   },
   {
@@ -2268,6 +2237,10 @@
         }
       },
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/debugOnly": true,
+      "automobile/embeddedSdkOnly": true
     }
   },
   {
@@ -2309,6 +2282,9 @@
         }
       },
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/embeddedSdkOnly": true
     }
   },
   {
@@ -2643,6 +2619,9 @@
         }
       },
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/debugOnly": true
     }
   },
   {
@@ -3021,6 +3000,9 @@
       },
       "required": ["appId", "adapterName"],
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/embeddedSdkOnly": true
     }
   },
   {
@@ -4204,6 +4186,9 @@
       },
       "required": ["host", "path"],
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/embeddedSdkOnly": true
     }
   },
   {
@@ -4236,6 +4221,10 @@
       },
       "required": ["targetScreen"],
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/debugOnly": true,
+      "automobile/embeddedSdkOnly": true
     }
   },
   {
@@ -4310,6 +4299,9 @@
         }
       },
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/embeddedSdkOnly": true
     }
   },
   {
@@ -4326,9 +4318,6 @@
         "waitFor": {
           "type": "object",
           "additionalProperties": false,
-          "not": {
-            "required": ["timeout", "timeoutMs"]
-          },
           "properties": {
             "for": {
               "type": "string",
@@ -4446,7 +4435,7 @@
                 }
               },
               "additionalProperties": false,
-              "oneOf": [
+              "anyOf": [
                 {
                   "required": ["elementId"]
                 },
@@ -4469,67 +4458,24 @@
                   "const": "stable"
                 }
               },
-              "required": ["for"],
-              "not": {
-                "required": ["container"]
-              }
+              "required": ["for"]
             },
             {
               "properties": {
-                "for": {
-                  "not": {
-                    "enum": ["stable", "textEquals"]
-                  }
-                }
+                "for": {}
               },
               "required": ["for", "elementId"]
             },
             {
               "properties": {
-                "for": {
-                  "not": {
-                    "const": "stable"
-                  }
-                }
+                "for": {}
               },
               "required": ["for", "text"]
             },
             {
-              "required": ["textAny"],
-              "not": {
-                "anyOf": [
-                  {
-                    "required": ["elementId"]
-                  },
-                  {
-                    "required": ["text"]
-                  },
-                  {
-                    "required": ["className"]
-                  },
-                  {
-                    "required": ["contentDescription"]
-                  },
-                  {
-                    "required": ["matchType"]
-                  },
-                  {
-                    "required": ["textMatch"]
-                  }
-                ]
-              }
+              "required": ["textAny"]
             },
             {
-              "not": {
-                "anyOf": [
-                  {
-                    "required": ["textAny"]
-                  },
-                  {
-                    "required": ["for"]
-                  }
-                ]
-              },
               "anyOf": [
                 {
                   "required": ["elementId"]
@@ -4661,36 +4607,6 @@
         }
       },
       "additionalProperties": false,
-      "if": {
-        "required": ["platform", "waitFor"],
-        "properties": {
-          "platform": {
-            "const": "ios"
-          },
-          "waitFor": {
-            "required": ["activeWindow"],
-            "properties": {
-              "activeWindow": {
-                "required": ["activityName"],
-                "not": {
-                  "anyOf": [
-                    {
-                      "required": ["appId"]
-                    },
-                    {
-                      "required": ["bundleId"]
-                    },
-                    {
-                      "required": ["packageName"]
-                    }
-                  ]
-                }
-              }
-            }
-          }
-        }
-      },
-      "then": false,
       "dependentRequired": {
         "settled": ["waitFor"]
       }
@@ -8149,9 +8065,6 @@
         "waitFor": {
           "type": "object",
           "additionalProperties": false,
-          "not": {
-            "required": ["timeout", "timeoutMs"]
-          },
           "properties": {
             "for": {
               "type": "string",
@@ -8269,7 +8182,7 @@
                 }
               },
               "additionalProperties": false,
-              "oneOf": [
+              "anyOf": [
                 {
                   "required": ["elementId"]
                 },
@@ -8292,67 +8205,24 @@
                   "const": "stable"
                 }
               },
-              "required": ["for"],
-              "not": {
-                "required": ["container"]
-              }
+              "required": ["for"]
             },
             {
               "properties": {
-                "for": {
-                  "not": {
-                    "enum": ["stable", "textEquals"]
-                  }
-                }
+                "for": {}
               },
               "required": ["for", "elementId"]
             },
             {
               "properties": {
-                "for": {
-                  "not": {
-                    "const": "stable"
-                  }
-                }
+                "for": {}
               },
               "required": ["for", "text"]
             },
             {
-              "required": ["textAny"],
-              "not": {
-                "anyOf": [
-                  {
-                    "required": ["elementId"]
-                  },
-                  {
-                    "required": ["text"]
-                  },
-                  {
-                    "required": ["className"]
-                  },
-                  {
-                    "required": ["contentDescription"]
-                  },
-                  {
-                    "required": ["matchType"]
-                  },
-                  {
-                    "required": ["textMatch"]
-                  }
-                ]
-              }
+              "required": ["textAny"]
             },
             {
-              "not": {
-                "anyOf": [
-                  {
-                    "required": ["textAny"]
-                  },
-                  {
-                    "required": ["for"]
-                  }
-                ]
-              },
               "anyOf": [
                 {
                   "required": ["elementId"]
@@ -8413,36 +8283,6 @@
       },
       "required": ["url"],
       "additionalProperties": false,
-      "if": {
-        "required": ["platform", "waitFor"],
-        "properties": {
-          "platform": {
-            "const": "ios"
-          },
-          "waitFor": {
-            "required": ["activeWindow"],
-            "properties": {
-              "activeWindow": {
-                "required": ["activityName"],
-                "not": {
-                  "anyOf": [
-                    {
-                      "required": ["appId"]
-                    },
-                    {
-                      "required": ["bundleId"]
-                    },
-                    {
-                      "required": ["packageName"]
-                    }
-                  ]
-                }
-              }
-            }
-          }
-        }
-      },
-      "then": false,
       "dependentRequired": {
         "settled": ["waitFor"]
       }
@@ -8533,15 +8373,15 @@
               "type": "string"
             }
           },
-          "oneOf": [
+          "description": "Scope search to a container",
+          "anyOf": [
             {
               "required": ["elementId"]
             },
             {
               "required": ["text"]
             }
-          ],
-          "description": "Scope search to a container"
+          ]
         },
         "autoTarget": {
           "description": "Auto-target pinchable containers",
@@ -8651,18 +8491,7 @@
         }
       },
       "required": ["title", "body"],
-      "additionalProperties": false,
-      "if": {
-        "properties": {
-          "platform": {
-            "const": "ios"
-          }
-        },
-        "required": ["platform"]
-      },
-      "then": {
-        "required": ["appId"]
-      }
+      "additionalProperties": false
     }
   },
   {
@@ -9031,7 +8860,7 @@
           "minProperties": 1
         },
         "device": {
-          "oneOf": [
+          "anyOf": [
             {
               "type": "object",
               "properties": {
@@ -9277,24 +9106,7 @@
         }
       },
       "required": ["operationId", "device"],
-      "additionalProperties": false,
-      "if": {
-        "anyOf": [
-          {
-            "required": ["resources"]
-          },
-          {
-            "required": ["enableTools"]
-          }
-        ]
-      },
-      "then": {
-        "properties": {
-          "boot": {
-            "const": true
-          }
-        }
-      }
+      "additionalProperties": false
     },
     "outputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -9846,7 +9658,7 @@
       "type": "object",
       "properties": {
         "target": {
-          "oneOf": [
+          "anyOf": [
             {
               "type": "object",
               "properties": {
@@ -9928,7 +9740,7 @@
             },
             "required": ["destinationPath"],
             "additionalProperties": false,
-            "oneOf": [
+            "anyOf": [
               {
                 "required": ["sourcePath"]
               },
@@ -9958,33 +9770,7 @@
         }
       },
       "required": ["target", "files"],
-      "additionalProperties": false,
-      "if": {
-        "properties": {
-          "target": {
-            "properties": {
-              "domain": {
-                "const": "media_library"
-              }
-            },
-            "required": ["domain"]
-          }
-        },
-        "required": ["target"]
-      },
-      "then": {
-        "properties": {
-          "files": {
-            "items": {
-              "properties": {
-                "destinationPath": {
-                  "pattern": "\\.(?:[aA][aA][cC]|[aA][iI][fF][fF]|[aA][vV][iI][fF]|[bB][mM][pP]|[fF][lL][aA][cC]|[gG][iI][fF]|[hH][eE][iI][cC]|[jJ][pP][eE][gG]|[jJ][pP][gG]|[mM]4[aA]|[mM][kK][vV]|[mM][oO][vV]|[mM][pP]4|[mM]4[vV]|[mM][pP]3|[oO][gG][gG]|[pP][nN][gG]|[tT][iI][fF]|[tT][iI][fF][fF]|[wW][aA][vV]|[wW][eE][bB][mM]|[wW][eE][bB][pP])$"
-                }
-              }
-            }
-          }
-        }
-      }
+      "additionalProperties": false
     }
   },
   {
@@ -10164,6 +9950,9 @@
       },
       "required": ["appId", "key"],
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/embeddedSdkOnly": true
     }
   },
   {
@@ -10403,7 +10192,7 @@
           "maxItems": 100,
           "type": "array",
           "items": {
-            "oneOf": [
+            "anyOf": [
               {
                 "type": "object",
                 "properties": {
@@ -10629,40 +10418,7 @@
         }
       },
       "required": ["appId"],
-      "additionalProperties": false,
-      "if": {
-        "properties": {
-          "action": {
-            "const": "reset"
-          }
-        },
-        "required": ["action"]
-      },
-      "then": {
-        "required": ["permissions"],
-        "not": {
-          "required": ["userId"]
-        },
-        "if": {
-          "properties": {
-            "platform": {
-              "const": "android"
-            }
-          },
-          "required": ["platform"]
-        },
-        "then": {
-          "properties": {
-            "permissions": {
-              "minItems": 1,
-              "maxItems": 1,
-              "items": {
-                "const": "all"
-              }
-            }
-          }
-        }
-      }
+      "additionalProperties": false
     }
   },
   {
@@ -11122,18 +10878,7 @@
           "type": "string"
         }
       },
-      "additionalProperties": false,
-      "if": {
-        "required": ["resources"]
-      },
-      "then": {
-        "not": {
-          "required": ["restore"]
-        }
-      },
-      "else": {
-        "required": ["restore"]
-      }
+      "additionalProperties": false
     }
   },
   {
@@ -11264,87 +11009,28 @@
             {
               "required": ["delayMs"],
               "properties": {
-                "delayMs": {
-                  "not": {
-                    "const": 0
-                  }
-                }
+                "delayMs": {}
               }
             },
             {
               "required": ["downloadKbps"],
               "properties": {
-                "downloadKbps": {
-                  "not": {
-                    "const": 0
-                  }
-                }
+                "downloadKbps": {}
               }
             },
             {
               "required": ["uploadKbps"],
               "properties": {
-                "uploadKbps": {
-                  "not": {
-                    "const": 0
-                  }
-                }
+                "uploadKbps": {}
               }
             },
             {
               "required": ["packetLossPercent"],
               "properties": {
-                "packetLossPercent": {
-                  "not": {
-                    "const": 0
-                  }
-                }
+                "packetLossPercent": {}
               }
             }
-          ],
-          "if": {
-            "required": ["profile"],
-            "properties": {
-              "profile": {
-                "const": "offline"
-              }
-            },
-            "not": {
-              "anyOf": [
-                {
-                  "required": ["cancel"],
-                  "properties": {
-                    "cancel": {
-                      "const": true
-                    }
-                  }
-                },
-                {
-                  "required": ["reset"],
-                  "properties": {
-                    "reset": {
-                      "const": true
-                    }
-                  }
-                }
-              ]
-            }
-          },
-          "then": {
-            "not": {
-              "anyOf": [
-                {
-                  "required": ["delayMs"]
-                },
-                {
-                  "required": ["downloadKbps"]
-                },
-                {
-                  "required": ["uploadKbps"]
-                }
-              ]
-            }
-          }
+          ]
         },
         "platform": {
           "type": "string",
@@ -11437,6 +11123,9 @@
       },
       "required": ["appId", "key", "value", "type"],
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/embeddedSdkOnly": true
     }
   },
   {
@@ -11746,18 +11435,7 @@
           "minLength": 1
         }
       },
-      "additionalProperties": false,
-      "if": {
-        "required": ["toolName"]
-      },
-      "then": {
-        "not": {
-          "required": ["toolNames"]
-        }
-      },
-      "else": {
-        "required": ["toolNames"]
-      }
+      "additionalProperties": false
     }
   },
   {
@@ -11923,6 +11601,9 @@
       },
       "required": ["success", "fields", "totalAttempts"],
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/debugOnly": true
     }
   },
   {
@@ -12007,6 +11688,9 @@
       },
       "required": ["appId", "databasePath", "query"],
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/embeddedSdkOnly": true
     }
   },
   {
@@ -12066,7 +11750,7 @@
             },
             "required": ["destinationPath"],
             "additionalProperties": false,
-            "oneOf": [
+            "anyOf": [
               {
                 "required": ["sourcePath"]
               },
@@ -12326,15 +12010,15 @@
               "type": "string"
             }
           },
-          "oneOf": [
+          "description": "Scope search to a container",
+          "anyOf": [
             {
               "required": ["elementId"]
             },
             {
               "required": ["text"]
             }
-          ],
-          "description": "Scope search to a container"
+          ]
         },
         "autoTarget": {
           "description": "Auto-target scrollable containers (default: true)",
@@ -12363,15 +12047,15 @@
               "type": "string"
             }
           },
-          "oneOf": [
+          "description": "Element to look for during swipe",
+          "anyOf": [
             {
               "required": ["elementId"]
             },
             {
               "required": ["text"]
             }
-          ],
-          "description": "Element to look for during swipe"
+          ]
         },
         "boomerang": {
           "description": "Return to start position after swipe apex",
@@ -12545,197 +12229,7 @@
         }
       },
       "required": ["action"],
-      "additionalProperties": false,
-      "if": {
-        "required": ["action"],
-        "properties": {
-          "action": {
-            "const": "list"
-          }
-        }
-      },
-      "then": {
-        "required": ["notification"],
-        "properties": {
-          "notification": {
-            "anyOf": [
-              {
-                "required": ["appId"],
-                "properties": {
-                  "appId": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 256,
-                    "pattern": "^[A-Za-z0-9._-]+$"
-                  }
-                }
-              },
-              {
-                "required": ["packageId"],
-                "properties": {
-                  "packageId": {
-                    "type": "string",
-                    "minLength": 1
-                  }
-                }
-              },
-              {
-                "required": ["package"],
-                "properties": {
-                  "package": {
-                    "type": "string",
-                    "minLength": 1
-                  }
-                }
-              },
-              {
-                "required": ["packageName"],
-                "properties": {
-                  "packageName": {
-                    "type": "string",
-                    "minLength": 1
-                  }
-                }
-              },
-              {
-                "required": ["appPackage"],
-                "properties": {
-                  "appPackage": {
-                    "type": "string",
-                    "minLength": 1
-                  }
-                }
-              },
-              {
-                "required": ["appPackageId"],
-                "properties": {
-                  "appPackageId": {
-                    "type": "string",
-                    "minLength": 1
-                  }
-                }
-              },
-              {
-                "required": ["bundle"],
-                "properties": {
-                  "bundle": {
-                    "type": "string",
-                    "minLength": 1
-                  }
-                }
-              },
-              {
-                "required": ["bundleId"],
-                "properties": {
-                  "bundleId": {
-                    "type": "string",
-                    "minLength": 1
-                  }
-                }
-              },
-              {
-                "required": ["bundleID"],
-                "properties": {
-                  "bundleID": {
-                    "type": "string",
-                    "minLength": 1
-                  }
-                }
-              },
-              {
-                "required": ["bundleIdentifier"],
-                "properties": {
-                  "bundleIdentifier": {
-                    "type": "string",
-                    "minLength": 1
-                  }
-                }
-              },
-              {
-                "required": ["application"],
-                "properties": {
-                  "application": {
-                    "type": "string",
-                    "minLength": 1
-                  }
-                }
-              },
-              {
-                "required": ["applicationId"],
-                "properties": {
-                  "applicationId": {
-                    "type": "string",
-                    "minLength": 1
-                  }
-                }
-              },
-              {
-                "required": ["applicationIdentifier"],
-                "properties": {
-                  "applicationIdentifier": {
-                    "type": "string",
-                    "minLength": 1
-                  }
-                }
-              },
-              {
-                "required": ["app"],
-                "properties": {
-                  "app": {
-                    "type": "string",
-                    "minLength": 1
-                  }
-                }
-              },
-              {
-                "required": ["appIdentifier"],
-                "properties": {
-                  "appIdentifier": {
-                    "type": "string",
-                    "minLength": 1
-                  }
-                }
-              },
-              {
-                "required": ["package_id"],
-                "properties": {
-                  "package_id": {
-                    "type": "string",
-                    "minLength": 1
-                  }
-                }
-              },
-              {
-                "required": ["package_name"],
-                "properties": {
-                  "package_name": {
-                    "type": "string",
-                    "minLength": 1
-                  }
-                }
-              },
-              {
-                "required": ["bundle_id"],
-                "properties": {
-                  "bundle_id": {
-                    "type": "string",
-                    "minLength": 1
-                  }
-                }
-              },
-              {
-                "required": ["application_id"],
-                "properties": {
-                  "application_id": {
-                    "type": "string",
-                    "minLength": 1
-                  }
-                }
-              }
-            ]
-          }
-        }
-      }
+      "additionalProperties": false
     }
   },
   {
@@ -12758,15 +12252,15 @@
               "type": "string"
             }
           },
-          "oneOf": [
+          "description": "Scope search to a container",
+          "anyOf": [
             {
               "required": ["elementId"]
             },
             {
               "required": ["text"]
             }
-          ],
-          "description": "Scope search to a container"
+          ]
         },
         "selectionStrategy": {
           "description": "Element selection strategy: 'first' (default) or 'random'",
@@ -12915,7 +12409,8 @@
               }
             }
           },
-          "oneOf": [
+          "description": "Element to tap: elementId, Android testTag, text, semantic accessibility link, or ordered text variants",
+          "anyOf": [
             {
               "required": ["elementId"]
             },
@@ -12931,8 +12426,7 @@
             {
               "required": ["textAny"]
             }
-          ],
-          "description": "Element to tap: elementId, Android testTag, text, semantic accessibility link, or ordered text variants"
+          ]
         },
         "sibling": {
           "description": "Tap a clickable sibling of the match, e.g. checkbox beside label",
@@ -12951,15 +12445,15 @@
               "type": "string"
             }
           },
-          "oneOf": [
+          "description": "Scope search to a container",
+          "anyOf": [
             {
               "required": ["elementId"]
             },
             {
               "required": ["text"]
             }
-          ],
-          "description": "Scope search to a container"
+          ]
         },
         "action": {
           "description": "Action type (default: tap)",
@@ -13057,111 +12551,7 @@
         }
       },
       "required": ["selector"],
-      "additionalProperties": false,
-      "if": {
-        "anyOf": [
-          {
-            "required": ["subtext"]
-          },
-          {
-            "properties": {
-              "selector": {
-                "required": ["accessibilityLink"]
-              }
-            }
-          }
-        ]
-      },
-      "then": {
-        "properties": {
-          "action": {
-            "const": "tap"
-          },
-          "sibling": {
-            "not": {
-              "const": true
-            }
-          },
-          "retryIfNoChange": {
-            "not": {
-              "const": true
-            }
-          },
-          "ensureTap": {
-            "not": {
-              "const": true
-            }
-          },
-          "ensureChecked": {
-            "not": {
-              "const": true
-            }
-          },
-          "searchUntil": {
-            "not": {}
-          }
-        },
-        "allOf": [
-          {
-            "not": {
-              "required": ["subtext"],
-              "properties": {
-                "selector": {
-                  "required": ["accessibilityLink"]
-                }
-              }
-            }
-          },
-          {
-            "if": {
-              "required": ["subtext"]
-            },
-            "then": {
-              "not": {
-                "required": ["index"]
-              }
-            }
-          },
-          {
-            "if": {
-              "required": ["subtext"]
-            },
-            "then": {
-              "properties": {
-                "selectionStrategy": {
-                  "not": {
-                    "const": "random"
-                  }
-                }
-              }
-            }
-          }
-        ]
-      },
-      "allOf": [
-        {
-          "if": {
-            "required": ["ensureChecked"],
-            "properties": {
-              "ensureChecked": {
-                "const": true
-              }
-            }
-          },
-          "then": {
-            "properties": {
-              "action": {
-                "const": "tap"
-              },
-              "selectionStrategy": {
-                "not": {
-                  "const": "random"
-                }
-              }
-            }
-          }
-        }
-      ]
+      "additionalProperties": false
     },
     "outputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",

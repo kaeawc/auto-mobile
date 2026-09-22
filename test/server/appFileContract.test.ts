@@ -162,35 +162,15 @@ describe("putAppFile canonical target contract (#5803)", () => {
     ).toBe(false);
   });
 
-  test("advertises the media-library filename requirement in generated tool definitions", () => {
+  test("leaves the media-library filename requirement to runtime validation", () => {
     const definitions = JSON.parse(readFileSync("schemas/tool-definitions.json", "utf8")) as Array<{
       name: string;
-      inputSchema?: { if?: unknown; then?: unknown };
+      inputSchema?: Record<string, unknown>;
     }>;
     const putAppFile = definitions.find((definition) => definition.name === "putAppFile");
 
-    expect(putAppFile?.inputSchema?.if).toEqual({
-      properties: {
-        target: {
-          properties: { domain: { const: "media_library" } },
-          required: ["domain"],
-        },
-      },
-      required: ["target"],
-    });
-    expect(putAppFile?.inputSchema?.then).toEqual({
-      properties: {
-        files: {
-          items: {
-            properties: {
-              destinationPath: {
-                pattern: expect.stringContaining("[pP][nN][gG]"),
-              },
-            },
-          },
-        },
-      },
-    });
+    expect(putAppFile?.inputSchema?.if).toBeUndefined();
+    expect(putAppFile?.inputSchema?.then).toBeUndefined();
   });
 
   test("normalizes the legacy single-file app-container shape into the canonical batch", () => {

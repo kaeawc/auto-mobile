@@ -150,9 +150,9 @@ describe("GetBackStack against real captures (#4329)", () => {
   });
 
   test("covers every supported API level 24..36", () => {
-    const levels = captureFiles
-      .map((f) => parseInt(f.match(/api(\d+)/)![1], 10))
-      .sort((a, b) => a - b);
+    const levels = [
+      ...new Set(captureFiles.map((f) => parseInt(f.match(/api(\d+)/)![1], 10))),
+    ].sort((a, b) => a - b);
     const expected = Array.from({ length: 36 - 24 + 1 }, (_, i) => 24 + i);
     expect(levels).toEqual(expected);
   });
@@ -437,6 +437,24 @@ describe("GetBackStack against real captures (#4329)", () => {
         "com.google.android.apps.contacts.activities.OnboardingSignInActivity",
       );
       expect(result.currentTaskId).toBe(10);
+    });
+  });
+
+  describe("api36 forwarded Settings activity, task provenance (#7435)", () => {
+    test("captures the root activity's launcher package and omits null", async () => {
+      const result = await parse(readCapture("api36-settings-intelligence-forward.log"));
+
+      const foregroundTask = result.tasks.find((task) => task.id === 44);
+      expect(result.currentTaskId).toBe(44);
+      expect(result.currentActivity?.name).toBe(
+        "com.google.android.settings.intelligence.modules.search.SearchActivity",
+      );
+      expect(foregroundTask?.launchedFromPackage).toBe("com.android.settings");
+
+      const homeTask = result.tasks.find(
+        (task) => task.packageName === "com.google.android.apps.nexuslauncher",
+      );
+      expect(homeTask?.launchedFromPackage).toBeUndefined();
     });
   });
 });

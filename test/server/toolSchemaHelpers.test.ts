@@ -4,7 +4,7 @@ import { z } from "zod/v4";
 import {
   addDeviceTargetingToSchema,
   appIdFieldAliases,
-  canonicalizeDiscriminatedUnionJsonSchema,
+  enforceAnthropicToolSchemaSubset,
   platformSchema,
   withFieldAliases,
   withAppIdAliases,
@@ -131,55 +131,58 @@ describe("addDeviceTargetingToSchema", () => {
   });
 });
 
-describe("canonicalizeDiscriminatedUnionJsonSchema", () => {
-  test("recursively converts object unions with unique literal discriminators", () => {
-    const schema = {
+describe("enforceAnthropicToolSchemaSubset", () => {
+  test("strips unsupported keywords, preserves nested supported combinators, and merges root allOf", () => {
+    const schema: Record<string, unknown> = {
+      type: "object",
       properties: {
-        commands: {
-          items: {
-            anyOf: [
-              { properties: { action: { const: "type" } }, required: ["action"] },
-              { properties: { action: { const: "key" } }, required: ["action"] },
-            ],
-          },
+        existing: { type: "string" },
+        selector: {
+          oneOf: [{ type: "string" }, { type: "number" }],
+          allOf: [{}, { minLength: 1 }],
+          if: { const: "ignored" },
+          then: { not: { const: "also ignored" } },
         },
+      },
+      required: ["existing"],
+      allOf: [
+        { if: { required: ["existing"] }, then: { required: ["ignored"] } },
+        {
+          properties: { fromConstraint: { type: "boolean" } },
+          required: ["fromConstraint"],
+        },
+      ],
+      $defs: {
+        conditionallyConstrained: { not: { type: "null" }, type: "string" },
       },
     };
 
-    canonicalizeDiscriminatedUnionJsonSchema(schema);
-
-    expect(schema.properties.commands.items).toEqual({
-      oneOf: [
-        { properties: { action: { const: "type" } }, required: ["action"] },
-        { properties: { action: { const: "key" } }, required: ["action"] },
-      ],
-    });
-  });
-
-  test("preserves unions with optional literal properties", () => {
-    const schema = {
-      anyOf: [
-        { properties: { action: { const: "type" } } },
-        { properties: { action: { const: "key" } } },
-      ],
-    };
-
-    canonicalizeDiscriminatedUnionJsonSchema(schema);
+    enforceAnthropicToolSchemaSubset(schema);
 
     expect(schema).toEqual({
-      anyOf: [
-        { properties: { action: { const: "type" } } },
-        { properties: { action: { const: "key" } } },
-      ],
+      type: "object",
+      properties: {
+        existing: { type: "string" },
+        selector: {
+          anyOf: [{ type: "string" }, { type: "number" }],
+          allOf: [{ minLength: 1 }],
+        },
+        fromConstraint: { type: "boolean" },
+      },
+      required: ["existing", "fromConstraint"],
+      $defs: { conditionallyConstrained: { type: "string" } },
     });
   });
 
-  test("preserves non-discriminated anyOf unions", () => {
-    const schema = { anyOf: [{ type: "string" }, { type: "null" }] };
+  test("rejects a residual root anyOf", () => {
+    const schema: Record<string, unknown> = {
+      type: "object",
+      anyOf: [{ type: "string" }, { type: "number" }],
+    };
 
-    canonicalizeDiscriminatedUnionJsonSchema(schema);
-
-    expect(schema).toEqual({ anyOf: [{ type: "string" }, { type: "null" }] });
+    expect(() => enforceAnthropicToolSchemaSubset(schema)).toThrow(
+      "Anthropic input schema has unsupported root anyOf",
+    );
   });
 });
 
@@ -513,28 +516,17 @@ describe("generated tool definitions", () => {
     });
   });
 
-  test("changeLocalization generated schema conditionally requires appId for Android locale changes", () => {
+  test("changeLocalization generated schema leaves Android appId validation to runtime", () => {
     const schemas = JSON.parse(readFileSync("schemas/tool-definitions.json", "utf8")) as Array<{
       name: string;
       inputSchema?: {
         properties?: Record<string, unknown>;
-        if?: unknown;
-        then?: unknown;
         required?: string[];
       };
     }>;
     const changeLocalization = schemas.find((schema) => schema.name === "changeLocalization");
 
     expect(changeLocalization?.inputSchema?.properties?.appId).toBeDefined();
-    expect(changeLocalization?.inputSchema?.if).toEqual({
-      properties: {
-        platform: { const: "android" },
-      },
-      required: ["platform", "locale"],
-    });
-    expect(changeLocalization?.inputSchema?.then).toEqual({
-      required: ["appId"],
-    });
     // #6154: platform is optional wherever deviceId/session resolves it, so
     // the top level no longer requires it.
     expect(changeLocalization?.inputSchema?.required).toBeUndefined();

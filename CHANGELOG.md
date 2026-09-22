@@ -1,5 +1,27 @@
 # Changelog
 
+## [v0.0.81] - 2026-09-21
+
+### Fixed
+
+- daemon: concurrent inventory RESOURCE reads serialize on the shared executionKey — 16 clients breach the 15s deadline (beyond #7404) ([#7419](https://github.com/kaeawc/auto-mobile/issues/7419)) (performance, daemon)
+
+### Security
+
+- Redact credential-bearing URIs from openLink errors ([#7402](https://github.com/kaeawc/auto-mobile/issues/7402)) (bug, android)
+
+### Other
+
+- fix(daemon): preserve unspecified tool defaults on partial restart override ([#7423](https://github.com/kaeawc/auto-mobile/issues/7423))
+- fix(daemon): derive discovery fallback from effective debug state ([#7421](https://github.com/kaeawc/auto-mobile/issues/7421))
+- fix(daemon): reconcile after connected static tool fallback ([#7422](https://github.com/kaeawc/auto-mobile/issues/7422))
+
+## [v0.0.80] - 2026-09-21
+
+### Other
+
+- No changes.
+
 ## [v0.0.79] - 2026-09-21
 
 ### Fixed

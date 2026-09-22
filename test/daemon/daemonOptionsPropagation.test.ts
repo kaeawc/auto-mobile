@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { DaemonManager, parseDaemonArgs } from "../../src/daemon/manager";
+import { daemonCommandOptions, DaemonManager, parseDaemonArgs } from "../../src/daemon/manager";
 import { parseArgs } from "../../src/cli/parseArgs";
 import { REUSE_CRITICAL_OPTION_KEYS } from "../../src/daemon/daemonMcpProxy";
 import {
@@ -7,6 +7,7 @@ import {
   CONNECTION_PRESENTATION_OPTION_KEYS,
   daemonProcessEnvironment,
   daemonProcessOptions,
+  daemonReuseOptions,
 } from "../../src/daemon/daemonOptionScopes";
 import { OUTPUT_REDUCTION_FLAG_SPECS } from "../../src/utils/outputReductionFlags";
 import type { DaemonOptions } from "../../src/daemon/types";
@@ -194,6 +195,51 @@ describe("daemon startup-option propagation", () => {
 
     expect(parseDaemonArgs(serialize(options))).toMatchObject(options);
   });
+
+  test("bare daemon commands preserve recorded tool defaults while explicit empties clear them", () => {
+    expect(daemonCommandOptions([], {}).enabledTools).toBeUndefined();
+    expect(daemonCommandOptions([], {}).disabledTools).toBeUndefined();
+    expect(
+      daemonCommandOptions([], {
+        startupToolDefaults: { enabledTools: [], disabledTools: [] },
+      }),
+    ).toMatchObject({ enabledTools: [], disabledTools: [] });
+  });
+
+  test("daemon command tool defaults are independently optional per side", () => {
+    expect(
+      daemonCommandOptions([], {
+        startupToolDefaults: { enabledTools: ["clipboard"] },
+      }),
+    ).toMatchObject({ enabledTools: ["clipboard"] });
+    expect(
+      daemonCommandOptions([], {
+        startupToolDefaults: { enabledTools: ["clipboard"] },
+      }).disabledTools,
+    ).toBeUndefined();
+
+    expect(
+      daemonCommandOptions([], {
+        startupToolDefaults: { disabledTools: ["observe"] },
+      }),
+    ).toMatchObject({ disabledTools: ["observe"] });
+    expect(
+      daemonCommandOptions([], {
+        startupToolDefaults: { disabledTools: ["observe"] },
+      }).enabledTools,
+    ).toBeUndefined();
+
+    expect(
+      daemonCommandOptions([], {
+        startupToolDefaults: { enabledTools: [] },
+      }),
+    ).toMatchObject({ enabledTools: [] });
+    expect(
+      daemonCommandOptions([], {
+        startupToolDefaults: { enabledTools: [] },
+      }).disabledTools,
+    ).toBeUndefined();
+  });
 });
 
 describe("reuse-critical drift guard", () => {
@@ -210,7 +256,7 @@ describe("reuse-critical drift guard", () => {
     expect(REUSE_CRITICAL_OPTION_KEYS).not.toContain("toolResultsNoStructuredContent");
   });
 
-  test("connection presentation options are removed before daemon lifecycle actions", () => {
+  test("startup tool defaults reach the daemon without becoming reuse-critical", () => {
     expect(CONNECTION_PRESENTATION_OPTION_KEYS).toEqual([
       "enabledTools",
       "disabledTools",
@@ -218,6 +264,18 @@ describe("reuse-critical drift guard", () => {
     ]);
     expect(
       daemonProcessOptions({
+        debug: true,
+        enabledTools: ["clipboard"],
+        disabledTools: ["observe"],
+        toolResultsNoStructuredContent: true,
+      }),
+    ).toEqual({
+      debug: true,
+      enabledTools: ["clipboard"],
+      disabledTools: ["observe"],
+    });
+    expect(
+      daemonReuseOptions({
         debug: true,
         enabledTools: ["clipboard"],
         disabledTools: ["observe"],

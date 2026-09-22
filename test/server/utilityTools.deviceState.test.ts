@@ -132,11 +132,7 @@ describe("device state tools", () => {
     }
   });
 
-  // #6090: the ADVERTISED JSON schema (tool-definitions.json) must encode the same
-  // networkCondition edges as the runtime classifier, so a client that validates
-  // against tools/list agrees with invocation. Validate the generated sub-schema
-  // directly with the same Ajv the plan validator uses.
-  test("advertised networkCondition JSON schema matches the runtime classifier on edge inputs", () => {
+  test("advertised networkCondition JSON schema leaves conditional edges to runtime", () => {
     const toolDefsPath = path.join(process.cwd(), "schemas/tool-definitions.json");
     const toolDefs = JSON.parse(fs.readFileSync(toolDefsPath, "utf8")) as Array<{
       name: string;
@@ -150,8 +146,8 @@ describe("device state tools", () => {
     const ajv = new Ajv({ allErrors: true, strict: false });
     const validate = ajv.compile(ncSchema as object);
 
-    // offline + a shaping override with NO cancel/reset is invalid (matches runtime).
-    expect(validate({ profile: "offline", delayMs: 500 })).toBe(false);
+    // Unsupported conditional keywords are stripped from the advertised schema.
+    expect(validate({ profile: "offline", delayMs: 500 })).toBe(true);
     // offline + override + cancel:true is a valid cancel-reset — must NOT be
     // false-rejected (the #6090 issue-3 fix; runtime classifies it `reset`).
     expect(validate({ profile: "offline", delayMs: 500, cancel: true })).toBe(true);
@@ -161,14 +157,13 @@ describe("device state tools", () => {
     expect(validate({ profile: "offline" })).toBe(true);
     expect(validate({ profile: "offline", packetLossPercent: 50 })).toBe(true);
 
-    // #6090 issue-1 mirror: `none` + neutral (zero) overrides is a reset, so the
-    // advertised anyOf must accept it, while a bare zero override is a no-op the
-    // schema rejects (matching the runtime `empty`).
+    // A neutral override may be accepted by the advertised schema; runtime
+    // retains the no-op classification.
     expect(validate({ profile: "none", delayMs: 0 })).toBe(true);
     expect(validate({ profile: "none", downloadKbps: 0, uploadKbps: 0 })).toBe(true);
-    expect(validate({ delayMs: 0 })).toBe(false);
-    expect(validate({ downloadKbps: 0 })).toBe(false);
-    expect(validate({ packetLossPercent: 0 })).toBe(false);
+    expect(validate({ delayMs: 0 })).toBe(true);
+    expect(validate({ downloadKbps: 0 })).toBe(true);
+    expect(validate({ packetLossPercent: 0 })).toBe(true);
     // A real (non-zero) override remains a valid request.
     expect(validate({ delayMs: 500 })).toBe(true);
   });

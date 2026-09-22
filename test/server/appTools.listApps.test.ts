@@ -549,7 +549,7 @@ describe("app permission tools", () => {
     expect(ToolRegistry.getTool("getIosSimulatorPermissions")).toBeUndefined();
   });
 
-  test("advertises Android permission action scope", () => {
+  test("leaves Android permission action scope to runtime validation", () => {
     const setAppPermissions = ToolRegistry.getToolDefinitions({ includeUnavailable: true }).find(
       (tool) => tool.name === "setAppPermissions",
     );
@@ -569,14 +569,14 @@ describe("app permission tools", () => {
         permissions: ["all"],
         userId: 10,
       }),
-    ).toBe(false);
+    ).toBe(true);
     expect(
       validate({
         appId: "com.example.app",
         action: "reset",
         notificationsEnabled: false,
       }),
-    ).toBe(false);
+    ).toBe(true);
     expect(
       validate({
         appId: "com.example.app",
@@ -584,7 +584,7 @@ describe("app permission tools", () => {
         permissions: ["camera"],
         platform: "android",
       }),
-    ).toBe(false);
+    ).toBe(true);
     expect(
       validate({
         appId: "com.example.app",
@@ -592,7 +592,7 @@ describe("app permission tools", () => {
         permissions: [],
         platform: "android",
       }),
-    ).toBe(false);
+    ).toBe(true);
     expect(
       validate({
         appId: "com.example.app",

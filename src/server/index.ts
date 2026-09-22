@@ -349,7 +349,6 @@ import {
   validateConfiguredToolSelectionDefaults,
 } from "../features/toolSelection/SessionToolSelectionService";
 import {
-  assertToolEnabledForAnySession,
   buildToolSelectionCandidateRoutes,
   isToolEnabledForAnyRoute,
 } from "../features/toolSelection/toolSelectionPolicy";
@@ -1027,13 +1026,10 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       toolSelectionProfileRegistry,
       connectionProfileUuid,
     );
-    // Tool selection honors the UNION of the base and the derived
-    // `${base}:${label}` device-label sessions (issue #4611): a tool is enabled
-    // when EITHER grants it. This public MCP boundary is an EARLIER gate than the
-    // only public-call enforcement boundary. Resolve the derived
-    // label candidate from the base session's label map (a read-only lookup, no
-    // device allocation). Non-labeled and non-device-aware calls collapse to the
-    // base, preserving prior single-session behavior and `tools/list` filtering.
+    // Resolve the base and derived `${base}:${label}` sessions for device routing
+    // and post-acquisition `tools/list` enrichment. Per-connection selection
+    // curates discovery only; every registered, available MCP tool remains
+    // callable regardless of that selection.
     //
     // Gate the derived-label candidate to DEVICE-AWARE tools only. A plain tool
     // (registered via `register`, not `registerDeviceAware`) strips the `device`
@@ -1076,26 +1072,6 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
           ),
         )
       : [];
-    // Tool selection follows the connection's routing profile. A raw deviceId is
-    // only an execution target and must not borrow an unrelated owning session's
-    // grants (which discovery cannot advertise). When both fields are present,
-    // ToolRegistry intentionally ignores deviceId in favor of the label.
-    if (!isAlwaysOnTool(name)) {
-      await assertToolEnabledForAnySession(
-        name,
-        tool.defaultEnabled,
-        [
-          connectionProfileUuid,
-          routingBaseSessionUuid,
-          ...(requestedDeviceLabel
-            ? [derivedLabelSessionUuid]
-            : [routingSessionUuid, derivedLabelSessionUuid]),
-        ],
-        options.sessionToolSelectionService,
-        connectionProfileUuid,
-      );
-    }
-
     // Only ever honor these two when the call is DAEMON-forwarded. Extraction
     // happens on the RAW `toolParams` before schema validation, and a direct
     // (non-daemon, e.g. stdio) caller controls those raw arguments outright --

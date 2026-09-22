@@ -204,11 +204,12 @@ describe("systemTray list", () => {
     ).rejects.toThrow("cancelled");
     expect(apps.calls).toHaveLength(9);
   });
-  test("advertised schema requires appId for list without constraining open and close", () => {
+  test("advertised schema leaves list appId selection to runtime", () => {
     for (const validate of [validateAdvertised, validateGenerated]) {
-      for (const notification of [undefined, {}, { title: "Only a title" }, { appId: "" }]) {
-        expect(validate({ action: "list", notification })).toBe(false);
+      for (const notification of [undefined, {}, { title: "Only a title" }]) {
+        expect(validate({ action: "list", notification })).toBe(true);
       }
+      expect(validate({ action: "list", notification: { appId: "" } })).toBe(false);
       expect(validate({ action: "list", notification: { appId: "com.example.messages" } })).toBe(
         true,
       );

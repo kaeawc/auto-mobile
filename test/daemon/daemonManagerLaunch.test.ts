@@ -60,7 +60,7 @@ describe("DaemonManager launch", () => {
     expect(writes).toEqual(["daemon structured record\n"]);
   });
 
-  test("writes stable logs and excludes connection presentation from the child daemon", async () => {
+  test("writes stable logs and forwards daemon-wide tool defaults to the child", async () => {
     const stateDir = createTempDir("daemon-launch-state-");
     const dataDir = createTempDir("daemon-data-dir-");
     process.env.AUTOMOBILE_DATA_DIR = dataDir;
@@ -126,8 +126,10 @@ describe("DaemonManager launch", () => {
     expect(launchLogs.length).toBeGreaterThan(0);
     expect(capturedEnv?.AUTOMOBILE_DAEMON_LAUNCH_LOG_PATH).toBe(join(logsDir, launchLogs[0]));
     expect(capturedArgs).toContain("--debug");
-    expect(capturedArgs).not.toContain("--enable-tool");
-    expect(capturedArgs).not.toContain("--disable-tool");
+    expect(capturedArgs).toContain("--enable-tool");
+    expect(capturedArgs).toContain("clipboard");
+    expect(capturedArgs).toContain("--disable-tool");
+    expect(capturedArgs).toContain("observe");
     expect(capturedArgs).not.toContain("--tool-results-no-structured-content");
     expect(capturedEnv?.AUTOMOBILE_ENABLED_TOOLS).toBeUndefined();
     expect(capturedEnv?.AUTOMOBILE_DISABLED_TOOLS).toBeUndefined();

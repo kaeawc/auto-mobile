@@ -32,9 +32,6 @@ describe("displayConfigSchema", () => {
   // (issue #6303 review: "Encode reset exclusivity in the public schema"), so
   // a generated tool client can reject an invalid request before dispatch,
   // not only after the zod runtime refinement runs it through the handler.
-  // Encoded via top-level `if`/`then` (not `allOf`/`anyOf`/`oneOf`), which
-  // `schema.integration.test.ts`'s "should not publish top-level schema
-  // combinators" gates repo-wide.
   describe("advertised JSON schema", () => {
     createMcpServer();
     const tool = ToolRegistry.getToolDefinitions().find((t) => t.name === "displayConfig");
@@ -52,10 +49,10 @@ describe("displayConfigSchema", () => {
       expect(schema.oneOf).toBeUndefined();
     });
 
-    test("rejects reset combined with an explicit field", () => {
-      expect(validate({ reset: true, theme: "dark" })).toBe(false);
-      expect(validate({ reset: true, fontScale: 1.2 })).toBe(false);
-      expect(validate({ reset: true, density: 480 })).toBe(false);
+    test("leaves reset combination validation to runtime", () => {
+      expect(validate({ reset: true, theme: "dark" })).toBe(true);
+      expect(validate({ reset: true, fontScale: 1.2 })).toBe(true);
+      expect(validate({ reset: true, density: 480 })).toBe(true);
     });
 
     test("accepts reset alone and an explicit field alone", () => {

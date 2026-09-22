@@ -8,6 +8,7 @@ import { FakeEmulatorConsoleBusyRegistry } from "../../fakes/FakeEmulatorConsole
 import { FakeAvdConfigReader } from "../../fakes/FakeAvdConfigReader";
 import type { AdbExecuteOptions } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { DiscoveryObservationSequence } from "../../../src/utils/DiscoveryObservationSequence";
+import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 
 function execResult(stdout: string) {
   return {
@@ -116,7 +117,148 @@ class SequencedDeferredAvdNameAdbExecutor extends FakeAdbExecutor {
   }
 }
 
+interface AvdProbeConcurrency {
+  active: number;
+  maximum: number;
+}
+
+class DelayedAvdNameAdbExecutor extends FakeAdbExecutor {
+  constructor(
+    private readonly timer: FakeTimer,
+    private readonly avdName: string,
+    private readonly delayMs: number,
+    private readonly concurrency: AvdProbeConcurrency,
+    private readonly fail: boolean,
+  ) {
+    super();
+  }
+
+  override async executeCommand(
+    command: string,
+    timeoutMs?: number,
+    maxBuffer?: number,
+    noRetry?: boolean,
+    signal?: AbortSignal,
+  ): Promise<ExecResult> {
+    if (command !== "emu avd name") {
+      return await super.executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+    }
+
+    this.concurrency.active++;
+    this.concurrency.maximum = Math.max(this.concurrency.maximum, this.concurrency.active);
+    try {
+      await this.timer.sleep(this.delayMs);
+      if (this.fail) {
+        throw new Error(`AVD-name probe failed for ${this.avdName}`);
+      }
+      return execResult(`${this.avdName}\n`);
+    } finally {
+      this.concurrency.active--;
+    }
+  }
+}
+
+class DelayedAvdNameAdbFactory implements AdbClientFactory {
+  private readonly discovery = new FakeAdbExecutor();
+  private readonly clients = new Map<string, DelayedAvdNameAdbExecutor>();
+
+  constructor(
+    devices: BootedDevice[],
+    timer: FakeTimer,
+    delaysByDevice: ReadonlyMap<string, number>,
+    concurrency: AvdProbeConcurrency,
+    failedDeviceId?: string,
+  ) {
+    this.discovery.setDevices(devices);
+    for (const device of devices) {
+      this.clients.set(
+        device.deviceId,
+        new DelayedAvdNameAdbExecutor(
+          timer,
+          `AVD_${device.deviceId}`,
+          delaysByDevice.get(device.deviceId) ?? 0,
+          concurrency,
+          device.deviceId === failedDeviceId,
+        ),
+      );
+    }
+  }
+
+  create(device?: BootedDevice | null) {
+    return device ? this.clients.get(device.deviceId)! : this.discovery;
+  }
+}
+
+async function waitForPendingSleeps(timer: FakeTimer, count: number): Promise<void> {
+  for (let turn = 0; turn < 20 && timer.getPendingSleeps().length < count; turn++) {
+    await Promise.resolve();
+  }
+  expect(timer.getPendingSleeps()).toHaveLength(count);
+}
+
 describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
+  test("enriches booted emulators concurrently within one probe delay", async () => {
+    const timer = new FakeTimer();
+    const devices = Array.from({ length: 4 }, (_, index) => ({
+      name: "ignored",
+      platform: "android" as const,
+      deviceId: `emulator-${5554 + index * 2}`,
+    }));
+    const concurrency: AvdProbeConcurrency = { active: 0, maximum: 0 };
+    const delays = new Map(devices.map((device) => [device.deviceId, 50]));
+    const client = new AndroidEmulatorClient(
+      null,
+      null,
+      timer,
+      new DelayedAvdNameAdbFactory(devices, timer, delays, concurrency),
+      new FakeAvdConfigReader(null),
+    );
+
+    const discovery = client.getBootedDevicesChecked();
+    await waitForPendingSleeps(timer, devices.length);
+    expect(concurrency.maximum).toBe(4);
+
+    timer.advanceTime(50);
+    await expect(discovery).resolves.toHaveLength(4);
+    expect(timer.now()).toBe(50);
+  });
+
+  test("isolates an AVD-name failure and preserves input order across parallel probes", async () => {
+    const timer = new FakeTimer();
+    const devices = [
+      { name: "ignored", platform: "android" as const, deviceId: "emulator-5554" },
+      { name: "ignored", platform: "android" as const, deviceId: "emulator-5556" },
+      { name: "ignored", platform: "android" as const, deviceId: "emulator-5558" },
+      { name: "ignored", platform: "android" as const, deviceId: "emulator-5560" },
+    ];
+    const concurrency: AvdProbeConcurrency = { active: 0, maximum: 0 };
+    const delays = new Map([
+      ["emulator-5554", 40],
+      ["emulator-5556", 10],
+      ["emulator-5558", 30],
+      ["emulator-5560", 20],
+    ]);
+    const client = new AndroidEmulatorClient(
+      null,
+      null,
+      timer,
+      new DelayedAvdNameAdbFactory(devices, timer, delays, concurrency, "emulator-5558"),
+      new FakeAvdConfigReader(null),
+    );
+
+    const discovery = client.getBootedDevicesChecked();
+    await waitForPendingSleeps(timer, devices.length);
+    timer.advanceTime(40);
+
+    await expect(discovery).resolves.toEqual([
+      expect.objectContaining({ deviceId: "emulator-5554", name: "AVD_emulator-5554" }),
+      expect.objectContaining({ deviceId: "emulator-5556", name: "AVD_emulator-5556" }),
+      expect.objectContaining({ deviceId: "emulator-5558", name: "Unknown (emulator-5558)" }),
+      expect.objectContaining({ deviceId: "emulator-5560", name: "AVD_emulator-5560" }),
+    ]);
+    expect(concurrency.maximum).toBe(4);
+  });
+
   test("exposes a cached getprop model on a booted emulator", async () => {
     const adb = new FakeAdbExecutor();
     adb.setDevices([

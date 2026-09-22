@@ -508,6 +508,115 @@ describe("LaunchApp", () => {
     expect(result.observation?.backStack).toEqual(helperObservation.backStack);
   });
 
+  test("accepts a companion task launched by the app", async () => {
+    fakeTimer.enableAutoAdvance();
+    const settingsPackageName = "com.android.settings";
+    const companionPackageName = "com.google.android.settings.intelligence";
+    const companionObservation = createObserveResult(companionPackageName, {
+      depth: 0,
+      activities: [],
+      currentTaskId: 44,
+      tasks: [
+        {
+          id: 44,
+          packageName: companionPackageName,
+          rootActivity: `${companionPackageName}/.modules.search.SearchActivity`,
+          topActivity: `${companionPackageName}/.modules.search.SearchActivity`,
+          launchedFromPackage: settingsPackageName,
+        },
+      ],
+    });
+
+    fakeAdb.setForegroundApp({ packageName: settingsPackageName, userId: 0 });
+    fakeAdb.setCommandResponse("shell pm list packages --user 0", {
+      stdout: `package:${settingsPackageName}\n`,
+      stderr: "",
+    });
+    fakeAdb.setCommandResponse("shell dumpsys activity processes", { stdout: "0\n", stderr: "" });
+    fakeObserveScreen.setObserveResult(companionObservation);
+
+    const result = await launchApp.execute(settingsPackageName, false, false);
+
+    expect(result.success).toBe(true);
+    expect(result.verifiedBy).toBe("task-provenance");
+    expect(result.foregroundActivityPackage).toBe(companionPackageName);
+    expect(result.observation?.backStack).toEqual(companionObservation.backStack);
+  });
+
+  test("rejects a companion task launched by another package", async () => {
+    fakeTimer.enableAutoAdvance();
+    const settingsPackageName = "com.android.settings";
+    const companionPackageName = "com.google.android.settings.intelligence";
+    const companionObservation = createObserveResult(companionPackageName, {
+      depth: 0,
+      activities: [],
+      currentTaskId: 44,
+      tasks: [
+        {
+          id: 44,
+          packageName: companionPackageName,
+          rootActivity: `${companionPackageName}/.modules.search.SearchActivity`,
+          launchedFromPackage: "com.google.android.apps.nexuslauncher",
+        },
+      ],
+    });
+
+    fakeAdb.setForegroundApp({ packageName: settingsPackageName, userId: 0 });
+    fakeAdb.setCommandResponse("shell pm list packages --user 0", {
+      stdout: `package:${settingsPackageName}\n`,
+      stderr: "",
+    });
+    fakeAdb.setCommandResponse("shell dumpsys activity processes", { stdout: "0\n", stderr: "" });
+    fakeObserveScreen.setObserveResult(companionObservation);
+
+    const result = await launchApp.execute(settingsPackageName, false, false);
+
+    expect(result.success).toBe(false);
+    expect(result.verifiedBy).toBeUndefined();
+    expect(result.foregroundActivityPackage).toBeUndefined();
+  });
+
+  test("does not accept a SystemUI overlay over a companion task launched by the app", async () => {
+    fakeTimer.enableAutoAdvance();
+    const settingsPackageName = "com.android.settings";
+    const companionPackageName = "com.google.android.settings.intelligence";
+    const overlayObservation = {
+      ...createObserveResult(companionPackageName, {
+        depth: 0,
+        activities: [],
+        currentTaskId: 44,
+        tasks: [
+          {
+            id: 44,
+            packageName: companionPackageName,
+            rootActivity: `${companionPackageName}/.modules.search.SearchActivity`,
+            launchedFromPackage: settingsPackageName,
+          },
+        ],
+      }),
+      activeWindow: {
+        appId: "com.android.systemui",
+        activityName: "NotificationShade",
+        layoutSeqSum: 1,
+        systemOverlay: true,
+      },
+    };
+
+    fakeAdb.setForegroundApp({ packageName: settingsPackageName, userId: 0 });
+    fakeAdb.setCommandResponse("shell pm list packages --user 0", {
+      stdout: `package:${settingsPackageName}\n`,
+      stderr: "",
+    });
+    fakeAdb.setCommandResponse("shell dumpsys activity processes", { stdout: "0\n", stderr: "" });
+    fakeObserveScreen.setObserveResult(() => overlayObservation);
+
+    const result = await launchApp.execute(settingsPackageName, false, false);
+
+    expect(result.success).toBe(false);
+    expect(result.verifiedBy).toBeUndefined();
+    expect(result.foregroundActivityPackage).toBeUndefined();
+  });
+
   test("does not accept a SystemUI overlay over a task rooted at the launched app", async () => {
     fakeTimer.enableAutoAdvance();
     const settingsPackageName = "com.android.settings";
@@ -551,6 +660,83 @@ describe("LaunchApp", () => {
     expect(result.verifiedBy).toBeUndefined();
     expect(result.foregroundActivityPackage).toBeUndefined();
     expect(fakeObserveScreen.getExecuteCallCount()).toBeGreaterThan(1);
+  });
+
+  test("collapses a notification shade covering the launched Android app", async () => {
+    fakeTimer.enableAutoAdvance();
+    const controller = new AbortController();
+    const notificationShadeObservation = {
+      ...createObserveResult(),
+      activeWindow: {
+        appId: "com.android.systemui",
+        activityName: "NotificationShade",
+        layoutSeqSum: 1,
+        systemOverlay: true,
+      },
+    };
+    const observations = [notificationShadeObservation, createObserveResult(packageName)];
+
+    fakeAdb.setForegroundApp({ packageName, userId: 0 });
+    fakeAdb.setCommandResponse("shell dumpsys activity processes", { stdout: "0\n", stderr: "" });
+    fakeObserveScreen.setObserveResult(
+      () => observations.shift() ?? createObserveResult(packageName),
+    );
+
+    const result = await launchApp.execute(
+      packageName,
+      false,
+      false,
+      undefined,
+      undefined,
+      undefined,
+      controller.signal,
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.observation?.activeWindow?.appId).toBe(packageName);
+    expect(
+      fakeAdb.getExecutedCommands().filter((command) => command === "shell cmd statusbar collapse"),
+    ).toHaveLength(1);
+  });
+
+  test("reports a notification shade blocker after cold boot launch verification times out", async () => {
+    fakeTimer.enableAutoAdvance();
+    const notificationShadeObservation = {
+      ...createObserveResult(),
+      activeWindow: {
+        appId: "com.android.systemui",
+        activityName: "NotificationShade",
+        layoutSeqSum: 1,
+        systemOverlay: true,
+      },
+    };
+
+    fakeAdb.setForegroundApp({ packageName, userId: 0 });
+    fakeAdb.setCommandResponse("shell dumpsys activity processes", { stdout: "0\n", stderr: "" });
+    fakeObserveScreen.setObserveResult(() => notificationShadeObservation);
+
+    const result = await launchApp.execute(packageName, false, true);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("notification shade");
+    expect(result.error).not.toContain("coldBoot: true");
+  });
+
+  test("reports the actual foreground blocker after cold boot launch verification times out", async () => {
+    fakeTimer.enableAutoAdvance();
+    const otherPackageName = "com.example.other";
+
+    fakeAdb.setForegroundApp({ packageName, userId: 0 });
+    fakeAdb.setCommandResponse("shell dumpsys activity processes", { stdout: "0\n", stderr: "" });
+    fakeObserveScreen.setObserveResult(() => createObserveResult(otherPackageName));
+
+    const result = await launchApp.execute(packageName, false, true);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain(otherPackageName);
+    expect(result.error).toContain(packageName);
+    expect(result.error).not.toContain("notification shade");
+    expect(result.error).not.toContain("coldBoot: true");
   });
 
   test("waits for a fresh observation before accepting a rooted helper task", async () => {

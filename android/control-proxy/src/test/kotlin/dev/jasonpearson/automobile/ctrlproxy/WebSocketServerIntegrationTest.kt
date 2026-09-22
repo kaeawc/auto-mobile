@@ -95,8 +95,6 @@ class WebSocketServerIntegrationTest {
       server.stop()
     }
     testScope.cancel()
-    // Minimal cleanup time
-    Thread.sleep(50)
   }
 
   /**

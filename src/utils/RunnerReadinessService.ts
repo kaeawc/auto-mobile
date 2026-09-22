@@ -84,6 +84,8 @@ export interface AndroidCompatibilityResult {
 export interface ReadinessAndroidManager {
   isInstalled(signal?: AbortSignal): Promise<boolean>;
   isEnabled(signal?: AbortSignal): Promise<boolean>;
+  /** Returns whether an unhealthy CtrlProxy accessibility service was rebound. */
+  rebindIfUnhealthy?(): Promise<boolean>;
   isVersionCompatible(): Promise<boolean>;
   enable(): Promise<void>;
   ensureCompatibleVersion(
@@ -233,6 +235,8 @@ interface ReadinessAttemptContext extends RunnerReadinessRequest {
    */
   healthDeadlineMs: number | null;
   phaseElapsedMs: Partial<Record<RunnerReadinessPhase, number>>;
+  ctrlProxyAccessibilityHealthChecked: boolean;
+  ctrlProxyAccessibilityRebindAttempted: boolean;
 }
 
 export class RunnerReadinessService {
@@ -246,6 +250,8 @@ export class RunnerReadinessService {
       ...request,
       healthDeadlineMs: null,
       phaseElapsedMs: {},
+      ctrlProxyAccessibilityHealthChecked: false,
+      ctrlProxyAccessibilityRebindAttempted: false,
     };
     const key = deviceReadinessLockKey(request.device.platform, request.device.deviceId);
     const release = await this.acquireReadinessTurn(context, key);
@@ -389,7 +395,7 @@ export class RunnerReadinessService {
     // this independent request tries to recover a reinstalled or disabled runner.
     manager.resetSetupState();
     await this.setupAndroidRunner(context, manager);
-    await this.waitForResponsiveClient(context, client);
+    await this.waitForResponsiveClient(context, client, manager);
     await this.recoverSystemUiAnrIfPresent(context, client);
   }
 
@@ -481,7 +487,7 @@ export class RunnerReadinessService {
     if (!enabled) {
       await this.runPhase(context, "runner-setup", 1, () => manager.enable());
     }
-    await this.waitForResponsiveClient(context, client);
+    await this.waitForResponsiveClient(context, client, manager);
     await this.recoverSystemUiAnrIfPresent(context, client);
   }
 
@@ -919,6 +925,7 @@ export class RunnerReadinessService {
   private async waitForResponsiveClient(
     context: ReadinessAttemptContext,
     client: ReadinessClient,
+    androidManager?: ReadinessAndroidManager,
   ): Promise<void> {
     // Provisioning is done; open the steady-state health window now so a long
     // cold launch above did not consume it (#5376).
@@ -932,6 +939,7 @@ export class RunnerReadinessService {
       connected = client.isConnected();
       if (!connected) {
         phase = "runner-connect";
+        await this.rebindUnhealthyAndroidAccessibilityService(context, androidManager, attempts);
         connected = await this.runPhase(context, phase, attempts, () =>
           client.waitForConnection(1, 0),
         );
@@ -959,6 +967,25 @@ export class RunnerReadinessService {
       }
     }
     await this.failUnresponsiveClient(context, client, phase, attempts);
+  }
+
+  private async rebindUnhealthyAndroidAccessibilityService(
+    context: ReadinessAttemptContext,
+    manager: ReadinessAndroidManager | undefined,
+    attempts: number,
+  ): Promise<void> {
+    if (
+      context.device.platform !== "android" ||
+      !manager?.rebindIfUnhealthy ||
+      context.ctrlProxyAccessibilityHealthChecked
+    ) {
+      return;
+    }
+    const rebindAttempted = await this.runPhase(context, "runner-connect", attempts, () =>
+      manager.rebindIfUnhealthy!(),
+    );
+    context.ctrlProxyAccessibilityHealthChecked = true;
+    context.ctrlProxyAccessibilityRebindAttempted = rebindAttempted;
   }
 
   /**
@@ -996,7 +1023,11 @@ export class RunnerReadinessService {
       context,
       phase,
       attempts,
-      `runner did not become responsive before the readiness deadline${diagnostic}`,
+      `${
+        phase === "runner-connect" && context.ctrlProxyAccessibilityRebindAttempted
+          ? "CtrlProxy accessibility service was crashed or unbound; rebind attempted, but the runner did not become responsive before the readiness deadline"
+          : "runner did not become responsive before the readiness deadline"
+      }${diagnostic}`,
       { deadlineExhausted: true },
     );
   }

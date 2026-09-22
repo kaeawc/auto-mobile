@@ -1603,6 +1603,13 @@ jobs:
           reuse-configuration-cache: true
           gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
 
+      - name: "Upload Kotlin Unit Test Reports on Failure"
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: kotlin-unit-test-reports
+          path: android/**/build/reports/tests/testDebugUnitTest/
+
       - name: "Generate Kotlin Coverage Badge"
         run: bash scripts/coverage/generate-kotlin-badge.sh
 

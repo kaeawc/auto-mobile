@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { FakeDeviceUtils } from "../../fakes/FakeDeviceUtils";
 import { FakeAvdManager } from "../../fakes/FakeAvdManager";
 import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
@@ -6,6 +6,7 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 import {
   createDeviceImageResourcesHandler,
   DeviceImagesResourceContent,
+  resetAndroidDeviceImageResourceCache,
 } from "../../../src/server/deviceImageResources";
 import { DeviceInfo } from "../../../src/models";
 import { AvdInfo } from "../../../src/utils/android-cmdline-tools/avdmanager";
@@ -24,9 +25,42 @@ describe("Device Image Resources with Fakes", () => {
 
   beforeEach(() => {
     AndroidAvdProvenanceCache.resetForTests();
+    resetAndroidDeviceImageResourceCache();
     fakeDeviceUtils = new FakeDeviceUtils();
     fakeAvdManager = new FakeAvdManager();
     fakeSimCtl = new FakeSimCtlClient();
+  });
+
+  afterEach(() => {
+    resetAndroidDeviceImageResourceCache();
+  });
+
+  test("coalesces and caches the full Android device-image resource snapshot", async () => {
+    const timer = new FakeTimer();
+    fakeDeviceUtils.setDeviceImages("android", []);
+    const handler = createDeviceImageResourcesHandler({
+      deviceManager: fakeDeviceUtils,
+      avdManager: fakeAvdManager,
+      timer,
+    });
+
+    const concurrentResults = await Promise.all(
+      Array.from({ length: 4 }, () => handler.getDeviceImagesForPlatforms(["android"])),
+    );
+
+    expect(concurrentResults).toHaveLength(4);
+    expect(fakeDeviceUtils.getGetDeviceImagesDetailedCalls()).toHaveLength(1);
+
+    await handler.getDeviceImagesForPlatforms(["android"]);
+    expect(fakeDeviceUtils.getGetDeviceImagesDetailedCalls()).toHaveLength(1);
+
+    timer.advanceTime(2_501);
+    await handler.getDeviceImagesForPlatforms(["android"]);
+    expect(fakeDeviceUtils.getGetDeviceImagesDetailedCalls()).toHaveLength(2);
+
+    resetAndroidDeviceImageResourceCache();
+    await handler.getDeviceImagesForPlatforms(["android"]);
+    expect(fakeDeviceUtils.getGetDeviceImagesDetailedCalls()).toHaveLength(3);
   });
 
   describe("createDeviceImageResourcesHandler", () => {

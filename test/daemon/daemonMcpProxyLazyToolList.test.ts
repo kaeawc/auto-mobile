@@ -91,28 +91,343 @@ describe("DaemonMcpProxy.listAdvertisedTools (lazy tools/list — issue #5879)",
     }
   });
 
-  test("once connected, serves the live daemon tool list, not the static surface (AC4)", async () => {
+  test.each(["android", "ios"] as const)(
+    "once connected, advertises only the filtered %s tool list (AC4)",
+    async (platform) => {
+      const liveToolName = `${platform}LiveTool`;
+      const tapOnSchema = {
+        type: "object",
+        properties: { platform: { const: platform } },
+      };
+      const fakeClient = new FakeDaemonClient({
+        daemonMethodResults: new Map([
+          ["tools/list", { tools: [{ name: liveToolName, inputSchema: {} }] }],
+        ]),
+      });
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => fakeClient,
+        daemonManager: matchingDaemonManager(),
+        daemonAvailabilityProbe: async () => true,
+        autoStartDaemon: false,
+        staticToolDefinitionsProvider: () => [{ name: "tapOn", inputSchema: tapOnSchema }],
+      });
+
+      try {
+        // Force a connection via a tool call.
+        await proxy.callTool("observe", {});
+        expect(proxy.isConnected()).toBe(true);
+
+        const tools = await proxy.listAdvertisedTools();
+        expect(tools).toEqual([{ name: liveToolName, inputSchema: {} }]);
+        expect(tools.map((tool) => tool.name)).not.toContain("tapOn");
+      } finally {
+        await proxy.close();
+      }
+    },
+  );
+
+  test("connected fallback retains tapOn without re-advertising plan-only tools", async () => {
     const fakeClient = new FakeDaemonClient({
-      daemonMethodResults: new Map([
-        ["tools/list", { tools: [{ name: "liveOnlyTool", inputSchema: {} }] }],
-      ]),
+      onCallDaemonMethod: (method) => {
+        if (method === "tools/list") {
+          throw new Error("wedged live list");
+        }
+      },
     });
-    const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
     const proxy = new DaemonMcpProxy({
       clientFactory: () => fakeClient,
       daemonManager: matchingDaemonManager(),
+      daemonAvailabilityProbe: async () => true,
       autoStartDaemon: false,
     });
 
     try {
-      // Force a connection via a tool call.
       await proxy.callTool("observe", {});
-      expect(proxy.isConnected()).toBe(true);
+      const toolNames = (await proxy.listAdvertisedTools()).map((tool) => tool.name);
+
+      expect(toolNames).toContain("tapOn");
+      expect(toolNames).not.toContain("barrier");
+      expect(toolNames).not.toContain("criticalSection");
+      expect(toolNames).not.toContain("debugSearch");
+      expect(toolNames).not.toContain("sqlQuery");
+    } finally {
+      await proxy.close();
+    }
+  });
+
+  test("connected fallback retains launch-gated schemas only when the daemon enabled them", async () => {
+    const fakeClient = new FakeDaemonClient({
+      onCallDaemonMethod: (method) => {
+        if (method === "tools/list") {
+          throw new Error("wedged live list");
+        }
+      },
+    });
+    const daemonManager = matchingDaemonManager();
+    daemonManager.statusResult = {
+      ...daemonManager.statusResult,
+      options: { debug: true, embeddedSdk: true },
+    };
+    const proxy = new DaemonMcpProxy({
+      clientFactory: () => fakeClient,
+      daemonManager,
+      daemonAvailabilityProbe: async () => true,
+      autoStartDaemon: false,
+    });
+
+    try {
+      await proxy.callTool("observe", {});
+      const toolNames = (await proxy.listAdvertisedTools()).map((tool) => tool.name);
+
+      expect(toolNames).toContain("debugSearch");
+      expect(toolNames).toContain("sqlQuery");
+    } finally {
+      await proxy.close();
+    }
+  });
+
+  test("connected fallback retains debug schemas when only effective debug is enabled", async () => {
+    const fakeClient = new FakeDaemonClient({
+      daemonMethodResults: new Map([["ide/status", { effectiveDebug: true }]]),
+      onCallDaemonMethod: (method) => {
+        if (method === "tools/list") {
+          throw new Error("wedged live list");
+        }
+      },
+    });
+    const daemonManager = matchingDaemonManager();
+    daemonManager.statusResult = {
+      ...daemonManager.statusResult,
+      effectiveDebug: false,
+      options: { debug: false },
+    };
+    const proxy = new DaemonMcpProxy({
+      clientFactory: () => fakeClient,
+      daemonManager,
+      daemonAvailabilityProbe: async () => true,
+      autoStartDaemon: false,
+    });
+
+    try {
+      await proxy.callTool("observe", {});
+      const toolNames = (await proxy.listAdvertisedTools()).map((tool) => tool.name);
+
+      expect(toolNames).toContain("debugSearch");
+    } finally {
+      await proxy.close();
+    }
+  });
+
+  test("connected fallback omits debug schemas when effective debug is disabled", async () => {
+    const fakeClient = new FakeDaemonClient({
+      daemonMethodResults: new Map([["ide/status", { effectiveDebug: false }]]),
+      onCallDaemonMethod: (method) => {
+        if (method === "tools/list") {
+          throw new Error("wedged live list");
+        }
+      },
+    });
+    const daemonManager = matchingDaemonManager();
+    daemonManager.statusResult = {
+      ...daemonManager.statusResult,
+      effectiveDebug: true,
+      options: { debug: true },
+    };
+    const proxy = new DaemonMcpProxy({
+      clientFactory: () => fakeClient,
+      daemonManager,
+      daemonAvailabilityProbe: async () => true,
+      autoStartDaemon: false,
+    });
+
+    try {
+      await proxy.callTool("observe", {});
+      const toolNames = (await proxy.listAdvertisedTools()).map((tool) => tool.name);
+
+      expect(toolNames).not.toContain("debugSearch");
+    } finally {
+      await proxy.close();
+    }
+  });
+
+  test("serves connected static schemas when the live tools list fails", async () => {
+    const fakeClient = new FakeDaemonClient({
+      onCallDaemonMethod: (method) => {
+        if (method === "tools/list") {
+          throw new Error("wedged live list");
+        }
+      },
+    });
+    const proxy = new DaemonMcpProxy({
+      clientFactory: () => fakeClient,
+      daemonManager: matchingDaemonManager(),
+      daemonAvailabilityProbe: async () => true,
+      autoStartDaemon: false,
+      staticToolDefinitionsProvider: () => [{ name: "tapOn", inputSchema: { type: "object" } }],
+    });
+
+    try {
+      await proxy.callTool("observe", {});
+      await expect(proxy.listAdvertisedTools()).resolves.toEqual([
+        { name: "tapOn", inputSchema: { type: "object" } },
+      ]);
+    } finally {
+      await proxy.close();
+    }
+  });
+
+  test("reconciles a connected static fallback and emits one tools list_changed", async () => {
+    const fakeTimer = new FakeTimer();
+    let liveListFails = true;
+    const liveTool = {
+      name: "liveOnlyTool",
+      inputSchema: { type: "object" },
+      outputSchema: { type: "object" },
+    };
+    const fakeClient = new FakeDaemonClient({
+      daemonMethodResults: new Map([["tools/list", { tools: [liveTool] }]]),
+      onCallDaemonMethod: (method) => {
+        if (method === "tools/list" && liveListFails) {
+          throw new Error("wedged live list");
+        }
+      },
+    });
+    const proxy = new DaemonMcpProxy({
+      clientFactory: () => fakeClient,
+      daemonManager: matchingDaemonManager(),
+      daemonAvailabilityProbe: async () => true,
+      autoStartDaemon: false,
+      timer: fakeTimer,
+      staticToolDefinitionsProvider: () => [{ name: "tapOn", inputSchema: { type: "object" } }],
+    });
+    const kinds: ListChangedKind[] = [];
+    proxy.onListChanged((kind) => kinds.push(kind));
+
+    try {
+      await proxy.callTool("observe", {});
+      await expect(proxy.listAdvertisedTools()).resolves.toEqual([
+        { name: "tapOn", inputSchema: { type: "object" } },
+      ]);
+      expect(fakeTimer.getPendingTimeouts()).toEqual([250]);
+      expect(kinds).toEqual([]);
+
+      liveListFails = false;
+      await fakeTimer.advanceTimeAsync(250);
+      expect(kinds).toEqual(["tools"]);
 
       const tools = await proxy.listAdvertisedTools();
-      expect(tools.map((tool) => tool.name)).toEqual(["liveOnlyTool"]);
+      expect(tools).toEqual([liveTool]);
+      expect(kinds).toEqual(["tools"]);
     } finally {
-      isAvailableSpy.mockRestore();
+      await proxy.close();
+    }
+  });
+
+  test("bounds connected static fallback reconciliation retries", async () => {
+    const fakeTimer = new FakeTimer();
+    const fakeClient = new FakeDaemonClient({
+      onCallDaemonMethod: (method) => {
+        if (method === "tools/list") {
+          throw new Error("wedged live list");
+        }
+      },
+    });
+    const proxy = new DaemonMcpProxy({
+      clientFactory: () => fakeClient,
+      daemonManager: matchingDaemonManager(),
+      daemonAvailabilityProbe: async () => true,
+      autoStartDaemon: false,
+      timer: fakeTimer,
+      staticToolDefinitionsProvider: () => [{ name: "tapOn", inputSchema: {} }],
+    });
+    const kinds: ListChangedKind[] = [];
+    proxy.onListChanged((kind) => kinds.push(kind));
+
+    try {
+      await proxy.callTool("observe", {});
+      await proxy.listAdvertisedTools();
+      expect(fakeTimer.getPendingTimeouts()).toEqual([250]);
+
+      await fakeTimer.advanceTimeAsync(250);
+      expect(fakeTimer.getPendingTimeouts()).toEqual([1_000]);
+      await fakeTimer.advanceTimeAsync(1_000);
+      expect(fakeTimer.getPendingTimeouts()).toEqual([4_000]);
+      await fakeTimer.advanceTimeAsync(4_000);
+
+      expect(fakeTimer.getPendingTimeouts()).toEqual([]);
+      expect(
+        fakeClient.callDaemonMethodCalls.filter((call) => call.method === "tools/list"),
+      ).toHaveLength(4);
+      expect(kinds).toEqual([]);
+    } finally {
+      await proxy.close();
+    }
+  });
+
+  test("close cancels pending connected static fallback reconciliation", async () => {
+    const fakeTimer = new FakeTimer();
+    const fakeClient = new FakeDaemonClient({
+      onCallDaemonMethod: (method) => {
+        if (method === "tools/list") {
+          throw new Error("wedged live list");
+        }
+      },
+    });
+    const proxy = new DaemonMcpProxy({
+      clientFactory: () => fakeClient,
+      daemonManager: matchingDaemonManager(),
+      daemonAvailabilityProbe: async () => true,
+      autoStartDaemon: false,
+      timer: fakeTimer,
+      staticToolDefinitionsProvider: () => [{ name: "tapOn", inputSchema: {} }],
+    });
+    const kinds: ListChangedKind[] = [];
+    proxy.onListChanged((kind) => kinds.push(kind));
+
+    await proxy.callTool("observe", {});
+    await proxy.listAdvertisedTools();
+    expect(fakeTimer.getPendingTimeouts()).toEqual([250]);
+
+    await proxy.close();
+    await fakeTimer.advanceTimeAsync(10_000);
+
+    expect(
+      fakeClient.callDaemonMethodCalls.filter((call) => call.method === "tools/list"),
+    ).toHaveLength(1);
+    expect(kinds).toEqual([]);
+  });
+
+  test("returns malformed live-only definitions as supplied by the daemon", async () => {
+    const fakeClient = new FakeDaemonClient({
+      daemonMethodResults: new Map([
+        [
+          "tools/list",
+          {
+            tools: [
+              { name: "liveOnly", description: "first", inputSchema: {} },
+              { name: "liveOnly", description: "last", inputSchema: {} },
+            ],
+          },
+        ],
+      ]),
+    });
+    const proxy = new DaemonMcpProxy({
+      clientFactory: () => fakeClient,
+      daemonManager: matchingDaemonManager(),
+      daemonAvailabilityProbe: async () => true,
+      autoStartDaemon: false,
+      staticToolDefinitionsProvider: () => [],
+    });
+
+    try {
+      await proxy.callTool("observe", {});
+      const tools = await proxy.listAdvertisedTools();
+
+      expect(tools).toEqual([
+        { name: "liveOnly", description: "first", inputSchema: {} },
+        { name: "liveOnly", description: "last", inputSchema: {} },
+      ]);
+    } finally {
       await proxy.close();
     }
   });

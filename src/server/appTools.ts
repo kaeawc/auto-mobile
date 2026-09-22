@@ -522,27 +522,6 @@ export const setAppPermissionsSchema = withJsonSchemaOverride(
     ]) {
       delete properties[name]?.description;
     }
-    jsonSchema.if = {
-      properties: { action: { const: "reset" } },
-      required: ["action"],
-    };
-    jsonSchema.then = {
-      required: ["permissions"],
-      not: { required: ["userId"] },
-      if: {
-        properties: { platform: { const: "android" } },
-        required: ["platform"],
-      },
-      then: {
-        properties: {
-          permissions: {
-            minItems: 1,
-            maxItems: 1,
-            items: { const: "all" },
-          },
-        },
-      },
-    };
   },
 );
 

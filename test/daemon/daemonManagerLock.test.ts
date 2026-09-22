@@ -5,6 +5,13 @@ import { tmpdir } from "node:os";
 import { DaemonManager } from "../../src/daemon/manager";
 import { parseLockContent } from "../../src/utils/fileLock";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
+
+function unavailableDaemonClient() {
+  const client = new FakeDaemonClient();
+  client.shouldFailConnect = true;
+  return client;
+}
 
 describe("DaemonManager file lock", () => {
   const tempDirs: string[] = [];
@@ -181,7 +188,21 @@ describe("DaemonManager file lock", () => {
         }
       }
 
-      const manager = new TestDaemonManager(undefined, undefined, fakeTimer, lockPath);
+      const manager = new TestDaemonManager(
+        unavailableDaemonClient,
+        undefined,
+        fakeTimer,
+        lockPath,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        { isReachable: async () => false },
+      );
 
       await manager.start();
 
@@ -225,7 +246,21 @@ describe("DaemonManager file lock", () => {
         }
       }
 
-      const manager = new TestDaemonManager(undefined, undefined, fakeTimer, lockPath);
+      const manager = new TestDaemonManager(
+        unavailableDaemonClient,
+        undefined,
+        fakeTimer,
+        lockPath,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        { isReachable: async () => false },
+      );
 
       await expect(manager.start()).rejects.toThrow(
         /Another process is starting the daemon but it failed to become ready[\s\S]*holder-logs[\s\S]*SIMULATOR-B/,
@@ -273,7 +308,21 @@ describe("DaemonManager file lock", () => {
         }
       }
 
-      const manager = new TestDaemonManager(undefined, undefined, fakeTimer, lockPath);
+      const manager = new TestDaemonManager(
+        unavailableDaemonClient,
+        undefined,
+        fakeTimer,
+        lockPath,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        { isReachable: async () => false },
+      );
 
       await expect(manager.start()).rejects.toThrow(
         /Another process is starting the daemon but it failed to become ready[\s\S]*retry-holder-logs[\s\S]*Retry holder failed/,
@@ -316,12 +365,19 @@ describe("DaemonManager file lock", () => {
       }
 
       const manager = new TestDaemonManager(
-        undefined,
+        unavailableDaemonClient,
         undefined,
         fakeTimer,
         lockPath,
         pidPath,
         socketPath,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        { isReachable: async () => false },
       );
 
       await expect(manager.start()).rejects.toThrow();

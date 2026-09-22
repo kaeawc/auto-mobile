@@ -105,52 +105,132 @@ export function withCanonicalDiscriminatedUnionJsonSchema<T extends z.ZodTypeAny
 ): T {
   const advertisedSchema = description ? (schema.describe(description) as T) : schema;
   return withJsonSchemaOverride(advertisedSchema, (jsonSchema) => {
-    if (Array.isArray(jsonSchema.anyOf)) {
-      jsonSchema.oneOf = jsonSchema.anyOf;
-      delete jsonSchema.anyOf;
-    }
     if (description) {
       jsonSchema.description = description;
     }
   });
 }
 
-export function canonicalizeDiscriminatedUnionJsonSchema(value: unknown): void {
-  if (Array.isArray(value)) {
-    value.forEach(canonicalizeDiscriminatedUnionJsonSchema);
-    return;
+/**
+ * Normalize an advertised tool INPUT JSON Schema in place to the Anthropic
+ * `input_schema` supported subset. Anthropic rejects root-level combinators and
+ * does not support `oneOf`/`if`/`then`/`else`/`not` (even nested). Nested
+ * `anyOf`/`allOf` are supported and preserved. This ONLY mutates the advertised
+ * JSON; the source-of-truth zod schema (runtime validation) is untouched.
+ */
+export function enforceAnthropicToolSchemaSubset(jsonSchema: Record<string, unknown>): void {
+  normalizeAnthropicSchemaNode(jsonSchema);
+
+  if (Object.hasOwn(jsonSchema, "allOf")) {
+    const allOf = jsonSchema.allOf;
+    if (Array.isArray(allOf)) {
+      mergeRootAllOf(jsonSchema, allOf);
+    }
+    delete jsonSchema.allOf;
   }
+
+  for (const key of ["anyOf", "oneOf", "not", "if", "then", "else"] as const) {
+    if (Object.hasOwn(jsonSchema, key)) {
+      throw new Error(`Anthropic input schema has unsupported root ${key}`);
+    }
+  }
+
+  if (jsonSchema.type !== "object") {
+    throw new Error("Anthropic input schema root must have type object");
+  }
+}
+
+function normalizeAnthropicSchemaNode(node: Record<string, unknown>): void {
+  delete node.if;
+  delete node.then;
+  delete node.else;
+  delete node.not;
+
+  const oneOf = node.oneOf;
+  if (Array.isArray(oneOf)) {
+    const anyOf = node.anyOf;
+    node.anyOf = Array.isArray(anyOf) ? [...anyOf, ...oneOf] : oneOf;
+  }
+  delete node.oneOf;
+
+  normalizeSchemaObjectValues(node.properties);
+  normalizeSchemaObjectValues(node.$defs);
+  normalizeSchemaObjectValues(node.definitions);
+  normalizeSchemaNodes(node.items);
+  normalizeSchemaArray(node.prefixItems);
+  normalizeSchemaNode(node.additionalProperties);
+  normalizeSchemaArray(node.anyOf);
+  normalizeSchemaArray(node.allOf);
+  normalizeSchemaNode(node.contains);
+  normalizeSchemaObjectValues(node.patternProperties);
+
+  pruneEmptySchemaBranches(node, "anyOf");
+  pruneEmptySchemaBranches(node, "allOf");
+}
+
+function normalizeSchemaObjectValues(value: unknown): void {
   if (!isJsonObject(value)) {
     return;
   }
-
-  if (Array.isArray(value.anyOf) && hasUniqueDiscriminator(value.anyOf)) {
-    value.oneOf = value.anyOf;
-    delete value.anyOf;
-  }
-  Object.values(value).forEach(canonicalizeDiscriminatedUnionJsonSchema);
+  Object.values(value).forEach(normalizeSchemaNode);
 }
 
-function hasUniqueDiscriminator(branches: unknown[]): boolean {
-  if (branches.length < 2 || !branches.every(isJsonObject)) {
-    return false;
+function normalizeSchemaNode(value: unknown): void {
+  if (isJsonObject(value)) {
+    normalizeAnthropicSchemaNode(value);
   }
-  const firstProperties = getJsonObject(branches[0].properties);
-  if (!firstProperties) {
-    return false;
-  }
-  return Object.keys(firstProperties).some((key) => hasUniqueConstValues(branches, key));
 }
 
-function hasUniqueConstValues(branches: Record<string, unknown>[], key: string): boolean {
-  if (!branches.every((branch) => getRequiredProperties(branch).includes(key))) {
-    return false;
+function normalizeSchemaNodes(value: unknown): void {
+  if (Array.isArray(value)) {
+    value.forEach(normalizeSchemaNode);
+  } else {
+    normalizeSchemaNode(value);
   }
-  const values = branches.map((branch) => getPropertyConst(branch, key));
-  if (values.some((entry) => !entry.found)) {
-    return false;
+}
+
+function normalizeSchemaArray(value: unknown): void {
+  if (Array.isArray(value)) {
+    value.forEach(normalizeSchemaNode);
   }
-  return new Set(values.map((entry) => JSON.stringify(entry.value))).size === branches.length;
+}
+
+function pruneEmptySchemaBranches(node: Record<string, unknown>, key: "anyOf" | "allOf"): void {
+  const branches = node[key];
+  if (!Array.isArray(branches)) {
+    return;
+  }
+  const nonEmptyBranches = branches.filter(
+    (branch) => !isJsonObject(branch) || Object.keys(branch).length > 0,
+  );
+  if (nonEmptyBranches.length === 0) {
+    delete node[key];
+  } else {
+    node[key] = nonEmptyBranches;
+  }
+}
+
+function mergeRootAllOf(root: Record<string, unknown>, allOf: unknown[]): void {
+  const rootProperties = getJsonObject(root.properties) ?? {};
+  const rootRequired = getRequiredProperties(root);
+
+  for (const branch of allOf) {
+    if (!isJsonObject(branch)) {
+      continue;
+    }
+    const branchProperties = getJsonObject(branch.properties);
+    if (branchProperties) {
+      Object.assign(rootProperties, branchProperties);
+    }
+    rootRequired.push(...getRequiredProperties(branch));
+  }
+
+  if (Object.keys(rootProperties).length > 0) {
+    root.properties = rootProperties;
+  }
+  if (rootRequired.length > 0) {
+    root.required = [...new Set(rootRequired)];
+  }
 }
 
 function getRequiredProperties(branch: Record<string, unknown>): string[] {
@@ -158,17 +238,6 @@ function getRequiredProperties(branch: Record<string, unknown>): string[] {
   return Array.isArray(required) && required.every((value) => typeof value === "string")
     ? required
     : [];
-}
-
-function getPropertyConst(
-  branch: Record<string, unknown>,
-  key: string,
-): { found: boolean; value?: unknown } {
-  const properties = getJsonObject(branch.properties);
-  const property = properties && getJsonObject(properties[key]);
-  return property && Object.hasOwn(property, "const")
-    ? { found: true, value: property.const }
-    : { found: false };
 }
 
 function getJsonObject(value: unknown): Record<string, unknown> | undefined {
@@ -208,7 +277,7 @@ export function isInjectedDeviceIdSchema(zodSchema: object): boolean {
  * an `anyOf` where every branch re-inlines a full object schema — costly in
  * `tools/list`. When a named property matches that pattern (each branch a strict
  * object requiring exactly one key), rewrite it to a single flat object that
- * lists all keys once with `oneOf: [{required:[k]}, ...]` — same accepted shape
+ * lists all keys once with `anyOf: [{required:[k]}, ...]` — same accepted shape
  * and the same "exactly one" hint at roughly half the tokens.
  *
  * Runtime validation is unaffected: this only mutates the advertised JSON schema
@@ -230,7 +299,7 @@ export function compactExclusiveSelectorProperties(
       continue;
     }
     const merged: Record<string, unknown> = {};
-    const oneOf: Array<{ required: string[] }> = [];
+    const anyOf: Array<{ required: string[] }> = [];
     let matchesPattern = true;
     for (const branch of branches) {
       const b = branch as Record<string, any>;
@@ -249,7 +318,7 @@ export function compactExclusiveSelectorProperties(
         break;
       }
       merged[key] = b.properties[key];
-      oneOf.push({ required: [key] });
+      anyOf.push({ required: [key] });
     }
     if (!matchesPattern) {
       continue;
@@ -258,11 +327,11 @@ export function compactExclusiveSelectorProperties(
       type: "object",
       additionalProperties: false,
       properties: merged,
-      oneOf,
     };
     if (typeof prop.description === "string") {
       compact.description = prop.description;
     }
+    compact.anyOf = anyOf;
     props[name] = compact;
   }
 }

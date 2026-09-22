@@ -54,7 +54,7 @@ import {
   APP_ID_PATTERN,
   applyJsonSchemaOverride,
   applyPostFlattenJsonSchemaOverride,
-  canonicalizeDiscriminatedUnionJsonSchema,
+  enforceAnthropicToolSchemaSubset,
   isInjectedDeviceIdSchema,
 } from "./toolSchemaHelpers";
 import {
@@ -187,7 +187,7 @@ function constrainAdvertisedAppIdProperties(value: unknown): void {
 
 function toAdvertisedJsonSchema(
   schema: any,
-  options: { constrainAppIds: boolean },
+  options: { constrainAppIds: boolean; anthropicSubset?: boolean },
 ): Record<string, unknown> {
   const jsonSchema = toJSONSchema(schema, {
     override: ({ zodSchema, jsonSchema }) => {
@@ -201,7 +201,6 @@ function toAdvertisedJsonSchema(
       }
     },
   });
-  canonicalizeDiscriminatedUnionJsonSchema(jsonSchema);
   const flattened = flattenTopLevelUnion(jsonSchema);
   // Re-assert any wire contract that must survive union flattening (e.g. the
   // observe join keys required on the successful-observation arm, issue #7018):
@@ -211,6 +210,9 @@ function toAdvertisedJsonSchema(
   applyPostFlattenJsonSchemaOverride(schema, flattened);
   if (options.constrainAppIds) {
     constrainAdvertisedAppIdProperties(flattened);
+  }
+  if (options.anthropicSubset) {
+    enforceAnthropicToolSchemaSubset(flattened);
   }
   return flattened;
 }
@@ -1920,7 +1922,13 @@ export class ToolRegistryClass {
         description: string;
         inputSchema: Record<string, unknown>;
         outputSchema?: Record<string, unknown>;
-        _meta?: { "anthropic/alwaysLoad"?: boolean; ui?: { resourceUri: string } };
+        _meta?: {
+          "anthropic/alwaysLoad"?: boolean;
+          "automobile/debugOnly"?: boolean;
+          "automobile/embeddedSdkOnly"?: boolean;
+          "automobile/planOnly"?: boolean;
+          ui?: { resourceUri: string };
+        };
       } = {
         name: tool.name,
         description: tool.description,
@@ -1939,6 +1947,18 @@ export class ToolRegistryClass {
       }
       if (alwaysLoad) {
         definition._meta = { ...definition._meta, "anthropic/alwaysLoad": true };
+      }
+      // The committed static catalog includes unavailable tools for schema
+      // completeness. Preserve enough generated metadata for the proxy to
+      // exclude plan-only tools after a live connection is available.
+      if (tool.planOnly) {
+        definition._meta = { ...definition._meta, "automobile/planOnly": true };
+      }
+      if (tool.debugOnly) {
+        definition._meta = { ...definition._meta, "automobile/debugOnly": true };
+      }
+      if (tool.embeddedSdkOnly) {
+        definition._meta = { ...definition._meta, "automobile/embeddedSdkOnly": true };
       }
       // MCP Apps UI pointer (issue #4669) — additive; non-Apps hosts ignore it.
       if (tool.appUiResourceUri) {
@@ -2006,7 +2026,10 @@ export class ToolRegistryClass {
     let cached = this.toolDefinitionSchemaCache.get(tool.name);
     if (!cached) {
       cached = {
-        inputSchema: toAdvertisedJsonSchema(tool.schema, { constrainAppIds: true }),
+        inputSchema: toAdvertisedJsonSchema(tool.schema, {
+          constrainAppIds: true,
+          anthropicSubset: true,
+        }),
         outputSchemasByRuntimeFlags: new Map(),
       };
       this.toolDefinitionSchemaCache.set(tool.name, cached);

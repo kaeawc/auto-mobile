@@ -167,7 +167,7 @@ describe("Tool Registration Validation (Integration Tests)", () => {
     }
   });
 
-  test("committed tapOn schema gates semantic link activation to plain taps", async () => {
+  test("committed tapOn schema leaves semantic link activation constraints to runtime validation", async () => {
     const fs = await import("fs/promises");
     const path = await import("path");
     const schemaPath = path.join(process.cwd(), "schemas", "tool-definitions.json");
@@ -180,15 +180,15 @@ describe("Tool Registration Validation (Integration Tests)", () => {
 
     expect(validate({ ...baseInput, platform: "android", action: "tap" })).toBe(true);
     expect(validate({ ...baseInput, platform: "ios", action: "tap" })).toBe(true);
-    expect(validate({ ...baseInput, platform: "android", action: "focus" })).toBe(false);
-    expect(validate({ ...baseInput, platform: "android", retryIfNoChange: true })).toBe(false);
+    expect(validate({ ...baseInput, platform: "android", action: "focus" })).toBe(true);
+    expect(validate({ ...baseInput, platform: "android", retryIfNoChange: true })).toBe(true);
     expect(
       validate({
         ...baseInput,
         platform: "android",
         subtext: { text: "Privacy Policy" },
       }),
-    ).toBe(false);
+    ).toBe(true);
     expect(
       validate({
         platform: "android",
@@ -196,7 +196,7 @@ describe("Tool Registration Validation (Integration Tests)", () => {
         subtext: { text: "Terms of Service" },
         index: 1,
       }),
-    ).toBe(false);
+    ).toBe(true);
     expect(
       validate({
         platform: "android",
@@ -204,7 +204,7 @@ describe("Tool Registration Validation (Integration Tests)", () => {
         subtext: { text: "Terms of Service" },
         selectionStrategy: "random",
       }),
-    ).toBe(false);
+    ).toBe(true);
   });
 
   // R9 (issue #4183): a negative assertion so the compile check cannot silently

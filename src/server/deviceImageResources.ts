@@ -32,6 +32,8 @@ import {
   type StableConfiguredDeviceImage,
 } from "../utils/configuredDeviceInventory";
 import { describeDevice, projectConfiguredImage, type ConfiguredImage } from "./deviceDescription";
+import { TTLCache } from "../utils/cache/Cache";
+import { SingleFlight } from "../utils/cache/SingleFlight";
 
 /**
  * Wall-clock budget for the COMPLETE Android resource path — the device-image
@@ -44,6 +46,29 @@ import { describeDevice, projectConfiguredImage, type ConfiguredImage } from "./
  * in-flight avdmanager/sdkmanager child on timeout.
  */
 export const ANDROID_PROVISIONING_CATALOG_BUDGET_MS = 9_000;
+
+const ANDROID_DEVICE_IMAGE_RESOURCE_CACHE_TTL_MS = 2_500; // Stay below adb's ~5s device-list cache.
+let androidDeviceImageResourceCache: TTLCache<string, PlatformResourceResult> | null = null;
+let androidDeviceImageResourceSingleFlight = new SingleFlight<string, PlatformResourceResult>();
+let androidDeviceImageResourceGeneration = 0;
+let androidDeviceImageResourcePublishedGeneration = 0;
+
+function getAndroidDeviceImageResourceCache(
+  timer: Timer,
+): TTLCache<string, PlatformResourceResult> {
+  if (!androidDeviceImageResourceCache) {
+    androidDeviceImageResourceCache = new TTLCache(timer, {
+      ttlMs: ANDROID_DEVICE_IMAGE_RESOURCE_CACHE_TTL_MS,
+    });
+  }
+  return androidDeviceImageResourceCache;
+}
+
+export function resetAndroidDeviceImageResourceCache(): void {
+  androidDeviceImageResourceCache = null;
+  androidDeviceImageResourceSingleFlight = new SingleFlight();
+  androidDeviceImageResourcePublishedGeneration = ++androidDeviceImageResourceGeneration;
+}
 
 // Resource URIs
 export const DEVICE_IMAGE_RESOURCE_URIS = {
@@ -337,6 +362,29 @@ async function buildIosResourceResult(
 }
 
 async function generateAndroidResource(
+  deviceManager: PlatformDeviceManager,
+  avdManager: AvdManager,
+  timer: Timer,
+  budgetMs: number,
+): Promise<PlatformResourceResult> {
+  const cacheKey = "android";
+  const cached = getAndroidDeviceImageResourceCache(timer).get(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
+  return await androidDeviceImageResourceSingleFlight.run(cacheKey, async () => {
+    const generation = ++androidDeviceImageResourceGeneration;
+    const result = await computeAndroidResource(deviceManager, avdManager, timer, budgetMs);
+    if (generation >= androidDeviceImageResourcePublishedGeneration) {
+      androidDeviceImageResourcePublishedGeneration = generation;
+      getAndroidDeviceImageResourceCache(timer).set(cacheKey, result);
+    }
+    return result;
+  });
+}
+
+async function computeAndroidResource(
   deviceManager: PlatformDeviceManager,
   avdManager: AvdManager,
   timer: Timer,

@@ -52,6 +52,11 @@ export const STALE_PREFETCH_SWEEP_DEADLINE_MS = 5_000;
 export interface CtrlProxyManager extends ProxyManager {
   setup(force?: boolean, perf?: PerformanceTracker): Promise<ProxySetupResult>;
   isEnabled(): Promise<boolean>;
+  /**
+   * Re-toggle CtrlProxy's accessibility-service entry when dumpsys shows it is
+   * crashed or unbound. Returns whether a rebind was attempted.
+   */
+  rebindIfUnhealthy?(): Promise<boolean>;
   isEnabledForUser(userId: number): Promise<boolean>;
   getInstalledApkSha256(): Promise<string | null>;
   isVersionCompatible(): Promise<boolean>;
@@ -114,6 +119,8 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   public static readonly ACTIVITY = "dev.jasonpearson.automobile.ctrlproxy.MainActivity";
   /** Package name used before the rename to CtrlProxy — uninstalled opportunistically on device setup */
   private static readonly LEGACY_PACKAGE = "dev.jasonpearson.automobile.accessibilityservice";
+
+  private static readonly ACCESSIBILITY_SERVICE_COMPONENT = `${AndroidCtrlProxyManager.PACKAGE}/${AndroidCtrlProxyManager.PACKAGE}.CtrlProxy`;
 
   // Static cache for service availability
   private cachedAvailability: { isAvailable: boolean; timestamp: number } | null = null;
@@ -848,6 +855,107 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       logger.warn(`[CTRL_PROXY] Error checking enabled status: ${error}`);
       return false;
     }
+  }
+
+  /**
+   * Check the framework's binding state separately from the secure-setting
+   * configuration. A configured service can remain listed after Android moves
+   * it to "Crashed services", so isEnabled() alone cannot establish health.
+   */
+  async isAccessibilityServiceHealthy(): Promise<boolean> {
+    const result = await this.adb.executeCommand("shell dumpsys accessibility");
+    const diagnostic = `${result.stdout}\n${result.stderr}`;
+    if (isAndroidFrameworkUnavailable(diagnostic)) {
+      throw new ActionableError(diagnostic);
+    }
+
+    const boundServices = AndroidCtrlProxyManager.accessibilityServiceSection(
+      diagnostic,
+      "Bound services",
+    );
+    const crashedServices = AndroidCtrlProxyManager.accessibilityServiceSection(
+      diagnostic,
+      "Crashed services",
+    );
+    const isBound = boundServices.includes(AndroidCtrlProxyManager.PACKAGE);
+    const isCrashed = crashedServices.includes(AndroidCtrlProxyManager.PACKAGE);
+    const healthy = isBound && !isCrashed;
+    logger.debug(
+      `[CTRL_PROXY] Accessibility service binding status: ${
+        healthy ? "bound" : isCrashed ? "crashed" : "unbound"
+      }`,
+    );
+    return healthy;
+  }
+
+  /**
+   * Remove CtrlProxy from the configured service list and add it back when
+   * Android reports it crashed or unbound. Writing the intermediate list keeps
+   * every other enabled accessibility service intact while forcing a rebind.
+   */
+  async rebindIfUnhealthy(): Promise<boolean> {
+    let rebindAttempted = false;
+    try {
+      if (await this.isAccessibilityServiceHealthy()) {
+        return false;
+      }
+
+      const result = await this.adb.executeCommand(
+        "shell settings get secure enabled_accessibility_services",
+      );
+      const diagnostic = `${result.stdout}\n${result.stderr}`;
+      if (isAndroidFrameworkUnavailable(diagnostic)) {
+        throw new ActionableError(diagnostic);
+      }
+      const otherServices = AndroidCtrlProxyManager.accessibilityServices(result.stdout).filter(
+        (service) => !service.includes(AndroidCtrlProxyManager.PACKAGE),
+      );
+      const servicesWithoutCtrlProxy = otherServices.join(":");
+      const servicesWithCtrlProxy = [
+        ...otherServices,
+        AndroidCtrlProxyManager.ACCESSIBILITY_SERVICE_COMPONENT,
+      ].join(":");
+
+      rebindAttempted = true;
+      await this.adb.executeCommand(
+        `shell settings put secure enabled_accessibility_services "${servicesWithoutCtrlProxy}"`,
+      );
+      await this.adb.executeCommand(
+        `shell settings put secure enabled_accessibility_services "${servicesWithCtrlProxy}"`,
+      );
+      logger.info(
+        "[CTRL_PROXY] Accessibility service was crashed or unbound; rebind attempted via settings",
+      );
+      return true;
+    } catch (error) {
+      throw toActionableError(
+        error,
+        "Failed to rebind crashed or unbound CtrlProxy accessibility service",
+      );
+    } finally {
+      if (rebindAttempted) {
+        // A rebind changes both the configured and framework-visible state.
+        this.clearAvailabilityCache();
+      }
+    }
+  }
+
+  private static accessibilityServiceSection(output: string, name: string): string {
+    const header = `${name}:`;
+    const start = output.indexOf(header);
+    if (start < 0) {
+      return "";
+    }
+    const end = output.indexOf("\n", start);
+    return output.slice(start + header.length, end < 0 ? undefined : end);
+  }
+
+  private static accessibilityServices(value: string): string[] {
+    const trimmed = value.trim();
+    if (trimmed === "" || trimmed === "null") {
+      return [];
+    }
+    return trimmed.split(":").filter((service) => service !== "");
   }
 
   /**

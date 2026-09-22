@@ -2113,15 +2113,13 @@ export class DaemonMcpProxy {
    * #5879). A wedged or absent daemon therefore never hides the tool surface at
    * `tools/list` time; the client still gets one clear error on first use.
    *
-   * Once a connection is established, live definitions augment the static
-   * surface, but cannot remove a static definition. Connection-profile updates
-   * and session binding can transiently narrow the daemon's live `tools/list`
-   * response while it is still legal for a caller to enable or invoke a tool.
-   * Keeping the schema superset prevents ToolSearch clients from losing the
-   * name and input schema needed to reach that capability; the live call gate
-   * remains authoritative for whether an advertised tool can execute. The first
-   * successful connect after a static serve emits a tools `list_changed` (see
-   * {@link doConnect}) so the client re-fetches enhanced live definitions.
+   * Once a connection is established, this returns the daemon's live,
+   * session-scoped list for this connection. The static superset is used only
+   * for the cold bootstrap above and if the live list fails below. Connection-
+   * profile updates and session binding can transiently narrow the live
+   * `tools/list` response; the explicit tools `list_changed` notifications and
+   * cache invalidation for those updates prompt clients to re-fetch under the
+   * current scope, so a stale-superset merge is not needed for completeness.
    *
    * The static path deliberately does NOT call `throwIfBoundSessionUnavailable()`
    * (unlike {@link listTools}): re-coupling `tools/list` to daemon/session state
@@ -2134,12 +2132,13 @@ export class DaemonMcpProxy {
       this.servedStaticToolList = true;
       return this.staticToolDefinitionsProvider();
     }
-    const daemonStatus = await this.reconciliationStatus();
-    const fallbackOptions = await this.connectedFallbackDaemonOptions(daemonStatus);
-    const staticTools = this.connectedStaticToolDefinitionsProvider(fallbackOptions);
-    let liveTools: ProxiedToolDefinition[];
+    // The live per-connection list is the post-connect contract (#5879); the
+    // static fallback is only built when the live call fails, so its cost — a
+    // reconciliationStatus() + connectedFallbackDaemonOptions() ide/status RPC —
+    // stays off the success path (and can't fail a list whose live call would
+    // have succeeded, e.g. daemonManager.status() throwing during a restart).
     try {
-      liveTools = await this.listTools();
+      return await this.listTools();
     } catch (error) {
       if (
         error instanceof DaemonBoundSessionExpiredError ||
@@ -2154,14 +2153,10 @@ export class DaemonMcpProxy {
         error,
       );
       this.scheduleConnectedFallbackReconcile();
-      return staticTools;
+      const daemonStatus = await this.reconciliationStatus();
+      const fallbackOptions = await this.connectedFallbackDaemonOptions(daemonStatus);
+      return this.connectedStaticToolDefinitionsProvider(fallbackOptions);
     }
-    const liveToolsByName = new Map(liveTools.map((tool) => [tool.name, tool]));
-    const staticToolNames = new Set(staticTools.map((tool) => tool.name));
-    return [
-      ...staticTools.map((tool) => liveToolsByName.get(tool.name) ?? tool),
-      ...[...liveToolsByName.values()].filter((tool) => !staticToolNames.has(tool.name)),
-    ];
   }
 
   private async connectedFallbackDaemonOptions(daemonStatus: DaemonStatus): Promise<DaemonOptions> {

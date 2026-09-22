@@ -92,7 +92,7 @@ describe("DaemonMcpProxy.listAdvertisedTools (lazy tools/list — issue #5879)",
   });
 
   test.each(["android", "ios"] as const)(
-    "once connected, preserves the tapOn schema for a filtered %s tool list (AC4)",
+    "once connected, advertises only the filtered %s tool list (AC4)",
     async (platform) => {
       const liveToolName = `${platform}LiveTool`;
       const tapOnSchema = {
@@ -118,8 +118,8 @@ describe("DaemonMcpProxy.listAdvertisedTools (lazy tools/list — issue #5879)",
         expect(proxy.isConnected()).toBe(true);
 
         const tools = await proxy.listAdvertisedTools();
-        expect(tools.map((tool) => tool.name)).toEqual(["tapOn", liveToolName]);
-        expect(tools.find((tool) => tool.name === "tapOn")?.inputSchema).toEqual(tapOnSchema);
+        expect(tools).toEqual([{ name: liveToolName, inputSchema: {} }]);
+        expect(tools.map((tool) => tool.name)).not.toContain("tapOn");
       } finally {
         await proxy.close();
       }
@@ -128,9 +128,11 @@ describe("DaemonMcpProxy.listAdvertisedTools (lazy tools/list — issue #5879)",
 
   test("connected fallback retains tapOn without re-advertising plan-only tools", async () => {
     const fakeClient = new FakeDaemonClient({
-      daemonMethodResults: new Map([
-        ["tools/list", { tools: [{ name: "liveOnlyTool", inputSchema: {} }] }],
-      ]),
+      onCallDaemonMethod: (method) => {
+        if (method === "tools/list") {
+          throw new Error("wedged live list");
+        }
+      },
     });
     const proxy = new DaemonMcpProxy({
       clientFactory: () => fakeClient,
@@ -144,7 +146,6 @@ describe("DaemonMcpProxy.listAdvertisedTools (lazy tools/list — issue #5879)",
       const toolNames = (await proxy.listAdvertisedTools()).map((tool) => tool.name);
 
       expect(toolNames).toContain("tapOn");
-      expect(toolNames).toContain("liveOnlyTool");
       expect(toolNames).not.toContain("barrier");
       expect(toolNames).not.toContain("criticalSection");
       expect(toolNames).not.toContain("debugSearch");
@@ -156,7 +157,11 @@ describe("DaemonMcpProxy.listAdvertisedTools (lazy tools/list — issue #5879)",
 
   test("connected fallback retains launch-gated schemas only when the daemon enabled them", async () => {
     const fakeClient = new FakeDaemonClient({
-      daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+      onCallDaemonMethod: (method) => {
+        if (method === "tools/list") {
+          throw new Error("wedged live list");
+        }
+      },
     });
     const daemonManager = matchingDaemonManager();
     daemonManager.statusResult = {
@@ -183,10 +188,12 @@ describe("DaemonMcpProxy.listAdvertisedTools (lazy tools/list — issue #5879)",
 
   test("connected fallback retains debug schemas when only effective debug is enabled", async () => {
     const fakeClient = new FakeDaemonClient({
-      daemonMethodResults: new Map([
-        ["ide/status", { effectiveDebug: true }],
-        ["tools/list", { tools: [] }],
-      ]),
+      daemonMethodResults: new Map([["ide/status", { effectiveDebug: true }]]),
+      onCallDaemonMethod: (method) => {
+        if (method === "tools/list") {
+          throw new Error("wedged live list");
+        }
+      },
     });
     const daemonManager = matchingDaemonManager();
     daemonManager.statusResult = {
@@ -213,10 +220,12 @@ describe("DaemonMcpProxy.listAdvertisedTools (lazy tools/list — issue #5879)",
 
   test("connected fallback omits debug schemas when effective debug is disabled", async () => {
     const fakeClient = new FakeDaemonClient({
-      daemonMethodResults: new Map([
-        ["ide/status", { effectiveDebug: false }],
-        ["tools/list", { tools: [] }],
-      ]),
+      daemonMethodResults: new Map([["ide/status", { effectiveDebug: false }]]),
+      onCallDaemonMethod: (method) => {
+        if (method === "tools/list") {
+          throw new Error("wedged live list");
+        }
+      },
     });
     const daemonManager = matchingDaemonManager();
     daemonManager.statusResult = {
@@ -307,7 +316,7 @@ describe("DaemonMcpProxy.listAdvertisedTools (lazy tools/list — issue #5879)",
       expect(kinds).toEqual(["tools"]);
 
       const tools = await proxy.listAdvertisedTools();
-      expect(tools).toEqual([{ name: "tapOn", inputSchema: { type: "object" } }, liveTool]);
+      expect(tools).toEqual([liveTool]);
       expect(kinds).toEqual(["tools"]);
     } finally {
       await proxy.close();
@@ -388,7 +397,7 @@ describe("DaemonMcpProxy.listAdvertisedTools (lazy tools/list — issue #5879)",
     expect(kinds).toEqual([]);
   });
 
-  test("deduplicates malformed live-only definitions by name", async () => {
+  test("returns malformed live-only definitions as supplied by the daemon", async () => {
     const fakeClient = new FakeDaemonClient({
       daemonMethodResults: new Map([
         [
@@ -414,8 +423,10 @@ describe("DaemonMcpProxy.listAdvertisedTools (lazy tools/list — issue #5879)",
       await proxy.callTool("observe", {});
       const tools = await proxy.listAdvertisedTools();
 
-      expect(tools).toHaveLength(1);
-      expect(tools[0]?.description).toBe("last");
+      expect(tools).toEqual([
+        { name: "liveOnly", description: "first", inputSchema: {} },
+        { name: "liveOnly", description: "last", inputSchema: {} },
+      ]);
     } finally {
       await proxy.close();
     }

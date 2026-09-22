@@ -393,6 +393,17 @@ data class SetTextResult(
 ) : WebSocketResponse()
 
 @Serializable
+@SerialName("commit_text_result")
+data class CommitTextResult(
+  override val timestamp: Long,
+  val requestId: String? = null,
+  val success: Boolean,
+  val totalTimeMs: Long,
+  val error: String? = null,
+  val perfTiming: String? = null,
+) : WebSocketResponse()
+
+@Serializable
 @SerialName("ime_action_result")
 data class ImeActionResult(
   override val timestamp: Long,

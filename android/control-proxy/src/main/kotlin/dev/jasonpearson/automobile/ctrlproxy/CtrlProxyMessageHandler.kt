@@ -22,6 +22,7 @@ import dev.jasonpearson.automobile.protocol.RemovePreference
 import dev.jasonpearson.automobile.protocol.RequestAction
 import dev.jasonpearson.automobile.protocol.RequestActivateAccessibilityLink
 import dev.jasonpearson.automobile.protocol.RequestClipboard
+import dev.jasonpearson.automobile.protocol.RequestCommitText
 import dev.jasonpearson.automobile.protocol.RequestDeviceInfo
 import dev.jasonpearson.automobile.protocol.RequestDrag
 import dev.jasonpearson.automobile.protocol.RequestGestureEnd
@@ -264,6 +265,8 @@ class CtrlProxyMessageHandler(
           )
         }
       is RequestInsertText -> actions.requestInsertText(request.requestId, request.text)
+      is RequestCommitText ->
+        actions.requestCommitText(request.requestId, request.text, request.priorImeId)
       is RequestImeAction ->
         if (request.frameContext == null) {
           actions.requestImeAction(request.requestId, request.action)

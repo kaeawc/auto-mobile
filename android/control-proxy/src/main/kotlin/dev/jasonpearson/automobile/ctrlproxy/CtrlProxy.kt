@@ -31,6 +31,7 @@ import android.view.View
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import dev.jasonpearson.automobile.ctrlproxy.ime.CtrlProxyIme
 import dev.jasonpearson.automobile.ctrlproxy.models.DisplayCutoutInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ElementBounds
 import dev.jasonpearson.automobile.ctrlproxy.models.FrameMetricsSnapshot
@@ -1982,6 +1983,32 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   override fun requestInsertText(requestId: String?, text: String) =
     performInsertText(requestId, text)
+
+  override fun requestCommitText(requestId: String?, text: String, priorImeId: String?) {
+    val start = System.currentTimeMillis()
+    val ime = CtrlProxyIme.current()
+    if (ime == null) {
+      launchRequestScope(requestId) {
+        broadcastCommitTextResult(
+          requestId,
+          false,
+          "IME not active; ime set required",
+          System.currentTimeMillis() - start,
+        )
+      }
+      return
+    }
+    ime.commitText(text, priorImeId) { result ->
+      launchRequestScope(requestId) {
+        broadcastCommitTextResult(
+          requestId,
+          result.success,
+          result.error,
+          System.currentTimeMillis() - start,
+        )
+      }
+    }
+  }
 
   override fun requestImeAction(requestId: String?, action: String) =
     performImeAction(requestId, action)
@@ -5944,6 +5971,34 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         }
       }
       Log.d(TAG, "Broadcasted set text result to ${webSocketServer.getConnectionCount()} clients")
+    }
+  }
+
+  private suspend fun broadcastCommitTextResult(
+    requestId: String?,
+    success: Boolean,
+    error: String?,
+    totalTimeMs: Long,
+  ) {
+    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
+      Log.d(TAG, "WebSocket server not running, skipping commit text result broadcast")
+      return
+    }
+
+    resultBroadcaster.guard(requestId, "commit_text_result") {
+      webSocketServer.broadcastWithPerfSync { perfTiming ->
+        webSocketFrameJson("commit_text_result", requestId = requestId, perfTiming = perfTiming) {
+          put("success", success)
+          put("totalTimeMs", totalTimeMs)
+          if (error != null) {
+            put("error", error)
+          }
+        }
+      }
+      Log.d(
+        TAG,
+        "Broadcasted commit text result to ${webSocketServer.getConnectionCount()} clients",
+      )
     }
   }
 

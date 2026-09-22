@@ -138,6 +138,8 @@ interface CtrlProxyActions {
 
   fun requestInsertText(requestId: String?, text: String)
 
+  fun requestCommitText(requestId: String?, text: String, priorImeId: String?)
+
   fun requestImeAction(requestId: String?, action: String)
 
   fun requestImeAction(requestId: String?, action: String, frameContext: String?) =

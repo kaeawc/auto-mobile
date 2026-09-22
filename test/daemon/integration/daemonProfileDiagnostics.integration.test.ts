@@ -251,11 +251,16 @@ describe("daemon tool-profile diagnostics", () => {
 
       await client.connect(transport);
       expect(transport.pid).not.toBeNull();
-      const result = await client.callTool({ name: "listDevices", arguments: {} }, undefined, {
-        timeout: 5_000,
-      });
-      expect(result.isError).toBe(true);
-      expect(JSON.stringify(result.content)).toContain("Tool listDevices is disabled");
+      const result = await client.callTool(
+        { name: "listDevices", arguments: { platform: "android" } },
+        undefined,
+        {
+          timeout: 5_000,
+        },
+      );
+      expect(result.isError).toBeFalsy();
+      const advertisedToolNames = (await client.listTools()).tools.map((tool) => tool.name);
+      expect(advertisedToolNames).not.toContain("listDevices");
       expect(daemon.exitCode).toBeNull();
     },
     TEST_TIMEOUT_MS,

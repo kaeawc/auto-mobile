@@ -192,6 +192,14 @@ export interface RequestInsertTextMessage {
   text: string;
 }
 
+/** `@SerialName("request_commit_text")` → `RequestCommitText` */
+export interface RequestCommitTextMessage {
+  type: "request_commit_text";
+  requestId: string;
+  text: string;
+  priorImeId?: string;
+}
+
 /** `@SerialName("request_ime_action")` → `RequestImeAction` */
 export interface RequestImeActionMessage {
   type: "request_ime_action";
@@ -607,6 +615,7 @@ export type CtrlProxyRequest =
   | RequestGestureEndMessage
   | RequestSetTextMessage
   | RequestInsertTextMessage
+  | RequestCommitTextMessage
   | RequestImeActionMessage
   | RequestSelectAllMessage
   | RequestActionMessage
@@ -678,6 +687,7 @@ const REQUEST_TYPE_REGISTRY: Record<CtrlProxyRequestType, true> = {
   request_gesture_end: true,
   request_set_text: true,
   request_insert_text: true,
+  request_commit_text: true,
   request_ime_action: true,
   request_select_all: true,
   request_action: true,

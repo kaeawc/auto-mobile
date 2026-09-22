@@ -30,4 +30,21 @@ export class CtrlProxyText extends SharedTextDelegate {
       errorLabel: "Insert text",
     });
   }
+
+  async commitViaIme(
+    text: string,
+    priorImeId?: string,
+    timeoutMs: number = 5000,
+    perf?: PerformanceTracker,
+  ): Promise<BaseResult> {
+    return sendCommand<BaseResult>(this.context, {
+      idPrefix: "commitText",
+      responseType: "commit_text",
+      messageType: "request_commit_text",
+      params: { text, priorImeId },
+      timeoutMs,
+      perf,
+      errorLabel: "Commit text",
+    });
+  }
 }

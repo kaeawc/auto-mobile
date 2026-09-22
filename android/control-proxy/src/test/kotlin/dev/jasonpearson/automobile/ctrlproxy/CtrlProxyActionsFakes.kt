@@ -78,6 +78,8 @@ open class NoOpCtrlProxyActions : CtrlProxyActions {
 
   override fun requestInsertText(requestId: String?, text: String) {}
 
+  override fun requestCommitText(requestId: String?, text: String, priorImeId: String?) {}
+
   override fun requestImeAction(requestId: String?, action: String) {}
 
   override fun requestSelectAll(requestId: String?) {}
@@ -325,6 +327,9 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
 
   override fun requestInsertText(requestId: String?, text: String) =
     record("requestInsertText", requestId, text)
+
+  override fun requestCommitText(requestId: String?, text: String, priorImeId: String?) =
+    record("requestCommitText", requestId, text, priorImeId)
 
   override fun requestImeAction(requestId: String?, action: String) =
     record("requestImeAction", requestId, action)

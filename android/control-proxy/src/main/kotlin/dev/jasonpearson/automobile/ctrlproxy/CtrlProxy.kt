@@ -1983,6 +1983,12 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   override fun requestInsertText(requestId: String?, text: String) =
     performInsertText(requestId, text)
 
+  override fun requestCommitText(requestId: String?, text: String, priorImeId: String?) {
+    kotlinx.coroutines.runBlocking {
+      broadcastCommitTextResult(requestId, false, "commit_text not implemented", 0)
+    }
+  }
+
   override fun requestImeAction(requestId: String?, action: String) =
     performImeAction(requestId, action)
 
@@ -5944,6 +5950,34 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         }
       }
       Log.d(TAG, "Broadcasted set text result to ${webSocketServer.getConnectionCount()} clients")
+    }
+  }
+
+  private suspend fun broadcastCommitTextResult(
+    requestId: String?,
+    success: Boolean,
+    error: String?,
+    totalTimeMs: Long,
+  ) {
+    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
+      Log.d(TAG, "WebSocket server not running, skipping commit text result broadcast")
+      return
+    }
+
+    resultBroadcaster.guard(requestId, "commit_text_result") {
+      webSocketServer.broadcastWithPerfSync { perfTiming ->
+        webSocketFrameJson("commit_text_result", requestId = requestId, perfTiming = perfTiming) {
+          put("success", success)
+          put("totalTimeMs", totalTimeMs)
+          if (error != null) {
+            put("error", error)
+          }
+        }
+      }
+      Log.d(
+        TAG,
+        "Broadcasted commit text result to ${webSocketServer.getConnectionCount()} clients",
+      )
     }
   }
 

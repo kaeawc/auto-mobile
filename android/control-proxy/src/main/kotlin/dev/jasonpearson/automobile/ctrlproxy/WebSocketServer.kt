@@ -106,6 +106,7 @@ class WebSocketServer(
         is DragResult -> response.requestId
         is PinchResult -> response.requestId
         is SetTextResult -> response.requestId
+        is CommitTextResult -> response.requestId
         is ImeActionResult -> response.requestId
         is SelectAllResult -> response.requestId
         is ActionResult -> response.requestId
@@ -260,6 +261,7 @@ class WebSocketServer(
                               "node_selector_actions",
                               "request_activate_accessibility_link",
                               "request_insert_text",
+                              "request_commit_text",
                             ),
                         ),
                       )

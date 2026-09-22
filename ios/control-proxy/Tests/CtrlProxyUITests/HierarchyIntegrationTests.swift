@@ -122,6 +122,43 @@ final class HierarchyIntegrationTests: XCTestCase {
         XCTAssertEqual(secureNode?.password, "true")
     }
 
+    func testPressKeyBackspaceDeletesFocusedText() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["CTRL_PROXY_SNAPSHOT_GAP_TEST_MODE"] = "1"
+        app.launch()
+
+        let messageTextView = app.descendants(matching: .textView)
+            .matching(NSPredicate(format: "label == %@", "Message #sample"))
+            .firstMatch
+        guard messageTextView.waitForExistence(timeout: 10) else {
+            XCTFail("Host app did not present the snapshot-gap fixture")
+            return
+        }
+
+        let locator = ElementLocator(application: app, perf: PerfProvider())
+        locator.setApplication(app, bundleId: "dev.jasonpearson.automobile.ctrlproxy")
+        let gestures = GesturePerformer(application: app, elementLocator: locator)
+        try gestures.performAction("tap", label: "Message #sample")
+        guard waitForMessageKeyboardFocus(messageTextView) else {
+            return
+        }
+
+        try gestures.typeText(text: "hello")
+        let typedTextExpectation = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == %@", "hello"),
+            object: messageTextView
+        )
+        XCTAssertEqual(XCTWaiter().wait(for: [typedTextExpectation], timeout: 5), .completed)
+
+        try gestures.pressKey(key: "backspace", modifiers: [])
+        let deletedTextExpectation = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == %@", "hell"),
+            object: messageTextView
+        )
+        XCTAssertEqual(XCTWaiter().wait(for: [deletedTextExpectation], timeout: 5), .completed)
+        XCTAssertEqual(messageTextView.value as? String, "hell")
+    }
+
     private func hierarchyNodes(in element: UIElementInfo) -> [UIElementInfo] {
         [element] + (element.node ?? []).flatMap { hierarchyNodes(in: $0) }
     }

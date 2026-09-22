@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import {
-  buildInputTextResultMessage,
   buildTapOnResultMessage,
   registerInteractionTools,
   resetTapAtElementFactory,
@@ -181,7 +180,7 @@ describe("buildTapOnResultMessage", () => {
 // Handler-level coverage: exercise the REGISTERED tapOn handler path with an
 // injected fake TapOnElement and assert the serialized envelope. Before #6152 a
 // selector that matched nothing still produced "Tapped on element (...)" and no
-// `isError` on the envelope — the exact shape #5902 fixed for inputText only.
+// `isError` on the envelope — the exact shape #5902 first fixed for text input.
 describe("tapOnHandler (registered handler wiring)", () => {
   const fakeDevice = { deviceId: "fake", platform: "android" } as unknown as BootedDevice;
   const args: TapOnArgs = { selector: { text: "ZZZ_NO_SUCH_TEXT_ZZZ" }, platform: "android" };
@@ -378,28 +377,5 @@ describe("tapAtHandler (registered handler wiring)", () => {
     );
     expect(getStructuredField(response, "deviceId")).toBe(fakeDevice.deviceId);
     expect(getStructuredField(response, "platform")).toBe(fakeDevice.platform);
-  });
-});
-
-describe("buildInputTextResultMessage", () => {
-  test("names the field targeted by a selector", () => {
-    expect(
-      buildInputTextResultMessage({
-        success: true,
-        text: "John",
-        matchedId: "com.test:id/first_name",
-        matchedText: "First name",
-      }),
-    ).toBe('Typed "John" into id=com.test:id/first_name text="First name"');
-  });
-
-  test("reports selector failures as failures", () => {
-    expect(
-      buildInputTextResultMessage({
-        success: false,
-        text: "John",
-        error: "Element not found with provided text 'Missing'",
-      }),
-    ).toBe("Failed to input text: Element not found with provided text 'Missing'");
   });
 });

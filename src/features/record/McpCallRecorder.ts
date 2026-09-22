@@ -16,13 +16,10 @@ export const PLAN_RELEVANT_TOOLS = new Set([
   // Interaction
   "tapOn",
   "swipeOn",
-  "inputText",
   "sendKeys",
-  "clearText",
   "pressButton",
   "dragAndDrop",
   "pinchOn",
-  "imeAction",
   // Form filling
   "setUIState",
 ]);

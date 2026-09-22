@@ -64,8 +64,14 @@ describe("parseDriveArgs", () => {
   };
 
   test("one-shot tool preserves numeric strings and coerces declared numbers", () => {
-    const textOptions = parseDriveArgs(["inputText", "--text", "12345"], noPlan);
-    expect(textOptions.steps[0]).toEqual({ tool: "inputText", args: { text: "12345" } });
+    const textOptions = parseDriveArgs(
+      ["sendKeys", "--commands", '[{"action":"type","text":"12345"}]'],
+      noPlan,
+    );
+    expect(textOptions.steps[0]).toEqual({
+      tool: "sendKeys",
+      args: { commands: [{ action: "type", text: "12345" }] },
+    });
 
     const options = parseDriveArgs(["shake", "--duration", "0"], noPlan);
     expect(options.steps).toHaveLength(1);
@@ -77,12 +83,12 @@ describe("parseDriveArgs", () => {
 
   test("flags, session, enable list", () => {
     const options = parseDriveArgs(
-      ["observe", "--json", "--session", "s9", "--enable", "observe, tapOn ,inputText"],
+      ["observe", "--json", "--session", "s9", "--enable", "observe, tapOn ,sendKeys"],
       noPlan,
     );
     expect(options.json).toBe(true);
     expect(options.session).toBe("s9");
-    expect(options.enable).toEqual(["observe", "tapOn", "inputText"]);
+    expect(options.enable).toEqual(["observe", "tapOn", "sendKeys"]);
   });
 
   test("--plan reads a JSON array of steps", () => {

@@ -110,12 +110,10 @@ const OBSERVE_WAIT_METADATA_KEYS = [
  */
 export const SKELETON_DEFAULT_ACTION_TOOLS: ReadonlySet<string> = new Set([
   "tapOn",
-  "inputText",
   "sendKeys",
   "launchApp",
   "tapAny",
   "dragAndDrop",
-  "clearText",
   "selectAllText",
   "pressButton",
   "systemTray",
@@ -123,7 +121,6 @@ export const SKELETON_DEFAULT_ACTION_TOOLS: ReadonlySet<string> = new Set([
   "pinchOn",
   "openLink",
   "shake",
-  "imeAction",
   "recentApps",
   "homeScreen",
   "rotate",
@@ -509,7 +506,7 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
       const sanitized = sanitizeObserveResult(payload.observation as ObserveResult, cfg);
       // Action observations default to the compact skeleton (issue #5872) — the
       // same response-shape control `observe` already has — so a client no longer
-      // pays the full raw hierarchy on every tapOn/inputText/launchApp. Scoped to
+      // pays the full raw hierarchy on every tapOn/sendKeys/launchApp. Scoped to
       // SKELETON_DEFAULT_ACTION_TOOLS (the tools that also expose the `raw`/`project`
       // opt-out), so the default and the escape hatch never diverge. The compact
       // form lands under the same `skeleton` key `observe` uses; `raw:true` /

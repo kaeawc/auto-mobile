@@ -1194,7 +1194,7 @@ export class SetUIState extends BaseVisualChange {
           // InputText.execute applies event-all marker auto-promotion here too
           // (a form field value containing a configured marker, e.g. an
           // @mention, is typed via eventAll). This is by design — the feature
-          // is scoped to both inputText and setUIState text fields.
+          // is scoped to both the internal text-input primitive and setUIState text fields.
           logger.debug(
             `[SetUIState] text.input selector=${selectorDesc} textLength=${fieldSpec.value.length}`,
           );

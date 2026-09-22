@@ -100,7 +100,7 @@ describe("DefaultAfterToolCallHandler embedded-observation settle (#6866)", () =
       observation: obs("Airplane mode", 10),
     });
 
-    const result = await runAfterToolCall(handlerWith(fake), "clearText", response, timer);
+    const result = await runAfterToolCall(handlerWith(fake), "sendKeys", response, timer);
     const payload = JSON.parse(result.finalizedResponse.content[0].text);
 
     expect(payload.observation.settled).toBe(false);

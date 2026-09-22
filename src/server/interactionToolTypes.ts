@@ -2,7 +2,7 @@
  * Type definitions for interaction tools.
  * Extracted from interactionTools.ts for maintainability.
  */
-import type { Platform, ElementSelectionStrategy, ImeAction } from "../models";
+import type { Platform, ElementSelectionStrategy } from "../models";
 import type { ObserveWaitForOptions, SettledOptions } from "./observeTools";
 import type { SendKeysCommand, SendKeysSelector } from "../features/action/SendKeys";
 
@@ -16,10 +16,6 @@ import type { SendKeysCommand, SendKeysSelector } from "../features/action/SendK
 // `TapOnArgs.platform` (below) is left as-is: tapOn's schema has been
 // optional since #5870, predating this pass, and fixing that pre-existing
 // mismatch is out of scope here.
-export interface ClearTextArgs {
-  platform?: Platform;
-}
-
 export interface SelectAllTextArgs {
   platform?: Platform;
 }
@@ -41,25 +37,6 @@ export interface SystemTrayArgs {
   notification?: SystemTrayNotificationArgs;
   awaitTimeout?: number;
   platform?: Platform;
-}
-
-/** Selector variants that focus an input field before typing (issue #5872). */
-export interface InputTextSelector {
-  elementId?: string;
-  testTag?: string;
-  text?: string;
-  textAny?: string[];
-}
-
-export interface InputTextArgs {
-  text: string;
-  selector?: InputTextSelector;
-  mode?: "a11y" | "eventLast" | "eventAll" | "eventOnly";
-  imeAction?: ImeAction;
-  dismissKeyboard?: boolean;
-  platform?: Platform;
-  raw?: boolean;
-  project?: "full" | "skeleton";
 }
 
 export interface SendKeysArgs {
@@ -193,11 +170,6 @@ export interface PinchOnArgs {
 export interface ShakeArgs {
   duration?: number;
   intensity?: number;
-  platform?: Platform;
-}
-
-export interface ImeActionArgs {
-  action: ImeAction;
   platform?: Platform;
 }
 

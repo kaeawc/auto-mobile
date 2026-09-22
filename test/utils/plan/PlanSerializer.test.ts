@@ -73,8 +73,10 @@ describe("YamlPlanSerializer", () => {
       // Migration adds action: "tap" to tapOn steps and wraps legacy top-level
       // `text` under `selector` for the v0.0.30 tapOn schema.
       expect(plan.steps[0].params).toEqual({ selector: { text: "Hello" }, action: "tap" });
-      expect(plan.steps[1].tool).toBe("inputText");
-      expect(plan.steps[1].params).toEqual({ text: "World" });
+      expect(plan.steps[1].tool).toBe("sendKeys");
+      expect(plan.steps[1].params).toEqual({
+        commands: [{ action: "type", text: "World", operation: "replace" }],
+      });
     });
 
     test("imports a minimal valid plan", () => {
@@ -217,7 +219,12 @@ describe("YamlPlanSerializer", () => {
           // importer auto-migrates legacy { text: "..." } to { selector: { text: "..." } },
           // which would otherwise make the round-trip non-identity.
           { tool: "tapOn", params: { selector: { text: "Login" }, action: "tap" } },
-          { tool: "inputText", params: { text: "user@example.com" } },
+          {
+            tool: "sendKeys",
+            params: {
+              commands: [{ action: "type", text: "user@example.com", operation: "replace" }],
+            },
+          },
           { tool: "pressButton", params: { button: "enter" } },
         ],
       };

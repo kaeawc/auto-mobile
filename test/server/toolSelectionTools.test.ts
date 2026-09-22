@@ -14,7 +14,7 @@ describe("applyToolSelection", () => {
   beforeEach(() => {
     ToolRegistry.clearTools();
     registerToolSelectionTools();
-    ToolRegistry.register("inputText", "inputText", z.object({}), async () => ({ content: [] }), {
+    ToolRegistry.register("sendKeys", "sendKeys", z.object({}), async () => ({ content: [] }), {
       defaultEnabled: false,
     });
   });
@@ -30,7 +30,7 @@ describe("applyToolSelection", () => {
 
   test("rejects a configurable batch with a read-only service", async () => {
     await expect(
-      applyToolSelection(readOnlyService, "session", ["inputText"], true),
+      applyToolSelection(readOnlyService, "session", ["sendKeys"], true),
     ).rejects.toThrow(
       "This MCP server's injected tool-selection service is read-only and cannot update tools.",
     );

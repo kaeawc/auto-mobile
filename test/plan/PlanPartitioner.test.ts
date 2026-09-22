@@ -171,7 +171,12 @@ describe("PlanPartitioner", () => {
               device: "A",
               lock: "shared",
               deviceCount: 2,
-              steps: [{ tool: "inputText", params: { device: "A", text: "hi" } }],
+              steps: [
+                {
+                  tool: "sendKeys",
+                  params: { device: "A", commands: [{ action: "type", text: "hi" }] },
+                },
+              ],
             },
           },
           {

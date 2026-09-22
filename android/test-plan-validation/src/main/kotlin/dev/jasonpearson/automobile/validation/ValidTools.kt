@@ -62,6 +62,7 @@ object ValidTools {
       "restoreDeviceSnapshot",
       "rotate",
       "selectAllText",
+      "sendKeys",
       "setActiveDevice",
       "setAppPermissions",
       "setDeviceState",

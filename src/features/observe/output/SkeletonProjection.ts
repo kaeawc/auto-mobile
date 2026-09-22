@@ -656,7 +656,7 @@ function collapseSystemUiBlock(nonActionable: SkeletonAccumulator[]): SkeletonAc
  * Synthetic elementId for the collapsed IME row. Like
  * {@link SYSTEMUI_SUMMARY_ELEMENT_ID} it is deliberately NOT shaped like a real
  * `package:id/name` resource-id, so it can never be mistaken for a selector: the
- * supported way to drive a keyboard is `inputText` / `sendKeys`, never a tap per
+ * supported way to drive a keyboard is `sendKeys`, never a tap per
  * keycap (issue #6871).
  */
 const IME_ELEMENT_ID = "<ime>";
@@ -945,8 +945,8 @@ function isImeMember(el: Element, ime: ImeWindow): boolean {
  * (`key_pos_header_access_points_menu`, `key_pos_switch_to_symbol`,
  * `key_pos_ime_action`), and the majority of keys carry no resource-id at all,
  * so any narrower key test would re-expose the ~40-row flood #6871 exists to
- * remove while still folding the toolbar. Driving the keyboard is `inputText` /
- * `sendKeys`, never a tap inside its window, so one row is the honest shape.
+ * remove while still folding the toolbar. Driving the keyboard is `sendKeys`,
+ * never a tap inside its window, so one row is the honest shape.
  */
 function isImeKeycap(el: Element, ime: ImeWindow | undefined): boolean {
   if (!ime || !isImeMember(el, ime)) {
@@ -958,8 +958,8 @@ function isImeKeycap(el: Element, ime: ImeWindow | undefined): boolean {
 
 /**
  * The single row that replaces every keycap: `<ime> | Keyboard (<package>) |
- * input` (issue #6871). `input` is the only honest affordance — `inputText` /
- * `sendKeys` are the supported way to drive it. Absent when the IME was
+ * input` (issue #6871). `input` is the only honest affordance — `sendKeys` is
+ * the supported way to drive it. Absent when the IME was
  * identified but contributed no bounded node (the `keyboard` summary still
  * reports it), so the row never claims a box it does not have.
  */

@@ -225,6 +225,58 @@ const migrateStepFields = (
     }
     changed = true;
   }
+  if (toolName === "inputText") {
+    if (mergedParams.value !== undefined) {
+      if (mergedParams.text === undefined) {
+        mergedParams.text = mergedParams.value;
+      }
+      delete mergedParams.value;
+      recordWarning(warnings, "Renamed inputText.value to text.", stepIndex);
+    }
+
+    const typeCommand: Record<string, unknown> = {
+      action: "type",
+      text: mergedParams.text,
+      operation: "replace",
+    };
+    delete mergedParams.text;
+    if (mergedParams.mode !== undefined) {
+      typeCommand.mode = mergedParams.mode;
+      delete mergedParams.mode;
+    }
+
+    const commands: Array<Record<string, unknown>> = [typeCommand];
+    if (mergedParams.imeAction !== undefined) {
+      commands.push({ action: "key", key: mergedParams.imeAction });
+      delete mergedParams.imeAction;
+    }
+    if (mergedParams.dismissKeyboard !== undefined) {
+      delete mergedParams.dismissKeyboard;
+      recordWarning(
+        warnings,
+        "Dropped inputText.dismissKeyboard during sendKeys migration; use the keyboard tool to dismiss it explicitly.",
+        stepIndex,
+      );
+    }
+
+    mergedParams.commands = commands;
+    normalizedTool = "sendKeys";
+    recordWarning(warnings, "Renamed inputText to sendKeys.", stepIndex);
+    changed = true;
+  }
+  if (toolName === "clearText") {
+    normalizedTool = "sendKeys";
+    mergedParams.commands = [{ action: "clear" }];
+    recordWarning(warnings, "Renamed clearText to sendKeys.", stepIndex);
+    changed = true;
+  }
+  if (toolName === "imeAction") {
+    normalizedTool = "sendKeys";
+    mergedParams.commands = [{ action: "key", key: mergedParams.action }];
+    delete mergedParams.action;
+    recordWarning(warnings, "Renamed imeAction to sendKeys.", stepIndex);
+    changed = true;
+  }
 
   step.tool = normalizedTool;
 
@@ -282,15 +334,6 @@ const migrateStepFields = (
         );
         changed = true;
       }
-    }
-  }
-
-  if (normalizedTool === "inputText") {
-    if (mergedParams.text === undefined && typeof mergedParams.value === "string") {
-      mergedParams.text = mergedParams.value;
-      delete mergedParams.value;
-      recordWarning(warnings, "Renamed inputText.value to text.", stepIndex);
-      changed = true;
     }
   }
 

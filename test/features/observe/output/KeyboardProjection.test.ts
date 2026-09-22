@@ -632,7 +632,7 @@ describe("IME-owned affordances fold with the keys (#6871)", () => {
     const source = keyboardFloodObservation();
     // Gboard's toolbar/emoji/clipboard affordances carry the SAME keycap id
     // family as its letter keys, so they are not separable from a key — and the
-    // supported way to drive the keyboard is `inputText` / `sendKeys` anyway.
+    // supported way to drive the keyboard is `sendKeys` anyway.
     source.viewHierarchy!.hierarchy.node!.node![1].node!.push({
       $: {
         "resource-id": "com.google.android.inputmethod.latin:id/key_pos_header_access_points_menu",

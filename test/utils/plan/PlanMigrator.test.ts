@@ -370,16 +370,74 @@ describe("PlanMigrator", () => {
         expect(plan.steps[0].params.text).toBeUndefined();
       });
 
-      test("renames inputText.value to text", () => {
+      test("migrates inputText value, mode, IME action, and dropped dismissal to sendKeys", () => {
+        const { plan, report } = migratePlan({
+          name: "Plan",
+          mcpVersion: "1.0.0",
+          metadata: { createdAt: "2024-01-01", version: "1.0.0" },
+          steps: [
+            {
+              tool: "inputText",
+              params: {
+                value: "hello",
+                selector: { elementId: "field" },
+                mode: "eventAll",
+                imeAction: "done",
+                dismissKeyboard: true,
+              },
+            },
+          ],
+        });
+
+        expect(plan.steps[0]).toEqual({
+          tool: "sendKeys",
+          params: {
+            selector: { elementId: "field" },
+            commands: [
+              {
+                action: "type",
+                text: "hello",
+                operation: "replace",
+                mode: "eventAll",
+              },
+              { action: "key", key: "done" },
+            ],
+          },
+        });
+        expect(report.warnings.some((warning) => warning.message.includes("dismissKeyboard"))).toBe(
+          true,
+        );
+      });
+
+      test("migrates clearText to a sendKeys clear command", () => {
         const { plan } = migratePlan({
           name: "Plan",
           mcpVersion: "1.0.0",
           metadata: { createdAt: "2024-01-01", version: "1.0.0" },
-          steps: [{ tool: "inputText", params: { value: "hello" } }],
+          steps: [{ tool: "clearText", params: { platform: "android" } }],
         });
 
-        expect(plan.steps[0].params.text).toBe("hello");
-        expect(plan.steps[0].params.value).toBeUndefined();
+        expect(plan.steps[0]).toEqual({
+          tool: "sendKeys",
+          params: { platform: "android", commands: [{ action: "clear" }] },
+        });
+      });
+
+      test("migrates imeAction to a sendKeys semantic key command", () => {
+        const { plan } = migratePlan({
+          name: "Plan",
+          mcpVersion: "1.0.0",
+          metadata: { createdAt: "2024-01-01", version: "1.0.0" },
+          steps: [{ tool: "imeAction", params: { action: "search", platform: "ios" } }],
+        });
+
+        expect(plan.steps[0]).toEqual({
+          tool: "sendKeys",
+          params: {
+            platform: "ios",
+            commands: [{ action: "key", key: "search" }],
+          },
+        });
       });
 
       test("renames openLink.link to url", () => {

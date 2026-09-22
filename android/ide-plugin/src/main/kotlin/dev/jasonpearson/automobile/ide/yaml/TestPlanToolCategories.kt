@@ -7,6 +7,7 @@ object TestPlanToolCategories {
         "UI interactions" to setOf("tapOn", "swipeOn", "pinchOn", "dragAndDrop"),
         "Input" to
           setOf(
+            "sendKeys",
             "inputText",
             "clearText",
             "selectAllText",

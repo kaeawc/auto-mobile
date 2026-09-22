@@ -1234,6 +1234,7 @@ private fun highlightYaml(yaml: String): androidx.compose.ui.text.AnnotatedStrin
         "swipeOn",
         "dragAndDrop",
         "pinchOn",
+        "sendKeys",
         "inputText",
         "clearText",
         "pressButton",

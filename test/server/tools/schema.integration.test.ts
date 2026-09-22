@@ -226,12 +226,10 @@ describe("MCP Tools Schema", () => {
   // default and the opt-out to the full set (never one without the other).
   test.each([
     "tapOn",
-    "inputText",
     "sendKeys",
     "launchApp",
     "tapAny",
     "dragAndDrop",
-    "clearText",
     "selectAllText",
     "pressButton",
     "systemTray",
@@ -239,7 +237,6 @@ describe("MCP Tools Schema", () => {
     "pinchOn",
     "openLink",
     "shake",
-    "imeAction",
     "recentApps",
     "homeScreen",
     "rotate",
@@ -271,11 +268,11 @@ describe("MCP Tools Schema", () => {
     }
   });
 
-  test("inputText accepts a project override and a selector", async () => {
-    const { inputTextSchema } = await import("../../../src/server/interactionTools");
-    const parsed = inputTextSchema.parse({
+  test("sendKeys accepts a project override and a selector", async () => {
+    const { sendKeysSchema } = await import("../../../src/server/interactionTools");
+    const parsed = sendKeysSchema.parse({
       platform: "android",
-      text: "Ada",
+      commands: [{ action: "type", text: "Ada" }],
       project: "full",
       selector: { text: "First name" },
     });

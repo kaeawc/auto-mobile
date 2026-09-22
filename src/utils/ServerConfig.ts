@@ -196,7 +196,7 @@ class ServerConfig {
   }
 
   /**
-   * Markers that, when present in inputText's text, auto-promote the call from
+   * Markers that, when present in the internal InputText primitive's text, auto-promote it from
    * the default `a11y` mode to `eventAll` (real per-character key events). An
    * empty list (the default) disables the behavior entirely.
    */

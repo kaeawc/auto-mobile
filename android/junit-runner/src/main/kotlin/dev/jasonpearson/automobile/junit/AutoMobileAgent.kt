@@ -19,6 +19,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -528,6 +529,7 @@ open class AutoMobileAgent(
             is String -> JsonPrimitive(value)
             is Number -> JsonPrimitive(value)
             is Boolean -> JsonPrimitive(value)
+            is JsonElement -> value
             else -> JsonPrimitive(value.toString())
           },
         )
@@ -623,20 +625,39 @@ open class AutoMobileAgent(
     }
   }
 
-  /** Input text with optional IME action */
-  class InputTextTool(private val mcpClient: MCPClient) :
-    SimpleTool<InputTextTool.Args>(
+  /** Type, clear, or submit text through the canonical text-input tool. */
+  class SendKeysTool(private val mcpClient: MCPClient) :
+    SimpleTool<SendKeysTool.Args>(
       argsType = typeToken<Args>(),
-      name = "inputText",
-      description = "Input text with optional IME action",
+      name = "sendKeys",
+      description = "Type, clear, or submit text in the focused input field",
     ) {
 
-    @Serializable data class Args(val text: String, val imeAction: String? = null)
+    @Serializable
+    data class Args(
+      val action: String = "type",
+      val text: String? = null,
+      val key: String? = null,
+    )
 
     override suspend fun execute(args: Args): String {
-      val parameters = mutableMapOf<String, Any>("text" to args.text)
-      args.imeAction?.let { parameters["imeAction"] = it }
-      return mcpClient.callTool("inputText", parameters)
+      val command =
+        when (args.action) {
+          "type" ->
+            buildJsonObject {
+              put("action", JsonPrimitive("type"))
+              put("text", JsonPrimitive(requireNotNull(args.text) { "text is required for type" }))
+              put("operation", JsonPrimitive("replace"))
+            }
+          "clear" -> buildJsonObject { put("action", JsonPrimitive("clear")) }
+          "key" ->
+            buildJsonObject {
+              put("action", JsonPrimitive("key"))
+              put("key", JsonPrimitive(requireNotNull(args.key) { "key is required for key" }))
+            }
+          else -> throw IllegalArgumentException("action must be type, clear, or key")
+        }
+      return mcpClient.callTool("sendKeys", mapOf("commands" to JsonArray(listOf(command))))
     }
   }
 
@@ -793,21 +814,6 @@ open class AutoMobileAgent(
     }
   }
 
-  /** Clear text from input fields */
-  class ClearTextTool(private val mcpClient: MCPClient) :
-    SimpleTool<ClearTextTool.Args>(
-      argsType = typeToken<Args>(),
-      name = "clearText",
-      description = "Clear text from input fields",
-    ) {
-
-    @Serializable class Args
-
-    override suspend fun execute(args: Args): String {
-      return mcpClient.callTool("clearText", emptyMap())
-    }
-  }
-
   /** Launch an app by package ID */
   class LaunchAppTool(private val mcpClient: MCPClient) :
     SimpleTool<LaunchAppTool.Args>(
@@ -918,13 +924,12 @@ open class AutoMobileAgent(
         ObserveTool(mcpClient),
         TapOnTool(mcpClient),
         TypeTextTool(mcpClient),
-        InputTextTool(mcpClient),
+        SendKeysTool(mcpClient),
         SwipeTool(mcpClient),
         ScrollTool(mcpClient),
         WaitForTool(rawMcpClient),
         GoBackTool(mcpClient),
         PressButtonTool(mcpClient),
-        ClearTextTool(mcpClient),
         LaunchAppTool(mcpClient),
         TerminateAppTool(mcpClient),
         DoubleTapOnTool(mcpClient),
@@ -1146,12 +1151,11 @@ open class AutoMobileAgent(
         Core tools typically available:
         - observe: Get current UI state and hierarchy
         - tapOn: Tap elements by text, id, or coordinates
-        - typeText/inputText: Enter text in input fields
+        - typeText/sendKeys: Enter, clear, or submit text in input fields
         - swipe/scroll: Navigate with gestures or within containers
         - waitFor: Wait for elements or conditions (implemented as polling)
         - goBack/pressButton: Navigate back or press hardware buttons
         - launchApp/terminateApp: Manage app lifecycle
-        - clearText: Clear input fields
 
         Additional tools may be available depending on the MCP server configuration.
 

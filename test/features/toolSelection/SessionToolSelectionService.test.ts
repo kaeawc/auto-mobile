@@ -105,22 +105,22 @@ describe("SessionToolSelectionService", () => {
     const repository = new FakeRepository();
     const service = new SessionToolSelectionService(repository);
 
-    await service.setEnabledMany("session-1", ["inputText", "clearText"], true);
+    await service.setEnabledMany("session-1", ["sendKeys", "clipboard"], true);
 
     expect(repository.batches).toEqual([
       [
         "session-1",
         [
-          { toolName: "inputText", enabled: true },
-          { toolName: "clearText", enabled: true },
+          { toolName: "sendKeys", enabled: true },
+          { toolName: "clipboard", enabled: true },
         ],
       ],
     ]);
     expect(repository.singleWrites).toEqual([]);
     expect(await repository.list("session-1")).toEqual(
       new Map([
-        ["inputText", true],
-        ["clearText", true],
+        ["sendKeys", true],
+        ["clipboard", true],
       ]),
     );
   });
@@ -129,11 +129,11 @@ describe("SessionToolSelectionService", () => {
     const repository = new SingleWriteOnlyRepository();
     const service = new SessionToolSelectionService(repository);
 
-    await service.setEnabledMany("session-1", ["inputText", "clearText"], false);
+    await service.setEnabledMany("session-1", ["sendKeys", "clipboard"], false);
 
     expect(repository.writes).toEqual([
-      ["session-1", "inputText", false],
-      ["session-1", "clearText", false],
+      ["session-1", "sendKeys", false],
+      ["session-1", "clipboard", false],
     ]);
   });
 });

@@ -236,7 +236,7 @@ describe("TestRunResources - Database Schema", () => {
         {
           execution_id: executionId,
           step_index: 1,
-          action: "inputText",
+          action: "sendKeys",
           target: 'id="username"',
           status: "completed",
           duration_ms: 300,
@@ -260,7 +260,7 @@ describe("TestRunResources - Database Schema", () => {
       expect(storedSteps[0].action).toBe("tapOn");
       expect(storedSteps[0].target).toBe('text="Login"');
       expect(storedSteps[0].screen_name).toBe("LoginScreen");
-      expect(storedSteps[1].action).toBe("inputText");
+      expect(storedSteps[1].action).toBe("sendKeys");
     });
 
     test("cascades delete when test_execution is deleted", async () => {

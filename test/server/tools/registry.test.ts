@@ -104,15 +104,7 @@ describe("MCP Tools Registry", () => {
 
     const expectedByCategory: Record<string, string[]> = {
       observe: ["observe"],
-      interaction: [
-        "tapOn",
-        "inputText",
-        "clearText",
-        "pressButton",
-        "swipeOn",
-        "dragAndDrop",
-        "pinchOn",
-      ],
+      interaction: ["tapOn", "sendKeys", "pressButton", "swipeOn", "dragAndDrop", "pinchOn"],
       app: ["launchApp", "terminateApp", "crashApp", "installApp", "uninstallApp", "listApps"],
       utility: ["rotate", "setActiveDevice", "openLink", "getDeviceState", "setDeviceState"],
       device: [

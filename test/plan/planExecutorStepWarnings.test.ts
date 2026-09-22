@@ -7,8 +7,8 @@ import { z } from "zod/v4";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
 
 /**
- * A best-effort epilogue that fails (a keyboard that would not dismiss) keeps the
- * step successful and reports itself through `warnings` (issue #6868). Inside
+ * A best-effort epilogue that fails keeps the step successful and reports itself
+ * through `warnings` (issue #6868). Inside
  * `executePlan` that used to be the step's whole failure signal, so dropping it
  * would let a plan report an entirely clean success while later steps ran against
  * a screen the caller thinks is in a different state.
@@ -16,9 +16,8 @@ import { createStructuredToolResponse } from "../../src/utils/toolUtils";
 describe("PlanExecutor — best-effort warnings in debug.steps", () => {
   let planExecutor: DefaultPlanExecutor;
 
-  const inputTextSchema = z.object({
-    text: z.string(),
-    dismissKeyboard: z.boolean().optional(),
+  const sendKeysSchema = z.object({
+    commands: z.array(z.object({ action: z.string() })),
     platform: z.string().optional(),
     deviceId: z.string().optional(),
     sessionUuid: z.string().optional(),
@@ -32,14 +31,14 @@ describe("PlanExecutor — best-effort warnings in debug.steps", () => {
     registerInteractionTools();
   });
 
-  const registerInputText = (payload: Record<string, unknown>) => {
+  const registerSendKeys = (payload: Record<string, unknown>) => {
     const handler = mock(async () => createStructuredToolResponse(payload));
-    ToolRegistry.register("inputText", "Mock inputText", inputTextSchema, handler);
-    (ToolRegistry.getTool("inputText") as { requiresDevice: boolean }).requiresDevice = true;
+    ToolRegistry.register("sendKeys", "Mock sendKeys", sendKeysSchema, handler);
+    (ToolRegistry.getTool("sendKeys") as { requiresDevice: boolean }).requiresDevice = true;
   };
 
   test("a successful step's warnings reach debug.steps[n].details", async () => {
-    registerInputText({
+    registerSendKeys({
       success: true,
       text: "hello",
       keyboardDismissed: false,
@@ -48,13 +47,13 @@ describe("PlanExecutor — best-effort warnings in debug.steps", () => {
 
     const plan: Plan = {
       name: "input-warning-plan",
-      steps: [{ tool: "inputText", params: { text: "hello", dismissKeyboard: true } }],
+      steps: [{ tool: "sendKeys", params: { commands: [{ action: "clear" }] } }],
     };
 
     const result = await planExecutor.executePlan(plan, 0, "android", "emulator-5554");
 
     expect(result.success).toBe(true);
-    const step = result.debug?.steps.find((s) => s.step.includes(": inputText"));
+    const step = result.debug?.steps.find((s) => s.step.includes(": sendKeys"));
     expect(step?.status).toBe("completed");
     expect(step?.details?.warnings).toEqual([
       "keyboard dismissal failed: Keyboard state unavailable",
@@ -66,7 +65,7 @@ describe("PlanExecutor — best-effort warnings in debug.steps", () => {
   // debug trace never reaches an ordinary plan's caller (#6887 review). The
   // executor promotes it to a first-class `warnings` field on the result.
   test("a successful step's warnings are promoted onto the plan result", async () => {
-    registerInputText({
+    registerSendKeys({
       success: true,
       text: "hello",
       keyboardDismissed: false,
@@ -76,8 +75,8 @@ describe("PlanExecutor — best-effort warnings in debug.steps", () => {
     const plan: Plan = {
       name: "input-warning-plan",
       steps: [
-        { tool: "inputText", params: { text: "hello", dismissKeyboard: true } },
-        { tool: "inputText", params: { text: "world", dismissKeyboard: true } },
+        { tool: "sendKeys", params: { commands: [{ action: "clear" }] } },
+        { tool: "sendKeys", params: { commands: [{ action: "key" }] } },
       ],
     };
 
@@ -87,19 +86,19 @@ describe("PlanExecutor — best-effort warnings in debug.steps", () => {
     expect(result.warnings).toEqual([
       {
         stepIndex: 0,
-        tool: "inputText",
+        tool: "sendKeys",
         warnings: ["keyboard dismissal failed: Keyboard state unavailable"],
       },
       {
         stepIndex: 1,
-        tool: "inputText",
+        tool: "sendKeys",
         warnings: ["keyboard dismissal failed: Keyboard state unavailable"],
       },
     ]);
   });
 
   test("a multi-device plan labels each promoted warning with its device", async () => {
-    registerInputText({
+    registerSendKeys({
       success: true,
       text: "hello",
       keyboardDismissed: false,
@@ -110,8 +109,8 @@ describe("PlanExecutor — best-effort warnings in debug.steps", () => {
       name: "input-warning-multi-device-plan",
       devices: ["A", "B"],
       steps: [
-        { tool: "inputText", params: { text: "hello", dismissKeyboard: true, device: "A" } },
-        { tool: "inputText", params: { text: "world", dismissKeyboard: true, device: "B" } },
+        { tool: "sendKeys", params: { commands: [{ action: "clear" }], device: "A" } },
+        { tool: "sendKeys", params: { commands: [{ action: "clear" }], device: "B" } },
       ],
     };
 
@@ -123,13 +122,13 @@ describe("PlanExecutor — best-effort warnings in debug.steps", () => {
     ).toEqual([
       {
         stepIndex: 0,
-        tool: "inputText",
+        tool: "sendKeys",
         device: "A",
         warnings: ["keyboard dismissal failed: Keyboard state unavailable"],
       },
       {
         stepIndex: 1,
-        tool: "inputText",
+        tool: "sendKeys",
         device: "B",
         warnings: ["keyboard dismissal failed: Keyboard state unavailable"],
       },
@@ -137,11 +136,11 @@ describe("PlanExecutor — best-effort warnings in debug.steps", () => {
   });
 
   test("a clean plan carries no warnings key", async () => {
-    registerInputText({ success: true, text: "hello", keyboardDismissed: true });
+    registerSendKeys({ success: true });
 
     const plan: Plan = {
       name: "input-clean-result-plan",
-      steps: [{ tool: "inputText", params: { text: "hello", dismissKeyboard: true } }],
+      steps: [{ tool: "sendKeys", params: { commands: [{ action: "clear" }] } }],
     };
 
     const result = await planExecutor.executePlan(plan, 0, "android", "emulator-5554");
@@ -150,17 +149,17 @@ describe("PlanExecutor — best-effort warnings in debug.steps", () => {
   });
 
   test("a clean step carries no warnings key", async () => {
-    registerInputText({ success: true, text: "hello", keyboardDismissed: true });
+    registerSendKeys({ success: true });
 
     const plan: Plan = {
       name: "input-clean-plan",
-      steps: [{ tool: "inputText", params: { text: "hello", dismissKeyboard: true } }],
+      steps: [{ tool: "sendKeys", params: { commands: [{ action: "clear" }] } }],
     };
 
     const result = await planExecutor.executePlan(plan, 0, "android", "emulator-5554");
 
     expect(result.success).toBe(true);
-    const step = result.debug?.steps.find((s) => s.step.includes(": inputText"));
+    const step = result.debug?.steps.find((s) => s.step.includes(": sendKeys"));
     expect(step?.details?.warnings).toBeUndefined();
   });
 });

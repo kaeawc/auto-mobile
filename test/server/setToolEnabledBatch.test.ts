@@ -103,9 +103,9 @@ describe("setToolEnabled batch enable (#6869)", () => {
     service = new SessionToolSelectionService(repository);
     ToolRegistry.clearTools();
     for (const [name, defaultEnabled] of [
-      ["inputText", false],
-      ["clearText", false],
-      ["imeAction", false],
+      ["sendKeys", false],
+      ["clipboard", false],
+      ["openLink", false],
       ["observe", true],
     ] as const) {
       ToolRegistry.register(
@@ -124,35 +124,35 @@ describe("setToolEnabled batch enable (#6869)", () => {
   });
 
   test("the single-name request and its three existing result fields are unchanged", async () => {
-    const payload = payloadOf(await callSetToolEnabled({ toolName: "inputText" }));
+    const payload = payloadOf(await callSetToolEnabled({ toolName: "sendKeys" }));
 
     expect(payload.sessionUuid).toBe(SESSION_UUID);
-    expect(payload.toolName).toBe("inputText");
+    expect(payload.toolName).toBe("sendKeys");
     expect(payload.enabled).toBe(true);
     expect(payload.toolNames).toBeUndefined();
-    expect(repository.writes).toEqual([[SESSION_UUID, "inputText", true]]);
+    expect(repository.writes).toEqual([[SESSION_UUID, "sendKeys", true]]);
   });
 
   test("enables every name in toolNames in one call", async () => {
     const payload = payloadOf(
-      await callSetToolEnabled({ toolNames: ["inputText", "clearText", "imeAction"] }),
+      await callSetToolEnabled({ toolNames: ["sendKeys", "clipboard", "openLink"] }),
     );
 
-    expect(payload.toolNames).toEqual(["inputText", "clearText", "imeAction"]);
+    expect(payload.toolNames).toEqual(["sendKeys", "clipboard", "openLink"]);
     expect(payload.toolName).toBeUndefined();
     expect(payload.enabled).toBe(true);
     expect(repository.writes).toEqual([
-      [SESSION_UUID, "inputText", true],
-      [SESSION_UUID, "clearText", true],
-      [SESSION_UUID, "imeAction", true],
+      [SESSION_UUID, "sendKeys", true],
+      [SESSION_UUID, "clipboard", true],
+      [SESSION_UUID, "openLink", true],
     ]);
   });
 
   test("returns the resulting enabled set for the session", async () => {
-    const payload = payloadOf(await callSetToolEnabled({ toolNames: ["inputText", "clearText"] }));
+    const payload = payloadOf(await callSetToolEnabled({ toolNames: ["sendKeys", "clipboard"] }));
 
-    // `observe` is enabled by its declared default; `imeAction` stays gated.
-    expect(payload.enabledTools).toEqual(["clearText", "inputText", "observe"]);
+    // `observe` is enabled by its declared default; `openLink` stays gated.
+    expect(payload.enabledTools).toEqual(["clipboard", "observe", "sendKeys"]);
   });
 
   test("reports the enabled set after a disable too", async () => {
@@ -165,40 +165,40 @@ describe("setToolEnabled batch enable (#6869)", () => {
   // #6886 review — `tools/list` and the call gate resolve a tool against the
   // UNION of the connection profile and the routing session, so reporting
   // `enabledTools` from the updated UUID alone omitted tools that stay callable.
-  // A sessionless update after `getAndroid({ enableTools: ["inputText"] })` is
+  // A sessionless update after `getAndroid({ enableTools: ["sendKeys"] })` is
   // exactly that case: the write lands on the connection profile while the grant
   // lives on the routing session.
   test("reports the union of the connection profile and the routing session", async () => {
-    await service.setEnabled(SESSION_UUID, "inputText", true);
+    await service.setEnabled(SESSION_UUID, "sendKeys", true);
 
     const payload = payloadOf(
       await callSetToolEnabled(
-        { toolNames: ["clearText"] },
+        { toolNames: ["clipboard"] },
         { toolSelectionProfileUuid: PROFILE_UUID },
       ),
     );
 
     expect(payload.sessionUuid).toBe(PROFILE_UUID);
-    expect(payload.enabledTools).toEqual(["clearText", "inputText", "observe"]);
+    expect(payload.enabledTools).toEqual(["clipboard", "observe", "sendKeys"]);
   });
 
   test("reports a tool either side enables, matching the call gate's union", async () => {
-    await service.setEnabled(SESSION_UUID, "imeAction", true);
+    await service.setEnabled(SESSION_UUID, "openLink", true);
 
     const payload = payloadOf(
       await callSetToolEnabled(
-        { toolNames: ["imeAction"], enabled: false },
+        { toolNames: ["openLink"], enabled: false },
         { toolSelectionProfileUuid: PROFILE_UUID },
       ),
     );
 
     // The routing session still grants it, so the call gate still admits it.
-    expect(payload.enabledTools).toContain("imeAction");
+    expect(payload.enabledTools).toContain("openLink");
   });
 
   test("rejects an unknown name before writing anything (all-or-nothing)", async () => {
     await expect(
-      callSetToolEnabled({ toolNames: ["inputText", "notATool", "clearText"] }),
+      callSetToolEnabled({ toolNames: ["sendKeys", "notATool", "clipboard"] }),
     ).rejects.toThrow(/notATool/);
 
     expect(repository.writes).toEqual([]);
@@ -216,13 +216,13 @@ describe("setToolEnabled batch enable (#6869)", () => {
   // never leave a prefix of the list applied, and two concurrent batches cannot
   // interleave into a state neither asked for.
   test("persists the whole batch through a single repository operation", async () => {
-    await callSetToolEnabled({ toolNames: ["inputText", "clearText", "imeAction"] });
+    await callSetToolEnabled({ toolNames: ["sendKeys", "clipboard", "openLink"] });
 
     expect(repository.batches).toEqual([
       [
-        [SESSION_UUID, "inputText", true],
-        [SESSION_UUID, "clearText", true],
-        [SESSION_UUID, "imeAction", true],
+        [SESSION_UUID, "sendKeys", true],
+        [SESSION_UUID, "clipboard", true],
+        [SESSION_UUID, "openLink", true],
       ],
     ]);
   });
@@ -236,7 +236,7 @@ describe("setToolEnabled batch enable (#6869)", () => {
     repository.failBatchWith = new Error("selection storage unavailable");
 
     try {
-      await expect(callSetToolEnabled({ toolNames: ["inputText", "clearText"] })).rejects.toThrow(
+      await expect(callSetToolEnabled({ toolNames: ["sendKeys", "clipboard"] })).rejects.toThrow(
         "selection storage unavailable",
       );
     } finally {
@@ -251,20 +251,20 @@ describe("setToolEnabled batch enable (#6869)", () => {
   test("reports a read failure after applying the batch", async () => {
     repository.failListWith = new Error("selection read unavailable");
 
-    const payload = payloadOf(await callSetToolEnabled({ toolNames: ["inputText", "clearText"] }));
+    const payload = payloadOf(await callSetToolEnabled({ toolNames: ["sendKeys", "clipboard"] }));
 
     expect(repository.writes).toEqual([
-      [SESSION_UUID, "inputText", true],
-      [SESSION_UUID, "clearText", true],
+      [SESSION_UUID, "sendKeys", true],
+      [SESSION_UUID, "clipboard", true],
     ]);
     expect(payload.enabledTools).toBeUndefined();
     expect(payload.enabledToolsError).toContain("selection read unavailable");
   });
 
   test("applies a repeated name once", async () => {
-    await callSetToolEnabled({ toolNames: ["inputText", "inputText"] });
+    await callSetToolEnabled({ toolNames: ["sendKeys", "sendKeys"] });
 
-    expect(repository.writes).toEqual([[SESSION_UUID, "inputText", true]]);
+    expect(repository.writes).toEqual([[SESSION_UUID, "sendKeys", true]]);
   });
 
   test("writes configurable batch names and reports setToolEnabled as always-on", async () => {
@@ -296,10 +296,10 @@ describe("setToolEnabled batch enable (#6869)", () => {
 
   describe("schema", () => {
     test("accepts exactly one of toolName and toolNames", () => {
-      expect(setToolEnabledSchema.safeParse({ toolName: "inputText" }).success).toBe(true);
-      expect(setToolEnabledSchema.safeParse({ toolNames: ["inputText"] }).success).toBe(true);
+      expect(setToolEnabledSchema.safeParse({ toolName: "sendKeys" }).success).toBe(true);
+      expect(setToolEnabledSchema.safeParse({ toolNames: ["sendKeys"] }).success).toBe(true);
       expect(
-        setToolEnabledSchema.safeParse({ toolName: "inputText", toolNames: ["clearText"] }).success,
+        setToolEnabledSchema.safeParse({ toolName: "sendKeys", toolNames: ["clipboard"] }).success,
       ).toBe(false);
       expect(setToolEnabledSchema.safeParse({ enabled: true }).success).toBe(false);
     });
@@ -315,7 +315,7 @@ describe("setToolEnabled batch enable (#6869)", () => {
       )!;
       const properties = definition.inputSchema.properties as Record<string, any>;
 
-      expect(properties.toolName.enum).toEqual(["clearText", "imeAction", "inputText", "observe"]);
+      expect(properties.toolName.enum).toEqual(["clipboard", "observe", "openLink", "sendKeys"]);
       expect(properties.toolNames.items.enum).toEqual(properties.toolName.enum);
     });
 
@@ -334,7 +334,7 @@ describe("setToolEnabled batch enable (#6869)", () => {
         }));
       }
 
-      const configurable = ["clearText", "imeAction", "inputText", "observe", "provisionDevice"];
+      const configurable = ["clipboard", "observe", "openLink", "provisionDevice", "sendKeys"];
       for (const name of ["getAndroid", "getApple", "provisionDevice"]) {
         const definition = ToolRegistry.getToolDefinitions().find((tool) => tool.name === name)!;
         const properties = definition.inputSchema.properties as Record<string, any>;
@@ -384,7 +384,7 @@ describe("setToolEnabled batch enable (#6869)", () => {
       )!;
       const validate = new Ajv2020({ strict: false }).compile(definition.inputSchema);
 
-      expect(validate({ deviceId: "emulator-5554", enableTools: ["inputText"] })).toBe(true);
+      expect(validate({ deviceId: "emulator-5554", enableTools: ["sendKeys"] })).toBe(true);
       expect(validate({ deviceId: "emulator-5554", enableTools: ["notATool"] })).toBe(false);
     });
 
@@ -394,9 +394,9 @@ describe("setToolEnabled batch enable (#6869)", () => {
       )!;
       const validate = new Ajv2020({ strict: false }).compile(definition.inputSchema);
 
-      expect(validate({ toolName: "inputText" })).toBe(true);
-      expect(validate({ toolNames: ["inputText"] })).toBe(true);
-      expect(validate({ toolName: "inputText", toolNames: ["clearText"] })).toBe(true);
+      expect(validate({ toolName: "sendKeys" })).toBe(true);
+      expect(validate({ toolNames: ["sendKeys"] })).toBe(true);
+      expect(validate({ toolName: "sendKeys", toolNames: ["clipboard"] })).toBe(true);
       expect(validate({ enabled: true })).toBe(true);
     });
 

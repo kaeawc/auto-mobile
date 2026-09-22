@@ -25,7 +25,7 @@ import { ActionableError } from "../../models/ActionableError";
  * `s-<hash>` is emitted only for a hash that is UNIQUE in the capture (issue
  * #6229). The ordinal forms are still capture-local whenever a duplicate
  * exists: an insert or reorder between the capture an id was observed from and
- * the fresh capture a later `tapOn`/`inputText` resolves it against can shift
+ * the fresh capture a later `tapOn`/`sendKeys` resolves it against can shift
  * which node an existing `-<k>` lands on - silently resolving to the WRONG
  * node rather than the one the caller meant (issue #6218 review thread
  * PRRT_kwDOP-GF5M6foer0, follow-up PRRT_kwDOP-GF5M6fomf-). The bare form, by

@@ -1011,10 +1011,7 @@ export const NAVIGATION_RELEVANT_TOOLS = new Set([
   "pinchOn",
   "dragAndDrop",
   "pressButton",
-  "inputText",
   "sendKeys",
-  "clearText",
-  "imeAction",
 ]);
 
 class DefaultNavigationToolCallRecorder implements NavigationToolCallRecorder {

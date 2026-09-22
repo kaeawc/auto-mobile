@@ -95,7 +95,7 @@ describe("TestExecutionRepository", () => {
     test("records steps alongside the execution", async () => {
       const steps: TestStepRecord[] = [
         makeStep({ stepIndex: 0, action: "tapOn", target: "username_field", durationMs: 100 }),
-        makeStep({ stepIndex: 1, action: "inputText", target: "user@test.com", durationMs: 50 }),
+        makeStep({ stepIndex: 1, action: "sendKeys", target: "user@test.com", durationMs: 50 }),
         makeStep({ stepIndex: 2, action: "tapOn", target: "submit_button", durationMs: 150 }),
       ];
 
@@ -107,7 +107,7 @@ describe("TestExecutionRepository", () => {
       expect(runs[0].steps[0].action).toBe("tapOn");
       expect(runs[0].steps[0].target).toBe("username_field");
       expect(runs[0].steps[0].stepIndex).toBe(0);
-      expect(runs[0].steps[1].action).toBe("inputText");
+      expect(runs[0].steps[1].action).toBe("sendKeys");
       expect(runs[0].steps[1].stepIndex).toBe(1);
       expect(runs[0].steps[2].action).toBe("tapOn");
       expect(runs[0].steps[2].stepIndex).toBe(2);
@@ -118,7 +118,7 @@ describe("TestExecutionRepository", () => {
         makeStep({ stepIndex: 0, action: "tapOn", status: "completed", durationMs: 100 }),
         makeStep({
           stepIndex: 1,
-          action: "inputText",
+          action: "sendKeys",
           status: "failed",
           durationMs: 50,
           errorMessage: "Element not visible",
@@ -295,7 +295,7 @@ describe("TestExecutionRepository", () => {
               timestamp: 1000 + i,
               steps: [
                 makeStep({ stepIndex: 0, action: "tapOn", target: `button-${i}` }),
-                makeStep({ stepIndex: 1, action: "inputText", target: `field-${i}` }),
+                makeStep({ stepIndex: 1, action: "sendKeys", target: `field-${i}` }),
               ],
               screensVisited: [
                 { screenName: `Screen${i}A`, timestamp: 1000 + i },

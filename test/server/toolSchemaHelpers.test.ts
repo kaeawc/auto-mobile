@@ -28,12 +28,10 @@ import {
   dragAndDropSchema,
   swipeOnSchema,
   pinchOnSchema,
-  clearTextSchema,
   selectAllTextSchema,
   pressButtonSchema,
-  inputTextSchema,
+  sendKeysSchema,
   openLinkSchema,
-  imeActionSchema,
   recentAppsSchema,
   homeScreenSchema,
   rotateSchema,
@@ -598,12 +596,14 @@ describe("platform field accepted by all device-targeting tool schemas", () => {
     ],
     ["swipeOnSchema", swipeOnSchema, { direction: "up", platform: "ios" }],
     ["pinchOnSchema", pinchOnSchema, { direction: "in", platform: "ios" }],
-    ["clearTextSchema", clearTextSchema, { platform: "ios" }],
     ["selectAllTextSchema", selectAllTextSchema, { platform: "ios" }],
     ["pressButtonSchema", pressButtonSchema, { button: "home", platform: "ios" }],
-    ["inputTextSchema", inputTextSchema, { text: "hello", platform: "ios" }],
+    [
+      "sendKeysSchema",
+      sendKeysSchema,
+      { commands: [{ action: "type", text: "hello" }], platform: "ios" },
+    ],
     ["openLinkSchema", openLinkSchema, { url: "https://example.com", platform: "ios" }],
-    ["imeActionSchema", imeActionSchema, { action: "done", platform: "ios" }],
     ["recentAppsSchema", recentAppsSchema, { platform: "ios" }],
     ["homeScreenSchema", homeScreenSchema, { platform: "ios" }],
     ["rotateSchema", rotateSchema, { orientation: "portrait", platform: "ios" }],
@@ -637,35 +637,10 @@ describe("platform field accepted by all device-targeting tool schemas", () => {
   });
 });
 
-describe("inputTextSchema", () => {
-  test("accepts supported Android input modes", () => {
-    for (const mode of ["a11y", "eventLast", "eventAll", "eventOnly"]) {
-      const result = inputTextSchema.safeParse({ text: "hello", mode, platform: "android" });
-      expect(result.success).toBe(true);
-    }
-  });
-
-  test("accepts input modes for iOS callers so runtime can ignore them", () => {
-    for (const mode of ["a11y", "eventLast", "eventAll", "eventOnly"]) {
-      const result = inputTextSchema.safeParse({ text: "hello", mode, platform: "ios" });
-      expect(result.success).toBe(true);
-    }
-  });
-
-  test("rejects unsupported input modes", () => {
-    const result = inputTextSchema.safeParse({
-      text: "hello",
-      mode: "realKeyEvents",
-      platform: "android",
-    });
-    expect(result.success).toBe(false);
-  });
-});
-
 /**
  * The `<ime>` row the skeleton projection emits for a visible keyboard (issue
  * #6871) is deliberately NOT a selector — the supported way to drive an IME is
- * `inputText` / `sendKeys`. The `project` description promises every skeleton
+ * `sendKeys`. The `project` description promises every skeleton
  * `elementId`/`label` is directly usable with `tapOn`, so it must name that one
  * exception; otherwise a client following the MCP schema issues a
  * guaranteed-failing `tapOn({ elementId: "<ime>" })`.

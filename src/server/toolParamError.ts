@@ -579,7 +579,7 @@ export function formatToolParamError(
     );
   // Conflicting keys are RECOGNIZED keys of the object that reported them, so
   // none of them is a misplaced top-level parameter: promoting `selector.text`
-  // to `inputText`'s own `text` parameter names a different thing the caller
+  // to a `sendKeys` type command's own `text` parameter names a different thing the caller
   // already supplied. Only unrecognized keys are promotable (PR #6882 review).
   const conflictLine = (issue: UnrecognizedKeysIssue, keys: string[]): string =>
     renderer(withMergedKeys(issue, keys, mutuallyExclusiveMessage(keys)));

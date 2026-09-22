@@ -1,7 +1,7 @@
 /**
  * Issue #6251: postNotification, setAppPermissions, navigateTo, and
  * setUIState must set `isError: true` whenever their primary operation did
- * not succeed, exactly like tapOn/inputText/sqlQuery already do (#6200).
+ * not succeed, exactly like tapOn/sendKeys/sqlQuery already do (#6200).
  * setUIState is the one partial-result exception: it may stay
  * `isError: false` for a genuine partial success (some fields set, others
  * not, #6237), but must flip to `isError: true` when every field fails.

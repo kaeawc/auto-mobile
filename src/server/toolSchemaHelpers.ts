@@ -26,7 +26,7 @@ export const responseShapeControlFields = {
         "(elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' " +
         "returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is " +
         "directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` " +
-        "(drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
+        "(drive it with sendKeys); re-request with raw/project:'full' to disambiguate.",
     ),
 } as const;
 

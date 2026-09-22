@@ -1,17 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import type { ReleaseChecksumEntry } from "../../src/constants/release";
-import { isSendKeysReleased } from "../../src/features/action/SendKeys";
 import type { BootedDevice } from "../../src/models";
 import { assertSendKeysRunnerCompatible, sendKeysSchema } from "../../src/server/interactionTools";
-
-function release(version: string): ReleaseChecksumEntry {
-  return {
-    version,
-    apkSha256: "apk",
-    ipaSha256: "ipa",
-    runnerSha256: "runner",
-  };
-}
 
 describe("sendKeysSchema", () => {
   test("accepts device, session, and bound-session targeting without a platform", () => {
@@ -85,17 +74,6 @@ describe("sendKeysSchema", () => {
         }).success,
       ).toBe(true);
     }
-  });
-
-  test("hands the default tool profile over only after the coordinated release", () => {
-    expect(isSendKeysReleased({}, [release("0.0.67")])).toBe(false);
-    expect(isSendKeysReleased({}, [release("0.0.68"), release("0.0.67")])).toBe(true);
-    expect(
-      isSendKeysReleased({ AUTOMOBILE_VERSION: "0.0.67" }, [release("0.0.68"), release("0.0.67")]),
-    ).toBe(false);
-    expect(
-      isSendKeysReleased({ AUTOMOBILE_VERSION: "0.0.69" }, [release("0.0.68"), release("0.0.67")]),
-    ).toBe(false);
   });
 
   test("preflights platform runner capabilities before execution", async () => {

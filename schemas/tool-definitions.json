@@ -444,7 +444,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -698,41 +698,6 @@
     },
     "_meta": {
       "automobile/embeddedSdkOnly": true
-    }
-  },
-  {
-    "name": "clearText",
-    "description": "Clear text from focused input",
-    "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "type": "object",
-      "properties": {
-        "platform": {
-          "type": "string",
-          "enum": ["android", "ios"]
-        },
-        "raw": {
-          "description": "Return the raw view hierarchy instead of the compact skeleton",
-          "type": "boolean"
-        },
-        "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
-          "type": "string",
-          "enum": ["full", "skeleton"]
-        },
-        "sessionUuid": {
-          "description": "Session",
-          "type": "string"
-        },
-        "keepScreenAwake": {
-          "type": "boolean"
-        },
-        "device": {
-          "description": "Device label",
-          "type": "string"
-        }
-      },
-      "additionalProperties": false
     }
   },
   {
@@ -1351,7 +1316,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -1813,7 +1778,6 @@
               "changeLocalization",
               "clearKeyValueFile",
               "clearMockNetwork",
-              "clearText",
               "clipboard",
               "crashApp",
               "debugSearch",
@@ -1836,8 +1800,6 @@
               "highlight",
               "homeScreen",
               "identifyInteractions",
-              "imeAction",
-              "inputText",
               "installApp",
               "keyboard",
               "killDevice",
@@ -1940,7 +1902,6 @@
               "changeLocalization",
               "clearKeyValueFile",
               "clearMockNetwork",
-              "clearText",
               "clipboard",
               "crashApp",
               "debugSearch",
@@ -1963,8 +1924,6 @@
               "highlight",
               "homeScreen",
               "identifyInteractions",
-              "imeAction",
-              "inputText",
               "installApp",
               "keyboard",
               "killDevice",
@@ -2530,7 +2489,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -2622,158 +2581,6 @@
     },
     "_meta": {
       "automobile/debugOnly": true
-    }
-  },
-  {
-    "name": "imeAction",
-    "description": "Perform IME action",
-    "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "type": "object",
-      "properties": {
-        "action": {
-          "description": "IME action",
-          "type": "string",
-          "enum": ["done", "next", "search", "send", "go", "previous"]
-        },
-        "platform": {
-          "type": "string",
-          "enum": ["android", "ios"]
-        },
-        "raw": {
-          "description": "Return the raw view hierarchy instead of the compact skeleton",
-          "type": "boolean"
-        },
-        "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
-          "type": "string",
-          "enum": ["full", "skeleton"]
-        },
-        "sessionUuid": {
-          "description": "Session",
-          "type": "string"
-        },
-        "keepScreenAwake": {
-          "type": "boolean"
-        },
-        "device": {
-          "description": "Device label",
-          "type": "string"
-        }
-      },
-      "required": ["action"],
-      "additionalProperties": false
-    }
-  },
-  {
-    "name": "inputText",
-    "description": "Input text. The optional mode field is Android-only and ignored on iOS. If the text lands but the optional keyboard dismissal fails, the response stays a success with keyboardDismissed:false and a warnings entry.",
-    "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "type": "object",
-      "properties": {
-        "text": {
-          "type": "string",
-          "minLength": 1
-        },
-        "selector": {
-          "description": "Focus this field before typing, collapsing the mandatory focus-then-type pair into one call. Without it, text goes to whatever is currently focused.",
-          "anyOf": [
-            {
-              "type": "object",
-              "properties": {
-                "elementId": {
-                  "description": "Resource ID, e.g. com.app:id/field",
-                  "type": "string",
-                  "minLength": 1
-                }
-              },
-              "required": ["elementId"],
-              "additionalProperties": false
-            },
-            {
-              "type": "object",
-              "properties": {
-                "testTag": {
-                  "description": "Android accessibility test tag",
-                  "type": "string",
-                  "minLength": 1
-                }
-              },
-              "required": ["testTag"],
-              "additionalProperties": false
-            },
-            {
-              "type": "object",
-              "properties": {
-                "text": {
-                  "description": "Text, content-desc, or placeholder of the field",
-                  "type": "string",
-                  "minLength": 1
-                }
-              },
-              "required": ["text"],
-              "additionalProperties": false
-            },
-            {
-              "type": "object",
-              "properties": {
-                "textAny": {
-                  "description": "Ordered text variants; first visible match wins",
-                  "minItems": 1,
-                  "type": "array",
-                  "items": {
-                    "type": "string",
-                    "minLength": 1
-                  }
-                }
-              },
-              "required": ["textAny"],
-              "additionalProperties": false
-            }
-          ]
-        },
-        "mode": {
-          "description": "Android text mode: a11y default; eventLast and eventAll start with accessibility setText; eventOnly clears and types supported ASCII with key events only",
-          "type": "string",
-          "enum": ["a11y", "eventLast", "eventAll", "eventOnly"]
-        },
-        "imeAction": {
-          "description": "IME action after input",
-          "type": "string",
-          "enum": ["done", "next", "search", "send", "go", "previous"]
-        },
-        "dismissKeyboard": {
-          "description": "Android: dismiss keyboard after input",
-          "type": "boolean"
-        },
-        "platform": {
-          "type": "string",
-          "enum": ["android", "ios"]
-        },
-        "raw": {
-          "description": "Return the raw view hierarchy instead of the compact skeleton",
-          "type": "boolean"
-        },
-        "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
-          "type": "string",
-          "enum": ["full", "skeleton"]
-        },
-        "sessionUuid": {
-          "description": "Session",
-          "type": "string"
-        },
-        "keepScreenAwake": {
-          "type": "boolean"
-        },
-        "device": {
-          "description": "Device label",
-          "type": "string"
-        }
-      },
-      "required": ["text"],
-      "additionalProperties": false
     }
   },
   {
@@ -2900,7 +2707,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -4518,7 +4325,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Output projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) in place of viewHierarchy/elements. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
+          "description": "Output projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) in place of viewHierarchy/elements. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -8265,7 +8072,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -8396,7 +8203,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -8514,7 +8321,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -9025,7 +8832,6 @@
               "changeLocalization",
               "clearKeyValueFile",
               "clearMockNetwork",
-              "clearText",
               "clipboard",
               "crashApp",
               "debugSearch",
@@ -9048,8 +8854,6 @@
               "highlight",
               "homeScreen",
               "identifyInteractions",
-              "imeAction",
-              "inputText",
               "installApp",
               "keyboard",
               "killDevice",
@@ -9789,7 +9593,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -10067,7 +9871,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -10103,7 +9907,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -10285,7 +10089,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -11252,7 +11056,6 @@
             "changeLocalization",
             "clearKeyValueFile",
             "clearMockNetwork",
-            "clearText",
             "clipboard",
             "crashApp",
             "debugSearch",
@@ -11275,8 +11078,6 @@
             "highlight",
             "homeScreen",
             "identifyInteractions",
-            "imeAction",
-            "inputText",
             "installApp",
             "keyboard",
             "killDevice",
@@ -11345,7 +11146,6 @@
               "changeLocalization",
               "clearKeyValueFile",
               "clearMockNetwork",
-              "clearText",
               "clipboard",
               "crashApp",
               "debugSearch",
@@ -11368,8 +11168,6 @@
               "highlight",
               "homeScreen",
               "identifyInteractions",
-              "imeAction",
-              "inputText",
               "installApp",
               "keyboard",
               "killDevice",
@@ -11630,7 +11428,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -12087,7 +11885,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -12212,7 +12010,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -12304,7 +12102,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -12343,7 +12141,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -12534,7 +12332,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },
@@ -15702,7 +15500,7 @@
           "type": "boolean"
         },
         "project": {
-          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with inputText/sendKeys); re-request with raw/project:'full' to disambiguate.",
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
         },

@@ -137,7 +137,7 @@ export const navigateToHandler = async (
       });
     } else {
       // A failed navigation must not read as a completed one: mark the MCP
-      // envelope `isError`, exactly as tapOn/inputText do (#6200, #6251).
+      // envelope `isError`, exactly as tapOn/sendKeys do (#6200, #6251).
       return {
         ...createJSONToolResponse({
           error: result.error || "Navigation failed",

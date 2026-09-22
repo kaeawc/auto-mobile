@@ -6,7 +6,7 @@ import { ToolRegistry } from "../../../src/server/toolRegistry";
 
 // Populate at module scope because test definitions are collected before hooks
 // run. The daemon-only tools are included to cover the generator's complete
-// 88-tool catalog rather than this test process's stdio-only default registry.
+// 85-tool catalog rather than this test process's stdio-only default registry.
 createMcpServer();
 registerCriticalSectionTools();
 registerBarrierTools();
@@ -46,7 +46,7 @@ function findForbiddenSchemaKeyword(
 
 describe("Anthropic input_schema subset", () => {
   test("normalizes every advertised tool input schema", () => {
-    expect(ADVERTISED_TOOLS).toHaveLength(88);
+    expect(ADVERTISED_TOOLS).toHaveLength(85);
 
     for (const tool of ADVERTISED_TOOLS) {
       const schema = tool.inputSchema as Record<string, unknown>;

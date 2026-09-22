@@ -54,10 +54,10 @@ describe("acquisition-time enableTools (#6869)", () => {
       handler,
       { defaultEnabled: true, hidden: name === "startDevice", ...options },
     );
-    ToolRegistry.register("inputText", "input", z.object({}), async () => ({ content: [] }), {
+    ToolRegistry.register("sendKeys", "input", z.object({}), async () => ({ content: [] }), {
       defaultEnabled: false,
     });
-    ToolRegistry.register("clearText", "clear", z.object({}), async () => ({ content: [] }), {
+    ToolRegistry.register("clipboard", "clear", z.object({}), async () => ({ content: [] }), {
       defaultEnabled: false,
     });
     ToolRegistry.register("observe", "observe", z.object({}), async () => ({ content: [] }), {
@@ -112,14 +112,14 @@ describe("acquisition-time enableTools (#6869)", () => {
       registerAcquisition(acquisition);
 
       const { payload } = await acquire(acquisition, {
-        enableTools: ["inputText", "clearText"],
+        enableTools: ["sendKeys", "clipboard"],
       });
 
       expect(acquiredSessionUuid(payload)).toBe("acquired-session");
       expect(payload.gatedTools).toEqual([]);
-      expect(payload.enabledTools).toEqual(["clearText", "inputText", "observe"]);
+      expect(payload.enabledTools).toEqual(["clipboard", "observe", "sendKeys"]);
       expect((await fixture!.client.listTools()).tools.map((tool) => tool.name)).toContain(
-        "inputText",
+        "sendKeys",
       );
     });
 
@@ -128,7 +128,7 @@ describe("acquisition-time enableTools (#6869)", () => {
 
       const { payload } = await acquire(acquisition, {});
 
-      expect(payload.gatedTools).toEqual(["clearText", "inputText"]);
+      expect(payload.gatedTools).toEqual(["clipboard", "sendKeys"]);
       expect(payload.enabledTools).toEqual(["observe"]);
     });
 
@@ -172,14 +172,14 @@ describe("acquisition-time enableTools (#6869)", () => {
     const gatedNames = [
       "observe",
       "tapOn",
-      "inputText",
+      "sendKeys",
       "launchApp",
       "systemTray",
       "getDeviceState",
       "pressButton",
       "setDeviceState",
-      "clearText",
-      "imeAction",
+      "clipboard",
+      "openLink",
       "postNotification",
       "wakeAndUnlock",
     ];
@@ -195,15 +195,15 @@ describe("acquisition-time enableTools (#6869)", () => {
       enableTools: [
         "observe",
         "tapOn",
-        "inputText",
+        "sendKeys",
         "launchApp",
         "setToolEnabled",
         "systemTray",
         "getDeviceState",
         "pressButton",
         "setDeviceState",
-        "clearText",
-        "imeAction",
+        "clipboard",
+        "openLink",
         "postNotification",
         "wakeAndUnlock",
       ],
@@ -225,14 +225,14 @@ describe("acquisition-time enableTools (#6869)", () => {
     await fixture!.client.request(
       {
         method: "tools/call",
-        params: { name: "setToolEnabled", arguments: { toolName: "inputText" } },
+        params: { name: "setToolEnabled", arguments: { toolName: "sendKeys" } },
       },
       z.any(),
     );
 
     const { payload } = await acquire("provisionDevice", {});
 
-    expect(payload.enabledTools).toContain("inputText");
+    expect(payload.enabledTools).toContain("sendKeys");
   });
 
   /**
@@ -248,12 +248,12 @@ describe("acquisition-time enableTools (#6869)", () => {
         await withFailingSelectionWrites();
         registerAcquisition(acquisition);
 
-        const { payload } = await acquire(acquisition, { enableTools: ["inputText"] });
+        const { payload } = await acquire(acquisition, { enableTools: ["sendKeys"] });
 
         expect(acquiredSessionUuid(payload)).toBe("acquired-session");
         expect(payload.enableToolsError).toContain("selection storage unavailable");
-        expect(payload.enableToolsError).toContain("inputText");
-        expect(payload.gatedTools).toContain("inputText");
+        expect(payload.enableToolsError).toContain("sendKeys");
+        expect(payload.gatedTools).toContain("sendKeys");
       });
     }
 
@@ -261,17 +261,17 @@ describe("acquisition-time enableTools (#6869)", () => {
       await withFailingSelectionWrites();
       registerAcquisition("provisionDevice");
 
-      const { payload } = await acquire("provisionDevice", { enableTools: ["inputText"] });
+      const { payload } = await acquire("provisionDevice", { enableTools: ["sendKeys"] });
 
       expect(acquiredSessionUuid(payload)).toBe("acquired-session");
       expect(payload.enableToolsError).toContain("selection storage unavailable");
-      expect(payload.enabledTools).not.toContain("inputText");
+      expect(payload.enabledTools).not.toContain("sendKeys");
     });
 
     test("a successful acquisition carries no enableToolsError", async () => {
       registerAcquisition("getAndroid");
 
-      const { payload } = await acquire("getAndroid", { enableTools: ["inputText"] });
+      const { payload } = await acquire("getAndroid", { enableTools: ["sendKeys"] });
 
       expect(payload.enableToolsError).toBeUndefined();
     });
@@ -313,19 +313,19 @@ describe("acquisition-time enableTools (#6869)", () => {
       registerResourceFailureProvision();
 
       const { response, payload } = await acquire("provisionDevice", {
-        enableTools: ["inputText"],
+        enableTools: ["sendKeys"],
       });
 
       expect(response.isError).toBe(true);
       expect(acquiredSessionUuid(payload)).toBe("acquired-session");
-      expect(payload.enabledTools).toEqual(["inputText", "observe", "provisionDevice"]);
+      expect(payload.enabledTools).toEqual(["observe", "provisionDevice", "sendKeys"]);
       expect(getStructuredField(response, "enabledTools")).toEqual([
-        "inputText",
         "observe",
         "provisionDevice",
+        "sendKeys",
       ]);
       expect((await fixture!.client.listTools()).tools.map((tool) => tool.name)).toContain(
-        "inputText",
+        "sendKeys",
       );
     });
 
@@ -334,7 +334,7 @@ describe("acquisition-time enableTools (#6869)", () => {
       registerResourceFailureProvision();
 
       const { response, payload } = await acquire("provisionDevice", {
-        enableTools: ["inputText"],
+        enableTools: ["sendKeys"],
       });
 
       expect(response.isError).toBe(true);
@@ -343,7 +343,7 @@ describe("acquisition-time enableTools (#6869)", () => {
       expect(getStructuredField(response, "enableToolsError")).toContain(
         "selection storage unavailable",
       );
-      expect(payload.enabledTools).not.toContain("inputText");
+      expect(payload.enabledTools).not.toContain("sendKeys");
     });
 
     test("a failed acquisition that mints no session grants nothing", async () => {
@@ -352,12 +352,12 @@ describe("acquisition-time enableTools (#6869)", () => {
         isError: true,
       }));
 
-      const { payload } = await acquire("provisionDevice", { enableTools: ["inputText"] });
+      const { payload } = await acquire("provisionDevice", { enableTools: ["sendKeys"] });
 
       expect(payload.enabledTools).toBeUndefined();
       expect(payload.enableToolsError).toBeUndefined();
       expect((await fixture!.client.listTools()).tools.map((tool) => tool.name)).not.toContain(
-        "inputText",
+        "sendKeys",
       );
     });
   });
@@ -365,9 +365,9 @@ describe("acquisition-time enableTools (#6869)", () => {
   test("provisionDevice enables the requested tools and reports enabledTools", async () => {
     registerAcquisition("provisionDevice");
 
-    const { payload } = await acquire("provisionDevice", { enableTools: ["inputText"] });
+    const { payload } = await acquire("provisionDevice", { enableTools: ["sendKeys"] });
 
     expect(acquiredSessionUuid(payload)).toBe("acquired-session");
-    expect(payload.enabledTools).toEqual(["inputText", "observe", "provisionDevice"]);
+    expect(payload.enabledTools).toEqual(["observe", "provisionDevice", "sendKeys"]);
   });
 });

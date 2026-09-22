@@ -1,5 +1,4 @@
 import { isInPlacePressButton, isNavigationPressButton } from "./pressButtonPolicy";
-import { isSubmitImeAction } from "../../models/ImeActionResult";
 
 /**
  * How an action tool's effect on the screen is classified for observation
@@ -19,7 +18,6 @@ const FIXED_OBSERVATION_ACTION_CLASSES: Readonly<Record<string, ObservationActio
   homeScreen: "navigation",
   recentApps: "navigation",
   openLink: "navigation",
-  clearText: "inPlace",
   selectAllText: "inPlace",
   keyboard: "inPlace",
   clipboard: "inPlace",
@@ -68,10 +66,6 @@ export function classifyObservationAction(
       return classifyPressButton(args);
     case "sendKeys":
       return classifySendKeys(args);
-    case "inputText":
-      return isSubmitImeAction(args?.imeAction) ? "navigation" : "inPlace";
-    case "imeAction":
-      return isSubmitImeAction(args?.action) ? "navigation" : "inPlace";
     default:
       return "unknown";
   }

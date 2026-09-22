@@ -449,7 +449,7 @@ async function main() {
       [embeddedSdk, "Embedded SDK tools enabled (--embedded-sdk)"],
       [
         dismissKeyboardAfterInput,
-        "Dismiss keyboard after inputText enabled (--dismiss-keyboard-after-input)",
+        "Dismiss keyboard after internal text input enabled (--dismiss-keyboard-after-input)",
       ],
       [
         noA11yIncludeNotImportantViews,
@@ -469,7 +469,7 @@ async function main() {
     }
     if (eventAllMarkers.length > 0) {
       logger.info(
-        `inputText eventAll auto-promotion markers configured (--event-all-markers): ${JSON.stringify(eventAllMarkers)}`,
+        `Internal text-input eventAll auto-promotion markers configured (--event-all-markers): ${JSON.stringify(eventAllMarkers)}`,
       );
     } else if (
       process.argv
@@ -477,7 +477,7 @@ async function main() {
         .some((a) => a === EVENT_ALL_MARKERS_FLAG || a.startsWith(`${EVENT_ALL_MARKERS_FLAG}=`))
     ) {
       logger.warn(
-        `${EVENT_ALL_MARKERS_FLAG} was provided but resolved to no markers; inputText eventAll auto-promotion stays disabled`,
+        `${EVENT_ALL_MARKERS_FLAG} was provided but resolved to no markers; internal text-input eventAll auto-promotion stays disabled`,
       );
     }
 

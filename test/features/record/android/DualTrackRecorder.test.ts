@@ -39,14 +39,11 @@ class FakeGestureEmitter implements GestureEmitter {
 }
 
 class FakeA11ySource implements A11ySource {
-  capabilityError: Error | undefined;
   connectionError: Error | undefined;
   connected = true;
   subscriptionCount = 0;
   unsubscribeCount = 0;
   private listener?: InteractionListener;
-
-  constructor(private readonly supportedCommands: string[] | null = ["request_insert_text"]) {}
 
   async ensureConnected(): Promise<boolean> {
     if (this.connectionError) {
@@ -56,10 +53,7 @@ class FakeA11ySource implements A11ySource {
   }
 
   async getSupportedCommands(): Promise<string[] | null> {
-    if (this.capabilityError) {
-      throw this.capabilityError;
-    }
-    return this.supportedCommands;
+    return ["request_insert_text"];
   }
 
   onInteraction(listener: InteractionListener): () => void {
@@ -106,7 +100,7 @@ describe("DualTrackRecorder", () => {
     fakeA11y = new FakeA11ySource();
     fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
-    recorder = new DualTrackRecorder(fakeDevice, fakeGestures, fakeA11y, fakeTimer, true);
+    recorder = new DualTrackRecorder(fakeDevice, fakeGestures, fakeA11y, fakeTimer);
   });
 
   test("tap gesture + matching A11y element → tapOn step", async () => {
@@ -231,68 +225,6 @@ describe("DualTrackRecorder", () => {
         ],
       },
     });
-  });
-
-  test("inputText from A11y remains replayable before the sendKeys runner release", async () => {
-    recorder = new DualTrackRecorder(fakeDevice, fakeGestures, fakeA11y, fakeTimer, false);
-    await recorder.start();
-
-    fakeA11y.emit({
-      type: "inputText",
-      timestamp: Date.now(),
-      text: "hello@example.com",
-      element: { "resource-id": "com.example:id/email_field" },
-    });
-
-    fakeA11y.emit({
-      type: "inputText",
-      timestamp: Date.now(),
-      text: "updated@example.com",
-      element: { "resource-id": "com.example:id/email_field" },
-    });
-
-    const { steps } = await recorder.stop();
-
-    expect(steps).toEqual([
-      {
-        tool: "inputText",
-        params: { text: "updated@example.com" },
-      },
-    ]);
-  });
-
-  test("inputText from a runner without insert support records a replayable inputText step", async () => {
-    fakeA11y = new FakeA11ySource([]);
-    recorder = new DualTrackRecorder(fakeDevice, fakeGestures, fakeA11y, fakeTimer, true);
-    await recorder.start();
-
-    fakeA11y.emit({
-      type: "inputText",
-      timestamp: Date.now(),
-      text: "hello@example.com",
-      element: { "resource-id": "com.example:id/email_field" },
-    });
-
-    const { steps } = await recorder.stop();
-
-    expect(steps).toEqual([{ tool: "inputText", params: { text: "hello@example.com" } }]);
-  });
-
-  test("rejected optional capabilities still start, record inputText, and clean up", async () => {
-    fakeA11y.capabilityError = new Error("capability lookup failed");
-    await recorder.start();
-    expect(fakeGestures.startCount).toBe(1);
-    expect(fakeA11y.subscriptionCount).toBe(1);
-    fakeA11y.emit({
-      type: "inputText",
-      timestamp: fakeTimer.now(),
-      text: "hello@example.com",
-      element: { "resource-id": "com.example:id/email" },
-    });
-    const { steps } = await recorder.stop();
-    expect(steps).toEqual([{ tool: "inputText", params: { text: "hello@example.com" } }]);
-    expect(fakeGestures.stopCount).toBe(1);
-    expect(fakeA11y.unsubscribeCount).toBe(1);
   });
 
   test.each(["disconnected", "rejected"])(

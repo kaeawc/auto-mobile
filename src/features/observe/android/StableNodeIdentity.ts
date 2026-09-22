@@ -28,7 +28,7 @@ import { getToggleContentDescription } from "../../../utils/elementProperties";
  * because some *descendant's* `text` ticked between captures — a row wrapping
  * a live timer child ("1 second" → "2 seconds") is still the same row, and the
  * `s2-…` id an `observe(project: "skeleton")` emitted must still resolve on the
- * fresh capture a later `tapOn`/`inputText` runs against. So a child contributes
+ * fresh capture a later `tapOn`/`sendKeys` runs against. So a child contributes
  * only its **structural** hash to an ancestor — class/className, `resource-id`,
  * `content-desc`, `test-tag`, and (recursively) its own children's structural
  * hashes — with volatile display `text` omitted from that upward contribution.

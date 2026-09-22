@@ -82,7 +82,7 @@ describe("mcpRecordingManager", () => {
 
       const recorder = getMcpRecorder()!;
       recorder.record("tapOn", { text: "Login" });
-      recorder.record("inputText", { text: "test" });
+      recorder.record("sendKeys", { commands: [{ action: "type", text: "test" }] });
 
       const statusTimer = new FakeTimer();
       statusTimer.setCurrentTime(3000);

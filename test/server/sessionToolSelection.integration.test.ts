@@ -129,7 +129,7 @@ describe("per-session exact-tool selection", () => {
       fixture = new McpTestFixture({
         sessionToolSelectionService: {
           isEnabled: async (_sessionUuid, toolName, declaredDefault) => {
-            if (toolName === "inputText" && stage === "lookup") {
+            if (toolName === "sendKeys" && stage === "lookup") {
               lookupStarted.resolve();
               await releaseLookup.promise;
             }
@@ -156,7 +156,7 @@ describe("per-session exact-tool selection", () => {
         },
         { defaultEnabled: true },
       );
-      ToolRegistry.register("inputText", "input", z.object({}), async () => ({ content: [] }), {
+      ToolRegistry.register("sendKeys", "input", z.object({}), async () => ({ content: [] }), {
         defaultEnabled: false,
       });
       ToolRegistry.register(
@@ -199,7 +199,7 @@ describe("per-session exact-tool selection", () => {
         sessionContext: { initialSessionToolBinding: "old-session" },
         sessionToolSelectionService: {
           isEnabled: async (sessionUuid, toolName, declaredDefault) =>
-            toolName === "inputText" ? sessionUuid === "old-session" : declaredDefault,
+            toolName === "sendKeys" ? sessionUuid === "old-session" : declaredDefault,
         },
       });
       await fixture.setup();
@@ -213,11 +213,11 @@ describe("per-session exact-tool selection", () => {
         }),
         { defaultEnabled: true },
       );
-      ToolRegistry.register("inputText", "input", z.object({}), async () => ({ content: [] }), {
+      ToolRegistry.register("sendKeys", "input", z.object({}), async () => ({ content: [] }), {
         defaultEnabled: false,
       });
       expect((await fixture.client.listTools()).tools.map((tool) => tool.name)).toContain(
-        "inputText",
+        "sendKeys",
       );
       const response = await fixture.client.request(
         { method: "tools/call", params: { name: acquisition, arguments: {} } },
@@ -225,7 +225,7 @@ describe("per-session exact-tool selection", () => {
       );
       expect(JSON.parse(response.content[0].text)).toEqual({
         runtime: { session: { sessionUuid: "new-session" } },
-        gatedTools: ["inputText"],
+        gatedTools: ["sendKeys"],
         // #6869 — the complement of gatedTools, so a client confirms the
         // resulting capability set without a second listTools.
         enabledTools: [],
@@ -239,7 +239,7 @@ describe("per-session exact-tool selection", () => {
       fixture = new McpTestFixture({
         sessionToolSelectionService: {
           isEnabled: async (sessionUuid, toolName, declaredDefault) => {
-            if (toolName !== "inputText") {
+            if (toolName !== "sendKeys") {
               return declaredDefault;
             }
             if (sessionUuid === "session-a" && !held) {
@@ -262,7 +262,7 @@ describe("per-session exact-tool selection", () => {
         }),
         { defaultEnabled: true },
       );
-      ToolRegistry.register("inputText", "input", z.object({}), async () => ({ content: [] }), {
+      ToolRegistry.register("sendKeys", "input", z.object({}), async () => ({ content: [] }), {
         defaultEnabled: false,
       });
       ToolRegistry.register(
@@ -292,21 +292,21 @@ describe("per-session exact-tool selection", () => {
         expect(await acquire("session-b")).toEqual({
           runtime: { session: { sessionUuid: "session-b" } },
           gatedTools: [],
-          enabledTools: ["inputText", "inspectRouting"].sort(),
+          enabledTools: ["sendKeys", "inspectRouting"].sort(),
         });
         expect((await fixture.client.listTools()).tools.map((tool) => tool.name)).toContain(
-          "inputText",
+          "sendKeys",
         );
       } finally {
         releaseLookup.resolve();
       }
       expect(await first).toEqual({
         runtime: { session: { sessionUuid: "session-a" } },
-        gatedTools: ["inputText"],
+        gatedTools: ["sendKeys"],
         enabledTools: ["inspectRouting"],
       });
       expect((await fixture.client.listTools()).tools.map((tool) => tool.name)).not.toContain(
-        "inputText",
+        "sendKeys",
       );
       const routed = await fixture.client.request(
         { method: "tools/call", params: { name: "inspectRouting", arguments: {} } },
@@ -319,7 +319,7 @@ describe("per-session exact-tool selection", () => {
       fixture = new McpTestFixture({
         sessionToolSelectionService: {
           isEnabled: async (_sessionUuid, toolName, declaredDefault) => {
-            if (toolName === "inputText") {
+            if (toolName === "sendKeys") {
               throw new Error("profile database unavailable");
             }
             return declaredDefault;
@@ -344,7 +344,7 @@ describe("per-session exact-tool selection", () => {
         }),
         { defaultEnabled: true },
       );
-      ToolRegistry.register("inputText", "input", z.object({}), async () => ({ content: [] }), {
+      ToolRegistry.register("sendKeys", "input", z.object({}), async () => ({ content: [] }), {
         defaultEnabled: false,
       });
       const response = await fixture.client.request(
@@ -380,7 +380,7 @@ describe("per-session exact-tool selection", () => {
           }),
           { defaultEnabled: true },
         );
-        ToolRegistry.register("inputText", "input", z.object({}), async () => ({ content: [] }), {
+        ToolRegistry.register("sendKeys", "input", z.object({}), async () => ({ content: [] }), {
           defaultEnabled: false,
         });
         ToolRegistry.register("hiddenTool", "hidden", z.object({}), async () => ({ content: [] }), {
@@ -398,12 +398,12 @@ describe("per-session exact-tool selection", () => {
         const payload = await acquire();
         expect(payload.runtime.session.sessionUuid).toBe("acquired-session");
         expect(payload.timing).toEqual({ total: 1 });
-        expect(payload.gatedTools).toEqual(["inputText"]);
+        expect(payload.gatedTools).toEqual(["sendKeys"]);
         const listed = await fixture.client.listTools();
-        expect(listed.tools.map((tool) => tool.name)).not.toContain("inputText");
+        expect(listed.tools.map((tool) => tool.name)).not.toContain("sendKeys");
         const control = listed.tools.find((tool) => tool.name === "setToolEnabled")!;
         expect((control.inputSchema.properties!.toolName as { enum: string[] }).enum).toContain(
-          "inputText",
+          "sendKeys",
         );
         await fixture.client.request(
           {
@@ -414,7 +414,7 @@ describe("per-session exact-tool selection", () => {
         );
         expect((await acquire()).gatedTools).toEqual([]);
         expect((await fixture.client.listTools()).tools.map((tool) => tool.name)).toContain(
-          "inputText",
+          "sendKeys",
         );
       },
     );

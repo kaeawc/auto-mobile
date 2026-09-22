@@ -74,6 +74,11 @@ class KeyboardSession(
       .execute(policy.onText(text, tracker.snapshot(connection)))
   }
 
+  fun finishComposingForAutomation(connection: ImeConnection?): Boolean {
+    if (connection == null) return false
+    return InputConnectionDriver(connection).execute(policy.onFinishInput())
+  }
+
   fun onFinishInput(connection: ImeConnection?) {
     val ops = policy.onFinishInput()
     if (connection != null) InputConnectionDriver(connection).execute(ops)

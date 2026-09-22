@@ -213,6 +213,9 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
       override fun commitChar(ch: CharSequence): Boolean =
         session.typeForAutomation(ch.toString(), connectionAdapter())
 
+      override fun finishComposing(): Boolean =
+        session.finishComposingForAutomation(connectionAdapter())
+
       override fun switchToIme(imeId: String) {
         switchInputMethod(imeId)
       }

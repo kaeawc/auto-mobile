@@ -98,12 +98,31 @@ class ImeCommitDriverTest {
     assertEquals(listOf(PRIOR_IME_ID), sink.switchedImeIds)
   }
 
+  @Test
+  fun `successful commit finishes composition after the last char and before restoring`() {
+    val sink = FakeImeCommitSink(inputType = InputType.TYPE_CLASS_TEXT)
+
+    ImeCommitDriver(sink).commit("ab", PRIOR_IME_ID)
+
+    assertEquals(listOf("char", "char", "finish", "switch"), sink.events)
+  }
+
+  @Test
+  fun `commit without an IME switch still finishes composition`() {
+    val sink = FakeImeCommitSink(inputType = InputType.TYPE_CLASS_TEXT)
+
+    ImeCommitDriver(sink).commit("ab", priorImeId = null)
+
+    assertEquals(listOf("char", "char", "finish"), sink.events)
+  }
+
   private class FakeImeCommitSink(
     private val inputType: Int?,
     private val failAtCommitIndex: Int? = null,
   ) : ImeCommitSink {
     val committedChars = mutableListOf<String>()
     val switchedImeIds = mutableListOf<String>()
+    val events = mutableListOf<String>()
     private var commitAttempts = 0
 
     override fun editorInputType(): Int? = inputType
@@ -112,11 +131,18 @@ class ImeCommitDriverTest {
       val currentAttempt = commitAttempts++
       if (currentAttempt == failAtCommitIndex) return false
       committedChars.add(ch.toString())
+      events.add("char")
+      return true
+    }
+
+    override fun finishComposing(): Boolean {
+      events.add("finish")
       return true
     }
 
     override fun switchToIme(imeId: String) {
       switchedImeIds.add(imeId)
+      events.add("switch")
     }
   }
 

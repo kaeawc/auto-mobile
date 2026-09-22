@@ -67,6 +67,19 @@ class KeyboardSessionTest {
     assertFalse(fixture.session.typeForAutomation("a", null))
   }
 
+  @Test
+  fun `automation finish commits the trailing composing word`() {
+    val fixture = Fixture("gboard")
+
+    assertTrue(fixture.session.typeForAutomation("hi", fixture.connection))
+    assertEquals(0, fixture.connection.editor.composingStart)
+
+    assertTrue(fixture.session.finishComposingForAutomation(fixture.connection))
+    assertEquals("hi", fixture.connection.editor.text)
+    assertEquals(-1, fixture.connection.editor.composingStart)
+    assertFalse(fixture.session.finishComposingForAutomation(null))
+  }
+
   private class Fixture(initialProfile: String) {
     val store = MemoryStore(initialProfile)
     val connection = ModelConnection()

@@ -7,10 +7,10 @@ import { parseCliArgs } from "../../src/cli";
 
 describe("parseCliArgs schema-aware coercion (#4241)", () => {
   test("keeps a numeric-looking value as a string for a string-typed param", () => {
-    const { params } = parseCliArgs(["sendKeys", "--platform", "android", "--text", "12345"]);
+    const { params } = parseCliArgs(["setActiveDevice", "--deviceId", "12345"]);
 
-    expect(params.text).toBe("12345");
-    expect(typeof params.text).toBe("string");
+    expect(params.deviceId).toBe("12345");
+    expect(typeof params.deviceId).toBe("string");
   });
 
   test("keeps an all-digit phone number as a string", () => {
@@ -300,8 +300,8 @@ describe("parseCliArgs preserves JSON null for nullable params (#4241 review)", 
   });
 
   test("a non-nullable string param keeps the literal token 'null'", () => {
-    const { params } = parseCliArgs(["sendKeys", "--platform", "android", "--text", "null"]);
+    const { params } = parseCliArgs(["setActiveDevice", "--deviceId", "null"]);
 
-    expect(params.text).toBe("null");
+    expect(params.deviceId).toBe("null");
   });
 });

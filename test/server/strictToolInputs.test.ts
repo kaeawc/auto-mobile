@@ -12,11 +12,7 @@ import {
   getNavigationGraphSchema,
   navigateToSchema,
 } from "../../src/server/navigationTools";
-import {
-  dragAndDropSchema,
-  pinchOnSchema,
-  swipeOnSchema,
-} from "../../src/server/interactionTools";
+import { dragAndDropSchema, pinchOnSchema, swipeOnSchema } from "../../src/server/interactionTools";
 import {
   crashAppSchema,
   installAppSchema,

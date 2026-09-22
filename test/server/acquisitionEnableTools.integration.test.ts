@@ -117,7 +117,7 @@ describe("acquisition-time enableTools (#6869)", () => {
 
       expect(acquiredSessionUuid(payload)).toBe("acquired-session");
       expect(payload.gatedTools).toEqual([]);
-      expect(payload.enabledTools).toEqual(["clipboard", "sendKeys", "observe"]);
+      expect(payload.enabledTools).toEqual(["clipboard", "observe", "sendKeys"]);
       expect((await fixture!.client.listTools()).tools.map((tool) => tool.name)).toContain(
         "sendKeys",
       );
@@ -318,11 +318,11 @@ describe("acquisition-time enableTools (#6869)", () => {
 
       expect(response.isError).toBe(true);
       expect(acquiredSessionUuid(payload)).toBe("acquired-session");
-      expect(payload.enabledTools).toEqual(["sendKeys", "observe", "provisionDevice"]);
+      expect(payload.enabledTools).toEqual(["observe", "provisionDevice", "sendKeys"]);
       expect(getStructuredField(response, "enabledTools")).toEqual([
-        "sendKeys",
         "observe",
         "provisionDevice",
+        "sendKeys",
       ]);
       expect((await fixture!.client.listTools()).tools.map((tool) => tool.name)).toContain(
         "sendKeys",
@@ -368,6 +368,6 @@ describe("acquisition-time enableTools (#6869)", () => {
     const { payload } = await acquire("provisionDevice", { enableTools: ["sendKeys"] });
 
     expect(acquiredSessionUuid(payload)).toBe("acquired-session");
-    expect(payload.enabledTools).toEqual(["sendKeys", "observe", "provisionDevice"]);
+    expect(payload.enabledTools).toEqual(["observe", "provisionDevice", "sendKeys"]);
   });
 });

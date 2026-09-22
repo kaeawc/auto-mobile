@@ -152,7 +152,7 @@ describe("setToolEnabled batch enable (#6869)", () => {
     const payload = payloadOf(await callSetToolEnabled({ toolNames: ["sendKeys", "clipboard"] }));
 
     // `observe` is enabled by its declared default; `openLink` stays gated.
-    expect(payload.enabledTools).toEqual(["clipboard", "sendKeys", "observe"]);
+    expect(payload.enabledTools).toEqual(["clipboard", "observe", "sendKeys"]);
   });
 
   test("reports the enabled set after a disable too", async () => {
@@ -179,7 +179,7 @@ describe("setToolEnabled batch enable (#6869)", () => {
     );
 
     expect(payload.sessionUuid).toBe(PROFILE_UUID);
-    expect(payload.enabledTools).toEqual(["clipboard", "sendKeys", "observe"]);
+    expect(payload.enabledTools).toEqual(["clipboard", "observe", "sendKeys"]);
   });
 
   test("reports a tool either side enables, matching the call gate's union", async () => {
@@ -315,7 +315,7 @@ describe("setToolEnabled batch enable (#6869)", () => {
       )!;
       const properties = definition.inputSchema.properties as Record<string, any>;
 
-      expect(properties.toolName.enum).toEqual(["clipboard", "openLink", "sendKeys", "observe"]);
+      expect(properties.toolName.enum).toEqual(["clipboard", "observe", "openLink", "sendKeys"]);
       expect(properties.toolNames.items.enum).toEqual(properties.toolName.enum);
     });
 
@@ -334,7 +334,7 @@ describe("setToolEnabled batch enable (#6869)", () => {
         }));
       }
 
-      const configurable = ["clipboard", "openLink", "sendKeys", "observe", "provisionDevice"];
+      const configurable = ["clipboard", "observe", "openLink", "provisionDevice", "sendKeys"];
       for (const name of ["getAndroid", "getApple", "provisionDevice"]) {
         const definition = ToolRegistry.getToolDefinitions().find((tool) => tool.name === name)!;
         const properties = definition.inputSchema.properties as Record<string, any>;

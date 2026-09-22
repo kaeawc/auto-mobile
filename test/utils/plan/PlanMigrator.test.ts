@@ -404,9 +404,9 @@ describe("PlanMigrator", () => {
             ],
           },
         });
-        expect(
-          report.warnings.some((warning) => warning.message.includes("dismissKeyboard")),
-        ).toBe(true);
+        expect(report.warnings.some((warning) => warning.message.includes("dismissKeyboard"))).toBe(
+          true,
+        );
       });
 
       test("migrates clearText to a sendKeys clear command", () => {

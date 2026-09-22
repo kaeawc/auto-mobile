@@ -505,8 +505,13 @@
   function section(root, title, subtitle) {
     var wrap = document.createElement("div");
     wrap.className = "dl-section";
-    wrap.appendChild(el("h2", {}, title));
-    wrap.appendChild(el("p", {}, subtitle));
+    // Plain HTML elements: el() creates SVG-namespace nodes.
+    var heading = document.createElement("h2");
+    heading.textContent = title;
+    wrap.appendChild(heading);
+    var description = document.createElement("p");
+    description.textContent = subtitle;
+    wrap.appendChild(description);
     root.appendChild(wrap);
     return wrap;
   }

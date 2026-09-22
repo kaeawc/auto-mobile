@@ -91,12 +91,7 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
           callbacks =
             KeyboardCallbacks(
               onKey = { key -> uiState = session.onKey(key, connectionAdapter()) },
-              onSelectProfile = { id ->
-                connectionAdapter()?.let { connection ->
-                  InputConnectionDriver(connection).execute(listOf(ImeOp.FinishComposingText))
-                }
-                if (session.setActiveProfile(id)) activeProfile = session.activeProfile()
-              },
+              onSelectProfile = { id -> applyProfile(id) },
               onShowImePicker = {
                 getSystemService(InputMethodManager::class.java).showInputMethodPicker()
               },
@@ -264,6 +259,15 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
     }
   }
 
+  // Finish any live composition first: the new profile's policy starts with an empty composing
+  // buffer, so a surviving composing span would be overwritten by its next setComposingText.
+  private fun applyProfile(id: String) {
+    connectionAdapter()?.let { connection ->
+      InputConnectionDriver(connection).execute(listOf(ImeOp.FinishComposingText))
+    }
+    if (session.setActiveProfile(id)) activeProfile = session.activeProfile()
+  }
+
   private fun connectionAdapter(): ImeConnection? = currentInputConnection?.let {
     InputConnectionAdapter(it, this)
   }
@@ -288,10 +292,15 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
 
     fun current(): CtrlProxyIme? = instance
 
+    /**
+     * Switches the live keyboard's profile. Callers may be on any thread (the CtrlProxy WebSocket
+     * handler is not the main thread), so the swap is posted to the main looper where the session
+     * is driven; a later posted automation commit therefore always runs under the new profile.
+     * Returns false when no keyboard instance is running (the caller persists the id instead).
+     */
     fun setActiveProfile(id: String): Boolean {
       val service = instance ?: return false
-      if (!service.session.setActiveProfile(id)) return false
-      service.activeProfile = service.session.activeProfile()
+      service.mainHandler.post { service.applyProfile(id) }
       return true
     }
   }

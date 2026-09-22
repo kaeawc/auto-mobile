@@ -10,6 +10,13 @@ import type { BaseResult } from "../shared/types";
 import type { DelegateContext } from "./types";
 import { sendCommand } from "../DeviceServiceUtils";
 
+export interface SetKeyboardProfileResult {
+  success: boolean;
+  activeProfileId?: string;
+  previousProfileId?: string;
+  error?: string;
+}
+
 export class CtrlProxyText extends SharedTextDelegate {
   constructor(context: DelegateContext) {
     super(context);
@@ -45,6 +52,22 @@ export class CtrlProxyText extends SharedTextDelegate {
       timeoutMs,
       perf,
       errorLabel: "Commit text",
+    });
+  }
+
+  async setKeyboardProfile(
+    profileId: string,
+    timeoutMs: number = 5000,
+    perf?: PerformanceTracker,
+  ): Promise<SetKeyboardProfileResult> {
+    return sendCommand<SetKeyboardProfileResult>(this.context, {
+      idPrefix: "setKeyboardProfile",
+      responseType: "set_keyboard_profile",
+      messageType: "request_set_keyboard_profile",
+      params: { profileId },
+      timeoutMs,
+      perf,
+      errorLabel: "Set keyboard profile",
     });
   }
 }

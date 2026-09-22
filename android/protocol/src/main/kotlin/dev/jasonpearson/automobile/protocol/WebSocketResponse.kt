@@ -404,6 +404,18 @@ data class CommitTextResult(
 ) : WebSocketResponse()
 
 @Serializable
+@SerialName("set_keyboard_profile_result")
+data class SetKeyboardProfileResult(
+  override val timestamp: Long,
+  val requestId: String? = null,
+  val success: Boolean,
+  val activeProfileId: String? = null,
+  val previousProfileId: String? = null,
+  val error: String? = null,
+  val perfTiming: String? = null,
+) : WebSocketResponse()
+
+@Serializable
 @SerialName("ime_action_result")
 data class ImeActionResult(
   override val timestamp: Long,

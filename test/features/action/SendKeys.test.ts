@@ -64,6 +64,10 @@ function focusedAndroidObservation(
 function createTextClient(
   options: {
     supportsImeCommit?: boolean;
+    supportsKeyboardProfiles?: boolean;
+    setKeyboardProfile?: (
+      id: string,
+    ) => Promise<{ success: boolean; previousProfileId?: string; error?: string }>;
     commitViaIme?: (text: string, priorImeId: string | null) => Promise<{ success: boolean }>;
   } = {},
 ) {
@@ -91,6 +95,11 @@ function createTextClient(
       supportsImeCommitCalls++;
       calls.push("supportsImeCommit");
       return options.supportsImeCommit ?? true;
+    },
+    supportsKeyboardProfiles: async () => options.supportsKeyboardProfiles ?? true,
+    setKeyboardProfile: async (id) => {
+      calls.push(`setKeyboardProfile:${id}`);
+      return options.setKeyboardProfile?.(id) ?? { success: true, previousProfileId: "direct" };
     },
     commitViaIme: async (text, priorImeId) => {
       calls.push(`commitViaIme:${text}:${priorImeId ?? "none"}`);
@@ -301,6 +310,131 @@ describe("DefaultSendKeysCommandExecutor", () => {
     });
     expect(textClient.getSupportsImeCommitCalls()).toBe(1);
     expect(textClient.commitViaImeCalls).toEqual([]);
+    expect(adb.getExecutedCommands()).toEqual([]);
+  });
+
+  test("per-call profile is set before commit and restored afterward", async () => {
+    const events: string[] = [];
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponseSequence("shell settings get secure default_input_method", [
+      { stdout: priorImeId, stderr: "" },
+      { stdout: commitImeId, stderr: "" },
+    ]);
+    const textClient = createTextClient({
+      setKeyboardProfile: async (id) => {
+        events.push(`profile:${id}`);
+        return { success: true, previousProfileId: "direct" };
+      },
+      commitViaIme: async () => {
+        events.push("commit");
+        return { success: true };
+      },
+    });
+    const executor = new DefaultSendKeysCommandExecutor(
+      androidDevice,
+      createAdbFactory(adb),
+      createObserver(),
+      { textClient: textClient.client },
+    );
+    const result = await executor.type({
+      action: "type",
+      text: "value",
+      keyboardProfile: "gboard",
+    });
+    expect(result).toMatchObject({ success: true, resolvedMode: "ime" });
+    expect(events).toEqual(["profile:gboard", "commit", "profile:direct"]);
+  });
+
+  test("per-call profile skips restoration when already active", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponseSequence("shell settings get secure default_input_method", [
+      { stdout: priorImeId, stderr: "" },
+      { stdout: commitImeId, stderr: "" },
+    ]);
+    const textClient = createTextClient({
+      setKeyboardProfile: async () => ({ success: true, previousProfileId: "gboard" }),
+    });
+    const executor = new DefaultSendKeysCommandExecutor(
+      androidDevice,
+      createAdbFactory(adb),
+      createObserver(),
+      { textClient: textClient.client },
+    );
+    expect(
+      (await executor.type({ action: "type", text: "value", keyboardProfile: "gboard" })).success,
+    ).toBe(true);
+    expect(textClient.calls.filter((call) => call.startsWith("setKeyboardProfile"))).toEqual([
+      "setKeyboardProfile:gboard",
+    ]);
+  });
+
+  test("profile restoration failure does not mask a successful commit", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponseSequence("shell settings get secure default_input_method", [
+      { stdout: priorImeId, stderr: "" },
+      { stdout: commitImeId, stderr: "" },
+    ]);
+    const textClient = createTextClient({
+      setKeyboardProfile: async (id) => {
+        if (id === "direct") {
+          throw new Error("restore failed");
+        }
+        return { success: true, previousProfileId: "direct" };
+      },
+    });
+    const executor = new DefaultSendKeysCommandExecutor(
+      androidDevice,
+      createAdbFactory(adb),
+      createObserver(),
+      { textClient: textClient.client },
+    );
+    expect(
+      (await executor.type({ action: "type", text: "value", keyboardProfile: "gboard" })).success,
+    ).toBe(true);
+    expect(adb.getExecutedCommands()).toContain(`shell ime set ${priorImeId}`);
+  });
+
+  test("unsupported profile command fails before adb mutation", async () => {
+    const adb = new FakeAdbExecutor();
+    const textClient = createTextClient({ supportsKeyboardProfiles: false });
+    const executor = new DefaultSendKeysCommandExecutor(
+      androidDevice,
+      createAdbFactory(adb),
+      createObserver(),
+      { textClient: textClient.client },
+    );
+    const result = await executor.type({
+      action: "type",
+      text: "value",
+      keyboardProfile: "gboard",
+    });
+    expect(result).toMatchObject({
+      success: false,
+      error: expect.stringContaining("does not support keyboard profiles"),
+    });
+    expect(adb.getExecutedCommands()).toEqual([]);
+    expect(textClient.commitViaImeCalls).toEqual([]);
+  });
+
+  test("profile with explicit non-IME mode returns validation error", async () => {
+    const adb = new FakeAdbExecutor();
+    const textClient = createTextClient();
+    const executor = new DefaultSendKeysCommandExecutor(
+      androidDevice,
+      createAdbFactory(adb),
+      createObserver(),
+      { textClient: textClient.client },
+    );
+    const result = await executor.type({
+      action: "type",
+      text: "value",
+      mode: "a11y",
+      keyboardProfile: "gboard",
+    });
+    expect(result).toMatchObject({
+      success: false,
+      error: expect.stringContaining("requires mode: ime"),
+    });
     expect(adb.getExecutedCommands()).toEqual([]);
   });
 

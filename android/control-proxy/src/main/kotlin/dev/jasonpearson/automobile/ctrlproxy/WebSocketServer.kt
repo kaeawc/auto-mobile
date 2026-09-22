@@ -107,6 +107,7 @@ class WebSocketServer(
         is PinchResult -> response.requestId
         is SetTextResult -> response.requestId
         is CommitTextResult -> response.requestId
+        is SetKeyboardProfileResult -> response.requestId
         is ImeActionResult -> response.requestId
         is SelectAllResult -> response.requestId
         is ActionResult -> response.requestId
@@ -262,6 +263,7 @@ class WebSocketServer(
                               "request_activate_accessibility_link",
                               "request_insert_text",
                               "request_commit_text",
+                              "request_set_keyboard_profile",
                             ),
                         ),
                       )

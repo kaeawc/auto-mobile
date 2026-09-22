@@ -14,7 +14,8 @@ copyright: "Copyright &copy; 2025-2026 Jason Pearson"
 
 # Pages under docs/ must also render on github.com, so they use GitHub syntax
 # (e.g. `> [!NOTE]` alerts) that this hook turns into Material equivalents.
-# scripts/validate_docs_github_markdown.sh rejects MkDocs-only syntax.
+# scripts/validate_docs_github_markdown.sh rejects MkDocs-only syntax by
+# rendering each page with and without the MkDocs-only extensions below.
 hooks:
   - scripts/github/auto_mobile_docs/github_alerts.py
 

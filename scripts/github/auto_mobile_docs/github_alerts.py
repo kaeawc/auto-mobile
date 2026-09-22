@@ -6,17 +6,20 @@ they use GitHub's alert syntax instead of MkDocs-only `!!! note` blocks:
     > [!NOTE]
     > Body text.
 
-GitHub renders that natively; this hook rewrites it to the equivalent
-`!!! note` admonition before MkDocs parses the page.
+GitHub renders that natively. This hook registers a Python-Markdown tree
+processor that rewrites the parsed <blockquote> into the markup the
+`admonition` extension produces. It runs on the parsed tree rather than the
+source text, so fenced code, blockquote nesting, and marker indentation are
+decided by the same parser that renders the site.
 """
 
 import re
+import xml.etree.ElementTree as etree
 
-_ALERT = re.compile(r"^> \[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*$")
-# Up to three spaces of indent; four or more is an indented code line.
-_FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
-# Blockquote container markers; a fence can open inside a quote.
-_QUOTE = re.compile(r"^(?: {0,3}> ?)*")
+from markdown import Extension
+from markdown.treeprocessors import Treeprocessor
+
+_MARKER = re.compile(r"^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\][ \t]*(?:\n|$)")
 
 # GitHub alert type -> (Material admonition type, title).
 _TYPES = {
@@ -28,49 +31,32 @@ _TYPES = {
 }
 
 
-def convert(markdown: str) -> str:
-    lines = markdown.split("\n")
-    out = []
-    fence = ""
-    fence_depth = 0
-    i = 0
-    while i < len(lines):
-        line = lines[i]
-        prefix = _QUOTE.match(line).group(0)
-        depth = prefix.count(">")
-        # A fence inside a blockquote ends with that blockquote (a line,
-        # including a blank one, with fewer quote markers).
-        if fence and depth < fence_depth:
-            fence = ""
-        fence_match = _FENCE.match(line[len(prefix) :])
-        if fence_match:
-            run, rest = fence_match.groups()
-            if not fence:
-                # A backtick info string may not contain a backtick.
-                if not (run[0] == "`" and "`" in rest):
-                    fence = run
-                    fence_depth = depth
-            # Close only on the opener's character, at least as long, with
-            # nothing after it (CommonMark); shorter fences inside are content.
-            elif run[0] == fence[0] and len(run) >= len(fence) and not rest.strip():
-                fence = ""
-        match = None if fence else _ALERT.match(line)
-        if not match:
-            out.append(line)
-            i += 1
-            continue
-        kind, title = _TYPES[match.group(1)]
-        out.append(f'!!! {kind} "{title}"')
-        out.append("")
-        i += 1
-        while i < len(lines) and lines[i].startswith(">"):
-            body = lines[i][1:]
-            body = body[1:] if body.startswith(" ") else body
-            out.append(f"    {body}" if body else "")
-            i += 1
-        out.append("")
-    return "\n".join(out)
+class GithubAlertsTreeprocessor(Treeprocessor):
+    def run(self, root):
+        for quote in list(root.iter("blockquote")):
+            if not len(quote) or quote[0].tag != "p":
+                continue
+            first = quote[0]
+            match = _MARKER.match(first.text or "")
+            if not match:
+                continue
+            kind, title = _TYPES[match.group(1)]
+            first.text = first.text[match.end() :]
+            if not first.text.strip() and not len(first):
+                quote.remove(first)
+            quote.tag = "div"
+            quote.set("class", f"admonition {kind}")
+            heading = etree.Element("p", {"class": "admonition-title"})
+            heading.text = title
+            quote.insert(0, heading)
 
 
-def on_page_markdown(markdown, **kwargs):
-    return convert(markdown)
+class GithubAlertsExtension(Extension):
+    def extendMarkdown(self, md):
+        # Above the inline processor (20) so the marker is still raw text.
+        md.treeprocessors.register(GithubAlertsTreeprocessor(md), "github_alerts", 25)
+
+
+def on_config(config, **kwargs):
+    config.markdown_extensions.append(GithubAlertsExtension())
+    return config

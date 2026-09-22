@@ -2032,6 +2032,10 @@ interface TrayObservedRow {
   // The row's app-supplied text, carried beside the reported fields so
   // correlation never sees SystemUI's chrome (#6875).
   correlationTexts: string[];
+  // The app-label text rendered under the row's structural notification-header
+  // node (distinct from title/body content), used only as fail-closed evidence
+  // for content-less custom layouts; null when no structural header node is present.
+  headerAppLabel: string | null;
   bounds?: Element["bounds"];
 }
 
@@ -2042,10 +2046,13 @@ const readTrayNotifications = (hierarchy: ViewHierarchyResult): TrayObservedRow[
     const label =
       fields.appLabel ||
       (candidate.groupNode ? readTrayNotificationFields(candidate.groupNode).appLabel : null);
+    const headerAppLabel =
+      findHeaderAppLabel(getNotificationGroupHeader(candidate.groupNode ?? candidate.node)) ?? null;
     const nodeId = getNodeProperties(candidate.node)?.["unique-id"];
     notifications.push({
       bounds: candidate.element?.bounds,
       correlationTexts: [...new Set(fields.contentTexts)],
+      headerAppLabel,
       notification: {
         id: typeof nodeId === "string" && nodeId.length > 0 ? nodeId : null,
         appLabel: label,
@@ -2211,6 +2218,9 @@ export const readActiveNotificationKeysForApp = async (
 
 type TrayRowAttribution = TrayOwnershipEvidence | "other" | "unknown";
 
+const isContentlessCustomLayout = (record: DumpsysNotificationRecord): boolean =>
+  record.hasCustomLayout && record.titles.length === 0 && record.bodies.length === 0;
+
 // The before snapshot is only evidence when it precedes every swipe. Once a
 // read fails, a later page must not retry it: a post-swipe dump stored as
 // "before" would present the requested package as the stable owner of a row
@@ -2229,6 +2239,21 @@ const attributeTrayRow = (
 ): TrayRowAttribution => {
   if (row.notification.appLabel !== null) {
     return appLabel && row.notification.appLabel === appLabel ? "header" : "other";
+  }
+  const requestedRecords = afterRecords.filter((record) => record.pkg === appId);
+  // Some custom RemoteViews (for example Clock timers) expose neither title
+  // nor text extras, but render their app label in the row's own notification
+  // header chrome. That structural label cannot be spoofed by same-named
+  // title/body content elsewhere in the row, and is evidence only when every
+  // requested record is content-less custom layout; absent header evidence
+  // remains fail-closed for ambiguous or opaque records (#6875).
+  if (
+    appLabel !== null &&
+    row.headerAppLabel === appLabel &&
+    requestedRecords.length > 0 &&
+    requestedRecords.every(isContentlessCustomLayout)
+  ) {
+    return "header";
   }
   const owner = attributeRowByDumpsys(
     intersectDumpsysRecordsForRow(beforeRecords, afterRecords, new Set(row.correlationTexts)),
@@ -2396,10 +2421,9 @@ export const listSystemTrayNotifications = async (
   );
   // Partial attribution stays useful; only zero attributed rows plus positive
   // posting evidence is unsafe to present as a confident empty list (#6875).
+  const requestedRecords = afterRecords.filter((record) => record.pkg === appId);
   const hasUnmatchedRequestedRecords =
-    beforeRecords !== undefined &&
-    afterRecords.some((record) => record.pkg === appId) &&
-    notifications.length === 0;
+    beforeRecords !== undefined && requestedRecords.length > 0 && notifications.length === 0;
   signal?.throwIfAborted();
   await detector.collapseTray();
   signal?.throwIfAborted();
@@ -2410,7 +2434,9 @@ export const listSystemTrayNotifications = async (
   );
   if (hasUnmatchedRequestedRecords) {
     throw new ActionableError(
-      `Notification records exist for ${appId}, but no shade row could be matched to them. Retry the list operation; the row's rendered text may have changed.`,
+      requestedRecords.every(isContentlessCustomLayout)
+        ? `Notification records for ${appId} have no title/text extras to correlate with shade rows (custom layout).`
+        : `Notification records for ${appId} could not be correlated with shade rows.`,
     );
   }
   return { notifications, unattributedRows, observation, swipes, order: "encounter" };

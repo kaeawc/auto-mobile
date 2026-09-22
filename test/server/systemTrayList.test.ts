@@ -676,7 +676,7 @@ describe("systemTray list silent-section ownership", () => {
     // #6875: records for this package exist, so an ambiguous shade row is not a confident empty list.
     await expect(
       listSystemTrayNotifications(device, WELLBEING, "Digital Wellbeing", 5000),
-    ).rejects.toThrow(/com\.google\.android\.apps\.wellbeing.*no shade row could be matched/i);
+    ).rejects.toThrow(/com\.google\.android\.apps\.wellbeing.*could not be correlated/i);
   });
 
   test("does not claim a row when a competing before-snapshot record was dismissed", async () => {
@@ -693,7 +693,7 @@ describe("systemTray list silent-section ownership", () => {
 
     await expect(
       listSystemTrayNotifications(device, WELLBEING, "Digital Wellbeing", 5000),
-    ).rejects.toThrow(/com\.google\.android\.apps\.wellbeing.*no shade row could be matched/i);
+    ).rejects.toThrow(/com\.google\.android\.apps\.wellbeing.*could not be correlated/i);
   });
 
   test("falls back to after-only ownership when the before dumpsys read fails", async () => {
@@ -764,7 +764,7 @@ describe("systemTray list silent-section ownership", () => {
 
     await expect(
       listSystemTrayNotifications(device, WELLBEING, "Digital Wellbeing", 5000),
-    ).rejects.toThrow(/notification records exist.*no shade row could be matched.*retry/i);
+    ).rejects.toThrow(/notification records.*could not be correlated/i);
   });
 
   test("does not attribute a stale other-app row when only after-scan evidence remains", async () => {
@@ -778,7 +778,7 @@ describe("systemTray list silent-section ownership", () => {
 
     await expect(
       listSystemTrayNotifications(device, WELLBEING, "Digital Wellbeing", 5000),
-    ).rejects.toThrow(/com\.google\.android\.apps\.wellbeing.*no shade row could be matched/i);
+    ).rejects.toThrow(/com\.google\.android\.apps\.wellbeing.*could not be correlated/i);
   });
 
   test("does not read dumpsys when every row carries an app header", async () => {
@@ -804,6 +804,86 @@ describe("systemTray list silent-section ownership", () => {
   });
 });
 
+describe("systemTray list content-less custom layouts", () => {
+  const CLOCK = "com.google.android.deskclock";
+  const clockLabel = "Clock";
+  const execResult = (stdout: string) => ({
+    stdout,
+    stderr: "",
+    toString: () => stdout,
+    trim: () => stdout.trim(),
+    includes: (search: string) => stdout.includes(search),
+  });
+  // Clock renders its label under structural notification-header chrome, rather
+  // than the app-name resource ids read as `notification.appLabel`.
+  const customLayoutRow = (label: string) =>
+    node("com.android.systemui:id/expandableNotificationRow", "", [
+      node("com.android.systemui:id/notification_header", "", [
+        node("com.android.systemui:id/custom_app_name_text", label),
+      ]),
+      node("android:id/chronometer", "00:09:57"),
+    ]);
+  const dumpsys = (...records: string[]) =>
+    ["Current Notification Manager state:", "  Notification List:", ...records].join("\n");
+  const customRecord = (title: string | null = null) =>
+    [
+      `    NotificationRecord(0x06b3f5ad: pkg=${CLOCK} user=UserHandle{0} id=2147483641 tag=null key=0|${CLOCK}|2147483641|null|10163: Notification(channel=Timers contentView=${CLOCK}/0x7f0e0042))`,
+      `      contentView=${CLOCK}/0x7f0e0042 (0 bytes): android.widget.RemoteViews@224e730`,
+      "      extras={",
+      `        android.title=${title === null ? "null" : `String (${title})`}`,
+      "        android.template=String (android.app.Notification$DecoratedCustomViewStyle)",
+      "        android.text=null",
+      "      }",
+    ].join("\n");
+
+  test("uses a generic rendered app label for an all-content-less custom layout", async () => {
+    const { adb } = setup([page(customLayoutRow(clockLabel))]);
+    const snapshot = execResult(dumpsys(customRecord()));
+    adb.setCommandResponseSequence("dumpsys notification", [snapshot, snapshot]);
+
+    const result = await listSystemTrayNotifications(device, CLOCK, clockLabel, 5000);
+
+    expect(result.notifications).toMatchObject([{ appId: CLOCK, ownership: "header" }]);
+    expect(result.unattributedRows).toBe(0);
+  });
+
+  test("fails closed when a content-less custom layout lacks rendered app-label evidence", async () => {
+    const { adb } = setup([page(customLayoutRow("Timer"))]);
+    const snapshot = execResult(dumpsys(customRecord()));
+    adb.setCommandResponseSequence("dumpsys notification", [snapshot, snapshot]);
+
+    await expect(listSystemTrayNotifications(device, CLOCK, clockLabel, 5000)).rejects.toThrow(
+      `Notification records for ${CLOCK} have no title/text extras to correlate with shade rows (custom layout).`,
+    );
+  });
+
+  test("does not attribute a header-less row to Clock just because its title text says Clock", async () => {
+    // Under the old correlationTexts.includes(appLabel) fallback, this title
+    // would have matched Clock despite belonging to an unspecified other app.
+    const headerlessImpostor = node("com.android.systemui:id/expandableNotificationRow", "", [
+      node("android:id/title", "Clock"),
+      node("android:id/text", "Alarm reminder"),
+    ]);
+    const { adb } = setup([page(headerlessImpostor)]);
+    const snapshot = execResult(dumpsys(customRecord()));
+    adb.setCommandResponseSequence("dumpsys notification", [snapshot, snapshot]);
+
+    await expect(listSystemTrayNotifications(device, CLOCK, clockLabel, 5000)).rejects.toThrow(
+      `Notification records for ${CLOCK} have no title/text extras to correlate with shade rows (custom layout).`,
+    );
+  });
+
+  test("does not use generic app-label evidence when a custom layout has title extras", async () => {
+    const { adb } = setup([page(customLayoutRow(clockLabel))]);
+    const snapshot = execResult(dumpsys(customRecord("Hidden default")));
+    adb.setCommandResponseSequence("dumpsys notification", [snapshot, snapshot]);
+
+    await expect(listSystemTrayNotifications(device, CLOCK, clockLabel, 5000)).rejects.toThrow(
+      `Notification records for ${CLOCK} could not be correlated with shade rows.`,
+    );
+  });
+});
+
 describe("systemTray clearAll dumpsys ownership", () => {
   const SHELL = "com.android.shell";
   const shellLabel = "Shell";
@@ -821,6 +901,16 @@ describe("systemTray clearAll dumpsys ownership", () => {
     ]);
   const dumpsys = (...records: string[]) =>
     ["Current Notification Manager state:", "  Notification List:", ...records].join("\n");
+  const api36EmptyDumpsys = () =>
+    [
+      "Current Notification Manager state:",
+      "  Notification attention state:",
+      "      mSoundNotificationKey=null",
+      "  mArchive=Archive (0 notifications)",
+      "  Snoozed notifications:",
+      " Pending snoozed notifications",
+      "  Ranking Config:",
+    ].join("\n");
   const record = (id: number, title: string, text: string, flags: number | string = 0) =>
     [
       `    NotificationRecord(0x${id}: pkg=${SHELL} user=UserHandle{0} id=${id} tag=null key=0|${SHELL}|${id}|null|10164)`,
@@ -828,6 +918,23 @@ describe("systemTray clearAll dumpsys ownership", () => {
       "      extras={",
       `        android.title=String (${title})`,
       `        android.text=String (${text})`,
+      "      }",
+    ].join("\n");
+  const customLayoutRow = (label: string) =>
+    node("com.android.systemui:id/expandableNotificationRow", "", [
+      node("com.android.systemui:id/notification_header", "", [
+        node("com.android.systemui:id/custom_app_name_text", label),
+      ]),
+      node("android:id/chronometer", "00:09:57"),
+    ]);
+  const customRecord = () =>
+    [
+      `    NotificationRecord(0x06b3f5ad: pkg=${SHELL} user=UserHandle{0} id=2147483641 tag=null key=0|${SHELL}|2147483641|null|10164: Notification(channel=Timers contentView=${SHELL}/0x7f0e0042))`,
+      `      contentView=${SHELL}/0x7f0e0042 (0 bytes): android.widget.RemoteViews@224e730`,
+      "      extras={",
+      "        android.title=null",
+      "        android.template=String (android.app.Notification$DecoratedCustomViewStyle)",
+      "        android.text=null",
       "      }",
     ].join("\n");
   const groupedRows = (notifications: readonly (readonly [string, string])[]) =>
@@ -854,6 +961,66 @@ describe("systemTray clearAll dumpsys ownership", () => {
     });
     registerInteractionTools();
   };
+
+  test("fails closed for a shared label on a header-less content-less custom layout", async () => {
+    const OTHER_APP = "com.example.other";
+    const { adb, timer } = setup([page(customLayoutRow(shellLabel))], false);
+    adb.setCommandResponse("dumpsys notification", execResult(dumpsys(customRecord())));
+    const installedAppsSpy = spyOn(ListInstalledApps.prototype, "execute").mockResolvedValue([
+      SHELL,
+      OTHER_APP,
+    ]);
+    timer.enableAutoAdvance();
+    setSystemTrayDependencies({
+      adbFactory: () => adb,
+      appLabelResolver: async (_device, appId) =>
+        appId === SHELL || appId === OTHER_APP ? shellLabel : null,
+      timer,
+    });
+    registerInteractionTools();
+
+    try {
+      await expect(clearAll()).rejects.toThrow(
+        `Notification records for ${SHELL} have no title/text extras to correlate with shade rows (custom layout).`,
+      );
+    } finally {
+      installedAppsSpy.mockRestore();
+    }
+
+    expect(
+      adb.getExecutedCommands().filter((command) => command.includes("input swipe")),
+    ).toHaveLength(0);
+  });
+
+  test("clears a header-less content-less custom layout when its label is unique", async () => {
+    const { adb, timer } = setup([page(customLayoutRow(shellLabel)), page()], false);
+    adb.setCommandResponseSequence("dumpsys notification", [
+      execResult(dumpsys(customRecord())),
+      execResult(dumpsys(customRecord())),
+      execResult(dumpsys(customRecord())),
+      execResult(api36EmptyDumpsys()),
+    ]);
+    const installedAppsSpy = spyOn(ListInstalledApps.prototype, "execute").mockResolvedValue([
+      SHELL,
+    ]);
+    installClearAllDependencies(timer, adb);
+
+    try {
+      const payload = JSON.parse((await clearAll()).content[0].text);
+      expect(payload).toMatchObject({
+        dismissedCount: 1,
+        expectedCount: 1,
+        remainingCount: 0,
+        success: true,
+      });
+    } finally {
+      installedAppsSpy.mockRestore();
+    }
+
+    expect(
+      adb.getExecutedCommands().filter((command) => command.includes("input swipe")),
+    ).toHaveLength(1);
+  });
 
   test("clears header-less rows attributed to the app by dumpsys", async () => {
     const notifications = [
@@ -940,6 +1107,31 @@ describe("systemTray clearAll dumpsys ownership", () => {
     expect(
       adb.getExecutedCommands().filter((command) => command.includes("input swipe")),
     ).toHaveLength(2);
+  });
+
+  test("accepts the API 36 no-list dump after clearing the last notification", async () => {
+    const { adb, timer } = setup([page(row("Shell notification", shellLabel)), page()], false);
+    adb.setCommandResponseSequence("dumpsys notification", [
+      execResult(dumpsys(record(1, "Shell notification", "Body"))),
+      execResult(api36EmptyDumpsys()),
+    ]);
+    const installedAppsSpy = spyOn(ListInstalledApps.prototype, "execute").mockResolvedValue([
+      SHELL,
+    ]);
+    installClearAllDependencies(timer, adb);
+
+    try {
+      const payload = JSON.parse((await clearAll()).content[0].text);
+      expect(payload).toMatchObject({
+        dismissedCount: 1,
+        expectedCount: 1,
+        remainingCount: 0,
+        success: true,
+      });
+      expect(payload.message).toBe(`Cleared 1 notification(s) for ${SHELL}`);
+    } finally {
+      installedAppsSpy.mockRestore();
+    }
   });
 
   test("counts every notification when one grouped-row swipe clears them all", async () => {

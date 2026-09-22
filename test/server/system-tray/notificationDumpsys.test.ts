@@ -83,6 +83,41 @@ describe("dumpsys notification records", () => {
     ).toEqual([]);
   });
 
+  test("accepts an API 36 empty dump that omits the notification list", () => {
+    expect(
+      parseActiveNotificationKeysForApp(
+        dump(
+          "Current Notification Manager state:",
+          "  Notification attention state:",
+          "      mSoundNotificationKey=null",
+          "  mArchive=Archive (0 notifications)",
+          "  Snoozed notifications:",
+          " Pending snoozed notifications",
+          "  Ranking Config:",
+        ),
+        "com.example.app",
+      ),
+    ).toEqual([]);
+  });
+
+  test("does not treat a manager-state header truncated before trailing state as empty", () => {
+    expect(
+      parseActiveNotificationKeysForApp("Current Notification Manager state:", "com.example.app"),
+    ).toBeUndefined();
+  });
+
+  test("does not trust a manager-state dump with records but no active-list heading", () => {
+    expect(
+      parseActiveNotificationKeysForApp(
+        dump(
+          "Current Notification Manager state:",
+          "    NotificationRecord(0x1: pkg=com.example.app user=UserHandle{0} id=1 tag=null key=0|com.example.app|1|null|10100: Notification(channel=messages))",
+        ),
+        "com.example.app",
+      ),
+    ).toBeUndefined();
+  });
+
   test("yields no correlation evidence from a redacted dump", () => {
     expect(
       parseDumpsysNotificationRecords(
@@ -145,6 +180,30 @@ describe("dumpsys notification records", () => {
         titles: ["Default notification"],
         bodies: [],
         hasCustomLayout: false,
+      },
+    ]);
+  });
+
+  test("parses a content-less Clock custom layout record", () => {
+    expect(
+      parseDumpsysNotificationRecords(
+        dump(
+          "  Notification List:",
+          "    NotificationRecord(0x06b3f5ad: pkg=com.google.android.deskclock user=UserHandle{0} id=2147483641 tag=null importance=3 key=0|com.google.android.deskclock|2147483641|null|10163: Notification(channel=Timers contentView=com.google.android.deskclock/0x7f0e0042))",
+          "      contentView=com.google.android.deskclock/0x7f0e0042 (0 bytes): android.widget.RemoteViews@224e730",
+          "      extras={",
+          "        android.title=null",
+          "        android.template=String (android.app.Notification$DecoratedCustomViewStyle)",
+          "        android.text=null",
+          "      }",
+        ),
+      ),
+    ).toEqual([
+      {
+        pkg: "com.google.android.deskclock",
+        titles: [],
+        bodies: [],
+        hasCustomLayout: true,
       },
     ]);
   });

@@ -109,3 +109,23 @@ EOF2
   [[ "$output" == *"attrs.md:1: attr_list"* ]]
   [[ "$output" == *"attrs.md:2: attr_list"* ]]
 }
+
+@test "a four-space-indented fence is an indented code line, not a fence opener" {
+  printf '%s\n' '    ```' '' '!!! note "Real violation"' >"$DOCS_DIR/indented.md"
+  run bash "$SCRIPT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"indented.md:3: MkDocs admonition"* ]]
+}
+
+@test "multi-backtick inline code spans are ignored" {
+  printf '%s\n' '``!!! note``' 'Use ``a ` b { .x }`` here.' '```=== "Tab"```' >"$DOCS_DIR/spans.md"
+  run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+}
+
+@test "an unmatched backtick run does not hide a violation" {
+  printf '%s\n' '!!! note ``unclosed' >"$DOCS_DIR/unmatched.md"
+  run bash "$SCRIPT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"unmatched.md:1: MkDocs admonition"* ]]
+}

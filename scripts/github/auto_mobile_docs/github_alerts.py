@@ -13,7 +13,8 @@ GitHub renders that natively; this hook rewrites it to the equivalent
 import re
 
 _ALERT = re.compile(r"^> \[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*$")
-_FENCE = re.compile(r"^\s*(`{3,}|~{3,})(.*)$")
+# Up to three spaces of indent; four or more is an indented code line.
+_FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 
 # GitHub alert type -> (Material admonition type, title).
 _TYPES = {

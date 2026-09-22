@@ -23,21 +23,39 @@ DOCS_DIR="${DOCS_DIR:-${ROOT_DIR}/docs}"
 # shellcheck disable=SC2016 # awk program, not shell expansions.
 violations="$(
   find "$DOCS_DIR" -name '*.md' -type f -print0 | sort -z | xargs -0 awk '
+    # Remove CommonMark inline code spans: a run of N backticks up to the next
+    # run of exactly N backticks. An unmatched run stays as literal text.
+    function strip_code_spans(s,    out, len, i, j, k, n, closed) {
+      out = ""; len = length(s); i = 1
+      while (i <= len) {
+        if (substr(s, i, 1) != "`") { out = out substr(s, i, 1); i++; continue }
+        n = 0; while (substr(s, i + n, 1) == "`") n++
+        j = i + n; closed = 0
+        while (j <= len) {
+          if (substr(s, j, 1) != "`") { j++; continue }
+          k = 0; while (substr(s, j + k, 1) == "`") k++
+          if (k == n) { closed = 1; break }
+          j += k
+        }
+        if (closed) { i = j + n } else { out = out substr(s, i, n); i += n }
+      }
+      return out
+    }
     FNR == 1 { fence = "" }
     # A fence closes only on the same character, at least as long as its
     # opener, with nothing after it (CommonMark), so a shorter fence line
-    # inside a longer fence is content, not a close.
-    match($0, /^[[:space:]]*(```+|~~~+)/) {
+    # inside a longer fence is content, not a close. Fences are indented at
+    # most three spaces; four or more is an indented code line, not a fence.
+    match($0, /^ ? ? ?(```+|~~~+)/) {
       run = substr($0, RSTART, RLENGTH)
-      sub(/^[[:space:]]*/, "", run)
+      sub(/^ */, "", run)
       rest = substr($0, RSTART + RLENGTH)
       if (fence == "") { fence = run; next }
       if (substr(run, 1, 1) == substr(fence, 1, 1) && length(run) >= length(fence) && rest ~ /^[[:space:]]*$/) { fence = ""; next }
     }
     fence != "" { next }
     {
-      line = $0
-      gsub(/`[^`]*`/, "", line)
+      line = strip_code_spans($0)
       reason = ""
       if (line ~ /^[[:space:]]*=== "/) reason = "MkDocs tab (use headings)"
       else if (line ~ /^[[:space:]]*!!! /) reason = "MkDocs admonition (use > [!NOTE])"

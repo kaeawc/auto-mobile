@@ -76,9 +76,12 @@ class FakeReadinessClient implements ReadinessClient, ReadinessIosClient {
 class FakeAndroidManager implements ReadinessAndroidManager {
   installed = true;
   enabled = true;
+  accessibilityServiceHealthy = true;
   versionCompatible = true;
   setupCalls = 0;
   enableCalls = 0;
+  accessibilityHealthChecks = 0;
+  rebindCalls = 0;
   resetSetupStateCalls = 0;
   private setupAttempted = false;
   compatibilityResult: Awaited<ReturnType<ReadinessAndroidManager["ensureCompatibleVersion"]>> = {
@@ -91,6 +94,16 @@ class FakeAndroidManager implements ReadinessAndroidManager {
 
   async isEnabled(): Promise<boolean> {
     return this.enabled;
+  }
+
+  async rebindIfUnhealthy(): Promise<boolean> {
+    this.accessibilityHealthChecks++;
+    if (this.accessibilityServiceHealthy) {
+      return false;
+    }
+    this.rebindCalls++;
+    this.accessibilityServiceHealthy = true;
+    return true;
   }
 
   async isVersionCompatible(): Promise<boolean> {
@@ -1610,6 +1623,43 @@ describe("RunnerReadinessService", () => {
 
     expect(client.connectionCalls).toBe(1);
     expect(client.healthCalls).toBe(2);
+  });
+
+  test("does not rebind a healthy Android accessibility service while reconnecting", async () => {
+    const manager = new FakeAndroidManager();
+    const client = new FakeReadinessClient();
+    client.connected = false;
+    const { service } = createService({ androidManager: manager, androidClient: client });
+
+    await service.ensureReady({
+      device: androidDevice(),
+      requestedIdentity: "platform=android",
+      totalDeadlineMs: 10_000,
+      readinessTimeoutMs: 10_000,
+    });
+
+    expect(manager.accessibilityHealthChecks).toBe(1);
+    expect(manager.rebindCalls).toBe(0);
+  });
+
+  test("reports that an Android accessibility-service rebind was attempted when reconnecting fails", async () => {
+    const manager = new FakeAndroidManager();
+    manager.accessibilityServiceHealthy = false;
+    const client = new FakeReadinessClient();
+    client.connected = false;
+    client.connectionResults = [];
+    const { service } = createService({ androidManager: manager, androidClient: client });
+
+    await expect(
+      service.ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "platform=android",
+        totalDeadlineMs: 1_000,
+        readinessTimeoutMs: 1_000,
+      }),
+    ).rejects.toThrow(/accessibility service was crashed or unbound; rebind attempted/);
+
+    expect(manager.rebindCalls).toBe(1);
   });
 
   test("reports the exhausted phase, attempts, mapping, and remaining budget", async () => {

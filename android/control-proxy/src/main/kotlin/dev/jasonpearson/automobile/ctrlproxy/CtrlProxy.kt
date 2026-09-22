@@ -31,6 +31,7 @@ import android.view.View
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import dev.jasonpearson.automobile.ctrlproxy.ime.CtrlProxyIme
 import dev.jasonpearson.automobile.ctrlproxy.models.DisplayCutoutInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ElementBounds
 import dev.jasonpearson.automobile.ctrlproxy.models.FrameMetricsSnapshot
@@ -1984,8 +1985,28 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     performInsertText(requestId, text)
 
   override fun requestCommitText(requestId: String?, text: String, priorImeId: String?) {
-    kotlinx.coroutines.runBlocking {
-      broadcastCommitTextResult(requestId, false, "commit_text not implemented", 0)
+    val start = System.currentTimeMillis()
+    val ime = CtrlProxyIme.current()
+    if (ime == null) {
+      launchRequestScope(requestId) {
+        broadcastCommitTextResult(
+          requestId,
+          false,
+          "IME not active; ime set required",
+          System.currentTimeMillis() - start,
+        )
+      }
+      return
+    }
+    ime.commitText(text, priorImeId) { result ->
+      launchRequestScope(requestId) {
+        broadcastCommitTextResult(
+          requestId,
+          result.success,
+          result.error,
+          System.currentTimeMillis() - start,
+        )
+      }
     }
   }
 

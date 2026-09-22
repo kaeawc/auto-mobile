@@ -173,7 +173,11 @@ describe("EdgeMatchIndex", () => {
       to: "B",
       timestamp: 1,
       edgeType: "tool",
-      interaction: { toolName: "inputText", args: { text: "Submit" }, timestamp: 1 },
+      interaction: {
+        toolName: "sendKeys",
+        args: { commands: [{ action: "type", text: "Submit" }] },
+        timestamp: 1,
+      },
     };
     const index = new EdgeMatchIndex([edge]);
     expect(index.findMatch(interactable({ text: "Submit", clickable: true }))).toBeUndefined();

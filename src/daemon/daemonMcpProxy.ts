@@ -476,7 +476,7 @@ export interface ProxiedResourceTemplate {
  * plus every process-global output-reduction flag. A
  * same-build MCP client that requests one of these against an already-running
  * daemon started without it (or vice versa) would otherwise silently get the
- * wrong tool-output or inputText behavior until a manual restart. `debug`, `embeddedSdk`,
+ * wrong tool-output or text-input behavior until a manual restart. `debug`, `embeddedSdk`,
  * and `networkMockable`
  * additionally gate whole tool families out of the registry, so reusing a daemon
  * that lacks the requested flag makes those tools unreachable (issue #4247). The

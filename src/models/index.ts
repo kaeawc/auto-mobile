@@ -44,7 +44,7 @@ export * from "./GrantAndroidPermissionsResult";
 export * from "./GfxMetrics";
 export * from "./PerfSnapshot";
 export * from "./HomeScreenResult";
-export * from "./ImeActionResult";
+export * from "./ImeAction";
 export * from "./InstalledApp";
 export * from "./InstallAppResult";
 export * from "./IntentChooserResult";

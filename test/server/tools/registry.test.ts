@@ -106,8 +106,7 @@ describe("MCP Tools Registry", () => {
       observe: ["observe"],
       interaction: [
         "tapOn",
-        "inputText",
-        "clearText",
+        "sendKeys",
         "pressButton",
         "swipeOn",
         "dragAndDrop",

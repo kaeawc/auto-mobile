@@ -90,7 +90,7 @@ describe("criticalSection tool", () => {
       deviceCount: 2,
       steps: [
         { tool: "observe", params: { device: "A" } },
-        { tool: "inputText", params: { text: "hi" } }, // no device
+        { tool: "sendKeys", params: { commands: [{ action: "type", text: "hi" }] } }, // no device
       ],
     };
 

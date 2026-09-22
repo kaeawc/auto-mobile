@@ -239,7 +239,7 @@ export interface ObserveResult {
    * >= 1`. A row with zero affordances is never emitted here — it goes into
    * the sibling {@link context} array instead, so `skeleton` means what its
    * name says and a client's action surface is not diluted by rows it can
-   * never `tapOn`/`inputText`/etc.
+   * never `tapOn`/`sendKeys`/etc.
    */
   skeleton?: SkeletonElement[];
   /** Observed Android IME window, replacing its individual keys in compact output. */

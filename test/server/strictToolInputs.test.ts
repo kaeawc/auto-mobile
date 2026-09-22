@@ -14,7 +14,6 @@ import {
 } from "../../src/server/navigationTools";
 import {
   dragAndDropSchema,
-  inputTextSchema,
   pinchOnSchema,
   swipeOnSchema,
 } from "../../src/server/interactionTools";
@@ -78,7 +77,6 @@ const strictCases: StrictCase[] = [
     valid: { source: { elementId: "a" }, target: { elementId: "b" } },
   },
   { name: "pinchOn", schema: pinchOnSchema, valid: { direction: "in" } },
-  { name: "inputText", schema: inputTextSchema, valid: { text: "hello" } },
   // #6613: app tools (appId-alias preprocessed)
   { name: "packageNameSchema", schema: packageNameSchema, valid: { appId: "com.example.app" } },
   // The schema `listApps` actually registers. `appId` is NOT one of its

@@ -46,7 +46,7 @@ interface IdentifiedInteraction {
   description: string;
   confidence: number;
   suggestedToolCall?: {
-    tool: "tapOn" | "inputText" | "swipeOn";
+    tool: "tapOn" | "swipeOn";
     params: Record<string, unknown>;
   };
   predictedOutcome?: {

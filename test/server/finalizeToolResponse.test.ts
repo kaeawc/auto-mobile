@@ -207,7 +207,7 @@ describe("finalizeToolResponse", () => {
 
   // Action tools default their embedded observation to the compact skeleton
   // (issue #5872): the same response-shape control `observe` already has, so a
-  // client no longer pays the full raw hierarchy on every tapOn/inputText/launchApp.
+  // client no longer pays the full raw hierarchy on every tapOn/sendKeys/launchApp.
   describe("action-tool skeleton default (#5872)", () => {
     test.each([
       { label: "Android physical pixels", load: () => loadAndroidHomeObserve().observe },
@@ -286,8 +286,8 @@ describe("finalizeToolResponse", () => {
         observation: makeObserveResult(),
       });
       const finalized = finalizeToolResponse(response, {
-        name: "inputText",
-        args: { raw: true },
+        name: "sendKeys",
+        args: { raw: true, commands: [{ action: "type", text: "hello" }] },
       });
       const observation = (finalized.structuredContent as any).observation;
       expect(observation.viewHierarchy).toBeDefined();
@@ -2054,8 +2054,10 @@ describe("finalizeToolResponse", () => {
       expectObservationDiff(finalized, { mode: "full", reason: "screen_changed" });
     });
 
-    test("action policy: inputText diffs on stable surface despite uncertain identity", () => {
-      const finalized = finalizeChangedLowConfidenceAction("inputText", { text: "hello" });
+    test("action policy: sendKeys typing diffs on stable surface despite uncertain identity", () => {
+      const finalized = finalizeChangedLowConfidenceAction("sendKeys", {
+        commands: [{ action: "type", text: "hello" }],
+      });
 
       const obsSc = (finalized.structuredContent as any).observation;
       expect(obsSc.isDiff).toBe(true);
@@ -2076,10 +2078,10 @@ describe("finalizeToolResponse", () => {
       expectObservationDiff(finalized, { mode: "diff", reason: "diff_emitted" });
     });
 
-    test("action policy: inputText emits full when uncertain identity key changes", () => {
+    test("action policy: sendKeys emits full when uncertain identity key changes", () => {
       const finalized = finalizeChangedLowConfidenceAction(
-        "inputText",
-        { text: "hello" },
+        "sendKeys",
+        { commands: [{ action: "type", text: "hello" }] },
         "bundle=com.apple.reminders|focus=Title",
         "bundle=com.apple.reminders|focus=Search",
       );
@@ -2116,31 +2118,20 @@ describe("finalizeToolResponse", () => {
     });
 
     test("action policy: submit-style IME actions are navigation-prone", () => {
-      const inputSearch = finalizeChangedLowConfidenceAction("inputText", {
-        text: "query",
-        imeAction: "search",
+      const search = finalizeChangedLowConfidenceAction("sendKeys", {
+        commands: [{ action: "key", key: "search" }],
       });
-      expect((inputSearch.structuredContent as any).observation.isDiff).toBeUndefined();
-      expect((inputSearch.structuredContent as any).observation.viewHierarchy).toBeDefined();
-      expectObservationDiff(inputSearch, { mode: "full", reason: "screen_changed" });
-
-      const imeGo = finalizeChangedLowConfidenceAction("imeAction", { action: "go" });
-      expect((imeGo.structuredContent as any).observation.isDiff).toBeUndefined();
-      expect((imeGo.structuredContent as any).observation.viewHierarchy).toBeDefined();
-      expectObservationDiff(imeGo, { mode: "full", reason: "screen_changed" });
+      expect((search.structuredContent as any).observation.isDiff).toBeUndefined();
+      expect((search.structuredContent as any).observation.viewHierarchy).toBeDefined();
+      expectObservationDiff(search, { mode: "full", reason: "screen_changed" });
     });
 
     test("action policy: focus-traversal IME actions remain in-place", () => {
-      const inputNext = finalizeChangedLowConfidenceAction("inputText", {
-        text: "value",
-        imeAction: "next",
+      const next = finalizeChangedLowConfidenceAction("sendKeys", {
+        commands: [{ action: "key", key: "next" }],
       });
-      expect((inputNext.structuredContent as any).observation.isDiff).toBe(true);
-      expectObservationDiff(inputNext, { mode: "diff", reason: "diff_emitted" });
-
-      const imePrevious = finalizeChangedLowConfidenceAction("imeAction", { action: "previous" });
-      expect((imePrevious.structuredContent as any).observation.isDiff).toBe(true);
-      expectObservationDiff(imePrevious, { mode: "diff", reason: "diff_emitted" });
+      expect((next.structuredContent as any).observation.isDiff).toBe(true);
+      expectObservationDiff(next, { mode: "diff", reason: "diff_emitted" });
     });
 
     // One row per documented action so a single failing case is attributable
@@ -2155,16 +2146,11 @@ describe("finalizeToolResponse", () => {
       ["pressButton", { button: "home" }],
       ["pressButton", { button: "recent" }],
       ["pressButton", { button: "power" }],
-      ["inputText", { text: "query", imeAction: "done" }],
-      ["inputText", { text: "query", imeAction: "go" }],
-      ["inputText", { text: "query", imeAction: "search" }],
-      ["inputText", { text: "query", imeAction: "send" }],
       ["sendKeys", { commands: [{ action: "key", key: "enter" }] }],
       ["sendKeys", { commands: [{ action: "key", key: "done" }] }],
-      ["imeAction", { action: "done" }],
-      ["imeAction", { action: "go" }],
-      ["imeAction", { action: "search" }],
-      ["imeAction", { action: "send" }],
+      ["sendKeys", { commands: [{ action: "key", key: "go" }] }],
+      ["sendKeys", { commands: [{ action: "key", key: "search" }] }],
+      ["sendKeys", { commands: [{ action: "key", key: "send" }] }],
     ];
 
     test.each(navigationProneActions)(
@@ -2178,15 +2164,12 @@ describe("finalizeToolResponse", () => {
     );
 
     const inPlaceAndScrollActions: Array<[string, Record<string, unknown>]> = [
-      ["inputText", { text: "hello" }],
-      ["inputText", { text: "hello", imeAction: "next" }],
-      ["inputText", { text: "hello", imeAction: "previous" }],
       ["sendKeys", { commands: [{ action: "type", text: "hello" }] }],
       ["sendKeys", { commands: [{ action: "key", key: "tab" }] }],
-      ["clearText", {}],
+      ["sendKeys", { commands: [{ action: "key", key: "next" }] }],
+      ["sendKeys", { commands: [{ action: "key", key: "previous" }] }],
+      ["sendKeys", { commands: [{ action: "clear" }] }],
       ["selectAllText", {}],
-      ["imeAction", { action: "next" }],
-      ["imeAction", { action: "previous" }],
       ["keyboard", { action: "open" }],
       ["clipboard", { action: "paste" }],
       ["pressButton", { button: "menu" }],

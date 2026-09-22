@@ -53,7 +53,6 @@ describe("Tool Registration Validation (Integration Tests)", () => {
   test("should verify critical tools from issue #745 exist in actual code", async () => {
     const interactionTools = await actualModules.interaction();
     const criticalSchemas = [
-      "clearTextSchema",
       "selectAllTextSchema",
       "pressButtonSchema",
       "systemTraySchema",

@@ -26,32 +26,32 @@ describe("SqliteSessionToolSelectionRepository.setMany", () => {
 
   test("applies every entry of the batch", async () => {
     await repository.setMany("session-1", [
-      { toolName: "inputText", enabled: true },
-      { toolName: "clearText", enabled: true },
+      { toolName: "sendKeys", enabled: true },
+      { toolName: "clipboard", enabled: true },
       { toolName: "observe", enabled: false },
     ]);
 
     expect(await repository.list("session-1")).toEqual(
       new Map([
-        ["inputText", true],
-        ["clearText", true],
+        ["sendKeys", true],
+        ["clipboard", true],
         ["observe", false],
       ]),
     );
   });
 
   test("overwrites an existing override in the same batch", async () => {
-    await repository.set("session-1", "inputText", true);
+    await repository.set("session-1", "sendKeys", true);
 
     await repository.setMany("session-1", [
-      { toolName: "inputText", enabled: false },
-      { toolName: "clearText", enabled: false },
+      { toolName: "sendKeys", enabled: false },
+      { toolName: "clipboard", enabled: false },
     ]);
 
     expect(await repository.list("session-1")).toEqual(
       new Map([
-        ["inputText", false],
-        ["clearText", false],
+        ["sendKeys", false],
+        ["clipboard", false],
       ]),
     );
   });
@@ -64,7 +64,7 @@ describe("SqliteSessionToolSelectionRepository.setMany", () => {
     // rolled back with it rather than left behind.
     await expect(
       repository.setMany("session-1", [
-        { toolName: "inputText", enabled: true },
+        { toolName: "sendKeys", enabled: true },
         { toolName: null as unknown as string, enabled: true },
       ]),
     ).rejects.toThrow();

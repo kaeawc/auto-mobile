@@ -241,7 +241,12 @@ describe("PlanValidator", () => {
               device: "A",
               lock: "shared",
               deviceCount: 2,
-              steps: [{ tool: "inputText", params: { device: "A", text: "hi" } }],
+              steps: [
+                {
+                  tool: "sendKeys",
+                  params: { device: "A", commands: [{ action: "type", text: "hi" }] },
+                },
+              ],
             },
           },
           {
@@ -349,7 +354,7 @@ describe("PlanValidator", () => {
               deviceCount: 2,
               steps: [
                 { tool: "tapOn", params: { text: "Sync", device: "A" } },
-                { tool: "inputText", params: { text: "hi" } },
+                { tool: "sendKeys", params: { commands: [{ action: "type", text: "hi" }] } },
               ],
             },
           },
@@ -358,7 +363,7 @@ describe("PlanValidator", () => {
       expect(() => PlanValidator.validate(plan)).toThrow(
         "Every step inside a criticalSection must declare a 'device' parameter",
       );
-      expect(() => PlanValidator.validate(plan)).toThrow("step 1.steps[1] (inputText)");
+      expect(() => PlanValidator.validate(plan)).toThrow("step 1.steps[1] (sendKeys)");
     });
 
     test("throws naming the device when a criticalSection sub-step uses an undeclared device", () => {

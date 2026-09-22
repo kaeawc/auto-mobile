@@ -1,5 +1,5 @@
 /**
- * Decide whether an inputText call should be auto-promoted from the default
+ * Decide whether an internal text-input operation should be auto-promoted from the default
  * `a11y` mode to `eventAll` based on the presence of consumer-configured
  * markers in the text.
  *

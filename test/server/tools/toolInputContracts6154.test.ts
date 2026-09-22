@@ -1,9 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
-  clearTextSchema,
-  inputTextSchema,
   pressButtonSchema,
   selectAllTextSchema,
+  sendKeysSchema,
   wakeAndUnlockSchema,
 } from "../../../src/server/interactionTools";
 import {
@@ -20,7 +19,7 @@ import {
 import type { BootedDevice } from "../../../src/models";
 import { ActionableError } from "../../../src/models/ActionableError";
 
-// Issue #6154 half 1: `platform` was required on pressButton/inputText/observe
+// Issue #6154 half 1: `platform` was required on pressButton/observe
 // (and siblings) but optional on tapOn/launchApp, even though a `deviceId`
 // (or session) resolves the platform the same way for all of them. Assert the
 // aligned tools now accept platform omitted when deviceId is present.
@@ -34,10 +33,10 @@ describe("issue #6154: platform is optional wherever deviceId/session resolves i
     expect(result.deviceId).toBe("emulator-5554");
   });
 
-  test("inputText parses with platform omitted and deviceId present", () => {
-    const result = inputTextSchema.parse({
+  test("sendKeys parses with platform omitted and deviceId present", () => {
+    const result = sendKeysSchema.parse({
       deviceId: "emulator-5554",
-      text: "hello",
+      commands: [{ action: "type", text: "hello" }],
     });
     expect(result.platform).toBeUndefined();
   });
@@ -51,13 +50,6 @@ describe("issue #6154: platform is optional wherever deviceId/session resolves i
 
   test("wakeAndUnlock parses with platform omitted and deviceId present", () => {
     const result = wakeAndUnlockSchema.parse({
-      deviceId: "emulator-5554",
-    });
-    expect(result.platform).toBeUndefined();
-  });
-
-  test("clearText parses with platform omitted and deviceId present", () => {
-    const result = clearTextSchema.parse({
       deviceId: "emulator-5554",
     });
     expect(result.platform).toBeUndefined();

@@ -90,7 +90,6 @@ const EXTENDS_TYPES: Record<string, string> = {
 const UNTOUCHED_TYPES = [
   "FocusOnResult", // no `error?` — different failure model
   "IntentChooserResult", // observation?: any, not ObserveResult
-  "ImeActionResult", // observation?: any
   "HomeScreenResult", // observation?: any
 ];
 

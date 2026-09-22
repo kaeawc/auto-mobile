@@ -3,18 +3,15 @@ import { ToolRegistry, ProgressCallback } from "./toolRegistry";
 import { TapOnElement } from "../features/action/TapOnElement";
 import { TapAtCoordinate } from "../features/action/TapAtCoordinate";
 import { TapAnyElement } from "../features/action/TapAnyElement";
-import { InputText } from "../features/action/InputText";
 import { WakeAndUnlock } from "../features/action/WakeAndUnlock";
 import { DeviceLockStore } from "../features/action/DeviceLockStore";
 import { IosLockScreenUnlocker } from "../features/action/IosLockScreenUnlocker";
-import { ClearText } from "../features/action/ClearText";
 import { SelectAllText } from "../features/action/SelectAllText";
 import { PressButton } from "../features/action/PressButton";
 import { DragAndDrop } from "../features/action/DragAndDrop";
 import { SwipeOn } from "../features/action/swipeon";
 import { PinchOn } from "../features/action/PinchOn";
 import { Shake } from "../features/action/Shake";
-import { ImeAction } from "../features/action/ImeAction";
 import { RecentApps } from "../features/action/RecentApps";
 import { HomeScreen } from "../features/action/HomeScreen";
 import { Rotate } from "../features/action/Rotate";
@@ -22,8 +19,6 @@ import { OpenURL } from "../features/action/OpenURL";
 import { Clipboard } from "../features/action/Clipboard";
 import { Keyboard } from "../features/action/Keyboard";
 import {
-  isSendKeysReleased,
-  SEND_KEYS_MIN_RELEASE,
   SEND_KEYS_OPERATIONS,
   SEND_KEYS_SEMANTIC_KEYS,
   SEND_KEYS_TYPING_MODES,
@@ -36,11 +31,8 @@ import {
   ClipboardResult,
   OpenURLResult,
   PinchOnResult,
-  SendTextResult,
   SwipeOnToolPayload,
-  type ClearTextResult,
   type DragAndDropResult,
-  type ImeActionResult,
   type PressButtonResult,
   type RotateResult,
   type SelectAllTextResult,
@@ -80,7 +72,6 @@ import {
   compactExclusiveSelectorProperties,
   responseShapeControlFields,
 } from "./toolSchemaHelpers";
-import { serverConfig } from "../utils/ServerConfig";
 import { isTruthyFlag } from "../utils/elementProperties";
 import {
   createElementIdTextSelectorSchema,
@@ -91,12 +82,10 @@ import { tapOnResultSchema } from "./toolOutputSchemas";
 
 // Import from extracted modules
 import type {
-  ClearTextArgs,
   SelectAllTextArgs,
   PressButtonArgs,
   SystemTrayNotificationArgs,
   SystemTrayArgs,
-  InputTextArgs,
   SendKeysArgs,
   WakeAndUnlockArgs,
   OpenLinkArgs,
@@ -107,7 +96,6 @@ import type {
   SwipeOnArgs,
   PinchOnArgs,
   ShakeArgs,
-  ImeActionArgs,
   KeyboardArgs,
   RecentAppsArgs,
   RotateArgs,
@@ -143,12 +131,10 @@ import {
 
 // Re-export types for backward compatibility
 export type {
-  ClearTextArgs,
   SelectAllTextArgs,
   PressButtonArgs,
   SystemTrayNotificationArgs,
   SystemTrayArgs,
-  InputTextArgs,
   SendKeysArgs,
   WakeAndUnlockArgs,
   OpenLinkArgs,
@@ -158,7 +144,6 @@ export type {
   SwipeOnArgs,
   PinchOnArgs,
   ShakeArgs,
-  ImeActionArgs,
   KeyboardArgs,
   RecentAppsArgs,
   RotateArgs,
@@ -452,7 +437,7 @@ const swipeOnLookForSchema = createElementIdTextSelectorSchema({
   text: "Text to look for",
 });
 
-// #6613: dragAndDrop/swipeOn/pinchOn/inputText advertised
+// #6613: dragAndDrop/swipeOn/pinchOn advertised
 // `additionalProperties: false` but were not `.strict()`, so an undeclared
 // caller argument was silently dropped instead of rejected. Same treatment as
 // tapOn/tapAny (#6154).
@@ -567,16 +552,6 @@ export const pinchOnSchema = withJsonSchemaOverride(
       .strict(),
   ),
   (js) => compactExclusiveSelectorProperties(js, ["container"]),
-);
-
-export const clearTextSchema = addDeviceTargetingToSchema(
-  z.object({
-    // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
-    // not required — a device handle from getAndroid/getApple is sufficient on
-    // its own.
-    platform: platformSchema.optional(),
-    ...responseShapeControlFields,
-  }),
 );
 
 export const selectAllTextSchema = addDeviceTargetingToSchema(
@@ -696,10 +671,10 @@ export const clearStateSchema = withAppIdAliases(
 );
 
 // A selector focuses the target field before typing (issue #5872 AC3), so a
-// form field no longer costs a mandatory tapOn-then-inputText pair. Kept to the
+// form field no longer costs a mandatory tapOn-then-sendKeys pair. Kept to the
 // selector variants that identify an input; semantic-link activation is a tapOn
 // concern, not a field to type into.
-const inputTextSelectorSchema = z
+const sendKeysSelectorSchema = z
   .union([
     z
       .object({ elementId: z.string().min(1).describe("Resource ID, e.g. com.app:id/field") })
@@ -722,36 +697,6 @@ const inputTextSelectorSchema = z
   .describe(
     "Field to focus before typing: elementId, Android testTag, text, or ordered text variants",
   );
-
-export const inputTextSchema = addDeviceTargetingToSchema(
-  z
-    .object({
-      text: z.string().min(1),
-      selector: inputTextSelectorSchema
-        .optional()
-        .describe(
-          "Focus this field before typing, collapsing the mandatory focus-then-type pair into " +
-            "one call. Without it, text goes to whatever is currently focused.",
-        ),
-      mode: z
-        .enum(["a11y", "eventLast", "eventAll", "eventOnly"])
-        .optional()
-        .describe(
-          "Android text mode: a11y default; eventLast and eventAll start with accessibility setText; eventOnly clears and types supported ASCII with key events only",
-        ),
-      imeAction: z
-        .enum(["done", "next", "search", "send", "go", "previous"])
-        .optional()
-        .describe("IME action after input"),
-      dismissKeyboard: z.boolean().optional().describe("Android: dismiss keyboard after input"),
-      // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
-      // not required — a device handle from getAndroid/getApple is sufficient on
-      // its own.
-      platform: platformSchema.optional(),
-      ...responseShapeControlFields,
-    })
-    .strict(),
-);
 
 const sendKeysKeyValues = [...SUPPORTED_INPUT_KEYS, ...SEND_KEYS_SEMANTIC_KEYS] as const;
 
@@ -794,7 +739,7 @@ const sendKeysCommandSchema = withCanonicalDiscriminatedUnionJsonSchema(
 
 export const sendKeysSchema = addDeviceTargetingToSchema(
   z.object({
-    selector: inputTextSelectorSchema
+    selector: sendKeysSelectorSchema
       .optional()
       .describe("Field to focus once before executing the ordered command sequence"),
     commands: z
@@ -834,7 +779,7 @@ export async function assertSendKeysRunnerCompatible(
   throw new ActionableError(
     `${device.platform === "android" ? "Android CtrlProxy APK" : "iOS CtrlProxy runner"} ` +
       `does not support sendKeys (${requiredCommand} is unavailable). Rebuild and redeploy the ` +
-      `CtrlProxy from this source checkout, or retry after AutoMobile ${SEND_KEYS_MIN_RELEASE} ships.`,
+      `CtrlProxy from this source checkout.`,
   );
 }
 
@@ -918,17 +863,6 @@ export const buildOpenLinkPayload = (
     candidates: waitOutcome.candidates,
   };
 };
-
-export const imeActionSchema = addDeviceTargetingToSchema(
-  z.object({
-    action: z.enum(["done", "next", "search", "send", "go", "previous"]).describe("IME action"),
-    // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
-    // not required — a device handle from getAndroid/getApple is sufficient on
-    // its own.
-    platform: platformSchema.optional(),
-    ...responseShapeControlFields,
-  }),
-);
 
 export const recentAppsSchema = addDeviceTargetingToSchema(
   z.object({
@@ -1102,7 +1036,7 @@ export async function swipeOnHandler(
     ...result,
   });
   // formatSwipeOnMessage already gates the message on `result.success`; the MCP
-  // envelope must agree, exactly as tapOn/inputText do (#6152, #5902), so a
+  // envelope must agree, exactly as tapOn does (#6152, #5902), so a
   // conforming client can't mistake a failed swipe for a completed one (#6163).
   return result.success ? response : { ...response, isError: true };
 }
@@ -1164,77 +1098,9 @@ export async function pinchOnHandler(
     ...result,
   });
   // formatPinchOnMessage already gates the message on `result.success`; the MCP
-  // envelope must agree, exactly as tapOn/inputText do (#6152, #5902), so a
+  // envelope must agree, exactly as tapOn does (#6152, #5902), so a
   // conforming client can't mistake a failed pinch for a completed one (#6163).
   return result.success ? response : { ...response, isError: true };
-}
-
-// Injection seam for the inputText handler (mirrors the swipeOn/pinchOn factory
-// seams in this file). Lets a unit test exercise the registered handler wiring
-// with a fake InputText, so the #6868 warning-vs-error contract is covered at
-// the tool boundary and not only inside the feature.
-export type InputTextLike = Pick<InputText, "execute">;
-
-let inputTextFactory: (device: BootedDevice) => InputTextLike = (device) => new InputText(device);
-
-export function setInputTextFactory(factory: (device: BootedDevice) => InputTextLike): void {
-  inputTextFactory = factory;
-}
-
-export function resetInputTextFactory(): void {
-  inputTextFactory = (device) => new InputText(device);
-}
-
-/**
- * Run inputText and report its outcome.
- *
- * `isError` is reserved for a failed TEXT WRITE. A best-effort epilogue that
- * failed (keyboard dismissal) rides along as `keyboardDismissed: false` plus a
- * `warnings` entry on a SUCCESSFUL response, so a client no longer has to parse
- * English prose to learn that the text it asked for actually landed (#6868).
- */
-export async function inputTextHandler(
-  device: BootedDevice,
-  args: InputTextArgs,
-  _progress?: ProgressCallback,
-  signal?: AbortSignal,
-) {
-  RecompositionTracker.getInstance().recordInteraction();
-  const dismissKeyboard = args.dismissKeyboard ?? serverConfig.isDismissKeyboardAfterInputEnabled();
-  const mode = device.platform === "android" ? args.mode : undefined;
-  const inputText = inputTextFactory(device);
-  const result = await inputText.execute(
-    args.text,
-    args.imeAction,
-    dismissKeyboard,
-    mode,
-    signal,
-    args.selector,
-  );
-  const response = createJSONToolResponse({
-    message: buildInputTextResultMessage(result),
-    observation: result.observation,
-    ...result,
-  });
-  return result.success ? response : { ...response, isError: true };
-}
-
-export function buildInputTextResultMessage(
-  result: Pick<SendTextResult, "success" | "error" | "matchedId" | "matchedText" | "text">,
-): string {
-  if (!result.success) {
-    return `Failed to input text: ${result.error ?? "unknown error"}`;
-  }
-
-  const identity: string[] = [];
-  if (result.matchedId) {
-    identity.push(`id=${result.matchedId}`);
-  }
-  if (result.matchedText) {
-    identity.push(`text=${JSON.stringify(result.matchedText)}`);
-  }
-  const typed = `Typed ${JSON.stringify(result.text)}`;
-  return identity.length > 0 ? `${typed} into ${identity.join(" ")}` : typed;
 }
 
 /**
@@ -1656,7 +1522,7 @@ export async function tapOnHandler(
   const searchSummary = buildTapOnSearchSummary(result, Boolean(args.searchUntil));
 
   // A selector miss must not read as a completed tap: gate the message on the
-  // outcome and mark the MCP envelope `isError`, exactly as inputText does since
+  // outcome and mark the MCP envelope `isError`, exactly as other action tools do since
   // #5902 (#6152). `||` not `??`: an empty-string error must still yield the
   // non-empty fallback (#4183 P4). The failure keeps the search summary so the
   // user still sees how long the selector was looked for before it missed.
@@ -1800,44 +1666,6 @@ export async function dragAndDropHandler(
   return result.success ? response : { ...response, isError: true as const };
 }
 
-// Injection seam for the clearText handler. Lets a unit test exercise the
-// registered handler wiring with a fake ClearText whose execute() returns a
-// failure (#6163).
-export type ClearTextLike = Pick<ClearText, "execute">;
-
-let clearTextFactory: (device: BootedDevice) => ClearTextLike = (device) => new ClearText(device);
-
-export function setClearTextFactory(factory: (device: BootedDevice) => ClearTextLike): void {
-  clearTextFactory = factory;
-}
-
-export function resetClearTextFactory(): void {
-  clearTextFactory = (device) => new ClearText(device);
-}
-
-export async function clearTextHandler(
-  device: BootedDevice,
-  _args: ClearTextArgs,
-  progress?: ProgressCallback,
-) {
-  try {
-    const clearText = clearTextFactory(device);
-    const result: ClearTextResult = await clearText.execute(progress);
-
-    const message = result.success
-      ? "Cleared text from input field"
-      : `Failed to clear text: ${result.error || "unknown error"}`;
-    const response = createJSONToolResponse({
-      message,
-      observation: result.observation,
-      ...result,
-    });
-    return result.success ? response : { ...response, isError: true as const };
-  } catch (error) {
-    throw new ActionableError(`Failed to clear text: ${error}`);
-  }
-}
-
 // Injection seam for the selectAllText handler. Lets a unit test exercise the
 // registered handler wiring with a fake SelectAllText whose execute() returns
 // a failure (#6163).
@@ -1916,44 +1744,6 @@ export async function pressButtonHandler(
     return result.success ? response : { ...response, isError: true as const };
   } catch (error) {
     throw new ActionableError(`Failed to press button: ${error}`);
-  }
-}
-
-// Injection seam for the imeAction handler. Lets a unit test exercise the
-// registered handler wiring with a fake ImeAction whose execute() returns a
-// failure (#6163).
-export type ImeActionLike = Pick<ImeAction, "execute">;
-
-let imeActionFactory: (device: BootedDevice) => ImeActionLike = (device) => new ImeAction(device);
-
-export function setImeActionFactory(factory: (device: BootedDevice) => ImeActionLike): void {
-  imeActionFactory = factory;
-}
-
-export function resetImeActionFactory(): void {
-  imeActionFactory = (device) => new ImeAction(device);
-}
-
-export async function imeActionHandler(
-  device: BootedDevice,
-  args: ImeActionArgs,
-  progress?: ProgressCallback,
-) {
-  try {
-    const imeAction = imeActionFactory(device);
-    const result: ImeActionResult = await imeAction.execute(args.action, progress);
-
-    const message = result.success
-      ? `Executed IME action "${args.action}"`
-      : `Failed to execute IME action "${args.action}": ${result.error || "unknown error"}`;
-    const response = createJSONToolResponse({
-      message,
-      observation: result.observation,
-      ...result,
-    });
-    return result.success ? response : { ...response, isError: true as const };
-  } catch (error) {
-    throw new ActionableError(`Failed to execute IME action: ${error}`);
   }
 }
 
@@ -2127,8 +1917,8 @@ const resolveClearAllAttributionLabel = async (
 // ============================================================================
 
 export function registerInteractionTools() {
-  // tapOn, tapAny, dragAndDrop, clearText, selectAllText, pressButton,
-  // imeAction, and swipeOn handlers are defined at module scope (each with an
+  // tapOn, tapAny, dragAndDrop, selectAllText, pressButton, and swipeOn handlers
+  // are defined at module scope (each with an
   // injectable factory) so a unit test can exercise the registered handler
   // wiring (#6152, #6163).
 
@@ -2478,9 +2268,6 @@ export function registerInteractionTools() {
   // pinchOn handler is defined at module scope (with an injectable PinchOn
   // factory) so a unit test can exercise the registered handler wiring (#6056).
 
-  // inputText handler is defined at module scope (with an injectable InputText
-  // factory) so a unit test can exercise the registered handler wiring (#6868).
-
   const sendKeysHandler = async (
     device: BootedDevice,
     args: SendKeysArgs,
@@ -2618,9 +2405,6 @@ export function registerInteractionTools() {
     }
   };
 
-  // imeAction handler is defined at module scope (with an injectable ImeAction
-  // factory) so a unit test can exercise the registered handler wiring (#6163).
-
   // Keyboard handler
   const keyboardHandler = async (device: BootedDevice, args: KeyboardArgs) => {
     try {
@@ -2694,19 +2478,7 @@ export function registerInteractionTools() {
     }
   };
 
-  // Keep the released input tool as the default until coordinated CtrlProxy
-  // artifacts contain the commands sendKeys preflights at invocation time.
-  const sendKeysReleased = isSendKeysReleased();
-
   // Register with the tool registry
-  ToolRegistry.registerDeviceAware(
-    "clearText",
-    "Clear text from focused input",
-    clearTextSchema,
-    clearTextHandler,
-    { defaultEnabled: !sendKeysReleased, supportsProgress: true },
-  );
-
   ToolRegistry.registerDeviceAware(
     "selectAllText",
     "Select all text in focused input",
@@ -2732,19 +2504,11 @@ export function registerInteractionTools() {
   );
 
   ToolRegistry.registerDeviceAware(
-    "inputText",
-    "Input text. The optional mode field is Android-only and ignored on iOS. If the text lands but the optional keyboard dismissal fails, the response stays a success with keyboardDismissed:false and a warnings entry.",
-    inputTextSchema,
-    inputTextHandler,
-    { defaultEnabled: !sendKeysReleased },
-  );
-
-  ToolRegistry.registerDeviceAware(
     "sendKeys",
     "Execute an ordered sequence of text insertion/replacement, clear, raw keys, and semantic IME keys.",
     sendKeysSchema,
     sendKeysHandler,
-    { defaultEnabled: sendKeysReleased, supportsProgress: true },
+    { defaultEnabled: true, supportsProgress: true },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -2813,14 +2577,6 @@ export function registerInteractionTools() {
     "Shake device; iOS Simulator only.",
     shakeSchema,
     shakeHandler,
-    { defaultEnabled: false, supportsProgress: true },
-  );
-
-  ToolRegistry.registerDeviceAware(
-    "imeAction",
-    "Perform IME action",
-    imeActionSchema,
-    imeActionHandler,
     { defaultEnabled: false, supportsProgress: true },
   );
 

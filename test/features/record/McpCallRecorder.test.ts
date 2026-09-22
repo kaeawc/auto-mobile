@@ -23,13 +23,16 @@ describe("McpCallRecorder", () => {
       const recorder = new McpCallRecorder();
       recorder.start();
       recorder.record("tapOn", { text: "Login" });
-      recorder.record("inputText", { text: "user@test.com" });
+      recorder.record("sendKeys", { commands: [{ action: "type", text: "user@test.com" }] });
 
       const steps = recorder.stop();
       expect(recorder.isRecording()).toBe(false);
       expect(steps).toHaveLength(2);
       expect(steps[0]).toEqual({ tool: "tapOn", params: { text: "Login" } });
-      expect(steps[1]).toEqual({ tool: "inputText", params: { text: "user@test.com" } });
+      expect(steps[1]).toEqual({
+        tool: "sendKeys",
+        params: { commands: [{ action: "type", text: "user@test.com" }] },
+      });
     });
 
     test("start clears previous steps", () => {
@@ -65,13 +68,12 @@ describe("McpCallRecorder", () => {
       recorder.record("launchApp", { appId: "com.test" });
       recorder.record("observe", {});
       recorder.record("tapOn", { text: "Login" });
-      recorder.record("inputText", { text: "test" });
       recorder.record("sendKeys", { commands: [{ action: "type", text: "test" }] });
       recorder.record("pressButton", { button: "back" });
       recorder.record("swipeOn", { direction: "up" });
       recorder.record("terminateApp", { appId: "com.test" });
 
-      expect(recorder.stepCount).toBe(8);
+      expect(recorder.stepCount).toBe(7);
     });
 
     test("records crashApp with only reproducible plan parameters", () => {
@@ -87,15 +89,15 @@ describe("McpCallRecorder", () => {
       expect(recorder.stop()).toEqual([{ tool: "crashApp", params: { appId: "com.test" } }]);
     });
 
-    test("records clearText and dragAndDrop as plan steps", () => {
+    test("records sendKeys clear and dragAndDrop as plan steps", () => {
       const recorder = new McpCallRecorder();
       recorder.start();
 
-      recorder.record("clearText", { id: "email" });
+      recorder.record("sendKeys", { commands: [{ action: "clear" }] });
       recorder.record("dragAndDrop", { from: "source", to: "destination" });
 
       expect(recorder.stop()).toEqual([
-        { tool: "clearText", params: { id: "email" } },
+        { tool: "sendKeys", params: { commands: [{ action: "clear" }] } },
         { tool: "dragAndDrop", params: { from: "source", to: "destination" } },
       ]);
     });

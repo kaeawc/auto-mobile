@@ -71,14 +71,14 @@ describe("ToolCallRepository", () => {
   test("listToolNamesBetween excludes specified tools", async () => {
     await repo.recordToolCall({ toolName: "tapOn", timestamp: "2024-01-01T00:00:01.000Z" });
     await repo.recordToolCall({ toolName: "observe", timestamp: "2024-01-01T00:00:02.000Z" });
-    await repo.recordToolCall({ toolName: "inputText", timestamp: "2024-01-01T00:00:03.000Z" });
+    await repo.recordToolCall({ toolName: "sendKeys", timestamp: "2024-01-01T00:00:03.000Z" });
 
     const result = await repo.listToolNamesBetween(
       "2024-01-01T00:00:00.000Z",
       "2024-01-01T00:00:04.000Z",
       ["observe"],
     );
-    expect(result).toEqual(["tapOn", "inputText"]);
+    expect(result).toEqual(["tapOn", "sendKeys"]);
   });
 
   test("listToolNamesBetween returns empty for no matches", async () => {

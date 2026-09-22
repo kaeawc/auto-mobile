@@ -15,7 +15,7 @@ import type { ObserveResult } from "../../../src/models/ObserveResult";
 /**
  * Round-trip coverage for issue #6218: the skeleton projection emits an
  * `s-<hash>` content-derived id (`assignStableViewIds`, #3228) as the SOLE
- * `elementId` for a node with no `resource-id`/`text`. `tapOn`/`inputText`
+ * `elementId` for a node with no `resource-id`/`text`. `tapOn`/`sendKeys`
  * resolve `elementId` through `DefaultElementSelector.selectByResourceId` →
  * `DefaultElementFinder`, which previously only ever compared against
  * `resource-id` — so a skeleton-emitted `s-<hash>` id could never match

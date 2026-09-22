@@ -307,8 +307,8 @@ describe("settleEmbeddedObservationInResponse (#6866)", () => {
     const fake = new FakeObserveScreen();
     const response = tapOnResponse(obs(AIRPLANE_ROW_INFLATED, 10));
     await settleEmbeddedObservationInResponse(response, {
-      name: "clearText",
-      args: {},
+      name: "sendKeys",
+      args: { commands: [{ action: "clear" }] },
       internal: false,
       createSettleObserve: () => settleFor(fake, new FakeTimer()),
     });

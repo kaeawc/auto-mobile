@@ -1,21 +1,15 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import {
-  clearTextHandler,
   dragAndDropHandler,
-  imeActionHandler,
   pressButtonHandler,
-  resetClearTextFactory,
   resetDragAndDropFactory,
-  resetImeActionFactory,
   resetPressButtonFactory,
   resetRotateFactory,
   resetSelectAllTextFactory,
   resetTapAnyElementFactory,
   rotateHandler,
   selectAllTextHandler,
-  setClearTextFactory,
   setDragAndDropFactory,
-  setImeActionFactory,
   setPressButtonFactory,
   setRotateFactory,
   setSelectAllTextFactory,
@@ -23,9 +17,7 @@ import {
   tapAnyHandler,
 } from "../../src/server/interactionTools";
 import type {
-  ClearTextArgs,
   DragAndDropArgs,
-  ImeActionArgs,
   PressButtonArgs,
   RotateArgs,
   SelectAllTextArgs,
@@ -33,16 +25,14 @@ import type {
 } from "../../src/server/interactionToolTypes";
 import type {
   BootedDevice,
-  ClearTextResult,
   DragAndDropResult,
-  ImeActionResult,
   PressButtonResult,
   RotateResult,
   SelectAllTextResult,
   TapOnElementResult,
 } from "../../src/models";
 
-// #6163: the tapOn (#6152) and inputText (#5902) fix — gate the message on
+// #6163: the tapOn (#6152) fix — gate the message on
 // `result.success` and set `isError: true` on the MCP envelope when the
 // underlying execute() reports a failure — generalized to the rest of the
 // action-tool family. Each suite below exercises the REGISTERED handler (not
@@ -139,40 +129,6 @@ describe("dragAndDropHandler (registered handler wiring)", () => {
   });
 });
 
-describe("clearTextHandler (registered handler wiring)", () => {
-  const args: ClearTextArgs = { platform: "android" };
-
-  afterEach(() => {
-    resetClearTextFactory();
-  });
-
-  const fakeResult = (overrides: Partial<ClearTextResult>): ClearTextResult => ({
-    success: false,
-    ...overrides,
-  });
-
-  test("a failure sets isError and reports the failure, not a completed clear", async () => {
-    setClearTextFactory(() => ({
-      execute: async () => fakeResult({ error: "Failed to clear text" }),
-    }));
-
-    const response = (await clearTextHandler(fakeDevice, args)) as ToolResponse;
-    expect(response.isError).toBe(true);
-    expect(parsePayload(response).message).toBe("Failed to clear text: Failed to clear text");
-    expect(parsePayload(response).success).toBe(false);
-  });
-
-  test("a success has no isError and the unchanged success message", async () => {
-    setClearTextFactory(() => ({
-      execute: async () => fakeResult({ success: true }),
-    }));
-
-    const response = (await clearTextHandler(fakeDevice, args)) as ToolResponse;
-    expect(response.isError).toBeUndefined();
-    expect(parsePayload(response).message).toBe("Cleared text from input field");
-  });
-});
-
 describe("selectAllTextHandler (registered handler wiring)", () => {
   const args: SelectAllTextArgs = { platform: "android" };
 
@@ -240,43 +196,6 @@ describe("pressButtonHandler (registered handler wiring)", () => {
     const response = (await pressButtonHandler(fakeDevice, args)) as ToolResponse;
     expect(response.isError).toBeUndefined();
     expect(parsePayload(response).message).toBe("Pressed button back");
-  });
-});
-
-describe("imeActionHandler (registered handler wiring)", () => {
-  const args: ImeActionArgs = { action: "done", platform: "android" };
-
-  afterEach(() => {
-    resetImeActionFactory();
-  });
-
-  const fakeResult = (overrides: Partial<ImeActionResult>): ImeActionResult => ({
-    success: false,
-    action: "done",
-    ...overrides,
-  });
-
-  test("a failure sets isError and reports the failure, not a completed action", async () => {
-    setImeActionFactory(() => ({
-      execute: async () => fakeResult({ error: "No focused input field" }),
-    }));
-
-    const response = (await imeActionHandler(fakeDevice, args)) as ToolResponse;
-    expect(response.isError).toBe(true);
-    expect(parsePayload(response).message).toBe(
-      'Failed to execute IME action "done": No focused input field',
-    );
-    expect(parsePayload(response).success).toBe(false);
-  });
-
-  test("a success has no isError and the unchanged success message", async () => {
-    setImeActionFactory(() => ({
-      execute: async () => fakeResult({ success: true }),
-    }));
-
-    const response = (await imeActionHandler(fakeDevice, args)) as ToolResponse;
-    expect(response.isError).toBeUndefined();
-    expect(parsePayload(response).message).toBe('Executed IME action "done"');
   });
 });
 

@@ -191,7 +191,7 @@ describe("PlanExecutionOrchestrator", () => {
     expect(result.debug).toEqual({ executionTimeMs: 100, steps: [] });
   });
 
-  // A best-effort epilogue warning (a keyboard that would not dismiss) must
+  // A best-effort epilogue warning must
   // reach the caller of an ORDINARY plan, not only one that opted into the
   // unrelated captureObserveSteps debug trace (#6887 review).
   test("execute() forwards plan warnings without captureObserveSteps", async () => {
@@ -202,7 +202,7 @@ describe("PlanExecutionOrchestrator", () => {
         totalSteps: 2,
         debug: { executionTimeMs: 100, steps: [] },
         warnings: [
-          { stepIndex: 0, tool: "inputText", warnings: ["keyboard dismissal not confirmed"] },
+          { stepIndex: 0, tool: "sendKeys", warnings: ["post-action state not confirmed"] },
         ],
       }),
     );
@@ -215,7 +215,7 @@ describe("PlanExecutionOrchestrator", () => {
     expect(result.success).toBe(true);
     expect(result.debug).toBeUndefined();
     expect(result.warnings).toEqual([
-      { stepIndex: 0, tool: "inputText", warnings: ["keyboard dismissal not confirmed"] },
+      { stepIndex: 0, tool: "sendKeys", warnings: ["post-action state not confirmed"] },
     ]);
   });
 

@@ -6,15 +6,6 @@ import { readAndroidDeviceApiLevel } from "../../utils/android-cmdline-tools/rea
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { defaultTimer } from "../../utils/SystemTimer";
-import {
-  isPinnedVersionKnown,
-  LATEST_RELEASE_VERSION,
-  RELEASE_CHECKSUM_REGISTRY,
-  resolveAssetVersion,
-  resolvePinnedVersion,
-  type ReleaseChecksumEntry,
-} from "../../constants/release";
-import { compareStrictNumericVersions } from "../../utils/deviceMatcher";
 import { RealObserveScreen } from "../observe/ObserveScreen";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
@@ -42,21 +33,6 @@ type AndroidSendKeysTypingMode = Exclude<ResolvedSendKeysTypingMode, "xcuiTypeTe
 
 export const SEND_KEYS_OPERATIONS = ["insert", "replace"] as const;
 export type SendKeysOperation = (typeof SEND_KEYS_OPERATIONS)[number];
-
-export const SEND_KEYS_MIN_RELEASE = "0.0.68";
-
-export function isSendKeysReleased(
-  env: NodeJS.ProcessEnv = process.env,
-  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY,
-): boolean {
-  const pinned = resolvePinnedVersion(env);
-  if (pinned !== LATEST_RELEASE_VERSION && !isPinnedVersionKnown(env, registry)) {
-    return false;
-  }
-  return (
-    compareStrictNumericVersions(resolveAssetVersion(pinned, registry), SEND_KEYS_MIN_RELEASE) >= 0
-  );
-}
 
 export const SEND_KEYS_SEMANTIC_KEYS = [
   "next",

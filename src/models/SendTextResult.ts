@@ -24,7 +24,7 @@ export type AppendTextFailureSource = "runner" | "helper";
 export interface SendTextResult extends BaseActionResult {
   text: string;
   imeAction?: string;
-  /** Identity of the field focused by an inputText selector, when available. */
+  /** Identity of the field focused by a text-input selector, when available. */
   matchedId?: string;
   matchedText?: string;
   /**

@@ -208,14 +208,14 @@ describe("ToolRegistry observe lastHierarchy cache repair (#2758)", () => {
   test("caches a text-only action response's nested observation", async () => {
     const sessionId = await setupAutolockedSession();
     const observation = makeObserveResult();
-    ToolRegistry.registerDeviceAware("inputText", "inputText", toolSchema, async () =>
+    ToolRegistry.registerDeviceAware("sendKeys", "sendKeys", toolSchema, async () =>
       createJSONToolResponse({
         success: true,
         message: "Input complete",
         observation,
       }),
     );
-    const tool = ToolRegistry.getTool("inputText")!;
+    const tool = ToolRegistry.getTool("sendKeys")!;
 
     await tool.handler({
       platform: "android",

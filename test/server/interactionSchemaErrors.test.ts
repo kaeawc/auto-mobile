@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { inputTextSchema, systemTraySchema, tapOnSchema } from "../../src/server/interactionTools";
+import { sendKeysSchema, systemTraySchema, tapOnSchema } from "../../src/server/interactionTools";
 import { observeSchema } from "../../src/server/observeTools";
 import { formatToolParamError } from "../../src/server/toolParamError";
 
@@ -277,15 +277,18 @@ describe("nested union conflicts (#6867)", () => {
   });
 
   // PR #6882 review: `selector.text` is a recognized selector key, so naming the
-  // tool's own `text` parameter (already supplied, different meaning) as what
+  // command's own `text` parameter (already supplied, different meaning) as what
   // the caller "meant" is wrong — only unrecognized keys are promotable.
   test("does not offer a top-level hint for recognized conflicting keys", () => {
-    const input = { text: "payload", selector: { text: "field", elementId: "id" } };
-    const result = inputTextSchema.safeParse(input);
+    const input = {
+      commands: [{ action: "type", text: "payload" }],
+      selector: { text: "field", elementId: "id" },
+    };
+    const result = sendKeysSchema.safeParse(input);
     if (result.success) {
       throw new Error("expected invalid selector");
     }
-    const message = formatToolParamError("inputText", result.error, input, inputTextSchema);
+    const message = formatToolParamError("sendKeys", result.error, input, sendKeysSchema);
     expect(message).toContain("Mutually exclusive keys");
     expect(message).not.toContain("did you mean");
   });

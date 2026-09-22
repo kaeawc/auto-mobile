@@ -216,6 +216,27 @@ public final class TachikomaPlanRecoveryHandler: PlanRecoveryHandler {
         if name == "tapOn", arguments["action"] == nil {
             arguments["action"] = "tap"
         }
+        if name == "sendKeys" {
+            let action = arguments.removeValue(forKey: "action") as? String ?? "type"
+            let command: [String: Any]
+            switch action {
+            case "type":
+                guard let text = arguments.removeValue(forKey: "text") as? String else {
+                    return "{\"error\":\"text is required for type\"}"
+                }
+                command = ["action": "type", "text": text, "operation": "replace"]
+            case "clear":
+                command = ["action": "clear"]
+            case "key":
+                guard let key = arguments.removeValue(forKey: "key") as? String else {
+                    return "{\"error\":\"key is required for key\"}"
+                }
+                command = ["action": "key", "key": key]
+            default:
+                return "{\"error\":\"action must be type, clear, or key\"}"
+            }
+            arguments["commands"] = [command]
+        }
 
         do {
             let response = try mcpClient.callTool(name: name, arguments: arguments, timeout: timeoutSeconds)
@@ -373,18 +394,16 @@ public final class TachikomaPlanRecoveryHandler: PlanRecoveryHandler {
                 required: ["selector"]
             ),
             tool(
-                name: "inputText",
-                description: "Type text into the currently focused input field.",
+                name: "sendKeys",
+                description: "Type, clear, or submit text in the focused input field.",
                 properties: [
-                    "text": .string(description: "The text to type"),
-                    "imeAction": .string(description: "Optional keyboard action to submit, e.g. done/next/search"),
+                    "action": .enumeration(
+                        ["type", "clear", "key"],
+                        description: "Text action to perform; defaults to type"
+                    ),
+                    "text": .string(description: "Text for a type action"),
+                    "key": .string(description: "Semantic key for a key action"),
                 ],
-                required: ["text"]
-            ),
-            tool(
-                name: "clearText",
-                description: "Clear text from the currently focused input field.",
-                properties: [:],
                 required: []
             ),
             tool(

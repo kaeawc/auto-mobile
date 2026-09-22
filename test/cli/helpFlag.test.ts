@@ -8,7 +8,7 @@ describe("global help", () => {
     expect(hasGlobalHelpFlag(["--debug", "--help"])).toBe(true);
   });
   test("preserves tool and daemon argument values", () => {
-    expect(hasGlobalHelpFlag(["--cli", "inputText", "--text", "--help"])).toBe(false);
+    expect(hasGlobalHelpFlag(["--cli", "sendKeys", "--commands", "--help"])).toBe(false);
     expect(hasGlobalHelpFlag(["--daemon", "status", "-h"])).toBe(false);
     expect(hasGlobalHelpFlag(["--boot-device", "--name", "-h"])).toBe(false);
   });

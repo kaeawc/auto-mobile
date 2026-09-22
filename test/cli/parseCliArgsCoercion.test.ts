@@ -7,7 +7,7 @@ import { parseCliArgs } from "../../src/cli";
 
 describe("parseCliArgs schema-aware coercion (#4241)", () => {
   test("keeps a numeric-looking value as a string for a string-typed param", () => {
-    const { params } = parseCliArgs(["inputText", "--platform", "android", "--text", "12345"]);
+    const { params } = parseCliArgs(["sendKeys", "--platform", "android", "--text", "12345"]);
 
     expect(params.text).toBe("12345");
     expect(typeof params.text).toBe("string");
@@ -211,19 +211,19 @@ describe("parseCliArgs coercion sees through schema wrappers (#4241 review)", ()
 
 describe("parseCliArgs preserves JSON-encoded scalars and rejects bad numbers (#4241 review)", () => {
   test("a JSON-encoded string for a string param unwraps to the inner string", () => {
-    const { params } = parseCliArgs(["inputText", "--platform", "android", "--text", '"12345"']);
+    const { params } = parseCliArgs(["sendKeys", "--platform", "android", "--text", '"12345"']);
 
     expect(params.text).toBe("12345");
   });
 
   test("a JSON-encoded string containing spaces unwraps", () => {
-    const { params } = parseCliArgs(["inputText", "--platform", "android", "--text", '"a b"']);
+    const { params } = parseCliArgs(["sendKeys", "--platform", "android", "--text", '"a b"']);
 
     expect(params.text).toBe("a b");
   });
 
   test("a bare token for a string param is unchanged", () => {
-    const { params } = parseCliArgs(["inputText", "--platform", "android", "--text", "plain"]);
+    const { params } = parseCliArgs(["sendKeys", "--platform", "android", "--text", "plain"]);
 
     expect(params.text).toBe("plain");
   });
@@ -300,7 +300,7 @@ describe("parseCliArgs preserves JSON null for nullable params (#4241 review)", 
   });
 
   test("a non-nullable string param keeps the literal token 'null'", () => {
-    const { params } = parseCliArgs(["inputText", "--platform", "android", "--text", "null"]);
+    const { params } = parseCliArgs(["sendKeys", "--platform", "android", "--text", "null"]);
 
     expect(params.text).toBe("null");
   });

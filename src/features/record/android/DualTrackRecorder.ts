@@ -7,7 +7,6 @@ import { discoverTouchNode } from "./TouchNodeDiscovery";
 import { buildAxisRanges, buildScaler, queryDensity, queryRotation } from "./AxisRanges";
 import { GetEventReader } from "./GetEventReader";
 import { defaultTimer, type Timer } from "../../../utils/SystemTimer";
-import { isSendKeysReleased } from "../../action/SendKeys";
 
 /** An InteractionEvent from the CtrlProxy (subset of fields we use) */
 interface ReceivedInteraction {
@@ -53,7 +52,6 @@ export class DualTrackRecorder {
   /** Reference to the real AndroidCtrlProxyClient when not in test mode */
   private activeA11y: AndroidCtrlProxyClient | null = null;
   private stopped = false;
-  private recordWithSupportedSendKeys: boolean;
 
   get stepCount(): number {
     return this.steps.length;
@@ -67,11 +65,7 @@ export class DualTrackRecorder {
     private readonly a11ySource?: A11ySource,
     /** Optional override for testing — defaults to the system timer */
     private readonly timer: Timer = defaultTimer,
-    /** Override the release-gated recorded text tool in tests. */
-    private readonly recordWithSendKeys: boolean = isSendKeysReleased(),
-  ) {
-    this.recordWithSupportedSendKeys = recordWithSendKeys;
-  }
+  ) {}
 
   async start(): Promise<void> {
     // In real mode (no test override), obtain the AndroidCtrlProxyClient directly
@@ -87,19 +81,6 @@ export class DualTrackRecorder {
     if (!connected) {
       throw new Error("[DualTrackRecorder] Unable to connect to the accessibility service.");
     }
-    if (this.recordWithSendKeys) {
-      this.recordWithSupportedSendKeys = false;
-      try {
-        const supportedCommands = await a11y.getSupportedCommands();
-        this.recordWithSupportedSendKeys =
-          supportedCommands?.includes("request_insert_text") ?? false;
-      } catch (error) {
-        logger.warn(
-          `[DualTrackRecorder] Capability lookup failed; recording text with inputText: ${error}`,
-        );
-      }
-    }
-
     // Notify Kotlin service that recording is starting (enables interaction event emission)
     if (a11yClient) {
       a11yClient.notifyRecordingStarted();
@@ -270,9 +251,6 @@ export class DualTrackRecorder {
   }
 
   private buildRecordedTextStep(text: string): PlanStep {
-    if (!this.recordWithSupportedSendKeys) {
-      return { tool: "inputText", params: { text } };
-    }
     return {
       tool: "sendKeys",
       params: {
@@ -296,11 +274,6 @@ export class DualTrackRecorder {
   }
 
   private updateCoalescedTextStep(existing: PlanStep | undefined, text: string): boolean {
-    if (existing?.tool === "inputText") {
-      existing.params.text = text;
-      return true;
-    }
-
     const command = existing?.params.commands?.[0];
     if (existing?.tool !== "sendKeys" || command?.action !== "type") {
       return false;

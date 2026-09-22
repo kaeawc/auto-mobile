@@ -27,7 +27,10 @@ describe("PlanPartitioner", () => {
         devices: ["phone"],
         steps: [
           { tool: "tapOn", params: { text: "Login", device: "phone" } },
-          { tool: "inputText", params: { text: "user", device: "phone" } },
+          {
+            tool: "sendKeys",
+            params: { commands: [{ action: "type", text: "user" }], device: "phone" },
+          },
         ],
       };
 
@@ -45,7 +48,10 @@ describe("PlanPartitioner", () => {
         steps: [
           { tool: "tapOn", params: { text: "Login", device: "phone" } },
           { tool: "tapOn", params: { text: "Login", device: "tablet" } },
-          { tool: "inputText", params: { text: "user", device: "phone" } },
+          {
+            tool: "sendKeys",
+            params: { commands: [{ action: "type", text: "user" }], device: "phone" },
+          },
         ],
       };
 

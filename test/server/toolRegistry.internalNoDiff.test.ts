@@ -137,20 +137,10 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
       createStructuredToolResponse(lowConfidenceObserve(false)),
     );
     ToolRegistry.registerDeviceAware(
-      "inputText",
-      "inputText",
+      "sendKeys",
+      "sendKeys",
       baseSchema.extend({
-        text: z.string().optional(),
-        imeAction: z.string().optional(),
-      }),
-      async () =>
-        createStructuredToolResponse({ success: true, observation: lowConfidenceObserve(true) }),
-    );
-    ToolRegistry.registerDeviceAware(
-      "imeAction",
-      "imeAction",
-      baseSchema.extend({
-        action: z.string().optional(),
+        commands: z.array(z.object({ action: z.string(), key: z.string().optional() })),
       }),
       async () =>
         createStructuredToolResponse({ success: true, observation: lowConfidenceObserve(true) }),
@@ -263,16 +253,15 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
       platform: "android",
       __mcpSessionId: "mcp-session-1",
     });
-    const inputSearch = await ToolRegistry.getTool("inputText")!.handler({
+    const search = await ToolRegistry.getTool("sendKeys")!.handler({
       platform: "android",
       __mcpSessionId: "mcp-session-1",
-      text: "query",
-      imeAction: "search",
+      commands: [{ action: "key", key: "search" }],
     });
-    expect((inputSearch.structuredContent as any).observation.isDiff).toBeUndefined();
-    expect((inputSearch.structuredContent as any).observation.skeleton).toBeDefined();
-    expect((inputSearch.structuredContent as any).observation.viewHierarchy).toBeUndefined();
-    expect((inputSearch.structuredContent as any).observationDiff).toMatchObject({
+    expect((search.structuredContent as any).observation.isDiff).toBeUndefined();
+    expect((search.structuredContent as any).observation.skeleton).toBeDefined();
+    expect((search.structuredContent as any).observation.viewHierarchy).toBeUndefined();
+    expect((search.structuredContent as any).observationDiff).toMatchObject({
       mode: "full",
       reason: "screen_changed",
     });
@@ -281,17 +270,17 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
       platform: "android",
       __mcpSessionId: "mcp-session-1",
     });
-    const imeGo = await runWithEnabledCapabilities(() =>
-      ToolRegistry.getTool("imeAction")!.handler({
+    const go = await runWithEnabledCapabilities(() =>
+      ToolRegistry.getTool("sendKeys")!.handler({
         platform: "android",
         __mcpSessionId: "mcp-session-1",
-        action: "go",
+        commands: [{ action: "key", key: "go" }],
       }),
     );
-    expect((imeGo.structuredContent as any).observation.isDiff).toBeUndefined();
-    expect((imeGo.structuredContent as any).observation.skeleton).toBeDefined();
-    expect((imeGo.structuredContent as any).observation.viewHierarchy).toBeUndefined();
-    expect((imeGo.structuredContent as any).observationDiff).toMatchObject({
+    expect((go.structuredContent as any).observation.isDiff).toBeUndefined();
+    expect((go.structuredContent as any).observation.skeleton).toBeDefined();
+    expect((go.structuredContent as any).observation.viewHierarchy).toBeUndefined();
+    expect((go.structuredContent as any).observationDiff).toMatchObject({
       mode: "full",
       reason: "screen_changed",
     });
@@ -307,14 +296,13 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
       platform: "android",
       __mcpSessionId: "mcp-session-1",
     });
-    const inputNext = await ToolRegistry.getTool("inputText")!.handler({
+    const next = await ToolRegistry.getTool("sendKeys")!.handler({
       platform: "android",
       __mcpSessionId: "mcp-session-1",
-      text: "query",
-      imeAction: "next",
+      commands: [{ action: "key", key: "next" }],
     });
-    expect((inputNext.structuredContent as any).observation.isDiff).toBe(true);
-    expect((inputNext.structuredContent as any).observationDiff).toMatchObject({
+    expect((next.structuredContent as any).observation.isDiff).toBe(true);
+    expect((next.structuredContent as any).observationDiff).toMatchObject({
       mode: "diff",
       reason: "diff_emitted",
     });
@@ -323,15 +311,15 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
       platform: "android",
       __mcpSessionId: "mcp-session-1",
     });
-    const imePrevious = await runWithEnabledCapabilities(() =>
-      ToolRegistry.getTool("imeAction")!.handler({
+    const previous = await runWithEnabledCapabilities(() =>
+      ToolRegistry.getTool("sendKeys")!.handler({
         platform: "android",
         __mcpSessionId: "mcp-session-1",
-        action: "previous",
+        commands: [{ action: "key", key: "previous" }],
       }),
     );
-    expect((imePrevious.structuredContent as any).observation.isDiff).toBe(true);
-    expect((imePrevious.structuredContent as any).observationDiff).toMatchObject({
+    expect((previous.structuredContent as any).observation.isDiff).toBe(true);
+    expect((previous.structuredContent as any).observationDiff).toMatchObject({
       mode: "diff",
       reason: "diff_emitted",
     });

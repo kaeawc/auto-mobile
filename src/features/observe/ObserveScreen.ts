@@ -98,6 +98,11 @@ function boundCachedLayoutWarnings(result: ObserveResult | undefined): ObserveRe
  */
 const SYSTEM_UI_WINDOW_PACKAGES = new Set<string>(["com.android.systemui"]);
 
+// Framework-owned crash and ANR dialogs are windows created by system_server,
+// so their accessibility hierarchy is labelled with this package rather than
+// the resumed activity behind the dialog.
+const FRAMEWORK_WINDOW_PACKAGE = "android";
+
 const SYSTEM_UI_PACKAGE = "com.android.systemui";
 
 /**
@@ -2014,7 +2019,38 @@ export class RealObserveScreen implements ObserveScreen {
     if (!confirmed || confirmed !== foreground || confirmed === observed) {
       return undefined;
     }
+    if (await this.isConfirmedFrameworkErrorDialog(observed, signal)) {
+      return undefined;
+    }
     return { observed, foreground };
+  }
+
+  /**
+   * `getForegroundApp` reports the resumed activity beneath an AppErrorDialog,
+   * while the dialog itself is the focused framework window. Confirm that rare
+   * divergence before treating the captured `android` hierarchy as stale.
+   */
+  private async isConfirmedFrameworkErrorDialog(
+    observed: string,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    if (observed !== FRAMEWORK_WINDOW_PACKAGE) {
+      return false;
+    }
+    try {
+      const { stdout } = await this.adb.executeCommand(
+        `shell "dumpsys window"`,
+        undefined,
+        undefined,
+        undefined,
+        signal,
+      );
+      return /mCurrentFocus=Window\{[^}\r\n]*Application Error:/.test(stdout);
+    } catch (error) {
+      // This optional confirmation must not fail observe; fall back to the normal mismatch gate.
+      logger.debug("Failed to read focused framework window from dumpsys:", error);
+      return false;
+    }
   }
 
   /**

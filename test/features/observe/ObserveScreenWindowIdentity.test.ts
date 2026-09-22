@@ -304,6 +304,91 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     expect(result.freshness?.warning).toContain("relaunch the target app");
   });
 
+  test("keeps a focused framework crash dialog fresh when its resumed app differs (#7442)", async () => {
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchy({
+      updatedAt: now,
+      receivedAt: now,
+      fresh: true,
+      screenWidth: 1080,
+      screenHeight: 2400,
+      packageName: "android",
+      foregroundActivity: "android/.AppErrorDialog",
+      hierarchy: {
+        node: {
+          bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
+          node: [
+            { text: "App info", bounds: { left: 100, top: 1600, right: 400, bottom: 1700 } },
+            { text: "Close app", bounds: { left: 600, top: 1600, right: 900, bottom: 1700 } },
+          ],
+        },
+      },
+    } as any);
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setForegroundApp({
+      packageName: "com.google.android.settings.intelligence",
+      userId: 0,
+    });
+    fakeAdb.setCommandResponse("dumpsys window", {
+      stdout:
+        "  mCurrentFocus=Window{8ddaeb2 u0 Application Error: dev.jasonpearson.automobile.ctrlproxy}\n",
+      stderr: "",
+      exitCode: 0,
+    } as any);
+
+    const result = await makeScreen(viewHierarchy, fakeAdb, timer).execute({
+      skipScreenshot: true,
+      skipBackStack: true,
+    });
+
+    expect(result.freshness?.verified).toBe(true);
+    expect(result.freshness?.isFresh).toBe(true);
+    expect(result.freshness?.warning ?? "").not.toContain("pressButton");
+    expect(result.freshness?.warning ?? "").not.toContain("stale wrong-window");
+  });
+
+  test("retracts an unfocused android-labelled hierarchy as a wrong-window capture (#7442)", async () => {
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchy({
+      ...calendarHierarchy(now),
+      packageName: "android",
+      foregroundActivity: "android/.SearchActivity",
+      hierarchy: {
+        node: {
+          bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
+          node: [
+            { text: "Search settings", bounds: { left: 0, top: 100, right: 500, bottom: 200 } },
+          ],
+        },
+      },
+    } as any);
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setForegroundApp({
+      packageName: "com.google.android.settings.intelligence",
+      userId: 0,
+    });
+    fakeAdb.setCommandResponse("dumpsys window", {
+      stdout: "  mCurrentFocus=Window{8ddaeb2 u0 android/.SearchActivity}\n",
+      stderr: "",
+      exitCode: 0,
+    } as any);
+
+    const result = await makeScreen(viewHierarchy, fakeAdb, timer).execute({
+      skipScreenshot: true,
+      skipBackStack: true,
+    });
+
+    expect(result.freshness?.verified).toBe(false);
+    expect(result.freshness?.isFresh).toBe(false);
+    expect(result.freshness?.warning).toContain("wrong-window");
+  });
+
   test("the freshness verdict is present when the result is cached (survives serialization)", async () => {
     // The filesystem observe cache serializes the result at put() time, so the
     // verdict must be attached BEFORE caching — otherwise a daemon-restart cache

@@ -470,6 +470,7 @@ for path in "${changed_files[@]}"; do
   case "${path}" in
     mkdocs.yml|docs/*)
       add_check "mkdocs-nav"
+      add_check "docs-github-markdown"
       ;;
   esac
 

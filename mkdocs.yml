@@ -12,6 +12,12 @@ use_directory_urls: true
 
 copyright: "Copyright &copy; 2025-2026 Jason Pearson"
 
+# Pages under docs/ must also render on github.com, so they use GitHub syntax
+# (e.g. `> [!NOTE]` alerts) that this hook turns into Material equivalents.
+# scripts/validate_docs_github_markdown.sh rejects MkDocs-only syntax.
+hooks:
+  - scripts/github/auto_mobile_docs/github_alerts.py
+
 plugins:
   - search
   - mermaid2:
@@ -42,13 +48,14 @@ theme:
   features:
     - content.code.copy
     - content.code.select
-    - content.tabs.link
 
 extra_css:
   - assets/stylesheets/automobile-brand.css
+  - assets/stylesheets/usage-data.css
 
 extra_javascript:
   - assets/javascripts/prompt-form.js
+  - assets/javascripts/usage-data.js
 
 markdown_extensions:
   - smarty
@@ -77,8 +84,6 @@ markdown_extensions:
           class: mermaid
           format: !!python/name:mermaid2.fence_mermaid_custom
   - pymdownx.emoji
-  - pymdownx.tabbed:
-      alternate_style: true
   - tables
   - admonition
   - pymdownx.details

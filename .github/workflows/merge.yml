@@ -713,6 +713,11 @@ jobs:
         run: |
           scripts/validate_mkdocs_nav.sh
 
+      - name: "Validate docs/ GitHub Markdown"
+        shell: "bash"
+        run: |
+          scripts/validate_docs_github_markdown.sh
+
   validate-claude-plugin:
     name: "Validate Claude Plugin"
     runs-on: ubuntu-latest

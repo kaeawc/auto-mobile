@@ -15,10 +15,11 @@ AutoMobile tests need:
 
 The sections below walk through each step.
 
-!!! note "No cloud device service required"
-Unlike Android — which uses [emulator.wtf](https://emulator.wtf) to provision managed cloud
-emulators — iOS AutoMobile tests run on the macOS runner's built-in iOS Simulator. No external
-device service or additional secrets are needed.
+> [!NOTE]
+> **No cloud device service required.** Unlike Android — which uses
+> [emulator.wtf](https://emulator.wtf) to provision managed cloud emulators — iOS
+> AutoMobile tests run on the macOS runner's built-in iOS Simulator. No external
+> device service or additional secrets are needed.
 
 ## Job structure
 

@@ -38,6 +38,8 @@ export interface TaskInfo {
   packageName?: string;
   /** Root activity of the task */
   rootActivity?: string;
+  /** Package that launched the task's root activity */
+  launchedFromPackage?: string;
   /** Top activity of the task */
   topActivity?: string;
   /** Number of activities in this task */

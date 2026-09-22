@@ -130,6 +130,7 @@ import {
   tryAcquireExclusiveLock,
 } from "../../../utils/fileLock";
 import { ensureSecureSharedAutoMobileDirSync } from "../../../utils/tempDir";
+import type { BaseResult } from "../shared/types";
 
 // Import delegates
 import { CtrlProxyGestures } from "./CtrlProxyGestures";
@@ -937,6 +938,13 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
     perf?: PerformanceTracker,
   ): Promise<A11ySetTextResult>;
 
+  commitViaIme(
+    text: string,
+    priorImeId?: string,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+  ): Promise<BaseResult>;
+
   requestClearText(
     resourceId?: string,
     timeoutMs?: number,
@@ -967,6 +975,8 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
   ): Promise<A11yActionResult>;
 
   supportsNodeActionSelectors(perf?: PerformanceTracker, signal?: AbortSignal): Promise<boolean>;
+
+  supportsCommand(name: string): Promise<boolean>;
 
   requestActivateAccessibilityLink(
     text: string,
@@ -2272,6 +2282,15 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     return this.text.requestInsertText(text, timeoutMs, perf);
   }
 
+  async commitViaIme(
+    text: string,
+    priorImeId?: string,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+  ): Promise<BaseResult> {
+    return this.text.commitViaIme(text, priorImeId, timeoutMs, perf);
+  }
+
   async requestClearText(
     resourceId?: string,
     timeoutMs?: number,
@@ -2613,6 +2632,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       }
     }
     return this.supportedCommands === null ? null : Array.from(this.supportedCommands).sort();
+  }
+
+  public async supportsCommand(name: string): Promise<boolean> {
+    return (await this.getSupportedCommands())?.includes(name) === true;
   }
 
   async supportsAccessibilityLinkActivation(

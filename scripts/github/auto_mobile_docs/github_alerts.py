@@ -15,6 +15,8 @@ import re
 _ALERT = re.compile(r"^> \[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*$")
 # Up to three spaces of indent; four or more is an indented code line.
 _FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+# Blockquote container markers; a fence can open inside a quote.
+_QUOTE = re.compile(r"^(?: {0,3}> ?)*")
 
 # GitHub alert type -> (Material admonition type, title).
 _TYPES = {
@@ -30,16 +32,24 @@ def convert(markdown: str) -> str:
     lines = markdown.split("\n")
     out = []
     fence = ""
+    fence_depth = 0
     i = 0
     while i < len(lines):
         line = lines[i]
-        fence_match = _FENCE.match(line)
+        prefix = _QUOTE.match(line).group(0)
+        depth = prefix.count(">")
+        # A fence inside a blockquote ends with that blockquote (a line,
+        # including a blank one, with fewer quote markers).
+        if fence and depth < fence_depth:
+            fence = ""
+        fence_match = _FENCE.match(line[len(prefix) :])
         if fence_match:
             run, rest = fence_match.groups()
             if not fence:
                 # A backtick info string may not contain a backtick.
                 if not (run[0] == "`" and "`" in rest):
                     fence = run
+                    fence_depth = depth
             # Close only on the opener's character, at least as long, with
             # nothing after it (CommonMark); shorter fences inside are content.
             elif run[0] == fence[0] and len(run) >= len(fence) and not rest.strip():

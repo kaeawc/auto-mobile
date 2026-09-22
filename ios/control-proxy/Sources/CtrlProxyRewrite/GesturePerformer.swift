@@ -860,8 +860,9 @@ public final class GesturePerformer: GesturePerforming {
                 throw GestureError.noApplication
             }
 
+            let normalizedKey = key.lowercased()
             let keyboardKey: XCUIKeyboardKey
-            switch key.lowercased() {
+            switch normalizedKey {
             case "enter":
                 keyboardKey = .return
             case "tab":
@@ -904,8 +905,45 @@ public final class GesturePerformer: GesturePerforming {
 
             try requireKeyboardFocus(app: app, context: "ensure a text field is focused before pressing a key")
 
+            let isDestructiveKey = normalizedKey == "backspace" || normalizedKey == "delete"
+            let focusedElement = isDestructiveKey ? resolveFocusedTextElement(app: app) : nil
+            let valueBeforeKeyPress = focusedElement?.value as? String
+
             try catchingObjCException {
-                app.typeKey(keyboardKey, modifierFlags: modifierFlags)
+                if isDestructiveKey {
+                    // typeKey accepts these function keys without delivering them to the
+                    // simulator's software keyboard. typeText reaches the first responder,
+                    // but XCUITest cannot attach modifier flags to that delivery path.
+                    if let focusedElement {
+                        focusedElement.typeText(keyboardKey.rawValue)
+                    } else {
+                        app.typeText(keyboardKey.rawValue)
+                    }
+                } else {
+                    app.typeKey(keyboardKey, modifierFlags: modifierFlags)
+                }
+            }
+
+            guard isDestructiveKey, let focusedElement, let valueBeforeKeyPress else {
+                return
+            }
+
+            let deadline = Date().addingTimeInterval(1.0)
+            while Date() < deadline {
+                guard focusedElement.exists, let valueAfterKeyPress = focusedElement.value as? String else {
+                    return
+                }
+                if valueAfterKeyPress != valueBeforeKeyPress {
+                    return
+                }
+                RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+            }
+
+            guard focusedElement.exists, let valueAfterKeyPress = focusedElement.value as? String else {
+                return
+            }
+            if valueAfterKeyPress == valueBeforeKeyPress {
+                throw GestureError.gestureFailed("Key '\(key)' was not delivered: field value did not change")
             }
         }
 

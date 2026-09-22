@@ -1581,6 +1581,22 @@ export class LaunchApp extends BaseVisualChange {
     );
   }
 
+  /** Whether the foreground task's root activity was launched by the expected package. */
+  private isForegroundTaskLaunchedByPackage(
+    observation: ObserveResult,
+    expectedPackageName: string,
+  ): boolean {
+    const currentTaskId = observation.backStack?.currentTaskId;
+    if (currentTaskId === undefined) {
+      return false;
+    }
+
+    return (
+      observation.backStack?.tasks.find((task) => task.id === currentTaskId)
+        ?.launchedFromPackage === expectedPackageName
+    );
+  }
+
   private verifyLaunchObservationFromTaskRoot(
     result: LaunchAppResult,
     observation: ObserveResult,
@@ -1598,10 +1614,24 @@ export class LaunchApp extends BaseVisualChange {
     const foregroundActivityPackage = this.getLaunchObservationPackageNames(observation).find(
       (packageName) => packageName !== expectedPackageName,
     );
-    if (
-      !foregroundActivityPackage ||
-      !this.isForegroundTaskRootedAtPackage(observation, expectedPackageName)
-    ) {
+    if (!foregroundActivityPackage) {
+      return false;
+    }
+
+    if (this.isForegroundTaskRootedAtPackage(observation, expectedPackageName)) {
+      result.observation = this.preserveLaunchObservationMetadata(
+        observation,
+        result.observation ?? observation,
+      );
+      result.foregroundActivityPackage = foregroundActivityPackage;
+      result.verifiedBy = "task-root";
+      return true;
+    }
+
+    // Provenance alone is intentional: a companion task started by the target
+    // in an earlier session (or restored after the target crashes during launch)
+    // can false-verify because no pre-launch task snapshot exists to age it out.
+    if (!this.isForegroundTaskLaunchedByPackage(observation, expectedPackageName)) {
       return false;
     }
 
@@ -1610,7 +1640,7 @@ export class LaunchApp extends BaseVisualChange {
       result.observation ?? observation,
     );
     result.foregroundActivityPackage = foregroundActivityPackage;
-    result.verifiedBy = "task-root";
+    result.verifiedBy = "task-provenance";
     return true;
   }
 

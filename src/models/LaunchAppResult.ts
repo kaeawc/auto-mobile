@@ -30,9 +30,10 @@ export interface LaunchAppResult extends BaseActionResult {
   foregroundActivityPackage?: string;
   /**
    * Present only when launch verification succeeded from the expected task root
-   * while a helper-package activity was on top (issue #7218).
+   * or its root activity's launch provenance while a helper-package activity was
+   * on top (issues #7218, #7435).
    */
-  verifiedBy?: "task-root";
+  verifiedBy?: "task-root" | "task-provenance";
   /**
    * Explains a deliberately-omitted `observation` (issue #5872) so the launch
    * payload has a deterministic, self-describing shape: rather than silently

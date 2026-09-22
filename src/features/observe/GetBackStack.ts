@@ -149,6 +149,7 @@ const ROOT_OF_TASK_LINE = /^\s*rootOfTask=(true|false)\b/;
 interface HistRootEntry {
   firstHist0?: string;
   authoritative?: string;
+  authoritativeLaunchedFromPackage?: string;
 }
 
 /** Fields carried by a modern task header line. */
@@ -345,7 +346,7 @@ export class GetBackStack implements BackStack {
     // field, if printed, we are waiting on. Mirrors parseActivities' openActivity
     // discipline (issue #4340) -- cleared at the next Hist row / task header /
     // consumed rootOfTask= so a value never bleeds across records.
-    let openHist: { owner: number; component: string } | undefined;
+    let openHist: { owner: number; component: string; launchedFromPackage?: string } | undefined;
 
     const histRootEntry = (owner: number): HistRootEntry => {
       let entry = histRoots.get(owner);
@@ -361,9 +362,16 @@ export class GetBackStack implements BackStack {
       const entry = histRootEntry(owner);
       entry.firstHist0 ??= component;
     };
-    const recordAuthoritative = (owner: number, component: string): void => {
+    const recordAuthoritative = (
+      owner: number,
+      component: string,
+      launchedFromPackage?: string,
+    ): void => {
       const entry = histRootEntry(owner);
-      entry.authoritative ??= component;
+      if (entry.authoritative === undefined) {
+        entry.authoritative = component;
+        entry.authoritativeLaunchedFromPackage = launchedFromPackage;
+      }
     };
 
     const flush = (): void => {
@@ -426,13 +434,19 @@ export class GetBackStack implements BackStack {
         openHist = undefined;
       }
 
+      const launchedFromPackage = line.match(/launchedFromPackage=([^\s]+)/);
+      if (launchedFromPackage && openHist) {
+        openHist.launchedFromPackage =
+          launchedFromPackage[1] === "null" ? undefined : launchedFromPackage[1];
+      }
+
       // The open record's own rootOfTask= field (see ROOT_OF_TASK_LINE / #4340).
       // First rootOfTask=true wins, so the api34 double-`Hist #0` task resolves
       // to the row the dump actually marks as the root.
       const rootOfTask = line.match(ROOT_OF_TASK_LINE);
       if (rootOfTask && openHist) {
         if (rootOfTask[1] === "true") {
-          recordAuthoritative(openHist.owner, openHist.component);
+          recordAuthoritative(openHist.owner, openHist.component, openHist.launchedFromPackage);
         }
         openHist = undefined;
       }
@@ -471,6 +485,9 @@ export class GetBackStack implements BackStack {
         task.numActivities = histCounts.get(task.id) ?? 0;
       }
       const entry = histRoots.get(task.id);
+      if (entry?.authoritativeLaunchedFromPackage !== undefined) {
+        task.launchedFromPackage = entry.authoritativeLaunchedFromPackage;
+      }
       // No `Hist #0` row means nothing here resolves the task's root the way
       // this fallback is scoped to. A rootOfTask=true row alone does NOT
       // populate an otherwise-undefined root (issue #4359): the override only

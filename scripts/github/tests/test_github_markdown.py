@@ -45,6 +45,9 @@ class CheckGithubMarkdownTest(unittest.TestCase):
         self.assertFlags("[Link](https://example.com){ target=_blank } trailing prose\n", "attr list")
         self.assertFlags("## Heading {: #custom-id }\n", "attr list")
 
+    def test_flags_inline_hilite(self):
+        self.assertFlags('Run `#!python print("hi")` first.\n', "inline highlighting")
+
     def test_flags_style_and_script_including_multiline_start_tags(self):
         self.assertFlags("<style>\np { color: red; }\n</style>\n", "<style>")
         self.assertFlags('<style\n  type="text/css">\np {}\n</style>\n', "<style>")

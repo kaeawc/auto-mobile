@@ -28,6 +28,7 @@ MKDOCS_ONLY = {
     "pymdownx.blocks.details": '/// details block (use <details markdown="1">)',
     "attr_list": '{ .class } / { key=value } attr list (use <div class="..." markdown> or HTML)',
     "pymdownx.snippets": "--8<-- snippet include (link or inline the content)",
+    "pymdownx.inlinehilite": "`#!lang code` inline highlighting (use plain `code`)",
     "pymdownx.caret": "^^insert^^ / ^superscript^ (use <ins> / <sup>)",
     "pymdownx.tilde": "~~delete~~ / ~subscript~ (use <sub>)",
     "pymdownx.mark": "==mark== (use <mark>)",

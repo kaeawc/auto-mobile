@@ -37,27 +37,39 @@ exclude = [
   "^https://github\\.com/kaeawc/auto-mobile/(issues|pull)/[0-9]+([#?].*)?$",
 ]
 
-# Exclude specific paths
+# Exclude specific input paths. These are regexes matched against each input
+# file path exactly as lychee walks it (e.g. `docs/index.md`, `./README.md`), so
+# anchor every pattern: an unanchored `site/` also matched any directory whose
+# name merely ends in "site" and silently dropped the whole built-site pass.
 exclude_path = [
   # Build artifacts
-  "site/",
-  "build/",
-  "dist/",
-  # Dependencies
-  "node_modules/",
-  # Git
-  ".git/",
-  # Files not deployed (in .gitignore)
-  "docs/contributing/index.md",
-  # Redirect shims target MkDocs' generated directory URLs, which do not exist
-  # in the source tree that lychee checks.
-  "docs/design-docs/mcp/tool-registration/index.html",
-  "docs/metrics/downloads/index.html",
-  "docs/using/a11y/index.html",
-  "docs/using/talkback/index.html",
-  "docs/using/tool-capabilities/index.html",
-  "docs/using/voiceover/index.html",
+  "^(\\./)?(site|build|dist)/",
+  # Dependencies and VCS metadata at any depth
+  "(^|/)node_modules/",
+  "(^|/)\\.git/",
+  # Redirect shims target MkDocs' generated directory URLs (`../foo/`), which do
+  # not exist in the source tree. validate_lychee.sh checks the built copies of
+  # these pages (targets and fragments) in its offline built-site pass instead.
+  "^docs/design-docs/mcp/tool-registration/index\\.html$",
+  "^docs/install/index\\.html$",
+  "^docs/metrics/downloads/index\\.html$",
+  "^docs/using/a11y/index\\.html$",
+  "^docs/using/talkback/index\\.html$",
+  "^docs/using/tool-capabilities/index\\.html$",
+  "^docs/using/voiceover/index\\.html$",
 ]
+
+# `#fragment` anchors are verified too, but via the bare `--include-fragments`
+# CLI flag in scripts/lychee/validate_lychee.sh rather than a key here: the key
+# is a bool in lychee 0.22 (the CI pin) and an enum string in 0.24+, so no single
+# value loads in both, while the bare flag means "check anchors" in each.
+
+# Check links inside code/verbatim blocks too. MkDocs content tabs (`=== "..."`)
+# and admonitions indent their bodies four spaces, which CommonMark parses as an
+# indented code block, so without this every link inside a tab (the install GIF,
+# desktop download buttons, agent-example GIFs, ui-tests source links) is
+# skipped. Placeholder hosts in real code samples are covered by `exclude`.
+include_verbatim = true
 
 # Accept status codes
 accept = [

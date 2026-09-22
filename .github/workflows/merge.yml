@@ -736,23 +736,41 @@ jobs:
         with:
           lfs: false
 
-      - name: "Create contributing file"
-        shell: "bash"
-        run: |
-          touch docs/contributing.md
+      # validate_lychee.sh builds the MkDocs site (from scripts/github/uv.lock,
+      # staging .github/CONTRIBUTING.md as the Contributing page itself) and
+      # checks the built HTML offline, so it needs Python + uv. Both are
+      # independent of the lychee download, so run all three concurrently.
+      - name: "Setup Python"
+        uses: actions/setup-python@v6
+        background: true
+        id: setup-python
+        with:
+          python-version: "3.11"
+
+      - name: "Install uv"
+        uses: astral-sh/setup-uv@v7
+        background: true
+        id: setup-uv
+        with:
+          enable-cache: true
 
       - name: "Install Lychee"
         shell: "bash"
         run: |
           scripts/lychee/install_lychee.sh
 
+      - wait: [setup-python, setup-uv]
+
       - name: "Validate Links"
         shell: "bash"
         # Lychee routes github.com links through the GitHub API (not throttled
         # HTTP scraping) when GITHUB_TOKEN is set, which prevents the mass
         # request timeouts we hit against the repo's own issue/actions links.
+        # LYCHEE_REQUIRE_SITE fails the job if the built-site pass cannot run,
+        # instead of skipping it the way a local run without MkDocs does.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LYCHEE_REQUIRE_SITE: "true"
         run: |
           scripts/lychee/validate_lychee.sh
 

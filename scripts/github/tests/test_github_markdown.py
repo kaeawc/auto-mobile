@@ -118,6 +118,23 @@ class GithubAlertsTest(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertNotIn("admonition", self.render(text))
 
+    def test_parses_block_structure_in_the_alert_body(self):
+        html = self.render("> [!NOTE]\n> - one\n> - two")
+        self.assertIn('<div class="admonition note">', html)
+        self.assertIn("<li>one</li>", html)
+        self.assertNotIn("- one", html)
+
+    def test_keeps_paragraphs_separated_by_quoted_blank_lines(self):
+        html = self.render("> [!WARNING]\n>\n> Para one.\n>\n> Para two.")
+        self.assertIn("<p>Para one.</p>\n<p>Para two.</p>", html)
+
+    def test_nested_markers_stay_plain_quotes_as_on_github(self):
+        for text in ["- > [!NOTE]\n  > body", "> > [!NOTE]\n> > body"]:
+            with self.subTest(text=text):
+                html = self.render(text)
+                self.assertNotIn("admonition", html)
+                self.assertIn("[!NOTE]", html)
+
     def test_plain_blockquote_is_unchanged(self):
         self.assertIn("<blockquote>", self.render("> Just a quote [!NOTE]"))
 

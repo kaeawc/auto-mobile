@@ -66,141 +66,141 @@ Each example connects to the socket, sends one `input/tap`, reads the response
 line, and checks `success`. Swipes, buttons, keys, and text use the same
 envelope with a different `method` and `params`.
 
-=== "Kotlin"
+### Kotlin
 
-    Uses JDK 16+ Unix domain sockets. `UnixSystem` supplies the uid.
+Uses JDK 16+ Unix domain sockets. `UnixSystem` supplies the uid.
 
-    ```kotlin
-    import com.sun.security.auth.module.UnixSystem
-    import java.net.StandardProtocolFamily
-    import java.net.UnixDomainSocketAddress
-    import java.nio.ByteBuffer
-    import java.nio.channels.SocketChannel
-    import java.nio.charset.StandardCharsets
+```kotlin
+import com.sun.security.auth.module.UnixSystem
+import java.net.StandardProtocolFamily
+import java.net.UnixDomainSocketAddress
+import java.nio.ByteBuffer
+import java.nio.channels.SocketChannel
+import java.nio.charset.StandardCharsets
 
-    fun tap(x: Int, y: Int) {
-        val uid = UnixSystem().uid
-        val path = "/tmp/auto-mobile-daemon-$uid.sock"
-        SocketChannel.open(StandardProtocolFamily.UNIX).use { channel ->
-            channel.connect(UnixDomainSocketAddress.of(path))
+fun tap(x: Int, y: Int) {
+    val uid = UnixSystem().uid
+    val path = "/tmp/auto-mobile-daemon-$uid.sock"
+    SocketChannel.open(StandardProtocolFamily.UNIX).use { channel ->
+        channel.connect(UnixDomainSocketAddress.of(path))
 
-            val request = """
-                {"id":"1","type":"daemon_request","method":"input/tap",
-                 "params":{"platform":"android","x":$x,"y":$y}}
-            """.trimIndent().replace("\n", "") + "\n"
-            channel.write(ByteBuffer.wrap(request.toByteArray(StandardCharsets.UTF_8)))
+        val request = """
+            {"id":"1","type":"daemon_request","method":"input/tap",
+             "params":{"platform":"android","x":$x,"y":$y}}
+        """.trimIndent().replace("\n", "") + "\n"
+        channel.write(ByteBuffer.wrap(request.toByteArray(StandardCharsets.UTF_8)))
 
-            val buffer = ByteBuffer.allocate(8192)
-            channel.read(buffer)
-            buffer.flip()
-            val response = StandardCharsets.UTF_8.decode(buffer).toString().trim()
-            println(response) // {"id":"1","type":"mcp_response","success":true,...}
-        }
+        val buffer = ByteBuffer.allocate(8192)
+        channel.read(buffer)
+        buffer.flip()
+        val response = StandardCharsets.UTF_8.decode(buffer).toString().trim()
+        println(response) // {"id":"1","type":"mcp_response","success":true,...}
     }
-    ```
+}
+```
 
-=== "Go"
+### Go
 
-    ```go
-    package main
+```go
+package main
 
-    import (
-        "bufio"
-        "encoding/json"
-        "fmt"
-        "net"
-        "os"
-    )
+import (
+    "bufio"
+    "encoding/json"
+    "fmt"
+    "net"
+    "os"
+)
 
-    func tap(x, y int) error {
-        path := fmt.Sprintf("/tmp/auto-mobile-daemon-%d.sock", os.Getuid())
-        conn, err := net.Dial("unix", path)
-        if err != nil {
-            return err
-        }
-        defer conn.Close()
+func tap(x, y int) error {
+    path := fmt.Sprintf("/tmp/auto-mobile-daemon-%d.sock", os.Getuid())
+    conn, err := net.Dial("unix", path)
+    if err != nil {
+        return err
+    }
+    defer conn.Close()
 
-        req := map[string]any{
-            "id":     "1",
-            "type":   "daemon_request",
+    req := map[string]any{
+        "id":     "1",
+        "type":   "daemon_request",
+        "method": "input/tap",
+        "params": map[string]any{"platform": "android", "x": x, "y": y},
+    }
+    line, _ := json.Marshal(req)
+    if _, err := conn.Write(append(line, '\n')); err != nil {
+        return err
+    }
+
+    resp, err := bufio.NewReader(conn).ReadString('\n')
+    if err != nil {
+        return err
+    }
+    fmt.Print(resp) // {"id":"1","type":"mcp_response","success":true,...}
+    return nil
+}
+```
+
+### TypeScript
+
+Works in Node and Bun.
+
+```ts
+import { createConnection } from "node:net";
+import { userInfo } from "node:os";
+
+function tap(x: number, y: number): Promise<unknown> {
+  const path = `/tmp/auto-mobile-daemon-${userInfo().uid}.sock`;
+  return new Promise((resolve, reject) => {
+    const socket = createConnection({ path }, () => {
+      const request = {
+        id: "1",
+        type: "daemon_request",
+        method: "input/tap",
+        params: { platform: "android", x, y },
+      };
+      socket.write(JSON.stringify(request) + "\n");
+    });
+
+    let buffer = "";
+    socket.on("data", (chunk) => {
+      buffer += chunk.toString();
+      const newline = buffer.indexOf("\n");
+      if (newline !== -1) {
+        socket.end();
+        resolve(JSON.parse(buffer.slice(0, newline)));
+      }
+    });
+    socket.on("error", reject);
+  });
+}
+```
+
+### Python
+
+```python
+import json
+import os
+import socket
+
+
+def tap(x: int, y: int) -> dict:
+    path = f"/tmp/auto-mobile-daemon-{os.getuid()}.sock"
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+        sock.connect(path)
+        request = {
+            "id": "1",
+            "type": "daemon_request",
             "method": "input/tap",
-            "params": map[string]any{"platform": "android", "x": x, "y": y},
+            "params": {"platform": "android", "x": x, "y": y},
         }
-        line, _ := json.Marshal(req)
-        if _, err := conn.Write(append(line, '\n')); err != nil {
-            return err
-        }
+        sock.sendall(json.dumps(request).encode() + b"\n")
 
-        resp, err := bufio.NewReader(conn).ReadString('\n')
-        if err != nil {
-            return err
-        }
-        fmt.Print(resp) // {"id":"1","type":"mcp_response","success":true,...}
-        return nil
-    }
-    ```
-
-=== "TypeScript"
-
-    Works in Node and Bun.
-
-    ```ts
-    import { createConnection } from "node:net";
-    import { userInfo } from "node:os";
-
-    function tap(x: number, y: number): Promise<unknown> {
-      const path = `/tmp/auto-mobile-daemon-${userInfo().uid}.sock`;
-      return new Promise((resolve, reject) => {
-        const socket = createConnection({ path }, () => {
-          const request = {
-            id: "1",
-            type: "daemon_request",
-            method: "input/tap",
-            params: { platform: "android", x, y },
-          };
-          socket.write(JSON.stringify(request) + "\n");
-        });
-
-        let buffer = "";
-        socket.on("data", (chunk) => {
-          buffer += chunk.toString();
-          const newline = buffer.indexOf("\n");
-          if (newline !== -1) {
-            socket.end();
-            resolve(JSON.parse(buffer.slice(0, newline)));
-          }
-        });
-        socket.on("error", reject);
-      });
-    }
-    ```
-
-=== "Python"
-
-    ```python
-    import json
-    import os
-    import socket
-
-
-    def tap(x: int, y: int) -> dict:
-        path = f"/tmp/auto-mobile-daemon-{os.getuid()}.sock"
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
-            sock.connect(path)
-            request = {
-                "id": "1",
-                "type": "daemon_request",
-                "method": "input/tap",
-                "params": {"platform": "android", "x": x, "y": y},
-            }
-            sock.sendall(json.dumps(request).encode() + b"\n")
-
-            buffer = b""
-            while b"\n" not in buffer:
-                buffer += sock.recv(8192)
-            return json.loads(buffer.split(b"\n", 1)[0])
-            # {"id": "1", "type": "mcp_response", "success": True, ...}
-    ```
+        buffer = b""
+        while b"\n" not in buffer:
+            buffer += sock.recv(8192)
+        return json.loads(buffer.split(b"\n", 1)[0])
+        # {"id": "1", "type": "mcp_response", "success": True, ...}
+```
 
 ## Sending other commands
 

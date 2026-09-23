@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.ctrlproxy
 
 import dev.jasonpearson.automobile.protocol.ErrorResponse
 import dev.jasonpearson.automobile.protocol.HierarchyUpdateEvent
+import dev.jasonpearson.automobile.protocol.SetKeyboardProfileResult
 import dev.jasonpearson.automobile.protocol.SwipeResult
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.test.TestScope
@@ -129,6 +130,12 @@ class WebSocketServerTest {
     val response =
       SwipeResult(timestamp = 0L, requestId = "req-1", success = true, totalTimeMs = 5L)
     assertEquals("req-1", WebSocketServer.correlationRequestId(response))
+  }
+
+  @Test
+  fun `correlationRequestId reads keyboard profile result id`() {
+    val response = SetKeyboardProfileResult(timestamp = 0L, requestId = "profile-1", success = true)
+    assertEquals("profile-1", WebSocketServer.correlationRequestId(response))
   }
 
   @Test

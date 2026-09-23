@@ -34,6 +34,31 @@ describe("sendKeysSchema", () => {
     });
   });
 
+  test("accepts keyboard profiles only with automatic or IME delivery", () => {
+    for (const mode of [undefined, "auto", "ime"]) {
+      expect(
+        sendKeysSchema.safeParse({
+          platform: "android",
+          commands: [
+            { action: "type", text: "value", ...(mode ? { mode } : {}), keyboardProfile: "gboard" },
+          ],
+        }).success,
+      ).toBe(true);
+    }
+    expect(
+      sendKeysSchema.safeParse({
+        platform: "android",
+        commands: [{ action: "type", text: "value", mode: "a11y", keyboardProfile: "gboard" }],
+      }).success,
+    ).toBe(false);
+    expect(
+      sendKeysSchema.safeParse({
+        platform: "android",
+        commands: [{ action: "type", text: "value", keyboardProfile: "unknown" }],
+      }).success,
+    ).toBe(false);
+  });
+
   test("rejects empty sequences and sequences over 100 commands", () => {
     expect(sendKeysSchema.safeParse({ platform: "ios", commands: [] }).success).toBe(false);
     expect(

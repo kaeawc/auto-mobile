@@ -32,6 +32,8 @@ import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import dev.jasonpearson.automobile.ctrlproxy.ime.CtrlProxyIme
+import dev.jasonpearson.automobile.ctrlproxy.ime.keyboard.profile.KeyboardProfiles
+import dev.jasonpearson.automobile.ctrlproxy.ime.session.SharedPreferencesKeyboardProfileStore
 import dev.jasonpearson.automobile.ctrlproxy.models.DisplayCutoutInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ElementBounds
 import dev.jasonpearson.automobile.ctrlproxy.models.FrameMetricsSnapshot
@@ -2007,6 +2009,30 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           System.currentTimeMillis() - start,
         )
       }
+    }
+  }
+
+  override fun requestSetKeyboardProfile(requestId: String?, profileId: String) {
+    val profile = KeyboardProfiles.byId(profileId)
+    if (profile == null) {
+      val expected = KeyboardProfiles.all.joinToString(", ") { it.id }
+      launchRequestScope(requestId) {
+        broadcastSetKeyboardProfileResult(
+          requestId,
+          false,
+          error = "Unknown keyboard profile '$profileId'; expected one of: $expected",
+        )
+      }
+      return
+    }
+
+    val store = SharedPreferencesKeyboardProfileStore(this)
+    val previous = store.activeProfileId()
+    if (!CtrlProxyIme.setActiveProfile(profile.id)) {
+      store.setActiveProfileId(profile.id)
+    }
+    launchRequestScope(requestId) {
+      broadcastSetKeyboardProfileResult(requestId, true, profile.id, previous)
     }
   }
 
@@ -5998,6 +6024,38 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       Log.d(
         TAG,
         "Broadcasted commit text result to ${webSocketServer.getConnectionCount()} clients",
+      )
+    }
+  }
+
+  private suspend fun broadcastSetKeyboardProfileResult(
+    requestId: String?,
+    success: Boolean,
+    activeProfileId: String? = null,
+    previousProfileId: String? = null,
+    error: String? = null,
+  ) {
+    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
+      Log.d(TAG, "WebSocket server not running, skipping keyboard profile result broadcast")
+      return
+    }
+
+    resultBroadcaster.guard(requestId, "set_keyboard_profile_result") {
+      webSocketServer.broadcastWithPerfSync { perfTiming ->
+        webSocketFrameJson(
+          "set_keyboard_profile_result",
+          requestId = requestId,
+          perfTiming = perfTiming,
+        ) {
+          put("success", success)
+          if (activeProfileId != null) put("activeProfileId", activeProfileId)
+          if (previousProfileId != null) put("previousProfileId", previousProfileId)
+          if (error != null) put("error", error)
+        }
+      }
+      Log.d(
+        TAG,
+        "Broadcasted keyboard profile result to ${webSocketServer.getConnectionCount()} clients",
       )
     }
   }

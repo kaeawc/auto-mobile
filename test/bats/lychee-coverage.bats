@@ -66,8 +66,8 @@ requires_yq() {
 @test "validate_lychee.sh checks .github/CONTRIBUTING.md and the built site" {
   grep -Fq '".github/CONTRIBUTING.md"' "$SCRIPT"
   # Stage every page deploy_pages.py copies in, so none is built unchecked.
-  grep -Fq '"$SITE_STAGE/docs/contributing.md"' "$SCRIPT"
-  grep -Fq '"$SITE_STAGE/docs/changelog.md"' "$SCRIPT"
+  grep -Fq '/docs/contributing.md"' "$SCRIPT"
+  grep -Fq '/docs/changelog.md"' "$SCRIPT"
   grep -Fq -- '--index-files index.html' "$SCRIPT"
   grep -Fq 'LYCHEE_REQUIRE_SITE' "$SCRIPT"
 }

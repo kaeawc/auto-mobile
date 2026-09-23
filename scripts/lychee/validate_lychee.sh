@@ -186,7 +186,17 @@ suggest_similar_files() {
 LYCHEE_OUTPUT=$(mktemp)
 LYCHEE_ERRORS=$(mktemp)
 SITE_STAGE=$(mktemp -d)
-trap 'rm -rf "$LYCHEE_OUTPUT" "$LYCHEE_ERRORS" "$SITE_STAGE"' EXIT
+# Generated docs pages build_site writes in place (both gitignored); removed on
+# exit so the working tree is left clean even if the build aborts.
+STAGED_DOCS=()
+# shellcheck disable=SC2329 # invoked indirectly via `trap cleanup EXIT` below
+cleanup() {
+    rm -rf "$LYCHEE_OUTPUT" "$LYCHEE_ERRORS" "$SITE_STAGE"
+    if [[ ${#STAGED_DOCS[@]} -gt 0 ]]; then
+        rm -f "${STAGED_DOCS[@]}"
+    fi
+}
+trap cleanup EXIT
 
 OVERALL_STATUS=0
 record_status() {
@@ -214,20 +224,20 @@ run_lychee_pass() {
     record_status "$status"
 }
 
-# Builds the MkDocs site into $SITE_STAGE/built from a staged copy of docs/, so
-# the working tree is never mutated. Mirrors copy_required_files() in
-# scripts/github/deploy_pages.py by staging .github/CONTRIBUTING.md as
-# docs/contributing.md (the nav's Contributing page) and CHANGELOG.md as
-# docs/changelog.md, so the built-site pass sees every page the deploy publishes.
-# Sets BUILD_STATUS: 0 on success, 3 when MkDocs is unavailable, 1 when the
-# build fails. Always returns 0 so set -e stays armed for the staging copies.
+# Builds the MkDocs site into $SITE_STAGE/built. The build runs from
+# $PROJECT_ROOT against the real mkdocs.yml, so every config-referenced support
+# path resolves exactly as it does in the deploy -- hooks
+# (scripts/github/auto_mobile_docs/*), plugins, extra_css/js and assets --
+# rather than being mirrored into an isolated tree that silently misses whatever
+# the config gains next. Mirrors copy_required_files() in
+# scripts/github/deploy_pages.py by writing .github/CONTRIBUTING.md to
+# docs/contributing.md (the nav's Contributing page) and CHANGELOG.md to
+# docs/changelog.md so the pass sees every page the deploy publishes. Both are
+# gitignored (the deploy writes them in place too) and are removed afterwards so
+# the working tree is left clean. Sets BUILD_STATUS: 0 on success, 3 when MkDocs
+# is unavailable, 1 when the build fails. Always returns 0 so set -e stays armed.
 BUILD_STATUS=0
 build_site() {
-    cp -R "$PROJECT_ROOT/docs" "$SITE_STAGE/docs"
-    cp "$PROJECT_ROOT/mkdocs.yml" "$SITE_STAGE/mkdocs.yml"
-    cp "$PROJECT_ROOT/.github/CONTRIBUTING.md" "$SITE_STAGE/docs/contributing.md"
-    cp "$PROJECT_ROOT/CHANGELOG.md" "$SITE_STAGE/docs/changelog.md"
-
     local -a mkdocs_cmd
     if command -v uv >/dev/null 2>&1 && [[ -f "$PROJECT_ROOT/scripts/github/uv.lock" ]]; then
         mkdocs_cmd=(uv run --project "$PROJECT_ROOT/scripts/github" --locked mkdocs)
@@ -238,7 +248,13 @@ build_site() {
         return 0
     fi
 
-    "${mkdocs_cmd[@]}" build --quiet --config-file "$SITE_STAGE/mkdocs.yml" --site-dir "$SITE_STAGE/built" || BUILD_STATUS=1
+    # Generated (gitignored) pages the deploy copies in; clean up on any exit.
+    cp "$PROJECT_ROOT/.github/CONTRIBUTING.md" "$PROJECT_ROOT/docs/contributing.md"
+    cp "$PROJECT_ROOT/CHANGELOG.md" "$PROJECT_ROOT/docs/changelog.md"
+    STAGED_DOCS=("$PROJECT_ROOT/docs/contributing.md" "$PROJECT_ROOT/docs/changelog.md")
+
+    ( cd "$PROJECT_ROOT" && "${mkdocs_cmd[@]}" build --quiet \
+        --config-file "$PROJECT_ROOT/mkdocs.yml" --site-dir "$SITE_STAGE/built" ) || BUILD_STATUS=1
 }
 
 print_status "Pass 1/2: source files (docs/, root *.md, .github/CONTRIBUTING.md)"

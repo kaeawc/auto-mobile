@@ -40,6 +40,7 @@ import dev.jasonpearson.automobile.protocol.RequestPackageInfo
 import dev.jasonpearson.automobile.protocol.RequestPinch
 import dev.jasonpearson.automobile.protocol.RequestScreenshot
 import dev.jasonpearson.automobile.protocol.RequestSelectAll
+import dev.jasonpearson.automobile.protocol.RequestSetKeyboardProfile
 import dev.jasonpearson.automobile.protocol.RequestSetText
 import dev.jasonpearson.automobile.protocol.RequestSettingsGet
 import dev.jasonpearson.automobile.protocol.RequestSettingsList
@@ -267,6 +268,8 @@ class CtrlProxyMessageHandler(
       is RequestInsertText -> actions.requestInsertText(request.requestId, request.text)
       is RequestCommitText ->
         actions.requestCommitText(request.requestId, request.text, request.priorImeId)
+      is RequestSetKeyboardProfile ->
+        actions.requestSetKeyboardProfile(request.requestId, request.profileId)
       is RequestImeAction ->
         if (request.frameContext == null) {
           actions.requestImeAction(request.requestId, request.action)

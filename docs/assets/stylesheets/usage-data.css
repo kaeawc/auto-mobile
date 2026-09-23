@@ -1,0 +1,52 @@
+/* Download charts on metrics/usage-data.md (rendered by usage-data.js). */
+#dl-metrics .dl-section {
+  margin: 1.2rem 0 2rem;
+}
+#dl-metrics #dl-status {
+  opacity: 0.7;
+}
+#dl-metrics svg {
+  width: 100%;
+  height: auto;
+  max-width: 100%;
+  overflow: visible;
+}
+#dl-metrics .dl-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1rem;
+  font-size: 0.8rem;
+  margin: 0.3rem 0 0.6rem;
+}
+#dl-metrics .dl-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+#dl-metrics .dl-swatch {
+  width: 0.8rem;
+  height: 0.8rem;
+  border-radius: 2px;
+  display: inline-block;
+}
+#dl-metrics .dl-error {
+  color: #c0392b;
+  font-weight: 600;
+}
+#dl-metrics .dl-chart-line {
+  fill: none;
+  stroke-width: 2;
+}
+#dl-metrics .dl-axis {
+  stroke: currentColor;
+  opacity: 0.35;
+  stroke-width: 1;
+}
+#dl-metrics .dl-tick-text {
+  font-size: 10px;
+  fill: currentColor;
+  opacity: 0.7;
+}
+#dl-metrics .dl-bar {
+  opacity: 0.9;
+}

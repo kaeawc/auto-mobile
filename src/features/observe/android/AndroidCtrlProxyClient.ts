@@ -332,6 +332,12 @@ interface WsCommitTextResultMessage extends WsRequestBase {
   type: "commit_text_result";
 }
 
+interface WsSetKeyboardProfileResultMessage extends WsRequestBase {
+  type: "set_keyboard_profile_result";
+  activeProfileId?: string;
+  previousProfileId?: string;
+}
+
 interface WsInsertTextResultMessage extends WsRequestBase {
   type: "insert_text_result";
   partialApplication?: boolean;
@@ -802,6 +808,7 @@ type WebSocketMessage =
   | WsPinchResultMessage
   | WsSetTextResultMessage
   | WsCommitTextResultMessage
+  | WsSetKeyboardProfileResultMessage
   | WsInsertTextResultMessage
   | WsImeActionResultMessage
   | WsSelectAllResultMessage
@@ -944,6 +951,17 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
     timeoutMs?: number,
     perf?: PerformanceTracker,
   ): Promise<BaseResult>;
+
+  setKeyboardProfile(
+    profileId: string,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+  ): Promise<{
+    success: boolean;
+    activeProfileId?: string;
+    previousProfileId?: string;
+    error?: string;
+  }>;
 
   requestClearText(
     resourceId?: string,
@@ -2289,6 +2307,19 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     perf?: PerformanceTracker,
   ): Promise<BaseResult> {
     return this.text.commitViaIme(text, priorImeId, timeoutMs, perf);
+  }
+
+  async setKeyboardProfile(
+    profileId: string,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+  ): Promise<{
+    success: boolean;
+    activeProfileId?: string;
+    previousProfileId?: string;
+    error?: string;
+  }> {
+    return this.text.setKeyboardProfile(profileId, timeoutMs, perf);
   }
 
   async requestClearText(
@@ -3970,6 +4001,15 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           totalTimeMs: message.totalTimeMs,
           error: message.error,
           perfTiming: message.perfTiming,
+        });
+      }
+
+      if (message.type === "set_keyboard_profile_result" && message.requestId) {
+        this.requestManager.resolve(message.requestId, {
+          success: message.success,
+          activeProfileId: message.activeProfileId,
+          previousProfileId: message.previousProfileId,
+          error: message.error,
         });
       }
 

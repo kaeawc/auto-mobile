@@ -2,212 +2,236 @@
 
 <input id="am-app-name" class="prompt-search" data-prompt-var="app" type="search" placeholder="Type app or category" autocomplete="off" spellcheck="false" aria-label="App or category">
 
-=== "Take a tour"
+## Take a tour
 
-    === "Android"
+### Android
 
-        <div class="copyable-prompt" markdown>
+<div class="copyable-prompt" markdown>
 
-        > Open my <code class="prompt-var" data-prompt-var="app" data-default="your app">your app</code> Android app and explore its
-        > main features. Visit each primary tab or section, and give me a short map
-        > of the key user flows you find. Call out any screen you couldn't reach.
+> Open my <code class="prompt-var" data-prompt-var="app" data-default="your app">your app</code> Android app and explore its
+> main features. Visit each primary tab or section, and give me a short map
+> of the key user flows you find. Call out any screen you couldn't reach.
 
-        </div>
+</div>
 
-        ![An AI agent exploring Google Maps on Android — launching the app, searching for a city, and zooming to a neighborhood](../img/google-maps.gif){ .example-demo }
+<div class="example-demo" markdown>
 
-    === "iOS"
+![An AI agent exploring Google Maps on Android — launching the app, searching for a city, and zooming to a neighborhood](../img/google-maps.gif)
 
-        <div class="copyable-prompt" markdown>
+</div>
 
-        > Open my <code class="prompt-var" data-prompt-var="app" data-default="your app">your app</code> iOS app and explore its main
-        > features. Visit each primary tab or section, and give me a short map of
-        > the key user flows you find. Call out any screen you couldn't reach.
+### iOS
 
-        </div>
+<div class="copyable-prompt" markdown>
 
-=== "Search for something"
+> Open my <code class="prompt-var" data-prompt-var="app" data-default="your app">your app</code> iOS app and explore its main
+> features. Visit each primary tab or section, and give me a short map of
+> the key user flows you find. Call out any screen you couldn't reach.
 
-    === "Android"
+</div>
 
-        <div class="copyable-prompt" markdown>
+## Search for something
 
-        > In my <code class="prompt-var" data-prompt-var="app" data-default="your app">your app</code> Android app, use search to find
-        > <code class="prompt-var--edit" contenteditable="true">what to search for</code> and
-        > open the first result. Tell me how many taps it took, and whether anything
-        > about the search or results was confusing.
+### Android
 
-        </div>
+<div class="copyable-prompt" markdown>
 
-        ![An AI agent searching YouTube on Android and opening a result](../img/youtube-search.gif){ .example-demo }
+> In my <code class="prompt-var" data-prompt-var="app" data-default="your app">your app</code> Android app, use search to find
+> <code class="prompt-var--edit" contenteditable="true">what to search for</code> and
+> open the first result. Tell me how many taps it took, and whether anything
+> about the search or results was confusing.
 
-    === "iOS"
+</div>
 
-        <div class="copyable-prompt" markdown>
+<div class="example-demo" markdown>
 
-        > In my <code class="prompt-var" data-prompt-var="app" data-default="your app">your app</code> iOS app, use search to find
-        > <code class="prompt-var--edit" contenteditable="true">what to search for</code> and
-        > open the first result. Tell me how many taps it took, and whether anything
-        > about the search or results was confusing.
+![An AI agent searching YouTube on Android and opening a result](../img/youtube-search.gif)
 
-        </div>
+</div>
 
-=== "Walk onboarding"
+### iOS
 
-    === "Android"
+<div class="copyable-prompt" markdown>
 
-        <div class="copyable-prompt" markdown>
+> In my <code class="prompt-var" data-prompt-var="app" data-default="your app">your app</code> iOS app, use search to find
+> <code class="prompt-var--edit" contenteditable="true">what to search for</code> and
+> open the first result. Tell me how many taps it took, and whether anything
+> about the search or results was confusing.
 
-        > Go through my <code class="prompt-var" data-prompt-var="app" data-default="your app">your app</code> Android app's onboarding as
-        > a brand-new user, from first launch to the main screen. Report each step,
-        > any dead ends or confusing copy, and controls that were hard to tap.
+</div>
 
-        </div>
+## Walk onboarding
 
-    === "iOS"
+### Android
 
-        <div class="copyable-prompt" markdown>
+<div class="copyable-prompt" markdown>
 
-        > Go through my <code class="prompt-var" data-prompt-var="app" data-default="your app">your app</code> iOS app's onboarding as a
-        > brand-new user, from first launch to the main screen. Report each step,
-        > any dead ends or confusing copy, and controls that were hard to tap.
+> Go through my <code class="prompt-var" data-prompt-var="app" data-default="your app">your app</code> Android app's onboarding as
+> a brand-new user, from first launch to the main screen. Report each step,
+> any dead ends or confusing copy, and controls that were hard to tap.
 
-        </div>
+</div>
 
-=== "Fill out a form"
+### iOS
 
-    === "Android"
+<div class="copyable-prompt" markdown>
 
-        <div class="copyable-prompt" markdown>
+> Go through my <code class="prompt-var" data-prompt-var="app" data-default="your app">your app</code> iOS app's onboarding as a
+> brand-new user, from first launch to the main screen. Report each step,
+> any dead ends or confusing copy, and controls that were hard to tap.
 
-        > In my <code class="prompt-var" data-prompt-var="app" data-default="your app">your app</code> Android app, open
-        > <code class="prompt-var--edit" contenteditable="true">a screen or feature</code> and
-        > fill in the form — enter realistic text, pick a date one week from today,
-        > and set any toggles or options. Submit it and confirm the result, flagging
-        > fields that were awkward to use.
+</div>
 
-        </div>
+## Fill out a form
 
-        ![An AI agent opening the Clock app on Android, selecting the alarm tab, and creating an alarm](../img/clock-app.gif){ .example-demo }
+### Android
 
-    === "iOS"
+<div class="copyable-prompt" markdown>
 
-        <div class="copyable-prompt" markdown>
+> In my <code class="prompt-var" data-prompt-var="app" data-default="your app">your app</code> Android app, open
+> <code class="prompt-var--edit" contenteditable="true">a screen or feature</code> and
+> fill in the form — enter realistic text, pick a date one week from today,
+> and set any toggles or options. Submit it and confirm the result, flagging
+> fields that were awkward to use.
 
-        > In my <code class="prompt-var" data-prompt-var="app" data-default="your app">your app</code> iOS app, open
-        > <code class="prompt-var--edit" contenteditable="true">a screen or feature</code> and
-        > fill in the form — enter realistic text, pick a date one week from today,
-        > and set any toggles or options. Submit it and confirm the result, flagging
-        > fields that were awkward to use.
+</div>
 
-        </div>
+<div class="example-demo" markdown>
 
-=== "Scroll and find"
+![An AI agent opening the Clock app on Android, selecting the alarm tab, and creating an alarm](../img/clock-app.gif)
 
-    === "Android"
+</div>
 
-        <div class="copyable-prompt" markdown>
+### iOS
 
-        > Open <code class="prompt-var--edit" contenteditable="true">a list or feed</code> in my
-        > <code class="prompt-var" data-prompt-var="app" data-default="your app">your app</code> Android app, scroll until you find
-        > <code class="prompt-var--edit" contenteditable="true">an item</code>, then open its
-        > detail screen. Report whether the list scrolled smoothly and if anything
-        > was hard to reach.
+<div class="copyable-prompt" markdown>
 
-        </div>
+> In my <code class="prompt-var" data-prompt-var="app" data-default="your app">your app</code> iOS app, open
+> <code class="prompt-var--edit" contenteditable="true">a screen or feature</code> and
+> fill in the form — enter realistic text, pick a date one week from today,
+> and set any toggles or options. Submit it and confirm the result, flagging
+> fields that were awkward to use.
 
-        ![An AI agent scrolling a list on Android and measuring scroll and transition smoothness](../img/scroll-transition-perf.gif){ .example-demo }
+</div>
 
-    === "iOS"
+## Scroll and find
 
-        <div class="copyable-prompt" markdown>
+### Android
 
-        > Open <code class="prompt-var--edit" contenteditable="true">a list or feed</code> in my
-        > <code class="prompt-var" data-prompt-var="app" data-default="your app">your app</code> iOS app, scroll until you find
-        > <code class="prompt-var--edit" contenteditable="true">an item</code>, then open its
-        > detail screen. Report whether the list scrolled smoothly and if anything
-        > was hard to reach.
+<div class="copyable-prompt" markdown>
 
-        </div>
+> Open <code class="prompt-var--edit" contenteditable="true">a list or feed</code> in my
+> <code class="prompt-var" data-prompt-var="app" data-default="your app">your app</code> Android app, scroll until you find
+> <code class="prompt-var--edit" contenteditable="true">an item</code>, then open its
+> detail screen. Report whether the list scrolled smoothly and if anything
+> was hard to reach.
 
-=== "Reproduce a bug"
+</div>
 
-    === "Android"
+<div class="example-demo" markdown>
 
-        <div class="copyable-prompt" markdown>
+![An AI agent scrolling a list on Android and measuring scroll and transition smoothness](../img/scroll-transition-perf.gif)
 
-        > Reproduce this bug in my <code class="prompt-var" data-prompt-var="app" data-default="your app">your app</code> Android app:
-        >
-        > <code class="prompt-var--edit" contenteditable="true">paste the bug report here</code>
-        >
-        > Report the exact steps, expected and actual results, device and OS version,
-        > app version, and whether it reproduced consistently. Highlight the defect,
-        > then take a device snapshot so someone else can inspect the state.
+</div>
 
-        </div>
+### iOS
 
-        ![An AI agent reproducing a sample counter bug on Android and highlighting the issue](../img/bug-repro.gif){ .example-demo }
+<div class="copyable-prompt" markdown>
 
-    === "iOS"
+> Open <code class="prompt-var--edit" contenteditable="true">a list or feed</code> in my
+> <code class="prompt-var" data-prompt-var="app" data-default="your app">your app</code> iOS app, scroll until you find
+> <code class="prompt-var--edit" contenteditable="true">an item</code>, then open its
+> detail screen. Report whether the list scrolled smoothly and if anything
+> was hard to reach.
 
-        <div class="copyable-prompt" markdown>
+</div>
 
-        > Reproduce this bug in my <code class="prompt-var" data-prompt-var="app" data-default="your app">your app</code> iOS app:
-        >
-        > <code class="prompt-var--edit" contenteditable="true">paste the bug report here</code>
-        >
-        > Report the exact steps, expected and actual results, device and OS version,
-        > app version, and whether it reproduced consistently. Highlight the defect,
-        > then take a device snapshot so someone else can inspect the state.
+## Reproduce a bug
 
-        </div>
+### Android
 
-=== "Measure performance"
+<div class="copyable-prompt" markdown>
 
-    === "Android"
+> Reproduce this bug in my <code class="prompt-var" data-prompt-var="app" data-default="your app">your app</code> Android app:
+>
+> <code class="prompt-var--edit" contenteditable="true">paste the bug report here</code>
+>
+> Report the exact steps, expected and actual results, device and OS version,
+> app version, and whether it reproduced consistently. Highlight the defect,
+> then take a device snapshot so someone else can inspect the state.
 
-        <div class="copyable-prompt" markdown>
+</div>
 
-        > Launch my <code class="prompt-var" data-prompt-var="app" data-default="your app">your app</code> Android app five times, measure
-        > cold and warm startup, and report time to first frame, time to
-        > interactive, and any outliers. Then open a long list, scroll it a few
-        > times, and report FPS, dropped frames, and visible jank.
+<div class="example-demo" markdown>
 
-        </div>
+![An AI agent reproducing a sample counter bug on Android and highlighting the issue](../img/bug-repro.gif)
 
-        ![An AI agent measuring Android app startup through a deep link](../img/deeplink-startup.gif){ .example-demo }
+</div>
 
-    === "iOS"
+### iOS
 
-        <div class="copyable-prompt" markdown>
+<div class="copyable-prompt" markdown>
 
-        > Launch my <code class="prompt-var" data-prompt-var="app" data-default="your app">your app</code> iOS app five times, measure cold
-        > and warm startup, and report time to first frame, time to interactive,
-        > and any outliers. Then open a long list, scroll it a few times, and report
-        > FPS, dropped frames, and visible jank.
+> Reproduce this bug in my <code class="prompt-var" data-prompt-var="app" data-default="your app">your app</code> iOS app:
+>
+> <code class="prompt-var--edit" contenteditable="true">paste the bug report here</code>
+>
+> Report the exact steps, expected and actual results, device and OS version,
+> app version, and whether it reproduced consistently. Highlight the defect,
+> then take a device snapshot so someone else can inspect the state.
 
-        </div>
+</div>
 
-=== "Check accessibility"
+## Measure performance
 
-    === "Android"
+### Android
 
-        <div class="copyable-prompt" markdown>
+<div class="copyable-prompt" markdown>
 
-        > Explore the current screen in my <code class="prompt-var" data-prompt-var="app" data-default="your app">your app</code> Android app
-        > and point out interactive elements that are difficult to use — small tap
-        > targets, low contrast, missing labels, or unclear controls. Suggest what
-        > to fix first.
+> Launch my <code class="prompt-var" data-prompt-var="app" data-default="your app">your app</code> Android app five times, measure
+> cold and warm startup, and report time to first frame, time to
+> interactive, and any outliers. Then open a long list, scroll it a few
+> times, and report FPS, dropped frames, and visible jank.
 
-        </div>
+</div>
 
-    === "iOS"
+<div class="example-demo" markdown>
 
-        <div class="copyable-prompt" markdown>
+![An AI agent measuring Android app startup through a deep link](../img/deeplink-startup.gif)
 
-        > Explore the current screen in my <code class="prompt-var" data-prompt-var="app" data-default="your app">your app</code> iOS app and
-        > point out interactive elements that are difficult to use — small tap
-        > targets, low contrast, missing labels, or unclear controls. Suggest what
-        > to fix first.
+</div>
 
-        </div>
+### iOS
+
+<div class="copyable-prompt" markdown>
+
+> Launch my <code class="prompt-var" data-prompt-var="app" data-default="your app">your app</code> iOS app five times, measure cold
+> and warm startup, and report time to first frame, time to interactive,
+> and any outliers. Then open a long list, scroll it a few times, and report
+> FPS, dropped frames, and visible jank.
+
+</div>
+
+## Check accessibility
+
+### Android
+
+<div class="copyable-prompt" markdown>
+
+> Explore the current screen in my <code class="prompt-var" data-prompt-var="app" data-default="your app">your app</code> Android app
+> and point out interactive elements that are difficult to use — small tap
+> targets, low contrast, missing labels, or unclear controls. Suggest what
+> to fix first.
+
+</div>
+
+### iOS
+
+<div class="copyable-prompt" markdown>
+
+> Explore the current screen in my <code class="prompt-var" data-prompt-var="app" data-default="your app">your app</code> iOS app and
+> point out interactive elements that are difficult to use — small tap
+> targets, low contrast, missing labels, or unclear controls. Suggest what
+> to fix first.
+
+</div>

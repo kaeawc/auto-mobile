@@ -46,6 +46,7 @@ add_check "shell-sete" "\"$PROJECT_ROOT/scripts/shellcheck/validate_shell_sete.s
 add_check "markdown-bash" "\"$PROJECT_ROOT/scripts/shellcheck/validate_markdown_bash.sh\"" "lint,shell" "Shellcheck fenced bash blocks in .claude/commands and skills Markdown"
 add_check "stdlib-first" "\"$PROJECT_ROOT/scripts/conventions/validate-stdlib-first.sh\"" "lint,conventions" "Enforce structured parsing and shared-helper conventions"
 add_check "mkdocs-nav" "\"$PROJECT_ROOT/scripts/validate_mkdocs_nav.sh\"" "docs" "Validate MkDocs navigation"
+add_check "docs-github-markdown" "\"$PROJECT_ROOT/scripts/validate_docs_github_markdown.sh\"" "docs" "Reject MkDocs-only syntax that breaks GitHub rendering of docs/"
 add_check "claude-plugin" "\"$PROJECT_ROOT/scripts/claude/validate_plugin.sh\"" "config" "Validate Claude plugin structure"
 add_check "codex-skills" "\"$PROJECT_ROOT/scripts/validate_codex_skills.sh\"" "config,docs" "Validate Codex skills and AGENTS inventory"
 add_check "lychee" "\"$PROJECT_ROOT/scripts/lychee/validate_lychee.sh\"" "docs,links" "Validate documentation links"

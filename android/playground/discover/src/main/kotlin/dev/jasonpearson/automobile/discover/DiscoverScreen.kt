@@ -21,6 +21,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.sp
 import dev.jasonpearson.automobile.design.system.theme.AutoMobileTheme
+import dev.jasonpearson.automobile.discover.ictrace.IcTraceScreen
 import dev.jasonpearson.automobile.sdk.TrackRecomposition
 import kotlinx.coroutines.launch
 
@@ -37,6 +38,7 @@ fun DiscoverVideoScreen(
         "Swipe" to { SwipeScreen() },
         "Media" to { VideoListScreen(onNavigateToVideoPlayer = onNavigateToVideoPlayer) },
         "Text" to { InputTextScreen() },
+        "IC Trace" to { IcTraceScreen() },
         "Chat" to { ChatScreen() },
       )
     val tabPageMap: Map<Int, @Composable () -> Unit> =

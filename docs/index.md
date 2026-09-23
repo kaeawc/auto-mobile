@@ -7,99 +7,63 @@ components are open source. The point is to provide mobile engineers with AI
 workflow tools to perform UX deep dives, reproduce bugs, and run automated
 tests.
 
-<style>
-  .install-command {
-    max-width: 42rem;
-  }
-
-  .install-command code {
-    font-size: 0.72rem;
-  }
-
-  .desktop-install-options {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.6rem;
-    margin: 0.75rem 0 1.5rem;
-  }
-
-  .desktop-install-options a {
-    border: 1px solid var(--md-default-fg-color--lighter);
-    border-radius: 0.5rem;
-    color: var(--md-default-fg-color);
-    min-width: 9rem;
-    padding: 0.5rem 0.75rem;
-    text-align: center;
-    text-decoration: none;
-  }
-
-  .desktop-install-options a:hover {
-    border-color: var(--md-accent-fg-color);
-  }
-
-  .desktop-install-options span {
-    color: var(--md-default-fg-color--light);
-    display: block;
-    font-size: 0.7rem;
-  }
-
-</style>
-
 ## Install
 
-=== "One-line install"
+### One-line install
 
-    <div class="install-command" markdown>
-    ~~~bash
-    curl -fsSL https://raw.githubusercontent.com/kaeawc/auto-mobile/main/scripts/install.sh | bash
-    ~~~
-    </div>
+<div class="install-command" markdown>
 
-    Run this in your app repository for project configuration, or elsewhere for
-    global configuration. Restart your MCP client when it finishes.
+```bash
+curl -fsSL https://raw.githubusercontent.com/kaeawc/auto-mobile/main/scripts/install.sh | bash
+```
 
-    ![Install Demo](img/install.gif)
+</div>
 
-    <div class="desktop-install-options">
-      <a data-platform="macos" href="https://github.com/kaeawc/auto-mobile/releases/download/0.0.81/AutoMobile-0.0.81-macos.dmg" aria-label="Download AutoMobile Desktop App for macOS x86-64">
-        <strong>macOS</strong>
-        <span>x86_64 · DMG</span>
-      </a>
-      <a data-platform="linux" href="https://github.com/kaeawc/auto-mobile/releases/download/0.0.81/AutoMobile-0.0.81-linux.deb" aria-label="Download AutoMobile Desktop App for Linux x86-64">
-        <strong>Linux</strong>
-        <span>x86_64 · DEB</span>
-      </a>
-      <a data-platform="windows" href="https://github.com/kaeawc/auto-mobile/releases/download/0.0.81/AutoMobile-0.0.81-windows.msi" aria-label="Download AutoMobile Desktop App for Windows x86-64">
-        <strong>Windows</strong>
-        <span>x86_64 · MSI</span>
-      </a>
-    </div>
+Run this in your app repository for project configuration, or elsewhere for
+global configuration. Restart your MCP client when it finishes.
 
-=== "Homebrew (CLI)"
+![Install Demo](img/install.gif)
 
-    ```bash
-    brew tap kaeawc/tap
-    brew install kaeawc/tap/auto-mobile
-    ```
+<div class="desktop-install-options">
+  <a data-platform="macos" href="https://github.com/kaeawc/auto-mobile/releases/download/0.0.81/AutoMobile-0.0.81-macos.dmg" aria-label="Download AutoMobile Desktop App for macOS x86-64">
+    <strong>macOS</strong>
+    <span>x86_64 · DMG</span>
+  </a>
+  <a data-platform="linux" href="https://github.com/kaeawc/auto-mobile/releases/download/0.0.81/AutoMobile-0.0.81-linux.deb" aria-label="Download AutoMobile Desktop App for Linux x86-64">
+    <strong>Linux</strong>
+    <span>x86_64 · DEB</span>
+  </a>
+  <a data-platform="windows" href="https://github.com/kaeawc/auto-mobile/releases/download/0.0.81/AutoMobile-0.0.81-windows.msi" aria-label="Download AutoMobile Desktop App for Windows x86-64">
+    <strong>Windows</strong>
+    <span>x86_64 · MSI</span>
+  </a>
+</div>
 
-    Installs the `auto-mobile` command-line tool and keeps it current through
-    `brew upgrade`. On recent Homebrew, run `brew trust kaeawc/tap` first if the
-    tap is reported untrusted.
+### Homebrew (CLI)
 
-=== "Manual MCP configuration"
+```bash
+brew tap kaeawc/tap
+brew install kaeawc/tap/auto-mobile
+```
 
-    ```json
-    {
-      "command": "bunx",
-      "args": ["@kaeawc/auto-mobile@latest"]
-    }
-    ```
+Installs the `auto-mobile` command-line tool and keeps it current through
+`brew upgrade`. On recent Homebrew, run `brew trust kaeawc/tap` first if the
+tap is reported untrusted.
 
-    Place this server in the client’s documented MCP configuration, then restart
-    the client. Going this route means you're going to handle dependencies like having
-    bun and ffmpeg.
+### Manual MCP configuration
 
-### First use
+```json
+{
+  "command": "bunx",
+  "args": ["@kaeawc/auto-mobile@latest"]
+}
+```
+
+Place this server in the client’s documented MCP configuration, then restart
+the client. Going this route means you're going to handle dependencies like having
+bun and ffmpeg.
+
+## First use
 
 Open your configured agent and ask it to explore your mobile app. If you have a connected physical device it'll recognize it, otherwise it'll look for emulators / simulators to use or provision.
 
@@ -107,7 +71,7 @@ Some common workflows:
 
 - [Agent examples](using/agent-examples.md)
 
-### Uninstall
+## Uninstall
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/kaeawc/auto-mobile/main/scripts/uninstall.sh | bash

@@ -208,6 +208,13 @@ data class RequestCommitText(
 ) : WebSocketRequest()
 
 @Serializable
+@SerialName("request_set_keyboard_profile")
+data class RequestSetKeyboardProfile(
+  override val requestId: String? = null,
+  val profileId: String,
+) : WebSocketRequest()
+
+@Serializable
 @SerialName("request_ime_action")
 data class RequestImeAction(
   override val requestId: String? = null,

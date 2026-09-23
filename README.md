@@ -41,7 +41,7 @@ _An AI agent searching YouTube and browsing results_
 - 🤖 **Fast UX Inspection** Kotlin Accessibility Service and Swift XCTestService to enable fast, accurate observations. 10x faster than the next fastest observation toolkit.
 - 🦾 **Full Touch Injection** Tap, Swipe, Pinch, Drag & Drop, Shake with automatic element targeting.
 - ♻️ **Tool Feedback** [Observations](docs/design-docs/mcp/interaction-loop.md) drive the interaction loop for all [tool calls](docs/tools.md).
-- 🧪 **Test Execution** [Kotlin JUnitRunner](docs/design-docs/plat/android/junit-runner/index.md) & [Swift XCTestRunner](docs/using/ui-tests.md#ios--swift-package-manager) execute tests natively handling device pooling, multi-device tests, and automatically optimizing test timing.
+- 🧪 **Test Execution** [Kotlin JUnitRunner](docs/design-docs/plat/android/junit-runner/index.md) & [Swift XCTestRunner](docs/using/ui-tests.md#1-install-a-test-runner) execute tests natively handling device pooling, multi-device tests, and automatically optimizing test timing.
 
 ## Get Started
 

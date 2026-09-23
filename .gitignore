@@ -72,3 +72,6 @@ demo/tmp-home/
 /Package.resolved
 reports/
 research/
+
+# Python bytecode cache (mkdocs doc-build hooks under scripts/github/)
+__pycache__/

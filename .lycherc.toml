@@ -9,8 +9,13 @@ exclude = [
   # Ignore common localhost URLs
   "^http://localhost",
   "^http://127\\.0\\.0\\.1",
-  # Ignore example domains
-  "^https?://example\\.com",
+  # Ignore RFC 2606 reserved example domains and any subdomain of them. Bare
+  # `example.com` is not enough now that include_verbatim checks links inside
+  # fenced code samples: docs/webrtc-streaming.md cites `mediamtx.example.com`,
+  # an illustrative host that must not be dialed. The trailing `([:/?#]|$)`
+  # anchors the TLD to a label boundary so a real host like `example.company.com`
+  # is not swept.
+  "^https?://([a-z0-9-]+\\.)*example\\.(com|net|org)([:/?#]|$)",
   # Ignore links to private fork repos (issues may not be publicly accessible)
   "^https://github\\.com/jasonpearson/",
   # Docker Hub returns transient 500s that fail link checks
@@ -37,27 +42,45 @@ exclude = [
   "^https://github\\.com/kaeawc/auto-mobile/(issues|pull)/[0-9]+([#?].*)?$",
 ]
 
-# Exclude specific paths
+# Exclude specific input paths. These are regexes matched against each input
+# file path exactly as lychee walks it (e.g. `docs/index.md`, `./README.md`), so
+# anchor every pattern: an unanchored `site/` also matched any directory whose
+# name merely ends in "site" and silently dropped the whole built-site pass.
 exclude_path = [
   # Build artifacts
-  "site/",
-  "build/",
-  "dist/",
-  # Dependencies
-  "node_modules/",
-  # Git
-  ".git/",
-  # Files not deployed (in .gitignore)
-  "docs/contributing/index.md",
-  # Redirect shims target MkDocs' generated directory URLs, which do not exist
-  # in the source tree that lychee checks.
-  "docs/design-docs/mcp/tool-registration/index.html",
-  "docs/metrics/downloads/index.html",
-  "docs/using/a11y/index.html",
-  "docs/using/talkback/index.html",
-  "docs/using/tool-capabilities/index.html",
-  "docs/using/voiceover/index.html",
+  "^(\\./)?(site|build|dist)/",
+  # Dependencies and VCS metadata at any depth
+  "(^|/)node_modules/",
+  "(^|/)\\.git/",
+  # Redirect shims target MkDocs' generated directory URLs (`../foo/`), which do
+  # not exist in the source tree. validate_lychee.sh checks the built copies of
+  # these pages (targets and fragments) in its offline built-site pass instead.
+  "^docs/design-docs/mcp/tool-registration/index\\.html$",
+  "^docs/install/index\\.html$",
+  "^docs/metrics/downloads/index\\.html$",
+  "^docs/using/a11y/index\\.html$",
+  "^docs/using/talkback/index\\.html$",
+  "^docs/using/tool-capabilities/index\\.html$",
+  "^docs/using/voiceover/index\\.html$",
+  # Generated pages the docs deploy writes into docs/ (gitignored). Their
+  # canonical sources -- .github/CONTRIBUTING.md and CHANGELOG.md -- are checked
+  # directly in the source pass, and the rendered copies in the built-site pass,
+  # so skip any stale on-disk copy a developer's local `mkdocs build` left behind.
+  "^docs/contributing\\.md$",
+  "^docs/changelog\\.md$",
 ]
+
+# `#fragment` anchors are verified too, but via the bare `--include-fragments`
+# CLI flag in scripts/lychee/validate_lychee.sh rather than a key here: the key
+# is a bool in lychee 0.22 (the CI pin) and an enum string in 0.24+, so no single
+# value loads in both, while the bare flag means "check anchors" in each.
+
+# Check links inside code/verbatim blocks too. MkDocs content tabs (`=== "..."`)
+# and admonitions indent their bodies four spaces, which CommonMark parses as an
+# indented code block, so without this every link inside a tab (the install GIF,
+# desktop download buttons, agent-example GIFs, ui-tests source links) is
+# skipped. Placeholder hosts in real code samples are covered by `exclude`.
+include_verbatim = true
 
 # Accept status codes
 accept = [

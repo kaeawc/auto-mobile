@@ -63,6 +63,33 @@ function calendarHierarchy(now: number): any {
   };
 }
 
+function incompleteFrameworkDialogHierarchy(now: number): any {
+  return {
+    ...calendarHierarchy(now),
+    packageName: "android",
+    foregroundActivity: "android/.AppErrorDialog",
+    ctrlProxyIncomplete: true,
+    sdkInt: 34,
+    hierarchy: {
+      node: {
+        bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
+        node: [
+          {
+            "resource-id": "android:id/alertTitle",
+            text: "Application Error",
+            bounds: { left: 100, top: 200, right: 900, bottom: 300 },
+          },
+          {
+            "resource-id": "android:id/aerr_close",
+            text: "Close app",
+            bounds: { left: 600, top: 1600, right: 900, bottom: 1700 },
+          },
+        ],
+      },
+    },
+  };
+}
+
 describe("ObserveScreen window-identity freshness (issue #5867)", () => {
   test("empty first-run content is incomplete even when the focused package matches (#6352)", async () => {
     const timer = new FakeTimer();
@@ -348,6 +375,56 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     expect(result.freshness?.isFresh).toBe(true);
     expect(result.freshness?.warning ?? "").not.toContain("pressButton");
     expect(result.freshness?.warning ?? "").not.toContain("stale wrong-window");
+  });
+
+  for (const focusTitle of ["Application Error:", "Application Not Responding"]) {
+    test(`keeps captured ${focusTitle} dialog content fresh when another window is incomplete (#7472)`, async () => {
+      const now = 1_700_000_000_000;
+      const timer = new FakeTimer();
+      timer.setCurrentTime(now);
+      const viewHierarchy = new FakeViewHierarchy();
+      viewHierarchy.configureHierarchy(incompleteFrameworkDialogHierarchy(now));
+      const fakeAdb = new FakeAdbExecutor();
+      fakeAdb.setForegroundApp({ packageName: "com.android.launcher3", userId: 0 });
+      fakeAdb.setCommandResponse("dumpsys window", {
+        stdout: `  mCurrentFocus=Window{8ddaeb2 u0 ${focusTitle} example.app}\n`,
+        stderr: "",
+        exitCode: 0,
+      } as any);
+
+      const result = await makeScreen(viewHierarchy, fakeAdb, timer).execute({
+        skipScreenshot: true,
+        skipBackStack: true,
+      });
+
+      expect(result.freshness?.isFresh).toBe(true);
+      expect(result.freshness?.warning ?? "").not.toContain("isAccessibilityTool");
+      expect(result.freshness?.warning ?? "").not.toContain("data-sensitive");
+    });
+  }
+
+  test("retracts incomplete android-labelled content without a focused framework error dialog (#7472)", async () => {
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchy(incompleteFrameworkDialogHierarchy(now));
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setForegroundApp({ packageName: "com.android.systemui", userId: 0 });
+    fakeAdb.setCommandResponse("dumpsys window", {
+      stdout: "  mCurrentFocus=Window{8ddaeb2 u0 com.android.systemui/.MainActivity}\n",
+      stderr: "",
+      exitCode: 0,
+    } as any);
+
+    const result = await makeScreen(viewHierarchy, fakeAdb, timer).execute({
+      skipScreenshot: true,
+      skipBackStack: true,
+    });
+
+    expect(result.freshness?.isFresh).toBe(false);
+    expect(result.freshness?.warning).toContain("capture as incomplete");
+    expect(result.freshness?.warning).toContain("isAccessibilityTool");
   });
 
   test("retracts an unfocused android-labelled hierarchy as a wrong-window capture (#7442)", async () => {

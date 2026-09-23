@@ -394,8 +394,9 @@ function describeStatusBarOnlyCapture(
 function describeIncompleteCapture(
   hierarchy: ObserveResult["viewHierarchy"],
   foreground: string | undefined,
+  confirmedFrameworkErrorDialog: boolean,
 ): { sdkInt: number | undefined; reason: CtrlProxyIncompleteReason | undefined } | undefined {
-  if (hierarchy?.ctrlProxyIncomplete !== true) {
+  if (hierarchy?.ctrlProxyIncomplete !== true || confirmedFrameworkErrorDialog) {
     return undefined;
   }
   const observed = hierarchy.packageName;
@@ -874,6 +875,12 @@ export class RealObserveScreen implements ObserveScreen {
           result.viewHierarchy?.ctrlProxyIncomplete === true
             ? await this.confirmForegroundIdentity(postCaptureForeground, signal)
             : undefined,
+          result.viewHierarchy?.ctrlProxyIncomplete === true
+            ? await this.isConfirmedFrameworkErrorDialog(
+                result.viewHierarchy.packageName ?? "",
+                signal,
+              )
+            : false,
         ),
       });
 
@@ -2045,7 +2052,7 @@ export class RealObserveScreen implements ObserveScreen {
         undefined,
         signal,
       );
-      return /mCurrentFocus=Window\{[^}\r\n]*Application Error:/.test(stdout);
+      return /mCurrentFocus=Window\{[^}\r\n]*Application (?:Error:|Not Responding)/.test(stdout);
     } catch (error) {
       // This optional confirmation must not fail observe; fall back to the normal mismatch gate.
       logger.debug("Failed to read focused framework window from dumpsys:", error);

@@ -94,6 +94,9 @@ describe("logPruner isOwnedBy (via pruneLogFiles)", () => {
         ownPrefix: "daemon",
         maxOwnFiles: 10,
         abandonedMaxAgeMs: -1, // treat every file as already stale
+        // Future clock so age is deterministically stale regardless of Windows
+        // filesystem/wall-clock precision differences.
+        now: Date.now() + 60_000,
         isProcessAlive: () => false, // owner pid 4242 has exited
       });
 
@@ -180,12 +183,17 @@ describe("logPruner daemon-launch inherited-fd guard (issue #6194)", () => {
       const launchLog = "daemon-launch-4242.log";
       await writeFile(path.join(dir, stalePeer), "x");
       await writeFile(path.join(dir, launchLog), "x");
+      const peerStats = await stat(path.join(dir, stalePeer));
+      const launchStats = await stat(path.join(dir, launchLog));
 
       await pruneLogFiles({
         dir,
         ownPrefix: "stdio-111",
         maxOwnFiles: 10,
-        abandonedMaxAgeMs: -1,
+        abandonedMaxAgeMs: 1000,
+        // Derive the sweep clock from recorded mtimes so both files are stale
+        // regardless of Windows filesystem and wall-clock precision differences.
+        now: Math.max(peerStats.mtimeMs, launchStats.mtimeMs) + 2000,
         isProcessAlive: () => false, // both owners exited
         isDaemonRunning: () => true, // guards only daemon-launch logs
       });
@@ -265,6 +273,7 @@ describe("logPruner cross-namespace launch-log retention (issue #6194)", () => {
         ownPrefix: "stdio-111",
         maxOwnFiles: 10,
         abandonedMaxAgeMs: -1,
+        now: Date.now() + 60_000, // deterministically stale on any filesystem clock
         isProcessAlive: () => false, // manager AND every namespace's daemon dead
         daemonPidFiles: () => ({ pidFiles: [pidFileB, pidFileA], uncertain: false }),
         readDaemonOwner: (p) =>
@@ -291,6 +300,7 @@ describe("logPruner cross-namespace launch-log retention (issue #6194)", () => {
         ownPrefix: "stdio-111",
         maxOwnFiles: 10,
         abandonedMaxAgeMs: -1,
+        now: Date.now() + 60_000, // deterministically stale on any filesystem clock
         isProcessAlive: (pid) => pid === daemonPidA, // only ns A's daemon alive
         daemonPidFiles: () => ({ pidFiles: [pidFileB, pidFileA], uncertain: false }),
         readDaemonOwner: (p) =>
@@ -449,6 +459,7 @@ describe("logPruner enumeration-uncertainty retention (issue #6194)", () => {
         ownPrefix: "stdio-111",
         maxOwnFiles: 10,
         abandonedMaxAgeMs: -1,
+        now: Date.now() + 60_000, // deterministically stale on any filesystem clock
         isProcessAlive: (pid) => pid === 5000,
         daemonPidFiles: () => ({ pidFiles: [ownPidFile], uncertain: false }),
         readDaemonOwner: () => ({ pid: 5000, launchLogPath: path.join(dir, liveOwnerLog) }),
@@ -583,6 +594,9 @@ describe("logPruner transient unlink failures (Windows EBUSY/EPERM)", () => {
       await pruneLogFiles({
         ...deadNamespace,
         dir,
+        // Future clock so the stale precondition holds regardless of Windows
+        // filesystem/wall-clock precision differences.
+        now: Date.now() + 60_000,
         unlink: async (filePath) => {
           attempts.push(filePath);
           if (attempts.filter((p) => p === filePath).length === 1) {
@@ -616,6 +630,9 @@ describe("logPruner transient unlink failures (Windows EBUSY/EPERM)", () => {
       await pruneLogFiles({
         ...deadNamespace,
         dir,
+        // Future clock so the stale precondition holds regardless of Windows
+        // filesystem/wall-clock precision differences.
+        now: Date.now() + 60_000,
         unlink: async () => {
           attempts += 1;
           throw errnoError("EPERM");

@@ -66,8 +66,8 @@ requires_yq() {
 @test "validate_lychee.sh checks .github/CONTRIBUTING.md and the built site" {
   grep -Fq '".github/CONTRIBUTING.md"' "$SCRIPT"
   # Stage every page deploy_pages.py copies in, so none is built unchecked.
-  grep -Fq '/docs/contributing.md"' "$SCRIPT"
-  grep -Fq '/docs/changelog.md"' "$SCRIPT"
+  grep -Fq 'docs/contributing.md:.github/CONTRIBUTING.md' "$SCRIPT"
+  grep -Fq 'docs/changelog.md:CHANGELOG.md' "$SCRIPT"
   grep -Fq -- '--index-files index.html' "$SCRIPT"
   grep -Fq 'LYCHEE_REQUIRE_SITE' "$SCRIPT"
 }
@@ -80,6 +80,18 @@ requires_yq() {
   run yq -r '.jobs["validate-documentation-links"].steps[].run // ""' "$MERGE_WORKFLOW"
   [ "$status" -eq 0 ]
   [[ "$output" != *"touch docs/contributing.md"* ]]
+}
+
+@test "reserved example.com subdomains are excluded (include_verbatim samples)" {
+  command -v lychee >/dev/null 2>&1 || skip "lychee not installed"
+  dir="$BATS_TEST_TMPDIR/docs"
+  mkdir -p "$dir"
+  # A fenced code sample citing an illustrative subdomain host, like
+  # docs/webrtc-streaming.md's mediamtx.example.com. It must not be dialed.
+  printf '# S\n\n```\ncurl https://mediamtx.example.com:8889/whip\n```\n' >"$dir/s.md"
+  run lychee --config "$CONFIG" --no-progress --include-verbatim --dump "$dir/s.md"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"example.com"* ]]
 }
 
 @test "lychee flags a missing #fragment under the repo config" {

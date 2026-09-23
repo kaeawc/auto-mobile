@@ -189,12 +189,22 @@ SITE_STAGE=$(mktemp -d)
 # Generated docs pages build_site writes in place (both gitignored); removed on
 # exit so the working tree is left clean even if the build aborts.
 STAGED_DOCS=()
-# shellcheck disable=SC2329 # invoked indirectly via `trap cleanup EXIT` below
+# Generated pages that pre-existed on disk (a dev's earlier `mkdocs build`),
+# backed up under $SITE_STAGE and restored so this run never erases them.
+RESTORE_DOCS=()
+# Invoked only through `trap cleanup EXIT`, which some shellcheck versions read
+# as unreachable (SC2317) and others as never-invoked (SC2329); disable both.
+# shellcheck disable=SC2317,SC2329
 cleanup() {
-    rm -rf "$LYCHEE_OUTPUT" "$LYCHEE_ERRORS" "$SITE_STAGE"
+    # Restore/remove staged docs BEFORE deleting the backup dir they restore from.
+    local f
+    for f in "${RESTORE_DOCS[@]}"; do
+        cp "$SITE_STAGE/orig-$(basename "$f")" "$f" 2>/dev/null || true
+    done
     if [[ ${#STAGED_DOCS[@]} -gt 0 ]]; then
         rm -f "${STAGED_DOCS[@]}"
     fi
+    rm -rf "$LYCHEE_OUTPUT" "$LYCHEE_ERRORS" "$SITE_STAGE"
 }
 trap cleanup EXIT
 
@@ -248,10 +258,24 @@ build_site() {
         return 0
     fi
 
-    # Generated (gitignored) pages the deploy copies in; clean up on any exit.
-    cp "$PROJECT_ROOT/.github/CONTRIBUTING.md" "$PROJECT_ROOT/docs/contributing.md"
-    cp "$PROJECT_ROOT/CHANGELOG.md" "$PROJECT_ROOT/docs/changelog.md"
-    STAGED_DOCS=("$PROJECT_ROOT/docs/contributing.md" "$PROJECT_ROOT/docs/changelog.md")
+    # Generated (gitignored) pages the deploy copies in. A developer who ran
+    # `deploy_pages.py build`/`serve` earlier may already have these on disk; back
+    # any such copy up and restore it on exit (cleanup), so this run neither
+    # erases the developer's file nor is influenced by a stale one. Pages we
+    # create fresh are removed on exit instead. (The source pass excludes both
+    # paths, so a stale copy is never validated there either.)
+    local mapping dest source
+    for mapping in "docs/contributing.md:.github/CONTRIBUTING.md" "docs/changelog.md:CHANGELOG.md"; do
+        dest="$PROJECT_ROOT/${mapping%%:*}"
+        source="$PROJECT_ROOT/${mapping##*:}"
+        if [[ -e "$dest" ]]; then
+            cp "$dest" "$SITE_STAGE/orig-$(basename "$dest")"
+            RESTORE_DOCS+=("$dest")
+        else
+            STAGED_DOCS+=("$dest")
+        fi
+        cp "$source" "$dest"
+    done
 
     ( cd "$PROJECT_ROOT" && "${mkdocs_cmd[@]}" build --quiet \
         --config-file "$PROJECT_ROOT/mkdocs.yml" --site-dir "$SITE_STAGE/built" ) || BUILD_STATUS=1

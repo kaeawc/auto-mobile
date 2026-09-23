@@ -9,8 +9,13 @@ exclude = [
   # Ignore common localhost URLs
   "^http://localhost",
   "^http://127\\.0\\.0\\.1",
-  # Ignore example domains
-  "^https?://example\\.com",
+  # Ignore RFC 2606 reserved example domains and any subdomain of them. Bare
+  # `example.com` is not enough now that include_verbatim checks links inside
+  # fenced code samples: docs/webrtc-streaming.md cites `mediamtx.example.com`,
+  # an illustrative host that must not be dialed. The trailing `([:/?#]|$)`
+  # anchors the TLD to a label boundary so a real host like `example.company.com`
+  # is not swept.
+  "^https?://([a-z0-9-]+\\.)*example\\.(com|net|org)([:/?#]|$)",
   # Ignore links to private fork repos (issues may not be publicly accessible)
   "^https://github\\.com/jasonpearson/",
   # Docker Hub returns transient 500s that fail link checks
@@ -57,6 +62,12 @@ exclude_path = [
   "^docs/using/talkback/index\\.html$",
   "^docs/using/tool-capabilities/index\\.html$",
   "^docs/using/voiceover/index\\.html$",
+  # Generated pages the docs deploy writes into docs/ (gitignored). Their
+  # canonical sources -- .github/CONTRIBUTING.md and CHANGELOG.md -- are checked
+  # directly in the source pass, and the rendered copies in the built-site pass,
+  # so skip any stale on-disk copy a developer's local `mkdocs build` left behind.
+  "^docs/contributing\\.md$",
+  "^docs/changelog\\.md$",
 ]
 
 # `#fragment` anchors are verified too, but via the bare `--include-fragments`

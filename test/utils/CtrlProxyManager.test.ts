@@ -1203,6 +1203,195 @@ describe("CtrlProxyManager", function () {
 
       const result = await accessibilityServiceClient.ensureCompatibleVersion();
       expect(result.status).toBe("skipped");
+      expect(result.expectedSha256).toBe("");
+      expect(fakeAdb.wasCommandExecuted("install -r -d")).toBe(false);
+    });
+
+    test("leaves an installed local APK alone when its SHA matches the override file", async function () {
+      const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "auto-mobile-local-match-"));
+      try {
+        const localApkPath = path.join(tempDir, "control-proxy-debug.apk");
+        const payload = Buffer.from("local APK bytes");
+        await fs.writeFile(localApkPath, payload);
+        const expectedSha = crypto.createHash("sha256").update(payload).digest("hex");
+        process.env.AUTOMOBILE_CTRL_PROXY_APK_PATH = localApkPath;
+        delete process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM;
+        delete process.env.AUTO_MOBILE_ACCESSIBILITY_SERVICE_SHA_SKIP_CHECK;
+
+        fakeAdb.setCommandResponse(
+          `shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`,
+          { stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`, stderr: "" },
+        );
+        fakeAdb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {
+          stdout: "package:/data/app/base.apk\n",
+          stderr: "",
+        });
+        fakeAdb.setCommandResponse("shell sha256sum", {
+          stdout: `${expectedSha} /data/app/base.apk\n`,
+          stderr: "",
+        });
+
+        const result = await accessibilityServiceClient.ensureCompatibleVersion();
+        expect(result.status).toBe("compatible");
+        expect(result.expectedSha256).toBe(expectedSha);
+        expect(result.installedSha256).toBe(expectedSha);
+        expect(fakeAdb.wasCommandExecuted("install -r -d")).toBe(false);
+      } finally {
+        await fs.rm(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    test("reinstalls a local APK when the installed SHA differs from its file", async function () {
+      const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "auto-mobile-local-mismatch-"));
+      try {
+        const localApkPath = path.join(tempDir, "control-proxy-debug.apk");
+        const zip = new AdmZip();
+        zip.addFile(
+          "AndroidManifest.xml",
+          Buffer.from('<?xml version="1.0" encoding="utf-8"?><manifest></manifest>'),
+        );
+        zip.addFile("classes.dex", crypto.randomBytes(15000));
+        const payload = zip.toBuffer();
+        await fs.writeFile(localApkPath, payload);
+        const expectedSha = crypto.createHash("sha256").update(payload).digest("hex");
+        process.env.AUTOMOBILE_CTRL_PROXY_APK_PATH = localApkPath;
+        delete process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM;
+        delete process.env.AUTO_MOBILE_ACCESSIBILITY_SERVICE_SHA_SKIP_CHECK;
+
+        fakeAdb.setCommandResponse(
+          `shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`,
+          { stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`, stderr: "" },
+        );
+        fakeAdb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {
+          stdout: "package:/data/app/base.apk\n",
+          stderr: "",
+        });
+        fakeAdb.setCommandResponse("shell sha256sum", {
+          stdout: `${"0".repeat(64)} /data/app/base.apk\n`,
+          stderr: "",
+        });
+        fakeAdb.setCommandResponse("install -r -d", createExecResult("Success", ""));
+
+        const result = await accessibilityServiceClient.ensureCompatibleVersion();
+        expect(result.status).toBe("upgraded");
+        expect(result.expectedSha256).toBe(expectedSha);
+        expect(fakeAdb.wasCommandExecuted("install -r -d")).toBe(true);
+      } finally {
+        await fs.rm(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    test("explicit checksum skip wins over a readable local APK override", async function () {
+      const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "auto-mobile-local-skip-"));
+      try {
+        const localApkPath = path.join(tempDir, "control-proxy-debug.apk");
+        await fs.writeFile(localApkPath, "local APK bytes");
+        process.env.AUTOMOBILE_CTRL_PROXY_APK_PATH = localApkPath;
+        process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM = "true";
+        AndroidCtrlProxyManager.setExpectedChecksumForTesting("programmatic-sha");
+
+        const result = await accessibilityServiceClient.ensureCompatibleVersion();
+        expect(result.status).toBe("skipped");
+        expect(result.expectedSha256).toBe("");
+        expect(fakeAdb.wasCommandExecuted("shell sha256sum")).toBe(false);
+      } finally {
+        await fs.rm(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    test("programmatic checksum override wins over a local APK file", async function () {
+      const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "auto-mobile-local-expected-"));
+      try {
+        const localApkPath = path.join(tempDir, "control-proxy-debug.apk");
+        await fs.writeFile(localApkPath, "local APK bytes");
+        process.env.AUTOMOBILE_CTRL_PROXY_APK_PATH = localApkPath;
+        delete process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM;
+        delete process.env.AUTO_MOBILE_ACCESSIBILITY_SERVICE_SHA_SKIP_CHECK;
+        AndroidCtrlProxyManager.setExpectedChecksumForTesting("programmatic-sha");
+        fakeAdb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {
+          stdout: "package:/data/app/base.apk\n",
+          stderr: "",
+        });
+        fakeAdb.setCommandResponse("shell sha256sum", {
+          stdout: "programmatic-sha /data/app/base.apk\n",
+          stderr: "",
+        });
+
+        expect(await accessibilityServiceClient.isVersionCompatible()).toBe(true);
+      } finally {
+        await fs.rm(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    test("resetInstances clears the memoized local APK checksum", async function () {
+      const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "auto-mobile-local-memo-"));
+      try {
+        const localApkPath = path.join(tempDir, "control-proxy-debug.apk");
+        await fs.writeFile(localApkPath, "first local APK");
+        process.env.AUTOMOBILE_CTRL_PROXY_APK_PATH = localApkPath;
+        delete process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM;
+        delete process.env.AUTO_MOBILE_ACCESSIBILITY_SERVICE_SHA_SKIP_CHECK;
+
+        fakeAdb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {
+          stdout: "package:/data/app/base.apk\n",
+          stderr: "",
+        });
+        let hashCalls = 0;
+        const checksumCalculator = {
+          computeFileSha256: async (filePath: string) => {
+            hashCalls++;
+            return {
+              checksum: crypto
+                .createHash("sha256")
+                .update(await fs.readFile(filePath))
+                .digest("hex"),
+              source: "node" as const,
+            };
+          },
+        };
+        const firstSha = crypto.createHash("sha256").update("first local APK").digest("hex");
+        fakeAdb.setCommandResponse("shell sha256sum", {
+          stdout: `${firstSha} /data/app/base.apk\n`,
+          stderr: "",
+        });
+        const firstManager = AndroidCtrlProxyManager.createForTestingWithDeps(
+          testDevice,
+          fakeAdb,
+          new FakeTimer(),
+          undefined,
+          checksumCalculator,
+        );
+        expect(await firstManager.isVersionCompatible()).toBe(true);
+        expect(await firstManager.isVersionCompatible()).toBe(true);
+        const anotherManager = AndroidCtrlProxyManager.createForTestingWithDeps(
+          testDevice,
+          fakeAdb,
+          new FakeTimer(),
+          undefined,
+          checksumCalculator,
+        );
+        expect(await anotherManager.isVersionCompatible()).toBe(true);
+        expect(hashCalls).toBe(1);
+
+        AndroidCtrlProxyManager.resetInstances();
+        await fs.writeFile(localApkPath, "second local APK");
+        const secondSha = crypto.createHash("sha256").update("second local APK").digest("hex");
+        fakeAdb.setCommandResponse("shell sha256sum", {
+          stdout: `${secondSha} /data/app/base.apk\n`,
+          stderr: "",
+        });
+        const secondManager = AndroidCtrlProxyManager.createForTestingWithDeps(
+          testDevice,
+          fakeAdb,
+          new FakeTimer(),
+          undefined,
+          checksumCalculator,
+        );
+        expect(await secondManager.isVersionCompatible()).toBe(true);
+        expect(hashCalls).toBe(2);
+      } finally {
+        await fs.rm(tempDir, { recursive: true, force: true });
+      }
     });
 
     test("should skip version check when SHA skip flag is true", async function () {

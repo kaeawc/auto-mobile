@@ -261,27 +261,26 @@ gh_json() {
 # gh >= 2.101.0 requires --allow-escape-sequences to emit a job-log body carrying
 # ANSI codes (without it, it exits non-zero and writes nothing); older gh has no
 # such flag and rejects it as "unknown flag" while needing none. Detect support
-# once and run the request the way this client understands, so the sentinel scan
-# works on both.
-_gh_allow_escape_supported=""
-gh_api_log() {
-  if [[ -z "$_gh_allow_escape_supported" ]]; then
-    # Capture help text, then string-match — do NOT pipe into `grep -q`, whose
-    # early close SIGPIPEs `gh` and, under `set -o pipefail`, would misreport the
-    # flag as unsupported.
-    local gh_api_help
-    gh_api_help="$(gh api --help 2> /dev/null || true)"
-    if [[ "$gh_api_help" == *"--allow-escape-sequences"* ]]; then
-      _gh_allow_escape_supported="yes"
-    else
-      _gh_allow_escape_supported="no"
-    fi
-  fi
-  if [[ "$_gh_allow_escape_supported" == "yes" ]]; then
-    gh api --allow-escape-sequences "$@"
+# once and record the extra `gh api` args in an array so the sentinel scan works
+# on both. Keeping the `gh api` call at its call site (an external command, not a
+# function invoked in `if`) preserves `set -e` there; this helper is a bare
+# statement that always returns 0.
+_gh_escape_args_ready=""
+_gh_escape_args=()
+prepare_gh_escape_args() {
+  [[ -n "$_gh_escape_args_ready" ]] && return 0
+  # Capture help text, then string-match — do NOT pipe into `grep -q`, whose
+  # early close SIGPIPEs `gh` and, under `set -o pipefail`, would misreport the
+  # flag as unsupported.
+  local gh_api_help
+  gh_api_help="$(gh api --help 2> /dev/null || true)"
+  if [[ "$gh_api_help" == *"--allow-escape-sequences"* ]]; then
+    _gh_escape_args=(--allow-escape-sequences)
   else
-    gh api "$@"
+    _gh_escape_args=()
   fi
+  _gh_escape_args_ready="yes"
+  return 0
 }
 
 fetch_run_jobs() {
@@ -356,7 +355,8 @@ fetch_sentinel_flags() {
     hit=false
     # A 404/410 here means the logs expired; treat that as "not observed"
     # rather than failing the whole window.
-    if gh_api_log "${API_PREFIX}/actions/jobs/${job_id}/logs" > "$log_file" 2> /dev/null; then
+    prepare_gh_escape_args
+    if gh api ${_gh_escape_args[@]+"${_gh_escape_args[@]}"} "${API_PREFIX}/actions/jobs/${job_id}/logs" > "$log_file" 2> /dev/null; then
       if grep -Eq -- "$SENTINEL" "$log_file"; then
         hit=true
       fi

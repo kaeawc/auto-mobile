@@ -494,13 +494,17 @@ SHIM
   # The sentinel must actually have been measured, not inherited as null.
   [ "$(jq -r '.meta.sentinel' "${TEST_ROOT}/b2.json")" = "SENTINEL" ]
 
+  # The per-job sentinel must be measured from the actual log read.
+  [ "$(jq -r '.runs[0].jobs[0].sentinel' "${TEST_ROOT}/b2.json")" = "true" ]
+
   # Older gh (< 2.101.0): detection must omit --allow-escape-sequences and still
-  # read the log, so the sentinel is measured on that client too.
+  # read the log, so the sentinel is measured on that client too. Assert the
+  # per-job flag from THIS run's bundle (b3) — .meta.sentinel merely echoes the
+  # --sentinel argument and would pass even if the log read had failed.
   run env PATH="${TEST_ROOT}/bin:$PATH" GH_ALLOW_ESCAPE=unsupported bash -c \
     "bash '$SCRIPT' --cache '${TEST_ROOT}/c2.json' --sentinel SENTINEL --sentinel-job iOS --fetch-only --limit 1 > '${TEST_ROOT}/b3.json'"
   assert_ok
-  [ "$(jq -r '.meta.sentinel' "${TEST_ROOT}/b3.json")" = "SENTINEL" ]
-  [ "$(jq -r '.runs[0].jobs[0].sentinel' "${TEST_ROOT}/b2.json")" = "true" ]
+  [ "$(jq -r '.runs[0].jobs[0].sentinel' "${TEST_ROOT}/b3.json")" = "true" ]
 }
 
 @test "an empty window aggregates without crashing" {

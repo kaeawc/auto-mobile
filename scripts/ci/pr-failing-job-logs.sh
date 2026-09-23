@@ -19,26 +19,26 @@ fi
 # gh >= 2.101.0 requires --allow-escape-sequences to emit a job-log body carrying
 # ANSI codes (without it, it exits non-zero and writes nothing); older gh has no
 # such flag and rejects it as "unknown flag" while needing none. Detect support
-# once and run the request the way this client understands.
-_gh_allow_escape_supported=""
-gh_api_log() {
-  if [[ -z "$_gh_allow_escape_supported" ]]; then
-    # Capture help text, then string-match — do NOT pipe into `grep -q`, whose
-    # early close SIGPIPEs `gh` and, under `set -o pipefail`, would misreport the
-    # flag as unsupported.
-    local gh_api_help
-    gh_api_help="$(gh api --help 2>/dev/null || true)"
-    if [[ "$gh_api_help" == *"--allow-escape-sequences"* ]]; then
-      _gh_allow_escape_supported="yes"
-    else
-      _gh_allow_escape_supported="no"
-    fi
-  fi
-  if [[ "$_gh_allow_escape_supported" == "yes" ]]; then
-    gh api --allow-escape-sequences "$@"
+# once and record the extra `gh api` args in an array so the log read works on
+# both. Keeping the `gh api` call at its call site (an external command, not a
+# function invoked in `if`) preserves `set -e` semantics; this helper is a bare
+# statement that always returns 0.
+_gh_escape_args_ready=""
+_gh_escape_args=()
+prepare_gh_escape_args() {
+  [[ -n "$_gh_escape_args_ready" ]] && return 0
+  # Capture help text, then string-match — do NOT pipe into `grep -q`, whose
+  # early close SIGPIPEs `gh` and, under `set -o pipefail`, would misreport the
+  # flag as unsupported.
+  local gh_api_help
+  gh_api_help="$(gh api --help 2>/dev/null || true)"
+  if [[ "$gh_api_help" == *"--allow-escape-sequences"* ]]; then
+    _gh_escape_args=(--allow-escape-sequences)
   else
-    gh api "$@"
+    _gh_escape_args=()
   fi
+  _gh_escape_args_ready="yes"
+  return 0
 }
 
 echo "=== CI status for PR #${PR_NUM} ==="
@@ -124,7 +124,8 @@ for RUN_ID in $RUN_IDS; do
       echo "--- job ${JOB_ID}: ${JOB_NAME} ---"
       LOG="scratch/job-${JOB_ID}.log"
       # A finished job's log is readable even while sibling jobs still run.
-      if gh_api_log "repos/${REPO}/actions/jobs/${JOB_ID}/logs" >"$LOG" 2>/dev/null; then
+      prepare_gh_escape_args
+      if gh api ${_gh_escape_args[@]+"${_gh_escape_args[@]}"} "repos/${REPO}/actions/jobs/${JOB_ID}/logs" >"$LOG" 2>/dev/null; then
         grep -nE '##\[error\]|not ok |FAIL|error:|Error:' "$LOG" | head -30
         echo "  (full log: ${LOG})"
       else

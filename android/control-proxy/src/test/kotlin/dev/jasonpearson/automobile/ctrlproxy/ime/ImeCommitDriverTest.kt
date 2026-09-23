@@ -104,7 +104,7 @@ class ImeCommitDriverTest {
 
     ImeCommitDriver(sink).commit("ab", PRIOR_IME_ID)
 
-    assertEquals(listOf("char", "char", "finish", "switch"), sink.events)
+    assertEquals(listOf("char", "char", "finish", "sync", "switch"), sink.events)
   }
 
   @Test
@@ -113,12 +113,36 @@ class ImeCommitDriverTest {
 
     ImeCommitDriver(sink).commit("ab", priorImeId = null)
 
-    assertEquals(listOf("char", "char", "finish"), sink.events)
+    assertEquals(listOf("char", "char", "finish", "sync"), sink.events)
+  }
+
+  @Test
+  fun `editor sync barrier runs before prior IME is restored`() {
+    val sink = FakeImeCommitSink(inputType = InputType.TYPE_CLASS_TEXT)
+
+    val result = ImeCommitDriver(sink).commit("ab", PRIOR_IME_ID)
+
+    assertTrue(result.success)
+    assertTrue(sink.events.indexOf("sync") < sink.events.indexOf("switch"))
+  }
+
+  @Test
+  fun `sync failure reports failure after committing all chars and restores prior IME`() {
+    val sink = FakeImeCommitSink(inputType = InputType.TYPE_CLASS_TEXT, failSync = true)
+
+    val result = ImeCommitDriver(sink).commit("ab", PRIOR_IME_ID)
+
+    assertFalse(result.success)
+    assertEquals("Input connection lost while syncing editor state", result.error)
+    assertEquals(listOf("a", "b"), sink.committedChars)
+    assertEquals(listOf(PRIOR_IME_ID), sink.switchedImeIds)
+    assertFalse("sync" in sink.events)
   }
 
   private class FakeImeCommitSink(
     private val inputType: Int?,
     private val failAtCommitIndex: Int? = null,
+    private val failSync: Boolean = false,
   ) : ImeCommitSink {
     val committedChars = mutableListOf<String>()
     val switchedImeIds = mutableListOf<String>()
@@ -137,6 +161,12 @@ class ImeCommitDriverTest {
 
     override fun finishComposing(): Boolean {
       events.add("finish")
+      return true
+    }
+
+    override fun syncEditorState(): Boolean {
+      if (failSync) return false
+      events.add("sync")
       return true
     }
 

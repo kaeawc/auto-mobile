@@ -216,6 +216,16 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
       override fun finishComposing(): Boolean =
         session.finishComposingForAutomation(connectionAdapter())
 
+      override fun syncEditorState(): Boolean =
+        connectionAdapter()?.let {
+          // Round-trip only: the returned text is intentionally ignored. Its sole purpose is to
+          // block until the app has applied the prior async (oneway) commit ops before we switch
+          // IMEs. A null/empty read (editors without text retrieval, e.g. some custom/WebView
+          // fields) is NOT a failure here; only a missing connection is.
+          it.textBeforeCursor(1)
+          true
+        } ?: false
+
       override fun switchToIme(imeId: String) {
         switchInputMethod(imeId)
       }

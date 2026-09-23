@@ -15,6 +15,12 @@ interface ImeCommitSink {
    */
   fun finishComposing(): Boolean
 
+  /**
+   * Force the target editor to apply all prior async commit ops before we switch IMEs, via a
+   * blocking getTextBeforeCursor round-trip. Returns false if the connection is gone.
+   */
+  fun syncEditorState(): Boolean
+
   /** Switch the system IME back to the given id (InputMethodService.switchInputMethod). */
   fun switchToIme(imeId: String)
 }
@@ -53,6 +59,9 @@ class ImeCommitDriver(private val sink: ImeCommitSink) {
     // already selected this keyboard), and editors that react to commits never see it.
     if (!sink.finishComposing()) {
       return failure("Input connection lost while finishing composition")
+    }
+    if (!sink.syncEditorState()) {
+      return failure("Input connection lost while syncing editor state")
     }
     return ImeCommitResult(success = true, error = null)
   }

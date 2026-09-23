@@ -15,6 +15,15 @@ set -u
 printf '%s\n' "$*" >> "${GH_CALLS:?}"
 
 case "$*" in
+  "api --help"|"api "*"--help"*)
+    # Feature detection: gh >= 2.101.0 lists --allow-escape-sequences; older gh
+    # does not. GH_ALLOW_ESCAPE selects which client this fake emulates.
+    if [[ "${GH_ALLOW_ESCAPE:-supported}" == "supported" ]]; then
+      printf '%s\n' '      --allow-escape-sequences   Allow escape sequences in the output'
+    else
+      printf '%s\n' '      --paginate   Make additional HTTP requests to fetch all pages'
+    fi
+    ;;
   "pr checks "*)
     case "${GH_SCENARIO:?}" in
       no-fail) printf '%s\n' '[{"name":"Build","state":"SUCCESS","bucket":"pass","link":"https://github.com/o/r/actions/runs/100"},{"name":"Skipped","state":"SKIPPED","bucket":"skipping","link":"https://github.com/o/r/actions/runs/200"},{"name":"Cancelled","state":"CANCELLED","bucket":"cancel","link":"https://github.com/o/r/actions/runs/300"}]' ;;
@@ -28,7 +37,19 @@ case "$*" in
       fail-live) printf '%s\n' $'77\tStill running failure' ;;
     esac
     ;;
-  "api repos/kaeawc/auto-mobile/actions/jobs/77/logs")
+  *"actions/jobs/77/logs")
+    # Enforce the flag contract for the emulated client: a supported gh must be
+    # given the flag; an unsupported gh must NOT be (it errors on the unknown
+    # flag). This makes the script's feature detection load-bearing.
+    if [[ "${GH_ALLOW_ESCAPE:-supported}" == "supported" ]]; then
+      if [[ "$*" != *"--allow-escape-sequences"* ]]; then
+        echo "the response contains terminal escape sequences; pass --allow-escape-sequences to output it anyway" >&2
+        exit 1
+      fi
+    elif [[ "$*" == *"--allow-escape-sequences"* ]]; then
+      echo "unknown flag: --allow-escape-sequences" >&2
+      exit 1
+    fi
     case "${GH_SCENARIO:?}" in
       fail-log) printf '%s\n' '##[error] actual failure detail' ;;
       fail-live) printf '%s\n' 'BlobNotFound' >&2; exit 1 ;;
@@ -52,6 +73,7 @@ run_script() {
     PATH="${STUB_DIR}:/opt/homebrew/bin:/usr/bin:/bin" \
     GH_CALLS="${TEST_ROOT}/gh-calls" \
     GH_SCENARIO="$1" \
+    GH_ALLOW_ESCAPE="${2:-supported}" \
     bash "$SCRIPT" 42
 }
 
@@ -64,6 +86,16 @@ run_script() {
   grep -q 'actions/runs/123/jobs' "${TEST_ROOT}/gh-calls"
   ! grep -q 'actions/runs/200/jobs\|actions/runs/300/jobs' "${TEST_ROOT}/gh-calls"
   ! grep -q 'jobs/88' "${TEST_ROOT}/gh-calls"
+}
+
+@test "reads a job log on gh < 2.101.0 that lacks --allow-escape-sequences" {
+  # Feature detection must omit the flag for an older gh; otherwise the log read
+  # fails there and the script falls through to the per-step fallback.
+  run_script fail-log unsupported
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"actual failure detail"* ]]
+  [ -f "scratch/job-77.log" ]
 }
 
 @test "a missing live-job log falls back to per-step status" {

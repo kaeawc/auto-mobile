@@ -167,11 +167,41 @@ read_log_file() {
   fi
 }
 
+# gh >= 2.101.0 refuses to emit a log body containing terminal escape sequences
+# unless --allow-escape-sequences is passed (it exits non-zero and writes
+# nothing, even to a file). Job logs are full of ANSI colour codes, so without
+# the flag on a new client the log comes back empty and every log-based
+# signature silently stops matching. But older gh (< 2.101.0) has no such flag
+# and rejects it as "unknown flag" — while needing no flag to emit the log.
+#
+# Detect support once and record the extra `gh api` args in an array. Keeping the
+# `gh api` call at the call site (an external command, not a function invoked in
+# the `if`) preserves `set -e` there; this helper is a bare statement that always
+# returns 0.
+_gh_escape_args_ready=""
+_gh_escape_args=()
+prepare_gh_escape_args() {
+  [[ -n "$_gh_escape_args_ready" ]] && return 0
+  # Capture help text, then string-match — do NOT pipe into `grep -q`, whose
+  # early close SIGPIPEs `gh` and, under `set -o pipefail`, would misreport the
+  # flag as unsupported.
+  local gh_api_help
+  gh_api_help="$(gh api --help 2>/dev/null || true)"
+  if [[ "$gh_api_help" == *"--allow-escape-sequences"* ]]; then
+    _gh_escape_args=(--allow-escape-sequences)
+  else
+    _gh_escape_args=()
+  fi
+  _gh_escape_args_ready="yes"
+  return 0
+}
+
 fetch_job_log() {
   local job_id="$1"
   local log_file log_text=''
   log_file="$(mktemp "${TMPDIR:-/tmp}/classify-failure-job-log.XXXXXX")"
-  if gh api "repos/${REPO}/actions/jobs/${job_id}/logs" > "$log_file" 2>/dev/null; then
+  prepare_gh_escape_args
+  if gh api ${_gh_escape_args[@]+"${_gh_escape_args[@]}"} "repos/${REPO}/actions/jobs/${job_id}/logs" > "$log_file" 2>/dev/null; then
     log_text="$(read_log_file "$log_file")"
   fi
   rm -f "$log_file"

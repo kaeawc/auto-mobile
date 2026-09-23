@@ -198,7 +198,8 @@ RESTORE_DOCS=()
 cleanup() {
     # Restore/remove staged docs BEFORE deleting the backup dir they restore from.
     local f
-    for f in "${RESTORE_DOCS[@]}"; do
+    # ${arr[@]+…} so an empty array does not trip set -u on bash 3.2 (macOS).
+    for f in ${RESTORE_DOCS[@]+"${RESTORE_DOCS[@]}"}; do
         cp "$SITE_STAGE/orig-$(basename "$f")" "$f" 2>/dev/null || true
     done
     if [[ ${#STAGED_DOCS[@]} -gt 0 ]]; then

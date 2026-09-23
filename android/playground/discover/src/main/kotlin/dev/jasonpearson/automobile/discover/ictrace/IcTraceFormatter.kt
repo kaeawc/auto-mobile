@@ -34,7 +34,9 @@ object IcTraceFormatter {
         '\n' -> append("\\n")
         '\r' -> append("\\r")
         '\t' -> append("\\t")
-        else -> if (char.code < 0x20) append("\\u%04x".format(char.code)) else append(char)
+        else ->
+          if (char.code < 0x20) append(String.format(java.util.Locale.ROOT, "\\u%04x", char.code))
+          else append(char)
       }
     }
     append('"')

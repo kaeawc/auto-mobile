@@ -28,7 +28,10 @@ case "$*" in
       fail-live) printf '%s\n' $'77\tStill running failure' ;;
     esac
     ;;
-  "api repos/kaeawc/auto-mobile/actions/jobs/77/logs")
+  "api --allow-escape-sequences repos/kaeawc/auto-mobile/actions/jobs/77/logs")
+    # gh >= 2.101.0 requires --allow-escape-sequences to emit an ANSI-coloured
+    # log body; the script must pass it, so only the flagged form is matched
+    # here (an unflagged call falls through to the unexpected-call trap).
     case "${GH_SCENARIO:?}" in
       fail-log) printf '%s\n' '##[error] actual failure detail' ;;
       fail-live) printf '%s\n' 'BlobNotFound' >&2; exit 1 ;;

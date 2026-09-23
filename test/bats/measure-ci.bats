@@ -451,7 +451,10 @@ case "$*" in
   # /logs BEFORE /jobs: the log URL is /actions/jobs/<id>/logs and would
   # otherwise be swallowed by the /jobs pattern, silently serving jobs JSON
   # as the log body.
-  *"/logs"*)    echo "line with SENTINEL here" ;;
+  # gh >= 2.101.0 requires --allow-escape-sequences to emit an ANSI-coloured
+  # log body; refuse (like real gh) when the script omits it.
+  *"--allow-escape-sequences"*"/logs"*) echo "line with SENTINEL here" ;;
+  *"/logs"*)    echo "the response contains terminal escape sequences" >&2; exit 1 ;;
   *"/jobs"*)    echo '{"jobs":[{"id":9,"name":"iOS","status":"completed","conclusion":"success","run_attempt":1,"started_at":"2026-07-21T00:00:00Z","completed_at":"2026-07-21T00:01:00Z","steps":[]}]}' ;;
   *"repo view"*) echo "o/r" ;;
   *) echo "" ;;

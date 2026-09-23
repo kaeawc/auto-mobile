@@ -171,7 +171,12 @@ fetch_job_log() {
   local job_id="$1"
   local log_file log_text=''
   log_file="$(mktemp "${TMPDIR:-/tmp}/classify-failure-job-log.XXXXXX")"
-  if gh api "repos/${REPO}/actions/jobs/${job_id}/logs" > "$log_file" 2>/dev/null; then
+  # gh >= 2.101.0 refuses to emit a log body containing terminal escape
+  # sequences unless --allow-escape-sequences is passed (it exits non-zero and
+  # writes nothing, even to a file). Job logs are full of ANSI colour codes, so
+  # without the flag this returns an empty log and every log-based signature
+  # silently stops matching.
+  if gh api --allow-escape-sequences "repos/${REPO}/actions/jobs/${job_id}/logs" > "$log_file" 2>/dev/null; then
     log_text="$(read_log_file "$log_file")"
   fi
   rm -f "$log_file"

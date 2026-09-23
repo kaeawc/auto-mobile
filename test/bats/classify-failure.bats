@@ -30,6 +30,14 @@ gh_args="$*"
 case "$1 $2" in
   'run view') cat "$CLASSIFY_FIXTURE" ;;
   api\ *)
+    # Reproduce gh >= 2.101.0: a job-log body carries terminal escape sequences,
+    # so gh refuses to emit it (non-zero, nothing written) unless
+    # --allow-escape-sequences is passed. This makes every log-based test below
+    # a regression guard for that flag on fetch_job_log.
+    if [[ "$*" == *"/logs" && "$*" != *"--allow-escape-sequences"* ]]; then
+      echo "the response contains terminal escape sequences; pass --allow-escape-sequences to output it anyway" >&2
+      exit 1
+    fi
     case "$*" in
       */check-runs/1/annotations*) annotation_response '[]' ;;
       */actions/jobs/1/logs) printf 'Test exceeded 100ms: timing budget fixture\n' ;;

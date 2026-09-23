@@ -99,7 +99,10 @@ for RUN_ID in $RUN_IDS; do
       echo "--- job ${JOB_ID}: ${JOB_NAME} ---"
       LOG="scratch/job-${JOB_ID}.log"
       # A finished job's log is readable even while sibling jobs still run.
-      if gh api "repos/${REPO}/actions/jobs/${JOB_ID}/logs" >"$LOG" 2>/dev/null; then
+      # --allow-escape-sequences is required by gh >= 2.101.0 to emit a log body
+      # containing ANSI colour codes; without it gh exits non-zero and writes
+      # nothing.
+      if gh api --allow-escape-sequences "repos/${REPO}/actions/jobs/${JOB_ID}/logs" >"$LOG" 2>/dev/null; then
         grep -nE '##\[error\]|not ok |FAIL|error:|Error:' "$LOG" | head -30
         echo "  (full log: ${LOG})"
       else

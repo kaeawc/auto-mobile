@@ -329,8 +329,10 @@ fetch_sentinel_flags() {
   for job_id in $ids; do
     hit=false
     # A 404/410 here means the logs expired; treat that as "not observed"
-    # rather than failing the whole window.
-    if gh api "${API_PREFIX}/actions/jobs/${job_id}/logs" > "$log_file" 2> /dev/null; then
+    # rather than failing the whole window. --allow-escape-sequences is required
+    # by gh >= 2.101.0 to emit a log body carrying ANSI codes; without it gh
+    # exits non-zero and writes nothing, so the sentinel would never be seen.
+    if gh api --allow-escape-sequences "${API_PREFIX}/actions/jobs/${job_id}/logs" > "$log_file" 2> /dev/null; then
       if grep -Eq -- "$SENTINEL" "$log_file"; then
         hit=true
       fi

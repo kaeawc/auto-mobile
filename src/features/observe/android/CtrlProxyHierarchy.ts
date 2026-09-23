@@ -989,7 +989,7 @@ export class CtrlProxyHierarchy {
             .isScreenOn(signal)
             .then((isOn) => {
               screenCheckInProgress = false;
-              if (!isOn) {
+              if (!isOn && !signal?.aborted) {
                 logger.warn(
                   "[CTRL_PROXY] Screen is off - failing fast instead of waiting for timeout",
                 );

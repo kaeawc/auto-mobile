@@ -142,6 +142,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   private attemptedAutomatedSetup: boolean = false;
   private static instances: Map<string, AndroidCtrlProxyManager> = new Map();
   private static expectedChecksumOverride: string | null = null;
+  private static readonly apkOverrideChecksums = new Map<string, Promise<string>>();
   private static accessibilityDetectorOverride: AccessibilityDetector | null = null;
 
   // Static prefetch state for APK download optimization
@@ -236,6 +237,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
    */
   public static resetInstances(): void {
     AndroidCtrlProxyManager.instances.clear();
+    AndroidCtrlProxyManager.apkOverrideChecksums.clear();
   }
 
   /**
@@ -1041,7 +1043,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
    * Check if installed APK SHA256 matches expected release checksum.
    */
   async isVersionCompatible(): Promise<boolean> {
-    const expectedSha = this.getExpectedChecksum();
+    const expectedSha = await this.getExpectedChecksum();
     if (expectedSha.length === 0) {
       logger.warn("[CTRL_PROXY] Version check skipped (no checksum provided)");
       return true;
@@ -1079,7 +1081,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     await this.uninstallLegacyPackageIfPresent();
     perf.endOperation("uninstallLegacy");
 
-    const expectedSha = this.getExpectedChecksum();
+    const expectedSha = await this.getExpectedChecksum();
     if (expectedSha.length === 0) {
       if (options.allowDownloadWhenInstalled) {
         logger.warn(
@@ -1384,7 +1386,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
 
       this.verifyApkIntegrity(apkPath);
 
-      const expectedChecksum = this.getExpectedChecksum();
+      const expectedChecksum = await this.getExpectedChecksum();
       // Perform checksum verification (only if checksum is provided)
       if (expectedChecksum.length > 0) {
         perf.startOperation("checksumVerify");
@@ -2161,11 +2163,36 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     }
   }
 
-  private getExpectedChecksum(): string {
+  private async getExpectedChecksum(): Promise<string> {
     if (this.shouldSkipChecksum()) {
       return "";
     }
-    return AndroidCtrlProxyManager.expectedChecksumOverride ?? resolveApkChecksum();
+    if (AndroidCtrlProxyManager.expectedChecksumOverride !== null) {
+      return AndroidCtrlProxyManager.expectedChecksumOverride;
+    }
+
+    const overridePath = this.getApkPathOverride();
+    if (!overridePath) {
+      return resolveApkChecksum();
+    }
+
+    try {
+      let checksumPromise = AndroidCtrlProxyManager.apkOverrideChecksums.get(overridePath);
+      if (!checksumPromise) {
+        checksumPromise = this.checksumCalculator
+          .computeFileSha256(overridePath)
+          .then(({ checksum }) => checksum.toLowerCase());
+        AndroidCtrlProxyManager.apkOverrideChecksums.set(overridePath, checksumPromise);
+      }
+      return await checksumPromise;
+    } catch (error) {
+      AndroidCtrlProxyManager.apkOverrideChecksums.delete(overridePath);
+      logger.warn("[CTRL_PROXY] Unable to hash local APK override; skipping checksum comparison", {
+        path: overridePath,
+        error: errorMessage(error),
+      });
+      return "";
+    }
   }
 
   /**
@@ -2257,12 +2284,16 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   }
 
   private shouldSkipChecksum(): boolean {
-    return AndroidCtrlProxyManager.isChecksumSkipConfigured();
+    // @deprecated AUTO_MOBILE_ACCESSIBILITY_SERVICE_SHA_SKIP_CHECK - use AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM instead
+    const explicitSkip =
+      process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM ??
+      process.env.AUTO_MOBILE_ACCESSIBILITY_SERVICE_SHA_SKIP_CHECK;
+    return Boolean(explicitSkip && (explicitSkip === "1" || explicitSkip.toLowerCase() === "true"));
   }
 
   /**
-   * Env-only view of the checksum-skip escape hatches, usable from the static
-   * prefetch path (which has no instance). Mirrors {@link shouldSkipChecksum}.
+   * Env-only view of the checksum-skip and local APK pin escape hatches,
+   * usable from the static prefetch path (which has no instance).
    */
   private static isChecksumSkipConfigured(): boolean {
     // @deprecated AUTO_MOBILE_ACCESSIBILITY_SERVICE_SHA_SKIP_CHECK - use AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM instead

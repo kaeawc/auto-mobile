@@ -164,8 +164,8 @@
   color: var(--md-accent-fg-color);
 }
 
-/* Demo gifs inside example-prompt tabs. */
-.md-typeset img.example-demo {
+/* Demo gifs under each example prompt. */
+.md-typeset .example-demo img {
   border: 1px solid var(--md-default-fg-color--lightest);
   border-radius: 0.5rem;
   display: block;
@@ -174,11 +174,38 @@
   width: auto;
 }
 
-/* Nested platform tabs (Android/iOS inside each example). content.tabs.link
-   re-selects the active platform when a previously-hidden example becomes
-   visible; with Material's animated underline this looked like the indicator
-   sliding from Android to iOS on every example switch. Make the nested
-   indicator jump instantly. The outer example tabs keep their animation. */
-.md-typeset .tabbed-content .tabbed-set > .tabbed-labels::before {
-  transition: none;
+/* Homepage install section (index.md). */
+.install-command {
+  max-width: 42rem;
+}
+
+.install-command code {
+  font-size: 0.72rem;
+}
+
+.desktop-install-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin: 0.75rem 0 1.5rem;
+}
+
+.desktop-install-options a {
+  border: 1px solid var(--md-default-fg-color--lighter);
+  border-radius: 0.5rem;
+  color: var(--md-default-fg-color);
+  min-width: 9rem;
+  padding: 0.5rem 0.75rem;
+  text-align: center;
+  text-decoration: none;
+}
+
+.desktop-install-options a:hover {
+  border-color: var(--md-accent-fg-color);
+}
+
+.desktop-install-options span {
+  color: var(--md-default-fg-color--light);
+  display: block;
+  font-size: 0.7rem;
 }

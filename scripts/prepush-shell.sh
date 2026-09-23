@@ -470,6 +470,10 @@ for path in "${changed_files[@]}"; do
   case "${path}" in
     mkdocs.yml|docs/*)
       add_check "mkdocs-nav"
+      add_check "docs-github-markdown"
+      ;;
+    CHANGELOG.md|.github/CONTRIBUTING.md)
+      add_check "docs-github-markdown"
       ;;
   esac
 
@@ -513,6 +517,10 @@ for path in "${changed_files[@]}"; do
       ;;
     scripts/github/uv.lock|scripts/github/pyproject.toml)
       add_check "github-python-lock"
+      add_check "docs-github-markdown"
+      ;;
+    scripts/github/auto_mobile_docs/*|scripts/github/tests/*)
+      add_check "docs-github-markdown"
       ;;
   esac
 

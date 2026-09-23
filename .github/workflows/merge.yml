@@ -713,6 +713,16 @@ jobs:
         run: |
           scripts/validate_mkdocs_nav.sh
 
+      - name: "Install uv for docs Markdown validation"
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: "Validate docs/ GitHub Markdown"
+        shell: "bash"
+        run: |
+          scripts/validate_docs_github_markdown.sh
+
   validate-claude-plugin:
     name: "Validate Claude Plugin"
     runs-on: ubuntu-latest

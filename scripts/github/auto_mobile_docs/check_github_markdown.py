@@ -1,0 +1,150 @@
+"""Reject MkDocs-only Markdown in docs/ so pages also render on github.com.
+
+Rather than pattern-matching source lines, render each page with the site's
+own Markdown configuration (from mkdocs.yml) and again with one MkDocs-only
+extension removed. If the output differs, the page uses that extension's
+syntax, which GitHub shows as literal text. Fenced code, inline code,
+blockquotes, and lists are therefore handled by the same parser that builds
+the site. Raw <style>/<script> elements are found in the rendered HTML,
+where code examples are already escaped.
+
+Usage: python -m auto_mobile_docs.check_github_markdown [mkdocs.yml] [docs dir]
+
+With the default docs dir, also checks the files deploy_pages.py copies into
+docs/ at build time.
+"""
+
+import sys
+from html.parser import HTMLParser
+from pathlib import Path
+
+import markdown
+
+# Extension -> what to use instead. Only those enabled in mkdocs.yml matter:
+# a disabled extension renders its syntax literally on the site as well.
+MKDOCS_ONLY = {
+    "admonition": "!!! admonition (use > [!NOTE])",
+    "pymdownx.details": '??? collapsible (use <details markdown="1">)',
+    "pymdownx.tabbed": '=== "Tab" (use headings)',
+    "pymdownx.blocks.tab": "/// tab block (use headings)",
+    "pymdownx.blocks.admonition": "/// admonition block (use > [!NOTE])",
+    "pymdownx.blocks.details": '/// details block (use <details markdown="1">)',
+    "attr_list": '{ .class } / { key=value } attr list (use <div class="..." markdown> or HTML)',
+    "pymdownx.snippets": "--8<-- snippet include (link or inline the content)",
+    "pymdownx.inlinehilite": "`#!lang code` inline highlighting (use plain `code`)",
+    "pymdownx.caret": "^^insert^^ / ^superscript^ (use <ins> / <sup>)",
+    "pymdownx.tilde": "~~delete~~ / ~subscript~ (use <sub>)",
+    "pymdownx.mark": "==mark== (use <mark>)",
+    "def_list": "definition list (use a table or bullets)",
+    "meta": "Key: value metadata header (GitHub shows it as text; remove it)",
+}
+
+
+class _CodeText(HTMLParser):
+    """Collects the text of each <pre> block, ignoring highlighting markup."""
+
+    def __init__(self):
+        super().__init__()
+        self.blocks = []
+        self._depth = 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "pre":
+            self._depth += 1
+            if self._depth == 1:
+                self.blocks.append("")
+
+    def handle_endtag(self, tag):
+        if tag == "pre" and self._depth:
+            self._depth -= 1
+
+    def handle_data(self, data):
+        if self._depth:
+            self.blocks[-1] += data
+
+
+def code_text(html):
+    parser = _CodeText()
+    parser.feed(html)
+    return [block.strip("\n") for block in parser.blocks]
+
+
+class _RawTagFinder(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.found = set()
+
+    def handle_starttag(self, tag, attrs):
+        if tag in ("style", "script"):
+            self.found.add(tag)
+
+
+def load_markdown_settings(config_file):
+    from mkdocs.config import load_config
+
+    config = load_config(config_file=str(config_file))
+    names = [ext for ext in config.markdown_extensions if isinstance(ext, str)]
+    return names, config.mdx_configs
+
+
+def render(text, names, configs):
+    return markdown.Markdown(
+        extensions=names,
+        extension_configs={k: v for k, v in configs.items() if k in names},
+    ).convert(text)
+
+
+def check_text(text, names, configs):
+    """Return the MkDocs-only constructs a page uses, as human-readable reasons."""
+    full = render(text, names, configs)
+    reasons = [
+        MKDOCS_ONLY[ext]
+        for ext in names
+        if ext in MKDOCS_ONLY and render(text, [n for n in names if n != ext], configs) != full
+    ]
+    # CodeHilite drops a leading `#!lang` / `:::lang` line from indented code
+    # blocks. Removing it changes all highlighting markup, so compare only
+    # the code text.
+    if "codehilite" in names and code_text(
+        render(text, [n for n in names if n != "codehilite"], configs)
+    ) != code_text(full):
+        reasons.append("#!lang / :::lang first line in an indented code block (use a fenced block)")
+    # Removing `toc` would also drop heading permalinks, so disable only its
+    # marker ([TOC] by default) and compare.
+    if "toc" in names:
+        no_marker = {**configs, "toc": {**configs.get("toc", {}), "marker": ""}}
+        if render(text, names, no_marker) != full:
+            reasons.append("[TOC] marker (GitHub shows it as text; remove it)")
+    finder = _RawTagFinder()
+    finder.feed(full)
+    reasons += [f"inline <{tag}> (move to docs/assets via mkdocs.yml)" for tag in sorted(finder.found)]
+    return reasons
+
+
+# Copied into docs/ by deploy_pages.py right before the deployed build.
+DEPLOY_COPIED = ("CHANGELOG.md", ".github/CONTRIBUTING.md")
+
+
+def main(argv):
+    root = Path(__file__).resolve().parents[3]
+    config_file = Path(argv[1]) if len(argv) > 1 else root / "mkdocs.yml"
+    docs_dir = Path(argv[2]) if len(argv) > 2 else root / "docs"
+    pages = sorted(docs_dir.rglob("*.md"))
+    if len(argv) <= 2:
+        pages += [root / name for name in DEPLOY_COPIED if (root / name).exists()]
+    names, configs = load_markdown_settings(config_file)
+    failures = [
+        f"{page}: {reason}"
+        for page in pages
+        for reason in check_text(page.read_text(encoding="utf-8"), names, configs)
+    ]
+    if failures:
+        print("error: MkDocs-only syntax in docs/ breaks GitHub rendering:", file=sys.stderr)
+        print("\n".join(failures), file=sys.stderr)
+        return 1
+    print("docs/ Markdown is GitHub-compatible.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

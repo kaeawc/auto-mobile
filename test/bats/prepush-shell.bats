@@ -547,6 +547,15 @@ EOF
   grep -Fqx -- '--only stdlib-first,github-python-lock,docs-github-markdown' "${FAST_LOG}"
 }
 
+@test "changed deploy-copied docs sources select docs-github-markdown" {
+  commit_change "CHANGELOG.md" "# Changelog"
+
+  run bash scripts/prepush-shell.sh --base base
+
+  [ "${status}" -eq 0 ]
+  grep -Fqx -- '--only docs-github-markdown' "${FAST_LOG}"
+}
+
 @test "changed docs Markdown checker sources select docs-github-markdown" {
   commit_change "scripts/github/auto_mobile_docs/github_alerts.py" "# fixture"
 

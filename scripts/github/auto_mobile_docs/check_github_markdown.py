@@ -9,6 +9,9 @@ the site. Raw <style>/<script> elements are found in the rendered HTML,
 where code examples are already escaped.
 
 Usage: python -m auto_mobile_docs.check_github_markdown [mkdocs.yml] [docs dir]
+
+With the default docs dir, also checks the files deploy_pages.py copies into
+docs/ at build time.
 """
 
 import sys
@@ -118,14 +121,21 @@ def check_text(text, names, configs):
     return reasons
 
 
+# Copied into docs/ by deploy_pages.py right before the deployed build.
+DEPLOY_COPIED = ("CHANGELOG.md", ".github/CONTRIBUTING.md")
+
+
 def main(argv):
     root = Path(__file__).resolve().parents[3]
     config_file = Path(argv[1]) if len(argv) > 1 else root / "mkdocs.yml"
     docs_dir = Path(argv[2]) if len(argv) > 2 else root / "docs"
+    pages = sorted(docs_dir.rglob("*.md"))
+    if len(argv) <= 2:
+        pages += [root / name for name in DEPLOY_COPIED if (root / name).exists()]
     names, configs = load_markdown_settings(config_file)
     failures = [
         f"{page}: {reason}"
-        for page in sorted(docs_dir.rglob("*.md"))
+        for page in pages
         for reason in check_text(page.read_text(encoding="utf-8"), names, configs)
     ]
     if failures:

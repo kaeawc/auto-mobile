@@ -472,6 +472,9 @@ for path in "${changed_files[@]}"; do
       add_check "mkdocs-nav"
       add_check "docs-github-markdown"
       ;;
+    CHANGELOG.md|.github/CONTRIBUTING.md)
+      add_check "docs-github-markdown"
+      ;;
   esac
 
   case "${path}" in

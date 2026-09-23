@@ -114,6 +114,11 @@ class ConfigurableTypingPolicy(private val behavior: TypingBehavior) : TypingPol
       snapshot.selectionStart < snapshot.composingStart ||
       snapshot.selectionStart > snapshot.composingEnd
 
+  // KNOWN LIMITATION (#7463): after re-composing a word the cursor landed inside, the buffer
+  // holds the whole word, but a following onText appends to its END instead of inserting at the
+  // caret, because ImeOp.SetComposingText carries no cursor position. A fix must thread a caret
+  // offset through SetComposingText and match InputConnection.setComposingText's newCursorPosition
+  // semantics, which need on-device verification.
   private fun recomposeWordAtCursor(snapshot: TextSnapshot): ImeOp.SetComposingRegion? {
     val before = snapshot.textBeforeCursor.takeLastWhile { it.isWordChar() }
     val after = snapshot.textAfterCursor.takeWhile { it.isWordChar() }

@@ -73,6 +73,7 @@ jobs:
             const docPatterns = [
               /\.md$/,                    // **/*.md
               /^docs\//,                  // docs/**
+              /^docs-assets\//,           // docs-assets/** — browser asset TS sources; generated JS lands under docs/
               /^docs\/.*\.(gif|png|webp)$/i, // docs/**/*.{gif,png,webp}
               /^mkdocs\.yml$/,            // mkdocs.yml
               /^\.lycherc\.toml$/         // .lycherc.toml
@@ -172,6 +173,7 @@ jobs:
             const docPatterns = [
               /\.md$/,
               /^docs\//,
+              /^docs-assets\//,           // browser asset TS sources; generated JS lands under docs/
               /^docs\/.*\.(gif|png|webp)$/i,
               /^mkdocs\.yml$/,
               /^\.lycherc\.toml$/

@@ -16,6 +16,31 @@ if [ -z "$PR_NUM" ]; then
   exit 1
 fi
 
+# gh >= 2.101.0 requires --allow-escape-sequences to emit a job-log body carrying
+# ANSI codes (without it, it exits non-zero and writes nothing); older gh has no
+# such flag and rejects it as "unknown flag" while needing none. Detect support
+# once and run the request the way this client understands.
+_gh_allow_escape_supported=""
+gh_api_log() {
+  if [[ -z "$_gh_allow_escape_supported" ]]; then
+    # Capture help text, then string-match — do NOT pipe into `grep -q`, whose
+    # early close SIGPIPEs `gh` and, under `set -o pipefail`, would misreport the
+    # flag as unsupported.
+    local gh_api_help
+    gh_api_help="$(gh api --help 2>/dev/null || true)"
+    if [[ "$gh_api_help" == *"--allow-escape-sequences"* ]]; then
+      _gh_allow_escape_supported="yes"
+    else
+      _gh_allow_escape_supported="no"
+    fi
+  fi
+  if [[ "$_gh_allow_escape_supported" == "yes" ]]; then
+    gh api --allow-escape-sequences "$@"
+  else
+    gh api "$@"
+  fi
+}
+
 echo "=== CI status for PR #${PR_NUM} ==="
 
 # Bucket is gh's normalized state: pass | fail | pending | skipping | cancel.
@@ -99,10 +124,7 @@ for RUN_ID in $RUN_IDS; do
       echo "--- job ${JOB_ID}: ${JOB_NAME} ---"
       LOG="scratch/job-${JOB_ID}.log"
       # A finished job's log is readable even while sibling jobs still run.
-      # --allow-escape-sequences is required by gh >= 2.101.0 to emit a log body
-      # containing ANSI colour codes; without it gh exits non-zero and writes
-      # nothing.
-      if gh api --allow-escape-sequences "repos/${REPO}/actions/jobs/${JOB_ID}/logs" >"$LOG" 2>/dev/null; then
+      if gh_api_log "repos/${REPO}/actions/jobs/${JOB_ID}/logs" >"$LOG" 2>/dev/null; then
         grep -nE '##\[error\]|not ok |FAIL|error:|Error:' "$LOG" | head -30
         echo "  (full log: ${LOG})"
       else

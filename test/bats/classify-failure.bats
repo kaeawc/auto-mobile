@@ -30,13 +30,30 @@ gh_args="$*"
 case "$1 $2" in
   'run view') cat "$CLASSIFY_FIXTURE" ;;
   api\ *)
-    # Reproduce gh >= 2.101.0: a job-log body carries terminal escape sequences,
-    # so gh refuses to emit it (non-zero, nothing written) unless
-    # --allow-escape-sequences is passed. This makes every log-based test below
-    # a regression guard for that flag on fetch_job_log.
-    if [[ "$*" == *"/logs" && "$*" != *"--allow-escape-sequences"* ]]; then
-      echo "the response contains terminal escape sequences; pass --allow-escape-sequences to output it anyway" >&2
-      exit 1
+    # Model gh's flag-sensitivity so fetch_job_log's feature detection is
+    # exercised. FAKE_GH_ALLOW_ESCAPE selects the client:
+    #   supported (default) = gh >= 2.101.0: --help lists the flag, and a job-log
+    #     request REFUSES (non-zero, nothing written) unless the flag is passed.
+    #   unsupported          = gh < 2.101.0: --help omits the flag, and passing
+    #     it is an "unknown flag" error; the log emits only WITHOUT the flag.
+    if [[ "$*" == *"--help"* ]]; then
+      if [[ "${FAKE_GH_ALLOW_ESCAPE:-supported}" == "supported" ]]; then
+        printf '%s\n' '      --allow-escape-sequences   Allow escape sequences in the output'
+      else
+        printf '%s\n' '      --paginate   Make additional HTTP requests to fetch all pages'
+      fi
+      exit 0
+    fi
+    if [[ "$*" == *"/logs" ]]; then
+      if [[ "${FAKE_GH_ALLOW_ESCAPE:-supported}" == "supported" ]]; then
+        if [[ "$*" != *"--allow-escape-sequences"* ]]; then
+          echo "the response contains terminal escape sequences; pass --allow-escape-sequences to output it anyway" >&2
+          exit 1
+        fi
+      elif [[ "$*" == *"--allow-escape-sequences"* ]]; then
+        echo "unknown flag: --allow-escape-sequences" >&2
+        exit 1
+      fi
     fi
     case "$*" in
       */check-runs/1/annotations*) annotation_response '[]' ;;
@@ -238,6 +255,25 @@ JSON
 JSON
 
   run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" bash "$SCRIPT" 654
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Run JUnit Runner Emulator Tests → Run AutoMobile tests that require emulator → none → RERUN-DONT-FIX"* ]]
+}
+
+@test "reads job logs on gh < 2.101.0 that lacks --allow-escape-sequences" {
+  # Feature detection must OMIT the flag on an older gh that rejects it as an
+  # unknown flag, or every job-log read would fail there and log-based
+  # signatures would silently stop matching. Same fixture as above, older client.
+  fixture="$BATS_TEST_TMPDIR/junit-emulator-old-gh-run.json"
+  cat > "$fixture" <<'JSON'
+{
+  "headBranch": "work/android-emulator",
+  "jobs": [
+    {"databaseId": 6, "name": "Run JUnit Runner Emulator Tests", "conclusion": "failure", "steps": [{"name": "Run AutoMobile tests that require emulator", "conclusion": "failure"}]}
+  ]
+}
+JSON
+
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" FAKE_GH_ALLOW_ESCAPE=unsupported bash "$SCRIPT" 656
   [ "$status" -eq 0 ]
   [[ "$output" == *"Run JUnit Runner Emulator Tests → Run AutoMobile tests that require emulator → none → RERUN-DONT-FIX"* ]]
 }

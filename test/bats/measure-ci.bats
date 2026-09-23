@@ -447,14 +447,33 @@ bundle_from_durations() {
   cat > "${TEST_ROOT}/bin/gh" <<'SHIM'
 #!/bin/sh
 case "$*" in
+  # Feature detection: a new gh (>= 2.101.0) lists --allow-escape-sequences in
+  # `gh api --help`; an older gh does not. GH_ALLOW_ESCAPE selects the client.
+  *"--help"*)
+    if [ "${GH_ALLOW_ESCAPE:-supported}" = "supported" ]; then
+      echo '      --allow-escape-sequences   Allow escape sequences in the output'
+    else
+      echo '      --paginate   Make additional HTTP requests to fetch all pages'
+    fi
+    ;;
   *"run list"*) echo '[{"databaseId":111,"headSha":"abc","createdAt":"2026-07-21T00:00:00Z","conclusion":"success","status":"completed","headBranch":"m","displayTitle":"t","attempt":1}]' ;;
   # /logs BEFORE /jobs: the log URL is /actions/jobs/<id>/logs and would
   # otherwise be swallowed by the /jobs pattern, silently serving jobs JSON
-  # as the log body.
-  # gh >= 2.101.0 requires --allow-escape-sequences to emit an ANSI-coloured
-  # log body; refuse (like real gh) when the script omits it.
-  *"--allow-escape-sequences"*"/logs"*) echo "line with SENTINEL here" ;;
-  *"/logs"*)    echo "the response contains terminal escape sequences" >&2; exit 1 ;;
+  # as the log body. Enforce the flag contract of the emulated client: a new gh
+  # refuses the log body without the flag; an old gh errors when given it.
+  *"/logs"*)
+    if [ "${GH_ALLOW_ESCAPE:-supported}" = "supported" ]; then
+      case "$*" in
+        *"--allow-escape-sequences"*) echo "line with SENTINEL here" ;;
+        *) echo "the response contains terminal escape sequences" >&2; exit 1 ;;
+      esac
+    else
+      case "$*" in
+        *"--allow-escape-sequences"*) echo "unknown flag: --allow-escape-sequences" >&2; exit 1 ;;
+        *) echo "line with SENTINEL here" ;;
+      esac
+    fi
+    ;;
   *"/jobs"*)    echo '{"jobs":[{"id":9,"name":"iOS","status":"completed","conclusion":"success","run_attempt":1,"started_at":"2026-07-21T00:00:00Z","completed_at":"2026-07-21T00:01:00Z","steps":[]}]}' ;;
   *"repo view"*) echo "o/r" ;;
   *) echo "" ;;
@@ -474,6 +493,13 @@ SHIM
 
   # The sentinel must actually have been measured, not inherited as null.
   [ "$(jq -r '.meta.sentinel' "${TEST_ROOT}/b2.json")" = "SENTINEL" ]
+
+  # Older gh (< 2.101.0): detection must omit --allow-escape-sequences and still
+  # read the log, so the sentinel is measured on that client too.
+  run env PATH="${TEST_ROOT}/bin:$PATH" GH_ALLOW_ESCAPE=unsupported bash -c \
+    "bash '$SCRIPT' --cache '${TEST_ROOT}/c2.json' --sentinel SENTINEL --sentinel-job iOS --fetch-only --limit 1 > '${TEST_ROOT}/b3.json'"
+  assert_ok
+  [ "$(jq -r '.meta.sentinel' "${TEST_ROOT}/b3.json")" = "SENTINEL" ]
   [ "$(jq -r '.runs[0].jobs[0].sentinel' "${TEST_ROOT}/b2.json")" = "true" ]
 }
 

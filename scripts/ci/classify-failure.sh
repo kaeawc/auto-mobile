@@ -167,16 +167,39 @@ read_log_file() {
   fi
 }
 
+# gh >= 2.101.0 refuses to emit a log body containing terminal escape sequences
+# unless --allow-escape-sequences is passed (it exits non-zero and writes
+# nothing, even to a file). Job logs are full of ANSI colour codes, so without
+# the flag on a new client the log comes back empty and every log-based
+# signature silently stops matching. But older gh (< 2.101.0) has no such flag
+# and rejects it as "unknown flag" — while needing no flag to emit the log. So
+# detect support once and run the request the way this client understands.
+_gh_allow_escape_supported=""
+gh_api_log() {
+  if [[ -z "$_gh_allow_escape_supported" ]]; then
+    # Capture help text, then string-match — do NOT pipe into `grep -q`, whose
+    # early close SIGPIPEs `gh` and, under `set -o pipefail`, would misreport the
+    # flag as unsupported.
+    local gh_api_help
+    gh_api_help="$(gh api --help 2>/dev/null || true)"
+    if [[ "$gh_api_help" == *"--allow-escape-sequences"* ]]; then
+      _gh_allow_escape_supported="yes"
+    else
+      _gh_allow_escape_supported="no"
+    fi
+  fi
+  if [[ "$_gh_allow_escape_supported" == "yes" ]]; then
+    gh api --allow-escape-sequences "$@"
+  else
+    gh api "$@"
+  fi
+}
+
 fetch_job_log() {
   local job_id="$1"
   local log_file log_text=''
   log_file="$(mktemp "${TMPDIR:-/tmp}/classify-failure-job-log.XXXXXX")"
-  # gh >= 2.101.0 refuses to emit a log body containing terminal escape
-  # sequences unless --allow-escape-sequences is passed (it exits non-zero and
-  # writes nothing, even to a file). Job logs are full of ANSI colour codes, so
-  # without the flag this returns an empty log and every log-based signature
-  # silently stops matching.
-  if gh api --allow-escape-sequences "repos/${REPO}/actions/jobs/${job_id}/logs" > "$log_file" 2>/dev/null; then
+  if gh_api_log "repos/${REPO}/actions/jobs/${job_id}/logs" > "$log_file" 2>/dev/null; then
     log_text="$(read_log_file "$log_file")"
   fi
   rm -f "$log_file"

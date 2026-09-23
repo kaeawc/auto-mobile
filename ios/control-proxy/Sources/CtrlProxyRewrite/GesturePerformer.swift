@@ -872,9 +872,7 @@ public final class GesturePerformer: GesturePerforming {
             case "backspace":
                 keyboardKey = .delete
             case "delete":
-                // XCTest's named constants have varied by SDK. U+F728 is the
-                // stable Cocoa forward-delete function-key value used by typeKey.
-                keyboardKey = XCUIKeyboardKey(rawValue: "\u{F728}")
+                keyboardKey = .forwardDelete
             case "arrow_up":
                 keyboardKey = .upArrow
             case "arrow_down":
@@ -911,13 +909,20 @@ public final class GesturePerformer: GesturePerforming {
 
             try catchingObjCException {
                 if isDestructiveKey {
-                    // typeKey accepts these function keys without delivering them to the
-                    // simulator's software keyboard. typeText reaches the first responder,
-                    // but XCUITest cannot attach modifier flags to that delivery path.
+                    // Target the focused field: app-level key delivery has not reliably
+                    // reached it. Backspace uses text insertion; forward delete needs a key event.
                     if let focusedElement {
-                        focusedElement.typeText(keyboardKey.rawValue)
+                        if normalizedKey == "backspace" {
+                            focusedElement.typeText(keyboardKey.rawValue)
+                        } else {
+                            focusedElement.typeKey(keyboardKey, modifierFlags: [])
+                        }
                     } else {
-                        app.typeText(keyboardKey.rawValue)
+                        if normalizedKey == "backspace" {
+                            app.typeText(keyboardKey.rawValue)
+                        } else {
+                            app.typeKey(keyboardKey, modifierFlags: [])
+                        }
                     }
                 } else {
                     app.typeKey(keyboardKey, modifierFlags: modifierFlags)
@@ -928,12 +933,13 @@ public final class GesturePerformer: GesturePerforming {
                 return
             }
 
+            let expectedLength = valueBeforeKeyPress.count - 1
             let deadline = Date().addingTimeInterval(1.0)
             while Date() < deadline {
                 guard focusedElement.exists, let valueAfterKeyPress = focusedElement.value as? String else {
                     return
                 }
-                if valueAfterKeyPress != valueBeforeKeyPress {
+                if valueAfterKeyPress.count == expectedLength {
                     return
                 }
                 RunLoop.current.run(until: Date().addingTimeInterval(0.05))
@@ -942,8 +948,10 @@ public final class GesturePerformer: GesturePerforming {
             guard focusedElement.exists, let valueAfterKeyPress = focusedElement.value as? String else {
                 return
             }
-            if valueAfterKeyPress == valueBeforeKeyPress {
-                throw GestureError.gestureFailed("Key '\(key)' was not delivered: field value did not change")
+            if valueAfterKeyPress.count != expectedLength {
+                throw GestureError.gestureFailed(
+                    "Key '\(key)' did not delete exactly one character: expected length \(expectedLength), observed \(valueAfterKeyPress.count)"
+                )
             }
         }
 

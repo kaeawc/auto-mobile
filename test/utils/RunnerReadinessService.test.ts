@@ -685,6 +685,35 @@ describe("RunnerReadinessService", () => {
     expect(timer.now()).toBe(0);
   });
 
+  test("aborts the health loop promptly instead of running to the runner-health deadline", async () => {
+    const controller = new AbortController();
+    const reason = new Error("caller cancelled health check");
+    const androidClient = new FakeReadinessClient();
+    androidClient.healthResults = Array.from({ length: 30 }, () => false);
+    androidClient.verifyServiceReady = async () => {
+      androidClient.healthCalls++;
+      if (androidClient.healthCalls === 2) {
+        controller.abort(reason);
+      }
+      return androidClient.healthResults.shift() ?? false;
+    };
+    const { service, timer } = createService({ androidClient });
+    const startTime = timer.now();
+
+    await expect(
+      service.ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "android",
+        totalDeadlineMs: 400_000,
+        readinessTimeoutMs: 360_000,
+        signal: controller.signal,
+      }),
+    ).rejects.toBe(reason);
+
+    expect(timer.now() - startTime).toBeLessThan(180_000);
+    expect(androidClient.healthCalls).toBeLessThan(androidClient.healthResults.length + 2);
+  });
+
   test("does not let a permanent framework inspection failure prevent readiness", async () => {
     const controller = new AbortController();
     const { service } = createService({

@@ -935,6 +935,7 @@ export class RunnerReadinessService {
     let phase: RunnerReadinessPhase = connected ? "runner-health" : "runner-connect";
     let lastSystemUiProbeMs = Number.NEGATIVE_INFINITY;
     while (this.remainingForPhase(context, "runner-health") > 0) {
+      this.throwIfCallerCancelled(context);
       attempts++;
       connected = client.isConnected();
       if (!connected) {

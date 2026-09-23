@@ -10,6 +10,7 @@ import {
 } from "../../../src/features/action/SendKeys";
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import { defaultTimer } from "../../../src/utils/SystemTimer";
 
 const androidDevice: BootedDevice = {
   deviceId: "emulator-5554",
@@ -469,6 +470,77 @@ describe("DefaultSendKeysCommandExecutor", () => {
     expect(textClient.commitViaImeCalls).toEqual([{ text: "value", priorImeId }]);
     expect(events.at(-2)).toBe("commit:rejected");
     expect(events.at(-1)).toBe(`adb:shell ime set ${priorImeId}`);
+  });
+
+  test("serializes overlapping ime-mode calls on one device so capture/restore never interleave (#7464)", async () => {
+    const device: BootedDevice = { ...androidDevice, deviceId: "emulator-overlap-7464" };
+    const events: string[] = [];
+    const adb = new FakeAdbExecutor();
+    // Two full commits: each reads default_input_method twice (capture + verify).
+    adb.setCommandResponseSequence("shell settings get secure default_input_method", [
+      { stdout: priorImeId, stderr: "" },
+      { stdout: commitImeId, stderr: "" },
+      { stdout: priorImeId, stderr: "" },
+      { stdout: commitImeId, stderr: "" },
+    ]);
+    const executeCommand = adb.executeCommand.bind(adb);
+    adb.executeCommand = async (command, ...options) => {
+      events.push(`adb:${command}`);
+      return executeCommand(command, ...options);
+    };
+    let releaseFirst!: () => void;
+    const firstCommitGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const textClient = createTextClient({
+      commitViaIme: async (text) => {
+        events.push(`commit:${text}`);
+        if (text === "first") {
+          await firstCommitGate;
+        }
+        events.push(`commit-done:${text}`);
+        return { success: true };
+      },
+    });
+    const makeExecutor = () =>
+      new DefaultSendKeysCommandExecutor(device, createAdbFactory(adb), createObserver(), {
+        textClient: textClient.client,
+      });
+    const waitFor = async (predicate: () => boolean) => {
+      for (let i = 0; i < 200; i++) {
+        if (predicate()) {
+          return;
+        }
+        await defaultTimer.sleep(5);
+      }
+      throw new Error("condition not met in time");
+    };
+
+    const first = makeExecutor().type({ action: "type", text: "first", mode: "ime" });
+    // Call 1 holds the per-device lock and parks at its commit.
+    await waitFor(() => events.includes("commit:first"));
+    const snapshotAtBlock = [...events];
+
+    const second = makeExecutor().type({ action: "type", text: "second", mode: "ime" });
+    // Give call 2 every chance to progress; the lock must keep it from doing anything.
+    for (let i = 0; i < 5; i++) {
+      await defaultTimer.sleep(5);
+    }
+    expect(events).toEqual(snapshotAtBlock);
+
+    releaseFirst();
+    expect((await first).success).toBe(true);
+    expect((await second).success).toBe(true);
+
+    // No interleave: call 2 does nothing until call 1 has fully restored.
+    const firstRestoreIdx = events.indexOf(`adb:shell ime set ${priorImeId}`);
+    const secondCaptureIdx = events.indexOf(
+      "adb:shell settings get secure default_input_method",
+      firstRestoreIdx,
+    );
+    expect(firstRestoreIdx).toBeGreaterThan(0);
+    expect(secondCaptureIdx).toBeGreaterThan(firstRestoreIdx);
+    expect(events.indexOf("commit:second")).toBeGreaterThan(events.indexOf("commit-done:first"));
   });
 
   test("eventOnly replacement rejects unavailable text before mutation but accepts empty text", async () => {

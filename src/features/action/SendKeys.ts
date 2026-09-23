@@ -1,3 +1,4 @@
+import { Mutex } from "async-mutex";
 import type { BootedDevice, ImeAction, ObserveResult } from "../../models";
 import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
@@ -179,6 +180,15 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   private readonly observer: SendKeysObserver;
   private androidKeyCombinationSupported: boolean | undefined;
 
+  // IME-mode typing captures the prior IME + keyboard profile, activates our
+  // keyboard, commits, then restores both in a finally. Two overlapping calls on
+  // one device would interleave those capture/restore pairs — call 1's restore
+  // switches the IME away mid-commit for call 2, and call 2 restores call 1's
+  // temporary profile instead of the user's (#7464). Serialize per device with a
+  // keyed mutex: a fresh executor is built per tool call, so the map is static
+  // and keyed by deviceId. Deliberately NOT shared across devices.
+  private static readonly imeCommitLocks = new Map<string, Mutex>();
+
   constructor(
     private readonly device: BootedDevice,
     adbFactory: AdbClientFactory,
@@ -355,7 +365,30 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     }
   }
 
+  private getImeCommitLock(): Mutex {
+    let lock = DefaultSendKeysCommandExecutor.imeCommitLocks.get(this.device.deviceId);
+    if (!lock) {
+      lock = new Mutex();
+      DefaultSendKeysCommandExecutor.imeCommitLocks.set(this.device.deviceId, lock);
+    }
+    return lock;
+  }
+
   private async executeAndroidImeCommit(
+    text: string,
+    operation: SendKeysOperation,
+    keyboardProfile: KeyboardProfileId | undefined,
+    signal?: AbortSignal,
+  ): Promise<TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode }> {
+    signal?.throwIfAborted();
+    // Serialize the whole capture→activate→commit→restore section per device so a
+    // second call cannot borrow/restore the IME while this one is mid-flight (#7464).
+    return this.getImeCommitLock().runExclusive(() =>
+      this.runAndroidImeCommit(text, operation, keyboardProfile, signal),
+    );
+  }
+
+  private async runAndroidImeCommit(
     text: string,
     operation: SendKeysOperation,
     keyboardProfile: KeyboardProfileId | undefined,

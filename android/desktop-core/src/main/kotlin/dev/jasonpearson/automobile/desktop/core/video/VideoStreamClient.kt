@@ -44,6 +44,12 @@ sealed class VideoStreamState {
 
   data object Connecting : VideoStreamState()
 
+  enum class UnavailableCause {
+    NO_RELAY,
+    REFUSED,
+    OTHER,
+  }
+
   data class Streaming(val width: Int, val height: Int) : VideoStreamState()
 
   /** A named host permission blocked the current subscribe attempt. */
@@ -53,7 +59,10 @@ sealed class VideoStreamState {
   ) : VideoStreamState()
 
   /** Terminal for this attempt; [reason] is safe to show a user. */
-  data class Unavailable(val reason: String) : VideoStreamState()
+  data class Unavailable(
+    val reason: String,
+    val cause: UnavailableCause = UnavailableCause.OTHER,
+  ) : VideoStreamState()
 }
 
 /** Recoverable permission state decoded from the local relay protocol. */
@@ -205,7 +214,11 @@ class VideoStreamClient(
   override fun connect(deviceId: String?) {
     if (readerJob?.isActive == true) return
     if (!isAvailable()) {
-      _state.value = VideoStreamState.Unavailable("Live mirroring is unavailable on this daemon")
+      _state.value =
+        VideoStreamState.Unavailable(
+          "Live mirroring is unavailable on this daemon",
+          VideoStreamState.UnavailableCause.NO_RELAY,
+        )
       return
     }
 
@@ -297,7 +310,10 @@ class VideoStreamClient(
         if (!ack.success) {
           publish(
             ack.permission.toPermissionState()
-              ?: VideoStreamState.Unavailable(ack.error ?: "Live mirroring was refused")
+              ?: VideoStreamState.Unavailable(
+                ack.error ?: "Live mirroring was refused",
+                VideoStreamState.UnavailableCause.REFUSED,
+              )
           )
           return
         }

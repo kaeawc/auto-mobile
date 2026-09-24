@@ -217,6 +217,10 @@ class VideoStreamClientTest {
       "No connected device with id ghost.",
       (client.state.value as VideoStreamState.Unavailable).reason,
     )
+    assertEquals(
+      VideoStreamState.UnavailableCause.REFUSED,
+      (client.state.value as VideoStreamState.Unavailable).cause,
+    )
     client.dispose()
   }
 
@@ -245,15 +249,19 @@ class VideoStreamClientTest {
   }
 
   @Test
-  fun `a missing socket reports unavailable instead of throwing`() = runBlocking {
-    val client = VideoStreamClient(socketPathValue = "/tmp/no-video-stream-am.sock")
+  fun `a missing socket reports unavailable with no relay cause instead of throwing`() =
+    runBlocking {
+      val client = VideoStreamClient(socketPathValue = "/tmp/no-video-stream-am.sock")
 
-    assertTrue(!client.isAvailable())
-    client.connect("emulator-5554")
+      assertTrue(!client.isAvailable())
+      client.connect("emulator-5554")
 
-    assertTrue(client.state.value is VideoStreamState.Unavailable)
-    client.dispose()
-  }
+      assertEquals(
+        VideoStreamState.UnavailableCause.NO_RELAY,
+        (client.state.value as VideoStreamState.Unavailable).cause,
+      )
+      client.dispose()
+    }
 
   @Test
   fun `disconnect returns to idle and stops the reader`() = runBlocking {

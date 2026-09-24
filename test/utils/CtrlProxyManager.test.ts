@@ -292,6 +292,17 @@ describe("CtrlProxyManager", function () {
   describe("accessibility service binding health", function () {
     const serviceComponent = `${AndroidCtrlProxyManager.PACKAGE}/${AndroidCtrlProxyManager.PACKAGE}.CtrlProxy`;
     const otherService = "com.example.reader/com.example.reader.ReaderService";
+    let timer: FakeTimer;
+
+    beforeEach(() => {
+      timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      accessibilityServiceClient = AndroidCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeAdb,
+        timer,
+      );
+    });
 
     test("reports healthy when CtrlProxy is bound", async function () {
       fakeAdb.setCommandResponse("shell dumpsys accessibility", {
@@ -321,11 +332,14 @@ describe("CtrlProxyManager", function () {
       expect(
         fakeAdb
           .getExecutedCommands()
-          .filter((command) =>
-            command.startsWith("shell settings put secure enabled_accessibility_services"),
+          .filter(
+            (command) =>
+              command.startsWith("shell settings put secure enabled_accessibility_services") ||
+              command === `shell am force-stop ${AndroidCtrlProxyManager.PACKAGE}`,
           ),
       ).toEqual([
         `shell settings put secure enabled_accessibility_services "${otherService}"`,
+        `shell am force-stop ${AndroidCtrlProxyManager.PACKAGE}`,
         `shell settings put secure enabled_accessibility_services "${otherService}:${serviceComponent}"`,
       ]);
     });
@@ -346,13 +360,51 @@ describe("CtrlProxyManager", function () {
       expect(
         fakeAdb
           .getExecutedCommands()
-          .filter((command) =>
-            command.startsWith("shell settings put secure enabled_accessibility_services"),
+          .filter(
+            (command) =>
+              command.startsWith("shell settings put secure enabled_accessibility_services") ||
+              command === `shell am force-stop ${AndroidCtrlProxyManager.PACKAGE}`,
           ),
       ).toEqual([
         `shell settings put secure enabled_accessibility_services "${otherService}:${secondService}"`,
+        `shell am force-stop ${AndroidCtrlProxyManager.PACKAGE}`,
         `shell settings put secure enabled_accessibility_services "${otherService}:${secondService}:${serviceComponent}"`,
       ]);
+    });
+
+    test("stops polling when the rebound service becomes healthy", async () => {
+      const crashed = {
+        stdout: `Bound services:{}\nCrashed services:{{${serviceComponent}}}`,
+        stderr: "",
+      };
+      fakeAdb.setCommandResponseSequence("shell dumpsys accessibility", [
+        crashed,
+        crashed,
+        { stdout: `Bound services:{{${serviceComponent}}}\nCrashed services:{}`, stderr: "" },
+      ]);
+
+      expect(await accessibilityServiceClient.rebindIfUnhealthy()).toBe(true);
+      expect(
+        fakeAdb
+          .getExecutedCommands()
+          .filter((command) => command === "shell dumpsys accessibility"),
+      ).toHaveLength(3);
+      expect(timer.getSleepHistory()).toEqual([100, 200]);
+    });
+
+    test("returns attempted after bounded polls when the service stays crashed", async () => {
+      fakeAdb.setCommandResponse("shell dumpsys accessibility", {
+        stdout: `Bound services:{}\nCrashed services:{{${serviceComponent}}}`,
+        stderr: "",
+      });
+
+      expect(await accessibilityServiceClient.rebindIfUnhealthy()).toBe(true);
+      expect(
+        fakeAdb
+          .getExecutedCommands()
+          .filter((command) => command === "shell dumpsys accessibility"),
+      ).toHaveLength(5);
+      expect(timer.getSleepHistory()).toEqual([100, 200, 200, 200]);
     });
   });
 

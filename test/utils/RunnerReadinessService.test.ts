@@ -1691,6 +1691,30 @@ describe("RunnerReadinessService", () => {
     expect(manager.rebindCalls).toBe(1);
   });
 
+  test("retries a still-unhealthy accessibility-service rebind after the throttle interval", async () => {
+    const manager = new FakeAndroidManager();
+    manager.rebindIfUnhealthy = async () => {
+      manager.rebindCalls++;
+      return true;
+    };
+    const client = new FakeReadinessClient();
+    client.connected = false;
+    client.connectionResults = [];
+    const { service, timer } = createService({ androidManager: manager, androidClient: client });
+
+    await expect(
+      service.ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "platform=android",
+        totalDeadlineMs: 2_500,
+        readinessTimeoutMs: 2_500,
+      }),
+    ).rejects.toThrow(/accessibility service was crashed or unbound; rebind attempted/);
+
+    expect(manager.rebindCalls).toBeGreaterThan(1);
+    expect(timer.now()).toBeLessThanOrEqual(2_500);
+  });
+
   test("reports the exhausted phase, attempts, mapping, and remaining budget", async () => {
     const client = new FakeReadinessClient();
     client.connected = false;

@@ -3,10 +3,16 @@ package dev.jasonpearson.automobile.desktop.core.workspace.picker
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -30,6 +36,8 @@ import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStream
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
 import dev.jasonpearson.automobile.desktop.core.daemon.ScreenshotStreamUpdate
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
+import dev.jasonpearson.automobile.desktop.core.theme.PlatformIcons
+import dev.jasonpearson.automobile.desktop.core.workspace.Platform
 import java.util.Base64
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -117,7 +125,7 @@ interface DeviceThumbnailScreenshotSource {
  *   per-card H.264 subscription would start a device capture/encode on the daemon and a decoder in
  *   the desktop for every booted tile — a glanceable preview is not worth that standing cost. Live
  *   video belongs to the workspace panes a device is actually opened into.
- * - **Shut-down / booting** → a solid black box with a centered "Shutdown" / "Booting" label.
+ * - **Shut-down** → a muted platform silhouette and "Shutdown" label; booting keeps its hint.
  *
  * [screenshotSource] is hoisted so a test drives this with a fake instead of opening sockets.
  */
@@ -156,13 +164,29 @@ fun DeviceThumbnail(
       modifier
         .aspectRatio(aspect)
         .clip(RoundedCornerShape(4.dp))
-        .background(Color.Black)
+        .background(
+          if (device.state == DeviceState.Shutdown && !booting)
+            MaterialTheme.colorScheme.surfaceVariant
+          else Color.Black
+        )
         .semantics {
           contentDescription = "Thumbnail ${device.name}"
         },
     contentAlignment = Alignment.Center,
   ) {
     when {
+      device.state == DeviceState.Shutdown && !booting ->
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+          val isIos = device.platform == Platform.Ios
+          Icon(
+            imageVector = PlatformIcons.logo(isIos),
+            contentDescription = "${PlatformIcons.contentDescription(isIos)} device silhouette",
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(48.dp),
+          )
+          Spacer(Modifier.height(8.dp))
+          Text("Shutdown", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+        }
       placeholder != null ->
         Text(placeholder, color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp)
       still != null ->

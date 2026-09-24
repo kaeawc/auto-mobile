@@ -40,10 +40,12 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import dev.jasonpearson.automobile.desktop.core.components.Tooltip
 import dev.jasonpearson.automobile.desktop.core.daemon.DaemonBootstrapState
 import dev.jasonpearson.automobile.desktop.core.daemon.DaemonLifecyclePhase
 import dev.jasonpearson.automobile.desktop.core.theme.PlatformIcons
 import dev.jasonpearson.automobile.desktop.core.workspace.Platform
+import dev.jasonpearson.automobile.desktop.core.workspace.disambiguateLabels
 
 private val Accent = Color(0xFF4DABF7)
 
@@ -330,6 +332,9 @@ private fun DeviceGrid(
   thumbnail: @Composable (PickerDevice, Boolean) -> Unit,
 ) {
   val devices = filteredDevices(content.devices, content.filters)
+  val displayNames = disambiguateLabels(devices, PickerDevice::id, PickerDevice::name)
+  // Different platforms can share a raw id while retaining distinct, unique names.
+  val nameCounts = devices.groupingBy(PickerDevice::name).eachCount()
   // Masonry (Pinterest-style) packing: every card is column-width, but each card's HEIGHT follows
   // its own device's aspect ratio, so the staggered grid packs disjoint heights instead of forcing
   // one uniform row height.
@@ -342,6 +347,9 @@ private fun DeviceGrid(
     items(devices, key = { it.uiKey }) { device ->
       DeviceCard(
         device = device,
+        displayName =
+          if (nameCounts.getValue(device.name) == 1) device.name
+          else displayNames.getValue(device.id),
         selected = device.uiKey in content.selectedIds,
         booting = device.uiKey in content.bootingIds,
         error = content.bootErrors[device.uiKey],
@@ -365,6 +373,7 @@ private fun DeviceGrid(
 @Composable
 private fun DeviceCard(
   device: PickerDevice,
+  displayName: String,
   selected: Boolean,
   booting: Boolean,
   error: String?,
@@ -394,7 +403,7 @@ private fun DeviceCard(
             }
           else Modifier
         )
-        .semantics { contentDescription = cardDescription(device, booted, booting, error) }
+        .semantics { contentDescription = cardDescription(displayName, booted, booting, error) }
         .padding(12.dp)
   ) {
     thumbnail(device, booting)
@@ -407,7 +416,13 @@ private fun DeviceCard(
         modifier = Modifier.size(16.dp),
       )
       Spacer(Modifier.width(6.dp))
-      Text(device.name, style = MaterialTheme.typography.bodyLarge)
+      if (displayName == device.name) {
+        Text(device.name, style = MaterialTheme.typography.bodyLarge)
+      } else {
+        Tooltip(tooltip = { Text(device.id) }) {
+          Text(displayName, style = MaterialTheme.typography.bodyLarge)
+        }
+      }
     }
     Spacer(Modifier.height(4.dp))
     val meta =
@@ -434,16 +449,16 @@ private fun DeviceCard(
 }
 
 private fun cardDescription(
-  device: PickerDevice,
+  displayName: String,
   booted: Boolean,
   booting: Boolean,
   error: String?,
 ): String =
   when {
-    booted -> "Observe ${device.name}"
-    booting -> "Booting ${device.name}"
-    error != null -> "Retry boot ${device.name}"
-    else -> "Boot ${device.name}"
+    booted -> "Observe $displayName"
+    booting -> "Booting $displayName"
+    error != null -> "Retry boot $displayName"
+    else -> "Boot $displayName"
   }
 
 private fun bootAffordance(booting: Boolean, error: String?): String =

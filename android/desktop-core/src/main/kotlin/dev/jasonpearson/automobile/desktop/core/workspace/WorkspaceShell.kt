@@ -198,6 +198,8 @@ fun WorkspaceShell(
         is WorkspaceUiState.Content ->
           Row(Modifier.weight(1f).fillMaxWidth()) {
             val canDiff = state.columns.size > 1
+            val displayNames =
+              disambiguateLabels(state.columns, DeviceColumn::deviceId, DeviceColumn::name)
             state.columns.forEach { column ->
               // Key by deviceId so a surviving pane keeps its own remembered state + facet
               // connection when another pane closes (unkeyed = positional identity churns
@@ -205,6 +207,7 @@ fun WorkspaceShell(
               key(column.deviceId) {
                 DeviceColumnView(
                   column = column,
+                  displayName = displayNames.getValue(column.deviceId),
                   focused = column.deviceId == state.focusedDeviceId,
                   onAction = onAction,
                   facetContent = facetContent,
@@ -690,6 +693,7 @@ internal fun firstPaneFraction(column: DeviceColumn): Float =
 @Composable
 private fun DeviceColumnView(
   column: DeviceColumn,
+  displayName: String,
   focused: Boolean,
   onAction: (WorkspaceAction) -> Unit,
   facetContent: @Composable (DeviceColumn, Tool) -> Unit,
@@ -727,7 +731,7 @@ private fun DeviceColumnView(
           color = if (focused) Accent else MaterialTheme.colorScheme.outlineVariant,
         )
   ) {
-    DeviceColumnHeader(column, onAction)
+    DeviceColumnHeader(column, displayName, onAction)
     val tool = column.activeTool
     if (tool == null) {
       PaneMainContent(
@@ -1104,7 +1108,11 @@ private fun LocaleControl(column: DeviceColumn, onAction: (WorkspaceAction) -> U
 }
 
 @Composable
-private fun DeviceColumnHeader(column: DeviceColumn, onAction: (WorkspaceAction) -> Unit) {
+internal fun DeviceColumnHeader(
+  column: DeviceColumn,
+  displayName: String,
+  onAction: (WorkspaceAction) -> Unit,
+) {
   Row(
     modifier =
       Modifier.fillMaxWidth()
@@ -1121,7 +1129,7 @@ private fun DeviceColumnHeader(column: DeviceColumn, onAction: (WorkspaceAction)
       modifier = Modifier.size(16.dp),
     )
     Spacer(Modifier.width(6.dp))
-    Text(column.name, style = MaterialTheme.typography.labelLarge)
+    Text(displayName, style = MaterialTheme.typography.labelLarge)
     Spacer(Modifier.width(10.dp))
     ModeToggle(column, onAction)
     Spacer(Modifier.weight(1f))
@@ -1130,7 +1138,7 @@ private fun DeviceColumnHeader(column: DeviceColumn, onAction: (WorkspaceAction)
       Glyph(
         text = tool.icon,
         // Device name disambiguates identical tool labels across panes for a11y / automation.
-        description = "${tool.label} ${column.name}",
+        description = "${tool.label} $displayName",
         active = active,
         // Re-tapping the active tool closes its facet.
         onClick = {
@@ -1141,13 +1149,13 @@ private fun DeviceColumnHeader(column: DeviceColumn, onAction: (WorkspaceAction)
     Spacer(Modifier.width(4.dp))
     Glyph(
       text = "⤡",
-      description = "Shrink ${column.name}",
+      description = "Shrink $displayName",
       active = column.shrunk,
       onClick = { onAction(WorkspaceAction.ToggleShrink(column.deviceId)) },
     )
     Glyph(
       text = "✕",
-      description = "Close ${column.name}",
+      description = "Close $displayName",
       active = false,
       onClick = { onAction(WorkspaceAction.CloseDevice(column.deviceId)) },
     )

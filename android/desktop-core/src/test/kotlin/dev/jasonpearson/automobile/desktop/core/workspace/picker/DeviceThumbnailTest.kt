@@ -59,6 +59,7 @@ class DeviceThumbnailTest {
       MaterialTheme { DeviceThumbnail(shutdown, booting = false, screenshotSource = null) }
     }
     onNodeWithText("Shutdown").assertIsDisplayed()
+    onNodeWithContentDescription("iOS device silhouette").assertIsDisplayed()
   }
 
   @Test

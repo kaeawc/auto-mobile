@@ -48,6 +48,25 @@ class DevicePickerUiTest {
   }
 
   @Test
+  fun `same-named picker cards show distinct titles and accessible actions`() = runComposeUiTest {
+    picker(
+      DevicePickerUiState.Content(
+        listOf(
+          PickerDevice("sim-A", "iPhone", Platform.Ios, DeviceState.Shutdown),
+          PickerDevice("sim-B", "iPhone", Platform.Ios, DeviceState.Shutdown),
+          PickerDevice("pixel-1", "Pixel", Platform.Android, DeviceState.Booted),
+        )
+      )
+    )
+    onNodeWithText("iPhone (A)").assertIsDisplayed()
+    onNodeWithText("iPhone (B)").assertIsDisplayed()
+    onNodeWithContentDescription("Boot iPhone (A)").assertIsDisplayed()
+    onNodeWithContentDescription("Boot iPhone (B)").assertIsDisplayed()
+    onNodeWithText("Pixel").assertIsDisplayed()
+    onNodeWithContentDescription("Observe Pixel").assertIsDisplayed()
+  }
+
+  @Test
   fun `renders same-id devices on both platforms with distinct click targets`() = runComposeUiTest {
     var action: DevicePickerAction? = null
     picker(

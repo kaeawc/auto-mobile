@@ -165,22 +165,23 @@ class PerformanceFacetTest {
   }
 
   @Test
-  fun `ignores a stream update for another device`() = runComposeUiTest {
-    val fake = FakeObservationStream()
-    setContent {
-      CompositionLocalProvider(LocalAutoMobileGraph provides fakeGraph()) {
-        MaterialTheme {
-          PerformanceFacet(
-            column = DeviceColumn(deviceId = "dev-1", name = "Pixel", platform = Platform.Android),
-            observationStreamFactory = { fake },
-          )
+  fun `renders a live metric when the stream device ID differs from the column device ID`() =
+    runComposeUiTest {
+      val fake = FakeObservationStream()
+      setContent {
+        CompositionLocalProvider(LocalAutoMobileGraph provides fakeGraph()) {
+          MaterialTheme {
+            PerformanceFacet(
+              column =
+                DeviceColumn(deviceId = "dev-1", name = "Pixel", platform = Platform.Android),
+              observationStreamFactory = { fake },
+            )
+          }
         }
       }
+      waitForIdle()
+      runOnIdle { fake.emitPerformance(perfUpdate(deviceId = "emulator-5554", fps = 30f)) }
+      waitForIdle()
+      onNodeWithText("Frame Rate").assertIsDisplayed()
     }
-    waitForIdle()
-    runOnIdle { fake.emitPerformance(perfUpdate(deviceId = "other", fps = 30f)) }
-    waitForIdle()
-    // Filtered out: no metric cards render, only the empty "waiting" state.
-    onNodeWithText("Waiting for performance data...").assertIsDisplayed()
-  }
 }

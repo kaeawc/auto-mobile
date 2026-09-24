@@ -10,7 +10,7 @@ const WAIT_ACTION = "Wait";
 // are stable across locales: `alertTitle` names the title, and AOSP's
 // AppNotRespondingDialog wires BUTTON_NEGATIVE ("Wait") and BUTTON_POSITIVE
 // ("Close app"), which the AlertController renders as `button2`/`button1`.
-const ALERT_TITLE_RESOURCE_ID = "android:id/alertTitle";
+export const ALERT_TITLE_RESOURCE_ID = "android:id/alertTitle";
 const WAIT_BUTTON_RESOURCE_ID = "android:id/button2";
 const CLOSE_APP_BUTTON_RESOURCE_ID = "android:id/button1";
 const SYSTEM_WINDOW_TYPE = 3;

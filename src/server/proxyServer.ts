@@ -19,6 +19,7 @@ import {
 } from "../daemon/daemonMcpProxy";
 import { DaemonShuttingDownError } from "../daemon/client";
 import { McpOverloadError, McpTimeoutError } from "../daemon/McpTimeoutError";
+import { DaemonDisconnectError } from "../daemon/DaemonDisconnectError";
 import { ActionableError } from "../models";
 import { daemonShuttingDownMcpOutcome } from "../daemon/daemonShutdownOutcome";
 import { getMcpServerVersion } from "../utils/mcpVersion";
@@ -211,13 +212,16 @@ export function mcpOverloadError(error: McpOverloadError): McpError {
 }
 
 /**
- * Safely preserve the request-level timeout or abort context attached when a
+ * Safely preserve the request-level disconnect, timeout, or abort context when a
  * daemon socket disappears. Arbitrary nested error messages can contain daemon
  * internals, so only expose the known request-control causes.
  */
 function safeForwardedRequestErrorMessage(error: unknown): string {
   const message = errorMessage(error);
   const cause = error instanceof Error ? error.cause : undefined;
+  if (cause instanceof DaemonDisconnectError) {
+    return `${message} (daemon connection closed before the response arrived while handling ${cause.toolName})`;
+  }
   if (cause instanceof McpTimeoutError) {
     return `${message} (request timed out after ${cause.timeoutMs}ms while handling ${cause.toolName})`;
   }
@@ -271,6 +275,7 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
     ...(acceptanceDiscovery ? { acceptanceDiscovery } : {}),
   });
   const advertisedToolOutputSchemas = new Map<string, boolean>();
+  let toolListEpoch = 0;
 
   // Create the MCP server
   const server = new McpServer(
@@ -303,6 +308,7 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
       if (kind === "tools") {
         // Until the client re-fetches, fail closed rather than retain a schema
         // advertised before the daemon changed its tool-result policy.
+        toolListEpoch += 1;
         advertisedToolOutputSchemas.clear();
         server.sendToolListChanged();
       } else {
@@ -336,10 +342,13 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
   // the accurate session-scoped list is served.
   server.server.setRequestHandler(ListToolsRequestSchema, async () => {
     try {
+      const requestEpoch = toolListEpoch;
       const tools = await proxy.listAdvertisedTools();
-      advertisedToolOutputSchemas.clear();
-      for (const tool of tools) {
-        advertisedToolOutputSchemas.set(tool.name, tool.outputSchema !== undefined);
+      if (requestEpoch === toolListEpoch) {
+        advertisedToolOutputSchemas.clear();
+        for (const tool of tools) {
+          advertisedToolOutputSchemas.set(tool.name, tool.outputSchema !== undefined);
+        }
       }
       return { tools };
     } catch (error) {

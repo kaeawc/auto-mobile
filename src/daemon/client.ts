@@ -28,6 +28,7 @@ import { isDaemonShuttingDownFailure } from "./daemonShutdownOutcome";
 import { type BuildIdentity, getCurrentBuildIdentity } from "./buildIdentity";
 import { resolveMcpRequestTimeoutMs, ProgressExtendableDeadline } from "./mcpRequestTimeout";
 import { McpOverloadError, McpTimeoutError, sanitizeMcpOverloadFailure } from "./McpTimeoutError";
+import { DaemonDisconnectError } from "./DaemonDisconnectError";
 import { type Timer, defaultTimer } from "../utils/SystemTimer";
 import { type IdGenerator, defaultIdGenerator } from "../utils/IdGenerator";
 import {
@@ -294,8 +295,8 @@ export class DaemonClient {
       deadline?: ProgressExtendableDeadline;
       requestTimeoutMs?: number;
       removeAbortListener?: () => void;
-      /** Per-request deadline context retained if the shared socket closes. */
-      disconnectCause: McpTimeoutError;
+      /** Per-request context retained if the shared socket closes. */
+      disconnectCause: McpTimeoutError | DaemonDisconnectError;
     }
   > = new Map();
   private buffer: string = "";
@@ -898,9 +899,8 @@ export class DaemonClient {
 
     const requestTimeoutMs = Math.max(resolveMcpRequestTimeoutMs(request), this.connectionTimeout);
     const toolName = method === "tools/call" ? (params?.name ?? method) : method;
-    const disconnectCause = new McpTimeoutError({
+    const disconnectCause = new DaemonDisconnectError({
       toolName,
-      timeoutMs: requestTimeoutMs,
       origin: "DaemonClient.sendRequest",
     });
     // Only a progress-emitting tools/call gets an extendable deadline -- a
@@ -979,9 +979,8 @@ export class DaemonClient {
     }
 
     const requestId = this.idGenerator.next();
-    const disconnectCause = new McpTimeoutError({
+    const disconnectCause = new DaemonDisconnectError({
       toolName: method,
-      timeoutMs,
       origin: "DaemonClient.callDaemonMethod",
     });
 
@@ -1065,7 +1064,7 @@ export class DaemonClient {
     this.connected = false;
 
     // Reject before destroy emits "close", preserving each request's own
-    // deadline context instead of replacing all diagnostics with one generic
+    // request context instead of replacing all diagnostics with one generic
     // transport message.
     for (const [, { timeout, reject, removeAbortListener, disconnectCause }] of this
       .pendingRequests) {

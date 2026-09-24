@@ -1,0 +1,141 @@
+package dev.jasonpearson.automobile.desktop.core.daemon
+
+import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.runTest
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+@OptIn(ExperimentalCoroutinesApi::class)
+class TelemetryPushSocketClientTest {
+  private class FakeRetryDelay : TelemetryRetryDelay {
+    val calls = mutableListOf<Long>()
+
+    override suspend fun wait(delayMs: Long) {
+      calls.add(delayMs)
+    }
+  }
+
+  private class FakeSocket(private val lines: List<String> = emptyList()) : TelemetrySocket {
+    private val remaining = ArrayDeque(lines)
+
+    override fun readLine(): String? = remaining.removeFirstOrNull()
+
+    override fun writeLine(line: String) = Unit
+
+    override fun close() = Unit
+  }
+
+  @Test
+  fun `dataless accepts increase attempt and backoff`() = runTest {
+    val delays = FakeRetryDelay()
+    val client = TelemetryPushSocketClient({ FakeSocket() }, delays, backgroundScope, { true })
+    val states = mutableListOf<ConnectionState>()
+    backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+      client.connectionState.collect { states.add(it) }
+    }
+
+    client.connect()
+    runCurrent()
+
+    assertEquals(
+      listOf(1, 2, 3, 4),
+      states.filterIsInstance<ConnectionState.Reconnecting>().map { it.attempt },
+    )
+    assertEquals(4, delays.calls.size)
+    assertTrue(delays.calls[1] > delays.calls[0])
+    assertTrue(delays.calls[2] > delays.calls[1])
+    assertFalse(states.any { it is ConnectionState.Connected })
+    client.dispose()
+  }
+
+  @Test
+  fun `five consecutive dataless flaps end in terminal error`() = runTest {
+    var opens = 0
+    val client =
+      TelemetryPushSocketClient(
+        {
+          opens++
+          FakeSocket()
+        },
+        {},
+        backgroundScope,
+        { true },
+      )
+
+    client.connect()
+    runCurrent()
+
+    assertEquals(TelemetryPushSocketClient.MAX_RECONNECT_ATTEMPTS, opens)
+    assertEquals(
+      ConnectionState.Error("Telemetry unavailable on this daemon"),
+      client.connectionState.replayCache.single(),
+    )
+    client.dispose()
+  }
+
+  @Test
+  fun `successful subscription resets attempts and emits Connected`() = runTest {
+    var opens = 0
+    val states = mutableListOf<ConnectionState>()
+    val client =
+      TelemetryPushSocketClient(
+        {
+          opens++
+          if (opens == 2) FakeSocket(listOf("""{"type":"subscription_response","success":true}"""))
+          else FakeSocket()
+        },
+        {},
+        backgroundScope,
+        { true },
+      )
+    backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+      client.connectionState.collect { states.add(it) }
+    }
+
+    client.connect()
+    runCurrent()
+
+    assertTrue(states.contains(ConnectionState.Connected(subscribed = true)))
+    assertEquals(
+      listOf(1, 1, 2, 3, 4),
+      states.filterIsInstance<ConnectionState.Reconnecting>().map { it.attempt },
+    )
+    client.dispose()
+  }
+
+  @Test
+  fun `manual Retry after Error starts a fresh cycle`() = runTest {
+    var opens = 0
+    val states = mutableListOf<ConnectionState>()
+    val client =
+      TelemetryPushSocketClient(
+        {
+          opens++
+          FakeSocket()
+        },
+        {},
+        backgroundScope,
+        { true },
+      )
+    backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+      client.connectionState.collect { states.add(it) }
+    }
+
+    client.connect()
+    runCurrent()
+    assertTrue(states.last() is ConnectionState.Error)
+    client.connect()
+    runCurrent()
+
+    assertEquals(2 * TelemetryPushSocketClient.MAX_RECONNECT_ATTEMPTS, opens)
+    assertEquals(2, states.count { it is ConnectionState.Connecting })
+    assertEquals(2, states.count { it is ConnectionState.Reconnecting && it.attempt == 1 })
+    client.dispose()
+  }
+}

@@ -48,6 +48,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dev.jasonpearson.automobile.desktop.core.components.Tooltip
 import dev.jasonpearson.automobile.desktop.core.daemon.DaemonBootstrapState
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStream
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
@@ -58,6 +59,7 @@ import dev.jasonpearson.automobile.desktop.core.mcp.McpConnectionType
 import dev.jasonpearson.automobile.desktop.core.mcp.McpProcess
 import dev.jasonpearson.automobile.desktop.core.mcp.RealMcpProcessDetector
 import dev.jasonpearson.automobile.desktop.core.shell.UpdateReadyButton
+import dev.jasonpearson.automobile.desktop.core.shell.VerticalSplitPane
 import dev.jasonpearson.automobile.desktop.core.theme.PlatformIcons
 import dev.jasonpearson.automobile.desktop.core.update.UpdateStatus
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.loadingMessage
@@ -678,6 +680,9 @@ private fun OfflineBrowseOverlay(onDismiss: () -> Unit, content: @Composable () 
  */
 internal fun facetHeightFraction(shrunk: Boolean): Float = if (shrunk) 0.8f else 0.35f
 
+internal fun firstPaneFraction(column: DeviceColumn): Float =
+  column.firstPaneFractionOverride ?: 1f - facetHeightFraction(column.shrunk)
+
 @Composable
 private fun DeviceColumnView(
   column: DeviceColumn,
@@ -730,19 +735,27 @@ private fun DeviceColumnView(
         Modifier.weight(1f),
       )
     } else {
-      // With a tool active the pane splits main content + docked facet; ⤡ shrink flips the split so
-      // the main content collapses to grow the facet.
-      val facetFraction = facetHeightFraction(column.shrunk)
-      PaneMainContent(
-        column,
-        onAction,
-        inspectContent,
-        streamContent,
-        observationStreamFactory,
-        screenshotSaver,
-        Modifier.weight(1f - facetFraction),
+      VerticalSplitPane(
+        first = {
+          PaneMainContent(
+            column,
+            onAction,
+            inspectContent,
+            streamContent,
+            observationStreamFactory,
+            screenshotSaver,
+            Modifier.fillMaxSize(),
+          )
+        },
+        second = {
+          DockedFacet(column, tool, onAction, facetContent, canDiff, Modifier.fillMaxSize())
+        },
+        modifier = Modifier.weight(1f),
+        firstPaneFraction = firstPaneFraction(column),
+        minFirstDp = 48.dp,
+        minSecondDp = 48.dp,
+        onFractionChanged = { onAction(WorkspaceAction.SetFirstPaneFraction(column.deviceId, it)) },
       )
-      DockedFacet(column, tool, onAction, facetContent, canDiff, Modifier.weight(facetFraction))
     }
   }
 }
@@ -1017,17 +1030,19 @@ private fun CrayonButton(
   active: Boolean = false,
   onClick: () -> Unit,
 ) {
-  Box(
-    modifier =
-      Modifier.size(30.dp)
-        .clip(CircleShape)
-        .then(if (active) Modifier.background(Color.White.copy(alpha = 0.16f)) else Modifier)
-        .clickable(onClick = onClick)
-        .semantics { contentDescription = description }
-        .padding(6.dp),
-    contentAlignment = Alignment.Center,
-  ) {
-    CrayonIcon(glyph, tint = Color.White, modifier = Modifier.fillMaxSize())
+  Tooltip(tooltip = { Text(description, style = MaterialTheme.typography.labelSmall) }) {
+    Box(
+      modifier =
+        Modifier.size(30.dp)
+          .clip(CircleShape)
+          .then(if (active) Modifier.background(Color.White.copy(alpha = 0.16f)) else Modifier)
+          .clickable(onClick = onClick)
+          .semantics { contentDescription = description }
+          .padding(6.dp),
+      contentAlignment = Alignment.Center,
+    ) {
+      CrayonIcon(glyph, tint = Color.White, modifier = Modifier.fillMaxSize())
+    }
   }
 }
 
@@ -1132,33 +1147,37 @@ private fun ModeToggle(column: DeviceColumn, onAction: (WorkspaceAction) -> Unit
 
 @Composable
 private fun ToggleCell(text: String, description: String, active: Boolean, onClick: () -> Unit) {
-  Box(
-    modifier =
-      Modifier.clickable(onClick = onClick)
-        .semantics { contentDescription = description }
-        .background(
-          if (active) Accent else Color.Transparent,
-          RoundedCornerShape(4.dp),
-        )
-        .padding(horizontal = 6.dp, vertical = 3.dp)
-  ) {
-    Text(text)
+  Tooltip(tooltip = { Text(description, style = MaterialTheme.typography.labelSmall) }) {
+    Box(
+      modifier =
+        Modifier.clickable(onClick = onClick)
+          .semantics { contentDescription = description }
+          .background(
+            if (active) Accent else Color.Transparent,
+            RoundedCornerShape(4.dp),
+          )
+          .padding(horizontal = 6.dp, vertical = 3.dp)
+    ) {
+      Text(text)
+    }
   }
 }
 
 @Composable
 private fun Glyph(text: String, description: String, active: Boolean, onClick: () -> Unit) {
-  Box(
-    modifier =
-      Modifier.clickable(onClick = onClick)
-        .semantics { contentDescription = description }
-        .background(
-          if (active) Accent.copy(alpha = 0.35f) else Color.Transparent,
-          RoundedCornerShape(4.dp),
-        )
-        .padding(horizontal = 4.dp, vertical = 2.dp)
-  ) {
-    Text(text)
+  Tooltip(tooltip = { Text(description, style = MaterialTheme.typography.labelSmall) }) {
+    Box(
+      modifier =
+        Modifier.clickable(onClick = onClick)
+          .semantics { contentDescription = description }
+          .background(
+            if (active) Accent.copy(alpha = 0.35f) else Color.Transparent,
+            RoundedCornerShape(4.dp),
+          )
+          .padding(horizontal = 4.dp, vertical = 2.dp)
+    ) {
+      Text(text)
+    }
   }
 }
 

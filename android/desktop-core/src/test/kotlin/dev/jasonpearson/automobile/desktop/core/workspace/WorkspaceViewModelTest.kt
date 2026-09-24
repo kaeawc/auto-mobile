@@ -171,23 +171,34 @@ class WorkspaceViewModelTest {
   }
 
   @Test
-  fun `setMode toggleShrink and selectTool mutate only the target column`() = testScope.runTest {
-    val vm = WorkspaceViewModel(this)
-    vm.onAction(WorkspaceAction.ObserveDevice(column("a")))
-    vm.onAction(WorkspaceAction.ObserveDevice(column("b")))
-    vm.onAction(WorkspaceAction.SetMode("a", InteractionMode.Inspect))
-    vm.onAction(WorkspaceAction.ToggleShrink("a"))
-    vm.onAction(WorkspaceAction.SelectTool("a", Tool.Logs))
-    val state = vm.state.value as WorkspaceUiState.Content
-    val a = state.columns.first { it.deviceId == "a" }
-    val b = state.columns.first { it.deviceId == "b" }
-    assertEquals(InteractionMode.Inspect, a.mode)
-    assertTrue(a.shrunk)
-    assertEquals(Tool.Logs, a.activeTool)
-    assertEquals(InteractionMode.Input, b.mode)
-    assertTrue(!b.shrunk)
-    assertNull(b.activeTool)
-  }
+  fun `setMode resize toggleShrink and selectTool mutate only the target column`() =
+    testScope.runTest {
+      val vm = WorkspaceViewModel(this)
+      vm.onAction(WorkspaceAction.ObserveDevice(column("a")))
+      vm.onAction(WorkspaceAction.ObserveDevice(column("b")))
+      vm.onAction(WorkspaceAction.SetMode("a", InteractionMode.Inspect))
+      vm.onAction(WorkspaceAction.SetFirstPaneFraction("a", 0.5f))
+      assertEquals(
+        0.5f,
+        (vm.state.value as WorkspaceUiState.Content)
+          .columns
+          .first { it.deviceId == "a" }
+          .firstPaneFractionOverride,
+      )
+      vm.onAction(WorkspaceAction.ToggleShrink("a"))
+      vm.onAction(WorkspaceAction.SelectTool("a", Tool.Logs))
+      val state = vm.state.value as WorkspaceUiState.Content
+      val a = state.columns.first { it.deviceId == "a" }
+      val b = state.columns.first { it.deviceId == "b" }
+      assertEquals(InteractionMode.Inspect, a.mode)
+      assertTrue(a.shrunk)
+      assertNull(a.firstPaneFractionOverride)
+      assertEquals(Tool.Logs, a.activeTool)
+      assertEquals(InteractionMode.Input, b.mode)
+      assertTrue(!b.shrunk)
+      assertNull(b.firstPaneFractionOverride)
+      assertNull(b.activeTool)
+    }
 
   @Test
   fun `RunControl runs the control against the targeted device with its platform`() =

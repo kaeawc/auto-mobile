@@ -368,7 +368,10 @@ fun NavigationFacet(
     NavigationFacetState.NoApp ->
       NavigationFacetNote("Open an app on this device to build its navigation graph")
     NavigationFacetState.Empty ->
-      NavigationFacetNote("No navigation graph recorded for this app yet")
+      NavigationFacetNote(
+        "No navigation graph recorded for this app yet",
+        "Interact with the app to record its navigation graph.",
+      )
     is NavigationFacetState.ConnectionError ->
       // Retry tears down and recreates the stream, re-attempting connect + appId resolution.
       NavigationFacetError(
@@ -420,11 +423,16 @@ internal fun stampScreenshotVersions(
     graph.copy(screens = graph.screens.map { it.copy(screenshotVersion = versions[it.name] ?: 0) })
   }
 
-/** Centered single-line note for the facet's transient (loading) or empty states. */
+/** Centered note for the facet's transient (loading) or empty states. */
 @Composable
-private fun NavigationFacetNote(text: String) {
+private fun NavigationFacetNote(text: String, hint: String? = null) {
   Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-    Text(text, color = MaterialTheme.colorScheme.outline)
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+      Text(text, color = MaterialTheme.colorScheme.outline)
+      hint?.let {
+        Text(it, color = MaterialTheme.colorScheme.outline.copy(alpha = 0.7f))
+      }
+    }
   }
 }
 

@@ -473,6 +473,7 @@ class NavigationFacetTest {
         .isNotEmpty()
     }
     onNodeWithText("No navigation graph recorded", substring = true).assertExists()
+    onNodeWithText("Interact with the app to record its navigation graph.").assertExists()
   }
 
   @Test

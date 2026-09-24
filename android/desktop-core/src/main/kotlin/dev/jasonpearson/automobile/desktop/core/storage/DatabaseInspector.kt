@@ -73,6 +73,7 @@ private val LOG = LoggerFactory.getLogger("DatabaseInspector")
 @Composable
 fun DatabaseInspector(
   databases: List<DatabaseInfo> = StorageMockData.databases,
+  platform: StoragePlatform = StoragePlatform.Android,
   loadError: String? = null,
   onFetchTableData: (suspend (databasePath: String, table: String) -> QueryResult)? = null,
   onExecuteSQL: (suspend (databasePath: String, query: String) -> QueryResult)? = null,
@@ -183,7 +184,11 @@ fun DatabaseInspector(
           )
           Text(
             loadError
-              ?: "AutoMobile can inspect databases via adb shell for debuggable apps. The SDK provides a richer inspection experience with live updates.",
+              ?: if (platform == StoragePlatform.iOS) {
+                "AutoMobile can inspect databases in a Simulator app's .app container. The SDK provides a richer inspection experience with live updates."
+              } else {
+                "AutoMobile can inspect databases via adb shell for debuggable apps. The SDK provides a richer inspection experience with live updates."
+              },
             fontSize = 11.sp,
             color = colors.text.normal.copy(alpha = 0.7f),
             fontFamily =

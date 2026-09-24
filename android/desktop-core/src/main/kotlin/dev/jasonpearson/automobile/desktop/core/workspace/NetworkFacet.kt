@@ -94,7 +94,11 @@ fun NetworkFacet(column: DeviceColumn, dataSource: NetworkRequestsDataSource? = 
 
   when (val current = state) {
     NetworkFacetState.Loading -> NetworkFacetNote("Loading network activity…")
-    NetworkFacetState.Empty -> NetworkFacetNote("No network activity captured on this device")
+    NetworkFacetState.Empty ->
+      NetworkFacetNote(
+        "No network activity captured on this device",
+        "Exercise the app to capture requests.",
+      )
     is NetworkFacetState.Error -> NetworkFacetError(current.message) { attempt++ }
     is NetworkFacetState.Resolved ->
       NetworkRequestsBody(
@@ -283,11 +287,16 @@ private fun HeaderLine(name: String, value: String) {
   }
 }
 
-/** Centered single-line note for the facet's transient (loading) or empty states. */
+/** Centered note for the facet's transient (loading) or empty states. */
 @Composable
-private fun NetworkFacetNote(text: String) {
+private fun NetworkFacetNote(text: String, hint: String? = null) {
   Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-    Text(text, color = MaterialTheme.colorScheme.outline)
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+      Text(text, color = MaterialTheme.colorScheme.outline)
+      hint?.let {
+        Text(it, color = MaterialTheme.colorScheme.outline.copy(alpha = 0.7f))
+      }
+    }
   }
 }
 

@@ -89,7 +89,11 @@ fun TestFacet(column: DeviceColumn, dataSource: TestDataSource? = null) {
 
   when (val current = state) {
     TestFacetState.Loading -> TestFacetNote("Loading test runs…")
-    TestFacetState.Empty -> TestFacetNote("No test runs for this device")
+    TestFacetState.Empty ->
+      TestFacetNote(
+        "No test runs for this device",
+        "Run a test with AutoMobile to see results here.",
+      )
     is TestFacetState.Error -> TestFacetError(current.message) { attempt++ }
     is TestFacetState.Resolved -> TestRunList(current.runs)
   }
@@ -159,11 +163,16 @@ private fun statusColor(status: TestStatus) =
     else -> MaterialTheme.colorScheme.onSurface
   }
 
-/** Centered single-line note for the facet's transient (loading) or empty states. */
+/** Centered note for the facet's transient (loading) or empty states. */
 @Composable
-private fun TestFacetNote(text: String) {
+private fun TestFacetNote(text: String, hint: String? = null) {
   Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-    Text(text, color = MaterialTheme.colorScheme.outline)
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+      Text(text, color = MaterialTheme.colorScheme.outline)
+      hint?.let {
+        Text(it, color = MaterialTheme.colorScheme.outline.copy(alpha = 0.7f))
+      }
+    }
   }
 }
 

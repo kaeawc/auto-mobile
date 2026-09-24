@@ -282,23 +282,31 @@ export class TapAtCoordinate extends BaseVisualChange {
     options: TapAtOptions,
     observeResult: ObserveResult,
   ): { x: number; y: number } | { x: number; y: number; error: string } {
-    const x = this.device.platform === "android" ? Math.round(options.x) : options.x;
-    const y = this.device.platform === "android" ? Math.round(options.y) : options.y;
-    if (!Number.isFinite(x) || !Number.isFinite(y)) {
-      return { x, y, error: "tapAt requires finite x and y coordinates" };
+    const rawX = options.x;
+    const rawY = options.y;
+    if (!Number.isFinite(rawX) || !Number.isFinite(rawY)) {
+      return { x: rawX, y: rawY, error: "tapAt requires finite x and y coordinates" };
     }
 
     const screenSize = observeResult.screenSize;
     if (!hasPositiveScreenSize(screenSize)) {
-      return { x, y, error: "tapAt requires a positive screenSize from a fresh observation" };
-    }
-    if (x < 0 || x >= screenSize.width || y < 0 || y >= screenSize.height) {
       return {
-        x,
-        y,
-        error: `tapAt coordinates (${x}, ${y}) are outside screen bounds [0, ${screenSize.width}) x [0, ${screenSize.height})`,
+        x: rawX,
+        y: rawY,
+        error: "tapAt requires a positive screenSize from a fresh observation",
       };
     }
+    if (rawX < 0 || rawX >= screenSize.width || rawY < 0 || rawY >= screenSize.height) {
+      return {
+        x: rawX,
+        y: rawY,
+        error: `tapAt coordinates (${rawX}, ${rawY}) are outside screen bounds [0, ${screenSize.width}) x [0, ${screenSize.height})`,
+      };
+    }
+    const x =
+      this.device.platform === "android" ? Math.min(Math.round(rawX), screenSize.width - 1) : rawX;
+    const y =
+      this.device.platform === "android" ? Math.min(Math.round(rawY), screenSize.height - 1) : rawY;
     return { x, y };
   }
 }

@@ -82,7 +82,7 @@ function createTapAt(device: BootedDevice, width = 10, height = 10) {
 }
 
 describe("TapAtCoordinate", () => {
-  test("rounds Android coordinates before half-open validation and dispatches native pixels", async () => {
+  test("rounds in-bounds Android coordinates and dispatches native pixels", async () => {
     const { tapAt, observeScreen, androidDispatches } = createTapAt(androidDevice);
 
     const result = await tapAt.execute({ x: 1.6, y: 2.5 });
@@ -91,6 +91,38 @@ describe("TapAtCoordinate", () => {
     expect(androidDispatches).toEqual([{ x: 2, y: 3, frameContext: "frame-123" }]);
     expect(observeScreen.getGetMostRecentCachedObserveResultCallCount()).toBe(0);
     expect(observeScreen.getExecuteOptions()[0]?.skipWaitForFresh).toBeUndefined();
+  });
+
+  test("accepts fractional Android coordinates just inside the right edge and clamps to the last pixel", async () => {
+    const { tapAt, androidDispatches } = createTapAt(androidDevice, 1080, 2400);
+
+    const result = await tapAt.execute({ x: 1079.999, y: 500 });
+
+    expect(result).toMatchObject({ success: true, x: 1079, y: 500 });
+    expect(androidDispatches).toEqual([{ x: 1079, y: 500, frameContext: "frame-123" }]);
+  });
+
+  test.each([
+    { x: 1080, expectedCoordinate: "1080" },
+    { x: -0.5, expectedCoordinate: "-0.5" },
+  ])("reports raw Android out-of-bounds x=$x", async ({ x, expectedCoordinate }) => {
+    const { tapAt, androidDispatches } = createTapAt(androidDevice, 1080, 2400);
+
+    const result = await tapAt.execute({ x, y: 500 });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain(expectedCoordinate);
+    expect(result.error).toContain("outside screen bounds [0, 1080) x [0, 2400)");
+    expect(androidDispatches).toEqual([]);
+  });
+
+  test("keeps in-bounds integer Android coordinates unchanged", async () => {
+    const { tapAt, androidDispatches } = createTapAt(androidDevice, 1080, 2400);
+
+    const result = await tapAt.execute({ x: 500, y: 700 });
+
+    expect(result).toMatchObject({ success: true, x: 500, y: 700 });
+    expect(androidDispatches).toEqual([{ x: 500, y: 700, frameContext: "frame-123" }]);
   });
 
   test("preserves iOS fractional XCTest points without scale or canonical-pixel conversion", async () => {

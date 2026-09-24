@@ -15,6 +15,7 @@ import { clearTextWithKeyEvents, getFocusedTextLength, hasFocusedTextInput } fro
 import { InputKey, type InputKeyModifier, type InputKeyName } from "./InputKey";
 import type { KeyboardProfileId } from "./keyboardProfiles";
 import { TapOnElement } from "./TapOnElement";
+import { containsWysiwygTriggerChar } from "./wysiwygTriggerChars";
 import {
   ANDROID_KEYCOMBINATION_MIN_API_LEVEL,
   asciiKeyEventNeedsKeyCombination,
@@ -60,6 +61,18 @@ export function splitImeFormatSpans(text: string): string[] {
 export type SendKeysTypingMode = (typeof SEND_KEYS_TYPING_MODES)[number];
 export type ResolvedSendKeysTypingMode = Exclude<SendKeysTypingMode, "auto"> | "xcuiTypeText";
 type AndroidSendKeysTypingMode = Exclude<ResolvedSendKeysTypingMode, "xcuiTypeText">;
+
+function getAutoImeFallback(
+  operation: SendKeysOperation,
+  requestedMode: SendKeysTypingMode,
+  keyboardProfile: KeyboardProfileId | undefined,
+  resolvedMode: AndroidSendKeysTypingMode,
+): AndroidSendKeysTypingMode | undefined {
+  if (requestedMode !== "auto" || keyboardProfile || resolvedMode !== "ime") {
+    return undefined;
+  }
+  return operation === "insert" ? "eventAll" : "a11y";
+}
 
 export const SEND_KEYS_OPERATIONS = ["insert", "replace"] as const;
 export type SendKeysOperation = (typeof SEND_KEYS_OPERATIONS)[number];
@@ -234,7 +247,18 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     signal?.throwIfAborted();
     const operation = command.operation ?? "insert";
     const requestedMode = command.mode ?? "auto";
-    const resolvedMode = this.resolveMode(operation, requestedMode, command.keyboardProfile);
+    const resolvedMode = this.resolveMode(
+      operation,
+      requestedMode,
+      command.keyboardProfile,
+      command.text,
+    );
+    const autoImeFallback = getAutoImeFallback(
+      operation,
+      requestedMode,
+      command.keyboardProfile,
+      resolvedMode,
+    );
     const baseResult = {
       index: -1,
       action: "type" as const,
@@ -257,6 +281,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
               operation,
               resolvedMode,
               command.keyboardProfile,
+              autoImeFallback,
               signal,
             );
       return {
@@ -334,11 +359,15 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     operation: SendKeysOperation,
     requestedMode: SendKeysTypingMode,
     keyboardProfile?: KeyboardProfileId,
+    text = "",
   ): AndroidSendKeysTypingMode {
     if (requestedMode !== "auto") {
       return requestedMode;
     }
     if (keyboardProfile) {
+      return "ime";
+    }
+    if (containsWysiwygTriggerChar(text)) {
       return "ime";
     }
     return operation === "insert" ? "eventAll" : "a11y";
@@ -376,6 +405,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     operation: SendKeysOperation,
     mode: AndroidSendKeysTypingMode,
     keyboardProfile: KeyboardProfileId | undefined,
+    autoImeFallback?: AndroidSendKeysTypingMode,
     signal?: AbortSignal,
   ): Promise<TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode }> {
     switch (mode) {
@@ -390,8 +420,35 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       case "eventOnly":
         return this.executeAndroidEventOnly(text, operation, signal);
       case "ime":
-        return this.executeAndroidImeCommit(text, operation, keyboardProfile, signal);
+        return this.executeAndroidImeOrFallback(
+          text,
+          operation,
+          keyboardProfile,
+          autoImeFallback,
+          signal,
+        );
     }
+  }
+
+  private async executeAndroidImeOrFallback(
+    text: string,
+    operation: SendKeysOperation,
+    keyboardProfile: KeyboardProfileId | undefined,
+    autoImeFallback: AndroidSendKeysTypingMode | undefined,
+    signal?: AbortSignal,
+  ): Promise<TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode }> {
+    if (!autoImeFallback || (await this.textClient.supportsImeCommit())) {
+      return this.executeAndroidImeCommit(text, operation, keyboardProfile, signal);
+    }
+    const fallback = await this.executeAndroidType(
+      text,
+      operation,
+      autoImeFallback,
+      keyboardProfile,
+      undefined,
+      signal,
+    );
+    return { ...fallback, resolvedMode: autoImeFallback };
   }
 
   private getImeCommitLock(): Mutex {

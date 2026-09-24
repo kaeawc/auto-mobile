@@ -146,6 +146,7 @@ class WorkspaceShellUiTest {
     onNodeWithContentDescription("Inspect mode").assertIsDisplayed()
     onNodeWithContentDescription("Navigation Pixel 8").assertIsDisplayed()
     onNodeWithContentDescription("Performance Pixel 8").assertIsDisplayed()
+    onNodeWithContentDescription("Shrink Pixel 8").assertIsDisplayed()
     onNodeWithContentDescription("Close Pixel 8").assertIsDisplayed()
   }
 

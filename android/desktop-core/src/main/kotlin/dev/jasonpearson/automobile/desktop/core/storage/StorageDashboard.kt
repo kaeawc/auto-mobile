@@ -454,6 +454,7 @@ fun StorageDashboard(
       StorageTab.Database ->
         DatabaseInspector(
           databases = databases,
+          platform = platform,
           loadError = if (databases.isEmpty()) error else null,
           onFetchTableData = onFetchTableData,
           onExecuteSQL = onExecuteSQL,

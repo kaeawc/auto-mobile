@@ -62,6 +62,7 @@ class TestFacetTest {
         .isNotEmpty()
     }
     onNodeWithText("No test runs for this device", substring = true).assertIsDisplayed()
+    onNodeWithText("Run a test with AutoMobile to see results here.").assertIsDisplayed()
   }
 
   @Test

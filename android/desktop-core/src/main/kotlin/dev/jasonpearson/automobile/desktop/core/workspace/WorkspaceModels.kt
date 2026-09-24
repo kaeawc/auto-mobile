@@ -118,6 +118,8 @@ data class DeviceColumn(
   val mode: InteractionMode = InteractionMode.Input,
   val activeTool: Tool? = null,
   val shrunk: Boolean = false,
+  /** User-selected share of the docked pane's height given to the main content. */
+  val firstPaneFractionOverride: Float? = null,
   val locked: Boolean = false,
   /** Current orientation; the Rotate control toggles it and drives the `rotate` tool value. */
   val orientation: Orientation = Orientation.Portrait,

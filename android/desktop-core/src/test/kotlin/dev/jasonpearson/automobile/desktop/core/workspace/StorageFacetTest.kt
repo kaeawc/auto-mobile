@@ -19,6 +19,7 @@ import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
 import dev.jasonpearson.automobile.desktop.core.platform.AppVersion
 import dev.jasonpearson.automobile.desktop.core.platform.AppVersionProvider
 import dev.jasonpearson.automobile.desktop.core.settings.FakeSettingsProvider
+import dev.jasonpearson.automobile.desktop.core.storage.DatabaseInspector
 import dev.jasonpearson.automobile.desktop.core.storage.StoragePlatform
 import dev.jasonpearson.automobile.desktop.core.testing.FakeAutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.update.FakeUpdateController
@@ -73,6 +74,23 @@ class StorageFacetTest {
   fun `maps workspace platform to storage platform`() {
     assertEquals(StoragePlatform.iOS, Platform.Ios.toStoragePlatform())
     assertEquals(StoragePlatform.Android, Platform.Android.toStoragePlatform())
+  }
+
+  @Test
+  fun `database empty state gives platform-specific guidance`() = runComposeUiTest {
+    val platform = mutableStateOf(StoragePlatform.iOS)
+    setContent {
+      MaterialTheme {
+        DatabaseInspector(databases = emptyList(), platform = platform.value)
+      }
+    }
+    onNodeWithText("No databases detected").assertIsDisplayed()
+    onNodeWithText("Simulator app's .app container", substring = true).assertIsDisplayed()
+    onNodeWithText("adb shell", substring = true).assertDoesNotExist()
+
+    runOnIdle { platform.value = StoragePlatform.Android }
+    onNodeWithText("adb shell", substring = true).assertIsDisplayed()
+    onNodeWithText("Simulator app's .app container", substring = true).assertDoesNotExist()
   }
 
   @Test

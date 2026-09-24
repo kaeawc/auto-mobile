@@ -76,6 +76,7 @@ class NetworkFacetTest {
         .isNotEmpty()
     }
     onNodeWithText("No network activity captured", substring = true).assertIsDisplayed()
+    onNodeWithText("Exercise the app to capture requests.").assertIsDisplayed()
   }
 
   @Test

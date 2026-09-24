@@ -185,8 +185,10 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
     onResult: (ImeCommitResult) -> Unit,
   ) {
     if (currentInputStarted && currentInputConnection != null) {
-      onResult(driver.commit(text, priorImeId))
-      scheduleIdleRestore(driver, priorImeId)
+      driver.commit(text, priorImeId) { result ->
+        onResult(result)
+        scheduleIdleRestore(driver, priorImeId)
+      }
       return
     }
     if (SystemClock.uptimeMillis() >= deadlineMs) {
@@ -215,6 +217,13 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
 
       override fun finishComposing(): Boolean =
         session.finishComposingForAutomation(connectionAdapter())
+
+      override fun readTextBeforeCursor(maxChars: Int): String? =
+        connectionAdapter()?.textBeforeCursor(maxChars)
+
+      override fun postDelayed(delayMs: Long, action: () -> Unit) {
+        mainHandler.postDelayed(action, delayMs)
+      }
 
       override fun syncEditorState(): Boolean =
         connectionAdapter()?.let {

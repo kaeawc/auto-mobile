@@ -257,7 +257,11 @@ fun DeviceStreamView(
     // surface (which owns the whole pane while the relay is refused). Collapsed by default so it
     // does
     // not intercept a tap on the interactive control surface; the user expands it to pick a preset.
-    if (qualityController != null && state !is VideoStreamState.PermissionRequired) {
+    if (
+      qualityController != null &&
+        state !is VideoStreamState.PermissionRequired &&
+        state !is VideoStreamState.Unavailable
+    ) {
       val actualFps by qualityController.actualFps.collectAsState()
       var autoAdjust by
         remember(column.deviceId) { mutableStateOf(qualityController.autoAdjustEnabled) }
@@ -461,5 +465,12 @@ internal fun streamStatusHint(state: VideoStreamState): String =
     // Streaming with no frame yet: the subscribe was accepted but nothing has decoded.
     is VideoStreamState.Streaming -> "Waiting for the first frame…"
     is VideoStreamState.PermissionRequired -> "Screen Recording needs approval"
-    is VideoStreamState.Unavailable -> state.reason
+    is VideoStreamState.Unavailable ->
+      when (state.cause) {
+        VideoStreamState.UnavailableCause.NO_RELAY ->
+          "Live mirroring unavailable\nThis daemon has no video-stream relay. Update or restart the daemon to enable live mirroring."
+        VideoStreamState.UnavailableCause.REFUSED ->
+          "Live mirroring refused\n${state.reason}\nCheck the daemon stream-auth setting (AUTOMOBILE_DAEMON_STREAM_AUTH)."
+        VideoStreamState.UnavailableCause.OTHER -> state.reason
+      }
   }

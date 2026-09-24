@@ -20,6 +20,7 @@ import dev.jasonpearson.automobile.desktop.core.settings.FakeSettingsProvider
 import dev.jasonpearson.automobile.desktop.core.video.FakeVideoStreamSource
 import dev.jasonpearson.automobile.desktop.core.video.VideoStreamQuality
 import dev.jasonpearson.automobile.desktop.core.video.VideoStreamState
+import dev.jasonpearson.automobile.desktop.core.video.VideoStreamState.UnavailableCause
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -535,6 +536,26 @@ class DeviceStreamViewTest {
   }
 
   @Test
+  fun `no quality overlay while the stream is unavailable`() = runComposeUiTest {
+    val source = FakeVideoStreamSource()
+    setContent {
+      MaterialTheme {
+        DeviceStreamView(
+          col(),
+          enableDeviceControl = true,
+          settings = FakeSettingsProvider(streamQualityPreset = "medium"),
+          sourceFactory = { _, _ -> source },
+        )
+      }
+    }
+    onNodeWithText("Medium · 0 fps").assertIsDisplayed()
+
+    runOnUiThread { source.becomeUnavailable("relay down") }
+
+    onAllNodesWithText("fps", substring = true).assertCountEquals(0)
+  }
+
+  @Test
   fun `manual quality selection persists and re-subscribes with the new preset`() =
     runComposeUiTest {
       val settings = FakeSettingsProvider(streamQualityPreset = "medium")
@@ -575,5 +596,20 @@ class DeviceStreamViewTest {
       streamStatusHint(VideoStreamState.Streaming(1080, 2400)),
     )
     assertEquals("relay down", streamStatusHint(VideoStreamState.Unavailable("relay down")))
+    val noRelay =
+      streamStatusHint(VideoStreamState.Unavailable("unused", UnavailableCause.NO_RELAY))
+    assertTrue(noRelay.contains("Live mirroring unavailable"))
+    assertTrue(
+      noRelay.contains(
+        "This daemon has no video-stream relay. Update or restart the daemon to enable live mirroring."
+      )
+    )
+    val refused =
+      streamStatusHint(
+        VideoStreamState.Unavailable("No connected device with id ghost.", UnavailableCause.REFUSED)
+      )
+    assertTrue(refused.contains("Live mirroring refused"))
+    assertTrue(refused.contains("No connected device with id ghost."))
+    assertTrue(refused.contains("AUTOMOBILE_DAEMON_STREAM_AUTH"))
   }
 }

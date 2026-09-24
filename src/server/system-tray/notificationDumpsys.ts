@@ -264,7 +264,7 @@ export const parseActiveNotificationKeysForApp = (
   const wellFormedEmptyActiveSet =
     output.includes(MANAGER_STATE_HEADER) &&
     !output.includes(`${ACTIVE_SECTION}:`) &&
-    !output.includes("NotificationRecord(") &&
+    snapshot.records.length === 0 &&
     EMPTY_ACTIVE_SET_TRAILING_MARKERS.some((marker) => output.includes(marker));
   if (!snapshot.complete || (!snapshot.activeSectionRecognized && !wellFormedEmptyActiveSet)) {
     return undefined;

@@ -349,7 +349,11 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
           bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
           node: [
             { text: "App info", bounds: { left: 100, top: 1600, right: 400, bottom: 1700 } },
-            { text: "Close app", bounds: { left: 600, top: 1600, right: 900, bottom: 1700 } },
+            {
+              "resource-id": "android:id/aerr_close",
+              text: "Close app",
+              bounds: { left: 600, top: 1600, right: 900, bottom: 1700 },
+            },
           ],
         },
       },
@@ -413,6 +417,48 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     fakeAdb.setForegroundApp({ packageName: "com.android.systemui", userId: 0 });
     fakeAdb.setCommandResponse("dumpsys window", {
       stdout: "  mCurrentFocus=Window{8ddaeb2 u0 com.android.systemui/.MainActivity}\n",
+      stderr: "",
+      exitCode: 0,
+    } as any);
+
+    const result = await makeScreen(viewHierarchy, fakeAdb, timer).execute({
+      skipScreenshot: true,
+      skipBackStack: true,
+    });
+
+    expect(result.freshness?.isFresh).toBe(false);
+    expect(result.freshness?.warning).toContain("capture as incomplete");
+    expect(result.freshness?.warning).toContain("isAccessibilityTool");
+  });
+
+  test("retracts an unrelated android hierarchy captured before a framework error dialog gains focus (#7454)", async () => {
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchy({
+      ...calendarHierarchy(now),
+      packageName: "android",
+      foregroundActivity: "android/.SearchActivity",
+      ctrlProxyIncomplete: true,
+      sdkInt: 34,
+      hierarchy: {
+        node: {
+          bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
+          node: [
+            {
+              "resource-id": "android:id/search_src_text",
+              text: "Search settings",
+              bounds: { left: 100, top: 200, right: 900, bottom: 300 },
+            },
+          ],
+        },
+      },
+    });
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setForegroundApp({ packageName: "com.android.systemui", userId: 0 });
+    fakeAdb.setCommandResponse("dumpsys window", {
+      stdout: "  mCurrentFocus=Window{8ddaeb2 u0 Application Error: example.app}\n",
       stderr: "",
       exitCode: 0,
     } as any);

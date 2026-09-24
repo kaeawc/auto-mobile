@@ -100,6 +100,23 @@ describe("dumpsys notification records", () => {
     ).toEqual([]);
   });
 
+  test("accepts an empty active set with snoozed and archived records", () => {
+    expect(
+      parseActiveNotificationKeysForApp(
+        dump(
+          "Current Notification Manager state:",
+          "  Notification attention state:",
+          "  mArchive=Archive (1 notification)",
+          "    NotificationRecord(0x1: pkg=com.example.app user=UserHandle{0} id=1 tag=archived key=0|com.example.app|1|archived|10100: Notification(channel=messages))",
+          "  Snoozed notifications:",
+          "    NotificationRecord(0x2: pkg=com.example.app user=UserHandle{0} id=2 tag=snoozed key=0|com.example.app|2|snoozed|10100: Notification(channel=messages))",
+          "  Ranking Config:",
+        ),
+        "com.example.app",
+      ),
+    ).toEqual([]);
+  });
+
   test("does not treat a manager-state header truncated before trailing state as empty", () => {
     expect(
       parseActiveNotificationKeysForApp("Current Notification Manager state:", "com.example.app"),

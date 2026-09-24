@@ -6,6 +6,8 @@ import {
   ObserveResult,
   ScreenIdentity,
   ViewHierarchyWindowInfo,
+  type ViewHierarchyNode,
+  type ViewHierarchyResult,
 } from "../../models";
 import { ViewHierarchy } from "./ViewHierarchy";
 import { Window } from "./Window";
@@ -64,6 +66,8 @@ import {
 import { deriveIosScreenIdentity } from "./ios/IosScreenIdentity";
 import { computeFreshness } from "./observationFreshness";
 import { SafeAreaAuditor, capLayoutWarnings } from "./audits/SafeAreaAuditor";
+import { DefaultElementParser } from "../utility/ElementParser";
+import { ALERT_TITLE_RESOURCE_ID } from "../../utils/androidSystemUiAnr";
 
 /**
  * Observe command class that combines screen details, view hierarchy and screenshot.
@@ -102,6 +106,8 @@ const SYSTEM_UI_WINDOW_PACKAGES = new Set<string>(["com.android.systemui"]);
 // so their accessibility hierarchy is labelled with this package rather than
 // the resumed activity behind the dialog.
 const FRAMEWORK_WINDOW_PACKAGE = "android";
+// AppErrorDialog's action IDs identify a captured crash dialog across locales.
+const APP_ERROR_RESOURCE_ID_PREFIX = "android:id/aerr_";
 
 const SYSTEM_UI_PACKAGE = "com.android.systemui";
 
@@ -876,10 +882,7 @@ export class RealObserveScreen implements ObserveScreen {
             ? await this.confirmForegroundIdentity(postCaptureForeground, signal)
             : undefined,
           result.viewHierarchy?.ctrlProxyIncomplete === true
-            ? await this.isConfirmedFrameworkErrorDialog(
-                result.viewHierarchy.packageName ?? "",
-                signal,
-              )
+            ? await this.isConfirmedFrameworkErrorDialog(result.viewHierarchy, signal)
             : false,
         ),
       });
@@ -2026,7 +2029,7 @@ export class RealObserveScreen implements ObserveScreen {
     if (!confirmed || confirmed !== foreground || confirmed === observed) {
       return undefined;
     }
-    if (await this.isConfirmedFrameworkErrorDialog(observed, signal)) {
+    if (await this.isConfirmedFrameworkErrorDialog(result.viewHierarchy, signal)) {
       return undefined;
     }
     return { observed, foreground };
@@ -2038,10 +2041,25 @@ export class RealObserveScreen implements ObserveScreen {
    * divergence before treating the captured `android` hierarchy as stale.
    */
   private async isConfirmedFrameworkErrorDialog(
-    observed: string,
+    viewHierarchy: ViewHierarchyResult | undefined,
     signal?: AbortSignal,
   ): Promise<boolean> {
-    if (observed !== FRAMEWORK_WINDOW_PACKAGE) {
+    if (viewHierarchy?.packageName !== FRAMEWORK_WINDOW_PACKAGE) {
+      return false;
+    }
+    const parser = new DefaultElementParser();
+    let capturedDialog = false;
+    for (const root of parser.extractRootNodes(viewHierarchy)) {
+      parser.traverseNode(root, (node: unknown) => {
+        const properties = parser.extractNodeProperties(node as ViewHierarchyNode);
+        const resourceId = properties["resource-id"] ?? properties.resourceId;
+        capturedDialog ||=
+          typeof resourceId === "string" &&
+          (resourceId.startsWith(APP_ERROR_RESOURCE_ID_PREFIX) ||
+            resourceId === ALERT_TITLE_RESOURCE_ID);
+      });
+    }
+    if (!capturedDialog) {
       return false;
     }
     try {

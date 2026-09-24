@@ -100,6 +100,14 @@ describe("#4130 hadolint hoist (fast-validation)", () => {
     expect(waitIndex).toBeLessThan(indexOfNamed(steps, "Run fast validation checks"));
     expect(checks?.run).toContain("github-python-lock");
   });
+
+  test("the docs-assets freshness gate is in the fast-validation --only list", () => {
+    // The generated docs/assets/javascripts/*.js is only authoritative because
+    // this gate rebuilds from docs-assets/src and fails on drift. It is selected
+    // explicitly, so guard it against being dropped from the --only list.
+    const checks = stepNamed(steps, "Run fast validation checks");
+    expect(checks?.run).toContain("docs-assets");
+  });
 });
 
 describe("#4130 deploy-docs fan-outs (docs.yml)", () => {

@@ -8,6 +8,7 @@
     "scratch/**",
     "dist/**",
     "node_modules/**",
+    "docs-assets/**",
     "**/*.generated.ts",
     "**/generated/**",
     "**/*.js",

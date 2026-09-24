@@ -1,0 +1,18 @@
+{
+  "//": "Browser-targeted docs assets. Separate from the root tsconfig (which is",
+  "//2": "Node/Bun and feeds the typecheck baseline) so DOM globals stay scoped to",
+  "//3": "these files and never leak into src/. scripts/docs/build-docs-assets.ts",
+  "//4": "type-checks against this config before bundling to docs/assets/javascripts/.",
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "types": [],
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["src"]
+}

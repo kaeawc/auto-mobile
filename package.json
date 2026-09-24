@@ -61,6 +61,8 @@
     "format:check": "oxfmt --check",
     "typecheck": "bash scripts/typecheck-baseline.sh",
     "typecheck:update": "bash scripts/typecheck-baseline.sh --update",
+    "docs:assets": "bun scripts/docs/build-docs-assets.ts",
+    "docs:assets:check": "bun scripts/docs/build-docs-assets.ts --check",
     "watch": "bun --watch src/index.ts",
     "build": "bun build.ts && chmod +x dist/src/index.js",
     "clean": "rm -rf dist",

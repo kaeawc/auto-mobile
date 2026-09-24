@@ -477,6 +477,16 @@ for path in "${changed_files[@]}"; do
       ;;
   esac
 
+  # The browser docs assets are generated from docs-assets/src into
+  # docs/assets/javascripts/*.js; either the source or a hand-edit of the
+  # generated output must run the freshness gate. (A change to the generator
+  # under scripts/ is selected by add_registered_checks_for_script_path below.)
+  case "${path}" in
+    docs-assets/*|docs/assets/javascripts/*.js)
+      add_check "docs-assets"
+      ;;
+  esac
+
   case "${path}" in
     package.json|bun.lock)
       add_check "runtime-pins"

@@ -27,8 +27,9 @@
 # TOML is parsed with yq (the repo's canonical config/workflow parser), not
 # grepped, so a value in a comment cannot satisfy these assertions. All
 # assertions here are config-level (parsing `.lycherc.toml` with yq) rather
-# than invoking the real `lychee` binary: the required BATS lane in
-# `pull_request.yml` does not install lychee, and a test gated behind
+# than invoking the real `lychee` binary: the required `bats-tests` lane in
+# `pull_request.yml` does not install lychee (the separate `fast-validation`
+# job does), and a test gated behind
 # "skip if lychee is missing" never actually runs there — it would guard
 # nothing pre-merge (the exact gap this test exists to close). yq ships on
 # the GitHub-hosted macOS runner image the BATS lane uses, so no new install

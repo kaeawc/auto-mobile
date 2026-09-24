@@ -17,8 +17,9 @@
 #     that substring.
 #
 # Config-level assertions parse TOML/YAML with yq (the repo's canonical
-# parser) so they run in the BATS lane, which does not install lychee. The one
-# behavioral test needs the lychee binary and skips without it.
+# parser) so they run in the `bats-tests` lane, which does not install lychee;
+# the separate `fast-validation` job does. The behavioral tests need the
+# lychee binary and skip without it.
 
 CONFIG=".lycherc.toml"
 SCRIPT="scripts/lychee/validate_lychee.sh"
@@ -105,4 +106,31 @@ requires_yq() {
   [ "$status" -eq 2 ]
   [[ "$output" == *"missing-heading"* ]]
   [[ "$output" != *"#real-heading"*"Cannot find fragment"* ]]
+}
+
+@test "lychee-offline check is registered in all_fast_validate_checks.sh" {
+  local checks="scripts/all_fast_validate_checks.sh"
+  grep -Fq 'add_check "lychee-offline"' "$checks"
+  grep -Fq -- '--offline' <(grep 'add_check "lychee-offline"' "$checks")
+  grep -Fq 'LYCHEE_REQUIRE_SITE=true' <(grep 'add_check "lychee-offline"' "$checks")
+}
+
+@test "pull_request.yml runs lychee-offline in its own step, not fanned out with the docs-globbing checks" {
+  requires_yq
+  local workflow=".github/workflows/pull_request.yml"
+  run yq -r '.jobs["fast-validation"].steps[] | select(.name == "Run offline lychee link check") | .run' "$workflow"
+  [ "$status" -eq 0 ]
+  [ "$output" = 'scripts/all_fast_validate_checks.sh --only lychee-offline' ]
+  run yq -r '.jobs["fast-validation"].steps[] | select(.name == "Run offline lychee link check") | .background // false' "$workflow"
+  [ "$status" -eq 0 ]
+  [ "$output" = "false" ]
+  # The docs-globbing checks must not share lychee-offline's --only invocation.
+  run grep -- '--only lychee-offline' "$workflow"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"mkdocs-nav"* ]]
+  [[ "$output" != *"docs-github-markdown"* ]]
+}
+
+@test "install-fast-validation-deps.sh installs lychee" {
+  grep -Fq 'install_lychee.sh' "scripts/ci/install-fast-validation-deps.sh"
 }

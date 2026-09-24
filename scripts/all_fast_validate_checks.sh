@@ -51,6 +51,7 @@ add_check "docs-github-markdown" "\"$PROJECT_ROOT/scripts/validate_docs_github_m
 add_check "claude-plugin" "\"$PROJECT_ROOT/scripts/claude/validate_plugin.sh\"" "config" "Validate Claude plugin structure"
 add_check "codex-skills" "\"$PROJECT_ROOT/scripts/validate_codex_skills.sh\"" "config,docs" "Validate Codex skills and AGENTS inventory"
 add_check "lychee" "\"$PROJECT_ROOT/scripts/lychee/validate_lychee.sh\"" "docs,links" "Validate documentation links"
+add_check "lychee-offline" "LYCHEE_REQUIRE_SITE=true \"$PROJECT_ROOT/scripts/lychee/validate_lychee.sh\" --offline" "docs,links" "Validate documentation links offline (local targets + #fragments)"
 add_check "dependabot" "\"$PROJECT_ROOT/scripts/validate_dependabot.sh\"" "config,yaml" "Validate Dependabot config"
 add_check "debug-tags" "\"$PROJECT_ROOT/scripts/validate-no-debug-log-tags.sh\"" "lint" "Reject stray [*-DEBUG] log tags in src/"
 add_check "dependency-decisions" "\"$PROJECT_ROOT/scripts/check-stdlib-first.sh\"" "lint,dependencies" "Require a decision record for new direct dependencies"

@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 #
-# Installs the Fast Validation job's extra CLI dependencies (xmlstarlet + bats)
-# with bounded, retrying network calls.
+# Installs the Fast Validation job's extra CLI dependencies (xmlstarlet, bats,
+# and lychee) with bounded, retrying network calls.
 #
-# The Fast Validation "Install fast validation dependencies" step runs three
-# network operations -- `apt-get update`, `apt-get install`, and a `git clone`
-# of bats-core -- as a `background: true` step. Native parallel-step failure
-# surfaces at the `- wait:` barrier, so when a stalled apt mirror or GitHub TCP
-# read never returns, the command blocks with no output, the wait never
-# completes, and the whole 50-minute job budget is consumed before the run is
-# cancelled by timeout. Wrapping each call in a per-command wall-clock timeout
+# The Fast Validation "Install fast validation dependencies" step runs four
+# network operations -- `apt-get update`, `apt-get install`, a `git clone` of
+# bats-core, and a lychee download -- as a `background: true` step. Native
+# parallel-step failure surfaces at the `- wait:` barrier, so when a stalled
+# apt mirror or GitHub TCP read never returns, the command blocks with no
+# output, the wait never completes, and the whole 20-minute job budget can be
+# consumed before the run is cancelled by timeout. Wrapping each call in a
+# per-command wall-clock timeout
 # plus exponential-backoff retry turns an indefinite hang into a fast, retried,
 # and ultimately loud failure. The workflow step also carries `timeout-minutes`
 # as a hard backstop.
@@ -18,9 +19,9 @@ set -euo pipefail
 # Tunables (overridable for tuning and for the BATS tests).
 #
 # Defaults are sized so the WORST CASE fits the workflow step's
-# `timeout-minutes: 10` backstop: 4 operations x (MAX_ATTEMPTS x
-# (CMD_TIMEOUT + KILL_GRACE) + retry delays) = 4 x (2 x (60 + 10) + 5) = 580s
-# < 600s. Healthy runs finish in seconds; a stalled mirror that cannot answer
+# `timeout-minutes: 13` backstop: 5 operations x (MAX_ATTEMPTS x
+# (CMD_TIMEOUT + KILL_GRACE) + retry delays) = 5 x (2 x (60 + 10) + 5) = 725s
+# < 780s. Healthy runs finish in seconds; a stalled mirror that cannot answer
 # in 60s will not answer in 180s either. Keep this arithmetic aligned when
 # changing any of these values or the step timeout.
 CMD_TIMEOUT_SECONDS="${FAST_VALIDATION_DEPS_CMD_TIMEOUT_SECONDS:-60}"
@@ -111,6 +112,8 @@ main() {
     run_with_retry "install bats-core" \
       sudo "${BATS_CLONE_DIR}/install.sh" "$BATS_INSTALL_PREFIX"
   fi
+
+  run_with_retry "install lychee" scripts/lychee/install_lychee.sh
 
   log "Fast Validation dependencies ready"
 }

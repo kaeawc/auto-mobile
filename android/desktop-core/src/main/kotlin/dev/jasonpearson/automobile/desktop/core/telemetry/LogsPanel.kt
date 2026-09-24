@@ -19,6 +19,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -304,13 +305,17 @@ fun LogsPanel(
     )
 
     if (statusText != null) {
-      Box(
+      Row(
         modifier =
           Modifier.fillMaxWidth()
             .background(Color(0xFF5C4033).copy(alpha = 0.3f))
-            .padding(horizontal = 8.dp, vertical = 2.dp)
+            .padding(horizontal = 8.dp, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
       ) {
         Text(statusText, fontSize = 10.sp, color = Color(0xFFE0A040))
+        if (connectionState is ConnectionState.Error && telemetryPushClient != null) {
+          TextButton(onClick = { telemetryPushClient.connect(activeDeviceId) }) { Text("Retry") }
+        }
       }
     }
 

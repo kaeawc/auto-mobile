@@ -266,6 +266,21 @@ class LogsPanelTest {
   }
 
   @Test
+  fun `terminal telemetry error offers Retry for the active device`() = runComposeUiTest {
+    val fake = FakeTelemetryPushClient()
+    setContent {
+      MaterialTheme { LogsPanel(telemetryPushClient = fake, activeDeviceId = "dev-1") }
+    }
+    fake.setConnectionState(ConnectionState.Error("Telemetry unavailable on this daemon"))
+    waitUntil(timeoutMillis = 2_000) {
+      onAllNodesWithText("Retry").fetchSemanticsNodes().isNotEmpty()
+    }
+    onNodeWithText("Retry").assertIsDisplayed().performClick()
+    assertEquals(1, fake.getConnectCallCount())
+    assertEquals("dev-1", fake.getLastDeviceId())
+  }
+
+  @Test
   fun `tail-follow survives filtering to an old row then clearing`() = runComposeUiTest {
     val fake = FakeTelemetryPushClient()
     setContent {

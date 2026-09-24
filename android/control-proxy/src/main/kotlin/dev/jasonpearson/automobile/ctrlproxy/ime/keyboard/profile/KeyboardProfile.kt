@@ -37,8 +37,11 @@ object KeyboardProfiles {
     )
 
   /**
-   * Best-known defaults to be tuned from real-device InputConnection traces; fidelity is not yet
-   * verified.
+   * Behavior verified on-device (2026-09-23): per-character `setComposingText` word composing with
+   * `finishComposingText` on separators, batched edits, and direct `commitText` for symbols. In a
+   * rich markdown composer the fenced-code autoformat fires, and the InputConnection call sequence
+   * is byte-identical to the stock Gboard (captured via the IC trace recorder). Prediction and
+   * autocorrect nuances are out of scope by design.
    */
   val GBOARD =
     KeyboardProfile(
@@ -69,8 +72,12 @@ object KeyboardProfiles {
     )
 
   /**
-   * Best-known defaults to be tuned from real-device InputConnection traces; fidelity is not yet
-   * verified.
+   * Behavior verified functional on-device (2026-09-23): word composing, cursor-move recompose
+   * (`setComposingRegion` when the caret enters committed text — the distinctive path Gboard
+   * omits), no batch edits, commit-newline enter, and the green accent style. Triggers the
+   * rich-composer fenced-code autoformat. Fidelity against the real Samsung Keyboard (Honeyboard)
+   * prediction/composing nuances is still pending a trace from Samsung hardware, which cannot be
+   * installed on a non-Samsung device.
    */
   val SAMSUNG =
     KeyboardProfile(

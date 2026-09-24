@@ -799,7 +799,7 @@ jobs:
         shell: bash
         background: true
         id: install-fast-validation-deps
-        timeout-minutes: 10
+        timeout-minutes: 13
         run: scripts/ci/install-fast-validation-deps.sh
 
       # Pin the JDK so the ktfmt check formats deterministically (project targets
@@ -828,6 +828,10 @@ jobs:
           scripts/all_fast_validate_checks.sh \
             --only yaml,schema-copy-drift,xml,bun-version-coherence,shellcheck,shell-portability,shell-sete,stdlib-first,dependency-decisions,sharp-matrix,runtime-pins,shell-quote-boundary,security-boundary,app-bundle-metadata-boundary,ios-ctrl-proxy-process-boundary,mkdocs-nav,docs-github-markdown,docs-assets,ktfmt,claude-plugin,codex-skills,github-python-lock \
             --max-parallel 4
+
+      - name: "Run offline lychee link check"
+        shell: bash
+        run: scripts/all_fast_validate_checks.sh --only lychee-offline
 
       # The BATS suite (913 tests, ~3.5min serially) is NOT run here. It ran a
       # full Ubuntu pass inline and dominated this required gate's wall-clock; the

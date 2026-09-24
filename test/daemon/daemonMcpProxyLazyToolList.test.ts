@@ -188,7 +188,6 @@ describe("DaemonMcpProxy.listAdvertisedTools (lazy tools/list — issue #5879)",
 
   test("connected fallback retains debug schemas when only effective debug is enabled", async () => {
     const fakeClient = new FakeDaemonClient({
-      daemonMethodResults: new Map([["ide/status", { effectiveDebug: true }]]),
       onCallDaemonMethod: (method) => {
         if (method === "tools/list") {
           throw new Error("wedged live list");
@@ -198,7 +197,7 @@ describe("DaemonMcpProxy.listAdvertisedTools (lazy tools/list — issue #5879)",
     const daemonManager = matchingDaemonManager();
     daemonManager.statusResult = {
       ...daemonManager.statusResult,
-      effectiveDebug: false,
+      effectiveDebug: true,
       options: { debug: false },
     };
     const proxy = new DaemonMcpProxy({
@@ -213,6 +212,9 @@ describe("DaemonMcpProxy.listAdvertisedTools (lazy tools/list — issue #5879)",
       const toolNames = (await proxy.listAdvertisedTools()).map((tool) => tool.name);
 
       expect(toolNames).toContain("debugSearch");
+      expect(
+        fakeClient.callDaemonMethodCalls.filter((call) => call.method === "ide/status"),
+      ).toHaveLength(0);
     } finally {
       await proxy.close();
     }
@@ -220,7 +222,6 @@ describe("DaemonMcpProxy.listAdvertisedTools (lazy tools/list — issue #5879)",
 
   test("connected fallback omits debug schemas when effective debug is disabled", async () => {
     const fakeClient = new FakeDaemonClient({
-      daemonMethodResults: new Map([["ide/status", { effectiveDebug: false }]]),
       onCallDaemonMethod: (method) => {
         if (method === "tools/list") {
           throw new Error("wedged live list");
@@ -230,7 +231,7 @@ describe("DaemonMcpProxy.listAdvertisedTools (lazy tools/list — issue #5879)",
     const daemonManager = matchingDaemonManager();
     daemonManager.statusResult = {
       ...daemonManager.statusResult,
-      effectiveDebug: true,
+      effectiveDebug: false,
       options: { debug: true },
     };
     const proxy = new DaemonMcpProxy({
@@ -245,6 +246,9 @@ describe("DaemonMcpProxy.listAdvertisedTools (lazy tools/list — issue #5879)",
       const toolNames = (await proxy.listAdvertisedTools()).map((tool) => tool.name);
 
       expect(toolNames).not.toContain("debugSearch");
+      expect(
+        fakeClient.callDaemonMethodCalls.filter((call) => call.method === "ide/status"),
+      ).toHaveLength(0);
     } finally {
       await proxy.close();
     }

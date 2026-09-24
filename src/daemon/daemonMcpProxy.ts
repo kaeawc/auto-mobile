@@ -2160,27 +2160,9 @@ export class DaemonMcpProxy {
   }
 
   private async connectedFallbackDaemonOptions(daemonStatus: DaemonStatus): Promise<DaemonOptions> {
-    let effectiveDebug = daemonStatus.effectiveDebug;
-    try {
-      const liveStatus: unknown = await this.client?.callDaemonMethod("ide/status", {});
-      if (
-        typeof liveStatus === "object" &&
-        liveStatus !== null &&
-        "effectiveDebug" in liveStatus &&
-        typeof liveStatus.effectiveDebug === "boolean"
-      ) {
-        effectiveDebug = liveStatus.effectiveDebug;
-      }
-    } catch (error) {
-      // The immutable launch option remains a backward-compatible fallback when
-      // a legacy or unhealthy daemon cannot report its live debug state.
-      logger.debug(
-        `[DaemonMcpProxy] Live effective debug status unavailable; using reconciled status: ${errorMessage(error)}`,
-      );
-    }
     return {
       ...daemonStatus.options,
-      debug: effectiveDebug ?? daemonStatus.options?.debug,
+      debug: daemonStatus.effectiveDebug ?? daemonStatus.options?.debug,
     };
   }
 

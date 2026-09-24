@@ -2,6 +2,7 @@ import { describe, expect, test, beforeEach } from "bun:test";
 import { Duplex } from "node:stream";
 import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
 import { McpTimeoutError } from "../../src/daemon/McpTimeoutError";
+import { DaemonDisconnectError } from "../../src/daemon/DaemonDisconnectError";
 import {
   DEFAULT_MCP_REQUEST_TIMEOUT_MS,
   MIN_UNINSTALL_APP_MCP_TIMEOUT_MS,
@@ -291,7 +292,7 @@ describe("DaemonClient per-request timeout", () => {
     }
   });
 
-  test("preserves each pending request's timeout context when the client closes", async () => {
+  test("surfaces a disconnect cause on each pending request when the client closes", async () => {
     const client = createConnectedClient(fakeTimer);
     const tool = client.callTool("tapOn", {}).catch((error: unknown) => error);
     const resource = client
@@ -302,10 +303,10 @@ describe("DaemonClient per-request timeout", () => {
     const [toolError, resourceError] = (await Promise.all([tool, resource])) as Error[];
     expect(toolError).toBeInstanceOf(DaemonUnavailableError);
     expect(resourceError).toBeInstanceOf(DaemonUnavailableError);
-    expect(toolError.cause).toBeInstanceOf(McpTimeoutError);
-    expect(resourceError.cause).toBeInstanceOf(McpTimeoutError);
-    expect((toolError.cause as McpTimeoutError).toolName).toBe("tapOn");
-    expect((resourceError.cause as McpTimeoutError).toolName).toBe("resources/read");
+    expect(toolError.cause).toBeInstanceOf(DaemonDisconnectError);
+    expect(resourceError.cause).toBeInstanceOf(DaemonDisconnectError);
+    expect((toolError.cause as DaemonDisconnectError).toolName).toBe("tapOn");
+    expect((resourceError.cause as DaemonDisconnectError).toolName).toBe("resources/read");
   });
 });
 

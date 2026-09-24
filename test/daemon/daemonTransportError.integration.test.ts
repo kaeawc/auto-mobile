@@ -9,6 +9,8 @@ import {
   DaemonUnavailableError,
 } from "../../src/daemon/client";
 import { DeviceControlTransportError } from "../../src/daemon/deviceControlTransportFailure";
+import { DaemonDisconnectError } from "../../src/daemon/DaemonDisconnectError";
+import { McpTimeoutError } from "../../src/daemon/McpTimeoutError";
 
 const isWindows = platform() === "win32";
 
@@ -52,11 +54,42 @@ describe("DaemonClient in-flight request on connection reset (#2737)", () => {
 
       // Must reject promptly with a recoverable DaemonUnavailableError — not hang
       // until the request timeout, and not a raw transport error.
-      await expect(client.callDaemonMethod("tools/list", {})).rejects.toBeInstanceOf(
-        DaemonUnavailableError,
-      );
+      try {
+        await client.callDaemonMethod("tools/list", {});
+        throw new Error("Expected tools/list to reject");
+      } catch (error) {
+        expect(error).toBeInstanceOf(DaemonUnavailableError);
+        expect((error as DaemonUnavailableError).cause).toBeInstanceOf(DaemonDisconnectError);
+        expect((error as DaemonUnavailableError).cause).not.toBeInstanceOf(McpTimeoutError);
+      }
 
       await client.close();
+    },
+  );
+
+  (isWindows ? test.skip : test)(
+    "preserves a disconnect cause for a pending MCP tool request",
+    async () => {
+      const dir = mkdtempSync(join(tmpdir(), "daemon-tool-disconnect-test-"));
+      tempDirs.push(dir);
+      const socketPath = join(dir, "daemon.sock");
+      server = createServer((connection: Socket) => {
+        connection.once("data", () => connection.destroy());
+      });
+      await new Promise<void>((resolve) => server!.listen(socketPath, resolve));
+
+      const client = new DaemonClient(socketPath, 2000);
+      try {
+        await client.connect();
+        await client.callTool("observe", {});
+        throw new Error("Expected observe to reject");
+      } catch (error) {
+        expect(error).toBeInstanceOf(DaemonUnavailableError);
+        expect((error as DaemonUnavailableError).cause).toBeInstanceOf(DaemonDisconnectError);
+        expect((error as DaemonUnavailableError).cause).not.toBeInstanceOf(McpTimeoutError);
+      } finally {
+        await client.close();
+      }
     },
   );
 });

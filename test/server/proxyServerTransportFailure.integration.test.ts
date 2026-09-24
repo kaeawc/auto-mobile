@@ -17,9 +17,11 @@ import {
 } from "../../src/daemon/deviceControlTransportFailure";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
 import { McpOverloadError, McpTimeoutError } from "../../src/daemon/McpTimeoutError";
+import { DaemonDisconnectError } from "../../src/daemon/DaemonDisconnectError";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
+import { FakeTimer } from "../fakes/FakeTimer";
 
 let isAvailableSpy: ReturnType<typeof spyOn> | null = null;
 
@@ -269,13 +271,53 @@ describe("proxy server daemon-overload errors", () => {
 });
 
 describe("proxy server socket-close diagnostics", () => {
-  test("surfaces only safe preserved timeout context for tool, resource, and list requests", async () => {
+  test("labels a real request timer expiry as a timeout", async () => {
+    const timer = new FakeTimer();
+    const daemonClient = new DaemonClient("/unused", 250, timer);
+    const deadlineError = new Promise<Error>((resolve) => {
+      daemonClient["scheduleRequestTimeout"]("request", "observe", 250, resolve);
+    });
+    timer.advanceTime(250);
+    const cause = await deadlineError;
+    expect(cause).toBeInstanceOf(McpTimeoutError);
+
+    isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+    const fakeClient = new FakeDaemonClient({
+      onCallTool: (toolName) => {
+        if (toolName === "observe") {
+          throw new DaemonUnavailableError("Socket connection closed", { cause });
+        }
+      },
+    });
+    const daemonManager = new FakeDaemonManager();
+    daemonManager.statusResult = { ...daemonManager.statusResult, version: DAEMON_VERSION };
+    const { server, proxy } = createProxyMcpServer({
+      proxyConfig: { clientFactory: () => fakeClient, daemonManager, autoStartDaemon: false },
+    });
+    const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "real-timeout-diagnostic-client", version: "0.0.1" });
+    try {
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+      await proxy.callTool("bootstrap", {});
+      const result = await client.callTool({ name: "observe", arguments: {} });
+      expect(JSON.stringify(result)).toContain(
+        "request timed out after 250ms while handling observe",
+      );
+      expect(JSON.stringify(result)).not.toContain("daemon connection closed before the response");
+    } finally {
+      await client.close();
+      await server.close();
+      await proxy.close();
+    }
+  });
+
+  test("surfaces only safe preserved disconnect context for tool, resource, and list requests", async () => {
     isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
     const disconnectError = (toolName: string) =>
       new DaemonUnavailableError("Socket connection closed", {
-        cause: new McpTimeoutError({
+        cause: new DaemonDisconnectError({
           toolName,
-          timeoutMs: 15_000,
           origin: "internal socket detail must not reach the client",
         }),
       });
@@ -297,7 +339,8 @@ describe("proxy server socket-close diagnostics", () => {
     });
     const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
     const client = new Client({ name: "socket-close-diagnostic-client", version: "0.0.1" });
-    const timeoutDiagnostic = /request timed out after 15000ms while handling/;
+    const disconnectDiagnostic =
+      /daemon connection closed before the response arrived while handling/;
 
     try {
       await server.connect(serverTransport);
@@ -306,15 +349,15 @@ describe("proxy server socket-close diagnostics", () => {
 
       const toolResult = await client.callTool({ name: "observe", arguments: {} });
       expect(toolResult.content).toMatchObject([
-        { type: "text", text: expect.stringMatching(timeoutDiagnostic) },
+        { type: "text", text: expect.stringMatching(disconnectDiagnostic) },
       ]);
       expect(JSON.stringify(toolResult)).not.toContain("internal socket detail");
 
       await expect(client.readResource({ uri: "automobile:devices/booted" })).rejects.toThrow(
-        timeoutDiagnostic,
+        disconnectDiagnostic,
       );
       for (const request of [() => client.listResources(), () => client.listResourceTemplates()]) {
-        await expect(request()).rejects.toThrow(timeoutDiagnostic);
+        await expect(request()).rejects.toThrow(disconnectDiagnostic);
       }
     } finally {
       await client.close();

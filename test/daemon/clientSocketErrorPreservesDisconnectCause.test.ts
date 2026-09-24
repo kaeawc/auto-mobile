@@ -26,10 +26,10 @@ mock.module("node:net", () => ({
 }));
 
 const { DaemonClient, DaemonUnavailableError } = await import("../../src/daemon/client");
-const { McpTimeoutError } = await import("../../src/daemon/McpTimeoutError");
+const { DaemonDisconnectError } = await import("../../src/daemon/DaemonDisconnectError");
 
 describe("DaemonClient socket error disconnect cause", () => {
-  test("preserves each pending request's timeout cause on transport error", async () => {
+  test("surfaces a disconnect cause on each pending request on transport error", async () => {
     const client = new DaemonClient(
       "/fake/socket",
       1_000,
@@ -51,10 +51,9 @@ describe("DaemonClient socket error disconnect cause", () => {
       expect.unreachable("the pending request should reject");
     } catch (error) {
       expect(error).toBeInstanceOf(DaemonUnavailableError);
-      expect((error as DaemonUnavailableError).cause).toBeInstanceOf(McpTimeoutError);
-      const disconnectCause = (error as DaemonUnavailableError).cause as McpTimeoutError;
+      expect((error as DaemonUnavailableError).cause).toBeInstanceOf(DaemonDisconnectError);
+      const disconnectCause = (error as DaemonUnavailableError).cause as DaemonDisconnectError;
       expect(disconnectCause.toolName).toBe("tools/list");
-      expect(disconnectCause.timeoutMs).toBe(250);
     }
   });
 });

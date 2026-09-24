@@ -68,32 +68,8 @@ internal fun filterCommands(commands: List<PaletteCommand>, query: String): List
  * characters still get labels that differ. Unique names are left untouched. Command ids are already
  * device-id-keyed, so this only affects the visible label. Pure.
  */
-internal fun disambiguatedDeviceNames(columns: List<DeviceColumn>): Map<String, String> = buildMap {
-  columns
-    .groupBy { it.name }
-    .forEach { (name, group) ->
-      if (group.size == 1) {
-        put(group.single().deviceId, name)
-      } else {
-        val length = shortestDistinguishingLength(group.map { it.deviceId })
-        group.forEach { column ->
-          put(column.deviceId, "$name (${column.deviceId.takeLast(length)})")
-        }
-      }
-    }
-}
-
-/**
- * The shortest id-suffix length whose `takeLast` values are all distinct across [deviceIds], so a
- * duplicate-name group gets the minimal readable disambiguator. Falls back to the longest id length
- * (the full id) when no shorter suffix separates them.
- */
-private fun shortestDistinguishingLength(deviceIds: List<String>): Int {
-  val maxLength = deviceIds.maxOf { it.length }
-  return (1..maxLength).firstOrNull { length ->
-    deviceIds.mapTo(mutableSetOf()) { it.takeLast(length) }.size == deviceIds.size
-  } ?: maxLength
-}
+internal fun disambiguatedDeviceNames(columns: List<DeviceColumn>): Map<String, String> =
+  disambiguateLabels(columns, DeviceColumn::deviceId, DeviceColumn::name)
 
 /**
  * The commands available for the current workspace [state]: open the picker, focus/close each

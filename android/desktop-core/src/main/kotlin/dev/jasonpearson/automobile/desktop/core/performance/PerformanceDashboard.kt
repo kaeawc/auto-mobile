@@ -204,11 +204,9 @@ fun PerformanceDashboard(
 
     LOG.info("Starting performance updates collection from stream client")
     observationStreamClient.performanceUpdates.collect { update ->
-      // The stream may be server-scoped to one device, but guard against cross-device updates so a
-      // multi-device workspace can't contaminate this pane's metrics.
-      if (deviceId != null && update.deviceId != null && update.deviceId != deviceId) {
-        return@collect
-      }
+      // Each pane receives a stream scoped to its device, so client-side device ID filtering is
+      // unnecessary and can drop updates when the daemon stamps a raw serial instead of the pane
+      // ID.
       LOG.info(
         "Received performance update - fps=${update.fps}, jankFrames=${update.jankFrames}, touchLatencyMs=${update.touchLatencyMs}, ttiMs=${update.timeToInteractiveMs}, screenName=${update.screenName}"
       )

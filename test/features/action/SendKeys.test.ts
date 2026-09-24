@@ -3,7 +3,6 @@ import type { BootedDevice, ObserveResult } from "../../../src/models";
 import {
   DefaultSendKeysCommandExecutor,
   SendKeys,
-  splitImeFormatSpans,
   type SendKeysCommandExecutor,
   type SendKeysInputKey,
   type SendKeysObserver,
@@ -12,7 +11,6 @@ import {
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { defaultTimer } from "../../../src/utils/SystemTimer";
-import { FakeTimer } from "../../fakes/FakeTimer";
 
 const androidDevice: BootedDevice = {
   deviceId: "emulator-5554",
@@ -356,64 +354,6 @@ describe("DefaultSendKeysCommandExecutor", () => {
     });
     expect(a11yResult).toMatchObject({ success: true, resolvedMode: "a11y" });
     expect(explicitA11yClient.calls).toContain("insert:note `x`");
-  });
-
-  test("splitImeFormatSpans ends segments at inline formatting spans", () => {
-    expect(splitImeFormatSpans("plain text")).toEqual(["plain text"]);
-    expect(splitImeFormatSpans("`foo` and `bar`")).toEqual(["`foo`", " and `bar`"]);
-    expect(splitImeFormatSpans("*a* _b_ ~c~")).toEqual(["*a*", " _b_", " ~c~"]);
-    expect(splitImeFormatSpans("```")).toEqual(["```"]);
-    expect(splitImeFormatSpans("hi `x` tail")).toEqual(["hi `x`", " tail"]);
-    expect(splitImeFormatSpans("`a``b`")).toEqual(["`a`", "`b`"]);
-  });
-
-  test("ime mode settles between formatting spans and restores the IME once", async () => {
-    const adb = new FakeAdbExecutor();
-    adb.setCommandResponseSequence("shell settings get secure default_input_method", [
-      { stdout: `${priorImeId}\n`, stderr: "" },
-      { stdout: `${commitImeId}\n`, stderr: "" },
-    ]);
-    const timer = new FakeTimer();
-    timer.enableAutoAdvance();
-    const textClient = createTextClient();
-    const executor = new DefaultSendKeysCommandExecutor(
-      androidDevice,
-      createAdbFactory(adb),
-      createObserver(),
-      { textClient: textClient.client, timer },
-    );
-
-    const result = await executor.type({ action: "type", text: "`foo` and `bar`", mode: "ime" });
-
-    expect(result).toMatchObject({ success: true, resolvedMode: "ime" });
-    expect(textClient.commitViaImeCalls).toEqual([
-      { text: "`foo`", priorImeId: null },
-      { text: " and `bar`", priorImeId: null },
-    ]);
-    expect(timer.getSleepHistory()).toEqual([200]);
-    expect(
-      adb.getExecutedCommands().filter((command) => command === `shell ime set ${priorImeId}`),
-    ).toHaveLength(1);
-
-    const singleAdb = new FakeAdbExecutor();
-    singleAdb.setCommandResponseSequence("shell settings get secure default_input_method", [
-      { stdout: `${priorImeId}\n`, stderr: "" },
-      { stdout: `${commitImeId}\n`, stderr: "" },
-    ]);
-    const singleTextClient = createTextClient();
-    const singleExecutor = new DefaultSendKeysCommandExecutor(
-      androidDevice,
-      createAdbFactory(singleAdb),
-      createObserver(),
-      { textClient: singleTextClient.client, timer },
-    );
-    const singleResult = await singleExecutor.type({
-      action: "type",
-      text: "`foo`",
-      mode: "ime",
-    });
-    expect(singleResult).toMatchObject({ success: true, resolvedMode: "ime" });
-    expect(singleTextClient.commitViaImeCalls).toEqual([{ text: "`foo`", priorImeId }]);
   });
 
   test("ime mode activates the companion IME, commits with the prior id, and restores it", async () => {

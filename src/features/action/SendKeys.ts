@@ -7,7 +7,7 @@ import { readAndroidDeviceApiLevel } from "../../utils/android-cmdline-tools/rea
 import { AndroidCtrlProxyManager } from "../../utils/CtrlProxyManager";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
-import { defaultTimer, type Timer } from "../../utils/SystemTimer";
+import { defaultTimer } from "../../utils/SystemTimer";
 import { RealObserveScreen } from "../observe/ObserveScreen";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
@@ -32,32 +32,6 @@ export const SEND_KEYS_TYPING_MODES = [
   "eventOnly",
   "ime",
 ] as const;
-const IME_SPAN_SETTLE_MS = 200;
-
-/**
- * Split injected IME text so each inline-format span ends a segment. A rich composer only
- * converts a marker pair (`code`, *bold*, _italic_, ~strike~, ``` fence) once its closing marker
- * is the settled trailing input; committing a whole multi-span string in one run leaves every
- * span but the last literal (#7491). Callers commit these segments sequentially with a settle
- * delay so each span converts before the next is typed.
- */
-export function splitImeFormatSpans(text: string): string[] {
-  const spans = /```|`[^`\n]+`|\*[^*\n]+\*|_[^_\n]+_|~[^~\n]+~/g;
-  const segments: string[] = [];
-  let previousCut = 0;
-  for (const match of text.matchAll(spans)) {
-    const end = (match.index ?? 0) + match[0].length;
-    const segment = text.slice(previousCut, end);
-    if (segment.length > 0) {
-      segments.push(segment);
-    }
-    previousCut = end;
-  }
-  if (previousCut < text.length) {
-    segments.push(text.slice(previousCut));
-  }
-  return segments.length > 0 ? segments : [text];
-}
 export type SendKeysTypingMode = (typeof SEND_KEYS_TYPING_MODES)[number];
 export type ResolvedSendKeysTypingMode = Exclude<SendKeysTypingMode, "auto"> | "xcuiTypeText";
 type AndroidSendKeysTypingMode = Exclude<ResolvedSendKeysTypingMode, "xcuiTypeText">;
@@ -210,7 +184,6 @@ export interface SendKeysInputKey {
 export interface SendKeysPlatformDependencies {
   textClient?: SendKeysTextClient;
   inputKey?: SendKeysInputKey;
-  timer?: Timer;
 }
 
 export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
@@ -218,7 +191,6 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   private readonly textClient: SendKeysTextClient;
   private readonly inputKey: SendKeysInputKey;
   private readonly observer: SendKeysObserver;
-  private readonly timer: Timer;
   private androidKeyCombinationSupported: boolean | undefined;
 
   // IME-mode typing captures the prior IME + keyboard profile, activates our
@@ -240,7 +212,6 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     this.observer = observer;
     this.inputKey = dependencies.inputKey ?? new InputKey(device, adbFactory);
     this.textClient = dependencies.textClient ?? this.createTextClient(adbFactory);
-    this.timer = dependencies.timer ?? defaultTimer;
   }
 
   async type(command: SendKeysTypeCommand, signal?: AbortSignal): Promise<SendKeysCommandResult> {
@@ -518,38 +489,12 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
           return { ...clearResult, resolvedMode: "ime" };
         }
       }
-      const result = await this.commitImeTextInSpans(text, prior, signal);
+      const result = await this.textClient.commitViaIme(text, prior);
       return { ...result, resolvedMode: "ime" };
     } finally {
       await this.restoreKeyboardProfileIfNeeded(keyboardProfile, previousProfileId);
       await this.restoreIme(prior);
     }
-  }
-
-  // Multi-span text is committed one span at a time with a settle gap between commits so
-  // a rich composer converts every inline-format span, not just the last (#7491). A
-  // single-span (or plain) string is committed in one call, unchanged from prior behavior.
-  private async commitImeTextInSpans(
-    text: string,
-    prior: string | null,
-    signal?: AbortSignal,
-  ): Promise<TextActionResult> {
-    const segments = splitImeFormatSpans(text);
-    if (segments.length <= 1) {
-      return this.textClient.commitViaIme(text, prior);
-    }
-    let result: TextActionResult = { success: true };
-    for (let i = 0; i < segments.length; i++) {
-      signal?.throwIfAborted();
-      result = await this.textClient.commitViaIme(segments[i], null);
-      if (!result.success) {
-        return result;
-      }
-      if (i < segments.length - 1) {
-        await this.timer.sleep(IME_SPAN_SETTLE_MS);
-      }
-    }
-    return result;
   }
 
   private async checkKeyboardProfileSupport(

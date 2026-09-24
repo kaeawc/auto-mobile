@@ -268,7 +268,7 @@ The restore-key prefixes retain the `26.5` toolchain segment, so a different Xco
 restores compiled artifacts from this lane. Source changes fall back to the prior matching-toolchain
 entry for incremental compilation.
 
-Because [`actions/cache` never updates an existing key](https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching#matching-a-cache-key),
+Because [`actions/cache` never updates an existing key](https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching#cache-key-matching),
 every DerivedData `hashFiles(...)` call — here and in the analogous Xcode-build, Playground, and
 nightly/merge sweep jobs — must cover every compiled, configuration, and resource input for the
 scoped project directory, not just `*.swift` sources and the project descriptor. Restricting the

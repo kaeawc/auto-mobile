@@ -103,6 +103,7 @@ const socketIdentityStatusSchema = z.object({
 
 const socketOptionsStatusSchema = z.object({
   options: daemonOptionsSchema.optional(),
+  effectiveDebug: z.boolean().optional(),
 });
 
 /** The server rejected this request before dispatch; retry cannot duplicate work. */
@@ -836,6 +837,9 @@ export class DaemonClient {
         ...identity,
         socketPath: this.socketPath,
         ...(optionsStatus.data.options ? { options: optionsStatus.data.options } : {}),
+        ...(optionsStatus.data.effectiveDebug !== undefined
+          ? { effectiveDebug: optionsStatus.data.effectiveDebug }
+          : {}),
         ...(releaseVersion ? { assetVersion: releaseVersion } : {}),
       };
     } finally {

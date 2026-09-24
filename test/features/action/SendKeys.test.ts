@@ -254,6 +254,110 @@ describe("DefaultSendKeysCommandExecutor", () => {
   const commitImeId = "dev.jasonpearson.automobile.ctrlproxy/.ime.CtrlProxyIme";
   const priorImeId = "com.example.keyboard/.Ime";
 
+  test("auto mode routes formatting text through IME for insert and replace", async () => {
+    for (const operation of ["insert", "replace"] as const) {
+      const adb = new FakeAdbExecutor();
+      adb.setCommandResponseSequence("shell settings get secure default_input_method", [
+        { stdout: `${priorImeId}\n`, stderr: "" },
+        { stdout: `${commitImeId}\n`, stderr: "" },
+      ]);
+      const textClient = createTextClient();
+      const executor = new DefaultSendKeysCommandExecutor(
+        androidDevice,
+        createAdbFactory(adb),
+        createObserver(focusedAndroidObservation()),
+        { textClient: textClient.client },
+      );
+
+      const result = await executor.type({ action: "type", text: "note `x`", operation });
+
+      expect(result.resolvedMode).toBe("ime");
+      expect(textClient.commitViaImeCalls.length).toBeGreaterThan(0);
+    }
+  });
+
+  test("auto mode keeps the existing defaults for plain text", async () => {
+    for (const [operation, mode] of [
+      ["insert", "eventAll"],
+      ["replace", "a11y"],
+    ] as const) {
+      const adb = new FakeAdbExecutor();
+      const textClient = createTextClient();
+      const executor = new DefaultSendKeysCommandExecutor(
+        androidDevice,
+        createAdbFactory(adb),
+        createObserver(focusedAndroidObservation()),
+        { textClient: textClient.client },
+      );
+
+      const result = await executor.type({ action: "type", text: "plain", operation });
+
+      expect(result.resolvedMode).toBe(mode);
+      if (mode === "eventAll") {
+        expect(adb.getExecutedCommands().length).toBeGreaterThan(0);
+      } else {
+        expect(textClient.calls).toContain("replace:plain");
+      }
+    }
+  });
+
+  test("auto IME falls back to the previous default when commit is unavailable", async () => {
+    for (const [operation, mode] of [
+      ["insert", "eventAll"],
+      ["replace", "a11y"],
+    ] as const) {
+      const adb = new FakeAdbExecutor();
+      const textClient = createTextClient({ supportsImeCommit: false });
+      const executor = new DefaultSendKeysCommandExecutor(
+        androidDevice,
+        createAdbFactory(adb),
+        createObserver(focusedAndroidObservation()),
+        { textClient: textClient.client },
+      );
+
+      const result = await executor.type({ action: "type", text: "note `x`", operation });
+
+      expect(result).toMatchObject({ success: true, resolvedMode: mode });
+      expect(textClient.commitViaImeCalls).toEqual([]);
+      if (mode === "eventAll") {
+        expect(adb.getExecutedCommands().length).toBeGreaterThan(0);
+      } else {
+        expect(textClient.calls).toContain("replace:note `x`");
+      }
+    }
+  });
+
+  test("explicit modes take precedence over trigger text and do not auto-fallback", async () => {
+    const explicitImeClient = createTextClient({ supportsImeCommit: false });
+    const explicitImeExecutor = new DefaultSendKeysCommandExecutor(
+      androidDevice,
+      createAdbFactory(new FakeAdbExecutor()),
+      createObserver(),
+      { textClient: explicitImeClient.client },
+    );
+    const imeResult = await explicitImeExecutor.type({
+      action: "type",
+      text: "note `x`",
+      mode: "ime",
+    });
+    expect(imeResult).toMatchObject({ success: false, resolvedMode: "ime" });
+
+    const explicitA11yClient = createTextClient();
+    const explicitA11yExecutor = new DefaultSendKeysCommandExecutor(
+      androidDevice,
+      createAdbFactory(new FakeAdbExecutor()),
+      createObserver(),
+      { textClient: explicitA11yClient.client },
+    );
+    const a11yResult = await explicitA11yExecutor.type({
+      action: "type",
+      text: "note `x`",
+      mode: "a11y",
+    });
+    expect(a11yResult).toMatchObject({ success: true, resolvedMode: "a11y" });
+    expect(explicitA11yClient.calls).toContain("insert:note `x`");
+  });
+
   test("splitImeFormatSpans ends segments at inline formatting spans", () => {
     expect(splitImeFormatSpans("plain text")).toEqual(["plain text"]);
     expect(splitImeFormatSpans("`foo` and `bar`")).toEqual(["`foo`", " and `bar`"]);

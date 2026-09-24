@@ -201,43 +201,11 @@ fun main() {
                 shortcut = platformShortcut(Key.Q),
               )
             }
-            Menu("View", mnemonic = 'V') {
-              Item(
-                "Toggle Left Pane",
-                onClick = { menuBarActions.showLeftPane = !menuBarActions.showLeftPane },
-                shortcut = platformShortcut(Key.Zero),
-              )
-              Item(
-                "Toggle Right Pane",
-                onClick = { menuBarActions.showRightPane = !menuBarActions.showRightPane },
-                shortcut = platformShortcut(Key.Zero, shift = true),
-              )
-              Item(
-                "Toggle Bottom Pane",
-                onClick = { menuBarActions.showBottomPane = !menuBarActions.showBottomPane },
-                shortcut = platformShortcut(Key.Y, shift = true),
-              )
-            }
             Menu("Tools", mnemonic = 'T') {
               Item(
                 "Command Palette",
                 onClick = { menuBarActions.showCommandPalette = true },
                 shortcut = platformShortcut(Key.P, shift = true),
-              )
-              Item(
-                "Global Search",
-                onClick = { menuBarActions.showGlobalSearch = true },
-                shortcut = platformShortcut(Key.F, shift = true),
-              )
-              Item(
-                // ⌘K/Ctrl+K is handled by the window-level onPreviewKeyEvent below (opens the
-                // command
-                // palette). No shortcut here — a duplicate Key.K accelerator on this (currently
-                // inert)
-                // item would race the window handler. Re-wiring this menu item + restoring its
-                // shortcut is tracked in #4670.
-                "Quick Jump",
-                onClick = { menuBarActions.showQuickJump = true },
               )
               Separator()
               Item(
@@ -247,12 +215,6 @@ fun main() {
               )
             }
             Menu("Help", mnemonic = 'H') {
-              Item(
-                "Keyboard Shortcuts",
-                onClick = { menuBarActions.showCheatSheet = true },
-                shortcut = platformShortcut(Key.Slash),
-              )
-              Separator()
               Item("About AutoMobile", onClick = { /* TODO: show about dialog */ })
             }
           }

@@ -283,6 +283,59 @@ class WorkspaceShellUiTest {
     }
 
   @Test
+  fun `external capture request uses the targeted pane screenshot path`() = runComposeUiTest {
+    val request = mutableStateOf<Pair<String, Int>?>(null)
+    val mode = mutableStateOf(InteractionMode.Input)
+    val first = FakeObservationStream()
+    val second = FakeObservationStream()
+    var savedName: String? = null
+    setContent {
+      MaterialTheme {
+        val state =
+          WorkspaceUiState.Content(
+            columns = listOf(col("a", "Pixel 8"), col("b", "Pixel 9").copy(mode = mode.value)),
+            focusedDeviceId = "b",
+          )
+        WorkspaceShell(
+          state = state,
+          onAction = {},
+          onOpenPicker = {},
+          inspectContent = { Text("inspect-slot") },
+          externalCaptureRequest = request.value,
+          observationStreamFactory = { if (it == "a") first else second },
+          screenshotSaver =
+            ScreenshotSaver { name, _ ->
+              savedName = name
+              "/tmp/shots/$name.png"
+            },
+        )
+      }
+    }
+
+    runOnIdle { request.value = "b" to 1 }
+    waitUntil(timeoutMillis = 5_000L) { second.observationRequestCount == 1 }
+    assertEquals(0, first.observationRequestCount)
+    second.emitScreenshot(
+      ScreenshotStreamUpdate(
+        "b",
+        0L,
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+        1,
+        1,
+      )
+    )
+    waitUntil(timeoutMillis = 5_000L) { savedName == "Pixel 9" }
+    onNodeWithContentDescription("Screenshot status Pixel 9").assertIsDisplayed()
+    onNodeWithContentDescription("Screenshot status Pixel 8").assertDoesNotExist()
+
+    runOnIdle { mode.value = InteractionMode.Inspect }
+    onNodeWithText("inspect-slot").assertIsDisplayed()
+    runOnIdle { mode.value = InteractionMode.Input }
+    onNodeWithContentDescription("Screenshot Pixel 9").assertIsDisplayed()
+    runOnIdle { assertEquals(1, second.observationRequestCount) }
+  }
+
+  @Test
   fun `Locale control opens a picker and selecting a locale dispatches SetLocale`() =
     runComposeUiTest {
       var action: WorkspaceAction? = null

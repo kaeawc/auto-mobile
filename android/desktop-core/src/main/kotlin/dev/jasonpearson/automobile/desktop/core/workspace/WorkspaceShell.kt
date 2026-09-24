@@ -122,6 +122,9 @@ fun WorkspaceShell(
   updateStatus: UpdateStatus = UpdateStatus.Idle,
   onUpdateClick: () -> Unit = {},
   onOpenPalette: () -> Unit = {},
+  // A host request for the named pane to use its existing Screenshot capture path. The token
+  // changes on each request; null leaves all panes inert.
+  externalCaptureRequest: Pair<String, Int>? = null,
   modifier: Modifier = Modifier,
   // Renders the docked facet body for a pane's active tool. Hoisted so the host can supply real
   // per-device dashboards; defaults to a placeholder so un-wired tools stay inert.
@@ -209,6 +212,7 @@ fun WorkspaceShell(
                   streamContent = streamContent,
                   observationStreamFactory = observationStreamFactory,
                   screenshotSaver = screenshotSaver,
+                  externalCaptureRequest = externalCaptureRequest,
                   canDiff = canDiff,
                   modifier = Modifier.weight(1f).fillMaxHeight(),
                 )
@@ -693,6 +697,7 @@ private fun DeviceColumnView(
   streamContent: @Composable (DeviceColumn) -> Unit,
   observationStreamFactory: (String) -> ObservationStream,
   screenshotSaver: ScreenshotSaver,
+  externalCaptureRequest: Pair<String, Int>?,
   canDiff: Boolean,
   modifier: Modifier,
 ) {
@@ -732,6 +737,7 @@ private fun DeviceColumnView(
         streamContent,
         observationStreamFactory,
         screenshotSaver,
+        externalCaptureRequest,
         Modifier.weight(1f),
       )
     } else {
@@ -744,6 +750,7 @@ private fun DeviceColumnView(
             streamContent,
             observationStreamFactory,
             screenshotSaver,
+            externalCaptureRequest,
             Modifier.fillMaxSize(),
           )
         },
@@ -773,12 +780,21 @@ private fun PaneMainContent(
   streamContent: @Composable (DeviceColumn) -> Unit,
   observationStreamFactory: (String) -> ObservationStream,
   screenshotSaver: ScreenshotSaver,
+  externalCaptureRequest: Pair<String, Int>?,
   modifier: Modifier,
 ) {
   if (column.mode == InteractionMode.Inspect) {
     Box(modifier.fillMaxWidth()) { inspectContent(column) }
   } else {
-    StreamArea(column, onAction, streamContent, observationStreamFactory, screenshotSaver, modifier)
+    StreamArea(
+      column,
+      onAction,
+      streamContent,
+      observationStreamFactory,
+      screenshotSaver,
+      externalCaptureRequest,
+      modifier,
+    )
   }
 }
 
@@ -796,12 +812,23 @@ private fun StreamArea(
   streamContent: @Composable (DeviceColumn) -> Unit,
   observationStreamFactory: (String) -> ObservationStream,
   screenshotSaver: ScreenshotSaver,
+  externalCaptureRequest: Pair<String, Int>?,
   modifier: Modifier,
 ) {
   // Result of the latest capture + a monotonically increasing request token. Keyed on deviceId so a
   // pane reused for a different device (panes are keyed by id, so this is defensive) starts clean.
   var savedNotice by remember(column.deviceId) { mutableStateOf<String?>(null) }
   var captureRequest by remember(column.deviceId) { mutableStateOf(0) }
+  var handledCapture by remember(column.deviceId) { mutableStateOf(externalCaptureRequest) }
+
+  LaunchedEffect(column.deviceId, externalCaptureRequest) {
+    if (
+      externalCaptureRequest != handledCapture && externalCaptureRequest?.first == column.deviceId
+    ) {
+      captureRequest++
+    }
+    handledCapture = externalCaptureRequest
+  }
 
   // Each Screenshot tap bumps captureRequest, re-running this effect: open a fresh per-device
   // stream,

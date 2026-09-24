@@ -624,7 +624,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     // Android IME ids are ComponentName.flattenToShortString(): the class is
     // abbreviated to a leading "." because it lives under the package, and that
     // short form is what `settings get secure default_input_method` stores.
-    const imeId = `${AndroidCtrlProxyManager.PACKAGE}/.ime.CtrlProxyIme`;
+    const imeId = this.commitImeId;
     try {
       const enableResult = await this.adb.executeCommand(`shell ime enable ${imeId}`);
       if (enableResult.stderr.trim()) {
@@ -667,6 +667,24 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     } catch (error) {
       // Restoration is best-effort so it cannot mask the text-commit result.
       logger.warn("[SendKeys] Failed to restore the prior IME", error);
+    }
+    await this.disableCommitIme();
+  }
+
+  private get commitImeId(): string {
+    return `${AndroidCtrlProxyManager.PACKAGE}/.ime.CtrlProxyIme`;
+  }
+
+  private async disableCommitIme(): Promise<void> {
+    // This removes the companion from the keyboard picker; activateCommitIme re-enables it next time.
+    try {
+      const result = await this.adb.executeCommand(`shell ime disable ${this.commitImeId}`);
+      if (result.stderr.trim()) {
+        logger.warn(`[SendKeys] Failed to disable the text-commit IME: ${result.stderr.trim()}`);
+      }
+    } catch (error) {
+      // Disabling is best-effort so it cannot mask the text-commit result.
+      logger.warn("[SendKeys] Failed to disable the text-commit IME", error);
     }
   }
 

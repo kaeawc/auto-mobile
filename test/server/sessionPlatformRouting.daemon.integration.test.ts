@@ -31,7 +31,13 @@ import { registerUtilityTools } from "../../src/server/utilityTools";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
+import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
+import { FakeAvdManager } from "../fakes/FakeAvdManager";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
+import {
+  resetDeviceToolsDependencies,
+  setDeviceToolsDependencies,
+} from "../../src/server/deviceTools";
 import type { BootedDevice } from "../../src/models";
 
 const devices: BootedDevice[] = [
@@ -346,34 +352,44 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
     await proxy.callTool("setActiveDevice", { deviceId: devices[2].deviceId, platform: "android" });
     await proxy.callTool("routingProbe", { keepScreenAwake: false });
     expect(received.at(-1)).toBe(devices[2].deviceId);
-    for (const name of ["listDevices", "listDeviceImages"]) {
-      // The tool is unadvertised for this connection but must still REACH the
-      // handler: per-connection selection hides a tool, it does not block the
-      // call. Real device discovery is environment-dependent, so tolerate a
-      // handler-level failure, but reject both the old "disabled" gate (whether
-      // thrown or returned as an isError result) and a pre-dispatch
-      // "Unknown tool" (which would mean the tool is no longer callable at all).
-      let callResult: Awaited<ReturnType<typeof proxy.callTool>> | undefined;
-      let callThrew: unknown;
-      try {
-        callResult = await proxy.callTool(name, { platform: "android" });
-      } catch (error) {
-        callThrew = error;
+    const fakeDeviceManager = new FakeDeviceManager();
+    const fakeAvdManager = new FakeAvdManager();
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => fakeDeviceManager,
+      avdManagerFactory: () => fakeAvdManager,
+    });
+    try {
+      for (const name of ["listDevices", "listDeviceImages"]) {
+        // The tool is unadvertised for this connection but must still REACH the
+        // handler: per-connection selection hides a tool, it does not block the
+        // call. Device discovery is faked here to avoid host tooling; tolerate a
+        // handler-level failure, but reject both the old "disabled" gate (whether
+        // thrown or returned as an isError result) and a pre-dispatch
+        // "Unknown tool" (which would mean the tool is no longer callable at all).
+        let callResult: Awaited<ReturnType<typeof proxy.callTool>> | undefined;
+        let callThrew: unknown;
+        try {
+          callResult = await proxy.callTool(name, { platform: "android" });
+        } catch (error) {
+          callThrew = error;
+        }
+        const failureText =
+          callThrew !== undefined
+            ? String(callThrew)
+            : callResult?.isError
+              ? JSON.stringify(callResult.content)
+              : "";
+        expect(failureText).not.toMatch(/disabled/i);
+        expect(failureText).not.toMatch(/unknown tool/i);
+        const fixture = fixtures.get(routes.at(-1)!);
+        expect(fixture).toBeDefined();
+        const advertisedToolNames = (await fixture!.client.listTools()).tools.map(
+          (tool) => tool.name,
+        );
+        expect(advertisedToolNames).not.toContain(name);
       }
-      const failureText =
-        callThrew !== undefined
-          ? String(callThrew)
-          : callResult?.isError
-            ? JSON.stringify(callResult.content)
-            : "";
-      expect(failureText).not.toMatch(/disabled/i);
-      expect(failureText).not.toMatch(/unknown tool/i);
-      const fixture = fixtures.get(routes.at(-1)!);
-      expect(fixture).toBeDefined();
-      const advertisedToolNames = (await fixture!.client.listTools()).tools.map(
-        (tool) => tool.name,
-      );
-      expect(advertisedToolNames).not.toContain(name);
+    } finally {
+      resetDeviceToolsDependencies();
     }
   } finally {
     await proxy.close();

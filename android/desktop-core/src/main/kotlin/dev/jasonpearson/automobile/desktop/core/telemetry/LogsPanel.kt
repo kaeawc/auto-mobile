@@ -62,6 +62,33 @@ import java.util.Date
 import java.util.Locale
 import kotlinx.serialization.Serializable
 
+/** Exact Android logcat tags emitted by CtrlProxy itself, hidden by default to expose app logs. */
+val AUTO_MOBILE_INTERNAL_TAGS: Set<String> =
+  setOf(
+    "MainActivity",
+    "ViewHierarchyExtractor",
+    "WebSocketServer",
+    "LogcatReader",
+    "ServiceScopeGuard",
+    "OverlayManager",
+    "OverlayDrawer",
+    "HighlightOverlayView",
+    "InstalledPkgLaunch",
+    "HierarchyDebouncer",
+    "PermissionManager",
+    "AsyncActionRunner",
+    "CtrlProxy",
+    "AutoMobileDeviceAdmin",
+    "ResultBroadcaster",
+    "StorageSubscriptionMgr",
+    "PerfProvider",
+  )
+
+fun isAutoMobileInternalTag(tag: String): Boolean = tag in AUTO_MOBILE_INTERNAL_TAGS
+
+private fun defaultEnabledLevels(minimum: LogLevel?): Set<LogLevel> =
+  LogLevel.entries.filter { it.ordinal >= (minimum ?: LogLevel.Info).ordinal }.toSet()
+
 /**
  * A log severity bucket surfaced as an always-on filter chip. Android's raw priority ints
  * (`Log.VERBOSE`=2 .. `Log.ASSERT`=7) collapse into these five canonical buckets via [logLevelOf];
@@ -126,9 +153,12 @@ fun filterLogs(
   query: String,
   platform: LogPlatform = LogPlatform.Android,
   tag: String? = null,
+  showInternalTags: Boolean = true,
 ): List<TelemetryDisplayEvent.Log> {
   val filter = LogsSavedView("", enabledLevels, tag, query)
-  return logs.filter { matchesSavedView(it, filter, platform) }
+  return logs.filter {
+    (showInternalTags || !isAutoMobileInternalTag(it.tag)) && matchesSavedView(it, filter, platform)
+  }
 }
 
 /**
@@ -218,7 +248,17 @@ fun LogsPanel(
   var selectedEvent by remember(activeDeviceId) { mutableStateOf<TelemetryDisplayEvent.Log?>(null) }
   var query by remember { mutableStateOf("") }
   var tag by remember { mutableStateOf("") }
-  var enabledLevels by remember { mutableStateOf(LogLevel.entries.toSet()) }
+  var enabledLevels by
+    remember(activeDeviceId) {
+      val minimum = activeDeviceId?.let { deviceId ->
+        deserializeLogsMinLevelByDevice(settingsProvider.logsMinLevelByDevice)[deviceId]?.let { name
+          ->
+          LogLevel.entries.firstOrNull { it.name == name }
+        }
+      }
+      mutableStateOf(defaultEnabledLevels(minimum))
+    }
+  var showInternalTags by remember(activeDeviceId) { mutableStateOf(false) }
   var savedViews by
     remember(settingsProvider) {
       mutableStateOf(deserializeLogsSavedViews(settingsProvider.logsSavedViews))
@@ -238,7 +278,7 @@ fun LogsPanel(
   // tracks on its own, so they are intentionally not remember keys.
   val filtered by
     remember(platform, activeDeviceId) {
-      derivedStateOf { filterLogs(logs, enabledLevels, query, platform, tag) }
+      derivedStateOf { filterLogs(logs, enabledLevels, query, platform, tag, showInternalTags) }
     }
   // Per-device scroll state: recreated on a device switch so a device left scrolled up does not
   // carry its scroll offset (and suppress auto-follow) into the next device.
@@ -316,7 +356,15 @@ fun LogsPanel(
       enabledLevels = enabledLevels,
       onToggleLevel = { level ->
         enabledLevels = if (level in enabledLevels) enabledLevels - level else enabledLevels + level
+        if (activeDeviceId != null && enabledLevels.isNotEmpty()) {
+          val byDevice =
+            deserializeLogsMinLevelByDevice(settingsProvider.logsMinLevelByDevice).toMutableMap()
+          byDevice[activeDeviceId] = enabledLevels.minBy { it.ordinal }.name
+          settingsProvider.logsMinLevelByDevice = serializeLogsMinLevelByDevice(byDevice)
+        }
       },
+      showInternalTags = showInternalTags,
+      onToggleInternalTags = { showInternalTags = !showInternalTags },
       savedViews = savedViews,
       onOpenViews = { savedViews = deserializeLogsSavedViews(settingsProvider.logsSavedViews) },
       onSaveView = { name ->
@@ -357,7 +405,7 @@ fun LogsPanel(
             // A non-healthy socket is why there are no rows — say so instead of the misleading
             // "No logs yet" (which implies a healthy but quiet stream).
             statusText != null -> statusText
-            query.isBlank() && tag.isBlank() && enabledLevels == LogLevel.entries.toSet() ->
+            query.isBlank() && tag.isBlank() && enabledLevels == defaultEnabledLevels(null) ->
               "No logs yet"
             else -> "No logs match the filter"
           }
@@ -409,6 +457,8 @@ private fun LogsFilterBar(
   onTagChange: (String) -> Unit,
   enabledLevels: Set<LogLevel>,
   onToggleLevel: (LogLevel) -> Unit,
+  showInternalTags: Boolean,
+  onToggleInternalTags: () -> Unit,
   savedViews: List<LogsSavedView>,
   onOpenViews: () -> Unit,
   onSaveView: (String) -> Unit,
@@ -461,6 +511,24 @@ private fun LogsFilterBar(
           onQueryChange = onTagChange,
           placeholder = "Tag contains...",
           modifier = Modifier.weight(1f).semantics { contentDescription = "Filter Logs by tag" },
+        )
+        Text(
+          "AutoMobile",
+          fontSize = 11.sp,
+          modifier =
+            Modifier.background(
+                if (showInternalTags) Color(0xFF74C0FC).copy(alpha = 0.18f) else Color.Transparent,
+                RoundedCornerShape(4.dp),
+              )
+              .clickable(onClick = onToggleInternalTags)
+              .pointerHoverIcon(PointerIcon.Hand)
+              .semantics {
+                contentDescription = "Toggle AutoMobile internal logs"
+                stateDescription = if (showInternalTags) "Shown" else "Hidden"
+                selected = showInternalTags
+                role = Role.Switch
+              }
+              .padding(horizontal = 6.dp, vertical = 4.dp),
         )
         Box {
           TextButton(

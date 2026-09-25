@@ -9,7 +9,11 @@ import { NavigationGraphManager } from "../features/navigation/NavigationGraphMa
 import { ActionableError, BootedDevice, Platform } from "../models";
 import { logger } from "../utils/logger";
 import { KeepScreenAwakeManager, KeepScreenAwakeState } from "../utils/KeepScreenAwakeManager";
-import { createPerformanceTracker, type TimingData } from "../utils/PerformanceTracker";
+import {
+  createPerformanceTracker,
+  type PerformanceTracker,
+  type TimingData,
+} from "../utils/PerformanceTracker";
 import { type Timer, defaultTimer } from "../utils/SystemTimer";
 import {
   deviceReadinessLockKey,
@@ -19,6 +23,7 @@ import {
 import { runWithAbortSignal } from "../utils/AbortContext";
 import { serverConfig } from "../utils/ServerConfig";
 import type { DeviceReadinessLevel } from "../utils/DeviceSessionManager";
+import type { ProxySetupErrorCategory, ProxySetupResult } from "../utils/interfaces/ProxyManager";
 
 /**
  * Storage for accessibility service setup timing.
@@ -437,11 +442,15 @@ async function runDeviceReadinessSetup(
       deviceReadinessLockKey(session.platform, session.assignedDevice),
       () =>
         runWithAbortSignal(signal, () =>
+          // #7541: reuse the SessionManager's own injected Timer (a FakeTimer
+          // in tests) rather than hard-wiring defaultTimer, so this retry
+          // path's delays are fake-clock testable instead of sleeping in real
+          // time.
           ensureAccessibilityServiceReady(
             session.assignedDevice,
             session.sessionId,
             session.platform,
-            defaultTimer,
+            sessionManager.getTimer(),
             signal,
           ),
         ),
@@ -480,14 +489,24 @@ function ensureSessionIsCurrent(session: Session, sessionManager: SessionManager
   }
 }
 
-const A11Y_TRANSIENT_ERROR_PATTERNS = [
-  "Operation aborted",
-  "Operation cancelled",
-  "Command timed out",
-];
+/**
+ * Categories worth a bounded retry inside `ensureAccessibilityServiceReady`
+ * (issue #7541): a lost/offline adb connection or a command timeout can clear
+ * up on their own within the loop's 3s delay, and adb itself does not retry
+ * `offline` (`AdbClient.isNonRetryableError`, #6516) so this loop is the only
+ * retry these get. Permission, install, unsupported-device, and
+ * network/download failures are terminal — retrying with no different inputs
+ * would fail the same way — as is `unknown` (a category the setup catch block
+ * couldn't classify): fail fast rather than guess with more substring
+ * patterns (#6516).
+ */
+const RETRYABLE_SETUP_CATEGORIES: ReadonlySet<ProxySetupErrorCategory> = new Set([
+  "deviceConnection",
+  "timeout",
+]);
 
-function isTransientA11yError(error: string): boolean {
-  return A11Y_TRANSIENT_ERROR_PATTERNS.some((p) => error.includes(p));
+function isRetryableSetupFailure(result: ProxySetupResult): boolean {
+  return result.category !== undefined && RETRYABLE_SETUP_CATEGORIES.has(result.category);
 }
 
 /**
@@ -527,6 +546,87 @@ async function assertCtrlProxyInstalledWhenDownloadsDisabled(
   }
 }
 
+/** Per-attempt parameters shared by {@link handleSetupFailure} and {@link handleConnectionFailure}. */
+interface A11yRetryContext {
+  attempt: number;
+  maxAttempts: number;
+  retryDelayMs: number;
+  deviceId: string;
+  sessionId: string;
+  timer: Timer;
+  signal?: AbortSignal;
+}
+
+/**
+ * Handle a failed `setup()` result for one attempt (pulled out of
+ * `ensureAccessibilityServiceReady` to stay under the complexity ratchet).
+ * Sleeps and returns when the failure's typed `category` is retryable and
+ * attempts remain, so the caller's `for` loop can `continue`; otherwise
+ * throws the terminal `ActionableError`.
+ */
+async function handleSetupFailure(
+  setupResult: ProxySetupResult,
+  perf: PerformanceTracker,
+  ctx: A11yRetryContext,
+): Promise<void> {
+  perf.end();
+  const timings = perf.getTimings();
+  if (timings) {
+    logger.info(`[ToolExecutionContext] Accessibility service setup failed`, {
+      perfTiming: JSON.stringify(timings, null, 2),
+    });
+  }
+
+  const errorMsg = setupResult.error || setupResult.message || "";
+  if (ctx.attempt < ctx.maxAttempts && isRetryableSetupFailure(setupResult)) {
+    logger.warn(
+      `[A11yRetry] Transient failure on attempt ${ctx.attempt}/${ctx.maxAttempts}, retrying in ${ctx.retryDelayMs}ms: ${errorMsg}`,
+    );
+    await awaitReadinessWork(ctx.timer.sleep(ctx.retryDelayMs), ctx.signal);
+    return;
+  }
+
+  throw new ActionableError(
+    `Failed to setup accessibility service for device ${ctx.deviceId} (session ${ctx.sessionId}): ${errorMsg}`,
+  );
+}
+
+/**
+ * Handle a `waitForConnection() === false` result for one attempt (issue
+ * #7541): sleeps and returns when attempts remain, so the caller's `for`
+ * loop can `continue` into a fresh `tryRebindUnhealthyAccessibilityService` +
+ * `setup()` — a real health-check-and-rebind rather than a bare repeat;
+ * otherwise throws the terminal `ActionableError`. An abort/cancellation
+ * while waiting (e.g. a typed `DeviceLostError` surfaced via `signal.reason`,
+ * #7536) rejects `awaitReadinessWork` and propagates uncaught, so a lost
+ * device fails fast instead of being retried.
+ */
+async function handleConnectionFailure(
+  perf: PerformanceTracker,
+  ctx: A11yRetryContext,
+): Promise<void> {
+  perf.end();
+  const timings = perf.getTimings();
+  if (timings) {
+    logger.info(`[ToolExecutionContext] CtrlProxy connection failed`, {
+      perfTiming: JSON.stringify(timings, null, 2),
+    });
+  }
+
+  if (ctx.attempt < ctx.maxAttempts) {
+    logger.warn(
+      `[A11yRetry] CtrlProxy connection failed on attempt ${ctx.attempt}/${ctx.maxAttempts}, retrying in ${ctx.retryDelayMs}ms`,
+    );
+    await awaitReadinessWork(ctx.timer.sleep(ctx.retryDelayMs), ctx.signal);
+    return;
+  }
+
+  throw new ActionableError(
+    `CtrlProxy connection failed for device ${ctx.deviceId} (session ${ctx.sessionId}). ` +
+      "Retry the operation after the accessibility service is connected.",
+  );
+}
+
 async function ensureAccessibilityServiceReady(
   deviceId: string,
   sessionId: string,
@@ -552,6 +652,15 @@ async function ensureAccessibilityServiceReady(
     signal?.throwIfAborted();
     const perf = createPerformanceTracker(true);
     perf.serial("ensureAccessibilityServiceReady");
+    const retryCtx: A11yRetryContext = {
+      attempt,
+      maxAttempts: MAX_ATTEMPTS,
+      retryDelayMs: RETRY_DELAY_MS,
+      deviceId,
+      sessionId,
+      timer,
+      signal,
+    };
 
     const readinessDriver = getDeviceReadinessProxyDriver(device);
     readinessDriver.resetSetupState();
@@ -559,26 +668,8 @@ async function ensureAccessibilityServiceReady(
     const setupResult = await readinessDriver.setup(false, perf);
 
     if (!setupResult.success) {
-      perf.end();
-      const timings = perf.getTimings();
-      if (timings) {
-        logger.info(`[ToolExecutionContext] Accessibility service setup failed`, {
-          perfTiming: JSON.stringify(timings, null, 2),
-        });
-      }
-
-      const errorMsg = setupResult.error || setupResult.message || "";
-      if (attempt < MAX_ATTEMPTS && isTransientA11yError(errorMsg)) {
-        logger.warn(
-          `[A11yRetry] Transient failure on attempt ${attempt}/${MAX_ATTEMPTS}, retrying in ${RETRY_DELAY_MS}ms: ${errorMsg}`,
-        );
-        await awaitReadinessWork(timer.sleep(RETRY_DELAY_MS), signal);
-        continue;
-      }
-
-      throw new ActionableError(
-        `Failed to setup accessibility service for device ${deviceId} (session ${sessionId}): ${errorMsg}`,
-      );
+      await handleSetupFailure(setupResult, perf, retryCtx);
+      continue;
     }
 
     if (attempt > 1) {
@@ -587,16 +678,18 @@ async function ensureAccessibilityServiceReady(
 
     resetConnectionBudgetAfterSetup(readinessDriver);
 
-    const connected = await perf.track("waitForConnection", async () => {
-      const ready = await awaitReadinessWork(readinessDriver.waitForConnection(), signal);
-      if (!ready) {
-        throw new ActionableError(
-          `CtrlProxy connection failed for device ${deviceId} (session ${sessionId}). ` +
-            "Retry the operation after the accessibility service is connected.",
-        );
-      }
-      return ready;
-    });
+    // Issue #7541: a failed connection is a retryable failure, not an
+    // immediate throw. Awaiting outside of `perf.track` (rather than
+    // throwing an `ActionableError` from inside its callback, as before) lets
+    // the `for` loop's next iteration run.
+    const connected = await perf.track("waitForConnection", () =>
+      awaitReadinessWork(readinessDriver.waitForConnection(), signal),
+    );
+
+    if (!connected) {
+      await handleConnectionFailure(perf, retryCtx);
+      continue;
+    }
 
     perf.end();
     const timings = perf.getTimings();

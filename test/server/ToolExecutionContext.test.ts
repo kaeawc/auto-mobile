@@ -150,45 +150,207 @@ describe("ToolExecutionContext", () => {
     expect(calls).toEqual(["resetConnectionBudget", "waitForConnection"]);
   });
 
+  // Issue #7541: a failed `waitForConnection()` used to throw straight out of
+  // the retry loop, so the second of the two declared attempts was
+  // unreachable and recovery only ever happened on a caller's NEXT call. It
+  // is now a retryable failure handled INSIDE `ensureAccessibilityServiceReady`,
+  // so a connection that comes up on the second attempt resolves within the
+  // same `createToolExecutionContext` call — and the retry re-runs
+  // `tryRebindUnhealthyAccessibilityService` + a fresh `setup()`, so the
+  // second attempt is a real health-check-and-rebind rather than a bare
+  // repeat of the first.
   test.each(["new", "persisted"])(
-    "rejects a failed proxy connection for a %s session and allows retry",
+    "recovers a failed proxy connection within one call for a %s session (#7541)",
     async (entrypoint) => {
       let connected = false;
+      let setupCalls = 0;
+      let rebindCalls = 0;
+      setDeviceReadinessProxyDriverProviderForTesting(() => ({
+        resetSetupState: () => {},
+        rebindIfUnhealthy: async () => {
+          rebindCalls++;
+          return false;
+        },
+        setup: async () => {
+          setupCalls++;
+          return { success: true, message: "ok" };
+        },
+        waitForConnection: async () => {
+          const result = connected;
+          // Recover on the retry the loop makes after this first failure.
+          connected = true;
+          return result;
+        },
+        isInstalled: async () => true,
+        isVersionCompatible: async () => true,
+      }));
+      if (entrypoint === "persisted") {
+        await sessionManager.createSession("connection-recovers", "device-1", "android");
+        sessionManager.setDeviceReadiness("connection-recovers", "booted");
+      }
+      await createToolExecutionContext(
+        "connection-recovers",
+        sessionManager,
+        devicePool,
+        sessionOptions,
+      );
+      expect(sessionManager.getDeviceReadiness("connection-recovers")).toBe("automationReady");
+      expect(setupCalls).toBe(2);
+      expect(rebindCalls).toBe(2);
+    },
+  );
+
+  // Issue #7541: the retry budget is bounded — a connection that never comes
+  // up must still fail fast rather than retry forever, and must not record
+  // `automationReady` for a device that was never actually reachable.
+  test("throws after two consecutive failed connection attempts and does not record automationReady (#7541)", async () => {
+    let setupCalls = 0;
+    setDeviceReadinessProxyDriverProviderForTesting(() => ({
+      resetSetupState: () => {},
+      setup: async () => {
+        setupCalls++;
+        return { success: true, message: "ok" };
+      },
+      waitForConnection: async () => false,
+      isInstalled: async () => true,
+      isVersionCompatible: async () => true,
+    }));
+    await expect(
+      createToolExecutionContext(
+        "connection-never-recovers",
+        sessionManager,
+        devicePool,
+        sessionOptions,
+      ),
+    ).rejects.toThrow("CtrlProxy connection");
+    expect(sessionManager.getDeviceReadiness("connection-never-recovers")).not.toBe(
+      "automationReady",
+    );
+    expect(setupCalls).toBe(2);
+  });
+
+  // Issue #7541: retryability is classified by the typed `category` field
+  // `AndroidCtrlProxyManager.setup` sets in its catch block, not by
+  // substring-matching `message`/`error` a second time downstream. Device-
+  // connection and timeout categories are transient and worth the loop's
+  // bounded retry.
+  test.each(["deviceConnection", "timeout"] as const)(
+    "retries a %s-classified setup failure and resolves after two setup() calls (#7541)",
+    async (category) => {
       let setupCalls = 0;
       setDeviceReadinessProxyDriverProviderForTesting(() => ({
         resetSetupState: () => {},
         setup: async () => {
           setupCalls++;
+          if (setupCalls === 1) {
+            return {
+              success: false,
+              message: "Failed to setup Accessibility Service",
+              error: "error: device offline",
+              category,
+            };
+          }
           return { success: true, message: "ok" };
         },
-        waitForConnection: async () => connected,
+        waitForConnection: async () => true,
         isInstalled: async () => true,
         isVersionCompatible: async () => true,
       }));
-      if (entrypoint === "persisted") {
-        await sessionManager.createSession("connection-failure", "device-1", "android");
-        sessionManager.setDeviceReadiness("connection-failure", "booted");
-      }
-      await expect(
-        createToolExecutionContext(
-          "connection-failure",
-          sessionManager,
-          devicePool,
-          sessionOptions,
-        ),
-      ).rejects.toThrow("CtrlProxy connection");
-      expect(sessionManager.getDeviceReadiness("connection-failure")).not.toBe("automationReady");
-      connected = true;
       await createToolExecutionContext(
-        "connection-failure",
+        `setup-retries-${category}`,
         sessionManager,
         devicePool,
         sessionOptions,
       );
-      expect(sessionManager.getDeviceReadiness("connection-failure")).toBe("automationReady");
+      expect(sessionManager.getDeviceReadiness(`setup-retries-${category}`)).toBe(
+        "automationReady",
+      );
       expect(setupCalls).toBe(2);
     },
   );
+
+  // Issue #7541: permission/install/unsupported/network failures are
+  // terminal — retrying with the same inputs would fail identically — so
+  // they must throw after exactly one `setup()` call instead of waiting out
+  // the retry delay.
+  test.each(["permission", "install"] as const)(
+    "throws a %s-classified setup failure after exactly one setup() call (#7541)",
+    async (category) => {
+      let setupCalls = 0;
+      setDeviceReadinessProxyDriverProviderForTesting(() => ({
+        resetSetupState: () => {},
+        setup: async () => {
+          setupCalls++;
+          return {
+            success: false,
+            message: "Failed to setup Accessibility Service",
+            error: "permission denied",
+            category,
+          };
+        },
+        waitForConnection: async () => true,
+        isInstalled: async () => true,
+        isVersionCompatible: async () => true,
+      }));
+      await expect(
+        createToolExecutionContext(
+          `setup-terminal-${category}`,
+          sessionManager,
+          devicePool,
+          sessionOptions,
+        ),
+      ).rejects.toThrow("Failed to setup accessibility service");
+      expect(setupCalls).toBe(1);
+    },
+  );
+
+  // Issue #7541: an abort during the retry delay must reject promptly with
+  // the caller's own reason instead of waiting out the 3s sleep — and must
+  // not start a second `setup()` call once cancelled.
+  test("rejects promptly with the caller's reason when aborted during the retry sleep (#7541)", async () => {
+    let setupCalls = 0;
+    let resolveFirstSetup!: () => void;
+    const firstSetupDone = new Promise<void>((resolve) => {
+      resolveFirstSetup = resolve;
+    });
+    setDeviceReadinessProxyDriverProviderForTesting(() => ({
+      resetSetupState: () => {},
+      setup: async () => {
+        setupCalls++;
+        if (setupCalls === 1) {
+          queueMicrotask(() => resolveFirstSetup());
+        }
+        return {
+          success: false,
+          message: "Failed to setup Accessibility Service due to device connection issue",
+          error: "error: device offline",
+          category: "deviceConnection" as const,
+        };
+      },
+      waitForConnection: async () => true,
+      isInstalled: async () => true,
+      isVersionCompatible: async () => true,
+    }));
+    await sessionManager.createSession("session-abort-retry-sleep", "device-1", "android");
+    const controller = new AbortController();
+    const context = createToolExecutionContext(
+      "session-abort-retry-sleep",
+      sessionManager,
+      devicePool,
+      sessionOptions,
+      undefined,
+      undefined,
+      false,
+      controller.signal,
+    );
+    // The fake timer's auto-advance dispatch runs on a macrotask (setImmediate),
+    // so waiting for the microtask-scheduled `firstSetupDone` here is
+    // guaranteed to land before the retry sleep's fake deadline fires.
+    await firstSetupDone;
+    controller.abort(new Error("caller cancelled during retry sleep"));
+    await expect(context).rejects.toThrow("caller cancelled during retry sleep");
+    expect(setupCalls).toBe(1);
+  });
 
   test("does not run accessibility setup when a pooled emulator serial is stale", async () => {
     const staleDeviceManager = new FakeDeviceManager();

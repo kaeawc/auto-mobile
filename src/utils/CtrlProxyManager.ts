@@ -34,7 +34,11 @@ import {
 import { Timer, defaultTimer } from "./SystemTimer";
 import { type FileDownloader, DefaultFileDownloader } from "./FileDownloader";
 import { type ChecksumCalculator, DefaultChecksumCalculator } from "./ChecksumCalculator";
-import type { ProxyManager, ProxySetupResult } from "./interfaces/ProxyManager";
+import type {
+  ProxyManager,
+  ProxySetupErrorCategory,
+  ProxySetupResult,
+} from "./interfaces/ProxyManager";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "./workingDirectory";
 import { getTempDir } from "./tempDir";
 import {
@@ -2019,29 +2023,39 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       const errorMsg = errorMessage(error);
       const errorLower = errorMsg.toLowerCase();
 
-      // Provide categorized error messages for better debugging
+      // Provide categorized error messages for better debugging, and carry the
+      // same category as a typed field (issue #7541) so retry-decision code
+      // downstream (ToolExecutionContext.ensureAccessibilityServiceReady)
+      // doesn't have to re-derive it from unanchored substrings a second time.
       let message = "Failed to setup Accessibility Service";
+      let category: ProxySetupErrorCategory = "unknown";
       if (errorLower.includes("permission denied") || errorLower.includes("not permitted")) {
         message = "Failed to setup Accessibility Service due to permission error";
+        category = "permission";
       } else if (
         errorLower.includes("device not found") ||
         errorLower.includes("no devices") ||
         errorLower.includes("offline")
       ) {
         message = "Failed to setup Accessibility Service due to device connection issue";
+        category = "deviceConnection";
       } else if (errorLower.includes("timeout") || errorLower.includes("timed out")) {
         message = "Failed to setup Accessibility Service due to timeout";
+        category = "timeout";
       } else if (
         errorLower.includes("download") ||
         errorLower.includes("network") ||
         errorLower.includes("unreachable")
       ) {
         message = "Failed to setup Accessibility Service due to network/download error";
+        category = "networkDownload";
       } else if (errorLower.includes("not supported")) {
         message =
           "Failed to setup Accessibility Service - settings toggle not supported on this device";
+        category = "unsupported";
       } else if (errorLower.includes("installation failed") || errorLower.includes("install")) {
         message = "Failed to setup Accessibility Service due to APK installation error";
+        category = "install";
       }
 
       perf.end();
@@ -2049,6 +2063,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         success: false,
         message,
         error: errorMsg,
+        category,
         perfTiming: perf.getTimings(),
       };
     } finally {

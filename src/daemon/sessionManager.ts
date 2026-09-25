@@ -1,5 +1,6 @@
 import { getAbortSignal } from "../utils/AbortContext";
 import { defaultTimer, Timer } from "../utils/SystemTimer";
+import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import { logger } from "../utils/logger";
 import { BootedDevice, Platform } from "../models";
 import { KeepScreenAwakeManager, KeepScreenAwakeState } from "../utils/KeepScreenAwakeManager";
@@ -401,6 +402,8 @@ export interface SessionRecoveryTarget {
   deviceId: string;
   /** Distinguishes an Android AVD name from a physical-device serial. */
   androidEmulator?: boolean;
+  /** Only device-restart releases may wait, bounded by session expiry and restart grace. */
+  restartRecoveryDeadlineMs?: number;
   /** Liveness contract recorded before the daemon restart. */
   liveness?: SessionRecoveryLiveness;
   /** A startup rehydration reserves the device until its prior owner reconnects. */
@@ -610,6 +613,22 @@ export {
 
 /** Default grace before a never-heartbeated default-policy session is reaped. */
 export const DEFAULT_PRE_FIRST_HEARTBEAT_GRACE_MS = 5_000;
+// Give a restarted emulator the same three-minute cold-boot allowance as device readiness.
+const DEVICE_RESTART_RECOVERY_WINDOW_MS = DEFAULT_DEVICE_READY_TIMEOUT_MS;
+
+function restartRecoveryDeadlineFromPersisted(persisted: DeviceSession): number | undefined {
+  if (
+    !persisted.release_reason ||
+    !isDeviceRestartReleaseReason(persisted.release_reason) ||
+    persisted.released_at_ms === null
+  ) {
+    return undefined;
+  }
+  return Math.min(
+    persisted.expires_at_ms,
+    persisted.released_at_ms + DEVICE_RESTART_RECOVERY_WINDOW_MS,
+  );
+}
 
 /**
  * The grace `SessionHeartbeatMonitor` applies before reaping a default-policy
@@ -4040,6 +4059,7 @@ export class SessionManager {
       platform: persisted.platform,
       stableDeviceId,
       deviceId: persisted.device_id,
+      restartRecoveryDeadlineMs: restartRecoveryDeadlineFromPersisted(persisted),
       liveness: this.recoveryLivenessFromPersisted(persisted),
       persistenceMetadata: {
         source: persisted.source,

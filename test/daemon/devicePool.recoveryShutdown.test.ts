@@ -11,6 +11,7 @@ import {
 import { SessionManager, type Session } from "../../src/daemon/sessionManager";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
+import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../../src/utils/deviceTimeouts";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
@@ -175,6 +176,50 @@ async function setup(
   );
   const captured = pool.getDevice(original.deviceId)!;
   return { timer, sessions, manager, pool, captured, persistence };
+}
+
+async function setupPassiveRestart() {
+  const timer = new FakeTimer();
+  const persistence = new FakeDeviceSessionPersistence();
+  const sessions = new SessionManager(timer, persistence);
+  const manager = new KillTrackingShutdownManager();
+  const pool = new DevicePool(
+    sessions,
+    "daemon",
+    timer,
+    new FakeInstalledAppsRepository(),
+    manager,
+    new DefaultRetryExecutor(timer),
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    { onLoss: false, maxAttempts: 1 },
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    true,
+  );
+  manager.bootedDevices = [original];
+  await pool.addDevice(original, image);
+  await pool.bindOrReuseDeviceSession(
+    "session",
+    original.deviceId,
+    "android",
+    image,
+    undefined,
+    original,
+  );
+  const captured = pool.getDevice(original.deviceId)!;
+  manager.bootedDevices = [];
+  await expect(
+    pool.recoverSessionBoundAndroidDeviceAfterLoss(original.deviceId, undefined, captured),
+  ).resolves.toBe("released");
+  return { timer, persistence, sessions, manager, pool };
 }
 
 async function setupAwaitingOwner(manager: LaggingShutdownManager) {
@@ -478,6 +523,248 @@ test("continuity releases an externally closed emulator without relaunch and reh
     });
     expect(replacement).toMatchObject({ sessionId: "session", status: "busy" });
     expect(`${replacement.id}#${replacement.incarnation}`).not.toBe(originalConnectionId);
+  } finally {
+    sessions.stopCleanupTimer();
+  }
+});
+
+test("device-restart resume waits for the same serial and preserves its session UUID", async () => {
+  const { timer, persistence, sessions, manager, pool } = await setupPassiveRestart();
+  try {
+    const resume = sessions.getOrCreateSession("session", pool, "android", undefined, true);
+    await flush();
+    expect(timer.getPendingSleeps()).toEqual([1_000]);
+    expect(await persistence.getSession?.("session")).toMatchObject({
+      release_reason: `device-restart:${original.name}`,
+    });
+
+    manager.bootedDevices = [original];
+    await pool.addDevice(original, image);
+    timer.advanceTime(1_000);
+    await expect(resume).resolves.toMatchObject({
+      sessionId: "session",
+      assignedDevice: original.deviceId,
+    });
+    expect(await persistence.getSession?.("session")).toMatchObject({
+      status: "active",
+      device_id: original.deviceId,
+    });
+  } finally {
+    sessions.stopCleanupTimer();
+  }
+});
+
+test("device-restart resume waits through an unknown new serial and binds by AVD name", async () => {
+  const { timer, persistence, sessions, manager, pool } = await setupPassiveRestart();
+  try {
+    const unknown = { ...original, deviceId: "emulator-5556", name: "Unknown (emulator-5556)" };
+    manager.bootedDevices = [unknown];
+    await pool.refreshDevices();
+    const resume = sessions.getOrCreateSession("session", pool, "android", undefined, true);
+    await flush();
+    expect(timer.getPendingSleeps()).toEqual([1_000]);
+    expect(await persistence.getSession?.("session")).toMatchObject({
+      release_reason: `device-restart:${original.name}`,
+    });
+
+    const returned = { ...original, deviceId: unknown.deviceId };
+    manager.bootedDevices = [returned];
+    await pool.refreshDevices();
+    timer.advanceTime(1_000);
+    await expect(resume).resolves.toMatchObject({
+      sessionId: "session",
+      assignedDevice: returned.deviceId,
+      stableDeviceId: original.name,
+    });
+    expect(pool.getDevice(returned.deviceId)).toMatchObject({
+      sessionId: "session",
+      status: "busy",
+    });
+  } finally {
+    sessions.stopCleanupTimer();
+  }
+});
+
+test("device-restart resume after 45 seconds reuses the same serial and session UUID", async () => {
+  const { timer, persistence, sessions, manager, pool } = await setupPassiveRestart();
+  try {
+    timer.advanceTime(45_000);
+    manager.bootedDevices = [original];
+    await pool.addDevice(original, image);
+
+    await expect(
+      sessions.getOrCreateSession("session", pool, "android", undefined, true),
+    ).resolves.toMatchObject({ sessionId: "session", assignedDevice: original.deviceId });
+    expect(await persistence.getSession?.("session")).toMatchObject({
+      status: "active",
+      device_id: original.deviceId,
+    });
+  } finally {
+    sessions.stopCleanupTimer();
+  }
+});
+
+test("device-restart resume after 45 seconds binds a new serial by AVD name and preserves the UUID", async () => {
+  const { timer, persistence, sessions, manager, pool } = await setupPassiveRestart();
+  try {
+    timer.advanceTime(45_000);
+    const unknown = { ...original, deviceId: "emulator-5556", name: "Unknown (emulator-5556)" };
+    manager.bootedDevices = [unknown];
+    await pool.refreshDevices();
+    const returned = { ...original, deviceId: unknown.deviceId };
+    manager.bootedDevices = [returned];
+    await pool.refreshDevices();
+
+    await expect(
+      sessions.getOrCreateSession("session", pool, "android", undefined, true),
+    ).resolves.toMatchObject({
+      sessionId: "session",
+      assignedDevice: returned.deviceId,
+      stableDeviceId: original.name,
+    });
+    expect(await persistence.getSession?.("session")).toMatchObject({
+      status: "active",
+      device_id: returned.deviceId,
+    });
+  } finally {
+    sessions.stopCleanupTimer();
+  }
+});
+
+test("device-restart resume accepts a present device after the full recovery deadline", async () => {
+  const { timer, persistence, sessions, manager, pool } = await setupPassiveRestart();
+  try {
+    timer.advanceTime(DEFAULT_DEVICE_READY_TIMEOUT_MS + 1);
+    manager.bootedDevices = [original];
+    await pool.addDevice(original, image);
+
+    await expect(
+      sessions.getOrCreateSession("session", pool, "android", undefined, true),
+    ).resolves.toMatchObject({ sessionId: "session", assignedDevice: original.deviceId });
+    expect(await persistence.getSession?.("session")).toMatchObject({
+      status: "active",
+      device_id: original.deviceId,
+    });
+  } finally {
+    sessions.stopCleanupTimer();
+  }
+});
+
+test("device-restart resume terminalizes absence at the persisted restart deadline", async () => {
+  const { timer, persistence, sessions, pool } = await setupPassiveRestart();
+  try {
+    const resume = sessions.getOrCreateSession("session", pool, "android", undefined, true);
+    await flush();
+    expect(timer.getPendingSleeps()).toEqual([1_000]);
+    timer.advanceTime(DEFAULT_DEVICE_READY_TIMEOUT_MS);
+    await expect(resume).rejects.toThrow("recovery reason: target-absent");
+    expect(await persistence.getSession?.("session")).toMatchObject({
+      status: "released",
+      release_reason: "identity-recovery-target-absent",
+    });
+  } finally {
+    sessions.stopCleanupTimer();
+  }
+});
+
+test("device-restart resume stops at the earlier session expiry", async () => {
+  const { timer, persistence, sessions, pool } = await setupPassiveRestart();
+  try {
+    const persisted = await persistence.getSession?.("session");
+    if (!persisted) {
+      throw new Error("Expected a persisted restart release");
+    }
+    persisted.expires_at_ms = 5_000;
+    const resume = sessions.getOrCreateSession("session", pool, "android", undefined, true);
+    await flush();
+    expect(timer.getPendingSleeps()).toEqual([1_000]);
+    timer.advanceTime(5_000);
+    await expect(resume).rejects.toThrow("recovery reason: target-absent");
+    expect(await persistence.getSession?.("session")).toMatchObject({
+      release_reason: "identity-recovery-target-absent",
+    });
+  } finally {
+    sessions.stopCleanupTimer();
+  }
+});
+
+test("a resolved old-serial replacement fences recovery despite another unknown emulator", async () => {
+  const { persistence, sessions, manager, pool } = await setupPassiveRestart();
+  try {
+    manager.bootedDevices = [
+      { ...original, name: "Different_AVD" },
+      { ...original, deviceId: "emulator-5556", name: "Unknown (emulator-5556)" },
+    ];
+    await pool.refreshDevices();
+    await expect(
+      sessions.getOrCreateSession("session", pool, "android", undefined, true),
+    ).rejects.toThrow("recovery reason: identity-continuity-lost");
+    expect(await persistence.getSession?.("session")).toMatchObject({
+      release_reason: "identity-recovery-identity-continuity-lost",
+    });
+  } finally {
+    sessions.stopCleanupTimer();
+  }
+});
+
+test("active emulator loss adopts a same-AVD replacement at a new serial", async () => {
+  const { sessions, manager, pool, captured } = await setup(new KillTrackingShutdownManager());
+  try {
+    const returned = { ...original, deviceId: "emulator-5556" };
+    manager.bootedDevices = [returned];
+    await expect(
+      pool.recoverSessionBoundAndroidDeviceAfterLoss(original.deviceId, undefined, captured),
+    ).resolves.toBe("recovered");
+    expect(sessions.getSession("session")).toMatchObject({
+      sessionId: "session",
+      assignedDevice: returned.deviceId,
+    });
+    expect(manager.kills).toEqual([]);
+    expect(manager.startedDevices).toEqual([]);
+  } finally {
+    sessions.stopCleanupTimer();
+  }
+});
+
+test("active emulator loss rebinds a pooled same-AVD replacement at a new serial", async () => {
+  const { sessions, manager, pool, captured } = await setup(new KillTrackingShutdownManager());
+  try {
+    const returned = { ...original, deviceId: "emulator-5556" };
+    manager.bootedDevices = [returned];
+    await pool.addDevice(returned, image);
+    await expect(
+      pool.recoverSessionBoundAndroidDeviceAfterLoss(original.deviceId, undefined, captured),
+    ).resolves.toBe("recovered");
+    expect(sessions.getSession("session")?.assignedDevice).toBe(returned.deviceId);
+    expect(manager.kills).toEqual([]);
+    expect(manager.startedDevices).toEqual([]);
+  } finally {
+    sessions.stopCleanupTimer();
+  }
+});
+
+test("active emulator loss adopts a new serial after its tracked process exits", async () => {
+  const { sessions, manager, pool, captured } = await setup(new KillTrackingShutdownManager());
+  try {
+    const exitedProcess = {
+      pid: 42,
+      exitCode: 1,
+      signalCode: null,
+      kill: () => {
+        throw new Error("An exited process must not be killed");
+      },
+    } as unknown as ChildProcess;
+    (
+      pool as unknown as { startedDeviceProcesses: Map<string, ChildProcess> }
+    ).startedDeviceProcesses.set(original.deviceId, exitedProcess);
+    const returned = { ...original, deviceId: "emulator-5556" };
+    manager.bootedDevices = [returned];
+    await expect(
+      pool.recoverSessionBoundAndroidDeviceAfterLoss(original.deviceId, undefined, captured),
+    ).resolves.toBe("recovered");
+    expect(sessions.getSession("session")?.assignedDevice).toBe(returned.deviceId);
+    expect(manager.kills).toEqual([]);
+    expect(manager.startedDevices).toEqual([]);
   } finally {
     sessions.stopCleanupTimer();
   }

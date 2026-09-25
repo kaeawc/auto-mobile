@@ -4657,7 +4657,7 @@ export class DevicePool {
     allowActiveStop: boolean,
   ): Promise<"stopped" | "same-avd" | "declined"> {
     const current = this.devices.get(device.id);
-    if (current && current !== device && current.avdName === avdName) {
+    if (this.sameAvdReplacements(device, avdName).length > 0) {
       return "same-avd";
     }
     if (!allowActiveStop) {
@@ -4675,10 +4675,17 @@ export class DevicePool {
       await this.stopEmulatorProcess(detachedProcess, retainLeaseUntil);
       return "stopped";
     }
-    const hadTrackedProcess = this.startedDeviceProcesses.has(device.id);
+    const trackedProcess = this.startedDeviceProcesses.get(device.id);
+    const hadTrackedProcess = trackedProcess !== undefined;
+    const trackedProcessExited = trackedProcess && this.getCompletedProcessExit(trackedProcess);
     await this.stopTrackedEmulatorProcess(device.id, retainLeaseUntil);
-    if (!hadTrackedProcess) {
-      await this.stopDiscoveredEmulatorByAvdName(avdName, retainLeaseUntil);
+    if (!hadTrackedProcess || trackedProcessExited) {
+      return await this.stopDiscoveredEmulatorByAvdName(
+        device,
+        avdName,
+        retainLeaseUntil,
+        hadTrackedProcess,
+      );
     }
     return "stopped";
   }
@@ -4715,10 +4722,11 @@ export class DevicePool {
     preservedAutolockSessionId: string | undefined,
     recoveryImage: DeviceInfo,
   ): Promise<boolean> {
-    const replacement = this.devices.get(device.id);
-    if (!replacement || replacement.avdName !== avdName) {
+    const replacements = this.sameAvdReplacements(device, avdName);
+    if (replacements.length !== 1) {
       return false;
     }
+    const replacement = replacements[0];
     if (!preservedSessionId) {
       return true;
     }
@@ -4756,6 +4764,21 @@ export class DevicePool {
       );
       return false;
     }
+  }
+
+  private sameAvdReplacements(device: PooledDevice, avdName: string): PooledDevice[] {
+    return this.getDevicesByPlatform("android").filter(
+      (candidate) =>
+        candidate !== device &&
+        isAndroidEmulatorSerial(candidate.id) &&
+        !candidate.identityUnresolved &&
+        !isUnresolvedAndroidEmulatorName({
+          deviceId: candidate.id,
+          name: candidate.name,
+          platform: candidate.platform,
+        }) &&
+        this.stableDeviceIdFor(candidate) === avdName,
+    );
   }
 
   private async recoverSameAvdReplacement(
@@ -4892,9 +4915,11 @@ export class DevicePool {
   }
 
   private async stopDiscoveredEmulatorByAvdName(
+    disconnectedDevice: PooledDevice,
     avdName: string,
     retainLeaseUntil: (settlement: Promise<unknown>) => void,
-  ): Promise<void> {
+    adoptOnly: boolean,
+  ): Promise<"stopped" | "same-avd"> {
     const timeoutMs = 30_000;
     const deadlineMs = this.timer.now() + timeoutMs;
     const deadlineController = new AbortController();
@@ -4916,7 +4941,7 @@ export class DevicePool {
         removeAbortListener = () => signal.removeEventListener("abort", abort);
       }
     });
-    const shutdown = runWithAbortSignal(signal, async () => {
+    const shutdown = runWithAbortSignal(signal, async (): Promise<"stopped" | "same-avd"> => {
       const discover = async () => {
         signal.throwIfAborted();
         const discovery = await this.deviceManager.getBootedDevicesDetailed("android", {
@@ -4936,11 +4961,25 @@ export class DevicePool {
         return discovery.devices;
       };
       const booted = await discover();
-      const matchingAvd = booted.find(
+      const matchingAvds = booted.filter(
         (device) => device.platform === "android" && device.name === avdName,
       );
+      if (matchingAvds.length > 1) {
+        throw new ActionableError(
+          `Multiple running emulators identify as '${avdName}'; recovery will not relaunch it`,
+        );
+      }
+      const matchingAvd = matchingAvds[0];
       if (!matchingAvd) {
-        return;
+        return "stopped";
+      }
+      if (matchingAvd.deviceId !== disconnectedDevice.id) {
+        await this.addDevice(matchingAvd, disconnectedDevice.androidImage);
+        signal.throwIfAborted();
+        return "same-avd";
+      }
+      if (adoptOnly) {
+        return "stopped";
       }
       await this.deviceManager.killDevice(matchingAvd, {
         timeoutMs: Math.max(1, deadlineMs - this.timer.now()),
@@ -4956,14 +4995,14 @@ export class DevicePool {
           logger.info(
             `[DevicePool] Confirmed untracked Android emulator ${avdName} stopped before recovery`,
           );
-          return;
+          return "stopped";
         }
         await this.timer.sleep(Math.min(1_000, Math.max(0, deadlineMs - this.timer.now())));
         signal.throwIfAborted();
       }
     });
     try {
-      await Promise.race([shutdown, cancelled]);
+      return await Promise.race([shutdown, cancelled]);
     } catch (error) {
       // A late command must settle before another lifecycle owner may mutate
       // this AVD. Failure propagates before pool/session detachment or relaunch.
@@ -8943,9 +8982,9 @@ export class DevicePool {
    * Recovery is an identity operation, not ordinary pool allocation. Once an
    * exact target is absent, busy, or replaced at its old transport address,
    * fail immediately rather than allowing retry timing or discovery order to
-   * choose another signed device. An unresolved identity at the persisted
-   * transport is not evidence of either absence or replacement, so keep retrying
-   * until discovery resolves it.
+   * choose another signed device. A device-restart release has a persisted,
+   * bounded grace period for absence. An unresolved emulator identity at any
+   * serial is not evidence of absence or replacement.
    */
   private recoveryFailure(
     sessionId: string,
@@ -8960,31 +8999,27 @@ export class DevicePool {
           isAndroidEmulatorSerial(device.id) === target.androidEmulator),
     );
     if (exactMatches.length !== 1) {
-      const transportIdentityUnresolved =
-        exactMatches.length === 0 &&
-        !isUnresolvedAndroidEmulatorName({
-          deviceId: target.deviceId,
-          name: target.stableDeviceId,
-          platform: target.platform,
-        }) &&
-        platformDevices.some(
-          (device) => device.id === target.deviceId && this.stableDeviceIdFor(device) === undefined,
-        );
-      if (transportIdentityUnresolved) {
-        return new DevicePoolError("Recovery target identity is unresolved", true);
-      }
-      const transportReused = platformDevices.some(
-        (device) =>
-          device.id === target.deviceId && this.stableDeviceIdFor(device) !== target.stableDeviceId,
-      );
+      const { transportReused, transportIdentityUnresolved, absenceAuthoritative } =
+        this.recoveryDiscoveryEvidence(target, platformDevices, refreshCompleteness);
       if (transportReused || exactMatches.length > 1) {
         return new SessionRecoveryIdentityLossError(sessionId, target, "identity-continuity-lost");
       }
-      if (
-        !refreshCompleteness ||
-        !didSourceSucceedForDevice(refreshCompleteness, target.platform, target.deviceId)
-      ) {
+      if (transportIdentityUnresolved) {
+        if (
+          target.restartRecoveryDeadlineMs === undefined ||
+          this.timer.now() < target.restartRecoveryDeadlineMs
+        ) {
+          return new DevicePoolError("Recovery target identity is unresolved", true);
+        }
+      }
+      if (!absenceAuthoritative) {
         return new DevicePoolError("Recovery target absence is not yet authoritative", true);
+      }
+      if (
+        target.restartRecoveryDeadlineMs !== undefined &&
+        this.timer.now() < target.restartRecoveryDeadlineMs
+      ) {
+        return new DevicePoolError("Recovery target is restarting", true);
       }
       return new SessionRecoveryIdentityLossError(sessionId, target, "target-absent");
     }
@@ -8993,6 +9028,43 @@ export class DevicePool {
       return new SessionRecoveryIdentityLossError(sessionId, target, "target-busy");
     }
     return undefined;
+  }
+
+  private recoveryDiscoveryEvidence(
+    target: SessionRecoveryTarget,
+    platformDevices: PooledDevice[],
+    refreshCompleteness: DiscoveryCompleteness | undefined,
+  ): {
+    transportReused: boolean;
+    transportIdentityUnresolved: boolean;
+    absenceAuthoritative: boolean;
+  } {
+    const transportReused = platformDevices.some((device) => {
+      const stableId = this.stableDeviceIdFor(device);
+      return (
+        device.id === target.deviceId &&
+        stableId !== undefined &&
+        stableId !== target.stableDeviceId
+      );
+    });
+    const transportIdentityUnresolved =
+      !isUnresolvedAndroidEmulatorName({
+        deviceId: target.deviceId,
+        name: target.stableDeviceId,
+        platform: target.platform,
+      }) &&
+      platformDevices.some(
+        (device) =>
+          this.stableDeviceIdFor(device) === undefined &&
+          (device.id === target.deviceId ||
+            (target.platform === "android" &&
+              target.androidEmulator === true &&
+              isAndroidEmulatorSerial(device.id))),
+      );
+    const absenceAuthoritative =
+      refreshCompleteness !== undefined &&
+      didSourceSucceedForDevice(refreshCompleteness, target.platform, target.deviceId);
+    return { transportReused, transportIdentityUnresolved, absenceAuthoritative };
   }
 
   private stableDeviceIdFor(device: PooledDevice): string | undefined {

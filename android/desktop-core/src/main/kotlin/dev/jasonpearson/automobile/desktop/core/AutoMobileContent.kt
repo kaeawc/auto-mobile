@@ -393,7 +393,8 @@ internal fun rememberLiveVideoFrame(
     fun reconnect(reason: String) {
       LOG.info("Live mirror for $deviceId reconnecting: $reason")
       noProgressSinceMs = nowMs()
-      lastSeenSequence = -1L
+      // The last frame stays on screen during reconnect; it cannot restart the stall clock.
+      lastSeenSequence = liveFrame?.sequence ?: -1L
       lastSeenActivityMs = source.lastActivityMs.value
       source.disconnect()
       source.connect(deviceId)

@@ -561,6 +561,23 @@ function assertNewStreamIdAvailable(streamId: string): void {
   }
 }
 
+/**
+ * Remove a record that never became live (initial capture/publish start
+ * failed) from `streams` and clear its lease timer, so the device's next
+ * `startWebRtcStream` call retries with a fresh record instead of finding
+ * and re-leasing a dead one (#7555). Callers of the failed start already
+ * hold a descriptor snapshot of the record and are unaffected.
+ */
+function discardDeadRecord(record: WebRtcStreamRecord): void {
+  if (streams.get(record.streamId) === record) {
+    streams.delete(record.streamId);
+  }
+  if (record.leaseExpiryHandle) {
+    dependencies.timer.clearTimeout(record.leaseExpiryHandle);
+    record.leaseExpiryHandle = null;
+  }
+}
+
 /** Stop live media components while retaining best-effort cleanup semantics. */
 async function stopActiveRecord(record: WebRtcStreamRecord): Promise<void> {
   setLifecycleState(record, "stopping");
@@ -641,8 +658,14 @@ export async function startWebRtcStream(
       markFailure(record, record.failure?.code ?? "capture_start_failed", error, "degraded");
       await record.source?.stop().catch(() => {});
       await record.publisher.stop().catch(() => {});
+      // The initial start never became live, so this record can never recover
+      // (prepareAndPublish/onBeforeEstablish never ran to restart the source).
+      // Discard it rather than leaving a dead record that a later
+      // startWebRtcStream for this device would find via activeStreamForDevice
+      // and re-lease indefinitely instead of retrying (#7555).
+      discardDeadRecord(record);
     }
-    return describeRecord(record, leaseId);
+    return { ...describeRecord(record, leaseId), state: "stopped" };
   }
 }
 

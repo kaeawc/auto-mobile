@@ -647,6 +647,11 @@ jobs:
             sleep 2
             pkill -KILL -x mediamtx 2>/dev/null || true
             pkill -KILL -f "index.js --daemon-mode" 2>/dev/null || true
+            if [ -n "${AUTOMOBILE_IOS_SIMULATOR_UDID:-}" ]; then
+              if ! timeout 10 xcrun simctl bootstatus "${AUTOMOBILE_IOS_SIMULATOR_UDID}" -b >/dev/null 2>&1; then
+                echo "Simulator did not report booted within 10s after cleanup; skipping reboot (best-effort re-verify only, #7605)." >&2
+              fi
+            fi
             for _ in $(seq 1 15); do
               lsof -nP -iTCP:8889 -sTCP:LISTEN >/dev/null 2>&1 || return 0
               sleep 1

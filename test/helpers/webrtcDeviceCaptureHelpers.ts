@@ -10,6 +10,34 @@ export interface SimulatorAppearanceClient {
   getDeviceInfo(deviceId: string): Promise<{ state: string } | null>;
 }
 
+export interface BoundedRetryOptions {
+  attempts?: number;
+}
+
+/**
+ * Retries `operation` up to `attempts` times (default 2), returning the
+ * first success and re-throwing the last failure only once every attempt is
+ * spent. Callers own their own per-attempt timeout (e.g. execFile's
+ * `timeout` option) — this wrapper only bounds how many attempts run, not
+ * how long each one takes (#7605: a wedged `simctl ui appearance` call on the
+ * macOS 26 runner needs a short per-call timeout plus a small retry, not one
+ * long attempt).
+ */
+export async function runWithBoundedRetry<T>(
+  operation: (attempt: number) => Promise<T>,
+  { attempts = 2 }: BoundedRetryOptions = {},
+): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      return await operation(attempt);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError;
+}
+
 export function shouldRetryWebRtcDaemonStart({
   startError,
   readyError,

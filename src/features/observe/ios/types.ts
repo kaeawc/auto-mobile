@@ -8,6 +8,7 @@
 import type { SemanticLink, ViewHierarchyWindowInfo } from "../../../models";
 import type { ObservationInsets } from "../../../models/ObservationInsets";
 import type { CtrlProxyReconnectStatus } from "../../../models/CtrlProxyReconnectStatus";
+import type { IosHierarchyUnavailableReason } from "../../../models/ViewHierarchyResult";
 import type { HighlightOperationResult } from "../../../models";
 import type {
   PerfTiming,
@@ -285,12 +286,15 @@ export interface CtrlProxyHierarchyResponse {
   frameContext?: string;
   reconnectStatus?: CtrlProxyReconnectStatus;
   reconnectMessage?: string;
+  unavailableReason?: IosHierarchyUnavailableReason;
+  unavailableDetail?: string;
 }
 
 /**
  * Extended context for hierarchy delegate with additional state access.
  */
 export interface HierarchyDelegateContext extends DelegateContext {
+  getLastConnectFailure?(): { reason: IosHierarchyUnavailableReason; detail?: string } | undefined;
   /** Cache freshness TTL in milliseconds */
   cacheFreshTtlMs: number;
   /** Get the cached hierarchy data */

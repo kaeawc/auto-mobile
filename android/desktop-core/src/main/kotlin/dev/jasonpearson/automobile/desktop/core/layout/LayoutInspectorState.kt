@@ -14,6 +14,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 
 /**
  * State holder for the Layout Inspector. Manages:
@@ -69,6 +72,20 @@ class LayoutInspectorState(
   // Connection state
   var connectionStatus by mutableStateOf(ConnectionStatus.Disconnected)
     private set
+
+  var hierarchyUnavailableReason by mutableStateOf<String?>(null)
+    private set
+
+  /** Record an error-shaped hierarchy frame; ordinary malformed frames remain parser warnings. */
+  fun recordHierarchyUnavailable(data: JsonElement): Boolean {
+    val hierarchy =
+      (data as? kotlinx.serialization.json.JsonObject)?.get("hierarchy")
+        as? kotlinx.serialization.json.JsonObject
+    val error = (hierarchy?.get("error") as? JsonPrimitive)?.contentOrNull ?: return false
+    val prefix = "Failed to retrieve iOS view hierarchy from CtrlProxy iOS: "
+    hierarchyUnavailableReason = error.removePrefix(prefix)
+    return true
+  }
 
   var streamingMode by mutableStateOf(StreamingMode.Paused)
     private set
@@ -385,6 +402,7 @@ class LayoutInspectorState(
     nativeScale: Double? = null,
     captureRotation: Int? = null,
   ) {
+    hierarchyUnavailableReason = null
     changedElementIds = changedIds
     currentParsedHierarchy = parsed
     rotation = parsed.rotation
@@ -440,6 +458,7 @@ class LayoutInspectorState(
   fun invalidateRenderedDeviceIdentity() {
     debounceJob?.cancel()
     advanceGeneration()
+    hierarchyUnavailableReason = null
     renderedDeviceId = null
     renderedScreenshotRotation = null
     renderedHierarchyDeviceId = null
@@ -507,6 +526,7 @@ class LayoutInspectorState(
     // dropped instead of repopulating stale state.
     advanceGeneration()
     connectionStatus = ConnectionStatus.Disconnected
+    hierarchyUnavailableReason = null
     streamingMode = StreamingMode.Paused
     screenshotData = null
     screenshotFallback = false

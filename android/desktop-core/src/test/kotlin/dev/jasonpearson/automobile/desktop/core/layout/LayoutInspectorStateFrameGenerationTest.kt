@@ -13,6 +13,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.Json
 import org.junit.Test
 
 /**
@@ -22,6 +23,26 @@ import org.junit.Test
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class LayoutInspectorStateFrameGenerationTest {
+
+  @Test
+  fun `hierarchy error appears and a successful frame clears it`() {
+    val state = LayoutInspectorState()
+    val error =
+      Json.parseToJsonElement(
+        """{"hierarchy":{"error":"Failed to retrieve iOS view hierarchy from CtrlProxy iOS: simulator_not_booted"}}"""
+      )
+    assertNull(parseHierarchyFromJson(error))
+    assertTrue(state.recordHierarchyUnavailable(error))
+    assertEquals("simulator_not_booted", state.hierarchyUnavailableReason)
+
+    val success =
+      Json.parseToJsonElement(
+        """{"hierarchy":{"node":{"className":"XCUIApplication","bounds":{"left":0,"top":0,"right":100,"bottom":100}}}}"""
+      )
+    val parsed = requireNotNull(parseHierarchyFromJson(success))
+    state.applyHierarchyUpdateImmediate(parsed, emptySet())
+    assertNull(state.hierarchyUnavailableReason)
+  }
 
   private fun screenshot(
     state: LayoutInspectorState,

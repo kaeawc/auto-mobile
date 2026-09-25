@@ -26,6 +26,25 @@ function context(
 }
 
 describe("CtrlProxyHierarchy synchronous deadline", () => {
+  test.each([
+    ["simulator_not_booted", undefined],
+    ["auto_setup_failed", "runner install failed"],
+  ] as const)(
+    "propagates connection failure %s to the hierarchy response",
+    async (reason, detail) => {
+      const timer = new FakeTimer();
+      const harness = context(
+        timer,
+        async () => false,
+        () => {},
+      );
+      harness.context.getLastConnectFailure = () => ({ reason, detail });
+      const response = await new CtrlProxyHierarchy(harness.context).getLatestHierarchy(false, 100);
+      expect(response.unavailableReason).toBe(reason);
+      expect(response.unavailableDetail).toBe(detail);
+    },
+  );
+
   test("spends setup time from the hierarchy request budget before dispatch", async () => {
     const timer = new FakeTimer();
     let sends = 0;

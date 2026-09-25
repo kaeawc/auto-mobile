@@ -24,6 +24,17 @@ import type { ViewHierarchy as ViewHierarchyInterface } from "./interfaces/ViewH
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { parseBounds } from "../../utils/bounds";
 import { HOST_OUTPUT_CHILD_CAP_REASON_PREFIX } from "./truncationReasons";
+import type { CtrlProxyHierarchyResponse } from "./ios/types";
+import type { Hierarchy } from "../../models/ViewHierarchyResult";
+
+function iosHierarchyUnavailable(result: CtrlProxyHierarchyResponse | null): Hierarchy {
+  const reason = result?.unavailableReason ?? "unknown";
+  const detail = result?.unavailableDetail;
+  return {
+    error: `Failed to retrieve iOS view hierarchy from CtrlProxy iOS: ${reason}${detail ? `: ${detail}` : ""}`,
+    iosUnavailableReason: reason,
+  };
+}
 
 /**
  * Interface for element bounds
@@ -180,9 +191,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
         }
 
         return {
-          hierarchy: {
-            error: "Failed to retrieve iOS view hierarchy from CtrlProxy iOS",
-          },
+          hierarchy: iosHierarchyUnavailable(result),
           updatedAt: this.timer.now(),
         };
       }

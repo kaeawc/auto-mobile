@@ -15,6 +15,7 @@
 
 import WebSocket from "ws";
 import { ActionableError } from "../../../models/ActionableError";
+import type { IosHierarchyUnavailableReason } from "../../../models/ViewHierarchyResult";
 import { logger } from "../../../utils/logger";
 import {
   BootedDevice,
@@ -638,6 +639,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   private readonly bootedDeviceLister: BootedDeviceLister;
   private readonly deviceConnectionLostNotifier: DeviceConnectionLostNotifier;
   private isAttemptingAutoSetup: boolean = false;
+  private lastConnectFailure?: { reason: IosHierarchyUnavailableReason; detail?: string };
 
   // SDK-event ingestion (telemetry/failure fan-out + layout telemetry)
   private readonly sdkEventIngestor: IosSdkEventIngestor;
@@ -1018,13 +1020,16 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   public override async ensureConnected(
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<boolean> {
+    this.lastConnectFailure = undefined;
     if (this.closed) {
+      this.lastConnectFailure = { reason: "connection_lost", detail: "client closed" };
       return false;
     }
     // Direct session tools connect here without passing through the manager.
     await IOSCtrlProxyManager.awaitStartupOrphanRunnerReap();
 
     if (this.closed) {
+      this.lastConnectFailure = { reason: "connection_lost", detail: "client closed" };
       return false;
     }
 
@@ -1039,6 +1044,10 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
 
     // Prevent re-entry during auto-setup
     if (this.isAttemptingAutoSetup) {
+      this.lastConnectFailure = {
+        reason: "auto_setup_failed",
+        detail: "auto-setup already running",
+      };
       return false;
     }
 
@@ -1064,7 +1073,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
         );
         this.syncPortFromManager(manager);
         this.resetConnectionBudget();
-        return await super.ensureConnected(perf);
+        return await this.reconnectAfterSetup(perf);
       }
 
       // Check if the target simulator is still booted before attempting auto-setup.
@@ -1077,6 +1086,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
           logger.info(
             `[IOSCtrlProxyClient] Target simulator ${this.device.deviceId} is no longer booted, skipping auto-setup`,
           );
+          this.lastConnectFailure = { reason: "simulator_not_booted" };
           return false;
         }
       } catch (error) {
@@ -1091,6 +1101,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
 
       if (!result.success) {
         logger.warn(`[IOSCtrlProxyClient] Auto-setup failed: ${result.message}`);
+        this.lastConnectFailure = { reason: "auto_setup_failed", detail: result.message };
         return false;
       }
 
@@ -1099,13 +1110,25 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       logger.info(`[IOSCtrlProxyClient] Auto-setup succeeded, retrying WebSocket connection`);
       // Reset the connection budget to allow a fresh connection attempt
       this.resetConnectionBudget();
-      return await super.ensureConnected(perf);
+      return await this.reconnectAfterSetup(perf);
     } catch (error) {
       logger.warn(`[IOSCtrlProxyClient] Auto-setup error: ${error}`);
+      this.lastConnectFailure = { reason: "auto_setup_failed", detail: String(error) };
       return false;
     } finally {
       this.isAttemptingAutoSetup = false;
     }
+  }
+
+  private async reconnectAfterSetup(perf: PerformanceTracker): Promise<boolean> {
+    const reconnected = await super.ensureConnected(perf);
+    if (!reconnected) {
+      this.lastConnectFailure = {
+        reason: "connection_lost",
+        detail: "WebSocket reconnect failed after setup",
+      };
+    }
+    return reconnected;
   }
 
   protected override connectWebSocket(
@@ -1182,6 +1205,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   private createHierarchyDelegateContext(): HierarchyDelegateContext {
     return {
       ...this.createDelegateContext(),
+      getLastConnectFailure: () => this.lastConnectFailure,
       cacheFreshTtlMs: IOSCtrlProxyClient.CACHE_FRESH_TTL_MS,
       getCachedHierarchy: () => this.cachedHierarchy,
       setCachedHierarchy: (h) => {

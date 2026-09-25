@@ -737,7 +737,7 @@ describe("DeviceSessionRepository", () => {
     }
   });
 
-  test("DevicePool stale emulator eviction persists device-disconnected release reason", async () => {
+  test("DevicePool stale emulator eviction (no recorded AVD image) persists a resumable device-restart release reason", async () => {
     const timer = new FakeTimer();
     const fakeDeviceUtils = new FakeDeviceUtils();
     const androidDevice = {
@@ -769,9 +769,8 @@ describe("DeviceSessionRepository", () => {
       ).rejects.toThrow(/not available|shut down|disconnected/);
 
       const row = await repo.getSession("session-1");
-      expect(row!.release_reason).toMatch(
-        /^device-disconnected:emulator-5554;incident=emulator-loss-/,
-      );
+      expect(row!.release_reason).toBe(deviceRestartReleaseReason(androidDevice.name));
+      expect(isRecoverableDaemonReleaseReason(row!.release_reason)).toBe(true);
     } finally {
       sessionManager.stopCleanupTimer();
     }

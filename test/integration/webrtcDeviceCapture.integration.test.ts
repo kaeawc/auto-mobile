@@ -26,6 +26,7 @@ import {
 import {
   configuredIosSimulatorUdid,
   isKeyframeRecoveryTimeout,
+  runWithBoundedRetry,
   shouldRetryWebRtcDaemonStart,
   waitForBootedSimulatorUdid,
   type SimulatorAppearanceClient,
@@ -68,6 +69,18 @@ const TEARDOWN_HOOK_TIMEOUT_MS = 45_000;
 // a hung subprocess or socket names the failed operation rather than consuming
 // the entire device lane (#5715).
 const REAL_IO_TIMEOUT_MS = 30_000;
+// A wedged `simctl ui appearance` call on the macOS 26 hosted runner can be
+// SIGKILLed or hang well past a normal I/O timeout (#7605). Bound each
+// attempt short and retry once inside the existing overall deadline, rather
+// than spending the whole deadline on a single hung attempt.
+const IOS_APPEARANCE_ATTEMPT_TIMEOUT_MS = 12_000;
+const IOS_APPEARANCE_MAX_ATTEMPTS = 2;
+// Appearance toggling exists only to force a visible screen change for the
+// capture assertions. If it is persistently wedged, fall back to launching a
+// distinct system app instead, so the "changing video" assertions still see a
+// real transition (#7605).
+const IOS_FALLBACK_DEFAULT_BUNDLE_ID = "com.apple.mobileslideshow"; // Photos — pairs with the "light"/default fixture state
+const IOS_FALLBACK_CHANGE_BUNDLE_ID = "com.apple.Preferences"; // Settings — pairs with the "dark"/changed fixture state
 const CDP_COMMAND_TIMEOUT_MS = REAL_IO_TIMEOUT_MS;
 const DAEMON_START_RETRY_DELAY_MS = 2_000;
 
@@ -651,17 +664,21 @@ async function setIosFixtureAppearance(
   {
     signal,
     timeoutMs = REAL_IO_TIMEOUT_MS,
+    attempts = IOS_APPEARANCE_MAX_ATTEMPTS,
+    attemptTimeoutMs = IOS_APPEARANCE_ATTEMPT_TIMEOUT_MS,
     timer = defaultTimer,
     simctlFactory = createSimCtlClient,
     environment = process.env,
   }: {
     signal?: AbortSignal;
     timeoutMs?: number;
+    attempts?: number;
+    attemptTimeoutMs?: number;
     timer?: Timer;
     simctlFactory?: SimCtlClientFactory;
     environment?: NodeJS.ProcessEnv;
   } = {},
-): Promise<void> {
+): Promise<boolean> {
   const deadline = timer.now() + timeoutMs;
   const configuredUdid = configuredIosSimulatorUdid(environment);
   const udid =
@@ -673,20 +690,54 @@ async function setIosFixtureAppearance(
   if (!udid) {
     // No simulator exists to update, so this cosmetic fixture change has no target.
     console.warn(`[#6969] no Booted iOS simulator found for ${appearance} appearance fixture`);
-    return;
+    return true;
   }
 
   const remainingMs = deadline - timer.now();
   if (remainingMs <= 0) {
     // No simctl command has run, so this cosmetic fixture change cannot be applied.
     console.warn(`[#6969] iOS simulator appearance fixture timed out before simctl could run`);
-    return;
+    return true;
   }
-  await execFileAsync("xcrun", ["simctl", "ui", udid, "appearance", appearance], {
-    timeout: remainingMs,
-    killSignal: "SIGKILL",
-    signal,
-  });
+  try {
+    await runWithBoundedRetry(
+      async () => {
+        const remainingMs = deadline - timer.now();
+        if (remainingMs <= 0) {
+          throw new Error(
+            "iOS simulator appearance fixture deadline exhausted before simctl could run",
+          );
+        }
+        return execFileAsync("xcrun", ["simctl", "ui", udid, "appearance", appearance], {
+          timeout: Math.min(attemptTimeoutMs, remainingMs),
+          killSignal: "SIGKILL",
+          signal,
+        });
+      },
+      { attempts },
+    );
+    return true;
+  } catch (error) {
+    console.warn(
+      `[#7605] simctl ui appearance ${appearance} failed after ${attempts} attempt(s), skipping: ${error}`,
+    );
+    return false;
+  }
+}
+
+async function launchIosFallbackScreen(bundleId: string, signal?: AbortSignal): Promise<void> {
+  const udid = configuredIosSimulatorUdid(process.env) ?? "booted";
+  try {
+    await execFileAsync("xcrun", ["simctl", "launch", udid, bundleId], {
+      timeout: REAL_IO_TIMEOUT_MS,
+      killSignal: "SIGKILL",
+      signal,
+    });
+  } catch (error) {
+    // Best-effort fallback for an already-degraded fixture path; a failure here
+    // must not fail the capture attempt either (#7605).
+    console.warn(`[#7605] iOS fallback screen-change launch of ${bundleId} failed: ${error}`);
+  }
 }
 
 describe("WHEP iOS fixture setup", () => {
@@ -773,7 +824,10 @@ async function launchFixture(signal?: AbortSignal): Promise<void> {
     // Simulator is already foregrounded by the workflow. Toggling appearance
     // yields the required visible fixture without a Settings-app launch, which
     // can wedge on macOS hosted runners.
-    await setIosFixtureAppearance("light", { signal });
+    const applied = await setIosFixtureAppearance("light", { signal });
+    if (!applied) {
+      await launchIosFallbackScreen(IOS_FALLBACK_DEFAULT_BUNDLE_ID, signal);
+    }
     return;
   }
   throw new Error("AUTOMOBILE_WEBRTC_DEVICE_PLATFORM must be android or ios");
@@ -793,7 +847,10 @@ async function changeFixture(signal?: AbortSignal): Promise<void> {
     return;
   }
   if (platform === "ios") {
-    await setIosFixtureAppearance("dark", { signal });
+    const applied = await setIosFixtureAppearance("dark", { signal });
+    if (!applied) {
+      await launchIosFallbackScreen(IOS_FALLBACK_CHANGE_BUNDLE_ID, signal);
+    }
     return;
   }
   throw new Error("AUTOMOBILE_WEBRTC_DEVICE_PLATFORM must be android or ios");

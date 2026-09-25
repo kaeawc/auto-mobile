@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   configuredIosSimulatorUdid,
   isKeyframeRecoveryTimeout,
+  runWithBoundedRetry,
   shouldRetryWebRtcDaemonStart,
   waitForBootedSimulatorUdid,
   type SimulatorAppearanceClient,
@@ -9,6 +10,70 @@ import {
 import { FakeTimer } from "../fakes/FakeTimer";
 
 describe("WHEP device capture helper logic", () => {
+  test("bounded retry returns an immediate success after one attempt", async () => {
+    let calls = 0;
+    await expect(
+      runWithBoundedRetry(async () => {
+        calls++;
+        return "first";
+      }),
+    ).resolves.toBe("first");
+    expect(calls).toBe(1);
+  });
+
+  test("bounded retry returns the second attempt after a rejection", async () => {
+    let calls = 0;
+    await expect(
+      runWithBoundedRetry(async () => {
+        calls++;
+        if (calls === 1) {
+          throw new Error("first failure");
+        }
+        return "second";
+      }),
+    ).resolves.toBe("second");
+    expect(calls).toBe(2);
+  });
+
+  test("bounded retry throws the last error after exhausting attempts", async () => {
+    const errors = [new Error("first failure"), new Error("last failure")];
+    let calls = 0;
+    await expect(
+      runWithBoundedRetry(
+        async () => {
+          throw errors[calls++];
+        },
+        { attempts: 2 },
+      ),
+    ).rejects.toBe(errors[1]);
+    expect(calls).toBe(2);
+  });
+
+  test("bounded retry defaults to two attempts", async () => {
+    let calls = 0;
+    await expect(
+      runWithBoundedRetry(async () => {
+        calls++;
+        throw new Error("failure");
+      }),
+    ).rejects.toThrow("failure");
+    expect(calls).toBe(2);
+  });
+
+  test("bounded retry supports a single attempt without retrying", async () => {
+    let calls = 0;
+    await expect(
+      runWithBoundedRetry(
+        async () => {
+          calls++;
+          throw new Error("single failure");
+        },
+        { attempts: 1 },
+      ),
+    ).rejects.toThrow("single failure");
+    expect(calls).toBe(1);
+  });
+
   test("reuses the workflow-selected simulator UDID without rediscovery", () => {
     const udid = "00000000-0000-0000-0000-000000000001";
 

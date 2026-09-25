@@ -414,6 +414,50 @@ describe("CtrlProxyManager", function () {
       ).toHaveLength(5);
       expect(timer.getSleepHistory()).toEqual([100, 200, 200, 200]);
     });
+
+    test("concurrent rebindIfUnhealthy calls share one force-stop/rebind sequence (issue #7532)", async function () {
+      // The #7534 readiness path (ToolExecutionContext.ensureAccessibilityServiceReady)
+      // and a client's own connection-failure recovery both call this on the same
+      // per-device singleton and can race. Without an in-flight guard, a second
+      // caller would start its own force-stop/settings sequence mid-rebind.
+      fakeAdb.setCommandResponse("shell dumpsys accessibility", {
+        stdout: `Bound services:{}\nCrashed services:{{${serviceComponent}}}`,
+        stderr: "",
+      });
+      fakeAdb.setCommandResponse("shell settings get secure enabled_accessibility_services", {
+        stdout: `${otherService}:${serviceComponent}`,
+        stderr: "",
+      });
+
+      const [first, second] = await Promise.all([
+        accessibilityServiceClient.rebindIfUnhealthy(),
+        accessibilityServiceClient.rebindIfUnhealthy(),
+      ]);
+
+      expect(first).toBe(true);
+      expect(second).toBe(true);
+      expect(
+        fakeAdb
+          .getExecutedCommands()
+          .filter(
+            (command) => command === `shell am force-stop ${AndroidCtrlProxyManager.PACKAGE}`,
+          ),
+      ).toHaveLength(1);
+      expect(
+        fakeAdb
+          .getExecutedCommands()
+          .filter((command) =>
+            command.startsWith("shell settings put secure enabled_accessibility_services"),
+          ),
+      ).toHaveLength(2);
+
+      // A later call after the in-flight rebind settles starts its own sequence.
+      fakeAdb.setCommandResponse("shell dumpsys accessibility", {
+        stdout: `Bound services:{{${serviceComponent}}}\nCrashed services:{}`,
+        stderr: "",
+      });
+      expect(await accessibilityServiceClient.rebindIfUnhealthy()).toBe(false);
+    });
   });
 
   describe("isAvailable", function () {

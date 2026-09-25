@@ -147,6 +147,14 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   private cachedToggleCapabilities: ToggleCapabilities | null = null;
 
   private attemptedAutomatedSetup: boolean = false;
+  // In-flight guard (issue #7532 review): the #7534 readiness path
+  // (ToolExecutionContext.ensureAccessibilityServiceReady) and a client's own
+  // connection-failure recovery both call rebindIfUnhealthy() on this same
+  // per-device singleton and can interleave — one re-enables while the other
+  // force-stops mid-sequence, leaving the health poll observing a state
+  // neither caller intended. Concurrent callers instead share one in-flight
+  // rebind and its result.
+  private rebindInFlight: Promise<boolean> | null = null;
   private static instances: Map<string, AndroidCtrlProxyManager> = new Map();
   private static expectedChecksumOverride: string | null = null;
   private static readonly apkOverrideChecksums = new Map<string, Promise<string>>();
@@ -901,8 +909,23 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
    * Remove CtrlProxy from the configured service list and add it back when
    * Android reports it crashed or unbound. Writing the intermediate list keeps
    * every other enabled accessibility service intact while forcing a rebind.
+   *
+   * Concurrent callers (the #7534 readiness path and a client's own
+   * connection-failure recovery, issue #7532) share a single in-flight rebind
+   * rather than interleaving their own force-stop/settings sequences against
+   * the same on-device service.
    */
   async rebindIfUnhealthy(): Promise<boolean> {
+    if (this.rebindInFlight) {
+      return this.rebindInFlight;
+    }
+    this.rebindInFlight = this.rebindIfUnhealthyInternal().finally(() => {
+      this.rebindInFlight = null;
+    });
+    return this.rebindInFlight;
+  }
+
+  private async rebindIfUnhealthyInternal(): Promise<boolean> {
     let rebindAttempted = false;
     try {
       if (await this.isAccessibilityServiceHealthy()) {

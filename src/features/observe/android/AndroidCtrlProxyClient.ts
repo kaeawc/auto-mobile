@@ -38,6 +38,7 @@ import {
 import { ViewHierarchyQueryOptions } from "../../../models/ViewHierarchyQueryOptions";
 import { readScreenScaleMetadata } from "../../../models/ScreenScaleMetadata";
 import { AndroidCtrlProxyManager } from "../../../utils/CtrlProxyManager";
+import type { ProxySetupResult } from "../../../utils/interfaces/ProxyManager";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
 import { Timer, defaultTimer } from "../../../utils/SystemTimer";
 import {
@@ -1237,6 +1238,24 @@ class NoOpCtrlProxyForwardLease implements CtrlProxyForwardLease {
 }
 
 /**
+ * Narrow Android manager seam for connection-failure escalation (issue #7532),
+ * analogous to `IOSCtrlProxyClient`'s `serviceManagerFactory`. Exposes only what
+ * recovery needs: the binding-health probe, the crashed/unbound rebind added by
+ * #7470, and full setup for a service that is missing or not installed at all.
+ * `AndroidCtrlProxyManager` implements all three.
+ */
+export interface AndroidServiceRecoveryManager {
+  isAccessibilityServiceHealthy(): Promise<boolean>;
+  rebindIfUnhealthy?(): Promise<boolean>;
+  setup(force?: boolean, perf?: PerformanceTracker): Promise<ProxySetupResult>;
+}
+
+export type AndroidServiceManagerFactory = (device: BootedDevice) => AndroidServiceRecoveryManager;
+
+const defaultAndroidServiceManagerFactory: AndroidServiceManagerFactory = (device) =>
+  AndroidCtrlProxyManager.getInstance(device);
+
+/**
  * Client for interacting with the AutoMobile Accessibility Service via WebSocket.
  * Uses singleton pattern per device to maintain persistent WebSocket connection.
  */
@@ -1284,6 +1303,18 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   // Distinct from a transient websocket disconnect (onConnectionClosed), which
   // must still allow the ADB fallback.
   private closed: boolean = false;
+
+  // Connection-failure escalation to service recovery (issue #7532). Counts
+  // failures via the base class's onConnectAttemptFailed() hook, which fires
+  // once per failed dial AND once per lost open connection (#7537), so both
+  // count toward the threshold. Reset on a successful connect or a successful
+  // recovery.
+  private consecutiveConnectionFailures: number = 0;
+  private static readonly MAX_CONSECUTIVE_FAILURES_BEFORE_RECOVERY = 3;
+  // Re-entry guard: a recovery burst that has not settled must not start a
+  // second, overlapping recovery attempt.
+  private isRecoveringService: boolean = false;
+  private readonly serviceManagerFactory: AndroidServiceManagerFactory;
 
   // Delegate instances (lazy initialized)
   private _gestures: CtrlProxyGestures | null = null;
@@ -1388,6 +1419,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     loggerInstance: Logger = logger,
     certificateFileSystem?: CertificateFileSystem,
     ctrlProxyForwardLease?: CtrlProxyForwardLease,
+    serviceManagerFactory: AndroidServiceManagerFactory = defaultAndroidServiceManagerFactory,
   ) {
     super(
       timer ?? defaultTimer,
@@ -1395,6 +1427,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       {},
       retryExecutor ?? defaultRetryExecutor,
     );
+    this.serviceManagerFactory = serviceManagerFactory;
     this.sdkEventIngestorInstance = sdkEventIngestor ?? null;
     this.loggerInstance = loggerInstance;
     this.device = device;
@@ -1715,6 +1748,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     certificateFileSystem?: CertificateFileSystem,
     screenshotBackoffScheduler?: ScreenshotBackoffScheduler,
     ctrlProxyForwardLease?: CtrlProxyForwardLease,
+    serviceManagerFactory?: AndroidServiceManagerFactory,
   ): AndroidCtrlProxyClient {
     const client = new AndroidCtrlProxyClient(
       device,
@@ -1729,6 +1763,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       loggerInstance,
       certificateFileSystem,
       ctrlProxyForwardLease ?? new NoOpCtrlProxyForwardLease(),
+      serviceManagerFactory ?? defaultAndroidServiceManagerFactory,
     );
     // Test-only seam: pre-seed the lazily-built scheduler so tests can assert shared floor
     // accounting (noteCaptureStarted) without the live device-data-stream server. Not exposed on
@@ -1935,6 +1970,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   }
 
   protected onConnectionEstablished(): void {
+    // Reset failure escalation state on every successful connect (issue #7532).
+    this.consecutiveConnectionFailures = 0;
     this.syncNetworkStateToDevice();
     this.syncAccessibilityFlagsToDevice();
     // The runner loses its in-process content observers across a service restart while the desktop
@@ -2053,6 +2090,166 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     return Array.from(
       new Set([...this.resolvedBuildContexts.keys(), ...this.buildContextInFlight]),
     );
+  }
+
+  /**
+   * Escalate repeated connection failures to service recovery (issue #7532).
+   * Fires once per failed dial AND once per lost open connection (#7537's
+   * `onConnectAttemptFailed` funnel), so both refused dials and dropped
+   * connections count toward the threshold — mirroring
+   * `IOSCtrlProxyClient.onConnectAttemptFailed`. Disabled while auto-reconnect
+   * is off or the client is closed.
+   */
+  protected override onConnectAttemptFailed(): void {
+    if (this.closed || !this.autoReconnectEnabled) {
+      return;
+    }
+
+    this.consecutiveConnectionFailures++;
+    logger.info(
+      `[AndroidCtrlProxyClient] Connection attempt failed (failure count: ${this.consecutiveConnectionFailures})`,
+    );
+
+    if (
+      this.consecutiveConnectionFailures > 0 &&
+      this.consecutiveConnectionFailures %
+        AndroidCtrlProxyClient.MAX_CONSECUTIVE_FAILURES_BEFORE_RECOVERY ===
+        0 &&
+      !this.isRecoveringService
+    ) {
+      this.triggerServiceRecovery();
+    }
+  }
+
+  /**
+   * Trigger CtrlProxy accessibility-service recovery through the manager.
+   * Called when repeated WebSocket connection failures indicate the service
+   * may be crashed, unbound, or missing (issue #7532). Guarded by
+   * `isRecoveringService` so a failure burst cannot start a second, overlapping
+   * recovery while one is already in flight.
+   */
+  private triggerServiceRecovery(): void {
+    if (this.isRecoveringService) {
+      return;
+    }
+
+    this.isRecoveringService = true;
+    logger.info(
+      `[AndroidCtrlProxyClient] Triggering CtrlProxy recovery after ${this.consecutiveConnectionFailures} connection failures`,
+    );
+
+    void this.recoverAccessibilityService()
+      .then(async (outcome) => {
+        if (outcome === "failed" || outcome === "unavailable") {
+          return;
+        }
+        // A resolved outcome (service already healthy, or actually repaired)
+        // clears the failure counter so a fresh run of failures is required
+        // before the next escalation.
+        this.consecutiveConnectionFailures = 0;
+        if (outcome === "repaired") {
+          // Only an actual rebind/setup justifies resetting the foreground
+          // cooldown early — the service was demonstrably broken and is now
+          // fixed. When the service was already healthy (#6260: WS refused
+          // for an unrelated reason), leave connectionAttempts alone so the
+          // cooldown still gates a background reconnect instead of hammering
+          // a socket that has nothing to do with service health.
+          this.connectionAttempts = 0;
+        }
+        logger.info(
+          `[AndroidCtrlProxyClient] Recovery completed (${outcome}); reconnecting WebSocket`,
+        );
+        // Background reconnect respects the #7537 background-attempt cap
+        // rather than consuming the caller's foreground connect budget.
+        const connected = await this.connectBackgroundWebSocket();
+        if (!connected) {
+          logger.warn(
+            `[AndroidCtrlProxyClient] WebSocket reconnect failed after CtrlProxy recovery`,
+          );
+        }
+      })
+      .catch((error) => {
+        logger.warn(`[AndroidCtrlProxyClient] CtrlProxy recovery failed: ${error}`);
+      })
+      .finally(() => {
+        this.isRecoveringService = false;
+      });
+  }
+
+  /**
+   * Check device presence, then the accessibility service's health. A healthy
+   * service is left untouched — no rebind, no setup — the caller only
+   * reconnects in the background without resetting the foreground cooldown
+   * (issue #6260). An unhealthy service is rebound per #7470 (force-stop,
+   * re-add, bounded health poll), falling back to a full `setup()` when the
+   * rebind alone does not restore health (e.g. CtrlProxy is missing from
+   * `enabled_accessibility_services` or not installed at all).
+   */
+  private async recoverAccessibilityService(): Promise<
+    "healthy" | "repaired" | "unavailable" | "failed"
+  > {
+    if (this.closed) {
+      return "failed";
+    }
+    if (!(await this.isDevicePresent())) {
+      logger.info(
+        `[AndroidCtrlProxyClient] Device ${this.device.deviceId} is offline or missing; skipping recovery`,
+      );
+      return "unavailable";
+    }
+
+    const manager = this.serviceManagerFactory(this.device);
+    const healthy = await manager.isAccessibilityServiceHealthy();
+    if (healthy) {
+      logger.info(
+        `[AndroidCtrlProxyClient] Accessibility service already healthy; skipping rebind`,
+      );
+      return "healthy";
+    }
+
+    logger.info(`[AndroidCtrlProxyClient] Accessibility service unhealthy; attempting rebind`);
+    const rebound = (await manager.rebindIfUnhealthy?.()) ?? false;
+    if (rebound && (await manager.isAccessibilityServiceHealthy())) {
+      return "repaired";
+    }
+
+    logger.info(`[AndroidCtrlProxyClient] Rebind did not restore health; running full setup`);
+    const result = await manager.setup(true);
+    if (!result.success) {
+      logger.warn(
+        `[AndroidCtrlProxyClient] CtrlProxy setup failed during recovery: ${result.message}`,
+      );
+      return "failed";
+    }
+    return "repaired";
+  }
+
+  /**
+   * Whether adb still reports this device as present and online. Recovery must
+   * not touch a stopped or disconnected device (issue #7532), mirroring the
+   * `bootedDeviceLister` check `IOSCtrlProxyClient.ensureConnected` runs before
+   * its own auto-setup.
+   */
+  private async isDevicePresent(): Promise<boolean> {
+    const getDeviceStates = this.adb.getDeviceStates?.bind(this.adb);
+    if (!getDeviceStates) {
+      // The executor cannot report raw device states; fail open rather than
+      // block recovery on a capability the executor doesn't provide.
+      return true;
+    }
+    try {
+      const states = await getDeviceStates();
+      const match = states.find((state) => state.deviceId === this.device.deviceId);
+      // "unauthorized" is not a state recovery can act on either — adb cannot
+      // run shell commands against it, so it is not meaningfully "present".
+      return match !== undefined && match.state !== "offline" && match.state !== "unauthorized";
+    } catch (error) {
+      // Diagnostic failure only: do not block recovery on it.
+      logger.warn(
+        `[AndroidCtrlProxyClient] Failed to check device state during recovery: ${error}`,
+      );
+      return true;
+    }
   }
 
   protected async setupBeforeConnect(perf: PerformanceTracker, signal: AbortSignal): Promise<void> {

@@ -859,6 +859,34 @@ export class AdbClient implements AdbExecutor {
     );
   }
 
+  /** Shell input (and activity launch) can take effect before adb reports failure. */
+  private isMutatingCommand(commandArgs: string[]): boolean {
+    if (commandArgs[0] !== "shell") {
+      return false;
+    }
+    // executeCommand packs the shell payload into one argv entry; execute can
+    // pass each word separately. Inspect only the leading shell subcommands.
+    const [shellCommand, subcommand] = commandArgs.slice(1).join(" ").trim().split(/\s+/);
+    return (
+      shellCommand === "input" ||
+      shellCommand === "keyevent" ||
+      shellCommand === "key" ||
+      (shellCommand === "am" && subcommand === "start")
+    );
+  }
+
+  private isPreDispatchError(error: Error): boolean {
+    if (this.isMissingExecutableError(error)) {
+      return true;
+    }
+    const message = error.message.toLowerCase();
+    return [
+      "cannot connect to adb",
+      "cannot connect to daemon",
+      "cannot connect to the daemon",
+    ].some((pattern) => message.includes(pattern));
+  }
+
   private getAbortError(signal?: AbortSignal): Error {
     const reason = signal?.reason;
     if (reason instanceof Error && reason.message.startsWith("device-disconnected:")) {
@@ -1004,11 +1032,11 @@ export class AdbClient implements AdbExecutor {
           if (resolvedSignal?.aborted) {
             return false;
           }
-          const retryable = !this.isNonRetryableError(error);
-          if (!retryable) {
+          if (this.isNonRetryableError(error)) {
             this.notifyMissingDeviceIfNeeded(error, busyAtDispatch);
+            return false;
           }
-          return retryable;
+          return !this.isMutatingCommand(commandArgs) || this.isPreDispatchError(error);
         },
         onRetry: (error, attempt) => {
           logger.debug(

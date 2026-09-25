@@ -28,11 +28,12 @@
 
 run_with_timeout() {
   local secs="$1"
+  local status=0
   shift
-  if command -v timeout > /dev/null 2>&1; then
-    timeout -k 2 "${secs}" "$@"
-  elif command -v gtimeout > /dev/null 2>&1; then
-    gtimeout -k 2 "${secs}" "$@"
+  if [ -z "${AUTOMOBILE_FORCE_PORTABLE_TIMEOUT:-}" ] && command -v timeout > /dev/null 2>&1; then
+    timeout -k 2 "${secs}" "$@" || status=$?
+  elif [ -z "${AUTOMOBILE_FORCE_PORTABLE_TIMEOUT:-}" ] && command -v gtimeout > /dev/null 2>&1; then
+    gtimeout -k 2 "${secs}" "$@" || status=$?
   else
     # The watchdog runs in a subshell and so cannot assign to a variable in this
     # scope; a marker file is how it reports back that it fired.
@@ -58,9 +59,30 @@ run_with_timeout() {
       sleep "${secs}"
       if kill -0 "${cmd_pid}" 2> /dev/null; then
         printf 'fired' > "${fired_marker}"
+        # Capture the group before TERM removes the process we need to inspect.
+        # The caller gives each shard its own path; the default uses the child
+        # pid so concurrent calls do not overwrite one another.
+        local snapshot_file="${AUTOMOBILE_WATCHDOG_SNAPSHOT_FILE:-scratch/watchdog-snapshot-${cmd_pid}.txt}"
+        if mkdir -p "$(dirname "$snapshot_file")" 2> /dev/null; then
+          if ! ps -o pid,ppid,pgid,etime,command -g "$cmd_pid" > "$snapshot_file" 2>&1 || [ "$(wc -l < "$snapshot_file")" -lt 2 ]; then
+            {
+              printf 'PID PPID PGID ETIME COMMAND (target pgid %s)\n' "$cmd_pid"
+              ps -e -o pid,ppid,pgid,etime,command | \
+                awk -v pgid="$cmd_pid" 'NR > 1 && ($3 == pgid || $1 == pgid)' || true
+            } > "$snapshot_file" 2>&1 || true
+          fi
+        fi
         # A negative pid targets the process group. Fall back to the bare pid
         # in case the child never became group leader.
         kill -TERM -"${cmd_pid}" 2> /dev/null || kill -TERM "${cmd_pid}" 2> /dev/null || true
+        # lsof is optional and runs separately so it cannot postpone TERM/KILL.
+        if command -v lsof > /dev/null 2>&1; then
+          if command -v timeout > /dev/null 2>&1; then
+            timeout 3 lsof -p "$cmd_pid" >> "$snapshot_file" 2>&1 &
+          elif command -v gtimeout > /dev/null 2>&1; then
+            gtimeout 3 lsof -p "$cmd_pid" >> "$snapshot_file" 2>&1 &
+          fi
+        fi
         # Escalate for anything that ignores SIGTERM, so a descendant cannot
         # hold the caller's command substitution open indefinitely.
         sleep 2
@@ -72,7 +94,6 @@ run_with_timeout() {
     ) > /dev/null 2>&1 3>&- &
     local watcher_pid=$!
 
-    local status=0
     wait "${cmd_pid}" 2> /dev/null || status=$?
     if [ -s "${fired_marker}" ]; then
       # The deadline fired. Let the watcher finish its TERM-to-KILL escalation:
@@ -86,6 +107,14 @@ run_with_timeout() {
       if [ -s "${fired_marker}" ]; then status=124; fi
     fi
     rm -f "${fired_marker}"
-    return "${status}"
   fi
+  if [ "$status" -eq 124 ] && [ -r "${AUTOMOBILE_WATCHDOG_TIMING_LOG:-}" ]; then
+    local active_file=""
+    local parser_path
+    parser_path="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)/lib/test-file-timings.ts"
+    active_file="$(bun "$parser_path" active "$AUTOMOBILE_WATCHDOG_TIMING_LOG" 2> /dev/null)" || active_file=""
+    printf 'WATCHDOG: %s exceeded %ss; last started-but-not-ended file: %s\n' \
+      "${AUTOMOBILE_WATCHDOG_LABEL:-command}" "$secs" "${active_file:-<none>}" >&2
+  fi
+  return "${status}"
 }

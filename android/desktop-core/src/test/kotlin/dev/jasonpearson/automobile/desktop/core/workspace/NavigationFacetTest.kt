@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.desktop.core.workspace
 
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.test.ExperimentalTestApi
@@ -592,6 +593,57 @@ class NavigationFacetTest {
     waitUntil(timeoutMillis = 5_000) {
       onAllNodesWithText("Home").fetchSemanticsNodes().isNotEmpty()
     }
+  }
+
+  @Test
+  fun `conflated reconnect clears the old app and requests fresh navigation`() = runComposeUiTest {
+    val fake = FakeObservationStream()
+    val observedStates = CopyOnWriteArrayList<ConnectionState>()
+    val downstreamMayResume = CompletableDeferred<Unit>()
+    setContent {
+      CompositionLocalProvider(LocalAutoMobileGraph provides testGraph()) {
+        MaterialTheme {
+          NavigationFacet(
+            column = column(),
+            observationStreamFactory = { fake },
+            navigationDataSourceProvider = {
+              StubNavigationDataSource(
+                Result.Success(NavigationGraph(listOf(screen("Alpha")), emptyList()))
+              )
+            },
+            backoffDelay = {},
+            socketAvailable = { true },
+          )
+          LaunchedEffect(fake) {
+            fake.connectionState.collect {
+              observedStates += it
+              if (observedStates.size == 1) downstreamMayResume.await()
+            }
+          }
+        }
+      }
+    }
+    waitForIdle()
+    fake.emitNavigation(navUpdate("com.example.a"))
+    waitUntil(timeoutMillis = 5_000) {
+      onAllNodesWithText("Alpha").fetchSemanticsNodes().isNotEmpty()
+    }
+    val requestsBeforeDrop = fake.navigationRequestCount
+
+    runOnIdle { fake.emitConnectionState(ConnectionState.Disconnected("Stream ended")) }
+    waitForIdle()
+    assertEquals(2, fake.connectCallCount)
+    assertEquals(ConnectionState.Connected(), fake.connectionState.value)
+    runOnIdle { downstreamMayResume.complete(Unit) }
+    waitForIdle()
+    assertTrue(
+      "the new generation must request a fresh navigation payload",
+      fake.navigationRequestCount > requestsBeforeDrop,
+    )
+    assertTrue(
+      "the old app must be hidden even when the state collector missed the drop",
+      onAllNodesWithText("Alpha").fetchSemanticsNodes().isEmpty(),
+    )
   }
 
   @Test

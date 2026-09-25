@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.desktop.core.workspace
 
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.runComposeUiTest
@@ -20,6 +21,51 @@ import org.junit.Test
  */
 @OptIn(ExperimentalTestApi::class)
 class ReconnectingObservationStreamTest {
+
+  @Test
+  fun `generation advances when a fast reconnect conflates the disconnected state`() =
+    runComposeUiTest {
+      val fake = FakeObservationStream()
+      val generations = CopyOnWriteArrayList<Int>()
+      val observedStates = CopyOnWriteArrayList<ConnectionState>()
+      val downstreamMayResume = CompletableDeferred<Unit>()
+      setContent {
+        val observation =
+          rememberReconnectingObservationState(
+            deviceId = "dev-1",
+            streamFactory = { fake },
+            backoffDelay = {},
+            socketAvailable = { true },
+          )
+        LaunchedEffect(observation.connectionGeneration) {
+          generations += observation.connectionGeneration
+        }
+        LaunchedEffect(fake) {
+          fake.connectionState.collect {
+            observedStates += it
+            if (observedStates.size == 1) downstreamMayResume.await()
+          }
+        }
+      }
+      waitForIdle()
+      assertEquals(ConnectionState.Connected(), fake.connectionState.value)
+      assertEquals(1, generations.last())
+      assertEquals(listOf(ConnectionState.Connected()), observedStates.toList())
+
+      // Hold an already-attached downstream collector in its first callback. The helper can
+      // consume Disconnected and reconnect while this collector cannot resume between writes.
+      runOnIdle { fake.emitConnectionState(ConnectionState.Disconnected("Stream ended")) }
+      waitForIdle()
+      assertEquals(2, fake.connectCallCount)
+      assertEquals(ConnectionState.Connected(), fake.connectionState.value)
+      assertEquals(2, generations.last())
+      runOnIdle { downstreamMayResume.complete(Unit) }
+      waitForIdle()
+      assertTrue(
+        "the downstream collector must miss the intermediate Disconnected value",
+        observedStates.all { it is ConnectionState.Connected },
+      )
+    }
 
   /** A backoff seam that records each attempt and blocks until the test releases that attempt. */
   private class GatedBackoff {

@@ -43,29 +43,55 @@ fun rememberReconnectingObservationStream(
   streamFactory: () -> ObservationStream,
   backoffDelay: suspend (attempt: Int) -> Unit = { attempt -> delay(reconnectBackoffMs(attempt)) },
   socketAvailable: () -> Boolean = { ObservationStreamClient.socketExists() },
-): ObservationStream? {
-  var stream by
+): ObservationStream? =
+  rememberReconnectingObservationState(
+      deviceId,
+      deviceSessionUuid,
+      requireDeviceSessionUuid,
+      streamFactory,
+      backoffDelay,
+      socketAvailable,
+    )
+    .stream
+
+/** A distinct generation for each actual connect call, starting at 1 for the first mount. */
+data class ReconnectingObservationState(
+  val stream: ObservationStream?,
+  val connectionGeneration: Int,
+)
+
+@Composable
+fun rememberReconnectingObservationState(
+  deviceId: String,
+  deviceSessionUuid: String? = null,
+  requireDeviceSessionUuid: Boolean = false,
+  streamFactory: () -> ObservationStream,
+  backoffDelay: suspend (attempt: Int) -> Unit = { attempt -> delay(reconnectBackoffMs(attempt)) },
+  socketAvailable: () -> Boolean = { ObservationStreamClient.socketExists() },
+): ReconnectingObservationState {
+  var observationState by
     remember(deviceId, deviceSessionUuid, requireDeviceSessionUuid) {
-      mutableStateOf<ObservationStream?>(null)
+      mutableStateOf(ReconnectingObservationState(null, 0))
     }
   DisposableEffect(deviceId, deviceSessionUuid, requireDeviceSessionUuid) {
     if (requireDeviceSessionUuid && deviceSessionUuid == null) {
-      stream = null
+      observationState = observationState.copy(stream = null)
       onDispose {}
     } else {
       val connected =
         streamFactory().also {
           it.connect(deviceId = deviceId, deviceSessionUuid = deviceSessionUuid)
         }
-      stream = connected
+      observationState =
+        ReconnectingObservationState(connected, observationState.connectionGeneration + 1)
       onDispose {
         connected.dispose()
-        stream = null
+        observationState = observationState.copy(stream = null)
       }
     }
   }
 
-  val active = stream
+  val active = observationState.stream
   // Reconnect loop, keyed on the live stream so it restarts for a new device and is cancelled on
   // dispose (which ends reconnection). Driven by the stream's connection state — the single source
   // of truth the real client updates on connect success/failure and on EOF ("Stream ended").
@@ -96,12 +122,16 @@ fun rememberReconnectingObservationStream(
           if (!isActive) break
           if (socketAvailable()) {
             s.connect(deviceId = deviceId, deviceSessionUuid = deviceSessionUuid)
+            observationState =
+              observationState.copy(
+                connectionGeneration = observationState.connectionGeneration + 1
+              )
           }
         }
       }
     }
   }
-  return stream
+  return observationState
 }
 
 /** Initial reconnect backoff; doubles per attempt up to [RECONNECT_MAX_DELAY_MS]. */

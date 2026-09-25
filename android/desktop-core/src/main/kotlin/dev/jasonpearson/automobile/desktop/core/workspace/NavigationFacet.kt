@@ -13,7 +13,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
@@ -34,7 +36,9 @@ import dev.jasonpearson.automobile.desktop.core.navigation.NavigationDashboard
 import dev.jasonpearson.automobile.desktop.core.navigation.ScreenshotLoader
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 private val LOG = LoggerFactory.getLogger("NavigationFacet")
@@ -119,13 +123,14 @@ fun NavigationFacet(
 ) {
   val graph = LocalAutoMobileGraph.current
 
-  val stream =
-    rememberReconnectingObservationStream(
+  val observation =
+    rememberReconnectingObservationState(
       deviceId = column.deviceId,
       streamFactory = { observationStreamFactory(column.deviceId) },
       backoffDelay = backoffDelay,
       socketAvailable = socketAvailable,
     )
+  val stream = observation.stream
 
   var attempt by remember(column.deviceId) { mutableStateOf(0) }
   var state by
@@ -188,31 +193,67 @@ fun NavigationFacet(
   }
 
   // Mirror the stream's connection state and reset app resolution on the first loss of each
-  // healthy connection. Do not restart the navigation collector on this generation: its SharedFlow
-  // replays the last payload, which could otherwise restore the stale pre-outage app.
+  // healthy connection. The helper's generation also catches a reconnect whose intermediate drop
+  // was conflated away by StateFlow. Do not restart the navigation collector on this generation:
+  // its SharedFlow replays the last payload, which could restore the stale pre-outage app.
   var connectionState by
     remember(column.deviceId) {
       mutableStateOf<ConnectionState>(ConnectionState.Connecting)
     }
+  var wasConnected by remember(stream, collectorAttempt) { mutableStateOf(false) }
+  var dropHandled by remember(stream, collectorAttempt) { mutableStateOf(false) }
+  var observedConnectionGeneration by
+    remember(stream) { mutableStateOf(observation.connectionGeneration) }
+  val latestConnectionGeneration = rememberUpdatedState(observation.connectionGeneration)
   LaunchedEffect(stream, collectorAttempt) {
     val current = stream ?: return@LaunchedEffect
-    var wasConnected = false
+    fun clearOldApp() {
+      foregroundAppId = null
+      currentScreen = null
+      noNavigationApp = false
+      updateGeneration = 0
+      resetGeneration++
+      state = NavigationFacetState.Loading
+    }
     try {
-      current.connectionState.collect { next ->
-        if (wasConnected && next !is ConnectionState.Connected) {
-          foregroundAppId = null
-          currentScreen = null
-          noNavigationApp = false
-          updateGeneration = 0
-          resetGeneration++
-          state = NavigationFacetState.Loading
+      coroutineScope {
+        launch {
+          snapshotFlow { latestConnectionGeneration.value }
+            .collect { generation ->
+              if (observedConnectionGeneration != generation) {
+                if (dropHandled) {
+                  // The connection collector already cleared the old app for this outage.
+                  dropHandled = false
+                } else if (wasConnected) {
+                  clearOldApp()
+                  // A fast drop and reconnect can leave StateFlow value-equal to the prior
+                  // Connected state, so the connection collector has no new value to request from.
+                  if (current.connectionState.value is ConnectionState.Connected) {
+                    current.requestNavigationGraph()
+                  }
+                }
+                observedConnectionGeneration = generation
+              }
+            }
         }
-        if (next is ConnectionState.Connected && !wasConnected) {
-          // Every new connection needs a fresh foreground-app payload, including after EOF.
-          current.requestNavigationGraph()
+        current.connectionState.collect { next ->
+          if (next !is ConnectionState.Connected) {
+            if (wasConnected) clearOldApp()
+            // A failed first connect is also an observed drop: its later successful
+            // connection must not clear a fresh app update a second time.
+            if (
+              wasConnected || next is ConnectionState.Disconnected || next is ConnectionState.Error
+            ) {
+              dropHandled = true
+            }
+          }
+          if (next is ConnectionState.Connected && !wasConnected) {
+            // Every new connection needs a fresh foreground-app payload, including after EOF.
+            current.requestNavigationGraph()
+          }
+          wasConnected = next is ConnectionState.Connected
+          connectionState = next
         }
-        wasConnected = next is ConnectionState.Connected
-        connectionState = next
       }
     } catch (c: CancellationException) {
       throw c

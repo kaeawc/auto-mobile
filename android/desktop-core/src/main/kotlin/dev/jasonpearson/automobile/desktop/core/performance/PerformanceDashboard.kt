@@ -60,6 +60,7 @@ fun PerformanceDashboard(
   // in a multi-device workspace can't contaminate each other's live metrics, and the audit-history
   // fetch is scoped to this device. Null = no filtering.
   deviceId: String? = null,
+  connectionGeneration: Int = 0,
   // Initial metrics from parent to avoid empty state flicker when opening
   initialFps: Float? = null,
   initialFrameTimeMs: Float? = null,
@@ -197,6 +198,19 @@ fun PerformanceDashboard(
 
   // Real-time performance metrics history (for live streaming)
   var realtimeMetricsHistory by remember { mutableStateOf<List<MetricDataPoint>>(emptyList()) }
+
+  var observedGeneration by remember(observationStreamClient) { mutableStateOf(0) }
+  LaunchedEffect(observationStreamClient, connectionGeneration) {
+    if (observedGeneration != 0 && observedGeneration != connectionGeneration) {
+      currentRun = null
+      realtimeMetricsHistory = emptyList()
+      currentScreen = PerformanceScreen.Overview
+      selectedMetric = null
+      isLoading = true
+      error = null
+    }
+    observedGeneration = connectionGeneration
+  }
 
   // Collect real-time performance updates from the stream
   LaunchedEffect(observationStreamClient) {
@@ -554,7 +568,7 @@ fun PerformanceDashboard(
   }
 
   // Initial fetch as fallback (only if we don't already have data from initial metrics)
-  LaunchedEffect(dataSourceMode, clientProvider, deviceId) {
+  LaunchedEffect(dataSourceMode, clientProvider, deviceId, connectionGeneration) {
     // Skip fetch if we already have data from initial metrics
     if (currentRun != null) {
       isLoading = false

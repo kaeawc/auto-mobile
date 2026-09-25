@@ -3,7 +3,7 @@ import {
   AdbClient,
   AdbCommandTimeoutError,
 } from "../../../src/utils/android-cmdline-tools/AdbClient";
-import { defaultRetryExecutor } from "../../../src/utils/retry/RetryExecutor";
+import { DefaultRetryExecutor } from "../../../src/utils/retry/RetryExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import type { BootedDevice, ExecResult } from "../../../src/models";
 
@@ -51,7 +51,9 @@ describe("AdbClient.getAndroidApiLevel timeout caching", () => {
       }
       return Promise.resolve(ok(""));
     };
-    const client = new AdbClient(DEVICE, exec, null, defaultRetryExecutor, new FakeTimer());
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const client = new AdbClient(DEVICE, exec, null, new DefaultRetryExecutor(timer), timer);
 
     expect(await client.getAndroidApiLevel()).toBe(31);
 
@@ -78,7 +80,9 @@ describe("AdbClient.getAndroidApiLevel timeout caching", () => {
       }
       return Promise.resolve(ok(""));
     };
-    const client = new AdbClient(DEVICE, exec, null, defaultRetryExecutor, new FakeTimer());
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const client = new AdbClient(DEVICE, exec, null, new DefaultRetryExecutor(timer), timer);
 
     // Budget expired: null for THIS call, but the failure is not a device verdict.
     expect(await client.getAndroidApiLevel(5)).toBeNull();
@@ -103,10 +107,13 @@ describe("AdbClient.getAndroidApiLevel timeout caching", () => {
       }
       return Promise.resolve(ok(""));
     };
-    const client = new AdbClient(DEVICE, exec, null, defaultRetryExecutor, new FakeTimer());
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const client = new AdbClient(DEVICE, exec, null, new DefaultRetryExecutor(timer), timer);
 
     expect(await client.getAndroidApiLevel(5000)).toBeNull();
     expect(await client.getAndroidApiLevel(5000)).toBeNull();
+    // API-level reads explicitly use noRetry and cache the first device failure.
     expect(calls).toBe(1);
   });
 });

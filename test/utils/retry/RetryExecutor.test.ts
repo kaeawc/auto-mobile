@@ -177,6 +177,27 @@ describe("DefaultRetryExecutor", () => {
       expect(attempts).toBe(1);
     });
 
+    it("preserves a typed abort reason during backoff", async () => {
+      const controller = new AbortController();
+      const reason = new Error("device-disconnected:emulator-5554");
+      let attempts = 0;
+      const resultPromise = executor.executeOrThrow(
+        async () => {
+          attempts += 1;
+          throw new Error("device offline");
+        },
+        { signal: controller.signal, delays: 200, maxAttempts: 4 },
+      );
+
+      await Promise.resolve();
+      expect(timer.getPendingTimeouts()).toEqual([200]);
+      controller.abort(reason);
+
+      await expect(resultPromise).rejects.toBe(reason);
+      expect(attempts).toBe(1);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    });
+
     it("removes its abort listener after every retry sleep on a shared signal", async () => {
       // #6138: the sleep/abort race registered a { once: true } listener that was
       // only removed when the signal aborted. A long-lived signal shared across

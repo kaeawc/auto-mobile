@@ -3349,6 +3349,117 @@ describe("AndroidCtrlProxyClient", function () {
     });
   });
 
+  describe("hierarchy waits on WebSocket close", function () {
+    test("a correlated hierarchy sync settles as soon as the socket closes", async function () {
+      const timer = new FakeTimer();
+      const { factory, getSocket } = createCapturingWebSocketFactory(timer);
+      const testClient = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        factory,
+        timer,
+      );
+
+      try {
+        testClient.invalidateCache();
+        const syncPromise = testClient.requestHierarchySync(undefined, false, undefined, 10000);
+        const socket = (await waitForSocket(getSocket)) as CapturingWebSocket;
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+        await waitForSentMessages(socket, 1);
+        await flushPromises();
+        expect(
+          socket.sentMessages.some((message) => JSON.parse(message).type === "request_hierarchy"),
+        ).toBe(true);
+        expect(timer.getPendingIntervals()).toContain(50);
+
+        let settled = false;
+        void syncPromise.then(() => {
+          settled = true;
+        });
+        socket.close();
+        await flushPromises();
+
+        expect(settled).toBe(true);
+        expect(await syncPromise).toBeNull();
+        expect(timer.getCurrentTime()).toBeLessThan(50);
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("a socket close leaves hierarchy runner diagnostics unset", async function () {
+      const timer = new FakeTimer();
+      const { factory, getSocket } = createCapturingWebSocketFactory(timer);
+      const testClient = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        factory,
+        timer,
+      );
+
+      try {
+        testClient.invalidateCache();
+        const diagnostics: HierarchySyncDiagnostics = {};
+        const syncPromise = testClient.requestHierarchySync(
+          undefined,
+          false,
+          undefined,
+          10000,
+          diagnostics,
+        );
+        const socket = (await waitForSocket(getSocket)) as CapturingWebSocket;
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+        await waitForSentMessages(socket, 1);
+        await flushPromises();
+        expect(
+          socket.sentMessages.some((message) => JSON.parse(message).type === "request_hierarchy"),
+        ).toBe(true);
+        expect(timer.getPendingIntervals()).toContain(50);
+
+        socket.close();
+        await flushPromises();
+
+        expect(await syncPromise).toBeNull();
+        expect(diagnostics.runnerError).toBeUndefined();
+        expect(timer.getCurrentTime()).toBeLessThan(50);
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("an uncorrelated latest-hierarchy wait settles on the next poll after close", async function () {
+      const timer = new FakeTimer();
+      const { factory, getSocket } = createCapturingWebSocketFactory(timer);
+      const testClient = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        factory,
+        timer,
+      );
+
+      try {
+        testClient.invalidateCache();
+        const latestPromise = testClient.getLatestHierarchy(true, 10000);
+        const socket = (await waitForSocket(getSocket)) as CapturingWebSocket;
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+        await flushPromises();
+        expect(timer.getPendingIntervals()).toContain(50);
+
+        socket.close();
+        await flushPromises();
+        timer.advanceTime(50);
+
+        expect(await latestPromise).toEqual({ hierarchy: null, fresh: false });
+        expect(timer.getCurrentTime()).toBe(50);
+      } finally {
+        await testClient.close();
+      }
+    });
+  });
+
   describe("hierarchy error frame correlation (issue #3032)", function () {
     // request_hierarchy does NOT await through RequestManager — it blocks in
     // CtrlProxyHierarchy.waitForFreshData for a hierarchy_update push. Before #3032 a runner

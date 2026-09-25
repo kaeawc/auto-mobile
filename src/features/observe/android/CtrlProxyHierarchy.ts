@@ -74,7 +74,7 @@ export class CtrlProxyHierarchy {
   private recompositionTrackingConfigured: boolean = false;
   private recompositionTrackingEnabled: boolean = false;
 
-  // Outstanding hierarchy request IDs mapped to their error-rejection hook. request_hierarchy does
+  // Outstanding hierarchy request IDs mapped to their settle hooks. request_hierarchy does
   // NOT await through RequestManager (it blocks in waitForFreshData for a hierarchy_update push), so
   // a runner type:"error" frame must be fanned into this map to unblock the correct waiter fast
   // instead of hanging to timeout. See issue #3032.
@@ -84,7 +84,7 @@ export class CtrlProxyHierarchy {
   // user-controlled requestId must never drive a dynamic method-name dispatch.
   private readonly pendingHierarchyRejectors = new Map<
     string,
-    { reject: (error: string) => void }
+    { reject: (error: string) => void; disconnect: () => void }
   >();
 
   constructor(context: HierarchyDelegateContext) {
@@ -106,6 +106,21 @@ export class CtrlProxyHierarchy {
     }
     rejector.reject(error);
     return true;
+  }
+
+  /** Reject every correlated hierarchy wait when its WebSocket connection closes. */
+  rejectAllPendingHierarchy(reason: string): void {
+    // Each disconnect removes its entries during waitForFreshData cleanup. A socket close is
+    // transient, so it must not be surfaced as a runner-reported error in diagnostics.
+    const pending = [...this.pendingHierarchyRejectors.values()];
+    for (const rejector of pending) {
+      rejector.disconnect();
+    }
+    if (pending.length > 0) {
+      logger.debug(
+        `[CTRL_PROXY] ${pending.length} hierarchy waits settled on disconnect: ${reason}`,
+      );
+    }
   }
 
   /**
@@ -573,8 +588,12 @@ export class CtrlProxyHierarchy {
       // reason as `getLatestHierarchy` above: an uninterruptible 5000ms
       // handshake must not outlive the caller's deadline, and a sync
       // extraction must never be dispatched after it expired (#6890 review).
-      await awaitWhileRequestIsLive(this.context.ensureConnected(perf), signal);
+      const connected = await awaitWhileRequestIsLive(this.context.ensureConnected(perf), signal);
       throwIfAborted(signal);
+      if (!connected) {
+        logger.warn("[CTRL_PROXY] Failed to establish WebSocket connection");
+        return null;
+      }
 
       // Try WebSocket request first (faster path). Returns the correlating requestId when sent so a
       // runner type:"error" frame for this hierarchy request can reject the wait fast (issue #3032).
@@ -607,10 +626,9 @@ export class CtrlProxyHierarchy {
       // id when the WebSocket send succeeded (issue #3032), or the ADB-broadcast `sync_` uuid when we
       // fell back (issue #3089). A runner type:"error" frame carrying that id unblocks the wait fast
       // instead of hanging to timeout. Note the broadcast fallback only reaches this correlation when
-      // the WebSocket is still readable (a transient send failure / flap) — when the socket is fully
-      // down the daemon receives neither the push nor the error frame and still degrades to timeout,
-      // so this closes the flapping subset of the hang class, not the socket-down subset. A fast fail
-      // still returns null, so the caller keeps its stale-cache fallback (see
+      // the WebSocket is still readable (a transient send failure / flap) — a fully disconnected
+      // socket returned above before the fallback. A correlated runner error still returns null,
+      // so the caller keeps its stale-cache fallback (see
       // getAccessibilityHierarchy) — nothing is discarded here.
       const correlationRequestId = hierarchyRequestId ?? broadcastRequestId ?? undefined;
       const freshData = await perf.track("waitForPush", () =>
@@ -863,6 +881,7 @@ export class CtrlProxyHierarchy {
     requestId?: string,
   ): Promise<CachedHierarchy | null> {
     const startTime = this.context.timer.now();
+    const waitSocket = this.context.getWebSocket();
     const checkInterval = 50;
     const screenCheckInterval = 1000;
     const staleCheckDelay = 2000;
@@ -919,6 +938,7 @@ export class CtrlProxyHierarchy {
             // handler failure apart from other thrown causes and surface it via diagnostics (#3062).
             settleReject(new HierarchyRunnerError(error));
           },
+          disconnect: () => settleResolve(null),
         });
       };
 
@@ -930,6 +950,11 @@ export class CtrlProxyHierarchy {
 
       intervalId = this.context.timer.setInterval(() => {
         if (signal?.aborted) {
+          settleResolve(null);
+          return;
+        }
+        // Identity also catches close+reconnect: data from a new socket cannot satisfy this wait.
+        if (this.context.getWebSocket() !== waitSocket) {
           settleResolve(null);
           return;
         }

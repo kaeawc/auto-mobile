@@ -2025,6 +2025,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     this.supportedCommands = null;
     this.lateCancelledScreenshotRequestIds.clear();
     this.cancelScreenshotBackoff();
+    this._hierarchy?.rejectAllPendingHierarchy("WebSocket connection closed");
     void this.markInstalledAppsStale("websocket_closed");
     this.deviceConnectionLostNotifier.onDeviceConnectionLost(this.device.deviceId);
 

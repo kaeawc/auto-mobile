@@ -1528,6 +1528,7 @@ async function stopIosCtrlProxyBeforeShutdown(
     );
   } catch (error) {
     if (shouldPropagateShutdownPreparationError(error, context.requestAbortSignal)) {
+      resumeCtrlProxyWhenPreparationSettles(stop, context.device);
       if (stop) {
         // CtrlProxy shutdown mutates process state after its caller stops waiting.
         // Keep this device unavailable until it settles, but release it after a
@@ -1557,6 +1558,7 @@ async function stopAndroidCtrlProxyBeforeShutdown(
     boundSessionId: activeObserver?.getBoundSessionId() ?? null,
     deviceIdentity: activeDeviceIdentity ?? null,
   };
+  AndroidCtrlProxyClient.retireForShutdown(context.device.deviceId);
   let stop: Promise<void> | undefined;
   perf.startOperation("stopAndroidCtrlProxy");
   try {
@@ -1571,6 +1573,7 @@ async function stopAndroidCtrlProxyBeforeShutdown(
     );
   } catch (error) {
     if (shouldPropagateShutdownPreparationError(error, context.requestAbortSignal)) {
+      resumeCtrlProxyWhenPreparationSettles(stop, context.device);
       if (stop) {
         // Observer detach can keep mutating adb/port state after its caller stops
         // waiting. Hold the device unavailable until it settles, releasing after a
@@ -1614,6 +1617,36 @@ function shouldClearIntentionalShutdownAfterFailure(
   requestAbortSignal: AbortSignal | undefined,
 ): boolean {
   return platform === "android" && !requestAbortSignal?.aborted;
+}
+
+function resumeCtrlProxyAfterFailedKill(device: BootedDevice): void {
+  if (device.platform === "ios") {
+    IOSCtrlProxyClient.resumeAfterDeviceStart(device.deviceId);
+  } else if (device.platform === "android") {
+    AndroidCtrlProxyClient.resumeAfterDeviceStart(device.deviceId);
+  }
+}
+
+function resumeCtrlProxyAfterUnconfirmedFailure(
+  device: BootedDevice,
+  requestAbortSignal: AbortSignal | undefined,
+  shutdownWasConfirmed = false,
+): void {
+  if (!shutdownWasConfirmed && !requestAbortSignal?.aborted) {
+    resumeCtrlProxyAfterFailedKill(device);
+  }
+}
+
+function resumeCtrlProxyWhenPreparationSettles(
+  stop: Promise<void> | undefined,
+  device: BootedDevice,
+): void {
+  // The same in-flight teardown retains the pool reservation on timeout/abort.
+  // Reopen the client registry only after it can no longer retire the device.
+  void stop?.then(
+    () => resumeCtrlProxyAfterFailedKill(device),
+    () => resumeCtrlProxyAfterFailedKill(device),
+  );
 }
 
 function shouldKeepIntentionalShutdownAfterCommandError(
@@ -1791,6 +1824,7 @@ async function restoreAndroidObserverAfterCommandFailure(
       observerState.deviceIdentity !== null &&
       isSameBootedDeviceIdentity(observerState.deviceIdentity, survivingDevice)
     ) {
+      AndroidCtrlProxyClient.resumeAfterDeviceStart(device.deviceId);
       const observer = AndroidCtrlProxyClient.getInstance(survivingDevice);
       // Bind before connecting so a frame arriving immediately after the socket
       // opens is attributed to the surviving session. A post-connect identity
@@ -2765,6 +2799,7 @@ async function killProcessAndRetireOwnership(
       requestAbortSignal,
     );
     retainLatePlatformShutdown(platformShutdown, platformShutdownSettled, retainReservationUntil);
+    resumeCtrlProxyAfterUnconfirmedFailure(device, requestAbortSignal);
     await restoreAndroidObserverAfterCommandFailure(
       deviceManager,
       device,
@@ -2828,6 +2863,7 @@ async function killProcessAndRetireOwnership(
     // the pool. It must remain eligible for normal unexpected-loss recovery.
     // Caller cancellation is different: the platform command may already have
     // succeeded, so retain the marker for its later process-exit cleanup.
+    resumeCtrlProxyAfterUnconfirmedFailure(device, requestAbortSignal, shutdownWasConfirmed);
     if (
       !shutdownWasConfirmed &&
       shouldClearIntentionalShutdownAfterFailure(device.platform, requestAbortSignal)
@@ -9721,6 +9757,11 @@ export function registerDeviceTools() {
   async function ensureCtrlProxyReady(request: RunnerReadinessRequest): Promise<void> {
     request.perf?.startOperation("ensureCtrlProxy");
     try {
+      if (request.device.platform === "ios") {
+        IOSCtrlProxyClient.resumeAfterDeviceStart(request.device.deviceId);
+      } else if (request.device.platform === "android") {
+        AndroidCtrlProxyClient.resumeAfterDeviceStart(request.device.deviceId);
+      }
       await createDefaultRunnerReadinessService(getDeviceToolsDependencies().timer).ensureReady(
         request,
       );

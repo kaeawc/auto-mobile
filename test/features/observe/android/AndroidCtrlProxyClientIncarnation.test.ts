@@ -47,4 +47,21 @@ describe("AndroidCtrlProxyClient incarnation invalidation", () => {
 
     expect(AndroidCtrlProxyClient.getExistingInstance(DEVICE.deviceId)).toBe(replacement);
   });
+
+  test("retirement keeps a same-serial lookup inert until a new device start", async () => {
+    const factory = new FakeAdbClientFactory();
+    const oldClient = AndroidCtrlProxyClient.getInstance(DEVICE, factory);
+    AndroidCtrlProxyClient.retireForShutdown(DEVICE.deviceId);
+    expect(AndroidCtrlProxyClient.getInstance(DEVICE, factory)).toBe(oldClient);
+    expect(await oldClient.ensureConnected()).toBe(false);
+
+    await oldClient.close();
+    AndroidCtrlProxyClient.removeInstance(DEVICE.deviceId);
+    const duringKill = AndroidCtrlProxyClient.getInstance(DEVICE, factory);
+    expect(await duringKill.ensureConnected()).toBe(false);
+
+    AndroidCtrlProxyClient.resumeAfterDeviceStart(DEVICE.deviceId);
+    const replacement = AndroidCtrlProxyClient.getInstance(DEVICE, factory);
+    expect(replacement).not.toBe(duringKill);
+  });
 });

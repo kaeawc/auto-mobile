@@ -21,6 +21,10 @@ import type { DeviceConnectionLostNotifier } from "../../../../src/features/obse
 import { FakeIosSdkEventIngestor } from "../../../fakes/FakeIosSdkEventIngestor";
 import { loadCoordinateMappingVectors } from "../../../parity/coordinateMappingGoldenVectors";
 import { logger } from "../../../../src/utils/logger";
+import {
+  IOSCtrlProxyManager,
+  type CtrlProxyIosManager,
+} from "../../../../src/utils/IOSCtrlProxyManager";
 
 describe("iOS runner feature release sequencing", () => {
   test("does not require an unreleased handshake from the immutable 0.0.66 IPA", () => {
@@ -3259,6 +3263,120 @@ describe("IOSCtrlProxyClient", function () {
 
       expect(IOSCtrlProxyClient.getExistingInstance(testDevice.deviceId)).toBeNull();
       expect(created.isConnected()).toBe(false);
+    });
+
+    test("retiring during a pending screenshot leaves no reconnecting replacement", async function () {
+      const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
+      let restarts = 0;
+      const manager = {
+        forceRestart: async () => {
+          restarts += 1;
+        },
+      } as CtrlProxyIosManager;
+      const client = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer,
+        () => manager,
+      );
+      (
+        IOSCtrlProxyClient as unknown as { instances: Map<string, IOSCtrlProxyClient> }
+      ).instances.set(testDevice.deviceId, client);
+
+      const screenshot = client.requestScreenshot(5_000);
+      const socket = await waitForSocket(getSocket);
+      await waitForSocketOpen(socket);
+      await waitForSentMessages(socket as CapturingWebSocket);
+      expect(commandPayloads(socket as CapturingWebSocket)[0]?.type).toBe("request_screenshot");
+      const screenshotResult = screenshot.then(
+        () => null,
+        (error: unknown) => error,
+      );
+      await IOSCtrlProxyClient.retireInstance(testDevice.deviceId);
+      expect(String(await screenshotResult)).toContain("WebSocket connection closed");
+      const duringKill = IOSCtrlProxyClient.getInstance(testDevice);
+      expect(duringKill).toBe(client);
+      expect(await duringKill.ensureConnected()).toBe(false);
+      expect(restarts).toBe(0);
+    });
+
+    test("a closed client refuses all dial and failure-escalation paths", async function () {
+      let socketCreations = 0;
+      let restarts = 0;
+      const manager = {
+        forceRestart: async () => {
+          restarts += 1;
+        },
+      } as CtrlProxyIosManager;
+      const client = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        {
+          create: (url) => {
+            socketCreations += 1;
+            return new FakeWebSocket(url, "none", 0, fakeTimer);
+          },
+        },
+        fakeTimer,
+        () => manager,
+      );
+      await client.close();
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        (client as unknown as { onConnectAttemptFailed(): void }).onConnectAttemptFailed();
+      }
+      expect(await client.ensureConnected()).toBe(false);
+      expect(await client.connectWithoutSetup()).toBe(false);
+      expect(socketCreations).toBe(0);
+      expect(restarts).toBe(0);
+    });
+
+    test("retired lookup is inert even when no client existed before retirement", async function () {
+      await IOSCtrlProxyClient.retireInstance(testDevice.deviceId);
+      const retired = IOSCtrlProxyClient.getInstance(testDevice);
+      expect(IOSCtrlProxyClient.getInstance(testDevice)).toBe(retired);
+      expect(await retired.ensureConnected()).toBe(false);
+      expect(IOSCtrlProxyClient.getExistingInstance(testDevice.deviceId)).toBeNull();
+    });
+
+    test("a fresh device start restores connection and failure escalation", async function () {
+      let restarts = 0;
+      const manager = {
+        forceRestart: async () => {
+          restarts += 1;
+        },
+      } as CtrlProxyIosManager;
+      await IOSCtrlProxyClient.retireInstance(testDevice.deviceId);
+      const retired = IOSCtrlProxyClient.getInstance(testDevice);
+      IOSCtrlProxyClient.resumeAfterDeviceStart(testDevice.deviceId);
+      const fresh = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        createSuccessWebSocketFactory(fakeTimer),
+        fakeTimer,
+        () => manager,
+      );
+      (
+        IOSCtrlProxyClient as unknown as { instances: Map<string, IOSCtrlProxyClient> }
+      ).instances.set(testDevice.deviceId, fresh);
+      expect(IOSCtrlProxyClient.getInstance(testDevice, serverPort)).toBe(fresh);
+      expect(fresh).not.toBe(retired);
+      expect(await fresh.ensureConnected()).toBe(true);
+      IOSCtrlProxyClient.resumeAfterDeviceStart(testDevice.deviceId);
+      expect(IOSCtrlProxyClient.getInstance(testDevice, serverPort)).toBe(fresh);
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        (fresh as unknown as { onConnectAttemptFailed(): void }).onConnectAttemptFailed();
+      }
+      await flushMicrotasks();
+      expect(restarts).toBe(1);
+      await fresh.close();
+    });
+
+    test("manager startup and forced restart refuse a retired device", async function () {
+      const manager = IOSCtrlProxyManager.createForTesting(testDevice, fakeTimer);
+      IOSCtrlProxyManager.retireDevice(testDevice.deviceId);
+      await expect(manager.start()).rejects.toThrow("being shut down");
+      await expect(manager.forceRestart()).rejects.toThrow("being shut down");
     });
 
     test("intentional retirement cancels a reconnect scheduled before runner shutdown", async function () {

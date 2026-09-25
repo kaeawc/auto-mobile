@@ -231,6 +231,29 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
   // Singleton instances per device
   private static instances: Map<string, IOSCtrlProxyManager> = new Map();
+  private static readonly retiredDeviceIds = new Set<string>();
+
+  public static retireDevice(deviceId: string): void {
+    IOSCtrlProxyManager.retiredDeviceIds.add(deviceId);
+  }
+
+  public static resumeDevice(deviceId: string): void {
+    IOSCtrlProxyManager.retiredDeviceIds.delete(deviceId);
+  }
+
+  public static isDeviceRetired(deviceId: string): boolean {
+    return IOSCtrlProxyManager.retiredDeviceIds.has(deviceId);
+  }
+
+  public static resetRetiredDevicesForTesting(): void {
+    IOSCtrlProxyManager.retiredDeviceIds.clear();
+  }
+
+  private assertDeviceNotRetired(): void {
+    if (IOSCtrlProxyManager.isDeviceRetired(this.device.deviceId)) {
+      throw new ActionableError(`iOS device ${this.device.deviceId} is being shut down`);
+    }
+  }
   private static startupOrphanRunnerReap: Promise<void> | null = null;
 
   // Cache for status checks
@@ -474,6 +497,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   public static resetInstances(): void {
     IOSCtrlProxyManager.instances.clear();
     IOSCtrlProxyManager.startupOrphanRunnerReap = null;
+    IOSCtrlProxyManager.retiredDeviceIds.clear();
   }
 
   /**
@@ -1093,7 +1117,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
    */
   public async start(options: CtrlProxyStartOptions = {}): Promise<void> {
     for (;;) {
+      this.assertDeviceNotRetired();
       await this.waitForForceRestart(options);
+      this.assertDeviceNotRetired();
       const expectedForceRestartGeneration = this.forceRestartGeneration;
       if (this.forceRestartInFlight) {
         continue;
@@ -1216,6 +1242,8 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     }
 
     await this.awaitStartupOrphanRunnerReap();
+
+    this.assertDeviceNotRetired();
 
     logger.info("[IOSCtrlProxy] Starting CtrlProxy");
     this.isStopping = false;
@@ -1957,6 +1985,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
       const xctestrunPath = await this.builder.getXctestrunPath("simulator");
       const bundleId = this.resolveTargetBundleId();
+      this.assertDeviceNotRetired();
       const result = await this.remoteRunner.start({
         deviceId: this.device.deviceId,
         port: this.servicePort,
@@ -2045,6 +2074,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     // session targeting this device and must outlive whichever request started
     // it; only stop()/forceRestart() abort this controller.
     this.runnerAbortController = new AbortController();
+    this.assertDeviceNotRetired();
     const child = await this.xcodebuild.startStreaming(args, {
       detached: true,
       env: { ...process.env, ...runnerEnv },
@@ -2178,6 +2208,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
    * Force restart the service (useful when client detects issues)
    */
   public async forceRestart(options: CtrlProxyStartOptions = {}): Promise<void> {
+    this.assertDeviceNotRetired();
     logger.info("[IOSCtrlProxy] Force restart requested");
 
     const existingRestart = this.forceRestartInFlight;
@@ -2197,6 +2228,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     const restart = (async () => {
       try {
         await this.stop();
+        this.assertDeviceNotRetired();
         if (options.signal?.aborted) {
           throw new ForceRestartCancelledError(
             options.signal.reason ?? new Error("iOS CtrlProxy restart was aborted"),
@@ -3132,6 +3164,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       await this.verifyInstalledAppBundle();
 
       const bundleId = this.resolveTargetBundleId();
+      this.assertDeviceNotRetired();
       const result = await this.remoteRunner.start({
         deviceId: this.device.deviceId,
         port: this.servicePort,
@@ -3223,6 +3256,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     // The signal is THIS manager's own runnerAbortController, never the ambient
     // per-request signal (issue #6410) — see the simulator call site for why.
     this.runnerAbortController = new AbortController();
+    this.assertDeviceNotRetired();
     const child = await this.xcodebuild.startStreaming(args, {
       detached: true,
       env: { ...process.env, ...runnerEnv },

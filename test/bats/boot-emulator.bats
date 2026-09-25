@@ -50,11 +50,19 @@ sleep 0.2
 printf '%s\n' '{"deviceId":"emulator-5554"}'
 MOCK
   chmod +x "${MOCK_BIN}/bun"
+  cat > "${MOCK_BIN}/tail" <<'MOCK'
+#!/usr/bin/env bash
+printf '%s\n' "$*" > "$TAIL_ARGS_FILE"
+MOCK
+  chmod +x "${MOCK_BIN}/tail"
+  tail_args_file="$(mktemp)"
 
-  run env AUTOMOBILE_BOOT_PROGRESS=true bash -c 'cd /tmp && "$1" --avd-name pixel_ci' _ "$(pwd)/$SCRIPT"
+  run env AUTOMOBILE_BOOT_PROGRESS=true TAIL_ARGS_FILE="$tail_args_file" bash -c 'cd /tmp && "$1" --avd-name pixel_ci' _ "$(pwd)/$SCRIPT"
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"emulator-5554"* ]]
+  [[ "$(<"$tail_args_file")" == "-f "*"/boot-device.log" ]]
+  rm -f "$tail_args_file"
 }
 
 @test "rejects an empty boot device ID and collects diagnostics" {
@@ -63,6 +71,16 @@ MOCK
 printf '%s\n' '{"deviceId":""}'
 MOCK
   chmod +x "${MOCK_BIN}/bun"
+  cat > "${MOCK_BIN}/adb" <<'MOCK'
+#!/usr/bin/env bash
+printf '%s\n' 'List of devices attached'
+MOCK
+  cat > "${MOCK_BIN}/timeout" <<'MOCK'
+#!/usr/bin/env bash
+shift 3 # -k 2 <seconds>
+"$@"
+MOCK
+  chmod +x "${MOCK_BIN}/adb" "${MOCK_BIN}/timeout"
   diagnostics_dir="$(mktemp -d)"
 
   run env AUTOMOBILE_EMULATOR_DIAGNOSTICS_DIR="$diagnostics_dir" bash -c 'cd /tmp && "$1"' _ "$(pwd)/$SCRIPT"

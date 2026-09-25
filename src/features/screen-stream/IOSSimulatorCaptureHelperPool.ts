@@ -19,6 +19,8 @@ import type {
 } from "./frameProtocol";
 
 export const IOS_SIMULATOR_HELPER_IDLE_TTL_MS = 45_000;
+/** Ceiling for a helper stop while holding the pool's serialized transition. */
+export const IOS_SIMULATOR_HELPER_STOP_TIMEOUT_MS = 5_000;
 
 export interface IosSimulatorCaptureHelperLease {
   start(): void | Promise<void>;
@@ -124,7 +126,7 @@ export class IOSSimulatorCaptureHelperPool {
       this.entries.clear();
       for (const entry of entries) {
         this.clearEntryIdleTimer(entry);
-        await entry.helper.stop().catch((error) => {
+        await this.stopHelperWithinDeadline(entry).catch((error) => {
           logger.debug(`[IOSSimulatorCaptureHelperPool] helper shutdown failed: ${error}`);
         });
       }
@@ -354,7 +356,7 @@ export class IOSSimulatorCaptureHelperPool {
     }
     this.clearEntryIdleTimer(entry);
     try {
-      await entry.helper.stop();
+      await this.stopHelperWithinDeadline(entry);
     } catch (error) {
       // Surface the stop failure to this caller, but record it so it is only
       // re-thrown to concurrent cleanup of the SAME failed entry — never to a
@@ -376,7 +378,36 @@ export class IOSSimulatorCaptureHelperPool {
     }
     this.clearEntryIdleTimer(entry);
     this.entries.delete(entry.key);
-    await entry.helper.stop();
+    await this.stopHelperWithinDeadline(entry);
+  }
+
+  private async stopHelperWithinDeadline(entry: HelperEntry): Promise<void> {
+    const stop = entry.helper.stop();
+    let didTimeOut = false;
+    // The helper owns process escalation. A late stop failure is only background
+    // cleanup after the pool has released its serialized transition.
+    void stop.catch((error) => {
+      if (didTimeOut) {
+        logger.debug(`[IOSSimulatorCaptureHelperPool] helper stop failed after timeout: ${error}`);
+      }
+    });
+    let timeout: NodeJS.Timeout | undefined;
+    const timedOut = new Promise<void>((resolve) => {
+      timeout = this.timer.setTimeout(() => {
+        didTimeOut = true;
+        logger.warn(
+          `[IOSSimulatorCaptureHelperPool] helper stop exceeded ${IOS_SIMULATOR_HELPER_STOP_TIMEOUT_MS}ms`,
+        );
+        resolve();
+      }, IOS_SIMULATOR_HELPER_STOP_TIMEOUT_MS);
+    });
+    try {
+      await Promise.race([stop, timedOut]);
+    } finally {
+      if (timeout) {
+        this.timer.clearTimeout(timeout);
+      }
+    }
   }
 
   // All pool mutations serialize through one global chain rather than a

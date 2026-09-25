@@ -164,6 +164,12 @@ export const IOS_ENCODER_RESTART_GRACE_MS = 2_000;
  * See issue #4768.
  */
 export const IOS_RUNNING_RECONNECT_MAX_ATTEMPTS = 2;
+/** Ceiling for stopping a helper during teardown before reconnect may proceed. */
+export const IOS_HELPER_STOP_TIMEOUT_MS = 6_000;
+/** Ceiling for resolving a released helper when no local helper path is configured. */
+export const IOS_HELPER_PATH_RESOLUTION_TIMEOUT_MS = 35_000;
+/** Ceiling for the raw pipeline's ffmpeg availability probe. */
+export const IOS_FFMPEG_PROBE_TIMEOUT_MS = 10_000;
 /** Default backoff between running-phase reconnect attempts: 500ms→1s→2s (cap). */
 export const IOS_RUNNING_RECONNECT_BACKOFF: BackoffInput = exponentialBackoff({
   initialDelayMs: 500,
@@ -614,10 +620,15 @@ export class IosH264Source implements H264CaptureSource {
   private async establishRaw(helperPath: string, target: CaptureTarget): Promise<void> {
     this.mode = "raw";
     this.encodeSettings = null;
-    await validateFfmpegAvailability(
-      this.ffmpegClient,
-      this.ffmpegPath,
-      this.options.commandRunner,
+    await this.withPreCaptureDeadline(
+      validateFfmpegAvailability(
+        this.ffmpegClient,
+        this.ffmpegPath,
+        IOS_FFMPEG_PROBE_TIMEOUT_MS,
+        this.options.commandRunner,
+      ),
+      IOS_FFMPEG_PROBE_TIMEOUT_MS,
+      "Probing iOS WebRTC ffmpeg",
     );
     if (!this.isActive()) {
       return;
@@ -844,7 +855,11 @@ export class IosH264Source implements H264CaptureSource {
       });
     }
 
-    const releasedPath = await this.screenCaptureHelperProvider.ensure();
+    const releasedPath = await this.withPreCaptureDeadline(
+      this.screenCaptureHelperProvider.ensure(),
+      IOS_HELPER_PATH_RESOLUTION_TIMEOUT_MS,
+      "Resolving iOS screen-capture-helper",
+    );
     if (releasedPath) {
       return releasedPath;
     }
@@ -886,6 +901,27 @@ export class IosH264Source implements H264CaptureSource {
         (error) => finish(() => reject(error)),
       );
     });
+  }
+
+  private async withPreCaptureDeadline<T>(
+    operation: Promise<T>,
+    timeoutMs: number,
+    context: string,
+  ): Promise<T> {
+    let timeout: NodeJS.Timeout | undefined;
+    const timedOut = new Promise<never>((_, reject) => {
+      timeout = this.timer.setTimeout(
+        () => reject(new ActionableError(`${context} timed out after ${timeoutMs}ms.`)),
+        timeoutMs,
+      );
+    });
+    try {
+      return await Promise.race([operation, timedOut]);
+    } finally {
+      if (timeout) {
+        this.timer.clearTimeout(timeout);
+      }
+    }
   }
 
   private createCaptureHelper(options: IosScreenCaptureHelperOptions): IosFrameCaptureHelper {
@@ -1844,9 +1880,31 @@ export class IosH264Source implements H264CaptureSource {
     this.rejectFirstAudioWait = null;
     const helper = this.helper;
     this.helper = null;
-    await helper?.stop().catch((error) => {
-      logger.debug(`[IosH264Source] helper stop failed: ${error}`);
+    if (!helper) {
+      return;
+    }
+    const stopped = helper.stop().then(
+      () => true,
+      (error: unknown) => {
+        logger.debug(`[IosH264Source] helper stop failed: ${error}`);
+        return true;
+      },
+    );
+    let timeout: NodeJS.Timeout | undefined;
+    const timedOut = new Promise<false>((resolve) => {
+      timeout = this.timer.setTimeout(() => resolve(false), IOS_HELPER_STOP_TIMEOUT_MS);
     });
+    try {
+      if (!(await Promise.race([stopped, timedOut]))) {
+        logger.warn(
+          `[IosH264Source] helper stop exceeded ${IOS_HELPER_STOP_TIMEOUT_MS}ms; continuing teardown`,
+        );
+      }
+    } finally {
+      if (timeout) {
+        this.timer.clearTimeout(timeout);
+      }
+    }
   }
 }
 
@@ -1992,6 +2050,7 @@ function readForceRawPipeline(env: NodeJS.ProcessEnv): boolean {
 async function validateFfmpegAvailability(
   ffmpegClient: FfmpegClient,
   ffmpegPath: string,
+  timeoutMs: number,
   testCommandRunner?: CommandRunner,
 ): Promise<void> {
   // `commandRunner` is a long-standing test seam. Production probes must stay
@@ -2000,7 +2059,7 @@ async function validateFfmpegAvailability(
     return validateFfmpegAvailabilityWithRunner(ffmpegPath, testCommandRunner);
   }
   try {
-    await ffmpegClient.probe({ requiredEncoders: ["h264_videotoolbox"] });
+    await ffmpegClient.probe({ requiredEncoders: ["h264_videotoolbox"], timeoutMs });
   } catch (error) {
     const message = errorMessage(error);
     if (message.includes("missing required encoder")) {

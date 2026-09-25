@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import type { Writable } from "node:stream";
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { FakeChildProcess } from "../../fakes/FakeChildProcess";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import type { BootedDevice } from "../../../src/models";
@@ -15,6 +15,9 @@ import {
   IOS_FORCED_KEYFRAME_MIN_INTERVAL_MS,
   IOS_ENCODED_FORCED_KEYFRAME_MIN_INTERVAL_MS,
   IOS_ENCODER_RESTART_GRACE_MS,
+  IOS_FFMPEG_PROBE_TIMEOUT_MS,
+  IOS_HELPER_STOP_TIMEOUT_MS,
+  IOS_HELPER_PATH_RESOLUTION_TIMEOUT_MS,
   IOS_SIMULATOR_TARGET_RESOLUTION_TIMEOUT_MS,
   IosH264Source,
   ScreenRecordingPermissionError,
@@ -27,7 +30,11 @@ import {
   WEBRTC_H264_MAX_MACROBLOCKS_PER_FRAME,
   h264MacroblocksPerFrame,
 } from "../../../src/features/webrtc/h264Level";
-import { IOSSimulatorCaptureHelperPool } from "../../../src/features/screen-stream/IOSSimulatorCaptureHelperPool";
+import {
+  IOS_SIMULATOR_HELPER_STOP_TIMEOUT_MS,
+  IOSSimulatorCaptureHelperPool,
+} from "../../../src/features/screen-stream/IOSSimulatorCaptureHelperPool";
+import { logger } from "../../../src/utils/logger";
 import { WEBRTC_IOS_SIMULATOR_FPS_DEFAULT } from "../../../src/features/webrtc/webrtcStreamingConfig";
 import { ENCODED_VIDEO_CAPABILITY } from "../../../src/features/screen-stream";
 import type {
@@ -138,6 +145,13 @@ class DelayedStopFrameCaptureHelper extends FakeFrameCaptureHelper {
 
   finishStop(): void {
     this.resolveStop?.();
+  }
+}
+
+class NeverStoppingFrameCaptureHelper extends FakeFrameCaptureHelper {
+  override async stop(): Promise<null> {
+    this.stopped = true;
+    return new Promise<null>(() => {});
   }
 }
 
@@ -1737,6 +1751,231 @@ describe("IosH264Source", () => {
 
     expect(errors).toHaveLength(1);
     expect(errors[0].message).toContain("screen-capture-helper exited");
+  });
+
+  test("exhausts reconnects when released helper resolution never settles", async () => {
+    const timer = new FakeTimer();
+    let ensures = 0;
+    const { source, helpers, errors } = createReconnectHarness({
+      helperPath: undefined,
+      screenCaptureHelperProvider: {
+        ensure: () => {
+          ensures++;
+          return ensures === 1 ? Promise.resolve(FAKE_HELPER_PATH) : new Promise<string>(() => {});
+        },
+      },
+      timer,
+      runningReconnectMaxAttempts: 2,
+    });
+    const started = source.start();
+    await flush();
+    helpers[0].emitFrame(frame(2, 2, 0x11));
+    await started;
+
+    helpers[0].emitExit(null, "SIGTRAP");
+    await flush();
+    timer.advanceTime(500);
+    await flush();
+    timer.advanceTime(IOS_HELPER_PATH_RESOLUTION_TIMEOUT_MS);
+    await flush();
+    timer.advanceTime(1_000);
+    await flush();
+    timer.advanceTime(IOS_HELPER_PATH_RESOLUTION_TIMEOUT_MS);
+    await flush();
+
+    expect(ensures).toBe(3);
+    expect(errors).toHaveLength(1);
+    expect(errors[0].message).toContain("screen-capture-helper exited");
+    await source.stop();
+  });
+
+  test("exhausts reconnects when Simulator window resolution ignores abort", async () => {
+    const timer = new FakeTimer();
+    let resolutions = 0;
+    const { source, helpers, errors } = createReconnectHarness({
+      device: IOS_SIMULATOR,
+      timer,
+      runningReconnectMaxAttempts: 2,
+      simulatorWindowResolver: () => {
+        resolutions++;
+        return resolutions === 1 ? Promise.resolve(42) : new Promise<number>(() => {});
+      },
+    });
+    const started = source.start();
+    await flush();
+    helpers[0].emitFrame(frame(2, 2, 0x11));
+    await started;
+
+    helpers[0].emitExit(null, "SIGTRAP");
+    await flush();
+    timer.advanceTime(500);
+    await flush();
+    timer.advanceTime(IOS_SIMULATOR_TARGET_RESOLUTION_TIMEOUT_MS);
+    await flush();
+    timer.advanceTime(1_000);
+    await flush();
+    timer.advanceTime(IOS_SIMULATOR_TARGET_RESOLUTION_TIMEOUT_MS);
+    await flush();
+
+    expect(resolutions).toBe(3);
+    expect(errors).toHaveLength(1);
+    expect(errors[0].message).toContain("screen-capture-helper exited");
+    await source.stop();
+  });
+
+  test("exhausts reconnects when raw ffmpeg probing never settles", async () => {
+    const timer = new FakeTimer();
+    let versionProbes = 0;
+    const { source, helpers, errors } = createReconnectHarness({
+      timer,
+      runningReconnectMaxAttempts: 2,
+      commandRunner: (command, args) => {
+        if (args.includes("-version") && ++versionProbes > 1) {
+          return new Promise(() => {});
+        }
+        return successfulCommandRunner(command, args);
+      },
+    });
+    const started = source.start();
+    await flush();
+    helpers[0].emitFrame(frame(2, 2, 0x11));
+    await started;
+
+    helpers[0].emitExit(null, "SIGTRAP");
+    await flush();
+    timer.advanceTime(500);
+    await flush();
+    timer.advanceTime(IOS_FFMPEG_PROBE_TIMEOUT_MS);
+    await flush();
+    timer.advanceTime(1_000);
+    await flush();
+    timer.advanceTime(IOS_FFMPEG_PROBE_TIMEOUT_MS);
+    await flush();
+
+    expect(versionProbes).toBe(3);
+    expect(errors).toHaveLength(1);
+    expect(errors[0].message).toContain("screen-capture-helper exited");
+    await source.stop();
+  });
+
+  test("times out a never-settling helper stop and exhausts reconnect attempts", async () => {
+    const timer = new FakeTimer();
+    const helpers: FakeFrameCaptureHelper[] = [];
+    const warning = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const { source, errors } = createReconnectHarness({
+        timer,
+        firstFrameTimeoutMs: 50,
+        runningReconnectMaxAttempts: 2,
+        createHelper: () => {
+          const helper =
+            helpers.length === 0
+              ? new NeverStoppingFrameCaptureHelper()
+              : new FakeFrameCaptureHelper();
+          helpers.push(helper);
+          return helper;
+        },
+      });
+      const started = source.start();
+      await flush();
+      helpers[0].emitFrame(frame(2, 2, 0x11));
+      await started;
+
+      helpers[0].emitExit(null, "SIGTRAP");
+      await flush();
+      timer.advanceTime(IOS_HELPER_STOP_TIMEOUT_MS);
+      await flush();
+      expect(warning).toHaveBeenCalledWith(
+        expect.stringContaining(`helper stop exceeded ${IOS_HELPER_STOP_TIMEOUT_MS}ms`),
+      );
+      timer.advanceTime(500);
+      await flush();
+      expect(helpers).toHaveLength(2);
+      timer.advanceTime(50);
+      await flush();
+      timer.advanceTime(1_000);
+      await flush();
+      expect(helpers).toHaveLength(3);
+      timer.advanceTime(50);
+      await flush();
+      expect(errors).toHaveLength(1);
+      expect(errors[0].message).toContain("screen-capture-helper exited");
+      await source.stop();
+    } finally {
+      warning.mockRestore();
+    }
+  });
+
+  test("exhausts bounded reconnects after a pooled helper stop stalls the shared queue", async () => {
+    const timer = new FakeTimer();
+    const helpers: FakeFrameCaptureHelper[] = [];
+    const pool = new IOSSimulatorCaptureHelperPool({
+      timer,
+      createHelper: (options) => {
+        const helper =
+          options.target.kind === "simulator" && options.target.windowID === 99
+            ? new NeverStoppingFrameCaptureHelper()
+            : new FakeFrameCaptureHelper();
+        helpers.push(helper);
+        return helper;
+      },
+    });
+    const warning = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const blocked = pool.acquire({
+        binaryPath: FAKE_HELPER_PATH,
+        target: { kind: "simulator", windowID: 99, fps: 15 },
+      });
+      blocked.on("error", () => {});
+      await blocked.start();
+      const { source, errors } = createReconnectHarness({
+        device: IOS_SIMULATOR,
+        createHelper: undefined,
+        simulatorHelperPool: pool,
+        timer,
+        firstFrameTimeoutMs: 50,
+        runningReconnectMaxAttempts: 2,
+      });
+      const started = source.start();
+      await flush();
+      helpers[1].emitFrame(frame(2, 2, 0x11));
+      await started;
+
+      helpers[0].emit("error", new Error("capture failed"));
+      await flush();
+      helpers[1].emitExit(null, "SIGTRAP");
+      await flush();
+      timer.advanceTime(500);
+      await flush();
+      expect(helpers).toHaveLength(2);
+
+      timer.advanceTime(IOS_SIMULATOR_HELPER_STOP_TIMEOUT_MS - 500);
+      await flush();
+      expect(helpers).toHaveLength(4);
+      timer.advanceTime(50);
+      await flush();
+      timer.advanceTime(1_000);
+      await flush();
+      expect(helpers).toHaveLength(5);
+      timer.advanceTime(50);
+      await flush();
+      expect(helpers).toHaveLength(6);
+      timer.advanceTime(50);
+      await flush();
+      expect(errors).toHaveLength(1);
+      expect(errors[0].message).toContain("screen-capture-helper exited");
+      expect(warning).toHaveBeenCalledWith(
+        expect.stringContaining(`helper stop exceeded ${IOS_SIMULATOR_HELPER_STOP_TIMEOUT_MS}ms`),
+      );
+      await source.stop();
+      await blocked.stop();
+      const shutdown = pool.shutdown();
+      await flush();
+      timer.advanceTime(IOS_SIMULATOR_HELPER_STOP_TIMEOUT_MS);
+      await shutdown;
+    } finally {
+      warning.mockRestore();
+    }
   });
 
   test("a stop() during the reconnect backoff cancels the cycle", async () => {

@@ -247,7 +247,10 @@ describe("CtrlProxyPackages (Android)", function () {
       const streamServer = await startDeviceDataStreamSocketServer(fakeTimer);
       const socketPath = DEVICE_DATA_STREAM_SOCKET_CONFIG.defaultPath;
       expect(path.dirname(socketPath)).toBe(testOverrides.auxSocketDir);
-      expect(statSync(socketPath).isSocket()).toBe(true);
+      // Windows named-pipe sockets do not have a stat-able NTFS socket inode.
+      if (process.platform !== "win32") {
+        expect(statSync(socketPath).isSocket()).toBe(true);
+      }
       (streamServer as any).subscribers.set("hierarchy-cadence-test", {
         socket: { destroyed: false },
         backfilling: false,

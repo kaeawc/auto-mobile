@@ -42,6 +42,10 @@ function candidateFiles(): string[] {
   return testFiles(TEST_DIR);
 }
 
+function normalizeRelativePath(relative: string): string {
+  return relative.split(path.sep).join("/").split("\\").join("/");
+}
+
 const homeSocket =
   /(?:path\.)?join\s*\(\s*(?:os\.)?homedir\s*\(\s*\)\s*,\s*["']\.auto-mobile["']\s*,\s*["'][^"']+\.sock["']\s*\)/g;
 const explicitDefault = new RegExp(
@@ -65,11 +69,17 @@ function violations(source: string): string[] {
 }
 
 describe("auxiliary socket test boundary (issue #7616)", () => {
+  test("normalizes Windows relative paths to POSIX form", () => {
+    expect(normalizeRelativePath("lint\\auxSocketDirBoundary.test.ts")).toBe(
+      "lint/auxSocketDirBoundary.test.ts",
+    );
+  });
+
   test("unit tests do not target production auxiliary socket paths", () => {
     const files = candidateFiles();
     expect(files.length).toBeGreaterThan(0);
     const offenders = files.flatMap((file) => {
-      const relative = path.relative(TEST_DIR, file);
+      const relative = normalizeRelativePath(path.relative(TEST_DIR, file));
       // The guard's own string fixtures intentionally contain forbidden examples.
       if (relative === "lint/auxSocketDirBoundary.test.ts") {
         return [];

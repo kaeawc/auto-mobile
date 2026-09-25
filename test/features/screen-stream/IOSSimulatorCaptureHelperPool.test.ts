@@ -8,6 +8,7 @@ import type {
 } from "../../../src/features/screen-stream/IOSScreenCaptureHelper";
 import {
   IOS_SIMULATOR_HELPER_IDLE_TTL_MS,
+  IOS_SIMULATOR_HELPER_STOP_TIMEOUT_MS,
   IOSSimulatorCaptureHelperPool,
 } from "../../../src/features/screen-stream/IOSSimulatorCaptureHelperPool";
 
@@ -45,6 +46,13 @@ class FakeSimulatorHelper extends EventEmitter {
   }
 }
 
+class NeverStoppingSimulatorHelper extends FakeSimulatorHelper {
+  override async stop(): Promise<null> {
+    this.stops++;
+    return new Promise<null>(() => {});
+  }
+}
+
 function simulatorOptions(windowID = 42): IosScreenCaptureHelperOptions {
   return {
     binaryPath: "/fake/screen-capture-helper",
@@ -71,6 +79,83 @@ async function flushMicrotasks(count = 5): Promise<void> {
 }
 
 describe("IOSSimulatorCaptureHelperPool", () => {
+  test("evicts an idle stalled window without failing a different window attach", async () => {
+    const timer = new FakeTimer();
+    const helpers: FakeSimulatorHelper[] = [];
+    const pool = new IOSSimulatorCaptureHelperPool({
+      timer,
+      createHelper: () => {
+        const helper =
+          helpers.length === 0 ? new NeverStoppingSimulatorHelper() : new FakeSimulatorHelper();
+        helpers.push(helper);
+        return helper;
+      },
+    });
+    const warning = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const oldWindow = pool.acquire(simulatorOptions(42));
+      await oldWindow.start();
+      await oldWindow.stop();
+
+      const newWindow = pool.acquire(simulatorOptions(43));
+      const attaching = newWindow.start();
+      await flushMicrotasks();
+      expect(helpers).toHaveLength(1);
+
+      timer.advanceTime(IOS_SIMULATOR_HELPER_STOP_TIMEOUT_MS);
+      await attaching;
+      expect(helpers).toHaveLength(2);
+      expect(helpers[1].starts).toBe(1);
+      expect(warning).toHaveBeenCalledWith(
+        expect.stringContaining(`helper stop exceeded ${IOS_SIMULATOR_HELPER_STOP_TIMEOUT_MS}ms`),
+      );
+      await newWindow.stop();
+      await pool.shutdown();
+    } finally {
+      warning.mockRestore();
+    }
+  });
+
+  test("times out a failed helper stop and releases the serialized attach queue", async () => {
+    const timer = new FakeTimer();
+    const helpers: FakeSimulatorHelper[] = [];
+    const pool = new IOSSimulatorCaptureHelperPool({
+      timer,
+      createHelper: () => {
+        const helper =
+          helpers.length === 0 ? new NeverStoppingSimulatorHelper() : new FakeSimulatorHelper();
+        helpers.push(helper);
+        return helper;
+      },
+    });
+    const warning = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const first = pool.acquire(simulatorOptions());
+      first.on("error", () => {});
+      await first.start();
+      helpers[0].emit("error", new Error("capture failed"));
+      await flushMicrotasks();
+
+      const replacement = pool.acquire(simulatorOptions());
+      const attaching = replacement.start();
+      await flushMicrotasks();
+      expect(helpers).toHaveLength(1);
+
+      timer.advanceTime(IOS_SIMULATOR_HELPER_STOP_TIMEOUT_MS);
+      await attaching;
+      expect(warning).toHaveBeenCalledWith(
+        expect.stringContaining(`helper stop exceeded ${IOS_SIMULATOR_HELPER_STOP_TIMEOUT_MS}ms`),
+      );
+      expect(helpers).toHaveLength(2);
+      expect(helpers[1].starts).toBe(1);
+      await first.stop();
+      await replacement.stop();
+      await pool.shutdown();
+    } finally {
+      warning.mockRestore();
+    }
+  });
+
   test("reuses a warm helper and replays its latest frame to the next lease", async () => {
     const helpers: FakeSimulatorHelper[] = [];
     const pool = new IOSSimulatorCaptureHelperPool({

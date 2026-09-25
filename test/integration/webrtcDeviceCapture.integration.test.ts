@@ -2,12 +2,13 @@ import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { execFile, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { once } from "node:events";
 import { createWriteStream, existsSync, readFileSync } from "node:fs";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import WebSocket from "ws";
 import { sendWebRtcStreamRequest } from "../../src/daemon/webrtcStreamClient";
+import { ActionableError } from "../../src/models";
 import { defaultTimer, type Timer } from "../../src/utils/SystemTimer";
 import { waitFor, withDeadline } from "../helpers/abortableWaitFor";
 import {
@@ -491,6 +492,21 @@ async function videoSample(
     height: number;
     sample: number;
   };
+}
+
+async function recoveryLogTail(path: string, pattern: RegExp): Promise<string> {
+  try {
+    const content = await readFile(path, "utf8");
+    return content
+      .split(/\r?\n/)
+      .filter((line) => pattern.test(line))
+      .slice(-30)
+      .join("\n");
+  } catch (error) {
+    // Diagnostics are best-effort; the original WHEP failure remains authoritative.
+    console.warn(`Could not read recovery diagnostics from ${path}: ${error}`);
+    return "unavailable";
+  }
 }
 
 async function readerDiagnostics(cdp: CdpClient): Promise<ReaderDiagnostics> {
@@ -1319,16 +1335,31 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
             // A brand-new WHEP subscription is the relayed PLI: it renegotiates
             // with MediaMTX, which requests a keyframe upstream. The recovery
             // viewer starts cold, so its baseline is zero on both counters.
-            ({ chrome, cdp } = await recoverWhepSubscription(
-              { chrome: chrome!, cdp: cdp! },
-              {
-                subscribe: subscribeReader,
-                launch: () => launchChromeReader(join(artifactDir, "chrome.log"), rememberChrome),
-                close: (readerCdp) => readerCdp.close(),
-                stop,
-                timer: defaultTimer,
-              },
-            ));
+            try {
+              ({ chrome, cdp } = await recoverWhepSubscription(
+                { chrome: chrome!, cdp: cdp! },
+                {
+                  subscribe: subscribeReader,
+                  launch: () => launchChromeReader(join(artifactDir, "chrome.log"), rememberChrome),
+                  close: (readerCdp) => readerCdp.close(),
+                  stop,
+                  timer: defaultTimer,
+                },
+              ));
+            } catch (error) {
+              const [daemonTail, mediamtxTail] = await Promise.all([
+                recoveryLogTail(
+                  join(daemonDir, "logs", "daemon.log"),
+                  /\[IosH264Source\]|\[WebRTC\]/,
+                ),
+                recoveryLogTail(join(artifactDir, "mediamtx.log"), new RegExp(streamId)),
+              ]);
+              throw new ActionableError(
+                `${error instanceof Error ? error.message : String(error)}; ` +
+                  `daemon log tail=${JSON.stringify(daemonTail)}; ` +
+                  `MediaMTX log tail=${JSON.stringify(mediamtxTail)}`,
+              );
+            }
             const baseline: KeyframeRecoverySample = { keyFramesDecoded: 0, framesDecoded: 0 };
             // Under a static Simulator screen the restarted encoder's IDR only
             // rides out on the next delivered frame (SimulatorCaptureSession drops

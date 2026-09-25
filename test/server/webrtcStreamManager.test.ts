@@ -543,7 +543,9 @@ describe("webrtcStreamManager", () => {
     expect(descriptor.failure?.message).toContain("checksum verification failed");
     expect(descriptor.fallback).toEqual({ mode: "screenshots", reason: "capture_start_failed" });
     expect(publisherCreated).toBe(1);
-    expect(listWebRtcStreams()).toHaveLength(1);
+    // The dead record never became live, so it is discarded rather than
+    // retained for a later startWebRtcStream call to find and re-lease (#7555).
+    expect(listWebRtcStreams()).toHaveLength(0);
   });
 
   test("passes audio config to publisher/source and routes PCM audio chunks", async () => {
@@ -721,7 +723,157 @@ describe("webrtcStreamManager", () => {
     expect(sources[0].stopped).toBe(true);
     expect(publishers[0].stopped).toBe(true);
     expect(publishers[0].sourceFailedCount).toBe(1);
+    // The dead record never became live, so it is discarded rather than
+    // retained for a later startWebRtcStream call to find and re-lease (#7555).
+    expect(listWebRtcStreams()).toHaveLength(0);
+  });
+
+  test("retries with a fresh stream after an initial capture start fails (#7555)", async () => {
+    const publishers: AsyncConnectedPublisher[] = [];
+    const sources: FakeSource[] = [];
+    let createSourceCalls = 0;
+    setWebRtcStreamManagerDependencies({
+      idGenerator: new CountingIdGenerator("id"),
+      createPublisher: (config, deps) => {
+        const publisher = new AsyncConnectedPublisher(config, deps);
+        publishers.push(publisher);
+        return publisher as unknown as WebRtcPublisher;
+      },
+      createSource: () => {
+        createSourceCalls++;
+        const source = new FakeSource();
+        if (createSourceCalls === 1) {
+          source.start = async () => {
+            source.started = true;
+            throw new Error("REMOTE_SUBMIX failed");
+          };
+        }
+        sources.push(source);
+        return source as unknown as AndroidH264Source;
+      },
+      resolveVideoJar: async () => "/verified/automobile-video.jar",
+      now: () => new Date("2026-07-11T00:00:00.000Z"),
+    });
+
+    const failed = await startWebRtcStream({
+      device: ANDROID,
+      overrides: { whipEndpoint: ENDPOINT, audioEnabled: true },
+    });
+    expect(failed.lifecycleState).toBe("degraded");
+    expect(failed.failure?.code).toBe("capture_start_failed");
+    // The dead record is discarded rather than retained for reuse.
+    expect(listWebRtcStreams()).toHaveLength(0);
+
+    const retried = await startWebRtcStream({
+      device: ANDROID,
+      overrides: { whipEndpoint: ENDPOINT, audioEnabled: true },
+    });
+
+    expect(createSourceCalls).toBe(2);
+    expect(retried.streamId).not.toBe(failed.streamId);
+    expect(retried.lifecycleState).toBe("capture_ready");
+    expect(retried.failure).toBeNull();
     expect(listWebRtcStreams()).toHaveLength(1);
+  });
+
+  test("clears the failed record's lease timer instead of extending it (#7555)", async () => {
+    const timer = new FakeTimer();
+    setWebRtcStreamManagerDependencies({
+      idGenerator: new CountingIdGenerator("id"),
+      createPublisher: (config, deps) =>
+        new AsyncConnectedPublisher(config, deps) as unknown as WebRtcPublisher,
+      createSource: () => {
+        const source = new FakeSource();
+        source.start = async () => {
+          source.started = true;
+          throw new Error("REMOTE_SUBMIX failed");
+        };
+        return source as unknown as AndroidH264Source;
+      },
+      resolveVideoJar: async () => "/verified/automobile-video.jar",
+      timer,
+      now: () => new Date("2026-07-11T00:00:00.000Z"),
+    });
+
+    await startWebRtcStream({
+      device: ANDROID,
+      overrides: { whipEndpoint: ENDPOINT, audioEnabled: true },
+    });
+
+    // A live record's lease would still be pending at this point; the dead
+    // record's timer was cleared on failure, so advancing time triggers
+    // nothing and leaves no scheduled callback behind.
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+    timer.advanceTime(WEBRTC_STREAM_LEASE_TTL_MS);
+    expect(listWebRtcStreams()).toHaveLength(0);
+  });
+
+  test("concurrent callers racing a pending start share one record", async () => {
+    let releaseJar: ((path: string | null) => void) | undefined;
+    let createSourceCalls = 0;
+    setWebRtcStreamManagerDependencies({
+      idGenerator: new CountingIdGenerator("id"),
+      createPublisher: (config, deps) =>
+        new FakePublisher(config, deps) as unknown as WebRtcPublisher,
+      createSource: () => {
+        createSourceCalls++;
+        return new FakeSource() as unknown as AndroidH264Source;
+      },
+      resolveVideoJar: () =>
+        new Promise((resolve) => {
+          releaseJar = resolve;
+        }),
+      now: () => new Date("2026-07-11T00:00:00.000Z"),
+    });
+
+    const first = startWebRtcStream({ device: ANDROID, overrides: { whipEndpoint: ENDPOINT } });
+    const second = startWebRtcStream({ device: ANDROID, overrides: { whipEndpoint: ENDPOINT } });
+    const third = startWebRtcStream({ device: ANDROID, overrides: { whipEndpoint: ENDPOINT } });
+
+    releaseJar?.(null);
+    const [firstResult, secondResult, thirdResult] = await Promise.all([first, second, third]);
+
+    expect(createSourceCalls).toBe(1);
+    expect(secondResult.streamId).toBe(firstResult.streamId);
+    expect(thirdResult.streamId).toBe(firstResult.streamId);
+    expect(thirdResult.consumerCount).toBe(3);
+    expect(listWebRtcStreams()).toHaveLength(1);
+  });
+
+  test("a previously-live record that later degrades keeps current semantics (not discarded)", async () => {
+    let sourceOptions!: Parameters<NonNullable<WebRtcStreamManagerDependencies["createSource"]>>[0];
+    setWebRtcStreamManagerDependencies({
+      idGenerator: new CountingIdGenerator("id"),
+      createPublisher: (config, deps) =>
+        new FakePublisher(config, deps) as unknown as WebRtcPublisher,
+      createSource: (options) => {
+        sourceOptions = options;
+        return new FakeSource() as unknown as AndroidH264Source;
+      },
+      resolveVideoJar: async () => null,
+    });
+
+    const started = await startWebRtcStream({
+      device: ANDROID,
+      overrides: { whipEndpoint: ENDPOINT },
+    });
+    // Runtime failure after the source was already live.
+    sourceOptions.onError?.(new Error("adb forward lost"));
+
+    const degraded = await waitForWebRtcStreamReadiness(started.streamId, "publishing", 100);
+    expect(degraded.lifecycleState).toBe("degraded");
+    expect(degraded.failure?.code).toBe("capture_runtime_failed");
+    // Unlike a dead initial-start failure, a runtime-degraded record is kept
+    // and returned to a later caller for the same device (reconnect path can
+    // still recover it).
+    expect(listWebRtcStreams()).toHaveLength(1);
+
+    const reused = await startWebRtcStream({
+      device: ANDROID,
+      overrides: { whipEndpoint: ENDPOINT },
+    });
+    expect(reused.streamId).toBe(started.streamId);
+    expect(reused.consumerCount).toBe(2);
   });
 
   test("failed async audio startup cleanup does not delete a replacement stream with the same id", async () => {

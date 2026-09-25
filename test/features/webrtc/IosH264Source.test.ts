@@ -580,6 +580,56 @@ describe("IosH264Source", () => {
     expect(helper.stopped).toBe(true);
   });
 
+  test("defers pooled helper recovery after the last viewer detaches", async () => {
+    const timer = new FakeTimer();
+    const helpers: FakeFrameCaptureHelper[] = [];
+    const errors: Error[] = [];
+    const pool = new IOSSimulatorCaptureHelperPool({
+      timer,
+      createHelper: () => {
+        const helper = new FakeFrameCaptureHelper();
+        helpers.push(helper);
+        return helper;
+      },
+    });
+    const source = new IosH264Source({
+      device: IOS_SIMULATOR,
+      helperPath: FAKE_HELPER_PATH,
+      helperPathExists: fakeHelperPathExists,
+      onData: () => {},
+      onError: (error) => errors.push(error),
+      simulatorHelperPool: pool,
+      forceRawPipeline: true,
+      spawner: () => new FakeChildProcess() as unknown as ChildProcessWithoutNullStreams,
+      simulatorWindowResolver: async () => 42,
+      commandRunner: successfulCommandRunner,
+      timer,
+    });
+    const started = source.start();
+    await flush();
+    helpers[0].emitFrame(frame(2, 2, 0x11));
+    await started;
+
+    source.setHasConsumers(false);
+    helpers[0].emitExit(null, "SIGTRAP");
+    await flush();
+    timer.advanceTime(5_000);
+    await flush();
+    expect(helpers).toHaveLength(1);
+    expect(errors).toEqual([]);
+
+    source.setHasConsumers(true);
+    await flush();
+    timer.advanceTime(500);
+    await flush();
+    expect(helpers).toHaveLength(2);
+    helpers[1].emitFrame(frame(2, 2, 0x22));
+    await flush();
+    expect(errors).toEqual([]);
+    await source.stop();
+    await pool.shutdown();
+  });
+
   test("retries a silent pooled Simulator helper once without replacing the source", async () => {
     const timer = new FakeTimer();
     const helpers: FakeFrameCaptureHelper[] = [];
@@ -1563,6 +1613,95 @@ describe("IosH264Source", () => {
     expect(encoders).toHaveLength(2);
     expect(encoders[1].getStdinData().length).toBeGreaterThan(0);
     expect(helpers[0].stopped).toBe(true);
+  });
+
+  test("does not reconnect a helper exit after stop was requested", async () => {
+    const timer = new FakeTimer();
+    const { source, helpers, errors } = createReconnectHarness({ timer });
+    const started = source.start();
+    await flush();
+    helpers[0].emitFrame(frame(2, 2, 0x11));
+    await started;
+
+    const stopping = source.stop();
+    helpers[0].emitExit(null, "SIGTRAP");
+    await stopping;
+    timer.advanceTime(5_000);
+    await flush();
+
+    expect(helpers).toHaveLength(1);
+    expect(errors).toEqual([]);
+  });
+
+  test("defers helper recovery while the relay has no viewers", async () => {
+    const timer = new FakeTimer();
+    const { source, helpers, errors } = createReconnectHarness({ timer });
+    const started = source.start();
+    await flush();
+    helpers[0].emitFrame(frame(2, 2, 0x11));
+    await started;
+
+    source.setHasConsumers(false);
+    helpers[0].emitExit(null, "SIGTRAP");
+    await flush();
+    timer.advanceTime(5_000);
+    await flush();
+    expect(helpers).toHaveLength(1);
+    expect(errors).toEqual([]);
+
+    source.setHasConsumers(true);
+    await flush();
+    timer.advanceTime(500);
+    await flush();
+    expect(helpers).toHaveLength(2);
+    helpers[1].emitFrame(frame(2, 2, 0x22));
+    await flush();
+    expect(errors).toEqual([]);
+    await source.stop();
+  });
+
+  test("a last-viewer detach cancels an already scheduled reconnect", async () => {
+    const timer = new FakeTimer();
+    const { source, helpers, errors } = createReconnectHarness({ timer });
+    const started = source.start();
+    await flush();
+    helpers[0].emitFrame(frame(2, 2, 0x11));
+    await started;
+
+    helpers[0].emitExit(null, "SIGTRAP");
+    await flush();
+    source.setHasConsumers(false);
+    timer.advanceTime(5_000);
+    await flush();
+    expect(helpers).toHaveLength(1);
+    expect(errors).toEqual([]);
+
+    source.setHasConsumers(true);
+    await flush();
+    timer.advanceTime(500);
+    await flush();
+    expect(helpers).toHaveLength(2);
+    await source.stop();
+  });
+
+  test("a viewer returning in the cancelled-backoff tick resumes recovery", async () => {
+    const timer = new FakeTimer();
+    const { source, helpers } = createReconnectHarness({ timer });
+    const started = source.start();
+    await flush();
+    helpers[0].emitFrame(frame(2, 2, 0x11));
+    await started;
+
+    helpers[0].emitExit(null, "SIGTRAP");
+    await flush();
+    source.setHasConsumers(false);
+    source.setHasConsumers(true);
+    await flush();
+    timer.advanceTime(500);
+    await flush();
+
+    expect(helpers).toHaveLength(2);
+    await source.stop();
   });
 
   test("surfaces onError after exhausting bounded reconnect attempts", async () => {

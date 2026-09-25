@@ -454,6 +454,10 @@ export class IosH264Source implements H264CaptureSource {
    * so a genuine misconfiguration is not hidden behind a retry loop.
    */
   private startupComplete = false;
+  /** The relay can keep a source warm briefly after its last viewer leaves. */
+  private hasConsumers = true;
+  private deferredHelperFailure: Error | null = null;
+  private reconnectPromise: Promise<void> | null = null;
   /** Cancels an in-flight reconnect backoff wait; resolves it as "cancelled". */
   private cancelReconnectDelay: (() => void) | null = null;
 
@@ -531,6 +535,7 @@ export class IosH264Source implements H264CaptureSource {
     await this.teardownPromise;
     this.phase = "starting";
     this.startupComplete = false;
+    this.deferredHelperFailure = null;
     this.lastHelperStderr = null;
     this.lastReadinessPhase = null;
     this.helperFrameMetrics = null;
@@ -666,6 +671,7 @@ export class IosH264Source implements H264CaptureSource {
   }
 
   async stop(): Promise<void> {
+    this.deferredHelperFailure = null;
     if (!this.isActive()) {
       await this.teardownPromise;
       return;
@@ -676,6 +682,18 @@ export class IosH264Source implements H264CaptureSource {
     this.cancelFirstFrameWait?.();
     this.cancelFirstAudioWait?.();
     await this.beginTeardown();
+  }
+
+  /** Called by the local relay when its first viewer arrives or last viewer leaves. */
+  setHasConsumers(hasConsumers: boolean): void {
+    this.hasConsumers = hasConsumers;
+    if (hasConsumers) {
+      if (this.deferredHelperFailure) {
+        this.queueReconnect(this.deferredHelperFailure);
+      }
+    } else {
+      this.cancelReconnectDelay?.();
+    }
   }
 
   /**
@@ -1640,13 +1658,22 @@ export class IosH264Source implements H264CaptureSource {
     if (this.phase !== "running") {
       return;
     }
+    if (!this.hasConsumers) {
+      // Keep the relay's idle grace, but do not launch another helper for an
+      // empty stream. A new viewer resumes the same bounded recovery path.
+      this.phase = "reconnecting";
+      this.startupComplete = false;
+      void this.beginTeardown();
+      this.queueReconnect(error);
+      return;
+    }
     // Only a steady-state failure (after start() resolved) is eligible for a
     // bounded reconnect; a failure still inside the initial handshake surfaces
     // immediately so a real misconfiguration is not masked by a retry loop.
     if (this.startupComplete && this.runningReconnectMaxAttempts > 0) {
       this.phase = "reconnecting";
       this.startupComplete = false;
-      void this.runReconnect(error);
+      this.queueReconnect(error);
       return;
     }
     this.failNow(error);
@@ -1677,15 +1704,19 @@ export class IosH264Source implements H264CaptureSource {
     );
     await this.beginTeardown();
 
+    if (!this.hasConsumers) {
+      this.deferredHelperFailure = initialError;
+      return;
+    }
+
     for (
       let attempt = 1;
       this.phase === "reconnecting" && attempt <= this.runningReconnectMaxAttempts;
       attempt++
     ) {
       const delayMs = this.runningReconnectBackoff.delayForAttempt(attempt);
-      const cancelled = await this.waitReconnectBackoff(delayMs);
-      if (cancelled || this.phase !== "reconnecting") {
-        return; // stop() intervened during the backoff wait.
+      if (!(await this.waitForActiveReconnect(delayMs, initialError))) {
+        return;
       }
       this.phase = "starting";
       try {
@@ -1714,6 +1745,29 @@ export class IosH264Source implements H264CaptureSource {
     if (this.phase === "reconnecting") {
       this.failNow(initialError);
     }
+  }
+
+  private async waitForActiveReconnect(delayMs: number, error: Error): Promise<boolean> {
+    const cancelled = await this.waitReconnectBackoff(delayMs);
+    if (this.phase === "reconnecting" && (!this.hasConsumers || cancelled)) {
+      // A viewer may have returned before a cancelled wait resumed.
+      this.deferredHelperFailure = error;
+    }
+    return !cancelled && this.hasConsumers && this.phase === "reconnecting";
+  }
+
+  private queueReconnect(error: Error): void {
+    this.deferredHelperFailure = error;
+    if (!this.hasConsumers || this.phase !== "reconnecting" || this.reconnectPromise) {
+      return;
+    }
+    this.deferredHelperFailure = null;
+    this.reconnectPromise = this.runReconnect(error).finally(() => {
+      this.reconnectPromise = null;
+      if (this.deferredHelperFailure && this.hasConsumers) {
+        this.queueReconnect(this.deferredHelperFailure);
+      }
+    });
   }
 
   /**

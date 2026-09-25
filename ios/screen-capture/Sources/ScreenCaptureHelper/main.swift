@@ -5,6 +5,9 @@ import Foundation
 import ScreenCaptureCore
 import ScreenCaptureKit
 
+// A closed stdout must reach the checked write path instead of terminating with SIGPIPE.
+signal(SIGPIPE, SIG_IGN)
+
 // MARK: - Constants
 
 /// ScreenCaptureKit cold-starts just beyond two seconds on hosted macOS runners.
@@ -249,7 +252,7 @@ case let .captureSimulator(windowID, fps, audio, encode):
         exit(1)
     }
 
-    let sink = FileHandleFrameSink(handle: .standardOutput)
+    let sink = FileHandleFrameSink(handle: .standardOutput) { _ = kill(getpid(), SIGTERM) }
     let writer = FrameWriter(sink: sink)
     let metricsReporter = FrameMetricsReporter(writer: writer, output: logError)
     metricsReporter.start()
@@ -348,7 +351,7 @@ case let .capture(deviceID, encode):
     }
     guard let device = resolved else { exit(1) }
 
-    let sink = FileHandleFrameSink(handle: .standardOutput)
+    let sink = FileHandleFrameSink(handle: .standardOutput) { _ = kill(getpid(), SIGTERM) }
     let writer = FrameWriter(sink: sink)
     let metricsReporter = FrameMetricsReporter(writer: writer, output: logError)
     metricsReporter.start()
@@ -376,18 +379,17 @@ case let .capture(deviceID, encode):
         deviceControlChannel = channel
     }
 
-    do {
-        try captureSession.start(device: device)
-    } catch {
-        logError("error: failed to start capture session: \(error)")
-        exit(1)
-    }
-
     installShutdownHandlers {
         metricsReporter.stop()
         deviceControlChannel?.stop()
         captureSession.stop()
         exit(0)
+    }
+    do {
+        try captureSession.start(device: device)
+    } catch {
+        logError("error: failed to start capture session: \(error)")
+        exit(1)
     }
     RunLoop.main.run()
 }

@@ -30,6 +30,8 @@ import {
 
 type TextDirectionSettingKey = "debug.force_rtl" | "force_rtl";
 const MIN_APP_LOCALE_API_LEVEL = 33;
+const ADB_ROOT_TIMEOUT_MS = 30_000;
+const ADB_WAIT_FOR_DEVICE_TIMEOUT_MS = 60_000;
 
 // Bounds for waiting on the framework to come back after the legacy (<33)
 // `stop; start` restart. We poll `sys.boot_completed` rather than racing the
@@ -257,8 +259,13 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
     apiLevel: number,
   ): Promise<{ success: true } | { success: false; error: string }> {
     try {
-      await this.adb.executeCommand("root", undefined, undefined, true);
-      await this.adb.executeCommand("wait-for-device", undefined, undefined, true);
+      await this.adb.executeCommand("root", ADB_ROOT_TIMEOUT_MS, undefined, true);
+      await this.adb.executeCommand(
+        "wait-for-device",
+        ADB_WAIT_FOR_DEVICE_TIMEOUT_MS,
+        undefined,
+        true,
+      );
     } catch (error) {
       const errorMsg = errorMessage(error);
       return {

@@ -28,6 +28,7 @@ describe("ClearAppData", () => {
 
       expect(result).toEqual({ success: true, packageName: "com.example.app", userId: 10 });
       expect(adb.getExecutedCommands()).toEqual(["shell pm clear --user 10 'com.example.app'"]);
+      expect(adb.getCommandCalls()[0]?.timeoutMs).toBe(60_000);
     });
 
     test("uses the package foreground user when no user is explicitly requested", async () => {

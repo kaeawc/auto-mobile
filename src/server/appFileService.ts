@@ -43,6 +43,8 @@ import {
 } from "./iosSimulatorMediaClient";
 import { findBootedDeviceForResource } from "./resourceDeviceResolver";
 
+const APP_FILE_PUSH_TIMEOUT_MS = 120_000;
+
 export type PutAppFileRequest = Omit<PutAppFileArgs, "device"> & {
   device: BootedDevice;
   signal?: AbortSignal;
@@ -574,7 +576,7 @@ class AndroidAppFileProvider
           operation: "write",
           access: "externalFiles",
         },
-        { noRetry: true, signal: request.signal },
+        { noRetry: true, signal: request.signal, timeoutMs: APP_FILE_PUSH_TIMEOUT_MS },
       );
       return;
     }
@@ -590,7 +592,7 @@ class AndroidAppFileProvider
         operation: "write",
         access: "run-as",
       },
-      { noRetry: true, signal: request.signal },
+      { noRetry: true, signal: request.signal, timeoutMs: APP_FILE_PUSH_TIMEOUT_MS },
     );
     try {
       const command =

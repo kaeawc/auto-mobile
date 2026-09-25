@@ -235,6 +235,10 @@ describe("SystemConfigurationAdapter", () => {
       expect(result.localeScope).toBe("system");
       expect(result.previousLanguageTag).toBe("en-US");
       expect(adb.wasCommandExecuted("root")).toBe(true);
+      expect(adb.getCommandCalls().find((call) => call.command === "root")?.timeoutMs).toBe(30_000);
+      expect(
+        adb.getCommandCalls().find((call) => call.command === "wait-for-device")?.timeoutMs,
+      ).toBe(60_000);
       expect(adb.wasCommandExecuted("shell id")).toBe(true);
       expect(adb.wasCommandExecuted("cmd locale set-app-locales")).toBe(false);
       expect(adb.wasCommandExecuted("setprop persist.sys.locale 'ja-JP'")).toBe(true);

@@ -35,6 +35,8 @@ import { InstalledAppsRepository, type InstalledAppsStore } from "../../db/insta
 import { getDbWriteBarrier } from "../../db/dbWriteBarrier";
 import { getInstalledAppsCacheWriteCoordinator } from "../../db/installedAppsCacheWriteCoordinator";
 
+const ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS = 120_000;
+
 export interface DeviceAppInstaller {
   installApp(deviceUdid: string, artifactPath: string): Promise<void>;
 }
@@ -323,7 +325,7 @@ export class InstallApp {
     try {
       const result = await this.adb.executeCommand(
         installArgs,
-        undefined,
+        ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS,
         undefined,
         undefined,
         signal,
@@ -365,7 +367,7 @@ export class InstallApp {
     }
     await this.adb.executeCommand(
       `uninstall ${packageName}`,
-      undefined,
+      ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS,
       undefined,
       undefined,
       signal,

@@ -28,6 +28,7 @@ import {
 } from "./sharedStorageContract";
 
 const DOWNLOADS_DIRECTORY = "Download";
+const SHARED_STORAGE_PUSH_TIMEOUT_MS = 120_000;
 
 interface SharedStorageStats {
   size: number;
@@ -193,7 +194,12 @@ class DefaultSharedStorageService implements SharedStorageService {
       throw new ActionableError(`destinationPath escapes shared-storage namespace ${namespace}`);
     }
     await execute(adb, `shell mkdir -p ${shellQuote(posix.dirname(destination))}`, request.signal);
-    await executeArgs(adb, ["push", file.source.path, destination], request.signal);
+    await executeArgs(
+      adb,
+      ["push", file.source.path, destination],
+      request.signal,
+      SHARED_STORAGE_PUSH_TIMEOUT_MS,
+    );
     const mediaIndexing = shouldIndexMedia(destinationPath, request.indexMedia ?? true)
       ? await indexMediaFile(adb, destination, destinationPath, userId, this.timer, request.signal)
       : {
@@ -238,9 +244,19 @@ async function execute(adb: AdbExecutor, command: string, signal?: AbortSignal):
   }
 }
 
-async function executeArgs(adb: AdbExecutor, args: string[], signal?: AbortSignal): Promise<void> {
+async function executeArgs(
+  adb: AdbExecutor,
+  args: string[],
+  signal?: AbortSignal,
+  timeoutMs?: number,
+): Promise<void> {
   try {
-    await adb.execute(args, { noRetry: true, signal, waitForProcessSettlementAfterAbort: true });
+    await adb.execute(args, {
+      noRetry: true,
+      signal,
+      waitForProcessSettlementAfterAbort: true,
+      timeoutMs,
+    });
   } catch (error) {
     throw new ActionableError(`Android shared-storage operation failed: ${errorMessage(error)}`);
   }

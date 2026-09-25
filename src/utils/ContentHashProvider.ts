@@ -12,6 +12,8 @@ import { toActionableError } from "../models/ActionableError";
 import { logger } from "./logger";
 import { shellQuote } from "./shellQuote";
 
+const APK_PULL_TIMEOUT_MS = 120_000;
+
 /**
  * Derives the content hash of an installed app from its installed bytes (#4984).
  *
@@ -227,7 +229,7 @@ export class AndroidApkContentHasher implements AppContentHasher {
       const digests: string[] = [];
       for (const remote of remotePaths) {
         const localPath = join(workDir, `${digests.length}.apk`);
-        await this.adb.executeCommand(`pull "${remote}" "${localPath}"`);
+        await this.adb.executeCommand(`pull "${remote}" "${localPath}"`, APK_PULL_TIMEOUT_MS);
         const { checksum } = await this.checksum.computeFileSha256(localPath);
         digests.push(`${checksum}  ${remote}`);
       }

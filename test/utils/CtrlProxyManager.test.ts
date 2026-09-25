@@ -100,6 +100,14 @@ describe("CtrlProxyManager", function () {
     }
   });
 
+  test("gives a direct APK install its full transfer budget", async () => {
+    fakeAdb.setCommandResponse("install ", { stdout: "Success", stderr: "" });
+    await accessibilityServiceClient.install("/tmp/ctrlproxy.apk");
+    expect(
+      fakeAdb.getCommandCalls().find((call) => call.command.startsWith("install "))?.timeoutMs,
+    ).toBe(120_000);
+  });
+
   test("quotes a hostile installed APK path before sha256sum", async function () {
     const apkPath = "/data/app/base$(id).apk";
     fakeAdb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {
@@ -500,8 +508,9 @@ describe("CtrlProxyManager", function () {
         includes: (searchString: string) => stdout.includes(searchString),
       });
 
+      let pullTimeoutMs: number | undefined;
       const localFakeAdb: any = {
-        executeCommand: async (command: string) => {
+        executeCommand: async (command: string, timeoutMs?: number) => {
           if (command.includes("shell pm path")) {
             return createExecResult(`package:${expectedApkPath}\n`, "");
           }
@@ -511,6 +520,7 @@ describe("CtrlProxyManager", function () {
           }
 
           if (command.includes("pull")) {
+            pullTimeoutMs = timeoutMs;
             const match = command.match(/pull\s+(".*?"|\S+)\s+(".*?"|\S+)/);
             const localPathRaw = match?.[2]?.replace(/^"(.*)"$/, "$1");
             if (localPathRaw) {
@@ -531,6 +541,7 @@ describe("CtrlProxyManager", function () {
 
       const result = await fallbackClient.getInstalledApkSha256();
       expect(result).toBe(expectedSha);
+      expect(pullTimeoutMs).toBe(120_000);
     });
   });
 
@@ -808,6 +819,10 @@ describe("CtrlProxyManager", function () {
       const result = await manager.ensureCompatibleVersion({ allowDownloadWhenInstalled: true });
       expect(result.status).toBe("upgraded");
       expect(localFakeAdb.wasCommandExecuted("install -r -d")).toBe(true);
+      expect(
+        localFakeAdb.getCommandCalls().find((call) => call.command.startsWith("install -r -d"))
+          ?.timeoutMs,
+      ).toBe(120_000);
     });
 
     test("should install local APK override when explicit update is requested", async function () {
@@ -955,6 +970,11 @@ describe("CtrlProxyManager", function () {
       expect(
         localFakeAdb.wasCommandExecuted(`shell pm uninstall ${AndroidCtrlProxyManager.PACKAGE}`),
       ).toBe(true);
+      expect(
+        localFakeAdb
+          .getCommandCalls()
+          .find((call) => call.command.startsWith("shell pm uninstall "))?.timeoutMs,
+      ).toBe(120_000);
     });
 
     test("fails closed on a pinned mismatch when completed prefetch install fails and old APK remains (#2815)", async function () {

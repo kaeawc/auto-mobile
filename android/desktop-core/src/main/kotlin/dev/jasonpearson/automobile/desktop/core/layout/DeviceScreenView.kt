@@ -399,6 +399,7 @@ fun DeviceScreenView(
   showTapTargetIssues: Boolean = false,
   onToggleTapTargetIssues: () -> Unit = {},
   connectionStatus: ConnectionStatus = ConnectionStatus.Connected,
+  hierarchyUnavailableReason: String? = null,
   socketExists: Boolean = true,
   onRestartDaemon: (() -> Unit)? = null,
   elementMap: Map<String, UIElementInfo>? = null,
@@ -1164,6 +1165,13 @@ fun DeviceScreenView(
               contentAlignment = Alignment.Center,
             ) {
               when {
+                hierarchyUnavailableReason != null -> {
+                  Text(
+                    "Hierarchy unavailable - $hierarchyUnavailableReason. Try getApple / reprovision.",
+                    color = colors.text.normal,
+                    fontSize = 12.sp,
+                  )
+                }
                 connectionStatus == ConnectionStatus.Disconnected && !socketExists -> {
                   // Daemon is down - show restart button
                   Column(
@@ -1236,6 +1244,15 @@ fun DeviceScreenView(
                 }
               }
             }
+          }
+          if (imageBitmap != null && hierarchyUnavailableReason != null) {
+            Text(
+              "Hierarchy unavailable - $hierarchyUnavailableReason. Try getApple / reprovision.",
+              modifier =
+                Modifier.align(Alignment.TopCenter).background(Color(0xDD1A1A1A)).padding(8.dp),
+              color = colors.text.normal,
+              fontSize = 12.sp,
+            )
           }
         }
 

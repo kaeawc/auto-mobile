@@ -440,6 +440,40 @@ describe("ViewHierarchy", function () {
       }
     });
 
+    test.each([
+      ["simulator_not_booted", undefined],
+      ["auto_setup_failed", "runner install failed"],
+    ] as const)("reports iOS hierarchy unavailable reason %s", async (reason, detail) => {
+      const iosDevice: BootedDevice = {
+        deviceId: "test-ios-device",
+        name: "Test iPhone",
+        platform: "ios",
+      };
+      const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+        getLatestHierarchy: async () => ({
+          hierarchy: null,
+          fresh: false,
+          unavailableReason: reason,
+          unavailableDetail: detail,
+        }),
+      } as any);
+      try {
+        const subject = new ViewHierarchy(
+          iosDevice,
+          new FakeAdbClientFactory(fakeAdb),
+          mockCtrlProxyClient,
+        );
+        const result = await subject.getiOSViewHierarchy();
+        expect(result.hierarchy.iosUnavailableReason).toBe(reason);
+        expect(result.hierarchy.error).toContain(reason);
+        if (detail) {
+          expect(result.hierarchy.error).toContain(detail);
+        }
+      } finally {
+        getInstanceSpy.mockRestore();
+      }
+    });
+
     test("preserves iOS CtrlProxy reconnect metadata on stale cached hierarchy", async function () {
       const iosDevice: BootedDevice = {
         deviceId: "test-ios-device",

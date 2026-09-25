@@ -136,6 +136,8 @@ export interface ContentHiddenRegion {
 
 export interface Hierarchy {
   error?: string;
+  /** Why an iOS CtrlProxy hierarchy could not be retrieved. */
+  iosUnavailableReason?: IosHierarchyUnavailableReason;
   node?: ViewHierarchyNode;
   /** iOS root XCTestNode bounds (points): {left, top, right, bottom} */
   bounds?: { left?: number; top?: number; right: number; bottom: number };
@@ -150,6 +152,14 @@ export interface Hierarchy {
    */
   transportFailure?: boolean;
 }
+
+export type IosHierarchyUnavailableReason =
+  | "runner_not_running"
+  | "connection_lost"
+  | "simulator_not_booted"
+  | "request_timed_out"
+  | "auto_setup_failed"
+  | "unknown";
 
 export interface ViewHierarchyWindowInfo {
   id?: number;

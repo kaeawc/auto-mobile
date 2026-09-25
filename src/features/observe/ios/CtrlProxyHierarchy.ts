@@ -6,6 +6,7 @@
  */
 
 import type { SemanticLink, ViewHierarchyResult } from "../../../models";
+import type { IosHierarchyUnavailableReason } from "../../../models/ViewHierarchyResult";
 import { isDeepStrictEqual } from "node:util";
 import { screenScaleMetadataSpread } from "../../../models/ScreenScaleMetadata";
 import type { ViewHierarchyQueryOptions } from "../../../models/ViewHierarchyQueryOptions";
@@ -48,6 +49,7 @@ export const IOS_HIERARCHY_REQUEST_TIMEOUT_MS = 15000;
  */
 export class CtrlProxyHierarchy {
   private readonly context: HierarchyDelegateContext;
+  private lastRequestFailure?: { reason: IosHierarchyUnavailableReason; detail?: string };
 
   // Track the last known foreground app to detect stale cache from a different app
   private lastKnownPackageName: string | null = null;
@@ -221,6 +223,7 @@ export class CtrlProxyHierarchy {
       cacheStale ||
       cachedIsSpringboard
     ) {
+      this.lastRequestFailure = undefined;
       if (cacheStale && skipWaitForFresh && !cacheInvalidated) {
         logger.debug(
           `[CTRL_PROXY] Cached hierarchy is ${cachedCaptureAgeMs}ms old (budget ${maxObservationAgeMs()}ms); forcing a synchronous re-verification`,
@@ -316,7 +319,12 @@ export class CtrlProxyHierarchy {
       };
     }
 
-    return { hierarchy: null, fresh: false };
+    return {
+      hierarchy: null,
+      fresh: false,
+      unavailableReason: this.lastRequestFailure?.reason ?? "unknown",
+      unavailableDetail: this.lastRequestFailure?.detail,
+    };
   }
 
   private buildReconnectMessage(retryAfterSeconds: number): string {
@@ -333,16 +341,16 @@ export class CtrlProxyHierarchy {
     deadlineMs: number,
     perf: PerformanceTracker | undefined,
     signal: AbortSignal | undefined,
-  ): Promise<boolean> {
+  ): Promise<"connected" | "failed" | "timeout"> {
     throwIfAborted(signal);
     const remainingMs = deadlineMs - this.context.timer.now();
     if (remainingMs <= 0) {
-      return false;
+      return "timeout";
     }
 
-    return new Promise<boolean>((resolve, reject) => {
+    return new Promise<"connected" | "failed" | "timeout">((resolve, reject) => {
       let settled = false;
-      const settle = (result: boolean | Error) => {
+      const settle = (result: "connected" | "failed" | "timeout" | Error) => {
         if (settled) {
           return;
         }
@@ -357,11 +365,11 @@ export class CtrlProxyHierarchy {
       };
       const onAbort = () =>
         settle(signal?.reason instanceof Error ? signal.reason : new Error("Operation cancelled"));
-      const timeout = this.context.timer.setTimeout(() => settle(false), remainingMs);
+      const timeout = this.context.timer.setTimeout(() => settle("timeout"), remainingMs);
 
       signal?.addEventListener("abort", onAbort, { once: true });
       void this.context.ensureConnected(perf).then(
-        (connected) => settle(connected),
+        (connected) => settle(connected ? "connected" : "failed"),
         (error: unknown) => settle(error instanceof Error ? error : new Error(String(error))),
       );
     });
@@ -383,7 +391,12 @@ export class CtrlProxyHierarchy {
   } | null> {
     const deadlineMs = this.context.timer.now() + Math.max(0, timeoutMs);
     throwIfAborted(signal);
-    if (!(await this.ensureConnectedBeforeDeadline(deadlineMs, perf, signal))) {
+    const connection = await this.ensureConnectedBeforeDeadline(deadlineMs, perf, signal);
+    if (connection !== "connected") {
+      this.lastRequestFailure =
+        connection === "timeout"
+          ? { reason: "request_timed_out" }
+          : (this.context.getLastConnectFailure?.() ?? { reason: "connection_lost" });
       return null;
     }
     // Connection establishment can include iOS runner setup. It is not
@@ -394,6 +407,7 @@ export class CtrlProxyHierarchy {
     }
     const remainingTimeoutMs = deadlineMs - this.context.timer.now();
     if (remainingTimeoutMs <= 0) {
+      this.lastRequestFailure = { reason: "request_timed_out" };
       return null;
     }
 
@@ -461,6 +475,7 @@ export class CtrlProxyHierarchy {
         };
       }
 
+      this.lastRequestFailure = { reason: "request_timed_out" };
       return null;
     } finally {
       signal?.removeEventListener("abort", rejectOnAbort);

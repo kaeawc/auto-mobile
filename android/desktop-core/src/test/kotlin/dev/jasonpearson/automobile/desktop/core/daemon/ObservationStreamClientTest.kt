@@ -23,6 +23,13 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withTimeout
 
 class ObservationStreamClientTest {
+  @Test
+  fun `read error log includes exception class when message is null`() {
+    val message = ObservationStreamClient.readErrorLogMessage(java.net.SocketException())
+    assertTrue(message.contains("SocketException"))
+    assertFalse(message.contains("null"))
+  }
+
   // Uses the same configuration as ObservationStreamClient so these assertions match the socket.
   private val wireJson = DaemonJson
 

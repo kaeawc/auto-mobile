@@ -294,6 +294,37 @@ describe("IOSCtrlProxyClient", function () {
   };
 
   describe("connection lifecycle", function () {
+    test.each([
+      ["simulator_not_booted", false, "unused"],
+      ["auto_setup_failed", true, "runner install failed"],
+    ] as const)("records %s from failed connection", async (reason, booted, message) => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const manager = {
+        isRunning: async () => false,
+        setup: async () => ({ success: false, message }),
+      } as unknown as CtrlProxyIosManager;
+      const client = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        createInstantFailureWebSocketFactory(timer),
+        timer,
+        () => manager,
+        async () => (booted ? [testDevice] : []),
+      );
+      (client as any).autoReconnectEnabled = false;
+      try {
+        expect(await client.ensureConnected()).toBe(false);
+        const failure = (client as any).createHierarchyDelegateContext().getLastConnectFailure();
+        expect(failure.reason).toBe(reason);
+        if (booted) {
+          expect(failure.detail).toBe(message);
+        }
+      } finally {
+        await client.close();
+      }
+    });
+
     test("cancels screenshot backoff when the connection closes", function () {
       const scheduler = new FakeScreenshotBackoffScheduler();
 

@@ -97,7 +97,12 @@ fun LayoutInspectorDashboard(
           )
           dashboardLog.info("Updated state with new hierarchy")
         } else {
-          dashboardLog.warn("Failed to parse hierarchy from JSON")
+          if (
+            frameGeneration == state.frameGeneration &&
+              !state.recordHierarchyUnavailable(hierarchyJson)
+          ) {
+            dashboardLog.warn("Failed to parse hierarchy from JSON")
+          }
         }
       }
     }
@@ -267,6 +272,7 @@ fun LayoutInspectorDashboard(
         showTapTargetIssues = state.showTapTargetIssues,
         onToggleTapTargetIssues = { state.toggleTapTargetIssues() },
         connectionStatus = state.connectionStatus,
+        hierarchyUnavailableReason = state.hierarchyUnavailableReason,
         socketExists = socketExists,
         onRestartDaemon = onRestartDaemon,
         elementMap = state.currentElementMap.takeIf { it.isNotEmpty() },

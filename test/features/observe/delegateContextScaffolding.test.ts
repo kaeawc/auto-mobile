@@ -152,6 +152,7 @@ describe("DelegateContext scaffolding (issue #5458)", () => {
         "cancelScreenshotBackoff",
         "ensureConnected",
         "getCachedHierarchy",
+        "getLastConnectFailure",
         "getReconnectStatus",
         "getSupportedCommands",
         "getWebSocket",

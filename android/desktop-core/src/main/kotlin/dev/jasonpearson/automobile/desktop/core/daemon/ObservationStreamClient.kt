@@ -102,6 +102,15 @@ class ObservationStreamClient(
 ) : ObservationStream {
   companion object {
     private const val STORAGE_UPDATE_BUFFER_CAPACITY = 64
+    private const val READ_ERROR_LOG_INTERVAL_MS = 5_000L
+
+    internal fun readErrorLogMessage(error: Exception): String {
+      val cause =
+        error.cause?.let {
+          "; cause=${it::class.simpleName}${it.message?.let { message -> ": $message" } ?: ""}"
+        } ?: ""
+      return "Error reading from observation stream: ${error::class.simpleName}${error.message?.let { ": $it" } ?: ""}$cause"
+    }
 
     internal fun getSocketPath(): String =
       AutoMobileSocketPaths.socketPath("observation-stream.sock")
@@ -110,6 +119,7 @@ class ObservationStreamClient(
   }
 
   private val log = LoggerFactory.getLogger(ObservationStreamClient::class.java)
+  private var lastReadErrorLogAtMs: Long? = null
   private val json = DaemonJson
   private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -495,7 +505,16 @@ class ObservationStreamClient(
       }
       log.info("Read loop ended - connected=${_connectionState.value.isConnected}")
     } catch (e: Exception) {
-      log.warn("Error reading from observation stream: ${e.message}", e)
+      val nowMs = System.nanoTime() / 1_000_000L
+      val shouldLog =
+        synchronized(ownershipLock) {
+          val last = lastReadErrorLogAtMs
+          if (last == null || nowMs - last >= READ_ERROR_LOG_INTERVAL_MS) {
+            lastReadErrorLogAtMs = nowMs
+            true
+          } else false
+        }
+      if (shouldLog) log.warn(readErrorLogMessage(e), e)
     }
 
     // Death point (EOF or read error). Clear the transport and publish Disconnected ONLY while we

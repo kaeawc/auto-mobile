@@ -53,6 +53,14 @@ export type CaptureSourceFactory = (options: {
   fps?: number;
 }) => Promise<H264CaptureSource>;
 
+function tracksConsumers(
+  source: H264CaptureSource | null,
+): source is H264CaptureSource & { setHasConsumers(hasConsumers: boolean): void } {
+  return (
+    source !== null && "setHasConsumers" in source && typeof source.setHasConsumers === "function"
+  );
+}
+
 export interface VideoStreamSocketServerDependencies {
   createCaptureSource: CaptureSourceFactory;
   resolveDevice: (deviceId?: string) => Promise<BootedDevice>;
@@ -401,6 +409,9 @@ export class VideoStreamSocketServer extends BaseSocketServer {
       this.clearIdleTimer(existing);
       logIgnoredLateHints(deviceId, request);
       existing.pendingSubscribers.add(socket);
+      if (tracksConsumers(existing.source)) {
+        existing.source.setHasConsumers(true);
+      }
       this.socketDeviceIds.set(socket, deviceId);
       await existing.startup;
       this.promoteSubscriber(existing, socket, true);
@@ -487,6 +498,9 @@ export class VideoStreamSocketServer extends BaseSocketServer {
           throw new ActionableError(`Video capture for ${deviceId} was stopped during startup.`);
         }
         capture.source = source;
+        if (tracksConsumers(source)) {
+          source.setHasConsumers(this.hasSubscribers(capture));
+        }
         await source.start();
         if (
           this.captures.get(deviceId) !== capture ||
@@ -693,6 +707,9 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     capture.backpressuredSubscribers.delete(socket);
     capture.waitingForKeyFrame.delete(socket);
     if (!this.hasSubscribers(capture)) {
+      if (tracksConsumers(capture.source)) {
+        capture.source.setHasConsumers(false);
+      }
       this.clearIdleTimer(capture);
       capture.idleTimer = this.timer.setTimeout(() => {
         capture.idleTimer = null;

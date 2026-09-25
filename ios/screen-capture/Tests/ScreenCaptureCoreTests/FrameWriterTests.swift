@@ -1,8 +1,9 @@
 // swiftlint:disable force_unwrapping
 // Force-unwrap is idiomatic in test fixtures (fail fast on bad setup); disabled file-wide.
 
-import XCTest
+import Darwin
 @testable import ScreenCaptureCore
+import XCTest
 
 final class BufferSink: FrameSink {
     var data = Data()
@@ -49,6 +50,25 @@ final class BlockingPayloadSink: FrameSink {
 }
 
 final class FrameWriterTests: XCTestCase {
+    func testClosedOutputNotifiesOnceWithoutTrapping() {
+        var descriptors: [Int32] = [0, 0]
+        XCTAssertEqual(pipe(&descriptors), 0)
+        defer { _ = close(descriptors[0]) }
+        _ = close(descriptors[1])
+
+        let closed = DispatchSemaphore(value: 0)
+        let sink = FileHandleFrameSink(
+            handle: FileHandle(fileDescriptor: descriptors[1], closeOnDealloc: false)
+        ) {
+            closed.signal()
+        }
+        sink.write(Data([1]))
+        sink.write(Data([2]))
+
+        XCTAssertEqual(closed.wait(timeout: .now()), .success)
+        XCTAssertEqual(closed.wait(timeout: .now()), .timedOut)
+    }
+
     func testRecordsEncoderDroppedFrameInMetrics() {
         let writer = FrameWriter(sink: BufferSink())
 
@@ -66,7 +86,7 @@ final class FrameWriterTests: XCTestCase {
         let height = 3
         let bytesPerRow = 8
         // 24 bytes of BGRA: 2px × 3 rows × 4 bytes
-        let payload = Array(0..<UInt8(bytesPerRow * height))
+        let payload = Array(0 ..< UInt8(bytesPerRow * height))
 
         _ = payload.withUnsafeBufferPointer { ptr in
             writer.write(
@@ -151,8 +171,8 @@ final class FrameWriterTests: XCTestCase {
         )
         let first: [UInt8] = [0x11, 0x11, 0x11, 0x11]
         let newest: [UInt8] = [0x33, 0x33, 0x33, 0x33]
-        let firstAudio = Data([0xaa, 0xaa, 0xaa, 0xaa])
-        let secondAudio = Data([0xbb, 0xbb, 0xbb, 0xbb])
+        let firstAudio = Data([0xAA, 0xAA, 0xAA, 0xAA])
+        let secondAudio = Data([0xBB, 0xBB, 0xBB, 0xBB])
 
         first.withUnsafeBufferPointer { ptr in
             XCTAssertTrue(writer.write(width: 1, height: 1, bytesPerRow: 4, baseAddress: ptr.baseAddress!))
@@ -233,7 +253,7 @@ final class FrameWriterTests: XCTestCase {
         }
         XCTAssertTrue(sink.waitForFirstPayload())
 
-        for _ in 0..<10 {
+        for _ in 0 ..< 10 {
             writer.writeAudio(pcm16le: Data())
         }
 

@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 /// Sink that receives encoded frames. Implementations write to stdout, a file,
@@ -126,7 +127,9 @@ public final class FrameWriter: @unchecked Sendable {
         bytesPerRow: Int,
         baseAddress: UnsafeRawPointer,
         timestamp: Date = Date()
-    ) -> Bool {
+    )
+        -> Bool
+    {
         let elapsedMs = max(0, timestamp.timeIntervalSince(startTime) * 1000)
         let captureTimestampMs = UInt32(truncatingIfNeeded: UInt64(elapsedMs))
 
@@ -143,7 +146,8 @@ public final class FrameWriter: @unchecked Sendable {
         // conversion, so drop the frame instead.
         guard let headerWidth = UInt32(exactly: width),
               let headerHeight = UInt32(exactly: height),
-              let headerBytesPerRow = UInt32(exactly: bytesPerRow) else {
+              let headerBytesPerRow = UInt32(exactly: bytesPerRow)
+        else {
             recordDroppedFrame(captureTimestampMs: captureTimestampMs)
             return false
         }
@@ -175,7 +179,8 @@ public final class FrameWriter: @unchecked Sendable {
     /// video, PCM records cannot be replaced without creating audible gaps.
     public func writeAudio(pcm16le: Data) {
         guard !pcm16le.isEmpty,
-              pcm16le.count <= configuration.maximumPendingAudioBytes else {
+              pcm16le.count <= configuration.maximumPendingAudioBytes
+        else {
             return
         }
         let record = PendingRecord(
@@ -187,7 +192,8 @@ public final class FrameWriter: @unchecked Sendable {
 
         stateLock.lock()
         while pendingAudioBytes + record.payload.count > configuration.maximumPendingAudioBytes,
-              let dropped = pendingAudio.first {
+              let dropped = pendingAudio.first
+        {
             pendingAudio.removeFirst()
             pendingAudioBytes -= dropped.payload.count
         }
@@ -358,12 +364,36 @@ public final class FrameWriter: @unchecked Sendable {
 /// Sink that writes to a `FileHandle` (e.g. `FileHandle.standardOutput`).
 public final class FileHandleFrameSink: FrameSink {
     private let handle: FileHandle
+    private let onOutputClosed: @Sendable () -> Void
+    private let stateLock = NSLock()
+    private var outputClosed = false
 
-    public init(handle: FileHandle) {
+    public init(handle: FileHandle, onOutputClosed: @escaping @Sendable () -> Void = {}) {
         self.handle = handle
+        self.onOutputClosed = onOutputClosed
     }
 
     public func write(_ data: Data) {
-        handle.write(data)
+        guard !stateLock.withLock({ outputClosed }) else { return }
+        data.withUnsafeBytes { bytes in
+            guard let base = bytes.baseAddress else { return }
+            var offset = 0
+            while offset < bytes.count {
+                let written = Darwin.write(handle.fileDescriptor, base.advanced(by: offset), bytes.count - offset)
+                if written > 0 {
+                    offset += written
+                } else if written == -1 && errno == EINTR {
+                    continue
+                } else {
+                    let shouldNotify = stateLock.withLock { () -> Bool in
+                        if outputClosed { return false }
+                        outputClosed = true
+                        return true
+                    }
+                    if shouldNotify { onOutputClosed() }
+                    return
+                }
+            }
+        }
     }
 }

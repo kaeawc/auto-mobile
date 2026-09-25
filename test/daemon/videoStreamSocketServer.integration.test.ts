@@ -41,6 +41,10 @@ class FakeCaptureSource implements H264CaptureSource {
   onStopSettled: (() => void) | null = null;
   onStart: (() => void) | null = null;
   keyFrameRequests = 0;
+  consumerStates: boolean[] = [];
+  setHasConsumers(hasConsumers: boolean): void {
+    this.consumerStates.push(hasConsumers);
+  }
   // When > 0, requestKeyFrame() reports the source is throttling (returns false) this many times
   // before it honors one — modeling the real Android/iOS key-frame rate limiter.
   keyFrameRejectionsRemaining = 0;
@@ -736,12 +740,14 @@ describe("VideoStreamSocketServer", () => {
 
     first.socket.destroy();
     await waitFor(() => h.server.subscriberCount(DEVICE.deviceId) === 0);
+    expect(h.sources[0].consumerStates.at(-1)).toBe(false);
     fakeTimer.advanceTime(1_500);
     const second = await subscribe(h.socketPath);
 
     expect(second.ack.success).toBe(true);
     expect(h.sources).toHaveLength(1);
     expect(h.sources[0].stopped).toBe(false);
+    expect(h.sources[0].consumerStates.at(-1)).toBe(true);
     expect(h.sources[0].keyFrameRequests).toBeGreaterThan(keyFrameRequests);
     fakeTimer.advanceTime(1_500);
     expect(h.sources[0].stopped).toBe(false);

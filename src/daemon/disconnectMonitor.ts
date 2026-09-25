@@ -56,6 +56,62 @@ export interface DisconnectMonitorEvaluationInput {
   missThreshold: number;
 }
 
+/**
+ * Drop attempted-recovery entries for devices no longer worth tracking: gone
+ * from the candidate set (session ended / device removed) or no longer
+ * observed `offline` (recovered, or now genuinely absent). Keeping the
+ * attempted-set pruned lets a LATER offline episode for the same serial
+ * trigger a fresh recovery attempt rather than being silently skipped
+ * forever (#7536).
+ *
+ * Note: a failed offline-state probe reports an empty `offlineDeviceIds` (the
+ * caller's best-effort degrade), which this function reads no differently
+ * than "every tracked serial recovered" — it prunes every attempted entry, so
+ * a still-offline serial re-arms exactly one more reconnect on the next
+ * successful probe rather than staying permanently marked as attempted.
+ */
+export function pruneStaleOfflineRecoveryAttempts(
+  attempted: ReadonlySet<string>,
+  candidateDeviceIds: ReadonlySet<string>,
+  offlineDeviceIds: ReadonlySet<string>,
+): Set<string> {
+  return new Set(
+    [...attempted].filter(
+      (deviceId) => candidateDeviceIds.has(deviceId) && offlineDeviceIds.has(deviceId),
+    ),
+  );
+}
+
+/**
+ * Session-bound serials seen ADB `offline` this sweep that have not yet had
+ * a bounded `adb reconnect offline` recovery attempt this episode (#7536).
+ * Recovery is one-shot per episode: once a serial is marked attempted (by the
+ * caller, using this function's return value), it is not retried again until
+ * {@link pruneStaleOfflineRecoveryAttempts} clears it — either because the
+ * serial recovered/left `offline`, or because it dropped out of the
+ * candidate set entirely.
+ *
+ * Excludes any serial with an in-flight `provisionDevice`/`startDevice` lease
+ * (`inFlightStartupDeviceIds`): `AndroidEmulatorClient`'s own fresh-provision
+ * readiness wait (`maybeRecoverFreshOffline`, #7054/#7078) already owns
+ * bounded offline recovery for that serial on its own 15s threshold, so this
+ * monitor-level reconnect would be redundant at best and, at worst, a second
+ * concurrent `adb reconnect offline` racing the readiness wait's own dispatch.
+ */
+export function selectOfflineRecoveryCandidates(
+  offlineDeviceIds: ReadonlySet<string>,
+  candidateDeviceIds: ReadonlySet<string>,
+  alreadyAttempted: ReadonlySet<string>,
+  inFlightStartupDeviceIds: ReadonlySet<string> = new Set(),
+): string[] {
+  return [...offlineDeviceIds].filter(
+    (deviceId) =>
+      candidateDeviceIds.has(deviceId) &&
+      !alreadyAttempted.has(deviceId) &&
+      !inFlightStartupDeviceIds.has(deviceId),
+  );
+}
+
 export function evaluateDeviceDisconnects(
   input: DisconnectMonitorEvaluationInput,
 ): DisconnectMonitorEvaluation {

@@ -162,7 +162,9 @@ import { AvdManagerService } from "../utils/android-cmdline-tools/AvdManagerServ
 import type { AvdManager } from "../utils/android-cmdline-tools/interfaces/AvdManager";
 import {
   evaluateDeviceDisconnects,
+  pruneStaleOfflineRecoveryAttempts,
   recordingCandidateIncarnations,
+  selectOfflineRecoveryCandidates,
   type DisconnectCandidateIncarnation,
 } from "./disconnectMonitor";
 import { describeUnknownError, errorMessage } from "../utils/describeUnknownError";
@@ -314,6 +316,10 @@ export class Daemon {
   private confirmedDisconnectedDeviceIds: Set<string> = new Set();
   private forceDisconnectedDeviceIds: Set<string> = new Set();
   private forceDisconnectedDeviceGenerations: Map<string, number> = new Map();
+  // Serials that already had one bounded 'adb reconnect offline' this offline
+  // episode (#7536). Pruned each sweep by pruneStaleOfflineRecoveryAttempts so
+  // a later episode for the same serial gets a fresh attempt.
+  private offlineRecoveryAttemptedDeviceIds: Set<string> = new Set();
   private stoppingRecordings: Set<string> = new Set();
   private sessionManager: SessionManager;
   private devicePool: DevicePool;
@@ -1929,6 +1935,60 @@ export class Daemon {
             candidateDeviceIds.add(deviceId);
           }
 
+          // Online-ness is otherwise binary: an in-session Android emulator
+          // that dropped to ADB `offline` looks identical to one that is
+          // fully gone, since bootedDeviceIds only ever contains `device`
+          // -state serials. Ask only about candidates already missing from
+          // that list, so a fully-healthy sweep never pays for this extra
+          // `devices -l` probe (#7536).
+          const missingAndroidCandidateIds = new Set(
+            [...candidateDeviceIds].filter(
+              (deviceId) =>
+                !bootedDeviceIds.has(deviceId) && candidatePlatforms.get(deviceId) === "android",
+            ),
+          );
+          const offlineDeviceIds =
+            missingAndroidCandidateIds.size > 0
+              ? await deviceManager.getAndroidOfflineDeviceIds(missingAndroidCandidateIds)
+              : new Set<string>();
+          this.offlineRecoveryAttemptedDeviceIds = pruneStaleOfflineRecoveryAttempts(
+            this.offlineRecoveryAttemptedDeviceIds,
+            candidateDeviceIds,
+            offlineDeviceIds,
+          );
+          // A serial that is mid-provisionDevice/startDevice already has its
+          // own bounded offline recovery: AndroidEmulatorClient's
+          // fresh-provision readiness wait (maybeRecoverFreshOffline, #7054/
+          // #7078) owns that serial's `adb reconnect offline` on its own 15s
+          // threshold. Deferring to it here mirrors how the ADB-reset cohort
+          // path (below) defers on the same in-flight-startup lease, so the
+          // monitor never races a second reconnect against the readiness
+          // wait's own dispatch.
+          const inFlightStartupOfflineDeviceIds = new Set(
+            [...offlineDeviceIds].filter((deviceId) =>
+              this.devicePool.isDeviceLeasedForAndroidStartup(deviceId),
+            ),
+          );
+          const offlineRecoveryTargets = selectOfflineRecoveryCandidates(
+            offlineDeviceIds,
+            candidateDeviceIds,
+            this.offlineRecoveryAttemptedDeviceIds,
+            inFlightStartupOfflineDeviceIds,
+          );
+          if (offlineRecoveryTargets.length > 0) {
+            for (const deviceId of offlineRecoveryTargets) {
+              this.offlineRecoveryAttemptedDeviceIds.add(deviceId);
+            }
+            logger.warn(
+              `[DisconnectMonitor] In-session device(s) ADB-offline (${offlineRecoveryTargets.join(", ")}); attempting bounded 'adb reconnect offline' recovery before miss-counting`,
+            );
+            // Global re-detect (adb has no per-serial reconnect target), one
+            // shot per offline episode; failures are logged and swallowed
+            // inside recoverAndroidOfflineDevices so a probe or recovery
+            // hiccup here never blocks the miss-count/disconnect path below.
+            await deviceManager.recoverAndroidOfflineDevices();
+          }
+
           const disconnectResult = evaluateDeviceDisconnects({
             deviceDisconnectMisses: this.deviceDisconnectMisses,
             confirmedDisconnectedDeviceIds: this.confirmedDisconnectedDeviceIds,
@@ -1951,8 +2011,9 @@ export class Daemon {
           }
 
           for (const { deviceId, misses } of disconnectResult.missed) {
+            const missState = offlineDeviceIds.has(deviceId) ? "offline" : "absent";
             logger.info(
-              `[DisconnectMonitor] Device ${deviceId} not in booted list (miss ${misses}/${DEVICE_DISCONNECT_MISS_THRESHOLD}, booted=${bootedDeviceIds.size})`,
+              `[DisconnectMonitor] Device ${deviceId} not in booted list (${missState}, miss ${misses}/${DEVICE_DISCONNECT_MISS_THRESHOLD}, booted=${bootedDeviceIds.size})`,
             );
           }
 
@@ -2124,6 +2185,7 @@ export class Daemon {
               this.confirmedDisconnectedDeviceIds.add(deviceId);
               this.deviceDisconnectMisses.delete(deviceId);
               this.deviceDisconnectMissIncarnations.delete(deviceId);
+              this.offlineRecoveryAttemptedDeviceIds.delete(deviceId);
               if (
                 this.forceDisconnectedDeviceGenerations.get(deviceId) ===
                 forceGenerationAtDisconnect

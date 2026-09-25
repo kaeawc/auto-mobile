@@ -1294,17 +1294,86 @@ export class AndroidEmulatorClient implements AndroidEmulator {
         `${now - offlineSince}ms; attempting 'adb reconnect offline' recovery`,
     );
     try {
-      await this.adbFactory
-        .create(null)
-        // One-shot recovery: noRetry keeps the real AdbClient from routing this
-        // through its retry executor (up to MAX_ADB_RETRIES + 1 executions), so
-        // one logical recovery issues exactly one reconnect command (#7054).
-        .executeCommand("reconnect offline", commandTimeoutMs, undefined, true, signal);
+      await this.issueReconnectOffline(commandTimeoutMs, signal);
     } catch (error) {
       this.throwIfReadinessAborted(signal);
       // Best-effort recovery: readiness polling continues through its deadline.
       logger.warn(
         `'adb reconnect offline' recovery for ${deviceId} failed: ${errorMessage(error)}`,
+        error,
+      );
+    }
+  }
+
+  /**
+   * Issue exactly one adb reconnect offline re-detect. Shared by the
+   * fresh-provision readiness recovery ({@link dispatchFreshOfflineReconnect})
+   * and the disconnect monitor's in-session offline recovery
+   * ({@link recoverOfflineDevices}, #7536): noRetry keeps the real AdbClient
+   * from routing this through its retry executor (up to MAX_ADB_RETRIES + 1
+   * executions), so one logical recovery issues exactly one reconnect command
+   * (#7054).
+   */
+  private async issueReconnectOffline(timeoutMs: number, signal: AbortSignal | undefined) {
+    await this.adbFactory
+      .create(null)
+      .executeCommand("reconnect offline", timeoutMs, undefined, true, signal);
+  }
+
+  /**
+   * Among the given candidate serials, which ones adb devices -l currently
+   * reports as ADB offline rather than absent. Used by the disconnect
+   * monitor to distinguish an in-session emulator that dropped its transport
+   * from one that is genuinely gone (#7536): both look identical to the
+   * online-only getBootedDevices filter.
+   *
+   * Best-effort: a probe failure returns an empty set rather than throwing,
+   * so a missing offline-state signal never blocks disconnect-monitor
+   * evaluation itself.
+   */
+  async getOfflineDeviceIdsAmong(
+    candidateIds: Iterable<string>,
+    options: { timeoutMs?: number; signal?: AbortSignal } = {},
+  ): Promise<Set<string>> {
+    const candidates = new Set(candidateIds);
+    if (candidates.size === 0) {
+      return new Set();
+    }
+    let states: AdbDeviceState[];
+    try {
+      states = (await this.adbFactory.create(null).getDeviceStates?.(options)) ?? [];
+    } catch (error) {
+      // Auxiliary diagnostic probe, same posture as detectOfflineFailure's own
+      // getDeviceStates() call: a failure here must not block or fail the
+      // disconnect monitor's sweep.
+      logger.debug(`Offline-state probe failed while checking candidates: ${errorMessage(error)}`);
+      return new Set();
+    }
+    return new Set(
+      states
+        .filter((state) => state.state === "offline" && candidates.has(state.deviceId))
+        .map((state) => state.deviceId),
+    );
+  }
+
+  /**
+   * Bounded, best-effort recovery for session-bound serial(s) the disconnect
+   * monitor observed stuck in ADB offline (#7536). adb reconnect offline
+   * has no per-serial target — it re-detects every currently offline
+   * device — so one dispatch covers every candidate returned by
+   * {@link getOfflineDeviceIdsAmong}. Never throws except on abort: recovery
+   * failure here must not fail or block the disconnect monitor's sweep.
+   */
+  async recoverOfflineDevices(
+    options: { timeoutMs?: number; signal?: AbortSignal } = {},
+  ): Promise<void> {
+    const timeoutMs = options.timeoutMs ?? FRESH_OFFLINE_RECOVERY_COMMAND_TIMEOUT_MS;
+    try {
+      await this.issueReconnectOffline(timeoutMs, options.signal);
+    } catch (error) {
+      this.throwIfReadinessAborted(options.signal);
+      logger.warn(
+        `'adb reconnect offline' recovery for in-session offline device(s) failed: ${errorMessage(error)}`,
         error,
       );
     }

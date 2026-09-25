@@ -6,10 +6,14 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.runComposeUiTest
 import dev.jasonpearson.automobile.desktop.core.video.FakeVideoStreamSource
 import dev.jasonpearson.automobile.desktop.core.video.VideoStreamState
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.channels.Channel
 
 @OptIn(ExperimentalTestApi::class)
 class LiveVideoStreamTest {
@@ -195,6 +199,48 @@ class LiveVideoStreamTest {
     source.becomeUnavailable("Live mirroring stopped")
     waitUntil(timeoutMillis = 2_000) { source.state.value is VideoStreamState.Streaming }
   }
+
+  @Test
+  fun `auto-reconnect backs off across refused subscribes and resets after success`() =
+    runComposeUiTest {
+      val source = FakeVideoStreamSource(refuseWith = "Subscribe refused", connectThenRefuse = true)
+      val requestedDelays = CopyOnWriteArrayList<Long>()
+      val delayPermits = Channel<Unit>(Channel.UNLIMITED)
+      val cancelledDelays = AtomicInteger()
+      setContent {
+        rememberLiveVideoFrame(
+          source,
+          "emulator-5554",
+          autoReconnect = true,
+          reconnectInitialMs = 10,
+          delayMs = { ms ->
+            requestedDelays += ms
+            try {
+              delayPermits.receive()
+            } catch (cancelled: CancellationException) {
+              cancelledDelays.incrementAndGet()
+              throw cancelled
+            }
+          },
+          stallReconnectMs = null,
+          firstFrameTimeoutMs = null,
+        )
+      }
+
+      for ((index, expected) in listOf(10L, 20L, 40L, 80L).withIndex()) {
+        waitUntil { requestedDelays.size == index + 1 }
+        assertEquals(expected, requestedDelays[index])
+        if (expected != 80L) delayPermits.trySend(Unit).getOrThrow()
+      }
+      assertEquals(listOf(10L, 20L, 40L, 80L), requestedDelays.toList())
+
+      source.becomeStreaming()
+      waitUntil { cancelledDelays.get() == 1 }
+      waitForIdle()
+      source.becomeUnavailable("Subscribe refused again")
+      waitUntil { requestedDelays.size == 5 }
+      assertEquals(listOf(10L, 20L, 40L, 80L, 10L), requestedDelays.toList())
+    }
 
   @Test
   fun `auto-reconnect resumes after Screen Recording is granted`() = runComposeUiTest {

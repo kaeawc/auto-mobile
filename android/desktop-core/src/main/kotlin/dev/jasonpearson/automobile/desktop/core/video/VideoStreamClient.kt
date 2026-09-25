@@ -482,6 +482,7 @@ class FakeVideoStreamSource(
    * exercising the first-frame-deadline watchdog.
    */
   private val holdConnecting: Boolean = false,
+  private val connectThenRefuse: Boolean = false,
 ) : VideoStreamSource {
   private val fakeSequence = java.util.concurrent.atomic.AtomicLong(0L)
 
@@ -509,6 +510,11 @@ class FakeVideoStreamSource(
   override fun connect(deviceId: String?) {
     connectCalls++
     connectedDeviceId = deviceId
+    if (connectThenRefuse && refuseWith != null) {
+      _state.value = VideoStreamState.Connecting
+      _state.value = VideoStreamState.Unavailable(refuseWith)
+      return
+    }
     _state.value =
       when {
         !available -> VideoStreamState.Unavailable("Live mirroring is unavailable on this daemon")

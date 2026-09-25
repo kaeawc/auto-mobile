@@ -3,6 +3,14 @@ import type { MatchingStrategy } from "../models/DeviceMatchCriteria";
 export const DEFAULT_DEVICE_RECOVERY_MAX_ATTEMPTS = 2;
 export const MAX_DEVICE_RECOVERY_ATTEMPTS = 10;
 
+/**
+ * Default rolling window, in milliseconds, that the Android crash-recovery
+ * budget counts attempts over. Kept separate from {@link DeviceRecoveryPolicy}
+ * (resolved once at startup and asserted with `toEqual` in several tests) so
+ * this purely Android-reboot-timing knob doesn't reshape that struct (#7545).
+ */
+export const DEFAULT_DEVICE_RECOVERY_WINDOW_MS = 15 * 60 * 1000;
+
 export interface DeviceRecoveryPolicy {
   onLoss: boolean;
   maxAttempts: number;
@@ -82,6 +90,23 @@ export function parseDeviceRecoveryPolicy(env: Environment): DeviceRecoveryPolic
 
 export function getDeviceRecoveryPolicy(): DeviceRecoveryPolicy {
   return parseDeviceRecoveryPolicy(process.env).policy;
+}
+
+/**
+ * Rolling window the Android crash-recovery budget counts attempts over.
+ * Isolated crashes further apart than this age out of the budget instead of
+ * accumulating for the whole daemon lifetime (#7545). Read at construction
+ * time, same as `maxAttempts`, so retries and status agree.
+ */
+export function getDeviceRecoveryWindowMs(env: Environment = process.env): number {
+  const override = firstDefined(env, [
+    "AUTOMOBILE_DEVICE_RECOVERY_WINDOW_MS",
+    "AUTO_MOBILE_DEVICE_RECOVERY_WINDOW_MS",
+  ]);
+  if (override !== undefined && /^[1-9]\d*$/.test(override)) {
+    return Number(override);
+  }
+  return DEFAULT_DEVICE_RECOVERY_WINDOW_MS;
 }
 
 /**

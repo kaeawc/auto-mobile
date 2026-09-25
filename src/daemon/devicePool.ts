@@ -29,6 +29,7 @@ import {
 import { createGlobalPerformanceTracker } from "../utils/PerformanceTracker";
 import {
   getDeviceRecoveryPolicy,
+  getDeviceRecoveryWindowMs,
   type DeviceRecoveryPolicy,
   isDeviceSessionContinuityEnabled,
   isDevicePoolAutolockEnabled,
@@ -852,7 +853,12 @@ export class DevicePool {
       deviceSessionContinuityEnabled,
     );
     this.androidDeviceReboot =
-      androidDeviceReboot ?? new BoundedAndroidDeviceReboot(timer, this.recoveryPolicy.maxAttempts);
+      androidDeviceReboot ??
+      new BoundedAndroidDeviceReboot(
+        timer,
+        this.recoveryPolicy.maxAttempts,
+        getDeviceRecoveryWindowMs(),
+      );
     this.releaseSessionForDisconnectedDevice =
       releaseSessionForDisconnectedDevice ??
       (async (sessionId, _deviceId, releaseReason, shouldCommit) => {
@@ -4482,7 +4488,9 @@ export class DevicePool {
       const recovered = await this.androidDeviceReboot.run(target, async () => {
         if (this.consumeAndroidRecoveryCancellation(device, recoveryDeviceIds)) {
           intentionallyStopped = true;
-          return;
+          // Cancelled before the emulator was touched: don't spend the
+          // crash-loop budget on it (issue #7545).
+          return "cancelled";
         }
         const attempt = ++recoveryAttempt;
         let childProcess: ChildProcess | null = null;

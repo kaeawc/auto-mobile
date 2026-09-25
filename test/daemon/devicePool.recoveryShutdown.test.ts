@@ -91,6 +91,29 @@ class BlockingRecoveryReadyManager extends LaggingShutdownManager {
   }
 }
 
+/**
+ * A `LaggingShutdownManager` whose kill signal can be re-armed for a second
+ * recovery cycle on the same manager instance -- the base class's
+ * `killAccepted` only ever resolves once. Used to verify a cancelled Android
+ * recovery does not spend the crash-loop budget: a second, genuine recovery
+ * on the same AVD name must still be able to relaunch it (#7545).
+ */
+class RearmableShutdownManager extends LaggingShutdownManager {
+  private pendingKillResolvers: Array<() => void> = [];
+
+  override async killDevice(): Promise<void> {
+    await super.killDevice();
+    const resolve = this.pendingKillResolvers.shift();
+    resolve?.();
+  }
+
+  nextKillAccepted(): Promise<void> {
+    return new Promise<void>((resolve) => {
+      this.pendingKillResolvers.push(resolve);
+    });
+  }
+}
+
 class PerAvdBlockingReadyManager extends LaggingShutdownManager {
   readonly kills: string[] = [];
   private readonly readinessStarted = new Map<string, PromiseWithResolvers<void>>();
@@ -2230,4 +2253,55 @@ test("failed-release retry flight excludes overlapping expiry releases", async (
   finish.resolve();
   await release;
   assertNoRecoveryReservationsRemain(pool, "session");
+});
+
+test("a cancelled Android recovery does not spend the crash-loop budget (#7545)", async () => {
+  const manager = new RearmableShutdownManager(original.deviceId);
+  const { timer, sessions, pool, captured } = await setup(manager);
+  try {
+    pool.markIntentionalShutdown(captured.id);
+    const firstKill = manager.nextKillAccepted();
+    const firstRecovery = pool.recoverSessionBoundAndroidDeviceAfterLoss(
+      original.deviceId,
+      undefined,
+      captured,
+    );
+    await firstKill;
+    manager.bootedDevices = [];
+    timer.advanceTime(1_000);
+
+    await expect(firstRecovery).resolves.toBe("released");
+    expect(manager.startedDevices).toHaveLength(0);
+    expect(sessions.getSession("session")).toBeNull();
+
+    // Re-provision the AVD and bind a fresh session, then simulate a
+    // genuine loss. maxAttempts is 1, so this only recovers if the
+    // cancelled attempt above did not spend the budget.
+    manager.bootedDevices = [original];
+    await pool.addDevice(original, image);
+    await pool.bindOrReuseDeviceSession(
+      "session-2",
+      original.deviceId,
+      "android",
+      image,
+      undefined,
+      original,
+    );
+    const recaptured = pool.getDevice(original.deviceId)!;
+
+    const secondKill = manager.nextKillAccepted();
+    const secondRecovery = pool.recoverSessionBoundAndroidDeviceAfterLoss(
+      original.deviceId,
+      undefined,
+      recaptured,
+    );
+    await secondKill;
+    manager.bootedDevices = [];
+    timer.advanceTime(1_000);
+
+    await expect(secondRecovery).resolves.toBe("recovered");
+    expect(manager.startedDevices).toHaveLength(1);
+  } finally {
+    sessions.stopCleanupTimer();
+  }
 });

@@ -4,6 +4,7 @@ import {
   SessionManager,
   SessionActivityPersistenceError,
   SessionRecoveryIdentityLossError,
+  type SessionReleaseSnapshot,
   type BiometricEnrollmentRestorer,
   type KeepScreenAwakeRestorer,
   type NetworkConditionRestorer,
@@ -168,6 +169,206 @@ test("invalidateAutomationReadiness downgrades a session and ignores unknown ids
   expect(() => manager.invalidateAutomationReadiness("unknown-session", "test")).not.toThrow();
   expect(manager.getDeviceReadiness("unknown-session")).toBeUndefined();
   manager.stopCleanupTimer();
+});
+
+test("retries a failed non-terminal release after removing the in-memory session", async () => {
+  const timer = new FakeTimer();
+  const persistence = new FakeDeviceSessionPersistence();
+  const manager = new SessionManager(timer, persistence);
+  try {
+    await manager.createSession("restart-session", "emulator-5554", "android");
+    persistence.failure = "release";
+    await expect(
+      manager.releaseSession("restart-session", "device-restart:Pixel_8"),
+    ).rejects.toThrow("Failed to persist non-terminal release");
+    expect(manager.getSession("restart-session")).toBeNull();
+    expect((await persistence.getSession?.("restart-session"))?.status).toBe("active");
+
+    persistence.failure = null;
+    await expect(manager.releaseSession("restart-session", "device-restart:Pixel_8")).resolves.toBe(
+      "emulator-5554",
+    );
+    expect(await persistence.getSession?.("restart-session")).toMatchObject({
+      status: "released",
+      release_reason: "device-restart:Pixel_8",
+      released_at_ms: expect.any(Number),
+    });
+  } finally {
+    manager.stopCleanupTimer();
+  }
+});
+
+test("explicit release returns its device when persistence fails and retains the snapshot", async () => {
+  const persistence = new FakeDeviceSessionPersistence();
+  const manager = new SessionManager(new FakeTimer(), persistence);
+  try {
+    await manager.createSession("explicit-session", "emulator-5554", "android");
+    persistence.failure = "release";
+
+    await expect(manager.releaseSession("explicit-session", "explicit-release")).resolves.toBe(
+      "emulator-5554",
+    );
+    const pending = Reflect.get(manager, "pendingNonTerminalReleaseSnapshots") as Map<
+      string,
+      SessionReleaseSnapshot
+    >;
+    expect(pending.get("explicit-session")).toMatchObject({
+      sessionId: "explicit-session",
+      deviceId: "emulator-5554",
+      releaseReason: "explicit-release",
+      terminal: false,
+    });
+    expect((await persistence.getSession?.("explicit-session"))?.status).toBe("active");
+  } finally {
+    manager.stopCleanupTimer();
+  }
+});
+
+test("a same-UUID resume discards a failed non-terminal release snapshot", async () => {
+  const timer = new FakeTimer();
+  const persistence = new FakeDeviceSessionPersistence();
+  const manager = new SessionManager(timer, persistence);
+  try {
+    const original = await manager.createSession("reused-session", "emulator-old", "android");
+    persistence.failure = "release";
+    await expect(manager.releaseSession("reused-session", "allocation-rollback")).resolves.toBe(
+      "emulator-old",
+    );
+    const pending = Reflect.get(manager, "pendingNonTerminalReleaseSnapshots") as Map<
+      string,
+      SessionReleaseSnapshot
+    >;
+    const staleSnapshot = pending.get("reused-session")!;
+    persistence.failure = null;
+    const resumed = await manager.createSession("reused-session", "emulator-new", "android");
+    expect(resumed.assignedDevice).toBe("emulator-new");
+    expect(pending.has("reused-session")).toBe(false);
+
+    // Exercise the retry write's last synchronous fence with the captured stale snapshot.
+    const retryWrite = Reflect.get(manager, "persistSessionRelease") as (
+      snapshot: SessionReleaseSnapshot,
+      retryPending: boolean,
+    ) => Promise<boolean>;
+    expect(await retryWrite.call(manager, staleSnapshot, true)).toBe(false);
+    // The public ownership fence also declines a late retry from the old incarnation.
+    await expect(
+      manager.releaseSessionIfOwned(
+        "reused-session",
+        original,
+        "emulator-old",
+        "allocation-rollback",
+      ),
+    ).resolves.toBeNull();
+    expect(await persistence.getSession?.("reused-session")).toMatchObject({
+      device_id: "emulator-new",
+      status: "active",
+      release_reason: null,
+      released_at_ms: null,
+    });
+    expect(manager.getSession("reused-session")).toBe(resumed);
+  } finally {
+    manager.stopCleanupTimer();
+  }
+});
+
+test("a retry during an unpublished same-UUID resume leaves the new row active", async () => {
+  const persistence = new FakeDeviceSessionPersistence();
+  const manager = new SessionManager(new FakeTimer(), persistence);
+  const upsertStarted = Promise.withResolvers<void>();
+  const finishUpsert = Promise.withResolvers<void>();
+  const upsert = persistence.upsertActiveSession.bind(persistence);
+  try {
+    await manager.createSession("racing-session", "emulator-old", "android");
+    persistence.failure = "release";
+    await expect(manager.releaseSession("racing-session", "allocation-rollback")).resolves.toBe(
+      "emulator-old",
+    );
+    const pending = Reflect.get(manager, "pendingNonTerminalReleaseSnapshots") as Map<
+      string,
+      SessionReleaseSnapshot
+    >;
+    expect(pending.has("racing-session")).toBe(true);
+
+    persistence.failure = null;
+    persistence.upsertActiveSession = async (record) => {
+      await upsert(record);
+      upsertStarted.resolve();
+      await finishUpsert.promise;
+    };
+    const resume = manager.createSession("racing-session", "emulator-new", "android");
+    await upsertStarted.promise;
+    expect(Reflect.get(manager, "pendingSessionCreations").has("racing-session")).toBe(true);
+    expect(manager.getSession("racing-session")).toBeNull();
+    expect(await persistence.getSession?.("racing-session")).toMatchObject({
+      device_id: "emulator-new",
+      status: "active",
+    });
+
+    await expect(
+      manager.releaseSession("racing-session", "allocation-rollback"),
+    ).resolves.toBeNull();
+    expect(pending.has("racing-session")).toBe(false);
+    expect((await persistence.getSession?.("racing-session"))?.status).toBe("active");
+    finishUpsert.resolve();
+    await expect(resume).resolves.toMatchObject({ assignedDevice: "emulator-new" });
+    expect(await persistence.getSession?.("racing-session")).toMatchObject({
+      status: "active",
+      release_reason: null,
+    });
+  } finally {
+    finishUpsert.resolve();
+    manager.stopCleanupTimer();
+  }
+});
+
+test("pending non-terminal releases evict the oldest snapshot at 256 entries", async () => {
+  const persistence = new FakeDeviceSessionPersistence();
+  const manager = new SessionManager(new FakeTimer(), persistence);
+  try {
+    await manager.createSession("bounded-0", "emulator-5554", "android");
+    persistence.failure = "release";
+    await manager.releaseSession("bounded-0", "explicit-release");
+    const pending = Reflect.get(manager, "pendingNonTerminalReleaseSnapshots") as Map<
+      string,
+      SessionReleaseSnapshot
+    >;
+    const initial = pending.get("bounded-0")!;
+    const writeRelease = Reflect.get(manager, "persistSessionRelease") as (
+      snapshot: SessionReleaseSnapshot,
+    ) => Promise<boolean>;
+    for (let index = 1; index <= 256; index++) {
+      await expect(
+        writeRelease.call(manager, { ...initial, sessionId: `bounded-${index}` }),
+      ).resolves.toBe(false);
+    }
+    expect(pending.size).toBe(256);
+    expect(pending.has("bounded-0")).toBe(false);
+    expect(pending.has("bounded-1")).toBe(true);
+    expect(pending.has("bounded-256")).toBe(true);
+  } finally {
+    manager.stopCleanupTimer();
+  }
+});
+
+test("shutdown hooks clear pending non-terminal release snapshots", async () => {
+  const persistence = new FakeDeviceSessionPersistence();
+  const manager = new SessionManager(new FakeTimer(), persistence);
+  await manager.createSession("drain-session", "emulator-5554", "android");
+  persistence.failure = "release";
+  await manager.releaseSession("drain-session", "explicit-release");
+  const pending = Reflect.get(manager, "pendingNonTerminalReleaseSnapshots") as Map<
+    string,
+    SessionReleaseSnapshot
+  >;
+  expect(pending.size).toBe(1);
+  await expect(manager.drainReleasePromises(10)).resolves.toBe(true);
+  expect(pending.size).toBe(0);
+
+  await manager.createSession("stop-session", "emulator-5556", "android");
+  await manager.releaseSession("stop-session", "explicit-release");
+  expect(pending.size).toBe(1);
+  manager.stopCleanupTimer();
+  expect(pending.size).toBe(0);
 });
 
 function clearHeartbeatEnv(): void {

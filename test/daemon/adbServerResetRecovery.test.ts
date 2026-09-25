@@ -1628,29 +1628,72 @@ describe("ADB server reset session recovery", () => {
       expect(incidentStore.completeAttempts).toBe(2);
       expect(sessionManager.getSession("session-1")).toBeNull();
       expect(pool.isSessionRecoveryInFlight("session-1")).toBe(false);
-      // The relaunch attempt genuinely failed (maxAttempts: 1, reboot always
-      // throws), but `releasePreservedSessionAfterRecoveryFailure` still
-      // releases with the resumable `device-restart:<avd>` reason on every
-      // attempt -- the same reason `isRecoverableDaemonReleaseReason`
-      // (src/db/deviceSessionRepository.ts) and the passive device-restart
-      // resume path (test/daemon/devicePool.recoveryShutdown.test.ts) honor
-      // regardless of this incident's recovery outcome. So this session is
-      // genuinely resumable when "Pixel_8_API_35" reappears, and the incident
-      // must reflect that as "awaiting-device", not a terminal "released"
-      // (#7544). The recovery outcome stays "exhausted" because a relaunch
-      // was actually attempted and failed, unlike the no-relaunch-attempted
-      // case which reports "not-attempted". (This synthetic double-failure
-      // harness never actually lands the release in `persistence`'s row --
-      // the fake's non-terminal-release retry path is a separate, pre-existing
-      // gap unrelated to #7544 -- so the resumable reason is pinned here
-      // directly at the call site instead of via the persisted row.)
+      // A failed relaunch still persists a resumable device-restart release.
+      // The incident awaits the device even though recovery was exhausted.
       expect(releaseReasons).toEqual([
         `device-restart:${original.name}`,
         `device-restart:${original.name}`,
       ]);
+      expect(await persistence.getSession?.("session-1")).toMatchObject({
+        status: "released",
+        release_reason: `device-restart:${original.name}`,
+        released_at_ms: expect.any(Number),
+      });
       await expect(pool.waitForEmulatorLossIncident(incidentId!)).resolves.toMatchObject({
         session: { state: "awaiting-device" },
         recovery: { outcome: "exhausted" },
+      });
+    } finally {
+      sessionManager.stopCleanupTimer();
+    }
+  });
+
+  test("retries a device-disconnected release before retiring a failed System UI recovery", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const persistence = new FakeDeviceSessionPersistence();
+    const originalMarkReleased = persistence.markReleased.bind(persistence);
+    let releaseAttempts = 0;
+    persistence.markReleased = async (...args) => {
+      releaseAttempts += 1;
+      if (releaseAttempts === 1) {
+        throw new Error("transient release failure");
+      }
+      await originalMarkReleased(...args);
+    };
+    const sessionManager = new SessionManager(timer, persistence);
+    const manager = new StoppedDeviceManager();
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      manager,
+      new DefaultRetryExecutor(timer),
+    );
+    const original: BootedDevice = {
+      platform: "android",
+      name: "Pixel_8_API_35",
+      deviceId: "emulator-5554",
+    };
+    const image: DeviceInfo = {
+      name: original.name,
+      platform: "android",
+      isRunning: true,
+      source: "local",
+    };
+    manager.bootedDevices = [original];
+    try {
+      await pool.addDevice(original, image);
+      await pool.bindOrReuseDeviceSession("session-1", original.deviceId, "android", image);
+      const captured = pool.getDevice(original.deviceId)!;
+
+      await expect(pool.retireDeviceAfterSystemUiAnrRecoveryFailure(captured)).resolves.toBe(true);
+      expect(releaseAttempts).toBe(2);
+      expect(await persistence.getSession?.("session-1")).toMatchObject({
+        status: "released",
+        release_reason: `device-disconnected:${original.deviceId}`,
+        released_at_ms: expect.any(Number),
       });
     } finally {
       sessionManager.stopCleanupTimer();

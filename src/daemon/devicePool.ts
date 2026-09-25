@@ -2922,11 +2922,13 @@ export class DevicePool {
       );
       return false;
     }
-    const released = await this.releaseSessionForDisconnectedDevice(
-      sessionId,
-      device.id,
-      deviceLossCancellationReason(device.id, incidentId),
-      () => !isSupersededByNewerIdentity(),
+    const released = await this.retrySessionRelease(sessionId, () =>
+      this.releaseSessionForDisconnectedDevice(
+        sessionId,
+        device.id,
+        deviceLossCancellationReason(device.id, incidentId),
+        () => !isSupersededByNewerIdentity(),
+      ),
     );
     if (released === false) {
       logger.info(
@@ -4396,19 +4398,23 @@ export class DevicePool {
     releaseReason: string,
     attempt?: () => Promise<void>,
   ): Promise<void> {
-    await this.retryExecutor.executeOrThrow(
+    await this.retrySessionRelease(
+      sessionId,
       attempt ??
         (async () =>
           await this.releaseSessionForDisconnectedDevice(sessionId, deviceId, releaseReason)),
-      {
-        onRetry: (error, attempt, delay) => {
-          logger.warn(
-            `[DevicePool] Retrying recovery release for session ${sessionId} after attempt ${attempt} failed; delay=${delay}ms: ${error}`,
-            error,
-          );
-        },
-      },
     );
+  }
+
+  private async retrySessionRelease<T>(sessionId: string, attempt: () => Promise<T>): Promise<T> {
+    return await this.retryExecutor.executeOrThrow(attempt, {
+      onRetry: (error, attemptNumber, delay) => {
+        logger.warn(
+          `[DevicePool] Retrying recovery release for session ${sessionId} after attempt ${attemptNumber} failed; delay=${delay}ms: ${error}`,
+          error,
+        );
+      },
+    });
   }
 
   private async rebootDisconnectedAndroidDevice(
@@ -6130,7 +6136,7 @@ export class DevicePool {
     let releaseError: unknown;
     if (expectedDevice.sessionId) {
       try {
-        await this.releaseSessionForDisconnectedDevice(
+        await this.releaseDisconnectedRecoverySessionWithRetry(
           expectedDevice.sessionId,
           expectedDevice.id,
           deviceLossCancellationReason(expectedDevice.id),
@@ -6290,11 +6296,13 @@ export class DevicePool {
       preservedSession &&
       this.sessionManager.getSession(preservedSession.sessionId) === preservedSession
     ) {
-      await this.sessionManager.releaseSessionIfOwned(
-        preservedSession.sessionId,
-        preservedSession,
-        preservedSession.assignedDevice,
-        deviceLossCancellationReason(replacementDevice?.id ?? preservedSession.assignedDevice),
+      await this.retrySessionRelease(preservedSession.sessionId, () =>
+        this.sessionManager.releaseSessionIfOwned(
+          preservedSession.sessionId,
+          preservedSession,
+          preservedSession.assignedDevice,
+          deviceLossCancellationReason(replacementDevice?.id ?? preservedSession.assignedDevice),
+        ),
       );
     }
   }

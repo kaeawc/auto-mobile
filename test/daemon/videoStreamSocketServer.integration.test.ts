@@ -15,7 +15,7 @@ import {
   type StreamAuthSessionManager,
   type StreamSocketAuthenticator,
 } from "../../src/daemon/streamSocketAuth";
-import { CODEC_ID_H264 } from "../../src/daemon/videoStreamFraming";
+import { CODEC_ID_H264, PACKET_FLAG_HEARTBEAT } from "../../src/daemon/videoStreamFraming";
 import { SIMULATOR_FPS_DEFAULT } from "../../src/features/screen-stream/IOSScreenCaptureHelper";
 import {
   permissiveDeviceAdmissionGate,
@@ -83,6 +83,8 @@ interface Harness {
   emitRotation: (rotation: number) => void;
   /** Simulates a cumulative encoder-side dropped-frame measurement. */
   emitDroppedFrames: (droppedFrames: number) => void;
+  /** Simulates the capture source reporting a mid-stream failure. */
+  emitError: (error: Error) => void;
   cleanup: () => Promise<void>;
 }
 
@@ -111,6 +113,7 @@ async function startHarness(
   let onData: ((chunk: Buffer) => void) | null = null;
   let onRotation: ((rotation: number) => void) | null = null;
   let onDroppedFrames: ((droppedFrames: number) => void) | null = null;
+  let onError: ((error: Error) => void) | null = null;
   const captureOptions: Array<{ fps?: number; quality?: string }> = [];
 
   const server = new VideoStreamSocketServer(
@@ -126,6 +129,7 @@ async function startHarness(
         onData = opts.onData;
         onRotation = opts.onRotation ?? null;
         onDroppedFrames = opts.onDroppedFrames ?? null;
+        onError = opts.onError;
         captureOptions.push(opts);
         const source = new FakeCaptureSource();
         source.startError = options.startError ?? null;
@@ -158,6 +162,7 @@ async function startHarness(
     emit: (chunk) => onData?.(chunk),
     emitRotation: (rotation) => onRotation?.(rotation),
     emitDroppedFrames: (droppedFrames) => onDroppedFrames?.(droppedFrames),
+    emitError: (error) => onError?.(error),
     cleanup: async () => {
       await server.close();
       rmSync(dir, { recursive: true, force: true });
@@ -404,6 +409,84 @@ describe("VideoStreamSocketServer", () => {
     expect(packet.readBigInt64BE(0) & ((1n << 61n) - 1n)).toBe(42n);
     expect(packet.readBigInt64BE(0) & (1n << 61n)).toBe(1n << 61n);
     expect(packet.readInt32BE(8)).toBe(0);
+  });
+
+  // --- Relay-originated heartbeat (issue #7549) ---
+
+  test("advertises the heartbeat cadence in the subscribe ack", async () => {
+    const h = await startHarness();
+
+    const { ack } = await subscribe(h.socketPath);
+
+    expect(ack.heartbeatMs).toBe(1_000);
+  });
+
+  test("emits a heartbeat packet to a promoted subscriber once the capture has data", async () => {
+    const fakeTimer = new FakeTimer();
+    const h = await startHarness({ timer: fakeTimer });
+    const { binary } = await subscribe(h.socketPath);
+    await waitFor(() => binary().length >= 12);
+
+    // A closing start code is required so the parser can flush the IDR NAL (it buffers an
+    // unterminated NAL waiting for more data, same as every other emit() in this file).
+    h.emit(Buffer.from([0x00, 0x00, 0x00, 0x01, 0x05, 0xaa, 0x00, 0x00, 0x00, 0x01, 0x01]));
+    await waitFor(() => binary().length > 12);
+
+    const beforeHeartbeat = binary().length;
+    fakeTimer.advanceTime(1_000);
+    await waitFor(() => binary().length > beforeHeartbeat);
+
+    const packet = binary().subarray(beforeHeartbeat, beforeHeartbeat + 12);
+    const ptsAndFlags = BigInt.asUintN(64, packet.readBigInt64BE(0));
+    expect(ptsAndFlags & PACKET_FLAG_HEARTBEAT).toBe(PACKET_FLAG_HEARTBEAT);
+    expect(packet.readInt32BE(8)).toBe(0);
+  });
+
+  test("does not emit a heartbeat before the capture has produced any data", async () => {
+    const fakeTimer = new FakeTimer();
+    const h = await startHarness({ timer: fakeTimer });
+    const { binary } = await subscribe(h.socketPath);
+    await waitFor(() => binary().length >= 12);
+
+    // A dead-from-start source must never look alive.
+    fakeTimer.advanceTime(5_000);
+    await defaultTimer.sleep(30);
+
+    expect(binary().length).toBe(12);
+  });
+
+  test("does not emit a heartbeat to a subscriber still waiting for a key frame", async () => {
+    const fakeTimer = new FakeTimer();
+    // Keeps the source throttling key-frame requests indefinitely, so the second
+    // subscriber never resyncs and stays parked in waitingForKeyFrame.
+    const h = await startHarness({ timer: fakeTimer, keyFrameRejections: 100 });
+    const first = await subscribe(h.socketPath);
+    await waitFor(() => first.binary().length >= 12);
+    h.emit(Buffer.from([0x00, 0x00, 0x00, 0x01, 0x05, 0xaa, 0x00, 0x00, 0x00, 0x01, 0x01]));
+    await waitFor(() => first.binary().length > 12);
+
+    const second = await subscribe(h.socketPath);
+    await waitFor(() => h.server.subscriberCount(DEVICE.deviceId) === 2);
+    const beforeHeartbeat = second.binary().length;
+
+    fakeTimer.advanceTime(3_000);
+    await defaultTimer.sleep(30);
+
+    expect(second.binary().length).toBe(beforeHeartbeat);
+  });
+
+  test("stops the heartbeat once the capture is torn down", async () => {
+    const fakeTimer = new FakeTimer();
+    const h = await startHarness({ timer: fakeTimer });
+    await subscribe(h.socketPath);
+    await waitFor(() => h.server.subscriberCount(DEVICE.deviceId) === 1);
+    h.emit(Buffer.from([0x00, 0x00, 0x00, 0x01, 0x05, 0xaa, 0x00, 0x00, 0x00, 0x01, 0x01]));
+    await waitFor(() => fakeTimer.getPendingIntervalCount() >= 1);
+
+    h.emitError(new Error("adb: device offline"));
+    await waitFor(() => h.server.activeDeviceIds().length === 0);
+
+    expect(fakeTimer.getPendingIntervalCount()).toBe(0);
   });
 
   test("does not mistake arbitrary source chunks for complete H.264 NAL units", async () => {

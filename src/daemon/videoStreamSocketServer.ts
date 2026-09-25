@@ -29,6 +29,7 @@ import { daemonDeviceAdmissionGate, type DeviceAdmissionGate } from "./deviceAdm
 import { reconcileDiscoveryObservation } from "./discoveryReconcile";
 import {
   encodeDroppedFrames,
+  encodeHeartbeat,
   encodePacket,
   encodePtsAndFlags,
   encodeStreamHeader,
@@ -84,6 +85,12 @@ interface DeviceCapture {
    */
   rotation: number | null;
   idleTimer: NodeJS.Timeout | null;
+  /**
+   * Fires every `HEARTBEAT_INTERVAL_MS` once the source has produced its first chunk (issue
+   * #7549), null before then and after teardown. Gated on first data so a source that is dead
+   * from the very start of capture is never masked as alive.
+   */
+  heartbeatTimer: NodeJS.Timeout | null;
 }
 
 const ANNEX_B_START_CODE = Buffer.from([0, 0, 0, 1]);
@@ -112,6 +119,12 @@ const KEY_FRAME_RETRY_INTERVAL_MS = 500;
 const KEY_FRAME_RETRY_MAX_ATTEMPTS = 8;
 // Covers brief viewer reconnects without keeping an abandoned encoder alive for long.
 const CAPTURE_IDLE_GRACE_MS = 3_000;
+
+/**
+ * Cadence for the relay-originated heartbeat (issue #7549), also advertised to the client in the
+ * subscribe ack (`heartbeatMs`) so it can size its own stall-reconnect window.
+ */
+const HEARTBEAT_INTERVAL_MS = 1_000;
 
 /**
  * Captures are shared per device and the FIRST subscriber's hints fixed the encode; a late
@@ -335,6 +348,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
         action: "subscribe",
         deviceId: device.deviceId,
         framing: "h264",
+        heartbeatMs: HEARTBEAT_INTERVAL_MS,
       } satisfies VideoStreamSocketResponse);
 
       socket.write(encodeStreamHeader(capture.size?.width ?? 0, capture.size?.height ?? 0));
@@ -406,6 +420,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
       size: request.size,
       rotation: null,
       idleTimer: null,
+      heartbeatTimer: null,
     };
     // Registered before start() so a chunk arriving during startup still finds its subscribers.
     this.captures.set(deviceId, capture);
@@ -415,7 +430,15 @@ export class VideoStreamSocketServer extends BaseSocketServer {
       try {
         const source = await this.deps.createCaptureSource({
           device,
-          onData: (chunk) => this.broadcast(deviceId, chunk),
+          onData: (chunk) => {
+            const current = this.captures.get(deviceId);
+            // Gated on the FIRST chunk since capture start, so a source that never produces
+            // anything is never masked as alive by a heartbeat of our own making (issue #7549).
+            if (current && current === capture && !current.heartbeatTimer) {
+              this.startHeartbeat(deviceId, current);
+            }
+            this.broadcast(deviceId, chunk);
+          },
           // Record the source's attested rotation so the next config packet re-attests it to
           // subscribers, including a late joiner via replayParameterSets (issue #4786).
           onRotation: (rotation) => {
@@ -687,6 +710,39 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     }
   }
 
+  /**
+   * Start the relay-originated heartbeat (issue #7549): a zero-payload packet on the injected
+   * timer, sent every `HEARTBEAT_INTERVAL_MS` to every promoted, non-backpressured subscriber
+   * while the capture has a live source. A subscriber still `waitingForKeyFrame` is skipped, same
+   * as any other packet — see `writePacketToSubscriber`.
+   */
+  private startHeartbeat(deviceId: string, capture: DeviceCapture): void {
+    capture.heartbeatTimer = this.timer.setInterval(() => {
+      const current = this.captures.get(deviceId);
+      if (!current || !current.source) {
+        return;
+      }
+      const packet = encodeHeartbeat();
+      for (const subscriber of current.subscribers) {
+        if (
+          subscriber.destroyed ||
+          current.waitingForKeyFrame.has(subscriber) ||
+          current.backpressuredSubscribers.has(subscriber)
+        ) {
+          continue;
+        }
+        subscriber.write(packet);
+      }
+    }, HEARTBEAT_INTERVAL_MS);
+  }
+
+  private clearHeartbeatTimer(capture: DeviceCapture): void {
+    if (capture.heartbeatTimer) {
+      this.timer.clearInterval(capture.heartbeatTimer);
+      capture.heartbeatTimer = null;
+    }
+  }
+
   private stopCapture(deviceId: string): Promise<void> {
     const pending = this.pendingStops.get(deviceId);
     if (pending) {
@@ -698,6 +754,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     }
     this.captures.delete(deviceId);
     this.clearIdleTimer(capture);
+    this.clearHeartbeatTimer(capture);
 
     for (const subscriber of [...capture.pendingSubscribers, ...capture.subscribers]) {
       this.socketDeviceIds.delete(subscriber);

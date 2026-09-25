@@ -172,16 +172,24 @@ fun DeviceStreamView(
     remember(column.deviceId, currentQuality, paneFps) {
       sourceFactory(column.deviceId, currentQuality)
     }
+  // The relay's own heartbeat (issue #7549) makes the Streaming-stall watchdog safe on any backend,
+  // including iOS's idle-buffer-dropping capture and the Android screenrecord fallback — a healthy
+  // static screen still advances lastActivityMs every heartbeat, so it is never mistaken for a
+  // stall. Only a daemon too old to advertise heartbeatMs falls back to the pre-#7549 heuristic
+  // (enabled for Android only, since only its persistent encoder emitted idle frames of its own).
+  val heartbeatMs by source.heartbeatMs.collectAsState()
   val liveFrame =
     rememberLiveVideoFrame(
       source,
       column.deviceId,
       autoReconnect = true,
       streamingEnabled = streamingEnabled,
-      // The Streaming-stall reconnect is only valid for idle-heartbeat sources (Android). The iOS
-      // capture drops idle buffers, so a healthy static screen makes no frame progress and must
-      // NOT be reconnected; the first-frame deadline still catches a never-first-frame wedge.
-      stallReconnectMs = if (column.platform == Platform.Android) LIVE_STALL_RECONNECT_MS else null,
+      stallReconnectMs =
+        if (heartbeatMs != null || column.platform == Platform.Android) {
+          LIVE_STALL_RECONNECT_MS
+        } else {
+          null
+        },
     )
   // Retain the newest frame ACROSS source swaps, keyed on the device. rememberLiveVideoFrame
   // retains frames across relay drops WITHIN one source, but arming the pane (fps 10→30), a manual

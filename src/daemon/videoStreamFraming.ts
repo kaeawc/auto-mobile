@@ -30,6 +30,20 @@ export const PACKET_FLAG_ROTATION_PRESENT = 1n << 61n;
  */
 export const PACKET_FLAG_DROPPED_FRAMES = 1n << 61n;
 
+/**
+ * Bit 60 of `ptsAndFlags` on a non-CONFIG, zero-payload packet: a relay-originated heartbeat
+ * (issue #7549). Bit 60 is otherwise only meaningful on a CONFIG packet (it is part of the
+ * rotation field, bits 60-59), so it is free to reuse here as long as CONFIG stays clear.
+ *
+ * The relay emits one of these every `HEARTBEAT_INTERVAL_MS` while a capture is producing data, so
+ * a source with no idle output of its own (screenrecord, iOS) still gives the desktop's
+ * Streaming-stall watchdog *something* to see progress on. An older desktop that has never heard
+ * of this flag still decodes the packet safely: `H264Decoder.decode` returns early on an empty
+ * payload before it would ever inspect this bit, so the heartbeat is silently ignorable. An older
+ * daemon simply never sends one.
+ */
+export const PACKET_FLAG_HEARTBEAT = 1n << 60n;
+
 /** Attested display rotation (0..3) occupies bits 60-59 of a CONFIG packet (issue #4786). */
 export const ROTATION_SHIFT = 59n;
 export const ROTATION_MASK = 0b11n << ROTATION_SHIFT;
@@ -99,6 +113,14 @@ export function encodeDroppedFrames(droppedFrames: number): Buffer {
     PACKET_FLAG_DROPPED_FRAMES | (BigInt(droppedFrames) & PTS_MASK),
     Buffer.alloc(0),
   );
+}
+
+/**
+ * Encode a relay-originated heartbeat: a zero-payload, non-CONFIG packet carrying no PTS. See
+ * `PACKET_FLAG_HEARTBEAT` for why this is safe for an older desktop to receive unrecognized.
+ */
+export function encodeHeartbeat(): Buffer {
+  return encodePacket(PACKET_FLAG_HEARTBEAT, Buffer.alloc(0));
 }
 
 /**

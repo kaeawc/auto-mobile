@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   CODEC_ID_H264,
   encodeDroppedFrames,
+  encodeHeartbeat,
   encodePacket,
   encodePacketHeader,
   encodePtsAndFlags,
@@ -9,6 +10,8 @@ import {
   isKeyFrameChunk,
   isParameterSetChunk,
   PACKET_FLAG_CONFIG,
+  PACKET_FLAG_DROPPED_FRAMES,
+  PACKET_FLAG_HEARTBEAT,
   PACKET_FLAG_KEY_FRAME,
   PACKET_FLAG_ROTATION_PRESENT,
   PTS_MASK,
@@ -129,6 +132,30 @@ describe("videoStreamFraming", () => {
       expect(packet.length).toBe(12 + payload.length);
       expect(packet.readInt32BE(8)).toBe(payload.length);
       expect(packet.subarray(12)).toEqual(payload);
+    });
+
+    // --- Relay-originated heartbeat (issue #7549) ---
+
+    test("a heartbeat is a zero-payload, non-config packet with the heartbeat bit set", () => {
+      const packet = encodeHeartbeat();
+
+      expect(packet.length).toBe(12);
+      expect(packet.readInt32BE(8)).toBe(0);
+      const ptsAndFlags = BigInt.asUintN(64, packet.readBigInt64BE(0));
+      expect(ptsAndFlags & PACKET_FLAG_HEARTBEAT).toBe(PACKET_FLAG_HEARTBEAT);
+      expect(ptsAndFlags & PACKET_FLAG_CONFIG).toBe(0n);
+      expect(ptsAndFlags & PACKET_FLAG_KEY_FRAME).toBe(0n);
+    });
+
+    test("the heartbeat bit does not collide with dropped-frame telemetry (both non-config)", () => {
+      const heartbeat = BigInt.asUintN(64, encodeHeartbeat().readBigInt64BE(0));
+      const dropped = BigInt.asUintN(64, encodeDroppedFrames(1).readBigInt64BE(0));
+
+      // Bit 60 is only meaningful on a CONFIG packet (part of the rotation field); encodeHeartbeat
+      // never sets CONFIG, so it cannot be mistaken for an attested rotation.
+      expect(heartbeat & PACKET_FLAG_CONFIG).toBe(0n);
+      expect(dropped & PACKET_FLAG_HEARTBEAT).toBe(0n);
+      expect(heartbeat & PACKET_FLAG_DROPPED_FRAMES).toBe(0n);
     });
   });
 

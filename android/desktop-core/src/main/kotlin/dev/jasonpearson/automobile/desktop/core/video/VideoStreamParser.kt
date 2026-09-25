@@ -23,6 +23,13 @@ private const val ROTATION_SHIFT = 59
 private const val ROTATION_MASK = 0b11L shl ROTATION_SHIFT
 
 /**
+ * Bit 60 on a non-CONFIG, zero-payload packet: a relay-originated heartbeat (issue #7549). Bit 60
+ * is otherwise only meaningful on a CONFIG packet (part of the rotation field), so it is free to
+ * reuse here as long as CONFIG stays clear. See `src/daemon/videoStreamFraming.ts` for the encoder.
+ */
+private const val FLAG_HEARTBEAT = 1L shl 60
+
+/**
  * Bits 0-58 carry the presentation timestamp. Narrowed from bits 0-61 for the rotation presence bit
  * and field; backward compatible because a real microsecond PTS never reaches bit 59.
  */
@@ -50,6 +57,12 @@ data class VideoPacket(
   val rotation: Int? = null,
   /** Cumulative source-encoder drops in a zero-payload telemetry packet (#5582). */
   val droppedFrames: Long? = null,
+  /**
+   * A relay-originated, zero-payload keep-alive (issue #7549), sent while the capture is producing
+   * data so a source with no idle output of its own (screenrecord, iOS) still gives the
+   * Streaming-stall watchdog something to see progress on.
+   */
+  val heartbeat: Boolean = false,
 ) {
   // Data classes compare arrays by identity, which would make equality useless in tests.
   override fun equals(other: Any?): Boolean =
@@ -59,13 +72,15 @@ data class VideoPacket(
       isConfig == other.isConfig &&
       isKeyFrame == other.isKeyFrame &&
       rotation == other.rotation &&
-      droppedFrames == other.droppedFrames
+      droppedFrames == other.droppedFrames &&
+      heartbeat == other.heartbeat
 
   override fun hashCode(): Int =
     payload.contentHashCode() * 31 +
       presentationTimeUs.hashCode() * 31 +
       isConfig.hashCode() +
-      droppedFrames.hashCode()
+      droppedFrames.hashCode() +
+      heartbeat.hashCode()
 }
 
 /** Raised when the stream is not the framing this client understands. */
@@ -160,6 +175,7 @@ class VideoStreamParser {
       val start = offset + PACKET_HEADER_BYTES
       val isConfig = (ptsAndFlags and FLAG_CONFIG) != 0L
       val isDroppedFrames = !isConfig && size == 0 && (ptsAndFlags and FLAG_DROPPED_FRAMES) != 0L
+      val isHeartbeat = !isConfig && size == 0 && (ptsAndFlags and FLAG_HEARTBEAT) != 0L
       onPacket(
         VideoPacket(
           payload = src.copyOfRange(start, start + size),
@@ -175,6 +191,7 @@ class VideoStreamParser {
               null
             },
           droppedFrames = if (isDroppedFrames) ptsAndFlags and PTS_MASK else null,
+          heartbeat = isHeartbeat,
         )
       )
       offset = start + size

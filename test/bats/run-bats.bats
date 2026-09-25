@@ -12,6 +12,11 @@ cat > "$STUB_BIN/bats" <<EOF
 #!/usr/bin/env bash
 printf 'bats:%s\n' "\$1" >> "$ARGS_FILE"
 case "\$1" in
+  *parallel-timeout*)
+    sleep 30 &
+    printf '%s\n' "\$!" > "\${TIMEOUT_SLEEP_PID_FILE}"
+    wait \$!
+    ;;
   *signal-pass*|*signal-column-pass*)
     printf '1..2\nok 1 first\nok 2 second\n'
     kill -TERM "\$\$"
@@ -50,7 +55,7 @@ for ((i = 0; i < \${#args[@]}; i += 1)); do
     command="\${args[\$((i + 1))]}"
   fi
 done
-if [[ "\$command" =~ \>\ \"([^\"]+)\"/\\{#\\}\.out ]]; then
+if [[ "\$command" =~ \"([^\"]+)\"/\\{#\\}\.out ]]; then
   output_dir="\${BASH_REMATCH[1]}"
 else
   exit 2
@@ -170,6 +175,33 @@ run_runner() {
   [[ "$output" == *"parallel-not-ok.bats did not produce a complete passing BATS TAP plan"* ]]
 }
 
+@test "GNU Parallel kills a timed-out BATS process tree and names its file" {
+  local timeout_bin real_bin list_file
+  command -v parallel >/dev/null || skip "GNU Parallel is unavailable"
+  parallel --version | head -1 | grep -q 'GNU parallel' || skip "GNU Parallel is unavailable"
+  timeout_bin="$(command -v gtimeout || command -v timeout)" || skip "timeout is unavailable"
+  real_bin="$(mktemp -d)"
+  ln -s "$(command -v parallel)" "$real_bin/parallel"
+  list_file="$FIXTURES/timeout-list"
+  printf '%s\0' "$FIXTURES/parallel-timeout.bats" > "$list_file"
+
+  run "$timeout_bin" -k 2s 8s env \
+    PATH="$real_bin:$STUB_BIN:$PATH" \
+    AUTOMOBILE_BATS_MAX_FILE_SECONDS=1 \
+    TIMEOUT_SLEEP_PID_FILE="$FIXTURES/sleep.pid" \
+    bash -c 'source "$1"; run_parallel_files "$2" 1 "$3"' \
+    _ "$SCRIPT" "$list_file" "$FIXTURES/timeout-joblog.tsv"
+
+  rm -rf "$real_bin"
+  [ "$status" -ne 0 ]
+  [ "$status" -ne 124 ]
+  [ "$status" -ne 137 ]
+  [[ "$output" == *"$FIXTURES/parallel-timeout.bats exceeded 1s and was killed"* ]]
+  grep -q "^bats:$FIXTURES/parallel-timeout.bats$" "$ARGS_FILE"
+  [ -s "$FIXTURES/sleep.pid" ]
+  ! kill -0 "$(cat "$FIXTURES/sleep.pid")" 2>/dev/null
+}
+
 @test "job count override reaches GNU Parallel" {
   run env \
     HOME="$FAKE_HOME" \
@@ -181,6 +213,12 @@ run_runner() {
   grep -q "parallel:.*--jobs 7" "$ARGS_FILE"
 }
 
+@test "parallel pass defaults to a 240 second file timeout" {
+  run_runner unit
+  [ "$status" -eq 0 ]
+  grep -q -- 'parallel:.*--timeout 240' "$ARGS_FILE"
+}
+
 @test "unit file budget fails with an actionable classification message" {
   run env \
     HOME="$FAKE_HOME" \
@@ -189,6 +227,7 @@ run_runner() {
     AUTOMOBILE_BATS_JOBLOG="$FIXTURES/joblog.tsv" \
     bash "$SCRIPT" unit "$FIXTURES"
   [ "$status" -ne 0 ]
+  [[ "$output" == *"$FIXTURES/unit.bats took 2.00s"* ]]
   [[ "$output" == *"tag genuine real-I/O coverage as integration"* ]]
 }
 

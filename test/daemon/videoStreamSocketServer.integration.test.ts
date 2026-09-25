@@ -35,7 +35,10 @@ class FakeCaptureSource implements H264CaptureSource {
   started = false;
   stopped = false;
   startError: Error | null = null;
+  stopError: Error | null = null;
   startGate: Promise<void> | null = null;
+  stopGate: Promise<void> | null = null;
+  onStopSettled: (() => void) | null = null;
   onStart: (() => void) | null = null;
   keyFrameRequests = 0;
   // When > 0, requestKeyFrame() reports the source is throttling (returns false) this many times
@@ -53,6 +56,11 @@ class FakeCaptureSource implements H264CaptureSource {
 
   async stop(): Promise<void> {
     this.stopped = true;
+    await this.stopGate;
+    if (this.stopError) {
+      throw this.stopError;
+    }
+    this.onStopSettled?.();
   }
 
   requestKeyFrame(): boolean {
@@ -89,6 +97,7 @@ async function startHarness(
     startGate?: Promise<void>;
     startData?: Buffer;
     resolveError?: Error;
+    onResolveDevice?: () => void;
     authenticator?: StreamSocketAuthenticator;
     timer?: Timer;
     /** Pre-arms each created source to throttle this many key-frame requests. */
@@ -107,6 +116,7 @@ async function startHarness(
   const server = new VideoStreamSocketServer(
     {
       resolveDevice: async () => {
+        options.onResolveDevice?.();
         if (options.resolveError) {
           throw options.resolveError;
         }
@@ -473,6 +483,7 @@ describe("VideoStreamSocketServer", () => {
   });
 
   test("stops a capture source that resolves after its only subscriber disconnects", async () => {
+    const fakeTimer = new FakeTimer();
     const dir = mkdtempSync(path.join(tmpdir(), "amvs-late-source-"));
     const socketPath = path.join(dir, "video-stream.sock");
     const source = new FakeCaptureSource();
@@ -490,7 +501,7 @@ describe("VideoStreamSocketServer", () => {
           nowUs: () => 1_000n,
         },
         socketPath,
-        defaultTimer,
+        fakeTimer,
         allowAllAuthenticator,
       );
       void server.start().then(() => {
@@ -515,6 +526,8 @@ describe("VideoStreamSocketServer", () => {
     socket.write(`${JSON.stringify({ action: "subscribe", deviceId: DEVICE.deviceId })}\n`);
     await sourceCreated;
     socket.destroy();
+    await waitFor(() => harness.server.subscriberCount(DEVICE.deviceId) === 0);
+    fakeTimer.advanceTime(3_000);
     await waitFor(() => harness.server.activeDeviceIds().length === 0);
     resolveSource?.(source);
 
@@ -523,6 +536,7 @@ describe("VideoStreamSocketServer", () => {
   });
 
   test("keeps a replacement capture when an abandoned startup later fails", async () => {
+    const fakeTimer = new FakeTimer();
     const dir = mkdtempSync(path.join(tmpdir(), "amvs-replacement-capture-"));
     const socketPath = path.join(dir, "video-stream.sock");
     const abandonedSource = new FakeCaptureSource();
@@ -544,7 +558,7 @@ describe("VideoStreamSocketServer", () => {
         nowUs: () => 1_000n,
       },
       socketPath,
-      defaultTimer,
+      fakeTimer,
       allowAllAuthenticator,
     );
     await server.start();
@@ -567,14 +581,17 @@ describe("VideoStreamSocketServer", () => {
     );
     await waitFor(() => resolveAbandonedSource !== undefined);
     abandonedSocket.destroy();
+    await waitFor(() => server.subscriberCount(DEVICE.deviceId) === 0);
+    fakeTimer.advanceTime(3_000);
     await waitFor(() => server.activeDeviceIds().length === 0);
 
-    const replacement = await subscribe(socketPath);
+    const replacementRequest = subscribe(socketPath);
+    resolveAbandonedSource?.(abandonedSource);
+    await waitFor(() => abandonedSource.stopped);
+    const replacement = await replacementRequest;
     expect(replacement.ack.success).toBe(true);
     expect(server.activeDeviceIds()).toEqual([DEVICE.deviceId]);
 
-    resolveAbandonedSource?.(abandonedSource);
-    await waitFor(() => abandonedSource.stopped);
     expect(server.activeDeviceIds()).toEqual([DEVICE.deviceId]);
     expect(server.subscriberCount(DEVICE.deviceId)).toBe(1);
   });
@@ -610,7 +627,8 @@ describe("VideoStreamSocketServer", () => {
   });
 
   test("the capture stops only when the last viewer leaves", async () => {
-    const h = await startHarness();
+    const fakeTimer = new FakeTimer();
+    const h = await startHarness({ timer: fakeTimer });
     const first = await subscribe(h.socketPath);
     const second = await subscribe(h.socketPath);
     await waitFor(() => h.server.subscriberCount(DEVICE.deviceId) === 2);
@@ -620,8 +638,186 @@ describe("VideoStreamSocketServer", () => {
     expect(h.sources[0].stopped).toBe(false);
 
     second.socket.destroy();
+    await waitFor(() => h.server.subscriberCount(DEVICE.deviceId) === 0);
+    expect(h.sources[0].stopped).toBe(false);
+    fakeTimer.advanceTime(3_000);
     await waitFor(() => h.server.activeDeviceIds().length === 0);
     expect(h.sources[0].stopped).toBe(true);
+  });
+
+  test("detach then reattach within the idle grace window reuses the capture", async () => {
+    const fakeTimer = new FakeTimer();
+    const h = await startHarness({ timer: fakeTimer });
+    const first = await subscribe(h.socketPath);
+    const keyFrameRequests = h.sources[0].keyFrameRequests;
+
+    first.socket.destroy();
+    await waitFor(() => h.server.subscriberCount(DEVICE.deviceId) === 0);
+    fakeTimer.advanceTime(1_500);
+    const second = await subscribe(h.socketPath);
+
+    expect(second.ack.success).toBe(true);
+    expect(h.sources).toHaveLength(1);
+    expect(h.sources[0].stopped).toBe(false);
+    expect(h.sources[0].keyFrameRequests).toBeGreaterThan(keyFrameRequests);
+    fakeTimer.advanceTime(1_500);
+    expect(h.sources[0].stopped).toBe(false);
+  });
+
+  test("detach then idle grace elapses with no reattach stops the capture", async () => {
+    const fakeTimer = new FakeTimer();
+    const h = await startHarness({ timer: fakeTimer });
+    const client = await subscribe(h.socketPath);
+
+    client.socket.destroy();
+    await waitFor(() => h.server.subscriberCount(DEVICE.deviceId) === 0);
+    fakeTimer.advanceTime(2_999);
+    expect(h.sources[0].stopped).toBe(false);
+    fakeTimer.advanceTime(1);
+
+    await waitFor(() => h.sources[0].stopped);
+    expect(h.server.activeDeviceIds()).toEqual([]);
+  });
+
+  test("attach during an in-flight stop waits for the stop to settle before starting a new source", async () => {
+    const fakeTimer = new FakeTimer();
+    let resolveCalls = 0;
+    const h = await startHarness({
+      timer: fakeTimer,
+      onResolveDevice: () => resolveCalls++,
+    });
+    const first = await subscribe(h.socketPath);
+    let releaseStop: (() => void) | undefined;
+    h.sources[0].stopGate = new Promise<void>((resolve) => {
+      releaseStop = resolve;
+    });
+    const order: string[] = [];
+    h.sources[0].onStopSettled = () => order.push("stop settled");
+
+    first.socket.destroy();
+    await waitFor(() => h.server.subscriberCount(DEVICE.deviceId) === 0);
+    fakeTimer.advanceTime(3_000);
+    expect(h.sources[0].stopped).toBe(true);
+
+    const secondRequest = subscribe(h.socketPath);
+    await waitFor(() => resolveCalls === 2);
+    expect(h.sources).toHaveLength(1);
+    expect(order).toEqual([]);
+
+    releaseStop?.();
+    const second = await secondRequest;
+    expect(second.ack.success).toBe(true);
+    expect(order).toEqual(["stop settled"]);
+    expect(h.sources).toHaveLength(2);
+    expect(h.sources[1].started).toBe(true);
+  });
+
+  test("close rejects an attach waiting for an in-flight stop without creating a source", async () => {
+    const fakeTimer = new FakeTimer();
+    let resolveCalls = 0;
+    const h = await startHarness({
+      timer: fakeTimer,
+      onResolveDevice: () => resolveCalls++,
+    });
+    const first = await subscribe(h.socketPath);
+    let releaseStop: (() => void) | undefined;
+    h.sources[0].stopGate = new Promise<void>((resolve) => {
+      releaseStop = resolve;
+    });
+
+    first.socket.destroy();
+    await waitFor(() => h.server.subscriberCount(DEVICE.deviceId) === 0);
+    fakeTimer.advanceTime(3_000);
+    expect(h.sources[0].stopped).toBe(true);
+
+    const parkedRequest = subscribe(h.socketPath);
+    await waitFor(() => resolveCalls === 2);
+    expect(h.sources).toHaveLength(1);
+
+    const closing = h.server.close();
+    releaseStop?.();
+    const parked = await parkedRequest;
+    await closing;
+
+    expect(parked.ack.success).toBe(false);
+    expect(parked.ack.error).toBe("Video stream server is closed");
+    expect(h.sources).toHaveLength(1);
+    expect(h.server.activeDeviceIds()).toEqual([]);
+  });
+
+  test("two attaches waiting for the same stop share one replacement capture", async () => {
+    const fakeTimer = new FakeTimer();
+    let resolveCalls = 0;
+    const h = await startHarness({
+      timer: fakeTimer,
+      onResolveDevice: () => resolveCalls++,
+    });
+    const first = await subscribe(h.socketPath);
+    let releaseStop: (() => void) | undefined;
+    h.sources[0].stopGate = new Promise<void>((resolve) => {
+      releaseStop = resolve;
+    });
+
+    first.socket.destroy();
+    await waitFor(() => h.server.subscriberCount(DEVICE.deviceId) === 0);
+    fakeTimer.advanceTime(3_000);
+    expect(h.sources[0].stopped).toBe(true);
+
+    const secondRequest = subscribe(h.socketPath);
+    const thirdRequest = subscribe(h.socketPath);
+    await waitFor(() => resolveCalls === 3);
+    expect(h.sources).toHaveLength(1);
+
+    releaseStop?.();
+    const [second, third] = await Promise.all([secondRequest, thirdRequest]);
+
+    expect(second.ack.success).toBe(true);
+    expect(third.ack.success).toBe(true);
+    expect(h.sources).toHaveLength(2);
+    expect(h.sources[1].started).toBe(true);
+    expect(h.server.subscriberCount(DEVICE.deviceId)).toBe(2);
+    expect(h.server.activeDeviceIds()).toEqual([DEVICE.deviceId]);
+  });
+
+  test("explicit server shutdown stops immediately without waiting for the idle grace", async () => {
+    const fakeTimer = new FakeTimer();
+    const h = await startHarness({ timer: fakeTimer });
+    const client = await subscribe(h.socketPath);
+
+    client.socket.destroy();
+    await waitFor(() => h.server.subscriberCount(DEVICE.deviceId) === 0);
+    const closing = h.server.close();
+    expect(h.sources[0].stopped).toBe(true);
+    await closing;
+    expect(h.server.activeDeviceIds()).toEqual([]);
+  });
+
+  test("a rejected in-flight stop releases the next attach", async () => {
+    const fakeTimer = new FakeTimer();
+    let resolveCalls = 0;
+    const h = await startHarness({
+      timer: fakeTimer,
+      onResolveDevice: () => resolveCalls++,
+    });
+    const first = await subscribe(h.socketPath);
+    let releaseStop: (() => void) | undefined;
+    h.sources[0].stopGate = new Promise<void>((resolve) => {
+      releaseStop = resolve;
+    });
+    h.sources[0].stopError = new Error("device already gone");
+
+    first.socket.destroy();
+    await waitFor(() => h.server.subscriberCount(DEVICE.deviceId) === 0);
+    fakeTimer.advanceTime(3_000);
+    const secondRequest = subscribe(h.socketPath);
+    await waitFor(() => resolveCalls === 2);
+    expect(h.sources).toHaveLength(1);
+
+    releaseStop?.();
+    const second = await secondRequest;
+    expect(second.ack.success).toBe(true);
+    expect(h.sources).toHaveLength(2);
+    expect(h.sources[1].started).toBe(true);
   });
 
   test("a late joiner is replayed the parameter sets", async () => {

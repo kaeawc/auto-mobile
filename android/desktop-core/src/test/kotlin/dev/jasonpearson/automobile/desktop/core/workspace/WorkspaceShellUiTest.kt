@@ -17,6 +17,8 @@ import dev.jasonpearson.automobile.desktop.core.daemon.FakeObservationStream
 import dev.jasonpearson.automobile.desktop.core.daemon.ScreenshotStreamUpdate
 import dev.jasonpearson.automobile.desktop.core.update.ReleaseAsset
 import dev.jasonpearson.automobile.desktop.core.update.UpdateStatus
+import dev.jasonpearson.automobile.desktop.core.video.FakeVideoStreamSource
+import dev.jasonpearson.automobile.desktop.core.video.VideoStreamState
 import java.util.Base64
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -437,6 +439,46 @@ class WorkspaceShellUiTest {
       WorkspaceUiState.Content(columns = listOf(col("a", "Pixel 8")), focusedDeviceId = "a")
     setContent { MaterialTheme { WorkspaceShell(state = state, onAction = {}, onOpenPicker = {}) } }
     onNodeWithContentDescription("Close Logs facet on Pixel 8").assertDoesNotExist()
+  }
+
+  @Test
+  fun `opening closing and resizing a tool keeps the live mirror connected`() = runComposeUiTest {
+    val source = FakeVideoStreamSource()
+    val column = mutableStateOf(col("a", "Pixel 8"))
+    setContent {
+      MaterialTheme {
+        WorkspaceShell(
+          state = WorkspaceUiState.Content(columns = listOf(column.value), focusedDeviceId = "a"),
+          onAction = {},
+          onOpenPicker = {},
+          streamContent = { DeviceStreamView(it, sourceFactory = { _, _ -> source }) },
+        )
+      }
+    }
+    waitUntil { source.state.value is VideoStreamState.Streaming }
+    source.emitFrame(width = 1, height = 1)
+    waitUntil {
+      onAllNodesWithContentDescription("Live stream of Pixel 8").fetchSemanticsNodes().isNotEmpty()
+    }
+    mainClock.autoAdvance = false
+
+    fun assertMirrorUninterrupted() {
+      assertEquals(1, source.connectCalls)
+      assertTrue(source.state.value is VideoStreamState.Streaming)
+      onNodeWithText("Connecting to live mirror…").assertDoesNotExist()
+      onNodeWithContentDescription("Live stream of Pixel 8").assertIsDisplayed()
+    }
+
+    assertMirrorUninterrupted()
+    runOnUiThread { column.value = column.value.copy(activeTool = Tool.Logs) }
+    waitForIdle()
+    assertMirrorUninterrupted()
+    runOnUiThread { column.value = column.value.copy(firstPaneFractionOverride = 0.5f) }
+    waitForIdle()
+    assertMirrorUninterrupted()
+    runOnUiThread { column.value = column.value.copy(activeTool = null) }
+    waitForIdle()
+    assertMirrorUninterrupted()
   }
 
   @Test

@@ -733,41 +733,31 @@ private fun DeviceColumnView(
   ) {
     DeviceColumnHeader(column, displayName, onAction)
     val tool = column.activeTool
-    if (tool == null) {
-      PaneMainContent(
-        column,
-        onAction,
-        inspectContent,
-        streamContent,
-        observationStreamFactory,
-        screenshotSaver,
-        externalCaptureRequest,
-        Modifier.weight(1f),
-      )
-    } else {
-      VerticalSplitPane(
-        first = {
-          PaneMainContent(
-            column,
-            onAction,
-            inspectContent,
-            streamContent,
-            observationStreamFactory,
-            screenshotSaver,
-            externalCaptureRequest,
-            Modifier.fillMaxSize(),
-          )
-        },
-        second = {
+    VerticalSplitPane(
+      first = {
+        PaneMainContent(
+          column,
+          onAction,
+          inspectContent,
+          streamContent,
+          observationStreamFactory,
+          screenshotSaver,
+          externalCaptureRequest,
+          Modifier.fillMaxSize(),
+        )
+      },
+      second = {
+        if (tool != null) {
           DockedFacet(column, tool, onAction, facetContent, canDiff, Modifier.fillMaxSize())
-        },
-        modifier = Modifier.weight(1f),
-        firstPaneFraction = firstPaneFraction(column),
-        minFirstDp = 48.dp,
-        minSecondDp = 48.dp,
-        onFractionChanged = { onAction(WorkspaceAction.SetFirstPaneFraction(column.deviceId, it)) },
-      )
-    }
+        }
+      },
+      showSecond = tool != null,
+      modifier = Modifier.weight(1f),
+      firstPaneFraction = firstPaneFraction(column),
+      minFirstDp = 48.dp,
+      minSecondDp = 48.dp,
+      onFractionChanged = { onAction(WorkspaceAction.SetFirstPaneFraction(column.deviceId, it)) },
+    )
   }
 }
 

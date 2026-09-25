@@ -127,6 +127,8 @@ fun HorizontalSplitPane(
  *
  * @param first Content for the top pane.
  * @param second Content for the bottom pane.
+ * @param showSecond Whether to show the divider and bottom pane. The first slot stays composed at
+ *   full height when false, preserving content state while a facet opens or closes.
  * @param firstPaneFraction Initial fraction of total height allocated to the first pane.
  * @param minFirstDp Minimum height of the first pane.
  * @param minSecondDp Minimum height of the second pane.
@@ -138,6 +140,7 @@ fun HorizontalSplitPane(
 fun VerticalSplitPane(
   first: @Composable () -> Unit,
   second: @Composable () -> Unit,
+  showSecond: Boolean = true,
   modifier: Modifier = Modifier,
   firstPaneFraction: Float = 0.25f,
   minFirstDp: Dp = 100.dp,
@@ -167,48 +170,53 @@ fun VerticalSplitPane(
     }
 
   Column(modifier = modifier.fillMaxSize().onSizeChanged { totalHeightPx = it.height }) {
-    Box(modifier = Modifier.weight(fraction.coerceIn(0.01f, 0.99f)).fillMaxWidth()) {
+    Box(
+      modifier =
+        Modifier.weight(if (showSecond) fraction.coerceIn(0.01f, 0.99f) else 1f).fillMaxWidth()
+    ) {
       first()
     }
 
-    Box(
-      modifier =
-        Modifier.height(dragHandleWidth)
-          .fillMaxWidth()
-          .hoverable(interactionSource)
-          .pointerHoverIcon(PointerIcon.Hand)
-          .pointerInput(minFirstDp, minSecondDp, dragHandleWidth) {
-            detectDragGestures(
-              onDragStart = { isDragging = true },
-              onDragEnd = { isDragging = false },
-              onDragCancel = { isDragging = false },
-              onDrag = { change, dragAmount ->
-                change.consume()
-                if (totalHeightPx > 0) {
-                  val minFirstPx = with(currentDensity) { minFirstDp.toPx() }
-                  val minSecondPx = with(currentDensity) { minSecondDp.toPx() }
-                  val handlePx = with(currentDensity) { dragHandleWidth.toPx() }
-                  val usable = (totalHeightPx - handlePx).coerceAtLeast(minFirstPx + minSecondPx)
-                  if (usable <= 0f) return@detectDragGestures
-                  val newFirstPx =
-                    (fraction * usable + dragAmount.y).coerceIn(
-                      minFirstPx,
-                      (usable - minSecondPx).coerceAtLeast(minFirstPx),
-                    )
-                  val newFraction = (newFirstPx / usable).coerceIn(0.01f, 0.99f)
-                  fraction = newFraction
-                  currentOnFractionChanged?.invoke(newFraction)
-                }
-              },
-            )
-          },
-      contentAlignment = Alignment.Center,
-    ) {
-      Box(modifier = Modifier.height(dividerWidth).fillMaxWidth().background(dividerColor))
-    }
+    if (showSecond) {
+      Box(
+        modifier =
+          Modifier.height(dragHandleWidth)
+            .fillMaxWidth()
+            .hoverable(interactionSource)
+            .pointerHoverIcon(PointerIcon.Hand)
+            .pointerInput(minFirstDp, minSecondDp, dragHandleWidth) {
+              detectDragGestures(
+                onDragStart = { isDragging = true },
+                onDragEnd = { isDragging = false },
+                onDragCancel = { isDragging = false },
+                onDrag = { change, dragAmount ->
+                  change.consume()
+                  if (totalHeightPx > 0) {
+                    val minFirstPx = with(currentDensity) { minFirstDp.toPx() }
+                    val minSecondPx = with(currentDensity) { minSecondDp.toPx() }
+                    val handlePx = with(currentDensity) { dragHandleWidth.toPx() }
+                    val usable = (totalHeightPx - handlePx).coerceAtLeast(minFirstPx + minSecondPx)
+                    if (usable <= 0f) return@detectDragGestures
+                    val newFirstPx =
+                      (fraction * usable + dragAmount.y).coerceIn(
+                        minFirstPx,
+                        (usable - minSecondPx).coerceAtLeast(minFirstPx),
+                      )
+                    val newFraction = (newFirstPx / usable).coerceIn(0.01f, 0.99f)
+                    fraction = newFraction
+                    currentOnFractionChanged?.invoke(newFraction)
+                  }
+                },
+              )
+            },
+        contentAlignment = Alignment.Center,
+      ) {
+        Box(modifier = Modifier.height(dividerWidth).fillMaxWidth().background(dividerColor))
+      }
 
-    Box(modifier = Modifier.weight((1f - fraction).coerceIn(0.01f, 0.99f)).fillMaxWidth()) {
-      second()
+      Box(modifier = Modifier.weight((1f - fraction).coerceIn(0.01f, 0.99f)).fillMaxWidth()) {
+        second()
+      }
     }
   }
 }

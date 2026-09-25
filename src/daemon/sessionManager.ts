@@ -540,6 +540,7 @@ const NETWORK_CONDITION_RESTORE_TIMEOUT_MS = 1_000;
 const NETWORK_CONDITION_RESTORE_RETRY_ATTEMPTS = 2;
 const NETWORK_CONDITION_RESTORE_RETRY_DELAY_MS = 250;
 const SESSION_SETUP_DRAIN_TIMEOUT_MS = 1_000;
+const MAX_PENDING_NON_TERMINAL_RELEASE_SNAPSHOTS = 256;
 export const SESSION_REHYDRATION_DEADLINE_MS = 15_000;
 const EXPIRY_RELEASE_REASONS = new Set([
   "lazy-expiry",
@@ -732,6 +733,8 @@ export class SessionManager {
   /** Rebinds that a release must await before it can remove the live binding. */
   private readonly pendingSessionRebinds: Map<string, PendingSessionRebind> = new Map();
   private readonly terminalReleaseSnapshots: Map<string, SessionReleaseSnapshot> = new Map();
+  private readonly pendingNonTerminalReleaseSnapshots: Map<string, SessionReleaseSnapshot> =
+    new Map();
   private deviceSessionRepository: DeviceSessionPersistence;
   private readonly getBarrier: () => DbWriteBarrier;
   private readonly keepScreenAwakeRestorerFactory: (
@@ -1002,6 +1005,7 @@ export class SessionManager {
       throw new TerminalSessionError(session.sessionId, terminalRelease);
     }
     this.invalidateFinalizedSessionIdentity(session.sessionId);
+    this.pendingNonTerminalReleaseSnapshots.delete(session.sessionId);
     this.sessions.set(session.sessionId, session);
     this.sessionDeviceMap.set(session.sessionId, session.assignedDevice);
     this.deviceSessionMap.set(session.assignedDevice, session.sessionId);
@@ -2124,6 +2128,12 @@ export class SessionManager {
       await this.persistSessionRelease(terminalSnapshot);
       return terminalSnapshot.deviceId;
     }
+    const pendingSnapshot = this.pendingNonTerminalReleaseSnapshots.get(sessionId);
+    if (pendingSnapshot) {
+      return (await this.persistSessionRelease(pendingSnapshot, true))
+        ? pendingSnapshot.deviceId
+        : null;
+    }
     const pendingAssignment = this.pendingSessionAssignments.get(sessionId);
     const pendingCreation = this.pendingSessionCreations.get(sessionId);
     const pendingSession = pendingAssignment ?? pendingCreation?.promise;
@@ -2228,21 +2238,20 @@ export class SessionManager {
       ...Array.from(this.activeReleasePromises, (release) => release.promise),
       ...additionalReleases,
     ];
-    if (releases.length === 0) {
-      return true;
-    }
-
     let timeoutHandle: NodeJS.Timeout | undefined;
-    const timeout = new Promise<boolean>((resolve) => {
-      timeoutHandle = this.timer.setTimeout(() => resolve(false), timeoutMs);
-    });
-
     try {
+      if (releases.length === 0) {
+        return true;
+      }
+      const timeout = new Promise<boolean>((resolve) => {
+        timeoutHandle = this.timer.setTimeout(() => resolve(false), timeoutMs);
+      });
       return await Promise.race([Promise.allSettled(releases).then(() => true), timeout]);
     } finally {
       if (timeoutHandle !== undefined) {
         this.timer.clearTimeout(timeoutHandle);
       }
+      this.pendingNonTerminalReleaseSnapshots.clear();
     }
   }
 
@@ -2587,7 +2596,16 @@ export class SessionManager {
     }
   }
 
-  private async persistSessionRelease(snapshot: SessionReleaseSnapshot): Promise<void> {
+  private async persistSessionRelease(
+    snapshot: SessionReleaseSnapshot,
+    retryPending: boolean = false,
+  ): Promise<boolean> {
+    // A resumed UUID can be in flight before it publishes. Check immediately
+    // before issuing a retry so it cannot release the newly active row.
+    if (retryPending && this.isSessionBeingRecreated(snapshot.sessionId)) {
+      this.pendingNonTerminalReleaseSnapshots.delete(snapshot.sessionId);
+      return false;
+    }
     try {
       const terminalStatus = EXPIRY_RELEASE_REASONS.has(snapshot.releaseReason)
         ? "expired"
@@ -2598,23 +2616,57 @@ export class SessionManager {
         snapshot.releasedAtMs,
         snapshot.releaseReason,
       );
+      if (this.pendingNonTerminalReleaseSnapshots.get(snapshot.sessionId) === snapshot) {
+        this.pendingNonTerminalReleaseSnapshots.delete(snapshot.sessionId);
+      }
+      return true;
     } catch (error) {
       logger.warn(
         `[SessionManager] Failed to mark session released (${snapshot.releaseReason}): ${error}`,
       );
-      if (snapshot.terminal) {
+      if (!snapshot.terminal && !this.sessions.has(snapshot.sessionId)) {
+        this.recordPendingNonTerminalRelease(snapshot);
+      }
+      if (this.shouldSurfaceReleasePersistenceFailure(snapshot, retryPending)) {
         throw toActionableError(
           error,
-          `Failed to persist terminal release for session ${snapshot.sessionId}`,
+          `Failed to persist ${snapshot.terminal ? "terminal" : "non-terminal"} release for session ${snapshot.sessionId}`,
         );
       }
-      if (isDeviceRestartReleaseReason(snapshot.releaseReason)) {
-        throw toActionableError(
-          error,
-          `Failed to persist recoverable device-restart release for session ${snapshot.sessionId}`,
-        );
+      return false;
+    }
+  }
+
+  private isSessionBeingRecreated(sessionId: string): boolean {
+    return (
+      this.sessions.has(sessionId) ||
+      this.pendingSessionCreations.has(sessionId) ||
+      this.pendingSessionAssignments.has(sessionId)
+    );
+  }
+
+  private shouldSurfaceReleasePersistenceFailure(
+    snapshot: SessionReleaseSnapshot,
+    retryPending: boolean,
+  ): boolean {
+    // Device-disconnected releases are terminal, so the terminal check covers them.
+    return (
+      snapshot.terminal || retryPending || isDeviceRestartReleaseReason(snapshot.releaseReason)
+    );
+  }
+
+  private recordPendingNonTerminalRelease(snapshot: SessionReleaseSnapshot): void {
+    const pending = this.pendingNonTerminalReleaseSnapshots;
+    if (
+      !pending.has(snapshot.sessionId) &&
+      pending.size >= MAX_PENDING_NON_TERMINAL_RELEASE_SNAPSHOTS
+    ) {
+      const oldestSessionId = pending.keys().next().value;
+      if (oldestSessionId !== undefined) {
+        pending.delete(oldestSessionId);
       }
     }
+    pending.set(snapshot.sessionId, snapshot);
   }
 
   private async persistTerminalReleaseIfNeeded(snapshot: SessionReleaseSnapshot): Promise<void> {
@@ -4006,6 +4058,7 @@ export class SessionManager {
       this.timer.clearTimeout(entry.handle);
     }
     this.networkConditionExpiryTimers.clear();
+    this.pendingNonTerminalReleaseSnapshots.clear();
   }
 
   // Intentionally NOT barrier-tracked: this write is `await`ed by its caller

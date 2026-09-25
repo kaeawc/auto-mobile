@@ -1488,18 +1488,23 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
       // Start the WebSocket server. This service implements CtrlProxyActions, so inbound requests
       // are dispatched straight to its perform*/handle* methods via CtrlProxyMessageHandler.
-      webSocketServer =
-        WebSocketServer(
-          port = 8765,
-          scope = serviceScope,
-          messageHandler =
-            CtrlProxyMessageHandler(
-              actions = this,
-              log = { message -> Log.w(TAG, message) },
-            ),
-        )
-      webSocketServer.start()
-      Log.d(TAG, "WebSocket server started on port 8765")
+      try {
+        webSocketServer =
+          WebSocketServer(
+            port = 8765,
+            scope = serviceScope,
+            messageHandler =
+              CtrlProxyMessageHandler(
+                actions = this,
+                log = { message -> Log.w(TAG, message) },
+              ),
+            onPermanentStartFailure = { disableSelf() },
+          )
+        webSocketServer.start()
+      } catch (e: Exception) {
+        Log.e(TAG, "Error initializing WebSocket server during service connection", e)
+        disableSelf()
+      }
 
       // Start every navigation-ingestion path only after the WebSocket is ready. SDK batch
       // events suppress latestEvent replay, so receiving one before this point would lose it.

@@ -14,6 +14,8 @@ import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import io.ktor.server.websocket.*
 import io.ktor.websocket.*
+import java.net.InetSocketAddress
+import java.net.ServerSocket
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.*
@@ -38,9 +40,13 @@ class WebSocketServer(
   private val perfProvider: PerfProvider = PerfProvider.instance,
   /** Type-safe handler that receives decoded requests. When null, inbound messages are ignored. */
   private val messageHandler: WebSocketMessageHandler? = null,
+  private val onPermanentStartFailure: () -> Unit = {},
 ) {
   companion object {
     private const val TAG = "WebSocketServer"
+    private const val MAX_START_ATTEMPTS = 5
+    private const val START_RETRY_BASE_DELAY_MS = 250L
+    private const val CONNECTOR_RESOLVE_TIMEOUT_MS = 2_000L
 
     /**
      * Maximum accepted inbound WebSocket frame (64 MiB). ktor caps frame size by default;
@@ -184,7 +190,10 @@ class WebSocketServer(
     }
   }
 
-  private var server: EmbeddedServer<*, *>? = null
+  @Volatile private var server: EmbeddedServer<*, *>? = null
+  private val startLock = Any()
+  private var startRetryJob: Job? = null
+  private var broadcastJob: Job? = null
   private val connections = mutableSetOf<DefaultWebSocketSession>()
   private val requestConnections = mutableMapOf<String, DefaultWebSocketSession>()
   private val connectionCount = AtomicInteger(0)
@@ -223,13 +232,43 @@ class WebSocketServer(
 
   /** Start the WebSocket server */
   fun start() {
-    if (server != null) {
-      Log.w(TAG, "Server already running")
-      return
-    }
+    synchronized(startLock) {
+      if (server != null) {
+        Log.w(TAG, "Server already running")
+        return
+      }
 
+      // An explicit start replaces any pending internal retry budget.
+      startRetryJob?.cancel()
+      startRetryJob = null
+      startRetryJob = scope.launch {
+        synchronized(startLock) {
+          if (server != null || tryStart()) return@launch
+        }
+        for (retry in 1 until MAX_START_ATTEMPTS) {
+          delay(START_RETRY_BASE_DELAY_MS * (1L shl (retry - 1)))
+          synchronized(startLock) {
+            if (server != null || tryStart()) return@launch
+            if (retry == MAX_START_ATTEMPTS - 1) {
+              Log.e(TAG, "WebSocket server failed to start after $MAX_START_ATTEMPTS attempts")
+              onPermanentStartFailure()
+            }
+          }
+        }
+      }
+    }
+  }
+
+  private fun tryStart(): Boolean {
+    var startedServer: EmbeddedServer<*, *>? = null
     try {
-      server =
+      // CIO binds on an internal coroutine and reports an occupied port as an uncaught failure.
+      // Detect the common occupied-port case before starting that coroutine.
+      if (port != 0) {
+        ServerSocket().use { it.bind(InetSocketAddress("127.0.0.1", port)) }
+      }
+
+      val candidate =
         // CtrlProxy is reached exclusively through adb forward. Binding loopback
         // prevents the accessibility-control endpoint from being exposed to the
         // device LAN when the runner is installed on a physical device.
@@ -328,43 +367,65 @@ class WebSocketServer(
             }
           }
           .start(wait = false)
+      startedServer = candidate
 
-      // Launch coroutine to handle message broadcasting
-      scope.launch {
+      // CIO starts its accept loop asynchronously. Wait for the connector to resolve so a bind
+      // failure is caught here, before this instance reports that it is listening.
+      runBlocking {
+        withTimeout(CONNECTOR_RESOLVE_TIMEOUT_MS) { candidate.engine.resolvedConnectors() }
+      }
+      server = candidate
+
+      // Only the current listener owns a collector; stop/start must not duplicate deliveries.
+      broadcastJob?.cancel()
+      broadcastJob = scope.launch {
         _messageFlow.asSharedFlow().collect { message -> broadcastToClients(message) }
       }
 
       Log.i(TAG, "WebSocket server started on port $port")
+      return true
     } catch (e: Exception) {
       Log.e(TAG, "Failed to start WebSocket server", e)
+      try {
+        startedServer?.stop(0, 0)
+      } catch (stopError: Exception) {
+        Log.e(TAG, "Failed to stop partially started WebSocket server", stopError)
+      }
       server = null
+      return false
     }
   }
 
   /** Stop the WebSocket server */
   fun stop() {
     try {
-      synchronized(connections) {
-        connections.forEach { connection ->
-          scope.launch {
-            try {
-              connection.close(CloseReason(CloseReason.Codes.GOING_AWAY, "Server shutting down"))
-            } catch (e: CancellationException) {
-              // Let cooperative cancellation unwind cleanly rather than logging it as an error
-              // (#3130).
-              throw e
-            } catch (e: Exception) {
-              Log.e(TAG, "Error closing connection", e)
+      synchronized(startLock) {
+        startRetryJob?.cancel()
+        startRetryJob = null
+        broadcastJob?.cancel()
+        broadcastJob = null
+        synchronized(connections) {
+          connections.forEach { connection ->
+            scope.launch {
+              try {
+                connection.close(CloseReason(CloseReason.Codes.GOING_AWAY, "Server shutting down"))
+              } catch (e: CancellationException) {
+                // Let cooperative cancellation unwind cleanly rather than logging it as an error
+                // (#3130).
+                throw e
+              } catch (e: Exception) {
+                Log.e(TAG, "Error closing connection", e)
+              }
             }
           }
+          connections.clear()
+          requestConnections.clear()
+          activeClientConnection = CompletableDeferred()
         }
-        connections.clear()
-        requestConnections.clear()
-        activeClientConnection = CompletableDeferred()
-      }
 
-      server?.stop(1000, 2000)
-      server = null
+        server?.stop(1000, 2000)
+        server = null
+      }
       Log.i(TAG, "WebSocket server stopped")
     } catch (e: Exception) {
       Log.e(TAG, "Error stopping WebSocket server", e)

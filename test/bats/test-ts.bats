@@ -61,7 +61,7 @@ setup() {
   export STUB_RECHECK_INDEX
   cat > "$STUB_BIN/nproc" <<'EOF'
 #!/usr/bin/env bash
-printf '8\n'
+printf '%s\n' "${STUB_NPROC_CORES:-8}"
 EOF
   cat > "$STUB_BIN/uname" <<'EOF'
 #!/usr/bin/env bash
@@ -206,6 +206,28 @@ run_lane() {
   [[ "$output" == *"--no-orphans"* ]]
   [[ "$output" == *"\\*\\*/\\*.integration.test.ts"* ]]
   [[ "$output" == *"test/stress/\\*\\*"* ]]
+}
+
+@test "macOS defaults to two unit shards on three cores" {
+  run env -u RUNNER_OS PATH="$STUB_BIN:$PATH" TEST_TS_PRINT_CMD=1 \
+    UNAME_S=Darwin STUB_NPROC_CORES=3 bash "$SCRIPT" unit
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"--shards=2"* ]]
+}
+
+@test "Linux keeps one unit shard on three cores" {
+  run env -u RUNNER_OS PATH="$STUB_BIN:$PATH" TEST_TS_PRINT_CMD=1 \
+    UNAME_S=Linux STUB_NPROC_CORES=3 bash "$SCRIPT" unit
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"--shards=1"* ]]
+}
+
+@test "explicit unit worker count bypasses the macOS floor" {
+  run env -u RUNNER_OS PATH="$STUB_BIN:$PATH" TEST_TS_PRINT_CMD=1 \
+    UNAME_S=Darwin STUB_NPROC_CORES=3 AUTOMOBILE_UNIT_TEST_WORKERS=1 \
+    bash "$SCRIPT" unit
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"--shards=1"* ]]
 }
 
 @test "Windows unit lane avoids isolate-only process options" {

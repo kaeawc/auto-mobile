@@ -21,6 +21,14 @@ if [[ "$#" -gt 0 ]]; then
   shift
 fi
 
+runner_os="${RUNNER_OS:-}"
+if [[ -z "$runner_os" ]]; then
+  case "$(uname -s 2> /dev/null || true)" in
+    Darwin) runner_os="macOS" ;;
+    MINGW* | MSYS* | CYGWIN*) runner_os="Windows" ;;
+  esac
+fi
+
 cores="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)"
 if ! [[ "$cores" =~ ^[0-9]+$ ]] || [[ "$cores" -lt 1 ]]; then
   cores=4
@@ -30,17 +38,13 @@ default_workers=$((cores - 2))
 if [[ "$default_workers" -lt 1 ]]; then
   default_workers=1
 fi
+if [[ "$runner_os" == "macOS" && "$cores" -ge 2 && "$default_workers" -lt 2 ]]; then
+  default_workers=2
+fi
 
 unit_workers="${AUTOMOBILE_UNIT_TEST_WORKERS:-$default_workers}"
 integration_workers="${AUTOMOBILE_INTEGRATION_TEST_WORKERS:-1}"
 per_test_timeout_ms="${AUTOMOBILE_TEST_TIMEOUT_MS:-5000}"
-runner_os="${RUNNER_OS:-}"
-if [[ -z "$runner_os" ]]; then
-  case "$(uname -s 2> /dev/null || true)" in
-    Darwin) runner_os="macOS" ;;
-    MINGW* | MSYS* | CYGWIN*) runner_os="Windows" ;;
-  esac
-fi
 if [[ "$runner_os" == "macOS" ]]; then
   per_test_timeout_ms="${AUTOMOBILE_TEST_TIMEOUT_MS:-20000}"
 fi

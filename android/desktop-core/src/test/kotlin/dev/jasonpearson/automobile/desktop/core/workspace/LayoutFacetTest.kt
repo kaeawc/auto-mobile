@@ -137,6 +137,34 @@ class LayoutFacetTest {
   }
 
   @Test
+  fun `conflated reconnect requests a fresh layout observation`() = runComposeUiTest {
+    val fake = FakeObservationStream()
+    setContent {
+      MaterialTheme {
+        LayoutFacet(
+          column = DeviceColumn(deviceId = "dev-1", name = "Pixel", platform = Platform.Android),
+          observationStreamFactory = { fake },
+          backoffDelay = {},
+          socketAvailable = { true },
+          videoSourceFactory = { FakeVideoStreamSource() },
+        )
+      }
+    }
+    waitForIdle()
+    assertEquals(1, fake.observationRequestCount)
+
+    runOnIdle { fake.emitConnectionState(ConnectionState.Disconnected("Stream ended")) }
+    waitForIdle()
+    assertEquals(2, fake.connectCallCount)
+    assertEquals(ConnectionState.Connected(), fake.connectionState.value)
+    assertEquals(
+      "a new connection must request a fresh observation even when state is value-equal",
+      2,
+      fake.observationRequestCount,
+    )
+  }
+
+  @Test
   fun `owns a live video mirror scoped to the pane device and disposes it on removal`() =
     runComposeUiTest {
       // The inspector's device panel renders LIVE VIDEO for its pixels (screenshots are only the

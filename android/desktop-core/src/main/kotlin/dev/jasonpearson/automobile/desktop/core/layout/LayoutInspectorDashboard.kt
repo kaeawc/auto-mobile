@@ -51,6 +51,7 @@ fun LayoutInspectorDashboard(
    * Null keeps the original screenshot-only rendering (the IDE-plugin dashboard path).
    */
   liveFrame: androidx.compose.ui.graphics.ImageBitmap? = null,
+  connectionGeneration: Int = 0,
 ) {
   val state = rememberLayoutInspectorState()
   val colors = SharedTheme.globalColors
@@ -73,6 +74,7 @@ fun LayoutInspectorDashboard(
         "Received hierarchy update in dashboard - deviceId=${update.deviceId}, hasData=${update.data != null}"
       )
       update.data?.let { hierarchyJson ->
+        val frameGeneration = state.frameGeneration
         dashboardLog.info("Parsing hierarchy JSON...")
         val result =
           kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
@@ -82,6 +84,7 @@ fun LayoutInspectorDashboard(
             parsed to changedIds
           }
         if (result != null) {
+          if (frameGeneration != state.frameGeneration) return@let
           dashboardLog.info(
             "Parsed hierarchy: root=${result.first.root.className}, children=${result.first.root.children.size}"
           )
@@ -90,6 +93,7 @@ fun LayoutInspectorDashboard(
             result.first,
             result.second,
             deviceId = update.deviceId ?: deviceId,
+            generation = frameGeneration,
           )
           dashboardLog.info("Updated state with new hierarchy")
         } else {
@@ -109,11 +113,13 @@ fun LayoutInspectorDashboard(
         "Received screenshot update in dashboard - deviceId=${update.deviceId}, hasScreenshot=${update.screenshotBase64 != null}"
       )
       update.screenshotBase64?.let { base64 ->
+        val frameGeneration = state.frameGeneration
         // Decode base64 to byte array off main thread
         val screenshotData =
           kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
             java.util.Base64.getDecoder().decode(base64)
           }
+        if (frameGeneration != state.frameGeneration) return@let
         dashboardLog.info("Decoded screenshot: ${screenshotData.size} bytes")
         state.updateConnectionStatus(ConnectionStatus.Connected)
         state.updateScreenshot(
@@ -126,6 +132,7 @@ fun LayoutInspectorDashboard(
           format = update.screenshotFormat,
           captureSource = update.screenshotCaptureSource,
           deviceId = update.deviceId ?: deviceId,
+          generation = frameGeneration,
         )
         dashboardLog.info("Updated state with new screenshot")
       }
@@ -152,6 +159,17 @@ fun LayoutInspectorDashboard(
       streamClient.connectionState.collect { connectionState ->
         gracePeriod.onStreamStateChange(connectionState)
       }
+    }
+    var observedGeneration by remember(streamClient) { mutableStateOf(0) }
+    LaunchedEffect(streamClient, connectionGeneration) {
+      if (observedGeneration != 0 && observedGeneration != connectionGeneration) {
+        // A fast drop/reconnect can leave connectionState value-equal to the old Connected state.
+        // Clear the old hierarchy and screenshot even when the grace-period collector missed it.
+        state.disconnect()
+        streamClient.resetLayoutReplayCache()
+        gracePeriod.onStreamStateChange(streamClient.connectionState.value)
+      }
+      observedGeneration = connectionGeneration
     }
     LaunchedEffect(streamClient) {
       streamClient.deviceEvents.collect { event ->
@@ -186,7 +204,9 @@ fun LayoutInspectorDashboard(
   // yet. Scoped to [deviceId] rather than the previous active-device REST fallback, so a per-device
   // facet never renders another device's frame. The result flows back through
   // hierarchyUpdates/screenshotUpdates above.
-  LaunchedEffect(observationStream, deviceId) { observationStream.requestObservation(deviceId) }
+  LaunchedEffect(observationStream, deviceId, connectionGeneration) {
+    observationStream.requestObservation(deviceId)
+  }
 
   // Panel collapse states - default to collapsed, remember user preference
   // TODO: Persist these to IDE preferences for remembering across sessions

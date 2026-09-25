@@ -60,8 +60,8 @@ fun LayoutFacet(
     )
   },
 ) {
-  val stream =
-    rememberReconnectingObservationStream(
+  val observation =
+    rememberReconnectingObservationState(
       deviceId = column.deviceId,
       streamFactory = observationStreamFactory,
       backoffDelay = backoffDelay,
@@ -78,13 +78,14 @@ fun LayoutFacet(
       // idle buffers, so a static inspected screen legitimately makes no frame progress.
       stallReconnectMs = if (column.platform == Platform.Android) LIVE_STALL_RECONNECT_MS else null,
     )
-  stream?.let { activeStream ->
+  observation.stream?.let { activeStream ->
     LayoutInspectorDashboard(
       dataSourceMode = DataSourceMode.Real,
       observationStream = activeStream,
       deviceId = column.deviceId,
       platform = if (column.platform == Platform.Ios) "ios" else "android",
       liveFrame = liveFrame?.bitmap,
+      connectionGeneration = observation.connectionGeneration,
     )
   }
 }

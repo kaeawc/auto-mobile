@@ -5,6 +5,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.runComposeUiTest
 import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
@@ -143,6 +144,36 @@ class PerformanceFacetTest {
     runOnIdle { backoff.complete(Unit) }
     waitForIdle()
     assertEquals("expected the perf facet to reconnect after a drop", 2, fake.connectCallCount)
+  }
+
+  @Test
+  fun `conflated reconnect discards live performance metrics`() = runComposeUiTest {
+    val fake = FakeObservationStream()
+    setContent {
+      CompositionLocalProvider(LocalAutoMobileGraph provides fakeGraph()) {
+        MaterialTheme {
+          PerformanceFacet(
+            column = DeviceColumn(deviceId = "dev-1", name = "Pixel", platform = Platform.Android),
+            observationStreamFactory = { fake },
+            backoffDelay = {},
+            socketAvailable = { true },
+          )
+        }
+      }
+    }
+    waitForIdle()
+    runOnIdle { fake.emitPerformance(perfUpdate(deviceId = "dev-1", fps = 30f)) }
+    waitForIdle()
+    onNodeWithText("Frame Rate").assertIsDisplayed()
+
+    runOnIdle { fake.emitConnectionState(ConnectionState.Disconnected("Stream ended")) }
+    waitForIdle()
+    assertEquals(2, fake.connectCallCount)
+    assertEquals(ConnectionState.Connected(), fake.connectionState.value)
+    assertTrue(
+      "the prior live run must be discarded after a value-equal reconnect",
+      onAllNodesWithText("Frame Rate").fetchSemanticsNodes().isEmpty(),
+    )
   }
 
   @Test

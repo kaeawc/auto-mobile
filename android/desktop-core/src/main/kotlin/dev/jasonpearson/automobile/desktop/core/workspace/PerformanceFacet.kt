@@ -35,8 +35,8 @@ fun PerformanceFacet(
   socketAvailable: () -> Boolean = { ObservationStreamClient.socketExists() },
 ) {
   val graph = LocalAutoMobileGraph.current
-  val stream =
-    rememberReconnectingObservationStream(
+  val observation =
+    rememberReconnectingObservationState(
       deviceId = column.deviceId,
       streamFactory = { observationStreamFactory(column.deviceId) },
       backoffDelay = backoffDelay,
@@ -45,7 +45,8 @@ fun PerformanceFacet(
   PerformanceDashboard(
     dataSourceMode = DataSourceMode.Real,
     clientProvider = { graph.autoMobileClient },
-    observationStreamClient = stream,
+    observationStreamClient = observation.stream,
+    connectionGeneration = observation.connectionGeneration,
     deviceId = column.deviceId,
   )
 }

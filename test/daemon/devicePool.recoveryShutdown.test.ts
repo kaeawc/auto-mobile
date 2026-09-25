@@ -490,17 +490,29 @@ test("continuity releases an externally closed emulator without relaunch and reh
   );
   const captured = pool.getDevice(original.deviceId)!;
   const originalConnectionId = `${captured.id}#${captured.incarnation}`;
+  const incidentId = await pool.recordEmulatorLossIncident(
+    original.deviceId,
+    "device-discovery-miss",
+  );
+  if (!incidentId) {
+    throw new Error("Expected emulator-loss incident to be recorded");
+  }
   manager.bootedDevices = [];
 
   try {
     await expect(
-      pool.recoverSessionBoundAndroidDeviceAfterLoss(original.deviceId, undefined, captured),
+      pool.recoverSessionBoundAndroidDeviceAfterLoss(original.deviceId, incidentId, captured),
     ).resolves.toBe("released");
     expect(manager.kills).toEqual([]);
     expect(manager.startedDevices).toEqual([]);
     expect(await persistence.getSession?.("session")).toMatchObject({
       status: "released",
       release_reason: `device-restart:${original.name}`,
+    });
+    expect(await pool.waitForEmulatorLossIncident(incidentId, 0)).toMatchObject({
+      avdName: original.name,
+      session: { state: "awaiting-device" },
+      recovery: { attempts: [], outcome: "not-attempted" },
     });
     expect(sessions.getSession("session")).toBeNull();
     assertNoRecoveryReservationsRemain(pool, "session");
@@ -523,6 +535,79 @@ test("continuity releases an externally closed emulator without relaunch and reh
     });
     expect(replacement).toMatchObject({ sessionId: "session", status: "busy" });
     expect(`${replacement.id}#${replacement.incarnation}`).not.toBe(originalConnectionId);
+  } finally {
+    sessions.stopCleanupTimer();
+  }
+});
+
+test("continuity-disabled emulator loss keeps a terminal released settlement", async () => {
+  const timer = new FakeTimer();
+  const persistence = new FakeDeviceSessionPersistence();
+  const sessions = new SessionManager(timer, persistence);
+  const manager = new KillTrackingShutdownManager();
+  const pool = new DevicePool(
+    sessions,
+    "daemon",
+    timer,
+    new FakeInstalledAppsRepository(),
+    manager,
+    new DefaultRetryExecutor(timer),
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    { onLoss: false, maxAttempts: 1 },
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    false,
+  );
+  manager.bootedDevices = [original];
+  await pool.addDevice(original, image);
+  await pool.bindOrReuseDeviceSession(
+    "session",
+    original.deviceId,
+    "android",
+    image,
+    undefined,
+    original,
+  );
+  const captured = pool.getDevice(original.deviceId)!;
+  const incidentId = await pool.recordEmulatorLossIncident(
+    original.deviceId,
+    "device-discovery-miss",
+  );
+  if (!incidentId) {
+    throw new Error("Expected emulator-loss incident to be recorded");
+  }
+  try {
+    const eviction = pool as unknown as {
+      evictMissingPooledDevice(
+        device: PooledDevice,
+        reason: string,
+        attemptDeviceLossRecovery: boolean,
+        incidentId: string,
+      ): Promise<void>;
+    };
+    await eviction.evictMissingPooledDevice(
+      captured,
+      "not present in adb devices",
+      true,
+      incidentId,
+    );
+
+    expect(await persistence.getSession?.("session")).toMatchObject({
+      status: "released",
+      release_reason: `device-disconnected:${original.deviceId};incident=${incidentId}`,
+    });
+    expect(await pool.waitForEmulatorLossIncident(incidentId, 0)).toMatchObject({
+      session: { state: "released" },
+      recovery: { attempts: [], outcome: "not-attempted" },
+    });
   } finally {
     sessions.stopCleanupTimer();
   }

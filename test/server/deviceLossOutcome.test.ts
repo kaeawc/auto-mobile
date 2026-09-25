@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import type { EmulatorLossIncident } from "../../src/daemon/emulatorLossIncident";
 import {
   DEVICE_LOSS_OUTCOME_CODE,
   DeviceLostError,
@@ -70,6 +71,49 @@ describe("device-loss outcome", () => {
       sessionState: "active",
       recovery: { status: "recovered", attempts: 1 },
       retry: { sameSession: true, requiresNewSession: false },
+    });
+  });
+
+  test("keeps a device-restart session resumable while terminal releases require a new session", () => {
+    const outcome = deviceLossOutcomeFromError(
+      new DeviceLostError("emulator-5554", "device-disconnected:emulator-5554", "emulator-loss-2"),
+      "session-a",
+    )!;
+    const incident: EmulatorLossIncident = {
+      id: "emulator-loss-2",
+      observedAtMs: 10,
+      updatedAtMs: 20,
+      deviceId: "emulator-5554",
+      avdName: "Pixel_8_API_35",
+      detectionPath: "device-discovery-miss",
+      session: {
+        sessionUuid: "session-a",
+        state: "awaiting-device",
+        lastHeartbeatMs: 9,
+        hasReceivedHeartbeat: true,
+        heartbeatTimeoutMs: 10_000,
+      },
+      recovery: {
+        policy: { onLoss: false, maxAttempts: 1 },
+        attempts: [],
+        outcome: "not-attempted",
+      },
+    };
+
+    expect(enrichDeviceLossOutcome(outcome, incident)).toMatchObject({
+      avdName: "Pixel_8_API_35",
+      sessionState: "awaiting-device",
+      recovery: { status: "not-attempted", attempts: 0 },
+      retry: { sameSession: true, requiresNewSession: false },
+    });
+
+    incident.session!.state = "released";
+    incident.recovery.outcome = "exhausted";
+    incident.recovery.attempts.push({ attempt: 1, outcome: "failed" });
+    expect(enrichDeviceLossOutcome(outcome, incident)).toMatchObject({
+      sessionState: "released",
+      recovery: { status: "exhausted", attempts: 1 },
+      retry: { sameSession: false, requiresNewSession: true },
     });
   });
 

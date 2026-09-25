@@ -14,7 +14,7 @@ export type EmulatorLossDetectionPath =
   | "adb-server-reset";
 
 export type EmulatorRecoveryOutcome = "recovered" | "exhausted" | "not-attempted";
-export type EmulatorLossSessionState = "recovering" | "active" | "released";
+export type EmulatorLossSessionState = "recovering" | "active" | "awaiting-device" | "released";
 
 export interface EmulatorLossSessionSnapshot {
   sessionUuid: string;

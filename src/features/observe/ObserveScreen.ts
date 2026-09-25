@@ -620,6 +620,7 @@ export class RealObserveScreen implements ObserveScreen {
         adb: this.adb,
         adbFactory: this.adbFactory,
         timer: this.timer,
+        onAvailabilityLost: dependencies?.onAvailabilityLost,
       });
     this.deviceStateCollector =
       dependencies?.deviceStateCollector ??

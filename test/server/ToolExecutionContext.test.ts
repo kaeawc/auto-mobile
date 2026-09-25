@@ -230,6 +230,62 @@ describe("ToolExecutionContext", () => {
     expect(setupCalls).toBe(0);
   });
 
+  test("checks unhealthy binding before setup on an existing session", async () => {
+    const calls: string[] = [];
+    setDeviceReadinessProxyDriverProviderForTesting(() => ({
+      resetSetupState: () => calls.push("reset"),
+      rebindIfUnhealthy: async () => {
+        calls.push("rebind");
+        return true;
+      },
+      setup: async () => {
+        calls.push("setup");
+        return { success: true, message: "ok" };
+      },
+      waitForConnection: async () => {
+        calls.push("wait");
+        return true;
+      },
+      isInstalled: async () => true,
+      isVersionCompatible: async () => true,
+    }));
+    await sessionManager.createSession("unbound-service", "device-1", "android");
+    sessionManager.setDeviceReadiness("unbound-service", "booted");
+
+    await createToolExecutionContext("unbound-service", sessionManager, devicePool, sessionOptions);
+
+    expect(calls).toEqual(["reset", "rebind", "setup", "wait"]);
+    expect(sessionManager.getDeviceReadiness("unbound-service")).toBe("automationReady");
+  });
+
+  test("continues setup when the optional binding check fails", async () => {
+    const calls: string[] = [];
+    setDeviceReadinessProxyDriverProviderForTesting(() => ({
+      resetSetupState: () => {},
+      rebindIfUnhealthy: async () => {
+        calls.push("rebind");
+        throw new Error("binding probe failed");
+      },
+      setup: async () => {
+        calls.push("setup");
+        return { success: true, message: "ok" };
+      },
+      waitForConnection: async () => {
+        calls.push("wait");
+        return true;
+      },
+      isInstalled: async () => true,
+      isVersionCompatible: async () => true,
+    }));
+    await sessionManager.createSession("binding-probe", "device-1", "android");
+    sessionManager.setDeviceReadiness("binding-probe", "booted");
+
+    await createToolExecutionContext("binding-probe", sessionManager, devicePool, sessionOptions);
+
+    expect(calls).toEqual(["rebind", "setup", "wait"]);
+    expect(sessionManager.getDeviceReadiness("binding-probe")).toBe("automationReady");
+  });
+
   test("still runs accessibility setup for a new session when deviceReadiness is automationReady (#6227)", async () => {
     let setupCalls = 0;
     AndroidCtrlProxyManager.getInstance = () =>
@@ -332,6 +388,36 @@ describe("ToolExecutionContext", () => {
 
     expect(context.deviceId).toBe("device-1");
     expect(setupCalls).toBe(0);
+    await createToolExecutionContext("session-acquired", sessionManager, devicePool, {
+      ...sessionOptions,
+      deviceReadiness: "automationReady",
+    });
+    expect(setupCalls).toBe(0);
+  });
+
+  test("reruns setup after automation readiness is invalidated for a session", async () => {
+    let setupCalls = 0;
+    AndroidCtrlProxyManager.getInstance = () =>
+      ({
+        resetSetupState: () => {},
+        setup: async () => {
+          setupCalls += 1;
+          return { success: true, message: "ok" };
+        },
+      }) as any;
+    AndroidCtrlProxyClient.getInstance = (() => ({
+      waitForConnection: async () => true,
+      close: async () => {},
+    })) as any;
+
+    await sessionManager.createSession("lost-service", "device-1", "android");
+    sessionManager.setDeviceReadiness("lost-service", "automationReady");
+    sessionManager.invalidateAutomationReadiness("lost-service", "test");
+
+    await createToolExecutionContext("lost-service", sessionManager, devicePool, sessionOptions);
+
+    expect(setupCalls).toBe(1);
+    expect(sessionManager.getDeviceReadiness("lost-service")).toBe("automationReady");
   });
 
   // Companion case: a session recovered without its readiness genuinely
@@ -599,6 +685,53 @@ describe("ToolExecutionContext", () => {
     expect(setupCalls).toBe(1);
     expect(resetCalls).toBe(1);
     expect(sessionManager.getDeviceReadiness("session-race-concurrent")).toBe("automationReady");
+  });
+
+  test("serializes concurrent setup after automation readiness is invalidated", async () => {
+    let setupCalls = 0;
+    const setupEntered = Promise.withResolvers<void>();
+    const setupGate = Promise.withResolvers<void>();
+    AndroidCtrlProxyManager.getInstance = () =>
+      ({
+        resetSetupState: () => {},
+        setup: async () => {
+          setupCalls += 1;
+          setupEntered.resolve();
+          await setupGate.promise;
+          return { success: true, message: "ok" };
+        },
+      }) as any;
+    AndroidCtrlProxyClient.getInstance = (() => ({
+      waitForConnection: async () => true,
+      close: async () => {},
+    })) as any;
+
+    await sessionManager.createSession("lost-service-concurrent", "device-1", "android");
+    sessionManager.setDeviceReadiness("lost-service-concurrent", "automationReady");
+    sessionManager.invalidateAutomationReadiness("lost-service-concurrent", "test");
+
+    const call1 = createToolExecutionContext(
+      "lost-service-concurrent",
+      sessionManager,
+      devicePool,
+      sessionOptions,
+    );
+    await setupEntered.promise;
+    const call2 = createToolExecutionContext(
+      "lost-service-concurrent",
+      sessionManager,
+      devicePool,
+      sessionOptions,
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+    setupGate.resolve();
+
+    const [context1, context2] = await Promise.all([call1, call2]);
+    expect(context1.deviceId).toBe("device-1");
+    expect(context2.deviceId).toBe("device-1");
+    expect(setupCalls).toBe(1);
+    expect(sessionManager.getDeviceReadiness("lost-service-concurrent")).toBe("automationReady");
   });
 
   // #6227 P1 follow-up (round 3): the round-2 single-flight above only

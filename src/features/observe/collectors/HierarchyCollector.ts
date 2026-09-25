@@ -4,7 +4,7 @@ import { AndroidCtrlProxyManager } from "../../../utils/CtrlProxyManager";
 import { AndroidCtrlProxyClient } from "../android";
 import { IOSCtrlProxyClient } from "../ios";
 import { appendObserveError } from "../ObserveError";
-import type { BootedDevice, ObserveResult } from "../../../models";
+import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../models";
 import type { ViewHierarchyQueryOptions } from "../../../models/ViewHierarchyQueryOptions";
 import type { ViewHierarchy } from "../interfaces/ViewHierarchy";
 import type { Timer } from "../../../utils/SystemTimer";
@@ -18,6 +18,7 @@ export interface HierarchyCollectorOptions {
   adb: AdbExecutor;
   adbFactory: AdbClientFactory;
   timer: Timer;
+  onAvailabilityLost?: (reason: string) => void;
 }
 
 /**
@@ -26,6 +27,28 @@ export interface HierarchyCollectorOptions {
  */
 export class HierarchyCollector {
   constructor(private opts: HierarchyCollectorOptions) {}
+
+  /**
+   * Primary detection path (#7534): fire `onAvailabilityLost` off the
+   * RESOLVED `ViewHierarchyResult`'s typed `transportFailure` signal
+   * (Android only). Extracted to keep `collect()`'s success branch shallow;
+   * the guard try/catch mirrors the existing catch-block callback guard.
+   */
+  private reportTransportFailureIfAny(
+    platform: BootedDevice["platform"],
+    hierarchy: ViewHierarchyResult,
+  ): void {
+    if (platform !== "android" || hierarchy.hierarchy?.transportFailure !== true) {
+      return;
+    }
+    try {
+      this.opts.onAvailabilityLost?.(
+        `CtrlProxy hierarchy connection lost: ${hierarchy.hierarchy.error ?? "transport failure"}`,
+      );
+    } catch (callbackError) {
+      logger.warn("[HierarchyCollector] Failed to report lost availability:", callbackError);
+    }
+  }
 
   /**
    * Collect view hierarchy and handle errors with accessibility service caching.
@@ -57,6 +80,16 @@ export class HierarchyCollector {
 
       if (hierarchy) {
         result.viewHierarchy = hierarchy;
+
+        // Primary detection path (#7534): the real `ViewHierarchy` swallows
+        // lost CtrlProxy connectivity/binding into a RESOLVED error-shaped
+        // `Hierarchy` rather than throwing, so the `catch` block below is
+        // largely dead code for this failure class in production. Read the
+        // typed signal off the resolved result instead. This call and the
+        // `catch` block below are mutually exclusive within this one
+        // try/catch, so `onAvailabilityLost` cannot fire twice for a single
+        // `collect()` call.
+        this.reportTransportFailureIfAny(device.platform, hierarchy);
 
         // Use the updatedAt from the view hierarchy if available (from accessibility service)
         if (hierarchy.updatedAt) {
@@ -114,7 +147,23 @@ export class HierarchyCollector {
         logger.debug(`[HierarchyCollector] Failed to clear availability cache: ${clearError}`);
       }
 
+      // Defensive/secondary path (#7534): the real `ViewHierarchy` resolves
+      // rather than throws for this failure class (see the resolved-result
+      // check in the success branch above, which is now primary). This
+      // string-matching guard stays for a `ViewHierarchy`/client
+      // implementation that genuinely throws instead.
       const errorStr = String(error);
+      if (
+        device.platform === "android" &&
+        (errorStr.includes("WebSocket not connected") ||
+          errorStr.includes("Failed to connect to accessibility service"))
+      ) {
+        try {
+          this.opts.onAvailabilityLost?.(`CtrlProxy hierarchy connection lost: ${errorStr}`);
+        } catch (callbackError) {
+          logger.warn("[HierarchyCollector] Failed to report lost availability:", callbackError);
+        }
+      }
       if (
         errorStr.includes("null root node returned by UiTestAutomationBridge") ||
         (errorStr.includes("cat:") && errorStr.includes("No such file or directory")) ||

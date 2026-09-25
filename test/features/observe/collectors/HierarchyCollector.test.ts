@@ -119,6 +119,92 @@ describe("HierarchyCollector", () => {
       expect(result.errors![0].cause).toContain("boom");
     });
 
+    // #7534 primary path: the real `ViewHierarchy` swallows lost CtrlProxy
+    // connectivity into a RESOLVED error-shaped result (`transportFailure:
+    // true`) rather than throwing, so `onAvailabilityLost` must be driven off
+    // the resolved result, not a thrown error. This replaces the prior
+    // round's throwing-fake coverage, which didn't exercise the real
+    // production shape (reviewer-flagged as misleading).
+    test("reports lost CtrlProxy availability from a resolved transport-failure result", async () => {
+      const reasons: string[] = [];
+      fakeViewHierarchy.configureHierarchy({
+        hierarchy: { error: "WebSocket not connected", transportFailure: true },
+        updatedAt: 1,
+      });
+      const reportingCollector = new HierarchyCollector({
+        device: makeDevice(),
+        viewHierarchy: fakeViewHierarchy,
+        adb: fakeAdb,
+        adbFactory: makeStubAdbFactory(fakeAdb),
+        timer: fakeTimer,
+        onAvailabilityLost: (reason) => reasons.push(reason),
+      });
+
+      await reportingCollector.collect(makeResult());
+
+      expect(reasons).toEqual(["CtrlProxy hierarchy connection lost: WebSocket not connected"]);
+    });
+
+    test("does not report lost availability for a resolved ordinary content error (no transportFailure)", async () => {
+      const reasons: string[] = [];
+      fakeViewHierarchy.configureHierarchy({
+        hierarchy: { error: "screen appears to be off" },
+        updatedAt: 1,
+      });
+      const reportingCollector = new HierarchyCollector({
+        device: makeDevice(),
+        viewHierarchy: fakeViewHierarchy,
+        adb: fakeAdb,
+        adbFactory: makeStubAdbFactory(fakeAdb),
+        timer: fakeTimer,
+        onAvailabilityLost: (reason) => reasons.push(reason),
+      });
+
+      await reportingCollector.collect(makeResult());
+
+      expect(reasons).toEqual([]);
+    });
+
+    // Defensive/secondary path (#7534): kept for a `ViewHierarchy` (or
+    // underlying client) implementation that genuinely throws instead of
+    // resolving. Not the primary production path — see the resolved-result
+    // tests above.
+    test("reports lost CtrlProxy availability once from a thrown connection error (secondary path)", async () => {
+      const reasons: string[] = [];
+      fakeViewHierarchy.setFailure(new Error("WebSocket not connected"));
+      const reportingCollector = new HierarchyCollector({
+        device: makeDevice(),
+        viewHierarchy: fakeViewHierarchy,
+        adb: fakeAdb,
+        adbFactory: makeStubAdbFactory(fakeAdb),
+        timer: fakeTimer,
+        onAvailabilityLost: (reason) => reasons.push(reason),
+      });
+
+      await reportingCollector.collect(makeResult());
+
+      expect(reasons).toEqual([
+        "CtrlProxy hierarchy connection lost: Error: WebSocket not connected",
+      ]);
+    });
+
+    test("does not report lost availability for a thrown screen-off content error", async () => {
+      const reasons: string[] = [];
+      fakeViewHierarchy.setFailure(new Error("screen appears to be off"));
+      const reportingCollector = new HierarchyCollector({
+        device: makeDevice(),
+        viewHierarchy: fakeViewHierarchy,
+        adb: fakeAdb,
+        adbFactory: makeStubAdbFactory(fakeAdb),
+        timer: fakeTimer,
+        onAvailabilityLost: (reason) => reasons.push(reason),
+      });
+
+      await reportingCollector.collect(makeResult());
+
+      expect(reasons).toEqual([]);
+    });
+
     test("emits screen-off message when error indicates screen off", async () => {
       fakeViewHierarchy.setFailure(new Error("null root node returned by UiTestAutomationBridge"));
 

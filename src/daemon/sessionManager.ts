@@ -3407,9 +3407,8 @@ export class SessionManager {
    * accessibility-service setup the device still needs, or an unnecessary
    * redundant setup would run. Comparing against the currently recorded level
    * and only writing when the new one is higher (or none has been recorded
-   * yet) closes that hole. There is currently no caller that needs to lower
-   * or clear a recorded level — a genuine reset/teardown should add a
-   * distinct, explicitly-named method rather than repurposing this recorder.
+   * yet) closes that hole. A genuine loss of automation readiness uses
+   * `invalidateAutomationReadiness` instead of repurposing this recorder.
    */
   setDeviceReadiness(sessionId: string, level: DeviceReadinessLevel): void {
     const current = this.getDeviceReadiness(sessionId);
@@ -3426,6 +3425,16 @@ export class SessionManager {
    */
   getDeviceReadiness(sessionId: string): DeviceReadinessLevel | undefined {
     return this.getSession(sessionId)?.cacheData.deviceReadiness;
+  }
+
+  /** Drop stale automation readiness after its service becomes unavailable. */
+  invalidateAutomationReadiness(sessionId: string, reason: string): void {
+    if (!this.getSession(sessionId)) {
+      logger.debug(`[SessionManager] Cannot invalidate readiness for unknown session ${sessionId}`);
+      return;
+    }
+    logger.warn(`[SessionManager] Invalidating automation readiness for ${sessionId}: ${reason}`);
+    this.updateSessionCache(sessionId, { deviceReadiness: "booted" });
   }
 
   /**

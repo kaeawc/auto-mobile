@@ -157,6 +157,19 @@ test("resetDeviceReadinessForDevice drops restored automation readiness", async 
   expect(manager.getDeviceReadiness("restore-session")).toBe("booted");
 });
 
+test("invalidateAutomationReadiness downgrades a session and ignores unknown ids", async () => {
+  const manager = new SessionManager(new FakeTimer(), new FakeDeviceSessionPersistence());
+  await manager.createSession("lost-service", "emulator-5554", "android");
+  manager.setDeviceReadiness("lost-service", "automationReady");
+
+  manager.invalidateAutomationReadiness("lost-service", "test");
+
+  expect(manager.getDeviceReadiness("lost-service")).toBe("booted");
+  expect(() => manager.invalidateAutomationReadiness("unknown-session", "test")).not.toThrow();
+  expect(manager.getDeviceReadiness("unknown-session")).toBeUndefined();
+  manager.stopCleanupTimer();
+});
+
 function clearHeartbeatEnv(): void {
   for (const key of HEARTBEAT_ENV_KEYS) {
     delete process.env[key];

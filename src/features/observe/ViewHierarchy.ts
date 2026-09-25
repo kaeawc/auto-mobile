@@ -3,6 +3,7 @@ import {
   defaultAdbClientFactory,
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { logger, LogLevel } from "../../utils/logger";
+import { errorMessage } from "../../utils/describeUnknownError";
 import { BootedDevice } from "../../models";
 import { Element } from "../../models";
 import { ScreenIdentity } from "../../models";
@@ -284,7 +285,14 @@ export class ViewHierarchy implements ViewHierarchyInterface {
         return this.prepareHierarchyForResponse(accessibilityHierarchy);
       }
 
-      // Accessibility service returned null
+      // Accessibility service returned null. Every null return from
+      // `getAccessibilityHierarchy` genuinely represents lost CtrlProxy
+      // connectivity/binding (not-installed, not-enabled, WebSocket+sync both
+      // failed, or a caught internal error) -- EXCEPT when the caller itself
+      // aborted this read (`signal` aborted): that path also resolves null
+      // (via `throwIfAborted` inside the delegate's own catch), but it is an
+      // operation-cancellation outcome, not lost availability, and must not
+      // trigger `onAvailabilityLost` downstream (#7534).
       perf.end();
       logger.warn("[VIEW_HIERARCHY] Accessibility service returned null hierarchy");
       return {
@@ -294,6 +302,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
             signal,
             timeoutMs,
           ),
+          ...(signal?.aborted ? {} : { transportFailure: true }),
         },
         updatedAt: this.timer.now(),
       };
@@ -304,6 +313,17 @@ export class ViewHierarchy implements ViewHierarchyInterface {
         `[VIEW_HIERARCHY] Failed to get hierarchy from accessibility service after ${duration}ms:`,
         err,
       );
+      // Defensive/secondary path: the real `AndroidCtrlProxyClient` swallows
+      // connection failures into a null return above rather than throwing, so
+      // this catch is rarely reached in production through it. It stays for
+      // other current or future client implementations, or a genuinely
+      // different thrown error, that DO throw. Only mark it a transport
+      // failure when the message matches a known connection/unbound-service
+      // signature -- otherwise this is an ordinary/unexpected thrown error.
+      const errMessage = errorMessage(err);
+      const transportFailure =
+        errMessage.includes("WebSocket not connected") ||
+        errMessage.includes("Failed to connect to accessibility service");
       return {
         hierarchy: {
           error: await this.describeHierarchyFailure(
@@ -311,6 +331,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
             signal,
             timeoutMs,
           ),
+          ...(transportFailure ? { transportFailure: true } : {}),
         },
         updatedAt: this.timer.now(),
       };

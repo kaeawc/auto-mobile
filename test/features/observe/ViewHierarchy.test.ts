@@ -1555,5 +1555,65 @@ describe("Offscreen Node Filtering", function () {
       expect(result.hierarchy.error).toBeDefined();
       expect(typeof result.updatedAt).toBe("number");
     });
+
+    // #7534: HierarchyCollector reads `transportFailure` off the RESOLVED
+    // result to detect lost CtrlProxy connectivity, since the real client
+    // swallows connection failures into a resolved error rather than
+    // throwing. These tests pin that contract at the ViewHierarchy layer.
+    test("marks the null-result path as a transport failure (#7534)", async function () {
+      const nullClient = {
+        getAccessibilityHierarchy: async () => null,
+      } as unknown as AndroidCtrlProxyClient;
+      const vh = new ViewHierarchy(device, new FakeAdbClientFactory(), nullClient);
+
+      const result = await vh.getAndroidViewHierarchy();
+
+      expect(result.hierarchy.transportFailure).toBe(true);
+    });
+
+    test("does not mark the null-result path as a transport failure when the caller aborted (#7534)", async function () {
+      const nullClient = {
+        getAccessibilityHierarchy: async () => null,
+      } as unknown as AndroidCtrlProxyClient;
+      const vh = new ViewHierarchy(device, new FakeAdbClientFactory(), nullClient);
+      const controller = new AbortController();
+      controller.abort();
+
+      const result = await vh.getAndroidViewHierarchy(
+        undefined,
+        undefined,
+        false,
+        0,
+        controller.signal,
+      );
+
+      expect(result.hierarchy.transportFailure).toBeFalsy();
+    });
+
+    test("marks a thrown connection-lost error as a transport failure (#7534)", async function () {
+      const throwingClient = {
+        getAccessibilityHierarchy: async () => {
+          throw new Error("WebSocket not connected");
+        },
+      } as unknown as AndroidCtrlProxyClient;
+      const vh = new ViewHierarchy(device, new FakeAdbClientFactory(), throwingClient);
+
+      const result = await vh.getAndroidViewHierarchy();
+
+      expect(result.hierarchy.transportFailure).toBe(true);
+    });
+
+    test("does not mark an ordinary thrown error as a transport failure (#7534)", async function () {
+      const throwingClient = {
+        getAccessibilityHierarchy: async () => {
+          throw new Error("ctrlproxy offline");
+        },
+      } as unknown as AndroidCtrlProxyClient;
+      const vh = new ViewHierarchy(device, new FakeAdbClientFactory(), throwingClient);
+
+      const result = await vh.getAndroidViewHierarchy();
+
+      expect(result.hierarchy.transportFailure).toBeFalsy();
+    });
   });
 });

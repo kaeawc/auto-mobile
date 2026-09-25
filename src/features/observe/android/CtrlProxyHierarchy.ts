@@ -108,6 +108,24 @@ export class CtrlProxyHierarchy {
     return true;
   }
 
+  /**
+   * Clear connection-scoped device state on a WebSocket close (issue #7540).
+   *
+   * The recomposition-tracking latch describes what the runner's accessibility
+   * service instance holds, not what the host client holds. A restart of that
+   * service (crash rebind, APK reinstall, or any other event that closes this
+   * socket) comes back with `RecompositionStore.enabled == false` regardless of
+   * what was configured before. Only `recompositionTrackingConfigured` is reset
+   * here — `recompositionTrackingEnabled` is deliberately left as the last
+   * requested value, so the next `setRecompositionTrackingEnabled(true)` call
+   * (every non-read-only observe makes one, via `HierarchyCollector.collect`)
+   * re-sends the frame on the new connection instead of comparing against a
+   * value the caller never changed and skipping it.
+   */
+  resetConnectionScopedState(): void {
+    this.recompositionTrackingConfigured = false;
+  }
+
   /** Reject every correlated hierarchy wait when its WebSocket connection closes. */
   rejectAllPendingHierarchy(reason: string): void {
     // Each disconnect removes its entries during waitForFreshData cleanup. A socket close is

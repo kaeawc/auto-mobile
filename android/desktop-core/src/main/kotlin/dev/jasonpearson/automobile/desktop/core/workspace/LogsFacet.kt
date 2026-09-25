@@ -8,6 +8,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import dev.jasonpearson.automobile.desktop.core.daemon.TelemetryPushClient
 import dev.jasonpearson.automobile.desktop.core.daemon.TelemetryPushSocketClient
+import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
 import dev.jasonpearson.automobile.desktop.core.telemetry.LogPlatform
 import dev.jasonpearson.automobile.desktop.core.telemetry.LogsPanel
 
@@ -32,6 +33,7 @@ fun LogsFacet(
   column: DeviceColumn,
   telemetryClientFactory: (String) -> TelemetryPushClient = { TelemetryPushSocketClient() },
 ) {
+  val graph = LocalAutoMobileGraph.current
   var client by remember(column.deviceId) { mutableStateOf<TelemetryPushClient?>(null) }
   DisposableEffect(column.deviceId) {
     val connected =
@@ -44,6 +46,7 @@ fun LogsFacet(
   }
   LogsPanel(
     telemetryPushClient = client,
+    settingsProvider = graph.settingsProvider,
     activeDeviceId = column.deviceId,
     platform = column.platform.toLogPlatform(),
   )

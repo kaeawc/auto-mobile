@@ -116,6 +116,10 @@ class FileSettingsProvider(private val file: File = defaultSettingsFile()) : Set
     get() = string(KEY_FAILURES_DATE_RANGE, "24h")
     set(value) = put(KEY_FAILURES_DATE_RANGE, value)
 
+  override var logsSavedViews: String
+    get() = string(KEY_LOGS_SAVED_VIEWS, "[]")
+    set(value) = put(KEY_LOGS_SAVED_VIEWS, value)
+
   override var androidIde: String
     get() = string(KEY_ANDROID_IDE, "auto")
     set(value) = put(KEY_ANDROID_IDE, value)
@@ -149,6 +153,7 @@ class FileSettingsProvider(private val file: File = defaultSettingsFile()) : Set
     private const val KEY_FOG_MODE_ENABLED = "fogModeEnabled"
     private const val KEY_AUTO_FOCUS_ENABLED = "autoFocusEnabled"
     private const val KEY_FAILURES_DATE_RANGE = "failuresDateRange"
+    private const val KEY_LOGS_SAVED_VIEWS = "logsSavedViews"
     private const val KEY_ANDROID_IDE = "androidIde"
     private const val KEY_IOS_IDE = "iosIde"
     private const val KEY_THEME_MODE = "themeMode"

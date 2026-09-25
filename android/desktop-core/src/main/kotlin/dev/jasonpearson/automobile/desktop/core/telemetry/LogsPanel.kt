@@ -18,6 +18,8 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -52,16 +54,20 @@ import androidx.compose.ui.unit.sp
 import dev.jasonpearson.automobile.desktop.core.components.SearchBar
 import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.core.daemon.TelemetryPushClient
+import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
+import dev.jasonpearson.automobile.desktop.core.settings.SettingsProvider
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.serialization.Serializable
 
 /**
  * A log severity bucket surfaced as an always-on filter chip. Android's raw priority ints
  * (`Log.VERBOSE`=2 .. `Log.ASSERT`=7) collapse into these five canonical buckets via [logLevelOf];
  * [color] mirrors the palette used by the telemetry dashboard's log summaries.
  */
+@Serializable
 enum class LogLevel(val label: String, val letter: String, val color: Long) {
   Verbose("Verbose", "V", 0xFF9E9E9E),
   Debug("Debug", "D", 0xFF74C0FC),
@@ -111,17 +117,18 @@ fun logLevelOf(level: Int, platform: LogPlatform = LogPlatform.Android): LogLeve
 
 /**
  * Client-side filter over already-streamed log rows. A row survives when its [LogLevel] (bucketed
- * for [platform]) is in [enabledLevels] and its tag/message matches [query] (case-insensitive
- * substring). A blank [query] and the full level set together return the input unchanged, so an
- * untouched filter bar shows everything.
+ * for [platform]) is in [enabledLevels], its tag matches [tag] when set, and its message or tag
+ * matches [query]. Both text predicates use case-insensitive substring matching.
  */
 fun filterLogs(
   logs: List<TelemetryDisplayEvent.Log>,
   enabledLevels: Set<LogLevel>,
   query: String,
   platform: LogPlatform = LogPlatform.Android,
-): List<TelemetryDisplayEvent.Log> = logs.filter {
-  logLevelOf(it.level, platform) in enabledLevels && it.matchesSearch(query)
+  tag: String? = null,
+): List<TelemetryDisplayEvent.Log> {
+  val filter = LogsSavedView("", enabledLevels, tag, query)
+  return logs.filter { matchesSavedView(it, filter, platform) }
 }
 
 /**
@@ -195,6 +202,7 @@ fun connectionStatusText(state: ConnectionState): String? =
 @Composable
 fun LogsPanel(
   telemetryPushClient: TelemetryPushClient?,
+  settingsProvider: SettingsProvider = LocalAutoMobileGraph.current.settingsProvider,
   activeDeviceId: String? = null,
   platform: LogPlatform = LogPlatform.Android,
   maxRows: Int = MAX_LOG_ROWS,
@@ -209,7 +217,12 @@ fun LogsPanel(
   // identity — filterLogs preserves instances, so `===` stays valid across recompositions.
   var selectedEvent by remember(activeDeviceId) { mutableStateOf<TelemetryDisplayEvent.Log?>(null) }
   var query by remember { mutableStateOf("") }
+  var tag by remember { mutableStateOf("") }
   var enabledLevels by remember { mutableStateOf(LogLevel.entries.toSet()) }
+  var savedViews by
+    remember(settingsProvider) {
+      mutableStateOf(deserializeLogsSavedViews(settingsProvider.logsSavedViews))
+    }
   var connectionState by remember(activeDeviceId) { mutableStateOf<ConnectionState?>(null) }
   // Monotonic append counter: unlike filtered.size it keeps advancing once the buffer is pinned at
   // maxRows, so the tail-follow effect below still re-fires on every appended row at the cap.
@@ -225,7 +238,7 @@ fun LogsPanel(
   // tracks on its own, so they are intentionally not remember keys.
   val filtered by
     remember(platform, activeDeviceId) {
-      derivedStateOf { filterLogs(logs, enabledLevels, query, platform) }
+      derivedStateOf { filterLogs(logs, enabledLevels, query, platform, tag) }
     }
   // Per-device scroll state: recreated on a device switch so a device left scrolled up does not
   // carry its scroll offset (and suppress auto-follow) into the next device.
@@ -286,7 +299,7 @@ fun LogsPanel(
   // Follow the tail when following: fires on every appended row (via appendCount, which advances
   // even at the buffer cap) and on filter/platform changes (which re-anchor the list), so the
   // newest visible row stays in view without fighting a scrolled-up user.
-  LaunchedEffect(appendCount, query, enabledLevels, platform, followTail) {
+  LaunchedEffect(appendCount, query, tag, enabledLevels, platform, followTail) {
     if (followTail && filtered.isNotEmpty()) {
       listState.scrollToItem(filtered.lastIndex)
     }
@@ -298,9 +311,27 @@ fun LogsPanel(
     LogsFilterBar(
       query = query,
       onQueryChange = { query = it },
+      tag = tag,
+      onTagChange = { tag = it },
       enabledLevels = enabledLevels,
       onToggleLevel = { level ->
         enabledLevels = if (level in enabledLevels) enabledLevels - level else enabledLevels + level
+      },
+      savedViews = savedViews,
+      onOpenViews = { savedViews = deserializeLogsSavedViews(settingsProvider.logsSavedViews) },
+      onSaveView = { name ->
+        val view = LogsSavedView(name, enabledLevels, tag.ifBlank { null }, query)
+        savedViews = savedViews.filterNot { it.name == name } + view
+        settingsProvider.logsSavedViews = serializeLogsSavedViews(savedViews)
+      },
+      onApplyView = { view ->
+        enabledLevels = view.enabledLevels
+        tag = view.tag.orEmpty()
+        query = view.query
+      },
+      onDeleteView = { view ->
+        savedViews = savedViews - view
+        settingsProvider.logsSavedViews = serializeLogsSavedViews(savedViews)
       },
     )
 
@@ -326,7 +357,8 @@ fun LogsPanel(
             // A non-healthy socket is why there are no rows — say so instead of the misleading
             // "No logs yet" (which implies a healthy but quiet stream).
             statusText != null -> statusText
-            query.isBlank() && enabledLevels == LogLevel.entries.toSet() -> "No logs yet"
+            query.isBlank() && tag.isBlank() && enabledLevels == LogLevel.entries.toSet() ->
+              "No logs yet"
             else -> "No logs match the filter"
           }
         Text(message, fontSize = 12.sp, color = colors.text.normal.copy(alpha = 0.4f))
@@ -373,9 +405,20 @@ fun LogsPanel(
 private fun LogsFilterBar(
   query: String,
   onQueryChange: (String) -> Unit,
+  tag: String,
+  onTagChange: (String) -> Unit,
   enabledLevels: Set<LogLevel>,
   onToggleLevel: (LogLevel) -> Unit,
+  savedViews: List<LogsSavedView>,
+  onOpenViews: () -> Unit,
+  onSaveView: (String) -> Unit,
+  onApplyView: (LogsSavedView) -> Unit,
+  onDeleteView: (LogsSavedView) -> Unit,
 ) {
+  var extrasExpanded by remember { mutableStateOf(false) }
+  var viewsOpen by remember { mutableStateOf(false) }
+  var namingView by remember { mutableStateOf(false) }
+  var viewName by remember { mutableStateOf("") }
   Column(
     modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
     verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -391,12 +434,93 @@ private fun LogsFilterBar(
       verticalAlignment = Alignment.CenterVertically,
       horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
+      Text(
+        "Views",
+        fontSize = 11.sp,
+        modifier =
+          Modifier.clickable { extrasExpanded = !extrasExpanded }
+            .semantics { contentDescription = "Toggle Logs filters and views" }
+            .padding(horizontal = 6.dp, vertical = 4.dp),
+      )
       LogLevel.entries.forEach { level ->
         LevelChip(
           level = level,
           isEnabled = level in enabledLevels,
           onToggle = { onToggleLevel(level) },
         )
+      }
+    }
+    if (extrasExpanded) {
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+      ) {
+        SearchBar(
+          query = tag,
+          onQueryChange = onTagChange,
+          placeholder = "Tag contains...",
+          modifier = Modifier.weight(1f).semantics { contentDescription = "Filter Logs by tag" },
+        )
+        Box {
+          TextButton(
+            onClick = {
+              onOpenViews()
+              viewsOpen = true
+            }
+          ) {
+            Text("Saved views", fontSize = 11.sp)
+          }
+          DropdownMenu(expanded = viewsOpen, onDismissRequest = { viewsOpen = false }) {
+            DropdownMenuItem(
+              text = { Text("Save current view…") },
+              onClick = { namingView = true },
+            )
+            if (namingView) {
+              Row(
+                modifier = Modifier.width(240.dp).padding(horizontal = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+              ) {
+                SearchBar(
+                  query = viewName,
+                  onQueryChange = { viewName = it },
+                  placeholder = "View name",
+                  modifier =
+                    Modifier.weight(1f).semantics { contentDescription = "Saved view name" },
+                )
+                TextButton(
+                  enabled = viewName.isNotBlank(),
+                  onClick = {
+                    onSaveView(viewName.trim())
+                    viewName = ""
+                    namingView = false
+                    viewsOpen = false
+                  },
+                ) {
+                  Text("Save")
+                }
+              }
+            }
+            savedViews.forEach { view ->
+              DropdownMenuItem(
+                text = { Text(view.name) },
+                onClick = {
+                  onApplyView(view)
+                  viewsOpen = false
+                },
+                trailingIcon = {
+                  TextButton(
+                    onClick = { onDeleteView(view) },
+                    modifier =
+                      Modifier.semantics { contentDescription = "Delete view ${view.name}" },
+                  ) {
+                    Text("Delete", fontSize = 10.sp)
+                  }
+                },
+              )
+            }
+          }
+        }
       }
     }
   }

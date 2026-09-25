@@ -12,6 +12,7 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
@@ -30,6 +31,7 @@ import androidx.compose.ui.test.runComposeUiTest
 import androidx.compose.ui.unit.dp
 import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.core.daemon.FakeTelemetryPushClient
+import dev.jasonpearson.automobile.desktop.core.settings.FakeSettingsProvider
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -81,9 +83,49 @@ class LogsPanelTest {
         log(4, "Ui", "button tapped", 2),
         log(4, "Db", "NETWORK cache miss", 3),
       )
-    // Matches tag of row 0 and message of row 2 (case-insensitive), not row 1.
     val result = filterLogs(logs, LogLevel.entries.toSet(), "network")
     assertEquals(listOf(logs[0], logs[2]), result)
+  }
+
+  @Test
+  fun `compound predicate combines level tag and message with blank edge cases`() {
+    val matching = log(4, "Network", "Connected to host", 1)
+    val wrongLevel = log(5, "Network", "Connected to host", 2)
+    val wrongTag = log(4, "Ui", "Connected to host", 3)
+    val wrongMessage = log(4, "Network", "Timed out", 4)
+    val queryMatchesTag = log(4, "ConnectedNetwork", "Timed out", 5)
+    val view = LogsSavedView("Network connections", setOf(LogLevel.Info), "net", "CONNECT")
+    assertTrue(matchesSavedView(matching, view))
+    assertFalse(matchesSavedView(wrongLevel, view))
+    assertFalse(matchesSavedView(wrongTag, view))
+    assertFalse(matchesSavedView(wrongMessage, view))
+    assertTrue(matchesSavedView(queryMatchesTag, view))
+    assertFalse(matchesSavedView(queryMatchesTag, view.copy(tag = "ui")))
+    assertEquals(
+      listOf(matching, queryMatchesTag),
+      filterLogs(
+        listOf(matching, wrongLevel, wrongTag, wrongMessage, queryMatchesTag),
+        view.enabledLevels,
+        view.query,
+        tag = view.tag,
+      ),
+    )
+    assertTrue(matchesSavedView(wrongTag, view.copy(tag = null)))
+    assertTrue(matchesSavedView(wrongTag, view.copy(tag = " ")))
+    assertTrue(matchesSavedView(wrongMessage, view.copy(query = "")))
+    assertFalse(matchesSavedView(matching, view.copy(enabledLevels = emptySet())))
+  }
+
+  @Test
+  fun `saved views serialize and deserialize with malformed input tolerated`() {
+    val views =
+      listOf(
+        LogsSavedView("Errors", setOf(LogLevel.Error), "Api", "timeout"),
+        LogsSavedView("Everything", LogLevel.entries.toSet(), null, ""),
+      )
+    assertEquals(views, deserializeLogsSavedViews(serializeLogsSavedViews(views)))
+    assertEquals(emptyList<LogsSavedView>(), deserializeLogsSavedViews(" "))
+    assertEquals(emptyList<LogsSavedView>(), deserializeLogsSavedViews("not json"))
   }
 
   @Test
@@ -169,6 +211,68 @@ class LogsPanelTest {
   }
 
   // -- Compose UI tests --
+
+  @Test
+  fun `saving applying and deleting a view round trips through SettingsProvider`() =
+    runComposeUiTest {
+      val settings = FakeSettingsProvider()
+      val fake = FakeTelemetryPushClient()
+      setContent {
+        MaterialTheme {
+          LogsPanel(
+            telemetryPushClient = fake,
+            settingsProvider = settings,
+            activeDeviceId = "dev-1",
+          )
+        }
+      }
+      waitForIdle()
+      fake.emitEvent(log(4, "Network", "connected host", 1))
+      fake.emitEvent(log(4, "Ui", "connected host", 2))
+      fake.emitEvent(log(5, "Network", "connected host", 3))
+      waitUntil(timeoutMillis = 2_000) {
+        onAllNodesWithText("connected host").fetchSemanticsNodes().size == 3
+      }
+
+      onNodeWithContentDescription("Toggle Warn logs").performClick()
+      onAllNodes(hasSetTextAction())[0].performTextInput("connected")
+      onNodeWithContentDescription("Toggle Logs filters and views").performClick()
+      onNode(hasSetTextAction() and hasAnyAncestor(hasContentDescription("Filter Logs by tag")))
+        .performTextInput("net")
+      onNodeWithText("Saved views").performClick()
+      onNodeWithText("Save current view…").performClick()
+      onNode(hasSetTextAction() and hasAnyAncestor(hasContentDescription("Saved view name")))
+        .performTextInput("Network info")
+      onNodeWithText("Save", useUnmergedTree = true).performClick()
+      assertEquals(
+        listOf(
+          LogsSavedView(
+            "Network info",
+            LogLevel.entries.toSet() - LogLevel.Warn,
+            "net",
+            "connected",
+          )
+        ),
+        deserializeLogsSavedViews(settings.logsSavedViews),
+      )
+
+      onAllNodes(hasSetTextAction())[0].performTextClearance()
+      onNode(hasSetTextAction() and hasAnyAncestor(hasContentDescription("Filter Logs by tag")))
+        .performTextClearance()
+      onNodeWithContentDescription("Toggle Warn logs").performClick()
+      onNodeWithText("Saved views").performClick()
+      onNodeWithText("Network info").performClick()
+      onAllNodes(hasSetTextAction())[0].assertTextEquals("connected")
+      onNode(hasSetTextAction() and hasAnyAncestor(hasContentDescription("Filter Logs by tag")))
+        .assertTextEquals("net")
+      onNodeWithContentDescription("Toggle Warn logs").assertIsNotSelected()
+      assertEquals(1, onAllNodesWithText("connected host").fetchSemanticsNodes().size)
+
+      onNodeWithText("Saved views").performClick()
+      onNodeWithContentDescription("Delete view Network info").performClick()
+      assertEquals(emptyList<LogsSavedView>(), deserializeLogsSavedViews(settings.logsSavedViews))
+      onNodeWithText("Network info").assertDoesNotExist()
+    }
 
   @Test
   fun `search field narrows the visible rows and clearing restores them`() = runComposeUiTest {

@@ -322,24 +322,36 @@ export class DaemonConnectionSessionReleasedError extends Error {
   }
 }
 
-/**
- * Raised when a tool the frontend advertises is rejected by the daemon as
- * "Unknown tool" even after the proxy reconciled build identity and retried.
- * Replaces the opaque `-32603` with an actionable message naming both builds.
- */
+const REMOVED_TOOL_HINTS: Record<string, string> = {
+  inputText: 'inputText was removed in #7457 and folded into "sendKeys".',
+  clearText: 'clearText was removed in #7457 and folded into "sendKeys".',
+  imeAction: 'imeAction was removed in #7457 and folded into "sendKeys".',
+};
+
+/** Raised when a frontend-advertised tool is rejected by the daemon as unknown. */
 export class DaemonToolUnavailableError extends Error {
   readonly toolName: string;
   readonly clientBuildId: string;
   readonly daemonBuildId: string;
 
-  constructor(params: { toolName: string; client: BuildIdentity; daemon: BuildIdentity }) {
+  constructor(params: {
+    toolName: string;
+    client: BuildIdentity;
+    daemon: BuildIdentity;
+    buildMismatch?: boolean;
+  }) {
     super(
-      `Tool "${params.toolName}" is advertised by this AutoMobile client but the connected daemon ` +
-        `does not provide it, even after restarting and refreshing the tool list. This usually means a ` +
-        `wrong-build daemon is serving this frontend. ` +
-        `client build=${describeBuildIdentity(params.client)}, ` +
-        `daemon build=${describeBuildIdentity(params.daemon)}. ` +
-        `Restart the daemon from this checkout to resolve the skew.`,
+      params.buildMismatch === false
+        ? `Tool "${params.toolName}" is advertised by this AutoMobile client but is unavailable in ` +
+            `the connected daemon's current configuration for this session (for example, a flag-gated ` +
+            `tool). client build=${describeBuildIdentity(params.client)}, ` +
+            `daemon build=${describeBuildIdentity(params.daemon)}. The client and daemon build IDs match.`
+        : `Tool "${params.toolName}" is advertised by this AutoMobile client but the connected daemon ` +
+            `does not provide it, even after restarting and refreshing the tool list. This usually means a ` +
+            `wrong-build daemon is serving this frontend. ` +
+            `client build=${describeBuildIdentity(params.client)}, ` +
+            `daemon build=${describeBuildIdentity(params.daemon)}. ` +
+            `Restart the daemon from this checkout to resolve the skew.`,
     );
     this.name = "DaemonToolUnavailableError";
     this.toolName = params.toolName;
@@ -2032,11 +2044,9 @@ export class DaemonMcpProxy {
       return true;
     }
 
-    // "Unknown tool" means the frontend advertised a tool the daemon rejects —
-    // typically a wrong-build daemon serving this frontend. Reconnecting drops the
-    // stale tool cache and re-runs the build-identity handshake (which restarts the
-    // daemon to the correct build on skew), so retry once before giving up.
-    return this.isDaemonSessionNotFoundError(error) || this.isUnknownToolError(error);
+    // "Unknown tool" is recoverable only when the frontend advertises that tool.
+    // A reconnect cannot make a frontend-unregistered name exist in the daemon.
+    return this.isDaemonSessionNotFoundError(error) || this.isRecoverableUnknownToolError(error);
   }
 
   private isDaemonSessionNotFoundError(error: unknown): boolean {
@@ -2051,6 +2061,15 @@ export class DaemonMcpProxy {
   private isUnknownToolError(error: unknown): boolean {
     const message = errorMessage(error);
     return message.includes("Unknown tool:");
+  }
+
+  private isRecoverableUnknownToolError(error: unknown): boolean {
+    const match = errorMessage(error).match(/Unknown tool:\s*(\S+)/);
+    if (!match) {
+      return this.isUnknownToolError(error);
+    }
+    const name = match[1].replace(/[.,;:!?]+$/, "");
+    return name.length === 0 || this.frontendRegistersTool(name);
   }
 
   private shouldSkipLeaseRefreshForDeviceControlTransportError(error: unknown): boolean {
@@ -3466,7 +3485,7 @@ export class DaemonMcpProxy {
     return this.toolAcceptsSessionUuid(name);
   }
 
-  private async toolUnavailableError(name: string): Promise<DaemonToolUnavailableError> {
+  private async toolUnavailableError(name: string): Promise<Error> {
     let daemonIdentity: BuildIdentity = { entryScript: "", buildId: "unknown" };
     try {
       const status = await this.daemonManager.status();
@@ -3476,11 +3495,23 @@ export class DaemonMcpProxy {
         `[DaemonMcpProxy] Failed to read daemon status for tool-unavailable error: ${error}`,
       );
     }
+    if (!this.frontendRegistersTool(name)) {
+      const hint = REMOVED_TOOL_HINTS[name];
+      return new Error(`Unknown tool "${name}".${hint ? ` ${hint}` : ""}`);
+    }
     return new DaemonToolUnavailableError({
       toolName: name,
       client: this.buildIdentity,
       daemon: daemonIdentity,
+      buildMismatch: this.buildIdentity.buildId !== daemonIdentity.buildId,
     });
+  }
+
+  private frontendRegistersTool(name: string): boolean {
+    const found =
+      this.cachedTools?.find((definition) => definition.name === name) ??
+      this.staticToolDefinitionsProvider().find((definition) => definition.name === name);
+    return !!found;
   }
 
   /**

@@ -5435,6 +5435,139 @@ describe("DaemonMcpProxy", () => {
   });
 
   describe("unknown-tool self-heal", () => {
+    test("does not reconnect for an unregistered removed tool", async () => {
+      const client = new ScriptedDaemonClient({
+        daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+        toolError: new Error("MCP error -32603: Unknown tool: inputText"),
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const matchingManager = matchingDaemonManager();
+      matchingManager.statusResult = {
+        ...matchingManager.statusResult,
+        buildId: "samebuild",
+      };
+      let clientFactoryCalls = 0;
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => {
+          clientFactoryCalls++;
+          if (clientFactoryCalls > 1) {
+            throw new Error("Unexpected reconnect");
+          }
+          return client;
+        },
+        daemonManager: matchingManager,
+        autoStartDaemon: false,
+        buildIdentity: { entryScript: "/client/dist/index.js", buildId: "samebuild" },
+      });
+
+      try {
+        let caught: unknown;
+        try {
+          await proxy.callTool("inputText", { text: "x" });
+        } catch (error) {
+          caught = error;
+        }
+        expect(caught).toBeInstanceOf(Error);
+        const error = caught as Error;
+        expect(error.message).toContain('Unknown tool "inputText"');
+        expect(error.message).toContain("sendKeys");
+        expect(error.message).toContain("#7457");
+        expect(client.callToolCalls).toHaveLength(1);
+        expect(client.closeCallCount).toBe(0);
+        expect(clientFactoryCalls).toBe(1);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("reports removed unregistered tools without blaming build skew", async () => {
+      const clients = [0, 1].map(
+        () =>
+          new ScriptedDaemonClient({
+            daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+            toolError: new Error("MCP error -32603: Unknown tool: inputText"),
+          }),
+      );
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const matchingManager = matchingDaemonManager();
+      matchingManager.statusResult = {
+        ...matchingManager.statusResult,
+        buildId: "samebuild",
+      };
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => clients.shift()!,
+        daemonManager: matchingManager,
+        autoStartDaemon: false,
+        buildIdentity: { entryScript: "/client/dist/index.js", buildId: "samebuild" },
+      });
+
+      try {
+        let caught: unknown;
+        try {
+          await proxy.callTool("inputText", { text: "x" });
+        } catch (error) {
+          caught = error;
+        }
+        expect(caught).toBeInstanceOf(Error);
+        const error = caught as Error;
+        expect(error.message).toContain('Unknown tool "inputText"');
+        expect(error.message).toContain("sendKeys");
+        expect(error.message).toContain("#7457");
+        expect(error.message.toLowerCase()).not.toContain("restart");
+        expect(error.message.toLowerCase()).not.toContain("skew");
+        expect(error.message).not.toContain("wrong-build");
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("uses configuration wording for a registered tool when builds match", async () => {
+      const clients = [0, 1].map(
+        () =>
+          new ScriptedDaemonClient({
+            daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+            toolError: new Error("MCP error -32603: Unknown tool: setPreference"),
+          }),
+      );
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const matchingManager = matchingDaemonManager();
+      matchingManager.statusResult = {
+        ...matchingManager.statusResult,
+        buildId: "samebuild",
+      };
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => clients.shift()!,
+        daemonManager: matchingManager,
+        autoStartDaemon: false,
+        buildIdentity: { entryScript: "/client/dist/index.js", buildId: "samebuild" },
+      });
+
+      try {
+        let caught: unknown;
+        try {
+          await proxy.callTool("setPreference", { key: "k" });
+        } catch (error) {
+          caught = error;
+        }
+        expect(caught).toBeInstanceOf(DaemonToolUnavailableError);
+        const error = caught as Error;
+        expect(error.message).toContain("unavailable");
+        expect(error.message).toContain("for this session");
+        expect(error.message.toLowerCase()).not.toContain("restart");
+        expect(error.message.toLowerCase()).not.toContain("skew");
+        expect(error.message).not.toContain("wrong-build");
+        const unavailableError = caught as DaemonToolUnavailableError;
+        expect(unavailableError.toolName).toBe("setPreference");
+        expect(unavailableError.clientBuildId).toBe("samebuild");
+        expect(unavailableError.daemonBuildId).toBe("samebuild");
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
     test("reconnects and retries once when daemon reports an advertised tool as unknown", async () => {
       const recoveredResult = { content: [{ type: "text", text: "set after reconnect" }] };
       const staleClient = new ScriptedDaemonClient({
@@ -5510,6 +5643,8 @@ describe("DaemonMcpProxy", () => {
         expect(err.toolName).toBe("setPreference");
         expect(err.message).toContain("setPreference");
         expect(err.message).toContain("clientbuild");
+        expect(err.message).toContain("wrong-build");
+        expect(err.message).toContain("Restart the daemon");
         // Capped at one retry: exactly two clients consumed.
         expect(clients).toHaveLength(0);
         expect(firstClient.callToolCalls).toHaveLength(1);

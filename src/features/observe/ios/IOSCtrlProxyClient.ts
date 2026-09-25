@@ -1031,7 +1031,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
           `[IOSCtrlProxyClient] Service is running but WebSocket failed — transient issue, retrying connection`,
         );
         this.syncPortFromManager(manager);
-        this.connectionAttempts = 0;
+        this.resetConnectionBudget();
         return await super.ensureConnected(perf);
       }
 
@@ -1065,8 +1065,8 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       this.syncPortFromManager(manager);
 
       logger.info(`[IOSCtrlProxyClient] Auto-setup succeeded, retrying WebSocket connection`);
-      // Reset connection attempts to allow fresh connection attempts
-      this.connectionAttempts = 0;
+      // Reset the connection budget to allow a fresh connection attempt
+      this.resetConnectionBudget();
       return await super.ensureConnected(perf);
     } catch (error) {
       logger.warn(`[IOSCtrlProxyClient] Auto-setup error: ${error}`);
@@ -1104,7 +1104,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       // the max-th in-flight attempt leaves connectionAttempts at the ceiling, so
       // connectWebSocket()'s cooldown check refuses to dial the new port for the
       // reset interval — the wedged state AC2 forbids.
-      this.connectionAttempts = 0;
+      this.resetConnectionBudget();
       if (this.ws) {
         logger.info(
           "[IOSCtrlProxyClient] Closing stale WebSocket after CtrlProxy service port change",
@@ -2128,7 +2128,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       .forceRestart()
       .then(async () => {
         this.syncPortFromManager(manager);
-        this.connectionAttempts = 0;
+        this.resetConnectionBudget();
         logger.info(`[IOSCtrlProxyClient] CtrlProxy restart completed; reconnecting WebSocket`);
         const connected = await this.connectBackgroundWebSocket();
         if (!connected) {

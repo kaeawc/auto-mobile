@@ -1383,6 +1383,15 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   private supportedCommands: Set<string> | null = null;
   private static readonly HANDSHAKE_WAIT_TIMEOUT_MS = 2000;
   private static readonly HANDSHAKE_POLL_INTERVAL_MS = 50;
+  // Matches iOS's CONNECTION_RESET_MS (set for #2695). The base default
+  // (10000ms) outlives waitForConnection()'s default retry budget
+  // (~2.7s), so a client that hit maxConnectionAttempts stays cooled down
+  // well past a caller's next waitForConnection() even when the endpoint
+  // has since recovered (issue #7538). Callers that just changed the
+  // endpoint's state (setup, enable, rebind) should still call the base
+  // class's resetConnectionBudget() rather than relying on this shorter
+  // window alone.
+  private static readonly CONNECTION_RESET_MS = 2000;
 
   // Track foreground package for crash monitoring
   private lastForegroundPackage: string | null = null;
@@ -1424,7 +1433,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     super(
       timer ?? defaultTimer,
       webSocketFactory ?? defaultWebSocketFactory,
-      {},
+      { connectionResetMs: AndroidCtrlProxyClient.CONNECTION_RESET_MS },
       retryExecutor ?? defaultRetryExecutor,
     );
     this.serviceManagerFactory = serviceManagerFactory;
@@ -2151,10 +2160,13 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           // Only an actual rebind/setup justifies resetting the foreground
           // cooldown early — the service was demonstrably broken and is now
           // fixed. When the service was already healthy (#6260: WS refused
-          // for an unrelated reason), leave connectionAttempts alone so the
-          // cooldown still gates a background reconnect instead of hammering
-          // a socket that has nothing to do with service health.
-          this.connectionAttempts = 0;
+          // for an unrelated reason), leave the connection budget alone so
+          // the cooldown still gates a background reconnect instead of
+          // hammering a socket that has nothing to do with service health.
+          // resetConnectionBudget() (issue #7538) also clears the cooldown
+          // clock and un-pauses a paused background reconnect, not just the
+          // attempt counter.
+          this.resetConnectionBudget();
         }
         logger.info(
           `[AndroidCtrlProxyClient] Recovery completed (${outcome}); reconnecting WebSocket`,

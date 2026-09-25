@@ -120,6 +120,16 @@ export interface DeviceService {
    */
   close(): Promise<void>;
 
+  /**
+   * Clear the connection-attempt budget and cooldown clock, and un-pause
+   * background reconnection (issue #7538). Callers that just changed the
+   * endpoint's state — a successful platform setup/enable, a rebind that
+   * actually rebound, a port change, or a forced service restart — call
+   * this so the next {@link waitForConnection} makes a real dial instead of
+   * being gated by failures recorded before the state change.
+   */
+  resetConnectionBudget(): void;
+
   // ---------------------------------------------------------------------------
   // Gestures
   // ---------------------------------------------------------------------------

@@ -94,6 +94,7 @@ describe("ToolExecutionContext", () => {
       clientCallArgs.push(device);
       return {
         waitForConnection: async () => true,
+        resetConnectionBudget: () => {},
         close: async () => {},
       };
     }) as any;
@@ -112,6 +113,41 @@ describe("ToolExecutionContext", () => {
     expect(typeof passed).toBe("object");
     expect(passed.deviceId).toBe("device-1");
     expect(passed.platform).toBe("android");
+  });
+
+  // Issue #7538: a successful setup() must reset the client's connection
+  // budget/cooldown before ensureAccessibilityServiceReady calls
+  // waitForConnection(), so failures recorded earlier in the session (#7537's
+  // background reconnect, or an earlier failed readiness attempt) don't
+  // silently gate the dial that would otherwise succeed.
+  test("resets the connection budget after a successful setup, before waitForConnection", async () => {
+    AndroidCtrlProxyManager.getInstance = () =>
+      ({
+        resetSetupState: () => {},
+        setup: async () => ({ success: true, message: "ok" }),
+      }) as any;
+
+    const calls: string[] = [];
+    AndroidCtrlProxyClient.getInstance = (() => ({
+      resetConnectionBudget: () => {
+        calls.push("resetConnectionBudget");
+      },
+      waitForConnection: async () => {
+        calls.push("waitForConnection");
+        return true;
+      },
+      close: async () => {},
+    })) as any;
+
+    const context = await createToolExecutionContext(
+      "session-1",
+      sessionManager,
+      devicePool,
+      sessionOptions,
+    );
+
+    expect(context.deviceId).toBe("device-1");
+    expect(calls).toEqual(["resetConnectionBudget", "waitForConnection"]);
   });
 
   test.each(["new", "persisted"])(
@@ -191,6 +227,7 @@ describe("ToolExecutionContext", () => {
       }) as any;
     AndroidCtrlProxyClient.getInstance = (() => ({
       waitForConnection: async () => true,
+      resetConnectionBudget: () => {},
       close: async () => {},
     })) as any;
 
@@ -298,6 +335,7 @@ describe("ToolExecutionContext", () => {
       }) as any;
     AndroidCtrlProxyClient.getInstance = (() => ({
       waitForConnection: async () => true,
+      resetConnectionBudget: () => {},
       close: async () => {},
     })) as any;
 
@@ -322,6 +360,7 @@ describe("ToolExecutionContext", () => {
       }) as any;
     AndroidCtrlProxyClient.getInstance = (() => ({
       waitForConnection: async () => true,
+      resetConnectionBudget: () => {},
       close: async () => {},
     })) as any;
 
@@ -367,6 +406,7 @@ describe("ToolExecutionContext", () => {
       }) as any;
     AndroidCtrlProxyClient.getInstance = (() => ({
       waitForConnection: async () => true,
+      resetConnectionBudget: () => {},
       close: async () => {},
     })) as any;
 
@@ -407,6 +447,7 @@ describe("ToolExecutionContext", () => {
       }) as any;
     AndroidCtrlProxyClient.getInstance = (() => ({
       waitForConnection: async () => true,
+      resetConnectionBudget: () => {},
       close: async () => {},
     })) as any;
 
@@ -436,6 +477,7 @@ describe("ToolExecutionContext", () => {
       }) as any;
     AndroidCtrlProxyClient.getInstance = (() => ({
       waitForConnection: async () => true,
+      resetConnectionBudget: () => {},
       close: async () => {},
     })) as any;
 
@@ -472,6 +514,7 @@ describe("ToolExecutionContext", () => {
       }) as any;
     AndroidCtrlProxyClient.getInstance = (() => ({
       waitForConnection: async () => true,
+      resetConnectionBudget: () => {},
       close: async () => {},
     })) as any;
 
@@ -516,6 +559,7 @@ describe("ToolExecutionContext", () => {
       }) as any;
     AndroidCtrlProxyClient.getInstance = (() => ({
       waitForConnection: async () => true,
+      resetConnectionBudget: () => {},
       close: async () => {},
     })) as any;
 
@@ -538,6 +582,7 @@ describe("ToolExecutionContext", () => {
       }) as any;
     AndroidCtrlProxyClient.getInstance = (() => ({
       waitForConnection: async () => true,
+      resetConnectionBudget: () => {},
       close: async () => {},
     })) as any;
 
@@ -582,6 +627,7 @@ describe("ToolExecutionContext", () => {
       }) as any;
     AndroidCtrlProxyClient.getInstance = (() => ({
       waitForConnection: async () => true,
+      resetConnectionBudget: () => {},
       close: async () => {},
     })) as any;
 
@@ -644,6 +690,7 @@ describe("ToolExecutionContext", () => {
       }) as any;
     AndroidCtrlProxyClient.getInstance = (() => ({
       waitForConnection: async () => true,
+      resetConnectionBudget: () => {},
       close: async () => {},
     })) as any;
 
@@ -703,6 +750,7 @@ describe("ToolExecutionContext", () => {
       }) as any;
     AndroidCtrlProxyClient.getInstance = (() => ({
       waitForConnection: async () => true,
+      resetConnectionBudget: () => {},
       close: async () => {},
     })) as any;
 
@@ -775,6 +823,7 @@ describe("ToolExecutionContext", () => {
       }) as any;
     AndroidCtrlProxyClient.getInstance = (() => ({
       waitForConnection: async () => true,
+      resetConnectionBudget: () => {},
       close: async () => {},
     })) as any;
 
@@ -843,6 +892,7 @@ describe("ToolExecutionContext", () => {
       }) as any;
     AndroidCtrlProxyClient.getInstance = (() => ({
       waitForConnection: async () => true,
+      resetConnectionBudget: () => {},
       close: async () => {},
     })) as any;
 
@@ -909,6 +959,7 @@ describe("ToolExecutionContext", () => {
       }) as any;
     AndroidCtrlProxyClient.getInstance = (() => ({
       waitForConnection: async () => true,
+      resetConnectionBudget: () => {},
       close: async () => {},
     })) as any;
 
@@ -996,6 +1047,7 @@ describe("ToolExecutionContext", () => {
       }) as any;
     AndroidCtrlProxyClient.getInstance = (() => ({
       waitForConnection: async () => true,
+      resetConnectionBudget: () => {},
       close: async () => {},
     })) as any;
 
@@ -1075,6 +1127,7 @@ describe("ToolExecutionContext", () => {
       }) as any;
     AndroidCtrlProxyClient.getInstance = (() => ({
       waitForConnection: async () => true,
+      resetConnectionBudget: () => {},
       close: async () => {},
     })) as any;
 
@@ -1123,6 +1176,7 @@ describe("ToolExecutionContext", () => {
       }) as any;
     AndroidCtrlProxyClient.getInstance = (() => ({
       waitForConnection: async () => true,
+      resetConnectionBudget: () => {},
       close: async () => {},
     })) as any;
 
@@ -1179,6 +1233,7 @@ describe("ToolExecutionContext", () => {
       }) as any;
     AndroidCtrlProxyClient.getInstance = (() => ({
       waitForConnection: async () => true,
+      resetConnectionBudget: () => {},
       close: async () => {},
     })) as any;
     await sessionManager.createSession("session-cancelled-readiness", "device-1", "android");
@@ -1476,6 +1531,7 @@ describe("ToolExecutionContext", () => {
       }) as any;
     AndroidCtrlProxyClient.getInstance = (() => ({
       waitForConnection: async () => true,
+      resetConnectionBudget: () => {},
       close: async () => {},
     })) as any;
 
@@ -1648,6 +1704,7 @@ describe("ToolExecutionContext", () => {
       }) as any;
     AndroidCtrlProxyClient.getInstance = (() => ({
       waitForConnection: async () => true,
+      resetConnectionBudget: () => {},
       close: async () => {},
     })) as any;
 
@@ -1736,6 +1793,7 @@ describe("ToolExecutionContext", () => {
         }) as any;
       AndroidCtrlProxyClient.getInstance = (() => ({
         waitForConnection: async () => true,
+        resetConnectionBudget: () => {},
         close: async () => {},
       })) as any;
 
@@ -1774,6 +1832,7 @@ describe("ToolExecutionContext", () => {
         }) as any;
       AndroidCtrlProxyClient.getInstance = (() => ({
         waitForConnection: async () => true,
+        resetConnectionBudget: () => {},
         close: async () => {},
       })) as any;
 
@@ -1820,6 +1879,7 @@ describe("ToolExecutionContext", () => {
         }) as any;
       AndroidCtrlProxyClient.getInstance = (() => ({
         waitForConnection: async () => true,
+        resetConnectionBudget: () => {},
         close: async () => {},
       })) as any;
 
@@ -1849,6 +1909,7 @@ describe("ToolExecutionContext", () => {
         }) as any;
       AndroidCtrlProxyClient.getInstance = (() => ({
         waitForConnection: async () => true,
+        resetConnectionBudget: () => {},
         close: async () => {},
       })) as any;
 

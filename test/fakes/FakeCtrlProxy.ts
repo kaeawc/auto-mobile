@@ -802,6 +802,10 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     return this.isConnectedState;
   }
 
+  resetConnectionBudget(): void {
+    // Fake never gates on a connection-attempt cooldown; nothing to reset.
+  }
+
   hasCachedHierarchy(): boolean {
     return this.hasCachedHierarchyState;
   }

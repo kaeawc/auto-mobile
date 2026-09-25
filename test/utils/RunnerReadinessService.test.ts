@@ -34,6 +34,7 @@ class FakeReadinessClient implements ReadinessClient, ReadinessIosClient {
   connectionResults: boolean[] = [true];
   healthCalls = 0;
   connectionCalls = 0;
+  resetConnectionBudgetCalls = 0;
   accessibilityHierarchies: Array<ViewHierarchyResult | null> = [];
   tapResult = { success: true };
   tapCoordinates: Array<{ x: number; y: number }> = [];
@@ -50,6 +51,10 @@ class FakeReadinessClient implements ReadinessClient, ReadinessIosClient {
     const connected = this.connectionResults.shift() ?? false;
     this.connected = connected;
     return connected;
+  }
+
+  resetConnectionBudget(): void {
+    this.resetConnectionBudgetCalls++;
   }
 
   async connectWithoutSetup(signal?: AbortSignal): Promise<boolean> {
@@ -1669,6 +1674,29 @@ describe("RunnerReadinessService", () => {
 
     expect(manager.accessibilityHealthChecks).toBe(1);
     expect(manager.rebindCalls).toBe(0);
+    expect(client.resetConnectionBudgetCalls).toBe(0);
+  });
+
+  // Issue #7538: a rebind that actually rebound the accessibility service
+  // changed the endpoint's state, so failures the client recorded before the
+  // rebind must not cool down the waitForConnection() dial that follows.
+  test("resets the client's connection budget after a successful accessibility-service rebind", async () => {
+    const manager = new FakeAndroidManager();
+    manager.accessibilityServiceHealthy = false;
+    const client = new FakeReadinessClient();
+    client.connected = false;
+    client.connectionResults = [true];
+    const { service } = createService({ androidManager: manager, androidClient: client });
+
+    await service.ensureReady({
+      device: androidDevice(),
+      requestedIdentity: "platform=android",
+      totalDeadlineMs: 10_000,
+      readinessTimeoutMs: 10_000,
+    });
+
+    expect(manager.rebindCalls).toBe(1);
+    expect(client.resetConnectionBudgetCalls).toBeGreaterThanOrEqual(1);
   });
 
   test("reports that an Android accessibility-service rebind was attempted when reconnecting fails", async () => {

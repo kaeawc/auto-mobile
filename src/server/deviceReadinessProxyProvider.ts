@@ -35,6 +35,16 @@ export interface DeviceReadinessProxyDriver {
   setup(force: boolean, perf: PerformanceTracker): Promise<ProxySetupResult>;
   waitForConnection(): Promise<boolean>;
   /**
+   * Clear the underlying client's connection-attempt budget and cooldown
+   * clock (issue #7538). Called by `ensureAccessibilityServiceReady` right
+   * after a successful `setup()`, so the `waitForConnection()` that follows
+   * makes a real dial instead of being gated by failures recorded before
+   * setup ran. Optional (like {@link rebindIfUnhealthy}) so the many fast
+   * no-op test drivers that never exercise the cooldown gate need not
+   * implement it.
+   */
+  resetConnectionBudget?(): void;
+  /**
    * Whether the CtrlProxy artifact is already installed on the device (#6227).
    * Consulted only when `--skip-ctrl-proxy-download` is enabled, so the
    * session-scoped readiness upgrade can refuse to download a missing artifact
@@ -64,6 +74,7 @@ const realProvider: DeviceReadinessProxyDriverProvider = (device) => {
     rebindIfUnhealthy: () => manager.rebindIfUnhealthy(),
     setup: (force, perf) => manager.setup(force, perf),
     waitForConnection: () => AndroidCtrlProxyClient.getInstance(device).waitForConnection(),
+    resetConnectionBudget: () => AndroidCtrlProxyClient.getInstance(device).resetConnectionBudget(),
     isInstalled: () => manager.isInstalled(),
     isVersionCompatible: () => manager.isVersionCompatible(),
   };

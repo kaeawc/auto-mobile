@@ -1270,6 +1270,10 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     return this.isConnectedState;
   }
 
+  resetConnectionBudget(): void {
+    // Fake never gates on a connection-attempt cooldown; nothing to reset.
+  }
+
   async waitForConnection(maxAttempts?: number, delayMs?: number): Promise<boolean> {
     return this.isConnectedState;
   }

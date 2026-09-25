@@ -176,9 +176,7 @@ class LiveVideoStreamTest {
   @Test
   fun `a silent Streaming relay with no heartbeat is still reconnected past the stall window`() =
     runComposeUiTest {
-      // Control for the test above: the identical clock/tick loop with no heartbeat must still
-      // trip the stall-reconnect, proving the heartbeat — not the loop itself — is what suppresses
-      // it.
+      // Control for the test above: without a heartbeat, one full stall window must reconnect.
       val clock = java.util.concurrent.atomic.AtomicLong(0L)
       val nowMs = { clock.get() }
       val source = FakeVideoStreamSource(nowMs = nowMs)
@@ -199,18 +197,41 @@ class LiveVideoStreamTest {
 
       mainClock.autoAdvance = false
       repeat(10) {
-        clock.addAndGet(50)
+        clock.addAndGet(10)
         mainClock.advanceTimeBy(20)
       }
       waitForIdle()
-      // Once the first reconnect fires, the watchdog's own `lastSeenSequence = -1L` reset makes the
-      // still-retained (unchanged) frame look like fresh progress on the very next check, which
-      // re-adopts that frame's now-stale receivedAtMs as the new baseline and trips again shortly
-      // after — a pre-existing quirk of the retained-frame reconnect path, not something this
-      // heartbeat feature governs. So this asserts "at least one reconnect fired" (the actual
-      // behavior this control exists to prove) rather than pinning the exact retrigger count.
-      assertTrue(source.connectCalls > 1, "expected a stall reconnect, was ${source.connectCalls}")
+      assertEquals(2, source.connectCalls)
     }
+
+  @Test
+  fun `a silent Streaming relay reconnects once per further stall window`() = runComposeUiTest {
+    val clock = java.util.concurrent.atomic.AtomicLong(0L)
+    val nowMs = { clock.get() }
+    val source = FakeVideoStreamSource(nowMs = nowMs)
+    setContent {
+      rememberLiveVideoFrame(
+        source,
+        "emulator-5554",
+        autoReconnect = true,
+        reconnectInitialMs = 10,
+        nowMs = nowMs,
+        stallReconnectMs = 100,
+        stallCheckIntervalMs = 20,
+      )
+    }
+    waitUntil { source.connectCalls >= 1 }
+    source.emitFrame(width = 1, height = 1)
+    waitUntil { source.state.value is VideoStreamState.Streaming }
+
+    mainClock.autoAdvance = false
+    repeat(3) { window ->
+      clock.addAndGet(100)
+      mainClock.advanceTimeBy(20)
+      waitForIdle()
+      assertEquals(window + 2, source.connectCalls)
+    }
+  }
 
   @Test
   fun `an idle-heartbeat-less source is NOT reconnected while idle-Streaming`() = runComposeUiTest {

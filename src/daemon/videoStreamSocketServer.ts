@@ -83,6 +83,7 @@ interface DeviceCapture {
    * the relay writes so a late joiner or a post-rotation client sees the current orientation.
    */
   rotation: number | null;
+  idleTimer: NodeJS.Timeout | null;
 }
 
 const ANNEX_B_START_CODE = Buffer.from([0, 0, 0, 1]);
@@ -109,6 +110,8 @@ const MAX_BITRATE_KBPS = 1_000_000;
 // interval × attempts span the widest (~3s) throttle window with headroom.
 const KEY_FRAME_RETRY_INTERVAL_MS = 500;
 const KEY_FRAME_RETRY_MAX_ATTEMPTS = 8;
+// Covers brief viewer reconnects without keeping an abandoned encoder alive for long.
+const CAPTURE_IDLE_GRACE_MS = 3_000;
 
 /**
  * Captures are shared per device and the FIRST subscriber's hints fixed the encode; a late
@@ -212,11 +215,13 @@ function subscribeFailureResponse(
  * `sendJson`.
  *
  * One capture is shared by every subscriber watching the same device, so a second viewer does not
- * start a second encoder; the capture stops when the last subscriber for that device disconnects.
+ * start a second encoder; the capture stops after its last subscriber has been idle briefly.
  */
 export class VideoStreamSocketServer extends BaseSocketServer {
   private readonly captures = new Map<string, DeviceCapture>();
+  private readonly pendingStops = new Map<string, Promise<void>>();
   private readonly socketDeviceIds = new Map<Socket, string>();
+  private closed = false;
 
   private readonly authenticator: StreamSocketAuthenticator;
   private readonly admissionGate: DeviceAdmissionGate;
@@ -249,9 +254,9 @@ export class VideoStreamSocketServer extends BaseSocketServer {
   }
 
   override async close(): Promise<void> {
-    for (const deviceId of [...this.captures.keys()]) {
-      await this.stopCapture(deviceId);
-    }
+    this.closed = true;
+    await Promise.all([...this.captures.keys()].map((deviceId) => this.stopCapture(deviceId)));
+    await Promise.all(this.pendingStops.values());
     this.socketDeviceIds.clear();
     await super.close();
   }
@@ -366,9 +371,20 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     device: BootedDevice,
     request: VideoStreamSocketRequest,
   ): Promise<DeviceCapture> {
+    if (this.closed) {
+      throw new ActionableError("Video stream server is closed");
+    }
     const deviceId = device.deviceId;
+    const pendingStop = this.pendingStops.get(deviceId);
+    if (pendingStop) {
+      await pendingStop;
+      if (this.closed) {
+        throw new ActionableError("Video stream server is closed");
+      }
+    }
     const existing = this.captures.get(deviceId);
     if (existing) {
+      this.clearIdleTimer(existing);
       logIgnoredLateHints(deviceId, request);
       existing.pendingSubscribers.add(socket);
       this.socketDeviceIds.set(socket, deviceId);
@@ -389,6 +405,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
       parser: new H264AnnexBParser(),
       size: request.size,
       rotation: null,
+      idleTimer: null,
     };
     // Registered before start() so a chunk arriving during startup still finds its subscribers.
     this.captures.set(deviceId, capture);
@@ -421,7 +438,9 @@ export class VideoStreamSocketServer extends BaseSocketServer {
           },
           onError: (error) => {
             logger.warn(`[VideoStream] capture failed for ${deviceId}: ${error}`);
-            void this.stopCapture(deviceId);
+            if (this.captures.get(deviceId) === capture) {
+              void this.stopCapture(deviceId);
+            }
           },
           bitrateBps: request.bitrateKbps ? request.bitrateKbps * 1000 : undefined,
           size: request.size,
@@ -433,17 +452,27 @@ export class VideoStreamSocketServer extends BaseSocketServer {
           // hint wins so farm viewers can lower the rate across many streams.
           fps: request.fps ?? SIMULATOR_FPS_DEFAULT,
         });
-        // The final subscriber may disconnect while source construction is in
-        // flight. Do not attach an unreachable capture process to a removed entry.
-        if (this.captures.get(deviceId) !== capture || !this.hasSubscribers(capture)) {
-          await source.stop().catch(() => {});
+        // A final disconnect during construction arms the same idle grace as any
+        // last-subscriber detach. Only a removed entry or expired grace aborts startup.
+        if (
+          this.captures.get(deviceId) !== capture ||
+          (!this.hasSubscribers(capture) && !capture.idleTimer)
+        ) {
+          await source.stop().catch((error) => {
+            logger.warn(`[VideoStream] failed to stop abandoned capture for ${deviceId}: ${error}`);
+          });
           throw new ActionableError(`Video capture for ${deviceId} was stopped during startup.`);
         }
         capture.source = source;
         await source.start();
-        if (this.captures.get(deviceId) !== capture || !this.hasSubscribers(capture)) {
+        if (
+          this.captures.get(deviceId) !== capture ||
+          (!this.hasSubscribers(capture) && !capture.idleTimer)
+        ) {
           capture.source = null;
-          await source.stop().catch(() => {});
+          await source.stop().catch((error) => {
+            logger.warn(`[VideoStream] failed to stop abandoned capture for ${deviceId}: ${error}`);
+          });
           throw new ActionableError(`Video capture for ${deviceId} was stopped during startup.`);
         }
       } catch (error) {
@@ -641,16 +670,34 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     capture.backpressuredSubscribers.delete(socket);
     capture.waitingForKeyFrame.delete(socket);
     if (!this.hasSubscribers(capture)) {
-      void this.stopCapture(deviceId);
+      this.clearIdleTimer(capture);
+      capture.idleTimer = this.timer.setTimeout(() => {
+        capture.idleTimer = null;
+        if (this.captures.get(deviceId) === capture && !this.hasSubscribers(capture)) {
+          void this.stopCapture(deviceId);
+        }
+      }, CAPTURE_IDLE_GRACE_MS);
     }
   }
 
-  private async stopCapture(deviceId: string): Promise<void> {
+  private clearIdleTimer(capture: DeviceCapture): void {
+    if (capture.idleTimer) {
+      this.timer.clearTimeout(capture.idleTimer);
+      capture.idleTimer = null;
+    }
+  }
+
+  private stopCapture(deviceId: string): Promise<void> {
+    const pending = this.pendingStops.get(deviceId);
+    if (pending) {
+      return pending;
+    }
     const capture = this.captures.get(deviceId);
     if (!capture) {
-      return;
+      return Promise.resolve();
     }
     this.captures.delete(deviceId);
+    this.clearIdleTimer(capture);
 
     for (const subscriber of [...capture.pendingSubscribers, ...capture.subscribers]) {
       this.socketDeviceIds.delete(subscriber);
@@ -661,13 +708,26 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     capture.backpressuredSubscribers.clear();
     capture.waitingForKeyFrame.clear();
 
-    try {
-      await capture.source?.stop();
-    } catch (error) {
-      // The capture is already detached, so a failure to tear down the device side is worth a
-      // trace but must not propagate into socket teardown.
-      logger.warn(`[VideoStream] failed to stop capture for ${deviceId}: ${error}`);
-    }
+    const stopping = (async () => {
+      try {
+        try {
+          await capture.source?.stop();
+        } catch (error) {
+          // A teardown failure must be visible, but must not prevent a later attach from retrying.
+          logger.warn(`[VideoStream] failed to stop capture for ${deviceId}: ${error}`);
+        }
+        try {
+          await capture.startup;
+        } catch (error) {
+          // Attach reports startup failures; teardown only needs to wait for late source cleanup.
+          logger.debug(`[VideoStream] startup settled during stop for ${deviceId}: ${error}`);
+        }
+      } finally {
+        this.pendingStops.delete(deviceId);
+      }
+    })();
+    this.pendingStops.set(deviceId, stopping);
+    return stopping;
   }
 }
 

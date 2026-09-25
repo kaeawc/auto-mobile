@@ -2,10 +2,17 @@ import { createServer, Server as NetServer, Socket } from "node:net";
 import { existsSync, statSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import path from "node:path";
+import {
+  DaemonSocketReachability,
+  type DaemonSocketReachabilityLike,
+} from "../daemonSocketReachability";
+import { ActionableError } from "../../models/ActionableError";
 import { logger } from "../../utils/logger";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { ensureSecureDir, secureFile } from "../../utils/filesystem/securePermissions";
 import { DEFAULT_SOCKET_IDLE_TIMEOUT_MS } from "./SocketServerTypes";
+
+export const AUX_SOCKET_BIND_LIVENESS_PROBE_TIMEOUT_MS = 1_000;
 
 /**
  * Abstract base class for Unix domain socket servers.
@@ -20,17 +27,20 @@ export abstract class BaseSocketServer {
   protected readonly timer: Timer;
   protected readonly serverName: string;
   protected readonly idleTimeoutMs: number;
+  private readonly socketReachability: DaemonSocketReachabilityLike;
 
   constructor(
     socketPath: string,
     timer: Timer = defaultTimer,
     serverName: string = "Socket",
     idleTimeoutMs: number = DEFAULT_SOCKET_IDLE_TIMEOUT_MS,
+    socketReachability: DaemonSocketReachabilityLike = new DaemonSocketReachability(),
   ) {
     this.socketPath = socketPath;
     this.timer = timer;
     this.serverName = serverName;
     this.idleTimeoutMs = idleTimeoutMs;
+    this.socketReachability = socketReachability;
   }
 
   /**
@@ -43,9 +53,7 @@ export abstract class BaseSocketServer {
     // containing directory's mode is the primary access control (issue #4750).
     await ensureSecureDir(directory);
 
-    if (existsSync(this.socketPath)) {
-      await unlink(this.socketPath);
-    }
+    await this.reclaimExistingSocketBeforeBind();
 
     this.server = createServer((socket) => {
       this.handleConnection(socket);
@@ -71,6 +79,43 @@ export abstract class BaseSocketServer {
         reject(error);
       });
     });
+  }
+
+  /**
+   * Auxiliary sockets use a reachability probe before reclaiming a stale path
+   * (issue #6543). Unlike the control socket's #6232 guard, they do not use
+   * the shared PID record or create a bind lock for every stream socket.
+   */
+  private async reclaimExistingSocketBeforeBind(): Promise<void> {
+    if (!existsSync(this.socketPath)) {
+      return;
+    }
+
+    const reachable = await this.socketReachability.isReachable(
+      this.socketPath,
+      AUX_SOCKET_BIND_LIVENESS_PROBE_TIMEOUT_MS,
+    );
+    if (reachable) {
+      throw new ActionableError(
+        `[${this.serverName}] Refusing to bind auxiliary socket ${this.socketPath}: another daemon is listening. Stop the daemon that owns it or use \`--daemon restart\` to replace it.`,
+      );
+    }
+
+    try {
+      await unlink(this.socketPath);
+    } catch (error) {
+      if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+        // The path disappeared after the probe; there is nothing left to reclaim.
+        logger.debug(
+          `[${this.serverName}] Auxiliary socket path already removed: ${this.socketPath}`,
+        );
+        return;
+      }
+      throw new ActionableError(
+        `[${this.serverName}] Unable to reclaim auxiliary socket ${this.socketPath} before binding`,
+        { cause: error },
+      );
+    }
   }
 
   /**

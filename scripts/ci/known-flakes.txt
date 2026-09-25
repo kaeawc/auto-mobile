@@ -20,5 +20,6 @@ Node Unit Timing Budget*|*recheck produced [0-9]* of [0-9]* isolated samples*|IN
 Node Unit Timing Budget*|*test exceeded 100ms*|RERUN-DONT-FIX|loaded-runner 100ms unit-budget flap, non-required, rerun
 Node Unit Timing Budget*|*exceed the 100ms budget*|RERUN-DONT-FIX|loaded-runner 100ms unit-budget flap, non-required, rerun
 iOS Device Capture to WHEP|*did not recover to a fresh IDR*|RERUN-DONT-FIX|macos-26 capture stall after healthy connect; standalone advisory job on main; #7222
+iOS Device Capture to WHEP|*No connected ios devices found*|RERUN-DONT-FIX|transient empty first iOS discovery on a fresh daemon while sim was booted; standalone advisory job on main; #7593
 *|*dependabot*sharp*sharp: could not load the sharp module*|KNOWN-NONFIX|pinned sharp/jimp graph rejects the bump by design; close or ignore the Dependabot PR, do not patch code
 *|*dependabot*sharp*sharp native matrix is incoherent*|KNOWN-NONFIX|pinned sharp/jimp graph rejects the bump by design; close or ignore the Dependabot PR, do not patch code

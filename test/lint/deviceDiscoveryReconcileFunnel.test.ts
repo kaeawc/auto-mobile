@@ -110,10 +110,12 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
     },
 
     "src/daemon/webrtcStreamSocketServer.ts": {
-      calls: 1,
+      calls: 2,
       reason:
         "Picks a stream candidate by platform from an injected manager, then hands it to an " +
-        "admission gate that reads pooled identity; reconciles first.",
+        "admission gate that reads pooled identity; reconciles first. A second call retries a " +
+        "transiently empty iOS listing with bounded re-discovery before giving up (issue #7593); " +
+        "both calls reconcile candidates before use.",
     },
     "src/daemon/videoStreamSocketServer.ts": {
       calls: 1,

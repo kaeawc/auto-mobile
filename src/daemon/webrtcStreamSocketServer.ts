@@ -23,6 +23,7 @@ import {
 } from "./streamSocketAuth";
 import { daemonDeviceAdmissionGate, type DeviceAdmissionGate } from "./deviceAdmissionGate";
 import { reconcileDiscoveryObservation } from "./discoveryReconcile";
+import { DefaultRetryExecutor } from "../utils/retry/RetryExecutor";
 
 /** Injectable dependencies so the server can be tested without a device pool. */
 export interface WebRtcStreamSocketServerDependencies {
@@ -49,10 +50,12 @@ export async function resolveWebRtcStreamDevice(
   deviceManager: Pick<PlatformDeviceManager, "getBootedDevices">,
   deviceId?: string,
   platform: "android" | "ios" = "android",
+  timer: Timer = defaultTimer,
+  signal?: AbortSignal,
 ): Promise<BootedDevice> {
   // The request already names its platform. Querying both platforms makes an
   // iOS stream wait for ADB (and vice versa), so keep discovery platform-scoped.
-  const candidates = await deviceManager.getBootedDevices(platform);
+  let candidates = await deviceManager.getBootedDevices(platform);
   // FUNNEL 1, before the caller joins any of this to pooled identity. This can be
   // the first path to observe the `Unknown (<serial>)` placeholder or a different
   // AVD on a reused serial, and without folding it in the admission gate in
@@ -60,6 +63,10 @@ export async function resolveWebRtcStreamDevice(
   // admit the stream onto an untrusted runtime
   // ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
   await reconcileDiscoveryObservation(candidates, "webrtc-stream-resolve");
+
+  if (candidates.length === 0) {
+    candidates = await rediscoverWebRtcStreamDevices(deviceManager, platform, timer, signal);
+  }
 
   if (deviceId) {
     const match = candidates.find((device) => device.deviceId === deviceId);
@@ -69,9 +76,6 @@ export async function resolveWebRtcStreamDevice(
     return match;
   }
 
-  if (candidates.length === 0) {
-    throw new ActionableError(`No connected ${platform} devices found.`);
-  }
   if (candidates.length > 1) {
     throw new ActionableError(
       `Multiple connected ${platform} devices; specify deviceId. Found: ${candidates
@@ -80,6 +84,32 @@ export async function resolveWebRtcStreamDevice(
     );
   }
   return candidates[0];
+}
+
+async function rediscoverWebRtcStreamDevices(
+  deviceManager: Pick<PlatformDeviceManager, "getBootedDevices">,
+  platform: "android" | "ios",
+  timer: Timer,
+  signal?: AbortSignal,
+): Promise<BootedDevice[]> {
+  try {
+    return await new DefaultRetryExecutor(timer).executeOrThrow(
+      async () => {
+        const candidates = await deviceManager.getBootedDevices(platform);
+        if (candidates.length === 0) {
+          throw new Error(`No connected ${platform} devices found.`);
+        }
+        await reconcileDiscoveryObservation(candidates, "webrtc-stream-resolve");
+        return candidates;
+      },
+      { delays: [250, 500, 1000, 2000], maxAttempts: 5, signal },
+    );
+  } catch (error) {
+    if (signal?.aborted) {
+      throw error;
+    }
+    throw new ActionableError(`No connected ${platform} devices found (after 5 attempts).`);
+  }
 }
 
 const defaultDeviceManager = new MultiPlatformDeviceManager();

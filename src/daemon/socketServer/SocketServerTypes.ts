@@ -1,4 +1,7 @@
 import { Socket } from "node:net";
+import os from "node:os";
+import path from "node:path";
+import { testOverrides } from "../../utils/testOverrides";
 
 /**
  * Base request interface for socket servers.
@@ -76,4 +79,13 @@ export const DEFAULT_SOCKET_IDLE_TIMEOUT_MS = 5 * 60 * 1000;
  */
 export function getSocketPath(config: SocketServerConfig): string {
   return config.defaultPath;
+}
+
+/** Resolve the shared directory for auxiliary daemon sockets at use time. */
+export function resolveAuxSocketDir(env: NodeJS.ProcessEnv = process.env): string {
+  return (
+    env.AUTOMOBILE_AUX_SOCKET_DIR ??
+    testOverrides.auxSocketDir ??
+    path.join(os.homedir(), ".auto-mobile")
+  );
 }

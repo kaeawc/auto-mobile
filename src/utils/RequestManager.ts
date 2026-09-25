@@ -43,6 +43,12 @@ export class RequestManager {
   constructor(
     timer: Timer = defaultTimer,
     private readonly idGenerator: IdGenerator = defaultIdGenerator,
+    // Notified whenever a registered request times out with no response
+    // (issue #7554). Lets a transport client (DeviceServiceClient) count
+    // consecutive timeouts as a signal that the underlying socket, though
+    // still `readyState === OPEN`, may be wedged and worth a liveness probe.
+    // Optional so every other caller of this shared primitive is unaffected.
+    private readonly onTimeout?: () => void,
   ) {
     this.timer = timer;
   }
@@ -84,6 +90,7 @@ export class RequestManager {
           logger.warn(
             `[RequestManager] Request timed out: ${type} (id: ${id}, timeout: ${timeoutMs}ms)`,
           );
+          this.onTimeout?.();
           resolve(timeoutErrorFactory(id, type, timeoutMs));
         }
       }, timeoutMs);

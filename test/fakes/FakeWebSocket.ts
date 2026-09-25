@@ -13,28 +13,39 @@ export enum WebSocketState {
 }
 
 /**
+ * Whether ping() replies with a pong on this fake socket. "auto" models a
+ * peer that answers protocol pings (both real runners do — see issue #7554);
+ * "withhold" models a wedged peer whose TCP connection stays open but never
+ * responds, the failure mode the liveness probe exists to catch.
+ */
+export type PongMode = "auto" | "withhold";
+
+/**
  * Fake WebSocket implementation for testing
  * Allows simulating instant connection failures without waiting for timeout
  */
 export class FakeWebSocket
   extends EventEmitter
-  implements Pick<WebSocket, "readyState" | "send" | "close">
+  implements Pick<WebSocket, "readyState" | "send" | "close" | "ping" | "terminate">
 {
   public readyState: WebSocketState = WebSocketState.CONNECTING;
   private failureMode: "instant" | "timeout" | "none";
   private connectTimeoutMs: number = 0;
   private timer: Timer;
+  private pongMode: PongMode;
 
   constructor(
     url: string,
     failureMode: "instant" | "timeout" | "none" = "none",
     connectTimeoutMs: number = 0,
     timer: Timer = defaultTimer,
+    pongMode: PongMode = "auto",
   ) {
     super();
     this.failureMode = failureMode;
     this.connectTimeoutMs = connectTimeoutMs;
     this.timer = timer;
+    this.pongMode = pongMode;
 
     // For success mode with no delay, emit open synchronously after constructor returns
     // This ensures the "open" event fires before any FakeTimer.setTimeout with autoAdvance
@@ -92,10 +103,45 @@ export class FakeWebSocket
     }
   }
 
+  // Real `ws` terminate() forcibly ends the connection without a close
+  // handshake. Modeled the same way `close()` is: flip state and emit "close"
+  // on the next tick so it still composes with FakeTimer-driven test flows.
+  terminate(): void {
+    if (this.readyState !== WebSocketState.CLOSED) {
+      this.readyState = WebSocketState.CLOSED;
+      setImmediate(() => {
+        this.emit("close");
+      });
+    }
+  }
+
+  // Real `ws` ping() sends a protocol-level ping frame; a cooperative peer
+  // replies with "pong". Only emits when `pongMode` is "auto" — "withhold"
+  // models the wedged-peer failure mode the liveness probe (#7554) detects.
+  ping(): void {
+    if (this.readyState !== WebSocketState.OPEN || this.pongMode !== "auto") {
+      return;
+    }
+    setImmediate(() => {
+      if (this.readyState === WebSocketState.OPEN) {
+        this.emit("pong");
+      }
+    });
+  }
+
   // Method to simulate receiving a message from server
   simulateMessage(data: any): void {
     if (this.readyState === WebSocketState.OPEN) {
       this.emit("message", data);
+    }
+  }
+
+  // Models the peer sending its own protocol-level ping (e.g. the Android
+  // Ktor CtrlProxy server's `pingPeriod`), independent of anything the host
+  // sent. Real `ws` auto-pongs these but still surfaces a "ping" event.
+  simulatePing(): void {
+    if (this.readyState === WebSocketState.OPEN) {
+      this.emit("ping");
     }
   }
 }
@@ -114,8 +160,11 @@ export function createInstantFailureWebSocketFactory(
  * Factory function that creates FakeWebSockets that connect successfully
  * This is useful for testing normal operation scenarios
  */
-export function createSuccessWebSocketFactory(timer?: Timer): (url: string) => FakeWebSocket {
-  return (url: string) => new FakeWebSocket(url, "none", 0, timer);
+export function createSuccessWebSocketFactory(
+  timer?: Timer,
+  pongMode: PongMode = "auto",
+): (url: string) => FakeWebSocket {
+  return (url: string) => new FakeWebSocket(url, "none", 0, timer, pongMode);
 }
 
 /**

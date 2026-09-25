@@ -1538,6 +1538,55 @@ describe("AndroidCtrlProxyClient", function () {
 
       expect(lostDeviceIds).toEqual(["test-device"]);
     });
+
+    // Issue #7540: a tree cached before a disconnect describes UI state as of the closed
+    // connection. Serving it after reconnect (as a cache hit or a timeout/sync fallback) can
+    // describe UI state from before whatever triggered the runner restart. iOS already clears
+    // its equivalent cache on every close (IOSCtrlProxyClient.onConnectionClosed); mirror that.
+    test("clears the cached hierarchy when the WebSocket connection closes", function () {
+      const testClient = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        createSuccessWebSocketFactory(fakeTimer),
+        fakeTimer,
+      );
+
+      (testClient as any).handleHierarchyUpdate({
+        updatedAt: 1,
+        packageName: "com.example.app",
+        hierarchy: { node: { $: { class: "Root" } } },
+      });
+      expect(testClient.hasCachedHierarchy()).toBe(true);
+
+      (testClient as any).onConnectionClosed();
+
+      expect(testClient.hasCachedHierarchy()).toBe(false);
+    });
+
+    // Issue #7540: the recomposition-tracking latch is connection-scoped device state, same as
+    // the hierarchy cache above. Verify the wiring directly (the latch's own reset behavior is
+    // covered by ctrlProxyHierarchyRecompositionLatchReset.test.ts) so a future refactor of
+    // onConnectionClosed() cannot drop the call silently.
+    test("resets the recomposition-tracking latch when the WebSocket connection closes", function () {
+      const testClient = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        createSuccessWebSocketFactory(fakeTimer),
+        fakeTimer,
+      );
+
+      const hierarchyDelegate = (testClient as any).hierarchy;
+      let resetCalls = 0;
+      const originalReset = hierarchyDelegate.resetConnectionScopedState.bind(hierarchyDelegate);
+      hierarchyDelegate.resetConnectionScopedState = () => {
+        resetCalls++;
+        originalReset();
+      };
+
+      (testClient as any).onConnectionClosed();
+
+      expect(resetCalls).toBe(1);
+    });
   });
 
   describe("getLatestHierarchy", function () {

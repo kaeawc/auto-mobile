@@ -2072,6 +2072,14 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     this.lateCancelledScreenshotRequestIds.clear();
     this.cancelScreenshotBackoff();
     this._hierarchy?.rejectAllPendingHierarchy("WebSocket connection closed");
+    // Issue #7540: the cache describes device UI state as of the closed connection, and the
+    // recomposition-tracking latch describes what the runner's accessibility service instance
+    // held. Both are connection-scoped: a runner restart (crash rebind, APK reinstall) behind
+    // this close can hand the next connection a service with tracking off, and a stale tree
+    // served after reconnect can describe UI state from before whatever triggered the restart.
+    // Mirrors IOSCtrlProxyClient.onConnectionClosed() clearing `cachedHierarchy`.
+    this.cachedHierarchy = null;
+    this._hierarchy?.resetConnectionScopedState();
     void this.markInstalledAppsStale("websocket_closed");
     this.deviceConnectionLostNotifier.onDeviceConnectionLost(this.device.deviceId);
 

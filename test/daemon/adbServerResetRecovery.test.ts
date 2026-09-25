@@ -1535,7 +1535,7 @@ describe("ADB server reset session recovery", () => {
     }
   });
 
-  test("retries transient terminal release persistence before unquarantining", async () => {
+  test("retries transient release persistence before unquarantining, and keeps a device-restart release resumable", async () => {
     class TransientCompletionFailureStore extends InMemoryEmulatorLossIncidentStore {
       completeAttempts = 0;
 
@@ -1559,6 +1559,7 @@ describe("ADB server reset session recovery", () => {
     const manager = new StoppedDeviceManager();
     const incidentStore = new TransientCompletionFailureStore(timer);
     let releaseAttempts = 0;
+    const releaseReasons: string[] = [];
     const reboot: AndroidDeviceReboot = {
       run: async (_target, attempt) => {
         try {
@@ -1580,6 +1581,7 @@ describe("ADB server reset session recovery", () => {
       undefined,
       async (sessionId, _deviceId, releaseReason) => {
         releaseAttempts += 1;
+        releaseReasons.push(releaseReason);
         try {
           await sessionManager.releaseSession(sessionId, releaseReason);
         } finally {
@@ -1626,8 +1628,28 @@ describe("ADB server reset session recovery", () => {
       expect(incidentStore.completeAttempts).toBe(2);
       expect(sessionManager.getSession("session-1")).toBeNull();
       expect(pool.isSessionRecoveryInFlight("session-1")).toBe(false);
+      // The relaunch attempt genuinely failed (maxAttempts: 1, reboot always
+      // throws), but `releasePreservedSessionAfterRecoveryFailure` still
+      // releases with the resumable `device-restart:<avd>` reason on every
+      // attempt -- the same reason `isRecoverableDaemonReleaseReason`
+      // (src/db/deviceSessionRepository.ts) and the passive device-restart
+      // resume path (test/daemon/devicePool.recoveryShutdown.test.ts) honor
+      // regardless of this incident's recovery outcome. So this session is
+      // genuinely resumable when "Pixel_8_API_35" reappears, and the incident
+      // must reflect that as "awaiting-device", not a terminal "released"
+      // (#7544). The recovery outcome stays "exhausted" because a relaunch
+      // was actually attempted and failed, unlike the no-relaunch-attempted
+      // case which reports "not-attempted". (This synthetic double-failure
+      // harness never actually lands the release in `persistence`'s row --
+      // the fake's non-terminal-release retry path is a separate, pre-existing
+      // gap unrelated to #7544 -- so the resumable reason is pinned here
+      // directly at the call site instead of via the persisted row.)
+      expect(releaseReasons).toEqual([
+        `device-restart:${original.name}`,
+        `device-restart:${original.name}`,
+      ]);
       await expect(pool.waitForEmulatorLossIncident(incidentId!)).resolves.toMatchObject({
-        session: { state: "released" },
+        session: { state: "awaiting-device" },
         recovery: { outcome: "exhausted" },
       });
     } finally {

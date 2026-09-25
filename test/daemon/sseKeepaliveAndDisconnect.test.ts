@@ -4,6 +4,7 @@ import {
   evaluateDeviceDisconnects,
   recordingCandidateIncarnations,
 } from "../../src/daemon/disconnectMonitor";
+import { notifyAdbMissingDevice } from "../../src/utils/android-cmdline-tools/AdbDeviceHealth";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 const SSE_KEEPALIVE_INTERVAL_MS = 30_000;
@@ -310,20 +311,50 @@ describe("disconnect monitor miss counting", () => {
     expect(misses.has("sim-1")).toBe(false);
   });
 
-  test("forced missing devices bypass the all-discovery-failed guard", () => {
-    const result = evaluateDeviceDisconnects({
-      deviceDisconnectMisses: new Map(),
+  test("a forced missing device follows the three-miss debounce", () => {
+    const misses = new Map<string, number>();
+    const forced = new Set(["emulator-5554"]);
+    const input = {
+      deviceDisconnectMisses: misses,
       confirmedDisconnectedDeviceIds: new Set(),
-      forceDisconnectedDeviceIds: new Set(["emulator-5554"]),
+      forceDisconnectedDeviceIds: forced,
       bootedDeviceIds: new Set(),
       candidateDeviceIds: new Set(["emulator-5554"]),
       succeededPlatforms: new Set(["android" as const]),
       candidatePlatforms: new Map([["emulator-5554", "android" as const]]),
       missThreshold: DEVICE_DISCONNECT_MISS_THRESHOLD,
+    };
+
+    for (let count = 1; count <= DEVICE_DISCONNECT_MISS_THRESHOLD; count++) {
+      const result = evaluateDeviceDisconnects(input);
+      expect(result.skippedAllDiscoveryFailed).toBe(false);
+      expect(result.missed).toEqual([{ deviceId: "emulator-5554", misses: count }]);
+      expect(result.disconnected).toEqual(
+        count === DEVICE_DISCONNECT_MISS_THRESHOLD ? ["emulator-5554"] : [],
+      );
+      expect(misses.get("emulator-5554")).toBe(count);
+      expect(forced.has("emulator-5554")).toBe(true);
+    }
+  });
+
+  test("a forced missing device does not bypass the all-discovery-failed guard", () => {
+    const misses = new Map([["emulator-5554", 1]]);
+    const result = evaluateDeviceDisconnects({
+      deviceDisconnectMisses: misses,
+      confirmedDisconnectedDeviceIds: new Set(),
+      forceDisconnectedDeviceIds: new Set(["emulator-5554"]),
+      bootedDeviceIds: new Set(),
+      candidateDeviceIds: new Set(["emulator-5554"]),
+      succeededPlatforms: new Set(),
+      succeededSources: new Set(),
+      candidatePlatforms: new Map([["emulator-5554", "android" as const]]),
+      missThreshold: DEVICE_DISCONNECT_MISS_THRESHOLD,
     });
 
-    expect(result.skippedAllDiscoveryFailed).toBe(false);
-    expect(result.disconnected).toEqual(["emulator-5554"]);
+    expect(result.skippedAllDiscoveryFailed).toBe(true);
+    expect(result.disconnected).toEqual([]);
+    expect(result.missed).toEqual([]);
+    expect(misses.get("emulator-5554")).toBe(1);
   });
 
   test("fresh booted scan clears a stale forced missing flag", () => {
@@ -342,6 +373,33 @@ describe("disconnect monitor miss counting", () => {
     expect(result.skippedAllDiscoveryFailed).toBe(false);
     expect(result.disconnected).toEqual([]);
     expect(forceDisconnectedDeviceIds.has("emulator-5554")).toBe(false);
+  });
+
+  test("a single adb missing report marks a tracked device suspect without preloading misses", () => {
+    const misses = new Map<string, number>();
+    const forced = new Set<string>();
+    const generations = new Map<string, number>();
+    const daemon = {
+      devicePool: { getDevice: () => ({}) },
+      sessionManager: { getSessionForDevice: () => null },
+      deviceDisconnectMisses: misses,
+      forceDisconnectedDeviceIds: forced,
+      forceDisconnectedDeviceGenerations: generations,
+      unsubscribeAdbMissingDevice: null as (() => void) | null,
+    };
+    const startAdbMissingDeviceListener = (
+      Daemon.prototype as unknown as { startAdbMissingDeviceListener: () => void }
+    ).startAdbMissingDeviceListener;
+
+    startAdbMissingDeviceListener.call(daemon);
+    try {
+      notifyAdbMissingDevice("emulator-5554", new Error("device 'emulator-5554' not found"));
+      expect(forced.has("emulator-5554")).toBe(true);
+      expect(generations.get("emulator-5554")).toBe(1);
+      expect(misses.has("emulator-5554")).toBe(false);
+    } finally {
+      daemon.unsubscribeAdbMissingDevice?.();
+    }
   });
 
   test("skips candidates from platforms whose discovery did not succeed", () => {

@@ -896,10 +896,19 @@ export class DeviceSessionManager implements DeviceSessionManager {
           perf.end();
           return;
         }
-        // Service not responsive despite connected socket - fall through to normal flow
+        // Service not responsive despite a connected socket: the socket itself
+        // is suspect (issue #7554 — readyState stays OPEN across a half-open
+        // connection to a wedged or unreachable peer). Terminate it so the
+        // normal flow below reconnects with a fresh socket, rather than
+        // falling through to a waitForConnection() that would just reuse the
+        // same half-open one and report success immediately. Unlike close(),
+        // terminateStaleConnection() does not disable auto-reconnect for the
+        // rest of this client's lifetime — it drives the same was-open close
+        // path a real network failure would.
         logger.warn(
-          `[DeviceSessionManager] WebSocket connected but service not responsive for ${deviceId}, checking status`,
+          `[DeviceSessionManager] WebSocket connected but service not responsive for ${deviceId}, terminating stale connection and checking status`,
         );
+        accessibilityClient.terminateStaleConnection();
       }
 
       const manager = this.provider.getAndroidCtrlProxyManager(device);

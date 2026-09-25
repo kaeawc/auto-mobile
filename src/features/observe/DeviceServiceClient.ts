@@ -66,6 +66,24 @@ const DEFAULT_CONNECTION_CONFIG: ConnectionConfig = {
   connectionTimeoutMs: 5000,
 };
 
+// Liveness probe tuning (issue #7554). `readyState === OPEN` alone cannot
+// distinguish a healthy peer from a half-open connection whose TCP stream
+// stalled without a close reaching the host (a wedged device-side handler, an
+// adb hop that never tears down, a suspended emulator). Both runners already
+// answer protocol-level pings, so the host probes with `ws.ping()` and treats
+// silence past a bounded deadline as a dead connection.
+//
+// The deadline is a multiple of the health-check interval rather than a fixed
+// constant so a client configured with a shorter/longer interval (as tests
+// do) gets a proportionally scaled deadline without new config plumbing.
+const LIVENESS_TIMEOUT_INTERVAL_MULTIPLIER = 2;
+// After this many consecutive RequestManager timeouts with no inbound frame
+// in between, the socket is "suspect": something is still accepting the TCP
+// connection but not answering application requests. Run the same
+// ping-then-terminate probe immediately instead of waiting for the next
+// periodic health-check tick.
+const REQUEST_TIMEOUT_LIVENESS_THRESHOLD = 3;
+
 /**
  * Abstract base class for device service WebSocket clients.
  *
@@ -121,6 +139,19 @@ export abstract class DeviceServiceClient {
   // Health check state
   protected healthCheckIntervalId: ReturnType<Timer["setInterval"]> | null = null;
   protected lastHealthCheckTime: number = 0;
+  // Liveness state (issue #7554). Refreshed by any proof of life on the
+  // current socket: a pong reply, a server-initiated ping, or any inbound
+  // frame (a frame proves the peer is alive even if no ping is outstanding).
+  // lastLivenessAt remains for logging/inspection; startLivenessProbe()
+  // compares livenessSeq rather than the timestamp, since a monotonic
+  // counter can't miss a frame that lands in the same millisecond as the
+  // probe's deadline tick (timer resolution is coarser than that).
+  private lastLivenessAt: number = 0;
+  private livenessSeq: number = 0;
+  private livenessDeadlineTimeoutId: ReturnType<Timer["setTimeout"]> | null = null;
+  // Consecutive RequestManager timeouts observed since the last proof of
+  // life. Reset by markLivenessSeen(); read by handleRequestTimeout().
+  private consecutiveRequestTimeouts: number = 0;
 
   // Injected dependencies
   protected readonly timer: Timer;
@@ -144,7 +175,7 @@ export abstract class DeviceServiceClient {
     this.timer = timer;
     this.webSocketFactory = webSocketFactory;
     this.config = { ...DEFAULT_CONNECTION_CONFIG, ...config };
-    this.requestManager = new RequestManager(timer);
+    this.requestManager = new RequestManager(timer, undefined, () => this.handleRequestTimeout());
     this.retryExecutor = retryExecutor;
   }
 
@@ -322,6 +353,29 @@ export abstract class DeviceServiceClient {
     }
 
     return result.value ?? false;
+  }
+
+  /**
+   * Force-close a socket a caller has independently determined to be stale —
+   * e.g. `readyState === OPEN` yet the service behind it is not responding to
+   * application requests (issue #7554,
+   * {@link DeviceSessionManager.verifyAndroidDevice}'s connected-but-unresponsive
+   * branch). Unlike {@link close}, this does not disable auto-reconnect or run
+   * any teardown itself: it calls `ws.terminate()` on the live socket, which
+   * fires the socket's own `close` handler and drives the exact same
+   * was-open close path (`onConnectionClosed()` → `scheduleReconnect()`) that
+   * a real network failure would, so the stale connection is counted as
+   * exactly one lost connection rather than a bespoke shutdown. A subsequent
+   * `waitForConnection()`/`ensureConnected()` then dials a fresh socket
+   * instead of reusing the terminated one.
+   *
+   * No-op when there is no live socket to terminate.
+   */
+  public terminateStaleConnection(): void {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      logger.warn(`[${this.logTag}] Terminating stale connection (connected but unresponsive)`);
+      this.ws.terminate();
+    }
   }
 
   /**
@@ -605,6 +659,7 @@ export abstract class DeviceServiceClient {
               this.backgroundReconnectPaused = false;
               this.lastConnectionFailureMessage = undefined;
               this.lastConnectionFailureIsForwardingLeaseConflict = false;
+              this.markLivenessSeen();
 
               // Start health check monitoring
               this.startHealthCheck();
@@ -616,7 +671,22 @@ export abstract class DeviceServiceClient {
             });
 
             ws.on("message", (data: WebSocket.Data) => {
+              // Any inbound frame proves the peer is alive, independent of
+              // whether it happens to be a pong reply (#7554).
+              this.markLivenessSeen();
               void this.handleMessage(data);
+            });
+
+            ws.on("pong", () => {
+              this.markLivenessSeen();
+            });
+
+            // The Android Ktor CtrlProxy server pings the host every 15s
+            // (WebSocketServer.kt `pingPeriod`); `ws` auto-pongs those but
+            // still surfaces them as a "ping" event on this side. That is a
+            // free proof of life independent of the host's own probe (#7554).
+            ws.on("ping", () => {
+              this.markLivenessSeen();
             });
 
             ws.on("error", (error) => {
@@ -867,6 +937,10 @@ export abstract class DeviceServiceClient {
         logger.debug(
           `[${this.logTag}] Health check passed (time since last: ${timeSinceLastCheck}ms)`,
         );
+        // readyState alone only proves the socket hasn't been torn down; it
+        // says nothing about whether the peer is still answering (#7554).
+        // Probe with a protocol-level ping on the injected timer.
+        this.startLivenessProbe(this.ws);
       }
     }, this.config.healthCheckIntervalMs);
   }
@@ -879,6 +953,97 @@ export abstract class DeviceServiceClient {
       logger.debug(`[${this.logTag}] Stopping health check`);
       this.timer.clearInterval(this.healthCheckIntervalId);
       this.healthCheckIntervalId = null;
+    }
+    if (this.livenessDeadlineTimeoutId !== null) {
+      this.timer.clearTimeout(this.livenessDeadlineTimeoutId);
+      this.livenessDeadlineTimeoutId = null;
+    }
+  }
+
+  /**
+   * Record proof that the current connection's peer is alive: a pong reply,
+   * a server-initiated ping, or any inbound frame (a frame proves liveness
+   * even without an outstanding ping). Also clears the consecutive-timeout
+   * counter used by {@link handleRequestTimeout}, since a live peer means
+   * those earlier timeouts were not evidence of a wedged socket after all.
+   *
+   * Bumps {@link livenessSeq} rather than relying solely on the
+   * {@link lastLivenessAt} timestamp: {@link startLivenessProbe}'s deadline
+   * check compares the sequence number, which can't miss a frame that lands
+   * in the same millisecond as the check (timer/`Date.now()` resolution is
+   * coarser than that).
+   */
+  private markLivenessSeen(): void {
+    this.lastLivenessAt = this.timer.now();
+    this.livenessSeq++;
+    this.consecutiveRequestTimeouts = 0;
+  }
+
+  /**
+   * Send a protocol-level ping and, unless a probe is already in flight,
+   * arm a bounded deadline on the injected {@link Timer}. If neither a pong
+   * nor any other inbound frame refreshes {@link livenessSeq} before the
+   * deadline, the socket is presumed dead and torn down with
+   * `ws.terminate()`. That firing is what drives the normal was-open close
+   * path (`onConnectionClosed()` → `scheduleReconnect()`) — this method
+   * never calls either directly, so a liveness failure is counted as exactly
+   * one lost connection, the same as any other close (#7554).
+   *
+   * Safe to call from both the periodic health check and
+   * {@link handleRequestTimeout}: a probe already in flight is left alone
+   * rather than restarted, so back-to-back callers cannot pile up deadlines
+   * or double-count a single failure.
+   */
+  private startLivenessProbe(ws: WebSocket): void {
+    if (this.livenessDeadlineTimeoutId !== null) {
+      return;
+    }
+    const checkStartedAtSeq = this.livenessSeq;
+    try {
+      ws.ping();
+    } catch (error) {
+      // Best-effort: a ping send failure on a socket that still reports OPEN
+      // is itself evidence of trouble, so still arm the deadline below rather
+      // than returning early.
+      logger.debug(`[${this.logTag}] Failed to send liveness ping: ${error}`);
+    }
+    const livenessTimeoutMs =
+      this.config.healthCheckIntervalMs * LIVENESS_TIMEOUT_INTERVAL_MULTIPLIER;
+    this.livenessDeadlineTimeoutId = this.timer.setTimeout(() => {
+      this.livenessDeadlineTimeoutId = null;
+      if (this.ws !== ws || ws.readyState !== WebSocket.OPEN) {
+        // Already replaced or torn down through some other path; nothing to do.
+        return;
+      }
+      if (this.livenessSeq > checkStartedAtSeq) {
+        // A pong or another frame arrived since this probe started.
+        return;
+      }
+      logger.warn(
+        `[${this.logTag}] Liveness probe failed: no pong or frame received within ${livenessTimeoutMs}ms, terminating stale connection`,
+      );
+      ws.terminate();
+    }, livenessTimeoutMs);
+  }
+
+  /**
+   * Feed RequestManager timeouts back into connection state (#7554). A
+   * wedged device-side handler can still answer protocol pings while never
+   * responding to application requests, so consecutive request timeouts with
+   * no proof of life in between are treated as "suspect" and trigger the same
+   * ping-then-terminate probe immediately, instead of waiting out the rest of
+   * the current health-check interval.
+   */
+  private handleRequestTimeout(): void {
+    this.consecutiveRequestTimeouts++;
+    if (this.consecutiveRequestTimeouts < REQUEST_TIMEOUT_LIVENESS_THRESHOLD) {
+      return;
+    }
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      logger.warn(
+        `[${this.logTag}] ${this.consecutiveRequestTimeouts} consecutive request timeouts with no inbound frame; probing connection liveness`,
+      );
+      this.startLivenessProbe(this.ws);
     }
   }
 

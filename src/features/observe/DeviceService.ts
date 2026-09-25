@@ -130,6 +130,16 @@ export interface DeviceService {
    */
   resetConnectionBudget(): void;
 
+  /**
+   * Force-close a socket the caller has independently determined to be stale
+   * — `isConnected()` is true, yet the service behind it is not responding
+   * (issue #7554). Drives the same was-open close path as a real network
+   * failure (`onConnectionClosed()` → `scheduleReconnect()`), so a subsequent
+   * `waitForConnection()` dials a fresh socket instead of reusing the
+   * half-open one. No-op when there is no live socket.
+   */
+  terminateStaleConnection(): void;
+
   // ---------------------------------------------------------------------------
   // Gestures
   // ---------------------------------------------------------------------------

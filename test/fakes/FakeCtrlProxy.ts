@@ -806,6 +806,13 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     // Fake never gates on a connection-attempt cooldown; nothing to reset.
   }
 
+  terminateStaleConnection(): void {
+    // Fake has no real socket to terminate; model it as an ordinary
+    // disconnect so callers exercising issue #7554's fallback see the same
+    // isConnected() transition a real client would.
+    this.isConnectedState = false;
+  }
+
   hasCachedHierarchy(): boolean {
     return this.hasCachedHierarchyState;
   }

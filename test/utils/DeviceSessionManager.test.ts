@@ -46,15 +46,24 @@ function ipaBytes(): Buffer {
 }
 
 function stubAndroidCtrlProxy(overrides: Partial<AndroidCtrlProxy>): AndroidCtrlProxy {
-  // resetConnectionBudget() (issue #7538) is a required DeviceService method
-  // that most of these per-test overrides don't care about; default it to a
-  // no-op so a test exercising the enable/setup paths doesn't have to stub it
-  // just to avoid an unhandled-method crash.
-  return { resetConnectionBudget: () => {}, ...overrides } as unknown as AndroidCtrlProxy;
+  // resetConnectionBudget() (issue #7538) and terminateStaleConnection()
+  // (issue #7554) are required DeviceService methods that most of these
+  // per-test overrides don't care about; default them to no-ops so a test
+  // exercising the enable/setup paths doesn't have to stub them just to
+  // avoid an unhandled-method crash.
+  return {
+    resetConnectionBudget: () => {},
+    terminateStaleConnection: () => {},
+    ...overrides,
+  } as unknown as AndroidCtrlProxy;
 }
 
 function stubIOSCtrlProxy(overrides: Partial<IOSCtrlProxy>): IOSCtrlProxy {
-  return { resetConnectionBudget: () => {}, ...overrides } as unknown as IOSCtrlProxy;
+  return {
+    resetConnectionBudget: () => {},
+    terminateStaleConnection: () => {},
+    ...overrides,
+  } as unknown as IOSCtrlProxy;
 }
 
 function deferred(): { promise: Promise<void>; resolve: () => void } {
@@ -395,6 +404,7 @@ describe("DeviceSessionManager", () => {
     const accessibilityManager = new FakeCtrlProxyManager();
     accessibilityManager.setInstalled(true);
     accessibilityManager.setEnabled(true);
+    let terminateStaleConnectionCalls = 0;
 
     const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, undefined, {
       window: fakeWindow,
@@ -403,11 +413,17 @@ describe("DeviceSessionManager", () => {
         isConnected: () => true,
         verifyServiceReady: () => Promise.resolve(false), // Service not responsive
         waitForConnection: () => Promise.resolve(true),
+        terminateStaleConnection: () => {
+          terminateStaleConnectionCalls++;
+        },
       }),
     });
     const manager = DeviceSessionManager.createInstance(provider);
     await manager.ensureDeviceReady("android", "device-1");
 
+    // Issue #7554: a connected-but-unresponsive socket must be terminated
+    // rather than reused by the waitForConnection() fallback below.
+    expect(terminateStaleConnectionCalls).toBe(1);
     // Should have fallen through and checked status since service wasn't responsive
     expect(accessibilityManager.wasMethodCalled("isInstalled")).toBe(true);
   });

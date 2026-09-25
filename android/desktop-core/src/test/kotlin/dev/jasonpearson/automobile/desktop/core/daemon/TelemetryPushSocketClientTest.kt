@@ -1,6 +1,8 @@
 package dev.jasonpearson.automobile.desktop.core.daemon
 
 import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
+import dev.jasonpearson.automobile.desktop.core.logging.Logger
+import dev.jasonpearson.automobile.desktop.core.telemetry.TelemetryDisplayEvent
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CompletableDeferred
@@ -17,6 +19,46 @@ import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class TelemetryPushSocketClientTest {
+  private class RecordingLogger : Logger {
+    val warnings = mutableListOf<String>()
+
+    override fun info(message: String) = Unit
+
+    override fun warn(message: String) {
+      warnings.add(message)
+    }
+
+    override fun warn(message: String, throwable: Throwable) {
+      warnings.add(message)
+    }
+
+    override fun error(message: String) = Unit
+
+    override fun error(message: String, throwable: Throwable) = Unit
+
+    override fun debug(message: String) = Unit
+  }
+
+  @Test
+  fun `malformed message is skipped and recovered field warning is deduplicated`() = runTest {
+    val logger = RecordingLogger()
+    val client = TelemetryPushSocketClient({ FakeSocket() }, {}, backgroundScope, { true }, logger)
+    val valid =
+      """{"type":"telemetry_push","data":{"category":"navigation","timestamp":1,"data":{"destination":"screen","arguments":{"id":"42","options":{"tab":"home"}}}}}"""
+    val malformed = """{"type":"telemetry_push","data":{"timestamp":1,"data":{}}}"""
+
+    assertFalse(client.processMessage(malformed))
+    assertTrue(client.processMessage(valid))
+    assertTrue(client.processMessage(valid))
+
+    val events = client.telemetryEvents.replayCache
+    assertEquals(2, events.size)
+    assertEquals("screen", (events.last() as TelemetryDisplayEvent.Navigation).destination)
+    assertEquals(1, logger.warnings.count { it.contains("Malformed telemetry push message") })
+    assertEquals(1, logger.warnings.count { it.contains("category=navigation field=arguments") })
+    client.dispose()
+  }
+
   private class FakeRetryDelay : TelemetryRetryDelay {
     val calls = mutableListOf<Long>()
 

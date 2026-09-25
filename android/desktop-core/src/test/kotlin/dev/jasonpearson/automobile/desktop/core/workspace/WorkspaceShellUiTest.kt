@@ -6,6 +6,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -325,6 +326,9 @@ class WorkspaceShellUiTest {
       )
     )
     waitUntil(timeoutMillis = 5_000L) { savedName == "Pixel 9" }
+    waitUntil(timeoutMillis = 5_000L) {
+      onAllNodesWithContentDescription("Screenshot status Pixel 9").fetchSemanticsNodes().size == 1
+    }
     onNodeWithContentDescription("Screenshot status Pixel 9").assertIsDisplayed()
     onNodeWithContentDescription("Screenshot status Pixel 8").assertDoesNotExist()
 

@@ -1,5 +1,11 @@
 import { ActionableError } from "../../models";
 import { logger } from "../../utils/logger";
+import {
+  exponentialBackoff,
+  normalizeBackoff,
+  type BackoffInput,
+  type BackoffPolicy,
+} from "../../utils/Backoff";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import {
   defaultAdbClientFactory,
@@ -27,6 +33,22 @@ const DEFAULT_SCREENRECORD_SIZE = { width: 1280, height: 720 };
  * viewer PLIs collapses to at most one forced rotation per this interval.
  */
 export const ANDROID_FORCED_KEYFRAME_MIN_INTERVAL_MS = 3000;
+/**
+ * A real screenrecord time-limit exit takes minutes. Two seconds is well below
+ * the default proactive rotation boundary, but excludes an adb exec-out process
+ * that exits cleanly before screenrecord could have established a stream.
+ */
+export const ANDROID_MIN_SEGMENT_AGE_MS = 2000;
+/** 30s distinguishes sustained capture from short recurring encoder failures. */
+export const ANDROID_HEALTHY_SEGMENT_AGE_MS = 30_000;
+/** Additional segment starts allowed after a contiguous run of failures. */
+export const ANDROID_RUNNING_RETRY_MAX_ATTEMPTS = 2;
+/** Backoff between running-phase retry starts: 500ms, then 1s (2s cap). */
+export const ANDROID_RUNNING_RETRY_BACKOFF: BackoffInput = exponentialBackoff({
+  initialDelayMs: 500,
+  multiplier: 2,
+  maxDelayMs: 2000,
+});
 
 export interface AndroidH264SourceOptions extends H264CaptureSourceOptions {
   adbFactory?: AdbClientFactory;
@@ -35,6 +57,10 @@ export interface AndroidH264SourceOptions extends H264CaptureSourceOptions {
   segmentTimeLimitSeconds?: number;
   /** Override when to proactively rotate to the next segment (ms). */
   segmentRotateMs?: number;
+  /** Additional running-phase segment starts before surfacing `onError`. */
+  runningRetryMaxAttempts?: number;
+  /** Backoff schedule between running-phase retry starts. */
+  runningRetryBackoff?: BackoffInput;
 }
 
 /**
@@ -51,10 +77,17 @@ export class AndroidH264Source implements H264CaptureSource {
   private readonly timer: Timer;
   private readonly segmentTimeLimitSeconds: number;
   private readonly segmentRotateMs: number;
+  private readonly healthySegmentAgeMs: number;
+  private readonly runningRetryMaxAttempts: number;
+  private readonly runningRetryBackoff: BackoffPolicy;
 
   private current: AdbProcess | null = null;
+  private segmentStartedAtMs: number | null = null;
   private rotateHandle: NodeJS.Timeout | null = null;
+  private cancelRetryDelay: (() => void) | null = null;
   private running = false;
+  private runId = 0;
+  private runningRetryAttempts = 0;
   private segmentCount = 0;
   private resolvedSize: { width: number; height: number } | null = null;
   private lastForcedKeyFrameMs = Number.NEGATIVE_INFINITY;
@@ -68,6 +101,13 @@ export class AndroidH264Source implements H264CaptureSource {
       ANDROID_SCREENRECORD_MAX_SECONDS,
     );
     this.segmentRotateMs = options.segmentRotateMs ?? ANDROID_STREAM_SEGMENT_ROTATE_MS;
+    // Half the scheduled interval counts as healthy when rotation is configured shorter than 30s.
+    this.healthySegmentAgeMs = Math.min(ANDROID_HEALTHY_SEGMENT_AGE_MS, this.segmentRotateMs / 2);
+    this.runningRetryMaxAttempts =
+      options.runningRetryMaxAttempts ?? ANDROID_RUNNING_RETRY_MAX_ATTEMPTS;
+    this.runningRetryBackoff = normalizeBackoff(
+      options.runningRetryBackoff ?? ANDROID_RUNNING_RETRY_BACKOFF,
+    );
   }
 
   get segmentsStarted(): number {
@@ -83,17 +123,22 @@ export class AndroidH264Source implements H264CaptureSource {
     if (this.running) {
       throw new ActionableError("Android H.264 source already started.");
     }
+    this.runId++;
+    this.runningRetryAttempts = 0;
     this.running = true;
     await this.startSegment();
   }
 
   /** Stop capturing: cancels rotation and terminates the active segment. */
   async stop(): Promise<void> {
+    this.runId++;
+    this.cancelRetryDelay?.();
     if (!this.running) {
       return;
     }
     this.running = false;
     this.clearRotateTimer();
+    this.segmentStartedAtMs = null;
 
     const process = this.current;
     this.current = null;
@@ -133,15 +178,16 @@ export class AndroidH264Source implements H264CaptureSource {
   }
 
   private async startSegment(): Promise<void> {
+    const runId = this.runId;
     const adb = this.adbFactory.create(this.options.device);
     // stop() may have run while we awaited adb setup; it returns early when
     // `current` is still null, so spawning now would leak a screenrecord process
     // that no later stop() would kill.
-    if (!this.running) {
+    if (!this.running || runId !== this.runId) {
       return;
     }
     const size = await this.captureSize(adb);
-    if (!this.running) {
+    if (!this.running || runId !== this.runId) {
       return;
     }
     const args = [
@@ -173,11 +219,12 @@ export class AndroidH264Source implements H264CaptureSource {
     // stop() may run while the async ADB boundary resolves the child. Do not
     // retain a late stream after its owner has stopped; terminate only this
     // host-side exec-out process, never device-wide screenrecord.
-    if (!this.running) {
+    if (!this.running || runId !== this.runId) {
       process.kill("SIGINT");
       return;
     }
     this.current = process;
+    this.segmentStartedAtMs = this.timer.now();
     this.segmentCount++;
 
     process.stdout.on("data", (chunk: Buffer) => {
@@ -196,10 +243,15 @@ export class AndroidH264Source implements H264CaptureSource {
     });
     process.once("error", (error: Error) => {
       logger.warn(`[AndroidH264Source] screenrecord process error: ${error.message}`);
-      if (this.running) {
-        this.running = false;
+      if (this.current === process && this.running) {
+        this.resetRetryAfterHealthySegment();
+        this.current = null;
+        this.segmentStartedAtMs = null;
         this.clearRotateTimer();
-        this.options.onError?.(error);
+        // An errored adb process may still be alive; detach it before killing
+        // so its later exit cannot start a second retry.
+        process.kill("SIGINT");
+        void this.retryAfterFailure(error);
       }
     });
     process.once("exit", (code, signal) => {
@@ -218,34 +270,90 @@ export class AndroidH264Source implements H264CaptureSource {
       // A superseded segment (already rotated away from) — ignore.
       return;
     }
+    const startedAt = this.segmentStartedAtMs;
+    const ageMs = startedAt === null ? 0 : this.timer.now() - startedAt;
+    this.resetRetryAfterHealthySegment();
     this.current = null;
+    this.segmentStartedAtMs = null;
     this.clearRotateTimer();
 
     if (!this.running) {
       return;
     }
 
-    // Only rotate on an expected segment boundary: our own SIGINT (rotate timer)
-    // or a clean time-limit exit (code 0). A non-zero exit means screenrecord
-    // failed (e.g. unsupported --size, encoder error); surface it via onError so
-    // the publisher can reconnect/fail instead of tight-looping a broken command.
-    const isExpectedRotation = signal === "SIGINT" || code === 0;
+    // Our own SIGINT is a rotation even when requested early for a keyframe.
+    // A clean adb exec-out exit is only a time-limit boundary after a plausible
+    // segment lifetime: adb can report code 0 when screenrecord failed at once.
+    // Other exits and instant clean exits get bounded backoff before onError.
+    const isExpectedRotation =
+      signal === "SIGINT" || (code === 0 && ageMs >= ANDROID_MIN_SEGMENT_AGE_MS);
     if (!isExpectedRotation) {
       logger.warn(
-        `[AndroidH264Source] screenrecord failed (code=${code}, signal=${signal}); not rotating`,
+        `[AndroidH264Source] screenrecord failed (code=${code}, signal=${signal}, age=${ageMs}ms); retrying`,
       );
-      this.running = false;
-      this.options.onError?.(new Error(`screenrecord exited with code ${code}`));
+      void this.retryAfterFailure(new Error(`screenrecord exited with code ${code}`));
       return;
     }
 
     logger.info(
       `[AndroidH264Source] segment ${this.segmentCount} ended (code=${code}, signal=${signal}); rotating`,
     );
+    const runId = this.runId;
     void this.startSegment().catch((error) => {
       logger.warn(`[AndroidH264Source] failed to start next segment: ${error}`);
+      void this.retryAfterFailure(error instanceof Error ? error : new Error(String(error)), runId);
+    });
+  }
+
+  /** A segment old enough to resemble a real capture starts a fresh failure budget. */
+  private resetRetryAfterHealthySegment(): void {
+    if (
+      this.segmentStartedAtMs !== null &&
+      this.timer.now() - this.segmentStartedAtMs >= this.healthySegmentAgeMs
+    ) {
+      this.runningRetryAttempts = 0;
+    }
+  }
+
+  /** Retry a failed running segment, or surface its final error on exhaustion. */
+  private async retryAfterFailure(error: Error, runId = this.runId): Promise<void> {
+    if (!this.running || runId !== this.runId) {
+      return;
+    }
+    if (this.runningRetryAttempts >= this.runningRetryMaxAttempts) {
       this.running = false;
-      this.options.onError?.(error instanceof Error ? error : new Error(String(error)));
+      this.clearRotateTimer();
+      this.options.onError?.(error);
+      return;
+    }
+    const attempt = ++this.runningRetryAttempts;
+    const cancelled = await this.waitRetryBackoff(
+      this.runningRetryBackoff.delayForAttempt(attempt),
+    );
+    if (cancelled || !this.running || runId !== this.runId) {
+      return;
+    }
+    void this.startSegment().catch((startError) => {
+      logger.warn(`[AndroidH264Source] failed to start retry segment: ${startError}`);
+      void this.retryAfterFailure(
+        startError instanceof Error ? startError : new Error(String(startError)),
+        runId,
+      );
+    });
+  }
+
+  /** Resolve on backoff expiry, or immediately as cancelled when stop() runs. */
+  private waitRetryBackoff(delayMs: number): Promise<boolean> {
+    return new Promise((resolve) => {
+      const handle = this.timer.setTimeout(() => {
+        this.cancelRetryDelay = null;
+        resolve(false);
+      }, delayMs);
+      this.cancelRetryDelay = (): void => {
+        this.timer.clearTimeout(handle);
+        this.cancelRetryDelay = null;
+        resolve(true);
+      };
     });
   }
 

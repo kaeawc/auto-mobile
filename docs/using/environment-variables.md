@@ -134,6 +134,13 @@ policy for eligible idle or unbound AutoMobile-owned Android AVDs. Physical
 devices and externally started Android emulators are not restarted. iOS
 simulators are never actively restarted by session continuity.
 
+`AUTOMOBILE_DEVICE_RECOVERY_MAX_ATTEMPTS` is a rolling budget, not a lifetime
+one: only restarts within the last `AUTOMOBILE_DEVICE_RECOVERY_WINDOW_MS`
+(default 15 minutes) count against it, so isolated crashes days apart don't
+exhaust the budget of a long-lived daemon. A recovery cancelled before it
+touches the emulator (an ADB-reset takeover, or an intentional `killDevice`)
+does not spend an attempt either way.
+
 ## Shared ADB server
 
 By default AutoMobile leaves the local ADB server running. Set

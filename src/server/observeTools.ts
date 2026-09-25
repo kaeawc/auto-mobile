@@ -53,6 +53,7 @@ import type { ElementFinder } from "../utils/interfaces/ElementFinder";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { consumeSetupTiming } from "./ToolExecutionContext";
 import { AndroidCtrlProxyManager } from "../utils/CtrlProxyManager";
+import { DaemonState } from "../daemon/daemonState";
 import { logger } from "../utils/logger";
 import { serverConfig } from "../utils/ServerConfig";
 import { NodeCryptoService } from "../utils/crypto";
@@ -1177,7 +1178,19 @@ export function registerObserveTools() {
     // actionable message isn't re-wrapped as a generic execution failure.
     assertActiveWindowWaitForSupportedOnPlatform(device.platform, waitFor);
     try {
-      const observeScreen = new RealObserveScreen(device);
+      const observeScreen = new RealObserveScreen(device, undefined, {
+        onAvailabilityLost:
+          device.platform === "android"
+            ? (reason) => {
+                const daemonState = DaemonState.getInstance();
+                if (args.sessionUuid && daemonState.isInitialized()) {
+                  daemonState
+                    .getSessionManager()
+                    .invalidateAutomationReadiness(args.sessionUuid, reason);
+                }
+              }
+            : undefined,
+      });
       // ObserveScreen.execute() rejects stale cross-platform hierarchies at the
       // source, so every observation reaching here is already platform-validated
       // (raw-mode append below is likewise gated on a validated primary hierarchy).
@@ -1226,8 +1239,8 @@ export function registerObserveTools() {
         }
       }
 
-      // If accessibility service reports as disabled, reset setup state to force reinstall on next attempt
-      // This handles cases where the service was uninstalled externally
+      // A disabled accessibility service invalidates both the manager setup latch
+      // and the session readiness recorded before the service was lost.
       if (device.platform === "android" && result.accessibilityState?.enabled === false) {
         logger.warn(
           "[observe] Accessibility service not enabled, resetting setup state for next attempt",
@@ -1239,6 +1252,14 @@ export function registerObserveTools() {
           logger.warn("[observe] Failed to reset accessibility setup state", {
             error: errorMessage(error),
           });
+        }
+        const daemonState = DaemonState.getInstance();
+        if (args.sessionUuid && daemonState.isInitialized()) {
+          daemonState
+            .getSessionManager()
+            .invalidateAutomationReadiness(args.sessionUuid, "accessibility service disabled");
+        } else {
+          logger.debug("[observe] No initialized daemon session to invalidate readiness for");
         }
       }
 

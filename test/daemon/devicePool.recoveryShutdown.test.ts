@@ -382,6 +382,29 @@ test("onLoss recovery still actively relaunches an owned emulator and preserves 
   }
 });
 
+test("same-serial recovery drops stale automation readiness until setup runs again", async () => {
+  const manager = new LaggingShutdownManager(original.deviceId);
+  const { timer, sessions, pool, captured } = await setup(manager);
+  try {
+    expect(sessions.getDeviceReadiness("session")).toBeUndefined();
+    sessions.setDeviceReadiness("session", "automationReady");
+    const recovery = pool.recoverSessionBoundAndroidDeviceAfterLoss(
+      original.deviceId,
+      undefined,
+      captured,
+    );
+    await manager.killAccepted.promise;
+    manager.bootedDevices = [];
+    timer.advanceTime(1_000);
+
+    await expect(recovery).resolves.toBe("recovered");
+    expect(pool.getDevice(original.deviceId)).toMatchObject({ sessionId: "session" });
+    expect(sessions.getDeviceReadiness("session")).toBe("booted");
+  } finally {
+    sessions.stopCleanupTimer();
+  }
+});
+
 test("same-serial emulator continuity is enabled when the recovery environment is unset", async () => {
   await withRecoveryEnvUnset(async () => {
     const timer = new FakeTimer();

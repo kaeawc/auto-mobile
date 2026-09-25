@@ -1,7 +1,10 @@
 import { SessionManager } from "../daemon/sessionManager";
 import type { Session, SessionExecutionMetadata } from "../daemon/sessionManager";
 import { DevicePool } from "../daemon/devicePool";
-import { getDeviceReadinessProxyDriver } from "./deviceReadinessProxyProvider";
+import {
+  getDeviceReadinessProxyDriver,
+  type DeviceReadinessProxyDriver,
+} from "./deviceReadinessProxyProvider";
 import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
 import { ActionableError, BootedDevice, Platform } from "../models";
 import { logger } from "../utils/logger";
@@ -552,6 +555,7 @@ async function ensureAccessibilityServiceReady(
 
     const readinessDriver = getDeviceReadinessProxyDriver(device);
     readinessDriver.resetSetupState();
+    await tryRebindUnhealthyAccessibilityService(readinessDriver);
     const setupResult = await readinessDriver.setup(false, perf);
 
     if (!setupResult.success) {
@@ -605,6 +609,17 @@ async function ensureAccessibilityServiceReady(
       );
     }
     return;
+  }
+}
+
+async function tryRebindUnhealthyAccessibilityService(
+  driver: DeviceReadinessProxyDriver,
+): Promise<void> {
+  try {
+    await driver.rebindIfUnhealthy?.();
+  } catch (error) {
+    // Setup may still restore the service after this optional binding repair fails.
+    logger.warn(`[ToolExecutionContext] CtrlProxy rebind check failed: ${error}`);
   }
 }
 

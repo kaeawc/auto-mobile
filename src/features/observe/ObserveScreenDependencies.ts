@@ -33,6 +33,7 @@ export interface ObserveScreenDependencies {
   // Composed services. If omitted, defaults are built from the data sources above.
   screenshotRecorder?: ObserveScreenshotRecorder;
   hierarchyCollector?: HierarchyCollector;
+  onAvailabilityLost?: (reason: string) => void;
   deviceStateCollector?: DeviceStateCollector;
   performanceAuditor?: PerformanceAuditor;
   accessibilityAuditor?: AccessibilityAuditor;

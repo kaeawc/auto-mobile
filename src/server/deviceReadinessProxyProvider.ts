@@ -31,6 +31,7 @@ import type { ProxySetupResult } from "../utils/interfaces/ProxyManager";
  */
 export interface DeviceReadinessProxyDriver {
   resetSetupState(): void;
+  rebindIfUnhealthy?(): Promise<boolean>;
   setup(force: boolean, perf: PerformanceTracker): Promise<ProxySetupResult>;
   waitForConnection(): Promise<boolean>;
   /**
@@ -60,6 +61,7 @@ const realProvider: DeviceReadinessProxyDriverProvider = (device) => {
   const manager = AndroidCtrlProxyManager.getInstance(device);
   return {
     resetSetupState: () => manager.resetSetupState(),
+    rebindIfUnhealthy: () => manager.rebindIfUnhealthy(),
     setup: (force, perf) => manager.setup(force, perf),
     waitForConnection: () => AndroidCtrlProxyClient.getInstance(device).waitForConnection(),
     isInstalled: () => manager.isInstalled(),

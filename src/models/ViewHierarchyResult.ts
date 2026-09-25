@@ -139,6 +139,16 @@ export interface Hierarchy {
   node?: ViewHierarchyNode;
   /** iOS root XCTestNode bounds (points): {left, top, right, bottom} */
   bounds?: { left?: number; top?: number; right: number; bottom: number };
+  /**
+   * True when {@link error} represents lost CtrlProxy connectivity/binding
+   * (Android only) rather than an ordinary content error (e.g. screen off,
+   * locked device, malformed capture). `HierarchyCollector` reads this typed
+   * signal off the RESOLVED result to fire `onAvailabilityLost` — the
+   * accessibility service swallows connection failures into a resolved
+   * error-shaped `Hierarchy` rather than throwing, so a thrown error is not a
+   * reliable primary detection point for this failure class (#7534).
+   */
+  transportFailure?: boolean;
 }
 
 export interface ViewHierarchyWindowInfo {

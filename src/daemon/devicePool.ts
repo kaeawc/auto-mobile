@@ -7075,8 +7075,8 @@ export class DevicePool {
   ): () => Promise<Session> {
     const previousDeviceId = previousSession?.assignedDevice;
     if (!previousDeviceId || previousDeviceId === deviceId) {
-      return async () =>
-        await this.sessionManager.createSession(
+      return async () => {
+        const session = await this.sessionManager.createSession(
           sessionId,
           deviceId,
           platform,
@@ -7084,6 +7084,14 @@ export class DevicePool {
           undefined,
           stableDeviceId,
         );
+        if (previousSession && platform === "android") {
+          this.sessionManager.invalidateAutomationReadiness(
+            sessionId,
+            "same-serial Android device recovery",
+          );
+        }
+        return session;
+      };
     }
 
     if (!allowSessionRebind) {

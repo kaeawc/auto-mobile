@@ -1067,6 +1067,98 @@ describe("PersistentEncoderH264Source", () => {
     expect(ctx.source.isRunning).toBe(false);
   });
 
+  test("resets the relaunch budget after a sustained healthy run following a relaunch (issue #7547)", async () => {
+    const fellBackWith: Error[] = [];
+    const ctx = makeSource({
+      serverRelaunchBackoff: 0,
+      maxServerRelaunchAttempts: 1,
+      onScreenrecordFallback: async (error: Error) => {
+        fellBackWith.push(error);
+      },
+    });
+    await startReady(ctx);
+
+    // Relaunch 1: exit -> recovered on a fresh server (spends the whole budget).
+    ctx.processes[0].exit(1, null);
+    await tick();
+    await tick();
+    ctx.processes[1].ready();
+    await tick();
+    await tick();
+    expect(ctx.source.isRunning).toBe(true);
+
+    // A long, healthy run (well past the default 60s window) since that
+    // recovery: a later, unrelated loss is a fresh incident, not a continuation
+    // of the earlier hot-loop the budget was sized for.
+    ctx.timer.advanceTime(60 * 60 * 1000);
+
+    ctx.processes[1].exit(1, null);
+    await tick();
+    await tick();
+
+    // The budget was reset: this incident gets its own relaunch attempt instead
+    // of going straight to the screenrecord fallback.
+    expect(ctx.processes).toHaveLength(3);
+    expect(fellBackWith).toEqual([]);
+    expect(ctx.errors).toEqual([]);
+
+    ctx.processes[2].ready();
+    await tick();
+    await tick();
+    expect(ctx.source.isRunning).toBe(true);
+
+    await ctx.source.stop();
+  });
+
+  test("still exhausts the relaunch budget when losses recur faster than the healthy window", async () => {
+    // A device that dies every couple of seconds must never accumulate the
+    // healthy window (default 60s) no matter how many relaunches recover it —
+    // the #7548 review caught exactly this bug in the analogous AndroidH264Source
+    // fix. Advancing by only a few seconds between incidents must behave
+    // identically to advancing by nothing at all: the budget stays cumulative.
+    const fellBackWith: Error[] = [];
+    const ctx = makeSource({
+      serverRelaunchBackoff: 0,
+      maxServerRelaunchAttempts: 2,
+      onScreenrecordFallback: async (error: Error) => {
+        fellBackWith.push(error);
+      },
+    });
+    await startReady(ctx);
+
+    // Relaunch 1: recovers after a few seconds of healthy runtime.
+    ctx.timer.advanceTime(2_000);
+    ctx.processes[0].exit(1, null);
+    await tick();
+    await tick();
+    ctx.processes[1].ready();
+    await tick();
+    await tick();
+    expect(ctx.source.isRunning).toBe(true);
+
+    // Relaunch 2: another few seconds, budget now spent.
+    ctx.timer.advanceTime(2_000);
+    ctx.processes[1].exit(1, null);
+    await tick();
+    await tick();
+    ctx.processes[2].ready();
+    await tick();
+    await tick();
+    expect(ctx.source.isRunning).toBe(true);
+    expect(ctx.processes).toHaveLength(3);
+
+    // Third loss, again only a few seconds later: budget spent -> fallback.
+    ctx.timer.advanceTime(2_000);
+    ctx.processes[2].exit(1, null);
+    await tick();
+    await tick();
+
+    expect(fellBackWith).toHaveLength(1);
+    expect(ctx.errors).toEqual([]);
+    expect(ctx.processes).toHaveLength(3); // no further relaunch attempt
+    expect(ctx.source.isRunning).toBe(false);
+  });
+
   test("surfaces onError only after the relaunch budget is spent when no fallback is wired", async () => {
     const ctx = makeSource({ serverRelaunchBackoff: 0, maxServerRelaunchAttempts: 1 });
     await startReady(ctx);

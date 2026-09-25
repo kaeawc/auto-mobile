@@ -114,6 +114,19 @@ export const DEFAULT_SERVER_RELAUNCH_BACKOFF: BackoffInput = exponentialBackoff(
   multiplier: 2,
   maxDelayMs: 8_000,
 });
+/**
+ * Default sustained-healthy window (ms), measured on the injected {@link Timer},
+ * that a (re)launched on-device server must run before a later, unrelated
+ * post-start loss resets the cumulative relaunch budget instead of continuing to
+ * spend it (issue #7547). Without this, a long-lived stream that hits a few
+ * well-separated, individually-recovered blips over hours (codec reclaimed under
+ * memory pressure, a transient `app_process` kill) is permanently demoted to
+ * screenrecord by the same counter that exists to stop a hot-looping,
+ * persistently-broken device. 60s is long enough that a device dying every few
+ * seconds never accumulates it and still exhausts the budget — only a
+ * genuinely well-separated incident resets it.
+ */
+export const DEFAULT_SERVER_RELAUNCH_HEALTHY_WINDOW_MS = 60_000;
 
 /** Minimal socket surface the source needs, for injectable testing. */
 export interface StreamSocket {
@@ -336,6 +349,13 @@ export interface PersistentEncoderH264SourceOptions {
   maxServerRelaunchAttempts?: number;
   /** Backoff between post-start server relaunch attempts. */
   serverRelaunchBackoff?: BackoffInput;
+  /**
+   * Sustained-healthy runtime (ms), measured on the injected {@link Timer}, that
+   * a (re)launched server must reach before a later post-start loss resets the
+   * relaunch budget rather than spending it further (issue #7547). Defaults to
+   * {@link DEFAULT_SERVER_RELAUNCH_HEALTHY_WINDOW_MS}.
+   */
+  serverRelaunchHealthyWindowMs?: number;
   /**
    * Invoked when relaunch attempts are exhausted, to hand the stream to
    * screenrecord via the SAME mechanism the initial-start path uses (see
@@ -564,6 +584,7 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
   private readonly activeVideoSessionRegistry: ActiveVideoSessionRegistry;
   private readonly maxServerRelaunchAttempts: number;
   private readonly serverRelaunchBackoff: BackoffPolicy;
+  private readonly serverRelaunchHealthyWindowMs: number;
   /**
    * Injected host-integrity source, or `undefined` to lazily default to the
    * shared {@link VideoServerJarProvider} singleton. Resolved on first use rather
@@ -616,6 +637,13 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
   private serverStartupInProgress: AdbProcess | null = null;
   private serverStartupFailure: { server: AdbProcess; error: Error } | null = null;
   private serverRelaunchAttempts = 0;
+  /**
+   * Timer-clock timestamp of the most recent successful (re)launch, or `null`
+   * before the first one. Compared against {@link serverRelaunchHealthyWindowMs}
+   * on the next post-start loss to decide whether that loss starts a fresh
+   * relaunch budget (issue #7547).
+   */
+  private serverHealthySinceMs: number | null = null;
   private relaunching = false;
   private relaunchAbortController: AbortController | null = null;
 
@@ -640,21 +668,26 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
     const relaunchPolicy = PersistentEncoderH264Source.resolveRelaunchPolicy(options);
     this.maxServerRelaunchAttempts = relaunchPolicy.maxAttempts;
     this.serverRelaunchBackoff = relaunchPolicy.backoff;
+    this.serverRelaunchHealthyWindowMs = relaunchPolicy.healthyWindowMs;
     this.validateTimings();
   }
 
   /**
-   * Resolve the post-start relaunch policy from options, defaulting the budget
-   * and backoff. Extracted from the constructor so the option-defaulting `??`
-   * branches do not count against the constructor's complexity ratchet.
+   * Resolve the post-start relaunch policy from options, defaulting the budget,
+   * backoff, and healthy-reset window. Extracted from the constructor so the
+   * option-defaulting `??` branches do not count against the constructor's
+   * complexity ratchet.
    */
   private static resolveRelaunchPolicy(options: PersistentEncoderH264SourceOptions): {
     maxAttempts: number;
     backoff: BackoffPolicy;
+    healthyWindowMs: number;
   } {
     return {
       maxAttempts: options.maxServerRelaunchAttempts ?? DEFAULT_MAX_SERVER_RELAUNCH_ATTEMPTS,
       backoff: normalizeBackoff(options.serverRelaunchBackoff ?? DEFAULT_SERVER_RELAUNCH_BACKOFF),
+      healthyWindowMs:
+        options.serverRelaunchHealthyWindowMs ?? DEFAULT_SERVER_RELAUNCH_HEALTHY_WINDOW_MS,
     };
   }
 
@@ -672,6 +705,9 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
     }
     if (!Number.isInteger(this.maxServerRelaunchAttempts) || this.maxServerRelaunchAttempts < 0) {
       throw new ActionableError("Server relaunch attempts must be a non-negative integer.");
+    }
+    if (this.serverRelaunchHealthyWindowMs <= 0) {
+      throw new ActionableError("Server relaunch healthy window must be positive milliseconds.");
     }
   }
 
@@ -707,6 +743,7 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
     this.serverStartupFailure = null;
     try {
       await this.launch();
+      this.serverHealthySinceMs = this.timer.now();
     } catch (error) {
       // Startup failed before we produced anything: tear down and rethrow so the
       // caller (source factory) can fall back to screenrecord.
@@ -1661,6 +1698,7 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
     if (!this.running || this.relaunching) {
       return;
     }
+    this.resetRelaunchBudgetAfterHealthyRun();
     this.relaunching = true;
     this.relaunchAbortController = new AbortController();
     void this.recoverFromServerLoss(error).finally(() => {
@@ -1683,6 +1721,24 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
     }
     if (this.running && !signal.aborted) {
       await this.fallBackAfterRelaunchExhausted(lastError);
+    }
+  }
+
+  /**
+   * A fresh post-start incident that arrives after the server has run
+   * healthily for {@link serverRelaunchHealthyWindowMs} since its last
+   * successful (re)launch starts a new relaunch budget (issue #7547) — mirrors
+   * {@link AndroidH264Source}'s per-segment reset (issue #7548). Checked once
+   * per incident (from {@link handlePostStartServerLoss}, which is re-entrancy
+   * guarded), never per attempt inside the retry loop, so a device that keeps
+   * losing its encoder within the window still exhausts the same budget.
+   */
+  private resetRelaunchBudgetAfterHealthyRun(): void {
+    if (
+      this.serverHealthySinceMs !== null &&
+      this.timer.now() - this.serverHealthySinceMs >= this.serverRelaunchHealthyWindowMs
+    ) {
+      this.serverRelaunchAttempts = 0;
     }
   }
 
@@ -1723,6 +1779,7 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
       if (!this.running) {
         return { status: "aborted", error: lastError };
       }
+      this.serverHealthySinceMs = this.timer.now();
       logger.info(
         `[PersistentEncoderH264Source] on-device server relaunched after ${attempt} attempt(s)`,
       );

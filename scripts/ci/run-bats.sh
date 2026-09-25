@@ -147,6 +147,7 @@ run_parallel_files() {
   local list_file="$1"
   local jobs="$2"
   local joblog="$3"
+  local max_seconds="${AUTOMOBILE_BATS_MAX_FILE_SECONDS:-240}"
   local output_dir sequence=0 bats_file output_file job_status exitval signal trailing_signal
   local parallel_status=0 rc=0
   if [[ ! -s "$list_file" ]]; then
@@ -156,23 +157,31 @@ run_parallel_files() {
   output_dir="$(mktemp -d)"
   parallel \
     --jobs "$jobs" \
-    --keep-order \
+    --timeout "$max_seconds" \
+    --line-buffer \
+    --tagstring '[{}] ' \
     --halt never \
     --joblog "$joblog" \
     -0 \
-    "bats {} > \"${output_dir}\"/{#}.out 2>&1" < "$list_file" || parallel_status=$?
+    "bash -o pipefail -c 'bats \"\$1\" 2>&1 | tee \"\$2\"' _ {} \"${output_dir}\"/{#}.out" < "$list_file" || parallel_status=$?
 
   while IFS= read -r -d '' bats_file; do
     sequence=$((sequence + 1))
     output_file="${output_dir}/${sequence}.out"
+    # GNU Parallel writes an initial -1 record for a timed-out job before its
+    # final signal record. Inspect every record for this sequence, and use the
+    # last record for ordinary exit/signal bookkeeping.
+    job_status="$(awk -v sequence="$sequence" 'NR > 1 && $1 == sequence { if ($7 == -1) timed_out = 1; exitval = $7; signal = $8; found = 1 } END { if (timed_out) print "TIMEOUT"; else if (found) print exitval, signal }' "$joblog")"
+    if [[ "$job_status" == "TIMEOUT" ]]; then
+      log "ERROR: ${bats_file} exceeded ${max_seconds}s and was killed"
+      rc=1
+      continue
+    fi
     if [[ ! -f "$output_file" ]]; then
       log "ERROR: GNU Parallel did not capture BATS output for ${bats_file}"
       rc=1
       continue
     fi
-    cat "$output_file" || rc=1
-
-    job_status="$(awk -v sequence="$sequence" 'NR > 1 && $1 == sequence { print $7, $8; exit }' "$joblog")"
     if [[ -z "$job_status" ]]; then
       log "ERROR: GNU Parallel did not write a job log entry for ${bats_file}"
       rc=1
@@ -192,8 +201,8 @@ run_parallel_files() {
     if [[ "$exitval" == "0" && "$signal" == "0" ]]; then
       continue
     fi
-    # Redirection in the command string makes GNU Parallel run a shell wrapper.
-    # If BATS is terminated, that wrapper commonly exits 128+signal instead of
+    # The tee pipeline makes GNU Parallel run a shell wrapper. If BATS is
+    # terminated, that wrapper commonly exits 128+signal instead of
     # being reported in the job log's Signal column. Accept either indicator,
     # but only after the complete passing TAP-plan guard above.
     trailing_signal=0
@@ -244,17 +253,23 @@ run_serial_files() {
 enforce_parallel_file_budget() {
   local joblog="$1"
   local max_seconds="$2"
+  local list_file="$3"
+  local bats_file sequence duration rc=0
+  local files=()
   if [[ ! -s "$joblog" ]]; then
     return 0
   fi
 
-  awk -v limit="$max_seconds" '
-    NR > 1 && $4 > limit {
-      printf "ERROR: %s took %.2fs, exceeding the %ss unit-file budget; tag genuine real-I/O coverage as integration\n", $10, $4, limit > "/dev/stderr"
-      failed = 1
-    }
-    END { exit(failed ? 1 : 0) }
-  ' "$joblog"
+  while IFS= read -r -d '' bats_file; do
+    files+=("$bats_file")
+  done < "$list_file"
+
+  while IFS=$'\t' read -r sequence duration; do
+    bats_file="${files[$((sequence - 1))]:-unknown file}"
+    log "ERROR: ${bats_file} took ${duration}s, exceeding the ${max_seconds}s unit-file budget; tag genuine real-I/O coverage as integration"
+    rc=1
+  done < <(awk -v limit="$max_seconds" 'NR > 1 && $7 != -1 && $4 > limit { printf "%d\t%.2f\n", $1, $4 }' "$joblog")
+  return "$rc"
 }
 
 enforce_unit_budget() {
@@ -342,7 +357,7 @@ main() {
   log "BATS ${lane} lane completed in ${elapsed}s (job log: ${joblog})"
   if [[ "$lane" == "unit" ]]; then
     if [[ -n "$file_budget" ]]; then
-      enforce_parallel_file_budget "$joblog" "$file_budget" || rc=1
+      enforce_parallel_file_budget "$joblog" "$file_budget" "$parallel_list" || rc=1
     fi
     enforce_unit_budget "$elapsed" || rc=1
   fi

@@ -36,6 +36,23 @@ const ABORT_SETTLEMENT_GRACE_MS = 1_000;
 const RUNNER_CONNECT_DIAGNOSTIC_TIMEOUT_MS = 2_000;
 const SYSTEM_UI_ANR_RECOVERY_POLL_MS = 1_000;
 const CTRL_PROXY_REBIND_RECOVERY_POLL_MS = 1_000;
+/**
+ * Minimum time to give a just-rebound accessibility service before escalating
+ * to a full process restart (issue #7533 follow-up). A freshly re-bound
+ * service on a loaded emulator can take well over a couple of seconds to
+ * serve its first hierarchy; without this grace period the 1s rebind-recovery
+ * cooldown alone let one slow-but-healthy probe (~2.3s after the rebind, once
+ * the probe timeout is included) force-stop the service that had just been
+ * repaired.
+ */
+const CTRL_PROXY_POST_REBIND_RESTART_GRACE_MS = 5_000;
+/**
+ * Minimum number of failed health probes observed since the last recovery
+ * check before escalating to a full process restart (issue #7533 follow-up).
+ * Pairs with the grace period above so a single unlucky probe miss cannot
+ * trigger a restart on its own.
+ */
+const CTRL_PROXY_RESTART_MIN_FAILED_PROBES = 2;
 const SYSTEM_UI_ANR_RECOVERY_HEALTHY_POLLS = 2;
 const SYSTEM_UI_ANR_RECOVERY_TIMEOUT_MS = 5_000;
 
@@ -87,6 +104,14 @@ export interface ReadinessAndroidManager {
   isEnabled(signal?: AbortSignal): Promise<boolean>;
   /** Returns whether an unhealthy CtrlProxy accessibility service was rebound. */
   rebindIfUnhealthy?(): Promise<boolean>;
+  /**
+   * Force-stop and re-enable CtrlProxy unconditionally, for a service whose
+   * accessibility binding is already healthy but which still cannot produce a
+   * hierarchy (issue #7533) — the Android counterpart of
+   * {@link ReadinessIosManager.forceRestart}. Returns whether a restart was
+   * attempted (false when the device is offline or missing).
+   */
+  forceRestartProcess?(): Promise<boolean>;
   isVersionCompatible(): Promise<boolean>;
   enable(): Promise<void>;
   ensureCompatibleVersion(
@@ -247,6 +272,32 @@ interface ReadinessAttemptContext extends RunnerReadinessRequest {
   phaseElapsedMs: Partial<Record<RunnerReadinessPhase, number>>;
   lastCtrlProxyRebindMs: number;
   ctrlProxyAccessibilityRebindAttempted: boolean;
+  /**
+   * Throttle clock for the connected-but-unresponsive recovery step (#7533),
+   * kept separate from {@link lastCtrlProxyRebindMs} (which gates the
+   * disconnected-branch rebind) so the two recovery paths do not interfere
+   * with each other's cooldowns.
+   */
+  lastConnectedRecoveryMs: number;
+  /**
+   * At most one full CtrlProxy process restart per readiness request (#7533),
+   * mirroring iOS's single `forceRestart` between "connected" and "healthy".
+   */
+  ctrlProxyProcessRestartAttempted: boolean;
+  /**
+   * When the last successful accessibility-service rebind completed, so
+   * escalation to a full process restart can wait out
+   * {@link CTRL_PROXY_POST_REBIND_RESTART_GRACE_MS} for the freshly re-bound
+   * service to start answering before force-stopping it again.
+   */
+  lastSuccessfulRebindMs: number;
+  /**
+   * Failed health probes observed since the last connected-but-unresponsive
+   * recovery check, reset every time that check runs (whether or not it acted)
+   * so escalation requires {@link CTRL_PROXY_RESTART_MIN_FAILED_PROBES}
+   * consecutive misses rather than a single unlucky probe.
+   */
+  failedHealthProbesSinceRecovery: number;
 }
 
 export class RunnerReadinessService {
@@ -262,6 +313,10 @@ export class RunnerReadinessService {
       phaseElapsedMs: {},
       lastCtrlProxyRebindMs: Number.NEGATIVE_INFINITY,
       ctrlProxyAccessibilityRebindAttempted: false,
+      lastConnectedRecoveryMs: Number.NEGATIVE_INFINITY,
+      ctrlProxyProcessRestartAttempted: false,
+      lastSuccessfulRebindMs: Number.NEGATIVE_INFINITY,
+      failedHealthProbesSinceRecovery: 0,
     };
     const key = deviceReadinessLockKey(request.device.platform, request.device.deviceId);
     const release = await this.acquireReadinessTurn(context, key);
@@ -968,6 +1023,12 @@ export class RunnerReadinessService {
         if (ready) {
           return;
         }
+        await this.recoverConnectedButUnresponsiveAndroid(
+          context,
+          androidManager,
+          client,
+          attempts,
+        );
       }
       if (
         context.device.platform === "android" &&
@@ -1013,6 +1074,102 @@ export class RunnerReadinessService {
   }
 
   /**
+   * Android steady-state health failed with the WebSocket still connected
+   * (issue #7533). Unlike the disconnected branch above, the framework
+   * distinguishes two causes and each needs a different fix, matching the
+   * iOS contract in `ensureIosReady`:
+   *
+   * 1. The accessibility binding itself is crashed or unbound —
+   *    `rebindIfUnhealthy()` already checks health internally and no-ops when
+   *    it is not, so it is safe to call unconditionally here; it is the same
+   *    primitive #7470/#7532 use for the disconnected branch.
+   * 2. The binding is healthy but the process still cannot produce a
+   *    hierarchy — no amount of re-probing fixes that, so restart the
+   *    process the way `forceRestart` does on iOS. At most once per
+   *    readiness request, and never against a device `forceRestartProcess`
+   *    itself finds offline or missing (see `AndroidCtrlProxyManager`).
+   *    Escalation additionally waits out
+   *    {@link CTRL_PROXY_POST_REBIND_RESTART_GRACE_MS} since the last
+   *    successful rebind and requires
+   *    {@link CTRL_PROXY_RESTART_MIN_FAILED_PROBES} failed probes since the
+   *    last recovery check: a freshly re-bound service on a loaded emulator
+   *    can take well over one probe interval to answer, and without both
+   *    gates a single slow-but-recovering probe force-stopped the service
+   *    that had just been repaired.
+   */
+  private async recoverConnectedButUnresponsiveAndroid(
+    context: ReadinessAttemptContext,
+    manager: ReadinessAndroidManager | undefined,
+    client: ReadinessClient,
+    attempts: number,
+  ): Promise<void> {
+    if (context.device.platform !== "android" || !manager) {
+      return;
+    }
+    context.failedHealthProbesSinceRecovery++;
+    if (
+      this.dependencies.timer.now() - context.lastConnectedRecoveryMs <
+      CTRL_PROXY_REBIND_RECOVERY_POLL_MS
+    ) {
+      return;
+    }
+    const failedProbesSinceLastCheck = context.failedHealthProbesSinceRecovery;
+    context.lastConnectedRecoveryMs = this.dependencies.timer.now();
+    context.failedHealthProbesSinceRecovery = 0;
+
+    if (manager.rebindIfUnhealthy) {
+      const rebindAttempted = await this.runPhase(context, "runner-health", attempts, () =>
+        manager.rebindIfUnhealthy!(),
+      );
+      context.ctrlProxyAccessibilityRebindAttempted ||= rebindAttempted;
+      if (rebindAttempted) {
+        context.lastSuccessfulRebindMs = this.dependencies.timer.now();
+        // The rebind just changed the endpoint's state; give the fresh bind a
+        // chance to answer before escalating to a full process restart, and
+        // do not cool down the health probe that follows (issue #7538).
+        client.resetConnectionBudget?.();
+        return;
+      }
+    }
+
+    if (!this.canEscalateToProcessRestart(context, manager, failedProbesSinceLastCheck)) {
+      return;
+    }
+    context.ctrlProxyProcessRestartAttempted = true;
+    const restarted = await this.runPhase(context, "runner-health", attempts, () =>
+      manager.forceRestartProcess!(),
+    );
+    if (restarted) {
+      client.resetConnectionBudget?.();
+    }
+  }
+
+  /**
+   * Whether {@link recoverConnectedButUnresponsiveAndroid} may escalate to a
+   * full process restart: at most once per readiness request, only when the
+   * manager exposes the primitive, and only once the post-rebind grace period
+   * and minimum-failed-probes gates (see the doc above) both clear.
+   */
+  private canEscalateToProcessRestart(
+    context: ReadinessAttemptContext,
+    manager: ReadinessAndroidManager,
+    failedProbesSinceLastCheck: number,
+  ): manager is ReadinessAndroidManager & {
+    forceRestartProcess: NonNullable<ReadinessAndroidManager["forceRestartProcess"]>;
+  } {
+    if (context.ctrlProxyProcessRestartAttempted || !manager.forceRestartProcess) {
+      return false;
+    }
+    if (failedProbesSinceLastCheck < CTRL_PROXY_RESTART_MIN_FAILED_PROBES) {
+      return false;
+    }
+    return (
+      this.dependencies.timer.now() - context.lastSuccessfulRebindMs >=
+      CTRL_PROXY_POST_REBIND_RESTART_GRACE_MS
+    );
+  }
+
+  /**
    * Report why `waitForResponsiveClient` gave up. A known connect-attempt
    * failure that is SPECIFICALLY the CtrlProxy forwarding-lease conflict (a
    * stale/orphaned AutoMobile process still owning forwarding for this
@@ -1047,13 +1204,28 @@ export class RunnerReadinessService {
       context,
       phase,
       attempts,
-      `${
-        phase === "runner-connect" && context.ctrlProxyAccessibilityRebindAttempted
-          ? "CtrlProxy accessibility service was crashed or unbound; rebind attempted, but the runner did not become responsive before the readiness deadline"
-          : "runner did not become responsive before the readiness deadline"
-      }${diagnostic}`,
+      `${this.unresponsiveClientRecoveryNote(context, phase)}${diagnostic}`,
       { deadlineExhausted: true },
     );
+  }
+
+  /**
+   * Describe which recovery step (if any) `waitForResponsiveClient` already
+   * tried, so a final failure diagnostic says whether the runner was merely
+   * slow or a recovery attempt (rebind or full restart, #7470/#7533) already
+   * ran and still did not restore it.
+   */
+  private unresponsiveClientRecoveryNote(
+    context: ReadinessAttemptContext,
+    phase: RunnerReadinessPhase,
+  ): string {
+    if (phase === "runner-connect" && context.ctrlProxyAccessibilityRebindAttempted) {
+      return "CtrlProxy accessibility service was crashed or unbound; rebind attempted, but the runner did not become responsive before the readiness deadline";
+    }
+    if (context.ctrlProxyProcessRestartAttempted) {
+      return "CtrlProxy accessibility service was bound but unresponsive; process restart attempted, but the runner did not become responsive before the readiness deadline";
+    }
+    return "runner did not become responsive before the readiness deadline";
   }
 
   private async runnerConnectFailureDiagnostic(context: ReadinessAttemptContext): Promise<string> {

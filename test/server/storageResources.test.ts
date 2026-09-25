@@ -1,8 +1,10 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { registerStorageResources } from "../../src/server/storageResources";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
+import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
+import { ProviderUnavailableError } from "../../src/features/storage/ProviderUnavailableError";
 
 // storageResources.ts had ZERO test mentions repo-wide (issue #4181, rank 1b).
 // Both resource handlers build a URI, look up a booted device, and return a
@@ -11,6 +13,7 @@ import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 // construction and not-found paths are exercised with only a FakeDeviceManager
 // — no DB, no clock, no device, no sockets.
 describe("storageResources", () => {
+  const originalGetInstance = AndroidCtrlProxyClient.getInstance;
   beforeEach(() => {
     PlatformDeviceManagerFactory.setInstance(new FakeDeviceManager([], []));
     registerStorageResources();
@@ -18,6 +21,7 @@ describe("storageResources", () => {
 
   afterEach(() => {
     PlatformDeviceManagerFactory.setInstance(null);
+    AndroidCtrlProxyClient.getInstance = originalGetInstance;
   });
 
   function readResource(uri: string) {
@@ -27,6 +31,36 @@ describe("storageResources", () => {
     }
     return match.template.handler(match.params);
   }
+
+  test.each(["files", "prefs.xml/entries"])(
+    "storage %s resource retains typed provider failure fields",
+    async (suffix) => {
+      PlatformDeviceManagerFactory.setInstance(
+        new FakeDeviceManager(
+          [],
+          [{ deviceId: "emulator-5554", name: "Test", platform: "android" }],
+        ),
+      );
+      AndroidCtrlProxyClient.getInstance = mock(() => ({
+        listPreferenceFiles: async () => {
+          throw new ProviderUnavailableError(
+            "Unknown authority com.example.nondebug.automobile.sharedprefs",
+          );
+        },
+        getPreferenceEntries: async () => {
+          throw new ProviderUnavailableError(
+            "Unknown authority com.example.nondebug.automobile.sharedprefs",
+          );
+        },
+      })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+      const content = await readResource(
+        `automobile:devices/emulator-5554/storage/com.example.nondebug/${suffix}`,
+      );
+      const body = JSON.parse(content.text!);
+      expect(body.errorCode).toBe("PROVIDER_UNAVAILABLE");
+      expect(body.errorReason).toBe("sdk_provider_absent");
+    },
+  );
 
   test("storage-files resource reports device-not-found when no device is booted", async () => {
     const content = await readResource(

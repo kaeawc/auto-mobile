@@ -78,7 +78,12 @@ class RealStorageDataSource(
 
       if (dbsResponse.error != null) {
         LOG.warn("getDatabases: Response error: ${dbsResponse.error}")
-        return Result.Error(RuntimeException(dbsResponse.error))
+        return Result.Error(
+          RuntimeException(dbsResponse.error),
+          dbsResponse.error,
+          dbsResponse.errorCode,
+          dbsResponse.errorReason,
+        )
       }
 
       LOG.info("getDatabases: Found ${dbsResponse.databases.size} databases")
@@ -93,6 +98,14 @@ class RealStorageDataSource(
             if (tablesText != null) {
               val tablesResponse =
                 json.decodeFromString(serializer<McpTablesResponse>(), tablesText)
+              if (tablesResponse.error != null) {
+                return Result.Error(
+                  RuntimeException(tablesResponse.error),
+                  tablesResponse.error,
+                  tablesResponse.errorCode,
+                  tablesResponse.errorReason,
+                )
+              }
               tablesResponse.tables
             } else {
               emptyList()
@@ -291,7 +304,12 @@ class RealStorageDataSource(
       // Check for error in response
       if (filesResponse.error != null) {
         LOG.warn("getKeyValueFiles: Response contains error: ${filesResponse.error}")
-        return Result.Error(RuntimeException(filesResponse.error))
+        return Result.Error(
+          RuntimeException(filesResponse.error),
+          filesResponse.error,
+          filesResponse.errorCode,
+          filesResponse.errorReason,
+        )
       }
 
       // For each file, fetch its entries
@@ -312,6 +330,14 @@ class RealStorageDataSource(
               LOG.info(
                 "getKeyValueFiles: File ${file.name} has ${entriesResponse.entries.size} entries"
               )
+              if (entriesResponse.error != null) {
+                return Result.Error(
+                  RuntimeException(entriesResponse.error),
+                  entriesResponse.error,
+                  entriesResponse.errorCode,
+                  entriesResponse.errorReason,
+                )
+              }
               entriesResponse.entries.map { entry ->
                 KeyValueEntry(
                   key = entry.key,
@@ -500,6 +526,8 @@ class RealStorageDataSource(
 private data class McpDatabasesResponse(
   val databases: List<McpDatabaseEntry> = emptyList(),
   val error: String? = null,
+  val errorCode: String? = null,
+  val errorReason: String? = null,
 )
 
 @Serializable
@@ -513,6 +541,8 @@ private data class McpDatabaseEntry(
 private data class McpTablesResponse(
   val tables: List<String> = emptyList(),
   val error: String? = null,
+  val errorCode: String? = null,
+  val errorReason: String? = null,
 )
 
 @Serializable
@@ -558,6 +588,8 @@ private data class McpStorageFilesResponse(
   val totalCount: Int = 0,
   val lastUpdated: String? = null,
   val error: String? = null,
+  val errorCode: String? = null,
+  val errorReason: String? = null,
 )
 
 @Serializable
@@ -576,6 +608,8 @@ private data class McpStorageEntriesResponse(
   val totalCount: Int = 0,
   val lastUpdated: String? = null,
   val error: String? = null,
+  val errorCode: String? = null,
+  val errorReason: String? = null,
 )
 
 @Serializable

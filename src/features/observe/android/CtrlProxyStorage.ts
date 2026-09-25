@@ -7,6 +7,7 @@
 
 import WebSocket from "ws";
 import { logger } from "../../../utils/logger";
+import { ProviderUnavailableError } from "../../storage/ProviderUnavailableError";
 import type { DelegateContext } from "./types";
 import { generateSecureId } from "./types";
 import { ctrlProxyRequests, serializeCtrlProxyRequest } from "./ctrlProxyProtocol";
@@ -30,6 +31,11 @@ import type {
  * Delegate class for handling SharedPreferences operations.
  */
 export class CtrlProxyStorage {
+  private preferenceError(message: string): Error {
+    return /Unknown authority\s+\S+\.automobile\.sharedprefs\b/i.test(message)
+      ? new ProviderUnavailableError(message)
+      : new Error(message);
+  }
   private readonly context: DelegateContext;
 
   // Storage change listeners
@@ -95,7 +101,7 @@ export class CtrlProxyStorage {
       const result = await resultPromise;
 
       if (!result.success) {
-        throw new Error(result.error || "Failed to list preference files");
+        throw this.preferenceError(result.error || "Failed to list preference files");
       }
 
       return result.files || [];
@@ -162,7 +168,7 @@ export class CtrlProxyStorage {
       const result = await resultPromise;
 
       if (!result.success) {
-        throw new Error(result.error || "Failed to get preference entries");
+        throw this.preferenceError(result.error || "Failed to get preference entries");
       }
 
       return result.entries || [];

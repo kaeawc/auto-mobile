@@ -7,6 +7,7 @@ import { FakeAdbClientFactory } from "../../../fakes/FakeAdbClientFactory";
 import { BootedDevice } from "../../../../src/models";
 import { FakeWebSocket, WebSocketState } from "../../../fakes/FakeWebSocket";
 import { FakeTimer } from "../../../fakes/FakeTimer";
+import { ProviderUnavailableError } from "../../../../src/features/storage/ProviderUnavailableError";
 
 /**
  * End-to-end WebSocket round-trip tests for the storage subscribe/unsubscribe lifecycle on the
@@ -119,6 +120,37 @@ describe("CtrlProxyStorage (Android)", function () {
     }
     throw new Error(`No message of type ${type} in: ${socket.sentMessages.join(", ")}`);
   };
+
+  test.each([
+    ["list_preference_files", "preference_files"],
+    ["get_preferences", "preferences"],
+  ])("classifies absent SDK authority in %s", async (requestType, responseType) => {
+    const { factory, getSocket } = createCapturingFactory(fakeTimer);
+    const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, fakeTimer);
+    try {
+      await client.ensureConnected();
+      const socket = await waitForSocket(getSocket);
+      await waitForSocketOpen(socket);
+      const baseCount = socket!.sentMessages.length;
+      const resultPromise =
+        requestType === "list_preference_files"
+          ? client.listPreferenceFiles("com.example.nondebug")
+          : client.getPreferenceEntries("com.example.nondebug", "prefs.xml");
+      await waitForSentMessages(socket, baseCount + 1);
+      const sent = findSentMessage(socket!, requestType);
+      socket!.simulateMessage(
+        JSON.stringify({
+          type: responseType,
+          requestId: sent.requestId,
+          success: false,
+          error: "Unknown authority com.example.nondebug.automobile.sharedprefs",
+        }),
+      );
+      await expect(resultPromise).rejects.toBeInstanceOf(ProviderUnavailableError);
+    } finally {
+      await client.close();
+    }
+  });
 
   describe("subscribeStorage", function () {
     test("resolves with a subscription rebuilt from the device's flat result fields", async function () {

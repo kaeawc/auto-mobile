@@ -80,9 +80,13 @@ fun StorageDashboard(
     }
   var isLoading by
     remember(dataSourceMode, clientProvider, deviceId, packageName) { mutableStateOf(true) }
-  var error by
+  var databaseError by
     remember(dataSourceMode, clientProvider, deviceId, packageName) {
-      mutableStateOf<String?>(null)
+      mutableStateOf<Result.Error?>(null)
+    }
+  var keyValueError by
+    remember(dataSourceMode, clientProvider, deviceId, packageName) {
+      mutableStateOf<Result.Error?>(null)
     }
 
   // Live key/value changes pushed by the daemon. Highlight expiry is tracked per key rather than
@@ -329,7 +333,8 @@ fun StorageDashboard(
       "StorageDashboard LaunchedEffect: mode=$dataSourceMode, clientProvider=${if (clientProvider != null) "present" else "null"}, deviceId=$deviceId, packageName=$packageName"
     )
     isLoading = true
-    error = null
+    databaseError = null
+    keyValueError = null
     kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
       try {
         val newDataSource =
@@ -351,7 +356,7 @@ fun StorageDashboard(
           }
           is Result.Error -> {
             LOG.warn("StorageDashboard: getDatabases error: ${result.message}")
-            error = result.message
+            databaseError = result
           }
           is Result.Loading -> {
             // Keep loading state
@@ -371,7 +376,7 @@ fun StorageDashboard(
           }
           is Result.Error -> {
             LOG.warn("StorageDashboard: getKeyValueFiles error: ${result.message}")
-            if (error == null) error = result.message
+            keyValueError = result
             isLoading = false
           }
           is Result.Loading -> {
@@ -380,7 +385,8 @@ fun StorageDashboard(
         }
       } catch (e: Exception) {
         LOG.error("StorageDashboard: Exception during data fetch", e)
-        error = e.message ?: "Unknown error"
+        databaseError = Result.Error(e, e.message ?: "Unknown error")
+        keyValueError = Result.Error(e, e.message ?: "Unknown error")
         isLoading = false
       }
     }
@@ -455,7 +461,8 @@ fun StorageDashboard(
         DatabaseInspector(
           databases = databases,
           platform = platform,
-          loadError = if (databases.isEmpty()) error else null,
+          loadError = if (databases.isEmpty()) databaseError?.message else null,
+          loadErrorCode = databaseError?.errorCode,
           onFetchTableData = onFetchTableData,
           onExecuteSQL = onExecuteSQL,
           modifier = Modifier.fillMaxSize(),
@@ -463,6 +470,8 @@ fun StorageDashboard(
       StorageTab.KeyValue ->
         KeyValueInspector(
           keyValueFiles = keyValueFiles,
+          loadError = keyValueError?.message,
+          loadErrorCode = keyValueError?.errorCode,
           onSetValue =
             dataSource?.let { ds ->
               { fileName, key, value, type ->

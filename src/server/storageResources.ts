@@ -6,6 +6,7 @@ import { BootedDevice } from "../models";
 import { logger } from "../utils/logger";
 import type { PreferenceFile, KeyValueEntry } from "../features/storage/storageTypes";
 import { findBootedDeviceForResource } from "./resourceDeviceResolver";
+import { resourceErrorFields } from "../features/storage/ProviderUnavailableError";
 
 // Resource URI templates
 const STORAGE_RESOURCE_TEMPLATES = {
@@ -215,7 +216,11 @@ async function getStorageFilesResource(params: Record<string, string>): Promise<
     return {
       uri,
       mimeType: "application/json",
-      text: JSON.stringify({ error: `Failed to list storage files: ${error}` }, null, 2),
+      text: JSON.stringify(
+        { error: `Failed to list storage files: ${error}`, ...resourceErrorFields(error) },
+        null,
+        2,
+      ),
     };
   }
 }
@@ -281,7 +286,11 @@ async function getStorageEntriesResource(params: Record<string, string>): Promis
     return {
       uri,
       mimeType: "application/json",
-      text: JSON.stringify({ error: `Failed to get storage entries: ${error}` }, null, 2),
+      text: JSON.stringify(
+        { error: `Failed to get storage entries: ${error}`, ...resourceErrorFields(error) },
+        null,
+        2,
+      ),
     };
   }
 }

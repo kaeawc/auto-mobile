@@ -76,6 +76,43 @@ async function withinBound<T>(operation: Promise<T>): Promise<T> {
 }
 
 describe("Android CtrlProxyHierarchy connection abort (#6890)", () => {
+  test("requestHierarchySync returns immediately without broadcasting when connection fails", async () => {
+    const timer = new FakeTimer();
+    const adbCommands: string[] = [];
+    const context: HierarchyDelegateContext = {
+      getWebSocket: () => null,
+      requestManager: new RequestManager(timer),
+      timer,
+      ensureConnected: async () => false,
+      cancelScreenshotBackoff: () => {},
+      device: { deviceId: "emulator-5554", platform: "android" } as never,
+      adb: {
+        executeCommand: async (command: string) => {
+          adbCommands.push(command);
+          return "";
+        },
+      } as never,
+      getCachedHierarchy: () => null,
+      setCachedHierarchy: () => {},
+      getLastWebSocketTimeout: () => 0,
+      setLastWebSocketTimeout: () => {},
+    };
+
+    let settled = false;
+    const pending = new CtrlProxyHierarchy(context).requestHierarchySync();
+    void pending.then(() => {
+      settled = true;
+    });
+    for (let turn = 0; turn < 10 && !settled; turn++) {
+      await Promise.resolve();
+    }
+
+    expect(settled).toBe(true);
+    expect(await pending).toBeNull();
+    expect(timer.now()).toBe(0);
+    expect(adbCommands).toEqual([]);
+  });
+
   test("getLatestHierarchy stops waiting on a wedged handshake when the caller aborts", async () => {
     const h = createHangingConnectHarness();
     const controller = new AbortController();

@@ -1,9 +1,11 @@
 import { describe, expect, test, afterEach } from "bun:test";
 import { DeviceServiceClient } from "../../../src/features/observe/DeviceServiceClient";
 import {
+  FakeWebSocket,
   createInstantFailureWebSocketFactory,
   createSuccessWebSocketFactory,
   createNthAttemptSuccessWebSocketFactory,
+  WebSocketState,
 } from "../../fakes/FakeWebSocket";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import type { PerformanceTracker } from "../../../src/utils/PerformanceTracker";
@@ -60,6 +62,13 @@ class TestDeviceServiceClient extends DeviceServiceClient {
 
   isAutoReconnectScheduled(): boolean {
     return this.reconnectTimeoutId !== null;
+  }
+}
+
+async function advanceAndSettle(timer: FakeTimer, ms: number): Promise<void> {
+  timer.advanceTime(ms);
+  for (let turn = 0; turn < 3; turn++) {
+    await timer.resolvePromise(new Promise<void>((resolve) => timer.setTimeout(resolve, 1)), 1);
   }
 }
 
@@ -204,7 +213,7 @@ describe("DeviceServiceClient connection cooldown", () => {
     expect(client.getConnectionAttempts()).toBe(1); // Reset to 0 then incremented to 1
   });
 
-  test("scheduleReconnect respects cooldown after max attempts", async () => {
+  test("failed foreground handshakes do not schedule reconnect or report a lost connection", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     client = new TestDeviceServiceClient(timer, createInstantFailureWebSocketFactory(timer), {
@@ -214,8 +223,7 @@ describe("DeviceServiceClient connection cooldown", () => {
     });
     // Keep auto-reconnect enabled for this test
 
-    // Exhaust 3 attempts — each failure triggers scheduleReconnect → timer fires → next attempt
-    // With instant failure + autoAdvance, each ensureConnected will fail and schedule reconnect
+    // A failed handshake is never an established connection loss.
     await client.ensureConnected(new NoOpPerformanceTracker());
     expect(client.getConnectionAttempts()).toBe(1);
 
@@ -225,9 +233,181 @@ describe("DeviceServiceClient connection cooldown", () => {
     await client.ensureConnected(new NoOpPerformanceTracker());
     expect(client.getConnectionAttempts()).toBe(3);
 
-    // Auto-reconnect is scheduled but when it fires, cooldown should block it
-    // The reconnect timeout should have been scheduled
+    expect(client.connectionClosedCount).toBe(0);
+    expect(client.isAutoReconnectScheduled()).toBe(false);
+    timer.advanceTime(2000);
+    expect(client.getConnectionAttempts()).toBe(3);
+  });
+
+  test("a connect timeout does not report an established connection loss", async () => {
+    const timer = new FakeTimer();
+    let socketCreated = false;
+    client = new TestDeviceServiceClient(timer, (url) => {
+      socketCreated = true;
+      return new FakeWebSocket(url, "timeout", 10000, timer);
+    });
+    const connecting = client.ensureConnected();
+    await timer.resolvePromise(
+      new Promise<void>((resolve) => {
+        const interval = timer.setInterval(() => {
+          if (socketCreated) {
+            timer.clearInterval(interval);
+            resolve();
+          }
+        }, 1);
+      }),
+      1,
+    );
+    timer.advanceTime(5000);
+    expect(await connecting).toBe(false);
+    expect(client.connectionClosedCount).toBe(0);
+    expect(client.isAutoReconnectScheduled()).toBe(false);
+  });
+
+  test("an eager pending-connect abort does not report an established connection loss", async () => {
+    const timer = new FakeTimer();
+    let socketCreated = false;
+    client = new TestDeviceServiceClient(timer, (url) => {
+      socketCreated = true;
+      return new FakeWebSocket(url, "timeout", 10000, timer);
+    });
+    const connecting = client.ensureConnected();
+    await timer.resolvePromise(
+      new Promise<void>((resolve) => {
+        const interval = timer.setInterval(() => {
+          if (socketCreated) {
+            timer.clearInterval(interval);
+            resolve();
+          }
+        }, 1);
+      }),
+      1,
+    );
+    await client.close();
+    expect(await connecting).toBe(false);
+    expect(client.connectionClosedCount).toBe(0);
+  });
+
+  test("close treats an established socket in CLOSING as connected", async () => {
+    const timer = new FakeTimer();
+    let socket: FakeWebSocket | null = null;
+    client = new TestDeviceServiceClient(timer, (url) => {
+      socket = new FakeWebSocket(url, "none", 0, timer);
+      return socket;
+    });
+
+    expect(await client.ensureConnected()).toBe(true);
+    socket!.close();
+    expect(socket!.readyState).toBe(WebSocketState.CLOSING);
+    await client.close();
+    expect(client.connectionClosedCount).toBe(1);
+  });
+
+  test("background recovery preserves the caller budget and stops after the cap", async () => {
+    const timer = new FakeTimer();
+    let factoryCalls = 0;
+    let firstSocket: FakeWebSocket | null = null;
+    const factory = (url: string): FakeWebSocket => {
+      factoryCalls++;
+      const socket = new FakeWebSocket(url, factoryCalls === 1 ? "none" : "instant", 0, timer);
+      firstSocket ??= socket;
+      return socket;
+    };
+    client = new TestDeviceServiceClient(timer, factory, {
+      maxConnectionAttempts: 3,
+      connectionResetMs: 10000,
+      reconnectDelayMs: 2000,
+    });
+
+    expect(await client.ensureConnected()).toBe(true);
+    firstSocket!.close();
+    await timer.resolvePromise(new Promise<void>((resolve) => timer.setTimeout(resolve, 1)), 1);
+
+    for (const [index, delay] of [2000, 4000, 8000].entries()) {
+      await advanceAndSettle(timer, delay);
+      expect(factoryCalls).toBe(index + 2);
+      expect(client.getConnectionAttempts()).toBe(0);
+    }
+    expect(client.isAutoReconnectScheduled()).toBe(false);
+    await advanceAndSettle(timer, 60000);
+    expect(factoryCalls).toBe(4);
+    expect(client.connectionClosedCount).toBe(1);
+  });
+
+  test("background recovery waits for a closed caller cooldown gate and then stops at the cap", async () => {
+    const timer = new FakeTimer();
+    let factoryCalls = 0;
+    let firstSocket: FakeWebSocket | null = null;
+    client = new TestDeviceServiceClient(
+      timer,
+      (url) => {
+        factoryCalls++;
+        const socket = new FakeWebSocket(url, factoryCalls === 1 ? "none" : "instant", 0, timer);
+        firstSocket ??= socket;
+        return socket;
+      },
+      { maxConnectionAttempts: 3, connectionResetMs: 10000, reconnectDelayMs: 2000 },
+    );
+
+    expect(await client.ensureConnected()).toBe(true);
+    firstSocket!.close();
+    await timer.resolvePromise(new Promise<void>((resolve) => timer.setTimeout(resolve, 1)), 1);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      expect(await client.ensureConnected()).toBe(false);
+    }
+    expect(factoryCalls).toBe(4);
+    for (let tick = 0; tick < 4; tick++) {
+      await advanceAndSettle(timer, 2000);
+      expect(factoryCalls).toBe(4);
+      expect(client.isAutoReconnectScheduled()).toBe(true);
+    }
+    await advanceAndSettle(timer, 2000);
+    expect(factoryCalls).toBe(5);
     expect(client.isAutoReconnectScheduled()).toBe(true);
+    await advanceAndSettle(timer, 4000);
+    await advanceAndSettle(timer, 8000);
+    expect(factoryCalls).toBe(7);
+    expect(client.isAutoReconnectScheduled()).toBe(false);
+  });
+
+  test("foreground ensureConnected after the cap re-seeds a fresh background run", async () => {
+    const timer = new FakeTimer();
+    let factoryCalls = 0;
+    let lastSocket: FakeWebSocket | null = null;
+    client = new TestDeviceServiceClient(timer, (url) => {
+      factoryCalls++;
+      const socket = new FakeWebSocket(
+        url,
+        factoryCalls === 1 || factoryCalls === 6 ? "none" : "instant",
+        0,
+        timer,
+      );
+      lastSocket = socket;
+      return socket;
+    });
+
+    expect(await client.ensureConnected()).toBe(true);
+    lastSocket!.close();
+    await timer.resolvePromise(new Promise<void>((resolve) => timer.setTimeout(resolve, 1)), 1);
+    for (const delay of [2000, 4000, 8000]) {
+      await advanceAndSettle(timer, delay);
+    }
+    expect(factoryCalls).toBe(4);
+    expect(client.isAutoReconnectScheduled()).toBe(false);
+
+    expect(await client.ensureConnected()).toBe(false);
+    expect(factoryCalls).toBe(5);
+    expect(client.getConnectionAttempts()).toBe(1);
+    expect(client.isAutoReconnectScheduled()).toBe(false);
+
+    expect(await client.ensureConnected()).toBe(true);
+    lastSocket!.close();
+    await timer.resolvePromise(new Promise<void>((resolve) => timer.setTimeout(resolve, 1)), 1);
+    for (const delay of [2000, 4000, 8000]) {
+      await advanceAndSettle(timer, delay);
+    }
+    expect(factoryCalls).toBe(9);
+    expect(client.isAutoReconnectScheduled()).toBe(false);
   });
 
   test("recovery after cooldown with Nth-attempt success", async () => {

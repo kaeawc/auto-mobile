@@ -15,6 +15,7 @@
  */
 
 import WebSocket from "ws";
+import { exponentialBackoff } from "../../utils/Backoff";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import type { PerformanceTracker } from "../../utils/PerformanceTracker";
@@ -112,6 +113,10 @@ export abstract class DeviceServiceClient {
   // Auto-reconnection state
   protected autoReconnectEnabled: boolean = true;
   protected reconnectTimeoutId: ReturnType<Timer["setTimeout"]> | null = null;
+  private backgroundReconnectAttempts = 0;
+  private backgroundReconnectPaused = false;
+  // Captured synchronously by connectWebSocket(), including subclass overrides.
+  private backgroundConnectRequested = false;
 
   // Health check state
   protected healthCheckIntervalId: ReturnType<Timer["setInterval"]> | null = null;
@@ -166,10 +171,16 @@ export abstract class DeviceServiceClient {
   protected abstract onConnectionEstablished(): void;
 
   /**
-   * Called when WebSocket connection is closed.
+   * Called when a WebSocket that reached open is closed.
    * Platform implementations can perform cleanup.
    */
   protected abstract onConnectionClosed(): void;
+
+  /** Called once for a failed dial or an established connection that was lost. */
+  protected onConnectAttemptFailed(): void {}
+
+  /** Cleanup for an explicitly closed client that never had an open socket. */
+  protected onClientClosedWithoutConnection(): void {}
 
   /**
    * Perform any platform-specific setup before WebSocket connection.
@@ -320,6 +331,7 @@ export abstract class DeviceServiceClient {
       // Cancel all pending requests
       this.requestManager.cancelAll(new Error("WebSocket connection closed"));
 
+      const wasConnected = this.ws !== null;
       const socket = this.ws ?? this.lifecycleSocket;
       this.ws = null;
       this.lifecycleSocket = null;
@@ -340,8 +352,12 @@ export abstract class DeviceServiceClient {
         socket.close();
       }
 
-      // Platform-specific cleanup — fires exactly once per close().
-      this.onConnectionClosed();
+      // Preserve local shutdown cleanup without reporting a lost connection.
+      if (wasConnected) {
+        this.onConnectionClosed();
+      } else {
+        this.onClientClosedWithoutConnection();
+      }
     } catch (error) {
       logger.warn(`[${this.logTag}] Error during close: ${error}`);
     }
@@ -395,11 +411,25 @@ export abstract class DeviceServiceClient {
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     interest: { release: () => void } = this.acquirePendingConnectInterest(),
   ): Promise<boolean> {
-    return this.connectWebSocketAttempt(perf).finally(interest.release);
+    return this.connectWebSocketAttempt(perf, this.backgroundConnectRequested).finally(
+      interest.release,
+    );
+  }
+
+  protected connectBackgroundWebSocket(): Promise<boolean> {
+    this.backgroundConnectRequested = true;
+    try {
+      // Keep platform overrides in the connection lifecycle (notably Android's
+      // in-flight cleanup) while capturing background accounting in the base.
+      return this.connectWebSocket(new NoOpPerformanceTracker());
+    } finally {
+      this.backgroundConnectRequested = false;
+    }
   }
 
   private async connectWebSocketAttempt(
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    background = false,
   ): Promise<boolean> {
     // Already connected - reuse existing connection
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
@@ -441,26 +471,12 @@ export abstract class DeviceServiceClient {
       return connected;
     }
 
-    // Check cooldown after max attempts
-    if (this.connectionAttempts >= this.config.maxConnectionAttempts) {
-      const timeSinceLastAttempt = this.timer.now() - this.lastConnectionAttempt;
-      if (timeSinceLastAttempt >= this.config.connectionResetMs) {
-        logger.info(
-          `[${this.logTag}] Resetting connection attempts after ${timeSinceLastAttempt}ms cooldown`,
-        );
-        this.connectionAttempts = 0;
-      } else {
-        const remaining = this.config.connectionResetMs - timeSinceLastAttempt;
-        logger.warn(
-          `[${this.logTag}] Max connection attempts (${this.config.maxConnectionAttempts}) reached, cooldown remaining: ${remaining}ms`,
-        );
-        return false;
-      }
+    if (this.isConnectCooldownActive(background)) {
+      return false;
     }
 
     this.isConnecting = true;
-    this.connectionAttempts++;
-    this.lastConnectionAttempt = this.timer.now();
+    this.recordConnectAttempt(background);
     // Snapshot the lifecycle generation before the first await so a close() that
     // overlaps the awaited platform setup (e.g. adb port-forward) is observed.
     const generation = this.connectionGeneration;
@@ -486,9 +502,11 @@ export abstract class DeviceServiceClient {
         () =>
           new Promise<boolean>((resolve, reject) => {
             const ws = this.webSocketFactory(wsUrl);
+            let opened = false;
             this.lifecycleSocket = ws;
             const connectionTimeout = this.timer.setTimeout(() => {
               this.clearPendingConnectAbort(ws);
+              this.clearLifecycleSocket(ws);
               ws.close();
               reject(new Error("WebSocket connection timeout"));
             }, this.config.connectionTimeoutMs);
@@ -517,6 +535,7 @@ export abstract class DeviceServiceClient {
                   logger.debug(`[${this.logTag}] Error closing aborted WebSocket: ${error}`);
                 }
                 this.isConnecting = false;
+                this.onConnectAttemptFailed();
                 resolve(false);
               },
             };
@@ -556,10 +575,13 @@ export abstract class DeviceServiceClient {
                 return;
               }
               logger.info(`[${this.logTag}] WebSocket connected successfully`);
+              opened = true;
               this.ws = ws;
               this.protectRegisteredRequestSends(ws);
               this.isConnecting = false;
               this.connectionAttempts = 0; // Reset on successful connection
+              this.backgroundReconnectAttempts = 0;
+              this.backgroundReconnectPaused = false;
               this.lastConnectionFailureMessage = undefined;
               this.lastConnectionFailureIsForwardingLeaseConflict = false;
 
@@ -577,7 +599,12 @@ export abstract class DeviceServiceClient {
             });
 
             ws.on("error", (error) => {
+              if (opened || this.lifecycleSocket !== ws) {
+                logger.warn(`[${this.logTag}] WebSocket error: ${error.message}`);
+                return;
+              }
               this.clearPendingConnectAbort(ws);
+              this.clearLifecycleSocket(ws);
               this.timer.clearTimeout(connectionTimeout);
               logger.warn(`[${this.logTag}] WebSocket error: ${error.message}`);
               this.isConnecting = false;
@@ -591,6 +618,12 @@ export abstract class DeviceServiceClient {
               }
               this.clearPendingConnectAbort(ws);
               this.lifecycleSocket = null;
+              if (!opened) {
+                this.timer.clearTimeout(connectionTimeout);
+                this.isConnecting = false;
+                reject(new Error("WebSocket closed before opening"));
+                return;
+              }
               logger.info(`[${this.logTag}] WebSocket connection closed`);
               this.ws = null;
               this.isConnecting = false;
@@ -605,6 +638,7 @@ export abstract class DeviceServiceClient {
 
               // Platform-specific cleanup
               this.onConnectionClosed();
+              this.onConnectAttemptFailed();
 
               // Attempt automatic reconnection if enabled
               this.scheduleReconnect();
@@ -613,13 +647,50 @@ export abstract class DeviceServiceClient {
       );
     } catch (error) {
       this.isConnecting = false;
-      this.lastConnectionAttempt = this.timer.now();
-      this.lastConnectionFailureMessage = errorMessage(error);
-      this.lastConnectionFailureIsForwardingLeaseConflict =
-        error instanceof CtrlProxyForwardingLeaseConflictError;
-      logger.warn(`[${this.logTag}] Failed to connect to WebSocket: ${error}`);
+      this.recordFailedConnect(error, background);
       return false;
     }
+  }
+
+  private recordConnectAttempt(background: boolean): void {
+    if (!background) {
+      this.backgroundReconnectAttempts = 0;
+      this.backgroundReconnectPaused = false;
+      this.connectionAttempts++;
+      this.lastConnectionAttempt = this.timer.now();
+    }
+  }
+
+  private recordFailedConnect(error: unknown, background: boolean): void {
+    if (!background) {
+      this.lastConnectionAttempt = this.timer.now();
+    }
+    this.lastConnectionFailureMessage = errorMessage(error);
+    this.lastConnectionFailureIsForwardingLeaseConflict =
+      error instanceof CtrlProxyForwardingLeaseConflictError;
+    logger.warn(`[${this.logTag}] Failed to connect to WebSocket: ${error}`);
+    this.onConnectAttemptFailed();
+  }
+
+  private isConnectCooldownActive(background: boolean): boolean {
+    if (this.connectionAttempts < this.config.maxConnectionAttempts) {
+      return false;
+    }
+    const timeSinceLastAttempt = this.timer.now() - this.lastConnectionAttempt;
+    if (timeSinceLastAttempt >= this.config.connectionResetMs) {
+      if (!background) {
+        logger.info(
+          `[${this.logTag}] Resetting connection attempts after ${timeSinceLastAttempt}ms cooldown`,
+        );
+        this.connectionAttempts = 0;
+      }
+      return false;
+    }
+    const remaining = this.config.connectionResetMs - timeSinceLastAttempt;
+    logger.warn(
+      `[${this.logTag}] Max connection attempts (${this.config.maxConnectionAttempts}) reached, cooldown remaining: ${remaining}ms`,
+    );
+    return true;
   }
 
   /**
@@ -702,19 +773,41 @@ export abstract class DeviceServiceClient {
    * Schedule automatic reconnection after disconnect.
    */
   protected scheduleReconnect(): void {
-    if (this.autoReconnectEnabled && !this.reconnectTimeoutId) {
-      logger.info(`[${this.logTag}] Scheduling reconnection in ${this.config.reconnectDelayMs}ms`);
+    if (this.autoReconnectEnabled && !this.backgroundReconnectPaused && !this.reconnectTimeoutId) {
+      const delayMs = exponentialBackoff({
+        initialDelayMs: this.config.reconnectDelayMs,
+        multiplier: 2,
+        maxDelayMs: this.config.connectionResetMs,
+      }).delayForAttempt(this.backgroundReconnectAttempts + 1);
+      logger.info(`[${this.logTag}] Scheduling reconnection in ${delayMs}ms`);
       this.reconnectTimeoutId = this.timer.setTimeout(() => {
         this.reconnectTimeoutId = null;
+        if (!this.autoReconnectEnabled || this.isConnected()) {
+          return;
+        }
+        if (this.getReconnectStatus() !== null) {
+          this.scheduleReconnect();
+          return;
+        }
         logger.info(`[${this.logTag}] Attempting automatic reconnection...`);
-        void this.connectWebSocket(new NoOpPerformanceTracker()).then((connected) => {
+        void this.connectBackgroundWebSocket().then((connected) => {
           if (connected) {
             logger.info(`[${this.logTag}] Automatic reconnection successful`);
           } else {
             logger.warn(`[${this.logTag}] Automatic reconnection failed`);
+            this.backgroundReconnectAttempts++;
+            if (this.backgroundReconnectAttempts >= this.config.maxConnectionAttempts) {
+              this.backgroundReconnectAttempts = 0;
+              this.backgroundReconnectPaused = true;
+              logger.info(
+                `[${this.logTag}] Automatic background reconnection paused until the next foreground connect attempt`,
+              );
+            } else {
+              this.scheduleReconnect();
+            }
           }
         });
-      }, this.config.reconnectDelayMs);
+      }, delayMs);
     }
   }
 
@@ -747,13 +840,7 @@ export abstract class DeviceServiceClient {
         // Attempt reconnection if auto-reconnect is enabled and not already connecting
         if (this.autoReconnectEnabled && !this.isConnecting && !this.reconnectTimeoutId) {
           logger.info(`[${this.logTag}] Health check triggering reconnection...`);
-          void this.connectWebSocket(new NoOpPerformanceTracker()).then((connected) => {
-            if (connected) {
-              logger.info(`[${this.logTag}] Health check reconnection successful`);
-            } else {
-              logger.warn(`[${this.logTag}] Health check reconnection failed`);
-            }
-          });
+          this.scheduleReconnect();
         }
       } else {
         logger.debug(

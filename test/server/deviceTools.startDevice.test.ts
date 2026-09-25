@@ -1382,6 +1382,7 @@ describe("startDevice handler", () => {
 
   it("preserves the second readiness error when recovery cleanup fails", async () => {
     const timer = new FakeTimer();
+    timer.enableAutoAdvance();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
       daemonSessionManager,
@@ -1389,7 +1390,7 @@ describe("startDevice handler", () => {
       timer,
       undefined,
       fakeDeviceUtils,
-      undefined,
+      new DefaultRetryExecutor(timer),
       undefined,
       undefined,
       async () => {
@@ -1613,6 +1614,7 @@ describe("startDevice handler", () => {
 
   it("preserves an AVD reboot failure when post-shutdown cleanup fails", async () => {
     const timer = new FakeTimer();
+    timer.enableAutoAdvance();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
       daemonSessionManager,
@@ -1620,7 +1622,7 @@ describe("startDevice handler", () => {
       timer,
       undefined,
       fakeDeviceUtils,
-      undefined,
+      new DefaultRetryExecutor(timer),
       undefined,
       undefined,
       async () => {

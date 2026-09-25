@@ -1,12 +1,7 @@
-import {
-  TelemetryRecorder,
-  getNoOpTelemetryRepository,
-} from "../../src/features/telemetry/TelemetryRecorder";
-import { AndroidEmulatorClient } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
-import { setDeviceReadinessProxyDriverProviderForTesting } from "../../src/server/deviceReadinessProxyProvider";
+import { testOverrides } from "../../src/utils/testOverrides";
 
 /**
- * Globally neutralize the {@link TelemetryRecorder} for the whole suite so a
+ * Globally neutralize TelemetryRecorder for the whole suite so a
  * fire-and-forget telemetry write can never resolve the real file-backed DB
  * (issue #3084). The nav manager's post-commit
  * `TelemetryRecorder.getInstance().recordNavigationEvent(...)` is a floating,
@@ -15,20 +10,20 @@ import { setDeviceReadinessProxyDriverProviderForTesting } from "../../src/serve
  * also surface as a misattributed unhandled rejection. Neither fails the
  * offending test deterministically.
  *
- * Installing the no-op repository as a process-wide default means every recorder
+ * Selecting the no-op repository as a process-wide default means every recorder
  * built from here on — including one lazily rebuilt after a test's
  * `resetInstance()` in teardown — never touches the DB. Tests that must assert on
  * telemetry still install `installInMemoryNavManager()` (spies the instance) or
  * inject their own recorder; this default only removes the ACCIDENTAL real-DB
  * write path, it does not block explicit assertions.
  */
-TelemetryRecorder.setDefaultRepositoryOverride(getNoOpTelemetryRepository());
+testOverrides.telemetryNoOpDefault = true;
 
 // Emulator launch tests must never create real TCP probes. Individual tests
 // inject unavailable ports when exercising allocation behavior.
-AndroidEmulatorClient.setHostPortAvailabilityCheckerForTesting({
+testOverrides.hostPortAvailabilityChecker = {
   isAvailable: async () => true,
-});
+};
 
 /**
  * Globally neutralize the per-session Android accessibility-service readiness
@@ -50,11 +45,11 @@ AndroidEmulatorClient.setHostPortAvailabilityCheckerForTesting({
  * Tests that must assert this path ran (e.g. readiness call counts) install
  * their own counting provider via `test/helpers/stubCtrlProxySetup.ts`.
  */
-setDeviceReadinessProxyDriverProviderForTesting(() => ({
+testOverrides.deviceReadinessProxyDriverProvider = () => ({
   resetSetupState: () => {},
   setup: async () => ({ success: true, message: "ok" }),
   waitForConnection: async () => true,
   resetConnectionBudget: () => {},
   isInstalled: async () => true,
   isVersionCompatible: async () => true,
-}));
+});

@@ -2,6 +2,7 @@ import { errorMessage } from "../describeUnknownError";
 import { type ChildProcess, type SpawnOptions } from "child_process";
 import { existsSync } from "node:fs";
 import { logger } from "../logger";
+import { testOverrides } from "../testOverrides";
 import { runExecSeam } from "../ExecSeam";
 import {
   DefaultHostCommandExecutor,
@@ -663,7 +664,6 @@ export class AndroidEmulatorClient implements AndroidEmulator {
    */
   private static readonly unreservedLaunchAvdNames = new Map<ChildProcess, string>();
   private static terminalReservationGeneration = 0;
-  private static hostPortAvailabilityCheckerForTesting: HostPortAvailabilityChecker | undefined;
   private readonly launchErrors = new WeakMap<ChildProcess, ActionableError>();
   private readonly launchErrorFinalizations = new WeakMap<
     ChildProcess,
@@ -718,10 +718,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
   }
 
   private static defaultHostPortAvailabilityChecker(): HostPortAvailabilityChecker {
-    return (
-      AndroidEmulatorClient.hostPortAvailabilityCheckerForTesting ??
-      new TcpHostPortAvailabilityChecker()
-    );
+    return testOverrides.hostPortAvailabilityChecker ?? new TcpHostPortAvailabilityChecker();
   }
 
   static resetLaunchReservationsForTesting(): void {
@@ -736,7 +733,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
   static setHostPortAvailabilityCheckerForTesting(
     checker: HostPortAvailabilityChecker | undefined,
   ): void {
-    AndroidEmulatorClient.hostPortAvailabilityCheckerForTesting = checker;
+    testOverrides.hostPortAvailabilityChecker = checker;
   }
 
   /**

@@ -12,6 +12,7 @@ import { recordLayoutEvent, type RecordLayoutEventInput } from "../../db/layoutE
 import { getTelemetryPushServer } from "../../daemon/telemetryPushSocketServer";
 import { type DbWriteBarrier, getDbWriteBarrier } from "../../db/dbWriteBarrier";
 import type { TelemetryEventBuffer } from "./TelemetryEventBuffer";
+import { testOverrides } from "../../utils/testOverrides";
 
 export type TelemetryCategory =
   | "network"
@@ -64,12 +65,14 @@ const defaultRepository: TelemetryRepository = {
 };
 
 /**
- * A repository whose persistence methods are no-ops. Used by the unit-test
- * preload (see {@link TelemetryRecorder.setDefaultRepositoryOverride}) so that a
- * fire-and-forget telemetry write can never resolve the real file-backed DB —
- * whose guard-throw would otherwise be SWALLOWED by each recorder method's own
- * try/catch (a silent log, not a failure) or, on a floating promise, surface as
- * a misattributed unhandled rejection (issue #3084 / #3067).
+ * A repository whose persistence methods are no-ops. Selected by default for
+ * every recorder under `NODE_ENV=test` when the unit-test preload sets
+ * `testOverrides.telemetryNoOpDefault = true` (see the constructor's default
+ * `repository` parameter below), so that a fire-and-forget telemetry write can
+ * never resolve the real file-backed DB — whose guard-throw would otherwise be
+ * SWALLOWED by each recorder method's own try/catch (a silent log, not a
+ * failure) or, on a floating promise, surface as a misattributed unhandled
+ * rejection (issue #3084 / #3067).
  */
 const noOpRepository: TelemetryRepository = {
   recordNetworkEvent: async () => 0,
@@ -87,14 +90,10 @@ export function getNoOpTelemetryRepository(): TelemetryRepository {
 
 export class TelemetryRecorder {
   private static instance: TelemetryRecorder | null = null;
-  // A process-wide default repository override. When set (only the unit-test
-  // preload does this), EVERY lazily-constructed recorder — including one created
-  // after a test's `resetInstance()` in teardown — uses this repository instead of
-  // `defaultRepository`. That durability is the point: a test that resets the
-  // singleton and then floats a `recordNavigationEvent` would otherwise re-arm the
-  // real-DB path; the override keeps the neutralization in force for the whole
-  // suite without per-test cooperation (issue #3084).
-  private static defaultRepositoryOverride: TelemetryRepository | null = null;
+  // Explicit overrides, including null to restore the real repository, take
+  // precedence over the preload's lazy no-op default. Undefined means no
+  // explicit override has been installed yet.
+  private static defaultRepositoryOverride: TelemetryRepository | null | undefined = undefined;
   private deviceId: string | null = null;
   private sessionId: string | null = null;
   private readonly repository: TelemetryRepository;
@@ -108,8 +107,11 @@ export class TelemetryRecorder {
   private readonly buffer: TelemetryEventBuffer | null;
 
   constructor(
-    repository: TelemetryRepository = TelemetryRecorder.defaultRepositoryOverride ??
-      defaultRepository,
+    repository: TelemetryRepository = TelemetryRecorder.defaultRepositoryOverride === undefined
+      ? process.env.NODE_ENV === "test" && testOverrides.telemetryNoOpDefault
+        ? noOpRepository
+        : defaultRepository
+      : (TelemetryRecorder.defaultRepositoryOverride ?? defaultRepository),
     getPushTarget: () => TelemetryPushTarget | null = () => getTelemetryPushServer(),
     // Resolve the shared barrier per write, not once at construction: a
     // same-process DB reopen swaps in a fresh barrier via resetDbWriteBarrier(),
@@ -131,12 +133,13 @@ export class TelemetryRecorder {
   }
 
   /**
-   * Install a process-wide default repository used by every recorder built from
-   * here on (including after {@link resetInstance}). Test-infra only: the
-   * unit-test preload passes {@link getNoOpTelemetryRepository} so no test can
-   * accidentally float a telemetry write against the real DB. Pass `null` to
-   * clear. Also drops any already-built singleton so it is rebuilt with the
-   * override on next {@link getInstance}.
+   * Install an explicit process-wide default repository used by every recorder
+   * built from here on (including after {@link resetInstance}), overriding the
+   * preload's lazy `testOverrides.telemetryNoOpDefault` no-op default. Test-infra
+   * only. Pass `null` to explicitly restore the real `defaultRepository` (as
+   * opposed to leaving the override unset, which falls back to the preload's
+   * no-op default under `NODE_ENV=test`). Also drops any already-built
+   * singleton so it is rebuilt with the override on next {@link getInstance}.
    */
   static setDefaultRepositoryOverride(repository: TelemetryRepository | null): void {
     TelemetryRecorder.defaultRepositoryOverride = repository;

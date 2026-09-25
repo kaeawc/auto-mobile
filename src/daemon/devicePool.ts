@@ -568,12 +568,20 @@ type AndroidEmulatorRecoveryDevice = PooledDevice & {
   androidImage: DeviceInfo;
 };
 
+/**
+ * Passive continuity (preserve the session, reattach when the AVD returns) only
+ * needs the emulator's runtime identity resolved. It does not need the
+ * configured image that active relaunch requires to know what to boot back;
+ * see `isAndroidEmulatorActiveRelaunchEligible` for that stricter contract (#7546).
+ */
+type AndroidEmulatorContinuityDevice = PooledDevice & { platform: "android" };
+
 type IOSSimulatorRecoveryDevice = PooledDevice & {
   platform: "ios";
   id: string;
 };
 
-type SessionContinuityDevice = AndroidEmulatorRecoveryDevice | IOSSimulatorRecoveryDevice;
+type SessionContinuityDevice = AndroidEmulatorContinuityDevice | IOSSimulatorRecoveryDevice;
 
 /**
  * A process can emit output after readiness. Capture its redacted bounded tail
@@ -1803,7 +1811,7 @@ export class DevicePool {
   private async wasRebootedAndroidDeviceRediscovered(
     device: PooledDevice,
   ): Promise<AndroidRediscoveryVerification> {
-    if (!this.getRecoveryPolicy().onLoss || !this.isAutoMobileOwnedAndroidVirtualDevice(device)) {
+    if (!this.getRecoveryPolicy().onLoss || !this.isAndroidEmulatorActiveRelaunchEligible(device)) {
       return "not-rediscovered";
     }
     const avdName = device.avdName;
@@ -3012,7 +3020,7 @@ export class DevicePool {
   ): device is AndroidEmulatorRecoveryDevice {
     return (
       (options.bypassRecoveryPolicy || this.getRecoveryPolicy().onLoss) &&
-      this.isAutoMobileOwnedAndroidVirtualDevice(device) &&
+      this.isAndroidEmulatorActiveRelaunchEligible(device) &&
       (options.allowExistingRecoveryReservation ||
         !this.recoveringAndroidImages.has(device.avdName))
     );
@@ -3196,7 +3204,7 @@ export class DevicePool {
     incidentId: string | undefined,
     deferredShutdowns: number,
   ): Promise<boolean> {
-    if (!this.isAutoMobileOwnedAndroidVirtualDevice(device)) {
+    if (!this.isAndroidEmulatorActiveRelaunchEligible(device)) {
       // iOS continuity is passive: falling through to the shared durable-release
       // tail preserves the session without invoking any simulator lifecycle API.
       return false;
@@ -3222,7 +3230,9 @@ export class DevicePool {
       {
         deviceId: device.id,
         incidentId,
-        ...(this.isAutoMobileOwnedAndroidVirtualDevice(device) ? { avdName: device.avdName } : {}),
+        ...(this.isAndroidEmulatorActiveRelaunchEligible(device)
+          ? { avdName: device.avdName }
+          : {}),
         deferredShutdowns,
       },
       ["quarantine", "loss"],
@@ -3233,7 +3243,7 @@ export class DevicePool {
     device: SessionContinuityDevice,
     sessionId: string,
   ): void {
-    if (!this.isAutoMobileOwnedAndroidVirtualDevice(device)) {
+    if (!this.isAndroidEmulatorActiveRelaunchEligible(device)) {
       return;
     }
     device.adbServerResetSessionId = sessionId;
@@ -3517,9 +3527,9 @@ export class DevicePool {
   private getAndroidSessionPreservingRecoveryTarget(
     deviceId: string,
     expectedDevice: PooledDevice | undefined,
-  ): { device: AndroidEmulatorRecoveryDevice; session: Session } | undefined {
+  ): { device: AndroidEmulatorContinuityDevice; session: Session } | undefined {
     const target = this.getSessionPreservingRecoveryTarget(deviceId, expectedDevice);
-    return target && this.isAutoMobileOwnedAndroidVirtualDevice(target.device)
+    return target && this.isAndroidEmulatorSessionContinuityDevice(target.device)
       ? { device: target.device, session: target.session }
       : undefined;
   }
@@ -3540,15 +3550,32 @@ export class DevicePool {
     );
   }
 
+  /**
+   * Passive continuity's entry gate for Android is deliberately looser than
+   * active relaunch's: any session-bound emulator with a resolved, non-placeholder
+   * AVD identity qualifies, regardless of whether it was acquired through
+   * getAndroid/startDevice image enrichment, pool idle allocation, or an
+   * enrichment failure that adopted the device without its configured image.
+   * Recording the image is what `isAndroidEmulatorActiveRelaunchEligible` gates,
+   * separately, before an actual reboot is attempted (#7546).
+   */
   private isSessionContinuityRecoveryDevice(
     device: PooledDevice,
   ): device is SessionContinuityDevice {
-    return device.platform === "android"
-      ? this.shouldRebootDisconnectedAndroidDevice(device, {
-          bypassRecoveryPolicy: this.deviceSessionContinuityEnabled,
-          allowExistingRecoveryReservation: this.canRetryDeferredSessionRecovery(device),
-        })
-      : this.deviceSessionContinuityEnabled && this.isIOSSimulatorContinuityDevice(device);
+    if (device.platform !== "android") {
+      return this.deviceSessionContinuityEnabled && this.isIOSSimulatorContinuityDevice(device);
+    }
+    if (
+      !(this.deviceSessionContinuityEnabled || this.getRecoveryPolicy().onLoss) ||
+      !this.isAndroidEmulatorSessionContinuityDevice(device)
+    ) {
+      return false;
+    }
+    if (this.canRetryDeferredSessionRecovery(device)) {
+      return true;
+    }
+    const stableDeviceId = this.stableDeviceIdFor(device);
+    return stableDeviceId !== undefined && !this.recoveringAndroidImages.has(stableDeviceId);
   }
 
   private canRetryDeferredSessionRecovery(device: PooledDevice): boolean {
@@ -3567,7 +3594,11 @@ export class DevicePool {
       await this.releaseDisconnectedRecoverySessionWithRetry(
         sessionId,
         device.id,
-        deviceRestartReleaseReason(device.platform === "android" ? device.avdName : device.id),
+        // `avdName` is not guaranteed here: passive continuity admits an Android
+        // emulator whose identity resolved only via discovery's device name
+        // (no image-enrichment pass ever ran). stableDeviceIdFor falls back to
+        // that resolved name, matching how a later resume looks the device up.
+        deviceRestartReleaseReason(this.stableDeviceIdFor(device) ?? device.id),
       );
     }
     if (this.devices.get(device.id) === device) {
@@ -3785,7 +3816,7 @@ export class DevicePool {
   ): AndroidEmulatorRecoveryDevice | undefined {
     const currentDevice = this.devices.get(deviceId);
     if (currentDevice === undefined) {
-      return expectedDevice && this.isAutoMobileOwnedAndroidVirtualDevice(expectedDevice)
+      return expectedDevice && this.isAndroidEmulatorActiveRelaunchEligible(expectedDevice)
         ? expectedDevice
         : undefined;
     }
@@ -3793,11 +3824,11 @@ export class DevicePool {
       // A preceding cohort member can legitimately reuse this detached
       // member's old serial. Keep recovering the captured AVD by its stable
       // name rather than treating that different replacement as this device.
-      return this.isAutoMobileOwnedAndroidVirtualDevice(expectedDevice)
+      return this.isAndroidEmulatorActiveRelaunchEligible(expectedDevice)
         ? expectedDevice
         : undefined;
     }
-    return this.isAutoMobileOwnedAndroidVirtualDevice(currentDevice) ? currentDevice : undefined;
+    return this.isAndroidEmulatorActiveRelaunchEligible(currentDevice) ? currentDevice : undefined;
   }
 
   private getAdbResetRecoverySession(device: PooledDevice): Session | undefined {
@@ -3829,7 +3860,7 @@ export class DevicePool {
       if (
         cohort.some(
           (device) =>
-            this.isAutoMobileOwnedAndroidVirtualDevice(device) &&
+            this.isAndroidEmulatorActiveRelaunchEligible(device) &&
             this.isLeasedForAndroidStartup(device.avdName),
         )
       ) {
@@ -3843,7 +3874,7 @@ export class DevicePool {
       for (const device of cohort) {
         if (
           this.devices.get(device.id) !== device ||
-          !this.isAutoMobileOwnedAndroidVirtualDevice(device)
+          !this.isAndroidEmulatorActiveRelaunchEligible(device)
         ) {
           continue;
         }
@@ -3984,7 +4015,7 @@ export class DevicePool {
     for (const device of cohort) {
       if (
         this.devices.get(device.id) !== device ||
-        !this.isAutoMobileOwnedAndroidVirtualDevice(device) ||
+        !this.isAndroidEmulatorActiveRelaunchEligible(device) ||
         !device.sessionId
       ) {
         continue;
@@ -4012,7 +4043,7 @@ export class DevicePool {
     for (const device of cohort) {
       if (
         this.devices.get(device.id) !== device ||
-        !this.isAutoMobileOwnedAndroidVirtualDevice(device) ||
+        !this.isAndroidEmulatorActiveRelaunchEligible(device) ||
         device.sessionId !== null ||
         !this.startedDeviceProcesses.has(device.id)
       ) {
@@ -8959,13 +8990,21 @@ export class DevicePool {
     if (device.platform !== "android") {
       return { eligible: false, reason: "unsupported-platform" };
     }
-    if (!this.isAutoMobileOwnedAndroidVirtualDevice(device)) {
+    if (!this.isAndroidEmulatorActiveRelaunchEligible(device)) {
       return { eligible: false, reason: "not-automobile-owned" };
     }
     return { eligible: true, action: "restart" };
   }
 
-  private isAutoMobileOwnedAndroidVirtualDevice(
+  /**
+   * True only for an Android emulator with a recorded AVD name *and* its
+   * configured image -- the metadata an active relaunch needs to know what to
+   * boot back. This is narrower than what passive continuity requires: it
+   * reflects "acquired through getAndroid/startDevice with image enrichment,"
+   * not "AutoMobile launched this emulator" or "this session may be preserved"
+   * (#7546). See `isAndroidEmulatorSessionContinuityDevice` for the passive gate.
+   */
+  private isAndroidEmulatorActiveRelaunchEligible(
     device: PooledDevice,
   ): device is PooledDevice & { avdName: string; androidImage: DeviceInfo } {
     return (
@@ -8973,6 +9012,23 @@ export class DevicePool {
       consolePortFromSerial(device.id) !== null &&
       typeof device.avdName === "string" &&
       device.androidImage !== undefined
+    );
+  }
+
+  /**
+   * True for any Android emulator serial whose AVD identity discovery has
+   * resolved -- via a recorded `avdName` or, absent that, a non-placeholder
+   * discovered name (see `stableDeviceIdFor`). Passive continuity (preserve the
+   * session, reattach on return) only needs this; it does not need the
+   * configured image `isAndroidEmulatorActiveRelaunchEligible` requires (#7546).
+   */
+  private isAndroidEmulatorSessionContinuityDevice(
+    device: PooledDevice,
+  ): device is AndroidEmulatorContinuityDevice {
+    return (
+      device.platform === "android" &&
+      consolePortFromSerial(device.id) !== null &&
+      this.stableDeviceIdFor(device) !== undefined
     );
   }
 

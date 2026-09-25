@@ -586,6 +586,133 @@ test("continuity releases an externally closed emulator without relaunch and reh
   }
 });
 
+test("a pool-allocated emulator without a recorded image still persists as device-restart and rehydrates (#7546)", async () => {
+  const timer = new FakeTimer();
+  const persistence = new FakeDeviceSessionPersistence();
+  const sessions = new SessionManager(timer, persistence);
+  const manager = new KillTrackingShutdownManager();
+  const pool = new DevicePool(
+    sessions,
+    "daemon",
+    timer,
+    new FakeInstalledAppsRepository(),
+    manager,
+    new DefaultRetryExecutor(timer),
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    { onLoss: false, maxAttempts: 1 },
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    true,
+  );
+  manager.bootedDevices = [original];
+  // Discovery-only refresh -- no sourceImage, so unlike `addDevice(device, image)`
+  // the pooled entry gets neither `avdName` nor `androidImage` (#7546's gap).
+  await pool.refreshDevices();
+  const pooled = pool.getDevice(original.deviceId);
+  expect(pooled?.avdName).toBeUndefined();
+  expect(pooled?.androidImage).toBeUndefined();
+
+  // Idle allocation (assignDeviceToSession), not startDevice/getAndroid image
+  // enrichment -- the client-supplied/runner-minted sessionUuid path.
+  await sessions.getOrCreateSession("session", pool, "android");
+  expect(pool.getDevice(original.deviceId)).toMatchObject({ sessionId: "session" });
+
+  try {
+    manager.bootedDevices = [];
+    await expect(
+      pool.recoverSessionBoundAndroidDeviceAfterLoss(
+        original.deviceId,
+        undefined,
+        pool.getDevice(original.deviceId),
+      ),
+    ).resolves.toBe("released");
+    expect(manager.kills).toEqual([]);
+    expect(manager.startedDevices).toEqual([]);
+    expect(await persistence.getSession?.("session")).toMatchObject({
+      status: "released",
+      release_reason: `device-restart:${original.name}`,
+    });
+    expect(sessions.getSession("session")).toBeNull();
+
+    const returned = { ...original, deviceId: "emulator-5599" };
+    manager.bootedDevices = [returned];
+    await pool.refreshDevices();
+    await expect(sessions.rehydratePersistedSessions(pool)).resolves.toEqual({
+      rehydrated: ["session"],
+      terminalized: [],
+      skipped: [],
+      timedOut: false,
+    });
+    expect(pool.getDevice(returned.deviceId)).toMatchObject({
+      sessionId: "session",
+      status: "busy",
+    });
+  } finally {
+    sessions.stopCleanupTimer();
+  }
+});
+
+test("onLoss recovery does not actively relaunch a pool-allocated emulator without a recorded image (#7546)", async () => {
+  const timer = new FakeTimer();
+  const persistence = new FakeDeviceSessionPersistence();
+  const sessions = new SessionManager(timer, persistence);
+  const manager = new KillTrackingShutdownManager();
+  const pool = new DevicePool(
+    sessions,
+    "daemon",
+    timer,
+    new FakeInstalledAppsRepository(),
+    manager,
+    new DefaultRetryExecutor(timer),
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    { onLoss: true, maxAttempts: 1 },
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    true,
+  );
+  manager.bootedDevices = [original];
+  await pool.refreshDevices();
+  await sessions.getOrCreateSession("session", pool, "android");
+
+  try {
+    manager.bootedDevices = [];
+    await expect(
+      pool.recoverSessionBoundAndroidDeviceAfterLoss(
+        original.deviceId,
+        undefined,
+        pool.getDevice(original.deviceId),
+      ),
+    ).resolves.toBe("released");
+    // Active relaunch stays gated on a recorded configured image even though
+    // onLoss is enabled: passive continuity's looser identity check must not
+    // widen what `isAndroidEmulatorActiveRelaunchEligible` permits.
+    expect(manager.kills).toEqual([]);
+    expect(manager.startedDevices).toEqual([]);
+    expect(await persistence.getSession?.("session")).toMatchObject({
+      status: "released",
+      release_reason: `device-restart:${original.name}`,
+    });
+  } finally {
+    sessions.stopCleanupTimer();
+  }
+});
+
 test("continuity-disabled emulator loss keeps a terminal released settlement", async () => {
   const timer = new FakeTimer();
   const persistence = new FakeDeviceSessionPersistence();

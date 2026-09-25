@@ -118,21 +118,29 @@ An explicit `--create-if-missing false` disables creation even when the
 environment variable is set. Created devices can be removed with
 `xcrun simctl delete <udid>` or `avdmanager delete avd -n <name>`.
 
-Session continuity is enabled by default for a session-bound Android emulator
-or iOS simulator that AutoMobile owns. If its runtime connection disappears,
-AutoMobile retains the session for that virtual device's stable identity. Android
-may restart the same AVD; iOS recovery is passive and waits for the same simulator
-UDID to become booted again. To disable that continuity explicitly:
+Session continuity is enabled by default for any session bound to an Android
+emulator or iOS simulator, regardless of how that binding happened -- an
+explicit `startDevice`/`getAndroid`, or a client-supplied or runner-minted
+session UUID that the daemon allocated from the idle pool. What matters is
+whether discovery resolved a stable identity for the device (its AVD name, or
+its simulator UDID), not who launched it. If the runtime connection
+disappears, AutoMobile retains the session for that stable identity and waits
+for it to reappear. To disable that continuity explicitly:
 
 ```bash
 export AUTOMOBILE_DEVICE_RECOVERY_ON_LOSS=0
 export AUTOMOBILE_DEVICE_RECOVERY_MAX_ATTEMPTS=2
 ```
 
-Setting `AUTOMOBILE_DEVICE_RECOVERY_ON_LOSS=1` also enables the broader recovery
-policy for eligible idle or unbound AutoMobile-owned Android AVDs. Physical
-devices and externally started Android emulators are not restarted. iOS
-simulators are never actively restarted by session continuity.
+Actively restarting the AVD process on loss is a stricter, separate opt-in:
+`AUTOMOBILE_DEVICE_RECOVERY_ON_LOSS=1` additionally requires the emulator's
+configured image to have been recorded, which only happens on a
+`startDevice`/`getAndroid` path with successful image enrichment. A pool-
+allocated or enrichment-failed emulator still gets passive continuity
+(reattach when it returns) but is never actively relaunched. Physical devices
+and externally started Android emulators are not restarted. iOS simulators are
+never actively restarted by session continuity; their recovery is always
+passive, waiting for the same simulator UDID to become booted again.
 
 `AUTOMOBILE_DEVICE_RECOVERY_MAX_ATTEMPTS` is a rolling budget, not a lifetime
 one: only restarts within the last `AUTOMOBILE_DEVICE_RECOVERY_WINDOW_MS`

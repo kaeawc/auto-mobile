@@ -75,6 +75,7 @@ fun DatabaseInspector(
   databases: List<DatabaseInfo> = StorageMockData.databases,
   platform: StoragePlatform = StoragePlatform.Android,
   loadError: String? = null,
+  loadErrorCode: String? = null,
   onFetchTableData: (suspend (databasePath: String, table: String) -> QueryResult)? = null,
   onExecuteSQL: (suspend (databasePath: String, query: String) -> QueryResult)? = null,
   modifier: Modifier = Modifier,
@@ -182,19 +183,19 @@ fun DatabaseInspector(
             fontWeight = FontWeight.Medium,
             color = if (isError) Color(0xFFFF5722) else Color(0xFF2196F3),
           )
-          Text(
-            loadError
-              ?: if (platform == StoragePlatform.iOS) {
+          if (loadError != null) {
+            StorageLoadError(loadError, loadErrorCode)
+          } else {
+            Text(
+              if (platform == StoragePlatform.iOS) {
                 "AutoMobile can inspect databases in a Simulator app's .app container. The SDK provides a richer inspection experience with live updates."
               } else {
                 "AutoMobile can inspect databases via adb shell for debuggable apps. The SDK provides a richer inspection experience with live updates."
               },
-            fontSize = 11.sp,
-            color = colors.text.normal.copy(alpha = 0.7f),
-            fontFamily =
-              if (isError) androidx.compose.ui.text.font.FontFamily.Monospace
-              else androidx.compose.ui.text.font.FontFamily.Default,
-          )
+              fontSize = 11.sp,
+              color = colors.text.normal.copy(alpha = 0.7f),
+            )
+          }
         }
       }
     }

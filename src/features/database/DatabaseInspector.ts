@@ -2,6 +2,7 @@ import { ActionableError, BootedDevice } from "../../models";
 import { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "../../utils/logger";
 import { shellQuote } from "../../utils/shellQuote";
+import { ProviderUnavailableError } from "../storage/ProviderUnavailableError";
 
 /**
  * Database descriptor returned from listDatabases
@@ -182,6 +183,9 @@ export class DatabaseInspector {
 
     if (!success) {
       const { errorType, error } = this.extractError(output);
+      if (errorType === "PROVIDER_UNAVAILABLE") {
+        throw new ProviderUnavailableError(`Database error (${errorType}): ${error}`);
+      }
       throw new ActionableError(`Database error (${errorType}): ${error}`);
     }
 
@@ -234,10 +238,23 @@ export class DatabaseInspector {
       }
     }
 
+    if (this.isProviderAbsent(output)) {
+      return { errorType: "PROVIDER_UNAVAILABLE", error: output.trim() };
+    }
+
     return {
       errorType: this.extractBundleValue(output, "errorType") || "UNKNOWN",
       error: this.extractBundleValue(output, "error") || output.trim() || "Unknown error",
     };
+  }
+
+  private isProviderAbsent(output: string): boolean {
+    return (
+      !this.extractBundleValue(output, "success") &&
+      !this.extractBundleValue(output, "errorType") &&
+      !this.extractBundleValue(output, "error") &&
+      output.includes("Could not find provider")
+    );
   }
 
   /**

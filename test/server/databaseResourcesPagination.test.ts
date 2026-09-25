@@ -9,6 +9,7 @@ import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import { IOSCtrlProxyClient } from "../../src/features/observe/ios";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import type { BootedDevice } from "../../src/models";
+import { ProviderUnavailableError } from "../../src/features/storage/ProviderUnavailableError";
 
 // Minimal MCP-server stand-in, matching the pattern in
 // resourceRegistryListChanged.test.ts: registerWithServer installs request
@@ -70,6 +71,24 @@ describe("table-data resource template optional pagination (issue #6133)", () =>
       getBootedDevices: mock(async (platform: string) => (platform === "ios" ? [device] : [])),
     } as unknown as ReturnType<typeof PlatformDeviceManagerFactory.getInstance>);
   }
+
+  test("database resource retains typed provider failure fields", async () => {
+    IOSCtrlProxyClient.getInstance = mock(() => ({
+      listDatabasesForIos: async () => {
+        throw new ProviderUnavailableError("Could not find provider");
+      },
+    })) as unknown as typeof IOSCtrlProxyClient.getInstance;
+    PlatformDeviceManagerFactory.setInstance({
+      getBootedDevices: mock(async (platform: string) => (platform === "ios" ? [device] : [])),
+    } as unknown as ReturnType<typeof PlatformDeviceManagerFactory.getInstance>);
+    registerDatabaseResources();
+    const match = ResourceRegistry.matchTemplate(
+      "automobile:devices/ios-1/databases?appId=com.example.nondebug",
+    );
+    const body = JSON.parse((await match!.template.handler(match!.params)).text!);
+    expect(body.errorCode).toBe("PROVIDER_UNAVAILABLE");
+    expect(body.errorReason).toBe("sdk_provider_absent");
+  });
 
   test.each([
     ["neither limit nor offset present", `${base}?appId=com.example.app`, 50, 0],

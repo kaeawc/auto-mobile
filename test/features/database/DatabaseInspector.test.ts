@@ -4,6 +4,7 @@ import type { BootedDevice } from "../../../src/models";
 import { shellQuote } from "../../../src/utils/shellQuote";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { ActionableError } from "../../../src/models";
+import { ProviderUnavailableError } from "../../../src/features/storage/ProviderUnavailableError";
 
 describe("DatabaseInspector", () => {
   const device: BootedDevice = {
@@ -32,6 +33,25 @@ describe("DatabaseInspector", () => {
   });
 
   describe("listDatabases", () => {
+    test("classifies an absent SDK provider without discarding adb details", async () => {
+      const missingApp = "com.example.nondebug";
+      const output = `Error while accessing provider:${missingApp}.automobile.database\njava.lang.IllegalStateException: Could not find provider ${missingApp}.automobile.database`;
+      fakeAdb.setCommandResult(
+        `shell content call --uri content://${missingApp}.automobile.database --method listDatabases`,
+        output,
+      );
+
+      try {
+        await inspector.listDatabases(missingApp);
+        throw new Error("expected provider failure");
+      } catch (error) {
+        expect(error).toBeInstanceOf(ProviderUnavailableError);
+        expect((error as ProviderUnavailableError).errorCode).toBe("PROVIDER_UNAVAILABLE");
+        expect((error as ProviderUnavailableError).errorReason).toBe("sdk_provider_absent");
+        expect(String(error)).toContain("Could not find provider");
+      }
+    });
+
     test("keeps a hostile provider URI inside one device-shell word", async () => {
       const hostileAppId = "com.example; input keyevent 3";
       fakeAdb.setCommandResult(

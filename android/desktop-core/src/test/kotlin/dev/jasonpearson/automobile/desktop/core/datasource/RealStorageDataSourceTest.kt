@@ -15,6 +15,31 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class RealStorageDataSourceTest {
+  @Test
+  fun `database provider failure preserves structured fields`() = runBlocking {
+    val client = FakeAutoMobileClient()
+    client.setResourceResponseWithText(
+      "automobile:devices/emulator-5554/databases?appId=com.example.nondebug",
+      """{"error":"Could not find provider","errorCode":"PROVIDER_UNAVAILABLE","errorReason":"sdk_provider_absent"}""",
+    )
+    val source = RealStorageDataSource({ client }, "emulator-5554", "com.example.nondebug")
+    val result = source.getDatabases() as Result.Error
+    assertEquals("PROVIDER_UNAVAILABLE", result.errorCode)
+    assertEquals("sdk_provider_absent", result.errorReason)
+  }
+
+  @Test
+  fun `key value provider failure preserves structured fields`() = runBlocking {
+    val client = FakeAutoMobileClient()
+    client.setResourceResponseWithText(
+      "automobile:devices/emulator-5554/storage/com.example.nondebug/files",
+      """{"error":"Unknown authority com.example.nondebug.automobile.sharedprefs","errorCode":"PROVIDER_UNAVAILABLE","errorReason":"sdk_provider_absent"}""",
+    )
+    val source = RealStorageDataSource({ client }, "emulator-5554", "com.example.nondebug")
+    val result = source.getKeyValueFiles() as Result.Error
+    assertEquals("PROVIDER_UNAVAILABLE", result.errorCode)
+    assertEquals("sdk_provider_absent", result.errorReason)
+  }
 
   @Test
   fun `executeSQL enables app data interop before querying`() = runBlocking {

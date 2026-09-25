@@ -68,6 +68,8 @@ private data class EditingEntryIdentity(
 @Composable
 fun KeyValueInspector(
   keyValueFiles: List<KeyValueFile>,
+  loadError: String? = null,
+  loadErrorCode: String? = null,
   onSetValue:
     (suspend (fileName: String, key: String, value: String, type: KeyValueType) -> Result<
         StorageMutationResult
@@ -111,6 +113,9 @@ fun KeyValueInspector(
       modifier =
         Modifier.width(200.dp).fillMaxSize().background(colors.text.normal.copy(alpha = 0.02f))
     ) {
+      if (loadError != null) {
+        StorageLoadError(loadError, loadErrorCode)
+      }
       // Header
       Box(
         modifier =

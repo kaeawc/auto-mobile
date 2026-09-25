@@ -11,6 +11,7 @@ import { IOSCtrlProxyClient } from "../features/observe/ios";
 import type { TableDataResult } from "../features/database/DatabaseInspector";
 import { optionalInteger } from "./queryParamValidation";
 import { findBootedDeviceForResource } from "./resourceDeviceResolver";
+import { resourceErrorFields } from "../features/storage/ProviderUnavailableError";
 
 // Resource URI templates
 const DATABASE_RESOURCE_TEMPLATES = {
@@ -242,7 +243,11 @@ async function getDatabasesResource(params: Record<string, string>): Promise<Res
     return {
       uri,
       mimeType: "application/json",
-      text: JSON.stringify({ error: `Failed to list databases: ${error}` }, null, 2),
+      text: JSON.stringify(
+        { error: `Failed to list databases: ${error}`, ...resourceErrorFields(error) },
+        null,
+        2,
+      ),
     };
   }
 }
@@ -290,7 +295,11 @@ async function getTablesResource(params: Record<string, string>): Promise<Resour
     return {
       uri,
       mimeType: "application/json",
-      text: JSON.stringify({ error: `Failed to list tables: ${error}` }, null, 2),
+      text: JSON.stringify(
+        { error: `Failed to list tables: ${error}`, ...resourceErrorFields(error) },
+        null,
+        2,
+      ),
     };
   }
 }
@@ -380,7 +389,11 @@ async function getTableDataResource(params: Record<string, string>): Promise<Res
     return {
       uri,
       mimeType: "application/json",
-      text: JSON.stringify({ error: `Failed to get table data: ${error}` }, null, 2),
+      text: JSON.stringify(
+        { error: `Failed to get table data: ${error}`, ...resourceErrorFields(error) },
+        null,
+        2,
+      ),
     };
   }
 }
@@ -445,7 +458,11 @@ async function getTableStructureResource(params: Record<string, string>): Promis
     return {
       uri,
       mimeType: "application/json",
-      text: JSON.stringify({ error: `Failed to get table structure: ${error}` }, null, 2),
+      text: JSON.stringify(
+        { error: `Failed to get table structure: ${error}`, ...resourceErrorFields(error) },
+        null,
+        2,
+      ),
     };
   }
 }

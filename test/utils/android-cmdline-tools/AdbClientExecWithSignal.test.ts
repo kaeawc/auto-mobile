@@ -30,6 +30,79 @@ describe.serial("AdbClient execWithSignal shared process seam", () => {
     adbHostProcessExecutor.executeCommandWithChild = originalExecuteCommandWithChild;
   });
 
+  for (const { name, explicitTimeoutMs, advanceBeforeKillMs, killAtMs } of [
+    { name: "default", explicitTimeoutMs: undefined, advanceBeforeKillMs: 14, killAtMs: 15 },
+    { name: "short explicit", explicitTimeoutMs: 5, advanceBeforeKillMs: 4, killAtMs: 5 },
+    { name: "long explicit", explicitTimeoutMs: 30, advanceBeforeKillMs: 16, killAtMs: 30 },
+  ]) {
+    test(`${name} command timeout kills the adb child at its budget`, async () => {
+      const timer = new FakeTimer();
+      const child = new EventEmitter() as ChildProcess;
+      const signals: (string | number | undefined)[] = [];
+      child.kill = (signal) => {
+        signals.push(signal);
+        return true;
+      };
+      let dispatches = 0;
+      adbHostProcessExecutor.executeCommandWithChild = (): StartedHostCommand => {
+        dispatches++;
+        return { child, result: new Promise(() => {}) };
+      };
+      const client = new AdbClient(
+        null,
+        null,
+        null,
+        defaultRetryExecutor,
+        timer,
+        undefined,
+        undefined,
+        undefined,
+        15,
+      );
+      const internals = client as unknown as AdbClientInternals & {
+        getBaseCommandParts: () => Promise<{ adbPath: string; baseArgs: string[] }>;
+      };
+      internals.isTestMode = false;
+      internals.getBaseCommandParts = async () => ({ adbPath: "adb", baseArgs: [] });
+      const result = client.executeCommand("shell input tap 1 2", explicitTimeoutMs);
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(dispatches).toBe(1);
+      timer.advanceTime(advanceBeforeKillMs);
+      expect(signals).toEqual([]);
+      timer.advanceTime(killAtMs - advanceBeforeKillMs);
+      await expect(result).rejects.toBeInstanceOf(AdbCommandTimeoutError);
+      expect(signals).toEqual(["SIGTERM"]);
+      expect(dispatches).toBe(1);
+    });
+  }
+
+  test("keeps the dispatched timeout error when a read retries after its budget expires", async () => {
+    const timer = new FakeTimer();
+    const child = new EventEmitter() as ChildProcess;
+    child.kill = () => true;
+    let dispatches = 0;
+    adbHostProcessExecutor.executeCommandWithChild = (): StartedHostCommand => {
+      dispatches++;
+      return { child, result: new Promise(() => {}) };
+    };
+    const client = new AdbClient(null, null, null, defaultRetryExecutor, timer);
+    const internals = client as unknown as AdbClientInternals & {
+      getBaseCommandParts: () => Promise<{ adbPath: string; baseArgs: string[] }>;
+    };
+    internals.isTestMode = false;
+    internals.getBaseCommandParts = async () => ({ adbPath: "adb", baseArgs: [] });
+
+    const result = client.executeCommand("shell getprop", 5);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(dispatches).toBe(1);
+    timer.advanceTime(5);
+
+    await expect(result).rejects.toThrow("Command timed out after 5ms: adb shell getprop");
+    expect(dispatches).toBe(1);
+  });
+
   test("keeps the injected timeout error when SIGTERM rejects during graceful settlement", async () => {
     const timer = new FakeTimer();
     const child = new EventEmitter() as ChildProcess;

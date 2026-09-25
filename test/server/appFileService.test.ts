@@ -428,6 +428,7 @@ describe("AppFileService", () => {
 
     const commands = adbFactory.getFakeClient().getAllCommands();
     expect(commands[0]).toContain("push ");
+    expect(adbFactory.getFakeClient().getCommandCalls()[0]?.timeoutMs).toBe(120_000);
     expect(commands[1]).toContain("shell run-as 'com.example.app' sh -c");
     expect(commands[1]).toContain("mkdir -p");
     expect(commands[1]).toContain("files/fixtures");
@@ -435,6 +436,23 @@ describe("AppFileService", () => {
     expect(commands[1]).toContain("/data/local/tmp/automobile-");
     expect(commands[1]).toContain("files/fixtures/welcome file.txt");
     expect(commands[2]).toContain("shell rm -f '/data/local/tmp/automobile-");
+  });
+
+  test("uses a transfer budget for Android externalFiles pushes", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    const service = createAppFileServiceForTesting({ adbFactory });
+
+    await service.putFile({
+      device: { deviceId: "emulator-5554", name: "Pixel", platform: "android" },
+      appId: "com.example.app",
+      container: "externalFiles",
+      contentText: "hello",
+      destinationPath: "fixtures/welcome.txt",
+    });
+
+    const calls = adbFactory.getFakeClient().getCommandCalls();
+    expect(calls.find((call) => call.command.startsWith("push "))?.timeoutMs).toBe(120_000);
+    expect(calls.find((call) => call.command.startsWith("shell mkdir"))?.timeoutMs).toBeUndefined();
   });
 
   test("sources the run-as temp path token from the injected IdGenerator", async () => {

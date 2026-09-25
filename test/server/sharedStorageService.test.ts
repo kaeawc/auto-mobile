@@ -91,6 +91,12 @@ describe("SharedStorageService", () => {
       "/storage/emulated/0/Download/run-42/docs/read me.txt",
     ]);
     expect(
+      executor
+        .getCommandCalls()
+        .filter((call) => call.command.startsWith("push "))
+        .map((call) => call.timeoutMs),
+    ).toEqual([120_000, 120_000]);
+    expect(
       commands.some(
         (command) =>
           command.includes("MEDIA_SCANNER_SCAN_FILE") &&

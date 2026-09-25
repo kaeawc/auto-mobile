@@ -41,6 +41,7 @@ const NOTIFICATION_RECEIVER =
   "dev.jasonpearson.automobile.sdk.notifications.AutoMobileNotificationReceiver";
 const SDK_RESULT_SUCCESS = 1;
 const DEVICE_IMAGE_DIR = "/sdcard/Download/automobile";
+const NOTIFICATION_IMAGE_PUSH_TIMEOUT_MS = 60_000;
 
 export class PostNotification {
   private device: BootedDevice;
@@ -465,7 +466,7 @@ export class PostNotification {
       );
       await this.adb.executeCommand(
         `push ${quoteForAdbArg(sourcePath)} ${quoteForAdbArg(devicePath)}`,
-        undefined,
+        NOTIFICATION_IMAGE_PUSH_TIMEOUT_MS,
         undefined,
         true,
         signal,

@@ -20,6 +20,8 @@ import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { promises as fs } from "fs";
 import * as path from "path";
 
+const CLEAR_APP_DATA_TIMEOUT_MS = 60_000;
+
 /** Reinstall-based data clear for physical iOS devices (devicectl). */
 export interface IosAppReinstaller {
   clearAppDataViaReinstall(deviceUdid: string, bundleId: string): Promise<void>;
@@ -96,6 +98,7 @@ export class ClearAppData {
       await perf.track("pmClear", async () => {
         await adb.executeCommand(
           `shell pm clear --user ${targetUserId} ${shellQuote(packageName)}`,
+          CLEAR_APP_DATA_TIMEOUT_MS,
         );
         logger.info(`Clearing app data was successful for user ${targetUserId}`);
       });

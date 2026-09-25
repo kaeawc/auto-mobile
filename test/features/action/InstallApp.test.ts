@@ -194,6 +194,9 @@ describe("InstallApp", () => {
     expect(result.warning).toBeUndefined();
     expect(fakeHost.wasCommandExecuted("aapt2")).toBe(true);
     expect(fakeAdb.wasCommandExecuted("install --user 10 -r")).toBe(true);
+    expect(
+      fakeAdb.getCommandCalls().find((call) => call.command.startsWith("install "))?.timeoutMs,
+    ).toBe(120_000);
 
     // Nesting invariant (issue #4169 item 15): the whole install is owned by a
     // single "installApp" root and every phase is nested under it. Asserting the
@@ -969,6 +972,9 @@ describe("InstallApp", () => {
     expect(result.packageName).toBe("com.example.app");
     expect(result.warning).toContain("uninstalled it and reinstalled");
     expect(fakeAdb.wasCommandExecuted("uninstall com.example.app")).toBe(true);
+    expect(
+      fakeAdb.getCommandCalls().find((call) => call.command.startsWith("uninstall "))?.timeoutMs,
+    ).toBe(120_000);
     expect(repo.markStaleCalls).toBe(2);
   });
 

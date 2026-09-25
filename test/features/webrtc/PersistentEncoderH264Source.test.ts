@@ -157,6 +157,7 @@ function muxPacket(trackId: number, payload: Buffer): Buffer {
 
 function makeSource(overrides: Record<string, unknown> = {}) {
   const commands: string[] = [];
+  const commandCalls: Array<{ command: string; timeoutMs?: number }> = [];
   const processes: FakeProcess[] = [];
   const sockets: FakeSocket[] = [];
   const spawnArgs: string[][] = [];
@@ -209,8 +210,9 @@ function makeSource(overrides: Record<string, unknown> = {}) {
     create() {
       return {
         getAdbPathOnly: async () => "adb",
-        executeCommand: (command: string) => {
+        executeCommand: (command: string, timeoutMs?: number) => {
           commands.push(command);
+          commandCalls.push({ command, timeoutMs });
           if (hangCommands.some((sub) => command.includes(sub))) {
             return neverResolves<{ stdout: string; stderr: string; exitCode: number }>();
           }
@@ -319,6 +321,7 @@ function makeSource(overrides: Record<string, unknown> = {}) {
   return {
     source,
     commands,
+    commandCalls,
     processes,
     sockets,
     spawnArgs,
@@ -471,6 +474,16 @@ describe("PersistentEncoderH264Source", () => {
       ),
     ).toBe(true);
     expect(ctx.commands).toContain(`forward tcp:0 localabstract:${SESSION_SOCKET}`);
+    expect(
+      ctx.commandCalls
+        .filter(
+          (call) =>
+            call.command.startsWith("push ") ||
+            call.command.startsWith("forward tcp:0") ||
+            call.command.includes("sha256sum"),
+        )
+        .every((call) => call.timeoutMs === 20_000),
+    ).toBe(true);
 
     const args = ctx.spawnArgs[0].join(" ");
     expect(args).not.toContain("-s emulator-5554");

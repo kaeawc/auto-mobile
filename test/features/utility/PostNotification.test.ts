@@ -221,6 +221,9 @@ describe("PostNotification", () => {
       expect(result.success).toBe(true);
       expect(fakeAdb.wasCommandExecuted("shell mkdir -p /sdcard/Download/automobile")).toBe(true);
       expect(fakeAdb.wasCommandExecuted("push")).toBe(true);
+      expect(
+        fakeAdb.getCommandCalls().find((call) => call.command.startsWith("push "))?.timeoutMs,
+      ).toBe(60_000);
       expect(fakeAdb.wasCommandExecuted("/sdcard/Download/automobile/image.png")).toBe(true);
       expect(fakeAdb.wasCommandExecuted("image_path")).toBe(true);
     } finally {

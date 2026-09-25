@@ -382,20 +382,29 @@ describe("AndroidApkContentHasher (pm path resolution)", () => {
         return { checksum: pullChecksums === 1 ? DIGEST_B : DIGEST_Z, source: "node" as const };
       },
     };
-    const adb = fakeAdb((command) => {
-      if (command.includes("pm path")) {
-        return ok("package:/a/base.apk\npackage:/a/split.apk\n");
-      }
-      if (command.includes("sha256sum")) {
-        return ok(`${DIGEST_A}  /a/base.apk\nsha256sum: /a/split.apk: No such file or directory\n`);
-      }
-      return ok(""); // pull
-    });
+    const pullTimeouts: number[] = [];
+    const adb = {
+      executeCommand: async (command: string, timeoutMs?: number) => {
+        if (command.startsWith("pull ")) {
+          pullTimeouts.push(timeoutMs ?? 0);
+        }
+        if (command.includes("pm path")) {
+          return ok("package:/a/base.apk\npackage:/a/split.apk\n");
+        }
+        if (command.includes("sha256sum")) {
+          return ok(
+            `${DIGEST_A}  /a/base.apk\nsha256sum: /a/split.apk: No such file or directory\n`,
+          );
+        }
+        return ok("");
+      },
+    } as AdbExecutor;
     const hasher = new AndroidApkContentHasher(adb, checksum);
     const hash = await hasher.computeHash(fakeDevice("emu-1"), "com.example.app", 0);
 
     // Fell back to pull (hashed both APKs), NOT the partial single on-device digest.
     expect(pullChecksums).toBe(2);
+    expect(pullTimeouts).toEqual([120_000, 120_000]);
     expect(hash).toBe(combineApkDigests(`${DIGEST_B}  /a/base.apk\n${DIGEST_Z}  /a/split.apk`));
     expect(hash).not.toBe(combineApkDigests(`${DIGEST_A}  /a/base.apk`));
   });

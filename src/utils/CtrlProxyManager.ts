@@ -44,6 +44,8 @@ import {
 
 export const MAX_STALE_PREFETCH_DIRS_PER_STARTUP = 20;
 export const STALE_PREFETCH_SWEEP_DEADLINE_MS = 5_000;
+const CTRL_PROXY_INSTALL_TIMEOUT_MS = 120_000;
+const CTRL_PROXY_PULL_TIMEOUT_MS = 120_000;
 
 /**
  * Android-specific accessibility-service lifecycle, extending the
@@ -1319,7 +1321,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       try {
         result.attemptedInstall = true;
         perf.startOperation("installApk");
-        await this.adb.executeCommand(`install -r -d "${apkPath}"`);
+        await this.adb.executeCommand(`install -r -d "${apkPath}"`, CTRL_PROXY_INSTALL_TIMEOUT_MS);
         perf.endOperation("installApk");
         logger.info("[CTRL_PROXY] APK upgraded successfully");
         this.clearAvailabilityCache();
@@ -1338,7 +1340,10 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     try {
       result.attemptedReinstall = true;
       if (isInstalled) {
-        await this.adb.executeCommand(`shell pm uninstall ${AndroidCtrlProxyManager.PACKAGE}`);
+        await this.adb.executeCommand(
+          `shell pm uninstall ${AndroidCtrlProxyManager.PACKAGE}`,
+          CTRL_PROXY_INSTALL_TIMEOUT_MS,
+        );
       }
       perf.startOperation("installApk");
       await this.install(apkPath);
@@ -1482,7 +1487,10 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       logger.info(
         `[CTRL_PROXY] Found legacy package ${AndroidCtrlProxyManager.LEGACY_PACKAGE}, uninstalling`,
       );
-      await this.adb.executeCommand(`shell pm uninstall ${AndroidCtrlProxyManager.LEGACY_PACKAGE}`);
+      await this.adb.executeCommand(
+        `shell pm uninstall ${AndroidCtrlProxyManager.LEGACY_PACKAGE}`,
+        CTRL_PROXY_INSTALL_TIMEOUT_MS,
+      );
       logger.info(`[CTRL_PROXY] Legacy package uninstalled`);
     } catch (error) {
       logger.warn(`[CTRL_PROXY] Failed to check/uninstall legacy package: ${error}`);
@@ -1496,7 +1504,10 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     try {
       logger.info("Installing APK", { path: apkPath });
 
-      const result = await this.adb.executeCommand(`install "${apkPath}"`);
+      const result = await this.adb.executeCommand(
+        `install "${apkPath}"`,
+        CTRL_PROXY_INSTALL_TIMEOUT_MS,
+      );
       const resultString = result.toString().toLowerCase();
 
       if (resultString.includes("failure") || resultString.includes("error")) {
@@ -2126,7 +2137,10 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     const localApkPath = path.join(tempDir, `control-proxy-installed-${safeDeviceId}.apk`);
 
     try {
-      await this.adb.executeCommand(`pull "${apkPath}" "${localApkPath}"`);
+      await this.adb.executeCommand(
+        `pull "${apkPath}" "${localApkPath}"`,
+        CTRL_PROXY_PULL_TIMEOUT_MS,
+      );
       const apkBuffer = await fs.readFile(localApkPath);
       const sha256 = crypto.createHash("sha256").update(apkBuffer).digest("hex");
       return {

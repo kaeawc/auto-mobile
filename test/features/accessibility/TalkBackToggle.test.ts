@@ -177,6 +177,14 @@ describe("TalkBackToggle", () => {
       );
       expect(fakeAdb.wasCommandExecuted("shell cat /sdcard/window_dump.xml")).toBe(true);
       expect(fakeAdb.wasCommandExecuted("/dev/tty")).toBe(false);
+      const calls = fakeAdb.getCommandCalls();
+      expect(
+        calls.find((call) => call.command === "shell uiautomator dump /sdcard/window_dump.xml")
+          ?.timeoutMs,
+      ).toBe(30_000);
+      expect(
+        calls.find((call) => call.command === "shell cat /sdcard/window_dump.xml")?.timeoutMs,
+      ).toBeUndefined();
     });
 
     test("taps Allow button when permission dialog is present (English)", async () => {

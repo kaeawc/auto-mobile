@@ -65,7 +65,7 @@ type SpawnFn = (file: string, args: string[], options?: SpawnOptions) => ChildPr
 export const adbHostProcessExecutor: HostProcessExecutor = new DefaultHostCommandExecutor();
 
 /**
- * Thrown when an adb command exceeds the caller-supplied `timeoutMs` budget, as
+ * Thrown when an adb command exceeds its effective `timeoutMs` budget, as
  * opposed to failing for a device reason (offline, adb error, non-numeric output).
  *
  * The distinction is load-bearing for callers that thread a request deadline — the
@@ -176,6 +176,7 @@ export class AdbClient implements AdbExecutor {
   private readonly timer: Timer;
 
   private static readonly DEVICE_LIST_TIMEOUT_MS = 10000;
+  private static readonly DEFAULT_COMMAND_TIMEOUT_MS = 15_000;
   private static readonly MAX_ADB_RETRIES = 3;
   private static readonly MAX_MACOS_MISSING_ADB_PROBES = 3;
   private static macosMissingAdbProbes = 0;
@@ -189,6 +190,7 @@ export class AdbClient implements AdbExecutor {
    * @param timer - Timer for delays and time tracking
    * @param observationSequence - Monotonic discovery ordering source
    * @param consoleBusyRegistry - Shared console-exclusive operation state
+   * @param defaultTimeoutMs - Per-command budget when no timeout is supplied
    */
   constructor(
     device: BootedDevice | null = null,
@@ -203,6 +205,7 @@ export class AdbClient implements AdbExecutor {
       new DefaultSystemDetection(),
     private readonly observationSequence: DiscoveryObservationSequence = defaultDiscoveryObservationSequence,
     private readonly consoleBusyRegistry?: AdbConsoleBusyRegistry,
+    private readonly defaultTimeoutMs: number = AdbClient.DEFAULT_COMMAND_TIMEOUT_MS,
   ) {
     this.device = device;
     // Test mode if: custom execAsync provided OR global test mode flag is set
@@ -572,10 +575,13 @@ export class AdbClient implements AdbExecutor {
       beforeDispatch,
       waitForProcessSettlementAfterAbort,
     } = options;
+    // The default uses the same AdbCommandTimeoutError and SIGTERM path as an
+    // explicit timeout; long-lived spawn commands do not pass through here.
+    const effectiveTimeoutMs = timeoutMs ?? this.defaultTimeoutMs;
     const startTime = this.timer.now();
     const result = await this.executeArgsImpl(
       args,
-      timeoutMs,
+      effectiveTimeoutMs,
       maxBuffer,
       noRetry,
       signal,
@@ -1006,23 +1012,41 @@ export class AdbClient implements AdbExecutor {
 
     // Use retry executor for retryable commands
     let busyAtDispatch = false;
+    let lastDispatchTimeout: AdbCommandTimeoutError | undefined;
+    const remainingTimeoutMs = () => {
+      try {
+        return this.getRemainingTimeoutMs(timeoutMs, startTime, command);
+      } catch (error) {
+        if (error instanceof AdbCommandTimeoutError && lastDispatchTimeout) {
+          throw lastDispatchTimeout;
+        }
+        throw error;
+      }
+    };
     return this.retryExecutor.executeOrThrow(
       async () => {
         busyAtDispatch = false;
         if (resolvedSignal?.aborted) {
           throw this.getAbortError(resolvedSignal);
         }
-        await beforeDispatch?.(this.getRemainingTimeoutMs(timeoutMs, startTime, command));
+        await beforeDispatch?.(remainingTimeoutMs());
         busyAtDispatch = this.isConsoleBusyAtDispatch();
-        const result = await this.execWithSignal(
-          adbPath,
-          fullArgs,
-          maxBuffer,
-          this.getRemainingTimeoutMs(timeoutMs, startTime, command),
-          resolvedSignal,
-          waitForProcessSettlementAfterAbort,
-        );
-        return result;
+        const remainingMs = remainingTimeoutMs();
+        try {
+          return await this.execWithSignal(
+            adbPath,
+            fullArgs,
+            maxBuffer,
+            remainingMs,
+            resolvedSignal,
+            waitForProcessSettlementAfterAbort,
+          );
+        } catch (error) {
+          if (error instanceof AdbCommandTimeoutError) {
+            lastDispatchTimeout = error;
+          }
+          throw error;
+        }
       },
       {
         maxAttempts: AdbClient.MAX_ADB_RETRIES + 1,

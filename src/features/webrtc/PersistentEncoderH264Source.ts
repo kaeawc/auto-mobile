@@ -829,7 +829,10 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
       return null;
     }
     const forward = await this.withTimeout(
-      adb.executeCommand(`forward tcp:0 localabstract:${session.socketName}`),
+      adb.executeCommand(
+        `forward tcp:0 localabstract:${session.socketName}`,
+        this.commandTimeoutMs,
+      ),
       this.commandTimeoutMs,
       "adb forward video-server socket",
     );
@@ -878,7 +881,10 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
       );
     }
     await this.withTimeout(
-      adb.executeCommand(`push "${this.options.jarPath}" ${VIDEO_SERVER_REMOTE_JAR_PATH}`),
+      adb.executeCommand(
+        `push "${this.options.jarPath}" ${VIDEO_SERVER_REMOTE_JAR_PATH}`,
+        this.commandTimeoutMs,
+      ),
       this.commandTimeoutMs,
       "adb push video-server jar",
     );
@@ -953,7 +959,7 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
       `wc -c < ${VIDEO_SERVER_REMOTE_JAR_PATH} 2>/dev/null`;
     try {
       const result = await this.withTimeout(
-        adb.executeCommand(`shell sh -c ${shellQuote(probe)}`),
+        adb.executeCommand(`shell sh -c ${shellQuote(probe)}`, this.commandTimeoutMs),
         this.commandTimeoutMs,
         "adb hash video-server jar",
       );

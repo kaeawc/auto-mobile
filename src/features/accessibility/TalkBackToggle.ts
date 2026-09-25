@@ -13,6 +13,7 @@ const TALKBACK_PACKAGE = "com.google.android.marvin.talkback";
 const TALKBACK_SERVICE_FALLBACK = `${TALKBACK_PACKAGE}/${TALKBACK_PACKAGE}.TalkBackService`;
 const DIALOG_DISMISS_RETRIES = 4; // 1 immediate + 3 × 500ms = 1500ms max wait
 const DIALOG_DISMISS_DELAY_MS = 500;
+const UIAUTOMATOR_DUMP_TIMEOUT_MS = 30_000;
 
 export class TalkBackToggle {
   private readonly adb: AdbExecutor;
@@ -278,7 +279,10 @@ export class TalkBackToggle {
    */
   private async dumpWindowHierarchy(): Promise<string> {
     const remotePath = "/sdcard/window_dump.xml";
-    await this.adb.executeCommand(`shell uiautomator dump ${remotePath}`);
+    await this.adb.executeCommand(
+      `shell uiautomator dump ${remotePath}`,
+      UIAUTOMATOR_DUMP_TIMEOUT_MS,
+    );
     const catResult = await this.adb.executeCommand(`shell cat ${remotePath}`);
     return catResult.stdout;
   }

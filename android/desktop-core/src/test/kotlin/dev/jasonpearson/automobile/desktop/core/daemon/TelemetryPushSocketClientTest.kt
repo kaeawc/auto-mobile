@@ -1,7 +1,11 @@
 package dev.jasonpearson.automobile.desktop.core.daemon
 
 import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runCurrent
@@ -31,6 +35,38 @@ class TelemetryPushSocketClientTest {
     override fun close() = Unit
   }
 
+  private class SilentFakeSocket(private val finishInterruptedRead: CountDownLatch? = null) :
+    TelemetrySocket {
+    val readEntered = CompletableDeferred<Unit>()
+    val readInterrupted = CompletableDeferred<Unit>()
+    val closed = CompletableDeferred<Unit>()
+    val closeCount = AtomicInteger()
+    private val closeGate = CountDownLatch(1)
+
+    override fun readLine(): String? {
+      readEntered.complete(Unit)
+      try {
+        closeGate.await()
+      } catch (e: InterruptedException) {
+        readInterrupted.complete(Unit)
+        if (finishInterruptedRead != null) {
+          Thread.interrupted()
+          finishInterruptedRead.await()
+        }
+        throw e
+      }
+      return null
+    }
+
+    override fun writeLine(line: String) = Unit
+
+    override fun close() {
+      closeCount.incrementAndGet()
+      closeGate.countDown()
+      closed.complete(Unit)
+    }
+  }
+
   @Test
   fun `dataless accepts increase attempt and backoff`() = runTest {
     val delays = FakeRetryDelay()
@@ -42,6 +78,7 @@ class TelemetryPushSocketClientTest {
 
     client.connect()
     runCurrent()
+    client.connectionState.first { it is ConnectionState.Error }
 
     assertEquals(
       listOf(1, 2, 3, 4),
@@ -70,6 +107,7 @@ class TelemetryPushSocketClientTest {
 
     client.connect()
     runCurrent()
+    client.connectionState.first { it is ConnectionState.Error }
 
     assertEquals(TelemetryPushSocketClient.MAX_RECONNECT_ATTEMPTS, opens)
     assertEquals(
@@ -100,6 +138,7 @@ class TelemetryPushSocketClientTest {
 
     client.connect()
     runCurrent()
+    client.connectionState.first { it is ConnectionState.Error }
 
     assertTrue(states.contains(ConnectionState.Connected(subscribed = true)))
     assertEquals(
@@ -129,13 +168,46 @@ class TelemetryPushSocketClientTest {
 
     client.connect()
     runCurrent()
+    client.connectionState.first { it is ConnectionState.Error }
     assertTrue(states.last() is ConnectionState.Error)
     client.connect()
     runCurrent()
+    client.connectionState.first { it is ConnectionState.Error }
 
     assertEquals(2 * TelemetryPushSocketClient.MAX_RECONNECT_ATTEMPTS, opens)
     assertEquals(2, states.count { it is ConnectionState.Connecting })
     assertEquals(2, states.count { it is ConnectionState.Reconnecting && it.attempt == 1 })
     client.dispose()
+  }
+
+  @Test
+  fun `reconnect interrupts the old read without closing the new socket`() = runTest {
+    val finishInterruptedRead = CountDownLatch(1)
+    val firstSocket = SilentFakeSocket(finishInterruptedRead)
+    val secondSocket = SilentFakeSocket()
+    val sockets = ArrayDeque(listOf(firstSocket, secondSocket))
+    val client = TelemetryPushSocketClient({ sockets.removeFirst() }, {}, backgroundScope, { true })
+
+    client.connect()
+    runCurrent()
+    firstSocket.readEntered.await()
+
+    client.connect()
+    runCurrent()
+    firstSocket.readInterrupted.await()
+    secondSocket.readEntered.await()
+    try {
+      assertFalse(firstSocket.closed.isCompleted)
+    } finally {
+      finishInterruptedRead.countDown()
+    }
+    firstSocket.closed.await()
+
+    assertEquals(1, firstSocket.closeCount.get())
+    assertEquals(0, secondSocket.closeCount.get())
+    assertEquals(ConnectionState.Connecting, client.connectionState.replayCache.single())
+
+    client.dispose()
+    secondSocket.closed.await()
   }
 }

@@ -19,13 +19,16 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.min
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -33,6 +36,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runInterruptible
 import kotlinx.serialization.serializer
 
 internal interface TelemetrySocket : AutoCloseable {
@@ -94,7 +98,7 @@ internal constructor(
 
   private val log = LoggerFactory.getLogger(TelemetryPushSocketClient::class.java)
   private val json = DaemonJson
-  private var socket: TelemetrySocket? = null
+  private val socket = AtomicReference<TelemetrySocket?>()
   private var connectionJob: Job? = null
 
   private val _state = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected(null))
@@ -148,26 +152,30 @@ internal constructor(
 
     while (_shouldReconnect) {
       log.info("Connecting to telemetry push at $socketPath (attempt ${attempt + 1})")
+      var currentSocket: TelemetrySocket? = null
 
       try {
         if (!socketAvailable(socketPath)) {
           throw SocketNotFoundError("Socket not found at $socketPath")
         }
-        socket = openSocket(socketPath)
+        currentSocket = openSocket(socketPath)
+        currentCoroutineContext().ensureActive()
+        socket.set(currentSocket)
 
         // Subscribe to all events (filter client-side)
-        subscribe()
+        subscribe(currentSocket)
 
         // Read messages (blocks until disconnected)
-        readMessages { attempt = 0 }
+        readMessages(currentSocket) { attempt = 0 }
       } catch (e: CancellationException) {
         throw e
       } catch (e: Exception) {
         log.warn("Telemetry push connection failed: ${e.message}")
       } finally {
-        cleanupConnection()
+        cleanupConnection(currentSocket)
       }
 
+      currentCoroutineContext().ensureActive()
       if (!_shouldReconnect) return
       attempt++
       if (attempt >= MAX_RECONNECT_ATTEMPTS) {
@@ -210,7 +218,7 @@ internal constructor(
     } catch (e: Exception) {
       log.warn("Error disconnecting from telemetry push: ${e.message}")
     }
-    cleanupConnection()
+    cleanupConnection(socket.getAndSet(null))
   }
 
   override fun isConnected(): Boolean = _isConnected
@@ -224,7 +232,7 @@ internal constructor(
     scope.coroutineContext[Job]?.cancel()
   }
 
-  private fun subscribe() {
+  private fun subscribe(currentSocket: TelemetrySocket) {
     val request =
       TelemetryPushRequest(
         id = UUID.randomUUID().toString(),
@@ -233,11 +241,16 @@ internal constructor(
         deviceId = subscribedDeviceId,
       )
 
-    if (!sendRequest(request)) throw IllegalStateException("Failed to send telemetry subscription")
+    if (!sendRequest(request, currentSocket)) {
+      throw IllegalStateException("Failed to send telemetry subscription")
+    }
   }
 
-  private fun sendRequest(request: TelemetryPushRequest): Boolean {
-    val currentSocket = socket ?: return false
+  private fun sendRequest(
+    request: TelemetryPushRequest,
+    currentSocket: TelemetrySocket? = socket.get(),
+  ): Boolean {
+    currentSocket ?: return false
 
     return try {
       val message = json.encodeToString(serializer<TelemetryPushRequest>(), request)
@@ -249,14 +262,13 @@ internal constructor(
     }
   }
 
-  private suspend fun readMessages(onHealthy: () -> Unit) {
-    val currentSocket = socket ?: return
-
+  private suspend fun readMessages(currentSocket: TelemetrySocket, onHealthy: () -> Unit) {
     try {
       log.info("Starting telemetry push message read loop")
 
       while (_shouldReconnect) {
-        val line = currentSocket.readLine() ?: break
+        val line = runInterruptible(Dispatchers.IO) { currentSocket.readLine() } ?: break
+        currentCoroutineContext().ensureActive()
         if (line.isBlank()) continue
 
         try {
@@ -269,6 +281,8 @@ internal constructor(
           log.warn("Failed to parse telemetry push message: ${e.message}", e)
         }
       }
+    } catch (e: CancellationException) {
+      throw e
     } catch (e: Exception) {
       log.warn("Error reading from telemetry push: ${e.message}", e)
     }
@@ -276,11 +290,11 @@ internal constructor(
     log.info("Telemetry push read loop ended")
   }
 
-  private fun cleanupConnection() {
+  private fun cleanupConnection(currentSocket: TelemetrySocket?) {
     try {
-      socket?.close()
+      currentSocket?.close()
     } catch (_: Exception) {}
-    socket = null
+    socket.compareAndSet(currentSocket, null)
   }
 
   private suspend fun handleMessage(message: String): Boolean {

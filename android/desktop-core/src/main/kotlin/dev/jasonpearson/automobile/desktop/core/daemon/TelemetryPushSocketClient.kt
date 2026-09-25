@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.desktop.core.daemon
 import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.core.connection.isConnected
 import dev.jasonpearson.automobile.desktop.core.connection.shouldReconnect
+import dev.jasonpearson.automobile.desktop.core.logging.Logger
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.core.telemetry.TelemetryDisplayEvent
 import dev.jasonpearson.automobile.desktop.core.telemetry.TelemetryPushRequest
@@ -79,6 +80,7 @@ internal constructor(
   private val retryDelay: TelemetryRetryDelay,
   private val scope: CoroutineScope,
   private val socketAvailable: (String) -> Boolean,
+  private val log: Logger = LoggerFactory.getLogger(TelemetryPushSocketClient::class.java),
 ) : TelemetryPushClient {
   constructor() :
     this(
@@ -96,10 +98,19 @@ internal constructor(
     fun socketExists(): Boolean = Files.exists(Path.of(getSocketPath()))
   }
 
-  private val log = LoggerFactory.getLogger(TelemetryPushSocketClient::class.java)
   private val json = DaemonJson
   private val socket = AtomicReference<TelemetrySocket?>()
   private var connectionJob: Job? = null
+  private val loggedFieldMismatches = mutableSetOf<String>()
+
+  private fun warnFieldMismatch(category: String, field: String) {
+    val key = "$category:$field"
+    synchronized(loggedFieldMismatches) {
+      if (loggedFieldMismatches.add(key)) {
+        log.warn("Recovered telemetry field shape mismatch: category=$category field=$field")
+      }
+    }
+  }
 
   private val _state = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected(null))
   override val connectionState: SharedFlow<ConnectionState> = _state.asStateFlow()
@@ -271,14 +282,10 @@ internal constructor(
         currentCoroutineContext().ensureActive()
         if (line.isBlank()) continue
 
-        try {
-          if (handleMessage(line) && !_isConnected) {
-            onHealthy()
-            _state.value = ConnectionState.Connected(subscribed = true)
-            log.info("Connected to telemetry push")
-          }
-        } catch (e: Exception) {
-          log.warn("Failed to parse telemetry push message: ${e.message}", e)
+        if (processMessage(line) && !_isConnected) {
+          onHealthy()
+          _state.value = ConnectionState.Connected(subscribed = true)
+          log.info("Connected to telemetry push")
         }
       }
     } catch (e: CancellationException) {
@@ -297,6 +304,16 @@ internal constructor(
     socket.compareAndSet(currentSocket, null)
   }
 
+  internal suspend fun processMessage(message: String): Boolean =
+    try {
+      handleMessage(message)
+    } catch (e: CancellationException) {
+      throw e
+    } catch (e: Exception) {
+      log.warn("Malformed telemetry push message; skipped: ${e.message}", e)
+      false
+    }
+
   private suspend fun handleMessage(message: String): Boolean {
     val response = json.decodeFromString(serializer<TelemetryPushResponse>(), message)
 
@@ -310,18 +327,24 @@ internal constructor(
       }
       "telemetry_push" -> {
         val envelope = response.data
-        if (envelope != null) {
+        if (envelope != null && envelope.category.isNotBlank()) {
           try {
-            val event = parseTelemetryEvent(envelope)
+            val event =
+              parseTelemetryEvent(envelope) { field ->
+                warnFieldMismatch(envelope.category, field)
+              }
             if (event != null) {
               _telemetryEvents.tryEmit(event)
             }
             event != null
           } catch (e: Exception) {
-            log.warn("Failed to parse telemetry push message: ${e.message}")
+            log.warn("Malformed telemetry push event; skipped: ${e.message}")
             false
           }
-        } else false
+        } else {
+          log.warn("Malformed telemetry push event; missing data or category; skipped")
+          false
+        }
       }
       "ping" -> {
         log.debug("Received telemetry ping, sending pong")

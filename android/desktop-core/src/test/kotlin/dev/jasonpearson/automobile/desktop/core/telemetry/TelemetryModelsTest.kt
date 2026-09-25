@@ -1,6 +1,8 @@
 package dev.jasonpearson.automobile.desktop.core.telemetry
 
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
@@ -12,6 +14,52 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class TelemetryModelsTest {
+
+  @Test
+  fun `OS event with null details retains the event`() {
+    val data =
+      Json.parseToJsonElement("""{"category":"broadcast","kind":"action","details":null}""")
+        .jsonObject
+    val event =
+      parseTelemetryEvent(TelemetryEventEnvelope("os", 1L, data = data)) as TelemetryDisplayEvent.Os
+    assertEquals("broadcast", event.category)
+    assertNull(event.details)
+  }
+
+  @Test
+  fun `navigation map with nested value retains remaining fields`() {
+    val data =
+      Json.parseToJsonElement(
+          """{"destination":"screen","arguments":{"id":"42","options":{"tab":"home"}},"metadata":null}"""
+        )
+        .jsonObject
+    val mismatches = mutableListOf<String>()
+    val event =
+      parseTelemetryEvent(TelemetryEventEnvelope("navigation", 2L, data = data)) {
+        mismatches.add(it)
+      }
+        as TelemetryDisplayEvent.Navigation
+    assertEquals("screen", event.destination)
+    assertEquals(mapOf("id" to "42", "options" to """{"tab":"home"}"""), event.arguments)
+    assertEquals(listOf("arguments"), mismatches)
+  }
+
+  @Test
+  fun `storage string set wire value is preserved`() {
+    val data =
+      Json.parseToJsonElement(
+          """{"fileName":"settings.xml","key":"tags","value":["a","b"],"valueType":"STRING_SET","changeType":"modify"}"""
+        )
+        .jsonObject
+    val mismatches = mutableListOf<String>()
+    val event =
+      parseTelemetryEvent(TelemetryEventEnvelope("storage", 3L, data = data)) {
+        mismatches.add(it)
+      }
+        as TelemetryDisplayEvent.Storage
+    assertEquals("[\"a\",\"b\"]", event.value)
+    assertEquals(listOf("value"), mismatches)
+  }
 
   @Test
   fun `parseTelemetryEvent parses network event with camelCase fields`() {

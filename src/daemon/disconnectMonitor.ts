@@ -90,16 +90,6 @@ export function evaluateDeviceDisconnects(
       forceDisconnectedDeviceIds.delete(deviceId);
       continue;
     }
-
-    if (forceDisconnectedDeviceIds.has(deviceId)) {
-      clearMiss(deviceId);
-      disconnected.push(deviceId);
-      continue;
-    }
-  }
-
-  if (disconnected.length > 0) {
-    return { disconnected, missed, skippedAllDiscoveryFailed: false };
   }
 
   if (

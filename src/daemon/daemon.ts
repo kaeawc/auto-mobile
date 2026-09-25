@@ -2338,7 +2338,6 @@ export class Daemon {
         event.deviceId,
         (this.forceDisconnectedDeviceGenerations.get(event.deviceId) ?? 0) + 1,
       );
-      this.deviceDisconnectMisses.set(event.deviceId, DEVICE_DISCONNECT_MISS_THRESHOLD);
     });
   }
 

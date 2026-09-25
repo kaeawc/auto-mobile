@@ -820,6 +820,18 @@ export class SessionManager {
   }
 
   /**
+   * The `Timer` this manager was constructed with (issue #7541). Lets
+   * call sites that already receive a `SessionManager` — e.g.
+   * `ToolExecutionContext`'s device-readiness setup — reuse the same
+   * injected `Timer` (a `FakeTimer` in tests) instead of hard-wiring
+   * `defaultTimer`, so retry/backoff delays on that path stay fake-clock
+   * testable rather than sleeping in real time.
+   */
+  getTimer(): Timer {
+    return this.timer;
+  }
+
+  /**
    * Register a callback to be invoked when a session is released.
    * Used for centralized cleanup of session-scoped state (e.g., NavigationGraphManager).
    */

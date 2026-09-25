@@ -105,6 +105,23 @@ interface VideoStreamSource {
   val droppedFrames: SharedFlow<Long>
   val state: StateFlow<VideoStreamState>
 
+  /**
+   * Cadence, in milliseconds, at which the relay sends a zero-payload heartbeat while the capture
+   * has data (issue #7549), as advertised in the subscribe ack. Null before the ack arrives and for
+   * a daemon that predates this field — callers that gate a stall-reconnect policy on "the relay
+   * proves idle liveness" must treat null as "no such proof available", not as "definitely dead".
+   */
+  val heartbeatMs: StateFlow<Long?>
+
+  /**
+   * Wall-clock ms of the most recent relay-attested activity while `Streaming` — a heartbeat or
+   * dropped-frame telemetry packet — sharing a time base with [LiveVideoFrame.receivedAtMs]
+   * (issue #7549). Only meaningful once [heartbeatMs] is non-null; a source that never advertises a
+   * heartbeat leaves this at its initial value forever, which is harmless: nothing reads it as
+   * progress unless it changes.
+   */
+  val lastActivityMs: StateFlow<Long>
+
   fun connect(deviceId: String?)
 
   fun disconnect()
@@ -197,6 +214,11 @@ class VideoStreamClient(
   private val _state = MutableStateFlow<VideoStreamState>(VideoStreamState.Idle)
   override val state: StateFlow<VideoStreamState> = _state.asStateFlow()
 
+  private val _heartbeatMs = MutableStateFlow<Long?>(null)
+  override val heartbeatMs: StateFlow<Long?> = _heartbeatMs.asStateFlow()
+  private val _lastActivityMs = MutableStateFlow(0L)
+  override val lastActivityMs: StateFlow<Long> = _lastActivityMs.asStateFlow()
+
   private var channel: SocketChannel? = null
   private var readerJob: Job? = null
   private val sessionLock = Any()
@@ -259,6 +281,12 @@ class VideoStreamClient(
     fun publish(state: VideoStreamState) {
       if (isCurrent()) _state.value = state
     }
+    // Reset per-session so a stale value from a prior connect (a different daemon, or a refused
+    // subscribe) never survives into this attempt (issue #7549).
+    if (isCurrent()) {
+      _heartbeatMs.value = null
+      _lastActivityMs.value = 0L
+    }
 
     val decoder =
       try {
@@ -317,6 +345,9 @@ class VideoStreamClient(
           )
           return
         }
+        // Null on a daemon that predates this field; callers must treat that as "no relay-attested
+        // liveness available", not "definitely heartbeat-less" (issue #7549).
+        if (isCurrent()) _heartbeatMs.value = ack.heartbeatMs
 
         pumpFrames(input, decoder, sessionId)
         publish(VideoStreamState.Unavailable("Live mirroring stopped"))
@@ -370,7 +401,16 @@ class VideoStreamClient(
           LOG.info("Live mirroring started (${header.width}x${header.height} advertised)")
         },
         onPacket = { packet ->
+          if (packet.heartbeat) {
+            // Relay-attested liveness with no frame of its own (issue #7549): count as progress for
+            // the Streaming-stall watchdog without touching the decoder or rotation state.
+            if (sessionId == activeSessionId) _lastActivityMs.value = nowMs()
+            return@onBytes
+          }
           packet.droppedFrames?.let {
+            // Encoder-drop telemetry also proves the relay/source pipeline is alive, same as a
+            // heartbeat (issue #7549).
+            if (sessionId == activeSessionId) _lastActivityMs.value = nowMs()
             _droppedFrames.tryEmit(it)
             return@onBytes
           }
@@ -449,6 +489,11 @@ internal data class VideoStreamResponse(
   val deviceId: String? = null,
   val framing: String? = null,
   val permission: VideoStreamPermissionResponse? = null,
+  /**
+   * Interval, in ms, at which the relay writes a zero-payload heartbeat while the capture has data
+   * (issue #7549). Absent on a daemon that predates this field.
+   */
+  val heartbeatMs: Long? = null,
   val error: String? = null,
 )
 
@@ -498,6 +543,11 @@ class FakeVideoStreamSource(
 
   private val _state = MutableStateFlow<VideoStreamState>(VideoStreamState.Idle)
   override val state: StateFlow<VideoStreamState> = _state.asStateFlow()
+
+  private val _heartbeatMs = MutableStateFlow<Long?>(null)
+  override val heartbeatMs: StateFlow<Long?> = _heartbeatMs.asStateFlow()
+  private val _lastActivityMs = MutableStateFlow(0L)
+  override val lastActivityMs: StateFlow<Long> = _lastActivityMs.asStateFlow()
 
   var connectedDeviceId: String? = null
     private set
@@ -575,5 +625,22 @@ class FakeVideoStreamSource(
   /** Publishes source-side encoder-drop telemetry for quality-controller tests. */
   fun emitDroppedFrames(droppedFrames: Long) {
     _droppedFrames.tryEmit(droppedFrames)
+  }
+
+  /**
+   * Sets the advertised heartbeat cadence, as a real ack would report after connect (issue #7549).
+   * Null (the default) models a daemon that predates the field.
+   */
+  fun setHeartbeatMs(heartbeatMs: Long?) {
+    _heartbeatMs.value = heartbeatMs
+  }
+
+  /**
+   * Simulates a relay heartbeat: bumps [lastActivityMs] with no accompanying frame, so a test can
+   * drive the Streaming-stall watchdog's heartbeat-progress path for a source with no idle frames
+   * of its own (issue #7549).
+   */
+  fun emitHeartbeat() {
+    _lastActivityMs.value = nowMs()
   }
 }

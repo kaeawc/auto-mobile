@@ -229,17 +229,21 @@ internal const val LIVE_RECONNECT_MAX_MS = 15_000L
 
 /**
  * Streaming-stall reconnect window for [rememberLiveVideoFrame]: force a reconnect after this long
- * in `Streaming` with no frame progress. A relay that stalls with its socket OPEN (device capture
+ * in `Streaming` with no progress. A relay that stalls with its socket OPEN (device capture
  * silently dead, half-open socket) stays `Streaming`, so the Unavailable-driven reconnect never
- * fires and the mirror silently freezes; frame progress ceasing is the only signal.
+ * fires and the mirror silently freezes; progress ceasing is the only signal.
  *
- * This is ONLY valid for sources that emit idle heartbeat frames, so "no progress" unambiguously
- * means "stalled" rather than "static screen": the Android video-server's FrameHeartbeat re-submits
- * ~1 fps while idle. The iOS ScreenCaptureKit capture deliberately DROPS idle buffers (`status !=
- * .complete`), so a healthy static iOS screen makes no decoded-frame progress — those callers pass
- * `stallReconnectMs = null` to disable this watchdog and rely on the first-frame deadline plus the
- * Unavailable retry instead. The reconnect is visually free: the last frame is retained while the
- * fresh subscribe (which re-requests a key frame) replaces it.
+ * "Progress" is a newer decoded frame OR [VideoStreamSource.lastActivityMs] advancing — the latter
+ * from the daemon relay's own heartbeat, sent every ~1s while a capture has data regardless of
+ * which backend produced it (issue #7549). That is what makes this watchdog safe for a genuinely
+ * static screen on ANY backend, including ones with no idle frames of their own (the screenrecord
+ * fallback, iOS ScreenCaptureKit, which deliberately drops idle buffers with `status !=
+ * .complete`): a healthy idle stream still advances `lastActivityMs` every heartbeat, well under
+ * this window, so "no progress" unambiguously means "stalled" rather than "static screen". A caller
+ * only needs `stallReconnectMs = null` for a daemon that predates the heartbeat (`heartbeatMs ==
+ * null`), where neither signal is available — see the call sites' fallback to the old per-platform
+ * heuristic. The reconnect is visually free: the last frame is retained while the fresh subscribe
+ * (which re-requests a key frame) replaces it.
  */
 internal const val LIVE_STALL_RECONNECT_MS = 10_000L
 internal const val LIVE_STALL_CHECK_INTERVAL_MS = 2_000L
@@ -358,12 +362,14 @@ internal fun rememberLiveVideoFrame(
   }
 
   // Progress watchdog: recovers the two silent freezes the Unavailable-driven retry can't see —
-  //  - a `Streaming` relay that stops delivering frames (stall), for heartbeat-capable sources; and
+  //  - a `Streaming` relay that stops delivering frames (stall), when the caller passes a non-null
+  //    stallReconnectMs; and
   //  - a `Connecting` subscribe that never yields a decodable first frame (the key-frame wedge).
   // Both re-subscribe (disconnect+connect), which re-requests a key frame; the retained last frame
-  // keeps rendering across it. Idle static screens are handled correctly: on iOS stallReconnectMs
-  // is null so an idle `Streaming` stream is left alone, and the first-frame deadline only applies
-  // BEFORE the first frame, where a static screen is irrelevant.
+  // keeps rendering across it. Idle static screens are handled correctly: the relay's own heartbeat
+  // (issue #7549) advances lastActivityMs well inside the window on any backend, so a caller only
+  // passes stallReconnectMs = null for a daemon too old to advertise heartbeatMs, and the
+  // first-frame deadline only applies BEFORE the first frame, where a static screen is irrelevant.
   LaunchedEffect(source, deviceId, autoReconnect, streamingEnabled) {
     // Gate on streamingEnabled too: while paused the source sits Idle after disconnect, and the
     // Connecting/Idle branch below would otherwise treat that as a never-first-frame wedge and
@@ -379,10 +385,16 @@ internal fun rememberLiveVideoFrame(
     // frameSequence is a monotonic per-source counter, so the next real frame always outranks the
     // retained one and still registers as progress.
     var lastSeenSequence = liveFrame?.sequence ?: -1L
+    // Relay-attested liveness with no frame of its own (issue #7549): a heartbeat or dropped-frame
+    // telemetry packet bumps this on the source, sharing a time base with `frame.receivedAtMs`.
+    // Seeded from the source's current value (like `lastSeenSequence` from the retained frame) so a
+    // watchdog restart never mistakes activity that happened before it started for fresh progress.
+    var lastSeenActivityMs = source.lastActivityMs.value
     fun reconnect(reason: String) {
       LOG.info("Live mirror for $deviceId reconnecting: $reason")
       noProgressSinceMs = nowMs()
       lastSeenSequence = -1L
+      lastSeenActivityMs = source.lastActivityMs.value
       source.disconnect()
       source.connect(deviceId)
     }
@@ -391,9 +403,15 @@ internal fun rememberLiveVideoFrame(
       when (source.state.value) {
         is VideoStreamState.Streaming -> {
           val frame = liveFrame
+          val activityMs = source.lastActivityMs.value
           if (frame != null && frame.sequence != lastSeenSequence) {
             lastSeenSequence = frame.sequence
             noProgressSinceMs = frame.receivedAtMs
+          } else if (activityMs != lastSeenActivityMs) {
+            // A heartbeat-capable relay (issue #7549) proves the pipeline alive even when the
+            // screen is genuinely static and no new frame decodes.
+            lastSeenActivityMs = activityMs
+            noProgressSinceMs = activityMs
           } else if (stallReconnectMs != null && nowMs() - noProgressSinceMs >= stallReconnectMs) {
             reconnect("no frame progress for ${stallReconnectMs}ms while Streaming")
           }
@@ -411,6 +429,7 @@ internal fun rememberLiveVideoFrame(
           // clock fresh so a recovered session gets a full window before being judged.
           noProgressSinceMs = nowMs()
           lastSeenSequence = -1L
+          lastSeenActivityMs = source.lastActivityMs.value
         }
       }
     }

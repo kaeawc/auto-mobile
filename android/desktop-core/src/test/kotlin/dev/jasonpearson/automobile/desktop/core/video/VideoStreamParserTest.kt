@@ -130,6 +130,28 @@ class VideoStreamParserTest {
   }
 
   @Test
+  fun `decodes a zero-payload heartbeat without treating it as video or dropped-frame telemetry`() {
+    // Bit 60, non-config, zero payload — matches videoStreamFraming.ts's encodeHeartbeat().
+    val heartbeat =
+      ByteBuffer.allocate(12).order(ByteOrder.BIG_ENDIAN).putLong(1L shl 60).putInt(0).array()
+
+    val out = feed(VideoStreamParser(), streamHeader() + heartbeat)
+
+    val packet = out.packets.single()
+    assertTrue(packet.heartbeat)
+    assertTrue(packet.payload.isEmpty())
+    assertEquals(null, packet.droppedFrames)
+    assertTrue(!packet.isConfig)
+  }
+
+  @Test
+  fun `heartbeat is false for an ordinary packet`() {
+    val out = feed(VideoStreamParser(), streamHeader() + packet(byteArrayOf(1, 2, 3)))
+
+    assertTrue(!out.packets.single().heartbeat)
+  }
+
+  @Test
   fun `config and key-frame flags survive the round trip`() {
     val out =
       feed(

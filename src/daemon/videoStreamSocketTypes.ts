@@ -72,5 +72,14 @@ export interface VideoStreamSocketResponse {
   framing?: "h264";
   /** Structured recovery state; accompanied by a concise legacy error for older clients. */
   permission?: VideoStreamPermission;
+  /**
+   * Interval, in milliseconds, at which the relay writes a zero-payload heartbeat packet to a
+   * promoted subscriber while the capture is producing data (issue #7549). Lets a desktop client
+   * tell "quietly healthy" apart from "silently dead" for sources with no idle output of their own
+   * (screenrecord, iOS), instead of assuming only the Android persistent-encoder heartbeat exists.
+   * Omitted by an older daemon; the desktop treats that as "no heartbeat available" and falls back
+   * to its prior per-platform stall policy.
+   */
+  heartbeatMs?: number;
   error?: string;
 }

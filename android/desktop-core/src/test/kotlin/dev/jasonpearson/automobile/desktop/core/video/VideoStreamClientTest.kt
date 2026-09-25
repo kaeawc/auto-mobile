@@ -53,10 +53,21 @@ class VideoStreamClientTest {
     keepOpen: Boolean = false,
     rotation: Int? = null,
     maxConnections: Int = 1,
+    heartbeatMs: Long? = null,
+    sendHeartbeatAfterPayload: Boolean = false,
   ): FakeRelay =
-    FakeRelay(success, error, permissionJson, payload, keepOpen, rotation, maxConnections).also {
-      servers.add(it)
-    }
+    FakeRelay(
+        success,
+        error,
+        permissionJson,
+        payload,
+        keepOpen,
+        rotation,
+        maxConnections,
+        heartbeatMs,
+        sendHeartbeatAfterPayload,
+      )
+      .also { servers.add(it) }
 
   @Test
   fun `subscribes with the device id and decodes frames`() = runBlocking {
@@ -129,6 +140,55 @@ class VideoStreamClientTest {
     assertTrue(state is VideoStreamState.Streaming, "expected Streaming, was $state")
     assertEquals(320, (state as VideoStreamState.Streaming).width)
     assertEquals(240, state.height)
+
+    client.dispose()
+  }
+
+  // --- Relay-originated heartbeat (issue #7549) ---
+
+  @Test
+  fun `parses the relay's advertised heartbeat cadence from the ack`() = runBlocking {
+    val server = relay(payload = sampleH264(), heartbeatMs = 1_000)
+    val client = VideoStreamClient(socketPathValue = server.socketPath.toString())
+
+    client.connect("emulator-5554")
+    server.awaitFirstFrameFrom(client)
+
+    assertEquals(1_000L, client.heartbeatMs.value)
+
+    client.dispose()
+  }
+
+  @Test
+  fun `heartbeatMs stays null for a daemon that predates the field`() = runBlocking {
+    val server = relay(payload = sampleH264())
+    val client = VideoStreamClient(socketPathValue = server.socketPath.toString())
+
+    client.connect("emulator-5554")
+    server.awaitFirstFrameFrom(client)
+
+    assertEquals(null, client.heartbeatMs.value)
+
+    client.dispose()
+  }
+
+  @Test
+  fun `a relay heartbeat packet bumps lastActivityMs without decoding it as video`() = runBlocking {
+    // The whole payload plus the trailing heartbeat can arrive in a single socket read, so the two
+    // are processed synchronously back to back. Asserting on lastActivityMs starting at its 0L
+    // reset value, rather than racing a before/after snapshot around the first-frame wait, is what
+    // makes this deterministic.
+    val server =
+      relay(payload = sampleH264(), heartbeatMs = 1_000, sendHeartbeatAfterPayload = true)
+    val client = VideoStreamClient(socketPathValue = server.socketPath.toString())
+
+    client.connect("emulator-5554")
+    val frame = server.awaitFirstFrameFrom(client)
+    waitUntil { client.lastActivityMs.value != 0L }
+
+    // The heartbeat must not have been mistaken for a decodable frame: the replay cache still holds
+    // the same latest decoded frame.
+    assertEquals(frame.sequence, client.frames.replayCache.first().sequence)
 
     client.dispose()
   }
@@ -399,6 +459,11 @@ class VideoStreamClientTest {
     // be exercised against one relay; each connection is handled on its own daemon thread so a
     // keepOpen session never blocks the accept loop.
     private val maxConnections: Int = 1,
+    // Advertised in the ack's `heartbeatMs` field (issue #7549); null omits the field, modeling a
+    // daemon that predates it.
+    private val heartbeatMs: Long? = null,
+    // When true, writes one zero-payload heartbeat packet right after the video payload.
+    private val sendHeartbeatAfterPayload: Boolean = false,
   ) : AutoCloseable {
     private val tempDir: Path = Files.createTempDirectory(Path.of("/tmp"), "amvsc-")
     val socketPath: Path = tempDir.resolve("video-stream.sock")
@@ -419,7 +484,11 @@ class VideoStreamClientTest {
 
         val ack =
           if (success) {
-            """{"id":"1","type":"video_stream_response","success":true,"framing":"h264"}"""
+            buildString {
+              append("""{"id":"1","type":"video_stream_response","success":true,"framing":"h264"""")
+              if (heartbeatMs != null) append(""","heartbeatMs":$heartbeatMs""")
+              append("}")
+            }
           } else {
             buildString {
               append("""{"id":"1","type":"video_stream_response","success":false""")
@@ -433,6 +502,9 @@ class VideoStreamClientTest {
 
         if (success && payload != null) {
           writeStream(out, payload)
+        }
+        if (success && sendHeartbeatAfterPayload) {
+          writeHeartbeat(out)
         }
         while (keepOpen && !Thread.currentThread().isInterrupted) {
           Thread.sleep(1000)
@@ -490,6 +562,14 @@ class VideoStreamClientTest {
           .array()
       )
       out.write(annexB)
+      out.flush()
+    }
+
+    /** Writes a zero-payload heartbeat packet (bit 60, non-config), matching the daemon relay. */
+    private fun writeHeartbeat(out: OutputStream) {
+      out.write(
+        ByteBuffer.allocate(12).order(ByteOrder.BIG_ENDIAN).putLong(1L shl 60).putInt(0).array()
+      )
       out.flush()
     }
 

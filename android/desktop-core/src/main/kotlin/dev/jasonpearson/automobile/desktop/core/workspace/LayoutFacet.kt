@@ -1,6 +1,8 @@
 package dev.jasonpearson.automobile.desktop.core.workspace
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import dev.jasonpearson.automobile.desktop.core.LIVE_STALL_RECONNECT_MS
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStream
@@ -68,15 +70,24 @@ fun LayoutFacet(
       socketAvailable = socketAvailable,
     )
   val videoSource = remember(column.deviceId) { videoSourceFactory(column.deviceId) }
+  // The relay's own heartbeat (issue #7549) makes the Streaming-stall watchdog safe on any backend,
+  // including iOS's idle-buffer-dropping capture — a static inspected screen still advances
+  // lastActivityMs every heartbeat. Only a daemon too old to advertise heartbeatMs falls back to
+  // the
+  // pre-#7549 per-platform heuristic (Android had its own idle-frame heartbeat; iOS did not).
+  val heartbeatMs by videoSource.heartbeatMs.collectAsState()
   val liveFrame =
     rememberLiveVideoFrame(
       videoSource,
       column.deviceId,
       autoReconnect = true,
       streamingEnabled = streamingEnabled,
-      // Streaming-stall reconnect only for idle-heartbeat sources (Android); the iOS capture drops
-      // idle buffers, so a static inspected screen legitimately makes no frame progress.
-      stallReconnectMs = if (column.platform == Platform.Android) LIVE_STALL_RECONNECT_MS else null,
+      stallReconnectMs =
+        if (heartbeatMs != null || column.platform == Platform.Android) {
+          LIVE_STALL_RECONNECT_MS
+        } else {
+          null
+        },
     )
   observation.stream?.let { activeStream ->
     LayoutInspectorDashboard(

@@ -135,19 +135,99 @@ class LiveVideoStreamTest {
   }
 
   @Test
+  fun `a relay heartbeat keeps a Streaming relay from being reconnected with no new frames`() =
+    runComposeUiTest {
+      // Issue #7549: the daemon relay's own heartbeat proves the pipeline alive even when the
+      // source itself produces no idle output (the screenrecord fallback, iOS) — heartbeat
+      // progress must suppress the stall-reconnect exactly like decoded-frame progress does.
+      // Deterministic per #7550: a logical clock injected as nowMs, driven in lockstep with the
+      // frozen mainClock rather than Thread.sleep + wall time.
+      val clock = java.util.concurrent.atomic.AtomicLong(0L)
+      val nowMs = { clock.get() }
+      val source = FakeVideoStreamSource(nowMs = nowMs)
+      setContent {
+        rememberLiveVideoFrame(
+          source,
+          "emulator-5554",
+          autoReconnect = true,
+          reconnectInitialMs = 10,
+          nowMs = nowMs,
+          stallReconnectMs = 100,
+          stallCheckIntervalMs = 20,
+        )
+      }
+      waitUntil { source.connectCalls >= 1 }
+      source.emitFrame(width = 1, height = 1) // first frame → Streaming
+      waitUntil { source.state.value is VideoStreamState.Streaming }
+
+      // No further frame ever arrives; a heartbeat every 50ms of logical time — comfortably inside
+      // the 100ms stall window — must keep resetting the "no progress" clock the same way a fresh
+      // frame would. mainClock drives the watchdog's own delay(stallCheckIntervalMs) loop.
+      mainClock.autoAdvance = false
+      repeat(10) {
+        clock.addAndGet(50)
+        source.emitHeartbeat()
+        mainClock.advanceTimeBy(20)
+      }
+      waitForIdle()
+      assertEquals(1, source.connectCalls) // heartbeat progress kept the stream alive
+    }
+
+  @Test
+  fun `a silent Streaming relay with no heartbeat is still reconnected past the stall window`() =
+    runComposeUiTest {
+      // Control for the test above: the identical clock/tick loop with no heartbeat must still
+      // trip the stall-reconnect, proving the heartbeat — not the loop itself — is what suppresses
+      // it.
+      val clock = java.util.concurrent.atomic.AtomicLong(0L)
+      val nowMs = { clock.get() }
+      val source = FakeVideoStreamSource(nowMs = nowMs)
+      setContent {
+        rememberLiveVideoFrame(
+          source,
+          "emulator-5554",
+          autoReconnect = true,
+          reconnectInitialMs = 10,
+          nowMs = nowMs,
+          stallReconnectMs = 100,
+          stallCheckIntervalMs = 20,
+        )
+      }
+      waitUntil { source.connectCalls >= 1 }
+      source.emitFrame(width = 1, height = 1) // first frame → Streaming
+      waitUntil { source.state.value is VideoStreamState.Streaming }
+
+      mainClock.autoAdvance = false
+      repeat(10) {
+        clock.addAndGet(50)
+        mainClock.advanceTimeBy(20)
+      }
+      waitForIdle()
+      // Once the first reconnect fires, the watchdog's own `lastSeenSequence = -1L` reset makes the
+      // still-retained (unchanged) frame look like fresh progress on the very next check, which
+      // re-adopts that frame's now-stale receivedAtMs as the new baseline and trips again shortly
+      // after — a pre-existing quirk of the retained-frame reconnect path, not something this
+      // heartbeat feature governs. So this asserts "at least one reconnect fired" (the actual
+      // behavior this control exists to prove) rather than pinning the exact retrigger count.
+      assertTrue(source.connectCalls > 1, "expected a stall reconnect, was ${source.connectCalls}")
+    }
+
+  @Test
   fun `an idle-heartbeat-less source is NOT reconnected while idle-Streaming`() = runComposeUiTest {
     // iOS drops idle ScreenCaptureKit buffers, so a healthy static screen makes no frame progress.
     // With stallReconnectMs = null the watchdog must leave a Streaming-but-idle stream alone rather
     // than churn a healthy capture (#5255 review). connectCalls stays at the initial subscribe.
-    val monotonic = { System.nanoTime() / 1_000_000L }
-    val source = FakeVideoStreamSource(nowMs = monotonic)
+    // Deterministic per #7550: a frozen logical clock plus a single mainClock advance, no sleep.
+    val clock = java.util.concurrent.atomic.AtomicLong(0L)
+    val nowMs = { clock.get() }
+    val source = FakeVideoStreamSource(nowMs = nowMs)
     setContent {
       rememberLiveVideoFrame(
         source,
         "ios-simulator",
         autoReconnect = true,
         reconnectInitialMs = 10,
-        nowMs = monotonic,
+        nowMs = nowMs,
         stallReconnectMs = null, // iOS
         firstFrameTimeoutMs = 100,
         stallCheckIntervalMs = 20,
@@ -155,8 +235,13 @@ class LiveVideoStreamTest {
     }
     waitUntil { source.connectCalls >= 1 }
     source.emitFrame(width = 1, height = 1) // first frame arrives → Streaming, then idle forever
-    // Wait well past both the first-frame deadline and several stall-check intervals.
-    Thread.sleep(400)
+    waitUntil { source.state.value is VideoStreamState.Streaming }
+
+    // Past both the first-frame deadline and several stall-check intervals, with stallReconnectMs
+    // disabled a truly idle Streaming stream must still never reconnect.
+    clock.set(10_000)
+    mainClock.autoAdvance = false
+    mainClock.advanceTimeBy(500)
     waitForIdle()
     assertEquals(1, source.connectCalls) // idle Streaming is healthy; never reconnected
   }

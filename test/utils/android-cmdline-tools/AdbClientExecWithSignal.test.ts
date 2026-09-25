@@ -7,7 +7,7 @@ import {
   adbHostProcessExecutor,
 } from "../../../src/utils/android-cmdline-tools/AdbClient";
 import type { StartedHostCommand } from "../../../src/utils/HostCommandExecutor";
-import { defaultRetryExecutor } from "../../../src/utils/retry/RetryExecutor";
+import { DefaultRetryExecutor, defaultRetryExecutor } from "../../../src/utils/retry/RetryExecutor";
 import { logger } from "../../../src/utils/logger";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
@@ -79,6 +79,7 @@ describe.serial("AdbClient execWithSignal shared process seam", () => {
 
   test("keeps the dispatched timeout error when a read retries after its budget expires", async () => {
     const timer = new FakeTimer();
+    timer.enableAutoAdvance();
     const child = new EventEmitter() as ChildProcess;
     child.kill = () => true;
     let dispatches = 0;
@@ -86,7 +87,7 @@ describe.serial("AdbClient execWithSignal shared process seam", () => {
       dispatches++;
       return { child, result: new Promise(() => {}) };
     };
-    const client = new AdbClient(null, null, null, defaultRetryExecutor, timer);
+    const client = new AdbClient(null, null, null, new DefaultRetryExecutor(timer), timer);
     const internals = client as unknown as AdbClientInternals & {
       getBaseCommandParts: () => Promise<{ adbPath: string; baseArgs: string[] }>;
     };

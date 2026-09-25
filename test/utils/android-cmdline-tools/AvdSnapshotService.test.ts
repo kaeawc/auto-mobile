@@ -3,7 +3,7 @@ import * as path from "path";
 import { AdbClient } from "../../../src/utils/android-cmdline-tools/AdbClient";
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecuteOptions } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
-import { defaultRetryExecutor } from "../../../src/utils/retry/RetryExecutor";
+import { DefaultRetryExecutor } from "../../../src/utils/retry/RetryExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import {
   AVD_SNAPSHOTS_DIRNAME,
@@ -326,6 +326,8 @@ describe("AvdSnapshotService (#6490)", () => {
   });
 
   test("deleteVmSnapshot stops retries when the serial is reassigned between attempts", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
     const liveDevices = {
       current: [
         { deviceId: "emulator-5556", name: "am-api36", platform: "android" } as BootedDevice,
@@ -345,8 +347,8 @@ describe("AvdSnapshotService (#6490)", () => {
         return execResult("OK");
       },
       null,
-      defaultRetryExecutor,
-      new FakeTimer(),
+      new DefaultRetryExecutor(timer),
+      timer,
     );
     const adbFactory: AdbClientFactory = { create: () => client };
     const sut = new AvdSnapshotService(

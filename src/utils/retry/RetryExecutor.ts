@@ -105,6 +105,15 @@ export class DefaultRetryExecutor implements RetryExecutor {
     const shouldRetry = options?.shouldRetry ?? (() => true);
     const onRetry = options?.onRetry;
     const signal = options?.signal;
+    const abortError = () => {
+      const reason = signal?.reason;
+      // A bare abort() supplies a DOMException that is an Error in Bun. Keep
+      // the existing generic message for that default while preserving typed reasons.
+      return reason instanceof Error &&
+        !(reason instanceof DOMException && reason.name === "AbortError")
+        ? reason
+        : new Error("Operation aborted");
+    };
 
     const startTime = this.timer.now();
     let lastError: Error | undefined;
@@ -114,7 +123,7 @@ export class DefaultRetryExecutor implements RetryExecutor {
       if (signal?.aborted) {
         return {
           success: false,
-          error: new Error("Operation aborted"),
+          error: abortError(),
           attempts: attempt,
           totalTimeMs: this.timer.now() - startTime,
         };
@@ -130,6 +139,17 @@ export class DefaultRetryExecutor implements RetryExecutor {
         };
       } catch (err) {
         lastError = err instanceof Error ? err : new Error(String(err));
+        // The operation can reject at the same instant its signal aborts.
+        // Preserve the cancellation reason before shouldRetry classifies the
+        // stale operation error as terminal.
+        if (signal?.aborted) {
+          return {
+            success: false,
+            error: abortError(),
+            attempts: attempt,
+            totalTimeMs: this.timer.now() - startTime,
+          };
+        }
 
         // Check if we should retry
         if (attempt < maxAttempts) {
@@ -149,7 +169,7 @@ export class DefaultRetryExecutor implements RetryExecutor {
           if (delay > 0 && (await this.sleepUnlessAborted(delay, signal))) {
             return {
               success: false,
-              error: new Error("Operation aborted"),
+              error: abortError(),
               attempts: attempt,
               totalTimeMs: this.timer.now() - startTime,
             };

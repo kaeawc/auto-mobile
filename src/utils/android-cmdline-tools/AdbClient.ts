@@ -32,6 +32,7 @@ import { getAbortSignal } from "../AbortContext";
 import { trackAmbient } from "../PerfContext";
 import { OPERATION_CANCELLED_MESSAGE } from "../constants";
 import { RetryExecutor, defaultRetryExecutor } from "../retry/RetryExecutor";
+import { sequenceBackoff } from "../Backoff";
 import { TTLCache } from "../cache/Cache";
 import { SingleFlight } from "../cache/SingleFlight";
 import { Timer, defaultTimer } from "../SystemTimer";
@@ -178,6 +179,7 @@ export class AdbClient implements AdbExecutor {
   private static readonly DEVICE_LIST_TIMEOUT_MS = 10000;
   private static readonly DEFAULT_COMMAND_TIMEOUT_MS = 15_000;
   private static readonly MAX_ADB_RETRIES = 3;
+  private static readonly ADB_RETRY_BACKOFF = sequenceBackoff([200, 500, 1000]);
   private static readonly MAX_MACOS_MISSING_ADB_PROBES = 3;
   private static macosMissingAdbProbes = 0;
 
@@ -830,7 +832,6 @@ export class AdbClient implements AdbExecutor {
       "syntax error",
       "device not found",
       "no devices",
-      "offline",
     ];
     return nonRetryablePatterns.some((pattern) => message.includes(pattern));
   }
@@ -1012,48 +1013,39 @@ export class AdbClient implements AdbExecutor {
 
     // Use retry executor for retryable commands
     let busyAtDispatch = false;
-    let lastDispatchTimeout: AdbCommandTimeoutError | undefined;
-    const remainingTimeoutMs = () => {
-      try {
-        return this.getRemainingTimeoutMs(timeoutMs, startTime, command);
-      } catch (error) {
-        if (error instanceof AdbCommandTimeoutError && lastDispatchTimeout) {
-          throw lastDispatchTimeout;
-        }
-        throw error;
-      }
-    };
     return this.retryExecutor.executeOrThrow(
       async () => {
         busyAtDispatch = false;
         if (resolvedSignal?.aborted) {
           throw this.getAbortError(resolvedSignal);
         }
-        await beforeDispatch?.(remainingTimeoutMs());
+        await beforeDispatch?.(this.getRemainingTimeoutMs(timeoutMs, startTime, command));
         busyAtDispatch = this.isConsoleBusyAtDispatch();
-        const remainingMs = remainingTimeoutMs();
-        try {
-          return await this.execWithSignal(
-            adbPath,
-            fullArgs,
-            maxBuffer,
-            remainingMs,
-            resolvedSignal,
-            waitForProcessSettlementAfterAbort,
-          );
-        } catch (error) {
-          if (error instanceof AdbCommandTimeoutError) {
-            lastDispatchTimeout = error;
-          }
-          throw error;
-        }
+        const remainingMs = this.getRemainingTimeoutMs(timeoutMs, startTime, command);
+        return await this.execWithSignal(
+          adbPath,
+          fullArgs,
+          maxBuffer,
+          remainingMs,
+          resolvedSignal,
+          waitForProcessSettlementAfterAbort,
+        );
       },
       {
         maxAttempts: AdbClient.MAX_ADB_RETRIES + 1,
-        delays: 0, // Immediate retry (no delay)
+        // The shared command budget is rechecked before each dispatch, including
+        // after these bounded delays.
+        delays: AdbClient.ADB_RETRY_BACKOFF,
         signal: resolvedSignal,
         shouldRetry: (error) => {
           if (resolvedSignal?.aborted) {
+            return false;
+          }
+          if (error instanceof AdbCommandTimeoutError) {
+            // A dispatch timeout has, by construction, already consumed the
+            // whole command budget. Retrying would sleep past the caller's
+            // deadline for a result the caller no longer wants; surface the
+            // original "Command timed out after ..." error instead.
             return false;
           }
           if (this.isNonRetryableError(error)) {

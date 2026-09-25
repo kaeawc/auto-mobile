@@ -1,5 +1,6 @@
 import { getAbortSignal } from "../utils/AbortContext";
 import { defaultTimer, Timer } from "../utils/SystemTimer";
+import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import { logger } from "../utils/logger";
 import { BootedDevice, Platform } from "../models";
 import { KeepScreenAwakeManager, KeepScreenAwakeState } from "../utils/KeepScreenAwakeManager";
@@ -612,7 +613,8 @@ export {
 
 /** Default grace before a never-heartbeated default-policy session is reaped. */
 export const DEFAULT_PRE_FIRST_HEARTBEAT_GRACE_MS = 5_000;
-const DEVICE_RESTART_RECOVERY_WINDOW_MS = 30_000;
+// Give a restarted emulator the same three-minute cold-boot allowance as device readiness.
+const DEVICE_RESTART_RECOVERY_WINDOW_MS = DEFAULT_DEVICE_READY_TIMEOUT_MS;
 
 function restartRecoveryDeadlineFromPersisted(persisted: DeviceSession): number | undefined {
   if (

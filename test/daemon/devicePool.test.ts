@@ -5610,7 +5610,7 @@ describe("DevicePool", () => {
       const resume = sessionManager.getOrCreateSession("session-1", devicePool, "android");
       await new Promise((resolve) => setImmediate(resolve));
       expect(fakeTimer.getPendingSleeps()).toEqual([1_000]);
-      fakeTimer.advanceTime(30_000);
+      fakeTimer.advanceTime(DEFAULT_DEVICE_READY_TIMEOUT_MS);
       await expect(resume).rejects.toThrow("recovery reason: target-absent");
     });
 

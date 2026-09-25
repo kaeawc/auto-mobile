@@ -5260,7 +5260,6 @@ export class DevicePool {
 
     const result = await this.retryExecutor.execute(
       async (attempt) => {
-        this.assertRecoveryDeadlineOpen(sessionId, recoveryTarget);
         // Try to assign device (mutex ensures atomic assignment)
         const assignResult = await this.tryAssignDevice(sessionId, platform, recoveryTarget);
 
@@ -5574,7 +5573,6 @@ export class DevicePool {
     device: PooledDevice,
     recoveryTarget?: SessionRecoveryTarget,
   ): Promise<{ deviceId: string; session?: Session }> {
-    this.assertRecoveryDeadlineOpen(sessionId, recoveryTarget);
     const existingSession = this.sessionManager.getSession(sessionId);
     const assignmentSnapshot = this.snapshotSessionAssignment(device);
     device.sessionId = sessionId;
@@ -5602,18 +5600,6 @@ export class DevicePool {
       return { deviceId: session.assignedDevice };
     }
     return existingSession === session ? { deviceId: device.id } : { deviceId: device.id, session };
-  }
-
-  private assertRecoveryDeadlineOpen(
-    sessionId: string,
-    recoveryTarget: SessionRecoveryTarget | undefined,
-  ): void {
-    if (
-      recoveryTarget?.restartRecoveryDeadlineMs !== undefined &&
-      this.timer.now() >= recoveryTarget.restartRecoveryDeadlineMs
-    ) {
-      throw new SessionRecoveryIdentityLossError(sessionId, recoveryTarget, "target-absent");
-    }
   }
 
   private selectIdleDevice(candidates: PooledDevice[]): PooledDevice | undefined {

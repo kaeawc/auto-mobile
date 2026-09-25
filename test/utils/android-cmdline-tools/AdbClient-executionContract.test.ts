@@ -125,6 +125,115 @@ describe("AdbClient retry contract", () => {
     await expect(client.executeCommand("shell echo hi")).rejects.toThrow("offline");
     expect(calls).toBe(1);
   });
+
+  test.each([
+    "shell input tap 10 20",
+    "shell input swipe 10 20 30 40",
+    "shell input keyevent KEYCODE_ENTER",
+    "shell input text hello",
+    "shell input",
+    "shell keyevent KEYCODE_ENTER",
+    "shell key KEYCODE_ENTER",
+    "shell am start -n example/.MainActivity",
+  ])("does not replay a possibly delivered mutation: %s", async (command) => {
+    let calls = 0;
+    const client = new AdbClient(
+      DEVICE,
+      async () => {
+        calls += 1;
+        throw new Error("error: closed");
+      },
+      null,
+      defaultRetryExecutor,
+      new FakeTimer(),
+    );
+
+    await expect(client.executeCommand(command)).rejects.toThrow("error: closed");
+    expect(calls).toBe(1);
+  });
+
+  test("does not replay a mutation passed as separate argv entries", async () => {
+    let calls = 0;
+    const client = new AdbClient(
+      DEVICE,
+      async () => {
+        calls += 1;
+        throw new Error("protocol fault");
+      },
+      null,
+      defaultRetryExecutor,
+      new FakeTimer(),
+    );
+
+    await expect(client.execute(["shell", "input", "tap", "10", "20"])).rejects.toThrow(
+      "protocol fault",
+    );
+    expect(calls).toBe(1);
+  });
+
+  test.each(["cannot connect to daemon", "CANNOT CONNECT TO ADB", "Executable not found"])(
+    "retries a mutation after a pre-dispatch failure: %s",
+    async (message) => {
+      let calls = 0;
+      const client = new AdbClient(
+        DEVICE,
+        async () => {
+          calls += 1;
+          if (calls === 1) {
+            throw new Error(message);
+          }
+          return ok("recovered");
+        },
+        null,
+        defaultRetryExecutor,
+        new FakeTimer(),
+      );
+
+      const result = await client.executeCommand("shell input tap 10 20");
+      expect(result.stdout).toBe("recovered");
+      expect(calls).toBe(2);
+    },
+  );
+
+  test("keeps retrying a read-only query after a transient failure", async () => {
+    let calls = 0;
+    const client = new AdbClient(
+      DEVICE,
+      async () => {
+        calls += 1;
+        if (calls === 1) {
+          throw new Error("error: closed");
+        }
+        return ok("1");
+      },
+      null,
+      defaultRetryExecutor,
+      new FakeTimer(),
+    );
+
+    const result = await client.executeCommand("shell getprop sys.boot_completed");
+    expect(result.stdout).toBe("1");
+    expect(calls).toBe(2);
+  });
+
+  test("keeps the existing non-retryable device error ahead of pre-dispatch checks", async () => {
+    let calls = 0;
+    const client = new AdbClient(
+      DEVICE,
+      async () => {
+        calls += 1;
+        throw new Error("cannot connect to daemon: device not found");
+      },
+      null,
+      defaultRetryExecutor,
+      new FakeTimer(),
+    );
+
+    await expect(client.executeCommand("shell input tap 10 20")).rejects.toThrow(
+      "device not found",
+    );
+    expect(calls).toBe(1);
+  });
 });
 
 describe("AdbClient missing-device notifications", () => {

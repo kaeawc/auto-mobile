@@ -2,6 +2,7 @@ import {
   DeviceLostError,
   DEVICE_LOSS_OUTCOME_CODE,
   type EmulatorLossIncident,
+  type EmulatorLossSessionState,
 } from "../daemon/emulatorLossIncident";
 
 export { DeviceLostError, DEVICE_LOSS_OUTCOME_CODE };
@@ -17,7 +18,7 @@ export interface DeviceLossOutcome {
   detectionPath?: EmulatorLossIncident["detectionPath"];
   avdName?: string;
   replacementDeviceId?: string;
-  sessionState?: "recovering" | "active" | "released";
+  sessionState?: EmulatorLossSessionState;
   heartbeat?: {
     lastHeartbeatMs: number;
     hasReceivedHeartbeat: boolean;
@@ -128,7 +129,7 @@ export function enrichDeviceLossOutcome(
       attempts: incident.recovery.attempts.length,
     },
     retry: {
-      sameSession: sessionState === "active",
+      sameSession: sessionState === "active" || sessionState === "awaiting-device",
       requiresNewSession: sessionState === "released",
     },
   };

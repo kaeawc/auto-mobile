@@ -1696,6 +1696,7 @@ export class DevicePool {
   private async completeEmulatorLossRecovery(
     incidentId: string | undefined,
     outcome: "recovered" | "exhausted" | "not-attempted",
+    releasedSessionState?: "awaiting-device",
   ): Promise<void> {
     if (!incidentId) {
       return;
@@ -1704,7 +1705,11 @@ export class DevicePool {
       await this.retryExecutor.executeOrThrow(
         async () => {
           const incident = await this.emulatorLossIncidentStore.get(incidentId);
-          const settlement = this.buildEmulatorLossRecoverySettlement(incident, outcome);
+          const settlement = this.buildEmulatorLossRecoverySettlement(
+            incident,
+            outcome,
+            releasedSessionState,
+          );
           await this.emulatorLossIncidentStore.completeRecovery(incidentId, outcome, settlement);
           if (!incident?.session) {
             this.settleEmulatorLossIncident(incidentId);
@@ -1731,6 +1736,7 @@ export class DevicePool {
   private buildEmulatorLossRecoverySettlement(
     incident: EmulatorLossIncident | undefined,
     outcome: "recovered" | "exhausted" | "not-attempted",
+    releasedSessionState?: "awaiting-device",
   ): EmulatorLossRecoverySettlement {
     if (!incident?.session) {
       return {};
@@ -1744,7 +1750,7 @@ export class DevicePool {
         ? outcome === "recovered" || outcome === "not-attempted"
           ? "active"
           : "recovering"
-        : "released",
+        : (releasedSessionState ?? "released"),
     };
   }
 
@@ -3550,7 +3556,8 @@ export class DevicePool {
     incidentId: string | undefined,
   ): Promise<void> {
     const sessionId = session.sessionId;
-    if (this.isPreservedSessionCurrent(session, device.id)) {
+    const releasedForDeviceRestart = this.isPreservedSessionCurrent(session, device.id);
+    if (releasedForDeviceRestart) {
       await this.releaseDisconnectedRecoverySessionWithRetry(
         sessionId,
         device.id,
@@ -3567,7 +3574,9 @@ export class DevicePool {
       const incident = await this.emulatorLossIncidentStore.get(incidentId);
       await this.completeEmulatorLossRecovery(
         incidentId,
-        incident?.recovery.outcome ?? "exhausted",
+        incident?.recovery.outcome ??
+          (incident?.recovery.policy.onLoss ? "exhausted" : "not-attempted"),
+        releasedForDeviceRestart ? "awaiting-device" : undefined,
       );
     }
   }

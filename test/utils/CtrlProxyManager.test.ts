@@ -460,6 +460,92 @@ describe("CtrlProxyManager", function () {
     });
   });
 
+  // Issue #7533: a connected-but-unresponsive CtrlProxy has a healthy binding
+  // (dumpsys shows it bound), so `rebindIfUnhealthy()`'s health gate never
+  // fires. `forceRestartProcess()` is the distinct primitive the readiness
+  // loop escalates to for that case; it always cycles the process.
+  describe("forceRestartProcess", function () {
+    const serviceComponent = `${AndroidCtrlProxyManager.PACKAGE}/${AndroidCtrlProxyManager.PACKAGE}.CtrlProxy`;
+    let timer: FakeTimer;
+
+    beforeEach(() => {
+      timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      accessibilityServiceClient = AndroidCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeAdb,
+        timer,
+      );
+      fakeAdb.setDeviceStates([{ deviceId: testDevice.deviceId, state: "device" }]);
+    });
+
+    test("force-stops and re-adds the service even when dumpsys reports it already bound", async function () {
+      fakeAdb.setCommandResponse("shell dumpsys accessibility", {
+        stdout: `Bound services:{{${serviceComponent}}}\nCrashed services:{}`,
+        stderr: "",
+      });
+      fakeAdb.setCommandResponse("shell settings get secure enabled_accessibility_services", {
+        stdout: serviceComponent,
+        stderr: "",
+      });
+
+      expect(await accessibilityServiceClient.forceRestartProcess()).toBe(true);
+      expect(
+        fakeAdb
+          .getExecutedCommands()
+          .filter(
+            (command) =>
+              command.startsWith("shell settings put secure enabled_accessibility_services") ||
+              command === `shell am force-stop ${AndroidCtrlProxyManager.PACKAGE}`,
+          ),
+      ).toEqual([
+        `shell settings put secure enabled_accessibility_services ""`,
+        `shell am force-stop ${AndroidCtrlProxyManager.PACKAGE}`,
+        `shell settings put secure enabled_accessibility_services "${serviceComponent}"`,
+      ]);
+    });
+
+    test("does not restart a device adb no longer lists as present", async function () {
+      fakeAdb.setDeviceStates([{ deviceId: testDevice.deviceId, state: "offline" }]);
+      fakeAdb.setCommandResponse("shell dumpsys accessibility", {
+        stdout: `Bound services:{{${serviceComponent}}}\nCrashed services:{}`,
+        stderr: "",
+      });
+
+      expect(await accessibilityServiceClient.forceRestartProcess()).toBe(false);
+      expect(fakeAdb.wasCommandExecuted("shell dumpsys accessibility")).toBe(false);
+      expect(
+        fakeAdb.wasCommandExecuted(`shell am force-stop ${AndroidCtrlProxyManager.PACKAGE}`),
+      ).toBe(false);
+    });
+
+    test("shares the single-flight guard with rebindIfUnhealthy (issue #7532)", async function () {
+      fakeAdb.setCommandResponse("shell dumpsys accessibility", {
+        stdout: `Bound services:{}\nCrashed services:{{${serviceComponent}}}`,
+        stderr: "",
+      });
+      fakeAdb.setCommandResponse("shell settings get secure enabled_accessibility_services", {
+        stdout: serviceComponent,
+        stderr: "",
+      });
+
+      const [rebind, restart] = await Promise.all([
+        accessibilityServiceClient.rebindIfUnhealthy(),
+        accessibilityServiceClient.forceRestartProcess(),
+      ]);
+
+      expect(rebind).toBe(true);
+      expect(restart).toBe(true);
+      expect(
+        fakeAdb
+          .getExecutedCommands()
+          .filter(
+            (command) => command === `shell am force-stop ${AndroidCtrlProxyManager.PACKAGE}`,
+          ),
+      ).toHaveLength(1);
+    });
+  });
+
   describe("isAvailable", function () {
     test("should return true when service is both installed and enabled", async function () {
       fakeAdb.setCommandResponse(

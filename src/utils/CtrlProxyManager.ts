@@ -59,6 +59,18 @@ export interface CtrlProxyManager extends ProxyManager {
    * crashed or unbound. Returns whether a rebind was attempted.
    */
   rebindIfUnhealthy?(): Promise<boolean>;
+  /**
+   * Force-stop and re-add CtrlProxy's accessibility-service entry
+   * unconditionally, even when {@link isAccessibilityServiceHealthy} already
+   * reports it bound. This is the Android counterpart of iOS's
+   * `forceRestart`: a service whose binding is healthy but which still cannot
+   * produce a hierarchy never trips {@link rebindIfUnhealthy}'s health gate
+   * (issue #7533). Returns whether a restart was attempted — false when the
+   * device is offline or missing (mirroring `AndroidCtrlProxyClient`'s
+   * pre-recovery device-presence check, issue #7532), so a caller cannot spin
+   * this into a restart loop against a device that has disappeared.
+   */
+  forceRestartProcess?(): Promise<boolean>;
   isEnabledForUser(userId: number): Promise<boolean>;
   getInstalledApkSha256(): Promise<string | null>;
   isVersionCompatible(): Promise<boolean>;
@@ -919,16 +931,66 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     if (this.rebindInFlight) {
       return this.rebindInFlight;
     }
-    this.rebindInFlight = this.rebindIfUnhealthyInternal().finally(() => {
+    this.rebindInFlight = this.rebindOrRestartInternal(false).finally(() => {
       this.rebindInFlight = null;
     });
     return this.rebindInFlight;
   }
 
-  private async rebindIfUnhealthyInternal(): Promise<boolean> {
+  /**
+   * Force-stop and re-add the accessibility service unconditionally — see the
+   * {@link CtrlProxyManager.forceRestartProcess} doc for why this is distinct
+   * from {@link rebindIfUnhealthy} (issue #7533). Shares `rebindIfUnhealthy`'s
+   * single-flight guard (#7532) so the two recovery paths never interleave
+   * force-stop/settings writes against the same device, and refuses to run
+   * against a device adb no longer lists as present so a caller cannot turn
+   * this into a restart loop.
+   */
+  async forceRestartProcess(): Promise<boolean> {
+    if (this.rebindInFlight) {
+      return this.rebindInFlight;
+    }
+    if (!(await this.isDevicePresent())) {
+      logger.info(
+        `[CTRL_PROXY] Device ${this.device.deviceId} is offline or missing; skipping process restart`,
+      );
+      return false;
+    }
+    this.rebindInFlight = this.rebindOrRestartInternal(true).finally(() => {
+      this.rebindInFlight = null;
+    });
+    return this.rebindInFlight;
+  }
+
+  /**
+   * Whether adb still reports this device as present and online. Mirrors
+   * `AndroidCtrlProxyClient.isDevicePresent` (issue #7532): restart must not
+   * touch a stopped or disconnected device.
+   */
+  private async isDevicePresent(): Promise<boolean> {
+    const getDeviceStates = this.adb.getDeviceStates?.bind(this.adb);
+    if (!getDeviceStates) {
+      // The executor cannot report raw device states; fail open rather than
+      // block recovery on a capability the executor doesn't provide.
+      return true;
+    }
+    try {
+      const states = await getDeviceStates();
+      const match = states.find((state) => state.deviceId === this.device.deviceId);
+      // "unauthorized" is not a state a restart can act on either — adb cannot
+      // run shell commands against it, so it is not meaningfully "present".
+      return match !== undefined && match.state !== "offline" && match.state !== "unauthorized";
+    } catch (error) {
+      // Diagnostic failure only: do not block the restart on it.
+      logger.warn(`[CTRL_PROXY] Failed to check device state before process restart: ${error}`);
+      return true;
+    }
+  }
+
+  private async rebindOrRestartInternal(force: boolean): Promise<boolean> {
     let rebindAttempted = false;
     try {
-      if (await this.isAccessibilityServiceHealthy()) {
+      if (!force && (await this.isAccessibilityServiceHealthy())) {
         return false;
       }
 
@@ -959,13 +1021,17 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       );
       const healthy = await this.waitForHealthyAfterRebind();
       logger.info(
-        `[CTRL_PROXY] Accessibility service was crashed or unbound; rebind attempted via settings and force-stop (${healthy ? "bound" : "still unhealthy"})`,
+        force
+          ? `[CTRL_PROXY] Process restart attempted via settings and force-stop for a connected-but-unresponsive service (${healthy ? "bound" : "still unhealthy"})`
+          : `[CTRL_PROXY] Accessibility service was crashed or unbound; rebind attempted via settings and force-stop (${healthy ? "bound" : "still unhealthy"})`,
       );
       return true;
     } catch (error) {
       throw toActionableError(
         error,
-        "Failed to rebind crashed or unbound CtrlProxy accessibility service",
+        force
+          ? "Failed to force-restart connected-but-unresponsive CtrlProxy process"
+          : "Failed to rebind crashed or unbound CtrlProxy accessibility service",
       );
     } finally {
       if (rebindAttempted) {

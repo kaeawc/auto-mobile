@@ -87,6 +87,9 @@ class FakeAndroidManager implements ReadinessAndroidManager {
   enableCalls = 0;
   accessibilityHealthChecks = 0;
   rebindCalls = 0;
+  restartCalls = 0;
+  restartResult = true;
+  onRestart?: () => Promise<void> | void;
   resetSetupStateCalls = 0;
   private setupAttempted = false;
   compatibilityResult: Awaited<ReturnType<ReadinessAndroidManager["ensureCompatibleVersion"]>> = {
@@ -109,6 +112,12 @@ class FakeAndroidManager implements ReadinessAndroidManager {
     this.rebindCalls++;
     this.accessibilityServiceHealthy = true;
     return true;
+  }
+
+  async forceRestartProcess(): Promise<boolean> {
+    this.restartCalls++;
+    await this.onRestart?.();
+    return this.restartResult;
   }
 
   async isVersionCompatible(): Promise<boolean> {
@@ -1741,6 +1750,136 @@ describe("RunnerReadinessService", () => {
 
     expect(manager.rebindCalls).toBeGreaterThan(1);
     expect(timer.now()).toBeLessThanOrEqual(2_500);
+  });
+
+  // Issue #7533: a connected-but-unresponsive CtrlProxy (WebSocket open,
+  // hierarchy requests failing) was polled until the budget ran out with no
+  // recovery at all -- the Android steady-state loop only rebound a
+  // *disconnected* client. These cases match the issue's "How to verify".
+  test("rebinds an unhealthy accessibility service when connected but unresponsive, then succeeds", async () => {
+    const manager = new FakeAndroidManager();
+    manager.accessibilityServiceHealthy = false;
+    const client = new FakeReadinessClient();
+    client.connected = true;
+    // index 0 is consumed by ensureAndroidReadyAttempt's own fast-path probe
+    // (isResponsiveFastPath) before the steady-state loop under test starts;
+    // index 1 is the loop's first probe (fails, triggers recovery); index 2
+    // succeeds after the rebind.
+    client.healthResults = [false, false, true];
+    const { service } = createService({ androidManager: manager, androidClient: client });
+
+    await service.ensureReady({
+      device: androidDevice(),
+      requestedIdentity: "platform=android",
+      totalDeadlineMs: 10_000,
+      readinessTimeoutMs: 10_000,
+    });
+
+    expect(manager.rebindCalls).toBe(1);
+    expect(manager.restartCalls).toBe(0);
+    expect(client.resetConnectionBudgetCalls).toBeGreaterThanOrEqual(1);
+  });
+
+  // #7533 follow-up: a rebind that repairs the binding does not mean the
+  // service can answer a hierarchy request right away on a loaded emulator.
+  // Escalating to a full process restart on the very next probe miss would
+  // force-stop the service seconds after it was just repaired, so escalation
+  // must wait out the post-rebind grace period even while probes keep failing.
+  test("does not escalate to a process restart while probes keep failing inside the post-rebind grace period", async () => {
+    const manager = new FakeAndroidManager();
+    manager.accessibilityServiceHealthy = false;
+    const client = new FakeReadinessClient();
+    client.connected = true;
+    // index 0: ensureAndroidReadyAttempt's own fast-path probe (fails).
+    // indices 1-12: the steady-state loop's probes over ~3s (250ms apart)
+    // all fail -- comfortably inside the 5s post-rebind grace period.
+    // index 13: the service finally answers.
+    client.healthResults = [false, ...Array(12).fill(false), true];
+    const { service } = createService({ androidManager: manager, androidClient: client });
+
+    await service.ensureReady({
+      device: androidDevice(),
+      requestedIdentity: "platform=android",
+      totalDeadlineMs: 10_000,
+      readinessTimeoutMs: 10_000,
+    });
+
+    expect(manager.rebindCalls).toBe(1);
+    expect(manager.restartCalls).toBe(0);
+  });
+
+  test("restarts the CtrlProxy process exactly once when the binding is healthy but unresponsive", async () => {
+    const manager = new FakeAndroidManager();
+    manager.accessibilityServiceHealthy = true;
+    const client = new FakeReadinessClient();
+    client.connected = true;
+    // Every health probe fails and every reconnect succeeds so the loop keeps
+    // running for the whole budget without ever calling ensureReady's caller
+    // back -- the restart must still happen exactly once, not once per loop
+    // iteration ("never a loop of restarts").
+    client.healthResults = Array(20).fill(false);
+    client.connectionResults = Array(20).fill(true);
+    const { service, timer } = createService({ androidManager: manager, androidClient: client });
+
+    await expect(
+      service.ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "platform=android",
+        totalDeadlineMs: 2_000,
+        readinessTimeoutMs: 2_000,
+      }),
+    ).rejects.toThrow(
+      /CtrlProxy accessibility service was bound but unresponsive; process restart attempted/,
+    );
+
+    expect(manager.rebindCalls).toBe(0);
+    expect(manager.restartCalls).toBe(1);
+    expect(timer.now()).toBeLessThanOrEqual(2_000);
+  });
+
+  test("does not check health, rebind, or restart when the first health probe passes (fast path unchanged)", async () => {
+    const manager = new FakeAndroidManager();
+    const client = new FakeReadinessClient();
+    client.connected = true;
+    client.healthResults = [true];
+    const { service } = createService({ androidManager: manager, androidClient: client });
+
+    await service.ensureReady({
+      device: androidDevice(),
+      requestedIdentity: "platform=android",
+      totalDeadlineMs: 10_000,
+      readinessTimeoutMs: 10_000,
+    });
+
+    expect(manager.accessibilityHealthChecks).toBe(0);
+    expect(manager.rebindCalls).toBe(0);
+    expect(manager.restartCalls).toBe(0);
+  });
+
+  test("propagates a caller abort during the connected-but-unresponsive restart as cancellation", async () => {
+    const manager = new FakeAndroidManager();
+    manager.accessibilityServiceHealthy = true;
+    const controller = new AbortController();
+    manager.onRestart = () => {
+      controller.abort(new Error("caller cancelled"));
+    };
+    const client = new FakeReadinessClient();
+    client.connected = true;
+    client.healthResults = Array(5).fill(false);
+
+    const { service } = createService({ androidManager: manager, androidClient: client });
+
+    await expect(
+      service.ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "platform=android",
+        totalDeadlineMs: 10_000,
+        readinessTimeoutMs: 10_000,
+        signal: controller.signal,
+      }),
+    ).rejects.toThrow(/caller cancelled/);
+
+    expect(manager.restartCalls).toBe(1);
   });
 
   test("reports the exhausted phase, attempts, mapping, and remaining budget", async () => {

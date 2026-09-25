@@ -3,6 +3,9 @@ import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import {
   ANDROID_FORCED_KEYFRAME_MIN_INTERVAL_MS,
+  ANDROID_HEALTHY_SEGMENT_AGE_MS,
+  ANDROID_MIN_SEGMENT_AGE_MS,
+  ANDROID_RUNNING_RETRY_MAX_ATTEMPTS,
   AndroidH264Source,
   capToQualityPreset,
   type SpawnedProcess,
@@ -35,6 +38,7 @@ function fakeAdbFactory(
   spawnArgs: string[][] = [],
   processes: FakeProcess[] = [],
   wmSizeOutput = "",
+  onSpawn?: (process: FakeProcess) => void,
 ): AdbClientFactory {
   return {
     create() {
@@ -48,6 +52,7 @@ function fakeAdbFactory(
           spawnArgs.push(args);
           const process = new FakeProcess();
           processes.push(process);
+          onSpawn?.(process);
           return process;
         },
       } as unknown as ReturnType<AdbClientFactory["create"]>;
@@ -58,6 +63,7 @@ function fakeAdbFactory(
 function makeSource(
   overrides: Partial<Parameters<typeof AndroidH264Source.prototype.constructor>[0]> = {},
   wmSizeOutput = "",
+  onSpawn?: (process: FakeProcess) => void,
 ) {
   const chunks: Buffer[] = [];
   const processes: FakeProcess[] = [];
@@ -68,13 +74,20 @@ function makeSource(
   const source = new AndroidH264Source({
     device: DEVICE,
     onData: (chunk) => chunks.push(chunk),
-    adbFactory: fakeAdbFactory(commands, spawnArgs, processes, wmSizeOutput),
+    adbFactory: fakeAdbFactory(commands, spawnArgs, processes, wmSizeOutput, onSpawn),
     timer,
     segmentRotateMs: 1000,
     ...overrides,
   });
 
   return { source, chunks, processes, commands, timer, spawnArgs };
+}
+
+async function drainSegmentStart(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
 }
 
 describe("AndroidH264Source", () => {
@@ -236,26 +249,35 @@ describe("AndroidH264Source", () => {
     expect(chunks).toHaveLength(1); // not forwarded into a new session
   });
 
-  test("does not rotate when a segment exits with a non-zero code; surfaces onError", async () => {
+  test("does not rotate when a segment exits with a non-zero code; surfaces onError after retries", async () => {
     let captured: Error | null = null;
-    const { source, processes } = makeSource({ onError: (error) => (captured = error) });
+    const { source, processes, timer } = makeSource({ onError: (error) => (captured = error) });
     await source.start();
     expect(processes).toHaveLength(1);
 
     // screenrecord failed (e.g. unsupported --size): exit code 1, no signal.
-    processes[0].simulateExit(1, null);
-    await Promise.resolve();
-    await Promise.resolve();
+    for (let attempt = 1; attempt <= ANDROID_RUNNING_RETRY_MAX_ATTEMPTS; attempt++) {
+      processes[attempt - 1].simulateExit(1, null);
+      await drainSegmentStart();
+      expect(captured).toBeNull();
+      expect(processes).toHaveLength(attempt); // backoff blocks the next spawn
+      timer.advanceTime(attempt === 1 ? 500 : 1000);
+      await drainSegmentStart();
+      expect(processes).toHaveLength(attempt + 1);
+    }
+    processes[ANDROID_RUNNING_RETRY_MAX_ATTEMPTS].simulateExit(1, null);
+    await drainSegmentStart();
 
-    expect(processes).toHaveLength(1); // no restart / tight loop
+    expect(processes).toHaveLength(1 + ANDROID_RUNNING_RETRY_MAX_ATTEMPTS);
     expect(source.isRunning).toBe(false);
     expect(captured).not.toBeNull();
     expect((captured as unknown as Error).message).toContain("code 1");
   });
 
   test("still rotates on a clean time-limit exit (code 0)", async () => {
-    const { source, processes } = makeSource();
+    const { source, processes, timer } = makeSource({ segmentRotateMs: 10_000 });
     await source.start();
+    timer.advanceTime(ANDROID_MIN_SEGMENT_AGE_MS);
     processes[0].simulateExit(0, null); // screenrecord hit --time-limit
     await Promise.resolve();
     await Promise.resolve();
@@ -293,12 +315,189 @@ describe("AndroidH264Source", () => {
 
   test("surfaces a fatal error when a segment process errors", async () => {
     let captured: Error | null = null;
-    const { source, processes } = makeSource({ onError: (error) => (captured = error) });
+    const { source, processes, timer } = makeSource({ onError: (error) => (captured = error) });
     await source.start();
 
-    processes[0].emit("error", new Error("adb not found"));
+    for (let attempt = 1; attempt <= ANDROID_RUNNING_RETRY_MAX_ATTEMPTS; attempt++) {
+      processes[attempt - 1].emit("error", new Error("adb not found"));
+      expect(captured).toBeNull();
+      timer.advanceTime(attempt === 1 ? 500 : 1000);
+      await drainSegmentStart();
+      expect(processes).toHaveLength(attempt + 1);
+    }
+    processes[ANDROID_RUNNING_RETRY_MAX_ATTEMPTS].emit("error", new Error("adb not found"));
     expect(captured).not.toBeNull();
     expect((captured as unknown as Error).message).toBe("adb not found");
+    expect(source.isRunning).toBe(false);
+  });
+
+  test("instant clean exits wait for backoff instead of respawning in a tight loop", async () => {
+    const errors: Error[] = [];
+    const { source, processes, timer } = makeSource(
+      { onError: (error) => errors.push(error) },
+      "",
+      (process) => {
+        // Emit as soon as the source installs the exit listener, before stdout.
+        process.on("newListener", (event) => {
+          if (event === "exit") {
+            queueMicrotask(() => process.simulateExit(0, null));
+          }
+        });
+      },
+    );
+    await source.start();
+    await drainSegmentStart();
+    await drainSegmentStart();
+    expect(processes).toHaveLength(1);
+    expect(errors).toHaveLength(0);
+
+    timer.advanceTime(500);
+    await drainSegmentStart();
+    expect(processes).toHaveLength(2);
+    timer.advanceTime(1000);
+    await drainSegmentStart();
+    expect(processes).toHaveLength(1 + ANDROID_RUNNING_RETRY_MAX_ATTEMPTS);
+    expect(errors).toHaveLength(1);
+    expect(source.isRunning).toBe(false);
+  });
+
+  test("a transient non-zero exit recovers without onError", async () => {
+    const errors: Error[] = [];
+    const { source, processes, timer } = makeSource({ onError: (error) => errors.push(error) });
+    await source.start();
+    processes[0].simulateExit(1, null);
+    await drainSegmentStart();
+    expect(processes).toHaveLength(1);
+    timer.advanceTime(500);
+    await drainSegmentStart();
+    expect(processes).toHaveLength(2);
+    expect(errors).toHaveLength(0);
+    expect(source.isRunning).toBe(true);
+    await source.stop();
+  });
+
+  test("persistent failures exhaust exactly the additional-start retry budget", async () => {
+    const errors: Error[] = [];
+    const { source, processes, timer } = makeSource({ onError: (error) => errors.push(error) });
+    await source.start();
+    // Each attempt permits one additional start. The original plus two retries
+    // means the third consecutive failed segment surfaces the final error.
+    for (let attempt = 1; attempt <= ANDROID_RUNNING_RETRY_MAX_ATTEMPTS; attempt++) {
+      processes[attempt - 1].simulateExit(1, null);
+      expect(errors).toHaveLength(0);
+      timer.advanceTime(attempt === 1 ? 500 : 1000);
+      await drainSegmentStart();
+    }
+    processes[ANDROID_RUNNING_RETRY_MAX_ATTEMPTS].simulateExit(1, null);
+    expect(processes).toHaveLength(1 + ANDROID_RUNNING_RETRY_MAX_ATTEMPTS);
+    expect(errors).toHaveLength(1);
+    expect(errors[0].message).toContain("code 1");
+    expect(source.isRunning).toBe(false);
+  });
+
+  test("repeated 2.5-second failures exhaust the retry budget", async () => {
+    const errors: Error[] = [];
+    const { source, processes, timer } = makeSource({
+      segmentRotateMs: ANDROID_HEALTHY_SEGMENT_AGE_MS * 4,
+      onError: (error) => errors.push(error),
+    });
+    await source.start();
+
+    for (let attempt = 0; attempt <= ANDROID_RUNNING_RETRY_MAX_ATTEMPTS; attempt++) {
+      timer.advanceTime(ANDROID_MIN_SEGMENT_AGE_MS + 500);
+      processes[attempt].simulateExit(1, null);
+      expect(errors).toHaveLength(attempt === ANDROID_RUNNING_RETRY_MAX_ATTEMPTS ? 1 : 0);
+      if (attempt < ANDROID_RUNNING_RETRY_MAX_ATTEMPTS) {
+        timer.advanceTime(attempt === 0 ? 500 : 1000);
+        await drainSegmentStart();
+        expect(processes).toHaveLength(attempt + 2);
+      }
+    }
+
+    expect(processes).toHaveLength(1 + ANDROID_RUNNING_RETRY_MAX_ATTEMPTS);
+    expect(errors[0].message).toContain("code 1");
+    expect(source.isRunning).toBe(false);
+  });
+
+  test("stop during backoff cancels the pending respawn", async () => {
+    const { source, processes, timer } = makeSource();
+    await source.start();
+    processes[0].simulateExit(1, null);
+    await source.stop();
+    timer.advanceTime(5000);
+    await drainSegmentStart();
+    expect(processes).toHaveLength(1);
+    expect(source.isRunning).toBe(false);
+  });
+
+  test("stop while a retry spawn is pending kills its late process", async () => {
+    const firstProcess = new FakeProcess();
+    const lateProcess = new FakeProcess();
+    let resolveRetry: (() => void) | undefined;
+    let spawnCount = 0;
+    const adbFactory = {
+      create() {
+        return {
+          spawn: () => {
+            spawnCount++;
+            if (spawnCount === 1) {
+              return Promise.resolve(firstProcess);
+            }
+            return new Promise<SpawnedProcess>((resolve) => {
+              resolveRetry = () => resolve(lateProcess);
+            });
+          },
+        } as unknown as ReturnType<AdbClientFactory["create"]>;
+      },
+    } as AdbClientFactory;
+    const { source, timer } = makeSource({
+      adbFactory,
+      size: { width: 720, height: 1280 },
+    });
+    await source.start();
+    firstProcess.simulateExit(1, null);
+    timer.advanceTime(500);
+    await drainSegmentStart();
+    expect(spawnCount).toBe(2);
+
+    await source.stop();
+    resolveRetry!();
+    await drainSegmentStart();
+    timer.advanceTime(5000);
+    expect(lateProcess.killed).toEqual(["SIGINT"]);
+    expect(source.segmentsStarted).toBe(1);
+    expect(source.isRunning).toBe(false);
+  });
+
+  test("a healthy segment resets the retry budget for later failures", async () => {
+    const errors: Error[] = [];
+    const { source, processes, timer } = makeSource({
+      segmentRotateMs: 10_000,
+      onError: (error) => errors.push(error),
+    });
+    await source.start();
+    processes[0].simulateExit(1, null);
+    timer.advanceTime(500);
+    await drainSegmentStart();
+    expect(processes).toHaveLength(2);
+
+    // The recovered segment reaches its scheduled rotation, then exits on our
+    // SIGINT. It has run past half its rotation interval and starts a fresh failure run.
+    timer.advanceTime(10_000);
+    expect(processes[1].killed).toContain("SIGINT");
+    processes[1].simulateExit(0, "SIGINT");
+    await drainSegmentStart();
+    expect(processes).toHaveLength(3);
+
+    for (let attempt = 1; attempt <= ANDROID_RUNNING_RETRY_MAX_ATTEMPTS; attempt++) {
+      processes[attempt + 1].simulateExit(1, null);
+      expect(errors).toHaveLength(0);
+      timer.advanceTime(attempt === 1 ? 500 : 1000);
+      await drainSegmentStart();
+      expect(processes).toHaveLength(attempt + 3);
+    }
+    processes[3 + ANDROID_RUNNING_RETRY_MAX_ATTEMPTS - 1].simulateExit(1, null);
+    expect(errors).toHaveLength(1);
     expect(source.isRunning).toBe(false);
   });
 });

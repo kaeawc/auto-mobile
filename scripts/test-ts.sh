@@ -254,7 +254,7 @@ done
 
 run_unit_shards() {
   local shard_root="$ROOT/scratch/test-ts-unit-shards"
-  local file index shard worker_count rc pid
+  local file index shard worker_count rc pid shard_status timing_log
   local test_files=()
   local pids=()
 
@@ -303,7 +303,14 @@ run_unit_shards() {
     done
 
     (
-      shard_args=(bun test --isolate --timeout "$per_test_timeout_ms" --no-orphans)
+      timing_log="$shard_root/timing-shard-${shard}.ndjson"
+      export AUTOMOBILE_TEST_TIMING_LOG="$timing_log"
+      export AUTOMOBILE_WATCHDOG_TIMING_LOG="$timing_log"
+      export AUTOMOBILE_WATCHDOG_SNAPSHOT_FILE="$shard_root/watchdog-shard-${shard}.txt"
+      export AUTOMOBILE_WATCHDOG_LABEL="unit shard ${shard}"
+      export AUTOMOBILE_FORCE_PORTABLE_TIMEOUT=1
+      shard_args=(bun test --isolate --timeout "$per_test_timeout_ms" --no-orphans \
+        --preload "$ROOT/test/setup/fileTimingProbe.ts")
       if [[ -n "${AUTOMOBILE_UNIT_JUNIT_DIR:-}" ]]; then
         shard_args+=(
           --reporter junit
@@ -316,13 +323,22 @@ run_unit_shards() {
           "$AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS"
         # shellcheck source=scripts/ios/run_with_timeout.sh disable=SC1091
         source "$ROOT/scripts/ios/run_with_timeout.sh"
+        shard_status=0
+        set +e
         run_with_timeout "$AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS" \
           ${shard_args[@]+"${shard_args[@]}"} \
           ${shard_files[@]+"${shard_files[@]}"}
+        shard_status=$?
+        set -e
       else
+        shard_status=0
         ${shard_args[@]+"${shard_args[@]}"} \
-          ${shard_files[@]+"${shard_files[@]}"}
+          ${shard_files[@]+"${shard_files[@]}"} || shard_status=$?
       fi
+      if [[ -s "$timing_log" ]]; then
+        bun "$ROOT/scripts/lib/test-file-timings.ts" summary "$timing_log" || true
+      fi
+      exit "$shard_status"
     ) > "$shard_root/shard-${shard}.log" 2>&1 &
     pids+=("$!")
   done
@@ -330,7 +346,12 @@ run_unit_shards() {
   rc=0
   for ((index = 0; index < ${#pids[@]}; index += 1)); do
     pid="${pids[$index]}"
-    if ! wait "$pid"; then
+    shard_status=0
+    wait "$pid" || shard_status=$?
+    if [[ "$shard_status" -eq 124 ]]; then
+      printf 'TIMEOUT: unit shard %d exceeded its wall-clock budget\n' "$index" >&2
+      rc=124
+    elif [[ "$shard_status" -ne 0 && "$rc" -ne 124 ]]; then
       rc=1
     fi
   done

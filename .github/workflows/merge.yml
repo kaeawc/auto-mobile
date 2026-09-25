@@ -889,6 +889,17 @@ jobs:
           BUN_TEST_TIMING_REPORT_DIR: scratch/timing-unit-reports
         run: bash scripts/validate-bun-test-timings.sh
 
+      - name: "Upload unit test diagnostics"
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: node-unit-test-diagnostics-${{ matrix.os }}
+          path: |
+            scratch/test-ts-unit-shards/**
+            scratch/watchdog-snapshot-*.txt
+          if-no-files-found: ignore
+          retention-days: 7
+
   node-host-integration-tests:
     name: "Node Host Integration Tests (${{ matrix.os }})"
     runs-on: ${{ matrix.os }}

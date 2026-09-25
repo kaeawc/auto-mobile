@@ -78,6 +78,9 @@ if [[ "$1" == "run" && "$2" == "scripts/lib/junit-testcase-timings.ts" ]]; then
   exec "$REAL_BUN" "$@"
 fi
 printf '%s\n' "$*" >> "$BUN_ARGS_FILE"
+if [[ -n "${STUB_BUN_SLEEP_SECONDS:-}" ]]; then
+  sleep "$STUB_BUN_SLEEP_SECONDS"
+fi
 # Same shape the real `bun test --reporter=junit` writes: `file=` lands on the
 # <testcase>, not only on the enclosing <testsuite>.
 stub_junit_report() {
@@ -466,6 +469,21 @@ EOF
   [ "$status" -eq 124 ]
   [[ "$output" == *"Coverage test run exceeded its 480s wall-clock budget"* ]]
   [[ "$output" == *"#6969"* ]]
+}
+
+@test "unit shards force the portable watchdog, capture a snapshot, and preserve exit 124" {
+  cat > "$STUB_BIN/timeout" <<'EOF'
+#!/usr/bin/env bash
+exit 77
+EOF
+  chmod +x "$STUB_BIN/timeout"
+
+  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=1 \
+    STUB_BUN_SLEEP_SECONDS=5 \
+    AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=1 bash "$SCRIPT" unit
+  [ "$status" -eq 124 ]
+  [ -s "scratch/test-ts-unit-shards/watchdog-shard-0.txt" ]
+  [[ "$output" == *"TIMEOUT: unit shard 0 exceeded its wall-clock budget"* ]]
 }
 
 @test "wall timeout diagnostics are portable for coverage and stress modes" {

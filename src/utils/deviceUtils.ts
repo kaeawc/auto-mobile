@@ -677,6 +677,30 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     };
   }
 
+  /**
+   * Among the given Android candidate serials, which are ADB `offline`
+   * rather than absent. Android-only: iOS's `simctl` has no analogous
+   * transport state (#7536). Best-effort — see
+   * {@link AndroidEmulatorClient.getOfflineDeviceIdsAmong}.
+   */
+  async getAndroidOfflineDeviceIds(
+    candidateIds: Iterable<string>,
+    options: { timeoutMs?: number; signal?: AbortSignal } = {},
+  ): Promise<Set<string>> {
+    return this.emulator.getOfflineDeviceIdsAmong(candidateIds, options);
+  }
+
+  /**
+   * Best-effort `adb reconnect offline` for session-bound Android serial(s)
+   * seen stuck in ADB `offline`. See
+   * {@link AndroidEmulatorClient.recoverOfflineDevices}.
+   */
+  async recoverAndroidOfflineDevices(
+    options: { timeoutMs?: number; signal?: AbortSignal } = {},
+  ): Promise<void> {
+    return this.emulator.recoverOfflineDevices(options);
+  }
+
   async getDeviceImagesDetailed(
     platform: SomePlatform,
     options: DeviceImageDiscoveryOptions = {},

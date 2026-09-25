@@ -4244,6 +4244,22 @@ export class DevicePool {
     );
   }
 
+  /**
+   * Whether the given serial's AVD currently has an in-flight
+   * `provisionDevice`/`startDevice` lease. Public wrapper around
+   * {@link isLeasedForAndroidStartup} — the same check
+   * {@link detachAdbServerResetCohort} uses to defer process-wide ADB-reset
+   * recovery until a matching startup completes — so the disconnect monitor's
+   * in-session offline recovery (#7536) can skip a serial that
+   * `AndroidEmulatorClient`'s own fresh-provision readiness wait
+   * (`maybeRecoverFreshOffline`) already owns recovery for. Returns `false`
+   * for an untracked serial or one with no recorded `avdName`.
+   */
+  isDeviceLeasedForAndroidStartup(deviceId: string): boolean {
+    const device = this.getDevice(deviceId);
+    return Boolean(device?.avdName) && this.isLeasedForAndroidStartup(device!.avdName!);
+  }
+
   private getAndroidStartupRecoveryMatches(request: AndroidStartupLeaseRequest): {
     matchingReservations: AdbServerResetRecoveryReservation[];
     matchingRecoveryAvdNames: string[];

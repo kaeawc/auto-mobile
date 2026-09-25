@@ -1255,3 +1255,43 @@ describe("MultiPlatformDeviceManager", () => {
     expect(reservedDeadlineMs).toBe(16_345);
   });
 });
+
+describe("MultiPlatformDeviceManager Android offline recovery delegation (#7536)", () => {
+  test("getAndroidOfflineDeviceIds delegates to the emulator client", async () => {
+    let receivedCandidates: string[] | undefined;
+    const fakeEmulator = {
+      getOfflineDeviceIdsAmong: async (candidateIds: Iterable<string>) => {
+        receivedCandidates = [...candidateIds];
+        return new Set(["emulator-5554"]);
+      },
+    } as unknown as AndroidEmulatorClient;
+    const manager = new MultiPlatformDeviceManager(
+      new FakeAdbClient() as unknown as AdbClient,
+      null,
+      fakeEmulator,
+    );
+
+    const offline = await manager.getAndroidOfflineDeviceIds(["emulator-5554", "emulator-5556"]);
+
+    expect(offline).toEqual(new Set(["emulator-5554"]));
+    expect(receivedCandidates).toEqual(["emulator-5554", "emulator-5556"]);
+  });
+
+  test("recoverAndroidOfflineDevices delegates to the emulator client", async () => {
+    let called = false;
+    const fakeEmulator = {
+      recoverOfflineDevices: async () => {
+        called = true;
+      },
+    } as unknown as AndroidEmulatorClient;
+    const manager = new MultiPlatformDeviceManager(
+      new FakeAdbClient() as unknown as AdbClient,
+      null,
+      fakeEmulator,
+    );
+
+    await manager.recoverAndroidOfflineDevices();
+
+    expect(called).toBe(true);
+  });
+});

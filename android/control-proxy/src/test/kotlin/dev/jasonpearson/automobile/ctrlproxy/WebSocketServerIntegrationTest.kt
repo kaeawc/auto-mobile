@@ -113,6 +113,11 @@ class WebSocketServerIntegrationTest {
     }
   }
 
+  private suspend fun startAndWait(target: WebSocketServer) {
+    target.start()
+    waitFor { target.isRunning() }
+  }
+
   private fun enqueueHighlightResponse(
     requestId: String?,
     success: Boolean,
@@ -135,7 +140,7 @@ class WebSocketServerIntegrationTest {
   @Test
   fun `server starts and stops successfully`() = runBlocking {
     // When
-    server.start()
+    startAndWait(server)
 
     // Then
     assertTrue("Server should be running", server.isRunning())
@@ -148,12 +153,42 @@ class WebSocketServerIntegrationTest {
   }
 
   @Test
+  fun `broadcast after stop and restart reaches a client once`() = runBlocking {
+    startAndWait(server)
+    server.stop()
+    startAndWait(server)
+
+    val client = HttpClient(CIO) { install(WebSockets) }
+    client.use { c ->
+      c.webSocket(
+        method = HttpMethod.Get,
+        host = "localhost",
+        port = getServerPort(),
+        path = "/ws",
+      ) {
+        incoming.receive() // Connection message
+        server.broadcast("""{"type":"probe","sequence":1}""")
+        val first = (withTimeout(1000) { incoming.receive() } as Frame.Text).readText()
+        server.broadcast("""{"type":"probe","sequence":2}""")
+        val second = (withTimeout(1000) { incoming.receive() } as Frame.Text).readText()
+
+        assertEquals("""{"type":"probe","sequence":1}""", first)
+        assertEquals(
+          "Second frame must be the second broadcast",
+          """{"type":"probe","sequence":2}""",
+          second,
+        )
+      }
+    }
+  }
+
+  @Test
   fun `server does not start twice`() = runBlocking {
     // Given
-    server.start()
+    startAndWait(server)
 
     // When - try to start again
-    server.start()
+    startAndWait(server)
 
     // Then - should still be running normally
     assertTrue("Server should still be running", server.isRunning())
@@ -162,7 +197,7 @@ class WebSocketServerIntegrationTest {
   @Test
   fun `client can connect to server`() = runBlocking {
     // Given
-    server.start()
+    startAndWait(server)
     val firstClientConnection = async { server.awaitFirstClientConnection() }
 
     assertFalse("No client should be ready before the handshake", firstClientConnection.isCompleted)
@@ -221,7 +256,7 @@ class WebSocketServerIntegrationTest {
       //    does NOT reset a still-connected client's in-flight scroll),
       //  - advanced after the set empties and a new client connects (so a disconnect+reconnect,
       //    including one with no intervening event, correctly clears stale scroll deltas).
-      server.start()
+      startAndWait(server)
       assertEquals(
         "generation starts at 0 before any connection",
         0,
@@ -296,7 +331,7 @@ class WebSocketServerIntegrationTest {
   @Test
   fun `server broadcasts messages to connected client`() = runBlocking {
     // Given
-    server.start()
+    startAndWait(server)
 
     val receivedMessages = mutableListOf<String>()
     val client = HttpClient(CIO) { install(WebSockets) }
@@ -345,7 +380,7 @@ class WebSocketServerIntegrationTest {
   @Test
   fun `server broadcasts hierarchy updates with correct format`() = runBlocking {
     // Given
-    server.start()
+    startAndWait(server)
 
     val receivedMessages = mutableListOf<String>()
     val client = HttpClient(CIO) { install(WebSockets) }
@@ -414,7 +449,7 @@ class WebSocketServerIntegrationTest {
   @Test
   fun `health check endpoint responds correctly`() = runBlocking {
     // Given
-    server.start()
+    startAndWait(server)
 
     // When
     val client = HttpClient(CIO)
@@ -429,7 +464,7 @@ class WebSocketServerIntegrationTest {
   @Test
   fun `server handles client disconnection gracefully`() = runBlocking {
     // Given
-    server.start()
+    startAndWait(server)
 
     val client = HttpClient(CIO) { install(WebSockets) }
 
@@ -461,7 +496,7 @@ class WebSocketServerIntegrationTest {
 
   @Test
   fun `await client connection waits for a replacement client after disconnect`() = runBlocking {
-    server.start()
+    startAndWait(server)
 
     val client = HttpClient(CIO) { install(WebSockets) }
     client.use { client ->
@@ -512,7 +547,7 @@ class WebSocketServerIntegrationTest {
 
   @Test
   fun `sync broadcast waits for a client and delivers after it connects`() = runBlocking {
-    server.start()
+    startAndWait(server)
     val response =
       SettingsGetResult(
         timestamp = 1234L,
@@ -552,7 +587,7 @@ class WebSocketServerIntegrationTest {
 
   @Test
   fun `add_highlight returns highlight response`() = runBlocking {
-    server.start()
+    startAndWait(server)
 
     val client = HttpClient(CIO) { install(WebSockets) }
     client.use { client ->
@@ -582,7 +617,7 @@ class WebSocketServerIntegrationTest {
 
   @Test
   fun `unsupported highlights return error responses`() = runBlocking {
-    server.start()
+    startAndWait(server)
 
     val client = HttpClient(CIO) { install(WebSockets) }
     client.use { client ->
@@ -617,7 +652,7 @@ class WebSocketServerIntegrationTest {
 
   @Test
   fun `invalid add_highlight returns error response`() = runBlocking {
-    server.start()
+    startAndWait(server)
 
     val client = HttpClient(CIO) { install(WebSockets) }
     client.use { client ->
@@ -650,7 +685,7 @@ class WebSocketServerIntegrationTest {
     // Issue #2985: an inbound command that fails to decode (here, an unknown command type) must
     // produce a structured `type:"error"` frame correlated by requestId, not a silent return that
     // leaves the daemon awaiter hanging until timeout.
-    server.start()
+    startAndWait(server)
 
     val client = HttpClient(CIO) { install(WebSockets) }
     client.use { client ->
@@ -686,7 +721,7 @@ class WebSocketServerIntegrationTest {
   fun `out of range numeric literal returns legible structured error response`() = runBlocking {
     // Issue #3022: exercise the real kotlinx decode path with an out-of-range literal instead of a
     // synthetic exception, so Android proves parity with the iOS decode-boundary legibility case.
-    server.start()
+    startAndWait(server)
 
     val client = HttpClient(CIO) { install(WebSockets) }
     client.use { client ->
@@ -727,7 +762,7 @@ class WebSocketServerIntegrationTest {
     // normal
     // responses still fan out, but an unrelated client should not observe another client's parse
     // failure.
-    server.start()
+    startAndWait(server)
 
     val ownerMessages = java.util.Collections.synchronizedList(mutableListOf<String>())
     val bystanderMessages = java.util.Collections.synchronizedList(mutableListOf<String>())
@@ -804,7 +839,7 @@ class WebSocketServerIntegrationTest {
   fun `unparseable payload returns error response with null requestId`() = runBlocking {
     // Best-effort requestId extraction (#2985): when the payload can't be parsed at all, the error
     // frame is still emitted with a null requestId rather than swallowed.
-    server.start()
+    startAndWait(server)
 
     val client = HttpClient(CIO) { install(WebSockets) }
     client.use { client ->
@@ -845,7 +880,7 @@ class WebSocketServerIntegrationTest {
             }
           ),
       )
-    throwingServer.start()
+    startAndWait(throwingServer)
     try {
       val client = HttpClient(CIO) { install(WebSockets) }
       client.use { client ->
@@ -889,7 +924,7 @@ class WebSocketServerIntegrationTest {
             }
           ),
       )
-    throwingServer.start()
+    startAndWait(throwingServer)
     try {
       val ownerMessages = java.util.Collections.synchronizedList(mutableListOf<String>())
       val bystanderMessages = java.util.Collections.synchronizedList(mutableListOf<String>())
@@ -988,7 +1023,7 @@ class WebSocketServerIntegrationTest {
             }
           ),
       )
-    orderedServer.start()
+    startAndWait(orderedServer)
     try {
       val client = HttpClient(CIO) { install(WebSockets) }
       client.use { c ->
@@ -1032,7 +1067,7 @@ class WebSocketServerIntegrationTest {
             }
           ),
       )
-    rawSuccessServer.start()
+    startAndWait(rawSuccessServer)
     try {
       val ownerMessages = java.util.Collections.synchronizedList(mutableListOf<String>())
       val bystanderMessages = java.util.Collections.synchronizedList(mutableListOf<String>())
@@ -1158,7 +1193,7 @@ class WebSocketServerIntegrationTest {
             }
           ),
       )
-    typedSuccessServer.start()
+    startAndWait(typedSuccessServer)
     try {
       val ownerMessages = java.util.Collections.synchronizedList(mutableListOf<String>())
       val bystanderMessages = java.util.Collections.synchronizedList(mutableListOf<String>())
@@ -1292,7 +1327,7 @@ class WebSocketServerIntegrationTest {
       )
     runnerHolder[0] =
       AsyncActionRunner(scope = testScope, broadcastResponse = { asyncServer.broadcast(it) })
-    asyncServer.start()
+    startAndWait(asyncServer)
     try {
       val client = HttpClient(CIO) { install(WebSockets) }
       client.use { c ->
@@ -1326,7 +1361,7 @@ class WebSocketServerIntegrationTest {
 
   @Test
   fun `externally correlated response broadcasts without a socket owner`() = runBlocking {
-    server.start()
+    startAndWait(server)
 
     val client = HttpClient(CIO) { install(WebSockets) }
     client.use { c ->
@@ -1375,7 +1410,7 @@ class WebSocketServerIntegrationTest {
       )
     runnerHolder[0] =
       AsyncActionRunner(scope = testScope, broadcastResponse = { asyncServer.broadcast(it) })
-    asyncServer.start()
+    startAndWait(asyncServer)
     try {
       val ownerMessages = java.util.Collections.synchronizedList(mutableListOf<String>())
       val bystanderMessages = java.util.Collections.synchronizedList(mutableListOf<String>())
@@ -1476,7 +1511,7 @@ class WebSocketServerIntegrationTest {
             }
           ),
       )
-    hierarchyServer.start()
+    startAndWait(hierarchyServer)
     try {
       val ownerMessages = java.util.Collections.synchronizedList(mutableListOf<String>())
       val bystanderMessages = java.util.Collections.synchronizedList(mutableListOf<String>())

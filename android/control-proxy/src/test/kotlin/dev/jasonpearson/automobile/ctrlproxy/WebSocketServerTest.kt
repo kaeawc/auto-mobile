@@ -4,8 +4,13 @@ import dev.jasonpearson.automobile.protocol.ErrorResponse
 import dev.jasonpearson.automobile.protocol.HierarchyUpdateEvent
 import dev.jasonpearson.automobile.protocol.SetKeyboardProfileResult
 import dev.jasonpearson.automobile.protocol.SwipeResult
+import java.net.InetAddress
+import java.net.ServerSocket
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -46,51 +51,162 @@ class WebSocketServerTest {
   }
 
   @Test
-  fun `server starts successfully`() = runTest {
-    // Given
-    assertFalse("Server should not be running initially", server.isRunning())
+  fun `server starts successfully`() =
+    runTest(testScope.testScheduler) {
+      // Given
+      assertFalse("Server should not be running initially", server.isRunning())
 
-    // When
-    server.start()
+      // When
+      server.start()
+      runCurrent()
 
-    // Then
-    assertTrue("Server should be running", server.isRunning())
-    assertEquals("Should have no connections initially", 0, server.getConnectionCount())
-  }
-
-  @Test
-  fun `server stops successfully`() = runTest {
-    // Given
-    server.start()
-    assertTrue(server.isRunning())
-
-    // When
-    server.stop()
-
-    // Then
-    assertFalse("Server should be stopped", server.isRunning())
-  }
+      // Then
+      assertTrue("Server should be running", server.isRunning())
+      assertEquals("Should have no connections initially", 0, server.getConnectionCount())
+    }
 
   @Test
-  fun `server does not start twice`() = runTest {
-    // Given
-    server.start()
+  fun `server retries a failed bind and starts when port becomes available`() =
+    runTest(testScope.testScheduler) {
+      var permanentFailures = 0
+      ServerSocket(0, 50, InetAddress.getByName("127.0.0.1")).use { blocker ->
+        server =
+          WebSocketServer(
+            port = blocker.localPort,
+            scope = testScope,
+            onPermanentStartFailure = { permanentFailures++ },
+          )
 
-    // When - try to start again
-    server.start()
+        server.start()
+        assertFalse("Failed initial bind must not report a listener", server.isRunning())
+        runCurrent()
+        advanceTimeBy(249)
+        assertFalse("Server must stay stopped during backoff", server.isRunning())
 
-    // Then - should still be running normally
-    assertTrue("Server should still be running", server.isRunning())
-  }
+        blocker.close()
+        advanceTimeBy(1)
+        runCurrent()
+        assertTrue("First retry should bind after the port is freed", server.isRunning())
+        assertEquals(0, permanentFailures)
+      }
+    }
 
   @Test
-  fun `server connection count starts at zero`() = runTest {
-    // Given
-    server.start()
+  fun `server reports permanent failure once after bounded retries`() =
+    runTest(testScope.testScheduler) {
+      var permanentFailures = 0
+      ServerSocket(0, 50, InetAddress.getByName("127.0.0.1")).use { blocker ->
+        server =
+          WebSocketServer(
+            port = blocker.localPort,
+            scope = testScope,
+            onPermanentStartFailure = { permanentFailures++ },
+          )
 
-    // Then
-    assertEquals("Connection count should start at 0", 0, server.getConnectionCount())
-  }
+        server.start()
+        assertFalse(server.isRunning())
+        runCurrent()
+        advanceUntilIdle()
+
+        assertFalse("Exhausted retries must not report a listener", server.isRunning())
+        assertEquals("Permanent failure callback should fire once", 1, permanentFailures)
+        assertEquals(
+          "Four exponential delays should total 3750 ms",
+          3750L,
+          testScheduler.currentTime,
+        )
+      }
+    }
+
+  @Test
+  fun `explicit successful start cancels pending permanent failure`() =
+    runTest(testScope.testScheduler) {
+      var permanentFailures = 0
+      ServerSocket(0, 50, InetAddress.getByName("127.0.0.1")).use { blocker ->
+        server =
+          WebSocketServer(
+            port = blocker.localPort,
+            scope = testScope,
+            onPermanentStartFailure = { permanentFailures++ },
+          )
+
+        server.start()
+        assertFalse(server.isRunning())
+        runCurrent()
+        blocker.close()
+        server.start()
+        runCurrent()
+        advanceUntilIdle()
+
+        assertTrue(server.isRunning())
+        assertEquals(0, permanentFailures)
+      }
+    }
+
+  @Test
+  fun `stop cancels a pending retry without reporting permanent failure`() =
+    runTest(testScope.testScheduler) {
+      var permanentFailures = 0
+      ServerSocket(0, 50, InetAddress.getByName("127.0.0.1")).use { blocker ->
+        server =
+          WebSocketServer(
+            port = blocker.localPort,
+            scope = testScope,
+            onPermanentStartFailure = { permanentFailures++ },
+          )
+
+        server.start()
+        runCurrent()
+        assertFalse(server.isRunning())
+        server.stop()
+        blocker.close()
+        advanceTimeBy(4_000)
+        runCurrent()
+
+        assertFalse("Stopped server must not bind after retry delay", server.isRunning())
+        assertEquals(0, permanentFailures)
+      }
+    }
+
+  @Test
+  fun `server stops successfully`() =
+    runTest(testScope.testScheduler) {
+      // Given
+      server.start()
+      runCurrent()
+      assertTrue(server.isRunning())
+
+      // When
+      server.stop()
+
+      // Then
+      assertFalse("Server should be stopped", server.isRunning())
+    }
+
+  @Test
+  fun `server does not start twice`() =
+    runTest(testScope.testScheduler) {
+      // Given
+      server.start()
+      runCurrent()
+
+      // When - try to start again
+      server.start()
+
+      // Then - should still be running normally
+      assertTrue("Server should still be running", server.isRunning())
+    }
+
+  @Test
+  fun `server connection count starts at zero`() =
+    runTest(testScope.testScheduler) {
+      // Given
+      server.start()
+      runCurrent()
+
+      // Then
+      assertEquals("Connection count should start at 0", 0, server.getConnectionCount())
+    }
 
   // ---------------------------------------------------------------------------
   // Error-envelope helpers (issue #2985) — pure, no network I/O.
@@ -202,18 +318,20 @@ class WebSocketServerTest {
   }
 
   @Test
-  fun `server can be created with custom port`() = runTest {
-    // Given
-    val customPort = 9999
-    val customServer = WebSocketServer(port = customPort, scope = testScope)
+  fun `server can be created with custom port`() =
+    runTest(testScope.testScheduler) {
+      // Given
+      val customPort = 9999
+      val customServer = WebSocketServer(port = customPort, scope = testScope)
 
-    // When
-    customServer.start()
+      // When
+      customServer.start()
+      runCurrent()
 
-    // Then
-    assertTrue("Custom server should be running", customServer.isRunning())
+      // Then
+      assertTrue("Custom server should be running", customServer.isRunning())
 
-    // Cleanup
-    customServer.stop()
-  }
+      // Cleanup
+      customServer.stop()
+    }
 }

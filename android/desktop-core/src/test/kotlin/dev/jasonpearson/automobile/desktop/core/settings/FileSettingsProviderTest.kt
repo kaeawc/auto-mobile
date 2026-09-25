@@ -46,6 +46,14 @@ class FileSettingsProviderTest {
   }
 
   @Test
+  fun `persists Logs saved views across provider instances`() {
+    val file = tempSettingsFile()
+    assertEquals("[]", FileSettingsProvider(file).logsSavedViews)
+    FileSettingsProvider(file).logsSavedViews = "[{\"name\":\"Errors\"}]"
+    assertEquals("[{\"name\":\"Errors\"}]", FileSettingsProvider(file).logsSavedViews)
+  }
+
+  @Test
   fun `defaults the live-mirror quality settings`() {
     val settings = FileSettingsProvider(tempSettingsFile())
     assertEquals("medium", settings.streamQualityPreset)

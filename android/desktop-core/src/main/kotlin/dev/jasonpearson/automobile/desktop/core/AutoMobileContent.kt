@@ -284,6 +284,7 @@ internal fun rememberLiveVideoFrame(
   autoReconnect: Boolean = false,
   streamingEnabled: Boolean = true,
   reconnectInitialMs: Long = LIVE_RECONNECT_INITIAL_MS,
+  delayMs: suspend (Long) -> Unit = ::delay,
   nowMs: () -> Long = MONOTONIC_NOW_MS,
   // Null disables the Streaming-stall reconnect; iOS (idle-frame-dropping) callers pass null.
   stallReconnectMs: Long? = LIVE_STALL_RECONNECT_MS,
@@ -324,6 +325,7 @@ internal fun rememberLiveVideoFrame(
   LaunchedEffect(source, deviceId, autoReconnect, streamingEnabled) {
     // A paused pane (window unfocused) owns no subscription, so it must not retry a reconnect.
     if (source == null || !streamingEnabled) return@LaunchedEffect
+    var backoffMs = reconnectInitialMs
     // collectLatest (not collect) is load-bearing for the retry: when the socket is absent,
     // connect() re-assigns the SAME Unavailable value, which MutableStateFlow suppresses — so a
     // plain collector would receive no further event and retry only once. Under collectLatest the
@@ -331,6 +333,7 @@ internal fun rememberLiveVideoFrame(
     // a successful connect, or disposal), so a stuck-Unavailable stream keeps retrying on its own
     // timer while a recovered one stops cleanly.
     source.state.collectLatest { state ->
+      if (state is VideoStreamState.Streaming) backoffMs = reconnectInitialMs
       if (state is VideoStreamState.Unavailable || state is VideoStreamState.PermissionRequired) {
         // Auto-reconnecting consumers (the workspace video pane) RETAIN the last decoded frame
         // across a relay drop: the pane keeps rendering the freshest video it ever had while the
@@ -341,12 +344,11 @@ internal fun rememberLiveVideoFrame(
         // semantics, where screenshot updates ARE the designed fallback surface.
         if (!autoReconnect) liveFrame = null
         if (autoReconnect && deviceId != null) {
-          var backoffMs = reconnectInitialMs
           while (isActive) {
             // Cancelled by composition disposal or a real state change, so a torn-down or
             // recovered pane stops. connect() no-ops while a reader is already active, so a
             // spurious retry cannot double-subscribe.
-            delay(backoffMs)
+            delayMs(backoffMs)
             backoffMs = (backoffMs * 2).coerceAtMost(LIVE_RECONNECT_MAX_MS)
             source.connect(deviceId)
           }

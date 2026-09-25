@@ -23,8 +23,11 @@ export const testOverrides: {
   hostPortAvailabilityChecker: HostPortAvailabilityChecker | undefined;
   deviceReadinessProxyDriverProvider: DeviceReadinessProxyDriverProvider | null;
   telemetryNoOpDefault: boolean;
+  /** Directory read by auxiliary socket configs during in-process tests. */
+  auxSocketDir: string | undefined;
 } = {
   hostPortAvailabilityChecker: undefined,
   deviceReadinessProxyDriverProvider: null,
   telemetryNoOpDefault: false,
+  auxSocketDir: undefined,
 };

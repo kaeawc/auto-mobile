@@ -10,6 +10,8 @@ import {
 import type { DaemonSocketReachabilityLike } from "../../../src/daemon/daemonSocketReachability";
 import { ActionableError } from "../../../src/models/ActionableError";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { DEVICE_DATA_STREAM_SOCKET_CONFIG } from "../../../src/daemon/daemonFiles";
+import { testOverrides } from "../../../src/utils/testOverrides";
 
 const isWindows = platform() === "win32";
 
@@ -48,7 +50,7 @@ describe("BaseSocketServer bind guard", () => {
       return;
     }
     peerDirectory = mkdtempSync(join(tmpdir(), "aux-socket-peer-"));
-    peerSocketPath = join(peerDirectory, "stream.sock");
+    peerSocketPath = join(peerDirectory, "observation-stream.sock");
     peer = await listenOnSocket(peerSocketPath);
     const original = statSync(peerSocketPath);
     peerIdentity = { dev: original.dev, ino: original.ino };
@@ -71,7 +73,13 @@ describe("BaseSocketServer bind guard", () => {
   });
 
   (isWindows ? test.skip : test)("refuses to unlink a live peer socket", async () => {
-    server = new TestServer(peerSocketPath, { isReachable: async () => true });
+    const previousDir = testOverrides.auxSocketDir;
+    testOverrides.auxSocketDir = peerDirectory;
+    const contestedPath = DEVICE_DATA_STREAM_SOCKET_CONFIG.defaultPath;
+    testOverrides.auxSocketDir = previousDir;
+    expect(contestedPath).toBe(peerSocketPath);
+    expect(DEVICE_DATA_STREAM_SOCKET_CONFIG.defaultPath).not.toBe(contestedPath);
+    server = new TestServer(contestedPath, { isReachable: async () => true });
 
     const start = server.start();
     await expect(start).rejects.toBeInstanceOf(ActionableError);

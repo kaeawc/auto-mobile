@@ -12,6 +12,10 @@ import {
   startDeviceDataStreamSocketServer,
   stopDeviceDataStreamSocketServer,
 } from "../../../../src/daemon/deviceDataStreamSocketServer";
+import { DEVICE_DATA_STREAM_SOCKET_CONFIG } from "../../../../src/daemon/daemonFiles";
+import { testOverrides } from "../../../../src/utils/testOverrides";
+import { statSync } from "node:fs";
+import path from "node:path";
 
 describe("CtrlProxyPackages (Android)", function () {
   let fakeAdb: FakeAdbExecutor;
@@ -241,6 +245,9 @@ describe("CtrlProxyPackages (Android)", function () {
 
     test("refreshes hierarchy cadence from the stream server when no interval is passed", async function () {
       const streamServer = await startDeviceDataStreamSocketServer(fakeTimer);
+      const socketPath = DEVICE_DATA_STREAM_SOCKET_CONFIG.defaultPath;
+      expect(path.dirname(socketPath)).toBe(testOverrides.auxSocketDir);
+      expect(statSync(socketPath).isSocket()).toBe(true);
       (streamServer as any).subscribers.set("hierarchy-cadence-test", {
         socket: { destroyed: false },
         backfilling: false,

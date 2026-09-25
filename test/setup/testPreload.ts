@@ -1,4 +1,23 @@
 import { testOverrides } from "../../src/utils/testOverrides";
+import { rmSync } from "node:fs";
+import { ensureAuxSocketDir } from "./auxSocketDir";
+
+/** Isolate auxiliary sockets from live daemons and parallel tests (issue #7616, PR #7612). */
+const auxSocketDir = ensureAuxSocketDir();
+testOverrides.auxSocketDir = auxSocketDir;
+
+const cleanupFlagKey = `__automobile_aux_socket_cleanup_registered_${process.pid}`;
+const globalFlags = globalThis as unknown as Record<string, boolean>;
+if (!globalFlags[cleanupFlagKey]) {
+  globalFlags[cleanupFlagKey] = true;
+  process.once("exit", () => {
+    try {
+      rmSync(auxSocketDir, { recursive: true, force: true });
+    } catch {
+      // Cleanup is best effort; a lingering socket must not block process exit.
+    }
+  });
+}
 
 /**
  * Globally neutralize TelemetryRecorder for the whole suite so a

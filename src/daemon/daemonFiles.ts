@@ -1,4 +1,3 @@
-import os from "node:os";
 import path from "node:path";
 import {
   existsSync,
@@ -14,7 +13,7 @@ import {
   readDarwinProcessGenerationToken,
   readLinuxProcessGenerationToken,
 } from "./processGeneration";
-import { getSocketPath, type SocketServerConfig } from "./socketServer/index";
+import { getSocketPath, resolveAuxSocketDir, type SocketServerConfig } from "./socketServer/index";
 import type { AuxiliaryDaemonSocketName, PidFileData } from "./types";
 import { compareStrictNumericVersions } from "../utils/deviceMatcher";
 import { logger } from "../utils/logger";
@@ -23,51 +22,75 @@ import { releaseVersion } from "../utils/mcpVersion";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
 
 export const VIDEO_RECORDING_SOCKET_CONFIG: SocketServerConfig = {
-  defaultPath: path.join(os.homedir(), ".auto-mobile", "video-recording.sock"),
+  get defaultPath() {
+    return path.join(resolveAuxSocketDir(), "video-recording.sock");
+  },
 };
 
 export const VIDEO_STREAM_SOCKET_CONFIG: SocketServerConfig = {
-  defaultPath: path.join(os.homedir(), ".auto-mobile", "video-stream.sock"),
+  get defaultPath() {
+    return path.join(resolveAuxSocketDir(), "video-stream.sock");
+  },
 };
 
 export const TEST_RECORDING_SOCKET_CONFIG: SocketServerConfig = {
-  defaultPath: path.join(os.homedir(), ".auto-mobile", "test-recording.sock"),
+  get defaultPath() {
+    return path.join(resolveAuxSocketDir(), "test-recording.sock");
+  },
 };
 
 export const DEVICE_SNAPSHOT_SOCKET_CONFIG: SocketServerConfig = {
-  defaultPath: path.join(os.homedir(), ".auto-mobile", "device-snapshot.sock"),
+  get defaultPath() {
+    return path.join(resolveAuxSocketDir(), "device-snapshot.sock");
+  },
 };
 
 export const APPEARANCE_SOCKET_CONFIG: SocketServerConfig = {
-  defaultPath: path.join(os.homedir(), ".auto-mobile", "appearance.sock"),
+  get defaultPath() {
+    return path.join(resolveAuxSocketDir(), "appearance.sock");
+  },
 };
 
 export const PERFORMANCE_STREAM_SOCKET_CONFIG: SocketServerConfig = {
-  defaultPath: path.join(os.homedir(), ".auto-mobile", "performance-stream.sock"),
+  get defaultPath() {
+    return path.join(resolveAuxSocketDir(), "performance-stream.sock");
+  },
 };
 
 export const PERFORMANCE_PUSH_SOCKET_CONFIG: SocketServerConfig = {
-  defaultPath: path.join(os.homedir(), ".auto-mobile", "performance-push.sock"),
+  get defaultPath() {
+    return path.join(resolveAuxSocketDir(), "performance-push.sock");
+  },
 };
 
 export const DEVICE_DATA_STREAM_SOCKET_CONFIG: SocketServerConfig = {
-  defaultPath: path.join(os.homedir(), ".auto-mobile", "observation-stream.sock"),
+  get defaultPath() {
+    return path.join(resolveAuxSocketDir(), "observation-stream.sock");
+  },
 };
 
 export const FAILURES_STREAM_SOCKET_CONFIG: SocketServerConfig = {
-  defaultPath: path.join(os.homedir(), ".auto-mobile", "failures-stream.sock"),
+  get defaultPath() {
+    return path.join(resolveAuxSocketDir(), "failures-stream.sock");
+  },
 };
 
 export const FAILURES_PUSH_SOCKET_CONFIG: SocketServerConfig = {
-  defaultPath: path.join(os.homedir(), ".auto-mobile", "failures-push.sock"),
+  get defaultPath() {
+    return path.join(resolveAuxSocketDir(), "failures-push.sock");
+  },
 };
 
 export const TELEMETRY_PUSH_SOCKET_CONFIG: SocketServerConfig = {
-  defaultPath: path.join(os.homedir(), ".auto-mobile", "telemetry-push.sock"),
+  get defaultPath() {
+    return path.join(resolveAuxSocketDir(), "telemetry-push.sock");
+  },
 };
 
 export const WEBRTC_STREAM_SOCKET_CONFIG: SocketServerConfig = {
-  defaultPath: resolveWebRtcStreamSocketPath(),
+  get defaultPath() {
+    return resolveWebRtcStreamSocketPath();
+  },
 };
 
 function resolveWebRtcStreamSocketPath(env: NodeJS.ProcessEnv = process.env): string {
@@ -75,7 +98,7 @@ function resolveWebRtcStreamSocketPath(env: NodeJS.ProcessEnv = process.env): st
     env.AUTOMOBILE_WEBRTC_STREAM_SOCKET_PATH ?? env.AUTO_MOBILE_WEBRTC_STREAM_SOCKET_PATH;
   return override
     ? resolvePathFromDaemonLaunchWorkingDirectory(override)
-    : path.join(os.homedir(), ".auto-mobile", "webrtc-stream.sock");
+    : path.join(resolveAuxSocketDir(env), "webrtc-stream.sock");
 }
 
 /**

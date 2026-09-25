@@ -20,4 +20,5 @@ export {
   type KeepaliveConfig,
   DEFAULT_KEEPALIVE_CONFIG,
   getSocketPath,
+  resolveAuxSocketDir,
 } from "./SocketServerTypes";

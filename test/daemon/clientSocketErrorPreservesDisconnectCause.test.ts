@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import * as net from "node:net";
 import { describe, expect, mock, test } from "bun:test";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -18,6 +19,7 @@ class FakeSocket extends EventEmitter {
 
 let createdSocket: FakeSocket | undefined;
 mock.module("node:net", () => ({
+  ...net,
   createConnection: (_socketPath: string, onConnect: () => void) => {
     createdSocket = new FakeSocket();
     queueMicrotask(onConnect);

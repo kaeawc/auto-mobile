@@ -1,7 +1,8 @@
-import ts from "typescript";
 import { beforeAll, describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
+import ts from "typescript";
+import { blankComments } from "./blankComments";
 
 /**
  * FUNNEL 2 guard: every device-addressed operation — with OR without a session —
@@ -150,47 +151,6 @@ describe("device-addressed admission gate (issue #6863)", () => {
     "src/daemon/videoStreamSocketServer.ts#resolveVideoStreamDevice",
     "src/daemon/testRecordingSocketServer.ts#resolveTestRecordingDevice",
   ];
-
-  /**
-   * Replace every comment's characters with spaces, in place, so a mention in
-   * prose ("see `getBootedDevices`") is not counted as a call site while every
-   * OFFSET in the file stays exactly where it was. Preserving offsets is what
-   * lets the real parser run on the untouched source and still read
-   * comment-free body text: handing the parser a shortened, scanner-rewritten
-   * copy silently dropped declarations, because a bare scanner cannot tell a
-   * regex literal from division.
-   */
-  function blankComments(source: string): string {
-    const scanner = ts.createScanner(
-      ts.ScriptTarget.Latest,
-      /* skipTrivia */ false,
-      ts.LanguageVariant.Standard,
-      source,
-    );
-    const out = source.split("");
-    let offset = 0;
-    for (
-      let token = scanner.scan();
-      token !== ts.SyntaxKind.EndOfFileToken;
-      token = scanner.scan()
-    ) {
-      const text = scanner.getTokenText();
-      if (
-        token === ts.SyntaxKind.SingleLineCommentTrivia ||
-        token === ts.SyntaxKind.MultiLineCommentTrivia
-      ) {
-        for (let index = offset; index < offset + text.length; index += 1) {
-          // Newlines survive so line structure — and any assertion that reads
-          // it — is unchanged.
-          if (out[index] !== "\n" && out[index] !== "\r") {
-            out[index] = " ";
-          }
-        }
-      }
-      offset += text.length;
-    }
-    return out.join("");
-  }
 
   interface NamedFunction {
     readonly name: string;

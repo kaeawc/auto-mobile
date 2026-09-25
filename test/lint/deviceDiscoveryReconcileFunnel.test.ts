@@ -1,7 +1,7 @@
-import ts from "typescript";
 import { beforeAll, describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
+import { blankComments } from "./blankComments";
 
 /**
  * FUNNEL 1 guard: every Android device discovery that is then joined to POOLED
@@ -72,7 +72,7 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
         "Android emulator discovery producer; runs below the pool. The 9th call (adoptsExistingAvdLaunch, line 1678) is #6906's in-flight-launch guard — a local adopt-vs-spawn decision, never joined to pooled identity.",
     },
     "src/utils/android-cmdline-tools/AdbClient.ts": {
-      calls: 2,
+      calls: 1,
       reason: "adb discovery producer; runs below the pool.",
     },
     "src/utils/android-cmdline-tools/interfaces/AdbExecutor.ts": {
@@ -178,54 +178,6 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
         "and reads no pool state. Its device-addressed reads go through resourceDeviceResolver.",
     },
   };
-
-  /**
-   * Strip comments before matching: a call named in prose ("see
-   * `getBootedDevices`") is not a call site, and this file's own guard would
-   * otherwise churn every time a doc comment mentions the API. The TypeScript
-   * scanner is used rather than a regex so a `//` inside a string literal
-   * survives.
-   */
-  /**
-   * Replace every comment's characters with spaces, in place, so a mention in
-   * prose ("see `getBootedDevices`") is not counted as a call site while every
-   * OFFSET in the file stays exactly where it was. Preserving offsets is what
-   * lets the real parser run on the untouched source and still read
-   * comment-free body text: handing the parser a shortened, scanner-rewritten
-   * copy silently dropped declarations, because a bare scanner cannot tell a
-   * regex literal from division.
-   */
-  function blankComments(source: string): string {
-    const scanner = ts.createScanner(
-      ts.ScriptTarget.Latest,
-      /* skipTrivia */ false,
-      ts.LanguageVariant.Standard,
-      source,
-    );
-    const out = source.split("");
-    let offset = 0;
-    for (
-      let token = scanner.scan();
-      token !== ts.SyntaxKind.EndOfFileToken;
-      token = scanner.scan()
-    ) {
-      const text = scanner.getTokenText();
-      if (
-        token === ts.SyntaxKind.SingleLineCommentTrivia ||
-        token === ts.SyntaxKind.MultiLineCommentTrivia
-      ) {
-        for (let index = offset; index < offset + text.length; index += 1) {
-          // Newlines survive so line structure — and any assertion that reads
-          // it — is unchanged.
-          if (out[index] !== "\n" && out[index] !== "\r") {
-            out[index] = " ";
-          }
-        }
-      }
-      offset += text.length;
-    }
-    return out.join("");
-  }
 
   function walk(dir: string, files: string[] = []): string[] {
     // withFileTypes, not a statSync per entry: one syscall for the whole
@@ -338,5 +290,39 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
     // literal survived the stripper, and an unanchored URL regex is exactly the
     // shape CodeQL flags as a host-matching hazard.
     expect(blankComments('const url = "http://example.com";')).toContain('"http://example.com"');
+  });
+
+  test("the comment stripper handles comments after template substitutions", () => {
+    const fixture = `const msg = \`failed: \${err}\`;
+/**
+ * See \`someOtherThing()\` for details. Do not call getBootedDevices()
+ * directly from here.
+ */
+await manager.getBootedDevices('android');`;
+    expect(blankComments(fixture).match(/\bgetBootedDevices\s*\(/g)).toHaveLength(1);
+  });
+
+  test("the comment stripper handles comments before closing tokens and at EOF", () => {
+    const fixtures = [
+      `function f() {
+  a();
+  // getBootedDevices()
+}`,
+      `foo(
+  bar,
+  // getBootedDevices()
+);`,
+      `const x = 1;
+// getBootedDevices()`,
+    ];
+
+    for (const fixture of fixtures) {
+      expect(blankComments(fixture).match(/\bgetBootedDevices\s*\(/g)).toBeNull();
+      expect(
+        blankComments(`${fixture}\nawait manager.getBootedDevices('android');`).match(
+          /\bgetBootedDevices\s*\(/g,
+        ),
+      ).toHaveLength(1);
+    }
   });
 });

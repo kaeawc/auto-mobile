@@ -14,6 +14,10 @@ import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+import { AndroidCtrlProxyClient } from "../../src/features/observe/android/AndroidCtrlProxyClient";
+import { IOSCtrlProxyClient } from "../../src/features/observe/ios/IOSCtrlProxyClient";
+import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
+import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 
 const createBootedDevice = (
   deviceId: string,
@@ -32,8 +36,11 @@ describe("device state tools", () => {
   });
 
   afterEach(() => {
+    AndroidCtrlProxyClient.resetInstances();
+    IOSCtrlProxyClient.resetInstances();
     ToolRegistry.clearTools();
     DaemonState.getInstance().reset();
+    PlatformDeviceManagerFactory.reset();
   });
 
   test("registers getDeviceState and setDeviceState schemas", () => {
@@ -276,6 +283,7 @@ describe("device state tools", () => {
       [],
       [createBootedDevice("sim-new", "ios", "iPhone 16")],
     );
+    PlatformDeviceManagerFactory.setInstance(fakeDeviceManager);
     const devicePool = new DevicePool(
       sessionManager,
       "test-daemon-session-id",
@@ -285,6 +293,9 @@ describe("device state tools", () => {
       new DefaultRetryExecutor(fakeTimer),
     );
     DaemonState.getInstance().initialize(sessionManager, devicePool);
+    const device = createBootedDevice("sim-new", "ios", "iPhone 16");
+    await IOSCtrlProxyClient.retireInstance(device.deviceId);
+    const retired = IOSCtrlProxyClient.getInstance(device);
 
     const setActiveDevice = ToolRegistry.getTool("setActiveDevice");
     await setActiveDevice!.handler({
@@ -296,7 +307,69 @@ describe("device state tools", () => {
     expect(sessionManager.getSession("session-1")?.assignedDevice).toBe("sim-new");
     expect(devicePool.getDevice("sim-new")?.sessionId).toBe("session-1");
     expect(devicePool.getDevice("sim-new")?.status).toBe("busy");
+    expect(IOSCtrlProxyClient.getInstance(device)).not.toBe(retired);
 
+    sessionManager.stopCleanupTimer();
+  });
+
+  test("setActiveDevice resumes a re-admitted Android device", async () => {
+    const fakeTimer = new FakeTimer();
+    const sessionManager = new SessionManager(fakeTimer, new FakeDeviceSessionPersistence());
+    const device = createBootedDevice("emulator-5554", "android", "Pixel 8");
+    const fakeDeviceManager = new FakeDeviceManager([], [device]);
+    PlatformDeviceManagerFactory.setInstance(fakeDeviceManager);
+    const devicePool = new DevicePool(
+      sessionManager,
+      "test-daemon-session-id",
+      fakeTimer,
+      new FakeInstalledAppsRepository(),
+      fakeDeviceManager,
+      new DefaultRetryExecutor(fakeTimer),
+    );
+    DaemonState.getInstance().initialize(sessionManager, devicePool);
+    AndroidCtrlProxyClient.retireForShutdown(device.deviceId);
+    const retired = AndroidCtrlProxyClient.getInstance(device, new FakeAdbClientFactory());
+
+    await ToolRegistry.getTool("setActiveDevice")!.handler({
+      deviceId: device.deviceId,
+      platform: "android",
+      sessionUuid: "session-1",
+    });
+
+    expect(AndroidCtrlProxyClient.getInstance(device, new FakeAdbClientFactory())).not.toBe(
+      retired,
+    );
+    sessionManager.stopCleanupTimer();
+  });
+
+  test("setActiveDevice keeps a cached but no longer booted device retired", async () => {
+    const fakeTimer = new FakeTimer();
+    const sessionManager = new SessionManager(fakeTimer, new FakeDeviceSessionPersistence());
+    const device = createBootedDevice("sim-stopped", "ios", "iPhone 16");
+    const devicePool = new DevicePool(
+      sessionManager,
+      "test-daemon-session-id",
+      fakeTimer,
+      new FakeInstalledAppsRepository(),
+      new FakeDeviceManager([], [device]),
+      new DefaultRetryExecutor(fakeTimer),
+    );
+    await devicePool.initializeWithDevices([device]);
+    const freshDiscovery = new FakeDeviceManager([], []);
+    PlatformDeviceManagerFactory.setInstance(freshDiscovery);
+    DaemonState.getInstance().initialize(sessionManager, devicePool);
+    await IOSCtrlProxyClient.retireInstance(device.deviceId);
+    const retired = IOSCtrlProxyClient.getInstance(device);
+
+    await ToolRegistry.getTool("setActiveDevice")!.handler({
+      deviceId: device.deviceId,
+      platform: "ios",
+      sessionUuid: "session-1",
+    });
+
+    expect(devicePool.getDevice(device.deviceId)).not.toBeNull();
+    expect(IOSCtrlProxyClient.getInstance(device)).toBe(retired);
+    expect(await retired.ensureConnected()).toBe(false);
     sessionManager.stopCleanupTimer();
   });
 
@@ -310,6 +383,7 @@ describe("device state tools", () => {
         createBootedDevice("sim-b", "ios", "iPhone 16"),
       ],
     );
+    PlatformDeviceManagerFactory.setInstance(fakeDeviceManager);
     const devicePool = new DevicePool(
       sessionManager,
       "test-daemon-session-id",

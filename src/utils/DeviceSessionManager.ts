@@ -1203,6 +1203,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
         lifecycleIdentityForDevice(device),
         options,
         async (signal) => {
+          AndroidCtrlProxyClient.resumeAfterDeviceStart(deviceId);
           perf.startOperation("verifyDevice");
           await this.verifyAndroidDevice(deviceId, { ...options, signal }, device);
           perf.endOperation("verifyDevice");
@@ -1262,6 +1263,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
           throw new ActionableError(`Failed to start Android emulator ${deviceImage}.`);
         }
 
+        AndroidCtrlProxyClient.resumeAfterDeviceStart(newDevice.deviceId!);
         perf.startOperation("verifyDevice");
         await this.verifyAndroidDevice(newDevice.deviceId!, { ...options, signal }, newDevice);
         perf.endOperation("verifyDevice");
@@ -1330,6 +1332,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
               async () => await this.simctl!.bootSimulator(provisioned.deviceId!),
             );
             perf.endOperation("bootSimulator");
+            IOSCtrlProxyClient.resumeAfterDeviceStart(provisioned.deviceId!);
             perf.startOperation("verifyDevice");
             await this.verifyIosDevice(provisioned.deviceId!, { ...options, signal });
             perf.endOperation("verifyDevice");
@@ -1392,6 +1395,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
         { platform: "ios", stableId: device.deviceId! },
         options,
         async (signal) => {
+          IOSCtrlProxyClient.resumeAfterDeviceStart(device.deviceId!);
           perf.startOperation("verifyDevice");
           await this.verifyIosDevice(device.deviceId!, { ...options, signal });
           perf.endOperation("verifyDevice");
@@ -1415,6 +1419,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
           async () => await this.simctl!.bootSimulator(deviceId),
         );
         perf.endOperation("bootSimulator");
+        IOSCtrlProxyClient.resumeAfterDeviceStart(deviceId);
         perf.startOperation("verifyDevice");
         await this.verifyIosDevice(deviceId, { ...options, signal });
         perf.endOperation("verifyDevice");

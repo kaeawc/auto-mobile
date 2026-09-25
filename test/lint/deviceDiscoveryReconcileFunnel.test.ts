@@ -102,6 +102,12 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
         "target, listDevices and provisionDevice exact-boot; exact-boot Android adds a fresh " +
         "cache-bypassed discovery beside the existing per-platform call; both reconcile first.",
     },
+    "src/server/utilityTools.ts": {
+      calls: 1,
+      reason:
+        "Fresh liveness gate before clearing the killDevice tombstone (#7586); the session-scoped " +
+        "setActiveDevice path reads the same pooled device afterward, so it reconciles first.",
+    },
 
     "src/daemon/webrtcStreamSocketServer.ts": {
       calls: 1,
@@ -256,6 +262,7 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
       "src/daemon/socketServer.ts",
       "src/server/bootedDeviceResources.ts",
       "src/server/deviceTools.ts",
+      "src/server/utilityTools.ts",
       "src/daemon/webrtcStreamSocketServer.ts",
       "src/daemon/videoStreamSocketServer.ts",
       "src/daemon/testRecordingSocketServer.ts",

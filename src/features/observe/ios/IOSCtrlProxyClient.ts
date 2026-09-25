@@ -557,6 +557,7 @@ export function getRequiredIosRunnerFeatureFlags(
  */
 export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlProxy {
   private static instances: Map<string, IOSCtrlProxyClient> = new Map();
+  private closed = false;
 
   // Session binding for multi-agent isolation
   private boundSessionId: string | null = null;
@@ -712,19 +713,29 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
    */
   public static getInstance(device: BootedDevice, port?: number): IOSCtrlProxyClient {
     requireBootedDevice(device, "IOSCtrlProxyClient.getInstance");
+    const key = device.deviceId;
+    const retired = IOSCtrlProxyManager.isDeviceRetired(key);
+    const existing = IOSCtrlProxyClient.instances.get(key);
+    if (retired && existing) {
+      return existing;
+    }
     const resolvedPort =
-      port ??
+      (retired ? IOSCtrlProxyClient.DEFAULT_PORT : port) ??
       (device.platform === "ios"
         ? PortManager.allocate(device.deviceId, { reservedPorts: IOS_CTRL_PROXY_RESERVED_PORTS })
         : IOSCtrlProxyClient.DEFAULT_PORT);
-    const key = device.deviceId;
-    const existing = IOSCtrlProxyClient.instances.get(key);
     if (existing) {
-      existing.updatePort(resolvedPort);
+      if (!existing.closed) {
+        existing.updatePort(resolvedPort);
+      }
       return existing;
     }
 
     const client = new IOSCtrlProxyClient(device, resolvedPort);
+    if (retired) {
+      client.closed = true;
+      client.autoReconnectEnabled = false;
+    }
     IOSCtrlProxyClient.instances.set(key, client);
     return client;
   }
@@ -736,21 +747,34 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
    * so listing devices never spins up a client or reserves a port as a side effect.
    */
   public static getExistingInstance(deviceId: string): IOSCtrlProxyClient | null {
+    if (IOSCtrlProxyManager.isDeviceRetired(deviceId)) {
+      return null;
+    }
     return IOSCtrlProxyClient.instances.get(deviceId) ?? null;
   }
 
   /**
    * Permanently retire the registered client for one device incarnation.
-   * Remove it before awaiting close so no concurrent cache lookup can recover
-   * the client whose reconnect timers are being cancelled.
+   * Keep the closed instance in the map so concurrent lookups cannot create a
+   * reconnecting replacement while the simulator is being killed.
    */
   public static async retireInstance(deviceId: string): Promise<void> {
+    IOSCtrlProxyManager.retireDevice(deviceId);
     const instance = IOSCtrlProxyClient.instances.get(deviceId);
     if (!instance) {
       return;
     }
-    IOSCtrlProxyClient.instances.delete(deviceId);
+    instance.closed = true;
     await instance.close();
+  }
+
+  /** Reopen the device registry only after a new boot/session start owns it. */
+  public static resumeAfterDeviceStart(deviceId: string): void {
+    if (!IOSCtrlProxyManager.isDeviceRetired(deviceId)) {
+      return;
+    }
+    IOSCtrlProxyClient.instances.delete(deviceId);
+    IOSCtrlProxyManager.resumeDevice(deviceId);
   }
 
   /** Return the latest app-provided navigation identity without doing I/O. */
@@ -945,6 +969,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       void instance.close();
     }
     IOSCtrlProxyClient.instances.clear();
+    IOSCtrlProxyManager.resetRetiredDevicesForTesting();
   }
 
   // ===========================================================================
@@ -993,8 +1018,15 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   public override async ensureConnected(
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<boolean> {
+    if (this.closed) {
+      return false;
+    }
     // Direct session tools connect here without passing through the manager.
     await IOSCtrlProxyManager.awaitStartupOrphanRunnerReap();
+
+    if (this.closed) {
+      return false;
+    }
 
     const connected = await super.ensureConnected(perf);
     if (connected) {
@@ -1074,6 +1106,21 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     } finally {
       this.isAttemptingAutoSetup = false;
     }
+  }
+
+  protected override connectWebSocket(
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    interest?: { release: () => void },
+  ): Promise<boolean> {
+    if (this.closed) {
+      return Promise.resolve(false);
+    }
+    return super.connectWebSocket(perf, interest);
+  }
+
+  public override async close(): Promise<void> {
+    this.closed = true;
+    await super.close();
   }
 
   private syncPortFromManager(manager: CtrlProxyIosManager): void {
@@ -1624,7 +1671,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   }
 
   protected override onConnectAttemptFailed(): void {
-    if (!this.autoReconnectEnabled) {
+    if (this.closed || !this.autoReconnectEnabled) {
       return;
     }
 
@@ -2110,7 +2157,11 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
    * that the CtrlProxy process may have crashed.
    */
   private triggerServiceRestart(): void {
-    if (this.isRequestingServiceRestart) {
+    if (
+      this.closed ||
+      IOSCtrlProxyManager.isDeviceRetired(this.device.deviceId) ||
+      this.isRequestingServiceRestart
+    ) {
       return;
     }
 

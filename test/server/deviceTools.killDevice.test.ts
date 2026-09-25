@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { EventEmitter } from "node:events";
+import { z } from "zod/v4";
 import type { ChildProcess } from "node:child_process";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -13,7 +14,7 @@ import {
   setDeviceToolsDependencies,
 } from "../../src/server/deviceTools";
 import { ActionableError } from "../../src/models/ActionableError";
-import { ToolRegistry } from "../../src/server/toolRegistry";
+import { ToolRegistry, ToolRegistryClass } from "../../src/server/toolRegistry";
 import {
   resetVideoRecordingManagerDependencies,
   setVideoRecordingManagerDependencies,
@@ -27,10 +28,13 @@ import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
 import { getInstalledAppsCacheWriteCoordinator } from "../../src/db/installedAppsCacheWriteCoordinator";
 import { executionTracker } from "../../src/server/executionTracker";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeWebSocket } from "../fakes/FakeWebSocket";
+import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android/AndroidCtrlProxyClient";
+import { IOSCtrlProxyClient } from "../../src/features/observe/ios/IOSCtrlProxyClient";
 import type {
   BootedDeviceDiscovery,
   BootedDeviceDiscoveryOptions,
@@ -614,6 +618,7 @@ describe("killDevice handler", () => {
 
   afterEach(() => {
     AndroidCtrlProxyClient.resetInstances();
+    IOSCtrlProxyClient.resetInstances();
     resetDeviceToolsDependencies();
     resetVideoRecordingManagerDependencies();
     DaemonState.getInstance().reset();
@@ -2330,11 +2335,15 @@ describe("killDevice handler", () => {
     const timer = new FakeTimer();
     const delayedManager = new DelayedSuccessfulKillDeviceManager();
     manager = delayedManager;
+    let retired: AndroidCtrlProxyClient | undefined;
     setDeviceToolsDependencies({
       deviceManagerFactory: () => delayedManager,
       notifyResourcesChanged: async () => {},
       ensureCtrlProxyReady: async () => {},
       clearInstalledAppsForDevice: async () => {},
+      stopAndroidObservers: async (device) => {
+        retired = AndroidCtrlProxyClient.getInstance(device, new FakeAdbClientFactory());
+      },
       timer,
     });
     const device: BootedDevice = {
@@ -2354,6 +2363,10 @@ describe("killDevice handler", () => {
 
     await expect(result).rejects.toThrow(
       "Timed out waiting for android device 'Pixel 8' (emulator-5554) to disappear",
+    );
+    expect(retired).toBeDefined();
+    expect(AndroidCtrlProxyClient.getInstance(device, new FakeAdbClientFactory())).not.toBe(
+      retired,
     );
   });
 
@@ -2580,10 +2593,19 @@ describe("killDevice handler", () => {
       timer.advanceTime(30_000);
       await expect(result).rejects.toThrow("iOS CtrlProxy shutdown did not complete");
       expect(pool.getStats()).toMatchObject({ idle: 0, assigned: 1 });
+      const device: BootedDevice = {
+        name: image.name,
+        platform: "ios",
+        deviceId: image.deviceId!,
+      };
+      const retired = IOSCtrlProxyClient.getInstance(device);
+      expect(IOSCtrlProxyManager.isDeviceRetired(device.deviceId)).toBe(true);
 
       rejectStop!(new Error("CtrlProxy stop failed"));
       await deferredStop.catch(() => undefined);
       expect(pool.getStats()).toMatchObject({ idle: 1, assigned: 0 });
+      expect(IOSCtrlProxyManager.isDeviceRetired(device.deviceId)).toBe(false);
+      expect(IOSCtrlProxyClient.getInstance(device)).not.toBe(retired);
     } finally {
       (
         IOSCtrlProxyManager as unknown as {
@@ -2591,6 +2613,276 @@ describe("killDevice handler", () => {
         }
       ).getInstance = originalGetInstance;
     }
+  });
+
+  test("resumes Android CtrlProxy after a late observer teardown failure", async () => {
+    const timer = new FakeTimer();
+    const device: BootedDevice = {
+      name: "Pixel 8",
+      platform: "android",
+      deviceId: "emulator-5554",
+    };
+    let rejectStop!: (error: Error) => void;
+    const deferredStop = new Promise<void>((_, reject) => {
+      rejectStop = reject;
+    });
+    let markStopStarted!: () => void;
+    const stopStarted = new Promise<void>((resolve) => {
+      markStopStarted = resolve;
+    });
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => manager,
+      stopAndroidObservers: () => {
+        markStopStarted();
+        return deferredStop;
+      },
+      timer,
+    });
+    const tool = ToolRegistry.getTool("killDevice")!;
+    const result = tool.handler({ device });
+    await stopStarted;
+    timer.advanceTime(30_000);
+    await expect(result).rejects.toThrow("Android observer detach did not complete");
+    const retired = AndroidCtrlProxyClient.getInstance(device, new FakeAdbClientFactory());
+
+    rejectStop(new Error("observer detach failed"));
+    await deferredStop.catch(() => undefined);
+    expect(AndroidCtrlProxyClient.getInstance(device, new FakeAdbClientFactory())).not.toBe(
+      retired,
+    );
+  });
+
+  test("keeps iOS CtrlProxy retired on caller abort until its teardown settles", async () => {
+    const timer = new FakeTimer();
+    const device: BootedDevice = { name: "iPhone 16", platform: "ios", deviceId: "ios-udid-abort" };
+    let resolveStop!: () => void;
+    const deferredStop = new Promise<void>((resolve) => {
+      resolveStop = resolve;
+    });
+    let markStopStarted!: () => void;
+    const stopStarted = new Promise<void>((resolve) => {
+      markStopStarted = resolve;
+    });
+    const managerSpy = spyOn(IOSCtrlProxyManager, "getInstance").mockReturnValue({
+      stop: () => {
+        markStopStarted();
+        return deferredStop;
+      },
+    } as never);
+    const controller = new AbortController();
+    try {
+      setDeviceToolsDependencies({ deviceManagerFactory: () => manager, timer });
+      const result = ToolRegistry.getTool("killDevice")!.handler(
+        { device },
+        undefined,
+        controller.signal,
+      );
+      await stopStarted;
+      controller.abort(new Error("caller cancelled shutdown"));
+      await expect(result).rejects.toThrow("caller cancelled shutdown");
+      const retired = IOSCtrlProxyClient.getInstance(device);
+      expect(IOSCtrlProxyManager.isDeviceRetired(device.deviceId)).toBe(true);
+
+      resolveStop();
+      await deferredStop;
+      for (
+        let attempt = 0;
+        IOSCtrlProxyManager.isDeviceRetired(device.deviceId) && attempt < 10;
+        attempt++
+      ) {
+        await Promise.resolve();
+      }
+      expect(IOSCtrlProxyManager.isDeviceRetired(device.deviceId)).toBe(false);
+      expect(IOSCtrlProxyClient.getInstance(device)).not.toBe(retired);
+    } finally {
+      managerSpy.mockRestore();
+    }
+  });
+
+  test("resumes iOS CtrlProxy when the platform kill command fails", async () => {
+    const device: BootedDevice = { name: "iPhone 16", platform: "ios", deviceId: "ios-udid-fail" };
+    const managerSpy = spyOn(IOSCtrlProxyManager, "getInstance").mockReturnValue({
+      stop: async () => {},
+    } as never);
+    try {
+      await expect(ToolRegistry.getTool("killDevice")!.handler({ device })).rejects.toThrow(
+        "adb emu kill failed",
+      );
+      expect(IOSCtrlProxyManager.isDeviceRetired(device.deviceId)).toBe(false);
+      expect(IOSCtrlProxyClient.getExistingInstance(device.deviceId)).toBeNull();
+      expect(IOSCtrlProxyClient.getInstance(device)).toBeDefined();
+    } finally {
+      managerSpy.mockRestore();
+    }
+  });
+
+  test("keeps iOS CtrlProxy retired when pre-kill stop fails but platform kill succeeds", async () => {
+    const device: BootedDevice = { name: "iPhone 16", platform: "ios", deviceId: "ios-stop-fail" };
+    const successfulManager = new SuccessfulKillDeviceManager();
+    const retiredDuringKill: boolean[] = [];
+    const originalKill = successfulManager.killDevice.bind(successfulManager);
+    successfulManager.killDevice = async (target, options) => {
+      retiredDuringKill.push(IOSCtrlProxyManager.isDeviceRetired(target.deviceId));
+      await originalKill(target, options);
+    };
+    manager = successfulManager;
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => successfulManager,
+      notifyResourcesChanged: async () => {},
+      ensureCtrlProxyReady: async () => {},
+      clearInstalledAppsForDevice: async () => {},
+    });
+    const managerSpy = spyOn(IOSCtrlProxyManager, "getInstance").mockReturnValue({
+      stop: async () => {
+        throw new Error("ordinary stop failure");
+      },
+    } as never);
+    try {
+      await expect(ToolRegistry.getTool("killDevice")!.handler({ device })).resolves.toBeDefined();
+      expect(retiredDuringKill).toEqual([true]);
+      expect(IOSCtrlProxyManager.isDeviceRetired(device.deviceId)).toBe(true);
+      const retired = IOSCtrlProxyClient.getInstance(device);
+      expect(await retired.ensureConnected()).toBe(false);
+    } finally {
+      managerSpy.mockRestore();
+    }
+  });
+
+  test("a tool call after iOS kill cannot revive a pending screenshot client", async () => {
+    const device: BootedDevice = { name: "iPhone 16", platform: "ios", deviceId: "ios-killed" };
+    const timer = new FakeTimer();
+    const successfulManager = new SuccessfulKillDeviceManager();
+    manager = successfulManager;
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => successfulManager,
+      notifyResourcesChanged: async () => {},
+      ensureCtrlProxyReady: async () => {},
+      clearInstalledAppsForDevice: async () => {},
+      timer,
+    });
+    let socketCreations = 0;
+    let restarts = 0;
+    const client = IOSCtrlProxyClient.createForTesting(
+      device,
+      8765,
+      (url) => {
+        socketCreations++;
+        return new FakeWebSocket(url, "none", 0, timer);
+      },
+      timer,
+      () =>
+        ({
+          forceRestart: async () => {
+            restarts++;
+          },
+        }) as never,
+    );
+    (IOSCtrlProxyClient as unknown as { instances: Map<string, IOSCtrlProxyClient> }).instances.set(
+      device.deviceId,
+      client,
+    );
+    const managerSpy = spyOn(IOSCtrlProxyManager, "getInstance").mockReturnValue({
+      stop: async () => {},
+    } as never);
+    try {
+      expect(await client.connectWithoutSetup()).toBe(true);
+      const screenshotResult = client.requestScreenshot(5_000).then(
+        () => null,
+        (error: unknown) => error,
+      );
+      await Promise.resolve();
+      expect(socketCreations).toBe(1);
+
+      await expect(ToolRegistry.getTool("killDevice")!.handler({ device })).resolves.toBeDefined();
+      expect(successfulManager.killedDeviceIds).toEqual([device.deviceId]);
+
+      // The next resolver still sees the caller's selected device, without a
+      // fresh boot observation. Binding the session must preserve its tombstone.
+      const registry = new ToolRegistryClass();
+      const fakeSessionManager = new FakeDeviceSessionManager();
+      fakeSessionManager.setConnectedDevices([device]);
+      (
+        registry as unknown as { deviceSessionManager: FakeDeviceSessionManager }
+      ).deviceSessionManager = fakeSessionManager;
+      (registry as unknown as { toolCallRepository: unknown }).toolCallRepository = {
+        async recordToolCall(): Promise<void> {},
+      };
+      registry.registerDeviceAware(
+        "postKillProbe",
+        "Post-kill binding probe",
+        z.object({}),
+        async () => ({ success: true }),
+      );
+      await registry.getTool("postKillProbe")!.handler({
+        deviceId: device.deviceId,
+        platform: "ios",
+        sessionUuid: "session-1",
+      });
+
+      expect(String(await screenshotResult)).toContain("WebSocket connection closed");
+      expect(IOSCtrlProxyClient.getInstance(device)).toBe(client);
+      expect(await IOSCtrlProxyClient.getInstance(device).ensureConnected()).toBe(false);
+      expect(socketCreations).toBe(1);
+      expect(restarts).toBe(0);
+    } finally {
+      managerSpy.mockRestore();
+    }
+  });
+
+  test("keeps Android CtrlProxy retired when observer stop fails but platform kill succeeds", async () => {
+    const device: BootedDevice = {
+      name: "Pixel 8",
+      platform: "android",
+      deviceId: "emulator-5554",
+    };
+    const successfulManager = new SuccessfulKillDeviceManager();
+    const retiredDuringKill: boolean[] = [];
+    const originalKill = successfulManager.killDevice.bind(successfulManager);
+    successfulManager.killDevice = async (target, options) => {
+      const retired = AndroidCtrlProxyClient.getInstance(target, new FakeAdbClientFactory());
+      retiredDuringKill.push(!(await retired.ensureConnected()));
+      await originalKill(target, options);
+    };
+    manager = successfulManager;
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => successfulManager,
+      stopAndroidObservers: async () => {
+        throw new Error("ordinary observer stop failure");
+      },
+      notifyResourcesChanged: async () => {},
+      ensureCtrlProxyReady: async () => {},
+      clearInstalledAppsForDevice: async () => {},
+    });
+
+    await expect(ToolRegistry.getTool("killDevice")!.handler({ device })).resolves.toBeDefined();
+    expect(retiredDuringKill).toEqual([true]);
+    const retired = AndroidCtrlProxyClient.getInstance(device, new FakeAdbClientFactory());
+    expect(await retired.ensureConnected()).toBe(false);
+    expect(AndroidCtrlProxyClient.getInstance(device, new FakeAdbClientFactory())).toBe(retired);
+  });
+
+  test("resumes a never-observed Android CtrlProxy after platform kill failure", async () => {
+    const device: BootedDevice = {
+      name: "Pixel 8",
+      platform: "android",
+      deviceId: "emulator-5554",
+    };
+    expect(AndroidCtrlProxyClient.getExistingInstance(device.deviceId)).toBeNull();
+    let retired: AndroidCtrlProxyClient | undefined;
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => manager,
+      stopAndroidObservers: async (target) => {
+        retired = AndroidCtrlProxyClient.getInstance(target, new FakeAdbClientFactory());
+      },
+    });
+
+    await expect(ToolRegistry.getTool("killDevice")!.handler({ device })).rejects.toThrow(
+      "adb emu kill failed",
+    );
+    expect(retired).toBeDefined();
+    expect(AndroidCtrlProxyClient.getInstance(device, new FakeAdbClientFactory())).not.toBe(
+      retired,
+    );
   });
 
   test("bounds a hung shutdown discovery with the same actionable timeout", async () => {

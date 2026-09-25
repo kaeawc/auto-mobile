@@ -21,6 +21,8 @@ import { logger } from "../utils/logger";
 import { createJSONToolResponse, createStructuredToolResponse } from "../utils/toolUtils";
 import { DeviceSessionManager } from "../utils/DeviceSessionManager";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
+import { AndroidCtrlProxyClient } from "../features/observe/android";
+import { IOSCtrlProxyClient } from "../features/observe/ios";
 import { BootedDevice, Platform } from "../models";
 import {
   addDeviceTargetingToSchema,
@@ -30,6 +32,7 @@ import {
   withJsonSchemaOverride,
 } from "./toolSchemaHelpers";
 import { DaemonState } from "../daemon/daemonState";
+import { reconcileDiscoveryObservation } from "../daemon/discoveryReconcile";
 import {
   registerDirectSessionDevice,
   resolveDirectSessionDevice,
@@ -40,6 +43,26 @@ import {
   runSessionBiometricMutation,
 } from "./sessionBiometricEnrollment";
 import { runSessionNetworkMutation } from "./sessionNetworkCondition";
+import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
+
+async function resumeCtrlProxyIfCurrentlyBooted(
+  deviceId: string,
+  platform: Platform,
+): Promise<void> {
+  if (platform !== "android" && platform !== "ios") {
+    return;
+  }
+  const bootedDevices = await PlatformDeviceManagerFactory.getInstance().getBootedDevices(platform);
+  await reconcileDiscoveryObservation(bootedDevices, "setActiveDevice:resumeCtrlProxy");
+  if (!bootedDevices.some((device) => device.deviceId === deviceId)) {
+    return;
+  }
+  if (platform === "android") {
+    AndroidCtrlProxyClient.resumeAfterDeviceStart(deviceId);
+  } else {
+    IOSCtrlProxyClient.resumeAfterDeviceStart(deviceId);
+  }
+}
 
 // Schema definitions
 export const setActiveDeviceSchema = addSessionUuidToSchema(
@@ -545,6 +568,7 @@ export function registerUtilityTools() {
           throw new ActionableError(`Device '${args.deviceId}' not found in device pool`);
         }
         devicePool.assertDeviceCleanupComplete(args.deviceId);
+        await resumeCtrlProxyIfCurrentlyBooted(args.deviceId, pooledDevice.platform);
         if (pooledDevice.sessionId && pooledDevice.sessionId !== args.sessionUuid) {
           const owningSession = sessionManager.getSession(pooledDevice.sessionId);
           if (owningSession) {
@@ -590,6 +614,7 @@ export function registerUtilityTools() {
           args.deviceId,
         );
         const resolvedPlatform = args.platform ?? readyDevice.platform;
+        await resumeCtrlProxyIfCurrentlyBooted(readyDevice.deviceId, resolvedPlatform);
         if (args.sessionUuid && resolveDirectSessionDevice(args.sessionUuid)) {
           registerDirectSessionDevice(args.sessionUuid, readyDevice);
         }

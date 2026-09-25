@@ -3706,6 +3706,7 @@ export class UnixSocketServer {
           };
         } else {
           const manager = IOSCtrlProxyManager.getInstance(targetDevice);
+          IOSCtrlProxyClient.resumeAfterDeviceStart(targetDevice.deviceId);
           await manager.forceRestart();
           return {
             success: true,

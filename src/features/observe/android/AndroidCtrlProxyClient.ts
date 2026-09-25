@@ -1273,6 +1273,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
   // Singleton instances per device
   private static instances: Map<string, AndroidCtrlProxyClient> = new Map();
+  private static readonly retiredDeviceIds = new Set<string>();
 
   // Session binding for multi-agent isolation
   private boundSessionId: string | null = null;
@@ -1471,6 +1472,17 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     requireBootedDevice(device, "AndroidCtrlProxyClient.getInstance");
     daemonDeviceAdmissionGate.assertDeviceActionable(device.deviceId, CTRL_PROXY_CLIENT_PURPOSE);
     const deviceId = device.deviceId;
+    if (AndroidCtrlProxyClient.retiredDeviceIds.has(deviceId)) {
+      const existing = AndroidCtrlProxyClient.instances.get(deviceId);
+      if (existing) {
+        return existing;
+      }
+      const retired = new AndroidCtrlProxyClient(device, adbFactory.create(device));
+      retired.closed = true;
+      retired.autoReconnectEnabled = false;
+      AndroidCtrlProxyClient.instances.set(deviceId, retired);
+      return retired;
+    }
     if (!AndroidCtrlProxyClient.instances.has(deviceId)) {
       logger.debug(`[CTRL_PROXY] Creating singleton for device: ${deviceId}`);
       AndroidCtrlProxyClient.instances.set(
@@ -1494,6 +1506,21 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
    */
   public static removeInstance(deviceId: string): void {
     AndroidCtrlProxyClient.instances.delete(deviceId);
+  }
+
+  public static retireForShutdown(deviceId: string): void {
+    AndroidCtrlProxyClient.retiredDeviceIds.add(deviceId);
+    const client = AndroidCtrlProxyClient.instances.get(deviceId);
+    if (client) {
+      client.closed = true;
+      client.autoReconnectEnabled = false;
+    }
+  }
+
+  public static resumeAfterDeviceStart(deviceId: string): void {
+    if (AndroidCtrlProxyClient.retiredDeviceIds.delete(deviceId)) {
+      AndroidCtrlProxyClient.instances.delete(deviceId);
+    }
   }
 
   /** Remove only the singleton captured before asynchronous incarnation cleanup began. */
@@ -1736,6 +1763,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       instance.close().catch(() => {});
     }
     AndroidCtrlProxyClient.instances.clear();
+    AndroidCtrlProxyClient.retiredDeviceIds.clear();
     PortManager.reset();
     logger.info("[CTRL_PROXY] Reset all singleton instances and port allocations");
   }

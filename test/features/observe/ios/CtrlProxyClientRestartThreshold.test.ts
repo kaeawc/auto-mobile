@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { IOSCtrlProxyClient } from "../../../../src/features/observe/ios";
 import { BootedDevice } from "../../../../src/models";
-import { createInstantFailureWebSocketFactory } from "../../../fakes/FakeWebSocket";
+import { createInstantFailureWebSocketFactory, FakeWebSocket } from "../../../fakes/FakeWebSocket";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import type { CtrlProxyIosManager } from "../../../../src/utils/IOSCtrlProxyManager";
 import { FakeIOSCtrlProxyManager } from "../../../fakes/FakeIOSCtrlProxyManager";
@@ -81,7 +81,7 @@ describe("IOSCtrlProxyClient restart threshold", () => {
     expect(fakeManager.forceRestartCount).toBe(1);
   });
 
-  test("keeps restart single-flight while the post-restart WebSocket is still failing", async () => {
+  test("restarts again after each three further failed handshakes", async () => {
     const fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
 
@@ -103,14 +103,52 @@ describe("IOSCtrlProxyClient restart threshold", () => {
     await new Promise((resolve) => fakeTimer.setTimeout(resolve, 10));
     expect(fakeManager.forceRestartCount).toBe(1);
 
-    // Even if more callers arrive after the connection cooldown, they must not
-    // overlap the restart's own failed reconnect.
+    // Background reconnects no longer consume the foreground attempt budget,
+    // so these six caller dials reach two further restart thresholds.
     fakeTimer.advanceTime(11000);
 
     for (let i = 0; i < 6; i++) {
       await client.ensureConnected();
     }
     await new Promise((resolve) => fakeTimer.setTimeout(resolve, 10));
+    expect(fakeManager.forceRestartCount).toBe(3);
+  });
+
+  test("a permanently gone device triggers only one automatic restart", async () => {
+    const fakeTimer = new FakeTimer();
+    const fakeManager = createFakeManager();
+    const failingFactory = createInstantFailureWebSocketFactory(fakeTimer);
+    let firstSocket: FakeWebSocket | null = null;
+    let socketCount = 0;
+    client = IOSCtrlProxyClient.createForTesting(
+      testDevice,
+      8765,
+      (url) => {
+        socketCount++;
+        if (firstSocket === null) {
+          firstSocket = new FakeWebSocket(url, "none", 0, fakeTimer);
+          return firstSocket;
+        }
+        return failingFactory(url);
+      },
+      fakeTimer,
+      () => fakeManager,
+    );
+
+    expect(await client.ensureConnected()).toBe(true);
+    firstSocket!.close();
+    await fakeTimer.resolvePromise(
+      new Promise<void>((resolve) => fakeTimer.setTimeout(resolve, 1)),
+      1,
+    );
+    for (const delay of [2000, 4000, 8000]) {
+      await fakeTimer.advanceTimeAsync(delay);
+    }
+    await fakeTimer.advanceTimeAsync(60000);
+    expect(fakeManager.forceRestartCount).toBe(1);
+    const stoppedAt = socketCount;
+    await fakeTimer.advanceTimeAsync(60000);
+    expect(socketCount).toBe(stoppedAt);
     expect(fakeManager.forceRestartCount).toBe(1);
   });
 

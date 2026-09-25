@@ -1437,6 +1437,30 @@ describe("AndroidCtrlProxyClient", function () {
   });
 
   describe("connection lifecycle", function () {
+    test("does not notify device loss for repeated failed handshakes", async function () {
+      const lostDeviceIds: string[] = [];
+      const notifier: DeviceConnectionLostNotifier = {
+        onDeviceConnectionLost: (deviceId) => {
+          lostDeviceIds.push(deviceId);
+        },
+      };
+      const testClient = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        createInstantFailureWebSocketFactory(fakeTimer),
+        fakeTimer,
+        undefined,
+        new DefaultRetryExecutor(fakeTimer),
+        undefined,
+        notifier,
+      );
+
+      expect(await testClient.waitForConnection(3, 0)).toBe(false);
+      expect(lostDeviceIds).toEqual([]);
+      await testClient.close();
+      expect(lostDeviceIds).toEqual([]);
+    });
+
     test("notifies the observation stream when the WebSocket connection closes", function () {
       const lostDeviceIds: string[] = [];
       const notifier: DeviceConnectionLostNotifier = {

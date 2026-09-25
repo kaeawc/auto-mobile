@@ -1603,10 +1603,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
 
   protected onConnectionClosed(): void {
     this.cancelScreenshotBackoff();
-    this.stopSdkEventPolling();
-    this.sdkEventPollGeneration++;
-    this.sdkEventPollAbortController?.abort();
-    this.sdkEventPollAbortController = null;
+    this.onClientClosedWithoutConnection();
     this.cachedHierarchy = null;
     this.clearSdkScreenIdentity();
     this.supportedCommands = null;
@@ -1617,7 +1614,16 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       this.hierarchyNavigationDetector.dispose();
       this.hierarchyNavigationDetector = null;
     }
+  }
 
+  protected override onClientClosedWithoutConnection(): void {
+    this.stopSdkEventPolling();
+    this.sdkEventPollGeneration++;
+    this.sdkEventPollAbortController?.abort();
+    this.sdkEventPollAbortController = null;
+  }
+
+  protected override onConnectAttemptFailed(): void {
     if (!this.autoReconnectEnabled) {
       return;
     }
@@ -1625,7 +1631,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     // Track connection failure and potentially trigger service restart
     this.consecutiveConnectionFailures++;
     logger.info(
-      `[IOSCtrlProxyClient] Connection closed (failure count: ${this.consecutiveConnectionFailures})`,
+      `[IOSCtrlProxyClient] Connection attempt failed (failure count: ${this.consecutiveConnectionFailures})`,
     );
 
     if (
@@ -2124,7 +2130,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
         this.syncPortFromManager(manager);
         this.connectionAttempts = 0;
         logger.info(`[IOSCtrlProxyClient] CtrlProxy restart completed; reconnecting WebSocket`);
-        const connected = await super.ensureConnected();
+        const connected = await this.connectBackgroundWebSocket();
         if (!connected) {
           logger.warn(`[IOSCtrlProxyClient] WebSocket reconnect failed after CtrlProxy restart`);
         }

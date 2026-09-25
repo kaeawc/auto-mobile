@@ -35,6 +35,7 @@ const MAX_DIAGNOSTIC_LENGTH = 4_000;
 const ABORT_SETTLEMENT_GRACE_MS = 1_000;
 const RUNNER_CONNECT_DIAGNOSTIC_TIMEOUT_MS = 2_000;
 const SYSTEM_UI_ANR_RECOVERY_POLL_MS = 1_000;
+const CTRL_PROXY_REBIND_RECOVERY_POLL_MS = 1_000;
 const SYSTEM_UI_ANR_RECOVERY_HEALTHY_POLLS = 2;
 const SYSTEM_UI_ANR_RECOVERY_TIMEOUT_MS = 5_000;
 
@@ -235,7 +236,7 @@ interface ReadinessAttemptContext extends RunnerReadinessRequest {
    */
   healthDeadlineMs: number | null;
   phaseElapsedMs: Partial<Record<RunnerReadinessPhase, number>>;
-  ctrlProxyAccessibilityHealthChecked: boolean;
+  lastCtrlProxyRebindMs: number;
   ctrlProxyAccessibilityRebindAttempted: boolean;
 }
 
@@ -250,7 +251,7 @@ export class RunnerReadinessService {
       ...request,
       healthDeadlineMs: null,
       phaseElapsedMs: {},
-      ctrlProxyAccessibilityHealthChecked: false,
+      lastCtrlProxyRebindMs: Number.NEGATIVE_INFINITY,
       ctrlProxyAccessibilityRebindAttempted: false,
     };
     const key = deviceReadinessLockKey(request.device.platform, request.device.deviceId);
@@ -978,15 +979,16 @@ export class RunnerReadinessService {
     if (
       context.device.platform !== "android" ||
       !manager?.rebindIfUnhealthy ||
-      context.ctrlProxyAccessibilityHealthChecked
+      this.dependencies.timer.now() - context.lastCtrlProxyRebindMs <
+        CTRL_PROXY_REBIND_RECOVERY_POLL_MS
     ) {
       return;
     }
     const rebindAttempted = await this.runPhase(context, "runner-connect", attempts, () =>
       manager.rebindIfUnhealthy!(),
     );
-    context.ctrlProxyAccessibilityHealthChecked = true;
-    context.ctrlProxyAccessibilityRebindAttempted = rebindAttempted;
+    context.lastCtrlProxyRebindMs = this.dependencies.timer.now();
+    context.ctrlProxyAccessibilityRebindAttempted ||= rebindAttempted;
   }
 
   /**

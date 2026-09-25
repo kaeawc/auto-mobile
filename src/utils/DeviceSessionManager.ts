@@ -963,6 +963,10 @@ export class DeviceSessionManager implements DeviceSessionManager {
         try {
           await perf.track("enableService", () => manager.enable());
           didSetup = true;
+          // enable() just changed the endpoint's state; failures recorded
+          // before this point must not cool down the connect that follows
+          // (issue #7538).
+          accessibilityClient.resetConnectionBudget();
           // Wait for WebSocket to be ready after enabling
           logger.info(
             `[DeviceSessionManager] Waiting for accessibility WebSocket connection for ${deviceId}`,
@@ -1005,6 +1009,10 @@ export class DeviceSessionManager implements DeviceSessionManager {
       if (needsSetup || !isInstalled) {
         await manager.setup(false, perf);
         didSetup = true;
+        // setup() just changed the endpoint's state (fresh install/enable);
+        // failures recorded before this point must not cool down the connect
+        // that follows (issue #7538).
+        accessibilityClient.resetConnectionBudget();
         // Wait for WebSocket to be ready after setup (install + enable)
         logger.info(
           `[DeviceSessionManager] Waiting for accessibility WebSocket connection after setup for ${deviceId}`,

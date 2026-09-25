@@ -54,6 +54,7 @@ setDeviceReadinessProxyDriverProviderForTesting(() => ({
   resetSetupState: () => {},
   setup: async () => ({ success: true, message: "ok" }),
   waitForConnection: async () => true,
+  resetConnectionBudget: () => {},
   isInstalled: async () => true,
   isVersionCompatible: async () => true,
 }));

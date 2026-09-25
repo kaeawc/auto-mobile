@@ -23,6 +23,7 @@ import { BootedDevice, HighlightShape } from "../../../src/models";
 import {
   FakeWebSocket,
   createInstantFailureWebSocketFactory,
+  createNthAttemptSuccessWebSocketFactory,
   createSuccessWebSocketFactory,
   WebSocketState,
 } from "../../fakes/FakeWebSocket";
@@ -1459,6 +1460,60 @@ describe("AndroidCtrlProxyClient", function () {
       expect(lostDeviceIds).toEqual([]);
       await testClient.close();
       expect(lostDeviceIds).toEqual([]);
+    });
+
+    // Issue #7538: the Android cooldown must be a short, explicit constant
+    // (matching iOS's 2000ms) rather than the 10s base default, so it does
+    // not outlive waitForConnection()'s default retry budget (~2.7s).
+    test("cooldown after max attempts is the short Android-specific constant, not the 10s base default", async () => {
+      const testClient = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        createInstantFailureWebSocketFactory(fakeTimer),
+        fakeTimer,
+        undefined,
+        new DefaultRetryExecutor(fakeTimer),
+      );
+
+      try {
+        expect(await testClient.waitForConnection(3, 0)).toBe(false);
+        expect(testClient.getReconnectStatus()).toMatchObject({
+          state: "cooldown",
+          retryAfterMs: 2000,
+        });
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    // Issue #7538: after the runner starts responding, a caller that resets
+    // the connection budget (as verifyAndroidDevice/ToolExecutionContext do
+    // right after a successful setup()) must be able to dial immediately —
+    // not wait out the remaining cooldown.
+    test("resetConnectionBudget lets a post-setup waitForConnection dial immediately", async () => {
+      const testClient = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        createNthAttemptSuccessWebSocketFactory(4, fakeTimer),
+        fakeTimer,
+        undefined,
+        new DefaultRetryExecutor(fakeTimer),
+      );
+
+      try {
+        // The runner is not listening yet — exhaust the connect budget.
+        expect(await testClient.waitForConnection(3, 0)).toBe(false);
+
+        // The runner is now listening (setup() just completed), but without a
+        // reset the cooldown blocks the dial that would find it.
+        expect(await testClient.waitForConnection(1, 0)).toBe(false);
+
+        testClient.resetConnectionBudget();
+
+        expect(await testClient.waitForConnection(1, 0)).toBe(true);
+      } finally {
+        await testClient.close();
+      }
     });
 
     test("notifies the observation stream when the WebSocket connection closes", function () {

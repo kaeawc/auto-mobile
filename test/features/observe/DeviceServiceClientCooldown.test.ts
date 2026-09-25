@@ -463,4 +463,40 @@ describe("DeviceServiceClient connection cooldown", () => {
     const connected = await client.waitForConnection(1, 1);
     expect(connected).toBe(false);
   });
+
+  // Issue #7538: a successful platform setup (or any other state change that
+  // makes a fresh connect worth trying) must not leave a stale cooldown
+  // blocking the very next waitForConnection() call.
+  test("resetConnectionBudget lets waitForConnection dial immediately, without waiting out the cooldown", async () => {
+    const timer = new FakeTimer();
+    client = new TestDeviceServiceClient(timer, createNthAttemptSuccessWebSocketFactory(4, timer), {
+      maxConnectionAttempts: 3,
+      connectionResetMs: 10000,
+      reconnectDelayMs: 2000,
+    });
+    client.disableAutoReconnect();
+
+    // Exhaust the budget — the runner isn't listening yet.
+    await client.ensureConnected(new NoOpPerformanceTracker());
+    await client.ensureConnected(new NoOpPerformanceTracker());
+    await client.ensureConnected(new NoOpPerformanceTracker());
+    expect(client.getConnectionAttempts()).toBe(3);
+
+    // Without a reset, the cooldown blocks the next dial entirely (the
+    // regression this issue fixes): the factory's 4th attempt — which would
+    // succeed — is never even reached.
+    const stillCoolingDown = await client.ensureConnected(new NoOpPerformanceTracker());
+    expect(stillCoolingDown).toBe(false);
+    expect(client.getConnectionAttempts()).toBe(3);
+
+    // Simulate a caller that just completed a successful platform setup.
+    client.resetConnectionBudget();
+
+    // No time has passed — a single attempt must reach the factory's 4th
+    // (successful) call rather than being gated by the stale cooldown.
+    const connected = await client.waitForConnection(1, 0);
+    expect(connected).toBe(true);
+    expect(client.getConnectionAttempts()).toBe(0);
+    expect(client.connectionEstablishedCount).toBe(1);
+  });
 });

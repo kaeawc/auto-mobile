@@ -46,11 +46,15 @@ function ipaBytes(): Buffer {
 }
 
 function stubAndroidCtrlProxy(overrides: Partial<AndroidCtrlProxy>): AndroidCtrlProxy {
-  return overrides as unknown as AndroidCtrlProxy;
+  // resetConnectionBudget() (issue #7538) is a required DeviceService method
+  // that most of these per-test overrides don't care about; default it to a
+  // no-op so a test exercising the enable/setup paths doesn't have to stub it
+  // just to avoid an unhandled-method crash.
+  return { resetConnectionBudget: () => {}, ...overrides } as unknown as AndroidCtrlProxy;
 }
 
 function stubIOSCtrlProxy(overrides: Partial<IOSCtrlProxy>): IOSCtrlProxy {
-  return overrides as unknown as IOSCtrlProxy;
+  return { resetConnectionBudget: () => {}, ...overrides } as unknown as IOSCtrlProxy;
 }
 
 function deferred(): { promise: Promise<void>; resolve: () => void } {
@@ -324,6 +328,50 @@ describe("DeviceSessionManager", () => {
     // Cache was stale (claimed installed but WebSocket failed), so setup should run
     expect(accessibilityManager.wasMethodCalled("resetSetupState")).toBe(true);
     expect(accessibilityManager.wasMethodCalled("setup")).toBe(true);
+  });
+
+  // Issue #7538: on the stale-cache path, the first waitForConnection(3, 200)
+  // exhausts the client's connection-attempt budget. If verifyAndroidDevice's
+  // post-setup waitForConnection() call is not preceded by a budget reset, it
+  // is silently gated by the stale cooldown even though setup() just fixed
+  // the underlying problem.
+  test("resets the connection budget after setup on the stale-cache path", async () => {
+    const accessibilityManager = new FakeCtrlProxyManager();
+    accessibilityManager.setInstalled(true);
+    accessibilityManager.setEnabled(true);
+
+    let waitForConnectionCalls = 0;
+    let resetConnectionBudgetCalls = 0;
+    let secondWaitSawPriorReset = false;
+
+    const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, undefined, {
+      window: fakeWindow,
+      ctrlProxyManager: accessibilityManager,
+      ctrlProxyClient: stubAndroidCtrlProxy({
+        isConnected: () => false,
+        waitForConnection: () => {
+          waitForConnectionCalls++;
+          if (waitForConnectionCalls === 1) {
+            // Cache-stale probe: the runner is not listening yet.
+            return Promise.resolve(false);
+          }
+          // Post-setup call: the runner is listening now (setup() just
+          // completed), so it must only run after the budget reset.
+          secondWaitSawPriorReset = resetConnectionBudgetCalls > 0;
+          return Promise.resolve(true);
+        },
+        resetConnectionBudget: () => {
+          resetConnectionBudgetCalls++;
+        },
+        verifyServiceReady: () => Promise.resolve(true),
+      }),
+    });
+    const manager = DeviceSessionManager.createInstance(provider);
+    await manager.ensureDeviceReady("android", "device-1");
+
+    expect(waitForConnectionCalls).toBe(2);
+    expect(resetConnectionBudgetCalls).toBeGreaterThanOrEqual(1);
+    expect(secondWaitSawPriorReset).toBe(true);
   });
 
   test("should skip accessibility checks when websocket is connected and service is responsive", async () => {

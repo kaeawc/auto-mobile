@@ -237,6 +237,27 @@ export abstract class DeviceServiceClient {
     };
   }
 
+  /**
+   * Clear the connection-attempt budget and cooldown clock, and un-pause
+   * background reconnection.
+   *
+   * Call this right after a change to the endpoint's state makes a fresh
+   * connect worth trying immediately: a successful platform `setup()` or
+   * `enable()`, a `rebindIfUnhealthy()` that actually rebound, an auto-setup
+   * that succeeded, a port change, or a forced service restart. Without it,
+   * failures recorded before the state change keep gating new dials for up
+   * to {@link ConnectionConfig.connectionResetMs} even though the underlying
+   * problem is already fixed (issue #7538) — `waitForConnection()` would
+   * report failure without ever attempting a dial.
+   */
+  public resetConnectionBudget(): void {
+    this.connectionAttempts = 0;
+    this.backgroundReconnectAttempts = 0;
+    this.backgroundReconnectPaused = false;
+    this.lastConnectionFailureMessage = undefined;
+    this.lastConnectionFailureIsForwardingLeaseConflict = false;
+  }
+
   public getReconnectStatus(): CtrlProxyReconnectStatus | null {
     if (this.isConnected() || this.connectionAttempts < this.config.maxConnectionAttempts) {
       return null;

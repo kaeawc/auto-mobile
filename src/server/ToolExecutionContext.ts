@@ -585,6 +585,8 @@ async function ensureAccessibilityServiceReady(
       logger.info(`[A11yRetry] Setup succeeded on attempt ${attempt}/${MAX_ATTEMPTS}`);
     }
 
+    resetConnectionBudgetAfterSetup(readinessDriver);
+
     const connected = await perf.track("waitForConnection", async () => {
       const ready = await awaitReadinessWork(readinessDriver.waitForConnection(), signal);
       if (!ready) {
@@ -621,6 +623,17 @@ async function tryRebindUnhealthyAccessibilityService(
     // Setup may still restore the service after this optional binding repair fails.
     logger.warn(`[ToolExecutionContext] CtrlProxy rebind check failed: ${error}`);
   }
+}
+
+/**
+ * setup() just changed the endpoint's state; failures recorded before this
+ * point (including from #7537's background reconnect) must not cool down
+ * the waitForConnection() dial that follows (issue #7538). Pulled out of
+ * `ensureAccessibilityServiceReady` so the optional-call branch doesn't push
+ * that function over the complexity ratchet.
+ */
+function resetConnectionBudgetAfterSetup(driver: DeviceReadinessProxyDriver): void {
+  driver.resetConnectionBudget?.();
 }
 
 async function ensureKeepScreenAwake(

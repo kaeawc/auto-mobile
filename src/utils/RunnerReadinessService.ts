@@ -145,6 +145,15 @@ export interface ReadinessClient {
    * surfacing `primaryUserStartState`/`deviceLock`, not raw transport text.
    */
   isLastConnectionFailureForwardingLeaseConflict?(): boolean;
+  /**
+   * Clear the client's connection-attempt budget and cooldown clock (issue
+   * #7538). Called after {@link ReadinessAndroidManager.rebindIfUnhealthy}
+   * actually rebound the accessibility service, so the next
+   * `waitForConnection` dials immediately instead of waiting out a cooldown
+   * recorded before the rebind. Optional so fakes that never exercise the
+   * cooldown gate need not implement it.
+   */
+  resetConnectionBudget?(): void;
   getAccessibilityHierarchy?(
     queryOptions?: undefined,
     perf?: undefined,
@@ -941,7 +950,12 @@ export class RunnerReadinessService {
       connected = client.isConnected();
       if (!connected) {
         phase = "runner-connect";
-        await this.rebindUnhealthyAndroidAccessibilityService(context, androidManager, attempts);
+        await this.rebindUnhealthyAndroidAccessibilityService(
+          context,
+          androidManager,
+          attempts,
+          client,
+        );
         connected = await this.runPhase(context, phase, attempts, () =>
           client.waitForConnection(1, 0),
         );
@@ -975,6 +989,7 @@ export class RunnerReadinessService {
     context: ReadinessAttemptContext,
     manager: ReadinessAndroidManager | undefined,
     attempts: number,
+    client: ReadinessClient,
   ): Promise<void> {
     if (
       context.device.platform !== "android" ||
@@ -989,6 +1004,12 @@ export class RunnerReadinessService {
     );
     context.lastCtrlProxyRebindMs = this.dependencies.timer.now();
     context.ctrlProxyAccessibilityRebindAttempted ||= rebindAttempted;
+    if (rebindAttempted) {
+      // The rebind just changed the endpoint's state; failures recorded
+      // before it must not cool down the waitForConnection() dial that
+      // follows (issue #7538).
+      client.resetConnectionBudget?.();
+    }
   }
 
   /**

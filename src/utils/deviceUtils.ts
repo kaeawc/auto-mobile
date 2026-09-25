@@ -500,7 +500,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
       return [];
     }
     const simulators = await this.simctl.getBootedSimulators().catch((error: unknown) => {
-      logger.debug(`[DeviceManager] booted simulator discovery failed: ${errorMessage(error)}`);
+      logger.warn(`[DeviceManager] booted simulator discovery failed: ${errorMessage(error)}`);
       return [] as BootedDevice[];
     });
     return mergeIosDevices(simulators, (await this.listPhysicalIosDevices()).devices);

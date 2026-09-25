@@ -170,6 +170,56 @@ function lastResponse(socket: FakeSocket): WebRtcStreamSocketResponse {
 }
 
 describe("WebRtcStreamSocketServer", () => {
+  test("retries an empty device discovery and reconciles the recovered device", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    let calls = 0;
+    const device = await resolveWebRtcStreamDevice(
+      {
+        getBootedDevices: async () => (++calls < 3 ? [] : [IOS]),
+      },
+      undefined,
+      "ios",
+      timer,
+    );
+    expect(device).toBe(IOS);
+    expect(calls).toBe(3);
+  });
+
+  test("reports an actionable error after bounded empty discovery retries", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    await expect(
+      resolveWebRtcStreamDevice(
+        {
+          getBootedDevices: async () => [],
+        },
+        undefined,
+        "ios",
+        timer,
+      ),
+    ).rejects.toThrow(/No connected ios devices found/);
+  });
+
+  test("aborts promptly while waiting between discovery retries", async () => {
+    const timer = new FakeTimer();
+    const controller = new AbortController();
+    const pending = resolveWebRtcStreamDevice(
+      { getBootedDevices: async () => [] },
+      undefined,
+      "ios",
+      timer,
+      controller.signal,
+    );
+    while (timer.getPendingTimeoutCount() === 0) {
+      await Promise.resolve();
+    }
+    expect(timer.getPendingTimeouts()).toEqual([250]);
+    timer.advanceTime(100);
+    controller.abort(new Error("stopped"));
+    await expect(pending).rejects.toThrow("stopped");
+  });
+
   test("device resolution scans only the requested platform", async () => {
     const requestedPlatforms: string[] = [];
     const device = await resolveWebRtcStreamDevice(

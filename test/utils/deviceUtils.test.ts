@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { MultiPlatformDeviceManager } from "../../src/utils/deviceUtils";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
 import { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
@@ -9,6 +9,7 @@ import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import type { VirtualDeviceLifecycleCoordinator } from "../../src/utils/virtualDeviceLifecycleCoordinator";
 import { FakeTimer } from "../fakes/FakeTimer";
 import type { IosPhysicalDeviceLister } from "../../src/utils/ios-cmdline-tools/DevicectlDeviceLister";
+import { logger } from "../../src/utils/logger";
 
 async function withProcessPlatform<T>(platform: NodeJS.Platform, fn: () => Promise<T>): Promise<T> {
   const original = process.platform;
@@ -147,6 +148,21 @@ describe("MultiPlatformDeviceManager", () => {
         expect(discovery.devices).toEqual([physicalDevice]);
         expect(discovery.succeededPlatforms.has("ios")).toBe(false);
         expect(discovery.discoveryErrors?.ios?.code).toBe("failed");
+      });
+    });
+
+    test("logs unexpected booted simulator discovery failures as warnings", async () => {
+      await withProcessPlatform("darwin", async () => {
+        const warn = spyOn(logger, "warn").mockImplementation(() => {});
+        try {
+          const manager = makeManager({ simulators: new Error("simctl exploded"), physical: [] });
+          expect(await manager.getBootedDevices("ios")).toEqual([]);
+          expect(warn).toHaveBeenCalledWith(
+            "[DeviceManager] booted simulator discovery failed: simctl exploded",
+          );
+        } finally {
+          warn.mockRestore();
+        }
       });
     });
 

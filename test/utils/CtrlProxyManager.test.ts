@@ -17,6 +17,7 @@ import AdmZip from "adm-zip";
 
 import { FakeAccessibilityDetector } from "../fakes/FakeAccessibilityDetector";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../src/utils/workingDirectory";
 import { logger } from "../../src/utils/logger";
 
@@ -1385,7 +1386,15 @@ describe("CtrlProxyManager", function () {
       };
 
       // Create AdbClient with custom executor that throws on install, wrap in factory
-      const localAdbClient = new AdbClient(testDevice, localExecAsync);
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const localAdbClient = new AdbClient(
+        testDevice,
+        localExecAsync,
+        null,
+        new DefaultRetryExecutor(timer),
+        timer,
+      );
       const localFactory: AdbClientFactory = { create: () => localAdbClient };
 
       AndroidCtrlProxyManager.resetInstances();
@@ -1667,7 +1676,15 @@ describe("CtrlProxyManager", function () {
       };
 
       // Create AdbClient with custom executor, wrap in factory
-      const localAdbClient = new AdbClient(testDevice, localExecAsync);
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const localAdbClient = new AdbClient(
+        testDevice,
+        localExecAsync,
+        null,
+        new DefaultRetryExecutor(timer),
+        timer,
+      );
       const localFactory: AdbClientFactory = { create: () => localAdbClient };
 
       AndroidCtrlProxyManager.resetInstances();

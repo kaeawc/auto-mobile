@@ -413,16 +413,37 @@ describe("VideoStreamSocketServer", () => {
   });
 
   test("relays cumulative encoder drops as a zero-payload telemetry packet", async () => {
-    const h = await startHarness();
+    const fakeTimer = new FakeTimer();
+    const h = await startHarness({ timer: fakeTimer });
     const { binary } = await subscribe(h.socketPath);
     await waitFor(() => binary().length >= 12);
 
     h.emitDroppedFrames(42);
-    await waitFor(() => binary().length >= 24);
+    await defaultTimer.sleep(10);
+    expect(binary().length).toBe(12);
 
-    const packet = binary().subarray(12, 24);
+    h.emit(Buffer.from([0, 0, 0, 1, 5, 0xaa, 0, 0, 0, 1, 1]));
+    await waitFor(() => binary().length > 12);
+    const beforeDropPacket = binary().length;
+    h.emitDroppedFrames(42);
+    await waitFor(() => binary().length >= beforeDropPacket + 12);
+
+    const packet = binary().subarray(beforeDropPacket, beforeDropPacket + 12);
     expect(packet.readBigInt64BE(0) & ((1n << 61n) - 1n)).toBe(42n);
     expect(packet.readBigInt64BE(0) & (1n << 61n)).toBe(1n << 61n);
+
+    fakeTimer.advanceTime(10_000);
+    await defaultTimer.sleep(10);
+    const staleLength = binary().length;
+    h.emitDroppedFrames(42);
+    await defaultTimer.sleep(10);
+    expect(binary().length).toBe(staleLength);
+
+    h.emit(Buffer.from([0, 0, 0, 1, 1, 0xbb, 0, 0, 0, 1, 1]));
+    await waitFor(() => binary().length > staleLength);
+    const beforeRecoveredDrop = binary().length;
+    h.emitDroppedFrames(43);
+    await waitFor(() => binary().length >= beforeRecoveredDrop + 12);
     expect(packet.readInt32BE(8)).toBe(0);
   });
 

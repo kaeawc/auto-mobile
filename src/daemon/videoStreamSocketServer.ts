@@ -488,7 +488,12 @@ export class VideoStreamSocketServer extends BaseSocketServer {
           },
           onDroppedFrames: (droppedFrames) => {
             const current = this.captures.get(deviceId);
-            if (current !== capture || !Number.isSafeInteger(droppedFrames) || droppedFrames < 0) {
+            if (
+              current !== capture ||
+              !Number.isSafeInteger(droppedFrames) ||
+              droppedFrames < 0 ||
+              !this.sourceEvidenceIsRecent(capture, this.timer.now())
+            ) {
               return;
             }
             const packet = encodeDroppedFrames(droppedFrames);
@@ -803,7 +808,18 @@ export class VideoStreamSocketServer extends BaseSocketServer {
         logger.warn(`[VideoStream] liveness key-frame request failed for ${deviceId}: ${error}`);
       }
     }
-    return oldestEvidenceAgeMs <= SOURCE_EVIDENCE_MAX_AGE_MS;
+    return this.sourceEvidenceIsRecent(capture, now);
+  }
+
+  /** Telemetry must not refresh the desktop's activity clock after producer or encoder stalls. */
+  private sourceEvidenceIsRecent(capture: DeviceCapture, now: number): boolean {
+    if (capture.lastSourceDataMs === null || capture.lastEncodedDataMs === null) {
+      return false;
+    }
+    return (
+      Math.max(now - capture.lastSourceDataMs, now - capture.lastEncodedDataMs, 0) <=
+      SOURCE_EVIDENCE_MAX_AGE_MS
+    );
   }
 
   private clearHeartbeatTimer(capture: DeviceCapture): void {

@@ -2,17 +2,44 @@ import type { BootedDevice, ViewHierarchyResult, ViewHierarchyNode } from "../..
 import { NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import { logger } from "../../utils/logger";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { ViewHierarchy } from "../observe/ViewHierarchy";
 import { DefaultElementFinder } from "../utility/ElementFinder";
 import { DefaultElementParser } from "../utility/ElementParser";
 import { AndroidImeCatalog, type ImeCatalogState } from "./AndroidImeCatalog";
 import { Keyboard } from "./Keyboard";
-import { TapAtCoordinate } from "./TapAtCoordinate";
 import { quarantineAndroidIme, withAndroidImeLock } from "./androidImeLock";
 
 const READY_TIMEOUT_MS = 2_000;
 const READY_POLL_MS = 100;
+
+interface FrameBoundKeyPoint {
+  x: number;
+  y: number;
+  frameContext: string;
+}
+export type EditorVerification =
+  | { status: "changed" | "unchanged" }
+  | { status: "unavailable"; reason: string };
+
+export async function tapFrameBoundImeKey(
+  client: Pick<AndroidCtrlProxyClient, "requestTapCoordinates">,
+  point: FrameBoundKeyPoint,
+): Promise<{ success: boolean; error?: string }> {
+  if (typeof point.frameContext !== "string" || !point.frameContext.trim()) {
+    return { success: false, error: "The IME key observation has no frame context." };
+  }
+  // The runner rejects a stale context before dispatch. Never retry or fall back to ADB.
+  return client.requestTapCoordinates(
+    point.x,
+    point.y,
+    10,
+    undefined,
+    undefined,
+    point.frameContext,
+  );
+}
 
 export interface InstalledImeKeySessionDependencies {
   catalog: Pick<AndroidImeCatalog, "list" | "selectWithinLock">;
@@ -21,11 +48,7 @@ export interface InstalledImeKeySessionDependencies {
   };
   hierarchy: { read(signal?: AbortSignal): Promise<ViewHierarchyResult | null> };
   tap: {
-    execute(
-      options: { x: number; y: number },
-      progress?: undefined,
-      signal?: AbortSignal,
-    ): Promise<{ success: boolean; error?: string }>;
+    execute(point: FrameBoundKeyPoint): Promise<{ success: boolean; error?: string }>;
   };
   timer: Timer;
 }
@@ -41,7 +64,13 @@ export class InstalledImeKeySession {
     imeId: string,
     key: string,
     signal?: AbortSignal,
-  ): Promise<{ imeId: string; key: string; x: number; y: number }> {
+  ): Promise<{
+    imeId: string;
+    key: string;
+    x: number;
+    y: number;
+    editorVerification: EditorVerification;
+  }> {
     if (!key.trim()) {
       throw new Error("IME key label must be non-empty.");
     }
@@ -50,12 +79,14 @@ export class InstalledImeKeySession {
 
   private async tapKeyLocked(imeId: string, key: string, signal?: AbortSignal) {
     const { catalog } = this.dependencies;
-    const before = await this.validateStartingState(imeId, signal);
+    const { before, editorBefore } = await this.validateStartingState(imeId, signal);
     const original = before.activeImeId!;
-    let result: { imeId: string; key: string; x: number; y: number } | undefined;
+    let result:
+      | { imeId: string; key: string; x: number; y: number; editorVerification: EditorVerification }
+      | undefined;
     let failure: unknown;
     try {
-      result = await this.performTap(imeId, key, signal);
+      result = await this.performTap(imeId, key, editorBefore, signal);
     } catch (error) {
       failure = error;
     }
@@ -84,7 +115,7 @@ export class InstalledImeKeySession {
   private async validateStartingState(
     imeId: string,
     signal?: AbortSignal,
-  ): Promise<ImeCatalogState> {
+  ): Promise<{ before: ImeCatalogState; editorBefore: FocusedEditorEvidence | null }> {
     const { catalog, hierarchy } = this.dependencies;
     const before = await catalog.list(signal);
     const original = before.activeImeId;
@@ -95,13 +126,19 @@ export class InstalledImeKeySession {
       throw new Error(`IME ${imeId} is not installed and enabled on this device.`);
     }
     const initialHierarchy = await hierarchy.read(signal);
+    const editorBefore = initialHierarchy ? focusedEditorEvidence(initialHierarchy) : null;
     if (!initialHierarchy || !new DefaultElementFinder().findFocusedTextInput(initialHierarchy)) {
       throw new Error("Focus a text input before tapping a native IME key.");
     }
-    return before;
+    return { before, editorBefore };
   }
 
-  private async performTap(imeId: string, key: string, signal?: AbortSignal) {
+  private async performTap(
+    imeId: string,
+    key: string,
+    editorBefore: FocusedEditorEvidence | null,
+    signal?: AbortSignal,
+  ) {
     const { catalog, keyboard, tap } = this.dependencies;
     signal?.throwIfAborted();
     await catalog.selectWithinLock(imeId, signal);
@@ -122,7 +159,36 @@ export class InstalledImeKeySession {
       throw new Error(tapped.error ?? "Native IME key tap failed.");
     }
     signal?.throwIfAborted();
-    return { imeId, key, ...point };
+    const editorVerification = await this.verifyEditorAfterTap(editorBefore);
+    signal?.throwIfAborted();
+    return { imeId, key, x: point.x, y: point.y, editorVerification };
+  }
+
+  private async verifyEditorAfterTap(
+    before: FocusedEditorEvidence | null,
+  ): Promise<EditorVerification> {
+    if (!before) {
+      return {
+        status: "unavailable",
+        reason: "Focused editor identity or text was unavailable before the tap.",
+      };
+    }
+    try {
+      const afterHierarchy = await this.dependencies.hierarchy.read();
+      const after = afterHierarchy ? focusedEditorEvidence(afterHierarchy) : null;
+      if (!after || after.identity !== before.identity) {
+        return {
+          status: "unavailable",
+          reason: "The same focused editor was not observable after the tap.",
+        };
+      }
+      return { status: after.text === before.text ? "unchanged" : "changed" };
+    } catch (error) {
+      logger.warn(
+        `Focused editor observation failed after native IME tap (${error instanceof Error ? error.name : typeof error}).`,
+      );
+      return { status: "unavailable", reason: "Focused editor observation failed after the tap." };
+    }
   }
 
   private async waitForVisibleKey(imeId: string, key: string, signal?: AbortSignal) {
@@ -133,7 +199,12 @@ export class InstalledImeKeySession {
       const current = await hierarchy.read(signal);
       const point = current ? findVisibleImeKey(current, imeId, key) : null;
       if (point) {
-        return point;
+        if (!current?.frameContext?.trim()) {
+          throw new Error(
+            "The visible IME key observation has no frame context; refusing an unbound tap.",
+          );
+        }
+        return { ...point, frameContext: current.frameContext };
       }
       const remaining = deadline - timer.now();
       if (remaining <= 0) {
@@ -143,6 +214,18 @@ export class InstalledImeKeySession {
     } while (timer.now() < deadline);
     throw new Error(`Visible key ${JSON.stringify(key)} was not found in the selected IME window.`);
   }
+}
+
+interface FocusedEditorEvidence {
+  identity: string;
+  text: string;
+}
+function focusedEditorEvidence(hierarchy: ViewHierarchyResult): FocusedEditorEvidence | null {
+  const editor = new DefaultElementFinder().findFocusedTextInput(hierarchy);
+  const identity = editor?.["resource-id"] ?? editor?.["view-id"];
+  return typeof identity === "string" && identity && typeof editor.text === "string"
+    ? { identity, text: editor.text }
+    : null;
 }
 
 function sameEnabledSet(before: ImeCatalogState, after: ImeCatalogState): boolean {
@@ -215,7 +298,7 @@ export function createInstalledImeKeySession(device: BootedDevice): InstalledIme
         );
       },
     },
-    tap: new TapAtCoordinate(device),
+    tap: { execute: (point) => tapFrameBoundImeKey(cache, point) },
     timer: defaultTimer,
   });
 }

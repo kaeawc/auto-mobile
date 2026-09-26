@@ -18,10 +18,18 @@ const resolver = new ElementResolver(() => 0);
 /** Exercise the row's advertised action; an index is passed through unchanged. */
 export function contractAction(testCase: ContractCase): ResolutionAction {
   const { affordances } = testCase.observed;
-  if (affordances.includes("input")) return "input";
-  if (affordances.includes("tap") || affordances.includes("toggle")) return "tap";
-  if (affordances.includes("scroll")) return "scroll";
-  if (affordances.includes("long-press")) return "long-press";
+  if (affordances.includes("input")) {
+    return "input";
+  }
+  if (affordances.includes("tap") || affordances.includes("toggle")) {
+    return "tap";
+  }
+  if (affordances.includes("scroll")) {
+    return "scroll";
+  }
+  if (affordances.includes("long-press")) {
+    return "long-press";
+  }
   return "inspect";
 }
 
@@ -34,10 +42,13 @@ export class ResolverContractAdapter implements ContractResolver {
       { [query.kind]: query.value, index: query.index, match: "exact" },
       { action: contractAction(this.testCase) },
     );
-    if (result.error) throw new Error(result.error);
+    if (result.error) {
+      throw new Error(result.error);
+    }
     const toElement = (node: (typeof result.candidates)[number]): Element => {
-      if (!node.element)
+      if (!node.element) {
         throw new Error(`Unbounded candidate in actionable fixture ${this.testCase.key}`);
+      }
       return node.element;
     };
     return {

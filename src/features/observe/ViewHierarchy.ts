@@ -1,3 +1,4 @@
+import { linkWindowRoots } from "./linkWindowRoots";
 import {
   AdbClientFactory,
   defaultAdbClientFactory,
@@ -438,7 +439,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
       truncations,
     );
 
-    if (meetsFilterCriteria) {
+    if (meetsFilterCriteria || Number.isInteger(props.windowId)) {
       const cleanedNode = this.cleanNodeProperties(node);
 
       if (relevantChildren.length > 0) {
@@ -478,6 +479,9 @@ export class ViewHierarchy implements ViewHierarchyInterface {
     const result = structuredClone(viewHierarchy);
     const truncations: string[] = [];
     result.hierarchy = this.filterSingleNode(viewHierarchy.hierarchy, true, truncations);
+    if (result.windows) {
+      result.windows = linkWindowRoots(result.hierarchy, result.windows);
+    }
     if (truncations.length > 0) {
       // Surface the per-node child cap on the same channel as device-side
       // truncation (#6601) so an agent reading the rendered rows knows they were
@@ -727,6 +731,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
   cleanNodeProperties(node: any): any {
     const result: any = {};
     const allowedProperties = [
+      "windowId",
       "text",
       "resourceId",
       "resource-id",

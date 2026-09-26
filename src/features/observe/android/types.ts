@@ -47,6 +47,8 @@ export const quoteForAdbArg = (value: string): string => {
  * Interface for accessibility service node format
  */
 export interface AccessibilityNode {
+  /** Native ownership marker present on captured window roots only. */
+  windowId?: number;
   actions?: string[];
   text?: string;
   "content-desc"?: string;

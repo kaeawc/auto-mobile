@@ -48,7 +48,15 @@ export class DefaultObserveElementCollector implements ObserveElementCollector {
     // in another window (issue #5881). `mainRootCount` keeps every main-hierarchy
     // root in a single group while each window root gets its own.
     const rootGroups = new Map<number, SearchableEntry[]>();
-    for (const entry of this.searchableHierarchy.project(viewHierarchy)) {
+    const seen = new Set<SearchableEntry["source"]>();
+    const rankedEntries = [...this.searchableHierarchy.project(viewHierarchy)].sort(
+      (a, b) => a.windowRank - b.windowRank || a.index - b.index,
+    );
+    for (const entry of rankedEntries) {
+      if (seen.has(entry.source)) {
+        continue;
+      }
+      seen.add(entry.source);
       const group = rootGroups.get(entry.rootGroup) ?? [];
       group.push(entry);
       rootGroups.set(entry.rootGroup, group);

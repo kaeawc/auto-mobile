@@ -71,6 +71,7 @@ export interface SimulatorCaptureHelperPoolOptions {
 interface HelperEntry {
   key: string;
   helper: SimulatorHelper;
+  capabilities: Set<string>;
   leases: Set<PooledSimulatorCaptureHelperLease>;
   /**
    * Raw-frame warm-start cache (raw leases only). A late lease is primed by
@@ -183,6 +184,7 @@ export class IOSSimulatorCaptureHelperPool {
     const created: HelperEntry = {
       key: targetKey,
       helper: this.createHelper(lease.options),
+      capabilities: new Set(),
       leases: new Set(),
       latestFrame: null,
       encoded: isEncodedTarget(lease.options.target),
@@ -205,6 +207,10 @@ export class IOSSimulatorCaptureHelperPool {
     this.clearEntryIdleTimer(entry);
     entry.leases.add(lease);
     lease.entryKey = targetKey;
+    // A warm helper sent its startup handshake before this lease attached.
+    for (const token of entry.capabilities) {
+      lease.forward("capability", token);
+    }
     if (!entry.encoded && entry.latestFrame) {
       lease.forward("frame", { ...entry.latestFrame, replayed: true });
     }
@@ -295,7 +301,10 @@ export class IOSSimulatorCaptureHelperPool {
     });
     entry.helper.on("idle", (info) => this.broadcast(entry, "idle", info));
     entry.helper.on("encodedVideo", (video) => this.broadcast(entry, "encodedVideo", video));
-    entry.helper.on("capability", (token) => this.broadcast(entry, "capability", token));
+    entry.helper.on("capability", (token) => {
+      entry.capabilities.add(token);
+      this.broadcast(entry, "capability", token);
+    });
     entry.helper.on("permission", (permission) => this.broadcast(entry, "permission", permission));
     entry.helper.on("permissionTarget", (target) =>
       this.broadcast(entry, "permissionTarget", target),

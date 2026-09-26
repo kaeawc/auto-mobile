@@ -161,7 +161,11 @@ final class SimulatorCaptureSessionTests: XCTestCase {
         XCTAssertTrue(diagnostics.lines.isEmpty)
 
         session.noteFrameWritten(width: 804, height: 1748)
-        session.noteIdleSample()
+        session.noteNonCompleteStatus(.blank)
+        session.noteNonCompleteStatus(.suspended)
+        session.noteNonCompleteStatus(.stopped)
+        XCTAssertFalse(diagnostics.lines.contains { $0.hasPrefix("capture-idle:") })
+        session.noteNonCompleteStatus(.idle)
         now += 1
         session.noteIdleSample()
         now += 1

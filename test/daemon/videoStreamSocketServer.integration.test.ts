@@ -92,6 +92,7 @@ interface Harness {
   emitUnattested: (chunk: Buffer) => void;
   emitSourceFrame: () => void;
   emitIdle: () => void;
+  setIdleSupport: (supported: boolean) => void;
   /** Simulates the source attesting a display rotation (issue #4786). */
   emitRotation: (rotation: number) => void;
   /** Simulates a cumulative encoder-side dropped-frame measurement. */
@@ -127,6 +128,7 @@ async function startHarness(
   let onData: ((chunk: Buffer) => void) | null = null;
   let onSourceFrame: (() => void) | null = null;
   let onSourceIdle: (() => void) | null = null;
+  let onIdleAttestationSupport: ((supported: boolean) => void) | null = null;
   let onRotation: ((rotation: number) => void) | null = null;
   let onDroppedFrames: ((droppedFrames: number) => void) | null = null;
   let onError: ((error: Error) => void) | null = null;
@@ -145,6 +147,7 @@ async function startHarness(
         onData = opts.onData;
         onSourceFrame = opts.onSourceFrame ?? null;
         onSourceIdle = opts.onSourceIdle ?? null;
+        onIdleAttestationSupport = opts.onIdleAttestationSupport ?? null;
         onRotation = opts.onRotation ?? null;
         onDroppedFrames = opts.onDroppedFrames ?? null;
         onError = opts.onError;
@@ -185,6 +188,7 @@ async function startHarness(
     emitUnattested: (chunk) => onData?.(chunk),
     emitSourceFrame: () => onSourceFrame?.(),
     emitIdle: () => onSourceIdle?.(),
+    setIdleSupport: (supported) => onIdleAttestationSupport?.(supported),
     emitRotation: (rotation) => onRotation?.(rotation),
     emitDroppedFrames: (droppedFrames) => onDroppedFrames?.(droppedFrames),
     emitError: (error) => onError?.(error),
@@ -582,6 +586,21 @@ describe("VideoStreamSocketServer", () => {
     fakeTimer.advanceTime(1_000);
     await waitFor(() => h.sources[0].stopped);
     expect(h.sources[0].staleStopped).toBe(true);
+  });
+
+  test("older Simulator helpers preserve static-screen heartbeats until upgraded", async () => {
+    const fakeTimer = new FakeTimer();
+    const iosDevice = { ...DEVICE, platform: "ios" } as BootedDevice;
+    const h = await startHarness({ timer: fakeTimer, device: iosDevice });
+    const { binary } = await subscribe(h.socketPath);
+    await waitFor(() => binary().length >= 12);
+    h.setIdleSupport(false);
+    h.emit(Buffer.from([0, 0, 0, 1, 5, 0xaa, 0, 0, 0, 1, 1]));
+    fakeTimer.advanceTime(12_000);
+    expect(h.sources[0].stopped).toBe(false);
+    h.setIdleSupport(true);
+    fakeTimer.advanceTime(1_000);
+    await waitFor(() => h.sources[0].stopped);
   });
 
   test("iOS encoder output alone cannot keep a cached helper frame capture alive", async () => {

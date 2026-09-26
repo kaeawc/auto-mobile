@@ -498,12 +498,28 @@ describe("IosH264Source", () => {
     const { source, helper } = createHarness(IOS_SIMULATOR, {
       onSourceIdle: () => idleCount++,
     });
-    await startWithFrame(source, helper, frame(1, 1, 0x11));
+    const started = source.start();
+    await flush();
+    helper.emit("capability", "simulator-idle-evidence");
+    helper.emitFrame(frame(1, 1, 0x11));
+    await started;
     helper.emit("idle", { windowID: 42 });
     expect(idleCount).toBe(1);
     await source.stop();
     helper.emit("idle", { windowID: 42 });
     expect(idleCount).toBe(1);
+  });
+
+  test("reports legacy idle compatibility only when the helper lacks the handshake", async () => {
+    const support: boolean[] = [];
+    const { source, helper } = createHarness(IOS_SIMULATOR, {
+      onIdleAttestationSupport: (supported) => support.push(supported),
+    });
+    await startWithFrame(source, helper, frame(1, 1, 0x11));
+    expect(support).toEqual([false]);
+    helper.emit("capability", "simulator-idle-evidence");
+    expect(support).toEqual([false, true]);
+    await source.stop();
   });
 
   test("classifies a marked Screen Recording denial while discovering Simulator windows", async () => {

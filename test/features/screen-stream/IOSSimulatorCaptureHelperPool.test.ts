@@ -512,6 +512,12 @@ describe("IOSSimulatorCaptureHelperPool", () => {
 
     expect(capabilities).toEqual(["encoded-video-h264"]);
     expect(records).toEqual([true]);
+    await lease.stop();
+    const warmLease = pool.acquire(encodedOptions());
+    const warmCapabilities: string[] = [];
+    warmLease.on("capability", (token) => warmCapabilities.push(token));
+    await warmLease.start();
+    expect(warmCapabilities).toEqual(["encoded-video-h264"]);
     await pool.shutdown();
   });
 

@@ -24,6 +24,8 @@ export interface H264CaptureSourceOptions {
   onSourceFrame?: () => void;
   /** Native Simulator idle callback from an attached stream; carries no encoded frame. */
   onSourceIdle?: () => void;
+  /** Whether this Simulator helper can attest native idle callbacks. */
+  onIdleAttestationSupport?: (supported: boolean) => void;
   /** Called with each chunk of 8 kHz mono PCM16LE audio when audio is enabled. */
   onAudioData?: (chunk: Buffer) => void;
   /**

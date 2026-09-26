@@ -32,6 +32,7 @@ export const NATIVE_FRAME_METRICS_PREFIX = "automobile-frame-metrics:";
 export const CAPTURE_CAPABILITY_PREFIX = "capture-capability:";
 /** Capability token advertising in-helper H.264 encoded output (issue #4787). */
 export const ENCODED_VIDEO_CAPABILITY = "encoded-video-h264";
+export const SIMULATOR_IDLE_EVIDENCE_CAPABILITY = "simulator-idle-evidence";
 /**
  * Prefix of a stable macOS privacy-permission marker emitted by the helper.
  * The companion error line is human-readable, while this token is the

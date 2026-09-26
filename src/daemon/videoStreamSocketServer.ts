@@ -44,6 +44,7 @@ export type CaptureSourceFactory = (options: {
   onSourceFrame?: () => void;
   /** Genuine native Simulator idle callback, scoped to this capture generation. */
   onSourceIdle?: () => void;
+  onIdleAttestationSupport?: (supported: boolean) => void;
   onError: (error: Error) => void;
   /** Receives the attested display rotation (0..3) when the source can prove it (issue #4786). */
   onRotation?: (rotation: number) => void;
@@ -109,6 +110,8 @@ interface DeviceCapture {
   lastIdleMs: number | null;
   /** An encoded chunk followed the most recent complete source frame. */
   encodedSinceSourceFrame: boolean;
+  /** Temporary compatibility for a released helper without native idle markers. */
+  legacySimulatorHelper: boolean;
   /** Time of the latest encoded output; both producer and encoder must keep making progress. */
   lastEncodedDataMs: number | null;
   /** Limits active key-frame probes while a source is quiet. A request is not proof of life. */
@@ -453,6 +456,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
       lastSourceDataMs: null,
       lastIdleMs: null,
       encodedSinceSourceFrame: false,
+      legacySimulatorHelper: false,
       lastEncodedDataMs: null,
       lastLivenessProbeMs: null,
     };
@@ -493,6 +497,11 @@ export class VideoStreamSocketServer extends BaseSocketServer {
               return;
             }
             capture.lastIdleMs = this.timer.now();
+          },
+          onIdleAttestationSupport: (supported) => {
+            if (this.captures.get(deviceId) === capture && device.platform === "ios") {
+              capture.legacySimulatorHelper = !supported;
+            }
           },
           // Record the source's attested rotation so the next config packet re-attests it to
           // subscribers, including a late joiner via replayParameterSets (issue #4786).
@@ -840,6 +849,9 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     if (capture.lastSourceDataMs === null || capture.lastEncodedDataMs === null) {
       return false;
     }
+    if (capture.legacySimulatorHelper) {
+      return true;
+    }
     if (
       capture.lastIdleMs !== null &&
       capture.encodedSinceSourceFrame &&
@@ -986,6 +998,7 @@ function defaultDependencies(): VideoStreamSocketServerDependencies {
           onData: options.onData,
           onSourceFrame: options.onSourceFrame,
           onSourceIdle: options.onSourceIdle,
+          onIdleAttestationSupport: options.onIdleAttestationSupport,
           onError: options.onError,
           onRotation: options.onRotation,
           onDroppedFrames: options.onDroppedFrames,

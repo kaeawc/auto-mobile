@@ -6,6 +6,7 @@ import {
   CAPTURE_PERMISSION_PREFIX,
   CAPTURE_PERMISSION_TARGET_PREFIX,
   ENCODED_VIDEO_CAPABILITY,
+  SIMULATOR_IDLE_EVIDENCE_CAPABILITY,
   IOSScreenCaptureHelper,
   type CapturePermission,
 } from "../screen-stream/IOSScreenCaptureHelper";
@@ -424,6 +425,8 @@ export class IosH264Source implements H264CaptureSource {
   private encodeSettings: EncodeSettings | null = null;
   /** Set once the helper advertises the encoded-video capability this attempt. */
   private encodedCapabilityConfirmed = false;
+  private nativeIdleCapabilityConfirmed = false;
+  private idleSupportReported = false;
   /**
    * True once an encoded attempt fell back to raw for a version-skewed helper, so
    * a later running-phase reconnect does not re-probe encoding against the same
@@ -1008,6 +1011,8 @@ export class IosH264Source implements H264CaptureSource {
     this.lastReadinessPhase = null;
     this.requiredPermission = null;
     this.requiredPermissionTarget = defaultScreenRecordingApprovalTarget(helperPath);
+    this.nativeIdleCapabilityConfirmed = false;
+    this.idleSupportReported = false;
     const helper = this.createCaptureHelper({ binaryPath: helperPath, target });
     this.helper = helper;
     if (this.mode === "encoded") {
@@ -1300,8 +1305,15 @@ export class IosH264Source implements H264CaptureSource {
 
   /** stderr/readiness/metrics/audio wiring shared by the raw and encoded paths. */
   private wireHelperDiagnostics(helper: IosFrameCaptureHelper): void {
+    helper.on("capability", (token) => {
+      if (this.helper === helper && token === SIMULATOR_IDLE_EVIDENCE_CAPABILITY) {
+        this.nativeIdleCapabilityConfirmed = true;
+        this.idleSupportReported = true;
+        this.options.onIdleAttestationSupport?.(true);
+      }
+    });
     helper.on("idle", () => {
-      if (this.helper === helper && this.isActive()) {
+      if (this.helper === helper && this.isActive() && this.nativeIdleCapabilityConfirmed) {
         this.options.onSourceIdle?.();
       }
     });
@@ -1372,6 +1384,7 @@ export class IosH264Source implements H264CaptureSource {
       return;
     }
     if (!frame.replayed) {
+      this.reportLegacyIdleSupport();
       this.options.onSourceFrame?.();
     }
     const size = { width: frame.header.width, height: frame.header.height };
@@ -1407,8 +1420,16 @@ export class IosH264Source implements H264CaptureSource {
     if (!this.isActive()) {
       return;
     }
+    this.reportLegacyIdleSupport();
     this.options.onSourceFrame?.();
     this.options.onData(video.payload);
+  }
+
+  private reportLegacyIdleSupport(): void {
+    if (this.captureKind === "simulator" && !this.idleSupportReported) {
+      this.idleSupportReported = true;
+      this.options.onIdleAttestationSupport?.(false);
+    }
   }
 
   /**

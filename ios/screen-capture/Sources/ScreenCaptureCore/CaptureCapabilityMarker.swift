@@ -9,6 +9,7 @@ public enum CaptureCapability: String, CaseIterable {
     /// vocabulary so the pairing can be validated ahead of time.
     case encodedVideoH264 = "encoded-video-h264"
     case simulatorHighlights = "simulator-highlights"
+    case simulatorIdleEvidence = "simulator-idle-evidence"
 }
 
 /// Formats a {@link CaptureCapability} into a stable, greppable stderr line the

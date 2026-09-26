@@ -407,7 +407,7 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate,
         }
     }
 
-    private func noteNonCompleteStatus(_ status: SCFrameStatus) {
+    func noteNonCompleteStatus(_ status: SCFrameStatus) {
         if status == .idle {
             noteIdleSample()
         }

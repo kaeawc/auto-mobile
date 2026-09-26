@@ -522,3 +522,35 @@ describe("ScrollUntilVisible shared resolver identity", () => {
     ).rejects.toThrow(/com.one:id\/btn_login.*com.two:id\/btn_login/);
   });
 });
+
+test("lookFor treats a temporarily missing container as a miss and retries within its scope", async () => {
+  const scroll = new ScrollUntilVisible({} as any);
+  const target = {
+    "resource-id": "com.app:id/login",
+    bounds: { left: 0, top: 0, right: 100, bottom: 40 },
+  };
+  const scope = { elementId: "panel" };
+  expect(
+    await scroll.findElementInHierarchy(
+      { elementId: "login" },
+      {
+        hierarchy: { node: target },
+      } as any,
+      scope,
+    ),
+  ).toBeNull();
+  const found = await scroll.findElementInHierarchy(
+    { elementId: "login" },
+    {
+      hierarchy: {
+        node: {
+          "resource-id": "com.app:id/panel",
+          bounds: { left: 0, top: 0, right: 200, bottom: 200 },
+          node: [target],
+        },
+      },
+    } as any,
+    scope,
+  );
+  expect(found?.["resource-id"]).toBe("com.app:id/login");
+});

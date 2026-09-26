@@ -129,7 +129,7 @@ export class SetAccessibilityFocus {
     }
     const resourceId = resolution.chosen?.nativeId;
     if (!resourceId) {
-      if (resolution.candidates.some((candidate) => !candidate.nativeId)) {
+      if (resolution.matches.some(({ node }) => !node.nativeId)) {
         throw new ActionableError(
           "Matched element has no resource-id; accessibility focus requires one.",
         );

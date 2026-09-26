@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeAll, describe, expect, mock, test } from "bun:test";
 
 /**
  * Issue #2784: the appearance sync is a best-effort background task started via
@@ -8,22 +8,25 @@ import { afterEach, describe, expect, mock, test } from "bun:test";
  * otherwise-healthy daemon into a restart loop — trigger() must swallow it.
  */
 describe("AppearanceSyncScheduler resilience", () => {
-  afterEach(() => {
-    mock.restore();
-  });
+  let triggerAppearanceSync: () => Promise<void>;
 
-  test("triggerAppearanceSync resolves (does not reject) when the config read fails", async () => {
+  beforeAll(async () => {
     mock.module("../../../src/server/appearanceManager", () => ({
       getAppearanceConfig: async () => {
         throw new Error("no such table: appearance_configs");
       },
       resolveAppearanceMode: async () => "dark",
     }));
-
-    const { triggerAppearanceSync } = await import(
+    ({ triggerAppearanceSync } = await import(
       `../../../src/utils/appearance/AppearanceSyncScheduler.ts?resilience=${Date.now()}-${Math.random()}`
-    );
+    ));
+  });
 
+  afterEach(() => {
+    mock.restore();
+  });
+
+  test("triggerAppearanceSync resolves (does not reject) when the config read fails", async () => {
     // If trigger() re-threw, this await would reject and fail the test.
     await expect(triggerAppearanceSync()).resolves.toBeUndefined();
   });

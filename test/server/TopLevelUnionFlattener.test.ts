@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import { flattenTopLevelUnion } from "../../src/server/TopLevelUnionFlattener";
 
 /**
@@ -7,8 +7,13 @@ import { flattenTopLevelUnion } from "../../src/server/TopLevelUnionFlattener";
  * backward-compatible re-export from toolRegistry).
  */
 describe("TopLevelUnionFlattener module", () => {
-  test("re-export and direct import resolve to the same function", async () => {
-    const fromRegistry = (await import("../../src/server/toolRegistry")).flattenTopLevelUnion;
+  let fromRegistry: typeof flattenTopLevelUnion;
+
+  beforeAll(async () => {
+    fromRegistry = (await import("../../src/server/toolRegistry")).flattenTopLevelUnion;
+  });
+
+  test("re-export and direct import resolve to the same function", () => {
     expect(fromRegistry).toBe(flattenTopLevelUnion);
   });
 

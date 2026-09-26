@@ -158,6 +158,7 @@ describe("device-addressed admission gate (issue #6863)", () => {
   }
 
   const functionCache = new Map<string, NamedFunction[]>();
+  let poolSource = "";
 
   /**
    * Every named function/method declaration in a file, with its body text.
@@ -209,13 +210,17 @@ describe("device-addressed admission gate (issue #6863)", () => {
     for (const file of SCANNED) {
       namedFunctions(file);
     }
+    poolSource = blankComments(readFileSync(join(ROOT, "src/daemon/devicePool.ts"), "utf8"));
   });
 
   test("the gate exists on the pool under its single name", () => {
-    const pool = blankComments(readFileSync(join(ROOT, "src/daemon/devicePool.ts"), "utf8"));
-    expect(pool).toMatch(new RegExp(`\\b${GATE}\\(deviceId: string, purpose: string\\): void`));
+    expect(poolSource).toMatch(
+      new RegExp(`\\b${GATE}\\(deviceId: string, purpose: string\\): void`),
+    );
     // The session-keyed gate is a CALLER of the device gate, not a second gate.
-    const sessionGate = pool.slice(pool.indexOf("assertSessionReadyForAutomation(sessionId"));
+    const sessionGate = poolSource.slice(
+      poolSource.indexOf("assertSessionReadyForAutomation(sessionId"),
+    );
     expect(sessionGate.slice(0, sessionGate.indexOf("\n  }\n"))).toContain(GATE);
   });
 

@@ -47,3 +47,17 @@ teardown() {
   [ "$status" -ne 0 ]
   [[ "$output" == *"reviewed initial"* ]]
 }
+
+@test "GitHub PR target controls the baseline even when origin main exists" {
+  git -C "$repo_dir" branch origin/main
+  printf '%s\n' '{"B1":["a"]}' > "$baseline"
+  git -C "$repo_dir" add .
+  git -C "$repo_dir" commit -qm shrink
+  git -C "$repo_dir" branch origin/release
+  printf '%s\n' '{"B1":["a","b"]}' > "$baseline"
+  run env GITHUB_ACTIONS=true GITHUB_BASE_REF=release bash "$repo_dir/scripts/check-element-resolution-ratchet.sh"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"only shrink"* ]]
+  run env GITHUB_ACTIONS=true GITHUB_BASE_REF=release bash "$repo_dir/scripts/check-element-resolution-ratchet.sh" origin/main
+  [ "$status" -eq 0 ]
+}

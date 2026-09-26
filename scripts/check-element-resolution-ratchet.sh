@@ -3,13 +3,17 @@ set -euo pipefail
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=scripts/lib/vcs-diff.sh disable=SC1091
 source scripts/lib/vcs-diff.sh
-base_ref="${1:-origin/main}"
+default_base=origin/main
+if [[ "${GITHUB_ACTIONS:-}" == true && -n "${GITHUB_BASE_REF:-}" ]]; then
+  default_base="origin/$GITHUB_BASE_REF"
+fi
+base_ref="${1:-$default_base}"
 # Predicate failures mean absent refs and are explicitly handled below.
 # shellcheck disable=SC2310
 if ! vcs_base_exists "$base_ref"; then
   # vcs_uses_jj is a boolean filesystem predicate, not an operation.
   # shellcheck disable=SC2310
-  if ! vcs_uses_jj && [[ "$base_ref" == origin/main && "${GITHUB_ACTIONS:-}" == true && -n "${GITHUB_BASE_REF:-}" ]]; then
+  if ! vcs_uses_jj && [[ "${GITHUB_ACTIONS:-}" == true && -n "${GITHUB_BASE_REF:-}" && "$base_ref" == "origin/$GITHUB_BASE_REF" ]]; then
     git fetch --no-tags --depth=1 origin "refs/heads/$GITHUB_BASE_REF:refs/remotes/origin/$GITHUB_BASE_REF"
     base_ref="origin/$GITHUB_BASE_REF"
   fi

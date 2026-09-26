@@ -98,7 +98,8 @@ describe("observe-to-resolve migration contract", () => {
           : legacy.resolve(capture, query);
       },
     };
-    expect(compareResolvers(cases, legacy, brokenTags)).toHaveLength(counts.testTag);
+    const tagCases = cases.filter(({ query }) => query.kind === "testTag");
+    expect(compareResolvers(tagCases, legacy, brokenTags)).toHaveLength(counts.testTag);
   });
   test("public default queries remain unindexed and expose legacy Settings behavior", () => {
     const defaults = publicTextCases(cases);

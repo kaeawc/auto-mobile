@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.discover.ictrace
 
 import android.content.Context
+import android.provider.Settings
 import android.text.InputType
 import android.util.AttributeSet
 import android.view.inputmethod.BaseInputConnection
@@ -23,7 +24,25 @@ class IcTraceEditText(context: Context, attrs: AttributeSet? = null) : EditText(
   override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection? {
     val base = super.onCreateInputConnection(outAttrs) ?: return null
     val activeRecorder = recorder ?: return base
-    return LoggingInputConnection(base, activeRecorder, captureText) {
+    val keyboardId =
+      Settings.Secure.getString(context.contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD)
+    val keyboardPackage = keyboardId?.substringBefore('/')
+    val keyboardVersion = keyboardPackage?.let { packageName ->
+      runCatching { context.packageManager.getPackageInfo(packageName, 0).versionName }.getOrNull()
+    }
+    activeRecorder.updateMetadata(
+      IcTraceMetadata(
+        keyboardId = keyboardId,
+        keyboardVersion = keyboardVersion,
+        editorPackage = outAttrs.packageName,
+        editorFieldId = outAttrs.fieldId,
+        editorFieldName = outAttrs.fieldName,
+        inputType = outAttrs.inputType,
+        imeOptions = outAttrs.imeOptions,
+        privateImeOptions = outAttrs.privateImeOptions,
+      )
+    )
+    return LoggingInputConnection(base, activeRecorder, { captureText }) {
       intArrayOf(
         selectionStart,
         selectionEnd,

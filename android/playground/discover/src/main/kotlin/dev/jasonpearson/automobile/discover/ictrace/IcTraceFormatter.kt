@@ -11,7 +11,11 @@ object IcTraceFormatter {
         "\"selectionStart\":${event.selectionStart}," +
         "\"selectionEnd\":${event.selectionEnd}," +
         "\"composingStart\":${event.composingStart}," +
-        "\"composingEnd\":${event.composingEnd}}"
+        "\"composingEnd\":${event.composingEnd}," +
+        "\"result\":${event.result?.toString() ?: "null"}," +
+        "\"readValue\":${event.readValue?.let(::quote) ?: "null"}," +
+        "\"droppedEvents\":${event.droppedEvents}," +
+        "\"metadata\":${metadata(event.metadata)}}"
     }
 
   fun summary(events: List<IcTraceEvent>): String =
@@ -41,4 +45,16 @@ object IcTraceFormatter {
     }
     append('"')
   }
+
+  private fun metadata(value: IcTraceMetadata): String =
+    "{" +
+      "\"scenario\":${quote(value.scenario)}," +
+      "\"keyboardId\":${value.keyboardId?.let(::quote) ?: "null"}," +
+      "\"keyboardVersion\":${value.keyboardVersion?.let(::quote) ?: "null"}," +
+      "\"editorPackage\":${value.editorPackage?.let(::quote) ?: "null"}," +
+      "\"editorFieldId\":${value.editorFieldId}," +
+      "\"editorFieldName\":${value.editorFieldName?.let(::quote) ?: "null"}," +
+      "\"inputType\":${value.inputType}," +
+      "\"imeOptions\":${value.imeOptions}," +
+      "\"privateImeOptions\":${value.privateImeOptions?.let(::quote) ?: "null"}}"
 }

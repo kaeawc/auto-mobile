@@ -9,61 +9,78 @@ import android.view.inputmethod.InputConnectionWrapper
 class LoggingInputConnection(
   base: InputConnection,
   private val recorder: IcTraceRecorder,
-  private val captureText: Boolean,
+  private val captureText: () -> Boolean,
   private val selectionOf: () -> IntArray,
 ) : InputConnectionWrapper(base, true) {
-  private fun log(call: String, args: String) {
+  private fun log(call: String, args: String, result: Boolean? = null, readValue: String? = null) {
     val selection = selectionOf()
-    recorder.record(call, args, selection[0], selection[1], selection[2], selection[3])
+    recorder.record(
+      call,
+      args,
+      selection[0],
+      selection[1],
+      selection[2],
+      selection[3],
+      result,
+      readValue,
+    )
   }
 
-  private fun formatText(value: CharSequence?): String = recorder.textArg(value, captureText)
+  private fun formatText(value: CharSequence?): String = recorder.textArg(value, captureText())
 
   override fun commitText(text: CharSequence?, newCursorPosition: Int): Boolean {
     val result = super.commitText(text, newCursorPosition)
-    log("commitText", "text=${formatText(text)}, newCursorPosition=$newCursorPosition")
+    log("commitText", "text=${formatText(text)}, newCursorPosition=$newCursorPosition", result)
     return result
   }
 
   override fun setComposingText(text: CharSequence?, newCursorPosition: Int): Boolean {
     val result = super.setComposingText(text, newCursorPosition)
-    log("setComposingText", "text=${formatText(text)}, newCursorPosition=$newCursorPosition")
+    log(
+      "setComposingText",
+      "text=${formatText(text)}, newCursorPosition=$newCursorPosition",
+      result,
+    )
     return result
   }
 
   override fun setComposingRegion(start: Int, end: Int): Boolean {
     val result = super.setComposingRegion(start, end)
-    log("setComposingRegion", "start=$start, end=$end")
+    log("setComposingRegion", "start=$start, end=$end", result)
     return result
   }
 
   override fun finishComposingText(): Boolean {
     val result = super.finishComposingText()
-    log("finishComposingText", "")
+    log("finishComposingText", "", result)
     return result
   }
 
   override fun deleteSurroundingText(beforeLength: Int, afterLength: Int): Boolean {
     val result = super.deleteSurroundingText(beforeLength, afterLength)
-    log("deleteSurroundingText", "beforeLength=$beforeLength, afterLength=$afterLength")
+    log("deleteSurroundingText", "beforeLength=$beforeLength, afterLength=$afterLength", result)
     return result
   }
 
   override fun deleteSurroundingTextInCodePoints(beforeLength: Int, afterLength: Int): Boolean {
     val result = super.deleteSurroundingTextInCodePoints(beforeLength, afterLength)
-    log("deleteSurroundingTextInCodePoints", "beforeLength=$beforeLength, afterLength=$afterLength")
+    log(
+      "deleteSurroundingTextInCodePoints",
+      "beforeLength=$beforeLength, afterLength=$afterLength",
+      result,
+    )
     return result
   }
 
   override fun sendKeyEvent(event: KeyEvent?): Boolean {
     val result = super.sendKeyEvent(event)
-    log("sendKeyEvent", "keyCode=${event?.keyCode}, action=${event?.action}")
+    log("sendKeyEvent", "keyCode=${event?.keyCode}, action=${event?.action}", result)
     return result
   }
 
   override fun performEditorAction(actionCode: Int): Boolean {
     val result = super.performEditorAction(actionCode)
-    log("performEditorAction", "actionCode=$actionCode")
+    log("performEditorAction", "actionCode=$actionCode", result)
     return result
   }
 
@@ -72,6 +89,7 @@ class LoggingInputConnection(
     log(
       "commitCompletion",
       "id=${text?.id}, position=${text?.position}, text=${formatText(text?.text)}",
+      result,
     )
     return result
   }
@@ -81,31 +99,58 @@ class LoggingInputConnection(
     log(
       "commitCorrection",
       "offset=${correctionInfo?.offset}, oldText=${formatText(correctionInfo?.oldText)}, newText=${formatText(correctionInfo?.newText)}",
+      result,
     )
     return result
   }
 
   override fun setSelection(start: Int, end: Int): Boolean {
     val result = super.setSelection(start, end)
-    log("setSelection", "start=$start, end=$end")
+    log("setSelection", "start=$start, end=$end", result)
     return result
   }
 
   override fun beginBatchEdit(): Boolean {
     val result = super.beginBatchEdit()
-    log("beginBatchEdit", "")
+    log("beginBatchEdit", "", result)
     return result
   }
 
   override fun endBatchEdit(): Boolean {
     val result = super.endBatchEdit()
-    log("endBatchEdit", "")
+    log("endBatchEdit", "", result)
     return result
   }
 
   override fun performContextMenuAction(id: Int): Boolean {
     val result = super.performContextMenuAction(id)
-    log("performContextMenuAction", "id=$id")
+    log("performContextMenuAction", "id=$id", result)
     return result
+  }
+
+  override fun getTextBeforeCursor(length: Int, flags: Int): CharSequence? {
+    val value = super.getTextBeforeCursor(length, flags)
+    log(
+      "getTextBeforeCursor",
+      "length=$length, flags=$flags",
+      readValue = recorder.safeText(value, captureText()),
+    )
+    return value
+  }
+
+  override fun getTextAfterCursor(length: Int, flags: Int): CharSequence? {
+    val value = super.getTextAfterCursor(length, flags)
+    log(
+      "getTextAfterCursor",
+      "length=$length, flags=$flags",
+      readValue = recorder.safeText(value, captureText()),
+    )
+    return value
+  }
+
+  override fun getSelectedText(flags: Int): CharSequence? {
+    val value = super.getSelectedText(flags)
+    log("getSelectedText", "flags=$flags", readValue = recorder.safeText(value, captureText()))
+    return value
   }
 }

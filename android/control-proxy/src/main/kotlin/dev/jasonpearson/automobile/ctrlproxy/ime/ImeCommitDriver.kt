@@ -55,8 +55,8 @@ class ImeCommitDriver(private val sink: ImeCommitSink) {
   private fun complete(result: ImeCommitResult) {
     if (completed) return
     completed = true
-    completion?.invoke(result)
     restoreIfNeeded(restoreId)
+    completion?.invoke(result)
   }
 
   /**
@@ -67,11 +67,16 @@ class ImeCommitDriver(private val sink: ImeCommitSink) {
     text: String,
     priorImeId: String?,
     deadlineMs: Long = Long.MAX_VALUE,
+    isCancelled: () -> Boolean = { false },
     onComplete: (ImeCommitResult) -> Unit,
   ) {
     check(completion == null) { "An IME commit driver handles one request" }
     completion = onComplete
     restoreId = priorImeId
+    if (isCancelled()) {
+      complete(failure("IME commit cancelled"))
+      return
+    }
     if (sink.nowMs() >= deadlineMs) {
       complete(failure("IME commit deadline exceeded"))
       return
@@ -90,6 +95,10 @@ class ImeCommitDriver(private val sink: ImeCommitSink) {
     val segments = splitInlineFormatSpans(text)
     fun commitSegment(index: Int) {
       if (completed) return
+      if (isCancelled()) {
+        complete(failure("IME commit cancelled"))
+        return
+      }
       if (sink.nowMs() >= deadlineMs) {
         complete(failure("IME commit deadline exceeded"))
         return
@@ -104,6 +113,10 @@ class ImeCommitDriver(private val sink: ImeCommitSink) {
       val segment = segments[index]
       for (ch in segment.text) {
         if (completed) return
+        if (isCancelled()) {
+          complete(failure("IME commit cancelled"))
+          return
+        }
         if (sink.nowMs() >= deadlineMs) {
           complete(failure("IME commit deadline exceeded"))
           return
@@ -123,6 +136,10 @@ class ImeCommitDriver(private val sink: ImeCommitSink) {
       if (literal != null && index < segments.lastIndex) {
         fun pollConverted(attempt: Int) {
           if (completed) return
+          if (isCancelled()) {
+            complete(failure("IME commit cancelled"))
+            return
+          }
           if (sink.nowMs() >= deadlineMs) {
             complete(failure("IME commit deadline exceeded"))
             return

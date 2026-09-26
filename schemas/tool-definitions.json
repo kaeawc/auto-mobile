@@ -2622,12 +2622,12 @@
       "type": "object",
       "properties": {
         "action": {
-          "description": "Keyboard action",
+          "description": "Keyboard action; listProfiles returns AutoMobile behavior models and listImes returns installed Android input methods",
           "type": "string",
-          "enum": ["open", "close", "detect", "setProfile", "listImes", "setIme"]
+          "enum": ["open", "close", "detect", "setProfile", "listProfiles", "listImes", "setIme"]
         },
         "profile": {
-          "description": "Android keyboard behavior profile; required for setProfile",
+          "description": "AutoMobile keyboard behavior profile; required for setProfile",
           "type": "string",
           "enum": ["direct", "gboard", "samsung"]
         },

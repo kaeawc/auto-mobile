@@ -40,12 +40,21 @@ async function waitForRequest(
   throw new Error(`No message of type ${type} in: ${socket.sentMessages.join(", ")}`);
 }
 
+async function waitForSent(sent: Record<string, unknown>[], count: number): Promise<void> {
+  for (let attempt = 0; attempt < 10 && sent.length < count; attempt++) {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  expect(sent.length).toBeGreaterThanOrEqual(count);
+}
+
 describe("Android CtrlProxyText", () => {
   test("commit timeout reports unknown editor state", async () => {
     const timer = new FakeTimer();
     const requestManager = new RequestManager(timer);
+    const sent: Record<string, unknown>[] = [];
     const context: DelegateContext = {
-      getWebSocket: () => ({ readyState: 1, send: () => {} }) as any,
+      getWebSocket: () =>
+        ({ readyState: 1, send: (data: string) => sent.push(JSON.parse(data)) }) as any,
       requestManager,
       timer,
       ensureConnected: async () => true,
@@ -53,15 +62,48 @@ describe("Android CtrlProxyText", () => {
     };
 
     const resultPromise = new CtrlProxyText(context).commitViaIme("text", "prior");
-    await Promise.resolve();
-    await Promise.resolve();
+    await waitForSent(sent, 1);
     timer.advanceTime(10_000);
+    await waitForSent(sent, 2);
+    timer.advanceTime(2_000);
 
     expect(await resultPromise).toMatchObject({
       success: false,
       partialApplication: true,
-      error: expect.stringContaining("editor state is unknown"),
+      sessionUnsafe: true,
+      error: expect.stringContaining("cancellation was not acknowledged"),
     });
+  });
+
+  test("timed-out commit waits for a correlated cancel acknowledgement", async () => {
+    const timer = new FakeTimer();
+    const sent: Record<string, unknown>[] = [];
+    const manager = new RequestManager(timer);
+    const context: DelegateContext = {
+      getWebSocket: () =>
+        ({ readyState: 1, send: (data: string) => sent.push(JSON.parse(data)) }) as any,
+      requestManager: manager,
+      timer,
+      ensureConnected: async () => true,
+      cancelScreenshotBackoff: () => {},
+    };
+    const resultPromise = new CtrlProxyText(context).commitViaIme("text", "prior");
+    await waitForSent(sent, 1);
+    const commit = sent[0]!;
+    timer.advanceTime(10_000);
+    await waitForSent(sent, 2);
+    const cancel = sent[1]!;
+    expect(cancel).toMatchObject({
+      type: "request_cancel_ime_commit",
+      targetRequestId: commit.requestId,
+    });
+    manager.resolve(cancel.requestId as string, {
+      success: true,
+      targetRequestId: commit.requestId,
+      partialApplication: true,
+    });
+    expect(await resultPromise).toMatchObject({ success: false, partialApplication: true });
+    expect((await resultPromise).sessionUnsafe).toBeUndefined();
   });
 
   test("sends request_insert_text and resolves its result", async () => {

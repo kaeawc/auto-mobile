@@ -11,6 +11,10 @@ import {
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { defaultTimer } from "../../../src/utils/SystemTimer";
+import {
+  clearAndroidImeQuarantine,
+  withAndroidImeLock,
+} from "../../../src/features/action/androidImeLock";
 
 const androidDevice: BootedDevice = {
   deviceId: "emulator-5554",
@@ -72,7 +76,12 @@ function createTextClient(
     commitViaIme?: (
       text: string,
       priorImeId: string | null,
-    ) => Promise<{ success: boolean; error?: string; partialApplication?: boolean }>;
+    ) => Promise<{
+      success: boolean;
+      error?: string;
+      partialApplication?: boolean;
+      sessionUnsafe?: boolean;
+    }>;
   } = {},
 ) {
   const calls: string[] = [];
@@ -652,6 +661,35 @@ describe("DefaultSendKeysCommandExecutor", () => {
     expect(events.at(-3)).toBe("commit:rejected");
     expect(events.at(-2)).toBe(`adb:shell ime set ${priorImeId}`);
     expect(events.at(-1)).toBe(`adb:shell ime disable ${commitImeId}`);
+  });
+
+  test("unacknowledged cancellation retains the IME and blocks later switches", async () => {
+    const device = { ...androidDevice, deviceId: "ime-unsafe-test" };
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponseSequence("shell settings get secure default_input_method", [
+      { stdout: priorImeId, stderr: "" },
+      { stdout: commitImeId, stderr: "" },
+    ]);
+    const textClient = createTextClient({
+      commitViaIme: async () => ({ success: false, partialApplication: true, sessionUnsafe: true }),
+    });
+    const executor = new DefaultSendKeysCommandExecutor(
+      device,
+      createAdbFactory(adb),
+      createObserver(),
+      { textClient: textClient.client },
+    );
+    try {
+      expect(await executor.type({ action: "type", text: "value", mode: "ime" })).toMatchObject({
+        success: false,
+        partialApplication: true,
+      });
+      expect(adb.getExecutedCommands()).not.toContain(`shell ime set ${priorImeId}`);
+      expect(adb.getExecutedCommands()).not.toContain(`shell ime disable ${commitImeId}`);
+      await expect(withAndroidImeLock(device.deviceId, async () => {})).rejects.toThrow("unknown");
+    } finally {
+      clearAndroidImeQuarantine(device.deviceId);
+    }
   });
 
   test("failed IME replacement reports partial application after clearing", async () => {

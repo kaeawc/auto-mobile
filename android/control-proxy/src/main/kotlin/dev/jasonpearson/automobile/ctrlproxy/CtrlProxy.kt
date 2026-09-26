@@ -101,10 +101,12 @@ import java.security.MessageDigest
 import java.util.Collections
 import java.util.IdentityHashMap
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.coroutines.resume
 import kotlin.math.max
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -577,6 +579,15 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
    * thread.
    */
   private val gestureEndRequestIds = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+  private class ImeCommitState {
+    val cancelled = AtomicBoolean(false)
+    val finished = CompletableDeferred<Boolean>()
+  }
+
+  // Cancelled IDs remain tombstoned until service shutdown. Request IDs are UUIDs; retaining a
+  // cancellation prevents a delayed request from starting after its cancellation was acknowledged.
+  private val imeCommitStates = java.util.concurrent.ConcurrentHashMap<String, ImeCommitState>()
 
   /**
    * Launches request-correlated raw work with [RequestIdContext] attached so [serviceScopeGuard]
@@ -1995,16 +2006,43 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   override fun requestCommitText(requestId: String?, text: String, priorImeId: String?) {
     val start = System.currentTimeMillis()
+    val state = requestId?.let { imeCommitStates.computeIfAbsent(it) { ImeCommitState() } }
+    if (state?.cancelled?.get() == true) {
+      launchRequestScope(requestId) {
+        broadcastCommitTextResult(requestId, false, "IME commit cancelled", 0L, false)
+      }
+      return
+    }
     launchRequestScope(requestId) {
+      fun finish(partialApplication: Boolean) {
+        state?.finished?.complete(partialApplication)
+        if (state?.cancelled?.get() == false) imeCommitStates.remove(requestId, state)
+      }
       // `ime set` can return before Android creates the InputMethodService. Give activation a
       // bounded window; the IME separately waits for its editor binding.
       val readyDeadline = android.os.SystemClock.uptimeMillis() + 2_000L
       var ime = CtrlProxyIme.current()
-      while (ime == null && android.os.SystemClock.uptimeMillis() < readyDeadline) {
+      while (
+        ime == null &&
+          state?.cancelled?.get() != true &&
+          android.os.SystemClock.uptimeMillis() < readyDeadline
+      ) {
         kotlinx.coroutines.delay(50L)
         ime = CtrlProxyIme.current()
       }
+      if (state?.cancelled?.get() == true) {
+        finish(false)
+        broadcastCommitTextResult(
+          requestId,
+          false,
+          "IME commit cancelled",
+          System.currentTimeMillis() - start,
+          false,
+        )
+        return@launchRequestScope
+      }
       if (ime == null) {
+        finish(false)
         broadcastCommitTextResult(
           requestId,
           false,
@@ -2014,7 +2052,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         )
         return@launchRequestScope
       }
-      ime.commitText(text, priorImeId) { result ->
+      ime.commitText(text, priorImeId, { state?.cancelled?.get() == true }) { result ->
+        finish(result.partialApplication)
         launchRequestScope(requestId) {
           broadcastCommitTextResult(
             requestId,
@@ -2023,6 +2062,33 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             System.currentTimeMillis() - start,
             result.partialApplication,
           )
+        }
+      }
+    }
+  }
+
+  override fun requestCancelImeCommit(requestId: String?, targetRequestId: String) {
+    val tombstone =
+      ImeCommitState().apply {
+        cancelled.set(true)
+        finished.complete(false)
+      }
+    val state = imeCommitStates.putIfAbsent(targetRequestId, tombstone) ?: tombstone
+    state.cancelled.set(true)
+    // An absent target is a tombstone: the original frame may still be queued on another socket.
+    launchRequestScope(requestId) {
+      val partialApplication = state.finished.await()
+      resultBroadcaster.guard(requestId, "cancel_ime_commit_result") {
+        webSocketServer.broadcastWithPerfSync { perfTiming ->
+          webSocketFrameJson(
+            "cancel_ime_commit_result",
+            requestId = requestId,
+            perfTiming = perfTiming,
+          ) {
+            put("success", true)
+            put("targetRequestId", targetRequestId)
+            put("partialApplication", partialApplication)
+          }
         }
       }
     }

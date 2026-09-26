@@ -168,9 +168,14 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
   fun commitText(
     text: String,
     priorImeId: String?,
+    isCancelled: () -> Boolean = { false },
     onResult: (ImeCommitResult) -> Unit,
   ) {
     mainHandler.post {
+      if (isCancelled()) {
+        onResult(ImeCommitResult(success = false, error = "IME commit cancelled"))
+        return@post
+      }
       // A previous request can still have delayed conversion polls queued after its response
       // deadline. Cancel it before starting another request, and fence every later callback.
       cancelActiveCommit?.invoke("IME commit superseded by another request")
@@ -200,6 +205,7 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
         driver = driver,
         deadlineMs = SystemClock.uptimeMillis() + INPUT_CONNECTION_TIMEOUT_MS,
         generation = generation,
+        isCancelled = isCancelled,
         onResult = ::finish,
       )
     }
@@ -211,11 +217,21 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
     driver: ImeCommitDriver,
     deadlineMs: Long,
     generation: Long,
+    isCancelled: () -> Boolean,
     onResult: (ImeCommitResult) -> Unit,
   ) {
     if (generation != commitGeneration) return
+    if (isCancelled()) {
+      onResult(ImeCommitResult(success = false, error = "IME commit cancelled"))
+      return
+    }
     if (currentInputStarted && currentInputConnection != null) {
-      driver.commit(text, priorImeId, SystemClock.uptimeMillis() + COMMIT_TIMEOUT_MS) { result ->
+      driver.commit(
+        text,
+        priorImeId,
+        SystemClock.uptimeMillis() + COMMIT_TIMEOUT_MS,
+        isCancelled,
+      ) { result ->
         onResult(result)
         if (generation == commitGeneration) scheduleIdleRestore(driver, priorImeId)
       }
@@ -231,7 +247,15 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
     }
     mainHandler.postDelayed(
       {
-        awaitInputConnection(text, priorImeId, driver, deadlineMs, generation, onResult)
+        awaitInputConnection(
+          text,
+          priorImeId,
+          driver,
+          deadlineMs,
+          generation,
+          isCancelled,
+          onResult,
+        )
       },
       INPUT_CONNECTION_POLL_MS,
     )

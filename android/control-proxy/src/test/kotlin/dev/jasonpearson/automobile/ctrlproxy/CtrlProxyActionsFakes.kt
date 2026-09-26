@@ -338,6 +338,9 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
   override fun requestCommitText(requestId: String?, text: String, priorImeId: String?) =
     record("requestCommitText", requestId, text, priorImeId)
 
+  override fun requestCancelImeCommit(requestId: String?, targetRequestId: String) =
+    record("requestCancelImeCommit", requestId, targetRequestId)
+
   override fun requestSetKeyboardProfile(requestId: String?, profileId: String) =
     record("requestSetKeyboardProfile", requestId, profileId)
 

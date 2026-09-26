@@ -13,6 +13,8 @@ import {
   KEYBOARD_PROFILE_CATALOG_VERSIONS,
   type KeyboardProfileCatalog,
 } from "../../action/keyboardProfiles";
+import { errorMessage } from "../../../utils/describeUnknownError";
+import { logger } from "../../../utils/logger";
 
 export interface SetKeyboardProfileResult {
   success: boolean;
@@ -23,6 +25,8 @@ export interface SetKeyboardProfileResult {
 
 export interface ImeCommitActionResult extends BaseResult {
   partialApplication?: boolean;
+  /** Cancellation could not be acknowledged; the host must retain the temporary IME. */
+  sessionUnsafe?: boolean;
 }
 
 export class CtrlProxyText extends SharedTextDelegate {
@@ -51,22 +55,83 @@ export class CtrlProxyText extends SharedTextDelegate {
     priorImeId?: string,
     timeoutMs: number = 10000,
     perf?: PerformanceTracker,
+    signal?: AbortSignal,
   ): Promise<ImeCommitActionResult> {
-    return sendCommand<ImeCommitActionResult>(this.context, {
-      idPrefix: "commitText",
-      responseType: "commit_text",
-      messageType: "request_commit_text",
-      params: { text, priorImeId },
-      timeoutMs,
-      perf,
-      errorLabel: "Commit text",
-      timeoutError: (timeout) => ({
+    let dispatchedId: string | undefined;
+    let timedOut = false;
+    let result: ImeCommitActionResult;
+    try {
+      result = await sendCommand<ImeCommitActionResult>(this.context, {
+        idPrefix: "commitText",
+        responseType: "commit_text",
+        messageType: "request_commit_text",
+        params: { text, priorImeId },
+        timeoutMs,
+        perf,
+        abortSignal: signal,
+        onDispatch: (id) => {
+          dispatchedId = id;
+        },
+        errorLabel: "Commit text",
+        timeoutError: (timeout) => {
+          timedOut = true;
+          return {
+            success: false,
+            totalTimeMs: timeout,
+            partialApplication: true,
+            error: `IME commit response timed out after ${timeout}ms; editor state is unknown`,
+          };
+        },
+      });
+      if (!timedOut) {
+        return result;
+      }
+    } catch (error) {
+      if (!dispatchedId) {
+        throw error;
+      }
+      result = {
         success: false,
-        totalTimeMs: timeout,
+        totalTimeMs: 0,
         partialApplication: true,
-        error: `IME commit response timed out after ${timeout}ms; editor state is unknown`,
-      }),
-    });
+        error: errorMessage(error),
+      };
+    }
+    if (!dispatchedId) {
+      return result;
+    }
+    const targetRequestId = dispatchedId;
+    try {
+      const ack = await sendCommand<{
+        success: boolean;
+        targetRequestId?: string;
+        partialApplication?: boolean;
+        error?: string;
+      }>(this.context, {
+        idPrefix: "cancelImeCommit",
+        responseType: "cancel_ime_commit",
+        messageType: "request_cancel_ime_commit",
+        params: { targetRequestId },
+        timeoutMs: 2000,
+        cancelScreenshotBackoff: false,
+      });
+      if (ack.success && ack.targetRequestId === targetRequestId) {
+        return {
+          ...result,
+          partialApplication: result.partialApplication || ack.partialApplication,
+        };
+      }
+    } catch (error) {
+      // A lost cancellation acknowledgement cannot prove the editor is quiescent.
+      logger.debug(`IME cancellation acknowledgement failed: ${errorMessage(error)}`);
+    }
+    return {
+      ...result,
+      success: false,
+      partialApplication: true,
+      sessionUnsafe: true,
+      error: `${result.error ?? "IME commit failed"}; cancellation was not acknowledged`,
+    };
   }
 
   async setKeyboardProfile(

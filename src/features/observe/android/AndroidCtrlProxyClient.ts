@@ -334,6 +334,12 @@ interface WsCommitTextResultMessage extends WsRequestBase {
   partialApplication?: boolean;
 }
 
+interface WsCancelImeCommitResultMessage extends WsRequestBase {
+  type: "cancel_ime_commit_result";
+  targetRequestId?: string;
+  partialApplication?: boolean;
+}
+
 interface WsSetKeyboardProfileResultMessage extends WsRequestBase {
   type: "set_keyboard_profile_result";
   activeProfileId?: string;
@@ -821,6 +827,7 @@ type WebSocketMessage =
   | WsPinchResultMessage
   | WsSetTextResultMessage
   | WsCommitTextResultMessage
+  | WsCancelImeCommitResultMessage
   | WsSetKeyboardProfileResultMessage
   | WsKeyboardProfilesResultMessage
   | WsInsertTextResultMessage
@@ -964,6 +971,7 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
     priorImeId?: string,
     timeoutMs?: number,
     perf?: PerformanceTracker,
+    signal?: AbortSignal,
   ): Promise<ImeCommitActionResult>;
 
   setKeyboardProfile(
@@ -2569,8 +2577,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     priorImeId?: string,
     timeoutMs?: number,
     perf?: PerformanceTracker,
+    signal?: AbortSignal,
   ): Promise<ImeCommitActionResult> {
-    return this.text.commitViaIme(text, priorImeId, timeoutMs, perf);
+    return this.text.commitViaIme(text, priorImeId, timeoutMs, perf, signal);
   }
 
   async setKeyboardProfile(
@@ -4273,6 +4282,15 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           error: message.error,
           partialApplication: message.partialApplication,
           perfTiming: message.perfTiming,
+        });
+      }
+
+      if (message.type === "cancel_ime_commit_result" && message.requestId) {
+        this.requestManager.resolve(message.requestId, {
+          success: message.success,
+          targetRequestId: message.targetRequestId,
+          partialApplication: message.partialApplication,
+          error: message.error,
         });
       }
 

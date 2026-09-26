@@ -15,7 +15,7 @@ import { InputKey, type InputKeyModifier, type InputKeyName } from "./InputKey";
 import type { KeyboardProfileId } from "./keyboardProfiles";
 import { TapOnElement } from "./TapOnElement";
 import { containsWysiwygTriggerChar } from "./wysiwygTriggerChars";
-import { withAndroidImeLock } from "./androidImeLock";
+import { quarantineAndroidIme, withAndroidImeLock } from "./androidImeLock";
 import {
   ANDROID_KEYCOMBINATION_MIN_API_LEVEL,
   asciiKeyEventNeedsKeyCombination,
@@ -153,6 +153,7 @@ export type TextActionResult = {
   success: boolean;
   error?: string;
   partialApplication?: boolean;
+  sessionUnsafe?: boolean;
 };
 
 export interface SendKeysTextClient {
@@ -165,7 +166,11 @@ export interface SendKeysTextClient {
   setKeyboardProfile(
     id: string,
   ): Promise<{ success: boolean; previousProfileId?: string; error?: string }>;
-  commitViaIme(text: string, priorImeId: string | null): Promise<TextActionResult>;
+  commitViaIme(
+    text: string,
+    priorImeId: string | null,
+    signal?: AbortSignal,
+  ): Promise<TextActionResult>;
 }
 
 type DefaultImeReadResult =
@@ -474,6 +479,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       return { success: false, error: "Failed to activate the IME for text commit." };
     }
 
+    let safeToRestore = true;
     try {
       if (operation === "replace") {
         const clearResult = await this.textClient.clear();
@@ -481,15 +487,26 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
           return { ...clearResult, resolvedMode: "ime" };
         }
       }
-      const result = await this.textClient.commitViaIme(text, prior);
+      const result = await this.textClient.commitViaIme(text, prior, signal);
+      safeToRestore = this.canRestoreAfterImeCommit(result);
       return {
         ...(operation === "replace" ? markPartialAfterMutation(result) : result),
         resolvedMode: "ime",
       };
     } finally {
-      await this.restoreKeyboardProfileIfNeeded(keyboardProfile, previousProfileId);
-      await this.restoreIme(prior, wasEnabled);
+      if (safeToRestore) {
+        await this.restoreKeyboardProfileIfNeeded(keyboardProfile, previousProfileId);
+        await this.restoreIme(prior, wasEnabled);
+      }
     }
+  }
+
+  private canRestoreAfterImeCommit(result: TextActionResult): boolean {
+    if (result.sessionUnsafe) {
+      quarantineAndroidIme(this.device.deviceId);
+      return false;
+    }
+    return true;
   }
 
   private async checkKeyboardProfileSupport(
@@ -918,16 +935,25 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         insert: async (text) => client.requestInsertText(text),
         clear: async () => client.requestClearText(),
         ime: async (action) => client.requestImeAction(action),
-        supportsImeCommit: async () => client.supportsCommand("request_commit_text"),
+        supportsImeCommit: async () =>
+          (await client.supportsCommand("request_commit_text")) &&
+          (await client.supportsCommand("request_cancel_ime_commit")),
         supportsKeyboardProfiles: async () =>
           client.supportsCommand("request_set_keyboard_profile"),
         setKeyboardProfile: async (id) => client.setKeyboardProfile(id),
-        commitViaIme: async (text, priorImeId) => {
-          const result = await client.commitViaIme(text, priorImeId ?? undefined);
+        commitViaIme: async (text, priorImeId, signal) => {
+          const result = await client.commitViaIme(
+            text,
+            priorImeId ?? undefined,
+            undefined,
+            undefined,
+            signal,
+          );
           return {
             success: result.success,
             ...(result.error ? { error: result.error } : {}),
             ...(result.partialApplication ? { partialApplication: true } : {}),
+            ...(result.sessionUnsafe ? { sessionUnsafe: true } : {}),
           };
         },
       };

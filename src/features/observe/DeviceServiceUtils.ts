@@ -265,7 +265,7 @@ interface SendCommandBaseOptions {
    * care about that distinction (e.g. `ImeAction`) pass this to flip a local
    * flag they can check when their own deadline fires.
    */
-  onDispatch?: () => void;
+  onDispatch?: (requestId: string) => void;
 }
 
 export type SendCommandOptions<T> = SendCommandBaseOptions & CommandFallbackBuilders<T>;
@@ -374,7 +374,7 @@ export async function sendCommand<T>(
         throw new Error("WebSocket not connected");
       }
       ws.send(msg);
-      options.onDispatch?.();
+      options.onDispatch?.(requestId);
     }
   } catch (error) {
     context.requestManager.reject(

@@ -242,6 +242,39 @@ class ImeCommitDriverTest {
     assertEquals(listOf(PRIOR_IME_ID), sink.switchedImeIds)
   }
 
+  @Test
+  fun `external cancellation stops a queued conversion poll before the next character`() {
+    val sink = FakeImeCommitSink(inputType = InputType.TYPE_CLASS_TEXT)
+    sink.readText = { _, _ -> "`a`" }
+    var cancelled = false
+    var result: ImeCommitResult? = null
+    ImeCommitDriver(sink).commit("`a` after", PRIOR_IME_ID, isCancelled = { cancelled }) {
+      result = it
+    }
+
+    assertEquals("`a`", sink.committedChars.joinToString(""))
+    cancelled = true
+    sink.drain()
+
+    assertEquals("`a`", sink.committedChars.joinToString(""))
+    assertEquals("IME commit cancelled", result?.error)
+    assertTrue(result!!.partialApplication)
+    assertEquals(listOf(PRIOR_IME_ID), sink.switchedImeIds)
+  }
+
+  @Test
+  fun `pre-cancelled request never mutates the editor`() {
+    val sink = FakeImeCommitSink(inputType = InputType.TYPE_CLASS_TEXT)
+    var result: ImeCommitResult? = null
+    ImeCommitDriver(sink).commit("late text", PRIOR_IME_ID, isCancelled = { true }) {
+      result = it
+    }
+
+    assertEquals("IME commit cancelled", result?.error)
+    assertTrue(sink.committedChars.isEmpty())
+    assertFalse(result!!.partialApplication)
+  }
+
   private fun commit(sink: FakeImeCommitSink, text: String, priorImeId: String?): ImeCommitResult {
     var result: ImeCommitResult? = null
     ImeCommitDriver(sink).commit(text, priorImeId) { result = it }

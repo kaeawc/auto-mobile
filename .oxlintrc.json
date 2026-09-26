@@ -51,6 +51,7 @@
     "auto-mobile/no-extension-import": "error",
     "auto-mobile/naming-convention": "error",
     "auto-mobile/no-raw-timer": "error",
+    "auto-mobile/no-raw-selector-field-read": "error",
     "auto-mobile/no-structured-content-read": "error"
   },
   "overrides": [

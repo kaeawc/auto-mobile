@@ -700,6 +700,131 @@ const noInlineErrorNormalizeRule = {
   },
 };
 
+// Scope-aware syntactic backstop for raw capture nodes. Typed Element results and
+// request DTOs are intentionally distinct from raw any/unknown/Record boundaries.
+const noRawSelectorFieldReadRule = {
+  meta: {
+    type: "problem",
+    messages: {
+      rawSelector:
+        "Resolve selectors through ElementResolver/SearchableNode instead of reading raw capture text, content-desc, or resource-id fields.",
+    },
+  },
+  create(context) {
+    const filename = context.filename.replaceAll("\\", "/");
+    if (!/(?:^|\/)src\/(?:features\/(?:action|debug)|server)\//.test(filename)) return {};
+    return {
+      Program(program) {
+        const fields = new Set(["text", "content-desc", "resource-id"]);
+        const rawType = (annotation) => {
+          const type = annotation?.typeAnnotation ?? annotation;
+          if (!type) return false;
+          if (["TSAnyKeyword", "TSUnknownKeyword"].includes(type.type)) return true;
+          if (type.type === "TSUnionType") return type.types.some(rawType);
+          return (
+            type.type === "TSTypeReference" &&
+            ["ViewHierarchyNode", "Record"].includes(type.typeName?.name)
+          );
+        };
+        const lookup = (env, name) => env.get(name);
+        const key = (node, env) => {
+          if (node?.type === "Literal") return node.value;
+          if (node?.type === "Identifier") return lookup(env, node.name)?.literal;
+          if (node?.type === "TemplateLiteral" && node.expressions.length === 0)
+            return node.quasis[0].value.cooked;
+          return undefined;
+        };
+        const raw = (node, env) => {
+          if (!node) return false;
+          if (
+            ["ChainExpression", "TSNonNullExpression", "ParenthesizedExpression"].includes(
+              node.type,
+            )
+          )
+            return raw(node.expression, env);
+          if (["TSAsExpression", "TSTypeAssertion"].includes(node.type))
+            return rawType(node.typeAnnotation) || raw(node.expression, env);
+          if (node.type === "Identifier") return lookup(env, node.name)?.raw === true;
+          if (node.type === "MemberExpression") return raw(node.object, env);
+          if (node.type === "LogicalExpression" || node.type === "ConditionalExpression")
+            return raw(node.left ?? node.consequent, env) || raw(node.right ?? node.alternate, env);
+          if (node.type === "CallExpression")
+            return ["extractNodeProperties", "getNodeProperties"].includes(
+              node.callee?.property?.name ?? node.callee?.name,
+            );
+          return false;
+        };
+        const bind = (pattern, value, env, isRaw) => {
+          if (!pattern) return;
+          if (pattern.type === "Identifier")
+            env.set(pattern.name, {
+              raw: isRaw || rawType(pattern.typeAnnotation),
+              literal: key(value, env),
+            });
+          else if (pattern.type === "ObjectPattern") {
+            for (const property of pattern.properties) {
+              if (property.type === "RestElement") {
+                bind(property.argument, undefined, env, isRaw);
+                continue;
+              }
+              const name = property.computed ? key(property.key, env) : propertyName(property.key);
+              if (isRaw && fields.has(name))
+                context.report({ node: property, messageId: "rawSelector" });
+              bind(property.value, undefined, env, isRaw && !fields.has(name));
+            }
+          } else if (pattern.type === "AssignmentPattern")
+            bind(pattern.left, pattern.right, env, isRaw);
+        };
+        const visit = (node, env, parent, role) => {
+          if (!node || typeof node.type !== "string") return;
+          if (
+            ["FunctionDeclaration", "FunctionExpression", "ArrowFunctionExpression"].includes(
+              node.type,
+            )
+          ) {
+            const local = new Map(env);
+            for (const parameter of node.params)
+              bind(parameter, undefined, local, rawType(parameter.typeAnnotation));
+            // Traversal callbacks receive raw hierarchy nodes even without annotations.
+            if (
+              parent?.type === "CallExpression" &&
+              parent.callee?.property?.name === "traverseNode"
+            )
+              bind(node.params[0], undefined, local, true);
+            visit(node.body, local, node, "body");
+            return;
+          }
+          if (node.type === "BlockStatement") env = new Map(env);
+          if (node.type === "VariableDeclarator") {
+            bind(node.id, node.init, env, raw(node.init, env));
+            visit(node.init, env, node, "init");
+            return;
+          }
+          if (
+            node.type === "AssignmentExpression" &&
+            ["Identifier", "ObjectPattern"].includes(node.left.type)
+          )
+            bind(node.left, node.right, env, raw(node.right, env));
+          if (
+            node.type === "MemberExpression" &&
+            !(parent?.type === "AssignmentExpression" && parent.operator === "=" && role === "left")
+          ) {
+            const name = node.computed ? key(node.property, env) : node.property.name;
+            if (fields.has(name) && raw(node.object, env))
+              context.report({ node, messageId: "rawSelector" });
+          }
+          for (const [name, value] of Object.entries(node)) {
+            if (name === "parent" || name === "typeAnnotation") continue;
+            if (Array.isArray(value)) for (const child of value) visit(child, env, node, name);
+            else if (value && typeof value === "object") visit(value, env, node, name);
+          }
+        };
+        visit(program, new Map(), null, "");
+      },
+    };
+  },
+};
+
 const plugin = {
   meta: {
     name: "auto-mobile",
@@ -713,6 +838,7 @@ const plugin = {
     "stress-explicit-timeout": stressExplicitTimeoutRule,
     "no-extension-import": noExtensionImportRule,
     "no-raw-timer": noRawTimerRule,
+    "no-raw-selector-field-read": noRawSelectorFieldReadRule,
     "no-structured-content-read": noStructuredContentReadRule,
     "naming-convention": namingConventionRule,
   },

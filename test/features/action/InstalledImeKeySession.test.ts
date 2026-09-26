@@ -59,6 +59,7 @@ function fixture(
   let tapError: string | undefined;
   let restoreError: string | undefined;
   let afterSelection: (() => void) | undefined;
+  let afterTapDispatch: (() => void) | undefined;
   const session = new InstalledImeKeySession(`native-session-device-${++fixtureNumber}`, {
     catalog: {
       list: async () => ({
@@ -97,6 +98,7 @@ function fixture(
     tap: {
       execute: async ({ x, y, frameContext }) => {
         events.push(`tap:${x},${y}:${frameContext}`);
+        afterTapDispatch?.();
         return tapError ? { success: false, error: tapError } : { success: true };
       },
     },
@@ -113,6 +115,9 @@ function fixture(
     },
     setAfterSelection: (action: () => void) => {
       afterSelection = action;
+    },
+    setAfterTapDispatch: (action: () => void) => {
+      afterTapDispatch = action;
     },
     getActive: () => active,
   };
@@ -314,6 +319,23 @@ test("restores the original IME after cancellation", async () => {
   setAfterSelection(() => controller.abort());
   await expect(session.tapKey(target, "a", controller.signal)).rejects.toThrow();
   expect(events).toEqual([`select:${target}:signaled`, `select:${original}:cleanup`]);
+  expect(getActive()).toBe(original);
+});
+
+test("reports an applied key when cancellation arrives after physical dispatch", async () => {
+  const { session, events, setAfterTapDispatch, getActive } = fixture();
+  const controller = new AbortController();
+  setAfterTapDispatch(() => controller.abort());
+
+  expect((await session.tapKey(target, "a", controller.signal)).editorVerification).toEqual({
+    status: "unavailable",
+    reason: "Focused editor identity or text was unavailable before the tap.",
+  });
+  expect(events).toEqual([
+    `select:${target}:signaled`,
+    "tap:120,420:frame-one",
+    `select:${original}:cleanup`,
+  ]);
   expect(getActive()).toBe(original);
 });
 

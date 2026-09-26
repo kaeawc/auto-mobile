@@ -158,9 +158,9 @@ export class InstalledImeKeySession {
     if (!tapped.success) {
       throw new Error(tapped.error ?? "Native IME key tap failed.");
     }
-    signal?.throwIfAborted();
+    // The tap has already reached the runner. Finish verification and restoration even if
+    // cancellation arrives now, so callers do not mistake an applied key for a canceled one.
     const editorVerification = await this.verifyEditorAfterTap(editorBefore);
-    signal?.throwIfAborted();
     return { imeId, key, x: point.x, y: point.y, editorVerification };
   }
 

@@ -3622,3 +3622,41 @@ describe("iOS systemTray tap and dismiss", () => {
     expect(swipe.duration).toBe(300);
   });
 });
+
+describe("exact notification classifier IDs", () => {
+  test("does not classify a header near miss as a group header", () => {
+    const group = {
+      node: [
+        {
+          $: { "resource-id": "com.android.systemui:id/custom_notification_headerless_view_row" },
+          node: [{ $: { "resource-id": "android:id/expand_button", "content-desc": "Collapse" } }],
+        },
+      ],
+    };
+    expect(resolveNotificationGroupExpansionState(group)).toBe("unknown");
+  });
+  test("does not classify a row near miss or package near miss as a row", () => {
+    const group = {
+      node: [
+        {
+          $: { "resource-id": "com.android.systemui:id/notification_children_container" },
+          node: [
+            {
+              $: {
+                packageName: SYSTEM_TRAY_PACKAGE,
+                "resource-id": "com.android.systemui:id/custom_notification_row_extra",
+              },
+            },
+            {
+              $: {
+                packageName: "com.android.systemui.beta",
+                "resource-id": "com.android.systemui.beta:id/notification_row",
+              },
+            },
+          ],
+        },
+      ],
+    };
+    expect(getNotificationGroupChildRows(group)).toEqual([]);
+  });
+});

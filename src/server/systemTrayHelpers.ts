@@ -43,6 +43,9 @@ import { errorMessage } from "../utils/describeUnknownError";
 import {
   SYSTEM_TRAY_PACKAGE,
   SYSTEM_TRAY_RESOURCE_ID_HINTS,
+  matchesNotificationResourceId,
+  nodeIsSystemUi,
+  type NOTIFICATION_RESOURCE_IDS,
   SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS as SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS_FROM_HINTS,
   getHierarchyRoots,
   getNodeProperties,
@@ -161,14 +164,11 @@ export const resetSystemTrayDependencies = (): void => {
 // Constants
 // ============================================================================
 
-const NOTIFICATION_ROW_RESOURCE_ID_HINTS = [
-  "notification_row",
-  "expandablenotificationrow",
-  "status_bar_notification",
-  "notification_container",
-  "notification_content",
-  "notification_main_column",
-  "notification_template",
+// Captured CtrlProxy group fixture and representative systemTray.test.ts rows.
+const NOTIFICATION_ROW_RESOURCE_IDS = [
+  "com.android.systemui:id/expandableNotificationRow",
+  "android:id/notification_content",
+  "android:id/notification_main_column",
 ];
 const NOTIFICATION_ROW_CLASS_HINTS = [
   "ExpandableNotificationRow",
@@ -478,23 +478,24 @@ const nodeHasNotificationRowHint = (node: any): boolean => {
     return false;
   }
 
-  const resourceId = String(props["resource-id"] ?? props.resourceId ?? "").toLowerCase();
+  const resourceId = String(props["resource-id"] ?? props.resourceId ?? "");
   const className = String(props.className ?? props.class ?? "").toLowerCase();
-  const packageName = String(props.packageName ?? props.package ?? "").toLowerCase();
-  const isSystemUi =
-    packageName === SYSTEM_TRAY_PACKAGE || resourceId.includes(SYSTEM_TRAY_PACKAGE);
+  const isSystemUi = nodeIsSystemUi(props);
 
   if (!isSystemUi) {
     return false;
   }
 
-  if (NOTIFICATION_ROW_RESOURCE_ID_EXCLUDES.some((hint) => resourceId.includes(hint))) {
+  if (
+    NOTIFICATION_ROW_RESOURCE_ID_EXCLUDES.some(
+      (hint) =>
+        resourceId === `${SYSTEM_TRAY_PACKAGE}:id/${hint}` || resourceId === `android:id/${hint}`,
+    )
+  ) {
     return false;
   }
 
-  const matchesResourceId = NOTIFICATION_ROW_RESOURCE_ID_HINTS.some((hint) =>
-    resourceId.includes(hint),
-  );
+  const matchesResourceId = NOTIFICATION_ROW_RESOURCE_IDS.includes(resourceId);
   const matchesClassName = NOTIFICATION_ROW_CLASS_HINTS.some((hint) =>
     className.includes(hint.toLowerCase()),
   );
@@ -516,8 +517,8 @@ export const nodeIsNotificationGroup = (node: any): boolean => {
     if (!props) {
       return false;
     }
-    const resourceId = String(props["resource-id"] ?? props.resourceId ?? "").toLowerCase();
-    return resourceId.includes("notification_children_container");
+    const resourceId = String(props["resource-id"] ?? props.resourceId ?? "");
+    return matchesNotificationResourceId(resourceId, "notification_children_container");
   };
 
   if (Array.isArray(children)) {
@@ -531,8 +532,8 @@ const nodeContainsNotificationChildrenContainer = (node: any): boolean => {
     return false;
   }
   const props = getNodeProperties(node);
-  const resourceId = String(props?.["resource-id"] ?? props?.resourceId ?? "").toLowerCase();
-  if (resourceId.includes("notification_children_container")) {
+  const resourceId = String(props?.["resource-id"] ?? props?.resourceId ?? "");
+  if (matchesNotificationResourceId(resourceId, "notification_children_container")) {
     return true;
   }
   return getDirectChildNodes(node).some(nodeContainsNotificationChildrenContainer);
@@ -552,16 +553,16 @@ const getDirectChildNodes = (node: any): any[] => {
 const getNotificationGroupChildrenContainer = (groupNode: any): any | null =>
   getDirectChildNodes(groupNode).find((child: any) => {
     const props = getNodeProperties(child);
-    const resourceId = String(props?.["resource-id"] ?? props?.resourceId ?? "").toLowerCase();
-    return resourceId.includes("notification_children_container");
+    const resourceId = String(props?.["resource-id"] ?? props?.resourceId ?? "");
+    return matchesNotificationResourceId(resourceId, "notification_children_container");
   }) ?? null;
 
 const getNotificationGroupHeader = (groupNode: any): any | null => {
   const groupChildren = getDirectChildNodes(groupNode);
   const header = groupChildren.find((child: any) => {
     const props = getNodeProperties(child);
-    const resourceId = String(props?.["resource-id"] ?? props?.resourceId ?? "").toLowerCase();
-    return resourceId.includes("notification_header");
+    const resourceId = String(props?.["resource-id"] ?? props?.resourceId ?? "");
+    return matchesNotificationResourceId(resourceId, "notification_header");
   });
   if (header) {
     return header;
@@ -571,8 +572,8 @@ const getNotificationGroupHeader = (groupNode: any): any | null => {
   return (
     getDirectChildNodes(childrenContainer).find((child: any) => {
       const props = getNodeProperties(child);
-      const resourceId = String(props?.["resource-id"] ?? props?.resourceId ?? "").toLowerCase();
-      return resourceId.includes("notification_header");
+      const resourceId = String(props?.["resource-id"] ?? props?.resourceId ?? "");
+      return matchesNotificationResourceId(resourceId, "notification_header");
     }) ?? null
   );
 };
@@ -582,8 +583,10 @@ const getExpandButtonResourceIdBounds = (
   parser: DefaultElementParser,
 ): Element | null => {
   const props = getNodeProperties(node);
-  const resourceId = String(props?.["resource-id"] ?? props?.resourceId ?? "").toLowerCase();
-  return resourceId.includes("expand_button") ? (parser.parseNodeBounds(node) ?? null) : null;
+  const resourceId = String(props?.["resource-id"] ?? props?.resourceId ?? "");
+  return matchesNotificationResourceId(resourceId, "expand_button")
+    ? (parser.parseNodeBounds(node) ?? null)
+    : null;
 };
 
 const getExpandButtonContentDescriptionBounds = (
@@ -664,17 +667,23 @@ export const getNotificationGroupChildRows = (groupNode: any): any[] => {
   const children = getDirectChildNodes(childrenContainer);
   return children.filter((child: any) => {
     const props = getNodeProperties(child);
-    const resourceId = String(props?.["resource-id"] ?? props?.resourceId ?? "").toLowerCase();
-    return !resourceId.includes("notification_header") && nodeHasNotificationRowHint(child);
+    const resourceId = String(props?.["resource-id"] ?? props?.resourceId ?? "");
+    return (
+      !matchesNotificationResourceId(resourceId, "notification_header") &&
+      nodeHasNotificationRowHint(child)
+    );
   });
 };
 
 export type NotificationGroupExpansionState = "expanded" | "collapsed" | "unknown";
 
-const nodeHasResourceIdDescendant = (node: any, resourceIdFragment: string): boolean => {
+const nodeHasResourceIdDescendant = (
+  node: any,
+  resourceIdFragment: keyof typeof NOTIFICATION_RESOURCE_IDS,
+): boolean => {
   const props = getNodeProperties(node);
-  const resourceId = String(props?.["resource-id"] ?? props?.resourceId ?? "").toLowerCase();
-  if (resourceId.includes(resourceIdFragment)) {
+  const resourceId = String(props?.["resource-id"] ?? props?.resourceId ?? "");
+  if (matchesNotificationResourceId(resourceId, resourceIdFragment)) {
     return true;
   }
   return getDirectChildNodes(node).some((child) =>
@@ -684,9 +693,9 @@ const nodeHasResourceIdDescendant = (node: any, resourceIdFragment: string): boo
 
 const getNodeExpandButtonContentDescription = (node: any): string | null => {
   const props = getNodeProperties(node);
-  const resourceId = String(props?.["resource-id"] ?? props?.resourceId ?? "").toLowerCase();
+  const resourceId = String(props?.["resource-id"] ?? props?.resourceId ?? "");
   const contentDescription = String(props?.["content-desc"] ?? props?.contentDesc ?? "").trim();
-  const isExpandButton = resourceId.includes("expand_button");
+  const isExpandButton = matchesNotificationResourceId(resourceId, "expand_button");
   const isRecognizedState = /^(expand|collapse)$/i.test(contentDescription);
   return contentDescription && (isExpandButton || isRecognizedState) ? contentDescription : null;
 };
@@ -2151,7 +2160,7 @@ const trayAtScrollEnd = (hierarchy: ViewHierarchyResult): boolean =>
         return false;
       }
       const resourceId = String(props["resource-id"] ?? props.resourceId ?? "");
-      if (!resourceId.includes("notification_stack_scroller")) {
+      if (!matchesNotificationResourceId(resourceId, "notification_stack_scroller")) {
         return false;
       }
       if (!isTruthy(props.scrollable)) {

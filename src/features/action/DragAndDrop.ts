@@ -8,9 +8,11 @@ import {
   ObserveResult,
   ViewHierarchyResult,
 } from "../../models";
-import type { ElementFinder } from "../../utils/interfaces/ElementFinder";
+import type { ElementSelector } from "../../utils/interfaces/ElementSelector";
+import type { HierarchyCapture } from "../observe/HierarchyCapture";
+import { createDeviceHierarchyCapture } from "../observe/DeviceHierarchyCapture";
+import { ResolverElementSelector } from "../utility/ResolverElementSelector";
 import type { ElementGeometry } from "../../utils/interfaces/ElementGeometry";
-import { DefaultElementFinder } from "../utility/ElementFinder";
 import { DefaultElementGeometry } from "../utility/ElementGeometry";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
@@ -19,10 +21,6 @@ import { throwIfAborted } from "../../utils/toolUtils";
 import { AndroidCtrlProxyManager } from "../../utils/CtrlProxyManager";
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
-import { ViewHierarchy } from "../observe/ViewHierarchy";
-import { serverConfig } from "../../utils/ServerConfig";
-import { attachRawViewHierarchy } from "../../utils/viewHierarchySearch";
-import { refreshAndroidViewHierarchy } from "./refreshAndroidViewHierarchy";
 import {
   DEFAULT_VISION_CONFIG,
   getVisionEnrichedError,
@@ -49,16 +47,18 @@ const HIERARCHY_REFRESH_TIMEOUT_MS = 5000;
 const IOS_HIERARCHY_REFRESH_TIMEOUT_MS = 15000;
 
 interface DragAndDropDeps {
+  hierarchyCapture?: HierarchyCapture;
+  selector?: ElementSelector;
   visionConfig?: VisionFallbackConfig;
   screenshotCapturer?: ScreenshotCapturer;
   visionAnalyzer?: VisionAnalyzer;
 }
 
 export class DragAndDrop extends BaseVisualChange {
-  private finder: ElementFinder;
+  private selector: ElementSelector;
+  private hierarchyCapture: HierarchyCapture;
   private geometry: ElementGeometry;
   private accessibilityService: AndroidCtrlProxyClient;
-  private viewHierarchy: ViewHierarchy;
   private visionConfig: VisionFallbackConfig;
   private screenshotCapturer: ScreenshotCapturer;
   private visionAnalyzer: VisionAnalyzer | undefined;
@@ -70,10 +70,11 @@ export class DragAndDrop extends BaseVisualChange {
     deps: DragAndDropDeps = {},
   ) {
     super(device, adb, timer);
-    this.finder = new DefaultElementFinder();
+    this.selector = deps.selector ?? new ResolverElementSelector();
+    this.hierarchyCapture =
+      deps.hierarchyCapture ?? createDeviceHierarchyCapture(device, { timer });
     this.geometry = new DefaultElementGeometry();
     this.accessibilityService = AndroidCtrlProxyClient.getInstance(device, this.adbFactory);
-    this.viewHierarchy = new ViewHierarchy(device, this.adbFactory);
     this.visionConfig = deps.visionConfig ?? DEFAULT_VISION_CONFIG;
     this.screenshotCapturer =
       deps.screenshotCapturer ?? new TakeScreenshotCapturer(device, this.adbFactory);
@@ -134,7 +135,7 @@ export class DragAndDrop extends BaseVisualChange {
       const result = await this.observedInteraction(
         async (observeResult: ObserveResult) => {
           throwIfAborted(signal);
-          const viewHierarchy = await this.resolveViewHierarchy(observeResult, signal);
+          const viewHierarchy = await this.resolveViewHierarchy(signal);
           if (!viewHierarchy) {
             return { success: false, error: "Unable to get view hierarchy, cannot drag and drop" };
           }
@@ -279,7 +280,9 @@ export class DragAndDrop extends BaseVisualChange {
       );
     }
     if (target.elementId) {
-      const element = this.finder.findElementByResourceId(viewHierarchy, target.elementId);
+      const element = this.selector.selectByResourceId(viewHierarchy, target.elementId, {
+        intentAction: "drag",
+      }).element;
       if (!element) {
         throw new ActionableError(
           `dragAndDrop ${label} not found with elementId '${target.elementId}'`,
@@ -288,7 +291,9 @@ export class DragAndDrop extends BaseVisualChange {
       return element;
     }
     if (target.text) {
-      const element = this.finder.findElementByText(viewHierarchy, target.text);
+      const element = this.selector.selectByText(viewHierarchy, target.text, {
+        intentAction: "drag",
+      }).element;
       if (!element) {
         throw new ActionableError(`dragAndDrop ${label} not found with text '${target.text}'`);
       }
@@ -297,78 +302,16 @@ export class DragAndDrop extends BaseVisualChange {
     throw new ActionableError(`dragAndDrop ${label} requires text or elementId`);
   }
 
-  private async resolveViewHierarchy(
-    observeResult: ObserveResult,
-    signal?: AbortSignal,
-  ): Promise<ViewHierarchyResult | null> {
-    // Prefer a freshly-captured hierarchy on both platforms so drag endpoints are not
-    // resolved against stale coordinates after the UI navigated/scrolled since the last
-    // observe. Android refreshes via the accessibility service; iOS via the XCUITest
-    // CtrlProxy runner's hierarchy snapshot.
-    const refreshed =
-      this.device.platform === "ios"
-        ? await this.refreshIosViewHierarchy(signal)
-        : await this.refreshViewHierarchy(signal);
-    if (refreshed && !refreshed.hierarchy?.error) {
-      return refreshed;
-    }
-
-    if (observeResult.viewHierarchy && !observeResult.viewHierarchy.hierarchy?.error) {
-      return observeResult.viewHierarchy;
-    }
-
-    return null;
-  }
-
-  private async refreshIosViewHierarchy(signal?: AbortSignal): Promise<ViewHierarchyResult | null> {
-    // Bypass the IOSCtrlProxyClient hierarchy cache entirely. getAccessibilityHierarchy /
-    // getLatestHierarchy would return any client-cached snapshot younger than its (<500ms)
-    // TTL before issuing a fresh request, so a drag started shortly after a navigation/scroll
-    // could still resolve against stale coordinates. requestHierarchySync always performs a
-    // fresh runner round-trip, guaranteeing the drag endpoints come from a current snapshot.
-    // Use the 15s iOS budget: XCUITest extraction can take 5-15s, and a shorter timeout would
-    // fall back to the stale observe cache on slow screens.
-    const client = IOSCtrlProxyClient.getInstance(this.device);
-    const synced = await client.requestHierarchySync(
-      undefined,
-      false,
+  private async resolveViewHierarchy(signal?: AbortSignal): Promise<ViewHierarchyResult | null> {
+    const snapshot = await this.hierarchyCapture.capture({
+      freshness: "fresh",
       signal,
-      IOS_HIERARCHY_REFRESH_TIMEOUT_MS,
-    );
-    if (!synced?.hierarchy) {
-      return null;
-    }
-    return this.viewHierarchy.projectActionableHierarchy(
-      this.viewHierarchy.normalizeIosHierarchy(synced.hierarchy),
-    );
-  }
-
-  private async refreshViewHierarchy(signal?: AbortSignal): Promise<ViewHierarchyResult | null> {
-    const rawHierarchy = await refreshAndroidViewHierarchy(
-      this.accessibilityService,
-      HIERARCHY_REFRESH_TIMEOUT_MS,
-      signal,
-      { adb: this.adb, timer: this.timer },
-    );
-
-    if (!rawHierarchy) {
-      return null;
-    }
-
-    if (!serverConfig.isRawElementSearchEnabled()) {
-      return rawHierarchy;
-    }
-    if (
-      rawHierarchy?.hierarchy &&
-      typeof rawHierarchy.hierarchy === "object" &&
-      "error" in rawHierarchy.hierarchy &&
-      rawHierarchy.hierarchy.error
-    ) {
-      return rawHierarchy;
-    }
-    const filtered = this.viewHierarchy.filterViewHierarchy(rawHierarchy);
-    attachRawViewHierarchy(filtered, rawHierarchy);
-    return filtered;
+      timeoutMs:
+        this.device.platform === "ios"
+          ? IOS_HIERARCHY_REFRESH_TIMEOUT_MS
+          : HIERARCHY_REFRESH_TIMEOUT_MS,
+    });
+    return snapshot.hierarchy;
   }
 
   private getPressDurationMs(options: DragAndDropOptions): number {

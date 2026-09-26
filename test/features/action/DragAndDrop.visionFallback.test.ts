@@ -70,6 +70,7 @@ describe("DragAndDrop vision fallback", () => {
     fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
     fakeCtrlProxy = new FakeCtrlProxy();
+    fakeCtrlProxy.setHierarchyData(createEmptyHierarchy());
     fakeAdbClientFactory = new FakeAdbClientFactory();
     fakeObserveScreen.setObserveResult(() => createObserveResult());
 

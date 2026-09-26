@@ -612,3 +612,62 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
     });
   });
 });
+
+describe("shared capture pre-tap resolution", () => {
+  const captureHierarchy = (id: string, bounds: Element["bounds"]): ViewHierarchyResult => ({
+    hierarchy: {
+      node: {
+        bounds: { left: 0, top: 0, right: 1080, bottom: 1920 },
+        node: { "resource-id": id, text: "Contact Name", clickable: true, bounds },
+      },
+    },
+  });
+
+  test.each([false, true])(
+    "fresh capture verifies native identity (changed=%s)",
+    async (changed) => {
+      const { DefaultHierarchyCapture, getHierarchySnapshot } =
+        await import("../../../src/features/observe/HierarchyCapture");
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const initial = captureHierarchy("app:id/contact", STABLE_BOUNDS);
+      const fresh = captureHierarchy(changed ? "app:id/other" : "app:id/contact", SHIFTED_BOUNDS);
+      const policies: string[] = [];
+      const capture = new DefaultHierarchyCapture(
+        "android",
+        {
+          readCached: async () => {
+            policies.push("cached-ok");
+            return initial;
+          },
+          readFresh: async () => {
+            policies.push("fresh");
+            return fresh;
+          },
+          projectVisible: (hierarchy) => hierarchy,
+        },
+        timer,
+      );
+      const observed = await capture.capture({ freshness: "cached-ok" });
+      const tap = new TapOnElement(
+        { name: "test", platform: "android", deviceId: "capture-test" },
+        new FakeAdbClient(),
+        { timer, hierarchyCapture: capture },
+      );
+      const result = await (tap as any).resolveAndroidStableTapTargetAfterRefreshes(
+        { text: "Contact Name", action: "tap" },
+        { viewHierarchy: observed.hierarchy, screenSize: { width: 1080, height: 1920 } },
+        "tap",
+        false,
+      );
+      expect(policies).toEqual(["cached-ok", "fresh"]);
+      expect(result.ok).toBe(!changed);
+      if (changed) {
+        expect(result.error).toContain("Stale tap target");
+      } else {
+        expect(result.tapElement.bounds).toEqual(SHIFTED_BOUNDS);
+        expect(getHierarchySnapshot(result.viewHierarchy)?.captureId).not.toBe(observed.captureId);
+      }
+    },
+  );
+});

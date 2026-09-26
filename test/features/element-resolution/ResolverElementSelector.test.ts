@@ -1,0 +1,86 @@
+import { expect, test } from "bun:test";
+import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
+const bounds = { left: 0, top: 0, right: 100, bottom: 100 };
+const hierarchy = {
+  hierarchy: {
+    node: [
+      { bounds, clickable: true, text: "Login help", "resource-id": "app:id/login_help" },
+      { bounds, clickable: true, text: "Login", "resource-id": "app:id/login" },
+    ],
+  },
+};
+
+test("action adapter defaults to namespace IDs and exact-first text", () => {
+  const selector = new ResolverElementSelector();
+  expect(selector.selectByResourceId(hierarchy, "login").element?.["resource-id"]).toBe(
+    "app:id/login",
+  );
+  expect(selector.selectByText(hierarchy, "Login").element?.["resource-id"]).toBe("app:id/login");
+});
+
+test("adapter fails ambiguity before returning any action target", () => {
+  const capture = {
+    hierarchy: {
+      node: [
+        { bounds, clickable: true, "resource-id": "one:id/map" },
+        { bounds, clickable: true, "resource-id": "two:id/map" },
+      ],
+    },
+  };
+  expect(() => new ResolverElementSelector().selectByResourceId(capture, "map")).toThrow(
+    "Ambiguous",
+  );
+});
+
+test("tapAny only indexes action-eligible nodes across windows", () => {
+  const capture = {
+    hierarchy: {
+      node: [
+        { bounds, text: "Not a button" },
+        { bounds, clickable: true, "resource-id": "main" },
+      ],
+    },
+    windows: [
+      {
+        windowLayer: 10,
+        hierarchy: { node: { bounds, clickable: true, "resource-id": "dialog" } },
+      },
+    ],
+  };
+  const result = new ResolverElementSelector().selectClickable(capture, { strategy: "first" });
+  expect(result.element?.["resource-id"]).toBe("dialog");
+  expect(result.totalMatches).toBe(2);
+});
+
+test("action adapter skips offscreen duplicate targets", () => {
+  const capture = {
+    screenWidth: 200,
+    screenHeight: 200,
+    hierarchy: {
+      node: [
+        { clickable: true, text: "Done", bounds: { left: -300, top: 0, right: -200, bottom: 50 } },
+        { clickable: true, text: "Done", bounds: { left: 20, top: 20, right: 120, bottom: 70 } },
+      ],
+    },
+  };
+  expect(new ResolverElementSelector().selectByText(capture, "Done").element?.bounds?.left).toBe(
+    20,
+  );
+});
+
+test("missing container remains retryable but synthetic container keys are recognized", () => {
+  const selector = new ResolverElementSelector();
+  expect(
+    selector.selectByText(hierarchy, "Login", { container: { elementId: "missing" } }).element,
+  ).toBeNull();
+  const capture = {
+    hierarchy: {
+      node: { "view-id": "s-container", bounds, node: { text: "Login", bounds, clickable: true } },
+    },
+  };
+  expect(selector.hasContainer(capture, { elementId: "s-container" })).toBe(true);
+  expect(
+    selector.selectByText(capture, "Login", { container: { elementId: "s-container" } }).element
+      ?.text,
+  ).toBe("Login");
+});

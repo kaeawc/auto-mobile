@@ -34,14 +34,13 @@ afterEach(() => {
 
 test("iOS hierarchy refresh forwards the caller's remaining budget and signal", async () => {
   const signal = new AbortController().signal;
-  const sharedRead = spyOn((tap as any).viewHierarchy, "getiOSViewHierarchy").mockResolvedValue({
-    hierarchy: { node: {} },
-  });
-
+  const sync = spyOn(client, "requestHierarchySync").mockResolvedValue({
+    hierarchy: { hierarchy: { node: {} } },
+  } as any);
   await tap["refreshViewHierarchy"](37, undefined, signal);
-  expect(sharedRead).toHaveBeenCalledWith(undefined, false, 0, 37, signal);
+  expect(sync).toHaveBeenCalledWith(undefined, false, signal, 37);
   expect(read).not.toHaveBeenCalled();
-  sharedRead.mockRestore();
+  sync.mockRestore();
 });
 
 test.each([0, -10])("an expired budget %s starts no hierarchy request", async (budget) => {

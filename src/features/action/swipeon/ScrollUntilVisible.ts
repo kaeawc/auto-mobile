@@ -112,6 +112,9 @@ export class ScrollUntilVisible {
       selector,
       { action },
     );
+    if (result.error === "Container not found") {
+      return null;
+    }
     if (result.error) {
       throw new ActionableError(result.error);
     }

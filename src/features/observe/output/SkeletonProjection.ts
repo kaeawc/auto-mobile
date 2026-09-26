@@ -1,3 +1,4 @@
+import { foldSearchableLabels } from "../../utility/SearchableLabels";
 import { toSearchable } from "../../utility/SearchableNode";
 import type { Element } from "../../../models/Element";
 import { isTruthy } from "../../../models/Element";
@@ -352,14 +353,10 @@ function distinctHoistParts(
  * clobbered by a descendant's state text (that text belongs in `sublabel`,
  * per the AC2 #5869 behavior above).
  */
-function isIncompleteOwnLabel(label: string): boolean {
-  return label !== label.trim();
-}
-
 /**
  * Fold `parts` onto the container: the first becomes `label` when it has none
  * — or when its existing own label is an incomplete template
- * ({@link isIncompleteOwnLabel}), in which case the first part is prepended to
+ * (leading or trailing whitespace), in which case the first part is prepended to
  * the trimmed own label so the row keeps its generic noun ("Alarm") without
  * losing the identifying descendant text ("8:30 AM") that made the row unique
  * (issue #6221 item 3). The remainder always joins into `sublabel`. A
@@ -367,22 +364,7 @@ function isIncompleteOwnLabel(label: string): boolean {
  * as `sublabel`.
  */
 function applyHoistedLabels(container: SkeletonAccumulator, parts: string[]): void {
-  if (parts.length === 0) {
-    return;
-  }
-  if (container.label === undefined) {
-    container.label = parts[0];
-    if (parts.length > 1) {
-      container.sublabel = parts.slice(1).join(", ");
-    }
-  } else if (isIncompleteOwnLabel(container.label)) {
-    container.label = `${parts[0]} ${container.label.trim()}`;
-    if (parts.length > 1) {
-      container.sublabel = parts.slice(1).join(", ");
-    }
-  } else {
-    container.sublabel = [...new Set([container.sublabel, ...parts].filter(Boolean))].join(", ");
-  }
+  Object.assign(container, foldSearchableLabels(container, parts));
 }
 
 /** Order two rows top-to-bottom, then left-to-right, by their bounds tuple. */

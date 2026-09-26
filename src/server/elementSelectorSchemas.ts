@@ -48,3 +48,38 @@ export const validateElementIdTextSelector = (
     });
   }
 };
+
+/** Canonical resolver selector. Tools compose this schema as they migrate. */
+export interface ResolverSelector {
+  elementId?: string;
+  text?: string;
+  testTag?: string;
+  index?: number;
+  selectionStrategy?: "first" | "random";
+  match?: "exact" | "contains";
+  caseSensitive?: boolean;
+  container?: ResolverSelector;
+  sibling?: ResolverSelector;
+}
+
+export const resolverSelectorSchema: z.ZodType<ResolverSelector> = z.lazy(() =>
+  z
+    .object({
+      elementId: z.string().min(1).optional(),
+      text: z.string().trim().min(1).optional(),
+      testTag: z.string().min(1).optional(),
+      index: z.number().int().nonnegative().optional(),
+      selectionStrategy: elementSelectionStrategySchema.optional(),
+      match: z.enum(["exact", "contains"]).optional(),
+      caseSensitive: z.boolean().optional(),
+      container: resolverSelectorSchema.optional(),
+      sibling: resolverSelectorSchema.optional(),
+    })
+    .strict()
+    .refine(
+      (selector) =>
+        [selector.elementId, selector.text, selector.testTag].filter((value) => value !== undefined)
+          .length <= 1,
+      "Provide at most one of elementId, text, or testTag",
+    ),
+);

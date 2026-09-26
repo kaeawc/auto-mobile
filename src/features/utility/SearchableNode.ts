@@ -1,3 +1,4 @@
+import { foldSearchableLabels } from "./SearchableLabels";
 import type { ViewHierarchyNode, ViewHierarchyResult } from "../../models";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
 import { DefaultElementParser } from "./ElementParser";
@@ -159,7 +160,43 @@ export class SearchableHierarchy {
         ancestors.push(entry);
       });
     }
+    hoistSearchableLabels(entries);
     this.captures.set(capture, entries);
     return entries;
+  }
+}
+
+function hoistSearchableLabels(entries: SearchableEntry[]): void {
+  const groups = new Map<SearchableEntry, SearchableEntry[]>();
+  for (const entry of entries) {
+    if (entry.label === undefined || entry.affordances.length > 0 || !entry.bounds) {
+      continue;
+    }
+    let parent = entry.parentIndex;
+    while (parent !== undefined) {
+      const ancestor = entries[parent];
+      if (ancestor.affordances.includes("tap") && ancestor.bounds) {
+        const texts = groups.get(ancestor) ?? [];
+        texts.push(entry);
+        groups.set(ancestor, texts);
+        break;
+      }
+      parent = ancestor.parentIndex;
+    }
+  }
+  for (const [row, texts] of groups) {
+    texts.sort((a, b) => a.bounds!.top - b.bounds!.top || a.bounds!.left - b.bounds!.left);
+    const parts = [
+      ...new Set(texts.map((text) => text.label!).filter((label) => label !== row.label)),
+    ];
+    const folded = foldSearchableLabels(row, parts);
+    row.label = folded.label?.trim();
+    row.textFields = [
+      ...new Set(
+        [row.label, ...row.textFields, ...parts].filter(
+          (field): field is string => field !== undefined,
+        ),
+      ),
+    ];
   }
 }

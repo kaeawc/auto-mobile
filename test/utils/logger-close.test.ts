@@ -1,8 +1,17 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { EventEmitter } from "node:events";
-import { closeLogStream } from "../../src/utils/logger";
+import fs from "node:fs";
 import { ActionableError } from "../../src/models/ActionableError";
 import { FakeTimer } from "../fakes/FakeTimer";
+
+const previousLogDir = process.env.AUTOMOBILE_LOG_DIR;
+process.env.AUTOMOBILE_LOG_DIR = `/tmp/automobile-logger-close-import-${process.pid}`;
+const { closeLogStream, CLOSE_LOG_WRITES_TIMEOUT_MS } = await import("../../src/utils/logger");
+if (previousLogDir === undefined) {
+  delete process.env.AUTOMOBILE_LOG_DIR;
+} else {
+  process.env.AUTOMOBILE_LOG_DIR = previousLogDir;
+}
 
 /**
  * Models a WriteStream's shutdown the way the runtime actually sequences it:
@@ -45,6 +54,54 @@ class FakeLogStream extends EventEmitter {
    * shutdown error is still followed by `close` once the fd is released. */
   failClose(error: Error): void {
     this.emit("error", error);
+  }
+}
+
+class WritableFakeLogStream extends FakeLogStream {
+  destroyed = false;
+  writable = true;
+
+  write(_chunk: unknown, callback?: (error: Error | null) => void): boolean {
+    queueMicrotask(() => callback?.(null));
+    return true;
+  }
+
+  override end(callback?: () => void): void {
+    super.end(callback);
+    queueMicrotask(() => this.emitClose());
+  }
+
+  destroy(): void {
+    this.destroyed = true;
+  }
+}
+
+let loggerImportCounter = 0;
+
+async function fileLoggerWithStreams(streams: WritableFakeLogStream[]) {
+  const priorSink = process.env.AUTOMOBILE_LOG_SINK;
+  const priorDir = process.env.AUTOMOBILE_LOG_DIR;
+  process.env.AUTOMOBILE_LOG_SINK = "file";
+  process.env.AUTOMOBILE_LOG_DIR = `/tmp/automobile-logger-close-${process.pid}`;
+  const createStream = spyOn(fs, "createWriteStream").mockImplementation(() => {
+    const stream = new WritableFakeLogStream();
+    streams.push(stream);
+    return stream as unknown as fs.WriteStream;
+  });
+  try {
+    const mod = await import(`../../src/utils/logger.ts?logger-close-${loggerImportCounter++}`);
+    return { mod, restore: () => createStream.mockRestore() };
+  } finally {
+    if (priorSink === undefined) {
+      delete process.env.AUTOMOBILE_LOG_SINK;
+    } else {
+      process.env.AUTOMOBILE_LOG_SINK = priorSink;
+    }
+    if (priorDir === undefined) {
+      delete process.env.AUTOMOBILE_LOG_DIR;
+    } else {
+      process.env.AUTOMOBILE_LOG_DIR = priorDir;
+    }
   }
 }
 
@@ -123,6 +180,18 @@ describe("closeLogStream (#6149)", () => {
 });
 
 describe("closeLogStream bounded close policy (#6700)", () => {
+  test("rejects when a stream silently never emits close", async () => {
+    const stream = new FakeLogStream();
+    const timer = new FakeTimer();
+    const close = closeLogStream(stream, timer, 25);
+
+    timer.advanceTime(24);
+    expect(timer.getPendingTimeoutCount()).toBe(1);
+    timer.advanceTime(1);
+    await expect(close).rejects.toBeInstanceOf(ActionableError);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
   test("clears the timeout when destroy closes synchronously", async () => {
     class SynchronousCloseStream extends FakeLogStream {
       destroy(): void {
@@ -224,5 +293,56 @@ describe("closeLogStream bounded close policy (#6700)", () => {
     // The bounded fallback timer must have been armed and then cleared by
     // the confirming `close`, not left pending or fired.
     expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+});
+
+describe("logger closeAfterFlush lifecycle", () => {
+  test("rejects when pending writes exceed the drain bound and clears its timer", async () => {
+    const streams: WritableFakeLogStream[] = [];
+    const { mod, restore } = await fileLoggerWithStreams(streams);
+    const timer = new FakeTimer();
+    const stream = streams[0];
+    spyOn(stream, "write").mockImplementation(() => true);
+    try {
+      mod.logger.info("pending forever");
+      const closing = mod.logger.closeAfterFlush(timer);
+      expect(timer.getPendingTimeoutCount()).toBe(1);
+      timer.advanceTime(CLOSE_LOG_WRITES_TIMEOUT_MS);
+      await expect(closing).rejects.toBeInstanceOf(ActionableError);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    } finally {
+      restore();
+    }
+  });
+
+  test("allows two consecutive closeAfterFlush calls", async () => {
+    const streams: WritableFakeLogStream[] = [];
+    const { mod, restore } = await fileLoggerWithStreams(streams);
+    const timer = new FakeTimer();
+    try {
+      await mod.logger.closeAfterFlush(timer);
+      await mod.logger.closeAfterFlush(timer);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+      expect(streams[0].closed).toBeTrue();
+    } finally {
+      restore();
+    }
+  });
+
+  test("reopens a stream for a write after closeAfterFlush", async () => {
+    const streams: WritableFakeLogStream[] = [];
+    const { mod, restore } = await fileLoggerWithStreams(streams);
+    const timer = new FakeTimer();
+    try {
+      await mod.logger.closeAfterFlush(timer);
+      mod.logger.info("after close");
+      await mod.logger.flush();
+      expect(streams).toHaveLength(2);
+      expect(streams[0].closed).toBeTrue();
+      expect(streams[1].closed).toBeFalse();
+    } finally {
+      await mod.logger.closeAfterFlush(timer);
+      restore();
+    }
   });
 });

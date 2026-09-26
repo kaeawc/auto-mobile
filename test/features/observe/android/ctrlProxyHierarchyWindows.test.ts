@@ -1,3 +1,4 @@
+import { DefaultElementFinder } from "../../../../src/features/utility/ElementFinder";
 import { ViewHierarchy } from "../../../../src/features/observe/ViewHierarchy";
 import { STABLE_VIEW_ID_PREFIX } from "../../../../src/features/observe/android/StableNodeIdentity";
 import { DefaultObserveElementCollector } from "../../../../src/features/observe/ObserveElementCollector";
@@ -57,6 +58,9 @@ test.each([false, true])(
       expect(roots[1].node.class).toBe("android.widget.Button");
     }
     expect(roots[1].node["view-id"]).toStartWith(STABLE_VIEW_ID_PREFIX);
+    expect(
+      new DefaultElementFinder().findElementByResourceId(converted, roots[1].node["view-id"]),
+    ).not.toBeNull();
     const projected = projectActionableHierarchy("android", converted);
     expect(projected.windows?.[1].hierarchy).toBe(roots[1]);
     const snapshot = { id: "capture", nodes: new SearchableHierarchy().project(projected) };

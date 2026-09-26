@@ -277,24 +277,7 @@ export class PinchOn extends BaseVisualChange {
     }
 
     const snapshot = await this.capture.capture({ freshness: "fresh" });
-    const freshSize =
-      extractHierarchyScreenSize(snapshot.hierarchy) ??
-      (snapshot.hierarchy.screenWidth && snapshot.hierarchy.screenHeight
-        ? { width: snapshot.hierarchy.screenWidth, height: snapshot.hierarchy.screenHeight }
-        : observeResult.screenSize);
-    const sameSize =
-      freshSize?.width === observeResult.screenSize?.width &&
-      freshSize?.height === observeResult.screenSize?.height;
-    observeResult = {
-      ...observeResult,
-      viewHierarchy: snapshot.hierarchy,
-      screenSize: freshSize,
-      // Insets belong to a coordinate space: never apply portrait edges to a
-      // fresh landscape capture when the runner did not supply rotated insets.
-      systemInsets:
-        snapshot.hierarchy.systemInsets ??
-        (sameSize ? observeResult.systemInsets : { top: 0, bottom: 0, left: 0, right: 0 }),
-    };
+    observeResult = this.withCaptureGeometry(observeResult, snapshot);
 
     if (!observeResult.viewHierarchy || !observeResult.screenSize) {
       throw new ActionableError("Unable to resolve target without a view hierarchy");
@@ -332,6 +315,30 @@ export class PinchOn extends BaseVisualChange {
     return {
       bounds: screenBounds,
       targetType: "screen",
+    };
+  }
+
+  private withCaptureGeometry(
+    observeResult: ObserveResult,
+    snapshot: HierarchySnapshot,
+  ): ObserveResult {
+    const freshSize =
+      extractHierarchyScreenSize(snapshot.hierarchy) ??
+      (snapshot.hierarchy.screenWidth && snapshot.hierarchy.screenHeight
+        ? { width: snapshot.hierarchy.screenWidth, height: snapshot.hierarchy.screenHeight }
+        : observeResult.screenSize);
+    const sameSize =
+      freshSize?.width === observeResult.screenSize?.width &&
+      freshSize?.height === observeResult.screenSize?.height;
+    return {
+      ...observeResult,
+      viewHierarchy: snapshot.hierarchy,
+      screenSize: freshSize,
+      // Insets belong to a coordinate space: never apply portrait edges to a
+      // fresh landscape capture when the runner did not supply rotated insets.
+      systemInsets:
+        snapshot.hierarchy.systemInsets ??
+        (sameSize ? observeResult.systemInsets : { top: 0, bottom: 0, left: 0, right: 0 }),
     };
   }
 

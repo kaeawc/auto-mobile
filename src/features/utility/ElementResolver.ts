@@ -108,8 +108,9 @@ function eligible(node: SearchableEntry, intent: ResolutionIntent): boolean {
   if (intent.action === "focus") {
     return node.focusable || node.affordances.includes("input");
   }
-  const actions = intent.action === "tap" ? ["tap", "toggle"] : [intent.action];
-  return actions.some((action) => node.affordances.includes(action as ResolutionAction));
+  return node.affordances.some(
+    (action) => action === intent.action || (intent.action === "tap" && action === "toggle"),
+  );
 }
 
 function isWithin(

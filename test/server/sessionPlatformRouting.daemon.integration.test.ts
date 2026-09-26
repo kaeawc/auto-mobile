@@ -28,6 +28,7 @@ import { SessionManager } from "../../src/daemon/sessionManager";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { registerUtilityTools } from "../../src/server/utilityTools";
+import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
@@ -71,6 +72,7 @@ beforeEach(async () => {
   const utils = new FakeDeviceUtils();
   utils.setBootedDevices("android", [devices[0], devices[2]]);
   utils.setBootedDevices("ios", [devices[1]]);
+  PlatformDeviceManagerFactory.setInstance(utils);
   pool = new DevicePool(
     manager,
     "daemon",
@@ -88,6 +90,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  PlatformDeviceManagerFactory.setInstance(null);
   (ToolRegistry as any).toolCallRepository = originalRepository;
   ToolRegistry.clearTools();
   DaemonState.getInstance().reset();

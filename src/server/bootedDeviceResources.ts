@@ -142,6 +142,12 @@ export interface DeviceServiceStatus {
   supportedCommandsComplete?: boolean | null;
   /** iOS only: whether all required non-command runner features are advertised. */
   supportedFeaturesComplete?: boolean | null;
+  recovery?: {
+    state: "backoff" | "exhausted" | "suspended";
+    attempts: number;
+    reason?: string;
+    nextAttemptAt?: string;
+  };
 }
 
 /**
@@ -1309,6 +1315,7 @@ export async function queryDeviceServiceStatus(
       };
     } else if (device.platform === "ios") {
       const manager = IOSCtrlProxyManager.getInstance(bootedDevice);
+      const restartBudget = manager.getForcedRestartBudget().snapshot();
       const [installed, running, version] = await Promise.all([
         manager.isInstalled(),
         manager.isRunning(),
@@ -1368,6 +1375,20 @@ export async function queryDeviceServiceStatus(
           : {}),
         supportedCommandsComplete,
         supportedFeaturesComplete,
+        ...(restartBudget.state === "idle"
+          ? {}
+          : {
+              recovery: {
+                state: restartBudget.state,
+                attempts: restartBudget.attempts,
+                ...(restartBudget.lastFailureReason
+                  ? { reason: restartBudget.lastFailureReason }
+                  : {}),
+                ...(restartBudget.nextAttemptAtMs === undefined
+                  ? {}
+                  : { nextAttemptAt: new Date(restartBudget.nextAttemptAtMs).toISOString() }),
+              },
+            }),
       };
     }
   } catch (error) {

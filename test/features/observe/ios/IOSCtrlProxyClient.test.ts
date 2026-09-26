@@ -25,6 +25,7 @@ import {
   IOSCtrlProxyManager,
   type CtrlProxyIosManager,
 } from "../../../../src/utils/IOSCtrlProxyManager";
+import { ForcedRestartBudget } from "../../../../src/utils/ctrlProxy/ForcedRestartBudget";
 
 describe("iOS runner feature release sequencing", () => {
   test("does not require an unreleased handshake from the immutable 0.0.66 IPA", () => {
@@ -3299,7 +3300,9 @@ describe("IOSCtrlProxyClient", function () {
     test("retiring during a pending screenshot leaves no reconnecting replacement", async function () {
       const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
       let restarts = 0;
+      const restartBudget = new ForcedRestartBudget(fakeTimer);
       const manager = {
+        getForcedRestartBudget: () => restartBudget,
         forceRestart: async () => {
           restarts += 1;
         },
@@ -3372,7 +3375,9 @@ describe("IOSCtrlProxyClient", function () {
 
     test("a fresh device start restores connection and failure escalation", async function () {
       let restarts = 0;
+      const restartBudget = new ForcedRestartBudget(fakeTimer);
       const manager = {
+        getForcedRestartBudget: () => restartBudget,
         forceRestart: async () => {
           restarts += 1;
         },

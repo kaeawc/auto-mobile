@@ -24,6 +24,7 @@ import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { getAbortSignal, runWithAbortSignal } from "../../src/utils/AbortContext";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 import { IOSCtrlProxyManager } from "../../src/utils/IOSCtrlProxyManager";
+import { ForcedRestartBudget } from "../../src/utils/ctrlProxy/ForcedRestartBudget";
 import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
 import { getInstalledAppsCacheWriteCoordinator } from "../../src/db/installedAppsCacheWriteCoordinator";
 import { executionTracker } from "../../src/server/executionTracker";
@@ -2762,6 +2763,7 @@ describe("killDevice handler", () => {
     });
     let socketCreations = 0;
     let restarts = 0;
+    const restartBudget = new ForcedRestartBudget(timer);
     const client = IOSCtrlProxyClient.createForTesting(
       device,
       8765,
@@ -2772,6 +2774,7 @@ describe("killDevice handler", () => {
       timer,
       () =>
         ({
+          getForcedRestartBudget: () => restartBudget,
           forceRestart: async () => {
             restarts++;
           },

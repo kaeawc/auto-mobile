@@ -1477,7 +1477,9 @@ export class TapOnElement extends BaseVisualChange {
         observeResult.viewHierarchy,
         freshHierarchy,
       );
-      if (staleSynthetic) {return { ok: false, error: staleSynthetic };}
+      if (staleSynthetic) {
+        return { ok: false, error: staleSynthetic };
+      }
 
       const refreshed = this.resolveTapTargetElement(
         refind.selection.element as Element,
@@ -1531,11 +1533,15 @@ export class TapOnElement extends BaseVisualChange {
     previous: ViewHierarchyResult | undefined,
     current: ViewHierarchyResult,
   ): string | undefined {
-    if (!original || original["resource-id"] || !original["view-id"] || !previous) {return undefined;}
+    if (!original || original["resource-id"] || !original["view-id"] || !previous) {
+      return undefined;
+    }
     const projection = new SearchableHierarchy();
     const nodeKey = original["view-id"];
     const oldNode = projection.project(previous).find((node) => node.nodeKey === nodeKey);
-    if (!oldNode) {return "Stale tap target: the observed reference is no longer identifiable.";}
+    if (!oldNode) {
+      return "Stale tap target: the observed reference is no longer identifiable.";
+    }
     const oldId = getHierarchySnapshot(previous)?.captureId ?? "before-refresh";
     const newId =
       getHierarchySnapshot(current)?.captureId ?? (previous === current ? oldId : "after-refresh");

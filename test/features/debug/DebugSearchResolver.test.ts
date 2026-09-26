@@ -1,17 +1,20 @@
 import { expect, test } from "bun:test";
+import { SearchableHierarchy } from "../../../src/features/utility/SearchableNode";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { DebugSearch } from "../../../src/features/debug/DebugSearch";
 import type { BootedDevice, ViewHierarchyResult } from "../../../src/models";
 const bounds = { left: 0, top: 0, right: 20, bottom: 20 };
 const search = (capture: ViewHierarchyResult) =>
-  new DebugSearch(
-    { platform: "android" } as BootedDevice,
-    undefined,
-    new FakeTimer(),
-    undefined,
-    undefined,
-    { getViewHierarchy: async () => capture },
-  );
+  new DebugSearch({ platform: "android" } as BootedDevice, undefined, new FakeTimer(), undefined, {
+    capture: async (request) => ({
+      captureId: "test",
+      platform: "android",
+      requestedFreshness: request.freshness,
+      receivedAt: 0,
+      hierarchy: capture,
+      nodes: new SearchableHierarchy().project(capture),
+    }),
+  });
 const capture = (...nodes: object[]) => ({
   hierarchy: { node: nodes.map((node) => ({ bounds, clickable: true, ...node })) },
 });
@@ -39,7 +42,7 @@ test("debug selection follows tap eligibility and missing containers never searc
   const feature = search(capture({ text: "Save", clickable: false }, { text: "Save" }));
   const result = await feature.execute({ text: "Save" });
   expect(result.matches).toHaveLength(2);
-  expect(result.selectedMatch).toBe(result.matches[1]);
+  expect(result.selectedMatch?.element).toBe(result.matches[1].element);
   expect(
     (await feature.execute({ text: "Save", container: { elementId: "missing" } })).matches,
   ).toHaveLength(0);
@@ -57,4 +60,21 @@ test("debug sees secondary windows in resolver rank order", async () => {
   const result = await feature.execute({ text: "Open" });
   expect(result.matches.map((match) => match.resourceId)).toEqual(["dialog", "main"]);
   expect(result.selectedMatch?.resourceId).toBe("dialog");
+});
+test("debug reports the actual promoted action target separately from the matching candidate", async () => {
+  const feature = search(
+    capture({
+      "resource-id": "tap-row",
+      children: [
+        {
+          bounds: { left: 1, top: 1, right: 10, bottom: 10 },
+          text: "Child",
+          actions: ["set_text"],
+        },
+      ],
+    }),
+  );
+  const result = await feature.execute({ text: "Child" });
+  expect(result.matches[0].element["resource-id"]).toBeUndefined();
+  expect(result.selectedMatch?.element["resource-id"]).toBe("tap-row");
 });

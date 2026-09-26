@@ -4,14 +4,10 @@ import {
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { type Timer, defaultTimer } from "../../utils/SystemTimer";
 import type { BootedDevice, DebugSearchResult, DebugSearchMatch } from "../../models";
-import { ViewHierarchy } from "../observe/ViewHierarchy";
-import { NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
-import { resolveViewHierarchyForSearch } from "../../utils/viewHierarchySearch";
-import type { ElementParser } from "../../utils/interfaces/ElementParser";
-import { DefaultElementParser } from "../utility/ElementParser";
+import type { HierarchyCapture } from "../observe/HierarchyCapture";
+import { createDeviceHierarchyCapture } from "../observe/DeviceHierarchyCapture";
 import { normalizeQuotes } from "../utility/TextMatcher";
 import { ElementResolver } from "../utility/ElementResolver";
-import { SearchableHierarchy } from "../utility/SearchableNode";
 import { ActionableError } from "../../models/ActionableError";
 interface DebugSearchOptions {
   /**
@@ -59,18 +55,16 @@ export class DebugSearch {
     device: BootedDevice,
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
     private readonly timer: Timer = defaultTimer,
-    private readonly parser: ElementParser = new DefaultElementParser(),
     private readonly resolver: Pick<ElementResolver, "resolve"> = new ElementResolver(),
-    private readonly viewHierarchy: Pick<ViewHierarchy, "getViewHierarchy"> = new ViewHierarchy(
-      device,
+    private readonly capture: HierarchyCapture = createDeviceHierarchyCapture(device, {
+      timer,
       adbFactory,
-    ),
+    }),
   ) {}
   async execute(options: DebugSearchOptions): Promise<DebugSearchResult> {
     const timestamp = this.timer.now();
-    const hierarchy = await this.viewHierarchy.getViewHierarchy({}, new NoOpPerformanceTracker());
-    const capture = resolveViewHierarchyForSearch(hierarchy) ?? hierarchy;
-    const nodes = capture ? new SearchableHierarchy(this.parser).project(capture) : [];
+    const snapshot = await this.capture.capture({ freshness: "cached-ok" });
+    const nodes = snapshot.nodes;
     const resolution = this.resolver.resolve(
       { id: String(timestamp), nodes },
       {
@@ -163,7 +157,19 @@ export class DebugSearch {
         match: resolution.matchMode,
       },
       matches,
-      selectedMatch: matches[resolution.indexInMatches ?? -1],
+      selectedMatch: resolution.chosen
+        ? {
+            ...matches[resolution.indexInMatches ?? -1],
+            element: resolution.chosen.element ?? resolution.chosen.properties,
+            resourceId: resolution.chosen.nativeId,
+            className: resolution.chosen.className,
+            clickable: resolution.chosen.affordances.includes("tap"),
+            enabled:
+              resolution.chosen.properties.enabled !== false &&
+              resolution.chosen.properties.enabled !== "false",
+            visible: !!resolution.chosen.bounds,
+          }
+        : undefined,
       totalElements: scopedNodes.length,
       timestamp,
       ...(nearMisses.length

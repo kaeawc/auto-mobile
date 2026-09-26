@@ -7,6 +7,7 @@ import { AndroidCtrlProxyManager } from "../../src/utils/CtrlProxyManager";
 import { PortManager } from "../../src/utils/PortManager";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
+import { BoundedAndroidDeviceReboot } from "../../src/utils/androidDeviceReboot";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import {
   DEFAULT_VIDEO_RECORDING_CONFIG,
@@ -186,6 +187,11 @@ class TeardownDeviceManager extends FakeDeviceUtils {
     return (await super.listDeviceImages(platform)).filter(
       (device) => !this.destroyedIdentities.has(this.inventoryIdentity(device)),
     );
+  }
+
+  reprovisionDevice(device: DeviceInfo): void {
+    this.destroyedIdentities.delete(this.inventoryIdentity(device));
+    this.setDeviceImages(device.platform, [device]);
   }
 
   private inventoryIdentity(device: Pick<DeviceInfo, "platform" | "name" | "deviceId">): string {
@@ -1086,6 +1092,97 @@ describe("deleteDevice handler", () => {
     expect(responseBody(response).state).toBe("destroyed");
     expect(pool.getDevice(first.deviceId)).toBeNull();
     expect(pool.getDevice(second.deviceId)).toBeNull();
+  });
+
+  test("clears a deleted AVD's budget but preserves it across an ordinary re-add and repeat delete", async () => {
+    const timer = new FakeTimer();
+    const reboot = new BoundedAndroidDeviceReboot(timer, 1);
+    const repository = new FakeDeviceSessionRepository();
+    const sessionManager = new SessionManager(timer, repository);
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      manager,
+      new DefaultRetryExecutor(timer),
+      repository,
+      undefined,
+      undefined,
+      undefined,
+      reboot,
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    const image: DeviceInfo = { platform: "android", name: "Pixel_8_API_35", isRunning: false };
+    const first: BootedDevice = {
+      platform: "android",
+      name: image.name,
+      deviceId: "emulator-5554",
+    };
+    const replacement: BootedDevice = { ...first, deviceId: "emulator-5556" };
+    const rebootOnce = () => reboot.run(image, async () => "succeeded");
+
+    expect(await rebootOnce()).toBe(true);
+    await pool.addDevice(first, image);
+    await pool.removeDevice(first.deviceId);
+    await pool.addDevice(replacement, image);
+    expect(await rebootOnce()).toBe(false);
+
+    manager.setBootedDevices("android", []);
+    manager.setDeviceImages("android", [image]);
+    const deleted = await teardownTool().handler(request("android", image.name, image.name));
+    expect(responseBody(deleted).state).toBe("destroyed");
+    manager.reprovisionDevice(image);
+    await pool.addDevice({ ...replacement, deviceId: "emulator-5558" }, image);
+    expect(await rebootOnce()).toBe(true);
+    expect(await rebootOnce()).toBe(false);
+
+    const secondDeleteRequest = {
+      ...request("android", image.name, image.name),
+      operationId: "4935e13f-86dd-4a3c-a811-85959ec715fb",
+    };
+    const secondDelete = await teardownTool().handler(secondDeleteRequest);
+    expect(responseBody(secondDelete).state).toBe("destroyed");
+    expect(await rebootOnce()).toBe(true);
+    expect(await rebootOnce()).toBe(false);
+
+    const repeatedRequest = {
+      ...request("android", image.name, image.name),
+      operationId: "97592399-76d8-4c2c-b106-331004003f7b",
+    };
+    const repeated = await teardownTool().handler(repeatedRequest);
+    expect(responseBody(repeated).state).toBe("already_absent");
+    expect(await rebootOnce()).toBe(false);
+  });
+
+  test("keeps an AVD's spent recovery budget when platform deletion fails", async () => {
+    const timer = new FakeTimer();
+    const reboot = new BoundedAndroidDeviceReboot(timer, 1);
+    const repository = new FakeDeviceSessionRepository();
+    const sessionManager = new SessionManager(timer, repository);
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      manager,
+      new DefaultRetryExecutor(timer),
+      repository,
+      undefined,
+      undefined,
+      undefined,
+      reboot,
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    const image: DeviceInfo = { platform: "android", name: "Pixel_8_API_35", isRunning: false };
+    manager.setBootedDevices("android", []);
+    manager.setDeviceImages("android", [image]);
+    manager.destroyError = new Error("AVD manager refused deletion");
+
+    expect(await reboot.run(image, async () => "succeeded")).toBe(true);
+    const response = await teardownTool().handler(request("android", image.name, image.name));
+    expect(responseBody(response).state).toBe("failed");
+    expect(await reboot.run(image, async () => "succeeded")).toBe(false);
   });
 
   test("does not report already_absent when a platform inventory is incomplete", async () => {

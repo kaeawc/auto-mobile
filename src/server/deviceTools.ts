@@ -4895,6 +4895,16 @@ async function sleepUnlessAborted(
   }
 }
 
+function clearDeletedAndroidAvdRebootBudget(target: TeardownResolvedTarget): void {
+  if (target.device.platform !== "android") {
+    return;
+  }
+  const daemonState = DaemonState.getInstance();
+  if (daemonState.isInitialized()) {
+    daemonState.getDevicePool().clearAndroidRebootBudgetForDeletedAvd(target.device);
+  }
+}
+
 async function verifyTeardownAbsence(
   context: TeardownContext,
   target: TeardownResolvedTarget,
@@ -4918,6 +4928,9 @@ async function verifyTeardownAbsence(
       return createTeardownVerificationDeadlineFailure(context, target, lastFailure);
     }
     if (!failure) {
+      // Clear the name-keyed crash budget only after deletion and durable
+      // absence are both confirmed. Pool re-adds and failed teardowns retain it.
+      clearDeletedAndroidAvdRebootBudget(target);
       void notifyResourcesAfterShutdown(context.dependencies);
       return createTeardownResponse(
         context.args,

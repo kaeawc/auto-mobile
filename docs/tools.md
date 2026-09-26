@@ -64,7 +64,7 @@ transform before correlating iOS `observe` or `tapAt` coordinates with
 | ✨ <code>selectAllText</code> | Selects all text in the focused input.                                                                                         |
 | ↩️ <code>imeAction</code>     | Legacy standalone IME action; disabled by default.                                                                             |
 | 🔘 <code>pressButton</code>   | Presses a device or navigation button.                                                                                         |
-| ⌨️ <code>keyboard</code>      | Opens, closes, or detects the on-screen keyboard.                                                                              |
+| ⌨️ <code>keyboard</code>      | Opens, closes, or detects the keyboard; selects AutoMobile profiles or installed Android IMEs.                                 |
 | 📋 <code>clipboard</code>     | Copies, pastes, clears, or reads the clipboard.                                                                                |
 
 `sendKeys` accepts one optional field selector and an ordered sequence of up to

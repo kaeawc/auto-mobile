@@ -19,6 +19,8 @@ import { OpenURL } from "../features/action/OpenURL";
 import { Clipboard } from "../features/action/Clipboard";
 import { Keyboard } from "../features/action/Keyboard";
 import { KEYBOARD_PROFILE_IDS } from "../features/action/keyboardProfiles";
+import { AndroidImeCatalog } from "../features/action/AndroidImeCatalog";
+import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import {
   SEND_KEYS_OPERATIONS,
   SEND_KEYS_SEMANTIC_KEYS,
@@ -174,11 +176,14 @@ export const shakeSchema = addDeviceTargetingToSchema(
 
 export const keyboardSchema = addDeviceTargetingToSchema(
   z.object({
-    action: z.enum(["open", "close", "detect", "setProfile"]).describe("Keyboard action"),
+    action: z
+      .enum(["open", "close", "detect", "setProfile", "listImes", "setIme"])
+      .describe("Keyboard action"),
     profile: z
       .enum(KEYBOARD_PROFILE_IDS)
       .optional()
       .describe("Android keyboard behavior profile; required for setProfile"),
+    imeId: z.string().optional().describe("Installed Android IME component; required for setIme"),
     // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
     // not required — a device handle from getAndroid/getApple is sufficient on
     // its own.
@@ -2455,6 +2460,21 @@ export function registerInteractionTools() {
       if (args.action === "setProfile") {
         return createJSONToolResponse(await setKeyboardProfileForTool(device, args.profile));
       }
+      if (args.action === "listImes" || args.action === "setIme") {
+        if (device.platform !== "android") {
+          throw new ActionableError(
+            "Installed IME actions are Android-only; select an Android device.",
+          );
+        }
+        const catalog = new AndroidImeCatalog(defaultAdbClientFactory.create(device));
+        if (args.action === "listImes") {
+          return createJSONToolResponse(await catalog.list());
+        }
+        if (!args.imeId) {
+          throw new ActionableError("keyboard setIme requires imeId from listImes.");
+        }
+        return createJSONToolResponse(await catalog.select(args.imeId));
+      }
       const keyboard = new Keyboard(device);
       const result = await keyboard.execute(args.action);
 
@@ -2629,7 +2649,7 @@ export function registerInteractionTools() {
 
   ToolRegistry.registerDeviceAware(
     "keyboard",
-    "Open, close, detect, or switch the on-screen keyboard profile",
+    "Open, close, detect, list/select installed Android IMEs, or switch the AutoMobile typing profile",
     keyboardSchema,
     keyboardHandler,
     { defaultEnabled: true },

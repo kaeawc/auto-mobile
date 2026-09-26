@@ -16,6 +16,17 @@ test("keyboard schema accepts supported profiles", () => {
   ).toBe(false);
 });
 
+test("keyboard schema exposes installed-IME discovery separately from behavior profiles", () => {
+  expect(keyboardSchema.safeParse({ action: "listImes", platform: "android" }).success).toBe(true);
+  expect(
+    keyboardSchema.safeParse({
+      action: "setIme",
+      imeId: "com.example/.Keyboard",
+      platform: "android",
+    }).success,
+  ).toBe(true);
+});
+
 test("setProfile validates profile and platform before calling the client", async () => {
   const calls: string[] = [];
   const client = {

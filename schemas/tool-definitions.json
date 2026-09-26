@@ -2616,7 +2616,7 @@
   },
   {
     "name": "keyboard",
-    "description": "Open, close, detect, or switch the on-screen keyboard profile",
+    "description": "Open, close, detect, list/select installed Android IMEs, or switch the AutoMobile typing profile",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -2624,12 +2624,16 @@
         "action": {
           "description": "Keyboard action",
           "type": "string",
-          "enum": ["open", "close", "detect", "setProfile"]
+          "enum": ["open", "close", "detect", "setProfile", "listImes", "setIme"]
         },
         "profile": {
           "description": "Android keyboard behavior profile; required for setProfile",
           "type": "string",
           "enum": ["direct", "gboard", "samsung"]
+        },
+        "imeId": {
+          "description": "Installed Android IME component; required for setIme",
+          "type": "string"
         },
         "platform": {
           "type": "string",

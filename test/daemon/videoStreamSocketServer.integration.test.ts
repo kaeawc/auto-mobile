@@ -439,11 +439,13 @@ describe("VideoStreamSocketServer", () => {
     await defaultTimer.sleep(10);
     expect(binary().length).toBe(staleLength);
 
-    h.emit(Buffer.from([0, 0, 0, 1, 1, 0xbb, 0, 0, 0, 1, 1]));
-    await waitFor(() => binary().length > staleLength);
-    const beforeRecoveredDrop = binary().length;
+    const replacement = await subscribe(h.socketPath);
+    await waitFor(() => replacement.binary().length >= 12);
+    h.emit(Buffer.from([0, 0, 0, 1, 5, 0xbb, 0, 0, 0, 1, 1]));
+    await waitFor(() => replacement.binary().length > 12);
+    const beforeRecoveredDrop = replacement.binary().length;
     h.emitDroppedFrames(43);
-    await waitFor(() => binary().length >= beforeRecoveredDrop + 12);
+    await waitFor(() => replacement.binary().length >= beforeRecoveredDrop + 12);
     expect(packet.readInt32BE(8)).toBe(0);
   });
 
@@ -491,7 +493,7 @@ describe("VideoStreamSocketServer", () => {
     expect(binary().length).toBe(12);
   });
 
-  test("stops attesting a silent source and resumes only after fresh source data", async () => {
+  test("keeps the capture when a quiet source answers a key-frame probe", async () => {
     const fakeTimer = new FakeTimer();
     const h = await startHarness({ timer: fakeTimer });
     const { binary } = await subscribe(h.socketPath);
@@ -499,21 +501,62 @@ describe("VideoStreamSocketServer", () => {
     h.emit(Buffer.from([0, 0, 0, 1, 5, 0xaa, 0, 0, 0, 1, 1]));
     await waitFor(() => binary().length > 12);
 
-    fakeTimer.advanceTime(9_000);
+    fakeTimer.advanceTime(8_000);
     await defaultTimer.sleep(10);
-    const stalledLength = binary().length;
+    const beforeRecovery = binary().length;
     expect(h.sources[0].keyFrameRequests).toBeGreaterThan(0);
-
-    fakeTimer.advanceTime(3_000);
-    await defaultTimer.sleep(10);
-    expect(binary().length).toBe(stalledLength);
 
     h.emit(Buffer.from([0, 0, 0, 1, 1, 0xbb, 0, 0, 0, 1, 1]));
     fakeTimer.advanceTime(1_000);
-    await waitFor(() => binary().length > stalledLength);
+    await waitFor(() => binary().length > beforeRecovery);
+    expect(h.sources[0].stopped).toBe(false);
   });
 
-  test("iOS encoder output alone cannot attest a cached helper frame", async () => {
+  test("fresh source frames do not reset the successful probe interval while encoding stalls", async () => {
+    const fakeTimer = new FakeTimer();
+    const h = await startHarness({ timer: fakeTimer });
+    const { binary } = await subscribe(h.socketPath);
+    await waitFor(() => binary().length >= 12);
+    h.emit(Buffer.from([0, 0, 0, 1, 5, 0xaa, 0, 0, 0, 1, 1]));
+    await waitFor(() => binary().length > 12);
+
+    const requestsBeforeProbe = h.sources[0].keyFrameRequests;
+    fakeTimer.advanceTime(6_000);
+    expect(h.sources[0].keyFrameRequests).toBe(requestsBeforeProbe + 1);
+    for (let second = 7; second <= 9; second++) {
+      h.emitSourceFrame();
+      fakeTimer.advanceTime(1_000);
+    }
+    expect(h.sources[0].keyFrameRequests).toBe(requestsBeforeProbe + 1);
+  });
+
+  test("retires a stale capture so a reconnect starts a new source", async () => {
+    const fakeTimer = new FakeTimer();
+    const h = await startHarness({ timer: fakeTimer });
+    const first = await subscribe(h.socketPath);
+    await waitFor(() => first.binary().length >= 12);
+    h.emit(Buffer.from([0, 0, 0, 1, 5, 0xaa, 0, 0, 0, 1, 1]));
+    await waitFor(() => first.binary().length > 12);
+    let finishStop: (() => void) | undefined;
+    h.sources[0].stopGate = new Promise<void>((resolve) => {
+      finishStop = resolve;
+    });
+
+    fakeTimer.advanceTime(10_000);
+    await waitFor(() => h.sources[0].stopped);
+    expect(h.server.activeDeviceIds()).toEqual([]);
+
+    const reconnect = subscribe(h.socketPath);
+    await defaultTimer.sleep(10);
+    expect(h.sources).toHaveLength(1);
+    finishStop?.();
+    const second = await reconnect;
+    await waitFor(() => second.binary().length >= 12);
+    expect(h.sources).toHaveLength(2);
+    expect(h.sources[1].started).toBe(true);
+  });
+
+  test("iOS encoder output alone cannot keep a cached helper frame capture alive", async () => {
     const fakeTimer = new FakeTimer();
     const iosDevice = { ...DEVICE, platform: "ios" } as BootedDevice;
     const h = await startHarness({ timer: fakeTimer, device: iosDevice });
@@ -528,16 +571,12 @@ describe("VideoStreamSocketServer", () => {
     fakeTimer.advanceTime(1_000);
     await waitFor(() => binary().length > withoutProof);
 
-    fakeTimer.advanceTime(9_000);
+    fakeTimer.advanceTime(5_000);
     await defaultTimer.sleep(10);
-    const staleLength = binary().length;
     // Raw iOS key-frame requests can cause this replay without any fresh helper frame.
     h.emitUnattested(Buffer.from([0, 0, 0, 1, 1, 0xbb, 0, 0, 0, 1, 1]));
-    await waitFor(() => binary().length > staleLength);
-    const afterReplay = binary().length;
-    fakeTimer.advanceTime(2_000);
-    await defaultTimer.sleep(10);
-    expect(binary().length).toBe(afterReplay);
+    fakeTimer.advanceTime(5_000);
+    await waitFor(() => h.sources[0].stopped);
   });
 
   test("fresh iOS helper frames cannot hide a stalled encoder", async () => {
@@ -1144,10 +1183,9 @@ describe("VideoStreamSocketServer", () => {
     // The real capture sources rate-limit key-frame requests (Android + raw iOS ~3s, encoded iOS
     // ~500ms), so a drain landing inside that window gets a `false` from requestKeyFrame(). Without
     // a retry the subscriber stays in waitingForKeyFrame and drops every inter frame until the
-    // natural GOP — the multi-second freeze this recovery exists to prevent. Auto-advance lets the
-    // injected timer's retries fire promptly.
+    // natural GOP — the multi-second freeze this recovery exists to prevent. Advance only the
+    // retry budget so the capture-liveness deadline does not replace the source during this test.
     const fakeTimer = new FakeTimer();
-    fakeTimer.enableAutoAdvance();
     const h = await startHarness({ timer: fakeTimer });
     const client = await subscribe(h.socketPath);
     await waitFor(() => h.sources.length > 0);
@@ -1176,6 +1214,8 @@ describe("VideoStreamSocketServer", () => {
 
     // The drain handler's first request is rejected; the timer-driven retries keep asking until the
     // source finally honors one — 2 rejections + 1 success — instead of leaving playback frozen.
+    await waitFor(() => source.keyFrameRequests >= before + 1);
+    fakeTimer.advanceTime(2_000);
     await waitFor(() => source.keyFrameRequests >= before + 3);
     expect(source.keyFrameRejectionsRemaining).toBe(0);
   });

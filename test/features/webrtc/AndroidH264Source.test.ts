@@ -108,6 +108,15 @@ describe("AndroidH264Source", () => {
     processes[0].stdout.write(Buffer.from([0, 0, 0, 1, 0x67]));
     expect(chunks).toHaveLength(1);
     expect(chunks[0]).toEqual(Buffer.from([0, 0, 0, 1, 0x67]));
+    expect(freshChunks).toBe(0);
+
+    // SPS/PPS alone are forwarded but cannot attest a live video frame. An IDR
+    // split across writes becomes evidence only after its next NAL boundary.
+    processes[0].stdout.write(Buffer.from([0, 0, 1, 0x68, 0x01, 0, 0, 1, 0x65]));
+    expect(freshChunks).toBe(0);
+    processes[0].stdout.write(Buffer.from([0x80, 0x01]));
+    expect(freshChunks).toBe(0);
+    processes[0].stdout.write(Buffer.from([0, 0, 1, 0x09, 0x10]));
     expect(freshChunks).toBe(1);
 
     await source.stop();

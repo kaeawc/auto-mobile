@@ -433,7 +433,6 @@ export class IosH264Source implements H264CaptureSource {
   private encoder: IosH264EncoderProcess | null = null;
   private encoderSize: EncoderSize | null = null;
   private encoderBackpressured = false;
-  private lastHelperFrame: DecodedFrame | null = null;
   private teardownPromise: Promise<void> | null = null;
   private cancelFirstFrameWait: (() => void) | null = null;
   private cancelFirstAudioWait: (() => void) | null = null;
@@ -546,7 +545,6 @@ export class IosH264Source implements H264CaptureSource {
     this.lastReadinessPhase = null;
     this.helperFrameMetrics = null;
     this.nativeFrameMetrics = null;
-    this.lastHelperFrame = null;
     this.mode = "raw";
     this.encodeSettings = null;
     this.encodedFellBack = false;
@@ -778,17 +776,13 @@ export class IosH264Source implements H264CaptureSource {
     logger.info("[IosH264Source] keyframe requested; restarting encoder to emit a fresh IDR");
     // Spawn the replacement first so the outgoing encoder's exit/error handlers
     // — all guarded by `this.encoder === encoder` — no-op instead of tearing the
-    // source down as a fatal crash. Two retained input frames make the first
-    // IDR's Annex-B NAL terminate at the following access-unit boundary even
-    // while the capture helper is otherwise quiet. Then end its stdin and
-    // terminate it.
+    // source down as a fatal crash. Wait for the next fresh helper frame to
+    // produce the replacement encoder's IDR. Replaying a cached frame here can
+    // create client-visible media after capture has stalled, falsely keeping
+    // downstream frame watchdogs alive.
     this.pendingFrames.clear(true);
     this.reportFrameMetrics();
     this.startEncoder(size, true);
-    if (this.lastHelperFrame) {
-      this.writeFrameToEncoder(this.lastHelperFrame);
-      this.writeFrameToEncoder(this.lastHelperFrame);
-    }
     // Reap the outgoing encoder on a bounded grace, escalating to SIGKILL, so a
     // slow or signal-ignoring h264_videotoolbox cannot linger as a zombie
     // holding the hardware encoder. Fire-and-forget: the replacement is already
@@ -1443,17 +1437,6 @@ export class IosH264Source implements H264CaptureSource {
       this.outputWriteHighWaterDurationMs,
       this.lastOutputWriteDurationMs,
     );
-    // Retain the reference rather than copying the whole frame every frame.
-    // `lastHelperFrame` is only re-read in `requestKeyFrame()` to reprime a
-    // replacement encoder, so paying a full-frame allocation + memcpy on 100%
-    // of frames to serve that rare PLI path is wasteful (~7 MB/frame at
-    // 910x1940 BGRA). This is safe because `frame.pixels` is a fresh
-    // per-frame allocation from `FrameDecoder.takeDetached`, the single-slot
-    // `LatestFrameQueue` never reuses an emitted buffer, and nothing mutates
-    // `frame.pixels` after handoff (`tightlyPackBgraFrame` returns the same
-    // buffer unpadded or a fresh packed buffer, and the pipe write does not
-    // mutate in place). See issue #4735.
-    this.lastHelperFrame = frame;
     if (accepted === false) {
       this.encoderBackpressured = true;
     }
@@ -1869,7 +1852,6 @@ export class IosH264Source implements H264CaptureSource {
     this.pendingFrames.clear();
     this.forcedKeyFrameEncoder = null;
     this.forcedKeyFrameParser = null;
-    this.lastHelperFrame = null;
     encoder?.stdin.end();
     encoder?.kill("SIGTERM");
 

@@ -457,7 +457,6 @@ export class VideoStreamSocketServer extends BaseSocketServer {
         return;
       }
       capture.lastSourceDataMs = this.timer.now();
-      capture.lastLivenessProbeMs = null;
       if (capture.lastEncodedDataMs !== null && !capture.heartbeatTimer) {
         this.startHeartbeat(deviceId, capture);
       }
@@ -768,10 +767,15 @@ export class VideoStreamSocketServer extends BaseSocketServer {
    */
   private startHeartbeat(deviceId: string, capture: DeviceCapture): void {
     capture.heartbeatTimer = this.timer.setInterval(() => {
-      if (
-        this.captures.get(deviceId) !== capture ||
-        !this.hasFreshSourceEvidence(deviceId, capture)
-      ) {
+      if (this.captures.get(deviceId) !== capture || !capture.source) {
+        return;
+      }
+      if (!this.hasFreshSourceEvidence(deviceId, capture)) {
+        // A reconnect must never inherit a capture we have already declared stale.
+        // stopCapture removes it synchronously and serializes replacement behind source.stop().
+        if (this.captures.get(deviceId) === capture) {
+          void this.stopCapture(deviceId);
+        }
         return;
       }
       const packet = encodeHeartbeat();

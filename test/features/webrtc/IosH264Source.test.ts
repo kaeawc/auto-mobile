@@ -2189,7 +2189,7 @@ describe("IosH264Source", () => {
     expect(stdin.writes).toEqual([Buffer.alloc(4, 0x11), Buffer.alloc(4, 0x33)]);
   });
 
-  test("discards a retired encoder's queued frame while replaying the last accepted frame", async () => {
+  test("discards queued frames from the retired encoder until a fresh frame arrives", async () => {
     const inputs: BackpressuredWritable[] = [];
     const { source, helper, encoders } = createRestartHarness({}, (encoder) => {
       const input = new BackpressuredWritable();
@@ -2207,11 +2207,7 @@ describe("IosH264Source", () => {
     inputs[1].emit("drain");
 
     expect(encoders).toHaveLength(2);
-    expect(inputs[1].writes).toEqual([
-      Buffer.alloc(4, 0x11),
-      Buffer.alloc(4, 0x11),
-      Buffer.alloc(4, 0x33),
-    ]);
+    expect(inputs[1].writes).toEqual([Buffer.alloc(4, 0x33)]);
     expect(source.getFrameMetrics().encoder.droppedFrames).toBe(1);
   });
 
@@ -2291,7 +2287,7 @@ describe("IosH264Source", () => {
     expect(errors).toEqual([]);
   });
 
-  test("requestKeyFrame preloads a replacement encoder with two defensive copies of the latest frame", async () => {
+  test("requestKeyFrame waits for a fresh helper frame before feeding the replacement encoder", async () => {
     const { source, helper, encoders, encoderSpawns, chunks, errors } = createRestartHarness();
 
     const firstFrame = frame(2, 2, 0x11);
@@ -2301,9 +2297,8 @@ describe("IosH264Source", () => {
     await flush();
 
     // ffmpeg cannot be signalled for an IDR mid-stream over a pipe; a request
-    // restarts the encoder. Replay two copies of the most recent frame so static
-    // capture produces the replacement encoder's first SPS/PPS + IDR and the
-    // following access-unit boundary without waiting for the screen to change.
+    // restarts the encoder. Cached pixels must not create client-visible output
+    // after the capture producer has stalled, so wait for the next helper frame.
     expect(source.requestKeyFrame()).toBe(true);
 
     // A second encoder is spawned with identical argv, and the old one is ended
@@ -2311,14 +2306,12 @@ describe("IosH264Source", () => {
     expect(encoderSpawns).toHaveLength(2);
     expect(encoderSpawns[1].args).toEqual(encoderSpawns[0].args);
     expect(encoders[0].killed).toBe(true);
-    expect(encoders[1].getStdinData()).toEqual(Buffer.alloc(32, 0x11));
+    expect(encoders[1].getStdinData()).toEqual(Buffer.alloc(0));
 
     // Later helper frames continue flowing into the replacement encoder, whose
     // output is forwarded to the same onData sink.
     helper.emitFrame(frame(2, 2, 0x22));
-    expect(encoders[1].getStdinData()).toEqual(
-      Buffer.concat([Buffer.alloc(32, 0x11), Buffer.alloc(16, 0x22)]),
-    );
+    expect(encoders[1].getStdinData()).toEqual(Buffer.alloc(16, 0x22));
     encoders[1].stdout.push(Buffer.from([0, 0, 0, 1, 0x65]));
     await flush();
 
@@ -2327,31 +2320,25 @@ describe("IosH264Source", () => {
     expect(errors).toEqual([]);
   });
 
-  // Issue #4735: `lastHelperFrame` retains the incoming frame by reference
-  // instead of deep-copying it every frame. Each frame carries its own
-  // `FrameDecoder.takeDetached` allocation and the single-slot queue never
-  // reuses a buffer, so processing later frames must leave the retained
-  // frame's pixels intact and replay them exactly on the next PLI.
-  test("replays the retained latest frame intact after subsequent frames are processed (#4735 no-copy)", async () => {
+  test("does not feed frames received before a raw keyframe request to the replacement", async () => {
     const { source, helper, encoders, encoderSpawns, errors } = createRestartHarness();
 
-    // First frame primes the encoder and becomes `lastHelperFrame`.
+    // First frame primes the encoder.
     await startWithFrame(source, helper, frame(2, 2, 0x11));
     expect(encoderSpawns).toHaveLength(1);
 
-    // Subsequent frames each arrive as independent allocations (mirroring
-    // production `takeDetached` buffers) and advance `lastHelperFrame`.
+    // Subsequent frames arrive before the request and are not eligible for
+    // replay after a possible source stall.
     helper.emitFrame(frame(2, 2, 0x22));
     helper.emitFrame(frame(2, 2, 0x33));
 
     emitIdr(encoders[0]);
     await flush();
 
-    // The retained reference must still decode to the latest frame's exact
-    // bytes — not a buffer clobbered by a later frame — when replayed twice
-    // into the replacement encoder.
     expect(source.requestKeyFrame()).toBe(true);
-    expect(encoders[1].getStdinData()).toEqual(Buffer.alloc(32, 0x33));
+    expect(encoders[1].getStdinData()).toEqual(Buffer.alloc(0));
+    helper.emitFrame(frame(2, 2, 0x44));
+    expect(encoders[1].getStdinData()).toEqual(Buffer.alloc(16, 0x44));
     expect(errors).toEqual([]);
   });
 

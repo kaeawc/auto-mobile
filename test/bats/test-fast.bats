@@ -31,10 +31,19 @@ _mock_nproc() {
 @test "clamps to at least 1 worker on a 2-core machine" {
   local dir
   dir="$(_mock_nproc 2)"
-  run env PATH="$dir:$PATH" TEST_FAST_PRINT_CMD=1 bash "$SCRIPT"
+  run env PATH="$dir:$PATH" RUNNER_OS=Linux TEST_FAST_PRINT_CMD=1 bash "$SCRIPT"
   rm -rf "$dir"
   [ "$status" -eq 0 ]
   [[ "$output" == *"--shards=1"* ]]
+}
+
+@test "reserves at least 2 workers on a 2-core macOS runner" {
+  local dir
+  dir="$(_mock_nproc 2)"
+  run env PATH="$dir:$PATH" RUNNER_OS=macOS TEST_FAST_PRINT_CMD=1 bash "$SCRIPT"
+  rm -rf "$dir"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"--shards=2"* ]]
 }
 
 @test "clamps to at least 1 worker on a single-core machine" {

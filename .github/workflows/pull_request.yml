@@ -3603,24 +3603,26 @@ jobs:
       # dependency here. See scripts/ci/known-flakes.txt.
       - name: "Check results"
         run: |
-          declare -A hard_results=(
-            [detect-changes]="${{ needs.detect-changes.result }}"
-            [ios-build-gate]="${{ needs.ios-build-gate.result }}"
-            [ios-playground-tests]="${{ needs.ios-playground-tests.result }}"
-            [ios-spm-root-package-build]="${{ needs.ios-spm-root-package-build.result }}"
+          hard_results=(
+            "detect-changes=${{ needs.detect-changes.result }}"
+            "ios-build-gate=${{ needs.ios-build-gate.result }}"
+            "ios-playground-tests=${{ needs.ios-playground-tests.result }}"
+            "ios-spm-root-package-build=${{ needs.ios-spm-root-package-build.result }}"
           )
-          declare -A advisory_results=( )
+          advisory_results=( )
           fail=
-          for name in "${!hard_results[@]}"; do
-            r="${hard_results[$name]}"
+          for entry in "${hard_results[@]}"; do
+            name="${entry%%=*}"
+            r="${entry#*=}"
             if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then
               echo "::error::iOS gate HARD dependency ${name} = ${r}"
               fail=1
             fi
           done
           if (( ${#advisory_results[@]} > 0 )); then
-            for name in "${!advisory_results[@]}"; do
-              r="${advisory_results[$name]}"
+            for entry in "${advisory_results[@]}"; do
+              name="${entry%%=*}"
+              r="${entry#*=}"
               if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then
                 echo "::warning::iOS gate advisory dependency ${name} = ${r}; advisory: ios-gate lane failed; classify with scripts/ci/classify-failure.sh <run-id>"
               fi
@@ -3655,33 +3657,35 @@ jobs:
       - name: "Check results"
         run: |
           # Compile-smoke failure is checked directly; downstream emulator skips only propagate that failure.
-          declare -A hard_results=(
-            [detect-changes]="${{ needs.detect-changes.result }}"
-            [build-android-control-proxy]="${{ needs.build-android-control-proxy.result }}"
-            [build-junit-runner-library]="${{ needs.build-junit-runner-library.result }}"
-            [build-playground-app]="${{ needs.build-playground-app.result }}"
-            [sdk-debug-inspector-consumer]="${{ needs.sdk-debug-inspector-consumer.result }}"
-            [junit-runner-kotlin-consumer-compatibility]="${{ needs.junit-runner-kotlin-consumer-compatibility.result }}"
-            [junit-runner-unit-tests]="${{ needs.junit-runner-unit-tests.result }}"
-            [android-emulator-compile-smoke]="${{ needs.android-emulator-compile-smoke.result }}"
-            [kotlin-code-coverage]="${{ needs.kotlin-code-coverage.result }}"
+          hard_results=(
+            "detect-changes=${{ needs.detect-changes.result }}"
+            "build-android-control-proxy=${{ needs.build-android-control-proxy.result }}"
+            "build-junit-runner-library=${{ needs.build-junit-runner-library.result }}"
+            "build-playground-app=${{ needs.build-playground-app.result }}"
+            "sdk-debug-inspector-consumer=${{ needs.sdk-debug-inspector-consumer.result }}"
+            "junit-runner-kotlin-consumer-compatibility=${{ needs.junit-runner-kotlin-consumer-compatibility.result }}"
+            "junit-runner-unit-tests=${{ needs.junit-runner-unit-tests.result }}"
+            "android-emulator-compile-smoke=${{ needs.android-emulator-compile-smoke.result }}"
+            "kotlin-code-coverage=${{ needs.kotlin-code-coverage.result }}"
           )
-          declare -A advisory_results=(
-            [junit-runner-emulator-tests]="${{ needs.junit-runner-emulator-tests.result }}"
-            [junit-runner-emulator-wtf-tests]="${{ needs.junit-runner-emulator-wtf-tests.result }}"
-            [playground-automobile-emulator-tests]="${{ needs.playground-automobile-emulator-tests.result }}"
+          advisory_results=(
+            "junit-runner-emulator-tests=${{ needs.junit-runner-emulator-tests.result }}"
+            "junit-runner-emulator-wtf-tests=${{ needs.junit-runner-emulator-wtf-tests.result }}"
+            "playground-automobile-emulator-tests=${{ needs.playground-automobile-emulator-tests.result }}"
           )
           fail=
-          for name in "${!hard_results[@]}"; do
-            r="${hard_results[$name]}"
+          for entry in "${hard_results[@]}"; do
+            name="${entry%%=*}"
+            r="${entry#*=}"
             if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then
               echo "::error::Android gate HARD dependency ${name} = ${r}"
               fail=1
             fi
           done
           if (( ${#advisory_results[@]} > 0 )); then
-            for name in "${!advisory_results[@]}"; do
-              r="${advisory_results[$name]}"
+            for entry in "${advisory_results[@]}"; do
+              name="${entry%%=*}"
+              r="${entry#*=}"
               if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then
                 echo "::warning::Android gate advisory dependency ${name} = ${r}; advisory: android-gate lane failed; classify with scripts/ci/classify-failure.sh <run-id>"
               fi
@@ -3841,26 +3845,28 @@ jobs:
       # live-device/emulator/simulator lane. See scripts/ci/known-flakes.txt.
       - name: "Check results"
         run: |
-          declare -A hard_results=(
-            [detect-changes]="${{ needs.detect-changes.result }}"
-            [fast-validation]="${{ needs.fast-validation.result }}"
-            [node-unit-tests]="${{ needs.node-unit-tests.result }}"
-            [node-host-integration-tests]="${{ needs.node-host-integration-tests.result }}"
+          hard_results=(
+            "detect-changes=${{ needs.detect-changes.result }}"
+            "fast-validation=${{ needs.fast-validation.result }}"
+            "node-unit-tests=${{ needs.node-unit-tests.result }}"
+            "node-host-integration-tests=${{ needs.node-host-integration-tests.result }}"
           )
-          declare -A advisory_results=(
-            [node-unit-timing-budget]="${{ needs.node-unit-timing-budget.result }}"
+          advisory_results=(
+            "node-unit-timing-budget=${{ needs.node-unit-timing-budget.result }}"
           )
           fail=
-          for name in "${!hard_results[@]}"; do
-            r="${hard_results[$name]}"
+          for entry in "${hard_results[@]}"; do
+            name="${entry%%=*}"
+            r="${entry#*=}"
             if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then
               echo "::error::Node Tests gate HARD dependency ${name} = ${r}"
               fail=1
             fi
           done
           if (( ${#advisory_results[@]} > 0 )); then
-            for name in "${!advisory_results[@]}"; do
-              r="${advisory_results[$name]}"
+            for entry in "${advisory_results[@]}"; do
+              name="${entry%%=*}"
+              r="${entry#*=}"
               if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then
                 echo "::warning::Node Tests gate advisory dependency ${name} = ${r}; advisory: node-tests-gate lane failed; classify with scripts/ci/classify-failure.sh <run-id>"
               fi
@@ -3894,25 +3900,27 @@ jobs:
       # advisory-until-promoted rule above and scripts/ci/known-flakes.txt.
       - name: "Check results"
         run: |
-          declare -A hard_results=(
-            [detect-changes]="${{ needs.detect-changes.result }}"
-            [webrtc-integration-test]="${{ needs.webrtc-integration-test.result }}"
+          hard_results=(
+            "detect-changes=${{ needs.detect-changes.result }}"
+            "webrtc-integration-test=${{ needs.webrtc-integration-test.result }}"
           )
-          declare -A advisory_results=(
-            [android-device-webrtc]="${{ needs.android-device-webrtc.result }}"
-            [ios-device-webrtc]="${{ needs.ios-device-webrtc.result }}"
+          advisory_results=(
+            "android-device-webrtc=${{ needs.android-device-webrtc.result }}"
+            "ios-device-webrtc=${{ needs.ios-device-webrtc.result }}"
           )
           fail=
-          for name in "${!hard_results[@]}"; do
-            r="${hard_results[$name]}"
+          for entry in "${hard_results[@]}"; do
+            name="${entry%%=*}"
+            r="${entry#*=}"
             if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then
               echo "::error::WebRTC gate HARD dependency ${name} = ${r}"
               fail=1
             fi
           done
           if (( ${#advisory_results[@]} > 0 )); then
-            for name in "${!advisory_results[@]}"; do
-              r="${advisory_results[$name]}"
+            for entry in "${advisory_results[@]}"; do
+              name="${entry%%=*}"
+              r="${entry#*=}"
               if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then
                 echo "::warning::WebRTC gate advisory dependency ${name} = ${r}; advisory: webrtc-gate lane failed; classify with scripts/ci/classify-failure.sh <run-id>"
               fi

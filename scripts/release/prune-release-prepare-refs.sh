@@ -58,7 +58,10 @@ if ! [[ "$now_epoch" =~ ^[0-9]+$ ]]; then
 fi
 
 refs_json="$(list_refs)"
-mapfile -t refs < <(
+refs=()
+while IFS= read -r ref_and_sha; do
+  refs+=("$ref_and_sha")
+done < <(
   jq -r --arg prefix "refs/heads/${REF_PREFIX}" '
     .[]
     | select(.ref | startswith($prefix))

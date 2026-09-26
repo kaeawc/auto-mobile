@@ -45,13 +45,13 @@ teardown() {
 
 run_script() {
   run env \
-    PATH="${STUB_DIR}:/opt/homebrew/bin:/usr/bin:/bin" \
+    PATH="${STUB_DIR}:/bin:/usr/bin:/opt/homebrew/bin" \
     GH_CALLS="${TEST_ROOT}/gh-calls" \
     GH_SCENARIO="$1" \
     GH_TOKEN=test-token \
     GITHUB_REPOSITORY=kaeawc/auto-mobile \
     PRUNE_RELEASE_PREPARE_NOW_EPOCH=1768003200 \
-    bash "$SCRIPT" 3
+    /bin/bash "$SCRIPT" 3
 }
 
 @test "deletes only stale release-prepare refs" {

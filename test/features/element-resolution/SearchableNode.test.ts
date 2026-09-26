@@ -83,3 +83,13 @@ test("collector calls do not share mutable output descriptors", () => {
   expect(second.clickable![0].text).toBe("Original");
   expect(second.clickable![0]).not.toBe(first.clickable![0]);
 });
+
+test("collector output bounds cannot mutate cached compact capture bounds", () => {
+  const collector = new DefaultObserveElementCollector();
+  const capture = {
+    hierarchy: { node: { bounds: [0, 0, 100, 50], text: "Original", clickable: true } },
+  };
+  const first = collector.collect(capture, "android")!;
+  first.clickable![0].bounds.left = 99;
+  expect(collector.collect(capture, "android")!.clickable![0].bounds.left).toBe(0);
+});

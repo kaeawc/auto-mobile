@@ -53,3 +53,14 @@ test("validated protocol DTO bridges and request metadata are distinct from node
   ).toEqual([]);
   expect(check("function target(params: {text?:unknown}) { return params.text; }")).toEqual([]);
 });
+
+test("typed capture containers preserve raw-node provenance", () => {
+  expect(
+    check("function match(capture: ViewHierarchyResult) { return capture.hierarchy.node.text; }"),
+  ).toHaveLength(1);
+  expect(
+    check(
+      'function match(capture: ViewHierarchyResult) { const {hierarchy} = capture; return hierarchy.node["resource-id"]; }',
+    ),
+  ).toHaveLength(1);
+});

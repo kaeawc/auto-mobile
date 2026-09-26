@@ -723,7 +723,7 @@ const noRawSelectorFieldReadRule = {
           if (type.type === "TSUnionType") return type.types.some(rawType);
           return (
             type.type === "TSTypeReference" &&
-            ["ViewHierarchyNode", "Record"].includes(type.typeName?.name)
+            ["ViewHierarchyNode", "ViewHierarchyResult", "Record"].includes(type.typeName?.name)
           );
         };
         const lookup = (env, name) => env.get(name);

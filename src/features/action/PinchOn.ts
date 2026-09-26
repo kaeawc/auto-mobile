@@ -11,6 +11,7 @@ import {
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { ElementResolver } from "../utility/ElementResolver";
 import type { HierarchyCapture, HierarchySnapshot } from "../observe/HierarchyCapture";
+import { extractHierarchyScreenSize } from "../observe/hierarchyScreenSize";
 import { createDeviceHierarchyCapture } from "../observe/DeviceHierarchyCapture";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
@@ -276,7 +277,24 @@ export class PinchOn extends BaseVisualChange {
     }
 
     const snapshot = await this.capture.capture({ freshness: "fresh" });
-    observeResult = { ...observeResult, viewHierarchy: snapshot.hierarchy };
+    const freshSize =
+      extractHierarchyScreenSize(snapshot.hierarchy) ??
+      (snapshot.hierarchy.screenWidth && snapshot.hierarchy.screenHeight
+        ? { width: snapshot.hierarchy.screenWidth, height: snapshot.hierarchy.screenHeight }
+        : observeResult.screenSize);
+    const sameSize =
+      freshSize?.width === observeResult.screenSize?.width &&
+      freshSize?.height === observeResult.screenSize?.height;
+    observeResult = {
+      ...observeResult,
+      viewHierarchy: snapshot.hierarchy,
+      screenSize: freshSize,
+      // Insets belong to a coordinate space: never apply portrait edges to a
+      // fresh landscape capture when the runner did not supply rotated insets.
+      systemInsets:
+        snapshot.hierarchy.systemInsets ??
+        (sameSize ? observeResult.systemInsets : { top: 0, bottom: 0, left: 0, right: 0 }),
+    };
 
     if (!observeResult.viewHierarchy || !observeResult.screenSize) {
       throw new ActionableError("Unable to resolve target without a view hierarchy");

@@ -1,3 +1,4 @@
+import { projectActionableHierarchy } from "./HierarchyNormalization";
 import { hierarchyUpdatedAtToMillis } from "./observeTimestamp";
 import type { ViewHierarchyResult } from "../../models";
 import { ActionableError } from "../../models/ActionableError";
@@ -21,6 +22,54 @@ export interface HierarchySnapshot {
   receivedAt: number;
   hierarchy: ViewHierarchyResult;
   nodes: readonly SearchableEntry[];
+}
+
+const capturedHierarchies = new WeakMap<ViewHierarchyResult, HierarchySnapshot>();
+const observedSearchable = new SearchableHierarchy();
+
+/** Internal provenance only: nothing is added to the serialized hierarchy contract. */
+export function getHierarchySnapshot(
+  hierarchy: ViewHierarchyResult | undefined,
+): HierarchySnapshot | undefined {
+  return hierarchy ? capturedHierarchies.get(hierarchy) : undefined;
+}
+
+export function identifyObservedHierarchy(
+  platform: "android" | "ios",
+  source: ViewHierarchyResult,
+  freshness: HierarchyCaptureRequest["freshness"],
+  timer: Timer = defaultTimer,
+  ids: IdGenerator = defaultIdGenerator,
+  captureId?: string,
+): HierarchySnapshot {
+  const existing = getHierarchySnapshot(source);
+  if (existing) return existing;
+  const hierarchy = projectActionableHierarchy(platform, source);
+  const snapshot: HierarchySnapshot = {
+    captureId: captureId ?? ids.next(),
+    platform,
+    requestedFreshness: freshness,
+    updatedAt: source.updatedAt,
+    receivedAt: source.receivedAt ?? timer.now(),
+    hierarchy,
+    nodes: observedSearchable.project(hierarchy),
+  };
+  capturedHierarchies.set(source, snapshot);
+  capturedHierarchies.set(hierarchy, snapshot);
+  return snapshot;
+}
+
+/** Carry acquisition identity across an observe-only visibility projection. */
+export function inheritHierarchySnapshot(
+  source: ViewHierarchyResult | undefined,
+  target: ViewHierarchyResult | undefined,
+): void {
+  const existing = getHierarchySnapshot(source);
+  if (!existing || !target || source === target) return;
+  const hierarchy = projectActionableHierarchy(existing.platform, target);
+  const snapshot = { ...existing, hierarchy, nodes: observedSearchable.project(hierarchy) };
+  capturedHierarchies.set(target, snapshot);
+  capturedHierarchies.set(hierarchy, snapshot);
 }
 
 export interface HierarchyCapture {
@@ -79,7 +128,10 @@ export class DefaultHierarchyCapture implements HierarchyCapture {
       };
       this.snapshots.set(source, snapshot);
     }
-    return { ...snapshot, requestedFreshness: request.freshness };
+    const result = { ...snapshot, requestedFreshness: request.freshness };
+    capturedHierarchies.set(source, result);
+    capturedHierarchies.set(result.hierarchy, result);
+    return result;
   }
 
   private read(request: HierarchyCaptureRequest): Promise<ViewHierarchyResult> {

@@ -1,3 +1,11 @@
+import { createDeviceHierarchyCapture } from "./DeviceHierarchyCapture";
+import {
+  identifyObservedHierarchy,
+  inheritHierarchySnapshot,
+  type HierarchyCapture,
+  type HierarchyCaptureRequest,
+} from "./HierarchyCapture";
+import { RealSettleObserve } from "./SettleObserve";
 import { logger } from "../../utils/logger";
 import { throwIfAborted } from "../../utils/toolUtils";
 import {
@@ -481,6 +489,7 @@ export class RealObserveScreen implements ObserveScreen {
   private idGenerator: IdGenerator;
 
   private viewHierarchy: ViewHierarchyInterface;
+  private readonly hierarchyCapture: HierarchyCapture;
   private predictiveUIState: PredictiveUIStateInterface;
 
   private screenshotRecorder: ObserveScreenshotRecorder;
@@ -587,6 +596,14 @@ export class RealObserveScreen implements ObserveScreen {
 
     // Data sources (either injected or default)
     this.viewHierarchy = dependencies?.viewHierarchy ?? new ViewHierarchy(device, this.adbFactory);
+    this.hierarchyCapture =
+      dependencies?.hierarchyCapture ??
+      createDeviceHierarchyCapture(device, {
+        viewHierarchy: this.viewHierarchy,
+        settle: new RealSettleObserve(this, timer),
+        timer,
+        ids: idGenerator,
+      });
     const window = dependencies?.window ?? new Window(device, this.adbFactory);
     const screenshotUtil = dependencies?.screenshot ?? new TakeScreenshot(device, this.adbFactory);
     const backStack = dependencies?.backStack ?? new GetBackStack(device, this.adbFactory);
@@ -693,6 +710,7 @@ export class RealObserveScreen implements ObserveScreen {
       const duration = this.timer.now() - startTime;
       if (cached) {
         logger.debug(`[OBSERVE_CACHE] Found recent result in cache (${duration}ms)`);
+        this.identifyCapture(cached, "cached-ok");
         return cached;
       }
       logger.debug(`[OBSERVE_CACHE] No cached observe result available (${duration}ms)`);
@@ -745,6 +763,15 @@ export class RealObserveScreen implements ObserveScreen {
           ? this.deviceStateCollector.collectForegroundIdentity(signal)
           : Promise.resolve(undefined);
 
+      const captured = options?.freshness
+        ? await this.hierarchyCapture.capture({
+            freshness: options.freshness,
+            minTimestamp,
+            signal,
+            timeoutMs: options.timeoutMs,
+          })
+        : undefined;
+
       // Phase 1+2: hierarchy + derived device state (platform-specific orchestration).
       await this.collectAllData(
         result,
@@ -755,6 +782,7 @@ export class RealObserveScreen implements ObserveScreen {
         signal,
         skipBackStack,
         options?.skipRecompositionTracking === true,
+        captured?.hierarchy,
       );
 
       // Reject a stale cross-platform hierarchy (e.g. an iOS hierarchy returned on
@@ -888,6 +916,8 @@ export class RealObserveScreen implements ObserveScreen {
         ),
       });
 
+      this.identifyCapture(result, options?.freshness ?? "cached-ok");
+
       // Intermediate settle polls are read-only. Their adopted terminal result
       // is enriched and cached once by ObservePoll.finalize().
       if (!options?.skipRecompositionTracking) {
@@ -931,6 +961,22 @@ export class RealObserveScreen implements ObserveScreen {
         cause: errorMessage,
       });
       return fallback;
+    }
+  }
+
+  private identifyCapture(
+    result: ObserveResult,
+    freshness: HierarchyCaptureRequest["freshness"],
+  ): void {
+    if (result.viewHierarchy && !result.viewHierarchy.hierarchy?.error) {
+      identifyObservedHierarchy(
+        this.device.platform,
+        result.viewHierarchy,
+        freshness,
+        this.timer,
+        this.idGenerator,
+        result.observationId,
+      );
     }
   }
 
@@ -1111,6 +1157,7 @@ export class RealObserveScreen implements ObserveScreen {
     signal?: AbortSignal,
     skipBackStack: boolean = false,
     readOnly: boolean = false,
+    capturedHierarchy?: ViewHierarchyResult,
   ): Promise<void> {
     switch (this.device.platform) {
       case "android":
@@ -1123,6 +1170,7 @@ export class RealObserveScreen implements ObserveScreen {
           minTimestamp,
           signal,
           readOnly,
+          capturedHierarchy,
         );
         perf.end();
 
@@ -1259,6 +1307,7 @@ export class RealObserveScreen implements ObserveScreen {
           minTimestamp,
           signal,
           readOnly,
+          capturedHierarchy,
         );
 
         // Resolve screen size: hierarchy-derived bounds, then CtrlProxy-reported logical points.
@@ -1308,6 +1357,7 @@ export class RealObserveScreen implements ObserveScreen {
             result.screenSize.width,
             result.screenSize.height,
           );
+          inheritHierarchySnapshot(rawHierarchy, result.viewHierarchy);
           if (serverConfig.isRawElementSearchEnabled()) {
             attachRawViewHierarchy(result.viewHierarchy, rawHierarchy);
           }

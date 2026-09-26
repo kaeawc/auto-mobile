@@ -1,3 +1,4 @@
+import type { ViewHierarchy as ViewHierarchyReader } from "./interfaces/ViewHierarchy";
 import type { BootedDevice, ViewHierarchyResult } from "../../models";
 import { ActionableError } from "../../models/ActionableError";
 import { NoOpPerformanceTracker, type PerformanceTracker } from "../../utils/PerformanceTracker";
@@ -29,6 +30,7 @@ export interface HierarchySyncClient {
 export interface DeviceHierarchyCaptureDependencies {
   syncClientFactory?: (device: BootedDevice) => HierarchySyncClient;
   settle?: SettleObserve;
+  viewHierarchy?: Pick<ViewHierarchyReader, "getViewHierarchy">;
   timer?: Timer;
   ids?: IdGenerator;
 }
@@ -46,7 +48,10 @@ export function createDeviceHierarchyCapture(
   const reader = new ViewHierarchyCaptureReader(
     {
       getViewHierarchy: (...args) =>
-        new ViewHierarchy(device, undefined, null, dependencies.timer).getViewHierarchy(...args),
+        (
+          dependencies.viewHierarchy ??
+          new ViewHierarchy(device, undefined, null, dependencies.timer)
+        ).getViewHierarchy(...args),
       filterOffscreenNodes,
     },
     async (request) => {

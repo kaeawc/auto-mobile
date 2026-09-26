@@ -61,6 +61,7 @@ export class HierarchyCollector {
     minTimestamp: number = 0,
     signal?: AbortSignal,
     readOnly: boolean = false,
+    capturedHierarchy?: ViewHierarchyResult,
   ): Promise<void> {
     const { device, viewHierarchy, adb, timer } = this.opts;
     try {
@@ -69,13 +70,15 @@ export class HierarchyCollector {
       }
 
       const viewHierarchyStart = timer.now();
-      const hierarchy = await viewHierarchy.getViewHierarchy(
-        queryOptions,
-        perf,
-        skipWaitForFresh,
-        minTimestamp,
-        signal,
-      );
+      const hierarchy =
+        capturedHierarchy ??
+        (await viewHierarchy.getViewHierarchy(
+          queryOptions,
+          perf,
+          skipWaitForFresh,
+          minTimestamp,
+          signal,
+        ));
       logger.debug("Accessibility service availability cached as: true");
 
       if (hierarchy) {

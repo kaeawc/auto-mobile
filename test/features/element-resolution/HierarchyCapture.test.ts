@@ -4,6 +4,9 @@ import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { describe, expect, test } from "bun:test";
 import {
   DefaultHierarchyCapture,
+  getHierarchySnapshot,
+  identifyObservedHierarchy,
+  inheritHierarchySnapshot,
   type HierarchyCaptureReader,
 } from "../../../src/features/observe/HierarchyCapture";
 import type { ViewHierarchyResult } from "../../../src/models";
@@ -175,4 +178,49 @@ test("cached reader wrappers keep device frame identity separate from host acqui
   expect(first.captureId).not.toBe(second.captureId);
   expect(first.hierarchy.frameContext).toBe(second.hierarchy.frameContext);
   expect(first.updatedAt).toBe(second.updatedAt);
+});
+
+test("capture provenance is available on direct output without serialized metadata", async () => {
+  const reader = new FakeReader();
+  const capture = new DefaultHierarchyCapture(
+    "ios",
+    reader,
+    new FakeTimer(),
+    new CountingIdGenerator(),
+  );
+  const snapshot = await capture.capture({ freshness: "fresh" });
+  expect(getHierarchySnapshot(snapshot.hierarchy)).toBe(snapshot);
+  expect(JSON.stringify(snapshot.hierarchy)).not.toContain("captureId");
+});
+
+test("observed provenance retains identity across visible projection and excludes raw nodes", () => {
+  const source = hierarchy(0);
+  attachRawViewHierarchy(source, hierarchy(5000));
+  const snapshot = identifyObservedHierarchy(
+    "android",
+    source,
+    "cached-ok",
+    new FakeTimer(),
+    new CountingIdGenerator(),
+  );
+  expect(snapshot.nodes[0].bounds?.left).toBe(0);
+  expect(resolveViewHierarchyForSearch(snapshot.hierarchy)).toBe(snapshot.hierarchy);
+  const projected = hierarchy(20);
+  inheritHierarchySnapshot(source, projected);
+  expect(getHierarchySnapshot(projected)?.captureId).toBe(snapshot.captureId);
+  expect(getHierarchySnapshot(projected)?.nodes[0].bounds?.left).toBe(20);
+});
+
+test("a missing device timestamp cannot satisfy a requested floor", async () => {
+  const reader = new FakeReader();
+  reader.fresh = { hierarchy: reader.fresh.hierarchy };
+  const capture = new DefaultHierarchyCapture(
+    "ios",
+    reader,
+    new FakeTimer(),
+    new CountingIdGenerator(),
+  );
+  await expect(capture.capture({ freshness: "fresh", minTimestamp: 1 })).rejects.toThrow(
+    "timestamp floor",
+  );
 });

@@ -11,7 +11,9 @@ import {
 } from "../../../models";
 import { logger } from "../../../utils/logger";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
-import type { ElementFinder } from "../../../utils/interfaces/ElementFinder";
+import { ElementResolver, type ResolutionAction } from "../../utility/ElementResolver";
+import { SearchableHierarchy } from "../../utility/SearchableNode";
+import type { ResolverSelector } from "../../../server/elementSelectorSchemas";
 import type { ElementGeometry } from "../../../utils/interfaces/ElementGeometry";
 import type { ObserveScreen } from "../../observe/interfaces/ObserveScreen";
 import { AccessibilityDetector } from "../../../utils/interfaces/AccessibilityDetector";
@@ -50,7 +52,7 @@ function oppositeDirection(dir: SwipeDirection): SwipeDirection {
 
 interface ScrollUntilVisibleDependencies {
   device: BootedDevice;
-  finder: ElementFinder;
+  resolver?: Pick<ElementResolver, "resolve">;
   geometry: ElementGeometry;
   observeScreen: ObserveScreen;
   accessibilityService: ScrollAccessibilityService;
@@ -93,7 +95,28 @@ interface ScrollUntilVisibleDependencies {
 export class ScrollUntilVisible {
   private static readonly MAX_ATTEMPTS = 5;
 
-  constructor(private readonly deps: ScrollUntilVisibleDependencies) {}
+  private readonly searchable = new SearchableHierarchy();
+  private readonly resolver: Pick<ElementResolver, "resolve">;
+
+  constructor(private readonly deps: ScrollUntilVisibleDependencies) {
+    this.resolver = deps.resolver ?? new ElementResolver();
+  }
+
+  private resolveElement(
+    hierarchy: ViewHierarchyResult,
+    selector: ResolverSelector,
+    action: ResolutionAction = "inspect",
+  ): Element | null {
+    const result = this.resolver.resolve(
+      { id: String(hierarchy.updatedAt ?? "swipe"), nodes: this.searchable.project(hierarchy) },
+      selector,
+      { action },
+    );
+    if (result.error) {
+      throw new ActionableError(result.error);
+    }
+    return result.chosen?.element ?? null;
+  }
 
   async execute(
     options: SwipeOnResolvedOptions,
@@ -469,23 +492,10 @@ export class ScrollUntilVisible {
       throw new ActionableError("Container must be specified for element swipe");
     }
 
-    if (options.container.text) {
-      element = this.deps.finder.findElementByText(
-        viewHierarchy,
-        options.container.text,
-        undefined,
-        true,
-        false,
-      );
-    } else if (options.container.elementId) {
-      element = this.deps.finder.findElementByResourceId(
-        viewHierarchy,
-        options.container.elementId,
-        undefined,
-      );
-    } else {
+    if (!options.container.text && !options.container.elementId) {
       throw new ActionableError("Container must specify either text or elementId");
     }
+    element = this.resolveElement(viewHierarchy, options.container);
 
     // Retry logic similar to TapOnElement
     if (!element && attempt < ScrollUntilVisible.MAX_ATTEMPTS) {
@@ -554,27 +564,12 @@ export class ScrollUntilVisible {
     let element: Element | null = null;
     const viewHierarchy = observeResult.viewHierarchy!;
 
-    // Try to find container by elementId or text
-    if (options.container?.elementId) {
-      element = this.deps.finder.findElementByResourceId(
-        viewHierarchy,
-        options.container.elementId,
-      );
-    } else if (options.container?.text) {
-      element = this.deps.finder.findElementByText(
-        viewHierarchy,
-        options.container.text,
-        undefined,
-        true,
-        false,
-      );
+    if (options.container?.elementId || options.container?.text) {
+      element = this.resolveElement(viewHierarchy, options.container);
     }
-
-    // If no container specified or found, try to find a scrollable element
     if (!element) {
-      const scrollableElement = this.deps.finder.findScrollableContainer(viewHierarchy);
-      if (scrollableElement) {
-        element = scrollableElement;
+      element = this.resolveElement(viewHierarchy, {}, "scroll");
+      if (element) {
         logger.info(`[SwipeOn] Found scrollable container automatically`);
       }
     }
@@ -598,23 +593,10 @@ export class ScrollUntilVisible {
     viewHierarchy: ViewHierarchyResult,
     container?: { elementId?: string; text?: string },
   ): Promise<Element | null> {
-    if (lookFor.text) {
-      return this.deps.finder.findElementByText(
-        viewHierarchy,
-        lookFor.text,
-        container,
-        true,
-        false,
-      );
-    } else if (lookFor.elementId) {
-      return this.deps.finder.findElementByResourceId(
-        viewHierarchy,
-        lookFor.elementId,
-        container,
-        true,
-      );
+    if (!lookFor.text && !lookFor.elementId) {
+      return null;
     }
-    return null;
+    return this.resolveElement(viewHierarchy, { ...lookFor, container });
   }
 
   computeHierarchyFingerprint(viewHierarchy: ViewHierarchyResult): string {

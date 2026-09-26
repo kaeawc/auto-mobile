@@ -12,7 +12,7 @@ export interface SetAccessibilityFocusOptions {
 
   /**
    * Target element selectors (at least one must be specified).
-   * Non-id selectors are resolved to a resource-id via the element finder before
+   * All selectors are resolved locally to a unique native resource-id before
    * the action is sent to the accessibility service.
    */
   text?: string; // Text content of the element

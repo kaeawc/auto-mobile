@@ -1,3 +1,4 @@
+import { SearchableHierarchy } from "../features/utility/SearchableNode";
 /**
  * System tray helper functions for notification handling.
  * Extracted from interactionTools.ts for maintainability.
@@ -231,6 +232,7 @@ interface SystemTrayMatchResult {
 type SystemTrayMatchKey = keyof SystemTrayMatchResult["matches"];
 
 export interface SystemTrayNotificationCandidate {
+  windowRank?: number;
   node: any;
   depth: number;
   element?: Element;
@@ -805,6 +807,7 @@ const collectNotificationCandidates = (
   viewHierarchy: ViewHierarchyResult,
 ): SystemTrayNotificationCandidate[] => {
   const candidates: SystemTrayNotificationCandidate[] = [];
+  const visited = new Set<unknown>();
   const parser = new DefaultElementParser();
 
   const visitChildren = (node: any, depth: number, groupNode?: any): void => {
@@ -831,9 +834,10 @@ const collectNotificationCandidates = (
   };
 
   const visit = (node: any, depth: number, groupNode?: any): void => {
-    if (!node) {
+    if (!node || visited.has(node)) {
       return;
     }
+    visited.add(node);
 
     if (nodeHasNotificationRowHint(node)) {
       if (nodeIsNotificationGroup(node)) {
@@ -996,6 +1000,7 @@ const collectCompositeNotificationCandidates = (
   }
 
   const candidates: SystemTrayNotificationCandidate[] = [];
+  const visited = new Set<unknown>();
   const parser = new DefaultElementParser();
 
   const childRowMatchesContentCriteria = (childRow: any): boolean => {
@@ -1050,9 +1055,10 @@ const collectCompositeNotificationCandidates = (
     depth: number,
     groupNode?: any,
   ): { matches: SystemTrayMatchResult["matches"]; hasAll: boolean } => {
-    if (!node) {
+    if (!node || visited.has(node)) {
       return { matches: {}, hasAll: false };
     }
+    visited.add(node);
 
     let combinedMatches = resolveNodeMatches(node);
     let childHasAll = false;
@@ -1273,6 +1279,10 @@ const selectBestNotificationMatch = (
     if (leftCounts.partial !== rightCounts.partial) {
       return rightCounts.partial - leftCounts.partial;
     }
+    const windowDelta = (left.candidate.windowRank ?? 0) - (right.candidate.windowRank ?? 0);
+    if (windowDelta !== 0) {
+      return windowDelta;
+    }
     // Prefer topmost notification (most recent in Android shade)
     const leftTop = getCandidateTopY(left.candidate);
     const rightTop = getCandidateTopY(right.candidate);
@@ -1288,11 +1298,20 @@ const selectBestNotificationMatch = (
   })[0];
 };
 
+const notificationSearchable = new SearchableHierarchy();
+
 const findNotificationMatches = (
   viewHierarchy: ViewHierarchyResult,
   criteria: SystemTrayNotificationArgs,
   appMatchTexts: string[],
 ): SystemTrayNotificationMatch[] => {
+  const windowRanks = new Map<unknown, number>();
+  for (const entry of notificationSearchable.project(viewHierarchy)) {
+    windowRanks.set(
+      entry.source,
+      Math.min(windowRanks.get(entry.source) ?? Infinity, entry.windowRank),
+    );
+  }
   const parser = new DefaultElementParser();
   const candidates = collectNotificationCandidates(viewHierarchy);
   const criteriaCount = getNotificationCriteriaCount(criteria);
@@ -1303,7 +1322,11 @@ const findNotificationMatches = (
       .map((candidate) => {
         const subHierarchy = createSubHierarchy(candidate.node);
         const match = buildNotificationMatch(subHierarchy, criteria, appMatchTexts);
-        return { candidate, match, subHierarchy };
+        return {
+          candidate: { ...candidate, windowRank: windowRanks.get(candidate.node) ?? 0 },
+          match,
+          subHierarchy,
+        };
       })
       .filter((entry) => entry.match.matched);
   };

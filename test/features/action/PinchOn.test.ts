@@ -1,3 +1,4 @@
+import { FakeHierarchyCapture } from "../../fakes/FakeHierarchyCapture";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../src/models";
 import { PinchOn } from "../../../src/features/action/PinchOn";
@@ -83,7 +84,11 @@ describe("PinchOn", () => {
       fakeIosService as any,
     );
 
-    pinchOn = new PinchOn(device);
+    pinchOn = new PinchOn(device, null, {
+      capture: new FakeHierarchyCapture(
+        async () => (await fakeObserveScreen.getMostRecentCachedObserveResult()).viewHierarchy!,
+      ),
+    });
     (pinchOn as any).observeScreen = fakeObserveScreen;
     (pinchOn as any).awaitIdle = fakeAwaitIdle;
     (pinchOn as any).window = fakeWindow;
@@ -119,6 +124,107 @@ describe("PinchOn", () => {
     expect(fakeA11yService.getPinchHistory()).toHaveLength(0);
   });
 
+  test("container bare ID does not select a substring near miss", async () => {
+    fakeObserveScreen.setObserveResult({
+      ...createObserveResult(),
+      viewHierarchy: {
+        hierarchy: {
+          node: [
+            {
+              "resource-id": "com.app:id/map_controls",
+              bounds: { left: 0, top: 0, right: 30, bottom: 30 },
+            },
+            {
+              "resource-id": "com.app:id/map",
+              bounds: { left: 100, top: 100, right: 300, bottom: 300 },
+            },
+          ],
+        },
+      },
+    });
+    const result = await pinchOn.execute({ direction: "out", container: { elementId: "map" } });
+    expect(result.success).toBe(true);
+    expect(fakeA11yService.getPinchHistory()[0].centerX).toBe(200);
+  });
+
+  test("ambiguous bare container ID fails before sending a pinch", async () => {
+    fakeObserveScreen.setObserveResult({
+      ...createObserveResult(),
+      viewHierarchy: {
+        hierarchy: {
+          node: [
+            {
+              "resource-id": "com.one:id/map",
+              bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+            },
+            {
+              "resource-id": "com.two:id/map",
+              bounds: { left: 100, top: 100, right: 300, bottom: 300 },
+            },
+          ],
+        },
+      },
+    });
+    const result = await pinchOn.execute({ direction: "out", container: { elementId: "map" } });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("com.one:id/map");
+    expect(result.error).toContain("com.two:id/map");
+    expect(fakeA11yService.getPinchHistory()).toEqual([]);
+  });
+
+  test("requests fresh capture and pinches changed bounds instead of cached coordinates", async () => {
+    const capture = new FakeHierarchyCapture(() => ({
+      hierarchy: {
+        node: {
+          "resource-id": "container-id",
+          bounds: { left: 400, top: 400, right: 600, bottom: 600 },
+        },
+      },
+    }));
+    (pinchOn as any).capture = capture;
+    const result = await pinchOn.execute({
+      direction: "out",
+      container: { elementId: "container-id" },
+    });
+    expect(result.success).toBe(true);
+    expect(capture.requests).toEqual([{ freshness: "fresh" }]);
+    expect(fakeA11yService.getPinchHistory()[0].centerX).toBe(500);
+    expect(fakeA11yService.getPinchHistory()[0].centerY).toBe(500);
+  });
+
+  test("does not fall back to cached bounds when fresh capture fails", async () => {
+    (pinchOn as any).capture = new FakeHierarchyCapture(() => {
+      throw new Error("fresh capture failed");
+    });
+    const result = await pinchOn.execute({
+      direction: "out",
+      container: { elementId: "container-id" },
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("fresh capture failed");
+    expect(fakeA11yService.getPinchHistory()).toEqual([]);
+  });
+
+  test("container resolution prefers the topmost window", async () => {
+    const upper = {
+      "resource-id": "container-id",
+      bounds: { left: 300, top: 300, right: 700, bottom: 700 },
+    };
+    (pinchOn as any).capture = new FakeHierarchyCapture(
+      () =>
+        ({
+          ...createHierarchy(),
+          windows: [{ windowLayer: 5, hierarchy: { node: upper } }],
+        }) as any,
+    );
+    const result = await pinchOn.execute({
+      direction: "out",
+      container: { elementId: "container-id" },
+    });
+    expect(result.success).toBe(true);
+    expect(fakeA11yService.getPinchHistory()[0].centerX).toBe(500);
+  });
+
   test("requests pinch when container elementId is valid", async () => {
     const result = await pinchOn.execute({
       direction: "out",
@@ -144,7 +250,12 @@ describe("PinchOn", () => {
       isAvailable: async () => false,
     } as any);
     fakeIosService.setPinchResult({ success: true, totalTimeMs: 710, gestureTimeMs: 700 });
-    pinchOn = new PinchOn(iosDevice);
+    pinchOn = new PinchOn(iosDevice, null, {
+      capture: new FakeHierarchyCapture(
+        async () => (await fakeObserveScreen.getMostRecentCachedObserveResult()).viewHierarchy!,
+        "ios",
+      ),
+    });
     (pinchOn as any).observeScreen = fakeObserveScreen;
     (pinchOn as any).awaitIdle = fakeAwaitIdle;
     (pinchOn as any).window = fakeWindow;
@@ -189,7 +300,12 @@ describe("PinchOn", () => {
       viewHierarchy: createHierarchy(),
     }));
     fakeIosService.setPinchResult({ success: true, totalTimeMs: 300, gestureTimeMs: 300 });
-    pinchOn = new PinchOn(iosDevice);
+    pinchOn = new PinchOn(iosDevice, null, {
+      capture: new FakeHierarchyCapture(
+        async () => (await fakeObserveScreen.getMostRecentCachedObserveResult()).viewHierarchy!,
+        "ios",
+      ),
+    });
     (pinchOn as any).observeScreen = fakeObserveScreen;
     (pinchOn as any).awaitIdle = fakeAwaitIdle;
     (pinchOn as any).window = fakeWindow;
@@ -218,7 +334,12 @@ describe("PinchOn", () => {
       name: "iPhone 16 Pro",
     };
     fakeIosService.setPinchResult({ success: false, error: "Pinch failed on runner" });
-    pinchOn = new PinchOn(iosDevice);
+    pinchOn = new PinchOn(iosDevice, null, {
+      capture: new FakeHierarchyCapture(
+        async () => (await fakeObserveScreen.getMostRecentCachedObserveResult()).viewHierarchy!,
+        "ios",
+      ),
+    });
     (pinchOn as any).observeScreen = fakeObserveScreen;
     (pinchOn as any).awaitIdle = fakeAwaitIdle;
     (pinchOn as any).window = fakeWindow;
@@ -248,7 +369,12 @@ describe("PinchOn", () => {
       gestureTimeMs: 300,
       pinchPath: "element-anchored",
     });
-    pinchOn = new PinchOn(iosDevice);
+    pinchOn = new PinchOn(iosDevice, null, {
+      capture: new FakeHierarchyCapture(
+        async () => (await fakeObserveScreen.getMostRecentCachedObserveResult()).viewHierarchy!,
+        "ios",
+      ),
+    });
     (pinchOn as any).observeScreen = fakeObserveScreen;
     (pinchOn as any).awaitIdle = fakeAwaitIdle;
     (pinchOn as any).window = fakeWindow;
@@ -273,7 +399,12 @@ describe("PinchOn", () => {
       gestureTimeMs: 300,
       pinchPath: "event-path",
     });
-    pinchOn = new PinchOn(iosDevice);
+    pinchOn = new PinchOn(iosDevice, null, {
+      capture: new FakeHierarchyCapture(
+        async () => (await fakeObserveScreen.getMostRecentCachedObserveResult()).viewHierarchy!,
+        "ios",
+      ),
+    });
     (pinchOn as any).observeScreen = fakeObserveScreen;
     (pinchOn as any).awaitIdle = fakeAwaitIdle;
     (pinchOn as any).window = fakeWindow;

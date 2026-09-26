@@ -155,3 +155,16 @@ it.each([
 ])("rejects near-collision tray identity %j", (props) => {
   expect(nodeHasSystemTrayHint({ $: props })).toBe(false);
 });
+
+it("enumerates separate notification windows topmost first without repeated root identity", () => {
+  const app = { text: "App" };
+  const tray = { "resource-id": "com.android.systemui:id/notification_panel" };
+  const capture = {
+    hierarchy: { node: [app, tray] },
+    windows: [
+      { windowLayer: 4, hierarchy: { node: tray } },
+      { windowLayer: 1, hierarchy: { node: app } },
+    ],
+  } as unknown as ViewHierarchyResult;
+  expect(getHierarchyRoots(capture)).toEqual([tray, app]);
+});

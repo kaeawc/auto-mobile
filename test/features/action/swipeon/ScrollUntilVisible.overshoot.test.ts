@@ -1,3 +1,4 @@
+import { FakeScrollElementResolver } from "../../../fakes/FakeScrollElementResolver";
 import { beforeEach, describe, expect, test } from "bun:test";
 import { ScrollUntilVisible } from "../../../../src/features/action/swipeon/ScrollUntilVisible";
 import { FakeAccessibilityDetector } from "../../../fakes/FakeAccessibilityDetector";
@@ -95,7 +96,7 @@ function makeScrollUntilVisible({
 
   return new ScrollUntilVisible({
     device: DEVICE,
-    finder: finder as any,
+    resolver: new FakeScrollElementResolver(finder),
     geometry: fakeGeometry,
     observeScreen: fakeObserveScreen as any,
     accessibilityService,
@@ -337,7 +338,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
 
     const suv = new ScrollUntilVisible({
       device: DEVICE,
-      finder: fakeFinder as any,
+      resolver: new FakeScrollElementResolver(fakeFinder),
       geometry: fakeGeometry,
       observeScreen: fakeObserveScreen as any,
       accessibilityService: fakeAccessibilityService,
@@ -489,5 +490,35 @@ describe("ScrollUntilVisible overshoot recovery", () => {
 
     expect(result.success).toBe(true);
     expect(talkBackExecutor.getCallCount()).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("ScrollUntilVisible shared resolver identity", () => {
+  const hierarchy = (ids: string[]) => ({
+    hierarchy: {
+      node: ids.map((id, index) => ({
+        "resource-id": id,
+        bounds: { left: 0, top: index * 50, right: 100, bottom: index * 50 + 40 },
+      })),
+    },
+  });
+  test("bare lookFor ID rejects substring near misses", async () => {
+    const { DefaultElementFinder } = await import("../../../../src/features/utility/ElementFinder");
+    const scroll = new ScrollUntilVisible({ finder: new DefaultElementFinder() } as any);
+    const result = await scroll.findElementInHierarchy(
+      { elementId: "btn_login" },
+      hierarchy(["com.app:id/btn_login_help"]) as any,
+    );
+    expect(result).toBeNull();
+  });
+  test("bare lookFor ID reports candidate packages when ambiguous", async () => {
+    const { DefaultElementFinder } = await import("../../../../src/features/utility/ElementFinder");
+    const scroll = new ScrollUntilVisible({ finder: new DefaultElementFinder() } as any);
+    await expect(
+      scroll.findElementInHierarchy(
+        { elementId: "btn_login" },
+        hierarchy(["com.one:id/btn_login", "com.two:id/btn_login"]) as any,
+      ),
+    ).rejects.toThrow(/com.one:id\/btn_login.*com.two:id\/btn_login/);
   });
 });

@@ -85,7 +85,9 @@ describe("observe-to-resolve migration contract", () => {
   });
   test("every query kind has fixture coverage and test-tag drift is detected", () => {
     const counts = { elementId: 0, text: 0, testTag: 0 };
-    for (const { query } of cases) counts[query.kind]++;
+    for (const { query } of cases) {
+      counts[query.kind]++;
+    }
     expect(counts).toEqual({ elementId: 95, text: 81, testTag: 1 });
     const brokenTags: ContractResolver = {
       resolve(capture, query) {

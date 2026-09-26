@@ -12,6 +12,7 @@ import {
 } from "./observeContract";
 import gaps from "./observeContractGaps.json";
 import gapSignatures from "./observeContractGapSignatures.json";
+import { ResolverContractAdapter } from "./resolverContract";
 
 const captures = loadContractCaptures(join(import.meta.dir, "../../fixtures/observe"));
 const legacy = new LegacyContractResolver();
@@ -19,7 +20,8 @@ const legacy = new LegacyContractResolver();
 describe("observe-to-resolve migration contract", () => {
   const cases = captures.flatMap(contractCases);
   const allowed = new Set(Object.values(gaps).flat());
-  for (const { key, capture, query, observed } of cases) {
+  for (const testCase of cases) {
+    const { key, capture, query, observed } = testCase;
     test(key, () => {
       const actual = boundsKey(legacy.resolve(capture, query).chosen);
       // A fixed gap must remove its entry; an existing gap cannot drift to a
@@ -29,6 +31,11 @@ describe("observe-to-resolve migration contract", () => {
           ? gapSignatures[key as keyof typeof gapSignatures]
           : observed.bounds.join(","),
       );
+      const roundTrips =
+        boundsKey(new ResolverContractAdapter(testCase).resolve(capture, query).chosen) ===
+        observed.bounds.join(",");
+      // A fixed gap must remove its entry; an unrecorded failure cannot be hidden.
+      expect(roundTrips).toBe(!allowed.has(key));
     });
   }
 

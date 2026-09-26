@@ -215,6 +215,13 @@ data class RequestSetKeyboardProfile(
 ) : WebSocketRequest()
 
 @Serializable
+@SerialName("request_list_keyboard_profiles")
+data class RequestListKeyboardProfiles(
+  override val requestId: String? = null,
+  val supportedCatalogVersions: List<Int>,
+) : WebSocketRequest()
+
+@Serializable
 @SerialName("request_ime_action")
 data class RequestImeAction(
   override val requestId: String? = null,

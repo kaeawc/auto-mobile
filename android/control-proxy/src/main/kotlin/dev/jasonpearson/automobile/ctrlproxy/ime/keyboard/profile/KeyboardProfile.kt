@@ -5,9 +5,17 @@ data class KeyboardProfile(
   val displayName: String,
   val behavior: TypingBehavior,
   val style: KeyboardStyle,
+  /** Increment when this profile's behavior contract changes. */
+  val version: Int = 1,
+  val evidenceStatus: String = "experimental",
+  val evidenceNote: String = "Evidence has not been recorded.",
 )
 
 object KeyboardProfiles {
+  /** Increment when the catalog response shape or its shared semantics change. */
+  const val CATALOG_VERSION = 1
+  val SUPPORTED_CATALOG_VERSIONS = listOf(CATALOG_VERSION)
+
   val DIRECT =
     KeyboardProfile(
       id = "direct",
@@ -34,6 +42,8 @@ object KeyboardProfiles {
           recomposeOnBackspaceIntoWord = false,
           batchEdits = false,
         ),
+      evidenceStatus = "baseline",
+      evidenceNote = "AutoMobile direct InputConnection policy.",
     )
 
   /**
@@ -69,6 +79,9 @@ object KeyboardProfiles {
           recomposeOnBackspaceIntoWord = true,
           batchEdits = true,
         ),
+      evidenceStatus = "focused_trace",
+      evidenceNote =
+        "A focused call sequence matched captured Gboard traces; full vendor equivalence is not claimed.",
     )
 
   /**
@@ -105,10 +118,16 @@ object KeyboardProfiles {
           recomposeOnBackspaceIntoWord = true,
           batchEdits = false,
         ),
+      evidenceStatus = "experimental",
+      evidenceNote =
+        "Experimental AutoMobile behavior model; real Samsung Keyboard comparison remains pending.",
     )
 
   val DEFAULT: KeyboardProfile = GBOARD
   val all: List<KeyboardProfile> = listOf(DIRECT, GBOARD, SAMSUNG)
 
   fun byId(id: String): KeyboardProfile? = all.firstOrNull { it.id.equals(id, ignoreCase = true) }
+
+  fun negotiateCatalogVersion(clientVersions: List<Int>): Int? =
+    SUPPORTED_CATALOG_VERSIONS.filter { it in clientVersions }.maxOrNull()
 }

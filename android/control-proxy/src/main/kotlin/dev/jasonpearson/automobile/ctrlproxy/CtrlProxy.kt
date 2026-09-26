@@ -64,6 +64,8 @@ import dev.jasonpearson.automobile.protocol.FrameMetricsData
 import dev.jasonpearson.automobile.protocol.FrameMetricsEventResponse
 import dev.jasonpearson.automobile.protocol.HandledExceptionData
 import dev.jasonpearson.automobile.protocol.HandledExceptionEvent
+import dev.jasonpearson.automobile.protocol.KeyboardProfileBehaviorInfo
+import dev.jasonpearson.automobile.protocol.KeyboardProfileInfo
 import dev.jasonpearson.automobile.protocol.LifecycleEventData
 import dev.jasonpearson.automobile.protocol.LifecycleEventResponse
 import dev.jasonpearson.automobile.protocol.NavigationEventData
@@ -2047,6 +2049,56 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
     launchRequestScope(requestId) {
       broadcastSetKeyboardProfileResult(requestId, true, profile.id, previous)
+    }
+  }
+
+  override fun requestListKeyboardProfiles(
+    requestId: String?,
+    supportedCatalogVersions: List<Int>,
+  ) {
+    val catalogVersion = KeyboardProfiles.negotiateCatalogVersion(supportedCatalogVersions)
+    if (catalogVersion == null) {
+      launchRequestScope(requestId) {
+        broadcastKeyboardProfileCatalog(
+          requestId = requestId,
+          success = false,
+          supportedCatalogVersions = KeyboardProfiles.SUPPORTED_CATALOG_VERSIONS,
+          error =
+            "No mutually supported keyboard profile catalog version; device supports " +
+              KeyboardProfiles.SUPPORTED_CATALOG_VERSIONS.joinToString(", "),
+        )
+      }
+      return
+    }
+    val profiles =
+      KeyboardProfiles.all.map { profile ->
+        KeyboardProfileInfo(
+          id = profile.id,
+          displayName = profile.displayName,
+          version = profile.version,
+          evidenceStatus = profile.evidenceStatus,
+          evidenceNote = profile.evidenceNote,
+          behavior =
+            KeyboardProfileBehaviorInfo(
+              composeWords = profile.behavior.composeWords,
+              enterStrategy = profile.behavior.enterStrategy.name,
+              backspaceStrategy = profile.behavior.backspaceStrategy.name,
+              recomposeOnCursorMove = profile.behavior.recomposeOnCursorMove,
+              recomposeOnBackspaceIntoWord = profile.behavior.recomposeOnBackspaceIntoWord,
+              batchEdits = profile.behavior.batchEdits,
+            ),
+        )
+      }
+    val activeProfileId = SharedPreferencesKeyboardProfileStore(this).activeProfileId()
+    launchRequestScope(requestId) {
+      broadcastKeyboardProfileCatalog(
+        requestId = requestId,
+        success = true,
+        catalogVersion = catalogVersion,
+        supportedCatalogVersions = KeyboardProfiles.SUPPORTED_CATALOG_VERSIONS,
+        activeProfileId = activeProfileId,
+        profiles = profiles,
+      )
     }
   }
 
@@ -6073,6 +6125,39 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         TAG,
         "Broadcasted keyboard profile result to ${webSocketServer.getConnectionCount()} clients",
       )
+    }
+  }
+
+  private suspend fun broadcastKeyboardProfileCatalog(
+    requestId: String?,
+    success: Boolean,
+    catalogVersion: Int? = null,
+    supportedCatalogVersions: List<Int>,
+    activeProfileId: String? = null,
+    profiles: List<KeyboardProfileInfo> = emptyList(),
+    error: String? = null,
+  ) {
+    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
+      Log.d(TAG, "WebSocket server not running, skipping keyboard profile catalog response")
+      return
+    }
+
+    resultBroadcaster.guard(requestId, "keyboard_profiles_result") {
+      webSocketServer.broadcastWithPerfSync { perfTiming ->
+        webSocketFrameJson(
+          "keyboard_profiles_result",
+          requestId = requestId,
+          perfTiming = perfTiming,
+        ) {
+          put("success", success)
+          put("catalogId", "automobile_behavior_profiles")
+          if (catalogVersion != null) put("catalogVersion", catalogVersion)
+          put("supportedCatalogVersions", jsonCompact.encodeToJsonElement(supportedCatalogVersions))
+          if (activeProfileId != null) put("activeProfileId", activeProfileId)
+          if (success) put("profiles", jsonCompact.encodeToJsonElement(profiles))
+          if (error != null) put("error", error)
+        }
+      }
     }
   }
 

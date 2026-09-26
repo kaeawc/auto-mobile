@@ -36,6 +36,7 @@ import dev.jasonpearson.automobile.protocol.RequestImeAction
 import dev.jasonpearson.automobile.protocol.RequestInsertText
 import dev.jasonpearson.automobile.protocol.RequestInstalledPackages
 import dev.jasonpearson.automobile.protocol.RequestLaunchIntent
+import dev.jasonpearson.automobile.protocol.RequestListKeyboardProfiles
 import dev.jasonpearson.automobile.protocol.RequestPackageInfo
 import dev.jasonpearson.automobile.protocol.RequestPinch
 import dev.jasonpearson.automobile.protocol.RequestScreenshot
@@ -270,6 +271,8 @@ class CtrlProxyMessageHandler(
         actions.requestCommitText(request.requestId, request.text, request.priorImeId)
       is RequestSetKeyboardProfile ->
         actions.requestSetKeyboardProfile(request.requestId, request.profileId)
+      is RequestListKeyboardProfiles ->
+        actions.requestListKeyboardProfiles(request.requestId, request.supportedCatalogVersions)
       is RequestImeAction ->
         if (request.frameContext == null) {
           actions.requestImeAction(request.requestId, request.action)

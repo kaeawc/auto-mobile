@@ -135,6 +135,7 @@ import { ensureSecureSharedAutoMobileDirSync } from "../../../utils/tempDir";
 // Import delegates
 import { CtrlProxyGestures } from "./CtrlProxyGestures";
 import { CtrlProxyText, type ImeCommitActionResult } from "./CtrlProxyText";
+import type { KeyboardProfileCatalog } from "../../action/keyboardProfiles";
 import { CtrlProxyHierarchy } from "./CtrlProxyHierarchy";
 import { CtrlProxyStorage } from "./CtrlProxyStorage";
 import { CtrlProxyCertificates, type CertificateFileSystem } from "./CtrlProxyCertificates";
@@ -337,6 +338,17 @@ interface WsSetKeyboardProfileResultMessage extends WsRequestBase {
   type: "set_keyboard_profile_result";
   activeProfileId?: string;
   previousProfileId?: string;
+}
+
+interface WsKeyboardProfilesResultMessage extends WsMessageBase {
+  type: "keyboard_profiles_result";
+  requestId: string;
+  success: boolean;
+  catalogId: string;
+  catalogVersion?: number;
+  supportedCatalogVersions?: number[];
+  activeProfileId?: string;
+  profiles?: KeyboardProfileCatalog["profiles"];
 }
 
 interface WsInsertTextResultMessage extends WsRequestBase {
@@ -810,6 +822,7 @@ type WebSocketMessage =
   | WsSetTextResultMessage
   | WsCommitTextResultMessage
   | WsSetKeyboardProfileResultMessage
+  | WsKeyboardProfilesResultMessage
   | WsInsertTextResultMessage
   | WsImeActionResultMessage
   | WsSelectAllResultMessage
@@ -963,6 +976,11 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
     previousProfileId?: string;
     error?: string;
   }>;
+
+  listKeyboardProfiles(
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+  ): Promise<KeyboardProfileCatalog>;
 
   requestClearText(
     resourceId?: string,
@@ -2566,6 +2584,13 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     error?: string;
   }> {
     return this.text.setKeyboardProfile(profileId, timeoutMs, perf);
+  }
+
+  async listKeyboardProfiles(
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+  ): Promise<KeyboardProfileCatalog> {
+    return this.text.listKeyboardProfiles(timeoutMs, perf);
   }
 
   async requestClearText(
@@ -4256,6 +4281,18 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           success: message.success,
           activeProfileId: message.activeProfileId,
           previousProfileId: message.previousProfileId,
+          error: message.error,
+        });
+      }
+
+      if (message.type === "keyboard_profiles_result" && message.requestId) {
+        this.requestManager.resolve<KeyboardProfileCatalog>(message.requestId, {
+          success: message.success,
+          catalogId: message.catalogId,
+          catalogVersion: message.catalogVersion,
+          supportedCatalogVersions: message.supportedCatalogVersions,
+          activeProfileId: message.activeProfileId,
+          profiles: message.profiles,
           error: message.error,
         });
       }

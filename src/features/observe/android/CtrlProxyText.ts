@@ -9,6 +9,10 @@ import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import type { BaseResult } from "../shared/types";
 import type { DelegateContext } from "./types";
 import { sendCommand } from "../DeviceServiceUtils";
+import {
+  KEYBOARD_PROFILE_CATALOG_VERSIONS,
+  type KeyboardProfileCatalog,
+} from "../../action/keyboardProfiles";
 
 export interface SetKeyboardProfileResult {
   success: boolean;
@@ -78,6 +82,21 @@ export class CtrlProxyText extends SharedTextDelegate {
       timeoutMs,
       perf,
       errorLabel: "Set keyboard profile",
+    });
+  }
+
+  async listKeyboardProfiles(
+    timeoutMs: number = 5000,
+    perf?: PerformanceTracker,
+  ): Promise<KeyboardProfileCatalog & { error?: string }> {
+    return sendCommand<KeyboardProfileCatalog & { error?: string }>(this.context, {
+      idPrefix: "listKeyboardProfiles",
+      responseType: "keyboard_profiles_result",
+      messageType: "request_list_keyboard_profiles",
+      params: { supportedCatalogVersions: Array.from(KEYBOARD_PROFILE_CATALOG_VERSIONS) },
+      timeoutMs,
+      perf,
+      errorLabel: "List keyboard profiles",
     });
   }
 }

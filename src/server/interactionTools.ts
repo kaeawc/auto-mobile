@@ -18,7 +18,13 @@ import { Rotate } from "../features/action/Rotate";
 import { OpenURL } from "../features/action/OpenURL";
 import { Clipboard } from "../features/action/Clipboard";
 import { Keyboard } from "../features/action/Keyboard";
-import { KEYBOARD_PROFILE_IDS } from "../features/action/keyboardProfiles";
+import { withAndroidImeLock } from "../features/action/androidImeLock";
+import {
+  KEYBOARD_PROFILE_CATALOG_ID,
+  KEYBOARD_PROFILE_CATALOG_VERSIONS,
+  KEYBOARD_PROFILE_IDS,
+  type KeyboardProfileCatalog,
+} from "../features/action/keyboardProfiles";
 import { AndroidImeCatalog } from "../features/action/AndroidImeCatalog";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import {
@@ -177,12 +183,14 @@ export const shakeSchema = addDeviceTargetingToSchema(
 export const keyboardSchema = addDeviceTargetingToSchema(
   z.object({
     action: z
-      .enum(["open", "close", "detect", "setProfile", "listImes", "setIme"])
-      .describe("Keyboard action"),
+      .enum(["open", "close", "detect", "setProfile", "listProfiles", "listImes", "setIme"])
+      .describe(
+        "Keyboard action; listProfiles returns AutoMobile behavior models and listImes returns installed Android input methods",
+      ),
     profile: z
       .enum(KEYBOARD_PROFILE_IDS)
       .optional()
-      .describe("Android keyboard behavior profile; required for setProfile"),
+      .describe("AutoMobile keyboard behavior profile; required for setProfile"),
     imeId: z.string().optional().describe("Installed Android IME component; required for setIme"),
     // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
     // not required — a device handle from getAndroid/getApple is sufficient on
@@ -210,11 +218,53 @@ export async function setKeyboardProfileForTool(
       "The installed control-proxy build does not support keyboard profiles; update/re-cut the APK.",
     );
   }
-  const result = await profileClient.setKeyboardProfile(profile);
+  const result = await withAndroidImeLock(device.deviceId, () =>
+    profileClient.setKeyboardProfile(profile),
+  );
   if (!result.success) {
     throw new ActionableError(result.error ?? "Failed to set keyboard profile.");
   }
   return { activeProfileId: result.activeProfileId, previousProfileId: result.previousProfileId };
+}
+
+export async function listKeyboardProfilesForTool(
+  device: BootedDevice,
+  client?: Pick<AndroidCtrlProxyClient, "supportsCommand" | "listKeyboardProfiles">,
+): Promise<KeyboardProfileCatalog> {
+  if (device.platform !== "android") {
+    throw new ActionableError(
+      "AutoMobile keyboard profiles are Android-only; select an Android device.",
+    );
+  }
+  const profileClient = client ?? AndroidCtrlProxyClient.getInstance(device);
+  const command = "request_list_keyboard_profiles";
+  if (!(await profileClient.supportsCommand(command))) {
+    throw new ActionableError(
+      "The installed control-proxy build does not support keyboard profile catalogs; update/re-cut the APK.",
+    );
+  }
+  const catalog = await profileClient.listKeyboardProfiles();
+  if (!catalog.success) {
+    throw new ActionableError(catalog.error ?? "Failed to list AutoMobile keyboard profiles.");
+  }
+  if (catalog.catalogId !== KEYBOARD_PROFILE_CATALOG_ID) {
+    throw new ActionableError(`Unsupported keyboard profile catalog '${catalog.catalogId}'.`);
+  }
+  if (
+    catalog.catalogVersion === undefined ||
+    !KEYBOARD_PROFILE_CATALOG_VERSIONS.some((version) => version === catalog.catalogVersion)
+  ) {
+    throw new ActionableError(
+      `Unsupported keyboard profile catalog version '${catalog.catalogVersion ?? "missing"}'.`,
+    );
+  }
+  if (!catalog.profiles?.length || !catalog.activeProfileId) {
+    throw new ActionableError("The AutoMobile keyboard profile catalog is incomplete.");
+  }
+  if (!catalog.profiles.some(({ id }) => id === catalog.activeProfileId)) {
+    throw new ActionableError("The active AutoMobile keyboard profile is not in its catalog.");
+  }
+  return catalog;
 }
 
 const tapOnSelectorSchema = z
@@ -2459,6 +2509,9 @@ export function registerInteractionTools() {
     try {
       if (args.action === "setProfile") {
         return createJSONToolResponse(await setKeyboardProfileForTool(device, args.profile));
+      }
+      if (args.action === "listProfiles") {
+        return createJSONToolResponse(await listKeyboardProfilesForTool(device));
       }
       if (args.action === "listImes" || args.action === "setIme") {
         if (device.platform !== "android") {

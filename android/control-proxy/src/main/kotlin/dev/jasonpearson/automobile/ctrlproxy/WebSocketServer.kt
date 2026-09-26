@@ -114,6 +114,7 @@ class WebSocketServer(
         is SetTextResult -> response.requestId
         is CommitTextResult -> response.requestId
         is SetKeyboardProfileResult -> response.requestId
+        is KeyboardProfileCatalogResult -> response.requestId
         is ImeActionResult -> response.requestId
         is SelectAllResult -> response.requestId
         is ActionResult -> response.requestId
@@ -303,6 +304,7 @@ class WebSocketServer(
                               "request_insert_text",
                               "request_commit_text",
                               "request_set_keyboard_profile",
+                              "request_list_keyboard_profiles",
                             ),
                         ),
                       )

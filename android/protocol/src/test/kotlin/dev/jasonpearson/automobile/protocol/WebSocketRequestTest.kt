@@ -24,6 +24,18 @@ class WebSocketRequestTest {
   }
 
   @Test
+  fun `deserialize request_list_keyboard_profiles with negotiated catalog versions`() {
+    val request =
+      json.decodeFromString<WebSocketRequest>(
+        """{"type":"request_list_keyboard_profiles","requestId":"profiles-1","supportedCatalogVersions":[1]}"""
+      )
+
+    assertIs<RequestListKeyboardProfiles>(request)
+    assertEquals("profiles-1", request.requestId)
+    assertEquals(listOf(1), request.supportedCatalogVersions)
+  }
+
+  @Test
   fun `deserialize request_hierarchy with filtering disabled`() {
     val message = """{"type":"request_hierarchy","requestId":"test-2","disableAllFiltering":true}"""
     val request = json.decodeFromString<WebSocketRequest>(message)

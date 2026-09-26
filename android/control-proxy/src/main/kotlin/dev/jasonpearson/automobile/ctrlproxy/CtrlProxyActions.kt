@@ -142,6 +142,8 @@ interface CtrlProxyActions {
 
   fun requestSetKeyboardProfile(requestId: String?, profileId: String)
 
+  fun requestListKeyboardProfiles(requestId: String?, supportedCatalogVersions: List<Int>)
+
   fun requestImeAction(requestId: String?, action: String)
 
   fun requestImeAction(requestId: String?, action: String, frameContext: String?) =

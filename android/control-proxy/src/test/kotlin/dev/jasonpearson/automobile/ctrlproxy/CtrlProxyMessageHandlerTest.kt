@@ -437,6 +437,14 @@ class CtrlProxyMessageHandlerTest {
   }
 
   @Test
+  fun `dispatches request_list_keyboard_profiles with supported versions`() = runTest {
+    dispatch(
+      """{"type":"request_list_keyboard_profiles","requestId":"profiles-1","supportedCatalogVersions":[1]}"""
+    )
+    assertEquals("requestListKeyboardProfiles" to listOf<Any?>("profiles-1", listOf(1)), lastCall)
+  }
+
+  @Test
   fun `dispatches request_ime_action`() = runTest {
     dispatch("""{"type":"request_ime_action","requestId":"i1","action":"search"}""")
     assertEquals("requestImeAction" to listOf<Any?>("i1", "search"), lastCall)

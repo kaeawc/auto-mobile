@@ -82,6 +82,11 @@ open class NoOpCtrlProxyActions : CtrlProxyActions {
 
   override fun requestSetKeyboardProfile(requestId: String?, profileId: String) {}
 
+  override fun requestListKeyboardProfiles(
+    requestId: String?,
+    supportedCatalogVersions: List<Int>,
+  ) {}
+
   override fun requestImeAction(requestId: String?, action: String) {}
 
   override fun requestSelectAll(requestId: String?) {}
@@ -335,6 +340,11 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
 
   override fun requestSetKeyboardProfile(requestId: String?, profileId: String) =
     record("requestSetKeyboardProfile", requestId, profileId)
+
+  override fun requestListKeyboardProfiles(
+    requestId: String?,
+    supportedCatalogVersions: List<Int>,
+  ) = record("requestListKeyboardProfiles", requestId, supportedCatalogVersions)
 
   override fun requestImeAction(requestId: String?, action: String) =
     record("requestImeAction", requestId, action)

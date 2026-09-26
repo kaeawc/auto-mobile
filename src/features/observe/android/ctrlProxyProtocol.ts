@@ -207,6 +207,13 @@ export interface RequestSetKeyboardProfileMessage {
   profileId: string;
 }
 
+/** `@SerialName("request_list_keyboard_profiles")` → `RequestListKeyboardProfiles` */
+export interface RequestListKeyboardProfilesMessage {
+  type: "request_list_keyboard_profiles";
+  requestId: string;
+  supportedCatalogVersions: number[];
+}
+
 /** `@SerialName("request_ime_action")` → `RequestImeAction` */
 export interface RequestImeActionMessage {
   type: "request_ime_action";
@@ -624,6 +631,7 @@ export type CtrlProxyRequest =
   | RequestInsertTextMessage
   | RequestCommitTextMessage
   | RequestSetKeyboardProfileMessage
+  | RequestListKeyboardProfilesMessage
   | RequestImeActionMessage
   | RequestSelectAllMessage
   | RequestActionMessage
@@ -697,6 +705,7 @@ const REQUEST_TYPE_REGISTRY: Record<CtrlProxyRequestType, true> = {
   request_insert_text: true,
   request_commit_text: true,
   request_set_keyboard_profile: true,
+  request_list_keyboard_profiles: true,
   request_ime_action: true,
   request_select_all: true,
   request_action: true,

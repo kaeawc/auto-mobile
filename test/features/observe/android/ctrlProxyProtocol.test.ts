@@ -39,6 +39,7 @@ const KOTLIN_SERIAL_NAMES = [
   "request_insert_text",
   "request_commit_text",
   "request_set_keyboard_profile",
+  "request_list_keyboard_profiles",
   "request_ime_action",
   "request_select_all",
   "request_action",

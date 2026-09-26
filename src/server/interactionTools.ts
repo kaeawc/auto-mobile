@@ -2466,7 +2466,10 @@ export function registerInteractionTools() {
             "Installed IME actions are Android-only; select an Android device.",
           );
         }
-        const catalog = new AndroidImeCatalog(defaultAdbClientFactory.create(device));
+        const catalog = new AndroidImeCatalog(
+          defaultAdbClientFactory.create(device),
+          device.deviceId,
+        );
         if (args.action === "listImes") {
           return createJSONToolResponse(await catalog.list());
         }

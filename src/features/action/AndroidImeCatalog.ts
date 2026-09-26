@@ -1,4 +1,5 @@
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { withAndroidImeLock } from "./androidImeLock";
 
 export interface InstalledIme {
   id: string;
@@ -13,7 +14,10 @@ export interface ImeCatalogState {
 
 /** System IMEs are Android components, distinct from CtrlProxy typing profiles. */
 export class AndroidImeCatalog {
-  constructor(private readonly adb: Pick<AdbExecutor, "execute">) {}
+  constructor(
+    private readonly adb: Pick<AdbExecutor, "execute">,
+    private readonly deviceId: string,
+  ) {}
 
   async list(signal?: AbortSignal): Promise<ImeCatalogState> {
     const [installed, enabled, active] = await Promise.all([
@@ -33,6 +37,10 @@ export class AndroidImeCatalog {
   }
 
   async select(id: string, signal?: AbortSignal): Promise<ImeCatalogState> {
+    return withAndroidImeLock(this.deviceId, () => this.selectLocked(id, signal), signal);
+  }
+
+  private async selectLocked(id: string, signal?: AbortSignal): Promise<ImeCatalogState> {
     const before = await this.list(signal);
     const target = before.installed.find((ime) => ime.id === id);
     if (!target) {

@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { AndroidImeCatalog } from "../../../src/features/action/AndroidImeCatalog";
+import { withAndroidImeLock } from "../../../src/features/action/androidImeLock";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 
 const gboard =
@@ -14,7 +15,7 @@ function fixture() {
     stdout: `${gboard}\n`,
     stderr: "",
   });
-  return { adb, catalog: new AndroidImeCatalog(adb) };
+  return { adb, catalog: new AndroidImeCatalog(adb, "test-device") };
 }
 
 test("lists actual installed IMEs separately from enabled and active state", async () => {
@@ -61,4 +62,19 @@ test("rejects malformed list output before it can become a selectable component"
     stderr: "",
   });
   await expect(catalog.list()).rejects.toThrow("invalid IME component list");
+});
+
+test("selection waits for another IME operation on the same device", async () => {
+  const { adb, catalog } = fixture();
+  let release: () => void = () => {};
+  const hold = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const inFlight = withAndroidImeLock("test-device", () => hold);
+  const selection = catalog.select(gboard);
+  await Promise.resolve();
+  expect(adb.getExecutedArgv()).toEqual([]);
+  release();
+  await inFlight;
+  expect((await selection).activeImeId).toBe(gboard);
 });

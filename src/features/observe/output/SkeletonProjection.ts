@@ -1,4 +1,4 @@
-import { foldSearchableLabels } from "../../utility/SearchableLabels";
+import { foldSearchableLabels, inheritsOwnerLabel } from "../../utility/SearchableLabels";
 import { toSearchable } from "../../utility/SearchableNode";
 import type { Element } from "../../../models/Element";
 import { isTruthy } from "../../../models/Element";
@@ -443,29 +443,13 @@ function toSkeletonEntry(acc: SkeletonAccumulator): SkeletonElement {
   return entry;
 }
 
-/**
- * Order two accumulators the way `tapOn`'s own explicit-`index` resolution
- * does, so a per-entry `index` this file emits is guaranteed usable verbatim
- * as `tapOn.index` (issue #6221 item 2).
- *
- * `DefaultElementSelector.pickMatch` treats an explicit `index` as "the Nth
- * on-screen match in hierarchy order" and — critically — resolves it against
- * the RAW DFS traversal order `ElementFinder.findElementsByResourceId` returns
- * with `preserveTraversalOrder: true` (selecting by index skips the by-area
- * sort `selectionStrategy: "first"` otherwise applies). That traversal order
- * is exactly the pre-order DFS counter this file's provenance already carries:
- * `ElementProvenance.enter`, assigned once per element by
- * `DefaultObserveElementCollector` while walking the SAME root-group order
- * `ElementFinder` walks (main roots, then window roots topmost-first) — so
- * ranking duplicate entries by `enter` reproduces tapOn's index assignment
- * exactly. Provenance-less producers (hand-built fixtures, non-provenance
- * callers) fall back to the skeleton's own top-to-bottom/left-to-right reading
- * order, the closest available approximation without a real traversal to rank
- * against.
- */
+/** Canonical window rank, then capture preorder; fixtures retain reading-order fallback. */
 function byHierarchyOrder(a: SkeletonAccumulator, b: SkeletonAccumulator): number {
   if (a.provenance && b.provenance) {
-    return a.provenance.enter - b.provenance.enter;
+    return (
+      (a.provenance.windowRank ?? 0) - (b.provenance.windowRank ?? 0) ||
+      a.provenance.enter - b.provenance.enter
+    );
   }
   return byReadingOrder(a, b);
 }
@@ -914,9 +898,6 @@ function imeAccumulator(
   };
 }
 
-/** Affordances whose row is a state/scroll container that commonly carries no text of its own. */
-const ATTRIBUTABLE_AFFORDANCES: readonly Affordance[] = ["toggle", "scroll"];
-
 /**
  * Attribute an owning row's label to unlabelled state containers (issue #6871).
  *
@@ -939,7 +920,7 @@ function attributeContainerLabels(accumulators: SkeletonAccumulator[]): void {
     return;
   }
   for (const acc of accumulators) {
-    if (acc.label !== undefined || !ATTRIBUTABLE_AFFORDANCES.some((a) => acc.affordances.has(a))) {
+    if (acc.label !== undefined || !inheritsOwnerLabel(acc.affordances)) {
       continue;
     }
     acc.label = smallestLabelledAncestor(acc, labelled)?.label;
@@ -999,6 +980,12 @@ export function projectSkeleton(elements: ObserveElements): SkeletonProjectionRe
   const kept = accumulators.filter((acc) => shouldKeep(acc, clickable));
   const actionable = kept.filter((acc) => acc.affordances.size > 0);
   const nonActionable = kept.filter((acc) => acc.affordances.size === 0);
+
+  // Captured rows share resolver ordering across categories and windows.
+  // Preserve the existing insertion order for producers without capture provenance.
+  if (actionable.every((entry) => entry.provenance?.windowRank !== undefined)) {
+    actionable.sort(byHierarchyOrder);
+  }
 
   // One row for the whole IME window, appended last: the keyboard is a mode, not
   // a list of targets, so it must never come before the app's own affordances.

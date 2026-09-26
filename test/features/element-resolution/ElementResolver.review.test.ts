@@ -1,3 +1,5 @@
+import { DefaultObserveElementCollector } from "../../../src/features/observe/ObserveElementCollector";
+import { projectSkeleton } from "../../../src/features/observe/output/SkeletonProjection";
 import { expect, test } from "bun:test";
 import { ElementResolver } from "../../../src/features/utility/ElementResolver";
 import { SearchableHierarchy } from "../../../src/features/utility/SearchableNode";
@@ -172,4 +174,121 @@ test("positional candidates exclude offscreen controls while keeping visible act
   const random = resolver.resolve(capture, { text: "Value", selectionStrategy: "random" }, intent);
   expect(random.chosen?.nativeId).toBe("visible-input");
   expect(random.indexInMatches).toBe(1);
+});
+
+test("sibling traversal crosses multi-label wrappers but not collection rows", () => {
+  const capture = snapshot([
+    node("list", {
+      class: "RecyclerView",
+      node: [
+        node("row", {
+          node: [
+            node("content", {
+              node: [node("label", { text: "Email" }), node("subtitle", { text: "Personal" })],
+            }),
+            node("remove", { clickable: true }),
+          ],
+        }),
+      ],
+    }),
+  ]);
+  expect(
+    resolver.resolve(capture, { elementId: "remove", sibling: { text: "Email" } }, tap).chosen
+      ?.nativeId,
+  ).toBe("remove");
+});
+
+test("unlabelled toggles inherit the displayed owning row label", () => {
+  const capture = snapshot([
+    node("row", {
+      clickable: true,
+      node: [node("label", { text: "Airplane mode" }), node("switch", { checkable: true })],
+    }),
+  ]);
+  expect(resolver.resolve(capture, { text: "Airplane mode", index: 1 }, tap).chosen?.nativeId).toBe(
+    "switch",
+  );
+});
+
+test("iOS table cells are sibling rows rather than collection boundaries", () => {
+  const capture = snapshot([
+    node("table", {
+      class: "UITableView",
+      node: [
+        node("cell", {
+          class: "UITableViewCell",
+          node: [node("label", { text: "Email" }), node("remove", { clickable: true })],
+        }),
+      ],
+    }),
+  ]);
+  expect(
+    resolver.resolve(capture, { elementId: "remove", sibling: { text: "Email" } }, tap).chosen
+      ?.nativeId,
+  ).toBe("remove");
+});
+
+test("observation indexes and text order agree with topmost resolver candidates", () => {
+  const main = node("open", { text: "Open", clickable: true });
+  const dialog = node("open", {
+    text: "Open",
+    clickable: true,
+    bounds: { left: 10, top: 10, right: 50, bottom: 50 },
+  });
+  const hierarchy = {
+    hierarchy: { node: [main] },
+    windows: [{ windowLayer: 10, hierarchy: { node: [dialog] } }],
+  } as any;
+  const observed = projectSkeleton(
+    new DefaultObserveElementCollector().collect(hierarchy, "android")!,
+  ).skeleton;
+  expect(observed.map((row) => row.bounds)).toEqual([
+    [10, 10, 50, 50],
+    [0, 0, 100, 100],
+  ]);
+  const capture = { id: "windows", nodes: new SearchableHierarchy().project(hierarchy) };
+  for (const [index, row] of observed.entries()) {
+    const selected = resolver.resolve(
+      capture,
+      { elementId: row.elementId, index: row.index },
+      tap,
+    ).chosen;
+    expect(selected?.bounds).toEqual(index === 0 ? dialog.bounds : main.bounds);
+    expect(resolver.resolve(capture, { text: row.label, index }, tap).chosen).toBe(selected);
+  }
+});
+
+test("sibling traversal includes the explicit container but cannot cross its boundary", () => {
+  const capture = snapshot([
+    node("outer", { node: [row("inside"), node("elsewhere", { clickable: true })] }),
+  ]);
+  expect(
+    resolver.resolve(
+      capture,
+      { elementId: "remove", container: { elementId: "inside" }, sibling: { text: "Email" } },
+      tap,
+    ).chosen?.nativeId,
+  ).toBe("remove");
+  expect(
+    resolver.resolve(
+      capture,
+      { elementId: "elsewhere", container: { elementId: "inside" }, sibling: { text: "Email" } },
+      tap,
+    ).chosen,
+  ).toBeNull();
+});
+
+test("sibling traversal never crosses collection boundaries to another row", () => {
+  const capture = snapshot([
+    node("list", {
+      className: "UICollectionView",
+      node: [
+        node("first", { node: [node("label", { text: "Email" })] }),
+        node("second", { node: [node("remove", { clickable: true })] }),
+      ],
+    }),
+  ]);
+  expect(
+    resolver.resolve(capture, { elementId: "remove", sibling: { text: "Email" } }, tap).chosen,
+  ).toBeNull();
 });

@@ -3,7 +3,12 @@ import type { BootedDevice, ViewHierarchyResult } from "../../models";
 import { ActionableError } from "../../models/ActionableError";
 import { NoOpPerformanceTracker, type PerformanceTracker } from "../../utils/PerformanceTracker";
 import type { IdGenerator } from "../../utils/IdGenerator";
-import type { Timer } from "../../utils/SystemTimer";
+import { defaultTimer, type Timer } from "../../utils/SystemTimer";
+import {
+  defaultAdbClientFactory,
+  type AdbClientFactory,
+} from "../../utils/android-cmdline-tools/AdbClientFactory";
+import { supplementAndroidHierarchy } from "../action/AndroidHierarchyFallback";
 import { AndroidCtrlProxyClient } from "./android";
 import { IOSCtrlProxyClient } from "./ios";
 import { ViewHierarchy } from "./ViewHierarchy";
@@ -28,6 +33,7 @@ export interface HierarchySyncClient {
 }
 
 export interface DeviceHierarchyCaptureDependencies {
+  adbFactory?: AdbClientFactory;
   syncClientFactory?: (device: BootedDevice) => HierarchySyncClient;
   settle?: SettleObserve;
   viewHierarchy?: Pick<ViewHierarchyReader, "getViewHierarchy">;
@@ -50,24 +56,41 @@ export function createDeviceHierarchyCapture(
       getViewHierarchy: (...args) =>
         (
           dependencies.viewHierarchy ??
-          new ViewHierarchy(device, undefined, null, dependencies.timer)
+          new ViewHierarchy(device, dependencies.adbFactory, null, dependencies.timer)
         ).getViewHierarchy(...args),
       filterOffscreenNodes,
     },
     async (request) => {
+      const timer = dependencies.timer ?? defaultTimer;
+      const timeoutMs = request.timeoutMs ?? 15000;
+      const deadline = timer.now() + timeoutMs;
       const syncClient = client();
       const synced = await syncClient.requestHierarchySync(
         new NoOpPerformanceTracker(),
         false,
         request.signal,
-        request.timeoutMs ?? 15000,
+        timeoutMs,
       );
       if (!synced) {
         throw new ActionableError("Unable to retrieve a fresh view hierarchy");
       }
-      return device.platform === "ios"
-        ? normalizeIosHierarchy(synced.hierarchy)
-        : syncClient.convertToViewHierarchyResult(synced.hierarchy);
+      if (device.platform === "ios") {
+        return normalizeIosHierarchy(synced.hierarchy);
+      }
+      const hierarchy = syncClient.convertToViewHierarchyResult(synced.hierarchy);
+      if (!hierarchy.ctrlProxyIncomplete || timer.now() >= deadline) {
+        return hierarchy;
+      }
+      return supplementAndroidHierarchy(
+        hierarchy,
+        {
+          adb: (dependencies.adbFactory ?? defaultAdbClientFactory).create(device),
+          timer,
+          idGenerator: dependencies.ids,
+        },
+        deadline,
+        request.signal,
+      );
     },
     (hierarchy) => projectActionableHierarchy(device.platform, hierarchy),
     dependencies.settle,

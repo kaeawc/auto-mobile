@@ -31,7 +31,7 @@ describe("observe-to-resolve migration contract", () => {
     expect([...allowed].filter((key) => !keys.has(key))).toEqual([]);
     // The trim-only fixture deliberately has no actionable skeleton rows.
     expect(captures.map((capture) => contractCases(capture).length)).toEqual([
-      30, 0, 3, 12, 25, 24, 30, 30, 2, 9, 9,
+      30, 0, 3, 3, 12, 25, 24, 30, 30, 2, 9, 9,
     ]);
   });
 
@@ -39,6 +39,7 @@ describe("observe-to-resolve migration contract", () => {
     expect(captures.map(({ name }) => name)).toEqual([
       "android-home.json",
       "android-playground-raw-trim-candidates.json",
+      "android-test-tag.json",
       "ctrlproxy-notification-group-compact-bounds.json/collapsed",
       "ctrlproxy-notification-group-compact-bounds.json/expanded",
       "diff/scroll-after.json",
@@ -81,6 +82,19 @@ describe("observe-to-resolve migration contract", () => {
       },
     };
     expect(compareResolvers([selected], legacy, missingTarget)).toEqual([selected.key]);
+  });
+  test("every query kind has fixture coverage and test-tag drift is detected", () => {
+    const counts = { elementId: 0, text: 0, testTag: 0 };
+    for (const { query } of cases) counts[query.kind]++;
+    expect(counts).toEqual({ elementId: 95, text: 81, testTag: 1 });
+    const brokenTags: ContractResolver = {
+      resolve(capture, query) {
+        return query.kind === "testTag"
+          ? { candidates: [], chosen: null }
+          : legacy.resolve(capture, query);
+      },
+    };
+    expect(compareResolvers(cases, legacy, brokenTags)).toHaveLength(counts.testTag);
   });
   test("differential seam distinguishes overlapping ID-less candidates", () => {
     const a = {

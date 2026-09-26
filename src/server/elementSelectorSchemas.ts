@@ -81,6 +81,10 @@ export const resolverSelectorSchema: z.ZodType<ResolverSelector> = z.lazy(() =>
     })
     .strict()
     .refine(
+      (selector) => selector.elementId === undefined || selector.match !== "regex",
+      "Element ID selectors do not support regular expressions",
+    )
+    .refine(
       (selector) =>
         [
           selector.elementId,

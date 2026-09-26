@@ -108,7 +108,8 @@ function eligible(node: SearchableEntry, intent: ResolutionIntent): boolean {
   if (intent.action === "focus") {
     return node.focusable || node.affordances.includes("input");
   }
-  return node.affordances.includes(intent.action);
+  const actions = intent.action === "tap" ? ["tap", "toggle"] : [intent.action];
+  return actions.some((action) => node.affordances.includes(action as ResolutionAction));
 }
 
 function isWithin(
@@ -144,8 +145,18 @@ export class ElementResolver {
     selector: ResolverSelector,
     intent: ResolutionIntent,
   ): ElementResolution {
+    return this.resolveInNodes(snapshot, selector, intent, snapshot.nodes);
+  }
+
+  private resolveInNodes(
+    snapshot: ResolverSnapshot,
+    selector: ResolverSelector,
+    intent: ResolutionIntent,
+    availableNodes: readonly SearchableEntry[],
+    boundary?: SearchableEntry,
+  ): ElementResolution {
     const seen = new Set<SearchableEntry["source"]>();
-    let nodes = [...snapshot.nodes]
+    let nodes = [...availableNodes]
       .sort((a, b) => a.windowRank - b.windowRank || a.index - b.index)
       .filter((node) => {
         if (seen.has(node.source)) {
@@ -154,9 +165,15 @@ export class ElementResolver {
         seen.add(node.source);
         return true;
       });
-    let scope: SearchableEntry | undefined;
+    let scope: SearchableEntry | undefined = boundary;
     if (selector.container) {
-      const container = this.resolve(snapshot, selector.container, { action: "inspect" });
+      const container = this.resolveInNodes(
+        snapshot,
+        selector.container,
+        { action: "inspect" },
+        nodes,
+        scope,
+      );
       if (!container.chosen) {
         return { ...container, error: container.error ?? "Container not found" };
       }
@@ -164,7 +181,7 @@ export class ElementResolver {
       nodes = nodes.filter((node) => isWithin(node, scope!, snapshot.nodes));
     }
     if (selector.sibling) {
-      const siblings = this.siblingNodes(snapshot, nodes, selector.sibling);
+      const siblings = this.siblingNodes(snapshot, nodes, selector.sibling, scope);
       if (siblings.error) {
         return {
           chosen: null,
@@ -221,14 +238,10 @@ export class ElementResolver {
       const selected = result.candidates[selector.index];
       result.chosen = actionTarget(selected);
     } else if (selector.selectionStrategy === "random") {
-      const selected =
-        result.candidates[
-          Math.min(
-            result.candidates.length - 1,
-            Math.floor(this.random() * result.candidates.length),
-          )
-        ];
-      result.chosen = actionTarget(selected);
+      result.chosen =
+        actionable[
+          Math.min(actionable.length - 1, Math.floor(this.random() * actionable.length))
+        ] ?? null;
     } else {
       result.chosen =
         [...actionable].sort(
@@ -277,12 +290,13 @@ export class ElementResolver {
     snapshot: ResolverSnapshot,
     nodes: SearchableEntry[],
     sibling: ResolverSelector,
+    scope?: SearchableEntry,
   ): { nodes: SearchableEntry[]; error?: string } {
-    const anchors = this.match(nodes, sibling, { action: "inspect" });
+    const anchors = this.resolveInNodes(snapshot, sibling, { action: "inspect" }, nodes, scope);
     if (anchors.error) {
       return { nodes: [], error: anchors.error };
     }
-    const anchor = anchors.matches[sibling.index ?? 0]?.node;
+    const anchor = this.siblingAnchor(anchors, snapshot);
     let parent = anchor?.parentIndex;
     while (
       parent !== undefined &&
@@ -305,6 +319,20 @@ export class ElementResolver {
           !isWithin(node, anchor, snapshot.nodes),
       ),
     };
+  }
+
+  private siblingAnchor(
+    anchors: ElementResolution,
+    snapshot: ResolverSnapshot,
+  ): SearchableEntry | undefined {
+    const matched = anchors.matches.find(({ node }) => node === anchors.chosen);
+    const sources = matched?.sourceNodes ?? (anchors.chosen ? [anchors.chosen] : []);
+    // Text promotion may choose the actionable row. Anchor sibling traversal on
+    // its matching descendant label instead of stepping outside that row.
+    return sources.find(
+      (source) =>
+        !sources.some((other) => other !== source && isWithin(other, source, snapshot.nodes)),
+    );
   }
 
   private semanticTarget(
@@ -448,6 +476,13 @@ export class ElementResolver {
     query: string,
     matchMode: MatchMode,
   ): Pick<ElementResolution, "matches" | "matchMode" | "error"> {
+    if (matchMode === "regex") {
+      return {
+        matches: [],
+        matchMode,
+        error: "Element ID selectors do not support regular expressions",
+      };
+    }
     if (matchMode === "contains") {
       return {
         matches: nodes

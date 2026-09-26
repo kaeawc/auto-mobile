@@ -19,7 +19,8 @@ import {
   SetAccessibilityFocusResult,
   ViewHierarchyResult,
 } from "../../models";
-import { ElementResolver } from "../utility/ElementResolver";
+import { ElementResolver, type ElementResolution } from "../utility/ElementResolver";
+import { normalizeQuotes } from "../utility/TextMatcher";
 import { SearchableHierarchy } from "../utility/SearchableNode";
 import type { ObserveScreen } from "../observe/interfaces/ObserveScreen";
 import { RealObserveScreen } from "../observe/ObserveScreen";
@@ -35,6 +36,19 @@ export interface AccessibilityFocusService {
   setAccessibilityFocus(resourceId: string): Promise<void>;
   clearAccessibilityFocus(resourceId: string): Promise<void>;
   requestCurrentFocus(): Promise<CurrentFocusResult>;
+}
+
+function matchedTextNativeId(resolution: ElementResolution, text: string): string | undefined {
+  const matched = resolution.matches.find(({ node }) => node === resolution.chosen);
+  const query = normalizeQuotes(text).trim().toLowerCase();
+  return matched?.sourceNodes?.find(
+    (node) =>
+      node.nativeId &&
+      Object.values(node.textSources).some((value) => {
+        const source = value && normalizeQuotes(value).trim().toLowerCase();
+        return resolution.matchMode === "contains" ? source?.includes(query) : source === query;
+      }),
+  )?.nativeId;
 }
 
 export interface SetAccessibilityFocusDependencies {
@@ -122,14 +136,22 @@ export class SetAccessibilityFocus {
     const resolution = this.resolver.resolve(
       { id: String(hierarchy.updatedAt ?? "accessibility-focus"), nodes },
       selector,
-      { action: "accessibility-focus", requireResourceId: true },
+      options.text
+        ? { action: "inspect" }
+        : { action: "accessibility-focus", requireResourceId: true },
     );
     if (resolution.error) {
       throw new ActionableError(resolution.error);
     }
-    const resourceId = resolution.chosen?.nativeId;
+    const resourceId = options.text
+      ? matchedTextNativeId(resolution, options.text)
+      : resolution.chosen?.nativeId;
     if (!resourceId) {
-      if (resolution.matches.some(({ node }) => !node.nativeId)) {
+      if (
+        resolution.matches.some(({ node, sourceNodes }) =>
+          (sourceNodes ?? [node]).some((source) => !source.nativeId),
+        )
+      ) {
         throw new ActionableError(
           "Matched element has no resource-id; accessibility focus requires one.",
         );
@@ -139,7 +161,11 @@ export class SetAccessibilityFocus {
       );
     }
     const sharing = new Set(
-      nodes.filter((node) => node.nativeId === resourceId).map((node) => node.source),
+      nodes
+        .filter(
+          (node) => node.nativeId === resourceId || node.nativeId?.endsWith(`:id/${resourceId}`),
+        )
+        .map((node) => node.source),
     ).size;
     if (sharing > 1) {
       throw new ActionableError(

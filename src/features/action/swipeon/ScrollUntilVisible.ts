@@ -571,7 +571,17 @@ export class ScrollUntilVisible {
       element = this.resolveElement(viewHierarchy, options.container);
     }
     if (!element) {
-      element = this.resolveElement(viewHierarchy, {}, "scroll");
+      // Automatic scrolling keeps traversal priority: the outer scrollable
+      // precedes nested carousels in the same window.
+      const resolution = this.resolver.resolve(
+        {
+          id: String(viewHierarchy.updatedAt ?? "swipe"),
+          nodes: this.searchable.project(viewHierarchy),
+        },
+        {},
+        { action: "scroll" },
+      );
+      element = resolution.candidates.find((candidate) => candidate.element)?.element ?? null;
       if (element) {
         logger.info(`[SwipeOn] Found scrollable container automatically`);
       }

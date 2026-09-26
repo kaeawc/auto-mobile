@@ -1,6 +1,7 @@
 import { FakeScrollElementResolver } from "../../../fakes/FakeScrollElementResolver";
 import { beforeEach, describe, expect, test } from "bun:test";
 import { ScrollUntilVisible } from "../../../../src/features/action/swipeon/ScrollUntilVisible";
+import { ElementResolver } from "../../../../src/features/utility/ElementResolver";
 import { FakeAccessibilityDetector } from "../../../fakes/FakeAccessibilityDetector";
 import { FakeElementFinder } from "../../../fakes/FakeElementFinder";
 import { FakeTimer } from "../../../fakes/FakeTimer";
@@ -57,6 +58,7 @@ function makeScrollUntilVisible({
   observeOptions,
   observedInteractionOptions,
   terminalEvidence,
+  resolver,
 }: {
   accessibilityDetector: FakeAccessibilityDetector;
   finder: FakeElementFinder;
@@ -69,6 +71,7 @@ function makeScrollUntilVisible({
   observeOptions?: Array<Record<string, unknown> | undefined>;
   observedInteractionOptions?: Array<Record<string, unknown>>;
   terminalEvidence?: ObserveResult[];
+  resolver?: ElementResolver;
 }): ScrollUntilVisible {
   let callIdx = 0;
 
@@ -96,7 +99,7 @@ function makeScrollUntilVisible({
 
   return new ScrollUntilVisible({
     device: DEVICE,
-    resolver: new FakeScrollElementResolver(finder),
+    resolver: resolver ?? new FakeScrollElementResolver(finder),
     geometry: fakeGeometry,
     observeScreen: fakeObserveScreen as any,
     accessibilityService,
@@ -137,6 +140,40 @@ describe("ScrollUntilVisible overshoot recovery", () => {
     timer.enableAutoAdvance();
     accessibilityService = new FakeScrollAccessibilityService();
     talkBackExecutor = new FakeTalkBackSwipeExecutor();
+  });
+
+  test("automatic scrolling keeps the outer scrollable ahead of a nested carousel", async () => {
+    const observation: ObserveResult = {
+      ...makeObserveResult(),
+      viewHierarchy: {
+        hierarchy: {
+          node: {
+            bounds: { left: 0, top: 0, right: 400, bottom: 900 },
+            "resource-id": "feed",
+            scrollable: true,
+            node: [
+              {
+                bounds: { left: 10, top: 100, right: 390, bottom: 300 },
+                "resource-id": "carousel",
+                scrollable: true,
+              },
+            ],
+          },
+        },
+      },
+    };
+    const scroll = makeScrollUntilVisible({
+      accessibilityDetector: detector,
+      finder,
+      timer,
+      accessibilityService,
+      observeResults: [observation],
+      talkBackExecutor,
+      resolver: new ElementResolver(),
+    });
+    expect((await scroll.findScrollableContainer(BASE_OPTIONS, observation))["resource-id"]).toBe(
+      "feed",
+    );
   });
 
   test("element found in reverse after forward end-of-list", async () => {

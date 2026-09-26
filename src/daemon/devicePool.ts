@@ -1471,6 +1471,16 @@ export class DevicePool {
   }
 
   /**
+   * A verified AVD deletion retires the name's crash-loop history. Ordinary
+   * pool removal and re-add keep it, because they can refer to the same AVD.
+   */
+  clearAndroidRebootBudgetForDeletedAvd(target: Pick<DeviceInfo, "platform" | "name">): void {
+    if (target.platform === "android") {
+      this.androidDeviceReboot.clear(target);
+    }
+  }
+
+  /**
    * Apply any intentional-shutdown marker to a disconnect, gated on the device
    * incarnation. Returns `true` when the disconnect is fully handled here — the
    * marked device was removed, or the signal was stale and the live device kept —

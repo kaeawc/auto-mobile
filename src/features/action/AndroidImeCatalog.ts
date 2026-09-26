@@ -37,10 +37,11 @@ export class AndroidImeCatalog {
   }
 
   async select(id: string, signal?: AbortSignal): Promise<ImeCatalogState> {
-    return withAndroidImeLock(this.deviceId, () => this.selectLocked(id, signal), signal);
+    return withAndroidImeLock(this.deviceId, () => this.selectWithinLock(id, signal), signal);
   }
 
-  private async selectLocked(id: string, signal?: AbortSignal): Promise<ImeCatalogState> {
+  /** For a scoped session that already holds the device IME lock. */
+  async selectWithinLock(id: string, signal?: AbortSignal): Promise<ImeCatalogState> {
     const before = await this.list(signal);
     const target = before.installed.find((ime) => ime.id === id);
     if (!target) {
@@ -52,7 +53,10 @@ export class AndroidImeCatalog {
     if (before.activeImeId === id) {
       return before;
     }
-    const result = await this.adb.execute(["shell", "ime", "set", id], { signal });
+    const result = await this.adb.execute(["shell", "ime", "set", id], {
+      signal,
+      waitForProcessSettlementAfterAbort: true,
+    });
     if (result.stderr.trim()) {
       throw new Error(`Failed to select IME ${id}: ${result.stderr.trim()}`);
     }

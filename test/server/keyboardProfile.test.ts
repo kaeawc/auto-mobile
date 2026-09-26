@@ -32,6 +32,14 @@ test("keyboard schema exposes installed-IME discovery separately from behavior p
       platform: "android",
     }).success,
   ).toBe(true);
+  expect(
+    keyboardSchema.safeParse({
+      action: "tapImeKey",
+      imeId: "com.example/.Keyboard",
+      key: "a",
+      platform: "android",
+    }).success,
+  ).toBe(true);
 });
 
 test("listProfiles negotiates a versioned AutoMobile behavior catalog", async () => {

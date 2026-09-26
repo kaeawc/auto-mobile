@@ -174,9 +174,18 @@ export interface ShakeArgs {
 }
 
 export interface KeyboardArgs {
-  action: "open" | "close" | "detect" | "setProfile" | "listProfiles" | "listImes" | "setIme";
+  action:
+    | "open"
+    | "close"
+    | "detect"
+    | "setProfile"
+    | "listProfiles"
+    | "listImes"
+    | "setIme"
+    | "tapImeKey";
   profile?: import("../features/action/keyboardProfiles").KeyboardProfileId;
   imeId?: string;
+  key?: string;
   platform?: Platform;
 }
 

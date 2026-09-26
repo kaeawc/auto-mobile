@@ -193,24 +193,25 @@ describe("ObserveElementsBuilder", () => {
         bounds: scrollableList.bounds,
       },
     ]);
-    // Preserve main-root-first output until live actions share capture ordering.
+    // Captured windows precede the unranked main tree under the shared
+    // topmost-first order (#7629); category contents and traversal count stay fixed.
     expect(elements.text).toEqual([
+      { ...topWindowText.$, bounds: topWindowText.bounds },
       { ...clickableButton.$, bounds: clickableButton.bounds },
       { ...mainImage.$, bounds: mainImage.bounds },
-      { ...topWindowText.$, bounds: topWindowText.bounds },
     ]);
     expect(elements.media).toEqual([
+      {
+        className: "android.widget.VideoView",
+        mediaType: "video",
+        bounds: bottomWindowVideo.bounds,
+      },
       {
         className: "android.widget.ImageView",
         mediaType: "image",
         bounds: mainImage.bounds,
         contentDescription: "Hero image",
         resourceId: "hero",
-      },
-      {
-        className: "android.widget.VideoView",
-        mediaType: "video",
-        bounds: bottomWindowVideo.bounds,
       },
     ]);
   });
@@ -257,7 +258,7 @@ describe("ObserveElementsBuilder", () => {
     ]);
   });
 
-  test("collects iOS accessibility labels with text and media from the shared traversal", () => {
+  test("collects iOS text and media from the shared traversal without adding accessibility-label text", () => {
     const labelOnlyImage = node({
       bounds: { left: 0, top: 0, right: 50, bottom: 50 },
       className: "CustomImageWidget",
@@ -291,10 +292,7 @@ describe("ObserveElementsBuilder", () => {
     const elements = builder.build(viewHierarchy, "ios");
 
     expect(parser.rootTraversalStarts).toBe(1);
-    expect(elements.text).toEqual([
-      { ...labelOnlyImage.$, bounds: labelOnlyImage.bounds },
-      { ...explicitText.$, bounds: explicitText.bounds },
-    ]);
+    expect(elements.text).toEqual([{ ...explicitText.$, bounds: explicitText.bounds }]);
     expect(elements.media).toEqual([
       {
         className: "CustomImageWidget",

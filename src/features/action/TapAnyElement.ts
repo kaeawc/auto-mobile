@@ -385,8 +385,9 @@ export class TapAnyElement extends BaseVisualChange {
               undefined,
               request.signal,
             );
-            if (!hierarchy)
+            if (!hierarchy) {
               throw new ActionableError("Unable to retrieve a fresh tapAny hierarchy");
+            }
             return hierarchy;
           },
           projectVisible: (hierarchy) => this.viewHierarchy.projectActionableHierarchy(hierarchy),
@@ -533,7 +534,9 @@ export class TapAnyElement extends BaseVisualChange {
     signal?: AbortSignal,
   ): Promise<ViewHierarchyResult | null> {
     throwIfAborted(signal);
-    if (timeoutMs <= 0) return null;
+    if (timeoutMs <= 0) {
+      return null;
+    }
     try {
       const snapshot = await this.hierarchyCapture.capture({
         freshness: "fresh",
@@ -580,7 +583,9 @@ export class TapAnyElement extends BaseVisualChange {
           signal,
           effectiveTimeoutMs,
         );
-        if (!synced?.hierarchy) return null;
+        if (!synced?.hierarchy) {
+          return null;
+        }
         const hierarchy = this.viewHierarchy.normalizeIosHierarchy(synced.hierarchy);
         return this.prepareViewHierarchyForResponse(hierarchy, screenSize);
       }

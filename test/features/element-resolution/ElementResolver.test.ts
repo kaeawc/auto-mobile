@@ -161,7 +161,7 @@ test("newer captures require matching identity proof for references", () => {
   );
 });
 
-test("explicit index counts the same ranked matches across action intents", () => {
+test("explicit index retains the shared ranked actionable rows across intents", () => {
   const capture = snapshot([
     node("label", "Buy milk"),
     node("input", "Buy milk", { class: "android.widget.EditText", focusable: true }),
@@ -169,6 +169,7 @@ test("explicit index counts the same ranked matches across action intents", () =
   const result = resolver.resolve(capture, { text: "Buy milk", index: 1 }, { action: "input" });
   expect(result.candidates.map((entry) => entry.nativeId)).toEqual(["label", "input"]);
   expect(result.chosen?.nativeId).toBe("input");
+  expect(result.matches).toHaveLength(2);
   expect(
     resolver.resolve(capture, { text: "Buy milk", index: 0 }, { action: "input" }).chosen,
   ).toBeNull();
@@ -281,4 +282,15 @@ test("nested label text and ID have the same sibling control", () => {
       "remove",
     );
   }
+});
+
+test("text index counts displayed actionable rows rather than standalone text", () => {
+  const capture = snapshot([
+    node("label", "Row", { clickable: false }),
+    node("first", "Row"),
+    node("second", "Row", { bounds: { left: 0, top: 0, right: 20, bottom: 20 } }),
+    node("third", "Row"),
+  ]);
+  expect(resolver.resolve(capture, { text: "Row", index: 2 }, tap).chosen?.nativeId).toBe("third");
+  expect(resolver.resolve(capture, { text: "Row" }, tap).chosen?.nativeId).toBe("second");
 });

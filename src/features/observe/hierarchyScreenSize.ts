@@ -10,7 +10,9 @@ export function extractHierarchyScreenSize(
     return null;
   }
   const rootNode = hierarchy.node;
-  const candidates = [rootNode?.bounds ?? rootNode?.$?.bounds, hierarchy.bounds];
+  // Cleanup may collapse hierarchy.node to one small content control while
+  // hierarchy.bounds still describes the enclosing application screen.
+  const candidates = [hierarchy.bounds, rootNode?.bounds ?? rootNode?.$?.bounds];
   for (const candidate of candidates) {
     const bounds = parseBounds(candidate);
     if (!bounds) {

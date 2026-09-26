@@ -6,7 +6,12 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [24])
 class ConfigurableTypingPolicyTest {
   @Test
   fun `direct commits every character without a composing span`() {
@@ -131,6 +136,22 @@ class ConfigurableTypingPolicyTest {
   }
 
   @Test
+  fun `samsung recomposition keeps combining marks inside the word`() {
+    val policy = policy(KeyboardProfiles.SAMSUNG)
+    val editor = FakeEditor("e\u0301x")
+    editor.setSelection(2)
+
+    val regionOps = policy.onSelectionChanged(editor.snapshot())
+    assertEquals(listOf(ImeOp.SetComposingRegion(0, 3)), regionOps)
+    editor.apply(regionOps)
+
+    val insertionOps = policy.onText("y", editor.snapshot())
+    editor.apply(insertionOps)
+    assertEquals("e\u0301yx", editor.text)
+    assertEquals(3, editor.selectionStart)
+  }
+
+  @Test
   fun `moving outside a composing span finishes the old word`() {
     val policy = policy(KeyboardProfiles.SAMSUNG)
     val editor = FakeEditor()
@@ -236,6 +257,39 @@ class ConfigurableTypingPolicyTest {
     assertEquals("a", editor.text)
     assertEquals(0, editor.composingStart)
     assertEquals(1, editor.composingEnd)
+  }
+
+  @Test
+  fun `composition backspace removes a complete accented grapheme`() {
+    val policy = policy(KeyboardProfiles.GBOARD)
+    val editor = FakeEditor()
+    type(policy, editor, "e\u0301")
+
+    editor.apply(policy.onBackspace(editor.snapshot()))
+
+    assertEquals("", editor.text)
+    assertEquals(-1, editor.composingStart)
+  }
+
+  @Test
+  fun `committed backspace removes a complete joined emoji grapheme`() {
+    val family = "👩‍👩‍👧‍👦"
+    val editor = FakeEditor(family)
+    val ops = policy(KeyboardProfiles.DIRECT).onBackspace(editor.snapshot())
+
+    assertEquals(listOf(ImeOp.DeleteSurroundingText(family.length, 0)), ops)
+    editor.apply(ops)
+    assertEquals("", editor.text)
+  }
+
+  @Test
+  fun `committed backspace removes a complete accented grapheme`() {
+    val editor = FakeEditor("be\u0301")
+    val ops = policy(KeyboardProfiles.DIRECT).onBackspace(editor.snapshot())
+
+    assertEquals(listOf(ImeOp.DeleteSurroundingText(2, 0)), ops)
+    editor.apply(ops)
+    assertEquals("b", editor.text)
   }
 
   @Test

@@ -54,9 +54,11 @@ export interface ResolverSelector {
   elementId?: string;
   text?: string;
   testTag?: string;
+  contentDescription?: string;
+  className?: string;
   index?: number;
   selectionStrategy?: "first" | "random";
-  match?: "exact" | "contains";
+  match?: "exact" | "contains" | "regex";
   caseSensitive?: boolean;
   container?: ResolverSelector;
   sibling?: ResolverSelector;
@@ -67,10 +69,12 @@ export const resolverSelectorSchema: z.ZodType<ResolverSelector> = z.lazy(() =>
     .object({
       elementId: z.string().min(1).optional(),
       text: z.string().trim().min(1).optional(),
+      contentDescription: z.string().trim().min(1).optional(),
+      className: z.string().min(1).optional(),
       testTag: z.string().min(1).optional(),
       index: z.number().int().nonnegative().optional(),
       selectionStrategy: elementSelectionStrategySchema.optional(),
-      match: z.enum(["exact", "contains"]).optional(),
+      match: z.enum(["exact", "contains", "regex"]).optional(),
       caseSensitive: z.boolean().optional(),
       container: resolverSelectorSchema.optional(),
       sibling: resolverSelectorSchema.optional(),
@@ -78,8 +82,13 @@ export const resolverSelectorSchema: z.ZodType<ResolverSelector> = z.lazy(() =>
     .strict()
     .refine(
       (selector) =>
-        [selector.elementId, selector.text, selector.testTag].filter((value) => value !== undefined)
-          .length <= 1,
+        [
+          selector.elementId,
+          selector.text,
+          selector.testTag,
+          selector.contentDescription,
+          selector.className,
+        ].filter((value) => value !== undefined).length <= 1,
       "Provide at most one of elementId, text, or testTag",
     ),
 );

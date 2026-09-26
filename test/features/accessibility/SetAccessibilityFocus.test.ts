@@ -133,6 +133,35 @@ describe("SetAccessibilityFocus", () => {
     expect(service.calls).toEqual([{ method: "set", resourceId: "com.example:id/settings" }]);
   });
 
+  test("text focus sends the matched child's native ID instead of its clickable row", async () => {
+    observeScreen.setObserveResult(
+      makeObserveResult(
+        makeViewHierarchy([
+          {
+            $: {
+              "resource-id": "com.example:id/row",
+              clickable: true,
+              bounds: bounds(0, 0, 300, 80),
+            },
+            node: [
+              {
+                $: {
+                  "resource-id": "com.example:id/label",
+                  text: "Settings",
+                  bounds: bounds(10, 10, 200, 60),
+                },
+              },
+            ],
+          },
+        ]),
+      ),
+    );
+
+    await makeFeature().execute({ text: "Settings" });
+
+    expect(service.calls).toEqual([{ method: "set", resourceId: "com.example:id/label" }]);
+  });
+
   test("resolves contentDesc selector to a resource-id", async () => {
     observeScreen.setObserveResult(
       makeObserveResult(
@@ -210,6 +239,22 @@ describe("SetAccessibilityFocus", () => {
     await expect(
       feature.execute({ action: "set", resourceId: "com.example:id/title" }),
     ).rejects.toThrow(/shared by 2 elements/);
+    expect(service.calls).toHaveLength(0);
+  });
+
+  test("bare native IDs count namespace-equivalent service targets", async () => {
+    observeScreen.setObserveResult(
+      makeObserveResult(
+        makeViewHierarchy([
+          { $: { "resource-id": "title", bounds: bounds(0, 0, 100, 50) } },
+          { $: { "resource-id": "com.example:id/title", bounds: bounds(0, 60, 100, 110) } },
+        ]),
+      ),
+    );
+
+    await expect(makeFeature().execute({ resourceId: "title" })).rejects.toThrow(
+      /shared by 2 elements/,
+    );
     expect(service.calls).toHaveLength(0);
   });
 

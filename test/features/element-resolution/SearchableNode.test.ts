@@ -1,3 +1,4 @@
+import { FakeElementParser } from "../../fakes/FakeElementParser";
 import { DefaultObserveElementCollector } from "../../../src/features/observe/ObserveElementCollector";
 import { describe, expect, test } from "bun:test";
 import { SearchableHierarchy, toSearchable } from "../../../src/features/utility/SearchableNode";
@@ -92,4 +93,47 @@ test("collector output bounds cannot mutate cached compact capture bounds", () =
   const first = collector.collect(capture, "android")!;
   first.clickable![0].bounds.left = 99;
   expect(collector.collect(capture, "android")!.clickable![0].bounds.left).toBe(0);
+});
+
+test("minimal parsed descriptors retain raw observe categories", () => {
+  const parser = new FakeElementParser();
+  parser.nextNodeProperties = { clickable: true, scrollable: true, text: "Go" };
+  parser.nextParsedNode = { bounds };
+  const capture = { hierarchy: { node: { bounds } } };
+  const elements = new DefaultObserveElementCollector(parser).collect(capture, "android")!;
+  expect(elements.clickable).toHaveLength(1);
+  expect(elements.scrollable).toHaveLength(1);
+  expect(elements.text).toHaveLength(1);
+  expect(elements.text![0]).toEqual({ bounds });
+});
+
+test("collector output nested fields cannot mutate a cached capture", () => {
+  const collector = new DefaultObserveElementCollector();
+  const capture = {
+    hierarchy: {
+      node: {
+        bounds,
+        text: "Original",
+        actions: [],
+        extras: { nested: { label: "Original" } },
+        "semantic-links": [{ text: "Original", occurrence: 0 }],
+      },
+    },
+  };
+  const first = collector.collect(capture, "android")!.text![0];
+  first.actions.push("click");
+  first.extras.nested.label = "Changed";
+  first["semantic-links"]![0].text = "Changed";
+  const second = collector.collect(capture, "android")!;
+  expect(second.text![0].actions).toEqual([]);
+  expect(second.text![0].extras.nested.label).toBe("Original");
+  expect(second.text![0]["semantic-links"]![0].text).toBe("Original");
+  expect(second.clickable).toHaveLength(0);
+});
+
+test("searchable class identity accepts className while preferring class", () => {
+  expect(toSearchable({ bounds, className: "XCUIElementTypeTextField" }).className).toBe(
+    "XCUIElementTypeTextField",
+  );
+  expect(toSearchable({ bounds, class: "Primary", className: "Alias" }).className).toBe("Primary");
 });

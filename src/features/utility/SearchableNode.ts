@@ -87,7 +87,7 @@ export function toSearchable(properties: SearchableProperties): SearchableNode {
       ),
     ],
     testTag: nonEmptyString(properties["test-tag"]),
-    className: nonEmptyString(properties.class),
+    className: [properties.class, properties.className].map(nonEmptyString).find(Boolean),
     focusable: isTruthy(properties.focusable),
     bounds,
     actionable: bounds !== undefined && affordances.length > 0,
@@ -142,8 +142,11 @@ export class SearchableHierarchy {
         }
         const properties = this.parser.extractNodeProperties(source);
         const element = this.parser.parseNodeBounds(source) ?? undefined;
+        const raw = toSearchable(properties);
         const entry: SearchableEntry = {
           ...toSearchable(element ?? properties),
+          categories: raw.categories,
+          categoryText: raw.categoryText,
           source,
           properties,
           element,

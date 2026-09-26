@@ -55,3 +55,25 @@ test("an editable iOS value displayed by observe is searchable by a wait", () =>
   });
   expect(appear(new ElementResolver(), { text: "Don't panic" })(capture).matched).toBe(true);
 });
+
+test("textEquals compares original text rather than toggle display labels or promoted parents", async () => {
+  const { textEquals } = await import("../../../src/features/observe/ConditionPredicates");
+  const toggle = observation({
+    "resource-id": "toggle",
+    checkable: true,
+    "content-desc": "Wi-Fi",
+    text: "On",
+  });
+  expect(textEquals(new ElementResolver(), { elementId: "toggle" }, "On")(toggle).matched).toBe(
+    true,
+  );
+  expect(textEquals(new ElementResolver(), { elementId: "toggle" }, "Wi-Fi")(toggle).matched).toBe(
+    false,
+  );
+  const nested = observation({
+    clickable: true,
+    text: "Parent",
+    node: [{ text: "Ready", bounds }],
+  });
+  expect(textEquals(new ElementResolver(), {}, "Ready")(nested).matched).toBe(true);
+});

@@ -117,10 +117,15 @@ export function textEquals(
     if (result.error) {
       throw new ActionableError(result.error);
     }
-    const located = result.chosen;
-    const matched = Boolean(
-      located && normalizeQuotes(located.label ?? "").trim() === normalizeQuotes(expected).trim(),
-    );
+    const exactText = (value: string | undefined) =>
+      value !== undefined && normalizeQuotes(value).trim() === normalizeQuotes(expected).trim();
+    const located =
+      selector.elementId !== undefined
+        ? result.chosen
+        : result.matches
+            .flatMap(({ node, sourceNodes }) => sourceNodes ?? [node])
+            .find((node) => exactText(node.textSources.text));
+    const matched = Boolean(located && exactText(located.textSources.text));
     return {
       matched,
       matchedElement: matched ? located?.element : undefined,

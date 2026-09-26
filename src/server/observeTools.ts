@@ -729,10 +729,29 @@ export const findWaitForElement = (
   modes = new Map<string, MatchMode>(),
   negative = false,
 ): Element | null => {
-  const snapshot = { id: "wait", nodes: new SearchableHierarchy().project(viewHierarchy) };
+  const snapshot = {
+    id: "wait",
+    // Compound predicates describe one source node, not its hoisted display row.
+    nodes: new SearchableHierarchy().project(viewHierarchy).map((node) => ({
+      ...node,
+      textFields: Object.values(node.textSources),
+    })),
+  };
+  const canTryVisibleContains = (
+    selector: ResolverSelector,
+    key: string,
+    mode: MatchMode,
+    visibleCount: number,
+  ) =>
+    Boolean(waitFor.textAny) &&
+    !negative &&
+    selector.match === undefined &&
+    !modes.has(key) &&
+    mode === "exact" &&
+    visibleCount === 0;
   const resolve = (selector: ResolverSelector) => {
     const key = JSON.stringify(selector);
-    const result = finder.resolve(
+    let result = finder.resolve(
       snapshot,
       { ...selector, container: waitForContainerForFinder(waitFor) ?? undefined },
       { action: "inspect", negative, matchMode: modes.get(key) },
@@ -743,10 +762,30 @@ export const findWaitForElement = (
     if (result.error) {
       throw new ActionableError(result.error);
     }
-    modes.set(key, result.matchMode);
-    return result.candidates.filter(
-      (node) => node.element && !isElementCenterOffScreen(node.element, viewHierarchy),
-    );
+    const visibleSources = (resolution: typeof result) =>
+      [
+        ...new Set(resolution.matches.flatMap(({ node, sourceNodes }) => sourceNodes ?? [node])),
+      ].filter((node) => node.element && !isElementCenterOffScreen(node.element, viewHierarchy));
+    let candidates = visibleSources(result);
+    if (canTryVisibleContains(selector, key, result.matchMode, candidates.length)) {
+      result = finder.resolve(
+        snapshot,
+        {
+          ...selector,
+          container: waitForContainerForFinder(waitFor) ?? undefined,
+          match: "contains",
+        },
+        { action: "inspect", matchMode: "contains" },
+      );
+      if (result.error) {
+        throw new ActionableError(result.error);
+      }
+      candidates = visibleSources(result);
+    }
+    if (!waitFor.textAny || candidates.length > 0) {
+      modes.set(key, result.matchMode);
+    }
+    return candidates;
   };
   if (waitFor.textAny) {
     for (const text of waitFor.textAny) {

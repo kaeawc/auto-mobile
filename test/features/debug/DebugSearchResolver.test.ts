@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { FakeTimer } from "../../fakes/FakeTimer";
 import { DebugSearch } from "../../../src/features/debug/DebugSearch";
 import type { BootedDevice, ViewHierarchyResult } from "../../../src/models";
 const bounds = { left: 0, top: 0, right: 20, bottom: 20 };
@@ -6,7 +7,7 @@ const search = (capture: ViewHierarchyResult) =>
   new DebugSearch(
     { platform: "android" } as BootedDevice,
     undefined,
-    undefined,
+    new FakeTimer(),
     undefined,
     undefined,
     { getViewHierarchy: async () => capture },

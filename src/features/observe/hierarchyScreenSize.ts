@@ -24,5 +24,17 @@ export function extractHierarchyScreenSize(
       return { width, height };
     }
   }
+  const width = viewHierarchy?.screenWidth;
+  const height = viewHierarchy?.screenHeight;
+  if (
+    width &&
+    height &&
+    Number.isFinite(width) &&
+    Number.isFinite(height) &&
+    width > 0 &&
+    height > 0
+  ) {
+    return { width, height };
+  }
   return null;
 }

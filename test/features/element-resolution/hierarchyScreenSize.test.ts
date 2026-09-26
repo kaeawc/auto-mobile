@@ -25,3 +25,12 @@ test("outer application bounds stay authoritative when cleanup collapses wrapper
       .some((node) => node.nativeId === "capture.visible.control"),
   ).toBe(true);
 });
+test("array-root captures retain fresh screen metadata when no enclosing bounds exist", () => {
+  expect(
+    extractHierarchyScreenSize({
+      hierarchy: { node: [{ bounds: { left: 100, top: 100, right: 200, bottom: 200 } }] },
+      screenWidth: 2400,
+      screenHeight: 1080,
+    }),
+  ).toEqual({ width: 2400, height: 1080 });
+});

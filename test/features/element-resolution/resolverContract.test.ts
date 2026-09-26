@@ -33,3 +33,31 @@ for (const testCase of cases) {
     }
   });
 }
+
+test("unindexed duplicate labels use the displayed default row in every captured group", () => {
+  const groups = new Map<string, typeof cases>();
+  for (const entry of cases.filter((item) => item.query.kind === "text")) {
+    const key = `${entry.capture.name}:${entry.query.value}`;
+    groups.set(key, [...(groups.get(key) ?? []), entry]);
+  }
+  const duplicates = [...groups.entries()].filter(([, entries]) => entries.length > 1);
+  expect(duplicates).toHaveLength(5);
+  for (const [key, entries] of duplicates) {
+    const first = entries[0];
+    const query = { ...first.query, index: undefined };
+    const current = new ResolverContractAdapter(first).resolve(first.capture, query);
+    expect(current.candidates.map(candidateIdentity)).toEqual(observedCandidates(first, cases));
+    expect(current.chosen && candidateIdentity(current.chosen)).toEqual({
+      elementId: first.observed.elementId,
+      bounds: first.observed.bounds.join(","),
+    });
+    const previous = legacy.resolve(first.capture, query);
+    const previousChoice = previous.chosen && candidateIdentity(previous.chosen);
+    if (key.includes("diff/scroll-") && key.endsWith(":Settings")) {
+      // Legacy chooses the smaller descendant; S2 keeps the advertised parent row.
+      expect(previousChoice).not.toEqual(candidateIdentity(current.chosen!));
+    } else {
+      expect(previousChoice).toEqual(candidateIdentity(current.chosen!));
+    }
+  }
+});

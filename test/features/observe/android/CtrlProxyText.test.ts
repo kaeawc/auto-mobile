@@ -41,6 +41,29 @@ async function waitForRequest(
 }
 
 describe("Android CtrlProxyText", () => {
+  test("commit timeout reports unknown editor state", async () => {
+    const timer = new FakeTimer();
+    const requestManager = new RequestManager(timer);
+    const context: DelegateContext = {
+      getWebSocket: () => ({ readyState: 1, send: () => {} }) as any,
+      requestManager,
+      timer,
+      ensureConnected: async () => true,
+      cancelScreenshotBackoff: () => {},
+    };
+
+    const resultPromise = new CtrlProxyText(context).commitViaIme("text", "prior");
+    await Promise.resolve();
+    await Promise.resolve();
+    timer.advanceTime(10_000);
+
+    expect(await resultPromise).toMatchObject({
+      success: false,
+      partialApplication: true,
+      error: expect.stringContaining("editor state is unknown"),
+    });
+  });
+
   test("sends request_insert_text and resolves its result", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
@@ -125,8 +148,25 @@ describe("Android CtrlProxyText", () => {
         success: true,
         totalTimeMs: 3,
         error: undefined,
+        partialApplication: undefined,
         perfTiming: undefined,
       });
+
+      socket.sentMessages.length = 0;
+      const failed = textDelegate.commitViaIme("long text", "prior-ime");
+      const failedRequest = await waitForRequest(socket, "request_commit_text");
+      socket.simulateMessage(
+        JSON.stringify({
+          type: "commit_text_result",
+          timestamp: 2,
+          requestId: failedRequest.requestId,
+          success: false,
+          error: "IME commit deadline exceeded",
+          totalTimeMs: 4000,
+          partialApplication: true,
+        }),
+      );
+      expect(await failed).toMatchObject({ success: false, partialApplication: true });
     } finally {
       await client.close();
     }

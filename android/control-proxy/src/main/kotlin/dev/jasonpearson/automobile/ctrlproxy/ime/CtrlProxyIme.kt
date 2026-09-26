@@ -58,7 +58,10 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
   private val mainHandler by lazy { Handler(Looper.getMainLooper()) }
   private var idleRestore: Runnable? = null
   private var lastDriver: ImeCommitDriver? = null
+  private var activeDriver: ImeCommitDriver? = null
+  private var cancelActiveCommit: ((String) -> Unit)? = null
   private var lastPriorImeId: String? = null
+  private var commitGeneration = 0L
 
   override fun onCreate() {
     super.onCreate()
@@ -69,6 +72,8 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
   }
 
   override fun onDestroy() {
+    cancelActiveCommit?.invoke("IME service destroyed during commit")
+    commitGeneration++
     idleRestore?.let(mainHandler::removeCallbacks)
     if (instance === this) instance = null
     // InputMethodService.onDestroy() finishes the input view, which calls onFinishInputView();
@@ -153,6 +158,8 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
   }
 
   override fun onFinishInput() {
+    cancelActiveCommit?.invoke("Editor disconnected during IME commit")
+    commitGeneration++
     session.onFinishInput(connectionAdapter())
     super.onFinishInput()
     restoreLastIme()
@@ -164,15 +171,36 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
     onResult: (ImeCommitResult) -> Unit,
   ) {
     mainHandler.post {
+      // A previous request can still have delayed conversion polls queued after its response
+      // deadline. Cancel it before starting another request, and fence every later callback.
+      cancelActiveCommit?.invoke("IME commit superseded by another request")
+      commitGeneration++
+      val generation = commitGeneration
       val driver = ImeCommitDriver(createSink())
+      activeDriver = driver
       val restoreId = priorImeId?.takeUnless { it == ownImeId() }
       rememberRestore(driver, restoreId)
+      var finished = false
+      fun finish(result: ImeCommitResult) {
+        if (finished) return
+        finished = true
+        if (activeDriver === driver) {
+          activeDriver = null
+          cancelActiveCommit = null
+        }
+        onResult(result)
+      }
+      cancelActiveCommit = { reason ->
+        driver.cancel(reason)
+        finish(ImeCommitResult(success = false, error = reason))
+      }
       awaitInputConnection(
         text = text,
         priorImeId = restoreId,
         driver = driver,
         deadlineMs = SystemClock.uptimeMillis() + INPUT_CONNECTION_TIMEOUT_MS,
-        onResult = onResult,
+        generation = generation,
+        onResult = ::finish,
       )
     }
   }
@@ -182,12 +210,14 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
     priorImeId: String?,
     driver: ImeCommitDriver,
     deadlineMs: Long,
+    generation: Long,
     onResult: (ImeCommitResult) -> Unit,
   ) {
+    if (generation != commitGeneration) return
     if (currentInputStarted && currentInputConnection != null) {
-      driver.commit(text, priorImeId) { result ->
+      driver.commit(text, priorImeId, SystemClock.uptimeMillis() + COMMIT_TIMEOUT_MS) { result ->
         onResult(result)
-        scheduleIdleRestore(driver, priorImeId)
+        if (generation == commitGeneration) scheduleIdleRestore(driver, priorImeId)
       }
       return
     }
@@ -201,7 +231,7 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
     }
     mainHandler.postDelayed(
       {
-        awaitInputConnection(text, priorImeId, driver, deadlineMs, onResult)
+        awaitInputConnection(text, priorImeId, driver, deadlineMs, generation, onResult)
       },
       INPUT_CONNECTION_POLL_MS,
     )
@@ -209,6 +239,8 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
 
   private fun createSink(): ImeCommitSink =
     object : ImeCommitSink {
+      override fun nowMs(): Long = SystemClock.uptimeMillis()
+
       override fun editorInputType(): Int? =
         if (currentInputStarted) currentInputEditorInfo?.inputType else null
 
@@ -241,9 +273,9 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
     }
 
   private fun rememberRestore(driver: ImeCommitDriver, priorImeId: String?) {
+    idleRestore?.let(mainHandler::removeCallbacks)
+    idleRestore = null
     if (priorImeId == null) {
-      idleRestore?.let(mainHandler::removeCallbacks)
-      idleRestore = null
       lastDriver = null
       lastPriorImeId = null
       return
@@ -259,6 +291,7 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
       return
     }
     val restore = Runnable {
+      if (lastDriver !== driver) return@Runnable
       driver.restoreIfNeeded(priorImeId)
       clearRememberedRestore(driver, priorImeId)
     }
@@ -269,8 +302,8 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
   private fun restoreLastIme() {
     val driver = lastDriver ?: return
     val priorImeId = lastPriorImeId ?: return
-    driver.restoreIfNeeded(priorImeId)
     clearRememberedRestore(driver, priorImeId)
+    driver.restoreIfNeeded(priorImeId)
   }
 
   // A destroyed LifecycleRegistry rejects every further transition, and the platform can deliver
@@ -307,6 +340,7 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
 
   companion object {
     private const val INPUT_CONNECTION_TIMEOUT_MS = 2_000L
+    private const val COMMIT_TIMEOUT_MS = 4_000L
     private const val INPUT_CONNECTION_POLL_MS = 50L
     private const val IDLE_RESTORE_DELAY_MS = 10_000L
 

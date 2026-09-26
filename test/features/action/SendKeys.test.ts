@@ -69,7 +69,10 @@ function createTextClient(
     setKeyboardProfile?: (
       id: string,
     ) => Promise<{ success: boolean; previousProfileId?: string; error?: string }>;
-    commitViaIme?: (text: string, priorImeId: string | null) => Promise<{ success: boolean }>;
+    commitViaIme?: (
+      text: string,
+      priorImeId: string | null,
+    ) => Promise<{ success: boolean; error?: string; partialApplication?: boolean }>;
   } = {},
 ) {
   const calls: string[] = [];
@@ -388,6 +391,7 @@ describe("DefaultSendKeysCommandExecutor", () => {
     expect(textClient.commitViaImeCalls).toEqual([{ text: "*bold*", priorImeId }]);
     expect(events).toEqual([
       "adb:shell settings get secure default_input_method",
+      "adb:shell ime list -s",
       `adb:shell ime enable ${commitImeId}`,
       `adb:shell ime set ${commitImeId}`,
       "adb:shell settings get secure default_input_method",
@@ -395,6 +399,31 @@ describe("DefaultSendKeysCommandExecutor", () => {
       `adb:shell ime set ${priorImeId}`,
       `adb:shell ime disable ${commitImeId}`,
     ]);
+  });
+
+  test("ime mode preserves a companion keyboard that was already enabled", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("shell ime list -s", {
+      stdout: `${priorImeId}\n${commitImeId}\n`,
+      stderr: "",
+    });
+    adb.setCommandResponseSequence("shell settings get secure default_input_method", [
+      { stdout: priorImeId, stderr: "" },
+      { stdout: commitImeId, stderr: "" },
+    ]);
+    const executor = new DefaultSendKeysCommandExecutor(
+      androidDevice,
+      createAdbFactory(adb),
+      createObserver(),
+      { textClient: createTextClient().client },
+    );
+
+    expect((await executor.type({ action: "type", text: "value", mode: "ime" })).success).toBe(
+      true,
+    );
+    expect(adb.getExecutedCommands()).not.toContain(`shell ime enable ${commitImeId}`);
+    expect(adb.getExecutedCommands()).not.toContain(`shell ime disable ${commitImeId}`);
+    expect(adb.getExecutedCommands()).toContain(`shell ime set ${priorImeId}`);
   });
 
   test("ime disable failures do not fail a successful commit", async () => {
@@ -623,6 +652,34 @@ describe("DefaultSendKeysCommandExecutor", () => {
     expect(events.at(-3)).toBe("commit:rejected");
     expect(events.at(-2)).toBe(`adb:shell ime set ${priorImeId}`);
     expect(events.at(-1)).toBe(`adb:shell ime disable ${commitImeId}`);
+  });
+
+  test("failed IME replacement reports partial application after clearing", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponseSequence("shell settings get secure default_input_method", [
+      { stdout: priorImeId, stderr: "" },
+      { stdout: commitImeId, stderr: "" },
+    ]);
+    const textClient = createTextClient({
+      commitViaIme: async () => ({ success: false, error: "deadline exceeded" }),
+    });
+    const executor = new DefaultSendKeysCommandExecutor(
+      androidDevice,
+      createAdbFactory(adb),
+      createObserver(),
+      { textClient: textClient.client },
+    );
+
+    const result = await executor.type({
+      action: "type",
+      text: "replacement",
+      operation: "replace",
+      mode: "ime",
+    });
+
+    expect(result).toMatchObject({ success: false, partialApplication: true });
+    expect(textClient.calls).toContain("clear");
+    expect(adb.getExecutedCommands()).toContain(`shell ime set ${priorImeId}`);
   });
 
   test("serializes overlapping ime-mode calls on one device so capture/restore never interleave (#7464)", async () => {

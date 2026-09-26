@@ -1993,26 +1993,35 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   override fun requestCommitText(requestId: String?, text: String, priorImeId: String?) {
     val start = System.currentTimeMillis()
-    val ime = CtrlProxyIme.current()
-    if (ime == null) {
-      launchRequestScope(requestId) {
+    launchRequestScope(requestId) {
+      // `ime set` can return before Android creates the InputMethodService. Give activation a
+      // bounded window; the IME separately waits for its editor binding.
+      val readyDeadline = android.os.SystemClock.uptimeMillis() + 2_000L
+      var ime = CtrlProxyIme.current()
+      while (ime == null && android.os.SystemClock.uptimeMillis() < readyDeadline) {
+        kotlinx.coroutines.delay(50L)
+        ime = CtrlProxyIme.current()
+      }
+      if (ime == null) {
         broadcastCommitTextResult(
           requestId,
           false,
-          "IME not active; ime set required",
+          "IME service did not start within timeout",
           System.currentTimeMillis() - start,
+          false,
         )
+        return@launchRequestScope
       }
-      return
-    }
-    ime.commitText(text, priorImeId) { result ->
-      launchRequestScope(requestId) {
-        broadcastCommitTextResult(
-          requestId,
-          result.success,
-          result.error,
-          System.currentTimeMillis() - start,
-        )
+      ime.commitText(text, priorImeId) { result ->
+        launchRequestScope(requestId) {
+          broadcastCommitTextResult(
+            requestId,
+            result.success,
+            result.error,
+            System.currentTimeMillis() - start,
+            result.partialApplication,
+          )
+        }
       }
     }
   }
@@ -6010,6 +6019,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     success: Boolean,
     error: String?,
     totalTimeMs: Long,
+    partialApplication: Boolean,
   ) {
     if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
       Log.d(TAG, "WebSocket server not running, skipping commit text result broadcast")
@@ -6021,6 +6031,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         webSocketFrameJson("commit_text_result", requestId = requestId, perfTiming = perfTiming) {
           put("success", success)
           put("totalTimeMs", totalTimeMs)
+          if (partialApplication) put("partialApplication", true)
           if (error != null) {
             put("error", error)
           }

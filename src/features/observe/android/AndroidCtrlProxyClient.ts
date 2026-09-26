@@ -131,11 +131,10 @@ import {
   tryAcquireExclusiveLock,
 } from "../../../utils/fileLock";
 import { ensureSecureSharedAutoMobileDirSync } from "../../../utils/tempDir";
-import type { BaseResult } from "../shared/types";
 
 // Import delegates
 import { CtrlProxyGestures } from "./CtrlProxyGestures";
-import { CtrlProxyText } from "./CtrlProxyText";
+import { CtrlProxyText, type ImeCommitActionResult } from "./CtrlProxyText";
 import { CtrlProxyHierarchy } from "./CtrlProxyHierarchy";
 import { CtrlProxyStorage } from "./CtrlProxyStorage";
 import { CtrlProxyCertificates, type CertificateFileSystem } from "./CtrlProxyCertificates";
@@ -331,6 +330,7 @@ interface WsSetTextResultMessage extends WsRequestBase {
 
 interface WsCommitTextResultMessage extends WsRequestBase {
   type: "commit_text_result";
+  partialApplication?: boolean;
 }
 
 interface WsSetKeyboardProfileResultMessage extends WsRequestBase {
@@ -951,7 +951,7 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
     priorImeId?: string,
     timeoutMs?: number,
     perf?: PerformanceTracker,
-  ): Promise<BaseResult>;
+  ): Promise<ImeCommitActionResult>;
 
   setKeyboardProfile(
     profileId: string,
@@ -2551,7 +2551,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     priorImeId?: string,
     timeoutMs?: number,
     perf?: PerformanceTracker,
-  ): Promise<BaseResult> {
+  ): Promise<ImeCommitActionResult> {
     return this.text.commitViaIme(text, priorImeId, timeoutMs, perf);
   }
 
@@ -4242,10 +4242,11 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       }
 
       if (message.type === "commit_text_result" && message.requestId) {
-        this.requestManager.resolve<A11ySetTextResult>(message.requestId, {
+        this.requestManager.resolve<ImeCommitActionResult>(message.requestId, {
           success: message.success,
           totalTimeMs: message.totalTimeMs,
           error: message.error,
+          partialApplication: message.partialApplication,
           perfTiming: message.perfTiming,
         });
       }

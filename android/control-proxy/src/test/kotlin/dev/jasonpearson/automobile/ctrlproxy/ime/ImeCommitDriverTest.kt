@@ -202,6 +202,44 @@ class ImeCommitDriverTest {
     assertEquals(listOf("a", "b"), sink.committedChars)
     assertEquals(listOf(PRIOR_IME_ID), sink.switchedImeIds)
     assertFalse("sync" in sink.events)
+    assertTrue(result.partialApplication)
+  }
+
+  @Test
+  fun `cancelled conversion poll cannot resume typing or report twice`() {
+    val sink = FakeImeCommitSink(inputType = InputType.TYPE_CLASS_TEXT)
+    sink.readText = { _, _ -> "`a`" }
+    val driver = ImeCommitDriver(sink)
+    val results = mutableListOf<ImeCommitResult>()
+
+    driver.commit("`a` after", PRIOR_IME_ID) { results.add(it) }
+    assertEquals("`a`", sink.committedChars.joinToString(""))
+    driver.cancel()
+    sink.drain()
+
+    assertEquals("`a`", sink.committedChars.joinToString(""))
+    assertEquals(1, results.size)
+    assertFalse(results.single().success)
+    assertTrue(results.single().partialApplication)
+    assertEquals(listOf(PRIOR_IME_ID), sink.switchedImeIds)
+  }
+
+  @Test
+  fun `deadline stops delayed continuation after partial commit`() {
+    val sink = FakeImeCommitSink(inputType = InputType.TYPE_CLASS_TEXT)
+    sink.readText = { _, _ -> "`a`" }
+    val results = mutableListOf<ImeCommitResult>()
+
+    ImeCommitDriver(sink).commit("`a` after", PRIOR_IME_ID, deadlineMs = 10L) {
+      results.add(it)
+    }
+    sink.clockMs = 10L
+    sink.drain()
+
+    assertEquals("`a`", sink.committedChars.joinToString(""))
+    assertEquals("IME commit deadline exceeded", results.single().error)
+    assertTrue(results.single().partialApplication)
+    assertEquals(listOf(PRIOR_IME_ID), sink.switchedImeIds)
   }
 
   private fun commit(sink: FakeImeCommitSink, text: String, priorImeId: String?): ImeCommitResult {
@@ -222,10 +260,13 @@ class ImeCommitDriverTest {
     val delays = mutableListOf<Long>()
     val readSizes = mutableListOf<Int>()
     var readText: (Int, Int) -> String? = { _, _ -> null }
+    var clockMs = 0L
     private val pending = ArrayDeque<() -> Unit>()
     private var commitAttempts = 0
 
     override fun editorInputType(): Int? = inputType
+
+    override fun nowMs(): Long = clockMs
 
     override fun commitChar(ch: CharSequence): Boolean {
       val currentAttempt = commitAttempts++

@@ -1,4 +1,3 @@
-import { Mutex } from "async-mutex";
 import type { BootedDevice, ImeAction, ObserveResult } from "../../models";
 import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
@@ -16,6 +15,7 @@ import { InputKey, type InputKeyModifier, type InputKeyName } from "./InputKey";
 import type { KeyboardProfileId } from "./keyboardProfiles";
 import { TapOnElement } from "./TapOnElement";
 import { containsWysiwygTriggerChar } from "./wysiwygTriggerChars";
+import { withAndroidImeLock } from "./androidImeLock";
 import {
   ANDROID_KEYCOMBINATION_MIN_API_LEVEL,
   asciiKeyEventNeedsKeyCombination,
@@ -193,14 +193,8 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   private readonly observer: SendKeysObserver;
   private androidKeyCombinationSupported: boolean | undefined;
 
-  // IME-mode typing captures the prior IME + keyboard profile, activates our
-  // keyboard, commits, then restores both in a finally. Two overlapping calls on
-  // one device would interleave those capture/restore pairs — call 1's restore
-  // switches the IME away mid-commit for call 2, and call 2 restores call 1's
-  // temporary profile instead of the user's (#7464). Serialize per device with a
-  // keyed mutex: a fresh executor is built per tool call, so the map is static
-  // and keyed by deviceId. Deliberately NOT shared across devices.
-  private static readonly imeCommitLocks = new Map<string, Mutex>();
+  // IME-mode typing captures the prior IME and profile, then restores both. The shared
+  // per-device lock also protects persistent keyboard selection from a concurrent restore.
 
   constructor(
     private readonly device: BootedDevice,
@@ -422,15 +416,6 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     return { ...fallback, resolvedMode: autoImeFallback };
   }
 
-  private getImeCommitLock(): Mutex {
-    let lock = DefaultSendKeysCommandExecutor.imeCommitLocks.get(this.device.deviceId);
-    if (!lock) {
-      lock = new Mutex();
-      DefaultSendKeysCommandExecutor.imeCommitLocks.set(this.device.deviceId, lock);
-    }
-    return lock;
-  }
-
   private async executeAndroidImeCommit(
     text: string,
     operation: SendKeysOperation,
@@ -440,8 +425,10 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     signal?.throwIfAborted();
     // Serialize the whole capture→activate→commit→restore section per device so a
     // second call cannot borrow/restore the IME while this one is mid-flight (#7464).
-    return this.getImeCommitLock().runExclusive(() =>
-      this.runAndroidImeCommit(text, operation, keyboardProfile, signal),
+    return withAndroidImeLock(
+      this.device.deviceId,
+      () => this.runAndroidImeCommit(text, operation, keyboardProfile, signal),
+      signal,
     );
   }
 
@@ -469,6 +456,11 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       return priorResult;
     }
     const prior = priorResult.imeId;
+    const enabledResult = await this.readCommitImeEnabled();
+    if (!enabledResult.success) {
+      return enabledResult;
+    }
+    const wasEnabled = enabledResult.enabled;
 
     const profileResult = await this.setRequestedKeyboardProfile(keyboardProfile);
     if (!profileResult.success) {
@@ -476,8 +468,8 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     }
     const previousProfileId = profileResult.previousProfileId;
 
-    if (!(await this.activateCommitIme())) {
-      await this.restoreIme(prior);
+    if (!(await this.activateCommitIme(wasEnabled))) {
+      await this.restoreIme(prior, wasEnabled);
       await this.restoreKeyboardProfileIfNeeded(keyboardProfile, previousProfileId);
       return { success: false, error: "Failed to activate the IME for text commit." };
     }
@@ -490,10 +482,13 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         }
       }
       const result = await this.textClient.commitViaIme(text, prior);
-      return { ...result, resolvedMode: "ime" };
+      return {
+        ...(operation === "replace" ? markPartialAfterMutation(result) : result),
+        resolvedMode: "ime",
+      };
     } finally {
       await this.restoreKeyboardProfileIfNeeded(keyboardProfile, previousProfileId);
-      await this.restoreIme(prior);
+      await this.restoreIme(prior, wasEnabled);
     }
   }
 
@@ -565,18 +560,37 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     }
   }
 
-  private async activateCommitIme(): Promise<boolean> {
+  private async readCommitImeEnabled(): Promise<
+    { success: true; enabled: boolean } | { success: false; error: string }
+  > {
+    try {
+      const result = await this.adb.executeCommand("shell ime list -s");
+      if (result.stderr.trim()) {
+        return { success: false, error: `Failed to list enabled IMEs: ${result.stderr.trim()}` };
+      }
+      return {
+        success: true,
+        enabled: result.stdout.split(/\r?\n/).some((id) => id.trim() === this.commitImeId),
+      };
+    } catch (error) {
+      return { success: false, error: `Failed to list enabled IMEs: ${errorMessage(error)}` };
+    }
+  }
+
+  private async activateCommitIme(wasEnabled: boolean): Promise<boolean> {
     // Android IME ids are ComponentName.flattenToShortString(): the class is
     // abbreviated to a leading "." because it lives under the package, and that
     // short form is what `settings get secure default_input_method` stores.
     const imeId = this.commitImeId;
     try {
-      const enableResult = await this.adb.executeCommand(`shell ime enable ${imeId}`);
-      if (enableResult.stderr.trim()) {
-        logger.warn(
-          `[SendKeys] Failed to enable the text-commit IME: ${enableResult.stderr.trim()}`,
-        );
-        return false;
+      if (!wasEnabled) {
+        const enableResult = await this.adb.executeCommand(`shell ime enable ${imeId}`);
+        if (enableResult.stderr.trim()) {
+          logger.warn(
+            `[SendKeys] Failed to enable the text-commit IME: ${enableResult.stderr.trim()}`,
+          );
+          return false;
+        }
       }
       const setResult = await this.adb.executeCommand(`shell ime set ${imeId}`);
       if (setResult.stderr.trim()) {
@@ -600,7 +614,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     }
   }
 
-  private async restoreIme(priorImeId: string | null): Promise<void> {
+  private async restoreIme(priorImeId: string | null, wasEnabled: boolean): Promise<void> {
     if (priorImeId === null) {
       return;
     }
@@ -613,7 +627,9 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       // Restoration is best-effort so it cannot mask the text-commit result.
       logger.warn("[SendKeys] Failed to restore the prior IME", error);
     }
-    await this.disableCommitIme();
+    if (!wasEnabled) {
+      await this.disableCommitIme();
+    }
   }
 
   private get commitImeId(): string {
@@ -912,6 +928,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
           return {
             success: result.success,
             ...(result.error ? { error: result.error } : {}),
+            ...(result.partialApplication ? { partialApplication: true } : {}),
           };
         },
       };

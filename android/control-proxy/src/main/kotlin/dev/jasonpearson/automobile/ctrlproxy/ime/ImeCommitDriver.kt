@@ -3,6 +3,8 @@ package dev.jasonpearson.automobile.ctrlproxy.ime
 import android.text.InputType
 
 interface ImeCommitSink {
+  fun nowMs(): Long
+
   /** The active editor's inputType (EditorInfo.inputType), or null if no connection. */
   fun editorInputType(): Int?
 
@@ -31,17 +33,48 @@ interface ImeCommitSink {
   fun switchToIme(imeId: String)
 }
 
-data class ImeCommitResult(val success: Boolean, val error: String?)
+data class ImeCommitResult(
+  val success: Boolean,
+  val error: String?,
+  val partialApplication: Boolean = false,
+)
 
 class ImeCommitDriver(private val sink: ImeCommitSink) {
+  private var completed = false
+  private var committedChars = 0
+  private var completion: ((ImeCommitResult) -> Unit)? = null
+  private var restoreId: String? = null
+
+  /**
+   * Stops scheduled polls and reports the outcome exactly once before the caller restores the IME.
+   */
+  fun cancel(reason: String = "IME commit cancelled") {
+    complete(failure(reason))
+  }
+
+  private fun complete(result: ImeCommitResult) {
+    if (completed) return
+    completed = true
+    completion?.invoke(result)
+    restoreIfNeeded(restoreId)
+  }
+
   /**
    * Calls onComplete after the final editor sync and IME restore. The shell still owns idle/finish
    * restoration as a backstop.
    */
-  fun commit(text: String, priorImeId: String?, onComplete: (ImeCommitResult) -> Unit) {
-    fun complete(result: ImeCommitResult) {
-      restoreIfNeeded(priorImeId)
-      onComplete(result)
+  fun commit(
+    text: String,
+    priorImeId: String?,
+    deadlineMs: Long = Long.MAX_VALUE,
+    onComplete: (ImeCommitResult) -> Unit,
+  ) {
+    check(completion == null) { "An IME commit driver handles one request" }
+    completion = onComplete
+    restoreId = priorImeId
+    if (sink.nowMs() >= deadlineMs) {
+      complete(failure("IME commit deadline exceeded"))
+      return
     }
 
     val inputType = sink.editorInputType()
@@ -56,6 +89,11 @@ class ImeCommitDriver(private val sink: ImeCommitSink) {
 
     val segments = splitInlineFormatSpans(text)
     fun commitSegment(index: Int) {
+      if (completed) return
+      if (sink.nowMs() >= deadlineMs) {
+        complete(failure("IME commit deadline exceeded"))
+        return
+      }
       if (index == segments.size) {
         complete(
           if (sink.syncEditorState()) ImeCommitResult(success = true, error = null)
@@ -65,10 +103,16 @@ class ImeCommitDriver(private val sink: ImeCommitSink) {
       }
       val segment = segments[index]
       for (ch in segment.text) {
+        if (completed) return
+        if (sink.nowMs() >= deadlineMs) {
+          complete(failure("IME commit deadline exceeded"))
+          return
+        }
         if (!sink.commitChar(ch.toString())) {
           complete(failure("Input connection lost during commit"))
           return
         }
+        committedChars++
       }
       // Composing profiles retain the last word until explicitly finished.
       if (!sink.finishComposing()) {
@@ -78,6 +122,11 @@ class ImeCommitDriver(private val sink: ImeCommitSink) {
       val literal = segment.trailingSpan
       if (literal != null && index < segments.lastIndex) {
         fun pollConverted(attempt: Int) {
+          if (completed) return
+          if (sink.nowMs() >= deadlineMs) {
+            complete(failure("IME commit deadline exceeded"))
+            return
+          }
           val seen = sink.readTextBeforeCursor(literal.length)
           // seen == null: connection gone — proceed; the next commitChar fails cleanly.
           // seen non-empty and != literal: the composer consumed the markers (converted).
@@ -137,7 +186,8 @@ class ImeCommitDriver(private val sink: ImeCommitSink) {
     return isTextPassword || isNumberPassword
   }
 
-  private fun failure(error: String) = ImeCommitResult(success = false, error = error)
+  private fun failure(error: String) =
+    ImeCommitResult(success = false, error = error, partialApplication = committedChars > 0)
 
   private companion object {
     val INLINE_FORMAT_SPAN = Regex("```|`[^`\n]+`|\\*[^*\n]+\\*|_[^_\n]+_|~[^~\n]+~")

@@ -17,6 +17,10 @@ export interface SetKeyboardProfileResult {
   error?: string;
 }
 
+export interface ImeCommitActionResult extends BaseResult {
+  partialApplication?: boolean;
+}
+
 export class CtrlProxyText extends SharedTextDelegate {
   constructor(context: DelegateContext) {
     super(context);
@@ -41,10 +45,10 @@ export class CtrlProxyText extends SharedTextDelegate {
   async commitViaIme(
     text: string,
     priorImeId?: string,
-    timeoutMs: number = 5000,
+    timeoutMs: number = 10000,
     perf?: PerformanceTracker,
-  ): Promise<BaseResult> {
-    return sendCommand<BaseResult>(this.context, {
+  ): Promise<ImeCommitActionResult> {
+    return sendCommand<ImeCommitActionResult>(this.context, {
       idPrefix: "commitText",
       responseType: "commit_text",
       messageType: "request_commit_text",
@@ -52,6 +56,12 @@ export class CtrlProxyText extends SharedTextDelegate {
       timeoutMs,
       perf,
       errorLabel: "Commit text",
+      timeoutError: (timeout) => ({
+        success: false,
+        totalTimeMs: timeout,
+        partialApplication: true,
+        error: `IME commit response timed out after ${timeout}ms; editor state is unknown`,
+      }),
     });
   }
 

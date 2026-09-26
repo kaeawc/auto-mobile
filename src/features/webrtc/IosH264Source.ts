@@ -462,6 +462,7 @@ export class IosH264Source implements H264CaptureSource {
   /** The relay can keep a source warm briefly after its last viewer leaves. */
   private hasConsumers = true;
   private deferredHelperFailure: Error | null = null;
+  private invalidateHelperOnStop = false;
   private reconnectPromise: Promise<void> | null = null;
   /** Cancels an in-flight reconnect backoff wait; resolves it as "cancelled". */
   private cancelReconnectDelay: (() => void) | null = null;
@@ -691,6 +692,11 @@ export class IosH264Source implements H264CaptureSource {
     this.cancelFirstFrameWait?.();
     this.cancelFirstAudioWait?.();
     await this.beginTeardown();
+  }
+
+  async stopStale(): Promise<void> {
+    this.invalidateHelperOnStop = true;
+    await this.stop();
   }
 
   /** Called by the local relay when its first viewer arrives or last viewer leaves. */
@@ -1869,7 +1875,9 @@ export class IosH264Source implements H264CaptureSource {
     if (!helper) {
       return;
     }
-    const stopped = helper.stop().then(
+    const stopped = (
+      this.invalidateHelperOnStop && helper.invalidate ? helper.invalidate() : helper.stop()
+    ).then(
       () => true,
       (error: unknown) => {
         logger.debug(`[IosH264Source] helper stop failed: ${error}`);

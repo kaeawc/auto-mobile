@@ -774,7 +774,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
         // A reconnect must never inherit a capture we have already declared stale.
         // stopCapture removes it synchronously and serializes replacement behind source.stop().
         if (this.captures.get(deviceId) === capture) {
-          void this.stopCapture(deviceId);
+          void this.stopCapture(deviceId, true);
         }
         return;
       }
@@ -833,7 +833,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     }
   }
 
-  private stopCapture(deviceId: string): Promise<void> {
+  private stopCapture(deviceId: string, stale = false): Promise<void> {
     const pending = this.pendingStops.get(deviceId);
     if (pending) {
       return pending;
@@ -858,7 +858,11 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     const stopping = (async () => {
       try {
         try {
-          await capture.source?.stop();
+          if (stale && capture.source?.stopStale) {
+            await capture.source.stopStale();
+          } else {
+            await capture.source?.stop();
+          }
         } catch (error) {
           // A teardown failure must be visible, but must not prevent a later attach from retrying.
           logger.warn(`[VideoStream] failed to stop capture for ${deviceId}: ${error}`);

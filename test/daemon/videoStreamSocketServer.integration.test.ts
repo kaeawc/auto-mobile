@@ -34,6 +34,7 @@ const DEVICE: BootedDevice = {
 class FakeCaptureSource implements H264CaptureSource {
   started = false;
   stopped = false;
+  staleStopped = false;
   startError: Error | null = null;
   stopError: Error | null = null;
   startGate: Promise<void> | null = null;
@@ -65,6 +66,11 @@ class FakeCaptureSource implements H264CaptureSource {
       throw this.stopError;
     }
     this.onStopSettled?.();
+  }
+
+  async stopStale(): Promise<void> {
+    this.staleStopped = true;
+    await this.stop();
   }
 
   requestKeyFrame(): boolean {
@@ -544,6 +550,7 @@ describe("VideoStreamSocketServer", () => {
 
     fakeTimer.advanceTime(10_000);
     await waitFor(() => h.sources[0].stopped);
+    expect(h.sources[0].staleStopped).toBe(true);
     expect(h.server.activeDeviceIds()).toEqual([]);
 
     const reconnect = subscribe(h.socketPath);

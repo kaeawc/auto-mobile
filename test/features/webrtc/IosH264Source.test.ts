@@ -59,6 +59,7 @@ const FAKE_HELPER_PATH = "/fake/screen-capture-helper";
 const fakeHelperPathExists = (candidate: string): boolean => candidate === FAKE_HELPER_PATH;
 
 class FakeFrameCaptureHelper extends EventEmitter implements IosFrameCaptureHelper {
+  invalidate?: () => Promise<void>;
   started = false;
   stopped = false;
   isRunning = false;
@@ -478,6 +479,18 @@ describe("IosH264Source", () => {
     expect(helperTargets).toEqual([
       { kind: "simulator", windowID: 42, fps: WEBRTC_IOS_SIMULATOR_FPS_DEFAULT },
     ]);
+  });
+
+  test("invalidates a pooled helper when a stale capture is retired", async () => {
+    const { source, helper } = createHarness(IOS_SIMULATOR);
+    let invalidated = false;
+    helper.invalidate = async () => {
+      invalidated = true;
+    };
+    await startWithFrame(source, helper, frame(1, 1, 0x11));
+    await source.stopStale();
+    expect(invalidated).toBe(true);
+    expect(helper.stopped).toBe(false);
   });
 
   test("classifies a marked Screen Recording denial while discovering Simulator windows", async () => {

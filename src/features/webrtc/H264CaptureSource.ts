@@ -89,6 +89,8 @@ export interface H264CaptureSource {
   start(): Promise<void>;
   /** Stop capturing and release device-side resources. */
   stop(): Promise<void>;
+  /** Retire a stalled source without retaining any warm capture helper for reconnect. */
+  stopStale?(): Promise<void>;
   /**
    * Ask the encoder to emit a fresh IDR as soon as possible, in response to a
    * downstream keyframe request (WHEP viewer PLI relayed through the publisher).

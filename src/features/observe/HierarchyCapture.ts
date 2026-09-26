@@ -43,7 +43,9 @@ export function identifyObservedHierarchy(
   captureId?: string,
 ): HierarchySnapshot {
   const existing = getHierarchySnapshot(source);
-  if (existing) return existing;
+  if (existing) {
+    return existing;
+  }
   const hierarchy = projectActionableHierarchy(platform, source);
   const snapshot: HierarchySnapshot = {
     captureId: captureId ?? ids.next(),
@@ -65,7 +67,9 @@ export function inheritHierarchySnapshot(
   target: ViewHierarchyResult | undefined,
 ): void {
   const existing = getHierarchySnapshot(source);
-  if (!existing || !target || source === target) return;
+  if (!existing || !target || source === target) {
+    return;
+  }
   const hierarchy = projectActionableHierarchy(existing.platform, target);
   const snapshot = { ...existing, hierarchy, nodes: observedSearchable.project(hierarchy) };
   capturedHierarchies.set(target, snapshot);

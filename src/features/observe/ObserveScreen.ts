@@ -968,7 +968,11 @@ export class RealObserveScreen implements ObserveScreen {
     result: ObserveResult,
     freshness: HierarchyCaptureRequest["freshness"],
   ): void {
-    if (result.viewHierarchy && !result.viewHierarchy.hierarchy?.error) {
+    if (
+      result.viewHierarchy &&
+      typeof result.viewHierarchy === "object" &&
+      !result.viewHierarchy.hierarchy?.error
+    ) {
       identifyObservedHierarchy(
         this.device.platform,
         result.viewHierarchy,

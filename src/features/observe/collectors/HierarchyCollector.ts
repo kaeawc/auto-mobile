@@ -10,7 +10,7 @@ import type { ViewHierarchy } from "../interfaces/ViewHierarchy";
 import type { Timer } from "../../../utils/SystemTimer";
 import type { AdbClientFactory } from "../../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
-import { parseBounds } from "../../../utils/bounds";
+import { extractHierarchyScreenSize } from "../hierarchyScreenSize";
 
 export interface HierarchyCollectorOptions {
   device: BootedDevice;
@@ -236,26 +236,7 @@ export class HierarchyCollector {
   extractScreenSize(
     viewHierarchy: ObserveResult["viewHierarchy"],
   ): { width: number; height: number } | null {
-    const rootNode = viewHierarchy?.hierarchy?.node;
-    const rootBounds = parseBounds(rootNode?.bounds ?? rootNode?.$?.bounds);
-    if (rootBounds) {
-      const width = rootBounds.right - rootBounds.left;
-      const height = rootBounds.bottom - rootBounds.top;
-      if (width > 0 && height > 0) {
-        return { width, height };
-      }
-    }
-
-    const hierarchyBounds = parseBounds(viewHierarchy?.hierarchy?.bounds);
-    if (hierarchyBounds) {
-      const width = hierarchyBounds.right - hierarchyBounds.left;
-      const height = hierarchyBounds.bottom - hierarchyBounds.top;
-      if (width > 0 && height > 0) {
-        return { width, height };
-      }
-    }
-
-    return null;
+    return extractHierarchyScreenSize(viewHierarchy);
   }
 
   /**

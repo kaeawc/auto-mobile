@@ -118,14 +118,8 @@ export interface ChooserAppMetadata {
 
 const defaultChooserAppMetadata: ChooserAppMetadata = {
   async getLabel(device, packageName) {
-    const { AndroidCtrlProxyClient } =
-      await import("../features/observe/android/AndroidCtrlProxyClient");
-    const info = await AndroidCtrlProxyClient.getInstance(device).requestPackageInfo(
-      packageName,
-      { includePermissions: false },
-      4000,
-    );
-    return info.success ? (info.applicationLabel ?? null) : null;
+    const { resolveAppLabel } = await import("../server/systemTrayHelpers");
+    return resolveAppLabel(device, packageName);
   },
 };
 
@@ -818,6 +812,12 @@ export class DeepLinkManager implements DeepLinkManager {
         `No exact clickable chooser row for ${appPackage}. Verify the app is installed and handles this link.`,
       );
     }
-    return candidates[0];
+    const target = this.parser.parseNodeBounds(candidates[0]);
+    if (!target) {
+      throw new Error(
+        `Exact chooser row for ${appPackage} has no usable bounds. Refresh the hierarchy before retrying.`,
+      );
+    }
+    return target;
   }
 }

@@ -128,3 +128,21 @@ test("rejects ambiguity across hierarchy roots", async () => {
   expect(result.error).toContain("Ambiguous");
   expect(adb.getExecutedCommands()).toEqual([]);
 });
+
+test("taps parsed clickable row bounds in XML-wrapped hierarchies", async () => {
+  const exactRow = row(target, 100);
+  const { result, commands } = await choose([
+    {
+      $: { clickable: "true", bounds: exactRow.bounds },
+      node: exactRow.node.map((node) => ({ $: node })),
+    },
+  ]);
+  expect(result.success).toBe(true);
+  expect(commands).toEqual(["shell input tap 50 120"]);
+});
+
+test("rejects an exact clickable row without usable bounds", async () => {
+  const { result, commands } = await choose([{ clickable: true, package: target }]);
+  expect(result.error).toContain("no usable bounds");
+  expect(commands).toEqual([]);
+});

@@ -1,9 +1,18 @@
+import {
+  STABLE_VIEW_ID_PREFIX,
+  STABLE_VIEW_ID_HASH_LENGTH,
+} from "../observe/android/StableNodeIdentity";
+
 import type { ResolverSelector } from "../../server/elementSelectorSchemas";
 import type { SearchableEntry } from "./SearchableNode";
 import { normalizeQuotes } from "./TextMatcher";
 import { boundsArea, boundsEqual } from "../../utils/bounds";
 import type { ElementBounds } from "../../models/ElementBounds";
 import { defaultRandom } from "../../utils/Random";
+
+const ordinalNodeKey = new RegExp(
+  `^${STABLE_VIEW_ID_PREFIX}[0-9a-f]{${STABLE_VIEW_ID_HASH_LENGTH}}-\\d+$`,
+);
 
 export type MatchMode = "exact" | "contains" | "regex";
 export type ResolutionAction =
@@ -502,7 +511,19 @@ export class ElementResolver {
     const ref = intent.ref!;
     const matches = result.candidates.filter((node) => node.nodeKey === ref.nodeKey);
     const node = matches.length === 1 ? matches[0] : undefined;
-    const valid = node && (snapshot.id === ref.snapshotId || sameReferenceProof(node, ref));
+    // Duplicate-generated ordinals are capture-local. Identical content and
+    // geometry cannot prove that a peer did not move into the old ordinal.
+    const uniqueNativeId =
+      node?.nativeId &&
+      new Set(
+        snapshot.nodes
+          .filter((entry) => entry.nativeId === node.nativeId)
+          .map((entry) => entry.source),
+      ).size === 1;
+    const valid =
+      node &&
+      (snapshot.id === ref.snapshotId ||
+        ((!ordinalNodeKey.test(ref.nodeKey) || uniqueNativeId) && sameReferenceProof(node, ref)));
     if (!valid) {
       return { ...result, error: `Stale reference ${ref.nodeKey}; observe again before acting.` };
     }

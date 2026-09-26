@@ -6,6 +6,9 @@ import type { ElementSelectionStrategy } from "./ElementSelectionStrategy";
  */
 export interface ElementSelectionResult {
   element: Element | null;
+  /** Original matching node, before action-target promotion. */
+  matchedElement?: Element;
+  captureId?: string;
   indexInMatches: number;
   totalMatches: number;
   strategy: ElementSelectionStrategy;

@@ -1,10 +1,7 @@
+import { toSearchable } from "../../utility/SearchableNode";
 import type { Element } from "../../../models/Element";
 import { isTruthy } from "../../../models/Element";
-import {
-  getToggleContentDescription,
-  hasAccessibilityAction,
-  isEditableElementProperties,
-} from "../../../utils/elementProperties";
+import { getToggleContentDescription } from "../../../utils/elementProperties";
 import type { Affordance, ObserveResult, SkeletonElement } from "../../../models/ObserveResult";
 import {
   ElementProvenance,
@@ -73,58 +70,12 @@ function nonEmptyString(value: unknown): string | undefined {
  * owners that do not enable `testTagsAsResourceId`.
  */
 function deriveId(el: Element): string | undefined {
-  return nonEmptyString(el["resource-id"]) ?? nonEmptyString(el["view-id"]);
-}
-
-/** Named toggles use their accessibility identity; other nodes prefer visible text. */
-function deriveLabel(el: Element): string | undefined {
-  const toggle = getToggleContentDescription(el);
-  if (toggle) {
-    return toggle;
-  }
-  if (isEditableElementProperties(el)) {
-    return (
-      nonEmptyString(el.value) ?? nonEmptyString(el.text) ?? nonEmptyString(el["content-desc"])
-    );
-  }
-  return nonEmptyString(el.text) ?? nonEmptyString(el["content-desc"]);
+  return toSearchable(el).elementId;
 }
 
 /** Preserve a named toggle's own state alongside its identifying label. */
 function deriveSublabel(el: Element, label: string | undefined): string | undefined {
   return getToggleContentDescription(el) && el.text !== label ? nonEmptyString(el.text) : undefined;
-}
-
-/**
- * Classify a single element's affordances from its view-hierarchy attributes.
- * `tap`/`long-press` mirror the repo's canonical predicates
- * (`elementProperties.isClickableElementProperties`, `TapOnElement`): the
- * accessibility `actions` array (`"click"` / `"long_click"`) is authoritative on
- * captures that carry no `clickable` boolean (Compose, and iOS which uses
- * `longClickable`), so an element `tapOn` would act on must expose the affordance.
- */
-function deriveAffordances(el: Element): Affordance[] {
-  const affordances: Affordance[] = [];
-  if (isTruthy(el.clickable) || hasAccessibilityAction(el.actions, "click")) {
-    affordances.push("tap");
-  }
-  if (
-    isTruthy(el["long-clickable"]) ||
-    isTruthy(el.longClickable) ||
-    hasAccessibilityAction(el.actions, "long_click")
-  ) {
-    affordances.push("long-press");
-  }
-  if (isEditableElementProperties(el)) {
-    affordances.push("input");
-  }
-  if (isTruthy(el.scrollable)) {
-    affordances.push("scroll");
-  }
-  if (isTruthy(el.checkable)) {
-    affordances.push("toggle");
-  }
-  return affordances;
 }
 
 /** Flatten an element's object bounds to the compact `[left, top, right, bottom]` tuple. */
@@ -157,10 +108,8 @@ export function projectSkeletonElement(element: Element): SkeletonElement | unde
   if (!bounds) {
     return undefined;
   }
-  const affordances = deriveAffordances(element);
+  const { affordances, elementId, label } = toSearchable(element);
   const entry: SkeletonElement = { bounds, affordances };
-  const elementId = deriveId(element);
-  const label = deriveLabel(element);
   if (elementId !== undefined) {
     entry.elementId = elementId;
   }
@@ -238,9 +187,7 @@ function accumulateByIdentity(
     if (!bounds) {
       continue;
     }
-    const elementId = deriveId(el);
-    const label = deriveLabel(el);
-    const affordances = deriveAffordances(el);
+    const { elementId, label, affordances } = toSearchable(el);
     const key = identityKey(elementId, label, bounds);
 
     let acc = byIdentity.get(key);

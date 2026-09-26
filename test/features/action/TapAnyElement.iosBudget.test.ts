@@ -34,13 +34,11 @@ afterEach(() => {
 
 test("iOS tapAny refresh uses the observe projection within the caller budget", async () => {
   const signal = new AbortController().signal;
-  const sharedRead = spyOn((tapAny as any).viewHierarchy, "getiOSViewHierarchy").mockResolvedValue({
-    hierarchy: { node: {} },
-  });
-
-  await tapAny["refreshViewHierarchy"](37, undefined, signal);
-
-  expect(sharedRead).toHaveBeenCalledWith(undefined, false, 0, 37, signal);
+  client.setHierarchyData({ hierarchy: { node: {} } } as any);
+  const sync = spyOn(client, "requestHierarchySync");
+  const capture = await tapAny["refreshViewHierarchy"](37, undefined, signal);
+  expect(capture).not.toBeNull();
+  expect(sync).toHaveBeenCalledWith(undefined, false, signal, 37);
   expect(directRead).not.toHaveBeenCalled();
-  sharedRead.mockRestore();
+  sync.mockRestore();
 });

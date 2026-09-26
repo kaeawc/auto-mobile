@@ -91,3 +91,29 @@ test("block shadowing and typed containers remain isolated", () => {
     check("function inspect(nodes: ReadonlyArray<Element>) { return nodes[0].text; }"),
   ).toEqual([]);
 });
+
+test.each([
+  "type RawNode = ViewHierarchyNode; function inspect(node: RawNode) { return node.text; }",
+  'import type { ViewHierarchyNode as RawNode } from "./models"; function inspect(node: RawNode) { return node.text; }',
+  "type RawNodes = Array<ViewHierarchyNode>; function inspect(nodes: RawNodes) { return nodes[0].text; }",
+  "function getRoot(): ViewHierarchyNode { return source; } function inspect() { const node = getRoot(); return node.text; }",
+  "function inspect() { return getRoot().text; } function getRoot(): ViewHierarchyNode { return source; }",
+  "const getRoot = (): ViewHierarchyNode => source; function inspect() { return getRoot().text; }",
+  "const getRoot: () => ViewHierarchyNode = () => source; function inspect() { return getRoot().text; }",
+  "function inspect(nodes: ViewHierarchyNode[]) { const [node] = nodes; return node.text; }",
+  "function inspect(nodes: ViewHierarchyNode[]) { const [...rest] = nodes; return rest[0].text; }",
+  "function inspect(nodes: ViewHierarchyNode[]) { let node; [node] = nodes; return node.text; }",
+])("explicit aliases, helper returns and destructuring retain raw provenance: %s", (code) => {
+  expect(check(code)).toHaveLength(1);
+});
+
+test.each([
+  "type Safe = Element; function inspect(node: Safe) { return node.text; }",
+  "type Cycle = Cycle; function inspect(node: Cycle) { return node.text; }",
+  "type Raw = ViewHierarchyNode; function inspect() { type Raw = Element; const node = value as Raw; return node.text; }",
+  "function getRoot(): Element { return source; } function inspect() { return getRoot().text; }",
+  "function getRoot(): ViewHierarchyNode { return source; } function inspect(getRoot: () => Element) { return getRoot().text; }",
+  "function inspect(nodes: Element[]) { const [node] = nodes; return node.text; }",
+])("safe aliases and local shadowing remain permitted: %s", (code) => {
+  expect(check(code)).toEqual([]);
+});

@@ -716,22 +716,28 @@ const noRawSelectorFieldReadRule = {
     return {
       Program(program) {
         const fields = new Set(["text", "content-desc", "resource-id"]);
-        const rawType = (annotation) => {
+        const rawType = (annotation, env, seen = new Set()) => {
           const type = annotation?.typeAnnotation ?? annotation;
           if (!type) return false;
           if (["TSAnyKeyword", "TSUnknownKeyword"].includes(type.type)) return true;
-          if (type.type === "TSUnionType") return type.types.some(rawType);
-          if (type.type === "TSArrayType") return rawType(type.elementType);
-          if (type.type === "TSTupleType") return type.elementTypes.some(rawType);
+          if (type.type === "TSUnionType")
+            return type.types.some((item) => rawType(item, env, seen));
+          if (type.type === "TSArrayType") return rawType(type.elementType, env, seen);
+          if (type.type === "TSTupleType")
+            return type.elementTypes.some((item) => rawType(item, env, seen));
           if (
             type.type === "TSTypeReference" &&
-            (type.typeArguments?.params ?? type.typeParameters?.params ?? []).some(rawType)
+            (type.typeArguments?.params ?? type.typeParameters?.params ?? []).some((item) =>
+              rawType(item, env, seen),
+            )
           )
             return true;
-          return (
-            type.type === "TSTypeReference" &&
-            ["ViewHierarchyNode", "ViewHierarchyResult", "Record"].includes(type.typeName?.name)
-          );
+          if (type.type !== "TSTypeReference") return false;
+          const name = type.typeName?.name;
+          if (["ViewHierarchyNode", "ViewHierarchyResult", "Record"].includes(name)) return true;
+          const alias = env?.get(`type:${name}`);
+          if (!alias || seen.has(name)) return false;
+          return rawType(alias, env, new Set([...seen, name]));
         };
         const lookup = (env, name) => env.get(name);
         const key = (node, env) => {
@@ -752,7 +758,7 @@ const noRawSelectorFieldReadRule = {
           if (["TSAsExpression", "TSTypeAssertion"].includes(node.type)) {
             // Protocol DTO assertions mark a checked bridge boundary; merely
             // casting a capture node to Element must not hide its provenance.
-            if (rawType(node.typeAnnotation)) return true;
+            if (rawType(node.typeAnnotation, env)) return true;
             return node.typeAnnotation?.typeName?.name === "Element" && raw(node.expression, env);
           }
           if (node.type === "Identifier") return lookup(env, node.name)?.raw === true;
@@ -760,8 +766,11 @@ const noRawSelectorFieldReadRule = {
           if (node.type === "LogicalExpression" || node.type === "ConditionalExpression")
             return raw(node.left ?? node.consequent, env) || raw(node.right ?? node.alternate, env);
           if (node.type === "CallExpression")
-            return ["extractNodeProperties", "getNodeProperties"].includes(
-              node.callee?.property?.name ?? node.callee?.name,
+            return (
+              lookup(env, node.callee?.name)?.rawReturn === true ||
+              ["extractNodeProperties", "getNodeProperties"].includes(
+                node.callee?.property?.name ?? node.callee?.name,
+              )
             );
           return false;
         };
@@ -771,12 +780,16 @@ const noRawSelectorFieldReadRule = {
             const binding = assignment ? env.get(pattern.name) : undefined;
             if (binding) {
               // Maps share outer binding records; declarations still shadow them.
-              binding.raw ||= isRaw || rawType(pattern.typeAnnotation);
+              binding.raw ||= isRaw || rawType(pattern.typeAnnotation, env);
               binding.literal = key(value, env);
             } else
               env.set(pattern.name, {
-                raw: isRaw || rawType(pattern.typeAnnotation),
+                raw: isRaw || rawType(pattern.typeAnnotation, env),
                 literal: key(value, env),
+                rawReturn: rawType(
+                  value?.returnType ?? pattern.typeAnnotation?.typeAnnotation?.returnType,
+                  env,
+                ),
               });
           } else if (pattern.type === "ObjectPattern") {
             for (const property of pattern.properties) {
@@ -789,6 +802,11 @@ const noRawSelectorFieldReadRule = {
                 context.report({ node: property, messageId: "rawSelector" });
               bind(property.value, undefined, env, isRaw && !fields.has(name), assignment);
             }
+          } else if (pattern.type === "ArrayPattern") {
+            for (const element of pattern.elements)
+              bind(element, undefined, env, isRaw, assignment);
+          } else if (pattern.type === "RestElement") {
+            bind(pattern.argument, undefined, env, isRaw, assignment);
           } else if (pattern.type === "AssignmentPattern")
             bind(pattern.left, pattern.right, env, isRaw, assignment);
         };
@@ -801,7 +819,7 @@ const noRawSelectorFieldReadRule = {
           ) {
             const local = new Map(env);
             for (const parameter of node.params)
-              bind(parameter, undefined, local, rawType(parameter.typeAnnotation));
+              bind(parameter, undefined, local, rawType(parameter.typeAnnotation, local));
             // Traversal callbacks receive raw hierarchy nodes even without annotations.
             if (
               parent?.type === "CallExpression" &&
@@ -812,6 +830,29 @@ const noRawSelectorFieldReadRule = {
             return;
           }
           if (node.type === "BlockStatement") env = new Map(env);
+          if (node.type === "Program" || node.type === "BlockStatement") {
+            // Predeclare explicit type aliases and function signatures in their lexical scope.
+            for (const statement of node.body) {
+              const declaration = statement.declaration ?? statement;
+              if (declaration.type === "TSTypeAliasDeclaration")
+                env.set(`type:${declaration.id.name}`, declaration.typeAnnotation);
+              if (declaration.type === "ImportDeclaration")
+                for (const specifier of declaration.specifiers)
+                  if (specifier.type === "ImportSpecifier")
+                    env.set(`type:${specifier.local.name}`, {
+                      type: "TSTypeReference",
+                      typeName: { name: specifier.imported.name },
+                    });
+            }
+            for (const statement of node.body) {
+              const declaration = statement.declaration ?? statement;
+              if (declaration.type === "FunctionDeclaration" && declaration.id)
+                env.set(declaration.id.name, {
+                  raw: false,
+                  rawReturn: rawType(declaration.returnType, env),
+                });
+            }
+          }
           if (node.type === "VariableDeclarator") {
             bind(node.id, node.init, env, raw(node.init, env));
             visit(node.init, env, node, "init");
@@ -819,7 +860,7 @@ const noRawSelectorFieldReadRule = {
           }
           if (
             node.type === "AssignmentExpression" &&
-            ["Identifier", "ObjectPattern"].includes(node.left.type)
+            ["Identifier", "ObjectPattern", "ArrayPattern"].includes(node.left.type)
           )
             bind(node.left, node.right, env, raw(node.right, env), true);
           if (

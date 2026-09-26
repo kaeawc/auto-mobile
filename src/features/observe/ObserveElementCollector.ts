@@ -110,7 +110,9 @@ export class DefaultObserveElementCollector implements ObserveElementCollector {
     for (const searchable of entries) {
       const { properties: nodeProperties, depth } = searchable;
       // Public observe descriptors remain independently owned by each collection.
-      const parsedNode = searchable.element ? { ...searchable.element } : undefined;
+      const parsedNode = searchable.element
+        ? { ...searchable.element, bounds: { ...searchable.element.bounds } }
+        : undefined;
       keyboardRoot = nextKeyboardRoot(
         keyboardRoot,
         nodeProperties.extras?.["automobile:imePackage"],

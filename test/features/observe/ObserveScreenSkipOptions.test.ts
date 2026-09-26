@@ -349,3 +349,12 @@ test("explicit observe capture policy distinguishes cached and fresh moved targe
   );
   expect(JSON.stringify(fresh)).not.toContain("captureId");
 });
+
+test("legacy observe publishes internal provenance without altering observation identity", async () => {
+  const { observeScreen } = createObserveScreen();
+  const observation = await observeScreen.execute({ skipScreenshot: true });
+  const snapshot = getHierarchySnapshot(observation.viewHierarchy);
+  expect(snapshot?.captureId).toBe(observation.observationId);
+  expect(snapshot?.requestedFreshness).toBe("cached-ok");
+  expect(JSON.stringify(observation)).not.toContain("captureId");
+});

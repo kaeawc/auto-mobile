@@ -146,3 +146,40 @@ test("rejects an exact clickable row without usable bounds", async () => {
   expect(result.error).toContain("no usable bounds");
   expect(commands).toEqual([]);
 });
+
+test("excludes a captured OEM chooser host from represented app metadata", async () => {
+  const adb = new FakeAdbExecutor();
+  const manager = new DeepLinkManager(
+    { platform: "android", deviceId: "fake", name: "fake" },
+    adb,
+    null,
+    null,
+    undefined,
+    undefined,
+    metadata("Example"),
+  );
+  const host = "com.vendor.intentresolver";
+  const result = await manager.handleIntentChooser(
+    {
+      hierarchy: {
+        node: {
+          $: { class: "com.android.internal.app.ChooserActivity", package: host },
+          node: [
+            {
+              ...row(host, 0),
+              node: [{ package: host, "resource-id": `${host}:id/title`, text: "Example Beta" }],
+            },
+            {
+              ...row(host, 100),
+              node: [{ package: host, "resource-id": `${host}:id/title`, text: "Example" }],
+            },
+          ],
+        },
+      },
+    } as any,
+    "custom",
+    target,
+  );
+  expect(result.success).toBe(true);
+  expect(adb.getExecutedCommands()).toEqual(["shell input tap 50 120"]);
+});

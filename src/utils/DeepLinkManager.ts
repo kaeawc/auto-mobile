@@ -749,6 +749,8 @@ export class DeepLinkManager implements DeepLinkManager {
     const labelRows = new Map<any, Set<string>>();
     let hasPackageMetadata = false;
     for (const node of nodes) {
+      const rootProperties = this.parser.extractNodeProperties(node);
+      const hostPackage = rootProperties.package ?? rootProperties.packageName;
       const ancestors: any[] = [];
       this.parser.traverseNode(node, (currentNode: any, depth: number) => {
         ancestors.length = depth;
@@ -769,6 +771,7 @@ export class DeepLinkManager implements DeepLinkManager {
           (value): value is string =>
             typeof value === "string" &&
             value.length > 0 &&
+            value !== hostPackage &&
             value !== "android" &&
             value !== "com.android.intentresolver" &&
             value !== "com.android.systemui",

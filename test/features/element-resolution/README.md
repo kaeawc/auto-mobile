@@ -23,7 +23,7 @@ loss of selectors. Deliberate fixture replacements require reviewing this contra
 
 S0 is **not complete yet**. `ContractResolver` is the adapter seam for S2's real
 resolver. `compareResolvers` compares chosen identity and ordered candidate
-identities (native ID, node key, bounds). Its current tests inject broken results
+identities (native ID, node key, bounds, text, label, value, class and test tag). Its current tests inject broken results
 to prove mismatch detection; they do not claim legacy-versus-legacy equivalence
 is evidence for a new resolver. S2 must wire its actual resolver into this seam,
 run the full fixture matrix differentially, and record only owner-approved

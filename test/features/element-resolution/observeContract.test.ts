@@ -82,4 +82,15 @@ describe("observe-to-resolve migration contract", () => {
     };
     expect(compareResolvers([selected], legacy, missingTarget)).toEqual([selected.key]);
   });
+  test("differential seam distinguishes overlapping ID-less candidates", () => {
+    const a = {
+      bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+      text: "Alpha",
+      class: "Button",
+    };
+    const b = { ...a, text: "Beta", class: "TextView" };
+    const reference: ContractResolver = { resolve: () => ({ candidates: [a, b], chosen: a }) };
+    const reordered: ContractResolver = { resolve: () => ({ candidates: [b, a], chosen: b }) };
+    expect(compareResolvers([cases[0]], reference, reordered)).toEqual([cases[0].key]);
+  });
 });

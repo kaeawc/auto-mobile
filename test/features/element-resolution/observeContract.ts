@@ -170,7 +170,19 @@ export function compareResolvers(
       const signature = (resolver: ContractResolver) => {
         const result = resolver.resolve(capture, query);
         const identity = (element: Element | null) =>
-          element ? [element["resource-id"], element["view-id"], boundsKey(element)] : null;
+          element
+            ? [
+                element["resource-id"],
+                element["view-id"],
+                boundsKey(element),
+                element.text,
+                element["content-desc"],
+                element["ios-accessibility-label"],
+                element.value,
+                element.class ?? element.className,
+                element["test-tag"],
+              ]
+            : null;
         return JSON.stringify({
           chosen: identity(result.chosen),
           candidates: result.candidates.map(identity),

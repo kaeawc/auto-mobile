@@ -8,7 +8,7 @@ interface ImeCommitSink {
   /** The active editor's inputType (EditorInfo.inputType), or null if no connection. */
   fun editorInputType(): Int?
 
-  /** Commit a single char to the InputConnection; false if the connection is gone. */
+  /** Commit one complete Unicode editing unit; false if the connection is gone. */
   fun commitChar(ch: CharSequence): Boolean
 
   /**
@@ -41,7 +41,7 @@ data class ImeCommitResult(
 
 class ImeCommitDriver(private val sink: ImeCommitSink) {
   private var completed = false
-  private var committedChars = 0
+  private var committedUnits = 0
   private var completion: ((ImeCommitResult) -> Unit)? = null
   private var restoreId: String? = null
 
@@ -111,7 +111,7 @@ class ImeCommitDriver(private val sink: ImeCommitSink) {
         return
       }
       val segment = segments[index]
-      for (ch in segment.text) {
+      for (unit in ImeGraphemes.split(segment.text)) {
         if (completed) return
         if (isCancelled()) {
           complete(failure("IME commit cancelled"))
@@ -121,11 +121,11 @@ class ImeCommitDriver(private val sink: ImeCommitSink) {
           complete(failure("IME commit deadline exceeded"))
           return
         }
-        if (!sink.commitChar(ch.toString())) {
+        if (!sink.commitChar(unit)) {
           complete(failure("Input connection lost during commit"))
           return
         }
-        committedChars++
+        committedUnits++
       }
       // Composing profiles retain the last word until explicitly finished.
       if (!sink.finishComposing()) {
@@ -204,7 +204,7 @@ class ImeCommitDriver(private val sink: ImeCommitSink) {
   }
 
   private fun failure(error: String) =
-    ImeCommitResult(success = false, error = error, partialApplication = committedChars > 0)
+    ImeCommitResult(success = false, error = error, partialApplication = committedUnits > 0)
 
   private companion object {
     val INLINE_FORMAT_SPAN = Regex("```|`[^`\n]+`|\\*[^*\n]+\\*|_[^_\n]+_|~[^~\n]+~")

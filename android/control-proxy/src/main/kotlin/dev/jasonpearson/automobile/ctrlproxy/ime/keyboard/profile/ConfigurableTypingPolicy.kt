@@ -1,8 +1,7 @@
 package dev.jasonpearson.automobile.ctrlproxy.ime.keyboard.profile
 
-import android.icu.text.BreakIterator
+import dev.jasonpearson.automobile.ctrlproxy.ime.ImeGraphemes
 import dev.jasonpearson.automobile.ctrlproxy.ime.keyboard.EditorConfig
-import java.util.Locale
 
 class ConfigurableTypingPolicy(private val behavior: TypingBehavior) : TypingPolicy {
   private var composingBuffer = ""
@@ -105,7 +104,7 @@ class ConfigurableTypingPolicy(private val behavior: TypingBehavior) : TypingPol
 
   private fun backspaceComposing(): List<ImeOp> {
     if (composingCursor == 0) return emptyList()
-    val previousGraphemeStart = composingBuffer.previousGraphemeStart(composingCursor)
+    val previousGraphemeStart = ImeGraphemes.previousStart(composingBuffer, composingCursor)
     composingBuffer = composingBuffer.removeRange(previousGraphemeStart, composingCursor)
     composingCursor = previousGraphemeStart
     return if (composingBuffer.isEmpty()) {
@@ -119,7 +118,7 @@ class ConfigurableTypingPolicy(private val behavior: TypingBehavior) : TypingPol
   private fun backspaceCommitted(snapshot: TextSnapshot): List<ImeOp> {
     val before = snapshot.textBeforeCursor
     if (before.isEmpty()) return emptyList()
-    val deletedStart = before.previousGraphemeStart(before.length)
+    val deletedStart = ImeGraphemes.previousStart(before, before.length)
     val deletedWidth = before.length - deletedStart
     val deletedCodePoint = Character.codePointBefore(before, before.length)
     if (behavior.recomposeOnBackspaceIntoWord && deletedCodePoint.isWordCodePoint()) {
@@ -220,36 +219,6 @@ class ConfigurableTypingPolicy(private val behavior: TypingBehavior) : TypingPol
       else -> false
     }
 
-  private fun String.previousGraphemeStart(cursor: Int): Int {
-    // Android 7's ICU break iterator may split newer emoji sequences, so extend its boundary
-    // across combining characters and joiners ourselves for consistent backspace behavior.
-    val breaks = BreakIterator.getCharacterInstance(Locale.ROOT)
-    breaks.setText(this)
-    var start = previousBoundary(breaks, cursor)
-    while (start > 0) {
-      val firstCodePoint = Character.codePointAt(this, start)
-      val previousCodePoint = Character.codePointBefore(this, start)
-      if (firstCodePoint.isGraphemeExtend() || previousCodePoint == ZERO_WIDTH_JOINER) {
-        start = previousBoundary(breaks, start)
-      } else {
-        break
-      }
-    }
-    return start
-  }
-
-  private fun previousBoundary(breaks: BreakIterator, offset: Int): Int =
-    breaks.preceding(offset).takeIf { it != BreakIterator.DONE } ?: 0
-
-  private fun Int.isGraphemeExtend(): Boolean =
-    isCombiningMark() ||
-      this == ZERO_WIDTH_JOINER ||
-      this == ZERO_WIDTH_NON_JOINER ||
-      this in VARIATION_SELECTOR_START..VARIATION_SELECTOR_END ||
-      this in SUPPLEMENTARY_VARIATION_SELECTOR_START..SUPPLEMENTARY_VARIATION_SELECTOR_END ||
-      this in EMOJI_MODIFIER_START..EMOJI_MODIFIER_END ||
-      this in EMOJI_TAG_START..EMOJI_TAG_END
-
   private fun String.takeLastWord(): String {
     var index = length
     while (index > 0) {
@@ -285,15 +254,5 @@ class ConfigurableTypingPolicy(private val behavior: TypingBehavior) : TypingPol
     const val KEYCODE_ENTER = 66
     // Android KeyEvent.KEYCODE_DEL
     const val KEYCODE_DEL = 67
-    const val ZERO_WIDTH_NON_JOINER = 0x200c
-    const val ZERO_WIDTH_JOINER = 0x200d
-    const val VARIATION_SELECTOR_START = 0xfe00
-    const val VARIATION_SELECTOR_END = 0xfe0f
-    const val SUPPLEMENTARY_VARIATION_SELECTOR_START = 0xe0100
-    const val SUPPLEMENTARY_VARIATION_SELECTOR_END = 0xe01ef
-    const val EMOJI_MODIFIER_START = 0x1f3fb
-    const val EMOJI_MODIFIER_END = 0x1f3ff
-    const val EMOJI_TAG_START = 0xe0020
-    const val EMOJI_TAG_END = 0xe007f
   }
 }

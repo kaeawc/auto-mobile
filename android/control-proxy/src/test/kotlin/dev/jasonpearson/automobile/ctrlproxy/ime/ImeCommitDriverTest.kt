@@ -6,7 +6,12 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [24])
 class ImeCommitDriverTest {
   @Test
   fun `text password field is refused and prior IME is restored`() {
@@ -41,6 +46,64 @@ class ImeCommitDriverTest {
     assertEquals("hello *world*", sink.committedChars.joinToString(separator = ""))
     assertEquals(listOf(PRIOR_IME_ID), sink.switchedImeIds)
     assertTrue(sink.delays.isEmpty())
+  }
+
+  @Test
+  fun `automation commits complete Unicode graphemes as individual units`() {
+    val sink = FakeImeCommitSink(inputType = InputType.TYPE_CLASS_TEXT)
+    val family = "👩‍👩‍👧‍👦"
+    val flag = "🇺🇸"
+    val text = "A😀e\u0301$family${flag}B"
+
+    val result = commit(sink, text, PRIOR_IME_ID)
+
+    assertTrue(result.success)
+    assertEquals(listOf("A", "😀", "e\u0301", family, flag, "B"), sink.committedChars)
+    assertEquals(text, sink.committedChars.joinToString(""))
+  }
+
+  @Test
+  fun `failed automation unit preserves complete cluster and partial progress`() {
+    val sink = FakeImeCommitSink(inputType = InputType.TYPE_CLASS_TEXT, failAtCommitIndex = 1)
+
+    val result = commit(sink, "e\u0301x", PRIOR_IME_ID)
+
+    assertFalse(result.success)
+    assertEquals("Input connection lost during commit", result.error)
+    assertEquals(listOf("e\u0301"), sink.committedChars)
+    assertTrue(result.partialApplication)
+    assertEquals(listOf(PRIOR_IME_ID), sink.switchedImeIds)
+  }
+
+  @Test
+  fun `cancellation is checked between grapheme commits`() {
+    val sink = FakeImeCommitSink(inputType = InputType.TYPE_CLASS_TEXT)
+    var cancelled = false
+    sink.afterCommit = { cancelled = true }
+    var result: ImeCommitResult? = null
+
+    ImeCommitDriver(sink).commit("😀after", PRIOR_IME_ID, isCancelled = { cancelled }) {
+      result = it
+    }
+
+    assertEquals(listOf("😀"), sink.committedChars)
+    assertEquals("IME commit cancelled", result?.error)
+    assertTrue(result!!.partialApplication)
+  }
+
+  @Test
+  fun `deadline is checked between grapheme commits`() {
+    val sink = FakeImeCommitSink(inputType = InputType.TYPE_CLASS_TEXT)
+    sink.afterCommit = { sink.clockMs = 10L }
+    var result: ImeCommitResult? = null
+
+    ImeCommitDriver(sink).commit("👩‍👩‍👧‍👦next", PRIOR_IME_ID, deadlineMs = 10L) {
+      result = it
+    }
+
+    assertEquals(listOf("👩‍👩‍👧‍👦"), sink.committedChars)
+    assertEquals("IME commit deadline exceeded", result?.error)
+    assertTrue(result!!.partialApplication)
   }
 
   @Test
@@ -293,6 +356,7 @@ class ImeCommitDriverTest {
     val delays = mutableListOf<Long>()
     val readSizes = mutableListOf<Int>()
     var readText: (Int, Int) -> String? = { _, _ -> null }
+    var afterCommit: (() -> Unit)? = null
     var clockMs = 0L
     private val pending = ArrayDeque<() -> Unit>()
     private var commitAttempts = 0
@@ -306,6 +370,7 @@ class ImeCommitDriverTest {
       if (currentAttempt == failAtCommitIndex) return false
       committedChars.add(ch.toString())
       events.add("char")
+      afterCommit?.invoke()
       return true
     }
 

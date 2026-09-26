@@ -1376,6 +1376,58 @@ class ViewHierarchyExtractorTest {
     assertTrue(ime.toString().contains("\"Q\""))
   }
 
+  @Test
+  fun `wire roots retain exact window ownership and layer independently of focus`() {
+    val app = fakeNode(packageName = "example.app", text = "Duplicate")
+    val overlay = fakeNode(packageName = "example.app", text = "Duplicate")
+    val result =
+      extractor.extractFromAllWindows(
+        listOf(
+          fakeWindow(id = 23, layer = 7, root = overlay),
+          fakeWindow(id = 24, layer = 2, root = app, focused = true, active = true),
+        ),
+        app,
+        disableAllFiltering = true,
+        occlusionEnabled = false,
+      )
+    val encoded =
+      json.encodeToJsonElement(ViewHierarchy.serializer(), result)
+        as kotlinx.serialization.json.JsonObject
+    val metadata = encoded["windows"] as kotlinx.serialization.json.JsonArray
+    val roots = result.hierarchy!!.node as kotlinx.serialization.json.JsonArray
+    assertEquals(
+      kotlinx.serialization.json.JsonPrimitive(24),
+      (roots[0] as kotlinx.serialization.json.JsonObject)["windowId"],
+    )
+    assertEquals(
+      kotlinx.serialization.json.JsonPrimitive(23),
+      (roots[1] as kotlinx.serialization.json.JsonObject)["windowId"],
+    )
+    assertEquals(
+      kotlinx.serialization.json.JsonPrimitive(7),
+      (metadata[0] as kotlinx.serialization.json.JsonObject)["windowLayer"],
+    )
+    assertEquals(
+      kotlinx.serialization.json.JsonPrimitive(2),
+      (metadata[1] as kotlinx.serialization.json.JsonObject)["windowLayer"],
+    )
+  }
+
+  @Test
+  fun `fallback root retains matching window metadata`() {
+    val app = fakeNode(packageName = "example.app", text = "Fallback")
+    val result = extractor.extractFromAllWindows(emptyList(), app, disableAllFiltering = true)
+    val root = result.hierarchy!!.node as kotlinx.serialization.json.JsonObject
+    val encoded =
+      json.encodeToJsonElement(ViewHierarchy.serializer(), result)
+        as kotlinx.serialization.json.JsonObject
+    val windows = encoded["windows"] as? kotlinx.serialization.json.JsonArray
+    assertNotNull(windows)
+    val metadata = windows!!.single() as kotlinx.serialization.json.JsonObject
+    assertEquals(root["windowId"], metadata["id"])
+    assertEquals(kotlinx.serialization.json.JsonPrimitive(0), metadata["windowLayer"])
+  }
+
   private fun fakeNode(
     packageName: String,
     text: String? = null,

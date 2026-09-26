@@ -33,7 +33,8 @@
       ],
       "outputs": [],
       "outputLogs": "new-only",
-      "passThroughEnv": ["CI", "GITHUB_ACTIONS"]
+      "passThroughEnv": ["CI", "GITHUB_ACTIONS"],
+      "env": ["GITHUB_BASE_REF"]
     },
     "test": {
       "description": "Run the hermetic Bun unit suite. The android/** and ios/** globs below are read off disk by cross-language source-scan guards no TS import can reach (registrationTeardownGuard, ctrlProxyProtocol, webrtcDeviceCaptureLatency, pinchGoldenVectorParity, coordinateMappingGoldenVectorParity); without them a Kotlin/Swift-only diff replays a cached result and the guard never runs. turbo.json is an input so editing test:coverage's list cannot leave this hash stale. Do not narrow or drop these without updating test/lint/turboTestInputsCoverNativeSources.integration.test.ts (issue #4351).",

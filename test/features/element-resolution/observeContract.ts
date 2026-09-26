@@ -9,6 +9,7 @@ import type {
 } from "../../../src/models";
 import { DefaultObserveElementCollector } from "../../../src/features/observe/ObserveElementCollector";
 import { projectSkeleton } from "../../../src/features/observe/output/SkeletonProjection";
+import { stableNodeSelectorForElement } from "../../../src/features/talkback/TalkBackTapStrategy";
 import { DefaultElementFinder } from "../../../src/features/utility/ElementFinder";
 import { DefaultElementSelector } from "../../../src/features/utility/DefaultElementSelector";
 
@@ -208,6 +209,7 @@ export function compareResolvers(
                 element.value,
                 element.class ?? element.className,
                 element["test-tag"],
+                stableNodeSelectorForElement(element),
               ]
             : null;
         return JSON.stringify({

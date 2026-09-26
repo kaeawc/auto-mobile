@@ -157,6 +157,24 @@ describe("observe-to-resolve migration contract", () => {
       "0,0,100,50",
     );
   });
+  test.each([
+    [{ "unique-id": "a" }, { "unique-id": "b" }],
+    [
+      { "unique-id": "shared", "collection-row-index": 0, "collection-column-index": 0 },
+      { "unique-id": "shared", "collection-row-index": 1, "collection-column-index": 0 },
+    ],
+  ])("differential seam preserves native activation identity %j", (first, second) => {
+    const base = { bounds: { left: 0, top: 0, right: 10, bottom: 10 }, text: "Same" };
+    const a = { ...base, ...first };
+    const b = { ...base, ...second };
+    expect(
+      compareResolvers(
+        [cases[0]],
+        { resolve: () => ({ candidates: [a, b], chosen: a }) },
+        { resolve: () => ({ candidates: [b, a], chosen: b }) },
+      ),
+    ).toEqual([cases[0].key]);
+  });
   test("differential seam distinguishes overlapping ID-less candidates", () => {
     const a = {
       bounds: { left: 0, top: 0, right: 10, bottom: 10 },

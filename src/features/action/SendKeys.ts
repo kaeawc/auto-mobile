@@ -615,17 +615,16 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   }
 
   private async restoreIme(priorImeId: string | null, wasEnabled: boolean): Promise<void> {
-    if (priorImeId === null) {
-      return;
-    }
-    try {
-      const result = await this.adb.executeCommand(`shell ime set ${priorImeId}`);
-      if (result.stderr.trim()) {
-        logger.warn(`[SendKeys] Failed to restore the prior IME: ${result.stderr.trim()}`);
+    if (priorImeId !== null) {
+      try {
+        const result = await this.adb.executeCommand(`shell ime set ${priorImeId}`);
+        if (result.stderr.trim()) {
+          logger.warn(`[SendKeys] Failed to restore the prior IME: ${result.stderr.trim()}`);
+        }
+      } catch (error) {
+        // Restoration is best-effort so it cannot mask the text-commit result.
+        logger.warn("[SendKeys] Failed to restore the prior IME", error);
       }
-    } catch (error) {
-      // Restoration is best-effort so it cannot mask the text-commit result.
-      logger.warn("[SendKeys] Failed to restore the prior IME", error);
     }
     if (!wasEnabled) {
       await this.disableCommitIme();

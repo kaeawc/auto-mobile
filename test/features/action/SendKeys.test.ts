@@ -452,7 +452,7 @@ describe("DefaultSendKeysCommandExecutor", () => {
     }
   });
 
-  test("ime mode does not set or disable an IME when there was no prior default", async () => {
+  test("ime mode disables a temporarily enabled IME when there was no prior default", async () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandResponseSequence("shell settings get secure default_input_method", [
       { stdout: "null\n", stderr: "" },
@@ -470,7 +470,7 @@ describe("DefaultSendKeysCommandExecutor", () => {
     expect(result).toMatchObject({ success: true, resolvedMode: "ime" });
     expect(adb.getExecutedCommands()).not.toContain("shell ime set null");
     expect(adb.getExecutedCommands()).not.toContain(`shell ime set ${priorImeId}`);
-    expect(adb.getExecutedCommands()).not.toContain(`shell ime disable ${commitImeId}`);
+    expect(adb.getExecutedCommands()).toContain(`shell ime disable ${commitImeId}`);
   });
 
   test("ime mode fails closed before switching when the command is not advertised", async () => {

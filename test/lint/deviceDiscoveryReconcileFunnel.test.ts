@@ -209,12 +209,31 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
    * assertions below read the same inventory.
    */
   let cachedCounts: Map<string, number> | undefined;
+  let routedSources: string[] = [];
+  let devicePoolSource = "";
+  let discoveryReconcileSource = "";
 
   // The inventory is a fixture shared by all three assertions below, not work
   // any one of them owns; building it here keeps each test's own cost to the
   // comparison it actually makes.
   beforeAll(() => {
     discoveryCallCounts();
+    const routed = [
+      "src/daemon/daemon.ts",
+      "src/daemon/socketServer.ts",
+      "src/server/bootedDeviceResources.ts",
+      "src/server/deviceTools.ts",
+      "src/server/utilityTools.ts",
+      "src/daemon/webrtcStreamSocketServer.ts",
+      "src/daemon/videoStreamSocketServer.ts",
+      "src/daemon/testRecordingSocketServer.ts",
+      "src/server/resourceDeviceResolver.ts",
+    ];
+    routedSources = routed.map((file) => blankComments(readFileSync(join(ROOT, file), "utf8")));
+    devicePoolSource = blankComments(readFileSync(join(ROOT, "src/daemon/devicePool.ts"), "utf8"));
+    discoveryReconcileSource = blankComments(
+      readFileSync(join(ROOT, "src/daemon/discoveryReconcile.ts"), "utf8"),
+    );
   });
 
   function discoveryCallCounts(): Map<string, number> {
@@ -259,30 +278,16 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
   });
 
   test("the funnel is reached from the routed files by its single name", () => {
-    const routed = [
-      "src/daemon/daemon.ts",
-      "src/daemon/socketServer.ts",
-      "src/server/bootedDeviceResources.ts",
-      "src/server/deviceTools.ts",
-      "src/server/utilityTools.ts",
-      "src/daemon/webrtcStreamSocketServer.ts",
-      "src/daemon/videoStreamSocketServer.ts",
-      "src/daemon/testRecordingSocketServer.ts",
-      "src/server/resourceDeviceResolver.ts",
-    ];
-    for (const file of routed) {
-      const source = blankComments(readFileSync(join(ROOT, file), "utf8"));
+    for (const source of routedSources) {
       expect(source).toMatch(/reconcileDiscoveryObservation\s*[?]?\.?\s*\(/);
     }
   });
 
   test("the funnel and its wrapper exist under their canonical names", () => {
-    expect(blankComments(readFileSync(join(ROOT, "src/daemon/devicePool.ts"), "utf8"))).toMatch(
-      /async reconcileDiscoveryObservation\(/,
+    expect(devicePoolSource).toMatch(/async reconcileDiscoveryObservation\(/);
+    expect(discoveryReconcileSource).toMatch(
+      /export async function reconcileDiscoveryObservation\(/,
     );
-    expect(
-      blankComments(readFileSync(join(ROOT, "src/daemon/discoveryReconcile.ts"), "utf8")),
-    ).toMatch(/export async function reconcileDiscoveryObservation\(/);
   });
 
   test("the comment stripper does not count a mention in prose as a call site", () => {

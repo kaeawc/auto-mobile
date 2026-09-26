@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import { requireBootedDevice } from "../../src/utils/requireBootedDevice";
 
 const FN = "Test.getInstance";
@@ -80,17 +80,19 @@ describe("requireBootedDevice", () => {
 });
 
 describe("requireBootedDevice integration with factories", () => {
-  test("IOSCtrlProxyClient.getInstance throws on bare deviceId string", async () => {
-    const { IOSCtrlProxyClient } =
-      await import("../../src/features/observe/ios/IOSCtrlProxyClient");
+  let IOSCtrlProxyClient: typeof import("../../src/features/observe/ios/IOSCtrlProxyClient").IOSCtrlProxyClient;
+
+  beforeAll(async () => {
+    ({ IOSCtrlProxyClient } = await import("../../src/features/observe/ios/IOSCtrlProxyClient"));
+  });
+
+  test("IOSCtrlProxyClient.getInstance throws on bare deviceId string", () => {
     expect(() => IOSCtrlProxyClient.getInstance("ABCDEF" as never)).toThrow(
       /IOSCtrlProxyClient\.getInstance: expected BootedDevice/,
     );
   });
 
-  test("IOSCtrlProxyClient.getInstance throws on empty object", async () => {
-    const { IOSCtrlProxyClient } =
-      await import("../../src/features/observe/ios/IOSCtrlProxyClient");
+  test("IOSCtrlProxyClient.getInstance throws on empty object", () => {
     expect(() => IOSCtrlProxyClient.getInstance({} as never)).toThrow(/expected BootedDevice/);
   });
 

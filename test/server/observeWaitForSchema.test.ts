@@ -654,7 +654,7 @@ describe("findWaitForElement rich predicates", () => {
     expect(element?.class).toBe("android.widget.BottomNavigationView");
   });
 
-  test("ignores camelCase className attributes on parsed elements", () => {
+  test("matches the className alias supplied by CtrlProxy captures", () => {
     const finder = new ElementResolver();
     const hierarchy = makeHierarchy([
       {
@@ -673,7 +673,8 @@ describe("findWaitForElement rich predicates", () => {
       hierarchy,
     );
 
-    expect(element).toBeNull();
+    // Shared capture normalization accepts both native class field spellings.
+    expect(element?.className).toBe("android.widget.BottomNavigationView");
   });
 
   test.each([

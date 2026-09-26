@@ -182,7 +182,7 @@ export class ElementResolver {
       nodes = nodes.filter((node) => isWithin(node, scope!, snapshot.nodes));
     }
     if (selector.sibling) {
-      const siblings = this.siblingNodes(snapshot, nodes, selector.sibling, scope);
+      const siblings = this.siblingNodes(snapshot, nodes, selector, intent, scope);
       if (siblings.error) {
         return {
           chosen: null,
@@ -292,36 +292,42 @@ export class ElementResolver {
   private siblingNodes(
     snapshot: ResolverSnapshot,
     nodes: SearchableEntry[],
-    sibling: ResolverSelector,
+    selector: ResolverSelector,
+    intent: ResolutionIntent,
     scope?: SearchableEntry,
   ): { nodes: SearchableEntry[]; error?: string } {
-    const anchors = this.resolveInNodes(snapshot, sibling, { action: "inspect" }, nodes, scope);
+    const anchors = this.resolveInNodes(
+      snapshot,
+      selector.sibling!,
+      { action: "inspect" },
+      nodes,
+      scope,
+    );
     if (anchors.error) {
       return { nodes: [], error: anchors.error };
     }
     const anchor = this.siblingAnchor(anchors, snapshot);
     let parent = anchor?.parentIndex;
-    while (
-      parent !== undefined &&
-      snapshot.nodes.filter((node) => node.parentIndex === parent).length === 1
-    ) {
-      if (snapshot.nodes[parent].collection) {
+    while (anchor && parent !== undefined) {
+      const row = snapshot.nodes[parent];
+      if (!row || row.collection) {
         break;
       }
-      parent = snapshot.nodes[parent].parentIndex;
-    }
-    const row = parent === undefined ? undefined : snapshot.nodes[parent];
-    if (!anchor || !row || row.collection) {
-      return { nodes: [], error: "Sibling row not found" };
-    }
-    return {
-      nodes: nodes.filter(
+      const siblings = nodes.filter(
         (node) =>
           isWithin(node, row, snapshot.nodes) &&
           node !== anchor &&
           !isWithin(node, anchor, snapshot.nodes),
-      ),
-    };
+      );
+      if (this.match(siblings, selector, intent).matches.length > 0) {
+        return { nodes: siblings };
+      }
+      if (row === scope) {
+        break;
+      }
+      parent = row.parentIndex;
+    }
+    return { nodes: [], error: "Sibling row not found" };
   }
 
   private siblingAnchor(

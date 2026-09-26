@@ -60,6 +60,8 @@ export function getUncollectedWrappers(elements: object): readonly Element[] {
  * overlays.
  */
 export interface ElementProvenance {
+  /** Canonical topmost-first capture window rank, when supplied by projection. */
+  windowRank?: number;
   /** Root/window group index; ancestry only holds within one group. */
   group: number;
   /** Pre-order enter position over parsed nodes (distinct, monotonic across groups). */

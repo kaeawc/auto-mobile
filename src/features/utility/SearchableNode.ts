@@ -1,4 +1,4 @@
-import { foldSearchableLabels } from "./SearchableLabels";
+import { foldSearchableLabels, inheritsOwnerLabel } from "./SearchableLabels";
 import type { ViewHierarchyNode, ViewHierarchyResult } from "../../models";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
 import { DefaultElementParser } from "./ElementParser";
@@ -185,6 +185,7 @@ export class SearchableHierarchy {
       });
     }
     hoistSearchableLabels(entries);
+    attributeSearchableLabels(entries);
     this.captures.set(capture, entries);
     return entries;
   }
@@ -222,5 +223,25 @@ function hoistSearchableLabels(entries: SearchableEntry[]): void {
         ),
       ),
     ];
+  }
+}
+
+/** Snapshot labelled owners so inherited labels never chain between controls. */
+function attributeSearchableLabels(entries: SearchableEntry[]): void {
+  const labelled = new Set(entries.filter((entry) => entry.label !== undefined));
+  for (const entry of entries) {
+    if (entry.label !== undefined || !inheritsOwnerLabel(entry.affordances)) {
+      continue;
+    }
+    let parent = entry.parentIndex;
+    while (parent !== undefined) {
+      const ancestor = entries[parent];
+      if (labelled.has(ancestor)) {
+        entry.label = ancestor.label;
+        entry.textFields = [...entry.textFields, ancestor.label!];
+        break;
+      }
+      parent = ancestor.parentIndex;
+    }
   }
 }

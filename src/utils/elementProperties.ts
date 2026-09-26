@@ -67,11 +67,16 @@ export const ANDROID_INPUT_CLASSES: readonly string[] = [
 
 /** A collection boundary cannot be crossed by an adjacent-control selector. */
 export function isCollectionElementProperties(props: Record<string, unknown>): boolean {
-  const className = typeof props.class === "string" ? props.class : "";
+  const className =
+    typeof props.class === "string"
+      ? props.class
+      : typeof props.className === "string"
+        ? props.className
+        : "";
   return (
     isTruthyFlag(props.scrollable) ||
     ["RecyclerView", "ListView", "ScrollView", "CollectionView", "TableView"].some((name) =>
-      className.includes(name),
+      className.endsWith(name),
     )
   );
 }

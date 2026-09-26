@@ -135,6 +135,7 @@ export class DefaultObserveElementCollector implements ObserveElementCollector {
       const parent = ancestors.length > 0 ? ancestors[ancestors.length - 1].provenance : undefined;
       const enter = provenanceState.enter++;
       const provenance: ElementProvenance = {
+        windowRank: searchable.windowRank,
         group,
         enter,
         exit: enter,

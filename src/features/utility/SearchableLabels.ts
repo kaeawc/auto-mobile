@@ -1,3 +1,10 @@
+import type { Affordance } from "../../models/ObserveResult";
+
+/** State and scroll containers may advertise their labelled owning row. */
+export function inheritsOwnerLabel(affordances: Iterable<Affordance>): boolean {
+  return [...affordances].some((action) => action === "toggle" || action === "scroll");
+}
+
 /** Fold a row's ordered descendant labels identically for display and resolution. */
 export function foldSearchableLabels(
   row: { label?: string; sublabel?: string },

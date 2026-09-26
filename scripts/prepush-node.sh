@@ -8,6 +8,11 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "$ROOT"
 
+# shellcheck source=scripts/lib/vcs-diff.sh disable=SC1091
+source "$ROOT/scripts/lib/vcs-diff.sh"
+# shellcheck source=scripts/lib/db-integration-paths.sh disable=SC1091
+source "$ROOT/scripts/lib/db-integration-paths.sh"
+
 # Keep local validation hermetic when the caller cannot chmod the default
 # user-level AutoMobile directories (for example, a restricted agent sandbox).
 export AUTOMOBILE_DATA_DIR="${AUTOMOBILE_DATA_DIR:-$ROOT/scratch/prepush-node-data}"
@@ -97,6 +102,22 @@ stale_base_guard() {
   fi
 }
 
+db_integration_fast_path() {
+  local branch_changes worktree_changes rc paths_changed
+  branch_changes="$(vcs_changed_files_since_merge_base origin/main)"
+  rc=$?
+  if [[ "$rc" -ne 0 ]]; then return "$rc"; fi
+  worktree_changes="$(vcs_touched_files_including_deleted)"
+  rc=$?
+  if [[ "$rc" -ne 0 ]]; then return "$rc"; fi
+  paths_changed="$(db_integration_paths_changed <<< "${branch_changes}"$'\n'"${worktree_changes}")"
+  if [[ "$paths_changed" == "yes" ]]; then
+    env AUTOMOBILE_TEST_MODE=true bun test test/db/*.integration.test.ts
+  else
+    echo "Skipping test/db integration fast path; no changes under src/daemon/, src/db/, src/server/, or test/db/."
+  fi
+}
+
 run_gate "stale-base guard" stale_base_guard
 run_gate "format check" bun run format:check
 run_gate "typecheck" bun run typecheck
@@ -114,6 +135,7 @@ if [[ "$runner_os" != "Windows" ]]; then
   unit_env=(env AUTOMOBILE_TEST_MODE=true AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=720 AUTOMOBILE_UNIT_JUNIT_DIR=scratch/timing-unit-reports)
 fi
 run_gate "${unit_mode} unit tests" "${unit_env[@]}" bash scripts/test-ts.sh "$unit_mode"
+run_gate "test/db integration fast path" db_integration_fast_path
 
 if [[ "$timing_requested" -eq 1 || ( "$runner_os" != "macOS" && "$runner_os" != "Windows" ) ]]; then
   if [[ "$changed_mode" -eq 1 ]]; then

@@ -9,6 +9,8 @@ const integrationTestPath = "test/integration/webrtcDeviceCapture.integration.te
 
 test("loads the default skipped device suite without initializing capture", async () => {
   const env = { ...process.env };
+  delete env.CLAUDECODE;
+  delete env.AI_AGENT;
   delete env.AUTOMOBILE_WEBRTC_DEVICE_INTEGRATION;
   const { stderr, stdout } = await execFileAsync("bun", ["test", integrationTestPath], {
     cwd: repoRoot,

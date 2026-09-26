@@ -218,7 +218,9 @@ export class ElementResolver {
     result.candidates = result.candidates.filter(
       (candidate) =>
         actionTarget(candidate) !== null ||
-        (!!candidate.bounds && candidate.affordances.length > 0),
+        (!!candidate.bounds &&
+          candidate.affordances.length > 0 &&
+          (!intent.viewport || centerWithinViewport(candidate.bounds, intent.viewport))),
     );
     return this.choose(result, selector, actionTarget);
   }

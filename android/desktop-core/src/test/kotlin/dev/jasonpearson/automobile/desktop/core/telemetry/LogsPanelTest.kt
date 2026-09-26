@@ -76,6 +76,30 @@ class LogsPanelTest {
   }
 
   @Test
+  fun `internal CtrlProxy tags are excluded independently of other filters`() {
+    val internal = log(4, "ViewHierarchyExtractor", "matching message", 1)
+    val app = log(4, "MyAppTag", "matching message", 2)
+    assertTrue(isAutoMobileInternalTag("ViewHierarchyExtractor"))
+    assertTrue(isAutoMobileInternalTag("CtrlProxy"))
+    assertFalse(isAutoMobileInternalTag("MyAppTag"))
+    assertEquals(
+      listOf(app),
+      filterLogs(listOf(internal, app), setOf(LogLevel.Info), "matching", showInternalTags = false),
+    )
+    assertEquals(
+      listOf(internal, app),
+      filterLogs(listOf(internal, app), setOf(LogLevel.Info), "matching", showInternalTags = true),
+    )
+  }
+
+  @Test
+  fun `minimum levels serialize by device and recover from malformed settings`() {
+    val levels = mapOf("device-a" to "WARN")
+    assertEquals(levels, deserializeLogsMinLevelByDevice(serializeLogsMinLevelByDevice(levels)))
+    assertEquals(emptyMap<String, String>(), deserializeLogsMinLevelByDevice("not json"))
+  }
+
+  @Test
   fun `search narrows by case-insensitive substring over tag and message`() {
     val logs =
       listOf(
@@ -248,7 +272,7 @@ class LogsPanelTest {
         listOf(
           LogsSavedView(
             "Network info",
-            LogLevel.entries.toSet() - LogLevel.Warn,
+            setOf(LogLevel.Info, LogLevel.Error),
             "net",
             "connected",
           )
@@ -331,6 +355,60 @@ class LogsPanelTest {
       onAllNodesWithText("warn line").fetchSemanticsNodes().isNotEmpty()
     }
     onNodeWithText("warn line").assertIsDisplayed()
+  }
+
+  @Test
+  fun `defaults to app Info and above and toggle reveals internal rows`() = runComposeUiTest {
+    val fake = FakeTelemetryPushClient()
+    setContent {
+      MaterialTheme { LogsPanel(telemetryPushClient = fake, activeDeviceId = "dev-1") }
+    }
+    waitForIdle()
+    fake.emitEvent(log(3, "AppTag", "debug app row", 1))
+    fake.emitEvent(log(4, "AppTag", "info app row", 2))
+    fake.emitEvent(log(5, "AppTag", "warn app row", 3))
+    fake.emitEvent(log(4, "ViewHierarchyExtractor", "internal info row", 4))
+    fake.emitEvent(log(3, "ViewHierarchyExtractor", "internal debug row", 5))
+    waitUntil(timeoutMillis = 2_000) {
+      onAllNodesWithText("info app row").fetchSemanticsNodes().isNotEmpty() &&
+        onAllNodesWithText("warn app row").fetchSemanticsNodes().isNotEmpty()
+    }
+    onNodeWithText("debug app row").assertDoesNotExist()
+    onNodeWithText("internal info row").assertDoesNotExist()
+    onNodeWithText("internal debug row").assertDoesNotExist()
+
+    onNodeWithContentDescription("Toggle Logs filters and views").performClick()
+    onNodeWithContentDescription("Toggle AutoMobile internal logs")
+      .assertIsNotSelected()
+      .performClick()
+    onNodeWithText("internal info row").assertIsDisplayed()
+    onNodeWithText("internal debug row").assertDoesNotExist()
+  }
+
+  @Test
+  fun `level minimum persists per device and restores when returning`() = runComposeUiTest {
+    val settings = FakeSettingsProvider()
+    val deviceId = mutableStateOf("dev-1")
+    setContent {
+      MaterialTheme {
+        LogsPanel(
+          telemetryPushClient = null,
+          settingsProvider = settings,
+          activeDeviceId = deviceId.value,
+        )
+      }
+    }
+    onNodeWithContentDescription("Toggle Debug logs").assertIsNotSelected().performClick()
+    assertEquals(
+      mapOf("dev-1" to "Debug"),
+      deserializeLogsMinLevelByDevice(settings.logsMinLevelByDevice),
+    )
+    onNodeWithContentDescription("Toggle Debug logs").assertIsSelected()
+
+    runOnIdle { deviceId.value = "dev-2" }
+    onNodeWithContentDescription("Toggle Debug logs").assertIsNotSelected()
+    runOnIdle { deviceId.value = "dev-1" }
+    onNodeWithContentDescription("Toggle Debug logs").assertIsSelected()
   }
 
   @Test

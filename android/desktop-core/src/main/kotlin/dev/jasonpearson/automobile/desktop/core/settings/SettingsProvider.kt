@@ -9,6 +9,8 @@ interface SettingsProvider {
   var failuresDateRange: String // "1h", "24h", "3d", "7d", "30d"
   /** JSON array of globally saved Logs filter views. */
   var logsSavedViews: String
+  /** JSON object mapping device IDs to their minimum enabled Logs level name. */
+  var logsMinLevelByDevice: String
   /** IDE to open Android/Kotlin/Java files in. "auto", "android-studio", "intellij", "vscode" */
   var androidIde: String
   /** IDE to open Swift/ObjC files in. "auto", "xcode", "vscode" */

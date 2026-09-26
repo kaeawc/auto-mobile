@@ -31,6 +31,25 @@ fun matchesSavedView(
 
 fun serializeLogsSavedViews(views: List<LogsSavedView>): String = Json.encodeToString(views)
 
+/**
+ * Encodes per-device minimum levels independently of saved-view JSON, preserving its stable shape.
+ */
+fun serializeLogsMinLevelByDevice(levels: Map<String, String>): String = Json.encodeToString(levels)
+
+/** Corrupt per-device filter settings recover to an empty map so the panel uses its default. */
+fun deserializeLogsMinLevelByDevice(json: String): Map<String, String> {
+  if (json.isBlank()) return emptyMap()
+  return try {
+    Json.decodeFromString<Map<String, String>>(json)
+  } catch (error: SerializationException) {
+    LOG.debug("Ignoring malformed per-device minimum Logs levels: ${error.message}")
+    emptyMap()
+  } catch (error: IllegalArgumentException) {
+    LOG.debug("Ignoring invalid per-device minimum Logs levels: ${error.message}")
+    emptyMap()
+  }
+}
+
 fun deserializeLogsSavedViews(json: String): List<LogsSavedView> {
   if (json.isBlank()) return emptyList()
   return try {

@@ -8,6 +8,7 @@ class FakeSettingsProvider(
   override var autoFocusEnabled: Boolean = true,
   override var failuresDateRange: String = "24h",
   override var logsSavedViews: String = "[]",
+  override var logsMinLevelByDevice: String = "{}",
   override var androidIde: String = "auto",
   override var iosIde: String = "auto",
   override var themeMode: String = "dark",

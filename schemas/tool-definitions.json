@@ -2624,7 +2624,16 @@
         "action": {
           "description": "Keyboard action; listProfiles returns AutoMobile behavior models and listImes returns installed Android input methods",
           "type": "string",
-          "enum": ["open", "close", "detect", "setProfile", "listProfiles", "listImes", "setIme"]
+          "enum": [
+            "open",
+            "close",
+            "detect",
+            "setProfile",
+            "listProfiles",
+            "listImes",
+            "setIme",
+            "tapImeKey"
+          ]
         },
         "profile": {
           "description": "AutoMobile keyboard behavior profile; required for setProfile",
@@ -2633,6 +2642,10 @@
         },
         "imeId": {
           "description": "Installed Android IME component; required for setIme",
+          "type": "string"
+        },
+        "key": {
+          "description": "Exact visible key text or accessibility label; required for tapImeKey",
           "type": "string"
         },
         "platform": {

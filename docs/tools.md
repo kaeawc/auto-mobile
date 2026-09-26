@@ -67,6 +67,18 @@ transform before correlating iOS `observe` or `tapAt` coordinates with
 | ⌨️ <code>keyboard</code>      | Opens, closes, or detects the keyboard; selects AutoMobile profiles or installed Android IMEs.                                 |
 | 📋 <code>clipboard</code>     | Copies, pastes, clears, or reads the clipboard.                                                                                |
 
+On Android, `keyboard` can list installed input methods with
+`{"action":"listImes"}` and select an enabled component with
+`{"action":"setIme","imeId":"…"}`. To exercise one visible key in an installed
+IME, focus an editor first, then call
+`{"action":"tapImeKey","imeId":"…","key":"a"}`. This action selects the requested
+IME for one frame-bound physical tap, reports whether the same focused editor
+changed without returning its text, and restores the original active IME.
+The requested component must already be installed and enabled; the key must
+have one visible, package-owned accessibility match inside an IME window.
+Unobservable or ambiguous keys fail closed. If restoration cannot be verified,
+AutoMobile quarantines further IME changes until restart.
+
 `sendKeys` accepts one optional field selector and an ordered sequence of up to
 100 commands:
 

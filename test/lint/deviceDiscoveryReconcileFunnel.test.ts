@@ -210,6 +210,8 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
    */
   let cachedCounts: Map<string, number> | undefined;
   let routedSources: string[] = [];
+  let devicePoolSource = "";
+  let discoveryReconcileSource = "";
 
   // The inventory is a fixture shared by all three assertions below, not work
   // any one of them owns; building it here keeps each test's own cost to the
@@ -228,6 +230,10 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
       "src/server/resourceDeviceResolver.ts",
     ];
     routedSources = routed.map((file) => blankComments(readFileSync(join(ROOT, file), "utf8")));
+    devicePoolSource = blankComments(readFileSync(join(ROOT, "src/daemon/devicePool.ts"), "utf8"));
+    discoveryReconcileSource = blankComments(
+      readFileSync(join(ROOT, "src/daemon/discoveryReconcile.ts"), "utf8"),
+    );
   });
 
   function discoveryCallCounts(): Map<string, number> {
@@ -278,12 +284,10 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
   });
 
   test("the funnel and its wrapper exist under their canonical names", () => {
-    expect(blankComments(readFileSync(join(ROOT, "src/daemon/devicePool.ts"), "utf8"))).toMatch(
-      /async reconcileDiscoveryObservation\(/,
+    expect(devicePoolSource).toMatch(/async reconcileDiscoveryObservation\(/);
+    expect(discoveryReconcileSource).toMatch(
+      /export async function reconcileDiscoveryObservation\(/,
     );
-    expect(
-      blankComments(readFileSync(join(ROOT, "src/daemon/discoveryReconcile.ts"), "utf8")),
-    ).toMatch(/export async function reconcileDiscoveryObservation\(/);
   });
 
   test("the comment stripper does not count a mention in prose as a call site", () => {

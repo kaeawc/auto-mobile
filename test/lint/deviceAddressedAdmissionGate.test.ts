@@ -159,6 +159,10 @@ describe("device-addressed admission gate (issue #6863)", () => {
 
   const functionCache = new Map<string, NamedFunction[]>();
   let poolSource = "";
+  let resolverSource = "";
+  let factorySource = "";
+  let ctrlProxyClientSource = "";
+  let unadmittedFactoryUsers: string[] = [];
 
   /**
    * Every named function/method declaration in a file, with its body text.
@@ -211,6 +215,19 @@ describe("device-addressed admission gate (issue #6863)", () => {
       namedFunctions(file);
     }
     poolSource = blankComments(readFileSync(join(ROOT, "src/daemon/devicePool.ts"), "utf8"));
+    resolverSource = blankComments(
+      readFileSync(join(ROOT, "src/daemon/deviceSessionResolver.ts"), "utf8"),
+    );
+    factorySource = blankComments(
+      readFileSync(join(ROOT, "src/utils/android-cmdline-tools/AdbClientFactory.ts"), "utf8"),
+    );
+    ctrlProxyClientSource = blankComments(
+      readFileSync(join(ROOT, "src/features/observe/android/AndroidCtrlProxyClient.ts"), "utf8"),
+    );
+    unadmittedFactoryUsers = walkSrc()
+      .filter((file) => readFileSync(file).includes("unadmittedAdbClientFactory"))
+      .map((file) => relative(ROOT, file).split(sep).join("/"))
+      .sort();
   });
 
   test("the gate exists on the pool under its single name", () => {
@@ -225,10 +242,9 @@ describe("device-addressed admission gate (issue #6863)", () => {
   });
 
   test("the stream server reaches the gate through the resolver it already holds", () => {
-    const resolver = blankComments(
-      readFileSync(join(ROOT, "src/daemon/deviceSessionResolver.ts"), "utf8"),
+    expect(resolverSource).toMatch(
+      new RegExp(`${GATE}\\(deviceId: string, purpose: string\\): void;`),
     );
-    expect(resolver).toMatch(new RegExp(`${GATE}\\(deviceId: string, purpose: string\\): void;`));
   });
 
   test.each(GATED_HANDLERS.map((handler) => [handler.file, handler.fn, handler.what] as const))(
@@ -274,22 +290,18 @@ describe("device-addressed admission gate (issue #6863)", () => {
    * "gate before you bind" is an ordering obligation no signature expresses.
    */
   test("the adb client factory gates every device-bound client", () => {
-    const factory = blankComments(
-      readFileSync(join(ROOT, "src/utils/android-cmdline-tools/AdbClientFactory.ts"), "utf8"),
-    );
-    expect(factory).toContain(`daemonDeviceAdmissionGate.${GATE}(device.deviceId`);
+    expect(factorySource).toContain(`daemonDeviceAdmissionGate.${GATE}(device.deviceId`);
     // ... and the escape hatch the quarantine's own machinery needs is a
     // SEPARATE export, so reaching it is a deliberate act.
-    expect(factory).toMatch(/export const unadmittedAdbClientFactory: AdbClientFactory/);
+    expect(factorySource).toMatch(/export const unadmittedAdbClientFactory: AdbClientFactory/);
   });
 
   test("the memoizing CtrlProxy client resolution gates too", () => {
     // `getInstance` caches per serial, so a client built before the quarantine
     // would be handed back without the factory seam being crossed again.
-    const client = blankComments(
-      readFileSync(join(ROOT, "src/features/observe/android/AndroidCtrlProxyClient.ts"), "utf8"),
+    const getInstance = ctrlProxyClientSource.slice(
+      ctrlProxyClientSource.indexOf("public static getInstance("),
     );
-    const getInstance = client.slice(client.indexOf("public static getInstance("));
     expect(getInstance.slice(0, getInstance.indexOf("\n  }\n"))).toContain(
       `daemonDeviceAdmissionGate.${GATE}(device.deviceId`,
     );
@@ -300,14 +312,7 @@ describe("device-addressed admission gate (issue #6863)", () => {
     // that can LIFT the quarantine, and `emu kill` is how the pool settles a
     // serial it can no longer identify. Everything else in src/ binds through
     // the gated factory.
-    const users: string[] = [];
-    for (const file of walkSrc()) {
-      if (!readFileSync(file).includes("unadmittedAdbClientFactory")) {
-        continue;
-      }
-      users.push(relative(ROOT, file).split(sep).join("/"));
-    }
-    expect(users.sort()).toEqual([
+    expect(unadmittedFactoryUsers).toEqual([
       "src/utils/android-cmdline-tools/AdbClientFactory.ts",
       "src/utils/android-cmdline-tools/AndroidEmulatorClient.ts",
     ]);

@@ -157,3 +157,73 @@ describe("TapAnyElement", () => {
     });
   });
 });
+
+test.each([false, true])(
+  "cached miss then fresh hit reports its coordinate capture (transient failure=%s)",
+  async (failFirstCapture) => {
+    const { DefaultHierarchyCapture, getHierarchySnapshot } =
+      await import("../../../src/features/observe/HierarchyCapture");
+    const { CountingIdGenerator } = await import("../../../src/utils/IdGenerator");
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const adb = new FakeAdbClient();
+    const requests: string[] = [];
+    const fresh = {
+      screenWidth: 500,
+      screenHeight: 500,
+      hierarchy: {
+        node: {
+          bounds: { left: 0, top: 0, right: 500, bottom: 500 },
+          node: {
+            text: "Continue",
+            clickable: true,
+            "resource-id": "app:id/continue",
+            bounds: { left: 200, top: 100, right: 300, bottom: 160 },
+          },
+        },
+      },
+    };
+    const capture = new DefaultHierarchyCapture(
+      "android",
+      {
+        readCached: async () => {
+          throw new Error("fresh request required");
+        },
+        readFresh: async (request) => {
+          requests.push(request.freshness);
+          if (failFirstCapture && requests.length === 1) {
+            throw new Error("temporary capture failure");
+          }
+          expect(request.timeoutMs).toBeGreaterThan(0);
+          expect(request.timeoutMs).toBeLessThanOrEqual(400);
+          return fresh;
+        },
+        projectVisible: (value) => value,
+      },
+      timer,
+      new CountingIdGenerator(),
+    );
+    const tapAny = new TapAnyElement(
+      { deviceId: "capture-tapany", name: "Test", platform: "android" },
+      adb as any,
+      { timer, hierarchyCapture: capture },
+    );
+    const cached = {
+      observationId: "old-capture",
+      screenSize: { width: 100, height: 100 },
+      viewHierarchy: { hierarchy: { node: {} } },
+    };
+    (tapAny as any).observedInteraction = (action: (result: any) => Promise<unknown>) =>
+      action(cached);
+    const result = await tapAny.execute({ action: "tap", searchUntil: { duration: 500 } });
+    expect(result.success).toBe(true);
+    expect(requests).toEqual(failFirstCapture ? ["fresh", "fresh"] : ["fresh"]);
+    expect(result.element["resource-id"]).toBe("app:id/continue");
+    expect(result.element.bounds.left).toBe(200);
+    expect(adb.getCommandCalls().map((call) => call.command)).toContain("shell input tap 250 130");
+    const snapshot = getHierarchySnapshot(fresh);
+    expect(result.captureId).toBeDefined();
+    expect(result.captureId).not.toBe("old-capture");
+    expect(result.captureId).toBe(snapshot?.captureId);
+  },
+);

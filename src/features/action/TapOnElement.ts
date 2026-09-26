@@ -1,3 +1,6 @@
+import { ElementResolver } from "../utility/ElementResolver";
+import { SearchableHierarchy } from "../utility/SearchableNode";
+import { DefaultHierarchyCapture, type HierarchyCapture } from "../observe/HierarchyCapture";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
 import {
@@ -18,7 +21,7 @@ import type { ElementGeometry } from "../../utils/interfaces/ElementGeometry";
 import { DefaultElementParser } from "../utility/ElementParser";
 import { DefaultElementFinder } from "../utility/ElementFinder";
 import { DefaultElementGeometry } from "../utility/ElementGeometry";
-import { DefaultElementSelector } from "../utility/DefaultElementSelector";
+import { ResolverElementSelector } from "../utility/ResolverElementSelector";
 import { logger } from "../../utils/logger";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
@@ -93,6 +96,7 @@ const TEXT_SELECTION_INTENT_BY_ACTION: Record<TapOnElementOptions["action"], Tex
  * Dependencies for TapOnElement that can be injected for testing.
  */
 interface TapOnElementDependencies {
+  hierarchyCapture?: HierarchyCapture;
   visionConfig?: VisionFallbackConfig;
   screenshotCapturer?: ScreenshotCapturer;
   visionAnalyzer?: VisionAnalyzer;
@@ -158,6 +162,7 @@ export class TapOnElement extends BaseVisualChange {
   private accessibilityDetector: AccessibilityDetector;
   private elementSelector: ElementSelector;
   private viewHierarchy: ViewHierarchy;
+  private hierarchyCapture: HierarchyCapture;
   private talkBackStrategy: TalkBackTapStrategy;
   private readonly featureFlags: FeatureFlagService;
   private talkBackDriverFactory: TalkBackNavigationDriverFactory;
@@ -246,13 +251,42 @@ export class TapOnElement extends BaseVisualChange {
       options.screenshotCapturer ?? new TakeScreenshotCapturer(device, this.adbFactory);
     this.visionAnalyzer = options.visionAnalyzer;
     this.viewHierarchy = new ViewHierarchy(device, this.adbFactory);
+    this.hierarchyCapture =
+      options.hierarchyCapture ??
+      new DefaultHierarchyCapture(
+        device.platform as "android" | "ios",
+        {
+          readCached: (request) =>
+            this.viewHierarchy.getViewHierarchy(
+              {},
+              undefined,
+              true,
+              request.minTimestamp,
+              request.signal,
+              request.timeoutMs,
+            ),
+          readFresh: async (request) => {
+            const result = await this.readFreshHierarchy(
+              request.timeoutMs ?? TapOnElement.ANDROID_PRE_TAP_REFRESH_TIMEOUT_MS,
+              undefined,
+              request.signal,
+            );
+            if (!result) {
+              throw new ActionableError("Unable to retrieve a fresh tap hierarchy");
+            }
+            return result;
+          },
+          projectVisible: (hierarchy) => this.viewHierarchy.projectActionableHierarchy(hierarchy),
+        },
+        this.timer,
+      );
     this.selectionStateTracker =
       options.selectionStateTracker ??
       new SelectionStateTracker({
         screenshotCapturer: this.screenshotCapturer,
       });
     this.accessibilityDetector = options.accessibilityDetector || defaultAccessibilityDetector;
-    this.elementSelector = options.elementSelector ?? new DefaultElementSelector();
+    this.elementSelector = options.elementSelector ?? new ResolverElementSelector();
     this.talkBackDriverFactory =
       options.talkBackDriverFactory ?? new DefaultTalkBackNavigationDriverFactory(this.adbFactory);
     this.talkBackStrategy =
@@ -1015,6 +1049,8 @@ export class TapOnElement extends BaseVisualChange {
     viewHierarchy: ViewHierarchyResult,
   ): { selection: ElementSelectionResult; containerFound: boolean } {
     const containerFound = this.isContainerAvailable(viewHierarchy, options.container);
+    const intentAction =
+      options.action === "longPress" ? "long-press" : options.action === "focus" ? "input" : "tap";
     const selectionIntent = TEXT_SELECTION_INTENT_BY_ACTION[options.action];
 
     if (options.text) {
@@ -1028,6 +1064,7 @@ export class TapOnElement extends BaseVisualChange {
               fuzzyMatch: true,
               caseSensitive: false,
               strategy: options.selectionStrategy,
+              intentAction,
               index: options.index,
             },
           ),
@@ -1041,6 +1078,7 @@ export class TapOnElement extends BaseVisualChange {
           partialMatch: true,
           caseSensitive: false,
           strategy: options.selectionStrategy,
+          intentAction,
           index: options.index,
           selectionIntent,
         }),
@@ -1059,6 +1097,7 @@ export class TapOnElement extends BaseVisualChange {
               fuzzyMatch: true,
               caseSensitive: false,
               strategy: options.selectionStrategy,
+              intentAction,
               index: options.index,
             })
           : this.elementSelector.selectByText(viewHierarchy, text, {
@@ -1066,6 +1105,7 @@ export class TapOnElement extends BaseVisualChange {
               partialMatch: true,
               caseSensitive: false,
               strategy: options.selectionStrategy,
+              intentAction,
               index: options.index,
               selectionIntent,
             });
@@ -1101,6 +1141,7 @@ export class TapOnElement extends BaseVisualChange {
               container: options.container,
               partialMatch: false,
               strategy: options.selectionStrategy,
+              intentAction,
               index: options.index,
             },
           ),
@@ -1113,6 +1154,7 @@ export class TapOnElement extends BaseVisualChange {
           container: options.container,
           partialMatch: false,
           strategy: options.selectionStrategy,
+          intentAction,
           index: options.index,
         }),
         containerFound,
@@ -1123,6 +1165,7 @@ export class TapOnElement extends BaseVisualChange {
       selection: this.elementSelector.selectByTestTag(viewHierarchy, this.requireTestTag(options), {
         container: options.container,
         strategy: options.selectionStrategy,
+        intentAction,
         index: options.index,
       }),
       containerFound,
@@ -1211,6 +1254,25 @@ export class TapOnElement extends BaseVisualChange {
 
   private async refreshViewHierarchy(
     timeoutMs: number,
+    _screenSize?: ObserveResult["screenSize"],
+    signal?: AbortSignal,
+  ): Promise<ViewHierarchyResult | null> {
+    throwIfAborted(signal);
+    if (timeoutMs <= 0) {
+      return null;
+    }
+    try {
+      return (await this.hierarchyCapture.capture({ freshness: "fresh", timeoutMs, signal }))
+        .hierarchy;
+    } catch (error) {
+      throwIfAborted(signal);
+      logger.warn(`[TapOnElement] Fresh capture failed: ${errorMessage(error)}`);
+      return null;
+    }
+  }
+
+  private async readFreshHierarchy(
+    timeoutMs: number,
     screenSize?: ObserveResult["screenSize"],
     signal?: AbortSignal,
   ): Promise<ViewHierarchyResult | null> {
@@ -1234,13 +1296,16 @@ export class TapOnElement extends BaseVisualChange {
         // Match the observe projection exactly. Going through CtrlProxy's
         // alternate conversion here lets a selector observed from one tree be
         // resolved against a differently-pruned tree on refresh.
-        const rawHierarchy = await this.viewHierarchy.getiOSViewHierarchy(
+        const synced = await IOSCtrlProxyClient.getInstance(this.device).requestHierarchySync(
           undefined,
           false,
-          0,
-          effectiveTimeoutMs,
           signal,
+          effectiveTimeoutMs,
         );
+        if (!synced?.hierarchy) {
+          return null;
+        }
+        const rawHierarchy = this.viewHierarchy.normalizeIosHierarchy(synced.hierarchy);
         return this.prepareViewHierarchyForResponse(rawHierarchy, screenSize);
       }
       default:
@@ -1271,6 +1336,10 @@ export class TapOnElement extends BaseVisualChange {
     | { ok: false; error: string }
   > {
     const stableMatchesRequired = androidPreTapConsecutiveStableMatchesRequired(options);
+    const original = observeResult.viewHierarchy
+      ? this.findElementInHierarchy(options, observeResult.viewHierarchy).selection.element
+      : null;
+
     let prevBounds: Element["bounds"] | null = null;
     let consecutiveStable = 0;
     let best: {
@@ -1386,6 +1455,17 @@ export class TapOnElement extends BaseVisualChange {
         consecutiveStable = 0;
         prevBounds = null;
         continue;
+      }
+
+      if (
+        original?.["resource-id"] &&
+        original["resource-id"] !== refind.selection.element["resource-id"]
+      ) {
+        return {
+          ok: false,
+          error:
+            "Stale tap target: the fresh capture matched a different native ID. Observe again before acting.",
+        };
       }
 
       const refreshed = this.resolveTapTargetElement(
@@ -1690,7 +1770,10 @@ export class TapOnElement extends BaseVisualChange {
       return true;
     }
 
-    return this.finder.hasContainerElement(viewHierarchy, container);
+    return (
+      this.elementSelector.hasContainer?.(viewHierarchy, container) ??
+      this.finder.hasContainerElement(viewHierarchy, container)
+    );
   }
 
   private resolveContainerElement(
@@ -1701,12 +1784,13 @@ export class TapOnElement extends BaseVisualChange {
       return undefined;
     }
     if (container.elementId) {
-      return this.elementSelector.selectByResourceId(viewHierarchy, container.elementId).element as
-        | Element
-        | undefined;
+      return this.elementSelector.selectByResourceId(viewHierarchy, container.elementId, {
+        intentAction: "inspect",
+      }).element as Element | undefined;
     }
     if (container.text) {
       return this.elementSelector.selectByText(viewHierarchy, container.text, {
+        intentAction: "inspect",
         partialMatch: false,
         caseSensitive: false,
       }).element as Element | undefined;
@@ -1723,18 +1807,6 @@ export class TapOnElement extends BaseVisualChange {
       isTruthyFlag(element["long-clickable"]) ||
       isTruthyFlag(element.longClickable) ||
       hasAccessibilityAction(element.actions, "long_click")
-    );
-  }
-
-  private isClickableProps(props: Record<string, unknown>): boolean {
-    return isTruthyFlag(props.clickable) || hasAccessibilityAction(props.actions, "click");
-  }
-
-  private isLongClickableProps(props: Record<string, unknown>): boolean {
-    return (
-      isTruthyFlag(props["long-clickable"]) ||
-      isTruthyFlag(props.longClickable) ||
-      hasAccessibilityAction(props.actions, "long_click")
     );
   }
 
@@ -1818,163 +1890,43 @@ export class TapOnElement extends BaseVisualChange {
       : `tapOn ensureChecked: tapped element but checked is now ${observed} (expected ${options.ensureChecked})`;
   }
 
-  private nodeMatchesElement(
-    target: Element,
-    props: Record<string, unknown>,
-    parsed: Element,
-  ): boolean {
-    if (!boundsEqual(parsed.bounds, target.bounds)) {
-      return false;
-    }
-
-    if (target["resource-id"] && props["resource-id"] !== target["resource-id"]) {
-      return false;
-    }
-
-    if (target.text && props.text !== target.text) {
-      return false;
-    }
-
-    if (target["content-desc"] && props["content-desc"] !== target["content-desc"]) {
-      return false;
-    }
-
-    const targetClass = target.class;
-    if (targetClass) {
-      const nodeClass = (props.class ?? props.className) as string | undefined;
-      if (nodeClass !== targetClass) {
-        return false;
-      }
-    }
-
-    return true;
-  }
-
-  private findAncestorChain(viewHierarchy: ViewHierarchyResult, target: Element): any[] | null {
-    const roots = [
-      ...this.elementParser.extractRootNodes(viewHierarchy),
-      ...this.elementParser.extractWindowRootNodes(viewHierarchy, "topmost-first"),
-    ];
-
-    const stack: any[] = [];
-    const search = (node: any): any[] | null => {
-      stack.push(node);
-      const props = this.elementParser.extractNodeProperties(node);
-      const parsed = this.elementParser.parseNodeBounds(node);
-
-      if (parsed && this.nodeMatchesElement(target, props, parsed)) {
-        const chain = [...stack];
-        stack.pop();
-        return chain;
-      }
-
-      const children = node?.node ? (Array.isArray(node.node) ? node.node : [node.node]) : [];
-      for (const child of children) {
-        const found = search(child);
-        if (found) {
-          stack.pop();
-          return found;
-        }
-      }
-
-      stack.pop();
-      return null;
-    };
-
-    for (const root of roots) {
-      const found = search(root);
-      if (found) {
-        return found;
-      }
-    }
-
-    return null;
-  }
-
-  private findAncestorByPredicate(
-    chain: any[],
-    predicate: (props: Record<string, unknown>) => boolean,
-    requireResourceId: boolean,
-  ): Element | null {
-    for (let i = chain.length - 2; i >= 0; i--) {
-      const node = chain[i];
-      const props = this.elementParser.extractNodeProperties(node);
-      if (!predicate(props)) {
-        continue;
-      }
-      if (requireResourceId && !props["resource-id"]) {
-        continue;
-      }
-      const parsed = this.elementParser.parseNodeBounds(node);
-      if (parsed) {
-        return parsed;
-      }
-    }
-
-    return null;
-  }
-
-  private selectAncestorForAction(
-    chain: any[],
-    action: string,
-    requireResourceId: boolean,
-  ): Element | null {
-    const primary =
-      action === "longPress"
-        ? (props: Record<string, unknown>) => this.isLongClickableProps(props)
-        : (props: Record<string, unknown>) => this.isClickableProps(props);
-    const secondary =
-      action === "longPress"
-        ? (props: Record<string, unknown>) => this.isClickableProps(props)
-        : (props: Record<string, unknown>) => this.isLongClickableProps(props);
-
-    return (
-      this.findAncestorByPredicate(chain, primary, requireResourceId) ??
-      this.findAncestorByPredicate(chain, secondary, requireResourceId)
-    );
-  }
-
   private resolveTapTargetElement(
     element: Element,
     viewHierarchy: ViewHierarchyResult | null,
     action: string,
     requireResourceId: boolean,
   ): { element: Element; usedParent: boolean } {
-    if (this.device.platform !== "android" || !viewHierarchy) {
+    if (!viewHierarchy || this.device.platform !== "android") {
       return { element, usedParent: false };
     }
-
-    const isLongPress = action === "longPress";
-    const isClickable = this.isClickableElement(element);
-    const isLongClickable = this.isLongClickableElement(element);
-
-    if (!isLongPress && isClickable) {
+    const resolver = new ElementResolver();
+    const snapshot = {
+      id: "selected-target",
+      nodes: new SearchableHierarchy().project(viewHierarchy),
+    };
+    const selector = element["resource-id"]
+      ? { elementId: element["resource-id"] }
+      : { text: element.text ?? element["content-desc"], match: "exact" as const };
+    if (!selector.elementId && !selector.text) {
       return { element, usedParent: false };
     }
-
-    if (isLongPress && isLongClickable) {
-      return { element, usedParent: false };
+    const candidates = resolver.resolve(snapshot, selector, { action: "inspect" }).candidates;
+    const index = candidates.findIndex(
+      (candidate) => candidate.bounds && boundsEqual(candidate.bounds, element.bounds),
+    );
+    const result = resolver.resolve(
+      snapshot,
+      { ...selector, index: index >= 0 ? index : undefined },
+      {
+        action: action === "longPress" ? "long-press" : "tap",
+        requireResourceId,
+      },
+    );
+    if (result.error) {
+      throw new ActionableError(result.error);
     }
-
-    const chain = this.findAncestorChain(viewHierarchy, element);
-    if (!chain) {
-      return { element, usedParent: false };
-    }
-
-    const ancestor = this.selectAncestorForAction(chain, action, requireResourceId);
-    if (ancestor) {
-      return { element: ancestor, usedParent: true };
-    }
-
-    if (!isLongPress && isLongClickable) {
-      return { element, usedParent: false };
-    }
-
-    if (isLongPress && isClickable) {
-      return { element, usedParent: false };
-    }
-
-    return { element, usedParent: false };
+    const target = result.chosen?.element ?? element;
+    return { element: target, usedParent: !boundsEqual(target.bounds, element.bounds) };
   }
 
   /**

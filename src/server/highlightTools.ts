@@ -9,7 +9,6 @@ import {
   HighlightOperationResult,
   HighlightShape,
   Platform,
-  ViewHierarchyNode,
   ViewHierarchyResult,
 } from "../models";
 import { highlightShapeSchema, VisualHighlightClient } from "../features/debug/VisualHighlight";
@@ -19,8 +18,8 @@ import {
   createDeviceHierarchyCapture,
   type HierarchySyncClient,
 } from "../features/observe/DeviceHierarchyCapture";
-import { DefaultElementSelector } from "../features/utility/DefaultElementSelector";
-import { DefaultElementFinder } from "../features/utility/ElementFinder";
+import { ElementResolver } from "../features/utility/ElementResolver";
+import type { SearchableEntry } from "../features/utility/SearchableNode";
 import { DefaultElementParser } from "../features/utility/ElementParser";
 import {
   elementContainerSchema,
@@ -115,90 +114,18 @@ const toHighlightErrorResponse = (error: unknown) => {
 const DEFAULT_HIERARCHY_TIMEOUT_MS = 10000;
 
 const findContainerForElement = (
-  viewHierarchy: ViewHierarchyResult,
-  target: Element,
+  nodes: readonly SearchableEntry[],
+  target: SearchableEntry,
 ): Element | null => {
-  const parser = new DefaultElementParser();
-  const roots: ViewHierarchyNode[] = [
-    ...parser.extractRootNodes(viewHierarchy),
-    ...parser.extractWindowRootNodes(viewHierarchy, "topmost-first"),
-  ];
-  const targetResourceId =
-    typeof target["resource-id"] === "string" ? target["resource-id"] : undefined;
-  const targetLabel =
-    typeof target.text === "string"
-      ? target.text
-      : typeof target["content-desc"] === "string"
-        ? target["content-desc"]
-        : undefined;
-  let container: Element | null = null;
-
-  const resolveContainerFromStack = (stack: ViewHierarchyNode[]): Element | null => {
-    for (let i = stack.length - 2; i >= 0; i -= 1) {
-      const parsedParent = parser.parseNodeBounds(stack[i]);
-      if (!parsedParent) {
-        continue;
-      }
-      if (!boundsEqual(parsedParent.bounds, target.bounds)) {
-        return parsedParent;
-      }
+  let parent = target.parentIndex;
+  while (parent !== undefined) {
+    const node = nodes[parent];
+    if (node.element && target.bounds && !boundsEqual(node.element.bounds, target.bounds)) {
+      return node.element;
     }
-    return null;
-  };
-
-  const matchesTarget = (node: ViewHierarchyNode, parsed: Element): boolean => {
-    if (!boundsEqual(parsed.bounds, target.bounds)) {
-      return false;
-    }
-    const nodeProps = parser.extractNodeProperties(node);
-    const nodeResourceId = nodeProps["resource-id"];
-    if (targetResourceId && nodeResourceId !== targetResourceId) {
-      return false;
-    }
-    if (!targetResourceId && targetLabel) {
-      const nodeLabel =
-        nodeProps.text || nodeProps["content-desc"] || nodeProps["ios-accessibility-label"];
-      if (nodeLabel !== targetLabel) {
-        return false;
-      }
-    }
-    return true;
-  };
-
-  const traverse = (node: ViewHierarchyNode, stack: ViewHierarchyNode[]) => {
-    if (container) {
-      return;
-    }
-    stack.push(node);
-    const parsed = parser.parseNodeBounds(node);
-    if (parsed && matchesTarget(node, parsed)) {
-      container = resolveContainerFromStack(stack);
-    }
-
-    const children = node.node;
-    if (!container && children) {
-      if (Array.isArray(children)) {
-        for (const child of children) {
-          traverse(child, stack);
-          if (container) {
-            break;
-          }
-        }
-      } else {
-        traverse(children, stack);
-      }
-    }
-    stack.pop();
-  };
-
-  for (const root of roots) {
-    traverse(root, []);
-    if (container) {
-      break;
-    }
+    parent = node.parentIndex;
   }
-
-  return container;
+  return null;
 };
 
 const resolveHighlightShapeFromSelector = async (
@@ -220,36 +147,25 @@ const resolveHighlightShapeFromSelector = async (
     timeoutMs: args.timeoutMs ?? DEFAULT_HIERARCHY_TIMEOUT_MS,
   });
   const viewHierarchy = snapshot.hierarchy;
-  const finder = new DefaultElementFinder();
-  const elementSelector = new DefaultElementSelector(finder);
-  const container = args.container ?? null;
-
-  if (container && !finder.hasContainerElement(viewHierarchy, container)) {
-    throw new ActionableError("Highlight container not found in the view hierarchy.");
+  const resolution = new ElementResolver().resolve(
+    { id: snapshot.captureId, nodes: snapshot.nodes },
+    {
+      elementId: args.elementId,
+      text: args.text,
+      container: args.container,
+      selectionStrategy: args.selectionStrategy,
+    },
+    { action: "highlight" },
+  );
+  if (resolution.error) {
+    throw new ActionableError(resolution.error);
   }
-
-  const strategy = args.selectionStrategy ?? "first";
-  const selection = args.text
-    ? elementSelector.selectByText(viewHierarchy, args.text, {
-        container,
-        partialMatch: true,
-        caseSensitive: false,
-        strategy,
-      })
-    : elementSelector.selectByResourceId(viewHierarchy, args.elementId as string, {
-        container,
-        partialMatch: false,
-        strategy,
-      });
-
-  const selectedElement = selection.element;
-  if (!selectedElement) {
+  if (!resolution.chosen?.element) {
     throw new ActionableError("Unable to find an element that matches the highlight selector.");
   }
-
   const highlightElement = args.containerOf
-    ? findContainerForElement(viewHierarchy, selectedElement)
-    : selectedElement;
+    ? findContainerForElement(snapshot.nodes, resolution.chosen)
+    : resolution.chosen.element;
   if (!highlightElement) {
     throw new ActionableError("Unable to resolve a container for the selected element.");
   }

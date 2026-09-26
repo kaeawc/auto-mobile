@@ -17,7 +17,7 @@ import {
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import type { ElementGeometry } from "../../utils/interfaces/ElementGeometry";
 import { DefaultElementGeometry } from "../utility/ElementGeometry";
-import { DefaultElementSelector } from "../utility/DefaultElementSelector";
+import { ResolverElementSelector } from "../utility/ResolverElementSelector";
 import { logger } from "../../utils/logger";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
@@ -352,7 +352,7 @@ export class TapAnyElement extends BaseVisualChange {
   ) {
     super(device, adb, options.timer);
     this.geometry = new DefaultElementGeometry();
-    this.elementSelector = options.elementSelector ?? new DefaultElementSelector();
+    this.elementSelector = options.elementSelector ?? new ResolverElementSelector();
     this.finder = new DefaultElementFinder();
     this.accessibilityService = AndroidCtrlProxyClient.getInstance(device, this.adbFactory);
     this.viewHierarchy = new ViewHierarchy(device, this.adbFactory);
@@ -408,7 +408,10 @@ export class TapAnyElement extends BaseVisualChange {
     if (!container) {
       return true;
     }
-    return this.finder.hasContainerElement(viewHierarchy, container);
+    return (
+      this.elementSelector.hasContainer?.(viewHierarchy, container) ??
+      this.finder.hasContainerElement(viewHierarchy, container)
+    );
   }
 
   private isElementCenterOffScreen(
@@ -432,6 +435,7 @@ export class TapAnyElement extends BaseVisualChange {
     const selection = this.elementSelector.selectClickable(viewHierarchy, {
       container: options.container,
       strategy: options.selectionStrategy,
+      intentAction: options.action === "longPress" ? "long-press" : "tap",
       scrollableContainer: options.scrollableContainer,
     });
     if (selection.element && this.isElementCenterOffScreen(selection.element, screenSize)) {

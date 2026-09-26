@@ -64,6 +64,8 @@ describe("DragAndDrop", () => {
     fakeAwaitIdle = new FakeAwaitIdle();
     fakeWindow = new FakeWindow();
     fakeA11yService = new FakeCtrlProxy();
+    fakeA11yService.setHierarchyData(createHierarchy());
+    fakeA11yService.setViewHierarchyResult(createHierarchy());
     fakeAdb = new FakeAdbExecutor();
     fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();

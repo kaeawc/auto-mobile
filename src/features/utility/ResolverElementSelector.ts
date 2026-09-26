@@ -4,7 +4,7 @@ import type { ElementSelectionResult } from "../../models/ElementSelectionResult
 import type { ViewHierarchyResult } from "../../models";
 import { ActionableError } from "../../models/ActionableError";
 import type { ResolverSelector } from "../../server/elementSelectorSchemas";
-import { ElementResolver, type ResolutionAction } from "./ElementResolver";
+import { ElementResolver, type ElementResolution, type ResolutionAction } from "./ElementResolver";
 import { SearchableHierarchy } from "./SearchableNode";
 import { extractHierarchyScreenSize } from "../observe/hierarchyScreenSize";
 import type { TextSelectionIntent } from "../../utils/interfaces/ElementFinder";
@@ -157,11 +157,31 @@ export class ResolverElementSelector implements ElementSelector {
     if (result.error && result.error !== "Container not found") {
       throw new ActionableError(result.error);
     }
+    return this.selectionResult(result, capture, options.strategy ?? "first");
+  }
+
+  private selectionResult(
+    result: ElementResolution,
+    capture: ViewHierarchyResult,
+    strategy: "first" | "random",
+  ): ElementSelectionResult {
+    const source = this.matchedSource(result);
     return {
       element: result.chosen?.element ?? null,
+      ...(source?.element ? { matchedElement: source.element } : {}),
+      ...(getHierarchySnapshot(capture)
+        ? { captureId: getHierarchySnapshot(capture)!.captureId }
+        : {}),
       indexInMatches: result.indexInMatches ?? -1,
       totalMatches: result.candidates.length,
-      strategy: options.strategy ?? "first",
+      strategy,
     };
+  }
+  private matchedSource(result: ElementResolution) {
+    const candidate = result.candidates[result.indexInMatches ?? -1];
+    const match = result.matches.find((entry) => entry.node === candidate);
+    return (
+      match?.sourceNodes?.find((node) => node !== candidate) ?? match?.sourceNodes?.[0] ?? candidate
+    );
   }
 }

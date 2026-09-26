@@ -1673,6 +1673,8 @@ export class TapOnElement extends BaseVisualChange {
       typeof selection.element["test-tag"] === "string" ? selection.element["test-tag"] : undefined;
 
     return {
+      ...(selection.matchedElement ? { matchedElement: selection.matchedElement } : {}),
+      ...(selection.captureId ? { captureId: selection.captureId } : {}),
       text,
       resourceId,
       ...(testTag ? { testTag } : {}),

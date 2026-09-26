@@ -127,6 +127,8 @@ test("debug preserves exact child text provenance after semantic parent promotio
     }),
   );
   const result = await feature.execute({ text: "Save" });
+  expect(result.matches[0].element.bounds).toEqual({ left: 1, top: 1, right: 10, bottom: 10 });
+  expect(result.selectedMatch?.element.bounds).toEqual(bounds);
   expect(result.matches[0].matchedValue).toBe("Save");
   expect(result.matches[0].matchedProperties).toEqual(["text"]);
   expect(result.matches[0].isExactMatch).toBe(true);
@@ -147,6 +149,8 @@ test("debug excludes every matching descendant merged into one action row from n
   const result = await feature.execute({ text: "Save" });
   expect(result.matches).toHaveLength(1);
   expect(result.matches[0].matchedProperties).toEqual(["text", "content-desc"]);
+  expect(result.matches[0].element.bounds).toEqual({ left: 1, top: 1, right: 10, bottom: 10 });
+  expect(result.selectedMatch?.element.bounds).toEqual(bounds);
   expect(result.matches[0].matchedValue).toBe("Save");
   expect(result.nearMisses ?? []).toHaveLength(0);
 });

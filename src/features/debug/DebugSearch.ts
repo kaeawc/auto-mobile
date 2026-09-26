@@ -102,6 +102,7 @@ export class DebugSearch {
         : normalizeQuotes(value).trim().toLowerCase();
     const matches: DebugSearchMatch[] = resolution.matches.map(({ node, kind, sourceNodes }) => {
       const matchedNodes = sourceNodes ?? [node];
+      const diagnostic = matchedNodes.find((source) => source !== node) ?? matchedNodes[0];
       const sources = options.resourceId
         ? [
             [
@@ -117,20 +118,21 @@ export class DebugSearch {
                 : normalize(value) === normalize(options.text ?? ""),
             );
       return {
-        element: node.element ?? node.properties,
+        element: diagnostic.element ?? diagnostic.properties,
         matchedProperty: [...new Set(sources.map(([key]) => key))].join(", ") || "label",
         matchedProperties: [...new Set(sources.map(([key]) => key))],
         matchedValue: sources[0]?.[1] ?? matchedNodes[0]?.label ?? "",
         matchKind: kind,
         isExactMatch: kind.endsWith("-exact") || kind === "id-namespace",
-        className: node.className,
-        resourceId: node.nativeId,
-        clickable: node.affordances.includes("tap"),
-        enabled: node.properties.enabled !== false && node.properties.enabled !== "false",
+        className: diagnostic.className,
+        resourceId: diagnostic.nativeId,
+        clickable: diagnostic.affordances.includes("tap"),
+        enabled:
+          diagnostic.properties.enabled !== false && diagnostic.properties.enabled !== "false",
         visible:
-          !!node.bounds &&
-          node.bounds.right > node.bounds.left &&
-          node.bounds.bottom > node.bounds.top,
+          !!diagnostic.bounds &&
+          diagnostic.bounds.right > diagnostic.bounds.left &&
+          diagnostic.bounds.bottom > diagnostic.bounds.top,
       };
     });
     const scopedNodes = options.container

@@ -37,7 +37,13 @@ object IcTraceComparison {
       listOf("reference" to reference, "candidate" to candidate).flatMap { (label, events) ->
         buildList {
           if (events.isEmpty()) add("$label capture contains no events")
+          if (events.firstOrNull()?.seq?.let { it != 1 } == true) {
+            add("$label capture does not start at sequence 1")
+          }
           if (events.any { it.droppedEvents > 0 }) add("$label capture reports dropped events")
+          if (events.any { it.metadata.identity() != events.first().metadata.identity() }) {
+            add("$label capture changes keyboard identity")
+          }
           if (events.zipWithNext().any { (left, right) -> right.seq != left.seq + 1 }) {
             add("$label capture has a sequence gap")
           }

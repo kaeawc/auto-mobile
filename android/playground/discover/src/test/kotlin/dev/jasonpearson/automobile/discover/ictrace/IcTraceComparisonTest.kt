@@ -69,6 +69,24 @@ class IcTraceComparisonTest {
       (sequenceGap as IcTraceComparison.Result.Inconclusive).reasons.any { "sequence gap" in it }
     )
 
+    val missingPrefix = IcTraceComparison.compare(listOf(event().copy(seq = 2)), listOf(event()))
+    assertTrue(missingPrefix is IcTraceComparison.Result.Inconclusive)
+    assertTrue(
+      (missingPrefix as IcTraceComparison.Result.Inconclusive).reasons.any { "sequence 1" in it }
+    )
+
+    val changedKeyboard =
+      IcTraceComparison.compare(
+        listOf(event(), event().copy(seq = 2, metadata = IcTraceMetadata(keyboardId = "other"))),
+        listOf(event(), event().copy(seq = 2)),
+      )
+    assertTrue(changedKeyboard is IcTraceComparison.Result.Inconclusive)
+    assertTrue(
+      (changedKeyboard as IcTraceComparison.Result.Inconclusive).reasons.any {
+        "keyboard identity" in it
+      }
+    )
+
     val malformed =
       IcTraceComparison.compareJsonl("{not-json}", IcTraceFormatter.format(listOf(event())))
     assertTrue(malformed is IcTraceComparison.Result.Inconclusive)

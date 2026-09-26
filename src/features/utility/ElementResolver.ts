@@ -233,13 +233,13 @@ export class ElementResolver {
       parent !== undefined &&
       snapshot.nodes.filter((node) => node.parentIndex === parent).length === 1
     ) {
-      if (snapshot.nodes[parent].affordances.includes("scroll")) {
+      if (snapshot.nodes[parent].collection) {
         break;
       }
       parent = snapshot.nodes[parent].parentIndex;
     }
     const row = parent === undefined ? undefined : snapshot.nodes[parent];
-    if (!anchor || !row || row.affordances.includes("scroll")) {
+    if (!anchor || !row || row.collection) {
       return { nodes: [], error: "Sibling row not found" };
     }
     return {

@@ -1,3 +1,4 @@
+import { isCollectionElementProperties } from "../../utils/elementProperties";
 import { Element } from "../../models/Element";
 import { ViewHierarchyNode, ViewHierarchyResult } from "../../models";
 import { logger } from "../../utils/logger";
@@ -711,16 +712,7 @@ export class DefaultElementFinder implements ElementFinder {
   }
 
   private isCollectionNode(props: Record<string, unknown>): boolean {
-    const className = typeof props.class === "string" ? props.class : "";
-    const scrollable = props.scrollable === "true" || props.scrollable === true;
-    return (
-      scrollable ||
-      className.includes("RecyclerView") ||
-      className.includes("ListView") ||
-      className.includes("ScrollView") ||
-      className.includes("CollectionView") ||
-      className.includes("TableView")
-    );
+    return isCollectionElementProperties(props);
   }
 
   /**

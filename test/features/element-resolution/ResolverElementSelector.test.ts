@@ -84,3 +84,65 @@ test("missing container remains retryable but synthetic container keys are recog
       ?.text,
   ).toBe("Login");
 });
+
+test("tapAny scrollable scope selects clickable rows instead of the scrolling list", () => {
+  const capture = {
+    hierarchy: {
+      node: [
+        { bounds, clickable: true, "resource-id": "outside" },
+        {
+          bounds,
+          scrollable: true,
+          "resource-id": "list",
+          node: [{ bounds, clickable: true, "resource-id": "row" }],
+        },
+      ],
+    },
+  };
+  const selector = new ResolverElementSelector();
+  expect(
+    selector.selectClickable(capture, { scrollableContainer: true }).element?.["resource-id"],
+  ).toBe("row");
+  expect(
+    selector.selectClickable(capture, {
+      scrollableContainer: true,
+      container: { elementId: "outside" },
+    }).element,
+  ).toBeNull();
+});
+
+test("long press falls back to ordinary clickable targets for tapOn and tapAny", () => {
+  const selector = new ResolverElementSelector();
+  expect(
+    selector.selectByText(hierarchy, "Login", { intentAction: "long-press" }).element?.[
+      "resource-id"
+    ],
+  ).toBe("app:id/login");
+  expect(
+    selector.selectClickable(hierarchy, { intentAction: "long-press", index: 0 }).element?.[
+      "resource-id"
+    ],
+  ).toBe("app:id/login_help");
+});
+
+test("indexed and random selection count only onscreen action candidates", async () => {
+  const { ElementResolver } = await import("../../../src/features/utility/ElementResolver");
+  const capture = {
+    screenWidth: 200,
+    screenHeight: 200,
+    hierarchy: {
+      node: [
+        { clickable: true, text: "Done", bounds: { left: -300, top: 0, right: -200, bottom: 50 } },
+        { clickable: true, text: "Done", bounds: { left: 20, top: 20, right: 120, bottom: 70 } },
+      ],
+    },
+  };
+  const selector = new ResolverElementSelector(new ElementResolver(() => 0));
+  const first = selector.selectByText(capture, "Done", { index: 0 });
+  expect(first.element?.bounds?.left).toBe(20);
+  expect(first.totalMatches).toBe(1);
+  expect(selector.selectByText(capture, "Done", { index: 1 }).element).toBeNull();
+  expect(selector.selectByText(capture, "Done", { strategy: "random" }).element?.bounds?.left).toBe(
+    20,
+  );
+});

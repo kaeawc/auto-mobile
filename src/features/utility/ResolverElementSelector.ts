@@ -5,7 +5,7 @@ import type { ViewHierarchyResult } from "../../models";
 import { ActionableError } from "../../models/ActionableError";
 import type { ResolverSelector } from "../../server/elementSelectorSchemas";
 import { ElementResolver, type ElementResolution, type ResolutionAction } from "./ElementResolver";
-import { SearchableHierarchy } from "./SearchableNode";
+import { SearchableHierarchy, type SearchableEntry } from "./SearchableNode";
 import { extractHierarchyScreenSize } from "../observe/hierarchyScreenSize";
 import type { TextSelectionIntent } from "../../utils/interfaces/ElementFinder";
 
@@ -69,7 +69,7 @@ export class ResolverElementSelector implements ElementSelector {
       {},
       {
         ...options,
-        intentAction: options.scrollableContainer ? "scroll" : (options.intentAction ?? "tap"),
+        intentAction: options.intentAction ?? "tap",
       },
     );
   }
@@ -132,13 +132,10 @@ export class ResolverElementSelector implements ElementSelector {
     selector: ResolverSelector,
     options: SelectionOptions,
   ): ElementSelectionResult {
-    const nodes = this.projection.project(capture);
+    const nodes = this.selectionNodes(capture, options);
     const result = this.resolver.resolve(
       {
-        id:
-          getHierarchySnapshot(capture)?.captureId ??
-          capture.frameContext ??
-          String(capture.updatedAt ?? "capture"),
+        id: this.snapshotId(capture),
         nodes,
       },
       {
@@ -157,7 +154,48 @@ export class ResolverElementSelector implements ElementSelector {
     if (result.error && result.error !== "Container not found") {
       throw new ActionableError(result.error);
     }
+    if (!result.error && !result.chosen && options.intentAction === "long-press") {
+      return this.select(capture, selector, { ...options, intentAction: "tap" });
+    }
     return this.selectionResult(result, capture, options.strategy ?? "first");
+  }
+
+  private snapshotId(capture: ViewHierarchyResult): string {
+    return (
+      getHierarchySnapshot(capture)?.captureId ??
+      capture.frameContext ??
+      String(capture.updatedAt ?? "capture")
+    );
+  }
+
+  private selectionNodes(
+    capture: ViewHierarchyResult,
+    options: SelectionOptions,
+  ): readonly SearchableEntry[] {
+    const nodes = this.projection.project(capture);
+    if (!options.scrollableContainer) {
+      return nodes;
+    }
+    const scope = options.container
+      ? this.resolver.resolve({ id: "scroll-scope", nodes }, options.container, {
+          action: "inspect",
+        }).chosen
+      : undefined;
+    const withinScrollingRoot = (node: SearchableEntry) => {
+      let ancestor: SearchableEntry | undefined = node;
+      while (ancestor) {
+        if (ancestor.affordances.includes("scroll")) {
+          return true;
+        }
+        if (ancestor === scope) {
+          break;
+        }
+        ancestor = ancestor.parentIndex === undefined ? undefined : nodes[ancestor.parentIndex];
+      }
+      return false;
+    };
+    // Preserve indices/ancestry for the resolver while excluding out-of-scope actions.
+    return nodes.map((node) => (withinScrollingRoot(node) ? node : { ...node, affordances: [] }));
   }
 
   private selectionResult(

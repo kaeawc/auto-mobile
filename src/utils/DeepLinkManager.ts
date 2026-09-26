@@ -112,6 +112,23 @@ export interface DeepLinkManager {
   ): Promise<IntentChooserResult>;
 }
 
+export interface ChooserAppMetadata {
+  getLabel(device: BootedDevice, packageName: string): Promise<string | null>;
+}
+
+const defaultChooserAppMetadata: ChooserAppMetadata = {
+  async getLabel(device, packageName) {
+    const { AndroidCtrlProxyClient } =
+      await import("../features/observe/android/AndroidCtrlProxyClient");
+    const info = await AndroidCtrlProxyClient.getInstance(device).requestPackageInfo(
+      packageName,
+      { includePermissions: false },
+      4000,
+    );
+    return info.success ? (info.applicationLabel ?? null) : null;
+  },
+};
+
 export class DeepLinkManager implements DeepLinkManager {
   private device: BootedDevice | null;
   private adbUtils: AdbExecutor;
@@ -130,6 +147,7 @@ export class DeepLinkManager implements DeepLinkManager {
     hostExec: HostExec | null = null,
     plist: PlistReader = new PlistClient(),
     appBundleMetadata: AppBundleMetadata = new AppBundleMetadataClient(),
+    private readonly chooserMetadata?: ChooserAppMetadata,
   ) {
     // Detect if the argument is a factory (has create method) or an executor
     if (
@@ -647,13 +665,7 @@ export class DeepLinkManager implements DeepLinkManager {
           }
         }
       } else if (preference === "custom" && customAppPackage) {
-        // Look for specific app in the list
-        for (const rootNode of rootNodes) {
-          targetElement = this.findAppInChooser(rootNode, customAppPackage);
-          if (targetElement) {
-            break;
-          }
-        }
+        targetElement = await this.findAppInChooser(rootNodes, customAppPackage);
       }
 
       if (targetElement) {
@@ -734,28 +746,78 @@ export class DeepLinkManager implements DeepLinkManager {
 
   /**
    * Find a specific app in the intent chooser list
-   * @param node - Root node to search from
+   * @param nodes - All chooser roots to search for distinct clickable rows
    * @param appPackage - App package to find
-   * @returns Found element or null
+   * @returns The unique matching clickable row; throws when missing or ambiguous
    */
-  private findAppInChooser(node: any, appPackage: string): any {
-    let foundElement: any = null;
-
-    this.parser.traverseNode(node, (currentNode: any) => {
-      if (foundElement) {
-        return;
-      } // Already found
-
-      const properties = this.parser.extractNodeProperties(currentNode);
-      const resourceId = properties["resource-id"] || "";
-      const text = properties.text || properties["content-desc"] || "";
-
-      // Check if this element references the target app
-      if (resourceId.includes(appPackage) || text.includes(appPackage)) {
-        foundElement = currentNode;
+  private async findAppInChooser(nodes: any[], appPackage: string): Promise<any> {
+    const packageRows = new Set<any>();
+    const labelRows = new Map<any, Set<string>>();
+    let hasPackageMetadata = false;
+    for (const node of nodes) {
+      const ancestors: any[] = [];
+      this.parser.traverseNode(node, (currentNode: any, depth: number) => {
+        ancestors.length = depth;
+        ancestors[depth] = currentNode;
+        const properties = this.parser.extractNodeProperties(currentNode);
+        const row = ancestors.toReversed().find((ancestor) => {
+          const clickable = this.parser.extractNodeProperties(ancestor).clickable;
+          return clickable === true || clickable === "true";
+        });
+        if (!row) {
+          return;
+        }
+        const resourceId = properties["resource-id"] ?? "";
+        const separator = resourceId.indexOf(":id/");
+        const namespace = separator > 0 ? resourceId.slice(0, separator) : undefined;
+        // Framework-owned chooser widgets are not metadata for the represented app.
+        const packages = [properties.package, properties.packageName, namespace].filter(
+          (value): value is string =>
+            typeof value === "string" &&
+            value.length > 0 &&
+            value !== "android" &&
+            value !== "com.android.intentresolver" &&
+            value !== "com.android.systemui",
+        );
+        if (packages.length > 0) {
+          hasPackageMetadata = true;
+        }
+        if (packages.includes(appPackage)) {
+          packageRows.add(row);
+        }
+        const labels = labelRows.get(row) ?? new Set<string>();
+        for (const value of [properties.text, properties["content-desc"]]) {
+          if (typeof value === "string" && value.length > 0) {
+            labels.add(value);
+          }
+        }
+        labelRows.set(row, labels);
+      });
+    }
+    let candidates = [...packageRows];
+    if (!hasPackageMetadata && this.device) {
+      const label = await (this.chooserMetadata ?? defaultChooserAppMetadata).getLabel(
+        this.device,
+        appPackage,
+      );
+      if (label) {
+        candidates = [...labelRows].filter(([, labels]) => labels.has(label)).map(([row]) => row);
       }
-    });
-
-    return foundElement;
+    }
+    if (candidates.length > 1) {
+      const descriptions = candidates.map((row, index) => {
+        const properties = this.parser.extractNodeProperties(row);
+        return `${index + 1}: ${[...(labelRows.get(row) ?? [])].join(" / ")} bounds=${JSON.stringify(properties.bounds)}`;
+      });
+      throw new Error(
+        `Ambiguous chooser rows for ${appPackage}: ${descriptions.join("; ")}. Use a chooser with one exact app match.`,
+      );
+    }
+    if (candidates.length === 0) {
+      throw new Error(
+        `No exact clickable chooser row for ${appPackage}. Verify the app is installed and handles this link.`,
+      );
+    }
+    return candidates[0];
   }
 }

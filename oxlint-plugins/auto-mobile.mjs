@@ -721,6 +721,13 @@ const noRawSelectorFieldReadRule = {
           if (!type) return false;
           if (["TSAnyKeyword", "TSUnknownKeyword"].includes(type.type)) return true;
           if (type.type === "TSUnionType") return type.types.some(rawType);
+          if (type.type === "TSArrayType") return rawType(type.elementType);
+          if (type.type === "TSTupleType") return type.elementTypes.some(rawType);
+          if (
+            type.type === "TSTypeReference" &&
+            (type.typeArguments?.params ?? type.typeParameters?.params ?? []).some(rawType)
+          )
+            return true;
           return (
             type.type === "TSTypeReference" &&
             ["ViewHierarchyNode", "ViewHierarchyResult", "Record"].includes(type.typeName?.name)
@@ -758,26 +765,32 @@ const noRawSelectorFieldReadRule = {
             );
           return false;
         };
-        const bind = (pattern, value, env, isRaw) => {
+        const bind = (pattern, value, env, isRaw, assignment = false) => {
           if (!pattern) return;
-          if (pattern.type === "Identifier")
-            env.set(pattern.name, {
-              raw: isRaw || rawType(pattern.typeAnnotation),
-              literal: key(value, env),
-            });
-          else if (pattern.type === "ObjectPattern") {
+          if (pattern.type === "Identifier") {
+            const binding = assignment ? env.get(pattern.name) : undefined;
+            if (binding) {
+              // Maps share outer binding records; declarations still shadow them.
+              binding.raw ||= isRaw || rawType(pattern.typeAnnotation);
+              binding.literal = key(value, env);
+            } else
+              env.set(pattern.name, {
+                raw: isRaw || rawType(pattern.typeAnnotation),
+                literal: key(value, env),
+              });
+          } else if (pattern.type === "ObjectPattern") {
             for (const property of pattern.properties) {
               if (property.type === "RestElement") {
-                bind(property.argument, undefined, env, isRaw);
+                bind(property.argument, undefined, env, isRaw, assignment);
                 continue;
               }
               const name = property.computed ? key(property.key, env) : propertyName(property.key);
               if (isRaw && fields.has(name))
                 context.report({ node: property, messageId: "rawSelector" });
-              bind(property.value, undefined, env, isRaw && !fields.has(name));
+              bind(property.value, undefined, env, isRaw && !fields.has(name), assignment);
             }
           } else if (pattern.type === "AssignmentPattern")
-            bind(pattern.left, pattern.right, env, isRaw);
+            bind(pattern.left, pattern.right, env, isRaw, assignment);
         };
         const visit = (node, env, parent, role) => {
           if (!node || typeof node.type !== "string") return;
@@ -808,7 +821,7 @@ const noRawSelectorFieldReadRule = {
             node.type === "AssignmentExpression" &&
             ["Identifier", "ObjectPattern"].includes(node.left.type)
           )
-            bind(node.left, node.right, env, raw(node.right, env));
+            bind(node.left, node.right, env, raw(node.right, env), true);
           if (
             node.type === "MemberExpression" &&
             !(parent?.type === "AssignmentExpression" && parent.operator === "=" && role === "left")

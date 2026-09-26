@@ -64,3 +64,30 @@ test("typed capture containers preserve raw-node provenance", () => {
     ),
   ).toHaveLength(1);
 });
+
+test.each([
+  "function inspect(nodes: ViewHierarchyNode[]) { return nodes[0].text; }",
+  "function inspect(nodes: Array<ViewHierarchyNode>) { return nodes[0].text; }",
+  "function inspect(nodes: ReadonlyArray<ViewHierarchyNode[]>) { return nodes[0][0].text; }",
+  "function inspect(nodes: Box<ViewHierarchyNode>) { return nodes.value.text; }",
+])("raw container annotations cannot hide selector reads: %s", (code) => {
+  expect(check(code)).toHaveLength(1);
+});
+
+test.each([
+  "function inspect(node: ViewHierarchyNode, ready: boolean) { let props; if (ready) { props = node.$; } return props?.text; }",
+  "function inspect(node: ViewHierarchyNode, ready: boolean) { let props; while (ready) { props = node.$; } return props?.text; }",
+])("nested assignments retain outer raw provenance: %s", (code) => {
+  expect(check(code)).toHaveLength(1);
+});
+
+test("block shadowing and typed containers remain isolated", () => {
+  expect(
+    check(
+      "function inspect(node: ViewHierarchyNode, props: Options) { { const props = node.$; } return props.text; }",
+    ),
+  ).toEqual([]);
+  expect(
+    check("function inspect(nodes: ReadonlyArray<Element>) { return nodes[0].text; }"),
+  ).toEqual([]);
+});

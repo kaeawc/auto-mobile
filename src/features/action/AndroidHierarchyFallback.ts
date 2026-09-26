@@ -26,8 +26,11 @@ function nodeKey(attributes: Record<string, unknown>, bounds: unknown): string {
   return JSON.stringify([
     attributes.package,
     attributes.class,
+    // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- F7 preserves hierarchy fingerprint identity; this does not select an action target.
     attributes["resource-id"] ?? "",
+    // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- F7 preserves hierarchy fingerprint identity; this does not select an action target.
     attributes.text ?? "",
+    // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- F7 preserves hierarchy fingerprint identity; this does not select an action target.
     attributes["content-desc"] ?? "",
     rect ? [rect.left, rect.top, rect.right, rect.bottom] : null,
   ]);

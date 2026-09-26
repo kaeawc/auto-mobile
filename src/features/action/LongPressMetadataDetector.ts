@@ -138,9 +138,11 @@ export class LongPressMetadataDetector {
 
   private getRootSignature(root: any): string {
     const props = this.elementParser.extractNodeProperties(root);
+    // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- F7 preserves menu detection and capture signatures; these are internal classifiers, not user selectors.
     const resourceId = props["resource-id"] ?? props.resourceId ?? "";
     const className = props.class ?? props.className ?? "";
     const bounds = props.bounds ?? "";
+    // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- F7 preserves menu detection and capture signatures; these are internal classifiers, not user selectors.
     const text = props.text ?? props["content-desc"] ?? "";
     return `${resourceId}|${className}|${bounds}|${text}`;
   }
@@ -152,8 +154,10 @@ export class LongPressMetadataDetector {
         return;
       }
       const props = this.elementParser.extractNodeProperties(node);
+      // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- F7 preserves menu detection and capture signatures; these are internal classifiers, not user selectors.
       const resourceId = (props["resource-id"] ?? props.resourceId ?? "").toLowerCase();
       const className = (props.class ?? props.className ?? "").toLowerCase();
+      // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- F7 preserves menu detection and capture signatures; these are internal classifiers, not user selectors.
       const text = (props.text ?? props["content-desc"] ?? "").toLowerCase();
       if (
         resourceId.includes("menu") ||

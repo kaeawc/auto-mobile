@@ -141,3 +141,17 @@ describe("nodeHasIosNotificationCenterHint", () => {
     expect(nodeHasIosNotificationCenterHint(null)).toBe(false);
   });
 });
+
+it.each([
+  {
+    packageName: SYSTEM_TRAY_PACKAGE,
+    "resource-id": "com.android.systemui:id/custom_notification_panel_extra",
+  },
+  {
+    packageName: "com.android.systemui.beta",
+    "resource-id": "com.android.systemui.beta:id/notification_panel",
+  },
+  { packageName: "com.other", "resource-id": "com.android.systemui:id/notification_panel" },
+])("rejects near-collision tray identity %j", (props) => {
+  expect(nodeHasSystemTrayHint({ $: props })).toBe(false);
+});

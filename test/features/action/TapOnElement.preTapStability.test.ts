@@ -671,3 +671,55 @@ describe("shared capture pre-tap resolution", () => {
     },
   );
 });
+
+test("tap rejects a reused generated ordinal after a fresh capture removes a duplicate peer", async () => {
+  const { assignStableViewIds } =
+    await import("../../../src/features/observe/android/StableNodeIdentity");
+  const { DefaultHierarchyCapture } =
+    await import("../../../src/features/observe/HierarchyCapture");
+  const tree = (count: number): ViewHierarchyResult => {
+    const hierarchy = {
+      node: {
+        bounds: { left: 0, top: 0, right: 1080, bottom: 1920 },
+        node: Array.from({ length: count }, (_, index) => ({
+          "view-id": `0000000${index + 1}-0000-4000-8000-000000000000`,
+          text: "Same",
+          clickable: true,
+          bounds: STABLE_BOUNDS,
+        })),
+      },
+    };
+    assignStableViewIds(hierarchy);
+    return { hierarchy };
+  };
+  const initial = tree(3);
+  const fresh = tree(2);
+  const timer = new FakeTimer();
+  timer.enableAutoAdvance();
+  const capture = new DefaultHierarchyCapture(
+    "android",
+    {
+      readCached: async () => initial,
+      readFresh: async () => fresh,
+      projectVisible: (value) => value,
+    },
+    timer,
+  );
+  const before = await capture.capture({ freshness: "cached-ok" });
+  const nodeKey = before.nodes.filter(
+    (node) => node.label === "Same" && node.affordances.includes("tap"),
+  )[1].nodeKey!;
+  const tap = new TapOnElement(
+    { name: "test", platform: "android", deviceId: "ordinal-tap" },
+    new FakeAdbClient(),
+    { timer, hierarchyCapture: capture },
+  );
+  const result = await (tap as any).resolveAndroidStableTapTargetAfterRefreshes(
+    { elementId: nodeKey, action: "tap" },
+    { viewHierarchy: before.hierarchy },
+    "tap",
+    false,
+  );
+  expect(result.ok).toBe(false);
+  expect(result.error).toContain("Stale reference");
+});

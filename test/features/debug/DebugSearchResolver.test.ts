@@ -78,3 +78,49 @@ test("debug reports the actual promoted action target separately from the matchi
   expect(result.matches[0].element["resource-id"]).toBeUndefined();
   expect(result.selectedMatch?.element["resource-id"]).toBe("tap-row");
 });
+
+test("debug preserves exact child text provenance after semantic parent promotion", async () => {
+  const feature = search(
+    capture({
+      text: "Account",
+      "resource-id": "row",
+      children: [{ text: "Save", bounds: { left: 1, top: 1, right: 10, bottom: 10 } }],
+    }),
+  );
+  const result = await feature.execute({ text: "Save" });
+  expect(result.matches[0].matchedValue).toBe("Save");
+  expect(result.matches[0].matchedProperties).toEqual(["text"]);
+  expect(result.matches[0].isExactMatch).toBe(true);
+  expect(result.selectedMatch?.resourceId).toBe("row");
+  expect(result.nearMisses?.some((match) => match.value === "Save") ?? false).toBe(false);
+});
+
+test("debug excludes every matching descendant merged into one action row from near misses", async () => {
+  const feature = search(
+    capture({
+      "resource-id": "row",
+      children: [
+        { text: "Save", bounds: { left: 1, top: 1, right: 10, bottom: 10 } },
+        { "content-desc": "Save", bounds: { left: 11, top: 1, right: 19, bottom: 10 } },
+      ],
+    }),
+  );
+  const result = await feature.execute({ text: "Save" });
+  expect(result.matches).toHaveLength(1);
+  expect(result.matches[0].matchedProperties).toEqual(["text", "content-desc"]);
+  expect(result.matches[0].matchedValue).toBe("Save");
+  expect(result.nearMisses ?? []).toHaveLength(0);
+});
+
+test("debug selected diagnostics map eligible candidates back to the full match list", async () => {
+  const result = await search(
+    capture(
+      { text: "Save", clickable: false },
+      { "content-desc": "Save", "resource-id": "button" },
+    ),
+  ).execute({ text: "Save" });
+  expect(result.matches).toHaveLength(2);
+  expect(result.selectedMatch?.resourceId).toBe("button");
+  expect(result.selectedMatch?.matchedProperties).toEqual(["content-desc"]);
+  expect(result.nearMisses ?? []).toHaveLength(0);
+});

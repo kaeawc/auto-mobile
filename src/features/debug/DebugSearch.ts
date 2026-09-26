@@ -91,7 +91,8 @@ export class DebugSearch {
       options.caseSensitive
         ? normalizeQuotes(value).trim()
         : normalizeQuotes(value).trim().toLowerCase();
-    const matches: DebugSearchMatch[] = resolution.matches.map(({ node, kind }) => {
+    const matches: DebugSearchMatch[] = resolution.matches.map(({ node, kind, sourceNodes }) => {
+      const matchedNodes = sourceNodes ?? [node];
       const sources = options.resourceId
         ? [
             [
@@ -99,16 +100,18 @@ export class DebugSearch {
               kind === "node-key-exact" ? node.nodeKey! : node.nativeId!,
             ],
           ]
-        : Object.entries(node.textSources).filter(([, value]) =>
-            resolution.matchMode === "contains"
-              ? normalize(value).includes(normalize(options.text ?? ""))
-              : normalize(value) === normalize(options.text ?? ""),
-          );
+        : matchedNodes
+            .flatMap((matchedNode) => Object.entries(matchedNode.textSources))
+            .filter(([, value]) =>
+              resolution.matchMode === "contains"
+                ? normalize(value).includes(normalize(options.text ?? ""))
+                : normalize(value) === normalize(options.text ?? ""),
+            );
       return {
         element: node.element ?? node.properties,
-        matchedProperty: sources.map(([key]) => key).join(", ") || "label",
-        matchedProperties: sources.map(([key]) => key),
-        matchedValue: sources[0]?.[1] ?? node.label ?? "",
+        matchedProperty: [...new Set(sources.map(([key]) => key))].join(", ") || "label",
+        matchedProperties: [...new Set(sources.map(([key]) => key))],
+        matchedValue: sources[0]?.[1] ?? matchedNodes[0]?.label ?? "",
         matchKind: kind,
         isExactMatch: kind.endsWith("-exact"),
         className: node.className,
@@ -130,7 +133,11 @@ export class DebugSearch {
       : nodes;
     const nearMisses: NonNullable<DebugSearchResult["nearMisses"]> = [];
     for (const node of options.includeNearMisses === false ? [] : scopedNodes) {
-      if (!node.element || resolution.candidates.includes(node)) {
+      if (
+        !node.element ||
+        resolution.candidates.includes(node) ||
+        resolution.matches.some((match) => match.node === node || match.sourceNodes?.includes(node))
+      ) {
         continue;
       }
       for (const [property, value] of Object.entries(
@@ -159,7 +166,11 @@ export class DebugSearch {
       matches,
       selectedMatch: resolution.chosen
         ? {
-            ...matches[resolution.indexInMatches ?? -1],
+            ...matches[
+              resolution.matches.findIndex(
+                ({ node }) => node === resolution.candidates[resolution.indexInMatches ?? -1],
+              )
+            ],
             element: resolution.chosen.element ?? resolution.chosen.properties,
             resourceId: resolution.chosen.nativeId,
             className: resolution.chosen.className,

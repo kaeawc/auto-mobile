@@ -46,7 +46,7 @@ function searchForWait(
 }
 
 function elements(result: ElementResolution | undefined): Element[] {
-  return result?.candidates.flatMap((node) => (node.element ? [node.element] : [])) ?? [];
+  return result?.matches.flatMap(({ node }) => (node.element ? [node.element] : [])) ?? [];
 }
 
 export function appear(

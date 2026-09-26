@@ -303,7 +303,7 @@ const ELEMENT_PREDICATE_REQUIRED = [
 const ABSENT_PREDICATE_ADVERTISED_SCHEMA: Record<string, unknown> = {
   type: "object",
   additionalProperties: false,
-  description: "Wait until an element matching these fields is absent (text uses contains match)",
+  description: "Wait until an element matching these fields is absent (text uses exact match)",
   properties: {
     elementId: { type: "string" },
     text: { type: "string" },

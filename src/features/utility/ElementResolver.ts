@@ -5,13 +5,14 @@ import { boundsArea, boundsEqual } from "../../utils/bounds";
 import type { ElementBounds } from "../../models/ElementBounds";
 import { defaultRandom } from "../../utils/Random";
 
-export type MatchMode = "exact" | "contains";
+export type MatchMode = "exact" | "contains" | "regex";
 export type ResolutionAction =
   | "inspect"
   | "tap"
   | "long-press"
   | "scroll"
   | "input"
+  | "accessibility-focus"
   | "focus"
   | "highlight"
   | "drag";
@@ -40,9 +41,12 @@ export type MatchKind =
   | "text-exact"
   | "test-tag-exact"
   | "contains"
+  | "regex"
+  | "class-exact"
   | "all";
 export interface ElementResolution {
   chosen: SearchableEntry | null;
+  indexInMatches?: number;
   candidates: SearchableEntry[];
   matches: { node: SearchableEntry; kind: MatchKind }[];
   matchMode: MatchMode;
@@ -72,7 +76,11 @@ function eligible(node: SearchableEntry, intent: ResolutionIntent): boolean {
   if (!node.bounds) {
     return false;
   }
-  if (intent.action === "highlight" || intent.action === "drag") {
+  if (
+    intent.action === "highlight" ||
+    intent.action === "drag" ||
+    intent.action === "accessibility-focus"
+  ) {
     return true;
   }
   if (intent.action === "focus") {
@@ -215,6 +223,10 @@ export class ElementResolver {
             a.index - b.index,
         )[0] ?? null;
     }
+    if (result.chosen)
+      result.indexInMatches =
+        selector.index ??
+        result.candidates.findIndex((candidate) => actionTarget(candidate) === result.chosen);
     return result;
   }
 
@@ -307,31 +319,62 @@ export class ElementResolver {
         matchMode: "exact",
       };
     }
-    if (selector.text === undefined) {
-      return { matches: nodes.map((node) => ({ node, kind: "all" })), matchMode: "exact" };
+    if (selector.className !== undefined) {
+      return {
+        matches: nodes
+          .filter((node) => node.className === selector.className)
+          .map((node) => ({ node, kind: "class-exact" })),
+        matchMode: "exact",
+      };
     }
-    const query = normalize(selector.text, selector.caseSensitive);
-    if (!query) {
+    const textQuery = selector.text ?? selector.contentDescription;
+    if (textQuery === undefined) {
+      return {
+        matches: nodes
+          .filter((node) => eligible(node, intent))
+          .map((node) => ({ node, kind: "all" })),
+        matchMode: "exact",
+      };
+    }
+    const fields = (node: SearchableEntry): readonly string[] =>
+      selector.contentDescription !== undefined
+        ? [node.textSources["content-desc"], node.accessibleLabel].filter(
+            (value): value is string => value !== undefined,
+          )
+        : node.textFields;
+    const query = normalize(textQuery, selector.caseSensitive);
+    if (!query)
       return { matches: [], matchMode: "exact", error: "Text selector must not be blank" };
-    }
     const exact = nodes.filter((node) =>
-      node.textFields.some((field) => normalize(field, selector.caseSensitive) === query),
+      fields(node).some((field) => normalize(field, selector.caseSensitive) === query),
     );
-    const matchMode = intent.negative
-      ? "exact"
-      : (intent.matchMode ?? selector.match ?? (exact.length ? "exact" : "contains"));
+    const requested = intent.matchMode ?? selector.match;
+    const matchMode =
+      intent.negative && requested !== "regex"
+        ? "exact"
+        : (requested ?? (exact.length ? "exact" : "contains"));
+    let regex: RegExp | undefined;
+    if (matchMode === "regex") {
+      try {
+        regex = new RegExp(normalizeQuotes(textQuery), selector.caseSensitive ? "" : "i");
+      } catch {
+        return { matches: [], matchMode, error: "Invalid text selector regular expression" };
+      }
+    }
     const matches =
       matchMode === "exact"
         ? exact
         : nodes.filter((node) =>
-            node.textFields.some((field) =>
-              normalize(field, selector.caseSensitive).includes(query),
+            fields(node).some((field) =>
+              regex
+                ? regex.test(normalizeQuotes(field))
+                : normalize(field, selector.caseSensitive).includes(query),
             ),
           );
     return {
       matches: matches.map((node) => ({
         node,
-        kind: matchMode === "exact" ? "text-exact" : "contains",
+        kind: matchMode === "exact" ? "text-exact" : matchMode,
       })),
       matchMode,
     };
@@ -409,6 +452,10 @@ export class ElementResolver {
     if (!valid) {
       return { ...result, error: `Stale reference ${ref.nodeKey}; observe again before acting.` };
     }
-    return { ...result, chosen: eligible(node, intent) ? node : null };
+    return {
+      ...result,
+      chosen: eligible(node, intent) ? node : null,
+      indexInMatches: result.candidates.indexOf(node),
+    };
   }
 }

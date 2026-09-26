@@ -22,6 +22,8 @@ export interface SearchableNode {
   elementId?: string;
   label?: string;
   textFields: readonly string[];
+  textSources: Readonly<Record<string, string>>;
+  accessibleLabel?: string;
   testTag?: string;
   className?: string;
   focusable: boolean;
@@ -70,9 +72,11 @@ export function toSearchable(properties: SearchableProperties): SearchableNode {
   const nodeKey = nonEmptyString(properties["view-id"]);
   const text = nonEmptyString(properties.text);
   const description = nonEmptyString(properties["content-desc"]);
+  const accessibleLabel = nonEmptyString(properties["ios-accessibility-label"]);
   const editable = isEditableElementProperties(properties);
   const value = editable ? nonEmptyString(properties.value) : undefined;
-  const label = getToggleContentDescription(properties) || value || text || description;
+  const label =
+    getToggleContentDescription(properties) || value || text || description || accessibleLabel;
   const parsedBounds = parseBounds(properties.bounds);
   const bounds =
     parsedBounds && Object.values(parsedBounds).every(Number.isFinite) ? parsedBounds : undefined;
@@ -84,9 +88,20 @@ export function toSearchable(properties: SearchableProperties): SearchableNode {
     nodeKey,
     elementId: nativeId ?? nodeKey,
     label,
+    accessibleLabel,
+    textSources: Object.fromEntries(
+      Object.entries({
+        text,
+        "content-desc": description,
+        "ios-accessibility-label": accessibleLabel,
+        value,
+      }).filter((entry): entry is [string, string] => entry[1] !== undefined),
+    ),
     textFields: [
       ...new Set(
-        [label, value, text, description].filter((field): field is string => field !== undefined),
+        [label, value, text, description, accessibleLabel].filter(
+          (field): field is string => field !== undefined,
+        ),
       ),
     ],
     testTag: nonEmptyString(properties["test-tag"]),

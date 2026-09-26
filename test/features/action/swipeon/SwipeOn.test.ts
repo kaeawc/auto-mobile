@@ -1,3 +1,4 @@
+import { FakeScrollElementResolver } from "../../../fakes/FakeScrollElementResolver";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { SwipeOn } from "../../../../src/features/action/swipeon";
 import { ObserveResult } from "../../../../src/models";
@@ -57,6 +58,7 @@ describe("SwipeOn TalkBack ACTION_SCROLL direction (#6116)", () => {
       observeScreen: fakeObserveScreen,
       accessibilityDetector: fakeAccessibilityDetector,
       finder,
+      resolver: new FakeScrollElementResolver(finder),
     });
     (swipeOn as any).awaitIdle = fakeAwaitIdle;
     (swipeOn as any).window = fakeWindow;

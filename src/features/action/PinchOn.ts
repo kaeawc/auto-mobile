@@ -7,13 +7,11 @@ import {
   ObserveResult,
   PinchOnOptions,
   PinchOnResult,
-  ViewHierarchyResult,
 } from "../../models";
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
-import type { ElementFinder } from "../../utils/interfaces/ElementFinder";
-import type { ElementParser } from "../../utils/interfaces/ElementParser";
-import { DefaultElementFinder } from "../utility/ElementFinder";
-import { DefaultElementParser } from "../utility/ElementParser";
+import { ElementResolver } from "../utility/ElementResolver";
+import type { HierarchyCapture, HierarchySnapshot } from "../observe/HierarchyCapture";
+import { createDeviceHierarchyCapture } from "../observe/DeviceHierarchyCapture";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { AndroidCtrlProxyManager } from "../../utils/CtrlProxyManager";
@@ -40,24 +38,24 @@ type PinchTarget = {
 };
 
 interface PinchOnDependencies {
-  finder?: ElementFinder;
-  parser?: ElementParser;
+  resolver?: Pick<ElementResolver, "resolve">;
+  capture?: HierarchyCapture;
   visionConfig?: VisionFallbackConfig;
   screenshotCapturer?: ScreenshotCapturer;
   visionAnalyzer?: VisionAnalyzer;
 }
 
 export class PinchOn extends BaseVisualChange {
-  private finder: ElementFinder;
-  private parser: ElementParser;
+  private readonly resolver: Pick<ElementResolver, "resolve">;
+  private readonly capture: HierarchyCapture;
   private visionConfig: VisionFallbackConfig;
   private screenshotCapturer: ScreenshotCapturer;
   private visionAnalyzer: VisionAnalyzer | undefined;
 
   constructor(device: BootedDevice, adb: AdbClient | null = null, deps: PinchOnDependencies = {}) {
     super(device, adb);
-    this.finder = deps.finder ?? new DefaultElementFinder();
-    this.parser = deps.parser ?? new DefaultElementParser();
+    this.resolver = deps.resolver ?? new ElementResolver();
+    this.capture = deps.capture ?? createDeviceHierarchyCapture(device);
     this.visionConfig = deps.visionConfig ?? DEFAULT_VISION_CONFIG;
     this.screenshotCapturer =
       deps.screenshotCapturer ?? new TakeScreenshotCapturer(device, this.adbFactory);
@@ -277,6 +275,9 @@ export class PinchOn extends BaseVisualChange {
       observeResult = await this.observeScreen.execute();
     }
 
+    const snapshot = await this.capture.capture({ freshness: "fresh" });
+    observeResult = { ...observeResult, viewHierarchy: snapshot.hierarchy };
+
     if (!observeResult.viewHierarchy || !observeResult.screenSize) {
       throw new ActionableError("Unable to resolve target without a view hierarchy");
     }
@@ -284,10 +285,7 @@ export class PinchOn extends BaseVisualChange {
     const screenBounds = this.getScreenBounds(observeResult, options.includeSystemInsets);
 
     if (options.container) {
-      const containerElement = this.findContainerElement(
-        options.container,
-        observeResult.viewHierarchy,
-      );
+      const containerElement = this.findContainerElement(options.container, snapshot);
       if (!containerElement) {
         throw new ActionableError("Container element not found for pinchOn");
       }
@@ -299,7 +297,7 @@ export class PinchOn extends BaseVisualChange {
     }
 
     if (options.autoTarget !== false) {
-      const autoTarget = this.selectAutoTargetElement(observeResult.viewHierarchy, screenBounds);
+      const autoTarget = this.selectAutoTargetElement(snapshot, screenBounds);
       if (autoTarget) {
         const container = buildContainerFromElement(autoTarget);
         return {
@@ -321,33 +319,25 @@ export class PinchOn extends BaseVisualChange {
 
   private findContainerElement(
     container: PinchOnOptions["container"],
-    viewHierarchy: ViewHierarchyResult,
+    snapshot: HierarchySnapshot,
   ): Element | null {
     if (!container) {
       return null;
     }
 
-    if (container.elementId) {
-      const element = this.finder.findElementByResourceId(
-        viewHierarchy,
-        container.elementId,
-        undefined,
-        true,
-      );
-      if (element) {
-        return element;
-      }
+    const resolution = this.resolver.resolve(
+      { id: snapshot.captureId, nodes: snapshot.nodes },
+      container,
+      { action: "inspect" },
+    );
+    if (resolution.error) {
+      throw new ActionableError(resolution.error);
     }
-
-    if (container.text) {
-      return this.finder.findElementByText(viewHierarchy, container.text, undefined, true, false);
-    }
-
-    return null;
+    return resolution.chosen?.element ?? null;
   }
 
   private selectAutoTargetElement(
-    viewHierarchy: ViewHierarchyResult,
+    snapshot: HierarchySnapshot,
     screenBounds: Element["bounds"],
   ): Element | null {
     const screenWidth = Math.max(1, screenBounds.right - screenBounds.left);
@@ -355,7 +345,8 @@ export class PinchOn extends BaseVisualChange {
     const screenArea = screenWidth * screenHeight;
 
     const candidates = new Map<string, Element>();
-    const addCandidate = (element: Element) => {
+    const windowRanks = new Map<Element, number>();
+    const addCandidate = (element: Element, rank: number) => {
       if (!element.bounds) {
         return;
       }
@@ -366,27 +357,28 @@ export class PinchOn extends BaseVisualChange {
       const key = `${element.bounds.left},${element.bounds.top},${element.bounds.right},${element.bounds.bottom}|${element["resource-id"] ?? ""}|${element.text ?? ""}|${element["content-desc"] ?? ""}`;
       if (!candidates.has(key)) {
         candidates.set(key, element);
+        windowRanks.set(element, rank);
       }
     };
 
-    const scrollables = this.finder.findScrollableElements(viewHierarchy);
-    const clickables = this.finder.findClickableElements(viewHierarchy);
-    const flattened = this.parser.flattenViewHierarchy(viewHierarchy).map((entry) => entry.element);
-
-    for (const element of scrollables) {
-      addCandidate(element);
-    }
-    for (const element of clickables) {
-      addCandidate(element);
-    }
-    for (const element of flattened) {
-      const area = boundsArea(element.bounds);
-      if (area / screenArea >= 0.15) {
-        addCandidate(element);
+    const entries = this.resolver.resolve(
+      { id: snapshot.captureId, nodes: snapshot.nodes },
+      {},
+      { action: "inspect" },
+    ).candidates;
+    for (const entry of entries) {
+      const element = entry.element;
+      if (
+        element &&
+        (entry.affordances.includes("scroll") ||
+          entry.affordances.includes("tap") ||
+          boundsArea(element.bounds) / screenArea >= 0.15)
+      ) {
+        addCandidate(element, entry.windowRank);
       }
     }
 
-    let best: { element: Element; score: number } | null = null;
+    let best: { element: Element; score: number; windowRank: number } | null = null;
     for (const element of candidates.values()) {
       if (!this.boundsWithinScreen(element.bounds, screenBounds)) {
         continue;
@@ -409,8 +401,13 @@ export class PinchOn extends BaseVisualChange {
         score *= 0.2;
       }
 
-      if (!best || score > best.score) {
-        best = { element, score };
+      const windowRank = windowRanks.get(element) ?? 0;
+      if (
+        !best ||
+        windowRank < best.windowRank ||
+        (windowRank === best.windowRank && score > best.score)
+      ) {
+        best = { element, score, windowRank };
       }
     }
 

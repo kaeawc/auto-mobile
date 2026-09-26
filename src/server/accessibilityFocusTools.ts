@@ -15,7 +15,10 @@ export const accessibilityFocusSchema = addDeviceTargetingToSchema(
       action: z.enum(["set", "clear"]).optional().describe("set default or clear TalkBack focus"),
       resourceId: z.string().optional().describe("Target resource ID"),
       text: z.string().optional().describe("Target text"),
-      contentDesc: z.string().optional().describe("Target content-desc"),
+      contentDesc: z
+        .string()
+        .optional()
+        .describe("Exact content-desc or accessible label; distinct from visible text"),
     })
     .strict(),
 );

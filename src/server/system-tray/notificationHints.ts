@@ -7,6 +7,7 @@
  * node — no I/O, no device dependencies.
  */
 import type { ViewHierarchyResult } from "../../models";
+import { SearchableHierarchy } from "../../features/utility/SearchableNode";
 
 export const SYSTEM_TRAY_PACKAGE = "com.android.systemui";
 
@@ -83,18 +84,22 @@ export const traverseForHint = (node: any, predicate: (node: any) => boolean): b
   return false;
 };
 
+const searchableHierarchy = new SearchableHierarchy();
+
+/** Preserve original root trees while sharing the resolver's window order and capture projection. */
 export const getHierarchyRoots = (viewHierarchy: ViewHierarchyResult): any[] => {
-  if (!viewHierarchy?.hierarchy || viewHierarchy.hierarchy.error) {
-    return [];
-  }
-  const hierarchy: any = viewHierarchy.hierarchy;
-  if (hierarchy.node) {
-    return Array.isArray(hierarchy.node) ? hierarchy.node : [hierarchy.node];
-  }
-  if (hierarchy.hierarchy) {
-    return [hierarchy.hierarchy];
-  }
-  return [hierarchy];
+  const seen = new Set<unknown>();
+  return [...searchableHierarchy.project(viewHierarchy)]
+    .filter((entry) => entry.parentIndex === undefined)
+    .sort((a, b) => a.windowRank - b.windowRank || a.index - b.index)
+    .filter((entry) => {
+      if (seen.has(entry.source)) {
+        return false;
+      }
+      seen.add(entry.source);
+      return true;
+    })
+    .map((entry) => entry.source);
 };
 
 // Framework aliases exercised by systemTray.test.ts and the captured

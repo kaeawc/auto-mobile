@@ -111,6 +111,7 @@ export interface ScrollAccessibilityService {
 }
 
 export interface SwipeOnDependencies {
+  resolver?: Pick<import("../../utility/ElementResolver").ElementResolver, "resolve">;
   executeGesture?: GestureExecutor;
   observeScreen?: ObserveScreen;
   finder?: import("../../../utils/interfaces/ElementFinder").ElementFinder;

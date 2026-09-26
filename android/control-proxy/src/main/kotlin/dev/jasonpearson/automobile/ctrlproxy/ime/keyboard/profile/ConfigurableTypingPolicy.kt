@@ -4,24 +4,36 @@ import dev.jasonpearson.automobile.ctrlproxy.ime.keyboard.EditorConfig
 
 class ConfigurableTypingPolicy(private val behavior: TypingBehavior) : TypingPolicy {
   private var composingBuffer = ""
+  private var composingCursor = 0
+  private var composingStart = -1
 
   override fun onText(text: String, snapshot: TextSnapshot): List<ImeOp> {
+    updateComposingCursor(snapshot)
+    var cursorInEditor = snapshot.selectionStart
     val ops = mutableListOf<ImeOp>()
-    text.forEach { char ->
+    text.forEachCodePoint { codePoint ->
+      val char = String(Character.toChars(codePoint))
       if (!behavior.composeWords) {
-        ops += ImeOp.CommitText(char.toString())
-      } else if (char.isWordChar()) {
-        composingBuffer += char
-        ops += ImeOp.SetComposingText(composingBuffer)
+        ops += ImeOp.CommitText(char)
+        cursorInEditor += char.length
+      } else if (codePoint.isWordCodePoint()) {
+        if (composingBuffer.isEmpty()) composingStart = cursorInEditor
+        composingBuffer = composingBuffer.insertAt(composingCursor, char)
+        composingCursor += char.length
+        ops += setComposingTextAtCursor()
+        cursorInEditor = composingStart + composingCursor
       } else {
+        if (composingBuffer.isNotEmpty()) cursorInEditor = composingStart + composingCursor
         finishComposingInto(ops)
-        ops += ImeOp.CommitText(char.toString())
+        ops += ImeOp.CommitText(char)
+        cursorInEditor += char.length
       }
     }
     return batchIfNeeded(ops)
   }
 
   override fun onBackspace(snapshot: TextSnapshot): List<ImeOp> {
+    updateComposingCursor(snapshot)
     val ops =
       when {
         snapshot.selectionStart != snapshot.selectionEnd -> {
@@ -30,6 +42,11 @@ class ConfigurableTypingPolicy(private val behavior: TypingBehavior) : TypingPol
           selectionOps += ImeOp.CommitText("")
           selectionOps
         }
+        composingBuffer.isNotEmpty() && composingCursor == 0 ->
+          mutableListOf<ImeOp>().also {
+            finishComposingInto(it)
+            it += backspaceCommitted(snapshot)
+          }
         composingBuffer.isNotEmpty() -> backspaceComposing()
         else -> backspaceCommitted(snapshot)
       }
@@ -61,6 +78,8 @@ class ConfigurableTypingPolicy(private val behavior: TypingBehavior) : TypingPol
     val ops = mutableListOf<ImeOp>()
     if (composingBuffer.isNotEmpty() && selectionLeftComposingSpan(snapshot)) {
       finishComposingInto(ops)
+    } else {
+      updateComposingCursor(snapshot)
     }
     // Our own composing edits echo back through onUpdateSelection; only re-compose when the
     // cursor lands in committed text, never while a word we are composing is still live.
@@ -77,33 +96,46 @@ class ConfigurableTypingPolicy(private val behavior: TypingBehavior) : TypingPol
   override fun onFinishInput(): List<ImeOp> {
     if (composingBuffer.isEmpty()) return emptyList()
     composingBuffer = ""
+    composingCursor = 0
+    composingStart = -1
     return listOf(ImeOp.FinishComposingText)
   }
 
   private fun backspaceComposing(): List<ImeOp> {
-    composingBuffer = composingBuffer.dropLast(1)
+    if (composingCursor == 0) return emptyList()
+    val previousCodePoint = Character.codePointBefore(composingBuffer, composingCursor)
+    val width = Character.charCount(previousCodePoint)
+    composingBuffer = composingBuffer.removeRange(composingCursor - width, composingCursor)
+    composingCursor -= width
     return if (composingBuffer.isEmpty()) {
+      composingStart = -1
       listOf(ImeOp.SetComposingText(""), ImeOp.FinishComposingText)
     } else {
-      listOf(ImeOp.SetComposingText(composingBuffer))
+      setComposingTextAtCursor()
     }
   }
 
   private fun backspaceCommitted(snapshot: TextSnapshot): List<ImeOp> {
     val before = snapshot.textBeforeCursor
-    if (behavior.recomposeOnBackspaceIntoWord && before.lastOrNull()?.isWordChar() == true) {
-      val remainingWord = before.dropLast(1).takeLastWhile { it.isWordChar() }
-      val ops = mutableListOf<ImeOp>(ImeOp.DeleteSurroundingText(1, 0))
+    if (before.isEmpty()) return emptyList()
+    val deletedWidth = before.lastCodePointWidth()
+    val deletedCodePoint = Character.codePointBefore(before, before.length)
+    if (behavior.recomposeOnBackspaceIntoWord && deletedCodePoint.isWordCodePoint()) {
+      val remainingText = before.dropLast(deletedWidth)
+      val remainingWord = remainingText.takeLastWord()
+      val ops = mutableListOf<ImeOp>(ImeOp.DeleteSurroundingText(deletedWidth, 0))
       if (remainingWord.isNotEmpty()) {
-        val end = snapshot.selectionStart - 1
+        val end = snapshot.selectionStart - deletedWidth
         composingBuffer = remainingWord
+        composingCursor = composingBuffer.length
+        composingStart = end - remainingWord.length
         ops += ImeOp.SetComposingRegion(end - remainingWord.length, end)
       }
       return ops
     }
     return listOf(
       when (behavior.backspaceStrategy) {
-        BackspaceStrategy.DELETE_SURROUNDING -> ImeOp.DeleteSurroundingText(1, 0)
+        BackspaceStrategy.DELETE_SURROUNDING -> ImeOp.DeleteSurroundingText(deletedWidth, 0)
         BackspaceStrategy.KEY_EVENT -> ImeOp.SendKey(KEYCODE_DEL)
       }
     )
@@ -114,16 +146,13 @@ class ConfigurableTypingPolicy(private val behavior: TypingBehavior) : TypingPol
       snapshot.selectionStart < snapshot.composingStart ||
       snapshot.selectionStart > snapshot.composingEnd
 
-  // KNOWN LIMITATION (#7463): after re-composing a word the cursor landed inside, the buffer
-  // holds the whole word, but a following onText appends to its END instead of inserting at the
-  // caret, because ImeOp.SetComposingText carries no cursor position. A fix must thread a caret
-  // offset through SetComposingText and match InputConnection.setComposingText's newCursorPosition
-  // semantics, which need on-device verification.
   private fun recomposeWordAtCursor(snapshot: TextSnapshot): ImeOp.SetComposingRegion? {
-    val before = snapshot.textBeforeCursor.takeLastWhile { it.isWordChar() }
-    val after = snapshot.textAfterCursor.takeWhile { it.isWordChar() }
+    val before = snapshot.textBeforeCursor.takeLastWord()
+    val after = snapshot.textAfterCursor.takeWhileWord()
     if (before.isEmpty() && after.isEmpty()) return null
     composingBuffer = before + after
+    composingCursor = before.length
+    composingStart = snapshot.selectionStart - before.length
     return ImeOp.SetComposingRegion(
       snapshot.selectionStart - before.length,
       snapshot.selectionStart + after.length,
@@ -134,6 +163,8 @@ class ConfigurableTypingPolicy(private val behavior: TypingBehavior) : TypingPol
     if (composingBuffer.isNotEmpty()) {
       ops += ImeOp.FinishComposingText
       composingBuffer = ""
+      composingCursor = 0
+      composingStart = -1
     }
   }
 
@@ -144,7 +175,62 @@ class ConfigurableTypingPolicy(private val behavior: TypingBehavior) : TypingPol
       ops
     }
 
-  private fun Char.isWordChar(): Boolean = isLetterOrDigit() || this == '\''
+  private fun updateComposingCursor(snapshot: TextSnapshot) {
+    if (
+      composingBuffer.isNotEmpty() &&
+        snapshot.composingStart >= 0 &&
+        snapshot.selectionStart in snapshot.composingStart..snapshot.composingEnd
+    ) {
+      composingCursor =
+        (snapshot.selectionStart - snapshot.composingStart).coerceIn(0, composingBuffer.length)
+      composingStart = snapshot.composingStart
+    }
+  }
+
+  private fun setComposingTextAtCursor(): List<ImeOp> = buildList {
+    add(ImeOp.SetComposingText(composingBuffer))
+    if (composingCursor != composingBuffer.length) {
+      val selection = composingStart + composingCursor
+      add(ImeOp.SetSelection(selection, selection))
+    }
+  }
+
+  private fun String.insertAt(index: Int, value: String): String =
+    substring(0, index) + value + substring(index)
+
+  private inline fun String.forEachCodePoint(action: (Int) -> Unit) {
+    var index = 0
+    while (index < length) {
+      val codePoint = Character.codePointAt(this, index)
+      action(codePoint)
+      index += Character.charCount(codePoint)
+    }
+  }
+
+  private fun Int.isWordCodePoint(): Boolean = Character.isLetterOrDigit(this) || this == '\''.code
+
+  private fun String.lastCodePointWidth(): Int =
+    if (isEmpty()) 1 else Character.charCount(Character.codePointBefore(this, length))
+
+  private fun String.takeLastWord(): String {
+    var index = length
+    while (index > 0) {
+      val codePoint = Character.codePointBefore(this, index)
+      if (!codePoint.isWordCodePoint()) break
+      index -= Character.charCount(codePoint)
+    }
+    return substring(index)
+  }
+
+  private fun String.takeWhileWord(): String {
+    var index = 0
+    while (index < length) {
+      val codePoint = Character.codePointAt(this, index)
+      if (!codePoint.isWordCodePoint()) break
+      index += Character.charCount(codePoint)
+    }
+    return substring(0, index)
+  }
 
   private companion object {
     // Android EditorInfo.IME_MASK_ACTION

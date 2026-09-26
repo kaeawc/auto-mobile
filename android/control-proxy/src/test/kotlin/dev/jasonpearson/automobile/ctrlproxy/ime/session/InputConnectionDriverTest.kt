@@ -16,6 +16,7 @@ class InputConnectionDriverTest {
         ImeOp.SetComposingText("b"),
         ImeOp.FinishComposingText,
         ImeOp.SetComposingRegion(1, 2),
+        ImeOp.SetSelection(2, 2),
         ImeOp.DeleteSurroundingText(2, 1),
         ImeOp.SendKey(67),
         ImeOp.PerformEditorAction(6),
@@ -27,9 +28,10 @@ class InputConnectionDriverTest {
     assertEquals(
       listOf(
         "commit:a",
-        "compose:b",
+        "compose:b:1",
         "finish",
         "region:1:2",
+        "selection:2:2",
         "delete:2:1",
         "key:67",
         "action:6",
@@ -42,30 +44,70 @@ class InputConnectionDriverTest {
 
   @Test
   fun `execution stops at first failed operation`() {
-    val connection = RecordingConnection(failOn = "compose:b")
+    val connection = RecordingConnection(failOn = "compose:b:1")
 
     assertFalse(
       InputConnectionDriver(connection)
         .execute(listOf(ImeOp.CommitText("a"), ImeOp.SetComposingText("b"), ImeOp.CommitText("c")))
     )
-    assertEquals(listOf("commit:a", "compose:b"), connection.calls)
+    assertEquals(listOf("commit:a", "compose:b:1"), connection.calls)
   }
 
-  private class RecordingConnection(private val failOn: String? = null) : ImeConnection {
+  @Test
+  fun `failed operation closes every successfully opened batch`() {
+    val connection = RecordingConnection(failOn = "compose:b:2")
+
+    assertFalse(
+      InputConnectionDriver(connection)
+        .execute(
+          listOf(
+            ImeOp.BeginBatchEdit,
+            ImeOp.SetComposingText("b", 2),
+            ImeOp.CommitText("c"),
+            ImeOp.EndBatchEdit,
+          )
+        )
+    )
+    assertEquals(listOf("begin", "compose:b:2", "end"), connection.calls)
+  }
+
+  @Test
+  fun `throwing operation closes every successfully opened batch`() {
+    val connection = RecordingConnection(throwOn = "compose:b:1")
+
+    try {
+      InputConnectionDriver(connection)
+        .execute(listOf(ImeOp.BeginBatchEdit, ImeOp.SetComposingText("b"), ImeOp.EndBatchEdit))
+      throw AssertionError("expected connection failure")
+    } catch (failure: IllegalStateException) {
+      assertEquals("compose:b:1", failure.message)
+    }
+
+    assertEquals(listOf("begin", "compose:b:1", "end"), connection.calls)
+  }
+
+  private class RecordingConnection(
+    private val failOn: String? = null,
+    private val throwOn: String? = null,
+  ) : ImeConnection {
     val calls = mutableListOf<String>()
 
     private fun record(call: String): Boolean {
       calls += call
+      if (call == throwOn) throw IllegalStateException(call)
       return call != failOn
     }
 
     override fun commitText(text: String) = record("commit:$text")
 
-    override fun setComposingText(text: String) = record("compose:$text")
+    override fun setComposingText(text: String, newCursorPosition: Int) =
+      record("compose:$text:$newCursorPosition")
 
     override fun finishComposingText() = record("finish")
 
     override fun setComposingRegion(start: Int, end: Int) = record("region:$start:$end")
+
+    override fun setSelection(start: Int, end: Int) = record("selection:$start:$end")
 
     override fun deleteSurroundingText(before: Int, after: Int) = record("delete:$before:$after")
 

@@ -9,12 +9,15 @@ class InputConnectionAdapter(
 ) : ImeConnection {
   override fun commitText(text: String): Boolean = connection.commitText(text, 1)
 
-  override fun setComposingText(text: String): Boolean = connection.setComposingText(text, 1)
+  override fun setComposingText(text: String, newCursorPosition: Int): Boolean =
+    connection.setComposingText(text, newCursorPosition)
 
   override fun finishComposingText(): Boolean = connection.finishComposingText()
 
   override fun setComposingRegion(start: Int, end: Int): Boolean =
     connection.setComposingRegion(start, end)
+
+  override fun setSelection(start: Int, end: Int): Boolean = connection.setSelection(start, end)
 
   override fun deleteSurroundingText(before: Int, after: Int): Boolean =
     connection.deleteSurroundingText(before, after)

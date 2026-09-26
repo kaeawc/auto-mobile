@@ -111,6 +111,26 @@ class ConfigurableTypingPolicyTest {
   }
 
   @Test
+  fun `samsung inserts into a recomposed word at the moved caret`() {
+    val policy = policy(KeyboardProfiles.SAMSUNG)
+    val editor = FakeEditor("hello world")
+    editor.setSelection(8)
+    editor.apply(policy.onSelectionChanged(editor.snapshot()))
+
+    val ops = policy.onText("X", editor.snapshot())
+    assertEquals(
+      listOf(ImeOp.SetComposingText("woXrld"), ImeOp.SetSelection(9, 9)),
+      ops,
+    )
+    editor.apply(ops)
+
+    assertEquals("hello woXrld", editor.text)
+    assertEquals(9, editor.selectionStart)
+    assertEquals(6, editor.composingStart)
+    assertEquals(12, editor.composingEnd)
+  }
+
+  @Test
   fun `moving outside a composing span finishes the old word`() {
     val policy = policy(KeyboardProfiles.SAMSUNG)
     val editor = FakeEditor()
@@ -193,6 +213,29 @@ class ConfigurableTypingPolicyTest {
     editor.apply(ops)
     assertEquals("ho", editor.text)
     assertEquals(-1, editor.composingStart)
+  }
+
+  @Test
+  fun `backspace deletes a complete supplementary character`() {
+    val editor = FakeEditor("a😀")
+    val ops = policy(KeyboardProfiles.DIRECT).onBackspace(editor.snapshot())
+
+    assertEquals(listOf(ImeOp.DeleteSurroundingText(2, 0)), ops)
+    editor.apply(ops)
+    assertEquals("a", editor.text)
+  }
+
+  @Test
+  fun `composition backspace removes a complete supplementary letter`() {
+    val policy = policy(KeyboardProfiles.GBOARD)
+    val editor = FakeEditor()
+    type(policy, editor, "a\uD801\uDC00")
+
+    editor.apply(policy.onBackspace(editor.snapshot()))
+
+    assertEquals("a", editor.text)
+    assertEquals(0, editor.composingStart)
+    assertEquals(1, editor.composingEnd)
   }
 
   @Test

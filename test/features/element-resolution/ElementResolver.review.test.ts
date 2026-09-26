@@ -151,3 +151,25 @@ test("sibling promotion cannot collapse anchors into the outer container", () =>
     capture.nodes.find((n) => n.nativeId === "second")?.index,
   );
 });
+
+test("positional candidates exclude offscreen controls while keeping visible action differences", () => {
+  const capture = snapshot([
+    node("offscreen", {
+      text: "Value",
+      clickable: true,
+      bounds: { left: 0, top: 150, right: 100, bottom: 200 },
+    }),
+    node("visible-tap", { text: "Value", clickable: true }),
+    node("visible-input", { text: "Value", editable: true, class: "android.widget.EditText" }),
+  ]);
+  const intent = { action: "input" as const, viewport: { width: 100, height: 100 } };
+  const first = resolver.resolve(capture, { text: "Value", index: 0 }, intent);
+  expect(first.candidates.map((n) => n.nativeId)).toEqual(["visible-tap", "visible-input"]);
+  expect(first.chosen).toBeNull();
+  const second = resolver.resolve(capture, { text: "Value", index: 1 }, intent);
+  expect(second.chosen?.nativeId).toBe("visible-input");
+  expect(second.indexInMatches).toBe(1);
+  const random = resolver.resolve(capture, { text: "Value", selectionStrategy: "random" }, intent);
+  expect(random.chosen?.nativeId).toBe("visible-input");
+  expect(random.indexInMatches).toBe(1);
+});

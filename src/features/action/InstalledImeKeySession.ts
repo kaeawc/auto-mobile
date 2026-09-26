@@ -244,38 +244,73 @@ function findVisibleImeKey(
 ): { x: number; y: number } | null {
   const parser = new DefaultElementParser();
   const packageName = imeId.slice(0, imeId.indexOf("/"));
+  const imeWindows = (hierarchy.windows ?? []).filter(
+    (window) =>
+      window.type === 2 &&
+      window.bounds &&
+      (!window.packageName || window.packageName === packageName),
+  );
+  if (imeWindows.length === 0) {
+    return null;
+  }
   const matches: Array<{ x: number; y: number }> = [];
-  for (const window of hierarchy.windows ?? []) {
-    if (
-      window.type !== 2 ||
-      !window.hierarchy ||
-      !window.bounds ||
-      (window.packageName && window.packageName !== packageName)
-    ) {
-      continue;
-    }
-    const bounds = window.bounds;
-    parser.traverseNode(window.hierarchy, (node: ViewHierarchyNode) => {
+  // CtrlProxy can flatten all window nodes into the root hierarchy while retaining
+  // only bounds/type metadata for each window. Traverse those nodes once, then
+  // require both target-package ownership and containment in a real IME window.
+  for (const root of parser.extractRootNodes(hierarchy)) {
+    parser.traverseNode(root, (node: ViewHierarchyNode) => {
       const properties = parser.extractNodeProperties(node);
-      if (
-        properties.text !== key &&
-        properties["content-desc"] !== key &&
-        properties.contentDesc !== key
-      ) {
-        return;
-      }
-      const candidate = parser.parseBounds(node.bounds ?? properties.bounds);
-      if (!candidate || candidate.right <= candidate.left || candidate.bottom <= candidate.top) {
-        return;
-      }
-      const x = Math.round((candidate.left + candidate.right) / 2);
-      const y = Math.round((candidate.top + candidate.bottom) / 2);
-      if (x >= bounds.left && x < bounds.right && y >= bounds.top && y < bounds.bottom) {
-        matches.push({ x, y });
+      const point = matchingImeKeyCenter(node, properties, parser, key, packageName, imeWindows);
+      if (point) {
+        matches.push(point);
       }
     });
   }
   return matches.length === 1 ? matches[0] : null;
+}
+
+function matchingImeKeyCenter(
+  node: ViewHierarchyNode,
+  properties: Record<string, unknown>,
+  parser: DefaultElementParser,
+  key: string,
+  packageName: string,
+  windows: NonNullable<ViewHierarchyResult["windows"]>,
+): { x: number; y: number } | null {
+  if (
+    properties.text !== key &&
+    properties["content-desc"] !== key &&
+    properties.contentDesc !== key
+  ) {
+    return null;
+  }
+  if (!isOwnedByIme(properties, packageName)) {
+    return null;
+  }
+  const candidate = parser.parseBounds(node.bounds ?? properties.bounds);
+  if (!candidate || candidate.right <= candidate.left || candidate.bottom <= candidate.top) {
+    return null;
+  }
+  const x = Math.round((candidate.left + candidate.right) / 2);
+  const y = Math.round((candidate.top + candidate.bottom) / 2);
+  return windows.some(
+    ({ bounds }) =>
+      bounds && x >= bounds.left && x < bounds.right && y >= bounds.top && y < bounds.bottom,
+  )
+    ? { x, y }
+    : null;
+}
+
+function isOwnedByIme(properties: Record<string, unknown>, packageName: string): boolean {
+  const resourceId = properties["resource-id"] ?? properties.resourceId;
+  const nodePackage = properties.package;
+  if (typeof resourceId !== "string" && nodePackage !== packageName) {
+    return false;
+  }
+  if (typeof resourceId === "string" && !resourceId.startsWith(`${packageName}:`)) {
+    return false;
+  }
+  return typeof nodePackage !== "string" || nodePackage === packageName;
 }
 
 export function createInstalledImeKeySession(device: BootedDevice): InstalledImeKeySession {

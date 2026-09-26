@@ -20,17 +20,26 @@ const focused: ViewHierarchyResult = {
   },
 };
 const keyWindow: ViewHierarchyResult = {
-  hierarchy: { node: { $: {} } },
+  hierarchy: {
+    node: {
+      $: {},
+      node: [
+        {
+          $: {
+            text: "a",
+            "resource-id": "com.example.keyboard:id/key_a",
+            bounds: { left: 100, top: 400, right: 140, bottom: 440 },
+          },
+        },
+      ],
+    },
+  },
   frameContext: "frame-one",
   windows: [
     {
       type: 2,
       packageName: "com.example.keyboard",
       bounds: { left: 0, top: 300, right: 400, bottom: 600 },
-      hierarchy: {
-        $: {},
-        node: [{ $: { text: "a", bounds: { left: 100, top: 400, right: 140, bottom: 440 } } }],
-      },
     },
   ],
 };
@@ -40,6 +49,7 @@ function fixture(
   window: ViewHierarchyResult = keyWindow,
   initial: ViewHierarchyResult = focused,
   afterTap: ViewHierarchyResult = window,
+  selectedIme: string = target,
 ) {
   const events: string[] = [];
   const timer = new FakeTimer();
@@ -53,7 +63,11 @@ function fixture(
     catalog: {
       list: async () => ({
         activeImeId: active,
-        installed: [original, target].map((id) => ({ id, enabled: true, active: id === active })),
+        installed: [original, selectedIme].map((id) => ({
+          id,
+          enabled: true,
+          active: id === active,
+        })),
       }),
       selectWithinLock: async (id, signal) => {
         events.push(`select:${id}:${signal ? "signaled" : "cleanup"}`);
@@ -63,7 +77,7 @@ function fixture(
         active = id;
         return {
           activeImeId: active,
-          installed: [original, target].map((item) => ({
+          installed: [original, selectedIme].map((item) => ({
             id: item,
             enabled: true,
             active: item === active,
@@ -146,11 +160,58 @@ test("does not tap an app control when no real IME window contains the key", asy
 test("does not tap a key from another IME package", async () => {
   const wrongPackage: ViewHierarchyResult = {
     ...keyWindow,
-    windows: keyWindow.windows?.map((window) => ({ ...window, packageName: "com.other.keyboard" })),
+    hierarchy: {
+      node: {
+        $: {},
+        node: [
+          {
+            $: {
+              text: "a",
+              "resource-id": "com.other.keyboard:id/key_a",
+              bounds: { left: 100, top: 400, right: 140, bottom: 440 },
+            },
+          },
+        ],
+      },
+    },
   };
   const { session, events } = fixture(wrongPackage);
   await expect(session.tapKey(target, "a")).rejects.toThrow("Visible key");
   expect(events.some((event) => event.startsWith("tap:"))).toBe(false);
+});
+
+test("matches a live-shaped Gboard key in the root hierarchy using IME window bounds", async () => {
+  const gboard =
+    "com.google.android.inputmethod.latin/com.google.android.apps.inputmethod.latin.LatinIME";
+  const liveShape: ViewHierarchyResult = {
+    frameContext: "gboard-frame",
+    hierarchy: {
+      node: {
+        $: {},
+        node: [
+          {
+            $: {
+              "content-desc": "a",
+              "resource-id": "com.google.android.inputmethod.latin:id/key_pos_1_0",
+              bounds: { left: 5, top: 1808, right: 165, bottom: 1963 },
+            },
+          },
+          {
+            $: {
+              "content-desc": "a",
+              "resource-id": "com.example.app:id/a",
+              bounds: { left: 5, top: 5, right: 165, bottom: 105 },
+            },
+          },
+        ],
+      },
+    },
+    windows: [{ type: 2, bounds: { left: 0, top: 1517, right: 1080, bottom: 2400 } }],
+  };
+  const { session, events } = fixture(liveShape, focused, liveShape, gboard);
+  const result = await session.tapKey(gboard, "a");
+  expect(result).toMatchObject({ imeId: gboard, key: "a", x: 85, y: 1886 });
+  expect(events).toContain("tap:85,1886:gboard-frame");
 });
 
 test("refuses a visible key when its hierarchy has no frame context", async () => {

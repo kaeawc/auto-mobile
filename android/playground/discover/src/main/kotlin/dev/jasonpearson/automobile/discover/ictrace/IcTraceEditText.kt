@@ -13,7 +13,7 @@ import android.widget.EditText
 // has no AppCompat theme, under which AppCompatEditText fails to take touch focus.
 class IcTraceEditText(context: Context, attrs: AttributeSet? = null) : EditText(context, attrs) {
   var recorder: IcTraceRecorder? = null
-  var captureText: Boolean = true
+  var captureText: Boolean = false
 
   init {
     isFocusable = true

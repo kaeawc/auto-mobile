@@ -5,7 +5,7 @@ including nested diff captures and both raw notification states. It collects and
 projects each capture through production observe code, then resolves every emitted
 ID, label and test tag through the legacy finder/selector. Assertions compare the
 chosen bounds to the displayed row. Duplicate labels receive an explicit index
-in display order. The trim-only fixture has no actionable rows; its zero selector
+in display order. The legacy text reference uses the public tap path's partial-match and tap-intent options, including normalized whitespace labels. `publicTextCases` separately preserves unique unindexed text queries; a focused behavior probe pins actual legacy outcomes for the five duplicate-label groups, including the two Settings child targets. S2 tests the corrected unindexed displayed-parent policy. These probes are not additional roundtrip exemptions and do not expand the frozen seed. The trim-only fixture has no actionable rows; its zero selector
 count is pinned. The synthetic `<ime>` keyboard mode summary is not a selector.
 
 `observeContractGaps.json` records individual failing cases, keyed by original

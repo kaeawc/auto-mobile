@@ -108,6 +108,27 @@ export function contractCases(capture: ContractCapture): ContractCase[] {
   });
 }
 
+/** Public default text queries, separate from indexed per-row roundtrip obligations. */
+export function publicTextCases(cases: ContractCase[]): ContractCase[] {
+  const unique = new Map<string, ContractCase>();
+  for (const testCase of cases) {
+    if (testCase.query.kind !== "text") {
+      continue;
+    }
+    const identity = JSON.stringify([testCase.capture.name, testCase.query.value]);
+    if (unique.has(identity)) {
+      continue;
+    }
+    const query: ContractQuery = { kind: "text", value: testCase.query.value };
+    unique.set(identity, {
+      ...testCase,
+      query,
+      key: `${testCase.capture.name}:${JSON.stringify(query)}:${testCase.observed.bounds.join(",")}`,
+    });
+  }
+  return [...unique.values()];
+}
+
 export class LegacyContractResolver implements ContractResolver {
   private readonly finder = new DefaultElementFinder();
   private readonly selector = new DefaultElementSelector(this.finder, () => 0);
@@ -141,12 +162,18 @@ export class LegacyContractResolver implements ContractResolver {
         hierarchy,
         query.value,
         null,
-        false,
+        true,
         false,
         query.index !== undefined,
         query.index === undefined,
+        "tap",
       ),
-      chosen: this.selector.selectByText(hierarchy, query.value, options).element,
+      chosen: this.selector.selectByText(hierarchy, query.value, {
+        ...options,
+        partialMatch: true,
+        caseSensitive: false,
+        selectionIntent: "tap",
+      }).element,
     };
   }
 }

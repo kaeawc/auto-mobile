@@ -7,6 +7,7 @@ import {
   LegacyContractResolver,
   loadContractCaptures,
   ratchetFailures,
+  publicTextCases,
   type ContractResolver,
 } from "./observeContract";
 import gaps from "./observeContractGaps.json";
@@ -31,7 +32,7 @@ describe("observe-to-resolve migration contract", () => {
     expect([...allowed].filter((key) => !keys.has(key))).toEqual([]);
     // The trim-only fixture deliberately has no actionable skeleton rows.
     expect(captures.map((capture) => contractCases(capture).length)).toEqual([
-      30, 0, 3, 3, 12, 25, 24, 30, 30, 2, 9, 9,
+      30, 0, 3, 2, 3, 12, 25, 24, 30, 30, 2, 9, 9,
     ]);
   });
 
@@ -40,6 +41,7 @@ describe("observe-to-resolve migration contract", () => {
       "android-home.json",
       "android-playground-raw-trim-candidates.json",
       "android-test-tag.json",
+      "android-whitespace-label.json",
       "ctrlproxy-notification-group-compact-bounds.json/collapsed",
       "ctrlproxy-notification-group-compact-bounds.json/expanded",
       "diff/scroll-after.json",
@@ -88,7 +90,7 @@ describe("observe-to-resolve migration contract", () => {
     for (const { query } of cases) {
       counts[query.kind]++;
     }
-    expect(counts).toEqual({ elementId: 95, text: 81, testTag: 1 });
+    expect(counts).toEqual({ elementId: 96, text: 82, testTag: 1 });
     const brokenTags: ContractResolver = {
       resolve(capture, query) {
         return query.kind === "testTag"
@@ -97,6 +99,62 @@ describe("observe-to-resolve migration contract", () => {
       },
     };
     expect(compareResolvers(cases, legacy, brokenTags)).toHaveLength(counts.testTag);
+  });
+  test("public default queries remain unindexed and expose legacy Settings behavior", () => {
+    const defaults = publicTextCases(cases);
+    expect(defaults).toHaveLength(76);
+    expect(defaults.every(({ query }) => query.index === undefined)).toBe(true);
+    const duplicateDefaults = defaults.filter(({ capture, query }) =>
+      cases.some(
+        (entry) =>
+          entry.capture === capture &&
+          entry.query.kind === "text" &&
+          entry.query.value === query.value &&
+          entry.query.index !== undefined,
+      ),
+    );
+    expect(
+      duplicateDefaults.map((entry) => [
+        entry.capture.name,
+        entry.query.value,
+        boundsKey(legacy.resolve(entry.capture, entry.query).chosen),
+      ]),
+    ).toEqual([
+      ["ctrlproxy-notification-group-compact-bounds.json/expanded", "Expand", "891,716,1038,934"],
+      ["diff/scroll-after.json", "Settings", "566,530,629,593"],
+      ["diff/scroll-before.json", "Settings", "566,855,629,918"],
+      ["ios-reminders-xctest-noise-after.json", "Buy milk", "0,156,393,204"],
+      ["ios-reminders-xctest-noise-before.json", "Buy milk", "0,156,393,204"],
+    ]);
+    const brokenDefault: ContractResolver = {
+      resolve(capture, query) {
+        return query.kind === "text" && query.index === undefined
+          ? { candidates: [], chosen: null }
+          : legacy.resolve(capture, query);
+      },
+    };
+    expect(compareResolvers(duplicateDefaults, legacy, brokenDefault)).toEqual(
+      duplicateDefaults.map(({ key }) => key),
+    );
+  });
+  test("legacy text reference follows public tap normalization", () => {
+    const capture = {
+      name: "whitespace-probe",
+      platform: "android" as const,
+      hierarchy: {
+        hierarchy: {
+          node: {
+            text: "  Submit  ",
+            clickable: "true",
+            enabled: "true",
+            bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+          },
+        },
+      },
+    };
+    expect(boundsKey(legacy.resolve(capture, { kind: "text", value: "Submit" }).chosen)).toBe(
+      "0,0,100,50",
+    );
   });
   test("differential seam distinguishes overlapping ID-less candidates", () => {
     const a = {

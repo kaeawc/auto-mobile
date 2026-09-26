@@ -21,6 +21,7 @@ import { XcodebuildClient, type Xcodebuild } from "./ios-cmdline-tools/Xcodebuil
 import { DeviceAppManager } from "./ios-cmdline-tools/DeviceAppManager";
 import { isIosSimulatorUdid } from "./ios-cmdline-tools/iosDeviceType";
 import { exponentialBackoff } from "./Backoff";
+import { ForcedRestartBudget } from "./ctrlProxy/ForcedRestartBudget";
 import { DefaultProcessSupervisor, type ProcessSupervisor } from "./ProcessSupervisor";
 import {
   TcpHostPortAvailabilityChecker,
@@ -92,6 +93,7 @@ interface SharedCtrlProxyStart {
  * {@link ProxyManager}.
  */
 export interface CtrlProxyIosManager extends ProxyManager {
+  getForcedRestartBudget(): ForcedRestartBudget;
   setup(
     force?: boolean,
     perf?: PerformanceTracker,
@@ -217,6 +219,7 @@ interface CtrlProxyIosCapabilities {
 export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   private readonly device: BootedDevice;
   private readonly timer: Timer;
+  private readonly forcedRestartBudget: ForcedRestartBudget;
   private servicePort: number;
   private readonly builder: IOSCtrlProxyBuilder;
   private readonly processExecutor: HostProcessExecutor;
@@ -239,6 +242,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
   public static resumeDevice(deviceId: string): void {
     IOSCtrlProxyManager.retiredDeviceIds.delete(deviceId);
+    IOSCtrlProxyManager.instances.get(deviceId)?.forcedRestartBudget.rearm("explicit device start");
   }
 
   public static isDeviceRetired(deviceId: string): boolean {
@@ -252,6 +256,12 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   private assertDeviceNotRetired(): void {
     if (IOSCtrlProxyManager.isDeviceRetired(this.device.deviceId)) {
       throw new ActionableError(`iOS device ${this.device.deviceId} is being shut down`);
+    }
+  }
+
+  private assertDeviceNotSuspended(): void {
+    if (this.forcedRestartBudget.snapshot().state === "suspended") {
+      throw new ActionableError(`iOS device ${this.device.deviceId} is absent from discovery`);
     }
   }
   private static startupOrphanRunnerReap: Promise<void> | null = null;
@@ -316,6 +326,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   // A forced restart must retain lifecycle ownership through its non-interruptible
   // stop phase, even when the readiness caller times out before it settles.
   private forceRestartInFlight: Promise<void> | null = null;
+  private removalCleanup: Promise<void> | null = null;
   // Lets ordinary starts detect that a newer forced restart began while they
   // yielded before claiming the shared-start slot.
   private forceRestartGeneration = 0;
@@ -357,6 +368,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   ) {
     this.device = device;
     this.timer = timer;
+    this.forcedRestartBudget = new ForcedRestartBudget(timer);
     this.servicePort = this.allocateServicePort();
     this.builder = builder || IOSCtrlProxyBuilder.getInstance();
     this.processExecutor = processExecutor;
@@ -444,6 +456,52 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       IOSCtrlProxyManager.instances.set(device.deviceId, new IOSCtrlProxyManager(device, timer));
     }
     return IOSCtrlProxyManager.instances.get(device.deviceId)!;
+  }
+
+  public static getExistingInstance(deviceId: string): IOSCtrlProxyManager | undefined {
+    return IOSCtrlProxyManager.instances.get(deviceId);
+  }
+
+  public getForcedRestartBudget(): ForcedRestartBudget {
+    return this.forcedRestartBudget;
+  }
+
+  /** Suspend recovery immediately, then retire any runner owned by this device. */
+  public async suspendForDeviceRemoval(): Promise<void> {
+    this.forcedRestartBudget.suspend("device disappeared from discovery");
+    this.forceRestartGeneration++;
+    const cleanup = (async () => {
+      try {
+        await this.forceRestartInFlight;
+      } catch (error) {
+        logger.warn(
+          `[IOSCtrlProxy] In-flight restart settled after device removal: ${errorMessage(error)}`,
+        );
+      }
+      await this.stop();
+    })();
+    this.removalCleanup = cleanup;
+    try {
+      await cleanup;
+    } catch (error) {
+      this.forcedRestartBudget.suspend(`device removal cleanup failed: ${errorMessage(error)}`);
+      throw error;
+    } finally {
+      if (this.removalCleanup === cleanup) {
+        this.removalCleanup = null;
+      }
+    }
+  }
+
+  public async rearmAfterDeviceReappearance(): Promise<void> {
+    const state = this.forcedRestartBudget.snapshot().state;
+    if (state !== "suspended" && state !== "exhausted") {
+      return;
+    }
+    if (this.removalCleanup) {
+      await this.removalCleanup;
+    }
+    this.forcedRestartBudget.rearm("device reappeared");
   }
 
   /**
@@ -1118,8 +1176,10 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   public async start(options: CtrlProxyStartOptions = {}): Promise<void> {
     for (;;) {
       this.assertDeviceNotRetired();
+      this.assertDeviceNotSuspended();
       await this.waitForForceRestart(options);
       this.assertDeviceNotRetired();
+      this.assertDeviceNotSuspended();
       const expectedForceRestartGeneration = this.forceRestartGeneration;
       if (this.forceRestartInFlight) {
         continue;
@@ -2209,6 +2269,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
    */
   public async forceRestart(options: CtrlProxyStartOptions = {}): Promise<void> {
     this.assertDeviceNotRetired();
+    this.assertDeviceNotSuspended();
     logger.info("[IOSCtrlProxy] Force restart requested");
 
     const existingRestart = this.forceRestartInFlight;
@@ -2229,6 +2290,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       try {
         await this.stop();
         this.assertDeviceNotRetired();
+        this.assertDeviceNotSuspended();
         if (options.signal?.aborted) {
           throw new ForceRestartCancelledError(
             options.signal.reason ?? new Error("iOS CtrlProxy restart was aborted"),

@@ -94,6 +94,12 @@ export type DeviceServiceStatusLike = {
   };
   supportedCommandsComplete?: boolean | null;
   supportedFeaturesComplete?: boolean | null;
+  recovery?: {
+    state: "backoff" | "exhausted" | "suspended";
+    attempts: number;
+    reason?: string;
+    nextAttemptAt?: string;
+  };
 };
 type DeviceSessionLike = Pick<Session, "sessionId"> & { ownership?: DeviceSessionOwnership };
 
@@ -440,7 +446,7 @@ function readinessFromServiceStatus(
   if (!status) {
     return "unknown";
   }
-  if (!status.installed || !status.enabled || !status.isCompatible) {
+  if (status.recovery || !status.installed || !status.enabled || !status.isCompatible) {
     return "not_ready";
   }
   // A missing live automation connection is inconclusive on both platforms.
@@ -570,6 +576,15 @@ const serviceStatusSchema = z
       .optional(),
     supportedCommandsComplete: z.boolean().nullable().optional(),
     supportedFeaturesComplete: z.boolean().nullable().optional(),
+    recovery: z
+      .object({
+        state: z.enum(["backoff", "exhausted", "suspended"]),
+        attempts: z.number().int().nonnegative(),
+        reason: z.string().optional(),
+        nextAttemptAt: z.string().optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict()
   .nullable();

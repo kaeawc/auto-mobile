@@ -3122,6 +3122,28 @@
                                 "type": "null"
                               }
                             ]
+                          },
+                          "recovery": {
+                            "type": "object",
+                            "properties": {
+                              "state": {
+                                "type": "string",
+                                "enum": ["backoff", "exhausted", "suspended"]
+                              },
+                              "attempts": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "reason": {
+                                "type": "string"
+                              },
+                              "nextAttemptAt": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["state", "attempts"],
+                            "additionalProperties": false
                           }
                         },
                         "required": ["installed", "enabled", "running", "isCompatible"],
@@ -3680,6 +3702,28 @@
                                 "type": "null"
                               }
                             ]
+                          },
+                          "recovery": {
+                            "type": "object",
+                            "properties": {
+                              "state": {
+                                "type": "string",
+                                "enum": ["backoff", "exhausted", "suspended"]
+                              },
+                              "attempts": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "reason": {
+                                "type": "string"
+                              },
+                              "nextAttemptAt": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["state", "attempts"],
+                            "additionalProperties": false
                           }
                         },
                         "required": ["installed", "enabled", "running", "isCompatible"],
@@ -9205,6 +9249,28 @@
                               "type": "null"
                             }
                           ]
+                        },
+                        "recovery": {
+                          "type": "object",
+                          "properties": {
+                            "state": {
+                              "type": "string",
+                              "enum": ["backoff", "exhausted", "suspended"]
+                            },
+                            "attempts": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            "reason": {
+                              "type": "string"
+                            },
+                            "nextAttemptAt": {
+                              "type": "string"
+                            }
+                          },
+                          "required": ["state", "attempts"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["installed", "enabled", "running", "isCompatible"],

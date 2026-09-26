@@ -17,6 +17,8 @@ import WebSocket from "ws";
 import { ActionableError } from "../../../models/ActionableError";
 import type { IosHierarchyUnavailableReason } from "../../../models/ViewHierarchyResult";
 import { logger } from "../../../utils/logger";
+import { errorMessage } from "../../../utils/describeUnknownError";
+import { ForcedRestartBudget } from "../../../utils/ctrlProxy/ForcedRestartBudget";
 import {
   BootedDevice,
   HighlightShape,
@@ -141,6 +143,10 @@ const defaultBootedDeviceLister: BootedDeviceLister = () =>
  * a factory never trigger real CtrlProxy setup on connection failure.
  */
 class NoOpIOSCtrlProxyManager implements CtrlProxyIosManager {
+  private readonly forcedRestartBudget = new ForcedRestartBudget();
+  getForcedRestartBudget(): ForcedRestartBudget {
+    return this.forcedRestartBudget;
+  }
   async setup(): Promise<{ success: false; message: string }> {
     return { success: false, message: "no-op test stub" };
   }
@@ -631,6 +637,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   // Connection failure tracking for auto-restart
   private consecutiveConnectionFailures: number = 0;
   private isRequestingServiceRestart: boolean = false;
+  private lastDeniedRestartState: string | undefined;
   private static readonly MAX_FAILURES_BEFORE_RESTART = 3;
   private static readonly CONNECTION_RESET_MS = 2000;
 
@@ -1366,6 +1373,11 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     // Reset failure counter on successful connection
     this.consecutiveConnectionFailures = 0;
     this.isRequestingServiceRestart = false;
+    const restartBudget = this.serviceManagerFactory(this.device).getForcedRestartBudget();
+    if (restartBudget.snapshot().state !== "suspended") {
+      restartBudget.recordSuccess();
+    }
+    this.lastDeniedRestartState = undefined;
     logger.info(`[IOSCtrlProxyClient] Connection established, reset failure counter`);
 
     this.syncHierarchyCadenceToDevice();
@@ -2189,33 +2201,78 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       return;
     }
 
+    const manager = this.serviceManagerFactory(this.device);
+    const budget = manager.getForcedRestartBudget();
+    if (budget.snapshot().state !== "idle") {
+      this.logDeniedRestart(budget);
+      return;
+    }
     this.isRequestingServiceRestart = true;
+    void this.restartServiceIfBooted(manager, budget).finally(() => {
+      this.isRequestingServiceRestart = false;
+    });
+  }
+
+  private logDeniedRestart(budget: ForcedRestartBudget): void {
+    const snapshot = budget.snapshot();
+    if (snapshot.state === "idle") {
+      return;
+    }
+    if (snapshot.state !== this.lastDeniedRestartState) {
+      logger.warn(
+        `[IOSCtrlProxyClient] Automatic CtrlProxy restart ${snapshot.state} for ${this.device.deviceId}` +
+          (snapshot.lastFailureReason ? `: ${snapshot.lastFailureReason}` : ""),
+      );
+      this.lastDeniedRestartState = snapshot.state;
+    }
+  }
+
+  private async restartServiceIfBooted(
+    manager: CtrlProxyIosManager,
+    budget: ForcedRestartBudget,
+  ): Promise<void> {
+    try {
+      const booted = await this.bootedDeviceLister();
+      if (!booted.some((device) => device.deviceId === this.device.deviceId)) {
+        logger.info(
+          `[IOSCtrlProxyClient] Target simulator ${this.device.deviceId} is no longer booted, skipping restart`,
+        );
+        return;
+      }
+    } catch (error) {
+      logger.warn(
+        `[IOSCtrlProxyClient] Failed to check simulator boot state: ${errorMessage(error)}`,
+      );
+    }
+    if (this.closed || IOSCtrlProxyManager.isDeviceRetired(this.device.deviceId)) {
+      return;
+    }
+    const token = budget.tryBeginAttempt();
+    if (token === undefined) {
+      this.logDeniedRestart(budget);
+      return;
+    }
+    this.lastDeniedRestartState = undefined;
     logger.info(
       `[IOSCtrlProxyClient] Triggering CtrlProxy restart after ${this.consecutiveConnectionFailures} connection failures`,
     );
-
-    const manager = this.serviceManagerFactory(this.device);
-
-    // Repeated WebSocket failures are the authoritative signal that automation is
-    // unusable. HTTP /health can remain responsive while the upgrade/command path
-    // is wedged, so it must not veto recovery after the failure threshold.
-    void manager
-      .forceRestart()
-      .then(async () => {
-        this.syncPortFromManager(manager);
-        this.resetConnectionBudget();
-        logger.info(`[IOSCtrlProxyClient] CtrlProxy restart completed; reconnecting WebSocket`);
-        const connected = await this.connectBackgroundWebSocket();
-        if (!connected) {
-          logger.warn(`[IOSCtrlProxyClient] WebSocket reconnect failed after CtrlProxy restart`);
-        }
-      })
-      .catch((error) => {
-        logger.warn(`[IOSCtrlProxyClient] CtrlProxy restart failed: ${error}`);
-      })
-      .finally(() => {
-        this.isRequestingServiceRestart = false;
-      });
+    try {
+      // WebSocket failures are authoritative even when HTTP /health still responds.
+      await manager.forceRestart();
+      if (!budget.recordSuccess(token)) {
+        return;
+      }
+      this.syncPortFromManager(manager);
+      this.resetConnectionBudget();
+      logger.info(`[IOSCtrlProxyClient] CtrlProxy restart completed; reconnecting WebSocket`);
+      const connected = await this.connectBackgroundWebSocket();
+      if (!connected) {
+        logger.warn(`[IOSCtrlProxyClient] WebSocket reconnect failed after CtrlProxy restart`);
+      }
+    } catch (error) {
+      budget.recordFailure(errorMessage(error), token);
+      logger.warn(`[IOSCtrlProxyClient] CtrlProxy restart failed: ${errorMessage(error)}`);
+    }
   }
 
   protected async setupBeforeConnect(

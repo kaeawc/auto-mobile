@@ -468,7 +468,7 @@ interface DeviceReadyListener {
 }
 
 interface DeviceRemovedListener {
-  (deviceId: string): void;
+  (deviceId: string, platform: "android" | "ios"): void;
 }
 
 interface DeviceSessionExecutionCanceller {
@@ -1296,9 +1296,9 @@ export class DevicePool {
   }
 
   /** Notify consumers that a device has been removed from the pool. */
-  private notifyDeviceRemoved(deviceId: string): void {
+  private notifyDeviceRemoved(deviceId: string, platform: "android" | "ios"): void {
     try {
-      this.onDeviceRemoved?.(deviceId);
+      this.onDeviceRemoved?.(deviceId, platform);
     } catch (error) {
       // Mirror the ready-listener contract: observers cannot roll back a removal
       // after the pool has deleted the device, so keep mandatory cleanup running.
@@ -1451,7 +1451,7 @@ export class DevicePool {
 
     this.devices.delete(deviceId);
     this.deferredDeviceReleases.delete(deviceId);
-    this.notifyDeviceRemoved(deviceId);
+    this.notifyDeviceRemoved(deviceId, device.platform);
     this.deviceSessionStarts.delete(deviceId);
     this.refreshMissingDeviceMisses.delete(deviceId);
     this.startedDeviceProcesses.delete(deviceId);

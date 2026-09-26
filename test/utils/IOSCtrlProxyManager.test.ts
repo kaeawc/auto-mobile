@@ -593,6 +593,39 @@ describe("IOSCtrlProxyManager", function () {
   });
 
   describe("evict", function () {
+    test("rearms an exhausted restart budget without starting the manager", async function () {
+      const manager = IOSCtrlProxyManager.getInstance(testDevice, fakeTimer);
+      const budget = manager.getForcedRestartBudget();
+      const start = spyOn(manager, "start").mockResolvedValue();
+
+      for (const delay of [30_000, 60_000, 0]) {
+        const token = budget.tryBeginAttempt();
+        expect(token).toBeDefined();
+        budget.recordFailure("startup timeout", token!);
+        fakeTimer.advanceTime(delay);
+      }
+      expect(budget.snapshot().state).toBe("exhausted");
+
+      await manager.rearmAfterDeviceReappearance();
+
+      expect(budget.snapshot().state).toBe("idle");
+      expect(budget.tryBeginAttempt()).toBeDefined();
+      expect(start).not.toHaveBeenCalled();
+    });
+
+    test("device disappearance suspends recovery and releases the runner port", async function () {
+      const manager = IOSCtrlProxyManager.getInstance(testDevice, fakeTimer);
+      const budget = manager.getForcedRestartBudget();
+      expect(PortManager.getPort(testDevice.deviceId)).toBeDefined();
+
+      await manager.suspendForDeviceRemoval();
+      expect(budget.snapshot()).toMatchObject({ state: "suspended", attempts: 0 });
+      expect(PortManager.getPort(testDevice.deviceId)).toBeUndefined();
+
+      await manager.rearmAfterDeviceReappearance();
+      expect(budget.snapshot()).toEqual({ state: "idle", attempts: 0 });
+    });
+
     test("stops the instance, deletes the map entry, and releases the port", async function () {
       const first = IOSCtrlProxyManager.getInstance(testDevice);
       expect(PortManager.getPort(testDevice.deviceId)).toBeDefined();
@@ -816,7 +849,13 @@ describe("IOSCtrlProxyManager", function () {
       const controller = new AbortController();
       const options = { signal: controller.signal, minimumHealthPollDurationMs: 1_000 };
       spyOn(manager, "stop").mockResolvedValue();
-      spyOn(manager, "isRunning").mockResolvedValue(false);
+      // This test checks option forwarding; health-drain timing belongs to its own tests.
+      spyOn(
+        manager as unknown as {
+          isRunnerStillHealthyAfterForcedTeardown(signal?: AbortSignal): Promise<boolean>;
+        },
+        "isRunnerStillHealthyAfterForcedTeardown",
+      ).mockResolvedValue(false);
       const start = spyOn(
         manager as unknown as {
           startAfterForceRestart(options: CtrlProxyStartOptions): Promise<void>;

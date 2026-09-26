@@ -8,6 +8,8 @@ import type { BootedDevice, SomePlatform } from "../../src/models";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { DeviceSessionManager } from "../../src/utils/DeviceSessionManager";
 import { IOSCtrlProxyBuilder } from "../../src/utils/IOSCtrlProxyBuilder";
+import { IOSCtrlProxyManager } from "../../src/utils/IOSCtrlProxyManager";
+import { FakeIOSCtrlProxyManager } from "../fakes/FakeIOSCtrlProxyManager";
 import { FakeDatabaseInitializer } from "../fakes/FakeDatabaseInitializer";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
@@ -77,6 +79,37 @@ describe("Daemon startup device discovery", () => {
   afterEach(() => {
     if (DaemonState.getInstance().isInitialized()) {
       DaemonState.getInstance().reset();
+    }
+  });
+
+  test("iOS pool removal suspends and stops its manager; reappearance rearms lazily", async () => {
+    const timer = new FakeTimer();
+    const daemon = buildDaemon(timer);
+    const pool = (daemon as unknown as DaemonStartupInternals).devicePool;
+    const manager = new FakeIOSCtrlProxyManager(timer);
+    const managerLookup = spyOn(IOSCtrlProxyManager, "getExistingInstance").mockReturnValue(
+      manager as unknown as IOSCtrlProxyManager,
+    );
+    const device: BootedDevice = {
+      deviceId: "00000000-0000-0000-0000-000000007676",
+      name: "iPhone",
+      platform: "ios",
+    };
+    try {
+      await pool.initializeWithDevices([device]);
+      await pool.removeDevice(device.deviceId);
+      await Promise.resolve();
+      expect(manager.getForcedRestartBudget().snapshot().state).toBe("suspended");
+      expect(manager.getCallCount("suspendForDeviceRemoval")).toBe(1);
+      expect(manager.getCallCount("stop")).toBe(1);
+
+      await pool.addDevice(device);
+      await Promise.resolve();
+      expect(manager.getForcedRestartBudget().snapshot().state).toBe("idle");
+      expect(manager.getCallCount("rearmAfterDeviceReappearance")).toBeGreaterThanOrEqual(1);
+      expect(manager.getCallCount("start")).toBe(0);
+    } finally {
+      managerLookup.mockRestore();
     }
   });
 

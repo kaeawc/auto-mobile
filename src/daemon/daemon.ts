@@ -3,6 +3,7 @@ import { ActionableError } from "../models/ActionableError";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { createMcpServer } from "../server";
 import { logger } from "../utils/logger";
+import { IOSCtrlProxyManager } from "../utils/IOSCtrlProxyManager";
 import { MultiPlatformDeviceManager } from "../utils/deviceUtils";
 import { UnixSocketServer } from "./socketServer";
 import { SessionManager, type ActiveSessionExecutionQuery, type Session } from "./sessionManager";
@@ -497,7 +498,17 @@ export class Daemon {
       (deviceId) => this.onDeviceReadyForSessionRegistry(deviceId),
       undefined,
       recoveryConfiguration.policy,
-      (deviceId) => this.deviceSessionRegistry.onDeviceDisconnected(deviceId),
+      (deviceId, platform) => {
+        this.deviceSessionRegistry.onDeviceDisconnected(deviceId);
+        if (platform === "ios") {
+          const manager = IOSCtrlProxyManager.getExistingInstance(deviceId);
+          void manager?.suspendForDeviceRemoval().catch((error) => {
+            logger.warn(
+              `[Daemon] Failed to stop iOS CtrlProxy for removed device ${deviceId}: ${errorMessage(error)}`,
+            );
+          });
+        }
+      },
       new EmulatorLossIncidentRepository(this.timer, this.idGenerator),
       (sessionId, reason, options) =>
         this.cancelAndDrainDeviceSessionExecutions(sessionId, reason, options),
@@ -1317,6 +1328,14 @@ export class Daemon {
     const pooled = this.devicePool.getDevice(deviceId);
     if (!pooled) {
       return;
+    }
+    if (pooled.platform === "ios") {
+      const manager = IOSCtrlProxyManager.getExistingInstance(deviceId);
+      void manager?.rearmAfterDeviceReappearance().catch((error) => {
+        logger.warn(
+          `[Daemon] Failed to rearm iOS CtrlProxy for ${deviceId}: ${errorMessage(error)}`,
+        );
+      });
     }
     this.deviceSessionRegistry.onDeviceConnected({
       deviceId: pooled.id,

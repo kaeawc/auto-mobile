@@ -34,6 +34,7 @@ import { DevicePool } from "../../../src/daemon/devicePool";
 import { DeviceSessionRegistry } from "../../../src/daemon/deviceSessionRegistry";
 import { SessionManager } from "../../../src/daemon/sessionManager";
 import { IOSCtrlProxyManager } from "../../../src/utils/IOSCtrlProxyManager";
+import { describeDevice, listDevicesEntrySchema } from "../../../src/server/deviceDescription";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { getAndroidAppMetadataViaAdb } from "../../../src/features/observe/GetAppMetadata";
 import { defaultAdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
@@ -1840,6 +1841,56 @@ describe("booted device readiness", () => {
     } finally {
       installedSpy.mockRestore();
       runningSpy.mockRestore();
+    }
+  });
+
+  test("reports exhausted iOS recovery in listDevices status and omits it after reset", async () => {
+    const timer = new FakeTimer();
+    const device: BootedDevice = {
+      name: "iPhone",
+      platform: "ios",
+      deviceId: "00000000-0000-0000-0000-000000007676",
+      source: "local",
+    };
+    const manager = IOSCtrlProxyManager.getInstance(device, timer);
+    const budget = manager.getForcedRestartBudget();
+    const installed = spyOn(IOSCtrlProxyManager.prototype, "isInstalled").mockResolvedValue(true);
+    const running = spyOn(IOSCtrlProxyManager.prototype, "isRunning").mockResolvedValue(false);
+    try {
+      for (const delay of [30_000, 60_000, 0]) {
+        const token = budget.tryBeginAttempt()!;
+        budget.recordFailure("xcodebuild startup timeout", token);
+        timer.advanceTime(delay);
+      }
+      const exhausted = await queryDeviceServiceStatus(
+        device,
+        undefined,
+        { getVersion: async () => undefined },
+        timer,
+      );
+      expect(exhausted?.recovery).toEqual({
+        state: "exhausted",
+        attempts: 3,
+        reason: "xcodebuild startup timeout",
+      });
+      const description = describeDevice({ kind: "booted", device, serviceStatus: exhausted });
+      expect(description.runtime.readiness.state).toBe("not_ready");
+      expect(listDevicesEntrySchema.parse(description).runtime.serviceStatus?.recovery).toEqual(
+        exhausted?.recovery,
+      );
+
+      budget.recordSuccess();
+      const idle = await queryDeviceServiceStatus(
+        device,
+        undefined,
+        { getVersion: async () => undefined },
+        timer,
+      );
+      expect(idle?.recovery).toBeUndefined();
+    } finally {
+      installed.mockRestore();
+      running.mockRestore();
+      IOSCtrlProxyManager.resetInstances();
     }
   });
 

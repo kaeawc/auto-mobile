@@ -29,6 +29,7 @@ export interface ElementReference {
 }
 export interface ResolutionIntent {
   action: ResolutionAction;
+  viewport?: { width: number; height: number };
   requireResourceId?: boolean;
   negative?: boolean;
   matchMode?: MatchMode;
@@ -66,6 +67,12 @@ function qualifiedId(id: string): { packageName: string; name: string } | undefi
     : undefined;
 }
 
+function centerWithinViewport(bounds: ElementBounds, viewport: { width: number; height: number }): boolean {
+  const x = (bounds.left + bounds.right) / 2;
+  const y = (bounds.top + bounds.bottom) / 2;
+  return x >= 0 && y >= 0 && x <= viewport.width && y <= viewport.height;
+}
+
 function eligible(node: SearchableEntry, intent: ResolutionIntent): boolean {
   if (intent.requireResourceId && !node.nativeId) {
     return false;
@@ -74,6 +81,9 @@ function eligible(node: SearchableEntry, intent: ResolutionIntent): boolean {
     return true;
   }
   if (!node.bounds) {
+    return false;
+  }
+  if (intent.viewport && !centerWithinViewport(node.bounds, intent.viewport)) {
     return false;
   }
   if (
@@ -171,29 +181,16 @@ export class ElementResolver {
     if (intent.ref) {
       return this.resolveReference(result, snapshot, intent);
     }
-    const actionTarget = (node: SearchableEntry | undefined): SearchableEntry | null => {
-      if (!node) {
-        return null;
-      }
-      if (eligible(node, intent)) {
-        return node;
-      }
-      if (selector.text === undefined || intent.requireResourceId) {
-        return null;
-      }
-      let parent = node.parentIndex;
-      while (parent !== undefined) {
-        const ancestor = snapshot.nodes[parent];
-        if (!ancestor || ancestor === scope) {
-          break;
-        }
-        if (eligible(ancestor, intent)) {
-          return ancestor;
-        }
-        parent = ancestor.parentIndex;
-      }
-      return null;
-    };
+    const actionTarget = (node: SearchableEntry | undefined) =>
+      this.actionTarget(node, snapshot, selector, intent, scope);
+    return this.choose(result, selector, actionTarget);
+  }
+
+  private choose(
+    result: ElementResolution,
+    selector: ResolverSelector,
+    actionTarget: (node: SearchableEntry | undefined) => SearchableEntry | null,
+  ): ElementResolution {
     const actionable = [
       ...new Set(
         result.candidates
@@ -224,10 +221,40 @@ export class ElementResolver {
         )[0] ?? null;
     }
     if (result.chosen)
-      result.indexInMatches =
+      {result.indexInMatches =
         selector.index ??
-        result.candidates.findIndex((candidate) => actionTarget(candidate) === result.chosen);
+        result.candidates.findIndex((candidate) => actionTarget(candidate) === result.chosen);}
     return result;
+  }
+
+  private actionTarget(
+    node: SearchableEntry | undefined,
+    snapshot: ResolverSnapshot,
+    selector: ResolverSelector,
+    intent: ResolutionIntent,
+    scope?: SearchableEntry,
+  ): SearchableEntry | null {
+      if (!node) {
+        return null;
+      }
+      if (eligible(node, intent)) {
+        return node;
+      }
+      if (selector.text === undefined || intent.requireResourceId) {
+        return null;
+      }
+      let parent = node.parentIndex;
+      while (parent !== undefined) {
+        const ancestor = snapshot.nodes[parent];
+        if (!ancestor || ancestor === scope) {
+          break;
+        }
+        if (eligible(ancestor, intent)) {
+          return ancestor;
+        }
+        parent = ancestor.parentIndex;
+      }
+      return null;
   }
 
   private siblingNodes(
@@ -336,6 +363,15 @@ export class ElementResolver {
         matchMode: "exact",
       };
     }
+    return this.matchText(nodes, selector, intent, textQuery);
+  }
+
+  private matchText(
+    nodes: SearchableEntry[],
+    selector: ResolverSelector,
+    intent: ResolutionIntent,
+    textQuery: string,
+  ): Pick<ElementResolution, "matches" | "matchMode" | "error"> {
     const fields = (node: SearchableEntry): readonly string[] =>
       selector.contentDescription !== undefined
         ? [node.textSources["content-desc"], node.accessibleLabel].filter(
@@ -344,7 +380,7 @@ export class ElementResolver {
         : node.textFields;
     const query = normalize(textQuery, selector.caseSensitive);
     if (!query)
-      return { matches: [], matchMode: "exact", error: "Text selector must not be blank" };
+      {return { matches: [], matchMode: "exact", error: "Text selector must not be blank" };}
     const exact = nodes.filter((node) =>
       fields(node).some((field) => normalize(field, selector.caseSensitive) === query),
     );
@@ -357,8 +393,8 @@ export class ElementResolver {
     if (matchMode === "regex") {
       try {
         regex = new RegExp(normalizeQuotes(textQuery), selector.caseSensitive ? "" : "i");
-      } catch {
-        return { matches: [], matchMode, error: "Invalid text selector regular expression" };
+      } catch (error) {
+        return { matches: [], matchMode, error: `Invalid text selector regular expression: ${String(error)}` };
       }
     }
     const matches =

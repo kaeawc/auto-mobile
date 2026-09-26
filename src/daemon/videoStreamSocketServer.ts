@@ -42,6 +42,8 @@ export type CaptureSourceFactory = (options: {
   onData: (chunk: Buffer) => void;
   /** Fresh producer frame; used by iOS where encoder output can replay a cached frame. */
   onSourceFrame?: () => void;
+  /** Genuine native Simulator idle callback, scoped to this capture generation. */
+  onSourceIdle?: () => void;
   onError: (error: Error) => void;
   /** Receives the attested display rotation (0..3) when the source can prove it (issue #4786). */
   onRotation?: (rotation: number) => void;
@@ -103,6 +105,10 @@ interface DeviceCapture {
   heartbeatTimer: NodeJS.Timeout | null;
   /** Time of the latest fresh producer frame, never refreshed by replay or the relay. */
   lastSourceDataMs: number | null;
+  /** Native producer-idle evidence; cleared by the next complete source frame. */
+  lastIdleMs: number | null;
+  /** An encoded chunk followed the most recent complete source frame. */
+  encodedSinceSourceFrame: boolean;
   /** Time of the latest encoded output; both producer and encoder must keep making progress. */
   lastEncodedDataMs: number | null;
   /** Limits active key-frame probes while a source is quiet. A request is not proof of life. */
@@ -445,6 +451,8 @@ export class VideoStreamSocketServer extends BaseSocketServer {
       idleTimer: null,
       heartbeatTimer: null,
       lastSourceDataMs: null,
+      lastIdleMs: null,
+      encodedSinceSourceFrame: false,
       lastEncodedDataMs: null,
       lastLivenessProbeMs: null,
     };
@@ -457,6 +465,8 @@ export class VideoStreamSocketServer extends BaseSocketServer {
         return;
       }
       capture.lastSourceDataMs = this.timer.now();
+      capture.lastIdleMs = null;
+      capture.encodedSinceSourceFrame = false;
       if (capture.lastEncodedDataMs !== null && !capture.heartbeatTimer) {
         this.startHeartbeat(deviceId, capture);
       }
@@ -471,12 +481,19 @@ export class VideoStreamSocketServer extends BaseSocketServer {
               return;
             }
             current.lastEncodedDataMs = this.timer.now();
+            current.encodedSinceSourceFrame = true;
             if (current.lastSourceDataMs !== null && !current.heartbeatTimer) {
               this.startHeartbeat(deviceId, current);
             }
             this.broadcast(deviceId, chunk);
           },
           onSourceFrame: attestSource,
+          onSourceIdle: () => {
+            if (this.captures.get(deviceId) !== capture || !capture.encodedSinceSourceFrame) {
+              return;
+            }
+            capture.lastIdleMs = this.timer.now();
+          },
           // Record the source's attested rotation so the next config packet re-attests it to
           // subscribers, including a late joiner via replayParameterSets (issue #4786).
           onRotation: (rotation) => {
@@ -798,6 +815,9 @@ export class VideoStreamSocketServer extends BaseSocketServer {
       return false;
     }
     const now = this.timer.now();
+    if (this.sourceEvidenceIsRecent(capture, now) && capture.lastIdleMs !== null) {
+      return true;
+    }
     const oldestEvidenceAgeMs = Math.max(now - lastSourceDataMs, now - lastEncodedDataMs, 0);
     if (
       oldestEvidenceAgeMs >= SOURCE_PROBE_AFTER_MS &&
@@ -819,6 +839,13 @@ export class VideoStreamSocketServer extends BaseSocketServer {
   private sourceEvidenceIsRecent(capture: DeviceCapture, now: number): boolean {
     if (capture.lastSourceDataMs === null || capture.lastEncodedDataMs === null) {
       return false;
+    }
+    if (
+      capture.lastIdleMs !== null &&
+      capture.encodedSinceSourceFrame &&
+      now - capture.lastIdleMs <= SOURCE_EVIDENCE_MAX_AGE_MS
+    ) {
+      return true;
     }
     return (
       Math.max(now - capture.lastSourceDataMs, now - capture.lastEncodedDataMs, 0) <=
@@ -958,6 +985,7 @@ function defaultDependencies(): VideoStreamSocketServerDependencies {
           device: options.device,
           onData: options.onData,
           onSourceFrame: options.onSourceFrame,
+          onSourceIdle: options.onSourceIdle,
           onError: options.onError,
           onRotation: options.onRotation,
           onDroppedFrames: options.onDroppedFrames,

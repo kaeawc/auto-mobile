@@ -224,6 +224,7 @@ export interface IosFrameCaptureHelper {
    */
   requestKeyFrame?(): boolean;
   on(event: "frame", listener: (frame: DecodedFrame) => void): this;
+  on(event: "idle", listener: (info: { windowID: number }) => void): this;
   on(event: "encodedVideo", listener: (video: DecodedEncodedVideo) => void): this;
   on(event: "capability", listener: (token: string) => void): this;
   on(event: "permission", listener: (permission: CapturePermission) => void): this;
@@ -1299,6 +1300,11 @@ export class IosH264Source implements H264CaptureSource {
 
   /** stderr/readiness/metrics/audio wiring shared by the raw and encoded paths. */
   private wireHelperDiagnostics(helper: IosFrameCaptureHelper): void {
+    helper.on("idle", () => {
+      if (this.helper === helper && this.isActive()) {
+        this.options.onSourceIdle?.();
+      }
+    });
     helper.on("frameMetrics", (metrics) => {
       if (this.helper === helper && this.isActive()) {
         this.helperFrameMetrics = metrics;

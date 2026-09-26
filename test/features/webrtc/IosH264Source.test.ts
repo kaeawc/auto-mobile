@@ -493,6 +493,19 @@ describe("IosH264Source", () => {
     expect(helper.stopped).toBe(false);
   });
 
+  test("forwards current helper idle evidence but ignores it after stop", async () => {
+    let idleCount = 0;
+    const { source, helper } = createHarness(IOS_SIMULATOR, {
+      onSourceIdle: () => idleCount++,
+    });
+    await startWithFrame(source, helper, frame(1, 1, 0x11));
+    helper.emit("idle", { windowID: 42 });
+    expect(idleCount).toBe(1);
+    await source.stop();
+    helper.emit("idle", { windowID: 42 });
+    expect(idleCount).toBe(1);
+  });
+
   test("classifies a marked Screen Recording denial while discovering Simulator windows", async () => {
     const helper = new FakeFrameCaptureHelper();
     const source = new IosH264Source({

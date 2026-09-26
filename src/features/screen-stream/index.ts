@@ -19,6 +19,7 @@ export {
 export { LatestFrameQueue, type FrameQueueMetrics } from "./LatestFrameQueue";
 export {
   IOSScreenCaptureHelper,
+  parseCaptureIdleMarker,
   IOS_SCREEN_CAPTURE_MAX_FRAME_BYTES,
   NATIVE_FRAME_METRICS_PREFIX,
   CAPTURE_CAPABILITY_PREFIX,

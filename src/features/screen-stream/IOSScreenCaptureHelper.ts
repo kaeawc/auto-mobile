@@ -123,6 +123,7 @@ export interface IosScreenCaptureReadiness {
 
 export interface IosScreenCaptureHelperEvents {
   frame: (frame: DecodedFrame) => void;
+  idle: (info: { windowID: number }) => void;
   frameMetrics: (metrics: FrameQueueMetrics) => void;
   captureMetrics: (metrics: NativeFrameMetrics) => void;
   audio: (audio: DecodedAudio) => void;
@@ -364,6 +365,13 @@ export class IOSScreenCaptureHelper extends EventEmitter {
   }
 
   private handleStderrLine(line: string): void {
+    const idleWindowID = parseCaptureIdleMarker(line);
+    if (idleWindowID !== null) {
+      if (this.target.kind === "simulator" && idleWindowID === this.target.windowID) {
+        this.emit("idle", { windowID: idleWindowID });
+      }
+      return;
+    }
     const metrics = parseNativeFrameMetrics(line);
     if (metrics !== null) {
       this.emit("captureMetrics", metrics);
@@ -500,6 +508,16 @@ export class IOSScreenCaptureHelper extends EventEmitter {
   }
 
   private static readonly STDERR_BUFFER_MAX = 64 * 1024;
+}
+
+/** A native idle callback is scoped to its exact Simulator window. */
+export function parseCaptureIdleMarker(line: string): number | null {
+  const match = /^capture-idle: windowID=(\d+)$/.exec(line.trim());
+  if (!match) {
+    return null;
+  }
+  const windowID = Number(match[1]);
+  return Number.isSafeInteger(windowID) && windowID > 0 ? windowID : null;
 }
 
 /**

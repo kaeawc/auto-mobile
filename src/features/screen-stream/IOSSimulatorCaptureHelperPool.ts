@@ -32,6 +32,7 @@ export interface IosSimulatorCaptureHelperLease {
    */
   requestKeyFrame(): boolean;
   on(event: "frame", listener: (frame: DecodedFrame) => void): this;
+  on(event: "idle", listener: (info: { windowID: number }) => void): this;
   on(event: "encodedVideo", listener: (video: DecodedEncodedVideo) => void): this;
   on(event: "capability", listener: (token: string) => void): this;
   on(event: "permission", listener: (permission: CapturePermission) => void): this;
@@ -292,6 +293,7 @@ export class IOSSimulatorCaptureHelperPool {
       entry.latestFrame = frame;
       this.broadcast(entry, "frame", frame);
     });
+    entry.helper.on("idle", (info) => this.broadcast(entry, "idle", info));
     entry.helper.on("encodedVideo", (video) => this.broadcast(entry, "encodedVideo", video));
     entry.helper.on("capability", (token) => this.broadcast(entry, "capability", token));
     entry.helper.on("permission", (permission) => this.broadcast(entry, "permission", permission));

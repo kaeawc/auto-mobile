@@ -91,6 +91,7 @@ interface Harness {
   emit: (chunk: Buffer) => void;
   emitUnattested: (chunk: Buffer) => void;
   emitSourceFrame: () => void;
+  emitIdle: () => void;
   /** Simulates the source attesting a display rotation (issue #4786). */
   emitRotation: (rotation: number) => void;
   /** Simulates a cumulative encoder-side dropped-frame measurement. */
@@ -125,6 +126,7 @@ async function startHarness(
   const sources: FakeCaptureSource[] = [];
   let onData: ((chunk: Buffer) => void) | null = null;
   let onSourceFrame: (() => void) | null = null;
+  let onSourceIdle: (() => void) | null = null;
   let onRotation: ((rotation: number) => void) | null = null;
   let onDroppedFrames: ((droppedFrames: number) => void) | null = null;
   let onError: ((error: Error) => void) | null = null;
@@ -142,6 +144,7 @@ async function startHarness(
       createCaptureSource: async (opts) => {
         onData = opts.onData;
         onSourceFrame = opts.onSourceFrame ?? null;
+        onSourceIdle = opts.onSourceIdle ?? null;
         onRotation = opts.onRotation ?? null;
         onDroppedFrames = opts.onDroppedFrames ?? null;
         onError = opts.onError;
@@ -181,6 +184,7 @@ async function startHarness(
     },
     emitUnattested: (chunk) => onData?.(chunk),
     emitSourceFrame: () => onSourceFrame?.(),
+    emitIdle: () => onSourceIdle?.(),
     emitRotation: (rotation) => onRotation?.(rotation),
     emitDroppedFrames: (droppedFrames) => onDroppedFrames?.(droppedFrames),
     emitError: (error) => onError?.(error),
@@ -561,6 +565,23 @@ describe("VideoStreamSocketServer", () => {
     await waitFor(() => second.binary().length >= 12);
     expect(h.sources).toHaveLength(2);
     expect(h.sources[1].started).toBe(true);
+  });
+
+  test("native idle callbacks sustain a static capture only after encoded output", async () => {
+    const fakeTimer = new FakeTimer();
+    const h = await startHarness({ timer: fakeTimer });
+    const { binary } = await subscribe(h.socketPath);
+    await waitFor(() => binary().length >= 12);
+    h.emit(Buffer.from([0, 0, 0, 1, 5, 0xaa, 0, 0, 0, 1, 1]));
+    for (let i = 0; i < 6; i++) {
+      h.emitIdle();
+      fakeTimer.advanceTime(2_000);
+    }
+    expect(h.sources[0].stopped).toBe(false);
+    h.emitSourceFrame();
+    fakeTimer.advanceTime(1_000);
+    await waitFor(() => h.sources[0].stopped);
+    expect(h.sources[0].staleStopped).toBe(true);
   });
 
   test("iOS encoder output alone cannot keep a cached helper frame capture alive", async () => {

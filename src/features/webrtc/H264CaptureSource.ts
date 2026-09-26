@@ -22,6 +22,8 @@ export interface H264CaptureSourceOptions {
   onData: (chunk: Buffer) => void;
   /** Called only for a fresh frame from the capture producer, before encoder replay can occur. */
   onSourceFrame?: () => void;
+  /** Native Simulator idle callback from an attached stream; carries no encoded frame. */
+  onSourceIdle?: () => void;
   /** Called with each chunk of 8 kHz mono PCM16LE audio when audio is enabled. */
   onAudioData?: (chunk: Buffer) => void;
   /**

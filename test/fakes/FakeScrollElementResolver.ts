@@ -1,5 +1,6 @@
 import type { ResolverSelector } from "../../src/server/elementSelectorSchemas";
 import type {
+  ElementResolver,
   ElementResolution,
   ResolutionIntent,
   ResolverSnapshot,
@@ -8,7 +9,7 @@ import { SearchableHierarchy } from "../../src/features/utility/SearchableNode";
 import type { FakeElementFinder } from "./FakeElementFinder";
 
 /** Retains scripted finder fixture data in scroll orchestration tests; matcher tests use the real resolver. */
-export class FakeScrollElementResolver {
+export class FakeScrollElementResolver implements Pick<ElementResolver, "resolve"> {
   constructor(private readonly finder: FakeElementFinder) {}
   resolve(
     snapshot: ResolverSnapshot,

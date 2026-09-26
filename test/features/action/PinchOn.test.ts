@@ -102,6 +102,31 @@ describe("PinchOn", () => {
     managerSpy?.mockRestore();
   });
 
+  test("screen fallback uses fresh rotated dimensions and capture insets", async () => {
+    fakeObserveScreen.setObserveResult({
+      ...createObserveResult(),
+      systemInsets: { top: 80, bottom: 100, left: 0, right: 0 },
+    });
+    (pinchOn as any).capture = new FakeHierarchyCapture(() => ({
+      hierarchy: { node: { bounds: { left: 0, top: 0, right: 1920, bottom: 1080 } } },
+      systemInsets: { top: 0, bottom: 0, left: 40, right: 60 },
+    }));
+    const target = await (pinchOn as any).resolveTarget({ direction: "out", autoTarget: false });
+    expect(target.bounds).toEqual({ left: 40, top: 0, right: 1860, bottom: 1080 });
+  });
+
+  test("rotated capture without inset metadata never reuses old portrait insets", async () => {
+    fakeObserveScreen.setObserveResult({
+      ...createObserveResult(),
+      systemInsets: { top: 80, bottom: 100, left: 0, right: 0 },
+    });
+    (pinchOn as any).capture = new FakeHierarchyCapture(() => ({
+      hierarchy: { node: { bounds: { left: 0, top: 0, right: 1920, bottom: 1080 } } },
+    }));
+    const target = await (pinchOn as any).resolveTarget({ direction: "out", autoTarget: false });
+    expect(target.bounds).toEqual({ left: 0, top: 0, right: 1920, bottom: 1080 });
+  });
+
   test("returns error when container specifies both elementId and text", async () => {
     const result = await pinchOn.execute({
       direction: "in",

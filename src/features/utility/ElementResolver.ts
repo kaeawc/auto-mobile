@@ -49,7 +49,7 @@ export interface ElementResolution {
   chosen: SearchableEntry | null;
   indexInMatches?: number;
   candidates: SearchableEntry[];
-  matches: { node: SearchableEntry; kind: MatchKind }[];
+  matches: { node: SearchableEntry; kind: MatchKind; sourceNodes?: SearchableEntry[] }[];
   matchMode: MatchMode;
   scope?: SearchableEntry;
   error?: string;
@@ -67,7 +67,10 @@ function qualifiedId(id: string): { packageName: string; name: string } | undefi
     : undefined;
 }
 
-function centerWithinViewport(bounds: ElementBounds, viewport: { width: number; height: number }): boolean {
+function centerWithinViewport(
+  bounds: ElementBounds,
+  viewport: { width: number; height: number },
+): boolean {
   const x = (bounds.left + bounds.right) / 2;
   const y = (bounds.top + bounds.bottom) / 2;
   return x >= 0 && y >= 0 && x <= viewport.width && y <= viewport.height;
@@ -182,7 +185,14 @@ export class ElementResolver {
       return this.resolveReference(result, snapshot, intent);
     }
     const actionTarget = (node: SearchableEntry | undefined) =>
-      this.actionTarget(node, snapshot, selector, intent, scope);
+      this.actionTarget(node, snapshot, intent, scope);
+    // Positional selection counts displayed actionable rows; diagnostic
+    // matches retain inert labels so debug can still explain why they cannot act.
+    result.candidates = result.candidates.filter(
+      (candidate) =>
+        actionTarget(candidate) !== null ||
+        (!!candidate.bounds && candidate.affordances.length > 0),
+    );
     return this.choose(result, selector, actionTarget);
   }
 
@@ -220,41 +230,38 @@ export class ElementResolver {
             a.index - b.index,
         )[0] ?? null;
     }
-    if (result.chosen)
-      {result.indexInMatches =
+    if (result.chosen) {
+      result.indexInMatches =
         selector.index ??
-        result.candidates.findIndex((candidate) => actionTarget(candidate) === result.chosen);}
+        result.candidates.findIndex((candidate) => actionTarget(candidate) === result.chosen);
+    }
     return result;
   }
 
   private actionTarget(
     node: SearchableEntry | undefined,
     snapshot: ResolverSnapshot,
-    selector: ResolverSelector,
     intent: ResolutionIntent,
     scope?: SearchableEntry,
   ): SearchableEntry | null {
-      if (!node) {
-        return null;
-      }
-      if (eligible(node, intent)) {
-        return node;
-      }
-      if (selector.text === undefined || intent.requireResourceId) {
-        return null;
-      }
-      let parent = node.parentIndex;
-      while (parent !== undefined) {
-        const ancestor = snapshot.nodes[parent];
-        if (!ancestor || ancestor === scope) {
-          break;
-        }
-        if (eligible(ancestor, intent)) {
-          return ancestor;
-        }
-        parent = ancestor.parentIndex;
-      }
+    if (!node) {
       return null;
+    }
+    if (eligible(node, intent)) {
+      return node;
+    }
+    let parent = node.parentIndex;
+    while (parent !== undefined) {
+      const ancestor = snapshot.nodes[parent];
+      if (!ancestor || ancestor === scope) {
+        break;
+      }
+      if (eligible(ancestor, intent)) {
+        return ancestor;
+      }
+      parent = ancestor.parentIndex;
+    }
+    return null;
   }
 
   private siblingNodes(
@@ -321,8 +328,14 @@ export class ElementResolver {
     const unique = new Map<number, ElementResolution["matches"][number]>();
     for (const match of matches) {
       const target = this.semanticTarget(match.node, snapshot, scope);
-      if (!unique.has(target.index)) {
-        unique.set(target.index, { ...match, node: target });
+      const existing = unique.get(target.index);
+      const sourceNodes = match.sourceNodes ?? [match.node];
+      if (existing) {
+        existing.sourceNodes = [
+          ...new Set([...(existing.sourceNodes ?? [existing.node]), ...sourceNodes]),
+        ];
+      } else {
+        unique.set(target.index, { ...match, node: target, sourceNodes });
       }
     }
     return [...unique.values()].sort(
@@ -379,8 +392,9 @@ export class ElementResolver {
           )
         : node.textFields;
     const query = normalize(textQuery, selector.caseSensitive);
-    if (!query)
-      {return { matches: [], matchMode: "exact", error: "Text selector must not be blank" };}
+    if (!query) {
+      return { matches: [], matchMode: "exact", error: "Text selector must not be blank" };
+    }
     const exact = nodes.filter((node) =>
       fields(node).some((field) => normalize(field, selector.caseSensitive) === query),
     );
@@ -394,7 +408,11 @@ export class ElementResolver {
       try {
         regex = new RegExp(normalizeQuotes(textQuery), selector.caseSensitive ? "" : "i");
       } catch (error) {
-        return { matches: [], matchMode, error: `Invalid text selector regular expression: ${String(error)}` };
+        return {
+          matches: [],
+          matchMode,
+          error: `Invalid text selector regular expression: ${String(error)}`,
+        };
       }
     }
     const matches =

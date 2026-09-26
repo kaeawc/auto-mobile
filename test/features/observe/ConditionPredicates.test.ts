@@ -6,7 +6,7 @@ import {
   disappear,
   textEquals,
 } from "../../../src/features/observe/ConditionPredicates";
-import { DefaultElementFinder } from "../../../src/features/utility/ElementFinder";
+import { ElementResolver } from "../../../src/features/utility/ElementResolver";
 
 /**
  * Unit tests for the declarative condition-predicate builders that back the
@@ -54,7 +54,7 @@ function node(props: Record<string, unknown>): Record<string, unknown> {
 }
 
 describe("clickable predicate", () => {
-  const finder = new DefaultElementFinder();
+  const finder = new ElementResolver();
 
   test("matches when the selector's element is present AND clickable", () => {
     const predicate = clickable(finder, { elementId: "submit" });
@@ -127,7 +127,7 @@ describe("clickable predicate", () => {
 });
 
 describe("textEquals predicate", () => {
-  const finder = new DefaultElementFinder();
+  const finder = new ElementResolver();
 
   test("matches when the element located by elementId shows the expected text EXACTLY", () => {
     const predicate = textEquals(finder, { elementId: "counter" }, "5");
@@ -174,7 +174,7 @@ describe("textEquals predicate", () => {
 });
 
 describe("countStable predicate", () => {
-  const finder = new DefaultElementFinder();
+  const finder = new ElementResolver();
 
   test("becomes stable once the matching-element count repeats for stableReads polls (default 2)", () => {
     const predicate = countStable(finder, { elementId: "row" });
@@ -251,7 +251,7 @@ describe("countStable predicate", () => {
 });
 
 describe("disappear predicate", () => {
-  const finder = new DefaultElementFinder();
+  const finder = new ElementResolver();
 
   test("treats a matching element outside its container as absent", () => {
     const predicate = disappear(finder, {

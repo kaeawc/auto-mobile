@@ -5,7 +5,7 @@ import {
   OBSERVE_WAIT_FOR_SKIP_SCREENSHOT_ENV,
   shouldSkipObserveWaitForScreenshot,
 } from "../../src/features/observe/automaticScreenshotPolicy";
-import { DefaultElementFinder } from "../../src/features/utility/ElementFinder";
+import { ElementResolver } from "../../src/features/utility/ElementResolver";
 import type { ObserveResult, ViewHierarchyResult } from "../../src/models";
 import {
   findWaitForElement,
@@ -578,7 +578,7 @@ describe("published observe waitFor input schema", () => {
 
 describe("findWaitForElement textAny", () => {
   test("skips off-screen earlier variants when a later variant is visible", () => {
-    const finder = new DefaultElementFinder();
+    const finder = new ElementResolver();
     const hierarchy = makeHierarchy([
       { $: { text: "Done", bounds: bounds(-300, 0, -200, 50) } },
       { $: { text: "Add", bounds: bounds(20, 20, 120, 70) } },
@@ -591,7 +591,7 @@ describe("findWaitForElement textAny", () => {
   });
 
   test("returns null when every matched variant is off-screen", () => {
-    const finder = new DefaultElementFinder();
+    const finder = new ElementResolver();
     const hierarchy = makeHierarchy([
       { $: { text: "Done", bounds: bounds(-300, 0, -200, 50) } },
       { $: { text: "Add", bounds: bounds(220, 20, 320, 70) } },
@@ -603,7 +603,7 @@ describe("findWaitForElement textAny", () => {
   });
 
   test("checks visible duplicate matches before trying later variants", () => {
-    const finder = new DefaultElementFinder();
+    const finder = new ElementResolver();
     const hierarchy = makeHierarchy([
       { $: { text: "Done", bounds: bounds(-300, 0, -200, 50) } },
       { $: { text: "Done", bounds: bounds(20, 20, 120, 70) } },
@@ -619,7 +619,7 @@ describe("findWaitForElement textAny", () => {
 
 describe("findWaitForElement rich predicates", () => {
   test("matches all specified element fields on the same node by default", () => {
-    const finder = new DefaultElementFinder();
+    const finder = new ElementResolver();
     const hierarchy = makeHierarchy([
       {
         $: {
@@ -655,7 +655,7 @@ describe("findWaitForElement rich predicates", () => {
   });
 
   test("ignores camelCase className attributes on parsed elements", () => {
-    const finder = new DefaultElementFinder();
+    const finder = new ElementResolver();
     const hierarchy = makeHierarchy([
       {
         $: {
@@ -686,7 +686,7 @@ describe("findWaitForElement rich predicates", () => {
       attributes: { accessibilityLabel: "Home tab" },
     },
   ])("ignores camelCase $label attributes on parsed elements", ({ attributes }) => {
-    const finder = new DefaultElementFinder();
+    const finder = new ElementResolver();
     const hierarchy = makeHierarchy([
       {
         $: {
@@ -708,7 +708,7 @@ describe("findWaitForElement rich predicates", () => {
   });
 
   test("requires elementId and text to match the same node", () => {
-    const finder = new DefaultElementFinder();
+    const finder = new ElementResolver();
     const hierarchy = makeHierarchy([
       {
         $: {
@@ -746,7 +746,7 @@ describe("findWaitForElement rich predicates", () => {
   });
 
   test("does not satisfy elementId and text across different nodes", () => {
-    const finder = new DefaultElementFinder();
+    const finder = new ElementResolver();
     const hierarchy = makeHierarchy([
       {
         $: {
@@ -777,7 +777,7 @@ describe("findWaitForElement rich predicates", () => {
   });
 
   test("scopes rich predicates to the requested container", () => {
-    const finder = new DefaultElementFinder();
+    const finder = new ElementResolver();
     const hierarchy = makeHierarchy([
       {
         $: {
@@ -827,7 +827,7 @@ describe("findWaitForElement rich predicates", () => {
   });
 
   test("returns null for rich predicates when the requested container is missing", () => {
-    const finder = new DefaultElementFinder();
+    const finder = new ElementResolver();
     const hierarchy = makeHierarchy([
       {
         $: {
@@ -852,7 +852,7 @@ describe("findWaitForElement rich predicates", () => {
   });
 
   test("does not satisfy matchType all across different nodes", () => {
-    const finder = new DefaultElementFinder();
+    const finder = new ElementResolver();
     const hierarchy = makeHierarchy([
       { $: { text: "Home", bounds: bounds(10, 10, 110, 60) } },
       {
@@ -878,7 +878,7 @@ describe("findWaitForElement rich predicates", () => {
   });
 
   test("matches any specified element field when matchType is any", () => {
-    const finder = new DefaultElementFinder();
+    const finder = new ElementResolver();
     const hierarchy = makeHierarchy([
       {
         $: {
@@ -903,7 +903,7 @@ describe("findWaitForElement rich predicates", () => {
   });
 
   test("honors exact, contains, and regex text matching modes", () => {
-    const finder = new DefaultElementFinder();
+    const finder = new ElementResolver();
     const hierarchy = makeHierarchy([
       { $: { text: "Welcome Home", bounds: bounds(10, 10, 180, 60) } },
     ]);
@@ -924,7 +924,7 @@ describe("findWaitForElement rich predicates", () => {
   });
 
   test("keeps contentDescription exact-only when textMatch is non-exact", () => {
-    const finder = new DefaultElementFinder();
+    const finder = new ElementResolver();
     const hierarchy = makeHierarchy([
       { $: { "content-desc": "Home tab", bounds: bounds(10, 10, 180, 60) } },
     ]);
@@ -953,7 +953,7 @@ describe("findWaitForElement rich predicates", () => {
   });
 
   test("matches iOS accessibility labels exposed as text for contentDescription", () => {
-    const finder = new DefaultElementFinder();
+    const finder = new ElementResolver();
     const hierarchy = makeHierarchy([
       {
         $: {
@@ -977,7 +977,7 @@ describe("findWaitForElement rich predicates", () => {
   });
 
   test("matches canonical iOS accessibility labels for contentDescription", () => {
-    const finder = new DefaultElementFinder();
+    const finder = new ElementResolver();
     const hierarchy = makeHierarchy([
       {
         $: {
@@ -1001,7 +1001,7 @@ describe("findWaitForElement rich predicates", () => {
   });
 
   test("does not match Android text-only nodes for contentDescription", () => {
-    const finder = new DefaultElementFinder();
+    const finder = new ElementResolver();
     const hierarchy = makeHierarchy([
       {
         $: {
@@ -1538,4 +1538,47 @@ describe("waitForObservation absent", () => {
     expect(outcome.awaitTimeout).toBe(false);
     expect(observeScreen.getExecuteCallCount()).toBe(2);
   });
+});
+
+test("rich waits normalize regex and resolve native namespace and synthetic IDs", () => {
+  const finder = new ElementResolver();
+  const hierarchy = makeHierarchy([
+    {
+      bounds: bounds(0, 0, 20, 20),
+      "resource-id": "app:id/save",
+      "view-id": "node-save",
+      text: "Don’t panic",
+      class: "Button",
+    },
+  ]);
+  expect(
+    findWaitForElement(finder, { elementId: "save", className: "Button" }, hierarchy)?.[
+      "resource-id"
+    ],
+  ).toBe("app:id/save");
+  expect(
+    findWaitForElement(
+      finder,
+      { elementId: "node-save", text: "^Don't.*$", textMatch: "regex" },
+      hierarchy,
+    ),
+  ).not.toBeNull();
+  expect(
+    findWaitForElement(finder, { elementId: "sav", className: "Button" }, hierarchy),
+  ).toBeNull();
+});
+
+test("rich wait mode stays locked and negative text is exact", () => {
+  const finder = new ElementResolver();
+  const modes = new Map<string, "exact" | "contains" | "regex">();
+  const initial = makeHierarchy([
+    { bounds: bounds(0, 0, 20, 20), text: "Account settings", class: "Button" },
+  ]);
+  expect(
+    findWaitForElement(finder, { text: "Account", className: "Button" }, initial, undefined, modes),
+  ).not.toBeNull();
+  expect(modes.values().toArray()).toContain("contains");
+  expect(
+    findWaitForElement(finder, { text: "Account" }, initial, undefined, new Map(), true),
+  ).toBeNull();
 });

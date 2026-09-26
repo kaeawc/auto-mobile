@@ -47,10 +47,12 @@ export function loadContractCaptures(directory: string): ContractCapture[] {
           name: `${entry.name}/${capture.name}`,
         }));
       }
-      if (!entry.name.endsWith(".json")) return [];
+      if (!entry.name.endsWith(".json")) {
+        return [];
+      }
       const value = JSON.parse(readFileSync(join(directory, entry.name), "utf8")) as ObserveResult &
         Record<string, ViewHierarchyNode>;
-      if (value.viewHierarchy)
+      if (value.viewHierarchy) {
         return [
           {
             name: entry.name,
@@ -58,6 +60,7 @@ export function loadContractCaptures(directory: string): ContractCapture[] {
             platform: entry.name.startsWith("ios-") ? "ios" : "android",
           },
         ];
+      }
       // The compact notification fixture contains named raw capture roots, not ObserveResults.
       if (entry.name === "ctrlproxy-notification-group-compact-bounds.json") {
         return Object.entries(value).map(([name, node]) => ({
@@ -78,10 +81,13 @@ export function contractCases(capture: ContractCapture): ContractCase[] {
   const skeleton = projectSkeleton(elements).skeleton;
   return skeleton.flatMap((observed, row) => {
     // The keyboard mode summary is deliberately not an addressable node.
-    if (observed.elementId === "<ime>") return [];
+    if (observed.elementId === "<ime>") {
+      return [];
+    }
     const queries: ContractQuery[] = [];
-    if (observed.elementId)
+    if (observed.elementId) {
       queries.push({ kind: "elementId", value: observed.elementId, index: observed.index });
+    }
     if (observed.label) {
       const peers = skeleton.filter((entry) => entry.label === observed.label);
       const index =
@@ -90,7 +96,9 @@ export function contractCases(capture: ContractCapture): ContractCase[] {
           : undefined;
       queries.push({ kind: "text", value: observed.label, index });
     }
-    if (observed.testTag) queries.push({ kind: "testTag", value: observed.testTag });
+    if (observed.testTag) {
+      queries.push({ kind: "testTag", value: observed.testTag });
+    }
     return queries.map((query) => ({
       key: `${capture.name}:${JSON.stringify(query)}:${observed.bounds.join(",")}`,
       capture,
@@ -105,7 +113,7 @@ export class LegacyContractResolver implements ContractResolver {
   private readonly selector = new DefaultElementSelector(this.finder, () => 0);
   resolve({ hierarchy }: ContractCapture, query: ContractQuery): ContractResolution {
     const options = { partialMatch: false, index: query.index };
-    if (query.kind === "elementId")
+    if (query.kind === "elementId") {
       return {
         candidates: this.finder.findElementsByResourceId(
           hierarchy,
@@ -116,7 +124,8 @@ export class LegacyContractResolver implements ContractResolver {
         ),
         chosen: this.selector.selectByResourceId(hierarchy, query.value, options).element,
       };
-    if (query.kind === "testTag")
+    }
+    if (query.kind === "testTag") {
       return {
         candidates: this.finder.findElementsByTestTag(
           hierarchy,
@@ -126,6 +135,7 @@ export class LegacyContractResolver implements ContractResolver {
         ),
         chosen: this.selector.selectByTestTag(hierarchy, query.value, options).element,
       };
+    }
     return {
       candidates: this.finder.findElementsByText(
         hierarchy,
@@ -142,7 +152,9 @@ export class LegacyContractResolver implements ContractResolver {
 }
 
 export function boundsKey(element: Element | null): string | null {
-  if (!element) return null;
+  if (!element) {
+    return null;
+  }
   const { left, top, right, bottom } = element.bounds;
   return [left, top, right, bottom].join(",");
 }

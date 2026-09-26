@@ -398,7 +398,11 @@ async function successfulCommandRunner(_command: string, args: string[]) {
 
 describe("IosH264Source", () => {
   test("captures a physical device, encodes BGRA frames, and forwards Annex-B output", async () => {
-    const { source, helper, encoder, helperTargets, encoderSpawns, chunks } = createHarness();
+    let freshFrames = 0;
+    const { source, helper, encoder, helperTargets, encoderSpawns, chunks } = createHarness(
+      IOS_DEVICE,
+      { onSourceFrame: () => freshFrames++ },
+    );
 
     await startWithFrame(source, helper, frame(2, 2, 0x44));
     encoder.stdout.push(Buffer.from([0, 0, 0, 1, 0x65]));
@@ -415,6 +419,11 @@ describe("IosH264Source", () => {
     expect(encoderSpawns[0].args[allowSoftwareIndex + 1]).toBe("1");
     expect(encoder.getStdinData()).toEqual(Buffer.alloc(16, 0x44));
     expect(chunks).toEqual([Buffer.from([0, 0, 0, 1, 0x65])]);
+    expect(freshFrames).toBe(1);
+    helper.emitFrame({ ...frame(2, 2, 0x44), replayed: true });
+    expect(freshFrames).toBe(1);
+    helper.emitFrame(frame(2, 2, 0x44));
+    expect(freshFrames).toBe(2);
   });
 
   test("encodes a Simulator-sized capture natively instead of upscaling toward 1920x1080", async () => {

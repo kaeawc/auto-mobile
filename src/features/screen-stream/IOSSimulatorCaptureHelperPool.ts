@@ -205,7 +205,7 @@ export class IOSSimulatorCaptureHelperPool {
     entry.leases.add(lease);
     lease.entryKey = targetKey;
     if (!entry.encoded && entry.latestFrame) {
-      lease.forward("frame", entry.latestFrame);
+      lease.forward("frame", { ...entry.latestFrame, replayed: true });
     }
     if (!entry.helper.isRunning) {
       try {

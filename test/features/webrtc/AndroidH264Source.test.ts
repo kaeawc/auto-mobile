@@ -92,7 +92,10 @@ async function drainSegmentStart(): Promise<void> {
 
 describe("AndroidH264Source", () => {
   test("spawns screenrecord with h264 output and forwards stdout chunks", async () => {
-    const { source, chunks, processes, spawnArgs } = makeSource();
+    let freshChunks = 0;
+    const { source, chunks, processes, spawnArgs } = makeSource({
+      onSourceFrame: () => freshChunks++,
+    });
     await source.start();
 
     expect(processes).toHaveLength(1);
@@ -105,6 +108,7 @@ describe("AndroidH264Source", () => {
     processes[0].stdout.write(Buffer.from([0, 0, 0, 1, 0x67]));
     expect(chunks).toHaveLength(1);
     expect(chunks[0]).toEqual(Buffer.from([0, 0, 0, 1, 0x67]));
+    expect(freshChunks).toBe(1);
 
     await source.stop();
   });

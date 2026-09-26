@@ -277,6 +277,8 @@ export interface PersistentEncoderH264SourceOptions {
   device: BootedDevice;
   /** Called with each chunk of the raw H.264 (Annex-B) elementary stream. */
   onData: (chunk: Buffer) => void;
+  /** Called for newly encoded device frames, excluding cached replay and config packets. */
+  onSourceFrame?: () => void;
   /** Called with each chunk of 8 kHz mono PCM16LE audio when enabled. */
   onAudioData?: (chunk: Buffer) => void;
   /**
@@ -1476,6 +1478,9 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
             // the payload so the relay's rotation is current when the SPS/PPS reaches subscribers.
             if (packet.config && packet.rotation !== undefined) {
               this.options.onRotation?.(packet.rotation);
+            }
+            if (!packet.config && !packet.replayed) {
+              this.options.onSourceFrame?.();
             }
             this.options.onData(packet.data);
           } else if (packet.codecId === VIDEO_SERVER_CODEC_ID_PCM16) {

@@ -20,6 +20,8 @@ export interface H264CaptureSourceOptions {
   device: BootedDevice;
   /** Called with each chunk of the raw H.264 (Annex-B) elementary stream. */
   onData: (chunk: Buffer) => void;
+  /** Called only for a fresh frame from the capture producer, before encoder replay can occur. */
+  onSourceFrame?: () => void;
   /** Called with each chunk of 8 kHz mono PCM16LE audio when audio is enabled. */
   onAudioData?: (chunk: Buffer) => void;
   /**

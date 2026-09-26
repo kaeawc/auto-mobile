@@ -1365,6 +1365,9 @@ export class IosH264Source implements H264CaptureSource {
     if (!this.isActive()) {
       return;
     }
+    if (!frame.replayed) {
+      this.options.onSourceFrame?.();
+    }
     const size = { width: frame.header.width, height: frame.header.height };
     if (!this.encoder) {
       this.startEncoder(size);
@@ -1398,6 +1401,7 @@ export class IosH264Source implements H264CaptureSource {
     if (!this.isActive()) {
       return;
     }
+    this.options.onSourceFrame?.();
     this.options.onData(video.payload);
   }
 

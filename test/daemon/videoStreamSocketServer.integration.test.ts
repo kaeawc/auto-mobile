@@ -83,6 +83,8 @@ interface Harness {
   sources: FakeCaptureSource[];
   captureOptions: Array<{ fps?: number; quality?: string }>;
   emit: (chunk: Buffer) => void;
+  emitUnattested: (chunk: Buffer) => void;
+  emitSourceFrame: () => void;
   /** Simulates the source attesting a display rotation (issue #4786). */
   emitRotation: (rotation: number) => void;
   /** Simulates a cumulative encoder-side dropped-frame measurement. */
@@ -109,12 +111,14 @@ async function startHarness(
     /** Pre-arms each created source to throttle this many key-frame requests. */
     keyFrameRejections?: number;
     admissionGate?: DeviceAdmissionGate;
+    device?: BootedDevice;
   } = {},
 ): Promise<Harness> {
   const dir = mkdtempSync(path.join(tmpdir(), "amvs-"));
   const socketPath = path.join(dir, "video-stream.sock");
   const sources: FakeCaptureSource[] = [];
   let onData: ((chunk: Buffer) => void) | null = null;
+  let onSourceFrame: (() => void) | null = null;
   let onRotation: ((rotation: number) => void) | null = null;
   let onDroppedFrames: ((droppedFrames: number) => void) | null = null;
   let onError: ((error: Error) => void) | null = null;
@@ -127,10 +131,11 @@ async function startHarness(
         if (options.resolveError) {
           throw options.resolveError;
         }
-        return DEVICE;
+        return options.device ?? DEVICE;
       },
       createCaptureSource: async (opts) => {
         onData = opts.onData;
+        onSourceFrame = opts.onSourceFrame ?? null;
         onRotation = opts.onRotation ?? null;
         onDroppedFrames = opts.onDroppedFrames ?? null;
         onError = opts.onError;
@@ -141,6 +146,7 @@ async function startHarness(
         source.keyFrameRejectionsRemaining = options.keyFrameRejections ?? 0;
         source.onStart = () => {
           if (options.startData) {
+            onSourceFrame?.();
             onData?.(options.startData);
           }
         };
@@ -163,7 +169,12 @@ async function startHarness(
     socketPath,
     sources,
     captureOptions,
-    emit: (chunk) => onData?.(chunk),
+    emit: (chunk) => {
+      onSourceFrame?.();
+      onData?.(chunk);
+    },
+    emitUnattested: (chunk) => onData?.(chunk),
+    emitSourceFrame: () => onSourceFrame?.(),
     emitRotation: (rotation) => onRotation?.(rotation),
     emitDroppedFrames: (droppedFrames) => onDroppedFrames?.(droppedFrames),
     emitError: (error) => onError?.(error),
@@ -457,6 +468,72 @@ describe("VideoStreamSocketServer", () => {
     await defaultTimer.sleep(30);
 
     expect(binary().length).toBe(12);
+  });
+
+  test("stops attesting a silent source and resumes only after fresh source data", async () => {
+    const fakeTimer = new FakeTimer();
+    const h = await startHarness({ timer: fakeTimer });
+    const { binary } = await subscribe(h.socketPath);
+    await waitFor(() => binary().length >= 12);
+    h.emit(Buffer.from([0, 0, 0, 1, 5, 0xaa, 0, 0, 0, 1, 1]));
+    await waitFor(() => binary().length > 12);
+
+    fakeTimer.advanceTime(9_000);
+    await defaultTimer.sleep(10);
+    const stalledLength = binary().length;
+    expect(h.sources[0].keyFrameRequests).toBeGreaterThan(0);
+
+    fakeTimer.advanceTime(3_000);
+    await defaultTimer.sleep(10);
+    expect(binary().length).toBe(stalledLength);
+
+    h.emit(Buffer.from([0, 0, 0, 1, 1, 0xbb, 0, 0, 0, 1, 1]));
+    fakeTimer.advanceTime(1_000);
+    await waitFor(() => binary().length > stalledLength);
+  });
+
+  test("iOS encoder output alone cannot attest a cached helper frame", async () => {
+    const fakeTimer = new FakeTimer();
+    const iosDevice = { ...DEVICE, platform: "ios" } as BootedDevice;
+    const h = await startHarness({ timer: fakeTimer, device: iosDevice });
+    const { binary } = await subscribe(h.socketPath);
+    await waitFor(() => binary().length >= 12);
+    h.emitUnattested(Buffer.from([0, 0, 0, 1, 5, 0xaa, 0, 0, 0, 1, 1]));
+
+    fakeTimer.advanceTime(2_000);
+    await defaultTimer.sleep(10);
+    const withoutProof = binary().length;
+    h.emitSourceFrame();
+    fakeTimer.advanceTime(1_000);
+    await waitFor(() => binary().length > withoutProof);
+
+    fakeTimer.advanceTime(9_000);
+    await defaultTimer.sleep(10);
+    const staleLength = binary().length;
+    // Raw iOS key-frame requests can cause this replay without any fresh helper frame.
+    h.emitUnattested(Buffer.from([0, 0, 0, 1, 1, 0xbb, 0, 0, 0, 1, 1]));
+    await waitFor(() => binary().length > staleLength);
+    const afterReplay = binary().length;
+    fakeTimer.advanceTime(2_000);
+    await defaultTimer.sleep(10);
+    expect(binary().length).toBe(afterReplay);
+  });
+
+  test("fresh iOS helper frames cannot hide a stalled encoder", async () => {
+    const fakeTimer = new FakeTimer();
+    const iosDevice = { ...DEVICE, platform: "ios" } as BootedDevice;
+    const h = await startHarness({ timer: fakeTimer, device: iosDevice });
+    const { binary } = await subscribe(h.socketPath);
+    await waitFor(() => binary().length >= 12);
+    h.emit(Buffer.from([0, 0, 0, 1, 5, 0xaa, 0, 0, 0, 1, 1]));
+    fakeTimer.advanceTime(9_000);
+    h.emitSourceFrame();
+    await defaultTimer.sleep(10);
+    const staleEncoderLength = binary().length;
+
+    fakeTimer.advanceTime(2_000);
+    await defaultTimer.sleep(10);
+    expect(binary().length).toBe(staleEncoderLength);
   });
 
   test("does not emit a heartbeat to a subscriber still waiting for a key frame", async () => {

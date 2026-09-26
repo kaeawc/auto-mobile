@@ -98,6 +98,8 @@ export interface FrameHeader {
 export interface DecodedFrame {
   header: FrameHeader;
   pixels: Buffer;
+  /** In-memory warm-start cache replay, not a new producer frame. */
+  replayed?: boolean;
 }
 
 export interface DecodedAudio {

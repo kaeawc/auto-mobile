@@ -189,7 +189,11 @@ describe("IOSSimulatorCaptureHelperPool", () => {
 
     const second = pool.acquire(simulatorOptions());
     const secondFrames: number[] = [];
-    second.on("frame", (frame) => secondFrames.push(frame.header.width));
+    const secondReplayFlags: Array<boolean | undefined> = [];
+    second.on("frame", (frame) => {
+      secondFrames.push(frame.header.width);
+      secondReplayFlags.push(frame.replayed);
+    });
     await second.start();
     helpers[0].emit("frame", {
       header: { width: 2, height: 1, bytesPerRow: 8, timestampMs: 2 },
@@ -201,6 +205,7 @@ describe("IOSSimulatorCaptureHelperPool", () => {
     expect(firstFrames).toEqual([1]);
     expect(firstQueueDepths).toEqual([1]);
     expect(secondFrames).toEqual([1, 2]);
+    expect(secondReplayFlags).toEqual([true, undefined]);
   });
 
   test("discards a helper reporting a fatal capture error before the next lease", async () => {

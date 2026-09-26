@@ -40,6 +40,8 @@ import type { VideoStreamSocketRequest, VideoStreamSocketResponse } from "./vide
 export type CaptureSourceFactory = (options: {
   device: BootedDevice;
   onData: (chunk: Buffer) => void;
+  /** Fresh producer frame; used by iOS where encoder output can replay a cached frame. */
+  onSourceFrame?: () => void;
   onError: (error: Error) => void;
   /** Receives the attested display rotation (0..3) when the source can prove it (issue #4786). */
   onRotation?: (rotation: number) => void;
@@ -99,6 +101,12 @@ interface DeviceCapture {
    * from the very start of capture is never masked as alive.
    */
   heartbeatTimer: NodeJS.Timeout | null;
+  /** Time of the latest fresh producer frame, never refreshed by replay or the relay. */
+  lastSourceDataMs: number | null;
+  /** Time of the latest encoded output; both producer and encoder must keep making progress. */
+  lastEncodedDataMs: number | null;
+  /** Limits active key-frame probes while a source is quiet. A request is not proof of life. */
+  lastLivenessProbeMs: number | null;
 }
 
 const ANNEX_B_START_CODE = Buffer.from([0, 0, 0, 1]);
@@ -133,6 +141,10 @@ const CAPTURE_IDLE_GRACE_MS = 3_000;
  * subscribe ack (`heartbeatMs`) so it can size its own stall-reconnect window.
  */
 const HEARTBEAT_INTERVAL_MS = 1_000;
+// Give screenrecord and iOS's encoder time to answer a key-frame request before allowing the
+// desktop's 10s stall watchdog to reconnect. A silent-but-attached process cannot extend this.
+const SOURCE_PROBE_AFTER_MS = 6_000;
+const SOURCE_EVIDENCE_MAX_AGE_MS = 9_000;
 
 /**
  * Captures are shared per device and the FIRST subscriber's hints fixed the encode; a late
@@ -432,35 +444,51 @@ export class VideoStreamSocketServer extends BaseSocketServer {
       rotation: null,
       idleTimer: null,
       heartbeatTimer: null,
+      lastSourceDataMs: null,
+      lastEncodedDataMs: null,
+      lastLivenessProbeMs: null,
     };
     // Registered before start() so a chunk arriving during startup still finds its subscribers.
     this.captures.set(deviceId, capture);
     this.socketDeviceIds.set(socket, deviceId);
 
+    const attestSource = (): void => {
+      if (this.captures.get(deviceId) !== capture) {
+        return;
+      }
+      capture.lastSourceDataMs = this.timer.now();
+      capture.lastLivenessProbeMs = null;
+      if (capture.lastEncodedDataMs !== null && !capture.heartbeatTimer) {
+        this.startHeartbeat(deviceId, capture);
+      }
+    };
     capture.startup = (async () => {
       try {
         const source = await this.deps.createCaptureSource({
           device,
           onData: (chunk) => {
             const current = this.captures.get(deviceId);
-            // Gated on the FIRST chunk since capture start, so a source that never produces
-            // anything is never masked as alive by a heartbeat of our own making (issue #7549).
-            if (current && current === capture && !current.heartbeatTimer) {
+            if (current !== capture || chunk.length === 0) {
+              return;
+            }
+            current.lastEncodedDataMs = this.timer.now();
+            if (current.lastSourceDataMs !== null && !current.heartbeatTimer) {
               this.startHeartbeat(deviceId, current);
             }
             this.broadcast(deviceId, chunk);
           },
+          onSourceFrame: attestSource,
           // Record the source's attested rotation so the next config packet re-attests it to
           // subscribers, including a late joiner via replayParameterSets (issue #4786).
           onRotation: (rotation) => {
             const current = this.captures.get(deviceId);
-            if (current) {
+            if (current === capture) {
               current.rotation = rotation;
             }
           },
           onDroppedFrames: (droppedFrames) => {
             const current = this.captures.get(deviceId);
-            if (!current || !Number.isSafeInteger(droppedFrames) || droppedFrames < 0) {
+            if (current !== capture || !Number.isSafeInteger(droppedFrames) || droppedFrames < 0) {
               return;
             }
             const packet = encodeDroppedFrames(droppedFrames);
@@ -730,27 +758,52 @@ export class VideoStreamSocketServer extends BaseSocketServer {
   /**
    * Start the relay-originated heartbeat (issue #7549): a zero-payload packet on the injected
    * timer, sent every `HEARTBEAT_INTERVAL_MS` to every promoted, non-backpressured subscriber
-   * while the capture has a live source. A subscriber still `waitingForKeyFrame` is skipped, same
+   * while the capture has recent source output. A subscriber still `waitingForKeyFrame` is skipped, same
    * as any other packet — see `writePacketToSubscriber`.
    */
   private startHeartbeat(deviceId: string, capture: DeviceCapture): void {
     capture.heartbeatTimer = this.timer.setInterval(() => {
-      const current = this.captures.get(deviceId);
-      if (!current || !current.source) {
+      if (
+        this.captures.get(deviceId) !== capture ||
+        !this.hasFreshSourceEvidence(deviceId, capture)
+      ) {
         return;
       }
       const packet = encodeHeartbeat();
-      for (const subscriber of current.subscribers) {
+      for (const subscriber of capture.subscribers) {
         if (
           subscriber.destroyed ||
-          current.waitingForKeyFrame.has(subscriber) ||
-          current.backpressuredSubscribers.has(subscriber)
+          capture.waitingForKeyFrame.has(subscriber) ||
+          capture.backpressuredSubscribers.has(subscriber)
         ) {
           continue;
         }
         subscriber.write(packet);
       }
     }, HEARTBEAT_INTERVAL_MS);
+  }
+
+  private hasFreshSourceEvidence(deviceId: string, capture: DeviceCapture): boolean {
+    const { source, lastSourceDataMs, lastEncodedDataMs } = capture;
+    if (!source || lastSourceDataMs === null || lastEncodedDataMs === null) {
+      return false;
+    }
+    const now = this.timer.now();
+    const oldestEvidenceAgeMs = Math.max(now - lastSourceDataMs, now - lastEncodedDataMs, 0);
+    if (
+      oldestEvidenceAgeMs >= SOURCE_PROBE_AFTER_MS &&
+      (capture.lastLivenessProbeMs === null ||
+        now - capture.lastLivenessProbeMs >= SOURCE_PROBE_AFTER_MS)
+    ) {
+      try {
+        if (source.requestKeyFrame?.()) {
+          capture.lastLivenessProbeMs = now;
+        }
+      } catch (error) {
+        logger.warn(`[VideoStream] liveness key-frame request failed for ${deviceId}: ${error}`);
+      }
+    }
+    return oldestEvidenceAgeMs <= SOURCE_EVIDENCE_MAX_AGE_MS;
   }
 
   private clearHeartbeatTimer(capture: DeviceCapture): void {
@@ -880,6 +933,7 @@ function defaultDependencies(): VideoStreamSocketServerDependencies {
         {
           device: options.device,
           onData: options.onData,
+          onSourceFrame: options.onSourceFrame,
           onError: options.onError,
           onRotation: options.onRotation,
           onDroppedFrames: options.onDroppedFrames,

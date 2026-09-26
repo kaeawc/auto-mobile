@@ -232,6 +232,9 @@ export class AndroidH264Source implements H264CaptureSource {
       // clears `current` before the old process finishes exiting, and stale frames
       // must not be written into a freshly reconnected WHIP session.
       if (this.current === process) {
+        if (chunk.length > 0) {
+          this.options.onSourceFrame?.();
+        }
         this.options.onData(chunk);
       }
     });

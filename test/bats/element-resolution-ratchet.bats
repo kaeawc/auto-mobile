@@ -1,0 +1,49 @@
+#!/usr/bin/env bats
+
+setup() {
+  repo_dir="$(mktemp -d)"
+  mkdir -p "$repo_dir/scripts/lib" "$repo_dir/test/features/element-resolution"
+  cp "$BATS_TEST_DIRNAME/../../scripts/check-element-resolution-ratchet.sh" "$repo_dir/scripts/"
+  cp "$BATS_TEST_DIRNAME/../../scripts/check-element-resolution-ratchet.ts" "$repo_dir/scripts/"
+  cp "$BATS_TEST_DIRNAME/../../scripts/lib/vcs-diff.sh" "$repo_dir/scripts/lib/"
+  baseline="$repo_dir/test/features/element-resolution/observeContractGaps.json"
+  printf '%s\n' '{"B1":["a","b"]}' > "$baseline"
+  git -C "$repo_dir" init -q
+  git -C "$repo_dir" config user.email test@example.com
+  git -C "$repo_dir" config user.name test
+  git -C "$repo_dir" add .
+  git -C "$repo_dir" commit -qm baseline
+}
+
+teardown() {
+  rm -rf "$repo_dir"
+}
+
+@test "allows shrink against committed baseline" {
+  printf '%s\n' '{"B1":["a"]}' > "$baseline"
+  run bash "$repo_dir/scripts/check-element-resolution-ratchet.sh" HEAD
+  [ "$status" -eq 0 ]
+}
+
+@test "rejects replacement of a removed exception with another" {
+  printf '%s\n' '{"B1":["a","new"]}' > "$baseline"
+  run bash "$repo_dir/scripts/check-element-resolution-ratchet.sh" HEAD
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"only shrink"* ]]
+}
+
+@test "fails closed without the requested base" {
+  run bash "$repo_dir/scripts/check-element-resolution-ratchet.sh" missing-base
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"missing base"* ]]
+}
+
+@test "bootstrap rejects an unreviewed seed even if the baseline file is absent" {
+  git -C "$repo_dir" rm -q test/features/element-resolution/observeContractGaps.json
+  git -C "$repo_dir" commit -qm remove
+  mkdir -p "$(dirname "$baseline")"
+  printf '%s\n' '{}' > "$baseline"
+  run bash "$repo_dir/scripts/check-element-resolution-ratchet.sh" HEAD
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"reviewed initial"* ]]
+}

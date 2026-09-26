@@ -75,8 +75,13 @@ export function toSearchable(properties: SearchableProperties): SearchableNode {
   const accessibleLabel = nonEmptyString(properties["ios-accessibility-label"]);
   const editable = isEditableElementProperties(properties);
   const value = editable ? nonEmptyString(properties.value) : undefined;
-  const label =
-    getToggleContentDescription(properties) || value || text || description || accessibleLabel;
+  const label = [
+    getToggleContentDescription(properties),
+    value,
+    text,
+    description,
+    accessibleLabel,
+  ].find(Boolean);
   const parsedBounds = parseBounds(properties.bounds);
   const bounds =
     parsedBounds && Object.values(parsedBounds).every(Number.isFinite) ? parsedBounds : undefined;

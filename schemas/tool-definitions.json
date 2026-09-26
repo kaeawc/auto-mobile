@@ -69,7 +69,7 @@
           "type": "string"
         },
         "contentDesc": {
-          "description": "Exact content-desc or accessible label; distinct from visible text",
+          "description": "Target content-desc",
           "type": "string"
         },
         "platform": {

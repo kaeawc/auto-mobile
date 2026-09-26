@@ -11,6 +11,7 @@ import {
   getToggleContentDescription,
   hasAccessibilityAction,
   isClickableElementProperties,
+  isCollectionElementProperties,
   isEditableElementProperties,
 } from "../../utils/elementProperties";
 
@@ -24,6 +25,7 @@ export interface SearchableNode {
   testTag?: string;
   className?: string;
   focusable: boolean;
+  collection: boolean;
   bounds?: ElementBounds;
   actionable: boolean;
   affordances: Affordance[];
@@ -90,6 +92,7 @@ export function toSearchable(properties: SearchableProperties): SearchableNode {
     testTag: nonEmptyString(properties["test-tag"]),
     className: [properties.class, properties.className].map(nonEmptyString).find(Boolean),
     focusable: isTruthy(properties.focusable),
+    collection: isCollectionElementProperties(properties),
     bounds,
     actionable: bounds !== undefined && affordances.length > 0,
     affordances,

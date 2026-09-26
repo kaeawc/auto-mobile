@@ -249,3 +249,36 @@ test("long-press intent promotes to a long-clickable ancestor", () => {
     resolver.resolve(capture, { text: "Hold" }, { action: "long-press" }).chosen?.nativeId,
   ).toBe("long");
 });
+
+test("sibling matching never escapes a row into a non-scrollable collection", () => {
+  const capture = snapshot([
+    {
+      bounds,
+      class: "androidx.recyclerview.widget.RecyclerView",
+      node: [
+        node("first-row", "", { node: [node("label", "First", { clickable: false })] }),
+        node("second-row", "", { node: [node("remove", "Remove")] }),
+      ],
+    },
+  ]);
+  for (const sibling of [{ text: "First" }, { elementId: "label" }]) {
+    expect(resolver.resolve(capture, { elementId: "remove", sibling }, tap).chosen).toBeNull();
+  }
+});
+
+test("nested label text and ID have the same sibling control", () => {
+  const capture = snapshot([
+    {
+      bounds,
+      node: [
+        { bounds, node: [node("label", "First", { clickable: false })] },
+        node("remove", "Remove"),
+      ],
+    },
+  ]);
+  for (const sibling of [{ text: "First" }, { elementId: "label" }]) {
+    expect(resolver.resolve(capture, { elementId: "remove", sibling }, tap).chosen?.nativeId).toBe(
+      "remove",
+    );
+  }
+});

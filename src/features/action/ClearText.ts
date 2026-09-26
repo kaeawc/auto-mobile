@@ -9,6 +9,7 @@ import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { logger } from "../../utils/logger";
+import { toSearchable } from "../utility/SearchableNode";
 import { ANDROID_INPUT_CLASSES } from "../../utils/elementProperties";
 
 export const DEVICE_TIMESTAMP_SECOND_GRANULARITY_MARGIN_MS = 1000;
@@ -23,11 +24,13 @@ export function getFocusedTextLength(
   for (const rootNode of rootNodes) {
     parser.traverseNode(rootNode, (node: any) => {
       const nodeProperties = parser.extractNodeProperties(node);
+      const displayText = toSearchable(nodeProperties).textSources;
+      const text = displayText.value ?? displayText.text;
       if (
         (nodeProperties.focused === "true" || nodeProperties.focused === true) &&
-        typeof nodeProperties.text === "string"
+        typeof text === "string"
       ) {
-        textLength = Math.max(textLength ?? 0, nodeProperties.text.length);
+        textLength = Math.max(textLength ?? 0, text.length);
       }
     });
   }
@@ -280,13 +283,14 @@ export class ClearText extends BaseVisualChange {
     for (const rootNode of rootNodes) {
       this.parser.traverseNode(rootNode, (node: any) => {
         const nodeProperties = this.parser.extractNodeProperties(node);
+        const text = toSearchable(nodeProperties).textSources.text;
         if (
           nodeProperties.class &&
           ANDROID_INPUT_CLASSES.some((cls) => nodeProperties.class.includes(cls)) &&
-          nodeProperties.text &&
-          typeof nodeProperties.text === "string"
+          text &&
+          typeof text === "string"
         ) {
-          textLength = Math.max(textLength, nodeProperties.text.length);
+          textLength = Math.max(textLength, text.length);
         }
       });
     }

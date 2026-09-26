@@ -69,7 +69,7 @@ function unwrapCriticalSectionResult(result: unknown): Record<string, unknown> |
   if (!firstContent || typeof firstContent !== "object") {
     return undefined;
   }
-  const text = (firstContent as Record<string, unknown>).text;
+  const text = (firstContent as { text?: unknown }).text;
   if (typeof text !== "string") {
     return undefined;
   }

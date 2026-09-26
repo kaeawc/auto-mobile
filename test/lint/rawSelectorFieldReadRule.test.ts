@@ -45,3 +45,11 @@ test("renaming raw parameters and casting aliases cannot bypass enforcement", ()
     ),
   ).toHaveLength(1);
 });
+test("validated protocol DTO bridges and request metadata are distinct from nodes", () => {
+  expect(
+    check(
+      "function unpack(response: unknown) { const envelope = response as ToolEnvelope; return envelope.content[0].text; }",
+    ),
+  ).toEqual([]);
+  expect(check("function target(params: {text?:unknown}) { return params.text; }")).toEqual([]);
+});

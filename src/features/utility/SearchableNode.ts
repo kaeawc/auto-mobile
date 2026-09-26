@@ -96,11 +96,11 @@ export function toSearchable(properties: SearchableProperties): SearchableNode {
     accessibleLabel,
     textSources: Object.fromEntries(
       Object.entries({
-        text,
-        "content-desc": description,
-        "ios-accessibility-label": accessibleLabel,
-        value,
-      }).filter((entry): entry is [string, string] => entry[1] !== undefined),
+        text: properties.text,
+        "content-desc": properties["content-desc"],
+        "ios-accessibility-label": properties["ios-accessibility-label"],
+        value: editable ? properties.value : undefined,
+      }).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
     ),
     textFields: [
       ...new Set(

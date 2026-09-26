@@ -742,8 +742,12 @@ const noRawSelectorFieldReadRule = {
             )
           )
             return raw(node.expression, env);
-          if (["TSAsExpression", "TSTypeAssertion"].includes(node.type))
-            return rawType(node.typeAnnotation) || raw(node.expression, env);
+          if (["TSAsExpression", "TSTypeAssertion"].includes(node.type)) {
+            // Protocol DTO assertions mark a checked bridge boundary; merely
+            // casting a capture node to Element must not hide its provenance.
+            if (rawType(node.typeAnnotation)) return true;
+            return node.typeAnnotation?.typeName?.name === "Element" && raw(node.expression, env);
+          }
           if (node.type === "Identifier") return lookup(env, node.name)?.raw === true;
           if (node.type === "MemberExpression") return raw(node.object, env);
           if (node.type === "LogicalExpression" || node.type === "ConditionalExpression")

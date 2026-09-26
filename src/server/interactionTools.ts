@@ -247,6 +247,11 @@ export async function listKeyboardProfilesForTool(
   if (!catalog.success) {
     throw new ActionableError(catalog.error ?? "Failed to list AutoMobile keyboard profiles.");
   }
+  validateKeyboardProfileCatalog(catalog);
+  return catalog;
+}
+
+function validateKeyboardProfileCatalog(catalog: KeyboardProfileCatalog): void {
   if (catalog.catalogId !== KEYBOARD_PROFILE_CATALOG_ID) {
     throw new ActionableError(`Unsupported keyboard profile catalog '${catalog.catalogId}'.`);
   }
@@ -264,7 +269,6 @@ export async function listKeyboardProfilesForTool(
   if (!catalog.profiles.some(({ id }) => id === catalog.activeProfileId)) {
     throw new ActionableError("The active AutoMobile keyboard profile is not in its catalog.");
   }
-  return catalog;
 }
 
 const tapOnSelectorSchema = z

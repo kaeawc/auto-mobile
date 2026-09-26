@@ -430,7 +430,9 @@ class CtrlProxyMessageHandlerTest {
 
   @Test
   fun `dispatches correlated IME cancellation`() = runTest {
-    dispatch("""{"type":"request_cancel_ime_commit","requestId":"cancel-1","targetRequestId":"commit-1"}""")
+    dispatch(
+      """{"type":"request_cancel_ime_commit","requestId":"cancel-1","targetRequestId":"commit-1"}"""
+    )
     assertEquals("requestCancelImeCommit" to listOf<Any?>("cancel-1", "commit-1"), lastCall)
   }
 

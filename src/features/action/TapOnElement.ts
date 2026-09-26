@@ -1,6 +1,10 @@
 import { ElementResolver } from "../utility/ElementResolver";
 import { SearchableHierarchy } from "../utility/SearchableNode";
-import { DefaultHierarchyCapture, type HierarchyCapture } from "../observe/HierarchyCapture";
+import {
+  DefaultHierarchyCapture,
+  getHierarchySnapshot,
+  type HierarchyCapture,
+} from "../observe/HierarchyCapture";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
 import {
@@ -1468,6 +1472,13 @@ export class TapOnElement extends BaseVisualChange {
         };
       }
 
+      const staleSynthetic = this.staleSyntheticTarget(
+        original,
+        observeResult.viewHierarchy,
+        freshHierarchy,
+      );
+      if (staleSynthetic) {return { ok: false, error: staleSynthetic };}
+
       const refreshed = this.resolveTapTargetElement(
         refind.selection.element as Element,
         freshHierarchy,
@@ -1513,6 +1524,36 @@ export class TapOnElement extends BaseVisualChange {
       error:
         "Android tap aborted: could not re-find the target in the accessibility hierarchy with stable bounds after repeated refreshes (refusing tap using pre-observe coordinates). The UI may still be updating (list, keyboard, loading overlay, or animation).",
     };
+  }
+
+  private staleSyntheticTarget(
+    original: Element | null,
+    previous: ViewHierarchyResult | undefined,
+    current: ViewHierarchyResult,
+  ): string | undefined {
+    if (!original || original["resource-id"] || !original["view-id"] || !previous) {return undefined;}
+    const projection = new SearchableHierarchy();
+    const nodeKey = original["view-id"];
+    const oldNode = projection.project(previous).find((node) => node.nodeKey === nodeKey);
+    if (!oldNode) {return "Stale tap target: the observed reference is no longer identifiable.";}
+    const oldId = getHierarchySnapshot(previous)?.captureId ?? "before-refresh";
+    const newId =
+      getHierarchySnapshot(current)?.captureId ?? (previous === current ? oldId : "after-refresh");
+    const result = new ElementResolver().resolve(
+      { id: newId, nodes: projection.project(current) },
+      { elementId: nodeKey },
+      {
+        action: "inspect",
+        ref: {
+          snapshotId: oldId,
+          nodeKey,
+          bounds: oldNode.bounds,
+          label: oldNode.label,
+          nativeId: oldNode.nativeId,
+        },
+      },
+    );
+    return result.error;
   }
 
   private async searchForElement(

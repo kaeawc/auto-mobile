@@ -17,12 +17,14 @@ export interface ContractCapture {
   name: string;
   hierarchy: ViewHierarchyResult;
   platform: "android" | "ios";
+  scopedQueries?: { query: ContractQuery; bounds: number[] }[];
 }
 export interface ContractQuery {
   kind: "elementId" | "text" | "testTag";
   value: string;
   index?: number;
   intent?: "tap" | "focus-input";
+  container?: { elementId?: string; text?: string };
 }
 export interface ContractResolution {
   candidates: Element[];
@@ -53,13 +55,16 @@ export function loadContractCaptures(directory: string): ContractCapture[] {
         return [];
       }
       const value = JSON.parse(readFileSync(join(directory, entry.name), "utf8")) as ObserveResult &
-        Record<string, ViewHierarchyNode>;
+        Record<string, ViewHierarchyNode> & {
+          contractScopedQueries?: { query: ContractQuery; bounds: number[] }[];
+        };
       if (value.viewHierarchy) {
         return [
           {
             name: entry.name,
             hierarchy: value.viewHierarchy,
             platform: entry.name.startsWith("ios-") ? "ios" : "android",
+            scopedQueries: value.contractScopedQueries,
           },
         ];
       }
@@ -81,6 +86,20 @@ export function contractCases(capture: ContractCapture): ContractCase[] {
     capture.platform,
   )!;
   const skeleton = projectSkeleton(elements).skeleton;
+  if (capture.scopedQueries) {
+    return capture.scopedQueries.map(({ query, bounds }) => {
+      const observed = skeleton.find((element) => element.bounds.join(",") === bounds.join(","));
+      if (!observed) {
+        throw new Error(`Scoped contract target missing from ${capture.name}: ${bounds.join(",")}`);
+      }
+      return {
+        key: `${capture.name}:${JSON.stringify(query)}:${bounds.join(",")}`,
+        capture,
+        query,
+        observed,
+      };
+    });
+  }
   return skeleton.flatMap((observed, row) => {
     // The keyboard mode summary is deliberately not an addressable node.
     if (observed.elementId === "<ime>") {
@@ -144,7 +163,7 @@ export function contractCases(capture: ContractCapture): ContractCase[] {
 export function publicTextCases(cases: ContractCase[]): ContractCase[] {
   const unique = new Map<string, ContractCase>();
   for (const testCase of cases) {
-    if (testCase.query.kind !== "text") {
+    if (testCase.query.kind !== "text" || testCase.query.container) {
       continue;
     }
     const identity = JSON.stringify([testCase.capture.name, testCase.query.value]);
@@ -165,13 +184,13 @@ export class LegacyContractResolver implements ContractResolver {
   private readonly finder = new DefaultElementFinder();
   private readonly selector = new DefaultElementSelector(this.finder, () => 0);
   resolve({ hierarchy }: ContractCapture, query: ContractQuery): ContractResolution {
-    const options = { partialMatch: false, index: query.index };
+    const options = { partialMatch: false, index: query.index, container: query.container };
     if (query.kind === "elementId") {
       return {
         candidates: this.finder.findElementsByResourceId(
           hierarchy,
           query.value,
-          null,
+          query.container,
           false,
           query.index !== undefined,
         ),
@@ -183,7 +202,7 @@ export class LegacyContractResolver implements ContractResolver {
         candidates: this.finder.findElementsByTestTag(
           hierarchy,
           query.value,
-          null,
+          query.container,
           query.index !== undefined,
         ),
         chosen: this.selector.selectByTestTag(hierarchy, query.value, options).element,
@@ -193,7 +212,7 @@ export class LegacyContractResolver implements ContractResolver {
       candidates: this.finder.findElementsByText(
         hierarchy,
         query.value,
-        null,
+        query.container,
         true,
         false,
         query.index !== undefined,
@@ -240,6 +259,7 @@ export function compareResolvers(
                 element.value,
                 element.class,
                 element.className,
+                element["hierarchy-source"],
                 element["test-tag"],
                 stableNodeSelectorForElement(element),
                 element.clickable,

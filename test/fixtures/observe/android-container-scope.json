@@ -1,0 +1,80 @@
+{
+  "viewHierarchy": {
+    "hierarchy": {
+      "node": {
+        "class": "android.widget.LinearLayout",
+        "bounds": { "left": 0, "top": 0, "right": 300, "bottom": 300 },
+        "node": [
+          {
+            "class": "android.widget.LinearLayout",
+            "resource-id": "example.app:id/left",
+            "text": "Left section",
+            "bounds": { "left": 0, "top": 0, "right": 300, "bottom": 140 },
+            "node": [
+              {
+                "class": "android.widget.Button",
+                "resource-id": "example.app:id/action",
+                "test-tag": "shared-action",
+                "text": "Open",
+                "clickable": "true",
+                "enabled": "true",
+                "bounds": { "left": 20, "top": 40, "right": 220, "bottom": 100 }
+              }
+            ]
+          },
+          {
+            "class": "android.widget.LinearLayout",
+            "resource-id": "example.app:id/right",
+            "text": "Right section",
+            "bounds": { "left": 0, "top": 150, "right": 300, "bottom": 300 },
+            "node": [
+              {
+                "class": "android.widget.Button",
+                "resource-id": "example.app:id/action",
+                "test-tag": "shared-action",
+                "text": "Open",
+                "clickable": "true",
+                "enabled": "true",
+                "bounds": { "left": 20, "top": 190, "right": 220, "bottom": 250 }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "contractScopedQueries": [
+    {
+      "query": {
+        "kind": "elementId",
+        "value": "example.app:id/action",
+        "container": { "elementId": "example.app:id/right" }
+      },
+      "bounds": [20, 190, 220, 250]
+    },
+    {
+      "query": {
+        "kind": "text",
+        "value": "Open",
+        "container": { "elementId": "example.app:id/right" }
+      },
+      "bounds": [20, 190, 220, 250]
+    },
+    {
+      "query": {
+        "kind": "testTag",
+        "value": "shared-action",
+        "container": { "elementId": "example.app:id/right" }
+      },
+      "bounds": [20, 190, 220, 250]
+    },
+    {
+      "query": {
+        "kind": "text",
+        "value": "Open",
+        "container": { "text": "Left section" }
+      },
+      "bounds": [20, 40, 220, 100]
+    }
+  ]
+}

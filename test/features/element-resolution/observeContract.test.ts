@@ -38,12 +38,13 @@ describe("observe-to-resolve migration contract", () => {
     expect(Object.keys(gapSignatures).sort()).toEqual([...allowed].sort());
     // The trim-only fixture deliberately has no actionable skeleton rows.
     expect(captures.map((capture) => contractCases(capture).length)).toEqual([
-      30, 0, 7, 2, 3, 12, 25, 24, 34, 34, 2, 10, 10,
+      4, 30, 0, 7, 2, 3, 12, 25, 24, 34, 34, 2, 10, 10,
     ]);
   });
 
   test("fixture inventory includes nested captures and both raw notification states", () => {
     expect(captures.map(({ name }) => name)).toEqual([
+      "android-container-scope.json",
       "android-home.json",
       "android-playground-raw-trim-candidates.json",
       "android-test-tag.json",
@@ -151,6 +152,19 @@ describe("observe-to-resolve migration contract", () => {
     };
     expect(compareResolvers([selected], reference, reordered)).toEqual([selected.key]);
   });
+  test("differential seam preserves hierarchy provenance", () => {
+    const selected = cases[0];
+    const node = legacy.resolve(selected.capture, selected.query).chosen!;
+    const native = { ...node, "hierarchy-source": "ctrlproxy" };
+    const fallback = { ...node, "hierarchy-source": "uiautomator" };
+    const reference: ContractResolver = {
+      resolve: () => ({ chosen: native, candidates: [native, fallback] }),
+    };
+    const reordered: ContractResolver = {
+      resolve: () => ({ chosen: native, candidates: [fallback, native] }),
+    };
+    expect(compareResolvers([selected], reference, reordered)).toEqual([selected.key]);
+  });
   test("differential seam detects camel-case long-clickable drift", () => {
     const selected = cases.find(
       ({ capture, query }) => legacy.resolve(capture, query).chosen !== null,
@@ -251,7 +265,7 @@ describe("observe-to-resolve migration contract", () => {
     for (const { query } of cases) {
       counts[query.kind]++;
     }
-    expect(counts).toEqual({ elementId: 97, text: 93, testTag: 3 });
+    expect(counts).toEqual({ elementId: 98, text: 95, testTag: 4 });
     const brokenTags: ContractResolver = {
       resolve(capture, query) {
         return query.kind === "testTag"
@@ -261,13 +275,14 @@ describe("observe-to-resolve migration contract", () => {
     };
     const tagCases = cases.filter(({ query }) => query.kind === "testTag");
     expect(compareResolvers(tagCases, legacy, brokenTags)).toHaveLength(counts.testTag);
-    expect(tagCases.map(({ query }) => query.index)).toEqual([0, undefined, 1]);
+    const unscopedTags = tagCases.filter(({ query }) => !query.container);
+    expect(unscopedTags.map(({ query }) => query.index)).toEqual([0, undefined, 1]);
     const ignoresTagIndex: ContractResolver = {
       resolve(capture, query) {
         return legacy.resolve(capture, query.kind === "testTag" ? { ...query, index: 0 } : query);
       },
     };
-    expect(compareResolvers(tagCases, legacy, ignoresTagIndex)).toEqual([tagCases[2].key]);
+    expect(compareResolvers(unscopedTags, legacy, ignoresTagIndex)).toEqual([unscopedTags[2].key]);
     const breaksOnlyDefaultTag: ContractResolver = {
       resolve(capture, query) {
         return query.kind === "testTag" && query.index === undefined
@@ -275,7 +290,21 @@ describe("observe-to-resolve migration contract", () => {
           : legacy.resolve(capture, query);
       },
     };
-    expect(compareResolvers(tagCases, legacy, breaksOnlyDefaultTag)).toEqual([tagCases[1].key]);
+    expect(compareResolvers(unscopedTags, legacy, breaksOnlyDefaultTag)).toEqual([
+      unscopedTags[1].key,
+    ]);
+  });
+  test("container-scoped fixture cases detect a resolver that ignores the requested scope", () => {
+    const scoped = cases.filter(({ query }) => query.container);
+    expect(scoped.map(({ query }) => query.kind)).toEqual(["elementId", "text", "testTag", "text"]);
+    const ignoresContainer: ContractResolver = {
+      resolve(capture, query) {
+        return legacy.resolve(capture, { ...query, container: undefined });
+      },
+    };
+    expect(compareResolvers(scoped, legacy, ignoresContainer)).toEqual(
+      scoped.map(({ key }) => key),
+    );
   });
   test("public default queries remain unindexed and expose legacy Settings behavior", () => {
     const defaults = publicTextCases(cases);

@@ -11,7 +11,11 @@ import {
 } from "../../../models";
 import { logger } from "../../../utils/logger";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
-import { ElementResolver, type ResolutionAction } from "../../utility/ElementResolver";
+import {
+  ElementResolver,
+  type ElementResolution,
+  type ResolutionAction,
+} from "../../utility/ElementResolver";
 import { SearchableHierarchy } from "../../utility/SearchableNode";
 import type { ResolverSelector } from "../../../server/elementSelectorSchemas";
 import type { ElementGeometry } from "../../../utils/interfaces/ElementGeometry";
@@ -36,6 +40,13 @@ import { computeHierarchyFingerprint, waitForScrollIdle } from "../../../utils/s
 import type { ProgressCallback } from "../BaseVisualChange";
 
 const SCROLL_IDLE_POLL_INTERVAL_MS = 150;
+
+function matchedSourceElement(result: ElementResolution): Element | null {
+  const sources = result.matches.find((match) => match.node === result.chosen)?.sourceNodes;
+  const matched =
+    sources?.find((source) => Object.keys(source.textSources).length > 0) ?? sources?.[0];
+  return matched?.element ?? result.chosen?.element ?? null;
+}
 
 function oppositeDirection(dir: SwipeDirection): SwipeDirection {
   switch (dir) {
@@ -119,12 +130,7 @@ export class ScrollUntilVisible {
     if (result.error) {
       throw new ActionableError(result.error);
     }
-    const sources = preserveMatchedNode
-      ? result.matches.find((match) => match.node === result.chosen)?.sourceNodes
-      : undefined;
-    const matched =
-      sources?.find((source) => Object.keys(source.textSources).length > 0) ?? sources?.[0];
-    return matched?.element ?? result.chosen?.element ?? null;
+    return preserveMatchedNode ? matchedSourceElement(result) : (result.chosen?.element ?? null);
   }
 
   async execute(

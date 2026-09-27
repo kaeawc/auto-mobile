@@ -157,6 +157,11 @@ function hasActionAffordance(node: SearchableEntry, intent: ResolutionIntent): b
   if (intent.action === "focus-input") {
     return isFocusEditableElement(node.properties);
   }
+  if (intent.action === "long-press") {
+    return node.affordances.some(
+      (action) => action === "long-press" || action === "tap" || action === "toggle",
+    );
+  }
   return node.affordances.some(
     (action) => action === intent.action || (intent.action === "tap" && action === "toggle"),
   );
@@ -280,6 +285,7 @@ export class ElementResolver {
         return true;
       });
     let scope: SearchableEntry | undefined = boundary;
+    let siblingCandidateNodes: SearchableEntry[] | undefined;
     if (selector.container) {
       const container = this.resolveInNodes(
         snapshot,
@@ -311,6 +317,7 @@ export class ElementResolver {
         };
       }
       nodes = siblings.nodes;
+      siblingCandidateNodes = siblings.candidateNodes;
     }
     const matched = this.prepareMatches(
       this.match(nodes, selector, intent, snapshot, scope),
@@ -337,13 +344,33 @@ export class ElementResolver {
       this.actionTarget(node, snapshot, intent, scope);
     // Positional selection counts displayed actionable rows; diagnostic
     // matches retain inert labels so debug can still explain why they cannot act.
-    result.candidates = result.candidates.filter((candidate) =>
+    const actionableCandidate = (candidate: SearchableEntry) =>
       intent.action === "focus-input"
         ? actionTarget(candidate) !== null
         : actionTarget(candidate) !== null ||
-          (hasVisibleBounds(candidate, intent) && candidate.affordances.length > 0),
-    );
-    return this.choose(result, selector, actionTarget, intent);
+          (hasVisibleBounds(candidate, intent) && candidate.affordances.length > 0);
+    result.candidates = result.candidates.filter(actionableCandidate);
+    this.choose(result, selector, actionTarget, intent);
+    if (siblingCandidateNodes) {
+      // Preserve the complete observed candidate list without letting another
+      // anchor's smaller target override the first anchor's chosen sibling.
+      const allMatches = this.prepareMatches(
+        this.match(siblingCandidateNodes, selector, intent, snapshot, scope),
+        selector,
+        snapshot,
+        scope,
+        intent,
+        preserveTextScope,
+      );
+      result.matches = allMatches.matches;
+      result.candidates = allMatches.matches.map(({ node }) => node).filter(actionableCandidate);
+      if (result.chosen) {
+        result.indexInMatches = result.candidates.findIndex(
+          (candidate) => actionTarget(candidate) === result.chosen,
+        );
+      }
+    }
+    return result;
   }
 
   private prepareMatches(
@@ -476,7 +503,7 @@ export class ElementResolver {
     selector: ResolverSelector,
     intent: ResolutionIntent,
     scope?: SearchableEntry,
-  ): { nodes: SearchableEntry[]; error?: string } {
+  ): { nodes: SearchableEntry[]; candidateNodes?: SearchableEntry[]; error?: string } {
     const anchors = this.resolveInNodes(
       snapshot,
       selector.sibling!,
@@ -487,7 +514,50 @@ export class ElementResolver {
     if (anchors.error) {
       return { nodes: [], error: anchors.error };
     }
-    const anchor = this.siblingAnchor(anchors, snapshot);
+    const anchorAlreadyDisambiguated =
+      selector.sibling!.index !== undefined || selector.sibling!.selectionStrategy !== undefined;
+    const shouldPoolAmbiguousAnchors =
+      !anchorAlreadyDisambiguated &&
+      selector.selectionStrategy === "random" &&
+      selector.index === undefined;
+    const selectedAnchors = shouldPoolAmbiguousAnchors ? anchors.candidates : [anchors.chosen];
+    const siblings = new Set<SearchableEntry>();
+    const allSiblings = new Set<SearchableEntry>();
+    for (const chosen of anchors.candidates) {
+      const anchor = this.siblingAnchor({ ...anchors, chosen }, snapshot);
+      for (const sibling of this.siblingsForAnchor(
+        snapshot,
+        nodes,
+        selector,
+        intent,
+        scope,
+        anchor,
+      )) {
+        allSiblings.add(sibling);
+        if (selectedAnchors.includes(chosen)) {
+          siblings.add(sibling);
+        }
+      }
+    }
+    return siblings.size > 0
+      ? {
+          nodes: nodes.filter((node) => siblings.has(node)),
+          candidateNodes:
+            !anchorAlreadyDisambiguated && selector.index === undefined
+              ? nodes.filter((node) => allSiblings.has(node))
+              : undefined,
+        }
+      : { nodes: [], error: "Sibling row not found" };
+  }
+
+  private siblingsForAnchor(
+    snapshot: ResolverSnapshot,
+    nodes: SearchableEntry[],
+    selector: ResolverSelector,
+    intent: ResolutionIntent,
+    scope: SearchableEntry | undefined,
+    anchor: SearchableEntry | undefined,
+  ): SearchableEntry[] {
     let parent = anchor?.parentIndex;
     while (anchor && parent !== undefined) {
       const row = snapshot.nodes[parent];
@@ -502,14 +572,14 @@ export class ElementResolver {
           !this.crossesCollection(node, row, snapshot.nodes),
       );
       if (this.match(siblings, selector, intent, snapshot, scope).matches.length > 0) {
-        return { nodes: siblings };
+        return siblings;
       }
       if (row === scope) {
         break;
       }
       parent = row.parentIndex;
     }
-    return { nodes: [], error: "Sibling row not found" };
+    return [];
   }
 
   private crossesCollection(
@@ -604,7 +674,13 @@ export class ElementResolver {
     scope?: SearchableEntry,
   ): Pick<ElementResolution, "matches" | "matchMode" | "error"> {
     if (selector.elementId !== undefined) {
-      return this.matchId(nodes, selector.elementId, selector.match ?? "exact", intent);
+      return this.matchId(
+        nodes,
+        selector.elementId,
+        selector.match ?? "exact",
+        intent,
+        selector.caseSensitive,
+      );
     }
     if (selector.testTag !== undefined) {
       return {
@@ -714,6 +790,7 @@ export class ElementResolver {
     query: string,
     matchMode: MatchMode,
     intent: ResolutionIntent,
+    caseSensitive?: boolean,
   ): Pick<ElementResolution, "matches" | "matchMode" | "error"> {
     if (matchMode === "regex") {
       return {
@@ -723,9 +800,12 @@ export class ElementResolver {
       };
     }
     if (matchMode === "contains") {
+      const normalizedQuery = normalize(query, caseSensitive);
       return {
         matches: nodes
-          .filter((node) => node.elementId?.includes(query))
+          .filter((node) =>
+            normalize(node.elementId ?? "", caseSensitive).includes(normalizedQuery),
+          )
           .map((node) => ({ node, kind: "contains" })),
         matchMode,
       };

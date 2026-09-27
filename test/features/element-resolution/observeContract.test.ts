@@ -94,6 +94,10 @@ describe("observe-to-resolve migration contract", () => {
     expect(siblings.map(({ query }) => query.kind).sort()).toEqual([
       "elementId",
       "elementId",
+      "elementId",
+      "elementId",
+      "text",
+      "text",
       "text",
       "text",
     ]);
@@ -105,10 +109,15 @@ describe("observe-to-resolve migration contract", () => {
   });
 
   test("random selection uses the injected RNG for duplicate ID, text, and test tags", () => {
-    const randomCases = cases.filter(({ query }) => query.strategy === "random");
+    // Scoped random cases can have one valid candidate and are covered by the container-scope test.
+    const randomCases = cases.filter(
+      ({ query }) => query.strategy === "random" && !query.container,
+    );
     expect(randomCases.map(({ query }) => query.kind).sort()).toEqual([
       "elementId",
+      "elementId",
       "testTag",
+      "text",
       "text",
     ]);
     for (const randomCase of randomCases) {
@@ -335,7 +344,7 @@ describe("observe-to-resolve migration contract", () => {
     for (const { query } of cases) {
       counts[query.kind]++;
     }
-    expect(counts).toEqual({ elementId: 103, text: 98, testTag: 5 });
+    expect(counts).toEqual({ elementId: 105, text: 101, testTag: 5 });
     const brokenTags: ContractResolver = {
       resolve(capture, query) {
         return query.kind === "testTag"
@@ -366,7 +375,13 @@ describe("observe-to-resolve migration contract", () => {
   });
   test("container-scoped fixture cases detect a resolver that ignores the requested scope", () => {
     const scoped = cases.filter(({ query }) => query.container && !query.sibling);
-    expect(scoped.map(({ query }) => query.kind)).toEqual(["elementId", "text", "testTag", "text"]);
+    expect(scoped.map(({ query }) => query.kind)).toEqual([
+      "elementId",
+      "text",
+      "testTag",
+      "text",
+      "text",
+    ]);
     const ignoresContainer: ContractResolver = {
       resolve(capture, query) {
         return legacy.resolve(capture, { ...query, container: undefined });

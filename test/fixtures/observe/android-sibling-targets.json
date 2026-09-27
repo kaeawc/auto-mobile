@@ -3,7 +3,7 @@
     "hierarchy": {
       "node": {
         "class": "android.widget.LinearLayout",
-        "bounds": { "left": 0, "top": 0, "right": 300, "bottom": 180 },
+        "bounds": { "left": 0, "top": 0, "right": 300, "bottom": 330 },
         "node": [
           {
             "class": "android.widget.LinearLayout",
@@ -39,6 +39,42 @@
                 "bounds": { "left": 160, "top": 100, "right": 280, "bottom": 150 }
               }
             ]
+          },
+          {
+            "class": "android.widget.LinearLayout",
+            "bounds": { "left": 0, "top": 190, "right": 300, "bottom": 250 },
+            "node": [
+              {
+                "class": "android.widget.TextView",
+                "resource-id": "example.app:id/repeat_label",
+                "text": "Repeat",
+                "bounds": { "left": 10, "top": 195, "right": 140, "bottom": 245 }
+              },
+              {
+                "class": "android.widget.Button",
+                "text": "Select",
+                "clickable": "true",
+                "bounds": { "left": 160, "top": 195, "right": 280, "bottom": 245 }
+              }
+            ]
+          },
+          {
+            "class": "android.widget.LinearLayout",
+            "bounds": { "left": 0, "top": 260, "right": 300, "bottom": 320 },
+            "node": [
+              {
+                "class": "android.widget.TextView",
+                "resource-id": "example.app:id/repeat_label",
+                "text": "Repeat",
+                "bounds": { "left": 10, "top": 265, "right": 140, "bottom": 315 }
+              },
+              {
+                "class": "android.widget.Button",
+                "text": "Select",
+                "clickable": "true",
+                "bounds": { "left": 160, "top": 265, "right": 200, "bottom": 315 }
+              }
+            ]
           }
         ]
       }
@@ -52,6 +88,27 @@
     {
       "query": { "kind": "elementId", "value": "example.app:id/launch_label", "sibling": true },
       "bounds": [160, 100, 280, 150]
+    },
+    {
+      "query": { "kind": "text", "value": "Repeat", "sibling": true, "intent": "tap" },
+      "bounds": [160, 195, 280, 245]
+    },
+    {
+      "query": { "kind": "elementId", "value": "example.app:id/repeat_label", "sibling": true },
+      "bounds": [160, 195, 280, 245]
+    },
+    {
+      "query": { "kind": "text", "value": "Repeat", "sibling": true, "strategy": "random" },
+      "bounds": [160, 265, 200, 315]
+    },
+    {
+      "query": {
+        "kind": "elementId",
+        "value": "example.app:id/repeat_label",
+        "sibling": true,
+        "strategy": "random"
+      },
+      "bounds": [160, 265, 200, 315]
     }
   ]
 }

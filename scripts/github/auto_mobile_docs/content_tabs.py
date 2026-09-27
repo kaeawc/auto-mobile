@@ -6,8 +6,10 @@ those headings into Material's alternate-style tab structure before TOC runs.
 """
 
 import xml.etree.ElementTree as etree
+from html.parser import HTMLParser
 
 from markdown import Extension
+from markdown.postprocessors import Postprocessor
 from markdown.treeprocessors import Treeprocessor
 
 HEADINGS = {f"h{level}" for level in range(1, 7)}
@@ -15,6 +17,31 @@ HEADINGS = {f"h{level}" for level in range(1, 7)}
 
 class ContentTabsError(ValueError):
     """A content-tabs div does not contain a usable tab group."""
+
+
+class _UnconvertedContentTabsFinder(HTMLParser):
+    def handle_starttag(self, tag, attrs):
+        self._check(attrs)
+
+    def handle_startendtag(self, tag, attrs):
+        self._check(attrs)
+
+    @staticmethod
+    def _check(attrs):
+        if any(
+            name == "class" and "content-tabs" in (value or "").split()
+            for name, value in attrs
+        ):
+            raise ContentTabsError(
+                'content-tabs div was not converted; add the markdown attribute: '
+                '<div class="content-tabs" markdown>'
+            )
+
+
+class UnconvertedContentTabsPostprocessor(Postprocessor):
+    def run(self, text):
+        _UnconvertedContentTabsFinder().feed(text)
+        return text
 
 
 class ContentTabsProcessor(Treeprocessor):
@@ -78,6 +105,7 @@ class ContentTabsProcessor(Treeprocessor):
 class ContentTabsExtension(Extension):
     def extendMarkdown(self, md):
         md.treeprocessors.register(ContentTabsProcessor(md), "content_tabs", 15)
+        md.postprocessors.register(UnconvertedContentTabsPostprocessor(md), "content_tabs_unconverted", 5)
 
 
 def on_config(config, **kwargs):

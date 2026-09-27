@@ -42,6 +42,10 @@ class CheckGithubMarkdownTest(unittest.TestCase):
         self.assertFlags('<div class="content-tabs" markdown>\n\n### Android\n\nOne.\n\n</div>',
                          "content-tabs (Android): expected at least two tabs")
 
+    def test_missing_content_tabs_markdown_attribute_is_flagged(self):
+        text = '<div class="content-tabs">\n\n### Android\n\nOne.\n\n### iOS\n\nTwo.\n\n</div>\n'
+        self.assertFlags(text, "add the markdown attribute")
+
     def test_flags_admonition(self):
         self.assertFlags('!!! note "Title"\n    Body.\n', "admonition")
 

@@ -40,6 +40,21 @@ class ContentTabsTest(unittest.TestCase):
         self.assertEqual(root[-1].text, "Outside.")
         self.assertNotIn("Android", [item.text for item in root.iter("h3")])
 
+    def test_missing_markdown_attribute_is_rejected_after_raw_html_restore(self):
+        source = (
+            '<div class="content-tabs">\n\n'
+            '### Android\n\nOne.\n\n### iOS\n\nTwo.\n\n</div>\n'
+        )
+        with self.assertRaisesRegex(ContentTabsError, "add the markdown attribute"):
+            self.md.convert(source)
+
+    def test_content_tabs_markup_inside_fenced_code_is_ignored(self):
+        md = markdown.Markdown(
+            extensions=["fenced_code", "md_in_html", ContentTabsExtension(), "toc"]
+        )
+        html = md.convert('```html\n<div class="content-tabs">\n```')
+        self.assertIn('&lt;div class=&quot;content-tabs&quot;&gt;', html)
+
     def test_multiple_groups_reset_and_nested_group(self):
         source = (
             '<div class="content-tabs" markdown>\n\n'

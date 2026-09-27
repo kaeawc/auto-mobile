@@ -584,6 +584,42 @@ describe("VideoStreamSocketServer", () => {
     expect(h.sources[1].started).toBe(true);
   });
 
+  test("retires a capture when only the raw source reports a frame", async () => {
+    const fakeTimer = new FakeTimer();
+    const h = await startHarness({ timer: fakeTimer });
+    const first = await subscribe(h.socketPath);
+    await waitFor(() => first.binary().length >= 12);
+
+    h.emitSourceFrame();
+    fakeTimer.advanceTime(8_000);
+    expect(h.sources[0].stopped).toBe(false);
+    // More raw frames must not restart the deadline for the missing encoder.
+    h.emitSourceFrame();
+    fakeTimer.advanceTime(2_000);
+    await waitFor(() => h.sources[0].stopped);
+    expect(h.sources[0].staleStopped).toBe(true);
+
+    const second = await subscribe(h.socketPath);
+    await waitFor(() => second.binary().length >= 12);
+    expect(h.sources).toHaveLength(2);
+    expect(h.sources[1].started).toBe(true);
+  });
+
+  test("retires a capture when only the encoder reports output", async () => {
+    const fakeTimer = new FakeTimer();
+    const h = await startHarness({ timer: fakeTimer });
+    const first = await subscribe(h.socketPath);
+    await waitFor(() => first.binary().length >= 12);
+
+    // emit() attests the source too; this path deliberately reports encoder output alone.
+    h.emitUnattested(Buffer.from([0, 0, 0, 1, 5, 0xaa, 0, 0, 0, 1, 1]));
+    fakeTimer.advanceTime(8_000);
+    expect(h.sources[0].stopped).toBe(false);
+    fakeTimer.advanceTime(2_000);
+    await waitFor(() => h.sources[0].stopped);
+    expect(h.sources[0].staleStopped).toBe(true);
+  });
+
   test("native idle callbacks sustain a static capture only after encoded output", async () => {
     const fakeTimer = new FakeTimer();
     const h = await startHarness({ timer: fakeTimer });

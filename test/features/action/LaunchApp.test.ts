@@ -419,6 +419,7 @@ describe("LaunchApp", () => {
       tasks: [
         {
           id: 8,
+          userId: 0,
           packageName: settingsPackageName,
           rootActivity: `${settingsPackageName}/.Settings`,
           topActivity: `${helperPackageName}/.modules.search.SearchActivity`,
@@ -443,6 +444,166 @@ describe("LaunchApp", () => {
     expect(result.observation?.backStack).toEqual(helperObservation.backStack);
   });
 
+  test("rejects a matching task root from another Android user", async () => {
+    const helperPackage = "com.example.helper";
+    const observation = createObserveResult(helperPackage, {
+      depth: 1,
+      activities: [],
+      currentTaskId: 8,
+      tasks: [{ id: 8, userId: 10, packageName, rootActivity: `${packageName}/.MainActivity` }],
+    });
+    const result = await (launchApp as any).ensureLaunchObservationMatchesPackage(
+      { success: true, packageName, observation },
+      packageName,
+      0,
+      1,
+      undefined,
+      false,
+      0,
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.verifiedBy).toBeUndefined();
+    expect(result.observation).toBeUndefined();
+  });
+
+  test("settles a matching task root when the task user id is unknown", async () => {
+    const helperPackage = "com.example.helper";
+    const observation = createObserveResult(helperPackage, {
+      depth: 1,
+      activities: [],
+      currentTaskId: 8,
+      tasks: [{ id: 8, packageName, rootActivity: `${packageName}/.MainActivity` }],
+    });
+    const result = await (launchApp as any).ensureLaunchObservationMatchesPackage(
+      { success: true, packageName, observation },
+      packageName,
+      0,
+      1,
+      undefined,
+      false,
+      0,
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.verifiedBy).toBe("task-root");
+    expect(result.observation?.backStack).toEqual(observation.backStack);
+  });
+
+  test("does not verify another user's task during an Android launch", async () => {
+    fakeTimer.enableAutoAdvance();
+    const helperPackage = "com.example.helper";
+    fakeAdb.setForegroundApp({ packageName, userId: 0 });
+    fakeObserveScreen.setObserveResult(
+      createObserveResult(helperPackage, {
+        depth: 1,
+        activities: [],
+        currentTaskId: 8,
+        tasks: [{ id: 8, userId: 10, packageName, rootActivity: `${packageName}/.MainActivity` }],
+      }),
+    );
+
+    const result = await launchApp.execute(packageName, false, false, undefined, 0);
+
+    expect(result.success).toBe(false);
+    expect(result.verifiedBy).toBeUndefined();
+    expect(result.observation).toBeUndefined();
+  });
+
+  test("rejects another user's companion task provenance", async () => {
+    const helperPackage = "com.example.helper";
+    const observation = createObserveResult(helperPackage, {
+      depth: 0,
+      activities: [],
+      currentTaskId: 8,
+      tasks: [{ id: 8, userId: 10, packageName: helperPackage, launchedFromPackage: packageName }],
+    });
+
+    const result = await (launchApp as any).ensureLaunchObservationMatchesPackage(
+      { success: true, packageName, observation },
+      packageName,
+      0,
+      1,
+      undefined,
+      false,
+      0,
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.verifiedBy).toBeUndefined();
+  });
+
+  test("does not give a failed launch task-root leniency", async () => {
+    const helperPackage = "com.example.helper";
+    const observation = createObserveResult(helperPackage, {
+      depth: 1,
+      activities: [],
+      currentTaskId: 8,
+      tasks: [{ id: 8, userId: 0, packageName, rootActivity: `${packageName}/.MainActivity` }],
+    });
+
+    const result = await (launchApp as any).ensureLaunchObservationMatchesPackage(
+      { success: false, packageName, observation },
+      packageName,
+      1000,
+      100,
+      undefined,
+      false,
+      0,
+    );
+
+    expect(result.verifiedBy).toBeUndefined();
+    expect(result.observation).toBeUndefined();
+    expect(fakeTimer.getSleepHistory()).toEqual([]);
+  });
+
+  test("settles an existing task-root observation without another poll", async () => {
+    const helperPackage = "com.example.helper";
+    const observation = createObserveResult(helperPackage, {
+      depth: 1,
+      activities: [],
+      currentTaskId: 8,
+      tasks: [{ id: 8, userId: 0, packageName, rootActivity: `${packageName}/.MainActivity` }],
+    });
+    fakeTimer.enableAutoAdvance();
+    fakeObserveScreen.setObserveResult(observation);
+
+    const result = await (launchApp as any).ensureLaunchObservationMatchesPackage(
+      { success: true, packageName, observation },
+      packageName,
+      1000,
+      100,
+      undefined,
+      false,
+      0,
+    );
+
+    expect(result.verifiedBy).toBe("task-root");
+    expect(fakeTimer.getSleepHistory()).toEqual([]);
+    expect(fakeObserveScreen.getCallCount("execute")).toBe(0);
+  });
+
+  test("polls and omits a non-settleable initial observation", async () => {
+    const observation = createObserveResult("com.example.other");
+    fakeTimer.enableAutoAdvance();
+    fakeObserveScreen.setObserveResult(observation);
+
+    const result = await (launchApp as any).ensureLaunchObservationMatchesPackage(
+      { success: true, packageName, observation },
+      packageName,
+      1,
+      1,
+      undefined,
+      false,
+      0,
+    );
+
+    expect(fakeTimer.getSleepHistory()).toEqual([1]);
+    expect(fakeObserveScreen.getCallCount("execute")).toBe(1);
+    expect(result.success).toBe(false);
+    expect(result.observationOmitted?.reason).toBe("stale_launch_observation");
+  });
+
   test("accepts a companion task launched by the app", async () => {
     fakeTimer.enableAutoAdvance();
     const settingsPackageName = "com.android.settings";
@@ -454,6 +615,7 @@ describe("LaunchApp", () => {
       tasks: [
         {
           id: 44,
+          userId: 0,
           packageName: companionPackageName,
           rootActivity: `${companionPackageName}/.modules.search.SearchActivity`,
           topActivity: `${companionPackageName}/.modules.search.SearchActivity`,
@@ -746,6 +908,7 @@ describe("LaunchApp", () => {
       tasks: [
         {
           id: 8,
+          userId: 0,
           packageName: settingsPackageName,
           rootActivity: `${settingsPackageName}/.Settings`,
           topActivity: `${helperPackageName}/.modules.search.SearchActivity`,

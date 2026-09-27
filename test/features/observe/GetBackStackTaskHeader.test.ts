@@ -103,6 +103,17 @@ describe("modern Task{...} header (#4223)", () => {
     expect(result.tasks.map((t) => t.id)).toEqual([61, 1]);
   });
 
+  test("keeps each task's Android user id from its header", async () => {
+    const result = await parse(
+      MODERN_TWO_TASKS.replace(
+        "#61 type=standard A=10164:com.example U=0",
+        "#61 type=standard A=10164:com.example U=10",
+      ),
+    );
+
+    expect(result.tasks.map((task) => task.userId)).toEqual([10, 0]);
+  });
+
   test("reads the affinity from the header's A= token", async () => {
     const result = await parse(MODERN_TWO_TASKS);
 

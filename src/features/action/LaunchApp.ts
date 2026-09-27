@@ -945,6 +945,7 @@ export class LaunchApp extends BaseVisualChange {
           undefined,
           signal,
           coldBoot,
+          targetUserId,
         );
         await this.captureTerminalObservationScreenshot(settledResult.observation, perf, signal);
         return settledResult;
@@ -1017,6 +1018,7 @@ export class LaunchApp extends BaseVisualChange {
         undefined,
         signal,
         coldBoot,
+        targetUserId,
       );
       await this.captureTerminalObservationScreenshot(
         settledLaunchResult.observation,
@@ -1198,6 +1200,7 @@ export class LaunchApp extends BaseVisualChange {
     pollIntervalMs: number = LAUNCH_OBSERVATION_POLL_INTERVAL_MS,
     signal?: AbortSignal,
     coldBoot?: boolean,
+    expectedUserId?: number,
   ): Promise<LaunchAppResult> {
     signal?.throwIfAborted();
     result = await this.collapseNotificationShadeIfCovering(result, signal);
@@ -1210,6 +1213,12 @@ export class LaunchApp extends BaseVisualChange {
 
     if (!result.success) {
       return this.withoutStaleLaunchObservation(result, expectedPackageName, result.observation);
+    }
+
+    if (
+      this.settleLaunchObservation(result, result.observation, expectedPackageName, expectedUserId)
+    ) {
+      return result;
     }
 
     const startTime = this.timer.now();
@@ -1244,7 +1253,9 @@ export class LaunchApp extends BaseVisualChange {
       );
       latestObservation = collapseRetry.observation;
       nextShadeCollapseTime = collapseRetry.nextShadeCollapseTime;
-      if (this.settleLaunchObservation(result, latestObservation, expectedPackageName)) {
+      if (
+        this.settleLaunchObservation(result, latestObservation, expectedPackageName, expectedUserId)
+      ) {
         return result;
       }
     }
@@ -1255,6 +1266,7 @@ export class LaunchApp extends BaseVisualChange {
       expectedPackageName,
       timeoutMs,
       coldBoot,
+      expectedUserId,
     );
   }
 
@@ -1333,6 +1345,7 @@ export class LaunchApp extends BaseVisualChange {
     expectedPackageName: string,
     timeoutMs: number,
     coldBoot?: boolean,
+    expectedUserId?: number,
   ): LaunchAppResult {
     // Distinguish "genuinely launched but no foreground window could be read at
     // all" from "observed a different/stale app" (issue #6220 follow-up). The
@@ -1360,7 +1373,14 @@ export class LaunchApp extends BaseVisualChange {
       return result;
     }
 
-    if (this.verifyLaunchObservationFromTaskRoot(result, latestObservation, expectedPackageName)) {
+    if (
+      this.verifyLaunchObservationFromTaskRoot(
+        result,
+        latestObservation,
+        expectedPackageName,
+        expectedUserId,
+      )
+    ) {
       return result;
     }
 
@@ -1398,6 +1418,7 @@ export class LaunchApp extends BaseVisualChange {
     result: LaunchAppResult,
     observation: ObserveResult,
     expectedPackageName: string,
+    expectedUserId?: number,
   ): boolean {
     if (this.launchObservationMatchesPackage(observation, expectedPackageName)) {
       result.observation = this.preserveLaunchObservationMetadata(
@@ -1407,7 +1428,12 @@ export class LaunchApp extends BaseVisualChange {
       return true;
     }
 
-    return this.verifyLaunchObservationFromTaskRoot(result, observation, expectedPackageName);
+    return this.verifyLaunchObservationFromTaskRoot(
+      result,
+      observation,
+      expectedPackageName,
+      expectedUserId,
+    );
   }
 
   private withoutStaleLaunchObservation(
@@ -1539,6 +1565,7 @@ export class LaunchApp extends BaseVisualChange {
   private isForegroundTaskRootedAtPackage(
     observation: ObserveResult,
     expectedPackageName: string,
+    expectedUserId?: number,
   ): boolean {
     const currentTaskId = observation.backStack?.currentTaskId;
     if (currentTaskId === undefined) {
@@ -1547,8 +1574,11 @@ export class LaunchApp extends BaseVisualChange {
 
     const currentTask = observation.backStack?.tasks.find((task) => task.id === currentTaskId);
     return (
-      currentTask?.packageName === expectedPackageName ||
-      currentTask?.rootActivity?.split("/")[0] === expectedPackageName
+      (expectedUserId === undefined ||
+        currentTask?.userId === undefined ||
+        currentTask.userId === expectedUserId) &&
+      (currentTask?.packageName === expectedPackageName ||
+        currentTask?.rootActivity?.split("/")[0] === expectedPackageName)
     );
   }
 
@@ -1556,15 +1586,19 @@ export class LaunchApp extends BaseVisualChange {
   private isForegroundTaskLaunchedByPackage(
     observation: ObserveResult,
     expectedPackageName: string,
+    expectedUserId?: number,
   ): boolean {
     const currentTaskId = observation.backStack?.currentTaskId;
     if (currentTaskId === undefined) {
       return false;
     }
 
+    const currentTask = observation.backStack?.tasks.find((task) => task.id === currentTaskId);
     return (
-      observation.backStack?.tasks.find((task) => task.id === currentTaskId)
-        ?.launchedFromPackage === expectedPackageName
+      (expectedUserId === undefined ||
+        currentTask?.userId === undefined ||
+        currentTask.userId === expectedUserId) &&
+      currentTask?.launchedFromPackage === expectedPackageName
     );
   }
 
@@ -1572,6 +1606,7 @@ export class LaunchApp extends BaseVisualChange {
     result: LaunchAppResult,
     observation: ObserveResult,
     expectedPackageName: string,
+    expectedUserId?: number,
   ): boolean {
     // Issue #7218 P1 follow-up: a SystemUI surface can cover the previously
     // foregrounded task, so its back stack must not verify the launch.
@@ -1589,7 +1624,7 @@ export class LaunchApp extends BaseVisualChange {
       return false;
     }
 
-    if (this.isForegroundTaskRootedAtPackage(observation, expectedPackageName)) {
+    if (this.isForegroundTaskRootedAtPackage(observation, expectedPackageName, expectedUserId)) {
       result.observation = this.preserveLaunchObservationMetadata(
         observation,
         result.observation ?? observation,
@@ -1602,7 +1637,7 @@ export class LaunchApp extends BaseVisualChange {
     // Provenance alone is intentional: a companion task started by the target
     // in an earlier session (or restored after the target crashes during launch)
     // can false-verify because no pre-launch task snapshot exists to age it out.
-    if (!this.isForegroundTaskLaunchedByPackage(observation, expectedPackageName)) {
+    if (!this.isForegroundTaskLaunchedByPackage(observation, expectedPackageName, expectedUserId)) {
       return false;
     }
 

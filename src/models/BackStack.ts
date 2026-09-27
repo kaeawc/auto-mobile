@@ -32,6 +32,8 @@ export interface ActivityInfo {
 export interface TaskInfo {
   /** Task ID */
   id: number;
+  /** Android user/profile ID of this task, when printed by dumpsys */
+  userId?: number;
   /** Task affinity */
   affinity?: string;
   /** Package name for this task */

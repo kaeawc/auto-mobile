@@ -607,9 +607,15 @@ export class ElementResolver {
   }
 
   private hasEligibleExactTextMatch(exact: SearchableEntry[], intent: ResolutionIntent): boolean {
-    return intent.action === "input" || intent.action === "focus"
-      ? exact.some((node) => eligible(node, intent))
-      : exact.length > 0;
+    return exact.some((node) => {
+      if (intent.action === "input" || intent.action === "focus") {
+        return eligible(node, intent);
+      }
+      if (intent.action === "drag" || intent.action === "highlight") {
+        return node.bounds !== undefined;
+      }
+      return true;
+    });
   }
 
   private matchId(

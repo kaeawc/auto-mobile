@@ -659,7 +659,11 @@ export class DeepLinkManager implements DeepLinkManager {
           }
         }
       } else if (preference === "custom" && customAppPackage) {
-        targetElement = await this.findAppInChooser(rootNodes, customAppPackage);
+        targetElement = await this.findAppInChooser(
+          rootNodes,
+          customAppPackage,
+          viewHierarchy.packageName,
+        );
       }
 
       if (targetElement) {
@@ -744,13 +748,17 @@ export class DeepLinkManager implements DeepLinkManager {
    * @param appPackage - App package to find
    * @returns The unique matching clickable row; throws when missing or ambiguous
    */
-  private async findAppInChooser(nodes: any[], appPackage: string): Promise<any> {
+  private async findAppInChooser(
+    nodes: any[],
+    appPackage: string,
+    hierarchyPackage?: string,
+  ): Promise<any> {
     const packageRows = new Set<any>();
     const labelRows = new Map<any, Set<string>>();
     const rowsWithPackageMetadata = new Set<any>();
     for (const node of nodes) {
       const rootProperties = this.parser.extractNodeProperties(node);
-      const hostPackage = rootProperties.package ?? rootProperties.packageName;
+      const hostPackage = hierarchyPackage ?? rootProperties.package ?? rootProperties.packageName;
       const ancestors: any[] = [];
       this.parser.traverseNode(node, (currentNode: any, depth: number) => {
         ancestors.length = depth;

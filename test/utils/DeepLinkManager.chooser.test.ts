@@ -168,7 +168,7 @@ test("excludes a captured OEM chooser host from represented app metadata", async
     {
       hierarchy: {
         node: {
-          $: { class: "com.android.internal.app.ChooserActivity", package: host },
+          $: { class: "com.android.internal.app.ChooserActivity" },
           node: [
             {
               ...row(host, 0),
@@ -181,6 +181,7 @@ test("excludes a captured OEM chooser host from represented app metadata", async
           ],
         },
       },
+      packageName: host,
     } as any,
     "custom",
     target,

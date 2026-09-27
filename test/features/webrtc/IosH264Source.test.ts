@@ -2384,6 +2384,20 @@ describe("IosH264Source", () => {
     expect(errors).toEqual([]);
   });
 
+  test("legacy raw Simulator bootstraps a late viewer from cached pixels without fresh-frame evidence", async () => {
+    let freshFrames = 0;
+    const { source, helper, encoders } = createRestartHarness({
+      device: IOS_SIMULATOR,
+      onSourceFrame: () => freshFrames++,
+    });
+    await startWithFrame(source, helper, frame(2, 2, 0x33));
+    emitIdr(encoders[0]);
+    await flush();
+    expect(source.requestKeyFrame()).toBe(true);
+    expect(encoders[1].getStdinData()).toEqual(Buffer.alloc(32, 0x33));
+    expect(freshFrames).toBe(1);
+  });
+
   test("escalates the outgoing encoder to SIGKILL when it ignores SIGTERM within the grace window", async () => {
     const timer = new FakeTimer();
     const { source, helper, encoders } = createRestartHarness({ timer }, (encoder) => {

@@ -427,6 +427,7 @@ export class IosH264Source implements H264CaptureSource {
   private encodedCapabilityConfirmed = false;
   private nativeIdleCapabilityConfirmed = false;
   private idleSupportReported = false;
+  private latestLegacyFrame: DecodedFrame | null = null;
   /**
    * True once an encoded attempt fell back to raw for a version-skewed helper, so
    * a later running-phase reconnect does not re-probe encoding against the same
@@ -793,6 +794,17 @@ export class IosH264Source implements H264CaptureSource {
     this.pendingFrames.clear(true);
     this.reportFrameMetrics();
     this.startEncoder(size, true);
+    // A released raw Simulator helper cannot attest idle or force a native frame.
+    // Feed its last BGRA image through the new encoder to bootstrap a late viewer;
+    // this is viewer setup, not a fresh producer frame or liveness evidence.
+    if (
+      this.captureKind === "simulator" &&
+      !this.nativeIdleCapabilityConfirmed &&
+      this.latestLegacyFrame
+    ) {
+      this.writeFrameToEncoder(this.latestLegacyFrame);
+      this.writeFrameToEncoder(this.latestLegacyFrame);
+    }
     // Reap the outgoing encoder on a bounded grace, escalating to SIGKILL, so a
     // slow or signal-ignoring h264_videotoolbox cannot linger as a zombie
     // holding the hardware encoder. Fire-and-forget: the replacement is already
@@ -1013,6 +1025,7 @@ export class IosH264Source implements H264CaptureSource {
     this.requiredPermissionTarget = defaultScreenRecordingApprovalTarget(helperPath);
     this.nativeIdleCapabilityConfirmed = false;
     this.idleSupportReported = false;
+    this.latestLegacyFrame = null;
     const helper = this.createCaptureHelper({ binaryPath: helperPath, target });
     this.helper = helper;
     if (this.mode === "encoded") {
@@ -1386,6 +1399,12 @@ export class IosH264Source implements H264CaptureSource {
     if (!frame.replayed) {
       this.reportLegacyIdleSupport();
       this.options.onSourceFrame?.();
+      if (
+        this.captureKind === "simulator" &&
+        frame.pixels.length <= IOS_ENCODER_PENDING_FRAME_MAX_BYTES
+      ) {
+        this.latestLegacyFrame = frame;
+      }
     }
     const size = { width: frame.header.width, height: frame.header.height };
     if (!this.encoder) {
@@ -1423,6 +1442,7 @@ export class IosH264Source implements H264CaptureSource {
     this.reportLegacyIdleSupport();
     this.options.onSourceFrame?.();
     this.options.onData(video.payload);
+    this.options.onEncodedAccessUnit?.();
   }
 
   private reportLegacyIdleSupport(): void {
@@ -1883,6 +1903,7 @@ export class IosH264Source implements H264CaptureSource {
     this.encoderSize = null;
     this.encoderBackpressured = false;
     this.pendingFrames.clear();
+    this.latestLegacyFrame = null;
     this.forcedKeyFrameEncoder = null;
     this.forcedKeyFrameParser = null;
     encoder?.stdin.end();

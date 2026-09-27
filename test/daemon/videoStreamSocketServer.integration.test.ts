@@ -92,6 +92,7 @@ interface Harness {
   emitUnattested: (chunk: Buffer) => void;
   emitSourceFrame: () => void;
   emitIdle: () => void;
+  emitEncodedBoundary: () => void;
   setIdleSupport: (supported: boolean) => void;
   /** Simulates the source attesting a display rotation (issue #4786). */
   emitRotation: (rotation: number) => void;
@@ -128,6 +129,7 @@ async function startHarness(
   let onData: ((chunk: Buffer) => void) | null = null;
   let onSourceFrame: (() => void) | null = null;
   let onSourceIdle: (() => void) | null = null;
+  let onEncodedAccessUnit: (() => void) | null = null;
   let onIdleAttestationSupport: ((supported: boolean) => void) | null = null;
   let onRotation: ((rotation: number) => void) | null = null;
   let onDroppedFrames: ((droppedFrames: number) => void) | null = null;
@@ -147,6 +149,7 @@ async function startHarness(
         onData = opts.onData;
         onSourceFrame = opts.onSourceFrame ?? null;
         onSourceIdle = opts.onSourceIdle ?? null;
+        onEncodedAccessUnit = opts.onEncodedAccessUnit ?? null;
         onIdleAttestationSupport = opts.onIdleAttestationSupport ?? null;
         onRotation = opts.onRotation ?? null;
         onDroppedFrames = opts.onDroppedFrames ?? null;
@@ -188,6 +191,7 @@ async function startHarness(
     emitUnattested: (chunk) => onData?.(chunk),
     emitSourceFrame: () => onSourceFrame?.(),
     emitIdle: () => onSourceIdle?.(),
+    emitEncodedBoundary: () => onEncodedAccessUnit?.(),
     setIdleSupport: (supported) => onIdleAttestationSupport?.(supported),
     emitRotation: (rotation) => onRotation?.(rotation),
     emitDroppedFrames: (droppedFrames) => onDroppedFrames?.(droppedFrames),
@@ -1123,6 +1127,7 @@ describe("VideoStreamSocketServer", () => {
     const secondIdrSlice = Buffer.from([0, 0, 0, 1, 0x65, 0x40, 0xbb]);
     // The key frame is the last access unit; a static screen sends no next P-frame.
     h.emit(Buffer.concat([sps, pps, idr, secondIdrSlice]));
+    h.emitEncodedBoundary();
     h.setIdleSupport(true);
     h.emitIdle();
     fakeTimer.advanceTime(8_000);
@@ -1149,6 +1154,7 @@ describe("VideoStreamSocketServer", () => {
     const pps = Buffer.from([0, 0, 0, 1, 0x68, 0xee]);
     const idr = Buffer.from([0, 0, 0, 1, 0x65, 0x80, 0xaa]);
     h.emit(Buffer.concat([sps, pps, idr]));
+    h.emitEncodedBoundary();
     h.setIdleSupport(true);
     h.emitIdle();
     h.emitSourceFrame();
@@ -1158,6 +1164,39 @@ describe("VideoStreamSocketServer", () => {
     await waitFor(() => late.binary().length > 12);
     expect(late.binary().includes(idr)).toBe(false);
     expect(h.sources[0].keyFrameRequests).toBeGreaterThan(requestsBeforeJoin);
+  });
+
+  test("idle iOS replay includes P frames after the cached IDR", async () => {
+    const fakeTimer = new FakeTimer();
+    const h = await startHarness({
+      timer: fakeTimer,
+      device: { ...DEVICE, platform: "ios" } as BootedDevice,
+    });
+    await subscribe(h.socketPath);
+    const sps = Buffer.from([0, 0, 0, 1, 0x67, 0x64]);
+    const pps = Buffer.from([0, 0, 0, 1, 0x68, 0xee]);
+    const idr = Buffer.from([0, 0, 0, 1, 0x65, 0x80, 0xaa]);
+    const finalP = Buffer.from([0, 0, 0, 1, 0x41, 0x80, 0xcc]);
+    h.emit(Buffer.concat([sps, pps, idr]));
+    h.emitEncodedBoundary();
+    h.emit(finalP);
+    h.emitEncodedBoundary();
+    h.setIdleSupport(true);
+    h.emitIdle();
+    const late = await subscribe(h.socketPath);
+    await waitFor(() => late.binary().includes(finalP));
+    expect(late.binary().includes(idr)).toBe(true);
+  });
+
+  test("raw idle evidence never flushes a partial ffmpeg NAL", async () => {
+    const h = await startHarness({ device: { ...DEVICE, platform: "ios" } as BootedDevice });
+    await subscribe(h.socketPath);
+    const partial = Buffer.from([0, 0, 0, 1, 0x65, 0x80]);
+    h.emit(partial);
+    h.setIdleSupport(true);
+    h.emitIdle();
+    const late = await subscribe(h.socketPath);
+    expect(late.binary().includes(partial)).toBe(false);
   });
 
   test("attests the source's rotation on a config packet and its replay (issue #4786)", async () => {

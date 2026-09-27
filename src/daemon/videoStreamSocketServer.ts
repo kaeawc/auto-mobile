@@ -46,6 +46,7 @@ export type CaptureSourceFactory = (options: {
   onSourceFrame?: () => void;
   /** Genuine native Simulator idle callback, scoped to this capture generation. */
   onSourceIdle?: () => void;
+  onEncodedAccessUnit?: () => void;
   onIdleAttestationSupport?: (supported: boolean) => void;
   onError: (error: Error) => void;
   /** Receives the attested display rotation (0..3) when the source can prove it (issue #4786). */
@@ -96,6 +97,10 @@ interface DeviceCapture {
   keyFrameAssembler: H264AccessUnitAssembler;
   keyFrameAuBytes: number;
   latestKeyFrameAu: Buffer | null;
+  latestInterFrameAus: Buffer[];
+  cachedGopBytes: number;
+  sourceFrameSequence: number;
+  lastEncodedBoundarySequence: number | null;
   size?: { width: number; height: number };
   /**
    * Latest attested display rotation (0..3) from the source, or null when the source cannot attest
@@ -462,6 +467,10 @@ export class VideoStreamSocketServer extends BaseSocketServer {
       keyFrameAssembler: new H264AccessUnitAssembler(),
       keyFrameAuBytes: 0,
       latestKeyFrameAu: null,
+      latestInterFrameAus: [],
+      cachedGopBytes: 0,
+      sourceFrameSequence: 0,
+      lastEncodedBoundarySequence: null,
       size: request.size,
       rotation: null,
       idleTimer: null,
@@ -482,6 +491,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
         return;
       }
       capture.lastSourceDataMs = this.timer.now();
+      capture.sourceFrameSequence++;
       capture.lastIdleMs = null;
       capture.encodedSinceSourceFrame = false;
       if (capture.lastEncodedDataMs !== null && !capture.heartbeatTimer) {
@@ -509,14 +519,18 @@ export class VideoStreamSocketServer extends BaseSocketServer {
             if (this.captures.get(deviceId) !== capture || !capture.encodedSinceSourceFrame) {
               return;
             }
-            // The producer has stopped changing the display. The final parsed IDR may be the
-            // last access unit, so no next frame arrived to close it in the assembler.
+            capture.lastIdleMs = this.timer.now();
+          },
+          onEncodedAccessUnit: () => {
+            if (this.captures.get(deviceId) !== capture) {
+              return;
+            }
             for (const nal of capture.parser.flush()) {
               this.broadcastNal(deviceId, capture, nal);
             }
             this.cacheCompletedAccessUnits(capture, capture.keyFrameAssembler.flush());
             capture.keyFrameAuBytes = 0;
-            capture.lastIdleMs = this.timer.now();
+            capture.lastEncodedBoundarySequence = capture.sourceFrameSequence;
           },
           onIdleAttestationSupport: (supported) => {
             if (this.captures.get(deviceId) === capture && device.platform === "ios") {
@@ -672,6 +686,8 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     if (type === NAL_TYPE_SPS || type === NAL_TYPE_PPS) {
       // An old IDR may have completed exactly as a new parameter set arrived.
       capture.latestKeyFrameAu = null;
+      capture.latestInterFrameAus = [];
+      capture.cachedGopBytes = 0;
     }
     if (capture.keyFrameAuBytes > MAX_ANNEX_B_BUFFER_BYTES) {
       capture.keyFrameAssembler = new H264AccessUnitAssembler();
@@ -683,19 +699,33 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     for (const au of completed) {
       const bytes = au.reduce((sum, item) => sum + item.length, 0);
       capture.keyFrameAuBytes -= bytes;
-      if (
-        bytes > MAX_ANNEX_B_BUFFER_BYTES ||
-        !au.some((item) => nalUnitType(item) === NAL_TYPE_IDR)
-      ) {
+      if (bytes > MAX_ANNEX_B_BUFFER_BYTES) {
+        capture.latestKeyFrameAu = null;
+        capture.latestInterFrameAus = [];
+        capture.cachedGopBytes = 0;
         continue;
       }
-      capture.latestKeyFrameAu = Buffer.concat(
+      const encoded = Buffer.concat(
         au
           .filter(
             (item) => nalUnitType(item) !== NAL_TYPE_SPS && nalUnitType(item) !== NAL_TYPE_PPS,
           )
           .flatMap((item) => [ANNEX_B_START_CODE, item]),
       );
+      if (au.some((item) => nalUnitType(item) === NAL_TYPE_IDR)) {
+        capture.latestKeyFrameAu = encoded;
+        capture.latestInterFrameAus = [];
+        capture.cachedGopBytes = encoded.length;
+      } else if (capture.latestKeyFrameAu) {
+        if (capture.cachedGopBytes + encoded.length > MAX_ANNEX_B_BUFFER_BYTES) {
+          capture.latestKeyFrameAu = null;
+          capture.latestInterFrameAus = [];
+          capture.cachedGopBytes = 0;
+        } else {
+          capture.latestInterFrameAus.push(encoded);
+          capture.cachedGopBytes += encoded.length;
+        }
+      }
     }
   }
 
@@ -714,6 +744,16 @@ export class VideoStreamSocketServer extends BaseSocketServer {
       false,
       true,
     );
+    for (const au of capture.latestInterFrameAus) {
+      this.writePacketToSubscriber(
+        deviceId,
+        capture,
+        socket,
+        encodePacket(encodePtsAndFlags(this.deps.nowUs(), {}), au),
+        false,
+        false,
+      );
+    }
   }
 
   private replayCurrentIosKeyFrame(
@@ -725,6 +765,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
       device.platform === "ios" &&
       capture.lastIdleMs !== null &&
       capture.encodedSinceSourceFrame &&
+      capture.lastEncodedBoundarySequence === capture.sourceFrameSequence &&
       this.timer.now() - capture.lastIdleMs <= SOURCE_EVIDENCE_MAX_AGE_MS
     ) {
       this.replayKeyFrame(capture, socket, device.deviceId);
@@ -1086,6 +1127,7 @@ function defaultDependencies(): VideoStreamSocketServerDependencies {
           onData: options.onData,
           onSourceFrame: options.onSourceFrame,
           onSourceIdle: options.onSourceIdle,
+          onEncodedAccessUnit: options.onEncodedAccessUnit,
           onIdleAttestationSupport: options.onIdleAttestationSupport,
           onError: options.onError,
           onRotation: options.onRotation,

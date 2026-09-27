@@ -634,6 +634,67 @@ describe("LaunchApp", () => {
     ).toHaveLength(1);
   });
 
+  test("collapses a notification shade that appears during Android launch observation", async () => {
+    fakeTimer.enableAutoAdvance();
+    const notificationShadeObservation = {
+      ...createObserveResult(),
+      activeWindow: {
+        appId: "com.android.systemui",
+        activityName: "NotificationShade",
+        layoutSeqSum: 1,
+        systemOverlay: true,
+      },
+    };
+    let observationCount = 0;
+
+    fakeAdb.setForegroundApp({ packageName, userId: 0 });
+    fakeAdb.setCommandResponse("shell dumpsys activity processes", { stdout: "0\n", stderr: "" });
+    fakeObserveScreen.setObserveResult(() => {
+      observationCount += 1;
+      if (observationCount === 1) {
+        return createObserveResult("com.example.previous");
+      }
+      return fakeAdb.getExecutedCommands().includes("shell cmd statusbar collapse")
+        ? createObserveResult(packageName)
+        : notificationShadeObservation;
+    });
+
+    const result = await launchApp.execute(packageName, false, false);
+
+    expect(result.success).toBe(true);
+    expect(result.observation?.activeWindow?.appId).toBe(packageName);
+    expect(observationCount).toBeGreaterThan(2);
+    expect(fakeAdb.getExecutedCommands()).toContain("shell cmd statusbar collapse");
+  });
+
+  test("rate limits shade collapse attempts through the Android launch timeout", async () => {
+    fakeTimer.enableAutoAdvance();
+    const notificationShadeObservation = {
+      ...createObserveResult(),
+      activeWindow: {
+        appId: "com.android.systemui",
+        activityName: "NotificationShade",
+        layoutSeqSum: 1,
+        systemOverlay: true,
+      },
+    };
+
+    fakeAdb.setForegroundApp({ packageName, userId: 0 });
+    fakeAdb.setCommandResponse("shell dumpsys activity processes", { stdout: "0\n", stderr: "" });
+    fakeObserveScreen.setObserveResult(() => notificationShadeObservation);
+
+    const result = await launchApp.execute(packageName, false, true);
+    const collapseCount = fakeAdb
+      .getExecutedCommands()
+      .filter((command) => command === "shell cmd statusbar collapse").length;
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("notification shade");
+    expect(fakeTimer.now()).toBeGreaterThanOrEqual(15_000);
+    expect(collapseCount).toBeGreaterThan(1);
+    expect(collapseCount).toBeLessThan(20);
+  });
+
   test("reports a notification shade blocker after cold boot launch verification times out", async () => {
     fakeTimer.enableAutoAdvance();
     const notificationShadeObservation = {

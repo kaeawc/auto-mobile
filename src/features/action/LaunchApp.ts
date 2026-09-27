@@ -41,6 +41,7 @@ import { shellQuote } from "../../utils/shellQuote";
 const LAUNCH_OBSERVATION_TIMEOUT_MS = 5000;
 const LAUNCH_OBSERVATION_POLL_INTERVAL_MS = 200;
 const ANDROID_LAUNCH_OBSERVATION_TIMEOUT_MS = 15_000;
+const SHADE_COLLAPSE_RETRY_INTERVAL_MS = 1_000;
 const ANDROID_PREFLIGHT_ABORT_SETTLEMENT_GRACE_MS = 1_000;
 const IOS_RETARGET_ABORT_SETTLEMENT_GRACE_MS = 1_000;
 
@@ -1213,6 +1214,8 @@ export class LaunchApp extends BaseVisualChange {
 
     const startTime = this.timer.now();
     let latestObservation = result.observation;
+    // Space collapse attempts by one second to avoid an ADB command on every poll.
+    let nextShadeCollapseTime = startTime + SHADE_COLLAPSE_RETRY_INTERVAL_MS;
 
     while (this.timer.now() - startTime < timeoutMs) {
       signal?.throwIfAborted();
@@ -1232,6 +1235,15 @@ export class LaunchApp extends BaseVisualChange {
         skipPerformanceAudit: true,
       });
       signal?.throwIfAborted();
+      const collapseRetry = await this.retryNotificationShadeCollapseIfDue(
+        result,
+        latestObservation,
+        expectedPackageName,
+        nextShadeCollapseTime,
+        signal,
+      );
+      latestObservation = collapseRetry.observation;
+      nextShadeCollapseTime = collapseRetry.nextShadeCollapseTime;
       if (this.settleLaunchObservation(result, latestObservation, expectedPackageName)) {
         return result;
       }
@@ -1244,6 +1256,34 @@ export class LaunchApp extends BaseVisualChange {
       timeoutMs,
       coldBoot,
     );
+  }
+
+  private async retryNotificationShadeCollapseIfDue(
+    result: LaunchAppResult,
+    observation: ObserveResult,
+    expectedPackageName: string,
+    nextShadeCollapseTime: number,
+    signal?: AbortSignal,
+  ): Promise<{ observation: ObserveResult; nextShadeCollapseTime: number }> {
+    const activeWindow = observation.activeWindow;
+    if (
+      this.device.platform !== "android" ||
+      activeWindow?.appId !== "com.android.systemui" ||
+      activeWindow.systemOverlay !== true ||
+      this.launchObservationMatchesPackage(observation, expectedPackageName) ||
+      this.timer.now() < nextShadeCollapseTime
+    ) {
+      return { observation, nextShadeCollapseTime };
+    }
+
+    const collapseResult = await this.collapseNotificationShadeIfCovering(
+      { ...result, observation },
+      signal,
+    );
+    return {
+      observation: collapseResult.observation ?? observation,
+      nextShadeCollapseTime: this.timer.now() + SHADE_COLLAPSE_RETRY_INTERVAL_MS,
+    };
   }
 
   private async collapseNotificationShadeIfCovering(

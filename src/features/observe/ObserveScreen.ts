@@ -763,14 +763,21 @@ export class RealObserveScreen implements ObserveScreen {
           ? this.deviceStateCollector.collectForegroundIdentity(signal)
           : Promise.resolve(undefined);
 
-      const captured = options?.freshness
-        ? await this.hierarchyCapture.capture({
+      let capturedHierarchy: ViewHierarchyResult | undefined;
+      if (options?.freshness) {
+        try {
+          const captured = await this.hierarchyCapture.capture({
             freshness: options.freshness,
             minTimestamp: minTimestamp > 0 ? minTimestamp : undefined,
             signal,
             timeoutMs: options.timeoutMs,
-          })
-        : undefined;
+          });
+          capturedHierarchy = captured.hierarchy;
+        } catch (error) {
+          // A failed pre-capture can be retried and reported by the hierarchy collector.
+          logger.warn(`[ObserveScreen] Freshness capture failed; collecting hierarchy: ${error}`);
+        }
+      }
 
       // Phase 1+2: hierarchy + derived device state (platform-specific orchestration).
       await this.collectAllData(
@@ -782,7 +789,7 @@ export class RealObserveScreen implements ObserveScreen {
         signal,
         skipBackStack,
         options?.skipRecompositionTracking === true,
-        captured?.hierarchy,
+        capturedHierarchy,
         options?.timeoutMs,
       );
 

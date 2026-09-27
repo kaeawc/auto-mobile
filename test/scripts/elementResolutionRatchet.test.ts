@@ -29,14 +29,25 @@ test("bootstrapping rejects unreviewed seeds and malformed baselines", () => {
 });
 test("signature ratchet retains outcomes for every surviving gap", () => {
   expect(() =>
-    assertSignatureRatchetDoesNotDrift('{"a":"target"}', '{"a":"target","b":null}'),
+    assertSignatureRatchetDoesNotDrift('{"a":"target"}', '{"a":"target","b":null}', '{"B1":["a"]}'),
   ).not.toThrow();
-  expect(() => assertSignatureRatchetDoesNotDrift('{"a":"other"}', '{"a":"target"}')).toThrow(
-    "only shrink",
-  );
   expect(() =>
-    assertSignatureRatchetDoesNotDrift('{"a":"target","new":null}', '{"a":"target"}'),
+    assertSignatureRatchetDoesNotDrift('{"a":"other"}', '{"a":"target"}', '{"B1":["a"]}'),
   ).toThrow("only shrink");
+  expect(() =>
+    assertSignatureRatchetDoesNotDrift(
+      '{"a":"target","new":null}',
+      '{"a":"target"}',
+      '{"B1":["a"]}',
+    ),
+  ).toThrow("only shrink");
+});
+
+test("signature removal requires the corresponding exception to be removed", () => {
+  expect(() => assertSignatureRatchetDoesNotDrift("{}", '{"a":"target"}', '{"B1":["a"]}')).toThrow(
+    "surviving exception",
+  );
+  expect(() => assertSignatureRatchetDoesNotDrift("{}", '{"a":"target"}', "{}")).not.toThrow();
 });
 
 test("ratchet cannot restore gaps removed from a later baseline", () => {
@@ -53,6 +64,6 @@ test("ratchet cannot restore gaps removed from a later baseline", () => {
   const removed = Object.keys(shrunkenSignatures).find((key) => key.includes("focus-input"))!;
   delete shrunkenSignatures[removed];
   expect(() =>
-    assertSignatureRatchetDoesNotDrift(signatures, JSON.stringify(shrunkenSignatures)),
+    assertSignatureRatchetDoesNotDrift(signatures, JSON.stringify(shrunkenSignatures), gaps),
   ).toThrow("only shrink");
 });

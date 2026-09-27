@@ -25,6 +25,7 @@ function signatures(raw: string): Record<string, string | null> {
 export function assertSignatureRatchetDoesNotDrift(
   current: string,
   baseline: string | undefined,
+  currentExceptions: string,
 ): void {
   const currentSignatures = signatures(current);
   const currentEntries = Object.entries(currentSignatures).map((entry) => JSON.stringify(entry));
@@ -35,6 +36,17 @@ export function assertSignatureRatchetDoesNotDrift(
     return;
   }
   const baselineSignatures = signatures(baseline);
+  const retainedCases = new Set(
+    entries(currentExceptions).map((entry) => (JSON.parse(entry) as [string, string])[1]),
+  );
+  const unprotected = Object.keys(baselineSignatures).filter(
+    (key) => !(key in currentSignatures) && retainedCases.has(key),
+  );
+  if (unprotected.length > 0) {
+    throw new Error(
+      `Element-resolution signatures removed for surviving exception:\n${unprotected.join("\n")}`,
+    );
+  }
   const drift = Object.entries(currentSignatures).filter(
     ([key, value]) => !(key in baselineSignatures) || baselineSignatures[key] !== value,
   );
@@ -125,6 +137,7 @@ if (import.meta.main) {
     assertSignatureRatchetDoesNotDrift(
       readFileSync(signaturePath, "utf8"),
       signatureBaselinePath ? readFileSync(signatureBaselinePath, "utf8") : undefined,
+      readFileSync(currentPath, "utf8"),
     );
   }
   if (casePath) {

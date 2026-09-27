@@ -411,6 +411,21 @@ test("sibling traversal never crosses collection boundaries to another row", () 
   ).toBeNull();
 });
 
+test("sibling traversal respects a decorated RecyclerView collection boundary", () => {
+  const capture = snapshot([
+    node("list", {
+      className: "com.example.RecyclerViewContainer",
+      node: [
+        node("first", { node: [node("label", { text: "Email" })] }),
+        node("second", { node: [node("remove", { clickable: true })] }),
+      ],
+    }),
+  ]);
+  expect(
+    resolver.resolve(capture, { elementId: "remove", sibling: { text: "Email" } }, tap).chosen,
+  ).toBeNull();
+});
+
 test("sibling traversal never crosses a ViewPager2 page boundary (#7715)", () => {
   const capture = snapshot([
     node("pager", {

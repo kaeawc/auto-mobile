@@ -14,6 +14,8 @@ import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeObserveCacheStore } from "../../fakes/FakeObserveCacheStore";
 import { FakeScreenshotStateStore } from "../../fakes/FakeScreenshotStateStore";
+import { FakeViewHierarchy } from "../../fakes/FakeViewHierarchy";
+import { AndroidCtrlProxyManager } from "../../../src/utils/CtrlProxyManager";
 import { resetObserveCacheStore } from "../../../src/features/observe/cache/ObserveCacheRegistry";
 import { resetScreenshotStateStore } from "../../../src/features/observe/screenshot/ScreenshotStateRegistry";
 import type { ObserveScreenshotRecorder } from "../../../src/features/observe/screenshot/ObserveScreenshotRecorder";
@@ -243,6 +245,55 @@ describe("ObserveScreen skip options", () => {
     expect(fakeScreenshotRecorder.captureCalls).toBe(0);
     expect(fakeDeviceStateCollector.backStackCalls).toBe(0);
   });
+});
+
+test("freshness capture failure reaches hierarchy collection and reports viewHierarchy error", async () => {
+  const timer = new FakeTimer();
+  const hierarchy = new FakeViewHierarchy();
+  hierarchy.setFailure(new Error("WebSocket not connected"));
+  const screenshotState = new FakeScreenshotStateStore(timer);
+  const lost: string[] = [];
+  AndroidCtrlProxyManager.resetInstances();
+  const adb = new FakeAdbExecutor();
+  const availability = AndroidCtrlProxyManager.getInstance(device, adb);
+  Reflect.set(availability, "cachedAvailability", { isAvailable: true, timestamp: timer.now() });
+  const screen = new RealObserveScreen(
+    device,
+    new FakeAdbClientFactory(adb),
+    {
+      hierarchyCapture: {
+        capture: async () => {
+          throw new Error("WebSocket not connected");
+        },
+      },
+      viewHierarchy: hierarchy,
+      cacheStore: new FakeObserveCacheStore(timer),
+      screenshotStateStore: screenshotState,
+      screenshotRecorder: new FakeScreenshotRecorder(),
+      deviceStateCollector: new FakeDeviceStateCollector() as unknown as DeviceStateCollector,
+      performanceAuditor: new NoOpAuditor() as unknown as PerformanceAuditor,
+      accessibilityAuditor: new NoOpAuditor() as unknown as AccessibilityAuditor,
+      accessibilityStateDetector: new NoOpAuditor() as unknown as AccessibilityStateDetector,
+      onAvailabilityLost: (reason) => lost.push(reason),
+    },
+    timer,
+  );
+  try {
+    const result = await screen.execute({
+      freshness: "fresh",
+      skipScreenshot: true,
+      skipBackStack: true,
+    });
+    expect(result.errors?.map((error) => error.phase)).toContain("viewHierarchy");
+    expect(result.errors?.map((error) => error.phase)).not.toContain("critical");
+    expect(lost).toHaveLength(1);
+    expect(Reflect.get(availability, "cachedAvailability")).toBeNull();
+    expect(screenshotState.getError(device.deviceId)).toBeUndefined();
+  } finally {
+    AndroidCtrlProxyManager.resetInstances();
+    resetObserveCacheStore();
+    resetScreenshotStateStore();
+  }
 });
 
 describe("ObserveScreen skipBackStack parameter threading", () => {

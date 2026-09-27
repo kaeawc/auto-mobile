@@ -31,6 +31,35 @@ function obs(updatedAt: number, marker: string): ObserveResult {
 }
 
 describe("pollObserveUntil minTimestamp floor (#6284)", () => {
+  test("returns the last trustworthy observation when sleep passes the deadline", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const fake = new FakeObserveScreen();
+    const last = obs(20, "last");
+    fake.setObserveSequence([obs(10, "baseline"), last]);
+    const outcome = await pollObserveUntil(
+      fake,
+      timer,
+      { timeoutMs: 100, pollMs: 60 },
+      () => false,
+    );
+    expect(outcome).toMatchObject({ polls: 2, stopped: false, terminalReason: "timeout" });
+    expect(outcome.observation).toBe(last);
+    expect(fake.getExecuteCallCount()).toBe(2);
+    expect(fake.getExecuteOptions().map((options) => options.timeoutMs)).toEqual([100, 40]);
+  });
+
+  test("returns the last received observation when no complete hierarchy was trustworthy", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const fake = new FakeObserveScreen();
+    const incomplete = { ...obs(10, "incomplete"), viewHierarchy: undefined };
+    fake.setObserveResult(incomplete);
+    const outcome = await pollObserveUntil(fake, timer, { timeoutMs: 50, pollMs: 60 }, () => false);
+    expect(outcome).toMatchObject({ polls: 1, terminalReason: "timeout" });
+    expect(outcome.observation).toBe(incomplete);
+    expect(fake.getExecuteCallCount()).toBe(1);
+  });
   test("passes the remaining poll deadline into each device observation", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
@@ -121,7 +150,7 @@ describe("pollObserveUntil minTimestamp floor (#6284)", () => {
     const outcome = await pollObserveUntil(
       fake,
       timer,
-      { timeoutMs: 300, pollMs: 150 },
+      { timeoutMs: 301, pollMs: 150 },
       () => ++polls >= 3,
     );
 
@@ -145,7 +174,7 @@ describe("pollObserveUntil minTimestamp floor (#6284)", () => {
     const outcome = await pollObserveUntil(
       fake,
       timer,
-      { timeoutMs: 450, pollMs: 150 },
+      { timeoutMs: 451, pollMs: 150 },
       (value) => {
         seen.push((value.viewHierarchy!.hierarchy.node as any).marker);
         return false;

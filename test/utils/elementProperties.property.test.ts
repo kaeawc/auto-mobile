@@ -1,12 +1,26 @@
-import { describe, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import fc from "fast-check";
 import type { Element } from "../../src/models/Element";
 import {
   buildContainerFromElement,
   hasAccessibilityAction,
   isClickableElementProperties,
+  isCollectionElementProperties,
   isTruthyFlag,
 } from "../../src/utils/elementProperties";
+
+test("collection boundaries recognize decorated Android names without arbitrary substring matches", () => {
+  expect(isCollectionElementProperties({ className: "com.example.RecyclerViewContainer" })).toBe(
+    true,
+  );
+  expect(isCollectionElementProperties({ className: "com.example.MyListViewImpersonator" })).toBe(
+    false,
+  );
+  expect(
+    isCollectionElementProperties({ className: "androidx.viewpager2.widget.ViewPager2" }),
+  ).toBe(true);
+  expect(isCollectionElementProperties({ className: "XCUIElementTypeTable" })).toBe(true);
+});
 
 // Property-based tests. See Backoff.property.test.ts for the pinned-seed rationale.
 const RUN_OPTIONS = { seed: 1_234_567, numRuns: 300 } as const;

@@ -1055,6 +1055,7 @@ export class TapOnElement extends BaseVisualChange {
     const containerFound = this.isContainerAvailable(viewHierarchy, options.container);
     const intentAction =
       options.action === "longPress" ? "long-press" : options.action === "focus" ? "input" : "tap";
+    const lookupAction = options.action === "focus" ? "input" : "inspect";
     const selectionIntent = TEXT_SELECTION_INTENT_BY_ACTION[options.action];
 
     if (options.text) {
@@ -1082,7 +1083,7 @@ export class TapOnElement extends BaseVisualChange {
           partialMatch: true,
           caseSensitive: false,
           strategy: options.selectionStrategy,
-          intentAction,
+          intentAction: lookupAction,
           index: options.index,
           selectionIntent,
         }),
@@ -1109,7 +1110,7 @@ export class TapOnElement extends BaseVisualChange {
               partialMatch: true,
               caseSensitive: false,
               strategy: options.selectionStrategy,
-              intentAction,
+              intentAction: lookupAction,
               index: options.index,
               selectionIntent,
             });
@@ -1158,7 +1159,7 @@ export class TapOnElement extends BaseVisualChange {
           container: options.container,
           partialMatch: false,
           strategy: options.selectionStrategy,
-          intentAction,
+          intentAction: lookupAction,
           index: options.index,
         }),
         containerFound,
@@ -1169,7 +1170,7 @@ export class TapOnElement extends BaseVisualChange {
       selection: this.elementSelector.selectByTestTag(viewHierarchy, this.requireTestTag(options), {
         container: options.container,
         strategy: options.selectionStrategy,
-        intentAction,
+        intentAction: lookupAction,
         index: options.index,
       }),
       containerFound,
@@ -1464,7 +1465,8 @@ export class TapOnElement extends BaseVisualChange {
 
       if (
         original?.["resource-id"] &&
-        original["resource-id"] !== refind.selection.element["resource-id"]
+        original["resource-id"] !==
+          (refind.selection.matchedElement ?? refind.selection.element)["resource-id"]
       ) {
         return {
           ok: false,
@@ -1948,34 +1950,27 @@ export class TapOnElement extends BaseVisualChange {
     if (!viewHierarchy || this.device.platform !== "android") {
       return { element, usedParent: false };
     }
-    const resolver = new ElementResolver();
-    const snapshot = {
-      id: "selected-target",
-      nodes: new SearchableHierarchy().project(viewHierarchy),
-    };
-    const selector = element["resource-id"]
-      ? { elementId: element["resource-id"] }
-      : { text: element.text ?? element["content-desc"], match: "exact" as const };
-    if (!selector.elementId && !selector.text) {
-      return { element, usedParent: false };
-    }
-    const candidates = resolver.resolve(snapshot, selector, { action: "inspect" }).candidates;
-    const index = candidates.findIndex(
-      (candidate) => candidate.bounds && boundsEqual(candidate.bounds, element.bounds),
+    const nodes = new SearchableHierarchy().project(viewHierarchy);
+    let candidate = nodes.find(
+      (node) =>
+        node.element &&
+        node.bounds &&
+        boundsEqual(node.bounds, element.bounds) &&
+        node.nativeId === element["resource-id"] &&
+        node.nodeKey === element["view-id"],
     );
-    const result = resolver.resolve(
-      snapshot,
-      { ...selector, index: index >= 0 ? index : undefined },
-      {
-        action: action === "longPress" ? "long-press" : "tap",
-        requireResourceId,
-      },
-    );
-    if (result.error) {
-      throw new ActionableError(result.error);
+    while (candidate) {
+      const canAct =
+        action === "longPress"
+          ? candidate.affordances.includes("long-press")
+          : candidate.affordances.includes("tap") || candidate.affordances.includes("toggle");
+      if (canAct && (!requireResourceId || candidate.nativeId) && candidate.element) {
+        const target = candidate.element;
+        return { element: target, usedParent: !boundsEqual(target.bounds, element.bounds) };
+      }
+      candidate = candidate.parentIndex === undefined ? undefined : nodes[candidate.parentIndex];
     }
-    const target = result.chosen?.element ?? element;
-    return { element: target, usedParent: !boundsEqual(target.bounds, element.bounds) };
+    return { element, usedParent: false };
   }
 
   /**

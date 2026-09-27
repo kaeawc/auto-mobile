@@ -85,12 +85,16 @@ function centerWithinViewport(
   return x >= 0 && y >= 0 && x <= viewport.width && y <= viewport.height;
 }
 
+function inspectEligible(node: SearchableEntry, viewport?: ResolutionIntent["viewport"]): boolean {
+  return !viewport || !node.bounds || centerWithinViewport(node.bounds, viewport);
+}
+
 function eligible(node: SearchableEntry, intent: ResolutionIntent): boolean {
   if (intent.requireResourceId && !node.nativeId) {
     return false;
   }
   if (intent.action === "inspect") {
-    return true;
+    return inspectEligible(node, intent.viewport);
   }
   if (!node.bounds) {
     return false;
@@ -368,7 +372,37 @@ export class ElementResolver {
     if (anchors.error) {
       return { nodes: [], error: anchors.error };
     }
-    const anchor = this.siblingAnchor(anchors, snapshot);
+    const selected = new Set<SearchableEntry>();
+    const anchorMatches =
+      selector.sibling!.index !== undefined || selector.sibling!.selectionStrategy === "random"
+        ? anchors.matches.filter(({ node }) => node === anchors.chosen)
+        : anchors.matches;
+    for (const match of anchorMatches) {
+      const anchor = this.siblingAnchor(match, snapshot);
+      for (const node of this.matchingSiblingRow(
+        snapshot,
+        nodes,
+        selector,
+        intent,
+        scope,
+        anchor,
+      )) {
+        selected.add(node);
+      }
+    }
+    return selected.size
+      ? { nodes: nodes.filter((node) => selected.has(node)) }
+      : { nodes: [], error: "Sibling row not found" };
+  }
+
+  private matchingSiblingRow(
+    snapshot: ResolverSnapshot,
+    nodes: SearchableEntry[],
+    selector: ResolverSelector,
+    intent: ResolutionIntent,
+    scope: SearchableEntry | undefined,
+    anchor: SearchableEntry | undefined,
+  ): SearchableEntry[] {
     let parent = anchor?.parentIndex;
     while (anchor && parent !== undefined) {
       const row = snapshot.nodes[parent];
@@ -383,14 +417,14 @@ export class ElementResolver {
           !this.crossesCollection(node, row, snapshot.nodes),
       );
       if (this.match(siblings, selector, intent).matches.length > 0) {
-        return { nodes: siblings };
+        return siblings;
       }
       if (row === scope) {
         break;
       }
       parent = row.parentIndex;
     }
-    return { nodes: [], error: "Sibling row not found" };
+    return [];
   }
 
   private crossesCollection(
@@ -410,11 +444,10 @@ export class ElementResolver {
   }
 
   private siblingAnchor(
-    anchors: ElementResolution,
+    match: ElementResolution["matches"][number],
     snapshot: ResolverSnapshot,
   ): SearchableEntry | undefined {
-    const matched = anchors.matches.find(({ node }) => node === anchors.chosen);
-    const sources = matched?.sourceNodes ?? (anchors.chosen ? [anchors.chosen] : []);
+    const sources = match.sourceNodes ?? [match.node];
     // Text promotion may choose the actionable row. Anchor sibling traversal on
     // its matching descendant label instead of stepping outside that row.
     return sources.find(

@@ -228,6 +228,29 @@ test("sibling promotion cannot collapse anchors into the outer container", () =>
   );
 });
 
+test("outer sibling index selects the second repeated row's control", () => {
+  const capture = snapshot([
+    node("list", {
+      node: [
+        node("first", {
+          node: [node("first-label", { text: "Email" }), node("remove", { clickable: true })],
+        }),
+        node("second", {
+          node: [node("second-label", { text: "Email" }), node("remove", { clickable: true })],
+        }),
+      ],
+    }),
+  ]);
+  const result = resolver.resolve(
+    capture,
+    { elementId: "remove", sibling: { text: "Email" }, index: 1 },
+    tap,
+  );
+  expect(result.chosen?.parentIndex).toBe(
+    capture.nodes.find((entry) => entry.nativeId === "second")?.index,
+  );
+});
+
 test("positional candidates exclude offscreen controls while keeping visible action differences", () => {
   const capture = snapshot([
     node("offscreen", {

@@ -87,11 +87,7 @@ export function toSearchable(properties: SearchableProperties): SearchableNode {
     parsedBounds && Object.values(parsedBounds).every(Number.isFinite) ? parsedBounds : undefined;
   const affordances = deriveAffordances(properties);
   // Preserve the full observe text category even when the skeleton prefers an editable value.
-  const categoryText =
-    properties.text ||
-    properties["content-desc"] ||
-    properties["ios-accessibility-label"] ||
-    undefined;
+  const categoryText = text ?? description ?? accessibleLabel;
   return {
     nativeId,
     nodeKey,

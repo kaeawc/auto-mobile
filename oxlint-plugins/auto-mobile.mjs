@@ -740,6 +740,23 @@ const noRawSelectorFieldReadRule = {
           return rawType(alias, env, new Set([...seen, name]));
         };
         const lookup = (env, name) => env.get(name);
+        const propertyTypes = (annotation, env, seen = new Set()) => {
+          const type = annotation?.typeAnnotation ?? annotation;
+          if (type?.type === "TSTypeReference") {
+            const name = type.typeName?.name;
+            if (seen.has(name)) return new Set();
+            return propertyTypes(env.get(`type:${name}`), env, new Set([...seen, name]));
+          }
+          if (type?.type !== "TSTypeLiteral") return new Set();
+          return new Set(
+            type.members
+              .filter(
+                (member) =>
+                  rawType(member.typeAnnotation, env) && propertyName(member.key) !== null,
+              )
+              .map((member) => propertyName(member.key)),
+          );
+        };
         const key = (node, env) => {
           if (node?.type === "Literal") return node.value;
           if (node?.type === "Identifier") return lookup(env, node.name)?.literal;
@@ -750,11 +767,14 @@ const noRawSelectorFieldReadRule = {
         const raw = (node, env) => {
           if (!node) return false;
           if (
-            ["ChainExpression", "TSNonNullExpression", "ParenthesizedExpression"].includes(
-              node.type,
-            )
+            [
+              "ChainExpression",
+              "TSNonNullExpression",
+              "ParenthesizedExpression",
+              "AwaitExpression",
+            ].includes(node.type)
           )
-            return raw(node.expression, env);
+            return raw(node.expression ?? node.argument, env);
           if (["TSAsExpression", "TSTypeAssertion"].includes(node.type)) {
             // Protocol DTO assertions mark a checked bridge boundary; merely
             // casting a capture node to Element must not hide its provenance.
@@ -762,30 +782,55 @@ const noRawSelectorFieldReadRule = {
             return node.typeAnnotation?.typeName?.name === "Element" && raw(node.expression, env);
           }
           if (node.type === "Identifier") return lookup(env, node.name)?.raw === true;
-          if (node.type === "MemberExpression") return raw(node.object, env);
+          if (node.type === "MemberExpression") {
+            const name = node.computed ? key(node.property, env) : propertyName(node.property);
+            return (
+              raw(node.object, env) ||
+              (node.object?.type === "Identifier" &&
+                lookup(env, node.object.name)?.properties?.has(name))
+            );
+          }
           if (node.type === "LogicalExpression" || node.type === "ConditionalExpression")
             return raw(node.left ?? node.consequent, env) || raw(node.right ?? node.alternate, env);
           if (node.type === "CallExpression")
             return (
               lookup(env, node.callee?.name)?.rawReturn === true ||
+              (node.callee?.type === "MemberExpression" &&
+                ["find", "at", "map", "filter", "flatMap"].includes(node.callee.property?.name) &&
+                raw(node.callee.object, env)) ||
               ["extractNodeProperties", "getNodeProperties"].includes(
                 node.callee?.property?.name ?? node.callee?.name,
               )
             );
           return false;
         };
-        const bind = (pattern, value, env, isRaw, assignment = false) => {
+        const bind = (pattern, value, env, isRaw, assignment = false, conditional = false) => {
           if (!pattern) return;
           if (pattern.type === "Identifier") {
             const binding = assignment ? env.get(pattern.name) : undefined;
             if (binding) {
               // Maps share outer binding records; declarations still shadow them.
               binding.raw ||= isRaw || rawType(pattern.typeAnnotation, env);
-              binding.literal = key(value, env);
+              const next = key(value, env);
+              binding.literal = next;
+              binding.literals = new Set(
+                (conditional ? [...(binding.literals ?? []), next] : [next]).filter(Boolean),
+              );
             } else
               env.set(pattern.name, {
                 raw: isRaw || rawType(pattern.typeAnnotation, env),
                 literal: key(value, env),
+                literals: new Set([key(value, env)].filter(Boolean)),
+                properties:
+                  value?.type === "ObjectExpression"
+                    ? new Set(
+                        value.properties
+                          .filter(
+                            (property) => property.type === "Property" && raw(property.value, env),
+                          )
+                          .map((property) => propertyName(property.key)),
+                      )
+                    : propertyTypes(pattern.typeAnnotation, env),
                 rawReturn: rawType(
                   value?.returnType ?? pattern.typeAnnotation?.typeAnnotation?.returnType,
                   env,
@@ -794,23 +839,30 @@ const noRawSelectorFieldReadRule = {
           } else if (pattern.type === "ObjectPattern") {
             for (const property of pattern.properties) {
               if (property.type === "RestElement") {
-                bind(property.argument, undefined, env, isRaw, assignment);
+                bind(property.argument, undefined, env, isRaw, assignment, conditional);
                 continue;
               }
               const name = property.computed ? key(property.key, env) : propertyName(property.key);
               if (isRaw && fields.has(name))
                 context.report({ node: property, messageId: "rawSelector" });
-              bind(property.value, undefined, env, isRaw && !fields.has(name), assignment);
+              bind(
+                property.value,
+                undefined,
+                env,
+                isRaw && !fields.has(name),
+                assignment,
+                conditional,
+              );
             }
           } else if (pattern.type === "ArrayPattern") {
             for (const element of pattern.elements)
-              bind(element, undefined, env, isRaw, assignment);
+              bind(element, undefined, env, isRaw, assignment, conditional);
           } else if (pattern.type === "RestElement") {
-            bind(pattern.argument, undefined, env, isRaw, assignment);
+            bind(pattern.argument, undefined, env, isRaw, assignment, conditional);
           } else if (pattern.type === "AssignmentPattern")
-            bind(pattern.left, pattern.right, env, isRaw, assignment);
+            bind(pattern.left, pattern.right, env, isRaw, assignment, conditional);
         };
-        const visit = (node, env, parent, role) => {
+        const visit = (node, env, parent, role, conditional = false) => {
           if (!node || typeof node.type !== "string") return;
           if (
             ["FunctionDeclaration", "FunctionExpression", "ArrowFunctionExpression"].includes(
@@ -823,10 +875,14 @@ const noRawSelectorFieldReadRule = {
             // Traversal callbacks receive raw hierarchy nodes even without annotations.
             if (
               parent?.type === "CallExpression" &&
-              parent.callee?.property?.name === "traverseNode"
+              (parent.callee?.property?.name === "traverseNode" ||
+                (["find", "map", "filter", "flatMap", "some", "every", "forEach"].includes(
+                  parent.callee?.property?.name,
+                ) &&
+                  raw(parent.callee.object, env)))
             )
               bind(node.params[0], undefined, local, true);
-            visit(node.body, local, node, "body");
+            visit(node.body, local, node, "body", conditional);
             return;
           }
           if (node.type === "BlockStatement") env = new Map(env);
@@ -855,26 +911,49 @@ const noRawSelectorFieldReadRule = {
           }
           if (node.type === "VariableDeclarator") {
             bind(node.id, node.init, env, raw(node.init, env));
-            visit(node.init, env, node, "init");
+            visit(node.init, env, node, "init", conditional);
+            return;
+          }
+          if (node.type === "ForOfStatement") {
+            visit(node.right, env, node, "right", conditional);
+            const loop = new Map(env);
+            const left =
+              node.left.type === "VariableDeclaration" ? node.left.declarations[0]?.id : node.left;
+            bind(left, undefined, loop, raw(node.right, env));
+            visit(node.body, loop, node, "body", true);
             return;
           }
           if (
             node.type === "AssignmentExpression" &&
             ["Identifier", "ObjectPattern", "ArrayPattern"].includes(node.left.type)
           )
-            bind(node.left, node.right, env, raw(node.right, env), true);
+            bind(node.left, node.right, env, raw(node.right, env), true, conditional);
           if (
             node.type === "MemberExpression" &&
             !(parent?.type === "AssignmentExpression" && parent.operator === "=" && role === "left")
           ) {
             const name = node.computed ? key(node.property, env) : node.property.name;
-            if (fields.has(name) && raw(node.object, env))
+            const possible =
+              node.computed && node.property.type === "Identifier"
+                ? lookup(env, node.property.name)?.literals
+                : undefined;
+            if (
+              (fields.has(name) || [...(possible ?? [])].some((item) => fields.has(item))) &&
+              raw(node.object, env)
+            )
               context.report({ node, messageId: "rawSelector" });
           }
           for (const [name, value] of Object.entries(node)) {
             if (name === "parent" || name === "typeAnnotation") continue;
-            if (Array.isArray(value)) for (const child of value) visit(child, env, node, name);
-            else if (value && typeof value === "object") visit(value, env, node, name);
+            const branch =
+              conditional ||
+              ((node.type === "IfStatement" || node.type === "ConditionalExpression") &&
+                (name === "consequent" || name === "alternate")) ||
+              (["WhileStatement", "DoWhileStatement", "ForStatement"].includes(node.type) &&
+                name === "body");
+            if (Array.isArray(value))
+              for (const child of value) visit(child, env, node, name, branch);
+            else if (value && typeof value === "object") visit(value, env, node, name, branch);
           }
         };
         visit(program, new Map(), null, "");

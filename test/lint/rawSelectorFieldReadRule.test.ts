@@ -117,3 +117,25 @@ test.each([
 ])("safe aliases and local shadowing remain permitted: %s", (code) => {
   expect(check(code)).toEqual([]);
 });
+
+test.each([
+  'function inspect(node: any, flag: boolean) { let key = "text"; if (flag) key = "bounds"; return node[key]; }',
+  "function inspect(nodes: ViewHierarchyNode[]) { return nodes.find(node => node.text); }",
+  'function inspect(nodes: ViewHierarchyNode[]) { return nodes.map(node => node["resource-id"]); }',
+  'function inspect(nodes: ViewHierarchyNode[]) { return nodes.filter(node => node["content-desc"]); }',
+  "function inspect(nodes: ViewHierarchyNode[]) { return nodes.find(() => true)?.text; }",
+  "function getRoot(): Promise<ViewHierarchyNode> { return source; } async function inspect() { const node = await getRoot(); return node.text; }",
+  "function getRoot(): Promise<ViewHierarchyNode> { return source; } async function inspect() { return (await getRoot()).text; }",
+  "function inspect(nodes: ViewHierarchyNode[]) { for (const node of nodes) { return node.text; } }",
+  "async function inspect(nodes: ViewHierarchyNode[]) { for await (const node of nodes) { return node.text; } }",
+  "function inspect(node: ViewHierarchyNode) { const candidate = { node }; return candidate.node.text; }",
+  "function inspect(candidate: {node: ViewHierarchyNode}) { return candidate.node.text; }",
+])("tracks raw selector provenance through common wrappers: %s", (code) => {
+  expect(check(code).length).toBeGreaterThan(0);
+});
+
+test("an unconditional key replacement removes an obsolete raw selector key", () => {
+  expect(
+    check('function inspect(node: any) { let key = "text"; key = "bounds"; return node[key]; }'),
+  ).toEqual([]);
+});

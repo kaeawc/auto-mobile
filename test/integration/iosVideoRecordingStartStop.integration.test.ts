@@ -13,6 +13,10 @@ import {
   DAEMON_HEARTBEAT_METHOD,
   getCliSessionIdleTimeoutMs,
 } from "../../src/daemon/constants";
+import {
+  IOS_RECORDING_FILE_READY_TIMEOUT_MS,
+  IOS_RECORDING_STOP_TIMEOUT_MS,
+} from "../../src/features/video/FfmpegVideoProcessingBackend";
 import { defaultTimer } from "../../src/utils/SystemTimer";
 import {
   cleanupIosVideoRecordingSession,
@@ -37,8 +41,13 @@ const DEFAULT_TEST_TIMEOUT_MS = 420000;
 const SESSION_HEARTBEAT_INTERVAL_MS = 2_000;
 const SESSION_HEARTBEAT_COMMAND_TIMEOUT_MS = 5_000;
 const SESSION_RELEASE_COMMAND_TIMEOUT_MS = 5_000;
-const RECORDING_STOP_COMMAND_TIMEOUT_MS = 5_000;
-const RECORDING_STOP_CLEANUP_TIMEOUT_MS = 6_000;
+// The daemon's iOS stop budget already accounts for a flush exceeding the generic
+// 5s window. Tie the CLI deadline to its stop and file-ready budgets, with 10s
+// for CLI startup, ffmpeg postprocessing, and secureFile/stat (#7803).
+const RECORDING_STOP_COMMAND_TIMEOUT_MS =
+  IOS_RECORDING_STOP_TIMEOUT_MS + IOS_RECORDING_FILE_READY_TIMEOUT_MS + 10_000;
+// Cleanup may join the same in-flight stop; give it the full client budget too.
+const RECORDING_STOP_CLEANUP_TIMEOUT_MS = RECORDING_STOP_COMMAND_TIMEOUT_MS;
 
 interface ToolTextResponse {
   content?: Array<{ type?: string; text?: string }>;

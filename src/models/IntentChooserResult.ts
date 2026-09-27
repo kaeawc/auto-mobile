@@ -5,4 +5,8 @@ export interface IntentChooserResult {
   appSelected?: string;
   error?: string;
   observation?: any;
+  /** Whether the selected chooser row carried the requested package metadata. */
+  packageVerified?: boolean;
+  /** Device-clock freshness floor captured immediately after a label-only chooser tap. */
+  tappedAt?: number;
 }

@@ -955,6 +955,19 @@ export const openLinkSchema = withAppIdAliases(
 /** Outcome of a post-open waitFor poll, as produced by {@link waitForObservation}. */
 export type OpenLinkWaitOutcome = WaitForObservationOutcome;
 
+function confirmsPostTapPackage(
+  selection: Awaited<ReturnType<HandleIntentChooser["execute"]>>,
+  packageName: string,
+): boolean {
+  const observed = selection.observation?.viewHierarchy;
+  return (
+    selection.tappedAt !== undefined &&
+    observed?.updatedAt !== undefined &&
+    observed.updatedAt >= selection.tappedAt &&
+    observed.packageName === packageName
+  );
+}
+
 export async function selectAndroidOpenLinkChooser(
   device: BootedDevice,
   packageName: string,
@@ -973,6 +986,14 @@ export async function selectAndroidOpenLinkChooser(
       ...opened,
       success: false,
       error: selection.error ?? `Intent chooser for ${packageName} was not found`,
+      observation: selection.observation ?? opened.observation,
+    };
+  }
+  if (selection.packageVerified === false && !confirmsPostTapPackage(selection, packageName)) {
+    return {
+      ...opened,
+      success: false,
+      error: `Unverified chooser selection for ${packageName}: the post-tap hierarchy is stale or does not confirm the foreground package.`,
       observation: selection.observation ?? opened.observation,
     };
   }

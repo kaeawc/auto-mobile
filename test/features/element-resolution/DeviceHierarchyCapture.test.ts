@@ -63,6 +63,34 @@ test("fresh Android capture preserves the device timestamp across conversion", a
   expect(snapshot.hierarchy.updatedAt).toBe(1234);
 });
 
+test("fresh iOS capture converts the XCTest root before normalization", async () => {
+  const raw = {
+    hierarchy: {
+      class: "XCUIElementTypeWindow",
+      bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+      node: [{ class: "XCUIElementTypeButton", text: "Child" }],
+    },
+  };
+  let converted = false;
+  const capture = createDeviceHierarchyCapture(
+    { platform: "ios", deviceId: "ios-fake", name: "ios-fake" },
+    {
+      timer: new FakeTimer(),
+      syncClientFactory: () => ({
+        requestHierarchySync: async () => ({ hierarchy: raw }),
+        convertToViewHierarchyResult: () => {
+          converted = true;
+          return { hierarchy: { node: raw.hierarchy }, screenWidth: 100, screenHeight: 100 };
+        },
+      }),
+    },
+  );
+  const snapshot = await capture.capture({ freshness: "fresh" });
+  expect(converted).toBe(true);
+  expect(snapshot.nodes.some((node) => node.className === "XCUIElementTypeWindow")).toBe(true);
+  expect(snapshot.nodes.some((node) => node.className === "XCUIElementTypeButton")).toBe(true);
+});
+
 test.each([false, true])(
   "capture avoids supplementation when complete or budget exhausted (exhausted=%s)",
   async (exhausted) => {

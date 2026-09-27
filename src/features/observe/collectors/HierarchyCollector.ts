@@ -62,6 +62,7 @@ export class HierarchyCollector {
     signal?: AbortSignal,
     readOnly: boolean = false,
     capturedHierarchy?: ViewHierarchyResult,
+    timeoutMs?: number,
   ): Promise<void> {
     const { device, viewHierarchy, adb, timer } = this.opts;
     try {
@@ -78,6 +79,7 @@ export class HierarchyCollector {
           skipWaitForFresh,
           minTimestamp,
           signal,
+          timeoutMs,
         ));
       logger.debug("Accessibility service availability cached as: true");
 

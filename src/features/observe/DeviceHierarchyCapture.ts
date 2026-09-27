@@ -41,6 +41,19 @@ export interface DeviceHierarchyCaptureDependencies {
   ids?: IdGenerator;
 }
 
+function normalizeSyncedIosHierarchy(
+  client: HierarchySyncClient,
+  synced: { hierarchy: unknown; frameContext?: ViewHierarchyResult["frameContext"] },
+  timer: Timer,
+): ViewHierarchyResult {
+  return {
+    ...normalizeIosHierarchy(client.convertToViewHierarchyResult(synced.hierarchy)),
+    receivedAt: timer.now(),
+    fresh: true,
+    ...(synced.frameContext !== undefined ? { frameContext: synced.frameContext } : {}),
+  };
+}
+
 /** One capture policy for action tools; a fresh request always bypasses client TTL caches. */
 export function createDeviceHierarchyCapture(
   device: BootedDevice,
@@ -75,7 +88,7 @@ export function createDeviceHierarchyCapture(
         throw new ActionableError("Unable to retrieve a fresh view hierarchy");
       }
       if (device.platform === "ios") {
-        return normalizeIosHierarchy(synced.hierarchy);
+        return normalizeSyncedIosHierarchy(syncClient, synced, timer);
       }
       const hierarchy = syncClient.convertToViewHierarchyResult(synced.hierarchy);
       const updatedAt = (synced.hierarchy as { updatedAt?: number } | null)?.updatedAt;

@@ -301,6 +301,7 @@ describe("ObserveScreen skipBackStack parameter threading", () => {
 
 test("explicit observe capture policy distinguishes cached and fresh moved targets without JSON metadata", async () => {
   const calls: string[] = [];
+  const settledFloors: Array<number | undefined> = [];
   const source = (left: number): ViewHierarchyResult => ({
     updatedAt: left + 100,
     packageName: "com.example",
@@ -327,8 +328,9 @@ test("explicit observe capture policy distinguishes cached and fresh moved targe
         calls.push("fresh");
         return source(100);
       },
-      readSettled: async () => {
+      readSettled: async (request) => {
         calls.push("settled");
+        settledFloors.push(request.minTimestamp);
         return source(200);
       },
       projectVisible: (hierarchy) => hierarchy,
@@ -341,6 +343,7 @@ test("explicit observe capture policy distinguishes cached and fresh moved targe
   const fresh = await observeScreen.execute({ freshness: "fresh", skipScreenshot: true });
   const settled = await observeScreen.execute({ freshness: "settled", skipScreenshot: true });
   expect(calls).toEqual(["cached-ok", "fresh", "settled"]);
+  expect(settledFloors).toEqual([undefined]);
   expect(getHierarchySnapshot(cached.viewHierarchy)?.nodes[0].bounds?.left).toBe(10);
   expect(getHierarchySnapshot(fresh.viewHierarchy)?.nodes[0].bounds?.left).toBe(100);
   expect(getHierarchySnapshot(settled.viewHierarchy)?.nodes[0].bounds?.left).toBe(200);

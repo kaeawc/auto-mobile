@@ -766,7 +766,7 @@ export class RealObserveScreen implements ObserveScreen {
       const captured = options?.freshness
         ? await this.hierarchyCapture.capture({
             freshness: options.freshness,
-            minTimestamp,
+            minTimestamp: minTimestamp > 0 ? minTimestamp : undefined,
             signal,
             timeoutMs: options.timeoutMs,
           })
@@ -783,6 +783,7 @@ export class RealObserveScreen implements ObserveScreen {
         skipBackStack,
         options?.skipRecompositionTracking === true,
         captured?.hierarchy,
+        options?.timeoutMs,
       );
 
       // Reject a stale cross-platform hierarchy (e.g. an iOS hierarchy returned on
@@ -1162,6 +1163,7 @@ export class RealObserveScreen implements ObserveScreen {
     skipBackStack: boolean = false,
     readOnly: boolean = false,
     capturedHierarchy?: ViewHierarchyResult,
+    timeoutMs?: number,
   ): Promise<void> {
     switch (this.device.platform) {
       case "android":
@@ -1175,6 +1177,7 @@ export class RealObserveScreen implements ObserveScreen {
           signal,
           readOnly,
           capturedHierarchy,
+          timeoutMs,
         );
         perf.end();
 
@@ -1312,6 +1315,7 @@ export class RealObserveScreen implements ObserveScreen {
           signal,
           readOnly,
           capturedHierarchy,
+          timeoutMs,
         );
 
         // Resolve screen size: hierarchy-derived bounds, then CtrlProxy-reported logical points.

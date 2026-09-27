@@ -46,6 +46,27 @@ describe("HierarchyCollector", () => {
   });
 
   describe("collect", () => {
+    test("forwards the caller's remaining timeout to the hierarchy read", async () => {
+      fakeViewHierarchy.configureHierarchy({ hierarchy: { node: {} } } as any);
+      let readTimeout: number | undefined;
+      const read = fakeViewHierarchy.getViewHierarchy.bind(fakeViewHierarchy);
+      fakeViewHierarchy.getViewHierarchy = async (...args) => {
+        readTimeout = args[5];
+        return read(...args);
+      };
+      await collector.collect(
+        makeResult(),
+        undefined,
+        undefined,
+        false,
+        0,
+        undefined,
+        false,
+        undefined,
+        750,
+      );
+      expect(readTimeout).toBe(750);
+    });
     test("populates viewHierarchy on success", async () => {
       fakeViewHierarchy.configureHierarchy({
         hierarchy: { foo: "bar" },

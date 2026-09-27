@@ -31,6 +31,14 @@ function obs(updatedAt: number, marker: string): ObserveResult {
 }
 
 describe("pollObserveUntil minTimestamp floor (#6284)", () => {
+  test("passes the remaining poll deadline into each device observation", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const fake = new FakeObserveScreen();
+    fake.setObserveSequence([obs(10, "baseline"), obs(20, "fresh")]);
+    await pollObserveUntil(fake, timer, { timeoutMs: 1000, pollMs: 150 }, () => true);
+    expect(fake.getExecuteOptions().map((options) => options.timeoutMs)).toEqual([1000, 850]);
+  });
   test("forces the first poll STRICTLY past the caller's DEVICE-domain seed, never the host clock", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();

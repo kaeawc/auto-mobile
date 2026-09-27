@@ -726,34 +726,53 @@ const noRawSelectorFieldReadRule = {
           if (type.type === "TSArrayType") return rawType(type.elementType, env, seen);
           if (type.type === "TSTupleType")
             return type.elementTypes.some((item) => rawType(item, env, seen));
-          if (
-            type.type === "TSTypeReference" &&
-            (type.typeArguments?.params ?? type.typeParameters?.params ?? []).some((item) =>
-              rawType(item, env, seen),
-            )
-          )
-            return true;
           if (type.type !== "TSTypeReference") return false;
           const name = type.typeName?.name;
           if (["ViewHierarchyNode", "ViewHierarchyResult", "Record"].includes(name)) return true;
           const alias = env?.get(`type:${name}`);
-          if (!alias || seen.has(name)) return false;
+          if (!alias)
+            return (type.typeArguments?.params ?? type.typeParameters?.params ?? []).some((item) =>
+              rawType(item, env, seen),
+            );
+          if (seen.has(name)) return false;
           return rawType(alias, env, new Set([...seen, name]));
         };
         const lookup = (env, name) => env.get(name);
-        const propertyTypes = (annotation, env, seen = new Set()) => {
+        const containsTypeParameter = (annotation, parameters) => {
+          const type = annotation?.typeAnnotation ?? annotation;
+          if (!type || parameters.size === 0) return false;
+          if (type.type === "TSTypeReference")
+            return (
+              parameters.has(type.typeName?.name) ||
+              (type.typeArguments?.params ?? []).some((item) =>
+                containsTypeParameter(item, parameters),
+              )
+            );
+          if (["TSArrayType", "TSTypeOperator"].includes(type.type))
+            return containsTypeParameter(type.elementType ?? type.typeAnnotation, parameters);
+          if (["TSUnionType", "TSIntersectionType"].includes(type.type))
+            return type.types.some((item) => containsTypeParameter(item, parameters));
+          return false;
+        };
+        const propertyTypes = (annotation, env, seen = new Set(), rawParams = new Set()) => {
           const type = annotation?.typeAnnotation ?? annotation;
           if (type?.type === "TSTypeReference") {
             const name = type.typeName?.name;
             if (seen.has(name)) return new Set();
-            return propertyTypes(env.get(`type:${name}`), env, new Set([...seen, name]));
+            const alias = env.get(`type:${name}`);
+            const params = env.get(`typeParams:${name}`) ?? [];
+            const args = type.typeArguments?.params ?? type.typeParameters?.params ?? [];
+            const rawParams = new Set(params.filter((_, index) => rawType(args[index], env)));
+            return propertyTypes(alias, env, new Set([...seen, name]), rawParams);
           }
           if (!["TSTypeLiteral", "TSInterfaceBody"].includes(type?.type)) return new Set();
           return new Set(
             (type.members ?? type.body)
               .filter(
                 (member) =>
-                  rawType(member.typeAnnotation, env) && propertyName(member.key) !== null,
+                  (rawType(member.typeAnnotation, env) ||
+                    containsTypeParameter(member.typeAnnotation, rawParams)) &&
+                  propertyName(member.key) !== null,
               )
               .map((member) => propertyName(member.key)),
           );
@@ -794,18 +813,32 @@ const noRawSelectorFieldReadRule = {
           }
           if (node.type === "LogicalExpression" || node.type === "ConditionalExpression")
             return raw(node.left ?? node.consequent, env) || raw(node.right ?? node.alternate, env);
-          if (node.type === "CallExpression")
+          if (node.type === "CallExpression") {
+            const method = node.callee?.property?.name;
+            const receiverRaw =
+              node.callee?.type === "MemberExpression" && raw(node.callee.object, env);
+            const transformed = ["map", "flatMap"].includes(method);
+            const callback = node.arguments[0];
+            const callbackEnv = new Map(env);
+            if (callback?.params?.[0] && receiverRaw)
+              bind(callback.params[0], undefined, callbackEnv, true);
+            const transformedRaw = callback?.returnType
+              ? rawType(callback.returnType, env)
+              : callback?.body?.type === "BlockStatement"
+                ? true
+                : raw(callback?.body, callbackEnv);
             return (
               lookup(env, node.callee?.name)?.rawReturn === true ||
-              (node.callee?.type === "MemberExpression" &&
+              (node.callee?.object?.type === "ThisExpression" &&
+                lookup(env, `method:${method}`)?.rawReturn === true) ||
+              (receiverRaw &&
                 ["find", "findLast", "at", "map", "filter", "flatMap", "sort", "toSorted"].includes(
-                  node.callee.property?.name,
+                  method,
                 ) &&
-                raw(node.callee.object, env)) ||
-              ["extractNodeProperties", "getNodeProperties"].includes(
-                node.callee?.property?.name ?? node.callee?.name,
-              )
+                (!transformed || transformedRaw)) ||
+              ["extractNodeProperties", "getNodeProperties"].includes(method ?? node.callee?.name)
             );
+          }
           return false;
         };
         const bind = (pattern, value, env, isRaw, assignment = false, conditional = false) => {
@@ -898,6 +931,12 @@ const noRawSelectorFieldReadRule = {
                   raw(parent.callee.object, env)))
             )
               bind(node.params[0], undefined, local, true);
+            if (
+              parent?.type === "CallExpression" &&
+              ["sort", "toSorted"].includes(parent.callee?.property?.name) &&
+              raw(parent.callee.object, env)
+            )
+              bind(node.params[1], undefined, local, true);
             visit(node.body, local, node, "body", conditional);
             return;
           }
@@ -906,10 +945,20 @@ const noRawSelectorFieldReadRule = {
             // Predeclare explicit type aliases and function signatures in their lexical scope.
             for (const statement of node.body) {
               const declaration = statement.declaration ?? statement;
-              if (declaration.type === "TSTypeAliasDeclaration")
+              if (declaration.type === "TSTypeAliasDeclaration") {
                 env.set(`type:${declaration.id.name}`, declaration.typeAnnotation);
-              if (declaration.type === "TSInterfaceDeclaration")
+                env.set(
+                  `typeParams:${declaration.id.name}`,
+                  (declaration.typeParameters?.params ?? []).map((param) => param.name?.name),
+                );
+              }
+              if (declaration.type === "TSInterfaceDeclaration") {
                 env.set(`type:${declaration.id.name}`, declaration.body);
+                env.set(
+                  `typeParams:${declaration.id.name}`,
+                  (declaration.typeParameters?.params ?? []).map((param) => param.name?.name),
+                );
+              }
               if (declaration.type === "ImportDeclaration")
                 for (const specifier of declaration.specifiers)
                   if (specifier.type === "ImportSpecifier")
@@ -925,6 +974,14 @@ const noRawSelectorFieldReadRule = {
                   raw: false,
                   rawReturn: rawType(declaration.returnType, env),
                 });
+            }
+          }
+          if (node.type === "ClassBody") {
+            env = new Map(env);
+            for (const method of node.body) {
+              const name = propertyName(method.key);
+              if (name)
+                env.set(`method:${name}`, { rawReturn: rawType(method.value?.returnType, env) });
             }
           }
           if (node.type === "VariableDeclarator") {
@@ -974,6 +1031,8 @@ const noRawSelectorFieldReadRule = {
               conditional ||
               ((node.type === "IfStatement" || node.type === "ConditionalExpression") &&
                 (name === "consequent" || name === "alternate")) ||
+              (node.type === "SwitchCase" && name === "consequent") ||
+              (node.type === "LogicalExpression" && name === "right") ||
               (["WhileStatement", "DoWhileStatement", "ForStatement"].includes(node.type) &&
                 name === "body");
             if (Array.isArray(value))

@@ -208,6 +208,13 @@ run_lane() {
   [[ "$output" == *"test/stress/\\*\\*"* ]]
 }
 
+@test "integration lane isolates test files to prevent shared suite state" {
+  run_lane integration
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"--isolate"* ]]
+  [[ "$output" == *".integration.test.ts"* ]]
+}
+
 @test "macOS defaults to two unit shards on three cores" {
   run env -u RUNNER_OS PATH="$STUB_BIN:$PATH" TEST_TS_PRINT_CMD=1 \
     UNAME_S=Darwin STUB_NPROC_CORES=3 bash "$SCRIPT" unit

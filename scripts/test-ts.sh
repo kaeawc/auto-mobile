@@ -428,7 +428,7 @@ case "$mode" in
       "${passthrough_args[@]+"${passthrough_args[@]}"}"
     ;;
   integration)
-    integration_args=(bun test --timeout "$per_test_timeout_ms")
+    integration_args=(bun test --isolate --timeout "$per_test_timeout_ms")
     if [[ "$runner_os" != "Windows" ]]; then
       integration_args+=(--no-orphans "--parallel=${integration_workers}")
     fi

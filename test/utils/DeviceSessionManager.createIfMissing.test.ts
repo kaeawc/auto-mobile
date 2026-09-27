@@ -13,6 +13,7 @@ interface SimctlRecorder {
   createCalls: { name: string; deviceType: string; runtime: string }[];
   bootCalls: string[];
   presentationCalls: Array<{ udid: string; generation: string }>;
+  presentationSignals: Array<AbortSignal | undefined>;
   deleteCalls?: string[];
   deleteSignalAborted?: boolean[];
   bootError?: Error;
@@ -51,8 +52,9 @@ function makeSimctl(recorder: SimctlRecorder, simulatorImages: DeviceInfo[] = []
       }
       return { deviceId: udid, name: "AutoMobile-iPhone-17", platform: "ios" };
     },
-    presentSimulatorAfterStart: async (udid: string, generation: string) => {
+    presentSimulatorAfterStart: async (udid: string, generation: string, signal?: AbortSignal) => {
       recorder.presentationCalls.push({ udid, generation });
+      recorder.presentationSignals.push(signal);
     },
     deleteSimulator: async (udid: string, options?: { signal?: AbortSignal }) => {
       recorder.deleteCalls?.push(udid);
@@ -97,6 +99,7 @@ describe("findOrStartIosDevice creation gate", () => {
       createCalls: [],
       bootCalls: [],
       presentationCalls: [],
+      presentationSignals: [],
       deleteCalls: [],
       deleteSignalAborted: [],
     };
@@ -136,6 +139,7 @@ describe("findOrStartIosDevice creation gate", () => {
     expect(recorder.bootCalls).toEqual(["CREATED-UDID"]);
     expect(recorder.presentationCalls).toHaveLength(1);
     expect(recorder.presentationCalls[0].udid).toBe("CREATED-UDID");
+    expect(recorder.presentationSignals[0]).toBeInstanceOf(AbortSignal);
     expect(recorder.deleteCalls).toEqual([]);
     expect(device.deviceId).toBe("CREATED-UDID");
   });
@@ -196,6 +200,7 @@ describe("findOrStartIosDevice creation gate", () => {
     await manager.findOrStartIosDevice();
 
     expect(recorder.bootCalls).toEqual(["999-available"]);
+    expect(recorder.presentationSignals[0]).toBeInstanceOf(AbortSignal);
   });
 
   test("provisions a replacement when every simulator image is unavailable and creation is enabled", async () => {

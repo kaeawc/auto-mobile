@@ -317,7 +317,11 @@ export interface SimCtl {
    */
   openSimulatorApp(udid?: string, signal?: AbortSignal): Promise<boolean>;
   /** Report a simulator boot completed by this process. Never call from readiness checks. */
-  presentSimulatorAfterStart(udid: string, bootGeneration: string): Promise<void>;
+  presentSimulatorAfterStart(
+    udid: string,
+    bootGeneration: string,
+    signal?: AbortSignal,
+  ): Promise<void>;
 
   /**
    * Deliver a simulated remote push notification to a booted simulator.
@@ -1067,11 +1071,11 @@ export class SimCtlClient implements SimCtl {
     deadlineMs: number,
     signal: AbortSignal | undefined,
   ): Promise<void> {
-    const presentation = this.presentSimulatorAfterStart(udid, bootGeneration);
     const remainingMs = Math.min(1_000, deadlineMs - this.timer.now());
     if (remainingMs <= 0 || signal?.aborted) {
       return;
     }
+    const presentation = this.presentSimulatorAfterStart(udid, bootGeneration);
 
     let timeoutHandle: NodeJS.Timeout | undefined;
     let abortListener: (() => void) | undefined;
@@ -1099,8 +1103,24 @@ export class SimCtlClient implements SimCtl {
     }
   }
 
-  async presentSimulatorAfterStart(udid: string, bootGeneration: string): Promise<void> {
+  async presentSimulatorAfterStart(
+    udid: string,
+    bootGeneration: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    if (signal?.aborted) {
+      return;
+    }
     try {
+      if (signal) {
+        await this.waitForPresentationAfterStart(
+          udid,
+          bootGeneration,
+          this.timer.now() + 1_000,
+          signal,
+        );
+        return;
+      }
       const generation = SimCtlClient.bootPresentationGenerations.get(udid) ?? bootGeneration;
       SimCtlClient.bootPresentationGenerations.set(udid, generation);
       await this.simulatorAppPresenter.presentAfterStart(udid, generation);

@@ -897,6 +897,123 @@ describe("SimCtlClient boot self-verification", () => {
     }
   });
 
+  test("session presentation stops waiting when cancelled after boot", async () => {
+    const previous = process.env.AUTOMOBILE_IOS_HEADLESS;
+    process.env.AUTOMOBILE_IOS_HEADLESS = "false";
+    try {
+      let opens = 0;
+      const harness = createConcurrentStartHarness(
+        () => Promise.resolve(createExecResult("", "")),
+        bootedSimulatorListResult,
+        {
+          openSimulatorApp: () => {
+            opens++;
+            return new Promise(() => {});
+          },
+        },
+      );
+      const controller = new AbortController();
+      let settled = false;
+      const presentation = harness
+        .createClient()
+        .presentSimulatorAfterStart(UDID, "session-generation", controller.signal)
+        .then(() => {
+          settled = true;
+        });
+      await waitForCondition(() => opens === 1, "Simulator.app focus");
+
+      controller.abort();
+      await drainMicrotasks();
+      expect(settled).toBe(true);
+      await presentation;
+    } finally {
+      if (previous === undefined) {
+        delete process.env.AUTOMOBILE_IOS_HEADLESS;
+      } else {
+        process.env.AUTOMOBILE_IOS_HEADLESS = previous;
+      }
+    }
+  });
+
+  test("already-cancelled session never opens Simulator.app", async () => {
+    const previous = process.env.AUTOMOBILE_IOS_HEADLESS;
+    process.env.AUTOMOBILE_IOS_HEADLESS = "false";
+    try {
+      let opens = 0;
+      const harness = createConcurrentStartHarness(
+        () => Promise.resolve(createExecResult("", "")),
+        bootedSimulatorListResult,
+        {
+          openSimulatorApp: async () => {
+            opens++;
+            return createExecResult("", "");
+          },
+        },
+      );
+      const controller = new AbortController();
+      controller.abort();
+
+      await harness
+        .createClient()
+        .presentSimulatorAfterStart(UDID, "session-generation", controller.signal);
+      await drainMicrotasks();
+      expect(opens).toBe(0);
+    } finally {
+      if (previous === undefined) {
+        delete process.env.AUTOMOBILE_IOS_HEADLESS;
+      } else {
+        process.env.AUTOMOBILE_IOS_HEADLESS = previous;
+      }
+    }
+  });
+
+  test("cancelled session leaves another caller's shared presentation running", async () => {
+    const previous = process.env.AUTOMOBILE_IOS_HEADLESS;
+    process.env.AUTOMOBILE_IOS_HEADLESS = "false";
+    try {
+      let opens = 0;
+      let finishOpen: (() => void) | undefined;
+      const harness = createConcurrentStartHarness(
+        () => Promise.resolve(createExecResult("", "")),
+        bootedSimulatorListResult,
+        {
+          openSimulatorApp: () => {
+            opens++;
+            return new Promise((resolve) => {
+              finishOpen = () => resolve(createExecResult("", ""));
+            });
+          },
+        },
+      );
+      const client = harness.createClient();
+      const controller = new AbortController();
+      const cancelled = client.presentSimulatorAfterStart(
+        UDID,
+        "shared-generation",
+        controller.signal,
+      );
+      await waitForCondition(() => opens === 1, "Simulator.app focus");
+      let otherSettled = false;
+      const other = client.presentSimulatorAfterStart(UDID, "shared-generation").then(() => {
+        otherSettled = true;
+      });
+
+      controller.abort();
+      await cancelled;
+      expect(otherSettled).toBe(false);
+      expect(opens).toBe(1);
+      finishOpen?.();
+      await other;
+      expect(otherSettled).toBe(true);
+    } finally {
+      if (previous === undefined) {
+        delete process.env.AUTOMOBILE_IOS_HEADLESS;
+      } else {
+        process.env.AUTOMOBILE_IOS_HEADLESS = previous;
+      }
+    }
+  });
+
   test("headless explicit start never launches Simulator.app", async () => {
     await withHeadlessEnv(async () => {
       const harness = createHarness({ maxAttempts: 1, retryBackoffMs: 0 });

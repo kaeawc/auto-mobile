@@ -937,8 +937,11 @@ export class VideoStreamSocketServer extends BaseSocketServer {
         }
         return;
       }
-      // The deadline runs from first evidence, but a lone stage cannot attest live video.
-      if (capture.lastSourceDataMs === null || capture.lastEncodedDataMs === null) {
+      // A lone stage needs recent native idle evidence to attest live video.
+      if (
+        capture.lastEncodedDataMs === null ||
+        (capture.lastSourceDataMs === null && !this.idleEvidenceIsRecent(capture, this.timer.now()))
+      ) {
         return;
       }
       const packet = encodeHeartbeat();

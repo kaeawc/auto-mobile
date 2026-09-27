@@ -624,18 +624,39 @@ describe("VideoStreamSocketServer", () => {
     const fakeTimer = new FakeTimer();
     const iosDevice = { ...DEVICE, platform: "ios" } as BootedDevice;
     const h = await startHarness({ timer: fakeTimer, device: iosDevice });
-    const { binary } = await subscribe(h.socketPath);
+    const { socket, binary } = await subscribe(h.socketPath);
     await waitFor(() => binary().length >= 12);
+    const receiveAtLeast = (byteCount: number): Promise<void> =>
+      new Promise((resolve) => {
+        const onData = (): void => {
+          if (binary().length >= byteCount) {
+            socket.off("data", onData);
+            resolve();
+          }
+        };
+        socket.on("data", onData);
+        onData();
+      });
 
     // A warm helper's replayed frame reaches ffmpeg but never attests a new source frame.
+    const frameReceived = receiveAtLeast(30);
     h.emitUnattested(Buffer.from([0, 0, 0, 1, 5, 0xaa, 0, 0, 0, 1, 1]));
+    await frameReceived;
+    const beforeIdle = binary().length;
+    const heartbeatReceived = receiveAtLeast(beforeIdle + 12);
     for (let i = 0; i < 10; i++) {
       h.emitIdle();
       fakeTimer.advanceTime(2_000);
     }
+    await heartbeatReceived;
 
     expect(h.sources[0].stopped).toBe(false);
     expect(h.server.activeDeviceIds()).toContain(iosDevice.deviceId);
+    expect(binary().length).toBeGreaterThan(beforeIdle);
+    const packet = binary().subarray(beforeIdle, beforeIdle + 12);
+    const ptsAndFlags = BigInt.asUintN(64, packet.readBigInt64BE(0));
+    expect(ptsAndFlags & PACKET_FLAG_HEARTBEAT).toBe(PACKET_FLAG_HEARTBEAT);
+    expect(packet.readInt32BE(8)).toBe(0);
   });
 
   test("native idle callbacks sustain a static capture only after encoded output", async () => {

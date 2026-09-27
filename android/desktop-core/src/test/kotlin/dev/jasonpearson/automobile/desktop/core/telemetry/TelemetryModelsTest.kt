@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.desktop.core.telemetry
 
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
@@ -42,6 +43,39 @@ class TelemetryModelsTest {
     assertEquals("screen", event.destination)
     assertEquals(mapOf("id" to "42", "options" to """{"tab":"home"}"""), event.arguments)
     assertEquals(listOf("arguments"), mismatches)
+  }
+
+  @Test
+  fun `navigation reports a non-object triggering interaction`() {
+    val data =
+      Json.parseToJsonElement("""{"destination":"screen","triggeringInteraction":["tap"]}""")
+        .jsonObject
+    val mismatches = mutableListOf<String>()
+    val event =
+      parseTelemetryEvent(TelemetryEventEnvelope("navigation", 2L, data = data)) {
+        mismatches.add(it)
+      }
+        as TelemetryDisplayEvent.Navigation
+
+    assertNull(event.triggeringInteraction)
+    assertEquals(listOf("triggeringInteraction"), mismatches)
+  }
+
+  @Test
+  fun `navigation accepts null triggering interaction without a mismatch`() {
+    val data = buildJsonObject {
+      put("destination", "screen")
+      put("triggeringInteraction", JsonNull)
+    }
+    val mismatches = mutableListOf<String>()
+    val event =
+      parseTelemetryEvent(TelemetryEventEnvelope("navigation", 2L, data = data)) {
+        mismatches.add(it)
+      }
+        as TelemetryDisplayEvent.Navigation
+
+    assertNull(event.triggeringInteraction)
+    assertTrue(mismatches.isEmpty())
   }
 
   @Test

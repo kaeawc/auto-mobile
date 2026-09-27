@@ -257,6 +257,11 @@ fun parseTelemetryEvent(
     if (value != null && value !is JsonPrimitive) onFieldMismatch(key)
     return value as? JsonPrimitive
   }
+  fun JsonObject.objectOrNull(key: String): JsonObject? {
+    val value = this[key]
+    if (value != null && value !is JsonNull && value !is JsonObject) onFieldMismatch(key)
+    return value as? JsonObject
+  }
   fun JsonObject.stringOrDefault(key: String, default: String): String =
     primitiveOrNull(key)?.content ?: default
   fun JsonObject.stringOrNull(key: String): String? = primitiveOrNull(key)?.contentOrNull
@@ -360,7 +365,7 @@ fun parseTelemetryEvent(
       val meta = d["metadata"].stringMap("metadata")
       // Build human-readable triggering interaction summary
       val trigInteraction =
-        (d["triggeringInteraction"] as? JsonObject)?.let { ti ->
+        d.objectOrNull("triggeringInteraction")?.let { ti ->
           val interType = ti.stringOrNull("type") ?: "interaction"
           val elText = ti.stringOrNull("elementText")
           val elResId = ti.stringOrNull("elementResourceId")

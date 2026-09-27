@@ -44,12 +44,13 @@ const GENERATED_VIEW_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]
  */
 export const IOS_HIERARCHY_REQUEST_TIMEOUT_MS = 15000;
 
+type HierarchyRequestFailure = { reason: IosHierarchyUnavailableReason; detail?: string };
+
 /**
  * Delegate class for handling hierarchy operations.
  */
 export class CtrlProxyHierarchy {
   private readonly context: HierarchyDelegateContext;
-  private lastRequestFailure?: { reason: IosHierarchyUnavailableReason; detail?: string };
 
   // Track the last known foreground app to detect stale cache from a different app
   private lastKnownPackageName: string | null = null;
@@ -216,6 +217,7 @@ export class CtrlProxyHierarchy {
     // tree" symptom: there was no code path that asked.
     const cacheStale =
       cachedCaptureAgeMs !== undefined && cachedCaptureAgeMs > maxObservationAgeMs();
+    const requestFailure: { value?: HierarchyRequestFailure } = {};
     if (
       !skipWaitForFresh ||
       cacheMissing ||
@@ -223,7 +225,6 @@ export class CtrlProxyHierarchy {
       cacheStale ||
       cachedIsSpringboard
     ) {
-      this.lastRequestFailure = undefined;
       if (cacheStale && skipWaitForFresh && !cacheInvalidated) {
         logger.debug(
           `[CTRL_PROXY] Cached hierarchy is ${cachedCaptureAgeMs}ms old (budget ${maxObservationAgeMs()}ms); forcing a synchronous re-verification`,
@@ -235,7 +236,14 @@ export class CtrlProxyHierarchy {
       // in both cases and can return the same pre-dialog tree. Force a real
       // capture so normal observe sees the same current window as raw observe.
       const forceCapture = cacheMissing || cacheInvalidated || cachedIsSpringboard;
-      const result = await this.requestHierarchySync(perf, forceCapture, signal, timeout);
+      const result = await this.requestHierarchySync(
+        perf,
+        forceCapture,
+        signal,
+        timeout,
+        false,
+        requestFailure,
+      );
       if (result) {
         if (result.hierarchy.packageName) {
           this.lastKnownPackageName = result.hierarchy.packageName;
@@ -322,8 +330,8 @@ export class CtrlProxyHierarchy {
     return {
       hierarchy: null,
       fresh: false,
-      unavailableReason: this.lastRequestFailure?.reason ?? "unknown",
-      unavailableDetail: this.lastRequestFailure?.detail,
+      unavailableReason: requestFailure.value?.reason ?? "unknown",
+      unavailableDetail: requestFailure.value?.detail,
     };
   }
 
@@ -341,16 +349,23 @@ export class CtrlProxyHierarchy {
     deadlineMs: number,
     perf: PerformanceTracker | undefined,
     signal: AbortSignal | undefined,
-  ): Promise<"connected" | "failed" | "timeout"> {
+  ): Promise<{ status: "connected" | "failed" | "timeout"; failure?: HierarchyRequestFailure }> {
     throwIfAborted(signal);
     const remainingMs = deadlineMs - this.context.timer.now();
     if (remainingMs <= 0) {
-      return "timeout";
+      return { status: "timeout" };
     }
 
-    return new Promise<"connected" | "failed" | "timeout">((resolve, reject) => {
+    return new Promise<{
+      status: "connected" | "failed" | "timeout";
+      failure?: HierarchyRequestFailure;
+    }>((resolve, reject) => {
       let settled = false;
-      const settle = (result: "connected" | "failed" | "timeout" | Error) => {
+      const settle = (
+        result:
+          | { status: "connected" | "failed" | "timeout"; failure?: HierarchyRequestFailure }
+          | Error,
+      ) => {
         if (settled) {
           return;
         }
@@ -365,11 +380,19 @@ export class CtrlProxyHierarchy {
       };
       const onAbort = () =>
         settle(signal?.reason instanceof Error ? signal.reason : new Error("Operation cancelled"));
-      const timeout = this.context.timer.setTimeout(() => settle("timeout"), remainingMs);
+      const timeout = this.context.timer.setTimeout(
+        () => settle({ status: "timeout" }),
+        remainingMs,
+      );
 
       signal?.addEventListener("abort", onAbort, { once: true });
       void this.context.ensureConnected(perf).then(
-        (connected) => settle(connected ? "connected" : "failed"),
+        (connected) =>
+          settle(
+            connected
+              ? { status: "connected" }
+              : { status: "failed", failure: this.context.getLastConnectFailure?.() },
+          ),
         (error: unknown) => settle(error instanceof Error ? error : new Error(String(error))),
       );
     });
@@ -384,19 +407,26 @@ export class CtrlProxyHierarchy {
     signal?: AbortSignal,
     timeoutMs: number = 5000,
     suppressObservationStreamPush: boolean = false,
+    failureSink?: { value?: HierarchyRequestFailure },
   ): Promise<{
     hierarchy: XCTestHierarchy;
     perfTiming?: CtrlProxyPerfTiming;
     frameContext?: string;
   } | null> {
+    const recordFailure = (failure: HierarchyRequestFailure) => {
+      if (failureSink) {
+        failureSink.value = failure;
+      }
+    };
     const deadlineMs = this.context.timer.now() + Math.max(0, timeoutMs);
     throwIfAborted(signal);
     const connection = await this.ensureConnectedBeforeDeadline(deadlineMs, perf, signal);
-    if (connection !== "connected") {
-      this.lastRequestFailure =
-        connection === "timeout"
+    if (connection.status !== "connected") {
+      recordFailure(
+        connection.status === "timeout"
           ? { reason: "request_timed_out" }
-          : (this.context.getLastConnectFailure?.() ?? { reason: "connection_lost" });
+          : (connection.failure ?? { reason: "connection_lost" }),
+      );
       return null;
     }
     // Connection establishment can include iOS runner setup. It is not
@@ -407,7 +437,7 @@ export class CtrlProxyHierarchy {
     }
     const remainingTimeoutMs = deadlineMs - this.context.timer.now();
     if (remainingTimeoutMs <= 0) {
-      this.lastRequestFailure = { reason: "request_timed_out" };
+      recordFailure({ reason: "request_timed_out" });
       return null;
     }
 
@@ -419,10 +449,17 @@ export class CtrlProxyHierarchy {
       hierarchy?: XCTestHierarchy;
       perfTiming?: CtrlProxyPerfTiming;
       frameContext?: string;
-    }>(requestId, "hierarchy", remainingTimeoutMs, () => ({
-      hierarchy: undefined,
-      perfTiming: undefined,
-    }));
+      error?: string;
+    }>(
+      requestId,
+      "hierarchy",
+      remainingTimeoutMs,
+      () => ({
+        hierarchy: undefined,
+        perfTiming: undefined,
+      }),
+      (error) => ({ error }),
+    );
 
     const rejectOnAbort = () => {
       this.context.requestManager.reject(
@@ -475,7 +512,11 @@ export class CtrlProxyHierarchy {
         };
       }
 
-      this.lastRequestFailure = { reason: "request_timed_out" };
+      recordFailure(
+        result.error !== undefined
+          ? { reason: "unknown", detail: result.error }
+          : { reason: "request_timed_out" },
+      );
       return null;
     } finally {
       signal?.removeEventListener("abort", rejectOnAbort);

@@ -83,6 +83,8 @@ class LayoutInspectorState(
         as? kotlinx.serialization.json.JsonObject
     val error = (hierarchy?.get("error") as? JsonPrimitive)?.contentOrNull ?: return false
     val prefix = "Failed to retrieve iOS view hierarchy from CtrlProxy iOS: "
+    if (!error.startsWith(prefix)) return false
+    debounceJob?.cancel()
     hierarchyUnavailableReason = error.removePrefix(prefix)
     return true
   }

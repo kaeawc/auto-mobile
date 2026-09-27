@@ -33,7 +33,8 @@
 #
 #   collect_touched_paths_including_deleted <project_root> <regex>
 #       Emit repo-relative modified paths matching <regex>, including paths
-#       deleted from disk. Deduplicated + sorted.
+#       deleted from disk. Deduplicated + sorted. Returns non-zero if the VCS
+#       diff fails so callers can distinguish failure from no matching paths.
 #
 #   collect_changed_paths_since_sha <project_root> <sha> <regex>
 #       Emit repo-relative paths changed from <sha> to the working copy matching
@@ -117,10 +118,13 @@ collect_changed_since_sha() {
 collect_touched_paths_including_deleted() {
   local project_root="$1"
   local regex="$2"
+  local touched_files
 
   : "$project_root"
   # shellcheck disable=SC2119 # The current workspace determines touched files.
-  vcs_touched_files_including_deleted \
+  touched_files="$(vcs_touched_files_including_deleted)" || return $?
+
+  printf '%s\n' "$touched_files" \
     | _filter_matching_paths "$regex" | sort | uniq
 }
 

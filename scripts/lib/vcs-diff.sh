@@ -75,13 +75,30 @@ vcs_touched_files() {
 }
 
 vcs_touched_files_including_deleted() {
+  local cached_changes unstaged_changes rc
   if vcs_uses_jj; then
     jj diff --from @- --to @ --name-only -- "$@"
     return
   fi
+
+  cached_changes="$(git diff --no-renames --cached --name-only --diff-filter=ACMRD)" || {
+    rc=$?
+    printf 'vcs_touched_files_including_deleted: cached git diff failed (exit %s)\n' "$rc" >&2
+    return "$rc"
+  }
+  unstaged_changes="$(git diff --no-renames --name-only --diff-filter=ACMRD)" || {
+    rc=$?
+    printf 'vcs_touched_files_including_deleted: unstaged git diff failed (exit %s)\n' "$rc" >&2
+    return "$rc"
+  }
+
   {
-    git diff --no-renames --cached --name-only --diff-filter=ACMRD
-    git diff --no-renames --name-only --diff-filter=ACMRD
+    if [[ -n "$cached_changes" ]]; then
+      printf '%s\n' "$cached_changes"
+    fi
+    if [[ -n "$unstaged_changes" ]]; then
+      printf '%s\n' "$unstaged_changes"
+    fi
   } | sort | uniq
 }
 

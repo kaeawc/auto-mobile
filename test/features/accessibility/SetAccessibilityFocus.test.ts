@@ -203,6 +203,33 @@ describe("SetAccessibilityFocus", () => {
     expect(service.calls).toEqual([{ method: "set", resourceId: "com.example:id/close" }]);
   });
 
+  test("contentDesc focus uses the matching child's native ID", async () => {
+    observeScreen.setObserveResult(
+      makeObserveResult(
+        makeViewHierarchy([
+          {
+            $: {
+              "resource-id": "com.example:id/row",
+              clickable: true,
+              bounds: bounds(0, 0, 100, 100),
+            },
+            node: [
+              {
+                $: {
+                  "resource-id": "com.example:id/close_icon",
+                  "content-desc": "Close",
+                  bounds: bounds(10, 10, 40, 40),
+                },
+              },
+            ],
+          },
+        ]),
+      ),
+    );
+    await makeFeature().execute({ action: "set", contentDesc: "Close" });
+    expect(service.calls).toEqual([{ method: "set", resourceId: "com.example:id/close_icon" }]);
+  });
+
   test("contentDesc selector only matches content-desc, not a same-text label", async () => {
     observeScreen.setObserveResult(
       makeObserveResult(

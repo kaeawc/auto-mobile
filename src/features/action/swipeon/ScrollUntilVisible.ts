@@ -18,6 +18,7 @@ import {
 } from "../../utility/ElementResolver";
 import { SearchableHierarchy } from "../../utility/SearchableNode";
 import type { ResolverSelector } from "../../../server/elementSelectorSchemas";
+import { normalizeQuotes } from "../../utility/TextMatcher";
 import type { ElementGeometry } from "../../../utils/interfaces/ElementGeometry";
 import type { ObserveScreen } from "../../observe/interfaces/ObserveScreen";
 import { AccessibilityDetector } from "../../../utils/interfaces/AccessibilityDetector";
@@ -46,11 +47,11 @@ function matchedSourceElement(
   selector: ResolverSelector,
 ): Element | null {
   const sources = result.matches.find((match) => match.node === result.chosen)?.sourceNodes;
-  const query = selector.text?.trim().toLowerCase();
+  const query = selector.text && normalizeQuotes(selector.text).trim().toLowerCase();
   const matched = query
     ? sources?.find((source) =>
         Object.values(source.textSources).some((value) => {
-          const actual = value.trim().toLowerCase();
+          const actual = normalizeQuotes(value).trim().toLowerCase();
           return result.matchMode === "contains" ? actual.includes(query) : actual === query;
         }),
       )

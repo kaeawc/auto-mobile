@@ -38,17 +38,34 @@ export interface AccessibilityFocusService {
   requestCurrentFocus(): Promise<CurrentFocusResult>;
 }
 
-function matchedTextNativeId(resolution: ElementResolution, text: string): string | undefined {
+function matchedTextNativeId(
+  resolution: ElementResolution,
+  text: string,
+  contentDescription = false,
+): string | undefined {
   const matched = resolution.matches.find(({ node }) => node === resolution.chosen);
   const query = normalizeQuotes(text).trim().toLowerCase();
   return matched?.sourceNodes?.find(
     (node) =>
       node.nativeId &&
-      Object.values(node.textSources).some((value) => {
+      (contentDescription
+        ? [node.textSources["content-desc"], node.accessibleLabel]
+        : Object.values(node.textSources)
+      ).some((value) => {
         const source = value && normalizeQuotes(value).trim().toLowerCase();
         return resolution.matchMode === "contains" ? source?.includes(query) : source === query;
       }),
   )?.nativeId;
+}
+
+function selectedNativeId(
+  resolution: ElementResolution,
+  options: SetAccessibilityFocusOptions,
+): string | undefined {
+  const selectedText = options.text ?? options.contentDesc;
+  return selectedText
+    ? matchedTextNativeId(resolution, selectedText, !!options.contentDesc)
+    : resolution.chosen?.nativeId;
 }
 
 export interface SetAccessibilityFocusDependencies {
@@ -136,16 +153,14 @@ export class SetAccessibilityFocus {
     const resolution = this.resolver.resolve(
       { id: String(hierarchy.updatedAt ?? "accessibility-focus"), nodes },
       selector,
-      options.text
+      options.text || options.contentDesc
         ? { action: "inspect" }
         : { action: "accessibility-focus", requireResourceId: true },
     );
     if (resolution.error) {
       throw new ActionableError(resolution.error);
     }
-    const resourceId = options.text
-      ? matchedTextNativeId(resolution, options.text)
-      : resolution.chosen?.nativeId;
+    const resourceId = selectedNativeId(resolution, options);
     if (!resourceId) {
       if (
         resolution.matches.some(({ node, sourceNodes }) =>

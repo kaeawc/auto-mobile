@@ -127,6 +127,27 @@ describe("PinchOn", () => {
     expect(target.bounds).toEqual({ left: 0, top: 0, right: 1920, bottom: 1080 });
   });
 
+  test("auto-target favors the full-screen map over a top-window keyboard key", async () => {
+    const mapBounds = { left: 0, top: 0, right: 1000, bottom: 1500 };
+    (pinchOn as any).capture = new FakeHierarchyCapture(() => ({
+      hierarchy: { node: { "resource-id": "app:id/map", bounds: mapBounds, scrollable: true } },
+      windows: [
+        {
+          windowLayer: 10,
+          hierarchy: {
+            node: {
+              "resource-id": "ime:id/key",
+              clickable: true,
+              bounds: { left: 0, top: 0, right: 50, bottom: 50 },
+            },
+          },
+        },
+      ],
+    }));
+    const target = await (pinchOn as any).resolveTarget({ direction: "out" });
+    expect(target.bounds).toEqual(mapBounds);
+  });
+
   test("returns error when container specifies both elementId and text", async () => {
     const result = await pinchOn.execute({
       direction: "in",

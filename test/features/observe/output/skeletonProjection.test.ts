@@ -6,7 +6,10 @@ import {
 import { setElementProvenance } from "../../../../src/features/observe/output/elementProvenance";
 import { DefaultObserveElementCollector } from "../../../../src/features/observe/ObserveElementCollector";
 import { DefaultElementSelector } from "../../../../src/features/utility/DefaultElementSelector";
+import { ResolverElementSelector } from "../../../../src/features/utility/ResolverElementSelector";
 import { tapOnSchema } from "../../../../src/server/interactionTools";
+import { serverConfig } from "../../../../src/utils/ServerConfig";
+import { attachRawViewHierarchy } from "../../../../src/utils/viewHierarchySearch";
 import type { Element } from "../../../../src/models/Element";
 import type { ObserveResult } from "../../../../src/models/ObserveResult";
 import type { SkeletonElement } from "../../../../src/models/ObserveResult";
@@ -856,6 +859,325 @@ describe("toSkeleton — acceptance criteria", () => {
   });
 
   describe("#6221 item 2: duplicate-id disambiguator", () => {
+    test("long-press-only rows with a shared elementId replay both indexes", () => {
+      const resourceId = "com.example:id/hold";
+      const viewHierarchy = {
+        hierarchy: {
+          node: {
+            bounds: bounds(0, 0, 100, 200),
+            node: [
+              {
+                "resource-id": resourceId,
+                "long-clickable": true,
+                text: "Hold",
+                bounds: bounds(0, 0, 80, 40),
+              },
+              {
+                "resource-id": resourceId,
+                "long-clickable": true,
+                text: "Hold",
+                bounds: bounds(0, 60, 80, 100),
+              },
+            ],
+          },
+        },
+      } as ViewHierarchyResult;
+      const elements = new DefaultObserveElementCollector().collect(viewHierarchy, "android");
+      const rows = projectSkeleton(elements!, { width: 100, height: 200 }).skeleton.filter(
+        (entry) => entry.elementId === resourceId,
+      );
+      expect(rows).toHaveLength(2);
+      expect(rows.map((entry) => entry.affordances)).toEqual([["long-press"], ["long-press"]]);
+      expect(rows.map((entry) => entry.index)).toEqual([0, 1]);
+
+      const selector = new ResolverElementSelector();
+      for (const row of rows) {
+        const result = selector.selectByResourceId(viewHierarchy, resourceId, {
+          index: row.index,
+          intentAction: "long-press",
+        });
+        expect(result.element?.bounds).toEqual(bounds(...row.bounds));
+      }
+    });
+
+    test("scroll-only row before clickable duplicate labels shares resolver positions", () => {
+      const label = "Results";
+      const viewHierarchy = {
+        hierarchy: {
+          node: {
+            bounds: bounds(0, 0, 100, 200),
+            node: [
+              { text: label, scrollable: true, bounds: bounds(0, 0, 80, 40) },
+              { text: label, clickable: true, bounds: bounds(0, 60, 80, 100) },
+              { text: label, clickable: true, bounds: bounds(0, 120, 80, 160) },
+            ],
+          },
+        },
+      } as ViewHierarchyResult;
+      const elements = new DefaultObserveElementCollector().collect(viewHierarchy, "android");
+      const rows = projectSkeleton(elements!, { width: 100, height: 200 })
+        .skeleton.filter((entry) => entry.label === label)
+        .sort((a, b) => a.bounds[1] - b.bounds[1]);
+      expect(rows).toHaveLength(3);
+      expect(rows.map((entry) => entry.affordances)).toEqual([["scroll"], ["tap"], ["tap"]]);
+      expect(rows.map((entry) => entry.index)).toEqual([0, 1, 2]);
+
+      const selector = new ResolverElementSelector();
+      for (const row of rows) {
+        const result = selector.selectByText(viewHierarchy, label, {
+          index: row.index,
+          partialMatch: false,
+          intentAction: row.affordances.includes("scroll") ? "scroll" : "tap",
+        });
+        expect(result.element?.bounds).toEqual(bounds(...row.bounds));
+      }
+    });
+
+    test("input-only fields with a shared elementId replay each focus-input index", () => {
+      const resourceId = "com.example:id/answer";
+      const viewHierarchy = {
+        hierarchy: {
+          node: {
+            bounds: bounds(0, 0, 100, 200),
+            node: [
+              {
+                "resource-id": resourceId,
+                role: "textfield",
+                text: "First",
+                actions: ["set_text"],
+                bounds: bounds(0, 0, 80, 40),
+              },
+              {
+                "resource-id": resourceId,
+                role: "textfield",
+                text: "Second",
+                actions: ["set_text"],
+                bounds: bounds(0, 60, 80, 100),
+              },
+            ],
+          },
+        },
+      } as ViewHierarchyResult;
+      const elements = new DefaultObserveElementCollector().collect(viewHierarchy, "android");
+      const rows = projectSkeleton(elements!, { width: 100, height: 200 }).skeleton.filter(
+        (entry) => entry.elementId === resourceId,
+      );
+      expect(rows).toHaveLength(2);
+      expect(rows.map((entry) => entry.affordances)).toEqual([["input"], ["input"]]);
+      expect(rows.map((entry) => entry.index)).toEqual([0, 1]);
+
+      const selector = new ResolverElementSelector();
+      for (const row of rows) {
+        const result = selector.selectByResourceId(viewHierarchy, resourceId, {
+          index: row.index,
+          selectionIntent: "focus-input",
+        });
+        expect(result.element?.bounds).toEqual(bounds(...row.bounds));
+      }
+    });
+
+    test("id-less iOS controls index only visible duplicate labels and replay each index", () => {
+      const viewHierarchy = {
+        hierarchy: {
+          node: {
+            bounds: bounds(0, 0, 100, 200),
+            node: [
+              {
+                "ios-accessibility-label": "Remove",
+                clickable: true,
+                bounds: bounds(0, 240, 80, 280),
+              },
+              {
+                "ios-accessibility-label": "Remove",
+                clickable: true,
+                bounds: bounds(0, 0, 80, 40),
+              },
+              {
+                "ios-accessibility-label": "Remove",
+                clickable: true,
+                bounds: bounds(0, 60, 80, 100),
+              },
+            ],
+          },
+        },
+      } as ViewHierarchyResult;
+      const elements = new DefaultObserveElementCollector().collect(viewHierarchy, "ios");
+      const rows = projectSkeleton(elements!, { width: 100, height: 200 }).skeleton.filter(
+        (entry) => entry.label === "Remove",
+      );
+      const offscreen = rows.find((entry) => entry.bounds[1] === 240);
+      expect(offscreen).toBeDefined();
+      expect("index" in offscreen!).toBe(false);
+      const indexed = rows.filter((entry) => entry.index !== undefined);
+      expect(indexed.map((entry) => entry.index)).toEqual([0, 1]);
+      const selector = new ResolverElementSelector();
+      for (const row of indexed) {
+        const result = selector.selectByText(viewHierarchy, row.label!, {
+          index: row.index,
+          partialMatch: false,
+        });
+        expect(result.element?.bounds).toEqual(bounds(...row.bounds));
+      }
+    });
+
+    test("off-screen duplicate before an on-screen label replays both indexes in raw search", () => {
+      const label = "Remove";
+      const viewHierarchy = {
+        hierarchy: {
+          node: {
+            bounds: bounds(0, 0, 100, 200),
+            node: [
+              {
+                "ios-accessibility-label": label,
+                clickable: true,
+                bounds: bounds(0, 240, 80, 280),
+              },
+              { "ios-accessibility-label": label, clickable: true, bounds: bounds(0, 0, 80, 40) },
+            ],
+          },
+        },
+      } as ViewHierarchyResult;
+      const elements = new DefaultObserveElementCollector().collect(viewHierarchy, "ios");
+      const viewport = { width: 100, height: 200 };
+      const previous = serverConfig.isRawElementSearchEnabled();
+      try {
+        serverConfig.setRawElementSearchEnabled(false);
+        const visibleOnly = projectSkeleton(elements!, viewport).skeleton.filter(
+          (entry) => entry.label === label,
+        );
+        expect(visibleOnly).toHaveLength(2);
+        expect(visibleOnly.map((entry) => entry.index)).toEqual([undefined, undefined]);
+
+        // The raw carrier makes the resolver's viewport() return undefined.
+        attachRawViewHierarchy(viewHierarchy, structuredClone(viewHierarchy));
+        serverConfig.setRawElementSearchEnabled(true);
+        const rows = projectSkeleton(elements!, viewport).skeleton.filter(
+          (entry) => entry.label === label,
+        );
+        expect(rows.map((entry) => entry.index)).toEqual([0, 1]);
+        const selector = new ResolverElementSelector();
+        for (const row of rows) {
+          const result = selector.selectByText(viewHierarchy, label, {
+            index: row.index,
+            partialMatch: false,
+          });
+          expect(result.element?.bounds).toEqual(bounds(...row.bounds));
+        }
+      } finally {
+        serverConfig.setRawElementSearchEnabled(previous);
+      }
+    });
+
+    test("zero-sized fallback viewport keeps bounded duplicate labels eligible", () => {
+      const label = "Remove";
+      const first: Element = {
+        "ios-accessibility-label": label,
+        clickable: true,
+        bounds: bounds(0, 0, 80, 40),
+      };
+      const second: Element = {
+        "ios-accessibility-label": label,
+        clickable: true,
+        bounds: bounds(0, 60, 80, 100),
+      };
+      const rows = projectSkeleton(
+        makeElements({ clickable: [first, second], text: [first, second] }),
+        { width: 0, height: 0 },
+      ).skeleton;
+      expect(rows.map((entry) => entry.index)).toEqual([0, 1]);
+    });
+
+    test("id-less labels in an overlay rank ahead of the main hierarchy and replay both indexes", () => {
+      const backgroundBounds = bounds(0, 0, 80, 40);
+      const overlayBounds = bounds(0, 60, 80, 100);
+      const viewHierarchy = {
+        hierarchy: {
+          node: {
+            bounds: bounds(0, 0, 100, 200),
+            node: { text: "Remove", clickable: true, bounds: backgroundBounds },
+          },
+        },
+        windows: [
+          {
+            windowLayer: 10,
+            hierarchy: { node: { text: "Remove", clickable: true, bounds: overlayBounds } },
+          },
+        ],
+      } as ViewHierarchyResult;
+      const elements = new DefaultObserveElementCollector().collect(viewHierarchy, "android");
+      const rows = projectSkeleton(elements!, { width: 100, height: 200 }).skeleton.filter(
+        (entry) => entry.label === "Remove",
+      );
+      expect(rows).toHaveLength(2);
+      expect(rows.find((entry) => entry.bounds[1] === overlayBounds.top)?.index).toBe(0);
+      expect(rows.find((entry) => entry.bounds[1] === backgroundBounds.top)?.index).toBe(1);
+
+      const selector = new ResolverElementSelector();
+      for (const row of rows) {
+        const result = selector.selectByText(viewHierarchy, row.label!, {
+          index: row.index,
+          partialMatch: false,
+        });
+        expect(result.element?.bounds).toEqual(bounds(...row.bounds));
+      }
+    });
+
+    test.each([
+      [" Remove ", "whitespace"],
+      ["remove", "case"],
+      ["Remove\u2019s", "curly quote"],
+    ])("id-less exact-label %s variant shares indexes and replays each row (%s)", (variant) => {
+      const canonical = variant.includes("\u2019") ? "Remove's" : "Remove";
+      const viewHierarchy = {
+        hierarchy: {
+          node: {
+            bounds: bounds(0, 0, 100, 200),
+            node: [
+              {
+                "ios-accessibility-label": canonical,
+                clickable: true,
+                bounds: bounds(0, 0, 80, 40),
+              },
+              {
+                "ios-accessibility-label": variant,
+                clickable: true,
+                bounds: bounds(0, 60, 80, 100),
+              },
+            ],
+          },
+        },
+      } as ViewHierarchyResult;
+      const elements = new DefaultObserveElementCollector().collect(viewHierarchy, "ios");
+      const rows = projectSkeleton(elements!, { width: 100, height: 200 }).skeleton;
+      expect(rows).toHaveLength(2);
+      expect(rows.map((entry) => entry.index)).toEqual([0, 1]);
+
+      const selector = new ResolverElementSelector();
+      for (const row of rows) {
+        const result = selector.selectByText(viewHierarchy, row.label!, {
+          index: row.index,
+          partialMatch: false,
+        });
+        expect(result.element?.bounds).toEqual(bounds(...row.bounds));
+      }
+    });
+
+    test("id-less labels with different raw padding share emitted-label indexes", () => {
+      const padded: Element = {
+        "ios-accessibility-label": " Remove",
+        clickable: true,
+        bounds: bounds(0, 0, 80, 40),
+      };
+      const plain: Element = {
+        "ios-accessibility-label": "Remove",
+        clickable: true,
+        bounds: bounds(0, 60, 80, 100),
+      };
+      const rows = toSkeleton(makeElements({ clickable: [padded, plain] }));
+      expect(rows.map((entry) => entry.label)).toEqual(["Remove", "Remove"]);
+      expect(rows.map((entry) => entry.index)).toEqual([0, 1]);
+    });
+
     test("unique-id entries never carry an index", () => {
       const a: Element = { bounds: bounds(0, 0, 10, 10), "resource-id": "a", clickable: "true" };
       const b: Element = { bounds: bounds(0, 20, 10, 30), "resource-id": "b", clickable: "true" };

@@ -99,6 +99,16 @@ describe("clickable predicate", () => {
     expect(evaluation.matched).toBe(false);
   });
 
+  test("reports a partial ID as a timeout candidate when the exact clickable ID is absent", () => {
+    const evaluation = clickable(finder, { elementId: "submit" })(
+      obs([node({ "resource-id": "submit_help", clickable: true })]),
+    );
+    expect(evaluation.matched).toBe(false);
+    expect(evaluation.candidates?.map((candidate) => candidate["resource-id"])).toEqual([
+      "submit_help",
+    ]);
+  });
+
   test("no hierarchy reads as no-match, not a throw", () => {
     const predicate = clickable(finder, { elementId: "submit" });
     const evaluation = predicate(emptyObs());
@@ -238,6 +248,12 @@ describe("textEquals predicate", () => {
     const evaluation = predicate(obs([node({ "resource-id": "label", text: "Done" })]));
     expect(evaluation.matched).toBe(true);
     expect(evaluation.matchedElement!.text).toBe("Done");
+  });
+
+  test("reports partial text as a timeout candidate when locator-less exact text is absent", () => {
+    const evaluation = textEquals(finder, {}, "Ready")(obs([node({ text: "Ready soon" })]));
+    expect(evaluation.matched).toBe(false);
+    expect(evaluation.candidates?.map((candidate) => candidate.text)).toEqual(["Ready soon"]);
   });
 
   test("does NOT match when the located element is absent", () => {

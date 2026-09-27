@@ -110,13 +110,12 @@ export interface SkeletonElement {
   /** Present only for a `toggle` affordance: the current checked state. */
   checked?: boolean;
   /**
-   * Disambiguator (issue #6221 item 2), present only when `elementId` repeats
-   * elsewhere in this same skeleton. Pass it verbatim as `tapOn({ selector,
-   * index })` to hit this exact entry instead of the `selectionStrategy:
-   * "first"` default: `index` is 0-based rank in the same "Nth on-screen match
-   * in hierarchy order" that `tapOn.index` itself resolves against (see
-   * `SkeletonProjection.assignDuplicateIndexes` for how the two are kept in
-   * sync). Unique-id entries never carry this field.
+   * Disambiguator (issue #6221 item 2), present when a replay-eligible row's
+   * `elementId`, or id-less `label`, repeats among other replay-eligible rows.
+   * Replay eligibility requires valid bounds and an affordance; a known viewport
+   * excludes off-screen rows unless raw element search is enabled. Pass `index`
+   * verbatim to `tapOn({ selector, index })`; it is the 0-based hierarchy-order
+   * rank among eligible selector matches.
    */
   index?: number;
 }

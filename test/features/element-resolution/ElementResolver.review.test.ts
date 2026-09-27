@@ -2,6 +2,7 @@ import { DefaultObserveElementCollector } from "../../../src/features/observe/Ob
 import { projectSkeleton } from "../../../src/features/observe/output/SkeletonProjection";
 import { expect, test } from "bun:test";
 import { ElementResolver } from "../../../src/features/utility/ElementResolver";
+import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
 import { SearchableHierarchy } from "../../../src/features/utility/SearchableNode";
 import { resolverSelectorSchema } from "../../../src/server/elementSelectorSchemas";
 
@@ -298,7 +299,7 @@ test("iOS table cells are sibling rows rather than collection boundaries", () =>
   ).toBe("remove");
 });
 
-test("observation keeps legacy main-first order until live actions use the resolver", () => {
+test("observation keeps main-first row order but indexes duplicates in resolver window order", () => {
   const main = node("open", { text: "Open", clickable: true });
   const dialog = node("open", {
     text: "Open",
@@ -316,7 +317,20 @@ test("observation keeps legacy main-first order until live actions use the resol
     [0, 0, 100, 100],
     [10, 10, 50, 50],
   ]);
-  expect(observed.map((row) => row.index)).toEqual([0, 1]);
+  expect(observed.map((row) => row.index)).toEqual([1, 0]);
+  const selector = new ResolverElementSelector();
+  for (const row of observed) {
+    const result = selector.selectByText(hierarchy, row.label!, {
+      index: row.index,
+      partialMatch: false,
+    });
+    expect(result.element?.bounds).toEqual({
+      left: row.bounds[0],
+      top: row.bounds[1],
+      right: row.bounds[2],
+      bottom: row.bounds[3],
+    });
+  }
 });
 
 test("sibling traversal includes the explicit container but cannot cross its boundary", () => {

@@ -18,6 +18,7 @@ import {
 } from "../models";
 import type { ElementParser } from "./interfaces/ElementParser";
 import type { ElementGeometry } from "./interfaces/ElementGeometry";
+import type { Element } from "../models/Element";
 import { DefaultElementParser } from "../features/utility/ElementParser";
 import { DefaultElementGeometry } from "../features/utility/ElementGeometry";
 import { ViewHierarchy } from "../features/observe/ViewHierarchy";
@@ -120,6 +121,10 @@ export interface ChooserAppMetadata {
     adbFactory: AdbClientFactory,
     minTimestamp: number,
   ): Promise<ViewHierarchyResult>;
+}
+
+class ChooserRowMissingError extends Error {
+  capturedAt?: number;
 }
 
 const defaultChooserAppMetadata: ChooserAppMetadata = {
@@ -673,13 +678,7 @@ export class DeepLinkManager implements DeepLinkManager {
           }
         }
       } else if (preference === "custom" && customAppPackage) {
-        targetElement = await this.findAppInChooser(
-          rootNodes,
-          customAppPackage,
-          viewHierarchy.packageName,
-          undefined,
-          viewHierarchy.updatedAt,
-        );
+        targetElement = await this.findAppInChooserAcrossPages(viewHierarchy, customAppPackage);
       }
 
       if (targetElement) {
@@ -792,6 +791,10 @@ export class DeepLinkManager implements DeepLinkManager {
         const resourceId = properties["resource-id"] ?? "";
         const separator = resourceId.indexOf(":id/");
         const namespace = separator > 0 ? resourceId.slice(0, separator) : undefined;
+        const inAppList = ancestors.some((ancestor) => {
+          const id = this.parser.extractNodeProperties(ancestor)["resource-id"];
+          return typeof id === "string" && /(?:^|\/)(?:resolver_list|chooser_list|list)$/.test(id);
+        });
         // Framework-owned chooser widgets are not metadata for the represented app.
         const packages = [properties.package, properties.packageName, namespace].filter(
           (value): value is string =>
@@ -805,7 +808,7 @@ export class DeepLinkManager implements DeepLinkManager {
         if (packages.length > 0) {
           rowsWithPackageMetadata.add(row);
         }
-        if (packages.includes(appPackage)) {
+        if (inAppList && packages.includes(appPackage)) {
           packageRows.add(row);
         }
         const labels = labelRows.get(row) ?? new Set<string>();
@@ -814,10 +817,6 @@ export class DeepLinkManager implements DeepLinkManager {
             labels.add(value);
           }
         }
-        const inAppList = ancestors.some((ancestor) => {
-          const id = this.parser.extractNodeProperties(ancestor)["resource-id"];
-          return typeof id === "string" && /(?:^|\/)(?:resolver_list|chooser_list|list)$/.test(id);
-        });
         if (inAppList) {
           labelRows.set(row, labels);
         }
@@ -834,6 +833,86 @@ export class DeepLinkManager implements DeepLinkManager {
       );
     }
     return this.selectUniqueChooserRow(candidates, labelRows, appPackage);
+  }
+
+  private async findAppInChooserAcrossPages(
+    initialHierarchy: ViewHierarchyResult,
+    appPackage: string,
+  ): Promise<any> {
+    const metadata = this.chooserMetadata ?? defaultChooserAppMetadata;
+    let hierarchy = initialHierarchy;
+    for (let page = 0; page < 4; page += 1) {
+      const roots = this.parser.extractRootNodes(hierarchy);
+      try {
+        return await this.findAppInChooser(
+          roots,
+          appPackage,
+          hierarchy.packageName,
+          undefined,
+          hierarchy.updatedAt,
+        );
+      } catch (error) {
+        if (!(error instanceof ChooserRowMissingError) || page === 3) {
+          throw error;
+        }
+        const next = await this.scrollChooserList(
+          hierarchy,
+          roots,
+          metadata,
+          appPackage,
+          error.capturedAt,
+        );
+        if (!next) {
+          throw error;
+        }
+        hierarchy = next;
+      }
+    }
+    throw new ChooserRowMissingError(`No exact clickable chooser row for ${appPackage}.`);
+  }
+
+  private async scrollChooserList(
+    hierarchy: ViewHierarchyResult,
+    roots: any[],
+    metadata: ChooserAppMetadata,
+    appPackage: string,
+    capturedAt?: number,
+  ): Promise<ViewHierarchyResult | null> {
+    const lists: Element[] = [];
+    for (const root of roots) {
+      this.parser.traverseNode(root, (node: any) => {
+        const id = this.parser.extractNodeProperties(node)["resource-id"];
+        if (typeof id === "string" && /(?:^|\/)(?:resolver_list|chooser_list|list)$/.test(id)) {
+          const parsed = this.parser.parseNodeBounds(node);
+          if (parsed) {
+            lists.push(parsed);
+          }
+        }
+      });
+    }
+    const list = lists.at(-1);
+    if (!list || list.bounds.bottom - list.bounds.top < 40) {
+      return null;
+    }
+    const centerX = Math.round((list.bounds.left + list.bounds.right) / 2);
+    const height = list.bounds.bottom - list.bounds.top;
+    const fromY = Math.round(list.bounds.bottom - height / 4);
+    const toY = Math.round(list.bounds.top + height / 4);
+    const swipe = await this.adbUtils.executeCommand(
+      `shell input swipe ${centerX} ${fromY} ${centerX} ${toY} 350`,
+    );
+    if (swipe.stderr?.trim()) {
+      throw new Error(`Could not scroll chooser app list: ${swipe.stderr.trim()}`);
+    }
+    const nextTimestamp = Math.max(hierarchy.updatedAt ?? 0, capturedAt ?? 0) + 1;
+    const fresh = await metadata.getFreshHierarchy(this.device!, this.adbFactory, nextTimestamp);
+    if (fresh.updatedAt === undefined || fresh.updatedAt < nextTimestamp) {
+      throw new Error(`Chooser hierarchy did not refresh after scrolling for ${appPackage}.`);
+    }
+    if (!this.detectIntentChooser(fresh)) {
+      throw new Error(`Intent chooser disappeared while finding ${appPackage}.`);
+    }
+    return JSON.stringify(fresh.hierarchy) === JSON.stringify(hierarchy.hierarchy) ? null : fresh;
   }
 
   private async findChooserLabelFallback(
@@ -862,12 +941,19 @@ export class DeepLinkManager implements DeepLinkManager {
       if (!this.detectIntentChooser(freshHierarchy)) {
         throw new Error(`Intent chooser disappeared while resolving ${appPackage}.`);
       }
-      return this.findAppInChooser(
-        this.parser.extractRootNodes(freshHierarchy),
-        appPackage,
-        freshHierarchy.packageName,
-        label,
-      );
+      try {
+        return await this.findAppInChooser(
+          this.parser.extractRootNodes(freshHierarchy),
+          appPackage,
+          freshHierarchy.packageName,
+          label,
+        );
+      } catch (error) {
+        if (error instanceof ChooserRowMissingError) {
+          error.capturedAt = freshHierarchy.updatedAt;
+        }
+        throw error;
+      }
     }
     const candidates = resolvedLabel
       ? [...labelRows]
@@ -892,7 +978,7 @@ export class DeepLinkManager implements DeepLinkManager {
       );
     }
     if (candidates.length === 0) {
-      throw new Error(
+      throw new ChooserRowMissingError(
         `No exact clickable chooser row for ${appPackage}. Verify the app is installed and handles this link.`,
       );
     }

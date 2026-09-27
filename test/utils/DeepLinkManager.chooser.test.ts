@@ -102,6 +102,46 @@ describe("custom intent chooser label fallback", () => {
     expect(result.success).toBe(true);
     expect(commands).toEqual(["shell input tap 50 120"]);
   });
+  test("scrolls and recaptures bounded chooser pages before declaring a label-only row missing", async () => {
+    const adb = new FakeAdbExecutor();
+    const page = (nodes: unknown[], updatedAt: number) => ({
+      updatedAt,
+      hierarchy: {
+        node: {
+          class: "com.android.internal.app.ChooserActivity",
+          node: [
+            {
+              "resource-id": "android:id/resolver_list",
+              bounds: { left: 0, top: 0, right: 100, bottom: 200 },
+              node: nodes,
+            },
+          ],
+        },
+      },
+    });
+    const first = page([labelRow("Example Beta", 100)], 100);
+    const second = page([labelRow("Example", 100)], 102);
+    const manager = new DeepLinkManager(
+      { platform: "android", deviceId: "fake", name: "fake" },
+      adb,
+      null,
+      null,
+      undefined,
+      undefined,
+      {
+        getLabel: async () => "Example",
+        getFreshHierarchy: async (_device, _factory, minTimestamp) =>
+          ({ ...(minTimestamp <= 101 ? first : second), updatedAt: minTimestamp }) as any,
+      },
+    );
+    const result = await manager.handleIntentChooser(first as any, "custom", target);
+    expect(adb.getExecutedCommands()).toEqual([
+      "shell input swipe 50 150 50 50 350",
+      "shell input tap 50 120",
+    ]);
+    expect(result.error).toBeUndefined();
+    expect(result.success).toBe(true);
+  });
   test("rematches a moved row after the label lookup before tapping", async () => {
     const adb = new FakeAdbExecutor();
     const manager = new DeepLinkManager(
@@ -232,8 +272,11 @@ test("rejects ambiguity across hierarchy roots", async () => {
       updatedAt: 100,
       hierarchy: {
         node: [
-          { class: "com.android.internal.app.ChooserActivity", node: [row(target, 0)] },
-          { node: [row(target, 100)] },
+          {
+            class: "com.android.internal.app.ChooserActivity",
+            node: [{ "resource-id": "android:id/resolver_list", node: [row(target, 0)] }],
+          },
+          { node: [{ "resource-id": "android:id/chooser_list", node: [row(target, 100)] }] },
         ],
       },
     } as any,
@@ -242,6 +285,34 @@ test("rejects ambiguity across hierarchy roots", async () => {
   );
   expect(result.error).toContain("Ambiguous");
   expect(adb.getExecutedCommands()).toEqual([]);
+});
+
+test("ignores exact package metadata outside the chooser app list", async () => {
+  const adb = new FakeAdbExecutor();
+  const manager = new DeepLinkManager(
+    { platform: "android", deviceId: "fake", name: "fake" },
+    adb,
+    null,
+    null,
+    undefined,
+    undefined,
+    metadata("Example", [row(target, 100)]),
+  );
+  const result = await manager.handleIntentChooser(
+    {
+      ...hierarchy([row(target, 100)]),
+      hierarchy: {
+        node: [
+          { class: "com.android.internal.app.ChooserActivity", node: [row(target, 0)] },
+          { "resource-id": "android:id/resolver_list", node: [row(target, 100)] },
+        ],
+      },
+    } as any,
+    "custom",
+    target,
+  );
+  expect(result.success).toBe(true);
+  expect(adb.getExecutedCommands()).toEqual(["shell input tap 50 120"]);
 });
 
 test("taps parsed clickable row bounds in XML-wrapped hierarchies", async () => {

@@ -4484,64 +4484,74 @@ export class DaemonManager implements DaemonManagerLike {
     const deadline = this.timer.now() + timeout;
     const pollInterval = 100;
 
-    const replacementWasObserved = (): boolean => {
+    const replacementWasObserved = (candidates: DaemonProcessRecord[]): boolean => {
       if (expectedGeneration === undefined) {
         return false;
       }
-      const scanBudget = this.remainingTime(deadline);
-      if (scanBudget <= 0) {
+      // The global process scan can find a different checkout's daemon after OS PID
+      // reuse. Only this namespace's PID record naming that candidate proves it took
+      // over our namespace rather than being an unrelated daemon elsewhere.
+      const pidData = readPidFileDataSync(this.pidFilePath);
+      if (pidData === null) {
         return false;
       }
+      const recordedGeneration: DaemonProcessRecord = {
+        pid: pidData.pid,
+        ppid: 0,
+        command: "",
+        // Birth time, not daemon construction time: the process-table matcher
+        // compares against the OS birth timestamp within a 2s tolerance.
+        startedAt: pidData.processStartedAt ?? pidData.startedAt,
+        ...(pidData.processGenerationToken === undefined
+          ? {}
+          : { processGenerationToken: pidData.processGenerationToken }),
+      };
+      return candidates.some(
+        (candidate) =>
+          this.isConfirmedDifferentDaemonGeneration(expectedGeneration, candidate) &&
+          this.matchesObservedDaemonGeneration(recordedGeneration, candidate),
+      );
+    };
+
+    const checkStopped = (): WaitForStopResult | undefined => {
+      if (!this.isProcessRunning(pid)) {
+        return { stopped: true, replacedByOtherGeneration: false };
+      }
+      if (expectedGeneration === undefined) {
+        return undefined;
+      }
+      const scanBudget = this.remainingTime(deadline);
+      if (scanBudget <= 0) {
+        return undefined;
+      }
       try {
-        // The global process scan can find a different checkout's daemon after OS PID
-        // reuse. Only this namespace's PID record naming that candidate proves it took
-        // over our namespace rather than being an unrelated daemon elsewhere.
-        const pidData = readPidFileDataSync(this.pidFilePath);
-        if (pidData === null) {
-          return false;
+        const candidates = this.findLiveDaemonProcessRecords(scanBudget);
+        // No daemon record at this live OS PID means the tracked generation is gone.
+        // A different daemon at this PID still needs the namespace PID-file check.
+        if (!candidates.some((candidate) => candidate.pid === pid)) {
+          return { stopped: true, replacedByOtherGeneration: false };
         }
-        const recordedGeneration: DaemonProcessRecord = {
-          pid: pidData.pid,
-          ppid: 0,
-          command: "",
-          // Birth time, not daemon construction time: the process-table matcher
-          // compares against the OS birth timestamp within a 2s tolerance.
-          startedAt: pidData.processStartedAt ?? pidData.startedAt,
-          ...(pidData.processGenerationToken === undefined
-            ? {}
-            : { processGenerationToken: pidData.processGenerationToken }),
-        };
-        return this.findLiveDaemonProcessRecords(scanBudget).some(
-          (candidate) =>
-            this.isConfirmedDifferentDaemonGeneration(expectedGeneration, candidate) &&
-            this.matchesObservedDaemonGeneration(recordedGeneration, candidate),
-        );
+        if (replacementWasObserved(candidates)) {
+          return { stopped: true, replacedByOtherGeneration: true };
+        }
       } catch (error) {
         // Safe: pre-SIGKILL generation verification remains the authoritative signaling gate.
         logger.debug(
           `[DaemonManager] replacement scan failed during stop; treating this poll as inconclusive: ${errorMessage(error)}`,
         );
-        return false;
       }
+      return undefined;
     };
 
     while (this.remainingTime(deadline) > 0) {
-      if (!this.isProcessRunning(pid)) {
-        return { stopped: true, replacedByOtherGeneration: false };
-      }
-      if (replacementWasObserved()) {
-        return { stopped: true, replacedByOtherGeneration: true };
+      const result = checkStopped();
+      if (result !== undefined) {
+        return result;
       }
       await this.timer.sleep(pollInterval);
     }
 
-    if (!this.isProcessRunning(pid)) {
-      return { stopped: true, replacedByOtherGeneration: false };
-    }
-    if (replacementWasObserved()) {
-      return { stopped: true, replacedByOtherGeneration: true };
-    }
-    return { stopped: false, replacedByOtherGeneration: false };
+    return checkStopped() ?? { stopped: false, replacedByOtherGeneration: false };
   }
 
   /**

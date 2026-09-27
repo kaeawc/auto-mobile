@@ -620,6 +620,24 @@ describe("VideoStreamSocketServer", () => {
     expect(h.sources[0].staleStopped).toBe(true);
   });
 
+  test("fresh native idle evidence sustains an encoder-only pooled iOS capture", async () => {
+    const fakeTimer = new FakeTimer();
+    const iosDevice = { ...DEVICE, platform: "ios" } as BootedDevice;
+    const h = await startHarness({ timer: fakeTimer, device: iosDevice });
+    const { binary } = await subscribe(h.socketPath);
+    await waitFor(() => binary().length >= 12);
+
+    // A warm helper's replayed frame reaches ffmpeg but never attests a new source frame.
+    h.emitUnattested(Buffer.from([0, 0, 0, 1, 5, 0xaa, 0, 0, 0, 1, 1]));
+    for (let i = 0; i < 10; i++) {
+      h.emitIdle();
+      fakeTimer.advanceTime(2_000);
+    }
+
+    expect(h.sources[0].stopped).toBe(false);
+    expect(h.server.activeDeviceIds()).toContain(iosDevice.deviceId);
+  });
+
   test("native idle callbacks sustain a static capture only after encoded output", async () => {
     const fakeTimer = new FakeTimer();
     const h = await startHarness({ timer: fakeTimer });

@@ -963,10 +963,12 @@ export class VideoStreamSocketServer extends BaseSocketServer {
   }
 
   private incompleteEvidenceIsRecent(capture: DeviceCapture): boolean {
+    const now = this.timer.now();
     return (
       capture.source !== null &&
       capture.firstEvidenceMs !== null &&
-      this.timer.now() - capture.firstEvidenceMs < SOURCE_EVIDENCE_MAX_AGE_MS
+      (this.idleEvidenceIsRecent(capture, now) ||
+        now - capture.firstEvidenceMs < SOURCE_EVIDENCE_MAX_AGE_MS)
     );
   }
 
@@ -1004,16 +1006,20 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     if (capture.legacySimulatorHelper) {
       return true;
     }
-    if (
-      capture.lastIdleMs !== null &&
-      capture.encodedSinceSourceFrame &&
-      now - capture.lastIdleMs <= SOURCE_EVIDENCE_MAX_AGE_MS
-    ) {
+    if (this.idleEvidenceIsRecent(capture, now)) {
       return true;
     }
     return (
       Math.max(now - capture.lastSourceDataMs, now - capture.lastEncodedDataMs, 0) <=
       SOURCE_EVIDENCE_MAX_AGE_MS
+    );
+  }
+
+  private idleEvidenceIsRecent(capture: DeviceCapture, now: number): boolean {
+    return (
+      capture.lastIdleMs !== null &&
+      capture.encodedSinceSourceFrame &&
+      now - capture.lastIdleMs <= SOURCE_EVIDENCE_MAX_AGE_MS
     );
   }
 

@@ -75,7 +75,12 @@ import { deriveIosScreenIdentity } from "./ios/IosScreenIdentity";
 import { computeFreshness } from "./observationFreshness";
 import { SafeAreaAuditor, capLayoutWarnings } from "./audits/SafeAreaAuditor";
 import { DefaultElementParser } from "../utility/ElementParser";
-import { ALERT_TITLE_RESOURCE_ID } from "../../utils/androidSystemUiAnr";
+import {
+  ALERT_TITLE_RESOURCE_ID,
+  CLOSE_APP_BUTTON_RESOURCE_ID,
+  WAIT_BUTTON_RESOURCE_ID,
+} from "../../utils/androidSystemUiAnr";
+import { DaemonState } from "../../daemon/daemonState";
 
 /**
  * Observe command class that combines screen details, view hierarchy and screenshot.
@@ -637,7 +642,18 @@ export class RealObserveScreen implements ObserveScreen {
         adb: this.adb,
         adbFactory: this.adbFactory,
         timer: this.timer,
-        onAvailabilityLost: dependencies?.onAvailabilityLost,
+        onAvailabilityLost:
+          dependencies?.onAvailabilityLost ??
+          (device.platform === "android"
+            ? (reason) => {
+                const daemonState = dependencies?.daemonState ?? DaemonState.getInstance();
+                if (daemonState.isInitialized()) {
+                  daemonState
+                    .getSessionManager()
+                    .invalidateAutomationReadinessForDevice(device.deviceId, reason);
+                }
+              }
+            : undefined),
       });
     this.deviceStateCollector =
       dependencies?.deviceStateCollector ??
@@ -2118,17 +2134,30 @@ export class RealObserveScreen implements ObserveScreen {
       return false;
     }
     const parser = new DefaultElementParser();
-    let capturedDialog = false;
+    let appErrorResourceFound = false;
+    let alertTitleFound = false;
+    let closeAppButtonFound = false;
+    let waitButtonFound = false;
+    let anrTitleFound = false;
+    let waitActionFound = false;
     for (const root of parser.extractRootNodes(viewHierarchy)) {
       parser.traverseNode(root, (node: unknown) => {
         const properties = parser.extractNodeProperties(node as ViewHierarchyNode);
         const resourceId = properties["resource-id"] ?? properties.resourceId;
-        capturedDialog ||=
-          typeof resourceId === "string" &&
-          (resourceId.startsWith(APP_ERROR_RESOURCE_ID_PREFIX) ||
-            resourceId === ALERT_TITLE_RESOURCE_ID);
+        appErrorResourceFound ||=
+          typeof resourceId === "string" && resourceId.startsWith(APP_ERROR_RESOURCE_ID_PREFIX);
+        alertTitleFound ||= resourceId === ALERT_TITLE_RESOURCE_ID;
+        closeAppButtonFound ||= resourceId === CLOSE_APP_BUTTON_RESOURCE_ID;
+        waitButtonFound ||= resourceId === WAIT_BUTTON_RESOURCE_ID;
+        const text = properties.text ?? properties["content-desc"];
+        anrTitleFound ||= typeof text === "string" && /\b(?:isn't|is not) responding\b/i.test(text);
+        waitActionFound ||= text === "Wait";
       });
     }
+    const capturedDialog =
+      appErrorResourceFound ||
+      (anrTitleFound && waitActionFound) ||
+      (alertTitleFound && closeAppButtonFound && waitButtonFound);
     if (!capturedDialog) {
       return false;
     }

@@ -4,6 +4,10 @@ import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
 import { NoOpPerformanceTracker } from "../../../../src/utils/PerformanceTracker";
 import { OPERATION_CANCELLED_MESSAGE } from "../../../../src/utils/constants";
 import type { BootedDevice, ObserveResult } from "../../../../src/models";
+import { DefaultAccessibilityDetector } from "../../../../src/utils/AccessibilityDetector";
+import { FakeTimer } from "../../../fakes/FakeTimer";
+import type { FeatureFlagService } from "../../../../src/features/featureFlags/FeatureFlagService";
+import { invalidateReadinessForDisabledAccessibility } from "../../../../src/server/observeTools";
 
 function makeResult(): ObserveResult {
   return {
@@ -16,6 +20,71 @@ function makeResult(): ObserveResult {
 const androidDevice: BootedDevice = { deviceId: "dev-1", name: "android", platform: "android" };
 
 describe("AccessibilityStateDetector", () => {
+  test("marks a disabled auto-detect result synthetic without querying a functioning service", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("enabled_accessibility_services", {
+      stdout: "dev.jasonpearson.automobile.ctrlproxy/.AccessibilityService",
+      stderr: "",
+    });
+    const flags = { isEnabled: () => false } as FeatureFlagService;
+    const detector = new AccessibilityStateDetector({
+      device: androidDevice,
+      adb,
+      featureFlags: flags,
+      accessibilityDetector: new DefaultAccessibilityDetector(new FakeTimer()),
+    });
+    const result = makeResult();
+
+    await detector.run(result, new NoOpPerformanceTracker());
+
+    expect(result.accessibilityState).toEqual({
+      enabled: false,
+      service: "unknown",
+      detectionSkipped: true,
+    });
+    expect(adb.getExecutedCommands()).toEqual([]);
+    const actions: string[] = [];
+    invalidateReadinessForDisabledAccessibility(androidDevice, result, "owner", {
+      resetSetupState: () => actions.push("reset"),
+      isDaemonInitialized: () => true,
+      invalidateAutomationReadiness: () => actions.push("invalidate"),
+    });
+    expect(actions).toEqual([]);
+  });
+
+  test("marks a checked, disabled service as confirmed", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("enabled_accessibility_services", { stdout: "null", stderr: "" });
+    const flags = {
+      isEnabled: (key: string) => key === "accessibility-auto-detect",
+    } as FeatureFlagService;
+    const detector = new AccessibilityStateDetector({
+      device: androidDevice,
+      adb,
+      featureFlags: flags,
+      accessibilityDetector: new DefaultAccessibilityDetector(new FakeTimer()),
+    });
+    const result = makeResult();
+
+    await detector.run(result, new NoOpPerformanceTracker());
+
+    expect(result.accessibilityState).toEqual({
+      enabled: false,
+      service: "unknown",
+      detectionSkipped: false,
+    });
+    expect(adb.getExecutedCommands()).toContain(
+      "shell settings get secure enabled_accessibility_services",
+    );
+    const actions: string[] = [];
+    invalidateReadinessForDisabledAccessibility(androidDevice, result, "owner", {
+      resetSetupState: () => actions.push("reset"),
+      isDaemonInitialized: () => true,
+      invalidateAutomationReadiness: () => actions.push("invalidate"),
+    });
+    expect(actions).toEqual(["reset", "invalidate"]);
+  });
+
   test("honors abort signal without polluting result.errors", async () => {
     const detector = new AccessibilityStateDetector({
       device: androidDevice,

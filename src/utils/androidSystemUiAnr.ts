@@ -11,8 +11,8 @@ const WAIT_ACTION = "Wait";
 // AppNotRespondingDialog wires BUTTON_NEGATIVE ("Wait") and BUTTON_POSITIVE
 // ("Close app"), which the AlertController renders as `button2`/`button1`.
 export const ALERT_TITLE_RESOURCE_ID = "android:id/alertTitle";
-const WAIT_BUTTON_RESOURCE_ID = "android:id/button2";
-const CLOSE_APP_BUTTON_RESOURCE_ID = "android:id/button1";
+export const WAIT_BUTTON_RESOURCE_ID = "android:id/button2";
+export const CLOSE_APP_BUTTON_RESOURCE_ID = "android:id/button1";
 const SYSTEM_WINDOW_TYPE = 3;
 
 export interface SystemUiAnrDialog {

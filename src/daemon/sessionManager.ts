@@ -3511,6 +3511,14 @@ export class SessionManager {
     this.updateSessionCache(sessionId, { deviceReadiness: "booted" });
   }
 
+  /** Invalidate the session currently owning a device after an embedded hierarchy read fails. */
+  invalidateAutomationReadinessForDevice(deviceId: string, reason: string): void {
+    const sessionId = this.getSessionForDevice(deviceId);
+    if (sessionId) {
+      this.invalidateAutomationReadiness(sessionId, reason);
+    }
+  }
+
   /**
    * Drop a restored guest's automation proof without using the monotonic setter.
    * The next device-aware request must rerun runner/accessibility readiness.

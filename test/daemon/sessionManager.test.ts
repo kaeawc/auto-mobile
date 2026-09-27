@@ -171,6 +171,24 @@ test("invalidateAutomationReadiness downgrades a session and ignores unknown ids
   manager.stopCleanupTimer();
 });
 
+test("invalidateAutomationReadinessForDevice downgrades only the owning session", async () => {
+  const manager = new SessionManager(new FakeTimer(), new FakeDeviceSessionPersistence());
+  try {
+    await manager.createSession("owner", "emulator-5554", "android");
+    await manager.createSession("other", "emulator-5556", "android");
+    manager.setDeviceReadiness("owner", "automationReady");
+    manager.setDeviceReadiness("other", "automationReady");
+
+    manager.invalidateAutomationReadinessForDevice("emulator-5554", "CtrlProxy lost");
+
+    expect(manager.getDeviceReadiness("owner")).toBe("booted");
+    expect(manager.getDeviceReadiness("other")).toBe("automationReady");
+    expect(() => manager.invalidateAutomationReadinessForDevice("missing", "lost")).not.toThrow();
+  } finally {
+    manager.stopCleanupTimer();
+  }
+});
+
 test("retries a failed non-terminal release after removing the in-memory session", async () => {
   const timer = new FakeTimer();
   const persistence = new FakeDeviceSessionPersistence();

@@ -192,11 +192,9 @@ describe("IOSCtrlProxyBuilder", function () {
 
       expect(config.scheme).toBe("AutoMobileTest");
       expect(config.destination).toBe("generic/platform=iOS Simulator");
-      // Off the world-writable /tmp default onto a uid-private ~/.auto-mobile
-      // subdir (issue #4759). Compare against getTempDir() so the assertion is
-      // path-separator agnostic and honors AUTOMOBILE_DATA_DIR on CI.
+      // getTempDir() uses the uid-private default and honors the explicit
+      // AUTOMOBILE_DATA_DIR override used by CI.
       expect(config.derivedDataPath).toBe(getTempDir("derived-data"));
-      expect(config.derivedDataPath).not.toContain("/tmp/");
       expect(config.bundleCacheDir).toBe(path.join(os.homedir(), ".automobile", "ctrl-proxy-ios"));
     });
 

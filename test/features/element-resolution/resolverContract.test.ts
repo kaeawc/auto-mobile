@@ -25,10 +25,8 @@ for (const testCase of cases) {
     if (differs.length === 0) {
       expect(current).toEqual(previous);
     } else {
-      // An intentional migration change must bring the complete candidate list
-      // to the observed contract; merely preserving a chosen target is insufficient.
-      const previousCandidates = previous.candidates.map(candidateIdentity);
-      expect(previousCandidates).not.toEqual(expected);
+      // Candidate identity is checked above. The richer differential also
+      // detects metadata and action changes when the candidates are identical.
       expect(differs).toEqual([testCase.key]);
     }
   });

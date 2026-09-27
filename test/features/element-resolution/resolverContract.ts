@@ -15,7 +15,7 @@ import type {
 import type { ResolverSelector } from "../../../src/server/elementSelectorSchemas";
 
 const searchable = new SearchableHierarchy();
-const resolver = new ElementResolver(() => 0);
+const resolver = new ElementResolver(() => 0.99);
 
 function selectorFor(
   kind: ContractQuery["kind"],

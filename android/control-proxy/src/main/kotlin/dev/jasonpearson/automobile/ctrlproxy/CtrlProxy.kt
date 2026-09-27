@@ -64,6 +64,7 @@ import dev.jasonpearson.automobile.protocol.FrameMetricsData
 import dev.jasonpearson.automobile.protocol.FrameMetricsEventResponse
 import dev.jasonpearson.automobile.protocol.HandledExceptionData
 import dev.jasonpearson.automobile.protocol.HandledExceptionEvent
+import dev.jasonpearson.automobile.protocol.ImeTextDelivery
 import dev.jasonpearson.automobile.protocol.KeyboardProfileBehaviorInfo
 import dev.jasonpearson.automobile.protocol.KeyboardProfileInfo
 import dev.jasonpearson.automobile.protocol.LifecycleEventData
@@ -2004,7 +2005,15 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   override fun requestInsertText(requestId: String?, text: String) =
     performInsertText(requestId, text)
 
-  override fun requestCommitText(requestId: String?, text: String, priorImeId: String?) {
+  override fun requestCommitText(requestId: String?, text: String, priorImeId: String?) =
+    requestCommitText(requestId, text, priorImeId, ImeTextDelivery.COMMIT)
+
+  override fun requestCommitText(
+    requestId: String?,
+    text: String,
+    priorImeId: String?,
+    delivery: ImeTextDelivery,
+  ) {
     val start = System.currentTimeMillis()
     val state = requestId?.let { imeCommitStates.computeIfAbsent(it) { ImeCommitState() } }
     if (state?.cancelled?.get() == true) {
@@ -2052,7 +2061,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         )
         return@launchRequestScope
       }
-      ime.commitText(text, priorImeId, { state?.cancelled?.get() == true }) { result ->
+      ime.commitText(text, priorImeId, { state?.cancelled?.get() == true }, delivery) { result ->
         finish(result.partialApplication)
         launchRequestScope(requestId) {
           broadcastCommitTextResult(

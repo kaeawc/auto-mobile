@@ -85,10 +85,17 @@ transform before correlating iOS `observe` or `tapAt` coordinates with
 Text defaults to `operation: "insert"` and `mode: "auto"`. On Android, `auto`
 uses AutoMobile's IME when the installed CtrlProxy APK advertises commit and
 cancellation support. Older APKs fall back to `eventAll` for insertion and
-`a11y` for replacement. Modes `ime`, `a11y`, `eventLast`, `eventAll`, and
-`eventOnly` select a delivery strategy explicitly; `eventAll` sends Android
-key events for apps that depend on them. iOS accepts the same values for
-cross-platform plans and reports the actual `xcuiTypeText` mechanism as
+`a11y` for replacement. Modes `ime`, `imeKeyEvents`, `a11y`, `eventLast`,
+`eventAll`, and `eventOnly` select a delivery strategy explicitly; `eventAll`
+sends Android key events for apps that depend on them. `imeKeyEvents` is an
+opt-in Android experiment that sends printable ASCII as soft-keyboard events
+through the active `InputConnection`. It preflights the whole string and
+rejects unsupported characters before sending any events; it requires an APK
+advertising `ime_key_events_v1`. No additional Android permission or manifest
+entry is required. A successful result confirms event dispatch, not the target
+editor's final text; inspect the returned observation when using this mode.
+iOS accepts the same values for cross-platform plans and
+reports the actual `xcuiTypeText` mechanism as
 `resolvedMode`. Raw keys are `enter`, `tab`,
 `escape`, `backspace`, `delete`, and the four arrow keys; they accept `shift`,
 `ctrl`, `alt`, and `meta`. Semantic keys `next`, `previous`, `done`, `search`,

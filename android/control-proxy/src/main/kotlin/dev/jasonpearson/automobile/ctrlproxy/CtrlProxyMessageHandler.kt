@@ -269,7 +269,12 @@ class CtrlProxyMessageHandler(
         }
       is RequestInsertText -> actions.requestInsertText(request.requestId, request.text)
       is RequestCommitText ->
-        actions.requestCommitText(request.requestId, request.text, request.priorImeId)
+        actions.requestCommitText(
+          request.requestId,
+          request.text,
+          request.priorImeId,
+          request.delivery,
+        )
       is RequestCancelImeCommit ->
         actions.requestCancelImeCommit(request.requestId, request.targetRequestId)
       is RequestSetKeyboardProfile ->

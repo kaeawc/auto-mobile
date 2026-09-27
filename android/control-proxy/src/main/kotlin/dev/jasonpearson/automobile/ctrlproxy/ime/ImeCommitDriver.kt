@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.ctrlproxy.ime
 
 import android.text.InputType
+import dev.jasonpearson.automobile.protocol.ImeTextDelivery
 
 interface ImeCommitSink {
   fun nowMs(): Long
@@ -10,6 +11,12 @@ interface ImeCommitSink {
 
   /** Commit one complete Unicode editing unit; false if the connection is gone. */
   fun commitChar(ch: CharSequence): Boolean
+
+  /** Preflight every requested unit before the first key event is dispatched. */
+  fun supportsKeyEvents(units: List<String>): Boolean
+
+  /** Send one complete character's down/up sequence through the current input connection. */
+  fun sendKeyEventUnit(unit: String): Boolean
 
   /**
    * Finalize any composing span the active typing profile left open (composing profiles keep the
@@ -68,6 +75,7 @@ class ImeCommitDriver(private val sink: ImeCommitSink) {
     priorImeId: String?,
     deadlineMs: Long = Long.MAX_VALUE,
     isCancelled: () -> Boolean = { false },
+    delivery: ImeTextDelivery = ImeTextDelivery.COMMIT,
     onComplete: (ImeCommitResult) -> Unit,
   ) {
     check(completion == null) { "An IME commit driver handles one request" }
@@ -89,6 +97,11 @@ class ImeCommitDriver(private val sink: ImeCommitSink) {
     }
     if (isPasswordInputType(inputType)) {
       complete(failure("Cannot commit text into a password field"))
+      return
+    }
+
+    if (delivery == ImeTextDelivery.KEY_EVENTS) {
+      sendKeyEvents(text, deadlineMs, isCancelled)
       return
     }
 
@@ -165,6 +178,35 @@ class ImeCommitDriver(private val sink: ImeCommitSink) {
       }
     }
     commitSegment(0)
+  }
+
+  private fun sendKeyEvents(text: String, deadlineMs: Long, isCancelled: () -> Boolean) {
+    val units = ImeGraphemes.split(text)
+    if (!runCatching { sink.supportsKeyEvents(units) }.getOrDefault(false)) {
+      complete(failure("IME key events cannot represent this text; use mode ime for text commit"))
+      return
+    }
+    for (unit in units) {
+      if (completed) return
+      if (isCancelled()) {
+        complete(failure("IME key events cancelled"))
+        return
+      }
+      if (sink.nowMs() >= deadlineMs) {
+        complete(failure("IME key event deadline exceeded"))
+        return
+      }
+      // A down event may have reached the editor even if the paired sequence reports failure.
+      committedUnits++
+      if (!runCatching { sink.sendKeyEventUnit(unit) }.getOrDefault(false)) {
+        complete(failure("Input connection lost during IME key events"))
+        return
+      }
+    }
+    complete(
+      if (sink.syncEditorState()) ImeCommitResult(success = true, error = null)
+      else failure("Input connection lost while syncing editor state")
+    )
   }
 
   /** Called by the shell on onFinishInput / idle-deadline; restores if priorImeId is non-null. */

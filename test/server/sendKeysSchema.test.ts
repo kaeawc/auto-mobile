@@ -91,7 +91,15 @@ describe("sendKeysSchema", () => {
   });
 
   test("accepts every typing mode in cross-platform iOS plans", () => {
-    for (const mode of ["auto", "a11y", "eventLast", "eventAll", "eventOnly", "ime"]) {
+    for (const mode of [
+      "auto",
+      "a11y",
+      "eventLast",
+      "eventAll",
+      "eventOnly",
+      "ime",
+      "imeKeyEvents",
+    ]) {
       expect(
         sendKeysSchema.safeParse({
           platform: "ios",

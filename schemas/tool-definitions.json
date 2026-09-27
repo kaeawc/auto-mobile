@@ -10091,10 +10091,18 @@
                     "enum": ["insert", "replace"]
                   },
                   "mode": {
-                    "description": "Android delivery mode. auto uses the AutoMobile IME when supported, otherwise eventAll for insert or a11y for replace. Explicit ime requires a compatible CtrlProxy APK. iOS reports xcuiTypeText as the resolved mode",
+                    "description": "Android delivery mode. auto uses the AutoMobile IME when supported, otherwise eventAll for insert or a11y for replace. Explicit ime commits text; imeKeyEvents dispatches printable ASCII key events through the IME input connection, requires a compatible CtrlProxy APK, and does not verify resulting editor text. iOS reports xcuiTypeText as the resolved mode",
                     "default": "auto",
                     "type": "string",
-                    "enum": ["auto", "a11y", "eventLast", "eventAll", "eventOnly", "ime"]
+                    "enum": [
+                      "auto",
+                      "a11y",
+                      "eventLast",
+                      "eventAll",
+                      "eventOnly",
+                      "ime",
+                      "imeKeyEvents"
+                    ]
                   },
                   "keyboardProfile": {
                     "description": "Android keyboard behavior profile for this IME type call; restored afterward",

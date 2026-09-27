@@ -6,6 +6,8 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.view.KeyCharacterMap
+import android.view.KeyEvent
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
@@ -33,6 +35,7 @@ import dev.jasonpearson.automobile.ctrlproxy.ime.session.InputConnectionAdapter
 import dev.jasonpearson.automobile.ctrlproxy.ime.session.InputConnectionDriver
 import dev.jasonpearson.automobile.ctrlproxy.ime.session.KeyboardSession
 import dev.jasonpearson.automobile.ctrlproxy.ime.session.SharedPreferencesKeyboardProfileStore
+import dev.jasonpearson.automobile.protocol.ImeTextDelivery
 
 class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwner {
   private val lifecycleRegistry = LifecycleRegistry(this)
@@ -169,6 +172,7 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
     text: String,
     priorImeId: String?,
     isCancelled: () -> Boolean = { false },
+    delivery: ImeTextDelivery = ImeTextDelivery.COMMIT,
     onResult: (ImeCommitResult) -> Unit,
   ) {
     mainHandler.post {
@@ -206,6 +210,7 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
         deadlineMs = SystemClock.uptimeMillis() + INPUT_CONNECTION_TIMEOUT_MS,
         generation = generation,
         isCancelled = isCancelled,
+        delivery = delivery,
         onResult = ::finish,
       )
     }
@@ -218,6 +223,7 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
     deadlineMs: Long,
     generation: Long,
     isCancelled: () -> Boolean,
+    delivery: ImeTextDelivery,
     onResult: (ImeCommitResult) -> Unit,
   ) {
     if (generation != commitGeneration) return
@@ -231,6 +237,7 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
         priorImeId,
         SystemClock.uptimeMillis() + COMMIT_TIMEOUT_MS,
         isCancelled,
+        delivery,
       ) { result ->
         onResult(result)
         if (generation == commitGeneration) scheduleIdleRestore(driver, priorImeId)
@@ -254,6 +261,7 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
           deadlineMs,
           generation,
           isCancelled,
+          delivery,
           onResult,
         )
       },
@@ -270,6 +278,22 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
 
       override fun commitChar(ch: CharSequence): Boolean =
         session.typeForAutomation(ch.toString(), connectionAdapter())
+
+      override fun supportsKeyEvents(units: List<String>): Boolean = units.all { unit ->
+        keyEventsFor(unit) != null
+      }
+
+      override fun sendKeyEventUnit(unit: String): Boolean {
+        val connection = currentInputConnection ?: return false
+        val events = keyEventsFor(unit) ?: return false
+        var accepted = true
+        for (event in events) {
+          val softEvent = KeyEvent.changeFlags(event, event.flags or KeyEvent.FLAG_SOFT_KEYBOARD)
+          accepted =
+            runCatching { connection.sendKeyEvent(softEvent) }.getOrDefault(false) && accepted
+        }
+        return accepted
+      }
 
       override fun finishComposing(): Boolean =
         session.finishComposingForAutomation(connectionAdapter())
@@ -295,6 +319,16 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
         switchInputMethod(imeId)
       }
     }
+
+  private fun keyEventsFor(unit: String): Array<KeyEvent>? {
+    if (unit.length != 1 || unit[0] !in ' '..'~') return null
+    val events =
+      KeyCharacterMap.load(KeyCharacterMap.VIRTUAL_KEYBOARD).getEvents(unit.toCharArray())
+    return events?.takeIf { sequence ->
+      sequence.isNotEmpty() &&
+        sequence.all { it.action == KeyEvent.ACTION_DOWN || it.action == KeyEvent.ACTION_UP }
+    }
+  }
 
   private fun rememberRestore(driver: ImeCommitDriver, priorImeId: String?) {
     idleRestore?.let(mainHandler::removeCallbacks)

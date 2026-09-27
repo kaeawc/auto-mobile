@@ -232,6 +232,28 @@ describe("Android CtrlProxyText", () => {
       });
 
       socket.sentMessages.length = 0;
+      const eventPromise = textDelegate.commitViaIme(
+        "Ab!",
+        "prior-ime",
+        10000,
+        undefined,
+        undefined,
+        "keyEvents",
+      );
+      const eventRequest = await waitForRequest(socket, "request_commit_text");
+      expect(eventRequest.delivery).toBe("keyEvents");
+      socket.simulateMessage(
+        JSON.stringify({
+          type: "commit_text_result",
+          timestamp: 2,
+          requestId: eventRequest.requestId,
+          success: true,
+          totalTimeMs: 3,
+        }),
+      );
+      expect((await eventPromise).success).toBe(true);
+
+      socket.sentMessages.length = 0;
       const failed = textDelegate.commitViaIme("long text", "prior-ime");
       const failedRequest = await waitForRequest(socket, "request_commit_text");
       socket.simulateMessage(

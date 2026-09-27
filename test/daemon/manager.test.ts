@@ -2189,7 +2189,7 @@ describe("DaemonManager status", () => {
 
       const status = await manager.status();
 
-      expect(status).toEqual({ running: false });
+      expect(status).toMatchObject({ running: false, recovery: { state: "unauthenticated" } });
       expect(existsSync(pidFilePath)).toBe(true);
       expect(existsSync(socketPath)).toBe(true);
     } finally {

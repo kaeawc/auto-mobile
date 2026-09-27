@@ -91,6 +91,8 @@ type DaemonOptionsSchemaCoversAllKeys =
 export const daemonOptionsSchemaCoversAllKeys: DaemonOptionsSchemaCoversAllKeys = true;
 
 const socketIdentityStatusSchema = z.object({
+  processStartedAt: z.number().finite().optional(),
+  dbPath: z.string().min(1).optional(),
   pid: z.number().int().positive().optional(),
   version: z.string().trim().min(1),
   buildId: z.string().optional(),
@@ -808,7 +810,7 @@ export class DaemonClient {
   }
 
   /** Read the actual socket owner's identity, including older version-only daemons. */
-  async getDaemonStatus(): Promise<DaemonStatus> {
+  async getDaemonStatus(timeoutMs?: number): Promise<DaemonStatus> {
     // ide/status is side-effect-free and existed before structured handshake
     // errors. Like doctor, this diagnostic request deliberately omits identity.
     const diagnostic = new DaemonClient(
@@ -819,7 +821,7 @@ export class DaemonClient {
       null,
     );
     try {
-      const rawStatus = await diagnostic.callDaemonMethod("ide/status", {});
+      const rawStatus = await diagnostic.callDaemonMethod("ide/status", {}, { timeoutMs });
       const identityStatus = socketIdentityStatusSchema.safeParse(rawStatus);
       if (!identityStatus.success) {
         throw new ActionableError(

@@ -2286,11 +2286,14 @@ export class DaemonManager implements DaemonManagerLike {
     if (holder.livePid !== process.pid || holder.token !== this.startupLockOwnerToken) {
       return;
     }
+    // Filesystem capabilities belong to the host, not the simulated recovery platform.
+    const { noFollow, unsafeWriteMask } =
+      process.platform === "win32"
+        ? { noFollow: 0, unsafeWriteMask: 0 }
+        : { noFollow: constants.O_NOFOLLOW, unsafeWriteMask: 0o022 };
     let fd: number;
     try {
-      const flags =
-        this.platform === "win32" ? constants.O_RDWR : constants.O_RDWR | constants.O_NOFOLLOW;
-      fd = openSync(this.lockFilePath, flags);
+      fd = openSync(this.lockFilePath, constants.O_RDWR | noFollow, 0o600);
     } catch (error) {
       logger.warn("Failed to safely open startup lock for identity recovery", error);
       return;
@@ -2301,7 +2304,7 @@ export class DaemonManager implements DaemonManagerLike {
       if (
         !stats.isFile() ||
         (uid !== undefined && stats.uid !== uid) ||
-        (stats.mode & 0o022) !== 0
+        (stats.mode & unsafeWriteMask) !== 0
       ) {
         logger.warn("Refusing unsafe startup lock for identity recovery", {
           uid: stats.uid,

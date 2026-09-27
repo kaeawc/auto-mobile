@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { createServer, type Server as NetServer, type Socket } from "node:net";
-import { mkdtempSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdtempSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { platform, tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -111,6 +111,42 @@ describe("BaseSocketServer bind guard", () => {
     expect(statSync(socketPath).isSocket()).toBe(true);
     expect(server.hasActiveSocketPath()).toBe(true);
   });
+
+  (isWindows ? test.skip : test)(
+    "preserves a live socket rebound during the stale probe",
+    async () => {
+      directory = mkdtempSync(join(tmpdir(), "aux-socket-race-"));
+      const socketPath = join(directory, "stream.sock");
+      writeFileSync(socketPath, "stale");
+      let racingPeer: NetServer | undefined;
+      let racingIdentity: { dev: number; ino: number } | undefined;
+      server = new TestServer(socketPath, {
+        isReachable: async () => {
+          // Retain the stale inode so the filesystem cannot immediately recycle it.
+          renameSync(socketPath, join(directory, "old.sock"));
+          racingPeer = await listenOnSocket(socketPath);
+          const identity = statSync(socketPath);
+          racingIdentity = { dev: identity.dev, ino: identity.ino };
+          return false;
+        },
+      });
+
+      try {
+        const start = server.start();
+        await expect(start).rejects.toBeInstanceOf(ActionableError);
+        await expect(start).rejects.toThrow("another daemon is listening");
+        const current = statSync(socketPath);
+        expect({ dev: current.dev, ino: current.ino }).toEqual(racingIdentity);
+        expect(racingPeer?.listening).toBe(true);
+        expect(server.isListening()).toBe(false);
+      } finally {
+        await server.close();
+        if (racingPeer) {
+          await closeServer(racingPeer);
+        }
+      }
+    },
+  );
 
   (isWindows ? test.skip : test)("binds if the path disappears during the probe", async () => {
     directory = mkdtempSync(join(tmpdir(), "aux-socket-bind-"));

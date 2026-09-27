@@ -38,10 +38,34 @@ describe("resolveAuxSocketDir", () => {
     expect(resolveAuxSocketDir({})).toBe(path.join(os.homedir(), ".auto-mobile"));
   });
 
-  test("uses the environment directory ahead of the test override", () => {
-    testOverrides.auxSocketDir = "/test-only";
+  test("uses the environment directory when the test override is cleared", () => {
+    testOverrides.auxSocketDir = undefined;
     expect(resolveAuxSocketDir({ AUTOMOBILE_AUX_SOCKET_DIR: "/isolated-daemon" })).toBe(
       "/isolated-daemon",
+    );
+  });
+
+  test("test override takes precedence over an exported environment directory", () => {
+    testOverrides.auxSocketDir = "test-only";
+    expect(resolveAuxSocketDir({ AUTOMOBILE_AUX_SOCKET_DIR: "/user-daemon" })).toBe("test-only");
+  });
+
+  test("anchors a relative environment directory to the daemon launch cwd", () => {
+    testOverrides.auxSocketDir = undefined;
+    expect(
+      resolveAuxSocketDir({
+        AUTOMOBILE_AUX_SOCKET_DIR: "relative",
+        AUTOMOBILE_DAEMON_LAUNCH_CWD: path.resolve("/tmp/original"),
+      }),
+    ).toBe(path.resolve("/tmp/original", "relative"));
+  });
+
+  test("trims environment directories and ignores blank overrides", () => {
+    testOverrides.auxSocketDir = undefined;
+    const absolute = path.resolve("/isolated-daemon");
+    expect(resolveAuxSocketDir({ AUTOMOBILE_AUX_SOCKET_DIR: `  ${absolute}  ` })).toBe(absolute);
+    expect(resolveAuxSocketDir({ AUTOMOBILE_AUX_SOCKET_DIR: "  " })).toBe(
+      path.join(os.homedir(), ".auto-mobile"),
     );
   });
 

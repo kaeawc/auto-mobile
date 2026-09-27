@@ -60,7 +60,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: auto-mobile:latest
+      target: dev
+    image: auto-mobile:dev
     container_name: auto-mobile-dev
 
     # Security: Use specific capabilities instead of privileged mode
@@ -83,7 +84,7 @@ services:
     volumes:
       - .:/workspace
       - android-sdk:/opt/android-sdk
-      - node-modules:/workspace/node_modules
+      - node-modules-dev:/workspace/node_modules
       - ~/.android:/home/automobile/.android
       - ~/.auto-mobile:/home/automobile/.auto-mobile
       - ./scratch:/workspace/scratch
@@ -107,3 +108,5 @@ volumes:
     name: auto-mobile-android-sdk
   node-modules:
     name: auto-mobile-node-modules
+  node-modules-dev:
+    name: auto-mobile-node-modules-dev

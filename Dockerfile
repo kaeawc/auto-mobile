@@ -23,10 +23,11 @@
 ARG ZULU_VERSION=21.0.2
 ARG PLATFORM=linux/amd64
 ARG BUN_VERSION=1.3.14
-ARG KTFMT_VERSION=0.55
-# Computed locally from the downloaded GitHub Releases asset on 2026-09-18:
-# https://github.com/facebook/ktfmt/releases/download/v0.55/ktfmt-0.55-with-dependencies.jar
-ARG KTFMT_SHA256=272cfe565566ba175e91c577ce08eb6a4a268b3358b82e3d138fa7d16b6a1023
+ARG KTFMT_VERSION=0.64
+# Keep in sync with scripts/ktfmt/ktfmt_version.sh (KTFMT_VERSION), the repo's canonical pin.
+# Computed locally from the downloaded GitHub Releases asset on 2026-09-27:
+# https://github.com/facebook/ktfmt/releases/download/v0.64/ktfmt-0.64-with-dependencies.jar
+ARG KTFMT_SHA256=b8fbb814808d8da33f74a7bbacb6d1748cef81c0202a7f829b87139520b51273
 ARG LYCHEE_VERSION=0.19.1
 ARG ANDROID_CMDLINE_TOOLS_VERSION=11076708
 ARG ANDROID_PLATFORM_VERSION=37
@@ -252,3 +253,14 @@ ENTRYPOINT ["/usr/local/bin/tini", "--"]
 # Default command - Run MCP server in stdio mode (default)
 # For other transports, override with: docker run ... bun run dev:sse
 CMD ["bun", "dist/src/index.js"]
+
+# ==============================================================================
+# DEV STAGE - Full dependency set for docker-compose's bind-mounted watch mode
+# ==============================================================================
+FROM runtime AS dev
+
+# The bind-mounted checkout runs unbundled TypeScript, which needs devDependencies.
+RUN bun install --frozen-lockfile \
+    && rm -rf ~/.bun/install/cache
+
+CMD ["bun", "--watch", "src/index.ts"]

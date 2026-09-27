@@ -188,6 +188,9 @@ if [[ -n "${STUB_RECHECK_TIMES:-}" ]]; then
   exit 0
 fi
 stub_junit_report "$report" "${target:-test/example.test.ts}" fixture fast 0.001
+if [[ "$target" == "test/server/proxyServerTransportFailure.integration.test.ts" && -n "${STUB_INTEGRATION_TRANSPORT_EXIT:-}" ]]; then
+  exit "$STUB_INTEGRATION_TRANSPORT_EXIT"
+fi
 if [[ "$target" == ".integration.test.ts" && -n "${STUB_INTEGRATION_MAIN_EXIT:-}" ]]; then
   exit "$STUB_INTEGRATION_MAIN_EXIT"
 fi
@@ -244,6 +247,26 @@ run_lane() {
   [ "$status" -eq 7 ]
   [ "$(grep -c '<testsuite ' "$report")" -eq 2 ]
   [[ "$(cat "$report")" == *"proxyServerTransportFailure.integration.test.ts"* ]]
+  rm -f "$report"
+}
+
+@test "integration split continues after transport failure unless bail is requested" {
+  local report
+  report="$(mktemp)"
+  run env PATH="$STUB_BIN:$PATH" STUB_INTEGRATION_TRANSPORT_EXIT=7 \
+    bash "$SCRIPT" integration --reporter junit --reporter-outfile "$report"
+  [ "$status" -eq 7 ]
+  [ "$(grep -c '<testsuite ' "$report")" -eq 2 ]
+  [ "$(wc -l < "$BUN_ARGS_FILE")" -eq 2 ]
+  rm -f "$report"
+
+  report="$(mktemp)"
+  : > "$BUN_ARGS_FILE"
+  run env PATH="$STUB_BIN:$PATH" STUB_INTEGRATION_TRANSPORT_EXIT=7 \
+    bash "$SCRIPT" integration --bail --reporter junit --reporter-outfile "$report"
+  [ "$status" -eq 7 ]
+  [ "$(grep -c '<testsuite ' "$report")" -eq 1 ]
+  [ "$(wc -l < "$BUN_ARGS_FILE")" -eq 1 ]
   rm -f "$report"
 }
 

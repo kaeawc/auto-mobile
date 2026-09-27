@@ -481,8 +481,15 @@ case "$mode" in
           transport_args[report_arg_index]="${report_arg_prefix}$report_dir/transport.xml"
           main_args[report_arg_index]="${report_arg_prefix}$report_dir/main.xml"
         fi
-        # A failed process may still write a useful JUnit report; preserve it
-        # before returning the process status. Both calls explicitly inspect it.
+        fail_fast=false
+        for passthrough_arg in "${passthrough_args[@]+"${passthrough_args[@]}"}"; do
+          case "$passthrough_arg" in
+            --bail|--bail=*) fail_fast=true ;;
+          esac
+        done
+        transport_status=0
+        # A failed process may still write a useful JUnit report. Run the
+        # remaining files unless the caller explicitly requested fail-fast.
         # shellcheck disable=SC2310
         if AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS="$transport_suite_timeout" run_test_command \
           "${integration_args[@]}" \
@@ -490,13 +497,14 @@ case "$mode" in
           "${transport_args[@]+"${transport_args[@]}"}"; then
           :
         else
-          test_status=$?
-          if [[ -n "$report_outfile" && -f "$report_dir/transport.xml" ]]; then
-            cp "$report_dir/transport.xml" "$report_outfile"
+          transport_status=$?
+          if [[ "$fail_fast" == true ]]; then
+            if [[ -n "$report_outfile" && -f "$report_dir/transport.xml" ]]; then
+              cp "$report_dir/transport.xml" "$report_outfile"
+            fi
+            exit "$transport_status"
           fi
-          exit "$test_status"
         fi
-        # shellcheck disable=SC2310
         integration_remaining=$((integration_wall_timeout - ($(date +%s) - integration_started_at)))
         if ((integration_remaining <= 0)); then
           if [[ -n "$report_outfile" && -f "$report_dir/transport.xml" ]]; then
@@ -505,6 +513,7 @@ case "$mode" in
           echo "Integration test run exceeded its ${integration_wall_timeout}s wall-clock budget." >&2
           exit 124
         fi
+        main_status=0
         # shellcheck disable=SC2310
         if AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS="$integration_remaining" run_test_command \
           "${integration_args[@]}" \
@@ -513,19 +522,20 @@ case "$mode" in
           "${main_args[@]+"${main_args[@]}"}"; then
           :
         else
-          test_status=$?
-          if [[ -n "$report_outfile" && -f "$report_dir/main.xml" ]]; then
-            bun scripts/lib/merge-junit-reports.ts "$report_outfile" \
-              "$report_dir/transport.xml" "$report_dir/main.xml"
-          elif [[ -n "$report_outfile" && -f "$report_dir/transport.xml" ]]; then
-            cp "$report_dir/transport.xml" "$report_outfile"
-          fi
-          exit "$test_status"
+          main_status=$?
         fi
         if [[ -n "$report_outfile" && "${TEST_TS_PRINT_CMD:-}" != 1 ]]; then
-          bun scripts/lib/merge-junit-reports.ts "$report_outfile" \
-            "$report_dir/transport.xml" "$report_dir/main.xml"
+          if [[ -f "$report_dir/transport.xml" && -f "$report_dir/main.xml" ]]; then
+            bun scripts/lib/merge-junit-reports.ts "$report_outfile" \
+              "$report_dir/transport.xml" "$report_dir/main.xml"
+          elif [[ -f "$report_dir/transport.xml" ]]; then
+            cp "$report_dir/transport.xml" "$report_outfile"
+          elif [[ -f "$report_dir/main.xml" ]]; then
+            cp "$report_dir/main.xml" "$report_outfile"
+          fi
         fi
+        if ((transport_status != 0)); then exit "$transport_status"; fi
+        if ((main_status != 0)); then exit "$main_status"; fi
       fi
     else
       echo "No integration test paths were selected." >&2

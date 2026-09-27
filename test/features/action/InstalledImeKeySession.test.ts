@@ -219,6 +219,91 @@ test("matches a live-shaped Gboard key in the root hierarchy using IME window bo
   expect(events).toContain("tap:85,1886:gboard-frame");
 });
 
+test("collapses a Gboard clickable key and its labeled descendant to the ancestor", async () => {
+  const nested: ViewHierarchyResult = {
+    ...keyWindow,
+    hierarchy: {
+      node: {
+        $: {},
+        node: [
+          {
+            $: {
+              "content-desc": "a",
+              clickable: "true",
+              "resource-id": "com.example.keyboard:id/C01",
+              bounds: { left: 100, top: 400, right: 140, bottom: 440 },
+            },
+            node: [
+              {
+                $: { "resource-id": "com.example.keyboard:id/host" },
+                node: [
+                  {
+                    $: {
+                      "content-desc": "a",
+                      "resource-id": "com.example.keyboard:id/label",
+                      bounds: { left: 110, top: 400, right: 135, bottom: 430 },
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    },
+  };
+  const { session, events } = fixture(nested);
+  expect(await session.tapKey(target, "a")).toMatchObject({ x: 120, y: 420 });
+  expect(events).toContain("tap:120,420:frame-one");
+});
+
+test("rejects separate same-label IME keys as ambiguous", async () => {
+  const separate: ViewHierarchyResult = {
+    ...keyWindow,
+    hierarchy: {
+      node: {
+        $: {},
+        node: [
+          {
+            $: {
+              text: "1",
+              "resource-id": "com.example.keyboard:id/one",
+              bounds: { left: 100, top: 400, right: 140, bottom: 440 },
+            },
+          },
+          {
+            $: {
+              text: "1",
+              "resource-id": "com.example.keyboard:id/other_one",
+              bounds: { left: 200, top: 400, right: 240, bottom: 440 },
+            },
+          },
+        ],
+      },
+    },
+  };
+  const { session, events } = fixture(separate);
+  await expect(session.tapKey(target, "1")).rejects.toThrow("Visible key");
+  expect(events.some((event) => event.startsWith("tap:"))).toBe(false);
+});
+
+test("matches a resource-id-less key below a marked IME root", async () => {
+  const marked: ViewHierarchyResult = {
+    ...keyWindow,
+    hierarchy: {
+      node: {
+        $: { extras: { "automobile:imePackage": "com.example.keyboard" } },
+        node: [
+          { $: { "content-desc": "a", bounds: { left: 100, top: 400, right: 140, bottom: 440 } } },
+        ],
+      },
+    },
+  };
+  const { session, events } = fixture(marked);
+  expect(await session.tapKey(target, "a")).toMatchObject({ x: 120, y: 420 });
+  expect(events).toContain("tap:120,420:frame-one");
+});
+
 test("refuses a visible key when its hierarchy has no frame context", async () => {
   const { session, events } = fixture({ ...keyWindow, frameContext: undefined });
   await expect(session.tapKey(target, "a")).rejects.toThrow("no frame context");

@@ -259,10 +259,22 @@ function findVisibleImeKey(
   // only bounds/type metadata for each window. Traverse those nodes once, then
   // require both target-package ownership and containment in a real IME window.
   for (const root of parser.extractRootNodes(hierarchy)) {
-    parser.traverseNode(root, (node: ViewHierarchyNode) => {
+    const ownedAtDepth: boolean[] = [];
+    const matchedAtDepth: boolean[] = [];
+    parser.traverseNode(root, (node: ViewHierarchyNode, depth: number) => {
       const properties = parser.extractNodeProperties(node);
-      const point = matchingImeKeyCenter(node, properties, parser, key, packageName, imeWindows);
-      if (point) {
+      const searchable = toSearchable(properties);
+      const owned = isOwnedByIme(
+        properties,
+        packageName,
+        searchable.nativeId,
+        ownedAtDepth[depth - 1],
+      );
+      ownedAtDepth[depth] = owned;
+      const point = matchingImeKeyCenter(node, properties, parser, key, owned, imeWindows);
+      const ancestorMatched = matchedAtDepth[depth - 1] ?? false;
+      matchedAtDepth[depth] = ancestorMatched || point !== null;
+      if (point && !ancestorMatched) {
         matches.push(point);
       }
     });
@@ -275,14 +287,14 @@ function matchingImeKeyCenter(
   properties: Record<string, unknown>,
   parser: DefaultElementParser,
   key: string,
-  packageName: string,
+  owned: boolean,
   windows: NonNullable<ViewHierarchyResult["windows"]>,
 ): { x: number; y: number } | null {
   const searchable = toSearchable(properties);
   if (!Object.values(searchable.textSources).includes(key) && properties.contentDesc !== key) {
     return null;
   }
-  if (!isOwnedByIme(properties, packageName, searchable.nativeId)) {
+  if (!owned) {
     return null;
   }
   const candidate = parser.parseBounds(node.bounds ?? properties.bounds);
@@ -303,15 +315,27 @@ function isOwnedByIme(
   properties: Record<string, unknown>,
   packageName: string,
   resourceId: string | undefined,
+  inherited = false,
 ): boolean {
   const nodePackage = properties.package;
-  if (typeof resourceId !== "string" && nodePackage !== packageName) {
+  const marker = (properties.extras as Record<string, unknown> | undefined)?.[
+    "automobile:imePackage"
+  ];
+  if (typeof marker === "string" && marker !== packageName) {
     return false;
   }
   if (typeof resourceId === "string" && !resourceId.startsWith(`${packageName}:`)) {
     return false;
   }
-  return typeof nodePackage !== "string" || nodePackage === packageName;
+  if (typeof nodePackage === "string" && nodePackage !== packageName) {
+    return false;
+  }
+  return (
+    marker === packageName ||
+    nodePackage === packageName ||
+    typeof resourceId === "string" ||
+    inherited
+  );
 }
 
 export function createInstalledImeKeySession(device: BootedDevice): InstalledImeKeySession {

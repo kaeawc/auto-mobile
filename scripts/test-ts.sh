@@ -482,9 +482,20 @@ case "$mode" in
           main_args[report_arg_index]="${report_arg_prefix}$report_dir/main.xml"
         fi
         fail_fast=false
-        for passthrough_arg in "${passthrough_args[@]+"${passthrough_args[@]}"}"; do
-          case "$passthrough_arg" in
-            --bail|--bail=*) fail_fast=true ;;
+        for ((bail_index = 0; bail_index < ${#passthrough_args[@]}; bail_index += 1)); do
+          case "${passthrough_args[$bail_index]}" in
+            --bail)
+              bail_count="${passthrough_args[$((bail_index + 1))]:-}"
+              if [[ ! "$bail_count" =~ ^[0-9]+$ ]] || ((bail_count <= 1)); then
+                fail_fast=true
+              fi
+              ;;
+            --bail=*)
+              bail_count="${passthrough_args[$bail_index]#--bail=}"
+              if [[ "$bail_count" =~ ^[0-9]+$ ]] && ((bail_count <= 1)); then
+                fail_fast=true
+              fi
+              ;;
           esac
         done
         transport_status=0

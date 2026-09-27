@@ -270,6 +270,22 @@ run_lane() {
   rm -f "$report"
 }
 
+@test "integration split continues after one transport failure with a numeric bail budget" {
+  local bail_args report
+  for bail_args in "--bail=2" "--bail 2"; do
+    report="$(mktemp)"
+    : > "$BUN_ARGS_FILE"
+    # Shell splitting intentionally exercises both supported argument forms.
+    # shellcheck disable=SC2086
+    run env PATH="$STUB_BIN:$PATH" STUB_INTEGRATION_TRANSPORT_EXIT=7 \
+      bash "$SCRIPT" integration $bail_args --reporter junit --reporter-outfile "$report"
+    [ "$status" -eq 7 ]
+    [ "$(grep -c '<testsuite ' "$report")" -eq 2 ]
+    [ "$(wc -l < "$BUN_ARGS_FILE")" -eq 2 ]
+    rm -f "$report"
+  done
+}
+
 @test "integration split respects a shorter caller wall timeout" {
   local timeout_args
   timeout_args="$(mktemp)"

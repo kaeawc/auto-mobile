@@ -868,6 +868,46 @@ test("keeps a repeated stable target ambiguous without overlapping anchor rows",
   ).toEqual([]);
 });
 
+test("keeps a repeated stable target ambiguous when only its clickable child overlaps", async () => {
+  const adb = new FakeAdbExecutor();
+  const stableTarget = (top: number) => ({
+    ...row(target, top),
+    "view-id": "s2-bbbbbbbbbbbbbbbb",
+    node: [
+      ...row(target, top).node,
+      {
+        clickable: true,
+        "view-id": "s2-cccccccccccccccc",
+        text: "Open",
+        bounds: { left: 60, top: top + 5, right: 90, bottom: top + 35 },
+      },
+    ],
+  });
+  const first = chooserPage([row("com.other.before", 80), stableTarget(140)], 100);
+  const second = chooserPage([row("com.other.after", 40), stableTarget(100)], 101);
+  const manager = new DeepLinkManager(
+    { platform: "android", deviceId: "fake", name: "fake" },
+    adb,
+    null,
+    null,
+    undefined,
+    undefined,
+    {
+      getLabel: async () => null,
+      getFreshHierarchy: async (_device, _factory, floor) =>
+        ({ ...second, updatedAt: floor }) as any,
+    },
+  );
+  const result = await manager.handleIntentChooser(first as any, "custom", target);
+  expect(result.error).toContain("Ambiguous chooser rows");
+  expect(
+    manager["getObservedChooserDisplacement"](first as any, second as any, "s2-bbbbbbbbbbbbbbbb"),
+  ).toBeUndefined();
+  expect(
+    adb.getExecutedCommands().filter((command) => command.startsWith("shell input tap")),
+  ).toEqual([]);
+});
+
 test("rejects identical stable label rows separated by chooser pages without tapping", async () => {
   const adb = new FakeAdbExecutor();
   const stableRow = (top: number) => ({

@@ -1119,16 +1119,20 @@ export class DeepLinkManager implements DeepLinkManager {
         ancestors[depth] = node;
         const properties = this.parser.extractNodeProperties(node);
         const id = properties["view-id"];
-        const inList = ancestors.some((ancestor) => {
+        const listIndex = ancestors.findIndex((ancestor) => {
           const resourceId = this.parser.extractNodeProperties(ancestor)["resource-id"];
           return (
             typeof resourceId === "string" &&
             /(?:^|\/)(?:resolver_list|chooser_list|list)$/.test(resourceId)
           );
         });
+        const outermostClickable = ancestors.slice(listIndex + 1).find((ancestor) => {
+          const clickable = this.parser.extractNodeProperties(ancestor).clickable;
+          return clickable === true || clickable === "true";
+        });
         if (
-          !inList ||
-          (properties.clickable !== true && properties.clickable !== "true") ||
+          listIndex < 0 ||
+          outermostClickable !== node ||
           typeof id !== "string" ||
           !UNIQUE_CHOOSER_VIEW_ID.test(id)
         ) {

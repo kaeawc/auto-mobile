@@ -180,6 +180,19 @@ describe("diffObserveResult", () => {
     expect(diff.changed[0].selector).toEqual({ elementId: "toggle", label: "Airplane mode" });
   });
 
+  test("changed iOS controls retain an accessibility-label selector without an ID", () => {
+    const control = {
+      bounds: { left: 5, top: 5, right: 45, bottom: 45 },
+      clickable: true,
+      "ios-accessibility-label": "Reminders",
+    };
+    const baseline = iosObs({ node: [control] });
+    const next = iosObs({ node: [{ ...control, selected: true }] });
+    const diff = diffObserveResult(baseline, next);
+    expect(diff.changed).toHaveLength(1);
+    expect(diff.changed[0].selector).toEqual({ elementId: undefined, label: "Reminders" });
+  });
+
   test("a changed entry whose elementId AND label repeat elsewhere in `next` gets a disambiguating `index` (PR #6242 review PRRT_kwDOP-GF5M6fq3iI)", () => {
     // Two identical toggle rows sharing both resource-id and label — without an
     // occurrence index, both `changed` entries would emit the SAME selector, so

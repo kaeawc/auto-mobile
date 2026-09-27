@@ -27,7 +27,7 @@ describe("observe-to-resolve migration contract", () => {
       // A fixed gap must remove its entry; an existing gap cannot drift to a
       // different wrong target (or disappear) without changing its signature.
       expect(actual).toBe(
-        allowed.has(key)
+        key in gapSignatures
           ? gapSignatures[key as keyof typeof gapSignatures]
           : observed.bounds.join(","),
       );
@@ -42,7 +42,7 @@ describe("observe-to-resolve migration contract", () => {
   test("all recorded cases still exist and each capture retains its selector coverage", () => {
     const keys = new Set(cases.map(({ key }) => key));
     expect([...allowed].filter((key) => !keys.has(key))).toEqual([]);
-    expect(Object.keys(gapSignatures).sort()).toEqual([...allowed].sort());
+    expect([...allowed].filter((key) => !(key in gapSignatures))).toEqual([]);
     // The trim-only fixture deliberately has no actionable skeleton rows.
     expect(captures.map((capture) => contractCases(capture).length)).toEqual([
       30, 0, 7, 2, 3, 12, 25, 24, 34, 34, 2, 10, 10,

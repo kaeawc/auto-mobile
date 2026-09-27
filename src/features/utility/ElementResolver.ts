@@ -38,6 +38,10 @@ export interface ElementReference {
 }
 export interface ResolutionIntent {
   action: ResolutionAction;
+  /** Preserve tap ranking while inspect keeps bounded inert labels addressable. */
+  preferTap?: boolean;
+  /** An action lookup cannot use an unbounded ID match as its target. */
+  requireBounds?: boolean;
   viewport?: { width: number; height: number };
   requireResourceId?: boolean;
   negative?: boolean;
@@ -267,7 +271,7 @@ export class ElementResolver {
           candidate.affordances.length > 0 &&
           (!intent.viewport || centerWithinViewport(candidate.bounds, intent.viewport))),
     );
-    return this.choose(result, selector, actionTarget);
+    return this.choose(result, selector, actionTarget, intent);
   }
 
   private prepareMatches(
@@ -295,6 +299,7 @@ export class ElementResolver {
     result: ElementResolution,
     selector: ResolverSelector,
     actionTarget: (node: SearchableEntry | undefined) => SearchableEntry | null,
+    intent: ResolutionIntent,
   ): ElementResolution {
     const actionable = [
       ...new Set(
@@ -315,6 +320,10 @@ export class ElementResolver {
       result.chosen =
         [...actionable].sort(
           (a, b) =>
+            (intent.preferTap
+              ? Number(!a.affordances.includes("tap") && !a.affordances.includes("toggle")) -
+                Number(!b.affordances.includes("tap") && !b.affordances.includes("toggle"))
+              : 0) ||
             a.windowRank - b.windowRank ||
             (a.bounds ? boundsArea(a.bounds) : Infinity) -
               (b.bounds ? boundsArea(b.bounds) : Infinity) ||
@@ -474,11 +483,13 @@ export class ElementResolver {
       const targetActions: SearchableEntry["affordances"][number][] =
         intent.action === "scroll"
           ? ["scroll"]
-          : intent.action === "long-press"
-            ? ["long-press"]
-            : intent.action === "input" || intent.action === "focus"
-              ? ["input"]
-              : ["tap", "scroll"];
+          : intent.action === "inspect"
+            ? ["tap", "toggle"]
+            : intent.action === "long-press"
+              ? ["long-press"]
+              : intent.action === "input" || intent.action === "focus"
+                ? ["input"]
+                : ["tap", "scroll"];
       if (
         ancestor.bounds &&
         targetActions.some((action) => ancestor.affordances.includes(action))
@@ -520,7 +531,7 @@ export class ElementResolver {
     intent: ResolutionIntent,
   ): Pick<ElementResolution, "matches" | "matchMode" | "error"> {
     if (selector.elementId !== undefined) {
-      return this.matchId(nodes, selector.elementId, selector.match ?? "exact");
+      return this.matchId(nodes, selector.elementId, selector.match ?? "exact", intent);
     }
     if (selector.testTag !== undefined) {
       return {
@@ -622,6 +633,7 @@ export class ElementResolver {
     nodes: SearchableEntry[],
     query: string,
     matchMode: MatchMode,
+    intent: ResolutionIntent,
   ): Pick<ElementResolution, "matches" | "matchMode" | "error"> {
     if (matchMode === "regex") {
       return {
@@ -639,14 +651,17 @@ export class ElementResolver {
       };
     }
     const native = nodes.filter((node) => node.nativeId === query);
-    if (native.length > 0) {
+    const usableNative = intent.requireBounds ? native.filter((node) => node.bounds) : native;
+    if (usableNative.length > 0) {
       return {
-        matches: native.map((node) => ({ node, kind: "native-id-exact" })),
+        matches: usableNative.map((node) => ({ node, kind: "native-id-exact" })),
         matchMode,
       };
     }
     const qualified = qualifiedId(query);
-    const direct = nodes.filter((node) => node.nodeKey === query);
+    const direct = nodes.filter(
+      (node) => node.nodeKey === query && (!intent.requireBounds || node.bounds),
+    );
     if (direct.length) {
       return {
         matches: direct.map((node) => ({
@@ -659,8 +674,15 @@ export class ElementResolver {
     const namespace = nodes.filter(
       (node) =>
         node.nativeId &&
+        (!intent.requireBounds || node.bounds) &&
         (qualified ? node.nativeId === qualified.name : qualifiedId(node.nativeId)?.name === query),
     );
+    if (namespace.length === 0 && native.length > 0) {
+      return {
+        matches: native.map((node) => ({ node, kind: "native-id-exact" })),
+        matchMode,
+      };
+    }
     const candidates = [...new Set([...direct, ...namespace])];
     const packages = new Set(
       candidates

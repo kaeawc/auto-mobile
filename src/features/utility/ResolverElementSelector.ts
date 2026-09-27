@@ -161,6 +161,8 @@ export class ResolverElementSelector implements ElementSelector {
         viewport: this.viewport(capture),
         action:
           options.intentAction ?? (options.selectionIntent === "focus-input" ? "input" : "tap"),
+        preferTap: options.intentAction === "inspect" && options.selectionIntent === "tap",
+        requireBounds: options.intentAction === "inspect",
       },
     );
     if (result.error && result.error !== "Container not found") {

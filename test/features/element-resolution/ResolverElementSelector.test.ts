@@ -182,3 +182,67 @@ test("indexed and random selection count only onscreen action candidates", async
     20,
   );
 });
+
+test("tap lookup preserves a bounded inert label inside a scroll container", () => {
+  const labelBounds = { left: 20, top: 40, right: 130, bottom: 70 };
+  const capture = {
+    hierarchy: {
+      node: {
+        scrollable: true,
+        bounds: { left: 0, top: 0, right: 300, bottom: 500 },
+        node: { text: "Details", bounds: labelBounds },
+      },
+    },
+  };
+  expect(
+    new ResolverElementSelector().selectByText(capture, "Details", {
+      intentAction: "inspect",
+      selectionIntent: "tap",
+    }).element?.bounds,
+  ).toEqual(labelBounds);
+});
+
+test("tap intent ranks a clickable text peer ahead of a smaller input", () => {
+  const capture = {
+    hierarchy: {
+      node: [
+        {
+          class: "android.widget.EditText",
+          text: "Login",
+          bounds: { left: 0, top: 0, right: 80, bottom: 30 },
+        },
+        {
+          clickable: true,
+          text: "Login",
+          bounds: { left: 0, top: 40, right: 200, bottom: 100 },
+        },
+      ],
+    },
+  };
+  expect(
+    new ResolverElementSelector().selectByText(capture, "Login", {
+      intentAction: "inspect",
+      selectionIntent: "tap",
+    }).element?.bounds?.top,
+  ).toBe(40);
+});
+
+test("tap lookup falls back to a bounded Compose ID when exact native ID is unbounded", () => {
+  const capture = {
+    hierarchy: {
+      node: [
+        { "resource-id": "app:id/login", text: "Unbounded" },
+        {
+          "resource-id": "login",
+          clickable: true,
+          bounds: { left: 20, top: 40, right: 120, bottom: 90 },
+        },
+      ],
+    },
+  };
+  expect(
+    new ResolverElementSelector().selectByResourceId(capture, "app:id/login", {
+      intentAction: "inspect",
+    }).element?.["resource-id"],
+  ).toBe("login");
+});

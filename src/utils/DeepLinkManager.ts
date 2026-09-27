@@ -19,9 +19,15 @@ import {
 import type { ElementParser } from "./interfaces/ElementParser";
 import type { ElementGeometry } from "./interfaces/ElementGeometry";
 import type { Element } from "../models/Element";
+import type { Timer } from "./interfaces/Timer";
+import { defaultTimer } from "./SystemTimer";
 import { DefaultElementParser } from "../features/utility/ElementParser";
 import { DefaultElementGeometry } from "../features/utility/ElementGeometry";
 import { ViewHierarchy } from "../features/observe/ViewHierarchy";
+import {
+  STABLE_VIEW_ID_HASH_LENGTH,
+  STABLE_VIEW_ID_PREFIX,
+} from "../features/observe/android/StableNodeIdentity";
 import { DEVICE_TIMESTAMP_SECOND_GRANULARITY_MARGIN_MS } from "../features/action/ClearText";
 import { SimCtlClient } from "./ios-cmdline-tools/SimCtlClient";
 import { isIosSimulatorUdid } from "./ios-cmdline-tools/iosDeviceType";
@@ -131,7 +137,20 @@ class ChooserRowMissingError extends Error {
 interface ChooserMatch {
   element: Element;
   packageVerified: boolean;
+  capturedAt?: number;
+  stableId?: string;
+  signature: string;
 }
+
+// HandleIntentChooser has a 500ms action timeout; leave time for its observation.
+const POST_TAP_VERIFY_BUDGET_MS = 200;
+const POST_TAP_VERIFY_INTERVAL_MS = 50;
+const CHOOSER_SCAN_PAGES = 4;
+// Bare content-derived IDs denote rows unique within a capture. Ordinal IDs
+// and resource-backed IDs can be reassigned when a list scrolls or recycles.
+const UNIQUE_CHOOSER_VIEW_ID = new RegExp(
+  `^${STABLE_VIEW_ID_PREFIX}[0-9a-f]{${STABLE_VIEW_ID_HASH_LENGTH}}$`,
+);
 
 const defaultChooserAppMetadata: ChooserAppMetadata = {
   async getLabel(device, packageName) {
@@ -159,6 +178,25 @@ export class DeepLinkManager implements DeepLinkManager {
   private plist: PlistReader;
   private appBundleMetadata: AppBundleMetadata;
 
+  private configureAdb(
+    device: BootedDevice | null,
+    adbFactoryOrExecutor: AdbClientFactory | AdbExecutor | null,
+  ): { factory: AdbClientFactory; executor: AdbExecutor } {
+    // Detect if the argument is a factory (has create method) or an executor.
+    if (
+      adbFactoryOrExecutor &&
+      typeof (adbFactoryOrExecutor as AdbClientFactory).create === "function"
+    ) {
+      const factory = adbFactoryOrExecutor as AdbClientFactory;
+      return { factory, executor: factory.create(device) };
+    } else if (adbFactoryOrExecutor) {
+      // Legacy path: wrap the executor in a factory for downstream dependencies.
+      const executor = adbFactoryOrExecutor as AdbExecutor;
+      return { factory: { create: () => executor }, executor };
+    }
+    return { factory: defaultAdbClientFactory, executor: defaultAdbClientFactory.create(device) };
+  }
+
   constructor(
     device: BootedDevice | null = null,
     adbFactoryOrExecutor: AdbClientFactory | AdbExecutor | null = defaultAdbClientFactory,
@@ -167,23 +205,11 @@ export class DeepLinkManager implements DeepLinkManager {
     plist: PlistReader = new PlistClient(),
     appBundleMetadata: AppBundleMetadata = new AppBundleMetadataClient(),
     private readonly chooserMetadata?: ChooserAppMetadata,
+    private readonly timer: Timer = defaultTimer,
   ) {
-    // Detect if the argument is a factory (has create method) or an executor
-    if (
-      adbFactoryOrExecutor &&
-      typeof (adbFactoryOrExecutor as AdbClientFactory).create === "function"
-    ) {
-      this.adbFactory = adbFactoryOrExecutor as AdbClientFactory;
-      this.adbUtils = this.adbFactory.create(device);
-    } else if (adbFactoryOrExecutor) {
-      // Legacy path: wrap the executor in a factory for downstream dependencies
-      const executor = adbFactoryOrExecutor as AdbExecutor;
-      this.adbUtils = executor;
-      this.adbFactory = { create: () => executor };
-    } else {
-      this.adbFactory = defaultAdbClientFactory;
-      this.adbUtils = this.adbFactory.create(device);
-    }
+    const adb = this.configureAdb(device, adbFactoryOrExecutor);
+    this.adbFactory = adb.factory;
+    this.adbUtils = adb.executor;
     this.device = device;
     this.simctl = simctl ?? new SimCtlClient(device);
     this.hostExec = hostExec ?? defaultHostExec;
@@ -772,13 +798,52 @@ export class DeepLinkManager implements DeepLinkManager {
     tappedAt: number,
   ): Promise<boolean> {
     const metadata = this.chooserMetadata ?? defaultChooserAppMetadata;
-    const observed = await metadata.getFreshHierarchy(this.device!, this.adbFactory, tappedAt);
-    return (
-      observed.updatedAt !== undefined &&
-      observed.updatedAt >= tappedAt &&
-      observed.packageName === appPackage &&
-      !this.detectIntentChooser(observed)
-    );
+    const deadline = this.timer.now() + POST_TAP_VERIFY_BUDGET_MS;
+    let floor = tappedAt;
+    for (;;) {
+      const observed = await metadata.getFreshHierarchy(this.device!, this.adbFactory, floor);
+      if (
+        observed.updatedAt !== undefined &&
+        observed.updatedAt >= floor &&
+        observed.packageName === appPackage &&
+        !this.hasResolverHostEvidence(observed)
+      ) {
+        return true;
+      }
+      const remaining = deadline - this.timer.now();
+      if (remaining <= 0) {
+        return false;
+      }
+      floor = Math.max(floor, observed.updatedAt ?? floor) + 1;
+      await this.timer.sleep(Math.min(POST_TAP_VERIFY_INTERVAL_MS, remaining));
+    }
+  }
+
+  private hasResolverHostEvidence(observed: ViewHierarchyResult): boolean {
+    const host = /(?:^|\/)(?:com\.android\.intentresolver|com\.android\.systemui)(?:\/|$)/;
+    if (host.test(observed.packageName ?? "") || host.test(observed.foregroundActivity ?? "")) {
+      return true;
+    }
+    const activity = observed.foregroundActivity ?? "";
+    if (/com\.android\.internal\.app\.(?:Chooser|Resolver)Activity/.test(activity)) {
+      return true;
+    }
+    for (const root of this.parser.extractRootNodes(observed)) {
+      let found = false;
+      this.parser.traverseNode(root, (node: any) => {
+        const nodeClass = this.parser.extractNodeProperties(node).class;
+        if (
+          typeof nodeClass === "string" &&
+          /com\.android\.internal\.app\.(?:Chooser|Resolver)Activity/.test(nodeClass)
+        ) {
+          found = true;
+        }
+      });
+      if (found) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /**
@@ -899,7 +964,7 @@ export class DeepLinkManager implements DeepLinkManager {
     let missing: ChooserRowMissingError | undefined;
     let matchingPage = -1;
     let currentPage = 0;
-    for (let page = 0; page < 4; page += 1) {
+    for (let page = 0; page < CHOOSER_SCAN_PAGES; page += 1) {
       currentPage = page;
       const roots = this.parser.extractRootNodes(hierarchy);
       try {
@@ -910,8 +975,12 @@ export class DeepLinkManager implements DeepLinkManager {
           undefined,
           hierarchy.updatedAt,
         );
-        // A row has no stable ID; identical bounds on different list pages cannot prove identity.
-        matches.set(JSON.stringify([hierarchy.hierarchy, match.element]), match);
+        // Without a stable row ID, repeated package/label matches on different pages
+        // remain ambiguous even when their text and geometry happen to coincide.
+        matches.set(
+          match.stableId ? `id:${match.stableId}|${match.signature}` : `page:${page}`,
+          match,
+        );
         matchingPage = page;
       } catch (error) {
         if (!(error instanceof ChooserRowMissingError)) {
@@ -922,7 +991,7 @@ export class DeepLinkManager implements DeepLinkManager {
         );
         missing = error;
       }
-      if (page === 3) {
+      if (page === CHOOSER_SCAN_PAGES - 1) {
         break;
       }
       const next = await this.scrollChooserList(
@@ -930,13 +999,28 @@ export class DeepLinkManager implements DeepLinkManager {
         roots,
         metadata,
         appPackage,
-        missing?.capturedAt,
+        Math.max(
+          missing?.capturedAt ?? 0,
+          ...[...matches.values()].map((match) => match.capturedAt ?? 0),
+        ),
       );
       if (!next) {
         break;
       }
       hierarchy = next;
     }
+    const unique = this.selectUniqueAcrossPages(matches, missing, appPackage);
+    if (matchingPage === currentPage) {
+      return unique;
+    }
+    return this.restoreChooserPage(hierarchy, appPackage, unique, metadata);
+  }
+
+  private selectUniqueAcrossPages(
+    matches: Map<string, ChooserMatch>,
+    missing: ChooserRowMissingError | undefined,
+    appPackage: string,
+  ): ChooserMatch {
     if (matches.size > 1) {
       throw new Error(
         `Ambiguous chooser rows for ${appPackage} across pages. Use a chooser with one exact app match.`,
@@ -947,40 +1031,68 @@ export class DeepLinkManager implements DeepLinkManager {
         missing ?? new ChooserRowMissingError(`No exact clickable chooser row for ${appPackage}.`)
       );
     }
-    if (matchingPage === currentPage) {
-      return [...matches.values()][0];
+    return [...matches.values()][0];
+  }
+
+  private async findMatchingChooserRow(
+    hierarchy: ViewHierarchyResult,
+    appPackage: string,
+    expected: ChooserMatch,
+  ): Promise<{ match?: ChooserMatch; capturedAt?: number }> {
+    try {
+      const match = await this.findAppInChooser(
+        this.parser.extractRootNodes(hierarchy),
+        appPackage,
+        hierarchy.packageName,
+        undefined,
+        hierarchy.updatedAt,
+      );
+      if (
+        expected.stableId
+          ? match.stableId === expected.stableId && match.signature === expected.signature
+          : match.signature === expected.signature
+      ) {
+        return { match };
+      }
+      return { capturedAt: match.capturedAt };
+    } catch (error) {
+      if (!(error instanceof ChooserRowMissingError)) {
+        throw error;
+      }
+      // A missing row is expected on intermediate viewports; keep scrolling.
+      logger.debug(`[DeepLinkManager] Row not yet restored for ${appPackage}: ${error.message}`);
+      return { capturedAt: error.capturedAt };
     }
-    return this.restoreChooserPage(hierarchy, appPackage, currentPage - matchingPage, metadata);
   }
 
   private async restoreChooserPage(
     hierarchy: ViewHierarchyResult,
     appPackage: string,
-    pagesBack: number,
+    expected: ChooserMatch,
     metadata: ChooserAppMetadata,
   ): Promise<ChooserMatch> {
-    for (let page = 0; page < pagesBack; page += 1) {
+    let capturedAt = expected.capturedAt;
+    for (let page = 0; page < CHOOSER_SCAN_PAGES; page += 1) {
       const previous = await this.scrollChooserList(
         hierarchy,
         this.parser.extractRootNodes(hierarchy),
         metadata,
         appPackage,
-        undefined,
+        capturedAt,
         "down",
       );
       if (!previous) {
-        throw new Error(
-          `Could not restore the unique chooser row for ${appPackage} after checking all pages.`,
-        );
+        break;
       }
       hierarchy = previous;
+      const result = await this.findMatchingChooserRow(hierarchy, appPackage, expected);
+      if (result.match) {
+        return result.match;
+      }
+      capturedAt = result.capturedAt;
     }
-    return this.findAppInChooser(
-      this.parser.extractRootNodes(hierarchy),
-      appPackage,
-      hierarchy.packageName,
-      undefined,
-      hierarchy.updatedAt,
+    throw new Error(
+      `Could not restore the unique chooser row for ${appPackage} after checking all pages.`,
     );
   }
 
@@ -1069,12 +1181,13 @@ export class DeepLinkManager implements DeepLinkManager {
         throw new Error(`Intent chooser disappeared while resolving ${appPackage}.`);
       }
       try {
-        return await this.findAppInChooser(
+        const match = await this.findAppInChooser(
           this.parser.extractRootNodes(freshHierarchy),
           appPackage,
           freshHierarchy.packageName,
           label,
         );
+        return { ...match, capturedAt: freshHierarchy.updatedAt };
       } catch (error) {
         if (error instanceof ChooserRowMissingError) {
           error.capturedAt = freshHierarchy.updatedAt;
@@ -1116,6 +1229,19 @@ export class DeepLinkManager implements DeepLinkManager {
         `Exact chooser row for ${appPackage} has no usable bounds. Refresh the hierarchy before retrying.`,
       );
     }
-    return { element: target, packageVerified };
+    const properties = this.parser.extractNodeProperties(candidates[0]);
+    // The producer reserves a bare content-derived view-id for a row unique
+    // within its capture. Resource-backed and ordinal IDs cannot prove that.
+    const stableId =
+      typeof properties["view-id"] === "string" &&
+      UNIQUE_CHOOSER_VIEW_ID.test(properties["view-id"])
+        ? properties["view-id"]
+        : undefined;
+    const signature = JSON.stringify([
+      appPackage,
+      packageVerified,
+      [...(labelRows.get(candidates[0]) ?? [])].sort(),
+    ]);
+    return { element: target, packageVerified, stableId, signature };
   }
 }

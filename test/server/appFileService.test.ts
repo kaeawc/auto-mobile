@@ -926,6 +926,7 @@ describe("AppFileService", () => {
       "shell base64 '/sdcard/Android/data/com.example.app/files/screenshots/home.png'",
     );
     expect(calls[1]?.maxBuffer).toBe(calls[0]?.maxBuffer);
+    expect(calls.map((call) => call.timeoutMs)).toEqual([120_000, 120_000]);
   });
 
   test("uses an expanded ADB maxBuffer when listing Android app files", async () => {
@@ -963,6 +964,7 @@ describe("AppFileService", () => {
     );
     expect(calls[1]?.command).toContain("find");
     expect(calls[1]?.maxBuffer).toBe(calls[0]?.maxBuffer);
+    expect(calls.map((call) => call.timeoutMs)).toEqual([120_000, 120_000]);
   });
 
   test("suppresses ADB retries on every read and list app-file command", async () => {

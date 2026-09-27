@@ -27,6 +27,26 @@ const makeElement = () =>
   }) as any;
 
 describe("TapAnyElement", () => {
+  test("budgets an Android long press beyond the default ADB timeout", async () => {
+    const adb = new FakeAdbClient();
+    const tapAny = new TapAnyElement(
+      { name: "test-device", platform: "android", deviceId: "emulator-5554" },
+      adb as any,
+      { timer: new FakeTimer(), elementSelector: new FakeElementSelector(makeElement()) },
+    );
+    (tapAny as any).observedInteraction = (action: (result: any) => Promise<unknown>) =>
+      action({
+        viewHierarchy: { hierarchy: { node: {} } },
+        screenSize: { width: 500, height: 500 },
+      });
+
+    await tapAny.execute({ action: "longPress", duration: 20_000 });
+    const swipe = adb
+      .getCommandCalls()
+      .find((call) => call.command.startsWith("shell input swipe"));
+    expect(swipe?.timeoutMs).toBe(22_000);
+  });
+
   describe("validateOptions", () => {
     const EXACTLY_ONE = "container must specify exactly one";
 

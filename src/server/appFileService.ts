@@ -655,7 +655,11 @@ class AndroidAppFileProvider
                 operation: "list",
                 access: "externalFiles",
               },
-              { maxBuffer: ANDROID_APP_FILE_MAX_BUFFER, noRetry: true },
+              {
+                maxBuffer: ANDROID_APP_FILE_MAX_BUFFER,
+                noRetry: true,
+                timeoutMs: APP_FILE_PUSH_TIMEOUT_MS,
+              },
             )
           ).stdout
         : (
@@ -669,7 +673,11 @@ class AndroidAppFileProvider
                 operation: "list",
                 access: "run-as",
               },
-              { maxBuffer: ANDROID_APP_FILE_MAX_BUFFER, noRetry: true },
+              {
+                maxBuffer: ANDROID_APP_FILE_MAX_BUFFER,
+                noRetry: true,
+                timeoutMs: APP_FILE_PUSH_TIMEOUT_MS,
+              },
             )
           ).stdout;
 
@@ -716,7 +724,11 @@ class AndroidAppFileProvider
                 operation: "read",
                 access: "externalFiles",
               },
-              { maxBuffer: ANDROID_APP_FILE_MAX_BUFFER, noRetry: true },
+              {
+                maxBuffer: ANDROID_APP_FILE_MAX_BUFFER,
+                noRetry: true,
+                timeoutMs: APP_FILE_PUSH_TIMEOUT_MS,
+              },
             )
           ).stdout
         : (
@@ -730,7 +742,11 @@ class AndroidAppFileProvider
                 operation: "read",
                 access: "run-as",
               },
-              { maxBuffer: ANDROID_APP_FILE_MAX_BUFFER, noRetry: true },
+              {
+                maxBuffer: ANDROID_APP_FILE_MAX_BUFFER,
+                noRetry: true,
+                timeoutMs: APP_FILE_PUSH_TIMEOUT_MS,
+              },
             )
           ).stdout;
     const blob = stdout.replace(/\s+/g, "");

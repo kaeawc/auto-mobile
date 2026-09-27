@@ -48,6 +48,24 @@ const makeElement = (bounds = { left: 0, top: 0, right: 100, bottom: 50 }) =>
   }) as any;
 
 describe("TapOnElement extended selectors", () => {
+  test("budgets both Android long-press swipe forms from the requested duration", async () => {
+    const tapOn = createDefaultTapOnElement();
+    const adb = (tapOn as any).adb as FakeAdbClient;
+    adb.setCommandError(
+      "shell input touchscreen swipe 50 25 50 25 20000",
+      new Error("touchscreen input unavailable"),
+    );
+
+    await (tapOn as any).executeAndroidLongPress(50, 25, 20_000, makeElement(), undefined, true);
+
+    expect(
+      adb
+        .getCommandCalls()
+        .filter((call) => call.command.includes("swipe"))
+        .map((call) => call.timeoutMs),
+    ).toEqual([22_000, 22_000]);
+  });
+
   describe("validation", () => {
     test("rejects when no selector provided", () => {
       const selector = new FakeElementSelector(makeElement());

@@ -12,6 +12,7 @@ import {
   type AdbMissingDeviceEvent,
 } from "../../../src/utils/android-cmdline-tools/AdbDeviceHealth";
 import { FakeEmulatorConsoleBusyRegistry } from "../../fakes/FakeEmulatorConsoleBusyRegistry";
+import { wrapCommandError } from "../../../src/utils/CommandError";
 
 const DEVICE: BootedDevice = {
   deviceId: "emulator-5554",
@@ -137,6 +138,262 @@ describe("AdbClient retry contract", () => {
     expect(timer.getCurrentTime()).toBe(1_700);
   });
 
+  test.each(["shell monkey -p 'com.example' --user 0 1", "shell kill -USR1 1234"])(
+    "does not replay an unclassified action after device offline: %s",
+    async (command) => {
+      let calls = 0;
+      const client = new AdbClient(
+        DEVICE,
+        async () => {
+          calls += 1;
+          throw new Error("error: device offline");
+        },
+        null,
+        ...autoRetrySeam(),
+      );
+
+      await expect(client.executeCommand(command)).rejects.toThrow("offline");
+      expect(calls).toBe(1);
+    },
+  );
+
+  test.each([
+    { name: "dumpsys window bare", command: "shell dumpsys window", dispatches: 4 },
+    {
+      name: "dumpsys window rotation grep",
+      command: 'shell dumpsys window | grep -i "mRotation="',
+      dispatches: 4,
+    },
+    {
+      name: "dumpsys window focus grep",
+      command: "shell dumpsys window | grep mCurrentFocus",
+      dispatches: 4,
+    },
+    {
+      name: "dumpsys activity activities bare",
+      command: "shell dumpsys activity activities",
+      dispatches: 4,
+    },
+    {
+      name: "dumpsys activity processes bare",
+      command: "shell dumpsys activity processes",
+      dispatches: 4,
+    },
+    {
+      name: "dumpsys activity processes package",
+      command: "shell dumpsys activity processes com.example",
+      dispatches: 4,
+    },
+    {
+      name: "dumpsys activity activities grep and head",
+      command:
+        'shell dumpsys activity activities | grep -E "(mResumedActivity|mFocusedActivity|topResumedActivity)" | head -1',
+      dispatches: 4,
+    },
+    { name: "dumpsys display", command: "shell dumpsys display", dispatches: 4 },
+    { name: "dumpsys SurfaceFlinger", command: "shell dumpsys SurfaceFlinger", dispatches: 4 },
+    { name: "dumpsys package", command: "shell dumpsys package com.example", dispatches: 4 },
+    { name: "dumpsys notification", command: "shell dumpsys notification", dispatches: 4 },
+    { name: "dumpsys accessibility", command: "shell dumpsys accessibility", dispatches: 4 },
+    { name: "dumpsys meminfo", command: "shell dumpsys meminfo com.example", dispatches: 4 },
+    { name: "dumpsys gfxinfo read", command: "shell dumpsys gfxinfo com.example", dispatches: 4 },
+    { name: "dumpsys user", command: "shell dumpsys user", dispatches: 4 },
+    {
+      name: "dumpsys power grep",
+      command: "shell dumpsys power | grep mWakefulness=",
+      dispatches: 4,
+    },
+    { name: "dumpsys input_method", command: "shell dumpsys input_method", dispatches: 4 },
+    { name: "wm size read", command: "shell wm size", dispatches: 4 },
+    { name: "wm density read", command: "shell wm density", dispatches: 4 },
+    { name: "settings get", command: "shell settings get system font_scale", dispatches: 4 },
+    { name: "pm list packages", command: "shell pm list packages --user 0", dispatches: 4 },
+    { name: "pm path", command: "shell pm path com.example", dispatches: 4 },
+    {
+      name: "cmd package query-activities",
+      command: "shell cmd package query-activities --brief android.intent.action.MAIN",
+      dispatches: 4,
+    },
+    {
+      name: "cmd package query-receivers",
+      command: "shell cmd package query-receivers --brief -a android.intent.action.BOOT_COMPLETED",
+      dispatches: 4,
+    },
+    {
+      name: "cmd package resolve-activity",
+      command: "shell cmd package resolve-activity --brief -a android.intent.action.MAIN",
+      dispatches: 4,
+    },
+    { name: "cat proc file", command: "shell cat /proc/uptime", dispatches: 4 },
+    { name: "getevent probe", command: "shell getevent -p", dispatches: 4 },
+    {
+      name: "sha256sum one path",
+      command: "shell sha256sum /data/local/tmp/app.apk",
+      dispatches: 4,
+    },
+    { name: "stat one path", command: "shell stat -c %s /data/local/tmp/app.apk", dispatches: 4 },
+    { name: "uiautomator dump writes file", command: "shell uiautomator dump", dispatches: 1 },
+    { name: "uiautomator invocation", command: "shell uiautomator events", dispatches: 1 },
+    { name: "screencap writes file", command: "shell screencap -p /sdcard/x", dispatches: 1 },
+    { name: "base64 just-written file", command: "shell base64 /sdcard/x", dispatches: 1 },
+    { name: "rm file", command: "shell rm /sdcard/x", dispatches: 1 },
+    {
+      name: "screencap base64 rm chain",
+      command: "shell screencap -p /sdcard/x && base64 /sdcard/x && rm /sdcard/x",
+      dispatches: 1,
+    },
+    { name: "wm density set", command: "shell wm density 420", dispatches: 1 },
+    { name: "wm density reset", command: "shell wm density reset", dispatches: 1 },
+    { name: "settings put", command: "shell settings put system font_scale 1.2", dispatches: 1 },
+    { name: "settings delete", command: "shell settings delete system font_scale", dispatches: 1 },
+    { name: "pm clear", command: "shell pm clear com.example", dispatches: 1 },
+    { name: "pm uninstall", command: "shell pm uninstall com.example", dispatches: 1 },
+    {
+      name: "pm grant",
+      command: "shell pm grant com.example android.permission.CAMERA",
+      dispatches: 1,
+    },
+    { name: "pm other subcommand", command: "shell pm dump com.example", dispatches: 1 },
+    {
+      name: "cmd package other subcommand",
+      command: "shell cmd package install /tmp/app.apk",
+      dispatches: 1,
+    },
+    {
+      name: "dumpsys semicolon rm chain",
+      command: "shell dumpsys window; rm -rf /sdcard/x",
+      dispatches: 1,
+    },
+    {
+      name: "dumpsys and rm chain",
+      command: "shell dumpsys window && rm -rf /sdcard/x",
+      dispatches: 1,
+    },
+    {
+      name: "dumpsys or rm chain",
+      command: "shell dumpsys window || rm -rf /sdcard/x",
+      dispatches: 1,
+    },
+    {
+      name: "dumpsys tee pipe",
+      command: "shell dumpsys window | tee /sdcard/x",
+      dispatches: 1,
+    },
+    {
+      name: "settings tee pipe",
+      command: "shell settings get system font_scale | tee /sdcard/x",
+      dispatches: 1,
+    },
+    {
+      name: "gfxinfo reset clears counters",
+      command: "shell dumpsys gfxinfo com.example reset",
+      dispatches: 1,
+    },
+    { name: "getevent other flags", command: "shell getevent -pl", dispatches: 1 },
+    {
+      name: "sha256sum semicolon chain",
+      command: "shell sha256sum /sdcard/x; rm /sdcard/x",
+      dispatches: 1,
+    },
+    {
+      name: "sha256sum and chain",
+      command: "shell sha256sum /sdcard/x && rm /sdcard/x",
+      dispatches: 1,
+    },
+    {
+      name: "sha256sum or chain",
+      command: "shell sha256sum /sdcard/x || rm /sdcard/x",
+      dispatches: 1,
+    },
+    {
+      name: "sha256sum pipe chain",
+      command: "shell sha256sum /sdcard/x | tee /sdcard/x.hash",
+      dispatches: 1,
+    },
+    {
+      name: "stat semicolon chain",
+      command: "shell stat -c %s /sdcard/x; rm /sdcard/x",
+      dispatches: 1,
+    },
+    {
+      name: "stat and chain",
+      command: "shell stat -c %s /sdcard/x && rm /sdcard/x",
+      dispatches: 1,
+    },
+    {
+      name: "stat or chain",
+      command: "shell stat -c %s /sdcard/x || rm /sdcard/x",
+      dispatches: 1,
+    },
+    {
+      name: "stat pipe chain",
+      command: "shell stat -c %s /sdcard/x | tee /sdcard/x.size",
+      dispatches: 1,
+    },
+  ])(
+    "retries only allowlisted shell reads after device offline: $name",
+    async ({ command, dispatches }) => {
+      let calls = 0;
+      const client = new AdbClient(
+        DEVICE,
+        async () => {
+          calls += 1;
+          throw new Error("error: device offline");
+        },
+        null,
+        ...autoRetrySeam(),
+      );
+
+      await expect(client.executeCommand(command)).rejects.toThrow("offline");
+      expect(calls).toBe(dispatches);
+    },
+  );
+
+  test("stops a retry backoff at the whole-command deadline", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    let calls = 0;
+    const client = new AdbClient(
+      DEVICE,
+      async () => {
+        calls += 1;
+        throw new Error("error: closed");
+      },
+      null,
+      new DefaultRetryExecutor(timer),
+      timer,
+    );
+
+    await expect(client.executeCommand("shell getprop sys.boot_completed", 100)).rejects.toThrow(
+      "Command timed out after 100ms",
+    );
+    expect(calls).toBe(1);
+    expect(timer.now()).toBe(100);
+  });
+
+  test("keeps a covered backoff and caps only the next one", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    let calls = 0;
+    const client = new AdbClient(
+      DEVICE,
+      async () => {
+        calls += 1;
+        throw new Error("error: closed");
+      },
+      null,
+      new DefaultRetryExecutor(timer),
+      timer,
+    );
+
+    await expect(client.executeCommand("shell getprop sys.boot_completed", 300)).rejects.toThrow(
+      "Command timed out after 300ms",
+    );
+    expect(calls).toBe(2);
+    expect(timer.getSleepHistory()).toEqual([200, 100]);
+    expect(timer.now()).toBe(300);
+  });
+
   test("outlasts a protocol fault that clears after 1.5 seconds", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
@@ -236,6 +493,42 @@ describe("AdbClient retry contract", () => {
       async () => {
         calls += 1;
         throw new Error("error: closed");
+      },
+      null,
+      ...autoRetrySeam(),
+    );
+
+    await expect(client.executeCommand(command)).rejects.toThrow("error: closed");
+    expect(calls).toBe(1);
+  });
+
+  test("does not replay a monkey launch after a closed connection", async () => {
+    let calls = 0;
+    const client = new AdbClient(
+      DEVICE,
+      async () => {
+        calls += 1;
+        throw new Error("error: closed");
+      },
+      null,
+      ...autoRetrySeam(),
+    );
+
+    await expect(client.executeCommand("shell monkey -p 'com.example' --user 0 1")).rejects.toThrow(
+      "closed",
+    );
+    expect(calls).toBe(1);
+  });
+
+  test("ignores pre-dispatch phrases in wrapped command arguments", async () => {
+    let calls = 0;
+    const command =
+      "shell am start -a android.intent.action.VIEW -d 'https://example.com/cannot connect to daemon'";
+    const client = new AdbClient(
+      DEVICE,
+      async () => {
+        calls += 1;
+        throw wrapCommandError(new Error("error: closed"), { command: "adb", args: [command] });
       },
       null,
       ...autoRetrySeam(),

@@ -121,7 +121,12 @@ class DefaultSharedStorageService implements SharedStorageService {
     try {
       if (request.reset) {
         // namespace has exactly one safe segment, so this can only remove Downloads/<namespace>.
-        await execute(adb, `shell rm -rf ${shellQuote(destinationDirectory)}`, request.signal);
+        await execute(
+          adb,
+          `shell rm -rf ${shellQuote(destinationDirectory)}`,
+          request.signal,
+          SHARED_STORAGE_PUSH_TIMEOUT_MS,
+        );
       }
       await execute(adb, `shell mkdir -p ${shellQuote(destinationDirectory)}`, request.signal);
 
@@ -236,9 +241,14 @@ interface PreparedSharedStorageFile {
   source: { path: string; byteCount: number; cleanup?: () => Promise<void> };
 }
 
-async function execute(adb: AdbExecutor, command: string, signal?: AbortSignal): Promise<void> {
+async function execute(
+  adb: AdbExecutor,
+  command: string,
+  signal?: AbortSignal,
+  timeoutMs?: number,
+): Promise<void> {
   try {
-    await adb.executeCommand(command, undefined, undefined, true, signal, true);
+    await adb.executeCommand(command, timeoutMs, undefined, true, signal, true);
   } catch (error) {
     throw new ActionableError(`Android shared-storage operation failed: ${errorMessage(error)}`);
   }

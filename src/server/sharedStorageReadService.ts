@@ -29,6 +29,7 @@ import {
 import { findBootedDeviceForResource } from "./resourceDeviceResolver";
 
 const SHARED_STORAGE_MAX_BUFFER = 64 * 1024 * 1024;
+const SHARED_STORAGE_BULK_TIMEOUT_MS = 120_000;
 const NAMESPACE_MISSING_MARKER = "__AUTOMOBILE_NS_MISSING__";
 const FILE_MISSING_MARKER = "__AUTOMOBILE_FILE_MISSING__";
 
@@ -262,7 +263,7 @@ async function executeShell(
 ): Promise<string> {
   const result = await adb.executeCommand(
     `shell ${script}`,
-    undefined,
+    SHARED_STORAGE_BULK_TIMEOUT_MS,
     SHARED_STORAGE_MAX_BUFFER,
     true,
     signal,

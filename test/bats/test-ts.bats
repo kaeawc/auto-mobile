@@ -77,6 +77,9 @@ cat > "$STUB_BIN/bun" <<'EOF'
 if [[ "$1" == "run" && "$2" == "scripts/lib/junit-testcase-timings.ts" ]]; then
   exec "$REAL_BUN" "$@"
 fi
+if [[ "$1" == "scripts/lib/merge-junit-reports.ts" ]]; then
+  exec "$REAL_BUN" "$@"
+fi
 printf '%s\n' "$*" >> "$BUN_ARGS_FILE"
 if [[ -n "${STUB_BUN_SLEEP_SECONDS:-}" ]]; then
   sleep "$STUB_BUN_SLEEP_SECONDS"
@@ -185,6 +188,12 @@ if [[ -n "${STUB_RECHECK_TIMES:-}" ]]; then
   exit 0
 fi
 stub_junit_report "$report" "${target:-test/example.test.ts}" fixture fast 0.001
+if [[ "$target" == "test/server/proxyServerTransportFailure.integration.test.ts" && -n "${STUB_INTEGRATION_TRANSPORT_EXIT:-}" ]]; then
+  exit "$STUB_INTEGRATION_TRANSPORT_EXIT"
+fi
+if [[ "$target" == ".integration.test.ts" && -n "${STUB_INTEGRATION_MAIN_EXIT:-}" ]]; then
+  exit "$STUB_INTEGRATION_MAIN_EXIT"
+fi
 EOF
   chmod +x "$STUB_BIN/git" "$STUB_BIN/bun"
 }
@@ -206,6 +215,185 @@ run_lane() {
   [[ "$output" == *"--no-orphans"* ]]
   [[ "$output" == *"\\*\\*/\\*.integration.test.ts"* ]]
   [[ "$output" == *"test/stress/\\*\\*"* ]]
+}
+
+@test "integration lane isolates test files to prevent shared suite state" {
+  run_lane integration --bail
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"--isolate"* ]]
+  [[ "$output" == *"test/server/proxyServerTransportFailure.integration.test.ts"* ]]
+  [[ "$output" == *"--path-ignore-patterns"*"proxyServerTransportFailure.integration.test.ts"* ]]
+  [[ "$output" == *".integration.test.ts"* ]]
+  [ "$(grep -c -- '--bail' <<< "$output")" -eq 2 ]
+}
+
+@test "integration split combines reports from both processes" {
+  local report
+  report="$(mktemp)"
+  run env PATH="$STUB_BIN:$PATH" bash "$SCRIPT" integration \
+    --reporter junit --reporter-outfile "$report"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '<testsuite ' "$report")" -eq 2 ]
+  [[ "$(cat "$report")" == *"proxyServerTransportFailure.integration.test.ts"* ]]
+  [[ "$(cat "$report")" == *'tests="2"'* ]]
+  rm -f "$report"
+}
+
+@test "integration split preserves both reports when the main process fails" {
+  local report
+  report="$(mktemp)"
+  run env PATH="$STUB_BIN:$PATH" STUB_INTEGRATION_MAIN_EXIT=7 bash "$SCRIPT" integration \
+    --reporter junit --reporter-outfile "$report"
+  [ "$status" -eq 7 ]
+  [ "$(grep -c '<testsuite ' "$report")" -eq 2 ]
+  [[ "$(cat "$report")" == *"proxyServerTransportFailure.integration.test.ts"* ]]
+  rm -f "$report"
+}
+
+@test "integration split continues after transport failure unless bail is requested" {
+  local report
+  report="$(mktemp)"
+  run env PATH="$STUB_BIN:$PATH" STUB_INTEGRATION_TRANSPORT_EXIT=7 \
+    bash "$SCRIPT" integration --reporter junit --reporter-outfile "$report"
+  [ "$status" -eq 7 ]
+  [ "$(grep -c '<testsuite ' "$report")" -eq 2 ]
+  [ "$(wc -l < "$BUN_ARGS_FILE")" -eq 2 ]
+  rm -f "$report"
+
+  report="$(mktemp)"
+  : > "$BUN_ARGS_FILE"
+  run env PATH="$STUB_BIN:$PATH" STUB_INTEGRATION_TRANSPORT_EXIT=7 \
+    bash "$SCRIPT" integration --bail --reporter junit --reporter-outfile "$report"
+  [ "$status" -eq 7 ]
+  [ "$(grep -c '<testsuite ' "$report")" -eq 1 ]
+  [ "$(wc -l < "$BUN_ARGS_FILE")" -eq 1 ]
+  rm -f "$report"
+}
+
+@test "integration split continues after one transport failure with a numeric bail budget" {
+  local bail_args report
+  for bail_args in "--bail=2" "--bail 2"; do
+    report="$(mktemp)"
+    : > "$BUN_ARGS_FILE"
+    # Shell splitting intentionally exercises both supported argument forms.
+    # shellcheck disable=SC2086
+    run env PATH="$STUB_BIN:$PATH" STUB_INTEGRATION_TRANSPORT_EXIT=7 \
+      bash "$SCRIPT" integration $bail_args --reporter junit --reporter-outfile "$report"
+    [ "$status" -eq 7 ]
+    [ "$(grep -c '<testsuite ' "$report")" -eq 2 ]
+    [ "$(wc -l < "$BUN_ARGS_FILE")" -eq 2 ]
+    rm -f "$report"
+  done
+}
+
+@test "integration coverage retains one process and its complete LCOV output" {
+  run_lane integration --coverage --coverage-reporter lcov --coverage-dir scratch/integration-coverage
+  [ "$status" -eq 0 ]
+  [ "$(grep -c 'bun test' <<< "$output")" -eq 1 ]
+  [[ "$output" == *"--coverage --coverage-reporter lcov --coverage-dir scratch/integration-coverage"* ]]
+}
+
+@test "long-lived integration modes keep every file in one process" {
+  local mode
+  for mode in --watch --hot --inspect-wait --inspect-brk --inspect-wait=127.0.0.1:6499 --inspect-brk=127.0.0.1:6499; do
+    run_lane integration "$mode"
+    [ "$status" -eq 0 ]
+    [ "$(grep -c 'bun test' <<< "$output")" -eq 1 ]
+    [[ "$output" == *".integration.test.ts"* ]]
+  done
+}
+
+@test "targeted transport suite stays isolated and capped when selected with other files" {
+  local timeout_args
+  timeout_args="$(mktemp)"
+  cat > "$STUB_BIN/timeout" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$TIMEOUT_ARGS_FILE"
+shift 3
+exec "$@"
+EOF
+  chmod +x "$STUB_BIN/timeout"
+  run env PATH="$STUB_BIN:$PATH" TIMEOUT_ARGS_FILE="$timeout_args" \
+    AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=900 bash "$SCRIPT" integration \
+    test/server/proxyServerTransportFailure.integration.test.ts \
+    test/server/deviceLabelSessionReleaseOrdering.integration.test.ts
+  [ "$status" -eq 0 ]
+  [ "$(wc -l < "$BUN_ARGS_FILE")" -eq 2 ]
+  [[ "$(head -n 1 "$timeout_args")" == "-k 2 60 "* ]]
+  [[ "$(tail -n 1 "$BUN_ARGS_FILE")" == *"deviceLabelSessionReleaseOrdering.integration.test.ts"* ]]
+  [[ "$(tail -n 1 "$BUN_ARGS_FILE")" != *"proxyServerTransportFailure.integration.test.ts"* ]]
+  : > "$BUN_ARGS_FILE"
+  : > "$timeout_args"
+  run env PATH="$STUB_BIN:$PATH" TIMEOUT_ARGS_FILE="$timeout_args" \
+    AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=900 bash "$SCRIPT" integration \
+    test/server/proxyServerTransportFailure.integration.test.ts
+  [ "$status" -eq 0 ]
+  [ "$(wc -l < "$BUN_ARGS_FILE")" -eq 1 ]
+  [[ "$(head -n 1 "$timeout_args")" == "-k 2 60 "* ]]
+  rm -f "$timeout_args"
+}
+
+@test "integration split reports a main watchdog timeout ahead of a transport failure" {
+  local report
+  report="$(mktemp)"
+  run env PATH="$STUB_BIN:$PATH" STUB_INTEGRATION_TRANSPORT_EXIT=7 \
+    STUB_INTEGRATION_MAIN_EXIT=124 bash "$SCRIPT" integration \
+    --reporter junit --reporter-outfile "$report"
+  [ "$status" -eq 124 ]
+  [ "$(grep -c '<testsuite ' "$report")" -eq 2 ]
+  rm -f "$report"
+}
+
+@test "integration split respects a shorter caller wall timeout" {
+  local timeout_args
+  timeout_args="$(mktemp)"
+  cat > "$STUB_BIN/timeout" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$TIMEOUT_ARGS_FILE"
+shift 3
+exec "$@"
+EOF
+  chmod +x "$STUB_BIN/timeout"
+  run env PATH="$STUB_BIN:$PATH" TIMEOUT_ARGS_FILE="$timeout_args" \
+    AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=1 bash "$SCRIPT" integration
+  [ "$status" -eq 0 ]
+  [ "$(wc -l < "$timeout_args")" -eq 2 ]
+  [[ "$(head -n 1 "$timeout_args")" == "-k 2 1 "* ]]
+  rm -f "$timeout_args"
+}
+
+@test "integration split passes only the remaining wall time to the main process" {
+  local timeout_args clock_calls
+  timeout_args="$(mktemp)"
+  clock_calls="$(mktemp)"
+  printf '0' > "$clock_calls"
+  cat > "$STUB_BIN/date" <<'EOF'
+#!/usr/bin/env bash
+calls="$(cat "$CLOCK_CALLS_FILE")"
+printf '%s' "$((calls + 1))" > "$CLOCK_CALLS_FILE"
+if ((calls < 2)); then printf '100\n'; else printf '105\n'; fi
+EOF
+  cat > "$STUB_BIN/timeout" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$TIMEOUT_ARGS_FILE"
+shift 3
+exec "$@"
+EOF
+  chmod +x "$STUB_BIN/date" "$STUB_BIN/timeout"
+  run env PATH="$STUB_BIN:$PATH" CLOCK_CALLS_FILE="$clock_calls" \
+    TIMEOUT_ARGS_FILE="$timeout_args" AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=60 \
+    bash "$SCRIPT" integration
+  [ "$status" -eq 0 ]
+  [[ "$(head -n 1 "$timeout_args")" == "-k 2 60 "* ]]
+  [[ "$(tail -n 1 "$timeout_args")" == "-k 2 55 "* ]]
+  rm -f "$timeout_args" "$clock_calls"
+}
+
+@test "Windows integration lane retains one process without a POSIX watchdog" {
+  run env RUNNER_OS=Windows PATH="$STUB_BIN:$PATH" TEST_TS_PRINT_CMD=1 bash "$SCRIPT" integration
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^bun test' <<< "$output")" -eq 1 ]
+  [[ "$output" != *"--path-ignore-patterns"* ]]
 }
 
 @test "macOS defaults to two unit shards on three cores" {
@@ -311,7 +499,7 @@ run_lane() {
   run_lane all --test-name-pattern test/scripts
   [ "$status" -eq 0 ]
   [[ "$output" == *"--test-name-pattern test/scripts"* ]]
-  [ "$(grep -c '^bun test' <<< "$output")" -eq 3 ]
+  [ "$(grep -c '^bun test' <<< "$output")" -eq 4 ]
 }
 
 @test "equals-form options are not classified as positional test targets" {

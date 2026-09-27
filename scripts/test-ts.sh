@@ -428,23 +428,159 @@ case "$mode" in
       "${passthrough_args[@]+"${passthrough_args[@]}"}"
     ;;
   integration)
-    integration_args=(bun test --timeout "$per_test_timeout_ms")
+    integration_args=(bun test --isolate --timeout "$per_test_timeout_ms")
+    transport_selected=false
+    integration_main_paths=()
+    for integration_path in "${integration_test_paths[@]+"${integration_test_paths[@]}"}"; do
+      if [[ "$integration_path" == test/server/proxyServerTransportFailure.integration.test.ts ]]; then
+        transport_selected=true
+      else
+        integration_main_paths+=("$integration_path")
+      fi
+    done
     if [[ "$runner_os" != "Windows" ]]; then
       integration_args+=(--no-orphans "--parallel=${integration_workers}")
     fi
     if [[ "${#integration_test_paths[@]}" -gt 0 && ( "${#unit_test_paths[@]}" -gt 0 || "${#stress_test_paths[@]}" -gt 0 ) ]]; then
       echo "Integration test targets cannot include other lanes." >&2
       exit 2
-    elif [[ "${#integration_test_paths[@]}" -gt 0 ]]; then
+    elif [[ "${#integration_test_paths[@]}" -gt 0 && "$transport_selected" == false ]]; then
       run_test_command \
         "${integration_args[@]}" \
         "${integration_test_paths[@]+"${integration_test_paths[@]}"}" \
         "${passthrough_args[@]+"${passthrough_args[@]}"}"
-    elif [[ "$has_test_targets" -eq 0 ]]; then
-      run_test_command \
-        "${integration_args[@]}" \
-        ".integration.test.ts" \
-        "${passthrough_args[@]+"${passthrough_args[@]}"}"
+    elif [[ "$has_test_targets" -eq 0 || "$transport_selected" == true ]]; then
+      coverage_requested=false
+      long_lived=false
+      for passthrough_arg in "${passthrough_args[@]+"${passthrough_args[@]}"}"; do
+        case "$passthrough_arg" in
+          --coverage|--coverage=*) coverage_requested=true ;;
+          --watch|--hot|--inspect-wait|--inspect-brk|--inspect-wait=*|--inspect-brk=*) long_lived=true ;;
+        esac
+      done
+      if [[ "$runner_os" == "Windows" || "$coverage_requested" == true || "$long_lived" == true ]]; then
+        # The Windows lane already passes as one process, and its shell does not
+        # use the POSIX watchdog needed for the stalled Unix transport suite.
+        # Coverage also stays in one process so Bun writes a complete LCOV
+        # report rather than overwriting the transport suite's first report.
+        if [[ "$has_test_targets" -eq 0 ]]; then
+          run_test_command "${integration_args[@]}" ".integration.test.ts" \
+            "${passthrough_args[@]+"${passthrough_args[@]}"}"
+        else
+          run_test_command "${integration_args[@]}" \
+            "${integration_test_paths[@]+"${integration_test_paths[@]}"}" "${passthrough_args[@]+"${passthrough_args[@]}"}"
+        fi
+      else
+        # This MCP transport suite can stall the Linux runner after earlier suites
+        # have run, even with Bun's per-file isolation. Give it a fresh process and
+        # a short deadline so a regression cannot consume the whole matrix job.
+        transport_suite_timeout="${AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS:-60}"
+        validate_positive_integer "AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS" "$transport_suite_timeout"
+        integration_wall_timeout="$transport_suite_timeout"
+        integration_started_at="$(date +%s)"
+        if ((transport_suite_timeout > 60)); then
+          transport_suite_timeout=60
+        fi
+        transport_args=("${passthrough_args[@]+"${passthrough_args[@]}"}")
+        main_args=("${passthrough_args[@]+"${passthrough_args[@]}"}")
+        report_outfile=""
+        for ((report_index = 0; report_index < ${#transport_args[@]}; report_index += 1)); do
+          if [[ "${transport_args[$report_index]}" == --reporter-outfile ]]; then
+            report_outfile="${transport_args[$((report_index + 1))]}"
+            report_arg_index=$((report_index + 1))
+            report_arg_prefix=""
+            break
+          elif [[ "${transport_args[$report_index]}" == --reporter-outfile=* ]]; then
+            report_outfile="${transport_args[$report_index]#--reporter-outfile=}"
+            report_arg_index="$report_index"
+            report_arg_prefix="--reporter-outfile="
+            break
+          fi
+        done
+        if [[ -n "$report_outfile" ]]; then
+          report_dir="$(mktemp -d)"
+          trap 'rm -rf "$report_dir"' EXIT
+          transport_args[report_arg_index]="${report_arg_prefix}$report_dir/transport.xml"
+          main_args[report_arg_index]="${report_arg_prefix}$report_dir/main.xml"
+        fi
+        fail_fast=false
+        for ((bail_index = 0; bail_index < ${#passthrough_args[@]}; bail_index += 1)); do
+          case "${passthrough_args[$bail_index]}" in
+            --bail)
+              bail_count="${passthrough_args[$((bail_index + 1))]:-}"
+              if [[ ! "$bail_count" =~ ^[0-9]+$ ]] || ((bail_count <= 1)); then
+                fail_fast=true
+              fi
+              ;;
+            --bail=*)
+              bail_count="${passthrough_args[$bail_index]#--bail=}"
+              if [[ "$bail_count" =~ ^[0-9]+$ ]] && ((bail_count <= 1)); then
+                fail_fast=true
+              fi
+              ;;
+          esac
+        done
+        transport_status=0
+        # A failed process may still write a useful JUnit report. Run the
+        # remaining files unless the caller explicitly requested fail-fast.
+        # shellcheck disable=SC2310
+        if AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS="$transport_suite_timeout" run_test_command \
+          "${integration_args[@]}" \
+          test/server/proxyServerTransportFailure.integration.test.ts \
+          "${transport_args[@]+"${transport_args[@]}"}"; then
+          :
+        else
+          transport_status=$?
+          if [[ "$fail_fast" == true ]]; then
+            if [[ -n "$report_outfile" && -f "$report_dir/transport.xml" ]]; then
+              cp "$report_dir/transport.xml" "$report_outfile"
+            fi
+            exit "$transport_status"
+          fi
+        fi
+        if [[ "$has_test_targets" -eq 1 && "${#integration_main_paths[@]}" -eq 0 ]]; then
+          if [[ -n "$report_outfile" && -f "$report_dir/transport.xml" ]]; then
+            cp "$report_dir/transport.xml" "$report_outfile"
+          fi
+          exit "$transport_status"
+        fi
+        integration_remaining=$((integration_wall_timeout - ($(date +%s) - integration_started_at)))
+        if ((integration_remaining <= 0)); then
+          if [[ -n "$report_outfile" && -f "$report_dir/transport.xml" ]]; then
+            cp "$report_dir/transport.xml" "$report_outfile"
+          fi
+          echo "Integration test run exceeded its ${integration_wall_timeout}s wall-clock budget." >&2
+          exit 124
+        fi
+        main_status=0
+        if [[ "$has_test_targets" -eq 0 ]]; then
+          main_targets=(--path-ignore-patterns "**/proxyServerTransportFailure.integration.test.ts" ".integration.test.ts")
+        else
+          main_targets=("${integration_main_paths[@]+"${integration_main_paths[@]}"}")
+        fi
+        # shellcheck disable=SC2310
+        if AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS="$integration_remaining" run_test_command \
+          "${integration_args[@]}" \
+          "${main_targets[@]}" \
+          "${main_args[@]+"${main_args[@]}"}"; then
+          :
+        else
+          main_status=$?
+        fi
+        if [[ -n "$report_outfile" && "${TEST_TS_PRINT_CMD:-}" != 1 ]]; then
+          if [[ -f "$report_dir/transport.xml" && -f "$report_dir/main.xml" ]]; then
+            bun scripts/lib/merge-junit-reports.ts "$report_outfile" \
+              "$report_dir/transport.xml" "$report_dir/main.xml"
+          elif [[ -f "$report_dir/transport.xml" ]]; then
+            cp "$report_dir/transport.xml" "$report_outfile"
+          elif [[ -f "$report_dir/main.xml" ]]; then
+            cp "$report_dir/main.xml" "$report_outfile"
+          fi
+        fi
+        if ((transport_status == 124 || main_status == 124)); then exit 124; fi
+        if ((transport_status != 0)); then exit "$transport_status"; fi
+        if ((main_status != 0)); then exit "$main_status"; fi
+      fi
     else
       echo "No integration test paths were selected." >&2
       exit 2

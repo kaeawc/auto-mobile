@@ -79,6 +79,24 @@ const chromeQueryActivities = `1 activities found:
 `;
 
 describe("ADB activity-label lookup", () => {
+  test("prefers a literal ResolveInfo label over a different ActivityInfo label", async () => {
+    const adb = new FakeAdbExecutor();
+    const labeledQuery = chromeQueryActivities
+      .replace(
+        "    ActivityInfo:",
+        "    labelRes=0x7f010002 nonLocalizedLabel=Open in Chrome icon=0x7f090311\n    ActivityInfo:",
+      )
+      .replace(
+        "      ApplicationInfo:",
+        "      labelRes=0x7f010001 nonLocalizedLabel=Chrome Activity icon=0x7f090311\n      ApplicationInfo:",
+      );
+    adb.setCommandResponse("query-activities", { stdout: labeledQuery, stderr: "" } as any);
+
+    expect(
+      await resolveChooserActivityLabel(adb, "com.android.chrome", "https://example.com"),
+    ).toBe("Open in Chrome");
+  });
+
   test("real Chrome query fixture has no activity label despite application label fields", async () => {
     const adb = new FakeAdbExecutor();
     expect(chromeQueryActivities).toContain("      ApplicationInfo:\n");

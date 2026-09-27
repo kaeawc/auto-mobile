@@ -2523,7 +2523,7 @@ export function registerInteractionTools() {
     const openUrl = new OpenURL(device);
     const opened = await openUrl.execute(args.url);
     const result = args.chooserAppPackage
-      ? await selectAndroidOpenLinkChooser(device, args.chooserAppPackage, opened, args.url)
+      ? await selectAndroidOpenLinkChooser(device, args.chooserAppPackage, opened, opened.url)
       : opened;
     const iosClient = device.platform === "ios" ? IOSCtrlProxyClient.getInstance(device) : null;
     const acceptedOpenAlert =

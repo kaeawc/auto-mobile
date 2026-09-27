@@ -165,6 +165,11 @@ function parseQueryActivity(block: string): { packageName: string; label: string
   if (!activityInfo) {
     return null;
   }
+  const resolveInfoFields = block.slice(0, activityInfo.index);
+  const resolveInfoLabel =
+    /^    labelRes=\S+\s+nonLocalizedLabel=(.*?)(?:\s+(?:icon|banner)=|$)/m
+      .exec(resolveInfoFields)?.[1]
+      .trim() ?? null;
   // ApplicationInfo is nested in ActivityInfo's dump but describes the app,
   // not this intent-resolving activity. Its label must never stand in for one.
   const fields = block
@@ -175,10 +180,11 @@ function parseQueryActivity(block: string): { packageName: string; label: string
   if (!name || !packageName) {
     return null;
   }
-  const label =
+  const activityLabel =
     /^      labelRes=\S+\s+nonLocalizedLabel=(.*?)(?:\s+(?:icon|banner)=|$)/m
       .exec(fields)?.[1]
       .trim() ?? null;
+  const label = resolveInfoLabel && resolveInfoLabel !== "null" ? resolveInfoLabel : activityLabel;
   return { packageName, label };
 }
 

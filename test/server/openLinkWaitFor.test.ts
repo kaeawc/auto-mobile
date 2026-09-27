@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import type {
   BootedDevice,
   Element,
@@ -11,11 +11,15 @@ import {
   buildOpenLinkPayload,
   isIosAppOpenAlert,
   openLinkSchema,
+  registerInteractionTools,
   selectAndroidOpenLinkChooser,
   resetTapOnElementFactory,
   setTapOnElementFactory,
 } from "../../src/server/interactionTools";
 import { DeepLinkManager } from "../../src/utils/DeepLinkManager";
+import { OpenURL } from "../../src/features/action/OpenURL";
+import { HandleIntentChooser } from "../../src/features/action/HandleIntentChooser";
+import { ToolRegistry } from "../../src/server/toolRegistry";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 
 const makeObservation = (marker: string): ObserveResult => ({
@@ -136,6 +140,39 @@ test("openLink chooser path passes the exact package to the handler and surfaces
   expect(calls).toEqual([["custom", "com.example.app", "example://item"]]);
   expect(result.observation).toBe(chosen);
   expect(result.success).toBe(true);
+});
+
+test("registered openLink probes the chooser with the normalized opened URL", async () => {
+  const device = { platform: "android", deviceId: "fake", name: "Android" } as BootedDevice;
+  const rawUrl = "  example://item  ";
+  const chooserCalls: unknown[][] = [];
+  const openSpy = spyOn(OpenURL.prototype, "execute").mockImplementation(async (url) => ({
+    success: true,
+    url: url.trim(),
+  }));
+  const chooserSpy = spyOn(HandleIntentChooser.prototype, "execute").mockImplementation(
+    async (...args) => {
+      chooserCalls.push(args);
+      return { success: true, detected: true, packageVerified: true };
+    },
+  );
+  try {
+    registerInteractionTools();
+    const handler = ToolRegistry.getTool("openLink")?.deviceAwareHandler;
+    expect(handler).toBeDefined();
+    await handler!(device, {
+      platform: "android",
+      url: rawUrl,
+      chooserAppPackage: "com.example.app",
+    });
+
+    expect(openSpy).toHaveBeenCalledWith(rawUrl);
+    expect(chooserCalls).toEqual([["custom", "com.example.app", "example://item"]]);
+  } finally {
+    openSpy.mockRestore();
+    chooserSpy.mockRestore();
+    ToolRegistry.clearTools();
+  }
 });
 
 test("openLink accepts a device-seconds chooser capture in the tap's coarse second", async () => {

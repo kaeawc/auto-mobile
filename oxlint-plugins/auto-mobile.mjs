@@ -712,7 +712,13 @@ const noRawSelectorFieldReadRule = {
   },
   create(context) {
     const filename = context.filename.replaceAll("\\", "/");
-    if (!/(?:^|\/)src\/(?:features\/(?:action|debug)|server)\//.test(filename)) return {};
+    if (
+      !/(?:^|\/)src\/(?:features\/(?:action|debug)|server)\//.test(filename) &&
+      !/(?:^|\/)src\/features\/(?:accessibility\/SetAccessibilityFocus|observe\/ConditionPredicates)\.ts$/.test(
+        filename,
+      )
+    )
+      return {};
     return {
       Program(program) {
         const fields = new Set(["text", "content-desc", "resource-id"]);
@@ -789,6 +795,64 @@ const noRawSelectorFieldReadRule = {
             return node.quasis[0].value.cooked;
           return undefined;
         };
+        const blockReturnsRaw = (block, env) => {
+          let found = false;
+          const local = new Map(env);
+          for (const statement of block.body) {
+            if (statement.type === "VariableDeclaration") {
+              for (const declarator of statement.declarations)
+                bind(declarator.id, declarator.init, local, raw(declarator.init, local));
+            } else if (
+              statement.type === "ExpressionStatement" &&
+              statement.expression?.type === "AssignmentExpression"
+            ) {
+              const assignment = statement.expression;
+              bind(
+                assignment.left,
+                assignment.right,
+                local,
+                raw(assignment.right, local),
+                true,
+                assignment.operator !== "=",
+              );
+            }
+          }
+          const inspect = (node, root = false) => {
+            if (!node || typeof node.type !== "string") return false;
+            if (
+              !root &&
+              ["FunctionDeclaration", "FunctionExpression", "ArrowFunctionExpression"].includes(
+                node.type,
+              )
+            )
+              return false;
+            if (node.type === "ReturnStatement") {
+              found = true;
+              return raw(node.argument, local);
+            }
+            return Object.entries(node).some(([name, value]) => {
+              if (name === "parent" || name === "typeAnnotation") return false;
+              if (Array.isArray(value)) return value.some((child) => inspect(child));
+              return value && typeof value === "object" ? inspect(value) : false;
+            });
+          };
+          const hasRawReturn = inspect(block, true);
+          return found && hasRawReturn;
+        };
+        const objectFieldRaw = (object, name, env) => {
+          let isRaw = false;
+          for (const property of object.properties) {
+            if (property.type === "SpreadElement") {
+              if (fields.has(name) && raw(property.argument, env)) isRaw = true;
+              continue;
+            }
+            const propertyKey = property.computed
+              ? key(property.key, env)
+              : propertyName(property.key);
+            if (propertyKey === name) isRaw = raw(property.value, env);
+          }
+          return isRaw;
+        };
         const raw = (node, env) => {
           if (!node) return false;
           if (
@@ -808,8 +872,29 @@ const noRawSelectorFieldReadRule = {
             return node.typeAnnotation?.typeName?.name === "Element" && raw(node.expression, env);
           }
           if (node.type === "Identifier") return lookup(env, node.name)?.raw === true;
+          if (node.type === "ArrayExpression")
+            return node.elements.some((element) =>
+              element?.type === "SpreadElement" ? raw(element.argument, env) : raw(element, env),
+            );
+          if (node.type === "ObjectExpression")
+            return node.properties.some(
+              (property) => property.type === "SpreadElement" && raw(property.argument, env),
+            );
           if (node.type === "MemberExpression") {
             const name = node.computed ? key(node.property, env) : propertyName(node.property);
+            if (node.object?.type === "ObjectExpression")
+              return objectFieldRaw(node.object, name, env);
+            const objectFields =
+              node.object?.type === "Identifier"
+                ? lookup(env, node.object.name)?.objectFields
+                : undefined;
+            if (objectFields?.has(name)) return objectFields.get(name);
+            const arrayElements =
+              node.object?.type === "Identifier"
+                ? lookup(env, node.object.name)?.arrayElements
+                : undefined;
+            if (arrayElements && Number.isInteger(name) && name >= 0 && name < arrayElements.length)
+              return arrayElements[name];
             return (
               raw(node.object, env) ||
               (node.object?.type === "Identifier" &&
@@ -825,17 +910,21 @@ const noRawSelectorFieldReadRule = {
             const transformed = ["map", "flatMap"].includes(method);
             const callback = node.arguments[0];
             const callbackEnv = new Map(env);
-            if (callback?.params?.[0] && receiverRaw)
-              bind(callback.params[0], undefined, callbackEnv, true);
+            const elementParameter = ["reduce", "reduceRight"].includes(method) ? 1 : 0;
+            if (callback?.params?.[elementParameter] && receiverRaw)
+              bind(callback.params[elementParameter], undefined, callbackEnv, true);
             const transformedRaw = callback?.returnType
               ? rawType(callback.returnType, env)
               : callback?.body?.type === "BlockStatement"
-                ? true
+                ? blockReturnsRaw(callback.body, callbackEnv)
                 : raw(callback?.body, callbackEnv);
             return (
               lookup(env, node.callee?.name)?.rawReturn === true ||
               (node.callee?.object?.type === "ThisExpression" &&
                 lookup(env, `method:${method}`)?.rawReturn === true) ||
+              (receiverRaw &&
+                ["reduce", "reduceRight"].includes(method) &&
+                (raw(node.arguments[1], env) || transformedRaw)) ||
               (receiverRaw &&
                 [
                   "find",
@@ -848,6 +937,10 @@ const noRawSelectorFieldReadRule = {
                   "flatMap",
                   "sort",
                   "toSorted",
+                  "slice",
+                  "concat",
+                  "toReversed",
+                  "toSpliced",
                 ].includes(method) &&
                 (!transformed || transformedRaw)) ||
               ["extractNodeProperties", "getNodeProperties"].includes(method ?? node.callee?.name)
@@ -868,26 +961,52 @@ const noRawSelectorFieldReadRule = {
               binding.literals = new Set(
                 (conditional ? [...(binding.literals ?? []), next] : [next]).filter(Boolean),
               );
-            } else
+            } else {
+              const properties = new Map();
+              const objectFields = new Map();
+              if (value?.type === "ObjectExpression")
+                for (const property of value.properties) {
+                  if (property.type === "SpreadElement") {
+                    if (raw(property.argument, env))
+                      for (const field of fields) {
+                        properties.set(field, true);
+                        objectFields.set(field, true);
+                      }
+                  } else {
+                    const propertyKey = property.computed
+                      ? key(property.key, env)
+                      : propertyName(property.key);
+                    if (propertyKey !== undefined) {
+                      const propertyRaw = raw(property.value, env);
+                      properties.set(propertyKey, propertyRaw);
+                      if (fields.has(propertyKey)) objectFields.set(propertyKey, propertyRaw);
+                    }
+                  }
+                }
               env.set(pattern.name, {
                 raw: isRaw || rawType(pattern.typeAnnotation, env),
                 literal: key(value, env),
                 literals: new Set([key(value, env)].filter(Boolean)),
+                arrayElements:
+                  value?.type === "ArrayExpression" &&
+                  !value.elements.some((element) => element?.type === "SpreadElement")
+                    ? value.elements.map((element) => raw(element, env))
+                    : undefined,
                 properties:
                   value?.type === "ObjectExpression"
                     ? new Set(
-                        value.properties
-                          .filter(
-                            (property) => property.type === "Property" && raw(property.value, env),
-                          )
-                          .map((property) => propertyName(property.key)),
+                        [...properties]
+                          .filter(([, propertyRaw]) => propertyRaw)
+                          .map(([field]) => field),
                       )
                     : propertyTypes(pattern.typeAnnotation, env),
+                objectFields: value?.type === "ObjectExpression" ? objectFields : undefined,
                 rawReturn: rawType(
                   value?.returnType ?? pattern.typeAnnotation?.typeAnnotation?.returnType,
                   env,
                 ),
               });
+            }
           } else if (pattern.type === "ObjectPattern") {
             const sourceProperties =
               value?.type === "Identifier" ? lookup(env, value.name)?.properties : undefined;
@@ -956,10 +1075,19 @@ const noRawSelectorFieldReadRule = {
                   "forEach",
                   "sort",
                   "toSorted",
+                  "reduce",
+                  "reduceRight",
                 ].includes(parent.callee?.property?.name) &&
                   raw(parent.callee.object, env)))
             )
-              bind(node.params[0], undefined, local, true);
+              bind(
+                node.params[
+                  ["reduce", "reduceRight"].includes(parent.callee?.property?.name) ? 1 : 0
+                ],
+                undefined,
+                local,
+                true,
+              );
             if (
               parent?.type === "CallExpression" &&
               ["sort", "toSorted"].includes(parent.callee?.property?.name) &&
@@ -1048,9 +1176,16 @@ const noRawSelectorFieldReadRule = {
               node.computed && node.property.type === "Identifier"
                 ? lookup(env, node.property.name)?.literals
                 : undefined;
+            const objectRaw =
+              node.object?.type === "ObjectExpression"
+                ? objectFieldRaw(node.object, name, env)
+                : node.object?.type === "Identifier" &&
+                    lookup(env, node.object.name)?.objectFields?.has(name)
+                  ? lookup(env, node.object.name).objectFields.get(name)
+                  : raw(node.object, env);
             if (
               (fields.has(name) || [...(possible ?? [])].some((item) => fields.has(item))) &&
-              raw(node.object, env)
+              objectRaw
             )
               context.report({ node, messageId: "rawSelector" });
           }

@@ -27,6 +27,8 @@ test("scope covers debug/server but excludes canonical utility and tests", () =>
   const code = "function match(node:any) { return node.text; }";
   expect(check(code, "src/features/debug/Search.ts")).toHaveLength(1);
   expect(check(code, "src/server/tool.ts")).toHaveLength(1);
+  expect(check(code, "src/features/accessibility/SetAccessibilityFocus.ts")).toHaveLength(1);
+  expect(check(code, "src/features/observe/ConditionPredicates.ts")).toHaveLength(1);
   expect(check(code, "src/features/utility/SearchableNode.ts")).toEqual([]);
   expect(check(code, "test/features/action/Test.ts")).toEqual([]);
 });
@@ -196,6 +198,148 @@ test("map transformations can return safe Elements without inheriting raw array 
       "function inspect(nodes: ViewHierarchyNode[]) { return nodes.map((node) => node)[0].text; }",
     ),
   ).toHaveLength(1);
+});
+
+test("block-bodied map callbacks preserve safe return provenance and reject raw returns", () => {
+  expect(
+    check(
+      "function inspect(nodes: ViewHierarchyNode[]) { const elements: Element[] = nodes.map((node) => { return toElement(node); }); return elements[0].text; }",
+    ),
+  ).toEqual([]);
+  expect(
+    check(
+      "function inspect(nodes: ViewHierarchyNode[]) { const elements: Element[] = nodes.map((node): Element => { return toElement(node); }); return elements[0].text; }",
+    ),
+  ).toEqual([]);
+  expect(
+    check(
+      "function inspect(nodes: ViewHierarchyNode[]) { return nodes.map((node) => { return node; })[0].text; }",
+    ),
+  ).toHaveLength(1);
+  expect(
+    check(
+      "function inspect(nodes: ViewHierarchyNode[]) { return nodes.map((node) => { return node.text; }); }",
+    ),
+  ).toHaveLength(1);
+  expect(
+    check(
+      "function inspect(nodes: ViewHierarchyNode[]) { return nodes.map((node) => { const alias = node; return alias; })[0].text; }",
+    ),
+  ).toHaveLength(1);
+  expect(
+    check(
+      "function inspect(nodes: ViewHierarchyNode[]) { return nodes.map((node) => { let alias; alias = node; return alias; })[0].text; }",
+    ),
+  ).toHaveLength(1);
+  expect(
+    check(
+      "function pick(node: ViewHierarchyNode): ViewHierarchyNode { return node; } function inspect(nodes: ViewHierarchyNode[], ctx: ViewHierarchyNode) { return nodes.map((node) => { const { parent } = ctx; const n = pick(node); return n; })[0].text; }",
+    ),
+  ).toHaveLength(1);
+  expect(
+    check(
+      "function inspect(nodes: ViewHierarchyNode[]) { const elements: Element[] = nodes.map((node) => { const label = describe(node); return label; }); return elements[0].text; }",
+    ),
+  ).toEqual([]);
+});
+
+test.each([
+  "function inspect(nodes: ViewHierarchyNode[]) { const copy = [...nodes]; return copy[0].text; }",
+  "function inspect(nodes: ViewHierarchyNode[]) { const copy = [...nodes.slice(0, 2)]; return copy[0].text; }",
+  "function inspect(nodes: ViewHierarchyNode[]) { const copy = [nodes[0]]; return copy[0].text; }",
+])("array spreads retain raw element provenance: %s", (code) => {
+  expect(check(code)).toHaveLength(1);
+});
+
+test("array spreads of safe typed elements remain permitted", () => {
+  expect(
+    check(
+      "function inspect(elements: Element[]) { const copy = [...elements]; return copy[0].text; }",
+    ),
+  ).toEqual([]);
+});
+
+test("known array literal indices retain per-element provenance", () => {
+  expect(
+    check(
+      "function inspect(node: ViewHierarchyNode, safe: Element) { const pair = [node, safe]; return pair[1].text; }",
+    ),
+  ).toEqual([]);
+  expect(
+    check(
+      "function inspect(node: ViewHierarchyNode, safe: Element) { const pair = [node, safe]; return pair[0].text; }",
+    ),
+  ).toHaveLength(1);
+});
+
+test("object spreads retain raw attribute provenance", () => {
+  expect(
+    check(
+      "function inspect(node: ViewHierarchyNode) { const copy = { ...node.$ }; return copy.text; }",
+    ),
+  ).toHaveLength(1);
+  expect(
+    check("function inspect(source: Options) { const copy = { ...source }; return copy.text; }"),
+  ).toEqual([]);
+});
+
+test("later object properties replace raw spread provenance by field", () => {
+  expect(
+    check('function inspect(node: ViewHierarchyNode) { return { ...node.$, text: "safe" }.text; }'),
+  ).toEqual([]);
+  expect(
+    check(
+      'function inspect(node: ViewHierarchyNode) { return { ...node.$, text: "safe" }["content-desc"]; }',
+    ),
+  ).toHaveLength(1);
+  expect(
+    check(
+      'function inspect(node: ViewHierarchyNode) { const copy = { ...node.$, text: "safe" }; return copy.text; }',
+    ),
+  ).toEqual([]);
+  expect(
+    check(
+      'function inspect(node: ViewHierarchyNode) { const copy = { ...node.$, text: "safe" }; return copy["content-desc"]; }',
+    ),
+  ).toHaveLength(1);
+});
+
+test("reduce callbacks bind the raw element parameter", () => {
+  expect(
+    check(
+      'function inspect(nodes: ViewHierarchyNode[]) { return nodes.reduce((_acc, node) => node.text, ""); }',
+    ),
+  ).toHaveLength(1);
+  expect(
+    check(
+      'function inspect(nodes: ViewHierarchyNode[]) { return nodes.reduceRight((_acc, node) => node.text, ""); }',
+    ),
+  ).toHaveLength(1);
+  expect(
+    check(
+      "function inspect(nodes: ViewHierarchyNode[], safe: Element) { const result = nodes.reduce((_acc, _node) => safe, safe); return result.text; }",
+    ),
+  ).toEqual([]);
+  expect(
+    check(
+      "function inspect(nodes: ViewHierarchyNode[]) { return nodes.reduce((_acc, node) => node, {} as Element).text; }",
+    ),
+  ).toHaveLength(1);
+  expect(
+    check(
+      "function inspect(nodes: ViewHierarchyNode[], seed: ViewHierarchyNode) { return nodes.reduce((acc, _node) => acc, seed).text; }",
+    ),
+  ).toHaveLength(1);
+});
+
+test.each([
+  "function inspect(nodes: ViewHierarchyNode[]) { return nodes.slice()[0].text; }",
+  "function inspect(nodes: ViewHierarchyNode[]) { return nodes.slice(1)[0].text; }",
+  "function inspect(nodes: ViewHierarchyNode[]) { return nodes.concat()[0].text; }",
+  "function inspect(nodes: ViewHierarchyNode[]) { return nodes.toReversed()[0].text; }",
+  "function inspect(nodes: ViewHierarchyNode[]) { return nodes.toSpliced(0, 1)[0].text; }",
+])("array copies retain raw element provenance: %s", (code) => {
+  expect(check(code)).toHaveLength(1);
 });
 
 test("sort comparators bind the second raw node", () => {

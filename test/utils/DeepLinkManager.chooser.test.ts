@@ -74,11 +74,16 @@ describe("custom intent chooser label fallback", () => {
     expect(result.success).toBe(true);
     expect(commands).toEqual(["shell input tap 50 120"]);
   });
-  test("does not fall back to label when rows carry package metadata", async () => {
+  test("falls back to a label-only row when another row carries package metadata", async () => {
     const { result, commands } = await choose(
       [row(`${target}.beta`, 0), labelRow("Example", 100)],
       "Example",
     );
+    expect(result.success).toBe(true);
+    expect(commands).toEqual(["shell input tap 50 120"]);
+  });
+  test("does not match a label on a row with conflicting package metadata", async () => {
+    const { result, commands } = await choose([row(`${target}.beta`, 0)], `${target}.beta`);
     expect(result.success).toBe(false);
     expect(commands).toEqual([]);
   });

@@ -747,7 +747,7 @@ export class DeepLinkManager implements DeepLinkManager {
   private async findAppInChooser(nodes: any[], appPackage: string): Promise<any> {
     const packageRows = new Set<any>();
     const labelRows = new Map<any, Set<string>>();
-    let hasPackageMetadata = false;
+    const rowsWithPackageMetadata = new Set<any>();
     for (const node of nodes) {
       const rootProperties = this.parser.extractNodeProperties(node);
       const hostPackage = rootProperties.package ?? rootProperties.packageName;
@@ -777,7 +777,7 @@ export class DeepLinkManager implements DeepLinkManager {
             value !== "com.android.systemui",
         );
         if (packages.length > 0) {
-          hasPackageMetadata = true;
+          rowsWithPackageMetadata.add(row);
         }
         if (packages.includes(appPackage)) {
           packageRows.add(row);
@@ -792,13 +792,15 @@ export class DeepLinkManager implements DeepLinkManager {
       });
     }
     let candidates = [...packageRows];
-    if (!hasPackageMetadata && this.device) {
+    if (candidates.length === 0 && this.device) {
       const label = await (this.chooserMetadata ?? defaultChooserAppMetadata).getLabel(
         this.device,
         appPackage,
       );
       if (label) {
-        candidates = [...labelRows].filter(([, labels]) => labels.has(label)).map(([row]) => row);
+        candidates = [...labelRows]
+          .filter(([row, labels]) => !rowsWithPackageMetadata.has(row) && labels.has(label))
+          .map(([row]) => row);
       }
     }
     if (candidates.length > 1) {

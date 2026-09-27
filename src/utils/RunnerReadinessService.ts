@@ -3,7 +3,7 @@ import type { BootedDevice, DeviceLockState } from "../models";
 import { ActionableError } from "../models";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
-import { AndroidCtrlProxyManager } from "./CtrlProxyManager";
+import { AndroidCtrlProxyManager, CtrlProxyInspectionError } from "./CtrlProxyManager";
 import { IOSCtrlProxyManager } from "./IOSCtrlProxyManager";
 import { checkIosCtrlProxyOverride } from "./iosCtrlProxyOverride";
 import { redactAndroidCommandOutput } from "./android-cmdline-tools/redactAndroidCommandOutput";
@@ -1064,9 +1064,18 @@ export class RunnerReadinessService {
     ) {
       return;
     }
-    const rebindAttempted = await this.runPhase(context, "runner-connect", attempts, () =>
-      manager.rebindIfUnhealthy!(),
-    );
+    const rebindAttempted = await this.runPhase(context, "runner-connect", attempts, async () => {
+      try {
+        return await manager.rebindIfUnhealthy!();
+      } catch (error) {
+        if (!(error instanceof CtrlProxyInspectionError)) {
+          throw error;
+        }
+        // Inspection did not mutate settings, so a normal connection attempt remains safe.
+        logger.warn(`[CTRL_PROXY] Accessibility rebind inspection unavailable: ${error}`, error);
+        return false;
+      }
+    });
     context.lastCtrlProxyRebindMs = this.dependencies.timer.now();
     context.ctrlProxyAccessibilityRebindAttempted ||= rebindAttempted;
     if (rebindAttempted) {

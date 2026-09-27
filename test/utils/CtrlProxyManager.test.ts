@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   AndroidCtrlProxyManager,
+  CtrlProxyInspectionError,
   MAX_STALE_PREFETCH_DIRS_PER_STARTUP,
   STALE_PREFETCH_SWEEP_DEADLINE_MS,
 } from "../../src/utils/CtrlProxyManager";
@@ -107,6 +108,22 @@ describe("CtrlProxyManager", function () {
     expect(
       fakeAdb.getCommandCalls().find((call) => call.command.startsWith("install "))?.timeoutMs,
     ).toBe(120_000);
+  });
+
+  test("categorizes a compatibility-stage timeout for bounded setup retry", async () => {
+    const manager = AndroidCtrlProxyManager.createForTestingWithDeps(
+      testDevice,
+      fakeAdb,
+      new FakeTimer(),
+    );
+    manager.ensureCompatibleVersion = async () => ({ status: "failed", error: "ADB timed out" });
+    const result = await manager.setup();
+    expect(result).toMatchObject({
+      success: false,
+      message: "Failed to ensure compatible Accessibility Service version",
+      error: "ADB timed out",
+      category: "timeout",
+    });
   });
 
   test("quotes a hostile installed APK path before sha256sum", async function () {
@@ -347,9 +364,9 @@ describe("CtrlProxyManager", function () {
               command === `shell am force-stop ${AndroidCtrlProxyManager.PACKAGE}`,
           ),
       ).toEqual([
-        `shell settings put secure enabled_accessibility_services "${otherService}"`,
+        `shell settings put secure enabled_accessibility_services '${otherService}'`,
         `shell am force-stop ${AndroidCtrlProxyManager.PACKAGE}`,
-        `shell settings put secure enabled_accessibility_services "${otherService}:${serviceComponent}"`,
+        `shell settings put secure enabled_accessibility_services '${otherService}:${serviceComponent}'`,
       ]);
     });
 
@@ -375,10 +392,74 @@ describe("CtrlProxyManager", function () {
               command === `shell am force-stop ${AndroidCtrlProxyManager.PACKAGE}`,
           ),
       ).toEqual([
-        `shell settings put secure enabled_accessibility_services "${otherService}:${secondService}"`,
+        `shell settings put secure enabled_accessibility_services '${otherService}:${secondService}'`,
         `shell am force-stop ${AndroidCtrlProxyManager.PACKAGE}`,
-        `shell settings put secure enabled_accessibility_services "${otherService}:${secondService}:${serviceComponent}"`,
+        `shell settings put secure enabled_accessibility_services '${otherService}:${secondService}:${serviceComponent}'`,
       ]);
+    });
+
+    test("quotes a co-listed component literally when rebinding", async () => {
+      const nestedService = "com.example/.Outer$Service";
+      fakeAdb.setCommandResponse("shell dumpsys accessibility", {
+        stdout: "Bound services:{}\nCrashed services:{}",
+        stderr: "",
+      });
+      fakeAdb.setCommandResponse("shell settings get secure enabled_accessibility_services", {
+        stdout: `${nestedService}:${serviceComponent}`,
+        stderr: "",
+      });
+      await accessibilityServiceClient.rebindIfUnhealthy();
+      expect(
+        fakeAdb
+          .getExecutedCommands()
+          .filter((command) =>
+            command.startsWith("shell settings put secure enabled_accessibility_services"),
+          ),
+      ).toEqual([
+        `shell settings put secure enabled_accessibility_services '${nestedService}'`,
+        `shell settings put secure enabled_accessibility_services '${nestedService}:${serviceComponent}'`,
+      ]);
+    });
+
+    test("identifies a dumpsys inspection failure before settings mutation", async () => {
+      fakeAdb.setCommandError("shell dumpsys accessibility", new Error("dumpsys unavailable"));
+      await expect(accessibilityServiceClient.rebindIfUnhealthy()).rejects.toBeInstanceOf(
+        CtrlProxyInspectionError,
+      );
+      expect(fakeAdb.wasCommandExecuted("settings put secure enabled_accessibility_services")).toBe(
+        false,
+      );
+    });
+
+    test("tries to restore CtrlProxy after the re-add write fails and preserves the original error", async () => {
+      fakeAdb.setCommandResponse("shell dumpsys accessibility", {
+        stdout: "Bound services:{}\nCrashed services:{}",
+        stderr: "",
+      });
+      fakeAdb.setCommandResponse("shell settings get secure enabled_accessibility_services", {
+        stdout: `${otherService}:${serviceComponent}`,
+        stderr: "",
+      });
+      fakeAdb.setCommandError(
+        `enabled_accessibility_services '${otherService}:${serviceComponent}'`,
+        new Error("re-add failed"),
+      );
+      await expect(accessibilityServiceClient.rebindIfUnhealthy()).rejects.toThrow("re-add failed");
+      const writes = fakeAdb
+        .getCommandCalls()
+        .filter(({ command }) =>
+          command.startsWith("shell settings put secure enabled_accessibility_services"),
+        );
+      expect(writes.map(({ command }) => command)).toEqual([
+        `shell settings put secure enabled_accessibility_services '${otherService}'`,
+        `shell settings put secure enabled_accessibility_services '${otherService}:${serviceComponent}'`,
+        `shell settings put secure enabled_accessibility_services '${otherService}:${serviceComponent}'`,
+      ]);
+      expect(
+        writes.every(
+          ({ waitForProcessSettlementAfterAbort }) => waitForProcessSettlementAfterAbort,
+        ),
+      ).toBe(true);
     });
 
     test("stops polling when the rebound service becomes healthy", async () => {
@@ -500,9 +581,9 @@ describe("CtrlProxyManager", function () {
               command === `shell am force-stop ${AndroidCtrlProxyManager.PACKAGE}`,
           ),
       ).toEqual([
-        `shell settings put secure enabled_accessibility_services ""`,
+        `shell settings put secure enabled_accessibility_services ''`,
         `shell am force-stop ${AndroidCtrlProxyManager.PACKAGE}`,
-        `shell settings put secure enabled_accessibility_services "${serviceComponent}"`,
+        `shell settings put secure enabled_accessibility_services '${serviceComponent}'`,
       ]);
     });
 
@@ -1690,6 +1771,41 @@ describe("CtrlProxyManager", function () {
           checksumCalculator,
         );
         expect(await secondManager.isVersionCompatible()).toBe(true);
+        expect(hashCalls).toBe(2);
+      } finally {
+        await fs.rm(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    test("shares an unchanged local APK hash and refreshes it after an in-place rebuild", async () => {
+      const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "auto-mobile-local-refresh-"));
+      try {
+        const localApkPath = path.join(tempDir, "ctrlproxy.apk");
+        await fs.writeFile(localApkPath, "first");
+        process.env.AUTOMOBILE_CTRL_PROXY_APK_PATH = localApkPath;
+        delete process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM;
+        delete process.env.AUTO_MOBILE_ACCESSIBILITY_SERVICE_SHA_SKIP_CHECK;
+        let hashCalls = 0;
+        const calculator = {
+          computeFileSha256: async (filePath: string) => {
+            hashCalls++;
+            return { checksum: await fs.readFile(filePath, "utf8"), source: "node" as const };
+          },
+        };
+        const manager = AndroidCtrlProxyManager.createForTestingWithDeps(
+          testDevice,
+          fakeAdb,
+          new FakeTimer(),
+          undefined,
+          calculator,
+        ) as unknown as { getExpectedChecksum(): Promise<string> };
+        expect(
+          await Promise.all([manager.getExpectedChecksum(), manager.getExpectedChecksum()]),
+        ).toEqual(["first", "first"]);
+        expect(hashCalls).toBe(1);
+        await fs.writeFile(localApkPath, "second, rebuilt");
+        await fs.utimes(localApkPath, new Date(1_000_000), new Date(1_000_000));
+        expect(await manager.getExpectedChecksum()).toBe("second, rebuilt");
         expect(hashCalls).toBe(2);
       } finally {
         await fs.rm(tempDir, { recursive: true, force: true });

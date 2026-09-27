@@ -1,4 +1,6 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test, spyOn } from "bun:test";
+import { CtrlProxyInspectionError } from "../../src/utils/CtrlProxyManager";
+import { logger } from "../../src/utils/logger";
 import type { BootedDevice } from "../../src/models";
 import {
   RunnerReadinessError,
@@ -1684,6 +1686,51 @@ describe("RunnerReadinessService", () => {
     expect(manager.accessibilityHealthChecks).toBe(1);
     expect(manager.rebindCalls).toBe(0);
     expect(client.resetConnectionBudgetCalls).toBe(0);
+  });
+
+  test("continues to connection after a pre-mutation accessibility inspection failure", async () => {
+    const manager = new FakeAndroidManager();
+    manager.rebindIfUnhealthy = async () => {
+      throw new CtrlProxyInspectionError("dumpsys accessibility unavailable");
+    };
+    const client = new FakeReadinessClient();
+    client.connected = false;
+    client.connectionResults = [false, true];
+    const warning = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const { service } = createService({ androidManager: manager, androidClient: client });
+      await service.ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "platform=android",
+        totalDeadlineMs: 10_000,
+        readinessTimeoutMs: 10_000,
+      });
+      expect(client.connectionCalls).toBe(2);
+      expect(
+        warning.mock.calls.some(([message]) => String(message).includes("inspection unavailable")),
+      ).toBe(true);
+    } finally {
+      warning.mockRestore();
+    }
+  });
+
+  test("surfaces a rebind mutation failure instead of treating it as inspection", async () => {
+    const manager = new FakeAndroidManager();
+    manager.rebindIfUnhealthy = async () => {
+      throw new Error("settings re-add failed");
+    };
+    const client = new FakeReadinessClient();
+    client.connected = false;
+    const { service } = createService({ androidManager: manager, androidClient: client });
+    await expect(
+      service.ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "platform=android",
+        totalDeadlineMs: 10_000,
+        readinessTimeoutMs: 10_000,
+      }),
+    ).rejects.toThrow("settings re-add failed");
+    expect(client.connectionCalls).toBe(0);
   });
 
   // Issue #7538: a rebind that actually rebound the accessibility service

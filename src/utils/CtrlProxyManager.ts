@@ -48,6 +48,13 @@ import {
 
 export const MAX_STALE_PREFETCH_DIRS_PER_STARTUP = 20;
 export const STALE_PREFETCH_SWEEP_DEADLINE_MS = 5_000;
+/** A rebind inspection failed before any accessibility setting was written. */
+export class CtrlProxyInspectionError extends ActionableError {}
+type ApkOverrideChecksumEntry = {
+  mtimeMs: number;
+  size: number;
+  checksumPromise: Promise<string>;
+};
 const CTRL_PROXY_INSTALL_TIMEOUT_MS = 120_000;
 const CTRL_PROXY_PULL_TIMEOUT_MS = 120_000;
 
@@ -173,7 +180,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   private rebindInFlight: Promise<boolean> | null = null;
   private static instances: Map<string, AndroidCtrlProxyManager> = new Map();
   private static expectedChecksumOverride: string | null = null;
-  private static readonly apkOverrideChecksums = new Map<string, Promise<string>>();
+  private static readonly apkOverrideChecksums = new Map<string, ApkOverrideChecksumEntry>();
   private static accessibilityDetectorOverride: AccessibilityDetector | null = null;
 
   // Static prefetch state for APK download optimization
@@ -1007,6 +1014,9 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
 
   private async rebindOrRestartInternal(force: boolean): Promise<boolean> {
     let rebindAttempted = false;
+    let removalCompleted = false;
+    let readdCompleted = false;
+    let servicesWithCtrlProxy: string | undefined;
     try {
       if (!force && (await this.isAccessibilityServiceHealthy())) {
         return false;
@@ -1023,30 +1033,32 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         (service) => !service.includes(AndroidCtrlProxyManager.PACKAGE),
       );
       const servicesWithoutCtrlProxy = otherServices.join(":");
-      const servicesWithCtrlProxy = [
+      servicesWithCtrlProxy = [
         ...otherServices,
         AndroidCtrlProxyManager.ACCESSIBILITY_SERVICE_COMPONENT,
       ].join(":");
 
       rebindAttempted = true;
       await this.adb.executeCommand(
-        `shell settings put secure enabled_accessibility_services "${servicesWithoutCtrlProxy}"`,
+        `shell settings put secure enabled_accessibility_services ${shellQuote(servicesWithoutCtrlProxy)}`,
         undefined,
         undefined,
         undefined,
         undefined,
         true,
       );
+      removalCompleted = true;
       await this.adb.executeCommand(`shell am force-stop ${AndroidCtrlProxyManager.PACKAGE}`);
       await this.timer.sleep(AndroidCtrlProxyManager.REBIND_FORCE_STOP_SETTLE_MS);
       await this.adb.executeCommand(
-        `shell settings put secure enabled_accessibility_services "${servicesWithCtrlProxy}"`,
+        `shell settings put secure enabled_accessibility_services ${shellQuote(servicesWithCtrlProxy)}`,
         undefined,
         undefined,
         undefined,
         undefined,
         true,
       );
+      readdCompleted = true;
       const healthy = await this.waitForHealthyAfterRebind();
       logger.info(
         force
@@ -1055,11 +1067,11 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       );
       return true;
     } catch (error) {
-      throw toActionableError(
+      throw await this.rebindFailure(
         error,
-        force
-          ? "Failed to force-restart connected-but-unresponsive CtrlProxy process"
-          : "Failed to rebind crashed or unbound CtrlProxy accessibility service",
+        force,
+        rebindAttempted,
+        removalCompleted && !readdCompleted ? servicesWithCtrlProxy : undefined,
       );
     } finally {
       if (rebindAttempted) {
@@ -1067,6 +1079,40 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         this.clearAvailabilityCache();
       }
     }
+  }
+
+  private async rebindFailure(
+    error: unknown,
+    force: boolean,
+    rebindAttempted: boolean,
+    servicesToRestore: string | undefined,
+  ): Promise<ActionableError> {
+    if (servicesToRestore !== undefined) {
+      try {
+        await this.adb.executeCommand(
+          `shell settings put secure enabled_accessibility_services ${shellQuote(servicesToRestore)}`,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          true,
+        );
+      } catch (restoreError) {
+        logger.warn(
+          `[CTRL_PROXY] Failed to restore accessibility services: ${restoreError}`,
+          restoreError,
+        );
+      }
+    }
+    if (!rebindAttempted) {
+      return new CtrlProxyInspectionError(errorMessage(error));
+    }
+    return toActionableError(
+      error,
+      force
+        ? "Failed to force-restart connected-but-unresponsive CtrlProxy process"
+        : "Failed to rebind crashed or unbound CtrlProxy accessibility service",
+    );
   }
 
   private async waitForHealthyAfterRebind(): Promise<boolean> {
@@ -1990,13 +2036,15 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       );
       if (compatibilityResult.status === "failed") {
         perf.end();
+        const error =
+          compatibilityResult.error ||
+          compatibilityResult.upgradeError ||
+          compatibilityResult.reinstallError;
         return {
           success: false,
           message: "Failed to ensure compatible Accessibility Service version",
-          error:
-            compatibilityResult.error ||
-            compatibilityResult.upgradeError ||
-            compatibilityResult.reinstallError,
+          error,
+          category: AndroidCtrlProxyManager.classifySetupError(error ?? "").category,
           perfTiming: perf.getTimings(),
         };
       }
@@ -2045,42 +2093,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       };
     } catch (error) {
       const errorMsg = errorMessage(error);
-      const errorLower = errorMsg.toLowerCase();
-
-      // Provide categorized error messages for better debugging, and carry the
-      // same category as a typed field (issue #7541) so retry-decision code
-      // downstream (ToolExecutionContext.ensureAccessibilityServiceReady)
-      // doesn't have to re-derive it from unanchored substrings a second time.
-      let message = "Failed to setup Accessibility Service";
-      let category: ProxySetupErrorCategory = "unknown";
-      if (errorLower.includes("permission denied") || errorLower.includes("not permitted")) {
-        message = "Failed to setup Accessibility Service due to permission error";
-        category = "permission";
-      } else if (
-        errorLower.includes("device not found") ||
-        errorLower.includes("no devices") ||
-        errorLower.includes("offline")
-      ) {
-        message = "Failed to setup Accessibility Service due to device connection issue";
-        category = "deviceConnection";
-      } else if (errorLower.includes("timeout") || errorLower.includes("timed out")) {
-        message = "Failed to setup Accessibility Service due to timeout";
-        category = "timeout";
-      } else if (
-        errorLower.includes("download") ||
-        errorLower.includes("network") ||
-        errorLower.includes("unreachable")
-      ) {
-        message = "Failed to setup Accessibility Service due to network/download error";
-        category = "networkDownload";
-      } else if (errorLower.includes("not supported")) {
-        message =
-          "Failed to setup Accessibility Service - settings toggle not supported on this device";
-        category = "unsupported";
-      } else if (errorLower.includes("installation failed") || errorLower.includes("install")) {
-        message = "Failed to setup Accessibility Service due to APK installation error";
-        category = "install";
-      }
+      const { message, category } = AndroidCtrlProxyManager.classifySetupError(errorMsg);
 
       perf.end();
       return {
@@ -2096,6 +2109,46 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         await this.cleanupApk(apkPath);
       }
     }
+  }
+
+  private static classifySetupError(errorMsg: string): {
+    message: string;
+    category: ProxySetupErrorCategory;
+  } {
+    const errorLower = errorMsg.toLowerCase();
+
+    // Provide categorized error messages for better debugging, and carry the
+    // same category as a typed field (issue #7541) so retry-decision code
+    // downstream (ToolExecutionContext.ensureAccessibilityServiceReady)
+    // doesn't have to re-derive it from unanchored substrings a second time.
+    let message = "Failed to setup Accessibility Service";
+    let category: ProxySetupErrorCategory = "unknown";
+    if (errorLower.includes("permission denied") || errorLower.includes("not permitted")) {
+      message = "Failed to setup Accessibility Service due to permission error";
+      category = "permission";
+    } else if (
+      errorLower.includes("device not found") ||
+      errorLower.includes("no devices") ||
+      errorLower.includes("offline")
+    ) {
+      message = "Failed to setup Accessibility Service due to device connection issue";
+      category = "deviceConnection";
+    } else if (errorLower.includes("timeout") || errorLower.includes("timed out")) {
+      message = "Failed to setup Accessibility Service due to timeout";
+      category = "timeout";
+    } else if (/download|network|unreachable/.test(errorLower)) {
+      message = "Failed to setup Accessibility Service due to network/download error";
+      category = "networkDownload";
+    } else if (errorLower.includes("not supported")) {
+      message =
+        "Failed to setup Accessibility Service - settings toggle not supported on this device";
+      category = "unsupported";
+    } else if (/installation failed|install/.test(errorLower)) {
+      message = "Failed to setup Accessibility Service due to APK installation error";
+      category = "install";
+    }
+
+    return { message, category };
   }
 
   /**
@@ -2338,17 +2391,22 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       return resolveApkChecksum();
     }
 
+    let entry: ApkOverrideChecksumEntry | undefined;
     try {
-      let checksumPromise = AndroidCtrlProxyManager.apkOverrideChecksums.get(overridePath);
-      if (!checksumPromise) {
-        checksumPromise = this.checksumCalculator
+      const { mtimeMs, size } = await fs.stat(overridePath);
+      entry = AndroidCtrlProxyManager.apkOverrideChecksums.get(overridePath);
+      if (!entry || entry.mtimeMs !== mtimeMs || entry.size !== size) {
+        const checksumPromise = this.checksumCalculator
           .computeFileSha256(overridePath)
           .then(({ checksum }) => checksum.toLowerCase());
-        AndroidCtrlProxyManager.apkOverrideChecksums.set(overridePath, checksumPromise);
+        entry = { mtimeMs, size, checksumPromise };
+        AndroidCtrlProxyManager.apkOverrideChecksums.set(overridePath, entry);
       }
-      return await checksumPromise;
+      return await entry.checksumPromise;
     } catch (error) {
-      AndroidCtrlProxyManager.apkOverrideChecksums.delete(overridePath);
+      if (entry === AndroidCtrlProxyManager.apkOverrideChecksums.get(overridePath)) {
+        AndroidCtrlProxyManager.apkOverrideChecksums.delete(overridePath);
+      }
       logger.warn("[CTRL_PROXY] Unable to hash local APK override; skipping checksum comparison", {
         path: overridePath,
         error: errorMessage(error),

@@ -209,7 +209,7 @@ const attachStreamFailureHandlers = (stream: fs.WriteStream, target: string): vo
     deferReopenUntilClose(stream);
     // Error listeners run in registration order. Wait until all of them have
     // recorded this error before destroy can synchronously emit close.
-    queueMicrotask(() => stream.destroy());
+    queueMicrotask(() => stream.destroy?.());
   });
 };
 
@@ -1026,7 +1026,7 @@ export const logger: Logger = {
             if (stalledStream) {
               logStream = undefined;
               deferReopenUntilClose(stalledStream, timer);
-              stalledStream.destroy();
+              stalledStream.destroy?.();
             }
             lastWrite = Promise.resolve();
             reject(

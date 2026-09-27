@@ -1,19 +1,20 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import fs from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ActionableError } from "../../src/models/ActionableError";
 import { defaultTimer } from "../../src/utils/SystemTimer";
 import { FakeTimer } from "../fakes/FakeTimer";
 
-const previousLogDir = process.env.AUTOMOBILE_LOG_DIR;
-process.env.AUTOMOBILE_LOG_DIR = `/tmp/automobile-logger-close-import-${process.pid}`;
+const previousSink = process.env.AUTOMOBILE_LOG_SINK;
+process.env.AUTOMOBILE_LOG_SINK = "stderr";
 const { closeLogStream, CLOSE_LOG_STREAM_TIMEOUT_MS, CLOSE_LOG_WRITES_TIMEOUT_MS } =
   await import("../../src/utils/logger");
-if (previousLogDir === undefined) {
-  delete process.env.AUTOMOBILE_LOG_DIR;
+if (previousSink === undefined) {
+  delete process.env.AUTOMOBILE_LOG_SINK;
 } else {
-  process.env.AUTOMOBILE_LOG_DIR = previousLogDir;
+  process.env.AUTOMOBILE_LOG_SINK = previousSink;
 }
 
 /**
@@ -88,7 +89,7 @@ async function fileLoggerWithStreams(
   const priorSink = process.env.AUTOMOBILE_LOG_SINK;
   const priorDir = process.env.AUTOMOBILE_LOG_DIR;
   const instance = loggerImportCounter++;
-  const dir = `/tmp/automobile-logger-close-${process.pid}-${instance}`;
+  const dir = fs.mkdtempSync(join(tmpdir(), "automobile-logger-close-"));
   process.env.AUTOMOBILE_LOG_SINK = "file";
   process.env.AUTOMOBILE_LOG_DIR = dir;
   const createStream = spyOn(fs, "createWriteStream").mockImplementation(() => {
@@ -98,7 +99,14 @@ async function fileLoggerWithStreams(
   });
   try {
     const mod = await import(`../../src/utils/logger.ts?logger-close-${instance}`);
-    return { mod, dir, restore: () => createStream.mockRestore() };
+    return {
+      mod,
+      dir,
+      restore: () => {
+        createStream.mockRestore();
+        fs.rmSync(dir, { recursive: true, force: true });
+      },
+    };
   } finally {
     if (priorSink === undefined) {
       delete process.env.AUTOMOBILE_LOG_SINK;

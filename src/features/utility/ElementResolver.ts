@@ -38,6 +38,10 @@ export interface ElementReference {
 }
 export interface ResolutionIntent {
   action: ResolutionAction;
+  /** Preserve tap ranking while inspect keeps bounded inert labels addressable. */
+  preferTap?: boolean;
+  /** An action lookup cannot use an unbounded ID match as its target. */
+  requireBounds?: boolean;
   viewport?: { width: number; height: number };
   requireResourceId?: boolean;
   negative?: boolean;
@@ -255,7 +259,7 @@ export class ElementResolver {
           candidate.affordances.length > 0 &&
           (!intent.viewport || centerWithinViewport(candidate.bounds, intent.viewport))),
     );
-    return this.choose(result, selector, actionTarget);
+    return this.choose(result, selector, actionTarget, intent);
   }
 
   private prepareMatches(
@@ -283,6 +287,7 @@ export class ElementResolver {
     result: ElementResolution,
     selector: ResolverSelector,
     actionTarget: (node: SearchableEntry | undefined) => SearchableEntry | null,
+    intent: ResolutionIntent,
   ): ElementResolution {
     const actionable = [
       ...new Set(
@@ -303,6 +308,10 @@ export class ElementResolver {
       result.chosen =
         [...actionable].sort(
           (a, b) =>
+            (intent.preferTap
+              ? Number(!a.affordances.includes("tap") && !a.affordances.includes("toggle")) -
+                Number(!b.affordances.includes("tap") && !b.affordances.includes("toggle"))
+              : 0) ||
             a.windowRank - b.windowRank ||
             (a.bounds ? boundsArea(a.bounds) : Infinity) -
               (b.bounds ? boundsArea(b.bounds) : Infinity) ||

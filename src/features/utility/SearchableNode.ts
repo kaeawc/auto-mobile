@@ -23,6 +23,7 @@ export interface SearchableNode {
   label?: string;
   textFields: readonly string[];
   textSources: Readonly<Record<string, string>>;
+  capturedTextLength?: number;
   accessibleLabel?: string;
   testTag?: string;
   className?: string;
@@ -102,6 +103,7 @@ export function toSearchable(properties: SearchableProperties): SearchableNode {
         value,
       }).filter((entry): entry is [string, string] => entry[1] !== undefined),
     ),
+    capturedTextLength: typeof properties.text === "string" ? properties.text.length : undefined,
     textFields: [
       ...new Set(
         [label, value, text, description, accessibleLabel].filter(

@@ -254,6 +254,41 @@ describe("DaemonMcpProxy.listAdvertisedTools (lazy tools/list — issue #5879)",
     }
   });
 
+  test.each([true, false])(
+    "tools/list_changed refreshes fallback debug state after a runtime toggle to %s",
+    async (enabled) => {
+      const fakeClient = new FakeDaemonClient({
+        onCallDaemonMethod: (method) => {
+          if (method === "tools/list") {
+            throw new Error("wedged live list");
+          }
+        },
+      });
+      const daemonManager = matchingDaemonManager();
+      daemonManager.statusResult = {
+        ...daemonManager.statusResult,
+        effectiveDebug: !enabled,
+      };
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => fakeClient,
+        daemonManager,
+        daemonAvailabilityProbe: async () => true,
+        daemonStatusProbe: async () => daemonManager.statusResult,
+        autoStartDaemon: false,
+      });
+      try {
+        await proxy.callTool("observe", {});
+        await proxy.listAdvertisedTools();
+        daemonManager.statusResult = { ...daemonManager.statusResult, effectiveDebug: enabled };
+        fakeClient.emitNotification("notifications/tools/list_changed");
+        const names = (await proxy.listAdvertisedTools()).map((tool) => tool.name);
+        expect(names.includes("debugSearch")).toBe(enabled);
+      } finally {
+        await proxy.close();
+      }
+    },
+  );
+
   test("serves connected static schemas when the live tools list fails", async () => {
     const fakeClient = new FakeDaemonClient({
       onCallDaemonMethod: (method) => {

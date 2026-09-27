@@ -1195,6 +1195,9 @@ export class DaemonMcpProxy {
     }
 
     this.invalidateListCache(kind);
+    if (kind === "tools") {
+      this.reconciliationSnapshot = undefined;
+    }
 
     for (const listener of this.listChangedListeners) {
       try {
@@ -2054,8 +2057,11 @@ export class DaemonMcpProxy {
     return message.includes("Session not found");
   }
 
-  private isUnadmittedDaemonSessionError(error: unknown): boolean {
-    return errorMessage(error).includes("is not an active daemon session");
+  private isPreDispatchDaemonSessionError(error: unknown): boolean {
+    return (
+      this.isUnknownToolError(error) ||
+      errorMessage(error).includes("is not an active daemon session")
+    );
   }
 
   private isUnknownToolError(error: unknown): boolean {
@@ -3396,7 +3402,7 @@ export class DaemonMcpProxy {
       error instanceof DaemonBoundSessionExpiredError ||
       error instanceof DaemonBoundSessionLostError ||
       this.isRecoverableDaemonSessionError(error) ||
-      this.isUnadmittedDaemonSessionError(error) ||
+      this.isPreDispatchDaemonSessionError(error) ||
       this.shouldSkipLeaseRefreshForDeviceControlTransportError(error)
     ) {
       return;
@@ -3503,7 +3509,7 @@ export class DaemonMcpProxy {
       toolName: name,
       client: this.buildIdentity,
       daemon: daemonIdentity,
-      buildMismatch: this.buildIdentity.buildId !== daemonIdentity.buildId,
+      buildMismatch: !buildIdentitiesMatch(this.buildIdentity, daemonIdentity),
     });
   }
 

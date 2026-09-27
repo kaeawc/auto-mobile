@@ -5435,6 +5435,64 @@ describe("DaemonMcpProxy", () => {
   });
 
   describe("unknown-tool self-heal", () => {
+    test.each([
+      {
+        client: { entryScript: "/same/entry.js", buildId: "client-hash" },
+        daemon: { entryScript: "/same/entry.js", buildId: "unknown" },
+        mismatch: false,
+      },
+      {
+        client: { entryScript: "/first/entry.js", buildId: "unknown" },
+        daemon: { entryScript: "/second/entry.js", buildId: "unknown" },
+        mismatch: true,
+      },
+    ])("diagnoses unknown build hashes using entry paths", async ({ client, daemon, mismatch }) => {
+      const manager = matchingDaemonManager();
+      manager.statusResult = { ...manager.statusResult, ...daemon };
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => new FakeDaemonClient(),
+        daemonManager: manager,
+        autoStartDaemon: false,
+        buildIdentity: client,
+      });
+      try {
+        const unavailable = await (proxy as any).toolUnavailableError("setPreference");
+        expect(unavailable).toBeInstanceOf(DaemonToolUnavailableError);
+        expect(unavailable.message.includes("wrong-build")).toBe(mismatch);
+      } finally {
+        await proxy.close();
+      }
+    });
+
+    test("an unregistered unknown tool cannot establish a forwarded session lease", async () => {
+      const fakeClient = new FakeDaemonClient({
+        onCallTool: (name) => {
+          if (name === "inputText") {
+            throw new Error("MCP error -32603: Unknown tool: inputText");
+          }
+        },
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => fakeClient,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+      try {
+        await expect(
+          proxy.callTool("inputText", { sessionUuid: "rejected-session" }),
+        ).rejects.toThrow('Unknown tool "inputText"');
+        await proxy.callTool("observe", {});
+        expect(fakeClient.callToolCalls).toEqual([
+          { toolName: "inputText", params: { sessionUuid: "rejected-session" } },
+          { toolName: "observe", params: {} },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
     test("does not reconnect for an unregistered removed tool", async () => {
       const client = new ScriptedDaemonClient({
         daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
@@ -5643,8 +5701,7 @@ describe("DaemonMcpProxy", () => {
         expect(err.toolName).toBe("setPreference");
         expect(err.message).toContain("setPreference");
         expect(err.message).toContain("clientbuild");
-        expect(err.message).toContain("wrong-build");
-        expect(err.message).toContain("Restart the daemon");
+        expect(err.message).toContain("current configuration");
         // Capped at one retry: exactly two clients consumed.
         expect(clients).toHaveLength(0);
         expect(firstClient.callToolCalls).toHaveLength(1);

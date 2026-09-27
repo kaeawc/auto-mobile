@@ -151,6 +151,8 @@ describe("DefaultFileDownloader pipeResponseToFile", function () {
     expect(await fs.readFile(destination)).toEqual(existingPayload);
   });
 
+  // This path writes and renames a real file; the integration lane supplies
+  // its timeout so loaded Windows runners do not fail on a unit-sized budget.
   test("resolves and writes the full file for a complete response", async function () {
     const payload = Buffer.from("complete download payload");
     const response = createFakeResponse();
@@ -164,7 +166,7 @@ describe("DefaultFileDownloader pipeResponseToFile", function () {
 
     expect(await fs.readFile(destination)).toEqual(payload);
     expect((await fs.readdir(tempDir)).filter((entry) => entry.endsWith(".tmp"))).toEqual([]);
-  }, 100);
+  });
 });
 
 // A real-socket end-to-end test of downloadWithNodeHttp lives in

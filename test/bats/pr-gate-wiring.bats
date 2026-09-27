@@ -225,10 +225,13 @@ wiring_requires_yq() {
 }
 
 @test "host integration job evaluates after the fast-validation fan-in" {
-  local host
-  host="$(job_block node-host-integration-tests)"
-  [[ "$host" == *"always() && !cancelled() && needs.detect-changes.result == 'success' && needs.fast-validation.result == 'success'"* ]]
-  [[ "$host" == *"needs.detect-changes.outputs.docs_only != 'true'"* ]]
+  wiring_requires_yq
+  local condition dependencies
+  condition="$(yq -r '.jobs."node-host-integration-tests".if' "$WF")"
+  dependencies="$(yq -r '.jobs."node-host-integration-tests".needs[]' "$WF")"
+  [[ "$condition" == "always() && !cancelled() && needs.detect-changes.result == 'success' && needs.fast-validation.result == 'success'"* ]]
+  [[ "$condition" == *"needs.detect-changes.outputs.docs_only != 'true'"* ]]
+  [ "$dependencies" = $'detect-changes\nfast-validation' ]
 }
 
 @test "PR TypeScript coverage has headroom beyond its wall-clock budget" {

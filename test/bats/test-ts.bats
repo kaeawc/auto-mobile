@@ -293,6 +293,46 @@ run_lane() {
   [[ "$output" == *"--coverage --coverage-reporter lcov --coverage-dir scratch/integration-coverage"* ]]
 }
 
+@test "long-lived integration modes keep every file in one process" {
+  local mode
+  for mode in --watch --hot; do
+    run_lane integration "$mode"
+    [ "$status" -eq 0 ]
+    [ "$(grep -c 'bun test' <<< "$output")" -eq 1 ]
+    [[ "$output" == *".integration.test.ts"* ]]
+  done
+}
+
+@test "targeted transport suite stays isolated and capped when selected with other files" {
+  local timeout_args
+  timeout_args="$(mktemp)"
+  cat > "$STUB_BIN/timeout" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$TIMEOUT_ARGS_FILE"
+shift 3
+exec "$@"
+EOF
+  chmod +x "$STUB_BIN/timeout"
+  run env PATH="$STUB_BIN:$PATH" TIMEOUT_ARGS_FILE="$timeout_args" \
+    AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=900 bash "$SCRIPT" integration \
+    test/server/proxyServerTransportFailure.integration.test.ts \
+    test/server/deviceLabelSessionReleaseOrdering.integration.test.ts
+  [ "$status" -eq 0 ]
+  [ "$(wc -l < "$BUN_ARGS_FILE")" -eq 2 ]
+  [[ "$(head -n 1 "$timeout_args")" == "-k 2 60 "* ]]
+  [[ "$(tail -n 1 "$BUN_ARGS_FILE")" == *"deviceLabelSessionReleaseOrdering.integration.test.ts"* ]]
+  [[ "$(tail -n 1 "$BUN_ARGS_FILE")" != *"proxyServerTransportFailure.integration.test.ts"* ]]
+  : > "$BUN_ARGS_FILE"
+  : > "$timeout_args"
+  run env PATH="$STUB_BIN:$PATH" TIMEOUT_ARGS_FILE="$timeout_args" \
+    AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=900 bash "$SCRIPT" integration \
+    test/server/proxyServerTransportFailure.integration.test.ts
+  [ "$status" -eq 0 ]
+  [ "$(wc -l < "$BUN_ARGS_FILE")" -eq 1 ]
+  [[ "$(head -n 1 "$timeout_args")" == "-k 2 60 "* ]]
+  rm -f "$timeout_args"
+}
+
 @test "integration split reports a main watchdog timeout ahead of a transport failure" {
   local report
   report="$(mktemp)"

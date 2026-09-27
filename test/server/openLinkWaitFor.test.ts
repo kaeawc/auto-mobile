@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import type {
   BootedDevice,
   Element,
@@ -11,10 +11,16 @@ import {
   buildOpenLinkPayload,
   isIosAppOpenAlert,
   openLinkSchema,
+  registerInteractionTools,
   selectAndroidOpenLinkChooser,
   resetTapOnElementFactory,
   setTapOnElementFactory,
 } from "../../src/server/interactionTools";
+import { DeepLinkManager } from "../../src/utils/DeepLinkManager";
+import { OpenURL } from "../../src/features/action/OpenURL";
+import { HandleIntentChooser } from "../../src/features/action/HandleIntentChooser";
+import { ToolRegistry } from "../../src/server/toolRegistry";
+import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 
 const makeObservation = (marker: string): ObserveResult => ({
   updatedAt: 0,
@@ -116,6 +122,7 @@ test("openLink chooser path passes the exact package to the handler and surfaces
     device,
     "com.example.app",
     { success: true, url: "example://item" },
+    "example://item",
     {
       execute: async (...args) => {
         calls.push(args);
@@ -130,9 +137,92 @@ test("openLink chooser path passes the exact package to the handler and surfaces
       },
     },
   );
-  expect(calls).toEqual([["custom", "com.example.app"]]);
+  expect(calls).toEqual([["custom", "com.example.app", "example://item"]]);
   expect(result.observation).toBe(chosen);
   expect(result.success).toBe(true);
+});
+
+test("registered openLink probes the chooser with the normalized opened URL", async () => {
+  const device = { platform: "android", deviceId: "fake", name: "Android" } as BootedDevice;
+  const rawUrl = "  example://item  ";
+  const chooserCalls: unknown[][] = [];
+  const openSpy = spyOn(OpenURL.prototype, "execute").mockImplementation(async (url) => ({
+    success: true,
+    url: url.trim(),
+  }));
+  const chooserSpy = spyOn(HandleIntentChooser.prototype, "execute").mockImplementation(
+    async (...args) => {
+      chooserCalls.push(args);
+      return { success: true, detected: true, packageVerified: true };
+    },
+  );
+  try {
+    registerInteractionTools();
+    const handler = ToolRegistry.getTool("openLink")?.deviceAwareHandler;
+    expect(handler).toBeDefined();
+    await handler!(device, {
+      platform: "android",
+      url: rawUrl,
+      chooserAppPackage: "com.example.app",
+    });
+
+    expect(openSpy).toHaveBeenCalledWith(rawUrl);
+    expect(chooserCalls).toEqual([["custom", "com.example.app", "example://item"]]);
+  } finally {
+    openSpy.mockRestore();
+    chooserSpy.mockRestore();
+    ToolRegistry.clearTools();
+  }
+});
+
+test("openLink accepts a device-seconds chooser capture in the tap's coarse second", async () => {
+  const device = { platform: "android", deviceId: "fake", name: "Android" } as BootedDevice;
+  const adb = new FakeAdbExecutor();
+  adb.setDeviceTimestampMs(1000);
+  adb.setDeviceTimestampSource("device-seconds");
+  const chooser = {
+    updatedAt: 100,
+    hierarchy: {
+      node: {
+        class: "com.android.internal.app.ChooserActivity",
+        node: [
+          {
+            "resource-id": "android:id/resolver_list",
+            node: [
+              {
+                clickable: true,
+                bounds: { left: 0, top: 100, right: 100, bottom: 140 },
+                node: [{ text: "Example" }],
+              },
+            ],
+          },
+        ],
+      },
+    },
+  };
+  const manager = new DeepLinkManager(device, adb, null, null, undefined, undefined, {
+    getLabel: async () => "Example",
+    getFreshHierarchy: async (_device, _factory, floor) =>
+      (floor < 2000
+        ? { ...chooser, updatedAt: floor }
+        : { hierarchy: { node: {} }, packageName: "com.example.app", updatedAt: 1000 }) as any,
+  });
+  const selection = await manager.handleIntentChooser(chooser as any, "custom", "com.example.app");
+  expect(selection.success).toBe(true);
+  const observation = {
+    ...makeObservation("selected-app"),
+    viewHierarchy: { hierarchy: {}, packageName: "com.example.app", updatedAt: 1000 },
+  } as ObserveResult;
+  const result = await selectAndroidOpenLinkChooser(
+    device,
+    "com.example.app",
+    { success: true, url: "example://item" },
+    "example://item",
+    { execute: async () => ({ ...selection, observation }) },
+  );
+  expect(selection.tappedAt).toBe(1000);
+  expect(result.success).toBe(true);
+  expect(result.observation).toBe(observation);
 });
 
 test("openLink accepts an exact-package chooser tap without post-tap confirmation", async () => {
@@ -141,6 +231,7 @@ test("openLink accepts an exact-package chooser tap without post-tap confirmatio
     device,
     "com.example.app",
     { success: true, url: "example://item" },
+    "example://item",
     { execute: async () => ({ success: true, detected: true, packageVerified: true }) },
   );
   expect(result.success).toBe(true);
@@ -156,6 +247,7 @@ test("openLink rejects a pre-tap cached label-only chooser observation", async (
     device,
     "com.example.app",
     { success: true, url: "example://item" },
+    "example://item",
     {
       execute: async () => ({
         success: true,
@@ -180,6 +272,7 @@ test("openLink chooser path reports an expected chooser that never appeared", as
     device,
     "com.example.app",
     { success: true, url: "example://item" },
+    "example://item",
     { execute: async () => ({ success: true, detected: false }) },
   );
   expect(result.success).toBe(false);

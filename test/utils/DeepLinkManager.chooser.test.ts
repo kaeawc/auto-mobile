@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { DeepLinkManager, type ChooserAppMetadata } from "../../src/utils/DeepLinkManager";
+import {
+  DeepLinkManager,
+  resolveChooserActivityLabel,
+  type ChooserAppMetadata,
+  type ChooserActivityLabelResult,
+} from "../../src/utils/DeepLinkManager";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -8,8 +13,13 @@ const metadata = (
   nodes: unknown[],
   packageName?: string,
   listId?: string,
+  activityLabel?: ChooserActivityLabelResult | string | null,
 ): ChooserAppMetadata => ({
   getLabel: async () => label,
+  getActivityLabel: async () =>
+    typeof activityLabel === "string"
+      ? { kind: "literal", label: activityLabel }
+      : (activityLabel ?? { kind: "none" }),
   getFreshHierarchy: async (_device, _factory, minTimestamp) =>
     ({
       ...hierarchy(nodes, listId),
@@ -20,6 +30,178 @@ const metadata = (
 });
 
 const target = "com.example.app";
+
+const chromeQueryActivities = `1 activities found:
+  Activity #0:
+    priority=0 preferredOrder=0 match=0x208000 specificIndex=-1 isDefault=true
+    ActivityInfo:
+      name=com.google.android.apps.chrome.IntentDispatcher
+      packageName=com.android.chrome
+      enabled=true exported=true directBootAware=false
+      taskAffinity=null targetActivity=org.chromium.chrome.browser.document.ChromeLauncherActivity persistableMode=PERSIST_ROOT_ONLY
+      launchMode=LAUNCH_MULTIPLE flags=0x311220 privateFlags=0x2 theme=0x7f150219
+      screenOrientation=-1 configChanges=0x1fb3 softInputMode=0x0
+      lockTaskLaunchMode=LOCK_TASK_LAUNCH_MODE_DEFAULT
+      resizeMode=RESIZE_MODE_RESIZEABLE_VIA_SDK_VERSION
+      knownActivityEmbeddingCerts={}
+      requireContentUriPermissionFromCaller=CONTENT_URI_PERMISSION_NONE
+      ApplicationInfo:
+        name=org.chromium.chrome.browser.base.SplitChromeApplication
+        packageName=com.android.chrome
+        labelRes=0x7f1402c9 nonLocalizedLabel=null icon=0x7f090311 banner=0x0
+        className=org.chromium.chrome.browser.base.SplitChromeApplication
+        processName=com.android.chrome
+        taskAffinity=com.android.chrome
+        uid=10153 flags=0xa0cbbec5 privateFlags=0x84089110 theme=0x0
+        requiresSmallestWidthDp=0 compatibleWidthLimitDp=0 largestWidthLimitDp=0
+        sourceDir=/data/app/~~afYmDKAAY_-ODyVPxkmJ_g==/com.android.chrome-fA7oSWp6s_POwN2v4WbjQg==/Chrome.apk
+        resourceDirs=[/product/overlay/EmulationPixel7/EmulationPixel7Overlay.apk, /product/overlay/NavigationBarModeGestural/NavigationBarModeGesturalOverlay.apk]
+        overlayPaths=[/product/overlay/EmulationPixel7/EmulationPixel7Overlay.apk, /product/overlay/NavigationBarModeGestural/NavigationBarModeGesturalOverlay.apk]
+        seinfo=default:targetSdkVersion=34:partition=product
+        seinfoUser=:complete
+        dataDir=/data/user/0/com.android.chrome
+        deviceProtectedDataDir=/data/user_de/0/com.android.chrome
+        credentialProtectedDataDir=/data/user/0/com.android.chrome
+        sharedLibraryFiles=[/data/app/~~irmkDV_t22eDqWE3B405IA==/com.google.android.trichromelibrary_694313732-YasP6Id9bpKXd-s54WyXzA==/TrichromeLibrary.apk]
+        enabled=true minSdkVersion=29 targetSdkVersion=34 versionCode=694313732 targetSandboxVersion=1
+        manageSpaceActivityName=org.chromium.chrome.browser.site_settings.ManageSpaceActivity
+        supportsRtl=true
+        fullBackupContent=true
+        crossProfile=false
+        networkSecurityConfigRes=0x7f18002c
+        category=7
+        HiddenApiEnforcementPolicy=2
+        usesNonSdkApi=false
+        allowsPlaybackCapture=false
+        memtagMode=1
+        nativeHeapZeroInitialized=0
+        localeConfigRes=0x7f180026
+        enableOnBackInvokedCallback=true
+        allowCrossUidActivitySwitchFromBelow=true
+        mPageSizeAppCompatFlags=0
+        createTimestamp=5530718
+`;
+
+describe("ADB activity-label lookup", () => {
+  test("prefers a literal ResolveInfo label over a different ActivityInfo label", async () => {
+    const adb = new FakeAdbExecutor();
+    const labeledQuery = chromeQueryActivities
+      .replace(
+        "    ActivityInfo:",
+        "    labelRes=0x7f010002 nonLocalizedLabel=Open in Chrome icon=0x7f090311\n    ActivityInfo:",
+      )
+      .replace(
+        "      ApplicationInfo:",
+        "      labelRes=0x7f010001 nonLocalizedLabel=Chrome Activity icon=0x7f090311\n      ApplicationInfo:",
+      );
+    adb.setCommandResponse("query-activities", { stdout: labeledQuery, stderr: "" } as any);
+
+    expect(
+      await resolveChooserActivityLabel(adb, "com.android.chrome", "https://example.com"),
+    ).toEqual({ kind: "literal", label: "Open in Chrome" });
+  });
+
+  test("real Chrome query fixture has no activity label despite application label fields", async () => {
+    const adb = new FakeAdbExecutor();
+    expect(chromeQueryActivities).toContain("      ApplicationInfo:\n");
+    expect(chromeQueryActivities).toContain(
+      "        labelRes=0x7f1402c9 nonLocalizedLabel=null icon=0x7f090311 banner=0x0",
+    );
+    adb.setCommandResponse("query-activities", {
+      stdout: chromeQueryActivities,
+      stderr: "",
+    } as any);
+
+    expect(
+      await resolveChooserActivityLabel(adb, "com.android.chrome", "https://example.com"),
+    ).toEqual({ kind: "none" });
+    expect(adb.getExecutedCommands()).toEqual([
+      "shell cmd package query-activities -a android.intent.action.VIEW -d 'https://example.com'",
+    ]);
+  });
+
+  test("reads a literal ActivityInfo label from the real query structure for a quoted URL", async () => {
+    const adb = new FakeAdbExecutor();
+    const labeledQuery = chromeQueryActivities.replace(
+      "      ApplicationInfo:",
+      "      labelRes=0x7f010001 nonLocalizedLabel=Open in Browser icon=0x7f090311\n      ApplicationInfo:",
+    );
+    adb.setCommandResponse("query-activities", { stdout: labeledQuery, stderr: "" } as any);
+
+    expect(
+      await resolveChooserActivityLabel(adb, "com.android.chrome", "example://item?q='x'&v=$HOME"),
+    ).toEqual({ kind: "literal", label: "Open in Browser" });
+    expect(adb.getExecutedCommands()).toEqual([
+      "shell cmd package query-activities -a android.intent.action.VIEW -d 'example://item?q='\\''x'\\''&v=$HOME'",
+    ]);
+  });
+
+  test("returns null when two VIEW activities from the same package match", async () => {
+    const adb = new FakeAdbExecutor();
+    const firstActivity = chromeQueryActivities
+      .slice(chromeQueryActivities.indexOf("  Activity #0:"))
+      .replace(
+        "      ApplicationInfo:",
+        "      labelRes=0x7f010001 nonLocalizedLabel=Open in Browser icon=0x7f090311\n      ApplicationInfo:",
+      );
+    const secondActivity = firstActivity
+      .replace("Activity #0:", "Activity #1:")
+      .replace("IntentDispatcher", "OtherDispatcher")
+      .replace("Open in Browser", "Open in Other");
+    const twoActivities = `2 activities found:\n${firstActivity}${secondActivity}`;
+    adb.setCommandResponse("query-activities", { stdout: twoActivities, stderr: "" } as any);
+
+    expect(
+      await resolveChooserActivityLabel(adb, "com.android.chrome", "https://example.com"),
+    ).toEqual({ kind: "none" });
+    expect(adb.getExecutedCommands()).toHaveLength(1);
+  });
+
+  test("ignores a literal ApplicationInfo label when ActivityInfo has none", async () => {
+    const adb = new FakeAdbExecutor();
+    const appLabeledQuery = chromeQueryActivities.replace(
+      "nonLocalizedLabel=null icon=0x7f090311",
+      "nonLocalizedLabel=Application Only icon=0x7f090311",
+    );
+    adb.setCommandResponse("query-activities", { stdout: appLabeledQuery, stderr: "" } as any);
+
+    expect(
+      await resolveChooserActivityLabel(adb, "com.android.chrome", "https://example.com"),
+    ).toEqual({ kind: "none" });
+  });
+
+  test("does not invent a label for a resource-backed activity", async () => {
+    const adb = new FakeAdbExecutor();
+    const resourceLabeledQuery = chromeQueryActivities.replace(
+      "      ApplicationInfo:",
+      "      labelRes=0x7f010001 nonLocalizedLabel=null icon=0x7f090311\n      ApplicationInfo:",
+    );
+    adb.setCommandResponse("query-activities", { stdout: resourceLabeledQuery, stderr: "" } as any);
+
+    expect(
+      await resolveChooserActivityLabel(adb, "com.android.chrome", "https://example.com"),
+    ).toEqual({ kind: "resource" });
+  });
+
+  test("keeps a resource-backed ResolveInfo label ahead of a literal ActivityInfo label", async () => {
+    const adb = new FakeAdbExecutor();
+    const query = chromeQueryActivities
+      .replace(
+        "    ActivityInfo:",
+        "    labelRes=0x7f010002 nonLocalizedLabel=null icon=0x7f090311\n    ActivityInfo:",
+      )
+      .replace(
+        "      ApplicationInfo:",
+        "      labelRes=0x7f010001 nonLocalizedLabel=Chrome Activity icon=0x7f090311\n      ApplicationInfo:",
+      );
+    adb.setCommandResponse("query-activities", { stdout: query, stderr: "" } as any);
+
+    expect(
+      await resolveChooserActivityLabel(adb, "com.android.chrome", "https://example.com"),
+    ).toEqual({ kind: "resource" });
+  });
+});
+
 const row = (packageName: string, top: number) => ({
   clickable: true,
   bounds: { left: 0, top, right: 100, bottom: top + 40 },
@@ -41,7 +223,13 @@ const hierarchy = (nodes: unknown[], listId = "android:id/resolver_list") => ({
   },
 });
 
-async function choose(nodes: unknown[], label: string | null = null, listId?: string) {
+async function choose(
+  nodes: unknown[],
+  label: string | null = null,
+  listId?: string,
+  activityLabel?: ChooserActivityLabelResult | string | null,
+  url?: string,
+) {
   const adb = new FakeAdbExecutor();
   adb.setDeviceTimestampMs(1000);
   const manager = new DeepLinkManager(
@@ -51,12 +239,13 @@ async function choose(nodes: unknown[], label: string | null = null, listId?: st
     null,
     undefined,
     undefined,
-    metadata(label, nodes, undefined, listId),
+    metadata(label, nodes, undefined, listId, activityLabel),
   );
   const result = await manager.handleIntentChooser(
     hierarchy(nodes, listId) as any,
     "custom",
     target,
+    url,
   );
   return { result, commands: adb.getExecutedCommands() };
 }
@@ -161,10 +350,87 @@ describe("custom intent chooser label fallback", () => {
     ...row("android", top),
     node: [{ text: label, package: "android" }],
   });
-  // #7724: Pending intent-label plumbing from HandleIntentChooser into DeepLinkManager.
-  test.skip("uses the resolved activity label when it differs from the application label", async () => {
-    const { result } = await choose([labelRow("Activity Name", 100)], "Application Name");
+  test("uses the resolved activity label when it differs from the application label", async () => {
+    const { result, commands } = await choose(
+      [labelRow("Activity Name", 100)],
+      "Application Name",
+      undefined,
+      "Activity Name",
+      "example://item",
+    );
     expect(result.success).toBe(true);
+    expect(commands).toEqual(["shell input tap 50 120"]);
+  });
+  test("falls back to the application label when the activity label is unavailable", async () => {
+    const { result, commands } = await choose(
+      [labelRow("Application Name", 100)],
+      "Application Name",
+      undefined,
+      null,
+      "example://item",
+    );
+    expect(result.success).toBe(true);
+    expect(commands).toEqual(["shell input tap 50 120"]);
+  });
+  test("tries the application label after a literal activity label misses every row", async () => {
+    const { result, commands } = await choose(
+      [labelRow("Application Name", 100)],
+      "Application Name",
+      undefined,
+      "Activity Name",
+      "example://item",
+    );
+    expect(result.success).toBe(true);
+    expect(commands).toEqual(["shell input tap 50 120"]);
+  });
+  test("does not retry the application label when the activity label is ambiguous", async () => {
+    const { result, commands } = await choose(
+      [
+        labelRow("Activity Name", 0),
+        labelRow("Activity Name", 50),
+        labelRow("Application Name", 100),
+      ],
+      "Application Name",
+      undefined,
+      "Activity Name",
+      "example://item",
+    );
+    expect(result.error).toContain("Ambiguous chooser rows");
+    expect(commands).toEqual([]);
+  });
+  test("never substitutes the application label for a resource-backed activity", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setDeviceTimestampMs(1000);
+    const query = chromeQueryActivities.replace(
+      "      ApplicationInfo:",
+      "      labelRes=0x7f010001 nonLocalizedLabel=null icon=0x7f090311\n      ApplicationInfo:",
+    );
+    adb.setCommandResponse("query-activities", { stdout: query, stderr: "" } as any);
+    const rows = [labelRow("Application Name", 100)];
+    const manager = new DeepLinkManager(
+      { platform: "android", deviceId: "fake", name: "fake" },
+      adb,
+      null,
+      null,
+      undefined,
+      undefined,
+      {
+        ...metadata("Application Name", rows),
+        getActivityLabel: async (_device, packageName, url, executor) =>
+          resolveChooserActivityLabel(executor, packageName, url),
+      },
+    );
+    const result = await manager.handleIntentChooser(
+      hierarchy(rows) as any,
+      "custom",
+      "com.android.chrome",
+      "example://item",
+    );
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("No exact clickable chooser row");
+    expect(adb.getExecutedCommands()).toEqual([
+      "shell cmd package query-activities -a android.intent.action.VIEW -d 'example://item'",
+    ]);
   });
   test("matches the resolved label exactly and promotes its row", async () => {
     const { result, commands } = await choose(
@@ -231,7 +497,8 @@ describe("custom intent chooser label fallback", () => {
     const result = await manager.handleIntentChooser(chooser as any, "custom", target);
     expect(result.success).toBe(true);
     expect(result.packageVerified).toBe(false);
-    expect(result.tappedAt).toBe(2000);
+    // Expose the raw second; only the internal polling floor advances to 2000.
+    expect(result.tappedAt).toBe(1000);
     expect(floors).toEqual([101, 2000]);
   });
   test("does not claim a shared-label row selected the requested package", async () => {
@@ -654,8 +921,238 @@ test("bounds post-tap polling and returns the typed unverified failure", async (
   expect(result.success).toBe(false);
   expect(result.error).toContain("Unverified chooser selection");
   expect(result.tappedAt).toBe(1000);
-  expect(floors).toEqual([101, 102, 1000, 1001, 1002, 1003, 1004]);
+  expect(floors).toEqual([101, 102, 1000, 1001, 1002, 1003]);
   expect(timer.getSleepHistory()).toEqual([50, 50, 50, 50]);
+});
+
+test("bounds a slow post-tap hierarchy read by the remaining verification budget", async () => {
+  const adb = new FakeAdbExecutor();
+  adb.setDeviceTimestampMs(1000);
+  const timer = new FakeTimer();
+  timer.enableAutoAdvance();
+  const chooser = chooserPage([{ ...row("android", 100), node: [{ text: "Example" }] }], 100);
+  const readBudgets: number[] = [];
+  const manager = new DeepLinkManager(
+    { platform: "android", deviceId: "fake", name: "fake" },
+    adb,
+    null,
+    null,
+    undefined,
+    undefined,
+    {
+      getLabel: async () => "Example",
+      getFreshHierarchy: async (_device, _factory, floor, timeoutMs) => {
+        if (floor < 1000) {
+          return { ...chooser, updatedAt: floor } as any;
+        }
+        readBudgets.push(timeoutMs ?? 0);
+        if (readBudgets.length === 1) {
+          return { hierarchy: { node: {} }, packageName: "com.other.app", updatedAt: floor } as any;
+        }
+        await timer.sleep(Math.min(11_000, timeoutMs ?? 11_000));
+        return { hierarchy: { node: {} }, packageName: "com.other.app", updatedAt: floor } as any;
+      },
+    },
+    timer,
+  );
+  const result = await manager.handleIntentChooser(chooser as any, "custom", target);
+  expect(result.success).toBe(false);
+  expect(result.error).toContain("Unverified chooser selection");
+  expect(result.packageVerified).toBe(false);
+  expect(readBudgets).toEqual([200, 150]);
+  expect(timer.getSleepHistory()).toEqual([50, 150]);
+  expect(timer.now()).toBe(200);
+});
+
+test("accepts a confirming hierarchy read that completes at the verification deadline", async () => {
+  const adb = new FakeAdbExecutor();
+  adb.setDeviceTimestampMs(1000);
+  const timer = new FakeTimer();
+  timer.enableAutoAdvance();
+  const chooser = chooserPage([{ ...row("android", 100), node: [{ text: "Example" }] }], 100);
+  const readBudgets: number[] = [];
+  const manager = new DeepLinkManager(
+    { platform: "android", deviceId: "fake", name: "fake" },
+    adb,
+    null,
+    null,
+    undefined,
+    undefined,
+    {
+      getLabel: async () => "Example",
+      getFreshHierarchy: async (_device, _factory, floor, timeoutMs) => {
+        if (floor < 1000) {
+          return { ...chooser, updatedAt: floor } as any;
+        }
+        readBudgets.push(timeoutMs ?? 0);
+        await timer.sleep(timeoutMs ?? 0);
+        return { hierarchy: { node: {} }, packageName: target, updatedAt: floor } as any;
+      },
+    },
+    timer,
+  );
+  const result = await manager.handleIntentChooser(chooser as any, "custom", target);
+  expect(result.success).toBe(true);
+  expect(result.packageVerified).toBe(false);
+  expect(readBudgets).toEqual([200]);
+  expect(timer.now()).toBe(200);
+});
+
+test("returns the typed verification failure when a bounded hierarchy read rejects", async () => {
+  const adb = new FakeAdbExecutor();
+  adb.setDeviceTimestampMs(1000);
+  const timer = new FakeTimer();
+  timer.enableAutoAdvance();
+  const chooser = chooserPage([{ ...row("android", 100), node: [{ text: "Example" }] }], 100);
+  const manager = new DeepLinkManager(
+    { platform: "android", deviceId: "fake", name: "fake" },
+    adb,
+    null,
+    null,
+    undefined,
+    undefined,
+    {
+      getLabel: async () => "Example",
+      getFreshHierarchy: async (_device, _factory, floor, timeoutMs) => {
+        if (floor < 1000) {
+          return { ...chooser, updatedAt: floor } as any;
+        }
+        await timer.sleep(timeoutMs ?? 11_000);
+        throw new Error("capture timed out");
+      },
+    },
+    timer,
+  );
+  const result = await manager.handleIntentChooser(chooser as any, "custom", target);
+  expect(result.success).toBe(false);
+  expect(result.error).toContain("Unverified chooser selection");
+  expect(result.packageVerified).toBe(false);
+  expect(timer.now()).toBe(200);
+});
+
+test("accepts a fresh target capture within the tap's device-second", async () => {
+  const adb = new FakeAdbExecutor();
+  adb.setDeviceTimestampMs(1000);
+  adb.setDeviceTimestampSource("device-seconds");
+  const timer = new FakeTimer();
+  timer.enableAutoAdvance();
+  const chooser = chooserPage([{ ...row("android", 100), node: [{ text: "Example" }] }], 100);
+  const floors: number[] = [];
+  let postTapReads = 0;
+  const manager = new DeepLinkManager(
+    { platform: "android", deviceId: "fake", name: "fake" },
+    adb,
+    null,
+    null,
+    undefined,
+    undefined,
+    {
+      getLabel: async () => "Example",
+      getFreshHierarchy: async (_device, _factory, floor) => {
+        floors.push(floor);
+        if (floor < 2000) {
+          return { ...chooser, updatedAt: floor } as any;
+        }
+        postTapReads += 1;
+        return postTapReads === 1
+          ? ({ ...chooser, updatedAt: 1000 } as any)
+          : ({ hierarchy: { node: {} }, packageName: target, updatedAt: 1000 } as any);
+      },
+    },
+    timer,
+  );
+  const result = await manager.handleIntentChooser(chooser as any, "custom", target);
+  expect(result.success).toBe(true);
+  // openLink compares against this raw second, not the internal 2000ms floor.
+  expect(result.tappedAt).toBe(1000);
+  expect(floors).toEqual([101, 102, 2000, 2000]);
+  expect(timer.getSleepHistory()).toEqual([50]);
+});
+
+test("rejects an out-of-order target capture after a newer device-seconds observation", async () => {
+  const adb = new FakeAdbExecutor();
+  adb.setDeviceTimestampMs(1000);
+  adb.setDeviceTimestampSource("device-seconds");
+  const timer = new FakeTimer();
+  timer.enableAutoAdvance();
+  const chooser = chooserPage([{ ...row("android", 100), node: [{ text: "Example" }] }], 100);
+  const floors: number[] = [];
+  let postTapReads = 0;
+  const manager = new DeepLinkManager(
+    { platform: "android", deviceId: "fake", name: "fake" },
+    adb,
+    null,
+    null,
+    undefined,
+    undefined,
+    {
+      getLabel: async () => "Example",
+      getFreshHierarchy: async (_device, _factory, floor) => {
+        floors.push(floor);
+        if (floor < 2000) {
+          return { ...chooser, updatedAt: floor } as any;
+        }
+        postTapReads += 1;
+        if (postTapReads === 1) {
+          return { hierarchy: { node: {} }, packageName: "com.other.app", updatedAt: 2500 } as any;
+        }
+        if (postTapReads === 2) {
+          return { hierarchy: { node: {} }, packageName: target, updatedAt: 1600 } as any;
+        }
+        return { hierarchy: { node: {} }, packageName: "com.other.app", updatedAt: 2500 } as any;
+      },
+    },
+    timer,
+  );
+  const result = await manager.handleIntentChooser(chooser as any, "custom", target);
+  expect(result.success).toBe(false);
+  expect(result.packageVerified).toBe(false);
+  expect(result.error).toContain("Unverified chooser selection");
+  expect(floors.slice(0, 4)).toEqual([101, 102, 2000, 2501]);
+  expect(postTapReads).toBe(4);
+  expect(timer.now()).toBe(200);
+});
+
+test("rejects a millisecond-clock target capture older than the moving floor", async () => {
+  const adb = new FakeAdbExecutor();
+  adb.setDeviceTimestampMs(1000);
+  const timer = new FakeTimer();
+  timer.enableAutoAdvance();
+  const chooser = chooserPage([{ ...row("android", 100), node: [{ text: "Example" }] }], 100);
+  const floors: number[] = [];
+  let postTapReads = 0;
+  const manager = new DeepLinkManager(
+    { platform: "android", deviceId: "fake", name: "fake" },
+    adb,
+    null,
+    null,
+    undefined,
+    undefined,
+    {
+      getLabel: async () => "Example",
+      getFreshHierarchy: async (_device, _factory, floor) => {
+        floors.push(floor);
+        if (floor < 1000) {
+          return { ...chooser, updatedAt: floor } as any;
+        }
+        postTapReads += 1;
+        if (postTapReads === 1) {
+          return { hierarchy: { node: {} }, packageName: "com.other.app", updatedAt: 2500 } as any;
+        }
+        if (postTapReads === 2) {
+          return { hierarchy: { node: {} }, packageName: target, updatedAt: 1600 } as any;
+        }
+        return { hierarchy: { node: {} }, packageName: "com.other.app", updatedAt: floor } as any;
+      },
+    },
+    timer,
+  );
+  const result = await manager.handleIntentChooser(chooser as any, "custom", target);
+  expect(result.success).toBe(false);
+  expect(result.packageVerified).toBe(false);
+  expect(result.error).toContain("Unverified chooser selection");
+  expect(floors.slice(0, 4)).toEqual([101, 102, 1000, 2501]);
+  expect(postTapReads).toBe(4);
 });
 
 test("accepts a target app screen containing chooser button text and IDs", async () => {
@@ -697,8 +1194,12 @@ test("accepts a target app screen containing chooser button text and IDs", async
 test("deduplicates a stable chooser row visible in overlapping captures", async () => {
   const adb = new FakeAdbExecutor();
   const stableRow = (top: number) => ({ ...row(target, top), "view-id": "s2-0123456789abcdef" });
-  const first = chooserPage([stableRow(140)], 100);
-  const second = chooserPage([stableRow(40), row("com.other.app", 140)], 101);
+  const anchor = (top: number) => ({
+    ...row("com.other.app", top),
+    "view-id": "s2-aaaaaaaaaaaaaaaa",
+  });
+  const first = chooserPage([anchor(100), stableRow(140)], 100);
+  const second = chooserPage([anchor(0), stableRow(40)], 101);
   const manager = new DeepLinkManager(
     { platform: "android", deviceId: "fake", name: "fake" },
     adb,
@@ -715,6 +1216,273 @@ test("deduplicates a stable chooser row visible in overlapping captures", async 
   const result = await manager.handleIntentChooser(first as any, "custom", target);
   expect(result.success).toBe(true);
   expect(adb.getExecutedCommands().at(-1)).toBe("shell input tap 50 60");
+});
+
+test("deduplicates a clamped chooser scroll using another row's observed displacement", async () => {
+  const adb = new FakeAdbExecutor();
+  const stableRow = (packageName: string, top: number, id: string) => ({
+    ...row(packageName, top),
+    "view-id": id,
+  });
+  const first = chooserPage(
+    [
+      stableRow("com.other.app", 80, "s2-aaaaaaaaaaaaaaaa"),
+      stableRow(target, 140, "s2-bbbbbbbbbbbbbbbb"),
+    ],
+    100,
+  );
+  const second = chooserPage(
+    [
+      stableRow("com.other.app", 40, "s2-aaaaaaaaaaaaaaaa"),
+      stableRow(target, 100, "s2-bbbbbbbbbbbbbbbb"),
+    ],
+    101,
+  );
+  const manager = new DeepLinkManager(
+    { platform: "android", deviceId: "fake", name: "fake" },
+    adb,
+    null,
+    null,
+    undefined,
+    undefined,
+    {
+      getLabel: async () => null,
+      getFreshHierarchy: async (_device, _factory, floor) =>
+        ({ ...second, updatedAt: floor }) as any,
+    },
+  );
+  const result = await manager.handleIntentChooser(first as any, "custom", target);
+  expect(result.success).toBe(true);
+  expect(adb.getExecutedCommands()[0]).toBe("shell input swipe 50 150 50 50 350");
+  expect(adb.getExecutedCommands().at(-1)).toBe("shell input tap 50 120");
+});
+
+test("keeps a repeated chooser target ambiguous when anchor deltas disagree", async () => {
+  const adb = new FakeAdbExecutor();
+  const stableRow = (packageName: string, top: number, id: string) => ({
+    ...row(packageName, top),
+    "view-id": id,
+  });
+  const first = chooserPage(
+    [
+      stableRow("com.other.one", 60, "s2-aaaaaaaaaaaaaaaa"),
+      stableRow(target, 120, "s2-bbbbbbbbbbbbbbbb"),
+      stableRow("com.other.two", 180, "s2-cccccccccccccccc"),
+    ],
+    100,
+  );
+  const second = chooserPage(
+    [
+      stableRow("com.other.one", 20, "s2-aaaaaaaaaaaaaaaa"),
+      stableRow(target, 55, "s2-bbbbbbbbbbbbbbbb"),
+      stableRow("com.other.two", 90, "s2-cccccccccccccccc"),
+    ],
+    101,
+  );
+  const manager = new DeepLinkManager(
+    { platform: "android", deviceId: "fake", name: "fake" },
+    adb,
+    null,
+    null,
+    undefined,
+    undefined,
+    {
+      getLabel: async () => null,
+      getFreshHierarchy: async (_device, _factory, floor) =>
+        ({ ...second, updatedAt: floor }) as any,
+    },
+  );
+  const result = await manager.handleIntentChooser(first as any, "custom", target);
+  expect(
+    manager["getObservedChooserDisplacement"](first as any, second as any, "s2-bbbbbbbbbbbbbbbb"),
+  ).toBeUndefined();
+  expect(result.error).toContain("Ambiguous chooser rows");
+  expect(
+    adb.getExecutedCommands().filter((command) => command.startsWith("shell input tap")),
+  ).toEqual([]);
+});
+
+test("excludes duplicate chooser anchor IDs from displacement evidence", () => {
+  const anchorId = "s2-aaaaaaaaaaaaaaaa";
+  const targetId = "s2-bbbbbbbbbbbbbbbb";
+  const stableRow = (packageName: string, top: number, id: string) => ({
+    ...row(packageName, top),
+    "view-id": id,
+  });
+  const makePage = (anchorTops: number[], targetTop: number, updatedAt: number) =>
+    chooserPage(
+      [
+        ...anchorTops.map((top) => stableRow("com.other.app", top, anchorId)),
+        stableRow(target, targetTop, targetId),
+      ],
+      updatedAt,
+    );
+  const manager = new DeepLinkManager(
+    { platform: "android", deviceId: "fake", name: "fake" },
+    new FakeAdbExecutor(),
+    null,
+    null,
+  );
+  for (const [beforeTops, afterTops] of [
+    [[80, 120], [40]],
+    [[80], [40, 80]],
+    [[80, 120, 160], [40]],
+  ]) {
+    const before = makePage(beforeTops, 140, 100);
+    const after = makePage(afterTops, 100, 101);
+    const duplicated = beforeTops.length > 1 ? before : after;
+    expect(manager["getChooserAnchorRows"](duplicated as any).has(anchorId)).toBe(false);
+    expect(
+      manager["getObservedChooserDisplacement"](before as any, after as any, targetId),
+    ).toBeUndefined();
+  }
+});
+
+test("rejects opposite-direction chooser anchors as scroll evidence", async () => {
+  const adb = new FakeAdbExecutor();
+  const stableRow = (packageName: string, top: number, id: string) => ({
+    ...row(packageName, top),
+    "view-id": id,
+  });
+  const anchorId = "s2-aaaaaaaaaaaaaaaa";
+  const targetId = "s2-bbbbbbbbbbbbbbbb";
+  const first = chooserPage(
+    [stableRow("com.other.app", 20, anchorId), stableRow(target, 140, targetId)],
+    100,
+  );
+  const second = chooserPage(
+    [stableRow("com.other.app", 60, anchorId), stableRow(target, 100, targetId)],
+    101,
+  );
+  const manager = new DeepLinkManager(
+    { platform: "android", deviceId: "fake", name: "fake" },
+    adb,
+    null,
+    null,
+    undefined,
+    undefined,
+    {
+      getLabel: async () => null,
+      getFreshHierarchy: async (_device, _factory, floor) =>
+        ({ ...second, updatedAt: floor }) as any,
+    },
+  );
+  expect(
+    manager["getObservedChooserDisplacement"](first as any, second as any, targetId),
+  ).toBeUndefined();
+  const result = await manager.handleIntentChooser(first as any, "custom", target);
+  expect(result.error).toContain("Ambiguous chooser rows");
+  expect(adb.getExecutedCommands()[0]).toBe("shell input swipe 50 150 50 50 350");
+  expect(
+    adb.getExecutedCommands().filter((command) => command.startsWith("shell input tap")),
+  ).toEqual([]);
+});
+
+test("keeps a repeated stable target ambiguous without overlapping anchor rows", async () => {
+  const adb = new FakeAdbExecutor();
+  const stableTarget = (top: number) => ({
+    ...row(target, top),
+    "view-id": "s2-bbbbbbbbbbbbbbbb",
+  });
+  const first = chooserPage([row("com.other.before", 80), stableTarget(140)], 100);
+  const second = chooserPage([row("com.other.after", 40), stableTarget(100)], 101);
+  const manager = new DeepLinkManager(
+    { platform: "android", deviceId: "fake", name: "fake" },
+    adb,
+    null,
+    null,
+    undefined,
+    undefined,
+    {
+      getLabel: async () => null,
+      getFreshHierarchy: async (_device, _factory, floor) =>
+        ({ ...second, updatedAt: floor }) as any,
+    },
+  );
+  const result = await manager.handleIntentChooser(first as any, "custom", target);
+  expect(result.error).toContain("Ambiguous chooser rows");
+  expect(
+    adb.getExecutedCommands().filter((command) => command.startsWith("shell input tap")),
+  ).toEqual([]);
+});
+
+test("keeps a repeated stable target ambiguous when only its clickable child overlaps", async () => {
+  const adb = new FakeAdbExecutor();
+  const stableTarget = (top: number) => ({
+    ...row(target, top),
+    "view-id": "s2-bbbbbbbbbbbbbbbb",
+    node: [
+      ...row(target, top).node,
+      {
+        clickable: true,
+        "view-id": "s2-cccccccccccccccc",
+        text: "Open",
+        bounds: { left: 60, top: top + 5, right: 90, bottom: top + 35 },
+      },
+    ],
+  });
+  const first = chooserPage([row("com.other.before", 80), stableTarget(140)], 100);
+  const second = chooserPage([row("com.other.after", 40), stableTarget(100)], 101);
+  const manager = new DeepLinkManager(
+    { platform: "android", deviceId: "fake", name: "fake" },
+    adb,
+    null,
+    null,
+    undefined,
+    undefined,
+    {
+      getLabel: async () => null,
+      getFreshHierarchy: async (_device, _factory, floor) =>
+        ({ ...second, updatedAt: floor }) as any,
+    },
+  );
+  const result = await manager.handleIntentChooser(first as any, "custom", target);
+  expect(result.error).toContain("Ambiguous chooser rows");
+  expect(
+    manager["getObservedChooserDisplacement"](first as any, second as any, "s2-bbbbbbbbbbbbbbbb"),
+  ).toBeUndefined();
+  expect(
+    adb.getExecutedCommands().filter((command) => command.startsWith("shell input tap")),
+  ).toEqual([]);
+});
+
+test("rejects identical stable label rows separated by chooser pages without tapping", async () => {
+  const adb = new FakeAdbExecutor();
+  const stableRow = (top: number) => ({
+    ...row("android", top),
+    "view-id": "s2-0123456789abcdef",
+    node: [{ text: "Example" }],
+  });
+  const pages = [
+    chooserPage([stableRow(140)], 100),
+    chooserPage([row("com.other.one", 100)], 101),
+    chooserPage([row("com.other.two", 100)], 102),
+    chooserPage([stableRow(40), row("com.other.three", 140)], 103),
+  ];
+  const manager = new DeepLinkManager(
+    { platform: "android", deviceId: "fake", name: "fake" },
+    adb,
+    null,
+    null,
+    undefined,
+    undefined,
+    {
+      getLabel: async () => "Example",
+      getFreshHierarchy: async (_device, _factory, floor) => {
+        const page = Math.min(
+          adb.getExecutedCommands().filter((command) => command.startsWith("shell input swipe"))
+            .length,
+          pages.length - 1,
+        );
+        return { ...pages[page], updatedAt: floor } as any;
+      },
+    },
+  );
+  const result = await manager.handleIntentChooser(pages[0] as any, "custom", target);
+  expect(result.error).toContain("Ambiguous chooser rows");
+  expect(
+    adb.getExecutedCommands().filter((command) => command.startsWith("shell input tap")),
+  ).toEqual([]);
 });
 
 test("keeps resource-backed row IDs ambiguous across pages", async () => {

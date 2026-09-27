@@ -185,7 +185,7 @@ export function sanitizeObserveResult(
  */
 function projectSkeletonOnto(out: ObserveResult, source: ObserveResult): void {
   const { skeleton, context, keyboard } = source.elements
-    ? projectSkeleton(source.elements)
+    ? projectSkeleton(source.elements, source.screenSize)
     : { skeleton: [] as SkeletonElement[], context: [] as SkeletonElement[], keyboard: undefined };
   out.skeleton = skeleton;
   if (keyboard) {

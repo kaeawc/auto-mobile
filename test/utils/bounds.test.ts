@@ -3,6 +3,7 @@ import {
   boundsArea,
   boundsEqual,
   boundsNearlyEqual,
+  horizontalExtentNearlyEqual,
   clamp,
   isElementBounds,
   parseBounds,
@@ -21,6 +22,18 @@ describe("boundsNearlyEqual", () => {
     const b = { left: 2, top: 2, right: 98, bottom: 48 };
     expect(boundsNearlyEqual(a, b, 3)).toBe(true);
     expect(boundsNearlyEqual(a, b, 1)).toBe(false);
+  });
+});
+
+describe("horizontalExtentNearlyEqual", () => {
+  it("allows vertical movement and small horizontal drift, but rejects a shifted edge", () => {
+    const before = { left: 10, top: 400, right: 110, bottom: 440 };
+    expect(
+      horizontalExtentNearlyEqual(before, { left: 13, top: 100, right: 107, bottom: 140 }, 3),
+    ).toBe(true);
+    expect(
+      horizontalExtentNearlyEqual(before, { left: 14, top: 100, right: 110, bottom: 140 }, 3),
+    ).toBe(false);
   });
 });
 

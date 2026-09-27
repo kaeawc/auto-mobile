@@ -568,17 +568,77 @@ case "$mode" in
         else
           main_targets=("${integration_main_paths[@]+"${integration_main_paths[@]}"}")
         fi
-        # shellcheck disable=SC2310
-        if AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS="$integration_remaining" run_test_command \
-          "${integration_args[@]}" \
-          "${main_targets[@]}" \
-          "${main_args[@]+"${main_args[@]}"}"; then
-          :
+        per_file_reports=()
+        if [[ "${AUTOMOBILE_TEST_MODE:-}" == true ]]; then
+          # Bun --isolate refreshes globals, but native handles remain in the
+          # shared process. CI has stalled in unrelated files after earlier
+          # suites ran, so give each file a fresh process.
+          if [[ "$has_test_targets" -eq 0 ]]; then
+            main_targets=()
+            while IFS= read -r integration_file; do
+              if [[ "$integration_file" != test/server/proxyServerTransportFailure.integration.test.ts ]]; then
+                main_targets+=("$integration_file")
+              fi
+            done < <(find test -type f -name '*.integration.test.ts' | LC_ALL=C sort)
+            if (( ${#main_targets[@]} == 0 )); then
+              echo "No integration test files were found." >&2
+              exit 2
+            fi
+          fi
+          main_index=0
+          for integration_file in "${main_targets[@]}"; do
+            integration_remaining=$((integration_wall_timeout - ($(date +%s) - integration_started_at)))
+            if ((integration_remaining <= 0)); then
+              echo "Integration test run exceeded its ${integration_wall_timeout}s wall-clock budget." >&2
+              main_status=124
+              break
+            fi
+            file_timeout="$integration_remaining"
+            if ((file_timeout > 60)); then file_timeout=60; fi
+            file_args=("${main_args[@]+"${main_args[@]}"}")
+            if [[ -n "$report_outfile" ]]; then
+              file_report="$report_dir/main-${main_index}.xml"
+              file_args[report_arg_index]="${report_arg_prefix}${file_report}"
+            fi
+            file_status=0
+            # shellcheck disable=SC2310
+            if AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS="$file_timeout" run_test_command \
+              "${integration_args[@]}" "$integration_file" "${file_args[@]+"${file_args[@]}"}"; then
+              :
+            else
+              file_status=$?
+            fi
+            if [[ -n "$report_outfile" && -f "$file_report" ]]; then
+              per_file_reports+=("$file_report")
+            fi
+            if ((file_status != 0)); then
+              if ((main_status == 0 || file_status == 124)); then main_status="$file_status"; fi
+              if ((file_status == 124)) || [[ "$fail_fast" == true ]]; then break; fi
+            fi
+            main_index=$((main_index + 1))
+          done
         else
-          main_status=$?
+          # shellcheck disable=SC2310
+          if AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS="$integration_remaining" run_test_command \
+            "${integration_args[@]}" \
+            "${main_targets[@]}" \
+            "${main_args[@]+"${main_args[@]}"}"; then
+            :
+          else
+            main_status=$?
+          fi
         fi
         if [[ -n "$report_outfile" && "${TEST_TS_PRINT_CMD:-}" != 1 ]]; then
-          if [[ -f "$report_dir/transport.xml" && -f "$report_dir/main.xml" ]]; then
+          if (( ${#per_file_reports[@]} > 0 )); then
+            if [[ -f "$report_dir/transport.xml" ]]; then
+              per_file_reports=("$report_dir/transport.xml" "${per_file_reports[@]}")
+            fi
+            if (( ${#per_file_reports[@]} > 1 )); then
+              bun scripts/lib/merge-junit-reports.ts "$report_outfile" "${per_file_reports[@]}"
+            else
+              cp "${per_file_reports[0]}" "$report_outfile"
+            fi
+          elif [[ -f "$report_dir/transport.xml" && -f "$report_dir/main.xml" ]]; then
             bun scripts/lib/merge-junit-reports.ts "$report_outfile" \
               "$report_dir/transport.xml" "$report_dir/main.xml"
           elif [[ -f "$report_dir/transport.xml" ]]; then

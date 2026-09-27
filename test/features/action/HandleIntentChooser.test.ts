@@ -184,6 +184,20 @@ describe("HandleIntentChooser", () => {
       expect(result.appSelected).toBe("com.example.customapp");
     });
 
+    test("passes the opened URL to DeepLinkManager", async () => {
+      const calls: unknown[][] = [];
+      (fakeDeepLinkManager as any).handleIntentChooser = async (...args: unknown[]) => {
+        calls.push(args);
+        return { success: true, detected: true, action: "custom" };
+      };
+
+      await handleIntentChooser.execute("custom", "com.example.customapp", "example://item");
+
+      expect(calls).toEqual([
+        [mockObserveResult.viewHierarchy, "custom", "com.example.customapp", "example://item"],
+      ]);
+    });
+
     test("should use default 'just_once' preference when none specified", async () => {
       fakeObserveScreen.setObserveResult(mockObserveResult);
       fakeDeepLinkManager.setDefaultIntentChooserDetected(true);

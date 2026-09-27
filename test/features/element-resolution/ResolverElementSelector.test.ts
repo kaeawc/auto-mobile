@@ -3,6 +3,7 @@ import { ResolverElementSelector } from "../../../src/features/utility/ResolverE
 import { identifyObservedHierarchy } from "../../../src/features/observe/HierarchyCapture";
 import { attachRawViewHierarchy } from "../../../src/utils/viewHierarchySearch";
 import { serverConfig } from "../../../src/utils/ServerConfig";
+import { projectSkeleton } from "../../../src/features/observe/output/SkeletonProjection";
 
 afterEach(() => serverConfig.setRawElementSearchEnabled(false));
 const bounds = { left: 0, top: 0, right: 100, bottom: 100 };
@@ -162,6 +163,36 @@ test("long press falls back to ordinary clickable targets for tapOn and tapAny",
   ).toBe("app:id/login_help");
 });
 
+test("long-press candidate set includes an ordinary clickable control alongside a long-clickable one (#7707)", async () => {
+  const { ElementResolver } = await import("../../../src/features/utility/ElementResolver");
+  const capture = {
+    hierarchy: {
+      node: [
+        { bounds, clickable: true, "resource-id": "A" },
+        { bounds, clickable: true, longClickable: true, "resource-id": "B" },
+      ],
+    },
+  };
+  const first = new ResolverElementSelector(new ElementResolver(() => 0)).selectClickable(capture, {
+    intentAction: "long-press",
+    strategy: "first",
+  });
+  expect(first.totalMatches).toBe(2);
+  expect(first.element?.["resource-id"]).toBe("A");
+  const randomFirst = new ResolverElementSelector(new ElementResolver(() => 0)).selectClickable(
+    capture,
+    { intentAction: "long-press", strategy: "random" },
+  );
+  const randomLast = new ResolverElementSelector(new ElementResolver(() => 0.99)).selectClickable(
+    capture,
+    { intentAction: "long-press", strategy: "random" },
+  );
+  expect(randomFirst.totalMatches).toBe(2);
+  expect(randomFirst.element?.["resource-id"]).toBe("A");
+  expect(randomLast.totalMatches).toBe(2);
+  expect(randomLast.element?.["resource-id"]).toBe("B");
+});
+
 test("indexed and random selection count only onscreen action candidates", async () => {
   const { ElementResolver } = await import("../../../src/features/utility/ElementResolver");
   const capture = {
@@ -226,6 +257,199 @@ test("tap intent ranks a clickable text peer ahead of a smaller input", () => {
       selectionIntent: "tap",
     }).element?.bounds?.top,
   ).toBe(40);
+});
+
+test("focus promotes a Compose label child to its editable ancestor (#7759)", () => {
+  const inputBounds = { left: 84, top: 1115, right: 996, bottom: 1262 };
+  const labelBounds = { left: 126, top: 1157, right: 461, bottom: 1220 };
+  const capture = {
+    hierarchy: {
+      bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
+      node: {
+        class: "android.widget.EditText",
+        bounds: inputBounds,
+        node: [{ class: "android.widget.TextView", text: "Basic Text Field", bounds: labelBounds }],
+      },
+    },
+  };
+  const result = new ResolverElementSelector().selectByText(capture, "Basic Text Field", {
+    intentAction: "focus-input",
+  });
+  expect(result.element?.bounds).toEqual(inputBounds);
+});
+
+test("focus prefers an exact label's promoted field over a partial match elsewhere (PR #7780 review)", () => {
+  const exactInputBounds = { left: 20, top: 100, right: 220, bottom: 160 };
+  const partialInputBounds = { left: 20, top: 200, right: 320, bottom: 280 };
+  const capture = {
+    hierarchy: {
+      bounds: { left: 0, top: 0, right: 400, bottom: 400 },
+      node: {
+        class: "android.widget.EditText",
+        bounds: exactInputBounds,
+        node: {
+          class: "android.widget.TextView",
+          text: "Email",
+          bounds: { left: 30, top: 110, right: 100, bottom: 140 },
+        },
+      },
+    },
+    windows: [
+      {
+        windowLayer: 10,
+        hierarchy: {
+          node: {
+            class: "android.widget.EditText",
+            text: "Email Address",
+            bounds: partialInputBounds,
+          },
+        },
+      },
+    ],
+  };
+  const result = new ResolverElementSelector().selectByText(capture, "Email", {
+    intentAction: "focus-input",
+  });
+  expect(result.element?.bounds).toEqual(exactInputBounds);
+});
+
+test("focus rejects a nested label outside a distant editable ancestor (#7759)", () => {
+  const outerBounds = { left: 0, top: 0, right: 200, bottom: 80 };
+  const labelBounds = { left: 20, top: 200, right: 100, bottom: 230 };
+  const capture = {
+    hierarchy: {
+      node: {
+        class: "android.widget.EditText",
+        bounds: outerBounds,
+        node: {
+          bounds: { left: 0, top: 180, right: 200, bottom: 250 },
+          node: { class: "android.widget.TextView", text: "Email", bounds: labelBounds },
+        },
+      },
+    },
+  };
+  const result = new ResolverElementSelector().selectByText(capture, "Email", {
+    intentAction: "focus-input",
+  });
+  expect(result.element).toBeNull();
+  expect(result.element?.bounds).not.toEqual(outerBounds);
+});
+
+test("focus rejects a label three hops below a full-screen editable ancestor (#7759)", () => {
+  const outerBounds = { left: 0, top: 0, right: 1080, bottom: 2400 };
+  const capture = {
+    hierarchy: {
+      node: {
+        class: "android.widget.EditText",
+        bounds: outerBounds,
+        node: {
+          bounds: { left: 0, top: 900, right: 1080, bottom: 1400 },
+          node: {
+            bounds: { left: 40, top: 1080, right: 1040, bottom: 1250 },
+            node: {
+              class: "android.widget.TextView",
+              text: "Email",
+              bounds: { left: 126, top: 1157, right: 461, bottom: 1220 },
+            },
+          },
+        },
+      },
+    },
+  };
+  const result = new ResolverElementSelector().selectByText(capture, "Email", {
+    intentAction: "focus-input",
+  });
+  expect(result.element).toBeNull();
+  expect(result.element?.bounds).not.toEqual(outerBounds);
+});
+
+test("focus stops at an interactive ancestor before a distant editable input (#7759)", () => {
+  const capture = {
+    hierarchy: {
+      node: {
+        class: "android.widget.EditText",
+        bounds: { left: 0, top: 0, right: 300, bottom: 300 },
+        node: {
+          clickable: true,
+          bounds: { left: 0, top: 0, right: 200, bottom: 100 },
+          node: { text: "Email", bounds: { left: 10, top: 10, right: 100, bottom: 40 } },
+        },
+      },
+    },
+  };
+  expect(
+    new ResolverElementSelector().selectByText(capture, "Email", { intentAction: "focus-input" })
+      .element,
+  ).toBeNull();
+});
+
+test("focus promotes an iOS text label to its text-field role ancestor (#7759)", () => {
+  const inputBounds = { left: 0, top: 0, right: 200, bottom: 70 };
+  const capture = {
+    hierarchy: {
+      node: {
+        role: "textfield",
+        bounds: inputBounds,
+        node: [{ text: "Email", bounds: { left: 10, top: 10, right: 100, bottom: 40 } }],
+      },
+    },
+  };
+  expect(
+    new ResolverElementSelector().selectByText(capture, "Email", { intentAction: "focus-input" })
+      .element?.bounds,
+  ).toEqual(inputBounds);
+});
+
+test("focus resolves a label merged from flattened skeleton siblings (#7759)", () => {
+  const inputBounds = { left: 0, top: 0, right: 200, bottom: 70 };
+  const labelBounds = { left: 10, top: 10, right: 100, bottom: 40 };
+  const input = { class: "android.widget.EditText", clickable: true, bounds: inputBounds };
+  const label = { class: "android.widget.TextView", text: "Email", bounds: labelBounds };
+  const skeleton = projectSkeleton({
+    clickable: [input],
+    scrollable: [],
+    text: [label],
+    media: [],
+  }).skeleton;
+  expect(skeleton.find((row) => row.affordances.includes("input"))?.label).toBe("Email");
+  const capture = { hierarchy: { node: { ...input, node: [label] } } };
+  expect(
+    new ResolverElementSelector().selectByText(capture, "Email", { intentAction: "focus-input" })
+      .element?.bounds,
+  ).toEqual(inputBounds);
+});
+
+test("focus rejects a stray non-editable label beside an unrelated input (#7759)", () => {
+  const capture = {
+    hierarchy: {
+      node: [
+        { class: "android.widget.TextView", text: "Email", bounds },
+        { class: "android.widget.EditText", bounds: { ...bounds, top: 120, bottom: 180 } },
+      ],
+    },
+  };
+  expect(
+    new ResolverElementSelector().selectByText(capture, "Email", { intentAction: "focus-input" })
+      .element,
+  ).toBeNull();
+});
+
+test("indexed focus excludes an exact clickable Email before the exact input (#7708)", () => {
+  const inputBounds = { left: 0, top: 120, right: 100, bottom: 180 };
+  const capture = {
+    hierarchy: {
+      node: [
+        { clickable: true, text: "Email", bounds },
+        { class: "android.widget.EditText", text: "Email", bounds: inputBounds },
+      ],
+    },
+  };
+  const result = new ResolverElementSelector().selectByText(capture, "Email", {
+    intentAction: "focus-input",
+    index: 0,
+  });
+  expect(result.element?.bounds).toEqual(inputBounds);
+  expect(result.totalMatches).toBe(1);
 });
 
 test("tap lookup falls back to a bounded Compose ID when exact native ID is unbounded", () => {

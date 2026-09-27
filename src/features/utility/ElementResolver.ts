@@ -9,10 +9,15 @@ import { normalizeQuotes } from "./TextMatcher";
 import { boundsArea, boundsEqual } from "../../utils/bounds";
 import type { ElementBounds } from "../../models/ElementBounds";
 import { defaultRandom } from "../../utils/Random";
+import { isEditableElementProperties } from "../../utils/elementProperties";
+import type { Element } from "../../models/Element";
 
 const ordinalNodeKey = new RegExp(
   `^${STABLE_VIEW_ID_PREFIX}[0-9a-f]{${STABLE_VIEW_ID_HASH_LENGTH}}-\\d+$`,
 );
+
+// Keep label promotion within a parent or grandparent, away from distant editable ancestors.
+const FOCUS_LABEL_ANCESTOR_HOP_LIMIT = 2;
 
 export type MatchMode = "exact" | "contains" | "regex";
 export type ResolutionAction =
@@ -21,6 +26,7 @@ export type ResolutionAction =
   | "long-press"
   | "scroll"
   | "input"
+  | "focus-input"
   | "accessibility-focus"
   | "focus"
   | "highlight"
@@ -118,6 +124,49 @@ function hasVisibleBounds(node: SearchableEntry, intent: ResolutionIntent): bool
   return !!node.bounds && (!intent.viewport || centerWithinViewport(node.bounds, intent.viewport));
 }
 
+function semanticActionsForIntent(intent: ResolutionIntent): SearchableEntry["affordances"] {
+  if (intent.action === "scroll") {
+    return ["scroll"];
+  }
+  if (intent.action === "inspect") {
+    return ["tap", "toggle"];
+  }
+  if (intent.action === "long-press") {
+    return ["long-press"];
+  }
+  return intent.action === "input" || intent.action === "focus-input"
+    ? ["input"]
+    : ["tap", "scroll"];
+}
+
+/** Native editable fields and iOS accessibility text-field roles can own focus labels. */
+export function isFocusEditableElement(element: Element): boolean {
+  return isEditableElementProperties(element) || element.role === "textfield";
+}
+
+function containsBounds(container: ElementBounds, contained: ElementBounds): boolean {
+  return (
+    container.left <= contained.left &&
+    container.top <= contained.top &&
+    container.right >= contained.right &&
+    container.bottom >= contained.bottom
+  );
+}
+
+function hasActionAffordance(node: SearchableEntry, intent: ResolutionIntent): boolean {
+  if (intent.action === "focus-input") {
+    return isFocusEditableElement(node.properties);
+  }
+  if (intent.action === "long-press") {
+    return node.affordances.some(
+      (action) => action === "long-press" || action === "tap" || action === "toggle",
+    );
+  }
+  return node.affordances.some(
+    (action) => action === intent.action || (intent.action === "tap" && action === "toggle"),
+  );
+}
+
 function eligible(node: SearchableEntry, intent: ResolutionIntent): boolean {
   if (intent.requireResourceId && !node.nativeId) {
     return false;
@@ -141,8 +190,19 @@ function eligible(node: SearchableEntry, intent: ResolutionIntent): boolean {
   if (intent.action === "focus") {
     return node.focusable || node.affordances.includes("input");
   }
-  return node.affordances.some(
-    (action) => action === intent.action || (intent.action === "tap" && action === "toggle"),
+  return hasActionAffordance(node, intent);
+}
+
+function promotableFocusAncestor(
+  label: SearchableEntry,
+  ancestor: SearchableEntry,
+  intent: ResolutionIntent,
+): boolean {
+  return (
+    !!label.bounds &&
+    !!ancestor.bounds &&
+    containsBounds(ancestor.bounds, label.bounds) &&
+    eligible(ancestor, intent)
   );
 }
 
@@ -225,6 +285,7 @@ export class ElementResolver {
         return true;
       });
     let scope: SearchableEntry | undefined = boundary;
+    let siblingCandidateNodes: SearchableEntry[] | undefined;
     if (selector.container) {
       const container = this.resolveInNodes(
         snapshot,
@@ -256,9 +317,10 @@ export class ElementResolver {
         };
       }
       nodes = siblings.nodes;
+      siblingCandidateNodes = siblings.candidateNodes;
     }
     const matched = this.prepareMatches(
-      this.match(nodes, selector, intent),
+      this.match(nodes, selector, intent, snapshot, scope),
       selector,
       snapshot,
       scope,
@@ -282,12 +344,33 @@ export class ElementResolver {
       this.actionTarget(node, snapshot, intent, scope);
     // Positional selection counts displayed actionable rows; diagnostic
     // matches retain inert labels so debug can still explain why they cannot act.
-    result.candidates = result.candidates.filter(
-      (candidate) =>
-        actionTarget(candidate) !== null ||
-        (hasVisibleBounds(candidate, intent) && candidate.affordances.length > 0),
-    );
-    return this.choose(result, selector, actionTarget, intent);
+    const actionableCandidate = (candidate: SearchableEntry) =>
+      intent.action === "focus-input"
+        ? actionTarget(candidate) !== null
+        : actionTarget(candidate) !== null ||
+          (hasVisibleBounds(candidate, intent) && candidate.affordances.length > 0);
+    result.candidates = result.candidates.filter(actionableCandidate);
+    this.choose(result, selector, actionTarget, intent);
+    if (siblingCandidateNodes) {
+      // Preserve the complete observed candidate list without letting another
+      // anchor's smaller target override the first anchor's chosen sibling.
+      const allMatches = this.prepareMatches(
+        this.match(siblingCandidateNodes, selector, intent, snapshot, scope),
+        selector,
+        snapshot,
+        scope,
+        intent,
+        preserveTextScope,
+      );
+      result.matches = allMatches.matches;
+      result.candidates = allMatches.matches.map(({ node }) => node).filter(actionableCandidate);
+      if (result.chosen) {
+        result.indexInMatches = result.candidates.findIndex(
+          (candidate) => actionTarget(candidate) === result.chosen,
+        );
+      }
+    }
+    return result;
   }
 
   private prepareMatches(
@@ -363,6 +446,9 @@ export class ElementResolver {
     if (!node) {
       return null;
     }
+    if (intent.action === "focus-input") {
+      return this.focusInputTarget(node, snapshot, intent, scope);
+    }
     if (eligible(node, intent)) {
       return node;
     }
@@ -380,13 +466,44 @@ export class ElementResolver {
     return null;
   }
 
+  private focusInputTarget(
+    node: SearchableEntry,
+    snapshot: ResolverSnapshot,
+    intent: ResolutionIntent,
+    scope?: SearchableEntry,
+  ): SearchableEntry | null {
+    if (eligible(node, intent)) {
+      return node;
+    }
+    if (node.affordances.length > 0) {
+      return null;
+    }
+    let parent = node.parentIndex;
+    let hops = 0;
+    while (parent !== undefined && hops < FOCUS_LABEL_ANCESTOR_HOP_LIMIT) {
+      hops += 1;
+      const ancestor = snapshot.nodes[parent];
+      if (!ancestor || ancestor === scope) {
+        break;
+      }
+      if (isFocusEditableElement(ancestor.properties)) {
+        return promotableFocusAncestor(node, ancestor, intent) ? ancestor : null;
+      }
+      if (ancestor.affordances.length > 0) {
+        break;
+      }
+      parent = ancestor.parentIndex;
+    }
+    return null;
+  }
+
   private siblingNodes(
     snapshot: ResolverSnapshot,
     nodes: SearchableEntry[],
     selector: ResolverSelector,
     intent: ResolutionIntent,
     scope?: SearchableEntry,
-  ): { nodes: SearchableEntry[]; error?: string } {
+  ): { nodes: SearchableEntry[]; candidateNodes?: SearchableEntry[]; error?: string } {
     const anchors = this.resolveInNodes(
       snapshot,
       selector.sibling!,
@@ -397,7 +514,50 @@ export class ElementResolver {
     if (anchors.error) {
       return { nodes: [], error: anchors.error };
     }
-    const anchor = this.siblingAnchor(anchors, snapshot);
+    const anchorAlreadyDisambiguated =
+      selector.sibling!.index !== undefined || selector.sibling!.selectionStrategy !== undefined;
+    const shouldPoolAmbiguousAnchors =
+      !anchorAlreadyDisambiguated &&
+      selector.selectionStrategy === "random" &&
+      selector.index === undefined;
+    const selectedAnchors = shouldPoolAmbiguousAnchors ? anchors.candidates : [anchors.chosen];
+    const siblings = new Set<SearchableEntry>();
+    const allSiblings = new Set<SearchableEntry>();
+    for (const chosen of anchors.candidates) {
+      const anchor = this.siblingAnchor({ ...anchors, chosen }, snapshot);
+      for (const sibling of this.siblingsForAnchor(
+        snapshot,
+        nodes,
+        selector,
+        intent,
+        scope,
+        anchor,
+      )) {
+        allSiblings.add(sibling);
+        if (selectedAnchors.includes(chosen)) {
+          siblings.add(sibling);
+        }
+      }
+    }
+    return siblings.size > 0
+      ? {
+          nodes: nodes.filter((node) => siblings.has(node)),
+          candidateNodes:
+            !anchorAlreadyDisambiguated && selector.index === undefined
+              ? nodes.filter((node) => allSiblings.has(node))
+              : undefined,
+        }
+      : { nodes: [], error: "Sibling row not found" };
+  }
+
+  private siblingsForAnchor(
+    snapshot: ResolverSnapshot,
+    nodes: SearchableEntry[],
+    selector: ResolverSelector,
+    intent: ResolutionIntent,
+    scope: SearchableEntry | undefined,
+    anchor: SearchableEntry | undefined,
+  ): SearchableEntry[] {
     let parent = anchor?.parentIndex;
     while (anchor && parent !== undefined) {
       const row = snapshot.nodes[parent];
@@ -411,15 +571,15 @@ export class ElementResolver {
           !isWithin(node, anchor, snapshot.nodes) &&
           !this.crossesCollection(node, row, snapshot.nodes),
       );
-      if (this.match(siblings, selector, intent).matches.length > 0) {
-        return { nodes: siblings };
+      if (this.match(siblings, selector, intent, snapshot, scope).matches.length > 0) {
+        return siblings;
       }
       if (row === scope) {
         break;
       }
       parent = row.parentIndex;
     }
-    return { nodes: [], error: "Sibling row not found" };
+    return [];
   }
 
   private crossesCollection(
@@ -458,6 +618,9 @@ export class ElementResolver {
     scope: SearchableEntry | undefined,
     intent: ResolutionIntent,
   ): SearchableEntry {
+    if (intent.action === "focus-input") {
+      return this.actionTarget(node, snapshot, intent, scope) ?? node;
+    }
     if (node.affordances.length > 0) {
       return node;
     }
@@ -467,16 +630,7 @@ export class ElementResolver {
       if (!ancestor || ancestor === scope) {
         break;
       }
-      const targetActions: SearchableEntry["affordances"][number][] =
-        intent.action === "scroll"
-          ? ["scroll"]
-          : intent.action === "inspect"
-            ? ["tap", "toggle"]
-            : intent.action === "long-press"
-              ? ["long-press"]
-              : intent.action === "input" || intent.action === "focus"
-                ? ["input"]
-                : ["tap", "scroll"];
+      const targetActions = semanticActionsForIntent(intent);
       if (
         ancestor.bounds &&
         targetActions.some((action) => ancestor.affordances.includes(action))
@@ -516,9 +670,17 @@ export class ElementResolver {
     nodes: SearchableEntry[],
     selector: ResolverSelector,
     intent: ResolutionIntent,
+    snapshot: ResolverSnapshot,
+    scope?: SearchableEntry,
   ): Pick<ElementResolution, "matches" | "matchMode" | "error"> {
     if (selector.elementId !== undefined) {
-      return this.matchId(nodes, selector.elementId, selector.match ?? "exact", intent);
+      return this.matchId(
+        nodes,
+        selector.elementId,
+        selector.match ?? "exact",
+        intent,
+        selector.caseSensitive,
+      );
     }
     if (selector.testTag !== undefined) {
       return {
@@ -545,7 +707,7 @@ export class ElementResolver {
         matchMode: "exact",
       };
     }
-    return this.matchText(nodes, selector, intent, textQuery);
+    return this.matchText(nodes, selector, intent, textQuery, snapshot, scope);
   }
 
   private matchText(
@@ -553,6 +715,8 @@ export class ElementResolver {
     selector: ResolverSelector,
     intent: ResolutionIntent,
     textQuery: string,
+    snapshot: ResolverSnapshot,
+    scope?: SearchableEntry,
   ): Pick<ElementResolution, "matches" | "matchMode" | "error"> {
     const fields = (node: SearchableEntry): readonly string[] =>
       selector.contentDescription !== undefined
@@ -568,7 +732,7 @@ export class ElementResolver {
       fields(node).some((field) => normalize(field, selector.caseSensitive) === query),
     );
     const requested = intent.matchMode ?? selector.match;
-    const eligibleExact = this.hasEligibleExactTextMatch(exact, intent);
+    const eligibleExact = this.hasEligibleExactTextMatch(exact, intent, snapshot, scope);
     const matchMode =
       intent.negative && requested !== "regex"
         ? "exact"
@@ -604,7 +768,18 @@ export class ElementResolver {
     };
   }
 
-  private hasEligibleExactTextMatch(exact: SearchableEntry[], intent: ResolutionIntent): boolean {
+  private hasEligibleExactTextMatch(
+    exact: SearchableEntry[],
+    intent: ResolutionIntent,
+    snapshot: ResolverSnapshot,
+    scope?: SearchableEntry,
+  ): boolean {
+    if (intent.action === "focus-input") {
+      return exact.some(
+        (node) =>
+          eligible(node, intent) || this.focusInputTarget(node, snapshot, intent, scope) !== null,
+      );
+    }
     return intent.action === "input" || intent.action === "focus"
       ? exact.some((node) => eligible(node, intent))
       : exact.length > 0;
@@ -615,6 +790,7 @@ export class ElementResolver {
     query: string,
     matchMode: MatchMode,
     intent: ResolutionIntent,
+    caseSensitive?: boolean,
   ): Pick<ElementResolution, "matches" | "matchMode" | "error"> {
     if (matchMode === "regex") {
       return {
@@ -624,9 +800,12 @@ export class ElementResolver {
       };
     }
     if (matchMode === "contains") {
+      const normalizedQuery = normalize(query, caseSensitive);
       return {
         matches: nodes
-          .filter((node) => node.elementId?.includes(query))
+          .filter((node) =>
+            normalize(node.elementId ?? "", caseSensitive).includes(normalizedQuery),
+          )
           .map((node) => ({ node, kind: "contains" })),
         matchMode,
       };

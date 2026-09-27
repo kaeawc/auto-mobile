@@ -12,12 +12,21 @@ RETRY_MARKER='Starting emulator retry attempt 2.'
 FAILURE_CONCLUSIONS_JQ_DEF='def is_failed_conclusion: ((. // "") | ascii_downcase) as $conclusion | ($conclusion == "failure" or $conclusion == "cancelled" or $conclusion == "timed_out" or $conclusion == "startup_failure");'
 
 usage() {
-  echo "Usage: scripts/ci/classify-failure.sh <run-id>" >&2
+  echo "Usage: scripts/ci/classify-failure.sh <run-id> [--attempt N]" >&2
 }
 
-if [[ "$#" -ne 1 ]]; then
+if [[ "$#" -ne 1 && "$#" -ne 3 ]]; then
   usage
   exit 2
+fi
+
+attempt_args=()
+if [[ "$#" -eq 3 ]]; then
+  if [[ "$2" != --attempt || ! "$3" =~ ^[1-9][0-9]*$ ]]; then
+    usage
+    exit 2
+  fi
+  attempt_args=(--attempt "$3")
 fi
 
 if [[ ! -f "$SIGNATURES" ]]; then
@@ -26,7 +35,7 @@ if [[ ! -f "$SIGNATURES" ]]; then
 fi
 
 run_id="$1"
-run_json="$(gh run view "$run_id" -R "$REPO" --json jobs,headBranch)"
+run_json="$(gh run view "$run_id" -R "$REPO" ${attempt_args[@]+"${attempt_args[@]}"} --json jobs,headBranch)"
 head_branch="$(jq -r '.headBranch // ""' <<< "$run_json")"
 
 lowercase() {

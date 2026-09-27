@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { Element, ElementSelectionResult, ViewHierarchyResult } from "../../../src/models";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
+import { FakeElementSelector } from "../../fakes/FakeElementSelector";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 const STABLE_BOUNDS: Element["bounds"] = { left: 10, top: 20, right: 110, bottom: 70 };
@@ -65,6 +66,142 @@ function stubStabilityDeps(tap: TapOnElement, sequence: StubSequenceEntry[]): vo
     usedParent: false,
   });
 }
+
+async function executeFocusWithDuplicateEmail(
+  flag: "preTapStability" | "ensureTap",
+  moveDuringStability = false,
+) {
+  const clickable: Element = {
+    text: "Email",
+    class: "android.widget.TextView",
+    clickable: true,
+    bounds: { left: 10, top: 20, right: 110, bottom: 70 },
+  };
+  const editable: Element = {
+    text: moveDuringStability ? undefined : "Email",
+    class: "android.widget.EditText",
+    "resource-id": moveDuringStability ? undefined : "com.app:id/email",
+    ...(moveDuringStability ? { "view-id": "s2-initial" } : {}),
+    bounds: { left: 10, top: 80, right: 110, bottom: 130 },
+    focused: false,
+  };
+  const stableEditable = moveDuringStability
+    ? {
+        ...editable,
+        "view-id": "s2-stable",
+        bounds: { left: 80, top: 80, right: 180, bottom: 130 },
+      }
+    : editable;
+  const focused = {
+    ...stableEditable,
+    ...(moveDuringStability ? { "view-id": "s2-focused" } : {}),
+    ...(moveDuringStability ? { text: "Email" } : {}),
+    focused: true,
+  };
+  const before: ViewHierarchyResult = { hierarchy: { node: [clickable, editable] } };
+  const stableHierarchy: ViewHierarchyResult = {
+    hierarchy: { node: [clickable, stableEditable] },
+  };
+  const after: ViewHierarchyResult = { hierarchy: { node: [clickable, focused] } };
+  const selector = new FakeElementSelector();
+  const selectionIntents: string[] = [];
+  selector.selectByText = (hierarchy, _text, options) => {
+    const intent = options?.selectionIntent ?? "tap";
+    selectionIntents.push(intent);
+    const element =
+      intent === "focus-input"
+        ? hierarchy === after
+          ? focused
+          : hierarchy === stableHierarchy
+            ? stableEditable
+            : editable
+        : clickable;
+    const matchedElement =
+      moveDuringStability && intent === "focus-input"
+        ? ({ text: hierarchy === stableHierarchy ? "Email" : "Stale label" } as Element)
+        : undefined;
+    return { element, matchedElement, indexInMatches: 0, totalMatches: 1, strategy: "first" };
+  };
+  const timer = new FakeTimer();
+  timer.enableAutoAdvance();
+  const tap = new TapOnElement(
+    { name: "test-device", platform: "android", deviceId: "emulator-5554" } as any,
+    new FakeAdbClient() as any,
+    {
+      timer,
+      elementSelector: selector,
+      tapStrategy: {
+        isAccessibilityServiceEnabled: async () => false,
+        shouldRunPreTapStability: (options: { preTapStability?: boolean }) =>
+          Boolean(options.preTapStability),
+      } as any,
+      selectionStateTracker: { finalize: async () => [] } as any,
+    },
+  );
+  const tapped: Element[] = [];
+  (tap as any).observedInteraction = async (
+    action: (observation: { viewHierarchy: ViewHierarchyResult }) => Promise<object>,
+  ) => ({ ...(await action({ viewHierarchy: before })), observation: { viewHierarchy: after } });
+  (tap as any).refreshViewHierarchy = async () => (moveDuringStability ? stableHierarchy : before);
+  (tap as any).executeAndroidTap = async (
+    _action: string,
+    _x: number,
+    _y: number,
+    _duration: number,
+    element: Element,
+  ) => {
+    tapped.push(element);
+  };
+  (tap as any).retryTapIfNoChange = async () => {};
+  (tap as any).prepareSelectionCapture = async () => null;
+  (tap as any).deriveTapEffectAfterPostTapObservation = async (
+    _previous: unknown,
+    observation: unknown,
+  ) => ({ observation });
+  (tap as any).captureTerminalObservationScreenshot = async () => {};
+  (tap as any).recordDeferredPredictionOutcome = async () => {};
+  (tap as any).enforceFreshnessConsistencyWithEffect = () => {};
+
+  const result = await tap.execute({ text: "Email", action: "focus", index: 0, [flag]: true });
+  return { result, tapped, clickable, editable, stableEditable, selectionIntents };
+}
+
+describe("focus intent through pre-tap stability", () => {
+  test("preserves focus-input intent through preTapStability re-resolution so the editable field is tapped, not its clickable peer (PR #7780 review)", async () => {
+    const { result, tapped, editable, selectionIntents } =
+      await executeFocusWithDuplicateEmail("preTapStability");
+
+    expect(selectionIntents).toEqual(["focus-input", "focus-input", "focus-input"]);
+    expect(tapped).toEqual([editable]);
+    expect(result.element).toBe(editable);
+    expect(result.focusVerified).toBe(true);
+    expect(result.success).toBe(true);
+  });
+
+  test("preserves focus-input intent through ensureTap re-resolution so the editable field is tapped, not its clickable peer (PR #7780 review)", async () => {
+    const { result, tapped, editable, selectionIntents } =
+      await executeFocusWithDuplicateEmail("ensureTap");
+
+    expect(selectionIntents).toEqual(["focus-input", "focus-input", "focus-input"]);
+    expect(tapped).toEqual([editable]);
+    expect(result.element).toBe(editable);
+    expect(result.focusVerified).toBe(true);
+    expect(result.success).toBe(true);
+  });
+
+  test.each(["preTapStability", "ensureTap"] as const)(
+    "verifies the refreshed Compose field after horizontal movement with %s (#7800)",
+    async (flag) => {
+      const { result, tapped, stableEditable } = await executeFocusWithDuplicateEmail(flag, true);
+
+      expect(tapped).toEqual([stableEditable]);
+      expect(result.selectedElement?.bounds.left).toBe(stableEditable.bounds.left);
+      expect(result.selectedElement?.bounds.right).toBe(stableEditable.bounds.right);
+      expect(result.focusVerified).toBe(true);
+      expect(result.success).toBe(true);
+    },
+  );
+});
 
 describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
   test("text selection may move even when its row has a generated view ID", async () => {

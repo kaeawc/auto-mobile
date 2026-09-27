@@ -1871,7 +1871,7 @@ describe("booted device readiness", () => {
       expect(exhausted?.recovery).toEqual({
         state: "exhausted",
         attempts: 3,
-        reason: "xcodebuild startup timeout",
+        reason: "CtrlProxy restart failed",
       });
       const description = describeDevice({ kind: "booted", device, serviceStatus: exhausted });
       expect(description.runtime.readiness.state).toBe("not_ready");
@@ -1887,6 +1887,76 @@ describe("booted device readiness", () => {
         timer,
       );
       expect(idle?.recovery).toBeUndefined();
+    } finally {
+      installed.mockRestore();
+      running.mockRestore();
+      IOSCtrlProxyManager.resetInstances();
+    }
+  });
+
+  test("reads iOS recovery after pending version lookup settles", async () => {
+    const timer = new FakeTimer();
+    const device: BootedDevice = {
+      name: "iPhone",
+      platform: "ios",
+      deviceId: "00000000-0000-0000-0000-000000007735",
+      source: "local",
+    };
+    const manager = IOSCtrlProxyManager.getInstance(device, timer);
+    const budget = manager.getForcedRestartBudget();
+    const installed = spyOn(IOSCtrlProxyManager.prototype, "isInstalled").mockResolvedValue(true);
+    const running = spyOn(IOSCtrlProxyManager.prototype, "isRunning").mockResolvedValue(false);
+    let releaseVersion!: () => void;
+    let enteredVersion!: () => void;
+    const versionEntered = new Promise<void>((resolve) => (enteredVersion = resolve));
+    const pendingVersion = new Promise<undefined>((resolve) => {
+      releaseVersion = () => resolve(undefined);
+    });
+    try {
+      const statusPromise = queryDeviceServiceStatus(
+        device,
+        undefined,
+        {
+          getVersion: () => {
+            enteredVersion();
+            return pendingVersion;
+          },
+        },
+        timer,
+      );
+      await versionEntered;
+      budget.suspend("device disappeared from discovery");
+      releaseVersion();
+      expect((await statusPromise)?.recovery?.state).toBe("suspended");
+    } finally {
+      installed.mockRestore();
+      running.mockRestore();
+      IOSCtrlProxyManager.resetInstances();
+    }
+  });
+
+  test("does not expose raw restart exception text in iOS device status", async () => {
+    const timer = new FakeTimer();
+    const device: BootedDevice = {
+      name: "iPhone",
+      platform: "ios",
+      deviceId: "00000000-0000-0000-0000-000000007753",
+      source: "local",
+    };
+    const manager = IOSCtrlProxyManager.getInstance(device, timer);
+    const budget = manager.getForcedRestartBudget();
+    const installed = spyOn(IOSCtrlProxyManager.prototype, "isInstalled").mockResolvedValue(true);
+    const running = spyOn(IOSCtrlProxyManager.prototype, "isRunning").mockResolvedValue(false);
+    try {
+      const token = budget.tryBeginAttempt()!;
+      budget.recordFailure(`/private/secret/path ${"s".repeat(1000)}`, token);
+      const status = await queryDeviceServiceStatus(
+        device,
+        undefined,
+        { getVersion: async () => undefined },
+        timer,
+      );
+      expect(status?.recovery?.reason).toBe("CtrlProxy restart failed");
     } finally {
       installed.mockRestore();
       running.mockRestore();

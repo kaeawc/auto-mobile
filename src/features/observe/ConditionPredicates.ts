@@ -53,6 +53,63 @@ function elements(result: ElementResolution | undefined): Element[] {
   return result?.matches.flatMap(({ node }) => (node.element ? [node.element] : [])) ?? [];
 }
 
+function diagnosticCandidates(
+  resolver: ConditionResolver,
+  observation: ObserveResult,
+  selector: ConditionSelector & { match: "contains"; caseSensitive?: boolean },
+): Element[] | undefined {
+  if (!observation.viewHierarchy) {
+    return undefined;
+  }
+  const result = resolver.resolve(
+    {
+      id: String(observation.updatedAt ?? "wait"),
+      nodes: new SearchableHierarchy().project(observation.viewHierarchy),
+    },
+    selector,
+    { action: "inspect", matchMode: "contains" },
+  );
+  return result.error ? undefined : elements(result);
+}
+
+function idWaitCandidates(
+  resolver: ConditionResolver,
+  observation: ObserveResult,
+  selector: ConditionSelector,
+  result: ElementResolution | undefined,
+  fallback: Element[],
+): Element[] {
+  if (result?.chosen || selector.elementId === undefined) {
+    return fallback;
+  }
+  return (
+    diagnosticCandidates(resolver, observation, { ...selector, match: "contains" }) ?? fallback
+  );
+}
+
+function textWaitCandidates(
+  resolver: ConditionResolver,
+  observation: ObserveResult,
+  expected: string,
+  container: ConditionSelector["container"],
+  result: ElementResolution,
+  matched: boolean,
+  hasElementId: boolean,
+): Element[] {
+  const fallback = elements(result);
+  if (matched || hasElementId) {
+    return fallback;
+  }
+  return (
+    diagnosticCandidates(resolver, observation, {
+      text: expected,
+      container,
+      match: "contains",
+      caseSensitive: true,
+    }) ?? fallback
+  );
+}
+
 function ownsSelectorText(
   selected: ElementResolution["chosen"] | undefined,
   text: string | undefined,
@@ -102,20 +159,13 @@ export function appear(
       result?.matches
         .flatMap(({ node, sourceNodes }) => sourceNodes ?? [node])
         .filter((node) => ownsSelectorText(node, selector.text)) ?? [];
-    let candidates = sources.flatMap((node) => (node.element ? [node.element] : []));
-    if (!result?.chosen && selector.elementId !== undefined && observation.viewHierarchy) {
-      const diagnostic = resolver.resolve(
-        {
-          id: String(observation.updatedAt ?? "wait"),
-          nodes: new SearchableHierarchy().project(observation.viewHierarchy),
-        },
-        { ...selector, match: "contains" },
-        { action: "inspect", matchMode: "contains" },
-      );
-      if (!diagnostic.error) {
-        candidates = elements(diagnostic);
-      }
-    }
+    const candidates = idWaitCandidates(
+      resolver,
+      observation,
+      selector,
+      result,
+      sources.flatMap((node) => (node.element ? [node.element] : [])),
+    );
     const source = boundedMatchedSource(result, selector);
     return {
       matched: Boolean(source),
@@ -153,10 +203,11 @@ export function clickable(
     const actionable = Boolean(
       ownsText && selected?.element && selected.bounds && selected.affordances.includes("tap"),
     );
+    const candidates = idWaitCandidates(resolver, observation, selector, result, elements(result));
     return {
       matched: actionable,
       matchedElement: actionable ? selected?.element : undefined,
-      candidates: elements(result),
+      candidates,
     };
   };
 }
@@ -175,11 +226,12 @@ export function textEquals(
     const container = selector.container?.text
       ? { ...selector.container, match: "contains" as const }
       : selector.container;
+    const snapshot = {
+      id: String(observation.updatedAt ?? "wait"),
+      nodes: projection.project(observation.viewHierarchy),
+    };
     const result = resolver.resolve(
-      {
-        id: String(observation.updatedAt ?? "wait"),
-        nodes: projection.project(observation.viewHierarchy),
-      },
+      snapshot,
       selector.elementId !== undefined
         ? { elementId: selector.elementId, container }
         : { text: expected, container, match: "exact", caseSensitive: true },
@@ -203,7 +255,15 @@ export function textEquals(
     return {
       matched,
       matchedElement: matched ? located?.element : undefined,
-      candidates: elements(result),
+      candidates: textWaitCandidates(
+        resolver,
+        observation,
+        expected,
+        container,
+        result,
+        matched,
+        selector.elementId !== undefined,
+      ),
     };
   };
 }

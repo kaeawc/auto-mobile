@@ -1055,6 +1055,11 @@ export class RunnerReadinessService {
     if (
       context.device.platform !== "android" ||
       !manager?.rebindIfUnhealthy ||
+      // A rebind that already ran can briefly leave dumpsys reporting an
+      // unbound service while its new process starts. Repeating force-stop in
+      // that interval prevents the WebSocket from staying up long enough to
+      // connect (Playground run 36326684647).
+      context.ctrlProxyAccessibilityRebindAttempted ||
       this.dependencies.timer.now() - context.lastCtrlProxyRebindMs <
         CTRL_PROXY_REBIND_RECOVERY_POLL_MS
     ) {
@@ -1117,7 +1122,7 @@ export class RunnerReadinessService {
     context.lastConnectedRecoveryMs = this.dependencies.timer.now();
     context.failedHealthProbesSinceRecovery = 0;
 
-    if (manager.rebindIfUnhealthy) {
+    if (manager.rebindIfUnhealthy && !context.ctrlProxyAccessibilityRebindAttempted) {
       const rebindAttempted = await this.runPhase(context, "runner-health", attempts, () =>
         manager.rebindIfUnhealthy!(),
       );

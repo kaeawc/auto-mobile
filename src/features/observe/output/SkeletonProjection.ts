@@ -1,8 +1,10 @@
 import { foldSearchableLabels, inheritsOwnerLabel } from "../../utility/SearchableLabels";
 import { toSearchable } from "../../utility/SearchableNode";
+import { normalizeQuotes } from "../../utility/TextMatcher";
 import type { Element } from "../../../models/Element";
 import { isTruthy } from "../../../models/Element";
 import { getToggleContentDescription } from "../../../utils/elementProperties";
+import { serverConfig } from "../../../utils/ServerConfig";
 import type { Affordance, ObserveResult, SkeletonElement } from "../../../models/ObserveResult";
 import {
   ElementProvenance,
@@ -443,10 +445,13 @@ function toSkeletonEntry(acc: SkeletonAccumulator): SkeletonElement {
   return entry;
 }
 
-/** Preserve the live selector's main-root-first traversal order for duplicate indexes. */
+/** Rank duplicate indexes by the live selector's topmost-window-first order. */
 function byHierarchyOrder(a: SkeletonAccumulator, b: SkeletonAccumulator): number {
   if (a.provenance && b.provenance) {
-    return a.provenance.enter - b.provenance.enter;
+    return (
+      (a.provenance.windowRank ?? Infinity) - (b.provenance.windowRank ?? Infinity) ||
+      a.provenance.enter - b.provenance.enter
+    );
   }
   return byReadingOrder(a, b);
 }
@@ -456,14 +461,46 @@ function byHierarchyOrder(a: SkeletonAccumulator, b: SkeletonAccumulator): numbe
  * `elementId` repeats within this skeleton, so a client can disambiguate with
  * `tapOn({ selector: { elementId }, index: entry.index })` instead of
  * guessing against the undocumented default `selectionStrategy: "first"`.
- * Entries with a unique `elementId` (including all entries with no
- * `elementId` at all) are left untouched — no spurious `index` on the common
- * case. See {@link byHierarchyOrder} for why ranking by `enter` reproduces
+ * Id-less rows with repeated labels also receive a text-selector index.
+ * See {@link byHierarchyOrder} for why ranking by window then `enter` reproduces
  * `tapOn.index` verbatim.
  */
-function assignDuplicateIndexes(entries: SkeletonAccumulator[]): void {
+function isSelectableForReplay(
+  entry: SkeletonAccumulator,
+  viewport: Pick<ObserveResult["screenSize"], "width" | "height"> | undefined,
+): boolean {
+  const [left, top, right, bottom] = entry.bounds;
+  const x = (left + right) / 2;
+  const y = (top + bottom) / 2;
+  return (
+    right > left &&
+    bottom > top &&
+    entry.affordances.size > 0 &&
+    (serverConfig.isRawElementSearchEnabled() ||
+      !viewport ||
+      viewport.width <= 0 ||
+      viewport.height <= 0 ||
+      (x >= 0 && y >= 0 && x <= viewport.width && y <= viewport.height))
+  );
+}
+
+function assignDuplicateIndexes(
+  entries: SkeletonAccumulator[],
+  viewport: Pick<ObserveResult["screenSize"], "width" | "height"> | undefined,
+): void {
   const byElementId = new Map<string, SkeletonAccumulator[]>();
+  const byLabel = new Map<string, SkeletonAccumulator[]>();
   for (const entry of entries) {
+    // Mirror tap selection's visible-bounds and affordance gate before indexing.
+    if (!isSelectableForReplay(entry, viewport)) {
+      continue;
+    }
+    if (entry.label !== undefined) {
+      const label = normalizeQuotes(entry.label).trim().toLowerCase();
+      const group = byLabel.get(label) ?? [];
+      group.push(entry);
+      byLabel.set(label, group);
+    }
     if (entry.elementId === undefined) {
       continue;
     }
@@ -481,6 +518,17 @@ function assignDuplicateIndexes(entries: SkeletonAccumulator[]): void {
     group.sort(byHierarchyOrder);
     group.forEach((entry, position) => {
       entry.index = position;
+    });
+  }
+  for (const group of byLabel.values()) {
+    if (group.length < 2) {
+      continue;
+    }
+    group.sort(byHierarchyOrder);
+    group.forEach((entry, position) => {
+      if (entry.elementId === undefined) {
+        entry.index = position;
+      }
     });
   }
 }
@@ -963,7 +1011,10 @@ export interface SkeletonProjectionResult {
  * 2) runs only over the actionable set — a non-actionable duplicate is not
  * something a client will ever need to disambiguate for `tapOn`.
  */
-export function projectSkeleton(elements: ObserveElements): SkeletonProjectionResult {
+export function projectSkeleton(
+  elements: ObserveElements,
+  viewport?: Pick<ObserveResult["screenSize"], "width" | "height">,
+): SkeletonProjectionResult {
   const ime = detectImeWindow(elements);
   const accumulators = accumulateByIdentity(elements, ime);
   const clickable = accumulators.filter((acc) => acc.affordances.has("tap"));
@@ -989,7 +1040,7 @@ export function projectSkeleton(elements: ObserveElements): SkeletonProjectionRe
   // actionable set, not the pre-filter accumulators — a duplicate suppressed by
   // the keep rule (e.g. folded/hoisted text) must not consume an index slot a
   // client will never see.
-  assignDuplicateIndexes(actionable);
+  assignDuplicateIndexes(actionable, viewport);
 
   return {
     // Report only observed IME identity; missing capture evidence does not mean hidden.

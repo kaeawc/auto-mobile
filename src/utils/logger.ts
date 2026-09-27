@@ -228,6 +228,11 @@ const deferReopenUntilClose = (stream: fs.WriteStream, timer: Timer = defaultTim
     previous.timer.clearTimeout(previous.timeoutHandle);
     stream.off("close", previous.onClose);
   }
+  // A permanent stream error can follow a drain timeout that already armed
+  // this barrier with a caller-injected timer. Keep that ownership when the
+  // error handler re-arms it with the default timer; explicit callers can
+  // still transfer the barrier by passing their own timer.
+  const barrierTimer = previous && timer === defaultTimer ? previous.timer : timer;
   const onClose = (): void => {
     const entry = unconfirmedCloses.get(stream);
     if (entry?.onClose === onClose) {
@@ -236,8 +241,8 @@ const deferReopenUntilClose = (stream: fs.WriteStream, timer: Timer = defaultTim
       unconfirmedCloses.delete(stream);
     }
   };
-  const timeoutHandle = timer.setTimeout(onClose, CLOSE_LOG_STREAM_TIMEOUT_MS);
-  unconfirmedCloses.set(stream, { timer, timeoutHandle, onClose });
+  const timeoutHandle = barrierTimer.setTimeout(onClose, CLOSE_LOG_STREAM_TIMEOUT_MS);
+  unconfirmedCloses.set(stream, { timer: barrierTimer, timeoutHandle, onClose });
   stream.once("close", onClose);
 };
 

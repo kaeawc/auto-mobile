@@ -968,10 +968,15 @@ function confirmsPostTapPackage(
   );
 }
 
+/**
+ * Selects the requested Android link handler and fails unless the chooser
+ * reports success and, when needed, a fresh hierarchy confirms the package.
+ */
 export async function selectAndroidOpenLinkChooser(
   device: BootedDevice,
   packageName: string,
   opened: OpenURLResult,
+  url?: string,
   chooser: Pick<HandleIntentChooser, "execute"> = new HandleIntentChooser(device),
 ): Promise<OpenURLResult> {
   if (device.platform !== "android") {
@@ -980,7 +985,7 @@ export async function selectAndroidOpenLinkChooser(
   if (!opened.success) {
     return opened;
   }
-  const selection = await chooser.execute("custom", packageName);
+  const selection = await chooser.execute("custom", packageName, url);
   if (!selection.detected || !selection.success) {
     return {
       ...opened,
@@ -2518,7 +2523,7 @@ export function registerInteractionTools() {
     const openUrl = new OpenURL(device);
     const opened = await openUrl.execute(args.url);
     const result = args.chooserAppPackage
-      ? await selectAndroidOpenLinkChooser(device, args.chooserAppPackage, opened)
+      ? await selectAndroidOpenLinkChooser(device, args.chooserAppPackage, opened, opened.url)
       : opened;
     const iosClient = device.platform === "ios" ? IOSCtrlProxyClient.getInstance(device) : null;
     const acceptedOpenAlert =

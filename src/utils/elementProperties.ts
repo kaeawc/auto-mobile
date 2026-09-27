@@ -84,6 +84,7 @@ export function isCollectionElementProperties(props: Record<string, unknown>): b
       "CollectionView",
       "TableView",
       "ViewPager",
+      "ViewPager2",
     ].some((name) => className.endsWith(name))
   );
 }

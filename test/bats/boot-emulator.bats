@@ -111,11 +111,13 @@ MOCK
   run env TIMEOUT_COMMANDS_FILE="$timeout_commands_file" bash "$(pwd)/scripts/android/collect-emulator-diagnostics.sh" "$diagnostics_dir" "test failure"
 
   [ "$status" -eq 0 ]
-  [ "$(wc -l < "$timeout_commands_file" | tr -d '[:space:]')" -eq 6 ]
+  [ "$(wc -l < "$timeout_commands_file" | tr -d '[:space:]')" -eq 8 ]
   grep -Fqx 'adb devices -l' "$timeout_commands_file"
   grep -Fqx 'adb -s emulator-5554 shell getprop' "$timeout_commands_file"
   grep -Fqx 'adb -s emulator-5554 shell ps -A' "$timeout_commands_file"
   grep -Fqx 'adb -s emulator-5554 shell dumpsys activity services' "$timeout_commands_file"
+  grep -Fqx 'adb -s emulator-5554 shell dumpsys accessibility' "$timeout_commands_file"
+  grep -Fqx 'adb -s emulator-5554 forward --list' "$timeout_commands_file"
   grep -Fqx 'adb -s emulator-5554 shell dumpsys package dev.jasonpearson.automobile.ctrlproxy' "$timeout_commands_file"
   grep -Fqx 'adb -s emulator-5554 logcat -d -v threadtime' "$timeout_commands_file"
   rm -rf "$diagnostics_dir"

@@ -1728,7 +1728,7 @@ describe("RunnerReadinessService", () => {
     expect(manager.rebindCalls).toBe(1);
   });
 
-  test("retries a still-unhealthy accessibility-service rebind after the throttle interval", async () => {
+  test("does not force-stop a rebinding service again while waiting for its WebSocket", async () => {
     const manager = new FakeAndroidManager();
     manager.rebindIfUnhealthy = async () => {
       manager.rebindCalls++;
@@ -1748,7 +1748,8 @@ describe("RunnerReadinessService", () => {
       }),
     ).rejects.toThrow(/accessibility service was crashed or unbound; rebind attempted/);
 
-    expect(manager.rebindCalls).toBeGreaterThan(1);
+    expect(manager.rebindCalls).toBe(1);
+    expect(client.connectionCalls).toBeGreaterThan(1);
     expect(timer.now()).toBeLessThanOrEqual(2_500);
   });
 
@@ -1806,6 +1807,30 @@ describe("RunnerReadinessService", () => {
 
     expect(manager.rebindCalls).toBe(1);
     expect(manager.restartCalls).toBe(0);
+  });
+
+  test("does not repeatedly rebind after transiently connected health probes fail", async () => {
+    const manager = new FakeAndroidManager();
+    manager.rebindIfUnhealthy = async () => {
+      manager.rebindCalls++;
+      return true;
+    };
+    const client = new FakeReadinessClient();
+    client.connected = true;
+    client.healthResults = Array(20).fill(false);
+    const { service } = createService({ androidManager: manager, androidClient: client });
+
+    await expect(
+      service.ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "platform=android",
+        totalDeadlineMs: 2_500,
+        readinessTimeoutMs: 2_500,
+      }),
+    ).rejects.toThrow(/phase=runner-health/);
+
+    expect(manager.rebindCalls).toBe(1);
+    expect(client.healthCalls).toBeGreaterThan(2);
   });
 
   test("restarts the CtrlProxy process exactly once when the binding is healthy but unresponsive", async () => {

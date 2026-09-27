@@ -74,6 +74,16 @@ export function boundsNearlyEqual(a: ElementBounds, b: ElementBounds, epsilonPx:
   );
 }
 
+/** True when the horizontal edges differ by at most epsilonPx (screen px). */
+export function horizontalExtentNearlyEqual(
+  a: ElementBounds,
+  b: ElementBounds,
+  epsilonPx: number,
+): boolean {
+  const e = Math.max(0, epsilonPx);
+  return Math.abs(a.left - b.left) <= e && Math.abs(a.right - b.right) <= e;
+}
+
 export function boundsArea(bounds: ElementBounds): number {
   return Math.max(0, bounds.right - bounds.left) * Math.max(0, bounds.bottom - bounds.top);
 }

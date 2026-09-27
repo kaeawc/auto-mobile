@@ -5,6 +5,8 @@ import type { ViewHierarchyNode } from "../../../models/ViewHierarchyResult";
 import { projectSkeleton, projectSkeletonElement } from "./SkeletonProjection";
 import { capLayoutWarnings } from "../audits/SafeAreaAuditor";
 import { captureFidelityTruncationReasons } from "../truncationReasons";
+import { parseBounds } from "../../../utils/bounds";
+import { normalizeQuotes } from "../../utility/TextMatcher";
 
 /**
  * Output-only shrinking of a single `ObserveResult` for serialization
@@ -541,22 +543,23 @@ function deriveDiffSelector(
  * unique selector is left out, mirroring the skeleton's "no spurious index on the
  * common case" rule.
  *
- * Scoped to the positional-match `changed` path only: content-identity
- * re-paired `changed` entries (`repairByContentIdentity` /
- * `repairByIosStableIdentity`) already require a UNIQUE content key among
- * leftovers on both sides to re-pair at all, so they are inherently
- * unambiguous and need no occurrence index.
+ * Also used after content and iOS stable-identity repair: a unique identity
+ * among leftovers can still share a public label with another next-tree node.
  */
 function computeSelectorOccurrenceIndexes(nodes: readonly FlatObserveNode[]): Map<string, number> {
   const byElementId = new Map<string, FlatObserveNode[]>();
   const byLabel = new Map<string, FlatObserveNode[]>();
   for (const node of nodes) {
+    if (!parseBounds(node.attributes.bounds)) {
+      continue;
+    }
     const elementId = diffElementId(node.attributes);
     const label = diffLabel(node.attributes);
     if (label !== undefined) {
-      const group = byLabel.get(label) ?? [];
+      const normalized = normalizeQuotes(label).trim().toLowerCase();
+      const group = byLabel.get(normalized) ?? [];
       group.push(node);
-      byLabel.set(label, group);
+      byLabel.set(normalized, group);
     }
     if (elementId !== undefined) {
       const group = byElementId.get(elementId) ?? [];
@@ -565,10 +568,17 @@ function computeSelectorOccurrenceIndexes(nodes: readonly FlatObserveNode[]): Ma
     }
   }
   const ambiguousEntries = nodes.flatMap((node): [string, number][] => {
+    if (!parseBounds(node.attributes.bounds)) {
+      return [];
+    }
     const elementId = diffElementId(node.attributes);
     const label = diffLabel(node.attributes);
     const group =
-      elementId !== undefined ? byElementId.get(elementId) : label ? byLabel.get(label) : undefined;
+      elementId !== undefined
+        ? byElementId.get(elementId)
+        : label
+          ? byLabel.get(normalizeQuotes(label).trim().toLowerCase())
+          : undefined;
     return group && group.length > 1 ? [[node.pathKey, group.indexOf(node)]] : [];
   });
   return new Map(ambiguousEntries);
@@ -847,6 +857,7 @@ interface FlatObserveNode {
 }
 
 interface DiffRepairNode extends ObserveDiffNode {
+  pathKey: string;
   ancestorClasses: readonly string[];
 }
 
@@ -1318,6 +1329,7 @@ function repairByContentIdentity(
   added: DiffRepairNode[],
   removed: DiffRepairNode[],
   changed: ObserveDiffNodeChange[],
+  occurrenceIndexByPathKey: ReadonlyMap<string, number>,
 ): { added: DiffRepairNode[]; removed: DiffRepairNode[] } {
   const addedByKey = indexByContentKey(added);
   const removedByKey = indexByContentKey(removed);
@@ -1343,7 +1355,10 @@ function repairByContentIdentity(
       changed.push({
         key: addedNode.key,
         fromKey: removedNode.key,
-        selector: deriveDiffSelector(addedNode.attributes),
+        selector: deriveDiffSelector(
+          addedNode.attributes,
+          occurrenceIndexByPathKey.get(addedNode.pathKey),
+        ),
         changes: attrChanges,
       });
     }
@@ -1523,6 +1538,7 @@ function repairByIosStableIdentity(
   added: DiffRepairNode[],
   removed: DiffRepairNode[],
   changed: ObserveDiffNodeChange[],
+  occurrenceIndexByPathKey: ReadonlyMap<string, number>,
 ): { added: DiffRepairNode[]; removed: DiffRepairNode[] } {
   const addedByKey = indexByIosStableKey(added);
   const removedByKey = indexByIosStableKey(removed);
@@ -1543,7 +1559,10 @@ function repairByIosStableIdentity(
       changed.push({
         key: addedNode.key,
         fromKey: removedNode.key,
-        selector: deriveDiffSelector(addedNode.attributes),
+        selector: deriveDiffSelector(
+          addedNode.attributes,
+          occurrenceIndexByPathKey.get(addedNode.pathKey),
+        ),
         changes: attrChanges,
       });
     }
@@ -1677,6 +1696,7 @@ export function diffObserveResult(
     }
     for (let i = paired; i < nextNodes.length; i++) {
       added.push({
+        pathKey: nextNodes[i].pathKey,
         key: nextNodes[i].key,
         attributes: nextNodes[i].attributes,
         ancestorClasses: nextNodes[i].ancestorClasses,
@@ -1684,6 +1704,7 @@ export function diffObserveResult(
     }
     for (let i = paired; i < baseNodes.length; i++) {
       removed.push({
+        pathKey: baseNodes[i].pathKey,
         key: baseNodes[i].key,
         attributes: baseNodes[i].attributes,
         ancestorClasses: baseNodes[i].ancestorClasses,
@@ -1698,11 +1719,16 @@ export function diffObserveResult(
   let finalAdded = added;
   let finalRemoved = removed;
   if (cfg?.contentIdentity !== false) {
-    const repaired = repairByContentIdentity(added, removed, changed);
+    const repaired = repairByContentIdentity(added, removed, changed, occurrenceIndexByPathKey);
     finalAdded = repaired.added;
     finalRemoved = repaired.removed;
     if (isIosObservation(baseline) && isIosObservation(next)) {
-      const iosRepaired = repairByIosStableIdentity(finalAdded, finalRemoved, changed);
+      const iosRepaired = repairByIosStableIdentity(
+        finalAdded,
+        finalRemoved,
+        changed,
+        occurrenceIndexByPathKey,
+      );
       finalAdded = iosRepaired.added;
       finalRemoved = iosRepaired.removed;
     }

@@ -76,8 +76,14 @@ export function isCollectionElementProperties(props: Record<string, unknown>): b
   return (
     isTruthyFlag(props.scrollable) ||
     className === "XCUIElementTypeTable" ||
-    ["RecyclerView", "ListView", "GridView", "ScrollView", "CollectionView", "TableView"].some(
-      (name) => className.endsWith(name),
-    )
+    [
+      "RecyclerView",
+      "ListView",
+      "GridView",
+      "ScrollView",
+      "CollectionView",
+      "TableView",
+      "ViewPager",
+    ].some((name) => className.endsWith(name))
   );
 }

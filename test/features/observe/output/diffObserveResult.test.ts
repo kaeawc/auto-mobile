@@ -211,6 +211,30 @@ describe("diffObserveResult", () => {
     expect(diff.changed[0].selector).toEqual({ elementId: undefined, label: "Remove", index: 1 });
   });
 
+  test("diff selector indices ignore unbounded peers and normalize label case", () => {
+    const unbounded = { "ios-accessibility-label": "Remove" };
+    const bounded = {
+      bounds: { left: 5, top: 55, right: 45, bottom: 95 },
+      clickable: true,
+      "ios-accessibility-label": "Remove",
+    };
+    const singleSelectable = diffObserveResult(
+      iosObs({ node: [unbounded, bounded] }),
+      iosObs({ node: [unbounded, { ...bounded, selected: true }] }),
+    );
+    expect(
+      singleSelectable.changed.find(({ changes }) => changes.selected)?.selector?.index,
+    ).toBeUndefined();
+
+    const first = { ...bounded, bounds: { left: 5, top: 5, right: 45, bottom: 45 } };
+    const second = { ...bounded, "ios-accessibility-label": "REMOVE" };
+    const caseFolded = diffObserveResult(
+      iosObs({ node: [first, second] }),
+      iosObs({ node: [first, { ...second, selected: true }] }),
+    );
+    expect(caseFolded.changed.find(({ changes }) => changes.selected)?.selector?.index).toBe(1);
+  });
+
   test("a changed entry whose elementId AND label repeat elsewhere in `next` gets a disambiguating `index` (PR #6242 review PRRT_kwDOP-GF5M6fq3iI)", () => {
     // Two identical toggle rows sharing both resource-id and label — without an
     // occurrence index, both `changed` entries would emit the SAME selector, so
@@ -1588,6 +1612,21 @@ describe("diffObserveResult", () => {
 });
 
 describe("diffObserveResult — conservative iOS stable identity (#3318)", () => {
+  test("stable-identity repair indexes a duplicate id-less label in the next tree", () => {
+    const field = (top: number, value: string) => ({
+      className: "XCUIElementTypeTextField",
+      "ios-accessibility-label": "Name",
+      bounds: { left: 16, top, right: 300, bottom: top + 40 },
+      value,
+    });
+    const baseline = iosObs({ node: [field(20, "first"), field(120, "before")] });
+    const next = iosObs({ node: [field(20, "first"), field(120, "after")] });
+
+    const diff = diffObserveResult(baseline, next);
+    expect(diff.changed).toHaveLength(1);
+    expect(diff.changed[0].selector).toMatchObject({ label: "Name", index: 1 });
+  });
+
   test("iOS text input edits emit one `changed` entry instead of remove+add", () => {
     const baseline = iosObs({
       "resource-id": "TitleField",

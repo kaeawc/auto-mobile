@@ -963,7 +963,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
         now - capture.lastLivenessProbeMs >= SOURCE_PROBE_AFTER_MS)
     ) {
       try {
-        if (source.requestKeyFrame?.()) {
+        if (source.requestKeyFrame?.("probe")) {
           capture.lastLivenessProbeMs = now;
         }
       } catch (error) {
@@ -991,6 +991,16 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     return (
       Math.max(now - capture.lastSourceDataMs, now - capture.lastEncodedDataMs, 0) <=
       SOURCE_EVIDENCE_MAX_AGE_MS
+    );
+  }
+
+  /** A stalled per-source encoder must not retire a producer shared by other leases. */
+  private producerEvidenceIsStale(capture: DeviceCapture): boolean {
+    const now = this.timer.now();
+    return (
+      (capture.lastSourceDataMs === null ||
+        now - capture.lastSourceDataMs > SOURCE_EVIDENCE_MAX_AGE_MS) &&
+      (capture.lastIdleMs === null || now - capture.lastIdleMs > SOURCE_EVIDENCE_MAX_AGE_MS)
     );
   }
 
@@ -1027,7 +1037,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
       try {
         try {
           if (stale && capture.source?.stopStale) {
-            await capture.source.stopStale();
+            await capture.source.stopStale(this.producerEvidenceIsStale(capture));
           } else {
             await capture.source?.stop();
           }

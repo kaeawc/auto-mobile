@@ -35,6 +35,8 @@ class FakeCaptureSource implements H264CaptureSource {
   started = false;
   stopped = false;
   staleStopped = false;
+  producerStaleOnStop: boolean | null = null;
+  keyFramePurposes: ("viewer" | "probe" | undefined)[] = [];
   startError: Error | null = null;
   stopError: Error | null = null;
   startGate: Promise<void> | null = null;
@@ -68,13 +70,15 @@ class FakeCaptureSource implements H264CaptureSource {
     this.onStopSettled?.();
   }
 
-  async stopStale(): Promise<void> {
+  async stopStale(producerStale?: boolean): Promise<void> {
     this.staleStopped = true;
+    this.producerStaleOnStop = producerStale ?? null;
     await this.stop();
   }
 
-  requestKeyFrame(): boolean {
+  requestKeyFrame(purpose?: "viewer" | "probe"): boolean {
     this.keyFrameRequests++;
+    this.keyFramePurposes.push(purpose);
     if (this.keyFrameRejectionsRemaining > 0) {
       this.keyFrameRejectionsRemaining--;
       return false;
@@ -541,11 +545,16 @@ describe("VideoStreamSocketServer", () => {
     const requestsBeforeProbe = h.sources[0].keyFrameRequests;
     fakeTimer.advanceTime(6_000);
     expect(h.sources[0].keyFrameRequests).toBe(requestsBeforeProbe + 1);
+    expect(h.sources[0].keyFramePurposes).toContain("probe");
     for (let second = 7; second <= 9; second++) {
       h.emitSourceFrame();
       fakeTimer.advanceTime(1_000);
     }
     expect(h.sources[0].keyFrameRequests).toBe(requestsBeforeProbe + 1);
+    h.emitSourceFrame();
+    fakeTimer.advanceTime(1_000);
+    await waitFor(() => h.sources[0].stopped);
+    expect(h.sources[0].producerStaleOnStop).toBe(false);
   });
 
   test("retires a stale capture so a reconnect starts a new source", async () => {

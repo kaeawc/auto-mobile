@@ -493,6 +493,18 @@ describe("IosH264Source", () => {
     expect(helper.stopped).toBe(false);
   });
 
+  test("keeps a shared producer when only this source's encoder is stale", async () => {
+    const { source, helper } = createHarness(IOS_SIMULATOR);
+    let invalidated = false;
+    helper.invalidate = async () => {
+      invalidated = true;
+    };
+    await startWithFrame(source, helper, frame(1, 1, 0x11));
+    await source.stopStale(false);
+    expect(invalidated).toBe(false);
+    expect(helper.stopped).toBe(true);
+  });
+
   test("forwards current helper idle evidence but ignores it after stop", async () => {
     let idleCount = 0;
     const { source, helper } = createHarness(IOS_SIMULATOR, {
@@ -2396,6 +2408,33 @@ describe("IosH264Source", () => {
     expect(source.requestKeyFrame()).toBe(true);
     expect(encoders[1].getStdinData()).toEqual(Buffer.alloc(32, 0x33));
     expect(freshFrames).toBe(1);
+  });
+
+  test("native-idle raw Simulator bootstraps a viewer but not a liveness probe", async () => {
+    let freshFrames = 0;
+    const { source, helper, encoders } = createRestartHarness({
+      device: IOS_SIMULATOR,
+      onSourceFrame: () => freshFrames++,
+    });
+    const started = source.start();
+    await flush();
+    helper.emit("capability", "simulator-idle-evidence");
+    helper.emitFrame(frame(2, 2, 0x33));
+    await started;
+    emitIdr(encoders[0]);
+    await flush();
+    expect(source.requestKeyFrame("viewer")).toBe(true);
+    expect(encoders[1].getStdinData()).toEqual(Buffer.alloc(32, 0x33));
+    expect(freshFrames).toBe(1);
+  });
+
+  test("raw Simulator liveness probes never replay cached pixels", async () => {
+    const { source, helper, encoders } = createRestartHarness({ device: IOS_SIMULATOR });
+    await startWithFrame(source, helper, frame(2, 2, 0x33));
+    emitIdr(encoders[0]);
+    await flush();
+    expect(source.requestKeyFrame("probe")).toBe(true);
+    expect(encoders[1].getStdinData()).toEqual(Buffer.alloc(0));
   });
 
   test("escalates the outgoing encoder to SIGKILL when it ignores SIGTERM within the grace window", async () => {

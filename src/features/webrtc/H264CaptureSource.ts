@@ -96,7 +96,7 @@ export interface H264CaptureSource {
   /** Stop capturing and release device-side resources. */
   stop(): Promise<void>;
   /** Retire a stalled source without retaining any warm capture helper for reconnect. */
-  stopStale?(): Promise<void>;
+  stopStale?(producerStale?: boolean): Promise<void>;
   /**
    * Ask the encoder to emit a fresh IDR as soon as possible, in response to a
    * downstream keyframe request (WHEP viewer PLI relayed through the publisher).
@@ -104,7 +104,7 @@ export interface H264CaptureSource {
    * rely on the periodic IDR interval. Implementations must be safe to call
    * frequently (throttle internally) and before/after the stream is running.
    */
-  requestKeyFrame?(): boolean;
+  requestKeyFrame?(purpose?: "viewer" | "probe"): boolean;
   /** Optional precise encoder telemetry for the stream-status control plane. */
   getTelemetry?(): H264CaptureSourceTelemetry;
 }

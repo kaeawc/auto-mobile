@@ -699,8 +699,8 @@ export class IosH264Source implements H264CaptureSource {
     await this.beginTeardown();
   }
 
-  async stopStale(): Promise<void> {
-    this.invalidateHelperOnStop = true;
+  async stopStale(producerStale: boolean = true): Promise<void> {
+    this.invalidateHelperOnStop = producerStale;
     await this.stop();
   }
 
@@ -734,8 +734,10 @@ export class IosH264Source implements H264CaptureSource {
    * encoder emits its first IDR (that encoder will already satisfy the request)
    * or after the source has stopped.
    */
-  requestKeyFrame(): boolean {
-    return this.mode === "encoded" ? this.requestEncodedKeyFrame() : this.requestRawKeyFrame();
+  requestKeyFrame(purpose: "viewer" | "probe" = "viewer"): boolean {
+    return this.mode === "encoded"
+      ? this.requestEncodedKeyFrame()
+      : this.requestRawKeyFrame(purpose);
   }
 
   /**
@@ -767,7 +769,7 @@ export class IosH264Source implements H264CaptureSource {
    * Raw-path keyframe request: ffmpeg cannot be signalled for a mid-stream IDR
    * over a pipe, so restart the encoder (its first output is SPS/PPS + IDR).
    */
-  private requestRawKeyFrame(): boolean {
+  private requestRawKeyFrame(purpose: "viewer" | "probe"): boolean {
     const oldEncoder = this.encoder;
     const size = this.encoderSize;
     if (
@@ -794,14 +796,10 @@ export class IosH264Source implements H264CaptureSource {
     this.pendingFrames.clear(true);
     this.reportFrameMetrics();
     this.startEncoder(size, true);
-    // A released raw Simulator helper cannot attest idle or force a native frame.
-    // Feed its last BGRA image through the new encoder to bootstrap a late viewer;
-    // this is viewer setup, not a fresh producer frame or liveness evidence.
-    if (
-      this.captureKind === "simulator" &&
-      !this.nativeIdleCapabilityConfirmed &&
-      this.latestLegacyFrame
-    ) {
+    // A raw Simulator helper may be natively idle and unable to force a new frame.
+    // Bootstrap a waiting viewer from cached BGRA, but never use it for a liveness probe.
+    // Neither path reports a fresh producer frame.
+    if (this.captureKind === "simulator" && purpose === "viewer" && this.latestLegacyFrame) {
       this.writeFrameToEncoder(this.latestLegacyFrame);
       this.writeFrameToEncoder(this.latestLegacyFrame);
     }

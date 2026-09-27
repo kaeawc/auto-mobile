@@ -857,6 +857,80 @@ describe("toSkeleton — acceptance criteria", () => {
   });
 
   describe("#6221 item 2: duplicate-id disambiguator", () => {
+    test("long-press-only rows with a shared elementId replay both indexes", () => {
+      const resourceId = "com.example:id/hold";
+      const viewHierarchy = {
+        hierarchy: {
+          node: {
+            bounds: bounds(0, 0, 100, 200),
+            node: [
+              {
+                "resource-id": resourceId,
+                "long-clickable": true,
+                text: "Hold",
+                bounds: bounds(0, 0, 80, 40),
+              },
+              {
+                "resource-id": resourceId,
+                "long-clickable": true,
+                text: "Hold",
+                bounds: bounds(0, 60, 80, 100),
+              },
+            ],
+          },
+        },
+      } as ViewHierarchyResult;
+      const elements = new DefaultObserveElementCollector().collect(viewHierarchy, "android");
+      const rows = projectSkeleton(elements!, { width: 100, height: 200 }).skeleton.filter(
+        (entry) => entry.elementId === resourceId,
+      );
+      expect(rows).toHaveLength(2);
+      expect(rows.map((entry) => entry.affordances)).toEqual([["long-press"], ["long-press"]]);
+      expect(rows.map((entry) => entry.index)).toEqual([0, 1]);
+
+      const selector = new ResolverElementSelector();
+      for (const row of rows) {
+        const result = selector.selectByResourceId(viewHierarchy, resourceId, {
+          index: row.index,
+          intentAction: "long-press",
+        });
+        expect(result.element?.bounds).toEqual(bounds(...row.bounds));
+      }
+    });
+
+    test("scroll-only row before clickable duplicate labels shares resolver positions", () => {
+      const label = "Results";
+      const viewHierarchy = {
+        hierarchy: {
+          node: {
+            bounds: bounds(0, 0, 100, 200),
+            node: [
+              { text: label, scrollable: true, bounds: bounds(0, 0, 80, 40) },
+              { text: label, clickable: true, bounds: bounds(0, 60, 80, 100) },
+              { text: label, clickable: true, bounds: bounds(0, 120, 80, 160) },
+            ],
+          },
+        },
+      } as ViewHierarchyResult;
+      const elements = new DefaultObserveElementCollector().collect(viewHierarchy, "android");
+      const rows = projectSkeleton(elements!, { width: 100, height: 200 })
+        .skeleton.filter((entry) => entry.label === label)
+        .sort((a, b) => a.bounds[1] - b.bounds[1]);
+      expect(rows).toHaveLength(3);
+      expect(rows.map((entry) => entry.affordances)).toEqual([["scroll"], ["tap"], ["tap"]]);
+      expect(rows.map((entry) => entry.index)).toEqual([0, 1, 2]);
+
+      const selector = new ResolverElementSelector();
+      for (const row of rows) {
+        const result = selector.selectByText(viewHierarchy, label, {
+          index: row.index,
+          partialMatch: false,
+          intentAction: row.affordances.includes("scroll") ? "scroll" : "tap",
+        });
+        expect(result.element?.bounds).toEqual(bounds(...row.bounds));
+      }
+    });
+
     test("input-only fields with a shared elementId replay each focus-input index", () => {
       const resourceId = "com.example:id/answer";
       const viewHierarchy = {

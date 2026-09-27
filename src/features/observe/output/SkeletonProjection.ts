@@ -474,9 +474,7 @@ function isSelectableForReplay(
   return (
     right > left &&
     bottom > top &&
-    (entry.affordances.has("tap") ||
-      entry.affordances.has("toggle") ||
-      entry.affordances.has("input")) &&
+    entry.affordances.size > 0 &&
     (!viewport || (x >= 0 && y >= 0 && x <= viewport.width && y <= viewport.height))
   );
 }

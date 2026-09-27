@@ -3,6 +3,7 @@ import {
   DeepLinkManager,
   resolveChooserActivityLabel,
   type ChooserAppMetadata,
+  type ChooserActivityLabelResult,
 } from "../../src/utils/DeepLinkManager";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -12,10 +13,13 @@ const metadata = (
   nodes: unknown[],
   packageName?: string,
   listId?: string,
-  activityLabel?: string | null,
+  activityLabel?: ChooserActivityLabelResult | string | null,
 ): ChooserAppMetadata => ({
   getLabel: async () => label,
-  getActivityLabel: async () => activityLabel ?? null,
+  getActivityLabel: async () =>
+    typeof activityLabel === "string"
+      ? { kind: "literal", label: activityLabel }
+      : (activityLabel ?? { kind: "none" }),
   getFreshHierarchy: async (_device, _factory, minTimestamp) =>
     ({
       ...hierarchy(nodes, listId),
@@ -94,7 +98,7 @@ describe("ADB activity-label lookup", () => {
 
     expect(
       await resolveChooserActivityLabel(adb, "com.android.chrome", "https://example.com"),
-    ).toBe("Open in Chrome");
+    ).toEqual({ kind: "literal", label: "Open in Chrome" });
   });
 
   test("real Chrome query fixture has no activity label despite application label fields", async () => {
@@ -110,7 +114,7 @@ describe("ADB activity-label lookup", () => {
 
     expect(
       await resolveChooserActivityLabel(adb, "com.android.chrome", "https://example.com"),
-    ).toBeNull();
+    ).toEqual({ kind: "none" });
     expect(adb.getExecutedCommands()).toEqual([
       "shell cmd package query-activities -a android.intent.action.VIEW -d 'https://example.com'",
     ]);
@@ -126,7 +130,7 @@ describe("ADB activity-label lookup", () => {
 
     expect(
       await resolveChooserActivityLabel(adb, "com.android.chrome", "example://item?q='x'&v=$HOME"),
-    ).toBe("Open in Browser");
+    ).toEqual({ kind: "literal", label: "Open in Browser" });
     expect(adb.getExecutedCommands()).toEqual([
       "shell cmd package query-activities -a android.intent.action.VIEW -d 'example://item?q='\\''x'\\''&v=$HOME'",
     ]);
@@ -149,7 +153,7 @@ describe("ADB activity-label lookup", () => {
 
     expect(
       await resolveChooserActivityLabel(adb, "com.android.chrome", "https://example.com"),
-    ).toBeNull();
+    ).toEqual({ kind: "none" });
     expect(adb.getExecutedCommands()).toHaveLength(1);
   });
 
@@ -163,7 +167,7 @@ describe("ADB activity-label lookup", () => {
 
     expect(
       await resolveChooserActivityLabel(adb, "com.android.chrome", "https://example.com"),
-    ).toBeNull();
+    ).toEqual({ kind: "none" });
   });
 
   test("does not invent a label for a resource-backed activity", async () => {
@@ -176,7 +180,25 @@ describe("ADB activity-label lookup", () => {
 
     expect(
       await resolveChooserActivityLabel(adb, "com.android.chrome", "https://example.com"),
-    ).toBeNull();
+    ).toEqual({ kind: "resource" });
+  });
+
+  test("keeps a resource-backed ResolveInfo label ahead of a literal ActivityInfo label", async () => {
+    const adb = new FakeAdbExecutor();
+    const query = chromeQueryActivities
+      .replace(
+        "    ActivityInfo:",
+        "    labelRes=0x7f010002 nonLocalizedLabel=null icon=0x7f090311\n    ActivityInfo:",
+      )
+      .replace(
+        "      ApplicationInfo:",
+        "      labelRes=0x7f010001 nonLocalizedLabel=Chrome Activity icon=0x7f090311\n      ApplicationInfo:",
+      );
+    adb.setCommandResponse("query-activities", { stdout: query, stderr: "" } as any);
+
+    expect(
+      await resolveChooserActivityLabel(adb, "com.android.chrome", "https://example.com"),
+    ).toEqual({ kind: "resource" });
   });
 });
 
@@ -205,7 +227,7 @@ async function choose(
   nodes: unknown[],
   label: string | null = null,
   listId?: string,
-  activityLabel?: string | null,
+  activityLabel?: ChooserActivityLabelResult | string | null,
   url?: string,
 ) {
   const adb = new FakeAdbExecutor();
@@ -349,6 +371,66 @@ describe("custom intent chooser label fallback", () => {
     );
     expect(result.success).toBe(true);
     expect(commands).toEqual(["shell input tap 50 120"]);
+  });
+  test("tries the application label after a literal activity label misses every row", async () => {
+    const { result, commands } = await choose(
+      [labelRow("Application Name", 100)],
+      "Application Name",
+      undefined,
+      "Activity Name",
+      "example://item",
+    );
+    expect(result.success).toBe(true);
+    expect(commands).toEqual(["shell input tap 50 120"]);
+  });
+  test("does not retry the application label when the activity label is ambiguous", async () => {
+    const { result, commands } = await choose(
+      [
+        labelRow("Activity Name", 0),
+        labelRow("Activity Name", 50),
+        labelRow("Application Name", 100),
+      ],
+      "Application Name",
+      undefined,
+      "Activity Name",
+      "example://item",
+    );
+    expect(result.error).toContain("Ambiguous chooser rows");
+    expect(commands).toEqual([]);
+  });
+  test("never substitutes the application label for a resource-backed activity", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setDeviceTimestampMs(1000);
+    const query = chromeQueryActivities.replace(
+      "      ApplicationInfo:",
+      "      labelRes=0x7f010001 nonLocalizedLabel=null icon=0x7f090311\n      ApplicationInfo:",
+    );
+    adb.setCommandResponse("query-activities", { stdout: query, stderr: "" } as any);
+    const rows = [labelRow("Application Name", 100)];
+    const manager = new DeepLinkManager(
+      { platform: "android", deviceId: "fake", name: "fake" },
+      adb,
+      null,
+      null,
+      undefined,
+      undefined,
+      {
+        ...metadata("Application Name", rows),
+        getActivityLabel: async (_device, packageName, url, executor) =>
+          resolveChooserActivityLabel(executor, packageName, url),
+      },
+    );
+    const result = await manager.handleIntentChooser(
+      hierarchy(rows) as any,
+      "custom",
+      "com.android.chrome",
+      "example://item",
+    );
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("No exact clickable chooser row");
+    expect(adb.getExecutedCommands()).toEqual([
+      "shell cmd package query-activities -a android.intent.action.VIEW -d 'example://item'",
+    ]);
   });
   test("matches the resolved label exactly and promotes its row", async () => {
     const { result, commands } = await choose(

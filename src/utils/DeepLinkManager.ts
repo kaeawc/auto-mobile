@@ -129,13 +129,18 @@ export interface ChooserAppMetadata {
     packageName: string,
     url: string,
     adb: AdbExecutor,
-  ): Promise<string | null>;
+  ): Promise<ChooserActivityLabelResult>;
   getFreshHierarchy(
     device: BootedDevice,
     adbFactory: AdbClientFactory,
     minTimestamp: number,
   ): Promise<ViewHierarchyResult>;
 }
+
+export type ChooserActivityLabelResult =
+  | { kind: "literal"; label: string }
+  | { kind: "resource" }
+  | { kind: "none" };
 
 class ChooserRowMissingError extends Error {
   capturedAt?: number;
@@ -160,16 +165,28 @@ const UNIQUE_CHOOSER_VIEW_ID = new RegExp(
   `^${STABLE_VIEW_ID_PREFIX}[0-9a-f]{${STABLE_VIEW_ID_HASH_LENGTH}}$`,
 );
 
-function parseQueryActivity(block: string): { packageName: string; label: string | null } | null {
+function parseDumpLabel(fields: RegExpExecArray | null): ChooserActivityLabelResult {
+  const labelRes = fields?.[1];
+  const literal = fields?.[2]?.trim();
+  if (literal !== undefined && literal !== "null") {
+    return { kind: "literal", label: literal };
+  }
+  return labelRes && !/^(?:0x0+|0+)$/i.test(labelRes) ? { kind: "resource" } : { kind: "none" };
+}
+
+function parseQueryActivity(
+  block: string,
+): { packageName: string; label: ChooserActivityLabelResult } | null {
   const activityInfo = /^    ActivityInfo:\s*$/m.exec(block);
   if (!activityInfo) {
     return null;
   }
   const resolveInfoFields = block.slice(0, activityInfo.index);
-  const resolveInfoLabel =
-    /^    labelRes=\S+\s+nonLocalizedLabel=(.*?)(?:\s+(?:icon|banner)=|$)/m
-      .exec(resolveInfoFields)?.[1]
-      .trim() ?? null;
+  const resolveInfoLabel = parseDumpLabel(
+    /^    labelRes=(\S+)\s+nonLocalizedLabel=(.*?)(?:\s+(?:icon|banner)=|$)/m.exec(
+      resolveInfoFields,
+    ),
+  );
   // ApplicationInfo is nested in ActivityInfo's dump but describes the app,
   // not this intent-resolving activity. Its label must never stand in for one.
   const fields = block
@@ -180,11 +197,10 @@ function parseQueryActivity(block: string): { packageName: string; label: string
   if (!name || !packageName) {
     return null;
   }
-  const activityLabel =
-    /^      labelRes=\S+\s+nonLocalizedLabel=(.*?)(?:\s+(?:icon|banner)=|$)/m
-      .exec(fields)?.[1]
-      .trim() ?? null;
-  const label = resolveInfoLabel && resolveInfoLabel !== "null" ? resolveInfoLabel : activityLabel;
+  const activityLabel = parseDumpLabel(
+    /^      labelRes=(\S+)\s+nonLocalizedLabel=(.*?)(?:\s+(?:icon|banner)=|$)/m.exec(fields),
+  );
+  const label = resolveInfoLabel.kind !== "none" ? resolveInfoLabel : activityLabel;
   return { packageName, label };
 }
 
@@ -193,7 +209,7 @@ export async function resolveChooserActivityLabel(
   adb: AdbExecutor,
   packageName: string,
   url: string,
-): Promise<string | null> {
+): Promise<ChooserActivityLabelResult> {
   // Match OpenURL's VIEW action and data; adding a category would change the
   // query from the intent that `am start -a VIEW -d <url>` actually launched.
   try {
@@ -201,7 +217,7 @@ export async function resolveChooserActivityLabel(
       `shell cmd package query-activities -a android.intent.action.VIEW -d ${shellQuote(url)}`,
     );
     if (query.stderr.trim()) {
-      return null;
+      return { kind: "none" };
     }
     const activities = query.stdout
       .split(/^  Activity #\d+:\s*$/m)
@@ -211,15 +227,14 @@ export async function resolveChooserActivityLabel(
     // Several matching activities can carry different labels. Without the
     // resolver's chosen component, claiming one would risk selecting a peer row.
     if (activities.length !== 1) {
-      return null;
+      return { kind: "none" };
     }
-    const label = activities[0]?.label;
-    return label && label !== "null" ? label : null;
+    return activities[0]?.label ?? { kind: "none" };
   } catch (error) {
     // This optional ADB enrichment can be absent on older devices; use the
     // existing application-label lookup when the shell query is unavailable.
     logger.debug(`[DeepLinkManager] Activity-label probe unavailable: ${errorMessage(error)}`);
-    return null;
+    return { kind: "none" };
   }
 }
 
@@ -1407,7 +1422,7 @@ export class DeepLinkManager implements DeepLinkManager {
         );
       }
       const metadata = this.chooserMetadata ?? defaultChooserAppMetadata;
-      const label = await this.resolveChooserLabel(metadata, appPackage, url);
+      const labels = await this.resolveChooserLabels(metadata, appPackage, url);
       const freshHierarchy = await metadata.getFreshHierarchy(
         this.device!,
         this.adbFactory,
@@ -1420,12 +1435,7 @@ export class DeepLinkManager implements DeepLinkManager {
         throw new Error(`Intent chooser disappeared while resolving ${appPackage}.`);
       }
       try {
-        const match = await this.findAppInChooser(
-          this.parser.extractRootNodes(freshHierarchy),
-          appPackage,
-          freshHierarchy.packageName,
-          label,
-        );
+        const match = await this.findChooserLabelCandidates(freshHierarchy, appPackage, labels);
         return { ...match, capturedAt: freshHierarchy.updatedAt };
       } catch (error) {
         if (error instanceof ChooserRowMissingError) {
@@ -1442,24 +1452,53 @@ export class DeepLinkManager implements DeepLinkManager {
     return this.selectUniqueChooserRow(candidates, labelRows, appPackage, false);
   }
 
-  private async resolveChooserLabel(
+  private async findChooserLabelCandidates(
+    hierarchy: ViewHierarchyResult,
+    appPackage: string,
+    labels: string[],
+  ): Promise<ChooserMatch> {
+    const roots = this.parser.extractRootNodes(hierarchy);
+    let missing: ChooserRowMissingError | undefined;
+    for (const label of labels) {
+      try {
+        return await this.findAppInChooser(roots, appPackage, hierarchy.packageName, label);
+      } catch (error) {
+        if (!(error instanceof ChooserRowMissingError)) {
+          throw error;
+        }
+        missing = error;
+      }
+    }
+    if (missing) {
+      throw missing;
+    }
+    return this.selectUniqueChooserRow([], new Map(), appPackage, false);
+  }
+
+  private async resolveChooserLabels(
     metadata: ChooserAppMetadata,
     appPackage: string,
     url?: string,
-  ): Promise<string | null> {
+  ): Promise<string[]> {
+    let activity: ChooserActivityLabelResult = { kind: "none" };
     if (url && metadata.getActivityLabel) {
       try {
-        const label = await metadata.getActivityLabel(this.device!, appPackage, url, this.adbUtils);
-        if (label) {
-          return label;
-        }
+        activity = await metadata.getActivityLabel(this.device!, appPackage, url, this.adbUtils);
       } catch (error) {
         // Optional activity metadata may be unavailable; the application label
         // remains the established best-effort chooser fallback.
         logger.debug(`[DeepLinkManager] Activity label unavailable: ${errorMessage(error)}`);
       }
     }
-    return metadata.getLabel(this.device!, appPackage);
+    if (activity.kind === "resource") {
+      return [];
+    }
+    const application = await metadata.getLabel(this.device!, appPackage);
+    const labels = activity.kind === "literal" ? [activity.label] : [];
+    if (application) {
+      labels.push(application);
+    }
+    return labels;
   }
 
   private selectUniqueChooserRow(

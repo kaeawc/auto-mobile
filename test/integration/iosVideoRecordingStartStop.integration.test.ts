@@ -9,6 +9,7 @@ import { computeBuildIdentity } from "../../src/daemon/buildIdentity";
 import { DaemonClient } from "../../src/daemon/client";
 import {
   CLI_SESSION_LIVENESS_POLICY,
+  CONNECTION_TIMEOUT_MS,
   DAEMON_VERSION,
   DAEMON_HEARTBEAT_METHOD,
   getCliSessionIdleTimeoutMs,
@@ -39,8 +40,12 @@ const DEFAULT_TEST_TIMEOUT_MS = 420000;
 // The daemon's default ownership timeout is 10s. Renew well within that window
 // while CLI calls are doing iOS setup or leaving a recording active.
 const SESSION_HEARTBEAT_INTERVAL_MS = 2_000;
+// Heartbeats use one persistent socket, not a fresh CLI process. Keep this below
+// the 10s ownership deadline so a stalled renewal can be retried in time.
 const SESSION_HEARTBEAT_COMMAND_TIMEOUT_MS = 5_000;
-const SESSION_RELEASE_COMMAND_TIMEOUT_MS = 5_000;
+// In #7803, the daemon never received the release request: a loaded CI runner
+// delayed fresh CLI startup past 5s. Use the client's request budget for it.
+const SESSION_RELEASE_COMMAND_TIMEOUT_MS = CONNECTION_TIMEOUT_MS;
 // The daemon's iOS stop budget already accounts for a flush exceeding the generic
 // 5s window. Tie the CLI deadline to its stop and file-ready budgets, with 10s
 // for CLI startup, ffmpeg postprocessing, and secureFile/stat (#7803).

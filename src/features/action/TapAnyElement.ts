@@ -998,6 +998,7 @@ export class TapAnyElement extends BaseVisualChange {
               if (action === "longPress") {
                 await this.adb.executeCommand(
                   `shell input swipe ${tapPoint.x} ${tapPoint.y} ${tapPoint.x} ${tapPoint.y} ${longPressDuration}`,
+                  resolveTapAnyCtrlProxyTimeoutMs(longPressDuration),
                 );
               } else if (action === "doubleTap") {
                 await this.adb.executeCommand(`shell input tap ${tapPoint.x} ${tapPoint.y}`);

@@ -75,6 +75,9 @@ describe("SharedStorageService", () => {
     const commands = executor.getExecutedCommands();
     expect(commands[0]).toBe("shell am get-current-user");
     expect(commands[1]).toBe("shell rm -rf '/storage/emulated/0/Download/run-42'");
+    expect(
+      executor.getCommandCalls().find((call) => call.command.startsWith("shell rm -rf"))?.timeoutMs,
+    ).toBe(120_000);
     expect(commands).toContain("shell mkdir -p '/storage/emulated/0/Download/run-42'");
     expect(commands).toContain("shell mkdir -p '/storage/emulated/0/Download/run-42/docs'");
     expect(commands).toContain("shell mkdir -p '/storage/emulated/0/Download/run-42/media'");

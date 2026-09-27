@@ -48,7 +48,7 @@ import {
 import { AccessibilityDetector } from "../../utils/interfaces/AccessibilityDetector";
 import { accessibilityDetector as defaultAccessibilityDetector } from "../../utils/AccessibilityDetector";
 import type { ElementSelector } from "../../utils/interfaces/ElementSelector";
-import type { Timer } from "../../utils/SystemTimer";
+import { MAX_SETTIMEOUT_DELAY_MS, type Timer } from "../../utils/SystemTimer";
 import { NodeCryptoService } from "../../utils/crypto";
 import { ViewHierarchy } from "../observe/ViewHierarchy";
 import { serverConfig } from "../../utils/ServerConfig";
@@ -3039,10 +3039,11 @@ export class TapOnElement extends BaseVisualChange {
       }
     }
 
+    const longPressTimeoutMs = Math.min(durationMs + 2_000, MAX_SETTIMEOUT_DELAY_MS);
     try {
       await this.adb.executeCommand(
         `shell input touchscreen swipe ${x} ${y} ${x} ${y} ${durationMs}`,
-        undefined,
+        longPressTimeoutMs,
         undefined,
         undefined,
         signal,
@@ -3051,7 +3052,7 @@ export class TapOnElement extends BaseVisualChange {
       logger.warn(`[TapOnElement] touch input swipe failed, falling back to input swipe: ${error}`);
       await this.adb.executeCommand(
         `shell input swipe ${x} ${y} ${x} ${y} ${durationMs}`,
-        undefined,
+        longPressTimeoutMs,
         undefined,
         undefined,
         signal,

@@ -75,6 +75,13 @@ describe("SharedStorageReadService.list", () => {
       namespace: "run-42",
     });
 
+    expect(
+      executor
+        .getCommandCalls()
+        .filter((call) => call.command.includes("-exec stat") || call.command.includes("sha256sum"))
+        .map((call) => call.timeoutMs),
+    ).toEqual([120_000, 120_000]);
+
     expect(listing).toEqual({
       deviceId: "emulator-5554",
       platform: "android",
@@ -227,6 +234,10 @@ describe("SharedStorageReadService.read", () => {
       namespace: "run-42",
       path: "notes/hi.txt",
     });
+
+    expect(
+      executor.getCommandCalls().find((call) => call.command.includes("base64"))?.timeoutMs,
+    ).toBe(120_000);
 
     expect(result.observation).toBe("complete");
     expect(result.text).toBe("hello");

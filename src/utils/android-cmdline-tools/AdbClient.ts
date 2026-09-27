@@ -32,7 +32,7 @@ import { getAbortSignal } from "../AbortContext";
 import { trackAmbient } from "../PerfContext";
 import { OPERATION_CANCELLED_MESSAGE } from "../constants";
 import { RetryExecutor, defaultRetryExecutor } from "../retry/RetryExecutor";
-import { sequenceBackoff } from "../Backoff";
+import { delayForAttempt, sequenceBackoff } from "../Backoff";
 import { TTLCache } from "../cache/Cache";
 import { SingleFlight } from "../cache/SingleFlight";
 import { Timer, defaultTimer } from "../SystemTimer";
@@ -866,32 +866,82 @@ export class AdbClient implements AdbExecutor {
     );
   }
 
-  /** Shell input (and activity launch) can take effect before adb reports failure. */
-  private isMutatingCommand(commandArgs: string[]): boolean {
-    if (commandArgs[0] !== "shell") {
-      return false;
+  /** Only explicitly known read commands may be replayed after an uncertain dispatch. */
+  private isSafeToRetryCommand(commandArgs: string[], hasDispatchGuard: boolean): boolean {
+    if (commandArgs[0] === "shell") {
+      const payload = commandArgs.slice(1).join(" ").trim();
+      // Keep shell metacharacters out: a read-looking prefix can execute a
+      // second, mutating command through the device shell.
+      if (/[;&`$<>\r\n]/.test(payload)) {
+        return false;
+      }
+      // gfxinfo's reset argument clears counters, unlike its ordinary reads.
+      if (/^dumpsys gfxinfo\b[^|]*\breset\b/.test(payload)) {
+        return false;
+      }
+      if (
+        /^dumpsys (?:window|activity (?:activities|processes)|display|SurfaceFlinger|package|notification|accessibility|meminfo|gfxinfo|user|power|input_method)\b(?: [^|]+)?(?: \| (?:grep|head) (?:"[^"]*"|'[^']*'|[^|"'`$\r\n])+)*$/.test(
+          payload,
+        )
+      ) {
+        return true;
+      }
+      if (payload.includes("|")) {
+        return false;
+      }
+      return [
+        /^(?:getprop|echo)(?: [\w. -]+)?$/,
+        /^wm (?:size|density)$/,
+        /^settings get [^\s]+ [^\s]+$/,
+        /^pm (?:list packages|path)\b(?: .+)?$/,
+        /^cmd package (?:query-activities|query-receivers|resolve-activity)\b(?: .+)?$/,
+        /^cat \/proc\/[^\s]+$/,
+        /^getevent -p$/,
+        /^sha256sum (?:[^\s]+|'[^']+'|"[^"]+")$/,
+        /^stat -c %s (?:[^\s]+|'[^']+'|"[^"]+")$/,
+      ].some((pattern) => pattern.test(payload));
     }
-    // executeCommand packs the shell payload into one argv entry; execute can
-    // pass each word separately. Inspect only the leading shell subcommands.
-    const [shellCommand, subcommand] = commandArgs.slice(1).join(" ").trim().split(/\s+/);
-    return (
-      shellCommand === "input" ||
-      shellCommand === "keyevent" ||
-      shellCommand === "key" ||
-      (shellCommand === "am" && subcommand === "start")
-    );
+    // Deleting a named emulator snapshot is idempotent; its caller checks the
+    // serial's AVD identity again before every dispatch.
+    if (commandArgs[0] === "emu" && hasDispatchGuard) {
+      return (
+        commandArgs.length === 5 &&
+        commandArgs[1] === "avd" &&
+        commandArgs[2] === "snapshot" &&
+        commandArgs[3] === "del"
+      );
+    }
+    return ["devices", "get-state", "get-serialno", "version"].includes(commandArgs[0] ?? "");
   }
 
   private isPreDispatchError(error: Error): boolean {
-    if (this.isMissingExecutableError(error)) {
+    const underlying = error.cause instanceof Error ? error.cause : error;
+    if ((underlying as NodeJS.ErrnoException).code === "ENOENT") {
       return true;
     }
-    const message = error.message.toLowerCase();
+    const stderr = (underlying as Error & { stderr?: string | Buffer }).stderr;
+    // Node's "Command failed: <args>" and wrapCommandError's formatted text
+    // include caller input; only inspect standalone errors or adb stderr.
+    const message = (
+      stderr
+        ? Buffer.isBuffer(stderr)
+          ? stderr.toString()
+          : stderr
+        : underlying.message.startsWith("Command failed:")
+          ? ""
+          : underlying.message
+    )
+      .trim()
+      .toLowerCase()
+      .replace(/^error:\s*/, "");
+    if (message.startsWith("executable not found")) {
+      return true;
+    }
     return [
       "cannot connect to adb",
       "cannot connect to daemon",
       "cannot connect to the daemon",
-    ].some((pattern) => message.includes(pattern));
+    ].some((pattern) => message.startsWith(pattern));
   }
 
   private getAbortError(signal?: AbortSignal): Error {
@@ -1033,9 +1083,14 @@ export class AdbClient implements AdbExecutor {
       },
       {
         maxAttempts: AdbClient.MAX_ADB_RETRIES + 1,
-        // The shared command budget is rechecked before each dispatch, including
-        // after these bounded delays.
-        delays: AdbClient.ADB_RETRY_BACKOFF,
+        // Keep the usual backoff intact, but never sleep past the remaining
+        // whole-command budget. The next dispatch check reports the timeout.
+        delays: (attempt) => {
+          const delay = delayForAttempt(AdbClient.ADB_RETRY_BACKOFF, attempt);
+          const remainingMs =
+            timeoutMs === undefined ? undefined : timeoutMs - (this.timer.now() - startTime);
+          return remainingMs === undefined ? delay : Math.min(delay, Math.max(0, remainingMs));
+        },
         signal: resolvedSignal,
         shouldRetry: (error) => {
           if (resolvedSignal?.aborted) {
@@ -1052,7 +1107,10 @@ export class AdbClient implements AdbExecutor {
             this.notifyMissingDeviceIfNeeded(error, busyAtDispatch);
             return false;
           }
-          return !this.isMutatingCommand(commandArgs) || this.isPreDispatchError(error);
+          return (
+            this.isSafeToRetryCommand(commandArgs, beforeDispatch !== undefined) ||
+            this.isPreDispatchError(error)
+          );
         },
         onRetry: (error, attempt) => {
           logger.debug(

@@ -223,6 +223,86 @@ class TelemetryPushSocketClientTest {
   }
 
   @Test
+  fun `health polls leave an in-flight retry's attempt count intact`() = runTest {
+    val gate = CompletableDeferred<Unit>()
+    var holdRetry = true
+    var opens = 0
+    val client =
+      TelemetryPushSocketClient(
+        {
+          opens++
+          throw IllegalStateException("offline")
+        },
+        { if (holdRetry) gate.await() },
+        backgroundScope,
+        { true },
+      )
+
+    client.connect()
+    runCurrent()
+    assertEquals(1, opens)
+    assertTrue(client.connectionState.replayCache.single() is ConnectionState.Reconnecting)
+    repeat(6) {
+      client.connect()
+      runCurrent()
+    }
+    assertEquals(1, opens)
+    assertEquals(
+      1,
+      (client.connectionState.replayCache.single() as ConnectionState.Reconnecting).attempt,
+    )
+
+    holdRetry = false
+    gate.complete(Unit)
+    runCurrent()
+    assertEquals(TelemetryPushSocketClient.MAX_RECONNECT_ATTEMPTS, opens)
+    assertTrue(client.connectionState.replayCache.single() is ConnectionState.Error)
+    client.dispose()
+  }
+
+  @Test
+  fun `superseded attempt cannot publish or subscribe its late socket`() = runTest {
+    class CountingSocket : TelemetrySocket {
+      var writes = 0
+
+      override fun readLine(): String? = null
+
+      override fun writeLine(line: String) {
+        writes++
+      }
+
+      override fun close() = Unit
+    }
+    val stale = CountingSocket()
+    val replacement = CountingSocket()
+    val sockets = ArrayDeque(listOf(stale, replacement))
+    lateinit var client: TelemetryPushSocketClient
+    var beforePublishCalls = 0
+    client =
+      TelemetryPushSocketClient(
+        { sockets.removeFirst() },
+        { kotlinx.coroutines.awaitCancellation() },
+        backgroundScope,
+        { true },
+        beforeSocketPublish = {
+          if (beforePublishCalls++ == 0) {
+            client.disconnect()
+            client.connect()
+            // Publish B before the canceled A resumes past its earlier ensureActive check.
+            testScheduler.runCurrent()
+            assertEquals(1, replacement.writes)
+          }
+        },
+      )
+
+    client.connect()
+    runCurrent()
+    assertEquals(0, stale.writes)
+    assertEquals(1, replacement.writes)
+    client.dispose()
+  }
+
+  @Test
   fun `reconnect interrupts the old read without closing the new socket`() = runTest {
     val finishInterruptedRead = CountDownLatch(1)
     val firstSocket = SilentFakeSocket(finishInterruptedRead)
@@ -234,15 +314,12 @@ class TelemetryPushSocketClientTest {
     runCurrent()
     firstSocket.readEntered.await()
 
+    client.disconnect()
     client.connect()
     runCurrent()
     firstSocket.readInterrupted.await()
     secondSocket.readEntered.await()
-    try {
-      assertFalse(firstSocket.closed.isCompleted)
-    } finally {
-      finishInterruptedRead.countDown()
-    }
+    finishInterruptedRead.countDown()
     firstSocket.closed.await()
 
     assertEquals(1, firstSocket.closeCount.get())

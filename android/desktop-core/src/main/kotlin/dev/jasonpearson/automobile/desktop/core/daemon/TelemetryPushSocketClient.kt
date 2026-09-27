@@ -81,6 +81,7 @@ internal constructor(
   private val scope: CoroutineScope,
   private val socketAvailable: (String) -> Boolean,
   private val log: Logger = LoggerFactory.getLogger(TelemetryPushSocketClient::class.java),
+  private val beforeSocketPublish: () -> Unit = {},
 ) : TelemetryPushClient {
   constructor() :
     this(
@@ -100,6 +101,8 @@ internal constructor(
 
   private val json = DaemonJson
   private val socket = AtomicReference<TelemetrySocket?>()
+  private val connectionLock = Any()
+  private var connectionGeneration = 0L
   private var connectionJob: Job? = null
   private val loggedFieldMismatches = mutableSetOf<String>()
 
@@ -143,21 +146,19 @@ internal constructor(
    * @param deviceId Optional device ID for server-side filtering. Null subscribes to all devices.
    */
   override fun connect(deviceId: String?) {
-    if (_isConnected) {
-      log.info("Already connected to telemetry push")
-      return
-    }
-
-    subscribedDeviceId = deviceId
-    connectionJob?.cancel()
-    _state.update { ConnectionState.Connecting }
-
-    connectionJob = scope.launch {
-      connectWithRetry()
+    synchronized(connectionLock) {
+      if (_isConnected || connectionJob?.isActive == true) {
+        log.info("Telemetry push connection already active")
+        return
+      }
+      subscribedDeviceId = deviceId
+      val generation = ++connectionGeneration
+      _state.update { ConnectionState.Connecting }
+      connectionJob = scope.launch { connectWithRetry(generation) }
     }
   }
 
-  private suspend fun connectWithRetry() {
+  private suspend fun connectWithRetry(generation: Long) {
     val socketPath = getSocketPath()
     var attempt = 0
 
@@ -171,7 +172,12 @@ internal constructor(
         }
         currentSocket = openSocket(socketPath)
         currentCoroutineContext().ensureActive()
-        socket.set(currentSocket)
+        beforeSocketPublish()
+        synchronized(connectionLock) {
+          // Cancellation may race the last ensureActive check. Only this attempt may publish.
+          if (generation != connectionGeneration) return
+          socket.set(currentSocket)
+        }
 
         // Subscribe to all events (filter client-side)
         subscribe(currentSocket)
@@ -211,11 +217,16 @@ internal constructor(
   private class SocketNotFoundError(message: String) : Exception(message)
 
   override fun disconnect() {
-    val previousState = _state.value
-    _state.update { ConnectionState.Disconnected(null) }
-
-    connectionJob?.cancel()
-    connectionJob = null
+    val previousState: ConnectionState
+    val previousSocket: TelemetrySocket?
+    synchronized(connectionLock) {
+      connectionGeneration++
+      previousState = _state.value
+      _state.update { ConnectionState.Disconnected(null) }
+      connectionJob?.cancel()
+      connectionJob = null
+      previousSocket = socket.getAndSet(null)
+    }
 
     try {
       if (previousState is ConnectionState.Connected && previousState.subscribed) {
@@ -224,12 +235,12 @@ internal constructor(
             id = UUID.randomUUID().toString(),
             command = "unsubscribe",
           )
-        sendRequest(request)
+        sendRequest(request, previousSocket)
       }
     } catch (e: Exception) {
       log.warn("Error disconnecting from telemetry push: ${e.message}")
     }
-    cleanupConnection(socket.getAndSet(null))
+    cleanupConnection(previousSocket)
   }
 
   override fun isConnected(): Boolean = _isConnected

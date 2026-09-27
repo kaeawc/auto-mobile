@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.desktop.core.workspace
 
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -36,6 +37,7 @@ import dev.jasonpearson.automobile.desktop.core.video.VideoStreamClient
 import dev.jasonpearson.automobile.desktop.core.video.VideoStreamQuality
 import dev.jasonpearson.automobile.desktop.core.video.VideoStreamSource
 import dev.jasonpearson.automobile.desktop.core.video.VideoStreamState
+import dev.jasonpearson.automobile.desktop.core.video.isStreamAuthFailure
 import dev.jasonpearson.automobile.desktop.domain.DeviceFrameSnapshot
 import dev.jasonpearson.automobile.desktop.domain.DeviceScreenControlMode
 import kotlinx.coroutines.delay
@@ -184,12 +186,7 @@ fun DeviceStreamView(
       column.deviceId,
       autoReconnect = true,
       streamingEnabled = streamingEnabled,
-      stallReconnectMs =
-        if (heartbeatMs != null || column.platform == Platform.Android) {
-          LIVE_STALL_RECONNECT_MS
-        } else {
-          null
-        },
+      stallReconnectMs = stallReconnectPolicy(column.platform, heartbeatMs),
     )
   // Retain the newest frame ACROSS source swaps, keyed on the device. rememberLiveVideoFrame
   // retains frames across relay drops WITHIN one source, but arming the pane (fps 10→30), a manual
@@ -261,6 +258,18 @@ fun DeviceStreamView(
       screenRecordingSettingsLauncher = screenRecordingSettingsLauncher,
       source = source,
     )
+    retainedStreamStatus(newestFrame != null, state)?.let { status ->
+      Text(
+        status,
+        color = MaterialTheme.colorScheme.onSurface,
+        style = MaterialTheme.typography.bodySmall,
+        textAlign = TextAlign.Center,
+        modifier =
+          Modifier.align(Alignment.BottomCenter)
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.9f))
+            .padding(12.dp),
+      )
+    }
     // Quality overlay: only on the focused pane (controller present) and never over the permission
     // surface (which owns the whole pane while the relay is refused). Collapsed by default so it
     // does
@@ -297,6 +306,12 @@ fun DeviceStreamView(
     }
   }
 }
+
+internal fun stallReconnectPolicy(platform: Platform, heartbeatMs: Long?): Long? =
+  if (heartbeatMs != null || platform == Platform.Android) LIVE_STALL_RECONNECT_MS else null
+
+internal fun retainedStreamStatus(hasFrame: Boolean, state: VideoStreamState): String? =
+  if (hasFrame && state is VideoStreamState.Unavailable) streamStatusHint(state) else null
 
 /**
  * The pane's video surface: permission gate, armed interactive video, or plain mirror/hint. Split
@@ -478,7 +493,11 @@ internal fun streamStatusHint(state: VideoStreamState): String =
         VideoStreamState.UnavailableCause.NO_RELAY ->
           "Live mirroring unavailable\nThis daemon has no video-stream relay. Update or restart the daemon to enable live mirroring."
         VideoStreamState.UnavailableCause.REFUSED ->
-          "Live mirroring refused\n${state.reason}\nCheck the daemon stream-auth setting (AUTOMOBILE_DAEMON_STREAM_AUTH)."
+          if (isStreamAuthFailure(state.reason)) {
+            "Live mirroring refused\n${state.reason}\nCheck the daemon stream-auth setting (AUTOMOBILE_DAEMON_STREAM_AUTH)."
+          } else {
+            "Live mirroring refused\n${state.reason}"
+          }
         VideoStreamState.UnavailableCause.OTHER -> state.reason
       }
   }

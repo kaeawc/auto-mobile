@@ -505,6 +505,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     }
   }
 
+  /** Rearms after removal cleanup only once per removal generation, when suspended or exhausted. */
   public async rearmAfterDeviceReappearance(): Promise<void> {
     const state = this.forcedRestartBudget.snapshot().state;
     const removalGeneration = this.removalGeneration;

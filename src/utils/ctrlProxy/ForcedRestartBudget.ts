@@ -31,6 +31,7 @@ export class ForcedRestartBudget {
     }
   }
 
+  /** Reports the current admission state, including the next retry time while backing off. */
   snapshot(): ForcedRestartSnapshot {
     if (this.suspendedReason !== undefined) {
       return {
@@ -93,6 +94,7 @@ export class ForcedRestartBudget {
     return true;
   }
 
+  /** Suspends admission and invalidates any in-flight attempt token. */
   suspend(reason: string): void {
     this.generation++;
     this.inFlight = false;
@@ -100,6 +102,7 @@ export class ForcedRestartBudget {
     this.nextAttemptAtMs = undefined;
   }
 
+  /** Clears failures and suspension, invalidating any in-flight token so its completion is ignored. */
   rearm(_reason: string): void {
     this.generation++;
     this.inFlight = false;

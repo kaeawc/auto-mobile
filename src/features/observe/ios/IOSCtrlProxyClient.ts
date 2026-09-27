@@ -2355,6 +2355,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     }
   }
 
+  /** Logs a denied restart once per non-idle budget state. */
   private logDeniedRestart(budget: ForcedRestartBudget): void {
     const snapshot = budget.snapshot();
     if (snapshot.state === "idle") {
@@ -2369,6 +2370,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     }
   }
 
+  /** Rechecks boot and retirement before admission; only a failure for this attempt token consumes budget. */
   private async restartServiceIfBooted(
     manager: CtrlProxyIosManager,
     budget: ForcedRestartBudget,

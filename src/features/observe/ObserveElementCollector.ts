@@ -49,10 +49,8 @@ export class DefaultObserveElementCollector implements ObserveElementCollector {
     // root in a single group while each window root gets its own.
     const rootGroups = new Map<number, SearchableEntry[]>();
     const seen = new Set<SearchableEntry["source"]>();
-    const rankedEntries = [...this.searchableHierarchy.project(viewHierarchy)].sort(
-      (a, b) => a.windowRank - b.windowRank || a.index - b.index,
-    );
-    for (const entry of rankedEntries) {
+    // Keep the live selector's main-first order until action consumers migrate.
+    for (const entry of this.searchableHierarchy.project(viewHierarchy)) {
       if (seen.has(entry.source)) {
         continue;
       }

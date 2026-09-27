@@ -28,7 +28,7 @@ export interface HierarchySyncClient {
     disableAllFiltering: boolean,
     signal: AbortSignal | undefined,
     timeoutMs: number,
-  ): Promise<{ hierarchy: unknown } | null>;
+  ): Promise<{ hierarchy: unknown; frameContext?: ViewHierarchyResult["frameContext"] } | null>;
   convertToViewHierarchyResult(hierarchy: unknown): ViewHierarchyResult;
 }
 
@@ -78,6 +78,15 @@ export function createDeviceHierarchyCapture(
         return normalizeIosHierarchy(synced.hierarchy);
       }
       const hierarchy = syncClient.convertToViewHierarchyResult(synced.hierarchy);
+      const updatedAt = (synced.hierarchy as { updatedAt?: number } | null)?.updatedAt;
+      if (typeof updatedAt === "number" && Number.isFinite(updatedAt)) {
+        hierarchy.updatedAt = updatedAt;
+      }
+      hierarchy.receivedAt = timer.now();
+      hierarchy.fresh = true;
+      if (synced.frameContext !== undefined) {
+        hierarchy.frameContext = synced.frameContext;
+      }
       if (!hierarchy.ctrlProxyIncomplete || timer.now() >= deadline) {
         return hierarchy;
       }

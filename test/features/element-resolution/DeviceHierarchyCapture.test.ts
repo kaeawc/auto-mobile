@@ -5,7 +5,7 @@ import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeIdGenerator } from "../../fakes/FakeIdGenerator";
 
-function fixture(elapsed: number, incomplete = true) {
+function fixture(elapsed: number, incomplete = true, updatedAt?: number) {
   const timer = new FakeTimer();
   const adb = new FakeAdbClient();
   adb.setForegroundApp({ packageName: "com.test", userId: 0 });
@@ -16,6 +16,7 @@ function fixture(elapsed: number, incomplete = true) {
   const raw: ViewHierarchyResult = {
     packageName: "com.test",
     ctrlProxyIncomplete: incomplete,
+    updatedAt,
     hierarchy: {
       node: {
         package: "com.test",
@@ -35,7 +36,7 @@ function fixture(elapsed: number, incomplete = true) {
           timer.advanceTime(elapsed);
           return { hierarchy: raw };
         },
-        convertToViewHierarchyResult: () => raw,
+        convertToViewHierarchyResult: () => ({ ...raw, updatedAt: undefined }),
       }),
     },
   );
@@ -54,6 +55,12 @@ test("fresh Android capture supplements missing app nodes within the remaining d
   expect(snapshot.hierarchy.ctrlProxyIncomplete).toBe(true);
   expect(adb.getCommandCalls()).toHaveLength(3);
   expect(adb.getCommandCalls()[0]).toMatchObject({ timeoutMs: 600, signal });
+});
+
+test("fresh Android capture preserves the device timestamp across conversion", async () => {
+  const { capture } = fixture(0, false, 1234);
+  const snapshot = await capture.capture({ freshness: "fresh", minTimestamp: 1234 });
+  expect(snapshot.hierarchy.updatedAt).toBe(1234);
 });
 
 test.each([false, true])(

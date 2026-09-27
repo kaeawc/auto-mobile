@@ -1,4 +1,5 @@
 import { DefaultElementFinder } from "../../../../src/features/utility/ElementFinder";
+import { DefaultElementSelector } from "../../../../src/features/utility/DefaultElementSelector";
 import { ViewHierarchy } from "../../../../src/features/observe/ViewHierarchy";
 import { STABLE_VIEW_ID_PREFIX } from "../../../../src/features/observe/android/StableNodeIdentity";
 import { DefaultObserveElementCollector } from "../../../../src/features/observe/ObserveElementCollector";
@@ -75,11 +76,22 @@ test.each([false, true])(
     const elements = new DefaultObserveElementCollector().collect(projected, "android")!;
     expect(elements.clickable).toHaveLength(3);
     expect(elements.clickable?.map((element) => element["resource-id"])).toEqual([
-      undefined,
       "large-main",
       "small-main",
+      undefined,
     ]);
-    expect(projectSkeleton(elements).skeleton).toHaveLength(3);
+    const skeleton = projectSkeleton(elements).skeleton;
+    expect(skeleton).toHaveLength(3);
+    const liveSelector = new DefaultElementSelector();
+    const selectedRows = [0, 1, 2].map(
+      (index) => liveSelector.selectByText(projected, "Open", { index }).element,
+    );
+    expect(selectedRows.map((element) => element?.["resource-id"])).toEqual([
+      "large-main",
+      "small-main",
+      undefined,
+    ]);
+    expect(selectedRows[2]?.["view-id"]).toBe(roots[1].node["view-id"]);
   },
 );
 

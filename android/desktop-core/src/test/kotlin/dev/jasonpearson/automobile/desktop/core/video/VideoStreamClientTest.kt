@@ -278,7 +278,7 @@ class VideoStreamClientTest {
       (client.state.value as VideoStreamState.Unavailable).reason,
     )
     assertEquals(
-      VideoStreamState.UnavailableCause.REFUSED,
+      VideoStreamState.UnavailableCause.OTHER,
       (client.state.value as VideoStreamState.Unavailable).cause,
     )
     client.dispose()

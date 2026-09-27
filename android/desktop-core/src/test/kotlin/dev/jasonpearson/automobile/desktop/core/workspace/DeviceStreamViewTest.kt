@@ -26,6 +26,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -610,6 +611,38 @@ class DeviceStreamViewTest {
       )
     assertTrue(refused.contains("Live mirroring refused"))
     assertTrue(refused.contains("No connected device with id ghost."))
-    assertTrue(refused.contains("AUTOMOBILE_DAEMON_STREAM_AUTH"))
+    assertTrue(!refused.contains("AUTOMOBILE_DAEMON_STREAM_AUTH"))
+  }
+
+  @Test
+  fun `iOS stall policy arms when the subscribe ack advertises heartbeats`() = runTest {
+    val source = FakeVideoStreamSource()
+    assertNull(stallReconnectPolicy(Platform.Ios, source.heartbeatMs.value))
+    source.setHeartbeatMs(1_000)
+    assertEquals(
+      dev.jasonpearson.automobile.desktop.core.LIVE_STALL_RECONNECT_MS,
+      stallReconnectPolicy(Platform.Ios, source.heartbeatMs.value),
+    )
+  }
+
+  @Test
+  fun `retained frame retains visible unavailable guidance`() = runTest {
+    val unavailable = VideoStreamState.Unavailable("relay stopped")
+    assertEquals("relay stopped", retainedStreamStatus(true, unavailable))
+    assertNull(retainedStreamStatus(true, VideoStreamState.Streaming(1, 1)))
+    assertNull(retainedStreamStatus(false, unavailable))
+  }
+
+  @Test
+  fun `only an auth refusal names the stream auth setting`() = runTest {
+    val auth =
+      VideoStreamState.Unavailable(
+        "Video stream subscribe requires an authenticated daemon session.",
+        UnavailableCause.REFUSED,
+      )
+    assertTrue(streamStatusHint(auth).contains("AUTOMOBILE_DAEMON_STREAM_AUTH"))
+    val generic =
+      VideoStreamState.Unavailable("No connected device with id ghost.", UnavailableCause.REFUSED)
+    assertTrue(!streamStatusHint(generic).contains("AUTOMOBILE_DAEMON_STREAM_AUTH"))
   }
 }

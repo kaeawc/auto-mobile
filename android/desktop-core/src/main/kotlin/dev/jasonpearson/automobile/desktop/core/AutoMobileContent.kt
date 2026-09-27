@@ -330,6 +330,15 @@ internal fun rememberLiveVideoFrame(
     // A paused pane (window unfocused) owns no subscription, so it must not retry a reconnect.
     if (source == null || !streamingEnabled) return@LaunchedEffect
     var backoffMs = reconnectInitialMs
+    // This durable sequence survives a Streaming -> Unavailable StateFlow conflation.
+    var lastSeenEmittedSequence = source.emittedFrameSequence.value
+    fun resetBackoffAfterFrame() {
+      val sequence = source.emittedFrameSequence.value
+      if (sequence > lastSeenEmittedSequence) {
+        lastSeenEmittedSequence = sequence
+        backoffMs = reconnectInitialMs
+      }
+    }
     // collectLatest (not collect) is load-bearing for the retry: when the socket is absent,
     // connect() re-assigns the SAME Unavailable value, which MutableStateFlow suppresses — so a
     // plain collector would receive no further event and retry only once. Under collectLatest the
@@ -337,6 +346,7 @@ internal fun rememberLiveVideoFrame(
     // a successful connect, or disposal), so a stuck-Unavailable stream keeps retrying on its own
     // timer while a recovered one stops cleanly.
     source.state.collectLatest { state ->
+      resetBackoffAfterFrame()
       if (state is VideoStreamState.Streaming) backoffMs = reconnectInitialMs
       if (state is VideoStreamState.Unavailable || state is VideoStreamState.PermissionRequired) {
         // Auto-reconnecting consumers (the workspace video pane) RETAIN the last decoded frame
@@ -349,6 +359,7 @@ internal fun rememberLiveVideoFrame(
         if (!autoReconnect) liveFrame = null
         if (autoReconnect && deviceId != null) {
           while (isActive) {
+            resetBackoffAfterFrame()
             // Cancelled by composition disposal or a real state change, so a torn-down or
             // recovered pane stops. connect() no-ops while a reader is already active, so a
             // spurious retry cannot double-subscribe.
@@ -370,7 +381,7 @@ internal fun rememberLiveVideoFrame(
   // (issue #7549) advances lastActivityMs well inside the window on any backend, so a caller only
   // passes stallReconnectMs = null for a daemon too old to advertise heartbeatMs, and the
   // first-frame deadline only applies BEFORE the first frame, where a static screen is irrelevant.
-  LaunchedEffect(source, deviceId, autoReconnect, streamingEnabled) {
+  LaunchedEffect(source, deviceId, autoReconnect, streamingEnabled, stallReconnectMs) {
     // Gate on streamingEnabled too: while paused the source sits Idle after disconnect, and the
     // Connecting/Idle branch below would otherwise treat that as a never-first-frame wedge and
     // reconnect — silently defeating the pause.
@@ -408,7 +419,7 @@ internal fun rememberLiveVideoFrame(
           if (frame != null && frame.sequence != lastSeenSequence) {
             lastSeenSequence = frame.sequence
             noProgressSinceMs = frame.receivedAtMs
-          } else if (activityMs != lastSeenActivityMs) {
+          } else if (activityMs > lastSeenActivityMs) {
             // A heartbeat-capable relay (issue #7549) proves the pipeline alive even when the
             // screen is genuinely static and no new frame decodes.
             lastSeenActivityMs = activityMs

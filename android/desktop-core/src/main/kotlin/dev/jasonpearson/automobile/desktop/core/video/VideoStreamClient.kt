@@ -25,6 +25,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.yield
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.serializer
@@ -101,6 +102,10 @@ enum class VideoStreamQuality(internal val wire: String) {
 /** A live view of a device's screen. */
 interface VideoStreamSource {
   val frames: SharedFlow<LiveVideoFrame>
+  /**
+   * Latest decoded frame sequence, retained even if StateFlow conflates a short Streaming state.
+   */
+  val emittedFrameSequence: StateFlow<Long>
   /** Cumulative source-encoder drops, when the relay provides telemetry. */
   val droppedFrames: SharedFlow<Long>
   val state: StateFlow<VideoStreamState>
@@ -208,6 +213,8 @@ class VideoStreamClient(
       onBufferOverflow = BufferOverflow.DROP_OLDEST,
     )
   override val frames: SharedFlow<LiveVideoFrame> = _frames.asSharedFlow()
+  private val _emittedFrameSequence = MutableStateFlow(0L)
+  override val emittedFrameSequence: StateFlow<Long> = _emittedFrameSequence.asStateFlow()
   private val _droppedFrames = MutableSharedFlow<Long>(replay = 1, extraBufferCapacity = 1)
   override val droppedFrames: SharedFlow<Long> = _droppedFrames.asSharedFlow()
 
@@ -340,7 +347,7 @@ class VideoStreamClient(
             ack.permission.toPermissionState()
               ?: VideoStreamState.Unavailable(
                 ack.error ?: "Live mirroring was refused",
-                VideoStreamState.UnavailableCause.REFUSED,
+                subscribeFailureCause(ack.error),
               )
           )
           return
@@ -435,10 +442,11 @@ class VideoStreamClient(
             // the immutable raster produced by toImageBitmap is the only per-frame copy, and
             // consumers receive a ready-to-draw frame with no conversion (or allocation) of
             // their own.
+            val sequence = frameSequence.incrementAndGet()
             _frames.tryEmit(
               LiveVideoFrame(
                 bitmap = frame.toImageBitmap(),
-                sequence = frameSequence.incrementAndGet(),
+                sequence = sequence,
                 receivedAtMs = nowMs(),
                 // The stream's config packets attest the display rotation; carrying it here
                 // lets DeviceControlSession re-prove orientation from the live frame alone
@@ -446,6 +454,7 @@ class VideoStreamClient(
                 rotation = currentRotation,
               )
             )
+            _emittedFrameSequence.value = sequence
           }
         },
       )
@@ -515,6 +524,21 @@ private fun VideoStreamPermissionResponse?.toPermissionState():
     else -> null
   }
 
+/** The relay currently sends textual errors rather than a structured auth failure code. */
+internal fun isStreamAuthFailure(reason: String): Boolean {
+  val text = reason.lowercase()
+  return text.contains("authenticated daemon session") ||
+    text.contains("cannot be authenticated") ||
+    text.contains("not an active daemon session") ||
+    text.contains("different daemon session") ||
+    text.contains("without authorization") ||
+    text.contains("unauthorized")
+}
+
+internal fun subscribeFailureCause(error: String?): VideoStreamState.UnavailableCause =
+  if (error != null && isStreamAuthFailure(error)) VideoStreamState.UnavailableCause.REFUSED
+  else VideoStreamState.UnavailableCause.OTHER
+
 /** In-memory [VideoStreamSource] for previews and tests. */
 class FakeVideoStreamSource(
   private val available: Boolean = true,
@@ -528,6 +552,7 @@ class FakeVideoStreamSource(
    */
   private val holdConnecting: Boolean = false,
   private val connectThenRefuse: Boolean = false,
+  private val refusalScope: CoroutineScope? = null,
 ) : VideoStreamSource {
   private val fakeSequence = java.util.concurrent.atomic.AtomicLong(0L)
 
@@ -538,6 +563,8 @@ class FakeVideoStreamSource(
       onBufferOverflow = BufferOverflow.DROP_OLDEST,
     )
   override val frames: SharedFlow<LiveVideoFrame> = _frames.asSharedFlow()
+  private val _emittedFrameSequence = MutableStateFlow(0L)
+  override val emittedFrameSequence: StateFlow<Long> = _emittedFrameSequence.asStateFlow()
   private val _droppedFrames = MutableSharedFlow<Long>(replay = 1, extraBufferCapacity = 1)
   override val droppedFrames: SharedFlow<Long> = _droppedFrames.asSharedFlow()
 
@@ -562,7 +589,14 @@ class FakeVideoStreamSource(
     connectedDeviceId = deviceId
     if (connectThenRefuse && refuseWith != null) {
       _state.value = VideoStreamState.Connecting
-      _state.value = VideoStreamState.Unavailable(refuseWith)
+      if (refusalScope != null) {
+        refusalScope.launch {
+          yield()
+          _state.value = VideoStreamState.Unavailable(refuseWith)
+        }
+      } else {
+        _state.value = VideoStreamState.Unavailable(refuseWith)
+      }
       return
     }
     _state.value =
@@ -612,14 +646,21 @@ class FakeVideoStreamSource(
     height: Int = 2400,
     rotation: Int? = null,
   ) {
+    val sequence = fakeSequence.incrementAndGet()
     _frames.tryEmit(
       LiveVideoFrame(
         bitmap = ImageBitmap(width, height),
-        sequence = fakeSequence.incrementAndGet(),
+        sequence = sequence,
         receivedAtMs = nowMs(),
         rotation = rotation,
       )
     )
+    _emittedFrameSequence.value = sequence
+  }
+
+  /** Records a decoded frame without allocating a native bitmap in virtual-time policy tests. */
+  fun recordFrameEmission() {
+    _emittedFrameSequence.value = fakeSequence.incrementAndGet()
   }
 
   /** Publishes source-side encoder-drop telemetry for quality-controller tests. */
@@ -642,5 +683,10 @@ class FakeVideoStreamSource(
    */
   fun emitHeartbeat() {
     _lastActivityMs.value = nowMs()
+  }
+
+  /** Models the real reader's per-session activity reset during a reconnect. */
+  fun resetActivity() {
+    _lastActivityMs.value = 0L
   }
 }

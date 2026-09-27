@@ -1267,8 +1267,14 @@ export class TapOnElement extends BaseVisualChange {
       return null;
     }
     try {
-      return (await this.hierarchyCapture.capture({ freshness: "fresh", timeoutMs, signal }))
-        .hierarchy;
+      return (
+        await this.hierarchyCapture.capture({
+          freshness: "fresh",
+          searchRaw: serverConfig.isRawElementSearchEnabled(),
+          timeoutMs,
+          signal,
+        })
+      ).hierarchy;
     } catch (error) {
       throwIfAborted(signal);
       logger.warn(`[TapOnElement] Fresh capture failed: ${errorMessage(error)}`);
@@ -1310,7 +1316,11 @@ export class TapOnElement extends BaseVisualChange {
         if (!synced?.hierarchy) {
           return null;
         }
-        const rawHierarchy = this.viewHierarchy.normalizeIosHierarchy(synced.hierarchy);
+        const rawHierarchy = this.viewHierarchy.normalizeIosHierarchy(
+          IOSCtrlProxyClient.getInstance(this.device).convertToViewHierarchyResult(
+            synced.hierarchy,
+          ),
+        );
         return this.prepareViewHierarchyForResponse(rawHierarchy, screenSize);
       }
       default:

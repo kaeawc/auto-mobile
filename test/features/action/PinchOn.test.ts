@@ -12,6 +12,7 @@ import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeWindow } from "../../fakes/FakeWindow";
+import { serverConfig } from "../../../src/utils/ServerConfig";
 
 describe("PinchOn", () => {
   const device: BootedDevice = {
@@ -97,9 +98,20 @@ describe("PinchOn", () => {
   });
 
   afterEach(() => {
+    serverConfig.setRawElementSearchEnabled(false);
     getInstanceSpy?.mockRestore();
     iosGetInstanceSpy?.mockRestore();
     managerSpy?.mockRestore();
+  });
+  test("fresh pinch selector capture requests raw hierarchy when enabled", async () => {
+    serverConfig.setRawElementSearchEnabled(true);
+    const capture = new FakeHierarchyCapture(createHierarchy);
+    (pinchOn as any).capture = capture;
+    await (pinchOn as any).resolveTarget({
+      direction: "in",
+      container: { elementId: "container-id" },
+    });
+    expect(capture.requests[0]?.searchRaw).toBe(true);
   });
 
   test("screen fallback uses fresh rotated dimensions and capture insets", async () => {
@@ -254,7 +266,7 @@ describe("PinchOn", () => {
       container: { elementId: "container-id" },
     });
     expect(result.success).toBe(true);
-    expect(capture.requests).toEqual([{ freshness: "fresh" }]);
+    expect(capture.requests).toEqual([{ freshness: "fresh", searchRaw: false }]);
     expect(fakeA11yService.getPinchHistory()[0].centerX).toBe(500);
     expect(fakeA11yService.getPinchHistory()[0].centerY).toBe(500);
   });

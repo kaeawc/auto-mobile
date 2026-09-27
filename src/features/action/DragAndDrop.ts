@@ -293,9 +293,10 @@ export class DragAndDrop extends BaseVisualChange {
       return element;
     }
     if (target.text) {
-      const element = this.selector.selectByText(viewHierarchy, target.text, {
+      const selection = this.selector.selectByText(viewHierarchy, target.text, {
         intentAction: "drag",
-      }).element;
+      });
+      const element = selection.matchedElement ?? selection.element;
       if (!element) {
         throw new ActionableError(`dragAndDrop ${label} not found with text '${target.text}'`);
       }

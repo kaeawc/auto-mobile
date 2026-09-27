@@ -181,6 +181,14 @@ test("appear reports the matching child rather than its promoted row", () => {
   expect(evaluation.matchedElement?.text).toBe("Ready");
   expect(evaluation.candidates?.[0]?.text).toBe("Ready");
 });
+test("presence waits ignore matching nodes without bounds", () => {
+  const observation = obs([{ "resource-id": "ghost", text: "Ghost" }]);
+  const resolver = new ElementResolver();
+  expect(appear(resolver, { elementId: "ghost" })(observation).matched).toBe(false);
+  expect(disappear(resolver, { elementId: "ghost" })(observation).matched).toBe(true);
+  expect(appear(resolver, { text: "Ghost" })(observation).matched).toBe(false);
+  expect(disappear(resolver, { text: "Ghost" })(observation).matched).toBe(true);
+});
 
 describe("textEquals predicate", () => {
   const finder = new ElementResolver();

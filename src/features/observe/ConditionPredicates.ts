@@ -6,6 +6,7 @@ import {
   type ElementResolution,
   type MatchMode,
   type ResolutionIntent,
+  matchedSourceNode,
 } from "../utility/ElementResolver";
 import { SearchableHierarchy } from "../utility/SearchableNode";
 import type { ResolverSelector } from "../../server/elementSelectorSchemas";
@@ -67,16 +68,16 @@ function ownsSelectorText(
   );
 }
 
-function matchedSource(result: ElementResolution | undefined, text: string | undefined) {
-  const match = result?.matches.find(({ node }) => node === result.chosen);
-  return match?.sourceNodes?.find((node) => ownsSelectorText(node, text)) ?? result?.chosen;
+function boundedMatchedSource(result: ElementResolution | undefined, selector: ConditionSelector) {
+  const source = result && matchedSourceNode(result, selector);
+  return source?.bounds && source.element ? source : undefined;
 }
 
 export function appear(
   resolver: ConditionResolver,
   selector: ConditionSelector,
 ): ConditionPredicate {
-  const search = searchForWait(resolver, selector, { action: "inspect" });
+  const search = searchForWait(resolver, selector, { action: "inspect", requireBounds: true });
   return (observation): ConditionEvaluation => {
     const result = search(observation);
     const sources =
@@ -97,9 +98,10 @@ export function appear(
         candidates = elements(diagnostic);
       }
     }
+    const source = boundedMatchedSource(result, selector);
     return {
-      matched: Boolean(result?.chosen),
-      matchedElement: matchedSource(result, selector.text)?.element,
+      matched: Boolean(source),
+      matchedElement: source?.element,
       candidates,
     };
   };
@@ -109,10 +111,14 @@ export function disappear(
   resolver: ConditionResolver,
   selector: ConditionSelector,
 ): ConditionPredicate {
-  const search = searchForWait(resolver, selector, { action: "inspect", negative: true });
+  const search = searchForWait(resolver, selector, {
+    action: "inspect",
+    negative: true,
+    requireBounds: true,
+  });
   return (observation): ConditionEvaluation => {
     const result = search(observation);
-    return { matched: !result?.chosen, candidates: elements(result) };
+    return { matched: !boundedMatchedSource(result, selector), candidates: elements(result) };
   };
 }
 

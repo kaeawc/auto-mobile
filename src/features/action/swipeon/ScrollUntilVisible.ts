@@ -13,12 +13,11 @@ import { logger } from "../../../utils/logger";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
 import {
   ElementResolver,
-  type ElementResolution,
+  matchedSourceNode,
   type ResolutionAction,
 } from "../../utility/ElementResolver";
 import { SearchableHierarchy } from "../../utility/SearchableNode";
 import type { ResolverSelector } from "../../../server/elementSelectorSchemas";
-import { normalizeQuotes } from "../../utility/TextMatcher";
 import type { ElementGeometry } from "../../../utils/interfaces/ElementGeometry";
 import type { ObserveScreen } from "../../observe/interfaces/ObserveScreen";
 import { AccessibilityDetector } from "../../../utils/interfaces/AccessibilityDetector";
@@ -41,23 +40,6 @@ import { computeHierarchyFingerprint, waitForScrollIdle } from "../../../utils/s
 import type { ProgressCallback } from "../BaseVisualChange";
 
 const SCROLL_IDLE_POLL_INTERVAL_MS = 150;
-
-function matchedSourceElement(
-  result: ElementResolution,
-  selector: ResolverSelector,
-): Element | null {
-  const sources = result.matches.find((match) => match.node === result.chosen)?.sourceNodes;
-  const query = selector.text && normalizeQuotes(selector.text).trim().toLowerCase();
-  const matched = query
-    ? sources?.find((source) =>
-        Object.values(source.textSources).some((value) => {
-          const actual = normalizeQuotes(value).trim().toLowerCase();
-          return result.matchMode === "contains" ? actual.includes(query) : actual === query;
-        }),
-      )
-    : sources?.[0];
-  return matched?.element ?? result.chosen?.element ?? null;
-}
 
 function oppositeDirection(dir: SwipeDirection): SwipeDirection {
   switch (dir) {
@@ -142,7 +124,7 @@ export class ScrollUntilVisible {
       throw new ActionableError(result.error);
     }
     return preserveMatchedNode
-      ? matchedSourceElement(result, selector)
+      ? (matchedSourceNode(result, selector)?.element ?? null)
       : (result.chosen?.element ?? null);
   }
 
@@ -523,7 +505,12 @@ export class ScrollUntilVisible {
     if (!options.container.text && !options.container.elementId) {
       throw new ActionableError("Container must specify either text or elementId");
     }
-    element = this.resolveElement(viewHierarchy, options.container);
+    element = this.resolveElement(
+      viewHierarchy,
+      options.container,
+      "inspect",
+      options.container.text !== undefined,
+    );
 
     // Retry logic similar to TapOnElement
     if (!element && attempt < ScrollUntilVisible.MAX_ATTEMPTS) {

@@ -18,7 +18,7 @@ import {
   createDeviceHierarchyCapture,
   type HierarchySyncClient,
 } from "../features/observe/DeviceHierarchyCapture";
-import { ElementResolver } from "../features/utility/ElementResolver";
+import { ElementResolver, matchedSourceNode } from "../features/utility/ElementResolver";
 import type { SearchableEntry } from "../features/utility/SearchableNode";
 import { DefaultElementParser } from "../features/utility/ElementParser";
 import {
@@ -169,9 +169,12 @@ const resolveHighlightShapeFromSelector = async (
   if (!resolution.chosen?.element) {
     throw new ActionableError("Unable to find an element that matches the highlight selector.");
   }
+  const selected = args.text
+    ? (matchedSourceNode(resolution, { text: args.text }) ?? resolution.chosen)
+    : resolution.chosen;
   const highlightElement = args.containerOf
-    ? findContainerForElement(snapshot.nodes, resolution.chosen)
-    : resolution.chosen.element;
+    ? findContainerForElement(snapshot.nodes, selected)
+    : selected.element;
   if (!highlightElement) {
     throw new ActionableError("Unable to resolve a container for the selected element.");
   }

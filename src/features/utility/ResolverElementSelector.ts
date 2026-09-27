@@ -4,7 +4,12 @@ import type { ElementSelectionResult } from "../../models/ElementSelectionResult
 import type { ViewHierarchyResult } from "../../models";
 import { ActionableError } from "../../models/ActionableError";
 import type { ResolverSelector } from "../../server/elementSelectorSchemas";
-import { ElementResolver, type ElementResolution, type ResolutionAction } from "./ElementResolver";
+import {
+  ElementResolver,
+  matchedSourceNode,
+  type ElementResolution,
+  type ResolutionAction,
+} from "./ElementResolver";
 import { SearchableHierarchy, type SearchableEntry } from "./SearchableNode";
 import { extractHierarchyScreenSize } from "../observe/hierarchyScreenSize";
 import type { TextSelectionIntent } from "../../utils/interfaces/ElementFinder";
@@ -171,7 +176,13 @@ export class ResolverElementSelector implements ElementSelector {
     if (!result.error && !result.chosen && options.intentAction === "long-press") {
       return this.select(capture, selector, { ...options, intentAction: "tap" });
     }
-    return this.selectionResult(result, capture, options.strategy ?? "first", options.intentAction);
+    return this.selectionResult(
+      result,
+      capture,
+      options.strategy ?? "first",
+      options.intentAction,
+      selector,
+    );
   }
 
   private snapshotId(capture: ViewHierarchyResult): string {
@@ -222,8 +233,9 @@ export class ResolverElementSelector implements ElementSelector {
     capture: ViewHierarchyResult,
     strategy: "first" | "random",
     action?: ResolutionAction,
+    selector?: ResolverSelector,
   ): ElementSelectionResult {
-    const source = this.matchedSource(result);
+    const source = matchedSourceNode(result, selector);
     return {
       element:
         action === "highlight" && result.chosen && source?.element
@@ -237,12 +249,5 @@ export class ResolverElementSelector implements ElementSelector {
       totalMatches: result.candidates.length,
       strategy,
     };
-  }
-  private matchedSource(result: ElementResolution) {
-    const candidate = result.candidates[result.indexInMatches ?? -1];
-    const match = result.matches.find((entry) => entry.node === candidate);
-    return (
-      match?.sourceNodes?.find((node) => node !== candidate) ?? match?.sourceNodes?.[0] ?? candidate
-    );
   }
 }

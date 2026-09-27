@@ -617,6 +617,28 @@ describe("ScrollUntilVisible shared resolver identity", () => {
     expect(found?.["resource-id"]).toBe("com.app:id/target_label");
     expect(found?.bounds).toEqual(label.bounds);
   });
+  test("explicit text swipe keeps matched label bounds, while ID uses the selected row", async () => {
+    const scroll = new ScrollUntilVisible({} as any);
+    const label = { text: "Target", bounds: { left: 20, top: 40, right: 80, bottom: 60 } };
+    const viewHierarchy = {
+      hierarchy: {
+        node: {
+          "resource-id": "row",
+          clickable: true,
+          bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+          node: [label],
+        },
+      },
+    } as any;
+    expect(
+      (await scroll.findTargetElement({ container: { text: "Target" } } as any, viewHierarchy))
+        .bounds,
+    ).toEqual(label.bounds);
+    expect(
+      (await scroll.findTargetElement({ container: { elementId: "row" } } as any, viewHierarchy))
+        .bounds,
+    ).toEqual({ left: 0, top: 0, right: 100, bottom: 100 });
+  });
   test("text lookFor skips unrelated text on the promoted row", async () => {
     const scroll = new ScrollUntilVisible({} as any);
     const target = { text: "Target", bounds: { left: 0, top: 40, right: 100, bottom: 60 } };

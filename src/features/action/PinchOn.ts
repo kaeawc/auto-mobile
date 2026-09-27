@@ -15,6 +15,7 @@ import { extractHierarchyScreenSize } from "../observe/hierarchyScreenSize";
 import { createDeviceHierarchyCapture } from "../observe/DeviceHierarchyCapture";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
+import { serverConfig } from "../../utils/ServerConfig";
 import { AndroidCtrlProxyManager } from "../../utils/CtrlProxyManager";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { boundsArea, clamp } from "../../utils/bounds";
@@ -277,7 +278,10 @@ export class PinchOn extends BaseVisualChange {
       observeResult = await this.observeScreen.execute();
     }
 
-    const snapshot = await this.capture.capture({ freshness: "fresh" });
+    const snapshot = await this.capture.capture({
+      freshness: "fresh",
+      searchRaw: serverConfig.isRawElementSearchEnabled(),
+    });
     observeResult = this.withCaptureGeometry(observeResult, snapshot);
 
     if (!observeResult.viewHierarchy || !observeResult.screenSize) {

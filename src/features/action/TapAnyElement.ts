@@ -540,6 +540,7 @@ export class TapAnyElement extends BaseVisualChange {
     try {
       const snapshot = await this.hierarchyCapture.capture({
         freshness: "fresh",
+        searchRaw: serverConfig.isRawElementSearchEnabled(),
         timeoutMs,
         signal,
       });
@@ -586,7 +587,11 @@ export class TapAnyElement extends BaseVisualChange {
         if (!synced?.hierarchy) {
           return null;
         }
-        const hierarchy = this.viewHierarchy.normalizeIosHierarchy(synced.hierarchy);
+        const hierarchy = this.viewHierarchy.normalizeIosHierarchy(
+          IOSCtrlProxyClient.getInstance(this.device).convertToViewHierarchyResult(
+            synced.hierarchy,
+          ),
+        );
         return this.prepareViewHierarchyForResponse(hierarchy, screenSize);
       }
       default:

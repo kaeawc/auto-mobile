@@ -18,6 +18,47 @@ describe("Highlight Tools Registration", () => {
     const toolNames = ToolRegistry.getToolDefinitions().map((tool) => tool.name);
     expect(toolNames).toContain("highlight");
   });
+  test.each([
+    [false, { x: 20, y: 40, width: 60, height: 20 }],
+    [true, { x: 0, y: 0, width: 100, height: 100 }],
+  ])("text highlight containerOf=%s starts from the matched label", async (containerOf, bounds) => {
+    const hierarchy: ViewHierarchyResult = {
+      hierarchy: {
+        node: {
+          bounds: { left: 0, top: 0, right: 200, bottom: 200 },
+          node: [
+            {
+              clickable: true,
+              bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+              node: [{ text: "Target", bounds: { left: 20, top: 40, right: 80, bottom: 60 } }],
+            },
+          ],
+        },
+      },
+    };
+    const shapes: HighlightShape[] = [];
+    registerHighlightTools({
+      generateHighlightId: () => "text-highlight",
+      viewHierarchyClientFactory: () => ({
+        requestHierarchySync: async () => ({ hierarchy }),
+        convertToViewHierarchyResult: () => hierarchy,
+      }),
+      highlightClientFactory: () =>
+        ({
+          addHighlight: async (_id, shape) => {
+            shapes.push(shape);
+            return { success: true };
+          },
+        }) as any,
+    });
+    const tool = ToolRegistry.getTool("highlight")!;
+    const response = await tool.deviceAwareHandler!(
+      { deviceId: "test", platform: "android", name: "Test" } as BootedDevice,
+      tool.schema.parse({ platform: "android", text: "Target", containerOf }),
+    );
+    expect(JSON.parse(response.content[0].text).success).toBe(true);
+    expect(shapes[0]).toEqual({ type: "circle", bounds });
+  });
 
   test("validates highlight schema for add action", () => {
     registerHighlightTools();

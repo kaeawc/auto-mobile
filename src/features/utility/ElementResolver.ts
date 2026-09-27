@@ -68,6 +68,30 @@ export interface ElementResolution {
   error?: string;
 }
 
+/** The source that satisfied a selector, before action-target promotion. */
+export function matchedSourceNode(
+  result: ElementResolution,
+  selector?: Pick<ResolverSelector, "text" | "caseSensitive">,
+): SearchableEntry | undefined {
+  const candidate = result.candidates[result.indexInMatches ?? -1] ?? result.chosen;
+  const sources = result.matches.find(({ node }) => node === candidate)?.sourceNodes;
+  if (!sources?.length) {
+    return candidate ?? undefined;
+  }
+  if (selector?.text === undefined) {
+    return sources.find((source) => source !== candidate) ?? sources[0];
+  }
+  const query = normalize(selector.text, selector.caseSensitive);
+  return (
+    sources.find((source) =>
+      Object.values(source.textSources).some((value) => {
+        const actual = normalize(value, selector.caseSensitive);
+        return result.matchMode === "contains" ? actual.includes(query) : actual === query;
+      }),
+    ) ?? sources[0]
+  );
+}
+
 function normalize(value: string, caseSensitive = false): string {
   const normalized = normalizeQuotes(value).trim();
   return caseSensitive ? normalized : normalized.toLowerCase();

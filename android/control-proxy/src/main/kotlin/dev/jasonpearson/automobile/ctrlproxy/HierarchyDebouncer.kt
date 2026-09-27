@@ -5,12 +5,15 @@ import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfProvider
 import dev.jasonpearson.automobile.ctrlproxy.perf.SystemTimeProvider
 import dev.jasonpearson.automobile.ctrlproxy.perf.TimeProvider
+import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 
 object HierarchyQuiescence {
@@ -69,6 +72,7 @@ internal constructor(
   private val animationSkipWindowMs: Long = 100L,
   private var unsolicitedIntervalMs: Long = 250L,
   internal val stats: CtrlProxyWorkStats = CtrlProxyWorkStats(),
+  private val beforeDebounceLock: () -> Unit = {},
   private val extractHierarchy:
     (disableAllFiltering: Boolean, snapshotOptions: HierarchySnapshotOptions) -> ViewHierarchy?,
 ) {
@@ -113,19 +117,24 @@ internal constructor(
       )
     debounceJob =
       scope.launch(start = CoroutineStart.LAZY) {
-        delay(waitMs)
-        synchronized(eventLock) {
-          pendingRefresh = false
-          extractionInFlight = true
-          lastUnsolicitedStart = timeProvider.currentTimeMillis()
-        }
+        val self = coroutineContext.job
         try {
+          delay(waitMs)
+          beforeDebounceLock()
+          synchronized(eventLock) {
+            self.ensureActive()
+            pendingRefresh = false
+            extractionInFlight = true
+            lastUnsolicitedStart = timeProvider.currentTimeMillis()
+          }
           extractAndCompare()
         } finally {
           synchronized(eventLock) {
-            extractionInFlight = false
-            debounceJob = null
-            schedulePendingRefresh()
+            if (debounceJob === self) {
+              extractionInFlight = false
+              debounceJob = null
+              schedulePendingRefresh()
+            }
           }
         }
       }

@@ -133,6 +133,46 @@ class HierarchyCoalescingTest {
   }
 
   @Test
+  fun `replaced debounce job cannot extract or clear its replacement`() = runTest {
+    val time = FakeTime()
+    val stats = CtrlProxyWorkStats()
+    var lockAttempts = 0
+    lateinit var debouncer: HierarchyDebouncer
+    debouncer =
+      HierarchyDebouncer(
+        scope = backgroundScope,
+        timeProvider = time,
+        quickDebounceMs = 5,
+        unsolicitedIntervalMs = 250,
+        stats = stats,
+        beforeDebounceLock = {
+          if (++lockAttempts == 1) {
+            debouncer.setUnsolicitedIntervalMs(0)
+          }
+        },
+        extractHierarchy = { _, _ -> ViewHierarchy(packageName = "current") },
+      )
+
+    debouncer.onAccessibilityEvent()
+    advanceTimeBy(5)
+    time.now += 5
+    runCurrent()
+    assertEquals(0L, stats.extractions.get())
+    assertTrue(debouncer.getState().hasActiveJob)
+
+    debouncer.onAccessibilityEvent()
+    advanceTimeBy(5)
+    time.now += 5
+    runCurrent()
+    assertEquals(1L, stats.extractions.get())
+
+    advanceTimeBy(5)
+    time.now += 5
+    runCurrent()
+    assertEquals(1L, stats.extractions.get())
+  }
+
+  @Test
   fun `explicit requests bypass pending event work and return each fresh state`() = runTest {
     val time = FakeTime()
     val stats = CtrlProxyWorkStats()

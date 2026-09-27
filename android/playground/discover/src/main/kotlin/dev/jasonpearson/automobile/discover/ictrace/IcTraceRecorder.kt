@@ -1,12 +1,13 @@
 package dev.jasonpearson.automobile.discover.ictrace
 
+import android.os.SystemClock
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 class IcTraceRecorder(
   captureText: Boolean = false,
-  private val nowMs: () -> Long = { System.currentTimeMillis() },
+  private val nowMs: () -> Long = { SystemClock.elapsedRealtime() },
 ) {
   private val startedMs = nowMs()
   private val buffer = ArrayDeque<IcTraceEvent>()
@@ -82,29 +83,53 @@ class IcTraceRecorder(
   fun textArg(text: CharSequence?, capture: Boolean = includeText): String =
     if (text == null) "null"
     else if (!capture) "length=${text.length}"
-    else
+    else {
+      var serializedLength = 2 // Opening and closing quotes.
+      for (index in 0 until text.length) {
+        val char = text[index]
+        serializedLength +=
+          when (char) {
+            '"',
+            '\\',
+            '\n',
+            '\r',
+            '\t' -> 2
+            else -> if (char.code < 0x20) 6 else 1
+          }
+        if (serializedLength > MAX_CAPTURED_ARG_LENGTH) break
+      }
+      val truncationMarker =
+        if (serializedLength > MAX_CAPTURED_ARG_LENGTH) "…[truncated length=${text.length}]" else ""
       buildString {
         append('"')
-        text.forEach { char ->
-          when (char) {
-            '"' -> append("\\\"")
-            '\\' -> append("\\\\")
-            '\n' -> append("\\n")
-            '\r' -> append("\\r")
-            '\t' -> append("\\t")
-            else ->
-              if (char.code < 0x20)
-                append(String.format(java.util.Locale.ROOT, "\\u%04x", char.code))
-              else append(char)
+        for (index in 0 until text.length) {
+          val char = text[index]
+          val escaped =
+            when (char) {
+              '"' -> "\\\""
+              '\\' -> "\\\\"
+              '\n' -> "\\n"
+              '\r' -> "\\r"
+              '\t' -> "\\t"
+              else ->
+                if (char.code < 0x20) String.format(java.util.Locale.ROOT, "\\u%04x", char.code)
+                else char.toString()
+            }
+          if (length + escaped.length + truncationMarker.length + 1 > MAX_CAPTURED_ARG_LENGTH) {
+            append(truncationMarker)
+            break
           }
+          append(escaped)
         }
         append('"')
       }
+    }
 
   fun safeText(text: CharSequence?, capture: Boolean = includeText): String? =
     if (text == null) null else if (capture) textArg(text, true) else "length=${text.length}"
 
   private companion object {
     const val CAPACITY = 500
+    const val MAX_CAPTURED_ARG_LENGTH = 4096
   }
 }

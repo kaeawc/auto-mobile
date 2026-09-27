@@ -291,7 +291,7 @@ object DeepLinkManager {
 
         path == PATH_CHAT -> {
           Log.d(TAG, "Parsed as HomeDestination with chat sub-tab selected")
-          HomeDestination(selectedTab = 0, selectedSubTab = 4) // Chat sub-tab is index 4
+          HomeDestination(selectedTab = 0, selectedSubTab = 5) // Chat sub-tab is index 5
         }
 
         path == PATH_VIDEO -> {

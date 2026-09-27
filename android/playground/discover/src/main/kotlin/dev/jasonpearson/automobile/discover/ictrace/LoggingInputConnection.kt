@@ -5,6 +5,7 @@ import android.view.inputmethod.CompletionInfo
 import android.view.inputmethod.CorrectionInfo
 import android.view.inputmethod.InputConnection
 import android.view.inputmethod.InputConnectionWrapper
+import android.view.inputmethod.TextAttribute
 
 class LoggingInputConnection(
   base: InputConnection,
@@ -34,11 +35,51 @@ class LoggingInputConnection(
     return result
   }
 
+  override fun commitText(
+    text: CharSequence,
+    newCursorPosition: Int,
+    textAttribute: TextAttribute?,
+  ): Boolean {
+    val result = super.commitText(text, newCursorPosition, textAttribute)
+    log("commitText", "text=${formatText(text)}, newCursorPosition=$newCursorPosition", result)
+    return result
+  }
+
   override fun setComposingText(text: CharSequence?, newCursorPosition: Int): Boolean {
     val result = super.setComposingText(text, newCursorPosition)
     log(
       "setComposingText",
       "text=${formatText(text)}, newCursorPosition=$newCursorPosition",
+      result,
+    )
+    return result
+  }
+
+  override fun setComposingText(
+    text: CharSequence,
+    newCursorPosition: Int,
+    textAttribute: TextAttribute?,
+  ): Boolean {
+    val result = super.setComposingText(text, newCursorPosition, textAttribute)
+    log(
+      "setComposingText",
+      "text=${formatText(text)}, newCursorPosition=$newCursorPosition",
+      result,
+    )
+    return result
+  }
+
+  override fun replaceText(
+    start: Int,
+    end: Int,
+    text: CharSequence,
+    newCursorPosition: Int,
+    textAttribute: TextAttribute?,
+  ): Boolean {
+    val result = super.replaceText(start, end, text, newCursorPosition, textAttribute)
+    log(
+      "replaceText",
+      "start=$start, end=$end, text=${formatText(text)}, newCursorPosition=$newCursorPosition",
       result,
     )
     return result

@@ -593,6 +593,20 @@ describe("ScrollUntilVisible shared resolver identity", () => {
     } as any);
     expect(found?.bounds).toEqual(target.bounds);
   });
+  test("text lookFor preserves curly-quote matching source geometry", async () => {
+    const scroll = new ScrollUntilVisible({} as any);
+    const target = { text: "It’s here", bounds: { left: 0, top: 40, right: 100, bottom: 60 } };
+    const found = await scroll.findElementInHierarchy({ text: "It's here" }, {
+      hierarchy: {
+        node: {
+          clickable: true,
+          bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+          node: [target],
+        },
+      },
+    } as any);
+    expect(found?.bounds).toEqual(target.bounds);
+  });
 });
 
 test("lookFor treats a temporarily missing container as a miss and retries within its scope", async () => {

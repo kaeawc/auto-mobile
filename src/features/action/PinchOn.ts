@@ -427,11 +427,7 @@ export class PinchOn extends BaseVisualChange {
       }
 
       const windowRank = windowRanks.get(element) ?? 0;
-      if (
-        !best ||
-        windowRank < best.windowRank ||
-        (windowRank === best.windowRank && score > best.score)
-      ) {
+      if (!best || score > best.score || (score === best.score && windowRank < best.windowRank)) {
         best = { element, score, windowRank };
       }
     }

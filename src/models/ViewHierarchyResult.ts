@@ -138,6 +138,9 @@ export interface Hierarchy {
   error?: string;
   /** Why an iOS CtrlProxy hierarchy could not be retrieved. */
   iosUnavailableReason?: IosHierarchyUnavailableReason;
+  /** Platform-neutral reason for an unavailable hierarchy. */
+  unavailableReason?: HierarchyUnavailableReason;
+  unavailableDetail?: string;
   node?: ViewHierarchyNode;
   /** iOS root XCTestNode bounds (points): {left, top, right, bottom} */
   bounds?: { left?: number; top?: number; right: number; bottom: number };
@@ -160,6 +163,12 @@ export type IosHierarchyUnavailableReason =
   | "request_timed_out"
   | "auto_setup_failed"
   | "unknown";
+
+/** `unknown` covers older delegates that do not yet report a typed cause. */
+export type HierarchyUnavailableReason =
+  | IosHierarchyUnavailableReason
+  | "service_recovering"
+  | "incomplete_capture";
 
 export interface ViewHierarchyWindowInfo {
   id?: number;

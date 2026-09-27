@@ -36,6 +36,8 @@ function iosHierarchyUnavailable(result: CtrlProxyHierarchyResponse | null): Hie
   return {
     error: `Failed to retrieve iOS view hierarchy from CtrlProxy iOS: ${reason}${detail ? `: ${detail}` : ""}`,
     iosUnavailableReason: reason,
+    unavailableReason: reason,
+    unavailableDetail: detail,
   };
 }
 
@@ -114,21 +116,80 @@ export class ViewHierarchy implements ViewHierarchyInterface {
     signal?: AbortSignal,
     timeoutMs?: number,
   ): Promise<ViewHierarchyResult> {
-    switch (this.device.platform) {
-      case "ios":
-        return this.getiOSViewHierarchy(perf, skipWaitForFresh, minTimestamp, timeoutMs, signal);
-      case "android":
-        return this.getAndroidViewHierarchy(
-          queryOptions,
-          perf,
-          skipWaitForFresh,
-          minTimestamp,
-          signal,
-          timeoutMs,
-        );
-      default:
-        throw new Error("Unsupported platform");
+    if (this.device.platform !== "ios" && this.device.platform !== "android") {
+      throw new Error("Unsupported platform");
     }
+    const result =
+      this.device.platform === "ios"
+        ? await this.getiOSViewHierarchy(perf, skipWaitForFresh, minTimestamp, timeoutMs, signal)
+        : await this.getAndroidViewHierarchy(
+            queryOptions,
+            perf,
+            skipWaitForFresh,
+            minTimestamp,
+            signal,
+            timeoutMs,
+          );
+    return this.retryAfterTransportRecovery(
+      result,
+      queryOptions,
+      perf,
+      skipWaitForFresh,
+      minTimestamp,
+      signal,
+      timeoutMs,
+    );
+  }
+
+  private async retryAfterTransportRecovery(
+    result: ViewHierarchyResult,
+    queryOptions: ViewHierarchyQueryOptions | undefined,
+    perf: PerformanceTracker,
+    skipWaitForFresh: boolean,
+    minTimestamp: number,
+    signal: AbortSignal | undefined,
+    timeoutMs: number | undefined,
+  ): Promise<ViewHierarchyResult> {
+    if (signal?.aborted) {
+      return result;
+    }
+    if (this.device.platform === "ios") {
+      if (
+        result.hierarchy.unavailableReason !== "runner_not_running" &&
+        result.hierarchy.unavailableReason !== "connection_lost"
+      ) {
+        return result;
+      }
+      const client = IOSCtrlProxyClient.getInstance(this.device);
+      client.ensureRecoveryStarted();
+      if (
+        (await client.awaitRecovery(IOSCtrlProxyClient.OBSERVE_RECOVERY_WAIT_MS, signal)) !==
+        "recovered"
+      ) {
+        return result;
+      }
+      return this.getiOSViewHierarchy(perf, skipWaitForFresh, minTimestamp, timeoutMs, signal);
+    }
+    if (result.hierarchy.transportFailure !== true) {
+      return result;
+    }
+    this.accessibilityServiceClient.ensureRecoveryStarted?.();
+    if (
+      (await this.accessibilityServiceClient.awaitRecovery?.(
+        AndroidCtrlProxyClient.OBSERVE_RECOVERY_WAIT_MS,
+        signal,
+      )) !== "recovered"
+    ) {
+      return result;
+    }
+    return this.getAndroidViewHierarchy(
+      queryOptions,
+      perf,
+      skipWaitForFresh,
+      minTimestamp,
+      signal,
+      timeoutMs,
+    );
   }
 
   /**
@@ -276,7 +337,16 @@ export class ViewHierarchy implements ViewHierarchyInterface {
         logger.debug(
           `[VIEW_HIERARCHY] Successfully retrieved hierarchy from accessibility service in ${duration}ms`,
         );
-        return this.prepareHierarchyForResponse(accessibilityHierarchy);
+        const prepared = this.prepareHierarchyForResponse(accessibilityHierarchy);
+        if (prepared.hierarchy.transportFailure) {
+          prepared.hierarchy.unavailableReason =
+            this.accessibilityServiceClient.isRecoveryInFlight?.()
+              ? "service_recovering"
+              : "connection_lost";
+        } else if (prepared.ctrlProxyIncomplete && !prepared.hierarchy.node) {
+          prepared.hierarchy.unavailableReason = "incomplete_capture";
+        }
+        return prepared;
       }
 
       // Accessibility service returned null. Every null return from
@@ -297,6 +367,13 @@ export class ViewHierarchy implements ViewHierarchyInterface {
             timeoutMs,
           ),
           ...(signal?.aborted ? {} : { transportFailure: true }),
+          ...(signal?.aborted
+            ? {}
+            : {
+                unavailableReason: this.accessibilityServiceClient.isRecoveryInFlight?.()
+                  ? ("service_recovering" as const)
+                  : ("connection_lost" as const),
+              }),
         },
         updatedAt: this.timer.now(),
       };
@@ -326,6 +403,13 @@ export class ViewHierarchy implements ViewHierarchyInterface {
             timeoutMs,
           ),
           ...(transportFailure ? { transportFailure: true } : {}),
+          ...(transportFailure
+            ? {
+                unavailableReason: this.accessibilityServiceClient.isRecoveryInFlight?.()
+                  ? ("service_recovering" as const)
+                  : ("connection_lost" as const),
+              }
+            : {}),
         },
         updatedAt: this.timer.now(),
       };

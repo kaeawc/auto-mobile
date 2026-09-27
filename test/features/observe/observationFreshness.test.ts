@@ -55,7 +55,30 @@ describe("computeFreshness", () => {
       const v = computeFreshness({ actualTimestamp: NOW, now: NOW, unavailable: true });
       expect(v.isFresh).toBe(false);
       expect(v.warning).toContain("could not be retrieved");
+      expect(v.unavailableReason).toBe("unknown");
     });
+
+    test.each(["connection_lost", "runner_not_running"] as const)(
+      "carries %s and detail only on unavailable verdicts",
+      (reason) => {
+        const unavailable = computeFreshness({
+          now: NOW,
+          unavailable: true,
+          unavailableReason: reason,
+          unavailableDetail: "runner died",
+        });
+        expect(unavailable.unavailableReason).toBe(reason);
+        expect(unavailable.unavailableDetail).toBe("runner died");
+        expect(unavailable.warning).toContain(reason);
+        const available = computeFreshness({
+          now: NOW,
+          actualTimestamp: NOW,
+          verified: true,
+          unavailableReason: reason,
+        });
+        expect(available.unavailableReason).toBeUndefined();
+      },
+    );
 
     test("the budget boundary is exclusive on the fresh side", () => {
       const at = DEFAULT_MAX_OBSERVATION_AGE_MS;

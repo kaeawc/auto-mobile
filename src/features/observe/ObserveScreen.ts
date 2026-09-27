@@ -882,7 +882,11 @@ export class RealObserveScreen implements ObserveScreen {
         unavailable:
           !hierarchyPlatformValid ||
           result.viewHierarchy?.hierarchy === undefined ||
-          result.viewHierarchy?.hierarchy?.error !== undefined,
+          result.viewHierarchy?.hierarchy?.error !== undefined ||
+          (result.viewHierarchy?.ctrlProxyIncomplete === true &&
+            !result.viewHierarchy.hierarchy.node),
+        unavailableReason: result.viewHierarchy?.hierarchy?.unavailableReason,
+        unavailableDetail: result.viewHierarchy?.hierarchy?.unavailableDetail,
         missingForegroundWindow: resolveMissingForegroundWindow(result),
         statusBarOnlyHierarchy: await this.resolveStatusBarOnlyHierarchy(
           result,

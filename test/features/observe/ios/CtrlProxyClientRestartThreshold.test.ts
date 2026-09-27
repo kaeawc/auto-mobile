@@ -88,7 +88,7 @@ describe("IOSCtrlProxyClient restart threshold", () => {
     expect(fakeManager.forceRestartCount).toBe(1);
   });
 
-  test("restarts again after each three further failed handshakes", async () => {
+  test("restarts again after each three further failed handshakes only until budget exhaustion", async () => {
     const fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
 
@@ -110,15 +110,56 @@ describe("IOSCtrlProxyClient restart threshold", () => {
     await new Promise((resolve) => fakeTimer.setTimeout(resolve, 10));
     expect(fakeManager.forceRestartCount).toBe(1);
 
-    // Background reconnects no longer consume the foreground attempt budget,
-    // so these six caller dials reach two further restart thresholds.
-    fakeTimer.advanceTime(11000);
-
-    for (let i = 0; i < 6; i++) {
+    // Runner launch succeeds, but each background handshake fails. Backoff
+    // admits at most two more attempts, then exhaustion denies all later ones.
+    for (const delay of [30_000, 60_000]) {
+      fakeTimer.advanceTime(delay);
+      for (let i = 0; i < 6; i++) {
+        await client.ensureConnected();
+      }
+      await new Promise((resolve) => fakeTimer.setTimeout(resolve, 10));
+    }
+    expect(fakeManager.forceRestartCount).toBe(3);
+    expect(fakeManager.getForcedRestartBudget().snapshot()).toMatchObject({
+      state: "exhausted",
+      attempts: 3,
+    });
+    fakeTimer.advanceTime(3_600_000);
+    for (let i = 0; i < 12; i++) {
       await client.ensureConnected();
     }
-    await new Promise((resolve) => fakeTimer.setTimeout(resolve, 10));
     expect(fakeManager.forceRestartCount).toBe(3);
+  });
+
+  test("a genuinely successful reconnect clears failed restart attempts after rearm", async () => {
+    const fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+    const fakeManager = createFakeManager(fakeTimer);
+    let reconnectWorks = false;
+    const failed = createInstantFailureWebSocketFactory(fakeTimer);
+    const succeeds = createSuccessWebSocketFactory(fakeTimer);
+    client = IOSCtrlProxyClient.createForTesting(
+      testDevice,
+      8765,
+      (url) => (reconnectWorks ? succeeds(url) : failed(url)),
+      fakeTimer,
+      () => fakeManager,
+    );
+    for (const delay of [0, 30_000, 60_000]) {
+      fakeTimer.advanceTime(delay);
+      client.ensureRecoveryStarted();
+      expect(await client.awaitRecovery(20_000)).toBe("failed");
+    }
+    expect(fakeManager.getForcedRestartBudget().snapshot().state).toBe("exhausted");
+    // A fresh device-presence event is the existing external rearm seam.
+    fakeManager.getForcedRestartBudget().rearm("device reappeared");
+    reconnectWorks = true;
+    client.ensureRecoveryStarted();
+    expect(await client.awaitRecovery(20_000)).toBe("recovered");
+    expect(fakeManager.getForcedRestartBudget().snapshot()).toMatchObject({
+      state: "idle",
+      attempts: 0,
+    });
   });
 
   test("a permanently gone device triggers only one automatic restart", async () => {
@@ -349,6 +390,54 @@ describe("IOSCtrlProxyClient restart threshold", () => {
       bootedDeviceLister = async () => [testDevice];
       await driveFailuresPastThreshold(client, fakeTimer);
       expect(manager.getCallCount("forceRestart")).toBeGreaterThan(0);
+    });
+
+    test("discovery rejection fails closed without starting or charging a restart", async () => {
+      const fakeTimer = new FakeTimer();
+      fakeTimer.enableAutoAdvance();
+      const manager = new FakeIOSCtrlProxyManager(fakeTimer);
+      client = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        8765,
+        createInstantFailureWebSocketFactory(fakeTimer),
+        fakeTimer,
+        () => manager,
+        async () => {
+          throw new Error("simctl unavailable");
+        },
+      );
+      client.ensureRecoveryStarted();
+      expect(await client.awaitRecovery(20_000)).toBe("failed");
+      expect(manager.getCallCount("forceRestart")).toBe(0);
+      expect(manager.getForcedRestartBudget().snapshot()).toMatchObject({
+        state: "idle",
+        attempts: 0,
+      });
+    });
+
+    test("awaitRecovery uses the injected timer and leaves an unfinished restart bounded", async () => {
+      const fakeTimer = new FakeTimer();
+      const manager = new FakeIOSCtrlProxyManager(fakeTimer);
+      let releaseDiscovery: ((devices: BootedDevice[]) => void) | undefined;
+      const discovery = new Promise<BootedDevice[]>((resolve) => {
+        releaseDiscovery = resolve;
+      });
+      client = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        8765,
+        createInstantFailureWebSocketFactory(fakeTimer),
+        fakeTimer,
+        () => manager,
+        () => discovery,
+      );
+      expect(await client.awaitRecovery(20_000)).toBe("not_recovering");
+      client.ensureRecoveryStarted();
+      const waiting = client.awaitRecovery(20_000);
+      expect(fakeTimer.getPendingTimeouts()).toContain(20_000);
+      fakeTimer.advanceTime(20_000);
+      expect(await waiting).toBe("timed_out");
+      expect(manager.getCallCount("forceRestart")).toBe(0);
+      releaseDiscovery?.([]);
     });
 
     test("a late WebSocket connection cannot clear removal suspension", async () => {

@@ -1342,6 +1342,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   // Re-entry guard: a recovery burst that has not settled must not start a
   // second, overlapping recovery attempt.
   private isRecoveringService: boolean = false;
+  private recoveryPromise: Promise<boolean> | null = null;
+  public static readonly OBSERVE_RECOVERY_WAIT_MS = 10_000;
   private readonly serviceManagerFactory: AndroidServiceManagerFactory;
 
   // Delegate instances (lazy initialized)
@@ -2210,10 +2212,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       `[AndroidCtrlProxyClient] Triggering CtrlProxy recovery after ${this.consecutiveConnectionFailures} connection failures`,
     );
 
-    void this.recoverAccessibilityService()
+    const recovery = this.recoverAccessibilityService()
       .then(async (outcome) => {
         if (outcome === "failed" || outcome === "unavailable") {
-          return;
+          return false;
         }
         // A resolved outcome (service already healthy, or actually repaired)
         // clears the failure counter so a fresh run of failures is required
@@ -2242,13 +2244,63 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
             `[AndroidCtrlProxyClient] WebSocket reconnect failed after CtrlProxy recovery`,
           );
         }
+        return connected && this.isConnected();
       })
       .catch((error) => {
         logger.warn(`[AndroidCtrlProxyClient] CtrlProxy recovery failed: ${error}`);
+        return false;
       })
       .finally(() => {
         this.isRecoveringService = false;
+        this.recoveryPromise = null;
       });
+    this.recoveryPromise = recovery;
+  }
+
+  /** Start a recovery for this observed transport failure if none is pending. */
+  public ensureRecoveryStarted(): void {
+    if (!this.closed && this.autoReconnectEnabled && !this.recoveryPromise) {
+      this.triggerServiceRecovery();
+    }
+  }
+
+  public isRecoveryInFlight(): boolean {
+    return this.recoveryPromise !== null;
+  }
+
+  public async awaitRecovery(
+    budgetMs: number,
+    signal?: AbortSignal,
+  ): Promise<"recovered" | "not_recovering" | "failed" | "timed_out"> {
+    const recovery = this.recoveryPromise;
+    if (!recovery) {
+      return "not_recovering";
+    }
+    if (signal?.aborted) {
+      return "timed_out";
+    }
+    let timeout: NodeJS.Timeout | undefined;
+    let onAbort: (() => void) | undefined;
+    const deadline = new Promise<"timed_out">((resolve) => {
+      timeout = this.timer.setTimeout(() => resolve("timed_out"), budgetMs);
+      onAbort = () => resolve("timed_out");
+      signal?.addEventListener("abort", onAbort, { once: true });
+    });
+    try {
+      return await Promise.race([
+        recovery.then(
+          (connected) => (connected ? "recovered" : "failed") as "recovered" | "failed",
+        ),
+        deadline,
+      ]);
+    } finally {
+      if (timeout) {
+        this.timer.clearTimeout(timeout);
+      }
+      if (onAbort) {
+        signal?.removeEventListener("abort", onAbort);
+      }
+    }
   }
 
   /**

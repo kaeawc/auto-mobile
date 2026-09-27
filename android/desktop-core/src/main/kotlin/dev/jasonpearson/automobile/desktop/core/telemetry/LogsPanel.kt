@@ -61,10 +61,16 @@ import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.conflate
+import kotlinx.coroutines.flow.filter
 import kotlinx.serialization.Serializable
 
-/** Exact Android logcat tags emitted by CtrlProxy itself, hidden by default to expose app logs. */
+/**
+ * Exact Android logcat tags emitted by CtrlProxy itself, hidden by default to expose app logs.
+ * `MainActivity` is deliberately excluded because it is also a common app tag. Consequently,
+ * CtrlProxy's own `MainActivity` rows show by default alongside app rows; fixing that trade-off
+ * requires package or process identity on [TelemetryDisplayEvent.Log], which is out of scope here.
+ */
 val AUTO_MOBILE_INTERNAL_TAGS: Set<String> =
   setOf(
     "ViewHierarchyExtractor",
@@ -348,18 +354,34 @@ fun LogsPanel(
   // Surface follow-intent transitions to the caller (observation seam; see [onFollowTailChange]).
   LaunchedEffect(followTail) { onFollowTailChange(followTail) }
 
-  // Follow the tail when following: fires on every appended row (via appendCount, which advances
-  // even at the buffer cap) and on filter/platform/internal-tag visibility changes (which
-  // re-anchor the list), so the newest visible row stays in view without fighting a scrolled-up
-  // user.
-  LaunchedEffect(appendCount, query, tag, enabledLevels, showInternalTags, platform, followTail) {
-    if (followTail && filtered.isNotEmpty()) {
-      val lastIndex = filtered.lastIndex
-      // Wait until LazyColumn has measured the new filtered item count before requesting the tail.
-      snapshotFlow { resolvedListState.layoutInfo.totalItemsCount }.first { it > lastIndex }
-      // LayoutInfo changes during measure; defer until the next frame to avoid a nested measure.
-      withFrameNanos {}
-      resolvedListState.scrollToItem(lastIndex)
+  // Keep one collector alive across appends: restarting a frame-waiting effect for every row can
+  // starve tail-follow while rows arrive faster than frames. The append signal also changes when
+  // the bounded buffer is full and its size and measured item count stay constant.
+  LaunchedEffect(
+    resolvedListState,
+    activeDeviceId,
+    query,
+    tag,
+    enabledLevels,
+    showInternalTags,
+    platform,
+    followTail,
+  ) {
+    if (followTail) {
+      snapshotFlow {
+        Triple(appendCount, filtered.lastIndex, resolvedListState.layoutInfo.totalItemsCount)
+      }
+        .filter { (_, lastIndex, measuredCount) ->
+          lastIndex >= 0 && measuredCount > lastIndex
+        }
+        .conflate()
+        .collect {
+          // LayoutInfo changes during measure; defer until the next frame to avoid a nested
+          // measure. Read the tail after waiting so an append during this frame wait is included.
+          withFrameNanos {}
+          val lastIndex = filtered.lastIndex
+          if (lastIndex >= 0) resolvedListState.scrollToItem(lastIndex)
+        }
     }
   }
 

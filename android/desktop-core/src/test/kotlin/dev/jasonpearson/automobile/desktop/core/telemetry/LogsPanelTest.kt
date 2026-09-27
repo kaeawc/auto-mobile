@@ -79,7 +79,7 @@ class LogsPanelTest {
   }
 
   @Test
-  fun `internal CtrlProxy tags are excluded independently of other filters`() {
+  fun `internal CtrlProxy tags are excluded while MainActivity remains visible by default`() {
     val internal = log(4, "ViewHierarchyExtractor", "matching message", 1)
     val mainActivity = log(4, "MainActivity", "matching app message", 3)
     val app = log(4, "MyAppTag", "matching message", 2)
@@ -436,6 +436,35 @@ class LogsPanelTest {
       listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index == 30
     }
     assertEquals(30, listState.layoutInfo.visibleItemsInfo.last().index)
+  }
+
+  @Test
+  fun `tail-follow reaches the newest row after a burst between frames`() = runComposeUiTest {
+    val fake = FakeTelemetryPushClient()
+    val listState = LazyListState()
+    mainClock.autoAdvance = false
+    setContent {
+      MaterialTheme {
+        Box(Modifier.height(120.dp)) {
+          LogsPanel(telemetryPushClient = fake, activeDeviceId = "dev-1", listState = listState)
+        }
+      }
+    }
+
+    // Feed a burst, then another burst after only one manually advanced frame. No frame is
+    // advanced per row, so append-driven effect restarts would keep interrupting their frame wait.
+    repeat(25) { index ->
+      fake.emitEvent(log(4, "Burst", "burst row $index", index.toLong()))
+    }
+    mainClock.advanceTimeByFrame()
+    repeat(25) { index ->
+      val row = index + 25
+      fake.emitEvent(log(4, "Burst", "burst row $row", row.toLong()))
+    }
+    mainClock.advanceTimeByFrame()
+
+    assertEquals(49, listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index)
+    onNodeWithText("burst row 49").assertIsDisplayed()
   }
 
   @Test

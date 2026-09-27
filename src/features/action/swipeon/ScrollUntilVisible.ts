@@ -41,10 +41,20 @@ import type { ProgressCallback } from "../BaseVisualChange";
 
 const SCROLL_IDLE_POLL_INTERVAL_MS = 150;
 
-function matchedSourceElement(result: ElementResolution): Element | null {
+function matchedSourceElement(
+  result: ElementResolution,
+  selector: ResolverSelector,
+): Element | null {
   const sources = result.matches.find((match) => match.node === result.chosen)?.sourceNodes;
-  const matched =
-    sources?.find((source) => Object.keys(source.textSources).length > 0) ?? sources?.[0];
+  const query = selector.text?.trim().toLowerCase();
+  const matched = query
+    ? sources?.find((source) =>
+        Object.values(source.textSources).some((value) => {
+          const actual = value.trim().toLowerCase();
+          return result.matchMode === "contains" ? actual.includes(query) : actual === query;
+        }),
+      )
+    : sources?.[0];
   return matched?.element ?? result.chosen?.element ?? null;
 }
 
@@ -130,7 +140,9 @@ export class ScrollUntilVisible {
     if (result.error) {
       throw new ActionableError(result.error);
     }
-    return preserveMatchedNode ? matchedSourceElement(result) : (result.chosen?.element ?? null);
+    return preserveMatchedNode
+      ? matchedSourceElement(result, selector)
+      : (result.chosen?.element ?? null);
   }
 
   async execute(

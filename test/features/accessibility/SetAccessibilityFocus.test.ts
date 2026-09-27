@@ -133,6 +133,26 @@ describe("SetAccessibilityFocus", () => {
     expect(service.calls).toEqual([{ method: "set", resourceId: "com.example:id/settings" }]);
   });
 
+  test("text selector does not focus a substring near miss", async () => {
+    observeScreen.setObserveResult(
+      makeObserveResult(
+        makeViewHierarchy([
+          {
+            $: {
+              text: "Settings",
+              "resource-id": "com.example:id/settings",
+              bounds: bounds(10, 20, 200, 60),
+            },
+          },
+        ]),
+      ),
+    );
+    await expect(makeFeature().execute({ action: "set", text: "Set" })).rejects.toThrow(
+      "Element not found",
+    );
+    expect(service.calls).toEqual([]);
+  });
+
   test("text focus sends the matched child's native ID instead of its clickable row", async () => {
     observeScreen.setObserveResult(
       makeObserveResult(

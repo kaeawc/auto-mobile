@@ -131,7 +131,7 @@ export class SetAccessibilityFocus {
     const selector = options.resourceId
       ? { elementId: options.resourceId }
       : options.text
-        ? { text: options.text }
+        ? { text: options.text, match: "exact" as const }
         : { contentDescription: options.contentDesc, match: "exact" as const };
     const resolution = this.resolver.resolve(
       { id: String(hierarchy.updatedAt ?? "accessibility-focus"), nodes },

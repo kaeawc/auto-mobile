@@ -1,5 +1,5 @@
 import { createServer, Server as NetServer, Socket } from "node:net";
-import { existsSync, statSync } from "node:fs";
+import { existsSync, statSync, unlinkSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import path from "node:path";
 import {
@@ -91,18 +91,25 @@ export abstract class BaseSocketServer {
       return;
     }
 
+    const originalIdentity = this.readSocketFileIdentity();
     const reachable = await this.socketReachability.isReachable(
       this.socketPath,
       AUX_SOCKET_BIND_LIVENESS_PROBE_TIMEOUT_MS,
     );
-    if (reachable) {
+    if (!reachable && !existsSync(this.socketPath)) {
+      return;
+    }
+    // Option 1: compare dev+ino across the async probe, then unlink synchronously
+    // without another event-loop yield. A successor's rebound path must survive;
+    // reuse the close-time identity check instead of adding a per-stream lock.
+    if (reachable || !this.isOwnedSocketFile(originalIdentity)) {
       throw new ActionableError(
         `[${this.serverName}] Refusing to bind auxiliary socket ${this.socketPath}: another daemon is listening. Stop the daemon that owns it or use \`--daemon restart\` to replace it.`,
       );
     }
 
     try {
-      await unlink(this.socketPath);
+      unlinkSync(this.socketPath);
     } catch (error) {
       if (error instanceof Error && "code" in error && error.code === "ENOENT") {
         // The path disappeared after the probe; there is nothing left to reclaim.
@@ -165,15 +172,12 @@ export abstract class BaseSocketServer {
     }
   }
 
-  private isOwnedSocketFile(): boolean {
-    if (!this.socketFileIdentity || !existsSync(this.socketPath)) {
+  private isOwnedSocketFile(identity = this.socketFileIdentity): boolean {
+    if (!identity || !existsSync(this.socketPath)) {
       return false;
     }
     const currentIdentity = this.readSocketFileIdentity();
-    return (
-      currentIdentity?.dev === this.socketFileIdentity.dev &&
-      currentIdentity.ino === this.socketFileIdentity.ino
-    );
+    return currentIdentity?.dev === identity.dev && currentIdentity.ino === identity.ino;
   }
 
   /**

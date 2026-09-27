@@ -1,6 +1,7 @@
 import { Socket } from "node:net";
 import os from "node:os";
 import path from "node:path";
+import { resolvePathFromDaemonLaunchWorkingDirectory } from "../../utils/workingDirectory";
 import { testOverrides } from "../../utils/testOverrides";
 
 /**
@@ -83,9 +84,11 @@ export function getSocketPath(config: SocketServerConfig): string {
 
 /** Resolve the shared directory for auxiliary daemon sockets at use time. */
 export function resolveAuxSocketDir(env: NodeJS.ProcessEnv = process.env): string {
-  return (
-    env.AUTOMOBILE_AUX_SOCKET_DIR ??
-    testOverrides.auxSocketDir ??
-    path.join(os.homedir(), ".auto-mobile")
-  );
+  if (testOverrides.auxSocketDir !== undefined) {
+    return testOverrides.auxSocketDir;
+  }
+  const override = env.AUTOMOBILE_AUX_SOCKET_DIR?.trim();
+  return override
+    ? resolvePathFromDaemonLaunchWorkingDirectory(override, env)
+    : path.join(os.homedir(), ".auto-mobile");
 }

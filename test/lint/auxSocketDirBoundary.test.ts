@@ -1,6 +1,6 @@
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
-import { spawnSync } from "node:child_process";
+import { parseSync, Visitor, type Expression, type MemberExpression } from "oxc-parser";
 import path from "node:path";
 
 const TEST_DIR = path.join(import.meta.dir, "..");
@@ -29,56 +29,142 @@ function testFiles(dir: string): string[] {
   });
 }
 
-function candidateFiles(): string[] {
-  const matches = spawnSync(
-    "rg",
-    ["-l", "--glob", "*.test.ts", "homedir|defaultPath|getSocketPath", TEST_DIR],
-    { encoding: "utf8" },
-  );
-  if (!matches.error && (matches.status === 0 || matches.status === 1)) {
-    return matches.stdout.trim().split("\n").filter(Boolean);
-  }
-  // Keep the guard portable when ripgrep is unavailable.
-  return testFiles(TEST_DIR);
-}
-
 function normalizeRelativePath(relative: string): string {
   return relative.split(path.sep).join("/").split("\\").join("/");
 }
 
-const homeSocket =
-  /(?:path\.)?join\s*\(\s*(?:os\.)?homedir\s*\(\s*\)\s*,\s*["']\.auto-mobile["']\s*,\s*["'][^"']+\.sock["']\s*\)/g;
-const explicitDefault = new RegExp(
-  `new\\s+(?:${SERVER_CLASSES.join("|")})SocketServer\\s*\\(\\s*(?:[A-Z_]+_SOCKET_CONFIG\\.defaultPath|getSocketPath\\s*\\()`,
-  "g",
-);
+function memberName(node: MemberExpression): string | undefined {
+  if (!node.computed && node.property.type === "Identifier") {
+    return node.property.name;
+  }
+  return node.property.type === "Literal" && typeof node.property.value === "string"
+    ? node.property.value
+    : undefined;
+}
+
+function callName(node: Expression): string | undefined {
+  if (node.type === "Identifier") {
+    return node.name;
+  }
+  return node.type === "MemberExpression" ? memberName(node) : undefined;
+}
+
+function isHomeSocket(node: Expression): boolean {
+  if (
+    node.type !== "CallExpression" ||
+    !["join", "resolve"].includes(callName(node.callee) ?? "")
+  ) {
+    return false;
+  }
+  const [home, directory, file] = node.arguments;
+  return (
+    home?.type === "CallExpression" &&
+    callName(home.callee) === "homedir" &&
+    directory?.type === "Literal" &&
+    directory.value === ".auto-mobile" &&
+    file?.type === "Literal" &&
+    typeof file.value === "string" &&
+    file.value.endsWith(".sock")
+  );
+}
 
 function violations(source: string): string[] {
-  const found: string[] = [];
-  for (const [pattern, label] of [
-    [homeSocket, "home socket path"],
-    [explicitDefault, "explicit production socket path"],
-  ] as const) {
-    pattern.lastIndex = 0;
-    for (const match of source.matchAll(pattern)) {
-      const line = source.slice(0, match.index).split("\n").length;
-      found.push(`${line}: ${label}`);
-    }
+  const { program, errors } = parseSync("boundary.test.ts", source);
+  if (errors.length > 0) {
+    return errors.map((error) => `parse error: ${error.message}`);
   }
+  const found: string[] = [];
+  const scopes: Map<string, boolean>[] = [new Map()];
+  const isDefaultPath = (node: Expression): boolean => {
+    if (node.type === "Identifier") {
+      return scopes.findLast((scope) => scope.has(node.name))?.get(node.name) ?? false;
+    }
+    if (node.type === "CallExpression") {
+      return callName(node.callee) === "getSocketPath";
+    }
+    return node.type === "MemberExpression" && memberName(node) === "defaultPath";
+  };
+  const report = (start: number, label: string): void => {
+    found.push(`${source.slice(0, start).split("\n").length}: ${label}`);
+  };
+  new Visitor({
+    BlockStatement() {
+      scopes.push(new Map());
+    },
+    "BlockStatement:exit"() {
+      scopes.pop();
+    },
+    VariableDeclarator(node) {
+      if (node.id.type === "Identifier") {
+        scopes[scopes.length - 1].set(node.id.name, node.init ? isDefaultPath(node.init) : false);
+      }
+    },
+    NewExpression(node) {
+      const name = callName(node.callee);
+      if (!SERVER_CLASSES.some((server) => name === `${server}SocketServer`)) {
+        return;
+      }
+      const first = node.arguments[0];
+      if (!first || (first.type !== "SpreadElement" && isDefaultPath(first))) {
+        report(node.start, "explicit production socket path");
+      }
+    },
+    CallExpression(node) {
+      if (isHomeSocket(node)) {
+        report(node.start, "home socket path");
+      }
+      const first = node.arguments[0];
+      if (
+        callName(node.callee) === "listen" &&
+        first &&
+        first.type !== "SpreadElement" &&
+        isDefaultPath(first)
+      ) {
+        report(node.start, "explicit production socket path");
+      }
+    },
+  }).visit(program);
   return found;
 }
 
 describe("auxiliary socket test boundary (issue #7616)", () => {
+  test.each([
+    "new DeviceDataStreamSocketServer()",
+    "const socket = CONFIG.defaultPath; new DeviceDataStreamSocketServer(socket)",
+    "const socket = DEVICE_DATA_STREAM_SOCKET_CONFIG.defaultPath; new DeviceDataStreamSocketServer(socket)",
+    'new DeviceDataStreamSocketServer(DEVICE_DATA_STREAM_SOCKET_CONFIG["defaultPath"])',
+    'path.resolve(os.homedir(), ".auto-mobile", "observation-stream.sock")',
+    'const socket = DEVICE_DATA_STREAM_SOCKET_CONFIG["defaultPath"]; peer.listen(socket)',
+  ])("rejects production socket spelling: %s", (source) => {
+    expect(violations(source)).toHaveLength(1);
+  });
+
   test("normalizes Windows relative paths to POSIX form", () => {
     expect(normalizeRelativePath("lint\\auxSocketDirBoundary.test.ts")).toBe(
       "lint/auxSocketDirBoundary.test.ts",
     );
   });
 
-  test("unit tests do not target production auxiliary socket paths", () => {
-    const files = candidateFiles();
+  test("ignores source strings, comments, and temporary path aliases", () => {
+    expect(
+      violations(`
+      // new DeviceDataStreamSocketServer()
+      const fixture = 'new DeviceDataStreamSocketServer()';
+      const socket = join(directory, "stream.sock");
+      new DeviceDataStreamSocketServer(socket);
+      const defaultPath = CONFIG.temporaryPath;
+      peer.listen(defaultPath);
+    `),
+    ).toEqual([]);
+  });
+
+  let offenders: string[];
+  // Parse every test AST once during setup; individual assertions stay below
+  // the 100ms budget without a text prefilter that could miss new spellings.
+  beforeAll(() => {
+    const files = testFiles(TEST_DIR);
     expect(files.length).toBeGreaterThan(0);
-    const offenders = files.flatMap((file) => {
+    offenders = files.flatMap((file) => {
       const relative = normalizeRelativePath(path.relative(TEST_DIR, file));
       // The guard's own string fixtures intentionally contain forbidden examples.
       if (relative === "lint/auxSocketDirBoundary.test.ts") {
@@ -96,6 +182,9 @@ describe("auxiliary socket test boundary (issue #7616)", () => {
         })
         .map((violation) => `${relative}:${violation}`);
     });
+  });
+
+  test("unit tests do not target production auxiliary socket paths", () => {
     expect(offenders).toEqual([]);
     expect(
       violations('path.join(os.homedir(), ".auto-mobile", "observation-stream.sock")'),

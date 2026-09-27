@@ -155,6 +155,7 @@ export class ElementResolver {
     intent: ResolutionIntent,
     availableNodes: readonly SearchableEntry[],
     boundary?: SearchableEntry,
+    preserveTextScope = false,
   ): ElementResolution {
     const seen = new Set<SearchableEntry["source"]>();
     let nodes = [...availableNodes]
@@ -174,6 +175,7 @@ export class ElementResolver {
         { action: "inspect" },
         nodes,
         scope,
+        true,
       );
       if (!container.chosen) {
         return { ...container, error: container.error ?? "Container not found" };
@@ -196,7 +198,18 @@ export class ElementResolver {
       nodes = siblings.nodes;
     }
     const matched = this.match(nodes, selector, intent);
-    if (selector.text !== undefined || selector.contentDescription !== undefined) {
+    if (preserveTextScope) {
+      matched.matches = matched.matches.filter(
+        ({ node }) =>
+          !matched.matches.some(
+            ({ node: other }) => other !== node && isWithin(other, node, snapshot.nodes),
+          ),
+      );
+    }
+    if (
+      !preserveTextScope &&
+      (selector.text !== undefined || selector.contentDescription !== undefined)
+    ) {
       matched.matches = this.promoteTextMatches(matched.matches, snapshot, scope, intent);
     }
     const result: ElementResolution = {
@@ -475,10 +488,14 @@ export class ElementResolver {
       fields(node).some((field) => normalize(field, selector.caseSensitive) === query),
     );
     const requested = intent.matchMode ?? selector.match;
+    const eligibleExact =
+      intent.action === "input" || intent.action === "focus"
+        ? exact.some((node) => eligible(node, intent))
+        : exact.length > 0;
     const matchMode =
       intent.negative && requested !== "regex"
         ? "exact"
-        : (requested ?? (exact.length ? "exact" : "contains"));
+        : (requested ?? (eligibleExact ? "exact" : "contains"));
     let regex: RegExp | undefined;
     if (matchMode === "regex") {
       try {
@@ -539,7 +556,7 @@ export class ElementResolver {
     }
     const qualified = qualifiedId(query);
     const direct = nodes.filter((node) => node.nodeKey === query);
-    if (qualified && direct.length) {
+    if (direct.length) {
       return {
         matches: direct.map((node) => ({
           node,

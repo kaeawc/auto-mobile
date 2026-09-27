@@ -108,7 +108,10 @@ test("openLink chooser path passes the exact package to the handler and surfaces
     name: "Android",
   } as BootedDevice;
   const calls: unknown[][] = [];
-  const chosen = makeObservation("selected-app");
+  const chosen = {
+    ...makeObservation("selected-app"),
+    viewHierarchy: { hierarchy: {}, packageName: "com.example.app", updatedAt: 200 },
+  } as ObserveResult;
   const result = await selectAndroidOpenLinkChooser(
     device,
     "com.example.app",
@@ -116,12 +119,55 @@ test("openLink chooser path passes the exact package to the handler and surfaces
     {
       execute: async (...args) => {
         calls.push(args);
-        return { success: true, detected: true, action: "custom", observation: chosen };
+        return {
+          success: true,
+          detected: true,
+          action: "custom",
+          packageVerified: false,
+          tappedAt: 199,
+          observation: chosen,
+        };
       },
     },
   );
   expect(calls).toEqual([["custom", "com.example.app"]]);
   expect(result.observation).toBe(chosen);
+  expect(result.success).toBe(true);
+});
+
+test("openLink accepts an exact-package chooser tap without post-tap confirmation", async () => {
+  const device = { platform: "android", deviceId: "fake", name: "Android" } as BootedDevice;
+  const result = await selectAndroidOpenLinkChooser(
+    device,
+    "com.example.app",
+    { success: true, url: "example://item" },
+    { execute: async () => ({ success: true, detected: true, packageVerified: true }) },
+  );
+  expect(result.success).toBe(true);
+});
+
+test("openLink rejects a pre-tap cached label-only chooser observation", async () => {
+  const device = { platform: "android", deviceId: "fake", name: "Android" } as BootedDevice;
+  const stale = {
+    ...makeObservation("chooser"),
+    viewHierarchy: { hierarchy: {}, packageName: "com.example.app", updatedAt: 100 },
+  } as ObserveResult;
+  const result = await selectAndroidOpenLinkChooser(
+    device,
+    "com.example.app",
+    { success: true, url: "example://item" },
+    {
+      execute: async () => ({
+        success: true,
+        detected: true,
+        packageVerified: false,
+        tappedAt: 101,
+        observation: stale,
+      }),
+    },
+  );
+  expect(result.success).toBe(false);
+  expect(result.error).toContain("post-tap hierarchy is stale");
 });
 
 test("openLink chooser path reports an expected chooser that never appeared", async () => {

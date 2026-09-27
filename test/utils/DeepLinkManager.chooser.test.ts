@@ -231,7 +231,8 @@ describe("custom intent chooser label fallback", () => {
     const result = await manager.handleIntentChooser(chooser as any, "custom", target);
     expect(result.success).toBe(true);
     expect(result.packageVerified).toBe(false);
-    expect(result.tappedAt).toBe(2000);
+    // Expose the raw second; only the internal polling floor advances to 2000.
+    expect(result.tappedAt).toBe(1000);
     expect(floors).toEqual([101, 2000]);
   });
   test("does not claim a shared-label row selected the requested package", async () => {
@@ -691,7 +692,8 @@ test("accepts a fresh target capture within the tap's device-second", async () =
   );
   const result = await manager.handleIntentChooser(chooser as any, "custom", target);
   expect(result.success).toBe(true);
-  expect(result.tappedAt).toBe(2000);
+  // openLink compares against this raw second, not the internal 2000ms floor.
+  expect(result.tappedAt).toBe(1000);
   expect(floors).toEqual([101, 102, 2000, 2000]);
   expect(timer.getSleepHistory()).toEqual([50]);
 });
@@ -735,8 +737,12 @@ test("accepts a target app screen containing chooser button text and IDs", async
 test("deduplicates a stable chooser row visible in overlapping captures", async () => {
   const adb = new FakeAdbExecutor();
   const stableRow = (top: number) => ({ ...row(target, top), "view-id": "s2-0123456789abcdef" });
-  const first = chooserPage([stableRow(140)], 100);
-  const second = chooserPage([stableRow(40), row("com.other.app", 140)], 101);
+  const anchor = (top: number) => ({
+    ...row("com.other.app", top),
+    "view-id": "s2-aaaaaaaaaaaaaaaa",
+  });
+  const first = chooserPage([anchor(100), stableRow(140)], 100);
+  const second = chooserPage([anchor(0), stableRow(40)], 101);
   const manager = new DeepLinkManager(
     { platform: "android", deviceId: "fake", name: "fake" },
     adb,
@@ -753,6 +759,73 @@ test("deduplicates a stable chooser row visible in overlapping captures", async 
   const result = await manager.handleIntentChooser(first as any, "custom", target);
   expect(result.success).toBe(true);
   expect(adb.getExecutedCommands().at(-1)).toBe("shell input tap 50 60");
+});
+
+test("deduplicates a clamped chooser scroll using another row's observed displacement", async () => {
+  const adb = new FakeAdbExecutor();
+  const stableRow = (packageName: string, top: number, id: string) => ({
+    ...row(packageName, top),
+    "view-id": id,
+  });
+  const first = chooserPage(
+    [
+      stableRow("com.other.app", 80, "s2-aaaaaaaaaaaaaaaa"),
+      stableRow(target, 140, "s2-bbbbbbbbbbbbbbbb"),
+    ],
+    100,
+  );
+  const second = chooserPage(
+    [
+      stableRow("com.other.app", 40, "s2-aaaaaaaaaaaaaaaa"),
+      stableRow(target, 100, "s2-bbbbbbbbbbbbbbbb"),
+    ],
+    101,
+  );
+  const manager = new DeepLinkManager(
+    { platform: "android", deviceId: "fake", name: "fake" },
+    adb,
+    null,
+    null,
+    undefined,
+    undefined,
+    {
+      getLabel: async () => null,
+      getFreshHierarchy: async (_device, _factory, floor) =>
+        ({ ...second, updatedAt: floor }) as any,
+    },
+  );
+  const result = await manager.handleIntentChooser(first as any, "custom", target);
+  expect(result.success).toBe(true);
+  expect(adb.getExecutedCommands()[0]).toBe("shell input swipe 50 150 50 50 350");
+  expect(adb.getExecutedCommands().at(-1)).toBe("shell input tap 50 120");
+});
+
+test("keeps a repeated stable target ambiguous without overlapping anchor rows", async () => {
+  const adb = new FakeAdbExecutor();
+  const stableTarget = (top: number) => ({
+    ...row(target, top),
+    "view-id": "s2-bbbbbbbbbbbbbbbb",
+  });
+  const first = chooserPage([row("com.other.before", 80), stableTarget(140)], 100);
+  const second = chooserPage([row("com.other.after", 40), stableTarget(100)], 101);
+  const manager = new DeepLinkManager(
+    { platform: "android", deviceId: "fake", name: "fake" },
+    adb,
+    null,
+    null,
+    undefined,
+    undefined,
+    {
+      getLabel: async () => null,
+      getFreshHierarchy: async (_device, _factory, floor) =>
+        ({ ...second, updatedAt: floor }) as any,
+    },
+  );
+  const result = await manager.handleIntentChooser(first as any, "custom", target);
+  expect(result.error).toContain("Ambiguous chooser rows");
+  expect(
+    adb.getExecutedCommands().filter((command) => command.startsWith("shell input tap")),
+  ).toEqual([]);
 });
 
 test("rejects identical stable label rows separated by chooser pages without tapping", async () => {

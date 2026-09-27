@@ -22,15 +22,18 @@ class SelectionTracker {
     composingEnd = candidatesEnd
   }
 
-  fun snapshot(connection: ImeConnection): TextSnapshot =
-    TextSnapshot(
-      textBeforeCursor = connection.textBeforeCursor(SNAPSHOT_WINDOW),
+  fun snapshot(connection: ImeConnection): TextSnapshot {
+    val before = connection.textBeforeCursorOrNull(SNAPSHOT_WINDOW)
+    return TextSnapshot(
+      textBeforeCursor = before.orEmpty(),
+      textBeforeCursorAvailable = before != null,
       textAfterCursor = connection.textAfterCursor(SNAPSHOT_WINDOW),
       selectionStart = selStart,
       selectionEnd = selEnd,
       composingStart = composingStart,
       composingEnd = composingEnd,
     )
+  }
 
   companion object {
     const val SNAPSHOT_WINDOW = 256

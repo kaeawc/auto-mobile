@@ -117,6 +117,10 @@ class ConfigurableTypingPolicy(private val behavior: TypingBehavior) : TypingPol
 
   private fun backspaceCommitted(snapshot: TextSnapshot): List<ImeOp> {
     val before = snapshot.textBeforeCursor
+    if (!snapshot.textBeforeCursorAvailable) {
+      return if (snapshot.selectionStart > 0) listOf(ImeOp.DeleteSurroundingText(1, 0))
+      else emptyList()
+    }
     if (before.isEmpty()) return emptyList()
     val deletedStart = ImeGraphemes.previousStart(before, before.length)
     val deletedWidth = before.length - deletedStart

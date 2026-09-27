@@ -37,6 +37,9 @@ class InputConnectionAdapter(
   override fun textBeforeCursor(max: Int): String =
     connection.getTextBeforeCursor(max, 0)?.toString().orEmpty()
 
+  override fun textBeforeCursorOrNull(max: Int): String? =
+    connection.getTextBeforeCursor(max, 0)?.toString()
+
   override fun textAfterCursor(max: Int): String =
     connection.getTextAfterCursor(max, 0)?.toString().orEmpty()
 }

@@ -212,6 +212,8 @@ run_lane() {
   run_lane integration
   [ "$status" -eq 0 ]
   [[ "$output" == *"--isolate"* ]]
+  [[ "$output" == *"test/server/proxyServerTransportFailure.integration.test.ts"* ]]
+  [[ "$output" == *"--path-ignore-patterns"*"proxyServerTransportFailure.integration.test.ts"* ]]
   [[ "$output" == *".integration.test.ts"* ]]
 }
 
@@ -318,7 +320,7 @@ run_lane() {
   run_lane all --test-name-pattern test/scripts
   [ "$status" -eq 0 ]
   [[ "$output" == *"--test-name-pattern test/scripts"* ]]
-  [ "$(grep -c '^bun test' <<< "$output")" -eq 3 ]
+  [ "$(grep -c '^bun test' <<< "$output")" -eq 4 ]
 }
 
 @test "equals-form options are not classified as positional test targets" {

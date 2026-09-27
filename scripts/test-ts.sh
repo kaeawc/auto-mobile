@@ -441,8 +441,15 @@ case "$mode" in
         "${integration_test_paths[@]+"${integration_test_paths[@]}"}" \
         "${passthrough_args[@]+"${passthrough_args[@]}"}"
     elif [[ "$has_test_targets" -eq 0 ]]; then
+      # This MCP transport suite can stall the Linux runner after earlier suites
+      # have run, even with Bun's per-file isolation. Give it a fresh process and
+      # a short deadline so a regression cannot consume the whole matrix job.
+      AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=60 run_test_command \
+        "${integration_args[@]}" \
+        test/server/proxyServerTransportFailure.integration.test.ts
       run_test_command \
         "${integration_args[@]}" \
+        --path-ignore-patterns "**/proxyServerTransportFailure.integration.test.ts" \
         ".integration.test.ts" \
         "${passthrough_args[@]+"${passthrough_args[@]}"}"
     else

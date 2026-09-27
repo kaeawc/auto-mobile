@@ -169,6 +169,13 @@ describe("textEquals predicate", () => {
     expect(evaluation.candidates!.some((c) => c.text === "50")).toBe(true);
   });
 
+  test("does not ignore literal surrounding whitespace in an exact value", () => {
+    const observation = obs([node({ "resource-id": "counter", text: " 5 " })]);
+    expect(textEquals(finder, { elementId: "counter" }, "5")(observation).matched).toBe(false);
+    expect(textEquals(finder, {}, "5")(observation).matched).toBe(false);
+    expect(textEquals(finder, { elementId: "counter" }, " 5 ")(observation).matched).toBe(true);
+  });
+
   test("without an elementId, matches any element whose text equals the expected value exactly", () => {
     const predicate = textEquals(finder, {}, "Done");
     const evaluation = predicate(obs([node({ "resource-id": "label", text: "Done" })]));

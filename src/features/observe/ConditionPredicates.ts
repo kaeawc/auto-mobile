@@ -154,7 +154,7 @@ export function textEquals(
       throw new ActionableError(result.error);
     }
     const exactText = (value: string | undefined) =>
-      value !== undefined && normalizeQuotes(value).trim() === normalizeQuotes(expected).trim();
+      value !== undefined && normalizeQuotes(value) === normalizeQuotes(expected);
     const located =
       selector.elementId !== undefined
         ? result.chosen

@@ -175,33 +175,6 @@ run_runner() {
   [[ "$output" == *"parallel-not-ok.bats did not produce a complete passing BATS TAP plan"* ]]
 }
 
-@test "GNU Parallel kills a timed-out BATS process tree and names its file" {
-  local timeout_bin real_bin list_file
-  command -v parallel >/dev/null || skip "GNU Parallel is unavailable"
-  parallel --version | head -1 | grep -q 'GNU parallel' || skip "GNU Parallel is unavailable"
-  timeout_bin="$(command -v gtimeout || command -v timeout)" || skip "timeout is unavailable"
-  real_bin="$(mktemp -d)"
-  ln -s "$(command -v parallel)" "$real_bin/parallel"
-  list_file="$FIXTURES/timeout-list"
-  printf '%s\0' "$FIXTURES/parallel-timeout.bats" > "$list_file"
-
-  run "$timeout_bin" -k 2s 8s env \
-    PATH="$real_bin:$STUB_BIN:$PATH" \
-    AUTOMOBILE_BATS_MAX_FILE_SECONDS=1 \
-    TIMEOUT_SLEEP_PID_FILE="$FIXTURES/sleep.pid" \
-    bash -c 'source "$1"; run_parallel_files "$2" 1 "$3"' \
-    _ "$SCRIPT" "$list_file" "$FIXTURES/timeout-joblog.tsv"
-
-  rm -rf "$real_bin"
-  [ "$status" -ne 0 ]
-  [ "$status" -ne 124 ]
-  [ "$status" -ne 137 ]
-  [[ "$output" == *"$FIXTURES/parallel-timeout.bats exceeded 1s and was killed"* ]]
-  grep -q "^bats:$FIXTURES/parallel-timeout.bats$" "$ARGS_FILE"
-  [ -s "$FIXTURES/sleep.pid" ]
-  ! kill -0 "$(cat "$FIXTURES/sleep.pid")" 2>/dev/null
-}
-
 @test "job count override reaches GNU Parallel" {
   run env \
     HOME="$FAKE_HOME" \

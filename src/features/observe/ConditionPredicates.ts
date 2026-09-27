@@ -115,10 +115,12 @@ export function clickable(
     const source = result?.matches.find(({ node }) => node === result.chosen)?.sourceNodes?.[0];
     const selected = source ?? result?.chosen;
     const ownsText = ownsSelectorText(selected, selector.text);
+    const actionable = Boolean(
+      ownsText && selected?.element && selected.bounds && selected.affordances.includes("tap"),
+    );
     return {
-      matched: Boolean(ownsText && selected?.affordances.includes("tap")),
-      matchedElement:
-        ownsText && selected?.affordances.includes("tap") ? selected.element : undefined,
+      matched: actionable,
+      matchedElement: actionable ? selected?.element : undefined,
       candidates: elements(result),
     };
   };

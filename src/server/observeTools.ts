@@ -732,7 +732,7 @@ function shouldRetryCompoundText(
   if (waitFor.textMatch !== undefined || sets.length < 2) {
     return false;
   }
-  return !sets.some((set) => sets.every((other) => set.some((node) => other.includes(node))));
+  return !sets.some((set) => set.some((node) => sets.every((other) => other.includes(node))));
 }
 
 function retryCompoundText<T>(

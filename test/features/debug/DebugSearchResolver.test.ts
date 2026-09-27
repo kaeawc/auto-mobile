@@ -25,6 +25,7 @@ test("debug IDs default to namespace and explicit contains never claims exact", 
   const exact = await feature.execute({ resourceId: "login" });
   expect(exact.matches).toHaveLength(1);
   expect(exact.matches[0].matchKind).toBe("id-namespace");
+  expect(exact.matches[0].isExactMatch).toBe(true);
   const partial = await feature.execute({ resourceId: "login", match: "contains" });
   expect(partial.matches).toHaveLength(2);
   expect(partial.matches.every((match) => !match.isExactMatch)).toBe(true);

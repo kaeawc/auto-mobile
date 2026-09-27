@@ -118,7 +118,7 @@ export class DebugSearch {
         matchedProperties: [...new Set(sources.map(([key]) => key))],
         matchedValue: sources[0]?.[1] ?? matchedNodes[0]?.label ?? "",
         matchKind: kind,
-        isExactMatch: kind.endsWith("-exact"),
+        isExactMatch: kind.endsWith("-exact") || kind === "id-namespace",
         className: node.className,
         resourceId: node.nativeId,
         clickable: node.affordances.includes("tap"),

@@ -501,11 +501,14 @@ export class ElementResolver {
       };
     }
     const native = nodes.filter((node) => node.nativeId === query);
+    if (native.length > 0) {
+      return {
+        matches: native.map((node) => ({ node, kind: "native-id-exact" })),
+        matchMode,
+      };
+    }
     const qualified = qualifiedId(query);
-    const direct =
-      qualified && native.length
-        ? native
-        : nodes.filter((node) => node.nativeId === query || node.nodeKey === query);
+    const direct = nodes.filter((node) => node.nodeKey === query);
     if (qualified && direct.length) {
       return {
         matches: direct.map((node) => ({

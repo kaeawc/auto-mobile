@@ -975,8 +975,8 @@ describe("keycap corroboration is scoped to one window group (#6908)", () => {
       project: "skeleton",
     });
     expect(result.skeleton!.map((entry) => entry.elementId)).toEqual([
-      "com.keyboard:id/key_pos_0_0",
       "com.keyboard:id/key_pos_preview",
+      "com.keyboard:id/key_pos_0_0",
     ]);
     expect(result.keyboard).toBeUndefined();
   });

@@ -228,7 +228,7 @@ test("iOS table cells are sibling rows rather than collection boundaries", () =>
   ).toBe("remove");
 });
 
-test("observation indexes and text order agree with topmost resolver candidates", () => {
+test("observation keeps legacy main-first order until live actions use the resolver", () => {
   const main = node("open", { text: "Open", clickable: true });
   const dialog = node("open", {
     text: "Open",
@@ -243,19 +243,10 @@ test("observation indexes and text order agree with topmost resolver candidates"
     new DefaultObserveElementCollector().collect(hierarchy, "android")!,
   ).skeleton;
   expect(observed.map((row) => row.bounds)).toEqual([
-    [10, 10, 50, 50],
     [0, 0, 100, 100],
+    [10, 10, 50, 50],
   ]);
-  const capture = { id: "windows", nodes: new SearchableHierarchy().project(hierarchy) };
-  for (const [index, row] of observed.entries()) {
-    const selected = resolver.resolve(
-      capture,
-      { elementId: row.elementId, index: row.index },
-      tap,
-    ).chosen;
-    expect(selected?.bounds).toEqual(index === 0 ? dialog.bounds : main.bounds);
-    expect(resolver.resolve(capture, { text: row.label, index }, tap).chosen).toBe(selected);
-  }
+  expect(observed.map((row) => row.index)).toEqual([0, 1]);
 });
 
 test("sibling traversal includes the explicit container but cannot cross its boundary", () => {

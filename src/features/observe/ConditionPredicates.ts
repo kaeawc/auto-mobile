@@ -6,9 +6,10 @@ import {
   type ElementResolution,
   type MatchMode,
   type ResolutionIntent,
+  isWithin,
   matchedSourceNode,
 } from "../utility/ElementResolver";
-import { SearchableHierarchy } from "../utility/SearchableNode";
+import { SearchableHierarchy, type SearchableEntry } from "../utility/SearchableNode";
 import type { ResolverSelector } from "../../server/elementSelectorSchemas";
 import { normalizeQuotes } from "../utility/TextMatcher";
 
@@ -68,9 +69,26 @@ function ownsSelectorText(
   );
 }
 
+function boundedChosenAncestor(result: ElementResolution, source: SearchableEntry) {
+  const chosen = result.chosen;
+  if (!chosen?.bounds || !chosen.element || !result.snapshotNodes) {
+    return undefined;
+  }
+  return chosen === source || isWithin(source, chosen, result.snapshotNodes) ? chosen : undefined;
+}
+
 function boundedMatchedSource(result: ElementResolution | undefined, selector: ConditionSelector) {
-  const source = result && matchedSourceNode(result, selector);
-  return source?.bounds && source.element ? source : undefined;
+  if (!result) {
+    return undefined;
+  }
+  const source = matchedSourceNode(result, selector);
+  if (!source) {
+    return undefined;
+  }
+  if (source.bounds && source.element) {
+    return source;
+  }
+  return boundedChosenAncestor(result, source);
 }
 
 export function appear(

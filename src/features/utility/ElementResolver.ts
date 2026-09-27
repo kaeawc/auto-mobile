@@ -60,6 +60,7 @@ export type MatchKind =
   | "all";
 export interface ElementResolution {
   chosen: SearchableEntry | null;
+  snapshotNodes?: readonly SearchableEntry[];
   indexInMatches?: number;
   candidates: SearchableEntry[];
   matches: { node: SearchableEntry; kind: MatchKind; sourceNodes?: SearchableEntry[] }[];
@@ -145,7 +146,7 @@ function eligible(node: SearchableEntry, intent: ResolutionIntent): boolean {
   );
 }
 
-function isWithin(
+export function isWithin(
   node: SearchableEntry,
   ancestor: SearchableEntry,
   nodes: readonly SearchableEntry[],
@@ -266,6 +267,7 @@ export class ElementResolver {
     );
     const result: ElementResolution = {
       chosen: null,
+      snapshotNodes: snapshot.nodes,
       candidates: matched.matches.map(({ node }) => node),
       ...matched,
       scope,

@@ -217,6 +217,13 @@ run_lane() {
   [[ "$output" == *".integration.test.ts"* ]]
 }
 
+@test "Windows integration lane retains one process without a POSIX watchdog" {
+  run env RUNNER_OS=Windows PATH="$STUB_BIN:$PATH" TEST_TS_PRINT_CMD=1 bash "$SCRIPT" integration
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^bun test' <<< "$output")" -eq 1 ]
+  [[ "$output" != *"--path-ignore-patterns"* ]]
+}
+
 @test "macOS defaults to two unit shards on three cores" {
   run env -u RUNNER_OS PATH="$STUB_BIN:$PATH" TEST_TS_PRINT_CMD=1 \
     UNAME_S=Darwin STUB_NPROC_CORES=3 bash "$SCRIPT" unit

@@ -155,7 +155,13 @@ const resolveHighlightShapeFromSelector = async (
       container: args.container,
       selectionStrategy: args.selectionStrategy,
     },
-    { action: "highlight" },
+    {
+      action: "highlight",
+      viewport:
+        viewHierarchy.screenWidth && viewHierarchy.screenHeight
+          ? { width: viewHierarchy.screenWidth, height: viewHierarchy.screenHeight }
+          : undefined,
+    },
   );
   if (resolution.error) {
     throw new ActionableError(resolution.error);

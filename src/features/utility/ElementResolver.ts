@@ -196,7 +196,7 @@ export class ElementResolver {
       nodes = siblings.nodes;
     }
     const matched = this.match(nodes, selector, intent);
-    if (selector.text !== undefined) {
+    if (selector.text !== undefined || selector.contentDescription !== undefined) {
       matched.matches = this.promoteTextMatches(matched.matches, snapshot, scope);
     }
     const result: ElementResolution = {

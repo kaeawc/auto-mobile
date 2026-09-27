@@ -515,7 +515,9 @@ function deriveDiffSelector(
 ): ObserveDiffSelector | undefined {
   const elementId = diffElementId(attributes);
   const label =
-    diffNonEmptyString(attributes["text"]) ?? diffNonEmptyString(attributes["content-desc"]);
+    diffNonEmptyString(attributes["text"]) ??
+    diffNonEmptyString(attributes["content-desc"]) ??
+    diffNonEmptyString(attributes["ios-accessibility-label"]);
   if (elementId === undefined && label === undefined) {
     return undefined;
   }

@@ -273,6 +273,37 @@ test("sibling matching never escapes a row into a non-scrollable collection", ()
   }
 });
 
+test("XCUI tables prevent sibling traversal into another cell", () => {
+  const capture = snapshot([
+    {
+      bounds,
+      class: "XCUIElementTypeTable",
+      node: [
+        node("first-row", "", { node: [node("label", "First", { clickable: false })] }),
+        node("second-row", "", { node: [node("remove", "Remove")] }),
+      ],
+    },
+  ]);
+  expect(
+    resolver.resolve(capture, { elementId: "remove", sibling: { text: "First" } }, tap).chosen,
+  ).toBeNull();
+});
+
+test("content-description indices count actionable rows after promotion", () => {
+  const capture = snapshot([
+    node("first-row", "", {
+      node: [
+        { bounds, "content-desc": "Label" },
+        { bounds, "content-desc": "Label" },
+      ],
+    }),
+    node("second-row", "", { node: [{ bounds, "content-desc": "Label" }] }),
+  ]);
+  expect(
+    resolver.resolve(capture, { contentDescription: "Label", index: 1 }, tap).chosen?.nativeId,
+  ).toBe("second-row");
+});
+
 test("nested label text and ID have the same sibling control", () => {
   const capture = snapshot([
     {

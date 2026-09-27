@@ -2087,6 +2087,27 @@ const resolveClearAllAttributionLabel = async (
   }
 };
 
+const readCompleteTrayAppIds = async (
+  device: BootedDevice,
+  signal?: AbortSignal,
+): Promise<string[]> => {
+  const inventory = await getSystemTrayDependencies()
+    .appInventoryFactory(device)
+    .executeDetailedResult(signal);
+  if (!inventory.successful) {
+    throw new ActionableError(
+      "Cannot verify notification ownership because the installed-app inventory is incomplete.",
+    );
+  }
+  return [
+    ...new Set(
+      [...Object.values(inventory.apps.profiles).flat(), ...inventory.apps.system].map(
+        (app) => app.packageName,
+      ),
+    ),
+  ];
+};
+
 // ============================================================================
 // Tool Registration
 // ============================================================================
@@ -2168,22 +2189,8 @@ export function registerInteractionTools() {
           throw new ActionableError("list action requires notification.appId");
         }
         signal?.throwIfAborted();
-        const inventory = await getSystemTrayDependencies()
-          .appInventoryFactory(device)
-          .executeDetailedResult(signal);
+        const appIds = await readCompleteTrayAppIds(device, signal);
         signal?.throwIfAborted();
-        if (!inventory.successful) {
-          throw new ActionableError(
-            "Cannot verify notification ownership because the installed-app inventory is incomplete.",
-          );
-        }
-        const appIds = [
-          ...new Set(
-            [...Object.values(inventory.apps.profiles).flat(), ...inventory.apps.system].map(
-              (app) => app.packageName,
-            ),
-          ),
-        ];
         if (!appIds.includes(appId)) {
           throw new ActionableError(`App ${appId} is not installed.`);
         }
@@ -2210,8 +2217,10 @@ export function registerInteractionTools() {
       let installedApps: string[] = [];
 
       if (notification.appId) {
-        const listInstalledApps = new ListInstalledApps(device);
-        installedApps = await listInstalledApps.execute();
+        installedApps =
+          device.platform === "android"
+            ? await readCompleteTrayAppIds(device, signal)
+            : await new ListInstalledApps(device).execute();
         if (!installedApps.includes(notification.appId)) {
           throw new ActionableError(`App ${notification.appId} is not installed.`);
         }

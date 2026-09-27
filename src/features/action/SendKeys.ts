@@ -6,7 +6,7 @@ import { readAndroidDeviceApiLevel } from "../../utils/android-cmdline-tools/rea
 import { AndroidCtrlProxyManager } from "../../utils/CtrlProxyManager";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
-import { defaultTimer } from "../../utils/SystemTimer";
+import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { RealObserveScreen } from "../observe/ObserveScreen";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
@@ -127,6 +127,7 @@ export interface SendKeysCommandResult {
   modifiers?: InputKeyModifier[];
   partialApplication?: boolean;
   error?: string;
+  retryable?: boolean;
 }
 
 export interface SendKeysResult {
@@ -134,8 +135,10 @@ export interface SendKeysResult {
   completedCommands: number;
   failedIndex?: number;
   commands: SendKeysCommandResult[];
-  observation: ObserveResult;
+  observation?: ObserveResult;
   error?: string;
+  retryable?: boolean;
+  warning?: string;
 }
 
 interface SendKeysFailure {
@@ -145,7 +148,11 @@ interface SendKeysFailure {
 
 export interface SendKeysCommandExecutor {
   type(command: SendKeysTypeCommand, signal?: AbortSignal): Promise<SendKeysCommandResult>;
-  key(command: SendKeysKeyCommand, signal?: AbortSignal): Promise<SendKeysCommandResult>;
+  key(
+    command: SendKeysKeyCommand,
+    signal?: AbortSignal,
+    onDispatch?: () => void,
+  ): Promise<SendKeysCommandResult>;
   clear(signal?: AbortSignal): Promise<{ success: boolean; error?: string }>;
 }
 
@@ -173,6 +180,7 @@ export interface SendKeysDependencies {
   focuser?: SendKeysTargetFocuser;
   observer?: SendKeysObserver;
   timestampProvider?: SendKeysTimestampProvider;
+  timer?: Timer;
 }
 
 export type TextActionResult = {
@@ -186,7 +194,7 @@ export interface SendKeysTextClient {
   replace(text: string): Promise<TextActionResult>;
   insert(text: string): Promise<TextActionResult>;
   clear(): Promise<TextActionResult>;
-  ime(action: ImeAction): Promise<TextActionResult>;
+  ime(action: ImeAction, signal?: AbortSignal, onDispatch?: () => void): Promise<TextActionResult>;
   supportsImeCommit(): Promise<boolean>;
   supportsImeKeyEvents(): Promise<boolean>;
   supportsKeyboardProfiles(): Promise<boolean>;
@@ -315,7 +323,11 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     return null;
   }
 
-  async key(command: SendKeysKeyCommand, signal?: AbortSignal): Promise<SendKeysCommandResult> {
+  async key(
+    command: SendKeysKeyCommand,
+    signal?: AbortSignal,
+    onDispatch?: () => void,
+  ): Promise<SendKeysCommandResult> {
     signal?.throwIfAborted();
     const modifiers = command.modifiers ?? [];
     if (isSemanticKey(command.key)) {
@@ -332,7 +344,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
           };
         }
       }
-      const result = await this.textClient.ime(command.key);
+      const result = await this.textClient.ime(command.key, signal, onDispatch);
       return {
         index: -1,
         action: "key",
@@ -354,9 +366,25 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     };
   }
 
-  clear(signal?: AbortSignal): Promise<TextActionResult> {
+  async clear(signal?: AbortSignal): Promise<TextActionResult> {
     signal?.throwIfAborted();
-    return this.textClient.clear();
+    const clearResult = await this.textClient.clear();
+    if (clearResult.success || this.device.platform !== "android") {
+      return clearResult;
+    }
+    logger.warn(`[SendKeys] Android accessibility clear failed: ${clearResult.error}`);
+    const focusResult = await this.requireFocusedAndroidInput(signal);
+    if (!focusResult.success) {
+      return focusResult;
+    }
+    const textLength = getFocusedTextLength(focusResult.hierarchy);
+    if (textLength === undefined) {
+      return {
+        success: false,
+        error: "Cannot determine focused text length for ADB clear fallback",
+      };
+    }
+    return this.clearEventOnlyForReplace(textLength, signal);
   }
 
   private resolveMode(requestedMode: SendKeysTypingMode): AndroidSendKeysTypingMode {
@@ -1102,7 +1130,8 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       },
       insert: async (text) => client.requestAppendText(text),
       clear: async () => client.requestClearText(),
-      ime: async (action) => client.requestImeAction(action),
+      ime: async (action, signal, onDispatch) =>
+        client.requestImeAction(action, 5000, undefined, signal, onDispatch),
       supportsImeCommit: async () => false,
       supportsImeKeyEvents: async () => false,
       supportsKeyboardProfiles: async () => false,
@@ -1120,12 +1149,14 @@ export class SendKeys {
   private readonly focuser: SendKeysTargetFocuser;
   private readonly observer: SendKeysObserver;
   private readonly timestampProvider: SendKeysTimestampProvider;
+  private readonly timer: Timer;
 
   constructor(
     private readonly device: BootedDevice,
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
     dependencies: SendKeysDependencies = {},
   ) {
+    this.timer = dependencies.timer ?? defaultTimer;
     this.observer = dependencies.observer ?? new RealObserveScreen(device, adbFactory);
     this.timestampProvider =
       dependencies.timestampProvider ??
@@ -1155,6 +1186,100 @@ export class SendKeys {
     progress?: ProgressCallback,
     signal?: AbortSignal,
   ): Promise<SendKeysResult> {
+    const semanticKey =
+      commands.length === 1 && commands[0]?.action === "key" && isSemanticKey(commands[0].key)
+        ? commands[0].key
+        : undefined;
+    if (this.device.platform === "ios" && semanticKey) {
+      return this.executeBoundedIosIme(commands, selector, progress, signal, semanticKey);
+    }
+    return this.executeUnbounded(commands, selector, progress, signal);
+  }
+
+  private async executeBoundedIosIme(
+    commands: SendKeysCommand[],
+    selector: SendKeysSelector | undefined,
+    progress: ProgressCallback | undefined,
+    signal: AbortSignal | undefined,
+    key: SendKeysSemanticKey,
+  ): Promise<SendKeysResult> {
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    signal?.addEventListener("abort", abort, { once: true });
+    if (signal?.aborted) {
+      controller.abort();
+    }
+    let dispatched = false;
+    let actionResult: SendKeysCommandResult | undefined;
+    let deadlineHandle: ReturnType<Timer["setTimeout"]> | undefined;
+    const deadline = new Promise<"deadline">((resolve) => {
+      deadlineHandle = this.timer.setTimeout(() => resolve("deadline"), 5000);
+    });
+    const interaction = this.executeUnbounded(
+      commands,
+      selector,
+      progress,
+      controller.signal,
+      () => {
+        dispatched = true;
+      },
+      (result) => {
+        actionResult = result;
+      },
+    );
+    try {
+      const outcome = await Promise.race([interaction, deadline]);
+      if (outcome !== "deadline") {
+        return outcome;
+      }
+      controller.abort();
+      void interaction.catch((error) => {
+        // The timed-out interaction can still settle while the connection recovers.
+        logger.debug(
+          `[SendKeys] iOS IME interaction settled after deadline: ${errorMessage(error)}`,
+        );
+      });
+      if (actionResult) {
+        return {
+          success: actionResult.success,
+          completedCommands: actionResult.success ? 1 : 0,
+          ...(!actionResult.success ? { failedIndex: 0, error: actionResult.error } : {}),
+          commands: [actionResult],
+          ...(actionResult.success
+            ? {
+                warning:
+                  "Post-action observation did not complete within 5000ms; the IME action was already applied.",
+              }
+            : {}),
+        };
+      }
+      const error = dispatched
+        ? `IME action '${key}' outcome is indeterminate: the request was dispatched but no result was received within 5000ms. Do not retry automatically.`
+        : `IME action '${key}' timed out before dispatch after 5000ms.`;
+      return {
+        success: false,
+        completedCommands: 0,
+        failedIndex: 0,
+        commands: [{ index: 0, action: "key", key, success: false, error, retryable: !dispatched }],
+        error,
+        retryable: !dispatched,
+      };
+    } finally {
+      if (deadlineHandle !== undefined) {
+        this.timer.clearTimeout(deadlineHandle);
+      }
+      signal?.removeEventListener("abort", abort);
+    }
+  }
+
+  private async executeUnbounded(
+    commands: SendKeysCommand[],
+    selector?: SendKeysSelector,
+    progress?: ProgressCallback,
+    signal?: AbortSignal,
+    onDispatch?: () => void,
+    onCommandResult?: (result: SendKeysCommandResult) => void,
+  ): Promise<SendKeysResult> {
     signal?.throwIfAborted();
     const preflight = this.preflightCommands(commands);
     // Accept hierarchy updates emitted while focus or command delivery is completing.
@@ -1165,7 +1290,7 @@ export class SendKeys {
       preflight ??
       (focusFailure
         ? { results: [], failure: focusFailure }
-        : await this.executeCommands(commands, progress, signal));
+        : await this.executeCommands(commands, progress, signal, onDispatch, onCommandResult));
     const minTimestamp = preflight || focusFailure ? undefined : actionStartTimestamp;
     signal?.throwIfAborted();
     await progress?.(commands.length, commands.length, "Observing final keyboard input state");
@@ -1227,6 +1352,8 @@ export class SendKeys {
     commands: SendKeysCommand[],
     progress?: ProgressCallback,
     signal?: AbortSignal,
+    onDispatch?: () => void,
+    onCommandResult?: (result: SendKeysCommandResult) => void,
   ): Promise<{ results: SendKeysCommandResult[]; failure?: SendKeysFailure }> {
     const results: SendKeysCommandResult[] = [];
     for (let index = 0; index < commands.length; index++) {
@@ -1239,7 +1366,7 @@ export class SendKeys {
 
       let result: SendKeysCommandResult;
       try {
-        result = await this.executeCommand(command, signal);
+        result = await this.executeCommand(command, signal, onDispatch);
       } catch (error) {
         signal?.throwIfAborted();
         logger.warn(`[SendKeys] ${command.action} command ${index} failed`, error);
@@ -1251,6 +1378,7 @@ export class SendKeys {
         };
       }
       result.index = index;
+      onCommandResult?.(result);
       results.push(result);
       if (!result.success) {
         return {
@@ -1289,12 +1417,13 @@ export class SendKeys {
   private executeCommand(
     command: SendKeysCommand,
     signal?: AbortSignal,
+    onDispatch?: () => void,
   ): Promise<SendKeysCommandResult> {
     switch (command.action) {
       case "type":
         return this.executor.type(command, signal);
       case "key":
-        return this.executor.key(command, signal);
+        return this.executor.key(command, signal, onDispatch);
       case "clear":
         return this.executor.clear(signal).then((result) => ({
           index: -1,

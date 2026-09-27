@@ -33,6 +33,19 @@ const POLL_INTERVAL_MS = 250;
 // Mirrors the private SYSTEM_TRAY_REEXPAND_INTERVAL_MS in systemTrayHelpers.ts.
 const REEXPAND_INTERVAL_MS = 1000;
 const SYSTEM_TRAY_PACKAGE = "com.android.systemui";
+const mockInstalledApps = (packageNames: string[]) =>
+  spyOn(ListInstalledApps.prototype, "executeDetailedResult").mockResolvedValue({
+    successful: true,
+    apps: {
+      profiles: {},
+      system: packageNames.map((packageName) => ({
+        packageName,
+        userIds: [0],
+        foreground: false,
+        recent: false,
+      })),
+    },
+  });
 
 // Extracted verbatim from real CtrlProxy captures. Bounds intentionally remain
 // compact tuples so this coverage exercises the server compact-bounds parser.
@@ -1709,9 +1722,7 @@ describe("systemTray headerless two-notification group", () => {
       fakeObserveScreen.setObserveResult(() =>
         createObservation(headerlessTwoNotificationGroups.expanded),
       );
-      const installedAppsSpy = spyOn(ListInstalledApps.prototype, "execute").mockResolvedValue([
-        "com.android.shell",
-      ]);
+      const installedAppsSpy = mockInstalledApps(["com.android.shell"]);
       setSystemTrayDependencies({
         timer: fakeTimer,
         adbFactory: () => fakeAdb,
@@ -1767,9 +1778,7 @@ describe("systemTray headerless two-notification group", () => {
             : headerlessTwoNotificationGroups.expanded,
         ),
       );
-      const installedAppsSpy = spyOn(ListInstalledApps.prototype, "execute").mockResolvedValue([
-        "com.android.shell",
-      ]);
+      const installedAppsSpy = mockInstalledApps(["com.android.shell"]);
       setSystemTrayDependencies({
         timer: fakeTimer,
         adbFactory: () => fakeAdb,
@@ -2377,9 +2386,7 @@ describe("systemTray group expansion", () => {
     fakeObserveScreen.setObserveResult((index) =>
       createObservation(index === 0 ? collapsedHierarchy : expandedHierarchy),
     );
-    const installedAppsSpy = spyOn(ListInstalledApps.prototype, "execute").mockResolvedValue([
-      "com.example.fub",
-    ]);
+    const installedAppsSpy = mockInstalledApps(["com.example.fub"]);
     setSystemTrayDependencies({
       timer: fakeTimer,
       adbFactory: () => fakeAdb,
@@ -2419,9 +2426,7 @@ describe("systemTray group expansion", () => {
       ["Zillow Real-Time Tour request"],
       { expanded: false },
     );
-    const installedAppsSpy = spyOn(ListInstalledApps.prototype, "execute").mockResolvedValue([
-      "com.example.fub",
-    ]);
+    const installedAppsSpy = mockInstalledApps(["com.example.fub"]);
     setSystemTrayDependencies({
       timer: fakeTimer,
       adbFactory: () => fakeAdb,

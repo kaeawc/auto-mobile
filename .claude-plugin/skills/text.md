@@ -1,6 +1,6 @@
 ---
 description: Text input, keyboard control, and clipboard operations
-allowed-tools: mcp__auto-mobile__inputText, mcp__auto-mobile__clearText, mcp__auto-mobile__selectAllText, mcp__auto-mobile__keyboard, mcp__auto-mobile__imeAction, mcp__auto-mobile__clipboard
+allowed-tools: mcp__auto-mobile__sendKeys, mcp__auto-mobile__selectAllText, mcp__auto-mobile__keyboard, mcp__auto-mobile__clipboard
 ---
 
 Handle text input, keyboard interactions, and clipboard operations.
@@ -10,7 +10,7 @@ Handle text input, keyboard interactions, and clipboard operations.
 Type text into the focused field:
 
 ```
-inputText with text: "Hello, world!"
+sendKeys with commands: [{ action: "type", text: "Hello, world!", operation: "insert" }]
 ```
 
 The field must be focused first (use `tapOn` with action "focus").
@@ -20,7 +20,7 @@ The field must be focused first (use `tapOn` with action "focus").
 Clear the current input field:
 
 ```
-clearText
+sendKeys with commands: [{ action: "clear" }]
 ```
 
 Removes all text from the focused field.
@@ -36,7 +36,7 @@ selectAllText
 Useful for replacing existing text:
 
 ```
-selectAllText → inputText with new text
+sendKeys with commands: [{ action: "type", text: "new text", operation: "replace" }]
 ```
 
 ## Keyboard Control
@@ -54,11 +54,11 @@ keyboard with action: "detect"  # Check if visible
 Trigger keyboard action buttons:
 
 ```
-imeAction with action: "done"     # Submit/complete
-imeAction with action: "next"     # Move to next field
-imeAction with action: "search"   # Trigger search
-imeAction with action: "send"     # Send message
-imeAction with action: "go"       # Navigate/submit
+sendKeys with commands: [{ action: "key", key: "done" }]    # Submit/complete
+sendKeys with commands: [{ action: "key", key: "next" }]    # Move to next field
+sendKeys with commands: [{ action: "key", key: "search" }]  # Trigger search
+sendKeys with commands: [{ action: "key", key: "send" }]    # Send message
+sendKeys with commands: [{ action: "key", key: "go" }]      # Navigate/submit
 ```
 
 ## Clipboard
@@ -77,13 +77,13 @@ clipboard with action: "clear"    # Clear clipboard
 **Fill a text field:**
 
 ```
-tapOn (field) → inputText → imeAction "next"
+tapOn (field) → sendKeys type "insert" → sendKeys key "next"
 ```
 
 **Replace existing text:**
 
 ```
-tapOn (field) → selectAllText → inputText (new text)
+tapOn (field) → sendKeys type "replace" (new text)
 ```
 
 **Copy text between fields:**
@@ -96,12 +96,12 @@ tapOn (target) → clipboard "paste"
 **Submit a form:**
 
 ```
-inputText (last field) → imeAction "done"
+sendKeys type "insert" (last field) → sendKeys key "done"
 ```
 
 ## Tips
 
 - Always focus a field before typing (use `tapOn` or `tapOn` with action "focus")
-- Use `imeAction "next"` to move through form fields efficiently
+- Use `sendKeys` with a `next` key command to move through form fields efficiently
 - Check `keyboardVisible` in observation before text operations
-- Use `selectAllText` + `inputText` to replace text (faster than clearText + inputText)
+- Use `sendKeys` with `operation: "replace"` to replace text

@@ -423,6 +423,105 @@ describe("PlanMigrator", () => {
         });
       });
 
+      test("migrates iOS inputText to caret insertion without clearing existing text", () => {
+        const { plan } = migratePlan({
+          name: "Plan",
+          mcpVersion: "1.0.0",
+          metadata: { createdAt: "2024-01-01", version: "1.0.0" },
+          steps: [{ tool: "inputText", params: { platform: "ios", text: "tail" } }],
+        });
+
+        expect(plan.steps[0].params.commands).toEqual([
+          { action: "type", text: "tail", operation: "insert" },
+        ]);
+      });
+
+      test("uses the top-level iOS platform hint for inputText without an inline platform", () => {
+        const { plan } = migratePlan({
+          name: "Plan",
+          platform: "ios",
+          steps: [{ tool: "inputText", params: { text: "tail" } }],
+        });
+
+        expect(plan.steps[0].params.commands).toEqual([
+          { action: "type", text: "tail", operation: "insert" },
+        ]);
+      });
+
+      test("uses a matching object device's iOS platform for inputText", () => {
+        const { plan } = migratePlan({
+          name: "Plan",
+          devices: [{ label: "a", platform: "ios" }],
+          steps: [{ tool: "inputText", params: { device: "a", text: "tail" } }],
+        });
+
+        expect(plan.steps[0].params.commands).toEqual([
+          { action: "type", text: "tail", operation: "insert" },
+        ]);
+      });
+
+      test("prefers a matching device platform over the top-level hint", () => {
+        const { plan } = migratePlan({
+          name: "Plan",
+          platform: "android",
+          devices: [{ label: "a", platform: "ios" }],
+          steps: [{ tool: "inputText", params: { device: "a", text: "tail" } }],
+        });
+
+        expect(plan.steps[0].params.commands).toEqual([
+          { action: "type", text: "tail", operation: "insert" },
+        ]);
+      });
+
+      test("prefers inline platform over matching device and top-level hints", () => {
+        const { plan } = migratePlan({
+          name: "Plan",
+          platform: "android",
+          devices: [{ label: "a", platform: "android" }],
+          steps: [{ tool: "inputText", params: { platform: "ios", device: "a", text: "tail" } }],
+        });
+
+        expect(plan.steps[0].params.commands).toEqual([
+          { action: "type", text: "tail", operation: "insert" },
+        ]);
+      });
+
+      test("uses replace for an Android plan-level platform hint", () => {
+        const { plan } = migratePlan({
+          name: "Plan",
+          platform: "android",
+          steps: [{ tool: "inputText", params: { text: "tail" } }],
+        });
+
+        expect(plan.steps[0].params.commands).toEqual([
+          { action: "type", text: "tail", operation: "replace" },
+        ]);
+      });
+
+      test("keeps replace when inputText has no platform signal", () => {
+        const { plan } = migratePlan({
+          name: "Plan",
+          steps: [{ tool: "inputText", params: { text: "tail" } }],
+        });
+
+        expect(plan.steps[0].params.commands).toEqual([
+          { action: "type", text: "tail", operation: "replace" },
+        ]);
+      });
+
+      test("falls through a plain-string device label to the top-level platform hint", () => {
+        const { plan } = migratePlan({
+          name: "Plan",
+          platform: "ios",
+          devices: ["a"],
+          steps: [{ tool: "inputText", params: { device: "a", text: "tail" } }],
+        });
+
+        expect(plan.steps[0].params.commands).toEqual([
+          { action: "type", text: "tail", operation: "insert" },
+        ]);
+      });
+
       test("migrates imeAction to a sendKeys semantic key command", () => {
         const { plan } = migratePlan({
           name: "Plan",

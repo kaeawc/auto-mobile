@@ -159,7 +159,7 @@ export class SetAccessibilityFocus {
       { id: String(hierarchy.updatedAt ?? "accessibility-focus"), nodes },
       selector,
       !options.resourceId && (options.text || options.contentDesc)
-        ? { action: "inspect" }
+        ? { action: "inspect", requireBounds: true }
         : { action: "accessibility-focus", requireResourceId: true },
     );
     if (resolution.error) {

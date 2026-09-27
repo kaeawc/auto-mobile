@@ -26,6 +26,7 @@ import {
   type KeyboardProfileCatalog,
 } from "../features/action/keyboardProfiles";
 import { AndroidImeCatalog } from "../features/action/AndroidImeCatalog";
+import { createInstalledImeKeySession } from "../features/action/InstalledImeKeySession";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import {
   SEND_KEYS_OPERATIONS,
@@ -183,7 +184,16 @@ export const shakeSchema = addDeviceTargetingToSchema(
 export const keyboardSchema = addDeviceTargetingToSchema(
   z.object({
     action: z
-      .enum(["open", "close", "detect", "setProfile", "listProfiles", "listImes", "setIme"])
+      .enum([
+        "open",
+        "close",
+        "detect",
+        "setProfile",
+        "listProfiles",
+        "listImes",
+        "setIme",
+        "tapImeKey",
+      ])
       .describe(
         "Keyboard action; listProfiles returns AutoMobile behavior models and listImes returns installed Android input methods",
       ),
@@ -192,6 +202,10 @@ export const keyboardSchema = addDeviceTargetingToSchema(
       .optional()
       .describe("AutoMobile keyboard behavior profile; required for setProfile"),
     imeId: z.string().optional().describe("Installed Android IME component; required for setIme"),
+    key: z
+      .string()
+      .optional()
+      .describe("Exact visible key text or accessibility label; required for tapImeKey"),
     // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
     // not required — a device handle from getAndroid/getApple is sufficient on
     // its own.
@@ -2019,6 +2033,28 @@ const resolveClearAllAttributionLabel = async (
 // Tool Registration
 // ============================================================================
 
+async function handleInstalledImeAction(device: BootedDevice, args: KeyboardArgs) {
+  if (device.platform !== "android") {
+    throw new ActionableError("Installed IME actions are Android-only; select an Android device.");
+  }
+  if (args.action === "tapImeKey") {
+    if (!args.imeId || !args.key) {
+      throw new ActionableError("tapImeKey requires imeId and key.");
+    }
+    return createJSONToolResponse(
+      await createInstalledImeKeySession(device).tapKey(args.imeId, args.key),
+    );
+  }
+  const catalog = new AndroidImeCatalog(defaultAdbClientFactory.create(device), device.deviceId);
+  if (args.action === "listImes") {
+    return createJSONToolResponse(await catalog.list());
+  }
+  if (!args.imeId) {
+    throw new ActionableError("keyboard setIme requires imeId from listImes.");
+  }
+  return createJSONToolResponse(await catalog.select(args.imeId));
+}
+
 export function registerInteractionTools() {
   // tapOn, tapAny, dragAndDrop, selectAllText, pressButton, and swipeOn handlers
   // are defined at module scope (each with an
@@ -2517,23 +2553,8 @@ export function registerInteractionTools() {
       if (args.action === "listProfiles") {
         return createJSONToolResponse(await listKeyboardProfilesForTool(device));
       }
-      if (args.action === "listImes" || args.action === "setIme") {
-        if (device.platform !== "android") {
-          throw new ActionableError(
-            "Installed IME actions are Android-only; select an Android device.",
-          );
-        }
-        const catalog = new AndroidImeCatalog(
-          defaultAdbClientFactory.create(device),
-          device.deviceId,
-        );
-        if (args.action === "listImes") {
-          return createJSONToolResponse(await catalog.list());
-        }
-        if (!args.imeId) {
-          throw new ActionableError("keyboard setIme requires imeId from listImes.");
-        }
-        return createJSONToolResponse(await catalog.select(args.imeId));
+      if (args.action === "listImes" || args.action === "setIme" || args.action === "tapImeKey") {
+        return handleInstalledImeAction(device, args);
       }
       const keyboard = new Keyboard(device);
       const result = await keyboard.execute(args.action);

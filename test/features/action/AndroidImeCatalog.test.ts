@@ -47,6 +47,10 @@ test("select uses component argv and verifies the resulting active IME", async (
   ]);
   expect((await catalog.select(samsung)).activeImeId).toBe(samsung);
   expect(adb.getExecutedArgv()).toContainEqual(["shell", "ime", "set", samsung]);
+  expect(
+    adb.getCommandCalls().find((call) => call.command === `shell ime set ${samsung}`)
+      ?.waitForProcessSettlementAfterAbort,
+  ).toBe(true);
 });
 
 test("select reports a failed postcondition instead of claiming readiness", async () => {

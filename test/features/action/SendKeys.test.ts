@@ -263,6 +263,51 @@ describe("SendKeys", () => {
       { signal: undefined, skipWaitForFresh: false, minTimestamp: undefined },
     ]);
   });
+
+  test("rejects invalid imeKeyEvents anywhere in a targeted batch before focus or commands", async () => {
+    const calls: string[] = [];
+    const sendKeys = new SendKeys(androidDevice, undefined, {
+      observer: createObserver(),
+      timestampProvider: { now: async () => 1234 },
+      focuser: {
+        focus: async () => {
+          calls.push("focus");
+          return { success: true };
+        },
+      },
+      executor: {
+        type: async () => {
+          calls.push("type");
+          return { index: -1, action: "type", success: true };
+        },
+        key: async () => {
+          calls.push("key");
+          return { index: -1, action: "key", key: "tab", success: true };
+        },
+        clear: async () => {
+          calls.push("clear");
+          return { success: true };
+        },
+      },
+    });
+
+    const result = await sendKeys.execute(
+      [
+        { action: "type", text: "valid", mode: "imeKeyEvents" },
+        { action: "type", text: "é", mode: "imeKeyEvents" },
+      ],
+      { text: "Email" },
+    );
+
+    expect(calls).toEqual([]);
+    expect(result).toMatchObject({
+      success: false,
+      completedCommands: 0,
+      failedIndex: 1,
+      error: expect.stringContaining("printable ASCII"),
+    });
+    expect(result.commands.every((command) => !command.partialApplication)).toBe(true);
+  });
 });
 
 describe("DefaultSendKeysCommandExecutor", () => {

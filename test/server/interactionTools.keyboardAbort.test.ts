@@ -3,6 +3,8 @@ import type { BootedDevice } from "../../src/models";
 import { InstalledImeKeySession } from "../../src/features/action/InstalledImeKeySession";
 import { registerInteractionTools } from "../../src/server/interactionTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
+import { defaultAdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
+import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 
 test("registered keyboard tapImeKey forwards a pre-dispatch abort without IME switch or tap", async () => {
   const mutations: string[] = [];
@@ -40,6 +42,66 @@ test("registered keyboard tapImeKey forwards a pre-dispatch abort without IME sw
   } finally {
     registration.mockRestore();
     tapKey.mockRestore();
+    ToolRegistry.clearTools();
+  }
+});
+
+test("registered keyboard setIme completes verification after cancellation follows dispatch", async () => {
+  const originalRegister = ToolRegistry.registerDeviceAware.bind(ToolRegistry);
+  let keyboardHandler: Parameters<typeof ToolRegistry.registerDeviceAware>[3] | undefined;
+  const registration = spyOn(ToolRegistry, "registerDeviceAware").mockImplementation((...args) => {
+    if (args[0] === "keyboard") {
+      keyboardHandler = args[3];
+    }
+    return originalRegister(...args);
+  });
+  const adb = new FakeAdbExecutor();
+  const oldIme = "com.example/.OldIme";
+  const newIme = "com.example/.NewIme";
+  adb.setThrowOnAbortedSignal();
+  adb.setCommandResponse("shell ime list -a -s", { stdout: `${oldIme}\n${newIme}\n`, stderr: "" });
+  adb.setCommandResponse("shell ime list -s", { stdout: `${oldIme}\n${newIme}\n`, stderr: "" });
+  adb.setCommandResponseSequence("shell settings get secure default_input_method", [
+    { stdout: oldIme, stderr: "" },
+    { stdout: newIme, stderr: "" },
+  ]);
+  const controller = new AbortController();
+  adb.abortAfterCommand(`shell ime set ${newIme}`, controller);
+  const create = spyOn(defaultAdbClientFactory, "create").mockReturnValue(adb);
+  try {
+    ToolRegistry.clearTools();
+    registerInteractionTools();
+    expect(keyboardHandler).toBeDefined();
+    const device = { deviceId: "fake-keyboard-set-ime", platform: "android" } as BootedDevice;
+    const response = await keyboardHandler!(
+      device,
+      { action: "setIme", imeId: newIme },
+      undefined,
+      controller.signal,
+    );
+    expect(response).toBeDefined();
+    expect(controller.signal.aborted).toBe(true);
+    expect(adb.getExecutedCommands()).toContain(`shell ime set ${newIme}`);
+    expect(
+      adb.getCommandCalls().filter((call) => call.command === "shell ime list -a -s"),
+    ).toHaveLength(2);
+    expect(
+      adb.getCommandCalls().filter((call) => call.command === "shell ime list -s"),
+    ).toHaveLength(2);
+    expect(
+      adb
+        .getCommandCalls()
+        .filter((call) => call.command === "shell settings get secure default_input_method"),
+    ).toHaveLength(2);
+    expect(
+      adb
+        .getCommandCalls()
+        .slice(-3)
+        .every((call) => call.signal === undefined),
+    ).toBe(true);
+  } finally {
+    create.mockRestore();
+    registration.mockRestore();
     ToolRegistry.clearTools();
   }
 });

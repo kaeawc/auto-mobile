@@ -60,7 +60,9 @@ export class AndroidImeCatalog {
     if (result.stderr.trim()) {
       throw new Error(`Failed to select IME ${id}: ${result.stderr.trim()}`);
     }
-    const after = await this.list(signal);
+    // The IME may already have changed. Verify it under the lock even if cancellation
+    // arrives after dispatch, as the native key tap path does after a physical tap.
+    const after = await this.list();
     if (after.activeImeId !== id) {
       throw new Error(
         `IME selection did not take effect: expected ${id}, got ${after.activeImeId ?? "none"}.`,

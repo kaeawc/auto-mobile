@@ -46,6 +46,20 @@ function isPrintableAscii(text: string): boolean {
   return true;
 }
 
+function validateImeKeyEventsText(
+  command: SendKeysTypeCommand,
+  platform: BootedDevice["platform"],
+): string | null {
+  if (
+    platform === "android" &&
+    command.mode === "imeKeyEvents" &&
+    !isPrintableAscii(command.text)
+  ) {
+    return "imeKeyEvents accepts printable ASCII (U+0020–U+007E) only; use mode: ime for other text.";
+  }
+  return null;
+}
+
 function getAutoImeFallback(
   operation: SendKeysOperation,
   requestedMode: SendKeysTypingMode,
@@ -280,14 +294,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     if (profileError) {
       return profileError;
     }
-    if (
-      this.device.platform === "android" &&
-      command.mode === "imeKeyEvents" &&
-      !isPrintableAscii(command.text)
-    ) {
-      return "imeKeyEvents accepts printable ASCII (U+0020–U+007E) only; use mode: ime for other text.";
-    }
-    return null;
+    return validateImeKeyEventsText(command, this.device.platform);
   }
 
   private validateKeyboardProfile(command: SendKeysTypeCommand): string | null {
@@ -1038,7 +1045,7 @@ export class SendKeys {
   private readonly timestampProvider: SendKeysTimestampProvider;
 
   constructor(
-    device: BootedDevice,
+    private readonly device: BootedDevice,
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
     dependencies: SendKeysDependencies = {},
   ) {
@@ -1072,14 +1079,17 @@ export class SendKeys {
     signal?: AbortSignal,
   ): Promise<SendKeysResult> {
     signal?.throwIfAborted();
+    const preflight = this.preflightCommands(commands);
     // Accept hierarchy updates emitted while focus or command delivery is completing.
-    const actionStartTimestamp = await this.timestampProvider.now();
-    const focusFailure = await this.focusTarget(selector, signal);
+    const actionStartTimestamp = preflight ? undefined : await this.timestampProvider.now();
+    const focusFailure = preflight ? undefined : await this.focusTarget(selector, signal);
     signal?.throwIfAborted();
-    const execution = focusFailure
-      ? { results: [], failure: focusFailure }
-      : await this.executeCommands(commands, progress, signal);
-    const minTimestamp = focusFailure ? undefined : actionStartTimestamp;
+    const execution =
+      preflight ??
+      (focusFailure
+        ? { results: [], failure: focusFailure }
+        : await this.executeCommands(commands, progress, signal));
+    const minTimestamp = preflight || focusFailure ? undefined : actionStartTimestamp;
     signal?.throwIfAborted();
     await progress?.(commands.length, commands.length, "Observing final keyboard input state");
     const observation = await this.observer.execute({
@@ -1088,6 +1098,35 @@ export class SendKeys {
       minTimestamp,
     });
     return this.buildResult(execution.results, execution.failure, observation);
+  }
+
+  private preflightCommands(
+    commands: SendKeysCommand[],
+  ): { results: SendKeysCommandResult[]; failure: SendKeysFailure } | undefined {
+    for (const [index, command] of commands.entries()) {
+      if (command.action !== "type") {
+        continue;
+      }
+      const error = validateImeKeyEventsText(command, this.device.platform);
+      if (error) {
+        return {
+          results: [
+            {
+              index,
+              action: "type",
+              success: false,
+              textLength: Array.from(command.text).length,
+              operation: command.operation ?? "insert",
+              requestedMode: command.mode ?? "auto",
+              resolvedMode: "imeKeyEvents",
+              error,
+            },
+          ],
+          failure: { index, error },
+        };
+      }
+    }
+    return undefined;
   }
 
   private async focusTarget(

@@ -209,12 +209,31 @@ run_lane() {
 }
 
 @test "integration lane isolates test files to prevent shared suite state" {
-  run_lane integration
+  run_lane integration --bail
   [ "$status" -eq 0 ]
   [[ "$output" == *"--isolate"* ]]
   [[ "$output" == *"test/server/proxyServerTransportFailure.integration.test.ts"* ]]
   [[ "$output" == *"--path-ignore-patterns"*"proxyServerTransportFailure.integration.test.ts"* ]]
   [[ "$output" == *".integration.test.ts"* ]]
+  [ "$(grep -c -- '--bail' <<< "$output")" -eq 2 ]
+}
+
+@test "integration split respects a shorter caller wall timeout" {
+  local timeout_args
+  timeout_args="$(mktemp)"
+  cat > "$STUB_BIN/timeout" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$TIMEOUT_ARGS_FILE"
+shift 3
+exec "$@"
+EOF
+  chmod +x "$STUB_BIN/timeout"
+  run env PATH="$STUB_BIN:$PATH" TIMEOUT_ARGS_FILE="$timeout_args" \
+    AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=1 bash "$SCRIPT" integration
+  [ "$status" -eq 0 ]
+  [ "$(wc -l < "$timeout_args")" -eq 2 ]
+  [[ "$(head -n 1 "$timeout_args")" == "-k 2 1 "* ]]
+  rm -f "$timeout_args"
 }
 
 @test "Windows integration lane retains one process without a POSIX watchdog" {

@@ -452,9 +452,15 @@ case "$mode" in
         # This MCP transport suite can stall the Linux runner after earlier suites
         # have run, even with Bun's per-file isolation. Give it a fresh process and
         # a short deadline so a regression cannot consume the whole matrix job.
-        AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=60 run_test_command \
+        transport_suite_timeout="${AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS:-60}"
+        validate_positive_integer "AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS" "$transport_suite_timeout"
+        if ((transport_suite_timeout > 60)); then
+          transport_suite_timeout=60
+        fi
+        AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS="$transport_suite_timeout" run_test_command \
           "${integration_args[@]}" \
-          test/server/proxyServerTransportFailure.integration.test.ts
+          test/server/proxyServerTransportFailure.integration.test.ts \
+          "${passthrough_args[@]+"${passthrough_args[@]}"}"
         run_test_command \
           "${integration_args[@]}" \
           --path-ignore-patterns "**/proxyServerTransportFailure.integration.test.ts" \

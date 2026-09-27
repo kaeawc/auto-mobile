@@ -227,7 +227,7 @@ wiring_requires_yq() {
 @test "host integration job evaluates after the fast-validation fan-in" {
   local host
   host="$(job_block node-host-integration-tests)"
-  [[ "$host" == *"always() && needs.detect-changes.result == 'success' && needs.fast-validation.result == 'success'"* ]]
+  [[ "$host" == *"always() && !cancelled() && needs.detect-changes.result == 'success' && needs.fast-validation.result == 'success'"* ]]
   [[ "$host" == *"needs.detect-changes.outputs.docs_only != 'true'"* ]]
 }
 

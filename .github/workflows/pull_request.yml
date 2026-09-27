@@ -1318,7 +1318,7 @@ jobs:
     # already established that this revision cannot pass.
     needs: [detect-changes, fast-validation]
     if: >-
-      always() && needs.detect-changes.result == 'success' && needs.fast-validation.result == 'success' &&
+      always() && !cancelled() && needs.detect-changes.result == 'success' && needs.fast-validation.result == 'success' &&
       needs.detect-changes.outputs.docs_only != 'true' && needs.detect-changes.outputs.sha256_only != 'true'
     strategy:
       fail-fast: false

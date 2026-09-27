@@ -116,4 +116,80 @@ describe("CtrlProxyHierarchy synchronous deadline", () => {
     await expect(request).rejects.toThrow("caller cancelled");
     expect(harness.requestManager.getPendingCount()).toBe(0);
   });
+
+  test("preserves a request-scoped runner error instead of reporting a timeout", async () => {
+    const timer = new FakeTimer();
+    let sent!: (requestId: string) => void;
+    const dispatched = new Promise<string>((resolve) => {
+      sent = resolve;
+    });
+    const harness = context(
+      timer,
+      async () => true,
+      (data) => {
+        sent((JSON.parse(data) as { requestId: string }).requestId);
+      },
+    );
+    const request = new CtrlProxyHierarchy(harness.context).getLatestHierarchy(false, 100);
+
+    const requestId = await dispatched;
+    harness.requestManager.resolveError(requestId, "runner hierarchy failed", 5);
+
+    const response = await request;
+    expect(response.unavailableReason).toBe("unknown");
+    expect(response.unavailableDetail).toBe("runner hierarchy failed");
+  });
+
+  test("reports a genuine hierarchy request timeout", async () => {
+    const timer = new FakeTimer();
+    let sent!: () => void;
+    const dispatched = new Promise<void>((resolve) => {
+      sent = resolve;
+    });
+    const harness = context(
+      timer,
+      async () => true,
+      () => sent(),
+    );
+    const request = new CtrlProxyHierarchy(harness.context).getLatestHierarchy(false, 100);
+
+    await dispatched;
+    timer.advanceTime(100);
+
+    const response = await request;
+    expect(response.unavailableReason).toBe("request_timed_out");
+    expect(response.unavailableDetail).toBeUndefined();
+  });
+
+  test("keeps concurrent hierarchy failures attached to their own requests", async () => {
+    const timer = new FakeTimer();
+    const requestIds: string[] = [];
+    let bothSent!: () => void;
+    const dispatched = new Promise<void>((resolve) => {
+      bothSent = resolve;
+    });
+    const harness = context(
+      timer,
+      async () => true,
+      (data) => {
+        requestIds.push((JSON.parse(data) as { requestId: string }).requestId);
+        if (requestIds.length === 2) {
+          bothSent();
+        }
+      },
+    );
+    const hierarchy = new CtrlProxyHierarchy(harness.context);
+    const first = hierarchy.getLatestHierarchy(false, 100);
+    const second = hierarchy.getLatestHierarchy(false, 100);
+
+    await dispatched;
+    harness.requestManager.resolveError(requestIds[0]!, "first runner failure", 5);
+    timer.advanceTime(100);
+
+    const [firstResponse, secondResponse] = await Promise.all([first, second]);
+    expect(firstResponse.unavailableReason).toBe("unknown");
+    expect(firstResponse.unavailableDetail).toBe("first runner failure");
+    expect(secondResponse.unavailableReason).toBe("request_timed_out");
+    expect(secondResponse.unavailableDetail).toBeUndefined();
+  });
 });

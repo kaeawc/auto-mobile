@@ -44,6 +44,37 @@ class LayoutInspectorStateFrameGenerationTest {
     assertNull(state.hierarchyUnavailableReason)
   }
 
+  @Test
+  fun `non iOS hierarchy error does not replace the recorded iOS failure`() {
+    val state = LayoutInspectorState()
+    val iosError =
+      Json.parseToJsonElement(
+        """{"hierarchy":{"error":"Failed to retrieve iOS view hierarchy from CtrlProxy iOS: runner unavailable"}}"""
+      )
+    assertTrue(state.recordHierarchyUnavailable(iosError))
+
+    val androidError =
+      Json.parseToJsonElement("""{"hierarchy":{"error":"Android service unavailable"}}""")
+    assertFalse(state.recordHierarchyUnavailable(androidError))
+    assertEquals("runner unavailable", state.hierarchyUnavailableReason)
+  }
+
+  @Test
+  fun `new iOS failure cancels an older debounced hierarchy success`() = runTest {
+    val state = LayoutInspectorState(StandardTestDispatcher(testScheduler))
+    val parsed = buildParsedHierarchy(LayoutInspectorMockData.mockHierarchy)
+    state.applyHierarchyUpdate(parsed, emptySet())
+
+    val error =
+      Json.parseToJsonElement(
+        """{"hierarchy":{"error":"Failed to retrieve iOS view hierarchy from CtrlProxy iOS: runner unavailable"}}"""
+      )
+    assertTrue(state.recordHierarchyUnavailable(error))
+    advanceUntilIdle()
+
+    assertEquals("runner unavailable", state.hierarchyUnavailableReason)
+  }
+
   private fun screenshot(
     state: LayoutInspectorState,
     deviceId: String,

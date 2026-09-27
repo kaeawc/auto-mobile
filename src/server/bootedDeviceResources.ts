@@ -1315,7 +1315,6 @@ export async function queryDeviceServiceStatus(
       };
     } else if (device.platform === "ios") {
       const manager = IOSCtrlProxyManager.getInstance(bootedDevice);
-      const restartBudget = manager.getForcedRestartBudget().snapshot();
       const [installed, running, version] = await Promise.all([
         manager.isInstalled(),
         manager.isRunning(),
@@ -1358,6 +1357,7 @@ export async function queryDeviceServiceStatus(
         supportedCommandsComplete === true &&
         supportedFeaturesComplete === true &&
         !IOSCtrlProxyBuilder.isPinnedVersionUnverifiable();
+      const restartBudget = manager.getForcedRestartBudget().snapshot();
 
       return {
         installed,
@@ -1382,7 +1382,12 @@ export async function queryDeviceServiceStatus(
                 state: restartBudget.state,
                 attempts: restartBudget.attempts,
                 ...(restartBudget.lastFailureReason
-                  ? { reason: restartBudget.lastFailureReason }
+                  ? {
+                      reason:
+                        restartBudget.state === "suspended"
+                          ? "device removed or cleanup failed"
+                          : "CtrlProxy restart failed",
+                    }
                   : {}),
                 ...(restartBudget.nextAttemptAtMs === undefined
                   ? {}

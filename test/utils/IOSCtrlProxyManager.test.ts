@@ -593,7 +593,7 @@ describe("IOSCtrlProxyManager", function () {
   });
 
   describe("evict", function () {
-    test("rearms an exhausted restart budget without starting the manager", async function () {
+    test("does not rearm an exhausted budget on a ready signal without removal", async function () {
       const manager = IOSCtrlProxyManager.getInstance(testDevice, fakeTimer);
       const budget = manager.getForcedRestartBudget();
       const start = spyOn(manager, "start").mockResolvedValue();
@@ -608,9 +608,38 @@ describe("IOSCtrlProxyManager", function () {
 
       await manager.rearmAfterDeviceReappearance();
 
-      expect(budget.snapshot().state).toBe("idle");
-      expect(budget.tryBeginAttempt()).toBeDefined();
+      expect(budget.snapshot().state).toBe("exhausted");
+      expect(budget.tryBeginAttempt()).toBeUndefined();
       expect(start).not.toHaveBeenCalled();
+    });
+
+    test("stale reappearance cannot rearm a newer device removal", async function () {
+      const manager = IOSCtrlProxyManager.getInstance(testDevice, fakeTimer);
+      const firstStop = deferred();
+      const secondStop = deferred();
+      const firstEntered = deferred();
+      const secondEntered = deferred();
+      spyOn(manager, "stop")
+        .mockImplementationOnce(async () => {
+          firstEntered.resolve();
+          await firstStop.promise;
+        })
+        .mockImplementationOnce(async () => {
+          secondEntered.resolve();
+          await secondStop.promise;
+        });
+
+      const firstRemoval = manager.suspendForDeviceRemoval();
+      await firstEntered.promise;
+      const staleRearm = manager.rearmAfterDeviceReappearance();
+      const secondRemoval = manager.suspendForDeviceRemoval();
+      await secondEntered.promise;
+      firstStop.resolve();
+      await firstRemoval;
+      await staleRearm;
+      expect(manager.getForcedRestartBudget().snapshot().state).toBe("suspended");
+      secondStop.resolve();
+      await secondRemoval;
     });
 
     test("device disappearance suspends recovery and releases the runner port", async function () {

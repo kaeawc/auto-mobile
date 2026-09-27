@@ -327,6 +327,8 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   // stop phase, even when the readiness caller times out before it settles.
   private forceRestartInFlight: Promise<void> | null = null;
   private removalCleanup: Promise<void> | null = null;
+  private removalGeneration = 0;
+  private rearmedRemovalGeneration = 0;
   // Lets ordinary starts detect that a newer forced restart began while they
   // yielded before claiming the shared-start slot.
   private forceRestartGeneration = 0;
@@ -468,6 +470,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
   /** Suspend recovery immediately, then retire any runner owned by this device. */
   public async suspendForDeviceRemoval(): Promise<void> {
+    this.removalGeneration++;
     this.forcedRestartBudget.suspend("device disappeared from discovery");
     this.forceRestartGeneration++;
     const cleanup = (async () => {
@@ -495,12 +498,23 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
   public async rearmAfterDeviceReappearance(): Promise<void> {
     const state = this.forcedRestartBudget.snapshot().state;
-    if (state !== "suspended" && state !== "exhausted") {
+    const removalGeneration = this.removalGeneration;
+    if (
+      (state !== "suspended" && state !== "exhausted") ||
+      removalGeneration === this.rearmedRemovalGeneration
+    ) {
       return;
     }
     if (this.removalCleanup) {
       await this.removalCleanup;
     }
+    if (
+      removalGeneration !== this.removalGeneration ||
+      removalGeneration === this.rearmedRemovalGeneration
+    ) {
+      return;
+    }
+    this.rearmedRemovalGeneration = removalGeneration;
     this.forcedRestartBudget.rearm("device reappeared");
   }
 

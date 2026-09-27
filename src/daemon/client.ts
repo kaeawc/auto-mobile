@@ -91,6 +91,9 @@ type DaemonOptionsSchemaCoversAllKeys =
 export const daemonOptionsSchemaCoversAllKeys: DaemonOptionsSchemaCoversAllKeys = true;
 
 const socketIdentityStatusSchema = z.object({
+  reportedPidFilePath: z.string().min(1).optional(),
+  reportedSocketPath: z.string().min(1).optional(),
+  reportedSockets: z.record(z.string(), z.string().min(1)).optional(),
   processStartedAt: z.number().finite().optional(),
   dbPath: z.string().min(1).optional(),
   pid: z.number().int().positive().optional(),

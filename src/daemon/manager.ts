@@ -918,7 +918,7 @@ interface StartupLockHolder {
   token: string | undefined;
 }
 
-export type DaemonStartResult = "started" | "joined";
+export type DaemonStartResult = "started" | "joined" | "replaced";
 
 function restartResultFromStart(result: DaemonStartResult): DaemonRestartResult {
   return result === "joined" ? "joined" : "restarted";
@@ -1076,7 +1076,9 @@ export class DaemonManager implements DaemonManagerLike {
     identityRecoveryIO?: IdentityRecoveryIO,
   ) {
     this.identityRecoveryIO = identityRecoveryIO ?? {
-      socketExists: () => this.platform === "win32" || existsSync(this.socketPath),
+      // Named pipes have no inode: existing PID metadata is a cheap positive signal.
+      socketExists: () =>
+        existsSync(this.platform === "win32" ? this.pidFilePath : this.socketPath),
       readRecord: () => readPidFileDataSync(this.pidFilePath),
       probe: () => new DaemonClient(this.socketPath, 1000, this.timer).getDaemonStatus(1000),
     };
@@ -1556,6 +1558,9 @@ export class DaemonManager implements DaemonManagerLike {
     const startDeadline = this.timer.now() + DAEMON_STARTUP_TIMEOUT_MS;
     const status = await this.lifecycleStatus();
     this.throwIfRecoveryCancelled(recoverySignal);
+    if (!status.running && status.recovery) {
+      return this.startIdentityRecovery(status);
+    }
     if (status.running) {
       // ensureVersionMatches/compareStrictNumericVersions treat empty/unparseable as older (+Infinity); this start guard deliberately protects it.
       if (shouldProtectLiveDaemonVersion(status.version, DAEMON_VERSION)) {
@@ -2232,7 +2237,10 @@ export class DaemonManager implements DaemonManagerLike {
    */
   async stop(timeout: number = DAEMON_SHUTDOWN_TIMEOUT_MS): Promise<void> {
     // Explicit stop must not repair or replace a missing generation before stopping it.
-    const status = await this.status(false);
+    let status = await this.status(false);
+    if (!status.running && this.identityRecoveryIO.socketExists()) {
+      status = await this.authenticateSocketOwner();
+    }
 
     if (!status.running) {
       // Status never deletes files (issue #6140) and does not
@@ -2759,59 +2767,74 @@ export class DaemonManager implements DaemonManagerLike {
     return this.recoveryOwner ? Promise.resolve(this.recordedStatus()) : this.status();
   }
 
-  private async recoverSocketIdentity(): Promise<DaemonStatus> {
-    let owner: DaemonStatus;
+  private async authenticateSocketOwner(): Promise<DaemonStatus> {
     try {
-      owner = await this.identityRecoveryIO.probe();
-      if (
-        !recoveryOwnerSchema.safeParse(owner).success ||
-        owner.socketPath !== this.socketPath ||
-        !this.isProcessRunning(owner.pid!)
-      ) {
+      const owner = await this.identityRecoveryIO.probe();
+      if (!this.isRecoveryOwner(owner)) {
         throw new ActionableError(
-          "Socket owner did not provide a live, complete process generation",
+          "Socket owner did not provide a live, matching provider identity",
         );
       }
+      return owner;
     } catch (error) {
+      if (/ECONNREFUSED|ENOENT|Failed to connect to daemon/.test(errorMessage(error))) {
+        // A stale socket with no listener is an expected post-crash state.
+        logger.debug("No daemon listening on the recovery socket", error);
+        return { running: false };
+      }
       logger.warn("Daemon socket owner could not be authenticated", error);
       return {
         running: false,
         recovery: { state: "unauthenticated", reason: errorMessage(error) },
       };
     }
-    try {
-      const result = await this.requestIdentityRepublish(owner);
-      if (result.accepted) {
-        const repaired = await this.tryVerifiedRepair(owner);
-        if (repaired) {
-          return repaired;
+  }
+
+  private isRecoveryOwner(owner: DaemonStatus): boolean {
+    return (
+      recoveryOwnerSchema.safeParse(owner).success &&
+      owner.reportedPidFilePath === this.pidFilePath &&
+      owner.reportedSocketPath === this.socketPath &&
+      this.isProcessRunning(owner.pid!)
+    );
+  }
+
+  private async recoverSocketIdentity(): Promise<DaemonStatus> {
+    const owner = await this.authenticateSocketOwner();
+    if (!owner.running) {
+      return owner;
+    }
+    const result = await this.requestIdentityRepublish(owner);
+    if (result.accepted) {
+      return (
+        (await this.tryVerifiedRepair(owner)) ?? {
+          running: false,
+          recovery: {
+            state: "failed",
+            reason: "Republish accepted without authoritative metadata",
+          },
         }
-      }
-      if (
-        result.reason &&
-        [
-          "active_sessions",
-          "active_operations",
-          "generation_changed",
-          "maintenance_pending",
-          "sessions_unavailable",
-          "startup_pending",
-        ].includes(result.reason)
-      ) {
-        return { ...owner, recovery: { state: "deferred", reason: result.reason } };
-      }
-      // restart() remains the sole replacement path. This context selects maintenance
-      // admission and prevents its own startup status reads from recursively recovering.
-      if (this.heldLockLogPath) {
-        return { ...owner, recovery: { state: "deferred", reason: "startup_pending" } };
-      }
-      this.recoveryOwner = owner;
-      await this.restart({}, owner);
-      return await this.verifiedRecoveryStatus("replaced");
+      );
+    }
+    return {
+      running: false,
+      recovery: { state: "deferred", reason: result.reason, replacementOwner: owner },
+    };
+  }
+
+  /** Only an explicit lifecycle operation may replace an authenticated incumbent. */
+  private async replaceRecoveryOwner(owner: DaemonStatus): Promise<DaemonStatus> {
+    this.recoveryOwner = owner;
+    try {
+      const result = await this.restart({}, owner);
+      return await this.waitForRecoverySuccessor(
+        owner,
+        result === "joined" ? "joined" : "replaced",
+      );
     } catch (error) {
-      logger.warn("Daemon identity recovery did not complete", error);
+      logger.warn("Explicit daemon identity replacement did not complete", error);
       return {
-        ...owner,
+        running: false,
         recovery: {
           state: error instanceof DaemonRestartDeferredError ? "deferred" : "failed",
           reason: errorMessage(error),
@@ -2820,6 +2843,44 @@ export class DaemonManager implements DaemonManagerLike {
     } finally {
       this.recoveryOwner = undefined;
     }
+  }
+
+  private async waitForRecoverySuccessor(
+    owner: DaemonStatus,
+    state: "joined" | "replaced",
+  ): Promise<DaemonStatus> {
+    const deadline = this.timer.now() + 5000;
+    while (this.timer.now() < deadline) {
+      const live = await this.authenticateSocketOwner();
+      if (
+        live.running &&
+        (state === "joined" || !this.isSameDaemonGeneration(live, owner)) &&
+        this.hasPublishedRecoveryIdentity(live)
+      ) {
+        return this.verifiedRecoveryStatus(state, live);
+      }
+      await this.timer.sleep(100);
+    }
+    return {
+      running: false,
+      recovery: {
+        state: "failed",
+        reason: "Successor did not publish complete identity within 5000ms",
+      },
+    };
+  }
+
+  private async startIdentityRecovery(status: DaemonStatus): Promise<DaemonStartResult> {
+    const owner = status.recovery?.replacementOwner;
+    const result = owner ? await this.replaceRecoveryOwner(owner) : status;
+    if (!result.running) {
+      const reason = result.recovery?.reason ?? "Identity recovery could not be verified";
+      if (result.recovery?.state === "deferred") {
+        throw new DaemonRestartDeferredError(reason);
+      }
+      throw new ActionableError(reason);
+    }
+    return result.recovery?.state === "joined" ? "joined" : "replaced";
   }
 
   private async requestIdentityRepublish(
@@ -2842,7 +2903,7 @@ export class DaemonManager implements DaemonManagerLike {
   private hasPublishedRecoveryIdentity(owner: DaemonStatus): boolean {
     const record = this.identityRecoveryIO.readRecord();
     return (
-      isCompleteRecoveryRecord(record) &&
+      isCompleteRecoveryRecord(record, owner.reportedSockets ?? {}) &&
       this.isProcessRunning(record.pid) &&
       record.socketPath === this.socketPath &&
       this.isSameDaemonGeneration({ ...record, running: true }, owner)
@@ -2859,15 +2920,14 @@ export class DaemonManager implements DaemonManagerLike {
   }
 
   private async verifiedRecoveryStatus(
-    state: "repaired" | "replaced",
+    state: "repaired" | "replaced" | "joined",
     expected?: DaemonStatus,
   ): Promise<DaemonStatus> {
     const record = this.identityRecoveryIO.readRecord();
-    const live = await this.identityRecoveryIO.probe();
+    const live = expected ?? (await this.identityRecoveryIO.probe());
     if (
-      !recoveryOwnerSchema.safeParse(live).success ||
-      live.socketPath !== this.socketPath ||
-      !isCompleteRecoveryRecord(record) ||
+      !this.isRecoveryOwner(live) ||
+      !isCompleteRecoveryRecord(record, live.reportedSockets ?? {}) ||
       !this.isProcessRunning(record.pid) ||
       !this.isSameDaemonGeneration({ ...record, running: true }, live) ||
       (expected && !this.isSameDaemonGeneration(live, expected)) ||
@@ -2894,6 +2954,9 @@ export class DaemonManager implements DaemonManagerLike {
     const status = recovering
       ? await this.identityRecoveryIO.probe()
       : await this.lifecycleStatus();
+    if (recovering && !this.isRecoveryOwner(status)) {
+      throw new DaemonRestartDeferredError("Provider identity changed before replacement");
+    }
     if (recovering && this.hasPublishedRecoveryIdentity(status)) {
       return "joined";
     }
@@ -2979,7 +3042,8 @@ export class DaemonManager implements DaemonManagerLike {
     // Another automatic client may win the shared startup lock during this
     // handoff. Ordinary start() joins that winner instead of terminating it.
     await this.timer.sleep(DAEMON_RESTART_HANDOFF_DELAY_MS);
-    const startResult = await this.start(options);
+    // Recovery already owns the startup lock; do not recursively acquire it.
+    const startResult = recovering ? await this.startUnlocked(options) : await this.start(options);
     return restartResultFromStart(startResult);
   }
 

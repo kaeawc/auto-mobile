@@ -1,3 +1,6 @@
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { republishOwnedIdentity } from "../../src/daemon/identityRecovery";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { DaemonManager } from "../../src/daemon/manager";
@@ -50,7 +53,13 @@ const complete: PidFileData = {
 
 function harness(result: { accepted: boolean; reason?: string } = { accepted: true }) {
   let record: PidFileData | null = null;
-  let owner: DaemonStatus = { ...complete, running: true };
+  let owner: DaemonStatus = {
+    ...complete,
+    running: true,
+    reportedPidFilePath: "/isolated/pid",
+    reportedSocketPath: socketPath,
+    reportedSockets: sockets,
+  };
   let probeError: Error | undefined;
   const results = new Map<string, unknown>([
     [REPUBLISH, result],
@@ -102,6 +111,7 @@ function harness(result: { accepted: boolean; reason?: string } = { accepted: tr
   );
   return {
     manager,
+    timer,
     client,
     results,
     get record() {
@@ -111,7 +121,12 @@ function harness(result: { accepted: boolean; reason?: string } = { accepted: tr
       record = value;
     },
     setOwner: (value: DaemonStatus) => {
-      owner = value;
+      owner = {
+        reportedPidFilePath: "/isolated/pid",
+        reportedSocketPath: socketPath,
+        reportedSockets: sockets,
+        ...value,
+      };
     },
     failProbe: (error: Error) => {
       probeError = error;
@@ -125,6 +140,194 @@ afterEach(() => {
 });
 
 describe("provider-owned identity recovery", () => {
+  test("fix 5: Windows recovery probes require an existing PID-file signal", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "identity-win32-"));
+    const pidPath = join(dir, "daemon.pid");
+    const manager = new DaemonManager(
+      undefined,
+      undefined,
+      new FakeTimer(),
+      join(dir, "lock"),
+      pidPath,
+      "named-pipe",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      "win32",
+    );
+    const probe = spyOn((manager as any).identityRecoveryIO, "probe").mockRejectedValue(
+      new Error("connect ECONNREFUSED"),
+    );
+    try {
+      expect(await manager.status()).toEqual({ running: false });
+      expect(probe).not.toHaveBeenCalled();
+      writeFileSync(pidPath, "malformed old metadata");
+      expect(await manager.status()).toEqual({ running: false });
+      expect(probe).toHaveBeenCalledTimes(1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  for (const outcome of ["repaired", "deferred", "failed", "unauthenticated"]) {
+    test(`fix 1: status ${outcome} records only status and republish RPCs`, async () => {
+      const h = harness({ accepted: outcome !== "deferred" });
+      const io = (h.manager as any).identityRecoveryIO;
+      const original = io.probe;
+      io.probe = async () => {
+        await h.client.callDaemonMethod("ide/status", {});
+        return original();
+      };
+      if (outcome === "failed") {
+        h.setOwner({ ...complete, running: true, processGenerationToken: "other" });
+      }
+      if (outcome === "unauthenticated") {
+        h.failProbe(new Error("malformed response"));
+      }
+      expect((await h.manager.status()).recovery?.state).toBe(outcome);
+      expect(h.client.callDaemonMethodCalls.map((c) => c.method)).toEqual(
+        outcome === "unauthenticated" ? ["ide/status"] : ["ide/status", REPUBLISH],
+      );
+    });
+  }
+
+  test("fix 1: concurrent explicit starts drive one maintenance-admitted replacement", async () => {
+    const h = harness({ accepted: false, reason: "republish_unavailable" });
+    const originalStartUnlocked = (h.manager as any).startUnlocked.bind(h.manager);
+    let ownsLock = false;
+    spyOn(h.manager, "acquireLock").mockImplementation(() => {
+      if (ownsLock) {
+        return false;
+      }
+      ownsLock = true;
+      return true;
+    });
+    spyOn(h.manager, "releaseLock").mockImplementation(() => {
+      ownsLock = false;
+    });
+    const stop = spyOn(h.manager as any, "stopRunningDaemon").mockResolvedValue(undefined);
+    let launchCalls = 0;
+    spyOn(h.manager as any, "startUnlocked").mockImplementation(async (options) => {
+      if (launchCalls++ === 0) {
+        return originalStartUnlocked(options);
+      }
+      const successor = { ...complete, pid: 124, startedAt: 200, processGenerationToken: "next" };
+      h.setOwner({ ...successor, running: true });
+      h.setRecord(successor);
+      return "started";
+    });
+    const first = h.manager.start();
+    // Model peers waiting on the namespace lock; lock arbitration has its own suite.
+    spyOn(h.manager as any, "startByAwaitingLockHolder").mockImplementation(async () => {
+      await first;
+      return "joined";
+    });
+    expect(await Promise.all([first, h.manager.start(), h.manager.start()])).toEqual([
+      "replaced",
+      "joined",
+      "joined",
+    ]);
+    expect(stop).toHaveBeenCalledTimes(1);
+    expect(h.client.callDaemonMethodCalls.filter((c) => c.method === ADMIT)).toHaveLength(1);
+  });
+
+  test("fix 2: accepted but unverified publication fails status and blocks explicit start", async () => {
+    const h = harness();
+    h.setOwner({ ...complete, running: true, processGenerationToken: "different" });
+    const restart = spyOn(h.manager, "restart");
+    expect(await h.manager.status()).toMatchObject({
+      running: false,
+      recovery: { state: "failed" },
+    });
+    h.setRecord(null);
+    await expect((h.manager as any).startUnlocked({})).rejects.toThrow("Republish accepted");
+    expect(restart).not.toHaveBeenCalled();
+    expect(h.client.callDaemonMethodCalls.every((c) => c.method === REPUBLISH)).toBe(true);
+  });
+
+  for (const field of ["reportedPidFilePath", "reportedSocketPath"]) {
+    test(`fix 2: foreign ${field} prevents publication and replacement`, async () => {
+      const h = harness();
+      h.setOwner({ ...complete, running: true, [field]: "/foreign" });
+      expect(await h.manager.status()).toMatchObject({
+        running: false,
+        recovery: { state: "unauthenticated" },
+      });
+      await expect((h.manager as any).startUnlocked({})).rejects.toThrow();
+      expect(h.client.callDaemonMethodCalls).toHaveLength(0);
+    });
+  }
+
+  test("fix 2: completeness follows the authenticated provider socket map", async () => {
+    const h = harness();
+    const providerSockets = { control: socketPath, future: "/isolated/future.sock" };
+    h.setOwner({ ...complete, running: true, reportedSockets: providerSockets });
+    h.results.set(REPUBLISH, { accepted: true });
+    spyOn(h.client, "callDaemonMethod").mockImplementation(async () => {
+      h.setRecord({ ...complete, sockets: providerSockets as any });
+      return { accepted: true };
+    });
+    expect((await h.manager.status()).recovery?.state).toBe("repaired");
+  });
+
+  for (const succeeds of [true, false]) {
+    test(`fix 3: successor complete-record wait ${succeeds ? "succeeds" : "times out without claiming killed owner"}`, async () => {
+      const h = harness({ accepted: false, reason: "republish_unavailable" });
+      const evidence = await h.manager.status();
+      const successor = { ...complete, pid: 124, startedAt: 200, processGenerationToken: "next" };
+      spyOn(h.manager, "restart").mockImplementation(async () => {
+        h.setOwner({ ...successor, running: true });
+        if (succeeds) {
+          h.timer.setTimeout(() => h.setRecord(successor), 300);
+        }
+        return "restarted";
+      });
+      const result = await (h.manager as any).replaceRecoveryOwner(
+        evidence.recovery?.replacementOwner,
+      );
+      expect(result).toMatchObject({
+        running: succeeds,
+        recovery: { state: succeeds ? "replaced" : "failed" },
+      });
+      expect(result.pid).not.toBe(123);
+      expect(h.timer.now()).toBeGreaterThanOrEqual(succeeds ? 300 : 5000);
+    });
+  }
+
+  test("fix 3: an already-started successor is reported as joined", async () => {
+    const h = harness({ accepted: false });
+    const evidence = await h.manager.status();
+    spyOn(h.manager, "restart").mockImplementation(async () => {
+      const successor = { ...complete, pid: 124, startedAt: 200 };
+      h.setOwner({ ...successor, running: true });
+      h.setRecord(successor);
+      return "joined";
+    });
+    expect(
+      (await (h.manager as any).replaceRecoveryOwner(evidence.recovery?.replacementOwner)).recovery
+        ?.state,
+    ).toBe("joined");
+  });
+
+  test("fix 4: explicit stop authenticates missing metadata without republishing", async () => {
+    const h = harness();
+    const stop = spyOn(h.manager as any, "stopRunningDaemon").mockResolvedValue(undefined);
+    await h.manager.stop();
+    expect(stop).toHaveBeenCalledWith(expect.objectContaining({ pid: 123 }), expect.any(Number));
+    expect(h.client.callDaemonMethodCalls).toHaveLength(0);
+  });
+
+  test("fix 5: refused stale socket is ordinary not-running without recovery presentation", async () => {
+    const h = harness();
+    h.failProbe(new Error("connect ECONNREFUSED"));
+    expect(await h.manager.status()).toEqual({ running: false });
+    expect(h.client.callDaemonMethodCalls).toHaveLength(0);
+  });
+
   test("in-place republish restores complete authoritative PID metadata before success", async () => {
     const h = harness();
     const restart = spyOn(h.manager, "restart");
@@ -138,12 +341,13 @@ describe("provider-owned identity recovery", () => {
     expect(restart).not.toHaveBeenCalled();
   });
 
-  test("maintenance-admitted replacement reuses restart and preserves effective options and database identity", async () => {
+  test("fix 1: explicit start performs maintenance-admitted replacement preserving options and database", async () => {
     const h = harness({ accepted: false, reason: "republish_unavailable" });
+    const startUnlocked = (h.manager as any).startUnlocked.bind(h.manager);
     const restart = spyOn(h.manager, "restart");
     // Only the process stop/start boundaries are fake; exercise the real restart admission.
     const stop = spyOn(h.manager as any, "stopRunningDaemon").mockResolvedValue(undefined);
-    const start = spyOn(h.manager, "start").mockImplementation(async (options) => {
+    const start = spyOn(h.manager as any, "startUnlocked").mockImplementation(async (options) => {
       expect(options).toEqual({ ...complete.options, strictPort: true });
       expect((h.manager as any).daemonLaunchEnvironment(options).AUTOMOBILE_DB_PATH).toBe(
         complete.dbPath,
@@ -158,7 +362,7 @@ describe("provider-owned identity recovery", () => {
       h.setRecord(replacement);
       return "started";
     });
-    expect((await h.manager.status()).recovery).toEqual({ state: "replaced" });
+    expect(await startUnlocked({})).toBe("replaced");
     expect(restart).toHaveBeenCalledTimes(1);
     expect(stop).toHaveBeenCalledWith(
       expect.objectContaining({ pid: 123 }),
@@ -174,7 +378,7 @@ describe("provider-owned identity recovery", () => {
     test(`${reason} defer recovery without repair, replacement or signals`, async () => {
       const h = harness({ accepted: false, reason });
       const restart = spyOn(h.manager, "restart");
-      expect((await h.manager.status()).recovery).toEqual({ state: "deferred", reason });
+      expect((await h.manager.status()).recovery).toMatchObject({ state: "deferred", reason });
       expect(h.record).toBeNull();
       expect(restart).not.toHaveBeenCalled();
     });
@@ -182,7 +386,13 @@ describe("provider-owned identity recovery", () => {
       const h = harness({ accepted: false, reason: "republish_unavailable" });
       h.results.set(PREPARE, { accepted: false, reason });
       const stop = spyOn(h.manager as any, "stopRunningDaemon");
-      expect((await h.manager.status()).recovery).toMatchObject({
+      expect(
+        (
+          await (h.manager as any).replaceRecoveryOwner(
+            (await h.manager.status()).recovery?.replacementOwner,
+          )
+        ).recovery,
+      ).toMatchObject({
         state: "deferred",
         reason: expect.stringContaining(reason),
       });
@@ -198,16 +408,13 @@ describe("provider-owned identity recovery", () => {
     expect(h.client.callDaemonMethodCalls.filter((c) => c.method === REPUBLISH)).toHaveLength(1);
   });
 
-  test("concurrent status callers share exactly one maintenance-admitted replacement", async () => {
+  test("fix 1: concurrent status callers share republish refusal without maintenance or replacement", async () => {
     const h = harness({ accepted: false, reason: "republish_failed" });
-    spyOn(h.manager as any, "stopRunningDaemon").mockResolvedValue(undefined);
-    const start = spyOn(h.manager, "start").mockImplementation(async () => {
-      h.setRecord(complete);
-      return "started";
-    });
-    await Promise.all(Array.from({ length: 8 }, () => h.manager.status()));
-    expect(start).toHaveBeenCalledTimes(1);
-    expect(h.client.callDaemonMethodCalls.filter((c) => c.method === ADMIT)).toHaveLength(1);
+    const restart = spyOn(h.manager, "restart");
+    const results = await Promise.all(Array.from({ length: 8 }, () => h.manager.status()));
+    expect(results.every((r) => r.recovery?.state === "deferred")).toBe(true);
+    expect(h.client.callDaemonMethodCalls.map((c) => c.method)).toEqual([REPUBLISH]);
+    expect(restart).not.toHaveBeenCalled();
   });
 
   test("malformed or unauthenticated socket status returns typed failure and attempts no recovery", async () => {
@@ -236,18 +443,6 @@ describe("provider-owned identity recovery", () => {
     const h = harness();
     h.setRecord({ ...complete, pid: 999 });
     expect((await h.manager.status()).recovery?.state).toBe("repaired");
-  });
-
-  test("dead complete PID metadata does not suppress the maintenance replacement fallback", async () => {
-    const h = harness({ accepted: false, reason: "republish_unavailable" });
-    h.setRecord({ ...complete, pid: 999 });
-    spyOn(h.manager as any, "stopRunningDaemon").mockResolvedValue(undefined);
-    const start = spyOn(h.manager, "start").mockImplementation(async () => {
-      h.setRecord(complete);
-      return "started";
-    });
-    expect((await h.manager.status()).recovery?.state).toBe("replaced");
-    expect(start).toHaveBeenCalledTimes(1);
   });
 
   test("unavailable incumbent database path defers replacement instead of changing databases", async () => {
@@ -338,17 +533,20 @@ describe("republish admin RPC admission", () => {
     await first;
     expect(p.writes).toBe(1);
   });
-  test("provider active-session admission defers in-place publication", async () => {
+  test("fix 4: provider republishes with active sessions without maintenance admission", async () => {
     const p = provider([{ sessionId: "active" }]);
-    expect(await p.call()).toEqual({ accepted: false, reason: "active_sessions" });
-    expect(p.writes).toBe(0);
+    expect(await p.call()).toEqual({ accepted: true });
+    expect(p.writes).toBe(1);
   });
-  test("provider active-operation admission defers in-place publication", async () => {
+  test("fix 4: republish does not contend with tool execution admission", async () => {
     const p = provider();
     const operation = executionTracker.startExecution("tapOn", "active-operation");
     try {
-      expect(await p.call()).toEqual({ accepted: false, reason: "active_operations" });
-      expect(p.writes).toBe(0);
+      const pending = p.call();
+      const concurrent = executionTracker.startExecution("tapOn", "during-republish");
+      executionTracker.endExecution(concurrent.id);
+      expect(await pending).toEqual({ accepted: true });
+      expect(p.writes).toBe(1);
     } finally {
       executionTracker.endExecution(operation.id);
     }
@@ -373,7 +571,7 @@ describe("incumbent-owned atomic publisher", () => {
       },
     };
     let acknowledged = false;
-    const first = republishOwnedIdentity(true, complete, io).then((value) => {
+    const first = republishOwnedIdentity(true, complete, io, sockets).then((value) => {
       acknowledged = value;
     });
     await Promise.resolve();
@@ -383,7 +581,7 @@ describe("incumbent-owned atomic publisher", () => {
     await first;
     expect(acknowledged).toBe(true);
     expect(record).toEqual(complete);
-    expect(await republishOwnedIdentity(true, complete, io)).toBe(true);
+    expect(await republishOwnedIdentity(true, complete, io, sockets)).toBe(true);
     expect(writes).toBe(1);
   });
 
@@ -396,8 +594,8 @@ describe("incumbent-owned atomic publisher", () => {
         writes++;
       },
     };
-    expect(await republishOwnedIdentity(false, complete, io)).toBe(false);
-    expect(await republishOwnedIdentity(true, complete, io)).toBe(false);
+    expect(await republishOwnedIdentity(false, complete, io, sockets)).toBe(false);
+    expect(await republishOwnedIdentity(true, complete, io, sockets)).toBe(false);
     expect(writes).toBe(0);
   });
 });

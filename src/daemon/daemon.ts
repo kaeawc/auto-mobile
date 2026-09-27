@@ -692,6 +692,8 @@ export class Daemon {
           processGenerationToken: this.processGenerationToken,
           startupOptions: this.options,
           onRepublishIdentity: () => this.republishIdentity(),
+          pidFilePath: PID_FILE_PATH,
+          sockets: getDaemonSocketPathsByName(),
           dbPath: getDatabasePath(),
           processStartedAt: this.processStartedAt,
           onRestartAccepted: () => {
@@ -1328,6 +1330,7 @@ export class Daemon {
         writeRecord: () => this.writePidFile(),
         isProcessRunning,
       },
+      getDaemonSocketPathsByName(),
     );
   }
 
@@ -2559,6 +2562,8 @@ export class Daemon {
             processGenerationToken: this.processGenerationToken,
             startupOptions: this.options,
             onRepublishIdentity: () => this.republishIdentity(),
+            pidFilePath: PID_FILE_PATH,
+            sockets: getDaemonSocketPathsByName(),
             dbPath: getDatabasePath(),
             processStartedAt: this.processStartedAt,
             onRestartAccepted: () => {

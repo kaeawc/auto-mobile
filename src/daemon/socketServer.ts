@@ -642,6 +642,8 @@ export class UnixSocketServer {
   private readonly startupOptions: DaemonOptions;
   private readonly onRepublishIdentity?: () => Promise<boolean>;
   private readonly identityDbPath?: string;
+  private readonly identityPidFilePath?: string;
+  private readonly identitySockets?: Record<string, string>;
   private readonly identityProcessStartedAt?: number;
   private identityRepublishInFlight?: Promise<{ accepted: boolean; reason?: string }>;
   private readonly onRestartAccepted?: () => void;
@@ -729,6 +731,8 @@ export class UnixSocketServer {
       enforce?: boolean;
       onRepublishIdentity?: () => Promise<boolean>;
       dbPath?: string;
+      pidFilePath?: string;
+      sockets?: Record<string, string>;
       processStartedAt?: number;
       onRestartAccepted?: () => void;
       liveAcceptanceStartupSecret?: string;
@@ -772,6 +776,8 @@ export class UnixSocketServer {
     this.startupOptions = snapshotDaemonOptions(handshakeConfig.startupOptions);
     this.onRepublishIdentity = handshakeConfig.onRepublishIdentity;
     this.identityDbPath = handshakeConfig.dbPath;
+    this.identityPidFilePath = handshakeConfig.pidFilePath;
+    this.identitySockets = handshakeConfig.sockets;
     this.identityProcessStartedAt = handshakeConfig.processStartedAt;
     this.onRestartAccepted = handshakeConfig.onRestartAccepted;
     this.liveAcceptanceStartupSecret = handshakeConfig.liveAcceptanceStartupSecret;
@@ -3206,7 +3212,7 @@ export class UnixSocketServer {
     );
   }
 
-  /** Local admin RPC, generation-bound and fenced by the existing maintenance admission. */
+  /** Local admin RPC, generation-bound; publication never reserves tool admission. */
   private async republishDaemonIdentity(
     params: Record<string, unknown>,
   ): Promise<{ accepted: boolean; reason?: string }> {
@@ -3220,7 +3226,7 @@ export class UnixSocketServer {
     if (this.identityRepublishInFlight) {
       return this.identityRepublishInFlight;
     }
-    this.identityRepublishInFlight = this.republishUnderMaintenance(params);
+    this.identityRepublishInFlight = this.publishIdentity();
     try {
       return await this.identityRepublishInFlight;
     } finally {
@@ -3228,15 +3234,9 @@ export class UnixSocketServer {
     }
   }
 
-  private async republishUnderMaintenance(
-    params: Record<string, unknown>,
-  ): Promise<{ accepted: boolean; reason?: string }> {
+  private async publishIdentity(): Promise<{ accepted: boolean; reason?: string }> {
     if (!this.onRepublishIdentity) {
       return { accepted: false, reason: "republish_unavailable" };
-    }
-    const admission = this.prepareDaemonMaintenance(params);
-    if (!admission.accepted) {
-      return admission;
     }
     try {
       const accepted = await this.onRepublishIdentity();
@@ -3244,8 +3244,6 @@ export class UnixSocketServer {
     } catch (error) {
       logger.warn("Failed to republish daemon identity", error);
       return { accepted: false, reason: "republish_failed" };
-    } finally {
-      this.releaseDaemonMaintenanceAdmission(admission.maintenanceToken);
     }
   }
 
@@ -3704,6 +3702,9 @@ export class UnixSocketServer {
           startedAt: this.identityStartedAt,
           processStartedAt: this.identityProcessStartedAt,
           dbPath: this.identityDbPath,
+          reportedPidFilePath: this.identityPidFilePath,
+          reportedSocketPath: this.socketPath,
+          reportedSockets: this.identitySockets,
           effectiveDebug: isDebugModeEnabled(),
           options: this.startupOptions,
           ...(this.processGenerationToken === undefined

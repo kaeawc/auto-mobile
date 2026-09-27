@@ -1,6 +1,5 @@
 import { z } from "zod";
 import { daemonOptionsSchema } from "./client";
-import { AUXILIARY_SOCKET_CONFIGS_BY_NAME } from "./daemonFiles";
 import type { DaemonStatus, PidFileData } from "./types";
 
 /** Stronger than legacy discovery: mutation requires a complete generation tuple. */
@@ -14,6 +13,9 @@ export const recoveryOwnerSchema = z.object({
   buildId: z.string().min(1),
   entryScript: z.string().min(1),
   socketPath: z.string().min(1),
+  reportedPidFilePath: z.string().min(1),
+  reportedSocketPath: z.string().min(1),
+  reportedSockets: z.record(z.string(), z.string().min(1)),
 });
 
 export const republishResultSchema = z.object({
@@ -21,17 +23,27 @@ export const republishResultSchema = z.object({
   reason: z.string().optional(),
 });
 
-const completeRecordSchema = recoveryOwnerSchema.omit({ running: true }).extend({
-  port: z.number().int().positive(),
-  dbPath: z.string().min(1),
-  daemonSessionId: z.string().min(1),
-  launchLogPath: z.string().nullable(),
-  options: daemonOptionsSchema,
-  sockets: z.record(z.string(), z.string().min(1)),
-});
+const completeRecordSchema = recoveryOwnerSchema
+  .omit({
+    running: true,
+    reportedPidFilePath: true,
+    reportedSocketPath: true,
+    reportedSockets: true,
+  })
+  .extend({
+    port: z.number().int().positive(),
+    dbPath: z.string().min(1),
+    daemonSessionId: z.string().min(1),
+    launchLogPath: z.string().nullable(),
+    options: daemonOptionsSchema,
+    sockets: z.record(z.string(), z.string().min(1)),
+  });
 
 /** Acknowledgement alone is insufficient: verify the daemon-owned complete record. */
-export function isCompleteRecoveryRecord(record: PidFileData | null): record is PidFileData {
+export function isCompleteRecoveryRecord(
+  record: PidFileData | null,
+  reportedSockets: Record<string, string>,
+): record is PidFileData {
   const parsed = completeRecordSchema.safeParse(record);
   if (!parsed.success) {
     return false;
@@ -39,7 +51,8 @@ export function isCompleteRecoveryRecord(record: PidFileData | null): record is 
   const { sockets, socketPath } = parsed.data;
   return (
     sockets.control === socketPath &&
-    Object.keys(AUXILIARY_SOCKET_CONFIGS_BY_NAME).every((name) => typeof sockets[name] === "string")
+    Object.keys(sockets).length === Object.keys(reportedSockets).length &&
+    Object.entries(reportedSockets).every(([name, path]) => sockets[name] === path)
   );
 }
 
@@ -60,13 +73,14 @@ export async function republishOwnedIdentity(
   ready: boolean,
   owner: Pick<PidFileData, "pid" | "startedAt" | "processGenerationToken">,
   io: IdentityPublisherIO,
+  reportedSockets: Record<string, string>,
 ): Promise<boolean> {
   if (!ready) {
     return false;
   }
   const record = io.readRecord();
   if (
-    isCompleteRecoveryRecord(record) &&
+    isCompleteRecoveryRecord(record, reportedSockets) &&
     record.pid === owner.pid &&
     record.startedAt === owner.startedAt &&
     record.processGenerationToken === owner.processGenerationToken

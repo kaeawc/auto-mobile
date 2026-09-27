@@ -70,7 +70,13 @@ test.skipIf(process.platform === "win32")(
       while (Date.now() < deadline && child.exitCode === null) {
         if (existsSync(pid) && existsSync(socket)) {
           const record = JSON.parse(readFileSync(pid, "utf8"));
-          if (isCompleteRecoveryRecord(record)) {
+          if (
+            record.daemonSessionId &&
+            isCompleteRecoveryRecord(
+              record,
+              (await new DaemonClient(socket).getDaemonStatus()).reportedSockets ?? {},
+            )
+          ) {
             before = record;
             break;
           }
@@ -87,6 +93,9 @@ test.skipIf(process.platform === "win32")(
       const live = await client.getDaemonStatus();
       expect(live).toMatchObject({
         pid: before.pid,
+        reportedPidFilePath: pid,
+        reportedSocketPath: socket,
+        reportedSockets: before.sockets,
         startedAt: before.startedAt,
         ...(before.processGenerationToken
           ? { processGenerationToken: before.processGenerationToken }

@@ -389,9 +389,9 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
       test: ["AUTOMOBILE_UNIT_TEST_WORKERS"],
       "test:unit": ["AUTOMOBILE_UNIT_TEST_WORKERS"],
       "test:changed": ["AUTOMOBILE_UNIT_TEST_WORKERS"],
-      "test:integration": ["AUTOMOBILE_INTEGRATION_TEST_WORKERS"],
+      "test:integration": [],
       "test:stress": [],
-      "test:all": ["AUTOMOBILE_UNIT_TEST_WORKERS", "AUTOMOBILE_INTEGRATION_TEST_WORKERS"],
+      "test:all": ["AUTOMOBILE_UNIT_TEST_WORKERS"],
       "test:coverage": ["AUTOMOBILE_UNIT_TEST_WORKERS"],
     } as const;
 

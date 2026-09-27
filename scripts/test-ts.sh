@@ -43,7 +43,6 @@ if [[ "$runner_os" == "macOS" && "$cores" -ge 2 && "$default_workers" -lt 2 ]]; 
 fi
 
 unit_workers="${AUTOMOBILE_UNIT_TEST_WORKERS:-$default_workers}"
-integration_workers="${AUTOMOBILE_INTEGRATION_TEST_WORKERS:-1}"
 per_test_timeout_ms="${AUTOMOBILE_TEST_TIMEOUT_MS:-5000}"
 if [[ "$runner_os" == "macOS" ]]; then
   per_test_timeout_ms="${AUTOMOBILE_TEST_TIMEOUT_MS:-20000}"
@@ -67,7 +66,6 @@ validate_positive_integer() {
 }
 
 validate_positive_integer "AUTOMOBILE_UNIT_TEST_WORKERS" "$unit_workers"
-validate_positive_integer "AUTOMOBILE_INTEGRATION_TEST_WORKERS" "$integration_workers"
 validate_positive_integer "AUTOMOBILE_TEST_TIMEOUT_MS" "$per_test_timeout_ms"
 
 run_test_command() {
@@ -308,9 +306,13 @@ run_unit_shards() {
 
     (
       timing_log="$shard_root/timing-shard-${shard}.ndjson"
+      # These exports intentionally belong to the unit-shard subshell.
+      # shellcheck disable=SC2030
       export AUTOMOBILE_TEST_TIMING_LOG="$timing_log"
+      # shellcheck disable=SC2030
       export AUTOMOBILE_WATCHDOG_TIMING_LOG="$timing_log"
       export AUTOMOBILE_WATCHDOG_SNAPSHOT_FILE="$shard_root/watchdog-shard-${shard}.txt"
+      # shellcheck disable=SC2030
       export AUTOMOBILE_WATCHDOG_LABEL="unit shard ${shard}"
       export AUTOMOBILE_FORCE_PORTABLE_TIMEOUT=1
       shard_args=(bun test --isolate --timeout "$per_test_timeout_ms" --no-orphans \
@@ -439,7 +441,15 @@ case "$mode" in
       fi
     done
     if [[ "$runner_os" != "Windows" ]]; then
-      integration_args+=(--no-orphans "--parallel=${integration_workers}")
+      mkdir -p scratch
+      # These assignments run in the parent shell, independent of unit shards.
+      # shellcheck disable=SC2031
+      export AUTOMOBILE_TEST_TIMING_LOG="${AUTOMOBILE_TEST_TIMING_LOG:-scratch/integration-file-timings-$$.ndjson}"
+      # shellcheck disable=SC2031
+      export AUTOMOBILE_WATCHDOG_TIMING_LOG="${AUTOMOBILE_WATCHDOG_TIMING_LOG:-$AUTOMOBILE_TEST_TIMING_LOG}"
+      # shellcheck disable=SC2031
+      export AUTOMOBILE_WATCHDOG_LABEL="${AUTOMOBILE_WATCHDOG_LABEL:-integration test}"
+      integration_args+=(--no-orphans --preload "$ROOT/test/setup/fileTimingProbe.ts")
     fi
     if [[ "${#integration_test_paths[@]}" -gt 0 && ( "${#unit_test_paths[@]}" -gt 0 || "${#stress_test_paths[@]}" -gt 0 ) ]]; then
       echo "Integration test targets cannot include other lanes." >&2

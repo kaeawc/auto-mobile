@@ -217,6 +217,13 @@ run_lane() {
   [[ "$output" == *"test/stress/\\*\\*"* ]]
 }
 
+@test "Unix integration lane uses Bun isolation without a parallel worker" {
+  run_lane integration
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"--isolate"* ]]
+  [[ "$output" != *"--parallel="* ]]
+}
+
 @test "integration lane isolates test files to prevent shared suite state" {
   run_lane integration --bail
   [ "$status" -eq 0 ]
@@ -454,7 +461,7 @@ EOF
 @test "integration lane selects the canonical suffix conservatively" {
   run_lane integration
   [ "$status" -eq 0 ]
-  [[ "$output" == *"--parallel=1"* ]]
+  [[ "$output" != *"--parallel="* ]]
   [[ "$output" == *".integration.test.ts"* ]]
 }
 

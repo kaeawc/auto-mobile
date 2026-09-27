@@ -27,6 +27,7 @@ export class HandleIntentChooser extends BaseVisualChange {
   async execute(
     preference: "always" | "just_once" | "custom" = "just_once",
     customAppPackage?: string,
+    url?: string,
   ): Promise<IntentChooserResult> {
     const perf = createGlobalPerformanceTracker();
     perf.serial("handleIntentChooser");
@@ -39,7 +40,12 @@ export class HandleIntentChooser extends BaseVisualChange {
         }
 
         return await perf.track("handleChooser", () =>
-          this.deepLinkManager.handleIntentChooser(viewHierarchy, preference, customAppPackage),
+          this.deepLinkManager.handleIntentChooser(
+            viewHierarchy,
+            preference,
+            customAppPackage,
+            url,
+          ),
         );
       },
       {

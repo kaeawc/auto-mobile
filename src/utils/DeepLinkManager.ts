@@ -118,17 +118,29 @@ export interface DeepLinkManager {
     viewHierarchy: ViewHierarchyResult,
     preference?: "always" | "just_once" | "custom",
     customAppPackage?: string,
+    url?: string,
   ): Promise<IntentChooserResult>;
 }
 
 export interface ChooserAppMetadata {
   getLabel(device: BootedDevice, packageName: string): Promise<string | null>;
+  getActivityLabel?(
+    device: BootedDevice,
+    packageName: string,
+    url: string,
+    adb: AdbExecutor,
+  ): Promise<ChooserActivityLabelResult>;
   getFreshHierarchy(
     device: BootedDevice,
     adbFactory: AdbClientFactory,
     minTimestamp: number,
   ): Promise<ViewHierarchyResult>;
 }
+
+export type ChooserActivityLabelResult =
+  | { kind: "literal"; label: string }
+  | { kind: "resource" }
+  | { kind: "none" };
 
 class ChooserRowMissingError extends Error {
   capturedAt?: number;
@@ -153,10 +165,86 @@ const UNIQUE_CHOOSER_VIEW_ID = new RegExp(
   `^${STABLE_VIEW_ID_PREFIX}[0-9a-f]{${STABLE_VIEW_ID_HASH_LENGTH}}$`,
 );
 
+function parseDumpLabel(fields: RegExpExecArray | null): ChooserActivityLabelResult {
+  const labelRes = fields?.[1];
+  const literal = fields?.[2]?.trim();
+  if (literal !== undefined && literal !== "null") {
+    return { kind: "literal", label: literal };
+  }
+  return labelRes && !/^(?:0x0+|0+)$/i.test(labelRes) ? { kind: "resource" } : { kind: "none" };
+}
+
+function parseQueryActivity(
+  block: string,
+): { packageName: string; label: ChooserActivityLabelResult } | null {
+  const activityInfo = /^    ActivityInfo:\s*$/m.exec(block);
+  if (!activityInfo) {
+    return null;
+  }
+  const resolveInfoFields = block.slice(0, activityInfo.index);
+  const resolveInfoLabel = parseDumpLabel(
+    /^    labelRes=(\S+)\s+nonLocalizedLabel=(.*?)(?:\s+(?:icon|banner)=|$)/m.exec(
+      resolveInfoFields,
+    ),
+  );
+  // ApplicationInfo is nested in ActivityInfo's dump but describes the app,
+  // not this intent-resolving activity. Its label must never stand in for one.
+  const fields = block
+    .slice(activityInfo.index + activityInfo[0].length)
+    .split(/^      ApplicationInfo:\s*$/m, 1)[0];
+  const name = /^      name=(\S+)\s*$/m.exec(fields)?.[1];
+  const packageName = /^      packageName=(\S+)\s*$/m.exec(fields)?.[1];
+  if (!name || !packageName) {
+    return null;
+  }
+  const activityLabel = parseDumpLabel(
+    /^      labelRes=(\S+)\s+nonLocalizedLabel=(.*?)(?:\s+(?:icon|banner)=|$)/m.exec(fields),
+  );
+  const label = resolveInfoLabel.kind !== "none" ? resolveInfoLabel : activityLabel;
+  return { packageName, label };
+}
+
+/** ADB can read literal activity labels, but cannot dereference labelRes. */
+export async function resolveChooserActivityLabel(
+  adb: AdbExecutor,
+  packageName: string,
+  url: string,
+): Promise<ChooserActivityLabelResult> {
+  // Match OpenURL's VIEW action and data; adding a category would change the
+  // query from the intent that `am start -a VIEW -d <url>` actually launched.
+  try {
+    const query = await adb.executeCommand(
+      `shell cmd package query-activities -a android.intent.action.VIEW -d ${shellQuote(url)}`,
+    );
+    if (query.stderr.trim()) {
+      return { kind: "none" };
+    }
+    const activities = query.stdout
+      .split(/^  Activity #\d+:\s*$/m)
+      .slice(1)
+      .map(parseQueryActivity)
+      .filter((activity) => activity?.packageName === packageName);
+    // Several matching activities can carry different labels. Without the
+    // resolver's chosen component, claiming one would risk selecting a peer row.
+    if (activities.length !== 1) {
+      return { kind: "none" };
+    }
+    return activities[0]?.label ?? { kind: "none" };
+  } catch (error) {
+    // This optional ADB enrichment can be absent on older devices; use the
+    // existing application-label lookup when the shell query is unavailable.
+    logger.debug(`[DeepLinkManager] Activity-label probe unavailable: ${errorMessage(error)}`);
+    return { kind: "none" };
+  }
+}
+
 const defaultChooserAppMetadata: ChooserAppMetadata = {
   async getLabel(device, packageName) {
     const { resolveAppLabel } = await import("../server/systemTrayHelpers");
     return resolveAppLabel(device, packageName);
+  },
+  async getActivityLabel(_device, packageName, url, adb) {
+    return resolveChooserActivityLabel(adb, packageName, url);
   },
   async getFreshHierarchy(device, adbFactory, minTimestamp) {
     return new ViewHierarchy(device, adbFactory).getViewHierarchy(
@@ -677,6 +765,7 @@ export class DeepLinkManager implements DeepLinkManager {
     viewHierarchy: ViewHierarchyResult,
     preference: "always" | "just_once" | "custom" = "just_once",
     customAppPackage?: string,
+    url?: string,
   ): Promise<IntentChooserResult> {
     let chooserMatch: ChooserMatch | undefined;
     try {
@@ -712,7 +801,7 @@ export class DeepLinkManager implements DeepLinkManager {
           }
         }
       } else if (preference === "custom" && customAppPackage) {
-        chooserMatch = await this.findAppInChooserAcrossPages(viewHierarchy, customAppPackage);
+        chooserMatch = await this.findAppInChooserAcrossPages(viewHierarchy, customAppPackage, url);
         targetElement = chooserMatch.element;
       }
 
@@ -907,6 +996,7 @@ export class DeepLinkManager implements DeepLinkManager {
     hierarchyPackage?: string,
     resolvedLabel?: string | null,
     originalUpdatedAt?: number,
+    url?: string,
   ): Promise<ChooserMatch> {
     const packageRows = new Set<any>();
     const labelRows = new Map<any, Set<string>>();
@@ -968,6 +1058,7 @@ export class DeepLinkManager implements DeepLinkManager {
         rowsWithPackageMetadata,
         resolvedLabel,
         originalUpdatedAt,
+        url,
       );
     }
     return this.selectUniqueChooserRow(candidates, labelRows, appPackage, true);
@@ -976,6 +1067,7 @@ export class DeepLinkManager implements DeepLinkManager {
   private async findAppInChooserAcrossPages(
     initialHierarchy: ViewHierarchyResult,
     appPackage: string,
+    url?: string,
   ): Promise<ChooserMatch> {
     const metadata = this.chooserMetadata ?? defaultChooserAppMetadata;
     let hierarchy = initialHierarchy;
@@ -995,6 +1087,7 @@ export class DeepLinkManager implements DeepLinkManager {
           hierarchy.packageName,
           undefined,
           hierarchy.updatedAt,
+          url,
         );
         previousMatch = this.recordChooserMatch(
           matches,
@@ -1041,7 +1134,7 @@ export class DeepLinkManager implements DeepLinkManager {
     if (matchingPage === currentPage) {
       return unique;
     }
-    return this.restoreChooserPage(hierarchy, appPackage, unique, metadata);
+    return this.restoreChooserPage(hierarchy, appPackage, unique, metadata, url);
   }
 
   private recordChooserMatch(
@@ -1193,6 +1286,7 @@ export class DeepLinkManager implements DeepLinkManager {
     hierarchy: ViewHierarchyResult,
     appPackage: string,
     expected: ChooserMatch,
+    url?: string,
   ): Promise<{ match?: ChooserMatch; capturedAt?: number }> {
     try {
       const match = await this.findAppInChooser(
@@ -1201,6 +1295,7 @@ export class DeepLinkManager implements DeepLinkManager {
         hierarchy.packageName,
         undefined,
         hierarchy.updatedAt,
+        url,
       );
       if (
         expected.stableId
@@ -1225,6 +1320,7 @@ export class DeepLinkManager implements DeepLinkManager {
     appPackage: string,
     expected: ChooserMatch,
     metadata: ChooserAppMetadata,
+    url?: string,
   ): Promise<ChooserMatch> {
     let capturedAt = expected.capturedAt;
     for (let page = 0; page < CHOOSER_SCAN_PAGES; page += 1) {
@@ -1240,7 +1336,7 @@ export class DeepLinkManager implements DeepLinkManager {
         break;
       }
       hierarchy = previous.hierarchy;
-      const result = await this.findMatchingChooserRow(hierarchy, appPackage, expected);
+      const result = await this.findMatchingChooserRow(hierarchy, appPackage, expected, url);
       if (result.match) {
         return result.match;
       }
@@ -1317,6 +1413,7 @@ export class DeepLinkManager implements DeepLinkManager {
     rowsWithPackageMetadata: Set<any>,
     resolvedLabel: string | null | undefined,
     originalUpdatedAt?: number,
+    url?: string,
   ): Promise<ChooserMatch> {
     if (resolvedLabel === undefined) {
       if (originalUpdatedAt === undefined) {
@@ -1325,7 +1422,7 @@ export class DeepLinkManager implements DeepLinkManager {
         );
       }
       const metadata = this.chooserMetadata ?? defaultChooserAppMetadata;
-      const label = await metadata.getLabel(this.device!, appPackage);
+      const labels = await this.resolveChooserLabels(metadata, appPackage, url);
       const freshHierarchy = await metadata.getFreshHierarchy(
         this.device!,
         this.adbFactory,
@@ -1338,12 +1435,7 @@ export class DeepLinkManager implements DeepLinkManager {
         throw new Error(`Intent chooser disappeared while resolving ${appPackage}.`);
       }
       try {
-        const match = await this.findAppInChooser(
-          this.parser.extractRootNodes(freshHierarchy),
-          appPackage,
-          freshHierarchy.packageName,
-          label,
-        );
+        const match = await this.findChooserLabelCandidates(freshHierarchy, appPackage, labels);
         return { ...match, capturedAt: freshHierarchy.updatedAt };
       } catch (error) {
         if (error instanceof ChooserRowMissingError) {
@@ -1358,6 +1450,55 @@ export class DeepLinkManager implements DeepLinkManager {
           .map(([row]) => row)
       : [];
     return this.selectUniqueChooserRow(candidates, labelRows, appPackage, false);
+  }
+
+  private async findChooserLabelCandidates(
+    hierarchy: ViewHierarchyResult,
+    appPackage: string,
+    labels: string[],
+  ): Promise<ChooserMatch> {
+    const roots = this.parser.extractRootNodes(hierarchy);
+    let missing: ChooserRowMissingError | undefined;
+    for (const label of labels) {
+      try {
+        return await this.findAppInChooser(roots, appPackage, hierarchy.packageName, label);
+      } catch (error) {
+        if (!(error instanceof ChooserRowMissingError)) {
+          throw error;
+        }
+        missing = error;
+      }
+    }
+    if (missing) {
+      throw missing;
+    }
+    return this.selectUniqueChooserRow([], new Map(), appPackage, false);
+  }
+
+  private async resolveChooserLabels(
+    metadata: ChooserAppMetadata,
+    appPackage: string,
+    url?: string,
+  ): Promise<string[]> {
+    let activity: ChooserActivityLabelResult = { kind: "none" };
+    if (url && metadata.getActivityLabel) {
+      try {
+        activity = await metadata.getActivityLabel(this.device!, appPackage, url, this.adbUtils);
+      } catch (error) {
+        // Optional activity metadata may be unavailable; the application label
+        // remains the established best-effort chooser fallback.
+        logger.debug(`[DeepLinkManager] Activity label unavailable: ${errorMessage(error)}`);
+      }
+    }
+    if (activity.kind === "resource") {
+      return [];
+    }
+    const application = await metadata.getLabel(this.device!, appPackage);
+    const labels = activity.kind === "literal" ? [activity.label] : [];
+    if (application) {
+      labels.push(application);
+    }
+    return labels;
   }
 
   private selectUniqueChooserRow(

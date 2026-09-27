@@ -67,6 +67,52 @@ function stubStabilityDeps(tap: TapOnElement, sequence: StubSequenceEntry[]): vo
 }
 
 describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
+  test("text selection may move even when its row has a generated view ID", async () => {
+    const { tap } = createTapOnElement();
+    const original = { ...makeElement(STABLE_BOUNDS), "view-id": "generated-row" };
+    const moved = { ...original, bounds: SHIFTED_BOUNDS };
+    const hierarchy = makeHierarchy();
+    (tap as any).findElementInHierarchy = () => ({ selection: { element: original } });
+    (tap as any).refreshViewHierarchy = async () => hierarchy;
+    (tap as any).resolveTapTargetElement = () => ({ element: moved, usedParent: false });
+    const result = await (tap as any).resolveAndroidStableTapTargetAfterRefreshes(
+      { text: "Contact Name", action: "tap" },
+      { viewHierarchy: hierarchy, screenSize: { width: 1080, height: 1920 } },
+      "tap",
+      false,
+    );
+    expect(result.ok).toBe(true);
+    expect(result.tapElement.bounds).toEqual(SHIFTED_BOUNDS);
+  });
+
+  test("synthetic ID stability checks the matched label, not its promoted row", async () => {
+    const { tap } = createTapOnElement();
+    const label = {
+      ...makeElement(STABLE_BOUNDS),
+      "resource-id": undefined,
+      "view-id": "generated-label",
+    };
+    const row = { ...makeElement(STABLE_BOUNDS), "resource-id": "row" };
+    const hierarchy = makeHierarchy();
+    (tap as any).findElementInHierarchy = () => ({
+      selection: { element: row, matchedElement: label },
+    });
+    (tap as any).refreshViewHierarchy = async () => hierarchy;
+    let checked: Element | null = null;
+    (tap as any).staleSyntheticTarget = (original: Element) => {
+      checked = original;
+      return "Stale reference: matched label changed";
+    };
+    const result = await (tap as any).resolveAndroidStableTapTargetAfterRefreshes(
+      { elementId: "generated-label", action: "tap" },
+      { viewHierarchy: hierarchy, screenSize: { width: 1080, height: 1920 } },
+      "tap",
+      false,
+    );
+    expect(checked).toBe(label);
+    expect(result.error).toContain("matched label changed");
+  });
+
   test("returns ok when bounds are immediately stable (1 match required for text-only)", async () => {
     const { tap } = createTapOnElement();
     const el = makeElement(STABLE_BOUNDS);

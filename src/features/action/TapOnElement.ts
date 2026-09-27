@@ -1340,9 +1340,10 @@ export class TapOnElement extends BaseVisualChange {
     | { ok: false; error: string }
   > {
     const stableMatchesRequired = androidPreTapConsecutiveStableMatchesRequired(options);
-    const original = observeResult.viewHierarchy
-      ? this.findElementInHierarchy(options, observeResult.viewHierarchy).selection.element
+    const originalSelection = observeResult.viewHierarchy
+      ? this.findElementInHierarchy(options, observeResult.viewHierarchy).selection
       : null;
+    const original = originalSelection?.matchedElement ?? originalSelection?.element ?? null;
 
     let prevBounds: Element["bounds"] | null = null;
     let consecutiveStable = 0;
@@ -1472,11 +1473,10 @@ export class TapOnElement extends BaseVisualChange {
         };
       }
 
-      const staleSynthetic = this.staleSyntheticTarget(
-        original,
-        observeResult.viewHierarchy,
-        freshHierarchy,
-      );
+      const staleSynthetic =
+        options.elementId !== undefined && options.elementId === original?.["view-id"]
+          ? this.staleSyntheticTarget(original, observeResult.viewHierarchy, freshHierarchy)
+          : undefined;
       if (staleSynthetic) {
         return { ok: false, error: staleSynthetic };
       }

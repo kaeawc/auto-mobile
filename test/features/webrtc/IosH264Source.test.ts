@@ -1737,6 +1737,71 @@ describe("IosH264Source", () => {
     await source.stop();
   });
 
+  test("fails viewerless audio startup after the first frame instead of resolving start", async () => {
+    const timer = new FakeTimer();
+    const { source, helpers, errors } = createReconnectHarness({
+      timer,
+      device: IOS_SIMULATOR,
+      audioEnabled: true,
+    });
+    const started = source.start();
+    await flush();
+    source.setHasConsumers(false);
+    helpers[0].emitFrame(frame(2, 2, 0x11));
+    helpers[0].emitStderr("error: capture failed before audio");
+    await expect(started).rejects.toThrow("capture failed before audio");
+    expect(errors).toHaveLength(1);
+    await source.stop();
+  });
+
+  test("fails fast for a viewerless running helper when reconnect is disabled", async () => {
+    const timer = new FakeTimer();
+    const { source, helpers, errors } = createReconnectHarness({
+      timer,
+      runningReconnectMaxAttempts: 0,
+    });
+    const started = source.start();
+    await flush();
+    helpers[0].emitFrame(frame(2, 2, 0x11));
+    await started;
+    source.setHasConsumers(false);
+    helpers[0].emitExit(null, "SIGTRAP");
+    await flush();
+    expect(errors).toHaveLength(1);
+    await source.stop();
+  });
+
+  test("defers a failed final reconnect attempt after the last viewer leaves", async () => {
+    const timer = new FakeTimer();
+    const { source, helpers, errors } = createReconnectHarness({
+      timer,
+      firstFrameTimeoutMs: 50,
+      runningReconnectMaxAttempts: 1,
+    });
+    const started = source.start();
+    await flush();
+    helpers[0].emitFrame(frame(2, 2, 0x11));
+    await started;
+    helpers[0].emitExit(null, "SIGTRAP");
+    await flush();
+    timer.advanceTime(500);
+    await flush();
+    expect(helpers).toHaveLength(2);
+    source.setHasConsumers(false);
+    timer.advanceTime(50);
+    await flush();
+    expect(errors).toEqual([]);
+    source.setHasConsumers(true);
+    await flush();
+    timer.advanceTime(500);
+    await flush();
+    expect(helpers).toHaveLength(3);
+    helpers[2].emitFrame(frame(2, 2, 0x22));
+    await flush();
+    expect(errors).toEqual([]);
+    await source.stop();
+  });
+
   test("a last-viewer detach cancels an already scheduled reconnect", async () => {
     const timer = new FakeTimer();
     const { source, helpers, errors } = createReconnectHarness({ timer });
@@ -1849,6 +1914,66 @@ describe("IosH264Source", () => {
     expect(ensures).toBe(3);
     expect(errors).toHaveLength(1);
     expect(errors[0].message).toContain("screen-capture-helper exited");
+    await source.stop();
+  });
+
+  test("an old helper-resolution deadline cannot tear down a restarted capture", async () => {
+    const timer = new FakeTimer();
+    let ensures = 0;
+    const { source, helpers, encoders } = createReconnectHarness({
+      timer,
+      helperPath: undefined,
+      screenCaptureHelperProvider: {
+        ensure: () =>
+          ++ensures === 1 ? new Promise<string>(() => {}) : Promise.resolve(FAKE_HELPER_PATH),
+      },
+    });
+    const oldStart = source.start().catch((error: Error) => error);
+    await flush();
+    await source.stop();
+    const newStart = source.start();
+    await flush();
+    helpers[0].emitFrame(frame(2, 2, 0x11));
+    await newStart;
+
+    const writes = encoders[0].getStdinData().length;
+
+    timer.advanceTime(IOS_HELPER_PATH_RESOLUTION_TIMEOUT_MS);
+    await flush();
+    helpers[0].emitFrame(frame(2, 2, 0x22));
+    expect(encoders[0].getStdinData()).toHaveLength(writes * 2);
+    expect(helpers[0].stopped).toBe(false);
+    expect(await oldStart).toBeUndefined();
+    await source.stop();
+  });
+
+  test("a timed-out old raw helper cannot feed the replacement encoder", async () => {
+    const timer = new FakeTimer();
+    const oldHelper = new NeverStoppingFrameCaptureHelper();
+    const { source, helpers, encoders } = createReconnectHarness({
+      timer,
+      createHelper: () => {
+        const helper = helpers.length === 0 ? oldHelper : new FakeFrameCaptureHelper();
+        helpers.push(helper);
+        return helper;
+      },
+    });
+    const started = source.start();
+    await flush();
+    oldHelper.emitFrame(frame(2, 2, 0x11));
+    await started;
+    oldHelper.emitExit(null, "SIGTRAP");
+    await flush();
+    timer.advanceTime(IOS_HELPER_STOP_TIMEOUT_MS);
+    await flush();
+    timer.advanceTime(500);
+    await flush();
+    expect(helpers).toHaveLength(2);
+    helpers[1].emitFrame(frame(2, 2, 0x22));
+    await flush();
+    const writes = encoders[1].getStdinData().length;
+    oldHelper.emitFrame(frame(2, 2, 0x33));
+    expect(encoders[1].getStdinData()).toHaveLength(writes);
     await source.stop();
   });
 
@@ -2777,6 +2902,80 @@ function probedEncoders(calls: string[][]): boolean {
 }
 
 describe("IosH264Source encoded path (#4789)", () => {
+  test("a timed-out old encoded helper cannot forward records, audio, or capability", async () => {
+    const timer = new FakeTimer();
+    const oldHelper = new NeverStoppingFrameCaptureHelper();
+    const helpers: FakeFrameCaptureHelper[] = [];
+    const audio: Buffer[] = [];
+    const { source, chunks } = createEncodedHarness({
+      timer,
+      audioEnabled: true,
+      onAudioData: (chunk) => audio.push(chunk),
+      createHelper: () => {
+        const helper = helpers.length === 0 ? oldHelper : new FakeFrameCaptureHelper();
+        helpers.push(helper);
+        return helper;
+      },
+    });
+    const started = source.start();
+    await flush();
+    oldHelper.emitCapability(ENCODED_VIDEO_CAPABILITY);
+    oldHelper.emitEncodedVideo(encodedRecord([0, 0, 0, 1, 0x65]));
+    oldHelper.emit("audio", { pcm16le: Buffer.from([1]) });
+    await started;
+    oldHelper.emitExit(null, "SIGTRAP");
+    await flush();
+    timer.advanceTime(IOS_HELPER_STOP_TIMEOUT_MS);
+    await flush();
+    timer.advanceTime(500);
+    await flush();
+    helpers[1].emitCapability(ENCODED_VIDEO_CAPABILITY);
+    helpers[1].emitEncodedVideo(encodedRecord([0, 0, 0, 1, 0x65]));
+    helpers[1].emit("audio", { pcm16le: Buffer.from([2]) });
+    await flush();
+    const recordCount = chunks.length;
+    const audioCount = audio.length;
+    oldHelper.emitEncodedVideo(encodedRecord([0, 0, 0, 1, 0x41]));
+    oldHelper.emit("audio", { pcm16le: Buffer.from([3]) });
+    oldHelper.emitMalformed("late record");
+    expect(chunks).toHaveLength(recordCount);
+    expect(audio).toHaveLength(audioCount);
+    expect(helpers[1].keyFrameRequests).toBe(0);
+    await source.stop();
+  });
+
+  test("an abandoned helper cannot confirm a replacement's encode capability", async () => {
+    const timer = new FakeTimer();
+    const oldHelper = new NeverStoppingFrameCaptureHelper();
+    const helpers: FakeFrameCaptureHelper[] = [];
+    const targets: CaptureTarget[] = [];
+    const { source } = createEncodedHarness({
+      timer,
+      createHelper: (options) => {
+        targets.push(options.target);
+        const helper = helpers.length === 0 ? oldHelper : new FakeFrameCaptureHelper();
+        helpers.push(helper);
+        return helper;
+      },
+    });
+    await startEncoded(source, helpers);
+    oldHelper.emitExit(null, "SIGTRAP");
+    await flush();
+    timer.advanceTime(IOS_HELPER_STOP_TIMEOUT_MS);
+    await flush();
+    timer.advanceTime(500);
+    await flush();
+
+    oldHelper.emitCapability(ENCODED_VIDEO_CAPABILITY);
+    helpers[1].emitStderr("error: --encode unsupported");
+    await flush();
+    expect(helpers).toHaveLength(3);
+    expect(targets[2].kind === "simulator" ? targets[2].encode : undefined).toBeUndefined();
+    helpers[2].emitFrame(frame(2, 2, 0x22));
+    await flush();
+    await source.stop();
+  });
+
   test("reads encoded records and forwards Annex-B without an ffmpeg subprocess", async () => {
     const { source, helpers, encoderSpawns, commandRunnerCalls, chunks } = createEncodedHarness();
 

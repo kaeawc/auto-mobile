@@ -14262,6 +14262,71 @@
                   "required": ["platform", "source", "confidence", "key", "components"],
                   "additionalProperties": {}
                 },
+                "freshness": {
+                  "type": "object",
+                  "properties": {
+                    "requestedAfter": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "actualTimestamp": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "ageMs": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "verified": {
+                      "type": "boolean"
+                    },
+                    "isFresh": {
+                      "type": "boolean"
+                    },
+                    "staleDurationMs": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "warning": {
+                      "type": "string"
+                    },
+                    "unavailableReason": {
+                      "type": "string",
+                      "enum": [
+                        "runner_not_running",
+                        "connection_lost",
+                        "simulator_not_booted",
+                        "request_timed_out",
+                        "auto_setup_failed",
+                        "unknown",
+                        "service_recovering",
+                        "device_locked",
+                        "incomplete_capture"
+                      ]
+                    },
+                    "unavailableDetail": {
+                      "type": "string",
+                      "maxLength": 500
+                    },
+                    "category": {
+                      "type": "string",
+                      "enum": [
+                        "cache_age",
+                        "window_identity",
+                        "requested_min",
+                        "no_timestamp",
+                        "unavailable",
+                        "effect_inconsistent"
+                      ]
+                    }
+                  },
+                  "required": ["isFresh"],
+                  "additionalProperties": {}
+                },
                 "viewHierarchy": {
                   "type": "object",
                   "properties": {

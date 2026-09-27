@@ -306,11 +306,15 @@ export class ViewHierarchy implements ViewHierarchyInterface {
 
       if (!result || !result.hierarchy) {
         if (result?.reconnectStatus) {
+          const reason = result.unavailableReason ?? "connection_lost";
           return {
             hierarchy: {
               error:
                 result.reconnectMessage ??
                 `CtrlProxy reconnecting, retry in ${result.reconnectStatus.retryAfterSeconds}s`,
+              iosUnavailableReason: reason,
+              unavailableReason: reason,
+              unavailableDetail: result.unavailableDetail,
             },
             ctrlProxyReconnect: result.reconnectStatus,
             updatedAt: this.timer.now(),
@@ -422,14 +426,9 @@ export class ViewHierarchy implements ViewHierarchyInterface {
         return prepared;
       }
 
-      // Accessibility service returned null. Every null return from
-      // `getAccessibilityHierarchy` genuinely represents lost CtrlProxy
-      // connectivity/binding (not-installed, not-enabled, WebSocket+sync both
-      // failed, or a caught internal error) -- EXCEPT when the caller itself
-      // aborted this read (`signal` aborted): that path also resolves null
-      // (via `throwIfAborted` inside the delegate's own catch), but it is an
-      // operation-cancellation outcome, not lost availability, and must not
-      // trigger `onAvailabilityLost` downstream (#7534).
+      // A null hierarchy may be a screen-off response, sync timeout, or runner
+      // error while the socket is healthy. Only a disconnected transport is
+      // evidence that reconnect/recovery can repair this read.
       perf.end();
       logger.warn("[VIEW_HIERARCHY] Accessibility service returned null hierarchy");
       const error = await this.describeHierarchyFailure(
@@ -439,10 +438,14 @@ export class ViewHierarchy implements ViewHierarchyInterface {
       );
       // A confirmed keyguard block is a device state, so rebind cannot repair it.
       const deviceLocked = error.startsWith("Device is locked;");
+      const transportFailure =
+        !signal?.aborted &&
+        !deviceLocked &&
+        this.accessibilityServiceClient.isConnected?.() === false;
       return {
         hierarchy: {
           error,
-          ...(signal?.aborted || deviceLocked ? {} : { transportFailure: true }),
+          ...(transportFailure ? { transportFailure: true } : {}),
           ...(signal?.aborted
             ? {}
             : {
@@ -450,7 +453,9 @@ export class ViewHierarchy implements ViewHierarchyInterface {
                   ? ("device_locked" as const)
                   : this.accessibilityServiceClient.isRecoveryInFlight?.()
                     ? ("service_recovering" as const)
-                    : ("connection_lost" as const),
+                    : transportFailure
+                      ? ("connection_lost" as const)
+                      : ("unknown" as const),
               }),
         },
         updatedAt: this.timer.now(),

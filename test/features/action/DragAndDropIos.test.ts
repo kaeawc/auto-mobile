@@ -100,6 +100,28 @@ describe("DragAndDrop - iOS", () => {
     managerSpy?.mockRestore();
   });
 
+  test("direct iOS sync cannot resolve an offscreen source excluded by observe", async () => {
+    fakeIosClient.setHierarchyData({
+      packageName: "com.test.app",
+      updatedAt: 1,
+      screenWidth: 100,
+      screenHeight: 100,
+      hierarchy: {
+        bounds: [0, 0, 100, 100],
+        node: [
+          { "resource-id": "source-id", text: "Source", bounds: [0, 500, 50, 550] },
+          { "resource-id": "target-id", text: "Target", bounds: [0, 0, 50, 50] },
+        ],
+      },
+    } as any);
+    const result = await dragAndDrop.execute({
+      source: { elementId: "source-id" },
+      target: { elementId: "target-id" },
+    });
+    expect(result.success).toBe(false);
+    expect(fakeIosClient.getDragHistory()).toHaveLength(0);
+  });
+
   test("routes drag through the iOS CtrlProxy client (not the Android a11y service)", async () => {
     fakeIosClient.setDragResult({ success: true, totalTimeMs: 410, gestureTimeMs: 300 });
 
@@ -187,8 +209,7 @@ describe("DragAndDrop - iOS", () => {
   test("drags against the freshly-refreshed hierarchy, not the stale observe cache", async () => {
     // The cached observe places the elements at (50,50)/(250,250); the fresh runner
     // snapshot reports new coordinates after the UI scrolled. The drag must use the fresh ones.
-    fakeIosClient.setHierarchyData({ packageName: "com.test.app", updatedAt: Date.now() });
-    fakeIosClient.setViewHierarchyResult({
+    fakeIosClient.setHierarchyData({
       hierarchy: {
         node: [
           {
@@ -211,7 +232,7 @@ describe("DragAndDrop - iOS", () => {
       },
       packageName: "com.test.app",
       updatedAt: Date.now(),
-    });
+    } as any);
     fakeIosClient.setDragResult({ success: true, totalTimeMs: 1, gestureTimeMs: 1 });
 
     const result = await dragAndDrop.execute({

@@ -4,7 +4,7 @@ import type { ObserveResult } from "../../../src/models/ObserveResult";
 import type { ConditionPredicate } from "../../../src/features/observe/interfaces/WaitForCondition";
 import { RealWaitForCondition } from "../../../src/features/observe/WaitForCondition";
 import { appear, disappear } from "../../../src/features/observe/ConditionPredicates";
-import { DefaultElementFinder } from "../../../src/features/utility/ElementFinder";
+import { ElementResolver } from "../../../src/features/utility/ElementResolver";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
@@ -167,7 +167,7 @@ describe("RealWaitForCondition", () => {
   test("built-in `appear` predicate reuses the finder and resolves when the element shows up", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
-    const finder = new DefaultElementFinder();
+    const finder = new ElementResolver();
     const fake = new FakeObserveScreen();
     fake.setObserveSequence([
       obs(
@@ -206,7 +206,7 @@ describe("RealWaitForCondition", () => {
   test("built-in `disappear` predicate resolves when the element is gone", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
-    const finder = new DefaultElementFinder();
+    const finder = new ElementResolver();
     const fake = new FakeObserveScreen();
     fake.setObserveSequence([
       obs(
@@ -244,7 +244,7 @@ describe("RealWaitForCondition", () => {
   test("works on iOS-shaped observations (no gfxinfo dependency)", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
-    const finder = new DefaultElementFinder();
+    const finder = new ElementResolver();
     const fake = new FakeObserveScreen();
     const iosExtra: Partial<ObserveResult> = {
       activeWindow: { appId: "com.apple.mobilesafari", activityName: "", layoutSeqSum: 1 },

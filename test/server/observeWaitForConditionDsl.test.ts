@@ -6,7 +6,7 @@ import {
   registerObserveTools,
   waitForObservation,
 } from "../../src/server/observeTools";
-import { DefaultElementFinder } from "../../src/features/utility/ElementFinder";
+import { ElementResolver } from "../../src/features/utility/ElementResolver";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { FakeObserveScreen } from "../fakes/FakeObserveScreen";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -63,7 +63,7 @@ const node = (props: Record<string, unknown>): Record<string, unknown> => ({
 // buildConditionPredicate — the DSL branching (AC3 core)
 // ---------------------------------------------------------------------------
 describe("buildConditionPredicate", () => {
-  const finder = new DefaultElementFinder();
+  const finder = new ElementResolver();
 
   test("appear -> matches a present element", () => {
     const predicate = buildConditionPredicate(finder, "appear", { elementId: "submit" });

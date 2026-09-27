@@ -9,6 +9,31 @@ import {
 const resolver = new ElementResolver();
 const tap = { action: "tap" as const };
 
+test("text container stays on its matching child instead of promoted row", () => {
+  const hierarchy = {
+    hierarchy: {
+      node: [
+        {
+          clickable: true,
+          bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+          node: [
+            { text: "Header", bounds: { left: 0, top: 0, right: 50, bottom: 20 } },
+            {
+              text: "Target",
+              clickable: true,
+              bounds: { left: 0, top: 30, right: 50, bottom: 50 },
+            },
+          ],
+        },
+      ],
+    },
+  };
+  const capture = { id: "text-container", nodes: new SearchableHierarchy().project(hierarchy) };
+  expect(
+    resolver.resolve(capture, { text: "Target", container: { text: "Header" } }, tap).chosen,
+  ).toBeNull();
+});
+
 test("duplicate container IDs use the same smallest-area scope as direct selection (#7645)", () => {
   const saveBounds = { left: 10, top: 320, right: 90, bottom: 360 };
   const secondBounds = { left: 0, top: 300, right: 100, bottom: 400 };

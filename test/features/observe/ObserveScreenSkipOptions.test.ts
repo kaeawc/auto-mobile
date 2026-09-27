@@ -1,3 +1,10 @@
+import {
+  DefaultHierarchyCapture,
+  getHierarchySnapshot,
+  type HierarchyCapture,
+} from "../../../src/features/observe/HierarchyCapture";
+import type { ViewHierarchyResult } from "../../../src/models";
+import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
 import { finalizeToolResponse } from "../../../src/server/finalizeToolResponse";
@@ -46,14 +53,16 @@ class FakeHierarchyCollector implements Pick<
 > {
   constructor(private foregroundActivity: string | null = "com.example/.MainActivity") {}
 
-  async collect(result: ObserveResult): Promise<void> {
-    result.viewHierarchy = {
-      hierarchy: {},
-      screenWidth: 1080,
-      screenHeight: 1920,
-      wakefulness: "Awake",
-      ...(this.foregroundActivity ? { foregroundActivity: this.foregroundActivity } : {}),
-    } as any;
+  async collect(result: ObserveResult, ...args: unknown[]): Promise<void> {
+    result.viewHierarchy =
+      (args[6] as ViewHierarchyResult | undefined) ??
+      ({
+        hierarchy: {},
+        screenWidth: 1080,
+        screenHeight: 1920,
+        wakefulness: "Awake",
+        ...(this.foregroundActivity ? { foregroundActivity: this.foregroundActivity } : {}),
+      } as any);
   }
 
   async collectRaw(): Promise<void> {}
@@ -116,7 +125,10 @@ const device: BootedDevice = {
   platform: "android",
 };
 
-function createObserveScreen(foregroundActivity: string | null = "com.example/.MainActivity") {
+function createObserveScreen(
+  foregroundActivity: string | null = "com.example/.MainActivity",
+  hierarchyCapture?: HierarchyCapture,
+) {
   const fakeTimer = new FakeTimer();
   const fakeScreenshotRecorder = new FakeScreenshotRecorder();
   const fakeDeviceStateCollector = new FakeDeviceStateCollector();
@@ -125,6 +137,7 @@ function createObserveScreen(foregroundActivity: string | null = "com.example/.M
     device,
     new FakeAdbClientFactory(new FakeAdbExecutor()),
     {
+      hierarchyCapture,
       cacheStore: new FakeObserveCacheStore(fakeTimer),
       screenshotStateStore: new FakeScreenshotStateStore(fakeTimer),
       screenshotRecorder: fakeScreenshotRecorder,
@@ -284,4 +297,67 @@ describe("ObserveScreen skipBackStack parameter threading", () => {
 
     expect(fakeDeviceStateCollector.backStackCalls).toBe(1);
   });
+});
+
+test("explicit observe capture policy distinguishes cached and fresh moved targets without JSON metadata", async () => {
+  const calls: string[] = [];
+  const settledFloors: Array<number | undefined> = [];
+  const source = (left: number): ViewHierarchyResult => ({
+    updatedAt: left + 100,
+    packageName: "com.example",
+    foregroundActivity: "com.example/.MainActivity",
+    screenWidth: 1080,
+    screenHeight: 1920,
+    wakefulness: "Awake",
+    hierarchy: {
+      node: {
+        text: "Target",
+        clickable: true,
+        bounds: { left, top: 100, right: left + 50, bottom: 150 },
+      },
+    },
+  });
+  const capture = new DefaultHierarchyCapture(
+    "android",
+    {
+      readCached: async () => {
+        calls.push("cached-ok");
+        return source(10);
+      },
+      readFresh: async () => {
+        calls.push("fresh");
+        return source(100);
+      },
+      readSettled: async (request) => {
+        calls.push("settled");
+        settledFloors.push(request.minTimestamp);
+        return source(200);
+      },
+      projectVisible: (hierarchy) => hierarchy,
+    },
+    new FakeTimer(),
+    new CountingIdGenerator(),
+  );
+  const { observeScreen } = createObserveScreen("com.example/.MainActivity", capture);
+  const cached = await observeScreen.execute({ freshness: "cached-ok", skipScreenshot: true });
+  const fresh = await observeScreen.execute({ freshness: "fresh", skipScreenshot: true });
+  const settled = await observeScreen.execute({ freshness: "settled", skipScreenshot: true });
+  expect(calls).toEqual(["cached-ok", "fresh", "settled"]);
+  expect(settledFloors).toEqual([undefined]);
+  expect(getHierarchySnapshot(cached.viewHierarchy)?.nodes[0].bounds?.left).toBe(10);
+  expect(getHierarchySnapshot(fresh.viewHierarchy)?.nodes[0].bounds?.left).toBe(100);
+  expect(getHierarchySnapshot(settled.viewHierarchy)?.nodes[0].bounds?.left).toBe(200);
+  expect(getHierarchySnapshot(fresh.viewHierarchy)?.captureId).not.toBe(
+    getHierarchySnapshot(cached.viewHierarchy)?.captureId,
+  );
+  expect(JSON.stringify(fresh)).not.toContain("captureId");
+});
+
+test("legacy observe publishes internal provenance without altering observation identity", async () => {
+  const { observeScreen } = createObserveScreen();
+  const observation = await observeScreen.execute({ skipScreenshot: true });
+  const snapshot = getHierarchySnapshot(observation.viewHierarchy);
+  expect(snapshot?.captureId).toBe(observation.observationId);
+  expect(snapshot?.requestedFreshness).toBe("cached-ok");
+  expect(JSON.stringify(observation)).not.toContain("captureId");
 });

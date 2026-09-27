@@ -31,6 +31,7 @@ export interface DebugSearchArgs {
     text?: string;
   };
   partialMatch?: boolean;
+  match?: "exact" | "contains";
   caseSensitive?: boolean;
   includeNearMisses?: boolean;
   maxNearMisses?: number;
@@ -50,10 +51,16 @@ const debugSearchBaseSchema = z
     container: elementContainerSchema
       .optional()
       .describe("Container element to scope the search - specify elementId or text to locate it"),
+    match: z
+      .enum(["exact", "contains"])
+      .optional()
+      .describe("Explicit matching mode; ID defaults to exact or namespace matching"),
     partialMatch: z
       .boolean()
       .optional()
-      .describe("Whether to use partial matching (substring containment, default: true)"),
+      .describe(
+        "Legacy explicit text substring flag; omitted text matching tries exact first. IDs require match: contains for substring search.",
+      ),
     caseSensitive: z
       .boolean()
       .optional()
@@ -91,6 +98,7 @@ export function registerDebugTools() {
         resourceId: args.elementId,
         container: args.container,
         partialMatch: args.partialMatch,
+        match: args.match,
         caseSensitive: args.caseSensitive,
         includeNearMisses: args.includeNearMisses,
         maxNearMisses: args.maxNearMisses,

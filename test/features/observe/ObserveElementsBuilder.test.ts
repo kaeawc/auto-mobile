@@ -193,6 +193,7 @@ describe("ObserveElementsBuilder", () => {
         bounds: scrollableList.bounds,
       },
     ]);
+    // Preserve main-root-first output until live actions share capture ordering.
     expect(elements.text).toEqual([
       { ...clickableButton.$, bounds: clickableButton.bounds },
       { ...mainImage.$, bounds: mainImage.bounds },

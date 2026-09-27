@@ -1,3 +1,4 @@
+import { linkWindowRoots } from "../linkWindowRoots";
 /**
  * CtrlProxyHierarchy - Delegate for hierarchy retrieval and caching.
  *
@@ -751,7 +752,7 @@ export class CtrlProxyHierarchy {
       const result: ViewHierarchyResult = {
         hierarchy: convertedHierarchy,
         packageName: resolvedPackageName,
-        windows: accessibilityHierarchy.windows,
+        windows: linkWindowRoots(convertedHierarchy, accessibilityHierarchy.windows),
         contentHiddenRegions: accessibilityHierarchy.contentHiddenRegions,
         intentChooserDetected: accessibilityHierarchy.intentChooserDetected,
         notificationPermissionDetected: accessibilityHierarchy.notificationPermissionDetected,
@@ -1155,6 +1156,9 @@ export class CtrlProxyHierarchy {
     }
 
     const converted: any = {};
+    if (Number.isInteger(node.windowId)) {
+      converted.windowId = node.windowId;
+    }
 
     if (node.actions) {
       converted.actions = node.actions;

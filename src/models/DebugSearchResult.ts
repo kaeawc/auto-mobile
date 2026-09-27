@@ -13,6 +13,8 @@ export interface DebugSearchMatch {
    * What property matched (text, content-desc, resource-id, etc.)
    */
   matchedProperty: string;
+  matchedProperties?: string[];
+  matchKind?: import("../features/utility/ElementResolver").MatchKind;
 
   /**
    * The actual value that matched
@@ -69,6 +71,7 @@ export interface DebugSearchResult {
       elementId?: string;
       text?: string;
     };
+    match?: import("../features/utility/ElementResolver").MatchMode;
     partialMatch: boolean;
     caseSensitive: boolean;
   };

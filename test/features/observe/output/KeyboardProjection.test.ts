@@ -974,6 +974,7 @@ describe("keycap corroboration is scoped to one window group (#6908)", () => {
       dropElements: true,
       project: "skeleton",
     });
+    // Neither node is folded; output retains the live selector's main-first order.
     expect(result.skeleton!.map((entry) => entry.elementId)).toEqual([
       "com.keyboard:id/key_pos_preview",
       "com.keyboard:id/key_pos_0_0",

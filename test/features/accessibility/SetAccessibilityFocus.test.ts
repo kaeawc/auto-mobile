@@ -8,7 +8,6 @@ import {
 } from "../../../src/models";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeAccessibilityFocusService } from "../../fakes/FakeAccessibilityFocusService";
-import { DefaultElementFinder } from "../../../src/features/utility/ElementFinder";
 
 const androidDevice: BootedDevice = {
   deviceId: "test-a11y-focus",
@@ -57,7 +56,6 @@ describe("SetAccessibilityFocus", () => {
 
   const makeFeature = (device: BootedDevice = androidDevice) =>
     new SetAccessibilityFocus(device, {
-      finder: new DefaultElementFinder(),
       observeScreen,
       serviceFactory: () => service,
     });
@@ -65,6 +63,13 @@ describe("SetAccessibilityFocus", () => {
   beforeEach(() => {
     service = new FakeAccessibilityFocusService();
     observeScreen = new FakeObserveScreen();
+    observeScreen.setObserveResult(
+      makeObserveResult(
+        makeViewHierarchy([
+          { $: { "resource-id": "com.example:id/title", bounds: bounds(0, 0, 100, 50) } },
+        ]),
+      ),
+    );
   });
 
   test("set focus by resource-id sends the 'focus' command", async () => {
@@ -106,7 +111,7 @@ describe("SetAccessibilityFocus", () => {
     expect(result.warning).toBeUndefined();
   });
 
-  test("resolves text selector to a resource-id via the element finder", async () => {
+  test("resolves text selector to a resource-id via the shared resolver", async () => {
     observeScreen.setObserveResult(
       makeObserveResult(
         makeViewHierarchy([
@@ -128,6 +133,55 @@ describe("SetAccessibilityFocus", () => {
     expect(service.calls).toEqual([{ method: "set", resourceId: "com.example:id/settings" }]);
   });
 
+  test("text selector does not focus a substring near miss", async () => {
+    observeScreen.setObserveResult(
+      makeObserveResult(
+        makeViewHierarchy([
+          {
+            $: {
+              text: "Settings",
+              "resource-id": "com.example:id/settings",
+              bounds: bounds(10, 20, 200, 60),
+            },
+          },
+        ]),
+      ),
+    );
+    await expect(makeFeature().execute({ action: "set", text: "Set" })).rejects.toThrow(
+      "Element not found",
+    );
+    expect(service.calls).toEqual([]);
+  });
+
+  test("text focus sends the matched child's native ID instead of its clickable row", async () => {
+    observeScreen.setObserveResult(
+      makeObserveResult(
+        makeViewHierarchy([
+          {
+            $: {
+              "resource-id": "com.example:id/row",
+              clickable: true,
+              bounds: bounds(0, 0, 300, 80),
+            },
+            node: [
+              {
+                $: {
+                  "resource-id": "com.example:id/label",
+                  text: "Settings",
+                  bounds: bounds(10, 10, 200, 60),
+                },
+              },
+            ],
+          },
+        ]),
+      ),
+    );
+
+    await makeFeature().execute({ text: "Settings" });
+
+    expect(service.calls).toEqual([{ method: "set", resourceId: "com.example:id/label" }]);
+  });
+
   test("resolves contentDesc selector to a resource-id", async () => {
     observeScreen.setObserveResult(
       makeObserveResult(
@@ -147,6 +201,33 @@ describe("SetAccessibilityFocus", () => {
     await feature.execute({ action: "set", contentDesc: "Close" });
 
     expect(service.calls).toEqual([{ method: "set", resourceId: "com.example:id/close" }]);
+  });
+
+  test("contentDesc focus uses the matching child's native ID", async () => {
+    observeScreen.setObserveResult(
+      makeObserveResult(
+        makeViewHierarchy([
+          {
+            $: {
+              "resource-id": "com.example:id/row",
+              clickable: true,
+              bounds: bounds(0, 0, 100, 100),
+            },
+            node: [
+              {
+                $: {
+                  "resource-id": "com.example:id/close_icon",
+                  "content-desc": "Close",
+                  bounds: bounds(10, 10, 40, 40),
+                },
+              },
+            ],
+          },
+        ]),
+      ),
+    );
+    await makeFeature().execute({ action: "set", contentDesc: "Close" });
+    expect(service.calls).toEqual([{ method: "set", resourceId: "com.example:id/close_icon" }]);
   });
 
   test("contentDesc selector only matches content-desc, not a same-text label", async () => {
@@ -179,6 +260,46 @@ describe("SetAccessibilityFocus", () => {
     expect(service.calls).toEqual([{ method: "set", resourceId: "com.example:id/close_icon" }]);
   });
 
+  test("mixed selector fields retain resource ID then text precedence", async () => {
+    observeScreen.setObserveResult(
+      makeObserveResult(
+        makeViewHierarchy([
+          {
+            $: {
+              "resource-id": "com.example:id/id_target",
+              text: "ID row",
+              bounds: bounds(0, 0, 80, 40),
+            },
+          },
+          {
+            $: {
+              "resource-id": "com.example:id/text_target",
+              text: "Name",
+              bounds: bounds(0, 50, 80, 90),
+            },
+          },
+          {
+            $: {
+              "resource-id": "com.example:id/desc_target",
+              "content-desc": "Description",
+              bounds: bounds(0, 100, 80, 140),
+            },
+          },
+        ]),
+      ),
+    );
+    await makeFeature().execute({
+      resourceId: "id_target",
+      text: "Name",
+      contentDesc: "Description",
+    });
+    await makeFeature().execute({ text: "Name", contentDesc: "Description" });
+    expect(service.calls).toEqual([
+      { method: "set", resourceId: "com.example:id/id_target" },
+      { method: "set", resourceId: "com.example:id/text_target" },
+    ]);
+  });
+
   test("throws when a resourceId selector is shared by repeated rows", async () => {
     observeScreen.setObserveResult(
       makeObserveResult(
@@ -208,15 +329,28 @@ describe("SetAccessibilityFocus", () => {
     expect(service.calls).toHaveLength(0);
   });
 
-  test("resourceId selector proceeds when the hierarchy cannot be observed", async () => {
-    // No observe result configured -> getViewHierarchy throws; the resourceId guard is
-    // best-effort, so the focus command is still sent.
-    const feature = makeFeature();
+  test("bare native IDs count namespace-equivalent service targets", async () => {
+    observeScreen.setObserveResult(
+      makeObserveResult(
+        makeViewHierarchy([
+          { $: { "resource-id": "title", bounds: bounds(0, 0, 100, 50) } },
+          { $: { "resource-id": "com.example:id/title", bounds: bounds(0, 60, 100, 110) } },
+        ]),
+      ),
+    );
 
-    const result = await feature.execute({ action: "set", resourceId: "com.example:id/title" });
+    await expect(makeFeature().execute({ resourceId: "title" })).rejects.toThrow(
+      /shared by 2 elements/,
+    );
+    expect(service.calls).toHaveLength(0);
+  });
 
-    expect(result.success).toBe(true);
-    expect(service.calls).toEqual([{ method: "set", resourceId: "com.example:id/title" }]);
+  test("resourceId selector fails when the hierarchy cannot be observed", async () => {
+    observeScreen = new FakeObserveScreen();
+    await expect(
+      makeFeature().execute({ action: "set", resourceId: "com.example:id/title" }),
+    ).rejects.toThrow();
+    expect(service.calls).toEqual([]);
   });
 
   test("resourceId selector proceeds when it is unique in the hierarchy", async () => {
@@ -302,6 +436,13 @@ describe("SetAccessibilityFocus", () => {
 
   test("returns success:false with the service error when set fails", async () => {
     service.setSetThrows(new Error("Element not found with resource-id: com.example:id/missing"));
+    observeScreen.setObserveResult(
+      makeObserveResult(
+        makeViewHierarchy([
+          { $: { "resource-id": "com.example:id/missing", bounds: bounds(0, 0, 100, 50) } },
+        ]),
+      ),
+    );
     const feature = makeFeature();
 
     const result = await feature.execute({ action: "set", resourceId: "com.example:id/missing" });
@@ -340,5 +481,77 @@ describe("SetAccessibilityFocus", () => {
       /only supported on Android/,
     );
     expect(service.calls).toHaveLength(0);
+  });
+  test("rejects an unknown native ID without contacting the service", async () => {
+    observeScreen.setObserveResult(makeObserveResult(makeViewHierarchy([])));
+    await expect(makeFeature().execute({ resourceId: "com.app:id/missing" })).rejects.toThrow(
+      /not found/i,
+    );
+    expect(service.calls).toEqual([]);
+  });
+
+  test("resolves an observed synthetic ID locally without fabricating a native ID", async () => {
+    observeScreen.setObserveResult(
+      makeObserveResult(
+        makeViewHierarchy([
+          { $: { "view-id": "s-abcdef123456", text: "Save", bounds: bounds(10, 20, 60, 80) } },
+        ]),
+      ),
+    );
+    await expect(makeFeature().execute({ resourceId: "s-abcdef123456" })).rejects.toThrow(
+      /resource-id/,
+    );
+    expect(service.calls).toEqual([]);
+  });
+
+  test("bare native ID resolves and forwards the exact qualified ID", async () => {
+    observeScreen.setObserveResult(
+      makeObserveResult(
+        makeViewHierarchy([
+          { $: { "resource-id": "com.app:id/save", text: "Save", bounds: bounds(10, 20, 60, 80) } },
+        ]),
+      ),
+    );
+    await makeFeature().execute({ resourceId: "save" });
+    expect(service.calls).toEqual([{ method: "set", resourceId: "com.app:id/save" }]);
+  });
+
+  test("text focus prefers the topmost window rather than the smallest background label", async () => {
+    const hierarchy = makeViewHierarchy([
+      { $: { text: "Save", "resource-id": "com.app:id/background", bounds: bounds(0, 0, 10, 10) } },
+    ]);
+    hierarchy.windows = [
+      {
+        windowLayer: 9,
+        hierarchy: {
+          node: {
+            text: "Save",
+            "resource-id": "com.app:id/dialog",
+            bounds: bounds(100, 100, 400, 200),
+          },
+        },
+      },
+    ] as any;
+    observeScreen.setObserveResult(makeObserveResult(hierarchy));
+    await makeFeature().execute({ text: "Save" });
+    expect(service.calls).toEqual([{ method: "set", resourceId: "com.app:id/dialog" }]);
+  });
+
+  test("an observed node key forwards its real native ID when present", async () => {
+    observeScreen.setObserveResult(
+      makeObserveResult(
+        makeViewHierarchy([
+          {
+            $: {
+              "view-id": "s-abcdef123456",
+              "resource-id": "com.app:id/save",
+              bounds: bounds(10, 20, 60, 80),
+            },
+          },
+        ]),
+      ),
+    );
+    await makeFeature().execute({ resourceId: "s-abcdef123456" });
+    expect(service.calls).toEqual([{ method: "set", resourceId: "com.app:id/save" }]);
   });
 });

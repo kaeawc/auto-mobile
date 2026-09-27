@@ -1,3 +1,4 @@
+import { SearchableHierarchy } from "../features/utility/SearchableNode";
 /**
  * System tray helper functions for notification handling.
  * Extracted from interactionTools.ts for maintainability.
@@ -169,6 +170,8 @@ const NOTIFICATION_ROW_RESOURCE_IDS = [
   "com.android.systemui:id/expandableNotificationRow",
   "android:id/notification_content",
   "android:id/notification_main_column",
+  "android:id/notification_template",
+  "com.android.systemui:id/status_bar_notification",
 ];
 const NOTIFICATION_ROW_CLASS_HINTS = [
   "ExpandableNotificationRow",
@@ -231,6 +234,7 @@ interface SystemTrayMatchResult {
 type SystemTrayMatchKey = keyof SystemTrayMatchResult["matches"];
 
 export interface SystemTrayNotificationCandidate {
+  windowRank?: number;
   node: any;
   depth: number;
   element?: Element;
@@ -478,6 +482,7 @@ const nodeHasNotificationRowHint = (node: any): boolean => {
     return false;
   }
 
+  // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- F6/F7 preserves notification layout and field classification; user element selectors use the resolver.
   const resourceId = String(props["resource-id"] ?? props.resourceId ?? "");
   const className = String(props.className ?? props.class ?? "").toLowerCase();
   const isSystemUi = nodeIsSystemUi(props);
@@ -517,6 +522,7 @@ export const nodeIsNotificationGroup = (node: any): boolean => {
     if (!props) {
       return false;
     }
+    // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- F6/F7 preserves notification layout and field classification; user element selectors use the resolver.
     const resourceId = String(props["resource-id"] ?? props.resourceId ?? "");
     return matchesNotificationResourceId(resourceId, "notification_children_container");
   };
@@ -532,6 +538,7 @@ const nodeContainsNotificationChildrenContainer = (node: any): boolean => {
     return false;
   }
   const props = getNodeProperties(node);
+  // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- F6/F7 preserves notification layout and field classification; user element selectors use the resolver.
   const resourceId = String(props?.["resource-id"] ?? props?.resourceId ?? "");
   if (matchesNotificationResourceId(resourceId, "notification_children_container")) {
     return true;
@@ -553,6 +560,7 @@ const getDirectChildNodes = (node: any): any[] => {
 const getNotificationGroupChildrenContainer = (groupNode: any): any | null =>
   getDirectChildNodes(groupNode).find((child: any) => {
     const props = getNodeProperties(child);
+    // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- F6/F7 preserves notification layout and field classification; user element selectors use the resolver.
     const resourceId = String(props?.["resource-id"] ?? props?.resourceId ?? "");
     return matchesNotificationResourceId(resourceId, "notification_children_container");
   }) ?? null;
@@ -561,6 +569,7 @@ const getNotificationGroupHeader = (groupNode: any): any | null => {
   const groupChildren = getDirectChildNodes(groupNode);
   const header = groupChildren.find((child: any) => {
     const props = getNodeProperties(child);
+    // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- F6/F7 preserves notification layout and field classification; user element selectors use the resolver.
     const resourceId = String(props?.["resource-id"] ?? props?.resourceId ?? "");
     return matchesNotificationResourceId(resourceId, "notification_header");
   });
@@ -572,6 +581,7 @@ const getNotificationGroupHeader = (groupNode: any): any | null => {
   return (
     getDirectChildNodes(childrenContainer).find((child: any) => {
       const props = getNodeProperties(child);
+      // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- F6/F7 preserves notification layout and field classification; user element selectors use the resolver.
       const resourceId = String(props?.["resource-id"] ?? props?.resourceId ?? "");
       return matchesNotificationResourceId(resourceId, "notification_header");
     }) ?? null
@@ -583,6 +593,7 @@ const getExpandButtonResourceIdBounds = (
   parser: DefaultElementParser,
 ): Element | null => {
   const props = getNodeProperties(node);
+  // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- F6/F7 preserves notification layout and field classification; user element selectors use the resolver.
   const resourceId = String(props?.["resource-id"] ?? props?.resourceId ?? "");
   return matchesNotificationResourceId(resourceId, "expand_button")
     ? (parser.parseNodeBounds(node) ?? null)
@@ -595,6 +606,7 @@ const getExpandButtonContentDescriptionBounds = (
 ): Element | null => {
   const props = getNodeProperties(node);
   const contentDescription = String(
+    // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- F6/F7 preserves notification layout and field classification; user element selectors use the resolver.
     props?.["content-desc"] ?? props?.contentDesc ?? "",
   ).toLowerCase();
   return contentDescription === "expand" ? (parser.parseNodeBounds(node) ?? null) : null;
@@ -667,6 +679,7 @@ export const getNotificationGroupChildRows = (groupNode: any): any[] => {
   const children = getDirectChildNodes(childrenContainer);
   return children.filter((child: any) => {
     const props = getNodeProperties(child);
+    // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- F6/F7 preserves notification layout and field classification; user element selectors use the resolver.
     const resourceId = String(props?.["resource-id"] ?? props?.resourceId ?? "");
     return (
       !matchesNotificationResourceId(resourceId, "notification_header") &&
@@ -682,6 +695,7 @@ const nodeHasResourceIdDescendant = (
   resourceIdFragment: keyof typeof NOTIFICATION_RESOURCE_IDS,
 ): boolean => {
   const props = getNodeProperties(node);
+  // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- F6/F7 preserves notification layout and field classification; user element selectors use the resolver.
   const resourceId = String(props?.["resource-id"] ?? props?.resourceId ?? "");
   if (matchesNotificationResourceId(resourceId, resourceIdFragment)) {
     return true;
@@ -693,7 +707,9 @@ const nodeHasResourceIdDescendant = (
 
 const getNodeExpandButtonContentDescription = (node: any): string | null => {
   const props = getNodeProperties(node);
+  // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- F6/F7 preserves notification layout and field classification; user element selectors use the resolver.
   const resourceId = String(props?.["resource-id"] ?? props?.resourceId ?? "");
+  // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- F6/F7 preserves notification layout and field classification; user element selectors use the resolver.
   const contentDescription = String(props?.["content-desc"] ?? props?.contentDesc ?? "").trim();
   const isExpandButton = matchesNotificationResourceId(resourceId, "expand_button");
   const isRecognizedState = /^(expand|collapse)$/i.test(contentDescription);
@@ -805,6 +821,7 @@ const collectNotificationCandidates = (
   viewHierarchy: ViewHierarchyResult,
 ): SystemTrayNotificationCandidate[] => {
   const candidates: SystemTrayNotificationCandidate[] = [];
+  const visited = new Set<unknown>();
   const parser = new DefaultElementParser();
 
   const visitChildren = (node: any, depth: number, groupNode?: any): void => {
@@ -831,9 +848,10 @@ const collectNotificationCandidates = (
   };
 
   const visit = (node: any, depth: number, groupNode?: any): void => {
-    if (!node) {
+    if (!node || visited.has(node)) {
       return;
     }
+    visited.add(node);
 
     if (nodeHasNotificationRowHint(node)) {
       if (nodeIsNotificationGroup(node)) {
@@ -877,6 +895,7 @@ const extractNodeTextCandidates = (node: any): string[] => {
     return [];
   }
 
+  // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- F6/F7 preserves notification layout and field classification; user element selectors use the resolver.
   const candidates = [props.text, props["content-desc"], props["ios-accessibility-label"]];
 
   return candidates.filter(
@@ -996,6 +1015,7 @@ const collectCompositeNotificationCandidates = (
   }
 
   const candidates: SystemTrayNotificationCandidate[] = [];
+  const visited = new Set<unknown>();
   const parser = new DefaultElementParser();
 
   const childRowMatchesContentCriteria = (childRow: any): boolean => {
@@ -1050,9 +1070,10 @@ const collectCompositeNotificationCandidates = (
     depth: number,
     groupNode?: any,
   ): { matches: SystemTrayMatchResult["matches"]; hasAll: boolean } => {
-    if (!node) {
+    if (!node || visited.has(node)) {
       return { matches: {}, hasAll: false };
     }
+    visited.add(node);
 
     let combinedMatches = resolveNodeMatches(node);
     let childHasAll = false;
@@ -1273,6 +1294,10 @@ const selectBestNotificationMatch = (
     if (leftCounts.partial !== rightCounts.partial) {
       return rightCounts.partial - leftCounts.partial;
     }
+    const windowDelta = (left.candidate.windowRank ?? 0) - (right.candidate.windowRank ?? 0);
+    if (windowDelta !== 0) {
+      return windowDelta;
+    }
     // Prefer topmost notification (most recent in Android shade)
     const leftTop = getCandidateTopY(left.candidate);
     const rightTop = getCandidateTopY(right.candidate);
@@ -1288,11 +1313,20 @@ const selectBestNotificationMatch = (
   })[0];
 };
 
+const notificationSearchable = new SearchableHierarchy();
+
 const findNotificationMatches = (
   viewHierarchy: ViewHierarchyResult,
   criteria: SystemTrayNotificationArgs,
   appMatchTexts: string[],
 ): SystemTrayNotificationMatch[] => {
+  const windowRanks = new Map<unknown, number>();
+  for (const entry of notificationSearchable.project(viewHierarchy)) {
+    windowRanks.set(
+      entry.source,
+      Math.min(windowRanks.get(entry.source) ?? Infinity, entry.windowRank),
+    );
+  }
   const parser = new DefaultElementParser();
   const candidates = collectNotificationCandidates(viewHierarchy);
   const criteriaCount = getNotificationCriteriaCount(criteria);
@@ -1303,7 +1337,11 @@ const findNotificationMatches = (
       .map((candidate) => {
         const subHierarchy = createSubHierarchy(candidate.node);
         const match = buildNotificationMatch(subHierarchy, criteria, appMatchTexts);
-        return { candidate, match, subHierarchy };
+        return {
+          candidate: { ...candidate, windowRank: windowRanks.get(candidate.node) ?? 0 },
+          match,
+          subHierarchy,
+        };
       })
       .filter((entry) => entry.match.matched);
   };
@@ -1629,8 +1667,10 @@ const NOTIFICATION_TITLE_FIELD_IDS = [
 
 const findHeaderAppLabel = (header: any): string | undefined => {
   const props = getNodeProperties(header);
+  // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- F6/F7 preserves notification layout and field classification; user element selectors use the resolver.
   const resourceId = String(props?.["resource-id"] ?? props?.resourceId ?? "").toLowerCase();
   if (resourceId.includes("app_name_text")) {
+    // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- F6/F7 preserves notification layout and field classification; user element selectors use the resolver.
     return typeof props?.text === "string" && props.text.length > 0 ? props.text : undefined;
   }
   for (const child of getDirectChildNodes(header)) {
@@ -1651,13 +1691,17 @@ const collectNotificationGroupChildTitles = (groupNode: any): string[] => {
   const titles: string[] = [];
   const visit = (node: any): void => {
     const props = getNodeProperties(node);
+    // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- F6/F7 preserves notification layout and field classification; user element selectors use the resolver.
     const resourceId = String(props?.["resource-id"] ?? props?.resourceId ?? "");
     const id = resourceId.split("/").pop() ?? "";
     if (
       NOTIFICATION_TITLE_FIELD_IDS.includes(id) &&
+      // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- F6/F7 preserves notification layout and field classification; user element selectors use the resolver.
       typeof props?.text === "string" &&
+      // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- F6/F7 preserves notification layout and field classification; user element selectors use the resolver.
       props.text.length > 0
     ) {
+      // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- F6/F7 preserves notification layout and field classification; user element selectors use the resolver.
       titles.push(props.text);
     }
     for (const child of getDirectChildNodes(node)) {
@@ -2003,6 +2047,7 @@ const readTrayNotificationFields = (root: any) => {
       continue;
     }
     const id =
+      // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- F6/F7 preserves notification layout and field classification; user element selectors use the resolver.
       String(props["resource-id"] ?? props.resourceId ?? "")
         .split("/")
         .pop() ?? "";
@@ -2159,6 +2204,7 @@ const trayAtScrollEnd = (hierarchy: ViewHierarchyResult): boolean =>
       if (!props) {
         return false;
       }
+      // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- F6/F7 preserves notification layout and field classification; user element selectors use the resolver.
       const resourceId = String(props["resource-id"] ?? props.resourceId ?? "");
       if (!matchesNotificationResourceId(resourceId, "notification_stack_scroller")) {
         return false;

@@ -23,6 +23,7 @@ export interface SearchableNode {
   label?: string;
   textFields: readonly string[];
   textSources: Readonly<Record<string, string>>;
+  capturedTextLength?: number;
   accessibleLabel?: string;
   testTag?: string;
   className?: string;
@@ -74,7 +75,9 @@ export function toSearchable(properties: SearchableProperties): SearchableNode {
   const description = nonEmptyString(properties["content-desc"]);
   const accessibleLabel = nonEmptyString(properties["ios-accessibility-label"]);
   const editable = isEditableElementProperties(properties);
-  const value = editable ? nonEmptyString(properties.value) : undefined;
+  const capturedValue =
+    editable && typeof properties.value === "string" ? properties.value : undefined;
+  const value = nonEmptyString(capturedValue);
   const label = [
     getToggleContentDescription(properties),
     value,
@@ -87,7 +90,9 @@ export function toSearchable(properties: SearchableProperties): SearchableNode {
     parsedBounds && Object.values(parsedBounds).every(Number.isFinite) ? parsedBounds : undefined;
   const affordances = deriveAffordances(properties);
   // Preserve the full observe text category even when the skeleton prefers an editable value.
-  const categoryText = text ?? description ?? accessibleLabel;
+  // Image labels remain searchable without adding media to observe's text category.
+  const categoryText =
+    text ?? description ?? (properties.role === "image" ? undefined : accessibleLabel);
   return {
     nativeId,
     nodeKey,
@@ -99,9 +104,10 @@ export function toSearchable(properties: SearchableProperties): SearchableNode {
         text,
         "content-desc": description,
         "ios-accessibility-label": accessibleLabel,
-        value,
+        value: capturedValue,
       }).filter((entry): entry is [string, string] => entry[1] !== undefined),
     ),
+    capturedTextLength: typeof properties.text === "string" ? properties.text.length : undefined,
     textFields: [
       ...new Set(
         [label, value, text, description, accessibleLabel].filter(

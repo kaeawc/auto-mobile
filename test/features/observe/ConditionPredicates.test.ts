@@ -21,7 +21,7 @@ import { ElementResolver } from "../../../src/features/utility/ElementResolver";
  */
 
 /** Build an ObserveResult wrapping a single root node with the given children. */
-function obs(children: Record<string, unknown>[]): ObserveResult {
+function obs(children: Record<string, unknown>[], rootBounds = true): ObserveResult {
   return {
     updatedAt: 1,
     screenSize: { width: 1080, height: 1920 },
@@ -32,7 +32,7 @@ function obs(children: Record<string, unknown>[]): ObserveResult {
       hierarchy: {
         node: {
           "resource-id": "root",
-          bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+          ...(rootBounds ? { bounds: { left: 0, top: 0, right: 100, bottom: 100 } } : {}),
           node: children,
         },
       },
@@ -180,6 +180,32 @@ test("appear reports the matching child rather than its promoted row", () => {
   expect(evaluation.matched).toBe(true);
   expect(evaluation.matchedElement?.text).toBe("Ready");
   expect(evaluation.candidates?.[0]?.text).toBe("Ready");
+});
+
+test("appear uses a bounded scroll-only ancestor for bounds-less matching text", () => {
+  const evaluation = appear(new ElementResolver(), { text: "Ghost" })(
+    obs([node({ "resource-id": "list", scrollable: true, node: [{ text: "Ghost" }] })]),
+  );
+  expect(evaluation.matched).toBe(true);
+  expect(evaluation.matchedElement?.["resource-id"]).toBe("list");
+});
+
+test("disappear waits until bounds-less matching text leaves its bounded scroll-only ancestor", () => {
+  const predicate = disappear(new ElementResolver(), { text: "Ghost" });
+  const present = obs([
+    node({ "resource-id": "list", scrollable: true, node: [{ text: "Ghost" }] }),
+  ]);
+  expect(predicate(present).matched).toBe(false);
+  expect(predicate(obs([node({ "resource-id": "list", scrollable: true })])).matched).toBe(true);
+});
+
+test("presence waits ignore matching nodes without bounds", () => {
+  const observation = obs([{ "resource-id": "ghost", text: "Ghost" }], false);
+  const resolver = new ElementResolver();
+  expect(appear(resolver, { elementId: "ghost" })(observation).matched).toBe(false);
+  expect(disappear(resolver, { elementId: "ghost" })(observation).matched).toBe(true);
+  expect(appear(resolver, { text: "Ghost" })(observation).matched).toBe(false);
+  expect(disappear(resolver, { text: "Ghost" })(observation).matched).toBe(true);
 });
 
 describe("textEquals predicate", () => {

@@ -356,3 +356,29 @@ describe("TapOnElement selectedElement metadata", () => {
     expect(response.selectedElement?.bounds.centerY).toBe(20);
   });
 });
+
+test("selection metadata separates the matched text child from the shared action row", async () => {
+  const { ResolverElementSelector } =
+    await import("../../../src/features/utility/ResolverElementSelector");
+  const rowBounds = { left: 0, top: 0, right: 300, bottom: 100 };
+  const childBounds = { left: 10, top: 10, right: 100, bottom: 40 };
+  const hierarchy = {
+    hierarchy: {
+      node: {
+        "resource-id": "app:id/row",
+        bounds: rowBounds,
+        clickable: true,
+        node: { text: "Wi-Fi", bounds: childBounds },
+      },
+    },
+  };
+  const selector = new ResolverElementSelector();
+  const tap = selector.selectByText(hierarchy, "Wi-Fi", { intentAction: "tap" });
+  const highlight = selector.selectByText(hierarchy, "Wi-Fi", { intentAction: "highlight" });
+  const metadata = (createTapOnElement() as any).buildSelectedElementMetadata(tap);
+  expect(tap.element?.bounds).toEqual(rowBounds);
+  expect(metadata.matchedElement.bounds).toEqual(childBounds);
+  expect(metadata.bounds).toMatchObject(rowBounds);
+  expect(highlight.element?.bounds).toEqual(childBounds);
+  expect(highlight.matchedElement?.bounds).toEqual(childBounds);
+});

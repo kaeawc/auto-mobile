@@ -1,3 +1,4 @@
+import { FakeScrollElementResolver } from "../../../fakes/FakeScrollElementResolver";
 import { beforeEach, describe, expect, test } from "bun:test";
 import { ScrollUntilVisible } from "../../../../src/features/action/swipeon/ScrollUntilVisible";
 import { FakeAccessibilityDetector } from "../../../fakes/FakeAccessibilityDetector";
@@ -104,7 +105,7 @@ function makeScrollUntilVisible({
 
   return new ScrollUntilVisible({
     device,
-    finder: finder as any,
+    resolver: new FakeScrollElementResolver(finder),
     geometry: fakeGeometry,
     observeScreen: fakeObserveScreen as any,
     accessibilityService,

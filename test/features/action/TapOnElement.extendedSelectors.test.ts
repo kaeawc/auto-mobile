@@ -280,9 +280,27 @@ describe("TapOnElement extended selectors", () => {
             node: {
               $: { bounds: { left: 0, top: 0, right: 200, bottom: 200 } },
               node: [
-                { $: { text: "Done", bounds: { left: -300, top: 0, right: -200, bottom: 50 } } },
-                { $: { text: "Done", bounds: { left: 20, top: 20, right: 120, bottom: 70 } } },
-                { $: { text: "Add", bounds: { left: 20, top: 90, right: 120, bottom: 140 } } },
+                {
+                  $: {
+                    clickable: true,
+                    text: "Done",
+                    bounds: { left: -300, top: 0, right: -200, bottom: 50 },
+                  },
+                },
+                {
+                  $: {
+                    clickable: true,
+                    text: "Done",
+                    bounds: { left: 20, top: 20, right: 120, bottom: 70 },
+                  },
+                },
+                {
+                  $: {
+                    clickable: true,
+                    text: "Add",
+                    bounds: { left: 20, top: 90, right: 120, bottom: 140 },
+                  },
+                },
               ],
             },
           },

@@ -18,6 +18,47 @@ describe("Highlight Tools Registration", () => {
     const toolNames = ToolRegistry.getToolDefinitions().map((tool) => tool.name);
     expect(toolNames).toContain("highlight");
   });
+  test.each([
+    [false, { x: 20, y: 40, width: 60, height: 20 }],
+    [true, { x: 0, y: 0, width: 100, height: 100 }],
+  ])("text highlight containerOf=%s starts from the matched label", async (containerOf, bounds) => {
+    const hierarchy: ViewHierarchyResult = {
+      hierarchy: {
+        node: {
+          bounds: { left: 0, top: 0, right: 200, bottom: 200 },
+          node: [
+            {
+              clickable: true,
+              bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+              node: [{ text: "Target", bounds: { left: 20, top: 40, right: 80, bottom: 60 } }],
+            },
+          ],
+        },
+      },
+    };
+    const shapes: HighlightShape[] = [];
+    registerHighlightTools({
+      generateHighlightId: () => "text-highlight",
+      viewHierarchyClientFactory: () => ({
+        requestHierarchySync: async () => ({ hierarchy }),
+        convertToViewHierarchyResult: () => hierarchy,
+      }),
+      highlightClientFactory: () =>
+        ({
+          addHighlight: async (_id, shape) => {
+            shapes.push(shape);
+            return { success: true };
+          },
+        }) as any,
+    });
+    const tool = ToolRegistry.getTool("highlight")!;
+    const response = await tool.deviceAwareHandler!(
+      { deviceId: "test", platform: "android", name: "Test" } as BootedDevice,
+      tool.schema.parse({ platform: "android", text: "Target", containerOf }),
+    );
+    expect(JSON.parse(response.content[0].text).success).toBe(true);
+    expect(shapes[0]).toEqual({ type: "circle", bounds });
+  });
 
   test("validates highlight schema for add action", () => {
     registerHighlightTools();
@@ -160,6 +201,48 @@ describe("Highlight Tools Registration", () => {
     );
     expect(JSON.parse(response.content[0].text).success).toBe(false);
     expect(highlighted).toBe(false);
+  });
+
+  test("Android selector highlights choose the visible duplicate", async () => {
+    let shape: HighlightShape | undefined;
+    const hierarchy: ViewHierarchyResult = {
+      screenWidth: 100,
+      screenHeight: 100,
+      hierarchy: {
+        node: [
+          { text: "X", bounds: [0, 200, 20, 220] },
+          { text: "X", bounds: [0, 10, 20, 30] },
+        ],
+      },
+    };
+    registerHighlightTools({
+      hierarchyCaptureFactory: () => ({
+        capture: async (request) => ({
+          captureId: "highlight",
+          platform: "android",
+          requestedFreshness: request.freshness,
+          receivedAt: 0,
+          hierarchy,
+          nodes: new (
+            await import("../../src/features/utility/SearchableNode")
+          ).SearchableHierarchy().project(hierarchy),
+        }),
+      }),
+      highlightClientFactory: () =>
+        ({
+          addHighlight: async (_id, value) => {
+            shape = value;
+            return { success: true };
+          },
+        }) as any,
+    });
+    const tool = ToolRegistry.getTool("highlight")!;
+    const response = await tool.deviceAwareHandler!(
+      { deviceId: "android-test", platform: "android", name: "test" },
+      tool.schema.parse({ text: "X" }),
+    );
+    expect(JSON.parse(response.content[0].text).success).toBe(true);
+    expect(shape?.bounds.y).toBe(10);
   });
 
   test("resolves iOS selector highlights from the iOS hierarchy", async () => {

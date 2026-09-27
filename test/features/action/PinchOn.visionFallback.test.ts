@@ -1,3 +1,4 @@
+import { FakeHierarchyCapture } from "../../fakes/FakeHierarchyCapture";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../src/models";
 import { PinchOn } from "../../../src/features/action/PinchOn";
@@ -74,6 +75,9 @@ describe("PinchOn vision fallback", () => {
 
   const createPinchOn = (capturer: FakeScreenshotCapturer, analyzer: FakeVisionAnalyzer) => {
     const pinchOn = new PinchOn(device, null, {
+      capture: new FakeHierarchyCapture(
+        async () => (await fakeObserveScreen.getMostRecentCachedObserveResult()).viewHierarchy!,
+      ),
       visionConfig: enabledVisionConfig,
       screenshotCapturer: capturer,
       visionAnalyzer: analyzer,
@@ -150,6 +154,9 @@ describe("PinchOn vision fallback", () => {
     const analyzer = new FakeVisionAnalyzer();
 
     const pinchOn = new PinchOn(device, null, {
+      capture: new FakeHierarchyCapture(
+        async () => (await fakeObserveScreen.getMostRecentCachedObserveResult()).viewHierarchy!,
+      ),
       visionConfig: { ...enabledVisionConfig, enabled: false },
       screenshotCapturer: capturer,
       visionAnalyzer: analyzer,

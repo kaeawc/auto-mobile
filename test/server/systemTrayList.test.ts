@@ -4,6 +4,7 @@ import generatedDefinitions from "../../schemas/tool-definitions.json";
 import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import {
   listSystemTrayNotifications,
+  waitForNotificationMatch,
   resolveUniqueTrayAppLabel,
   resetSystemTrayDependencies,
   setSystemTrayDependencies,
@@ -1466,4 +1467,27 @@ describe("systemTray list silent-section chronometer chrome", () => {
     // exceeds it on notification-heavy devices and would reject outright.
     expect(call.maxBuffer).toBeGreaterThan(1024 * 1024);
   });
+});
+
+test("lists topmost window rows once when also nested in the primary hierarchy", async () => {
+  const sharedTop = identifiedRow("top-window");
+  const observation = page(identifiedRow("primary"), sharedTop);
+  observation.viewHierarchy!.windows = [
+    { windowLayer: 10, hierarchy: page(sharedTop).viewHierarchy!.hierarchy },
+  ] as any;
+  setup([observation]);
+  const result = await list();
+  expect(result.notifications.map((entry) => entry.title)).toEqual(["top-window", "primary"]);
+});
+
+test("matching identical notification titles prefers the topmost window before screen Y", async () => {
+  const primary = positionedRow("Same", 200);
+  const upper = positionedRow("Same", 900);
+  const observation = page(primary);
+  observation.viewHierarchy!.windows = [
+    { windowLayer: 10, hierarchy: page(upper).viewHierarchy!.hierarchy },
+  ] as any;
+  setup([observation]);
+  const result = await waitForNotificationMatch(device, { title: "Same" }, [], 1000);
+  expect(result.match?.candidate.element?.bounds.top).toBe(900);
 });

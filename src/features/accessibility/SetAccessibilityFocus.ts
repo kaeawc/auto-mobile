@@ -19,10 +19,10 @@ import {
   SetAccessibilityFocusResult,
   ViewHierarchyResult,
 } from "../../models";
-import type { ElementFinder } from "../../utils/interfaces/ElementFinder";
-import type { ObserveScreen } from "../observe/interfaces/ObserveScreen";
-import { DefaultElementFinder } from "../utility/ElementFinder";
+import { ElementResolver, type ElementResolution } from "../utility/ElementResolver";
 import { normalizeQuotes } from "../utility/TextMatcher";
+import { SearchableHierarchy } from "../utility/SearchableNode";
+import type { ObserveScreen } from "../observe/interfaces/ObserveScreen";
 import { RealObserveScreen } from "../observe/ObserveScreen";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
@@ -38,8 +38,43 @@ export interface AccessibilityFocusService {
   requestCurrentFocus(): Promise<CurrentFocusResult>;
 }
 
+function matchedTextNativeId(
+  resolution: ElementResolution,
+  text: string,
+  contentDescription = false,
+): string | undefined {
+  const matched = resolution.matches.find(({ node }) => node === resolution.chosen);
+  const query = normalizeQuotes(text).trim().toLowerCase();
+  return matched?.sourceNodes?.find(
+    (node) =>
+      node.nativeId &&
+      (contentDescription
+        ? [node.textSources["content-desc"], node.accessibleLabel]
+        : Object.values(node.textSources)
+      ).some((value) => {
+        const source = value && normalizeQuotes(value).trim().toLowerCase();
+        return resolution.matchMode === "contains" ? source?.includes(query) : source === query;
+      }),
+  )?.nativeId;
+}
+
+function selectedNativeId(
+  resolution: ElementResolution,
+  options: SetAccessibilityFocusOptions,
+): string | undefined {
+  if (options.resourceId) {
+    return resolution.chosen?.nativeId;
+  }
+  if (options.text) {
+    return matchedTextNativeId(resolution, options.text);
+  }
+  return options.contentDesc
+    ? matchedTextNativeId(resolution, options.contentDesc, true)
+    : undefined;
+}
+
 export interface SetAccessibilityFocusDependencies {
-  finder?: ElementFinder;
+  resolver?: Pick<ElementResolver, "resolve">;
   observeScreen?: ObserveScreen;
   /** Factory so production resolves the live CtrlProxy client lazily; fakes inject directly. */
   serviceFactory?: (device: BootedDevice) => AccessibilityFocusService;
@@ -47,13 +82,14 @@ export interface SetAccessibilityFocusDependencies {
 
 export class SetAccessibilityFocus {
   private readonly device: BootedDevice;
-  private readonly finder: ElementFinder;
+  private readonly resolver: Pick<ElementResolver, "resolve">;
+  private readonly searchable = new SearchableHierarchy();
   private readonly observeScreen: ObserveScreen;
   private readonly serviceFactory: (device: BootedDevice) => AccessibilityFocusService;
 
   constructor(device: BootedDevice, deps: SetAccessibilityFocusDependencies = {}) {
     this.device = device;
-    this.finder = deps.finder ?? new DefaultElementFinder();
+    this.resolver = deps.resolver ?? new ElementResolver();
     this.observeScreen =
       deps.observeScreen ?? new RealObserveScreen(device, defaultAdbClientFactory);
     this.serviceFactory =
@@ -76,8 +112,8 @@ export class SetAccessibilityFocus {
       );
     }
 
-    const service = this.serviceFactory(this.device);
     const resourceId = await this.resolveResourceId(options);
+    const service = this.serviceFactory(this.device);
 
     try {
       if (action === "clear") {
@@ -110,93 +146,53 @@ export class SetAccessibilityFocus {
     return { success: true, focusedElement, confirmed, warning };
   }
 
-  /**
-   * Resolve the target to a resource-id. A resource-id selector is used directly; a
-   * text/contentDesc selector is resolved against the current view hierarchy via the
-   * element finder. The matched element must itself have a resource-id.
-   */
+  /** Resolve observed identity locally; only a unique real native ID crosses the service boundary. */
   private async resolveResourceId(options: SetAccessibilityFocusOptions): Promise<string> {
-    if (options.resourceId) {
-      // A caller-supplied id is just as exposed to the duplicate-id hazard below: CtrlProxy
-      // focuses the FIRST node carrying it. Guard it too, but best-effort — a resource-id
-      // selector did not previously require an observable hierarchy, so if we can't read
-      // one we fall through and let CtrlProxy resolve the id as before.
-      try {
-        const viewHierarchy = await this.getViewHierarchy();
-        this.assertUniqueResourceId(
-          viewHierarchy,
-          options.resourceId,
-          `resourceId "${options.resourceId}"`,
-        );
-      } catch (error) {
-        if (error instanceof ActionableError) {
-          throw error;
-        }
-        logger.warn(
-          `[accessibilityFocus] Could not observe to check resourceId uniqueness; proceeding: ${error}`,
+    const hierarchy = await this.getViewHierarchy();
+    const nodes = this.searchable.project(hierarchy);
+    const selector = options.resourceId
+      ? { elementId: options.resourceId }
+      : options.text
+        ? { text: options.text, match: "exact" as const }
+        : { contentDescription: options.contentDesc, match: "exact" as const };
+    const resolution = this.resolver.resolve(
+      { id: String(hierarchy.updatedAt ?? "accessibility-focus"), nodes },
+      selector,
+      !options.resourceId && (options.text || options.contentDesc)
+        ? { action: "inspect" }
+        : { action: "accessibility-focus", requireResourceId: true },
+    );
+    if (resolution.error) {
+      throw new ActionableError(resolution.error);
+    }
+    const resourceId = selectedNativeId(resolution, options);
+    if (!resourceId) {
+      if (
+        resolution.matches.some(({ node, sourceNodes }) =>
+          (sourceNodes ?? [node]).some((source) => !source.nativeId),
+        )
+      ) {
+        throw new ActionableError(
+          "Matched element has no resource-id; accessibility focus requires one.",
         );
       }
-      return options.resourceId;
-    }
-
-    const viewHierarchy = await this.getViewHierarchy();
-    const matched = this.findElement(viewHierarchy, options);
-    const selector = options.text
-      ? `text "${options.text}"`
-      : `content-desc "${options.contentDesc}"`;
-    if (!matched) {
-      throw new ActionableError(`Element not found for selector: ${selector}`);
-    }
-
-    const resourceId = matched["resource-id"];
-    if (!resourceId) {
       throw new ActionableError(
-        "Matched element has no resource-id; accessibility focus requires one.",
+        `Element not found for accessibility focus selector: ${JSON.stringify(selector)}`,
       );
     }
-
-    this.assertUniqueResourceId(viewHierarchy, resourceId, `Selector ${selector}`);
-    return resourceId;
-  }
-
-  /**
-   * The CtrlProxy service can only target a node by resource-id, and it focuses the FIRST
-   * node carrying that id. When the id is shared by repeated rows (e.g. a RecyclerView item
-   * id reused per row), focusing it would silently move the cursor to the wrong row while
-   * reporting success. Reject the ambiguity instead.
-   */
-  private assertUniqueResourceId(
-    viewHierarchy: ViewHierarchyResult,
-    resourceId: string,
-    selectorLabel: string,
-  ): void {
-    const sharing = this.countMatchingResourceIds(viewHierarchy, resourceId);
+    const sharing = new Set(
+      nodes
+        .filter(
+          (node) => node.nativeId === resourceId || node.nativeId?.endsWith(`:id/${resourceId}`),
+        )
+        .map((node) => node.source),
+    ).size;
     if (sharing > 1) {
       throw new ActionableError(
-        `${selectorLabel} resolves to resource-id "${resourceId}", which is shared by ` +
-          `${sharing} elements (e.g. repeated list rows). Accessibility focus targets a node ` +
-          `by resource-id and would focus the first match, not necessarily the one you ` +
-          `selected. Provide a more specific selector or a unique target.`,
+        `Selected resource-id "${resourceId}" is shared by ${sharing} elements. Accessibility focus requires a unique native target.`,
       );
     }
-  }
-
-  /**
-   * Count nodes whose resource-id matches, mirroring CtrlProxy.findNodeByResourceId:
-   * full equality OR a ":id/<id>" suffix, so both short and fully-qualified ids are
-   * counted the same way the service would resolve them.
-   */
-  private countMatchingResourceIds(viewHierarchy: ViewHierarchyResult, resourceId: string): number {
-    const candidates = this.finder.findElementsByResourceId(
-      viewHierarchy,
-      resourceId,
-      undefined,
-      true,
-    );
-    return candidates.filter((el) => {
-      const rid = el["resource-id"];
-      return typeof rid === "string" && (rid === resourceId || rid.endsWith(`:id/${resourceId}`));
-    }).length;
+    return resourceId;
   }
 
   private async getViewHierarchy(): Promise<ViewHierarchyResult> {
@@ -208,34 +204,5 @@ export class SetAccessibilityFocus {
       throw new ActionableError("Unable to observe screen to resolve accessibility focus target.");
     }
     return observeResult.viewHierarchy;
-  }
-
-  private findElement(
-    viewHierarchy: ViewHierarchyResult,
-    options: SetAccessibilityFocusOptions,
-  ): Element | null {
-    if (options.text) {
-      return this.finder.findElementByText(viewHierarchy, options.text, undefined, false, false);
-    }
-    if (options.contentDesc) {
-      // The text finder matches BOTH visible text and content-desc, so a text label that
-      // happens to equal the content-desc (e.g. a "Close" label next to a "Close" icon)
-      // could win. Restrict to nodes whose content-desc actually matches the selector.
-      const target = normalizeQuotes(options.contentDesc).toLowerCase();
-      const candidates = this.finder.findElementsByText(
-        viewHierarchy,
-        options.contentDesc,
-        undefined,
-        false,
-        false,
-      );
-      return (
-        candidates.find((el) => {
-          const desc = el["content-desc"];
-          return typeof desc === "string" && normalizeQuotes(desc).toLowerCase() === target;
-        }) ?? null
-      );
-    }
-    return null;
   }
 }

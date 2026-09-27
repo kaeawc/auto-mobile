@@ -7,6 +7,7 @@
  * node — no I/O, no device dependencies.
  */
 import type { ViewHierarchyResult } from "../../models";
+import { SearchableHierarchy } from "../../features/utility/SearchableNode";
 
 export const SYSTEM_TRAY_PACKAGE = "com.android.systemui";
 
@@ -83,18 +84,22 @@ export const traverseForHint = (node: any, predicate: (node: any) => boolean): b
   return false;
 };
 
+const searchableHierarchy = new SearchableHierarchy();
+
+/** Preserve original root trees while sharing the resolver's window order and capture projection. */
 export const getHierarchyRoots = (viewHierarchy: ViewHierarchyResult): any[] => {
-  if (!viewHierarchy?.hierarchy || viewHierarchy.hierarchy.error) {
-    return [];
-  }
-  const hierarchy: any = viewHierarchy.hierarchy;
-  if (hierarchy.node) {
-    return Array.isArray(hierarchy.node) ? hierarchy.node : [hierarchy.node];
-  }
-  if (hierarchy.hierarchy) {
-    return [hierarchy.hierarchy];
-  }
-  return [hierarchy];
+  const seen = new Set<unknown>();
+  return [...searchableHierarchy.project(viewHierarchy)]
+    .filter((entry) => entry.parentIndex === undefined)
+    .sort((a, b) => a.windowRank - b.windowRank || a.index - b.index)
+    .filter((entry) => {
+      if (seen.has(entry.source)) {
+        return false;
+      }
+      seen.add(entry.source);
+      return true;
+    })
+    .map((entry) => entry.source);
 };
 
 // Framework aliases exercised by systemTray.test.ts and the captured
@@ -107,7 +112,11 @@ export const NOTIFICATION_RESOURCE_IDS = {
     // Existing custom-layout fixture in systemTrayList.test.ts.
     "com.android.systemui:id/notification_header",
   ],
-  expand_button: ["android:id/expand_button", "android:id/expand_button_touch_container"],
+  expand_button: [
+    "android:id/expand_button",
+    "android:id/expand_button_touch_container",
+    "com.android.systemui:id/expand_button",
+  ],
   status_bar_latest_event_content: ["android:id/status_bar_latest_event_content"],
   notification_stack_scroller: ["com.android.systemui:id/notification_stack_scroller"],
 } satisfies Record<string, readonly string[]>;
@@ -122,6 +131,7 @@ export const nodeIsSystemUi = (props: Record<string, any>): boolean => {
   if (packageName) {
     return packageName === SYSTEM_TRAY_PACKAGE;
   }
+  // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- F6/F7 preserves platform notification-layout classification, not user element selection.
   const resourceId = String(props["resource-id"] ?? props.resourceId ?? "");
   return resourceId.startsWith(`${SYSTEM_TRAY_PACKAGE}:id/`);
 };
@@ -131,6 +141,7 @@ export const nodeHasSystemTrayHint = (node: any): boolean => {
   if (!props) {
     return false;
   }
+  // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- F6/F7 preserves platform notification-layout classification, not user element selection.
   const resourceId = String(props["resource-id"] ?? props.resourceId ?? "");
   const className = String(props.className ?? props.class ?? "");
   const isSystemUi = nodeIsSystemUi(props);
@@ -150,7 +161,9 @@ export const nodeHasIosNotificationCenterHint = (node: any): boolean => {
     return false;
   }
   const className = String(props.className ?? props.class ?? "");
+  // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- F6/F7 preserves platform notification-layout classification, not user element selection.
   const contentDesc = String(props["content-desc"] ?? props["ios-accessibility-label"] ?? "");
+  // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- F6/F7 preserves platform notification-layout classification, not user element selection.
   const identifier = String(props["resource-id"] ?? props.resourceId ?? props.identifier ?? "");
   return IOS_NOTIFICATION_CENTER_CLASS_HINTS.some(
     (hint) => className.includes(hint) || contentDesc.includes(hint) || identifier.includes(hint),

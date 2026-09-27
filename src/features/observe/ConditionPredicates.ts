@@ -6,8 +6,10 @@ import {
   type ElementResolution,
   type MatchMode,
   type ResolutionIntent,
+  isWithin,
+  matchedSourceNode,
 } from "../utility/ElementResolver";
-import { SearchableHierarchy } from "../utility/SearchableNode";
+import { SearchableHierarchy, type SearchableEntry } from "../utility/SearchableNode";
 import type { ResolverSelector } from "../../server/elementSelectorSchemas";
 import { normalizeQuotes } from "../utility/TextMatcher";
 
@@ -67,16 +69,33 @@ function ownsSelectorText(
   );
 }
 
-function matchedSource(result: ElementResolution | undefined, text: string | undefined) {
-  const match = result?.matches.find(({ node }) => node === result.chosen);
-  return match?.sourceNodes?.find((node) => ownsSelectorText(node, text)) ?? result?.chosen;
+function boundedChosenAncestor(result: ElementResolution, source: SearchableEntry) {
+  const chosen = result.chosen;
+  if (!chosen?.bounds || !chosen.element || !result.snapshotNodes) {
+    return undefined;
+  }
+  return chosen === source || isWithin(source, chosen, result.snapshotNodes) ? chosen : undefined;
+}
+
+function boundedMatchedSource(result: ElementResolution | undefined, selector: ConditionSelector) {
+  if (!result) {
+    return undefined;
+  }
+  const source = matchedSourceNode(result, selector);
+  if (!source) {
+    return undefined;
+  }
+  if (source.bounds && source.element) {
+    return source;
+  }
+  return boundedChosenAncestor(result, source);
 }
 
 export function appear(
   resolver: ConditionResolver,
   selector: ConditionSelector,
 ): ConditionPredicate {
-  const search = searchForWait(resolver, selector, { action: "inspect" });
+  const search = searchForWait(resolver, selector, { action: "inspect", requireBounds: true });
   return (observation): ConditionEvaluation => {
     const result = search(observation);
     const sources =
@@ -97,9 +116,10 @@ export function appear(
         candidates = elements(diagnostic);
       }
     }
+    const source = boundedMatchedSource(result, selector);
     return {
-      matched: Boolean(result?.chosen),
-      matchedElement: matchedSource(result, selector.text)?.element,
+      matched: Boolean(source),
+      matchedElement: source?.element,
       candidates,
     };
   };
@@ -109,10 +129,14 @@ export function disappear(
   resolver: ConditionResolver,
   selector: ConditionSelector,
 ): ConditionPredicate {
-  const search = searchForWait(resolver, selector, { action: "inspect", negative: true });
+  const search = searchForWait(resolver, selector, {
+    action: "inspect",
+    negative: true,
+    requireBounds: true,
+  });
   return (observation): ConditionEvaluation => {
     const result = search(observation);
-    return { matched: !result?.chosen, candidates: elements(result) };
+    return { matched: !boundedMatchedSource(result, selector), candidates: elements(result) };
   };
 }
 

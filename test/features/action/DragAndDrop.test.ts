@@ -64,6 +64,8 @@ describe("DragAndDrop", () => {
     fakeAwaitIdle = new FakeAwaitIdle();
     fakeWindow = new FakeWindow();
     fakeA11yService = new FakeCtrlProxy();
+    fakeA11yService.setHierarchyData(createHierarchy());
+    fakeA11yService.setViewHierarchyResult(createHierarchy());
     fakeAdb = new FakeAdbExecutor();
     fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
@@ -122,6 +124,35 @@ describe("DragAndDrop", () => {
     expect(dragCall.y1).toBe(50);
     expect(dragCall.x2).toBe(250);
     expect(dragCall.y2).toBe(250);
+  });
+  test("text drag endpoints use matched label centers inside clickable rows", () => {
+    const hierarchy: ViewHierarchyResult = {
+      hierarchy: {
+        node: [
+          {
+            "resource-id": "source-row",
+            clickable: true,
+            bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+            node: [{ text: "Source", bounds: { left: 20, top: 40, right: 40, bottom: 60 } }],
+          },
+          {
+            "resource-id": "target-row",
+            clickable: true,
+            bounds: { left: 200, top: 200, right: 300, bottom: 300 },
+            node: [{ text: "Target", bounds: { left: 220, top: 240, right: 240, bottom: 260 } }],
+          },
+        ],
+      },
+    };
+    expect(
+      (dragAndDrop as any).resolveTarget(hierarchy, { text: "Source" }, "source").bounds,
+    ).toEqual({ left: 20, top: 40, right: 40, bottom: 60 });
+    expect(
+      (dragAndDrop as any).resolveTarget(hierarchy, { text: "Target" }, "target").bounds,
+    ).toEqual({ left: 220, top: 240, right: 240, bottom: 260 });
+    expect(
+      (dragAndDrop as any).resolveTarget(hierarchy, { elementId: "source-row" }, "source").bounds,
+    ).toEqual({ left: 0, top: 0, right: 100, bottom: 100 });
   });
 
   test("returns error when accessibility service reports failure", async () => {

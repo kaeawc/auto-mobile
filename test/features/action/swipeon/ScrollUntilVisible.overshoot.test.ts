@@ -1,5 +1,7 @@
+import { FakeScrollElementResolver } from "../../../fakes/FakeScrollElementResolver";
 import { beforeEach, describe, expect, test } from "bun:test";
 import { ScrollUntilVisible } from "../../../../src/features/action/swipeon/ScrollUntilVisible";
+import { ElementResolver } from "../../../../src/features/utility/ElementResolver";
 import { FakeAccessibilityDetector } from "../../../fakes/FakeAccessibilityDetector";
 import { FakeElementFinder } from "../../../fakes/FakeElementFinder";
 import { FakeTimer } from "../../../fakes/FakeTimer";
@@ -56,6 +58,7 @@ function makeScrollUntilVisible({
   observeOptions,
   observedInteractionOptions,
   terminalEvidence,
+  resolver,
 }: {
   accessibilityDetector: FakeAccessibilityDetector;
   finder: FakeElementFinder;
@@ -68,6 +71,7 @@ function makeScrollUntilVisible({
   observeOptions?: Array<Record<string, unknown> | undefined>;
   observedInteractionOptions?: Array<Record<string, unknown>>;
   terminalEvidence?: ObserveResult[];
+  resolver?: ElementResolver;
 }): ScrollUntilVisible {
   let callIdx = 0;
 
@@ -95,7 +99,7 @@ function makeScrollUntilVisible({
 
   return new ScrollUntilVisible({
     device: DEVICE,
-    finder: finder as any,
+    resolver: resolver ?? new FakeScrollElementResolver(finder),
     geometry: fakeGeometry,
     observeScreen: fakeObserveScreen as any,
     accessibilityService,
@@ -136,6 +140,79 @@ describe("ScrollUntilVisible overshoot recovery", () => {
     timer.enableAutoAdvance();
     accessibilityService = new FakeScrollAccessibilityService();
     talkBackExecutor = new FakeTalkBackSwipeExecutor();
+  });
+
+  test("automatic scrolling keeps the outer scrollable ahead of a nested carousel", async () => {
+    const observation: ObserveResult = {
+      ...makeObserveResult(),
+      viewHierarchy: {
+        hierarchy: {
+          node: {
+            bounds: { left: 0, top: 0, right: 400, bottom: 900 },
+            "resource-id": "feed",
+            scrollable: true,
+            node: [
+              {
+                bounds: { left: 10, top: 100, right: 390, bottom: 300 },
+                "resource-id": "carousel",
+                scrollable: true,
+              },
+            ],
+          },
+        },
+      },
+    };
+    const scroll = makeScrollUntilVisible({
+      accessibilityDetector: detector,
+      finder,
+      timer,
+      accessibilityService,
+      observeResults: [observation],
+      talkBackExecutor,
+      resolver: new ElementResolver(),
+    });
+    expect((await scroll.findScrollableContainer(BASE_OPTIONS, observation))["resource-id"]).toBe(
+      "feed",
+    );
+  });
+
+  test("automatic scrolling uses the app feed before an IME overlay", async () => {
+    const observation: ObserveResult = {
+      ...makeObserveResult(),
+      viewHierarchy: {
+        hierarchy: {
+          node: {
+            bounds: { left: 0, top: 0, right: 400, bottom: 900 },
+            "resource-id": "app:id/feed",
+            scrollable: true,
+          },
+        },
+        windows: [
+          {
+            windowLayer: 10,
+            hierarchy: {
+              node: {
+                bounds: { left: 0, top: 700, right: 400, bottom: 900 },
+                "resource-id": "ime:id/suggestions",
+                scrollable: true,
+              },
+            },
+          },
+        ],
+      },
+    };
+    const scroll = makeScrollUntilVisible({
+      accessibilityDetector: detector,
+      finder,
+      timer,
+      accessibilityService,
+      observeResults: [observation],
+      talkBackExecutor,
+      resolver: new ElementResolver(),
+    });
+    expect((await scroll.findScrollableContainer(BASE_OPTIONS, observation))["resource-id"]).toBe(
+      "app:id/feed",
+    );
   });
 
   test("element found in reverse after forward end-of-list", async () => {
@@ -337,7 +414,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
 
     const suv = new ScrollUntilVisible({
       device: DEVICE,
-      finder: fakeFinder as any,
+      resolver: new FakeScrollElementResolver(fakeFinder),
       geometry: fakeGeometry,
       observeScreen: fakeObserveScreen as any,
       accessibilityService: fakeAccessibilityService,
@@ -490,4 +567,137 @@ describe("ScrollUntilVisible overshoot recovery", () => {
     expect(result.success).toBe(true);
     expect(talkBackExecutor.getCallCount()).toBeGreaterThanOrEqual(2);
   });
+});
+
+describe("ScrollUntilVisible shared resolver identity", () => {
+  const hierarchy = (ids: string[]) => ({
+    hierarchy: {
+      node: ids.map((id, index) => ({
+        "resource-id": id,
+        bounds: { left: 0, top: index * 50, right: 100, bottom: index * 50 + 40 },
+      })),
+    },
+  });
+  test("bare lookFor ID rejects substring near misses", async () => {
+    const { DefaultElementFinder } = await import("../../../../src/features/utility/ElementFinder");
+    const scroll = new ScrollUntilVisible({ finder: new DefaultElementFinder() } as any);
+    const result = await scroll.findElementInHierarchy(
+      { elementId: "btn_login" },
+      hierarchy(["com.app:id/btn_login_help"]) as any,
+    );
+    expect(result).toBeNull();
+  });
+  test("bare lookFor ID reports candidate packages when ambiguous", async () => {
+    const { DefaultElementFinder } = await import("../../../../src/features/utility/ElementFinder");
+    const scroll = new ScrollUntilVisible({ finder: new DefaultElementFinder() } as any);
+    await expect(
+      scroll.findElementInHierarchy(
+        { elementId: "btn_login" },
+        hierarchy(["com.one:id/btn_login", "com.two:id/btn_login"]) as any,
+      ),
+    ).rejects.toThrow(/com.one:id\/btn_login.*com.two:id\/btn_login/);
+  });
+  test("text lookFor keeps the matched label rather than its clickable row", async () => {
+    const scroll = new ScrollUntilVisible({} as any);
+    const label = {
+      "resource-id": "com.app:id/target_label",
+      text: "Target",
+      bounds: { left: 0, top: 80, right: 100, bottom: 100 },
+    };
+    const found = await scroll.findElementInHierarchy({ text: "Target" }, {
+      hierarchy: {
+        node: {
+          "resource-id": "com.app:id/target_row",
+          clickable: true,
+          bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+          node: [label],
+        },
+      },
+    } as any);
+    expect(found?.["resource-id"]).toBe("com.app:id/target_label");
+    expect(found?.bounds).toEqual(label.bounds);
+  });
+  test("explicit text swipe keeps matched label bounds, while ID uses the selected row", async () => {
+    const scroll = new ScrollUntilVisible({} as any);
+    const label = { text: "Target", bounds: { left: 20, top: 40, right: 80, bottom: 60 } };
+    const viewHierarchy = {
+      hierarchy: {
+        node: {
+          "resource-id": "row",
+          clickable: true,
+          bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+          node: [label],
+        },
+      },
+    } as any;
+    expect(
+      (await scroll.findTargetElement({ container: { text: "Target" } } as any, viewHierarchy))
+        .bounds,
+    ).toEqual(label.bounds);
+    expect(
+      (await scroll.findTargetElement({ container: { elementId: "row" } } as any, viewHierarchy))
+        .bounds,
+    ).toEqual({ left: 0, top: 0, right: 100, bottom: 100 });
+  });
+  test("text lookFor skips unrelated text on the promoted row", async () => {
+    const scroll = new ScrollUntilVisible({} as any);
+    const target = { text: "Target", bounds: { left: 0, top: 40, right: 100, bottom: 60 } };
+    const found = await scroll.findElementInHierarchy({ text: "Target" }, {
+      hierarchy: {
+        node: {
+          "content-desc": "Unrelated row label",
+          clickable: true,
+          bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+          node: [target],
+        },
+      },
+    } as any);
+    expect(found?.bounds).toEqual(target.bounds);
+  });
+  test("text lookFor preserves curly-quote matching source geometry", async () => {
+    const scroll = new ScrollUntilVisible({} as any);
+    const target = { text: "It’s here", bounds: { left: 0, top: 40, right: 100, bottom: 60 } };
+    const found = await scroll.findElementInHierarchy({ text: "It's here" }, {
+      hierarchy: {
+        node: {
+          clickable: true,
+          bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+          node: [target],
+        },
+      },
+    } as any);
+    expect(found?.bounds).toEqual(target.bounds);
+  });
+});
+
+test("lookFor treats a temporarily missing container as a miss and retries within its scope", async () => {
+  const scroll = new ScrollUntilVisible({} as any);
+  const target = {
+    "resource-id": "com.app:id/login",
+    bounds: { left: 0, top: 0, right: 100, bottom: 40 },
+  };
+  const scope = { elementId: "panel" };
+  expect(
+    await scroll.findElementInHierarchy(
+      { elementId: "login" },
+      {
+        hierarchy: { node: target },
+      } as any,
+      scope,
+    ),
+  ).toBeNull();
+  const found = await scroll.findElementInHierarchy(
+    { elementId: "login" },
+    {
+      hierarchy: {
+        node: {
+          "resource-id": "com.app:id/panel",
+          bounds: { left: 0, top: 0, right: 200, bottom: 200 },
+          node: [target],
+        },
+      },
+    } as any,
+    scope,
+  );
+  expect(found?.["resource-id"]).toBe("com.app:id/login");
 });

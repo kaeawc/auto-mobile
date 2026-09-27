@@ -5,6 +5,8 @@ import { PortManager } from "../../../src/utils/PortManager";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeHierarchyCapture } from "../../fakes/FakeHierarchyCapture";
+import { serverConfig } from "../../../src/utils/ServerConfig";
 
 let restore: () => void;
 let tap: TapOnElement;
@@ -26,22 +28,59 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  serverConfig.setRawElementSearchEnabled(false);
   restore();
   read.mockRestore();
   PortManager.reset();
   PortManager.setPortAvailabilityCheckerForTesting(null);
 });
+test("fresh tap selector capture requests raw hierarchy when enabled", async () => {
+  serverConfig.setRawElementSearchEnabled(true);
+  const capture = new FakeHierarchyCapture(() => ({ hierarchy: { node: {} } }), "ios");
+  (tap as any).hierarchyCapture = capture;
+  await tap["refreshViewHierarchy"](37);
+  expect(capture.requests[0]?.searchRaw).toBe(true);
+});
 
 test("iOS hierarchy refresh forwards the caller's remaining budget and signal", async () => {
   const signal = new AbortController().signal;
-  const sharedRead = spyOn((tap as any).viewHierarchy, "getiOSViewHierarchy").mockResolvedValue({
-    hierarchy: { node: {} },
-  });
-
+  const sync = spyOn(client, "requestHierarchySync").mockResolvedValue({
+    hierarchy: { hierarchy: { node: {} } },
+  } as any);
   await tap["refreshViewHierarchy"](37, undefined, signal);
-  expect(sharedRead).toHaveBeenCalledWith(undefined, false, 0, 37, signal);
+  expect(sync).toHaveBeenCalledWith(undefined, false, signal, 37);
   expect(read).not.toHaveBeenCalled();
-  sharedRead.mockRestore();
+  sync.mockRestore();
+});
+test("iOS search refresh converts raw resource IDs and test tags before normalization", async () => {
+  const raw = {
+    hierarchy: {
+      resourceId: "late-id",
+      testTag: "late-tag",
+      text: "Late",
+      bounds: { left: 10, top: 10, right: 40, bottom: 40 },
+    },
+  };
+  const converted = {
+    hierarchy: {
+      node: {
+        "resource-id": "late-id",
+        "test-tag": "late-tag",
+        text: "Late",
+        bounds: { left: 10, top: 10, right: 40, bottom: 40 },
+      },
+    },
+  };
+  const sync = spyOn(client, "requestHierarchySync").mockResolvedValue({ hierarchy: raw } as any);
+  const convert = spyOn(client, "convertToViewHierarchyResult").mockReturnValue(converted as any);
+  const hierarchy = await tap["readFreshHierarchy"](37);
+  expect(convert).toHaveBeenCalledWith(raw);
+  expect(hierarchy?.hierarchy?.node).toMatchObject({
+    "resource-id": "late-id",
+    "test-tag": "late-tag",
+  });
+  sync.mockRestore();
+  convert.mockRestore();
 });
 
 test.each([0, -10])("an expired budget %s starts no hierarchy request", async (budget) => {

@@ -25,6 +25,9 @@ export interface TapOnSelectedElementBounds extends ElementBounds {
 }
 
 export interface TapOnSelectedElement {
+  /** Original selector match; bounds above describe the action target. */
+  matchedElement?: Element;
+  captureId?: string;
   text: string;
   resourceId: string;
   /** Compose test tag, when the node exposes one (may be the only stable identity). */

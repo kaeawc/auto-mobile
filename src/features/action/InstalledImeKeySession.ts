@@ -7,6 +7,7 @@ import { AndroidCtrlProxyClient } from "../observe/android";
 import { ViewHierarchy } from "../observe/ViewHierarchy";
 import { DefaultElementFinder } from "../utility/ElementFinder";
 import { DefaultElementParser } from "../utility/ElementParser";
+import { toSearchable } from "../utility/SearchableNode";
 import { AndroidImeCatalog, type ImeCatalogState } from "./AndroidImeCatalog";
 import { Keyboard } from "./Keyboard";
 import { quarantineAndroidIme, withAndroidImeLock } from "./androidImeLock";
@@ -277,14 +278,11 @@ function matchingImeKeyCenter(
   packageName: string,
   windows: NonNullable<ViewHierarchyResult["windows"]>,
 ): { x: number; y: number } | null {
-  if (
-    properties.text !== key &&
-    properties["content-desc"] !== key &&
-    properties.contentDesc !== key
-  ) {
+  const searchable = toSearchable(properties);
+  if (!Object.values(searchable.textSources).includes(key) && properties.contentDesc !== key) {
     return null;
   }
-  if (!isOwnedByIme(properties, packageName)) {
+  if (!isOwnedByIme(properties, packageName, searchable.nativeId)) {
     return null;
   }
   const candidate = parser.parseBounds(node.bounds ?? properties.bounds);
@@ -301,8 +299,11 @@ function matchingImeKeyCenter(
     : null;
 }
 
-function isOwnedByIme(properties: Record<string, unknown>, packageName: string): boolean {
-  const resourceId = properties["resource-id"] ?? properties.resourceId;
+function isOwnedByIme(
+  properties: Record<string, unknown>,
+  packageName: string,
+  resourceId: string | undefined,
+): boolean {
   const nodePackage = properties.package;
   if (typeof resourceId !== "string" && nodePackage !== packageName) {
     return false;

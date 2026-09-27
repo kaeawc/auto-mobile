@@ -1,3 +1,10 @@
+import {
+  DefaultHierarchyCapture,
+  identifyObservedHierarchy,
+  type HierarchyCapture,
+} from "../observe/HierarchyCapture";
+import { extractHierarchyScreenSize } from "../observe/hierarchyScreenSize";
+import type { TapAnyElementResult } from "../../models/TapAnyElementResult";
 import { errorMessage } from "../../utils/describeUnknownError";
 import {
   BaseVisualChange,
@@ -17,7 +24,7 @@ import {
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import type { ElementGeometry } from "../../utils/interfaces/ElementGeometry";
 import { DefaultElementGeometry } from "../utility/ElementGeometry";
-import { DefaultElementSelector } from "../utility/DefaultElementSelector";
+import { ResolverElementSelector } from "../utility/ResolverElementSelector";
 import { logger } from "../../utils/logger";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
@@ -39,6 +46,7 @@ import { IOS_HIERARCHY_REQUEST_TIMEOUT_MS } from "../observe/ios/CtrlProxyHierar
 import { IOS_VOICEOVER_STATE_REQUEST_TIMEOUT_MS } from "../observe/ios/CtrlProxyVoiceOver";
 
 interface TapAnyElementDependencies {
+  hierarchyCapture?: HierarchyCapture;
   timer?: Timer;
   elementSelector?: ElementSelector;
   iosVoiceOverDetector?: IosVoiceOverDetector;
@@ -337,6 +345,7 @@ export class TapAnyElement extends BaseVisualChange {
   private finder: ElementFinder;
   private accessibilityService: AndroidCtrlProxyClient;
   private viewHierarchy: ViewHierarchy;
+  private hierarchyCapture: HierarchyCapture;
   private iosVoiceOverDetector: IosVoiceOverDetector;
   private featureFlags: FeatureFlagService;
 
@@ -352,10 +361,39 @@ export class TapAnyElement extends BaseVisualChange {
   ) {
     super(device, adb, options.timer);
     this.geometry = new DefaultElementGeometry();
-    this.elementSelector = options.elementSelector ?? new DefaultElementSelector();
+    this.elementSelector = options.elementSelector ?? new ResolverElementSelector();
     this.finder = new DefaultElementFinder();
     this.accessibilityService = AndroidCtrlProxyClient.getInstance(device, this.adbFactory);
     this.viewHierarchy = new ViewHierarchy(device, this.adbFactory);
+    this.hierarchyCapture =
+      options.hierarchyCapture ??
+      new DefaultHierarchyCapture(
+        device.platform,
+        {
+          readCached: (request) =>
+            this.viewHierarchy.getViewHierarchy(
+              {},
+              undefined,
+              true,
+              request.minTimestamp ?? 0,
+              request.signal,
+              request.timeoutMs,
+            ),
+          readFresh: async (request) => {
+            const hierarchy = await this.readFreshHierarchy(
+              request.timeoutMs ?? TAP_ANY_SEARCH_UNTIL_DEFAULT_MS,
+              undefined,
+              request.signal,
+            );
+            if (!hierarchy) {
+              throw new ActionableError("Unable to retrieve a fresh tapAny hierarchy");
+            }
+            return hierarchy;
+          },
+          projectVisible: (hierarchy) => this.viewHierarchy.projectActionableHierarchy(hierarchy),
+        },
+        this.timer,
+      );
     this.iosVoiceOverDetector = options.iosVoiceOverDetector ?? defaultIosVoiceOverDetector;
     this.featureFlags = options.featureFlags ?? FeatureFlagService.getInstance();
   }
@@ -408,7 +446,10 @@ export class TapAnyElement extends BaseVisualChange {
     if (!container) {
       return true;
     }
-    return this.finder.hasContainerElement(viewHierarchy, container);
+    return (
+      this.elementSelector.hasContainer?.(viewHierarchy, container) ??
+      this.finder.hasContainerElement(viewHierarchy, container)
+    );
   }
 
   private isElementCenterOffScreen(
@@ -432,6 +473,7 @@ export class TapAnyElement extends BaseVisualChange {
     const selection = this.elementSelector.selectClickable(viewHierarchy, {
       container: options.container,
       strategy: options.selectionStrategy,
+      intentAction: options.action === "longPress" ? "long-press" : "tap",
       scrollableContainer: options.scrollableContainer,
     });
     if (selection.element && this.isElementCenterOffScreen(selection.element, screenSize)) {
@@ -488,6 +530,38 @@ export class TapAnyElement extends BaseVisualChange {
 
   private async refreshViewHierarchy(
     timeoutMs: number,
+    _screenSize?: ObserveResult["screenSize"],
+    signal?: AbortSignal,
+  ): Promise<ViewHierarchyResult | null> {
+    throwIfAborted(signal);
+    if (timeoutMs <= 0) {
+      return null;
+    }
+    try {
+      const snapshot = await this.hierarchyCapture.capture({
+        freshness: "fresh",
+        searchRaw: serverConfig.isRawElementSearchEnabled(),
+        timeoutMs,
+        signal,
+      });
+      identifyObservedHierarchy(
+        this.device.platform,
+        snapshot.hierarchy,
+        "fresh",
+        this.timer,
+        undefined,
+        snapshot.captureId,
+      );
+      return snapshot.hierarchy;
+    } catch (error) {
+      throwIfAborted(signal);
+      logger.warn(`[TapAnyElement] Fresh capture failed: ${errorMessage(error)}`);
+      return null;
+    }
+  }
+
+  private async readFreshHierarchy(
+    timeoutMs: number,
     screenSize?: ObserveResult["screenSize"],
     signal?: AbortSignal,
   ): Promise<ViewHierarchyResult | null> {
@@ -503,22 +577,22 @@ export class TapAnyElement extends BaseVisualChange {
         return rawHierarchy ? this.prepareViewHierarchyForResponse(rawHierarchy, screenSize) : null;
       }
       case "ios": {
-        // Constrain the request to the CALLER's remaining budget, not
-        // `getiOSViewHierarchy`'s own generic default -- the pre-tap search
-        // loop below bounds its own deadline by `searchUntil.duration`, but an
-        // unconstrained hierarchy fetch could independently run for the full
-        // default `IOS_HIERARCHY_REQUEST_TIMEOUT_MS` (~15s) regardless of how much
-        // of that budget is actually left, letting the outer MCP floor expire
-        // mid-search even though this call would eventually have returned (issue
-        // #6306 review, P2).
-        const rawHierarchy = await this.viewHierarchy.getiOSViewHierarchy(
+        // Direct sync bypasses the client TTL while retaining the search deadline.
+        const synced = await IOSCtrlProxyClient.getInstance(this.device).requestHierarchySync(
           undefined,
           false,
-          0,
-          effectiveTimeoutMs,
           signal,
+          effectiveTimeoutMs,
         );
-        return this.prepareViewHierarchyForResponse(rawHierarchy, screenSize);
+        if (!synced?.hierarchy) {
+          return null;
+        }
+        const hierarchy = this.viewHierarchy.normalizeIosHierarchy(
+          IOSCtrlProxyClient.getInstance(this.device).convertToViewHierarchyResult(
+            synced.hierarchy,
+          ),
+        );
+        return this.prepareViewHierarchyForResponse(hierarchy, screenSize);
       }
       default:
         throw new ActionableError(`Unsupported platform: ${this.device.platform}`);
@@ -793,7 +867,7 @@ export class TapAnyElement extends BaseVisualChange {
     options: TapAnyElementOptions,
     progress?: ProgressCallback,
     signal?: AbortSignal,
-  ): Promise<TapOnElementResult> {
+  ): Promise<TapAnyElementResult> {
     if (!options.action) {
       return this.createErrorResult(options.action, "tap action is required");
     }
@@ -819,13 +893,25 @@ export class TapAnyElement extends BaseVisualChange {
             return { success: false, error: "Unable to get view hierarchy, cannot tap on element" };
           }
 
+          let selectedCapture = identifyObservedHierarchy(
+            this.device.platform,
+            viewHierarchy,
+            "cached-ok",
+            this.timer,
+            undefined,
+            observeResult.observationId,
+          );
           const searchDurationMs = this.getSearchUntilDuration(options);
           const startTime = this.timer.now();
           let requestCount = 0;
           let changeCount = 0;
           let lastHash = this.hashViewHierarchy(viewHierarchy);
 
-          let found = this.findClickableElement(options, viewHierarchy, observeResult.screenSize);
+          let found = this.findClickableElement(
+            options,
+            selectedCapture.hierarchy,
+            extractHierarchyScreenSize(selectedCapture.hierarchy) ?? observeResult.screenSize,
+          );
           let element = found.element;
           let containerFoundEver = found.containerFound;
 
@@ -863,7 +949,17 @@ export class TapAnyElement extends BaseVisualChange {
                 lastHash = hash;
               }
 
-              found = this.findClickableElement(options, refreshed, observeResult.screenSize);
+              selectedCapture = identifyObservedHierarchy(
+                this.device.platform,
+                refreshed,
+                "fresh",
+                this.timer,
+              );
+              found = this.findClickableElement(
+                options,
+                selectedCapture.hierarchy,
+                extractHierarchyScreenSize(selectedCapture.hierarchy) ?? observeResult.screenSize,
+              );
               element = found.element;
               containerFoundEver = containerFoundEver || found.containerFound;
               if (element) {
@@ -930,6 +1026,7 @@ export class TapAnyElement extends BaseVisualChange {
             success: true,
             action,
             element,
+            captureId: selectedCapture.captureId,
             searchUntil: {
               durationMs: Math.max(0, Math.round(this.timer.now() - startTime)),
               requestCount,

@@ -1,5 +1,6 @@
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import { createDeviceHierarchyCapture } from "../../../src/features/observe/DeviceHierarchyCapture";
+import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import type { ViewHierarchyResult } from "../../../src/models";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -55,6 +56,24 @@ test("fresh Android capture supplements missing app nodes within the remaining d
   expect(snapshot.hierarchy.ctrlProxyIncomplete).toBe(true);
   expect(adb.getCommandCalls()).toHaveLength(3);
   expect(adb.getCommandCalls()[0]).toMatchObject({ timeoutMs: 600, signal });
+});
+
+test("fresh Android capture forwards the injected ADB factory to its sync client", async () => {
+  const device = { platform: "android" as const, deviceId: "factory-test", name: "factory-test" };
+  const raw = {
+    hierarchy: { node: { text: "Ready", bounds: { left: 0, top: 0, right: 50, bottom: 50 } } },
+  };
+  const adbFactory = { create: () => new FakeAdbClient() };
+  const singleton = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+    requestHierarchySync: async () => ({ hierarchy: raw }),
+    convertToViewHierarchyResult: () => raw,
+  } as any);
+  try {
+    await createDeviceHierarchyCapture(device, { adbFactory }).capture({ freshness: "fresh" });
+    expect(singleton).toHaveBeenCalledWith(device, adbFactory);
+  } finally {
+    singleton.mockRestore();
+  }
 });
 
 test("fresh Android capture preserves the device timestamp across conversion", async () => {

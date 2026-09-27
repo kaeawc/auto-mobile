@@ -9,6 +9,7 @@ import type { ElementFinder } from "../../../utils/interfaces/ElementFinder";
 import type { ElementGeometry } from "../../../utils/interfaces/ElementGeometry";
 import type { ElementParser } from "../../../utils/interfaces/ElementParser";
 import { SwipeInterval, OverlayCandidate, OverlayAnalyzer } from "./types";
+import { toSearchable } from "../../utility/SearchableNode";
 import { boundsArea, boundsEqual, clamp } from "../../../utils/bounds";
 import { isTruthyFlag, buildContainerFromElement } from "../../../utils/elementProperties";
 
@@ -549,18 +550,22 @@ export class OverlayDetector implements OverlayAnalyzer {
     containerElement: Element,
     containerBounds: Element["bounds"],
   ): boolean {
+    const searchable = toSearchable(nodeProperties);
     const hasResourceId = Boolean(containerElement["resource-id"]);
     const hasText = Boolean(containerElement.text);
     const hasContentDesc = Boolean(containerElement["content-desc"]);
 
     if (hasResourceId || hasText || hasContentDesc) {
-      if (hasResourceId && nodeProperties["resource-id"] !== containerElement["resource-id"]) {
+      if (hasResourceId && searchable.nativeId !== containerElement["resource-id"]) {
         return false;
       }
-      if (hasText && nodeProperties.text !== containerElement.text) {
+      if (hasText && searchable.textSources.text !== containerElement.text) {
         return false;
       }
-      if (hasContentDesc && nodeProperties["content-desc"] !== containerElement["content-desc"]) {
+      if (
+        hasContentDesc &&
+        searchable.textSources["content-desc"] !== containerElement["content-desc"]
+      ) {
         return false;
       }
       return true;

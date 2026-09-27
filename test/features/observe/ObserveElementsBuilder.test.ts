@@ -257,7 +257,7 @@ describe("ObserveElementsBuilder", () => {
     ]);
   });
 
-  test("collects iOS accessibility labels with text and media from the shared traversal", () => {
+  test("collects iOS text and media from the shared traversal without adding accessibility-label text", () => {
     const labelOnlyImage = node({
       bounds: { left: 0, top: 0, right: 50, bottom: 50 },
       className: "CustomImageWidget",
@@ -291,10 +291,7 @@ describe("ObserveElementsBuilder", () => {
     const elements = builder.build(viewHierarchy, "ios");
 
     expect(parser.rootTraversalStarts).toBe(1);
-    expect(elements.text).toEqual([
-      { ...labelOnlyImage.$, bounds: labelOnlyImage.bounds },
-      { ...explicitText.$, bounds: explicitText.bounds },
-    ]);
+    expect(elements.text).toEqual([{ ...explicitText.$, bounds: explicitText.bounds }]);
     expect(elements.media).toEqual([
       {
         className: "CustomImageWidget",

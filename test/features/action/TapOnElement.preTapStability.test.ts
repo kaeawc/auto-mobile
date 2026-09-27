@@ -67,6 +67,52 @@ function stubStabilityDeps(tap: TapOnElement, sequence: StubSequenceEntry[]): vo
 }
 
 describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
+  test("text selection may move even when its row has a generated view ID", async () => {
+    const { tap } = createTapOnElement();
+    const original = { ...makeElement(STABLE_BOUNDS), "view-id": "generated-row" };
+    const moved = { ...original, bounds: SHIFTED_BOUNDS };
+    const hierarchy = makeHierarchy();
+    (tap as any).findElementInHierarchy = () => ({ selection: { element: original } });
+    (tap as any).refreshViewHierarchy = async () => hierarchy;
+    (tap as any).resolveTapTargetElement = () => ({ element: moved, usedParent: false });
+    const result = await (tap as any).resolveAndroidStableTapTargetAfterRefreshes(
+      { text: "Contact Name", action: "tap" },
+      { viewHierarchy: hierarchy, screenSize: { width: 1080, height: 1920 } },
+      "tap",
+      false,
+    );
+    expect(result.ok).toBe(true);
+    expect(result.tapElement.bounds).toEqual(SHIFTED_BOUNDS);
+  });
+
+  test("synthetic ID stability checks the matched label, not its promoted row", async () => {
+    const { tap } = createTapOnElement();
+    const label = {
+      ...makeElement(STABLE_BOUNDS),
+      "resource-id": undefined,
+      "view-id": "generated-label",
+    };
+    const row = { ...makeElement(STABLE_BOUNDS), "resource-id": "row" };
+    const hierarchy = makeHierarchy();
+    (tap as any).findElementInHierarchy = () => ({
+      selection: { element: row, matchedElement: label },
+    });
+    (tap as any).refreshViewHierarchy = async () => hierarchy;
+    let checked: Element | null = null;
+    (tap as any).staleSyntheticTarget = (original: Element) => {
+      checked = original;
+      return "Stale reference: matched label changed";
+    };
+    const result = await (tap as any).resolveAndroidStableTapTargetAfterRefreshes(
+      { elementId: "generated-label", action: "tap" },
+      { viewHierarchy: hierarchy, screenSize: { width: 1080, height: 1920 } },
+      "tap",
+      false,
+    );
+    expect(checked).toBe(label);
+    expect(result.error).toContain("matched label changed");
+  });
+
   test("returns ok when bounds are immediately stable (1 match required for text-only)", async () => {
     const { tap } = createTapOnElement();
     const el = makeElement(STABLE_BOUNDS);
@@ -611,4 +657,115 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
       });
     });
   });
+});
+
+describe("shared capture pre-tap resolution", () => {
+  const captureHierarchy = (id: string, bounds: Element["bounds"]): ViewHierarchyResult => ({
+    hierarchy: {
+      node: {
+        bounds: { left: 0, top: 0, right: 1080, bottom: 1920 },
+        node: { "resource-id": id, text: "Contact Name", clickable: true, bounds },
+      },
+    },
+  });
+
+  test.each([false, true])(
+    "fresh capture verifies native identity (changed=%s)",
+    async (changed) => {
+      const { DefaultHierarchyCapture, getHierarchySnapshot } =
+        await import("../../../src/features/observe/HierarchyCapture");
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const initial = captureHierarchy("app:id/contact", STABLE_BOUNDS);
+      const fresh = captureHierarchy(changed ? "app:id/other" : "app:id/contact", SHIFTED_BOUNDS);
+      const policies: string[] = [];
+      const capture = new DefaultHierarchyCapture(
+        "android",
+        {
+          readCached: async () => {
+            policies.push("cached-ok");
+            return initial;
+          },
+          readFresh: async () => {
+            policies.push("fresh");
+            return fresh;
+          },
+          projectVisible: (hierarchy) => hierarchy,
+        },
+        timer,
+      );
+      const observed = await capture.capture({ freshness: "cached-ok" });
+      const tap = new TapOnElement(
+        { name: "test", platform: "android", deviceId: "capture-test" },
+        new FakeAdbClient(),
+        { timer, hierarchyCapture: capture },
+      );
+      const result = await (tap as any).resolveAndroidStableTapTargetAfterRefreshes(
+        { text: "Contact Name", action: "tap" },
+        { viewHierarchy: observed.hierarchy, screenSize: { width: 1080, height: 1920 } },
+        "tap",
+        false,
+      );
+      expect(policies).toEqual(["cached-ok", "fresh"]);
+      expect(result.ok).toBe(!changed);
+      if (changed) {
+        expect(result.error).toContain("Stale tap target");
+      } else {
+        expect(result.tapElement.bounds).toEqual(SHIFTED_BOUNDS);
+        expect(getHierarchySnapshot(result.viewHierarchy)?.captureId).not.toBe(observed.captureId);
+      }
+    },
+  );
+});
+
+test("tap rejects a reused generated ordinal after a fresh capture removes a duplicate peer", async () => {
+  const { assignStableViewIds } =
+    await import("../../../src/features/observe/android/StableNodeIdentity");
+  const { DefaultHierarchyCapture } =
+    await import("../../../src/features/observe/HierarchyCapture");
+  const tree = (count: number): ViewHierarchyResult => {
+    const hierarchy = {
+      node: {
+        bounds: { left: 0, top: 0, right: 1080, bottom: 1920 },
+        node: Array.from({ length: count }, (_, index) => ({
+          "view-id": `0000000${index + 1}-0000-4000-8000-000000000000`,
+          text: "Same",
+          clickable: true,
+          bounds: STABLE_BOUNDS,
+        })),
+      },
+    };
+    assignStableViewIds(hierarchy);
+    return { hierarchy };
+  };
+  const initial = tree(3);
+  const fresh = tree(2);
+  const timer = new FakeTimer();
+  timer.enableAutoAdvance();
+  const capture = new DefaultHierarchyCapture(
+    "android",
+    {
+      readCached: async () => initial,
+      readFresh: async () => fresh,
+      projectVisible: (value) => value,
+    },
+    timer,
+  );
+  const before = await capture.capture({ freshness: "cached-ok" });
+  const nodeKey = before.nodes.filter(
+    (node) => node.label === "Same" && node.affordances.includes("tap"),
+  )[1].nodeKey!;
+  const tap = new TapOnElement(
+    { name: "test", platform: "android", deviceId: "ordinal-tap" },
+    new FakeAdbClient(),
+    { timer, hierarchyCapture: capture },
+  );
+  const result = await (tap as any).resolveAndroidStableTapTargetAfterRefreshes(
+    { elementId: nodeKey, action: "tap" },
+    { viewHierarchy: before.hierarchy },
+    "tap",
+    false,
+  );
+  expect(result.ok).toBe(false);
+  expect(result.error).toContain("Stale reference");
 });

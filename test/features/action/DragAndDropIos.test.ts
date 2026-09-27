@@ -70,6 +70,8 @@ describe("DragAndDrop - iOS", () => {
     fakeAndroidClient = new FakeCtrlProxy();
     fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
+    fakeIosClient.setHierarchyData(createHierarchy());
+    fakeIosClient.setViewHierarchyResult(createHierarchy());
 
     fakeObserveScreen.setObserveResult(() => createObserveResult());
     fakeWindow.configureCachedActiveWindow(null);
@@ -101,7 +103,7 @@ describe("DragAndDrop - iOS", () => {
   });
 
   test("direct iOS sync cannot resolve an offscreen source excluded by observe", async () => {
-    fakeIosClient.setHierarchyData({
+    const freshHierarchy = {
       packageName: "com.test.app",
       updatedAt: 1,
       screenWidth: 100,
@@ -113,7 +115,9 @@ describe("DragAndDrop - iOS", () => {
           { "resource-id": "target-id", text: "Target", bounds: [0, 0, 50, 50] },
         ],
       },
-    } as any);
+    } as any;
+    fakeIosClient.setHierarchyData(freshHierarchy);
+    fakeIosClient.setViewHierarchyResult(freshHierarchy);
     const result = await dragAndDrop.execute({
       source: { elementId: "source-id" },
       target: { elementId: "target-id" },
@@ -203,13 +207,13 @@ describe("DragAndDrop - iOS", () => {
     expect(cachedSpy).not.toHaveBeenCalled();
     expect(latestSpy).not.toHaveBeenCalled();
     // Uses the 15s iOS budget (XCUITest extraction can take 5-15s), not the 5s Android value.
-    expect(syncSpy).toHaveBeenCalledWith(undefined, false, undefined, 15000);
+    expect(syncSpy).toHaveBeenCalledWith(expect.anything(), false, undefined, 15000);
   });
 
   test("drags against the freshly-refreshed hierarchy, not the stale observe cache", async () => {
     // The cached observe places the elements at (50,50)/(250,250); the fresh runner
     // snapshot reports new coordinates after the UI scrolled. The drag must use the fresh ones.
-    fakeIosClient.setHierarchyData({
+    const freshHierarchy = {
       hierarchy: {
         node: [
           {
@@ -232,7 +236,9 @@ describe("DragAndDrop - iOS", () => {
       },
       packageName: "com.test.app",
       updatedAt: Date.now(),
-    } as any);
+    } as any;
+    fakeIosClient.setHierarchyData(freshHierarchy);
+    fakeIosClient.setViewHierarchyResult(freshHierarchy);
     fakeIosClient.setDragResult({ success: true, totalTimeMs: 1, gestureTimeMs: 1 });
 
     const result = await dragAndDrop.execute({
@@ -249,22 +255,15 @@ describe("DragAndDrop - iOS", () => {
     expect(result.distance).toBeCloseTo(Math.hypot(200, 200));
   });
 
-  test("falls back to the observe cache when the iOS refresh returns nothing", async () => {
-    // No hierarchyData configured → the runner snapshot is null; the cached observe
-    // (source/target at (50,50)/(250,250)) must still resolve the drag endpoints.
+  test("rejects a failed fresh capture without dragging cached coordinates", async () => {
+    spyOn(fakeIosClient, "requestHierarchySync").mockResolvedValue(null);
     fakeIosClient.setDragResult({ success: true, totalTimeMs: 1, gestureTimeMs: 1 });
-
     const result = await dragAndDrop.execute({
       source: { elementId: "source-id" },
       target: { elementId: "target-id" },
     });
-
-    expect(result.success).toBe(true);
-    const [iosDrag] = fakeIosClient.getDragHistory();
-    expect(iosDrag.x1).toBe(50);
-    expect(iosDrag.y1).toBe(50);
-    expect(iosDrag.x2).toBe(250);
-    expect(iosDrag.y2).toBe(250);
+    expect(result.success).toBe(false);
+    expect(fakeIosClient.getDragHistory()).toHaveLength(0);
   });
 
   test("forwards a caller-supplied dragDurationMs to the iOS runner", async () => {

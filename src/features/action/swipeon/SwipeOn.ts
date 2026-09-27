@@ -126,7 +126,7 @@ export class SwipeOn extends BaseVisualChange {
       );
     this.scrollUntilVisible = new ScrollUntilVisible({
       device,
-      finder: this.finder,
+      resolver: dependencies.resolver,
       geometry: this.geometry,
       observeScreen: this.observeScreen,
       accessibilityService: this.accessibilityService,

@@ -6,6 +6,7 @@ import {
   nodeHasSystemTrayHint,
   nodeHasIosNotificationCenterHint,
   SYSTEM_TRAY_PACKAGE,
+  matchesNotificationResourceId,
 } from "../../../src/server/system-tray/notificationHints";
 import type { ViewHierarchyResult } from "../../../src/models";
 
@@ -30,6 +31,15 @@ describe("getNodeProperties", () => {
   it("treats an empty $ as no wrapper and returns the node", () => {
     expect(getNodeProperties({ $: null, class: "Bar" })).toEqual({ $: null, class: "Bar" });
   });
+});
+
+it("recognizes the captured SystemUI expand button without a translated description", () => {
+  expect(
+    matchesNotificationResourceId("com.android.systemui:id/expand_button", "expand_button"),
+  ).toBe(true);
+  expect(
+    matchesNotificationResourceId("com.android.systemui:id/expand_button_help", "expand_button"),
+  ).toBe(false);
 });
 
 describe("getHierarchyRoots", () => {
@@ -154,4 +164,17 @@ it.each([
   { packageName: "com.other", "resource-id": "com.android.systemui:id/notification_panel" },
 ])("rejects near-collision tray identity %j", (props) => {
   expect(nodeHasSystemTrayHint({ $: props })).toBe(false);
+});
+
+it("enumerates separate notification windows topmost first without repeated root identity", () => {
+  const app = { text: "App" };
+  const tray = { "resource-id": "com.android.systemui:id/notification_panel" };
+  const capture = {
+    hierarchy: { node: [app, tray] },
+    windows: [
+      { windowLayer: 4, hierarchy: { node: tray } },
+      { windowLayer: 1, hierarchy: { node: app } },
+    ],
+  } as unknown as ViewHierarchyResult;
+  expect(getHierarchyRoots(capture)).toEqual([tray, app]);
 });

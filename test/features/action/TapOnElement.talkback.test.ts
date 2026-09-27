@@ -443,6 +443,49 @@ describe("TapOnElement TalkBack mode detection", () => {
       expect(result.element["resource-id"]).toBe("com.example:id/settings_row");
     });
 
+    test("keeps the selected clickable duplicate after an inert same-ID match", () => {
+      const bounds = (top: number) => ({ left: 0, top, right: 100, bottom: top + 40 });
+      const viewHierarchy = {
+        hierarchy: {
+          node: [
+            { "resource-id": "app:id/action", bounds: bounds(0) },
+            { "resource-id": "app:id/action", clickable: true, bounds: bounds(50) },
+            { "resource-id": "app:id/action", clickable: true, bounds: bounds(100) },
+          ],
+        },
+      } as any;
+      const selected = {
+        "resource-id": "app:id/action",
+        clickable: true,
+        bounds: bounds(50),
+      } as any;
+      const result = (tapOnElement as any).resolveTapTargetElement(
+        selected,
+        viewHierarchy,
+        "tap",
+        false,
+      );
+      expect(result.element.bounds).toEqual(bounds(50));
+    });
+
+    test("retains an inert bounded child inside the requested clickable container", () => {
+      const viewHierarchy = {
+        hierarchy: {
+          node: {
+            "resource-id": "app:id/row",
+            clickable: true,
+            bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+            node: [{ text: "Open", bounds: { left: 10, top: 10, right: 80, bottom: 40 } }],
+          },
+        },
+      } as any;
+      const found = (tapOnElement as any).findElementInHierarchy(
+        { action: "tap", text: "Open", container: { elementId: "app:id/row" } },
+        viewHierarchy,
+      );
+      expect(found.selection.element?.text).toBe("Open");
+    });
+
     test("uses parent with click action when clickable flag is absent", () => {
       const viewHierarchy = {
         hierarchy: {

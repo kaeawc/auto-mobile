@@ -468,6 +468,24 @@ case "$mode" in
           --watch|--hot|--inspect-wait|--inspect-brk|--inspect-wait=*|--inspect-brk=*) long_lived=true ;;
         esac
       done
+      if [[ "${AUTOMOBILE_TEST_MODE:-}" == true && "$runner_os" != "Windows" &&
+        "$coverage_requested" == false && "$long_lived" == false ]]; then
+        for ((bail_index = 0; bail_index < ${#passthrough_args[@]}; bail_index += 1)); do
+          bail_count=""
+          case "${passthrough_args[$bail_index]}" in
+            --bail) bail_count="${passthrough_args[$((bail_index + 1))]:-}" ;;
+            --bail=*) bail_count="${passthrough_args[$bail_index]#--bail=}" ;;
+          esac
+          if [[ "$bail_count" =~ ^[0-9]+$ ]]; then
+            significant_bail="${bail_count#"${bail_count%%[!0]*}"}"
+            significant_bail="${significant_bail:-0}"
+            if [[ "$significant_bail" == ??* || "$significant_bail" == [2-9] ]]; then
+              echo "--bail=$bail_count cannot be used with AUTOMOBILE_TEST_MODE=true per-file runs; run without AUTOMOBILE_TEST_MODE for a shared numeric bail limit." >&2
+              exit 2
+            fi
+          fi
+        done
+      fi
       if [[ "$runner_os" == "Windows" || "$coverage_requested" == true || "$long_lived" == true ]]; then
         # The Windows lane already passes as one process, and its shell does not
         # use the POSIX watchdog needed for the stalled Unix transport suite.

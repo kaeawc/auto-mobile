@@ -196,6 +196,11 @@ runs:
         echo "First emulator attempt failed; captured diagnostics follow:"
         find "$diagnostics_dir" -maxdepth 1 -type f -print -exec sed -n '1,160p' {} \; 2>/dev/null || true
 
+    - name: Reset AutoMobile Daemon Before Retry
+      if: steps.emulator-attempt-1.outcome == 'failure'
+      shell: ${{ inputs.shell }}
+      run: "${{ github.workspace }}/scripts/android/reset-daemon-before-retry.sh"
+
     - name: Boot and test Emulator (Retry)
       id: emulator-attempt-2
       if: steps.emulator-attempt-1.outcome == 'failure'

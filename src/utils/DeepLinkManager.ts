@@ -1092,6 +1092,8 @@ export class DeepLinkManager implements DeepLinkManager {
       if (
         id !== targetStableId &&
         next?.signature === row.signature &&
+        // The only caller scans forward with an upward swipe, moving list rows upward.
+        next.top - row.top < 0 &&
         Math.abs(next.bottom - row.bottom - (next.top - row.top)) <= 1
       ) {
         deltas.push(next.top - row.top);

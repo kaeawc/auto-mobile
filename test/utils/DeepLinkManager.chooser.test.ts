@@ -800,6 +800,46 @@ test("deduplicates a clamped chooser scroll using another row's observed displac
   expect(adb.getExecutedCommands().at(-1)).toBe("shell input tap 50 120");
 });
 
+test("rejects opposite-direction chooser anchors as scroll evidence", async () => {
+  const adb = new FakeAdbExecutor();
+  const stableRow = (packageName: string, top: number, id: string) => ({
+    ...row(packageName, top),
+    "view-id": id,
+  });
+  const anchorId = "s2-aaaaaaaaaaaaaaaa";
+  const targetId = "s2-bbbbbbbbbbbbbbbb";
+  const first = chooserPage(
+    [stableRow("com.other.app", 20, anchorId), stableRow(target, 140, targetId)],
+    100,
+  );
+  const second = chooserPage(
+    [stableRow("com.other.app", 60, anchorId), stableRow(target, 100, targetId)],
+    101,
+  );
+  const manager = new DeepLinkManager(
+    { platform: "android", deviceId: "fake", name: "fake" },
+    adb,
+    null,
+    null,
+    undefined,
+    undefined,
+    {
+      getLabel: async () => null,
+      getFreshHierarchy: async (_device, _factory, floor) =>
+        ({ ...second, updatedAt: floor }) as any,
+    },
+  );
+  expect(
+    manager["getObservedChooserDisplacement"](first as any, second as any, targetId),
+  ).toBeUndefined();
+  const result = await manager.handleIntentChooser(first as any, "custom", target);
+  expect(result.error).toContain("Ambiguous chooser rows");
+  expect(adb.getExecutedCommands()[0]).toBe("shell input swipe 50 150 50 50 350");
+  expect(
+    adb.getExecutedCommands().filter((command) => command.startsWith("shell input tap")),
+  ).toEqual([]);
+});
+
 test("keeps a repeated stable target ambiguous without overlapping anchor rows", async () => {
   const adb = new FakeAdbExecutor();
   const stableTarget = (top: number) => ({

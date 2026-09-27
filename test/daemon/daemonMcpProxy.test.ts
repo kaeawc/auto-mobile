@@ -5440,29 +5440,51 @@ describe("DaemonMcpProxy", () => {
         client: { entryScript: "/same/entry.js", buildId: "client-hash" },
         daemon: { entryScript: "/same/entry.js", buildId: "unknown" },
         mismatch: false,
+        explanation: "One or both build IDs are unknown; the entry-script paths match.",
+      },
+      {
+        client: { entryScript: "/same/entry.js", buildId: "same-hash" },
+        daemon: { entryScript: "/other/entry.js", buildId: "same-hash" },
+        mismatch: false,
+        explanation: "The client and daemon build IDs match.",
+      },
+      {
+        client: { entryScript: "/same/entry.js", buildId: "client-hash" },
+        daemon: { entryScript: "", buildId: "unknown" },
+        mismatch: false,
+        explanation:
+          "Build identity is unavailable on at least one side, so the builds cannot be compared.",
       },
       {
         client: { entryScript: "/first/entry.js", buildId: "unknown" },
         daemon: { entryScript: "/second/entry.js", buildId: "unknown" },
         mismatch: true,
+        explanation: "wrong-build",
       },
-    ])("diagnoses unknown build hashes using entry paths", async ({ client, daemon, mismatch }) => {
-      const manager = matchingDaemonManager();
-      manager.statusResult = { ...manager.statusResult, ...daemon };
-      const proxy = new DaemonMcpProxy({
-        clientFactory: () => new FakeDaemonClient(),
-        daemonManager: manager,
-        autoStartDaemon: false,
-        buildIdentity: client,
-      });
-      try {
-        const unavailable = await (proxy as any).toolUnavailableError("setPreference");
-        expect(unavailable).toBeInstanceOf(DaemonToolUnavailableError);
-        expect(unavailable.message.includes("wrong-build")).toBe(mismatch);
-      } finally {
-        await proxy.close();
-      }
-    });
+    ])(
+      "diagnoses build identity matches accurately",
+      async ({ client, daemon, mismatch, explanation }) => {
+        const manager = matchingDaemonManager();
+        manager.statusResult = { ...manager.statusResult, ...daemon };
+        const proxy = new DaemonMcpProxy({
+          clientFactory: () => new FakeDaemonClient(),
+          daemonManager: manager,
+          autoStartDaemon: false,
+          buildIdentity: client,
+        });
+        try {
+          const unavailable = await (proxy as any).toolUnavailableError("setPreference");
+          expect(unavailable).toBeInstanceOf(DaemonToolUnavailableError);
+          expect(unavailable.message.includes("wrong-build")).toBe(mismatch);
+          expect(unavailable.message).toContain(explanation);
+          if (client.buildId !== daemon.buildId) {
+            expect(unavailable.message).not.toContain("build IDs match");
+          }
+        } finally {
+          await proxy.close();
+        }
+      },
+    );
 
     test("an unregistered unknown tool cannot establish a forwarded session lease", async () => {
       const fakeClient = new FakeDaemonClient({

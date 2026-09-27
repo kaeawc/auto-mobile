@@ -340,12 +340,21 @@ export class DaemonToolUnavailableError extends Error {
     daemon: BuildIdentity;
     buildMismatch?: boolean;
   }) {
+    const matchingReason =
+      params.client.buildId !== "unknown" &&
+      params.client.buildId.length > 0 &&
+      params.daemon.buildId !== "unknown" &&
+      params.daemon.buildId.length > 0
+        ? "The client and daemon build IDs match."
+        : params.client.entryScript.length > 0 && params.daemon.entryScript.length > 0
+          ? "One or both build IDs are unknown; the entry-script paths match."
+          : "Build identity is unavailable on at least one side, so the builds cannot be compared.";
     super(
       params.buildMismatch === false
         ? `Tool "${params.toolName}" is advertised by this AutoMobile client but is unavailable in ` +
             `the connected daemon's current configuration for this session (for example, a flag-gated ` +
             `tool). client build=${describeBuildIdentity(params.client)}, ` +
-            `daemon build=${describeBuildIdentity(params.daemon)}. The client and daemon build IDs match.`
+            `daemon build=${describeBuildIdentity(params.daemon)}. ${matchingReason}`
         : `Tool "${params.toolName}" is advertised by this AutoMobile client but the connected daemon ` +
             `does not provide it, even after restarting and refreshing the tool list. This usually means a ` +
             `wrong-build daemon is serving this frontend. ` +

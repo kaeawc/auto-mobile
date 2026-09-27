@@ -3,8 +3,8 @@
 #
 # Tests for scripts/ci/install-fast-validation-deps.sh
 #
-# The real script installs xmlstarlet + bats over the network. These tests stub
-# `sudo`, `apt-get`, and `git` on PATH so nothing touches the network, and drive
+# The real script installs xmlstarlet, bats, and lychee over the network. These tests stub
+# `sudo`, `apt-get`, and `git` on PATH and run a scratch copy with a fake lychee installer, and drive
 # the timeout/retry logic that bounds the Fast Validation dependency-install
 # hang class.
 
@@ -13,6 +13,26 @@ SCRIPT="scripts/ci/install-fast-validation-deps.sh"
 setup() {
   MOCK_BIN="$(mktemp -d)"
   ORIG_PATH="$PATH"
+  # The installer invokes lychee by relative path, so a PATH stub cannot intercept
+  # it. Run a copy of the script from a scratch repo-shaped directory instead.
+  mkdir -p "${MOCK_BIN}/workspace/scripts/ci" "${MOCK_BIN}/workspace/scripts/lychee"
+  cp "$SCRIPT" "${MOCK_BIN}/workspace/scripts/ci/install-fast-validation-deps.sh"
+  SCRIPT="${MOCK_BIN}/workspace/scripts/ci/install-fast-validation-deps.sh"
+  cat > "${MOCK_BIN}/workspace/scripts/lychee/install_lychee.sh" <<'STUB'
+#!/usr/bin/env bash
+calls=0
+[ -f "$LYCHEE_STATE_FILE" ] && calls="$(cat "$LYCHEE_STATE_FILE")"
+calls=$((calls + 1))
+echo "$calls" > "$LYCHEE_STATE_FILE"
+if [ "$calls" -le "${LYCHEE_FAIL_FIRST:-0}" ]; then
+  echo "lychee transient failure $calls" >&2
+  exit 1
+fi
+exit 0
+STUB
+  chmod +x "${MOCK_BIN}/workspace/scripts/lychee/install_lychee.sh"
+  export LYCHEE_STATE_FILE="${MOCK_BIN}/lychee-calls"
+  cd "${MOCK_BIN}/workspace"
   # A shared counter file lets a stub fail the first N invocations.
   export STATE_FILE="${MOCK_BIN}/apt-calls"
   # Keep the bats source-install branch out of the way: a stub `bats` on PATH
@@ -28,52 +48,23 @@ STUB
 exec "$@"
 STUB
   chmod +x "${MOCK_BIN}/sudo"
-  # A hermetic GNU-`timeout` emulation so these tests do not depend on the host
-  # shipping coreutils `timeout` (macOS does not). Supports `[-k GRACE] DURATION
-  # CMD...` and returns 124 when it has to kill the command, matching the real
-  # tool the script relies on in Ubuntu CI.
+  # Deterministic timeout/sleep stubs: no wall-clock delay or process signaling.
+  # MOCK_TIMEOUT_EXPIRE models GNU timeout's 124 result for the timeout test.
   cat > "${MOCK_BIN}/timeout" <<'STUB'
 #!/usr/bin/env bash
-grace=""
-if [ "$1" = "-k" ]; then grace="$2"; shift 2; fi
-duration="$1"; shift
-# Sentinel recording that the killer actually fired. Checking the killer with
-# `kill -0` is racy: an exited-but-unreaped killer is a zombie, and `kill -0`
-# on a zombie still succeeds, which made this stub report the command's raw
-# exit (commonly 143) instead of 124.
-fired="$(mktemp -u)"
-"$@" &
-cmd_pid=$!
-(
-  sleep "$duration"
-  # Mark BEFORE signaling so the parent cannot observe the kill without the
-  # sentinel; un-mark if the command was already gone (natural exit won the
-  # race and must keep its own status).
-  : > "$fired"
-  if ! kill -TERM "$cmd_pid" 2>/dev/null; then
-    rm -f "$fired"
-  elif [ -n "$grace" ]; then
-    sleep "$grace"
-    kill -KILL "$cmd_pid" 2>/dev/null
-  fi
-) &
-killer_pid=$!
-if wait "$cmd_pid" 2>/dev/null; then status=0; else status=$?; fi
-# Reap the killer and its `sleep` child either way so nothing orphaned holds
-# the output pipe open.
-pkill -P "$killer_pid" 2>/dev/null
-kill "$killer_pid" 2>/dev/null
-wait "$killer_pid" 2>/dev/null
-if [ -e "$fired" ] && [ "$status" -ne 0 ]; then
-  # Timed out: reap any grandchild of the killed command (e.g. a `sleep`).
-  pkill -P "$cmd_pid" 2>/dev/null
-  rm -f "$fired"
+if [ "$1" = "-k" ]; then shift 2; fi
+shift
+if [ "${MOCK_TIMEOUT_EXPIRE:-0}" = 1 ]; then
   exit 124
 fi
-rm -f "$fired"
-exit "$status"
+"$@"
 STUB
   chmod +x "${MOCK_BIN}/timeout"
+  cat > "${MOCK_BIN}/sleep" <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  chmod +x "${MOCK_BIN}/sleep"
   export PATH="${MOCK_BIN}:${PATH}"
   # Fast, deterministic retries.
   export FAST_VALIDATION_DEPS_RETRY_BASE_DELAY_SECONDS=1
@@ -134,8 +125,18 @@ STUB
   [[ "$output" == *"Fast Validation dependencies ready"* ]]
 }
 
-@test "default retry budget fits the 10-minute step timeout" {
-  # Worst case = 4 ops x (MAX_ATTEMPTS x (CMD_TIMEOUT + KILL_GRACE) + delays).
+@test "retries a transiently-failing lychee install and then succeeds" {
+  make_apt_get 0
+  export LYCHEE_FAIL_FIRST=1
+  run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"install lychee (attempt 2/2"* ]]
+  [[ "$output" == *"Fast Validation dependencies ready"* ]]
+  [ "$(cat "$LYCHEE_STATE_FILE")" -eq 2 ]
+}
+
+@test "default retry budget fits the documented 13-minute step timeout" {
+  # Worst case = each retrying operation x (MAX_ATTEMPTS x (CMD_TIMEOUT + KILL_GRACE) + delays).
   # Guard the arithmetic so a future default bump cannot silently exceed the
   # workflow step's timeout-minutes backstop.
   local cmd_timeout kill_grace attempts base_delay
@@ -148,9 +149,13 @@ STUB
     delays=$((delays + delay))
     delay=$((delay * 2))
   done
-  local worst_case=$((4 * (attempts * (cmd_timeout + kill_grace) + delays)))
+  local operation_count step_timeout_minutes
+  operation_count=$(grep -cE '^[[:space:]]*run_with_retry "' "$SCRIPT")
+  step_timeout_minutes=$(grep -oE 'timeout-minutes: [0-9]+' "$SCRIPT" | head -1 | grep -oE '[0-9]+$')
+  [ "$operation_count" -eq 5 ]
+  local worst_case=$((operation_count * (attempts * (cmd_timeout + kill_grace) + delays)))
   echo "worst_case=${worst_case}s"
-  [ "$worst_case" -le 600 ]
+  [ "$worst_case" -le "$((step_timeout_minutes * 60))" ]
 }
 
 @test "a partial clone left by a killed attempt is cleaned before the retry" {
@@ -204,14 +209,13 @@ STUB
 }
 
 @test "bounds a hanging command with the per-command timeout" {
-  # apt-get sleeps far longer than the 1s per-command timeout; with a single
-  # attempt the run must fail fast (via exit 124) rather than block.
+  # The timeout stub deterministically reports an expired command, with no wait.
   cat > "${MOCK_BIN}/apt-get" <<'STUB'
 #!/usr/bin/env bash
-sleep 30
+exit 0
 STUB
   chmod +x "${MOCK_BIN}/apt-get"
-  run env FAST_VALIDATION_DEPS_CMD_TIMEOUT_SECONDS=1 \
+  run env MOCK_TIMEOUT_EXPIRE=1 FAST_VALIDATION_DEPS_CMD_TIMEOUT_SECONDS=1 \
     FAST_VALIDATION_DEPS_KILL_GRACE_SECONDS=1 \
     FAST_VALIDATION_DEPS_MAX_ATTEMPTS=1 \
     bash "$SCRIPT"

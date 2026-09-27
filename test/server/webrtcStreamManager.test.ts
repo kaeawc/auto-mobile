@@ -776,6 +776,75 @@ describe("webrtcStreamManager", () => {
     expect(listWebRtcStreams()).toHaveLength(1);
   });
 
+  test("keeps a raced caller's capture start failure observable through status, readiness, and stop", async () => {
+    const timer = new FakeTimer();
+    let rejectStart: ((error: Error) => void) | undefined;
+    let sourceCalls = 0;
+    let sourceStarting!: () => void;
+    const sourceStartingPromise = new Promise<void>((resolve) => {
+      sourceStarting = resolve;
+    });
+    setWebRtcStreamManagerDependencies({
+      idGenerator: new CountingIdGenerator("id"),
+      createPublisher: (config, deps) =>
+        new FakePublisher(config, deps) as unknown as WebRtcPublisher,
+      createSource: () => {
+        const source = new FakeSource();
+        sourceCalls++;
+        if (sourceCalls === 1) {
+          source.start = () => {
+            sourceStarting();
+            return new Promise<void>((_resolve, reject) => {
+              rejectStart = reject;
+            });
+          };
+        }
+        return source as unknown as AndroidH264Source;
+      },
+      resolveVideoJar: async () => null,
+      timer,
+      now: () => new Date("2026-07-11T00:00:00.000Z"),
+    });
+
+    const firstStart = startWebRtcStream({
+      device: ANDROID,
+      overrides: { whipEndpoint: ENDPOINT },
+    });
+    await sourceStartingPromise;
+    const second = await startWebRtcStream({
+      device: ANDROID,
+      overrides: { whipEndpoint: ENDPOINT },
+    });
+    expect(second.lease?.id).toBeDefined();
+    expect(second.lifecycleState).toBe("preparing");
+
+    rejectStart?.(new Error("capture source rejected"));
+    const failed = await firstStart;
+    expect(failed.failure?.code).toBe("capture_start_failed");
+    expect(getWebRtcStreamDescriptor(second.streamId, second.lease?.id)?.failure?.code).toBe(
+      "capture_start_failed",
+    );
+    expect(
+      (await waitForWebRtcStreamReadiness(second.streamId, "capture_ready", 100, second.lease?.id))
+        .failure?.code,
+    ).toBe("capture_start_failed");
+    const retried = await startWebRtcStream({
+      device: ANDROID,
+      overrides: { whipEndpoint: ENDPOINT },
+    });
+    expect(retried.streamId).not.toBe(second.streamId);
+    expect(retried.lifecycleState).toBe("capture_ready");
+    expect(sourceCalls).toBe(2);
+
+    expect((await stopWebRtcStream(second.streamId, second.lease?.id)).failure?.code).toBe(
+      "capture_start_failed",
+    );
+    expect(getWebRtcStreamDescriptor(second.streamId)?.failure?.code).toBe("capture_start_failed");
+    expect((await stopWebRtcStream(second.streamId, failed.lease?.id)).failure?.code).toBe(
+      "capture_start_failed",
+    );
+  });
+
   test("clears the failed record's lease timer instead of extending it (#7555)", async () => {
     const timer = new FakeTimer();
     setWebRtcStreamManagerDependencies({

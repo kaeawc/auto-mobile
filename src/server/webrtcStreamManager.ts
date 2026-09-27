@@ -99,6 +99,8 @@ interface WebRtcStreamRecord {
   failure: VideoStreamFailure | null;
   telemetry: VideoStreamTelemetry;
   sourceFailed: boolean;
+  /** Initial capture failed, but raced consumers still need its failure descriptor. */
+  initialStartFailed: boolean;
   mediaParser: H264AnnexBParser;
   cachedSps: Buffer | null;
   cachedPps: Buffer | null;
@@ -163,7 +165,7 @@ export function resetWebRtcStreamManager(): void {
 
 function activeStreamForDevice(deviceId: string): WebRtcStreamRecord | undefined {
   for (const record of streams.values()) {
-    if (record.device.deviceId === deviceId) {
+    if (record.device.deviceId === deviceId && !record.initialStartFailed) {
       return record;
     }
   }
@@ -263,11 +265,10 @@ function acquireLease(record: WebRtcStreamRecord, requestedLeaseId?: string): st
 
 function releaseLease(record: WebRtcStreamRecord, leaseId: string): boolean {
   const removed = record.leases.delete(leaseId);
-  if (!removed) {
-    return false;
+  if (removed) {
+    scheduleLeaseExpiry(record);
   }
-  scheduleLeaseExpiry(record);
-  return record.leases.size === 0;
+  return removed;
 }
 
 function wakeStateWaiters(record: WebRtcStreamRecord): void {
@@ -410,6 +411,7 @@ function createStreamRecord(
     failure: null,
     telemetry: { requestReceived },
     sourceFailed: false,
+    initialStartFailed: false,
     mediaParser: new H264AnnexBParser(),
     cachedSps: null,
     cachedPps: null,
@@ -562,11 +564,9 @@ function assertNewStreamIdAvailable(streamId: string): void {
 }
 
 /**
- * Remove a record that never became live (initial capture/publish start
- * failed) from `streams` and clear its lease timer, so the device's next
- * `startWebRtcStream` call retries with a fresh record instead of finding
- * and re-leasing a dead one (#7555). Callers of the failed start already
- * hold a descriptor snapshot of the record and are unaffected.
+ * Remove a record that never became live from `streams` and clear its lease
+ * timer. A failed start with concurrent leases remains queryable until those
+ * leases are released or expire; new starts skip it and use a fresh record.
  */
 function discardDeadRecord(record: WebRtcStreamRecord): void {
   if (streams.get(record.streamId) === record) {
@@ -654,16 +654,21 @@ export async function startWebRtcStream(
     void prepareAndPublish(record);
     return describeRecord(record, leaseId);
   } catch (error) {
+    logger.warn(
+      `[WebRtcStream] initial start failed for ${streamId}: ${errorMessage(error)}`,
+      error,
+    );
     if (streams.get(streamId) === record) {
       markFailure(record, record.failure?.code ?? "capture_start_failed", error, "degraded");
+      record.initialStartFailed = true;
       await record.source?.stop().catch(() => {});
       await record.publisher.stop().catch(() => {});
       // The initial start never became live, so this record can never recover
       // (prepareAndPublish/onBeforeEstablish never ran to restart the source).
-      // Discard it rather than leaving a dead record that a later
-      // startWebRtcStream for this device would find via activeStreamForDevice
-      // and re-lease indefinitely instead of retrying (#7555).
-      discardDeadRecord(record);
+      // A lone caller needs no retained failure lookup; raced leases do.
+      if (record.leases.size <= 1) {
+        discardDeadRecord(record);
+      }
     }
     return { ...describeRecord(record, leaseId), state: "stopped" };
   }

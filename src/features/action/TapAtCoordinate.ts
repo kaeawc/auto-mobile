@@ -9,6 +9,7 @@ import {
 } from "../../models";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { errorMessage } from "../../utils/describeUnknownError";
+import { logger } from "../../utils/logger";
 import {
   createGlobalPerformanceTracker,
   type PerformanceTracker,
@@ -156,6 +157,7 @@ export class TapAtCoordinate extends BaseVisualChange {
   ): Promise<TapAtResult> {
     const perf = createGlobalPerformanceTracker();
     perf.serial("tapAt");
+    let dispatchedCoordinates: { x: number; y: number } | undefined;
 
     try {
       throwIfAborted(signal);
@@ -170,6 +172,7 @@ export class TapAtCoordinate extends BaseVisualChange {
           if ("error" in resolved) {
             return { success: false, x: resolved.x, y: resolved.y, error: resolved.error };
           }
+          dispatchedCoordinates = resolved;
 
           const frameContext = observeResult.viewHierarchy?.frameContext;
           switch (this.device.platform) {
@@ -212,10 +215,15 @@ export class TapAtCoordinate extends BaseVisualChange {
         },
       );
     } catch (error) {
+      logger.warn(`tapAt dispatch failed: ${errorMessage(error)}`, error);
       return {
         success: false,
-        x: this.device.platform === "android" ? Math.round(options.x) : options.x,
-        y: this.device.platform === "android" ? Math.round(options.y) : options.y,
+        x:
+          dispatchedCoordinates?.x ??
+          (this.device.platform === "android" ? Math.round(options.x) : options.x),
+        y:
+          dispatchedCoordinates?.y ??
+          (this.device.platform === "android" ? Math.round(options.y) : options.y),
         error: `Failed to tap at coordinates: ${errorMessage(error)}`,
       };
     } finally {

@@ -1769,7 +1769,7 @@
           "minLength": 1
         },
         "enableTools": {
-          "description": "Exact case-sensitive AutoMobile tool names to enable for the session this call mints, applied before the response is built so the returned enabledTools/gatedTools reflect them. Unknown or hidden names reject the call before device work; always-on names are returned in skipped.",
+          "description": "Exact case-sensitive AutoMobile tool names to enable for the session this call mints, applied before the response is built so the returned enabledTools/gatedTools reflect discovery. Unknown or hidden names reject the call before device work; always-on names are returned in skipped.",
           "minItems": 1,
           "type": "array",
           "items": {
@@ -1893,7 +1893,7 @@
           "minLength": 1
         },
         "enableTools": {
-          "description": "Exact case-sensitive AutoMobile tool names to enable for the session this call mints, applied before the response is built so the returned enabledTools/gatedTools reflect them. Unknown or hidden names reject the call before device work; always-on names are returned in skipped.",
+          "description": "Exact case-sensitive AutoMobile tool names to enable for the session this call mints, applied before the response is built so the returned enabledTools/gatedTools reflect discovery. Unknown or hidden names reject the call before device work; always-on names are returned in skipped.",
           "minItems": 1,
           "type": "array",
           "items": {
@@ -8912,7 +8912,7 @@
           "maximum": 830000
         },
         "enableTools": {
-          "description": "Exact case-sensitive AutoMobile tool names to enable for the session this call mints, applied before the response is built so the returned enabledTools/gatedTools reflect them. Unknown or hidden names reject the call before device work; always-on names are returned in skipped. Requires boot=true.",
+          "description": "Exact case-sensitive AutoMobile tool names to enable for the session this call mints, applied before the response is built so the returned enabledTools/gatedTools reflect discovery. Unknown or hidden names reject the call before device work; always-on names are returned in skipped. Requires boot=true.",
           "minItems": 1,
           "type": "array",
           "items": {
@@ -11167,14 +11167,14 @@
   },
   {
     "name": "setToolEnabled",
-    "description": "Enable or disable AutoMobile tools for this MCP session: one exact name via toolName, or a whole batch in one call via toolNames. Returns enabledTools, or enabledToolsError instead if post-write readback fails (the change still applies).",
+    "description": "Control tools/list discovery for this MCP session: one exact name via toolName, or a batch via toolNames. Omitted tools remain callable directly by name through tools/call. Returns enabledTools, or enabledToolsError if post-write readback fails (the change still applies).",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "description": "Enable or disable configurable AutoMobile tools for an active session. It can ungate a tool after a device session already exists without reacquiring the device.",
+      "description": "Control which configurable AutoMobile tools appear in tools/list for an active session. A tool omitted from discovery remains callable directly by name through tools/call.",
       "type": "object",
       "properties": {
         "toolName": {
-          "description": "Exact case-sensitive AutoMobile tool name to enable or disable. The listed choices include optional tools absent from tools/list until enabled. Provide either toolName or toolNames.",
+          "description": "Exact case-sensitive AutoMobile tool name to show or omit in tools/list. Omitted tools remain callable directly by name. Provide either toolName or toolNames.",
           "type": "string",
           "minLength": 1,
           "enum": [
@@ -11261,7 +11261,7 @@
           ]
         },
         "toolNames": {
-          "description": "Exact case-sensitive AutoMobile tool names to enable or disable in ONE call. Unknown or hidden names reject the whole request before anything is written; always-on names are returned in skipped. Provide either toolName or toolNames.",
+          "description": "Exact case-sensitive AutoMobile tool names to show or omit in tools/list in ONE call. Omitted tools remain callable directly by name. Unknown or hidden names reject the whole request before anything is written; always-on names are returned in skipped. Provide either toolName or toolNames.",
           "minItems": 1,
           "type": "array",
           "items": {
@@ -11352,7 +11352,7 @@
           }
         },
         "enabled": {
-          "description": "Whether to enable the tools (default: true).",
+          "description": "Whether to show the tools in tools/list (default: true).",
           "default": true,
           "type": "boolean"
         },

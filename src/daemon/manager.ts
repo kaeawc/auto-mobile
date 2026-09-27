@@ -939,6 +939,29 @@ function restartResultFromStart(result: DaemonStartResult): DaemonRestartResult 
   return result === "joined" ? "joined" : "restarted";
 }
 
+function mergeRestartOptions(running: DaemonOptions, requested: DaemonOptions): DaemonOptions {
+  const merged = { ...running, ...requested, strictPort: true };
+  if (
+    requested.enabledTools !== undefined &&
+    requested.disabledTools === undefined &&
+    running.disabledTools !== undefined
+  ) {
+    merged.disabledTools = running.disabledTools.filter(
+      (name) => !requested.enabledTools?.includes(name),
+    );
+  }
+  if (
+    requested.disabledTools !== undefined &&
+    requested.enabledTools === undefined &&
+    running.enabledTools !== undefined
+  ) {
+    merged.enabledTools = running.enabledTools.filter(
+      (name) => !requested.disabledTools?.includes(name),
+    );
+  }
+  return merged;
+}
+
 /**
  * Surface of DaemonManager used by clients (e.g. DaemonMcpProxy).
  * Allows injecting fakes in tests without subclassing the concrete class.
@@ -3183,11 +3206,7 @@ export class DaemonManager implements DaemonManagerLike {
     // canonical port in that window. strictPort makes the child's own
     // listen() call the atomic guard, failing loudly instead of silently
     // falling back to port + 1..3 and recreating the split-brain.
-    const restartOptions: DaemonOptions = {
-      ...runningOptions,
-      ...requestedOptions,
-      strictPort: true,
-    };
+    const restartOptions = mergeRestartOptions(runningOptions, requestedOptions);
     if (expectedDaemon && !this.isSameDaemonGeneration(status, expectedDaemon)) {
       stderrLog("Daemon generation changed before restart; joining the current generation");
       return "joined";
@@ -3299,13 +3318,12 @@ export class DaemonManager implements DaemonManagerLike {
       );
     }
 
-    const restartOptions: DaemonOptions = {
-      ...daemonProcessOptions(status.options),
-      ...daemonProcessOptions(
+    const restartOptions = mergeRestartOptions(
+      daemonProcessOptions(status.options),
+      daemonProcessOptions(
         Object.fromEntries(Object.entries(options).filter(([, value]) => value !== undefined)),
       ),
-      strictPort: true,
-    };
+    );
     // The admitted daemon has already initiated its own SIGTERM before it
     // acknowledges. Preserve the exact pre-admission status through the wait;
     // a later status read could name its replacement instead.

@@ -217,10 +217,16 @@ describe("DaemonManager restart", () => {
       expected: { enabledTools: [], disabledTools: ["observe"] },
     },
     {
-      name: "enabled side wins without clearing recorded disabled side",
+      name: "enabled side clears the conflicting recorded disabled side",
       requested: { enabledTools: ["clipboard"] },
-      recorded: { enabledTools: ["sqlQuery"], disabledTools: ["clipboard"] },
-      expected: { enabledTools: ["clipboard"], disabledTools: ["clipboard"] },
+      recorded: { enabledTools: ["sqlQuery"], disabledTools: ["clipboard", "observe"] },
+      expected: { enabledTools: ["clipboard"], disabledTools: ["observe"] },
+    },
+    {
+      name: "disabled side clears the conflicting recorded enabled side",
+      requested: { disabledTools: ["clipboard"] },
+      recorded: { enabledTools: ["clipboard", "sqlQuery"], disabledTools: ["observe"] },
+      expected: { enabledTools: ["sqlQuery"], disabledTools: ["clipboard"] },
     },
   ])(
     "restart preserves unspecified tool side for $name",
@@ -253,6 +259,10 @@ describe("DaemonManager restart", () => {
       try {
         await manager.restart(requested);
         expect(startSpy).toHaveBeenCalledWith({ ...expected, strictPort: true });
+        const restarted = startSpy.mock.calls[0][0];
+        expect(
+          restarted.enabledTools?.filter((name) => restarted.disabledTools?.includes(name)),
+        ).toEqual([]);
       } finally {
         startSpy.mockRestore();
         statusSpy.mockRestore();

@@ -1440,6 +1440,7 @@ export function registerBootedDeviceResources(): void {
 // the lightweight lock-states resource (#5056) enumerate the same booted inventory, so a device
 // starting/killing changes both — notify subscribers of each, not just the full resource.
 export async function notifyBootedDeviceResourcesUpdated(): Promise<void> {
+  resetBootedDevicesResourceCache();
   await ResourceRegistry.notifyResourcesUpdated([
     BOOTED_DEVICE_RESOURCE_URIS.ALL_BOOTED,
     DEVICE_LOCK_STATES_RESOURCE_URI,

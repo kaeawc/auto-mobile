@@ -411,6 +411,16 @@ describe("setToolEnabled batch enable (#6869)", () => {
       expect(schema.type).toBe("object");
     });
 
+    test("describes selection as discovery only in the advertised schema", () => {
+      const definition = ToolRegistry.getToolDefinitions().find(
+        (tool) => tool.name === SET_TOOL_ENABLED_TOOL_NAME,
+      );
+      expect(definition?.description).toContain("tools/list");
+      expect(definition?.description).toContain("tools/call");
+      expect(definition?.inputSchema.description).toContain("tools/list");
+      expect(definition?.inputSchema.description).toContain("tools/call");
+    });
+
     test("still advertises sessionUuid as a top-level property", () => {
       const properties = (z.toJSONSchema(setToolEnabledSchema, { io: "input" }) as any).properties;
       expect(Object.keys(properties).sort()).toEqual([

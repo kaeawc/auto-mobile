@@ -255,7 +255,7 @@ describe("daemon tool-profile diagnostics", () => {
         { name: "listDevices", arguments: { platform: "android" } },
         undefined,
         {
-          timeout: 5_000,
+          timeout: TEST_TIMEOUT_MS,
         },
       );
       expect(result.isError).toBeFalsy();

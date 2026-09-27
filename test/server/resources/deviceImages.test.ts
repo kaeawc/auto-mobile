@@ -6,6 +6,7 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 import {
   createDeviceImageResourcesHandler,
   DeviceImagesResourceContent,
+  notifyDeviceImageResourcesUpdated,
   resetAndroidDeviceImageResourceCache,
 } from "../../../src/server/deviceImageResources";
 import { DeviceInfo } from "../../../src/models";
@@ -17,6 +18,8 @@ import type {
 import type { AvdManager } from "../../../src/utils/android-cmdline-tools/interfaces/AvdManager";
 import type { DeviceImageDiscovery, PlatformDeviceManager } from "../../../src/utils/deviceUtils";
 import { AndroidAvdProvenanceCache } from "../../../src/utils/AndroidAvdProvenanceCache";
+import { ResourceRegistry } from "../../../src/server/resourceRegistry";
+import { spyOn } from "bun:test";
 
 describe("Device Image Resources with Fakes", () => {
   let fakeDeviceUtils: FakeDeviceUtils;
@@ -61,6 +64,59 @@ describe("Device Image Resources with Fakes", () => {
     resetAndroidDeviceImageResourceCache();
     await handler.getDeviceImagesForPlatforms(["android"]);
     expect(fakeDeviceUtils.getGetDeviceImagesDetailedCalls()).toHaveLength(3);
+  });
+
+  test("separate handlers use their own injected Android inventory", async () => {
+    const otherDevices = new FakeDeviceUtils();
+    const otherAvdManager = new FakeAvdManager();
+    fakeDeviceUtils.setDeviceImages("android", [
+      { name: "First", platform: "android", deviceId: "first", source: "local" },
+    ]);
+    otherDevices.setDeviceImages("android", [
+      { name: "Second", platform: "android", deviceId: "second", source: "local" },
+    ]);
+    const first = createDeviceImageResourcesHandler({
+      deviceManager: fakeDeviceUtils,
+      avdManager: fakeAvdManager,
+      timer: new FakeTimer(),
+    });
+    const second = createDeviceImageResourcesHandler({
+      deviceManager: otherDevices,
+      avdManager: otherAvdManager,
+      timer: new FakeTimer(),
+    });
+    expect((await first.getDeviceImagesForPlatforms(["android"])).images[0]?.name).toBe("First");
+    expect((await second.getDeviceImagesForPlatforms(["android"])).images[0]?.name).toBe("Second");
+    expect(otherDevices.getGetDeviceImagesDetailedCalls()).toHaveLength(1);
+  });
+
+  test("notification invalidates cached Android images before subscribers re-read", async () => {
+    const timer = new FakeTimer();
+    fakeDeviceUtils.setDeviceImages("android", [
+      { name: "First", platform: "android", deviceId: "first", source: "local" },
+    ]);
+    const handler = createDeviceImageResourcesHandler({
+      deviceManager: fakeDeviceUtils,
+      avdManager: fakeAvdManager,
+      timer,
+    });
+    await handler.getDeviceImagesForPlatforms(["android"]);
+    fakeDeviceUtils.setDeviceImages("android", [
+      { name: "Second", platform: "android", deviceId: "second", source: "local" },
+    ]);
+    const notify = spyOn(ResourceRegistry, "notifyResourcesUpdated").mockImplementation(
+      async () => {
+        const after = await handler.getDeviceImagesForPlatforms(["android"]);
+        expect(after.images[0]?.name).toBe("Second");
+      },
+    );
+    try {
+      await notifyDeviceImageResourcesUpdated();
+      expect(notify).toHaveBeenCalledTimes(1);
+      expect(fakeDeviceUtils.getGetDeviceImagesDetailedCalls()).toHaveLength(2);
+    } finally {
+      notify.mockRestore();
+    }
   });
 
   describe("createDeviceImageResourcesHandler", () => {

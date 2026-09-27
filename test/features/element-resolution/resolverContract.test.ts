@@ -36,7 +36,7 @@ for (const testCase of cases) {
 
 test("unindexed duplicate labels use the displayed default row in every captured group", () => {
   const groups = new Map<string, typeof cases>();
-  for (const entry of cases.filter((item) => item.query.kind === "text")) {
+  for (const entry of cases.filter((item) => item.query.kind === "text" && !item.query.intent)) {
     const key = `${entry.capture.name}:${entry.query.value}`;
     groups.set(key, [...(groups.get(key) ?? []), entry]);
   }

@@ -2,16 +2,5 @@
   "B1": [
     "diff/text-input-empty.json:{\"kind\":\"text\",\"value\":\"Settings\"}:826,2127,1080,2337",
     "diff/text-input-typed.json:{\"kind\":\"text\",\"value\":\"Settings\"}:826,2127,1080,2337"
-  ],
-  "F-focus-input": [
-    "diff/text-input-empty.json:{\"kind\":\"text\",\"value\":\"Basic Text Field\",\"intent\":\"focus-input\"}:84,871,996,1018",
-    "diff/text-input-empty.json:{\"kind\":\"text\",\"value\":\"Email\",\"intent\":\"focus-input\"}:84,1039,996,1207",
-    "diff/text-input-empty.json:{\"kind\":\"text\",\"value\":\"Password\",\"intent\":\"focus-input\"}:84,1417,996,1585",
-    "diff/text-input-empty.json:{\"kind\":\"text\",\"value\":\"Comments\",\"intent\":\"focus-input\"}:84,1795,996,2085",
-    "diff/text-input-typed.json:{\"kind\":\"text\",\"value\":\"Email\",\"intent\":\"focus-input\"}:84,1039,996,1207",
-    "diff/text-input-typed.json:{\"kind\":\"text\",\"value\":\"Password\",\"intent\":\"focus-input\"}:84,1417,996,1585",
-    "diff/text-input-typed.json:{\"kind\":\"text\",\"value\":\"Comments\",\"intent\":\"focus-input\"}:84,1795,996,2085",
-    "ios-reminders-xctest-noise-after.json:{\"kind\":\"text\",\"value\":\"Buy milk\",\"intent\":\"focus-input\"}:16,728,377,772",
-    "ios-reminders-xctest-noise-before.json:{\"kind\":\"text\",\"value\":\"Buy milk\",\"intent\":\"focus-input\"}:16,728,377,772"
   ]
 }

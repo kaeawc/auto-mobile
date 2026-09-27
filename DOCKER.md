@@ -80,16 +80,16 @@ docker build --platform=linux/amd64 --build-arg ANDROID_INSTALL_EMULATOR=true -t
 docker-compose exec auto-mobile bash
 
 # Run tests
-docker-compose exec auto-mobile npm test
+docker-compose exec auto-mobile-dev bun run test
 
 # Run linter
-docker-compose exec auto-mobile npm run lint
+docker-compose exec auto-mobile-dev bun run lint
 
 # Check connected devices
 docker-compose exec auto-mobile adb devices
 
 # Build Android components
-docker-compose exec auto-mobile bash -c "cd android && ./gradlew build"
+docker-compose exec auto-mobile-dev bash -c "cd android && ./gradlew build"
 ```
 
 ## Requirements

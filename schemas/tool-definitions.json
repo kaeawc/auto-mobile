@@ -7336,6 +7336,24 @@
             "warning": {
               "type": "string"
             },
+            "unavailableReason": {
+              "type": "string",
+              "enum": [
+                "runner_not_running",
+                "connection_lost",
+                "simulator_not_booted",
+                "request_timed_out",
+                "auto_setup_failed",
+                "unknown",
+                "service_recovering",
+                "device_locked",
+                "incomplete_capture"
+              ]
+            },
+            "unavailableDetail": {
+              "type": "string",
+              "maxLength": 500
+            },
             "category": {
               "type": "string",
               "enum": [
@@ -12984,6 +13002,24 @@
                     },
                     "warning": {
                       "type": "string"
+                    },
+                    "unavailableReason": {
+                      "type": "string",
+                      "enum": [
+                        "runner_not_running",
+                        "connection_lost",
+                        "simulator_not_booted",
+                        "request_timed_out",
+                        "auto_setup_failed",
+                        "unknown",
+                        "service_recovering",
+                        "device_locked",
+                        "incomplete_capture"
+                      ]
+                    },
+                    "unavailableDetail": {
+                      "type": "string",
+                      "maxLength": 500
                     },
                     "category": {
                       "type": "string",

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { toJSONSchema } from "zod/v4";
 import {
   elementBoundsSchema,
+  freshnessSchema,
   elementSchema,
   observationOutputSchema,
   observationSummarySchema,
@@ -12,6 +13,17 @@ import {
   toolOutputArtifactMetadataSchema,
   viewHierarchyResultSchema,
 } from "../../src/server/toolOutputSchemas";
+
+test("freshness schema accepts bounded machine-readable unavailability", () => {
+  const fields = {
+    isFresh: false,
+    unavailableReason: "device_locked",
+    unavailableDetail: "Unlock the device",
+  };
+  expect(freshnessSchema.parse(fields)).toEqual(fields);
+  expect(() => freshnessSchema.parse({ ...fields, unavailableReason: "bad_reason" })).toThrow();
+  expect(() => freshnessSchema.parse({ ...fields, unavailableDetail: "x".repeat(501) })).toThrow();
+});
 import { applyJsonSchemaOverride } from "../../src/server/toolSchemaHelpers";
 
 const observeTruncationReasonsDescription =

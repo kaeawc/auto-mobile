@@ -80,6 +80,16 @@ describe("computeFreshness", () => {
       },
     );
 
+    test("bounds unavailable detail in the public freshness verdict", () => {
+      const unavailable = computeFreshness({
+        unavailable: true,
+        unavailableReason: "connection_lost",
+        unavailableDetail: "x".repeat(700),
+        now: 0,
+      });
+      expect(unavailable.unavailableDetail).toBe("x".repeat(500));
+    });
+
     test("the budget boundary is exclusive on the fresh side", () => {
       const at = DEFAULT_MAX_OBSERVATION_AGE_MS;
       expect(computeFreshness({ actualTimestamp: NOW - at, now: NOW }).isFresh).toBe(true);
@@ -128,6 +138,7 @@ describe("computeFreshness", () => {
         now: NOW,
         verified: true,
       });
+
       expect(v.ageMs).toBe(200);
       expect(v.actualTimestamp).toBe(NOW - 25_000); // still reports the device timestamp
       expect(v.isFresh).toBe(true);

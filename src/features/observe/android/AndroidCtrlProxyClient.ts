@@ -41,6 +41,7 @@ import { AndroidCtrlProxyManager } from "../../../utils/CtrlProxyManager";
 import type { ProxySetupResult } from "../../../utils/interfaces/ProxyManager";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
 import { Timer, defaultTimer } from "../../../utils/SystemTimer";
+import { ForcedRestartBudget } from "../../../utils/ctrlProxy/ForcedRestartBudget";
 import {
   NavigationGraphManager,
   NavigationEvent,
@@ -1343,6 +1344,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   // second, overlapping recovery attempt.
   private isRecoveringService: boolean = false;
   private recoveryPromise: Promise<boolean> | null = null;
+  /** One client exists per device; this budget gates both failure bursts and observe calls. */
+  private readonly forcedRestartBudget: ForcedRestartBudget;
   public static readonly OBSERVE_RECOVERY_WAIT_MS = 10_000;
   private readonly serviceManagerFactory: AndroidServiceManagerFactory;
 
@@ -1466,6 +1469,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       { connectionResetMs: AndroidCtrlProxyClient.CONNECTION_RESET_MS },
       retryExecutor ?? defaultRetryExecutor,
     );
+    this.forcedRestartBudget = new ForcedRestartBudget(this.timer);
     this.serviceManagerFactory = serviceManagerFactory;
     this.sdkEventIngestorInstance = sdkEventIngestor ?? null;
     this.loggerInstance = loggerInstance;
@@ -2206,6 +2210,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     if (this.isRecoveringService) {
       return;
     }
+    const token = this.forcedRestartBudget.tryBeginAttempt();
+    if (token === undefined) {
+      return;
+    }
 
     this.isRecoveringService = true;
     logger.info(
@@ -2215,12 +2223,11 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     const recovery = this.recoverAccessibilityService()
       .then(async (outcome) => {
         if (outcome === "failed" || outcome === "unavailable") {
+          this.forcedRestartBudget.recordFailure(`service recovery ${outcome}`, token);
           return false;
         }
-        // A resolved outcome (service already healthy, or actually repaired)
-        // clears the failure counter so a fresh run of failures is required
-        // before the next escalation.
-        this.consecutiveConnectionFailures = 0;
+        // A repaired service may clear the foreground connection cooldown;
+        // the failure counter and restart budget reset only after reconnect.
         if (outcome === "repaired") {
           // Only an actual rebind/setup justifies resetting the foreground
           // cooldown early — the service was demonstrably broken and is now
@@ -2244,15 +2251,25 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
             `[AndroidCtrlProxyClient] WebSocket reconnect failed after CtrlProxy recovery`,
           );
         }
-        return connected && this.isConnected();
+        if (!connected || !this.isConnected()) {
+          this.forcedRestartBudget.recordFailure("WebSocket reconnect failed", token);
+          return false;
+        }
+        this.consecutiveConnectionFailures = 0;
+        this.forcedRestartBudget.recordSuccess(token);
+        return true;
       })
       .catch((error) => {
+        this.forcedRestartBudget.recordFailure(String(error), token);
         logger.warn(`[AndroidCtrlProxyClient] CtrlProxy recovery failed: ${error}`);
         return false;
       })
       .finally(() => {
-        this.isRecoveringService = false;
-        this.recoveryPromise = null;
+        // A superseded recovery must not clear a newer attempt's state.
+        if (this.recoveryPromise === recovery) {
+          this.isRecoveringService = false;
+          this.recoveryPromise = null;
+        }
       });
     this.recoveryPromise = recovery;
   }
@@ -2346,6 +2363,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       logger.warn(
         `[AndroidCtrlProxyClient] CtrlProxy setup failed during recovery: ${result.message}`,
       );
+      return "failed";
+    }
+    if (!(await manager.isAccessibilityServiceHealthy())) {
+      logger.warn(`[AndroidCtrlProxyClient] Accessibility service remained unhealthy after setup`);
       return "failed";
     }
     return "repaired";

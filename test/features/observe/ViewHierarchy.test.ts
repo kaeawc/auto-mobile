@@ -1,11 +1,15 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { ViewHierarchy } from "../../../src/features/observe/ViewHierarchy";
+import {
+  ViewHierarchy,
+  MIN_RECOVERY_REFETCH_BUDGET_MS,
+} from "../../../src/features/observe/ViewHierarchy";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { BootedDevice } from "../../../src/models/DeviceInfo";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { logger, LogLevel } from "../../../src/utils/logger";
+import { FakeTimer } from "../../fakes/FakeTimer";
 
 // Note: the previous version of this file patched fs-extra's readFile to mock
 // screenshot reads. That dependency has been removed from production code, so
@@ -292,6 +296,21 @@ describe("ViewHierarchy", function () {
       const error = String((result.hierarchy as any).error).toLowerCase();
       expect(error).toContain("locked");
       expect(error).toContain("unlock");
+    });
+
+    test("locked keyguard reports device_locked without starting recovery", async function () {
+      fakeAdb.setDeviceLock({ locked: true, keyguardShowing: true, secure: true });
+      let starts = 0;
+      let waits = 0;
+      (mockCtrlProxyClient as any).ensureRecoveryStarted = () => starts++;
+      (mockCtrlProxyClient as any).awaitRecovery = async () => {
+        waits++;
+        return "failed";
+      };
+      const result = await viewHierarchy.getViewHierarchy();
+      expect(result.hierarchy.unavailableReason).toBe("device_locked");
+      expect(result.hierarchy.transportFailure).toBeUndefined();
+      expect([starts, waits]).toEqual([0, 0]);
     });
 
     test("names a swipe keyguard as the cause of a hierarchy error (#4281)", async function () {
@@ -1671,21 +1690,74 @@ describe("Offscreen Node Filtering", function () {
       expect(result.hierarchy.node).toBeDefined();
     });
 
-    test("keeps Android's original reason when recovery does not complete", async function () {
+    test("reports service_recovering when this call starts recovery that remains in flight", async function () {
       let reads = 0;
+      let recovering = false;
       const recoveringClient = {
         getAccessibilityHierarchy: async () => {
           reads++;
           return null;
         },
-        ensureRecoveryStarted: () => {},
+        ensureRecoveryStarted: () => {
+          recovering = true;
+        },
         awaitRecovery: async () => "timed_out",
-        isRecoveryInFlight: () => true,
+        isRecoveryInFlight: () => recovering,
       } as unknown as AndroidCtrlProxyClient;
       const vh = new ViewHierarchy(device, new FakeAdbClientFactory(), recoveringClient);
       const result = await vh.getViewHierarchy();
       expect(reads).toBe(1);
       expect(result.hierarchy.unavailableReason).toBe("service_recovering");
+    });
+
+    test("bounds Android recovery wait and re-fetch within a 1000ms caller budget", async function () {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      let reads = 0;
+      const client = {
+        getAccessibilityHierarchy: async (...args: unknown[]) => {
+          reads++;
+          if (reads === 2) {
+            expect(args[6]).toBe(MIN_RECOVERY_REFETCH_BUDGET_MS);
+            return { hierarchy: { node: { $: { text: "Recovered" } } } };
+          }
+          return null;
+        },
+        ensureRecoveryStarted: () => {},
+        awaitRecovery: async (budget: number) => {
+          expect(budget).toBe(1000 - MIN_RECOVERY_REFETCH_BUDGET_MS);
+          await timer.sleep(budget);
+          return "recovered";
+        },
+      } as unknown as AndroidCtrlProxyClient;
+      const vh = new ViewHierarchy(device, new FakeAdbClientFactory(), client, timer);
+      await vh.getViewHierarchy(undefined, undefined, false, 0, undefined, 1000);
+      expect(reads).toBe(2);
+      expect(timer.now()).toBeLessThanOrEqual(1000);
+    });
+
+    test("skips recovery entirely below the minimum re-fetch budget", async function () {
+      const timer = new FakeTimer();
+      let starts = 0;
+      let waits = 0;
+      const client = {
+        getAccessibilityHierarchy: async () => null,
+        ensureRecoveryStarted: () => starts++,
+        awaitRecovery: async () => {
+          waits++;
+          return "recovered";
+        },
+      } as unknown as AndroidCtrlProxyClient;
+      const vh = new ViewHierarchy(device, new FakeAdbClientFactory(), client, timer);
+      await vh.getViewHierarchy(
+        undefined,
+        undefined,
+        false,
+        0,
+        undefined,
+        MIN_RECOVERY_REFETCH_BUDGET_MS - 1,
+      );
+      expect([starts, waits]).toEqual([0, 0]);
     });
 
     test("does not mark the null-result path as a transport failure when the caller aborted (#7534)", async function () {

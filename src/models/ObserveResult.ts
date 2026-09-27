@@ -3,7 +3,7 @@ import { DeviceLockState } from "./DeviceLockState";
 import { ScreenSize } from "./ScreenSize";
 import { SystemInsets } from "./SystemInsets";
 import { ActiveWindowInfo } from "./ActiveWindowInfo";
-import { ViewHierarchyResult } from "./ViewHierarchyResult";
+import { ViewHierarchyResult, type HierarchyUnavailableReason } from "./ViewHierarchyResult";
 import { TimingData } from "../utils/PerformanceTracker";
 import { GfxMetrics } from "./GfxMetrics";
 import { PerfSnapshot } from "./PerfSnapshot";
@@ -460,6 +460,8 @@ export interface ObserveResult {
     staleDurationMs?: number;
     /** Optional warning when freshness could not be guaranteed */
     warning?: string;
+    unavailableReason?: HierarchyUnavailableReason;
+    unavailableDetail?: string;
     /**
      * Stable discriminant for WHY freshness failed (present only when `isFresh`
      * is false): "cache_age" (stale/unverified/over-budget — a re-capture

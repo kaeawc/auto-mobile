@@ -32,6 +32,8 @@ import type { HierarchyUnavailableReason } from "../../models/ViewHierarchyResul
  * age near zero.
  */
 export const DEFAULT_MAX_OBSERVATION_AGE_MS = 5000;
+/** Bounds runner-authored diagnostics before they enter public freshness output. */
+export const MAX_UNAVAILABLE_DETAIL_LENGTH = 500;
 
 /** Env override, for hosts whose runner is slower or whose budget is tighter. */
 export function maxObservationAgeMs(): number {
@@ -446,7 +448,7 @@ function computeUnavailableFreshness(
     unavailableReason,
     ...(inputs.unavailableDetail === undefined
       ? {}
-      : { unavailableDetail: inputs.unavailableDetail }),
+      : { unavailableDetail: inputs.unavailableDetail.slice(0, MAX_UNAVAILABLE_DETAIL_LENGTH) }),
   };
 }
 

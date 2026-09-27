@@ -168,6 +168,7 @@ export type IosHierarchyUnavailableReason =
 export type HierarchyUnavailableReason =
   | IosHierarchyUnavailableReason
   | "service_recovering"
+  | "device_locked"
   | "incomplete_capture";
 
 export interface ViewHierarchyWindowInfo {

@@ -400,6 +400,20 @@ export const freshnessSchema = z
     isFresh: z.boolean(),
     staleDurationMs: z.number().int().optional(),
     warning: z.string().optional(),
+    unavailableReason: z
+      .enum([
+        "runner_not_running",
+        "connection_lost",
+        "simulator_not_booted",
+        "request_timed_out",
+        "auto_setup_failed",
+        "unknown",
+        "service_recovering",
+        "device_locked",
+        "incomplete_capture",
+      ])
+      .optional(),
+    unavailableDetail: z.string().max(500).optional(),
     /** Stable discriminant for WHY freshness failed (only when `isFresh` is false). */
     category: z
       .enum([

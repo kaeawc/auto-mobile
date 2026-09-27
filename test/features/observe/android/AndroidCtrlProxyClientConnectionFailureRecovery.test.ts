@@ -8,6 +8,7 @@ import { BootedDevice } from "../../../../src/models";
 import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
 import { createInstantFailureWebSocketFactory } from "../../../fakes/FakeWebSocket";
 import { FakeTimer } from "../../../fakes/FakeTimer";
+import { ForcedRestartBudget } from "../../../../src/utils/ctrlProxy/ForcedRestartBudget";
 
 /**
  * Regression coverage (issue #7532): AndroidCtrlProxyClient never escalated
@@ -214,6 +215,117 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
     // is fixed, so recovery must not clear the foreground cooldown — only an
     // actual rebind/setup repair earns that reset.
     expect(client.getReconnectStatus()).not.toBeNull();
+  });
+
+  test("healthy service with failed WebSocket reconnect records a budget failure", async function () {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const manager = new FakeManager();
+    manager.healthy = true;
+    client = AndroidCtrlProxyClient.createForTesting(
+      testDevice,
+      buildFakeAdb(),
+      createInstantFailureWebSocketFactory(timer),
+      timer,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      () => manager,
+    );
+    client.ensureRecoveryStarted();
+    expect(await client.awaitRecovery(10_000)).toBe("failed");
+    const budget = (client as any).forcedRestartBudget as ForcedRestartBudget;
+    expect(budget.snapshot()).toMatchObject({ state: "backoff", attempts: 1 });
+    expect(manager.rebindIfUnhealthyCallCount).toBe(0);
+  });
+
+  test("budget-denied observe recovery returns not_recovering without waiting", async function () {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const manager = new FakeManager();
+    manager.healthy = true;
+    client = AndroidCtrlProxyClient.createForTesting(
+      testDevice,
+      buildFakeAdb(),
+      createInstantFailureWebSocketFactory(timer),
+      timer,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      () => manager,
+    );
+    client.ensureRecoveryStarted();
+    expect(await client.awaitRecovery(10_000)).toBe("failed");
+    const before = timer.now();
+    const healthChecks = manager.isAccessibilityServiceHealthyCallCount;
+    client.ensureRecoveryStarted();
+    expect(await client.awaitRecovery(10_000)).toBe("not_recovering");
+    expect(timer.now()).toBe(before);
+    expect(manager.isAccessibilityServiceHealthyCallCount).toBe(healthChecks);
+  });
+
+  test("older Android recovery completion preserves a newer recovery promise", async function () {
+    const timer = new FakeTimer();
+    const releases: Array<() => void> = [];
+    const manager: AndroidServiceRecoveryManager = {
+      isAccessibilityServiceHealthy: () =>
+        new Promise<boolean>((resolve) => {
+          releases.push(() => resolve(false));
+        }),
+      rebindIfUnhealthy: async () => false,
+      setup: async () => ({ success: false, message: "failed" }),
+    };
+    client = AndroidCtrlProxyClient.createForTesting(
+      testDevice,
+      buildFakeAdb(),
+      createInstantFailureWebSocketFactory(timer),
+      timer,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      () => manager,
+    );
+    const internals = client as any;
+    client.ensureRecoveryStarted();
+    const first = internals.recoveryPromise;
+    for (let i = 0; i < 8; i++) {
+      await Promise.resolve();
+    }
+    expect(releases).toHaveLength(1);
+    // Model a replacement started while an old completion is pending.
+    internals.forcedRestartBudget.rearm("replacement");
+    internals.isRecoveringService = false;
+    internals.recoveryPromise = null;
+    client.ensureRecoveryStarted();
+    const second = internals.recoveryPromise;
+    for (let i = 0; i < 8; i++) {
+      await Promise.resolve();
+    }
+    expect(releases).toHaveLength(2);
+    releases[0]!();
+    await first;
+    expect(internals.recoveryPromise).toBe(second);
+    expect(internals.isRecoveringService).toBe(true);
+    releases[1]!();
+    await second;
   });
 
   test("a closed client triggers no recovery", async function () {

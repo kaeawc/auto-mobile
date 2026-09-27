@@ -156,10 +156,70 @@ describe("IOSCtrlProxyClient restart threshold", () => {
     reconnectWorks = true;
     client.ensureRecoveryStarted();
     expect(await client.awaitRecovery(20_000)).toBe("recovered");
+    await fakeTimer.advanceTimeAsync(2000);
     expect(fakeManager.getForcedRestartBudget().snapshot()).toMatchObject({
       state: "idle",
       attempts: 0,
     });
+  });
+
+  test("briefly opened sockets never rearm the restart budget", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const manager = createFakeManager(timer);
+    client = IOSCtrlProxyClient.createForTesting(
+      testDevice,
+      8765,
+      (url) => {
+        const socket = new FakeWebSocket(url, "none", 0, timer);
+        socket.on("open", () => socket.close());
+        return socket;
+      },
+      timer,
+      () => manager,
+    );
+    for (const delay of [0, 30_000, 60_000]) {
+      timer.advanceTime(delay);
+      client.ensureRecoveryStarted();
+      await client.awaitRecovery(20_000);
+      await timer.advanceTimeAsync(2000);
+    }
+    expect(manager.getForcedRestartBudget().snapshot()).toMatchObject({
+      state: "exhausted",
+      attempts: 3,
+    });
+  });
+
+  test("older iOS recovery completion preserves a newer recovery promise", async () => {
+    const timer = new FakeTimer();
+    const releases: Array<() => void> = [];
+    client = IOSCtrlProxyClient.createForTesting(
+      testDevice,
+      8765,
+      createInstantFailureWebSocketFactory(timer),
+      timer,
+      () => createFakeManager(timer),
+      () =>
+        new Promise<BootedDevice[]>((resolve) => {
+          releases.push(() => resolve([]));
+        }),
+    );
+    const internals = client as any;
+    client.ensureRecoveryStarted();
+    const first = internals.recoveryPromise;
+    expect(releases).toHaveLength(1);
+    // Model replacement before the first boot probe's completion settles.
+    internals.isRequestingServiceRestart = false;
+    internals.recoveryPromise = null;
+    client.ensureRecoveryStarted();
+    const second = internals.recoveryPromise;
+    expect(releases).toHaveLength(2);
+    releases[0]!();
+    await first;
+    expect(internals.recoveryPromise).toBe(second);
+    expect(internals.isRequestingServiceRestart).toBe(true);
+    releases[1]!();
+    await second;
   });
 
   test("a permanently gone device triggers only one automatic restart", async () => {

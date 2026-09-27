@@ -511,6 +511,9 @@ export class VideoStreamSocketServer extends BaseSocketServer {
             }
             // The producer has stopped changing the display. The final parsed IDR may be the
             // last access unit, so no next frame arrived to close it in the assembler.
+            for (const nal of capture.parser.flush()) {
+              this.broadcastNal(deviceId, capture, nal);
+            }
             this.cacheCompletedAccessUnits(capture, capture.keyFrameAssembler.flush());
             capture.keyFrameAuBytes = 0;
             capture.lastIdleMs = this.timer.now();
@@ -718,7 +721,12 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     capture: DeviceCapture,
     socket: Socket,
   ): void {
-    if (device.platform === "ios" && this.sourceEvidenceIsRecent(capture, this.timer.now())) {
+    if (
+      device.platform === "ios" &&
+      capture.lastIdleMs !== null &&
+      capture.encodedSinceSourceFrame &&
+      this.timer.now() - capture.lastIdleMs <= SOURCE_EVIDENCE_MAX_AGE_MS
+    ) {
       this.replayKeyFrame(capture, socket, device.deviceId);
     }
   }

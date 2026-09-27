@@ -24,6 +24,7 @@ export interface HierarchySnapshot {
   receivedAt: number;
   hierarchy: ViewHierarchyResult;
   nodes: readonly SearchableEntry[];
+  searchRaw?: boolean;
 }
 
 const capturedHierarchies = new WeakMap<ViewHierarchyResult, HierarchySnapshot>();
@@ -140,6 +141,7 @@ export class DefaultHierarchyCapture implements HierarchyCapture {
         receivedAt: source.receivedAt ?? this.timer.now(),
         hierarchy,
         nodes: this.projectNodes(source, hierarchy, request.searchRaw),
+        searchRaw: request.searchRaw,
       };
       snapshots.set(source, snapshot);
     }

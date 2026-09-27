@@ -119,6 +119,9 @@ export class ResolverElementSelector implements ElementSelector {
   }
 
   private viewport(capture: ViewHierarchyResult) {
+    if (getHierarchySnapshot(capture)?.searchRaw) {
+      return undefined;
+    }
     return (
       extractHierarchyScreenSize(capture) ??
       (capture.screenWidth && capture.screenHeight
@@ -172,7 +175,7 @@ export class ResolverElementSelector implements ElementSelector {
     capture: ViewHierarchyResult,
     options: SelectionOptions,
   ): readonly SearchableEntry[] {
-    const nodes = this.projection.project(capture);
+    const nodes = getHierarchySnapshot(capture)?.nodes ?? this.projection.project(capture);
     if (!options.scrollableContainer) {
       return nodes;
     }

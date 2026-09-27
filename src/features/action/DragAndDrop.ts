@@ -21,6 +21,7 @@ import { throwIfAborted } from "../../utils/toolUtils";
 import { AndroidCtrlProxyManager } from "../../utils/CtrlProxyManager";
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
+import { serverConfig } from "../../utils/ServerConfig";
 import {
   DEFAULT_VISION_CONFIG,
   getVisionEnrichedError,
@@ -72,7 +73,8 @@ export class DragAndDrop extends BaseVisualChange {
     super(device, adb, timer);
     this.selector = deps.selector ?? new ResolverElementSelector();
     this.hierarchyCapture =
-      deps.hierarchyCapture ?? createDeviceHierarchyCapture(device, { timer });
+      deps.hierarchyCapture ??
+      createDeviceHierarchyCapture(device, { timer, adbFactory: this.adbFactory });
     this.geometry = new DefaultElementGeometry();
     this.accessibilityService = AndroidCtrlProxyClient.getInstance(device, this.adbFactory);
     this.visionConfig = deps.visionConfig ?? DEFAULT_VISION_CONFIG;
@@ -305,6 +307,7 @@ export class DragAndDrop extends BaseVisualChange {
   private async resolveViewHierarchy(signal?: AbortSignal): Promise<ViewHierarchyResult | null> {
     const snapshot = await this.hierarchyCapture.capture({
       freshness: "fresh",
+      searchRaw: this.device.platform === "android" && serverConfig.isRawElementSearchEnabled(),
       signal,
       timeoutMs:
         this.device.platform === "ios"

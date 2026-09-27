@@ -1,5 +1,8 @@
 package dev.jasonpearson.automobile.discover.ictrace
 
+import kotlinx.serialization.Serializable
+
+@Serializable
 data class IcTraceEvent(
   val seq: Int,
   val elapsedMs: Long,
@@ -15,6 +18,7 @@ data class IcTraceEvent(
   val metadata: IcTraceMetadata = IcTraceMetadata(),
 )
 
+@Serializable
 data class IcTraceMetadata(
   val scenario: String = "unspecified",
   val keyboardId: String? = null,

@@ -234,6 +234,22 @@ describe("textEquals predicate", () => {
     );
     expect(evaluation.matched).toBe(false);
   });
+
+  test("textEquals retains contains matching for a text container", () => {
+    const predicate = textEquals(
+      finder,
+      { elementId: "status", container: { text: "Settings" } },
+      "Ready",
+    );
+    const evaluation = predicate(
+      obs([
+        node({ text: "Settings panel", node: [node({ "resource-id": "status", text: "Ready" })] }),
+        node({ text: "Settings" }),
+      ]),
+    );
+    expect(evaluation.matched).toBe(true);
+    expect(evaluation.matchedElement?.text).toBe("Ready");
+  });
 });
 
 describe("countStable predicate", () => {

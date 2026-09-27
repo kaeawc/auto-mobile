@@ -148,14 +148,17 @@ export function textEquals(
     if (!observation.viewHierarchy) {
       return { matched: false, candidates: [] };
     }
+    const container = selector.container?.text
+      ? { ...selector.container, match: "contains" as const }
+      : selector.container;
     const result = resolver.resolve(
       {
         id: String(observation.updatedAt ?? "wait"),
         nodes: projection.project(observation.viewHierarchy),
       },
       selector.elementId !== undefined
-        ? { elementId: selector.elementId, container: selector.container }
-        : { text: expected, container: selector.container, match: "exact", caseSensitive: true },
+        ? { elementId: selector.elementId, container }
+        : { text: expected, container, match: "exact", caseSensitive: true },
       { action: "inspect", matchMode: "exact" },
     );
     if (result.error === "Container not found") {

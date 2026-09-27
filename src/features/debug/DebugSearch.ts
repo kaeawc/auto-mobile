@@ -78,12 +78,15 @@ export class DebugSearch {
           : options.partialMatch
             ? "contains"
             : "exact");
+    const container = options.container?.text
+      ? { ...options.container, match: "contains" as const }
+      : options.container;
     const resolution = this.resolver.resolve(
       { id: String(timestamp), nodes },
       {
         elementId: options.resourceId,
         text: options.text,
-        container: options.container,
+        container,
         match: requestedMatch,
         caseSensitive: options.caseSensitive,
       },
@@ -102,6 +105,15 @@ export class DebugSearch {
         : normalizeQuotes(value).trim().toLowerCase();
     const matches: DebugSearchMatch[] = resolution.matches.map(({ node, kind, sourceNodes }) => {
       const matchedNodes = sourceNodes ?? [node];
+      const source = options.text
+        ? (matchedNodes.find((candidate) =>
+            Object.values(candidate.textSources).some((value) =>
+              resolution.matchMode === "contains"
+                ? normalize(value).includes(normalize(options.text!))
+                : normalize(value) === normalize(options.text!),
+            ),
+          ) ?? matchedNodes[0])
+        : node;
       const sources = options.resourceId
         ? [
             [
@@ -117,26 +129,26 @@ export class DebugSearch {
                 : normalize(value) === normalize(options.text ?? ""),
             );
       return {
-        element: node.element ?? node.properties,
+        element: source.element ?? source.properties,
         matchedProperty: [...new Set(sources.map(([key]) => key))].join(", ") || "label",
         matchedProperties: [...new Set(sources.map(([key]) => key))],
         matchedValue: sources[0]?.[1] ?? matchedNodes[0]?.label ?? "",
         matchKind: kind,
         isExactMatch: kind.endsWith("-exact") || kind === "id-namespace",
-        className: node.className,
-        resourceId: node.nativeId,
-        clickable: node.affordances.includes("tap"),
-        enabled: node.properties.enabled !== false && node.properties.enabled !== "false",
+        className: source.className,
+        resourceId: source.nativeId,
+        clickable: source.affordances.includes("tap"),
+        enabled: source.properties.enabled !== false && source.properties.enabled !== "false",
         visible:
-          !!node.bounds &&
-          node.bounds.right > node.bounds.left &&
-          node.bounds.bottom > node.bounds.top,
+          !!source.bounds &&
+          source.bounds.right > source.bounds.left &&
+          source.bounds.bottom > source.bounds.top,
       };
     });
     const scopedNodes = options.container
       ? this.resolver.resolve(
           { id: String(timestamp), nodes },
-          { container: options.container },
+          { container },
           { action: "inspect" },
         ).candidates
       : nodes;

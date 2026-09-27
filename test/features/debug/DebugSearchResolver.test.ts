@@ -130,8 +130,22 @@ test("debug preserves exact child text provenance after semantic parent promotio
   expect(result.matches[0].matchedValue).toBe("Save");
   expect(result.matches[0].matchedProperties).toEqual(["text"]);
   expect(result.matches[0].isExactMatch).toBe(true);
+  expect(result.matches[0].element.text).toBe("Save");
+  expect(result.matches[0].element["resource-id"]).toBeUndefined();
   expect(result.selectedMatch?.resourceId).toBe("row");
   expect(result.nearMisses?.some((match) => match.value === "Save") ?? false).toBe(false);
+});
+
+test("debug text containers retain contains matching before a later exact peer", async () => {
+  const feature = search(
+    capture(
+      { text: "Settings panel", children: [{ bounds, text: "Ready", "resource-id": "status" }] },
+      { text: "Settings" },
+    ),
+  );
+  const result = await feature.execute({ resourceId: "status", container: { text: "Settings" } });
+  expect(result.matches).toHaveLength(1);
+  expect(result.matches[0].resourceId).toBe("status");
 });
 
 test("debug excludes every matching descendant merged into one action row from near misses", async () => {

@@ -104,6 +104,9 @@ export function contractCases(capture: ContractCapture): ContractCase[] {
           ? skeleton.slice(0, row).filter((entry) => entry.testTag === observed.testTag).length
           : undefined;
       queries.push({ kind: "testTag", value: observed.testTag, index });
+      if (peers.length > 1 && index === 0) {
+        queries.push({ kind: "testTag", value: observed.testTag });
+      }
     }
     return queries.map((query) => ({
       key: `${capture.name}:${JSON.stringify(query)}:${observed.bounds.join(",")}`,
@@ -217,6 +220,7 @@ export function compareResolvers(
                 stableNodeSelectorForElement(element),
                 element.clickable,
                 element["long-clickable"],
+                element.longClickable,
                 element.actions,
               ]
             : null;

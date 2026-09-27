@@ -38,7 +38,7 @@ describe("observe-to-resolve migration contract", () => {
     expect(Object.keys(gapSignatures).sort()).toEqual([...allowed].sort());
     // The trim-only fixture deliberately has no actionable skeleton rows.
     expect(captures.map((capture) => contractCases(capture).length)).toEqual([
-      30, 0, 6, 2, 3, 12, 25, 24, 30, 30, 2, 9, 9,
+      30, 0, 7, 2, 3, 12, 25, 24, 30, 30, 2, 9, 9,
     ]);
   });
 
@@ -123,12 +123,27 @@ describe("observe-to-resolve migration contract", () => {
     };
     expect(compareResolvers([selected], reference, reordered)).toEqual([selected.key]);
   });
+  test("differential seam detects camel-case long-clickable drift", () => {
+    const selected = cases.find(
+      ({ capture, query }) => legacy.resolve(capture, query).chosen !== null,
+    )!;
+    const node = legacy.resolve(selected.capture, selected.query).chosen!;
+    const inert = { ...node, longClickable: false };
+    const actionable = { ...node, longClickable: true };
+    const reference: ContractResolver = {
+      resolve: () => ({ chosen: inert, candidates: [inert, actionable] }),
+    };
+    const reordered: ContractResolver = {
+      resolve: () => ({ chosen: inert, candidates: [actionable, inert] }),
+    };
+    expect(compareResolvers([selected], reference, reordered)).toEqual([selected.key]);
+  });
   test("every query kind has fixture coverage and test-tag drift is detected", () => {
     const counts = { elementId: 0, text: 0, testTag: 0 };
     for (const { query } of cases) {
       counts[query.kind]++;
     }
-    expect(counts).toEqual({ elementId: 97, text: 83, testTag: 2 });
+    expect(counts).toEqual({ elementId: 97, text: 83, testTag: 3 });
     const brokenTags: ContractResolver = {
       resolve(capture, query) {
         return query.kind === "testTag"
@@ -138,13 +153,21 @@ describe("observe-to-resolve migration contract", () => {
     };
     const tagCases = cases.filter(({ query }) => query.kind === "testTag");
     expect(compareResolvers(tagCases, legacy, brokenTags)).toHaveLength(counts.testTag);
-    expect(tagCases.map(({ query }) => query.index)).toEqual([0, 1]);
+    expect(tagCases.map(({ query }) => query.index)).toEqual([0, undefined, 1]);
     const ignoresTagIndex: ContractResolver = {
       resolve(capture, query) {
         return legacy.resolve(capture, query.kind === "testTag" ? { ...query, index: 0 } : query);
       },
     };
-    expect(compareResolvers(tagCases, legacy, ignoresTagIndex)).toEqual([tagCases[1].key]);
+    expect(compareResolvers(tagCases, legacy, ignoresTagIndex)).toEqual([tagCases[2].key]);
+    const breaksOnlyDefaultTag: ContractResolver = {
+      resolve(capture, query) {
+        return query.kind === "testTag" && query.index === undefined
+          ? { candidates: [], chosen: null }
+          : legacy.resolve(capture, query);
+      },
+    };
+    expect(compareResolvers(tagCases, legacy, breaksOnlyDefaultTag)).toEqual([tagCases[1].key]);
   });
   test("public default queries remain unindexed and expose legacy Settings behavior", () => {
     const defaults = publicTextCases(cases);

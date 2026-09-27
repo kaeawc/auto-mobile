@@ -7,7 +7,9 @@ setup() {
   cp "$BATS_TEST_DIRNAME/../../scripts/check-element-resolution-ratchet.ts" "$repo_dir/scripts/"
   cp "$BATS_TEST_DIRNAME/../../scripts/lib/vcs-diff.sh" "$repo_dir/scripts/lib/"
   baseline="$repo_dir/test/features/element-resolution/observeContractGaps.json"
+  signatures="$repo_dir/test/features/element-resolution/observeContractGapSignatures.json"
   printf '%s\n' '{"B1":["a","b"]}' > "$baseline"
+  printf '%s\n' '{"a":"old","b":null}' > "$signatures"
   git -C "$repo_dir" init -q
   git -C "$repo_dir" config user.email test@example.com
   git -C "$repo_dir" config user.name test
@@ -30,6 +32,13 @@ teardown() {
   run bash "$repo_dir/scripts/check-element-resolution-ratchet.sh" HEAD
   [ "$status" -ne 0 ]
   [[ "$output" == *"only shrink"* ]]
+}
+
+@test "rejects changed signatures for retained exceptions" {
+  printf '%s\n' '{"a":"new","b":null}' > "$signatures"
+  run bash "$repo_dir/scripts/check-element-resolution-ratchet.sh" HEAD
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"signatures may only shrink"* ]]
 }
 
 @test "fails closed without the requested base" {

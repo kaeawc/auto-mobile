@@ -22,7 +22,7 @@ describe("tool selection default declarations", () => {
     configureToolSelectionCliDefaults(["typo"], []);
 
     expect(() => registerMcpTools(false)).toThrow(
-      "Tool 'typo' is not a session-configurable tool name; AUTOMOBILE_ENABLED_TOOLS/AUTOMOBILE_DISABLED_TOOLS accept session-configurable tools only (see the automobile:tools resource).",
+      "Tool 'typo' is not a session-configurable tool name; CLI startup defaults (--enable-tool/--disable-tool) accept session-configurable tools only (see the automobile:tools resource).",
     );
   });
 

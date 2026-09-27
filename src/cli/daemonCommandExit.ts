@@ -3,6 +3,7 @@ import { errorMessage } from "../utils/describeUnknownError";
 /** Minimal logger contract for the completed daemon-command executable boundary. */
 export interface CompletedDaemonCommandLogger {
   closeAfterFlush(): Promise<void>;
+  flush(): Promise<void>;
   warn(message: string): void;
 }
 
@@ -28,6 +29,7 @@ export async function exitAfterSuccessfulDaemonCommand(
     logger.warn(
       `Daemon command completed successfully, but logger teardown failed; exiting 0: ${errorMessage(error)}`,
     );
+    await logger.flush();
   }
   terminator.exit(0);
 }

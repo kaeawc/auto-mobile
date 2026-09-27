@@ -7,6 +7,7 @@ import {
 
 class FakeCompletedDaemonCommandLogger implements CompletedDaemonCommandLogger {
   readonly warnings: string[] = [];
+  private readonly pendingWarnings: string[] = [];
 
   constructor(private readonly closeError?: Error) {}
 
@@ -16,8 +17,13 @@ class FakeCompletedDaemonCommandLogger implements CompletedDaemonCommandLogger {
     }
   }
 
+  async flush(): Promise<void> {
+    await Promise.resolve();
+    this.warnings.push(...this.pendingWarnings.splice(0));
+  }
+
   warn(message: string): void {
-    this.warnings.push(message);
+    this.pendingWarnings.push(message);
   }
 }
 

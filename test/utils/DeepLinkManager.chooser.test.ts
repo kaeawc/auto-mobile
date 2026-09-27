@@ -658,6 +658,44 @@ test("bounds post-tap polling and returns the typed unverified failure", async (
   expect(timer.getSleepHistory()).toEqual([50, 50, 50, 50]);
 });
 
+test("accepts a fresh target capture within the tap's device-second", async () => {
+  const adb = new FakeAdbExecutor();
+  adb.setDeviceTimestampMs(1000);
+  adb.setDeviceTimestampSource("device-seconds");
+  const timer = new FakeTimer();
+  timer.enableAutoAdvance();
+  const chooser = chooserPage([{ ...row("android", 100), node: [{ text: "Example" }] }], 100);
+  const floors: number[] = [];
+  let postTapReads = 0;
+  const manager = new DeepLinkManager(
+    { platform: "android", deviceId: "fake", name: "fake" },
+    adb,
+    null,
+    null,
+    undefined,
+    undefined,
+    {
+      getLabel: async () => "Example",
+      getFreshHierarchy: async (_device, _factory, floor) => {
+        floors.push(floor);
+        if (floor < 2000) {
+          return { ...chooser, updatedAt: floor } as any;
+        }
+        postTapReads += 1;
+        return postTapReads === 1
+          ? ({ ...chooser, updatedAt: 1000 } as any)
+          : ({ hierarchy: { node: {} }, packageName: target, updatedAt: 1000 } as any);
+      },
+    },
+    timer,
+  );
+  const result = await manager.handleIntentChooser(chooser as any, "custom", target);
+  expect(result.success).toBe(true);
+  expect(result.tappedAt).toBe(2000);
+  expect(floors).toEqual([101, 102, 2000, 2000]);
+  expect(timer.getSleepHistory()).toEqual([50]);
+});
+
 test("accepts a target app screen containing chooser button text and IDs", async () => {
   const adb = new FakeAdbExecutor();
   adb.setDeviceTimestampMs(1000);
@@ -715,6 +753,45 @@ test("deduplicates a stable chooser row visible in overlapping captures", async 
   const result = await manager.handleIntentChooser(first as any, "custom", target);
   expect(result.success).toBe(true);
   expect(adb.getExecutedCommands().at(-1)).toBe("shell input tap 50 60");
+});
+
+test("rejects identical stable label rows separated by chooser pages without tapping", async () => {
+  const adb = new FakeAdbExecutor();
+  const stableRow = (top: number) => ({
+    ...row("android", top),
+    "view-id": "s2-0123456789abcdef",
+    node: [{ text: "Example" }],
+  });
+  const pages = [
+    chooserPage([stableRow(140)], 100),
+    chooserPage([row("com.other.one", 100)], 101),
+    chooserPage([row("com.other.two", 100)], 102),
+    chooserPage([stableRow(40), row("com.other.three", 140)], 103),
+  ];
+  const manager = new DeepLinkManager(
+    { platform: "android", deviceId: "fake", name: "fake" },
+    adb,
+    null,
+    null,
+    undefined,
+    undefined,
+    {
+      getLabel: async () => "Example",
+      getFreshHierarchy: async (_device, _factory, floor) => {
+        const page = Math.min(
+          adb.getExecutedCommands().filter((command) => command.startsWith("shell input swipe"))
+            .length,
+          pages.length - 1,
+        );
+        return { ...pages[page], updatedAt: floor } as any;
+      },
+    },
+  );
+  const result = await manager.handleIntentChooser(pages[0] as any, "custom", target);
+  expect(result.error).toContain("Ambiguous chooser rows");
+  expect(
+    adb.getExecutedCommands().filter((command) => command.startsWith("shell input tap")),
+  ).toEqual([]);
 });
 
 test("keeps resource-backed row IDs ambiguous across pages", async () => {

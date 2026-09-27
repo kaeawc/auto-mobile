@@ -739,14 +739,19 @@ export class DeepLinkManager implements DeepLinkManager {
           `[DeepLinkManager] Tapped on intent chooser option at (${center.x}, ${center.y})`,
         );
 
-        const tappedAt =
+        const tapTimestamp =
           chooserMatch && !chooserMatch.packageVerified
             ? await this.getChooserTapFreshnessFloor()
             : undefined;
+        const tappedAt = tapTimestamp?.floor;
         if (chooserMatch && !chooserMatch.packageVerified) {
           const verified =
-            tappedAt !== undefined &&
-            (await this.verifyPostTapChooserPackage(customAppPackage!, tappedAt));
+            tapTimestamp !== undefined &&
+            (await this.verifyPostTapChooserPackage(
+              customAppPackage!,
+              tapTimestamp.floor,
+              tapTimestamp.deviceSeconds,
+            ));
           if (!verified) {
             return {
               success: false,
@@ -783,19 +788,26 @@ export class DeepLinkManager implements DeepLinkManager {
     }
   }
 
-  private async getChooserTapFreshnessFloor(): Promise<number | undefined> {
+  private async getChooserTapFreshnessFloor(): Promise<
+    { floor: number; deviceSeconds: boolean } | undefined
+  > {
     const timestampResult = await this.adbUtils.getDeviceTimestampMsWithSource();
     if (timestampResult.source === "host") {
       return undefined;
     }
-    return timestampResult.source === "device-seconds"
-      ? timestampResult.timestampMs + DEVICE_TIMESTAMP_SECOND_GRANULARITY_MARGIN_MS
-      : timestampResult.timestampMs;
+    const deviceSeconds = timestampResult.source === "device-seconds";
+    return {
+      floor:
+        timestampResult.timestampMs +
+        (deviceSeconds ? DEVICE_TIMESTAMP_SECOND_GRANULARITY_MARGIN_MS : 0),
+      deviceSeconds,
+    };
   }
 
   private async verifyPostTapChooserPackage(
     appPackage: string,
     tappedAt: number,
+    deviceSeconds: boolean,
   ): Promise<boolean> {
     const metadata = this.chooserMetadata ?? defaultChooserAppMetadata;
     const deadline = this.timer.now() + POST_TAP_VERIFY_BUDGET_MS;
@@ -804,7 +816,8 @@ export class DeepLinkManager implements DeepLinkManager {
       const observed = await metadata.getFreshHierarchy(this.device!, this.adbFactory, floor);
       if (
         observed.updatedAt !== undefined &&
-        observed.updatedAt >= floor &&
+        observed.updatedAt >=
+          floor - (deviceSeconds ? DEVICE_TIMESTAMP_SECOND_GRANULARITY_MARGIN_MS : 0) &&
         observed.packageName === appPackage &&
         !this.hasResolverHostEvidence(observed)
       ) {
@@ -814,7 +827,9 @@ export class DeepLinkManager implements DeepLinkManager {
       if (remaining <= 0) {
         return false;
       }
-      floor = Math.max(floor, observed.updatedAt ?? floor) + 1;
+      floor = deviceSeconds
+        ? Math.max(floor, (observed.updatedAt ?? floor - 1) + 1)
+        : Math.max(floor, observed.updatedAt ?? floor) + 1;
       await this.timer.sleep(Math.min(POST_TAP_VERIFY_INTERVAL_MS, remaining));
     }
   }
@@ -964,6 +979,8 @@ export class DeepLinkManager implements DeepLinkManager {
     let missing: ChooserRowMissingError | undefined;
     let matchingPage = -1;
     let currentPage = 0;
+    let previousMatch: { page: number; key: string; match: ChooserMatch } | undefined;
+    let previousSwipeDistance = 0;
     for (let page = 0; page < CHOOSER_SCAN_PAGES; page += 1) {
       currentPage = page;
       const roots = this.parser.extractRootNodes(hierarchy);
@@ -975,11 +992,12 @@ export class DeepLinkManager implements DeepLinkManager {
           undefined,
           hierarchy.updatedAt,
         );
-        // Without a stable row ID, repeated package/label matches on different pages
-        // remain ambiguous even when their text and geometry happen to coincide.
-        matches.set(
-          match.stableId ? `id:${match.stableId}|${match.signature}` : `page:${page}`,
+        previousMatch = this.recordChooserMatch(
+          matches,
+          previousMatch,
           match,
+          page,
+          previousSwipeDistance,
         );
         matchingPage = page;
       } catch (error) {
@@ -990,6 +1008,7 @@ export class DeepLinkManager implements DeepLinkManager {
           `[DeepLinkManager] No matching row on chooser page ${page + 1}: ${error.message}`,
         );
         missing = error;
+        previousMatch = undefined;
       }
       if (page === CHOOSER_SCAN_PAGES - 1) {
         break;
@@ -1007,13 +1026,49 @@ export class DeepLinkManager implements DeepLinkManager {
       if (!next) {
         break;
       }
-      hierarchy = next;
+      previousSwipeDistance = next.swipeDistance;
+      hierarchy = next.hierarchy;
     }
     const unique = this.selectUniqueAcrossPages(matches, missing, appPackage);
     if (matchingPage === currentPage) {
       return unique;
     }
     return this.restoreChooserPage(hierarchy, appPackage, unique, metadata);
+  }
+
+  private recordChooserMatch(
+    matches: Map<string, ChooserMatch>,
+    previous: { page: number; key: string; match: ChooserMatch } | undefined,
+    match: ChooserMatch,
+    page: number,
+    swipeDistance: number,
+  ): { page: number; key: string; match: ChooserMatch } {
+    const sameRow =
+      previous?.page === page - 1 &&
+      this.isChooserRowSlidingAcrossSwipe(previous.match, match, swipeDistance);
+    const key = sameRow && previous ? previous.key : `page:${page}`;
+    matches.set(key, match);
+    return { page, key, match };
+  }
+
+  private isChooserRowSlidingAcrossSwipe(
+    previous: ChooserMatch,
+    current: ChooserMatch,
+    swipeDistance: number,
+  ): boolean {
+    if (
+      !previous.stableId ||
+      previous.stableId !== current.stableId ||
+      previous.signature !== current.signature
+    ) {
+      return false;
+    }
+    const before = previous.element.bounds;
+    const after = current.element.bounds;
+    return (
+      Math.abs(before.top - after.top - swipeDistance) <= 1 &&
+      Math.abs(before.bottom - after.bottom - swipeDistance) <= 1
+    );
   }
 
   private selectUniqueAcrossPages(
@@ -1084,7 +1139,7 @@ export class DeepLinkManager implements DeepLinkManager {
       if (!previous) {
         break;
       }
-      hierarchy = previous;
+      hierarchy = previous.hierarchy;
       const result = await this.findMatchingChooserRow(hierarchy, appPackage, expected);
       if (result.match) {
         return result.match;
@@ -1103,7 +1158,7 @@ export class DeepLinkManager implements DeepLinkManager {
     appPackage: string,
     capturedAt?: number,
     direction: "up" | "down" = "up",
-  ): Promise<ViewHierarchyResult | null> {
+  ): Promise<{ hierarchy: ViewHierarchyResult; swipeDistance: number } | null> {
     const list = this.findChooserList(roots);
     if (!list || list.bounds.bottom - list.bounds.top < 40) {
       return null;
@@ -1122,7 +1177,9 @@ export class DeepLinkManager implements DeepLinkManager {
     const nextTimestamp = Math.max(hierarchy.updatedAt ?? 0, capturedAt ?? 0) + 1;
     const fresh = await metadata.getFreshHierarchy(this.device!, this.adbFactory, nextTimestamp);
     this.validateScrolledChooser(fresh, nextTimestamp, appPackage);
-    return JSON.stringify(fresh.hierarchy) === JSON.stringify(hierarchy.hierarchy) ? null : fresh;
+    return JSON.stringify(fresh.hierarchy) === JSON.stringify(hierarchy.hierarchy)
+      ? null
+      : { hierarchy: fresh, swipeDistance: fromY - toY };
   }
 
   private validateScrolledChooser(

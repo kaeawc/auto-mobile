@@ -12,6 +12,8 @@ import { resetObserveCacheStore } from "../../../src/features/observe/cache/Obse
 import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
 import { defaultTimer } from "../../../src/utils/SystemTimer";
 import { sanitizeObserveResult } from "../../../src/features/observe/output/ObserveResultOutput";
+import { SessionManager } from "../../../src/daemon/sessionManager";
+import { FakeDeviceSessionPersistence } from "../../fakes/FakeDeviceSessionPersistence";
 
 describe("ObserveScreen", function () {
   describe("Unit Tests for Extracted Methods", function () {
@@ -69,6 +71,40 @@ describe("ObserveScreen", function () {
 
       expect(screen.createBaseResult().observationId).toBe("observation-1");
       expect(screen.createBaseResult().observationId).toBe("observation-2");
+    });
+
+    test("default availability callback invalidates the owning device session", async () => {
+      const timer = new FakeTimer();
+      const manager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+      const device = { ...mockDevice, deviceId: "emulator-5554" };
+      await manager.createSession("owner", device.deviceId, "android");
+      manager.setDeviceReadiness("owner", "automationReady");
+      const hierarchy = new FakeViewHierarchy();
+      hierarchy.configureHierarchy({
+        hierarchy: {
+          error: "CtrlProxy disconnected",
+          unavailableReason: "connection_lost",
+          transportFailure: true,
+        },
+        updatedAt: 123,
+      });
+      try {
+        const screen = new RealObserveScreen(device, new FakeAdbClientFactory(fakeAdb), {
+          viewHierarchy: hierarchy,
+          daemonState: { isInitialized: () => true, getSessionManager: () => manager },
+          cacheStore: new FakeObserveCacheStore(timer),
+          performanceAuditor: { run: async () => undefined } as any,
+          accessibilityAuditor: { run: async () => undefined } as any,
+          accessibilityStateDetector: { run: async () => undefined } as any,
+        });
+
+        await screen.execute({ skipScreenshot: true, skipBackStack: true });
+
+        expect(manager.getDeviceReadiness("owner")).toBe("booted");
+      } finally {
+        manager.stopCleanupTimer();
+        resetObserveCacheStore();
+      }
     });
 
     test("should append error message to empty error field", function () {

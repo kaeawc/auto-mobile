@@ -13,6 +13,7 @@ import type { PerformanceAuditor } from "./audits/PerformanceAuditor";
 import type { AccessibilityAuditor } from "./audits/AccessibilityAuditor";
 import type { AccessibilityStateDetector } from "./audits/AccessibilityStateDetector";
 import type { HierarchyPlatformValidator } from "./HierarchyPlatformValidator";
+import type { DaemonStateLike } from "../../daemon/daemonState";
 
 /**
  * Dependencies for ObserveScreen that can be injected for testing.
@@ -36,6 +37,7 @@ export interface ObserveScreenDependencies {
   screenshotRecorder?: ObserveScreenshotRecorder;
   hierarchyCollector?: HierarchyCollector;
   onAvailabilityLost?: (reason: string) => void;
+  daemonState?: Pick<DaemonStateLike, "isInitialized" | "getSessionManager">;
   deviceStateCollector?: DeviceStateCollector;
   performanceAuditor?: PerformanceAuditor;
   accessibilityAuditor?: AccessibilityAuditor;

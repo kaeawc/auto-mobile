@@ -496,6 +496,8 @@ export interface ObserveResult {
     enabled: boolean;
     /** The detected accessibility service type */
     service: "talkback" | "voiceover" | "unknown";
+    /** True when a feature flag returned a synthetic state without checking the device. */
+    detectionSkipped?: boolean;
   };
 
   /**

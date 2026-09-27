@@ -381,6 +381,93 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     expect(result.freshness?.warning ?? "").not.toContain("stale wrong-window");
   });
 
+  test("rejects a stale generic framework AlertDialog when an error window gains focus", async () => {
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchy({
+      ...calendarHierarchy(now),
+      packageName: "android",
+      foregroundActivity: "android/.AlertDialog",
+      hierarchy: {
+        node: {
+          bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
+          node: [
+            {
+              "resource-id": "android:id/alertTitle",
+              text: "Settings",
+              bounds: { left: 100, top: 200, right: 900, bottom: 300 },
+            },
+          ],
+        },
+      },
+    });
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setForegroundApp({ packageName: "com.example.app", userId: 0 });
+    fakeAdb.setCommandResponse("dumpsys window", {
+      stdout: "  mCurrentFocus=Window{8ddaeb2 u0 Application Error: com.example.app}\n",
+      stderr: "",
+      exitCode: 0,
+    });
+
+    const result = await makeScreen(viewHierarchy, fakeAdb, timer).execute({
+      skipScreenshot: true,
+      skipBackStack: true,
+    });
+
+    expect(result.freshness?.isFresh).toBe(false);
+    expect(result.freshness?.warning).toContain("stale wrong-window");
+  });
+
+  test("keeps a captured framework ANR with the complete button signature fresh", async () => {
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchy({
+      ...calendarHierarchy(now),
+      packageName: "android",
+      foregroundActivity: "android/.AppNotRespondingDialog",
+      hierarchy: {
+        node: {
+          bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
+          node: [
+            {
+              "resource-id": "android:id/alertTitle",
+              text: "Localized title",
+              bounds: { left: 100, top: 200, right: 900, bottom: 300 },
+            },
+            {
+              "resource-id": "android:id/button1",
+              text: "Close",
+              bounds: { left: 400, top: 1600, right: 600, bottom: 1700 },
+            },
+            {
+              "resource-id": "android:id/button2",
+              text: "Wait",
+              bounds: { left: 600, top: 1600, right: 900, bottom: 1700 },
+            },
+          ],
+        },
+      },
+    });
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setForegroundApp({ packageName: "com.example.app", userId: 0 });
+    fakeAdb.setCommandResponse("dumpsys window", {
+      stdout: "  mCurrentFocus=Window{8ddaeb2 u0 Application Not Responding: com.example.app}\n",
+      stderr: "",
+      exitCode: 0,
+    });
+
+    const result = await makeScreen(viewHierarchy, fakeAdb, timer).execute({
+      skipScreenshot: true,
+      skipBackStack: true,
+    });
+
+    expect(result.freshness?.isFresh).toBe(true);
+  });
+
   for (const focusTitle of ["Application Error:", "Application Not Responding"]) {
     test(`keeps captured ${focusTitle} dialog content fresh when another window is incomplete (#7472)`, async () => {
       const now = 1_700_000_000_000;

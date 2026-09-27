@@ -71,6 +71,7 @@ interface ParsedDumpsysNotificationRecord {
 interface ParsedDumpsysNotificationSnapshot {
   records: ParsedDumpsysNotificationRecord[];
   activeSectionRecognized: boolean;
+  unclassifiedRecordSeen: boolean;
   complete: boolean;
 }
 
@@ -180,6 +181,9 @@ const startParsedRecord = (
   return { complete: key !== null, current };
 };
 
+const isUnclassifiedRecord = (inActiveSection: boolean, inKnownInactiveSection: boolean): boolean =>
+  !inActiveSection && !inKnownInactiveSection;
+
 const readRecordMetadata = (current: ParsedDumpsysNotificationRecord, line: string): boolean => {
   current.correlation.hasCustomLayout ||= CUSTOM_LAYOUT_FIELD.test(line);
   const flags = RECORD_FLAGS.exec(line);
@@ -198,7 +202,11 @@ const parseDumpsysNotificationSnapshot = (output: string): ParsedDumpsysNotifica
   // Records before the first heading belong to no declared section: a dump
   // without section headings is read whole rather than discarded.
   let inActiveSection = true;
+  // Archive and snoozed records are legitimate non-active content in API 36's
+  // heading-less empty dump; records under any other heading remain untrusted.
+  let inKnownInactiveSection = false;
   let activeSectionRecognized = false;
+  let unclassifiedRecordCount = 0;
   let complete = true;
   // The physical lines of the extras block being read, or `null` outside one.
   let extrasLines: string[] | null = null;
@@ -213,11 +221,18 @@ const parseDumpsysNotificationSnapshot = (output: string): ParsedDumpsysNotifica
     const heading = extrasLines === null ? SECTION_HEADING.exec(trimmed) : null;
     if (heading) {
       inActiveSection = heading[1] === ACTIVE_SECTION;
+      inKnownInactiveSection = heading[1] === "Snoozed notifications";
       activeSectionRecognized ||= inActiveSection;
       current = null;
       continue;
     }
+    if (trimmed.startsWith("mArchive=")) {
+      inKnownInactiveSection = true;
+    }
     if (trimmed.includes("NotificationRecord(")) {
+      unclassifiedRecordCount += Number(
+        isUnclassifiedRecord(inActiveSection, inKnownInactiveSection),
+      );
       flushExtras();
       const started = startParsedRecord(trimmed, inActiveSection, records);
       current = started.current;
@@ -240,7 +255,12 @@ const parseDumpsysNotificationSnapshot = (output: string): ParsedDumpsysNotifica
     extrasLines.push(line);
   }
   flushExtras();
-  return { records, activeSectionRecognized, complete };
+  return {
+    records,
+    activeSectionRecognized,
+    unclassifiedRecordSeen: unclassifiedRecordCount > 0,
+    complete,
+  };
 };
 
 /** Parse `dumpsys notification --noredact` into per-package correlation records. */
@@ -265,6 +285,7 @@ export const parseActiveNotificationKeysForApp = (
     output.includes(MANAGER_STATE_HEADER) &&
     !output.includes(`${ACTIVE_SECTION}:`) &&
     snapshot.records.length === 0 &&
+    !snapshot.unclassifiedRecordSeen &&
     EMPTY_ACTIVE_SET_TRAILING_MARKERS.some((marker) => output.includes(marker));
   if (!snapshot.complete || (!snapshot.activeSectionRecognized && !wellFormedEmptyActiveSet)) {
     return undefined;

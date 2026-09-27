@@ -1,6 +1,7 @@
 import { logger } from "../../../utils/logger";
 import { throwIfAborted } from "../../../utils/toolUtils";
 import { accessibilityDetector } from "../../../utils/AccessibilityDetector";
+import type { AccessibilityDetector as AccessibilityDetectorContract } from "../../../utils/interfaces/AccessibilityDetector";
 import { iosVoiceOverDetector } from "../../../utils/IosVoiceOverDetector";
 import { FeatureFlagService } from "../../featureFlags/FeatureFlagService";
 import { IOSCtrlProxyClient } from "../ios";
@@ -11,6 +12,8 @@ import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 export interface AccessibilityStateDetectorOptions {
   device: BootedDevice;
   adb: AdbExecutor;
+  featureFlags?: FeatureFlagService;
+  accessibilityDetector?: AccessibilityDetectorContract;
 }
 
 /**
@@ -20,10 +23,14 @@ export interface AccessibilityStateDetectorOptions {
 export class AccessibilityStateDetector {
   private readonly device: BootedDevice;
   private readonly adb: AdbExecutor;
+  private readonly featureFlags: FeatureFlagService | undefined;
+  private readonly detector: AccessibilityDetectorContract;
 
   constructor(opts: AccessibilityStateDetectorOptions) {
     this.device = opts.device;
     this.adb = opts.adb;
+    this.featureFlags = opts.featureFlags;
+    this.detector = opts.accessibilityDetector ?? accessibilityDetector;
   }
 
   async run(result: ObserveResult, perf: PerformanceTracker, signal?: AbortSignal): Promise<void> {
@@ -32,23 +39,26 @@ export class AccessibilityStateDetector {
         throwIfAborted(signal);
 
         // Get feature flag service instance
-        const featureFlags = FeatureFlagService.getInstance();
+        const featureFlags = this.featureFlags ?? FeatureFlagService.getInstance();
 
         if (this.device.platform === "android") {
           // Detect TalkBack state via ADB
-          const enabled = await accessibilityDetector.isAccessibilityEnabled(
+          const enabled = await this.detector.isAccessibilityEnabled(
             this.device.deviceId,
             this.adb,
             featureFlags,
           );
 
-          const service = await accessibilityDetector.detectMethod(
+          const service = await this.detector.detectMethod(
             this.device.deviceId,
             this.adb,
             featureFlags,
           );
 
-          result.accessibilityState = { enabled, service };
+          const detectionSkipped =
+            !featureFlags.isEnabled("force-accessibility-mode") &&
+            !featureFlags.isEnabled("accessibility-auto-detect");
+          result.accessibilityState = { enabled, service, detectionSkipped };
           logger.debug(
             `[AccessibilityDetector] Android accessibility state: enabled=${enabled}, service=${service}`,
           );

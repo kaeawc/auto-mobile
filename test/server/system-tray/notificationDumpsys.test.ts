@@ -117,6 +117,21 @@ describe("dumpsys notification records", () => {
     ).toEqual([]);
   });
 
+  test("rejects a heading-less active list with a record under an unknown section", () => {
+    expect(
+      parseActiveNotificationKeysForApp(
+        dump(
+          "Current Notification Manager state:",
+          "  Vendor notification state:",
+          "    NotificationRecord(0x1: pkg=com.example.app user=UserHandle{0} id=1 tag=live key=0|com.example.app|1|live|10100: Notification(channel=messages))",
+          "  mArchive=Archive (0 notifications)",
+          "  Snoozed notifications:",
+        ),
+        "com.example.app",
+      ),
+    ).toBeUndefined();
+  });
+
   test("does not treat a manager-state header truncated before trailing state as empty", () => {
     expect(
       parseActiveNotificationKeysForApp("Current Notification Manager state:", "com.example.app"),

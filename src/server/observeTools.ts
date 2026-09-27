@@ -1156,6 +1156,43 @@ export const waitForObservation = async (
   });
 };
 
+interface AccessibilityReadinessActions {
+  resetSetupState(): void;
+  isDaemonInitialized(): boolean;
+  invalidateAutomationReadiness(sessionUuid: string, reason: string): void;
+}
+
+/** A synthetic disabled result is not evidence that the device lost accessibility. */
+export function invalidateReadinessForDisabledAccessibility(
+  device: BootedDevice,
+  result: ObserveResult,
+  sessionUuid: string | undefined,
+  actions: AccessibilityReadinessActions,
+): void {
+  if (
+    device.platform !== "android" ||
+    result.accessibilityState?.enabled !== false ||
+    result.accessibilityState.detectionSkipped === true
+  ) {
+    return;
+  }
+  logger.warn(
+    "[observe] Accessibility service not enabled, resetting setup state for next attempt",
+  );
+  try {
+    actions.resetSetupState();
+  } catch (error) {
+    logger.warn("[observe] Failed to reset accessibility setup state", {
+      error: errorMessage(error),
+    });
+  }
+  if (sessionUuid && actions.isDaemonInitialized()) {
+    actions.invalidateAutomationReadiness(sessionUuid, "accessibility service disabled");
+  } else {
+    logger.debug("[observe] No initialized daemon session to invalidate readiness for");
+  }
+}
+
 // Register tools (this will be called when this file is imported)
 export function registerObserveTools() {
   // Observe handler
@@ -1236,27 +1273,14 @@ export function registerObserveTools() {
 
       // A disabled accessibility service invalidates both the manager setup latch
       // and the session readiness recorded before the service was lost.
-      if (device.platform === "android" && result.accessibilityState?.enabled === false) {
-        logger.warn(
-          "[observe] Accessibility service not enabled, resetting setup state for next attempt",
-        );
-        try {
-          const manager = AndroidCtrlProxyManager.getInstance(device);
-          manager.resetSetupState();
-        } catch (error) {
-          logger.warn("[observe] Failed to reset accessibility setup state", {
-            error: errorMessage(error),
-          });
-        }
-        const daemonState = DaemonState.getInstance();
-        if (args.sessionUuid && daemonState.isInitialized()) {
-          daemonState
+      invalidateReadinessForDisabledAccessibility(device, result, args.sessionUuid, {
+        resetSetupState: () => AndroidCtrlProxyManager.getInstance(device).resetSetupState(),
+        isDaemonInitialized: () => DaemonState.getInstance().isInitialized(),
+        invalidateAutomationReadiness: (sessionUuid, reason) =>
+          DaemonState.getInstance()
             .getSessionManager()
-            .invalidateAutomationReadiness(args.sessionUuid, "accessibility service disabled");
-        } else {
-          logger.debug("[observe] No initialized daemon session to invalidate readiness for");
-        }
-      }
+            .invalidateAutomationReadiness(sessionUuid, reason),
+      });
 
       // Notify MCP clients that observation resources have been updated
       await ResourceRegistry.notifyResourcesUpdated([

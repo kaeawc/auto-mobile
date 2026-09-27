@@ -11,6 +11,8 @@ interface SettingsProvider {
   var logsSavedViews: String
   /** JSON object mapping device IDs to their minimum enabled Logs level name. */
   var logsMinLevelByDevice: String
+  /** JSON object mapping device IDs to their enabled Logs level names. */
+  var logsEnabledLevelsByDevice: String
   /** IDE to open Android/Kotlin/Java files in. "auto", "android-studio", "intellij", "vscode" */
   var androidIde: String
   /** IDE to open Swift/ObjC files in. "auto", "xcode", "vscode" */

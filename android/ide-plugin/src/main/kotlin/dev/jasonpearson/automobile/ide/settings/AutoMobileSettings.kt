@@ -19,6 +19,7 @@ class AutoMobileSettings : PersistentStateComponent<AutoMobileSettings>, Setting
   override var failuresDateRange: String = "24h" // Default to 24 hours
   override var logsSavedViews: String = "[]"
   override var logsMinLevelByDevice: String = "{}"
+  override var logsEnabledLevelsByDevice: String = "{}"
   override var androidIde: String = "auto"
   override var iosIde: String = "auto"
   override var themeMode: String = "dark"

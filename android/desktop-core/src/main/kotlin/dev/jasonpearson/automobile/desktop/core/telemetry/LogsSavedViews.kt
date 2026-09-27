@@ -36,6 +36,24 @@ fun serializeLogsSavedViews(views: List<LogsSavedView>): String = Json.encodeToS
  */
 fun serializeLogsMinLevelByDevice(levels: Map<String, String>): String = Json.encodeToString(levels)
 
+/** Encodes each device's selected log levels independently of saved-view JSON. */
+fun serializeLogsEnabledLevelsByDevice(levels: Map<String, Set<LogLevel>>): String =
+  Json.encodeToString(levels)
+
+/** Corrupt per-device filter settings recover to an empty map so the panel uses its default. */
+fun deserializeLogsEnabledLevelsByDevice(json: String): Map<String, Set<LogLevel>> {
+  if (json.isBlank()) return emptyMap()
+  return try {
+    Json.decodeFromString<Map<String, Set<LogLevel>>>(json)
+  } catch (error: SerializationException) {
+    LOG.debug("Ignoring malformed per-device enabled Logs levels: ${error.message}")
+    emptyMap()
+  } catch (error: IllegalArgumentException) {
+    LOG.debug("Ignoring invalid per-device enabled Logs levels: ${error.message}")
+    emptyMap()
+  }
+}
+
 /** Corrupt per-device filter settings recover to an empty map so the panel uses its default. */
 fun deserializeLogsMinLevelByDevice(json: String): Map<String, String> {
   if (json.isBlank()) return emptyMap()

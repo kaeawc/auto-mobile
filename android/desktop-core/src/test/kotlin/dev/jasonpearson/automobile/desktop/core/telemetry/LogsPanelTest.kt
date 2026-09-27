@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.desktop.core.telemetry
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
@@ -31,7 +32,9 @@ import androidx.compose.ui.test.runComposeUiTest
 import androidx.compose.ui.unit.dp
 import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.core.daemon.FakeTelemetryPushClient
+import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
 import dev.jasonpearson.automobile.desktop.core.settings.FakeSettingsProvider
+import dev.jasonpearson.automobile.desktop.core.settings.SettingsProvider
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -78,10 +81,16 @@ class LogsPanelTest {
   @Test
   fun `internal CtrlProxy tags are excluded independently of other filters`() {
     val internal = log(4, "ViewHierarchyExtractor", "matching message", 1)
+    val mainActivity = log(4, "MainActivity", "matching app message", 3)
     val app = log(4, "MyAppTag", "matching message", 2)
     assertTrue(isAutoMobileInternalTag("ViewHierarchyExtractor"))
     assertTrue(isAutoMobileInternalTag("CtrlProxy"))
     assertFalse(isAutoMobileInternalTag("MyAppTag"))
+    assertFalse(isAutoMobileInternalTag("MainActivity"))
+    assertEquals(
+      listOf(mainActivity),
+      filterLogs(listOf(mainActivity), setOf(LogLevel.Info), "", showInternalTags = false),
+    )
     assertEquals(
       listOf(app),
       filterLogs(listOf(internal, app), setOf(LogLevel.Info), "matching", showInternalTags = false),
@@ -97,6 +106,19 @@ class LogsPanelTest {
     val levels = mapOf("device-a" to "WARN")
     assertEquals(levels, deserializeLogsMinLevelByDevice(serializeLogsMinLevelByDevice(levels)))
     assertEquals(emptyMap<String, String>(), deserializeLogsMinLevelByDevice("not json"))
+  }
+
+  @Test
+  fun `enabled levels serialize per device and recover from malformed settings`() {
+    val levels = mapOf("device-a" to setOf(LogLevel.Info, LogLevel.Error))
+    assertEquals(
+      levels,
+      deserializeLogsEnabledLevelsByDevice(serializeLogsEnabledLevelsByDevice(levels)),
+    )
+    assertEquals(
+      emptyMap<String, Set<LogLevel>>(),
+      deserializeLogsEnabledLevelsByDevice("not json"),
+    )
   }
 
   @Test
@@ -386,7 +408,38 @@ class LogsPanelTest {
   }
 
   @Test
-  fun `level minimum persists per device and restores when returning`() = runComposeUiTest {
+  fun `revealing internal rows follows the newest visible row`() = runComposeUiTest {
+    val fake = FakeTelemetryPushClient()
+    val listState = LazyListState()
+    setContent {
+      MaterialTheme {
+        Box(Modifier.height(120.dp)) {
+          LogsPanel(telemetryPushClient = fake, activeDeviceId = "dev-1", listState = listState)
+        }
+      }
+    }
+    waitForIdle()
+    for (i in 0 until 30) fake.emitEvent(log(4, "App", "app row $i", i.toLong()))
+    fake.emitEvent(log(4, "ViewHierarchyExtractor", "newest internal row", 30L))
+    waitUntil(timeoutMillis = 2_000) {
+      onAllNodesWithText("app row 29").fetchSemanticsNodes().isNotEmpty()
+    }
+    onNodeWithText("newest internal row").assertDoesNotExist()
+
+    onNodeWithContentDescription("Toggle Logs filters and views").performClick()
+    onNodeWithContentDescription("Toggle AutoMobile internal logs").performClick()
+
+    waitUntil(timeoutMillis = 2_000) {
+      onAllNodesWithText("newest internal row").fetchSemanticsNodes().isNotEmpty()
+    }
+    waitUntil(timeoutMillis = 2_000) {
+      listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index == 30
+    }
+    assertEquals(30, listState.layoutInfo.visibleItemsInfo.last().index)
+  }
+
+  @Test
+  fun `selected levels persist per device and restore when returning`() = runComposeUiTest {
     val settings = FakeSettingsProvider()
     val deviceId = mutableStateOf("dev-1")
     setContent {
@@ -400,8 +453,8 @@ class LogsPanelTest {
     }
     onNodeWithContentDescription("Toggle Debug logs").assertIsNotSelected().performClick()
     assertEquals(
-      mapOf("dev-1" to "Debug"),
-      deserializeLogsMinLevelByDevice(settings.logsMinLevelByDevice),
+      mapOf("dev-1" to setOf(LogLevel.Debug, LogLevel.Info, LogLevel.Warn, LogLevel.Error)),
+      deserializeLogsEnabledLevelsByDevice(settings.logsEnabledLevelsByDevice),
     )
     onNodeWithContentDescription("Toggle Debug logs").assertIsSelected()
 
@@ -409,6 +462,90 @@ class LogsPanelTest {
     onNodeWithContentDescription("Toggle Debug logs").assertIsNotSelected()
     runOnIdle { deviceId.value = "dev-1" }
     onNodeWithContentDescription("Toggle Debug logs").assertIsSelected()
+  }
+
+  @Test
+  fun `selected levels persist through implicit graph settings provider`() = runComposeUiTest {
+    lateinit var settings: SettingsProvider
+    setContent {
+      MaterialTheme {
+        settings = LocalAutoMobileGraph.current.settingsProvider
+        settings.logsEnabledLevelsByDevice = "{}"
+        LogsPanel(telemetryPushClient = null, activeDeviceId = "dev-1")
+      }
+    }
+
+    onNodeWithContentDescription("Toggle Warn logs").performClick()
+
+    try {
+      assertEquals(
+        mapOf("dev-1" to setOf(LogLevel.Info, LogLevel.Error)),
+        deserializeLogsEnabledLevelsByDevice(settings.logsEnabledLevelsByDevice),
+      )
+    } finally {
+      settings.logsEnabledLevelsByDevice = "{}"
+    }
+  }
+
+  @Test
+  fun `selected levels restore exactly across device switches`() = runComposeUiTest {
+    val settings = FakeSettingsProvider()
+    val deviceId = mutableStateOf("dev-1")
+    setContent {
+      MaterialTheme {
+        LogsPanel(null, settingsProvider = settings, activeDeviceId = deviceId.value)
+      }
+    }
+    onNodeWithContentDescription("Toggle Warn logs").performClick()
+    assertEquals(
+      setOf(LogLevel.Info, LogLevel.Error),
+      deserializeLogsEnabledLevelsByDevice(settings.logsEnabledLevelsByDevice)["dev-1"],
+    )
+
+    runOnIdle { deviceId.value = "dev-2" }
+    runOnIdle { deviceId.value = "dev-1" }
+    onNodeWithContentDescription("Toggle Warn logs").assertIsNotSelected()
+    onNodeWithContentDescription("Toggle Info logs").assertIsSelected()
+    onNodeWithContentDescription("Toggle Error logs").assertIsSelected()
+  }
+
+  @Test
+  fun `empty level selection persists and restores across device switches`() = runComposeUiTest {
+    val settings = FakeSettingsProvider()
+    val deviceId = mutableStateOf("dev-1")
+    setContent {
+      MaterialTheme {
+        LogsPanel(null, settingsProvider = settings, activeDeviceId = deviceId.value)
+      }
+    }
+    setOf(LogLevel.Info, LogLevel.Warn, LogLevel.Error).forEach { level ->
+      onNodeWithContentDescription("Toggle ${level.label} logs").performClick()
+    }
+    assertEquals(
+      emptySet<LogLevel>(),
+      deserializeLogsEnabledLevelsByDevice(settings.logsEnabledLevelsByDevice)["dev-1"],
+    )
+
+    runOnIdle { deviceId.value = "dev-2" }
+    runOnIdle { deviceId.value = "dev-1" }
+    LogLevel.entries.forEach { level ->
+      onNodeWithContentDescription("Toggle ${level.label} logs").assertIsNotSelected()
+    }
+  }
+
+  @Test
+  fun `legacy minimum level restores when no full selection was persisted`() = runComposeUiTest {
+    val settings = FakeSettingsProvider(logsMinLevelByDevice = "{\"dev-1\":\"Warn\"}")
+    setContent {
+      MaterialTheme {
+        LogsPanel(null, settingsProvider = settings, activeDeviceId = "dev-1")
+      }
+    }
+    onNodeWithContentDescription("Toggle Verbose logs").assertIsNotSelected()
+    onNodeWithContentDescription("Toggle Debug logs").assertIsNotSelected()
+    onNodeWithContentDescription("Toggle Info logs").assertIsNotSelected()
+    onNodeWithContentDescription("Toggle Warn logs").assertIsSelected()
+    onNodeWithContentDescription("Toggle Error logs").assertIsSelected()
   }
 
   @Test
@@ -647,6 +784,10 @@ class LogsPanelTest {
       onAllNodesWithText("level five").fetchSemanticsNodes().isNotEmpty()
     }
     onNodeWithText("level five").assertIsDisplayed()
+
+    // Restore the persisted level selection so later tests using the default graph start clean.
+    onNodeWithContentDescription("Toggle Warn logs").performClick()
+    onNodeWithContentDescription("Toggle Warn logs").assertIsSelected()
   }
 
   @Test

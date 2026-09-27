@@ -176,6 +176,45 @@ describe("ScrollUntilVisible overshoot recovery", () => {
     );
   });
 
+  test("automatic scrolling uses the app feed before an IME overlay", async () => {
+    const observation: ObserveResult = {
+      ...makeObserveResult(),
+      viewHierarchy: {
+        hierarchy: {
+          node: {
+            bounds: { left: 0, top: 0, right: 400, bottom: 900 },
+            "resource-id": "app:id/feed",
+            scrollable: true,
+          },
+        },
+        windows: [
+          {
+            windowLayer: 10,
+            hierarchy: {
+              node: {
+                bounds: { left: 0, top: 700, right: 400, bottom: 900 },
+                "resource-id": "ime:id/suggestions",
+                scrollable: true,
+              },
+            },
+          },
+        ],
+      },
+    };
+    const scroll = makeScrollUntilVisible({
+      accessibilityDetector: detector,
+      finder,
+      timer,
+      accessibilityService,
+      observeResults: [observation],
+      talkBackExecutor,
+      resolver: new ElementResolver(),
+    });
+    expect((await scroll.findScrollableContainer(BASE_OPTIONS, observation))["resource-id"]).toBe(
+      "app:id/feed",
+    );
+  });
+
   test("element found in reverse after forward end-of-list", async () => {
     finder.nextScrollableContainer = CONTAINER_ELEMENT;
 

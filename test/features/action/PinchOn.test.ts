@@ -193,6 +193,27 @@ describe("PinchOn", () => {
     expect(fakeA11yService.getPinchHistory()[0].centerX).toBe(200);
   });
 
+  test("explicit text container keeps the matched label bounds", async () => {
+    const labelBounds = { left: 100, top: 100, right: 300, bottom: 300 };
+    fakeObserveScreen.setObserveResult({
+      ...createObserveResult(),
+      viewHierarchy: {
+        hierarchy: {
+          node: {
+            "resource-id": "app:id/row",
+            clickable: true,
+            bounds: { left: 0, top: 0, right: 400, bottom: 400 },
+            node: [{ text: "Map", bounds: labelBounds }],
+          },
+        },
+      },
+    });
+    const result = await pinchOn.execute({ direction: "out", container: { text: "Map" } });
+    expect(result.success).toBe(true);
+    expect(fakeA11yService.getPinchHistory()[0].centerX).toBe(200);
+    expect(fakeA11yService.getPinchHistory()[0].centerY).toBe(200);
+  });
+
   test("ambiguous bare container ID fails before sending a pinch", async () => {
     fakeObserveScreen.setObserveResult({
       ...createObserveResult(),

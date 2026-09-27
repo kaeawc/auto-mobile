@@ -56,7 +56,8 @@ export class PinchOn extends BaseVisualChange {
   constructor(device: BootedDevice, adb: AdbClient | null = null, deps: PinchOnDependencies = {}) {
     super(device, adb);
     this.resolver = deps.resolver ?? new ElementResolver();
-    this.capture = deps.capture ?? createDeviceHierarchyCapture(device);
+    this.capture =
+      deps.capture ?? createDeviceHierarchyCapture(device, { adbFactory: this.adbFactory });
     this.visionConfig = deps.visionConfig ?? DEFAULT_VISION_CONFIG;
     this.screenshotCapturer =
       deps.screenshotCapturer ?? new TakeScreenshotCapturer(device, this.adbFactory);
@@ -358,7 +359,10 @@ export class PinchOn extends BaseVisualChange {
     if (resolution.error) {
       throw new ActionableError(resolution.error);
     }
-    return resolution.chosen?.element ?? null;
+    const source = container.text
+      ? resolution.matches.find(({ node }) => node === resolution.chosen)?.sourceNodes?.[0]
+      : undefined;
+    return (source ?? resolution.chosen)?.element ?? null;
   }
 
   private selectAutoTargetElement(

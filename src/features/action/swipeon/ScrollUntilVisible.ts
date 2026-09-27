@@ -606,7 +606,12 @@ export class ScrollUntilVisible {
         {},
         { action: "scroll" },
       );
-      element = resolution.candidates.find((candidate) => candidate.element)?.element ?? null;
+      // The app's main hierarchy remains the first automatic scroll target;
+      // transient higher-layer windows such as an IME are fallback targets.
+      const candidates = [...resolution.candidates].sort(
+        (a, b) => Number(a.rootGroup !== 0) - Number(b.rootGroup !== 0),
+      );
+      element = candidates.find((candidate) => candidate.element)?.element ?? null;
       if (element) {
         logger.info(`[SwipeOn] Found scrollable container automatically`);
       }

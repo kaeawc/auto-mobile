@@ -21,7 +21,7 @@ function searchForWait(
   intent: ResolutionIntent,
 ) {
   const projection = new SearchableHierarchy();
-  let matchMode: MatchMode | undefined = intent.matchMode;
+  let matchMode: MatchMode | undefined = intent.matchMode ?? "exact";
   return (observation: ObserveResult): ElementResolution | undefined => {
     if (!observation.viewHierarchy) {
       return undefined;
@@ -31,7 +31,9 @@ function searchForWait(
         id: String(observation.updatedAt ?? "wait"),
         nodes: projection.project(observation.viewHierarchy),
       },
-      selector,
+      selector.container?.text
+        ? { ...selector, container: { ...selector.container, match: "contains" } }
+        : selector,
       { ...intent, matchMode },
     );
     if (result.error === "Container not found") {
@@ -65,6 +67,11 @@ function ownsSelectorText(
   );
 }
 
+function matchedSource(result: ElementResolution | undefined, text: string | undefined) {
+  const match = result?.matches.find(({ node }) => node === result.chosen);
+  return match?.sourceNodes?.find((node) => ownsSelectorText(node, text)) ?? result?.chosen;
+}
+
 export function appear(
   resolver: ConditionResolver,
   selector: ConditionSelector,
@@ -72,7 +79,11 @@ export function appear(
   const search = searchForWait(resolver, selector, { action: "inspect" });
   return (observation): ConditionEvaluation => {
     const result = search(observation);
-    let candidates = elements(result);
+    const sources =
+      result?.matches
+        .flatMap(({ node, sourceNodes }) => sourceNodes ?? [node])
+        .filter((node) => ownsSelectorText(node, selector.text)) ?? [];
+    let candidates = sources.flatMap((node) => (node.element ? [node.element] : []));
     if (!result?.chosen && selector.elementId !== undefined && observation.viewHierarchy) {
       const diagnostic = resolver.resolve(
         {
@@ -88,7 +99,7 @@ export function appear(
     }
     return {
       matched: Boolean(result?.chosen),
-      matchedElement: result?.chosen?.element,
+      matchedElement: matchedSource(result, selector.text)?.element,
       candidates,
     };
   };

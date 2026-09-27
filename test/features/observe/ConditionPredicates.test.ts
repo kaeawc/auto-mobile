@@ -151,6 +151,37 @@ test("appear retains partial ID candidates for an exact ID miss", () => {
   );
 });
 
+test("declarative text predicates keep exact matching", () => {
+  const observation = obs([node({ text: "Submit now", clickable: true })]);
+  expect(appear(new ElementResolver(), { text: "Submit" })(observation).matched).toBe(false);
+  expect(clickable(new ElementResolver(), { text: "Submit" })(observation).matched).toBe(false);
+  const stable = countStable(new ElementResolver(), { text: "Submit" });
+  expect(stable(observation).candidates).toEqual([]);
+});
+
+test("text containers retain contains matching ahead of a later exact peer", () => {
+  const evaluation = appear(new ElementResolver(), {
+    elementId: "submit",
+    container: { text: "Settings" },
+  })(
+    obs([
+      node({ text: "Settings panel", node: [node({ "resource-id": "submit" })] }),
+      node({ text: "Settings" }),
+    ]),
+  );
+  expect(evaluation.matched).toBe(true);
+  expect(evaluation.matchedElement?.["resource-id"]).toBe("submit");
+});
+
+test("appear reports the matching child rather than its promoted row", () => {
+  const evaluation = appear(new ElementResolver(), { text: "Ready" })(
+    obs([node({ clickable: true, node: [node({ text: "Ready" })] })]),
+  );
+  expect(evaluation.matched).toBe(true);
+  expect(evaluation.matchedElement?.text).toBe("Ready");
+  expect(evaluation.candidates?.[0]?.text).toBe("Ready");
+});
+
 describe("textEquals predicate", () => {
   const finder = new ElementResolver();
 

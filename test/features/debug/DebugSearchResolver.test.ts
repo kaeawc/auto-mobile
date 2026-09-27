@@ -63,6 +63,13 @@ test("debug explains all matching fields once and finds synthetic keys", async (
     "node-key-exact",
   );
 });
+test("contains lookup reports a synthetic ID as a view ID", async () => {
+  const feature = search(capture({ "view-id": "synthetic-key", clickable: true }));
+  const result = await feature.execute({ resourceId: "synthetic", match: "contains" });
+  expect(result.matches[0].matchedProperty).toBe("view-id");
+  expect(result.matches[0].matchedValue).toBe("synthetic-key");
+  expect(result.matches[0].matchKind).toBe("contains");
+});
 test("debug selection follows tap eligibility and missing containers never search globally", async () => {
   const feature = search(capture({ text: "Save", clickable: false }, { text: "Save" }));
   const result = await feature.execute({ text: "Save" });

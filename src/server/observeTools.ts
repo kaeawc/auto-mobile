@@ -692,15 +692,13 @@ const runWaitForConditionDsl = async (
   };
 };
 
-const waitForContainerForFinder = (
-  waitFor: ObserveWaitForOptions,
-): { elementId?: string; text?: string } | null => {
+const waitForContainerForFinder = (waitFor: ObserveWaitForOptions): ResolverSelector | null => {
   if (!waitFor.container) {
     return null;
   }
   return "elementId" in waitFor.container
     ? { elementId: waitFor.container.elementId }
-    : { text: waitFor.container.text };
+    : { text: waitFor.container.text, match: "contains" };
 };
 
 const isElementCenterOffScreen = (

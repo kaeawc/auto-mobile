@@ -105,8 +105,8 @@ export class DebugSearch {
       const sources = options.resourceId
         ? [
             [
-              kind === "node-key-exact" ? "view-id" : "resource-id",
-              kind === "node-key-exact" ? node.nodeKey! : node.nativeId!,
+              kind === "node-key-exact" || !node.nativeId ? "view-id" : "resource-id",
+              kind === "node-key-exact" || !node.nativeId ? node.nodeKey! : node.nativeId,
             ],
           ]
         : matchedNodes

@@ -9,11 +9,11 @@ const observation = (...nodes: object[]): ObserveResult =>
     viewHierarchy: { hierarchy: { node: nodes.map((node) => ({ bounds, ...node })) } },
   }) as ObserveResult;
 
-test("positive waits fall back once and keep the same mode across later polls", () => {
+test("positive waits keep exact text matching across later polls", () => {
   const predicate = countStable(new ElementResolver(), { text: "Account" });
   expect(predicate(observation({ text: "Account settings" })).matched).toBe(false);
   const next = predicate(observation({ text: "Account settings" }, { text: "Account" }));
-  expect(next.candidates).toHaveLength(2);
+  expect(next.candidates).toHaveLength(1);
   expect(next.matched).toBe(false);
 });
 

@@ -53,10 +53,25 @@ export class AndroidImeCatalog {
     if (before.activeImeId === id) {
       return before;
     }
-    const result = await this.adb.execute(["shell", "ime", "set", id], {
-      signal,
-      waitForProcessSettlementAfterAbort: true,
-    });
+    // Forward cancellation until dispatch. Once ADB starts, the device may have
+    // applied the change; finish the command and verify the actual IME state.
+    const commandController = signal ? new AbortController() : undefined;
+    const forwardAbort = () => commandController?.abort(signal?.reason);
+    signal?.throwIfAborted();
+    signal?.addEventListener("abort", forwardAbort, { once: true });
+    let result;
+    try {
+      result = await this.adb.execute(["shell", "ime", "set", id], {
+        signal: commandController?.signal,
+        waitForProcessSettlementAfterAbort: true,
+        beforeDispatch: async () => {
+          signal?.throwIfAborted();
+          signal?.removeEventListener("abort", forwardAbort);
+        },
+      });
+    } finally {
+      signal?.removeEventListener("abort", forwardAbort);
+    }
     if (result.stderr.trim()) {
       throw new Error(`Failed to select IME ${id}: ${result.stderr.trim()}`);
     }

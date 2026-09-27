@@ -59,6 +59,8 @@ function fixture(
   let tapError: string | undefined;
   let restoreError: string | undefined;
   let afterSelection: (() => void) | undefined;
+  let selectionSettled: (() => void) | undefined;
+  let openCount = 0;
   let afterTapDispatch: (() => void) | undefined;
   const session = new InstalledImeKeySession(`native-session-device-${++fixtureNumber}`, {
     catalog: {
@@ -76,6 +78,9 @@ function fixture(
           throw new Error(restoreError);
         }
         active = id;
+        if (id === selectedIme) {
+          selectionSettled?.();
+        }
         return {
           activeImeId: active,
           installed: [original, selectedIme].map((item) => ({
@@ -88,6 +93,7 @@ function fixture(
     },
     keyboard: {
       execute: async () => {
+        openCount++;
         afterSelection?.();
         return { success: true };
       },
@@ -116,6 +122,10 @@ function fixture(
     setAfterSelection: (action: () => void) => {
       afterSelection = action;
     },
+    setSelectionSettled: (action: () => void) => {
+      selectionSettled = action;
+    },
+    getOpenCount: () => openCount,
     setAfterTapDispatch: (action: () => void) => {
       afterTapDispatch = action;
     },
@@ -403,6 +413,17 @@ test("restores the original IME after cancellation", async () => {
   const controller = new AbortController();
   setAfterSelection(() => controller.abort());
   await expect(session.tapKey(target, "a", controller.signal)).rejects.toThrow();
+  expect(events).toEqual([`select:${target}:signaled`, `select:${original}:cleanup`]);
+  expect(getActive()).toBe(original);
+});
+
+test("does not open the keyboard when selection completes with cancellation", async () => {
+  const { session, events, setSelectionSettled, getOpenCount, getActive } = fixture();
+  const controller = new AbortController();
+  setSelectionSettled(() => controller.abort());
+
+  await expect(session.tapKey(target, "a", controller.signal)).rejects.toThrow();
+  expect(getOpenCount()).toBe(0);
   expect(events).toEqual([`select:${target}:signaled`, `select:${original}:cleanup`]);
   expect(getActive()).toBe(original);
 });

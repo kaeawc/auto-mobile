@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { AndroidImeCatalog } from "../../../src/features/action/AndroidImeCatalog";
 import { withAndroidImeLock } from "../../../src/features/action/androidImeLock";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import type { AdbExecuteOptions } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 
 const gboard =
   "com.google.android.inputmethod.latin/com.google.android.apps.inputmethod.latin.LatinIME";
@@ -81,4 +82,92 @@ test("selection waits for another IME operation on the same device", async () =>
   release();
   await inFlight;
   expect((await selection).activeImeId).toBe(gboard);
+});
+
+test("reports the verified IME after cancellation following set dispatch", async () => {
+  const { adb } = fixture();
+  const controller = new AbortController();
+  adb.setCommandResponse("shell ime list -s", { stdout: `${gboard}\n${samsung}\n`, stderr: "" });
+  adb.setCommandResponseSequence("shell settings get secure default_input_method", [
+    { stdout: gboard, stderr: "" },
+    { stdout: samsung, stderr: "" },
+  ]);
+  const catalog = new AndroidImeCatalog(
+    {
+      execute: async (args: string[], options?: AdbExecuteOptions) => {
+        if (args.join(" ") !== `shell ime set ${samsung}`) {
+          return adb.execute(args, options);
+        }
+        await options?.beforeDispatch?.();
+        controller.abort();
+        options?.signal?.throwIfAborted();
+        return adb.execute(args, { signal: options?.signal });
+      },
+    },
+    "dispatch-cancel-device",
+  );
+
+  expect((await catalog.selectWithinLock(samsung, controller.signal)).activeImeId).toBe(samsung);
+});
+
+test("reports a genuine set failure after cancellation following dispatch", async () => {
+  const { adb } = fixture();
+  const controller = new AbortController();
+  adb.setCommandResponse("shell ime list -s", { stdout: `${gboard}\n${samsung}\n`, stderr: "" });
+  const catalog = new AndroidImeCatalog(
+    {
+      execute: async (args: string[], options?: AdbExecuteOptions) => {
+        if (args.join(" ") !== `shell ime set ${samsung}`) {
+          return adb.execute(args, options);
+        }
+        await options?.beforeDispatch?.();
+        controller.abort();
+        options?.signal?.throwIfAborted();
+        return adb.execute(args, { signal: options?.signal });
+      },
+    },
+    "dispatch-failure-device",
+  );
+  adb.setCommandResponse(`shell ime set ${samsung}`, { stdout: "", stderr: "permission denied" });
+
+  await expect(catalog.selectWithinLock(samsung, controller.signal)).rejects.toThrow(
+    "Failed to select IME",
+  );
+});
+
+test("cancels set before dispatch without changing the active IME", async () => {
+  const { adb } = fixture();
+  const controller = new AbortController();
+  adb.setCommandResponse("shell ime list -s", { stdout: `${gboard}\n${samsung}\n`, stderr: "" });
+  let dispatched = false;
+  let enteredQueue: () => void = () => {};
+  const queued = new Promise<void>((resolve) => {
+    enteredQueue = resolve;
+  });
+  const catalog = new AndroidImeCatalog(
+    {
+      execute: async (args: string[], options?: AdbExecuteOptions) => {
+        if (args.join(" ") !== `shell ime set ${samsung}`) {
+          return adb.execute(args, options);
+        }
+        enteredQueue();
+        await new Promise<void>((_resolve, reject) => {
+          options?.signal?.addEventListener("abort", () => reject(options.signal?.reason), {
+            once: true,
+          });
+        });
+        await options?.beforeDispatch?.();
+        dispatched = true;
+        return adb.execute(args, { signal: options?.signal });
+      },
+    },
+    "queued-cancel-device",
+  );
+
+  const selection = catalog.selectWithinLock(samsung, controller.signal);
+  await queued;
+  controller.abort();
+  await expect(selection).rejects.toThrow();
+  expect(dispatched).toBe(false);
+  expect(adb.getExecutedArgv()).not.toContainEqual(["shell", "ime", "set", samsung]);
 });

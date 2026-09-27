@@ -143,6 +143,7 @@ export class InstalledImeKeySession {
     const { catalog, keyboard, tap } = this.dependencies;
     signal?.throwIfAborted();
     await catalog.selectWithinLock(imeId, signal);
+    signal?.throwIfAborted();
     // Once focus activation starts, wait for it to settle before any restoration.
     const opened = await keyboard.execute("open");
     if (!opened.success) {

@@ -545,6 +545,97 @@ describe("CtrlProxyManager", function () {
           ),
       ).toHaveLength(1);
     });
+
+    test("forces a restart after an in-flight healthy binding check no-ops", async () => {
+      fakeAdb.setCommandResponse("shell dumpsys accessibility", {
+        stdout: `Bound services:{{${serviceComponent}}}\nCrashed services:{}`,
+        stderr: "",
+      });
+      fakeAdb.setCommandResponse("shell settings get secure enabled_accessibility_services", {
+        stdout: serviceComponent,
+        stderr: "",
+      });
+      let releaseCheck!: () => void;
+      const checkGate = new Promise<void>((resolve) => {
+        releaseCheck = resolve;
+      });
+      const executeCommand = fakeAdb.executeCommand.bind(fakeAdb);
+      fakeAdb.executeCommand = async (command, ...args) => {
+        if (command === "shell dumpsys accessibility") {
+          await checkGate;
+        }
+        return executeCommand(command, ...args);
+      };
+
+      const rebind = accessibilityServiceClient.rebindIfUnhealthy();
+      const restart = accessibilityServiceClient.forceRestartProcess();
+      releaseCheck();
+
+      expect(await rebind).toBe(false);
+      expect(await restart).toBe(true);
+      expect(
+        fakeAdb
+          .getExecutedCommands()
+          .filter(
+            (command) => command === `shell am force-stop ${AndroidCtrlProxyManager.PACKAGE}`,
+          ),
+      ).toHaveLength(1);
+    });
+
+    test("claims the flight before checking device presence", async () => {
+      fakeAdb.setCommandResponse("shell dumpsys accessibility", {
+        stdout: `Bound services:{{${serviceComponent}}}\nCrashed services:{}`,
+        stderr: "",
+      });
+      fakeAdb.setCommandResponse("shell settings get secure enabled_accessibility_services", {
+        stdout: serviceComponent,
+        stderr: "",
+      });
+      let releasePresence!: () => void;
+      const presenceGate = new Promise<void>((resolve) => {
+        releasePresence = resolve;
+      });
+      const getDeviceStates = fakeAdb.getDeviceStates.bind(fakeAdb);
+      let presenceCalls = 0;
+      fakeAdb.getDeviceStates = async (...args) => {
+        presenceCalls++;
+        await presenceGate;
+        return getDeviceStates(...args);
+      };
+
+      const first = accessibilityServiceClient.forceRestartProcess();
+      const second = accessibilityServiceClient.forceRestartProcess();
+      releasePresence();
+
+      expect(await Promise.all([first, second])).toEqual([true, true]);
+      expect(presenceCalls).toBe(1);
+      expect(
+        fakeAdb
+          .getExecutedCommands()
+          .filter(
+            (command) => command === `shell am force-stop ${AndroidCtrlProxyManager.PACKAGE}`,
+          ),
+      ).toHaveLength(1);
+    });
+
+    test("waits for both settings writes to settle after abort", async () => {
+      fakeAdb.setCommandResponse("shell settings get secure enabled_accessibility_services", {
+        stdout: serviceComponent,
+        stderr: "",
+      });
+
+      expect(await accessibilityServiceClient.forceRestartProcess()).toBe(true);
+      const settingsWrites = fakeAdb
+        .getCommandCalls()
+        .filter((call) =>
+          call.command.startsWith("shell settings put secure enabled_accessibility_services"),
+        );
+      expect(settingsWrites).toHaveLength(2);
+      expect(settingsWrites.map((call) => call.waitForProcessSettlementAfterAbort)).toEqual([
+        true,
+        true,
+      ]);
+    });
   });
 
   describe("isAvailable", function () {

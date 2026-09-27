@@ -935,10 +935,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     if (this.rebindInFlight) {
       return this.rebindInFlight;
     }
-    this.rebindInFlight = this.rebindOrRestartInternal(false).finally(() => {
-      this.rebindInFlight = null;
-    });
-    return this.rebindInFlight;
+    return this.trackRebindFlight(this.rebindOrRestartInternal(false));
   }
 
   /**
@@ -951,19 +948,36 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
    * this into a restart loop.
    */
   async forceRestartProcess(): Promise<boolean> {
-    if (this.rebindInFlight) {
-      return this.rebindInFlight;
+    const inFlight = this.rebindInFlight;
+    if (inFlight) {
+      // A healthy-binding check can finish without changing the process.
+      // Reserve the next flight before awaiting it so another caller cannot
+      // start a settings sequence in between.
+      return this.trackRebindFlight(
+        (async () => (await inFlight) || this.forceRestartIfPresent())(),
+      );
     }
+    return this.trackRebindFlight(this.forceRestartIfPresent());
+  }
+
+  private trackRebindFlight(work: Promise<boolean>): Promise<boolean> {
+    const flight = work.finally(() => {
+      if (this.rebindInFlight === flight) {
+        this.rebindInFlight = null;
+      }
+    });
+    this.rebindInFlight = flight;
+    return flight;
+  }
+
+  private async forceRestartIfPresent(): Promise<boolean> {
     if (!(await this.isDevicePresent())) {
       logger.info(
         `[CTRL_PROXY] Device ${this.device.deviceId} is offline or missing; skipping process restart`,
       );
       return false;
     }
-    this.rebindInFlight = this.rebindOrRestartInternal(true).finally(() => {
-      this.rebindInFlight = null;
-    });
-    return this.rebindInFlight;
+    return this.rebindOrRestartInternal(true);
   }
 
   /**
@@ -1017,11 +1031,21 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       rebindAttempted = true;
       await this.adb.executeCommand(
         `shell settings put secure enabled_accessibility_services "${servicesWithoutCtrlProxy}"`,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        true,
       );
       await this.adb.executeCommand(`shell am force-stop ${AndroidCtrlProxyManager.PACKAGE}`);
       await this.timer.sleep(AndroidCtrlProxyManager.REBIND_FORCE_STOP_SETTLE_MS);
       await this.adb.executeCommand(
         `shell settings put secure enabled_accessibility_services "${servicesWithCtrlProxy}"`,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        true,
       );
       const healthy = await this.waitForHealthyAfterRebind();
       logger.info(

@@ -47,8 +47,8 @@ const CTRL_PROXY_REBIND_RECOVERY_POLL_MS = 1_000;
  */
 const CTRL_PROXY_POST_REBIND_RESTART_GRACE_MS = 5_000;
 /**
- * Minimum number of failed health probes observed since the last recovery
- * check before escalating to a full process restart (issue #7533 follow-up).
+ * Minimum number of consecutive failed health probes since the last rebind
+ * before escalating to a full process restart (issue #7533 follow-up).
  * Pairs with the grace period above so a single unlucky probe miss cannot
  * trigger a restart on its own.
  */
@@ -292,10 +292,9 @@ interface ReadinessAttemptContext extends RunnerReadinessRequest {
    */
   lastSuccessfulRebindMs: number;
   /**
-   * Failed health probes observed since the last connected-but-unresponsive
-   * recovery check, reset every time that check runs (whether or not it acted)
-   * so escalation requires {@link CTRL_PROXY_RESTART_MIN_FAILED_PROBES}
-   * consecutive misses rather than a single unlucky probe.
+   * Consecutive failed health probes since the last actual rebind. The
+   * recovery throttle must not discard failures when each probe itself takes
+   * longer than the throttle window.
    */
   failedHealthProbesSinceRecovery: number;
 }
@@ -1097,7 +1096,7 @@ export class RunnerReadinessService {
    *    {@link CTRL_PROXY_POST_REBIND_RESTART_GRACE_MS} since the last
    *    successful rebind and requires
    *    {@link CTRL_PROXY_RESTART_MIN_FAILED_PROBES} failed probes since the
-   *    last recovery check: a freshly re-bound service on a loaded emulator
+   *    last rebind: a freshly re-bound service on a loaded emulator
    *    can take well over one probe interval to answer, and without both
    *    gates a single slow-but-recovering probe force-stopped the service
    *    that had just been repaired.
@@ -1118,9 +1117,8 @@ export class RunnerReadinessService {
     ) {
       return;
     }
-    const failedProbesSinceLastCheck = context.failedHealthProbesSinceRecovery;
+    const failedProbesSinceRecovery = context.failedHealthProbesSinceRecovery;
     context.lastConnectedRecoveryMs = this.dependencies.timer.now();
-    context.failedHealthProbesSinceRecovery = 0;
 
     if (manager.rebindIfUnhealthy && !context.ctrlProxyAccessibilityRebindAttempted) {
       const rebindAttempted = await this.runPhase(context, "runner-health", attempts, () =>
@@ -1128,6 +1126,7 @@ export class RunnerReadinessService {
       );
       context.ctrlProxyAccessibilityRebindAttempted ||= rebindAttempted;
       if (rebindAttempted) {
+        context.failedHealthProbesSinceRecovery = 0;
         context.lastSuccessfulRebindMs = this.dependencies.timer.now();
         // The rebind just changed the endpoint's state; give the fresh bind a
         // chance to answer before escalating to a full process restart, and
@@ -1137,7 +1136,7 @@ export class RunnerReadinessService {
       }
     }
 
-    if (!this.canEscalateToProcessRestart(context, manager, failedProbesSinceLastCheck)) {
+    if (!this.canEscalateToProcessRestart(context, manager, failedProbesSinceRecovery)) {
       return;
     }
     context.ctrlProxyProcessRestartAttempted = true;
@@ -1158,14 +1157,14 @@ export class RunnerReadinessService {
   private canEscalateToProcessRestart(
     context: ReadinessAttemptContext,
     manager: ReadinessAndroidManager,
-    failedProbesSinceLastCheck: number,
+    failedProbesSinceRecovery: number,
   ): manager is ReadinessAndroidManager & {
     forceRestartProcess: NonNullable<ReadinessAndroidManager["forceRestartProcess"]>;
   } {
     if (context.ctrlProxyProcessRestartAttempted || !manager.forceRestartProcess) {
       return false;
     }
-    if (failedProbesSinceLastCheck < CTRL_PROXY_RESTART_MIN_FAILED_PROBES) {
+    if (failedProbesSinceRecovery < CTRL_PROXY_RESTART_MIN_FAILED_PROBES) {
       return false;
     }
     return (

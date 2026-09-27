@@ -198,6 +198,92 @@ describe("TapOnElement selectionStrategy", () => {
     expect(result.focusVerified).toBe(true);
   });
 
+  test("verifies focus when the IME pans a field vertically without changing its horizontal extent (PR #7780 review)", async () => {
+    const before = editableElement({
+      "resource-id": undefined,
+      "view-id": "s2-before",
+      bounds: { left: 0, top: 400, right: 100, bottom: 440 },
+      focused: false,
+    });
+    const after = {
+      ...before,
+      "view-id": "s2-after",
+      bounds: { left: 0, top: 100, right: 100, bottom: 140 },
+      focused: true,
+    };
+    const { result } = await executeFocus(before, { hierarchy: { node: after } });
+
+    expect(result.focusVerified).toBe(true);
+    expect(result.success).toBe(true);
+  });
+
+  test("rejects a different field with the same class but a different hint when focus verification runs (PR #7780 review)", async () => {
+    const before = editableElement({
+      "resource-id": undefined,
+      "view-id": "s2-before",
+      bounds: { left: 0, top: 400, right: 100, bottom: 440 },
+      focused: false,
+    });
+    const after = {
+      ...before,
+      text: "Email",
+      "view-id": "s2-after",
+      bounds: { left: 0, top: 100, right: 100, bottom: 140 },
+      focused: true,
+    };
+    const { result } = await executeFocus(before, { hierarchy: { node: after } });
+
+    expect(result.focusVerified).toBe(false);
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Failed to confirm focus");
+  });
+
+  test("rejects an IME-panned field with a different stable resource ID (PR #7780 review)", async () => {
+    const before = editableElement({
+      "view-id": "s2-before",
+      bounds: { left: 0, top: 400, right: 100, bottom: 440 },
+      focused: false,
+    });
+    const after = {
+      ...before,
+      "resource-id": "com.example:id/email",
+      "view-id": "s2-after",
+      bounds: { left: 0, top: 100, right: 100, bottom: 140 },
+      focused: true,
+    };
+    const { result } = await executeFocus(before, { hierarchy: { node: after } });
+
+    expect(result.focusVerified).toBe(false);
+    expect(result.success).toBe(false);
+  });
+
+  test("rejects an ambiguous IME pan when two editable fields report focus (PR #7780 review)", async () => {
+    const before = editableElement({
+      "resource-id": undefined,
+      "view-id": "s2-before",
+      bounds: { left: 0, top: 400, right: 100, bottom: 440 },
+      focused: false,
+    });
+    const focused = {
+      ...before,
+      "view-id": "s2-after",
+      bounds: { left: 0, top: 100, right: 100, bottom: 140 },
+      focused: true,
+    };
+    const anotherFocused = {
+      ...focused,
+      text: "Email",
+      "view-id": "s2-other",
+      bounds: { left: 0, top: 150, right: 100, bottom: 190 },
+    };
+    const { result } = await executeFocus(before, {
+      hierarchy: { node: [focused, anotherFocused] },
+    });
+
+    expect(result.focusVerified).toBe(false);
+    expect(result.success).toBe(false);
+  });
+
   test("verifies focus against the attached raw hierarchy when raw element search is enabled (PR #7780 review)", async () => {
     const before = editableElement({
       "resource-id": undefined,
@@ -231,6 +317,7 @@ describe("TapOnElement selectionStrategy", () => {
     });
     const after = {
       ...before,
+      text: "Email",
       "view-id": "s2-7e6d952ea5fe0ddf",
       bounds: { left: 0, top: 80, right: 100, bottom: 120 },
       focused: true,

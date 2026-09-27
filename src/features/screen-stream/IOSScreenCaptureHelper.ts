@@ -511,7 +511,10 @@ export class IOSScreenCaptureHelper extends EventEmitter {
   private static readonly STDERR_BUFFER_MAX = 64 * 1024;
 }
 
-/** A native idle callback is scoped to its exact Simulator window. */
+/**
+ * Parses a native idle callback's positive Simulator window ID; malformed,
+ * unsafe, or nonpositive IDs return null so callbacks cannot cross windows.
+ */
 export function parseCaptureIdleMarker(line: string): number | null {
   const match = /^capture-idle: windowID=(\d+)$/.exec(line.trim());
   if (!match) {

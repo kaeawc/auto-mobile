@@ -70,6 +70,7 @@ export class ForcedRestartBudget {
     return ++this.generation;
   }
 
+  /** Records only the current admitted attempt; stale tokens cannot consume budget. */
   recordFailure(reason: string, token: number): void {
     if (!this.inFlight || token !== this.generation) {
       return;
@@ -83,6 +84,7 @@ export class ForcedRestartBudget {
         : this.timer.now() + this.backoff.delayForAttempt(this.attempts);
   }
 
+  /** Rearms the budget on success, rejecting a completion from an invalidated attempt. */
   recordSuccess(token?: number): boolean {
     if (token !== undefined && (!this.inFlight || token !== this.generation)) {
       return false;

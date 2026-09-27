@@ -968,6 +968,10 @@ function confirmsPostTapPackage(
   );
 }
 
+/**
+ * Selects the requested Android link handler and fails unless the chooser
+ * reports success and, when needed, a fresh hierarchy confirms the package.
+ */
 export async function selectAndroidOpenLinkChooser(
   device: BootedDevice,
   packageName: string,

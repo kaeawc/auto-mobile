@@ -35,7 +35,7 @@ if [[ ! -f "$SIGNATURES" ]]; then
 fi
 
 run_id="$1"
-run_json="$(gh run view "$run_id" -R "$REPO" "${attempt_args[@]}" --json jobs,headBranch)"
+run_json="$(gh run view "$run_id" -R "$REPO" ${attempt_args[@]+"${attempt_args[@]}"} --json jobs,headBranch)"
 head_branch="$(jq -r '.headBranch // ""' <<< "$run_json")"
 
 lowercase() {

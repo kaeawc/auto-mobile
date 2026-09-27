@@ -193,25 +193,24 @@ describe("ObserveElementsBuilder", () => {
         bounds: scrollableList.bounds,
       },
     ]);
-    // Captured windows precede the unranked main tree under the shared
-    // topmost-first order (#7629); category contents and traversal count stay fixed.
+    // Preserve main-root-first output until live actions share capture ordering.
     expect(elements.text).toEqual([
-      { ...topWindowText.$, bounds: topWindowText.bounds },
       { ...clickableButton.$, bounds: clickableButton.bounds },
       { ...mainImage.$, bounds: mainImage.bounds },
+      { ...topWindowText.$, bounds: topWindowText.bounds },
     ]);
     expect(elements.media).toEqual([
-      {
-        className: "android.widget.VideoView",
-        mediaType: "video",
-        bounds: bottomWindowVideo.bounds,
-      },
       {
         className: "android.widget.ImageView",
         mediaType: "image",
         bounds: mainImage.bounds,
         contentDescription: "Hero image",
         resourceId: "hero",
+      },
+      {
+        className: "android.widget.VideoView",
+        mediaType: "video",
+        bounds: bottomWindowVideo.bounds,
       },
     ]);
   });

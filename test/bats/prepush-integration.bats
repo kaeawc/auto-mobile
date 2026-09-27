@@ -158,3 +158,29 @@ SHIM
   [[ "$output" == *"Revision 'definitely-no-such-ref' does not exist"* ]]
   [[ "$output" != *"no changed test/**/*.integration.test.ts files"* ]]
 }
+
+@test "fails when the touched-path VCS diff fails" {
+  local fake_bin
+  fake_bin="$BATS_TEST_TMPDIR/vcs-diff-bin"
+  mkdir -p "$fake_bin"
+  cat > "$fake_bin/git" <<'SHIM'
+#!/usr/bin/env bash
+if [[ "$1" == "rev-parse" ]]; then
+  exit 0
+fi
+if [[ "$1" == "diff" && " $* " == *" --cached "* && " $* " == *" --diff-filter=ACMRD "* ]]; then
+  exit 23
+fi
+if [[ "$1" == "diff" ]]; then
+  exit 0
+fi
+exit 0
+SHIM
+  chmod +x "$fake_bin/git"
+
+  run env PATH="$fake_bin:$PATH" AUTOMOBILE_INTEGRATION_TEST_BASE_REF=origin/main bash "$SCRIPT"
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"cached git diff failed (exit 23)"* ]]
+  [[ "$output" != *"Pre-push integration summary complete."* ]]
+}

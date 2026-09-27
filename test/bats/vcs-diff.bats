@@ -34,3 +34,34 @@ teardown() {
   [[ "$output" == *"src/changed.ts"* ]]
   [[ "$output" == *"+const changed = true;"* ]]
 }
+
+@test "fails when the cached diff fails even if the unstaged diff succeeds" {
+  rm -rf "$repo_dir/.jj"
+  cat > "$repo_dir/bin/git" <<'EOF'
+#!/usr/bin/env bash
+if [[ " $* " == *" --cached "* ]]; then
+  exit 23
+fi
+exit 0
+EOF
+  chmod +x "$repo_dir/bin/git"
+
+  run bash -c 'cd "$1" && PATH="$1/bin:$PATH" && source scripts/lib/vcs-diff.sh && vcs_touched_files_including_deleted' _ "$repo_dir"
+
+  [ "$status" -eq 23 ]
+  [[ "$output" == *"cached git diff failed (exit 23)"* ]]
+}
+
+@test "returns an empty list when cached and unstaged diffs are clean" {
+  rm -rf "$repo_dir/.jj"
+  cat > "$repo_dir/bin/git" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+  chmod +x "$repo_dir/bin/git"
+
+  run bash -c 'cd "$1" && PATH="$1/bin:$PATH" && source scripts/lib/vcs-diff.sh && vcs_touched_files_including_deleted' _ "$repo_dir"
+
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}

@@ -64,6 +64,37 @@ class ImeCommitDriverTest {
   }
 
   @Test
+  fun `cancel after a commit syncs editor before restore and completion`() {
+    val sink = FakeImeCommitSink(inputType = InputType.TYPE_CLASS_TEXT)
+    sink.readText = { _, _ -> "`a`" }
+    val driver = ImeCommitDriver(sink)
+    driver.commit("`a` after", PRIOR_IME_ID) { result ->
+      sink.events.add("complete")
+      assertTrue(result.partialApplication)
+    }
+    assertEquals(listOf("char", "char", "char", "finish", "read"), sink.events)
+
+    driver.cancel()
+
+    assertEquals(listOf("sync", "switch", "complete"), sink.events.takeLast(3))
+  }
+
+  @Test
+  fun `cancel after commit marks partial when editor sync cannot confirm quiescence`() {
+    val sink = FakeImeCommitSink(inputType = InputType.TYPE_CLASS_TEXT, failSync = true)
+    sink.readText = { _, _ -> "`a`" }
+    val driver = ImeCommitDriver(sink)
+    var result: ImeCommitResult? = null
+    driver.commit("`a` after", PRIOR_IME_ID) { result = it }
+
+    driver.cancel()
+
+    assertEquals(1, sink.syncCalls)
+    assertTrue(result!!.partialApplication)
+    assertEquals(listOf(PRIOR_IME_ID), sink.switchedImeIds)
+  }
+
+  @Test
   fun `text password field is refused and prior IME is restored`() {
     assertPasswordRefused(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD)
   }
@@ -459,6 +490,7 @@ class ImeCommitDriverTest {
     val readSizes = mutableListOf<Int>()
     var readText: (Int, Int) -> String? = { _, _ -> null }
     var afterCommit: (() -> Unit)? = null
+    var syncCalls = 0
     var clockMs = 0L
     var advanceClockOnDrain = false
     private val pending = ArrayDeque<() -> Unit>()
@@ -510,6 +542,7 @@ class ImeCommitDriverTest {
     }
 
     override fun syncEditorState(): Boolean {
+      syncCalls++
       if (failSync) return false
       events.add("sync")
       return true

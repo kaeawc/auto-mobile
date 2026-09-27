@@ -423,6 +423,71 @@ describe("DefaultSendKeysCommandExecutor", () => {
     }
   });
 
+  test("auto IME activation failure falls back before any editor mutation", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("shell ime set", { stdout: "", stderr: "selection failed" });
+    adb.setCommandResponse("shell settings get secure default_input_method", {
+      stdout: priorImeId,
+      stderr: "",
+    });
+    const textClient = createTextClient();
+    const executor = new DefaultSendKeysCommandExecutor(
+      androidDevice,
+      createAdbFactory(adb),
+      createObserver(focusedAndroidObservation()),
+      { textClient: textClient.client },
+    );
+
+    const result = await executor.type({ action: "type", text: "abc" });
+
+    expect(result).toMatchObject({ success: true, resolvedMode: "eventAll" });
+    expect(textClient.commitViaImeCalls).toEqual([]);
+    expect(adb.getExecutedCommands()).toContain(`shell ime set ${commitImeId}`);
+    expect(adb.getExecutedCommands()).toContain("shell input keyevent KEYCODE_A");
+  });
+
+  test("auto IME does not fall back after a partial commit", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponseSequence("shell settings get secure default_input_method", [
+      { stdout: priorImeId, stderr: "" },
+      { stdout: commitImeId, stderr: "" },
+    ]);
+    const textClient = createTextClient({
+      commitViaIme: async () => ({
+        success: false,
+        error: "commit interrupted",
+        partialApplication: true,
+      }),
+    });
+    const executor = new DefaultSendKeysCommandExecutor(
+      androidDevice,
+      createAdbFactory(adb),
+      createObserver(focusedAndroidObservation()),
+      { textClient: textClient.client },
+    );
+
+    const result = await executor.type({ action: "type", text: "abc" });
+
+    expect(result).toMatchObject({ success: false, partialApplication: true, resolvedMode: "ime" });
+    expect(textClient.calls).not.toContain("insert:abc");
+    expect(adb.getExecutedCommands()).not.toContain("shell input keyevent KEYCODE_A");
+  });
+
+  test("auto fallback reports a11y when eventAll cannot encode any character", async () => {
+    const textClient = createTextClient({ supportsImeCommit: false });
+    const executor = new DefaultSendKeysCommandExecutor(
+      androidDevice,
+      createAdbFactory(new FakeAdbExecutor()),
+      createObserver(focusedAndroidObservation()),
+      { textClient: textClient.client },
+    );
+
+    const result = await executor.type({ action: "type", text: "😀" });
+
+    expect(result).toMatchObject({ success: true, resolvedMode: "a11y" });
+    expect(textClient.calls).toContain("insert:😀");
+  });
+
   test("explicit IME key events require capability and use event delivery", async () => {
     const supported = createTextClient();
     const supportedAdb = new FakeAdbExecutor();

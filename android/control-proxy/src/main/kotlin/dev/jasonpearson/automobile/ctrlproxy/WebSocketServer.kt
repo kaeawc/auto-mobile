@@ -41,6 +41,13 @@ class WebSocketServer(
   /** Type-safe handler that receives decoded requests. When null, inbound messages are ignored. */
   private val messageHandler: WebSocketMessageHandler? = null,
   private val onPermanentStartFailure: () -> Unit = {},
+  private val portAvailable: (Int) -> Boolean = { candidatePort ->
+    if (candidatePort != 0) {
+      ServerSocket().use { it.bind(InetSocketAddress("127.0.0.1", candidatePort)) }
+    }
+    true
+  },
+  private val onRetryLockAcquired: () -> Unit = {},
 ) {
   companion object {
     private const val TAG = "WebSocketServer"
@@ -244,12 +251,13 @@ class WebSocketServer(
       startRetryJob = null
       startRetryJob = scope.launch {
         synchronized(startLock) {
-          if (server != null || tryStart()) return@launch
+          if (!coroutineContext.isActive || server != null || tryStart()) return@launch
         }
         for (retry in 1 until MAX_START_ATTEMPTS) {
           delay(START_RETRY_BASE_DELAY_MS * (1L shl (retry - 1)))
           synchronized(startLock) {
-            if (server != null || tryStart()) return@launch
+            onRetryLockAcquired()
+            if (!coroutineContext.isActive || server != null || tryStart()) return@launch
             if (retry == MAX_START_ATTEMPTS - 1) {
               Log.e(TAG, "WebSocket server failed to start after $MAX_START_ATTEMPTS attempts")
               onPermanentStartFailure()
@@ -265,9 +273,7 @@ class WebSocketServer(
     try {
       // CIO binds on an internal coroutine and reports an occupied port as an uncaught failure.
       // Detect the common occupied-port case before starting that coroutine.
-      if (port != 0) {
-        ServerSocket().use { it.bind(InetSocketAddress("127.0.0.1", port)) }
-      }
+      if (!portAvailable(port)) return false
 
       val candidate =
         // CtrlProxy is reached exclusively through adb forward. Binding loopback

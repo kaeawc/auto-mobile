@@ -124,11 +124,12 @@ export function getEnvironmentToolDefaults(
 function assertKnownToolNames(
   toolNames: readonly string[],
   knownToolNames: ReadonlySet<string>,
+  source: string,
 ): void {
   const unknown = toolNames.find((toolName) => !knownToolNames.has(toolName));
   if (unknown) {
     throw new Error(
-      `Tool '${unknown}' is not a session-configurable tool name; AUTOMOBILE_ENABLED_TOOLS/AUTOMOBILE_DISABLED_TOOLS accept session-configurable tools only (see the automobile:tools resource).`,
+      `Tool '${unknown}' is not a session-configurable tool name; ${source} accept session-configurable tools only (see the automobile:tools resource).`,
     );
   }
 }
@@ -139,8 +140,9 @@ export function getStartupToolDefaults(
   enabledTools: readonly string[] = [],
   disabledTools: readonly string[] = [],
 ): ToolDefaultOverrides {
-  assertKnownToolNames(enabledTools, knownToolNames);
-  assertKnownToolNames(disabledTools, knownToolNames);
+  const cliSource = "CLI startup defaults (--enable-tool/--disable-tool)";
+  assertKnownToolNames(enabledTools, knownToolNames, cliSource);
+  assertKnownToolNames(disabledTools, knownToolNames, cliSource);
   const disabledSet = new Set(disabledTools);
   const conflict = enabledTools.find((toolName) => disabledSet.has(toolName));
   if (conflict) {

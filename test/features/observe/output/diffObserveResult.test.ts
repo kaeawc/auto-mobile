@@ -193,6 +193,24 @@ describe("diffObserveResult", () => {
     expect(diff.changed[0].selector).toEqual({ elementId: undefined, label: "Reminders" });
   });
 
+  test("duplicate id-less iOS labels index the changed occurrence", () => {
+    const first = {
+      bounds: { left: 5, top: 5, right: 45, bottom: 45 },
+      clickable: true,
+      "ios-accessibility-label": "Remove",
+    };
+    const second = {
+      bounds: { left: 5, top: 55, right: 45, bottom: 95 },
+      clickable: true,
+      "ios-accessibility-label": "Remove",
+    };
+    const baseline = iosObs({ node: [first, second] });
+    const next = iosObs({ node: [first, { ...second, selected: true }] });
+    const diff = diffObserveResult(baseline, next);
+    expect(diff.changed).toHaveLength(1);
+    expect(diff.changed[0].selector).toEqual({ elementId: undefined, label: "Remove", index: 1 });
+  });
+
   test("a changed entry whose elementId AND label repeat elsewhere in `next` gets a disambiguating `index` (PR #6242 review PRRT_kwDOP-GF5M6fq3iI)", () => {
     // Two identical toggle rows sharing both resource-id and label — without an
     // occurrence index, both `changed` entries would emit the SAME selector, so

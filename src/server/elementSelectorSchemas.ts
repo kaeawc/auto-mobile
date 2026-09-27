@@ -86,6 +86,13 @@ export const resolverSelectorSchema: z.ZodType<ResolverSelector> = z.lazy(() =>
     )
     .refine(
       (selector) =>
+        (selector.testTag === undefined && selector.className === undefined) ||
+        selector.match === undefined ||
+        selector.match === "exact",
+      "Test tag and class selectors support exact matching only",
+    )
+    .refine(
+      (selector) =>
         [
           selector.elementId,
           selector.text,

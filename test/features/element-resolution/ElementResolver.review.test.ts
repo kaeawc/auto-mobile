@@ -52,6 +52,57 @@ test("sibling anchors honor nested containers", () => {
   );
 });
 
+test("text container keeps its matched section instead of promoting to a clickable card", () => {
+  const capture = snapshot([
+    node("card", {
+      clickable: true,
+      node: [
+        node("first", { text: "First", node: [node("save", { clickable: true })] }),
+        node("second", { text: "Second", node: [node("save", { clickable: true })] }),
+      ],
+    }),
+  ]);
+  const result = resolver.resolve(
+    capture,
+    { elementId: "save", container: { text: "Second" } },
+    tap,
+  );
+  expect(result.scope?.nativeId).toBe("second");
+  expect(result.chosen?.parentIndex).toBe(
+    capture.nodes.find((entry) => entry.nativeId === "second")?.index,
+  );
+});
+
+test("implicit text mode finds an input when only a partial match can perform input", () => {
+  const capture = snapshot([
+    node("button", { text: "Email", clickable: true }),
+    node("field", { text: "Email address", editable: true, class: "android.widget.EditText" }),
+  ]);
+  const result = resolver.resolve(capture, { text: "Email" }, { action: "input" });
+  expect(result.matchMode).toBe("contains");
+  expect(result.chosen?.nativeId).toBe("field");
+  expect(
+    resolver.resolve(capture, { text: "Email", match: "exact" }, { action: "input" }).chosen,
+  ).toBeNull();
+});
+
+test("bare node key wins before a namespace suffix peer", () => {
+  const capture = snapshot([
+    node("app:id/save", { clickable: true, bounds: { left: 0, top: 0, right: 10, bottom: 10 } }),
+    { "view-id": "save", clickable: true, bounds: { left: 0, top: 0, right: 100, bottom: 100 } },
+  ]);
+  const result = resolver.resolve(capture, { elementId: "save" }, tap);
+  expect(result.matches.map((entry) => entry.kind)).toEqual(["node-key-exact"]);
+  expect(result.chosen?.nodeKey).toBe("save");
+});
+
+test.each(["testTag", "className"] as const)("%s rejects unsupported match modes", (field) => {
+  for (const match of ["contains", "regex"] as const) {
+    expect(resolverSelectorSchema.safeParse({ [field]: "save", match }).success).toBe(false);
+  }
+  expect(resolverSelectorSchema.safeParse({ [field]: "save", match: "exact" }).success).toBe(true);
+});
+
 test("sibling anchors honor their random strategy within outer container", () => {
   const capture = snapshot([
     list("outside"),

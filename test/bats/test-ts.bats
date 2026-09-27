@@ -51,7 +51,19 @@ write_junit_report_with_lines() {
   } > "$outfile"
 }
 
+setup_file() {
+  FD3_OWNERSHIP_FILE="$BATS_FILE_TMPDIR/fd3-ownership"
+  printf '%s %s\n' "$BASHPID" "$(date +%s)" > "$FD3_OWNERSHIP_FILE"
+  local pgid
+  pgid="$(lsof -nP -a -p "$BASHPID" -F g 2> /dev/null | sed -n 's/^g//p' | head -n 1)"
+  [[ "$pgid" =~ ^[0-9]+$ ]] && printf 'g%s\n' "$pgid" >> "$FD3_OWNERSHIP_FILE"
+  return 0
+}
+
 setup() {
+  local pgid
+  pgid="$(lsof -nP -a -p "$BASHPID" -F g 2> /dev/null | sed -n 's/^g//p' | head -n 1)"
+  [[ "$pgid" =~ ^[0-9]+$ ]] && printf 'g%s\n' "$pgid" >> "$BATS_FILE_TMPDIR/fd3-ownership"
   STUB_BIN="$(mktemp -d)"
   REAL_BUN="$(command -v bun)"
   export REAL_BUN
@@ -210,38 +222,90 @@ teardown() {
 teardown_file() {
   command -v lsof > /dev/null 2>&1 || return 0
 
-  local self_pid="$BASHPID" pipe holders pid ppid pgid command command_line elapsed
+  local self_pid="$BASHPID" pipe holders pid ppid pgid command command_line elapsed ownership
+  local root_pid started start_text start_epoch
+  [[ -r "$BATS_FILE_TMPDIR/fd3-ownership" ]] || return 0
+  read -r root_pid started < "$BATS_FILE_TMPDIR/fd3-ownership"
+  [[ "$root_pid" == "$self_pid" && "$started" =~ ^[0-9]+$ ]] || return 0
   pipe="$(lsof -nP -a -p "$self_pid" -d 3 -F n 2> /dev/null | sed -n 's/^n//p' | head -n 1)"
   [[ -n "$pipe" ]] || return 0
 
   # Finish the scan before handling matches so its own processes are gone.
   holders="$({
-    lsof -nP -F pRgcfn 3>&- 2> /dev/null | awk -v pipe="$pipe" -v self="$self_pid" '
+    lsof -nP -F pRgcfn 3>&- 2> /dev/null | awk -v pipe="$pipe" -v root="$root_pid" -v state="$BATS_FILE_TMPDIR/fd3-ownership" '
+      BEGIN {
+        while ((getline line < state) > 0) {
+          if (line ~ /^g[0-9]+$/) own_group[substr(line, 2)] = 1
+        }
+        close(state)
+      }
       /^p[0-9]/ { pid = substr($0, 2) }
       /^R/ { parent[pid] = substr($0, 2) }
       /^g/ { group[pid] = substr($0, 2) }
       /^c/ { command[pid] = substr($0, 2) }
       /^n/ && substr($0, 2) == pipe { holder[pid] = 1 }
+      function descendant(candidate, current, seen) {
+        current = candidate
+        while (current != "" && current != 1 && !seen[current]++) {
+          if (current == root) return 1
+          current = parent[current]
+        }
+        return 0
+      }
+      function foreign_tree(candidate, current, seen) {
+        current = candidate
+        while (current != "" && current != 1 && !seen[current]++) {
+          if (current == root) return 0
+          current = parent[current]
+        }
+        return current == 1
+      }
       END {
-        # Fail closed unless the whole bats ancestor chain is visible.
-        for (pid = self; pid != 1; pid = parent[pid]) {
-          if (pid == "" || ancestor[pid]++ || parent[pid] == "") exit
+        # The file process and its ancestors are expected holders, not leaks.
+        for (pid = root; pid != "" && pid != 1 && !ancestor[pid]++; pid = parent[pid]) {
+          if (parent[pid] == "") break
         }
         for (pid in holder) {
-          if (!ancestor[pid] && parent[pid] != "" && group[pid] != "")
-            print pid "\t" parent[pid] "\t" group[pid] "\t" command[pid]
+          if (ancestor[pid]) continue
+          owned = descendant(pid)
+          # A process group shared with any other visible process tree cannot
+          # establish ownership of a reparented child.
+          orphan = parent[pid] == 1 && own_group[group[pid]] && group[pid] != ""
+          if (orphan) {
+            for (other in parent) {
+              if (other != pid && group[other] == group[pid] && !descendant(other)) {
+                orphan = 0
+                break
+              }
+            }
+          }
+          # A complete chain to init proves a live sibling belongs elsewhere.
+          # Incomplete chains still get a report-only diagnostic.
+          if (!owned && !orphan && parent[pid] != 1 && foreign_tree(pid)) continue
+          print pid "\t" (parent[pid] != "" ? parent[pid] : "?") "\t" \
+            (group[pid] != "" ? group[pid] : "?") "\t" \
+            (command[pid] != "" ? command[pid] : "?") "\t" \
+            (owned ? "descendant" : orphan ? "orphan" : "report")
         }
       }
     ' 3>&-
   } 3>&-)"
 
   # lsof supplies parent and process group IDs even where ps is unavailable.
-  while IFS=$'\t' read -r pid ppid pgid command; do
+  while IFS=$'\t' read -r pid ppid pgid command ownership; do
     [[ "$pid" =~ ^[0-9]+$ ]] || continue
     kill -0 "$pid" 2> /dev/null || continue
     command_line="$(ps -o command= -p "$pid" 2> /dev/null || true)"
     printf '# test-ts.bats left fd 3 open after last test: pid=%s ppid=%s pgid=%s command=%s\n' \
       "$pid" "$ppid" "$pgid" "${command_line:-$command}" >&3
+
+    if [[ "$ownership" == orphan ]]; then
+      start_text="$(ps -o lstart= -p "$pid" 2> /dev/null || true)"
+      start_epoch="$(date -j -f '%a %b %e %T %Y' "$start_text" +%s 2> /dev/null || date -d "$start_text" +%s 2> /dev/null || true)"
+      [[ "$start_epoch" =~ ^[0-9]+$ && "$start_epoch" -gt "$started" ]] || continue
+    elif [[ "$ownership" != descendant ]]; then
+      continue
+    fi
 
     kill -TERM "$pid" 2> /dev/null || continue
     elapsed=0
@@ -257,6 +321,72 @@ teardown_file() {
 
 run_lane() {
   run env PATH="$STUB_BIN:$PATH" TEST_TS_PRINT_CMD=1 bash "$SCRIPT" "$@"
+}
+
+@test "fd-3 reaper kills its child without signalling a sibling on the same pipe" {
+  command -v lsof > /dev/null || skip "lsof is required"
+  local fixture="$BATS_TEST_TMPDIR/fd3-hooks.sh" sibling_pid owner_pid index
+  awk '/^setup_file\(\) \{/ { copy=1 } /^run_lane\(\) \{/ { copy=0 } copy { print }' \
+    "$BATS_TEST_FILENAME" > "$fixture"
+  cat > "$BATS_TEST_TMPDIR/sibling.sh" <<'EOF'
+#!/usr/bin/env bash
+trap 'printf "TERM\n" >> "$1/signalled"' TERM
+sleep 30 &
+printf '%s\n' "$!" > "$1/sibling-child"
+touch "$1/sibling-ready"
+while [[ ! -e "$1/stop-sibling" ]]; do sleep 0.1; done
+wait || true
+EOF
+  cat > "$BATS_TEST_TMPDIR/owner.sh" <<'EOF'
+#!/usr/bin/env bash
+source "$1/fd3-hooks.sh"
+BATS_FILE_TMPDIR="$1"
+setup_file
+sleep 30 &
+own_child="$!"
+printf '%s\n' "$own_child" > "$1/own-child"
+while [[ ! -e "$1/sibling-ready" ]]; do sleep 0.1; done
+teardown_file
+wait "$own_child" 2> /dev/null
+wait_status=$?
+[[ "$wait_status" -gt 128 ]] && touch "$1/own-reaped"
+touch "$1/owner-done"
+EOF
+  mkfifo "$BATS_TEST_TMPDIR/shared-pipe"
+  exec 9<> "$BATS_TEST_TMPDIR/shared-pipe"
+  cat "$BATS_TEST_TMPDIR/shared-pipe" 9>&- > "$BATS_TEST_TMPDIR/diagnostics" &
+  local reader_pid=$!
+  bash "$BATS_TEST_TMPDIR/sibling.sh" "$BATS_TEST_TMPDIR" 3>&9 9>&- &
+  sibling_pid=$!
+  bash "$BATS_TEST_TMPDIR/owner.sh" "$BATS_TEST_TMPDIR" 3>&9 9>&- &
+  owner_pid=$!
+  exec 9>&-
+
+  for ((index = 0; index < 100; index += 1)); do
+    [[ -e "$BATS_TEST_TMPDIR/owner-done" ]] && break
+    sleep 0.1
+  done
+  local sibling_alive=false sibling_child_alive=false
+  kill -0 "$sibling_pid" 2> /dev/null && sibling_alive=true
+  kill -0 "$(cat "$BATS_TEST_TMPDIR/sibling-child")" 2> /dev/null && sibling_child_alive=true
+  touch "$BATS_TEST_TMPDIR/stop-sibling"
+  kill "$(cat "$BATS_TEST_TMPDIR/sibling-child")" 2> /dev/null || true
+  if [[ ! -e "$BATS_TEST_TMPDIR/owner-done" ]]; then
+    kill "$owner_pid" "$(cat "$BATS_TEST_TMPDIR/own-child")" 2> /dev/null || true
+  fi
+  wait "$owner_pid" || true
+  wait "$sibling_pid" || true
+  wait "$reader_pid" || true
+
+  [ -e "$BATS_TEST_TMPDIR/owner-done" ]
+  [ -e "$BATS_TEST_TMPDIR/own-reaped" ]
+  [ "$sibling_alive" = true ]
+  [ "$sibling_child_alive" = true ]
+  [ ! -e "$BATS_TEST_TMPDIR/signalled" ]
+  grep -q "pid=$(cat "$BATS_TEST_TMPDIR/own-child") " "$BATS_TEST_TMPDIR/diagnostics"
+  ! grep -q "pid=$sibling_pid " "$BATS_TEST_TMPDIR/diagnostics"
+  ! grep -q "pid=$(cat "$BATS_TEST_TMPDIR/sibling-child") " "$BATS_TEST_TMPDIR/diagnostics"
+  [ "$(cat "$BATS_TEST_TMPDIR/own-child")" != "$(cat "$BATS_TEST_TMPDIR/sibling-child")" ]
 }
 
 @test "unit lane is parallel and excludes integration and stress" {

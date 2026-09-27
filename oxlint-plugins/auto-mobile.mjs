@@ -730,8 +730,8 @@ const noRawSelectorFieldReadRule = {
             return type.types.some((item) => rawType(item, env, seen));
           if (type.type === "TSTypeOperator") return rawType(type.typeAnnotation, env, seen);
           if (type.type === "TSArrayType") return rawType(type.elementType, env, seen);
-          if (type.type === "TSTypeLiteral")
-            return type.members.some(
+          if (["TSTypeLiteral", "TSInterfaceBody"].includes(type.type))
+            return (type.members ?? type.body).some(
               (member) =>
                 member.type === "TSIndexSignature" && rawType(member.typeAnnotation, env, seen),
             );
@@ -746,7 +746,21 @@ const noRawSelectorFieldReadRule = {
               rawType(item, env, seen),
             );
           if (seen.has(name)) return false;
-          return rawType(alias, env, new Set([...seen, name]));
+          const nextSeen = new Set([...seen, name]);
+          return (
+            rawType(alias, env, nextSeen) ||
+            (env.get(`typeHeritage:${name}`) ?? []).some((heritage) =>
+              rawType(
+                {
+                  type: "TSTypeReference",
+                  typeName: heritage.expression,
+                  typeArguments: heritage.typeArguments,
+                },
+                env,
+                nextSeen,
+              ),
+            )
+          );
         };
         const lookup = (env, name) => env.get(name);
         const containsTypeParameter = (annotation, parameters) => {
@@ -1157,6 +1171,7 @@ const noRawSelectorFieldReadRule = {
               const declaration = statement.declaration ?? statement;
               if (declaration.type === "TSTypeAliasDeclaration") {
                 env.set(`type:${declaration.id.name}`, declaration.typeAnnotation);
+                env.set(`typeHeritage:${declaration.id.name}`, []);
                 env.set(
                   `typeParams:${declaration.id.name}`,
                   (declaration.typeParameters?.params ?? []).map((param) => param.name?.name),
@@ -1164,6 +1179,7 @@ const noRawSelectorFieldReadRule = {
               }
               if (declaration.type === "TSInterfaceDeclaration") {
                 env.set(`type:${declaration.id.name}`, declaration.body);
+                env.set(`typeHeritage:${declaration.id.name}`, declaration.extends ?? []);
                 env.set(
                   `typeParams:${declaration.id.name}`,
                   (declaration.typeParameters?.params ?? []).map((param) => param.name?.name),

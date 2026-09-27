@@ -32,6 +32,19 @@ test("scope covers debug/server but excludes canonical utility and tests", () =>
   expect(check(code, "src/features/utility/SearchableNode.ts")).toEqual([]);
   expect(check(code, "test/features/action/Test.ts")).toEqual([]);
 });
+
+test.each([
+  ["src/features/accessibility/SetAccessibilityFocus.ts", "node.text"],
+  ["src/features/accessibility/SetAccessibilityFocus.ts", 'node["resource-id"]'],
+  ["src/features/accessibility/SetAccessibilityFocus.ts", 'node["content-desc"]'],
+  ["src/features/observe/ConditionPredicates.ts", "node.text"],
+  ["src/features/observe/ConditionPredicates.ts", 'node["resource-id"]'],
+  ["src/features/observe/ConditionPredicates.ts", 'node["content-desc"]'],
+])("migrated consumer %s rejects %s", (filename, read) => {
+  expect(
+    check(`function inspect(node: ViewHierarchyNode) { return ${read}; }`, filename),
+  ).toHaveLength(1);
+});
 test("destructuring assignment and nested raw attributes cannot bypass enforcement", () => {
   expect(check("function match(node:any) { let text; ({text} = node); }")).toHaveLength(1);
   expect(check("function match(node:any) { const {$:{text}} = node; }")).toHaveLength(1);
@@ -365,6 +378,43 @@ test("seedless reduce inherits raw provenance from the receiver element", () => 
       "function inspect(nodes: ViewHierarchyNode[]) { return nodes.reduce((acc, _node) => acc.text); }",
     ),
   ).toHaveLength(1);
+});
+
+test.each([
+  'nodes.reduce((_acc, node) => node.text, "")',
+  'nodes.reduceRight((_acc, node) => node.text, "")',
+  "nodes.reduce((acc) => acc.text)",
+  "nodes.reduceRight((acc) => acc.text)",
+])("reduce callback rejects raw selector read: %s", (expression) => {
+  expect(
+    check(`function inspect(nodes: ViewHierarchyNode[]) { return ${expression}; }`),
+  ).toHaveLength(1);
+});
+
+test.each(["nodes.slice()[0].text", "nodes.concat()[0].text"])(
+  "array copy rejects raw selector read: %s",
+  (expression) => {
+    expect(
+      check(`function inspect(nodes: ViewHierarchyNode[]) { return ${expression}; }`),
+    ).toHaveLength(1);
+  },
+);
+
+test.each([
+  "interface DecoratedNode extends ViewHierarchyNode {} function inspect(node: DecoratedNode) { return node.text; }",
+  "interface BaseNode extends ViewHierarchyNode {} interface DecoratedNode extends BaseNode {} function inspect(node: DecoratedNode) { return node.text; }",
+  "interface DecoratedNode extends Element, ViewHierarchyNode {} function inspect(node: DecoratedNode) { return node.text; }",
+  "interface DecoratedNode extends ViewHierarchyNode, Element {} function inspect(node: DecoratedNode) { return node.text; }",
+])("inherited raw node interfaces reject selector reads: %s", (code) => {
+  expect(check(code)).toHaveLength(1);
+});
+
+test("interface extending only a safe type permits selector reads", () => {
+  expect(
+    check(
+      "interface DecoratedNode extends Element {} function inspect(node: DecoratedNode) { return node.text; }",
+    ),
+  ).toEqual([]);
 });
 
 test.each([

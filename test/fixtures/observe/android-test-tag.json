@@ -1,0 +1,26 @@
+{
+  "viewHierarchy": {
+    "hierarchy": {
+      "node": [
+        {
+          "class": "android.widget.Button",
+          "resource-id": "example.app:id/submit",
+          "test-tag": "submit-form",
+          "text": "Submit form",
+          "clickable": "true",
+          "enabled": "true",
+          "bounds": { "left": 20, "top": 100, "right": 220, "bottom": 160 }
+        },
+        {
+          "class": "android.widget.Button",
+          "resource-id": "example.app:id/submit-again",
+          "test-tag": "submit-form",
+          "text": "Submit again",
+          "clickable": "true",
+          "enabled": "true",
+          "bounds": { "left": 20, "top": 200, "right": 220, "bottom": 260 }
+        }
+      ]
+    }
+  }
+}

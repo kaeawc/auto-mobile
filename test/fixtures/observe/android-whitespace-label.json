@@ -1,0 +1,19 @@
+{
+  "viewHierarchy": {
+    "hierarchy": {
+      "node": {
+        "class": "android.widget.Button",
+        "resource-id": "example.app:id/submit",
+        "text": "  Submit  ",
+        "clickable": "true",
+        "enabled": "true",
+        "bounds": {
+          "left": 0,
+          "top": 0,
+          "right": 100,
+          "bottom": 50
+        }
+      }
+    }
+  }
+}

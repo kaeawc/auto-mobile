@@ -6,7 +6,10 @@ describe("turbo lint inputs cover the shell script chain", () => {
   const ROOT = join(import.meta.dir, "..", "..");
 
   interface TurboConfig {
-    readonly tasks: Record<string, { readonly inputs?: readonly string[] }>;
+    readonly tasks: Record<
+      string,
+      { readonly inputs?: readonly string[]; readonly env?: readonly string[] }
+    >;
   }
 
   interface OxlintConfig {
@@ -16,6 +19,10 @@ describe("turbo lint inputs cover the shell script chain", () => {
   function loadTurbo(): TurboConfig {
     return JSON.parse(readFileSync(join(ROOT, "turbo.json"), "utf8")) as TurboConfig;
   }
+
+  test("PR target is forwarded and hashed for the lint ratchet", () => {
+    expect(loadTurbo().tasks.lint?.env).toContain("GITHUB_BASE_REF");
+  });
 
   function lintInputs(): readonly string[] {
     return loadTurbo().tasks.lint?.inputs ?? [];

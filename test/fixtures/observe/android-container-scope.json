@@ -1,0 +1,146 @@
+{
+  "viewHierarchy": {
+    "hierarchy": {
+      "node": {
+        "class": "android.widget.LinearLayout",
+        "bounds": { "left": 0, "top": 0, "right": 300, "bottom": 300 },
+        "node": [
+          {
+            "class": "android.widget.LinearLayout",
+            "resource-id": "example.app:id/left",
+            "text": "Left section",
+            "bounds": { "left": 0, "top": 0, "right": 300, "bottom": 140 },
+            "node": [
+              {
+                "class": "android.widget.Button",
+                "resource-id": "example.app:id/action",
+                "test-tag": "shared-action",
+                "text": "Open",
+                "clickable": "true",
+                "enabled": "true",
+                "bounds": { "left": 20, "top": 40, "right": 220, "bottom": 100 }
+              },
+              {
+                "class": "android.widget.LinearLayout",
+                "bounds": { "left": 0, "top": 100, "right": 300, "bottom": 140 },
+                "node": [
+                  {
+                    "class": "android.widget.TextView",
+                    "resource-id": "example.app:id/more_label",
+                    "text": "More",
+                    "bounds": { "left": 20, "top": 105, "right": 110, "bottom": 130 }
+                  },
+                  {
+                    "class": "android.widget.Button",
+                    "text": "Visit",
+                    "clickable": "true",
+                    "bounds": { "left": 160, "top": 105, "right": 260, "bottom": 130 }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "class": "android.widget.LinearLayout",
+            "resource-id": "example.app:id/right",
+            "text": "Right section",
+            "bounds": { "left": 0, "top": 150, "right": 300, "bottom": 300 },
+            "node": [
+              {
+                "class": "android.widget.Button",
+                "resource-id": "example.app:id/action",
+                "test-tag": "shared-action",
+                "text": "Open",
+                "clickable": "true",
+                "enabled": "true",
+                "bounds": { "left": 20, "top": 190, "right": 220, "bottom": 250 }
+              },
+              {
+                "class": "android.widget.LinearLayout",
+                "bounds": { "left": 0, "top": 250, "right": 300, "bottom": 290 },
+                "node": [
+                  {
+                    "class": "android.widget.TextView",
+                    "resource-id": "example.app:id/more_label",
+                    "text": "More",
+                    "bounds": { "left": 20, "top": 255, "right": 110, "bottom": 280 }
+                  },
+                  {
+                    "class": "android.widget.Button",
+                    "text": "Visit",
+                    "clickable": "true",
+                    "bounds": { "left": 160, "top": 255, "right": 260, "bottom": 280 }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "contractScopedQueries": [
+    {
+      "query": {
+        "kind": "elementId",
+        "value": "example.app:id/action",
+        "container": { "elementId": "example.app:id/right" }
+      },
+      "bounds": [20, 190, 220, 250]
+    },
+    {
+      "query": {
+        "kind": "text",
+        "value": "Open",
+        "container": { "elementId": "example.app:id/right" }
+      },
+      "bounds": [20, 190, 220, 250]
+    },
+    {
+      "query": {
+        "kind": "testTag",
+        "value": "shared-action",
+        "container": { "elementId": "example.app:id/right" }
+      },
+      "bounds": [20, 190, 220, 250]
+    },
+    {
+      "query": {
+        "kind": "text",
+        "value": "Open",
+        "container": { "text": "Left section" }
+      },
+      "bounds": [20, 40, 220, 100]
+    },
+    {
+      "query": { "kind": "elementId", "value": "example.app:id/action", "strategy": "random" },
+      "bounds": [20, 190, 220, 250]
+    },
+    {
+      "query": { "kind": "text", "value": "Open", "strategy": "random" },
+      "bounds": [20, 190, 220, 250]
+    },
+    {
+      "query": { "kind": "testTag", "value": "shared-action", "strategy": "random" },
+      "bounds": [20, 190, 220, 250]
+    },
+    {
+      "query": {
+        "kind": "text",
+        "value": "More",
+        "sibling": true,
+        "container": { "elementId": "example.app:id/right" }
+      },
+      "bounds": [160, 255, 260, 280]
+    },
+    {
+      "query": {
+        "kind": "elementId",
+        "value": "example.app:id/more_label",
+        "sibling": true,
+        "container": { "elementId": "example.app:id/right" }
+      },
+      "bounds": [160, 255, 260, 280]
+    }
+  ]
+}

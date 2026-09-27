@@ -56,10 +56,24 @@ export function appear(
   const search = searchForWait(resolver, selector, { action: "inspect" });
   return (observation): ConditionEvaluation => {
     const result = search(observation);
+    let candidates = elements(result);
+    if (!result?.chosen && selector.elementId !== undefined && observation.viewHierarchy) {
+      const diagnostic = resolver.resolve(
+        {
+          id: String(observation.updatedAt ?? "wait"),
+          nodes: new SearchableHierarchy().project(observation.viewHierarchy),
+        },
+        { ...selector, match: "contains" },
+        { action: "inspect", matchMode: "contains" },
+      );
+      if (!diagnostic.error) {
+        candidates = elements(diagnostic);
+      }
+    }
     return {
       matched: Boolean(result?.chosen),
       matchedElement: result?.chosen?.element,
-      candidates: elements(result),
+      candidates,
     };
   };
 }
@@ -79,12 +93,24 @@ export function clickable(
   resolver: ConditionResolver,
   selector: ConditionSelector,
 ): ConditionPredicate {
-  const search = searchForWait(resolver, selector, { action: "tap" });
+  const search = searchForWait(resolver, selector, { action: "inspect" });
   return (observation): ConditionEvaluation => {
     const result = search(observation);
+    const source = result?.matches.find(({ node }) => node === result.chosen)?.sourceNodes?.[0];
+    const selected = source ?? result?.chosen;
+    const ownsText =
+      selector.text === undefined ||
+      (selected !== undefined &&
+        selected !== null &&
+        Object.values(selected.textSources).some((value) =>
+          normalizeQuotes(value)
+            .toLowerCase()
+            .includes(normalizeQuotes(selector.text!).toLowerCase()),
+        ));
     return {
-      matched: Boolean(result?.chosen),
-      matchedElement: result?.chosen?.element,
+      matched: Boolean(ownsText && selected?.affordances.includes("tap")),
+      matchedElement:
+        ownsText && selected?.affordances.includes("tap") ? selected.element : undefined,
       candidates: elements(result),
     };
   };
@@ -149,7 +175,8 @@ export function countStable(
   let equalRun = 0;
   return (observation): ConditionEvaluation => {
     const result = search(observation);
-    const count = result?.candidates.length ?? 0;
+    const count = new Set(result?.matches.flatMap(({ node, sourceNodes }) => sourceNodes ?? [node]))
+      .size;
     equalRun = previousCount !== undefined && count === previousCount ? equalRun + 1 : 1;
     previousCount = count;
     return { matched: equalRun >= stableReads, candidates: elements(result) };

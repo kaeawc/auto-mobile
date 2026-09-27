@@ -765,7 +765,10 @@ export const findWaitForElement = (
     const visibleSources = (resolution: typeof result) =>
       [
         ...new Set(resolution.matches.flatMap(({ node, sourceNodes }) => sourceNodes ?? [node])),
-      ].filter((node) => node.element && !isElementCenterOffScreen(node.element, viewHierarchy));
+      ].filter(
+        (node) =>
+          node.element && (negative || !isElementCenterOffScreen(node.element, viewHierarchy)),
+      );
     let candidates = visibleSources(result);
     if (canTryVisibleContains(selector, key, result.matchMode, candidates.length)) {
       result = finder.resolve(
@@ -821,6 +824,17 @@ export const findWaitForElement = (
     }
     return candidates;
   });
+  if (
+    !negative &&
+    waitFor.matchType !== "any" &&
+    waitFor.text !== undefined &&
+    waitFor.textMatch === undefined &&
+    sets.length > 1 &&
+    !sets.some((set) => sets.every((other) => set.some((node) => other.includes(node))))
+  ) {
+    const textIndex = predicates.findIndex((selector) => selector.text !== undefined);
+    sets[textIndex] = resolve({ text: waitFor.text, match: "contains" });
+  }
   const candidates = [...new Set(sets.flat())].sort(
     (a, b) => a.windowRank - b.windowRank || a.index - b.index,
   );

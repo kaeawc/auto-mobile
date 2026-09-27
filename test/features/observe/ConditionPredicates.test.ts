@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { ObserveResult } from "../../../src/models/ObserveResult";
 import {
+  appear,
   clickable,
   countStable,
   disappear,
@@ -124,6 +125,30 @@ describe("clickable predicate", () => {
     );
     expect(evaluation.matched).toBe(false);
   });
+
+  test("does not borrow tap affordance from a promoted parent", () => {
+    const predicate = clickable(finder, { text: "Submit" });
+    const evaluation = predicate(
+      obs([
+        node({
+          "resource-id": "row",
+          clickable: true,
+          node: [node({ text: "Submit", clickable: false })],
+        }),
+      ]),
+    );
+    expect(evaluation.matched).toBe(false);
+  });
+});
+
+test("appear retains partial ID candidates for an exact ID miss", () => {
+  const evaluation = appear(new ElementResolver(), { elementId: "submit" })(
+    obs([node({ "resource-id": "submit_help" })]),
+  );
+  expect(evaluation.matched).toBe(false);
+  expect(evaluation.candidates?.map((candidate) => candidate["resource-id"])).toContain(
+    "submit_help",
+  );
 });
 
 describe("textEquals predicate", () => {

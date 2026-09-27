@@ -46,6 +46,13 @@ test("debug selection follows tap eligibility and missing containers never searc
   expect(
     (await feature.execute({ text: "Save", container: { elementId: "missing" } })).matches,
   ).toHaveLength(0);
+  const exactMissing = await feature.execute({
+    text: "Save",
+    match: "exact",
+    container: { text: "missing" },
+  });
+  expect(exactMissing.query.match).toBe("exact");
+  expect(exactMissing.query.partialMatch).toBe(false);
 });
 test("debug sees secondary windows in resolver rank order", async () => {
   const feature = search({

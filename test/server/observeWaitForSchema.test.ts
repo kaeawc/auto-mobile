@@ -878,6 +878,20 @@ describe("findWaitForElement rich predicates", () => {
     expect(element).toBeNull();
   });
 
+  test("tries contained text on the same class node after an unrelated exact hit", () => {
+    const hierarchy = makeHierarchy([
+      { text: "Home", bounds: bounds(0, 0, 20, 20) },
+      { text: "Home tab", class: "UITabBar", bounds: bounds(0, 30, 20, 50) },
+    ]);
+    expect(
+      findWaitForElement(
+        new ElementResolver(),
+        { text: "Home", className: "UITabBar", matchType: "all" },
+        hierarchy,
+      )?.text,
+    ).toBe("Home tab");
+  });
+
   test("matches any specified element field when matchType is any", () => {
     const finder = new ElementResolver();
     const hierarchy = makeHierarchy([
@@ -1622,7 +1636,7 @@ test("textAny chooses and locks contains when exact source is offscreen", () => 
       new Map(),
       true,
     ),
-  ).toBeNull();
+  ).toMatchObject({ text: "Ready" });
   const modes = new Map<string, "exact" | "contains" | "regex">();
   expect(
     findWaitForElement(new ElementResolver(), { textAny: ["Ready"] }, hierarchy, undefined, modes)

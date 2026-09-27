@@ -65,21 +65,22 @@ export class DebugSearch {
     const timestamp = this.timer.now();
     const snapshot = await this.capture.capture({ freshness: "cached-ok" });
     const nodes = snapshot.nodes;
+    const requestedMatch =
+      options.match ??
+      (options.resourceId
+        ? "exact"
+        : options.partialMatch === undefined
+          ? undefined
+          : options.partialMatch
+            ? "contains"
+            : "exact");
     const resolution = this.resolver.resolve(
       { id: String(timestamp), nodes },
       {
         elementId: options.resourceId,
         text: options.text,
         container: options.container,
-        match:
-          options.match ??
-          (options.resourceId
-            ? "exact"
-            : options.partialMatch === undefined
-              ? undefined
-              : options.partialMatch
-                ? "contains"
-                : "exact"),
+        match: requestedMatch,
         caseSensitive: options.caseSensitive,
       },
       { action: "tap" },
@@ -87,6 +88,10 @@ export class DebugSearch {
     if (resolution.error && resolution.error !== "Container not found") {
       throw new ActionableError(resolution.error);
     }
+    const resultMatch =
+      resolution.error === "Container not found"
+        ? (requestedMatch ?? "exact")
+        : resolution.matchMode;
     const normalize = (value: string) =>
       options.caseSensitive
         ? normalizeQuotes(value).trim()
@@ -159,9 +164,9 @@ export class DebugSearch {
         text: options.text,
         resourceId: options.resourceId,
         container: options.container,
-        partialMatch: resolution.matchMode === "contains",
+        partialMatch: resultMatch === "contains",
         caseSensitive: options.caseSensitive === true,
-        match: resolution.matchMode,
+        match: resultMatch,
       },
       matches,
       selectedMatch: resolution.chosen

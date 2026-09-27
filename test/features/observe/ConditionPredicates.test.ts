@@ -1,12 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import type { ObserveResult } from "../../../src/models/ObserveResult";
 import {
+  appear,
   clickable,
   countStable,
   disappear,
   textEquals,
 } from "../../../src/features/observe/ConditionPredicates";
-import { DefaultElementFinder } from "../../../src/features/utility/ElementFinder";
+import { ElementResolver } from "../../../src/features/utility/ElementResolver";
 
 /**
  * Unit tests for the declarative condition-predicate builders that back the
@@ -54,7 +55,7 @@ function node(props: Record<string, unknown>): Record<string, unknown> {
 }
 
 describe("clickable predicate", () => {
-  const finder = new DefaultElementFinder();
+  const finder = new ElementResolver();
 
   test("matches when the selector's element is present AND clickable", () => {
     const predicate = clickable(finder, { elementId: "submit" });
@@ -124,10 +125,65 @@ describe("clickable predicate", () => {
     );
     expect(evaluation.matched).toBe(false);
   });
+
+  test("does not borrow tap affordance from a promoted parent", () => {
+    const predicate = clickable(finder, { text: "Submit" });
+    const evaluation = predicate(
+      obs([
+        node({
+          "resource-id": "row",
+          clickable: true,
+          node: [node({ text: "Submit", clickable: false })],
+        }),
+      ]),
+    );
+    expect(evaluation.matched).toBe(false);
+  });
+});
+
+test("appear retains partial ID candidates for an exact ID miss", () => {
+  const evaluation = appear(new ElementResolver(), { elementId: "submit" })(
+    obs([node({ "resource-id": "submit_help" })]),
+  );
+  expect(evaluation.matched).toBe(false);
+  expect(evaluation.candidates?.map((candidate) => candidate["resource-id"])).toContain(
+    "submit_help",
+  );
+});
+
+test("declarative text predicates keep exact matching", () => {
+  const observation = obs([node({ text: "Submit now", clickable: true })]);
+  expect(appear(new ElementResolver(), { text: "Submit" })(observation).matched).toBe(false);
+  expect(clickable(new ElementResolver(), { text: "Submit" })(observation).matched).toBe(false);
+  const stable = countStable(new ElementResolver(), { text: "Submit" });
+  expect(stable(observation).candidates).toEqual([]);
+});
+
+test("text containers retain contains matching ahead of a later exact peer", () => {
+  const evaluation = appear(new ElementResolver(), {
+    elementId: "submit",
+    container: { text: "Settings" },
+  })(
+    obs([
+      node({ text: "Settings panel", node: [node({ "resource-id": "submit" })] }),
+      node({ text: "Settings" }),
+    ]),
+  );
+  expect(evaluation.matched).toBe(true);
+  expect(evaluation.matchedElement?.["resource-id"]).toBe("submit");
+});
+
+test("appear reports the matching child rather than its promoted row", () => {
+  const evaluation = appear(new ElementResolver(), { text: "Ready" })(
+    obs([node({ clickable: true, node: [node({ text: "Ready" })] })]),
+  );
+  expect(evaluation.matched).toBe(true);
+  expect(evaluation.matchedElement?.text).toBe("Ready");
+  expect(evaluation.candidates?.[0]?.text).toBe("Ready");
 });
 
 describe("textEquals predicate", () => {
-  const finder = new DefaultElementFinder();
+  const finder = new ElementResolver();
 
   test("matches when the element located by elementId shows the expected text EXACTLY", () => {
     const predicate = textEquals(finder, { elementId: "counter" }, "5");
@@ -142,6 +198,13 @@ describe("textEquals predicate", () => {
     expect(evaluation.matched).toBe(false);
     // The located element is surfaced so a timeout shows what value it was stuck on.
     expect(evaluation.candidates!.some((c) => c.text === "50")).toBe(true);
+  });
+
+  test("does not ignore literal surrounding whitespace in an exact value", () => {
+    const observation = obs([node({ "resource-id": "counter", text: " 5 " })]);
+    expect(textEquals(finder, { elementId: "counter" }, "5")(observation).matched).toBe(false);
+    expect(textEquals(finder, {}, "5")(observation).matched).toBe(false);
+    expect(textEquals(finder, { elementId: "counter" }, " 5 ")(observation).matched).toBe(true);
   });
 
   test("without an elementId, matches any element whose text equals the expected value exactly", () => {
@@ -171,10 +234,26 @@ describe("textEquals predicate", () => {
     );
     expect(evaluation.matched).toBe(false);
   });
+
+  test("textEquals retains contains matching for a text container", () => {
+    const predicate = textEquals(
+      finder,
+      { elementId: "status", container: { text: "Settings" } },
+      "Ready",
+    );
+    const evaluation = predicate(
+      obs([
+        node({ text: "Settings panel", node: [node({ "resource-id": "status", text: "Ready" })] }),
+        node({ text: "Settings" }),
+      ]),
+    );
+    expect(evaluation.matched).toBe(true);
+    expect(evaluation.matchedElement?.text).toBe("Ready");
+  });
 });
 
 describe("countStable predicate", () => {
-  const finder = new DefaultElementFinder();
+  const finder = new ElementResolver();
 
   test("becomes stable once the matching-element count repeats for stableReads polls (default 2)", () => {
     const predicate = countStable(finder, { elementId: "row" });
@@ -251,7 +330,7 @@ describe("countStable predicate", () => {
 });
 
 describe("disappear predicate", () => {
-  const finder = new DefaultElementFinder();
+  const finder = new ElementResolver();
 
   test("treats a matching element outside its container as absent", () => {
     const predicate = disappear(finder, {

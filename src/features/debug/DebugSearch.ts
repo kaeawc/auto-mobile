@@ -1,22 +1,15 @@
 import {
-  AdbClientFactory,
+  type AdbClientFactory,
   defaultAdbClientFactory,
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
-import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
-import { logger } from "../../utils/logger";
-import { Timer, defaultTimer } from "../../utils/SystemTimer";
-import { BootedDevice, Element, DebugSearchResult, DebugSearchMatch } from "../../models";
-import { ViewHierarchy } from "../observe/ViewHierarchy";
-import { NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
-import { resolveViewHierarchyForSearch } from "../../utils/viewHierarchySearch";
-import { boundsArea } from "../../utils/bounds";
-import type { ElementParser } from "../../utils/interfaces/ElementParser";
-import type { TextMatcher } from "../../utils/interfaces/TextMatcher";
-import type { ElementFinder } from "../../utils/interfaces/ElementFinder";
-import { DefaultElementParser } from "../utility/ElementParser";
-import { DefaultTextMatcher } from "../utility/TextMatcher";
-import { DefaultElementFinder } from "../utility/ElementFinder";
-
+import { type Timer, defaultTimer } from "../../utils/SystemTimer";
+import type { BootedDevice, DebugSearchResult, DebugSearchMatch } from "../../models";
+import type { HierarchyCapture } from "../observe/HierarchyCapture";
+import { createDeviceHierarchyCapture } from "../observe/DeviceHierarchyCapture";
+import { normalizeQuotes } from "../utility/TextMatcher";
+import { ElementResolver } from "../utility/ElementResolver";
+import { ActionableError } from "../../models/ActionableError";
+import { serverConfig } from "../../utils/ServerConfig";
 interface DebugSearchOptions {
   /**
    * Text to search for
@@ -40,6 +33,7 @@ interface DebugSearchOptions {
    * Whether to use partial matching (substring containment, default: true)
    */
   partialMatch?: boolean;
+  match?: "exact" | "contains";
 
   /**
    * Whether to use case-sensitive matching (default: false)
@@ -57,245 +51,164 @@ interface DebugSearchOptions {
   maxNearMisses?: number;
 }
 
-/**
- * Feature to debug element search operations
- * Shows all matching elements and explains why certain elements were/weren't selected
- */
 export class DebugSearch {
-  private device: BootedDevice;
-  private readonly adb: AdbExecutor;
-  private viewHierarchy: ViewHierarchy;
-  private timer: Timer;
-  private parser: ElementParser;
-  private textMatcher: TextMatcher;
-  private finder: ElementFinder;
-
   constructor(
     device: BootedDevice,
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
-    timer: Timer = defaultTimer,
-    parser: ElementParser = new DefaultElementParser(),
-    textMatcher: TextMatcher = new DefaultTextMatcher(),
-    finder: ElementFinder = new DefaultElementFinder(),
-  ) {
-    this.device = device;
-    this.adb = adbFactory.create(device);
-    this.viewHierarchy = new ViewHierarchy(device, adbFactory);
-    this.timer = timer;
-    this.parser = parser;
-    this.textMatcher = textMatcher;
-    this.finder = finder;
-  }
-
-  /**
-   * Execute debug search
-   * @param options - Search options
-   * @returns Debug search result with all matches and analysis
-   */
+    private readonly timer: Timer = defaultTimer,
+    private readonly resolver: Pick<ElementResolver, "resolve"> = new ElementResolver(),
+    private readonly capture: HierarchyCapture = createDeviceHierarchyCapture(device, {
+      timer,
+      adbFactory,
+    }),
+  ) {}
   async execute(options: DebugSearchOptions): Promise<DebugSearchResult> {
-    const startTime = this.timer.now();
-    const partialMatch = options.partialMatch !== false;
-    const caseSensitive = options.caseSensitive === true;
-    const includeNearMisses = options.includeNearMisses !== false;
-    const maxNearMisses = options.maxNearMisses || 10;
-
-    logger.info(
-      `[DebugSearch] Starting search - text: "${options.text}", resourceId: "${options.resourceId}"`,
-    );
-
-    // Get current view hierarchy
-    const perf = new NoOpPerformanceTracker();
-    const hierarchy = await this.viewHierarchy.getViewHierarchy({}, perf);
-    const searchHierarchy = resolveViewHierarchyForSearch(hierarchy) ?? hierarchy;
-
-    if (!searchHierarchy || !searchHierarchy.hierarchy) {
-      return {
-        query: {
-          text: options.text,
-          resourceId: options.resourceId,
-          container: options.container,
-          partialMatch,
-          caseSensitive,
-        },
-        matches: [],
-        totalElements: 0,
-        timestamp: startTime,
-      };
-    }
-
-    const matches: DebugSearchMatch[] = [];
-    const nearMisses: { element: Element; property: string; value: string; reason: string }[] = [];
-    let totalElements = 0;
-
-    // Create text matcher
-    const matchesText = this.textMatcher.createTextMatcher(
-      options.text || "",
-      partialMatch,
-      caseSensitive,
-    );
-
-    // Traverse the hierarchy and find all matches
-    const rootNodes = this.parser.extractRootNodes(searchHierarchy);
-
-    // If container is specified, find container first
-    let containerNode: any = null;
-    if (options.container) {
-      containerNode = this.finder.findContainerNode(searchHierarchy, options.container);
-      if (!containerNode) {
-        logger.warn(
-          `[DebugSearch] Container "${options.container.elementId || options.container.text}" not found`,
-        );
-      }
-    }
-
-    const searchNodes = containerNode ? [containerNode] : rootNodes;
-
-    for (const searchNode of searchNodes) {
-      this.parser.traverseNode(searchNode, (node: any) => {
-        totalElements++;
-        const props = this.parser.extractNodeProperties(node);
-        const element = this.parser.parseNodeBounds(node);
-
-        if (!element) {
-          return;
-        }
-
-        const elementInfo: Partial<DebugSearchMatch> = {
-          className: props.class || props.className,
-          resourceId: props["resource-id"],
-          clickable: props.clickable === "true" || props.clickable === true,
-          enabled: props.enabled !== "false" && props.enabled !== false,
-          visible: boundsArea(element.bounds) > 0,
-        };
-
-        // Check for text match
-        if (options.text) {
-          // Check text property
-          if (props.text && typeof props.text === "string") {
-            if (matchesText(props.text)) {
-              matches.push({
-                element,
-                matchedProperty: "text",
-                matchedValue: props.text,
-                isExactMatch: props.text === options.text,
-                ...elementInfo,
-              } as DebugSearchMatch);
-            } else if (includeNearMisses && this.isSimilar(props.text, options.text)) {
-              nearMisses.push({
-                element,
-                property: "text",
-                value: props.text,
-                reason: `Similar but didn't match: "${props.text}" vs "${options.text}"`,
-              });
-            }
-          }
-
-          // Check content-desc
-          if (props["content-desc"] && typeof props["content-desc"] === "string") {
-            if (matchesText(props["content-desc"])) {
-              matches.push({
-                element,
-                matchedProperty: "content-desc",
-                matchedValue: props["content-desc"],
-                isExactMatch: props["content-desc"] === options.text,
-                ...elementInfo,
-              } as DebugSearchMatch);
-            } else if (includeNearMisses && this.isSimilar(props["content-desc"], options.text)) {
-              nearMisses.push({
-                element,
-                property: "content-desc",
-                value: props["content-desc"],
-                reason: `Similar but didn't match: "${props["content-desc"]}" vs "${options.text}"`,
-              });
-            }
-          }
-
-          // Check iOS accessibility label
-          if (
-            props["ios-accessibility-label"] &&
-            typeof props["ios-accessibility-label"] === "string"
-          ) {
-            if (matchesText(props["ios-accessibility-label"])) {
-              matches.push({
-                element,
-                matchedProperty: "ios-accessibility-label",
-                matchedValue: props["ios-accessibility-label"],
-                isExactMatch: props["ios-accessibility-label"] === options.text,
-                ...elementInfo,
-              } as DebugSearchMatch);
-            }
-          }
-        }
-
-        // Check for resource ID match
-        if (options.resourceId) {
-          const nodeResourceId = props["resource-id"];
-          if (nodeResourceId) {
-            const idMatches =
-              nodeResourceId.includes(options.resourceId) ||
-              nodeResourceId.endsWith(`:id/${options.resourceId}`);
-
-            if (idMatches) {
-              matches.push({
-                element,
-                matchedProperty: "resource-id",
-                matchedValue: nodeResourceId,
-                isExactMatch:
-                  nodeResourceId === options.resourceId ||
-                  nodeResourceId.endsWith(`:id/${options.resourceId}`),
-                ...elementInfo,
-              } as DebugSearchMatch);
-            } else if (includeNearMisses && this.isSimilar(nodeResourceId, options.resourceId)) {
-              nearMisses.push({
-                element,
-                property: "resource-id",
-                value: nodeResourceId,
-                reason: `Similar resource ID: "${nodeResourceId}" vs "${options.resourceId}"`,
-              });
-            }
-          }
-        }
-      });
-    }
-
-    // Sort matches: exact matches first, then by smallest area
-    matches.sort((a, b) => {
-      if (a.isExactMatch !== b.isExactMatch) {
-        return a.isExactMatch ? -1 : 1;
-      }
-      const aArea = boundsArea(a.element.bounds);
-      const bArea = boundsArea(b.element.bounds);
-      return aArea - bArea;
+    const timestamp = this.timer.now();
+    const snapshot = await this.capture.capture({
+      freshness: "fresh",
+      searchRaw: serverConfig.isRawElementSearchEnabled(),
     });
+    const nodes = snapshot.nodes;
+    const requestedMatch =
+      options.match ??
+      (options.resourceId
+        ? "exact"
+        : options.partialMatch === undefined
+          ? undefined
+          : options.partialMatch
+            ? "contains"
+            : "exact");
+    const container = options.container?.text
+      ? { ...options.container, match: "contains" as const }
+      : options.container;
+    const resolution = this.resolver.resolve(
+      { id: String(timestamp), nodes },
+      {
+        elementId: options.resourceId,
+        text: options.text,
+        container,
+        match: requestedMatch,
+        caseSensitive: options.caseSensitive,
+      },
+      { action: "tap" },
+    );
+    if (resolution.error && resolution.error !== "Container not found") {
+      throw new ActionableError(resolution.error);
+    }
+    const resultMatch =
+      resolution.error === "Container not found"
+        ? (requestedMatch ?? "exact")
+        : resolution.matchMode;
+    const normalize = (value: string) =>
+      options.caseSensitive
+        ? normalizeQuotes(value).trim()
+        : normalizeQuotes(value).trim().toLowerCase();
+    const matches: DebugSearchMatch[] = resolution.matches.map(({ node, kind, sourceNodes }) => {
+      const matchedNodes = sourceNodes ?? [node];
+      const source = options.text
+        ? (matchedNodes.find((candidate) =>
+            Object.values(candidate.textSources).some((value) =>
+              resolution.matchMode === "contains"
+                ? normalize(value).includes(normalize(options.text!))
+                : normalize(value) === normalize(options.text!),
+            ),
+          ) ?? matchedNodes[0])
+        : node;
+      const sources = options.resourceId
+        ? [
+            [
+              kind === "node-key-exact" || !node.nativeId ? "view-id" : "resource-id",
+              kind === "node-key-exact" || !node.nativeId ? node.nodeKey! : node.nativeId,
+            ],
+          ]
+        : matchedNodes
+            .flatMap((matchedNode) => Object.entries(matchedNode.textSources))
+            .filter(([, value]) =>
+              resolution.matchMode === "contains"
+                ? normalize(value).includes(normalize(options.text ?? ""))
+                : normalize(value) === normalize(options.text ?? ""),
+            );
+      return {
+        element: source.element ?? source.properties,
+        matchedProperty: [...new Set(sources.map(([key]) => key))].join(", ") || "label",
+        matchedProperties: [...new Set(sources.map(([key]) => key))],
+        matchedValue: sources[0]?.[1] ?? matchedNodes[0]?.label ?? "",
+        matchKind: kind,
+        isExactMatch: kind.endsWith("-exact") || kind === "id-namespace",
+        className: source.className,
+        resourceId: source.nativeId,
+        clickable: source.affordances.includes("tap"),
+        enabled: source.properties.enabled !== false && source.properties.enabled !== "false",
+        visible:
+          !!source.bounds &&
+          source.bounds.right > source.bounds.left &&
+          source.bounds.bottom > source.bounds.top,
+      };
+    });
+    const scopedNodes = options.container
+      ? this.resolver.resolve(
+          { id: String(timestamp), nodes },
+          { container },
+          { action: "inspect" },
+        ).candidates
+      : nodes;
+    const nearMisses: NonNullable<DebugSearchResult["nearMisses"]> = [];
+    for (const node of options.includeNearMisses === false ? [] : scopedNodes) {
+      if (
+        !node.element ||
+        resolution.candidates.includes(node) ||
+        resolution.matches.some((match) => match.node === node || match.sourceNodes?.includes(node))
+      ) {
+        continue;
+      }
+      for (const [property, value] of Object.entries(
+        options.resourceId ? { "resource-id": node.nativeId } : node.textSources,
+      )) {
+        if (value && this.isSimilar(value, options.resourceId ?? options.text ?? "")) {
+          nearMisses.push({
+            element: node.element,
+            property,
+            value,
+            reason: "Similar but did not match the selected mode",
+          });
+        }
+      }
+    }
 
-    // Determine which element would be selected by normal search
-    const selectedMatch = matches.length > 0 ? matches[0] : undefined;
-
-    const result: DebugSearchResult = {
+    return {
       query: {
         text: options.text,
         resourceId: options.resourceId,
         container: options.container,
-        partialMatch,
-        caseSensitive,
+        partialMatch: resultMatch === "contains",
+        caseSensitive: options.caseSensitive === true,
+        match: resultMatch,
       },
       matches,
-      selectedMatch,
-      totalElements,
-      timestamp: startTime,
+      selectedMatch: resolution.chosen
+        ? {
+            ...matches[
+              resolution.matches.findIndex(
+                ({ node }) => node === resolution.candidates[resolution.indexInMatches ?? -1],
+              )
+            ],
+            element: resolution.chosen.element ?? resolution.chosen.properties,
+            resourceId: resolution.chosen.nativeId,
+            className: resolution.chosen.className,
+            clickable: resolution.chosen.affordances.includes("tap"),
+            enabled:
+              resolution.chosen.properties.enabled !== false &&
+              resolution.chosen.properties.enabled !== "false",
+            visible: !!resolution.chosen.bounds,
+          }
+        : undefined,
+      totalElements: scopedNodes.length,
+      timestamp,
+      ...(nearMisses.length
+        ? { nearMisses: nearMisses.slice(0, options.maxNearMisses ?? 10) }
+        : {}),
     };
-
-    if (includeNearMisses && nearMisses.length > 0) {
-      result.nearMisses = nearMisses.slice(0, maxNearMisses);
-    }
-
-    logger.info(
-      `[DebugSearch] Found ${matches.length} matches, ${nearMisses.length} near-misses out of ${totalElements} elements`,
-    );
-
-    return result;
   }
-
   /**
    * Check if two strings are similar (for near-miss detection)
    */

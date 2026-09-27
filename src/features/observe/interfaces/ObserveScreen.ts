@@ -1,3 +1,4 @@
+import type { HierarchyCaptureRequest } from "../HierarchyCapture";
 import type { ObserveResult } from "../../../models";
 import type { ViewHierarchyQueryOptions } from "../../../models/ViewHierarchyQueryOptions";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
@@ -5,6 +6,10 @@ import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 export interface ObserveScreenExecuteOptions {
   queryOptions?: ViewHierarchyQueryOptions;
   perf?: PerformanceTracker;
+  /** Explicit internal capture policy; omitted preserves legacy wait options. */
+  freshness?: HierarchyCaptureRequest["freshness"];
+  /** Bounds an explicitly requested hierarchy capture. */
+  timeoutMs?: number;
   skipWaitForFresh?: boolean;
   minTimestamp?: number;
   signal?: AbortSignal;

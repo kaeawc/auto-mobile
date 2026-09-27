@@ -64,3 +64,26 @@ export const ANDROID_INPUT_CLASSES: readonly string[] = [
   "android.widget.MultiAutoCompleteTextView",
   "androidx.appcompat.widget.AppCompatEditText",
 ];
+
+/** A collection boundary cannot be crossed by an adjacent-control selector. */
+export function isCollectionElementProperties(props: Record<string, unknown>): boolean {
+  const className =
+    typeof props.class === "string"
+      ? props.class
+      : typeof props.className === "string"
+        ? props.className
+        : "";
+  return (
+    isTruthyFlag(props.scrollable) ||
+    className === "XCUIElementTypeTable" ||
+    [
+      "RecyclerView",
+      "ListView",
+      "GridView",
+      "ScrollView",
+      "CollectionView",
+      "TableView",
+      "ViewPager",
+    ].some((name) => className.endsWith(name))
+  );
+}

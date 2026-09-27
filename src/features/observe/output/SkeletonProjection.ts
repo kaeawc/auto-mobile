@@ -1,10 +1,8 @@
+import { foldSearchableLabels, inheritsOwnerLabel } from "../../utility/SearchableLabels";
+import { toSearchable } from "../../utility/SearchableNode";
 import type { Element } from "../../../models/Element";
 import { isTruthy } from "../../../models/Element";
-import {
-  getToggleContentDescription,
-  hasAccessibilityAction,
-  isEditableElementProperties,
-} from "../../../utils/elementProperties";
+import { getToggleContentDescription } from "../../../utils/elementProperties";
 import type { Affordance, ObserveResult, SkeletonElement } from "../../../models/ObserveResult";
 import {
   ElementProvenance,
@@ -73,58 +71,12 @@ function nonEmptyString(value: unknown): string | undefined {
  * owners that do not enable `testTagsAsResourceId`.
  */
 function deriveId(el: Element): string | undefined {
-  return nonEmptyString(el["resource-id"]) ?? nonEmptyString(el["view-id"]);
-}
-
-/** Named toggles use their accessibility identity; other nodes prefer visible text. */
-function deriveLabel(el: Element): string | undefined {
-  const toggle = getToggleContentDescription(el);
-  if (toggle) {
-    return toggle;
-  }
-  if (isEditableElementProperties(el)) {
-    return (
-      nonEmptyString(el.value) ?? nonEmptyString(el.text) ?? nonEmptyString(el["content-desc"])
-    );
-  }
-  return nonEmptyString(el.text) ?? nonEmptyString(el["content-desc"]);
+  return toSearchable(el).elementId;
 }
 
 /** Preserve a named toggle's own state alongside its identifying label. */
 function deriveSublabel(el: Element, label: string | undefined): string | undefined {
   return getToggleContentDescription(el) && el.text !== label ? nonEmptyString(el.text) : undefined;
-}
-
-/**
- * Classify a single element's affordances from its view-hierarchy attributes.
- * `tap`/`long-press` mirror the repo's canonical predicates
- * (`elementProperties.isClickableElementProperties`, `TapOnElement`): the
- * accessibility `actions` array (`"click"` / `"long_click"`) is authoritative on
- * captures that carry no `clickable` boolean (Compose, and iOS which uses
- * `longClickable`), so an element `tapOn` would act on must expose the affordance.
- */
-function deriveAffordances(el: Element): Affordance[] {
-  const affordances: Affordance[] = [];
-  if (isTruthy(el.clickable) || hasAccessibilityAction(el.actions, "click")) {
-    affordances.push("tap");
-  }
-  if (
-    isTruthy(el["long-clickable"]) ||
-    isTruthy(el.longClickable) ||
-    hasAccessibilityAction(el.actions, "long_click")
-  ) {
-    affordances.push("long-press");
-  }
-  if (isEditableElementProperties(el)) {
-    affordances.push("input");
-  }
-  if (isTruthy(el.scrollable)) {
-    affordances.push("scroll");
-  }
-  if (isTruthy(el.checkable)) {
-    affordances.push("toggle");
-  }
-  return affordances;
 }
 
 /** Flatten an element's object bounds to the compact `[left, top, right, bottom]` tuple. */
@@ -157,10 +109,8 @@ export function projectSkeletonElement(element: Element): SkeletonElement | unde
   if (!bounds) {
     return undefined;
   }
-  const affordances = deriveAffordances(element);
+  const { affordances, elementId, label } = toSearchable(element);
   const entry: SkeletonElement = { bounds, affordances };
-  const elementId = deriveId(element);
-  const label = deriveLabel(element);
   if (elementId !== undefined) {
     entry.elementId = elementId;
   }
@@ -238,9 +188,7 @@ function accumulateByIdentity(
     if (!bounds) {
       continue;
     }
-    const elementId = deriveId(el);
-    const label = deriveLabel(el);
-    const affordances = deriveAffordances(el);
+    const { elementId, label, affordances } = toSearchable(el);
     const key = identityKey(elementId, label, bounds);
 
     let acc = byIdentity.get(key);
@@ -405,14 +353,10 @@ function distinctHoistParts(
  * clobbered by a descendant's state text (that text belongs in `sublabel`,
  * per the AC2 #5869 behavior above).
  */
-function isIncompleteOwnLabel(label: string): boolean {
-  return label !== label.trim();
-}
-
 /**
  * Fold `parts` onto the container: the first becomes `label` when it has none
  * — or when its existing own label is an incomplete template
- * ({@link isIncompleteOwnLabel}), in which case the first part is prepended to
+ * (leading or trailing whitespace), in which case the first part is prepended to
  * the trimmed own label so the row keeps its generic noun ("Alarm") without
  * losing the identifying descendant text ("8:30 AM") that made the row unique
  * (issue #6221 item 3). The remainder always joins into `sublabel`. A
@@ -420,22 +364,7 @@ function isIncompleteOwnLabel(label: string): boolean {
  * as `sublabel`.
  */
 function applyHoistedLabels(container: SkeletonAccumulator, parts: string[]): void {
-  if (parts.length === 0) {
-    return;
-  }
-  if (container.label === undefined) {
-    container.label = parts[0];
-    if (parts.length > 1) {
-      container.sublabel = parts.slice(1).join(", ");
-    }
-  } else if (isIncompleteOwnLabel(container.label)) {
-    container.label = `${parts[0]} ${container.label.trim()}`;
-    if (parts.length > 1) {
-      container.sublabel = parts.slice(1).join(", ");
-    }
-  } else {
-    container.sublabel = [...new Set([container.sublabel, ...parts].filter(Boolean))].join(", ");
-  }
+  Object.assign(container, foldSearchableLabels(container, parts));
 }
 
 /** Order two rows top-to-bottom, then left-to-right, by their bounds tuple. */
@@ -514,26 +443,7 @@ function toSkeletonEntry(acc: SkeletonAccumulator): SkeletonElement {
   return entry;
 }
 
-/**
- * Order two accumulators the way `tapOn`'s own explicit-`index` resolution
- * does, so a per-entry `index` this file emits is guaranteed usable verbatim
- * as `tapOn.index` (issue #6221 item 2).
- *
- * `DefaultElementSelector.pickMatch` treats an explicit `index` as "the Nth
- * on-screen match in hierarchy order" and — critically — resolves it against
- * the RAW DFS traversal order `ElementFinder.findElementsByResourceId` returns
- * with `preserveTraversalOrder: true` (selecting by index skips the by-area
- * sort `selectionStrategy: "first"` otherwise applies). That traversal order
- * is exactly the pre-order DFS counter this file's provenance already carries:
- * `ElementProvenance.enter`, assigned once per element by
- * `DefaultObserveElementCollector` while walking the SAME root-group order
- * `ElementFinder` walks (main roots, then window roots topmost-first) — so
- * ranking duplicate entries by `enter` reproduces tapOn's index assignment
- * exactly. Provenance-less producers (hand-built fixtures, non-provenance
- * callers) fall back to the skeleton's own top-to-bottom/left-to-right reading
- * order, the closest available approximation without a real traversal to rank
- * against.
- */
+/** Preserve the live selector's main-root-first traversal order for duplicate indexes. */
 function byHierarchyOrder(a: SkeletonAccumulator, b: SkeletonAccumulator): number {
   if (a.provenance && b.provenance) {
     return a.provenance.enter - b.provenance.enter;
@@ -985,9 +895,6 @@ function imeAccumulator(
   };
 }
 
-/** Affordances whose row is a state/scroll container that commonly carries no text of its own. */
-const ATTRIBUTABLE_AFFORDANCES: readonly Affordance[] = ["toggle", "scroll"];
-
 /**
  * Attribute an owning row's label to unlabelled state containers (issue #6871).
  *
@@ -1010,7 +917,7 @@ function attributeContainerLabels(accumulators: SkeletonAccumulator[]): void {
     return;
   }
   for (const acc of accumulators) {
-    if (acc.label !== undefined || !ATTRIBUTABLE_AFFORDANCES.some((a) => acc.affordances.has(a))) {
+    if (acc.label !== undefined || !inheritsOwnerLabel(acc.affordances)) {
       continue;
     }
     acc.label = smallestLabelledAncestor(acc, labelled)?.label;

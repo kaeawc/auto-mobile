@@ -13,6 +13,7 @@ import {
 import gaps from "./observeContractGaps.json";
 import gapSignatures from "./observeContractGapSignatures.json";
 import caseKeys from "./observeContractCaseKeys.json";
+import { ResolverContractAdapter } from "./resolverContract";
 
 const captures = loadContractCaptures(join(import.meta.dir, "../../fixtures/observe"));
 const legacy = new LegacyContractResolver(() => 0.99);
@@ -20,16 +21,22 @@ const legacy = new LegacyContractResolver(() => 0.99);
 describe("observe-to-resolve migration contract", () => {
   const cases = captures.flatMap(contractCases);
   const allowed = new Set(Object.values(gaps).flat());
-  for (const { key, capture, query, observed } of cases) {
+  for (const testCase of cases) {
+    const { key, capture, query, observed } = testCase;
     test(key, () => {
       const actual = boundsKey(legacy.resolve(capture, query).chosen);
       // A fixed gap must remove its entry; an existing gap cannot drift to a
       // different wrong target (or disappear) without changing its signature.
       expect(actual).toBe(
-        allowed.has(key)
+        key in gapSignatures
           ? gapSignatures[key as keyof typeof gapSignatures]
           : observed.bounds.join(","),
       );
+      const roundTrips =
+        boundsKey(new ResolverContractAdapter(testCase).resolve(capture, query).chosen) ===
+        observed.bounds.join(",");
+      // A fixed gap must remove its entry; an unrecorded failure cannot be hidden.
+      expect(roundTrips).toBe(!allowed.has(key));
     });
   }
 
@@ -37,7 +44,7 @@ describe("observe-to-resolve migration contract", () => {
     const keys = new Set(cases.map(({ key }) => key));
     expect([...keys].sort()).toEqual(caseKeys);
     expect([...allowed].filter((key) => !keys.has(key))).toEqual([]);
-    expect(Object.keys(gapSignatures).sort()).toEqual([...allowed].sort());
+    expect([...allowed].filter((key) => !(key in gapSignatures))).toEqual([]);
   });
 
   test("fixture inventory includes nested captures and both raw notification states", () => {

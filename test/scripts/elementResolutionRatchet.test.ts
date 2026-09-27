@@ -39,14 +39,15 @@ test("signature ratchet retains outcomes for every surviving gap", () => {
   ).toThrow("only shrink");
 });
 
-test("reviewed focus seed cannot restore gaps removed from a later baseline", () => {
+test("ratchet cannot restore gaps removed from a later baseline", () => {
   const gaps = readFileSync("test/features/element-resolution/observeContractGaps.json", "utf8");
   const signatures = readFileSync(
     "test/features/element-resolution/observeContractGapSignatures.json",
     "utf8",
   );
   const shrunkenGaps = JSON.parse(gaps) as Record<string, string[]>;
-  shrunkenGaps["F-focus-input"].pop();
+  const finding = "F-focus-input" in shrunkenGaps ? "F-focus-input" : Object.keys(shrunkenGaps)[0];
+  shrunkenGaps[finding].pop();
   expect(() => assertRatchetDoesNotGrow(gaps, JSON.stringify(shrunkenGaps))).toThrow("only shrink");
   const shrunkenSignatures = JSON.parse(signatures) as Record<string, string | null>;
   const removed = Object.keys(shrunkenSignatures).find((key) => key.includes("focus-input"))!;

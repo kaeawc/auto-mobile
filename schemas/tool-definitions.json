@@ -999,8 +999,13 @@
             }
           ]
         },
+        "match": {
+          "description": "Explicit matching mode; ID defaults to exact or namespace matching",
+          "type": "string",
+          "enum": ["exact", "contains"]
+        },
         "partialMatch": {
-          "description": "Whether to use partial matching (substring containment, default: true)",
+          "description": "Legacy explicit text substring flag; omitted text matching tries exact first. IDs require match: contains for substring search.",
           "type": "boolean"
         },
         "caseSensitive": {
@@ -4267,7 +4272,7 @@
             "absent": {
               "type": "object",
               "additionalProperties": false,
-              "description": "Wait until an element matching these fields is absent (text uses contains match)",
+              "description": "Wait until an element matching these fields is absent (text uses exact match)",
               "properties": {
                 "elementId": {
                   "type": "string"
@@ -8019,7 +8024,7 @@
             "absent": {
               "type": "object",
               "additionalProperties": false,
-              "description": "Wait until an element matching these fields is absent (text uses contains match)",
+              "description": "Wait until an element matching these fields is absent (text uses exact match)",
               "properties": {
                 "elementId": {
                   "type": "string"

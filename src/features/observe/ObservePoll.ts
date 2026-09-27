@@ -265,6 +265,7 @@ export async function pollObserveUntil(
 
     const observation = await observeScreen.execute({
       minTimestamp,
+      timeoutMs: Math.max(1, options.timeoutMs - (timer.now() - start)),
       skipWaitForFresh: false,
       signal: options.signal,
       // Polls are intermediate state only. Public callers that opt into

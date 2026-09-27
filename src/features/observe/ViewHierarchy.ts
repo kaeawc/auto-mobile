@@ -1,8 +1,9 @@
+import { linkWindowRoots } from "./linkWindowRoots";
 import {
   AdbClientFactory,
   defaultAdbClientFactory,
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
-import { logger, LogLevel } from "../../utils/logger";
+import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { BootedDevice } from "../../models";
 import { Element } from "../../models";
@@ -15,14 +16,16 @@ import { DefaultElementGeometry } from "../utility/ElementGeometry";
 import { ViewHierarchyQueryOptions } from "../../models";
 import { AndroidCtrlProxyClient } from "./android";
 import { IOSCtrlProxyClient } from "./ios";
-import { cleanupIosXCTestHierarchy } from "./ios/cleanupIosHierarchy";
-import { assignStableViewIds } from "./android/StableNodeIdentity";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import { serverConfig } from "../../utils/ServerConfig";
 import { attachRawViewHierarchy } from "../../utils/viewHierarchySearch";
 import type { ViewHierarchy as ViewHierarchyInterface } from "./interfaces/ViewHierarchy";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
-import { parseBounds } from "../../utils/bounds";
+import {
+  normalizeIosHierarchy,
+  projectActionableHierarchy,
+  filterOffscreenNodes,
+} from "./HierarchyNormalization";
 import { HOST_OUTPUT_CHILD_CAP_REASON_PREFIX } from "./truncationReasons";
 import type { CtrlProxyHierarchyResponse } from "./ios/types";
 import type { Hierarchy } from "../../models/ViewHierarchyResult";
@@ -34,16 +37,6 @@ function iosHierarchyUnavailable(result: CtrlProxyHierarchyResponse | null): Hie
     error: `Failed to retrieve iOS view hierarchy from CtrlProxy iOS: ${reason}${detail ? `: ${detail}` : ""}`,
     iosUnavailableReason: reason,
   };
-}
-
-/**
- * Interface for element bounds
- */
-interface ElementBounds {
-  left: number;
-  top: number;
-  right: number;
-  bottom: number;
 }
 
 /**
@@ -200,7 +193,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
       // `result.fresh` says whether the delegate verified this tree against the
       // device on this call or served a host-side cache entry unverified; carry
       // it so ObserveScreen can report freshness instead of assuming it.
-      return this.convertXCTestHierarchy(
+      return this.normalizeIosHierarchy(
         result.hierarchy,
         result.updatedAt,
         result.reconnectStatus,
@@ -221,32 +214,24 @@ export class ViewHierarchy implements ViewHierarchyInterface {
   /**
    * Convert XCTestHierarchy to ViewHierarchyResult format
    */
-  private convertXCTestHierarchy(
+  normalizeIosHierarchy(
     hierarchy: any,
     updatedAt?: number,
     ctrlProxyReconnect?: ViewHierarchyResult["ctrlProxyReconnect"],
     frameContext?: string,
     fresh?: boolean,
   ): ViewHierarchyResult {
-    const cleanedHierarchy = cleanupIosXCTestHierarchy(hierarchy);
-    // Match the Android ingest invariant: generated path UUIDs must never be
-    // published as selector ids. This is the canonical iOS conversion used by
-    // observe and iOS action refreshes.
-    assignStableViewIds(cleanedHierarchy.hierarchy);
-    const result = {
-      ...cleanedHierarchy,
-      updatedAt: updatedAt ?? hierarchy.updatedAt ?? this.timer.now(),
-    };
-    if (ctrlProxyReconnect) {
-      result.ctrlProxyReconnect = ctrlProxyReconnect;
-    }
-    if (frameContext !== undefined) {
-      result.frameContext = frameContext;
-    }
-    if (fresh !== undefined) {
-      result.fresh = fresh;
-    }
-    return result;
+    return normalizeIosHierarchy(
+      hierarchy,
+      updatedAt ?? hierarchy.updatedAt ?? this.timer.now(),
+      ctrlProxyReconnect,
+      frameContext,
+      fresh,
+    );
+  }
+
+  projectActionableHierarchy(hierarchy: ViewHierarchyResult): ViewHierarchyResult {
+    return projectActionableHierarchy(this.device.platform, hierarchy);
   }
 
   /**
@@ -454,7 +439,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
       truncations,
     );
 
-    if (meetsFilterCriteria) {
+    if (meetsFilterCriteria || Number.isInteger(props.windowId)) {
       const cleanedNode = this.cleanNodeProperties(node);
 
       if (relevantChildren.length > 0) {
@@ -494,6 +479,9 @@ export class ViewHierarchy implements ViewHierarchyInterface {
     const result = structuredClone(viewHierarchy);
     const truncations: string[] = [];
     result.hierarchy = this.filterSingleNode(viewHierarchy.hierarchy, true, truncations);
+    if (result.windows) {
+      result.windows = linkWindowRoots(result.hierarchy, result.windows);
+    }
     if (truncations.length > 0) {
       // Surface the per-node child cap on the same channel as device-side
       // truncation (#6601) so an agent reading the rendered rows knows they were
@@ -529,132 +517,9 @@ export class ViewHierarchy implements ViewHierarchyInterface {
     return filtered;
   }
 
-  /**
-   * Check if bounds are completely offscreen
-   * @param bounds - Element bounds
-   * @param screenWidth - Screen width
-   * @param screenHeight - Screen height
-   * @param margin - Extra margin around screen to keep near-visible elements (default 100px)
-   * @returns True if element is completely offscreen
-   */
-  private isCompletelyOffscreen(
-    bounds: ElementBounds,
-    screenWidth: number,
-    screenHeight: number,
-    margin: number = 100,
-  ): boolean {
-    // Element is offscreen if it's completely outside the screen + margin
-    return (
-      bounds.right < -margin || // Completely left of screen
-      bounds.left > screenWidth + margin || // Completely right of screen
-      bounds.bottom < -margin || // Completely above screen
-      bounds.top > screenHeight + margin // Completely below screen
-    );
-  }
-
-  /**
-   * Recursively filter out offscreen nodes from the hierarchy
-   * @param node - Node to filter
-   * @param screenWidth - Screen width
-   * @param screenHeight - Screen height
-   * @param margin - Extra margin to keep near-visible elements
-   * @returns Filtered node or null if completely offscreen with no visible children
-   */
-  private filterOffscreenNode(
-    node: any,
-    screenWidth: number,
-    screenHeight: number,
-    margin: number = 100,
-  ): any | null {
-    if (!node) {
-      return null;
-    }
-
-    const bounds = parseBounds(node.bounds ?? node.$?.bounds);
-
-    // Check if this node is completely offscreen
-    const isOffscreen =
-      bounds && this.isCompletelyOffscreen(bounds, screenWidth, screenHeight, margin);
-
-    // Process children
-    const children = node.node;
-    const filteredChildren: any[] = [];
-
-    if (children) {
-      const childArray = Array.isArray(children) ? children : [children];
-      for (const child of childArray) {
-        const filteredChild = this.filterOffscreenNode(child, screenWidth, screenHeight, margin);
-        if (filteredChild !== null) {
-          if (Array.isArray(filteredChild)) {
-            filteredChildren.push(...filteredChild);
-          } else {
-            filteredChildren.push(filteredChild);
-          }
-        }
-      }
-    }
-
-    // If node is offscreen but has visible children, return just the children
-    if (isOffscreen && filteredChildren.length > 0) {
-      return filteredChildren.length === 1 ? filteredChildren[0] : filteredChildren;
-    }
-
-    // If node is offscreen and has no visible children, filter it out
-    if (isOffscreen && filteredChildren.length === 0) {
-      return null;
-    }
-
-    // Node is visible - return it with filtered children
-    const result = { ...node };
-    if (filteredChildren.length > 0) {
-      result.node = filteredChildren.length === 1 ? filteredChildren[0] : filteredChildren;
-    } else if (node.node) {
-      delete result.node;
-    }
-
-    return result;
-  }
-
-  /**
-   * Filter out completely offscreen nodes from the view hierarchy
-   * This reduces hierarchy size significantly for scrollable content (like YouTube)
-   * @param viewHierarchy - The view hierarchy to filter
-   * @param screenWidth - Screen width in pixels
-   * @param screenHeight - Screen height in pixels
-   * @param margin - Extra margin around screen to keep near-visible elements (default 100px)
-   * @returns Filtered view hierarchy with offscreen nodes removed
-   */
-  filterOffscreenNodes(
-    viewHierarchy: any,
-    screenWidth: number,
-    screenHeight: number,
-    margin: number = 100,
-  ): any {
-    if (!viewHierarchy || !viewHierarchy.hierarchy || screenWidth <= 0 || screenHeight <= 0) {
-      return viewHierarchy;
-    }
-
-    const result = { ...viewHierarchy };
-    result.hierarchy = this.filterOffscreenNode(
-      viewHierarchy.hierarchy,
-      screenWidth,
-      screenHeight,
-      margin,
-    );
-
-    if (logger.getLogLevel() <= LogLevel.DEBUG) {
-      const originalSize = JSON.stringify(viewHierarchy.hierarchy).length;
-      const filteredSize = JSON.stringify(result.hierarchy).length;
-      const reduction = Math.round((1 - filteredSize / originalSize) * 100);
-
-      if (reduction > 10) {
-        logger.debug(
-          `Offscreen filtering reduced hierarchy by ${reduction}% (${originalSize} -> ${filteredSize} bytes)`,
-        );
-      }
-    }
-
-    return result;
+  /** Preserve the shared offscreen projection used by observe and action captures. */
+  filterOffscreenNodes(hierarchy: any, width: number, height: number, margin = 100): any {
+    return filterOffscreenNodes(hierarchy, width, height, margin);
   }
 
   /**
@@ -866,6 +731,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
   cleanNodeProperties(node: any): any {
     const result: any = {};
     const allowedProperties = [
+      "windowId",
       "text",
       "resourceId",
       "resource-id",

@@ -48,3 +48,58 @@ export const validateElementIdTextSelector = (
     });
   }
 };
+
+/** Canonical resolver selector. Tools compose this schema as they migrate. */
+export interface ResolverSelector {
+  elementId?: string;
+  text?: string;
+  testTag?: string;
+  contentDescription?: string;
+  className?: string;
+  index?: number;
+  selectionStrategy?: "first" | "random";
+  match?: "exact" | "contains" | "regex";
+  caseSensitive?: boolean;
+  container?: ResolverSelector;
+  sibling?: ResolverSelector;
+}
+
+export const resolverSelectorSchema: z.ZodType<ResolverSelector> = z.lazy(() =>
+  z
+    .object({
+      elementId: z.string().min(1).optional(),
+      text: z.string().trim().min(1).optional(),
+      contentDescription: z.string().trim().min(1).optional(),
+      className: z.string().min(1).optional(),
+      testTag: z.string().min(1).optional(),
+      index: z.number().int().nonnegative().optional(),
+      selectionStrategy: elementSelectionStrategySchema.optional(),
+      match: z.enum(["exact", "contains", "regex"]).optional(),
+      caseSensitive: z.boolean().optional(),
+      container: resolverSelectorSchema.optional(),
+      sibling: resolverSelectorSchema.optional(),
+    })
+    .strict()
+    .refine(
+      (selector) => selector.elementId === undefined || selector.match !== "regex",
+      "Element ID selectors do not support regular expressions",
+    )
+    .refine(
+      (selector) =>
+        (selector.testTag === undefined && selector.className === undefined) ||
+        selector.match === undefined ||
+        selector.match === "exact",
+      "Test tag and class selectors support exact matching only",
+    )
+    .refine(
+      (selector) =>
+        [
+          selector.elementId,
+          selector.text,
+          selector.testTag,
+          selector.contentDescription,
+          selector.className,
+        ].filter((value) => value !== undefined).length <= 1,
+      "Provide at most one of elementId, text, or testTag",
+    ),
+);

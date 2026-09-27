@@ -280,6 +280,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
             WindowInfo(
               id = window.id,
               type = window.type,
+              windowLayer = windowLayer,
               isActive = window.isActive,
               isFocused = window.isFocused,
               bounds = ElementBounds(windowBounds),
@@ -400,7 +401,18 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
         }
         if (mainHierarchy != null) {
           val fallbackWindowId = activeWindowKey ?: DEFAULT_WINDOW_KEY
-          windowEntries.add(
+          if (windowInfos.none { it.id == fallbackWindowId }) {
+            windowInfos.add(
+              WindowInfo(
+                id = fallbackWindowId,
+                type = AccessibilityWindowInfo.TYPE_APPLICATION,
+                windowLayer = activeWindowLayer,
+                isActive = true,
+                isFocused = true,
+              )
+            )
+          }
+          val fallbackEntry =
             WindowEntry(
               windowId = fallbackWindowId,
               windowType = "application",
@@ -410,7 +422,12 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
               isFocused = true,
               hierarchy = mainHierarchy!!,
             )
-          )
+          val existingIndex = windowEntries.indexOfFirst { it.windowId == fallbackWindowId }
+          if (existingIndex >= 0) {
+            windowEntries[existingIndex] = fallbackEntry
+          } else {
+            windowEntries.add(fallbackEntry)
+          }
         }
       }
 
@@ -469,10 +486,12 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
             // The desktop projection folds this subtree; raw captures retain every key.
             if (it.windowType == "input_method" && !it.packageName.isNullOrBlank()) {
               it.hierarchy.copy(
-                extras = it.hierarchy.extras.orEmpty() + ("automobile:imePackage" to it.packageName)
+                windowId = it.windowId,
+                extras =
+                  it.hierarchy.extras.orEmpty() + ("automobile:imePackage" to it.packageName),
               )
             } else {
-              it.hierarchy
+              it.hierarchy.copy(windowId = it.windowId)
             }
           }
       val unifiedHierarchy =

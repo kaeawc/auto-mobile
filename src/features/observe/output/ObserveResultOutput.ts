@@ -5,6 +5,8 @@ import type { ViewHierarchyNode } from "../../../models/ViewHierarchyResult";
 import { projectSkeleton, projectSkeletonElement } from "./SkeletonProjection";
 import { capLayoutWarnings } from "../audits/SafeAreaAuditor";
 import { captureFidelityTruncationReasons } from "../truncationReasons";
+import { parseBounds } from "../../../utils/bounds";
+import { normalizeQuotes } from "../../utility/TextMatcher";
 
 /**
  * Output-only shrinking of a single `ObserveResult` for serialization
@@ -477,14 +479,13 @@ export interface ObserveDiffSelector {
   label?: string;
   /**
    * Disambiguator (PR #6242 review PRRT_kwDOP-GF5M6fq3iI), present only when
-   * `elementId` repeats elsewhere among `next`'s nodes: without it, two
-   * `changed` entries for distinct repeated controls (same resource-id AND
-   * label — e.g. two identical toggle rows) would emit the SAME selector, so
+   * the selected element ID or label repeats among `next`'s nodes. Without it,
+   * two changed controls with the same ID or an ID-less iOS accessibility label emit the same selector, so
    * `tapOn` would act on the first match rather than the occurrence that
    * actually changed. Same hierarchy-order semantics as the skeleton's #6238
    * `index` — verbatim-usable as `tapOn({ selector, index })` — computed by
-   * {@link computeElementIdOccurrenceIndexes} over the SAME preorder walk
-   * `flattenForDiff` produces. Unique-id entries never carry this field.
+   * {@link computeSelectorOccurrenceIndexes} over the SAME preorder walk
+   * `flattenForDiff` produces. Unique selectors never carry this field.
    */
   index?: number;
 }
@@ -497,6 +498,14 @@ function diffNonEmptyString(value: unknown): string | undefined {
 /** `elementId = resource-id ?? view-id` off a diff node's raw attributes — see {@link deriveDiffSelector}. */
 function diffElementId(attributes: Record<string, unknown>): string | undefined {
   return diffNonEmptyString(attributes["resource-id"]) ?? diffNonEmptyString(attributes["view-id"]);
+}
+
+function diffLabel(attributes: Record<string, unknown>): string | undefined {
+  return (
+    diffNonEmptyString(attributes["text"]) ??
+    diffNonEmptyString(attributes["content-desc"]) ??
+    diffNonEmptyString(attributes["ios-accessibility-label"])
+  );
 }
 
 /**
@@ -514,8 +523,7 @@ function deriveDiffSelector(
   index?: number,
 ): ObserveDiffSelector | undefined {
   const elementId = diffElementId(attributes);
-  const label =
-    diffNonEmptyString(attributes["text"]) ?? diffNonEmptyString(attributes["content-desc"]);
+  const label = diffLabel(attributes);
   if (elementId === undefined && label === undefined) {
     return undefined;
   }
@@ -524,40 +532,55 @@ function deriveDiffSelector(
 
 /**
  * Occurrence index for every flattened `next` node whose resolved `elementId`
- * (`resource-id ?? view-id`) repeats elsewhere in the SAME preorder DFS walk
+ * (`resource-id ?? view-id`) or ID-less label repeats in the SAME preorder DFS walk
  * `flattenForDiff` performs (PR #6242 review PRRT_kwDOP-GF5M6fq3iI) — the
  * identical traversal order `tapOn.index` resolves against, and the same
  * hierarchy-order semantics `SkeletonProjection.assignDuplicateIndexes` (issue
  * #6238) already uses for the skeleton's own `index`. Keyed by `pathKey` (the
  * one thing that uniquely identifies a specific flattened node instance) so a
  * `changed` entry can look up its own index without re-deriving ambiguity from
- * scratch. Only ambiguous elementIds (repeated 2+ times) get an entry — a
- * unique id is left out, mirroring the skeleton's "no spurious index on the
+ * scratch. Only ambiguous selectors (repeated 2+ times) get an entry — a
+ * unique selector is left out, mirroring the skeleton's "no spurious index on the
  * common case" rule.
  *
- * Scoped to the positional-match `changed` path only: content-identity
- * re-paired `changed` entries (`repairByContentIdentity` /
- * `repairByIosStableIdentity`) already require a UNIQUE content key among
- * leftovers on both sides to re-pair at all, so they are inherently
- * unambiguous and need no occurrence index.
+ * Also used after content and iOS stable-identity repair: a unique identity
+ * among leftovers can still share a public label with another next-tree node.
  */
-function computeElementIdOccurrenceIndexes(nodes: readonly FlatObserveNode[]): Map<string, number> {
+function computeSelectorOccurrenceIndexes(nodes: readonly FlatObserveNode[]): Map<string, number> {
   const byElementId = new Map<string, FlatObserveNode[]>();
+  const byLabel = new Map<string, FlatObserveNode[]>();
   for (const node of nodes) {
-    const elementId = diffElementId(node.attributes);
-    if (elementId === undefined) {
+    if (!parseBounds(node.attributes.bounds)) {
       continue;
     }
-    const group = byElementId.get(elementId);
-    if (group) {
+    const elementId = diffElementId(node.attributes);
+    const label = diffLabel(node.attributes);
+    if (label !== undefined) {
+      const normalized = normalizeQuotes(label).trim().toLowerCase();
+      const group = byLabel.get(normalized) ?? [];
       group.push(node);
-    } else {
-      byElementId.set(elementId, [node]);
+      byLabel.set(normalized, group);
+    }
+    if (elementId !== undefined) {
+      const group = byElementId.get(elementId) ?? [];
+      group.push(node);
+      byElementId.set(elementId, group);
     }
   }
-  const ambiguousEntries = [...byElementId.values()]
-    .filter((group) => group.length >= 2)
-    .flatMap((group) => group.map((node, position): [string, number] => [node.pathKey, position]));
+  const ambiguousEntries = nodes.flatMap((node): [string, number][] => {
+    if (!parseBounds(node.attributes.bounds)) {
+      return [];
+    }
+    const elementId = diffElementId(node.attributes);
+    const label = diffLabel(node.attributes);
+    const group =
+      elementId !== undefined
+        ? byElementId.get(elementId)
+        : label
+          ? byLabel.get(normalizeQuotes(label).trim().toLowerCase())
+          : undefined;
+    return group && group.length > 1 ? [[node.pathKey, group.indexOf(node)]] : [];
+  });
   return new Map(ambiguousEntries);
 }
 
@@ -834,6 +857,7 @@ interface FlatObserveNode {
 }
 
 interface DiffRepairNode extends ObserveDiffNode {
+  pathKey: string;
   ancestorClasses: readonly string[];
 }
 
@@ -1305,6 +1329,7 @@ function repairByContentIdentity(
   added: DiffRepairNode[],
   removed: DiffRepairNode[],
   changed: ObserveDiffNodeChange[],
+  occurrenceIndexByPathKey: ReadonlyMap<string, number>,
 ): { added: DiffRepairNode[]; removed: DiffRepairNode[] } {
   const addedByKey = indexByContentKey(added);
   const removedByKey = indexByContentKey(removed);
@@ -1330,7 +1355,10 @@ function repairByContentIdentity(
       changed.push({
         key: addedNode.key,
         fromKey: removedNode.key,
-        selector: deriveDiffSelector(addedNode.attributes),
+        selector: deriveDiffSelector(
+          addedNode.attributes,
+          occurrenceIndexByPathKey.get(addedNode.pathKey),
+        ),
         changes: attrChanges,
       });
     }
@@ -1510,6 +1538,7 @@ function repairByIosStableIdentity(
   added: DiffRepairNode[],
   removed: DiffRepairNode[],
   changed: ObserveDiffNodeChange[],
+  occurrenceIndexByPathKey: ReadonlyMap<string, number>,
 ): { added: DiffRepairNode[]; removed: DiffRepairNode[] } {
   const addedByKey = indexByIosStableKey(added);
   const removedByKey = indexByIosStableKey(removed);
@@ -1530,7 +1559,10 @@ function repairByIosStableIdentity(
       changed.push({
         key: addedNode.key,
         fromKey: removedNode.key,
-        selector: deriveDiffSelector(addedNode.attributes),
+        selector: deriveDiffSelector(
+          addedNode.attributes,
+          occurrenceIndexByPathKey.get(addedNode.pathKey),
+        ),
         changes: attrChanges,
       });
     }
@@ -1638,9 +1670,8 @@ export function diffObserveResult(
   const nextFlatNodes = flattenForDiff(next, cfg?.collapseKeyboard);
   const baseByKey = groupByKey(flattenForDiff(baseline, cfg?.collapseKeyboard));
   const nextByKey = groupByKey(nextFlatNodes);
-  // Occurrence-index map for ambiguous elementIds among `next`'s nodes (PR #6242
-  // review PRRT_kwDOP-GF5M6fq3iI) — see computeElementIdOccurrenceIndexes' doc.
-  const occurrenceIndexByPathKey = computeElementIdOccurrenceIndexes(nextFlatNodes);
+  // Occurrence-index map for ambiguous IDs and labels among `next`'s nodes.
+  const occurrenceIndexByPathKey = computeSelectorOccurrenceIndexes(nextFlatNodes);
 
   const added: DiffRepairNode[] = [];
   const removed: DiffRepairNode[] = [];
@@ -1665,6 +1696,7 @@ export function diffObserveResult(
     }
     for (let i = paired; i < nextNodes.length; i++) {
       added.push({
+        pathKey: nextNodes[i].pathKey,
         key: nextNodes[i].key,
         attributes: nextNodes[i].attributes,
         ancestorClasses: nextNodes[i].ancestorClasses,
@@ -1672,6 +1704,7 @@ export function diffObserveResult(
     }
     for (let i = paired; i < baseNodes.length; i++) {
       removed.push({
+        pathKey: baseNodes[i].pathKey,
         key: baseNodes[i].key,
         attributes: baseNodes[i].attributes,
         ancestorClasses: baseNodes[i].ancestorClasses,
@@ -1686,11 +1719,16 @@ export function diffObserveResult(
   let finalAdded = added;
   let finalRemoved = removed;
   if (cfg?.contentIdentity !== false) {
-    const repaired = repairByContentIdentity(added, removed, changed);
+    const repaired = repairByContentIdentity(added, removed, changed, occurrenceIndexByPathKey);
     finalAdded = repaired.added;
     finalRemoved = repaired.removed;
     if (isIosObservation(baseline) && isIosObservation(next)) {
-      const iosRepaired = repairByIosStableIdentity(finalAdded, finalRemoved, changed);
+      const iosRepaired = repairByIosStableIdentity(
+        finalAdded,
+        finalRemoved,
+        changed,
+        occurrenceIndexByPathKey,
+      );
       finalAdded = iosRepaired.added;
       finalRemoved = iosRepaired.removed;
     }

@@ -1,7 +1,10 @@
-import type { ObserveResult, ViewHierarchyNode, ViewHierarchyResult } from "../../models";
+import type { ObserveResult, ViewHierarchyResult } from "../../models";
 import type { Element } from "../../models/Element";
-import { isTruthy } from "../../models/Element";
-import { isClickableElementProperties } from "../../utils/elementProperties";
+import {
+  SearchableHierarchy,
+  type SearchableEntry,
+  type SearchableNode,
+} from "../utility/SearchableNode";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
 import { DefaultElementParser } from "../utility/ElementParser";
 import { FlattenedElementEntry, IdentifyMediaViews } from "./IdentifyMediaViews";
@@ -21,10 +24,13 @@ export interface ObserveElementCollector {
 }
 
 export class DefaultObserveElementCollector implements ObserveElementCollector {
+  private readonly searchableHierarchy: SearchableHierarchy;
   constructor(
-    private readonly parser: ElementParser = new DefaultElementParser(),
+    parser: ElementParser = new DefaultElementParser(),
     private readonly mediaClassifier: IdentifyMediaViews = new IdentifyMediaViews(parser),
-  ) {}
+  ) {
+    this.searchableHierarchy = new SearchableHierarchy(parser);
+  }
 
   collect(
     viewHierarchy: ViewHierarchyResult,
@@ -41,20 +47,26 @@ export class DefaultObserveElementCollector implements ObserveElementCollector {
     // hoisting/suppression can tell a genuine descendant from an unrelated node
     // in another window (issue #5881). `mainRootCount` keeps every main-hierarchy
     // root in a single group while each window root gets its own.
-    const mainRoots = this.parser.extractRootNodes(viewHierarchy);
-    const windowRoots = this.parser.extractWindowRootNodes(viewHierarchy, "topmost-first");
-    const rootGroups: { root: ViewHierarchyNode; group: number }[] = [
-      ...mainRoots.map((root) => ({ root, group: 0 })),
-      ...windowRoots.map((root, index) => ({ root, group: index + 1 })),
-    ];
+    const rootGroups = new Map<number, SearchableEntry[]>();
+    const seen = new Set<SearchableEntry["source"]>();
+    // Keep the live selector's main-first order until action consumers migrate.
+    for (const entry of this.searchableHierarchy.project(viewHierarchy)) {
+      if (seen.has(entry.source)) {
+        continue;
+      }
+      seen.add(entry.source);
+      const group = rootGroups.get(entry.rootGroup) ?? [];
+      group.push(entry);
+      rootGroups.set(entry.rootGroup, group);
+    }
 
     // Shared pre-order counter + parent records so ancestry intervals are
     // computed once after every root is walked.
     const provenanceState: ProvenanceState = { enter: 0, records: [] };
 
-    for (const { root, group } of rootGroups) {
+    for (const [group, entries] of rootGroups) {
       keyboardPackage =
-        this.collectFromRoot(root, group, platform, provenanceState, {
+        this.collectFromRoot(entries, group, platform, provenanceState, {
           clickable,
           scrollable,
           flattenedEntries,
@@ -82,7 +94,7 @@ export class DefaultObserveElementCollector implements ObserveElementCollector {
   }
 
   private collectFromRoot(
-    rootNode: ViewHierarchyNode,
+    entries: readonly SearchableEntry[],
     group: number,
     platform: "android" | "ios",
     provenanceState: ProvenanceState,
@@ -101,8 +113,10 @@ export class DefaultObserveElementCollector implements ObserveElementCollector {
     let keyboardRoot: KeyboardRoot | undefined;
     let capturedKeyboardPackage: string | undefined;
 
-    this.parser.traverseNode(rootNode, (node: ViewHierarchyNode, depth: number) => {
-      const nodeProperties = this.parser.extractNodeProperties(node);
+    for (const searchable of entries) {
+      const { properties: nodeProperties, depth } = searchable;
+      // Public observe descriptors remain independently owned by each collection.
+      const parsedNode = searchable.element ? structuredClone(searchable.element) : undefined;
       keyboardRoot = nextKeyboardRoot(
         keyboardRoot,
         nodeProperties.extras?.["automobile:imePackage"],
@@ -120,14 +134,14 @@ export class DefaultObserveElementCollector implements ObserveElementCollector {
         ancestors.pop();
       }
 
-      const parsedNode = this.parser.parseNodeBounds(node);
       if (!parsedNode) {
-        return;
+        continue;
       }
 
       const parent = ancestors.length > 0 ? ancestors[ancestors.length - 1].provenance : undefined;
       const enter = provenanceState.enter++;
       const provenance: ElementProvenance = {
+        windowRank: searchable.windowRank,
         group,
         enter,
         exit: enter,
@@ -137,9 +151,9 @@ export class DefaultObserveElementCollector implements ObserveElementCollector {
       provenanceState.records.push({ provenance, parent });
       ancestors.push({ depth, provenance });
 
-      const actionable = collectActionableNode(parsedNode, nodeProperties, collections);
+      const actionable = collectActionableNode(parsedNode, searchable, collections);
 
-      const accessibilityText = nodeProperties.text || nodeProperties["content-desc"] || undefined;
+      const accessibilityText = searchable.categoryText;
       collections.flattenedEntries.push({
         element: parsedNode,
         index: collections.nextIndex(),
@@ -149,7 +163,7 @@ export class DefaultObserveElementCollector implements ObserveElementCollector {
       if (isUncollectedWrapper(parsedNode, actionable, accessibilityText)) {
         collections.uncollectedWrappers.push(parsedNode);
       }
-    });
+    }
     return capturedKeyboardPackage;
   }
 }
@@ -160,16 +174,16 @@ export class DefaultObserveElementCollector implements ObserveElementCollector {
  */
 function collectActionableNode(
   element: Element,
-  properties: Element,
+  searchable: SearchableNode,
   collections: { clickable: Element[]; scrollable: Element[] },
 ): boolean {
   let collected = false;
   // A non-clickable switch still needs its toggle affordance (issue #6257).
-  if (isClickableElementProperties(properties) || isTruthy(properties.checkable)) {
+  if (searchable.categories.clickable) {
     collections.clickable.push(element);
     collected = true;
   }
-  if (isTruthy(properties.scrollable)) {
+  if (searchable.categories.scrollable) {
     collections.scrollable.push(element);
     collected = true;
   }

@@ -126,6 +126,42 @@ describe("Highlight Tools Registration", () => {
     expect(addCalls).toEqual([{ id: "highlight-ios-shape", shape: validShape, platform: "ios" }]);
   });
 
+  test("iOS selector highlights omit offscreen nodes from the shared projection", async () => {
+    let highlighted = false;
+    const hierarchy = {
+      updatedAt: 1,
+      screenWidth: 100,
+      screenHeight: 100,
+      hierarchy: {
+        bounds: [0, 0, 100, 100],
+        node: [
+          { text: "Visible", bounds: [0, 0, 20, 20] },
+          { text: "Offscreen", bounds: [0, 500, 20, 520] },
+        ],
+      },
+    };
+    registerHighlightTools({
+      viewHierarchyClientFactory: () => ({
+        requestHierarchySync: async () => ({ hierarchy }),
+        convertToViewHierarchyResult: () => hierarchy as ViewHierarchyResult,
+      }),
+      highlightClientFactory: () =>
+        ({
+          addHighlight: async () => {
+            highlighted = true;
+            return { success: true };
+          },
+        }) as any,
+    });
+    const tool = ToolRegistry.getTool("highlight")!;
+    const response = await tool.deviceAwareHandler!(
+      { deviceId: "ios-test", platform: "ios", name: "test" },
+      tool.schema.parse({ text: "Offscreen" }),
+    );
+    expect(JSON.parse(response.content[0].text).success).toBe(false);
+    expect(highlighted).toBe(false);
+  });
+
   test("resolves iOS selector highlights from the iOS hierarchy", async () => {
     const hierarchy: ViewHierarchyResult = {
       hierarchy: {
@@ -186,7 +222,7 @@ describe("Highlight Tools Registration", () => {
     });
   });
 
-  test("attaches iOS source dims from hierarchy screen size when present", async () => {
+  test("uses observe root dimensions over stale iOS screen metadata", async () => {
     const hierarchy: ViewHierarchyResult = {
       hierarchy: {
         node: {
@@ -234,7 +270,7 @@ describe("Highlight Tools Registration", () => {
 
     expect(addCalls[0]?.shape).toEqual({
       type: "circle",
-      bounds: { x: 12, y: 124, width: 366, height: 44, sourceWidth: 402, sourceHeight: 874 },
+      bounds: { x: 12, y: 124, width: 366, height: 44, sourceWidth: 390, sourceHeight: 844 },
     });
   });
 

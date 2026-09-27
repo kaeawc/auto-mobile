@@ -1,3 +1,4 @@
+import type { HierarchyCapture } from "./HierarchyCapture";
 import type { ScreenshotService } from "./interfaces/ScreenshotService";
 import type { ViewHierarchy } from "./interfaces/ViewHierarchy";
 import type { Window } from "./interfaces/Window";
@@ -20,6 +21,7 @@ import type { HierarchyPlatformValidator } from "./HierarchyPlatformValidator";
 export interface ObserveScreenDependencies {
   // Data sources
   viewHierarchy?: ViewHierarchy;
+  hierarchyCapture?: HierarchyCapture;
   window?: Window;
   screenshot?: ScreenshotService;
   backStack?: BackStack;

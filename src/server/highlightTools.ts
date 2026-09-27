@@ -14,13 +14,14 @@ import {
 } from "../models";
 import { highlightShapeSchema, VisualHighlightClient } from "../features/debug/VisualHighlight";
 import { generateHighlightId, recordVideoRecordingHighlightAdded } from "./videoRecordingManager";
-import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
-import { AndroidCtrlProxyClient } from "../features/observe/android";
-import { IOSCtrlProxyClient } from "../features/observe/ios";
+import type { HierarchyCapture } from "../features/observe/HierarchyCapture";
+import {
+  createDeviceHierarchyCapture,
+  type HierarchySyncClient,
+} from "../features/observe/DeviceHierarchyCapture";
 import { DefaultElementSelector } from "../features/utility/DefaultElementSelector";
 import { DefaultElementFinder } from "../features/utility/ElementFinder";
 import { DefaultElementParser } from "../features/utility/ElementParser";
-import { NoOpPerformanceTracker, type PerformanceTracker } from "../utils/PerformanceTracker";
 import {
   elementContainerSchema,
   elementIdTextFieldsSchema,
@@ -209,20 +210,16 @@ const resolveHighlightShapeFromSelector = async (
     throw new ActionableError("highlight requires elementId or text when shape is not provided.");
   }
 
-  const viewHierarchyClient = dependencies.viewHierarchyClientFactory
-    ? dependencies.viewHierarchyClientFactory(device)
-    : createDefaultViewHierarchyClient(device);
-  const hierarchyTimeout = args.timeoutMs ?? DEFAULT_HIERARCHY_TIMEOUT_MS;
-  const syncResult = await viewHierarchyClient.requestHierarchySync(
-    new NoOpPerformanceTracker(),
-    false,
-    undefined,
-    hierarchyTimeout,
-  );
-  if (!syncResult) {
-    throw new ActionableError("Unable to retrieve view hierarchy for highlight.");
-  }
-  const viewHierarchy = viewHierarchyClient.convertToViewHierarchyResult(syncResult.hierarchy);
+  const capture =
+    dependencies.hierarchyCaptureFactory?.(device) ??
+    createDeviceHierarchyCapture(device, {
+      syncClientFactory: dependencies.viewHierarchyClientFactory,
+    });
+  const snapshot = await capture.capture({
+    freshness: "fresh",
+    timeoutMs: args.timeoutMs ?? DEFAULT_HIERARCHY_TIMEOUT_MS,
+  });
+  const viewHierarchy = snapshot.hierarchy;
   const finder = new DefaultElementFinder();
   const elementSelector = new DefaultElementSelector(finder);
   const container = args.container ?? null;
@@ -326,34 +323,12 @@ const resolveSourceDimensions = (
   return null;
 };
 
-interface HighlightViewHierarchyClient {
-  requestHierarchySync(
-    perf: PerformanceTracker,
-    disableAllFiltering: boolean,
-    signal: AbortSignal | undefined,
-    timeoutMs: number,
-  ): Promise<{ hierarchy: unknown } | null>;
-  convertToViewHierarchyResult(hierarchy: unknown): ViewHierarchyResult;
-}
-
 interface HighlightToolDependencies {
+  hierarchyCaptureFactory?: (device: BootedDevice) => HierarchyCapture;
   highlightClientFactory?: () => VisualHighlightClient;
-  viewHierarchyClientFactory?: (device: BootedDevice) => HighlightViewHierarchyClient;
+  viewHierarchyClientFactory?: (device: BootedDevice) => HierarchySyncClient;
   generateHighlightId?: () => string;
 }
-
-const createDefaultViewHierarchyClient = (device: BootedDevice): HighlightViewHierarchyClient => {
-  if (device.platform === "android") {
-    return AndroidCtrlProxyClient.getInstance(
-      device,
-      defaultAdbClientFactory,
-    ) as HighlightViewHierarchyClient;
-  }
-  if (device.platform === "ios") {
-    return IOSCtrlProxyClient.getInstance(device) as HighlightViewHierarchyClient;
-  }
-  throw new ActionableError(`Visual highlights are not supported on ${device.platform} devices.`);
-};
 
 /**
  * #6154 follow-up: `platform` is optional on the wire (resolved from

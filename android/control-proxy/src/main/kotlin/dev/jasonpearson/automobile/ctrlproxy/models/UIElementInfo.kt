@@ -28,6 +28,8 @@ data class SemanticLink(
 data class UIElementInfo(
   val text: String? = null,
   val textSize: Float? = null,
+  /** Owning accessibility window, emitted only on combined window roots. */
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val windowId: Int? = null,
   @SerialName("text-color") val textColor: String? = null, // Hex color string like "#FF000000"
   @SerialName("content-desc") val contentDesc: String? = null,
   @SerialName("resource-id") val resourceId: String? = null,

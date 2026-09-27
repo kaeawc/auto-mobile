@@ -799,6 +799,121 @@ class ViewHierarchyExtractorTest {
   }
 
   @Test
+  fun `multi-window output matches the quadratic algorithm golden fixture`() {
+    // The original layer/order pair scan marks both app nodes half covered by SystemUI and
+    // ignores the transparent IME wrapper. Preserve every field of that filtered tree.
+    val target = elementWithBounds(resourceId = "target", bounds = bounds(0, 0, 100, 100))
+    val app =
+      elementWithBounds(
+        resourceId = "app",
+        bounds = bounds(0, 0, 100, 100),
+        children = listOf(target),
+      )
+    val systemUi =
+      elementWithBounds(
+        resourceId = "system-ui",
+        viewId = "system-ui-id",
+        bounds = bounds(0, 0, 50, 100),
+      )
+    val ime = elementWithBounds(resourceId = "ime", bounds = bounds(0, 50, 100, 100))
+    val entries =
+      listOf(
+        extractor.createWindowEntry(1, 0, app),
+        extractor.createWindowEntry(2, 1, systemUi, windowType = "system"),
+        extractor.createWindowEntry(3, 2, ime, windowType = "input_method"),
+      )
+
+    val info = extractor.buildOcclusionInfoForTest(entries)
+    val actual = extractor.filterOccludedHierarchyForTest(app, info, 1, "", true)
+    val expected =
+      app.copy(
+        occlusionState = "partial",
+        occludedBy = "system-ui",
+        occludedByViewId = "system-ui-id",
+        children =
+          listOf(
+            target.copy(
+              occlusionState = "partial",
+              occludedBy = "system-ui",
+              occludedByViewId = "system-ui-id",
+            )
+          ),
+      )
+    assertEquals(expected, actual)
+    assertEquals(
+      mapOf(
+        "NodeKey(windowKey=1, path=)" to
+          "OcclusionInfo(coverage=0.5, occludedBy=system-ui, occludedByViewId=system-ui-id)",
+        "NodeKey(windowKey=1, path=0)" to
+          "OcclusionInfo(coverage=0.5, occludedBy=system-ui, occludedByViewId=system-ui-id)",
+      ),
+      info.mapKeys { it.key.toString() }.mapValues { it.value.toString() },
+    )
+  }
+
+  @Test
+  fun `spatial candidate comparisons grow below quadratic across app SystemUI and IME`() {
+    fun comparisons(count: Int): Long {
+      val stats = CtrlProxyWorkStats()
+      val indexedExtractor = ViewHierarchyExtractor(stats = stats)
+      fun window(id: String): UIElementInfo =
+        elementWithBounds(
+          resourceId = "$id-root",
+          bounds = bounds(0, 0, count * 20, 100),
+          children =
+            (0 until count).map { index ->
+              elementWithBounds(
+                resourceId = "$id-$index",
+                bounds = bounds(index * 20, 0, index * 20 + 10, 100),
+              )
+            },
+        )
+      indexedExtractor.buildOcclusionInfoForTest(
+        listOf(
+          indexedExtractor.createWindowEntry(1, 0, window("app")),
+          indexedExtractor.createWindowEntry(2, 1, window("system"), windowType = "system"),
+          indexedExtractor.createWindowEntry(3, 2, window("ime"), windowType = "input_method"),
+        )
+      )
+      return stats.occlusionCandidateComparisons.get()
+    }
+
+    val small = comparisons(20)
+    val large = comparisons(40)
+    assertTrue("expected candidate comparisons in small fixture", small > 0)
+    assertTrue("doubling nodes must grow below quadratic: $small -> $large", large < small * 3)
+  }
+
+  @Test
+  fun `dense full-width windows visit each spatial candidate once`() {
+    val stats = CtrlProxyWorkStats()
+    val indexedExtractor = ViewHierarchyExtractor(stats = stats)
+    fun window(id: String): UIElementInfo =
+      elementWithBounds(
+        resourceId = "$id-root",
+        bounds = bounds(0, 0, 1080, 100),
+        children =
+          (0 until 100).map { index ->
+            elementWithBounds(
+              resourceId = "$id-$index",
+              bounds = bounds(0, 0, 1080, 100),
+            )
+          },
+      )
+
+    indexedExtractor.buildOcclusionInfoForTest(
+      listOf(
+        indexedExtractor.createWindowEntry(1, 0, window("app")),
+        indexedExtractor.createWindowEntry(2, 1, window("overlay")),
+      )
+    )
+    assertTrue(
+      "index visits must stay below the old pair-loop budget: ${stats.occlusionIndexEntriesVisited.get()}",
+      stats.occlusionIndexEntriesVisited.get() <= 20_402L,
+    )
+  }
+
+  @Test
   fun `cross-window occlusion annotates unlabeled occluder with view id`() {
     val target = elementWithBounds(resourceId = "partial-target", bounds = bounds(0, 0, 100, 100))
     val appRoot =

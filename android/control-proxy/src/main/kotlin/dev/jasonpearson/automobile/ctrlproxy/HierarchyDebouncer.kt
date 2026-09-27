@@ -5,11 +5,15 @@ import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfProvider
 import dev.jasonpearson.automobile.ctrlproxy.perf.SystemTimeProvider
 import dev.jasonpearson.automobile.ctrlproxy.perf.TimeProvider
+import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 
 object HierarchyQuiescence {
@@ -59,12 +63,17 @@ sealed class HierarchyResult {
  *   100ms)
  * @param extractHierarchy Function to extract the current hierarchy
  */
-class HierarchyDebouncer(
+class HierarchyDebouncer
+internal constructor(
   private val scope: CoroutineScope,
   private val timeProvider: TimeProvider = SystemTimeProvider(),
   private val perfProvider: PerfProvider = PerfProvider.instance,
   private val quickDebounceMs: Long = 5L,
   private val animationSkipWindowMs: Long = 100L,
+  private var unsolicitedIntervalMs: Long = 250L,
+  internal val stats: CtrlProxyWorkStats = CtrlProxyWorkStats(),
+  private val beforeDebounceLock: () -> Unit = {},
+  private val beforeDebounceCompletion: () -> Unit = {},
   private val extractHierarchy:
     (disableAllFiltering: Boolean, snapshotOptions: HierarchySnapshotOptions) -> ViewHierarchy?,
 ) {
@@ -82,6 +91,58 @@ class HierarchyDebouncer(
 
   // Debounce job
   private var debounceJob: Job? = null
+  private val eventLock = Any()
+  private val extractionLock = Any()
+  private var extractionInFlight = false
+  private var pendingRefresh = false
+  private var lastUnsolicitedStart: Long? = null
+
+  fun setUnsolicitedIntervalMs(intervalMs: Long) {
+    synchronized(eventLock) {
+      unsolicitedIntervalMs = intervalMs.coerceAtLeast(0L)
+      if (pendingRefresh && !extractionInFlight) {
+        debounceJob?.cancel()
+        debounceJob = null
+        schedulePendingRefresh()
+      }
+    }
+  }
+
+  private fun schedulePendingRefresh() {
+    if (debounceJob?.isActive == true || extractionInFlight || !pendingRefresh) return
+    val elapsed = lastUnsolicitedStart?.let { timeProvider.currentTimeMillis() - it }
+    val waitMs =
+      maxOf(
+        quickDebounceMs,
+        unsolicitedIntervalMs - (elapsed ?: unsolicitedIntervalMs),
+        if (inAnimationMode) animationModeEndTime - timeProvider.currentTimeMillis() else 0L,
+      )
+    debounceJob =
+      scope.launch(start = CoroutineStart.LAZY) {
+        val self = coroutineContext.job
+        try {
+          delay(waitMs)
+          beforeDebounceLock()
+          synchronized(eventLock) {
+            self.ensureActive()
+            pendingRefresh = false
+            extractionInFlight = true
+            lastUnsolicitedStart = timeProvider.currentTimeMillis()
+          }
+          extractAndCompare()
+          beforeDebounceCompletion()
+        } finally {
+          synchronized(eventLock) {
+            if (debounceJob === self) {
+              extractionInFlight = false
+              debounceJob = null
+              schedulePendingRefresh()
+            }
+          }
+        }
+      }
+    debounceJob?.start()
+  }
 
   // Flag to temporarily suppress flow emissions (during setText operations)
   @Volatile private var suppressFlowEmissions: Boolean = false
@@ -102,6 +163,7 @@ class HierarchyDebouncer(
    * debouncing and decides whether to extract based on animation detection.
    */
   fun onAccessibilityEvent() {
+    stats.accessibilityEvents.incrementAndGet()
     val now = timeProvider.currentTimeMillis()
     lastEventTimestamp = now
 
@@ -112,10 +174,14 @@ class HierarchyDebouncer(
       return
     }
 
-    // If we're in animation mode and within the skip window, skip extraction
+    // Retain animation skipping, but remember the last event for a trailing refresh.
     if (inAnimationMode && now < animationModeEndTime) {
       skippedEventCount++
-      Log.d(TAG, "Skipping extraction (animation mode), skipped: $skippedEventCount")
+      synchronized(eventLock) {
+        stats.coalescedEvents.incrementAndGet()
+        pendingRefresh = true
+        schedulePendingRefresh()
+      }
       return
     }
 
@@ -125,11 +191,16 @@ class HierarchyDebouncer(
       inAnimationMode = false
     }
 
-    // Cancel previous debounce and start new one
-    debounceJob?.cancel()
-    debounceJob = scope.launch {
-      delay(quickDebounceMs)
-      extractAndCompare()
+    synchronized(eventLock) {
+      if (
+        pendingRefresh ||
+          extractionInFlight ||
+          lastUnsolicitedStart?.let { now - it < unsolicitedIntervalMs } == true
+      ) {
+        stats.coalescedEvents.incrementAndGet()
+      }
+      pendingRefresh = true
+      schedulePendingRefresh()
     }
   }
 
@@ -138,7 +209,6 @@ class HierarchyDebouncer(
    * immediately after launching the extraction.
    */
   fun extractNow(disableAllFiltering: Boolean = false) {
-    debounceJob?.cancel()
     inAnimationMode = false
     scope.launch { extractAndCompare(disableAllFiltering = disableAllFiltering) }
   }
@@ -158,16 +228,21 @@ class HierarchyDebouncer(
     disableAllFiltering: Boolean = false,
     snapshotOptions: HierarchySnapshotOptions = HierarchySnapshotOptions(),
   ): ViewHierarchy? {
-    debounceJob?.cancel()
     inAnimationMode = false
-    kotlinx.coroutines.runBlocking {
+    synchronized(eventLock) {
+      if (!extractionInFlight) {
+        debounceJob?.cancel()
+        debounceJob = null
+        pendingRefresh = false
+      }
+    }
+    return kotlinx.coroutines.runBlocking {
       extractAndCompare(
         skipFlowEmit = skipFlowEmit,
         disableAllFiltering = disableAllFiltering,
         snapshotOptions = snapshotOptions,
       )
     }
-    return lastHierarchy
   }
 
   /**
@@ -203,79 +278,86 @@ class HierarchyDebouncer(
     )
 
     try {
-      // Cancel any pending debounce job
-      debounceJob?.cancel()
+      // Cancel only a queued job. An active extraction retains ownership through its finally.
+      synchronized(eventLock) {
+        if (!extractionInFlight) {
+          debounceJob?.cancel()
+          debounceJob = null
+        }
+        pendingRefresh = false
+      }
       inAnimationMode = false
 
-      kotlinx.coroutines.runBlocking {
-        // PHASE 1: Wait for at least one new accessibility event to fire
-        // This is critical because ACTION_SET_TEXT completes before the accessibility
-        // tree is updated. The tree update triggers TYPE_WINDOW_CONTENT_CHANGED events.
-        var sawFirstEvent = false
-        while (!sawFirstEvent) {
-          val now = timeProvider.currentTimeMillis()
-          val elapsed = now - startTime
+      val hierarchy =
+        kotlinx.coroutines.runBlocking {
+          // PHASE 1: Wait for at least one new accessibility event to fire
+          // This is critical because ACTION_SET_TEXT completes before the accessibility
+          // tree is updated. The tree update triggers TYPE_WINDOW_CONTENT_CHANGED events.
+          var sawFirstEvent = false
+          while (!sawFirstEvent) {
+            val now = timeProvider.currentTimeMillis()
+            val elapsed = now - startTime
 
-          // Check if we've exceeded initial event wait time
-          if (elapsed >= initialEventWaitMs) {
-            Log.d(TAG, "extractAfterQuiescence: no events after ${elapsed}ms, proceeding anyway")
-            break
+            // Check if we've exceeded initial event wait time
+            if (elapsed >= initialEventWaitMs) {
+              Log.d(TAG, "extractAfterQuiescence: no events after ${elapsed}ms, proceeding anyway")
+              break
+            }
+
+            // Check if a new event has fired since we started
+            if (lastEventTimestamp != initialTimestamp) {
+              Log.d(TAG, "extractAfterQuiescence: first event detected after ${elapsed}ms")
+              sawFirstEvent = true
+              break
+            }
+
+            delay(pollIntervalMs)
           }
 
-          // Check if a new event has fired since we started
-          if (lastEventTimestamp != initialTimestamp) {
-            Log.d(TAG, "extractAfterQuiescence: first event detected after ${elapsed}ms")
-            sawFirstEvent = true
-            break
+          // PHASE 2: Wait for quiescence (no events for quiescenceMs)
+          var lastCheckedTimestamp = lastEventTimestamp
+
+          while (true) {
+            val now = timeProvider.currentTimeMillis()
+            val elapsed = now - startTime
+            val timeSinceLastEvent = now - lastEventTimestamp
+
+            // Check if we've exceeded max wait time
+            if (elapsed >= maxWaitMs) {
+              Log.w(
+                TAG,
+                "extractAfterQuiescence: max wait time exceeded (${elapsed}ms); hierarchy may be stale",
+              )
+              break
+            }
+
+            // Check if we've achieved quiescence
+            if (timeSinceLastEvent >= quiescenceMs) {
+              Log.d(
+                TAG,
+                "extractAfterQuiescence: quiescence achieved after ${elapsed}ms (no events for ${timeSinceLastEvent}ms)",
+              )
+              break
+            }
+
+            // Log if new event was detected
+            if (lastEventTimestamp != lastCheckedTimestamp) {
+              Log.d(TAG, "extractAfterQuiescence: new event detected, resetting quiescence timer")
+              lastCheckedTimestamp = lastEventTimestamp
+            }
+
+            // Wait before checking again
+            delay(pollIntervalMs)
           }
 
-          delay(pollIntervalMs)
+          // Now extract the hierarchy
+          extractAndCompare(skipFlowEmit = true)
         }
-
-        // PHASE 2: Wait for quiescence (no events for quiescenceMs)
-        var lastCheckedTimestamp = lastEventTimestamp
-
-        while (true) {
-          val now = timeProvider.currentTimeMillis()
-          val elapsed = now - startTime
-          val timeSinceLastEvent = now - lastEventTimestamp
-
-          // Check if we've exceeded max wait time
-          if (elapsed >= maxWaitMs) {
-            Log.w(
-              TAG,
-              "extractAfterQuiescence: max wait time exceeded (${elapsed}ms); hierarchy may be stale",
-            )
-            break
-          }
-
-          // Check if we've achieved quiescence
-          if (timeSinceLastEvent >= quiescenceMs) {
-            Log.d(
-              TAG,
-              "extractAfterQuiescence: quiescence achieved after ${elapsed}ms (no events for ${timeSinceLastEvent}ms)",
-            )
-            break
-          }
-
-          // Log if new event was detected
-          if (lastEventTimestamp != lastCheckedTimestamp) {
-            Log.d(TAG, "extractAfterQuiescence: new event detected, resetting quiescence timer")
-            lastCheckedTimestamp = lastEventTimestamp
-          }
-
-          // Wait before checking again
-          delay(pollIntervalMs)
-        }
-
-        // Now extract the hierarchy
-        extractAndCompare(skipFlowEmit = true)
-      }
 
       val totalWait = timeProvider.currentTimeMillis() - startTime
       Log.d(TAG, "extractAfterQuiescence: completed in ${totalWait}ms")
 
-      return lastHierarchy
+      return hierarchy
     } finally {
       // Always unsuppress flow emissions
       suppressFlowEmissions = false
@@ -298,81 +380,84 @@ class HierarchyDebouncer(
     skipFlowEmit: Boolean = false,
     disableAllFiltering: Boolean = false,
     snapshotOptions: HierarchySnapshotOptions = HierarchySnapshotOptions(),
-  ) {
+  ): ViewHierarchy? {
     val startTime = timeProvider.currentTimeMillis()
 
     // Variables to hold results for emission after perf block closes
     var resultToEmit: HierarchyResult? = null
     var hierarchyToCache: ViewHierarchy? = null
 
-    // Use independentRoot so concurrent extractions are tracked as parallel siblings
-    // rather than nested within each other
-    perfProvider.independentRoot("hierarchyDebouncer")
-    try {
-      perfProvider.startOperation("extractHierarchy")
-      val hierarchy = extractHierarchy(disableAllFiltering, snapshotOptions)
-      perfProvider.endOperation("extractHierarchy")
+    // The tree walk and shared comparison/cache state must advance as one extraction.
+    synchronized(extractionLock) {
+      perfProvider.independentRoot("hierarchyDebouncer")
+      try {
+        perfProvider.startOperation("extractHierarchy")
+        stats.extractions.incrementAndGet()
+        val hierarchy = extractHierarchy(disableAllFiltering, snapshotOptions)
+        perfProvider.endOperation("extractHierarchy")
 
-      if (hierarchy == null) {
-        // Set the Error and fall through to the emit below. A `return` here would
-        // unwind through `finally` and exit the function, skipping the emit block
-        // so consumers never saw the Error (#3608).
-        resultToEmit = HierarchyResult.Error("Failed to extract hierarchy")
-      } else {
-        val extractionTime = timeProvider.currentTimeMillis() - startTime
-
-        perfProvider.startOperation("computeHash")
-        val structuralHash = StructuralHasher.computeHash(hierarchy)
-        perfProvider.endOperation("computeHash")
-
-        if (structuralHash == lastStructuralHash) {
-          // Structure unchanged - likely animation
-          // Enter animation mode to skip subsequent events
-          inAnimationMode = true
-          animationModeEndTime = timeProvider.currentTimeMillis() + animationSkipWindowMs
-
-          resultToEmit =
-            HierarchyResult.Unchanged(
-              hierarchy = hierarchy,
-              hash = structuralHash,
-              extractionTimeMs = extractionTime,
-              skippedEventCount = skippedEventCount,
-            )
-          hierarchyToCache = hierarchy
-
-          Log.d(
-            TAG,
-            "Structure unchanged (hash=$structuralHash), entering animation mode for ${animationSkipWindowMs}ms",
-          )
-
-          // Reset skipped count
-          skippedEventCount = 0
+        if (hierarchy == null) {
+          // Set the Error and fall through to the emit below. A `return` here would
+          // unwind through `finally` and exit the function, skipping the emit block
+          // so consumers never saw the Error (#3608).
+          resultToEmit = HierarchyResult.Error("Failed to extract hierarchy")
         } else {
-          // Structure changed - this is a real content change
-          val oldHash = lastStructuralHash
-          inAnimationMode = false
-          lastStructuralHash = structuralHash
+          val extractionTime = timeProvider.currentTimeMillis() - startTime
 
-          resultToEmit =
-            HierarchyResult.Changed(
-              hierarchy = hierarchy,
-              hash = structuralHash,
-              extractionTimeMs = extractionTime,
+          perfProvider.startOperation("computeHash")
+          val structuralHash = StructuralHasher.computeHash(hierarchy)
+          perfProvider.endOperation("computeHash")
+
+          if (structuralHash == lastStructuralHash) {
+            stats.unchangedCaptures.incrementAndGet()
+            // Structure unchanged - likely animation
+            // Enter animation mode to skip subsequent events
+            inAnimationMode = true
+            animationModeEndTime = timeProvider.currentTimeMillis() + animationSkipWindowMs
+
+            resultToEmit =
+              HierarchyResult.Unchanged(
+                hierarchy = hierarchy,
+                hash = structuralHash,
+                extractionTimeMs = extractionTime,
+                skippedEventCount = skippedEventCount,
+              )
+            hierarchyToCache = hierarchy
+
+            Log.d(
+              TAG,
+              "Structure unchanged (hash=$structuralHash), entering animation mode for ${animationSkipWindowMs}ms",
             )
-          hierarchyToCache = hierarchy
 
-          Log.d(TAG, "Structure changed (oldHash=$oldHash, newHash=$structuralHash)")
+            // Reset skipped count
+            skippedEventCount = 0
+          } else {
+            // Structure changed - this is a real content change
+            val oldHash = lastStructuralHash
+            inAnimationMode = false
+            lastStructuralHash = structuralHash
 
-          skippedEventCount = 0
+            resultToEmit =
+              HierarchyResult.Changed(
+                hierarchy = hierarchy,
+                hash = structuralHash,
+                extractionTimeMs = extractionTime,
+              )
+            hierarchyToCache = hierarchy
+
+            Log.d(TAG, "Structure changed (oldHash=$oldHash, newHash=$structuralHash)")
+
+            skippedEventCount = 0
+          }
         }
+      } finally {
+        // End perf block BEFORE emit to prevent nesting if emit suspends
+        perfProvider.end()
       }
-    } finally {
-      // End perf block BEFORE emit to prevent nesting if emit suspends
-      perfProvider.end()
+      hierarchyToCache?.let { lastHierarchy = it }
     }
 
     // Emit AFTER perf block is closed - this can suspend without causing nesting issues
-    hierarchyToCache?.let { lastHierarchy = it }
     // Only emit to flow if not skipped AND emissions are not suppressed
     // suppressFlowEmissions is used during setText operations to prevent racing broadcasts
     if (!skipFlowEmit && !suppressFlowEmissions) {
@@ -380,6 +465,7 @@ class HierarchyDebouncer(
     } else if (suppressFlowEmissions) {
       Log.d(TAG, "Flow emission suppressed (setText operation in progress)")
     }
+    return hierarchyToCache
   }
 
   /** Get the last extracted hierarchy without triggering a new extraction. */
@@ -428,8 +514,13 @@ class HierarchyDebouncer(
 
   /** Reset all state (for testing or reconnection). */
   fun reset() {
-    debounceJob?.cancel()
-    debounceJob = null
+    synchronized(eventLock) {
+      debounceJob?.cancel()
+      debounceJob = null
+      pendingRefresh = false
+      extractionInFlight = false
+      lastUnsolicitedStart = null
+    }
     lastStructuralHash = 0
     inAnimationMode = false
     animationModeEndTime = 0

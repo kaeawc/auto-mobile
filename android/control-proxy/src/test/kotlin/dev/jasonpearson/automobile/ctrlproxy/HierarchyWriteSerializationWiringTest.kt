@@ -15,41 +15,29 @@ import org.junit.Test
  * 1. A single `Changed` result serializes the tree at most once — the compact wire string is reused
  *    for the debug-file write rather than serialized a second time. The former pretty-printed
  *    `json` file serializer is retired entirely.
- * 2. A throttled `Changed` frame pays no disk write — `writeHierarchyToFile` for the event path
- *    lives inside the `shouldBroadcast()` branch, so a throttled frame skips it.
+ * 2. Event admission happens before extraction. Every admitted `Changed` frame takes the single
+ *    write and broadcast path, so a trailing capture cannot be dropped by a second throttle.
  */
 class HierarchyWriteSerializationWiringTest {
 
   @Test
-  fun `the changed-result handler writes the hierarchy file only when it broadcasts`() {
+  fun `the changed-result handler delivers every admitted frame`() {
     val source = KotlinSourceScan.maskLiteralsAndComments(readCtrlProxySource())
     val changedBranch = changedBranchBody(source)
 
-    val shouldBroadcastIdx = changedBranch.indexOf("broadcastThrottler.shouldBroadcast()")
     assertTrue(
-      "the Changed branch must gate on broadcastThrottler.shouldBroadcast()",
-      shouldBroadcastIdx >= 0,
-    )
-
-    val ifBraceOpen = changedBranch.indexOf('{', shouldBroadcastIdx)
-    assertTrue("the shouldBroadcast() if-block must have a body", ifBraceOpen >= 0)
-    val ifBraceClose = KotlinSourceScan.matchBrace(changedBranch, ifBraceOpen)
-    val broadcastBlock = changedBranch.substring(ifBraceOpen, ifBraceClose)
-    val elseBlock = changedBranch.substring(ifBraceClose)
-
-    assertTrue(
-      "the event-path disk write must live inside the shouldBroadcast() branch so a throttled " +
-        "frame pays no flushed disk write (issue #5469)",
-      "writeHierarchyToFile" in broadcastBlock,
-    )
-    assertTrue(
-      "a throttled frame must not write the hierarchy file (issue #5469)",
-      "writeHierarchyToFile" !in elseBlock,
+      "an admitted Changed frame must not be dropped by a downstream throttle",
+      "shouldBroadcast()" !in changedBranch,
     )
     assertEquals(
-      "the Changed branch must call writeHierarchyToFile exactly once (only on the broadcast path)",
+      "the Changed branch must write the admitted frame exactly once",
       1,
       Regex("writeHierarchyToFile").findAll(changedBranch).count(),
+    )
+    assertEquals(
+      "the Changed branch must broadcast the admitted frame exactly once",
+      1,
+      Regex("broadcastHierarchyUpdate").findAll(changedBranch).count(),
     )
   }
 

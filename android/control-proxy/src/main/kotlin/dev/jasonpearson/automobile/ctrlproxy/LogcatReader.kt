@@ -1,11 +1,30 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
+import android.os.Process as AndroidProcess
 import android.util.Log
 import dev.jasonpearson.automobile.protocol.LogEventData
 import dev.jasonpearson.automobile.protocol.LogEventResponse
 import dev.jasonpearson.automobile.protocol.WebSocketResponse
 import java.io.BufferedReader
 import java.io.InputStreamReader
+import kotlinx.coroutines.channels.Channel
+
+/** Single-consumer, bounded log queue. Recent warnings/errors displace older queued lines. */
+internal class BoundedLogBuffer(
+  capacity: Int,
+  private val stats: CtrlProxyWorkStats,
+) {
+  val channel = Channel<WebSocketResponse>(capacity)
+
+  fun offer(response: WebSocketResponse): Boolean {
+    if (channel.trySend(response).isSuccess) return true
+    if (response is LogEventResponse && response.event.level >= Log.WARN) {
+      if (channel.tryReceive().isSuccess) stats.droppedOverflowLogLines.incrementAndGet()
+      return channel.trySend(response).isSuccess
+    }
+    return false
+  }
+}
 
 /**
  * Reads logcat output in real-time and broadcasts [LogEventResponse] objects.
@@ -23,10 +42,15 @@ import java.io.InputStreamReader
  * @param hasConsumer seam returning whether any client is currently connected; injected so the gate
  *   is unit-testable without a live WebSocket. Defaults to always-on for callers that never gate.
  */
-class LogcatReader(
+class LogcatReader
+internal constructor(
   private val onLogEvent: (WebSocketResponse) -> Unit,
   private val hasConsumer: () -> Boolean = { true },
+  private val tryDeliver: ((WebSocketResponse) -> Boolean)? = null,
+  private val ownPid: () -> Int = { runCatching { AndroidProcess.myPid() }.getOrDefault(-1) },
+  internal val stats: CtrlProxyWorkStats = CtrlProxyWorkStats(),
 ) {
+  private val processId = ownPid()
 
   companion object {
     private const val TAG = "LogcatReader"
@@ -131,13 +155,46 @@ class LogcatReader(
   internal fun handleLine(line: String) {
     // No client is consuming logs — skip the regex match + LogEventResponse allocation entirely.
     if (!hasConsumer()) return
+    // Read the fixed threadtime header without regex or event allocation. Only suppress this
+    // process's verbose/debug diagnostics; app logs and our warnings/errors retain their priority.
+    if (isOwnDiagnostic(line)) {
+      stats.droppedInternalLogLines.incrementAndGet()
+      return
+    }
     parseLine(line)?.let { response ->
       try {
-        onLogEvent(response)
+        val accepted =
+          tryDeliver?.invoke(response)
+            ?: run {
+              onLogEvent(response)
+              true
+            }
+        if (accepted) stats.forwardedLogLines.incrementAndGet()
+        else stats.droppedOverflowLogLines.incrementAndGet()
       } catch (e: Exception) {
         Log.w(TAG, "Error broadcasting log event", e)
       }
     }
+  }
+
+  private fun isOwnDiagnostic(line: String): Boolean {
+    if (line.length < 22) return false
+    var index = 18 // after MM-DD HH:MM:SS.mmm
+    while (index < line.length && line[index] == ' ') index++
+    val pidStart = index
+    var pid = 0
+    while (index < line.length && line[index].isDigit()) {
+      pid = pid * 10 + (line[index] - '0')
+      index++
+    }
+    if (pidStart == index || pid != processId) return false
+    while (index < line.length && line[index] == ' ') index++
+    while (index < line.length && line[index].isDigit()) index++ // TID
+    while (index < line.length && line[index] == ' ') index++
+    return index < line.length &&
+      (line[index] == 'D' || line[index] == 'V') &&
+      index + 1 < line.length &&
+      line[index + 1] == ' '
   }
 
   /**

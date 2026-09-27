@@ -22,13 +22,20 @@ import kotlin.math.min
  * Component responsible for parsing AccessibilityNodeInfo trees and converting them into
  * UIElementInfo objects for automated testing.
  */
-class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore? = null) {
+class ViewHierarchyExtractor
+internal constructor(
+  private val recompositionStore: RecompositionStore? = null,
+  internal val stats: CtrlProxyWorkStats = CtrlProxyWorkStats(),
+  internal val logOptimizationDecisions: Boolean = false,
+) {
 
   companion object {
     private const val TAG = "ViewHierarchyExtractor"
     private const val MAX_DEPTH = 100 // Prevent infinite traversal in focus-order extraction
     private const val MAX_CHILDREN = 256 // Limit children to prevent memory issues
     private const val OCCLUSION_THRESHOLD = 0.95
+    private const val OCCLUSION_BUCKET_WIDTH = 128
+    private const val MAX_OCCLUSION_BUCKET_SPAN = 64
     private const val DEFAULT_WINDOW_KEY = -1
     private const val CONTENT_HIDDEN_REASON_COMPOSE_INTEROP = "compose-interop-no-hide-descendants"
     private const val MIN_HIDDEN_REGION_SCREEN_AREA = 0.25
@@ -866,6 +873,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
     childIndex: Int = 0,
     budget: HierarchySnapshotBudget,
   ): UIElementInfo? {
+    stats.nodesVisited.incrementAndGet()
     if (!budget.enter(depth)) {
       return null
     }
@@ -1401,14 +1409,15 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
     // interactive
     if (isBoundsOnlyWrapper && !isInteractive) {
       if (optimizedChildren.isEmpty()) {
-        Log.d(TAG, "[OPT] -> FILTER OUT (bounds-only, no children)")
+        if (logOptimizationDecisions) Log.d(TAG, "[OPT] -> FILTER OUT (bounds-only, no children)")
         return emptyList()
       }
-      Log.d(TAG, "[OPT] -> PROMOTE ${optimizedChildren.size} children")
+      if (logOptimizationDecisions)
+        Log.d(TAG, "[OPT] -> PROMOTE ${optimizedChildren.size} children")
       return optimizedChildren
     }
 
-    Log.d(TAG, "[OPT] -> KEEP (meets criteria or interactive)")
+    if (logOptimizationDecisions) Log.d(TAG, "[OPT] -> KEEP (meets criteria or interactive)")
     return listOf(element.copy(children = optimizedChildren))
   }
 
@@ -1441,6 +1450,18 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
     val occludedBy: String?,
     val occludedByViewId: String?,
   )
+
+  private data class OcclusionWindowIndex(
+    val all: List<IndexedValue<OcclusionNode>>,
+    val buckets: Map<Int, List<IndexedValue<OcclusionNode>>>,
+    val wide: List<IndexedValue<OcclusionNode>>,
+  )
+
+  private fun occlusionBuckets(bounds: ElementBounds): IntRange? {
+    val first = bounds.left / OCCLUSION_BUCKET_WIDTH
+    val last = (bounds.right - 1) / OCCLUSION_BUCKET_WIDTH
+    return if (last.toLong() - first.toLong() >= MAX_OCCLUSION_BUCKET_SPAN) null else first..last
+  }
 
   /** Represents the relationship between two nodes in a tree hierarchy. */
   enum class NodeRelationship {
@@ -1570,7 +1591,24 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
 
     val sortedNodes =
       nodes.sortedWith(compareBy<OcclusionNode> { it.windowLayer }.thenBy { it.order })
+    // Index cross-window candidates spatially. Wide roots are stored once and considered for
+    // every query; narrow nodes are visited only in the queried horizontal buckets.
+    val nodesByWindow =
+      sortedNodes
+        .withIndex()
+        .groupBy { it.value.windowKey }
+        .mapValues { (_, entries) ->
+          val buckets = mutableMapOf<Int, MutableList<IndexedValue<OcclusionNode>>>()
+          val wide = mutableListOf<IndexedValue<OcclusionNode>>()
+          for (entry in entries) {
+            val span = occlusionBuckets(entry.value.bounds)
+            if (span == null) wide.add(entry)
+            else for (bucket in span) buckets.getOrPut(bucket) { mutableListOf() }.add(entry)
+          }
+          OcclusionWindowIndex(entries, buckets, wide)
+        }
     val occlusionInfo = mutableMapOf<NodeKey, OcclusionInfo>()
+    var indexEntriesVisited = 0L
 
     for (i in sortedNodes.indices) {
       val node = sortedNodes[i]
@@ -1591,33 +1629,46 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
         )
       }
 
-      for (j in i + 1 until sortedNodes.size) {
-        val occluder = sortedNodes[j]
+      val candidates = mutableListOf<IndexedValue<OcclusionNode>>()
+      val nodeBuckets = occlusionBuckets(node.bounds)
+      for ((windowKey, windowIndex) in nodesByWindow) {
+        if (windowKey == node.windowKey) continue
+        // A query spanning several buckets is cheaper to scan once against the window index.
+        // For narrow queries, stream bucket entries so duplicates never form a flattened list.
+        val possible =
+          if (nodeBuckets == null || nodeBuckets.last - nodeBuckets.first >= 3) {
+            windowIndex.all.asSequence()
+          } else {
+            sequence {
+              yieldAll(windowIndex.wide)
+              for (bucket in nodeBuckets) yieldAll(windowIndex.buckets[bucket].orEmpty())
+            }
+          }
+        val seen = mutableSetOf<Int>()
+        for (entry in possible) {
+          indexEntriesVisited++
+          if (!seen.add(entry.index)) continue
+          val bounds = entry.value.bounds
+          if (
+            entry.index > i &&
+              bounds.left < node.bounds.right &&
+              bounds.right > node.bounds.left &&
+              bounds.top < node.bounds.bottom &&
+              bounds.bottom > node.bounds.top
+          ) {
+            candidates.add(entry)
+          }
+        }
+      }
+      for (candidate in candidates.sortedBy { it.index }) {
+        val occluder = candidate.value
+        stats.occlusionCandidateComparisons.incrementAndGet()
         // Skip cross-window IME occluders: the IME's a11y root has a transparent wrapper that
         // overstates the keyboard rectangle and would falsely mark the app underneath as hidden.
         // Same-window IME-vs-IME occlusion is preserved by the `windowKey != node.windowKey` guard.
         if (occluder.windowKey != node.windowKey && occluder.windowKey in imeWindowKeys) {
           continue
         }
-        if (occluder.windowKey == node.windowKey) {
-          // Within the same window, nodes should never occlude each other.
-          // After optimizeHierarchy promotes children of bounds-only wrappers, the tree structure
-          // no longer reliably reflects visual relationships. Nodes that are visual siblings
-          // (e.g., a toolbar and a scrollable content area in a Compose Box) can end up at
-          // different depths in the optimized tree, causing determineNodeRelationship to
-          // incorrectly classify them as UNRELATED — leading to false occlusion (the Slack
-          // channel-header disappearance bug).
-          // This also makes the multi-window path consistent with the `windowEntries.size == 1`
-          // guard above, which already skips within-window occlusion when only one window exists.
-          if (isDebugNode) {
-            Log.d(
-              TAG,
-              "[OCCLUSION]   Skip same-window: text='${occluder.element.text}', bounds=${occluder.bounds}, order=${occluder.order}",
-            )
-          }
-          continue
-        }
-
         val intersection = intersectBounds(node.bounds, occluder.bounds) ?: continue
         val overlapArea = intersection.width * intersection.height
         if (overlapArea <= 0) continue
@@ -1664,6 +1715,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
       }
     }
 
+    stats.occlusionIndexEntriesVisited.addAndGet(indexEntriesVisited)
     return occlusionInfo
   }
 

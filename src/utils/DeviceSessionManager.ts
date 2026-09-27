@@ -1274,6 +1274,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
               await this.simctl!.presentSimulatorAfterStart(
                 provisioned.deviceId,
                 this.idGenerator.next(),
+                signal,
               );
             }
             IOSCtrlProxyClient.resumeAfterDeviceStart(provisioned.deviceId!);
@@ -1364,7 +1365,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
         );
         perf.endOperation("bootSimulator");
         if (bootedDevice.deviceId === deviceId) {
-          await this.simctl!.presentSimulatorAfterStart(deviceId, this.idGenerator.next());
+          await this.simctl!.presentSimulatorAfterStart(deviceId, this.idGenerator.next(), signal);
         }
         IOSCtrlProxyClient.resumeAfterDeviceStart(deviceId);
         perf.startOperation("verifyDevice");

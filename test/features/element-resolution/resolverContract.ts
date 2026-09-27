@@ -40,7 +40,7 @@ export class ResolverContractAdapter implements ContractResolver {
     const result = resolver.resolve(
       { id: capture.name, nodes: searchable.project(capture.hierarchy) },
       { [query.kind]: query.value, index: query.index, match: "exact" },
-      { action: contractAction(this.testCase) },
+      { action: query.intent === "focus-input" ? "focus" : contractAction(this.testCase) },
     );
     if (result.error) {
       throw new Error(result.error);

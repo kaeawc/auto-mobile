@@ -166,6 +166,29 @@ test("random selects eligible action targets but preserves ranked match indexes"
   ).toBeNull();
 });
 
+test("focus prefers a partial editable input over an exact inert label", () => {
+  const capture = snapshot([
+    node("label", { text: "Email" }),
+    node("input", { text: "Email address", editable: true, class: "android.widget.EditText" }),
+  ]);
+  expect(resolver.resolve(capture, { text: "Email" }, { action: "input" }).chosen?.nativeId).toBe(
+    "input",
+  );
+});
+
+test.each(["drag", "highlight"] as const)(
+  "%s keeps a bounded text child instead of its clickable row",
+  (action) => {
+    const capture = snapshot([
+      node("row", {
+        clickable: true,
+        node: [node("label", { text: "Move", bounds: { left: 5, top: 5, right: 20, bottom: 20 } })],
+      }),
+    ]);
+    expect(resolver.resolve(capture, { text: "Move" }, { action }).chosen?.nativeId).toBe("label");
+  },
+);
+
 test.each(["app:id/s.*", "["])("element ID regex is rejected honestly: %s", (elementId) => {
   expect(resolverSelectorSchema.safeParse({ elementId, match: "regex" }).success).toBe(false);
   const result = resolver.resolve(

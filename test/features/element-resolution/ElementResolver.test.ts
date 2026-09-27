@@ -128,7 +128,7 @@ describe("pure element resolver", () => {
   });
 });
 
-test("text labels resolve to the owning actionable row for tap and highlight", () => {
+test("text labels use the owning row for tap but their own bounds for highlight", () => {
   const capture = snapshot([
     node("row", "", {
       node: [{ bounds: { left: 5, top: 5, right: 30, bottom: 20 }, text: "Wi-Fi" }],
@@ -136,8 +136,8 @@ test("text labels resolve to the owning actionable row for tap and highlight", (
   ]);
   expect(resolver.resolve(capture, { text: "Wi-Fi" }, tap).chosen?.nativeId).toBe("row");
   expect(
-    resolver.resolve(capture, { text: "Wi-Fi" }, { action: "highlight" }).chosen?.nativeId,
-  ).toBe("row");
+    resolver.resolve(capture, { text: "Wi-Fi" }, { action: "highlight" }).chosen?.bounds,
+  ).toEqual({ left: 5, top: 5, right: 30, bottom: 20 });
 });
 
 test("default selection keeps smallest eligible area within the topmost window", () => {

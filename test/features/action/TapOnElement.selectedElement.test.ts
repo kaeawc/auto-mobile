@@ -379,6 +379,6 @@ test("selection metadata separates the matched text child from the shared action
   expect(tap.element?.bounds).toEqual(rowBounds);
   expect(metadata.matchedElement.bounds).toEqual(childBounds);
   expect(metadata.bounds).toMatchObject(rowBounds);
-  expect(highlight.element?.bounds).toEqual(rowBounds);
+  expect(highlight.element?.bounds).toEqual(childBounds);
   expect(highlight.matchedElement?.bounds).toEqual(childBounds);
 });

@@ -648,6 +648,8 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   /** Only a socket opened after forceRestart teardown may satisfy this attempt. */
   private restartAcceptsReplacement = false;
   private restartReplacementSocket: WebSocket | null = null;
+  private restartSocketBeforeTeardown: WebSocket | null = null;
+  private connectedSocketPort: number | null = null;
 
   // Auto-setup on connection failure
   private readonly serviceManagerFactory: ServiceManagerFactory;
@@ -1387,6 +1389,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   protected onConnectionEstablished(): void {
     // Reset failure counter on successful connection
     this.consecutiveConnectionFailures = 0;
+    this.connectedSocketPort = this.port;
     if (this.pendingRestartToken !== undefined && this.restartAcceptsReplacement) {
       this.restartReplacementSocket = this.ws;
     }
@@ -1397,30 +1400,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     }
     this.restartRearmTimeout = this.timer.setTimeout(() => {
       this.restartRearmTimeout = null;
-      if (!this.isConnected()) {
-        this.failPendingRestart("WebSocket closed before stable reconnect");
-        return;
-      }
-      if (this.pendingRestartToken !== undefined && this.ws !== this.restartReplacementSocket) {
-        return;
-      }
-      const budget = this.serviceManagerFactory(this.device).getForcedRestartBudget();
-      if (budget.snapshot().state === "suspended") {
-        this.failPendingRestart("Restart budget suspended before stable reconnect");
-      } else {
-        const token = this.pendingRestartToken;
-        if (budget.recordSuccess(token)) {
-          this.pendingRestartToken = undefined;
-          this.restartAcceptsReplacement = false;
-          this.restartReplacementSocket = null;
-          this.lastDeniedRestartState = undefined;
-          if (token !== undefined) {
-            this.finishPendingRestart(true);
-          }
-        } else if (token !== undefined) {
-          this.failPendingRestart("WebSocket reconnect was superseded before stability");
-        }
-      }
+      this.completeStableRestartConnection();
     }, IOSCtrlProxyClient.RESTART_REARM_STABILITY_MS);
     logger.info(`[IOSCtrlProxyClient] Connection established, reset failure counter`);
 
@@ -2277,7 +2257,56 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     }
     this.restartAcceptsReplacement = false;
     this.restartReplacementSocket = null;
+    this.restartSocketBeforeTeardown = null;
     this.finishPendingRestart(false);
+  }
+
+  private completeStableRestartConnection(): void {
+    if (!this.isConnected()) {
+      this.failPendingRestart("WebSocket closed before stable reconnect");
+      return;
+    }
+    if (this.pendingRestartToken !== undefined && this.ws !== this.restartReplacementSocket) {
+      return;
+    }
+    const budget = this.serviceManagerFactory(this.device).getForcedRestartBudget();
+    if (budget.snapshot().state === "suspended") {
+      this.failPendingRestart("Restart budget suspended before stable reconnect");
+      return;
+    }
+    const token = this.pendingRestartToken;
+    if (budget.recordSuccess(token)) {
+      this.pendingRestartToken = undefined;
+      this.restartAcceptsReplacement = false;
+      this.restartReplacementSocket = null;
+      this.restartSocketBeforeTeardown = null;
+      this.lastDeniedRestartState = undefined;
+      if (token !== undefined) {
+        this.finishPendingRestart(true);
+      }
+    } else if (token !== undefined) {
+      this.failPendingRestart("WebSocket reconnect was superseded before stability");
+    }
+  }
+
+  private acceptEarlyRestartReplacement(): void {
+    if (
+      !this.isConnected() ||
+      this.ws === this.restartSocketBeforeTeardown ||
+      this.connectedSocketPort !== this.port
+    ) {
+      return;
+    }
+    this.restartReplacementSocket = this.ws;
+    // The original stability timer may already have fired while forceRestart
+    // was still polling health. Credit that completed window now.
+    if (!this.restartRearmTimeout) {
+      this.completeStableRestartConnection();
+    }
+  }
+
+  private hasAcceptedRestartReplacement(): boolean {
+    return this.pendingRestartToken === undefined || this.ws === this.restartReplacementSocket;
   }
 
   private finishPendingRestart(stable: boolean): void {
@@ -2369,6 +2398,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     this.pendingRestartToken = token;
     this.restartAcceptsReplacement = false;
     this.restartReplacementSocket = null;
+    this.restartSocketBeforeTeardown = this.ws;
     const stableConnection = new Promise<boolean>((resolve) => {
       this.resolvePendingRestart = resolve;
     });
@@ -2381,6 +2411,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       await manager.forceRestart();
       this.restartAcceptsReplacement = true;
       this.syncPortFromManager(manager);
+      this.acceptEarlyRestartReplacement();
       this.resetConnectionBudget();
       logger.info(`[IOSCtrlProxyClient] CtrlProxy restart completed; reconnecting WebSocket`);
       const connected = await this.connectBackgroundWebSocket();
@@ -2389,7 +2420,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
         logger.warn(`[IOSCtrlProxyClient] WebSocket reconnect failed after CtrlProxy restart`);
         return false;
       }
-      if (this.ws !== this.restartReplacementSocket) {
+      if (!this.hasAcceptedRestartReplacement()) {
         this.failPendingRestart("No replacement WebSocket opened after CtrlProxy restart");
         return false;
       }

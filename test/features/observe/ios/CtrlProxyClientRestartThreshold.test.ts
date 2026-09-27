@@ -261,6 +261,47 @@ describe("IOSCtrlProxyClient restart threshold", () => {
     expect(await waiting).toBe("recovered");
   });
 
+  test("recovery accepts a replacement socket opened before forceRestart returns", async () => {
+    const timer = new FakeTimer();
+    const manager = createFakeManager(timer);
+    manager.getServicePort = () => 8765;
+    let releaseRestart: (() => void) | undefined;
+    manager.forceRestart = async () => {
+      manager.forceRestartCount++;
+      await new Promise<void>((resolve) => {
+        releaseRestart = resolve;
+      });
+    };
+    const sockets: FakeWebSocket[] = [];
+    client = IOSCtrlProxyClient.createForTesting(
+      testDevice,
+      8765,
+      (url) => {
+        const socket = new FakeWebSocket(url, "none", 0, timer);
+        sockets.push(socket);
+        return socket;
+      },
+      timer,
+      () => manager,
+    );
+    client.ensureRecoveryStarted();
+    for (let i = 0; i < 8; i++) {
+      await Promise.resolve();
+    }
+    expect(releaseRestart).toBeDefined();
+    const waiting = client.awaitRecovery(20_000);
+    expect(await client.ensureConnected()).toBe(true);
+    expect(sockets).toHaveLength(1);
+    await timer.advanceTimeAsync(2500);
+    releaseRestart!();
+    expect(await waiting).toBe("recovered");
+    expect(await client.ensureConnected()).toBe(true);
+    expect(manager.getForcedRestartBudget().snapshot()).toMatchObject({
+      state: "idle",
+      attempts: 0,
+    });
+  });
+
   test("ViewHierarchy does not refetch after iOS socket closes inside the stability window", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();

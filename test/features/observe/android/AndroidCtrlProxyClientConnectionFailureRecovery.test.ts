@@ -344,6 +344,57 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
     expect(await waiting).toBe("recovered");
   });
 
+  test("setup replaces an interim rebind socket without failing recovery", async function () {
+    const timer = new FakeTimer();
+    const sockets: FakeWebSocket[] = [];
+    let healthChecks = 0;
+    const manager: AndroidServiceRecoveryManager = {
+      isAccessibilityServiceHealthy: async () => ++healthChecks === 3,
+      rebindIfUnhealthy: async () => {
+        expect(await client!.ensureConnected()).toBe(true);
+        return true;
+      },
+      setup: async () => {
+        const interim = sockets[0]!;
+        const closed = new Promise<void>((resolve) => interim.once("close", resolve));
+        interim.terminate();
+        await closed;
+        return { success: true, message: "setup ok" };
+      },
+    };
+    client = AndroidCtrlProxyClient.createForTesting(
+      testDevice,
+      buildFakeAdb(),
+      (url) => {
+        const socket = new FakeWebSocket(url, "none", 0, timer);
+        sockets.push(socket);
+        return socket as WebSocket;
+      },
+      timer,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      () => manager,
+    );
+    client.ensureRecoveryStarted();
+    const waiting = client.awaitRecovery(10_000);
+    await flushMicrotasks();
+    expect(sockets).toHaveLength(2);
+    await timer.advanceTimeAsync(2000);
+    expect(await waiting).toBe("recovered");
+    expect(await client.ensureConnected()).toBe(true);
+    expect((client as any).forcedRestartBudget.snapshot()).toMatchObject({
+      state: "idle",
+      attempts: 0,
+    });
+  });
+
   test("budget-denied observe recovery returns not_recovering without waiting", async function () {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();

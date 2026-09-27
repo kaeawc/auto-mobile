@@ -1348,7 +1348,12 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   private static readonly RESTART_REARM_STABILITY_MS = 2000;
   private restartRearmTimeout: NodeJS.Timeout | null = null;
   private pendingRecoveryStability:
-    | { token: number; resolve: (stable: boolean) => void }
+    | {
+        token: number;
+        resolve: (stable: boolean) => void;
+        eligible: boolean;
+        stableSocket: WebSocket | null;
+      }
     | undefined;
   /** One client exists per device; this budget gates both failure bursts and observe calls. */
   private readonly forcedRestartBudget: ForcedRestartBudget;
@@ -2054,13 +2059,15 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     this.restartRearmTimeout = this.timer.setTimeout(() => {
       this.restartRearmTimeout = null;
       if (!this.isConnected()) {
-        this.failPendingRecoveryStability("WebSocket closed before stable reconnect");
+        if (this.pendingRecoveryStability?.eligible) {
+          this.failPendingRecoveryStability("WebSocket closed before stable reconnect");
+        }
         return;
       }
       const pending = this.pendingRecoveryStability;
       if (pending) {
-        this.pendingRecoveryStability = undefined;
-        pending.resolve(this.forcedRestartBudget.recordSuccess(pending.token));
+        pending.stableSocket = this.ws;
+        this.completePendingRecoveryStability();
       } else if (this.forcedRestartBudget.snapshot().state !== "suspended") {
         this.forcedRestartBudget.recordSuccess();
       }
@@ -2155,7 +2162,12 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     if (this.restartRearmTimeout) {
       this.timer.clearTimeout(this.restartRearmTimeout);
       this.restartRearmTimeout = null;
-      this.failPendingRecoveryStability("WebSocket closed before stable reconnect");
+      if (this.pendingRecoveryStability?.eligible) {
+        this.failPendingRecoveryStability("WebSocket closed before stable reconnect");
+      }
+    }
+    if (this.pendingRecoveryStability) {
+      this.pendingRecoveryStability.stableSocket = null;
     }
     this.supportedCommands = null;
     this.lateCancelledScreenshotRequestIds.clear();
@@ -2197,6 +2209,14 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       this.pendingRecoveryStability = undefined;
       this.forcedRestartBudget.recordFailure(reason, pending.token);
       pending.resolve(false);
+    }
+  }
+
+  private completePendingRecoveryStability(): void {
+    const pending = this.pendingRecoveryStability;
+    if (pending?.eligible && pending.stableSocket === this.ws && this.isConnected()) {
+      this.pendingRecoveryStability = undefined;
+      pending.resolve(this.forcedRestartBudget.recordSuccess(pending.token));
     }
   }
 
@@ -2259,11 +2279,17 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
     // A background reconnect can stabilize while the async health probe is
     // pending. Claim its stability signal with this recovery's token now.
-    const stableConnection = new Promise<boolean>((resolve) => {
-      this.pendingRecoveryStability = { token, resolve };
-    });
+    const replaceStabilityWaiter = (): Promise<boolean> => {
+      this.pendingRecoveryStability?.resolve(false);
+      return new Promise<boolean>((resolve) => {
+        this.pendingRecoveryStability = { token, resolve, eligible: false, stableSocket: null };
+      });
+    };
+    let stableConnection = replaceStabilityWaiter();
 
-    const recovery = this.recoverAccessibilityService()
+    const recovery = this.recoverAccessibilityService(() => {
+      stableConnection = replaceStabilityWaiter();
+    })
       .then(async (outcome) => {
         if (outcome === "failed" || outcome === "unavailable") {
           this.failPendingRecoveryStability(`service recovery ${outcome}`);
@@ -2283,6 +2309,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           // clock and un-pauses a paused background reconnect, not just the
           // attempt counter.
           this.resetConnectionBudget();
+        }
+        if (this.pendingRecoveryStability) {
+          this.pendingRecoveryStability.eligible = true;
+          this.completePendingRecoveryStability();
         }
         logger.info(
           `[AndroidCtrlProxyClient] Recovery completed (${outcome}); reconnecting WebSocket`,
@@ -2376,9 +2406,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
    * rebind alone does not restore health (e.g. CtrlProxy is missing from
    * `enabled_accessibility_services` or not installed at all).
    */
-  private async recoverAccessibilityService(): Promise<
-    "healthy" | "repaired" | "unavailable" | "failed"
-  > {
+  private async recoverAccessibilityService(
+    onEscalation: () => void,
+  ): Promise<"healthy" | "repaired" | "unavailable" | "failed"> {
     if (this.closed) {
       return "failed";
     }
@@ -2398,12 +2428,14 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       return "healthy";
     }
 
+    onEscalation();
     logger.info(`[AndroidCtrlProxyClient] Accessibility service unhealthy; attempting rebind`);
     const rebound = (await manager.rebindIfUnhealthy?.()) ?? false;
     if (rebound && (await manager.isAccessibilityServiceHealthy())) {
       return "repaired";
     }
 
+    onEscalation();
     logger.info(`[AndroidCtrlProxyClient] Rebind did not restore health; running full setup`);
     const result = await manager.setup(true);
     if (!result.success) {

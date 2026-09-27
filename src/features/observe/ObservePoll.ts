@@ -209,6 +209,9 @@ export async function pollObserveUntil(
 ): Promise<ObservePollOutcome> {
   const start = timer.now();
   let previous: ObserveResult | undefined;
+  let lastObservation: ObserveResult | undefined;
+  let lastGeneration: number | undefined;
+  let lastCachedAt: number | undefined;
   let polls = 0;
   // The device timestamp the loop must get STRICTLY past before an observation
   // can be terminal. `undefined` until seeded by the caller or by the first
@@ -252,6 +255,20 @@ export async function pollObserveUntil(
 
   while (true) {
     throwIfAborted(options.signal);
+    if (lastObservation && timer.now() - start >= options.timeoutMs) {
+      return finalize(
+        {
+          observation: newestTrustworthyObservation ?? lastObservation,
+          polls,
+          waitMs: timer.now() - start,
+          stopped: false,
+          terminalReason: "timeout",
+        },
+        newestTrustworthyObservation !== undefined,
+        newestTrustworthyObservation !== undefined ? newestTrustworthyGeneration : lastGeneration,
+        newestTrustworthyObservation !== undefined ? newestTrustworthyCachedAt : lastCachedAt,
+      );
+    }
 
     const minTimestamp = nextPollMinTimestamp(
       hasPostInvocationEvidence,
@@ -276,6 +293,9 @@ export async function pollObserveUntil(
       skipRecompositionTracking: options.skipRecompositionTracking,
     });
     polls++;
+    lastObservation = observation;
+    lastGeneration = cacheGeneration;
+    lastCachedAt = cacheStartedAt;
     throwIfAborted(options.signal);
 
     const observedMs = deviceCaptureTimestamp(observation);

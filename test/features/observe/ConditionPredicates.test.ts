@@ -8,6 +8,8 @@ import {
   textEquals,
 } from "../../../src/features/observe/ConditionPredicates";
 import { ElementResolver } from "../../../src/features/utility/ElementResolver";
+import type { ConditionResolver } from "../../../src/features/observe/ConditionPredicates";
+import type { SearchableEntry } from "../../../src/features/utility/SearchableNode";
 
 /**
  * Unit tests for the declarative condition-predicate builders that back the
@@ -216,6 +218,26 @@ test("presence waits ignore matching nodes without bounds", () => {
   expect(disappear(resolver, { elementId: "ghost" })(observation).matched).toBe(true);
   expect(appear(resolver, { text: "Ghost" })(observation).matched).toBe(false);
   expect(disappear(resolver, { text: "Ghost" })(observation).matched).toBe(true);
+});
+
+test("presence waits reject an unbounded chosen node from an inspect resolver", () => {
+  const chosen = { textSources: {}, element: undefined, bounds: undefined } as SearchableEntry;
+  const intents: Array<{ requireBounds?: boolean }> = [];
+  const resolver: ConditionResolver = {
+    resolve: (_snapshot, _selector, intent) => {
+      intents.push(intent);
+      return {
+        chosen,
+        matches: [{ node: chosen, kind: "native-id-exact" }],
+        candidates: [chosen],
+        matchMode: "exact",
+      };
+    },
+  };
+  const observation = obs([node({ "resource-id": "ghost" })]);
+  expect(appear(resolver, { elementId: "ghost" })(observation)).toMatchObject({ matched: false });
+  expect(disappear(resolver, { elementId: "ghost" })(observation)).toMatchObject({ matched: true });
+  expect(intents.map((intent) => intent.requireBounds)).toEqual([true, true]);
 });
 
 describe("textEquals predicate", () => {

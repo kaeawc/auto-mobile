@@ -1,7 +1,23 @@
-import { describe, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import fc from "fast-check";
 import { z } from "zod/v4";
-import { validateElementIdTextSelector } from "../../src/server/elementSelectorSchemas";
+import {
+  resolverSelectorSchema,
+  validateElementIdTextSelector,
+} from "../../src/server/elementSelectorSchemas";
+
+test("resolver selector conflict names all mutually exclusive fields", () => {
+  const result = resolverSelectorSchema.safeParse({
+    contentDescription: "Save",
+    className: "android.widget.Button",
+  });
+  expect(result.success).toBe(false);
+  if (!result.success) {
+    expect(result.error.issues[0]?.message).toBe(
+      "Provide at most one of elementId, text, testTag, contentDescription, or className",
+    );
+  }
+});
 
 // Property-based tests. See test/utils/Backoff.property.test.ts for the pinned-seed rationale.
 const RUN_OPTIONS = { seed: 1_234_567, numRuns: 300 } as const;

@@ -100,6 +100,6 @@ export const resolverSelectorSchema: z.ZodType<ResolverSelector> = z.lazy(() =>
           selector.contentDescription,
           selector.className,
         ].filter((value) => value !== undefined).length <= 1,
-      "Provide at most one of elementId, text, or testTag",
+      "Provide at most one of elementId, text, testTag, contentDescription, or className",
     ),
 );

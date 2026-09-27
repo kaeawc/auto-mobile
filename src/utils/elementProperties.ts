@@ -73,6 +73,7 @@ export function isCollectionElementProperties(props: Record<string, unknown>): b
       : typeof props.className === "string"
         ? props.className
         : "";
+  const simpleClassName = className.split(".").at(-1) ?? "";
   return (
     isTruthyFlag(props.scrollable) ||
     className === "XCUIElementTypeTable" ||
@@ -85,6 +86,6 @@ export function isCollectionElementProperties(props: Record<string, unknown>): b
       "TableView",
       "ViewPager",
       "ViewPager2",
-    ].some((name) => className.endsWith(name))
+    ].some((name) => className.endsWith(name) || simpleClassName.startsWith(name))
   );
 }

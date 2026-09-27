@@ -563,6 +563,77 @@ describe("logger closeAfterFlush lifecycle", () => {
     }
   });
 
+  test("keeps a drain-timeout error barrier on the injected timer when destroy never closes", async () => {
+    class ErrorWithoutCloseOnDestroyStream extends WritableFakeLogStream {
+      private errorEmitted = false;
+
+      override destroy(): void {
+        this.destroyed = true;
+        if (!this.errorEmitted) {
+          this.errorEmitted = true;
+          this.failClose(new Error("destroy failed without close"));
+        }
+      }
+    }
+    const streams: WritableFakeLogStream[] = [];
+    const { mod, restore } = await fileLoggerWithStreams(
+      streams,
+      () => new ErrorWithoutCloseOnDestroyStream(),
+    );
+    const timer = new FakeTimer();
+    const productionTimer = new FakeTimer();
+    const setTimeoutSpy = spyOn(defaultTimer, "setTimeout").mockImplementation((callback, ms) =>
+      productionTimer.setTimeout(callback, ms),
+    );
+    const clearTimeoutSpy = spyOn(defaultTimer, "clearTimeout").mockImplementation((handle) =>
+      productionTimer.clearTimeout(handle),
+    );
+    const writeStarted = new Promise<void>((resolve) => {
+      spyOn(streams[0], "write").mockImplementation(() => {
+        resolve();
+        return true;
+      });
+    });
+    const stderrSpy = spyOn(process.stderr, "write").mockImplementation(((
+      _chunk: unknown,
+      callback?: (error?: Error | null) => void,
+    ) => {
+      callback?.(null);
+      return true;
+    }) as typeof process.stderr.write);
+    try {
+      mod.logger.info("pending forever before destroy error");
+      await writeStarted;
+      const closing = mod.logger.closeAfterFlush(timer);
+      timer.advanceTime(CLOSE_LOG_WRITES_TIMEOUT_MS);
+      await expect(closing).rejects.toBeInstanceOf(ActionableError);
+      await Promise.resolve();
+
+      expect(timer.getPendingTimeoutCount()).toBe(1);
+      expect(productionTimer.getPendingTimeoutCount()).toBe(0);
+      expect(setTimeoutSpy).not.toHaveBeenCalled();
+
+      mod.logger.info("while destroy error barrier is active");
+      await mod.logger.flush();
+      expect(streams).toHaveLength(1);
+
+      timer.advanceTime(CLOSE_LOG_STREAM_TIMEOUT_MS);
+      mod.logger.info("after injected destroy error barrier timeout");
+      await mod.logger.flush();
+      expect(streams).toHaveLength(2);
+      expect(streams[1].destroyed).toBeFalse();
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+      expect(productionTimer.getPendingTimeoutCount()).toBe(0);
+    } finally {
+      timer.advanceTime(CLOSE_LOG_WRITES_TIMEOUT_MS + CLOSE_LOG_STREAM_TIMEOUT_MS);
+      productionTimer.advanceTime(CLOSE_LOG_STREAM_TIMEOUT_MS);
+      stderrSpy.mockRestore();
+      clearTimeoutSpy.mockRestore();
+      setTimeoutSpy.mockRestore();
+      restore();
+    }
+  });
+
   test("does not reuse a timed-out close stream and reopens once its fd is released", async () => {
     class NeverClosesStream extends WritableFakeLogStream {
       override end(): void {

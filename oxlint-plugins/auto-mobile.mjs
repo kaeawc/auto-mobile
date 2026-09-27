@@ -724,6 +724,11 @@ const noRawSelectorFieldReadRule = {
             return type.types.some((item) => rawType(item, env, seen));
           if (type.type === "TSTypeOperator") return rawType(type.typeAnnotation, env, seen);
           if (type.type === "TSArrayType") return rawType(type.elementType, env, seen);
+          if (type.type === "TSTypeLiteral")
+            return type.members.some(
+              (member) =>
+                member.type === "TSIndexSignature" && rawType(member.typeAnnotation, env, seen),
+            );
           if (type.type === "TSTupleType")
             return type.elementTypes.some((item) => rawType(item, env, seen));
           if (type.type !== "TSTypeReference") return false;
@@ -832,9 +837,18 @@ const noRawSelectorFieldReadRule = {
               (node.callee?.object?.type === "ThisExpression" &&
                 lookup(env, `method:${method}`)?.rawReturn === true) ||
               (receiverRaw &&
-                ["find", "findLast", "at", "map", "filter", "flatMap", "sort", "toSorted"].includes(
-                  method,
-                ) &&
+                [
+                  "find",
+                  "findLast",
+                  "at",
+                  "pop",
+                  "shift",
+                  "map",
+                  "filter",
+                  "flatMap",
+                  "sort",
+                  "toSorted",
+                ].includes(method) &&
                 (!transformed || transformedRaw)) ||
               ["extractNodeProperties", "getNodeProperties"].includes(method ?? node.callee?.name)
             );
@@ -875,6 +889,8 @@ const noRawSelectorFieldReadRule = {
                 ),
               });
           } else if (pattern.type === "ObjectPattern") {
+            const sourceProperties =
+              value?.type === "Identifier" ? lookup(env, value.name)?.properties : undefined;
             for (const property of pattern.properties) {
               if (property.type === "RestElement") {
                 bind(property.argument, undefined, env, isRaw, assignment, conditional);
@@ -887,7 +903,7 @@ const noRawSelectorFieldReadRule = {
                 property.value,
                 undefined,
                 env,
-                isRaw && !fields.has(name),
+                (isRaw && !fields.has(name)) || sourceProperties?.has(name) === true,
                 assignment,
                 conditional,
               );
@@ -907,7 +923,20 @@ const noRawSelectorFieldReadRule = {
               node.type,
             )
           ) {
-            const local = new Map(env);
+            const local = new Map(
+              [...env].map(([name, binding]) => [
+                name,
+                Array.isArray(binding)
+                  ? [...binding]
+                  : binding && typeof binding === "object"
+                    ? {
+                        ...binding,
+                        literals: binding.literals && new Set(binding.literals),
+                        properties: binding.properties && new Set(binding.properties),
+                      }
+                    : binding,
+              ]),
+            );
             for (const parameter of node.params)
               bind(parameter, undefined, local, rawType(parameter.typeAnnotation, local));
             // Traversal callbacks receive raw hierarchy nodes even without annotations.
@@ -1032,6 +1061,7 @@ const noRawSelectorFieldReadRule = {
               ((node.type === "IfStatement" || node.type === "ConditionalExpression") &&
                 (name === "consequent" || name === "alternate")) ||
               (node.type === "SwitchCase" && name === "consequent") ||
+              (node.type === "TryStatement" && name === "block") ||
               (node.type === "LogicalExpression" && name === "right") ||
               (["WhileStatement", "DoWhileStatement", "ForStatement"].includes(node.type) &&
                 name === "body");

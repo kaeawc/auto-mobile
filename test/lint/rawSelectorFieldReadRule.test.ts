@@ -141,6 +141,25 @@ test("an unconditional key replacement removes an obsolete raw selector key", ()
 });
 
 test.each([
+  'function inspect(node: { [key: string]: unknown }) { return node["text"]; }',
+  "function inspect(nodes: ViewHierarchyNode[]) { const node = nodes.pop(); return node?.text; }",
+  "function inspect(nodes: ViewHierarchyNode[]) { const node = nodes.shift(); return node?.text; }",
+  "interface Candidate { node: ViewHierarchyNode } function inspect(candidate: Candidate) { const { node } = candidate; return node.text; }",
+  "function inspect(node: ViewHierarchyNode, safe: Element) { let candidate = node; function reset() { candidate = safe; } return candidate.text; }",
+  "function inspect(node: ViewHierarchyNode, safe: Element) { let candidate = node; try { mayThrow(); candidate = safe; } catch {} return candidate.text; }",
+])("rejects raw reads across additional provenance boundaries: %s", (code) => {
+  expect(check(code).length).toBeGreaterThan(0);
+});
+
+test("closure and try flow still permit reads after an unconditional safe replacement", () => {
+  expect(
+    check(
+      "function inspect(node: ViewHierarchyNode, safe: Element) { let candidate = node; candidate = safe; function reset() { candidate = node; } return candidate.text; }",
+    ),
+  ).toEqual([]);
+});
+
+test.each([
   "function inspect(node: ViewHierarchyNode & { extra: string }) { return node.text; }",
   "function inspect(nodes: readonly ViewHierarchyNode[]) { return nodes[0].text; }",
   "interface Box { node: ViewHierarchyNode } function inspect(box: Box) { return box.node.text; }",

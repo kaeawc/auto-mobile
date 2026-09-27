@@ -1200,7 +1200,9 @@ export class TapOnElement extends BaseVisualChange {
         return targetValue === candidateValue;
       }
     }
-    return boundsEqual(target.bounds, candidate.bounds);
+    return (
+      boundsEqual(target.bounds, candidate.bounds) && this.hasStableFocusIdentity(target, candidate)
+    );
   }
 
   private describeFocusTarget(element: Element, options: TapOnElementOptions): string {
@@ -1215,7 +1217,7 @@ export class TapOnElement extends BaseVisualChange {
       : "the matched element";
   }
 
-  private hasStableFocusIdentity(target: Element, candidate: Element): boolean {
+  private hasStableFocusIdentity(target: Element, candidate: Element, labelText?: string): boolean {
     if (target.class !== candidate.class) {
       return false;
     }
@@ -1229,12 +1231,17 @@ export class TapOnElement extends BaseVisualChange {
     const targetText = target.text ?? target["content-desc"] ?? target["ios-accessibility-label"];
     const candidateText =
       candidate.text ?? candidate["content-desc"] ?? candidate["ios-accessibility-label"];
-    return typeof targetText === "string" && targetText.length > 0 && targetText === candidateText;
+    const identityText =
+      typeof targetText === "string" && targetText.length > 0 ? targetText : labelText;
+    return (
+      typeof identityText === "string" && identityText.length > 0 && identityText === candidateText
+    );
   }
 
   private findSoleFocusedFieldByStableIdentity(
     target: Element,
     nodes: readonly SearchableEntry[],
+    labelText?: string,
   ): Element | undefined {
     const focusedFields = nodes.filter(
       (node) =>
@@ -1242,12 +1249,20 @@ export class TapOnElement extends BaseVisualChange {
         isFocusEditableElement(node.properties) &&
         this.finder.isElementKeyboardFocused(node.element),
     );
-    if (focusedFields.length !== 1) {
+    const seen = new Set<SearchableEntry["source"]>();
+    const distinctFocusedFields = focusedFields.filter((node) => {
+      if (seen.has(node.source)) {
+        return false;
+      }
+      seen.add(node.source);
+      return true;
+    });
+    if (distinctFocusedFields.length !== 1) {
       return undefined;
     }
-    const candidate = focusedFields[0].element;
+    const candidate = distinctFocusedFields[0].element;
     return candidate &&
-      this.hasStableFocusIdentity(target, candidate) &&
+      this.hasStableFocusIdentity(target, candidate, labelText) &&
       horizontalExtentNearlyEqual(
         target.bounds,
         candidate.bounds,
@@ -1261,6 +1276,7 @@ export class TapOnElement extends BaseVisualChange {
     options: TapOnElementOptions,
     target: Element,
     observation?: ObserveResult,
+    labelText?: string,
   ): boolean {
     if (!observation?.viewHierarchy) {
       return false;
@@ -1278,7 +1294,7 @@ export class TapOnElement extends BaseVisualChange {
     if (focused) {
       return true;
     }
-    if (this.findSoleFocusedFieldByStableIdentity(target, nodes)) {
+    if (this.findSoleFocusedFieldByStableIdentity(target, nodes, labelText)) {
       return true;
     }
     if (!options.testTag && !(options.elementId && target["resource-id"])) {
@@ -2086,6 +2102,7 @@ export class TapOnElement extends BaseVisualChange {
     let selectionCapture: SelectionCaptureState | null = null;
     let searchUntilStats: SearchUntilStats | undefined;
     let focusTarget: Element | undefined;
+    let focusLabelText: string | undefined;
 
     try {
       throwIfAborted(signal);
@@ -2196,6 +2213,10 @@ export class TapOnElement extends BaseVisualChange {
             }
 
             focusTarget = element;
+            const matchedLabel = searchOutcome.selection.matchedElement;
+            if (matchedLabel && matchedLabel !== element) {
+              focusLabelText = matchedLabel.text;
+            }
 
             // Check if element is already focused
             const isFocused = this.finder.isElementKeyboardFocused(element);
@@ -2427,6 +2448,7 @@ export class TapOnElement extends BaseVisualChange {
           { ...options, action: "focus" },
           target,
           result.observation,
+          focusLabelText,
         );
         if (!result.focusVerified) {
           result.success = false;

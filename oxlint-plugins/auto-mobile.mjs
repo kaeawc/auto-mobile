@@ -720,8 +720,9 @@ const noRawSelectorFieldReadRule = {
           const type = annotation?.typeAnnotation ?? annotation;
           if (!type) return false;
           if (["TSAnyKeyword", "TSUnknownKeyword"].includes(type.type)) return true;
-          if (type.type === "TSUnionType")
+          if (["TSUnionType", "TSIntersectionType"].includes(type.type))
             return type.types.some((item) => rawType(item, env, seen));
+          if (type.type === "TSTypeOperator") return rawType(type.typeAnnotation, env, seen);
           if (type.type === "TSArrayType") return rawType(type.elementType, env, seen);
           if (type.type === "TSTupleType")
             return type.elementTypes.some((item) => rawType(item, env, seen));
@@ -747,9 +748,9 @@ const noRawSelectorFieldReadRule = {
             if (seen.has(name)) return new Set();
             return propertyTypes(env.get(`type:${name}`), env, new Set([...seen, name]));
           }
-          if (type?.type !== "TSTypeLiteral") return new Set();
+          if (!["TSTypeLiteral", "TSInterfaceBody"].includes(type?.type)) return new Set();
           return new Set(
-            type.members
+            (type.members ?? type.body)
               .filter(
                 (member) =>
                   rawType(member.typeAnnotation, env) && propertyName(member.key) !== null,
@@ -772,6 +773,7 @@ const noRawSelectorFieldReadRule = {
               "TSNonNullExpression",
               "ParenthesizedExpression",
               "AwaitExpression",
+              "TSSatisfiesExpression",
             ].includes(node.type)
           )
             return raw(node.expression ?? node.argument, env);
@@ -796,7 +798,9 @@ const noRawSelectorFieldReadRule = {
             return (
               lookup(env, node.callee?.name)?.rawReturn === true ||
               (node.callee?.type === "MemberExpression" &&
-                ["find", "at", "map", "filter", "flatMap"].includes(node.callee.property?.name) &&
+                ["find", "findLast", "at", "map", "filter", "flatMap", "sort", "toSorted"].includes(
+                  node.callee.property?.name,
+                ) &&
                 raw(node.callee.object, env)) ||
               ["extractNodeProperties", "getNodeProperties"].includes(
                 node.callee?.property?.name ?? node.callee?.name,
@@ -810,7 +814,8 @@ const noRawSelectorFieldReadRule = {
             const binding = assignment ? env.get(pattern.name) : undefined;
             if (binding) {
               // Maps share outer binding records; declarations still shadow them.
-              binding.raw ||= isRaw || rawType(pattern.typeAnnotation, env);
+              const nextRaw = isRaw || rawType(pattern.typeAnnotation, env);
+              binding.raw = conditional ? binding.raw || nextRaw : nextRaw;
               const next = key(value, env);
               binding.literal = next;
               binding.literals = new Set(
@@ -876,9 +881,20 @@ const noRawSelectorFieldReadRule = {
             if (
               parent?.type === "CallExpression" &&
               (parent.callee?.property?.name === "traverseNode" ||
-                (["find", "map", "filter", "flatMap", "some", "every", "forEach"].includes(
-                  parent.callee?.property?.name,
-                ) &&
+                ([
+                  "find",
+                  "findIndex",
+                  "findLast",
+                  "findLastIndex",
+                  "map",
+                  "filter",
+                  "flatMap",
+                  "some",
+                  "every",
+                  "forEach",
+                  "sort",
+                  "toSorted",
+                ].includes(parent.callee?.property?.name) &&
                   raw(parent.callee.object, env)))
             )
               bind(node.params[0], undefined, local, true);
@@ -892,6 +908,8 @@ const noRawSelectorFieldReadRule = {
               const declaration = statement.declaration ?? statement;
               if (declaration.type === "TSTypeAliasDeclaration")
                 env.set(`type:${declaration.id.name}`, declaration.typeAnnotation);
+              if (declaration.type === "TSInterfaceDeclaration")
+                env.set(`type:${declaration.id.name}`, declaration.body);
               if (declaration.type === "ImportDeclaration")
                 for (const specifier of declaration.specifiers)
                   if (specifier.type === "ImportSpecifier")
@@ -927,7 +945,14 @@ const noRawSelectorFieldReadRule = {
             node.type === "AssignmentExpression" &&
             ["Identifier", "ObjectPattern", "ArrayPattern"].includes(node.left.type)
           )
-            bind(node.left, node.right, env, raw(node.right, env), true, conditional);
+            bind(
+              node.left,
+              node.right,
+              env,
+              raw(node.right, env),
+              true,
+              conditional || node.operator !== "=",
+            );
           if (
             node.type === "MemberExpression" &&
             !(parent?.type === "AssignmentExpression" && parent.operator === "=" && role === "left")

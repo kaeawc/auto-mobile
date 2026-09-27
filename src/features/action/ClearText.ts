@@ -24,13 +24,15 @@ export function getFocusedTextLength(
   for (const rootNode of rootNodes) {
     parser.traverseNode(rootNode, (node: any) => {
       const nodeProperties = parser.extractNodeProperties(node);
-      const displayText = toSearchable(nodeProperties).textSources;
+      const searchable = toSearchable(nodeProperties);
+      const displayText = searchable.textSources;
       const text = displayText.value ?? displayText.text;
+      const length = typeof text === "string" ? text.length : searchable.capturedTextLength;
       if (
         (nodeProperties.focused === "true" || nodeProperties.focused === true) &&
-        typeof text === "string"
+        length !== undefined
       ) {
-        textLength = Math.max(textLength ?? 0, text.length);
+        textLength = Math.max(textLength ?? 0, length);
       }
     });
   }

@@ -22,6 +22,17 @@ describe("searchable node derivation", () => {
     expect(node.className).toBe("TextView");
   });
 
+  test("omits empty label sources while retaining an editable empty value", () => {
+    const node = toSearchable({
+      text: "  ",
+      "content-desc": "",
+      "ios-accessibility-label": "Label",
+    });
+    expect(node.textSources).toEqual({ "ios-accessibility-label": "Label" });
+    const editable = toSearchable({ class: "android.widget.EditText", value: "" });
+    expect(editable.textSources).toEqual({ value: "" });
+  });
+
   test("editable value and accessible label remain searchable", () => {
     const node = toSearchable({
       bounds,

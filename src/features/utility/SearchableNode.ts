@@ -23,6 +23,7 @@ export interface SearchableNode {
   label?: string;
   textFields: readonly string[];
   textSources: Readonly<Record<string, string>>;
+  capturedTextLength?: number;
   accessibleLabel?: string;
   testTag?: string;
   className?: string;
@@ -100,8 +101,12 @@ export function toSearchable(properties: SearchableProperties): SearchableNode {
         "content-desc": properties["content-desc"],
         "ios-accessibility-label": properties["ios-accessibility-label"],
         value: editable ? properties.value : undefined,
-      }).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
+      }).filter(
+        (entry): entry is [string, string] =>
+          typeof entry[1] === "string" && (entry[0] === "value" || entry[1].trim().length > 0),
+      ),
     ),
+    capturedTextLength: typeof properties.text === "string" ? properties.text.length : undefined,
     textFields: [
       ...new Set(
         [label, value, text, description, accessibleLabel].filter(

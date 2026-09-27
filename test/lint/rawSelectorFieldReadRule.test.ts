@@ -139,3 +139,29 @@ test("an unconditional key replacement removes an obsolete raw selector key", ()
     check('function inspect(node: any) { let key = "text"; key = "bounds"; return node[key]; }'),
   ).toEqual([]);
 });
+
+test.each([
+  "function inspect(node: ViewHierarchyNode & { extra: string }) { return node.text; }",
+  "function inspect(nodes: readonly ViewHierarchyNode[]) { return nodes[0].text; }",
+  "interface Box { node: ViewHierarchyNode } function inspect(box: Box) { return box.node.text; }",
+  "function inspect(node: unknown) { return (node satisfies ViewHierarchyNode).text; }",
+  "function inspect(nodes: ViewHierarchyNode[]) { return nodes.findIndex(node => !!node.text); }",
+  "function inspect(nodes: ViewHierarchyNode[]) { return nodes.findLast(node => !!node.text); }",
+  "function inspect(nodes: ViewHierarchyNode[]) { return nodes.sort((a, b) => a.text.localeCompare(b.text)); }",
+  "function inspect(nodes: ViewHierarchyNode[]) { return nodes.toSorted((a, b) => a.text.localeCompare(b.text)); }",
+])("tracks raw provenance through additional TypeScript forms: %s", (code) => {
+  expect(check(code).length).toBeGreaterThan(0);
+});
+
+test("unconditional assignment replaces raw provenance while conditional assignment retains it", () => {
+  expect(
+    check(
+      "function inspect(node: ViewHierarchyNode, safe: Element) { let candidate = node; candidate = safe; return candidate.text; }",
+    ),
+  ).toEqual([]);
+  expect(
+    check(
+      "function inspect(node: ViewHierarchyNode, safe: Element, flag: boolean) { let candidate = node; if (flag) candidate = safe; return candidate.text; }",
+    ),
+  ).toHaveLength(1);
+});

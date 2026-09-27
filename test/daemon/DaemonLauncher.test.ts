@@ -115,6 +115,24 @@ describe("DaemonLauncher", () => {
     );
   });
 
+  test("matches a forward-slashed Windows sibling workspace candidate", () => {
+    const candidate = "C:/src/auto-mobile-ws2/dist/src/index.js";
+    const active = "C:\\src\\auto-mobile\\dist\\src\\index.js";
+    expect(isDaemonEntryScriptPath(candidate, active, () => true)).toBe(true);
+  });
+
+  test("rejects a Windows sibling candidate under a different parent", () => {
+    const candidate = "D:/other/auto-mobile-ws2/dist/src/index.js";
+    const active = "C:\\src\\auto-mobile\\dist\\src\\index.js";
+    expect(isDaemonEntryScriptPath(candidate, active, () => true)).toBe(false);
+  });
+
+  test("rejects a Windows sibling candidate when provenance probe fails", () => {
+    const candidate = "C:/src/auto-mobile-ws2/dist/src/index.js";
+    const active = "C:\\src\\auto-mobile\\dist\\src\\index.js";
+    expect(isDaemonEntryScriptPath(candidate, active, () => false)).toBe(false);
+  });
+
   test("accepts a sibling checkout with the default provenance probe", () => {
     const checkoutRoot = mkdtempSync(join(tmpdir(), "auto-mobile-provenance-"));
     const activeEntryScript = join(dirname(checkoutRoot), "auto-mobile", "dist/src/index.js");

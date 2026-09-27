@@ -1,5 +1,10 @@
-import { expect, test } from "bun:test";
+import { afterEach, expect, test } from "bun:test";
 import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
+import { identifyObservedHierarchy } from "../../../src/features/observe/HierarchyCapture";
+import { attachRawViewHierarchy } from "../../../src/utils/viewHierarchySearch";
+import { serverConfig } from "../../../src/utils/ServerConfig";
+
+afterEach(() => serverConfig.setRawElementSearchEnabled(false));
 const bounds = { left: 0, top: 0, right: 100, bottom: 100 };
 const hierarchy = {
   hierarchy: {
@@ -16,6 +21,37 @@ test("action adapter defaults to namespace IDs and exact-first text", () => {
     "app:id/login",
   );
   expect(selector.selectByText(hierarchy, "Login").element?.["resource-id"]).toBe("app:id/login");
+});
+
+test("fuzzy sibling selection keeps partial label anchors", () => {
+  const capture = {
+    hierarchy: {
+      node: {
+        node: [
+          { bounds, clickable: true, text: "Email" },
+          { bounds, clickable: true, text: "Email backup" },
+        ],
+      },
+    },
+  };
+  const result = new ResolverElementSelector().selectClickableSiblingOfText(capture, "Email", {
+    fuzzyMatch: true,
+    index: 1,
+  });
+  expect(result.element?.text).toBe("Email backup");
+});
+
+test("raw element search uses attached raw nodes even with an actionable snapshot", () => {
+  const raw = {
+    hierarchy: { node: { bounds, clickable: true, text: "Hidden target" } },
+  };
+  const filtered = { hierarchy: { node: { bounds, clickable: true, text: "Visible target" } } };
+  identifyObservedHierarchy("android", filtered, "cached-ok");
+  attachRawViewHierarchy(filtered, raw);
+  serverConfig.setRawElementSearchEnabled(true);
+  expect(new ResolverElementSelector().selectByText(filtered, "Hidden target").element?.text).toBe(
+    "Hidden target",
+  );
 });
 
 test("adapter fails ambiguity before returning any action target", () => {

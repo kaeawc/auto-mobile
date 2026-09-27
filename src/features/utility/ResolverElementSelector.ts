@@ -8,6 +8,7 @@ import { ElementResolver, type ElementResolution, type ResolutionAction } from "
 import { SearchableHierarchy, type SearchableEntry } from "./SearchableNode";
 import { extractHierarchyScreenSize } from "../observe/hierarchyScreenSize";
 import type { TextSelectionIntent } from "../../utils/interfaces/ElementFinder";
+import { resolveViewHierarchyForSearch } from "../../utils/viewHierarchySearch";
 
 interface SelectionOptions {
   container?: { elementId?: string; text?: string } | null;
@@ -81,7 +82,9 @@ export class ResolverElementSelector implements ElementSelector {
   ): ElementSelectionResult {
     return this.select(
       capture,
-      { sibling: { text, ...(options.fuzzyMatch === false ? ({ match: "exact" } as const) : {}) } },
+      {
+        sibling: { text, ...(options.fuzzyMatch === true ? ({ match: "contains" } as const) : {}) },
+      },
       options,
     );
   }
@@ -108,7 +111,10 @@ export class ResolverElementSelector implements ElementSelector {
     container: { elementId?: string; text?: string },
   ): boolean {
     const result = this.resolver.resolve(
-      { id: "container", nodes: this.projection.project(capture) },
+      {
+        id: "container",
+        nodes: this.projection.project(resolveViewHierarchyForSearch(capture) ?? capture),
+      },
       container,
       { action: "inspect" },
     );
@@ -119,7 +125,10 @@ export class ResolverElementSelector implements ElementSelector {
   }
 
   private viewport(capture: ViewHierarchyResult) {
-    if (getHierarchySnapshot(capture)?.searchRaw) {
+    if (
+      getHierarchySnapshot(capture)?.searchRaw ||
+      resolveViewHierarchyForSearch(capture) !== capture
+    ) {
       return undefined;
     }
     return (
@@ -175,7 +184,12 @@ export class ResolverElementSelector implements ElementSelector {
     capture: ViewHierarchyResult,
     options: SelectionOptions,
   ): readonly SearchableEntry[] {
-    const nodes = getHierarchySnapshot(capture)?.nodes ?? this.projection.project(capture);
+    const raw = resolveViewHierarchyForSearch(capture);
+    const snapshot = getHierarchySnapshot(capture);
+    const nodes =
+      raw && raw !== capture
+        ? this.projection.project(raw)
+        : (snapshot?.nodes ?? this.projection.project(capture));
     if (!options.scrollableContainer) {
       return nodes;
     }

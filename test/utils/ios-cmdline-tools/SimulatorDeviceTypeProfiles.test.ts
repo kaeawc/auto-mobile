@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { ActionableError } from "../../../src/models";
 import type { AppleDeviceType } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
 import {
   SimCtlSimulatorDeviceTypeProfiles,
@@ -131,6 +132,37 @@ describe("SimCtlSimulatorDeviceTypeProfiles", () => {
     await expect(
       profiles.profileFor("com.apple.CoreSimulator.SimDeviceType.iPhone-17"),
     ).resolves.toBeNull();
+  });
+
+  test("retries a profile read after caller cancellation", async () => {
+    const cancelled = new AbortController();
+    const fresh = new AbortController();
+    const plist = plistReader({});
+    let reads = 0;
+    plist.readJsonFile = async () => {
+      reads++;
+      if (reads === 1) {
+        cancelled.abort();
+        throw new ActionableError("plutil failed: plutil execution was cancelled");
+      }
+      return { mainScreenWidth: 1206 };
+    };
+    const profiles = new SimCtlSimulatorDeviceTypeProfiles(
+      { getDeviceTypes: async () => [deviceType()] },
+      plist,
+    );
+
+    await expect(
+      profiles.profileFor("com.apple.CoreSimulator.SimDeviceType.iPhone-17", {
+        signal: cancelled.signal,
+      }),
+    ).resolves.toBeNull();
+    await expect(
+      profiles.profileFor("com.apple.CoreSimulator.SimDeviceType.iPhone-17", {
+        signal: fresh.signal,
+      }),
+    ).resolves.toMatchObject({ pixelWidth: 1206 });
+    expect(reads).toBe(2);
   });
 
   test("returns null for an unknown device type", async () => {

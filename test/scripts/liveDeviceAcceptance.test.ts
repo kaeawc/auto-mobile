@@ -1822,11 +1822,52 @@ describe("live device acceptance harness", () => {
     expect(
       harness.calls.some(
         (call) =>
-          call.owner === "provision" &&
+          call.owner === "cleanup-provisioned-device" &&
           call.name === "killDevice" &&
           (call.arguments.device as Record<string, unknown>).deviceId === "emulator-5560",
       ),
     ).toBe(true);
+  });
+
+  test("uses a fresh cleanup client when provision readiness times out and closes its client", async () => {
+    const harness = createHarness();
+    const createMcpClient = harness.dependencies.createMcpClient!;
+    let exhaustedWorkBudget = false;
+    harness.dependencies.createMcpClient = async (owner, signal, presentationOrder) => {
+      const client = await createMcpClient(owner, signal, presentationOrder);
+      let closed = false;
+      return {
+        async callTool(name, arguments_, callSignal) {
+          if (closed) {
+            throw new Error(`MCP client ${owner} is closed`);
+          }
+          const result = client.callTool(name, arguments_, callSignal);
+          if (!exhaustedWorkBudget && owner === "provision" && name === "observe") {
+            exhaustedWorkBudget = true;
+            harness.timer.advanceTime(6_750);
+          }
+          return await result;
+        },
+        async close() {
+          closed = true;
+          await client.close();
+        },
+      };
+    };
+
+    await expect(runAcceptanceMatrix(androidArgs, harness.dependencies)).rejects.toThrow(
+      "Acceptance",
+    );
+
+    expect(exhaustedWorkBudget).toBe(true);
+    expect(harness.events).toContain("close:provision");
+    expect(
+      harness.calls.find(
+        (call) => call.owner === "cleanup-provisioned-device" && call.name === "killDevice",
+      )?.arguments,
+    ).toEqual({
+      device: { name: "Pixel_8_API_35", deviceId: "emulator-5556", platform: "android" },
+    });
   });
 
   test("cleans up the reacquired Android target when a later readiness check fails", async () => {
@@ -1837,8 +1878,9 @@ describe("live device acceptance harness", () => {
     );
 
     expect(
-      harness.calls.find((call) => call.owner === "provision" && call.name === "killDevice")
-        ?.arguments,
+      harness.calls.find(
+        (call) => call.owner === "cleanup-provisioned-device" && call.name === "killDevice",
+      )?.arguments,
     ).toEqual({
       device: { name: "Pixel_8_API_35", deviceId: "emulator-5560", platform: "android" },
     });
@@ -1852,8 +1894,9 @@ describe("live device acceptance harness", () => {
     );
 
     expect(
-      harness.calls.find((call) => call.owner === "provision" && call.name === "killDevice")
-        ?.arguments,
+      harness.calls.find(
+        (call) => call.owner === "cleanup-provisioned-device" && call.name === "killDevice",
+      )?.arguments,
     ).toEqual({
       device: { name: "Pixel_8_API_35", deviceId: "emulator-5556", platform: "android" },
     });

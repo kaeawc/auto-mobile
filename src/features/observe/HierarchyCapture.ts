@@ -25,7 +25,18 @@ export interface HierarchySnapshot {
 }
 
 const capturedHierarchies = new WeakMap<ViewHierarchyResult, HierarchySnapshot>();
+const acquisitionTimestamps = new WeakMap<ViewHierarchyResult, number>();
 const observedSearchable = new SearchableHierarchy();
+
+/** Keep device acquisition proof without labelling a mixed hierarchy as one frame. */
+export function recordAcquisitionTimestamp(
+  hierarchy: ViewHierarchyResult,
+  updatedAt: number | undefined,
+): void {
+  if (updatedAt !== undefined) {
+    acquisitionTimestamps.set(hierarchy, updatedAt);
+  }
+}
 
 /** Internal provenance only: nothing is added to the serialized hierarchy contract. */
 export function getHierarchySnapshot(
@@ -109,7 +120,7 @@ export class DefaultHierarchyCapture implements HierarchyCapture {
     if (source.hierarchy?.error) {
       throw new ActionableError(`Unable to capture hierarchy: ${source.hierarchy.error}`);
     }
-    const updatedAt = hierarchyUpdatedAtToMillis(source);
+    const updatedAt = acquisitionTimestamps.get(source) ?? hierarchyUpdatedAtToMillis(source);
     if (
       request.minTimestamp !== undefined &&
       request.minTimestamp > 0 &&

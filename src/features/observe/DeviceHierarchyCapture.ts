@@ -12,7 +12,11 @@ import { supplementAndroidHierarchy } from "../action/AndroidHierarchyFallback";
 import { AndroidCtrlProxyClient } from "./android";
 import { IOSCtrlProxyClient } from "./ios";
 import { ViewHierarchy } from "./ViewHierarchy";
-import { DefaultHierarchyCapture, type HierarchyCapture } from "./HierarchyCapture";
+import {
+  DefaultHierarchyCapture,
+  recordAcquisitionTimestamp,
+  type HierarchyCapture,
+} from "./HierarchyCapture";
 import { ViewHierarchyCaptureReader } from "./ViewHierarchyCaptureReader";
 import {
   filterOffscreenNodes,
@@ -103,7 +107,7 @@ export function createDeviceHierarchyCapture(
       if (!hierarchy.ctrlProxyIncomplete || timer.now() >= deadline) {
         return hierarchy;
       }
-      return supplementAndroidHierarchy(
+      const supplemented = await supplementAndroidHierarchy(
         hierarchy,
         {
           adb: (dependencies.adbFactory ?? defaultAdbClientFactory).create(device),
@@ -113,6 +117,8 @@ export function createDeviceHierarchyCapture(
         deadline,
         request.signal,
       );
+      recordAcquisitionTimestamp(supplemented, updatedAt);
+      return supplemented;
     },
     (hierarchy) => projectActionableHierarchy(device.platform, hierarchy),
     dependencies.settle,

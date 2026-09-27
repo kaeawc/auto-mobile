@@ -1443,7 +1443,9 @@ class ViewHierarchyExtractorTest {
         disableAllFiltering = true,
         occlusionEnabled = false,
       )
-    val encoded = json.encodeToJsonElement(ViewHierarchy.serializer(), result) as kotlinx.serialization.json.JsonObject
+    val encoded =
+      json.encodeToJsonElement(ViewHierarchy.serializer(), result)
+        as kotlinx.serialization.json.JsonObject
     val root = result.hierarchy!!.node as kotlinx.serialization.json.JsonObject
     assertEquals(kotlinx.serialization.json.JsonPrimitive(42), root["windowId"])
     assertNotNull(encoded["windows"])

@@ -63,6 +63,17 @@ test("fresh Android capture preserves the device timestamp across conversion", a
   expect(snapshot.hierarchy.updatedAt).toBe(1234);
 });
 
+test("fresh supplemented Android capture validates the native floor without timestamping the mixed tree", async () => {
+  const { capture } = fixture(0, true, 1234);
+  const snapshot = await capture.capture({ freshness: "fresh", minTimestamp: 1234 });
+  expect(snapshot.nodes.some((node) => node.nativeId === "com.test:id/target")).toBe(true);
+  expect(snapshot.updatedAt).toBeUndefined();
+  expect(snapshot.hierarchy.updatedAt).toBeUndefined();
+  await expect(capture.capture({ freshness: "fresh", minTimestamp: 1235 })).rejects.toThrow(
+    "timestamp floor",
+  );
+});
+
 test("fresh iOS capture converts the XCTest root before normalization", async () => {
   const raw = {
     hierarchy: {

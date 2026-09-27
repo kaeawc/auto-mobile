@@ -77,6 +77,7 @@ case "$1 $2" in
         ;;
       */check-runs/33/annotations*) annotation_response '[]' ;;
       */check-runs/34/annotations*) annotation_response '[]' ;;
+      */check-runs/37/annotations*) annotation_response '[]' ;;
       */check-runs/12/annotations*|*/check-runs/13/annotations*|*/check-runs/14/annotations*) annotation_response '[]' ;;
       */check-runs/15/annotations*|*/check-runs/16/annotations*|*/check-runs/17/annotations*) annotation_response '[]' ;;
       */actions/jobs/6/logs) printf 'readiness phase exceeded the remaining deadline\n' ;;
@@ -86,6 +87,7 @@ case "$1 $2" in
       */actions/jobs/32/logs) printf 'First emulator attempt failed; captured diagnostics follow:\nsys.boot_completed is not 1\nexpect(received).toBe(expected) ... someRealRegression assertion failed\n' ;;
       */actions/jobs/33/logs) printf '##[group]Run for attempt in $(seq 1 "${attempts}"); do\n  echo "::group::iOS device capture integration (attempt ${attempt}/${attempts})"\n  if [ "${attempt}" -gt 1 ]; then\n    echo "Starting emulator retry attempt 2."\n  fi\n  ...\n##[endgroup]\niOS device capture attempt 1 failed (exit 1): iOS WHEP viewer did not recover to a fresh IDR within ~2000ms of the relayed PLI\nReaping MediaMTX / daemon / Chrome before one retry.\nStarting emulator retry attempt 2.\niOS device capture attempt 2 failed (exit 1): TypeError: Cannot read properties of undefined (reading '\''sessionId'\'')\niOS device capture failed after 2 attempts.\n' ;;
       */actions/jobs/34/logs) printf '##[group]Run for attempt in $(seq 1 "${attempts}"); do\n  if [ "${attempt}" -gt 1 ]; then\n    echo "Starting emulator retry attempt 2."\n  fi\n##[endgroup]\niOS device capture attempt 1 failed (exit 1): iOS WHEP viewer did not recover to a fresh IDR within ~2000ms of the relayed PLI\niOS device capture failed after 1 attempts.\n' ;;
+      */actions/jobs/37/logs) printf 'iOS device capture attempt 1 failed (exit 1): first attempt failure\nStarting emulator retry attempt 2.\niOS device capture attempt 2 failed (exit 1): No connected ios devices found (after 5 attempts).\niOS device capture failed after 2 attempts.\n' ;;
       */actions/jobs/18/logs) printf 'Test exceeded 100ms: some/test.ts > some test (median 142.31ms of 3 isolated runs)\n' ;;
       */actions/jobs/22/logs) printf 'Test exceeded 100ms: foo.bar (150.00ms; recheck produced 2 of 5 isolated samples)\n' ;;
       */actions/jobs/43/logs) printf '2026-09-27T14:26:44.12Z WATCHDOG: integration test exceeded 899s; last started-but-not-ended file: test/server/toolRegistry.collaborators.integration.test.ts\n' ;;
@@ -396,6 +398,23 @@ JSON
 JSON
 
   run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" bash "$SCRIPT" 660
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"iOS Device Capture to WHEP → Run iOS device capture → none → UNKNOWN"* ]]
+  [[ "$output" != *"RERUN-DONT-FIX"* ]]
+}
+
+@test "does not classify exhausted iOS discovery after the second attempt as a flake" {
+  fixture="$BATS_TEST_TMPDIR/ios-discovery-exhausted-run.json"
+  cat > "$fixture" <<'JSON'
+{
+  "headBranch": "work/ios-discovery",
+  "jobs": [
+    {"databaseId": 37, "name": "iOS Device Capture to WHEP", "conclusion": "failure", "steps": [{"name": "Run iOS device capture", "conclusion": "failure"}]}
+  ]
+}
+JSON
+
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" bash "$SCRIPT" 662
   [ "$status" -eq 0 ]
   [[ "$output" == *"iOS Device Capture to WHEP → Run iOS device capture → none → UNKNOWN"* ]]
   [[ "$output" != *"RERUN-DONT-FIX"* ]]

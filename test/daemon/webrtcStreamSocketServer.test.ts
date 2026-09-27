@@ -170,6 +170,28 @@ function lastResponse(socket: FakeSocket): WebRtcStreamSocketResponse {
 }
 
 describe("WebRtcStreamSocketServer", () => {
+  test("fails empty default Android discovery without retrying or sleeping", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    let calls = 0;
+    await expect(
+      resolveWebRtcStreamDevice(
+        {
+          getBootedDevices: async () => {
+            calls++;
+            return [];
+          },
+        },
+        undefined,
+        undefined,
+        timer,
+      ),
+    ).rejects.toThrow("No connected android devices found.");
+    expect(calls).toBe(1);
+    expect(timer.getSleepCallCount()).toBe(0);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
   test("retries an empty device discovery and reconciles the recovered device", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();

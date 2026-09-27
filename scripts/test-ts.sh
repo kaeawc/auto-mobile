@@ -476,9 +476,13 @@ case "$mode" in
             --bail) bail_count="${passthrough_args[$((bail_index + 1))]:-}" ;;
             --bail=*) bail_count="${passthrough_args[$bail_index]#--bail=}" ;;
           esac
-          if [[ "$bail_count" =~ ^[0-9]+$ ]] && ((bail_count > 1)); then
-            echo "--bail=$bail_count cannot be used with AUTOMOBILE_TEST_MODE=true per-file runs; run without AUTOMOBILE_TEST_MODE for a shared numeric bail limit." >&2
-            exit 2
+          if [[ "$bail_count" =~ ^[0-9]+$ ]]; then
+            significant_bail="${bail_count#"${bail_count%%[!0]*}"}"
+            significant_bail="${significant_bail:-0}"
+            if [[ "$significant_bail" == ??* || "$significant_bail" == [2-9] ]]; then
+              echo "--bail=$bail_count cannot be used with AUTOMOBILE_TEST_MODE=true per-file runs; run without AUTOMOBILE_TEST_MODE for a shared numeric bail limit." >&2
+              exit 2
+            fi
           fi
         done
       fi

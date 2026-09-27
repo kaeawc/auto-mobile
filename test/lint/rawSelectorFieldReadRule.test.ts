@@ -398,6 +398,28 @@ test("concat includes raw array argument provenance", () => {
   ).toHaveLength(1);
 });
 
+test("concat includes raw spread argument provenance", () => {
+  expect(
+    check(
+      "function inspect(nodes: ViewHierarchyNode[]) { const copy = Array<ViewHierarchyNode>().concat(...nodes); return copy[0].text; }",
+    ),
+  ).toHaveLength(1);
+});
+
+test("concat retains raw receiver array spread provenance", () => {
+  expect(
+    check("function inspect(nodes: ViewHierarchyNode[]) { return [...nodes].concat()[0].text; }"),
+  ).toHaveLength(1);
+});
+
+test("conditional reassignment in a map callback retains the outer raw return", () => {
+  expect(
+    check(
+      "function inspect(nodes: ViewHierarchyNode[], flag: boolean, safe: Element) { return nodes.map(node => { let alias = node; if (flag) { alias = safe; } return alias; })[0].text; }",
+    ),
+  ).toHaveLength(1);
+});
+
 test("conditional switch and short-circuit assignments retain raw provenance", () => {
   expect(
     check(

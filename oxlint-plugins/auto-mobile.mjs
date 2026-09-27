@@ -797,7 +797,7 @@ const noRawSelectorFieldReadRule = {
         };
         const blockReturnsRaw = (block, env) => {
           let found = false;
-          const inspect = (node, local) => {
+          const inspect = (node, local, inherited) => {
             if (!node || typeof node.type !== "string") return false;
             if (
               ["FunctionDeclaration", "FunctionExpression", "ArrowFunctionExpression"].includes(
@@ -807,8 +807,10 @@ const noRawSelectorFieldReadRule = {
               return false;
             if (node.type === "BlockStatement") {
               const scope = new Map(local);
+              const outerBindings = new Map(local);
               let hasRaw = false;
-              for (const statement of node.body) if (inspect(statement, scope)) hasRaw = true;
+              for (const statement of node.body)
+                if (inspect(statement, scope, outerBindings)) hasRaw = true;
               return hasRaw;
             }
             if (node.type === "VariableDeclaration") {
@@ -824,6 +826,7 @@ const noRawSelectorFieldReadRule = {
                 raw(node.right, local),
                 true,
                 node.operator !== "=",
+                inherited,
               );
             if (node.type === "ReturnStatement") {
               found = true;
@@ -833,8 +836,9 @@ const noRawSelectorFieldReadRule = {
             for (const [name, value] of Object.entries(node)) {
               if (name === "parent" || name === "typeAnnotation") continue;
               if (Array.isArray(value)) {
-                for (const child of value) if (inspect(child, local)) hasRaw = true;
-              } else if (value && typeof value === "object" && inspect(value, local)) hasRaw = true;
+                for (const child of value) if (inspect(child, local, inherited)) hasRaw = true;
+              } else if (value && typeof value === "object" && inspect(value, local, inherited))
+                hasRaw = true;
             }
             return hasRaw;
           };
@@ -951,18 +955,34 @@ const noRawSelectorFieldReadRule = {
                   "toSpliced",
                 ].includes(method) &&
                 (!transformed || transformedRaw)) ||
-              (method === "concat" && node.arguments.some((argument) => raw(argument, env))) ||
+              (method === "concat" &&
+                node.arguments.some((argument) =>
+                  raw(argument.type === "SpreadElement" ? argument.argument : argument, env),
+                )) ||
               ["extractNodeProperties", "getNodeProperties"].includes(method ?? node.callee?.name)
             );
           }
           return false;
         };
-        const bind = (pattern, value, env, isRaw, assignment = false, conditional = false) => {
+        const bind = (
+          pattern,
+          value,
+          env,
+          isRaw,
+          assignment = false,
+          conditional = false,
+          inherited,
+        ) => {
           if (!pattern) return;
           if (pattern.type === "Identifier") {
-            const binding = assignment ? env.get(pattern.name) : undefined;
+            let binding = assignment ? env.get(pattern.name) : undefined;
             if (binding) {
-              // Maps share outer binding records; declarations still shadow them.
+              // An assignment in a nested block must not mutate the enclosing
+              // binding record: execution may skip this block entirely.
+              if (inherited?.get(pattern.name) === binding) {
+                binding = { ...binding };
+                env.set(pattern.name, binding);
+              }
               const nextRaw = isRaw || rawType(pattern.typeAnnotation, env);
               binding.raw = conditional ? binding.raw || nextRaw : nextRaw;
               const next = key(value, env);
@@ -1037,7 +1057,7 @@ const noRawSelectorFieldReadRule = {
               value?.type === "Identifier" ? lookup(env, value.name)?.properties : undefined;
             for (const property of pattern.properties) {
               if (property.type === "RestElement") {
-                bind(property.argument, undefined, env, isRaw, assignment, conditional);
+                bind(property.argument, undefined, env, isRaw, assignment, conditional, inherited);
                 continue;
               }
               const name = property.computed ? key(property.key, env) : propertyName(property.key);
@@ -1050,15 +1070,16 @@ const noRawSelectorFieldReadRule = {
                 (isRaw && !fields.has(name)) || sourceProperties?.has(name) === true,
                 assignment,
                 conditional,
+                inherited,
               );
             }
           } else if (pattern.type === "ArrayPattern") {
             for (const element of pattern.elements)
-              bind(element, undefined, env, isRaw, assignment, conditional);
+              bind(element, undefined, env, isRaw, assignment, conditional, inherited);
           } else if (pattern.type === "RestElement") {
-            bind(pattern.argument, undefined, env, isRaw, assignment, conditional);
+            bind(pattern.argument, undefined, env, isRaw, assignment, conditional, inherited);
           } else if (pattern.type === "AssignmentPattern")
-            bind(pattern.left, pattern.right, env, isRaw, assignment, conditional);
+            bind(pattern.left, pattern.right, env, isRaw, assignment, conditional, inherited);
         };
         const visit = (node, env, parent, role, conditional = false) => {
           if (!node || typeof node.type !== "string") return;

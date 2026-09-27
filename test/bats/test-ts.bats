@@ -317,6 +317,35 @@ run_lane() {
   done
 }
 
+@test "per-file integration mode rejects leading zero and oversized numeric bail budgets" {
+  local bail_count
+  for bail_count in 08 0002 99999999999999999999999; do
+    : > "$BUN_ARGS_FILE"
+    run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_TEST_MODE=true \
+      bash "$SCRIPT" integration "--bail=$bail_count"
+    printf 'bail=%s status=%s output=%s\n' "$bail_count" "$status" "$output"
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"--bail=$bail_count cannot be used with AUTOMOBILE_TEST_MODE=true"* ]]
+    [ ! -s "$BUN_ARGS_FILE" ]
+  done
+}
+
+@test "per-file integration mode allows zero and one bail budgets" {
+  local bail_count
+  for bail_count in 0 1 01 00; do
+    : > "$BUN_ARGS_FILE"
+    run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_TEST_MODE=true \
+      bash "$SCRIPT" integration "--bail=$bail_count" \
+      test/server/deviceLabelSessionReleaseOrdering.integration.test.ts \
+      test/server/proxyServerTransportFailure.integration.test.ts \
+      test/server/toolRegistration.integration.test.ts
+    printf 'bail=%s status=%s output=%s\n' "$bail_count" "$status" "$output"
+    [ "$status" -eq 0 ]
+    [ "$(wc -l < "$BUN_ARGS_FILE")" -eq 3 ]
+    [[ "$(cat "$BUN_ARGS_FILE")" == *"--bail=$bail_count"* ]]
+  done
+}
+
 @test "integration coverage retains one process and its complete LCOV output" {
   run_lane integration --coverage --coverage-reporter lcov --coverage-dir scratch/integration-coverage
   [ "$status" -eq 0 ]
@@ -378,13 +407,17 @@ EOF
 @test "integration split respects a shorter caller wall timeout" {
   local timeout_args
   timeout_args="$(mktemp)"
+  cat > "$STUB_BIN/date" <<'EOF'
+#!/usr/bin/env bash
+printf '100\n'
+EOF
   cat > "$STUB_BIN/timeout" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$TIMEOUT_ARGS_FILE"
 shift 3
 exec "$@"
 EOF
-  chmod +x "$STUB_BIN/timeout"
+  chmod +x "$STUB_BIN/date" "$STUB_BIN/timeout"
   run env PATH="$STUB_BIN:$PATH" TIMEOUT_ARGS_FILE="$timeout_args" \
     AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=1 bash "$SCRIPT" integration
   [ "$status" -eq 0 ]

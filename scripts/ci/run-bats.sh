@@ -148,7 +148,7 @@ run_parallel_files() {
   local jobs="$2"
   local joblog="$3"
   local max_seconds="${AUTOMOBILE_BATS_MAX_FILE_SECONDS:-240}"
-  local output_dir sequence=0 bats_file output_file job_status exitval signal trailing_signal
+  local output_dir sequence=0 bats_file output_file job_status exitval signal
   local parallel_status=0 rc=0
   if [[ ! -s "$list_file" ]]; then
     return 0
@@ -202,17 +202,11 @@ run_parallel_files() {
       continue
     fi
     # The tee pipeline makes GNU Parallel run a shell wrapper. If BATS is
-    # terminated, that wrapper commonly exits 128+signal instead of
-    # being reported in the job log's Signal column. Accept either indicator,
-    # but only after the complete passing TAP-plan guard above.
-    trailing_signal=0
-    if [[ "$signal" != "0" ]]; then
-      trailing_signal="$signal"
-    elif [[ "$exitval" -gt 128 && "$exitval" -le 192 ]]; then
-      trailing_signal=$((exitval - 128))
-    fi
-    if [[ "$trailing_signal" != "0" ]]; then
-      log "note: ${bats_file} plan complete despite trailing signal ${trailing_signal}; treating as pass — see #5813"
+    # The tee pipeline makes GNU Parallel run a shell wrapper. For the benign
+    # #5813 SIGTERM case, the wrapper exits 143 or Parallel reports signal 15.
+    # Accept only those indicators, and only after the complete TAP-plan guard above.
+    if [[ "$signal" == "15" || ( "$signal" == "0" && "$exitval" == "143" ) ]]; then
+      log "note: ${bats_file} plan complete despite trailing signal 15; treating as pass — see #5813"
       continue
     fi
     log "ERROR: ${bats_file} exited ${exitval} without a signal"

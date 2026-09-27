@@ -21,6 +21,13 @@ case "\$1" in
     printf '1..2\nok 1 first\nok 2 second\n'
     kill -TERM "\$\$"
     ;;
+  *signal-kill-exit*|*signal-segv-column*)
+    printf '1..1\nok 1 complete plan\n'
+    if [[ "\$1" == *signal-kill-exit* ]]; then
+      exit 137
+    fi
+    exit 139
+    ;;
   *not-ok*) printf '1..1\nnot ok 1 real failure\n' ;;
   *fail*)
     printf '1..1\nok 1 stub failure\n'
@@ -66,8 +73,11 @@ while IFS= read -r -d '' file; do
   bats_status=\$?
   exitval=\$bats_status
   signal=0
-  if [[ "\$file" == *signal-column-pass* ]] && (( bats_status > 128 )); then
-    signal=\$((bats_status - 128))
+  if (( bats_status > 128 )); then
+    case "\$file" in
+      *signal-column-pass*) signal=15 ;;
+      *signal-segv-column*) signal=11 ;;
+    esac
   fi
   printf '%s : 0 2.000 0 0 %s %s bats %s\n' "\$sequence" "\$exitval" "\$signal" "\$file" >> "\$joblog"
   if (( bats_status != 0 )); then
@@ -164,6 +174,24 @@ run_runner() {
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"parallel-signal-column-pass.bats plan complete despite trailing signal 15; treating as pass"* ]]
+}
+
+@test "parallel SIGKILL wrapper exit after a complete TAP plan fails" {
+  printf '@test "signal kill exit" { true; }\n' > "$FIXTURES/parallel-signal-kill-exit.bats"
+
+  run_runner unit
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"ERROR: $FIXTURES/parallel-signal-kill-exit.bats exited 137 without a signal"* ]]
+}
+
+@test "parallel SIGSEGV Signal-column termination after a complete TAP plan fails" {
+  printf '@test "signal segv column" { true; }\n' > "$FIXTURES/parallel-signal-segv-column.bats"
+
+  run_runner unit
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"ERROR: $FIXTURES/parallel-signal-segv-column.bats exited 139 without a signal"* ]]
 }
 
 @test "parallel TAP not ok fails even when bats exits zero" {

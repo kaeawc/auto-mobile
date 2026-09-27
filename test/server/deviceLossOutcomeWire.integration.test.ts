@@ -339,7 +339,7 @@ describe("device loss MCP outcome", () => {
       undefined,
       { timeout: MCP_TEST_REQUEST_TIMEOUT_MS },
     );
-    await observeStarted.promise;
+    await Promise.race([observeStarted.promise, resultPromise.then(() => observeStarted.promise)]);
     await executionTracker.cancelDeviceSessionExecutions(
       "device-session-a",
       "device-disconnected:emulator-5554",

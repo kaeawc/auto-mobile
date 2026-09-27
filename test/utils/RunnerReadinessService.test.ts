@@ -1862,6 +1862,31 @@ describe("RunnerReadinessService", () => {
     expect(timer.now()).toBeLessThanOrEqual(2_000);
   });
 
+  test("counts consecutive slow health probe failures across recovery poll windows", async () => {
+    const manager = new FakeAndroidManager();
+    const client = new FakeReadinessClient();
+    const timer = new FakeTimer();
+    let probes = 0;
+    client.verifyServiceReady = async () => {
+      probes++;
+      // A hierarchy timeout can exceed the 1s recovery throttle. Advance
+      // synchronously so the test uses no real timers or device operations.
+      timer.advanceTime(1_200);
+      return probes >= 4;
+    };
+    const { service } = createService({ androidManager: manager, androidClient: client, timer });
+
+    await service.ensureReady({
+      device: androidDevice(),
+      requestedIdentity: "platform=android",
+      totalDeadlineMs: 10_000,
+      readinessTimeoutMs: 10_000,
+    });
+
+    expect(probes).toBe(4);
+    expect(manager.restartCalls).toBe(1);
+  });
+
   test("does not check health, rebind, or restart when the first health probe passes (fast path unchanged)", async () => {
     const manager = new FakeAndroidManager();
     const client = new FakeReadinessClient();

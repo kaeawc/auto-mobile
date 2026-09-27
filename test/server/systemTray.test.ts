@@ -43,12 +43,26 @@ const CTRL_PROXY_COMPACT_BOUNDS_GROUP_FIXTURE_PATH = join(
 const realCtrlProxyCompactBoundsGroups = JSON.parse(
   readFileSync(CTRL_PROXY_COMPACT_BOUNDS_GROUP_FIXTURE_PATH, "utf8"),
 ) as { collapsed: unknown; expanded: unknown };
-const headerlessTwoNotificationGroups = JSON.parse(
-  readFileSync(
-    join(import.meta.dir, "../fixtures/observe/ctrlproxy-headerless-two-notification-group.json"),
-    "utf8",
-  ),
-) as { collapsed: ViewHierarchyResult; expanded: ViewHierarchyResult };
+const headerlessTwoNotificationGroups = {
+  collapsed: JSON.parse(
+    readFileSync(
+      join(
+        import.meta.dir,
+        "../fixtures/observe/ctrlproxy-headerless-two-notification-group-collapsed.json",
+      ),
+      "utf8",
+    ),
+  ).viewHierarchy as ViewHierarchyResult,
+  expanded: JSON.parse(
+    readFileSync(
+      join(
+        import.meta.dir,
+        "../fixtures/observe/ctrlproxy-headerless-two-notification-group-expanded.json",
+      ),
+      "utf8",
+    ),
+  ).viewHierarchy as ViewHierarchyResult,
+};
 
 class SequencedFakeAdbExecutor extends FakeAdbExecutor {
   private timestamps: number[];

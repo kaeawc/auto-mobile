@@ -25,12 +25,19 @@ const device: BootedDevice = {
   platform: "android",
   source: "local",
 };
-const headerlessTwoNotificationGroups = JSON.parse(
-  readFileSync(
-    join(import.meta.dir, "../fixtures/observe/ctrlproxy-headerless-two-notification-group.json"),
-    "utf8",
-  ),
-) as { expanded: ObserveResult["viewHierarchy"] };
+const headerlessTwoNotificationGroups = {
+  expanded: (
+    JSON.parse(
+      readFileSync(
+        join(
+          import.meta.dir,
+          "../fixtures/observe/ctrlproxy-headerless-two-notification-group-expanded.json",
+        ),
+        "utf8",
+      ),
+    ) as ObserveResult
+  ).viewHierarchy,
+};
 const node = (id: string, text = "", children: any[] = []) => ({
   $: { "resource-id": id, text, package: "com.android.systemui", bounds: "[0,200][1000,1600]" },
   node: children,

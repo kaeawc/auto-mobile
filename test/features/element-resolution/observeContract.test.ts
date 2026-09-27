@@ -55,6 +55,8 @@ describe("observe-to-resolve migration contract", () => {
       "android-sibling-targets.json",
       "android-test-tag.json",
       "android-whitespace-label.json",
+      "ctrlproxy-headerless-two-notification-group-collapsed.json",
+      "ctrlproxy-headerless-two-notification-group-expanded.json",
       "ctrlproxy-notification-group-compact-bounds.json/collapsed",
       "ctrlproxy-notification-group-compact-bounds.json/expanded",
       "diff/scroll-after.json",

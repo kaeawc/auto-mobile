@@ -581,6 +581,50 @@ describe("ViewHierarchy", function () {
       }
     });
 
+    test("keeps the iOS cooldown reason when joined recovery times out", async function () {
+      const timer = new FakeTimer();
+      const iosDevice: BootedDevice = {
+        deviceId: "test-ios-device",
+        name: "Test iPhone",
+        platform: "ios",
+      };
+      let reads = 0;
+      const client = {
+        getLatestHierarchy: async () => {
+          reads++;
+          return {
+            hierarchy: null,
+            unavailableReason: "connection_lost",
+            unavailableDetail: "runner socket closed",
+            reconnectStatus: {
+              state: "cooldown",
+              retryAfterMs: 1000,
+              retryAfterSeconds: 1,
+              connectionAttempts: 3,
+              maxConnectionAttempts: 3,
+            },
+          };
+        },
+        ensureRecoveryStarted: () => {},
+        awaitRecovery: async () => "timed_out",
+      };
+      const spy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(client as any);
+      try {
+        const vh = new ViewHierarchy(
+          iosDevice,
+          new FakeAdbClientFactory(),
+          mockCtrlProxyClient,
+          timer,
+        );
+        const result = await vh.getViewHierarchy();
+        expect(reads).toBe(1);
+        expect(result.hierarchy.unavailableReason).toBe("connection_lost");
+        expect(result.hierarchy.unavailableDetail).toBe("runner socket closed");
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
     test("preserves iOS CtrlProxy reconnect metadata on stale cached hierarchy", async function () {
       const iosDevice: BootedDevice = {
         deviceId: "test-ios-device",
@@ -1704,6 +1748,7 @@ describe("Offscreen Node Filtering", function () {
     test("marks the null-result path as a transport failure (#7534)", async function () {
       const nullClient = {
         getAccessibilityHierarchy: async () => null,
+        isConnected: () => false,
       } as unknown as AndroidCtrlProxyClient;
       const vh = new ViewHierarchy(device, new FakeAdbClientFactory(), nullClient);
 
@@ -1713,12 +1758,30 @@ describe("Offscreen Node Filtering", function () {
       expect(result.hierarchy.unavailableReason).toBe("connection_lost");
     });
 
+    test("does not start recovery for a null hierarchy while Android transport stays connected", async function () {
+      const timer = new FakeTimer();
+      let starts = 0;
+      const connectedClient = {
+        getAccessibilityHierarchy: async () => null,
+        isConnected: () => true,
+        ensureRecoveryStarted: () => {
+          starts++;
+        },
+        awaitRecovery: async () => "failed",
+      } as unknown as AndroidCtrlProxyClient;
+      const vh = new ViewHierarchy(device, new FakeAdbClientFactory(), connectedClient, timer);
+      const result = await vh.getViewHierarchy();
+      expect(result.hierarchy.transportFailure).toBeUndefined();
+      expect(starts).toBe(0);
+    });
+
     test("waits once and refetches Android after a confirmed recovery", async function () {
       let reads = 0;
       let starts = 0;
       const recoveringClient = {
         getAccessibilityHierarchy: async () =>
           ++reads === 1 ? null : { hierarchy: { node: { $: { text: "Recovered" } } } },
+        isConnected: () => false,
         ensureRecoveryStarted: () => {
           starts++;
         },
@@ -1743,6 +1806,7 @@ describe("Offscreen Node Filtering", function () {
           reads++;
           return null;
         },
+        isConnected: () => false,
         ensureRecoveryStarted: () => {
           recovering = true;
         },
@@ -1768,6 +1832,7 @@ describe("Offscreen Node Filtering", function () {
           }
           return null;
         },
+        isConnected: () => false,
         ensureRecoveryStarted: () => {},
         awaitRecovery: async (budget: number) => {
           expect(budget).toBe(1000 - MIN_RECOVERY_REFETCH_BUDGET_MS);
@@ -1790,6 +1855,7 @@ describe("Offscreen Node Filtering", function () {
           await timer.sleep(800);
           return null;
         },
+        isConnected: () => false,
         ensureRecoveryStarted: () => {},
         awaitRecovery: async (budget: number) => {
           waitBudget = budget;

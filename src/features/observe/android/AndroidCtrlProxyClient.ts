@@ -2257,9 +2257,16 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       `[AndroidCtrlProxyClient] Triggering CtrlProxy recovery after ${this.consecutiveConnectionFailures} connection failures`,
     );
 
+    // A background reconnect can stabilize while the async health probe is
+    // pending. Claim its stability signal with this recovery's token now.
+    const stableConnection = new Promise<boolean>((resolve) => {
+      this.pendingRecoveryStability = { token, resolve };
+    });
+
     const recovery = this.recoverAccessibilityService()
       .then(async (outcome) => {
         if (outcome === "failed" || outcome === "unavailable") {
+          this.failPendingRecoveryStability(`service recovery ${outcome}`);
           this.forcedRestartBudget.recordFailure(`service recovery ${outcome}`, token);
           return false;
         }
@@ -2282,9 +2289,6 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         );
         // Background reconnect respects the #7537 background-attempt cap
         // rather than consuming the caller's foreground connect budget.
-        const stableConnection = new Promise<boolean>((resolve) => {
-          this.pendingRecoveryStability = { token, resolve };
-        });
         const connected = await this.connectBackgroundWebSocket();
         if (!connected) {
           logger.warn(

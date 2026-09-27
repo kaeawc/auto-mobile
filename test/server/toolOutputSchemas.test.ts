@@ -24,6 +24,14 @@ test("freshness schema accepts bounded machine-readable unavailability", () => {
   expect(() => freshnessSchema.parse({ ...fields, unavailableReason: "bad_reason" })).toThrow();
   expect(() => freshnessSchema.parse({ ...fields, unavailableDetail: "x".repeat(501) })).toThrow();
 });
+
+test("full action observation advertises the optional freshness reason fields", () => {
+  const full = toJSONSchema(observationSummarySchema);
+  const freshness = full.properties?.freshness;
+  expect(full.required ?? []).not.toContain("freshness");
+  expect(JSON.stringify(freshness)).toContain("unavailableReason");
+  expect(JSON.stringify(freshness)).toContain("unavailableDetail");
+});
 import { applyJsonSchemaOverride } from "../../src/server/toolSchemaHelpers";
 
 const observeTruncationReasonsDescription =

@@ -213,6 +213,54 @@ describe("IOSCtrlProxyClient restart threshold", () => {
     expect(manager.getForcedRestartBudget().snapshot().attempts).toBe(1);
   });
 
+  test("recovery waits for the replacement socket after an old reconnect stabilizes during teardown", async () => {
+    const timer = new FakeTimer();
+    const manager = createFakeManager(timer);
+    let releaseRestart: (() => void) | undefined;
+    manager.forceRestart = async () => {
+      manager.forceRestartCount++;
+      await new Promise<void>((resolve) => {
+        releaseRestart = resolve;
+      });
+    };
+    const sockets: FakeWebSocket[] = [];
+    client = IOSCtrlProxyClient.createForTesting(
+      testDevice,
+      8765,
+      (url) => {
+        const socket = new FakeWebSocket(url, "none", 0, timer);
+        sockets.push(socket);
+        return socket;
+      },
+      timer,
+      () => manager,
+    );
+    client.ensureRecoveryStarted();
+    for (let i = 0; i < 8; i++) {
+      await Promise.resolve();
+    }
+    expect(releaseRestart).toBeDefined();
+    const waiting = client.awaitRecovery(20_000);
+    expect(await client.ensureConnected()).toBe(true);
+    await timer.advanceTimeAsync(2000);
+    expect((client as any).pendingRestartToken).toBeDefined();
+    sockets[0]!.terminate();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    releaseRestart!();
+    for (let i = 0; i < 12; i++) {
+      await Promise.resolve();
+    }
+    let settled = false;
+    void waiting.then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    expect(sockets.length).toBeGreaterThanOrEqual(2);
+    await timer.advanceTimeAsync(2000);
+    expect(await waiting).toBe("recovered");
+  });
+
   test("ViewHierarchy does not refetch after iOS socket closes inside the stability window", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();

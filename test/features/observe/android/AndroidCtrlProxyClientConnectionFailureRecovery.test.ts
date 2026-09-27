@@ -305,6 +305,45 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
     expect(budget.snapshot()).toMatchObject({ state: "idle", attempts: 0 });
   });
 
+  test("stable reconnect during recovery health check satisfies that recovery", async function () {
+    const timer = new FakeTimer();
+    let releaseHealth: ((healthy: boolean) => void) | undefined;
+    const manager: AndroidServiceRecoveryManager = {
+      isAccessibilityServiceHealthy: () =>
+        new Promise<boolean>((resolve) => {
+          releaseHealth = resolve;
+        }),
+      rebindIfUnhealthy: async () => false,
+      setup: async () => ({ success: false, message: "not needed" }),
+    };
+    client = AndroidCtrlProxyClient.createForTesting(
+      testDevice,
+      buildFakeAdb(),
+      createSuccessWebSocketFactory(timer),
+      timer,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      () => manager,
+    );
+    client.ensureRecoveryStarted();
+    for (let i = 0; i < 8; i++) {
+      await Promise.resolve();
+    }
+    expect(releaseHealth).toBeDefined();
+    const waiting = client.awaitRecovery(10_000);
+    expect(await client.ensureConnected()).toBe(true);
+    await timer.advanceTimeAsync(2000);
+    releaseHealth!(true);
+    expect(await waiting).toBe("recovered");
+  });
+
   test("budget-denied observe recovery returns not_recovering without waiting", async function () {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();

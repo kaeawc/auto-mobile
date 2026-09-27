@@ -720,6 +720,7 @@ export const observationSummarySchema = z
     accessibilityFocusedElement: elementSchema.optional(),
     activeWindow: activeWindowSchema.optional(),
     screenIdentity: screenIdentitySchema.optional(),
+    freshness: freshnessSchema.optional(),
     // Full/raw action projections place the raw ObserveResult (the observe tool's shape) under `.observation`.
     viewHierarchy: viewHierarchyResultSchema.optional(),
     truncationReasons: z

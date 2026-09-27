@@ -676,9 +676,10 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
       const observation = sanitizedPayload.observation;
       sanitizedPayload = {
         ...sanitizedPayload,
-        observation: isObserveDiff(observation)
-          ? writeObserveDiffBodyArtifact(ctx, observation)
-          : writeObservationArtifact(ctx, observation),
+        observation:
+          isObserveDiff(observation) && resolveObserveProjection(ctx.args) !== "full"
+            ? writeObserveDiffBodyArtifact(ctx, observation)
+            : writeObservationArtifact(ctx, observation),
       };
     }
   }
@@ -987,6 +988,7 @@ function writeObserveDiffBodyArtifact(
   observation: Record<string, unknown>,
 ): Record<string, unknown> {
   const { added, removed, changed, fields, ...inline } = observation;
+  delete inline.isDiff;
   const body: Record<string, unknown> = { isDiff: true, added, removed, changed };
   if (fields !== undefined) {
     body.fields = fields;

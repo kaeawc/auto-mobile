@@ -24,5 +24,8 @@ interface ImeConnection {
 
   fun textBeforeCursor(max: Int): String
 
+  /** Null means the editor could not provide surrounding text. */
+  fun textBeforeCursorOrNull(max: Int): String? = textBeforeCursor(max)
+
   fun textAfterCursor(max: Int): String
 }

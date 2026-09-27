@@ -14,6 +14,8 @@ import { clearTextWithKeyEvents, getFocusedTextLength, hasFocusedTextInput } fro
 import { InputKey, type InputKeyModifier, type InputKeyName } from "./InputKey";
 import type { KeyboardProfileId } from "./keyboardProfiles";
 import { TapOnElement } from "./TapOnElement";
+import { FieldTypeDetector } from "./FieldTypeDetector";
+import { DefaultElementParser } from "../utility/ElementParser";
 import { quarantineAndroidIme, withAndroidImeLock } from "./androidImeLock";
 import {
   ANDROID_KEYCOMBINATION_MIN_API_LEVEL,
@@ -243,20 +245,14 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     signal?.throwIfAborted();
     const operation = command.operation ?? "insert";
     const requestedMode = command.mode ?? "auto";
-    const resolvedMode = this.resolveMode(requestedMode);
-    const autoImeFallback = getAutoImeFallback(
-      operation,
-      requestedMode,
-      command.keyboardProfile,
-      resolvedMode,
-    );
+    let resolvedMode = this.resolveMode(requestedMode);
     const baseResult = {
       index: -1,
       action: "type" as const,
       textLength: Array.from(command.text).length,
       operation,
       requestedMode,
-      resolvedMode: this.device.platform === "ios" ? ("xcuiTypeText" as const) : resolvedMode,
+      resolvedMode: this.reportedMode(resolvedMode),
     };
 
     try {
@@ -264,6 +260,14 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       if (validationError) {
         return { ...baseResult, success: false, error: validationError };
       }
+      resolvedMode = await this.resolveAutoPasswordMode(requestedMode, operation, signal);
+      baseResult.resolvedMode = this.reportedMode(resolvedMode);
+      const autoImeFallback = getAutoImeFallback(
+        operation,
+        requestedMode,
+        command.keyboardProfile,
+        resolvedMode,
+      );
       const result: TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode } =
         this.device.platform === "ios"
           ? await this.executeIosType(command.text, operation, signal)
@@ -274,6 +278,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
               command.keyboardProfile,
               autoImeFallback,
               signal,
+              this.isAutoPasswordInsert(requestedMode, resolvedMode),
             );
       return {
         ...baseResult,
@@ -358,6 +363,58 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     return requestedMode === "auto" ? "ime" : requestedMode;
   }
 
+  private reportedMode(mode: AndroidSendKeysTypingMode): ResolvedSendKeysTypingMode {
+    return this.device.platform === "ios" ? "xcuiTypeText" : mode;
+  }
+
+  private isAutoPasswordInsert(
+    requestedMode: SendKeysTypingMode,
+    mode: AndroidSendKeysTypingMode,
+  ): boolean {
+    return requestedMode === "auto" && mode === "eventAll";
+  }
+
+  private async resolveAutoPasswordMode(
+    requestedMode: SendKeysTypingMode,
+    operation: SendKeysOperation,
+    signal?: AbortSignal,
+  ): Promise<AndroidSendKeysTypingMode> {
+    if (this.device.platform !== "android" || requestedMode !== "auto") {
+      return this.resolveMode(requestedMode);
+    }
+    return (await this.isFocusedAndroidPasswordField(signal))
+      ? operation === "insert"
+        ? "eventAll"
+        : "a11y"
+      : "ime";
+  }
+
+  private async isFocusedAndroidPasswordField(signal?: AbortSignal): Promise<boolean> {
+    const observation = await this.observer.execute({ signal, skipWaitForFresh: false });
+    const hierarchy = observation.viewHierarchy;
+    if (!hierarchy || !hasFocusedTextInput(hierarchy)) {
+      return false;
+    }
+    const parser = new DefaultElementParser();
+    const detector = new FieldTypeDetector();
+    for (const root of parser.extractRootNodes(hierarchy)) {
+      let password = false;
+      parser.traverseNode(root, (node) => {
+        const element = parser.extractNodeProperties(node);
+        if (
+          (element.focused === true || element.focused === "true") &&
+          detector.isPasswordField(element)
+        ) {
+          password = true;
+        }
+      });
+      if (password) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   private async executeIosType(
     text: string,
     operation: SendKeysOperation,
@@ -392,6 +449,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     keyboardProfile: KeyboardProfileId | undefined,
     autoImeFallback?: AndroidSendKeysTypingMode,
     signal?: AbortSignal,
+    focusedInputVerified = false,
   ): Promise<TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode }> {
     switch (mode) {
       case "a11y":
@@ -401,7 +459,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       case "eventLast":
         return this.executeAndroidEventLast(text, operation, signal);
       case "eventAll":
-        return this.executeAndroidEventAll(text, operation, signal);
+        return this.executeAndroidEventAll(text, operation, signal, focusedInputVerified);
       case "eventOnly":
         return this.executeAndroidEventOnly(text, operation, signal);
       case "ime":
@@ -790,6 +848,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     text: string,
     operation: SendKeysOperation,
     signal?: AbortSignal,
+    focusedInputVerified = false,
   ): Promise<TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode }> {
     const chars = Array.from(text);
     if (!(await this.hasAndroidKeyEvent(chars))) {
@@ -800,9 +859,11 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       return { ...result, resolvedMode: "a11y" };
     }
 
-    const focusResult = await this.requireFocusedAndroidInput(signal);
-    if (!focusResult.success) {
-      return focusResult;
+    if (!focusedInputVerified) {
+      const focusResult = await this.requireFocusedAndroidInput(signal);
+      if (!focusResult.success) {
+        return focusResult;
+      }
     }
 
     const clearResult = await this.clearForReplace(operation);

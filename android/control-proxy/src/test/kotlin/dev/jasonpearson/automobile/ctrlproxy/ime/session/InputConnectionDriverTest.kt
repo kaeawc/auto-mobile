@@ -72,6 +72,36 @@ class InputConnectionDriverTest {
   }
 
   @Test
+  fun `declined batch still executes contained edits without an end call`() {
+    val connection = RecordingConnection(failOn = "begin")
+
+    assertTrue(
+      InputConnectionDriver(connection)
+        .execute(
+          listOf(
+            ImeOp.BeginBatchEdit,
+            ImeOp.CommitText("hello"),
+            ImeOp.CommitText(" "),
+            ImeOp.EndBatchEdit,
+          )
+        )
+    )
+    assertEquals(listOf("begin", "commit:hello", "commit: "), connection.calls)
+  }
+
+  @Test
+  fun `selection snapshot distinguishes unavailable cursor text from empty text`() {
+    val tracker = SelectionTracker()
+    tracker.reset(4, 4)
+
+    val snapshot = tracker.snapshot(RecordingConnection(missingBeforeText = true))
+
+    assertEquals("", snapshot.textBeforeCursor)
+    assertFalse(snapshot.textBeforeCursorAvailable)
+    assertEquals(4, snapshot.selectionStart)
+  }
+
+  @Test
   fun `throwing operation closes every successfully opened batch`() {
     val connection = RecordingConnection(throwOn = "compose:b:1")
 
@@ -89,6 +119,7 @@ class InputConnectionDriverTest {
   private class RecordingConnection(
     private val failOn: String? = null,
     private val throwOn: String? = null,
+    private val missingBeforeText: Boolean = false,
   ) : ImeConnection {
     val calls = mutableListOf<String>()
 
@@ -120,6 +151,9 @@ class InputConnectionDriverTest {
     override fun endBatchEdit() = record("end")
 
     override fun textBeforeCursor(max: Int) = ""
+
+    override fun textBeforeCursorOrNull(max: Int): String? =
+      if (missingBeforeText) null else textBeforeCursor(max)
 
     override fun textAfterCursor(max: Int) = ""
   }

@@ -5,6 +5,7 @@ import dev.jasonpearson.automobile.ctrlproxy.ime.keyboard.profile.ImeOp
 class InputConnectionDriver(private val connection: ImeConnection) {
   fun execute(ops: List<ImeOp>): Boolean {
     var openBatches = 0
+    val batchAccepted = ArrayDeque<Boolean>()
     try {
       for (op in ops) {
         val succeeded =
@@ -17,10 +18,17 @@ class InputConnectionDriver(private val connection: ImeConnection) {
             is ImeOp.DeleteSurroundingText -> connection.deleteSurroundingText(op.before, op.after)
             is ImeOp.SendKey -> connection.sendDownUpKey(op.keyCode)
             is ImeOp.PerformEditorAction -> connection.performEditorAction(op.actionId)
-            ImeOp.BeginBatchEdit -> connection.beginBatchEdit().also { if (it) openBatches++ }
+            ImeOp.BeginBatchEdit -> {
+              val accepted = connection.beginBatchEdit()
+              batchAccepted.addLast(accepted)
+              if (accepted) openBatches++
+              true
+            }
             ImeOp.EndBatchEdit -> {
-              connection.endBatchEdit()
-              if (openBatches > 0) openBatches--
+              if (batchAccepted.removeLastOrNull() == true) {
+                connection.endBatchEdit()
+                openBatches--
+              }
               true
             }
           }

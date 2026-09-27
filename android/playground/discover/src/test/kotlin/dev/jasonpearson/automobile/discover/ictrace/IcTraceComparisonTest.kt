@@ -54,6 +54,39 @@ class IcTraceComparisonTest {
   }
 
   @Test
+  fun `reports both keyboard identities when captures differ`() {
+    val referenceIdentity = IcTraceComparison.KeyboardIdentity("reference.ime", "1.0")
+    val candidateIdentity = IcTraceComparison.KeyboardIdentity("candidate.ime", "2.0")
+    val reference =
+      event(
+        metadata =
+          IcTraceMetadata(
+            scenario = "scenario",
+            keyboardId = referenceIdentity.id,
+            keyboardVersion = referenceIdentity.version,
+          )
+      )
+    val candidate =
+      event(
+        call = "setComposingText",
+        metadata =
+          IcTraceMetadata(
+            scenario = "scenario",
+            keyboardId = candidateIdentity.id,
+            keyboardVersion = candidateIdentity.version,
+          ),
+      )
+
+    val result = IcTraceComparison.compare(listOf(reference), listOf(candidate))
+
+    assertTrue(result is IcTraceComparison.Result.Different)
+    val different = result as IcTraceComparison.Result.Different
+    assertEquals(listOf("events[0].call"), different.mismatches.map { it.location })
+    assertEquals(referenceIdentity, different.referenceKeyboard)
+    assertEquals(candidateIdentity, different.candidateKeyboard)
+  }
+
+  @Test
   fun `reports incomplete and malformed captures as inconclusive`() {
     val dropped = event().copy(droppedEvents = 1)
     val droppedResult = IcTraceComparison.compare(listOf(dropped), listOf(event()))
@@ -69,11 +102,12 @@ class IcTraceComparisonTest {
       (sequenceGap as IcTraceComparison.Result.Inconclusive).reasons.any { "sequence gap" in it }
     )
 
-    val missingPrefix = IcTraceComparison.compare(listOf(event().copy(seq = 2)), listOf(event()))
-    assertTrue(missingPrefix is IcTraceComparison.Result.Inconclusive)
-    assertTrue(
-      (missingPrefix as IcTraceComparison.Result.Inconclusive).reasons.any { "sequence 1" in it }
-    )
+    val afterClear =
+      IcTraceComparison.compare(
+        listOf(event().copy(seq = 2), event().copy(seq = 3)),
+        listOf(event(), event().copy(seq = 2)),
+      )
+    assertTrue(afterClear is IcTraceComparison.Result.Equivalent)
 
     val changedKeyboard =
       IcTraceComparison.compare(

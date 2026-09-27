@@ -7,4 +7,5 @@ data class TextSnapshot(
   val selectionEnd: Int,
   val composingStart: Int = -1,
   val composingEnd: Int = -1,
+  val textBeforeCursorAvailable: Boolean = true,
 )

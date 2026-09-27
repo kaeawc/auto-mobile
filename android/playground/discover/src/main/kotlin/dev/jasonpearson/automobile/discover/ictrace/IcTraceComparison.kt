@@ -15,7 +15,11 @@ object IcTraceComparison {
       val candidateKeyboard: KeyboardIdentity,
     ) : Result
 
-    data class Different(val mismatches: List<Mismatch>) : Result
+    data class Different(
+      val mismatches: List<Mismatch>,
+      val referenceKeyboard: KeyboardIdentity,
+      val candidateKeyboard: KeyboardIdentity,
+    ) : Result
 
     data class Inconclusive(val reasons: List<String>) : Result
   }
@@ -37,9 +41,6 @@ object IcTraceComparison {
       listOf("reference" to reference, "candidate" to candidate).flatMap { (label, events) ->
         buildList {
           if (events.isEmpty()) add("$label capture contains no events")
-          if (events.firstOrNull()?.seq?.let { it != 1 } == true) {
-            add("$label capture does not start at sequence 1")
-          }
           if (events.any { it.droppedEvents > 0 }) add("$label capture reports dropped events")
           if (events.any { it.metadata.identity() != events.first().metadata.identity() }) {
             add("$label capture changes keyboard identity")
@@ -79,7 +80,13 @@ object IcTraceComparison {
       compareField(mismatches, "$prefix.composingEnd", left.composingEnd, right.composingEnd)
     }
 
-    if (mismatches.isNotEmpty()) return Result.Different(mismatches)
+    if (mismatches.isNotEmpty()) {
+      return Result.Different(
+        mismatches,
+        reference.first().metadata.identity(),
+        candidate.first().metadata.identity(),
+      )
+    }
     return Result.Equivalent(
       reference.size,
       reference.first().metadata.identity(),

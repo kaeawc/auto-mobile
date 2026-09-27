@@ -83,6 +83,16 @@ class ConfigurableTypingPolicyTest {
   }
 
   @Test
+  fun `backspace uses a one unit deletion when cursor text is unavailable`() {
+    val policy = policy(KeyboardProfiles.GBOARD)
+    val unknownText =
+      FakeEditor("abcd").snapshot().copy(textBeforeCursor = "", textBeforeCursorAvailable = false)
+
+    assertEquals(listOf(ImeOp.DeleteSurroundingText(1, 0)), policy.onBackspace(unknownText))
+    assertTrue(policy.onBackspace(unknownText.copy(selectionStart = 0, selectionEnd = 0)).isEmpty())
+  }
+
+  @Test
   fun `gboard backspace reopens remaining committed word`() {
     val policy = policy(KeyboardProfiles.GBOARD)
     val editor = FakeEditor()

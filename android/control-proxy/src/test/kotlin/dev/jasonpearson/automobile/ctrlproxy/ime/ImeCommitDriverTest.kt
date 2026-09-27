@@ -126,6 +126,16 @@ class ImeCommitDriverTest {
   }
 
   @Test
+  fun `failed multi code point unit reports possible partial application`() {
+    val sink = FakeImeCommitSink(inputType = InputType.TYPE_CLASS_TEXT, failAtCommitIndex = 0)
+
+    val result = commit(sink, "e\u0301", PRIOR_IME_ID)
+
+    assertFalse(result.success)
+    assertTrue(result.partialApplication)
+  }
+
+  @Test
   fun `cancellation is checked between grapheme commits`() {
     val sink = FakeImeCommitSink(inputType = InputType.TYPE_CLASS_TEXT)
     var cancelled = false
@@ -202,6 +212,44 @@ class ImeCommitDriverTest {
     assertEquals("`a``b`", sink.committedChars.joinToString(""))
     assertEquals(12, sink.delays.size)
     assertEquals(listOf(PRIOR_IME_ID), sink.switchedImeIds)
+  }
+
+  @Test
+  fun `settle waits do not exhaust the active commit deadline`() {
+    val sink = FakeImeCommitSink(inputType = InputType.TYPE_CLASS_TEXT)
+    sink.readText = { _, _ -> "" }
+    sink.advanceClockOnDrain = true
+    var result: ImeCommitResult? = null
+
+    ImeCommitDriver(sink).commit(
+      "`a``b``c``d``e``f``g``h``i` tail",
+      PRIOR_IME_ID,
+      deadlineMs = 4_000L,
+    ) {
+      result = it
+    }
+    sink.drain()
+
+    assertTrue(result!!.success)
+    assertEquals(4_320L, sink.clockMs)
+    assertEquals("`a``b``c``d``e``f``g``h``i` tail", sink.committedChars.joinToString(""))
+  }
+
+  @Test
+  fun `double delimiters stay together until the conversion barrier`() {
+    for (span in listOf("**b1**", "~~gone~~")) {
+      val sink = FakeImeCommitSink(inputType = InputType.TYPE_CLASS_TEXT)
+      sink.readText = { _, _ -> span }
+      var result: ImeCommitResult? = null
+
+      ImeCommitDriver(sink).commit("$span tail", PRIOR_IME_ID) { result = it }
+
+      assertEquals(span, sink.committedChars.joinToString(""))
+      assertEquals(listOf(span.length), sink.readSizes)
+      assertNull(result)
+      sink.drain()
+      assertTrue(result!!.success)
+    }
   }
 
   @Test
@@ -346,7 +394,8 @@ class ImeCommitDriverTest {
     ImeCommitDriver(sink).commit("`a` after", PRIOR_IME_ID, deadlineMs = 10L) {
       results.add(it)
     }
-    sink.clockMs = 10L
+    // The first scheduled 40 ms settle wait is excluded from the active-work deadline.
+    sink.clockMs = 50L
     sink.drain()
 
     assertEquals("`a`", sink.committedChars.joinToString(""))
@@ -411,6 +460,7 @@ class ImeCommitDriverTest {
     var readText: (Int, Int) -> String? = { _, _ -> null }
     var afterCommit: (() -> Unit)? = null
     var clockMs = 0L
+    var advanceClockOnDrain = false
     private val pending = ArrayDeque<() -> Unit>()
     private var commitAttempts = 0
 
@@ -452,7 +502,11 @@ class ImeCommitDriverTest {
     }
 
     fun drain() {
-      while (pending.isNotEmpty()) pending.removeFirst().invoke()
+      while (pending.isNotEmpty()) {
+        val delay = delays.getOrNull(delays.size - pending.size) ?: 0L
+        if (advanceClockOnDrain) clockMs += delay
+        pending.removeFirst().invoke()
+      }
     }
 
     override fun syncEditorState(): Boolean {

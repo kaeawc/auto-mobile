@@ -49,6 +49,7 @@ data class ImeCommitResult(
 class ImeCommitDriver(private val sink: ImeCommitSink) {
   private var completed = false
   private var committedUnits = 0
+  private var settleWaitMs = 0L
   private var completion: ((ImeCommitResult) -> Unit)? = null
   private var restoreId: String? = null
 
@@ -106,13 +107,15 @@ class ImeCommitDriver(private val sink: ImeCommitSink) {
     }
 
     val segments = splitInlineFormatSpans(text)
+    fun deadlineExceeded() =
+      deadlineMs < Long.MAX_VALUE - settleWaitMs && sink.nowMs() >= deadlineMs + settleWaitMs
     fun commitSegment(index: Int) {
       if (completed) return
       if (isCancelled()) {
         complete(failure("IME commit cancelled"))
         return
       }
-      if (sink.nowMs() >= deadlineMs) {
+      if (deadlineExceeded()) {
         complete(failure("IME commit deadline exceeded"))
         return
       }
@@ -130,15 +133,17 @@ class ImeCommitDriver(private val sink: ImeCommitSink) {
           complete(failure("IME commit cancelled"))
           return
         }
-        if (sink.nowMs() >= deadlineMs) {
+        if (deadlineExceeded()) {
           complete(failure("IME commit deadline exceeded"))
           return
         }
+        // The policy may issue several editor operations for one grapheme. A false return can
+        // follow an applied prefix, so count the unit conservatively before dispatch.
+        committedUnits++
         if (!sink.commitChar(unit)) {
           complete(failure("Input connection lost during commit"))
           return
         }
-        committedUnits++
       }
       // Composing profiles retain the last word until explicitly finished.
       if (!sink.finishComposing()) {
@@ -153,7 +158,7 @@ class ImeCommitDriver(private val sink: ImeCommitSink) {
             complete(failure("IME commit cancelled"))
             return
           }
-          if (sink.nowMs() >= deadlineMs) {
+          if (deadlineExceeded()) {
             complete(failure("IME commit deadline exceeded"))
             return
           }
@@ -169,6 +174,7 @@ class ImeCommitDriver(private val sink: ImeCommitSink) {
           if (proceed) {
             commitSegment(index + 1)
           } else {
+            settleWaitMs += POLL_INTERVAL_MS
             sink.postDelayed(POLL_INTERVAL_MS) { pollConverted(attempt + 1) }
           }
         }
@@ -249,7 +255,8 @@ class ImeCommitDriver(private val sink: ImeCommitSink) {
     ImeCommitResult(success = false, error = error, partialApplication = committedUnits > 0)
 
   private companion object {
-    val INLINE_FORMAT_SPAN = Regex("```|`[^`\n]+`|\\*[^*\n]+\\*|_[^_\n]+_|~[^~\n]+~")
+    val INLINE_FORMAT_SPAN =
+      Regex("```|`[^`\n]+`|\\*\\*[^*\n]+\\*\\*|~~[^~\n]+~~|\\*[^*\n]+\\*|_[^_\n]+_|~[^~\n]+~")
     const val POLL_INTERVAL_MS = 40L
     const val MAX_POLL_ATTEMPTS = 12
   }

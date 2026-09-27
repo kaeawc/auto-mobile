@@ -314,6 +314,59 @@ describe("DefaultSendKeysCommandExecutor", () => {
   const commitImeId = "dev.jasonpearson.automobile.ctrlproxy/.ime.CtrlProxyIme";
   const priorImeId = "com.example.keyboard/.Ime";
 
+  test("auto password typing uses legacy delivery before any IME mutation", async () => {
+    for (const [operation, expectedMode] of [
+      ["insert", "eventAll"],
+      ["replace", "a11y"],
+    ] as const) {
+      const adb = new FakeAdbExecutor();
+      const textClient = createTextClient({
+        commitViaIme: async () => ({ success: false, error: "password input rejected" }),
+      });
+      const observer = createObserver(focusedAndroidObservation("secret", { password: "true" }));
+      const executor = new DefaultSendKeysCommandExecutor(
+        androidDevice,
+        createAdbFactory(adb),
+        observer,
+        { textClient: textClient.client },
+      );
+
+      const result = await executor.type({ action: "type", text: "new", operation });
+
+      expect(result).toMatchObject({ success: true, resolvedMode: expectedMode });
+      expect(textClient.commitViaImeCalls).toEqual([]);
+      expect(textClient.calls).not.toContain("clear");
+      expect(observer.calls).toBe(1);
+      if (operation === "replace") {
+        expect(textClient.calls).toContain("replace:new");
+      }
+    }
+  });
+
+  test("explicit IME mode retains password rejection", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponseSequence("shell settings get secure default_input_method", [
+      { stdout: `${priorImeId}\n`, stderr: "" },
+      { stdout: `${commitImeId}\n`, stderr: "" },
+    ]);
+    const textClient = createTextClient({
+      commitViaIme: async () => ({ success: false, error: "password input rejected" }),
+    });
+    const executor = new DefaultSendKeysCommandExecutor(
+      androidDevice,
+      createAdbFactory(adb),
+      createObserver(focusedAndroidObservation("secret", { password: "true" })),
+      { textClient: textClient.client },
+    );
+
+    expect(await executor.type({ action: "type", text: "new", mode: "ime" })).toMatchObject({
+      success: false,
+      resolvedMode: "ime",
+      error: "password input rejected",
+    });
+    expect(textClient.commitViaImeCalls).toEqual([{ text: "new", priorImeId }]);
+  });
+
   test("auto mode routes plain and formatting text through IME for insert and replace", async () => {
     for (const [operation, text] of [
       ["insert", "plain"],

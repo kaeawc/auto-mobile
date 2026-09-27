@@ -123,6 +123,49 @@ test("sibling anchors honor their random strategy within outer container", () =>
   expect(result.chosen?.parentIndex).toBe(capture.nodes.find((n) => n.nativeId === "first")?.index);
 });
 
+test("sibling default/first resolution prefers the topmost anchor's row over bounds area (#7722 regression)", () => {
+  const capture = snapshot([
+    node("first-row", {
+      bounds: { left: 0, top: 0, right: 300, bottom: 80 },
+      node: [
+        node("first-label", { text: "Repeat" }),
+        node("first-select", {
+          text: "Select",
+          clickable: true,
+          bounds: { left: 100, top: 0, right: 300, bottom: 60 },
+        }),
+      ],
+    }),
+    node("second-row", {
+      bounds: { left: 0, top: 100, right: 300, bottom: 180 },
+      node: [
+        node("second-label", { text: "Repeat" }),
+        node("second-select", {
+          text: "Select",
+          clickable: true,
+          bounds: { left: 100, top: 100, right: 140, bottom: 160 },
+        }),
+      ],
+    }),
+  ]);
+  const selector = { text: "Select", sibling: { text: "Repeat" } };
+  expect(resolver.resolve(capture, selector, tap).chosen?.nativeId).toBe("first-select");
+  expect(
+    resolver.resolve(capture, { ...selector, selectionStrategy: "first" }, tap).chosen?.nativeId,
+  ).toBe("first-select");
+  expect(
+    new ElementResolver(() => 0).resolve(capture, { ...selector, selectionStrategy: "random" }, tap)
+      .chosen?.nativeId,
+  ).toBe("first-select");
+  expect(
+    new ElementResolver(() => 0.99).resolve(
+      capture,
+      { ...selector, selectionStrategy: "random" },
+      tap,
+    ).chosen?.nativeId,
+  ).toBe("second-select");
+});
+
 test("sibling anchors honor recursively nested sibling selectors", () => {
   const capture = snapshot([
     node("first", {
@@ -357,6 +400,21 @@ test("sibling traversal never crosses collection boundaries to another row", () 
   const capture = snapshot([
     node("list", {
       className: "UICollectionView",
+      node: [
+        node("first", { node: [node("label", { text: "Email" })] }),
+        node("second", { node: [node("remove", { clickable: true })] }),
+      ],
+    }),
+  ]);
+  expect(
+    resolver.resolve(capture, { elementId: "remove", sibling: { text: "Email" } }, tap).chosen,
+  ).toBeNull();
+});
+
+test("sibling traversal never crosses a ViewPager2 page boundary (#7715)", () => {
+  const capture = snapshot([
+    node("pager", {
+      className: "androidx.viewpager2.widget.ViewPager2",
       node: [
         node("first", { node: [node("label", { text: "Email" })] }),
         node("second", { node: [node("remove", { clickable: true })] }),

@@ -114,6 +114,23 @@ describe("pure element resolver", () => {
     );
     expect(result.matches[0].kind).toBe("contains");
   });
+  test("elementId contains-match is case-insensitive by default (#7713)", () => {
+    const capture = snapshot([node("app:id/SaveButton")]);
+    expect(
+      resolver.resolve(capture, { elementId: "savebutton", match: "contains" }, tap).chosen
+        ?.nativeId,
+    ).toBe("app:id/SaveButton");
+  });
+  test("elementId contains-match honors explicit caseSensitive (#7713)", () => {
+    const capture = snapshot([node("app:id/SaveButton")]);
+    expect(
+      resolver.resolve(
+        capture,
+        { elementId: "savebutton", match: "contains", caseSensitive: true },
+        tap,
+      ).chosen,
+    ).toBeNull();
+  });
   test("container scopes use ancestry rather than matching IDs on another peer", () => {
     const capture = snapshot([
       node("container", "", { node: [node("target", "One")] }),

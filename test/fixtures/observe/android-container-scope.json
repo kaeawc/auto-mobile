@@ -113,6 +113,15 @@
       "bounds": [20, 40, 220, 100]
     },
     {
+      "query": {
+        "kind": "text",
+        "value": "Open",
+        "container": { "text": "Left section" },
+        "strategy": "random"
+      },
+      "bounds": [20, 40, 220, 100]
+    },
+    {
       "query": { "kind": "elementId", "value": "example.app:id/action", "strategy": "random" },
       "bounds": [20, 190, 220, 250]
     },

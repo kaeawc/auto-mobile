@@ -163,6 +163,36 @@ test("long press falls back to ordinary clickable targets for tapOn and tapAny",
   ).toBe("app:id/login_help");
 });
 
+test("long-press candidate set includes an ordinary clickable control alongside a long-clickable one (#7707)", async () => {
+  const { ElementResolver } = await import("../../../src/features/utility/ElementResolver");
+  const capture = {
+    hierarchy: {
+      node: [
+        { bounds, clickable: true, "resource-id": "A" },
+        { bounds, clickable: true, longClickable: true, "resource-id": "B" },
+      ],
+    },
+  };
+  const first = new ResolverElementSelector(new ElementResolver(() => 0)).selectClickable(capture, {
+    intentAction: "long-press",
+    strategy: "first",
+  });
+  expect(first.totalMatches).toBe(2);
+  expect(first.element?.["resource-id"]).toBe("A");
+  const randomFirst = new ResolverElementSelector(new ElementResolver(() => 0)).selectClickable(
+    capture,
+    { intentAction: "long-press", strategy: "random" },
+  );
+  const randomLast = new ResolverElementSelector(new ElementResolver(() => 0.99)).selectClickable(
+    capture,
+    { intentAction: "long-press", strategy: "random" },
+  );
+  expect(randomFirst.totalMatches).toBe(2);
+  expect(randomFirst.element?.["resource-id"]).toBe("A");
+  expect(randomLast.totalMatches).toBe(2);
+  expect(randomLast.element?.["resource-id"]).toBe("B");
+});
+
 test("indexed and random selection count only onscreen action candidates", async () => {
   const { ElementResolver } = await import("../../../src/features/utility/ElementResolver");
   const capture = {

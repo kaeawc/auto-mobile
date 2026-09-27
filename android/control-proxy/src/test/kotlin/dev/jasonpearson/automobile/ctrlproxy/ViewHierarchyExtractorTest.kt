@@ -1428,6 +1428,27 @@ class ViewHierarchyExtractorTest {
     assertEquals(kotlinx.serialization.json.JsonPrimitive(0), metadata["windowLayer"])
   }
 
+  @Test
+  fun `fallback replaces an already extracted active window instead of duplicating its ownership`() {
+    val activeRoot = fakeNode(packageName = "example.app", text = "Active content")
+    val windows =
+      listOf(
+        fakeWindow(id = 41, layer = 0, root = null, focused = true),
+        fakeWindow(id = 42, layer = 2, root = activeRoot, active = true),
+      )
+    val result =
+      extractor.extractFromAllWindows(
+        windows,
+        activeRoot,
+        disableAllFiltering = true,
+        occlusionEnabled = false,
+      )
+    val encoded = json.encodeToJsonElement(ViewHierarchy.serializer(), result) as kotlinx.serialization.json.JsonObject
+    val root = result.hierarchy!!.node as kotlinx.serialization.json.JsonObject
+    assertEquals(kotlinx.serialization.json.JsonPrimitive(42), root["windowId"])
+    assertNotNull(encoded["windows"])
+  }
+
   private fun fakeNode(
     packageName: String,
     text: String? = null,

@@ -412,7 +412,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
               )
             )
           }
-          windowEntries.add(
+          val fallbackEntry =
             WindowEntry(
               windowId = fallbackWindowId,
               windowType = "application",
@@ -422,7 +422,12 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
               isFocused = true,
               hierarchy = mainHierarchy!!,
             )
-          )
+          val existingIndex = windowEntries.indexOfFirst { it.windowId == fallbackWindowId }
+          if (existingIndex >= 0) {
+            windowEntries[existingIndex] = fallbackEntry
+          } else {
+            windowEntries.add(fallbackEntry)
+          }
         }
       }
 

@@ -15,6 +15,30 @@ const search = (capture: ViewHierarchyResult) =>
       nodes: new SearchableHierarchy().project(capture),
     }),
   });
+test("debug search requests current hierarchy rather than cached coordinates", async () => {
+  let freshness: string | undefined;
+  const feature = new DebugSearch(
+    { platform: "android" } as BootedDevice,
+    undefined,
+    new FakeTimer(),
+    undefined,
+    {
+      capture: async (request) => {
+        freshness = request.freshness;
+        return {
+          captureId: "fresh",
+          platform: "android",
+          requestedFreshness: request.freshness,
+          receivedAt: 0,
+          hierarchy: capture({ text: "Current" }),
+          nodes: new SearchableHierarchy().project(capture({ text: "Current" })),
+        };
+      },
+    },
+  );
+  await feature.execute({ text: "Current" });
+  expect(freshness).toBe("fresh");
+});
 const capture = (...nodes: object[]) => ({
   hierarchy: { node: nodes.map((node) => ({ bounds, clickable: true, ...node })) },
 });

@@ -9,6 +9,7 @@ import { createDeviceHierarchyCapture } from "../observe/DeviceHierarchyCapture"
 import { normalizeQuotes } from "../utility/TextMatcher";
 import { ElementResolver } from "../utility/ElementResolver";
 import { ActionableError } from "../../models/ActionableError";
+import { serverConfig } from "../../utils/ServerConfig";
 interface DebugSearchOptions {
   /**
    * Text to search for
@@ -63,7 +64,10 @@ export class DebugSearch {
   ) {}
   async execute(options: DebugSearchOptions): Promise<DebugSearchResult> {
     const timestamp = this.timer.now();
-    const snapshot = await this.capture.capture({ freshness: "cached-ok" });
+    const snapshot = await this.capture.capture({
+      freshness: "fresh",
+      searchRaw: serverConfig.isRawElementSearchEnabled(),
+    });
     const nodes = snapshot.nodes;
     const requestedMatch =
       options.match ??

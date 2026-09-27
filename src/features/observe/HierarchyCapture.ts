@@ -5,9 +5,11 @@ import { ActionableError } from "../../models/ActionableError";
 import { defaultIdGenerator, type IdGenerator } from "../../utils/IdGenerator";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { SearchableHierarchy, type SearchableEntry } from "../utility/SearchableNode";
+import { resolveViewHierarchyForSearch } from "../../utils/viewHierarchySearch";
 
 export interface HierarchyCaptureRequest {
   freshness: "cached-ok" | "fresh" | "settled";
+  searchRaw?: boolean;
   minTimestamp?: number;
   timeoutMs?: number;
   signal?: AbortSignal;
@@ -105,6 +107,10 @@ export class DefaultHierarchyCapture implements HierarchyCapture {
     ViewHierarchyResult,
     Omit<HierarchySnapshot, "requestedFreshness">
   >();
+  private readonly rawSearchSnapshots = new WeakMap<
+    ViewHierarchyResult,
+    Omit<HierarchySnapshot, "requestedFreshness">
+  >();
 
   constructor(
     private readonly platform: "android" | "ios",
@@ -128,7 +134,8 @@ export class DefaultHierarchyCapture implements HierarchyCapture {
     ) {
       throw new ActionableError("Hierarchy capture did not satisfy the device timestamp floor");
     }
-    let snapshot = this.snapshots.get(source);
+    const snapshots = request.searchRaw ? this.rawSearchSnapshots : this.snapshots;
+    let snapshot = snapshots.get(source);
     if (!snapshot) {
       // Spread deliberately drops the non-enumerable raw-search carrier. The
       // actionable projection must never silently widen back to an offscreen tree.
@@ -139,14 +146,24 @@ export class DefaultHierarchyCapture implements HierarchyCapture {
         updatedAt: source.updatedAt,
         receivedAt: source.receivedAt ?? this.timer.now(),
         hierarchy,
-        nodes: this.searchable.project(hierarchy),
+        nodes: this.projectNodes(source, hierarchy, request.searchRaw),
       };
-      this.snapshots.set(source, snapshot);
+      snapshots.set(source, snapshot);
     }
     const result = { ...snapshot, requestedFreshness: request.freshness };
     capturedHierarchies.set(source, result);
     capturedHierarchies.set(result.hierarchy, result);
     return result;
+  }
+
+  private projectNodes(
+    source: ViewHierarchyResult,
+    hierarchy: ViewHierarchyResult,
+    searchRaw: boolean | undefined,
+  ): readonly SearchableEntry[] {
+    return this.searchable.project(
+      searchRaw ? (resolveViewHierarchyForSearch(source) ?? source) : hierarchy,
+    );
   }
 
   private read(request: HierarchyCaptureRequest): Promise<ViewHierarchyResult> {

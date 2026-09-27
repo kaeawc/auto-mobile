@@ -84,7 +84,7 @@ export function createDeviceHierarchyCapture(
       const syncClient = client();
       const synced = await syncClient.requestHierarchySync(
         new NoOpPerformanceTracker(),
-        false,
+        request.searchRaw === true,
         request.signal,
         timeoutMs,
       );

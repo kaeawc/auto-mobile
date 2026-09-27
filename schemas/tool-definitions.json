@@ -5693,7 +5693,7 @@
                 "type": "boolean"
               },
               "index": {
-                "description": "Disambiguator present only when elementId repeats elsewhere in this skeleton (issue #6221). Pass verbatim as tapOn({ selector, index }) to hit this exact entry.",
+                "description": "Disambiguator present when elementId repeats, or an id-less row's label repeats elsewhere in this skeleton (issue #6221). Pass verbatim as tapOn({ selector, index }) to hit this exact entry.",
                 "type": "integer",
                 "minimum": 0,
                 "maximum": 9007199254740991
@@ -5779,7 +5779,7 @@
                 "type": "boolean"
               },
               "index": {
-                "description": "Disambiguator present only when elementId repeats elsewhere in this skeleton (issue #6221). Pass verbatim as tapOn({ selector, index }) to hit this exact entry.",
+                "description": "Disambiguator present when elementId repeats, or an id-less row's label repeats elsewhere in this skeleton (issue #6221). Pass verbatim as tapOn({ selector, index }) to hit this exact entry.",
                 "type": "integer",
                 "minimum": 0,
                 "maximum": 9007199254740991
@@ -12850,7 +12850,7 @@
                         "type": "boolean"
                       },
                       "index": {
-                        "description": "Disambiguator present only when elementId repeats elsewhere in this skeleton (issue #6221). Pass verbatim as tapOn({ selector, index }) to hit this exact entry.",
+                        "description": "Disambiguator present when elementId repeats, or an id-less row's label repeats elsewhere in this skeleton (issue #6221). Pass verbatim as tapOn({ selector, index }) to hit this exact entry.",
                         "type": "integer",
                         "minimum": 0,
                         "maximum": 9007199254740991
@@ -12936,7 +12936,7 @@
                         "type": "boolean"
                       },
                       "index": {
-                        "description": "Disambiguator present only when elementId repeats elsewhere in this skeleton (issue #6221). Pass verbatim as tapOn({ selector, index }) to hit this exact entry.",
+                        "description": "Disambiguator present when elementId repeats, or an id-less row's label repeats elsewhere in this skeleton (issue #6221). Pass verbatim as tapOn({ selector, index }) to hit this exact entry.",
                         "type": "integer",
                         "minimum": 0,
                         "maximum": 9007199254740991

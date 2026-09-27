@@ -944,6 +944,81 @@ describe("toSkeleton — acceptance criteria", () => {
       }
     });
 
+    test("id-less labels in an overlay rank ahead of the main hierarchy and replay both indexes", () => {
+      const backgroundBounds = bounds(0, 0, 80, 40);
+      const overlayBounds = bounds(0, 60, 80, 100);
+      const viewHierarchy = {
+        hierarchy: {
+          node: {
+            bounds: bounds(0, 0, 100, 200),
+            node: { text: "Remove", clickable: true, bounds: backgroundBounds },
+          },
+        },
+        windows: [
+          {
+            windowLayer: 10,
+            hierarchy: { node: { text: "Remove", clickable: true, bounds: overlayBounds } },
+          },
+        ],
+      } as ViewHierarchyResult;
+      const elements = new DefaultObserveElementCollector().collect(viewHierarchy, "android");
+      const rows = projectSkeleton(elements!, { width: 100, height: 200 }).skeleton.filter(
+        (entry) => entry.label === "Remove",
+      );
+      expect(rows).toHaveLength(2);
+      expect(rows.find((entry) => entry.bounds[1] === overlayBounds.top)?.index).toBe(0);
+      expect(rows.find((entry) => entry.bounds[1] === backgroundBounds.top)?.index).toBe(1);
+
+      const selector = new ResolverElementSelector();
+      for (const row of rows) {
+        const result = selector.selectByText(viewHierarchy, row.label!, {
+          index: row.index,
+          partialMatch: false,
+        });
+        expect(result.element?.bounds).toEqual(bounds(...row.bounds));
+      }
+    });
+
+    test.each([
+      [" Remove ", "whitespace"],
+      ["remove", "case"],
+      ["Remove\u2019s", "curly quote"],
+    ])("id-less exact-label %s variant shares indexes and replays each row (%s)", (variant) => {
+      const canonical = variant.includes("\u2019") ? "Remove's" : "Remove";
+      const viewHierarchy = {
+        hierarchy: {
+          node: {
+            bounds: bounds(0, 0, 100, 200),
+            node: [
+              {
+                "ios-accessibility-label": canonical,
+                clickable: true,
+                bounds: bounds(0, 0, 80, 40),
+              },
+              {
+                "ios-accessibility-label": variant,
+                clickable: true,
+                bounds: bounds(0, 60, 80, 100),
+              },
+            ],
+          },
+        },
+      } as ViewHierarchyResult;
+      const elements = new DefaultObserveElementCollector().collect(viewHierarchy, "ios");
+      const rows = projectSkeleton(elements!, { width: 100, height: 200 }).skeleton;
+      expect(rows).toHaveLength(2);
+      expect(rows.map((entry) => entry.index)).toEqual([0, 1]);
+
+      const selector = new ResolverElementSelector();
+      for (const row of rows) {
+        const result = selector.selectByText(viewHierarchy, row.label!, {
+          index: row.index,
+          partialMatch: false,
+        });
+        expect(result.element?.bounds).toEqual(bounds(...row.bounds));
+      }
+    });
+
     test("id-less labels with different raw padding share emitted-label indexes", () => {
       const padded: Element = {
         "ios-accessibility-label": " Remove",

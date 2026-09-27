@@ -825,8 +825,8 @@ export const skeletonElementSchema = z
       .nonnegative()
       .optional()
       .describe(
-        "Disambiguator present only when elementId repeats elsewhere in this " +
-          "skeleton (issue #6221). Pass verbatim as tapOn({ selector, index }) to " +
+        "Disambiguator present when elementId repeats, or an id-less row's label " +
+          "repeats elsewhere in this skeleton (issue #6221). Pass verbatim as tapOn({ selector, index }) to " +
           "hit this exact entry.",
       ),
   })

@@ -444,10 +444,13 @@ function toSkeletonEntry(acc: SkeletonAccumulator): SkeletonElement {
   return entry;
 }
 
-/** Preserve the live selector's main-root-first traversal order for duplicate indexes. */
+/** Rank duplicate indexes by the live selector's topmost-window-first order. */
 function byHierarchyOrder(a: SkeletonAccumulator, b: SkeletonAccumulator): number {
   if (a.provenance && b.provenance) {
-    return a.provenance.enter - b.provenance.enter;
+    return (
+      (a.provenance.windowRank ?? Infinity) - (b.provenance.windowRank ?? Infinity) ||
+      a.provenance.enter - b.provenance.enter
+    );
   }
   return byReadingOrder(a, b);
 }
@@ -458,7 +461,7 @@ function byHierarchyOrder(a: SkeletonAccumulator, b: SkeletonAccumulator): numbe
  * `tapOn({ selector: { elementId }, index: entry.index })` instead of
  * guessing against the undocumented default `selectionStrategy: "first"`.
  * Id-less rows with repeated labels also receive a text-selector index.
- * See {@link byHierarchyOrder} for why ranking by `enter` reproduces
+ * See {@link byHierarchyOrder} for why ranking by window then `enter` reproduces
  * `tapOn.index` verbatim.
  */
 function isSelectableForReplay(
@@ -490,7 +493,7 @@ function assignDuplicateIndexes(
       continue;
     }
     if (entry.label !== undefined) {
-      const label = normalizeQuotes(entry.label.trim()).toLowerCase();
+      const label = normalizeQuotes(entry.label).trim().toLowerCase();
       const group = byLabel.get(label) ?? [];
       group.push(entry);
       byLabel.set(label, group);

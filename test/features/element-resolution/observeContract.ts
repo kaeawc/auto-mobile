@@ -98,7 +98,12 @@ export function contractCases(capture: ContractCapture): ContractCase[] {
       queries.push({ kind: "text", value: observed.label, index });
     }
     if (observed.testTag) {
-      queries.push({ kind: "testTag", value: observed.testTag });
+      const peers = skeleton.filter((entry) => entry.testTag === observed.testTag);
+      const index =
+        peers.length > 1
+          ? skeleton.slice(0, row).filter((entry) => entry.testTag === observed.testTag).length
+          : undefined;
+      queries.push({ kind: "testTag", value: observed.testTag, index });
     }
     return queries.map((query) => ({
       key: `${capture.name}:${JSON.stringify(query)}:${observed.bounds.join(",")}`,
@@ -210,6 +215,9 @@ export function compareResolvers(
                 element.class ?? element.className,
                 element["test-tag"],
                 stableNodeSelectorForElement(element),
+                element.clickable,
+                element["long-clickable"],
+                element.actions,
               ]
             : null;
         return JSON.stringify({

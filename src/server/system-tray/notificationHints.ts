@@ -97,6 +97,35 @@ export const getHierarchyRoots = (viewHierarchy: ViewHierarchyResult): any[] => 
   return [hierarchy];
 };
 
+// Framework aliases exercised by systemTray.test.ts and the captured
+// fixtures/observe/ctrlproxy-notification-group-compact-bounds.json hierarchy.
+// Add OEM aliases only with captured evidence beside the new entry.
+export const NOTIFICATION_RESOURCE_IDS = {
+  notification_children_container: ["com.android.systemui:id/notification_children_container"],
+  notification_header: [
+    "android:id/notification_header",
+    // Existing custom-layout fixture in systemTrayList.test.ts.
+    "com.android.systemui:id/notification_header",
+  ],
+  expand_button: ["android:id/expand_button", "android:id/expand_button_touch_container"],
+  status_bar_latest_event_content: ["android:id/status_bar_latest_event_content"],
+  notification_stack_scroller: ["com.android.systemui:id/notification_stack_scroller"],
+} satisfies Record<string, readonly string[]>;
+
+export const matchesNotificationResourceId = (
+  resourceId: string,
+  name: keyof typeof NOTIFICATION_RESOURCE_IDS,
+): boolean => NOTIFICATION_RESOURCE_IDS[name].some((alias) => resourceId === alias);
+
+export const nodeIsSystemUi = (props: Record<string, any>): boolean => {
+  const packageName = String(props.packageName ?? props.package ?? "");
+  if (packageName) {
+    return packageName === SYSTEM_TRAY_PACKAGE;
+  }
+  const resourceId = String(props["resource-id"] ?? props.resourceId ?? "");
+  return resourceId.startsWith(`${SYSTEM_TRAY_PACKAGE}:id/`);
+};
+
 export const nodeHasSystemTrayHint = (node: any): boolean => {
   const props = getNodeProperties(node);
   if (!props) {
@@ -104,13 +133,13 @@ export const nodeHasSystemTrayHint = (node: any): boolean => {
   }
   const resourceId = String(props["resource-id"] ?? props.resourceId ?? "");
   const className = String(props.className ?? props.class ?? "");
-  const packageName = String(props.packageName ?? props.package ?? "");
-  const isSystemUi =
-    packageName === SYSTEM_TRAY_PACKAGE || resourceId.includes(SYSTEM_TRAY_PACKAGE);
+  const isSystemUi = nodeIsSystemUi(props);
   if (!isSystemUi) {
     return false;
   }
-  const matchesResourceId = SYSTEM_TRAY_RESOURCE_ID_HINTS.some((hint) => resourceId.includes(hint));
+  const matchesResourceId = SYSTEM_TRAY_RESOURCE_ID_HINTS.some(
+    (hint) => resourceId === `${SYSTEM_TRAY_PACKAGE}:id/${hint}` || resourceId === hint,
+  );
   const matchesClassName = SYSTEM_TRAY_CLASS_HINTS.some((hint) => className.includes(hint));
   return matchesResourceId || matchesClassName;
 };

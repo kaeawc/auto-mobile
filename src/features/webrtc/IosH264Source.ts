@@ -414,6 +414,9 @@ export class IosH264Source implements H264CaptureSource {
   private readonly runningReconnectBackoff: BackoffPolicy;
 
   private helper: IosFrameCaptureHelper | null = null;
+  /** Invalidates async work and helper callbacks from a stopped capture lifecycle. */
+  private helperGeneration = 0;
+  private cancelPreCaptureDeadline: (() => void) | null = null;
   private captureKind: CaptureTarget["kind"] | null = null;
   /**
    * Output pipeline for the active capture. `"encoded"` consumes in-helper H.264
@@ -544,6 +547,7 @@ export class IosH264Source implements H264CaptureSource {
       throw new ActionableError("iOS H.264 source already started.");
     }
     await this.teardownPromise;
+    const generation = ++this.helperGeneration;
     this.phase = "starting";
     this.startupComplete = false;
     this.deferredHelperFailure = null;
@@ -557,9 +561,14 @@ export class IosH264Source implements H264CaptureSource {
     this.encodedCapabilityConfirmed = false;
 
     try {
-      await this.establishCapture();
-      this.startupComplete = this.phaseNow() === "running";
+      await this.establishCapture(generation);
+      if (generation === this.helperGeneration) {
+        this.startupComplete = this.phaseNow() === "running";
+      }
     } catch (error) {
+      if (generation !== this.helperGeneration) {
+        return; // stop() owns teardown of this superseded startup.
+      }
       this.phase = "stopping";
       await this.beginTeardown();
       throw error;
@@ -573,11 +582,14 @@ export class IosH264Source implements H264CaptureSource {
    * phase is `"running"` (set by the first-frame handler); a `stop()` that races
    * the handshake leaves it non-`"running"`, which callers treat as "not up".
    */
-  private async establishCapture(): Promise<void> {
+  private async establishCapture(generation: number): Promise<void> {
     const helperPath = await this.resolveHelperPath();
+    if (generation !== this.helperGeneration) {
+      return;
+    }
     const target = await this.resolveCaptureTarget(helperPath);
     this.captureKind = target.kind;
-    if (!this.isActive()) {
+    if (!this.isActive() || generation !== this.helperGeneration) {
       return;
     }
     if (await this.tryEstablishEncoded(helperPath, target)) {
@@ -600,12 +612,16 @@ export class IosH264Source implements H264CaptureSource {
     }
     this.mode = "encoded";
     this.encodeSettings = this.resolveEncodeSettings();
+    const generation = this.helperGeneration;
     try {
       await this.startCaptureWithSimulatorRetry(helperPath, this.encodedTarget(target));
       return true;
     } catch (error) {
       if (!(error instanceof EncodedUnsupportedError)) {
         throw error;
+      }
+      if (generation !== this.helperGeneration) {
+        return true; // The stopped attempt cannot replace the current helper.
       }
       this.encodedFellBack = true;
       await this.stopCurrentHelper();
@@ -624,6 +640,7 @@ export class IosH264Source implements H264CaptureSource {
   private async establishRaw(helperPath: string, target: CaptureTarget): Promise<void> {
     this.mode = "raw";
     this.encodeSettings = null;
+    const generation = this.helperGeneration;
     await this.withPreCaptureDeadline(
       validateFfmpegAvailability(
         this.ffmpegClient,
@@ -634,7 +651,7 @@ export class IosH264Source implements H264CaptureSource {
       IOS_FFMPEG_PROBE_TIMEOUT_MS,
       "Probing iOS WebRTC ffmpeg",
     );
-    if (!this.isActive()) {
+    if (!this.isActive() || generation !== this.helperGeneration) {
       return;
     }
     await this.startCaptureWithSimulatorRetry(helperPath, target);
@@ -692,7 +709,9 @@ export class IosH264Source implements H264CaptureSource {
       return;
     }
     this.phase = "stopping";
+    this.helperGeneration++;
     this.startupComplete = false;
+    this.cancelPreCaptureDeadline?.();
     this.cancelReconnectDelay?.();
     this.cancelFirstFrameWait?.();
     this.cancelFirstAudioWait?.();
@@ -924,14 +943,20 @@ export class IosH264Source implements H264CaptureSource {
   ): Promise<T> {
     let timeout: NodeJS.Timeout | undefined;
     const timedOut = new Promise<never>((_, reject) => {
+      const cancel = (): void => reject(new ActionableError(`${context} cancelled by stop.`));
+      this.cancelPreCaptureDeadline = cancel;
       timeout = this.timer.setTimeout(
         () => reject(new ActionableError(`${context} timed out after ${timeoutMs}ms.`)),
         timeoutMs,
       );
     });
+    const cancel = this.cancelPreCaptureDeadline;
     try {
       return await Promise.race([operation, timedOut]);
     } finally {
+      if (this.cancelPreCaptureDeadline === cancel) {
+        this.cancelPreCaptureDeadline = null;
+      }
       if (timeout) {
         this.timer.clearTimeout(timeout);
       }
@@ -1057,6 +1082,7 @@ export class IosH264Source implements H264CaptureSource {
   }
 
   private waitForFirstFrame(helper: IosFrameCaptureHelper, target: CaptureTarget): Promise<void> {
+    const generation = this.helperGeneration;
     return new Promise((resolve, reject) => {
       let settled = false;
       let firstFrameSeen = false;
@@ -1080,7 +1106,7 @@ export class IosH264Source implements H264CaptureSource {
       this.cancelFirstFrameWait = cancel;
 
       helper.on("frame", () => {
-        if (this.helper !== helper || !this.isActive()) {
+        if (!this.isCurrentHelper(helper, generation) || !this.isActive()) {
           return;
         }
         firstFrameSeen = true;
@@ -1088,7 +1114,7 @@ export class IosH264Source implements H264CaptureSource {
         finish(resolve);
       });
       helper.on("stderr", (line) => {
-        if (this.helper !== helper || !this.isActive()) {
+        if (!this.isCurrentHelper(helper, generation) || !this.isActive()) {
           return;
         }
         if (isNoFramesPermissionWarning(line)) {
@@ -1100,17 +1126,17 @@ export class IosH264Source implements H264CaptureSource {
         }
       });
       helper.on("error", (error) => {
-        if (this.helper !== helper || !this.isActive()) {
+        if (!this.isCurrentHelper(helper, generation) || !this.isActive()) {
           return;
         }
         if (firstFrameSeen) {
-          this.failIfCurrentHelper(helper, error);
+          this.failIfCurrentHelper(helper, generation, error);
           return;
         }
         finish(() => reject(error));
       });
       helper.on("exit", (info) => {
-        if (this.helper !== helper || !this.isActive()) {
+        if (!this.isCurrentHelper(helper, generation) || !this.isActive()) {
           return;
         }
         const stderr =
@@ -1119,7 +1145,7 @@ export class IosH264Source implements H264CaptureSource {
           `screen-capture-helper exited (code=${info.code}, signal=${info.signal})${stderr}`,
         );
         if (firstFrameSeen) {
-          this.failIfCurrentHelper(helper, error);
+          this.failIfCurrentHelper(helper, generation, error);
           return;
         }
         finish(() => reject(error));
@@ -1128,6 +1154,7 @@ export class IosH264Source implements H264CaptureSource {
   }
 
   private waitForFirstAudio(helper: IosFrameCaptureHelper): Promise<void> {
+    const generation = this.helperGeneration;
     return new Promise((resolve, reject) => {
       let settled = false;
       const finish = (callback: () => void): void => {
@@ -1158,17 +1185,17 @@ export class IosH264Source implements H264CaptureSource {
       this.cancelFirstAudioWait = cancel;
       this.rejectFirstAudioWait = rejectWait;
       helper.on("audio", () => {
-        if (this.helper === helper && this.isActive()) {
+        if (this.isCurrentHelper(helper, generation) && this.isActive()) {
           finish(resolve);
         }
       });
       helper.on("error", (error) => {
-        if (this.helper === helper && this.isActive()) {
+        if (this.isCurrentHelper(helper, generation) && this.isActive()) {
           finish(() => reject(error));
         }
       });
       helper.on("exit", (info) => {
-        if (this.helper === helper && this.isActive()) {
+        if (this.isCurrentHelper(helper, generation) && this.isActive()) {
           finish(() =>
             reject(
               new Error(
@@ -1193,6 +1220,7 @@ export class IosH264Source implements H264CaptureSource {
     helper: IosFrameCaptureHelper,
     target: CaptureTarget,
   ): Promise<void> {
+    const generation = this.helperGeneration;
     return new Promise((resolve, reject) => {
       let settled = false;
       let firstRecordSeen = false;
@@ -1219,7 +1247,7 @@ export class IosH264Source implements H264CaptureSource {
       this.cancelFirstFrameWait = cancel;
 
       helper.on("encodedVideo", () => {
-        if (this.helper !== helper || !this.isActive()) {
+        if (!this.isCurrentHelper(helper, generation) || !this.isActive()) {
           return;
         }
         firstRecordSeen = true;
@@ -1227,7 +1255,7 @@ export class IosH264Source implements H264CaptureSource {
         finish(resolve);
       });
       helper.on("stderr", (line) => {
-        if (this.helper !== helper || !this.isActive()) {
+        if (!this.isCurrentHelper(helper, generation) || !this.isActive()) {
           return;
         }
         if (isNoFramesPermissionWarning(line)) {
@@ -1239,17 +1267,17 @@ export class IosH264Source implements H264CaptureSource {
         }
       });
       helper.on("error", (error) => {
-        if (this.helper !== helper || !this.isActive()) {
+        if (!this.isCurrentHelper(helper, generation) || !this.isActive()) {
           return;
         }
         if (firstRecordSeen) {
-          this.failIfCurrentHelper(helper, error);
+          this.failIfCurrentHelper(helper, generation, error);
           return;
         }
         rejectStartupFailure(error);
       });
       helper.on("exit", (info) => {
-        if (this.helper !== helper || !this.isActive()) {
+        if (!this.isCurrentHelper(helper, generation) || !this.isActive()) {
           return;
         }
         const stderr =
@@ -1258,7 +1286,7 @@ export class IosH264Source implements H264CaptureSource {
           `screen-capture-helper exited (code=${info.code}, signal=${info.signal})${stderr}`,
         );
         if (firstRecordSeen) {
-          this.failIfCurrentHelper(helper, error);
+          this.failIfCurrentHelper(helper, generation, error);
           return;
         }
         rejectStartupFailure(error);
@@ -1283,9 +1311,16 @@ export class IosH264Source implements H264CaptureSource {
   }
 
   private wireHelperFrames(helper: IosFrameCaptureHelper): void {
-    helper.on("frame", (frame) => this.handleFrame(frame));
+    const generation = this.helperGeneration;
+    helper.on("frame", (frame) => {
+      if (this.isCurrentHelper(helper, generation)) {
+        this.handleFrame(frame);
+      }
+    });
     helper.on("malformed", (error) => {
-      logger.warn(`[IosH264Source] malformed frame from helper: ${error.reason}`);
+      if (this.isCurrentHelper(helper, generation)) {
+        logger.warn(`[IosH264Source] malformed frame from helper: ${error.reason}`);
+      }
     });
     this.wireHelperDiagnostics(helper);
   }
@@ -1299,13 +1334,21 @@ export class IosH264Source implements H264CaptureSource {
    * wiring with the raw path.
    */
   private wireEncodedHelper(helper: IosFrameCaptureHelper): void {
-    helper.on("encodedVideo", (video) => this.handleEncodedVideo(video));
+    const generation = this.helperGeneration;
+    helper.on("encodedVideo", (video) => {
+      if (this.isCurrentHelper(helper, generation)) {
+        this.handleEncodedVideo(video);
+      }
+    });
     helper.on("capability", (token) => {
-      if (token === ENCODED_VIDEO_CAPABILITY) {
+      if (this.isCurrentHelper(helper, generation) && token === ENCODED_VIDEO_CAPABILITY) {
         this.encodedCapabilityConfirmed = true;
       }
     });
     helper.on("malformed", (error) => {
+      if (!this.isCurrentHelper(helper, generation)) {
+        return;
+      }
       logger.warn(
         `[IosH264Source] malformed encoded record from helper: ${error.reason}; requesting keyframe to recover`,
       );
@@ -1316,26 +1359,34 @@ export class IosH264Source implements H264CaptureSource {
 
   /** stderr/readiness/metrics/audio wiring shared by the raw and encoded paths. */
   private wireHelperDiagnostics(helper: IosFrameCaptureHelper): void {
+    const generation = this.helperGeneration;
     helper.on("capability", (token) => {
-      if (this.helper === helper && token === SIMULATOR_IDLE_EVIDENCE_CAPABILITY) {
+      if (
+        this.isCurrentHelper(helper, generation) &&
+        token === SIMULATOR_IDLE_EVIDENCE_CAPABILITY
+      ) {
         this.nativeIdleCapabilityConfirmed = true;
         this.idleSupportReported = true;
         this.options.onIdleAttestationSupport?.(true);
       }
     });
     helper.on("idle", () => {
-      if (this.helper === helper && this.isActive() && this.nativeIdleCapabilityConfirmed) {
+      if (
+        this.isCurrentHelper(helper, generation) &&
+        this.isActive() &&
+        this.nativeIdleCapabilityConfirmed
+      ) {
         this.options.onSourceIdle?.();
       }
     });
     helper.on("frameMetrics", (metrics) => {
-      if (this.helper === helper && this.isActive()) {
+      if (this.isCurrentHelper(helper, generation) && this.isActive()) {
         this.helperFrameMetrics = metrics;
         this.reportFrameMetrics();
       }
     });
     helper.on("captureMetrics", (metrics) => {
-      if (this.helper === helper && this.isActive()) {
+      if (this.isCurrentHelper(helper, generation) && this.isActive()) {
         this.nativeFrameMetrics = metrics;
         // The native writer's cumulative counter is the only one the encoded Simulator path (the
         // default) advances on VideoToolbox overload — the raw-frame queue's `frameMetrics` counter
@@ -1346,21 +1397,28 @@ export class IosH264Source implements H264CaptureSource {
       }
     });
     helper.on("audio", (audio) => {
-      if (this.isActive() && this.options.audioEnabled) {
+      if (
+        this.isCurrentHelper(helper, generation) &&
+        this.isActive() &&
+        this.options.audioEnabled
+      ) {
         this.options.onAudioData?.(audio.pcm16le);
       }
     });
     helper.on("permission", (permission) => {
-      if (this.helper === helper) {
+      if (this.isCurrentHelper(helper, generation)) {
         this.requiredPermission = permission;
       }
     });
     helper.on("permissionTarget", (target) => {
-      if (this.helper === helper) {
+      if (this.isCurrentHelper(helper, generation)) {
         this.requiredPermissionTarget = target;
       }
     });
     helper.on("stderr", (line) => {
+      if (!this.isCurrentHelper(helper, generation)) {
+        return;
+      }
       if (line.length > 0) {
         this.lastHelperStderr = line.slice(-2_048);
         // The helper runs in a separate process. Preserve its diagnostics in the
@@ -1368,11 +1426,11 @@ export class IosH264Source implements H264CaptureSource {
         logger.warn(`[IosH264Source] screen-capture-helper stderr: ${line}`);
       }
       if (isHelperError(line)) {
-        this.failIfCurrentHelper(helper, this.helperFailureFor(line));
+        this.failIfCurrentHelper(helper, generation, this.helperFailureFor(line));
       }
     });
     helper.on("readiness", (status) => {
-      if (this.helper === helper && this.isActive()) {
+      if (this.isCurrentHelper(helper, generation) && this.isActive()) {
         // Track the furthest startup stage reached so a first-frame timeout can
         // name exactly where capture stalled (issue #4766).
         this.lastReadinessPhase = status.phase;
@@ -1732,6 +1790,11 @@ export class IosH264Source implements H264CaptureSource {
     if (this.phase !== "running") {
       return;
     }
+    // Initial handshakes and fail-fast streams must surface their real failure.
+    if (!this.startupComplete || this.runningReconnectMaxAttempts <= 0) {
+      this.failNow(error);
+      return;
+    }
     if (!this.hasConsumers) {
       // Keep the relay's idle grace, but do not launch another helper for an
       // empty stream. A new viewer resumes the same bounded recovery path.
@@ -1741,16 +1804,9 @@ export class IosH264Source implements H264CaptureSource {
       this.queueReconnect(error);
       return;
     }
-    // Only a steady-state failure (after start() resolved) is eligible for a
-    // bounded reconnect; a failure still inside the initial handshake surfaces
-    // immediately so a real misconfiguration is not masked by a retry loop.
-    if (this.startupComplete && this.runningReconnectMaxAttempts > 0) {
-      this.phase = "reconnecting";
-      this.startupComplete = false;
-      this.queueReconnect(error);
-      return;
-    }
-    this.failNow(error);
+    this.phase = "reconnecting";
+    this.startupComplete = false;
+    this.queueReconnect(error);
   }
 
   /** Terminal failure: tear the source down and surface `onError`. */
@@ -1793,8 +1849,12 @@ export class IosH264Source implements H264CaptureSource {
         return;
       }
       this.phase = "starting";
+      const generation = ++this.helperGeneration;
       try {
-        await this.establishCapture();
+        await this.establishCapture(generation);
+        if (generation !== this.helperGeneration) {
+          return;
+        }
         if (this.phaseNow() === "running") {
           this.startupComplete = true;
           logger.info(`[IosH264Source] running-phase reconnect succeeded on attempt ${attempt}`);
@@ -1803,6 +1863,9 @@ export class IosH264Source implements H264CaptureSource {
         // A stop() raced the handshake; teardown is owned by stop().
         return;
       } catch (error) {
+        if (generation !== this.helperGeneration) {
+          return; // stop() owns teardown of this superseded attempt.
+        }
         logger.warn(
           `[IosH264Source] reconnect attempt ${attempt}/${this.runningReconnectMaxAttempts} failed: ` +
             `${errorMessage(error)}`,
@@ -1816,9 +1879,18 @@ export class IosH264Source implements H264CaptureSource {
       }
     }
 
-    if (this.phase === "reconnecting") {
-      this.failNow(initialError);
+    this.finishReconnectExhausted(initialError);
+  }
+
+  private finishReconnectExhausted(initialError: Error): void {
+    if (this.phase !== "reconnecting") {
+      return;
     }
+    if (!this.hasConsumers) {
+      this.deferredHelperFailure = initialError;
+      return;
+    }
+    this.failNow(initialError);
   }
 
   private async waitForActiveReconnect(delayMs: number, error: Error): Promise<boolean> {
@@ -1863,11 +1935,19 @@ export class IosH264Source implements H264CaptureSource {
     });
   }
 
-  private failIfCurrentHelper(helper: IosFrameCaptureHelper, error: Error): void {
-    if (this.helper !== helper) {
+  private failIfCurrentHelper(
+    helper: IosFrameCaptureHelper,
+    generation: number,
+    error: Error,
+  ): void {
+    if (!this.isCurrentHelper(helper, generation)) {
       return;
     }
     this.failIfRunning(error);
+  }
+
+  private isCurrentHelper(helper: IosFrameCaptureHelper, generation: number): boolean {
+    return this.helper === helper && this.helperGeneration === generation;
   }
 
   private isActive(): boolean {

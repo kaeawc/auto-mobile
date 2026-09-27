@@ -51,10 +51,17 @@ final class BlockingPayloadSink: FrameSink {
 
 final class FrameWriterTests: XCTestCase {
     func testClosedOutputNotifiesOnceWithoutTrapping() {
+        // The helper executable ignores SIGPIPE so a closed reader reaches the
+        // sink's EPIPE handling. Restore the test process's prior disposition.
+        let previousSignalHandler = signal(SIGPIPE, SIG_IGN)
+        defer { _ = signal(SIGPIPE, previousSignalHandler) }
         var descriptors: [Int32] = [0, 0]
-        XCTAssertEqual(pipe(&descriptors), 0)
-        defer { _ = close(descriptors[0]) }
-        _ = close(descriptors[1])
+        guard pipe(&descriptors) == 0 else {
+            XCTFail("pipe creation failed")
+            return
+        }
+        defer { _ = close(descriptors[1]) }
+        _ = close(descriptors[0])
 
         let closed = DispatchSemaphore(value: 0)
         let sink = FileHandleFrameSink(
@@ -63,10 +70,28 @@ final class FrameWriterTests: XCTestCase {
             closed.signal()
         }
         sink.write(Data([1]))
+        XCTAssertEqual(errno, EPIPE)
         sink.write(Data([2]))
 
         XCTAssertEqual(closed.wait(timeout: .now()), .success)
         XCTAssertEqual(closed.wait(timeout: .now()), .timedOut)
+    }
+
+    func testHelperHelpSurvivesClosedStdoutPipe() throws {
+        let helperURL = Bundle(for: Self.self).bundleURL
+            .deletingLastPathComponent()
+            .appendingPathComponent("screen-capture-helper")
+        let output = Pipe()
+        output.fileHandleForReading.closeFile()
+        let helper = Process()
+        helper.executableURL = helperURL
+        helper.arguments = ["--help"]
+        helper.standardOutput = output
+
+        try helper.run()
+        helper.waitUntilExit()
+        XCTAssertEqual(helper.terminationReason, .exit)
+        XCTAssertEqual(helper.terminationStatus, 0)
     }
 
     func testRecordsEncoderDroppedFrameInMetrics() {

@@ -77,6 +77,9 @@ cat > "$STUB_BIN/bun" <<'EOF'
 if [[ "$1" == "run" && "$2" == "scripts/lib/junit-testcase-timings.ts" ]]; then
   exec "$REAL_BUN" "$@"
 fi
+if [[ "$1" == "scripts/lib/merge-junit-reports.ts" ]]; then
+  exec "$REAL_BUN" "$@"
+fi
 printf '%s\n' "$*" >> "$BUN_ARGS_FILE"
 if [[ -n "${STUB_BUN_SLEEP_SECONDS:-}" ]]; then
   sleep "$STUB_BUN_SLEEP_SECONDS"
@@ -216,6 +219,18 @@ run_lane() {
   [[ "$output" == *"--path-ignore-patterns"*"proxyServerTransportFailure.integration.test.ts"* ]]
   [[ "$output" == *".integration.test.ts"* ]]
   [ "$(grep -c -- '--bail' <<< "$output")" -eq 2 ]
+}
+
+@test "integration split combines reports from both processes" {
+  local report
+  report="$(mktemp)"
+  run env PATH="$STUB_BIN:$PATH" bash "$SCRIPT" integration \
+    --reporter junit --reporter-outfile "$report"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '<testsuite ' "$report")" -eq 2 ]
+  [[ "$(cat "$report")" == *"proxyServerTransportFailure.integration.test.ts"* ]]
+  [[ "$(cat "$report")" == *'tests="2"'* ]]
+  rm -f "$report"
 }
 
 @test "integration split respects a shorter caller wall timeout" {

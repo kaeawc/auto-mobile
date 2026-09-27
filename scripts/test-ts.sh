@@ -457,15 +457,61 @@ case "$mode" in
         if ((transport_suite_timeout > 60)); then
           transport_suite_timeout=60
         fi
-        AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS="$transport_suite_timeout" run_test_command \
+        transport_args=("${passthrough_args[@]+"${passthrough_args[@]}"}")
+        main_args=("${passthrough_args[@]+"${passthrough_args[@]}"}")
+        report_outfile=""
+        for ((report_index = 0; report_index < ${#transport_args[@]}; report_index += 1)); do
+          if [[ "${transport_args[$report_index]}" == --reporter-outfile ]]; then
+            report_outfile="${transport_args[$((report_index + 1))]}"
+            report_arg_index=$((report_index + 1))
+            report_arg_prefix=""
+            break
+          elif [[ "${transport_args[$report_index]}" == --reporter-outfile=* ]]; then
+            report_outfile="${transport_args[$report_index]#--reporter-outfile=}"
+            report_arg_index="$report_index"
+            report_arg_prefix="--reporter-outfile="
+            break
+          fi
+        done
+        if [[ -n "$report_outfile" ]]; then
+          report_dir="$(mktemp -d)"
+          trap 'rm -rf "$report_dir"' EXIT
+          transport_args[report_arg_index]="${report_arg_prefix}$report_dir/transport.xml"
+          main_args[report_arg_index]="${report_arg_prefix}$report_dir/main.xml"
+        fi
+        # A failed process may still write a useful JUnit report; preserve it
+        # before returning the process status. Both calls explicitly inspect it.
+        # shellcheck disable=SC2310
+        if AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS="$transport_suite_timeout" run_test_command \
           "${integration_args[@]}" \
           test/server/proxyServerTransportFailure.integration.test.ts \
-          "${passthrough_args[@]+"${passthrough_args[@]}"}"
-        run_test_command \
+          "${transport_args[@]+"${transport_args[@]}"}"; then
+          :
+        else
+          test_status=$?
+          if [[ -n "$report_outfile" && -f "$report_dir/transport.xml" ]]; then
+            cp "$report_dir/transport.xml" "$report_outfile"
+          fi
+          exit "$test_status"
+        fi
+        # shellcheck disable=SC2310
+        if run_test_command \
           "${integration_args[@]}" \
           --path-ignore-patterns "**/proxyServerTransportFailure.integration.test.ts" \
           ".integration.test.ts" \
-          "${passthrough_args[@]+"${passthrough_args[@]}"}"
+          "${main_args[@]+"${main_args[@]}"}"; then
+          :
+        else
+          test_status=$?
+          if [[ -n "$report_outfile" && -f "$report_dir/transport.xml" ]]; then
+            cp "$report_dir/transport.xml" "$report_outfile"
+          fi
+          exit "$test_status"
+        fi
+        if [[ -n "$report_outfile" && "${TEST_TS_PRINT_CMD:-}" != 1 ]]; then
+          bun scripts/lib/merge-junit-reports.ts "$report_outfile" \
+            "$report_dir/transport.xml" "$report_dir/main.xml"
+        fi
       fi
     else
       echo "No integration test paths were selected." >&2

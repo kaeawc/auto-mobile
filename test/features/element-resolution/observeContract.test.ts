@@ -38,7 +38,7 @@ describe("observe-to-resolve migration contract", () => {
     expect(Object.keys(gapSignatures).sort()).toEqual([...allowed].sort());
     // The trim-only fixture deliberately has no actionable skeleton rows.
     expect(captures.map((capture) => contractCases(capture).length)).toEqual([
-      30, 0, 7, 2, 3, 12, 25, 24, 30, 30, 2, 9, 9,
+      30, 0, 7, 2, 3, 12, 25, 24, 34, 34, 2, 10, 10,
     ]);
   });
 
@@ -169,6 +169,19 @@ describe("observe-to-resolve migration contract", () => {
     };
     expect(compareResolvers([selected], legacy, ignoresFocus)).toEqual([selected.key]);
   });
+  test("differential seam distinguishes same-bounds focus state and editability", () => {
+    const selected = cases.find(({ query }) => query.intent === "focus-input")!;
+    const element = legacy.resolve(selected.capture, selected.query).chosen!;
+    const editable = { ...element, focusable: true, "input-type": "text", focused: true };
+    const inert = { ...element, focusable: false, "input-type": undefined, focused: false };
+    const reference: ContractResolver = {
+      resolve: () => ({ chosen: editable, candidates: [editable, inert] }),
+    };
+    const reordered: ContractResolver = {
+      resolve: () => ({ chosen: editable, candidates: [inert, editable] }),
+    };
+    expect(compareResolvers([selected], reference, reordered)).toEqual([selected.key]);
+  });
   test("differential seam detects swapped toggle states", () => {
     const selected = cases.find(({ capture, query }) => legacy.resolve(capture, query).chosen)!;
     const node = legacy.resolve(selected.capture, selected.query).chosen!;
@@ -187,7 +200,7 @@ describe("observe-to-resolve migration contract", () => {
     for (const { query } of cases) {
       counts[query.kind]++;
     }
-    expect(counts).toEqual({ elementId: 97, text: 83, testTag: 3 });
+    expect(counts).toEqual({ elementId: 97, text: 93, testTag: 3 });
     const brokenTags: ContractResolver = {
       resolve(capture, query) {
         return query.kind === "testTag"

@@ -68,9 +68,19 @@ function withoutVolatileTapLayoutFields(value: unknown): unknown {
   );
 }
 
+function hasTruncatedTapLayout(observation: ObserveResult): boolean {
+  return Boolean(
+    observation.truncationReasons?.length || observation.viewHierarchy?.truncationReasons?.length,
+  );
+}
+
 function tapTargetingLayout(observation: ObserveResult): unknown | null {
   const rotation = observation.rotation ?? observation.viewHierarchy?.rotation;
-  if (!Number.isInteger(rotation) || !observation.viewHierarchy) {
+  if (
+    !Number.isInteger(rotation) ||
+    !observation.viewHierarchy ||
+    hasTruncatedTapLayout(observation)
+  ) {
     return null;
   }
 
@@ -267,7 +277,8 @@ export class TapAtCoordinate extends BaseVisualChange {
         refreshed.x !== resolved.x ||
         refreshed.y !== resolved.y ||
         !hasSameTapTargetingLayout(observeResult, refreshedObservation) ||
-        !refreshedFrameContext
+        !refreshedFrameContext ||
+        refreshedFrameContext === frameContext
       ) {
         throw actionable;
       }

@@ -443,13 +443,10 @@ function toSkeletonEntry(acc: SkeletonAccumulator): SkeletonElement {
   return entry;
 }
 
-/** Canonical window rank, then capture preorder; fixtures retain reading-order fallback. */
+/** Preserve the live selector's main-root-first traversal order for duplicate indexes. */
 function byHierarchyOrder(a: SkeletonAccumulator, b: SkeletonAccumulator): number {
   if (a.provenance && b.provenance) {
-    return (
-      (a.provenance.windowRank ?? 0) - (b.provenance.windowRank ?? 0) ||
-      a.provenance.enter - b.provenance.enter
-    );
+    return a.provenance.enter - b.provenance.enter;
   }
   return byReadingOrder(a, b);
 }
@@ -980,12 +977,6 @@ export function projectSkeleton(elements: ObserveElements): SkeletonProjectionRe
   const kept = accumulators.filter((acc) => shouldKeep(acc, clickable));
   const actionable = kept.filter((acc) => acc.affordances.size > 0);
   const nonActionable = kept.filter((acc) => acc.affordances.size === 0);
-
-  // Captured rows share resolver ordering across categories and windows.
-  // Preserve the existing insertion order for producers without capture provenance.
-  if (actionable.every((entry) => entry.provenance?.windowRank !== undefined)) {
-    actionable.sort(byHierarchyOrder);
-  }
 
   // One row for the whole IME window, appended last: the keyboard is a mode, not
   // a list of targets, so it must never come before the app's own affordances.

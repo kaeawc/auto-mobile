@@ -47,6 +47,12 @@ describe("pure element resolver", () => {
       resolver.resolve(snapshot([node("map")]), { elementId: "app:id/map" }, tap).chosen?.nativeId,
     ).toBe("map");
   });
+  test("exact bare native ID takes precedence over a qualified suffix peer", () => {
+    const capture = snapshot([node("app:id/save"), node("save")]);
+    const result = resolver.resolve(capture, { elementId: "save" }, tap);
+    expect(result.chosen?.nativeId).toBe("save");
+    expect(result.candidates.map((candidate) => candidate.nativeId)).toEqual(["save"]);
+  });
   test("text is normalized exact first, then contains only when exact is absent", () => {
     const capture = snapshot([
       node("help", "Don't continue help"),

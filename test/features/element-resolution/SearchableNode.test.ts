@@ -48,6 +48,24 @@ describe("searchable node derivation", () => {
     expect(node.categories.text).toBe(true);
   });
 
+  test("includes an iOS accessibility-only label in observable text", () => {
+    const hierarchy = {
+      hierarchy: {
+        node: {
+          bounds,
+          clickable: true,
+          node: [{ bounds, "ios-accessibility-label": "Open details" }],
+        },
+      },
+    };
+    const searchable = toSearchable({ bounds, "ios-accessibility-label": "Open details" });
+    expect(searchable.categoryText).toBe("Open details");
+    const observed = new DefaultObserveElementCollector().collect(hierarchy, "ios")!;
+    expect(
+      observed.text?.some((entry) => entry["ios-accessibility-label"] === "Open details"),
+    ).toBe(true);
+  });
+
   test("unifies compact bounds and accessibility actions", () => {
     const node = toSearchable({
       bounds: [1, 2, 3, 4],

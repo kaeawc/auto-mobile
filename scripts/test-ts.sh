@@ -454,6 +454,8 @@ case "$mode" in
         # a short deadline so a regression cannot consume the whole matrix job.
         transport_suite_timeout="${AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS:-60}"
         validate_positive_integer "AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS" "$transport_suite_timeout"
+        integration_wall_timeout="$transport_suite_timeout"
+        integration_started_at="$(date +%s)"
         if ((transport_suite_timeout > 60)); then
           transport_suite_timeout=60
         fi
@@ -495,7 +497,16 @@ case "$mode" in
           exit "$test_status"
         fi
         # shellcheck disable=SC2310
-        if run_test_command \
+        integration_remaining=$((integration_wall_timeout - ($(date +%s) - integration_started_at)))
+        if ((integration_remaining <= 0)); then
+          if [[ -n "$report_outfile" && -f "$report_dir/transport.xml" ]]; then
+            cp "$report_dir/transport.xml" "$report_outfile"
+          fi
+          echo "Integration test run exceeded its ${integration_wall_timeout}s wall-clock budget." >&2
+          exit 124
+        fi
+        # shellcheck disable=SC2310
+        if AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS="$integration_remaining" run_test_command \
           "${integration_args[@]}" \
           --path-ignore-patterns "**/proxyServerTransportFailure.integration.test.ts" \
           ".integration.test.ts" \
@@ -503,7 +514,10 @@ case "$mode" in
           :
         else
           test_status=$?
-          if [[ -n "$report_outfile" && -f "$report_dir/transport.xml" ]]; then
+          if [[ -n "$report_outfile" && -f "$report_dir/main.xml" ]]; then
+            bun scripts/lib/merge-junit-reports.ts "$report_outfile" \
+              "$report_dir/transport.xml" "$report_dir/main.xml"
+          elif [[ -n "$report_outfile" && -f "$report_dir/transport.xml" ]]; then
             cp "$report_dir/transport.xml" "$report_outfile"
           fi
           exit "$test_status"

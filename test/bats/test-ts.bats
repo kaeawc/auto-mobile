@@ -188,6 +188,9 @@ if [[ -n "${STUB_RECHECK_TIMES:-}" ]]; then
   exit 0
 fi
 stub_junit_report "$report" "${target:-test/example.test.ts}" fixture fast 0.001
+if [[ "$target" == ".integration.test.ts" && -n "${STUB_INTEGRATION_MAIN_EXIT:-}" ]]; then
+  exit "$STUB_INTEGRATION_MAIN_EXIT"
+fi
 EOF
   chmod +x "$STUB_BIN/git" "$STUB_BIN/bun"
 }
@@ -233,6 +236,17 @@ run_lane() {
   rm -f "$report"
 }
 
+@test "integration split preserves both reports when the main process fails" {
+  local report
+  report="$(mktemp)"
+  run env PATH="$STUB_BIN:$PATH" STUB_INTEGRATION_MAIN_EXIT=7 bash "$SCRIPT" integration \
+    --reporter junit --reporter-outfile "$report"
+  [ "$status" -eq 7 ]
+  [ "$(grep -c '<testsuite ' "$report")" -eq 2 ]
+  [[ "$(cat "$report")" == *"proxyServerTransportFailure.integration.test.ts"* ]]
+  rm -f "$report"
+}
+
 @test "integration split respects a shorter caller wall timeout" {
   local timeout_args
   timeout_args="$(mktemp)"
@@ -249,6 +263,33 @@ EOF
   [ "$(wc -l < "$timeout_args")" -eq 2 ]
   [[ "$(head -n 1 "$timeout_args")" == "-k 2 1 "* ]]
   rm -f "$timeout_args"
+}
+
+@test "integration split passes only the remaining wall time to the main process" {
+  local timeout_args clock_calls
+  timeout_args="$(mktemp)"
+  clock_calls="$(mktemp)"
+  printf '0' > "$clock_calls"
+  cat > "$STUB_BIN/date" <<'EOF'
+#!/usr/bin/env bash
+calls="$(cat "$CLOCK_CALLS_FILE")"
+printf '%s' "$((calls + 1))" > "$CLOCK_CALLS_FILE"
+if ((calls < 2)); then printf '100\n'; else printf '105\n'; fi
+EOF
+  cat > "$STUB_BIN/timeout" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$TIMEOUT_ARGS_FILE"
+shift 3
+exec "$@"
+EOF
+  chmod +x "$STUB_BIN/date" "$STUB_BIN/timeout"
+  run env PATH="$STUB_BIN:$PATH" CLOCK_CALLS_FILE="$clock_calls" \
+    TIMEOUT_ARGS_FILE="$timeout_args" AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=60 \
+    bash "$SCRIPT" integration
+  [ "$status" -eq 0 ]
+  [[ "$(head -n 1 "$timeout_args")" == "-k 2 60 "* ]]
+  [[ "$(tail -n 1 "$timeout_args")" == "-k 2 55 "* ]]
+  rm -f "$timeout_args" "$clock_calls"
 }
 
 @test "Windows integration lane retains one process without a POSIX watchdog" {

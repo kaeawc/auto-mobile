@@ -1884,23 +1884,32 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       perf.startOperation("avdNameResolution");
       const emulatorResults = await Promise.all(
         emulatorDevices.map(async (device) => {
+          const deadlineMs = this.timer.now() + infoTimeoutMs;
           const avdName = options.skipNameEnrichment
             ? { name: "", diagnostic: undefined }
             : await this.getRunningAVDName(device, infoTimeoutMs, signal);
-          const model = await this.modelForBootedEmulator(
-            device,
-            avdName,
-            infoTimeoutMs,
-            options.skipNameEnrichment === true,
-            signal,
-          );
-          const architecture = await this.resolveEmulatorArchitecture(
-            device,
-            avdName,
-            infoTimeoutMs,
-            options.skipNameEnrichment === true,
-            signal,
-          );
+          const modelRemainingMs = deadlineMs - this.timer.now();
+          const model =
+            modelRemainingMs > 0
+              ? await this.modelForBootedEmulator(
+                  device,
+                  avdName,
+                  modelRemainingMs,
+                  options.skipNameEnrichment === true,
+                  signal,
+                )
+              : undefined;
+          const architectureRemainingMs = deadlineMs - this.timer.now();
+          const architecture =
+            architectureRemainingMs > 0
+              ? await this.resolveEmulatorArchitecture(
+                  device,
+                  avdName,
+                  architectureRemainingMs,
+                  options.skipNameEnrichment === true,
+                  signal,
+                )
+              : undefined;
 
           return {
             device: this.discoveredEmulatorDevice(device, avdName, model, architecture),
@@ -1939,17 +1948,23 @@ export class AndroidEmulatorClient implements AndroidEmulator {
   }
 
   /**
-   * `ro.product.model` is cached per serial because a device cannot change
-   * models under a fixed serial. It remains metadata rather than identity, so
-   * a failed read is safe to omit from discovery.
+   * Physical models are cached per serial; emulator models also require the
+   * resolved AVD name because a new AVD may reuse the same emulator serial.
    */
   private async resolveDeviceModel(
     device: BootedDevice,
     infoTimeoutMs: number,
     skipNameEnrichment: boolean,
     signal?: AbortSignal,
+    avdName?: string,
   ): Promise<string | undefined> {
-    const cachedModel = this.modelNameCache.get(device.deviceId);
+    const cacheKey =
+      avdName === undefined
+        ? device.deviceId
+        : avdName
+          ? `${device.deviceId}\0${avdName}`
+          : undefined;
+    const cachedModel = cacheKey ? this.modelNameCache.get(cacheKey) : undefined;
     if (cachedModel) {
       logger.debug(`Got model name for ${device.deviceId}: "${cachedModel}" (cached)`);
       return cachedModel;
@@ -1972,10 +1987,13 @@ export class AndroidEmulatorClient implements AndroidEmulator {
         logger.debug(`No model name found for ${device.deviceId}`);
         return undefined;
       }
-      this.modelNameCache.set(device.deviceId, modelName);
+      if (cacheKey) {
+        this.modelNameCache.set(cacheKey, modelName);
+      }
       logger.debug(`Got model name for ${device.deviceId}: "${modelName}"`);
       return modelName;
     } catch (error) {
+      this.throwIfReadinessAborted(signal);
       // A missing model is cosmetic: the serial/AVD name still identifies the
       // discovered device, so discovery continues without this metadata.
       logger.debug(`Failed to get model name for ${device.deviceId}: ${error}`);
@@ -1996,6 +2014,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
         2000,
         false,
         signal,
+        avdName,
       ))
     );
   }
@@ -2015,7 +2034,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
 
   private async modelForBootedEmulator(
     device: BootedDevice,
-    avdName: { consoleBusyDuringProbe?: boolean },
+    avdName: { name: string; consoleBusyDuringProbe?: boolean },
     infoTimeoutMs: number,
     skipNameEnrichment: boolean,
     signal?: AbortSignal,
@@ -2025,7 +2044,13 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       // contending with the destructive console operation.
       return undefined;
     }
-    return await this.resolveDeviceModel(device, infoTimeoutMs, skipNameEnrichment, signal);
+    return await this.resolveDeviceModel(
+      device,
+      infoTimeoutMs,
+      skipNameEnrichment,
+      signal,
+      avdName.name,
+    );
   }
 
   private async resolveEmulatorArchitecture(
@@ -2134,6 +2159,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       logger.debug(`Got CPU architecture for ${device.deviceId}: "${architecture}"`);
       return architecture;
     } catch (error) {
+      this.throwIfReadinessAborted(signal);
       // A device can still be described without this optional metadata.
       logger.debug(`Failed to get CPU architecture for ${device.deviceId}: ${error}`);
       return undefined;

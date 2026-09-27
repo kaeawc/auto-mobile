@@ -2,6 +2,9 @@ import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { parseAvdConfig } from "../../src/utils/android-cmdline-tools/AvdConfigReader";
 import type { DeviceInfo } from "../../src/models";
+import { AndroidAvdProvenanceCache } from "../../src/utils/AndroidAvdProvenanceCache";
+import { FakeAvdManager } from "../fakes/FakeAvdManager";
+import { FakeTimer } from "../fakes/FakeTimer";
 import {
   DefaultExactDeviceProvisioner,
   FileAndroidAvdConfigWriter,
@@ -53,6 +56,42 @@ describe("ProvisionDeviceError retryability", () => {
 });
 
 describe("DefaultExactDeviceProvisioner", () => {
+  test("invalidates cached Android AVD provenance after exact creation", async () => {
+    AndroidAvdProvenanceCache.resetForTests();
+    try {
+      const cache = AndroidAvdProvenanceCache.getInstance();
+      const avdManager = new FakeAvdManager();
+      const timer = new FakeTimer();
+      avdManager.setListDeviceImagesResponse([]);
+      await cache.getByName(avdManager, timer);
+      expect(cache.getCachedByName()).toBeDefined();
+      const provisioner = new DefaultExactDeviceProvisioner({
+        listDeviceImages: async () => [],
+        isCreationAllowed: () => true,
+        avdManager: {
+          createAvd: async (params) => ({
+            success: true,
+            message: "created",
+            avdName: params.name,
+          }),
+        },
+        androidConfigReader: { readConfig: async () => null },
+        androidConfigWriter: {} as AndroidAvdConfigWriter,
+        iosSimulator: {} as ExactIosSimulatorClient,
+      });
+
+      await provisioner.provision({
+        platform: "android",
+        name: "phone-api-36-a",
+        spec: { ...ANDROID_SPEC, configuration: {} },
+        onBeforeCreate: async () => {},
+      });
+      expect(cache.getCachedByName()).toBeUndefined();
+    } finally {
+      AndroidAvdProvenanceCache.resetForTests();
+    }
+  });
+
   test("writes and reads independent hardware options without changing other AVD properties", async () => {
     let content = "hw.cpu.ncore = 4\nhw.ramSize=2048\nuntouched=yes\n";
     const writer = new FileAndroidAvdConfigWriter({

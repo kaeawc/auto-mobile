@@ -7,6 +7,8 @@ import type { HostPortAvailabilityChecker } from "./ios/IOSHostPortAvailabilityC
 export interface DeviceReadinessProxyDriver {
   resetSetupState(): void;
   rebindIfUnhealthy?(): Promise<boolean>;
+  verifyServiceReady?(): Promise<boolean>;
+  forceRestartProcess?(): Promise<boolean>;
   setup(force: boolean, perf: PerformanceTracker): Promise<ProxySetupResult>;
   waitForConnection(): Promise<boolean>;
   resetConnectionBudget?(): void;

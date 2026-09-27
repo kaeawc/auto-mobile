@@ -647,6 +647,7 @@ async function ensureAccessibilityServiceReady(
 
   const MAX_ATTEMPTS = 2;
   const RETRY_DELAY_MS = 3000;
+  let processRestartAttempted = false;
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     signal?.throwIfAborted();
@@ -691,6 +692,17 @@ async function ensureAccessibilityServiceReady(
       continue;
     }
 
+    const health = await probeConnectedAccessibilityService(
+      readinessDriver,
+      processRestartAttempted,
+      signal,
+    );
+    processRestartAttempted ||= health.restartAttempted;
+    if (!health.ready) {
+      await handleConnectionFailure(perf, retryCtx);
+      continue;
+    }
+
     perf.end();
     const timings = perf.getTimings();
     if (timings) {
@@ -705,6 +717,25 @@ async function ensureAccessibilityServiceReady(
     }
     return;
   }
+}
+
+async function probeConnectedAccessibilityService(
+  driver: DeviceReadinessProxyDriver,
+  restartAlreadyAttempted: boolean,
+  signal?: AbortSignal,
+): Promise<{ ready: boolean; restartAttempted: boolean }> {
+  if (!driver.verifyServiceReady) {
+    return { ready: true, restartAttempted: false };
+  }
+  const ready = await awaitReadinessWork(driver.verifyServiceReady(), signal);
+  if (ready || restartAlreadyAttempted || !driver.forceRestartProcess) {
+    return { ready, restartAttempted: false };
+  }
+  const restarted = await awaitReadinessWork(driver.forceRestartProcess(), signal);
+  return {
+    ready: restarted && (await awaitReadinessWork(driver.verifyServiceReady(), signal)),
+    restartAttempted: true,
+  };
 }
 
 async function tryRebindUnhealthyAccessibilityService(

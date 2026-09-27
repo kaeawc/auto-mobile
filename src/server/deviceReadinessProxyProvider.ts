@@ -17,6 +17,10 @@ const realProvider: DeviceReadinessProxyDriverProvider = (device) => {
   return {
     resetSetupState: () => manager.resetSetupState(),
     rebindIfUnhealthy: () => manager.rebindIfUnhealthy(),
+    forceRestartProcess: () => manager.forceRestartProcess(),
+    verifyServiceReady: () =>
+      AndroidCtrlProxyClient.getInstance(device).verifyServiceReady?.(1, 0) ??
+      Promise.resolve(true),
     setup: (force, perf) => manager.setup(force, perf),
     waitForConnection: () => AndroidCtrlProxyClient.getInstance(device).waitForConnection(),
     resetConnectionBudget: () => AndroidCtrlProxyClient.getInstance(device).resetConnectionBudget(),

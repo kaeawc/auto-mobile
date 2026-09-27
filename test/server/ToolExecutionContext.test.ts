@@ -229,6 +229,64 @@ describe("ToolExecutionContext", () => {
     expect(setupCalls).toBe(2);
   });
 
+  test("health-probes an upgraded session and restarts an unresponsive proxy once", async () => {
+    const calls: string[] = [];
+    setDeviceReadinessProxyDriverProviderForTesting(() => ({
+      resetSetupState: () => {},
+      rebindIfUnhealthy: async () => {
+        calls.push("rebind");
+        return false;
+      },
+      setup: async () => ({ success: true, message: "ok" }),
+      waitForConnection: async () => {
+        calls.push("connect");
+        return true;
+      },
+      verifyServiceReady: async () => {
+        calls.push("probe");
+        return calls.filter((call) => call === "probe").length === 2;
+      },
+      forceRestartProcess: async () => {
+        calls.push("restart");
+        return true;
+      },
+      isInstalled: async () => true,
+      isVersionCompatible: async () => true,
+    }));
+    await sessionManager.createSession("upgrade-health", "device-1", "android");
+    sessionManager.setDeviceReadiness("upgrade-health", "booted");
+    await createToolExecutionContext("upgrade-health", sessionManager, devicePool, sessionOptions);
+    expect(sessionManager.getDeviceReadiness("upgrade-health")).toBe("automationReady");
+    expect(calls).toEqual(["rebind", "connect", "probe", "restart", "probe"]);
+  });
+
+  test("an upgraded session accepts a driver without optional health primitives", async () => {
+    const calls: string[] = [];
+    setDeviceReadinessProxyDriverProviderForTesting(() => ({
+      resetSetupState: () => {},
+      setup: async () => {
+        calls.push("setup");
+        return { success: true, message: "ok" };
+      },
+      waitForConnection: async () => {
+        calls.push("connect");
+        return true;
+      },
+      isInstalled: async () => true,
+      isVersionCompatible: async () => true,
+    }));
+    await sessionManager.createSession("upgrade-no-probe", "device-1", "android");
+    sessionManager.setDeviceReadiness("upgrade-no-probe", "booted");
+    await createToolExecutionContext(
+      "upgrade-no-probe",
+      sessionManager,
+      devicePool,
+      sessionOptions,
+    );
+    expect(sessionManager.getDeviceReadiness("upgrade-no-probe")).toBe("automationReady");
+    expect(calls).toEqual(["setup", "connect"]);
+  });
+
   // Issue #7541: retryability is classified by the typed `category` field
   // `AndroidCtrlProxyManager.setup` sets in its catch block, not by
   // substring-matching `message`/`error` a second time downstream. Device-

@@ -1685,10 +1685,10 @@ describe("systemTray headerless two-notification group", () => {
   });
 
   for (const [title, y] of [
-    ["Gamma", 1044],
-    ["Delta", 825],
+    ["Gamma", 1054],
+    ["Delta", 835],
   ] as const) {
-    test(`dismisses the expanded ${title} child row`, async () => {
+    test(`dismisses the real expanded headerless ${title} child row`, async () => {
       const fakeTimer = new FakeTimer();
       const fakeAdb = new SequencedFakeAdbExecutor([1000, 1000, 2000]);
       const fakeObserveScreen = new FakeObserveScreen();
@@ -1734,54 +1734,59 @@ describe("systemTray headerless two-notification group", () => {
       ).toEqual([]);
       expect(
         fakeAdb.getExecutedCommands().filter((command) => command.includes("input swipe")),
-      ).toEqual([expect.stringContaining(`shell input swipe 938 ${y} 141 ${y}`)]);
+      ).toEqual([`shell input swipe 938 ${y} 141 ${y} 300`]);
     });
   }
 
-  test("expands a collapsed group, re-matches Gamma, and swipes its child row", async () => {
-    const fakeTimer = new FakeTimer();
-    const fakeAdb = new SequencedFakeAdbExecutor([1000, 1000, 2000]);
-    const fakeObserveScreen = new FakeObserveScreen();
-    fakeObserveScreen.setObserveResult((index) =>
-      createObservation(
-        index === 0
-          ? headerlessTwoNotificationGroups.collapsed
-          : headerlessTwoNotificationGroups.expanded,
-      ),
-    );
-    const installedAppsSpy = spyOn(ListInstalledApps.prototype, "execute").mockResolvedValue([
-      "com.android.shell",
-    ]);
-    setSystemTrayDependencies({
-      timer: fakeTimer,
-      adbFactory: () => fakeAdb,
-      appLabelResolver: async () => "Shell",
-      observeScreenFactory: () => fakeObserveScreen,
-    });
-    ToolRegistry.clearTools();
-    registerInteractionTools();
-
-    try {
-      const dismiss = ToolRegistry.getTool("systemTray")!.deviceAwareHandler!(device, {
-        action: "dismiss",
-        notification: { title: "Gamma", appId: "com.android.shell" },
-        awaitTimeout: 5000,
-        platform: "android",
+  for (const [title, y] of [
+    ["Gamma", 1054],
+    ["Delta", 835],
+  ] as const) {
+    test(`expands the real collapsed group, re-matches ${title}, and swipes its child row`, async () => {
+      const fakeTimer = new FakeTimer();
+      const fakeAdb = new SequencedFakeAdbExecutor([1000, 1000, 2000]);
+      const fakeObserveScreen = new FakeObserveScreen();
+      fakeObserveScreen.setObserveResult((index) =>
+        createObservation(
+          index === 0
+            ? headerlessTwoNotificationGroups.collapsed
+            : headerlessTwoNotificationGroups.expanded,
+        ),
+      );
+      const installedAppsSpy = spyOn(ListInstalledApps.prototype, "execute").mockResolvedValue([
+        "com.android.shell",
+      ]);
+      setSystemTrayDependencies({
+        timer: fakeTimer,
+        adbFactory: () => fakeAdb,
+        appLabelResolver: async () => "Shell",
+        observeScreenFactory: () => fakeObserveScreen,
       });
-      await waitForPendingSleep(fakeTimer);
-      fakeTimer.enableAutoAdvance();
-      fakeTimer.advanceTime(EXPAND_GROUP_SETTLE_MS);
-      await dismiss;
-    } finally {
-      installedAppsSpy.mockRestore();
-    }
-    expect(
-      fakeAdb.getExecutedCommands().filter((command) => command.includes("input tap")),
-    ).toContain("shell input tap 964 641");
-    expect(
-      fakeAdb.getExecutedCommands().filter((command) => command.includes("input swipe")),
-    ).toEqual([expect.stringContaining("shell input swipe 938 1044 141 1044")]);
-  });
+      ToolRegistry.clearTools();
+      registerInteractionTools();
+
+      try {
+        const dismiss = ToolRegistry.getTool("systemTray")!.deviceAwareHandler!(device, {
+          action: "dismiss",
+          notification: { title, appId: "com.android.shell" },
+          awaitTimeout: 5000,
+          platform: "android",
+        });
+        await waitForPendingSleep(fakeTimer);
+        fakeTimer.enableAutoAdvance();
+        fakeTimer.advanceTime(EXPAND_GROUP_SETTLE_MS);
+        await dismiss;
+      } finally {
+        installedAppsSpy.mockRestore();
+      }
+      expect(
+        fakeAdb.getExecutedCommands().filter((command) => command.includes("input tap")),
+      ).toEqual(["shell input tap 945 651"]);
+      expect(
+        fakeAdb.getExecutedCommands().filter((command) => command.includes("input swipe")),
+      ).toEqual([`shell input swipe 938 ${y} 141 ${y} 300`]);
+    });
+  }
 });
 
 describe("systemTray grouped notifications", () => {

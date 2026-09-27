@@ -683,8 +683,7 @@ export const getNotificationGroupChildRows = (groupNode: any): any[] => {
     const resourceId = String(props?.["resource-id"] ?? props?.resourceId ?? "");
     return (
       !matchesNotificationResourceId(resourceId, "notification_header") &&
-      (resourceId === `${SYSTEM_TRAY_PACKAGE}:id/expandableNotificationRow` ||
-        nodeHasNotificationRowHint(child))
+      nodeHasNotificationRowHint(child)
     );
   });
 };
@@ -854,16 +853,11 @@ const collectNotificationCandidates = (
     }
     visited.add(node);
 
-    // CtrlProxy omits package metadata on some SystemUI rows. The children
-    // container identifies their parent group even without a row hint.
     if (nodeIsNotificationGroup(node)) {
       visitNotificationGroupChildren(node, depth);
       return;
     }
-    if (
-      nodeHasNotificationRowHint(node) ||
-      (groupNode && getNotificationGroupChildRows(groupNode).includes(node))
-    ) {
+    if (nodeHasNotificationRowHint(node)) {
       const element = parser.parseNodeBounds(node) ?? undefined;
       candidates.push({ node, depth, element, groupNode });
       return;

@@ -519,7 +519,7 @@ describe("systemTray list", () => {
     setup([page(group)]);
     expect((await list()).notifications).toMatchObject([{ title: "inside", inGroup: true }]);
   });
-  test("lists both templates in the expanded two-notification group", async () => {
+  test("lists both real headerless children and retains the neighboring row as unattributed", async () => {
     const fixture = headerlessTwoNotificationGroups.expanded!;
     setup([{ ...page(), viewHierarchy: fixture }], false);
     const result = await listSystemTrayNotifications(device, "com.android.shell", "Shell", 5000);
@@ -527,6 +527,7 @@ describe("systemTray list", () => {
       { title: "Delta", inGroup: true },
       { title: "Gamma", inGroup: true },
     ]);
+    expect(result.unattributedRows).toBe(1);
   });
   test("retains identical notifications on the same page", async () => {
     setup([page(row("same"), row("same"))]);
@@ -1152,10 +1153,12 @@ describe("systemTray clearAll dumpsys ownership", () => {
     }
   });
 
-  test("clearAll counts both templates in the expanded two-notification group", async () => {
+  test("clearAll counts both real headerless children beside an unrelated row", async () => {
     const fixture = headerlessTwoNotificationGroups.expanded!;
     const { adb, timer } = setup([{ ...page(), viewHierarchy: fixture }, page()], false);
     adb.setCommandResponseSequence("dumpsys notification", [
+      execResult(dumpsys(record(1, "Delta", "delta body"), record(2, "Gamma", "gamma body"))),
+      execResult(dumpsys(record(1, "Delta", "delta body"), record(2, "Gamma", "gamma body"))),
       execResult(dumpsys(record(1, "Delta", "delta body"), record(2, "Gamma", "gamma body"))),
       execResult(api36EmptyDumpsys()),
     ]);
@@ -1172,6 +1175,9 @@ describe("systemTray clearAll dumpsys ownership", () => {
         remainingCount: 0,
         success: true,
       });
+      expect(
+        adb.getExecutedCommands().filter((command) => command.includes("input swipe")),
+      ).toEqual([expect.stringMatching(/^shell input swipe 938 (835|1054) 141 \1 300$/)]);
     } finally {
       installedAppsSpy.mockRestore();
     }

@@ -224,6 +224,13 @@ wiring_requires_yq() {
   [[ "$bats_unit" != *"AUTOMOBILE_BATS_SERIAL_ONLY"* ]]
 }
 
+@test "host integration job evaluates after the fast-validation fan-in" {
+  local host
+  host="$(job_block node-host-integration-tests)"
+  [[ "$host" == *"always() && needs.detect-changes.result == 'success' && needs.fast-validation.result == 'success'"* ]]
+  [[ "$host" == *"needs.detect-changes.outputs.docs_only != 'true'"* ]]
+}
+
 @test "PR TypeScript coverage has headroom beyond its wall-clock budget" {
   wiring_requires_yq
   run yq -r '.jobs."ts-code-coverage"."timeout-minutes" > 12' "$WF"

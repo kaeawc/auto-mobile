@@ -36,6 +36,16 @@ export type SendKeysTypingMode = (typeof SEND_KEYS_TYPING_MODES)[number];
 export type ResolvedSendKeysTypingMode = Exclude<SendKeysTypingMode, "auto"> | "xcuiTypeText";
 type AndroidSendKeysTypingMode = Exclude<ResolvedSendKeysTypingMode, "xcuiTypeText">;
 
+function isPrintableAscii(text: string): boolean {
+  for (const char of text) {
+    const codePoint = char.codePointAt(0)!;
+    if (codePoint < 0x20 || codePoint > 0x7e) {
+      return false;
+    }
+  }
+  return true;
+}
+
 function getAutoImeFallback(
   operation: SendKeysOperation,
   requestedMode: SendKeysTypingMode,
@@ -236,9 +246,9 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     };
 
     try {
-      const profileError = this.validateKeyboardProfile(command);
-      if (profileError) {
-        return { ...baseResult, success: false, error: profileError };
+      const validationError = this.validateTypeCommand(command);
+      if (validationError) {
+        return { ...baseResult, success: false, error: validationError };
       }
       const result: TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode } =
         this.device.platform === "ios"
@@ -263,6 +273,21 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       logger.warn("[SendKeys] Text command failed", error);
       return { ...baseResult, success: false, error: errorMessage(error) };
     }
+  }
+
+  private validateTypeCommand(command: SendKeysTypeCommand): string | null {
+    const profileError = this.validateKeyboardProfile(command);
+    if (profileError) {
+      return profileError;
+    }
+    if (
+      this.device.platform === "android" &&
+      command.mode === "imeKeyEvents" &&
+      !isPrintableAscii(command.text)
+    ) {
+      return "imeKeyEvents accepts printable ASCII (U+0020–U+007E) only; use mode: ime for other text.";
+    }
+    return null;
   }
 
   private validateKeyboardProfile(command: SendKeysTypeCommand): string | null {

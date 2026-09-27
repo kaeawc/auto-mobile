@@ -2065,7 +2065,11 @@ const resolveClearAllAttributionLabel = async (
 // Tool Registration
 // ============================================================================
 
-async function handleInstalledImeAction(device: BootedDevice, args: KeyboardArgs) {
+async function handleInstalledImeAction(
+  device: BootedDevice,
+  args: KeyboardArgs,
+  signal?: AbortSignal,
+) {
   if (device.platform !== "android") {
     throw new ActionableError("Installed IME actions are Android-only; select an Android device.");
   }
@@ -2074,17 +2078,17 @@ async function handleInstalledImeAction(device: BootedDevice, args: KeyboardArgs
       throw new ActionableError("tapImeKey requires imeId and key.");
     }
     return createJSONToolResponse(
-      await createInstalledImeKeySession(device).tapKey(args.imeId, args.key),
+      await createInstalledImeKeySession(device).tapKey(args.imeId, args.key, signal),
     );
   }
   const catalog = new AndroidImeCatalog(defaultAdbClientFactory.create(device), device.deviceId);
   if (args.action === "listImes") {
-    return createJSONToolResponse(await catalog.list());
+    return createJSONToolResponse(await catalog.list(signal));
   }
   if (!args.imeId) {
     throw new ActionableError("keyboard setIme requires imeId from listImes.");
   }
-  return createJSONToolResponse(await catalog.select(args.imeId));
+  return createJSONToolResponse(await catalog.select(args.imeId, signal));
 }
 
 export function registerInteractionTools() {
@@ -2583,7 +2587,12 @@ export function registerInteractionTools() {
   };
 
   // Keyboard handler
-  const keyboardHandler = async (device: BootedDevice, args: KeyboardArgs) => {
+  const keyboardHandler = async (
+    device: BootedDevice,
+    args: KeyboardArgs,
+    _progress?: ProgressCallback,
+    signal?: AbortSignal,
+  ) => {
     try {
       if (args.action === "setProfile") {
         return createJSONToolResponse(await setKeyboardProfileForTool(device, args.profile));
@@ -2592,7 +2601,7 @@ export function registerInteractionTools() {
         return createJSONToolResponse(await listKeyboardProfilesForTool(device));
       }
       if (args.action === "listImes" || args.action === "setIme" || args.action === "tapImeKey") {
-        return handleInstalledImeAction(device, args);
+        return handleInstalledImeAction(device, args, signal);
       }
       const keyboard = new Keyboard(device);
       const result = await keyboard.execute(args.action);

@@ -363,6 +363,75 @@ describe("DefaultSendKeysCommandExecutor", () => {
     expect(adb.getExecutedCommands()).toEqual([]);
   });
 
+  test.each(["é", "😀", "a😀", "line\nbreak", "a\tb", "ASCII then é"])(
+    "imeKeyEvents replacement rejects %j before any mutation",
+    async (text) => {
+      const adb = new FakeAdbExecutor();
+      const textClient = createTextClient();
+      const executor = new DefaultSendKeysCommandExecutor(
+        androidDevice,
+        createAdbFactory(adb),
+        createObserver(focusedAndroidObservation("original")),
+        { textClient: textClient.client },
+      );
+      const result = await executor.type({
+        action: "type",
+        text,
+        operation: "replace",
+        mode: "imeKeyEvents",
+      });
+      expect(result).toMatchObject({
+        success: false,
+        error: expect.stringContaining("printable ASCII"),
+      });
+      expect(result.partialApplication).toBeUndefined();
+      expect(textClient.calls).toEqual([]);
+      expect(adb.getExecutedCommands()).toEqual([]);
+    },
+  );
+
+  test("imeKeyEvents ASCII and empty replacements still commit and clear", async () => {
+    for (const text of ["Ab!", ""]) {
+      const adb = new FakeAdbExecutor();
+      adb.setCommandResponseSequence("shell settings get secure default_input_method", [
+        { stdout: priorImeId, stderr: "" },
+        { stdout: commitImeId, stderr: "" },
+      ]);
+      const textClient = createTextClient();
+      const executor = new DefaultSendKeysCommandExecutor(
+        androidDevice,
+        createAdbFactory(adb),
+        createObserver(focusedAndroidObservation("original")),
+        { textClient: textClient.client },
+      );
+      expect(
+        await executor.type({ action: "type", text, operation: "replace", mode: "imeKeyEvents" }),
+      ).toMatchObject({ success: true });
+      expect(textClient.calls).toContain("clear");
+      expect(textClient.commitDeliveries).toEqual(["keyEvents"]);
+    }
+  });
+
+  test("ime mode still accepts Unicode replacement text", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponseSequence("shell settings get secure default_input_method", [
+      { stdout: priorImeId, stderr: "" },
+      { stdout: commitImeId, stderr: "" },
+    ]);
+    const textClient = createTextClient();
+    const executor = new DefaultSendKeysCommandExecutor(
+      androidDevice,
+      createAdbFactory(adb),
+      createObserver(focusedAndroidObservation("original")),
+      { textClient: textClient.client },
+    );
+    expect(
+      await executor.type({ action: "type", text: "a😀", operation: "replace", mode: "ime" }),
+    ).toMatchObject({ success: true });
+    expect(textClient.calls).toContain("clear");
+    expect(textClient.commitViaImeCalls[0]?.text).toBe("a😀");
+  });
+
   test("explicit modes take precedence over trigger text and do not auto-fallback", async () => {
     const explicitImeClient = createTextClient({ supportsImeCommit: false });
     const explicitImeExecutor = new DefaultSendKeysCommandExecutor(

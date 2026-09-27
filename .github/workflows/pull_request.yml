@@ -2296,6 +2296,12 @@ jobs:
         run: |
           ./scripts/ios/navigation-graph-sdk-event-integration.sh "${{ steps.ctrlproxy-simulator.outputs.simulator_udid }}"
 
+      - name: "Stop AutoMobile daemon before odd-width boot"
+        if: ${{ !cancelled() && steps.build-ctrlproxy.outcome == 'success' && steps.ctrlproxy-simulator.outcome == 'success' }}
+        run: |
+          source ./scripts/ios/run_with_timeout.sh
+          run_with_timeout 20 auto-mobile --daemon stop || true
+
       # The main simulator is no longer needed after navigation. Shut it down
       # before starting iPhone 15: the second boot correlated with simctl list
       # stalls and exhaustion of the odd-width step's 12-minute budget (#7771).

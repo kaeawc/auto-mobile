@@ -62,10 +62,15 @@ function selectedNativeId(
   resolution: ElementResolution,
   options: SetAccessibilityFocusOptions,
 ): string | undefined {
-  const selectedText = options.text ?? options.contentDesc;
-  return selectedText
-    ? matchedTextNativeId(resolution, selectedText, !!options.contentDesc)
-    : resolution.chosen?.nativeId;
+  if (options.resourceId) {
+    return resolution.chosen?.nativeId;
+  }
+  if (options.text) {
+    return matchedTextNativeId(resolution, options.text);
+  }
+  return options.contentDesc
+    ? matchedTextNativeId(resolution, options.contentDesc, true)
+    : undefined;
 }
 
 export interface SetAccessibilityFocusDependencies {
@@ -153,7 +158,7 @@ export class SetAccessibilityFocus {
     const resolution = this.resolver.resolve(
       { id: String(hierarchy.updatedAt ?? "accessibility-focus"), nodes },
       selector,
-      options.text || options.contentDesc
+      !options.resourceId && (options.text || options.contentDesc)
         ? { action: "inspect" }
         : { action: "accessibility-focus", requireResourceId: true },
     );

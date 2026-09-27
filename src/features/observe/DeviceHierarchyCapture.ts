@@ -67,7 +67,10 @@ export function createDeviceHierarchyCapture(
     dependencies.syncClientFactory?.(device) ??
     ((device.platform === "ios"
       ? IOSCtrlProxyClient.getInstance(device)
-      : AndroidCtrlProxyClient.getInstance(device)) as HierarchySyncClient);
+      : AndroidCtrlProxyClient.getInstance(
+          device,
+          dependencies.adbFactory,
+        )) as HierarchySyncClient);
   const reader = new ViewHierarchyCaptureReader(
     {
       getViewHierarchy: (...args) =>

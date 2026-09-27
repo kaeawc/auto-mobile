@@ -1,5 +1,7 @@
 import { Mutex } from "async-mutex";
 
+type ImeLockRelease = Awaited<ReturnType<Mutex["acquire"]>>;
+
 // IME selection is global to an Android device. Share this lock between temporary typing
 // sessions and persistent keyboard selection so neither can restore over the other.
 const imeLocks = new Map<string, Mutex>();
@@ -14,7 +16,32 @@ export function clearAndroidImeQuarantine(deviceId: string): void {
   unsafeImeDevices.delete(deviceId);
 }
 
-export function withAndroidImeLock<T>(
+async function acquireImeLock(lock: Mutex, signal?: AbortSignal): Promise<ImeLockRelease> {
+  signal?.throwIfAborted();
+  if (!signal) {
+    return lock.acquire();
+  }
+  return new Promise<ImeLockRelease>((resolve, reject) => {
+    const onAbort = () => reject(signal.reason);
+    signal.addEventListener("abort", onAbort, { once: true });
+    void lock.acquire().then(
+      (release) => {
+        signal.removeEventListener("abort", onAbort);
+        if (signal.aborted) {
+          release();
+          return;
+        }
+        resolve(release);
+      },
+      (error: unknown) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      },
+    );
+  });
+}
+
+export async function withAndroidImeLock<T>(
   deviceId: string,
   action: () => Promise<T>,
   signal?: AbortSignal,
@@ -24,13 +51,16 @@ export function withAndroidImeLock<T>(
     lock = new Mutex();
     imeLocks.set(deviceId, lock);
   }
-  return lock.runExclusive(() => {
+  const release = await acquireImeLock(lock, signal);
+  try {
     if (unsafeImeDevices.has(deviceId)) {
       throw new Error(
         "IME state is unknown after an unacknowledged cancellation; restart AutoMobile before changing keyboards.",
       );
     }
     signal?.throwIfAborted();
-    return action();
-  });
+    return await action();
+  } finally {
+    release();
+  }
 }

@@ -146,6 +146,7 @@ interface ChooserMatch {
 const POST_TAP_VERIFY_BUDGET_MS = 200;
 const POST_TAP_VERIFY_INTERVAL_MS = 50;
 const CHOOSER_SCAN_PAGES = 4;
+const CHOOSER_ANCHOR_DELTA_TOLERANCE_PX = 2;
 // Bare content-derived IDs denote rows unique within a capture. Ordinal IDs
 // and resource-backed IDs can be reassigned when a list scrolls or recycles.
 const UNIQUE_CHOOSER_VIEW_ID = new RegExp(
@@ -1103,6 +1104,9 @@ export class DeepLinkManager implements DeepLinkManager {
       return undefined;
     }
     deltas.sort((a, b) => a - b);
+    if (deltas[deltas.length - 1] - deltas[0] > CHOOSER_ANCHOR_DELTA_TOLERANCE_PX) {
+      return undefined;
+    }
     const middle = Math.floor(deltas.length / 2);
     return deltas.length % 2 === 1 ? deltas[middle] : (deltas[middle - 1] + deltas[middle]) / 2;
   }

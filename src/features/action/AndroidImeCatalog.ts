@@ -1,6 +1,10 @@
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { withAndroidImeLock } from "./androidImeLock";
 
+/** `ime set` normally completes well under 1s; bound the post-dispatch
+ * window while the per-device IME lock is held. */
+const IME_SET_COMMAND_TIMEOUT_MS = 5_000;
+
 export interface InstalledIme {
   id: string;
   enabled: boolean;
@@ -63,6 +67,7 @@ export class AndroidImeCatalog {
     try {
       result = await this.adb.execute(["shell", "ime", "set", id], {
         signal: commandController?.signal,
+        timeoutMs: IME_SET_COMMAND_TIMEOUT_MS,
         waitForProcessSettlementAfterAbort: true,
         beforeDispatch: async () => {
           signal?.throwIfAborted();

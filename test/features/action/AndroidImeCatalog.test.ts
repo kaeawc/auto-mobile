@@ -52,6 +52,9 @@ test("select uses component argv and verifies the resulting active IME", async (
     adb.getCommandCalls().find((call) => call.command === `shell ime set ${samsung}`)
       ?.waitForProcessSettlementAfterAbort,
   ).toBe(true);
+  expect(
+    adb.getCommandCalls().find((call) => call.command === `shell ime set ${samsung}`)?.timeoutMs,
+  ).toBe(5_000);
 });
 
 test("select reports a failed postcondition instead of claiming readiness", async () => {

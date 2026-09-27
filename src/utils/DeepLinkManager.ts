@@ -20,6 +20,7 @@ import type { ElementParser } from "./interfaces/ElementParser";
 import type { ElementGeometry } from "./interfaces/ElementGeometry";
 import { DefaultElementParser } from "../features/utility/ElementParser";
 import { DefaultElementGeometry } from "../features/utility/ElementGeometry";
+import { ViewHierarchy } from "../features/observe/ViewHierarchy";
 import { SimCtlClient } from "./ios-cmdline-tools/SimCtlClient";
 import { isIosSimulatorUdid } from "./ios-cmdline-tools/iosDeviceType";
 import { PlistClient, type PlistReader } from "./ios-cmdline-tools/PlistClient";
@@ -114,12 +115,19 @@ export interface DeepLinkManager {
 
 export interface ChooserAppMetadata {
   getLabel(device: BootedDevice, packageName: string): Promise<string | null>;
+  getFreshHierarchy(
+    device: BootedDevice,
+    adbFactory: AdbClientFactory,
+  ): Promise<ViewHierarchyResult>;
 }
 
 const defaultChooserAppMetadata: ChooserAppMetadata = {
   async getLabel(device, packageName) {
     const { resolveAppLabel } = await import("../server/systemTrayHelpers");
     return resolveAppLabel(device, packageName);
+  },
+  async getFreshHierarchy(device, adbFactory) {
+    return new ViewHierarchy(device, adbFactory).getViewHierarchy(undefined, undefined, true);
   },
 };
 
@@ -752,6 +760,7 @@ export class DeepLinkManager implements DeepLinkManager {
     nodes: any[],
     appPackage: string,
     hierarchyPackage?: string,
+    resolvedLabel?: string | null,
   ): Promise<any> {
     const packageRows = new Set<any>();
     const labelRows = new Map<any, Set<string>>();
@@ -799,18 +808,51 @@ export class DeepLinkManager implements DeepLinkManager {
         labelRows.set(row, labels);
       });
     }
-    let candidates = [...packageRows];
+    const candidates = [...packageRows];
     if (candidates.length === 0 && this.device) {
-      const label = await (this.chooserMetadata ?? defaultChooserAppMetadata).getLabel(
-        this.device,
+      return this.findChooserLabelFallback(
         appPackage,
+        labelRows,
+        rowsWithPackageMetadata,
+        resolvedLabel,
       );
-      if (label) {
-        candidates = [...labelRows]
-          .filter(([row, labels]) => !rowsWithPackageMetadata.has(row) && labels.has(label))
-          .map(([row]) => row);
-      }
     }
+    return this.selectUniqueChooserRow(candidates, labelRows, appPackage);
+  }
+
+  private async findChooserLabelFallback(
+    appPackage: string,
+    labelRows: Map<any, Set<string>>,
+    rowsWithPackageMetadata: Set<any>,
+    resolvedLabel: string | null | undefined,
+  ): Promise<any> {
+    if (resolvedLabel === undefined) {
+      const metadata = this.chooserMetadata ?? defaultChooserAppMetadata;
+      const label = await metadata.getLabel(this.device!, appPackage);
+      const freshHierarchy = await metadata.getFreshHierarchy(this.device!, this.adbFactory);
+      if (!this.detectIntentChooser(freshHierarchy)) {
+        throw new Error(`Intent chooser disappeared while resolving ${appPackage}.`);
+      }
+      return this.findAppInChooser(
+        this.parser.extractRootNodes(freshHierarchy),
+        appPackage,
+        freshHierarchy.packageName,
+        label,
+      );
+    }
+    const candidates = resolvedLabel
+      ? [...labelRows]
+          .filter(([row, labels]) => !rowsWithPackageMetadata.has(row) && labels.has(resolvedLabel))
+          .map(([row]) => row)
+      : [];
+    return this.selectUniqueChooserRow(candidates, labelRows, appPackage);
+  }
+
+  private selectUniqueChooserRow(
+    candidates: any[],
+    labelRows: Map<any, Set<string>>,
+    appPackage: string,
+  ): any {
     if (candidates.length > 1) {
       const descriptions = candidates.map((row, index) => {
         const properties = this.parser.extractNodeProperties(row);

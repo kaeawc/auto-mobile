@@ -2,7 +2,14 @@ import { describe, expect, test } from "bun:test";
 import { DeepLinkManager, type ChooserAppMetadata } from "../../src/utils/DeepLinkManager";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 
-const metadata = (label: string | null): ChooserAppMetadata => ({ getLabel: async () => label });
+const metadata = (
+  label: string | null,
+  nodes: unknown[],
+  packageName?: string,
+): ChooserAppMetadata => ({
+  getLabel: async () => label,
+  getFreshHierarchy: async () => ({ ...hierarchy(nodes), packageName }) as any,
+});
 
 const target = "com.example.app";
 const row = (packageName: string, top: number) => ({
@@ -29,7 +36,7 @@ async function choose(nodes: unknown[], label: string | null = null) {
     null,
     undefined,
     undefined,
-    metadata(label),
+    metadata(label, nodes),
   );
   const result = await manager.handleIntentChooser(hierarchy(nodes) as any, "custom", target);
   return { result, commands: adb.getExecutedCommands() };
@@ -73,6 +80,25 @@ describe("custom intent chooser label fallback", () => {
     );
     expect(result.success).toBe(true);
     expect(commands).toEqual(["shell input tap 50 120"]);
+  });
+  test("rematches a moved row after the label lookup before tapping", async () => {
+    const adb = new FakeAdbExecutor();
+    const manager = new DeepLinkManager(
+      { platform: "android", deviceId: "fake", name: "fake" },
+      adb,
+      null,
+      null,
+      undefined,
+      undefined,
+      metadata("Example", [labelRow("Example", 200), labelRow("Example Beta", 0)]),
+    );
+    const result = await manager.handleIntentChooser(
+      hierarchy([labelRow("Example", 100), labelRow("Example Beta", 0)]) as any,
+      "custom",
+      target,
+    );
+    expect(result.success).toBe(true);
+    expect(adb.getExecutedCommands()).toEqual(["shell input tap 50 220"]);
   });
   test("falls back to a label-only row when another row carries package metadata", async () => {
     const { result, commands } = await choose(
@@ -154,6 +180,7 @@ test("rejects an exact clickable row without usable bounds", async () => {
 
 test("excludes a captured OEM chooser host from represented app metadata", async () => {
   const adb = new FakeAdbExecutor();
+  const host = "com.vendor.intentresolver";
   const manager = new DeepLinkManager(
     { platform: "android", deviceId: "fake", name: "fake" },
     adb,
@@ -161,9 +188,21 @@ test("excludes a captured OEM chooser host from represented app metadata", async
     null,
     undefined,
     undefined,
-    metadata("Example"),
+    metadata(
+      "Example",
+      [
+        {
+          ...row(host, 0),
+          node: [{ package: host, "resource-id": `${host}:id/title`, text: "Example Beta" }],
+        },
+        {
+          ...row(host, 100),
+          node: [{ package: host, "resource-id": `${host}:id/title`, text: "Example" }],
+        },
+      ],
+      host,
+    ),
   );
-  const host = "com.vendor.intentresolver";
   const result = await manager.handleIntentChooser(
     {
       hierarchy: {

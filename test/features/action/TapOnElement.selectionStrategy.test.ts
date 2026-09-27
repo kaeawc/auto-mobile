@@ -24,10 +24,18 @@ async function executeFocus(
   postTapHierarchy: ViewHierarchyResult = { hierarchy: { node: {} } },
   elementId?: string,
   matchedElement?: Element,
+  index?: number,
+  testTag?: string,
+  postSelectedIndex?: number,
 ) {
   const fakeSelector = new FakeElementSelector(element as any);
-  if (matchedElement) {
-    fakeSelector.setNextSelection({ element: element as Element, matchedElement });
+  if (matchedElement || index !== undefined) {
+    fakeSelector.setNextSelection({
+      element: element as Element,
+      matchedElement,
+      indexInMatches: index,
+      totalMatches: index === undefined ? 1 : index + 1,
+    });
   }
   let tapped = false;
   const tapOnElement = new TapOnElement(
@@ -50,7 +58,29 @@ async function executeFocus(
   const observation = { viewHierarchy: postTapHierarchy };
   (tapOnElement as any).observedInteraction = async (
     action: (currentObservation: typeof observation) => Promise<Record<string, unknown>>,
-  ) => ({ ...(await action(observation)), observation });
+  ) => {
+    const actionResult = await action({ viewHierarchy: { hierarchy: { node: {} } } });
+    if (index !== undefined || postSelectedIndex !== undefined) {
+      const resolvedIndex = index ?? postSelectedIndex ?? 0;
+      const matches = new SearchableHierarchy()
+        .project(postTapHierarchy)
+        .filter(
+          (node) =>
+            node.element &&
+            (elementId
+              ? node.element["resource-id"] === elementId
+              : testTag
+                ? node.element["test-tag"] === testTag
+                : node.element.text === element.text),
+        );
+      fakeSelector.setNextSelection({
+        element: matches[resolvedIndex]?.element ?? null,
+        indexInMatches: resolvedIndex,
+        totalMatches: matches.length,
+      });
+    }
+    return { ...actionResult, observation };
+  };
   (tapOnElement as any).executeAndroidTap = async () => {
     tapped = true;
   };
@@ -64,7 +94,11 @@ async function executeFocus(
   (tapOnElement as any).enforceFreshnessConsistencyWithEffect = () => {};
 
   const result = await tapOnElement.execute(
-    elementId ? { elementId, action: "focus" } : { text: "Phone", action: "focus" },
+    elementId
+      ? { elementId, index, action: "focus" }
+      : testTag
+        ? { testTag, index, action: "focus" }
+        : { text: "Phone", index, action: "focus" },
   );
   return { result, tapped };
 }
@@ -177,6 +211,173 @@ describe("TapOnElement selectionStrategy", () => {
 
     expect(tapped).toBe(false);
     expect(result.wasAlreadyFocused).toBe(true);
+    expect(result.focusVerified).toBe(true);
+    expect(result.success).toBe(true);
+  });
+
+  test.each(["resource ID", "test tag", "text"] as const)(
+    "rejects focus on the first occurrence after tapping the second field with the same %s (#7787)",
+    async (identifier) => {
+      const identity =
+        identifier === "resource ID"
+          ? { "resource-id": "com.example:id/phone" }
+          : { "resource-id": undefined, "test-tag": "shared" };
+      const first = editableElement({ ...identity, focused: true });
+      const second = editableElement({
+        ...identity,
+        focused: false,
+        bounds: { left: 0, top: 80, right: 100, bottom: 120 },
+      });
+      const { result, tapped } = await executeFocus(
+        second,
+        { hierarchy: { node: [first, second] } },
+        identifier === "resource ID" ? "com.example:id/phone" : undefined,
+        undefined,
+        1,
+        identifier === "test tag" ? "shared" : undefined,
+      );
+
+      expect(tapped).toBe(true);
+      expect(result.selectedElement?.indexInMatches).toBe(1);
+      expect(result.focusVerified).toBe(false);
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Failed to confirm focus");
+    },
+  );
+
+  test("verifies the selected second occurrence when it actually receives focus (#7787)", async () => {
+    const first = editableElement({ focused: false });
+    const second = editableElement({
+      focused: false,
+      bounds: { left: 0, top: 80, right: 100, bottom: 120 },
+    });
+    const { result, tapped } = await executeFocus(
+      second,
+      { hierarchy: { node: [first, { ...second, focused: true }] } },
+      "com.example:id/phone",
+      undefined,
+      1,
+    );
+
+    expect(tapped).toBe(true);
+    expect(result.focusVerified).toBe(true);
+    expect(result.success).toBe(true);
+  });
+
+  test("verifies the selected shared-ID occurrence after it shifts vertically (#7787)", async () => {
+    const first = editableElement({ focused: false });
+    const second = editableElement({
+      focused: false,
+      bounds: { left: 0, top: 480, right: 100, bottom: 520 },
+    });
+    const shifted = {
+      ...second,
+      focused: true,
+      bounds: { left: 0, top: 80, right: 100, bottom: 140 },
+    };
+    const { result, tapped } = await executeFocus(
+      second,
+      { hierarchy: { node: [first, shifted] } },
+      "com.example:id/phone",
+      undefined,
+      1,
+    );
+
+    expect(tapped).toBe(true);
+    expect(result.focusVerified).toBe(true);
+    expect(result.success).toBe(true);
+  });
+
+  test.each([false, true])(
+    "checks the selected shared-ID occurrence without an explicit index (focused: %s)",
+    async (selectedFocused) => {
+      const first = editableElement({
+        bounds: { left: 0, top: 480, right: 100, bottom: 520 },
+        focused: false,
+      });
+      const postFirst = {
+        ...first,
+        bounds: { left: 0, top: 80, right: 100, bottom: 140 },
+        focused: selectedFocused,
+      };
+      const second = editableElement({
+        bounds: { left: 0, top: 180, right: 100, bottom: 220 },
+        focused: !selectedFocused,
+      });
+      const { result } = await executeFocus(
+        first,
+        { hierarchy: { node: [postFirst, second] } },
+        "com.example:id/phone",
+        undefined,
+        undefined,
+        undefined,
+        0,
+      );
+
+      expect(result.focusVerified).toBe(selectedFocused);
+      expect(result.success).toBe(selectedFocused);
+    },
+  );
+
+  test("verifies a uniquely identified field after it moves up and grows on focus", async () => {
+    const before = editableElement({
+      bounds: { left: 0, top: 480, right: 100, bottom: 520 },
+      focused: false,
+    });
+    const after = {
+      ...before,
+      bounds: { left: 0, top: 80, right: 100, bottom: 140 },
+      focused: true,
+    };
+    const otherFocused = editableElement({
+      "resource-id": "com.example:id/search",
+      text: "Search",
+      bounds: { left: 0, top: 160, right: 100, bottom: 200 },
+      focused: true,
+    });
+    const { result, tapped } = await executeFocus(
+      before,
+      { hierarchy: { node: [after, otherFocused] } },
+      "com.example:id/phone",
+    );
+
+    expect(tapped).toBe(true);
+    expect(result.focusVerified).toBe(true);
+    expect(result.success).toBe(true);
+  });
+
+  test("verifies a unique Compose test tag after a 400px shift, growth, and s2 ID churn", async () => {
+    const before = editableElement({
+      "resource-id": undefined,
+      "test-tag": "email-input",
+      "view-id": "s2-before",
+      bounds: { left: 0, top: 480, right: 100, bottom: 520 },
+      focused: false,
+    });
+    const after = {
+      ...before,
+      "view-id": "s2-after",
+      bounds: { left: 0, top: 80, right: 100, bottom: 140 },
+      focused: true,
+    };
+    const otherFocused = editableElement({
+      "resource-id": undefined,
+      "test-tag": "search-input",
+      "view-id": "s2-search",
+      text: "Search",
+      bounds: { left: 0, top: 160, right: 100, bottom: 200 },
+      focused: true,
+    });
+    const { result, tapped } = await executeFocus(
+      before,
+      { hierarchy: { node: [after, otherFocused] } },
+      undefined,
+      undefined,
+      undefined,
+      "email-input",
+    );
+
+    expect(tapped).toBe(true);
     expect(result.focusVerified).toBe(true);
     expect(result.success).toBe(true);
   });

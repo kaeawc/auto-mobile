@@ -440,6 +440,11 @@ export class VideoStreamSocketServer extends BaseSocketServer {
       if (this.closed) {
         throw new ActionableError("Video stream server is closed");
       }
+      if (socket.destroyed) {
+        throw new ActionableError(
+          `Video stream subscriber disconnected while stopping ${deviceId}`,
+        );
+      }
     }
     const existing = this.captures.get(deviceId);
     if (existing) {
@@ -633,7 +638,11 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     socket: Socket,
     waitForKeyFrame: boolean,
   ): void {
-    if (socket.destroyed || !capture.pendingSubscribers.delete(socket)) {
+    if (socket.destroyed) {
+      capture.pendingSubscribers.delete(socket);
+      return;
+    }
+    if (!capture.pendingSubscribers.delete(socket)) {
       return;
     }
     capture.subscribers.add(socket);

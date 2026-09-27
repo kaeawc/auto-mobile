@@ -1140,6 +1140,42 @@ describe("VideoStreamSocketServer", () => {
     expect(h.server.activeDeviceIds()).toEqual([DEVICE.deviceId]);
   });
 
+  test("a disconnected attach waiting for stop cannot strand a replacement capture", async () => {
+    const fakeTimer = new FakeTimer();
+    let resolveCalls = 0;
+    const h = await startHarness({ timer: fakeTimer, onResolveDevice: () => resolveCalls++ });
+    const first = await subscribe(h.socketPath);
+    let releaseStop: (() => void) | undefined;
+    h.sources[0].stopGate = new Promise<void>((resolve) => {
+      releaseStop = resolve;
+    });
+
+    first.socket.destroy();
+    await waitFor(() => h.server.subscriberCount(DEVICE.deviceId) === 0);
+    fakeTimer.advanceTime(3_000);
+    expect(h.sources[0].stopped).toBe(true);
+
+    const disconnected = new net.Socket();
+    await connectBounded(disconnected, h.socketPath);
+    disconnected.write(`${JSON.stringify({ action: "subscribe", deviceId: DEVICE.deviceId })}\n`);
+    await waitFor(() => resolveCalls === 2);
+    disconnected.destroy();
+    const remainingRequest = subscribe(h.socketPath);
+    await waitFor(() => resolveCalls === 3);
+
+    releaseStop?.();
+    const remaining = await remainingRequest;
+    expect(remaining.ack.success).toBe(true);
+    remaining.socket.destroy();
+    await waitFor(() => h.server.subscriberCount(DEVICE.deviceId) === 0);
+
+    expect(h.server.subscriberCount(DEVICE.deviceId)).toBe(0);
+    expect(fakeTimer.getPendingTimeouts()).toContain(3_000);
+    fakeTimer.advanceTime(3_000);
+    await waitFor(() => h.server.activeDeviceIds().length === 0);
+    expect(h.sources[1].stopped).toBe(true);
+  });
+
   test("explicit server shutdown stops immediately without waiting for the idle grace", async () => {
     const fakeTimer = new FakeTimer();
     const h = await startHarness({ timer: fakeTimer });

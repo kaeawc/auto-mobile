@@ -102,6 +102,27 @@ describe("TapAtCoordinate", () => {
     expect(androidDispatches).toEqual([{ x: 1079, y: 500, frameContext: "frame-123" }]);
   });
 
+  test("reports the clamped Android pixel when dispatch fails at the screen edge", async () => {
+    const dispatched: Array<{ x: number; y: number }> = [];
+    const client: CoordinateTapClient = {
+      requestTapCoordinates: async (x, y) => {
+        dispatched.push({ x, y });
+        throw new Error("native tap failed");
+      },
+    };
+    const { tapAt } = createAndroidTapAtWithClient([observation(1080, 2400)], client);
+
+    const result = await tapAt.execute({ x: 1079.999, y: 2399.999 });
+
+    expect(dispatched).toEqual([{ x: 1079, y: 2399 }]);
+    expect(result).toMatchObject({
+      success: false,
+      x: 1079,
+      y: 2399,
+      error: expect.stringContaining("native tap failed"),
+    });
+  });
+
   test.each([
     { x: 1080, expectedCoordinate: "1080" },
     { x: -0.5, expectedCoordinate: "-0.5" },

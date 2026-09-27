@@ -2616,20 +2616,37 @@
   },
   {
     "name": "keyboard",
-    "description": "Open, close, detect, or switch the on-screen keyboard profile",
+    "description": "Open, close, detect, list/select installed Android IMEs, or switch the AutoMobile typing profile",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "action": {
-          "description": "Keyboard action",
+          "description": "Keyboard action; listProfiles returns AutoMobile behavior models and listImes returns installed Android input methods",
           "type": "string",
-          "enum": ["open", "close", "detect", "setProfile"]
+          "enum": [
+            "open",
+            "close",
+            "detect",
+            "setProfile",
+            "listProfiles",
+            "listImes",
+            "setIme",
+            "tapImeKey"
+          ]
         },
         "profile": {
-          "description": "Android keyboard behavior profile; required for setProfile",
+          "description": "AutoMobile keyboard behavior profile; required for setProfile",
           "type": "string",
           "enum": ["direct", "gboard", "samsung"]
+        },
+        "imeId": {
+          "description": "Installed Android IME component; required for setIme",
+          "type": "string"
+        },
+        "key": {
+          "description": "Exact visible key text or accessibility label; required for tapImeKey",
+          "type": "string"
         },
         "platform": {
           "type": "string",
@@ -10092,10 +10109,18 @@
                     "enum": ["insert", "replace"]
                   },
                   "mode": {
-                    "description": "Android delivery mode. ime is an opt-in companion input method for WYSIWYG/markdown rich-text editors. iOS accepts these values for cross-platform plans and reports xcuiTypeText as the resolved mode",
+                    "description": "Android delivery mode. auto uses the AutoMobile IME when supported, otherwise eventAll for insert or a11y for replace. Explicit ime commits text; imeKeyEvents dispatches printable ASCII key events through the IME input connection, requires a compatible CtrlProxy APK, and does not verify resulting editor text. iOS reports xcuiTypeText as the resolved mode",
                     "default": "auto",
                     "type": "string",
-                    "enum": ["auto", "a11y", "eventLast", "eventAll", "eventOnly", "ime"]
+                    "enum": [
+                      "auto",
+                      "a11y",
+                      "eventLast",
+                      "eventAll",
+                      "eventOnly",
+                      "ime",
+                      "imeKeyEvents"
+                    ]
                   },
                   "keyboardProfile": {
                     "description": "Android keyboard behavior profile for this IME type call; restored afterward",

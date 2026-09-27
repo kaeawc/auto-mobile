@@ -64,8 +64,20 @@ transform before correlating iOS `observe` or `tapAt` coordinates with
 | ✨ <code>selectAllText</code> | Selects all text in the focused input.                                                                                         |
 | ↩️ <code>imeAction</code>     | Legacy standalone IME action; disabled by default.                                                                             |
 | 🔘 <code>pressButton</code>   | Presses a device or navigation button.                                                                                         |
-| ⌨️ <code>keyboard</code>      | Opens, closes, or detects the on-screen keyboard.                                                                              |
+| ⌨️ <code>keyboard</code>      | Opens, closes, or detects the keyboard; selects AutoMobile profiles or installed Android IMEs.                                 |
 | 📋 <code>clipboard</code>     | Copies, pastes, clears, or reads the clipboard.                                                                                |
+
+On Android, `keyboard` can list installed input methods with
+`{"action":"listImes"}` and select an enabled component with
+`{"action":"setIme","imeId":"…"}`. To exercise one visible key in an installed
+IME, focus an editor first, then call
+`{"action":"tapImeKey","imeId":"…","key":"a"}`. This action selects the requested
+IME for one frame-bound physical tap, reports whether the same focused editor
+changed without returning its text, and restores the original active IME.
+The requested component must already be installed and enabled; the key must
+have one visible, package-owned accessibility match inside an IME window.
+Unobservable or ambiguous keys fail closed. If restoration cannot be verified,
+AutoMobile quarantines further IME changes until restart.
 
 `sendKeys` accepts one optional field selector and an ordered sequence of up to
 100 commands:
@@ -82,10 +94,21 @@ transform before correlating iOS `observe` or `tapAt` coordinates with
 }
 ```
 
-Text defaults to `operation: "insert"` and `mode: "auto"`. Modes are `auto`,
-`a11y`, `eventLast`, `eventAll`, and `eventOnly`. They select Android delivery
-strategies; iOS accepts the same values for cross-platform plans and reports the
-actual `xcuiTypeText` mechanism as `resolvedMode`. Raw keys are `enter`, `tab`,
+Text defaults to `operation: "insert"` and `mode: "auto"`. On Android, `auto`
+uses AutoMobile's IME when the installed CtrlProxy APK advertises commit and
+cancellation support. Older APKs fall back to `eventAll` for insertion and
+`a11y` for replacement. Modes `ime`, `imeKeyEvents`, `a11y`, `eventLast`,
+`eventAll`, and `eventOnly` select a delivery strategy explicitly; `eventAll`
+sends Android key events for apps that depend on them. `imeKeyEvents` is an
+opt-in Android experiment that sends printable ASCII as soft-keyboard events
+through the active `InputConnection`. It preflights the whole string and
+rejects unsupported characters before sending any events; it requires an APK
+advertising `ime_key_events_v1`. No additional Android permission or manifest
+entry is required. A successful result confirms event dispatch, not the target
+editor's final text; inspect the returned observation when using this mode.
+iOS accepts the same values for cross-platform plans and
+reports the actual `xcuiTypeText` mechanism as
+`resolvedMode`. Raw keys are `enter`, `tab`,
 `escape`, `backspace`, `delete`, and the four arrow keys; they accept `shift`,
 `ctrl`, `alt`, and `meta`. Semantic keys `next`, `previous`, `done`, `search`,
 `send`, and `go` perform the corresponding IME action and ignore modifiers. A

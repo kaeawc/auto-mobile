@@ -40,7 +40,72 @@ async function waitForRequest(
   throw new Error(`No message of type ${type} in: ${socket.sentMessages.join(", ")}`);
 }
 
+async function waitForSent(sent: Record<string, unknown>[], count: number): Promise<void> {
+  for (let attempt = 0; attempt < 10 && sent.length < count; attempt++) {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  expect(sent.length).toBeGreaterThanOrEqual(count);
+}
+
 describe("Android CtrlProxyText", () => {
+  test("commit timeout reports unknown editor state", async () => {
+    const timer = new FakeTimer();
+    const requestManager = new RequestManager(timer);
+    const sent: Record<string, unknown>[] = [];
+    const context: DelegateContext = {
+      getWebSocket: () =>
+        ({ readyState: 1, send: (data: string) => sent.push(JSON.parse(data)) }) as any,
+      requestManager,
+      timer,
+      ensureConnected: async () => true,
+      cancelScreenshotBackoff: () => {},
+    };
+
+    const resultPromise = new CtrlProxyText(context).commitViaIme("text", "prior");
+    await waitForSent(sent, 1);
+    timer.advanceTime(10_000);
+    await waitForSent(sent, 2);
+    timer.advanceTime(2_000);
+
+    expect(await resultPromise).toMatchObject({
+      success: false,
+      partialApplication: true,
+      sessionUnsafe: true,
+      error: expect.stringContaining("cancellation was not acknowledged"),
+    });
+  });
+
+  test("timed-out commit waits for a correlated cancel acknowledgement", async () => {
+    const timer = new FakeTimer();
+    const sent: Record<string, unknown>[] = [];
+    const manager = new RequestManager(timer);
+    const context: DelegateContext = {
+      getWebSocket: () =>
+        ({ readyState: 1, send: (data: string) => sent.push(JSON.parse(data)) }) as any,
+      requestManager: manager,
+      timer,
+      ensureConnected: async () => true,
+      cancelScreenshotBackoff: () => {},
+    };
+    const resultPromise = new CtrlProxyText(context).commitViaIme("text", "prior");
+    await waitForSent(sent, 1);
+    const commit = sent[0]!;
+    timer.advanceTime(10_000);
+    await waitForSent(sent, 2);
+    const cancel = sent[1]!;
+    expect(cancel).toMatchObject({
+      type: "request_cancel_ime_commit",
+      targetRequestId: commit.requestId,
+    });
+    manager.resolve(cancel.requestId as string, {
+      success: true,
+      targetRequestId: commit.requestId,
+      partialApplication: true,
+    });
+    expect(await resultPromise).toMatchObject({ success: false, partialApplication: true });
+    expect((await resultPromise).sessionUnsafe).toBeUndefined();
+  });
+
   test("sends request_insert_text and resolves its result", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
@@ -70,6 +135,43 @@ describe("Android CtrlProxyText", () => {
       text: "value",
     });
     expect(await resultPromise).toMatchObject({ success: true, totalTimeMs: 2 });
+  });
+
+  test("requests a versioned keyboard profile catalog", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const sent: string[] = [];
+    const requestManager = new RequestManager(timer);
+    const context: DelegateContext = {
+      getWebSocket: () => ({ readyState: 1, send: (data: string) => sent.push(data) }) as any,
+      requestManager,
+      timer,
+      ensureConnected: async () => true,
+      cancelScreenshotBackoff: () => {},
+    };
+    const resultPromise = new CtrlProxyText(context).listKeyboardProfiles();
+    await Promise.resolve();
+    await Promise.resolve();
+    const request = JSON.parse(sent[0] ?? "{}") as Record<string, unknown>;
+    requestManager.resolve(request.requestId as string, {
+      success: true,
+      catalogId: "automobile_behavior_profiles",
+      catalogVersion: 1,
+      supportedCatalogVersions: [1],
+      activeProfileId: "gboard",
+      profiles: [],
+    });
+
+    expect(request).toMatchObject({
+      type: "request_list_keyboard_profiles",
+      supportedCatalogVersions: [1],
+    });
+    expect(await resultPromise).toMatchObject({
+      success: true,
+      catalogId: "automobile_behavior_profiles",
+      catalogVersion: 1,
+      activeProfileId: "gboard",
+    });
   });
 
   test("resolves commitViaIme from a commit_text_result frame", async () => {
@@ -125,8 +227,47 @@ describe("Android CtrlProxyText", () => {
         success: true,
         totalTimeMs: 3,
         error: undefined,
+        partialApplication: undefined,
         perfTiming: undefined,
       });
+
+      socket.sentMessages.length = 0;
+      const eventPromise = textDelegate.commitViaIme(
+        "Ab!",
+        "prior-ime",
+        10000,
+        undefined,
+        undefined,
+        "keyEvents",
+      );
+      const eventRequest = await waitForRequest(socket, "request_commit_text");
+      expect(eventRequest.delivery).toBe("keyEvents");
+      socket.simulateMessage(
+        JSON.stringify({
+          type: "commit_text_result",
+          timestamp: 2,
+          requestId: eventRequest.requestId,
+          success: true,
+          totalTimeMs: 3,
+        }),
+      );
+      expect((await eventPromise).success).toBe(true);
+
+      socket.sentMessages.length = 0;
+      const failed = textDelegate.commitViaIme("long text", "prior-ime");
+      const failedRequest = await waitForRequest(socket, "request_commit_text");
+      socket.simulateMessage(
+        JSON.stringify({
+          type: "commit_text_result",
+          timestamp: 2,
+          requestId: failedRequest.requestId,
+          success: false,
+          error: "IME commit deadline exceeded",
+          totalTimeMs: 4000,
+          partialApplication: true,
+        }),
+      );
+      expect(await failed).toMatchObject({ success: false, partialApplication: true });
     } finally {
       await client.close();
     }
@@ -178,6 +319,76 @@ describe("Android CtrlProxyText", () => {
         activeProfileId: "samsung",
         previousProfileId: "direct",
         error: undefined,
+      });
+    } finally {
+      await client.close();
+    }
+  });
+
+  test("resolves listKeyboardProfiles from a versioned catalog result", async () => {
+    const timer = new FakeTimer();
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setCommandResponse("forward", { stdout: "8765", stderr: "" });
+    fakeAdb.setScreenState(true);
+    const device: BootedDevice = {
+      deviceId: "test-device-profile-catalog",
+      platform: "android",
+      isEmulator: true,
+      name: "Test Device",
+    };
+    let socket: CapturingWebSocket | null = null;
+    const client = AndroidCtrlProxyClient.createForTesting(
+      device,
+      fakeAdb,
+      (url: string) => {
+        socket = new CapturingWebSocket(url, "none", 0, timer);
+        return socket;
+      },
+      timer,
+    );
+    try {
+      expect(await client.ensureConnected()).toBe(true);
+      if (!socket) {
+        throw new Error("Expected the WebSocket factory to create a socket");
+      }
+      await waitForSocketOpen(socket);
+      const resultPromise = client.listKeyboardProfiles();
+      const request = await waitForRequest(socket, "request_list_keyboard_profiles");
+      expect(request).toMatchObject({ supportedCatalogVersions: [1] });
+      socket.simulateMessage(
+        JSON.stringify({
+          type: "keyboard_profiles_result",
+          timestamp: 1,
+          requestId: request.requestId,
+          success: true,
+          catalogId: "automobile_behavior_profiles",
+          catalogVersion: 1,
+          supportedCatalogVersions: [1],
+          activeProfileId: "samsung",
+          profiles: [
+            {
+              id: "samsung",
+              displayName: "Samsung",
+              version: 1,
+              evidenceStatus: "experimental",
+              evidenceNote: "Real-device comparison remains pending.",
+              behavior: {
+                composeWords: true,
+                enterStrategy: "COMMIT_NEWLINE",
+                backspaceStrategy: "DELETE_SURROUNDING",
+                recomposeOnCursorMove: true,
+                recomposeOnBackspaceIntoWord: true,
+                batchEdits: false,
+              },
+            },
+          ],
+        }),
+      );
+      expect(await resultPromise).toMatchObject({
+        catalogId: "automobile_behavior_profiles",
+        catalogVersion: 1,
+        activeProfileId: "samsung",
+        profiles: [{ id: "samsung", evidenceStatus: "experimental" }],
       });
     } finally {
       await client.close();

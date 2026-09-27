@@ -5,7 +5,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 class IcTraceRecorder(
-  private val captureText: Boolean = true,
+  captureText: Boolean = false,
   private val nowMs: () -> Long = { System.currentTimeMillis() },
 ) {
   private val startedMs = nowMs()
@@ -13,6 +13,9 @@ class IcTraceRecorder(
   private val mutableEvents = MutableStateFlow<List<IcTraceEvent>>(emptyList())
   val events: StateFlow<List<IcTraceEvent>> = mutableEvents.asStateFlow()
   private var nextSeq = 1
+  @Volatile private var includeText = captureText
+  private var droppedEvents = 0
+  private var metadata = IcTraceMetadata()
 
   @Synchronized
   fun record(
@@ -22,8 +25,13 @@ class IcTraceRecorder(
     selectionEnd: Int,
     composingStart: Int,
     composingEnd: Int,
+    result: Boolean? = null,
+    readValue: String? = null,
   ) {
-    if (buffer.size == CAPACITY) buffer.removeFirst()
+    if (buffer.size == CAPACITY) {
+      buffer.removeFirst()
+      droppedEvents++
+    }
     buffer.addLast(
       IcTraceEvent(
         nextSeq++,
@@ -34,6 +42,10 @@ class IcTraceRecorder(
         selectionEnd,
         composingStart,
         composingEnd,
+        result,
+        readValue,
+        droppedEvents,
+        metadata,
       )
     )
     mutableEvents.value = buffer.toList()
@@ -42,13 +54,32 @@ class IcTraceRecorder(
   @Synchronized fun snapshot(): List<IcTraceEvent> = buffer.toList()
 
   @Synchronized
+  fun updateMetadata(metadata: IcTraceMetadata) {
+    this.metadata =
+      if (metadata.scenario == "unspecified") metadata.copy(scenario = this.metadata.scenario)
+      else metadata
+  }
+
+  @Synchronized
+  fun updateScenario(scenario: String) {
+    metadata = metadata.copy(scenario = scenario.ifBlank { "unspecified" })
+  }
+
+  fun setCaptureText(capture: Boolean) {
+    includeText = capture
+  }
+
+  @Synchronized fun droppedEventCount(): Int = droppedEvents
+
+  @Synchronized
   fun clear() {
     buffer.clear()
+    droppedEvents = 0
     mutableEvents.value = emptyList()
   }
 
   // Callers must use this for every text-bearing argument before record().
-  fun textArg(text: CharSequence?, capture: Boolean = captureText): String =
+  fun textArg(text: CharSequence?, capture: Boolean = includeText): String =
     if (text == null) "null"
     else if (!capture) "length=${text.length}"
     else
@@ -69,6 +100,9 @@ class IcTraceRecorder(
         }
         append('"')
       }
+
+  fun safeText(text: CharSequence?, capture: Boolean = includeText): String? =
+    if (text == null) null else if (capture) textArg(text, true) else "length=${text.length}"
 
   private companion object {
     const val CAPACITY = 500

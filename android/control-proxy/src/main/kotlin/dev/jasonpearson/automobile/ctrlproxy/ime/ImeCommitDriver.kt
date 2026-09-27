@@ -1,13 +1,22 @@
 package dev.jasonpearson.automobile.ctrlproxy.ime
 
 import android.text.InputType
+import dev.jasonpearson.automobile.protocol.ImeTextDelivery
 
 interface ImeCommitSink {
+  fun nowMs(): Long
+
   /** The active editor's inputType (EditorInfo.inputType), or null if no connection. */
   fun editorInputType(): Int?
 
-  /** Commit a single char to the InputConnection; false if the connection is gone. */
+  /** Commit one complete Unicode editing unit; false if the connection is gone. */
   fun commitChar(ch: CharSequence): Boolean
+
+  /** Preflight every requested unit before the first key event is dispatched. */
+  fun supportsKeyEvents(units: List<String>): Boolean
+
+  /** Send one complete character's down/up sequence through the current input connection. */
+  fun sendKeyEventUnit(unit: String): Boolean
 
   /**
    * Finalize any composing span the active typing profile left open (composing profiles keep the
@@ -31,17 +40,54 @@ interface ImeCommitSink {
   fun switchToIme(imeId: String)
 }
 
-data class ImeCommitResult(val success: Boolean, val error: String?)
+data class ImeCommitResult(
+  val success: Boolean,
+  val error: String?,
+  val partialApplication: Boolean = false,
+)
 
 class ImeCommitDriver(private val sink: ImeCommitSink) {
+  private var completed = false
+  private var committedUnits = 0
+  private var completion: ((ImeCommitResult) -> Unit)? = null
+  private var restoreId: String? = null
+
+  /**
+   * Stops scheduled polls and reports the outcome exactly once before the caller restores the IME.
+   */
+  fun cancel(reason: String = "IME commit cancelled") {
+    complete(failure(reason))
+  }
+
+  private fun complete(result: ImeCommitResult) {
+    if (completed) return
+    completed = true
+    restoreIfNeeded(restoreId)
+    completion?.invoke(result)
+  }
+
   /**
    * Calls onComplete after the final editor sync and IME restore. The shell still owns idle/finish
    * restoration as a backstop.
    */
-  fun commit(text: String, priorImeId: String?, onComplete: (ImeCommitResult) -> Unit) {
-    fun complete(result: ImeCommitResult) {
-      restoreIfNeeded(priorImeId)
-      onComplete(result)
+  fun commit(
+    text: String,
+    priorImeId: String?,
+    deadlineMs: Long = Long.MAX_VALUE,
+    isCancelled: () -> Boolean = { false },
+    delivery: ImeTextDelivery = ImeTextDelivery.COMMIT,
+    onComplete: (ImeCommitResult) -> Unit,
+  ) {
+    check(completion == null) { "An IME commit driver handles one request" }
+    completion = onComplete
+    restoreId = priorImeId
+    if (isCancelled()) {
+      complete(failure("IME commit cancelled"))
+      return
+    }
+    if (sink.nowMs() >= deadlineMs) {
+      complete(failure("IME commit deadline exceeded"))
+      return
     }
 
     val inputType = sink.editorInputType()
@@ -54,8 +100,22 @@ class ImeCommitDriver(private val sink: ImeCommitSink) {
       return
     }
 
+    if (delivery == ImeTextDelivery.KEY_EVENTS) {
+      sendKeyEvents(text, deadlineMs, isCancelled)
+      return
+    }
+
     val segments = splitInlineFormatSpans(text)
     fun commitSegment(index: Int) {
+      if (completed) return
+      if (isCancelled()) {
+        complete(failure("IME commit cancelled"))
+        return
+      }
+      if (sink.nowMs() >= deadlineMs) {
+        complete(failure("IME commit deadline exceeded"))
+        return
+      }
       if (index == segments.size) {
         complete(
           if (sink.syncEditorState()) ImeCommitResult(success = true, error = null)
@@ -64,11 +124,21 @@ class ImeCommitDriver(private val sink: ImeCommitSink) {
         return
       }
       val segment = segments[index]
-      for (ch in segment.text) {
-        if (!sink.commitChar(ch.toString())) {
+      for (unit in ImeGraphemes.split(segment.text)) {
+        if (completed) return
+        if (isCancelled()) {
+          complete(failure("IME commit cancelled"))
+          return
+        }
+        if (sink.nowMs() >= deadlineMs) {
+          complete(failure("IME commit deadline exceeded"))
+          return
+        }
+        if (!sink.commitChar(unit)) {
           complete(failure("Input connection lost during commit"))
           return
         }
+        committedUnits++
       }
       // Composing profiles retain the last word until explicitly finished.
       if (!sink.finishComposing()) {
@@ -78,6 +148,15 @@ class ImeCommitDriver(private val sink: ImeCommitSink) {
       val literal = segment.trailingSpan
       if (literal != null && index < segments.lastIndex) {
         fun pollConverted(attempt: Int) {
+          if (completed) return
+          if (isCancelled()) {
+            complete(failure("IME commit cancelled"))
+            return
+          }
+          if (sink.nowMs() >= deadlineMs) {
+            complete(failure("IME commit deadline exceeded"))
+            return
+          }
           val seen = sink.readTextBeforeCursor(literal.length)
           // seen == null: connection gone — proceed; the next commitChar fails cleanly.
           // seen non-empty and != literal: the composer consumed the markers (converted).
@@ -99,6 +178,35 @@ class ImeCommitDriver(private val sink: ImeCommitSink) {
       }
     }
     commitSegment(0)
+  }
+
+  private fun sendKeyEvents(text: String, deadlineMs: Long, isCancelled: () -> Boolean) {
+    val units = ImeGraphemes.split(text)
+    if (!runCatching { sink.supportsKeyEvents(units) }.getOrDefault(false)) {
+      complete(failure("IME key events cannot represent this text; use mode ime for text commit"))
+      return
+    }
+    for (unit in units) {
+      if (completed) return
+      if (isCancelled()) {
+        complete(failure("IME key events cancelled"))
+        return
+      }
+      if (sink.nowMs() >= deadlineMs) {
+        complete(failure("IME key event deadline exceeded"))
+        return
+      }
+      // A down event may have reached the editor even if the paired sequence reports failure.
+      committedUnits++
+      if (!runCatching { sink.sendKeyEventUnit(unit) }.getOrDefault(false)) {
+        complete(failure("Input connection lost during IME key events"))
+        return
+      }
+    }
+    complete(
+      if (sink.syncEditorState()) ImeCommitResult(success = true, error = null)
+      else failure("Input connection lost while syncing editor state")
+    )
   }
 
   /** Called by the shell on onFinishInput / idle-deadline; restores if priorImeId is non-null. */
@@ -137,7 +245,8 @@ class ImeCommitDriver(private val sink: ImeCommitSink) {
     return isTextPassword || isNumberPassword
   }
 
-  private fun failure(error: String) = ImeCommitResult(success = false, error = error)
+  private fun failure(error: String) =
+    ImeCommitResult(success = false, error = error, partialApplication = committedUnits > 0)
 
   private companion object {
     val INLINE_FORMAT_SPAN = Regex("```|`[^`\n]+`|\\*[^*\n]+\\*|_[^_\n]+_|~[^~\n]+~")

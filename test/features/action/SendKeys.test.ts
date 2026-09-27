@@ -11,6 +11,10 @@ import {
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { defaultTimer } from "../../../src/utils/SystemTimer";
+import {
+  clearAndroidImeQuarantine,
+  withAndroidImeLock,
+} from "../../../src/features/action/androidImeLock";
 
 const androidDevice: BootedDevice = {
   deviceId: "emulator-5554",
@@ -65,15 +69,25 @@ function focusedAndroidObservation(
 function createTextClient(
   options: {
     supportsImeCommit?: boolean;
+    supportsImeKeyEvents?: boolean;
     supportsKeyboardProfiles?: boolean;
     setKeyboardProfile?: (
       id: string,
     ) => Promise<{ success: boolean; previousProfileId?: string; error?: string }>;
-    commitViaIme?: (text: string, priorImeId: string | null) => Promise<{ success: boolean }>;
+    commitViaIme?: (
+      text: string,
+      priorImeId: string | null,
+    ) => Promise<{
+      success: boolean;
+      error?: string;
+      partialApplication?: boolean;
+      sessionUnsafe?: boolean;
+    }>;
   } = {},
 ) {
   const calls: string[] = [];
   const commitViaImeCalls: Array<{ text: string; priorImeId: string | null }> = [];
+  const commitDeliveries: Array<"commit" | "keyEvents" | undefined> = [];
   let supportsImeCommitCalls = 0;
   const client: SendKeysTextClient = {
     replace: async (text) => {
@@ -97,14 +111,16 @@ function createTextClient(
       calls.push("supportsImeCommit");
       return options.supportsImeCommit ?? true;
     },
+    supportsImeKeyEvents: async () => options.supportsImeKeyEvents ?? true,
     supportsKeyboardProfiles: async () => options.supportsKeyboardProfiles ?? true,
     setKeyboardProfile: async (id) => {
       calls.push(`setKeyboardProfile:${id}`);
       return options.setKeyboardProfile?.(id) ?? { success: true, previousProfileId: "direct" };
     },
-    commitViaIme: async (text, priorImeId) => {
+    commitViaIme: async (text, priorImeId, _signal, delivery) => {
       calls.push(`commitViaIme:${text}:${priorImeId ?? "none"}`);
       commitViaImeCalls.push({ text, priorImeId });
+      commitDeliveries.push(delivery);
       return options.commitViaIme ? options.commitViaIme(text, priorImeId) : { success: true };
     },
   };
@@ -112,6 +128,7 @@ function createTextClient(
     client,
     calls,
     commitViaImeCalls,
+    commitDeliveries,
     getSupportsImeCommitCalls: () => supportsImeCommitCalls,
   };
 }
@@ -252,8 +269,13 @@ describe("DefaultSendKeysCommandExecutor", () => {
   const commitImeId = "dev.jasonpearson.automobile.ctrlproxy/.ime.CtrlProxyIme";
   const priorImeId = "com.example.keyboard/.Ime";
 
-  test("auto mode routes formatting text through IME for insert and replace", async () => {
-    for (const operation of ["insert", "replace"] as const) {
+  test("auto mode routes plain and formatting text through IME for insert and replace", async () => {
+    for (const [operation, text] of [
+      ["insert", "plain"],
+      ["replace", "plain"],
+      ["insert", "note `x`"],
+      ["replace", "note `x`"],
+    ] as const) {
       const adb = new FakeAdbExecutor();
       adb.setCommandResponseSequence("shell settings get secure default_input_method", [
         { stdout: `${priorImeId}\n`, stderr: "" },
@@ -267,39 +289,17 @@ describe("DefaultSendKeysCommandExecutor", () => {
         { textClient: textClient.client },
       );
 
-      const result = await executor.type({ action: "type", text: "note `x`", operation });
+      const result = await executor.type({ action: "type", text, operation });
 
       expect(result.resolvedMode).toBe("ime");
-      expect(textClient.commitViaImeCalls.length).toBeGreaterThan(0);
+      expect(textClient.commitViaImeCalls).toEqual([{ text, priorImeId }]);
+      expect(
+        adb.getExecutedCommands().every((command) => !command.startsWith("shell input keyevent")),
+      ).toBe(true);
     }
   });
 
-  test("auto mode keeps the existing defaults for plain text", async () => {
-    for (const [operation, mode] of [
-      ["insert", "eventAll"],
-      ["replace", "a11y"],
-    ] as const) {
-      const adb = new FakeAdbExecutor();
-      const textClient = createTextClient();
-      const executor = new DefaultSendKeysCommandExecutor(
-        androidDevice,
-        createAdbFactory(adb),
-        createObserver(focusedAndroidObservation()),
-        { textClient: textClient.client },
-      );
-
-      const result = await executor.type({ action: "type", text: "plain", operation });
-
-      expect(result.resolvedMode).toBe(mode);
-      if (mode === "eventAll") {
-        expect(adb.getExecutedCommands().length).toBeGreaterThan(0);
-      } else {
-        expect(textClient.calls).toContain("replace:plain");
-      }
-    }
-  });
-
-  test("auto IME falls back to the previous default when commit is unavailable", async () => {
+  test("auto IME falls back to the previous delivery modes when commit is unavailable", async () => {
     for (const [operation, mode] of [
       ["insert", "eventAll"],
       ["replace", "a11y"],
@@ -323,6 +323,44 @@ describe("DefaultSendKeysCommandExecutor", () => {
         expect(textClient.calls).toContain("replace:note `x`");
       }
     }
+  });
+
+  test("explicit IME key events require capability and use event delivery", async () => {
+    const supported = createTextClient();
+    const supportedAdb = new FakeAdbExecutor();
+    supportedAdb.setCommandResponseSequence("shell settings get secure default_input_method", [
+      { stdout: `${priorImeId}\n`, stderr: "" },
+      { stdout: `${commitImeId}\n`, stderr: "" },
+    ]);
+    const executor = new DefaultSendKeysCommandExecutor(
+      androidDevice,
+      createAdbFactory(supportedAdb),
+      createObserver(focusedAndroidObservation()),
+      { textClient: supported.client },
+    );
+    const result = await executor.type({ action: "type", text: "Ab!", mode: "imeKeyEvents" });
+    expect(result).toMatchObject({ success: true, resolvedMode: "imeKeyEvents" });
+    expect(supported.commitDeliveries).toEqual(["keyEvents"]);
+
+    const unsupported = createTextClient({ supportsImeKeyEvents: false });
+    const adb = new FakeAdbExecutor();
+    const unsupportedExecutor = new DefaultSendKeysCommandExecutor(
+      androidDevice,
+      createAdbFactory(adb),
+      createObserver(focusedAndroidObservation()),
+      { textClient: unsupported.client },
+    );
+    const rejected = await unsupportedExecutor.type({
+      action: "type",
+      text: "Ab!",
+      mode: "imeKeyEvents",
+    });
+    expect(rejected).toMatchObject({
+      success: false,
+      error: expect.stringContaining("unavailable"),
+    });
+    expect(unsupported.commitDeliveries).toEqual([]);
+    expect(adb.getExecutedCommands()).toEqual([]);
   });
 
   test("explicit modes take precedence over trigger text and do not auto-fallback", async () => {
@@ -388,6 +426,7 @@ describe("DefaultSendKeysCommandExecutor", () => {
     expect(textClient.commitViaImeCalls).toEqual([{ text: "*bold*", priorImeId }]);
     expect(events).toEqual([
       "adb:shell settings get secure default_input_method",
+      "adb:shell ime list -s",
       `adb:shell ime enable ${commitImeId}`,
       `adb:shell ime set ${commitImeId}`,
       "adb:shell settings get secure default_input_method",
@@ -395,6 +434,31 @@ describe("DefaultSendKeysCommandExecutor", () => {
       `adb:shell ime set ${priorImeId}`,
       `adb:shell ime disable ${commitImeId}`,
     ]);
+  });
+
+  test("ime mode preserves a companion keyboard that was already enabled", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("shell ime list -s", {
+      stdout: `${priorImeId}\n${commitImeId}\n`,
+      stderr: "",
+    });
+    adb.setCommandResponseSequence("shell settings get secure default_input_method", [
+      { stdout: priorImeId, stderr: "" },
+      { stdout: commitImeId, stderr: "" },
+    ]);
+    const executor = new DefaultSendKeysCommandExecutor(
+      androidDevice,
+      createAdbFactory(adb),
+      createObserver(),
+      { textClient: createTextClient().client },
+    );
+
+    expect((await executor.type({ action: "type", text: "value", mode: "ime" })).success).toBe(
+      true,
+    );
+    expect(adb.getExecutedCommands()).not.toContain(`shell ime enable ${commitImeId}`);
+    expect(adb.getExecutedCommands()).not.toContain(`shell ime disable ${commitImeId}`);
+    expect(adb.getExecutedCommands()).toContain(`shell ime set ${priorImeId}`);
   });
 
   test("ime disable failures do not fail a successful commit", async () => {
@@ -423,7 +487,7 @@ describe("DefaultSendKeysCommandExecutor", () => {
     }
   });
 
-  test("ime mode does not set or disable an IME when there was no prior default", async () => {
+  test("ime mode disables a temporarily enabled IME when there was no prior default", async () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandResponseSequence("shell settings get secure default_input_method", [
       { stdout: "null\n", stderr: "" },
@@ -441,7 +505,7 @@ describe("DefaultSendKeysCommandExecutor", () => {
     expect(result).toMatchObject({ success: true, resolvedMode: "ime" });
     expect(adb.getExecutedCommands()).not.toContain("shell ime set null");
     expect(adb.getExecutedCommands()).not.toContain(`shell ime set ${priorImeId}`);
-    expect(adb.getExecutedCommands()).not.toContain(`shell ime disable ${commitImeId}`);
+    expect(adb.getExecutedCommands()).toContain(`shell ime disable ${commitImeId}`);
   });
 
   test("ime mode fails closed before switching when the command is not advertised", async () => {
@@ -625,6 +689,63 @@ describe("DefaultSendKeysCommandExecutor", () => {
     expect(events.at(-1)).toBe(`adb:shell ime disable ${commitImeId}`);
   });
 
+  test("unacknowledged cancellation retains the IME and blocks later switches", async () => {
+    const device = { ...androidDevice, deviceId: "ime-unsafe-test" };
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponseSequence("shell settings get secure default_input_method", [
+      { stdout: priorImeId, stderr: "" },
+      { stdout: commitImeId, stderr: "" },
+    ]);
+    const textClient = createTextClient({
+      commitViaIme: async () => ({ success: false, partialApplication: true, sessionUnsafe: true }),
+    });
+    const executor = new DefaultSendKeysCommandExecutor(
+      device,
+      createAdbFactory(adb),
+      createObserver(),
+      { textClient: textClient.client },
+    );
+    try {
+      expect(await executor.type({ action: "type", text: "value", mode: "ime" })).toMatchObject({
+        success: false,
+        partialApplication: true,
+      });
+      expect(adb.getExecutedCommands()).not.toContain(`shell ime set ${priorImeId}`);
+      expect(adb.getExecutedCommands()).not.toContain(`shell ime disable ${commitImeId}`);
+      await expect(withAndroidImeLock(device.deviceId, async () => {})).rejects.toThrow("unknown");
+    } finally {
+      clearAndroidImeQuarantine(device.deviceId);
+    }
+  });
+
+  test("failed IME replacement reports partial application after clearing", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponseSequence("shell settings get secure default_input_method", [
+      { stdout: priorImeId, stderr: "" },
+      { stdout: commitImeId, stderr: "" },
+    ]);
+    const textClient = createTextClient({
+      commitViaIme: async () => ({ success: false, error: "deadline exceeded" }),
+    });
+    const executor = new DefaultSendKeysCommandExecutor(
+      androidDevice,
+      createAdbFactory(adb),
+      createObserver(),
+      { textClient: textClient.client },
+    );
+
+    const result = await executor.type({
+      action: "type",
+      text: "replacement",
+      operation: "replace",
+      mode: "ime",
+    });
+
+    expect(result).toMatchObject({ success: false, partialApplication: true });
+    expect(textClient.calls).toContain("clear");
+    expect(adb.getExecutedCommands()).toContain(`shell ime set ${priorImeId}`);
+  });
+
   test("serializes overlapping ime-mode calls on one device so capture/restore never interleave (#7464)", async () => {
     const device: BootedDevice = { ...androidDevice, deviceId: "emulator-overlap-7464" };
     const events: string[] = [];
@@ -769,7 +890,7 @@ describe("DefaultSendKeysCommandExecutor", () => {
     });
   });
 
-  test("auto insert uses eventAll and accessibility-inserts unsupported runs", async () => {
+  test("explicit eventAll uses key events and accessibility-inserts unsupported runs", async () => {
     const adb = new FakeAdbExecutor();
     const observer = createObserver(focusedAndroidObservation());
     const { client, calls } = createTextClient();
@@ -780,12 +901,12 @@ describe("DefaultSendKeysCommandExecutor", () => {
       { textClient: client },
     );
 
-    const result = await executor.type({ action: "type", text: "a🙂" });
+    const result = await executor.type({ action: "type", text: "a🙂", mode: "eventAll" });
 
     expect(result).toMatchObject({
       success: true,
       operation: "insert",
-      requestedMode: "auto",
+      requestedMode: "eventAll",
       resolvedMode: "eventAll",
       textLength: 2,
     });
@@ -804,7 +925,7 @@ describe("DefaultSendKeysCommandExecutor", () => {
       { textClient: client },
     );
 
-    const result = await executor.type({ action: "type", text: "a🙂" });
+    const result = await executor.type({ action: "type", text: "a🙂", mode: "eventAll" });
 
     expect(result).toMatchObject({
       success: false,
@@ -824,7 +945,7 @@ describe("DefaultSendKeysCommandExecutor", () => {
       { textClient: createTextClient().client },
     );
 
-    const result = await executor.type({ action: "type", text: "ab" });
+    const result = await executor.type({ action: "type", text: "ab", mode: "eventAll" });
 
     expect(result).toMatchObject({
       success: false,
@@ -933,7 +1054,7 @@ describe("DefaultSendKeysCommandExecutor", () => {
       { textClient: createTextClient().client },
     );
 
-    const result = await executor.type({ action: "type", text: "a" });
+    const result = await executor.type({ action: "type", text: "a", mode: "eventAll" });
 
     expect(result.success).toBe(true);
     expect(adb.getExecutedCommands()).toEqual(["shell input keyevent KEYCODE_A"]);

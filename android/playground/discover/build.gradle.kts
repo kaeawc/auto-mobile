@@ -52,6 +52,7 @@ dependencies {
 
   // Kotlin coroutines
   implementation(libs.kotlinx.coroutines)
+  implementation(libs.kotlinx.serialization)
 
   // Image loading
   implementation(libs.coil.compose)

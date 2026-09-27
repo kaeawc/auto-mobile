@@ -100,6 +100,46 @@ class WebSocketResponseTest {
   }
 
   @Test
+  fun `serialize versioned keyboard profile catalog`() {
+    val response: WebSocketResponse =
+      KeyboardProfileCatalogResult(
+        timestamp = 1L,
+        requestId = "profiles-1",
+        success = true,
+        catalogId = "automobile_behavior_profiles",
+        catalogVersion = 1,
+        supportedCatalogVersions = listOf(1),
+        activeProfileId = "gboard",
+        profiles =
+          listOf(
+            KeyboardProfileInfo(
+              id = "gboard",
+              displayName = "Gboard",
+              version = 1,
+              evidenceStatus = "focused_trace",
+              evidenceNote = "Focused trace comparison; full vendor equivalence is not claimed.",
+              behavior =
+                KeyboardProfileBehaviorInfo(
+                  composeWords = true,
+                  enterStrategy = "KEY_EVENT",
+                  backspaceStrategy = "DELETE_SURROUNDING",
+                  recomposeOnCursorMove = false,
+                  recomposeOnBackspaceIntoWord = true,
+                  batchEdits = true,
+                ),
+            )
+          ),
+      )
+
+    val encoded = json.encodeToString(WebSocketResponse.serializer(), response)
+    assertTrue(encoded.contains("\"type\":\"keyboard_profiles_result\""))
+    assertTrue(encoded.contains("\"catalogId\":\"automobile_behavior_profiles\""))
+    assertTrue(encoded.contains("\"catalogVersion\":1"))
+    assertTrue(encoded.contains("\"activeProfileId\":\"gboard\""))
+    assertTrue(encoded.contains("\"enterStrategy\":\"KEY_EVENT\""))
+  }
+
+  @Test
   fun `serialize permission_result`() {
     val response: WebSocketResponse =
       PermissionResult(

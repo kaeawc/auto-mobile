@@ -205,6 +205,14 @@ data class RequestCommitText(
   override val requestId: String? = null,
   val text: String,
   val priorImeId: String? = null,
+  val delivery: ImeTextDelivery = ImeTextDelivery.COMMIT,
+) : WebSocketRequest()
+
+@Serializable
+@SerialName("request_cancel_ime_commit")
+data class RequestCancelImeCommit(
+  override val requestId: String? = null,
+  val targetRequestId: String,
 ) : WebSocketRequest()
 
 @Serializable
@@ -212,6 +220,13 @@ data class RequestCommitText(
 data class RequestSetKeyboardProfile(
   override val requestId: String? = null,
   val profileId: String,
+) : WebSocketRequest()
+
+@Serializable
+@SerialName("request_list_keyboard_profiles")
+data class RequestListKeyboardProfiles(
+  override val requestId: String? = null,
+  val supportedCatalogVersions: List<Int>,
 ) : WebSocketRequest()
 
 @Serializable

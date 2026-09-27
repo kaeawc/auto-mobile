@@ -1,13 +1,68 @@
 package dev.jasonpearson.automobile.ctrlproxy.ime
 
 import android.text.InputType
+import dev.jasonpearson.automobile.protocol.ImeTextDelivery
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [24])
 class ImeCommitDriverTest {
+  @Test
+  fun `key event delivery sends units without committing text`() {
+    val sink = FakeImeCommitSink(inputType = InputType.TYPE_CLASS_TEXT)
+    var result: ImeCommitResult? = null
+    ImeCommitDriver(sink).commit("Ab!", PRIOR_IME_ID, delivery = ImeTextDelivery.KEY_EVENTS) {
+      result = it
+    }
+
+    assertTrue(result!!.success)
+    assertEquals(listOf("A", "b", "!"), sink.sentKeyUnits)
+    assertTrue(sink.committedChars.isEmpty())
+    assertEquals(listOf(PRIOR_IME_ID), sink.switchedImeIds)
+  }
+
+  @Test
+  fun `unsupported key event text fails before any event`() {
+    val sink = FakeImeCommitSink(inputType = InputType.TYPE_CLASS_TEXT)
+    sink.supportedKeyUnits = { units -> units.none { it == "😀" } }
+    var result: ImeCommitResult? = null
+    ImeCommitDriver(sink).commit("a😀", PRIOR_IME_ID, delivery = ImeTextDelivery.KEY_EVENTS) {
+      result = it
+    }
+
+    val outcome = requireNotNull(result)
+    assertFalse(outcome.success)
+    assertFalse(outcome.partialApplication)
+    assertTrue(sink.sentKeyUnits.isEmpty())
+  }
+
+  @Test
+  fun `key event cancellation reports partial application`() {
+    val sink = FakeImeCommitSink(inputType = InputType.TYPE_CLASS_TEXT)
+    var cancelled = false
+    sink.afterKeyUnit = { cancelled = true }
+    var result: ImeCommitResult? = null
+    ImeCommitDriver(sink).commit(
+      "ab",
+      PRIOR_IME_ID,
+      isCancelled = { cancelled },
+      delivery = ImeTextDelivery.KEY_EVENTS,
+    ) {
+      result = it
+    }
+
+    assertEquals(listOf("a"), sink.sentKeyUnits)
+    assertTrue(result!!.partialApplication)
+    assertEquals(listOf(PRIOR_IME_ID), sink.switchedImeIds)
+  }
+
   @Test
   fun `text password field is refused and prior IME is restored`() {
     assertPasswordRefused(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD)
@@ -41,6 +96,64 @@ class ImeCommitDriverTest {
     assertEquals("hello *world*", sink.committedChars.joinToString(separator = ""))
     assertEquals(listOf(PRIOR_IME_ID), sink.switchedImeIds)
     assertTrue(sink.delays.isEmpty())
+  }
+
+  @Test
+  fun `automation commits complete Unicode graphemes as individual units`() {
+    val sink = FakeImeCommitSink(inputType = InputType.TYPE_CLASS_TEXT)
+    val family = "👩‍👩‍👧‍👦"
+    val flag = "🇺🇸"
+    val text = "A😀e\u0301$family${flag}B"
+
+    val result = commit(sink, text, PRIOR_IME_ID)
+
+    assertTrue(result.success)
+    assertEquals(listOf("A", "😀", "e\u0301", family, flag, "B"), sink.committedChars)
+    assertEquals(text, sink.committedChars.joinToString(""))
+  }
+
+  @Test
+  fun `failed automation unit preserves complete cluster and partial progress`() {
+    val sink = FakeImeCommitSink(inputType = InputType.TYPE_CLASS_TEXT, failAtCommitIndex = 1)
+
+    val result = commit(sink, "e\u0301x", PRIOR_IME_ID)
+
+    assertFalse(result.success)
+    assertEquals("Input connection lost during commit", result.error)
+    assertEquals(listOf("e\u0301"), sink.committedChars)
+    assertTrue(result.partialApplication)
+    assertEquals(listOf(PRIOR_IME_ID), sink.switchedImeIds)
+  }
+
+  @Test
+  fun `cancellation is checked between grapheme commits`() {
+    val sink = FakeImeCommitSink(inputType = InputType.TYPE_CLASS_TEXT)
+    var cancelled = false
+    sink.afterCommit = { cancelled = true }
+    var result: ImeCommitResult? = null
+
+    ImeCommitDriver(sink).commit("😀after", PRIOR_IME_ID, isCancelled = { cancelled }) {
+      result = it
+    }
+
+    assertEquals(listOf("😀"), sink.committedChars)
+    assertEquals("IME commit cancelled", result?.error)
+    assertTrue(result!!.partialApplication)
+  }
+
+  @Test
+  fun `deadline is checked between grapheme commits`() {
+    val sink = FakeImeCommitSink(inputType = InputType.TYPE_CLASS_TEXT)
+    sink.afterCommit = { sink.clockMs = 10L }
+    var result: ImeCommitResult? = null
+
+    ImeCommitDriver(sink).commit("👩‍👩‍👧‍👦next", PRIOR_IME_ID, deadlineMs = 10L) {
+      result = it
+    }
+
+    assertEquals(listOf("👩‍👩‍👧‍👦"), sink.committedChars)
+    assertEquals("IME commit deadline exceeded", result?.error)
+    assertTrue(result!!.partialApplication)
   }
 
   @Test
@@ -202,6 +315,77 @@ class ImeCommitDriverTest {
     assertEquals(listOf("a", "b"), sink.committedChars)
     assertEquals(listOf(PRIOR_IME_ID), sink.switchedImeIds)
     assertFalse("sync" in sink.events)
+    assertTrue(result.partialApplication)
+  }
+
+  @Test
+  fun `cancelled conversion poll cannot resume typing or report twice`() {
+    val sink = FakeImeCommitSink(inputType = InputType.TYPE_CLASS_TEXT)
+    sink.readText = { _, _ -> "`a`" }
+    val driver = ImeCommitDriver(sink)
+    val results = mutableListOf<ImeCommitResult>()
+
+    driver.commit("`a` after", PRIOR_IME_ID) { results.add(it) }
+    assertEquals("`a`", sink.committedChars.joinToString(""))
+    driver.cancel()
+    sink.drain()
+
+    assertEquals("`a`", sink.committedChars.joinToString(""))
+    assertEquals(1, results.size)
+    assertFalse(results.single().success)
+    assertTrue(results.single().partialApplication)
+    assertEquals(listOf(PRIOR_IME_ID), sink.switchedImeIds)
+  }
+
+  @Test
+  fun `deadline stops delayed continuation after partial commit`() {
+    val sink = FakeImeCommitSink(inputType = InputType.TYPE_CLASS_TEXT)
+    sink.readText = { _, _ -> "`a`" }
+    val results = mutableListOf<ImeCommitResult>()
+
+    ImeCommitDriver(sink).commit("`a` after", PRIOR_IME_ID, deadlineMs = 10L) {
+      results.add(it)
+    }
+    sink.clockMs = 10L
+    sink.drain()
+
+    assertEquals("`a`", sink.committedChars.joinToString(""))
+    assertEquals("IME commit deadline exceeded", results.single().error)
+    assertTrue(results.single().partialApplication)
+    assertEquals(listOf(PRIOR_IME_ID), sink.switchedImeIds)
+  }
+
+  @Test
+  fun `external cancellation stops a queued conversion poll before the next character`() {
+    val sink = FakeImeCommitSink(inputType = InputType.TYPE_CLASS_TEXT)
+    sink.readText = { _, _ -> "`a`" }
+    var cancelled = false
+    var result: ImeCommitResult? = null
+    ImeCommitDriver(sink).commit("`a` after", PRIOR_IME_ID, isCancelled = { cancelled }) {
+      result = it
+    }
+
+    assertEquals("`a`", sink.committedChars.joinToString(""))
+    cancelled = true
+    sink.drain()
+
+    assertEquals("`a`", sink.committedChars.joinToString(""))
+    assertEquals("IME commit cancelled", result?.error)
+    assertTrue(result!!.partialApplication)
+    assertEquals(listOf(PRIOR_IME_ID), sink.switchedImeIds)
+  }
+
+  @Test
+  fun `pre-cancelled request never mutates the editor`() {
+    val sink = FakeImeCommitSink(inputType = InputType.TYPE_CLASS_TEXT)
+    var result: ImeCommitResult? = null
+    ImeCommitDriver(sink).commit("late text", PRIOR_IME_ID, isCancelled = { true }) {
+      result = it
+    }
+
+    assertEquals("IME commit cancelled", result?.error)
+    assertTrue(sink.committedChars.isEmpty())
+    assertFalse(result!!.partialApplication)
   }
 
   private fun commit(sink: FakeImeCommitSink, text: String, priorImeId: String?): ImeCommitResult {
@@ -217,21 +401,37 @@ class ImeCommitDriverTest {
     private val failSync: Boolean = false,
   ) : ImeCommitSink {
     val committedChars = mutableListOf<String>()
+    val sentKeyUnits = mutableListOf<String>()
+    var supportedKeyUnits: (List<String>) -> Boolean = { true }
+    var afterKeyUnit: (() -> Unit)? = null
     val switchedImeIds = mutableListOf<String>()
     val events = mutableListOf<String>()
     val delays = mutableListOf<Long>()
     val readSizes = mutableListOf<Int>()
     var readText: (Int, Int) -> String? = { _, _ -> null }
+    var afterCommit: (() -> Unit)? = null
+    var clockMs = 0L
     private val pending = ArrayDeque<() -> Unit>()
     private var commitAttempts = 0
 
     override fun editorInputType(): Int? = inputType
+
+    override fun nowMs(): Long = clockMs
 
     override fun commitChar(ch: CharSequence): Boolean {
       val currentAttempt = commitAttempts++
       if (currentAttempt == failAtCommitIndex) return false
       committedChars.add(ch.toString())
       events.add("char")
+      afterCommit?.invoke()
+      return true
+    }
+
+    override fun supportsKeyEvents(units: List<String>): Boolean = supportedKeyUnits(units)
+
+    override fun sendKeyEventUnit(unit: String): Boolean {
+      sentKeyUnits.add(unit)
+      afterKeyUnit?.invoke()
       return true
     }
 

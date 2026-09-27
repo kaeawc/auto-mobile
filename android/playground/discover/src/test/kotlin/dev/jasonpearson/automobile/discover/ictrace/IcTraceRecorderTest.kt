@@ -57,4 +57,39 @@ class IcTraceRecorderTest {
     assertEquals(listOf("first", "second"), snapshot.map { it.args })
     assertEquals(listOf("first", "second", "third"), recorder.snapshot().map { it.args })
   }
+
+  @Test
+  fun `records result metadata and dropped event count`() {
+    val recorder = IcTraceRecorder(nowMs = { 0L })
+    recorder.updateMetadata(
+      IcTraceMetadata(
+        scenario = "mid-word replacement",
+        keyboardId = "com.example.ime/.KeyboardService",
+        keyboardVersion = "2.4",
+        inputType = 1,
+        imeOptions = 6,
+      )
+    )
+    repeat(501) { index ->
+      recorder.record("setSelection", "start=$index", 0, 0, -1, -1, result = index % 2 == 0)
+    }
+
+    assertEquals(1, recorder.droppedEventCount())
+    assertEquals(1, recorder.snapshot().last().droppedEvents)
+    assertEquals(true, recorder.snapshot().last().result)
+    assertEquals("mid-word replacement", recorder.snapshot().last().metadata.scenario)
+    assertEquals("2.4", recorder.snapshot().last().metadata.keyboardVersion)
+
+    recorder.updateMetadata(IcTraceMetadata(keyboardId = "com.example.next/.Ime"))
+    recorder.record("setSelection", "", 0, 0, -1, -1)
+    assertEquals("mid-word replacement", recorder.snapshot().last().metadata.scenario)
+  }
+
+  @Test
+  fun `redacted read values preserve length without text`() {
+    val recorder = IcTraceRecorder(captureText = false, nowMs = { 0L })
+    assertEquals("length=8", recorder.safeText("password"))
+    assertFalse(recorder.safeText("password")!!.contains("password"))
+    assertEquals(null, recorder.safeText(null))
+  }
 }

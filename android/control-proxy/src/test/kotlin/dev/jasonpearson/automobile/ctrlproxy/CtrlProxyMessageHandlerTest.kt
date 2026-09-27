@@ -429,11 +429,27 @@ class CtrlProxyMessageHandlerTest {
   }
 
   @Test
+  fun `dispatches correlated IME cancellation`() = runTest {
+    dispatch(
+      """{"type":"request_cancel_ime_commit","requestId":"cancel-1","targetRequestId":"commit-1"}"""
+    )
+    assertEquals("requestCancelImeCommit" to listOf<Any?>("cancel-1", "commit-1"), lastCall)
+  }
+
+  @Test
   fun `dispatches request_set_keyboard_profile`() = runTest {
     dispatch(
       """{"type":"request_set_keyboard_profile","requestId":"profile-1","profileId":"gboard"}"""
     )
     assertEquals("requestSetKeyboardProfile" to listOf<Any?>("profile-1", "gboard"), lastCall)
+  }
+
+  @Test
+  fun `dispatches request_list_keyboard_profiles with supported versions`() = runTest {
+    dispatch(
+      """{"type":"request_list_keyboard_profiles","requestId":"profiles-1","supportedCatalogVersions":[1]}"""
+    )
+    assertEquals("requestListKeyboardProfiles" to listOf<Any?>("profiles-1", listOf(1)), lastCall)
   }
 
   @Test

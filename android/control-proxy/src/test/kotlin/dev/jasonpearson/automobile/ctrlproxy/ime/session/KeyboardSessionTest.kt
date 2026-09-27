@@ -125,8 +125,8 @@ class KeyboardSessionTest {
       return true
     }
 
-    override fun setComposingText(text: String): Boolean {
-      editor.apply(listOf(ImeOp.SetComposingText(text)))
+    override fun setComposingText(text: String, newCursorPosition: Int): Boolean {
+      editor.apply(listOf(ImeOp.SetComposingText(text, newCursorPosition)))
       return true
     }
 
@@ -137,6 +137,11 @@ class KeyboardSessionTest {
 
     override fun setComposingRegion(start: Int, end: Int): Boolean {
       editor.apply(listOf(ImeOp.SetComposingRegion(start, end)))
+      return true
+    }
+
+    override fun setSelection(start: Int, end: Int): Boolean {
+      editor.apply(listOf(ImeOp.SetSelection(start, end)))
       return true
     }
 

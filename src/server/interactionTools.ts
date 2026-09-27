@@ -19,7 +19,16 @@ import { OpenURL } from "../features/action/OpenURL";
 import { HandleIntentChooser } from "../features/action/HandleIntentChooser";
 import { Clipboard } from "../features/action/Clipboard";
 import { Keyboard } from "../features/action/Keyboard";
-import { KEYBOARD_PROFILE_IDS } from "../features/action/keyboardProfiles";
+import { withAndroidImeLock } from "../features/action/androidImeLock";
+import {
+  KEYBOARD_PROFILE_CATALOG_ID,
+  KEYBOARD_PROFILE_CATALOG_VERSIONS,
+  KEYBOARD_PROFILE_IDS,
+  type KeyboardProfileCatalog,
+} from "../features/action/keyboardProfiles";
+import { AndroidImeCatalog } from "../features/action/AndroidImeCatalog";
+import { createInstalledImeKeySession } from "../features/action/InstalledImeKeySession";
+import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import {
   SEND_KEYS_OPERATIONS,
   SEND_KEYS_SEMANTIC_KEYS,
@@ -175,11 +184,29 @@ export const shakeSchema = addDeviceTargetingToSchema(
 
 export const keyboardSchema = addDeviceTargetingToSchema(
   z.object({
-    action: z.enum(["open", "close", "detect", "setProfile"]).describe("Keyboard action"),
+    action: z
+      .enum([
+        "open",
+        "close",
+        "detect",
+        "setProfile",
+        "listProfiles",
+        "listImes",
+        "setIme",
+        "tapImeKey",
+      ])
+      .describe(
+        "Keyboard action; listProfiles returns AutoMobile behavior models and listImes returns installed Android input methods",
+      ),
     profile: z
       .enum(KEYBOARD_PROFILE_IDS)
       .optional()
-      .describe("Android keyboard behavior profile; required for setProfile"),
+      .describe("AutoMobile keyboard behavior profile; required for setProfile"),
+    imeId: z.string().optional().describe("Installed Android IME component; required for setIme"),
+    key: z
+      .string()
+      .optional()
+      .describe("Exact visible key text or accessibility label; required for tapImeKey"),
     // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
     // not required — a device handle from getAndroid/getApple is sufficient on
     // its own.
@@ -206,11 +233,57 @@ export async function setKeyboardProfileForTool(
       "The installed control-proxy build does not support keyboard profiles; update/re-cut the APK.",
     );
   }
-  const result = await profileClient.setKeyboardProfile(profile);
+  const result = await withAndroidImeLock(device.deviceId, () =>
+    profileClient.setKeyboardProfile(profile),
+  );
   if (!result.success) {
     throw new ActionableError(result.error ?? "Failed to set keyboard profile.");
   }
   return { activeProfileId: result.activeProfileId, previousProfileId: result.previousProfileId };
+}
+
+export async function listKeyboardProfilesForTool(
+  device: BootedDevice,
+  client?: Pick<AndroidCtrlProxyClient, "supportsCommand" | "listKeyboardProfiles">,
+): Promise<KeyboardProfileCatalog> {
+  if (device.platform !== "android") {
+    throw new ActionableError(
+      "AutoMobile keyboard profiles are Android-only; select an Android device.",
+    );
+  }
+  const profileClient = client ?? AndroidCtrlProxyClient.getInstance(device);
+  const command = "request_list_keyboard_profiles";
+  if (!(await profileClient.supportsCommand(command))) {
+    throw new ActionableError(
+      "The installed control-proxy build does not support keyboard profile catalogs; update/re-cut the APK.",
+    );
+  }
+  const catalog = await profileClient.listKeyboardProfiles();
+  if (!catalog.success) {
+    throw new ActionableError(catalog.error ?? "Failed to list AutoMobile keyboard profiles.");
+  }
+  validateKeyboardProfileCatalog(catalog);
+  return catalog;
+}
+
+function validateKeyboardProfileCatalog(catalog: KeyboardProfileCatalog): void {
+  if (catalog.catalogId !== KEYBOARD_PROFILE_CATALOG_ID) {
+    throw new ActionableError(`Unsupported keyboard profile catalog '${catalog.catalogId}'.`);
+  }
+  if (
+    catalog.catalogVersion === undefined ||
+    !KEYBOARD_PROFILE_CATALOG_VERSIONS.some((version) => version === catalog.catalogVersion)
+  ) {
+    throw new ActionableError(
+      `Unsupported keyboard profile catalog version '${catalog.catalogVersion ?? "missing"}'.`,
+    );
+  }
+  if (!catalog.profiles?.length || !catalog.activeProfileId) {
+    throw new ActionableError("The AutoMobile keyboard profile catalog is incomplete.");
+  }
+  if (!catalog.profiles.some(({ id }) => id === catalog.activeProfileId)) {
+    throw new ActionableError("The active AutoMobile keyboard profile is not in its catalog.");
+  }
 }
 
 const tapOnSelectorSchema = z
@@ -746,7 +819,7 @@ const sendKeysCommandSchema = withCanonicalDiscriminatedUnionJsonSchema(
           .enum(SEND_KEYS_TYPING_MODES)
           .default("auto")
           .describe(
-            "Android delivery mode. ime is an opt-in companion input method for WYSIWYG/markdown rich-text editors. iOS accepts these values for cross-platform plans and reports xcuiTypeText as the resolved mode",
+            "Android delivery mode. auto uses the AutoMobile IME when supported, otherwise eventAll for insert or a11y for replace. Explicit ime commits text; imeKeyEvents dispatches printable ASCII key events through the IME input connection, requires a compatible CtrlProxy APK, and does not verify resulting editor text. iOS reports xcuiTypeText as the resolved mode",
           ),
         keyboardProfile: z
           .enum(KEYBOARD_PROFILE_IDS)
@@ -1992,6 +2065,28 @@ const resolveClearAllAttributionLabel = async (
 // Tool Registration
 // ============================================================================
 
+async function handleInstalledImeAction(device: BootedDevice, args: KeyboardArgs) {
+  if (device.platform !== "android") {
+    throw new ActionableError("Installed IME actions are Android-only; select an Android device.");
+  }
+  if (args.action === "tapImeKey") {
+    if (!args.imeId || !args.key) {
+      throw new ActionableError("tapImeKey requires imeId and key.");
+    }
+    return createJSONToolResponse(
+      await createInstalledImeKeySession(device).tapKey(args.imeId, args.key),
+    );
+  }
+  const catalog = new AndroidImeCatalog(defaultAdbClientFactory.create(device), device.deviceId);
+  if (args.action === "listImes") {
+    return createJSONToolResponse(await catalog.list());
+  }
+  if (!args.imeId) {
+    throw new ActionableError("keyboard setIme requires imeId from listImes.");
+  }
+  return createJSONToolResponse(await catalog.select(args.imeId));
+}
+
 export function registerInteractionTools() {
   // tapOn, tapAny, dragAndDrop, selectAllText, pressButton, and swipeOn handlers
   // are defined at module scope (each with an
@@ -2493,6 +2588,12 @@ export function registerInteractionTools() {
       if (args.action === "setProfile") {
         return createJSONToolResponse(await setKeyboardProfileForTool(device, args.profile));
       }
+      if (args.action === "listProfiles") {
+        return createJSONToolResponse(await listKeyboardProfilesForTool(device));
+      }
+      if (args.action === "listImes" || args.action === "setIme" || args.action === "tapImeKey") {
+        return handleInstalledImeAction(device, args);
+      }
       const keyboard = new Keyboard(device);
       const result = await keyboard.execute(args.action);
 
@@ -2667,7 +2768,7 @@ export function registerInteractionTools() {
 
   ToolRegistry.registerDeviceAware(
     "keyboard",
-    "Open, close, detect, or switch the on-screen keyboard profile",
+    "Open, close, detect, list/select installed Android IMEs, or switch the AutoMobile typing profile",
     keyboardSchema,
     keyboardHandler,
     { defaultEnabled: true },

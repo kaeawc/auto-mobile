@@ -64,6 +64,9 @@ import dev.jasonpearson.automobile.protocol.FrameMetricsData
 import dev.jasonpearson.automobile.protocol.FrameMetricsEventResponse
 import dev.jasonpearson.automobile.protocol.HandledExceptionData
 import dev.jasonpearson.automobile.protocol.HandledExceptionEvent
+import dev.jasonpearson.automobile.protocol.ImeTextDelivery
+import dev.jasonpearson.automobile.protocol.KeyboardProfileBehaviorInfo
+import dev.jasonpearson.automobile.protocol.KeyboardProfileInfo
 import dev.jasonpearson.automobile.protocol.LifecycleEventData
 import dev.jasonpearson.automobile.protocol.LifecycleEventResponse
 import dev.jasonpearson.automobile.protocol.NavigationEventData
@@ -99,10 +102,12 @@ import java.security.MessageDigest
 import java.util.Collections
 import java.util.IdentityHashMap
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.coroutines.resume
 import kotlin.math.max
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -575,6 +580,15 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
    * thread.
    */
   private val gestureEndRequestIds = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+  private class ImeCommitState {
+    val cancelled = AtomicBoolean(false)
+    val finished = CompletableDeferred<Boolean>()
+  }
+
+  // Cancelled IDs remain tombstoned until service shutdown. Request IDs are UUIDs; retaining a
+  // cancellation prevents a delayed request from starting after its cancellation was acknowledged.
+  private val imeCommitStates = java.util.concurrent.ConcurrentHashMap<String, ImeCommitState>()
 
   /**
    * Launches request-correlated raw work with [RequestIdContext] attached so [serviceScopeGuard]
@@ -1991,28 +2005,100 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   override fun requestInsertText(requestId: String?, text: String) =
     performInsertText(requestId, text)
 
-  override fun requestCommitText(requestId: String?, text: String, priorImeId: String?) {
+  override fun requestCommitText(requestId: String?, text: String, priorImeId: String?) =
+    requestCommitText(requestId, text, priorImeId, ImeTextDelivery.COMMIT)
+
+  override fun requestCommitText(
+    requestId: String?,
+    text: String,
+    priorImeId: String?,
+    delivery: ImeTextDelivery,
+  ) {
     val start = System.currentTimeMillis()
-    val ime = CtrlProxyIme.current()
-    if (ime == null) {
+    val state = requestId?.let { imeCommitStates.computeIfAbsent(it) { ImeCommitState() } }
+    if (state?.cancelled?.get() == true) {
       launchRequestScope(requestId) {
-        broadcastCommitTextResult(
-          requestId,
-          false,
-          "IME not active; ime set required",
-          System.currentTimeMillis() - start,
-        )
+        broadcastCommitTextResult(requestId, false, "IME commit cancelled", 0L, false)
       }
       return
     }
-    ime.commitText(text, priorImeId) { result ->
-      launchRequestScope(requestId) {
+    launchRequestScope(requestId) {
+      fun finish(partialApplication: Boolean) {
+        state?.finished?.complete(partialApplication)
+        if (state?.cancelled?.get() == false) imeCommitStates.remove(requestId, state)
+      }
+      // `ime set` can return before Android creates the InputMethodService. Give activation a
+      // bounded window; the IME separately waits for its editor binding.
+      val readyDeadline = android.os.SystemClock.uptimeMillis() + 2_000L
+      var ime = CtrlProxyIme.current()
+      while (
+        ime == null &&
+          state?.cancelled?.get() != true &&
+          android.os.SystemClock.uptimeMillis() < readyDeadline
+      ) {
+        kotlinx.coroutines.delay(50L)
+        ime = CtrlProxyIme.current()
+      }
+      if (state?.cancelled?.get() == true) {
+        finish(false)
         broadcastCommitTextResult(
           requestId,
-          result.success,
-          result.error,
+          false,
+          "IME commit cancelled",
           System.currentTimeMillis() - start,
+          false,
         )
+        return@launchRequestScope
+      }
+      if (ime == null) {
+        finish(false)
+        broadcastCommitTextResult(
+          requestId,
+          false,
+          "IME service did not start within timeout",
+          System.currentTimeMillis() - start,
+          false,
+        )
+        return@launchRequestScope
+      }
+      ime.commitText(text, priorImeId, { state?.cancelled?.get() == true }, delivery) { result ->
+        finish(result.partialApplication)
+        launchRequestScope(requestId) {
+          broadcastCommitTextResult(
+            requestId,
+            result.success,
+            result.error,
+            System.currentTimeMillis() - start,
+            result.partialApplication,
+          )
+        }
+      }
+    }
+  }
+
+  override fun requestCancelImeCommit(requestId: String?, targetRequestId: String) {
+    val tombstone =
+      ImeCommitState().apply {
+        cancelled.set(true)
+        finished.complete(false)
+      }
+    val state = imeCommitStates.putIfAbsent(targetRequestId, tombstone) ?: tombstone
+    state.cancelled.set(true)
+    // An absent target is a tombstone: the original frame may still be queued on another socket.
+    launchRequestScope(requestId) {
+      val partialApplication = state.finished.await()
+      resultBroadcaster.guard(requestId, "cancel_ime_commit_result") {
+        webSocketServer.broadcastWithPerfSync { perfTiming ->
+          webSocketFrameJson(
+            "cancel_ime_commit_result",
+            requestId = requestId,
+            perfTiming = perfTiming,
+          ) {
+            put("success", true)
+            put("targetRequestId", targetRequestId)
+            put("partialApplication", partialApplication)
+          }
+        }
       }
     }
   }
@@ -2038,6 +2124,56 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
     launchRequestScope(requestId) {
       broadcastSetKeyboardProfileResult(requestId, true, profile.id, previous)
+    }
+  }
+
+  override fun requestListKeyboardProfiles(
+    requestId: String?,
+    supportedCatalogVersions: List<Int>,
+  ) {
+    val catalogVersion = KeyboardProfiles.negotiateCatalogVersion(supportedCatalogVersions)
+    if (catalogVersion == null) {
+      launchRequestScope(requestId) {
+        broadcastKeyboardProfileCatalog(
+          requestId = requestId,
+          success = false,
+          supportedCatalogVersions = KeyboardProfiles.SUPPORTED_CATALOG_VERSIONS,
+          error =
+            "No mutually supported keyboard profile catalog version; device supports " +
+              KeyboardProfiles.SUPPORTED_CATALOG_VERSIONS.joinToString(", "),
+        )
+      }
+      return
+    }
+    val profiles =
+      KeyboardProfiles.all.map { profile ->
+        KeyboardProfileInfo(
+          id = profile.id,
+          displayName = profile.displayName,
+          version = profile.version,
+          evidenceStatus = profile.evidenceStatus,
+          evidenceNote = profile.evidenceNote,
+          behavior =
+            KeyboardProfileBehaviorInfo(
+              composeWords = profile.behavior.composeWords,
+              enterStrategy = profile.behavior.enterStrategy.name,
+              backspaceStrategy = profile.behavior.backspaceStrategy.name,
+              recomposeOnCursorMove = profile.behavior.recomposeOnCursorMove,
+              recomposeOnBackspaceIntoWord = profile.behavior.recomposeOnBackspaceIntoWord,
+              batchEdits = profile.behavior.batchEdits,
+            ),
+        )
+      }
+    val activeProfileId = SharedPreferencesKeyboardProfileStore(this).activeProfileId()
+    launchRequestScope(requestId) {
+      broadcastKeyboardProfileCatalog(
+        requestId = requestId,
+        success = true,
+        catalogVersion = catalogVersion,
+        supportedCatalogVersions = KeyboardProfiles.SUPPORTED_CATALOG_VERSIONS,
+        activeProfileId = activeProfileId,
+        profiles = profiles,
+      )
     }
   }
 
@@ -6010,6 +6146,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     success: Boolean,
     error: String?,
     totalTimeMs: Long,
+    partialApplication: Boolean,
   ) {
     if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
       Log.d(TAG, "WebSocket server not running, skipping commit text result broadcast")
@@ -6021,6 +6158,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         webSocketFrameJson("commit_text_result", requestId = requestId, perfTiming = perfTiming) {
           put("success", success)
           put("totalTimeMs", totalTimeMs)
+          if (partialApplication) put("partialApplication", true)
           if (error != null) {
             put("error", error)
           }
@@ -6062,6 +6200,39 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         TAG,
         "Broadcasted keyboard profile result to ${webSocketServer.getConnectionCount()} clients",
       )
+    }
+  }
+
+  private suspend fun broadcastKeyboardProfileCatalog(
+    requestId: String?,
+    success: Boolean,
+    catalogVersion: Int? = null,
+    supportedCatalogVersions: List<Int>,
+    activeProfileId: String? = null,
+    profiles: List<KeyboardProfileInfo> = emptyList(),
+    error: String? = null,
+  ) {
+    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
+      Log.d(TAG, "WebSocket server not running, skipping keyboard profile catalog response")
+      return
+    }
+
+    resultBroadcaster.guard(requestId, "keyboard_profiles_result") {
+      webSocketServer.broadcastWithPerfSync { perfTiming ->
+        webSocketFrameJson(
+          "keyboard_profiles_result",
+          requestId = requestId,
+          perfTiming = perfTiming,
+        ) {
+          put("success", success)
+          put("catalogId", "automobile_behavior_profiles")
+          if (catalogVersion != null) put("catalogVersion", catalogVersion)
+          put("supportedCatalogVersions", jsonCompact.encodeToJsonElement(supportedCatalogVersions))
+          if (activeProfileId != null) put("activeProfileId", activeProfileId)
+          if (success) put("profiles", jsonCompact.encodeToJsonElement(profiles))
+          if (error != null) put("error", error)
+        }
+      }
     }
   }
 

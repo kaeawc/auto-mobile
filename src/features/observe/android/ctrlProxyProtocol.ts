@@ -198,6 +198,13 @@ export interface RequestCommitTextMessage {
   requestId: string;
   text: string;
   priorImeId?: string;
+  delivery?: "keyEvents";
+}
+
+export interface RequestCancelImeCommitMessage {
+  type: "request_cancel_ime_commit";
+  requestId: string;
+  targetRequestId: string;
 }
 
 /** `@SerialName("request_set_keyboard_profile")` → `RequestSetKeyboardProfile` */
@@ -205,6 +212,13 @@ export interface RequestSetKeyboardProfileMessage {
   type: "request_set_keyboard_profile";
   requestId: string;
   profileId: string;
+}
+
+/** `@SerialName("request_list_keyboard_profiles")` → `RequestListKeyboardProfiles` */
+export interface RequestListKeyboardProfilesMessage {
+  type: "request_list_keyboard_profiles";
+  requestId: string;
+  supportedCatalogVersions: number[];
 }
 
 /** `@SerialName("request_ime_action")` → `RequestImeAction` */
@@ -623,7 +637,9 @@ export type CtrlProxyRequest =
   | RequestSetTextMessage
   | RequestInsertTextMessage
   | RequestCommitTextMessage
+  | RequestCancelImeCommitMessage
   | RequestSetKeyboardProfileMessage
+  | RequestListKeyboardProfilesMessage
   | RequestImeActionMessage
   | RequestSelectAllMessage
   | RequestActionMessage
@@ -696,7 +712,9 @@ const REQUEST_TYPE_REGISTRY: Record<CtrlProxyRequestType, true> = {
   request_set_text: true,
   request_insert_text: true,
   request_commit_text: true,
+  request_cancel_ime_commit: true,
   request_set_keyboard_profile: true,
+  request_list_keyboard_profiles: true,
   request_ime_action: true,
   request_select_all: true,
   request_action: true,

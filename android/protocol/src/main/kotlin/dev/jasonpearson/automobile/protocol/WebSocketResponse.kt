@@ -416,6 +416,41 @@ data class SetKeyboardProfileResult(
 ) : WebSocketResponse()
 
 @Serializable
+data class KeyboardProfileBehaviorInfo(
+  val composeWords: Boolean,
+  val enterStrategy: String,
+  val backspaceStrategy: String,
+  val recomposeOnCursorMove: Boolean,
+  val recomposeOnBackspaceIntoWord: Boolean,
+  val batchEdits: Boolean,
+)
+
+@Serializable
+data class KeyboardProfileInfo(
+  val id: String,
+  val displayName: String,
+  val version: Int,
+  val evidenceStatus: String,
+  val evidenceNote: String,
+  val behavior: KeyboardProfileBehaviorInfo,
+)
+
+@Serializable
+@SerialName("keyboard_profiles_result")
+data class KeyboardProfileCatalogResult(
+  override val timestamp: Long,
+  val requestId: String? = null,
+  val success: Boolean,
+  val catalogId: String,
+  val catalogVersion: Int? = null,
+  val supportedCatalogVersions: List<Int> = emptyList(),
+  val activeProfileId: String? = null,
+  val profiles: List<KeyboardProfileInfo> = emptyList(),
+  val error: String? = null,
+  val perfTiming: String? = null,
+) : WebSocketResponse()
+
+@Serializable
 @SerialName("ime_action_result")
 data class ImeActionResult(
   override val timestamp: Long,

@@ -21,6 +21,7 @@ import dev.jasonpearson.automobile.protocol.RemoveCaCert
 import dev.jasonpearson.automobile.protocol.RemovePreference
 import dev.jasonpearson.automobile.protocol.RequestAction
 import dev.jasonpearson.automobile.protocol.RequestActivateAccessibilityLink
+import dev.jasonpearson.automobile.protocol.RequestCancelImeCommit
 import dev.jasonpearson.automobile.protocol.RequestClipboard
 import dev.jasonpearson.automobile.protocol.RequestCommitText
 import dev.jasonpearson.automobile.protocol.RequestDeviceInfo
@@ -36,6 +37,7 @@ import dev.jasonpearson.automobile.protocol.RequestImeAction
 import dev.jasonpearson.automobile.protocol.RequestInsertText
 import dev.jasonpearson.automobile.protocol.RequestInstalledPackages
 import dev.jasonpearson.automobile.protocol.RequestLaunchIntent
+import dev.jasonpearson.automobile.protocol.RequestListKeyboardProfiles
 import dev.jasonpearson.automobile.protocol.RequestPackageInfo
 import dev.jasonpearson.automobile.protocol.RequestPinch
 import dev.jasonpearson.automobile.protocol.RequestScreenshot
@@ -267,9 +269,18 @@ class CtrlProxyMessageHandler(
         }
       is RequestInsertText -> actions.requestInsertText(request.requestId, request.text)
       is RequestCommitText ->
-        actions.requestCommitText(request.requestId, request.text, request.priorImeId)
+        actions.requestCommitText(
+          request.requestId,
+          request.text,
+          request.priorImeId,
+          request.delivery,
+        )
+      is RequestCancelImeCommit ->
+        actions.requestCancelImeCommit(request.requestId, request.targetRequestId)
       is RequestSetKeyboardProfile ->
         actions.requestSetKeyboardProfile(request.requestId, request.profileId)
+      is RequestListKeyboardProfiles ->
+        actions.requestListKeyboardProfiles(request.requestId, request.supportedCatalogVersions)
       is RequestImeAction ->
         if (request.frameContext == null) {
           actions.requestImeAction(request.requestId, request.action)

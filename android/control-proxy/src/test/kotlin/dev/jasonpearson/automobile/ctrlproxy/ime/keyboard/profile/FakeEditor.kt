@@ -47,6 +47,14 @@ internal class FakeEditor(initialText: String = "") {
           replace(start, end, op.text)
           composingStart = start
           composingEnd = start + op.text.length
+          val cursor =
+            if (op.newCursorPosition > 0) {
+              start + op.text.length + op.newCursorPosition - 1
+            } else {
+              start + op.newCursorPosition
+            }
+          selectionStart = cursor.coerceIn(composingStart, composingEnd)
+          selectionEnd = selectionStart
         }
         ImeOp.FinishComposingText -> clearComposing()
         is ImeOp.SetComposingRegion -> {
@@ -54,6 +62,7 @@ internal class FakeEditor(initialText: String = "") {
           composingStart = op.start
           composingEnd = op.end
         }
+        is ImeOp.SetSelection -> setSelection(op.start, op.end)
         is ImeOp.DeleteSurroundingText -> {
           val start = (selectionStart - op.before).coerceAtLeast(0)
           val end = (selectionEnd + op.after).coerceAtMost(text.length)

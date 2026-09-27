@@ -131,11 +131,11 @@ import {
   tryAcquireExclusiveLock,
 } from "../../../utils/fileLock";
 import { ensureSecureSharedAutoMobileDirSync } from "../../../utils/tempDir";
-import type { BaseResult } from "../shared/types";
 
 // Import delegates
 import { CtrlProxyGestures } from "./CtrlProxyGestures";
-import { CtrlProxyText } from "./CtrlProxyText";
+import { CtrlProxyText, type ImeCommitActionResult } from "./CtrlProxyText";
+import type { KeyboardProfileCatalog } from "../../action/keyboardProfiles";
 import { CtrlProxyHierarchy } from "./CtrlProxyHierarchy";
 import { CtrlProxyStorage } from "./CtrlProxyStorage";
 import { CtrlProxyCertificates, type CertificateFileSystem } from "./CtrlProxyCertificates";
@@ -331,12 +331,30 @@ interface WsSetTextResultMessage extends WsRequestBase {
 
 interface WsCommitTextResultMessage extends WsRequestBase {
   type: "commit_text_result";
+  partialApplication?: boolean;
+}
+
+interface WsCancelImeCommitResultMessage extends WsRequestBase {
+  type: "cancel_ime_commit_result";
+  targetRequestId?: string;
+  partialApplication?: boolean;
 }
 
 interface WsSetKeyboardProfileResultMessage extends WsRequestBase {
   type: "set_keyboard_profile_result";
   activeProfileId?: string;
   previousProfileId?: string;
+}
+
+interface WsKeyboardProfilesResultMessage extends WsMessageBase {
+  type: "keyboard_profiles_result";
+  requestId: string;
+  success: boolean;
+  catalogId: string;
+  catalogVersion?: number;
+  supportedCatalogVersions?: number[];
+  activeProfileId?: string;
+  profiles?: KeyboardProfileCatalog["profiles"];
 }
 
 interface WsInsertTextResultMessage extends WsRequestBase {
@@ -809,7 +827,9 @@ type WebSocketMessage =
   | WsPinchResultMessage
   | WsSetTextResultMessage
   | WsCommitTextResultMessage
+  | WsCancelImeCommitResultMessage
   | WsSetKeyboardProfileResultMessage
+  | WsKeyboardProfilesResultMessage
   | WsInsertTextResultMessage
   | WsImeActionResultMessage
   | WsSelectAllResultMessage
@@ -951,7 +971,9 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
     priorImeId?: string,
     timeoutMs?: number,
     perf?: PerformanceTracker,
-  ): Promise<BaseResult>;
+    signal?: AbortSignal,
+    delivery?: "commit" | "keyEvents",
+  ): Promise<ImeCommitActionResult>;
 
   setKeyboardProfile(
     profileId: string,
@@ -963,6 +985,11 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
     previousProfileId?: string;
     error?: string;
   }>;
+
+  listKeyboardProfiles(
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+  ): Promise<KeyboardProfileCatalog>;
 
   requestClearText(
     resourceId?: string,
@@ -2551,8 +2578,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     priorImeId?: string,
     timeoutMs?: number,
     perf?: PerformanceTracker,
-  ): Promise<BaseResult> {
-    return this.text.commitViaIme(text, priorImeId, timeoutMs, perf);
+    signal?: AbortSignal,
+    delivery?: "commit" | "keyEvents",
+  ): Promise<ImeCommitActionResult> {
+    return this.text.commitViaIme(text, priorImeId, timeoutMs, perf, signal, delivery);
   }
 
   async setKeyboardProfile(
@@ -2566,6 +2595,13 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     error?: string;
   }> {
     return this.text.setKeyboardProfile(profileId, timeoutMs, perf);
+  }
+
+  async listKeyboardProfiles(
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+  ): Promise<KeyboardProfileCatalog> {
+    return this.text.listKeyboardProfiles(timeoutMs, perf);
   }
 
   async requestClearText(
@@ -4242,11 +4278,21 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       }
 
       if (message.type === "commit_text_result" && message.requestId) {
-        this.requestManager.resolve<A11ySetTextResult>(message.requestId, {
+        this.requestManager.resolve<ImeCommitActionResult>(message.requestId, {
           success: message.success,
           totalTimeMs: message.totalTimeMs,
           error: message.error,
+          partialApplication: message.partialApplication,
           perfTiming: message.perfTiming,
+        });
+      }
+
+      if (message.type === "cancel_ime_commit_result" && message.requestId) {
+        this.requestManager.resolve(message.requestId, {
+          success: message.success,
+          targetRequestId: message.targetRequestId,
+          partialApplication: message.partialApplication,
+          error: message.error,
         });
       }
 
@@ -4255,6 +4301,18 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           success: message.success,
           activeProfileId: message.activeProfileId,
           previousProfileId: message.previousProfileId,
+          error: message.error,
+        });
+      }
+
+      if (message.type === "keyboard_profiles_result" && message.requestId) {
+        this.requestManager.resolve<KeyboardProfileCatalog>(message.requestId, {
+          success: message.success,
+          catalogId: message.catalogId,
+          catalogVersion: message.catalogVersion,
+          supportedCatalogVersions: message.supportedCatalogVersions,
+          activeProfileId: message.activeProfileId,
+          profiles: message.profiles,
           error: message.error,
         });
       }

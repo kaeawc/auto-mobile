@@ -27,4 +27,16 @@ class KeyboardProfilesTest {
     }
     assertNull(KeyboardProfiles.byId("unknown"))
   }
+
+  @Test
+  fun `catalog and profile versions preserve legacy ids`() {
+    assertEquals(1, KeyboardProfiles.CATALOG_VERSION)
+    assertEquals(listOf("direct", "gboard", "samsung"), KeyboardProfiles.all.map { it.id })
+    assertTrue(KeyboardProfiles.all.all { it.version == 1 })
+    assertEquals(listOf(1), KeyboardProfiles.SUPPORTED_CATALOG_VERSIONS)
+    assertEquals("experimental", KeyboardProfiles.SAMSUNG.evidenceStatus)
+    assertTrue(KeyboardProfiles.SAMSUNG.evidenceNote.contains("comparison remains pending"))
+    assertEquals(1, KeyboardProfiles.negotiateCatalogVersion(listOf(2, 1)))
+    assertNull(KeyboardProfiles.negotiateCatalogVersion(listOf(2)))
+  }
 }

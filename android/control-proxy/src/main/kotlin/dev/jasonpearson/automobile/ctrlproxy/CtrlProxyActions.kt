@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
 import dev.jasonpearson.automobile.ctrlproxy.models.HighlightShape
+import dev.jasonpearson.automobile.protocol.ImeTextDelivery
 import dev.jasonpearson.automobile.protocol.NodeSelector
 
 /**
@@ -140,7 +141,18 @@ interface CtrlProxyActions {
 
   fun requestCommitText(requestId: String?, text: String, priorImeId: String?)
 
+  fun requestCommitText(
+    requestId: String?,
+    text: String,
+    priorImeId: String?,
+    delivery: ImeTextDelivery,
+  ) = requestCommitText(requestId, text, priorImeId)
+
+  fun requestCancelImeCommit(requestId: String?, targetRequestId: String) {}
+
   fun requestSetKeyboardProfile(requestId: String?, profileId: String)
+
+  fun requestListKeyboardProfiles(requestId: String?, supportedCatalogVersions: List<Int>)
 
   fun requestImeAction(requestId: String?, action: String)
 

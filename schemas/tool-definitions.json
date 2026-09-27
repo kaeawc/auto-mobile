@@ -7914,6 +7914,11 @@
           "description": "On iOS, automatically tap Open when a system 'Open in <app>?' alert appears",
           "type": "boolean"
         },
+        "chooserAppPackage": {
+          "description": "On Android, select this exact package if opening the URL displays an intent chooser",
+          "type": "string",
+          "minLength": 1
+        },
         "platform": {
           "type": "string",
           "enum": ["android", "ios"]

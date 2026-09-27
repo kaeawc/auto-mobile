@@ -6,9 +6,11 @@ const metadata = (
   label: string | null,
   nodes: unknown[],
   packageName?: string,
+  listId?: string,
 ): ChooserAppMetadata => ({
   getLabel: async () => label,
-  getFreshHierarchy: async () => ({ ...hierarchy(nodes), packageName, updatedAt: 101 }) as any,
+  getFreshHierarchy: async () =>
+    ({ ...hierarchy(nodes, listId), packageName, updatedAt: 101 }) as any,
 });
 
 const target = "com.example.app";
@@ -23,17 +25,17 @@ const row = (packageName: string, top: number) => ({
     },
   ],
 });
-const hierarchy = (nodes: unknown[]) => ({
+const hierarchy = (nodes: unknown[], listId = "android:id/resolver_list") => ({
   updatedAt: 100,
   hierarchy: {
     node: {
       class: "com.android.internal.app.ChooserActivity",
-      node: [{ "resource-id": "android:id/resolver_list", node: nodes }],
+      node: [{ "resource-id": listId, node: nodes }],
     },
   },
 });
 
-async function choose(nodes: unknown[], label: string | null = null) {
+async function choose(nodes: unknown[], label: string | null = null, listId?: string) {
   const adb = new FakeAdbExecutor();
   const manager = new DeepLinkManager(
     { platform: "android", deviceId: "fake", name: "fake" },
@@ -42,9 +44,13 @@ async function choose(nodes: unknown[], label: string | null = null) {
     null,
     undefined,
     undefined,
-    metadata(label, nodes),
+    metadata(label, nodes, undefined, listId),
   );
-  const result = await manager.handleIntentChooser(hierarchy(nodes) as any, "custom", target);
+  const result = await manager.handleIntentChooser(
+    hierarchy(nodes, listId) as any,
+    "custom",
+    target,
+  );
   return { result, commands: adb.getExecutedCommands() };
 }
 
@@ -83,6 +89,15 @@ describe("custom intent chooser label fallback", () => {
     const { result, commands } = await choose(
       [labelRow("Example Beta", 0), labelRow("Example", 100)],
       "Example",
+    );
+    expect(result.success).toBe(true);
+    expect(commands).toEqual(["shell input tap 50 120"]);
+  });
+  test("matches a label-only row in the legacy android:id/list container", async () => {
+    const { result, commands } = await choose(
+      [labelRow("Example Beta", 0), labelRow("Example", 100)],
+      "Example",
+      "android:id/list",
     );
     expect(result.success).toBe(true);
     expect(commands).toEqual(["shell input tap 50 120"]);

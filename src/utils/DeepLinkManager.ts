@@ -816,7 +816,7 @@ export class DeepLinkManager implements DeepLinkManager {
         }
         const inAppList = ancestors.some((ancestor) => {
           const id = this.parser.extractNodeProperties(ancestor)["resource-id"];
-          return typeof id === "string" && /(?:^|\/)(?:resolver_list|chooser_list)$/.test(id);
+          return typeof id === "string" && /(?:^|\/)(?:resolver_list|chooser_list|list)$/.test(id);
         });
         if (inAppList) {
           labelRows.set(row, labels);

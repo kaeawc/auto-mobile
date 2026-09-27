@@ -2391,6 +2391,9 @@ export function registerInteractionTools() {
     // entirely when the caller omitted it. Re-validate against the resolved
     // `device.platform` before opening the URL.
     assertActiveWindowWaitForSupportedOnPlatform(device.platform, args.waitFor);
+    if (args.chooserAppPackage && device.platform !== "android") {
+      throw new ActionableError("chooserAppPackage is supported only on Android.");
+    }
 
     const openUrl = new OpenURL(device);
     const opened = await openUrl.execute(args.url);

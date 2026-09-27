@@ -30,6 +30,7 @@ export const SEND_KEYS_TYPING_MODES = [
   "eventAll",
   "eventOnly",
   "ime",
+  "imeKeyEvents",
 ] as const;
 export type SendKeysTypingMode = (typeof SEND_KEYS_TYPING_MODES)[number];
 export type ResolvedSendKeysTypingMode = Exclude<SendKeysTypingMode, "auto"> | "xcuiTypeText";
@@ -161,6 +162,7 @@ export interface SendKeysTextClient {
   clear(): Promise<TextActionResult>;
   ime(action: ImeAction): Promise<TextActionResult>;
   supportsImeCommit(): Promise<boolean>;
+  supportsImeKeyEvents(): Promise<boolean>;
   supportsKeyboardProfiles(): Promise<boolean>;
   setKeyboardProfile(
     id: string,
@@ -169,6 +171,7 @@ export interface SendKeysTextClient {
     text: string,
     priorImeId: string | null,
     signal?: AbortSignal,
+    delivery?: "commit" | "keyEvents",
   ): Promise<TextActionResult>;
 }
 
@@ -377,6 +380,14 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
           autoImeFallback,
           signal,
         );
+      case "imeKeyEvents":
+        return this.executeAndroidImeCommit(
+          text,
+          operation,
+          keyboardProfile,
+          signal,
+          "imeKeyEvents",
+        );
     }
   }
 
@@ -406,13 +417,14 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     operation: SendKeysOperation,
     keyboardProfile: KeyboardProfileId | undefined,
     signal?: AbortSignal,
+    mode: "ime" | "imeKeyEvents" = "ime",
   ): Promise<TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode }> {
     signal?.throwIfAborted();
     // Serialize the whole capture→activate→commit→restore section per device so a
     // second call cannot borrow/restore the IME while this one is mid-flight (#7464).
     return withAndroidImeLock(
       this.device.deviceId,
-      () => this.runAndroidImeCommit(text, operation, keyboardProfile, signal),
+      () => this.runAndroidImeCommit(text, operation, keyboardProfile, signal, mode),
       signal,
     );
   }
@@ -422,6 +434,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     operation: SendKeysOperation,
     keyboardProfile: KeyboardProfileId | undefined,
     signal?: AbortSignal,
+    mode: "ime" | "imeKeyEvents" = "ime",
   ): Promise<TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode }> {
     signal?.throwIfAborted();
     if (!(await this.textClient.supportsImeCommit())) {
@@ -430,10 +443,16 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       logger.warn(`[SendKeys] ${error}`);
       return { success: false, error };
     }
+    if (mode === "imeKeyEvents" && !(await this.textClient.supportsImeKeyEvents())) {
+      return {
+        success: false,
+        error: "IME key events are unavailable: update the control-proxy APK.",
+      };
+    }
 
     const profileSupport = await this.checkKeyboardProfileSupport(keyboardProfile);
     if (!profileSupport.success) {
-      return { ...profileSupport, resolvedMode: "ime" };
+      return { ...profileSupport, resolvedMode: mode };
     }
 
     const priorResult = await this.readDefaultIme();
@@ -447,9 +466,29 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     }
     const wasEnabled = enabledResult.enabled;
 
+    return this.commitWithActiveIme(
+      text,
+      operation,
+      keyboardProfile,
+      prior,
+      wasEnabled,
+      signal,
+      mode,
+    );
+  }
+
+  private async commitWithActiveIme(
+    text: string,
+    operation: SendKeysOperation,
+    keyboardProfile: KeyboardProfileId | undefined,
+    prior: string | null,
+    wasEnabled: boolean,
+    signal?: AbortSignal,
+    mode: "ime" | "imeKeyEvents" = "ime",
+  ): Promise<TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode }> {
     const profileResult = await this.setRequestedKeyboardProfile(keyboardProfile);
     if (!profileResult.success) {
-      return { ...profileResult, resolvedMode: "ime" };
+      return { ...profileResult, resolvedMode: mode };
     }
     const previousProfileId = profileResult.previousProfileId;
 
@@ -464,14 +503,19 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       if (operation === "replace") {
         const clearResult = await this.textClient.clear();
         if (!clearResult.success) {
-          return { ...clearResult, resolvedMode: "ime" };
+          return { ...clearResult, resolvedMode: mode };
         }
       }
-      const result = await this.textClient.commitViaIme(text, prior, signal);
+      const result = await this.textClient.commitViaIme(
+        text,
+        prior,
+        signal,
+        mode === "imeKeyEvents" ? "keyEvents" : "commit",
+      );
       safeToRestore = this.canRestoreAfterImeCommit(result);
       return {
         ...(operation === "replace" ? markPartialAfterMutation(result) : result),
-        resolvedMode: "ime",
+        resolvedMode: mode,
       };
     } finally {
       if (safeToRestore) {
@@ -918,16 +962,18 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         supportsImeCommit: async () =>
           (await client.supportsCommand("request_commit_text")) &&
           (await client.supportsCommand("request_cancel_ime_commit")),
+        supportsImeKeyEvents: async () => client.supportsCommand("ime_key_events_v1"),
         supportsKeyboardProfiles: async () =>
           client.supportsCommand("request_set_keyboard_profile"),
         setKeyboardProfile: async (id) => client.setKeyboardProfile(id),
-        commitViaIme: async (text, priorImeId, signal) => {
+        commitViaIme: async (text, priorImeId, signal, delivery) => {
           const result = await client.commitViaIme(
             text,
             priorImeId ?? undefined,
             undefined,
             undefined,
             signal,
+            delivery,
           );
           return {
             success: result.success,
@@ -949,6 +995,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       clear: async () => client.requestClearText(),
       ime: async (action) => client.requestImeAction(action),
       supportsImeCommit: async () => false,
+      supportsImeKeyEvents: async () => false,
       supportsKeyboardProfiles: async () => false,
       setKeyboardProfile: async () => ({
         success: false,

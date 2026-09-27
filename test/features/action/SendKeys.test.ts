@@ -69,6 +69,7 @@ function focusedAndroidObservation(
 function createTextClient(
   options: {
     supportsImeCommit?: boolean;
+    supportsImeKeyEvents?: boolean;
     supportsKeyboardProfiles?: boolean;
     setKeyboardProfile?: (
       id: string,
@@ -86,6 +87,7 @@ function createTextClient(
 ) {
   const calls: string[] = [];
   const commitViaImeCalls: Array<{ text: string; priorImeId: string | null }> = [];
+  const commitDeliveries: Array<"commit" | "keyEvents" | undefined> = [];
   let supportsImeCommitCalls = 0;
   const client: SendKeysTextClient = {
     replace: async (text) => {
@@ -109,14 +111,16 @@ function createTextClient(
       calls.push("supportsImeCommit");
       return options.supportsImeCommit ?? true;
     },
+    supportsImeKeyEvents: async () => options.supportsImeKeyEvents ?? true,
     supportsKeyboardProfiles: async () => options.supportsKeyboardProfiles ?? true,
     setKeyboardProfile: async (id) => {
       calls.push(`setKeyboardProfile:${id}`);
       return options.setKeyboardProfile?.(id) ?? { success: true, previousProfileId: "direct" };
     },
-    commitViaIme: async (text, priorImeId) => {
+    commitViaIme: async (text, priorImeId, _signal, delivery) => {
       calls.push(`commitViaIme:${text}:${priorImeId ?? "none"}`);
       commitViaImeCalls.push({ text, priorImeId });
+      commitDeliveries.push(delivery);
       return options.commitViaIme ? options.commitViaIme(text, priorImeId) : { success: true };
     },
   };
@@ -124,6 +128,7 @@ function createTextClient(
     client,
     calls,
     commitViaImeCalls,
+    commitDeliveries,
     getSupportsImeCommitCalls: () => supportsImeCommitCalls,
   };
 }
@@ -318,6 +323,44 @@ describe("DefaultSendKeysCommandExecutor", () => {
         expect(textClient.calls).toContain("replace:note `x`");
       }
     }
+  });
+
+  test("explicit IME key events require capability and use event delivery", async () => {
+    const supported = createTextClient();
+    const supportedAdb = new FakeAdbExecutor();
+    supportedAdb.setCommandResponseSequence("shell settings get secure default_input_method", [
+      { stdout: `${priorImeId}\n`, stderr: "" },
+      { stdout: `${commitImeId}\n`, stderr: "" },
+    ]);
+    const executor = new DefaultSendKeysCommandExecutor(
+      androidDevice,
+      createAdbFactory(supportedAdb),
+      createObserver(focusedAndroidObservation()),
+      { textClient: supported.client },
+    );
+    const result = await executor.type({ action: "type", text: "Ab!", mode: "imeKeyEvents" });
+    expect(result).toMatchObject({ success: true, resolvedMode: "imeKeyEvents" });
+    expect(supported.commitDeliveries).toEqual(["keyEvents"]);
+
+    const unsupported = createTextClient({ supportsImeKeyEvents: false });
+    const adb = new FakeAdbExecutor();
+    const unsupportedExecutor = new DefaultSendKeysCommandExecutor(
+      androidDevice,
+      createAdbFactory(adb),
+      createObserver(focusedAndroidObservation()),
+      { textClient: unsupported.client },
+    );
+    const rejected = await unsupportedExecutor.type({
+      action: "type",
+      text: "Ab!",
+      mode: "imeKeyEvents",
+    });
+    expect(rejected).toMatchObject({
+      success: false,
+      error: expect.stringContaining("unavailable"),
+    });
+    expect(unsupported.commitDeliveries).toEqual([]);
+    expect(adb.getExecutedCommands()).toEqual([]);
   });
 
   test("explicit modes take precedence over trigger text and do not auto-fallback", async () => {

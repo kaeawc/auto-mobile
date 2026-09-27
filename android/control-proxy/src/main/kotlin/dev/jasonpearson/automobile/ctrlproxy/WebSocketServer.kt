@@ -303,6 +303,7 @@ class WebSocketServer(
                               "request_activate_accessibility_link",
                               "request_insert_text",
                               "request_commit_text",
+                              "ime_key_events_v1",
                               "request_cancel_ime_commit",
                               "request_set_keyboard_profile",
                               "request_list_keyboard_profiles",

@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.ctrlproxy.ime
 
 import android.text.InputType
+import dev.jasonpearson.automobile.protocol.ImeTextDelivery
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -13,6 +14,55 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [24])
 class ImeCommitDriverTest {
+  @Test
+  fun `key event delivery sends units without committing text`() {
+    val sink = FakeImeCommitSink(inputType = InputType.TYPE_CLASS_TEXT)
+    var result: ImeCommitResult? = null
+    ImeCommitDriver(sink).commit("Ab!", PRIOR_IME_ID, delivery = ImeTextDelivery.KEY_EVENTS) {
+      result = it
+    }
+
+    assertTrue(result!!.success)
+    assertEquals(listOf("A", "b", "!"), sink.sentKeyUnits)
+    assertTrue(sink.committedChars.isEmpty())
+    assertEquals(listOf(PRIOR_IME_ID), sink.switchedImeIds)
+  }
+
+  @Test
+  fun `unsupported key event text fails before any event`() {
+    val sink = FakeImeCommitSink(inputType = InputType.TYPE_CLASS_TEXT)
+    sink.supportedKeyUnits = { units -> units.none { it == "😀" } }
+    var result: ImeCommitResult? = null
+    ImeCommitDriver(sink).commit("a😀", PRIOR_IME_ID, delivery = ImeTextDelivery.KEY_EVENTS) {
+      result = it
+    }
+
+    val outcome = requireNotNull(result)
+    assertFalse(outcome.success)
+    assertFalse(outcome.partialApplication)
+    assertTrue(sink.sentKeyUnits.isEmpty())
+  }
+
+  @Test
+  fun `key event cancellation reports partial application`() {
+    val sink = FakeImeCommitSink(inputType = InputType.TYPE_CLASS_TEXT)
+    var cancelled = false
+    sink.afterKeyUnit = { cancelled = true }
+    var result: ImeCommitResult? = null
+    ImeCommitDriver(sink).commit(
+      "ab",
+      PRIOR_IME_ID,
+      isCancelled = { cancelled },
+      delivery = ImeTextDelivery.KEY_EVENTS,
+    ) {
+      result = it
+    }
+
+    assertEquals(listOf("a"), sink.sentKeyUnits)
+    assertTrue(result!!.partialApplication)
+    assertEquals(listOf(PRIOR_IME_ID), sink.switchedImeIds)
+  }
+
   @Test
   fun `text password field is refused and prior IME is restored`() {
     assertPasswordRefused(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD)
@@ -351,6 +401,9 @@ class ImeCommitDriverTest {
     private val failSync: Boolean = false,
   ) : ImeCommitSink {
     val committedChars = mutableListOf<String>()
+    val sentKeyUnits = mutableListOf<String>()
+    var supportedKeyUnits: (List<String>) -> Boolean = { true }
+    var afterKeyUnit: (() -> Unit)? = null
     val switchedImeIds = mutableListOf<String>()
     val events = mutableListOf<String>()
     val delays = mutableListOf<Long>()
@@ -371,6 +424,14 @@ class ImeCommitDriverTest {
       committedChars.add(ch.toString())
       events.add("char")
       afterCommit?.invoke()
+      return true
+    }
+
+    override fun supportsKeyEvents(units: List<String>): Boolean = supportedKeyUnits(units)
+
+    override fun sendKeyEventUnit(unit: String): Boolean {
+      sentKeyUnits.add(unit)
+      afterKeyUnit?.invoke()
       return true
     }
 

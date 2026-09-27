@@ -198,6 +198,7 @@ export interface RequestCommitTextMessage {
   requestId: string;
   text: string;
   priorImeId?: string;
+  delivery?: "keyEvents";
 }
 
 export interface RequestCancelImeCommitMessage {

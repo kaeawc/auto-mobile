@@ -56,6 +56,7 @@ export class CtrlProxyText extends SharedTextDelegate {
     timeoutMs: number = 10000,
     perf?: PerformanceTracker,
     signal?: AbortSignal,
+    delivery?: "commit" | "keyEvents",
   ): Promise<ImeCommitActionResult> {
     let dispatchedId: string | undefined;
     let timedOut = false;
@@ -65,7 +66,7 @@ export class CtrlProxyText extends SharedTextDelegate {
         idPrefix: "commitText",
         responseType: "commit_text",
         messageType: "request_commit_text",
-        params: { text, priorImeId },
+        params: { text, priorImeId, ...(delivery === "keyEvents" ? { delivery } : {}) },
         timeoutMs,
         perf,
         abortSignal: signal,

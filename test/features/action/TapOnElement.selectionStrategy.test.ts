@@ -12,7 +12,11 @@ const editableElement = (focus: Record<string, unknown>) => ({
   ...focus,
 });
 
-async function executeFocus(element: ReturnType<typeof editableElement>) {
+async function executeFocus(
+  element: ReturnType<typeof editableElement>,
+  postTapHierarchy = { hierarchy: { node: {} } },
+  elementId?: string,
+) {
   const fakeSelector = new FakeElementSelector(element as any);
   let tapped = false;
   const tapOnElement = new TapOnElement(
@@ -32,7 +36,7 @@ async function executeFocus(element: ReturnType<typeof editableElement>) {
       selectionStateTracker: { finalize: async () => [] } as any,
     },
   );
-  const observation = { viewHierarchy: { hierarchy: { node: {} } } };
+  const observation = { viewHierarchy: postTapHierarchy };
   (tapOnElement as any).observedInteraction = async (
     action: (currentObservation: typeof observation) => Promise<Record<string, unknown>>,
   ) => ({ ...(await action(observation)), observation });
@@ -48,7 +52,9 @@ async function executeFocus(element: ReturnType<typeof editableElement>) {
   (tapOnElement as any).recordDeferredPredictionOutcome = async () => {};
   (tapOnElement as any).enforceFreshnessConsistencyWithEffect = () => {};
 
-  const result = await tapOnElement.execute({ text: "Phone", action: "focus" });
+  const result = await tapOnElement.execute(
+    elementId ? { elementId, action: "focus" } : { text: "Phone", action: "focus" },
+  );
   return { result, tapped };
 }
 
@@ -162,5 +168,49 @@ describe("TapOnElement selectionStrategy", () => {
     expect(result.wasAlreadyFocused).toBe(true);
     expect(result.focusVerified).toBe(true);
     expect(result.success).toBe(true);
+  });
+
+  test("verifies focus after an s2 id changes on the post-tap Compose field (#7758)", async () => {
+    const before = editableElement({
+      "resource-id": undefined,
+      "view-id": "s2-35973cc76070aa26",
+      focused: false,
+    });
+    const after = {
+      ...before,
+      "view-id": "s2-7e6d952ea5fe0ddf",
+      focused: true,
+      node: [{ text: "Email" }],
+    };
+    const { result, tapped } = await executeFocus(
+      before,
+      { hierarchy: { node: after } },
+      "s2-35973cc76070aa26",
+    );
+
+    expect(tapped).toBe(true);
+    expect(result.success).toBe(true);
+    expect(result.focusVerified).toBe(true);
+  });
+
+  test("does not accept keyboard focus on a different editable field (#7758)", async () => {
+    const before = editableElement({
+      "resource-id": undefined,
+      "view-id": "s2-35973cc76070aa26",
+      focused: false,
+    });
+    const after = {
+      ...before,
+      "view-id": "s2-7e6d952ea5fe0ddf",
+      bounds: { left: 0, top: 80, right: 100, bottom: 120 },
+      focused: true,
+    };
+    const { result } = await executeFocus(
+      before,
+      { hierarchy: { node: after } },
+      "s2-35973cc76070aa26",
+    );
+    expect(result.focusVerified).toBe(false);
+    expect(result.success).toBe(false);
   });
 });

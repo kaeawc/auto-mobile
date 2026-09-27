@@ -1,4 +1,4 @@
-import { ElementResolver } from "../utility/ElementResolver";
+import { ElementResolver, isFocusEditableElement } from "../utility/ElementResolver";
 import { SearchableHierarchy } from "../utility/SearchableNode";
 import {
   DefaultHierarchyCapture,
@@ -59,7 +59,6 @@ import { androidViewHierarchyIndicatesLikelyBlockingLoading } from "../../utils/
 import {
   getToggleContentDescription,
   hasAccessibilityAction,
-  isEditableElementProperties,
   isTruthyFlag,
 } from "../../utils/elementProperties";
 import {
@@ -1054,8 +1053,12 @@ export class TapOnElement extends BaseVisualChange {
   ): { selection: ElementSelectionResult; containerFound: boolean } {
     const containerFound = this.isContainerAvailable(viewHierarchy, options.container);
     const intentAction =
-      options.action === "longPress" ? "long-press" : options.action === "focus" ? "input" : "tap";
-    const lookupAction = options.action === "focus" ? "input" : "inspect";
+      options.action === "longPress"
+        ? "long-press"
+        : options.action === "focus"
+          ? "focus-input"
+          : "tap";
+    const lookupAction = options.action === "focus" ? "focus-input" : "inspect";
     const selectionIntent = TEXT_SELECTION_INTENT_BY_ACTION[options.action];
 
     if (options.text) {
@@ -1182,6 +1185,12 @@ export class TapOnElement extends BaseVisualChange {
       const targetValue = target[key];
       const candidateValue = candidate[key];
       if (
+        key === "view-id" &&
+        (String(targetValue).startsWith("s2-") || String(candidateValue).startsWith("s2-"))
+      ) {
+        continue;
+      }
+      if (
         typeof targetValue === "string" &&
         targetValue.length > 0 &&
         typeof candidateValue === "string" &&
@@ -1213,11 +1222,25 @@ export class TapOnElement extends BaseVisualChange {
     if (!observation?.viewHierarchy) {
       return false;
     }
+    const nodes = new SearchableHierarchy().project(observation.viewHierarchy);
+    const focused = nodes.find(
+      (node) =>
+        node.element &&
+        isFocusEditableElement(node.properties) &&
+        this.finder.isElementKeyboardFocused(node.element) &&
+        this.isSameFocusTarget(target, node.element),
+    );
+    if (focused) {
+      return true;
+    }
+    if (!options.testTag && !(options.elementId && target["resource-id"])) {
+      return false;
+    }
     const candidate = this.findElementInHierarchy(options, observation.viewHierarchy).selection
       .element;
     return Boolean(
       candidate &&
-      isEditableElementProperties(candidate) &&
+      isFocusEditableElement(candidate) &&
       this.finder.isElementKeyboardFocused(candidate) &&
       this.isSameFocusTarget(target, candidate),
     );
@@ -2112,7 +2135,7 @@ export class TapOnElement extends BaseVisualChange {
           const longPressDuration = this.getLongPressDuration(options);
 
           if (action === "focus") {
-            if (!isEditableElementProperties(element)) {
+            if (!isFocusEditableElement(element)) {
               perf.end();
               return {
                 success: false,
@@ -2350,7 +2373,7 @@ export class TapOnElement extends BaseVisualChange {
         this.enforceFreshnessConsistencyWithEffect(previousObserveResult, result);
       }
 
-      if (requestedAction === "focus" && result.success) {
+      if (requestedAction === "focus" && result.success && !result.wasAlreadyFocused) {
         const target = focusTarget ?? result.element;
         result.focusVerified = this.verifyFocusedInputTarget(
           { ...options, action: "focus" },

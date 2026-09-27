@@ -9,6 +9,8 @@ import { normalizeQuotes } from "./TextMatcher";
 import { boundsArea, boundsEqual } from "../../utils/bounds";
 import type { ElementBounds } from "../../models/ElementBounds";
 import { defaultRandom } from "../../utils/Random";
+import { isEditableElementProperties } from "../../utils/elementProperties";
+import type { Element } from "../../models/Element";
 
 const ordinalNodeKey = new RegExp(
   `^${STABLE_VIEW_ID_PREFIX}[0-9a-f]{${STABLE_VIEW_ID_HASH_LENGTH}}-\\d+$`,
@@ -21,6 +23,7 @@ export type ResolutionAction =
   | "long-press"
   | "scroll"
   | "input"
+  | "focus-input"
   | "accessibility-focus"
   | "focus"
   | "highlight"
@@ -118,6 +121,39 @@ function hasVisibleBounds(node: SearchableEntry, intent: ResolutionIntent): bool
   return !!node.bounds && (!intent.viewport || centerWithinViewport(node.bounds, intent.viewport));
 }
 
+function semanticActionsForIntent(intent: ResolutionIntent): SearchableEntry["affordances"] {
+  if (intent.action === "scroll") {
+    return ["scroll"];
+  }
+  if (intent.action === "inspect") {
+    return ["tap", "toggle"];
+  }
+  if (intent.action === "long-press") {
+    return ["long-press"];
+  }
+  return intent.action === "input" || intent.action === "focus-input"
+    ? ["input"]
+    : ["tap", "scroll"];
+}
+
+/** Native editable fields and iOS accessibility text-field roles can own focus labels. */
+export function isFocusEditableElement(element: Element): boolean {
+  return (
+    isEditableElementProperties(element) ||
+    element["ios-role"] === "AXTextField" ||
+    element["ios-role"] === "AXTextArea"
+  );
+}
+
+function hasActionAffordance(node: SearchableEntry, intent: ResolutionIntent): boolean {
+  if (intent.action === "focus-input") {
+    return isFocusEditableElement(node.properties);
+  }
+  return node.affordances.some(
+    (action) => action === intent.action || (intent.action === "tap" && action === "toggle"),
+  );
+}
+
 function eligible(node: SearchableEntry, intent: ResolutionIntent): boolean {
   if (intent.requireResourceId && !node.nativeId) {
     return false;
@@ -141,9 +177,7 @@ function eligible(node: SearchableEntry, intent: ResolutionIntent): boolean {
   if (intent.action === "focus") {
     return node.focusable || node.affordances.includes("input");
   }
-  return node.affordances.some(
-    (action) => action === intent.action || (intent.action === "tap" && action === "toggle"),
-  );
+  return hasActionAffordance(node, intent);
 }
 
 export function isWithin(
@@ -282,10 +316,11 @@ export class ElementResolver {
       this.actionTarget(node, snapshot, intent, scope);
     // Positional selection counts displayed actionable rows; diagnostic
     // matches retain inert labels so debug can still explain why they cannot act.
-    result.candidates = result.candidates.filter(
-      (candidate) =>
-        actionTarget(candidate) !== null ||
-        (hasVisibleBounds(candidate, intent) && candidate.affordances.length > 0),
+    result.candidates = result.candidates.filter((candidate) =>
+      intent.action === "focus-input"
+        ? actionTarget(candidate) !== null
+        : actionTarget(candidate) !== null ||
+          (hasVisibleBounds(candidate, intent) && candidate.affordances.length > 0),
     );
     return this.choose(result, selector, actionTarget, intent);
   }
@@ -458,6 +493,9 @@ export class ElementResolver {
     scope: SearchableEntry | undefined,
     intent: ResolutionIntent,
   ): SearchableEntry {
+    if (intent.action === "focus-input") {
+      return this.actionTarget(node, snapshot, intent, scope) ?? node;
+    }
     if (node.affordances.length > 0) {
       return node;
     }
@@ -467,16 +505,7 @@ export class ElementResolver {
       if (!ancestor || ancestor === scope) {
         break;
       }
-      const targetActions: SearchableEntry["affordances"][number][] =
-        intent.action === "scroll"
-          ? ["scroll"]
-          : intent.action === "inspect"
-            ? ["tap", "toggle"]
-            : intent.action === "long-press"
-              ? ["long-press"]
-              : intent.action === "input" || intent.action === "focus"
-                ? ["input"]
-                : ["tap", "scroll"];
+      const targetActions = semanticActionsForIntent(intent);
       if (
         ancestor.bounds &&
         targetActions.some((action) => ancestor.affordances.includes(action))
@@ -605,7 +634,7 @@ export class ElementResolver {
   }
 
   private hasEligibleExactTextMatch(exact: SearchableEntry[], intent: ResolutionIntent): boolean {
-    return intent.action === "input" || intent.action === "focus"
+    return intent.action === "input" || intent.action === "focus" || intent.action === "focus-input"
       ? exact.some((node) => eligible(node, intent))
       : exact.length > 0;
   }

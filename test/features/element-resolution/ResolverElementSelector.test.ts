@@ -3,6 +3,7 @@ import { ResolverElementSelector } from "../../../src/features/utility/ResolverE
 import { identifyObservedHierarchy } from "../../../src/features/observe/HierarchyCapture";
 import { attachRawViewHierarchy } from "../../../src/utils/viewHierarchySearch";
 import { serverConfig } from "../../../src/utils/ServerConfig";
+import { projectSkeleton } from "../../../src/features/observe/output/SkeletonProjection";
 
 afterEach(() => serverConfig.setRawElementSearchEnabled(false));
 const bounds = { left: 0, top: 0, right: 100, bottom: 100 };
@@ -226,6 +227,94 @@ test("tap intent ranks a clickable text peer ahead of a smaller input", () => {
       selectionIntent: "tap",
     }).element?.bounds?.top,
   ).toBe(40);
+});
+
+test("focus promotes a Compose label child to its editable ancestor (#7759)", () => {
+  const inputBounds = { left: 84, top: 1115, right: 996, bottom: 1262 };
+  const labelBounds = { left: 126, top: 1157, right: 461, bottom: 1220 };
+  const capture = {
+    hierarchy: {
+      bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
+      node: {
+        class: "android.widget.EditText",
+        bounds: inputBounds,
+        node: [{ class: "android.widget.TextView", text: "Basic Text Field", bounds: labelBounds }],
+      },
+    },
+  };
+  const result = new ResolverElementSelector().selectByText(capture, "Basic Text Field", {
+    intentAction: "focus-input",
+  });
+  expect(result.element?.bounds).toEqual(inputBounds);
+});
+
+test("focus promotes an iOS text label to its text-field role ancestor (#7759)", () => {
+  const inputBounds = { left: 0, top: 0, right: 200, bottom: 70 };
+  const capture = {
+    hierarchy: {
+      node: {
+        "ios-role": "AXTextField",
+        bounds: inputBounds,
+        node: [{ text: "Email", bounds: { left: 10, top: 10, right: 100, bottom: 40 } }],
+      },
+    },
+  };
+  expect(
+    new ResolverElementSelector().selectByText(capture, "Email", { intentAction: "focus-input" })
+      .element?.bounds,
+  ).toEqual(inputBounds);
+});
+
+test("focus resolves a label merged from flattened skeleton siblings (#7759)", () => {
+  const inputBounds = { left: 0, top: 0, right: 200, bottom: 70 };
+  const labelBounds = { left: 10, top: 10, right: 100, bottom: 40 };
+  const input = { class: "android.widget.EditText", clickable: true, bounds: inputBounds };
+  const label = { class: "android.widget.TextView", text: "Email", bounds: labelBounds };
+  const skeleton = projectSkeleton({
+    clickable: [input],
+    scrollable: [],
+    text: [label],
+    media: [],
+  }).skeleton;
+  expect(skeleton.find((row) => row.affordances.includes("input"))?.label).toBe("Email");
+  const capture = { hierarchy: { node: { ...input, node: [label] } } };
+  expect(
+    new ResolverElementSelector().selectByText(capture, "Email", { intentAction: "focus-input" })
+      .element?.bounds,
+  ).toEqual(inputBounds);
+});
+
+test("focus rejects a stray non-editable label beside an unrelated input (#7759)", () => {
+  const capture = {
+    hierarchy: {
+      node: [
+        { class: "android.widget.TextView", text: "Email", bounds },
+        { class: "android.widget.EditText", bounds: { ...bounds, top: 120, bottom: 180 } },
+      ],
+    },
+  };
+  expect(
+    new ResolverElementSelector().selectByText(capture, "Email", { intentAction: "focus-input" })
+      .element,
+  ).toBeNull();
+});
+
+test("indexed focus excludes an exact clickable Email before the exact input (#7708)", () => {
+  const inputBounds = { left: 0, top: 120, right: 100, bottom: 180 };
+  const capture = {
+    hierarchy: {
+      node: [
+        { clickable: true, text: "Email", bounds },
+        { class: "android.widget.EditText", text: "Email", bounds: inputBounds },
+      ],
+    },
+  };
+  const result = new ResolverElementSelector().selectByText(capture, "Email", {
+    intentAction: "focus-input",
+    index: 0,
+  });
+  expect(result.element?.bounds).toEqual(inputBounds);
+  expect(result.totalMatches).toBe(1);
 });
 
 test("tap lookup falls back to a bounded Compose ID when exact native ID is unbounded", () => {

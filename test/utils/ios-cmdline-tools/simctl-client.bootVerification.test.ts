@@ -715,7 +715,7 @@ describe("SimCtlClient boot self-verification", () => {
     expect(harness.shutdownInvocations()).toBe(0);
   });
 
-  test("bounds Simulator.app focus while retaining the successful boot lease", async () => {
+  test("bounds one post-boot Simulator.app presentation while retaining the successful boot lease", async () => {
     let openingSimulatorApp = false;
     let openSimulatorSignal: AbortSignal | undefined;
     const harness = createConcurrentStartHarness(
@@ -739,7 +739,7 @@ describe("SimCtlClient boot self-verification", () => {
     await drainMicrotasks();
     expect(harness.bootstatusInvocations()).toBe(1);
 
-    harness.timer.advanceTime(100);
+    harness.timer.advanceTime(1_000);
 
     await expect(firstStart).resolves.toBeDefined();
     expect(openSimulatorSignal?.aborted).toBe(true);
@@ -776,6 +776,47 @@ describe("SimCtlClient boot self-verification", () => {
     expect(openSignal?.aborted).toBe(true);
     expect(harness.shutdownInvocations()).toBe(0);
     await start;
+  });
+
+  test("explicit start and session auto-start reports for the same boot present once; a later boot presents again", async () => {
+    let opens = 0;
+    const harness = createConcurrentStartHarness(
+      () => Promise.resolve(createExecResult("", "")),
+      bootedSimulatorListResult,
+      {
+        openSimulatorApp: async () => {
+          opens++;
+          return createExecResult("", "");
+        },
+      },
+    );
+    const simctl = harness.createClient();
+    const first = await simctl.startSimulator(UDID, 5_000);
+    await simctl.presentSimulatorAfterStart(UDID, "session-path-generation");
+    expect(opens).toBe(1);
+
+    expect(first.kill()).toBe(true);
+    await waitForCondition(() => harness.shutdownInvocations() === 1, "first shutdown");
+    const second = await simctl.startSimulator(UDID, 5_000);
+    await simctl.presentSimulatorAfterStart(UDID, "later-session-generation");
+    expect(opens).toBe(2);
+    expect(second.kill()).toBe(true);
+    await waitForCondition(() => harness.shutdownInvocations() === 2, "second shutdown");
+  });
+
+  test("headless explicit start never launches Simulator.app", async () => {
+    const harness = createHarness({ maxAttempts: 1, retryBackoffMs: 0 });
+    harness.setStates(["Booted"]);
+    await harness.simctl.startSimulator(UDID, 5_000);
+    expect(harness.calls.filter((call) => call === "open -a Simulator")).toHaveLength(0);
+  });
+
+  test("headless session auto-start never launches Simulator.app", async () => {
+    const harness = createHarness({ maxAttempts: 1, retryBackoffMs: 0 });
+    harness.setStates(["Booted"]);
+    await harness.simctl.bootSimulator(UDID);
+    await harness.simctl.presentSimulatorAfterStart(UDID, "session-generation");
+    expect(harness.calls.filter((call) => call === "open -a Simulator")).toHaveLength(0);
   });
 
   test("does not reuse stale success after an idle start is shut down", async () => {

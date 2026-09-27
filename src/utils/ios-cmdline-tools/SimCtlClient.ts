@@ -30,6 +30,8 @@ import { Mutex } from "async-mutex";
 import { iosSimulatorCapabilityInventory } from "../../features/device-control/virtualDeviceCapabilities";
 import { compareSimctlVersions, parseSimctlVersion } from "./simctlVersion";
 import { compareStrictNumericVersions } from "../deviceMatcher";
+import { defaultIdGenerator, type IdGenerator } from "../IdGenerator";
+import { DefaultSimulatorAppPresenter, type SimulatorAppPresenter } from "./SimulatorAppPresenter";
 import {
   SimCtlSimulatorDeviceTypeProfiles,
   type SimulatorDeviceTypeProfile,
@@ -311,12 +313,11 @@ export interface SimCtl {
    * Open Simulator.app. If udid is provided, focuses that specific device window.
    * With multiple simulators booted, this ensures the right device is visible.
    * @param udid - Optional device UDID to focus
-   * @returns true if the GUI launch was performed, false if it was skipped
-   *   because this host has no Aqua session. Callers that memoize "Simulator
-   *   is up" must only do so on true — a headless skip left nothing running,
-   *   and a later call may find a GUI session (issue #6372).
+   * @returns true if the GUI launch was performed, false if this host has no Aqua session.
    */
   openSimulatorApp(udid?: string, signal?: AbortSignal): Promise<boolean>;
+  /** Report a simulator boot completed by this process. Never call from readiness checks. */
+  presentSimulatorAfterStart(udid: string, bootGeneration: string): Promise<void>;
 
   /**
    * Deliver a simulated remote push notification to a booted simulator.
@@ -590,6 +591,9 @@ export class SimCtlClient implements SimCtl {
   ) => ChildProcess;
   private readonly fileSystem: SimCtlFileSystem;
   private readonly bootOptions: SimCtlBootOptions;
+  private readonly simulatorAppPresenter: SimulatorAppPresenter;
+  private readonly idGenerator: IdGenerator;
+  private readonly bootPresentationGenerations = new Map<string, string>();
   // Cached result of the launchctl headless-session probe (null = not yet probed).
   // Re-probed after HEADLESS_SESSION_CACHE_TTL so a GUI login/logout mid-process
   // (e.g. an SSH session that later gains a GUI, or vice versa) does not leave a
@@ -657,6 +661,8 @@ export class SimCtlClient implements SimCtl {
     private readonly plist: PlistReader = new PlistClient(),
     private readonly observationSequence: DiscoveryObservationSequence = defaultDiscoveryObservationSequence,
     deviceTypeProfiles?: SimulatorDeviceTypeProfileSource,
+    simulatorAppPresenter?: SimulatorAppPresenter,
+    idGenerator?: IdGenerator,
   ) {
     this.device = device;
     this.execAsync = execAsyncFn || execAsync;
@@ -665,10 +671,40 @@ export class SimCtlClient implements SimCtl {
     this.spawnProcess = spawnProcess;
     this.fileSystem = fileSystem;
     this.deviceTypeProfiles = deviceTypeProfiles ?? new SimCtlSimulatorDeviceTypeProfiles(this);
+    this.simulatorAppPresenter = this.resolveSimulatorAppPresenter(simulatorAppPresenter);
+    this.idGenerator = this.resolveIdGenerator(idGenerator);
     this.bootOptions = {
       maxAttempts: Math.max(1, bootOptions.maxAttempts),
       retryBackoffMs: Math.max(0, bootOptions.retryBackoffMs),
     };
+  }
+
+  private resolveSimulatorAppPresenter(presenter?: SimulatorAppPresenter): SimulatorAppPresenter {
+    return (
+      presenter ?? new DefaultSimulatorAppPresenter((udid) => this.openSimulatorAppBounded(udid))
+    );
+  }
+
+  private resolveIdGenerator(generator?: IdGenerator): IdGenerator {
+    return generator ?? defaultIdGenerator;
+  }
+
+  private async openSimulatorAppBounded(udid: string): Promise<boolean> {
+    const controller = new AbortController();
+    let timeoutHandle: NodeJS.Timeout | undefined;
+    const timeout = new Promise<never>((_resolve, reject) => {
+      timeoutHandle = this.timer.setTimeout(() => {
+        controller.abort();
+        reject(new Error(`Timed out opening Simulator.app for ${udid}`));
+      }, 1_000);
+    });
+    try {
+      return await Promise.race([this.openSimulatorApp(udid, controller.signal), timeout]);
+    } finally {
+      if (timeoutHandle) {
+        this.timer.clearTimeout(timeoutHandle);
+      }
+    }
   }
 
   /**
@@ -999,76 +1035,27 @@ export class SimCtlClient implements SimCtl {
     // {@link bootAndVerify}.
     perf.startOperation("bootstatus");
     try {
+      this.bootPresentationGenerations.delete(udid);
       await this.runOwnedBoot(udid, () => this.bootAndVerify(udid, deadlineMs));
     } finally {
       perf.endOperation("bootstatus");
     }
 
-    // Open Simulator.app focused on this specific device (no-op on headless hosts)
-    try {
-      perf.startOperation("openSimulatorApp");
-      await this.openSimulatorAppBeforeDeadline(udid, deadlineMs, startSignal);
-      perf.endOperation("openSimulatorApp");
-    } catch {
-      perf.endOperation("openSimulatorApp");
-      logger.debug("Could not open Simulator.app (non-fatal)");
-    }
+    await this.presentSimulatorAfterStart(udid, this.idGenerator.next());
     if (startSignal?.aborted) {
       await this.shutdownAfterFailedStart(udid);
       throw startSignal.reason ?? new ActionableError(`iOS simulator start aborted for ${udid}`);
     }
   }
 
-  private async openSimulatorAppBeforeDeadline(
-    udid: string,
-    deadlineMs: number,
-    signal: AbortSignal | undefined,
-  ): Promise<void> {
-    // Focusing the optional GUI must not consume the boot/readiness budget of
-    // an already booted simulator. A wedged LaunchServices/AppleScript call is
-    // cancelled promptly; automation continues without the window.
-    const remainingMs = Math.min(1_000, this.remainingBootTimeoutMs(udid, deadlineMs));
-    if (signal?.aborted) {
-      throw signal.reason ?? new ActionableError(`iOS simulator start aborted for ${udid}`);
-    }
-
-    let timeoutHandle: NodeJS.Timeout | undefined;
-    let abortListener: (() => void) | undefined;
-    const timeoutController = new AbortController();
-    const operationSignal = signal
-      ? AbortSignal.any([signal, timeoutController.signal])
-      : timeoutController.signal;
-    const timeout = new Promise<never>((_resolve, reject) => {
-      timeoutHandle = this.timer.setTimeout(() => {
-        timeoutController.abort();
-        reject(new Error(`Timed out opening Simulator.app for ${udid}`));
-      }, remainingMs);
-    });
-    // The launch/skip outcome is irrelevant here: this path only focuses the
-    // window of an already-booted simulator.
-    const contenders: Array<Promise<unknown>> = [
-      this.openSimulatorApp(udid, operationSignal),
-      timeout,
-    ];
-    if (signal) {
-      contenders.push(
-        new Promise<never>((_resolve, reject) => {
-          abortListener = () =>
-            reject(signal.reason ?? new ActionableError(`iOS simulator start aborted for ${udid}`));
-          signal.addEventListener("abort", abortListener, { once: true });
-        }),
-      );
-    }
-
+  async presentSimulatorAfterStart(udid: string, bootGeneration: string): Promise<void> {
     try {
-      await Promise.race(contenders);
-    } finally {
-      if (timeoutHandle) {
-        this.timer.clearTimeout(timeoutHandle);
-      }
-      if (signal && abortListener) {
-        signal.removeEventListener("abort", abortListener);
-      }
+      const generation = this.bootPresentationGenerations.get(udid) ?? bootGeneration;
+      this.bootPresentationGenerations.set(udid, generation);
+      await this.simulatorAppPresenter.presentAfterStart(udid, generation);
+    } catch (error) {
+      // The presenter warns on GUI launch failure; unexpected errors cannot fail a start.
+      logger.debug(`Could not present Simulator.app for ${udid}: ${error}`);
     }
   }
 
@@ -2254,6 +2241,7 @@ export class SimCtlClient implements SimCtl {
       getAbortSignal(),
       true,
       async () => {
+        this.bootPresentationGenerations.delete(udid);
         await this.bootAndVerify(udid, deadlineMs);
         perf.endOperation("simctlBoot");
         return this.resolveRegisteredBootSimulator(udid, deadlineMs, perf);

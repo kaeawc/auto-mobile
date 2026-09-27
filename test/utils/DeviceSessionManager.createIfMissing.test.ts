@@ -12,6 +12,7 @@ import type { BootedDevice, DeviceInfo } from "../../src/models";
 interface SimctlRecorder {
   createCalls: { name: string; deviceType: string; runtime: string }[];
   bootCalls: string[];
+  presentationCalls: Array<{ udid: string; generation: string }>;
   deleteCalls?: string[];
   deleteSignalAborted?: boolean[];
   bootError?: Error;
@@ -49,6 +50,9 @@ function makeSimctl(recorder: SimctlRecorder, simulatorImages: DeviceInfo[] = []
         throw recorder.bootError;
       }
       return { deviceId: udid, name: "AutoMobile-iPhone-17", platform: "ios" };
+    },
+    presentSimulatorAfterStart: async (udid: string, generation: string) => {
+      recorder.presentationCalls.push({ udid, generation });
     },
     deleteSimulator: async (udid: string, options?: { signal?: AbortSignal }) => {
       recorder.deleteCalls?.push(udid);
@@ -89,7 +93,13 @@ describe("findOrStartIosDevice creation gate", () => {
   let manager: DeviceSessionManager;
 
   beforeEach(() => {
-    recorder = { createCalls: [], bootCalls: [], deleteCalls: [], deleteSignalAborted: [] };
+    recorder = {
+      createCalls: [],
+      bootCalls: [],
+      presentationCalls: [],
+      deleteCalls: [],
+      deleteSignalAborted: [],
+    };
     const provider = new FakeDeviceClientProvider(
       new FakeAdbExecutor(),
       new FakeDeviceUtils(),
@@ -124,6 +134,8 @@ describe("findOrStartIosDevice creation gate", () => {
     expect(recorder.createCalls[0].runtime).toBe("com.apple.CoreSimulator.SimRuntime.iOS-26-3");
     expect(recorder.createCalls[0].name).toStartWith("AutoMobile-iPhone-17-");
     expect(recorder.bootCalls).toEqual(["CREATED-UDID"]);
+    expect(recorder.presentationCalls).toHaveLength(1);
+    expect(recorder.presentationCalls[0].udid).toBe("CREATED-UDID");
     expect(recorder.deleteCalls).toEqual([]);
     expect(device.deviceId).toBe("CREATED-UDID");
   });

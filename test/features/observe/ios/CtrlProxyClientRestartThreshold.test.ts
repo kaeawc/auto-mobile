@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { IOSCtrlProxyClient } from "../../../../src/features/observe/ios";
 import { BootedDevice } from "../../../../src/models";
 import {
@@ -10,6 +10,9 @@ import { FakeTimer } from "../../../fakes/FakeTimer";
 import type { CtrlProxyIosManager } from "../../../../src/utils/IOSCtrlProxyManager";
 import { FakeIOSCtrlProxyManager } from "../../../fakes/FakeIOSCtrlProxyManager";
 import { ForcedRestartBudget } from "../../../../src/utils/ctrlProxy/ForcedRestartBudget";
+import { ViewHierarchy } from "../../../../src/features/observe/ViewHierarchy";
+import { FakeAdbClientFactory } from "../../../fakes/FakeAdbClientFactory";
+import type { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
 
 function createFakeManager(timer: FakeTimer): CtrlProxyIosManager & { forceRestartCount: number } {
   const budget = new ForcedRestartBudget(timer);
@@ -188,6 +191,63 @@ describe("IOSCtrlProxyClient restart threshold", () => {
       state: "exhausted",
       attempts: 3,
     });
+  });
+
+  test("awaitRecovery reports failure when iOS socket closes inside the stability window", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const manager = createFakeManager(timer);
+    client = IOSCtrlProxyClient.createForTesting(
+      testDevice,
+      8765,
+      (url) => {
+        const socket = new FakeWebSocket(url, "none", 0, timer);
+        socket.on("open", () => timer.setTimeout(() => socket.terminate(), 1000));
+        return socket;
+      },
+      timer,
+      () => manager,
+    );
+    client.ensureRecoveryStarted();
+    expect(await client.awaitRecovery(20_000)).toBe("failed");
+    expect(manager.getForcedRestartBudget().snapshot().attempts).toBe(1);
+  });
+
+  test("ViewHierarchy does not refetch after iOS socket closes inside the stability window", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const manager = createFakeManager(timer);
+    client = IOSCtrlProxyClient.createForTesting(
+      testDevice,
+      8765,
+      (url) => {
+        const socket = new FakeWebSocket(url, "none", 0, timer);
+        socket.on("open", () => timer.setTimeout(() => socket.terminate(), 1000));
+        return socket;
+      },
+      timer,
+      () => manager,
+    );
+    let reads = 0;
+    const hierarchySpy = spyOn(client, "getLatestHierarchy").mockImplementation(async () => {
+      reads++;
+      return { hierarchy: null, unavailableReason: "runner_not_running" };
+    });
+    const instanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(client);
+    try {
+      const vh = new ViewHierarchy(
+        testDevice,
+        new FakeAdbClientFactory(),
+        {} as AndroidCtrlProxyClient,
+        timer,
+      );
+      const result = await vh.getViewHierarchy();
+      expect(reads).toBe(1);
+      expect(result.hierarchy.unavailableReason).toBe("runner_not_running");
+    } finally {
+      instanceSpy.mockRestore();
+      hierarchySpy.mockRestore();
+    }
   });
 
   test("older iOS recovery completion preserves a newer recovery promise", async () => {

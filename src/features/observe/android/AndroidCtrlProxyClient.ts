@@ -1344,6 +1344,12 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   // second, overlapping recovery attempt.
   private isRecoveringService: boolean = false;
   private recoveryPromise: Promise<boolean> | null = null;
+  /** A socket must survive this interval before it can rearm a restart. */
+  private static readonly RESTART_REARM_STABILITY_MS = 2000;
+  private restartRearmTimeout: NodeJS.Timeout | null = null;
+  private pendingRecoveryStability:
+    | { token: number; resolve: (stable: boolean) => void }
+    | undefined;
   /** One client exists per device; this budget gates both failure bursts and observe calls. */
   private readonly forcedRestartBudget: ForcedRestartBudget;
   public static readonly OBSERVE_RECOVERY_WAIT_MS = 10_000;
@@ -2042,6 +2048,23 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   protected onConnectionEstablished(): void {
     // Reset failure escalation state on every successful connect (issue #7532).
     this.consecutiveConnectionFailures = 0;
+    if (this.restartRearmTimeout) {
+      this.timer.clearTimeout(this.restartRearmTimeout);
+    }
+    this.restartRearmTimeout = this.timer.setTimeout(() => {
+      this.restartRearmTimeout = null;
+      if (!this.isConnected()) {
+        this.failPendingRecoveryStability("WebSocket closed before stable reconnect");
+        return;
+      }
+      const pending = this.pendingRecoveryStability;
+      if (pending) {
+        this.pendingRecoveryStability = undefined;
+        pending.resolve(this.forcedRestartBudget.recordSuccess(pending.token));
+      } else if (this.forcedRestartBudget.snapshot().state !== "suspended") {
+        this.forcedRestartBudget.recordSuccess();
+      }
+    }, AndroidCtrlProxyClient.RESTART_REARM_STABILITY_MS);
     this.syncNetworkStateToDevice();
     this.syncAccessibilityFlagsToDevice();
     // The runner loses its in-process content observers across a service restart while the desktop
@@ -2129,6 +2152,11 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   }
 
   protected onConnectionClosed(): void {
+    if (this.restartRearmTimeout) {
+      this.timer.clearTimeout(this.restartRearmTimeout);
+      this.restartRearmTimeout = null;
+      this.failPendingRecoveryStability("WebSocket closed before stable reconnect");
+    }
     this.supportedCommands = null;
     this.lateCancelledScreenshotRequestIds.clear();
     this.cancelScreenshotBackoff();
@@ -2161,6 +2189,15 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
     // Stop work profile monitor when connection closes
     this.stopWorkProfileMonitor();
+  }
+
+  private failPendingRecoveryStability(reason: string): void {
+    const pending = this.pendingRecoveryStability;
+    if (pending) {
+      this.pendingRecoveryStability = undefined;
+      this.forcedRestartBudget.recordFailure(reason, pending.token);
+      pending.resolve(false);
+    }
   }
 
   /** Every app id with cached or in-flight build-context state (#4984). */
@@ -2245,6 +2282,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         );
         // Background reconnect respects the #7537 background-attempt cap
         // rather than consuming the caller's foreground connect budget.
+        const stableConnection = new Promise<boolean>((resolve) => {
+          this.pendingRecoveryStability = { token, resolve };
+        });
         const connected = await this.connectBackgroundWebSocket();
         if (!connected) {
           logger.warn(
@@ -2252,14 +2292,17 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           );
         }
         if (!connected || !this.isConnected()) {
-          this.forcedRestartBudget.recordFailure("WebSocket reconnect failed", token);
+          this.failPendingRecoveryStability("WebSocket reconnect failed");
           return false;
         }
+        if (this.pendingRecoveryStability && !this.restartRearmTimeout) {
+          this.failPendingRecoveryStability("No stable WebSocket reconnect observed");
+        }
         this.consecutiveConnectionFailures = 0;
-        this.forcedRestartBudget.recordSuccess(token);
-        return true;
+        return await stableConnection;
       })
       .catch((error) => {
+        this.failPendingRecoveryStability(String(error));
         this.forcedRestartBudget.recordFailure(String(error), token);
         logger.warn(`[AndroidCtrlProxyClient] CtrlProxy recovery failed: ${error}`);
         return false;
@@ -3909,6 +3952,11 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     // through to captureScreenshotViaAdb("ctrlproxy_exception"). Setting the flag
     // first makes that leaked one-shot fallback short-circuit (#5493).
     this.closed = true;
+    if (this.restartRearmTimeout) {
+      this.timer.clearTimeout(this.restartRearmTimeout);
+      this.restartRearmTimeout = null;
+    }
+    this.failPendingRecoveryStability("Client closed before stable reconnect");
     try {
       // Stop work profile monitor if running
       this.stopWorkProfileMonitor();

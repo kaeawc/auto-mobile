@@ -536,6 +536,51 @@ describe("ViewHierarchy", function () {
       }
     });
 
+    test("joins iOS cooldown recovery and refetches exactly once", async function () {
+      const iosDevice: BootedDevice = {
+        deviceId: "test-ios-device",
+        name: "Test iPhone",
+        platform: "ios",
+      };
+      const timer = new FakeTimer();
+      let reads = 0;
+      let waits = 0;
+      const client = {
+        getLatestHierarchy: async () =>
+          ++reads === 1
+            ? {
+                hierarchy: null,
+                reconnectStatus: {
+                  state: "cooldown",
+                  retryAfterMs: 1000,
+                  retryAfterSeconds: 1,
+                  connectionAttempts: 3,
+                  maxConnectionAttempts: 3,
+                },
+              }
+            : { hierarchy: { hierarchy: { role: "text", text: "Recovered" } }, fresh: true },
+        ensureRecoveryStarted: () => {},
+        awaitRecovery: async () => {
+          waits++;
+          return "recovered";
+        },
+      };
+      const spy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(client as any);
+      try {
+        const vh = new ViewHierarchy(
+          iosDevice,
+          new FakeAdbClientFactory(fakeAdb),
+          mockCtrlProxyClient,
+          timer,
+        );
+        const result = await vh.getViewHierarchy();
+        expect([reads, waits]).toEqual([2, 1]);
+        expect(result.hierarchy.error).toBeUndefined();
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
     test("preserves iOS CtrlProxy reconnect metadata on stale cached hierarchy", async function () {
       const iosDevice: BootedDevice = {
         deviceId: "test-ios-device",
@@ -1733,6 +1778,29 @@ describe("Offscreen Node Filtering", function () {
       const vh = new ViewHierarchy(device, new FakeAdbClientFactory(), client, timer);
       await vh.getViewHierarchy(undefined, undefined, false, 0, undefined, 1000);
       expect(reads).toBe(2);
+      expect(timer.now()).toBeLessThanOrEqual(1000);
+    });
+
+    test("starts Android recovery deadline before a slow initial fetch", async function () {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      let waitBudget = -1;
+      const client = {
+        getAccessibilityHierarchy: async () => {
+          await timer.sleep(800);
+          return null;
+        },
+        ensureRecoveryStarted: () => {},
+        awaitRecovery: async (budget: number) => {
+          waitBudget = budget;
+          await timer.sleep(budget);
+          return "failed";
+        },
+        isRecoveryInFlight: () => false,
+      } as unknown as AndroidCtrlProxyClient;
+      const vh = new ViewHierarchy(device, new FakeAdbClientFactory(), client, timer);
+      await vh.getViewHierarchy(undefined, undefined, false, 0, undefined, 1000);
+      expect(waitBudget).toBe(1000 - 800 - MIN_RECOVERY_REFETCH_BUDGET_MS);
       expect(timer.now()).toBeLessThanOrEqual(1000);
     });
 

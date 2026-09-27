@@ -7,6 +7,10 @@ import {
 } from "../../src/features/observe/automaticScreenshotPolicy";
 import { ElementResolver } from "../../src/features/utility/ElementResolver";
 import type { ObserveResult, ViewHierarchyResult } from "../../src/models";
+import type {
+  ObserveScreen,
+  ObserveScreenExecuteOptions,
+} from "../../src/features/observe/interfaces/ObserveScreen";
 import {
   findWaitForElement,
   observeSchema,
@@ -1041,6 +1045,36 @@ describe("findWaitForElement rich predicates", () => {
 });
 
 describe("waitForObservation activeWindow", () => {
+  test("legacy waitFor bounds a transport recovery poll by its remaining deadline", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const budgets: Array<number | undefined> = [];
+    const observation: ObserveResult = {
+      updatedAt: 0,
+      screenSize: { width: 200, height: 200 },
+      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      viewHierarchy: { hierarchy: { error: "connection lost", transportFailure: true } },
+    };
+    const screen = {
+      execute: async (options?: ObserveScreenExecuteOptions) => {
+        budgets.push(options?.timeoutMs);
+        await timer.sleep(options?.timeoutMs ?? 10_000);
+        return observation;
+      },
+    } as ObserveScreen;
+
+    const outcome = await waitForObservation(
+      screen,
+      { text: "missing", timeout: 500 },
+      undefined,
+      false,
+      timer,
+    );
+    expect(budgets).toEqual([500]);
+    expect(outcome.timedOut).toBe(true);
+    expect(timer.now()).toBe(500);
+  });
+
   const makeObservation = (
     appId: string,
     activityName: string,

@@ -6,7 +6,11 @@ import {
 import type { ProxySetupResult } from "../../../../src/utils/interfaces/ProxyManager";
 import { BootedDevice } from "../../../../src/models";
 import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
-import { createInstantFailureWebSocketFactory } from "../../../fakes/FakeWebSocket";
+import {
+  createInstantFailureWebSocketFactory,
+  createSuccessWebSocketFactory,
+  FakeWebSocket,
+} from "../../../fakes/FakeWebSocket";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { ForcedRestartBudget } from "../../../../src/utils/ctrlProxy/ForcedRestartBudget";
 
@@ -243,6 +247,62 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
     const budget = (client as any).forcedRestartBudget as ForcedRestartBudget;
     expect(budget.snapshot()).toMatchObject({ state: "backoff", attempts: 1 });
     expect(manager.rebindIfUnhealthyCallCount).toBe(0);
+  });
+
+  test("briefly opened recovery sockets never rearm the Android restart budget", async function () {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const manager = new FakeManager();
+    manager.healthy = true;
+    client = AndroidCtrlProxyClient.createForTesting(
+      testDevice,
+      buildFakeAdb(),
+      (url) => {
+        const socket = new FakeWebSocket(url, "none", 0, timer);
+        socket.on("open", () => timer.setTimeout(() => socket.terminate(), 1000));
+        return socket as WebSocket;
+      },
+      timer,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      () => manager,
+    );
+    for (const delay of [0, 30_000, 60_000]) {
+      timer.advanceTime(delay);
+      client.ensureRecoveryStarted();
+      await client.awaitRecovery(10_000);
+      await timer.advanceTimeAsync(2000);
+    }
+    const budget = (client as any).forcedRestartBudget as ForcedRestartBudget;
+    expect(budget.snapshot()).toMatchObject({ state: "exhausted", attempts: 3 });
+  });
+
+  test("stable external Android reconnect rearms an exhausted restart budget", async function () {
+    const timer = new FakeTimer();
+    client = AndroidCtrlProxyClient.createForTesting(
+      testDevice,
+      buildFakeAdb(),
+      createSuccessWebSocketFactory(timer),
+      timer,
+    );
+    const budget = (client as any).forcedRestartBudget as ForcedRestartBudget;
+    for (const delay of [0, 30_000, 60_000]) {
+      timer.advanceTime(delay);
+      const token = budget.tryBeginAttempt();
+      expect(token).toBeDefined();
+      budget.recordFailure("runner unavailable", token!);
+    }
+    expect(budget.snapshot().state).toBe("exhausted");
+    expect(await client.ensureConnected()).toBe(true);
+    await timer.advanceTimeAsync(2000);
+    expect(budget.snapshot()).toMatchObject({ state: "idle", attempts: 0 });
   });
 
   test("budget-denied observe recovery returns not_recovering without waiting", async function () {

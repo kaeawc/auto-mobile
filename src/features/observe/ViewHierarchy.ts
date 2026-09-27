@@ -130,6 +130,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
     if (this.device.platform !== "ios" && this.device.platform !== "android") {
       throw new Error("Unsupported platform");
     }
+    const deadline = timeoutMs === undefined ? undefined : this.timer.now() + timeoutMs;
     const result =
       this.device.platform === "ios"
         ? await this.getiOSViewHierarchy(perf, skipWaitForFresh, minTimestamp, timeoutMs, signal)
@@ -148,7 +149,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
       skipWaitForFresh,
       minTimestamp,
       signal,
-      timeoutMs,
+      deadline,
     );
   }
 
@@ -159,7 +160,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
     skipWaitForFresh: boolean,
     minTimestamp: number,
     signal: AbortSignal | undefined,
-    timeoutMs: number | undefined,
+    deadline: number | undefined,
   ): Promise<ViewHierarchyResult> {
     const context: RecoveryReadContext = {
       queryOptions,
@@ -167,7 +168,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
       skipWaitForFresh,
       minTimestamp,
       signal,
-      deadline: timeoutMs === undefined ? undefined : this.timer.now() + timeoutMs,
+      deadline,
     };
     if (signal?.aborted) {
       return result;
@@ -202,7 +203,8 @@ export class ViewHierarchy implements ViewHierarchyInterface {
   ): Promise<ViewHierarchyResult> {
     if (
       (result.hierarchy.unavailableReason !== "runner_not_running" &&
-        result.hierarchy.unavailableReason !== "connection_lost") ||
+        result.hierarchy.unavailableReason !== "connection_lost" &&
+        !(result.ctrlProxyReconnect && result.hierarchy.error)) ||
       !this.hasRecoveryRefetchBudget(context)
     ) {
       return result;

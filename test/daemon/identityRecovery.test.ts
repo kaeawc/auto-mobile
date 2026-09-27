@@ -1,4 +1,12 @@
-import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync } from "node:fs";
+import {
+  chmodSync,
+  mkdtempSync,
+  writeFileSync,
+  readFileSync,
+  existsSync,
+  rmSync,
+  symlinkSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { republishOwnedIdentity } from "../../src/daemon/identityRecovery";
@@ -328,6 +336,64 @@ describe("provider-owned identity recovery", () => {
       expect(existsSync(join(dir, "lock"))).toBe(false);
     } finally {
       unblock();
+      h.manager.releaseLock();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("symlinked startup lock leaves its target untouched and identity recovery completes", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "identity-symlink-marker-"));
+    const path = join(dir, "lock");
+    const target = join(dir, "target");
+    const h = harness({ accepted: true }, path);
+    try {
+      expect(h.manager.acquireLock()).toBe(true);
+      const content = readFileSync(path, "utf8");
+      writeFileSync(target, content, { mode: 0o600 });
+      rmSync(path);
+      symlinkSync(target, path);
+      expect(() => (h.manager as any).markStartupLockRecovering()).not.toThrow();
+      expect(readFileSync(target, "utf8")).toBe(content);
+      const recovered = await (h.manager as any).recoverSocketIdentity();
+      expect(recovered.running).toBe(true);
+      expect(h.record).toEqual(complete);
+      expect(readFileSync(target, "utf8")).toBe(content);
+    } finally {
+      h.manager.releaseLock();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("writable startup lock is unchanged and identity recovery completes", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "identity-unsafe-mode-marker-"));
+    const path = join(dir, "lock");
+    const h = harness({ accepted: true }, path);
+    try {
+      expect(h.manager.acquireLock()).toBe(true);
+      const content = readFileSync(path, "utf8");
+      chmodSync(path, 0o666);
+      expect(() => (h.manager as any).markStartupLockRecovering()).not.toThrow();
+      expect(readFileSync(path, "utf8")).toBe(content);
+      const recovered = await (h.manager as any).recoverSocketIdentity();
+      expect(recovered.running).toBe(true);
+      expect(h.record).toEqual(complete);
+      expect(readFileSync(path, "utf8")).toBe(content);
+    } finally {
+      h.manager.releaseLock();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("safe owned startup lock writes the recovery marker preserving PID and token", () => {
+    const dir = mkdtempSync(join(tmpdir(), "identity-safe-marker-"));
+    const h = harness({ accepted: true }, join(dir, "lock"));
+    try {
+      expect(h.manager.acquireLock()).toBe(true);
+      const before = (h.manager as any).readStartupLockHolder();
+      expect(before.recovering).toBeUndefined();
+      (h.manager as any).markStartupLockRecovering();
+      expect((h.manager as any).readStartupLockHolder()).toEqual({ ...before, recovering: true });
+    } finally {
       h.manager.releaseLock();
       rmSync(dir, { recursive: true, force: true });
     }

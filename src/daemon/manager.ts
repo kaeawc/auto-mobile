@@ -8,7 +8,15 @@ import { errorMessage } from "../utils/describeUnknownError";
 import { execSync, type ChildProcess } from "node:child_process";
 import { createServer as createNetServer } from "node:net";
 import { open, readFile, rm } from "node:fs/promises";
-import { existsSync, openSync, closeSync, readFileSync, writeSync } from "node:fs";
+import {
+  constants,
+  existsSync,
+  openSync,
+  closeSync,
+  fstatSync,
+  readFileSync,
+  writeSync,
+} from "node:fs";
 import { basename, isAbsolute, join, resolve, sep } from "node:path";
 import { devNull, tmpdir } from "node:os";
 import { isStructuredLoggingEnabled, logger, resolveAutomobileLogSink } from "../utils/logger";
@@ -2278,8 +2286,30 @@ export class DaemonManager implements DaemonManagerLike {
     if (holder.livePid !== process.pid || holder.token !== this.startupLockOwnerToken) {
       return;
     }
-    const fd = openSync(this.lockFilePath, "r+");
+    let fd: number;
     try {
+      const flags =
+        this.platform === "win32" ? constants.O_RDWR : constants.O_RDWR | constants.O_NOFOLLOW;
+      fd = openSync(this.lockFilePath, flags);
+    } catch (error) {
+      logger.warn("Failed to safely open startup lock for identity recovery", error);
+      return;
+    }
+    try {
+      const stats = fstatSync(fd);
+      const uid = process.getuid?.();
+      if (
+        !stats.isFile() ||
+        (uid !== undefined && stats.uid !== uid) ||
+        (stats.mode & 0o022) !== 0
+      ) {
+        logger.warn("Refusing unsafe startup lock for identity recovery", {
+          uid: stats.uid,
+          mode: stats.mode,
+          regularFile: stats.isFile(),
+        });
+        return;
+      }
       const lockContents = readFileSync(fd, "utf8");
       const { pid, token, metadata } = parseLockContent(lockContents.trim());
       if (pid !== process.pid || token !== this.startupLockOwnerToken) {

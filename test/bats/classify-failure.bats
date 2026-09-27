@@ -75,6 +75,8 @@ case "$1 $2" in
       */check-runs/12/annotations*|*/check-runs/13/annotations*|*/check-runs/14/annotations*) annotation_response '[]' ;;
       */check-runs/15/annotations*|*/check-runs/16/annotations*|*/check-runs/17/annotations*) annotation_response '[]' ;;
       */actions/jobs/6/logs) printf 'readiness phase exceeded the remaining deadline\n' ;;
+      */actions/jobs/35/logs) printf 'First emulator attempt failed; captured diagnostics follow:\ngetAndroid automation runner readiness failed: phase=runner-connect attempts=241\nStarting emulator retry attempt 2.\ngetAndroid automation runner readiness failed: phase=runner-connect attempts=237: readiness phase exceeded the remaining deadline\n' ;;
+      */actions/jobs/36/logs) printf 'getAndroid automation runner readiness failed: phase=runner-health attempts=4\n' ;;
       */actions/jobs/31/logs) printf 'First emulator attempt failed; captured diagnostics follow:\nsys.boot_completed is not 1\nStarting emulator retry attempt 2.\nexpect(received).toBe(expected) ... someRealRegression assertion failed\n' ;;
       */actions/jobs/32/logs) printf 'First emulator attempt failed; captured diagnostics follow:\nsys.boot_completed is not 1\nexpect(received).toBe(expected) ... someRealRegression assertion failed\n' ;;
       */actions/jobs/33/logs) printf '##[group]Run for attempt in $(seq 1 "${attempts}"); do\n  echo "::group::iOS device capture integration (attempt ${attempt}/${attempts})"\n  if [ "${attempt}" -gt 1 ]; then\n    echo "Starting emulator retry attempt 2."\n  fi\n  ...\n##[endgroup]\niOS device capture attempt 1 failed (exit 1): iOS WHEP viewer did not recover to a fresh IDR within ~2000ms of the relayed PLI\nReaping MediaMTX / daemon / Chrome before one retry.\nStarting emulator retry attempt 2.\niOS device capture attempt 2 failed (exit 1): TypeError: Cannot read properties of undefined (reading '\''sessionId'\'')\niOS device capture failed after 2 attempts.\n' ;;
@@ -259,6 +261,38 @@ JSON
   [[ "$output" == *"Run JUnit Runner Emulator Tests → Run AutoMobile tests that require emulator → none → RERUN-DONT-FIX"* ]]
 }
 
+@test "keeps Playground getAndroid runner-connect separate from boot flakes" {
+  fixture="$BATS_TEST_TMPDIR/playground-runner-connect-run.json"
+  cat > "$fixture" <<'JSON'
+{
+  "headBranch": "work/android-runner-connect",
+  "jobs": [
+    {"databaseId": 35, "name": "Run Playground Automobile Emulator Tests", "conclusion": "failure", "steps": [{"name": "Run ./.github/actions/android-emulator", "conclusion": "failure"}]}
+  ]
+}
+JSON
+
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" bash "$SCRIPT" 7785
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Run Playground Automobile Emulator Tests → Run ./.github/actions/android-emulator → none → INVESTIGATE"* ]]
+  [[ "$output" != *"RERUN-DONT-FIX"* ]]
+}
+
+@test "does not classify a Playground runner-health failure as runner-connect" {
+  fixture="$BATS_TEST_TMPDIR/playground-runner-health-run.json"
+  cat > "$fixture" <<'JSON'
+{
+  "headBranch": "work/android-runner-health",
+  "jobs": [
+    {"databaseId": 36, "name": "Run Playground Automobile Emulator Tests", "conclusion": "failure", "steps": [{"name": "Run ./.github/actions/android-emulator", "conclusion": "failure"}]}
+  ]
+}
+JSON
+
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" bash "$SCRIPT" 7785
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Run Playground Automobile Emulator Tests → Run ./.github/actions/android-emulator → none → UNKNOWN"* ]]
+}
 @test "reads job logs on gh < 2.101.0 that lacks --allow-escape-sequences" {
   # Feature detection must OMIT the flag on an older gh that rejects it as an
   # unknown flag, or every job-log read would fail there and log-based

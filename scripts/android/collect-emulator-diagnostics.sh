@@ -41,6 +41,10 @@ run_with_timeout "${adb_timeout_seconds}" adb -s "${serial}" shell getprop > "${
 run_with_timeout "${adb_timeout_seconds}" adb -s "${serial}" shell ps -A > "${diagnostics_dir}/processes.txt" 2>&1
 run_with_timeout "${adb_timeout_seconds}" adb -s "${serial}" shell dumpsys activity services \
   > "${diagnostics_dir}/activity-services.txt" 2>&1
+run_with_timeout "${adb_timeout_seconds}" adb -s "${serial}" shell dumpsys accessibility \
+  > "${diagnostics_dir}/accessibility.txt" 2>&1
+run_with_timeout "${adb_timeout_seconds}" adb -s "${serial}" forward --list \
+  > "${diagnostics_dir}/adb-forwards.txt" 2>&1
 run_with_timeout "${adb_timeout_seconds}" adb -s "${serial}" shell dumpsys package dev.jasonpearson.automobile.ctrlproxy \
   > "${diagnostics_dir}/ctrl-proxy-package.txt" 2>&1
 run_with_timeout "${adb_timeout_seconds}" adb -s "${serial}" logcat -d -v threadtime \

@@ -11,6 +11,7 @@ Run JUnit Runner Emulator*|*is not available in the device pool*|RERUN-DONT-FIX|
 Run JUnit Runner Emulator*|*sys.boot_completed is not 1*|RERUN-DONT-FIX|Android emulator boot or AVD flake, non-required, rerun
 Run JUnit Runner Emulator*|*timeout exhausted while waiting for device boot readiness*|RERUN-DONT-FIX|Android emulator boot or AVD flake, non-required, rerun
 Run Playground Automobile Emulator*|*startDevice automation runner readiness failed*|RERUN-DONT-FIX|Android emulator boot or AVD flake, non-required, rerun
+Run Playground Automobile Emulator*|*getAndroid automation runner readiness failed*phase=runner-connect*|INVESTIGATE|CtrlProxy runner-connect failed after emulator boot; inspect accessibility binding, WebSocket lifecycle, and ADB forwarding diagnostics
 Run Playground Automobile Emulator*|*readiness phase exceeded the remaining deadline*|RERUN-DONT-FIX|Android emulator boot or AVD flake, non-required, rerun
 Run Playground Automobile Emulator*|*is not available in the device pool*|RERUN-DONT-FIX|Android emulator boot or AVD flake, non-required, rerun
 Run Playground Automobile Emulator*|*sys.boot_completed is not 1*|RERUN-DONT-FIX|Android emulator boot or AVD flake, non-required, rerun

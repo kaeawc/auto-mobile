@@ -242,6 +242,7 @@ export function compareResolvers(
                 element["test-tag"],
                 stableNodeSelectorForElement(element),
                 element.clickable,
+                element.scrollable,
                 element["long-clickable"],
                 element.longClickable,
                 element.checkable,

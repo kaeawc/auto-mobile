@@ -576,11 +576,14 @@ class WebSocketServerIntegrationTest {
         path = "/ws",
       ) {
         incoming.receive()
-        val delivered = withTimeout(1000) { incoming.receive() } as Frame.Text
+        // This is a real CIO socket round-trip. Shared Linux runners can pause
+        // the client and server for over a second while other Gradle test forks
+        // run, even though the delivery itself remains correct.
+        val delivered = withTimeout(5000) { incoming.receive() } as Frame.Text
         val payload = json.parseToJsonElement(delivered.readText()).jsonObject
 
         assertEquals("settings_get_result", payload["type"]?.jsonPrimitive?.content)
-        withTimeout(1000) { delivery.await() }
+        withTimeout(5000) { delivery.await() }
       }
     }
   }

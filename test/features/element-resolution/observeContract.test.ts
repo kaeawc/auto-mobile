@@ -123,6 +123,21 @@ describe("observe-to-resolve migration contract", () => {
     };
     expect(compareResolvers([selected], reference, reordered)).toEqual([selected.key]);
   });
+  test("differential seam detects swapped candidates that differ only in scroll affordance", () => {
+    const selected = cases.find(
+      ({ capture, query }) => legacy.resolve(capture, query).chosen !== null,
+    )!;
+    const node = legacy.resolve(selected.capture, selected.query).chosen!;
+    const fixed = { ...node, scrollable: false };
+    const scrolling = { ...node, scrollable: true };
+    const reference: ContractResolver = {
+      resolve: () => ({ chosen: fixed, candidates: [fixed, scrolling] }),
+    };
+    const reordered: ContractResolver = {
+      resolve: () => ({ chosen: scrolling, candidates: [scrolling, fixed] }),
+    };
+    expect(compareResolvers([selected], reference, reordered)).toEqual([selected.key]);
+  });
   test("differential seam detects camel-case long-clickable drift", () => {
     const selected = cases.find(
       ({ capture, query }) => legacy.resolve(capture, query).chosen !== null,

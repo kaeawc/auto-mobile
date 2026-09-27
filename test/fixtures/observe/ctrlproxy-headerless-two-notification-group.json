@@ -1,0 +1,178 @@
+{
+  "expanded": {
+    "packageName": "com.android.systemui",
+    "hierarchy": {
+      "node": {
+        "resource-id": "com.android.systemui:id/notification_stack_scroller",
+        "bounds": [0, 0, 1080, 2316],
+        "package": "com.android.systemui",
+        "node": [
+          {
+            "resource-id": "com.android.systemui:id/expandableNotificationRow",
+            "bounds": [42, 568, 1038, 1372],
+            "node": [
+              {
+                "resource-id": "com.android.systemui:id/notification_children_container",
+                "bounds": [42, 568, 1038, 1372],
+                "node": [
+                  {
+                    "resource-id": "android:id/notification_header",
+                    "bounds": [42, 568, 1038, 715],
+                    "node": [
+                      {
+                        "resource-id": "android:id/app_name_text",
+                        "bounds": [179, 620, 310, 663],
+                        "text": "Shell"
+                      },
+                      {
+                        "resource-id": "android:id/expand_button",
+                        "bounds": [891, 568, 1038, 715],
+                        "content-desc": "Collapse"
+                      }
+                    ]
+                  },
+                  {
+                    "resource-id": "com.android.systemui:id/expandableNotificationRow",
+                    "bounds": [42, 716, 1038, 934],
+                    "visible-to-user": true,
+                    "node": [
+                      {
+                        "resource-id": "android:id/expanded",
+                        "bounds": [42, 716, 1038, 934],
+                        "node": [
+                          {
+                            "resource-id": "android:id/status_bar_latest_event_content",
+                            "bounds": [42, 716, 1038, 934],
+                            "node": [
+                              {
+                                "resource-id": "android:id/notification_template",
+                                "bounds": [179, 716, 1038, 934],
+                                "node": [
+                                  {
+                                    "resource-id": "android:id/notification_title",
+                                    "bounds": [179, 728, 850, 781],
+                                    "text": "Delta"
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "resource-id": "com.android.systemui:id/expandableNotificationRow",
+                    "bounds": [42, 935, 1038, 1153],
+                    "visible-to-user": true,
+                    "node": [
+                      {
+                        "resource-id": "android:id/expanded",
+                        "bounds": [42, 935, 1038, 1153],
+                        "node": [
+                          {
+                            "resource-id": "android:id/status_bar_latest_event_content",
+                            "bounds": [42, 935, 1038, 1153],
+                            "node": [
+                              {
+                                "resource-id": "android:id/notification_headerless_view_row",
+                                "bounds": [179, 935, 1038, 1153],
+                                "node": [
+                                  {
+                                    "resource-id": "android:id/title",
+                                    "bounds": [179, 947, 850, 1000],
+                                    "text": "Gamma"
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "collapsed": {
+    "packageName": "com.android.systemui",
+    "hierarchy": {
+      "node": {
+        "resource-id": "com.android.systemui:id/notification_stack_scroller",
+        "bounds": [0, 0, 1080, 2316],
+        "package": "com.android.systemui",
+        "node": [
+          {
+            "resource-id": "com.android.systemui:id/expandableNotificationRow",
+            "bounds": [42, 568, 1038, 1372],
+            "node": [
+              {
+                "resource-id": "com.android.systemui:id/notification_children_container",
+                "bounds": [42, 568, 1038, 1372],
+                "node": [
+                  {
+                    "resource-id": "android:id/notification_header",
+                    "bounds": [42, 568, 1038, 715],
+                    "node": [
+                      {
+                        "resource-id": "android:id/app_name_text",
+                        "bounds": [179, 620, 310, 663],
+                        "text": "Shell"
+                      },
+                      {
+                        "resource-id": "android:id/expand_button",
+                        "bounds": [891, 568, 1038, 715],
+                        "content-desc": "Expand"
+                      }
+                    ]
+                  },
+                  {
+                    "resource-id": "com.android.systemui:id/expandableNotificationRow",
+                    "bounds": [42, 694, 1038, 745],
+                    "visible-to-user": false,
+                    "node": [
+                      {
+                        "resource-id": "android:id/notification_template",
+                        "bounds": [179, 694, 1038, 745],
+                        "node": [
+                          {
+                            "resource-id": "android:id/notification_title",
+                            "bounds": [179, 706, 850, 745],
+                            "text": "Delta"
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "resource-id": "com.android.systemui:id/expandableNotificationRow",
+                    "bounds": [42, 766, 1038, 817],
+                    "visible-to-user": false,
+                    "node": [
+                      {
+                        "resource-id": "android:id/notification_headerless_view_row",
+                        "bounds": [179, 766, 1038, 817],
+                        "node": [
+                          {
+                            "resource-id": "android:id/title",
+                            "bounds": [179, 778, 850, 817],
+                            "text": "Gamma"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

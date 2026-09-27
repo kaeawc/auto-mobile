@@ -43,6 +43,12 @@ const CTRL_PROXY_COMPACT_BOUNDS_GROUP_FIXTURE_PATH = join(
 const realCtrlProxyCompactBoundsGroups = JSON.parse(
   readFileSync(CTRL_PROXY_COMPACT_BOUNDS_GROUP_FIXTURE_PATH, "utf8"),
 ) as { collapsed: unknown; expanded: unknown };
+const headerlessTwoNotificationGroups = JSON.parse(
+  readFileSync(
+    join(import.meta.dir, "../fixtures/observe/ctrlproxy-headerless-two-notification-group.json"),
+    "utf8",
+  ),
+) as { collapsed: ViewHierarchyResult; expanded: ViewHierarchyResult };
 
 class SequencedFakeAdbExecutor extends FakeAdbExecutor {
   private timestamps: number[];
@@ -1670,6 +1676,112 @@ const combineGroupNotificationTrays = (...trays: ViewHierarchyResult[]): ViewHie
       node: trays.map((tray) => (tray.hierarchy as any).node.node),
     },
   },
+});
+
+describe("systemTray headerless two-notification group", () => {
+  afterEach(() => {
+    resetSystemTrayDependencies();
+    ToolRegistry.clearTools();
+  });
+
+  for (const [title, y] of [
+    ["Gamma", 1044],
+    ["Delta", 825],
+  ] as const) {
+    test(`dismisses the expanded ${title} child row`, async () => {
+      const fakeTimer = new FakeTimer();
+      const fakeAdb = new SequencedFakeAdbExecutor([1000, 1000, 2000]);
+      const fakeObserveScreen = new FakeObserveScreen();
+      fakeObserveScreen.setObserveResult(() =>
+        createObservation(headerlessTwoNotificationGroups.expanded),
+      );
+      const installedAppsSpy = spyOn(ListInstalledApps.prototype, "execute").mockResolvedValue([
+        "com.android.shell",
+      ]);
+      setSystemTrayDependencies({
+        timer: fakeTimer,
+        adbFactory: () => fakeAdb,
+        appLabelResolver: async () => "Shell",
+        observeScreenFactory: () => fakeObserveScreen,
+      });
+      ToolRegistry.clearTools();
+      registerInteractionTools();
+
+      try {
+        const found = await waitForNotificationMatch(
+          device,
+          { title, appId: "com.android.shell" },
+          ["Shell", "com.android.shell"],
+          5000,
+        );
+        expect(found.match?.candidate.node["resource-id"]).toBe(
+          "com.android.systemui:id/expandableNotificationRow",
+        );
+        expect(found.match?.candidate.groupNode?.["resource-id"]).toBe(
+          "com.android.systemui:id/expandableNotificationRow",
+        );
+        expect(found.match?.candidate.node).not.toBe(found.match?.candidate.groupNode);
+        await ToolRegistry.getTool("systemTray")!.deviceAwareHandler!(device, {
+          action: "dismiss",
+          notification: { title, appId: "com.android.shell" },
+          platform: "android",
+        });
+      } finally {
+        installedAppsSpy.mockRestore();
+      }
+      expect(
+        fakeAdb.getExecutedCommands().filter((command) => command.includes("input tap")),
+      ).toEqual([]);
+      expect(
+        fakeAdb.getExecutedCommands().filter((command) => command.includes("input swipe")),
+      ).toEqual([expect.stringContaining(`shell input swipe 938 ${y} 141 ${y}`)]);
+    });
+  }
+
+  test("expands a collapsed group, re-matches Gamma, and swipes its child row", async () => {
+    const fakeTimer = new FakeTimer();
+    const fakeAdb = new SequencedFakeAdbExecutor([1000, 1000, 2000]);
+    const fakeObserveScreen = new FakeObserveScreen();
+    fakeObserveScreen.setObserveResult((index) =>
+      createObservation(
+        index === 0
+          ? headerlessTwoNotificationGroups.collapsed
+          : headerlessTwoNotificationGroups.expanded,
+      ),
+    );
+    const installedAppsSpy = spyOn(ListInstalledApps.prototype, "execute").mockResolvedValue([
+      "com.android.shell",
+    ]);
+    setSystemTrayDependencies({
+      timer: fakeTimer,
+      adbFactory: () => fakeAdb,
+      appLabelResolver: async () => "Shell",
+      observeScreenFactory: () => fakeObserveScreen,
+    });
+    ToolRegistry.clearTools();
+    registerInteractionTools();
+
+    try {
+      const dismiss = ToolRegistry.getTool("systemTray")!.deviceAwareHandler!(device, {
+        action: "dismiss",
+        notification: { title: "Gamma", appId: "com.android.shell" },
+        awaitTimeout: 5000,
+        platform: "android",
+      });
+      await waitForPendingSleep(fakeTimer);
+      fakeTimer.enableAutoAdvance();
+      fakeTimer.advanceTime(EXPAND_GROUP_SETTLE_MS);
+      await dismiss;
+    } finally {
+      installedAppsSpy.mockRestore();
+    }
+    expect(
+      fakeAdb.getExecutedCommands().filter((command) => command.includes("input tap")),
+    ).toContain("shell input tap 964 641");
+    expect(
+      fakeAdb.getExecutedCommands().filter((command) => command.includes("input swipe")),
+    ).toEqual([expect.stringContaining("shell input swipe 938 1044 141 1044")]);
+  });
 });
 
 describe("systemTray grouped notifications", () => {

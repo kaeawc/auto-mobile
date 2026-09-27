@@ -81,6 +81,25 @@ public final class GesturePerformer: GesturePerforming {
         }
     }
 
+    /// Pressing a key needs a first responder, while text editing still needs
+    /// evidence that an `.other` snapshot is a text input.
+    nonisolated static func isFocusedSnapshotCandidate(
+        hasFocus: Bool, isKnownTextInput: Bool, isOther: Bool,
+        hasTextInputEvidence: Bool, forKeyPress: Bool
+    )
+        -> Bool
+    {
+        hasFocus && (isKnownTextInput || (isOther && (forKeyPress || hasTextInputEvidence)))
+    }
+
+    nonisolated static func canVerifyDestructiveKey(focusedValue: String?) -> Bool {
+        focusedValue != nil
+    }
+
+    nonisolated static func didDeleteText(before: String, after: String) -> Bool {
+        after.count < before.count
+    }
+
     /// Includes a scoped owner when the owner is itself a link; XCUITest's
     /// descendants query otherwise excludes that element.
     nonisolated static func scopedLinkCandidates<Element>(
@@ -197,6 +216,7 @@ public final class GesturePerformer: GesturePerforming {
         /// Depth-guarded at 64 to bound recursion on pathological trees.
         private static func snapshotHasTextInputWithFocus(
             _ snapshot: XCUIElementSnapshot,
+            forKeyPress: Bool = false,
             depth: Int = 0
         )
             -> Bool
@@ -209,10 +229,18 @@ public final class GesturePerformer: GesturePerforming {
                 || type == .secureTextField
             let isTextLikeOther = type == .other && snapshotLooksLikeTextInput(snapshot)
 
-            if (isKnownTextInput || isTextLikeOther) && snapshot.hasFocus {
+            if isFocusedSnapshotCandidate(
+                hasFocus: snapshot.hasFocus,
+                isKnownTextInput: isKnownTextInput,
+                isOther: type == .other,
+                hasTextInputEvidence: isTextLikeOther,
+                forKeyPress: forKeyPress
+            ) {
                 return true
             }
-            for child in snapshot.children where snapshotHasTextInputWithFocus(child, depth: depth + 1) {
+            for child in snapshot.children where snapshotHasTextInputWithFocus(
+                child, forKeyPress: forKeyPress, depth: depth + 1
+            ) {
                 return true
             }
             return false
@@ -245,7 +273,7 @@ public final class GesturePerformer: GesturePerforming {
         ///
         /// Returns `(hasFocus, strategy)` so the caller can log which path
         /// won.
-        private func detectKeyboardFocus(app: XCUIApplication) throws -> (Bool, String) {
+        private func detectKeyboardFocus(app: XCUIApplication, forKeyPress: Bool = false) throws -> (Bool, String) {
             try catchingObjCException {
                 // Strategy 1: predicate
                 let byPredicate = app.descendants(matching: .any)
@@ -260,7 +288,7 @@ public final class GesturePerformer: GesturePerforming {
                 // the app we want is never SpringBoard in a text-input flow.
                 if app.identifier != "com.apple.springboard" {
                     if let snapshot = try? app.snapshot(),
-                       GesturePerformer.snapshotHasTextInputWithFocus(snapshot)
+                       GesturePerformer.snapshotHasTextInputWithFocus(snapshot, forKeyPress: forKeyPress)
                     {
                         return (true, "snapshot.hasFocus")
                     }
@@ -282,9 +310,13 @@ public final class GesturePerformer: GesturePerforming {
         /// Throws with a contextual error message if no focus is detected.
         /// On failure, the thrown error embeds a focus-diagnostic summary so
         /// it surfaces in the MCP response — not just in device logs.
-        private func requireKeyboardFocus(app: XCUIApplication, context: String) throws {
+        private func requireKeyboardFocus(
+            app: XCUIApplication, context: String, forKeyPress: Bool = false
+        )
+            throws
+        {
             let queryStart = Date()
-            let (hasFocus, strategy) = try detectKeyboardFocus(app: app)
+            let (hasFocus, strategy) = try detectKeyboardFocus(app: app, forKeyPress: forKeyPress)
             let elapsedMs = Int(Date().timeIntervalSince(queryStart) * 1000)
             let appLabel = catchingObjCExceptionNonThrowing({ app.label }, fallback: "unknown")
             print(
@@ -901,45 +933,54 @@ public final class GesturePerformer: GesturePerforming {
                 }
             }
 
-            try requireKeyboardFocus(app: app, context: "ensure a text field is focused before pressing a key")
+            try requireKeyboardFocus(
+                app: app, context: "ensure a text field is focused before pressing a key", forKeyPress: true
+            )
 
             let isDestructiveKey = normalizedKey == "backspace" || normalizedKey == "delete"
             let focusedElement = isDestructiveKey ? resolveFocusedTextElement(app: app) : nil
             let valueBeforeKeyPress = focusedElement?.value as? String
 
+            if isDestructiveKey, !GesturePerformer.canVerifyDestructiveKey(focusedValue: valueBeforeKeyPress) {
+                throw GestureError.gestureFailed(
+                    "Key '\(key)' was not delivered: focused field could not be observed"
+                )
+            }
+
             try catchingObjCException {
                 if isDestructiveKey {
                     // Target the focused field: app-level key delivery has not reliably
                     // reached it. Backspace uses text insertion; forward delete needs a key event.
-                    if let focusedElement {
-                        if normalizedKey == "backspace" {
-                            focusedElement.typeText(keyboardKey.rawValue)
-                        } else {
-                            focusedElement.typeKey(keyboardKey, modifierFlags: [])
-                        }
+                    guard let focusedElement else {
+                        throw GestureError.gestureFailed(
+                            "Key '\(key)' was not delivered: focused field could not be observed"
+                        )
+                    }
+                    if normalizedKey == "backspace" {
+                        focusedElement.typeText(keyboardKey.rawValue)
                     } else {
-                        if normalizedKey == "backspace" {
-                            app.typeText(keyboardKey.rawValue)
-                        } else {
-                            app.typeKey(keyboardKey, modifierFlags: [])
-                        }
+                        focusedElement.typeKey(keyboardKey, modifierFlags: [])
                     }
                 } else {
                     app.typeKey(keyboardKey, modifierFlags: modifierFlags)
                 }
             }
 
-            guard isDestructiveKey, let focusedElement, let valueBeforeKeyPress else {
+            guard isDestructiveKey else {
                 return
             }
+            guard let focusedElement, let valueBeforeKeyPress else {
+                throw GestureError.gestureFailed(
+                    "Key '\(key)' was not delivered: focused field could not be observed"
+                )
+            }
 
-            let expectedLength = valueBeforeKeyPress.count - 1
             let deadline = Date().addingTimeInterval(1.0)
             while Date() < deadline {
                 guard focusedElement.exists, let valueAfterKeyPress = focusedElement.value as? String else {
                     return
                 }
-                if valueAfterKeyPress.count == expectedLength {
+                if GesturePerformer.didDeleteText(before: valueBeforeKeyPress, after: valueAfterKeyPress) {
                     return
                 }
                 RunLoop.current.run(until: Date().addingTimeInterval(0.05))
@@ -948,9 +989,9 @@ public final class GesturePerformer: GesturePerforming {
             guard focusedElement.exists, let valueAfterKeyPress = focusedElement.value as? String else {
                 return
             }
-            if valueAfterKeyPress.count != expectedLength {
+            if !GesturePerformer.didDeleteText(before: valueBeforeKeyPress, after: valueAfterKeyPress) {
                 throw GestureError.gestureFailed(
-                    "Key '\(key)' did not delete exactly one character: expected length \(expectedLength), observed \(valueAfterKeyPress.count)"
+                    "Key '\(key)' did not decrease text length: before \(valueBeforeKeyPress.count), observed \(valueAfterKeyPress.count)"
                 )
             }
         }

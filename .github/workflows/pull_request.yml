@@ -2235,7 +2235,9 @@ jobs:
             -only-testing:CtrlProxyUITests/PrivacyResourceMappingTests \
             -only-testing:CtrlProxyUITests/RotationOrientationTests \
             -only-testing:CtrlProxyUITests/HierarchyIntegrationTests/testHierarchyIncludesTypedTextInputsMissingFromSnapshotTree \
-            -only-testing:CtrlProxyUITests/HierarchyIntegrationTests/testScreenshotCapturesScreenAfterTrackedAppTerminates
+            -only-testing:CtrlProxyUITests/HierarchyIntegrationTests/testScreenshotCapturesScreenAfterTrackedAppTerminates \
+            -only-testing:CtrlProxyUITests/HierarchyIntegrationTests/testPressKeyForwardDeleteRemovesFollowingCharacter \
+            -only-testing:CtrlProxyUITests/HierarchyIntegrationTests/testPressKeyForwardDeleteAtEndOfTextFailsClosed
 
       # Bring the daemon to ready and warm CtrlProxy on the freshly-booted sim
       # BEFORE any simulator workflow that opens an in-process session — including

@@ -3,6 +3,29 @@ import Foundation
 import XCTest
 
 final class PressKeyTests: XCTestCase {
+    func testFocusedEmptyOtherIsEligibleForKeyPressButNotTextInputDetection() {
+        XCTAssertTrue(GesturePerformer.isFocusedSnapshotCandidate(
+            hasFocus: true, isKnownTextInput: false, isOther: true,
+            hasTextInputEvidence: false, forKeyPress: true
+        ))
+        XCTAssertFalse(GesturePerformer.isFocusedSnapshotCandidate(
+            hasFocus: true, isKnownTextInput: false, isOther: true,
+            hasTextInputEvidence: false, forKeyPress: false
+        ))
+        XCTAssertFalse(GesturePerformer.isFocusedSnapshotCandidate(
+            hasFocus: false, isKnownTextInput: false, isOther: true,
+            hasTextInputEvidence: false, forKeyPress: true
+        ))
+    }
+
+    func testDestructiveKeyRequiresObservableFieldAndAcceptsSelectionDeletion() {
+        XCTAssertFalse(GesturePerformer.canVerifyDestructiveKey(focusedValue: nil))
+        XCTAssertTrue(GesturePerformer.canVerifyDestructiveKey(focusedValue: ""))
+        XCTAssertTrue(GesturePerformer.didDeleteText(before: "hello", after: "hel"))
+        XCTAssertFalse(GesturePerformer.didDeleteText(before: "hello", after: "hello"))
+        XCTAssertFalse(GesturePerformer.didDeleteText(before: "hello", after: "helloo"))
+    }
+
     func testDecodePreservesKeyAndModifiersAndResponseType() throws {
         let request = try JSONDecoder().decode(WebSocketRequest.self, from: Data(
             #"{"type":"request_press_key","requestId":"key-1","key":"tab","modifiers":["shift","meta"]}"#.utf8

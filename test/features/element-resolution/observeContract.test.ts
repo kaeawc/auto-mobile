@@ -138,6 +138,50 @@ describe("observe-to-resolve migration contract", () => {
     };
     expect(compareResolvers([selected], reference, reordered)).toEqual([selected.key]);
   });
+  test("focus-input text contract selects the editable peer", () => {
+    const capture = {
+      name: "focus-label-collision",
+      platform: "android" as const,
+      hierarchy: {
+        hierarchy: {
+          node: [
+            { text: "Name", clickable: true, bounds: { left: 0, top: 0, right: 100, bottom: 30 } },
+            {
+              text: "Name",
+              class: "android.widget.EditText",
+              focusable: true,
+              bounds: { left: 0, top: 40, right: 100, bottom: 70 },
+            },
+          ],
+        },
+      },
+    };
+    const query = { kind: "text" as const, value: "Name", intent: "focus-input" as const };
+    const selected = {
+      key: "focus-label-collision",
+      capture,
+      query,
+      observed: { bounds: [0, 40, 100, 70] as [number, number, number, number] },
+    };
+    expect(boundsKey(legacy.resolve(capture, query).chosen)).toBe("0,40,100,70");
+    const ignoresFocus: ContractResolver = {
+      resolve: (source, request) => legacy.resolve(source, { ...request, intent: "tap" }),
+    };
+    expect(compareResolvers([selected], legacy, ignoresFocus)).toEqual([selected.key]);
+  });
+  test("differential seam detects swapped toggle states", () => {
+    const selected = cases.find(({ capture, query }) => legacy.resolve(capture, query).chosen)!;
+    const node = legacy.resolve(selected.capture, selected.query).chosen!;
+    const unchecked = { ...node, checkable: true, checked: false };
+    const checked = { ...node, checkable: true, checked: true };
+    const reference: ContractResolver = {
+      resolve: () => ({ chosen: unchecked, candidates: [unchecked, checked] }),
+    };
+    const reordered: ContractResolver = {
+      resolve: () => ({ chosen: unchecked, candidates: [checked, unchecked] }),
+    };
+    expect(compareResolvers([selected], reference, reordered)).toEqual([selected.key]);
+  });
   test("every query kind has fixture coverage and test-tag drift is detected", () => {
     const counts = { elementId: 0, text: 0, testTag: 0 };
     for (const { query } of cases) {

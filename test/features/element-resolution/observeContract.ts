@@ -22,6 +22,7 @@ export interface ContractQuery {
   kind: "elementId" | "text" | "testTag";
   value: string;
   index?: number;
+  intent?: "tap" | "focus-input";
 }
 export interface ContractResolution {
   candidates: Element[];
@@ -175,13 +176,13 @@ export class LegacyContractResolver implements ContractResolver {
         false,
         query.index !== undefined,
         query.index === undefined,
-        "tap",
+        query.intent ?? "tap",
       ),
       chosen: this.selector.selectByText(hierarchy, query.value, {
         ...options,
         partialMatch: true,
         caseSensitive: false,
-        selectionIntent: "tap",
+        selectionIntent: query.intent ?? "tap",
       }).element,
     };
   }
@@ -221,6 +222,8 @@ export function compareResolvers(
                 element.clickable,
                 element["long-clickable"],
                 element.longClickable,
+                element.checkable,
+                element.checked,
                 element.actions,
               ]
             : null;

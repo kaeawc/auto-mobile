@@ -36,12 +36,18 @@ interface FakeListeningProcess {
   ignoreKill?: boolean;
 }
 
-function deferred(): { promise: Promise<void>; resolve: () => void } {
+function deferred(): {
+  promise: Promise<void>;
+  resolve: () => void;
+  reject: (error: Error) => void;
+} {
   let resolve!: () => void;
-  const promise = new Promise<void>((done) => {
+  let reject!: (error: Error) => void;
+  const promise = new Promise<void>((done, fail) => {
     resolve = done;
+    reject = fail;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 /**
@@ -596,12 +602,20 @@ describe("IOSCtrlProxyManager", function () {
     test("explicit device start consumes the removal before a routine ready signal", async function () {
       const manager = IOSCtrlProxyManager.getInstance(testDevice, fakeTimer);
       const budget = manager.getForcedRestartBudget();
-      spyOn(manager, "stop").mockResolvedValue();
+      const stop = deferred();
+      const stopEntered = deferred();
+      spyOn(manager, "stop").mockImplementation(() => {
+        stopEntered.resolve();
+        return stop.promise;
+      });
 
-      await manager.suspendForDeviceRemoval();
+      const removal = manager.suspendForDeviceRemoval();
+      await stopEntered.promise;
       expect(budget.snapshot().state).toBe("suspended");
       IOSCtrlProxyManager.resumeDevice(testDevice.deviceId);
       expect(budget.snapshot().state).toBe("idle");
+      stop.resolve();
+      await removal;
 
       for (const delay of [30_000, 60_000, 0]) {
         const token = budget.tryBeginAttempt();
@@ -615,6 +629,52 @@ describe("IOSCtrlProxyManager", function () {
 
       expect(budget.snapshot().state).toBe("exhausted");
       expect(budget.tryBeginAttempt()).toBeUndefined();
+    });
+
+    test("failed removal cleanup after an explicit start permits a later reappearance", async function () {
+      const manager = IOSCtrlProxyManager.getInstance(testDevice, fakeTimer);
+      const budget = manager.getForcedRestartBudget();
+      const stop = deferred();
+      const stopEntered = deferred();
+      spyOn(manager, "stop").mockImplementation(() => {
+        stopEntered.resolve();
+        return stop.promise;
+      });
+
+      const removal = manager.suspendForDeviceRemoval();
+      await stopEntered.promise;
+      IOSCtrlProxyManager.resumeDevice(testDevice.deviceId);
+      expect(budget.snapshot().state).toBe("idle");
+
+      stop.reject(new Error("stop failed"));
+      await expect(removal).rejects.toThrow("stop failed");
+      expect(budget.snapshot().state).toBe("suspended");
+
+      await manager.rearmAfterDeviceReappearance();
+      expect(budget.snapshot().state).toBe("idle");
+      expect(budget.tryBeginAttempt()).toBeDefined();
+    });
+
+    test("failed removal cleanup without an explicit start awaits reappearance", async function () {
+      const manager = IOSCtrlProxyManager.getInstance(testDevice, fakeTimer);
+      const budget = manager.getForcedRestartBudget();
+      const stop = deferred();
+      const stopEntered = deferred();
+      spyOn(manager, "stop").mockImplementation(() => {
+        stopEntered.resolve();
+        return stop.promise;
+      });
+
+      const removal = manager.suspendForDeviceRemoval();
+      await stopEntered.promise;
+      expect(budget.snapshot().state).toBe("suspended");
+
+      stop.reject(new Error("stop failed"));
+      await expect(removal).rejects.toThrow("stop failed");
+      expect(budget.snapshot().state).toBe("suspended");
+
+      await manager.rearmAfterDeviceReappearance();
+      expect(budget.snapshot().state).toBe("idle");
     });
 
     test("does not rearm an exhausted budget on a ready signal without removal", async function () {

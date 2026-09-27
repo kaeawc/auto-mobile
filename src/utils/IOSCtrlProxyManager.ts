@@ -11,7 +11,7 @@ import {
 import { Timer, defaultTimer } from "./SystemTimer";
 import { IOSCtrlProxyBuilder, type CtrlProxyIosBuildResult } from "./IOSCtrlProxyBuilder";
 import { checkIosCtrlProxyOverride } from "./iosCtrlProxyOverride";
-import { ActionableError } from "../models/ActionableError";
+import { ActionableError, toActionableError } from "../models/ActionableError";
 import { resolvePinnedVersion } from "../constants/release";
 import { type ChildProcess } from "child_process";
 import { IOS_CTRL_PROXY_RESERVED_PORTS, PortManager } from "./PortManager";
@@ -474,7 +474,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
   /** Suspend recovery immediately, then retire any runner owned by this device. */
   public async suspendForDeviceRemoval(): Promise<void> {
-    this.removalGeneration++;
+    const removalGeneration = ++this.removalGeneration;
     this.forcedRestartBudget.suspend("device disappeared from discovery");
     this.forceRestartGeneration++;
     const cleanup = (async () => {
@@ -491,8 +491,13 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     try {
       await cleanup;
     } catch (error) {
-      this.forcedRestartBudget.suspend(`device removal cleanup failed: ${errorMessage(error)}`);
-      throw error;
+      if (this.removalGeneration === removalGeneration) {
+        this.forcedRestartBudget.suspend(`device removal cleanup failed: ${errorMessage(error)}`);
+        if (this.rearmedRemovalGeneration === removalGeneration) {
+          this.rearmedRemovalGeneration = removalGeneration - 1;
+        }
+      }
+      throw toActionableError(error, "iOS device removal cleanup failed");
     } finally {
       if (this.removalCleanup === cleanup) {
         this.removalCleanup = null;

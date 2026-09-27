@@ -1,0 +1,57 @@
+{
+  "viewHierarchy": {
+    "hierarchy": {
+      "node": {
+        "class": "android.widget.LinearLayout",
+        "bounds": { "left": 0, "top": 0, "right": 300, "bottom": 180 },
+        "node": [
+          {
+            "class": "android.widget.LinearLayout",
+            "bounds": { "left": 0, "top": 0, "right": 300, "bottom": 80 },
+            "node": [
+              {
+                "class": "android.widget.TextView",
+                "text": "Open details",
+                "bounds": { "left": 10, "top": 10, "right": 140, "bottom": 60 }
+              },
+              {
+                "class": "android.widget.Button",
+                "text": "Go",
+                "clickable": "true",
+                "bounds": { "left": 160, "top": 10, "right": 280, "bottom": 60 }
+              }
+            ]
+          },
+          {
+            "class": "android.widget.LinearLayout",
+            "bounds": { "left": 0, "top": 90, "right": 300, "bottom": 180 },
+            "node": [
+              {
+                "class": "android.widget.TextView",
+                "resource-id": "example.app:id/launch_label",
+                "text": "Launch",
+                "bounds": { "left": 10, "top": 100, "right": 140, "bottom": 150 }
+              },
+              {
+                "class": "android.widget.Button",
+                "text": "Go",
+                "clickable": "true",
+                "bounds": { "left": 160, "top": 100, "right": 280, "bottom": 150 }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "contractScopedQueries": [
+    {
+      "query": { "kind": "text", "value": "Open details", "sibling": true },
+      "bounds": [160, 10, 280, 60]
+    },
+    {
+      "query": { "kind": "elementId", "value": "example.app:id/launch_label", "sibling": true },
+      "bounds": [160, 100, 280, 150]
+    }
+  ]
+}

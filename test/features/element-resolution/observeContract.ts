@@ -25,6 +25,7 @@ export interface ContractQuery {
   index?: number;
   intent?: "tap" | "focus-input";
   container?: { elementId?: string; text?: string };
+  sibling?: boolean;
 }
 export interface ContractResolution {
   candidates: Element[];
@@ -108,6 +109,9 @@ export function contractCases(capture: ContractCapture): ContractCase[] {
     const queries: ContractQuery[] = [];
     if (observed.elementId) {
       queries.push({ kind: "elementId", value: observed.elementId, index: observed.index });
+      if (observed.index === 0) {
+        queries.push({ kind: "elementId", value: observed.elementId });
+      }
     }
     if (observed.label) {
       const peers = skeleton.filter((entry) => entry.label === observed.label);
@@ -163,7 +167,7 @@ export function contractCases(capture: ContractCapture): ContractCase[] {
 export function publicTextCases(cases: ContractCase[]): ContractCase[] {
   const unique = new Map<string, ContractCase>();
   for (const testCase of cases) {
-    if (testCase.query.kind !== "text" || testCase.query.container) {
+    if (testCase.query.kind !== "text" || testCase.query.container || testCase.query.sibling) {
       continue;
     }
     const identity = JSON.stringify([testCase.capture.name, testCase.query.value]);
@@ -186,6 +190,18 @@ export class LegacyContractResolver implements ContractResolver {
   resolve({ hierarchy }: ContractCapture, query: ContractQuery): ContractResolution {
     const options = { partialMatch: false, index: query.index, container: query.container };
     if (query.kind === "elementId") {
+      if (query.sibling) {
+        return {
+          candidates: this.finder.findClickableSiblingsOfResourceId(
+            hierarchy,
+            query.value,
+            query.container,
+            false,
+          ),
+          chosen: this.selector.selectClickableSiblingOfResourceId(hierarchy, query.value, options)
+            .element,
+        };
+      }
       return {
         candidates: this.finder.findElementsByResourceId(
           hierarchy,
@@ -206,6 +222,22 @@ export class LegacyContractResolver implements ContractResolver {
           query.index !== undefined,
         ),
         chosen: this.selector.selectByTestTag(hierarchy, query.value, options).element,
+      };
+    }
+    if (query.sibling) {
+      return {
+        candidates: this.finder.findClickableSiblingsOfText(
+          hierarchy,
+          query.value,
+          query.container,
+          true,
+          false,
+        ),
+        chosen: this.selector.selectClickableSiblingOfText(hierarchy, query.value, {
+          ...options,
+          fuzzyMatch: true,
+          caseSensitive: false,
+        }).element,
       };
     }
     return {

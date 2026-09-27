@@ -12,6 +12,7 @@ import {
 } from "./observeContract";
 import gaps from "./observeContractGaps.json";
 import gapSignatures from "./observeContractGapSignatures.json";
+import caseKeys from "./observeContractCaseKeys.json";
 
 const captures = loadContractCaptures(join(import.meta.dir, "../../fixtures/observe"));
 const legacy = new LegacyContractResolver();
@@ -32,14 +33,11 @@ describe("observe-to-resolve migration contract", () => {
     });
   }
 
-  test("all recorded cases still exist and each capture retains its selector coverage", () => {
+  test("all recorded cases still exist with the same query and observed bounds", () => {
     const keys = new Set(cases.map(({ key }) => key));
+    expect([...keys].sort()).toEqual(caseKeys);
     expect([...allowed].filter((key) => !keys.has(key))).toEqual([]);
     expect(Object.keys(gapSignatures).sort()).toEqual([...allowed].sort());
-    // The trim-only fixture deliberately has no actionable skeleton rows.
-    expect(captures.map((capture) => contractCases(capture).length)).toEqual([
-      4, 30, 0, 7, 2, 3, 12, 25, 24, 34, 34, 2, 10, 10,
-    ]);
   });
 
   test("fixture inventory includes nested captures and both raw notification states", () => {
@@ -47,6 +45,7 @@ describe("observe-to-resolve migration contract", () => {
       "android-container-scope.json",
       "android-home.json",
       "android-playground-raw-trim-candidates.json",
+      "android-sibling-targets.json",
       "android-test-tag.json",
       "android-whitespace-label.json",
       "ctrlproxy-notification-group-compact-bounds.json/collapsed",
@@ -79,6 +78,44 @@ describe("observe-to-resolve migration contract", () => {
       },
     };
     expect(compareResolvers([selected], legacy, missingCandidate)).toEqual([selected.key]);
+  });
+
+  test("sibling cases select the clickable neighbor for both public selectors", () => {
+    const siblings = cases.filter(({ query }) => query.sibling);
+    expect(siblings.map(({ query }) => query.kind).sort()).toEqual(["elementId", "text"]);
+    for (const sibling of siblings) {
+      expect(boundsKey(legacy.resolve(sibling.capture, sibling.query).chosen)).toBe(
+        sibling.observed.bounds.join(","),
+      );
+    }
+  });
+
+  test("duplicate element IDs retain an unindexed public default case", () => {
+    const repeated = cases.filter(
+      ({ capture, query }) =>
+        capture.name === "android-container-scope.json" &&
+        query.kind === "elementId" &&
+        query.value === "example.app:id/action",
+    );
+    // The scoped fixture intentionally has no public default; a repeated
+    // unscoped capture must supply one alongside the indexed row cases.
+    const defaults = cases.filter(
+      ({ query, capture }) =>
+        capture.name !== "android-container-scope.json" &&
+        query.kind === "elementId" &&
+        query.index === undefined &&
+        !query.container &&
+        !query.sibling &&
+        cases.some(
+          ({ query: peer, capture: peerCapture }) =>
+            peerCapture === capture &&
+            peer.kind === "elementId" &&
+            peer.value === query.value &&
+            peer.index !== undefined,
+        ),
+    );
+    expect(repeated).toHaveLength(1);
+    expect(defaults.length).toBeGreaterThan(0);
   });
 
   test("differential seam detects chosen-target drift with unchanged candidate list", () => {
@@ -265,7 +302,7 @@ describe("observe-to-resolve migration contract", () => {
     for (const { query } of cases) {
       counts[query.kind]++;
     }
-    expect(counts).toEqual({ elementId: 98, text: 95, testTag: 4 });
+    expect(counts).toEqual({ elementId: 101, text: 96, testTag: 4 });
     const brokenTags: ContractResolver = {
       resolve(capture, query) {
         return query.kind === "testTag"

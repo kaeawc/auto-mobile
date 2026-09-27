@@ -2162,40 +2162,50 @@ describe("DaemonManager status", () => {
     );
   }
 
-  test("never unlinks the socket or PID file when the recorded PID is dead", async () => {
-    const directory = mkdtempSync(join(tmpdir(), "daemon-manager-status-dead-pid-"));
-    const pidFilePath = join(directory, "daemon.pid");
-    const socketPath = join(directory, "daemon.sock");
-    const pid = 4245;
-    try {
-      writeStatusPidFile(pidFilePath, pid, socketPath);
-      // A stale socket inode is present but the recorded PID is confirmed dead —
-      // exactly the shape a concurrent startup winner's live socket + a stale
-      // loser PID file would present.
-      writeFileSync(socketPath, "socket");
-      const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
-        findDaemonProcesses: () => [],
-        isProcessRunning: () => false,
-      };
-      const manager = new DaemonManager(
-        undefined,
-        undefined,
-        undefined,
-        join(tmpdir(), "unused-daemon-lock"),
-        pidFilePath,
-        socketPath,
-        processFinder,
-      );
+  test.each([undefined, "win32"] as const)(
+    "never unlinks the socket or PID file when the recorded PID is dead (platform %s)",
+    async (platformOverride) => {
+      const directory = mkdtempSync(join(tmpdir(), "daemon-manager-status-dead-pid-"));
+      const pidFilePath = join(directory, "daemon.pid");
+      const socketPath = join(directory, "daemon.sock");
+      const pid = 4245;
+      try {
+        writeStatusPidFile(pidFilePath, pid, socketPath);
+        // A stale socket inode is present but the recorded PID is confirmed dead —
+        // exactly the shape a concurrent startup winner's live socket + a stale
+        // loser PID file would present.
+        writeFileSync(socketPath, "socket");
+        const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
+          findDaemonProcesses: () => [],
+          isProcessRunning: () => false,
+        };
+        const manager = new DaemonManager(
+          undefined,
+          undefined,
+          undefined,
+          join(tmpdir(), "unused-daemon-lock"),
+          pidFilePath,
+          socketPath,
+          processFinder,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          platformOverride,
+        );
 
-      const status = await manager.status();
+        const status = await manager.status();
 
-      expect(status).toEqual({ running: false });
-      expect(existsSync(pidFilePath)).toBe(true);
-      expect(existsSync(socketPath)).toBe(true);
-    } finally {
-      rmSync(directory, { recursive: true, force: true });
-    }
-  });
+        expect(status).toEqual({ running: false });
+        expect(existsSync(pidFilePath)).toBe(true);
+        expect(existsSync(socketPath)).toBe(true);
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    },
+  );
 
   test("reports running without touching any files when the recorded PID is alive", async () => {
     const directory = mkdtempSync(join(tmpdir(), "daemon-manager-status-live-pid-"));

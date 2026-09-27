@@ -8,7 +8,7 @@ import { errorMessage } from "../utils/describeUnknownError";
 import { execSync, type ChildProcess } from "node:child_process";
 import { createServer as createNetServer } from "node:net";
 import { open, readFile, rm } from "node:fs/promises";
-import { existsSync, openSync, closeSync, readFileSync } from "node:fs";
+import { existsSync, openSync, closeSync, readFileSync, writeSync } from "node:fs";
 import { basename, isAbsolute, join, resolve, sep } from "node:path";
 import { devNull, tmpdir } from "node:os";
 import { isStructuredLoggingEnabled, logger, resolveAutomobileLogSink } from "../utils/logger";
@@ -107,7 +107,12 @@ import {
   readPidFileDataSync,
   shouldProtectLiveDaemonVersion,
 } from "./daemonFiles";
-import { parseLockContent, releaseExclusiveLock, tryAcquireExclusiveLock } from "../utils/fileLock";
+import {
+  formatLockContent,
+  parseLockContent,
+  releaseExclusiveLock,
+  tryAcquireExclusiveLock,
+} from "../utils/fileLock";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import {
   DAEMON_LAUNCH_CWD_ENV,
@@ -913,6 +918,8 @@ const PID_FILE_DELETE_LOCK_POLL_MS = 50;
  * replacement holder is distinguishable from the prior one even under PID reuse.
  */
 interface StartupLockHolder {
+  metadataPending?: boolean;
+  recovering?: boolean;
   present: boolean;
   livePid: number | undefined;
   token: string | undefined;
@@ -1076,9 +1083,10 @@ export class DaemonManager implements DaemonManagerLike {
     identityRecoveryIO?: IdentityRecoveryIO,
   ) {
     this.identityRecoveryIO = identityRecoveryIO ?? {
-      // Named pipes have no inode: existing PID metadata is a cheap positive signal.
-      socketExists: () =>
-        existsSync(this.platform === "win32" ? this.pidFilePath : this.socketPath),
+      // Windows named pipes cannot use this POSIX socket identity probe. This accepted
+      // platform gap means a live Windows daemon with missing PID metadata will not
+      // self-heal here; retain the pre-identity-recovery behavior on Windows.
+      socketExists: () => this.platform !== "win32" && existsSync(this.socketPath),
       readRecord: () => readPidFileDataSync(this.pidFilePath),
       probe: () => new DaemonClient(this.socketPath, 1000, this.timer).getDaemonStatus(1000),
     };
@@ -1474,11 +1482,13 @@ export class DaemonManager implements DaemonManagerLike {
       // survive into the failure message if the holder later releases on failure.
       holderLogPath = (await this.getLockHolderStartupLogPath()) ?? holderLogPath;
       this.throwIfRecoveryCancelled(recoverySignal);
-      const ready = await this.waitForReady(
+      // Recovery is asserted by this lock holder, never inferred from an ambient socket.
+      waitedOnHolder = this.readStartupLockHolder();
+      const ready = await this.waitForStartupLockHolder(
+        arbitrationDeadline,
         remaining,
+        waitedOnHolder,
         recoverySignal,
-        () => this.isStillWaitingOnStartupLockHolder(waitedOnHolder),
-        LOCK_HOLDER_PROBE_TIMEOUT_MS,
       );
       this.throwIfRecoveryCancelled(recoverySignal);
       if (ready) {
@@ -1528,15 +1538,119 @@ export class DaemonManager implements DaemonManagerLike {
     );
     this.throwIfRecoveryCancelled(recoverySignal);
     if (
-      confirmBudget > 0 &&
-      this.socketPathObservable() &&
-      (await this.verifyDaemonConnection(confirmBudget))
+      await this.confirmLockFollowerReady(
+        confirmBudget,
+        waitedOnHolder.recovering === true,
+        recoverySignal,
+      )
     ) {
       this.throwIfRecoveryCancelled(recoverySignal);
       stderrLog("Daemon became ready before reporting startup failure");
       return "joined";
     }
     throw await this.createLockHolderStartupFailure(holderLogPath);
+  }
+
+  private async waitForStartupLockHolder(
+    deadline: number,
+    remaining: number,
+    holder: StartupLockHolder,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    Object.assign(holder, await this.readSettledStartupLockHolder(deadline, signal));
+    const stillWaiting = () => this.isStillWaitingOnStartupLockHolder(holder);
+    if (!holder.recovering) {
+      const ready = await this.waitForReady(
+        Math.min(remaining, this.remainingTime(deadline)),
+        signal,
+        stillWaiting,
+        LOCK_HOLDER_PROBE_TIMEOUT_MS,
+      );
+      // The holder may enter replacement while the ordinary readiness probe awaits.
+      const current = await this.readSettledStartupLockHolder(deadline, signal);
+      // Any current recovery invalidates reachability, even after ownership changes.
+      // Keep the original PID/token for the outer loop's holder-change detection.
+      holder.recovering = current.recovering;
+      if (!holder.recovering) {
+        return ready;
+      }
+    }
+    return this.waitForPublishedLockHolderIdentity(deadline, stillWaiting, signal);
+  }
+
+  /** Retry only torn JSON; legacy metadata never consumes arbitration budget. */
+  private async readSettledStartupLockHolder(
+    deadline: number,
+    signal?: AbortSignal,
+  ): Promise<StartupLockHolder> {
+    let holder = this.readStartupLockHolder();
+    for (let attempt = 0; holder.metadataPending && attempt < 3; attempt++) {
+      if (this.remainingTime(deadline) <= 0) {
+        break;
+      }
+      await this.sleepUnlessAborted(Math.min(1, this.remainingTime(deadline)), signal);
+      holder = this.readStartupLockHolder();
+    }
+    // Persistent corruption is not evidence that generic reachability is safe.
+    return holder;
+  }
+
+  private async confirmLockFollowerReady(
+    budget: number,
+    requireIdentity: boolean,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    if (budget <= 0 || !this.socketPathObservable()) {
+      return false;
+    }
+    return requireIdentity
+      ? this.waitForPublishedLockHolderIdentity(this.timer.now() + budget, () => false, signal)
+      : this.verifyDaemonConnection(budget);
+  }
+
+  /** A bounded observation: a stalled incumbent must not extend arbitration. */
+  private async authenticateLockFollowerOwner(deadline: number): Promise<DaemonStatus> {
+    const budget = Math.min(LOCK_HOLDER_PROBE_TIMEOUT_MS, this.remainingTime(deadline));
+    if (budget <= 0 || !this.identityRecoveryIO.socketExists()) {
+      return { running: false };
+    }
+    let timeout: NodeJS.Timeout | undefined;
+    try {
+      return await Promise.race([
+        this.authenticateSocketOwner(),
+        new Promise<DaemonStatus>((resolve) => {
+          timeout = this.timer.setTimeout(() => resolve({ running: false }), budget);
+        }),
+      ]);
+    } finally {
+      if (timeout !== undefined) {
+        this.timer.clearTimeout(timeout);
+      }
+    }
+  }
+
+  /**
+   * Reachability alone can join an incumbent that the lock holder is about to kill.
+   * Require a complete record matching the observed generation: either the repaired
+   * incumbent or its successor. Never grant a fresh budget when the holder changes.
+   */
+  private async waitForPublishedLockHolderIdentity(
+    deadline: number,
+    shouldContinueWaiting: () => boolean,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    while (this.remainingTime(deadline) > 0) {
+      this.throwIfRecoveryCancelled(signal);
+      const owner = await this.authenticateLockFollowerOwner(deadline);
+      if (owner.running && this.hasPublishedRecoveryIdentity(owner)) {
+        return true;
+      }
+      if (!shouldContinueWaiting()) {
+        return false;
+      }
+      await this.sleepUnlessAborted(Math.min(100, this.remainingTime(deadline)), signal);
+    }
+    return false;
   }
 
   /**
@@ -2005,13 +2119,18 @@ export class DaemonManager implements DaemonManagerLike {
       // but with no comparable identity yet.
       return { present: true, livePid: undefined, token: undefined };
     }
-    const { pid, token } = parseLockContent(content);
+    const { pid, token, metadata } = parseLockContent(content);
     if (!Number.isSafeInteger(pid) || pid <= 0) {
       // Unreadable PID — a holder may still be filling it in; keep waiting.
       return { present: true, livePid: undefined, token };
     }
     return this.isProcessRunning(pid)
-      ? { present: true, livePid: pid, token }
+      ? {
+          present: true,
+          livePid: pid,
+          token,
+          ...this.startupLockMetadata(metadata),
+        }
       : { present: false, livePid: undefined, token };
   }
 
@@ -2128,6 +2247,57 @@ export class DaemonManager implements DaemonManagerLike {
     return false;
   }
 
+  /** The shared lock metadata was historically just a base64url log path. */
+  private startupLockMetadata(metadata?: string): {
+    logPath: string;
+    recovering?: boolean;
+    metadataPending?: boolean;
+  } {
+    if (!metadata?.startsWith("{")) {
+      return { logPath: Buffer.from(metadata ?? "", "base64url").toString("utf8") };
+    }
+    try {
+      const value: unknown = JSON.parse(metadata);
+      if (typeof value === "object" && value !== null && "logPath" in value) {
+        return {
+          logPath: typeof value.logPath === "string" ? value.logPath : "",
+          recovering: "recovering" in value && value.recovering === true,
+        };
+      }
+    } catch (error) {
+      // Concurrent in-place writes can tear JSON: retry before trusting readiness.
+      logger.debug("Startup lock metadata is not yet readable", error);
+      return { logPath: "", recovering: true, metadataPending: true };
+    }
+    return { logPath: "" };
+  }
+
+  /** Update only our owned inode; releaseLock removes the marker with the lock. */
+  private markStartupLockRecovering(): void {
+    const holder = this.readStartupLockHolder();
+    if (holder.livePid !== process.pid || holder.token !== this.startupLockOwnerToken) {
+      return;
+    }
+    const fd = openSync(this.lockFilePath, "r+");
+    try {
+      const lockContents = readFileSync(fd, "utf8");
+      const { pid, token, metadata } = parseLockContent(lockContents.trim());
+      if (pid !== process.pid || token !== this.startupLockOwnerToken) {
+        throw new ActionableError("Startup lock ownership changed before identity recovery");
+      }
+      const recoveryMetadata = JSON.stringify({
+        logPath: this.startupLockMetadata(metadata).logPath,
+        recovering: true,
+      });
+      const content = formatLockContent(pid, token, recoveryMetadata);
+      // Pad shorter metadata so one write replaces the old body without a
+      // write/truncate window in which followers could read trailing old bytes.
+      writeSync(fd, content.padEnd(Buffer.byteLength(lockContents)), 0, "utf8");
+    } finally {
+      closeSync(fd);
+    }
+  }
+
   private async getLockHolderStartupLogPath(): Promise<string | null> {
     try {
       const lockContents = await readFile(this.lockFilePath, "utf-8");
@@ -2138,7 +2308,7 @@ export class DaemonManager implements DaemonManagerLike {
       if (!metadata) {
         return null;
       }
-      const logPath = Buffer.from(metadata, "base64url").toString("utf8");
+      const { logPath } = this.startupLockMetadata(metadata);
       if (!isAbsolute(logPath) || basename(logPath) !== `daemon-launch-${lockHolderPid}.log`) {
         return null;
       }
@@ -2800,6 +2970,12 @@ export class DaemonManager implements DaemonManagerLike {
   }
 
   private async recoverSocketIdentity(): Promise<DaemonStatus> {
+    // Publish before the first incumbent RPC, not after deciding to replace it.
+    // PID/token gating makes this inert for status callers without the lock.
+    // Retain the marker until the enclosing lifecycle operation releases its lock,
+    // including repair/unauthenticated outcomes: repaired records satisfy followers,
+    // and release removes the marker so later starts cannot inherit stale recovery.
+    this.markStartupLockRecovering();
     const owner = await this.authenticateSocketOwner();
     if (!owner.running) {
       return owner;
@@ -2826,6 +3002,7 @@ export class DaemonManager implements DaemonManagerLike {
   private async replaceRecoveryOwner(owner: DaemonStatus): Promise<DaemonStatus> {
     this.recoveryOwner = owner;
     try {
+      this.markStartupLockRecovering();
       const result = await this.restart({}, owner);
       return await this.waitForRecoverySuccessor(
         owner,

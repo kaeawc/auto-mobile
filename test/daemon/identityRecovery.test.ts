@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { republishOwnedIdentity } from "../../src/daemon/identityRecovery";
@@ -11,7 +11,7 @@ import type { DaemonStatus, PidFileData, DaemonSocketPaths } from "../../src/dae
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { getCurrentBuildIdentity } from "../../src/daemon/buildIdentity";
-import { DAEMON_VERSION } from "../../src/daemon/constants";
+import { DAEMON_STARTUP_TIMEOUT_MS, DAEMON_VERSION } from "../../src/daemon/constants";
 import {
   DAEMON_REPUBLISH_IDENTITY_METHOD as REPUBLISH,
   DAEMON_PREPARE_MAINTENANCE_METHOD as PREPARE,
@@ -51,7 +51,11 @@ const complete: PidFileData = {
   options: { debug: true, port: 19000, host: "127.0.0.1" },
 };
 
-function harness(result: { accepted: boolean; reason?: string } = { accepted: true }) {
+function harness(
+  result: { accepted: boolean; reason?: string } = { accepted: true },
+  lockPath = "/isolated/lock",
+  timer = new FakeTimer(),
+) {
   let record: PidFileData | null = null;
   let owner: DaemonStatus = {
     ...complete,
@@ -74,16 +78,20 @@ function harness(result: { accepted: boolean; reason?: string } = { accepted: tr
       }
     },
   });
-  const timer = new FakeTimer();
-  timer.enableAutoAdvance();
+  if (lockPath === "/isolated/lock") {
+    timer.enableAutoAdvance();
+  }
   const manager = new DaemonManager(
     () => client,
     undefined,
     timer,
-    "/isolated/lock",
+    lockPath,
     "/isolated/pid",
     socketPath,
-    { findDaemonProcesses: () => [], isProcessRunning: (pid) => pid === owner.pid },
+    {
+      findDaemonProcesses: () => [],
+      isProcessRunning: (pid) => pid === process.pid || (owner.running && pid === owner.pid),
+    },
     undefined,
     undefined,
     undefined,
@@ -140,7 +148,7 @@ afterEach(() => {
 });
 
 describe("provider-owned identity recovery", () => {
-  test("fix 5: Windows recovery probes require an existing PID-file signal", async () => {
+  test("Windows never probes socket identity with absent, present, stale, or malformed PID metadata", async () => {
     const dir = mkdtempSync(join(tmpdir(), "identity-win32-"));
     const pidPath = join(dir, "daemon.pid");
     const manager = new DaemonManager(
@@ -150,7 +158,7 @@ describe("provider-owned identity recovery", () => {
       join(dir, "lock"),
       pidPath,
       "named-pipe",
-      undefined,
+      { findDaemonProcesses: () => [], isProcessRunning: (pid) => pid === 123 },
       undefined,
       undefined,
       undefined,
@@ -164,10 +172,13 @@ describe("provider-owned identity recovery", () => {
     );
     try {
       expect(await manager.status()).toEqual({ running: false });
-      expect(probe).not.toHaveBeenCalled();
+      writeFileSync(pidPath, JSON.stringify(complete));
+      expect((await manager.status()).running).toBe(true);
+      writeFileSync(pidPath, JSON.stringify({ ...complete, pid: 999 }));
+      expect(await manager.status()).toEqual({ running: false });
       writeFileSync(pidPath, "malformed old metadata");
       expect(await manager.status()).toEqual({ running: false });
-      expect(probe).toHaveBeenCalledTimes(1);
+      expect(probe).not.toHaveBeenCalled();
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -195,45 +206,281 @@ describe("provider-owned identity recovery", () => {
     });
   }
 
-  test("fix 1: concurrent explicit starts drive one maintenance-admitted replacement", async () => {
-    const h = harness({ accepted: false, reason: "republish_unavailable" });
-    const originalStartUnlocked = (h.manager as any).startUnlocked.bind(h.manager);
-    let ownsLock = false;
-    spyOn(h.manager, "acquireLock").mockImplementation(() => {
-      if (ownsLock) {
-        return false;
-      }
-      ownsLock = true;
-      return true;
+  test("recovery lock follower waits for the successor's generation instead of joining the doomed incumbent", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "identity-follower-"));
+    const timer = new FakeTimer();
+    const h = harness(
+      { accepted: false, reason: "republish_unavailable" },
+      join(dir, "lock"),
+      timer,
+    );
+    const successor = { ...complete, pid: 124, startedAt: 200, processGenerationToken: "next" };
+    const stop = spyOn(h.manager as any, "stopRunningDaemon").mockImplementation(async () => {
+      await timer.sleep(300);
+      h.setOwner({ running: false });
     });
-    spyOn(h.manager, "releaseLock").mockImplementation(() => {
-      ownsLock = false;
+    const launch = spyOn((h.manager as any).launcher, "launchAndWait").mockImplementation(
+      async () => {
+        h.setOwner({ ...successor, running: true });
+        // Listening is insufficient until the successor publishes its complete record.
+        await timer.sleep(300);
+        h.setRecord(successor);
+      },
+    );
+    const peer = harness({ accepted: false }, join(dir, "lock"), timer);
+    // Separate manager state, sharing only the filesystem lock and fake daemon endpoint.
+    (peer.manager as any).identityRecoveryIO = (h.manager as any).identityRecoveryIO;
+    spyOn(peer.manager as any, "isProcessRunning").mockImplementation((pid) =>
+      (h.manager as any).isProcessRunning(pid),
+    );
+    const reachable = spyOn(peer.manager, "waitForReady").mockResolvedValue(true);
+    let joined: DaemonStatus | undefined;
+    try {
+      const first = h.manager.start();
+      const follower = peer.manager.start().then(async (result) => {
+        joined = await h.manager.status(false);
+        return result;
+      });
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(stop).toHaveBeenCalledTimes(1);
+      expect(joined).toBeUndefined();
+      expect(h.record).toBeNull();
+      expect(await timer.resolvePromise(Promise.all([first, follower]))).toEqual([
+        "replaced",
+        "joined",
+      ]);
+      expect(joined).toMatchObject({
+        running: true,
+        pid: 124,
+        startedAt: 200,
+        processGenerationToken: "next",
+      });
+      expect(reachable).not.toHaveBeenCalled();
+      expect(launch).toHaveBeenCalledTimes(1);
+      expect(h.client.callDaemonMethodCalls.filter((c) => c.method === ADMIT)).toHaveLength(1);
+    } finally {
+      h.manager.releaseLock();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("follower arriving during incumbent authentication waits for the replacement decision and successor", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "identity-auth-window-"));
+    const timer = new FakeTimer();
+    const h = harness({ accepted: false }, join(dir, "lock"), timer);
+    const peer = harness({ accepted: false }, join(dir, "lock"), timer);
+    const io = (h.manager as any).identityRecoveryIO;
+    (peer.manager as any).identityRecoveryIO = io;
+    spyOn(peer.manager as any, "isProcessRunning").mockImplementation((pid) =>
+      (h.manager as any).isProcessRunning(pid),
+    );
+    const probe = io.probe;
+    let unblock!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      unblock = resolve;
     });
-    const stop = spyOn(h.manager as any, "stopRunningDaemon").mockResolvedValue(undefined);
-    let launchCalls = 0;
-    spyOn(h.manager as any, "startUnlocked").mockImplementation(async (options) => {
-      if (launchCalls++ === 0) {
-        return originalStartUnlocked(options);
+    let entered!: () => void;
+    const authenticating = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    let followerProbed!: () => void;
+    const followerWaiting = new Promise<void>((resolve) => {
+      followerProbed = resolve;
+    });
+    let firstProbe = true;
+    spyOn(io, "probe").mockImplementation(async () => {
+      if (firstProbe) {
+        firstProbe = false;
+        entered();
+        await gate;
+      } else {
+        followerProbed();
       }
-      const successor = { ...complete, pid: 124, startedAt: 200, processGenerationToken: "next" };
+      return probe();
+    });
+    const successor = { ...complete, pid: 124, startedAt: 200, processGenerationToken: "next" };
+    const replacement = spyOn(h.manager, "restart").mockImplementation(async () => {
       h.setOwner({ ...successor, running: true });
       h.setRecord(successor);
-      return "started";
+      return "restarted";
     });
-    const first = h.manager.start();
-    // Model peers waiting on the namespace lock; lock arbitration has its own suite.
-    spyOn(h.manager as any, "startByAwaitingLockHolder").mockImplementation(async () => {
-      await first;
-      return "joined";
-    });
-    expect(await Promise.all([first, h.manager.start(), h.manager.start()])).toEqual([
-      "replaced",
-      "joined",
-      "joined",
-    ]);
-    expect(stop).toHaveBeenCalledTimes(1);
-    expect(h.client.callDaemonMethodCalls.filter((c) => c.method === ADMIT)).toHaveLength(1);
+    const reachable = spyOn(peer.manager, "waitForReady").mockResolvedValue(true);
+    let joined = false;
+    try {
+      const start = h.manager.start();
+      await authenticating;
+      expect((h.manager as any).readStartupLockHolder().recovering).toBe(true);
+      const follower = peer.manager.start().then((result) => {
+        joined = true;
+        return result;
+      });
+      await followerWaiting;
+      expect(joined).toBe(false);
+      expect(replacement).not.toHaveBeenCalled();
+      expect(h.client.callDaemonMethodCalls).toHaveLength(0);
+      unblock();
+      expect(await timer.resolvePromise(Promise.all([start, follower]))).toEqual([
+        "replaced",
+        "joined",
+      ]);
+      expect(h.record?.processGenerationToken).toBe("next");
+      expect(reachable).not.toHaveBeenCalled();
+      expect(existsSync(join(dir, "lock"))).toBe(false);
+    } finally {
+      unblock();
+      h.manager.releaseLock();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
+
+  test("a different holder's recovery marker invalidates ordinary readiness", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "identity-new-holder-"));
+    const h = harness({ accepted: false }, join(dir, "lock"));
+    const next = harness({ accepted: false }, join(dir, "lock"), h.timer);
+    h.timer.enableAutoAdvance();
+    (next.manager as any).identityRecoveryIO = (h.manager as any).identityRecoveryIO;
+    const ready = spyOn(h.manager, "waitForReady").mockImplementation(async () => {
+      h.manager.releaseLock();
+      expect(next.manager.acquireLock()).toBe(true);
+      (next.manager as any).markStartupLockRecovering();
+      h.timer.setTimeout(() => h.setRecord(complete), 300);
+      return true;
+    });
+    try {
+      expect(h.manager.acquireLock()).toBe(true);
+      expect(await h.manager.start()).toBe("joined");
+      expect(h.record).toEqual(complete);
+      expect(ready).toHaveBeenCalledTimes(1);
+    } finally {
+      next.manager.releaseLock();
+      h.manager.releaseLock();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("torn JSON recovery metadata is retried before readiness is trusted", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "identity-torn-marker-"));
+    const path = join(dir, "lock");
+    const h = harness({ accepted: false }, path);
+    h.timer.enableAutoAdvance();
+    const ready = spyOn(h.manager, "waitForReady").mockResolvedValue(true);
+    try {
+      expect(h.manager.acquireLock()).toBe(true);
+      (h.manager as any).markStartupLockRecovering();
+      const content = readFileSync(path, "utf8");
+      writeFileSync(path, content.slice(0, content.indexOf("{") + 1));
+      h.timer.setTimeout(() => writeFileSync(path, content), 1);
+      const holder = await (h.manager as any).readSettledStartupLockHolder(30000);
+      expect(holder.recovering).toBe(true);
+      expect(holder.metadataPending).toBeUndefined();
+      expect(h.timer.now()).toBe(1);
+      h.timer.setTimeout(() => h.setRecord(complete), 300);
+      expect(await h.manager.start()).toBe("joined");
+      expect(h.record).toEqual(complete);
+      expect(ready).not.toHaveBeenCalled();
+    } finally {
+      h.manager.releaseLock();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("in-place repair releases its recovery marker before a later ordinary follower", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "identity-marker-release-"));
+    const h = harness({ accepted: true }, join(dir, "lock"));
+    try {
+      expect(await h.manager.start()).toBe("joined");
+      expect(existsSync(join(dir, "lock"))).toBe(false);
+      expect(h.manager.acquireLock()).toBe(true);
+      expect((h.manager as any).readStartupLockHolder().recovering).toBeUndefined();
+      const ready = spyOn(h.manager, "waitForReady").mockResolvedValue(true);
+      const probe = spyOn((h.manager as any).identityRecoveryIO, "probe");
+      expect(await h.manager.start()).toBe("joined");
+      expect(ready).toHaveBeenCalled();
+      expect(probe).not.toHaveBeenCalled();
+    } finally {
+      h.manager.releaseLock();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("ordinary lock followers never inspect socket identity and retain the full budget", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "identity-ordinary-follower-"));
+    const h = harness({ accepted: false }, join(dir, "lock"));
+    const io = (h.manager as any).identityRecoveryIO;
+    const socketExists = spyOn(io, "socketExists");
+    const probe = spyOn(io, "probe");
+    const ready = spyOn(h.manager, "waitForReady").mockResolvedValue(true);
+    try {
+      expect(h.manager.acquireLock()).toBe(true);
+      expect(await h.manager.start()).toBe("joined");
+      expect(ready.mock.calls[0]?.[0]).toBe(DAEMON_STARTUP_TIMEOUT_MS);
+      expect(socketExists).not.toHaveBeenCalled();
+      expect(probe).not.toHaveBeenCalled();
+    } finally {
+      h.manager.releaseLock();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a recovery marker published during readiness switches the follower to identity waiting", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "identity-transition-follower-"));
+    const h = harness({ accepted: false }, join(dir, "lock"));
+    h.timer.enableAutoAdvance();
+    const ready = spyOn(h.manager, "waitForReady").mockImplementation(async () => {
+      (h.manager as any).markStartupLockRecovering();
+      h.timer.setTimeout(() => h.setRecord(complete), 300);
+      return true;
+    });
+    try {
+      expect(h.manager.acquireLock()).toBe(true);
+      expect(await h.manager.start()).toBe("joined");
+      expect(ready).toHaveBeenCalledTimes(1);
+      expect(h.record).toEqual(complete);
+    } finally {
+      h.manager.releaseLock();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test.each(["repair", "timeout", "stalled probe"])(
+    "recovery lock follower handles %s within the arbitration budget",
+    async (outcome) => {
+      const dir = mkdtempSync(join(tmpdir(), "identity-follower-budget-"));
+      const h = harness({ accepted: false }, join(dir, "lock"));
+      h.timer.enableAutoAdvance();
+      const reachable = spyOn(h.manager, "waitForReady").mockResolvedValue(true);
+      try {
+        expect(h.manager.acquireLock()).toBe(true);
+        (h.manager as any).markStartupLockRecovering();
+        if (outcome === "repair") {
+          h.timer.setTimeout(() => h.setRecord(complete), 300);
+        }
+        if (outcome === "stalled probe") {
+          const io = (h.manager as any).identityRecoveryIO;
+          const probe = io.probe;
+          let calls = 0;
+          spyOn(io, "probe").mockImplementation(() =>
+            calls++ === 0 ? probe() : new Promise<DaemonStatus>(() => {}),
+          );
+        }
+        const follower = h.manager.start();
+        if (outcome === "repair") {
+          expect(await follower).toBe("joined");
+          expect(await h.manager.status(false)).toMatchObject({
+            pid: complete.pid,
+            processGenerationToken: complete.processGenerationToken,
+          });
+        } else {
+          await expect(follower).rejects.toThrow("failed to become ready");
+          expect(h.timer.now()).toBe(DAEMON_STARTUP_TIMEOUT_MS);
+        }
+        expect(reachable).not.toHaveBeenCalled();
+      } finally {
+        h.manager.releaseLock();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
 
   test("fix 2: accepted but unverified publication fails status and blocks explicit start", async () => {
     const h = harness();

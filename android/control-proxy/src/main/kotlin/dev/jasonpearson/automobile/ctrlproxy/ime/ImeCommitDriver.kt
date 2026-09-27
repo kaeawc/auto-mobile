@@ -63,8 +63,14 @@ class ImeCommitDriver(private val sink: ImeCommitSink) {
   private fun complete(result: ImeCommitResult) {
     if (completed) return
     completed = true
+    // Editor writes are oneway; a failed request may have already issued some of them.
+    // Keep the result partial when the round-trip cannot confirm quiescence.
+    val outcome =
+      if (!result.success && committedUnits > 0 && !sink.syncEditorState())
+        result.copy(partialApplication = true)
+      else result
     restoreIfNeeded(restoreId)
-    completion?.invoke(result)
+    completion?.invoke(outcome)
   }
 
   /**

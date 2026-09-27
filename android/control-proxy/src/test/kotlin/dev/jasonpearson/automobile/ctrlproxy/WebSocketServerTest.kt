@@ -4,8 +4,6 @@ import dev.jasonpearson.automobile.protocol.ErrorResponse
 import dev.jasonpearson.automobile.protocol.HierarchyUpdateEvent
 import dev.jasonpearson.automobile.protocol.SetKeyboardProfileResult
 import dev.jasonpearson.automobile.protocol.SwipeResult
-import java.net.InetAddress
-import java.net.ServerSocket
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
@@ -69,103 +67,144 @@ class WebSocketServerTest {
   fun `server retries a failed bind and starts when port becomes available`() =
     runTest(testScope.testScheduler) {
       var permanentFailures = 0
-      ServerSocket(0, 50, InetAddress.getByName("127.0.0.1")).use { blocker ->
-        server =
-          WebSocketServer(
-            port = blocker.localPort,
-            scope = testScope,
-            onPermanentStartFailure = { permanentFailures++ },
-          )
+      var available = false
+      server =
+        WebSocketServer(
+          port = 0,
+          scope = testScope,
+          onPermanentStartFailure = { permanentFailures++ },
+          portAvailable = { available },
+        )
 
-        server.start()
-        assertFalse("Failed initial bind must not report a listener", server.isRunning())
-        runCurrent()
-        advanceTimeBy(249)
-        assertFalse("Server must stay stopped during backoff", server.isRunning())
+      server.start()
+      assertFalse("Failed initial bind must not report a listener", server.isRunning())
+      runCurrent()
+      advanceTimeBy(249)
+      assertFalse("Server must stay stopped during backoff", server.isRunning())
 
-        blocker.close()
-        advanceTimeBy(1)
-        runCurrent()
-        assertTrue("First retry should bind after the port is freed", server.isRunning())
-        assertEquals(0, permanentFailures)
-      }
+      available = true
+      advanceTimeBy(1)
+      runCurrent()
+      assertTrue("First retry should bind after the port is freed", server.isRunning())
+      assertEquals(0, permanentFailures)
+    }
+
+  @Test
+  fun `injected occupied port probe prevents ktor startup without a blocker socket`() =
+    runTest(testScope.testScheduler) {
+      var probes = 0
+      server =
+        WebSocketServer(
+          port = 0,
+          scope = testScope,
+          portAvailable = {
+            probes++
+            false
+          },
+        )
+
+      server.start()
+      runCurrent()
+
+      assertEquals(1, probes)
+      assertFalse(server.isRunning())
     }
 
   @Test
   fun `server reports permanent failure once after bounded retries`() =
     runTest(testScope.testScheduler) {
       var permanentFailures = 0
-      ServerSocket(0, 50, InetAddress.getByName("127.0.0.1")).use { blocker ->
-        server =
-          WebSocketServer(
-            port = blocker.localPort,
-            scope = testScope,
-            onPermanentStartFailure = { permanentFailures++ },
-          )
-
-        server.start()
-        assertFalse(server.isRunning())
-        runCurrent()
-        advanceUntilIdle()
-
-        assertFalse("Exhausted retries must not report a listener", server.isRunning())
-        assertEquals("Permanent failure callback should fire once", 1, permanentFailures)
-        assertEquals(
-          "Four exponential delays should total 3750 ms",
-          3750L,
-          testScheduler.currentTime,
+      server =
+        WebSocketServer(
+          port = 0,
+          scope = testScope,
+          onPermanentStartFailure = { permanentFailures++ },
+          portAvailable = { false },
         )
-      }
+
+      server.start()
+      assertFalse(server.isRunning())
+      runCurrent()
+      advanceUntilIdle()
+
+      assertFalse("Exhausted retries must not report a listener", server.isRunning())
+      assertEquals("Permanent failure callback should fire once", 1, permanentFailures)
+      assertEquals(
+        "Four exponential delays should total 3750 ms",
+        3750L,
+        testScheduler.currentTime,
+      )
     }
 
   @Test
   fun `explicit successful start cancels pending permanent failure`() =
     runTest(testScope.testScheduler) {
       var permanentFailures = 0
-      ServerSocket(0, 50, InetAddress.getByName("127.0.0.1")).use { blocker ->
-        server =
-          WebSocketServer(
-            port = blocker.localPort,
-            scope = testScope,
-            onPermanentStartFailure = { permanentFailures++ },
-          )
+      var available = false
+      server =
+        WebSocketServer(
+          port = 0,
+          scope = testScope,
+          onPermanentStartFailure = { permanentFailures++ },
+          portAvailable = { available },
+        )
 
-        server.start()
-        assertFalse(server.isRunning())
-        runCurrent()
-        blocker.close()
-        server.start()
-        runCurrent()
-        advanceUntilIdle()
+      server.start()
+      assertFalse(server.isRunning())
+      runCurrent()
+      available = true
+      server.start()
+      runCurrent()
+      advanceUntilIdle()
 
-        assertTrue(server.isRunning())
-        assertEquals(0, permanentFailures)
-      }
+      assertTrue(server.isRunning())
+      assertEquals(0, permanentFailures)
     }
 
   @Test
   fun `stop cancels a pending retry without reporting permanent failure`() =
     runTest(testScope.testScheduler) {
       var permanentFailures = 0
-      ServerSocket(0, 50, InetAddress.getByName("127.0.0.1")).use { blocker ->
-        server =
-          WebSocketServer(
-            port = blocker.localPort,
-            scope = testScope,
-            onPermanentStartFailure = { permanentFailures++ },
-          )
+      server =
+        WebSocketServer(
+          port = 0,
+          scope = testScope,
+          onPermanentStartFailure = { permanentFailures++ },
+          portAvailable = { false },
+        )
 
-        server.start()
-        runCurrent()
-        assertFalse(server.isRunning())
-        server.stop()
-        blocker.close()
-        advanceTimeBy(4_000)
-        runCurrent()
+      server.start()
+      runCurrent()
+      assertFalse(server.isRunning())
+      server.stop()
+      advanceTimeBy(4_000)
+      runCurrent()
 
-        assertFalse("Stopped server must not bind after retry delay", server.isRunning())
-        assertEquals(0, permanentFailures)
-      }
+      assertFalse("Stopped server must not bind after retry delay", server.isRunning())
+      assertEquals(0, permanentFailures)
+    }
+
+  @Test
+  fun `cancel while retry enters start lock cannot resurrect listener`() =
+    runTest(testScope.testScheduler) {
+      var available = false
+      server =
+        WebSocketServer(
+          port = 0,
+          scope = testScope,
+          portAvailable = { available },
+          onRetryLockAcquired = {
+            available = true
+            server.stop()
+          },
+        )
+
+      server.start()
+      runCurrent()
+      advanceTimeBy(250)
+      runCurrent()
+
+      assertFalse("A canceled retry must not bind after stop", server.isRunning())
     }
 
   @Test

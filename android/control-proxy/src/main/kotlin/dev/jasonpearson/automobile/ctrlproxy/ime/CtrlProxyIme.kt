@@ -374,11 +374,13 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
 
   // Finish any live composition first: the new profile's policy starts with an empty composing
   // buffer, so a surviving composing span would be overwritten by its next setComposingText.
-  private fun applyProfile(id: String) {
+  private fun applyProfile(id: String): Boolean {
     connectionAdapter()?.let { connection ->
       InputConnectionDriver(connection).execute(listOf(ImeOp.FinishComposingText))
     }
-    if (session.setActiveProfile(id)) activeProfile = session.activeProfile()
+    if (!session.setActiveProfile(id)) return false
+    activeProfile = session.activeProfile()
+    return true
   }
 
   private fun connectionAdapter(): ImeConnection? = currentInputConnection?.let {
@@ -410,12 +412,25 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
      * Switches the live keyboard's profile. Callers may be on any thread (the CtrlProxy WebSocket
      * handler is not the main thread), so the swap is posted to the main looper where the session
      * is driven; a later posted automation commit therefore always runs under the new profile.
-     * Returns false when no keyboard instance is running (the caller persists the id instead).
+     * Returns false when no keyboard instance is running (the caller persists the id instead). The
+     * callback runs after the live session has applied and persisted the profile.
      */
-    fun setActiveProfile(id: String): Boolean {
+    fun setActiveProfile(id: String, onComplete: (Boolean) -> Unit): Boolean {
       val service = instance ?: return false
-      service.mainHandler.post { service.applyProfile(id) }
+      postProfileChange(
+        { action -> service.mainHandler.post(action) },
+        { service.applyProfile(id) },
+        onComplete,
+      )
       return true
+    }
+
+    internal fun postProfileChange(
+      post: (Runnable) -> Boolean,
+      apply: () -> Boolean,
+      onComplete: (Boolean) -> Unit,
+    ) {
+      if (!post(Runnable { onComplete(apply()) })) onComplete(false)
     }
   }
 }

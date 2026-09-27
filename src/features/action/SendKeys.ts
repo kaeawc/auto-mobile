@@ -488,8 +488,14 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     autoImeFallback: AndroidSendKeysTypingMode | undefined,
     signal?: AbortSignal,
   ): Promise<TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode }> {
-    if (!autoImeFallback || (await this.textClient.supportsImeCommit())) {
+    if (!autoImeFallback) {
       return this.executeAndroidImeCommit(text, operation, keyboardProfile, signal);
+    }
+    if (await this.textClient.supportsImeCommit()) {
+      const result = await this.executeAndroidImeCommit(text, operation, keyboardProfile, signal);
+      if (!result.imeActivationFailed) {
+        return result;
+      }
     }
     const fallback = await this.executeAndroidType(
       text,
@@ -499,7 +505,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       undefined,
       signal,
     );
-    return { ...fallback, resolvedMode: autoImeFallback };
+    return { ...fallback, resolvedMode: fallback.resolvedMode ?? autoImeFallback };
   }
 
   private async executeAndroidImeCommit(
@@ -508,7 +514,9 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     keyboardProfile: KeyboardProfileId | undefined,
     signal?: AbortSignal,
     mode: "ime" | "imeKeyEvents" = "ime",
-  ): Promise<TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode }> {
+  ): Promise<
+    TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode; imeActivationFailed?: boolean }
+  > {
     signal?.throwIfAborted();
     // Serialize the whole capture→activate→commit→restore section per device so a
     // second call cannot borrow/restore the IME while this one is mid-flight (#7464).
@@ -525,7 +533,9 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     keyboardProfile: KeyboardProfileId | undefined,
     signal?: AbortSignal,
     mode: "ime" | "imeKeyEvents" = "ime",
-  ): Promise<TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode }> {
+  ): Promise<
+    TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode; imeActivationFailed?: boolean }
+  > {
     signal?.throwIfAborted();
     if (!(await this.textClient.supportsImeCommit())) {
       const error =
@@ -575,7 +585,9 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     wasEnabled: boolean,
     signal?: AbortSignal,
     mode: "ime" | "imeKeyEvents" = "ime",
-  ): Promise<TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode }> {
+  ): Promise<
+    TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode; imeActivationFailed?: boolean }
+  > {
     const profileResult = await this.setRequestedKeyboardProfile(keyboardProfile);
     if (!profileResult.success) {
       return { ...profileResult, resolvedMode: mode };
@@ -585,7 +597,11 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     if (!(await this.activateCommitIme(wasEnabled))) {
       await this.restoreIme(prior, wasEnabled);
       await this.restoreKeyboardProfileIfNeeded(keyboardProfile, previousProfileId);
-      return { success: false, error: "Failed to activate the IME for text commit." };
+      return {
+        success: false,
+        error: "Failed to activate the IME for text commit.",
+        imeActivationFailed: true,
+      };
     }
 
     let safeToRestore = true;

@@ -154,6 +154,15 @@ internal fun nodeSelectorMatches(selector: NodeSelector, fields: NodeSelectorFie
   return true
 }
 
+internal suspend fun startEventIngestionWhenReady(
+  isRunning: () -> Boolean,
+  pause: suspend () -> Unit,
+  start: () -> Unit,
+) {
+  while (!isRunning()) pause()
+  start()
+}
+
 internal fun nodeActionFailure(action: String, availableActionIds: Collection<Int>?): String? {
   val actionId = nodeActionId(action) ?: return "Unsupported accessibility action: $action"
   if (availableActionIds != null && actionId !in availableActionIds) {
@@ -1493,21 +1502,28 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         disableSelf()
       }
 
-      // Start every navigation-ingestion path only after the WebSocket is ready. SDK batch
-      // events suppress latestEvent replay, so receiving one before this point would lose it.
-      navigationEventAccumulator.initialize()
-      Log.d(TAG, "Navigation event accumulator initialized")
-      navigationEventJob =
-        navigationEventAccumulator.latestEvent
-          .onEach { event ->
-            if (event != null) {
-              Log.d(TAG, "Navigation event: ${event.destination} at ${event.timestamp}")
-              broadcastNavigationEvent(event)
-            }
-          }
-          .launchIn(serviceScope)
-      sdkEventBatchProcessor.start()
-      Log.d(TAG, "SDK event batch processor started")
+      // Receivers may enqueue into the processor's bounded channel during bind retries. Do not
+      // drain it, or publish accumulator events, until the listener can deliver them.
+      serviceScope.launch {
+        startEventIngestionWhenReady(
+          isRunning = { webSocketServer.isRunning() },
+          pause = { kotlinx.coroutines.delay(50L) },
+        ) {
+          navigationEventAccumulator.initialize()
+          Log.d(TAG, "Navigation event accumulator initialized")
+          navigationEventJob =
+            navigationEventAccumulator.latestEvent
+              .onEach { event ->
+                if (event != null) {
+                  Log.d(TAG, "Navigation event: ${event.destination} at ${event.timestamp}")
+                  broadcastNavigationEvent(event)
+                }
+              }
+              .launchIn(serviceScope)
+          sdkEventBatchProcessor.start()
+          Log.d(TAG, "SDK event batch processor started")
+        }
+      }
 
       // Start logcat reader for automatic log capture. Gate parsing on a connected client so a
       // chatty device is not regex-parsed while nobody is consuming logs.
@@ -2112,11 +2128,21 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
     val store = SharedPreferencesKeyboardProfileStore(this)
     val previous = store.activeProfileId()
-    if (!CtrlProxyIme.setActiveProfile(profile.id)) {
+    val applied = CompletableDeferred<Boolean>()
+    val live = CtrlProxyIme.setActiveProfile(profile.id) { applied.complete(it) }
+    if (!live) {
       store.setActiveProfileId(profile.id)
+      applied.complete(true)
     }
     launchRequestScope(requestId) {
-      broadcastSetKeyboardProfileResult(requestId, true, profile.id, previous)
+      val success = applied.await()
+      broadcastSetKeyboardProfileResult(
+        requestId,
+        success,
+        if (success) profile.id else null,
+        if (success) previous else null,
+        if (success) null else "Failed to apply keyboard profile",
+      )
     }
   }
 

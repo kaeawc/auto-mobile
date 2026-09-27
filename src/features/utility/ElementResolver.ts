@@ -197,21 +197,14 @@ export class ElementResolver {
       }
       nodes = siblings.nodes;
     }
-    const matched = this.match(nodes, selector, intent);
-    if (preserveTextScope) {
-      matched.matches = matched.matches.filter(
-        ({ node }) =>
-          !matched.matches.some(
-            ({ node: other }) => other !== node && isWithin(other, node, snapshot.nodes),
-          ),
-      );
-    }
-    if (
-      !preserveTextScope &&
-      (selector.text !== undefined || selector.contentDescription !== undefined)
-    ) {
-      matched.matches = this.promoteTextMatches(matched.matches, snapshot, scope, intent);
-    }
+    const matched = this.prepareMatches(
+      this.match(nodes, selector, intent),
+      selector,
+      snapshot,
+      scope,
+      intent,
+      preserveTextScope,
+    );
     const result: ElementResolution = {
       chosen: null,
       candidates: matched.matches.map(({ node }) => node),
@@ -236,6 +229,27 @@ export class ElementResolver {
           (!intent.viewport || centerWithinViewport(candidate.bounds, intent.viewport))),
     );
     return this.choose(result, selector, actionTarget);
+  }
+
+  private prepareMatches(
+    matched: Pick<ElementResolution, "matches" | "matchMode" | "error">,
+    selector: ResolverSelector,
+    snapshot: ResolverSnapshot,
+    scope: SearchableEntry | undefined,
+    intent: ResolutionIntent,
+    preserveTextScope: boolean,
+  ): Pick<ElementResolution, "matches" | "matchMode" | "error"> {
+    if (preserveTextScope) {
+      matched.matches = matched.matches.filter(
+        ({ node }) =>
+          !matched.matches.some(
+            ({ node: other }) => other !== node && isWithin(other, node, snapshot.nodes),
+          ),
+      );
+    } else if (selector.text !== undefined || selector.contentDescription !== undefined) {
+      matched.matches = this.promoteTextMatches(matched.matches, snapshot, scope, intent);
+    }
+    return matched;
   }
 
   private choose(
@@ -488,10 +502,7 @@ export class ElementResolver {
       fields(node).some((field) => normalize(field, selector.caseSensitive) === query),
     );
     const requested = intent.matchMode ?? selector.match;
-    const eligibleExact =
-      intent.action === "input" || intent.action === "focus"
-        ? exact.some((node) => eligible(node, intent))
-        : exact.length > 0;
+    const eligibleExact = this.hasEligibleExactTextMatch(exact, intent);
     const matchMode =
       intent.negative && requested !== "regex"
         ? "exact"
@@ -525,6 +536,12 @@ export class ElementResolver {
       })),
       matchMode,
     };
+  }
+
+  private hasEligibleExactTextMatch(exact: SearchableEntry[], intent: ResolutionIntent): boolean {
+    return intent.action === "input" || intent.action === "focus"
+      ? exact.some((node) => eligible(node, intent))
+      : exact.length > 0;
   }
 
   private matchId(

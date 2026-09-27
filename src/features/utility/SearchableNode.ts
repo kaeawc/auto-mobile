@@ -144,9 +144,8 @@ export class SearchableHierarchy {
         const element = this.parser.parseNodeBounds(source) ?? undefined;
         const raw = toSearchable(properties);
         const entry: SearchableEntry = {
-          ...toSearchable(element ?? properties),
-          categories: raw.categories,
-          categoryText: raw.categoryText,
+          ...raw,
+          bounds: element?.bounds ?? raw.bounds,
           source,
           properties,
           element,

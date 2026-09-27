@@ -107,6 +107,28 @@ test("minimal parsed descriptors retain raw observe categories", () => {
   expect(elements.text![0]).toEqual({ bounds });
 });
 
+test("minimal parsed descriptors retain all raw searchable metadata and normalized bounds", () => {
+  const parser = new FakeElementParser();
+  parser.nextNodeProperties = {
+    "resource-id": "pkg:id/go",
+    text: "Go",
+    class: "Button",
+    clickable: true,
+    bounds: [1, 2, 3, 4],
+  };
+  parser.nextParsedNode = { bounds };
+  const [entry] = new SearchableHierarchy(parser).project({ hierarchy: { node: { bounds } } });
+  expect(entry.nativeId).toBe("pkg:id/go");
+  expect(entry.elementId).toBe("pkg:id/go");
+  expect(entry.label).toBe("Go");
+  expect(entry.textFields).toEqual(["Go"]);
+  expect(entry.className).toBe("Button");
+  expect(entry.affordances).toContain("tap");
+  expect(entry.actionable).toBe(true);
+  expect(entry.bounds).toEqual(bounds);
+  expect(entry.element).toEqual({ bounds });
+});
+
 test("collector output nested fields cannot mutate a cached capture", () => {
   const collector = new DefaultObserveElementCollector();
   const capture = {

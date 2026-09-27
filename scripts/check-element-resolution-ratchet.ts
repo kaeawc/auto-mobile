@@ -5,8 +5,8 @@ const INITIAL_BASELINE_SHA256 = "b329c96f1dd1263982a92b952fd9d099d6e7ba9a8498765
 const INITIAL_SIGNATURE_SHA256 = "87531c89409eceb7d4d815126c3461acd6d759e46786fc6b89eb1532333b4b9f";
 // The reviewed focus-input fixture extension adds nine recorded legacy gaps.
 // The exact digest permits this one contract expansion while keeping future growth gated.
-const FOCUS_BASELINE_SHA256 = "176011148f8bb8f7e0f9dd61ba0637910e89e19a2e74dd5f6e8d217eb3e2ed38";
-const FOCUS_SIGNATURE_SHA256 = "a39d301f0debfb298828b161a46d0d324e41824889477423d97d8d09afe68aa0";
+const FOCUS_BASELINE_SHA256 = "de44394bfd0b94fcc979a112ca0bc45dd37e1336b7b987caa3533642e74c6ed7";
+const FOCUS_SIGNATURE_SHA256 = "262630c6315a6cfe945008abb58d52274dd5188903df949d0c239c95a785dd5b";
 const digest = (entries: string[]) =>
   createHash("sha256").update(entries.sort().join("\n")).digest("hex");
 
@@ -37,7 +37,10 @@ export function assertSignatureRatchetDoesNotDrift(
   const drift = Object.entries(currentSignatures).filter(
     ([key, value]) => !(key in baselineSignatures) || baselineSignatures[key] !== value,
   );
-  if (drift.length && digest(currentEntries) !== FOCUS_SIGNATURE_SHA256) {
+  const focusExpansion =
+    digest(Object.entries(baselineSignatures).map((entry) => JSON.stringify(entry))) ===
+      INITIAL_SIGNATURE_SHA256 && digest(currentEntries) === FOCUS_SIGNATURE_SHA256;
+  if (drift.length && !focusExpansion) {
     throw new Error(`Element-resolution signatures may only shrink:\n${JSON.stringify(drift)}`);
   }
 }
@@ -66,9 +69,13 @@ export function assertRatchetDoesNotGrow(current: string, baseline: string | und
     }
     return;
   }
-  const allowed = new Set(entries(baseline));
+  const baselineEntries = entries(baseline);
+  const allowed = new Set(baselineEntries);
   const additions = currentEntries.filter((entry) => !allowed.has(entry));
-  if (additions.length && digest(currentEntries) !== FOCUS_BASELINE_SHA256) {
+  const focusExpansion =
+    digest(baselineEntries) === INITIAL_BASELINE_SHA256 &&
+    digest(currentEntries) === FOCUS_BASELINE_SHA256;
+  if (additions.length && !focusExpansion) {
     throw new Error(`Element-resolution exceptions may only shrink:\n${additions.join("\n")}`);
   }
 }

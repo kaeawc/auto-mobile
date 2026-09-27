@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import {
   assertRatchetDoesNotGrow,
   assertSignatureRatchetDoesNotDrift,
@@ -25,5 +26,22 @@ test("signature ratchet retains outcomes for every surviving gap", () => {
   );
   expect(() =>
     assertSignatureRatchetDoesNotDrift('{"a":"target","new":null}', '{"a":"target"}'),
+  ).toThrow("only shrink");
+});
+
+test("reviewed focus seed cannot restore gaps removed from a later baseline", () => {
+  const gaps = readFileSync("test/features/element-resolution/observeContractGaps.json", "utf8");
+  const signatures = readFileSync(
+    "test/features/element-resolution/observeContractGapSignatures.json",
+    "utf8",
+  );
+  const shrunkenGaps = JSON.parse(gaps) as Record<string, string[]>;
+  shrunkenGaps["F-focus-input"].pop();
+  expect(() => assertRatchetDoesNotGrow(gaps, JSON.stringify(shrunkenGaps))).toThrow("only shrink");
+  const shrunkenSignatures = JSON.parse(signatures) as Record<string, string | null>;
+  const removed = Object.keys(shrunkenSignatures).find((key) => key.includes("focus-input"))!;
+  delete shrunkenSignatures[removed];
+  expect(() =>
+    assertSignatureRatchetDoesNotDrift(signatures, JSON.stringify(shrunkenSignatures)),
   ).toThrow("only shrink");
 });

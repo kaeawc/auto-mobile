@@ -169,6 +169,29 @@ describe("observe-to-resolve migration contract", () => {
     };
     expect(compareResolvers([selected], legacy, ignoresFocus)).toEqual([selected.key]);
   });
+  test("public focus-input query remains unindexed when a label has a non-input peer", () => {
+    const focus = cases.find(
+      ({ capture, query }) =>
+        capture.name === "ios-reminders-xctest-noise-before.json" &&
+        query.intent === "focus-input" &&
+        query.value === "Buy milk",
+    );
+    expect(focus).toBeDefined();
+    expect(focus!.query.index).toBeUndefined();
+  });
+  test("differential seam detects camel-case accessibility focus state", () => {
+    const selected = cases.find(({ query }) => query.intent === "focus-input")!;
+    const element = legacy.resolve(selected.capture, selected.query).chosen!;
+    const focused = { ...element, accessibilityFocused: true };
+    const unfocused = { ...element, accessibilityFocused: false };
+    const reference: ContractResolver = {
+      resolve: () => ({ chosen: focused, candidates: [focused, unfocused] }),
+    };
+    const reordered: ContractResolver = {
+      resolve: () => ({ chosen: focused, candidates: [unfocused, focused] }),
+    };
+    expect(compareResolvers([selected], reference, reordered)).toEqual([selected.key]);
+  });
   test("differential seam distinguishes same-bounds focus state and editability", () => {
     const selected = cases.find(({ query }) => query.intent === "focus-input")!;
     const element = legacy.resolve(selected.capture, selected.query).chosen!;

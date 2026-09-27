@@ -98,7 +98,26 @@ export function contractCases(capture: ContractCapture): ContractCase[] {
           : undefined;
       queries.push({ kind: "text", value: observed.label, index });
       if (observed.affordances.includes("input")) {
-        queries.push({ kind: "text", value: observed.label, index, intent: "focus-input" });
+        const inputPeers = skeleton.filter(
+          (entry) => entry.label === observed.label && entry.affordances.includes("input"),
+        );
+        const focusIndex =
+          inputPeers.length > 1
+            ? skeleton
+                .slice(0, row)
+                .filter(
+                  (entry) => entry.label === observed.label && entry.affordances.includes("input"),
+                ).length
+            : undefined;
+        queries.push({
+          kind: "text",
+          value: observed.label,
+          index: focusIndex,
+          intent: "focus-input",
+        });
+        if (focusIndex === 0) {
+          queries.push({ kind: "text", value: observed.label, intent: "focus-input" });
+        }
       }
     }
     if (observed.testTag) {
@@ -234,6 +253,7 @@ export function compareResolvers(
                 element.isFocused,
                 element["has-keyboard-focus"],
                 element["accessibility-focused"],
+                element.accessibilityFocused,
               ]
             : null;
         return JSON.stringify({

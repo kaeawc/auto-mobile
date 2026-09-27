@@ -103,12 +103,12 @@
   "ios-reminders-xctest-noise-after.json:{\"kind\":\"elementId\",\"value\":\"new-reminder\"}:16,786,201,823": null,
   "ios-reminders-xctest-noise-after.json:{\"kind\":\"elementId\",\"value\":\"reminder-buy-milk\"}:0,156,393,204": null,
   "ios-reminders-xctest-noise-after.json:{\"kind\":\"elementId\",\"value\":\"title-field\"}:16,728,377,772": null,
-  "ios-reminders-xctest-noise-after.json:{\"kind\":\"text\",\"value\":\"Buy milk\",\"index\":1,\"intent\":\"focus-input\"}:16,728,377,772": null,
+  "ios-reminders-xctest-noise-after.json:{\"kind\":\"text\",\"value\":\"Buy milk\",\"intent\":\"focus-input\"}:16,728,377,772": "0,156,393,204",
   "ios-reminders-xctest-noise-after.json:{\"kind\":\"text\",\"value\":\"Buy milk\",\"index\":1}:16,728,377,772": null,
   "ios-reminders-xctest-noise-before.json:{\"kind\":\"elementId\",\"value\":\"list\"}:0,120,393,720": null,
   "ios-reminders-xctest-noise-before.json:{\"kind\":\"elementId\",\"value\":\"new-reminder\"}:16,786,201,823": null,
   "ios-reminders-xctest-noise-before.json:{\"kind\":\"elementId\",\"value\":\"reminder-buy-milk\"}:0,156,393,204": null,
   "ios-reminders-xctest-noise-before.json:{\"kind\":\"elementId\",\"value\":\"title-field\"}:16,728,377,772": null,
-  "ios-reminders-xctest-noise-before.json:{\"kind\":\"text\",\"value\":\"Buy milk\",\"index\":1,\"intent\":\"focus-input\"}:16,728,377,772": "56,168,142,192",
+  "ios-reminders-xctest-noise-before.json:{\"kind\":\"text\",\"value\":\"Buy milk\",\"intent\":\"focus-input\"}:16,728,377,772": "0,156,393,204",
   "ios-reminders-xctest-noise-before.json:{\"kind\":\"text\",\"value\":\"Buy milk\",\"index\":1}:16,728,377,772": "56,168,142,192"
 }

@@ -248,12 +248,82 @@ test("focus promotes a Compose label child to its editable ancestor (#7759)", ()
   expect(result.element?.bounds).toEqual(inputBounds);
 });
 
+test("focus rejects a nested label outside a distant editable ancestor (#7759)", () => {
+  const outerBounds = { left: 0, top: 0, right: 200, bottom: 80 };
+  const labelBounds = { left: 20, top: 200, right: 100, bottom: 230 };
+  const capture = {
+    hierarchy: {
+      node: {
+        class: "android.widget.EditText",
+        bounds: outerBounds,
+        node: {
+          bounds: { left: 0, top: 180, right: 200, bottom: 250 },
+          node: { class: "android.widget.TextView", text: "Email", bounds: labelBounds },
+        },
+      },
+    },
+  };
+  const result = new ResolverElementSelector().selectByText(capture, "Email", {
+    intentAction: "focus-input",
+  });
+  expect(result.element).toBeNull();
+  expect(result.element?.bounds).not.toEqual(outerBounds);
+});
+
+test("focus rejects a label three hops below a full-screen editable ancestor (#7759)", () => {
+  const outerBounds = { left: 0, top: 0, right: 1080, bottom: 2400 };
+  const capture = {
+    hierarchy: {
+      node: {
+        class: "android.widget.EditText",
+        bounds: outerBounds,
+        node: {
+          bounds: { left: 0, top: 900, right: 1080, bottom: 1400 },
+          node: {
+            bounds: { left: 40, top: 1080, right: 1040, bottom: 1250 },
+            node: {
+              class: "android.widget.TextView",
+              text: "Email",
+              bounds: { left: 126, top: 1157, right: 461, bottom: 1220 },
+            },
+          },
+        },
+      },
+    },
+  };
+  const result = new ResolverElementSelector().selectByText(capture, "Email", {
+    intentAction: "focus-input",
+  });
+  expect(result.element).toBeNull();
+  expect(result.element?.bounds).not.toEqual(outerBounds);
+});
+
+test("focus stops at an interactive ancestor before a distant editable input (#7759)", () => {
+  const capture = {
+    hierarchy: {
+      node: {
+        class: "android.widget.EditText",
+        bounds: { left: 0, top: 0, right: 300, bottom: 300 },
+        node: {
+          clickable: true,
+          bounds: { left: 0, top: 0, right: 200, bottom: 100 },
+          node: { text: "Email", bounds: { left: 10, top: 10, right: 100, bottom: 40 } },
+        },
+      },
+    },
+  };
+  expect(
+    new ResolverElementSelector().selectByText(capture, "Email", { intentAction: "focus-input" })
+      .element,
+  ).toBeNull();
+});
+
 test("focus promotes an iOS text label to its text-field role ancestor (#7759)", () => {
   const inputBounds = { left: 0, top: 0, right: 200, bottom: 70 };
   const capture = {
     hierarchy: {
       node: {
-        "ios-role": "AXTextField",
+        role: "textfield",
         bounds: inputBounds,
         node: [{ text: "Email", bounds: { left: 10, top: 10, right: 100, bottom: 40 } }],
       },

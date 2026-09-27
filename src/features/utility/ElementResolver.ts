@@ -16,6 +16,9 @@ const ordinalNodeKey = new RegExp(
   `^${STABLE_VIEW_ID_PREFIX}[0-9a-f]{${STABLE_VIEW_ID_HASH_LENGTH}}-\\d+$`,
 );
 
+// Keep label promotion within a parent or grandparent, away from distant editable ancestors.
+const FOCUS_LABEL_ANCESTOR_HOP_LIMIT = 2;
+
 export type MatchMode = "exact" | "contains" | "regex";
 export type ResolutionAction =
   | "inspect"
@@ -138,10 +141,15 @@ function semanticActionsForIntent(intent: ResolutionIntent): SearchableEntry["af
 
 /** Native editable fields and iOS accessibility text-field roles can own focus labels. */
 export function isFocusEditableElement(element: Element): boolean {
+  return isEditableElementProperties(element) || element.role === "textfield";
+}
+
+function containsBounds(container: ElementBounds, contained: ElementBounds): boolean {
   return (
-    isEditableElementProperties(element) ||
-    element["ios-role"] === "AXTextField" ||
-    element["ios-role"] === "AXTextArea"
+    container.left <= contained.left &&
+    container.top <= contained.top &&
+    container.right >= contained.right &&
+    container.bottom >= contained.bottom
   );
 }
 
@@ -178,6 +186,19 @@ function eligible(node: SearchableEntry, intent: ResolutionIntent): boolean {
     return node.focusable || node.affordances.includes("input");
   }
   return hasActionAffordance(node, intent);
+}
+
+function promotableFocusAncestor(
+  label: SearchableEntry,
+  ancestor: SearchableEntry,
+  intent: ResolutionIntent,
+): boolean {
+  return (
+    !!label.bounds &&
+    !!ancestor.bounds &&
+    containsBounds(ancestor.bounds, label.bounds) &&
+    eligible(ancestor, intent)
+  );
 }
 
 export function isWithin(
@@ -398,6 +419,9 @@ export class ElementResolver {
     if (!node) {
       return null;
     }
+    if (intent.action === "focus-input") {
+      return this.focusInputTarget(node, snapshot, intent, scope);
+    }
     if (eligible(node, intent)) {
       return node;
     }
@@ -409,6 +433,37 @@ export class ElementResolver {
       }
       if (eligible(ancestor, intent)) {
         return ancestor;
+      }
+      parent = ancestor.parentIndex;
+    }
+    return null;
+  }
+
+  private focusInputTarget(
+    node: SearchableEntry,
+    snapshot: ResolverSnapshot,
+    intent: ResolutionIntent,
+    scope?: SearchableEntry,
+  ): SearchableEntry | null {
+    if (eligible(node, intent)) {
+      return node;
+    }
+    if (node.affordances.length > 0) {
+      return null;
+    }
+    let parent = node.parentIndex;
+    let hops = 0;
+    while (parent !== undefined && hops < FOCUS_LABEL_ANCESTOR_HOP_LIMIT) {
+      hops += 1;
+      const ancestor = snapshot.nodes[parent];
+      if (!ancestor || ancestor === scope) {
+        break;
+      }
+      if (isFocusEditableElement(ancestor.properties)) {
+        return promotableFocusAncestor(node, ancestor, intent) ? ancestor : null;
+      }
+      if (ancestor.affordances.length > 0) {
+        break;
       }
       parent = ancestor.parentIndex;
     }

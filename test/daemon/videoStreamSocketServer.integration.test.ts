@@ -1112,6 +1112,34 @@ describe("VideoStreamSocketServer", () => {
     expect(packet.readBigInt64BE(0)).toBeLessThan(0n); // CONFIG flag is bit 63
   });
 
+  test("replays a complete cached IDR to a late iOS viewer without extending source life", async () => {
+    const fakeTimer = new FakeTimer();
+    const iosDevice = { ...DEVICE, platform: "ios" } as BootedDevice;
+    const h = await startHarness({ timer: fakeTimer, device: iosDevice });
+    await subscribe(h.socketPath);
+    const sps = Buffer.from([0, 0, 0, 1, 0x67, 0x64]);
+    const pps = Buffer.from([0, 0, 0, 1, 0x68, 0xee]);
+    const idr = Buffer.from([0, 0, 0, 1, 0x65, 0x80, 0xaa]);
+    const secondIdrSlice = Buffer.from([0, 0, 0, 1, 0x65, 0x40, 0xbb]);
+    // The key frame is the last access unit; a static screen sends no next P-frame.
+    h.emit(Buffer.concat([sps, pps, idr, secondIdrSlice, Buffer.from([0, 0, 0, 1])]));
+    h.setIdleSupport(true);
+    h.emitIdle();
+    fakeTimer.advanceTime(8_000);
+
+    const keyFrameRequestsBeforeJoin = h.sources[0].keyFrameRequests;
+    const late = await subscribe(h.socketPath);
+    await waitFor(() => late.binary().includes(idr));
+    expect(late.binary().includes(sps)).toBe(true);
+    expect(late.binary().includes(pps)).toBe(true);
+    expect(late.binary().includes(secondIdrSlice)).toBe(true);
+    expect(h.sources[0].keyFrameRequests).toBe(keyFrameRequestsBeforeJoin);
+
+    // The replay is viewer setup, not evidence that either capture stage is still producing.
+    fakeTimer.advanceTime(2_000);
+    await waitFor(() => h.sources[0].staleStopped);
+  });
+
   test("attests the source's rotation on a config packet and its replay (issue #4786)", async () => {
     const ROTATION_PRESENT = 1n << 61n;
     const ROTATION_SHIFT = 59n;

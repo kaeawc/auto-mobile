@@ -13,7 +13,9 @@ import type { BootedDevice } from "../models";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import type { H264CaptureSource } from "../features/webrtc/H264CaptureSource";
 import {
+  H264AccessUnitAssembler,
   H264AnnexBParser,
+  MAX_ANNEX_B_BUFFER_BYTES,
   nalUnitType,
   NAL_TYPE_IDR,
   NAL_TYPE_PPS,
@@ -90,6 +92,10 @@ interface DeviceCapture {
   sps: Buffer | null;
   pps: Buffer | null;
   parser: H264AnnexBParser;
+  /** Bounded, complete IDR access unit for a late viewer of an unchanged screen. */
+  keyFrameAssembler: H264AccessUnitAssembler;
+  keyFrameAuBytes: number;
+  latestKeyFrameAu: Buffer | null;
   size?: { width: number; height: number };
   /**
    * Latest attested display rotation (0..3) from the source, or null when the source cannot attest
@@ -385,6 +391,10 @@ export class VideoStreamSocketServer extends BaseSocketServer {
       // Replay the parameter sets so a late joiner can decode immediately instead of waiting for
       // the encoder's next key frame.
       this.replayParameterSets(capture, socket);
+      // A raw iOS encoder cannot produce a new IDR until ScreenCaptureKit delivers another
+      // complete frame. On an unchanged screen, replay one complete IDR without claiming
+      // either producer or encoder progress.
+      this.replayCurrentIosKeyFrame(device, capture, socket);
       // Startup can synchronously emit an IDR before the acknowledgement makes this socket
       // eligible for binary data. Gate the subscriber and ask for a post-ack keyframe so it
       // never begins on an undecodable inter-frame. Retried through the injected timer when the
@@ -449,6 +459,9 @@ export class VideoStreamSocketServer extends BaseSocketServer {
       sps: null,
       pps: null,
       parser: new H264AnnexBParser(),
+      keyFrameAssembler: new H264AccessUnitAssembler(),
+      keyFrameAuBytes: 0,
+      latestKeyFrameAu: null,
       size: request.size,
       rotation: null,
       idleTimer: null,
@@ -496,6 +509,10 @@ export class VideoStreamSocketServer extends BaseSocketServer {
             if (this.captures.get(deviceId) !== capture || !capture.encodedSinceSourceFrame) {
               return;
             }
+            // The producer has stopped changing the display. The final parsed IDR may be the
+            // last access unit, so no next frame arrived to close it in the assembler.
+            this.cacheCompletedAccessUnits(capture, capture.keyFrameAssembler.flush());
+            capture.keyFrameAuBytes = 0;
             capture.lastIdleMs = this.timer.now();
           },
           onIdleAttestationSupport: (supported) => {
@@ -622,6 +639,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
 
   private broadcastNal(deviceId: string, capture: DeviceCapture, nal: Buffer): void {
     const type = nalUnitType(nal);
+    this.cacheCompleteKeyFrame(capture, nal, type);
     const isConfig = type === NAL_TYPE_SPS || type === NAL_TYPE_PPS;
     if (type === NAL_TYPE_SPS) {
       capture.sps = Buffer.from(nal);
@@ -641,6 +659,67 @@ export class VideoStreamSocketServer extends BaseSocketServer {
 
     for (const subscriber of capture.subscribers) {
       this.writePacketToSubscriber(deviceId, capture, subscriber, packet, isConfig, isKeyFrame);
+    }
+  }
+
+  private cacheCompleteKeyFrame(capture: DeviceCapture, nal: Buffer, type: number): void {
+    const completed = capture.keyFrameAssembler.push(nal);
+    capture.keyFrameAuBytes += nal.length;
+    this.cacheCompletedAccessUnits(capture, completed);
+    if (type === NAL_TYPE_SPS || type === NAL_TYPE_PPS) {
+      // An old IDR may have completed exactly as a new parameter set arrived.
+      capture.latestKeyFrameAu = null;
+    }
+    if (capture.keyFrameAuBytes > MAX_ANNEX_B_BUFFER_BYTES) {
+      capture.keyFrameAssembler = new H264AccessUnitAssembler();
+      capture.keyFrameAuBytes = 0;
+    }
+  }
+
+  private cacheCompletedAccessUnits(capture: DeviceCapture, completed: Buffer[][]): void {
+    for (const au of completed) {
+      const bytes = au.reduce((sum, item) => sum + item.length, 0);
+      capture.keyFrameAuBytes -= bytes;
+      if (
+        bytes > MAX_ANNEX_B_BUFFER_BYTES ||
+        !au.some((item) => nalUnitType(item) === NAL_TYPE_IDR)
+      ) {
+        continue;
+      }
+      capture.latestKeyFrameAu = Buffer.concat(
+        au
+          .filter(
+            (item) => nalUnitType(item) !== NAL_TYPE_SPS && nalUnitType(item) !== NAL_TYPE_PPS,
+          )
+          .flatMap((item) => [ANNEX_B_START_CODE, item]),
+      );
+    }
+  }
+
+  private replayKeyFrame(capture: DeviceCapture, socket: Socket, deviceId: string): void {
+    if (!capture.sps || !capture.pps || !capture.latestKeyFrameAu) {
+      return;
+    }
+    this.writePacketToSubscriber(
+      deviceId,
+      capture,
+      socket,
+      encodePacket(
+        encodePtsAndFlags(this.deps.nowUs(), { isKeyFrame: true }),
+        capture.latestKeyFrameAu,
+      ),
+      false,
+      true,
+    );
+  }
+
+  private replayCurrentIosKeyFrame(
+    device: BootedDevice,
+    capture: DeviceCapture,
+    socket: Socket,
+  ): void {
+    if (device.platform === "ios" && this.sourceEvidenceIsRecent(capture, this.timer.now())) {
+      this.replayKeyFrame(capture, socket, device.deviceId);
     }
   }
 

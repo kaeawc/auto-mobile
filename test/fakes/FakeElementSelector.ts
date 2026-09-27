@@ -23,6 +23,7 @@ export class FakeElementSelector implements ElementSelector {
   lastScrollableContainer?: boolean;
   lastContainer?: { elementId?: string; text?: string } | null;
   nextElement: Element | null;
+  nextMatchedElement?: Element;
   nextIndexInMatches?: number;
   nextTotalMatches?: number;
 
@@ -36,10 +37,12 @@ export class FakeElementSelector implements ElementSelector {
 
   setNextSelection(selection: {
     element: Element | null;
+    matchedElement?: Element;
     indexInMatches?: number;
     totalMatches?: number;
   }): void {
     this.nextElement = selection.element;
+    this.nextMatchedElement = selection.matchedElement;
     this.nextIndexInMatches = selection.indexInMatches;
     this.nextTotalMatches = selection.totalMatches;
   }
@@ -54,6 +57,7 @@ export class FakeElementSelector implements ElementSelector {
       typeof this.nextIndexInMatches === "number" ? this.nextIndexInMatches : element ? 0 : -1;
     return {
       element,
+      matchedElement: this.nextMatchedElement,
       indexInMatches,
       totalMatches,
       strategy: strategy ?? "first",

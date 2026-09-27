@@ -1,8 +1,13 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
+import { SearchableHierarchy } from "../../../src/features/utility/SearchableNode";
+import { serverConfig } from "../../../src/utils/ServerConfig";
+import { attachRawViewHierarchy } from "../../../src/utils/viewHierarchySearch";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeElementSelector } from "../../fakes/FakeElementSelector";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import type { Element } from "../../../src/models/Element";
+import type { ViewHierarchyResult } from "../../../src/models/ViewHierarchyResult";
 
 const editableElement = (focus: Record<string, unknown>) => ({
   text: "Phone number",
@@ -12,8 +17,18 @@ const editableElement = (focus: Record<string, unknown>) => ({
   ...focus,
 });
 
-async function executeFocus(element: ReturnType<typeof editableElement>) {
+afterEach(() => serverConfig.setRawElementSearchEnabled(false));
+
+async function executeFocus(
+  element: ReturnType<typeof editableElement>,
+  postTapHierarchy: ViewHierarchyResult = { hierarchy: { node: {} } },
+  elementId?: string,
+  matchedElement?: Element,
+) {
   const fakeSelector = new FakeElementSelector(element as any);
+  if (matchedElement) {
+    fakeSelector.setNextSelection({ element: element as Element, matchedElement });
+  }
   let tapped = false;
   const tapOnElement = new TapOnElement(
     {
@@ -32,7 +47,7 @@ async function executeFocus(element: ReturnType<typeof editableElement>) {
       selectionStateTracker: { finalize: async () => [] } as any,
     },
   );
-  const observation = { viewHierarchy: { hierarchy: { node: {} } } };
+  const observation = { viewHierarchy: postTapHierarchy };
   (tapOnElement as any).observedInteraction = async (
     action: (currentObservation: typeof observation) => Promise<Record<string, unknown>>,
   ) => ({ ...(await action(observation)), observation });
@@ -48,7 +63,9 @@ async function executeFocus(element: ReturnType<typeof editableElement>) {
   (tapOnElement as any).recordDeferredPredictionOutcome = async () => {};
   (tapOnElement as any).enforceFreshnessConsistencyWithEffect = () => {};
 
-  const result = await tapOnElement.execute({ text: "Phone", action: "focus" });
+  const result = await tapOnElement.execute(
+    elementId ? { elementId, action: "focus" } : { text: "Phone", action: "focus" },
+  );
   return { result, tapped };
 }
 
@@ -162,5 +179,244 @@ describe("TapOnElement selectionStrategy", () => {
     expect(result.wasAlreadyFocused).toBe(true);
     expect(result.focusVerified).toBe(true);
     expect(result.success).toBe(true);
+  });
+
+  test("verifies focus after an s2 id changes on the post-tap Compose field (#7758)", async () => {
+    const before = editableElement({
+      "resource-id": undefined,
+      "view-id": "s2-35973cc76070aa26",
+      focused: false,
+    });
+    const after = {
+      ...before,
+      "view-id": "s2-7e6d952ea5fe0ddf",
+      focused: true,
+      node: [{ text: "Email" }],
+    };
+    const { result, tapped } = await executeFocus(
+      before,
+      { hierarchy: { node: after } },
+      "s2-35973cc76070aa26",
+    );
+
+    expect(tapped).toBe(true);
+    expect(result.success).toBe(true);
+    expect(result.focusVerified).toBe(true);
+  });
+
+  test("verifies focus on an empty EditText when its s2 id is unchanged (PR #7780 review)", async () => {
+    const before = editableElement({
+      text: undefined,
+      "resource-id": undefined,
+      "view-id": "s2-empty-compose-input",
+      focused: false,
+      node: [{ text: "Email" }],
+    });
+    const after = { ...before, focused: true };
+    const { result, tapped } = await executeFocus(
+      before,
+      { hierarchy: { node: after } },
+      "s2-empty-compose-input",
+    );
+
+    expect(tapped).toBe(true);
+    expect(result.focusVerified).toBe(true);
+    expect(result.success).toBe(true);
+  });
+
+  test("verifies focus when the IME pans a field vertically without changing its horizontal extent (PR #7780 review)", async () => {
+    const before = editableElement({
+      "resource-id": undefined,
+      "view-id": "s2-before",
+      bounds: { left: 0, top: 400, right: 100, bottom: 440 },
+      focused: false,
+    });
+    const after = {
+      ...before,
+      "view-id": "s2-after",
+      bounds: { left: 0, top: 100, right: 100, bottom: 140 },
+      focused: true,
+    };
+    const { result } = await executeFocus(before, { hierarchy: { node: after } });
+
+    expect(result.focusVerified).toBe(true);
+    expect(result.success).toBe(true);
+  });
+
+  test("verifies focus on a label-promoted ancestor using the matched label's text (PR #7780 review)", async () => {
+    const before = editableElement({
+      text: undefined,
+      "resource-id": undefined,
+      "view-id": "s2-before",
+      bounds: { left: 0, top: 400, right: 100, bottom: 440 },
+      focused: false,
+    });
+    const after = {
+      ...before,
+      text: "Phone number",
+      "view-id": "s2-after",
+      bounds: { left: 0, top: 100, right: 100, bottom: 140 },
+      focused: true,
+    };
+    const label = { text: "Phone number", class: "android.widget.TextView", bounds: before.bounds };
+    const { result } = await executeFocus(before, { hierarchy: { node: after } }, undefined, label);
+
+    expect(result.focusVerified).toBe(true);
+    expect(result.success).toBe(true);
+  });
+
+  test("deduplicates a focused field that appears twice via linked window roots (PR #7780 review)", async () => {
+    const before = editableElement({
+      "resource-id": undefined,
+      "view-id": "s2-before",
+      bounds: { left: 0, top: 400, right: 100, bottom: 440 },
+      focused: false,
+    });
+    const focusedNode = {
+      ...before,
+      "view-id": "s2-after",
+      bounds: { left: 0, top: 100, right: 100, bottom: 140 },
+      focused: true,
+    };
+    const viewHierarchy = {
+      hierarchy: { node: focusedNode },
+      windows: [{ windowLayer: 1, hierarchy: focusedNode }],
+    };
+    const { result } = await executeFocus(before, viewHierarchy);
+
+    expect(result.focusVerified).toBe(true);
+    expect(result.success).toBe(true);
+  });
+
+  test("rejects a same-bounds replacement field lacking a stable identity match (PR #7780 review)", async () => {
+    const before = editableElement({
+      "resource-id": undefined,
+      "view-id": "s2-before",
+      focused: false,
+    });
+    const after = {
+      ...before,
+      text: "Email",
+      "view-id": "s2-after",
+      focused: true,
+    };
+    const { result } = await executeFocus(before, { hierarchy: { node: after } });
+
+    expect(result.focusVerified).toBe(false);
+    expect(result.success).toBe(false);
+  });
+
+  test("rejects a different field with the same class but a different hint when focus verification runs (PR #7780 review)", async () => {
+    const before = editableElement({
+      "resource-id": undefined,
+      "view-id": "s2-before",
+      bounds: { left: 0, top: 400, right: 100, bottom: 440 },
+      focused: false,
+    });
+    const after = {
+      ...before,
+      text: "Email",
+      "view-id": "s2-after",
+      bounds: { left: 0, top: 100, right: 100, bottom: 140 },
+      focused: true,
+    };
+    const { result } = await executeFocus(before, { hierarchy: { node: after } });
+
+    expect(result.focusVerified).toBe(false);
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Failed to confirm focus");
+  });
+
+  test("rejects an IME-panned field with a different stable resource ID (PR #7780 review)", async () => {
+    const before = editableElement({
+      "view-id": "s2-before",
+      bounds: { left: 0, top: 400, right: 100, bottom: 440 },
+      focused: false,
+    });
+    const after = {
+      ...before,
+      "resource-id": "com.example:id/email",
+      "view-id": "s2-after",
+      bounds: { left: 0, top: 100, right: 100, bottom: 140 },
+      focused: true,
+    };
+    const { result } = await executeFocus(before, { hierarchy: { node: after } });
+
+    expect(result.focusVerified).toBe(false);
+    expect(result.success).toBe(false);
+  });
+
+  test("rejects an ambiguous IME pan when two editable fields report focus (PR #7780 review)", async () => {
+    const before = editableElement({
+      "resource-id": undefined,
+      "view-id": "s2-before",
+      bounds: { left: 0, top: 400, right: 100, bottom: 440 },
+      focused: false,
+    });
+    const focused = {
+      ...before,
+      "view-id": "s2-after",
+      bounds: { left: 0, top: 100, right: 100, bottom: 140 },
+      focused: true,
+    };
+    const anotherFocused = {
+      ...focused,
+      text: "Email",
+      "view-id": "s2-other",
+      bounds: { left: 0, top: 150, right: 100, bottom: 190 },
+    };
+    const { result } = await executeFocus(before, {
+      hierarchy: { node: [focused, anotherFocused] },
+    });
+
+    expect(result.focusVerified).toBe(false);
+    expect(result.success).toBe(false);
+  });
+
+  test("verifies focus against the attached raw hierarchy when raw element search is enabled (PR #7780 review)", async () => {
+    const before = editableElement({
+      "resource-id": undefined,
+      "view-id": "s2-before",
+      focused: false,
+    });
+    const after = { ...before, "view-id": "s2-after", focused: true };
+    const filtered = { hierarchy: { node: { text: "Visible sibling" } } };
+    const raw = { hierarchy: { node: after } };
+    attachRawViewHierarchy(filtered, raw);
+    serverConfig.setRawElementSearchEnabled(true);
+
+    const project = spyOn(SearchableHierarchy.prototype, "project");
+    try {
+      const { result, tapped } = await executeFocus(before, filtered);
+
+      expect(tapped).toBe(true);
+      expect(result.success).toBe(true);
+      expect(result.focusVerified).toBe(true);
+      expect(project.mock.calls.at(-1)?.[0]).toBe(raw);
+    } finally {
+      project.mockRestore();
+    }
+  });
+
+  test("does not accept keyboard focus on a different editable field (#7758)", async () => {
+    const before = editableElement({
+      "resource-id": undefined,
+      "view-id": "s2-35973cc76070aa26",
+      focused: false,
+    });
+    const after = {
+      ...before,
+      text: "Email",
+      "view-id": "s2-7e6d952ea5fe0ddf",
+      bounds: { left: 0, top: 80, right: 100, bottom: 120 },
+      focused: true,
+    };
+    const { result } = await executeFocus(
+      before,
+      { hierarchy: { node: after } },
+      "s2-35973cc76070aa26",
+    );
+    expect(result.focusVerified).toBe(false);
+    expect(result.success).toBe(false);
   });
 });

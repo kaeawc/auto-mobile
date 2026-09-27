@@ -1,6 +1,5 @@
 import { errorMessage } from "../../utils/describeUnknownError";
-import { promises as fsPromises } from "node:fs";
-import { pathExists } from "../../utils/filesystem/DefaultFileSystem";
+import { DefaultFileSystem, type FileSystem } from "../../utils/filesystem/DefaultFileSystem";
 import path from "path";
 import {
   AdbClientFactory,
@@ -63,6 +62,8 @@ export class TakeScreenshot implements ScreenshotService {
   private timer: Timer;
   private idGenerator: IdGenerator;
   private fileWriter: ScreenshotFileWriter;
+  private fileSystem: FileSystem;
+  private cacheDirResolver: () => string;
   private static cacheDir: string | null = null;
   private static readonly MAX_CACHE_SIZE_BYTES = 128 * 1024 * 1024; // 128MB
 
@@ -88,6 +89,8 @@ export class TakeScreenshot implements ScreenshotService {
     timer: Timer = defaultTimer,
     idGenerator: IdGenerator = defaultIdGenerator,
     fileWriter: ScreenshotFileWriter = defaultScreenshotFileWriter,
+    fileSystem: FileSystem = new DefaultFileSystem(),
+    cacheDirResolver: () => string = () => TakeScreenshot.getCacheDir(),
   ) {
     this.device = device;
     this.adbFactory = adbFactory;
@@ -96,6 +99,8 @@ export class TakeScreenshot implements ScreenshotService {
     this.timer = timer;
     this.idGenerator = idGenerator;
     this.fileWriter = fileWriter;
+    this.fileSystem = fileSystem;
+    this.cacheDirResolver = cacheDirResolver;
 
     // Manage cache size (getCacheDir ensures directory exists with secure permissions)
     this.cleanupCache();
@@ -106,15 +111,15 @@ export class TakeScreenshot implements ScreenshotService {
    */
   private async cleanupCache(): Promise<void> {
     try {
-      const cacheDir = TakeScreenshot.getCacheDir();
+      const cacheDir = this.cacheDirResolver();
 
       // Get all files in cache with their stats
-      const files = await fsPromises.readdir(cacheDir);
+      const files = await this.fileSystem.readdir(cacheDir);
       const fileStats = await Promise.all(
         files.map(async (file) => {
           const filePath = path.join(cacheDir, file);
-          const stats = await fsPromises.stat(filePath);
-          return { path: filePath, stats, mtime: stats.mtime.getTime() };
+          const stats = await this.fileSystem.stat(filePath);
+          return { path: filePath, stats, mtime: stats.mtimeMs };
         }),
       );
 
@@ -128,7 +133,7 @@ export class TakeScreenshot implements ScreenshotService {
         Date.now(),
       );
       for (const filePath of toDelete) {
-        await fsPromises.unlink(filePath);
+        await this.fileSystem.unlink(filePath);
         logger.debug(`Removed cached screenshot: ${filePath}`);
       }
     } catch (err) {
@@ -588,7 +593,7 @@ export class TakeScreenshot implements ScreenshotService {
 
       // Step 4: Read the pulled file into buffer
       const readStartTime = this.timer.now();
-      const imageBuffer = await fsPromises.readFile(tempLocalFile);
+      const imageBuffer = await this.fileSystem.readFileBuffer(tempLocalFile);
       const readDuration = this.timer.now() - readStartTime;
       logger.info(
         `[SCREENSHOT] File read took ${readDuration}ms, buffer size: ${imageBuffer.length} bytes`,
@@ -598,7 +603,7 @@ export class TakeScreenshot implements ScreenshotService {
       if (options.format !== "webp") {
         // For PNG, move the temp file to final path
         const saveStartTime = this.timer.now();
-        await fsPromises.rename(tempLocalFile, finalPath);
+        await this.fileSystem.rename(tempLocalFile, finalPath);
         const saveDuration = this.timer.now() - saveStartTime;
         logger.info(`[SCREENSHOT] PNG file move took ${saveDuration}ms`);
       } else {
@@ -616,7 +621,7 @@ export class TakeScreenshot implements ScreenshotService {
         // Save the webp file securely and remove temp file
         const saveStartTime = this.timer.now();
         await this.fileWriter.write(finalPath, convertedImage);
-        await fsPromises.rm(tempLocalFile, { recursive: true, force: true });
+        await this.fileSystem.remove(tempLocalFile);
         const saveDuration = this.timer.now() - saveStartTime;
         logger.info(`[SCREENSHOT] WebP file save took ${saveDuration}ms`);
       }
@@ -658,8 +663,8 @@ export class TakeScreenshot implements ScreenshotService {
 
     // Cancellation can land while device cleanup is in flight. Remove the
     // completed frame so the latest-screenshot disk fallback cannot serve it.
-    if (await pathExists(finalPath)) {
-      await fsPromises.rm(finalPath, { recursive: true, force: true });
+    if (await this.fileSystem.pathExists(finalPath)) {
+      await this.fileSystem.remove(finalPath);
     }
     return { success: false, error: OPERATION_CANCELLED_MESSAGE };
   }
@@ -678,8 +683,8 @@ export class TakeScreenshot implements ScreenshotService {
 
   private async removeLocalTempScreenshot(tempLocalFile: string): Promise<void> {
     try {
-      if (await pathExists(tempLocalFile)) {
-        await fsPromises.rm(tempLocalFile, { recursive: true, force: true });
+      if (await this.fileSystem.pathExists(tempLocalFile)) {
+        await this.fileSystem.remove(tempLocalFile);
       }
     } catch (cleanupErr) {
       logger.debug(`Failed to cleanup temp file: ${errorMessage(cleanupErr)}`);

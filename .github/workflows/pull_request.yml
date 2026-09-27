@@ -2301,7 +2301,7 @@ jobs:
       # stalls and exhaustion of the odd-width step's 12-minute budget (#7771).
       - name: "Run odd-width CtrlProxy screenshot test (iPhone 15)"
         if: ${{ !cancelled() && steps.build-ctrlproxy.outcome == 'success' && steps.ctrlproxy-simulator.outcome == 'success' }}
-        timeout-minutes: 12
+        timeout-minutes: 13
         env:
           SIMULATOR_UDID: ${{ steps.ctrlproxy-simulator.outputs.simulator_udid }}
         run: |
@@ -2310,8 +2310,10 @@ jobs:
             exit 1
           fi
           echo "Shutting down main simulator ${SIMULATOR_UDID} before booting iPhone 15."
-          xcrun simctl shutdown "${SIMULATOR_UDID}"
           source ./scripts/ios/run_with_timeout.sh
+          if ! run_with_timeout 15 xcrun simctl shutdown "${SIMULATOR_UDID}"; then
+            echo "::warning::Main simulator shutdown request timed out or failed; checking observed state." >&2
+          fi
           shutdown_deadline=$((SECONDS + 60))
           simulator_state=""
           while (( SECONDS < shutdown_deadline )); do
@@ -2328,7 +2330,7 @@ jobs:
               sleep 2
             fi
           done
-          if [[ "${simulator_state}" != "Shutdown" ]] || (( SECONDS >= shutdown_deadline )); then
+          if [[ "${simulator_state}" != "Shutdown" ]]; then
             echo "::error::Main simulator ${SIMULATOR_UDID} did not reach Shutdown within 60 seconds before booting iPhone 15." >&2
             exit 1
           fi

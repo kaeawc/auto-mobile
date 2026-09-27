@@ -56,6 +56,7 @@ export interface OpenLinkArgs {
   url: string;
   platform?: Platform;
   acceptOpenAlert?: boolean;
+  chooserAppPackage?: string;
   waitFor?: ObserveWaitForOptions;
   settled?: SettledOptions;
 }

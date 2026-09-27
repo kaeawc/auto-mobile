@@ -170,6 +170,8 @@ const NOTIFICATION_ROW_RESOURCE_IDS = [
   "com.android.systemui:id/expandableNotificationRow",
   "android:id/notification_content",
   "android:id/notification_main_column",
+  "android:id/notification_template",
+  "com.android.systemui:id/status_bar_notification",
 ];
 const NOTIFICATION_ROW_CLASS_HINTS = [
   "ExpandableNotificationRow",

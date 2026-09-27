@@ -3624,6 +3624,21 @@ describe("iOS systemTray tap and dismiss", () => {
 });
 
 describe("exact notification classifier IDs", () => {
+  test.each([
+    "com.android.systemui:id/status_bar_notification",
+    "android:id/notification_template",
+  ])("recognizes the exact framework row ID %s", (resourceId) => {
+    const row = { $: { packageName: SYSTEM_TRAY_PACKAGE, "resource-id": resourceId } };
+    const group = {
+      node: [
+        {
+          $: { "resource-id": "com.android.systemui:id/notification_children_container" },
+          node: [row],
+        },
+      ],
+    };
+    expect(getNotificationGroupChildRows(group)).toEqual([row]);
+  });
   test("does not classify a header near miss as a group header", () => {
     const group = {
       node: [

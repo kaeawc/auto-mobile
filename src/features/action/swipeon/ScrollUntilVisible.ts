@@ -106,6 +106,7 @@ export class ScrollUntilVisible {
     hierarchy: ViewHierarchyResult,
     selector: ResolverSelector,
     action: ResolutionAction = "inspect",
+    preserveMatchedNode = false,
   ): Element | null {
     const result = this.resolver.resolve(
       { id: String(hierarchy.updatedAt ?? "swipe"), nodes: this.searchable.project(hierarchy) },
@@ -118,7 +119,12 @@ export class ScrollUntilVisible {
     if (result.error) {
       throw new ActionableError(result.error);
     }
-    return result.chosen?.element ?? null;
+    const sources = preserveMatchedNode
+      ? result.matches.find((match) => match.node === result.chosen)?.sourceNodes
+      : undefined;
+    const matched =
+      sources?.find((source) => Object.keys(source.textSources).length > 0) ?? sources?.[0];
+    return matched?.element ?? result.chosen?.element ?? null;
   }
 
   async execute(
@@ -609,7 +615,7 @@ export class ScrollUntilVisible {
     if (!lookFor.text && !lookFor.elementId) {
       return null;
     }
-    return this.resolveElement(viewHierarchy, { ...lookFor, container });
+    return this.resolveElement(viewHierarchy, { ...lookFor, container }, "inspect", true);
   }
 
   computeHierarchyFingerprint(viewHierarchy: ViewHierarchyResult): string {

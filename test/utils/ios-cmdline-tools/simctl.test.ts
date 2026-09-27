@@ -15,12 +15,16 @@ function resetSimctlCaches(): void {
     inFlightDeviceList: Promise<unknown[]> | null;
     inFlightDeviceListRequestSequence: number | null;
     simulatorBoots: Map<string, unknown>;
+    bootPresentationGenerations: Map<string, string>;
+    simulatorAppPresentations: Map<string, unknown>;
   };
   simctlClass.deviceListCache = null;
   simctlClass.lastGoodDeviceList = null;
   simctlClass.inFlightDeviceList = null;
   simctlClass.inFlightDeviceListRequestSequence = null;
   simctlClass.simulatorBoots.clear();
+  simctlClass.bootPresentationGenerations.clear();
+  simctlClass.simulatorAppPresentations.clear();
 }
 
 async function waitForCondition(condition: () => boolean, description: string): Promise<void> {

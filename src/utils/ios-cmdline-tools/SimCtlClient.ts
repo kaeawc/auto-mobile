@@ -593,7 +593,11 @@ export class SimCtlClient implements SimCtl {
   private readonly bootOptions: SimCtlBootOptions;
   private readonly simulatorAppPresenter: SimulatorAppPresenter;
   private readonly idGenerator: IdGenerator;
-  private readonly bootPresentationGenerations = new Map<string, string>();
+  private static readonly bootPresentationGenerations = new Map<string, string>();
+  private static readonly simulatorAppPresentations = new Map<
+    string,
+    { bootGeneration: string; presentation: Promise<void> }
+  >();
   // Cached result of the launchctl headless-session probe (null = not yet probed).
   // Re-probed after HEADLESS_SESSION_CACHE_TTL so a GUI login/logout mid-process
   // (e.g. an SSH session that later gains a GUI, or vice versa) does not leave a
@@ -681,7 +685,11 @@ export class SimCtlClient implements SimCtl {
 
   private resolveSimulatorAppPresenter(presenter?: SimulatorAppPresenter): SimulatorAppPresenter {
     return (
-      presenter ?? new DefaultSimulatorAppPresenter((udid) => this.openSimulatorAppBounded(udid))
+      presenter ??
+      new DefaultSimulatorAppPresenter(
+        (udid) => this.openSimulatorAppBounded(udid),
+        SimCtlClient.simulatorAppPresentations,
+      )
     );
   }
 
@@ -1035,23 +1043,66 @@ export class SimCtlClient implements SimCtl {
     // {@link bootAndVerify}.
     perf.startOperation("bootstatus");
     try {
-      this.bootPresentationGenerations.delete(udid);
+      SimCtlClient.bootPresentationGenerations.delete(udid);
       await this.runOwnedBoot(udid, () => this.bootAndVerify(udid, deadlineMs));
     } finally {
       perf.endOperation("bootstatus");
     }
 
-    await this.presentSimulatorAfterStart(udid, this.idGenerator.next());
+    await this.waitForPresentationAfterStart(
+      udid,
+      this.idGenerator.next(),
+      deadlineMs,
+      startSignal,
+    );
     if (startSignal?.aborted) {
       await this.shutdownAfterFailedStart(udid);
       throw startSignal.reason ?? new ActionableError(`iOS simulator start aborted for ${udid}`);
     }
   }
 
+  private async waitForPresentationAfterStart(
+    udid: string,
+    bootGeneration: string,
+    deadlineMs: number,
+    signal: AbortSignal | undefined,
+  ): Promise<void> {
+    const presentation = this.presentSimulatorAfterStart(udid, bootGeneration);
+    const remainingMs = Math.min(1_000, deadlineMs - this.timer.now());
+    if (remainingMs <= 0 || signal?.aborted) {
+      return;
+    }
+
+    let timeoutHandle: NodeJS.Timeout | undefined;
+    let abortListener: (() => void) | undefined;
+    const timeout = new Promise<void>((resolve) => {
+      timeoutHandle = this.timer.setTimeout(resolve, remainingMs);
+    });
+    const contenders = [presentation, timeout];
+    if (signal) {
+      contenders.push(
+        new Promise<void>((resolve) => {
+          abortListener = resolve;
+          signal.addEventListener("abort", abortListener, { once: true });
+        }),
+      );
+    }
+    try {
+      await Promise.race(contenders);
+    } finally {
+      if (timeoutHandle) {
+        this.timer.clearTimeout(timeoutHandle);
+      }
+      if (signal && abortListener) {
+        signal.removeEventListener("abort", abortListener);
+      }
+    }
+  }
+
   async presentSimulatorAfterStart(udid: string, bootGeneration: string): Promise<void> {
     try {
-      const generation = this.bootPresentationGenerations.get(udid) ?? bootGeneration;
-      this.bootPresentationGenerations.set(udid, generation);
+      const generation = SimCtlClient.bootPresentationGenerations.get(udid) ?? bootGeneration;
+      SimCtlClient.bootPresentationGenerations.set(udid, generation);
       await this.simulatorAppPresenter.presentAfterStart(udid, generation);
     } catch (error) {
       // The presenter warns on GUI launch failure; unexpected errors cannot fail a start.
@@ -2241,7 +2292,7 @@ export class SimCtlClient implements SimCtl {
       getAbortSignal(),
       true,
       async () => {
-        this.bootPresentationGenerations.delete(udid);
+        SimCtlClient.bootPresentationGenerations.delete(udid);
         await this.bootAndVerify(udid, deadlineMs);
         perf.endOperation("simctlBoot");
         return this.resolveRegisteredBootSimulator(udid, deadlineMs, perf);

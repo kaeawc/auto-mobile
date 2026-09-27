@@ -15,9 +15,13 @@ const OTHER_UDID = "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE";
 function resetSimctlState(): void {
   const simctlClass = SimCtlClient as unknown as {
     simulatorBoots: Map<string, unknown>;
+    bootPresentationGenerations: Map<string, string>;
+    simulatorAppPresentations: Map<string, unknown>;
     inFlightDeviceList: Promise<unknown[]> | null;
   };
   simctlClass.simulatorBoots.clear();
+  simctlClass.bootPresentationGenerations.clear();
+  simctlClass.simulatorAppPresentations.clear();
   // Drop any still-pending shared listing a previous test left behind (e.g. one
   // whose mock only settles on an abort that never fired within that test's own
   // FakeTimer). Without this a later test's caller-independent coalesced read
@@ -25,6 +29,20 @@ function resetSimctlState(): void {
   // orphaned promise and hang forever awaiting a timer no one is driving.
   simctlClass.inFlightDeviceList = null;
   SimCtlClient.invalidateDeviceListCache();
+}
+
+async function withHeadlessEnv(operation: () => Promise<void>): Promise<void> {
+  const previous = process.env.AUTOMOBILE_IOS_HEADLESS;
+  process.env.AUTOMOBILE_IOS_HEADLESS = "true";
+  try {
+    await operation();
+  } finally {
+    if (previous === undefined) {
+      delete process.env.AUTOMOBILE_IOS_HEADLESS;
+    } else {
+      process.env.AUTOMOBILE_IOS_HEADLESS = previous;
+    }
+  }
 }
 
 interface Harness {
@@ -804,19 +822,98 @@ describe("SimCtlClient boot self-verification", () => {
     await waitForCondition(() => harness.shutdownInvocations() === 2, "second shutdown");
   });
 
+  test("independent clients adopting one physical boot present Simulator.app once", async () => {
+    const previous = process.env.AUTOMOBILE_IOS_HEADLESS;
+    process.env.AUTOMOBILE_IOS_HEADLESS = "false";
+    try {
+      let opens = 0;
+      const harness = createConcurrentStartHarness(
+        () => Promise.resolve(createExecResult("", "")),
+        bootedSimulatorListResult,
+        {
+          openSimulatorApp: async () => {
+            opens++;
+            return createExecResult("", "");
+          },
+        },
+      );
+      const owner = harness.createClient();
+      const adopter = harness.createClient();
+      await owner.startSimulator(UDID, 5_000);
+      await adopter.bootSimulator(UDID);
+      await adopter.presentSimulatorAfterStart(UDID, "session-path-generation");
+      expect(harness.bootstatusInvocations()).toBe(1);
+      expect(opens).toBe(1);
+    } finally {
+      if (previous === undefined) {
+        delete process.env.AUTOMOBILE_IOS_HEADLESS;
+      } else {
+        process.env.AUTOMOBILE_IOS_HEADLESS = previous;
+      }
+    }
+  });
+
+  test("a start stops waiting for shared Simulator.app presentation at its deadline", async () => {
+    const previous = process.env.AUTOMOBILE_IOS_HEADLESS;
+    process.env.AUTOMOBILE_IOS_HEADLESS = "false";
+    try {
+      let openingSimulatorApp = false;
+      let finishOpen: (() => void) | undefined;
+      let opens = 0;
+      const harness = createConcurrentStartHarness(
+        () => Promise.resolve(createExecResult("", "")),
+        bootedSimulatorListResult,
+        {
+          openSimulatorApp: () => {
+            openingSimulatorApp = true;
+            opens++;
+            return new Promise((resolve) => {
+              finishOpen = () => resolve(createExecResult("", ""));
+            });
+          },
+        },
+      );
+      let settled = false;
+      const owner = harness.createClient();
+      const adopter = harness.createClient();
+      const start = owner.startSimulator(UDID, 100).then(() => {
+        settled = true;
+      });
+      await waitForCondition(() => openingSimulatorApp, "Simulator.app focus");
+      const otherPresentation = adopter.presentSimulatorAfterStart(UDID, "session-generation");
+      harness.timer.advanceTime(100);
+      await drainMicrotasks();
+      expect(settled).toBe(true);
+      await start;
+      finishOpen?.();
+      await otherPresentation;
+      expect(opens).toBe(1);
+    } finally {
+      if (previous === undefined) {
+        delete process.env.AUTOMOBILE_IOS_HEADLESS;
+      } else {
+        process.env.AUTOMOBILE_IOS_HEADLESS = previous;
+      }
+    }
+  });
+
   test("headless explicit start never launches Simulator.app", async () => {
-    const harness = createHarness({ maxAttempts: 1, retryBackoffMs: 0 });
-    harness.setStates(["Booted"]);
-    await harness.simctl.startSimulator(UDID, 5_000);
-    expect(harness.calls.filter((call) => call === "open -a Simulator")).toHaveLength(0);
+    await withHeadlessEnv(async () => {
+      const harness = createHarness({ maxAttempts: 1, retryBackoffMs: 0 });
+      harness.setStates(["Booted"]);
+      await harness.simctl.startSimulator(UDID, 5_000);
+      expect(harness.calls.filter((call) => call === "open -a Simulator")).toHaveLength(0);
+    });
   });
 
   test("headless session auto-start never launches Simulator.app", async () => {
-    const harness = createHarness({ maxAttempts: 1, retryBackoffMs: 0 });
-    harness.setStates(["Booted"]);
-    await harness.simctl.bootSimulator(UDID);
-    await harness.simctl.presentSimulatorAfterStart(UDID, "session-generation");
-    expect(harness.calls.filter((call) => call === "open -a Simulator")).toHaveLength(0);
+    await withHeadlessEnv(async () => {
+      const harness = createHarness({ maxAttempts: 1, retryBackoffMs: 0 });
+      harness.setStates(["Booted"]);
+      await harness.simctl.bootSimulator(UDID);
+      await harness.simctl.presentSimulatorAfterStart(UDID, "session-generation");
+      expect(harness.calls.filter((call) => call === "open -a Simulator")).toHaveLength(0);
+    });
   });
 
   test("does not reuse stale success after an idle start is shut down", async () => {

@@ -6,12 +6,13 @@ export interface SimulatorAppPresenter {
 
 /** Shares one launch among callers reporting the same physical boot. */
 export class DefaultSimulatorAppPresenter implements SimulatorAppPresenter {
-  private readonly presentations = new Map<
-    string,
-    { bootGeneration: string; presentation: Promise<void> }
-  >();
-
-  constructor(private readonly openSimulatorApp: (udid: string) => Promise<boolean>) {}
+  constructor(
+    private readonly openSimulatorApp: (udid: string) => Promise<boolean>,
+    private readonly presentations: Map<
+      string,
+      { bootGeneration: string; presentation: Promise<void> }
+    > = new Map(),
+  ) {}
 
   presentAfterStart(udid: string, bootGeneration: string): Promise<void> {
     const existing = this.presentations.get(udid);

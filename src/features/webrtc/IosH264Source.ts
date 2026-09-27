@@ -6,6 +6,7 @@ import {
   CAPTURE_PERMISSION_PREFIX,
   CAPTURE_PERMISSION_TARGET_PREFIX,
   ENCODED_VIDEO_CAPABILITY,
+  SIMULATOR_IDLE_EVIDENCE_CAPABILITY,
   IOSScreenCaptureHelper,
   type CapturePermission,
 } from "../screen-stream/IOSScreenCaptureHelper";
@@ -224,6 +225,7 @@ export interface IosFrameCaptureHelper {
    */
   requestKeyFrame?(): boolean;
   on(event: "frame", listener: (frame: DecodedFrame) => void): this;
+  on(event: "idle", listener: (info: { windowID: number }) => void): this;
   on(event: "encodedVideo", listener: (video: DecodedEncodedVideo) => void): this;
   on(event: "capability", listener: (token: string) => void): this;
   on(event: "permission", listener: (permission: CapturePermission) => void): this;
@@ -423,6 +425,9 @@ export class IosH264Source implements H264CaptureSource {
   private encodeSettings: EncodeSettings | null = null;
   /** Set once the helper advertises the encoded-video capability this attempt. */
   private encodedCapabilityConfirmed = false;
+  private nativeIdleCapabilityConfirmed = false;
+  private idleSupportReported = false;
+  private latestLegacyFrame: DecodedFrame | null = null;
   /**
    * True once an encoded attempt fell back to raw for a version-skewed helper, so
    * a later running-phase reconnect does not re-probe encoding against the same
@@ -433,7 +438,6 @@ export class IosH264Source implements H264CaptureSource {
   private encoder: IosH264EncoderProcess | null = null;
   private encoderSize: EncoderSize | null = null;
   private encoderBackpressured = false;
-  private lastHelperFrame: DecodedFrame | null = null;
   private teardownPromise: Promise<void> | null = null;
   private cancelFirstFrameWait: (() => void) | null = null;
   private cancelFirstAudioWait: (() => void) | null = null;
@@ -463,6 +467,7 @@ export class IosH264Source implements H264CaptureSource {
   /** The relay can keep a source warm briefly after its last viewer leaves. */
   private hasConsumers = true;
   private deferredHelperFailure: Error | null = null;
+  private invalidateHelperOnStop = false;
   private reconnectPromise: Promise<void> | null = null;
   /** Cancels an in-flight reconnect backoff wait; resolves it as "cancelled". */
   private cancelReconnectDelay: (() => void) | null = null;
@@ -546,7 +551,6 @@ export class IosH264Source implements H264CaptureSource {
     this.lastReadinessPhase = null;
     this.helperFrameMetrics = null;
     this.nativeFrameMetrics = null;
-    this.lastHelperFrame = null;
     this.mode = "raw";
     this.encodeSettings = null;
     this.encodedFellBack = false;
@@ -695,6 +699,11 @@ export class IosH264Source implements H264CaptureSource {
     await this.beginTeardown();
   }
 
+  async stopStale(producerStale: boolean = true): Promise<void> {
+    this.invalidateHelperOnStop = producerStale;
+    await this.stop();
+  }
+
   /** Called by the local relay when its first viewer arrives or last viewer leaves. */
   setHasConsumers(hasConsumers: boolean): void {
     this.hasConsumers = hasConsumers;
@@ -725,8 +734,10 @@ export class IosH264Source implements H264CaptureSource {
    * encoder emits its first IDR (that encoder will already satisfy the request)
    * or after the source has stopped.
    */
-  requestKeyFrame(): boolean {
-    return this.mode === "encoded" ? this.requestEncodedKeyFrame() : this.requestRawKeyFrame();
+  requestKeyFrame(purpose: "viewer" | "probe" = "viewer"): boolean {
+    return this.mode === "encoded"
+      ? this.requestEncodedKeyFrame()
+      : this.requestRawKeyFrame(purpose);
   }
 
   /**
@@ -758,7 +769,7 @@ export class IosH264Source implements H264CaptureSource {
    * Raw-path keyframe request: ffmpeg cannot be signalled for a mid-stream IDR
    * over a pipe, so restart the encoder (its first output is SPS/PPS + IDR).
    */
-  private requestRawKeyFrame(): boolean {
+  private requestRawKeyFrame(purpose: "viewer" | "probe"): boolean {
     const oldEncoder = this.encoder;
     const size = this.encoderSize;
     if (
@@ -778,16 +789,19 @@ export class IosH264Source implements H264CaptureSource {
     logger.info("[IosH264Source] keyframe requested; restarting encoder to emit a fresh IDR");
     // Spawn the replacement first so the outgoing encoder's exit/error handlers
     // — all guarded by `this.encoder === encoder` — no-op instead of tearing the
-    // source down as a fatal crash. Two retained input frames make the first
-    // IDR's Annex-B NAL terminate at the following access-unit boundary even
-    // while the capture helper is otherwise quiet. Then end its stdin and
-    // terminate it.
+    // source down as a fatal crash. Wait for the next fresh helper frame to
+    // produce the replacement encoder's IDR. Replaying a cached frame here can
+    // create client-visible media after capture has stalled, falsely keeping
+    // downstream frame watchdogs alive.
     this.pendingFrames.clear(true);
     this.reportFrameMetrics();
     this.startEncoder(size, true);
-    if (this.lastHelperFrame) {
-      this.writeFrameToEncoder(this.lastHelperFrame);
-      this.writeFrameToEncoder(this.lastHelperFrame);
+    // A raw Simulator helper may be natively idle and unable to force a new frame.
+    // Bootstrap a waiting viewer from cached BGRA, but never use it for a liveness probe.
+    // Neither path reports a fresh producer frame.
+    if (this.captureKind === "simulator" && purpose === "viewer" && this.latestLegacyFrame) {
+      this.writeFrameToEncoder(this.latestLegacyFrame);
+      this.writeFrameToEncoder(this.latestLegacyFrame);
     }
     // Reap the outgoing encoder on a bounded grace, escalating to SIGKILL, so a
     // slow or signal-ignoring h264_videotoolbox cannot linger as a zombie
@@ -1007,6 +1021,9 @@ export class IosH264Source implements H264CaptureSource {
     this.lastReadinessPhase = null;
     this.requiredPermission = null;
     this.requiredPermissionTarget = defaultScreenRecordingApprovalTarget(helperPath);
+    this.nativeIdleCapabilityConfirmed = false;
+    this.idleSupportReported = false;
+    this.latestLegacyFrame = null;
     const helper = this.createCaptureHelper({ binaryPath: helperPath, target });
     this.helper = helper;
     if (this.mode === "encoded") {
@@ -1299,6 +1316,18 @@ export class IosH264Source implements H264CaptureSource {
 
   /** stderr/readiness/metrics/audio wiring shared by the raw and encoded paths. */
   private wireHelperDiagnostics(helper: IosFrameCaptureHelper): void {
+    helper.on("capability", (token) => {
+      if (this.helper === helper && token === SIMULATOR_IDLE_EVIDENCE_CAPABILITY) {
+        this.nativeIdleCapabilityConfirmed = true;
+        this.idleSupportReported = true;
+        this.options.onIdleAttestationSupport?.(true);
+      }
+    });
+    helper.on("idle", () => {
+      if (this.helper === helper && this.isActive() && this.nativeIdleCapabilityConfirmed) {
+        this.options.onSourceIdle?.();
+      }
+    });
     helper.on("frameMetrics", (metrics) => {
       if (this.helper === helper && this.isActive()) {
         this.helperFrameMetrics = metrics;
@@ -1365,6 +1394,16 @@ export class IosH264Source implements H264CaptureSource {
     if (!this.isActive()) {
       return;
     }
+    if (!frame.replayed) {
+      this.reportLegacyIdleSupport();
+      this.options.onSourceFrame?.();
+      if (
+        this.captureKind === "simulator" &&
+        frame.pixels.length <= IOS_ENCODER_PENDING_FRAME_MAX_BYTES
+      ) {
+        this.latestLegacyFrame = frame;
+      }
+    }
     const size = { width: frame.header.width, height: frame.header.height };
     if (!this.encoder) {
       this.startEncoder(size);
@@ -1398,7 +1437,17 @@ export class IosH264Source implements H264CaptureSource {
     if (!this.isActive()) {
       return;
     }
+    this.reportLegacyIdleSupport();
+    this.options.onSourceFrame?.();
     this.options.onData(video.payload);
+    this.options.onEncodedAccessUnit?.();
+  }
+
+  private reportLegacyIdleSupport(): void {
+    if (this.captureKind === "simulator" && !this.idleSupportReported) {
+      this.idleSupportReported = true;
+      this.options.onIdleAttestationSupport?.(false);
+    }
   }
 
   /**
@@ -1439,17 +1488,6 @@ export class IosH264Source implements H264CaptureSource {
       this.outputWriteHighWaterDurationMs,
       this.lastOutputWriteDurationMs,
     );
-    // Retain the reference rather than copying the whole frame every frame.
-    // `lastHelperFrame` is only re-read in `requestKeyFrame()` to reprime a
-    // replacement encoder, so paying a full-frame allocation + memcpy on 100%
-    // of frames to serve that rare PLI path is wasteful (~7 MB/frame at
-    // 910x1940 BGRA). This is safe because `frame.pixels` is a fresh
-    // per-frame allocation from `FrameDecoder.takeDetached`, the single-slot
-    // `LatestFrameQueue` never reuses an emitted buffer, and nothing mutates
-    // `frame.pixels` after handoff (`tightlyPackBgraFrame` returns the same
-    // buffer unpadded or a fresh packed buffer, and the pipe write does not
-    // mutate in place). See issue #4735.
-    this.lastHelperFrame = frame;
     if (accepted === false) {
       this.encoderBackpressured = true;
     }
@@ -1863,9 +1901,9 @@ export class IosH264Source implements H264CaptureSource {
     this.encoderSize = null;
     this.encoderBackpressured = false;
     this.pendingFrames.clear();
+    this.latestLegacyFrame = null;
     this.forcedKeyFrameEncoder = null;
     this.forcedKeyFrameParser = null;
-    this.lastHelperFrame = null;
     encoder?.stdin.end();
     encoder?.kill("SIGTERM");
 
@@ -1883,7 +1921,9 @@ export class IosH264Source implements H264CaptureSource {
     if (!helper) {
       return;
     }
-    const stopped = helper.stop().then(
+    const stopped = (
+      this.invalidateHelperOnStop && helper.invalidate ? helper.invalidate() : helper.stop()
+    ).then(
       () => true,
       (error: unknown) => {
         logger.debug(`[IosH264Source] helper stop failed: ${error}`);

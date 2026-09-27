@@ -82,6 +82,7 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate,
     private var _reconfiguring = false
     private var _overlaySourceRect = CGRect.zero
     private var _updatingOverlay = false
+    private var lastIdleMarkerUptime: TimeInterval?
     private var overlayTask: Task<Void, Never>?
 
     /// Pixel format requested from ScreenCaptureKit — 32BGRA for the raw path,
@@ -91,6 +92,7 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate,
     /// Diagnostic lines (first-frame marker, reconfigure warnings) go here so
     /// tests can observe them; the default preserves the stderr behavior.
     private let diagnosticSink: (String) -> Void
+    private let uptime: () -> TimeInterval
     private let queue = DispatchQueue(label: "automobile.simulator-capture.frames")
     let firstFrameSignal = FirstFrameSignal()
 
@@ -140,12 +142,14 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate,
         diagnosticSink: @escaping (String) -> Void = { line in
             FileHandle.standardError.write(Data(line.utf8))
         },
+        uptime: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
         encode: CommandLineOptions.EncodeSettings? = nil,
         onFatalError: @escaping (Error) -> Void
     ) {
         self.writer = writer
         self.makeStream = makeStream
         self.diagnosticSink = diagnosticSink
+        self.uptime = uptime
         encodeSettings = encode
         self.onFatalError = onFatalError
     }
@@ -265,6 +269,7 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate,
             let stream = _stream
             _pipeline = nil
             _stream = nil
+            lastIdleMarkerUptime = nil
             return (pipeline, stream)
         }
 
@@ -301,11 +306,12 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate,
         guard type == .screen else { return }
         guard !stateLock.withLock({ _updatingOverlay }) else { return }
 
-        // Drop non-complete statuses (idle, blank, suspended, stopped) so we
-        // don't re-emit identical pixels or partial buffers.
+        // Idle samples attest a live ScreenCaptureKit stream without claiming a
+        // fresh encoded frame. Other non-complete statuses prove nothing.
         if let status = SimulatorCaptureSession.frameStatus(of: sampleBuffer),
            status != .complete
         {
+            noteNonCompleteStatus(status)
             return
         }
 
@@ -382,6 +388,29 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate,
             diagnosticSink("\(marker)\n")
         }
         firstFrameSignal.markReceivedFrame()
+    }
+
+    /// Emit at most one producer-idle marker every two seconds, only after a
+    /// real first frame and while this exact stream remains attached.
+    func noteIdleSample() {
+        guard firstFrameSignal.hasReceivedFrame else { return }
+        let now = uptime()
+        let shouldEmit = stateLock.withLock { () -> Bool in
+            guard _stream != nil,
+                  lastIdleMarkerUptime.map({ now - $0 >= 2 }) ?? true
+            else { return false }
+            lastIdleMarkerUptime = now
+            return true
+        }
+        if shouldEmit {
+            diagnosticSink("capture-idle: windowID=\(windowID)\n")
+        }
+    }
+
+    func noteNonCompleteStatus(_ status: SCFrameStatus) {
+        if status == .idle {
+            noteIdleSample()
+        }
     }
 
     // MARK: - SCStreamDelegate

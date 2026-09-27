@@ -1,5 +1,5 @@
-import XCTest
 @testable import ScreenCaptureCore
+import XCTest
 
 final class CaptureCapabilityMarkerTests: XCTestCase {
     func testPrefixConstant() {
@@ -19,6 +19,7 @@ final class CaptureCapabilityMarkerTests: XCTestCase {
             CaptureCapability.allCases.map { "capture-capability: \($0.rawValue)" }
         )
         XCTAssertTrue(CaptureCapabilityMarker.allLines().contains("capture-capability: encoded-video-h264"))
+        XCTAssertTrue(CaptureCapabilityMarker.allLines().contains("capture-capability: simulator-idle-evidence"))
     }
 
     /// The TS supervisor (`IosH264Source`) treats an `error:`-prefixed helper line

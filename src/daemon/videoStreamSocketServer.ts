@@ -13,7 +13,9 @@ import type { BootedDevice } from "../models";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import type { H264CaptureSource } from "../features/webrtc/H264CaptureSource";
 import {
+  H264AccessUnitAssembler,
   H264AnnexBParser,
+  MAX_ANNEX_B_BUFFER_BYTES,
   nalUnitType,
   NAL_TYPE_IDR,
   NAL_TYPE_PPS,
@@ -40,6 +42,12 @@ import type { VideoStreamSocketRequest, VideoStreamSocketResponse } from "./vide
 export type CaptureSourceFactory = (options: {
   device: BootedDevice;
   onData: (chunk: Buffer) => void;
+  /** Fresh producer frame; used by iOS where encoder output can replay a cached frame. */
+  onSourceFrame?: () => void;
+  /** Genuine native Simulator idle callback, scoped to this capture generation. */
+  onSourceIdle?: () => void;
+  onEncodedAccessUnit?: () => void;
+  onIdleAttestationSupport?: (supported: boolean) => void;
   onError: (error: Error) => void;
   /** Receives the attested display rotation (0..3) when the source can prove it (issue #4786). */
   onRotation?: (rotation: number) => void;
@@ -85,6 +93,14 @@ interface DeviceCapture {
   sps: Buffer | null;
   pps: Buffer | null;
   parser: H264AnnexBParser;
+  /** Bounded, complete IDR access unit for a late viewer of an unchanged screen. */
+  keyFrameAssembler: H264AccessUnitAssembler;
+  keyFrameAuBytes: number;
+  latestKeyFrameAu: Buffer | null;
+  latestInterFrameAus: Buffer[];
+  cachedGopBytes: number;
+  sourceFrameSequence: number;
+  lastEncodedBoundarySequence: number | null;
   size?: { width: number; height: number };
   /**
    * Latest attested display rotation (0..3) from the source, or null when the source cannot attest
@@ -99,6 +115,18 @@ interface DeviceCapture {
    * from the very start of capture is never masked as alive.
    */
   heartbeatTimer: NodeJS.Timeout | null;
+  /** Time of the latest fresh producer frame, never refreshed by replay or the relay. */
+  lastSourceDataMs: number | null;
+  /** Native producer-idle evidence; cleared by the next complete source frame. */
+  lastIdleMs: number | null;
+  /** An encoded chunk followed the most recent complete source frame. */
+  encodedSinceSourceFrame: boolean;
+  /** Temporary compatibility for a released helper without native idle markers. */
+  legacySimulatorHelper: boolean;
+  /** Time of the latest encoded output; both producer and encoder must keep making progress. */
+  lastEncodedDataMs: number | null;
+  /** Limits active key-frame probes while a source is quiet. A request is not proof of life. */
+  lastLivenessProbeMs: number | null;
 }
 
 const ANNEX_B_START_CODE = Buffer.from([0, 0, 0, 1]);
@@ -133,6 +161,10 @@ const CAPTURE_IDLE_GRACE_MS = 3_000;
  * subscribe ack (`heartbeatMs`) so it can size its own stall-reconnect window.
  */
 const HEARTBEAT_INTERVAL_MS = 1_000;
+// Give screenrecord and iOS's encoder time to answer a key-frame request before allowing the
+// desktop's 10s stall watchdog to reconnect. A silent-but-attached process cannot extend this.
+const SOURCE_PROBE_AFTER_MS = 6_000;
+const SOURCE_EVIDENCE_MAX_AGE_MS = 9_000;
 
 /**
  * Captures are shared per device and the FIRST subscriber's hints fixed the encode; a late
@@ -364,6 +396,10 @@ export class VideoStreamSocketServer extends BaseSocketServer {
       // Replay the parameter sets so a late joiner can decode immediately instead of waiting for
       // the encoder's next key frame.
       this.replayParameterSets(capture, socket);
+      // A raw iOS encoder cannot produce a new IDR until ScreenCaptureKit delivers another
+      // complete frame. On an unchanged screen, replay one complete IDR without claiming
+      // either producer or encoder progress.
+      this.replayCurrentIosKeyFrame(device, capture, socket);
       // Startup can synchronously emit an IDR before the acknowledgement makes this socket
       // eligible for binary data. Gate the subscriber and ask for a post-ack keyframe so it
       // never begins on an undecodable inter-frame. Retried through the injected timer when the
@@ -428,39 +464,95 @@ export class VideoStreamSocketServer extends BaseSocketServer {
       sps: null,
       pps: null,
       parser: new H264AnnexBParser(),
+      keyFrameAssembler: new H264AccessUnitAssembler(),
+      keyFrameAuBytes: 0,
+      latestKeyFrameAu: null,
+      latestInterFrameAus: [],
+      cachedGopBytes: 0,
+      sourceFrameSequence: 0,
+      lastEncodedBoundarySequence: null,
       size: request.size,
       rotation: null,
       idleTimer: null,
       heartbeatTimer: null,
+      lastSourceDataMs: null,
+      lastIdleMs: null,
+      encodedSinceSourceFrame: false,
+      legacySimulatorHelper: false,
+      lastEncodedDataMs: null,
+      lastLivenessProbeMs: null,
     };
     // Registered before start() so a chunk arriving during startup still finds its subscribers.
     this.captures.set(deviceId, capture);
     this.socketDeviceIds.set(socket, deviceId);
 
+    const attestSource = (): void => {
+      if (this.captures.get(deviceId) !== capture) {
+        return;
+      }
+      capture.lastSourceDataMs = this.timer.now();
+      capture.sourceFrameSequence++;
+      capture.lastIdleMs = null;
+      capture.encodedSinceSourceFrame = false;
+      if (capture.lastEncodedDataMs !== null && !capture.heartbeatTimer) {
+        this.startHeartbeat(deviceId, capture);
+      }
+    };
     capture.startup = (async () => {
       try {
         const source = await this.deps.createCaptureSource({
           device,
           onData: (chunk) => {
             const current = this.captures.get(deviceId);
-            // Gated on the FIRST chunk since capture start, so a source that never produces
-            // anything is never masked as alive by a heartbeat of our own making (issue #7549).
-            if (current && current === capture && !current.heartbeatTimer) {
+            if (current !== capture || chunk.length === 0) {
+              return;
+            }
+            current.lastEncodedDataMs = this.timer.now();
+            current.encodedSinceSourceFrame = true;
+            if (current.lastSourceDataMs !== null && !current.heartbeatTimer) {
               this.startHeartbeat(deviceId, current);
             }
             this.broadcast(deviceId, chunk);
+          },
+          onSourceFrame: attestSource,
+          onSourceIdle: () => {
+            if (this.captures.get(deviceId) !== capture || !capture.encodedSinceSourceFrame) {
+              return;
+            }
+            capture.lastIdleMs = this.timer.now();
+          },
+          onEncodedAccessUnit: () => {
+            if (this.captures.get(deviceId) !== capture) {
+              return;
+            }
+            for (const nal of capture.parser.flush()) {
+              this.broadcastNal(deviceId, capture, nal);
+            }
+            this.cacheCompletedAccessUnits(capture, capture.keyFrameAssembler.flush());
+            capture.keyFrameAuBytes = 0;
+            capture.lastEncodedBoundarySequence = capture.sourceFrameSequence;
+          },
+          onIdleAttestationSupport: (supported) => {
+            if (this.captures.get(deviceId) === capture && device.platform === "ios") {
+              capture.legacySimulatorHelper = !supported;
+            }
           },
           // Record the source's attested rotation so the next config packet re-attests it to
           // subscribers, including a late joiner via replayParameterSets (issue #4786).
           onRotation: (rotation) => {
             const current = this.captures.get(deviceId);
-            if (current) {
+            if (current === capture) {
               current.rotation = rotation;
             }
           },
           onDroppedFrames: (droppedFrames) => {
             const current = this.captures.get(deviceId);
-            if (!current || !Number.isSafeInteger(droppedFrames) || droppedFrames < 0) {
+            if (
+              current !== capture ||
+              !Number.isSafeInteger(droppedFrames) ||
+              droppedFrames < 0 ||
+              !this.sourceEvidenceIsRecent(capture, this.timer.now())
+            ) {
               return;
             }
             const packet = encodeDroppedFrames(droppedFrames);
@@ -513,6 +605,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
           throw new ActionableError(`Video capture for ${deviceId} was stopped during startup.`);
         }
       } catch (error) {
+        this.clearHeartbeatTimer(capture);
         // A replacement subscriber may have installed a new capture while this
         // asynchronous start was unwinding. Never remove that newer capture.
         if (this.captures.get(deviceId) === capture) {
@@ -563,6 +656,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
 
   private broadcastNal(deviceId: string, capture: DeviceCapture, nal: Buffer): void {
     const type = nalUnitType(nal);
+    this.cacheCompleteKeyFrame(capture, nal, type);
     const isConfig = type === NAL_TYPE_SPS || type === NAL_TYPE_PPS;
     if (type === NAL_TYPE_SPS) {
       capture.sps = Buffer.from(nal);
@@ -582,6 +676,99 @@ export class VideoStreamSocketServer extends BaseSocketServer {
 
     for (const subscriber of capture.subscribers) {
       this.writePacketToSubscriber(deviceId, capture, subscriber, packet, isConfig, isKeyFrame);
+    }
+  }
+
+  private cacheCompleteKeyFrame(capture: DeviceCapture, nal: Buffer, type: number): void {
+    const completed = capture.keyFrameAssembler.push(nal);
+    capture.keyFrameAuBytes += nal.length;
+    this.cacheCompletedAccessUnits(capture, completed);
+    if (type === NAL_TYPE_SPS || type === NAL_TYPE_PPS) {
+      // An old IDR may have completed exactly as a new parameter set arrived.
+      capture.latestKeyFrameAu = null;
+      capture.latestInterFrameAus = [];
+      capture.cachedGopBytes = 0;
+    }
+    if (capture.keyFrameAuBytes > MAX_ANNEX_B_BUFFER_BYTES) {
+      capture.keyFrameAssembler = new H264AccessUnitAssembler();
+      capture.keyFrameAuBytes = 0;
+    }
+  }
+
+  private cacheCompletedAccessUnits(capture: DeviceCapture, completed: Buffer[][]): void {
+    for (const au of completed) {
+      const bytes = au.reduce((sum, item) => sum + item.length, 0);
+      capture.keyFrameAuBytes -= bytes;
+      if (bytes > MAX_ANNEX_B_BUFFER_BYTES) {
+        capture.latestKeyFrameAu = null;
+        capture.latestInterFrameAus = [];
+        capture.cachedGopBytes = 0;
+        continue;
+      }
+      const encoded = Buffer.concat(
+        au
+          .filter(
+            (item) => nalUnitType(item) !== NAL_TYPE_SPS && nalUnitType(item) !== NAL_TYPE_PPS,
+          )
+          .flatMap((item) => [ANNEX_B_START_CODE, item]),
+      );
+      if (au.some((item) => nalUnitType(item) === NAL_TYPE_IDR)) {
+        capture.latestKeyFrameAu = encoded;
+        capture.latestInterFrameAus = [];
+        capture.cachedGopBytes = encoded.length;
+      } else if (capture.latestKeyFrameAu) {
+        if (capture.cachedGopBytes + encoded.length > MAX_ANNEX_B_BUFFER_BYTES) {
+          capture.latestKeyFrameAu = null;
+          capture.latestInterFrameAus = [];
+          capture.cachedGopBytes = 0;
+        } else {
+          capture.latestInterFrameAus.push(encoded);
+          capture.cachedGopBytes += encoded.length;
+        }
+      }
+    }
+  }
+
+  private replayKeyFrame(capture: DeviceCapture, socket: Socket, deviceId: string): void {
+    if (!capture.sps || !capture.pps || !capture.latestKeyFrameAu) {
+      return;
+    }
+    this.writePacketToSubscriber(
+      deviceId,
+      capture,
+      socket,
+      encodePacket(
+        encodePtsAndFlags(this.deps.nowUs(), { isKeyFrame: true }),
+        capture.latestKeyFrameAu,
+      ),
+      false,
+      true,
+    );
+    for (const au of capture.latestInterFrameAus) {
+      this.writePacketToSubscriber(
+        deviceId,
+        capture,
+        socket,
+        encodePacket(encodePtsAndFlags(this.deps.nowUs(), {}), au),
+        false,
+        false,
+      );
+    }
+  }
+
+  private replayCurrentIosKeyFrame(
+    device: BootedDevice,
+    capture: DeviceCapture,
+    socket: Socket,
+  ): void {
+    if (
+      device.platform === "ios" &&
+      capture.lastIdleMs !== null &&
+      capture.encodedSinceSourceFrame &&
+      capture.lastEncodedBoundarySequence === capture.sourceFrameSequence &&
+      this.timer.now() - capture.lastIdleMs <= SOURCE_EVIDENCE_MAX_AGE_MS
+    ) {
+      this.replayKeyFrame(capture, socket, device.deviceId);
     }
   }
 
@@ -730,27 +917,91 @@ export class VideoStreamSocketServer extends BaseSocketServer {
   /**
    * Start the relay-originated heartbeat (issue #7549): a zero-payload packet on the injected
    * timer, sent every `HEARTBEAT_INTERVAL_MS` to every promoted, non-backpressured subscriber
-   * while the capture has a live source. A subscriber still `waitingForKeyFrame` is skipped, same
+   * while the capture has recent source output. A subscriber still `waitingForKeyFrame` is skipped, same
    * as any other packet — see `writePacketToSubscriber`.
    */
   private startHeartbeat(deviceId: string, capture: DeviceCapture): void {
     capture.heartbeatTimer = this.timer.setInterval(() => {
-      const current = this.captures.get(deviceId);
-      if (!current || !current.source) {
+      if (this.captures.get(deviceId) !== capture || !capture.source) {
+        return;
+      }
+      if (!this.hasFreshSourceEvidence(deviceId, capture)) {
+        // A reconnect must never inherit a capture we have already declared stale.
+        // stopCapture removes it synchronously and serializes replacement behind source.stop().
+        if (this.captures.get(deviceId) === capture) {
+          void this.stopCapture(deviceId, true);
+        }
         return;
       }
       const packet = encodeHeartbeat();
-      for (const subscriber of current.subscribers) {
+      for (const subscriber of capture.subscribers) {
         if (
           subscriber.destroyed ||
-          current.waitingForKeyFrame.has(subscriber) ||
-          current.backpressuredSubscribers.has(subscriber)
+          capture.waitingForKeyFrame.has(subscriber) ||
+          capture.backpressuredSubscribers.has(subscriber)
         ) {
           continue;
         }
         subscriber.write(packet);
       }
     }, HEARTBEAT_INTERVAL_MS);
+  }
+
+  private hasFreshSourceEvidence(deviceId: string, capture: DeviceCapture): boolean {
+    const { source, lastSourceDataMs, lastEncodedDataMs } = capture;
+    if (!source || lastSourceDataMs === null || lastEncodedDataMs === null) {
+      return false;
+    }
+    const now = this.timer.now();
+    if (this.sourceEvidenceIsRecent(capture, now) && capture.lastIdleMs !== null) {
+      return true;
+    }
+    const oldestEvidenceAgeMs = Math.max(now - lastSourceDataMs, now - lastEncodedDataMs, 0);
+    if (
+      oldestEvidenceAgeMs >= SOURCE_PROBE_AFTER_MS &&
+      (capture.lastLivenessProbeMs === null ||
+        now - capture.lastLivenessProbeMs >= SOURCE_PROBE_AFTER_MS)
+    ) {
+      try {
+        if (source.requestKeyFrame?.("probe")) {
+          capture.lastLivenessProbeMs = now;
+        }
+      } catch (error) {
+        logger.warn(`[VideoStream] liveness key-frame request failed for ${deviceId}: ${error}`);
+      }
+    }
+    return this.sourceEvidenceIsRecent(capture, now);
+  }
+
+  /** Telemetry must not refresh the desktop's activity clock after producer or encoder stalls. */
+  private sourceEvidenceIsRecent(capture: DeviceCapture, now: number): boolean {
+    if (capture.lastSourceDataMs === null || capture.lastEncodedDataMs === null) {
+      return false;
+    }
+    if (capture.legacySimulatorHelper) {
+      return true;
+    }
+    if (
+      capture.lastIdleMs !== null &&
+      capture.encodedSinceSourceFrame &&
+      now - capture.lastIdleMs <= SOURCE_EVIDENCE_MAX_AGE_MS
+    ) {
+      return true;
+    }
+    return (
+      Math.max(now - capture.lastSourceDataMs, now - capture.lastEncodedDataMs, 0) <=
+      SOURCE_EVIDENCE_MAX_AGE_MS
+    );
+  }
+
+  /** A stalled per-source encoder must not retire a producer shared by other leases. */
+  private producerEvidenceIsStale(capture: DeviceCapture): boolean {
+    const now = this.timer.now();
+    return (
+      (capture.lastSourceDataMs === null ||
+        now - capture.lastSourceDataMs > SOURCE_EVIDENCE_MAX_AGE_MS) &&
+      (capture.lastIdleMs === null || now - capture.lastIdleMs > SOURCE_EVIDENCE_MAX_AGE_MS)
+    );
   }
 
   private clearHeartbeatTimer(capture: DeviceCapture): void {
@@ -760,7 +1011,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     }
   }
 
-  private stopCapture(deviceId: string): Promise<void> {
+  private stopCapture(deviceId: string, stale = false): Promise<void> {
     const pending = this.pendingStops.get(deviceId);
     if (pending) {
       return pending;
@@ -785,7 +1036,11 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     const stopping = (async () => {
       try {
         try {
-          await capture.source?.stop();
+          if (stale && capture.source?.stopStale) {
+            await capture.source.stopStale(this.producerEvidenceIsStale(capture));
+          } else {
+            await capture.source?.stop();
+          }
         } catch (error) {
           // A teardown failure must be visible, but must not prevent a later attach from retrying.
           logger.warn(`[VideoStream] failed to stop capture for ${deviceId}: ${error}`);
@@ -880,6 +1135,10 @@ function defaultDependencies(): VideoStreamSocketServerDependencies {
         {
           device: options.device,
           onData: options.onData,
+          onSourceFrame: options.onSourceFrame,
+          onSourceIdle: options.onSourceIdle,
+          onEncodedAccessUnit: options.onEncodedAccessUnit,
+          onIdleAttestationSupport: options.onIdleAttestationSupport,
           onError: options.onError,
           onRotation: options.onRotation,
           onDroppedFrames: options.onDroppedFrames,

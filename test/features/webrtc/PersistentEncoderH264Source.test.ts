@@ -576,7 +576,8 @@ describe("PersistentEncoderH264Source", () => {
   });
 
   test("does not count a replayed IDR as completion of the new keyframe request", async () => {
-    const ctx = makeSource();
+    let freshFrames = 0;
+    const ctx = makeSource({ onSourceFrame: () => freshFrames++ });
     await startReady(ctx);
 
     ctx.sockets[0].feed(streamHeader(480, 1040));
@@ -591,6 +592,10 @@ describe("PersistentEncoderH264Source", () => {
       idrCompletionCount: 0,
       encodedAccessUnitCount: 0,
     });
+    expect(freshFrames).toBe(0);
+
+    ctx.sockets[0].feed(framedPacket(Buffer.from([0, 0, 0, 1, 0x41, 0x80]), 124n));
+    expect(freshFrames).toBe(1);
 
     await ctx.source.stop();
   });

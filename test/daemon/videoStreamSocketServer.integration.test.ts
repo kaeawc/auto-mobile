@@ -34,6 +34,9 @@ const DEVICE: BootedDevice = {
 class FakeCaptureSource implements H264CaptureSource {
   started = false;
   stopped = false;
+  staleStopped = false;
+  producerStaleOnStop: boolean | null = null;
+  keyFramePurposes: ("viewer" | "probe" | undefined)[] = [];
   startError: Error | null = null;
   stopError: Error | null = null;
   startGate: Promise<void> | null = null;
@@ -67,8 +70,15 @@ class FakeCaptureSource implements H264CaptureSource {
     this.onStopSettled?.();
   }
 
-  requestKeyFrame(): boolean {
+  async stopStale(producerStale?: boolean): Promise<void> {
+    this.staleStopped = true;
+    this.producerStaleOnStop = producerStale ?? null;
+    await this.stop();
+  }
+
+  requestKeyFrame(purpose?: "viewer" | "probe"): boolean {
     this.keyFrameRequests++;
+    this.keyFramePurposes.push(purpose);
     if (this.keyFrameRejectionsRemaining > 0) {
       this.keyFrameRejectionsRemaining--;
       return false;
@@ -83,6 +93,11 @@ interface Harness {
   sources: FakeCaptureSource[];
   captureOptions: Array<{ fps?: number; quality?: string }>;
   emit: (chunk: Buffer) => void;
+  emitUnattested: (chunk: Buffer) => void;
+  emitSourceFrame: () => void;
+  emitIdle: () => void;
+  emitEncodedBoundary: () => void;
+  setIdleSupport: (supported: boolean) => void;
   /** Simulates the source attesting a display rotation (issue #4786). */
   emitRotation: (rotation: number) => void;
   /** Simulates a cumulative encoder-side dropped-frame measurement. */
@@ -109,12 +124,17 @@ async function startHarness(
     /** Pre-arms each created source to throttle this many key-frame requests. */
     keyFrameRejections?: number;
     admissionGate?: DeviceAdmissionGate;
+    device?: BootedDevice;
   } = {},
 ): Promise<Harness> {
   const dir = mkdtempSync(path.join(tmpdir(), "amvs-"));
   const socketPath = path.join(dir, "video-stream.sock");
   const sources: FakeCaptureSource[] = [];
   let onData: ((chunk: Buffer) => void) | null = null;
+  let onSourceFrame: (() => void) | null = null;
+  let onSourceIdle: (() => void) | null = null;
+  let onEncodedAccessUnit: (() => void) | null = null;
+  let onIdleAttestationSupport: ((supported: boolean) => void) | null = null;
   let onRotation: ((rotation: number) => void) | null = null;
   let onDroppedFrames: ((droppedFrames: number) => void) | null = null;
   let onError: ((error: Error) => void) | null = null;
@@ -127,10 +147,14 @@ async function startHarness(
         if (options.resolveError) {
           throw options.resolveError;
         }
-        return DEVICE;
+        return options.device ?? DEVICE;
       },
       createCaptureSource: async (opts) => {
         onData = opts.onData;
+        onSourceFrame = opts.onSourceFrame ?? null;
+        onSourceIdle = opts.onSourceIdle ?? null;
+        onEncodedAccessUnit = opts.onEncodedAccessUnit ?? null;
+        onIdleAttestationSupport = opts.onIdleAttestationSupport ?? null;
         onRotation = opts.onRotation ?? null;
         onDroppedFrames = opts.onDroppedFrames ?? null;
         onError = opts.onError;
@@ -141,6 +165,7 @@ async function startHarness(
         source.keyFrameRejectionsRemaining = options.keyFrameRejections ?? 0;
         source.onStart = () => {
           if (options.startData) {
+            onSourceFrame?.();
             onData?.(options.startData);
           }
         };
@@ -163,7 +188,15 @@ async function startHarness(
     socketPath,
     sources,
     captureOptions,
-    emit: (chunk) => onData?.(chunk),
+    emit: (chunk) => {
+      onSourceFrame?.();
+      onData?.(chunk);
+    },
+    emitUnattested: (chunk) => onData?.(chunk),
+    emitSourceFrame: () => onSourceFrame?.(),
+    emitIdle: () => onSourceIdle?.(),
+    emitEncodedBoundary: () => onEncodedAccessUnit?.(),
+    setIdleSupport: (supported) => onIdleAttestationSupport?.(supported),
     emitRotation: (rotation) => onRotation?.(rotation),
     emitDroppedFrames: (droppedFrames) => onDroppedFrames?.(droppedFrames),
     emitError: (error) => onError?.(error),
@@ -402,16 +435,39 @@ describe("VideoStreamSocketServer", () => {
   });
 
   test("relays cumulative encoder drops as a zero-payload telemetry packet", async () => {
-    const h = await startHarness();
+    const fakeTimer = new FakeTimer();
+    const h = await startHarness({ timer: fakeTimer });
     const { binary } = await subscribe(h.socketPath);
     await waitFor(() => binary().length >= 12);
 
     h.emitDroppedFrames(42);
-    await waitFor(() => binary().length >= 24);
+    await defaultTimer.sleep(10);
+    expect(binary().length).toBe(12);
 
-    const packet = binary().subarray(12, 24);
+    h.emit(Buffer.from([0, 0, 0, 1, 5, 0xaa, 0, 0, 0, 1, 1]));
+    await waitFor(() => binary().length > 12);
+    const beforeDropPacket = binary().length;
+    h.emitDroppedFrames(42);
+    await waitFor(() => binary().length >= beforeDropPacket + 12);
+
+    const packet = binary().subarray(beforeDropPacket, beforeDropPacket + 12);
     expect(packet.readBigInt64BE(0) & ((1n << 61n) - 1n)).toBe(42n);
     expect(packet.readBigInt64BE(0) & (1n << 61n)).toBe(1n << 61n);
+
+    fakeTimer.advanceTime(10_000);
+    await defaultTimer.sleep(10);
+    const staleLength = binary().length;
+    h.emitDroppedFrames(42);
+    await defaultTimer.sleep(10);
+    expect(binary().length).toBe(staleLength);
+
+    const replacement = await subscribe(h.socketPath);
+    await waitFor(() => replacement.binary().length >= 12);
+    h.emit(Buffer.from([0, 0, 0, 1, 5, 0xbb, 0, 0, 0, 1, 1]));
+    await waitFor(() => replacement.binary().length > 12);
+    const beforeRecoveredDrop = replacement.binary().length;
+    h.emitDroppedFrames(43);
+    await waitFor(() => replacement.binary().length >= beforeRecoveredDrop + 12);
     expect(packet.readInt32BE(8)).toBe(0);
   });
 
@@ -457,6 +513,147 @@ describe("VideoStreamSocketServer", () => {
     await defaultTimer.sleep(30);
 
     expect(binary().length).toBe(12);
+  });
+
+  test("keeps the capture when a quiet source answers a key-frame probe", async () => {
+    const fakeTimer = new FakeTimer();
+    const h = await startHarness({ timer: fakeTimer });
+    const { binary } = await subscribe(h.socketPath);
+    await waitFor(() => binary().length >= 12);
+    h.emit(Buffer.from([0, 0, 0, 1, 5, 0xaa, 0, 0, 0, 1, 1]));
+    await waitFor(() => binary().length > 12);
+
+    fakeTimer.advanceTime(8_000);
+    await defaultTimer.sleep(10);
+    const beforeRecovery = binary().length;
+    expect(h.sources[0].keyFrameRequests).toBeGreaterThan(0);
+
+    h.emit(Buffer.from([0, 0, 0, 1, 1, 0xbb, 0, 0, 0, 1, 1]));
+    fakeTimer.advanceTime(1_000);
+    await waitFor(() => binary().length > beforeRecovery);
+    expect(h.sources[0].stopped).toBe(false);
+  });
+
+  test("fresh source frames do not reset the successful probe interval while encoding stalls", async () => {
+    const fakeTimer = new FakeTimer();
+    const h = await startHarness({ timer: fakeTimer });
+    const { binary } = await subscribe(h.socketPath);
+    await waitFor(() => binary().length >= 12);
+    h.emit(Buffer.from([0, 0, 0, 1, 5, 0xaa, 0, 0, 0, 1, 1]));
+    await waitFor(() => binary().length > 12);
+
+    const requestsBeforeProbe = h.sources[0].keyFrameRequests;
+    fakeTimer.advanceTime(6_000);
+    expect(h.sources[0].keyFrameRequests).toBe(requestsBeforeProbe + 1);
+    expect(h.sources[0].keyFramePurposes).toContain("probe");
+    for (let second = 7; second <= 9; second++) {
+      h.emitSourceFrame();
+      fakeTimer.advanceTime(1_000);
+    }
+    expect(h.sources[0].keyFrameRequests).toBe(requestsBeforeProbe + 1);
+    h.emitSourceFrame();
+    fakeTimer.advanceTime(1_000);
+    await waitFor(() => h.sources[0].stopped);
+    expect(h.sources[0].producerStaleOnStop).toBe(false);
+  });
+
+  test("retires a stale capture so a reconnect starts a new source", async () => {
+    const fakeTimer = new FakeTimer();
+    const h = await startHarness({ timer: fakeTimer });
+    const first = await subscribe(h.socketPath);
+    await waitFor(() => first.binary().length >= 12);
+    h.emit(Buffer.from([0, 0, 0, 1, 5, 0xaa, 0, 0, 0, 1, 1]));
+    await waitFor(() => first.binary().length > 12);
+    let finishStop: (() => void) | undefined;
+    h.sources[0].stopGate = new Promise<void>((resolve) => {
+      finishStop = resolve;
+    });
+
+    fakeTimer.advanceTime(10_000);
+    await waitFor(() => h.sources[0].stopped);
+    expect(h.sources[0].staleStopped).toBe(true);
+    expect(h.server.activeDeviceIds()).toEqual([]);
+
+    const reconnect = subscribe(h.socketPath);
+    await defaultTimer.sleep(10);
+    expect(h.sources).toHaveLength(1);
+    finishStop?.();
+    const second = await reconnect;
+    await waitFor(() => second.binary().length >= 12);
+    expect(h.sources).toHaveLength(2);
+    expect(h.sources[1].started).toBe(true);
+  });
+
+  test("native idle callbacks sustain a static capture only after encoded output", async () => {
+    const fakeTimer = new FakeTimer();
+    const h = await startHarness({ timer: fakeTimer });
+    const { binary } = await subscribe(h.socketPath);
+    await waitFor(() => binary().length >= 12);
+    h.emit(Buffer.from([0, 0, 0, 1, 5, 0xaa, 0, 0, 0, 1, 1]));
+    for (let i = 0; i < 6; i++) {
+      h.emitIdle();
+      fakeTimer.advanceTime(2_000);
+    }
+    expect(h.sources[0].stopped).toBe(false);
+    h.emitSourceFrame();
+    fakeTimer.advanceTime(1_000);
+    await waitFor(() => h.sources[0].stopped);
+    expect(h.sources[0].staleStopped).toBe(true);
+  });
+
+  test("older Simulator helpers preserve static-screen heartbeats until upgraded", async () => {
+    const fakeTimer = new FakeTimer();
+    const iosDevice = { ...DEVICE, platform: "ios" } as BootedDevice;
+    const h = await startHarness({ timer: fakeTimer, device: iosDevice });
+    const { binary } = await subscribe(h.socketPath);
+    await waitFor(() => binary().length >= 12);
+    h.setIdleSupport(false);
+    h.emit(Buffer.from([0, 0, 0, 1, 5, 0xaa, 0, 0, 0, 1, 1]));
+    fakeTimer.advanceTime(12_000);
+    expect(h.sources[0].stopped).toBe(false);
+    h.setIdleSupport(true);
+    fakeTimer.advanceTime(1_000);
+    await waitFor(() => h.sources[0].stopped);
+  });
+
+  test("iOS encoder output alone cannot keep a cached helper frame capture alive", async () => {
+    const fakeTimer = new FakeTimer();
+    const iosDevice = { ...DEVICE, platform: "ios" } as BootedDevice;
+    const h = await startHarness({ timer: fakeTimer, device: iosDevice });
+    const { binary } = await subscribe(h.socketPath);
+    await waitFor(() => binary().length >= 12);
+    h.emitUnattested(Buffer.from([0, 0, 0, 1, 5, 0xaa, 0, 0, 0, 1, 1]));
+
+    fakeTimer.advanceTime(2_000);
+    await defaultTimer.sleep(10);
+    const withoutProof = binary().length;
+    h.emitSourceFrame();
+    fakeTimer.advanceTime(1_000);
+    await waitFor(() => binary().length > withoutProof);
+
+    fakeTimer.advanceTime(5_000);
+    await defaultTimer.sleep(10);
+    // Raw iOS key-frame requests can cause this replay without any fresh helper frame.
+    h.emitUnattested(Buffer.from([0, 0, 0, 1, 1, 0xbb, 0, 0, 0, 1, 1]));
+    fakeTimer.advanceTime(5_000);
+    await waitFor(() => h.sources[0].stopped);
+  });
+
+  test("fresh iOS helper frames cannot hide a stalled encoder", async () => {
+    const fakeTimer = new FakeTimer();
+    const iosDevice = { ...DEVICE, platform: "ios" } as BootedDevice;
+    const h = await startHarness({ timer: fakeTimer, device: iosDevice });
+    const { binary } = await subscribe(h.socketPath);
+    await waitFor(() => binary().length >= 12);
+    h.emit(Buffer.from([0, 0, 0, 1, 5, 0xaa, 0, 0, 0, 1, 1]));
+    fakeTimer.advanceTime(9_000);
+    h.emitSourceFrame();
+    await defaultTimer.sleep(10);
+    const staleEncoderLength = binary().length;
+
+    fakeTimer.advanceTime(2_000);
+    await defaultTimer.sleep(10);
+    expect(binary().length).toBe(staleEncoderLength);
   });
 
   test("does not emit a heartbeat to a subscriber still waiting for a key frame", async () => {
@@ -928,6 +1125,89 @@ describe("VideoStreamSocketServer", () => {
     expect(packet.readBigInt64BE(0)).toBeLessThan(0n); // CONFIG flag is bit 63
   });
 
+  test("replays a complete cached IDR to a late iOS viewer without extending source life", async () => {
+    const fakeTimer = new FakeTimer();
+    const iosDevice = { ...DEVICE, platform: "ios" } as BootedDevice;
+    const h = await startHarness({ timer: fakeTimer, device: iosDevice });
+    await subscribe(h.socketPath);
+    const sps = Buffer.from([0, 0, 0, 1, 0x67, 0x64]);
+    const pps = Buffer.from([0, 0, 0, 1, 0x68, 0xee]);
+    const idr = Buffer.from([0, 0, 0, 1, 0x65, 0x80, 0xaa]);
+    const secondIdrSlice = Buffer.from([0, 0, 0, 1, 0x65, 0x40, 0xbb]);
+    // The key frame is the last access unit; a static screen sends no next P-frame.
+    h.emit(Buffer.concat([sps, pps, idr, secondIdrSlice]));
+    h.emitEncodedBoundary();
+    h.setIdleSupport(true);
+    h.emitIdle();
+    fakeTimer.advanceTime(8_000);
+
+    const keyFrameRequestsBeforeJoin = h.sources[0].keyFrameRequests;
+    const late = await subscribe(h.socketPath);
+    await waitFor(() => late.binary().includes(idr));
+    expect(late.binary().includes(sps)).toBe(true);
+    expect(late.binary().includes(pps)).toBe(true);
+    expect(late.binary().includes(secondIdrSlice)).toBe(true);
+    expect(h.sources[0].keyFrameRequests).toBe(keyFrameRequestsBeforeJoin);
+
+    // The replay is viewer setup, not evidence that either capture stage is still producing.
+    fakeTimer.advanceTime(2_000);
+    await waitFor(() => h.sources[0].staleStopped);
+  });
+
+  test("active iOS capture waits for a fresh IDR instead of replaying an old one", async () => {
+    const fakeTimer = new FakeTimer();
+    const iosDevice = { ...DEVICE, platform: "ios" } as BootedDevice;
+    const h = await startHarness({ timer: fakeTimer, device: iosDevice });
+    await subscribe(h.socketPath);
+    const sps = Buffer.from([0, 0, 0, 1, 0x67, 0x64]);
+    const pps = Buffer.from([0, 0, 0, 1, 0x68, 0xee]);
+    const idr = Buffer.from([0, 0, 0, 1, 0x65, 0x80, 0xaa]);
+    h.emit(Buffer.concat([sps, pps, idr]));
+    h.emitEncodedBoundary();
+    h.setIdleSupport(true);
+    h.emitIdle();
+    h.emitSourceFrame();
+
+    const requestsBeforeJoin = h.sources[0].keyFrameRequests;
+    const late = await subscribe(h.socketPath);
+    await waitFor(() => late.binary().length > 12);
+    expect(late.binary().includes(idr)).toBe(false);
+    expect(h.sources[0].keyFrameRequests).toBeGreaterThan(requestsBeforeJoin);
+  });
+
+  test("idle iOS replay includes P frames after the cached IDR", async () => {
+    const fakeTimer = new FakeTimer();
+    const h = await startHarness({
+      timer: fakeTimer,
+      device: { ...DEVICE, platform: "ios" } as BootedDevice,
+    });
+    await subscribe(h.socketPath);
+    const sps = Buffer.from([0, 0, 0, 1, 0x67, 0x64]);
+    const pps = Buffer.from([0, 0, 0, 1, 0x68, 0xee]);
+    const idr = Buffer.from([0, 0, 0, 1, 0x65, 0x80, 0xaa]);
+    const finalP = Buffer.from([0, 0, 0, 1, 0x41, 0x80, 0xcc]);
+    h.emit(Buffer.concat([sps, pps, idr]));
+    h.emitEncodedBoundary();
+    h.emit(finalP);
+    h.emitEncodedBoundary();
+    h.setIdleSupport(true);
+    h.emitIdle();
+    const late = await subscribe(h.socketPath);
+    await waitFor(() => late.binary().includes(finalP));
+    expect(late.binary().includes(idr)).toBe(true);
+  });
+
+  test("raw idle evidence never flushes a partial ffmpeg NAL", async () => {
+    const h = await startHarness({ device: { ...DEVICE, platform: "ios" } as BootedDevice });
+    await subscribe(h.socketPath);
+    const partial = Buffer.from([0, 0, 0, 1, 0x65, 0x80]);
+    h.emit(partial);
+    h.setIdleSupport(true);
+    h.emitIdle();
+    const late = await subscribe(h.socketPath);
+    expect(late.binary().includes(partial)).toBe(false);
+  });
+
   test("attests the source's rotation on a config packet and its replay (issue #4786)", async () => {
     const ROTATION_PRESENT = 1n << 61n;
     const ROTATION_SHIFT = 59n;
@@ -1046,10 +1326,9 @@ describe("VideoStreamSocketServer", () => {
     // The real capture sources rate-limit key-frame requests (Android + raw iOS ~3s, encoded iOS
     // ~500ms), so a drain landing inside that window gets a `false` from requestKeyFrame(). Without
     // a retry the subscriber stays in waitingForKeyFrame and drops every inter frame until the
-    // natural GOP — the multi-second freeze this recovery exists to prevent. Auto-advance lets the
-    // injected timer's retries fire promptly.
+    // natural GOP — the multi-second freeze this recovery exists to prevent. Advance only the
+    // retry budget so the capture-liveness deadline does not replace the source during this test.
     const fakeTimer = new FakeTimer();
-    fakeTimer.enableAutoAdvance();
     const h = await startHarness({ timer: fakeTimer });
     const client = await subscribe(h.socketPath);
     await waitFor(() => h.sources.length > 0);
@@ -1078,6 +1357,8 @@ describe("VideoStreamSocketServer", () => {
 
     // The drain handler's first request is rejected; the timer-driven retries keep asking until the
     // source finally honors one — 2 rejections + 1 success — instead of leaving playback frozen.
+    await waitFor(() => source.keyFrameRequests >= before + 1);
+    fakeTimer.advanceTime(2_000);
     await waitFor(() => source.keyFrameRequests >= before + 3);
     expect(source.keyFrameRejectionsRemaining).toBe(0);
   });
@@ -1090,6 +1371,20 @@ describe("VideoStreamSocketServer", () => {
     expect(ack.success).toBe(false);
     expect(String(ack.error)).toContain("adb: device offline");
     expect(h.server.activeDeviceIds()).toHaveLength(0);
+  });
+
+  test("clears a heartbeat armed by startup media when capture start fails", async () => {
+    const fakeTimer = new FakeTimer();
+    const h = await startHarness({
+      timer: fakeTimer,
+      startData: Buffer.from([0, 0, 0, 1, 5, 0xaa, 0, 0, 0, 1, 1]),
+      startError: new Error("encoder failed"),
+    });
+
+    const { ack } = await subscribe(h.socketPath);
+
+    expect(ack.success).toBe(false);
+    expect(fakeTimer.getPendingIntervalCount()).toBe(0);
   });
 
   test("reports a Screen Recording denial as structured permission state with a legacy fallback", async () => {

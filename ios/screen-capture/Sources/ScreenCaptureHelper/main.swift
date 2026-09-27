@@ -290,18 +290,15 @@ case let .captureSimulator(windowID, fps, audio, encode):
     // 2.6–13s slow-start window cannot trip a false "no frames" warning; a start
     // that never reaches capture-started is bounded and surfaced by the start
     // deadline inside SimulatorCaptureSession instead.
-    let permissionHintQueue = DispatchQueue(label: "automobile.simulator-capture.permission-hint")
-    let permissionHintTimer = DispatchSource.makeTimerSource(queue: permissionHintQueue)
-    permissionHintTimer.setEventHandler {
-        if !firstFrameSignal.hasReceivedFrame {
-            logScreenRecordingPermissionRequired()
-        }
-    }
+    let permissionHintTimer = PermissionHintTimer(
+        firstFrameSignal: firstFrameSignal,
+        approvalTarget: screenRecordingApprovalTarget()
+    )
 
     logError(CaptureStartupMarker.line(.startingCapture(windowID: windowID, fps: fps)))
     installShutdownHandlers {
         metricsReporter.stop()
-        permissionHintTimer.cancel()
+        permissionHintTimer.stop()
         controlChannel?.stop()
         Task { @MainActor in
             await simSession.stop()
@@ -315,8 +312,7 @@ case let .captureSimulator(windowID, fps, audio, encode):
 
             // Measure the no-frames window from capture-started, not from launch,
             // so the slow-start tail never counts against it.
-            permissionHintTimer.schedule(deadline: .now() + simulatorPermissionTimeoutSeconds)
-            permissionHintTimer.resume()
+            permissionHintTimer.arm(after: simulatorPermissionTimeoutSeconds)
         } catch {
             logError("error: failed to start simulator capture: \(error)")
             exit(1)

@@ -13,6 +13,7 @@ import {
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbProcess } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { ANDROID_SCREENRECORD_MAX_SECONDS } from "../video/androidScreenrecord";
+import { H264AnnexBParser, isVclNal } from "./h264";
 import { h264MacroblocksPerFrame, WEBRTC_H264_MAX_MACROBLOCKS_PER_FRAME } from "./h264Level";
 import { qualityPresetBitrateBps } from "./qualityPresets";
 import type { H264CaptureSource, H264CaptureSourceOptions } from "./H264CaptureSource";
@@ -226,12 +227,27 @@ export class AndroidH264Source implements H264CaptureSource {
     this.current = process;
     this.segmentStartedAtMs = this.timer.now();
     this.segmentCount++;
+    const sourceEvidenceParser = new H264AnnexBParser();
 
     process.stdout.on("data", (chunk: Buffer) => {
       // Ignore residual output from a superseded/stopped segment: stop()/rotation
       // clears `current` before the old process finishes exiting, and stale frames
       // must not be written into a freshly reconnected WHIP session.
       if (this.current === process) {
+        if (chunk.length > 0) {
+          // Configuration NALs do not prove that screenrecord is still producing frames.
+          // The parser retains split NALs until their next Annex-B boundary.
+          let hasFrame = false;
+          try {
+            hasFrame = sourceEvidenceParser.push(chunk).some(isVclNal);
+          } catch (error) {
+            this.options.onError?.(error instanceof Error ? error : new Error(String(error)));
+            return;
+          }
+          if (hasFrame) {
+            this.options.onSourceFrame?.();
+          }
+        }
         this.options.onData(chunk);
       }
     });

@@ -119,6 +119,7 @@ export function createAndroidH264CaptureSource(
   ): PersistentEncoderH264SourceOptions => ({
     device: options.device,
     onData: options.onData,
+    onSourceFrame: options.onSourceFrame,
     onAudioData: options.onAudioData,
     onRotation: options.onRotation,
     onDroppedFrames: options.onDroppedFrames,

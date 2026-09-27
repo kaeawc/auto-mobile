@@ -9,6 +9,7 @@ import {
   encodeFrameHeader,
   IOS_HELPER_STOP_GRACE_MS,
   IOSScreenCaptureHelper,
+  parseCaptureIdleMarker,
   NATIVE_FRAME_METRICS_PREFIX,
   type CaptureTarget,
   type DecodedFrame,
@@ -101,6 +102,18 @@ describe("IOSScreenCaptureHelper", () => {
     const { spawnArgs, helper } = withFakeSpawner({ kind: "simulator", windowID: 98765 });
     helper.start();
     expect(spawnArgs.args).toEqual(["--simulator-window", "98765"]);
+  });
+
+  test("accepts idle evidence only for its exact Simulator window", async () => {
+    const { fake, helper } = withFakeSpawner({ kind: "simulator", windowID: 42 });
+    const idle: number[] = [];
+    helper.on("idle", ({ windowID }) => idle.push(windowID));
+    helper.start();
+    fake.stderr.push(Buffer.from("capture-idle: windowID=420\ncapture-idle: windowID=42\n"));
+    await flush();
+    expect(idle).toEqual([42]);
+    expect(parseCaptureIdleMarker("capture-idle: windowID=42")).toBe(42);
+    expect(parseCaptureIdleMarker("capture-idle: windowID=42junk")).toBeNull();
   });
 
   // The fps guard runs on start() (in buildArgs), not the constructor. Accepted

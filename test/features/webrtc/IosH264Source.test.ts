@@ -59,6 +59,7 @@ const FAKE_HELPER_PATH = "/fake/screen-capture-helper";
 const fakeHelperPathExists = (candidate: string): boolean => candidate === FAKE_HELPER_PATH;
 
 class FakeFrameCaptureHelper extends EventEmitter implements IosFrameCaptureHelper {
+  invalidate?: () => Promise<void>;
   started = false;
   stopped = false;
   isRunning = false;
@@ -398,7 +399,11 @@ async function successfulCommandRunner(_command: string, args: string[]) {
 
 describe("IosH264Source", () => {
   test("captures a physical device, encodes BGRA frames, and forwards Annex-B output", async () => {
-    const { source, helper, encoder, helperTargets, encoderSpawns, chunks } = createHarness();
+    let freshFrames = 0;
+    const { source, helper, encoder, helperTargets, encoderSpawns, chunks } = createHarness(
+      IOS_DEVICE,
+      { onSourceFrame: () => freshFrames++ },
+    );
 
     await startWithFrame(source, helper, frame(2, 2, 0x44));
     encoder.stdout.push(Buffer.from([0, 0, 0, 1, 0x65]));
@@ -415,6 +420,11 @@ describe("IosH264Source", () => {
     expect(encoderSpawns[0].args[allowSoftwareIndex + 1]).toBe("1");
     expect(encoder.getStdinData()).toEqual(Buffer.alloc(16, 0x44));
     expect(chunks).toEqual([Buffer.from([0, 0, 0, 1, 0x65])]);
+    expect(freshFrames).toBe(1);
+    helper.emitFrame({ ...frame(2, 2, 0x44), replayed: true });
+    expect(freshFrames).toBe(1);
+    helper.emitFrame(frame(2, 2, 0x44));
+    expect(freshFrames).toBe(2);
   });
 
   test("encodes a Simulator-sized capture natively instead of upscaling toward 1920x1080", async () => {
@@ -469,6 +479,59 @@ describe("IosH264Source", () => {
     expect(helperTargets).toEqual([
       { kind: "simulator", windowID: 42, fps: WEBRTC_IOS_SIMULATOR_FPS_DEFAULT },
     ]);
+  });
+
+  test("invalidates a pooled helper when a stale capture is retired", async () => {
+    const { source, helper } = createHarness(IOS_SIMULATOR);
+    let invalidated = false;
+    helper.invalidate = async () => {
+      invalidated = true;
+    };
+    await startWithFrame(source, helper, frame(1, 1, 0x11));
+    await source.stopStale();
+    expect(invalidated).toBe(true);
+    expect(helper.stopped).toBe(false);
+  });
+
+  test("keeps a shared producer when only this source's encoder is stale", async () => {
+    const { source, helper } = createHarness(IOS_SIMULATOR);
+    let invalidated = false;
+    helper.invalidate = async () => {
+      invalidated = true;
+    };
+    await startWithFrame(source, helper, frame(1, 1, 0x11));
+    await source.stopStale(false);
+    expect(invalidated).toBe(false);
+    expect(helper.stopped).toBe(true);
+  });
+
+  test("forwards current helper idle evidence but ignores it after stop", async () => {
+    let idleCount = 0;
+    const { source, helper } = createHarness(IOS_SIMULATOR, {
+      onSourceIdle: () => idleCount++,
+    });
+    const started = source.start();
+    await flush();
+    helper.emit("capability", "simulator-idle-evidence");
+    helper.emitFrame(frame(1, 1, 0x11));
+    await started;
+    helper.emit("idle", { windowID: 42 });
+    expect(idleCount).toBe(1);
+    await source.stop();
+    helper.emit("idle", { windowID: 42 });
+    expect(idleCount).toBe(1);
+  });
+
+  test("reports legacy idle compatibility only when the helper lacks the handshake", async () => {
+    const support: boolean[] = [];
+    const { source, helper } = createHarness(IOS_SIMULATOR, {
+      onIdleAttestationSupport: (supported) => support.push(supported),
+    });
+    await startWithFrame(source, helper, frame(1, 1, 0x11));
+    expect(support).toEqual([false]);
+    helper.emit("capability", "simulator-idle-evidence");
+    expect(support).toEqual([false, true]);
+    await source.stop();
   });
 
   test("classifies a marked Screen Recording denial while discovering Simulator windows", async () => {
@@ -2180,7 +2243,7 @@ describe("IosH264Source", () => {
     expect(stdin.writes).toEqual([Buffer.alloc(4, 0x11), Buffer.alloc(4, 0x33)]);
   });
 
-  test("discards a retired encoder's queued frame while replaying the last accepted frame", async () => {
+  test("discards queued frames from the retired encoder until a fresh frame arrives", async () => {
     const inputs: BackpressuredWritable[] = [];
     const { source, helper, encoders } = createRestartHarness({}, (encoder) => {
       const input = new BackpressuredWritable();
@@ -2198,11 +2261,7 @@ describe("IosH264Source", () => {
     inputs[1].emit("drain");
 
     expect(encoders).toHaveLength(2);
-    expect(inputs[1].writes).toEqual([
-      Buffer.alloc(4, 0x11),
-      Buffer.alloc(4, 0x11),
-      Buffer.alloc(4, 0x33),
-    ]);
+    expect(inputs[1].writes).toEqual([Buffer.alloc(4, 0x33)]);
     expect(source.getFrameMetrics().encoder.droppedFrames).toBe(1);
   });
 
@@ -2282,7 +2341,7 @@ describe("IosH264Source", () => {
     expect(errors).toEqual([]);
   });
 
-  test("requestKeyFrame preloads a replacement encoder with two defensive copies of the latest frame", async () => {
+  test("requestKeyFrame waits for a fresh helper frame before feeding the replacement encoder", async () => {
     const { source, helper, encoders, encoderSpawns, chunks, errors } = createRestartHarness();
 
     const firstFrame = frame(2, 2, 0x11);
@@ -2292,9 +2351,8 @@ describe("IosH264Source", () => {
     await flush();
 
     // ffmpeg cannot be signalled for an IDR mid-stream over a pipe; a request
-    // restarts the encoder. Replay two copies of the most recent frame so static
-    // capture produces the replacement encoder's first SPS/PPS + IDR and the
-    // following access-unit boundary without waiting for the screen to change.
+    // restarts the encoder. Cached pixels must not create client-visible output
+    // after the capture producer has stalled, so wait for the next helper frame.
     expect(source.requestKeyFrame()).toBe(true);
 
     // A second encoder is spawned with identical argv, and the old one is ended
@@ -2302,14 +2360,12 @@ describe("IosH264Source", () => {
     expect(encoderSpawns).toHaveLength(2);
     expect(encoderSpawns[1].args).toEqual(encoderSpawns[0].args);
     expect(encoders[0].killed).toBe(true);
-    expect(encoders[1].getStdinData()).toEqual(Buffer.alloc(32, 0x11));
+    expect(encoders[1].getStdinData()).toEqual(Buffer.alloc(0));
 
     // Later helper frames continue flowing into the replacement encoder, whose
     // output is forwarded to the same onData sink.
     helper.emitFrame(frame(2, 2, 0x22));
-    expect(encoders[1].getStdinData()).toEqual(
-      Buffer.concat([Buffer.alloc(32, 0x11), Buffer.alloc(16, 0x22)]),
-    );
+    expect(encoders[1].getStdinData()).toEqual(Buffer.alloc(16, 0x22));
     encoders[1].stdout.push(Buffer.from([0, 0, 0, 1, 0x65]));
     await flush();
 
@@ -2318,32 +2374,67 @@ describe("IosH264Source", () => {
     expect(errors).toEqual([]);
   });
 
-  // Issue #4735: `lastHelperFrame` retains the incoming frame by reference
-  // instead of deep-copying it every frame. Each frame carries its own
-  // `FrameDecoder.takeDetached` allocation and the single-slot queue never
-  // reuses a buffer, so processing later frames must leave the retained
-  // frame's pixels intact and replay them exactly on the next PLI.
-  test("replays the retained latest frame intact after subsequent frames are processed (#4735 no-copy)", async () => {
+  test("does not feed frames received before a raw keyframe request to the replacement", async () => {
     const { source, helper, encoders, encoderSpawns, errors } = createRestartHarness();
 
-    // First frame primes the encoder and becomes `lastHelperFrame`.
+    // First frame primes the encoder.
     await startWithFrame(source, helper, frame(2, 2, 0x11));
     expect(encoderSpawns).toHaveLength(1);
 
-    // Subsequent frames each arrive as independent allocations (mirroring
-    // production `takeDetached` buffers) and advance `lastHelperFrame`.
+    // Subsequent frames arrive before the request and are not eligible for
+    // replay after a possible source stall.
     helper.emitFrame(frame(2, 2, 0x22));
     helper.emitFrame(frame(2, 2, 0x33));
 
     emitIdr(encoders[0]);
     await flush();
 
-    // The retained reference must still decode to the latest frame's exact
-    // bytes — not a buffer clobbered by a later frame — when replayed twice
-    // into the replacement encoder.
+    expect(source.requestKeyFrame()).toBe(true);
+    expect(encoders[1].getStdinData()).toEqual(Buffer.alloc(0));
+    helper.emitFrame(frame(2, 2, 0x44));
+    expect(encoders[1].getStdinData()).toEqual(Buffer.alloc(16, 0x44));
+    expect(errors).toEqual([]);
+  });
+
+  test("legacy raw Simulator bootstraps a late viewer from cached pixels without fresh-frame evidence", async () => {
+    let freshFrames = 0;
+    const { source, helper, encoders } = createRestartHarness({
+      device: IOS_SIMULATOR,
+      onSourceFrame: () => freshFrames++,
+    });
+    await startWithFrame(source, helper, frame(2, 2, 0x33));
+    emitIdr(encoders[0]);
+    await flush();
     expect(source.requestKeyFrame()).toBe(true);
     expect(encoders[1].getStdinData()).toEqual(Buffer.alloc(32, 0x33));
-    expect(errors).toEqual([]);
+    expect(freshFrames).toBe(1);
+  });
+
+  test("native-idle raw Simulator bootstraps a viewer but not a liveness probe", async () => {
+    let freshFrames = 0;
+    const { source, helper, encoders } = createRestartHarness({
+      device: IOS_SIMULATOR,
+      onSourceFrame: () => freshFrames++,
+    });
+    const started = source.start();
+    await flush();
+    helper.emit("capability", "simulator-idle-evidence");
+    helper.emitFrame(frame(2, 2, 0x33));
+    await started;
+    emitIdr(encoders[0]);
+    await flush();
+    expect(source.requestKeyFrame("viewer")).toBe(true);
+    expect(encoders[1].getStdinData()).toEqual(Buffer.alloc(32, 0x33));
+    expect(freshFrames).toBe(1);
+  });
+
+  test("raw Simulator liveness probes never replay cached pixels", async () => {
+    const { source, helper, encoders } = createRestartHarness({ device: IOS_SIMULATOR });
+    await startWithFrame(source, helper, frame(2, 2, 0x33));
+    emitIdr(encoders[0]);
+    await flush();
+    expect(source.requestKeyFrame("probe")).toBe(true);
+    expect(encoders[1].getStdinData()).toEqual(Buffer.alloc(0));
   });
 
   test("escalates the outgoing encoder to SIGKILL when it ignores SIGTERM within the grace window", async () => {

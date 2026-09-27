@@ -144,6 +144,43 @@ final class SimulatorCaptureSessionTests: XCTestCase {
         XCTAssertTrue(session.stream === fake)
     }
 
+    func testIdleEvidenceRequiresLiveStreamAndFirstFrameAndIsRateLimited() async throws {
+        let diagnostics = DiagnosticRecorder()
+        var now: TimeInterval = 100
+        let session = SimulatorCaptureSession(
+            writer: FrameWriter(sink: MemorySink()),
+            diagnosticSink: { diagnostics.record($0) },
+            uptime: { now },
+            onFatalError: { _ in }
+        )
+        session.windowID = 91
+        session.noteIdleSample()
+        let fake = FakeCaptureStream()
+        try await session.beginCapture(with: fake, audio: false)
+        session.noteIdleSample()
+        XCTAssertTrue(diagnostics.lines.isEmpty)
+
+        session.noteFrameWritten(width: 804, height: 1748)
+        session.noteNonCompleteStatus(.blank)
+        session.noteNonCompleteStatus(.suspended)
+        session.noteNonCompleteStatus(.stopped)
+        XCTAssertFalse(diagnostics.lines.contains { $0.hasPrefix("capture-idle:") })
+        session.noteNonCompleteStatus(.idle)
+        now += 1
+        session.noteIdleSample()
+        now += 1
+        session.noteIdleSample()
+        XCTAssertEqual(diagnostics.lines.filter { $0.hasPrefix("capture-idle:") }, [
+            "capture-idle: windowID=91\n",
+            "capture-idle: windowID=91\n",
+        ])
+
+        await session.stop()
+        now += 2
+        session.noteIdleSample()
+        XCTAssertEqual(diagnostics.lines.filter { $0.hasPrefix("capture-idle:") }.count, 2)
+    }
+
     func testBeginCaptureAddsAudioOutputWhenEnabled() async throws {
         let diagnostics = DiagnosticRecorder()
         let session = makeSession(diagnostics: diagnostics)

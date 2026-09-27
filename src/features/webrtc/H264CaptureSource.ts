@@ -20,6 +20,14 @@ export interface H264CaptureSourceOptions {
   device: BootedDevice;
   /** Called with each chunk of the raw H.264 (Annex-B) elementary stream. */
   onData: (chunk: Buffer) => void;
+  /** Called only for a fresh frame from the capture producer, before encoder replay can occur. */
+  onSourceFrame?: () => void;
+  /** Native Simulator idle callback from an attached stream; carries no encoded frame. */
+  onSourceIdle?: () => void;
+  /** The encoded helper completed one self-contained access-unit record. */
+  onEncodedAccessUnit?: () => void;
+  /** Whether this Simulator helper can attest native idle callbacks. */
+  onIdleAttestationSupport?: (supported: boolean) => void;
   /** Called with each chunk of 8 kHz mono PCM16LE audio when audio is enabled. */
   onAudioData?: (chunk: Buffer) => void;
   /**
@@ -87,6 +95,8 @@ export interface H264CaptureSource {
   start(): Promise<void>;
   /** Stop capturing and release device-side resources. */
   stop(): Promise<void>;
+  /** Retire a stalled source without retaining any warm capture helper for reconnect. */
+  stopStale?(producerStale?: boolean): Promise<void>;
   /**
    * Ask the encoder to emit a fresh IDR as soon as possible, in response to a
    * downstream keyframe request (WHEP viewer PLI relayed through the publisher).
@@ -94,7 +104,7 @@ export interface H264CaptureSource {
    * rely on the periodic IDR interval. Implementations must be safe to call
    * frequently (throttle internally) and before/after the stream is running.
    */
-  requestKeyFrame?(): boolean;
+  requestKeyFrame?(purpose?: "viewer" | "probe"): boolean;
   /** Optional precise encoder telemetry for the stream-status control plane. */
   getTelemetry?(): H264CaptureSourceTelemetry;
 }

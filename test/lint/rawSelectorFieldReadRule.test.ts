@@ -228,6 +228,11 @@ test("block-bodied map callbacks preserve safe return provenance and reject raw 
   ).toHaveLength(1);
   expect(
     check(
+      "function inspect(nodes: ViewHierarchyNode[]) { return nodes.map((node) => { let alias; alias = node; return alias; })[0].text; }",
+    ),
+  ).toHaveLength(1);
+  expect(
+    check(
       "function pick(node: ViewHierarchyNode): ViewHierarchyNode { return node; } function inspect(nodes: ViewHierarchyNode[], ctx: ViewHierarchyNode) { return nodes.map((node) => { const { parent } = ctx; const n = pick(node); return n; })[0].text; }",
     ),
   ).toHaveLength(1);
@@ -254,6 +259,19 @@ test("array spreads of safe typed elements remain permitted", () => {
   ).toEqual([]);
 });
 
+test("known array literal indices retain per-element provenance", () => {
+  expect(
+    check(
+      "function inspect(node: ViewHierarchyNode, safe: Element) { const pair = [node, safe]; return pair[1].text; }",
+    ),
+  ).toEqual([]);
+  expect(
+    check(
+      "function inspect(node: ViewHierarchyNode, safe: Element) { const pair = [node, safe]; return pair[0].text; }",
+    ),
+  ).toHaveLength(1);
+});
+
 test("object spreads retain raw attribute provenance", () => {
   expect(
     check(
@@ -263,6 +281,27 @@ test("object spreads retain raw attribute provenance", () => {
   expect(
     check("function inspect(source: Options) { const copy = { ...source }; return copy.text; }"),
   ).toEqual([]);
+});
+
+test("later object properties replace raw spread provenance by field", () => {
+  expect(
+    check('function inspect(node: ViewHierarchyNode) { return { ...node.$, text: "safe" }.text; }'),
+  ).toEqual([]);
+  expect(
+    check(
+      'function inspect(node: ViewHierarchyNode) { return { ...node.$, text: "safe" }["content-desc"]; }',
+    ),
+  ).toHaveLength(1);
+  expect(
+    check(
+      'function inspect(node: ViewHierarchyNode) { const copy = { ...node.$, text: "safe" }; return copy.text; }',
+    ),
+  ).toEqual([]);
+  expect(
+    check(
+      'function inspect(node: ViewHierarchyNode) { const copy = { ...node.$, text: "safe" }; return copy["content-desc"]; }',
+    ),
+  ).toHaveLength(1);
 });
 
 test("reduce callbacks bind the raw element parameter", () => {

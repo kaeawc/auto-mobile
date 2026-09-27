@@ -47,10 +47,10 @@ fields were removed from every producer:
 
 - Image surfaces (`listDeviceImages` and `automobile:devices/images`): `stableId`,
   `deviceId`, `path`, `target`, `basedOn`, `error`, `state`, `isAvailable`,
-  `availabilityError`, `iosVersion`, `deviceType`, `model`, and `architecture`.
+  and `iosVersion`.
   The former raw `state` string is represented by normalized
   `runtime.lifecycle.state`.
-- `listDevices`: `deviceId`, `apiLevel`, `osVersion`, and `formFactor`.
+- `listDevices`: `deviceId`.
 - `provisionDevice.device`: the raw pre-image `DeviceInfo`/`BootedDevice` fields,
   including `deviceId`, `isRunning`, runtime/display metadata, availability
   metadata, and capability inventory.
@@ -87,9 +87,8 @@ Observed against the shared local daemon. Read-only calls only: `listDevices`,
 
 Provenance caveats, so nobody reads more into the table than it supports:
 
-- The daemon that answered was built from `596475d1a`, five commits behind the
-  main head this doc lives on (two of them README badge bumps). Two of the
-  remaining three touch these surfaces:
+- The daemon that answered was built from `596475d1a`, several commits behind
+  the main head this doc lives on, with several README badge bumps in between.
   #7238 changed the image `state` alias to the raw discovery token and added
   `session.sessionUuid`/canonical readiness on acquisitions. Values marked
   `(pre-#7238)` below were observed on the older build and are expected to

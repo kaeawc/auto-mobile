@@ -3806,19 +3806,22 @@ export async function runAcceptanceMatrix(
   } finally {
     if (provisionedDevice !== undefined) {
       try {
-        if (provisionClient === undefined) {
-          throw new Error("provision client was unavailable");
-        }
+        const cleanupClient = await bounded(
+          "cleanup provisioned device MCP connect",
+          "cleanup",
+          async (signal) => await createMcpClient("cleanup-provisioned-device", signal),
+        );
+        clients.push(cleanupClient);
         await bounded("cleanup provisioned device", "cleanup", async () => {
           await enableDestructiveTool(
-            provisionClient!,
+            cleanupClient,
             "killDevice",
             "cleanup-provisioned-device",
             "cleanup",
           );
           toolPayload(
             await callTool(
-              provisionClient!,
+              cleanupClient,
               "killDevice",
               { device: provisionedDevice },
               "cleanup-provisioned-device",

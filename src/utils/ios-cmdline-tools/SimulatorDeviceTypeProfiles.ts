@@ -99,7 +99,7 @@ export class SimCtlSimulatorDeviceTypeProfiles implements SimulatorDeviceTypePro
       );
       // A cancelled/timed-out read says nothing about the profile; only a completed
       // failure is worth remembering.
-      if (!isAbortOrTimeout(error)) {
+      if (!isAbortOrTimeout(error, options.signal)) {
         this.profiles.set(deviceTypeId, null);
       }
       return null;
@@ -117,7 +117,10 @@ export class SimCtlSimulatorDeviceTypeProfiles implements SimulatorDeviceTypePro
   }
 }
 
-function isAbortOrTimeout(error: unknown): boolean {
+function isAbortOrTimeout(error: unknown, signal?: AbortSignal): boolean {
+  if (signal?.aborted) {
+    return true;
+  }
   if (!(error instanceof Error)) {
     return false;
   }

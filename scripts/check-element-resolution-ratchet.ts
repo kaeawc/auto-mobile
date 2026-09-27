@@ -7,6 +7,7 @@ const INITIAL_SIGNATURE_SHA256 = "87531c89409eceb7d4d815126c3461acd6d759e46786fc
 // The exact digest permits this one contract expansion while keeping future growth gated.
 const FOCUS_BASELINE_SHA256 = "de44394bfd0b94fcc979a112ca0bc45dd37e1336b7b987caa3533642e74c6ed7";
 const FOCUS_SIGNATURE_SHA256 = "262630c6315a6cfe945008abb58d52274dd5188903df949d0c239c95a785dd5b";
+const INITIAL_CASE_KEYS_SHA256 = "8c9983421c0379cb2bf76f4ca3745c7e1b280507c3cc12f46241890cec157191";
 const digest = (entries: string[]) =>
   createHash("sha256").update(entries.sort().join("\n")).digest("hex");
 
@@ -80,8 +81,42 @@ export function assertRatchetDoesNotGrow(current: string, baseline: string | und
   }
 }
 
+export function assertCaseInventoryDoesNotShrink(
+  current: string,
+  baseline: string | undefined,
+): void {
+  const parseKeys = (raw: string): string[] => {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed) || parsed.some((key) => typeof key !== "string")) {
+      throw new Error("Expected contract case-key array");
+    }
+    if (new Set(parsed).size !== parsed.length) {
+      throw new Error("Duplicate contract case keys");
+    }
+    return parsed as string[];
+  };
+  const currentKeys = parseKeys(current);
+  if (baseline === undefined) {
+    if (digest(currentKeys) !== INITIAL_CASE_KEYS_SHA256) {
+      throw new Error("Only the reviewed initial contract case keys may bootstrap the ratchet");
+    }
+    return;
+  }
+  const missing = parseKeys(baseline).filter((key) => !currentKeys.includes(key));
+  if (missing.length > 0) {
+    throw new Error(`Element-resolution case keys may only grow:\n${missing.join("\n")}`);
+  }
+}
+
 if (import.meta.main) {
-  const [currentPath, baselinePath, signaturePath, signatureBaselinePath] = process.argv.slice(2);
+  const [
+    currentPath,
+    baselinePath,
+    signaturePath,
+    signatureBaselinePath,
+    casePath,
+    caseBaselinePath,
+  ] = process.argv.slice(2);
   assertRatchetDoesNotGrow(
     readFileSync(currentPath, "utf8"),
     baselinePath ? readFileSync(baselinePath, "utf8") : undefined,
@@ -90,6 +125,12 @@ if (import.meta.main) {
     assertSignatureRatchetDoesNotDrift(
       readFileSync(signaturePath, "utf8"),
       signatureBaselinePath ? readFileSync(signatureBaselinePath, "utf8") : undefined,
+    );
+  }
+  if (casePath) {
+    assertCaseInventoryDoesNotShrink(
+      readFileSync(casePath, "utf8"),
+      caseBaselinePath ? readFileSync(caseBaselinePath, "utf8") : undefined,
     );
   }
 }

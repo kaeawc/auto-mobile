@@ -12,6 +12,7 @@ import { projectSkeleton } from "../../../src/features/observe/output/SkeletonPr
 import { stableNodeSelectorForElement } from "../../../src/features/talkback/TalkBackTapStrategy";
 import { DefaultElementFinder } from "../../../src/features/utility/ElementFinder";
 import { DefaultElementSelector } from "../../../src/features/utility/DefaultElementSelector";
+import type { ElementSelectionStrategy } from "../../../src/models/ElementSelectionStrategy";
 
 export interface ContractCapture {
   name: string;
@@ -26,6 +27,7 @@ export interface ContractQuery {
   intent?: "tap" | "focus-input";
   container?: { elementId?: string; text?: string };
   sibling?: boolean;
+  strategy?: ElementSelectionStrategy;
 }
 export interface ContractResolution {
   candidates: Element[];
@@ -167,7 +169,12 @@ export function contractCases(capture: ContractCapture): ContractCase[] {
 export function publicTextCases(cases: ContractCase[]): ContractCase[] {
   const unique = new Map<string, ContractCase>();
   for (const testCase of cases) {
-    if (testCase.query.kind !== "text" || testCase.query.container || testCase.query.sibling) {
+    if (
+      testCase.query.kind !== "text" ||
+      testCase.query.container ||
+      testCase.query.sibling ||
+      testCase.query.strategy
+    ) {
       continue;
     }
     const identity = JSON.stringify([testCase.capture.name, testCase.query.value]);
@@ -186,9 +193,17 @@ export function publicTextCases(cases: ContractCase[]): ContractCase[] {
 
 export class LegacyContractResolver implements ContractResolver {
   private readonly finder = new DefaultElementFinder();
-  private readonly selector = new DefaultElementSelector(this.finder, () => 0);
+  private readonly selector: DefaultElementSelector;
+  constructor(random: () => number = () => 0) {
+    this.selector = new DefaultElementSelector(this.finder, random);
+  }
   resolve({ hierarchy }: ContractCapture, query: ContractQuery): ContractResolution {
-    const options = { partialMatch: false, index: query.index, container: query.container };
+    const options = {
+      partialMatch: false,
+      index: query.index,
+      container: query.container,
+      strategy: query.strategy,
+    };
     if (query.kind === "elementId") {
       if (query.sibling) {
         return {
@@ -248,7 +263,7 @@ export class LegacyContractResolver implements ContractResolver {
         true,
         false,
         query.index !== undefined,
-        query.index === undefined,
+        query.index === undefined && query.strategy !== "random",
         query.intent ?? "tap",
       ),
       chosen: this.selector.selectByText(hierarchy, query.value, {

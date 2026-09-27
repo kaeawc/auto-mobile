@@ -8,8 +8,10 @@ setup() {
   cp "$BATS_TEST_DIRNAME/../../scripts/lib/vcs-diff.sh" "$repo_dir/scripts/lib/"
   baseline="$repo_dir/test/features/element-resolution/observeContractGaps.json"
   signatures="$repo_dir/test/features/element-resolution/observeContractGapSignatures.json"
+  cases="$repo_dir/test/features/element-resolution/observeContractCaseKeys.json"
   printf '%s\n' '{"B1":["a","b"]}' > "$baseline"
   printf '%s\n' '{"a":"old","b":null}' > "$signatures"
+  printf '%s\n' '["case-a","case-b"]' > "$cases"
   git -C "$repo_dir" init -q
   git -C "$repo_dir" config user.email test@example.com
   git -C "$repo_dir" config user.name test
@@ -39,6 +41,14 @@ teardown() {
   run bash "$repo_dir/scripts/check-element-resolution-ratchet.sh" HEAD
   [ "$status" -ne 0 ]
   [[ "$output" == *"signatures may only shrink"* ]]
+}
+
+@test "rejects removal or replacement of a previously green case key" {
+  printf '%s\n' '["case-a","case-c"]' > "$cases"
+  run bash "$repo_dir/scripts/check-element-resolution-ratchet.sh" HEAD
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"case keys may only grow"* ]]
+  [[ "$output" == *"case-b"* ]]
 }
 
 @test "fails closed without the requested base" {

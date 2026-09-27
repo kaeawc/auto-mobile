@@ -1,8 +1,13 @@
 [
   "android-container-scope.json:{\"kind\":\"elementId\",\"value\":\"example.app:id/action\",\"container\":{\"elementId\":\"example.app:id/right\"}}:20,190,220,250",
+  "android-container-scope.json:{\"kind\":\"elementId\",\"value\":\"example.app:id/action\",\"strategy\":\"random\"}:20,190,220,250",
+  "android-container-scope.json:{\"kind\":\"elementId\",\"value\":\"example.app:id/more_label\",\"sibling\":true,\"container\":{\"elementId\":\"example.app:id/right\"}}:160,255,260,280",
   "android-container-scope.json:{\"kind\":\"testTag\",\"value\":\"shared-action\",\"container\":{\"elementId\":\"example.app:id/right\"}}:20,190,220,250",
+  "android-container-scope.json:{\"kind\":\"testTag\",\"value\":\"shared-action\",\"strategy\":\"random\"}:20,190,220,250",
+  "android-container-scope.json:{\"kind\":\"text\",\"value\":\"More\",\"sibling\":true,\"container\":{\"elementId\":\"example.app:id/right\"}}:160,255,260,280",
   "android-container-scope.json:{\"kind\":\"text\",\"value\":\"Open\",\"container\":{\"elementId\":\"example.app:id/right\"}}:20,190,220,250",
   "android-container-scope.json:{\"kind\":\"text\",\"value\":\"Open\",\"container\":{\"text\":\"Left section\"}}:20,40,220,100",
+  "android-container-scope.json:{\"kind\":\"text\",\"value\":\"Open\",\"strategy\":\"random\"}:20,190,220,250",
   "android-home.json:{\"kind\":\"elementId\",\"value\":\"0a822ce5-b7fd-37de-1722-eb7a16db8e10\"}:314,1406,519,1692",
   "android-home.json:{\"kind\":\"elementId\",\"value\":\"4af3e4c2-83e5-dd77-1909-33554a1721fd\"}:577,1873,750,2068",
   "android-home.json:{\"kind\":\"elementId\",\"value\":\"7433f4c5-fb23-05e7-f058-1fb3746194d3\"}:83,1873,256,2068",

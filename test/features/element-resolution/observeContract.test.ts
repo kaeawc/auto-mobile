@@ -15,7 +15,7 @@ import gapSignatures from "./observeContractGapSignatures.json";
 import caseKeys from "./observeContractCaseKeys.json";
 
 const captures = loadContractCaptures(join(import.meta.dir, "../../fixtures/observe"));
-const legacy = new LegacyContractResolver();
+const legacy = new LegacyContractResolver(() => 0.99);
 
 describe("observe-to-resolve migration contract", () => {
   const cases = captures.flatMap(contractCases);
@@ -82,11 +82,35 @@ describe("observe-to-resolve migration contract", () => {
 
   test("sibling cases select the clickable neighbor for both public selectors", () => {
     const siblings = cases.filter(({ query }) => query.sibling);
-    expect(siblings.map(({ query }) => query.kind).sort()).toEqual(["elementId", "text"]);
+    expect(siblings.map(({ query }) => query.kind).sort()).toEqual([
+      "elementId",
+      "elementId",
+      "text",
+      "text",
+    ]);
     for (const sibling of siblings) {
       expect(boundsKey(legacy.resolve(sibling.capture, sibling.query).chosen)).toBe(
         sibling.observed.bounds.join(","),
       );
+    }
+  });
+
+  test("random selection uses the injected RNG for duplicate ID, text, and test tags", () => {
+    const randomCases = cases.filter(({ query }) => query.strategy === "random");
+    expect(randomCases.map(({ query }) => query.kind).sort()).toEqual([
+      "elementId",
+      "testTag",
+      "text",
+    ]);
+    for (const randomCase of randomCases) {
+      expect(boundsKey(legacy.resolve(randomCase.capture, randomCase.query).chosen)).toBe(
+        randomCase.observed.bounds.join(","),
+      );
+      expect(
+        boundsKey(
+          new LegacyContractResolver(() => 0).resolve(randomCase.capture, randomCase.query).chosen,
+        ),
+      ).not.toBe(randomCase.observed.bounds.join(","));
     }
   });
 
@@ -114,7 +138,7 @@ describe("observe-to-resolve migration contract", () => {
             peer.index !== undefined,
         ),
     );
-    expect(repeated).toHaveLength(1);
+    expect(repeated).toHaveLength(2);
     expect(defaults.length).toBeGreaterThan(0);
   });
 
@@ -302,7 +326,7 @@ describe("observe-to-resolve migration contract", () => {
     for (const { query } of cases) {
       counts[query.kind]++;
     }
-    expect(counts).toEqual({ elementId: 101, text: 96, testTag: 4 });
+    expect(counts).toEqual({ elementId: 103, text: 98, testTag: 5 });
     const brokenTags: ContractResolver = {
       resolve(capture, query) {
         return query.kind === "testTag"
@@ -312,7 +336,7 @@ describe("observe-to-resolve migration contract", () => {
     };
     const tagCases = cases.filter(({ query }) => query.kind === "testTag");
     expect(compareResolvers(tagCases, legacy, brokenTags)).toHaveLength(counts.testTag);
-    const unscopedTags = tagCases.filter(({ query }) => !query.container);
+    const unscopedTags = tagCases.filter(({ query }) => !query.container && !query.strategy);
     expect(unscopedTags.map(({ query }) => query.index)).toEqual([0, undefined, 1]);
     const ignoresTagIndex: ContractResolver = {
       resolve(capture, query) {
@@ -332,7 +356,7 @@ describe("observe-to-resolve migration contract", () => {
     ]);
   });
   test("container-scoped fixture cases detect a resolver that ignores the requested scope", () => {
-    const scoped = cases.filter(({ query }) => query.container);
+    const scoped = cases.filter(({ query }) => query.container && !query.sibling);
     expect(scoped.map(({ query }) => query.kind)).toEqual(["elementId", "text", "testTag", "text"]);
     const ignoresContainer: ContractResolver = {
       resolve(capture, query) {

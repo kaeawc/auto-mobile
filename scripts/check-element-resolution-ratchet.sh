@@ -25,6 +25,7 @@ if ! vcs_base_exists "$base_ref"; then
 fi
 baseline_path=test/features/element-resolution/observeContractGaps.json
 signature_path=test/features/element-resolution/observeContractGapSignatures.json
+case_path=test/features/element-resolution/observeContractCaseKeys.json
 scratch_dir="$(mktemp -d)"
 trap 'rm -rf "$scratch_dir"' EXIT
 # Resolve the merge base separately so an unavailable history fails closed.
@@ -48,5 +49,11 @@ if grep -Fxq "$signature_path" "$scratch_dir/files"; then
 else
   signature_base_arg=""
 fi
+if grep -Fxq "$case_path" "$scratch_dir/files"; then
+  vcs_file_at_merge_base "$base_ref" "$case_path" > "$scratch_dir/cases.json"
+  case_base_arg="$scratch_dir/cases.json"
+else
+  case_base_arg=""
+fi
 # Only inception may lack these files; the TS gate pins reviewed seed digests.
-bun scripts/check-element-resolution-ratchet.ts "$baseline_path" "$baseline_arg" "$signature_path" "$signature_base_arg"
+bun scripts/check-element-resolution-ratchet.ts "$baseline_path" "$baseline_arg" "$signature_path" "$signature_base_arg" "$case_path" "$case_base_arg"

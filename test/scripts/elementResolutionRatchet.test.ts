@@ -1,9 +1,19 @@
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import {
+  assertCaseInventoryDoesNotShrink,
   assertRatchetDoesNotGrow,
   assertSignatureRatchetDoesNotDrift,
 } from "../../scripts/check-element-resolution-ratchet";
+
+test("case-key ratchet preserves existing obligations while allowing additions", () => {
+  expect(() => assertCaseInventoryDoesNotShrink('["a","b","c"]', '["a","b"]')).not.toThrow();
+  expect(() => assertCaseInventoryDoesNotShrink('["a","c"]', '["a","b"]')).toThrow(
+    "case keys may only grow",
+  );
+  expect(() => assertCaseInventoryDoesNotShrink('["a","a"]', '["a"]')).toThrow("Duplicate");
+  expect(() => assertCaseInventoryDoesNotShrink('["a"]', undefined)).toThrow("reviewed initial");
+});
 
 test("allows only removal within the original finding", () => {
   expect(() => assertRatchetDoesNotGrow('{"B1":["a"]}', '{"B1":["a","b"]}')).not.toThrow();

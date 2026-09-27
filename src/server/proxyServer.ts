@@ -36,6 +36,8 @@ import {
   DEVICE_SESSION_RECOVERY_TOOLS,
 } from "./deviceSessionResult";
 import { ACCEPTANCE_DISCOVERY_CAPABILITY_ENV } from "../daemon/constants";
+import { getStartupToolDefaults } from "../features/toolSelection/SessionToolSelectionService";
+import { ToolRegistry } from "./toolRegistry";
 
 const LIVE_ACCEPTANCE_ENV = "AUTOMOBILE_ACCEPTANCE_LIVE";
 const ACCEPTANCE_DISCOVERY_ORDER_ENV = "AUTOMOBILE_ACCEPTANCE_DISCOVERY_ORDER";
@@ -343,7 +345,27 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
   server.server.setRequestHandler(ListToolsRequestSchema, async () => {
     try {
       const requestEpoch = toolListEpoch;
-      const tools = await proxy.listAdvertisedTools();
+      const advertised = await proxy.listAdvertisedTools();
+      // Before connection the daemon cannot provide this connection's live profile.
+      // Use the registered built-in defaults plus this frontend's startup choices;
+      // after connection the daemon's session-scoped list remains authoritative.
+      const tools = proxy.isConnected()
+        ? advertised
+        : (() => {
+            const registered = ToolRegistry.getAllTools({ includeUnavailable: true });
+            const defaults = getStartupToolDefaults(
+              process.env,
+              new Set(ToolRegistry.getConfigurableToolNames()),
+              options.proxyConfig?.daemonOptions?.enabledTools,
+              options.proxyConfig?.daemonOptions?.disabledTools,
+            );
+            const declaredDefaults = new Map(
+              registered.map((tool) => [tool.name, tool.defaultEnabled]),
+            );
+            return advertised.filter(
+              (tool) => defaults.get(tool.name) ?? declaredDefaults.get(tool.name) ?? true,
+            );
+          })();
       if (requestEpoch === toolListEpoch) {
         advertisedToolOutputSchemas.clear();
         for (const tool of tools) {

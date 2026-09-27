@@ -825,6 +825,31 @@ describe("MCP Booted Device Resources", () => {
       }
     });
 
+    test("notification invalidates the cached booted inventory before subscribers re-read", async () => {
+      const timer = new FakeTimer();
+      fakeDeviceUtils.setBootedDevices("ios", [mockIosDevice1]);
+      const before = await getBootedDevicesForPlatforms(["ios"], timer);
+      expect(before.devices.map((device) => device.runtime.deviceId)).toEqual([
+        mockIosDevice1.deviceId,
+      ]);
+      fakeDeviceUtils.setBootedDevices("ios", [mockIosDevice2]);
+      const notify = spyOn(ResourceRegistry, "notifyResourcesUpdated").mockImplementation(
+        async () => {
+          const after = await getBootedDevicesForPlatforms(["ios"], timer);
+          expect(after.devices.map((device) => device.runtime.deviceId)).toEqual([
+            mockIosDevice2.deviceId,
+          ]);
+        },
+      );
+      try {
+        await notifyBootedDeviceResourcesUpdated();
+        expect(notify).toHaveBeenCalledTimes(1);
+        expect(fakeDeviceUtils.getCallCount("getBootedDevices:ios")).toBe(2);
+      } finally {
+        notify.mockRestore();
+      }
+    });
+
     test("preserves pool counts until every iOS discovery source completes", async () => {
       const physicalDevice = { ...mockIosDevice2, deviceId: "00008110-001234567890001E" };
       fakeDeviceUtils.setBootedDevices("ios", [mockIosDevice1, physicalDevice]);

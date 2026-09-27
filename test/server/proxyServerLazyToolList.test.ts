@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
@@ -6,6 +6,9 @@ import { DaemonClient } from "../../src/daemon/client";
 import { getStaticToolDefinitions } from "../../src/daemon/staticToolDefinitions";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
+import { registerMcpTools } from "../../src/server";
+import { ToolRegistry } from "../../src/server/toolRegistry";
+import { DAEMON_VERSION } from "../../src/daemon/constants";
 
 // Issue #5879: the proxy MCP server serves tools/list from the static tool
 // registry without connecting to the daemon, so a wedged/absent daemon never
@@ -14,15 +17,20 @@ import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 
 let isAvailableSpy: ReturnType<typeof spyOn> | null = null;
 
+beforeEach(() => {
+  registerMcpTools(false);
+});
+
 afterEach(() => {
   isAvailableSpy?.mockRestore();
   isAvailableSpy = null;
+  ToolRegistry.clearTools();
 });
 
 describe("proxy server lazy tools/list", () => {
-  test("tools/list returns the full static surface with no daemon available", async () => {
+  test("tools/list returns the selected static surface with no daemon available", async () => {
     // isAvailable is NOT stubbed and autoStartDaemon is false: a connection
-    // attempt would throw. tools/list must still resolve the whole surface.
+    // attempt would throw. tools/list still resolves the selected surface.
     const isAvailableProbe = spyOn(DaemonClient, "isAvailable");
     isAvailableSpy = isAvailableProbe;
     const fakeClient = new FakeDaemonClient();
@@ -43,12 +51,67 @@ describe("proxy server lazy tools/list", () => {
       const result = await client.listTools();
 
       const staticNames = getStaticToolDefinitions()
+        .filter((tool) => {
+          const declared = ToolRegistry.getAllTools({ includeUnavailable: true }).find(
+            (registered) => registered.name === tool.name,
+          );
+          return declared?.defaultEnabled ?? true;
+        })
         .map((tool) => tool.name)
         .sort();
       expect(result.tools.map((tool) => tool.name).sort()).toEqual(staticNames);
       expect(proxy.isConnected()).toBe(false);
       expect(fakeClient.isConnected()).toBe(false);
       expect(isAvailableProbe).not.toHaveBeenCalled();
+    } finally {
+      await client.close();
+      await proxy.close();
+    }
+  });
+
+  test("cold proxy discovery omits disabled tools while a direct call by name still forwards", async () => {
+    isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+    const fakeClient = new FakeDaemonClient({
+      toolResultFor: (toolName) =>
+        toolName === "setToolEnabled"
+          ? {
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify({
+                    sessionUuid: "cold-selection-profile",
+                    scope: "connection-profile",
+                  }),
+                },
+              ],
+            }
+          : undefined,
+    });
+    const manager = new FakeDaemonManager();
+    manager.statusResult = { ...manager.statusResult, version: DAEMON_VERSION };
+    const { server, proxy } = createProxyMcpServer({
+      proxyConfig: {
+        clientFactory: () => fakeClient,
+        daemonManager: manager,
+        daemonAvailabilityProbe: async () => true,
+        autoStartDaemon: false,
+        daemonOptions: { disabledTools: ["listDevices"] },
+      },
+    });
+    const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "selected-tools-test-client", version: "0.0.1" });
+    try {
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+      const names = (await client.listTools()).tools.map((tool) => tool.name);
+      expect(names).not.toContain("listDevices");
+      expect(names).not.toContain("provisionDevice");
+      expect(names).toContain("observe");
+      expect(proxy.isConnected()).toBe(false);
+
+      const result = await client.callTool({ name: "listDevices", arguments: {} });
+      expect(result.isError).toBeFalsy();
+      expect(fakeClient.callToolCalls.some((call) => call.toolName === "listDevices")).toBe(true);
     } finally {
       await client.close();
       await proxy.close();

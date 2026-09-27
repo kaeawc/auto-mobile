@@ -1,7 +1,9 @@
 # Dynamic Tools
 
-AutoMobile lets you enable or disable public tools by their exact,
-case-sensitive names. `setToolEnabled` is always available:
+AutoMobile lets you control which public tools appear in `tools/list` by their
+exact, case-sensitive names. `setToolEnabled` is always available. Selection
+controls discovery only: a client can still invoke an omitted tool directly by
+name through `tools/call`:
 
 ```json
 {
@@ -10,8 +12,9 @@ case-sensitive names. `setToolEnabled` is always available:
 }
 ```
 
-Set `enabled` to `false` to disable a tool. An optional `sessionUuid` scopes
-the choice to a routing session. The choice persists across daemon restarts.
+Set `enabled` to `false` to omit a tool from discovery. An optional
+`sessionUuid` scopes the choice to a routing session. The choice persists
+across daemon restarts.
 
 ## Enabling several tools at once
 
@@ -26,8 +29,8 @@ rejects the request before anything is written.
 }
 ```
 
-Either spelling returns `enabledTools` — the user-configurable tools that are
-enabled for the session after the call — so the resulting capability set is
+Either spelling returns `enabledTools` — the user-configurable tools selected
+for discovery in the session after the call — so the resulting discovery set is
 visible without a second `tools/list`.
 If the write succeeds but the follow-up read of that set fails, the response
 returns `enabledToolsError` instead of `enabledTools`; the change was still
@@ -51,13 +54,13 @@ call:
 ```
 
 An unknown name rejects the call before any device work starts. `getAndroid`
-and `getApple` report both `gatedTools` (still disabled) and `enabledTools`
+and `getApple` report both `gatedTools` (omitted from discovery) and `enabledTools`
 (the complement) in their response; `provisionDevice` reports `enabledTools`
 and requires `boot: true`, since a no-boot provision mints no session to
 declare capabilities against.
 Both reports resolve a tool the same way `tools/list` does — the union of the
 connection profile and the routing session — so every tool they list is one the
-next call can actually make.
+next `tools/list` will advertise. A direct `tools/call` can invoke an omitted tool.
 
 If the device is acquired but the capability declaration itself cannot be
 persisted, the response keeps its session handle and adds an `enableToolsError`

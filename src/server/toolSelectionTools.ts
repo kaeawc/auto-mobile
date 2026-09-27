@@ -40,7 +40,7 @@ export const enableToolsSchemaField = z
   .optional()
   .describe(
     "Exact case-sensitive AutoMobile tool names to enable for the session this call mints, " +
-      "applied before the response is built so the returned enabledTools/gatedTools reflect them. " +
+      "applied before the response is built so the returned enabledTools/gatedTools reflect discovery. " +
       "Unknown or hidden names reject the call before device work; always-on names are returned in skipped.",
   );
 
@@ -51,20 +51,20 @@ export const setToolEnabledSchema = z
       .min(1)
       .optional()
       .describe(
-        "Exact case-sensitive AutoMobile tool name to enable or disable. The listed choices include optional tools absent from tools/list until enabled. Provide either toolName or toolNames.",
+        "Exact case-sensitive AutoMobile tool name to show or omit in tools/list. Omitted tools remain callable directly by name. Provide either toolName or toolNames.",
       ),
     toolNames: z
       .array(z.string().min(1))
       .min(1)
       .optional()
       .describe(
-        "Exact case-sensitive AutoMobile tool names to enable or disable in ONE call. Unknown or hidden names reject the whole request before anything is written; always-on names are returned in skipped. Provide either toolName or toolNames.",
+        "Exact case-sensitive AutoMobile tool names to show or omit in tools/list in ONE call. Omitted tools remain callable directly by name. Unknown or hidden names reject the whole request before anything is written; always-on names are returned in skipped. Provide either toolName or toolNames.",
       ),
     enabled: z
       .boolean()
       .default(true)
       .optional()
-      .describe("Whether to enable the tools (default: true)."),
+      .describe("Whether to show the tools in tools/list (default: true)."),
     sessionUuid: z
       .string()
       .min(1)
@@ -83,7 +83,7 @@ export const setToolEnabledSchema = z
     }
   })
   .describe(
-    "Enable or disable configurable AutoMobile tools for an active session. It can ungate a tool after a device session already exists without reacquiring the device.",
+    "Control which configurable AutoMobile tools appear in tools/list for an active session. A tool omitted from discovery remains callable directly by name through tools/call.",
   );
 
 function resolveSelectionSessionUuid(
@@ -302,7 +302,7 @@ async function getEnabledToolsResponse(
 export function registerToolSelectionTools(): void {
   ToolRegistry.register(
     SET_TOOL_ENABLED_TOOL_NAME,
-    "Enable or disable AutoMobile tools for this MCP session: one exact name via toolName, or a whole batch in one call via toolNames. Returns enabledTools, or enabledToolsError instead if post-write readback fails (the change still applies).",
+    "Control tools/list discovery for this MCP session: one exact name via toolName, or a batch via toolNames. Omitted tools remain callable directly by name through tools/call. Returns enabledTools, or enabledToolsError if post-write readback fails (the change still applies).",
     setToolEnabledSchema,
     async (args) => {
       const context = getToolSelectionContext();

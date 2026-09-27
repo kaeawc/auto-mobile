@@ -1,5 +1,6 @@
 import { ElementResolver, isFocusEditableElement } from "../utility/ElementResolver";
 import { SearchableHierarchy } from "../utility/SearchableNode";
+import { resolveViewHierarchyForSearch } from "../../utils/viewHierarchySearch";
 import {
   DefaultHierarchyCapture,
   getHierarchySnapshot,
@@ -1222,7 +1223,9 @@ export class TapOnElement extends BaseVisualChange {
     if (!observation?.viewHierarchy) {
       return false;
     }
-    const nodes = new SearchableHierarchy().project(observation.viewHierarchy);
+    const searchHierarchy =
+      resolveViewHierarchyForSearch(observation.viewHierarchy) ?? observation.viewHierarchy;
+    const nodes = new SearchableHierarchy().project(searchHierarchy);
     const focused = nodes.find(
       (node) =>
         node.element &&

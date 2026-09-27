@@ -1,5 +1,8 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
+import { SearchableHierarchy } from "../../../src/features/utility/SearchableNode";
+import { serverConfig } from "../../../src/utils/ServerConfig";
+import { attachRawViewHierarchy } from "../../../src/utils/viewHierarchySearch";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeElementSelector } from "../../fakes/FakeElementSelector";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -11,6 +14,8 @@ const editableElement = (focus: Record<string, unknown>) => ({
   bounds: { left: 0, top: 0, right: 100, bottom: 40 },
   ...focus,
 });
+
+afterEach(() => serverConfig.setRawElementSearchEnabled(false));
 
 async function executeFocus(
   element: ReturnType<typeof editableElement>,
@@ -191,6 +196,31 @@ describe("TapOnElement selectionStrategy", () => {
     expect(tapped).toBe(true);
     expect(result.success).toBe(true);
     expect(result.focusVerified).toBe(true);
+  });
+
+  test("verifies focus against the attached raw hierarchy when raw element search is enabled (PR #7780 review)", async () => {
+    const before = editableElement({
+      "resource-id": undefined,
+      "view-id": "s2-before",
+      focused: false,
+    });
+    const after = { ...before, "view-id": "s2-after", focused: true };
+    const filtered = { hierarchy: { node: { text: "Visible sibling" } } };
+    const raw = { hierarchy: { node: after } };
+    attachRawViewHierarchy(filtered, raw);
+    serverConfig.setRawElementSearchEnabled(true);
+
+    const project = spyOn(SearchableHierarchy.prototype, "project");
+    try {
+      const { result, tapped } = await executeFocus(before, filtered);
+
+      expect(tapped).toBe(true);
+      expect(result.success).toBe(true);
+      expect(result.focusVerified).toBe(true);
+      expect(project.mock.calls.at(-1)?.[0]).toBe(raw);
+    } finally {
+      project.mockRestore();
+    }
   });
 
   test("does not accept keyboard focus on a different editable field (#7758)", async () => {

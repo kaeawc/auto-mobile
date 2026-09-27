@@ -1,0 +1,571 @@
+{
+  "viewHierarchy": {
+    "packageName": "com.android.systemui",
+    "hierarchy": {
+      "node": {
+        "resource-id": "com.android.systemui:id/notification_stack_scroller",
+        "bounds": [0, 0, 1080, 2316],
+        "package": "com.android.systemui",
+        "class": "android.widget.ScrollView",
+        "node": [
+          {
+            "resource-id": "com.android.systemui:id/expandableNotificationRow",
+            "bounds": [42, 578, 1038, 1163],
+            "package": "com.android.systemui",
+            "class": "android.widget.FrameLayout",
+            "node": [
+              {
+                "resource-id": "com.android.systemui:id/backgroundDimmed",
+                "bounds": [42, 578, 1038, 1345],
+                "package": "com.android.systemui",
+                "class": "android.view.View"
+              },
+              {
+                "resource-id": "com.android.systemui:id/notification_children_container",
+                "bounds": [42, 578, 1038, 1345],
+                "package": "com.android.systemui",
+                "class": "android.view.ViewGroup",
+                "node": [
+                  {
+                    "resource-id": "android:id/notification_header",
+                    "bounds": [42, 578, 1038, 725],
+                    "package": "com.android.systemui",
+                    "class": "android.widget.RelativeLayout",
+                    "node": [
+                      {
+                        "resource-id": "android:id/notification_top_line",
+                        "bounds": [42, 578, 891, 725],
+                        "package": "com.android.systemui",
+                        "class": "android.view.ViewGroup",
+                        "node": [
+                          {
+                            "resource-id": "android:id/app_name_text",
+                            "bounds": [179, 630, 249, 673],
+                            "package": "com.android.systemui",
+                            "class": "android.widget.TextView",
+                            "text": "Shell"
+                          },
+                          {
+                            "resource-id": "android:id/time_divider",
+                            "bounds": [259, 630, 270, 673],
+                            "package": "com.android.systemui",
+                            "class": "android.widget.TextView",
+                            "text": "•"
+                          },
+                          {
+                            "resource-id": "android:id/time",
+                            "bounds": [280, 630, 340, 673],
+                            "package": "com.android.systemui",
+                            "class": "android.widget.TextView",
+                            "text": "now"
+                          }
+                        ]
+                      },
+                      {
+                        "resource-id": "android:id/alternate_expand_target",
+                        "bounds": [42, 578, 179, 725],
+                        "package": "com.android.systemui",
+                        "class": "android.widget.FrameLayout"
+                      },
+                      {
+                        "resource-id": "android:id/icon",
+                        "bounds": [84, 620, 147, 683],
+                        "package": "com.android.systemui",
+                        "class": "android.widget.ImageView"
+                      },
+                      {
+                        "resource-id": "android:id/expand_button",
+                        "bounds": [891, 578, 1038, 725],
+                        "package": "com.android.systemui",
+                        "class": "android.widget.Button",
+                        "content-desc": "Collapse",
+                        "node": [
+                          {
+                            "resource-id": "android:id/expand_button_pill",
+                            "bounds": [933, 620, 996, 683],
+                            "package": "com.android.systemui",
+                            "class": "android.widget.LinearLayout",
+                            "node": [
+                              {
+                                "resource-id": "android:id/expand_button_icon",
+                                "bounds": [933, 620, 996, 683],
+                                "package": "com.android.systemui",
+                                "class": "android.widget.ImageView"
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "resource-id": "com.android.systemui:id/expandableNotificationRow",
+                    "bounds": [42, 726, 1038, 944],
+                    "package": "com.android.systemui",
+                    "class": "android.widget.FrameLayout",
+                    "node": [
+                      {
+                        "resource-id": "com.android.systemui:id/backgroundNormal",
+                        "bounds": [42, 726, 1038, 1035],
+                        "package": "com.android.systemui",
+                        "class": "android.view.View"
+                      },
+                      {
+                        "resource-id": "com.android.systemui:id/backgroundDimmed",
+                        "bounds": [42, 726, 1038, 1035],
+                        "package": "com.android.systemui",
+                        "class": "android.view.View"
+                      },
+                      {
+                        "resource-id": "com.android.systemui:id/expanded",
+                        "bounds": [42, 726, 1038, 1035],
+                        "package": "com.android.systemui",
+                        "class": "android.widget.FrameLayout",
+                        "node": [
+                          {
+                            "resource-id": "android:id/status_bar_latest_event_content",
+                            "bounds": [42, 726, 1038, 944],
+                            "package": "com.android.systemui",
+                            "class": "android.widget.FrameLayout",
+                            "node": [
+                              {
+                                "resource-id": "android:id/alternate_expand_target",
+                                "bounds": [42, 726, 179, 944],
+                                "package": "com.android.systemui",
+                                "class": "android.widget.FrameLayout"
+                              },
+                              {
+                                "resource-id": "android:id/left_icon",
+                                "bounds": [84, 803, 147, 866],
+                                "package": "com.android.systemui",
+                                "class": "android.widget.ImageView"
+                              },
+                              {
+                                "resource-id": "android:id/notification_headerless_view_row",
+                                "bounds": [179, 726, 1038, 944],
+                                "package": "com.android.systemui",
+                                "class": "android.widget.LinearLayout",
+                                "node": [
+                                  {
+                                    "resource-id": "android:id/notification_headerless_view_column",
+                                    "bounds": [179, 778, 891, 892],
+                                    "package": "com.android.systemui",
+                                    "class": "android.widget.LinearLayout",
+                                    "node": [
+                                      {
+                                        "resource-id": "android:id/notification_top_line",
+                                        "bounds": [179, 778, 891, 829],
+                                        "package": "com.android.systemui",
+                                        "class": "android.view.ViewGroup",
+                                        "node": [
+                                          {
+                                            "resource-id": "android:id/title",
+                                            "bounds": [179, 778, 264, 829],
+                                            "package": "com.android.systemui",
+                                            "class": "android.widget.TextView",
+                                            "text": "Delta"
+                                          },
+                                          {
+                                            "resource-id": "android:id/time_divider",
+                                            "bounds": [274, 784, 285, 827],
+                                            "package": "com.android.systemui",
+                                            "class": "android.widget.TextView",
+                                            "text": "•"
+                                          },
+                                          {
+                                            "resource-id": "android:id/time",
+                                            "bounds": [295, 784, 355, 827],
+                                            "package": "com.android.systemui",
+                                            "class": "android.widget.TextView",
+                                            "text": "now"
+                                          }
+                                        ]
+                                      },
+                                      {
+                                        "resource-id": "android:id/notification_main_column",
+                                        "bounds": [179, 829, 891, 892],
+                                        "package": "com.android.systemui",
+                                        "class": "android.widget.LinearLayout",
+                                        "node": [
+                                          {
+                                            "bounds": [179, 829, 891, 892],
+                                            "package": "com.android.systemui",
+                                            "class": "android.widget.FrameLayout",
+                                            "node": [
+                                              {
+                                                "resource-id": "android:id/text",
+                                                "bounds": [179, 834, 891, 887],
+                                                "package": "com.android.systemui",
+                                                "class": "android.widget.TextView",
+                                                "text": "delta body"
+                                              }
+                                            ]
+                                          }
+                                        ]
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "resource-id": "android:id/expand_button_touch_container",
+                                    "bounds": [891, 726, 1038, 944],
+                                    "package": "com.android.systemui",
+                                    "class": "android.widget.FrameLayout",
+                                    "node": [
+                                      {
+                                        "resource-id": "android:id/expand_button",
+                                        "bounds": [891, 726, 1038, 944],
+                                        "package": "com.android.systemui",
+                                        "class": "android.widget.Button",
+                                        "content-desc": "Expand",
+                                        "node": [
+                                          {
+                                            "resource-id": "android:id/expand_button_pill",
+                                            "bounds": [933, 803, 996, 866],
+                                            "package": "com.android.systemui",
+                                            "class": "android.widget.LinearLayout",
+                                            "node": [
+                                              {
+                                                "resource-id": "android:id/expand_button_icon",
+                                                "bounds": [933, 803, 996, 866],
+                                                "package": "com.android.systemui",
+                                                "class": "android.widget.ImageView"
+                                              }
+                                            ]
+                                          }
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "resource-id": "com.android.systemui:id/fake_shadow",
+                        "bounds": [42, 726, 1038, 1035],
+                        "package": "com.android.systemui",
+                        "class": "android.widget.FrameLayout"
+                      }
+                    ]
+                  },
+                  {
+                    "resource-id": "com.android.systemui:id/expandableNotificationRow",
+                    "bounds": [42, 945, 1038, 1163],
+                    "package": "com.android.systemui",
+                    "class": "android.widget.FrameLayout",
+                    "node": [
+                      {
+                        "resource-id": "com.android.systemui:id/backgroundNormal",
+                        "bounds": [42, 945, 1038, 1254],
+                        "package": "com.android.systemui",
+                        "class": "android.view.View"
+                      },
+                      {
+                        "resource-id": "com.android.systemui:id/backgroundDimmed",
+                        "bounds": [42, 945, 1038, 1254],
+                        "package": "com.android.systemui",
+                        "class": "android.view.View"
+                      },
+                      {
+                        "resource-id": "com.android.systemui:id/expanded",
+                        "bounds": [42, 945, 1038, 1254],
+                        "package": "com.android.systemui",
+                        "class": "android.widget.FrameLayout",
+                        "node": [
+                          {
+                            "resource-id": "android:id/status_bar_latest_event_content",
+                            "bounds": [42, 945, 1038, 1163],
+                            "package": "com.android.systemui",
+                            "class": "android.widget.FrameLayout",
+                            "node": [
+                              {
+                                "resource-id": "android:id/alternate_expand_target",
+                                "bounds": [42, 945, 179, 1163],
+                                "package": "com.android.systemui",
+                                "class": "android.widget.FrameLayout"
+                              },
+                              {
+                                "resource-id": "android:id/left_icon",
+                                "bounds": [84, 1022, 147, 1085],
+                                "package": "com.android.systemui",
+                                "class": "android.widget.ImageView"
+                              },
+                              {
+                                "resource-id": "android:id/notification_headerless_view_row",
+                                "bounds": [179, 945, 1038, 1163],
+                                "package": "com.android.systemui",
+                                "class": "android.widget.LinearLayout",
+                                "node": [
+                                  {
+                                    "resource-id": "android:id/notification_headerless_view_column",
+                                    "bounds": [179, 997, 891, 1111],
+                                    "package": "com.android.systemui",
+                                    "class": "android.widget.LinearLayout",
+                                    "node": [
+                                      {
+                                        "resource-id": "android:id/notification_top_line",
+                                        "bounds": [179, 997, 891, 1048],
+                                        "package": "com.android.systemui",
+                                        "class": "android.view.ViewGroup",
+                                        "node": [
+                                          {
+                                            "resource-id": "android:id/title",
+                                            "bounds": [179, 997, 308, 1048],
+                                            "package": "com.android.systemui",
+                                            "class": "android.widget.TextView",
+                                            "text": "Gamma"
+                                          },
+                                          {
+                                            "resource-id": "android:id/time_divider",
+                                            "bounds": [318, 1003, 329, 1046],
+                                            "package": "com.android.systemui",
+                                            "class": "android.widget.TextView",
+                                            "text": "•"
+                                          },
+                                          {
+                                            "resource-id": "android:id/time",
+                                            "bounds": [339, 1003, 399, 1046],
+                                            "package": "com.android.systemui",
+                                            "class": "android.widget.TextView",
+                                            "text": "now"
+                                          }
+                                        ]
+                                      },
+                                      {
+                                        "resource-id": "android:id/notification_main_column",
+                                        "bounds": [179, 1048, 891, 1111],
+                                        "package": "com.android.systemui",
+                                        "class": "android.widget.LinearLayout",
+                                        "node": [
+                                          {
+                                            "bounds": [179, 1048, 891, 1111],
+                                            "package": "com.android.systemui",
+                                            "class": "android.widget.FrameLayout",
+                                            "node": [
+                                              {
+                                                "resource-id": "android:id/text",
+                                                "bounds": [179, 1053, 891, 1106],
+                                                "package": "com.android.systemui",
+                                                "class": "android.widget.TextView",
+                                                "text": "gamma body"
+                                              }
+                                            ]
+                                          }
+                                        ]
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "resource-id": "android:id/expand_button_touch_container",
+                                    "bounds": [891, 945, 1038, 1163],
+                                    "package": "com.android.systemui",
+                                    "class": "android.widget.FrameLayout",
+                                    "node": [
+                                      {
+                                        "resource-id": "android:id/expand_button",
+                                        "bounds": [891, 945, 1038, 1163],
+                                        "package": "com.android.systemui",
+                                        "class": "android.widget.Button",
+                                        "content-desc": "Expand",
+                                        "node": [
+                                          {
+                                            "resource-id": "android:id/expand_button_pill",
+                                            "bounds": [933, 1022, 996, 1085],
+                                            "package": "com.android.systemui",
+                                            "class": "android.widget.LinearLayout",
+                                            "node": [
+                                              {
+                                                "resource-id": "android:id/expand_button_icon",
+                                                "bounds": [933, 1022, 996, 1085],
+                                                "package": "com.android.systemui",
+                                                "class": "android.widget.ImageView"
+                                              }
+                                            ]
+                                          }
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "resource-id": "com.android.systemui:id/fake_shadow",
+                        "bounds": [42, 945, 1038, 1254],
+                        "package": "com.android.systemui",
+                        "class": "android.widget.FrameLayout"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "resource-id": "com.android.systemui:id/fake_shadow",
+                "bounds": [42, 578, 1038, 1345],
+                "package": "com.android.systemui",
+                "class": "android.widget.FrameLayout"
+              }
+            ]
+          },
+          {
+            "resource-id": "com.android.systemui:id/expandableNotificationRow",
+            "bounds": [42, 1168, 1038, 1386],
+            "package": "com.android.systemui",
+            "class": "android.widget.FrameLayout",
+            "node": [
+              {
+                "resource-id": "com.android.systemui:id/backgroundNormal",
+                "bounds": [42, 1168, 1038, 1528],
+                "package": "com.android.systemui",
+                "class": "android.view.View"
+              },
+              {
+                "resource-id": "com.android.systemui:id/backgroundDimmed",
+                "bounds": [42, 1168, 1038, 1528],
+                "package": "com.android.systemui",
+                "class": "android.view.View"
+              },
+              {
+                "resource-id": "com.android.systemui:id/expanded",
+                "bounds": [42, 1168, 1038, 1528],
+                "package": "com.android.systemui",
+                "class": "android.widget.FrameLayout",
+                "node": [
+                  {
+                    "resource-id": "android:id/status_bar_latest_event_content",
+                    "bounds": [42, 1168, 1038, 1386],
+                    "package": "com.android.systemui",
+                    "class": "android.widget.FrameLayout",
+                    "node": [
+                      {
+                        "resource-id": "android:id/alternate_expand_target",
+                        "bounds": [42, 1168, 179, 1386],
+                        "package": "com.android.systemui",
+                        "class": "android.widget.FrameLayout"
+                      },
+                      {
+                        "resource-id": "android:id/icon",
+                        "bounds": [84, 1245, 147, 1308],
+                        "package": "com.android.systemui",
+                        "class": "android.widget.ImageView"
+                      },
+                      {
+                        "resource-id": "android:id/notification_headerless_view_row",
+                        "bounds": [179, 1168, 1038, 1386],
+                        "package": "com.android.systemui",
+                        "class": "android.widget.LinearLayout",
+                        "node": [
+                          {
+                            "resource-id": "android:id/notification_headerless_view_column",
+                            "bounds": [179, 1220, 891, 1334],
+                            "package": "com.android.systemui",
+                            "class": "android.widget.LinearLayout",
+                            "node": [
+                              {
+                                "resource-id": "android:id/notification_top_line",
+                                "bounds": [179, 1220, 891, 1271],
+                                "package": "com.android.systemui",
+                                "class": "android.view.ViewGroup",
+                                "node": [
+                                  {
+                                    "resource-id": "android:id/title",
+                                    "bounds": [179, 1220, 459, 1271],
+                                    "package": "com.android.systemui",
+                                    "class": "android.widget.TextView",
+                                    "text": "Set a screen lock"
+                                  },
+                                  {
+                                    "resource-id": "android:id/time_divider",
+                                    "bounds": [469, 1226, 480, 1269],
+                                    "package": "com.android.systemui",
+                                    "class": "android.widget.TextView",
+                                    "text": "•"
+                                  },
+                                  {
+                                    "resource-id": "android:id/time",
+                                    "bounds": [490, 1226, 526, 1269],
+                                    "package": "com.android.systemui",
+                                    "class": "android.widget.TextView",
+                                    "text": "1 day ago"
+                                  }
+                                ]
+                              },
+                              {
+                                "resource-id": "android:id/notification_main_column",
+                                "bounds": [179, 1271, 891, 1334],
+                                "package": "com.android.systemui",
+                                "class": "android.widget.LinearLayout",
+                                "node": [
+                                  {
+                                    "bounds": [179, 1271, 891, 1334],
+                                    "package": "com.android.systemui",
+                                    "class": "android.widget.FrameLayout",
+                                    "node": [
+                                      {
+                                        "resource-id": "android:id/text",
+                                        "bounds": [179, 1276, 891, 1329],
+                                        "package": "com.android.systemui",
+                                        "class": "android.widget.TextView",
+                                        "text": "For added security, set a PIN, pattern, or password for this device."
+                                      }
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          },
+                          {
+                            "resource-id": "android:id/expand_button_touch_container",
+                            "bounds": [891, 1168, 1038, 1386],
+                            "package": "com.android.systemui",
+                            "class": "android.widget.FrameLayout",
+                            "node": [
+                              {
+                                "resource-id": "android:id/expand_button",
+                                "bounds": [891, 1168, 1038, 1386],
+                                "package": "com.android.systemui",
+                                "class": "android.widget.Button",
+                                "content-desc": "Expand",
+                                "node": [
+                                  {
+                                    "resource-id": "android:id/expand_button_pill",
+                                    "bounds": [933, 1245, 996, 1308],
+                                    "package": "com.android.systemui",
+                                    "class": "android.widget.LinearLayout",
+                                    "node": [
+                                      {
+                                        "resource-id": "android:id/expand_button_icon",
+                                        "bounds": [933, 1245, 996, 1308],
+                                        "package": "com.android.systemui",
+                                        "class": "android.widget.ImageView"
+                                      }
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "resource-id": "com.android.systemui:id/fake_shadow",
+                "bounds": [42, 1168, 1038, 1528],
+                "package": "com.android.systemui",
+                "class": "android.widget.FrameLayout"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

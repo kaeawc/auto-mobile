@@ -853,11 +853,11 @@ const collectNotificationCandidates = (
     }
     visited.add(node);
 
+    if (nodeIsNotificationGroup(node)) {
+      visitNotificationGroupChildren(node, depth);
+      return;
+    }
     if (nodeHasNotificationRowHint(node)) {
-      if (nodeIsNotificationGroup(node)) {
-        visitNotificationGroupChildren(node, depth);
-        return;
-      }
       const element = parser.parseNodeBounds(node) ?? undefined;
       candidates.push({ node, depth, element, groupNode });
       return;
@@ -1315,6 +1315,38 @@ const selectBestNotificationMatch = (
 
 const notificationSearchable = new SearchableHierarchy();
 
+const buildNotificationCandidateMatch = (
+  candidate: SystemTrayNotificationCandidate,
+  criteria: SystemTrayNotificationArgs,
+  appMatchTexts: string[],
+): SystemTrayMatchResult => {
+  const subHierarchy = createSubHierarchy(candidate.node);
+  const direct = buildNotificationMatch(subHierarchy, criteria, appMatchTexts);
+  if (direct.matched || !candidate.groupNode || !criteria.appId) {
+    return direct;
+  }
+  const header = getNotificationGroupHeader(candidate.groupNode);
+  if (!header) {
+    return direct;
+  }
+  const content = buildNotificationMatch(subHierarchy, { ...criteria, appId: undefined }, []);
+  const app = buildNotificationMatch(
+    createSubHierarchy(header),
+    { appId: criteria.appId },
+    appMatchTexts,
+  );
+  return content.matched && app.matched
+    ? { matched: true, matches: { ...content.matches, ...app.matches } }
+    : direct;
+};
+
+const nodeIsNotificationStackScroller = (node: any): boolean => {
+  const props = getNodeProperties(node);
+  // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- Classifies a SystemUI layout node; user element selection uses the resolver.
+  const resourceId = String(props?.["resource-id"] ?? props?.resourceId ?? "");
+  return matchesNotificationResourceId(resourceId, "notification_stack_scroller");
+};
+
 const findNotificationMatches = (
   viewHierarchy: ViewHierarchyResult,
   criteria: SystemTrayNotificationArgs,
@@ -1336,7 +1368,7 @@ const findNotificationMatches = (
     return candidateList
       .map((candidate) => {
         const subHierarchy = createSubHierarchy(candidate.node);
-        const match = buildNotificationMatch(subHierarchy, criteria, appMatchTexts);
+        const match = buildNotificationCandidateMatch(candidate, criteria, appMatchTexts);
         return {
           candidate: { ...candidate, windowRank: windowRanks.get(candidate.node) ?? 0 },
           match,
@@ -1365,6 +1397,8 @@ const findNotificationMatches = (
       viewHierarchy,
       criteria,
       appMatchTexts,
+    ).filter(
+      (candidate) => candidates.length === 0 || !nodeIsNotificationStackScroller(candidate.node),
     );
   }
 

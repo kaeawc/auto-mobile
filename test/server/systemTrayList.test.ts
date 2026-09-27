@@ -1,4 +1,6 @@
 import { ToolRegistry } from "../../src/server/toolRegistry";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import Ajv2020 from "ajv/dist/2020";
 import generatedDefinitions from "../../schemas/tool-definitions.json";
 import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
@@ -22,6 +24,19 @@ const device: BootedDevice = {
   name: "test",
   platform: "android",
   source: "local",
+};
+const headerlessTwoNotificationGroups = {
+  expanded: (
+    JSON.parse(
+      readFileSync(
+        join(
+          import.meta.dir,
+          "../fixtures/observe/ctrlproxy-headerless-two-notification-group-expanded.json",
+        ),
+        "utf8",
+      ),
+    ) as ObserveResult
+  ).viewHierarchy,
 };
 const node = (id: string, text = "", children: any[] = []) => ({
   $: { "resource-id": id, text, package: "com.android.systemui", bounds: "[0,200][1000,1600]" },
@@ -510,6 +525,16 @@ describe("systemTray list", () => {
     ]);
     setup([page(group)]);
     expect((await list()).notifications).toMatchObject([{ title: "inside", inGroup: true }]);
+  });
+  test("lists both real headerless children and retains the neighboring row as unattributed", async () => {
+    const fixture = headerlessTwoNotificationGroups.expanded!;
+    setup([{ ...page(), viewHierarchy: fixture }], false);
+    const result = await listSystemTrayNotifications(device, "com.android.shell", "Shell", 5000);
+    expect(result.notifications).toMatchObject([
+      { title: "Delta", inGroup: true },
+      { title: "Gamma", inGroup: true },
+    ]);
+    expect(result.unattributedRows).toBe(1);
   });
   test("retains identical notifications on the same page", async () => {
     setup([page(row("same"), row("same"))]);
@@ -1130,6 +1155,36 @@ describe("systemTray clearAll dumpsys ownership", () => {
         success: true,
       });
       expect(payload.message).toBe(`Cleared 1 notification(s) for ${SHELL}`);
+    } finally {
+      installedAppsSpy.mockRestore();
+    }
+  });
+
+  test("clearAll counts both real headerless children beside an unrelated row", async () => {
+    const fixture = headerlessTwoNotificationGroups.expanded!;
+    const { adb, timer } = setup([{ ...page(), viewHierarchy: fixture }, page()], false);
+    adb.setCommandResponseSequence("dumpsys notification", [
+      execResult(dumpsys(record(1, "Delta", "delta body"), record(2, "Gamma", "gamma body"))),
+      execResult(dumpsys(record(1, "Delta", "delta body"), record(2, "Gamma", "gamma body"))),
+      execResult(dumpsys(record(1, "Delta", "delta body"), record(2, "Gamma", "gamma body"))),
+      execResult(api36EmptyDumpsys()),
+    ]);
+    const installedAppsSpy = spyOn(ListInstalledApps.prototype, "execute").mockResolvedValue([
+      SHELL,
+    ]);
+    installClearAllDependencies(timer, adb);
+
+    try {
+      const payload = JSON.parse((await clearAll()).content[0].text);
+      expect(payload).toMatchObject({
+        dismissedCount: 2,
+        expectedCount: 2,
+        remainingCount: 0,
+        success: true,
+      });
+      expect(
+        adb.getExecutedCommands().filter((command) => command.includes("input swipe")),
+      ).toEqual([expect.stringMatching(/^shell input swipe 938 (835|1054) 141 \1 300$/)]);
     } finally {
       installedAppsSpy.mockRestore();
     }

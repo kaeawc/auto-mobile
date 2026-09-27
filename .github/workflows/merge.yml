@@ -391,6 +391,15 @@ jobs:
           AUTOMOBILE_BATS_UNIT_BUDGET_SECONDS: "420"
         run: scripts/ci/run-bats.sh unit
 
+      - name: "Upload BATS Unit Joblog"
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: bats-unit-joblog-${{ matrix.os }}
+          path: scratch/bats-unit-joblog.tsv
+          if-no-files-found: ignore
+          retention-days: 7
+
   bats-integration-tests:
     timeout-minutes: 10
     name: "BATS Integration Tests (${{ matrix.os }})"

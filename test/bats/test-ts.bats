@@ -207,6 +207,54 @@ teardown() {
   rm -f "$BUN_ARGS_FILE" "$STUB_RECHECK_INDEX"
 }
 
+teardown_file() {
+  command -v lsof > /dev/null 2>&1 || return 0
+
+  local self_pid="$BASHPID" pipe holders pid ppid pgid command command_line elapsed
+  pipe="$(lsof -nP -a -p "$self_pid" -d 3 -F n 2> /dev/null | sed -n 's/^n//p' | head -n 1)"
+  [[ -n "$pipe" ]] || return 0
+
+  # Finish the scan before handling matches so its own processes are gone.
+  holders="$({
+    lsof -nP -F pRgcfn 3>&- 2> /dev/null | awk -v pipe="$pipe" -v self="$self_pid" '
+      /^p[0-9]/ { pid = substr($0, 2) }
+      /^R/ { parent[pid] = substr($0, 2) }
+      /^g/ { group[pid] = substr($0, 2) }
+      /^c/ { command[pid] = substr($0, 2) }
+      /^n/ && substr($0, 2) == pipe { holder[pid] = 1 }
+      END {
+        # Fail closed unless the whole bats ancestor chain is visible.
+        for (pid = self; pid != 1; pid = parent[pid]) {
+          if (pid == "" || ancestor[pid]++ || parent[pid] == "") exit
+        }
+        for (pid in holder) {
+          if (!ancestor[pid] && parent[pid] != "" && group[pid] != "")
+            print pid "\t" parent[pid] "\t" group[pid] "\t" command[pid]
+        }
+      }
+    ' 3>&-
+  } 3>&-)"
+
+  # lsof supplies parent and process group IDs even where ps is unavailable.
+  while IFS=$'\t' read -r pid ppid pgid command; do
+    [[ "$pid" =~ ^[0-9]+$ ]] || continue
+    kill -0 "$pid" 2> /dev/null || continue
+    command_line="$(ps -o command= -p "$pid" 2> /dev/null || true)"
+    printf '# test-ts.bats left fd 3 open after last test: pid=%s ppid=%s pgid=%s command=%s\n' \
+      "$pid" "$ppid" "$pgid" "${command_line:-$command}" >&3
+
+    kill -TERM "$pid" 2> /dev/null || continue
+    elapsed=0
+    while kill -0 "$pid" 2> /dev/null && [[ "$elapsed" -lt 20 ]]; do
+      sleep 0.1
+      ((elapsed += 1))
+    done
+    if kill -0 "$pid" 2> /dev/null; then
+      kill -KILL "$pid" 2> /dev/null || true
+    fi
+  done <<< "$holders"
+}
+
 run_lane() {
   run env PATH="$STUB_BIN:$PATH" TEST_TS_PRINT_CMD=1 bash "$SCRIPT" "$@"
 }

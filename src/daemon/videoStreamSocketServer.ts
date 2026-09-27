@@ -571,6 +571,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
           throw new ActionableError(`Video capture for ${deviceId} was stopped during startup.`);
         }
       } catch (error) {
+        this.clearHeartbeatTimer(capture);
         // A replacement subscriber may have installed a new capture while this
         // asynchronous start was unwinding. Never remove that newer capture.
         if (this.captures.get(deviceId) === capture) {

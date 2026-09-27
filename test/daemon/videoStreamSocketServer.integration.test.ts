@@ -1277,6 +1277,20 @@ describe("VideoStreamSocketServer", () => {
     expect(h.server.activeDeviceIds()).toHaveLength(0);
   });
 
+  test("clears a heartbeat armed by startup media when capture start fails", async () => {
+    const fakeTimer = new FakeTimer();
+    const h = await startHarness({
+      timer: fakeTimer,
+      startData: Buffer.from([0, 0, 0, 1, 5, 0xaa, 0, 0, 0, 1, 1]),
+      startError: new Error("encoder failed"),
+    });
+
+    const { ack } = await subscribe(h.socketPath);
+
+    expect(ack.success).toBe(false);
+    expect(fakeTimer.getPendingIntervalCount()).toBe(0);
+  });
+
   test("reports a Screen Recording denial as structured permission state with a legacy fallback", async () => {
     const h = await startHarness({ startError: new ScreenRecordingPermissionError() });
 

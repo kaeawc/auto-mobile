@@ -636,7 +636,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     )
   private val recompositionStore = RecompositionStore()
   private val frameMetricsStore = FrameMetricsStore()
-  private val viewHierarchyExtractor = ViewHierarchyExtractor(recompositionStore)
+  internal val workStats = CtrlProxyWorkStats()
+  private val viewHierarchyExtractor = ViewHierarchyExtractor(recompositionStore, workStats)
   private val jsonCompact = Json {
     prettyPrint = false
     encodeDefaults = true
@@ -669,7 +670,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   private lateinit var webSocketServer: WebSocketServer
   private lateinit var hierarchyDebouncer: HierarchyDebouncer
   private lateinit var rotationProvenance: RotationProvenanceTracker
-  private var hierarchyBroadcastThrottler: BroadcastThrottler? = null
   private val navigationEventAccumulator = NavigationEventAccumulator()
   private val sdkEventBatchProcessor by lazy {
     SdkEventBatchProcessor(
@@ -788,6 +788,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   // Logcat reader for automatic log capture
   private var logcatReader: LogcatReader? = null
+  private var logEventBuffer: BoundedLogBuffer? = null
 
   private val commandReceiver =
     object : BroadcastReceiver() {
@@ -1392,20 +1393,15 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           perfProvider = perfProvider,
           quickDebounceMs = 5L,
           animationSkipWindowMs = 100L,
+          unsolicitedIntervalMs = DEFAULT_HIERARCHY_BROADCAST_INTERVAL_MS,
+          stats = workStats,
           extractHierarchy = { disableAllFiltering, snapshotOptions ->
             extractHierarchyDirect(disableAllFiltering, snapshotOptions)
           },
         )
 
-      // Subscribe to hierarchy updates from the debouncer.
-      // Throttle event-driven broadcasts to avoid saturating the ADB port-forwarding
-      // pipe. The extraction itself stays fast (request_hierarchy uses extractNowBlocking
-      // and bypasses this flow entirely), but unsolicited pushes are rate-limited so
-      // on-demand requests have a clear pipe to travel through.
-      val broadcastThrottler =
-        BroadcastThrottler(timeProvider, minIntervalMs = DEFAULT_HIERARCHY_BROADCAST_INTERVAL_MS)
-      hierarchyBroadcastThrottler = broadcastThrottler
-
+      // Event-driven extraction is admitted before this collector at the configured interval.
+      // Deliver every admitted result so extraction time cannot cause a final refresh to be lost.
       hierarchyFlowJob =
         hierarchyDebouncer.hierarchyFlow
           .onEach { result ->
@@ -1423,53 +1419,30 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
                     TAG,
                     "Hierarchy changed (hash=${result.hash}, extraction=${result.extractionTimeMs}ms)",
                   )
-                  // Only serialize and persist a Changed frame that will actually broadcast. A
-                  // throttled frame skips both the wire push and the flushed disk write (issue
-                  // #5469) — the debug file is refreshed by the next non-throttled broadcast and
-                  // force-written by every explicit hierarchy request, so no real consumer is
-                  // staled.
-                  if (broadcastThrottler.shouldBroadcast()) {
-                    // Serialize the tree exactly once and reuse the compact wire form for the debug
-                    // file, so a single Changed result never serializes twice (issue #5469). The
-                    // frame-context entry is released even if the encode throws (leak fix).
-                    deliverHierarchyFrame(
-                      serialize = {
-                        perfProvider.track("serializeHierarchy") {
-                          jsonCompact.encodeToString(result.hierarchy)
-                        }
-                      },
-                      write = { serialized ->
-                        writeHierarchyToFile(result.hierarchy, serialized = serialized)
-                      },
-                      broadcast = { serialized ->
-                        broadcastHierarchyUpdate(result.hierarchy, serialized = serialized)
-                      },
-                      releaseFrameContext = {
-                        extractedHierarchyFrameContexts.remove(result.hierarchy)
-                      },
-                    )
-                  } else {
-                    extractedHierarchyFrameContexts.remove(result.hierarchy)
-                    Log.d(
-                      TAG,
-                      "Throttled event-driven broadcast (${broadcastThrottler.timeSinceLastBroadcastMs()}ms since last)",
-                    )
-                  }
+                  // Serialize once for the debug file and wire; release frame context on failure.
+                  deliverHierarchyFrame(
+                    serialize = {
+                      perfProvider.track("serializeHierarchy") {
+                        jsonCompact.encodeToString(result.hierarchy)
+                      }
+                    },
+                    write = { serialized ->
+                      writeHierarchyToFile(result.hierarchy, serialized = serialized)
+                    },
+                    broadcast = { serialized ->
+                      broadcastHierarchyUpdate(result.hierarchy, serialized = serialized)
+                    },
+                    releaseFrameContext = {
+                      extractedHierarchyFrameContexts.remove(result.hierarchy)
+                    },
+                  )
                 }
                 is HierarchyResult.Unchanged -> {
                   Log.d(
                     TAG,
                     "Hierarchy unchanged (animation mode, skipped=${result.skippedEventCount})",
                   )
-                  if (broadcastThrottler.shouldBroadcast()) {
-                    broadcastHierarchyUpdate(result.hierarchy)
-                  } else {
-                    extractedHierarchyFrameContexts.remove(result.hierarchy)
-                    Log.d(
-                      TAG,
-                      "Throttled event-driven broadcast (${broadcastThrottler.timeSinceLastBroadcastMs()}ms since last)",
-                    )
-                  }
+                  broadcastHierarchyUpdate(result.hierarchy)
                 }
                 is HierarchyResult.Error -> {
                   Log.w(TAG, "Hierarchy extraction error: ${result.message}")
@@ -1538,16 +1511,32 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
       // Start logcat reader for automatic log capture. Gate parsing on a connected client so a
       // chatty device is not regex-parsed while nobody is consuming logs.
+      val logBuffer = BoundedLogBuffer(capacity = 128, stats = workStats)
+      logEventBuffer = logBuffer
+      serviceScope.launch {
+        var reportedFailure = false
+        for (response in logBuffer.channel) {
+          try {
+            if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
+              webSocketServer.broadcast(response)
+            }
+            reportedFailure = false
+          } catch (e: CancellationException) {
+            throw e
+          } catch (e: Exception) {
+            if (!reportedFailure) Log.w(TAG, "Error broadcasting log event", e)
+            reportedFailure = true
+          }
+        }
+      }
       logcatReader =
         LogcatReader(
-          onLogEvent = { response ->
-            if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
-              serviceScope.launch { webSocketServer.broadcast(response) }
-            }
-          },
+          onLogEvent = {},
+          tryDeliver = logBuffer::offer,
           hasConsumer = {
             ::webSocketServer.isInitialized && webSocketServer.getConnectionCount() > 0
           },
+          stats = workStats,
         )
       logcatReader?.start()
       Log.d(TAG, "Logcat reader started")
@@ -1629,6 +1618,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     // Stop logcat reader
     logcatReader?.stop()
     logcatReader = null
+    logEventBuffer?.channel?.close()
+    logEventBuffer = null
 
     if (::overlayDrawer.isInitialized) {
       overlayDrawer.destroy()
@@ -1693,7 +1684,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   override fun setHierarchyInterval(intervalMs: Long?) {
     val resolvedIntervalMs = intervalMs ?: DEFAULT_HIERARCHY_BROADCAST_INTERVAL_MS
-    hierarchyBroadcastThrottler?.setMinIntervalMs(resolvedIntervalMs)
+    if (::hierarchyDebouncer.isInitialized) {
+      hierarchyDebouncer.setUnsolicitedIntervalMs(resolvedIntervalMs)
+    }
     Log.d(TAG, "Hierarchy broadcast interval set to ${resolvedIntervalMs}ms")
   }
 

@@ -6,6 +6,7 @@ import dev.jasonpearson.automobile.ctrlproxy.perf.PerfProvider
 import dev.jasonpearson.automobile.ctrlproxy.perf.SystemTimeProvider
 import dev.jasonpearson.automobile.ctrlproxy.perf.TimeProvider
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -59,12 +60,15 @@ sealed class HierarchyResult {
  *   100ms)
  * @param extractHierarchy Function to extract the current hierarchy
  */
-class HierarchyDebouncer(
+class HierarchyDebouncer
+internal constructor(
   private val scope: CoroutineScope,
   private val timeProvider: TimeProvider = SystemTimeProvider(),
   private val perfProvider: PerfProvider = PerfProvider.instance,
   private val quickDebounceMs: Long = 5L,
   private val animationSkipWindowMs: Long = 100L,
+  private var unsolicitedIntervalMs: Long = 250L,
+  internal val stats: CtrlProxyWorkStats = CtrlProxyWorkStats(),
   private val extractHierarchy:
     (disableAllFiltering: Boolean, snapshotOptions: HierarchySnapshotOptions) -> ViewHierarchy?,
 ) {
@@ -82,6 +86,51 @@ class HierarchyDebouncer(
 
   // Debounce job
   private var debounceJob: Job? = null
+  private val eventLock = Any()
+  private var extractionInFlight = false
+  private var pendingRefresh = false
+  private var lastUnsolicitedStart: Long? = null
+
+  fun setUnsolicitedIntervalMs(intervalMs: Long) {
+    synchronized(eventLock) {
+      unsolicitedIntervalMs = intervalMs.coerceAtLeast(0L)
+      if (pendingRefresh && !extractionInFlight) {
+        debounceJob?.cancel()
+        debounceJob = null
+        schedulePendingRefresh()
+      }
+    }
+  }
+
+  private fun schedulePendingRefresh() {
+    if (debounceJob?.isActive == true || extractionInFlight || !pendingRefresh) return
+    val elapsed = lastUnsolicitedStart?.let { timeProvider.currentTimeMillis() - it }
+    val waitMs =
+      maxOf(
+        quickDebounceMs,
+        unsolicitedIntervalMs - (elapsed ?: unsolicitedIntervalMs),
+        if (inAnimationMode) animationModeEndTime - timeProvider.currentTimeMillis() else 0L,
+      )
+    debounceJob =
+      scope.launch(start = CoroutineStart.LAZY) {
+        delay(waitMs)
+        synchronized(eventLock) {
+          pendingRefresh = false
+          extractionInFlight = true
+          lastUnsolicitedStart = timeProvider.currentTimeMillis()
+        }
+        try {
+          extractAndCompare()
+        } finally {
+          synchronized(eventLock) {
+            extractionInFlight = false
+            debounceJob = null
+            schedulePendingRefresh()
+          }
+        }
+      }
+    debounceJob?.start()
+  }
 
   // Flag to temporarily suppress flow emissions (during setText operations)
   @Volatile private var suppressFlowEmissions: Boolean = false
@@ -102,6 +151,7 @@ class HierarchyDebouncer(
    * debouncing and decides whether to extract based on animation detection.
    */
   fun onAccessibilityEvent() {
+    stats.accessibilityEvents.incrementAndGet()
     val now = timeProvider.currentTimeMillis()
     lastEventTimestamp = now
 
@@ -112,10 +162,14 @@ class HierarchyDebouncer(
       return
     }
 
-    // If we're in animation mode and within the skip window, skip extraction
+    // Retain animation skipping, but remember the last event for a trailing refresh.
     if (inAnimationMode && now < animationModeEndTime) {
       skippedEventCount++
-      Log.d(TAG, "Skipping extraction (animation mode), skipped: $skippedEventCount")
+      synchronized(eventLock) {
+        stats.coalescedEvents.incrementAndGet()
+        pendingRefresh = true
+        schedulePendingRefresh()
+      }
       return
     }
 
@@ -125,11 +179,16 @@ class HierarchyDebouncer(
       inAnimationMode = false
     }
 
-    // Cancel previous debounce and start new one
-    debounceJob?.cancel()
-    debounceJob = scope.launch {
-      delay(quickDebounceMs)
-      extractAndCompare()
+    synchronized(eventLock) {
+      if (
+        pendingRefresh ||
+          extractionInFlight ||
+          lastUnsolicitedStart?.let { now - it < unsolicitedIntervalMs } == true
+      ) {
+        stats.coalescedEvents.incrementAndGet()
+      }
+      pendingRefresh = true
+      schedulePendingRefresh()
     }
   }
 
@@ -138,7 +197,6 @@ class HierarchyDebouncer(
    * immediately after launching the extraction.
    */
   fun extractNow(disableAllFiltering: Boolean = false) {
-    debounceJob?.cancel()
     inAnimationMode = false
     scope.launch { extractAndCompare(disableAllFiltering = disableAllFiltering) }
   }
@@ -158,7 +216,6 @@ class HierarchyDebouncer(
     disableAllFiltering: Boolean = false,
     snapshotOptions: HierarchySnapshotOptions = HierarchySnapshotOptions(),
   ): ViewHierarchy? {
-    debounceJob?.cancel()
     inAnimationMode = false
     kotlinx.coroutines.runBlocking {
       extractAndCompare(
@@ -204,7 +261,11 @@ class HierarchyDebouncer(
 
     try {
       // Cancel any pending debounce job
-      debounceJob?.cancel()
+      synchronized(eventLock) {
+        debounceJob?.cancel()
+        debounceJob = null
+        pendingRefresh = false
+      }
       inAnimationMode = false
 
       kotlinx.coroutines.runBlocking {
@@ -310,6 +371,7 @@ class HierarchyDebouncer(
     perfProvider.independentRoot("hierarchyDebouncer")
     try {
       perfProvider.startOperation("extractHierarchy")
+      stats.extractions.incrementAndGet()
       val hierarchy = extractHierarchy(disableAllFiltering, snapshotOptions)
       perfProvider.endOperation("extractHierarchy")
 
@@ -326,6 +388,7 @@ class HierarchyDebouncer(
         perfProvider.endOperation("computeHash")
 
         if (structuralHash == lastStructuralHash) {
+          stats.unchangedCaptures.incrementAndGet()
           // Structure unchanged - likely animation
           // Enter animation mode to skip subsequent events
           inAnimationMode = true
@@ -428,8 +491,13 @@ class HierarchyDebouncer(
 
   /** Reset all state (for testing or reconnection). */
   fun reset() {
-    debounceJob?.cancel()
-    debounceJob = null
+    synchronized(eventLock) {
+      debounceJob?.cancel()
+      debounceJob = null
+      pendingRefresh = false
+      extractionInFlight = false
+      lastUnsolicitedStart = null
+    }
     lastStructuralHash = 0
     inAnimationMode = false
     animationModeEndTime = 0

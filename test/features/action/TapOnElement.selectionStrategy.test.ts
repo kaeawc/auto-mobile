@@ -204,6 +204,26 @@ describe("TapOnElement selectionStrategy", () => {
     expect(result.focusVerified).toBe(true);
   });
 
+  test("verifies focus on an empty EditText when its s2 id is unchanged (PR #7780 review)", async () => {
+    const before = editableElement({
+      text: undefined,
+      "resource-id": undefined,
+      "view-id": "s2-empty-compose-input",
+      focused: false,
+      node: [{ text: "Email" }],
+    });
+    const after = { ...before, focused: true };
+    const { result, tapped } = await executeFocus(
+      before,
+      { hierarchy: { node: after } },
+      "s2-empty-compose-input",
+    );
+
+    expect(tapped).toBe(true);
+    expect(result.focusVerified).toBe(true);
+    expect(result.success).toBe(true);
+  });
+
   test("verifies focus when the IME pans a field vertically without changing its horizontal extent (PR #7780 review)", async () => {
     const before = editableElement({
       "resource-id": undefined,

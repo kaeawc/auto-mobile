@@ -1187,7 +1187,8 @@ export class TapOnElement extends BaseVisualChange {
       const candidateValue = candidate[key];
       if (
         key === "view-id" &&
-        (String(targetValue).startsWith("s2-") || String(candidateValue).startsWith("s2-"))
+        targetValue !== candidateValue &&
+        [targetValue, candidateValue].some((value) => String(value).startsWith("s2-"))
       ) {
         continue;
       }
@@ -2261,7 +2262,7 @@ export class TapOnElement extends BaseVisualChange {
 
           if (this.strategy.shouldRunPreTapStability(options)) {
             const stable = await this.resolveAndroidStableTapTargetAfterRefreshes(
-              options,
+              requestedAction === "focus" ? { ...options, action: "focus" as const } : options,
               observeResult,
               action,
               requireResourceId,

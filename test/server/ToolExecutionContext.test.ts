@@ -352,6 +352,42 @@ describe("ToolExecutionContext", () => {
     expect(setupCalls).toBe(1);
   });
 
+  test("already preserves the caller's abort reason when setup itself is cancelled", async () => {
+    const setupStarted = Promise.withResolvers<void>();
+    const finishSetup = Promise.withResolvers<void>();
+    let setupCalls = 0;
+    setDeviceReadinessProxyDriverProviderForTesting(() => ({
+      resetSetupState: () => {},
+      setup: async () => {
+        setupCalls++;
+        setupStarted.resolve();
+        await finishSetup.promise;
+        return { success: false, message: "Operation cancelled", category: "unknown" };
+      },
+      waitForConnection: async () => true,
+      isInstalled: async () => true,
+      isVersionCompatible: async () => true,
+    }));
+    await sessionManager.createSession("session-abort-during-setup", "device-1", "android");
+    const controller = new AbortController();
+    const reason = new Error("caller cancelled during setup");
+    const context = createToolExecutionContext(
+      "session-abort-during-setup",
+      sessionManager,
+      devicePool,
+      sessionOptions,
+      undefined,
+      undefined,
+      false,
+      controller.signal,
+    );
+    await setupStarted.promise;
+    controller.abort(reason);
+    finishSetup.resolve();
+    await expect(context).rejects.toBe(reason);
+    expect(setupCalls).toBe(1);
+  });
+
   test("does not run accessibility setup when a pooled emulator serial is stale", async () => {
     const staleDeviceManager = new FakeDeviceManager();
     const stalePool = new DevicePool(

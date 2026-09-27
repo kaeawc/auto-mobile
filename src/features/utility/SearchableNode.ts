@@ -231,7 +231,7 @@ function hoistSearchableLabels(entries: SearchableEntry[]): void {
 
 /** Snapshot labelled owners so inherited labels never chain between controls. */
 function attributeSearchableLabels(entries: SearchableEntry[]): void {
-  const labelled = new Set(entries.filter((entry) => entry.label !== undefined));
+  const labelled = new Set(entries.filter((entry) => entry.label !== undefined && entry.bounds));
   for (const entry of entries) {
     if (entry.label !== undefined || !inheritsOwnerLabel(entry.affordances)) {
       continue;

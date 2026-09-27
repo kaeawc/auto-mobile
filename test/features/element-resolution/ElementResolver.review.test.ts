@@ -210,6 +210,25 @@ test("unlabelled toggles inherit the displayed owning row label", () => {
   );
 });
 
+test("unbounded wrappers do not steal a toggle's displayed row label", () => {
+  const capture = snapshot([
+    node("row", {
+      text: "Airplane mode",
+      clickable: true,
+      node: [
+        node("wrapper", {
+          text: "Hidden wrapper",
+          bounds: undefined,
+          node: [node("switch", { checkable: true })],
+        }),
+      ],
+    }),
+  ]);
+  expect(resolver.resolve(capture, { text: "Airplane mode", index: 1 }, tap).chosen?.nativeId).toBe(
+    "switch",
+  );
+});
+
 test("iOS table cells are sibling rows rather than collection boundaries", () => {
   const capture = snapshot([
     node("table", {

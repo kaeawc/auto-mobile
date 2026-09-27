@@ -90,6 +90,7 @@ export class BoundedAndroidDeviceReboot implements AndroidDeviceReboot {
 
     if (attempts.length > 0) {
       await this.timer.sleep(this.backoff.delayForAttempt(attempts.length));
+      attempts = this.attemptsInWindow(targetKey);
     }
 
     while (attempts.length < this.maxAttempts) {
@@ -113,6 +114,7 @@ export class BoundedAndroidDeviceReboot implements AndroidDeviceReboot {
         );
         if (attempts.length < this.maxAttempts) {
           await this.timer.sleep(this.backoff.delayForAttempt(attempts.length));
+          attempts = this.attemptsInWindow(targetKey);
         }
       }
     }

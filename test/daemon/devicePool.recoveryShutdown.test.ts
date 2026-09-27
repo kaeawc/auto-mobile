@@ -166,6 +166,7 @@ async function setup(
   manager: LaggingShutdownManager = new LaggingShutdownManager(),
   cancelDeviceSessionExecutions?: (sessionId: string, reason: string) => Promise<number>,
   emulatorLossIncidentStore?: EmulatorLossIncidentStore,
+  apps = new FakeInstalledAppsRepository(),
 ) {
   const timer = new FakeTimer();
   const persistence = new FakeDeviceSessionPersistence();
@@ -174,7 +175,7 @@ async function setup(
     sessions,
     "daemon",
     timer,
-    new FakeInstalledAppsRepository(),
+    apps,
     manager,
     new DefaultRetryExecutor(timer),
     undefined,
@@ -201,7 +202,7 @@ async function setup(
   return { timer, sessions, manager, pool, captured, persistence };
 }
 
-async function setupPassiveRestart() {
+async function setupPassiveRestart(release = true) {
   const timer = new FakeTimer();
   const persistence = new FakeDeviceSessionPersistence();
   const sessions = new SessionManager(timer, persistence);
@@ -239,10 +240,12 @@ async function setupPassiveRestart() {
   );
   const captured = pool.getDevice(original.deviceId)!;
   manager.bootedDevices = [];
-  await expect(
-    pool.recoverSessionBoundAndroidDeviceAfterLoss(original.deviceId, undefined, captured),
-  ).resolves.toBe("released");
-  return { timer, persistence, sessions, manager, pool };
+  if (release) {
+    await expect(
+      pool.recoverSessionBoundAndroidDeviceAfterLoss(original.deviceId, undefined, captured),
+    ).resolves.toBe("released");
+  }
+  return { timer, persistence, sessions, manager, pool, captured };
 }
 
 async function setupAwaitingOwner(manager: LaggingShutdownManager) {
@@ -784,6 +787,34 @@ test("continuity-disabled emulator loss keeps a terminal released settlement", a
   } finally {
     sessions.stopCleanupTimer();
   }
+});
+
+test("restart recovery remains pending after 60 seconds and recovers at 120 seconds", async () => {
+  const { timer, sessions, manager, pool } = await setupPassiveRestart();
+  sessions.stopCleanupTimer();
+  let settled = false;
+  const resume = sessions.getOrCreateSession("session", pool, "android", undefined, true);
+  void resume.then(
+    () => {
+      settled = true;
+    },
+    () => {
+      settled = true;
+    },
+  );
+  await flush();
+  for (let second = 1; second <= 120; second++) {
+    timer.advanceTime(1_000);
+    await flush();
+    expect(settled).toBe(false);
+  }
+  manager.bootedDevices = [original];
+  await pool.addDevice(original, image);
+  timer.advanceTime(1_000);
+  await expect(resume).resolves.toMatchObject({
+    sessionId: "session",
+    assignedDevice: original.deviceId,
+  });
 });
 
 test("device-restart resume waits for the same serial and preserves its session UUID", async () => {
@@ -2429,6 +2460,127 @@ test("a cancelled Android recovery does not spend the crash-loop budget (#7545)"
     await expect(secondRecovery).resolves.toBe("recovered");
     expect(manager.startedDevices).toHaveLength(1);
   } finally {
+    sessions.stopCleanupTimer();
+  }
+});
+
+test("same-AVD replacement is reserved while session tracking persistence stalls", async () => {
+  const trackingStarted = Promise.withResolvers<void>();
+  const finishTracking = Promise.withResolvers<void>();
+  const replacement = { ...original, deviceId: "emulator-5556" };
+  class BlockingTrackingRepository extends FakeInstalledAppsRepository {
+    override async setSessionTracking(daemonId: string, deviceId: string, startedAt: number) {
+      if (deviceId === replacement.deviceId) {
+        trackingStarted.resolve();
+        await finishTracking.promise;
+      }
+      await super.setSessionTracking(daemonId, deviceId, startedAt);
+    }
+  }
+  const { sessions, manager, pool, captured, timer } = await setup(
+    new KillTrackingShutdownManager(),
+    undefined,
+    undefined,
+    new BlockingTrackingRepository(),
+  );
+  try {
+    manager.bootedDevices = [replacement];
+    const recovery = pool.recoverSessionBoundAndroidDeviceAfterLoss(
+      original.deviceId,
+      undefined,
+      captured,
+    );
+    await trackingStarted.promise;
+    let allocated = false;
+    const competing = pool.assignDeviceToSession("competitor", "android");
+    void competing.then(
+      () => {
+        allocated = true;
+      },
+      () => {},
+    );
+    await flush();
+    expect(allocated).toBe(false);
+    expect(pool.getDevice(replacement.deviceId)?.sessionId).toBeNull();
+    finishTracking.resolve();
+    await expect(recovery).resolves.toBe("recovered");
+    expect(sessions.getSession("session")?.assignedDevice).toBe(replacement.deviceId);
+    expect(
+      (pool as unknown as { androidRecoveryHandoffOwners: Map<string, symbol> })
+        .androidRecoveryHandoffOwners.size,
+    ).toBe(0);
+    // End the ordinary allocator's bounded wait without any wall-clock timers.
+    timer.enableAutoAdvance();
+    timer.advanceTime(1_000);
+    await expect(competing).rejects.toThrow();
+  } finally {
+    finishTracking.resolve();
+    sessions.stopCleanupTimer();
+  }
+});
+
+test("coalesced passive loss inherits the resolved primary awaiting-device settlement", async () => {
+  const { sessions, pool, captured } = await setupPassiveRestart(false);
+  try {
+    const primary = await pool.recordEmulatorLossIncident(
+      original.deviceId,
+      "watched-process-exit",
+    );
+    const joined = await pool.recordEmulatorLossIncident(
+      original.deviceId,
+      "device-discovery-miss",
+    );
+    expect(primary).toBeDefined();
+    expect(joined).toBeDefined();
+    await pool.recoverSessionBoundAndroidDeviceAfterLoss(original.deviceId, primary, captured);
+    const internals = pool as unknown as {
+      joinSessionPreservingRecovery(
+        recovery: { incidentId?: string; promise: Promise<"released"> },
+        incidentId?: string,
+      ): Promise<string>;
+    };
+    await internals.joinSessionPreservingRecovery(
+      { incidentId: primary, promise: Promise.resolve("released") },
+      joined,
+    );
+    expect(await pool.waitForEmulatorLossIncident(joined!, 0)).toMatchObject({
+      recovery: { outcome: "not-attempted" },
+      session: { state: "awaiting-device" },
+    });
+  } finally {
+    sessions.stopCleanupTimer();
+  }
+});
+
+test("terminal teardown wins over a joined device-restart release settlement", async () => {
+  const { sessions, pool, captured, persistence } = await setupPassiveRestart(false);
+  const finishSetup = Promise.withResolvers<void>();
+  try {
+    const session = sessions.getSession("session")!;
+    const setup = sessions.trackSessionSetup(session, () => finishSetup.promise);
+    const incident = await pool.recordEmulatorLossIncident(
+      original.deviceId,
+      "device-discovery-miss",
+    );
+    const terminal = sessions.releaseSession("session", "heartbeat-timeout");
+    await flush();
+    expect(sessions.isCurrentSession(session)).toBe(true);
+    const recovery = pool.recoverSessionBoundAndroidDeviceAfterLoss(
+      original.deviceId,
+      incident,
+      captured,
+    );
+    await flush();
+    finishSetup.resolve();
+    await Promise.all([setup, terminal, recovery]);
+    expect(await persistence.getSession?.("session")).toMatchObject({
+      release_reason: "heartbeat-timeout",
+    });
+    expect(await pool.waitForEmulatorLossIncident(incident!, 0)).toMatchObject({
+      session: { state: "released" },
+    });
+  } finally {
+    finishSetup.resolve();
     sessions.stopCleanupTimer();
   }
 });

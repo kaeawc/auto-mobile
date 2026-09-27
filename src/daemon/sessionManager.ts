@@ -1857,6 +1857,11 @@ export class SessionManager {
     return session.assignedDevice;
   }
 
+  /** Final reason for this exact identity, including releases joined during teardown. */
+  getFinalizedReleaseReason(session: Session): string | undefined {
+    return this.finalizedSessionReleases.get(session)?.finalizedSnapshot?.releaseReason;
+  }
+
   getTerminalReleaseSnapshot(sessionId: string): SessionReleaseSnapshot | undefined {
     const snapshot = this.terminalReleaseSnapshots.get(sessionId);
     return snapshot ? { ...snapshot, heartbeat: { ...snapshot.heartbeat } } : undefined;
@@ -2352,11 +2357,16 @@ export class SessionManager {
       }
 
       this.notifySessionRelease(releaseSnapshot);
-      const persistedSnapshot = await this.completeReleasePersistence(
-        releaseSnapshot,
-        reason,
-        session,
-      );
+      let persistedSnapshot: SessionReleaseSnapshot;
+      try {
+        persistedSnapshot = await this.completeReleasePersistence(releaseSnapshot, reason, session);
+      } catch (error) {
+        // Removal committed before persistence. Retain its identity and reason
+        // while the pending release snapshot is retried by the recovery owner.
+        reason.finalizedSnapshot ??= releaseSnapshot;
+        this.recordFinalizedSessionRelease(session, reason);
+        throw toActionableError(error, `Failed to finalize session ${sessionId} release`);
+      }
       this.recordFinalizedSessionRelease(session, reason);
       if (persistedSnapshot !== releaseSnapshot) {
         this.notifySessionRelease(persistedSnapshot);

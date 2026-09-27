@@ -35,7 +35,11 @@ import {
   isDevicePoolAutolockEnabled,
   getDevicePoolTimeoutMs,
 } from "./poolConfig";
-import { DeviceSessionRepository, deviceRestartReleaseReason } from "../db/deviceSessionRepository";
+import {
+  DeviceSessionRepository,
+  deviceRestartReleaseReason,
+  isDeviceRestartReleaseReason,
+} from "../db/deviceSessionRepository";
 import { AndroidDeviceReboot, BoundedAndroidDeviceReboot } from "../utils/androidDeviceReboot";
 import {
   DeviceCriteriaMatcher,
@@ -3397,6 +3401,7 @@ export class DevicePool {
       await this.completeEmulatorLossRecovery(
         incidentId,
         primaryIncident?.recovery.outcome ?? (result === "recovered" ? "recovered" : "exhausted"),
+        primaryIncident?.session?.state === "awaiting-device" ? "awaiting-device" : undefined,
       );
       this.settleEmulatorLossIncident(incidentId);
     }
@@ -3625,7 +3630,9 @@ export class DevicePool {
         incidentId,
         incident?.recovery.outcome ??
           (incident?.recovery.policy.onLoss ? "exhausted" : "not-attempted"),
-        releasedForDeviceRestart ? "awaiting-device" : undefined,
+        isDeviceRestartReleaseReason(this.sessionManager.getFinalizedReleaseReason(session) ?? "")
+          ? "awaiting-device"
+          : undefined,
       );
     }
   }
@@ -4507,6 +4514,7 @@ export class DevicePool {
     this.setRecoveringAndroidImage(avdName, recoveryImage);
     this.trackAndroidRecoveryImageReservation(preservedSessionId);
     this.recoveringAndroidDeviceIds.add(device.id);
+    const replacementHandoffOwner = Symbol("same-avd-recovery-handoff");
     let recoveryAttempt = 0;
     let retainRecoveryImage = false;
     try {
@@ -4517,6 +4525,7 @@ export class DevicePool {
           avdName,
           retainLeaseUntil,
           allowActiveStop,
+          replacementHandoffOwner,
         );
       } catch (error) {
         logger.warn(
@@ -4540,6 +4549,7 @@ export class DevicePool {
           preservedAutolockSessionId,
           recoveryImage,
           incidentId,
+          replacementHandoffOwner,
         );
       }
       if (!this.detachSessionForAndroidRecovery(device, preservedSessionId, preservedSession)) {
@@ -4681,7 +4691,12 @@ export class DevicePool {
       await this.completeEmulatorLossRecovery(incidentId, recovered ? "recovered" : "exhausted");
       return recovered;
     } finally {
-      this.finishAndroidRecoveryAttempt(avdName, recoveryDeviceIds, retainRecoveryImage);
+      this.finishAndroidRecoveryAttempt(
+        avdName,
+        recoveryDeviceIds,
+        retainRecoveryImage,
+        replacementHandoffOwner,
+      );
     }
   }
 
@@ -4689,7 +4704,13 @@ export class DevicePool {
     avdName: string,
     recoveryDeviceIds: ReadonlySet<string>,
     retainRecoveryImage: boolean,
+    replacementHandoffOwner: symbol,
   ): void {
+    for (const [deviceId, owner] of this.androidRecoveryHandoffOwners) {
+      if (owner === replacementHandoffOwner) {
+        this.androidRecoveryHandoffOwners.delete(deviceId);
+      }
+    }
     const recordOwnsImage = Array.from(this.recoveringSessionLosses.values()).some(
       (record) => record.avdName === avdName && record.reservations.has("image"),
     );
@@ -4735,6 +4756,7 @@ export class DevicePool {
     avdName: string,
     retainLeaseUntil: (settlement: Promise<unknown>) => void,
     allowActiveStop: boolean,
+    handoffOwner: symbol,
   ): Promise<"stopped" | "same-avd" | "declined"> {
     const current = this.devices.get(device.id);
     if (this.sameAvdReplacements(device, avdName).length > 0) {
@@ -4765,6 +4787,7 @@ export class DevicePool {
         avdName,
         retainLeaseUntil,
         hadTrackedProcess,
+        handoffOwner,
       );
     }
     return "stopped";
@@ -4779,6 +4802,7 @@ export class DevicePool {
     preservedAutolockSessionId: string | undefined,
     recoveryImage: DeviceInfo,
     incidentId: string | undefined,
+    handoffOwner: symbol,
   ): Promise<boolean> {
     if (replacementState === "declined") {
       return false;
@@ -4791,6 +4815,7 @@ export class DevicePool {
       preservedAutolockSessionId,
       recoveryImage,
       incidentId,
+      handoffOwner,
     );
   }
 
@@ -4801,6 +4826,7 @@ export class DevicePool {
     preservedSession: Session | undefined,
     preservedAutolockSessionId: string | undefined,
     recoveryImage: DeviceInfo,
+    handoffOwner: symbol,
   ): Promise<boolean> {
     const replacements = this.sameAvdReplacements(device, avdName);
     if (replacements.length !== 1) {
@@ -4826,7 +4852,7 @@ export class DevicePool {
           platform: "android",
         },
         true,
-        undefined,
+        new Set([handoffOwner]),
         undefined,
         device.id,
       );
@@ -4869,6 +4895,7 @@ export class DevicePool {
     preservedAutolockSessionId: string | undefined,
     recoveryImage: DeviceInfo,
     incidentId: string | undefined,
+    handoffOwner: symbol,
   ): Promise<boolean> {
     if (
       !(await this.rebindSameAvdReplacementSession(
@@ -4878,6 +4905,7 @@ export class DevicePool {
         preservedSession,
         preservedAutolockSessionId,
         recoveryImage,
+        handoffOwner,
       ))
     ) {
       return false;
@@ -4999,6 +5027,7 @@ export class DevicePool {
     avdName: string,
     retainLeaseUntil: (settlement: Promise<unknown>) => void,
     adoptOnly: boolean,
+    handoffOwner: symbol,
   ): Promise<"stopped" | "same-avd"> {
     const timeoutMs = 30_000;
     const deadlineMs = this.timer.now() + timeoutMs;
@@ -5054,6 +5083,7 @@ export class DevicePool {
         return "stopped";
       }
       if (matchingAvd.deviceId !== disconnectedDevice.id) {
+        this.androidRecoveryHandoffOwners.set(matchingAvd.deviceId, handoffOwner);
         await this.addDevice(matchingAvd, disconnectedDevice.androidImage);
         signal.throwIfAborted();
         return "same-avd";
@@ -5335,7 +5365,17 @@ export class DevicePool {
     platform?: Platform,
     recoveryTarget?: SessionRecoveryTarget,
   ): Promise<string> {
-    const maxAttempts = Math.ceil(this.DEVICE_WAIT_TIMEOUT_MS / this.DEVICE_WAIT_INTERVAL_MS);
+    const recoveryDeadline = recoveryTarget?.restartRecoveryDeadlineMs;
+    const timeoutMs =
+      recoveryDeadline === undefined
+        ? this.DEVICE_WAIT_TIMEOUT_MS
+        : Math.max(0, recoveryDeadline - this.timer.now());
+    // Include the deadline attempt: attempt one runs immediately, before any sleep.
+    const maxAttempts = Math.max(
+      1,
+      Math.ceil(timeoutMs / this.DEVICE_WAIT_INTERVAL_MS) +
+        (recoveryDeadline === undefined ? 0 : 1),
+    );
     let firstAttemptLogged = false;
 
     const result = await this.retryExecutor.execute(
@@ -5377,7 +5417,7 @@ export class DevicePool {
             firstAttemptLogged = true;
             logger.info(
               `All ${assignResult.totalDevices} devices busy, ` +
-                `session ${sessionId} waiting for availability (timeout: ${this.DEVICE_WAIT_TIMEOUT_MS / 1000}s)...`,
+                `session ${sessionId} waiting for availability (timeout: ${timeoutMs / 1000}s)...`,
             );
           }
           throw new DevicePoolError("All devices busy", true);
@@ -5401,8 +5441,17 @@ export class DevicePool {
       },
       {
         maxAttempts,
-        delays: this.DEVICE_WAIT_INTERVAL_MS,
-        shouldRetry: (error) => error instanceof DevicePoolError && error.isRetryable,
+        delays: () =>
+          Math.min(
+            this.DEVICE_WAIT_INTERVAL_MS,
+            recoveryDeadline === undefined
+              ? this.DEVICE_WAIT_INTERVAL_MS
+              : Math.max(0, recoveryDeadline - this.timer.now()),
+          ),
+        shouldRetry: (error) =>
+          error instanceof DevicePoolError &&
+          error.isRetryable &&
+          (recoveryDeadline === undefined || this.timer.now() < recoveryDeadline),
       },
     );
 
@@ -5424,7 +5473,7 @@ export class DevicePool {
       // Timeout case - all attempts exhausted
       const stats = this.getStatsForPlatform(platform);
       throw new ActionableError(
-        `Timed out waiting for device after ${Math.round(this.DEVICE_WAIT_TIMEOUT_MS / 1000)}s (${result.attempts} attempts).\n` +
+        `Timed out waiting for device after ${Math.round(timeoutMs / 1000)}s (${result.attempts} attempts).\n` +
           `Session: ${sessionId}\n` +
           `Device pool status:\n` +
           `  Total devices: ${stats.total}\n` +

@@ -12,6 +12,53 @@ export interface SimulatorAppearanceClient {
 
 export interface BoundedRetryOptions {
   attempts?: number;
+  signal?: AbortSignal;
+}
+
+export async function applyIosFixtureAppearance(
+  appearance: "light" | "dark",
+  operation: () => Promise<unknown>,
+  { attempts = 2, signal }: BoundedRetryOptions = {},
+): Promise<boolean> {
+  try {
+    await runWithBoundedRetry(operation, { attempts, signal });
+    return true;
+  } catch (error) {
+    if (signal?.aborted && error instanceof Error && error.name === "AbortError") {
+      throw error;
+    }
+    console.warn(
+      `[#7605] simctl ui appearance ${appearance} failed after ${attempts} attempt(s), skipping: ${error}`,
+    );
+    return false;
+  }
+}
+
+export class IosFixtureTransitions {
+  private fallbackMode = false;
+
+  constructor(
+    private readonly setAppearance: (
+      appearance: "light" | "dark",
+      signal?: AbortSignal,
+    ) => Promise<boolean>,
+    private readonly launchFallback: (bundleId: string, signal?: AbortSignal) => Promise<void>,
+  ) {}
+
+  async apply(
+    appearance: "light" | "dark",
+    fallbackBundleId: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    if (!this.fallbackMode) {
+      const applied = await this.setAppearance(appearance, signal);
+      if (applied) {
+        return;
+      }
+      this.fallbackMode = true;
+    }
+    await this.launchFallback(fallbackBundleId, signal);
+  }
 }
 
 /**
@@ -25,13 +72,18 @@ export interface BoundedRetryOptions {
  */
 export async function runWithBoundedRetry<T>(
   operation: (attempt: number) => Promise<T>,
-  { attempts = 2 }: BoundedRetryOptions = {},
+  { attempts = 2, signal }: BoundedRetryOptions = {},
 ): Promise<T> {
   let lastError: unknown;
   for (let attempt = 1; attempt <= attempts; attempt++) {
     try {
       return await operation(attempt);
     } catch (error) {
+      if (signal?.aborted && error instanceof Error && error.name === "AbortError") {
+        throw error;
+      }
+      // A non-abort attempt may recover on the next bounded try.
+      console.debug(`Bounded retry attempt ${attempt} failed: ${error}`);
       lastError = error;
     }
   }

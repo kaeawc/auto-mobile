@@ -25,9 +25,10 @@ import {
   type KeyframeRecoverySample,
 } from "../helpers/captureStageTimeline";
 import {
+  applyIosFixtureAppearance,
   configuredIosSimulatorUdid,
+  IosFixtureTransitions,
   isKeyframeRecoveryTimeout,
-  runWithBoundedRetry,
   shouldRetryWebRtcDaemonStart,
   waitForBootedSimulatorUdid,
   type SimulatorAppearanceClient,
@@ -715,30 +716,23 @@ async function setIosFixtureAppearance(
     console.warn(`[#6969] iOS simulator appearance fixture timed out before simctl could run`);
     return true;
   }
-  try {
-    await runWithBoundedRetry(
-      async () => {
-        const remainingMs = deadline - timer.now();
-        if (remainingMs <= 0) {
-          throw new Error(
-            "iOS simulator appearance fixture deadline exhausted before simctl could run",
-          );
-        }
-        return execFileAsync("xcrun", ["simctl", "ui", udid, "appearance", appearance], {
-          timeout: Math.min(attemptTimeoutMs, remainingMs),
-          killSignal: "SIGKILL",
-          signal,
-        });
-      },
-      { attempts },
-    );
-    return true;
-  } catch (error) {
-    console.warn(
-      `[#7605] simctl ui appearance ${appearance} failed after ${attempts} attempt(s), skipping: ${error}`,
-    );
-    return false;
-  }
+  return applyIosFixtureAppearance(
+    appearance,
+    async () => {
+      const remainingMs = deadline - timer.now();
+      if (remainingMs <= 0) {
+        throw new Error(
+          "iOS simulator appearance fixture deadline exhausted before simctl could run",
+        );
+      }
+      return execFileAsync("xcrun", ["simctl", "ui", udid, "appearance", appearance], {
+        timeout: Math.min(attemptTimeoutMs, remainingMs),
+        killSignal: "SIGKILL",
+        signal,
+      });
+    },
+    { attempts, signal },
+  );
 }
 
 async function launchIosFallbackScreen(bundleId: string, signal?: AbortSignal): Promise<void> {
@@ -750,11 +744,18 @@ async function launchIosFallbackScreen(bundleId: string, signal?: AbortSignal): 
       signal,
     });
   } catch (error) {
-    // Best-effort fallback for an already-degraded fixture path; a failure here
-    // must not fail the capture attempt either (#7605).
-    console.warn(`[#7605] iOS fallback screen-change launch of ${bundleId} failed: ${error}`);
+    if (signal?.aborted && error instanceof Error && error.name === "AbortError") {
+      throw error;
+    }
+    // A non-abort launch failure is safe to skip because this cosmetic fixture path is already degraded.
+    console.debug(`[#7605] iOS fallback screen-change launch of ${bundleId} failed: ${error}`);
   }
 }
+
+const iosFixtureTransitions = new IosFixtureTransitions(
+  (appearance, signal) => setIosFixtureAppearance(appearance, { signal }),
+  launchIosFallbackScreen,
+);
 
 describe("WHEP iOS fixture setup", () => {
   test("propagates simulator-client setup failures", async () => {
@@ -840,10 +841,7 @@ async function launchFixture(signal?: AbortSignal): Promise<void> {
     // Simulator is already foregrounded by the workflow. Toggling appearance
     // yields the required visible fixture without a Settings-app launch, which
     // can wedge on macOS hosted runners.
-    const applied = await setIosFixtureAppearance("light", { signal });
-    if (!applied) {
-      await launchIosFallbackScreen(IOS_FALLBACK_DEFAULT_BUNDLE_ID, signal);
-    }
+    await iosFixtureTransitions.apply("light", IOS_FALLBACK_DEFAULT_BUNDLE_ID, signal);
     return;
   }
   throw new Error("AUTOMOBILE_WEBRTC_DEVICE_PLATFORM must be android or ios");
@@ -863,10 +861,7 @@ async function changeFixture(signal?: AbortSignal): Promise<void> {
     return;
   }
   if (platform === "ios") {
-    const applied = await setIosFixtureAppearance("dark", { signal });
-    if (!applied) {
-      await launchIosFallbackScreen(IOS_FALLBACK_CHANGE_BUNDLE_ID, signal);
-    }
+    await iosFixtureTransitions.apply("dark", IOS_FALLBACK_CHANGE_BUNDLE_ID, signal);
     return;
   }
   throw new Error("AUTOMOBILE_WEBRTC_DEVICE_PLATFORM must be android or ios");

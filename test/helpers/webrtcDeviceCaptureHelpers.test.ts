@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
+  applyIosFixtureAppearance,
   configuredIosSimulatorUdid,
+  IosFixtureTransitions,
   isKeyframeRecoveryTimeout,
   runWithBoundedRetry,
   shouldRetryWebRtcDaemonStart,
@@ -10,6 +12,64 @@ import {
 import { FakeTimer } from "../fakes/FakeTimer";
 
 describe("WHEP device capture helper logic", () => {
+  test("propagates caller cancellation during appearance instead of falling back", async () => {
+    const controller = new AbortController();
+    const abortError = Object.assign(new Error("appearance cancelled"), { name: "AbortError" });
+    let calls = 0;
+    let fallbackLaunches = 0;
+    const transitions = new IosFixtureTransitions(
+      (appearance, signal) =>
+        applyIosFixtureAppearance(
+          appearance,
+          async () => {
+            calls++;
+            controller.abort();
+            throw abortError;
+          },
+          { attempts: 2, signal },
+        ),
+      async () => {
+        fallbackLaunches++;
+      },
+    );
+
+    await expect(transitions.apply("dark", "settings", controller.signal)).rejects.toBe(abortError);
+    expect(calls).toBe(1);
+    expect(fallbackLaunches).toBe(0);
+  });
+
+  test("returns fallback status only after non-abort appearance retries exhaust", async () => {
+    let calls = 0;
+    await expect(
+      applyIosFixtureAppearance("dark", async () => {
+        calls++;
+        throw new Error("simctl unavailable");
+      }),
+    ).resolves.toBe(false);
+    expect(calls).toBe(2);
+  });
+
+  test("keeps using paired app transitions after appearance fallback begins", async () => {
+    const appearances: string[] = [];
+    const launched: string[] = [];
+    const transitions = new IosFixtureTransitions(
+      async (appearance) => {
+        appearances.push(appearance);
+        return appearance === "light";
+      },
+      async (bundleId) => {
+        launched.push(bundleId);
+      },
+    );
+
+    await transitions.apply("light", "photos");
+    await transitions.apply("dark", "settings");
+    await transitions.apply("light", "photos");
+
+    expect(appearances).toEqual(["light", "dark"]);
+    expect(launched).toEqual(["settings", "photos"]);
+  });
+
   test("bounded retry returns an immediate success after one attempt", async () => {
     let calls = 0;
     await expect(

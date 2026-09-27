@@ -65,6 +65,9 @@ export async function resolveWebRtcStreamDevice(
   await reconcileDiscoveryObservation(candidates, "webrtc-stream-resolve");
 
   if (candidates.length === 0) {
+    if (platform === "android") {
+      throw new ActionableError("No connected android devices found.");
+    }
     candidates = await rediscoverWebRtcStreamDevices(deviceManager, platform, timer, signal);
   }
 

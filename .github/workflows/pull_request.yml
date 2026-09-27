@@ -2304,42 +2304,17 @@ jobs:
 
       # The main simulator is no longer needed after navigation. Shut it down
       # before starting iPhone 15: the second boot correlated with simctl list
-      # stalls and exhaustion of the odd-width step's 12-minute budget (#7771).
+      # stalls and exhaustion of the odd-width step's budget (#7771).
+      # 60s shutdown (including its 15s request) + 600s boot + ~120s
+      # inspection/xcodebuild (718s historical boot+inspection+test) = ~780s
+      # minimum. Allow 15 minutes for headroom; the daemon-stop step is separate.
       - name: "Run odd-width CtrlProxy screenshot test (iPhone 15)"
         if: ${{ !cancelled() && steps.build-ctrlproxy.outcome == 'success' && steps.ctrlproxy-simulator.outcome == 'success' }}
-        timeout-minutes: 13
+        timeout-minutes: 15
         env:
           SIMULATOR_UDID: ${{ steps.ctrlproxy-simulator.outputs.simulator_udid }}
         run: |
-          if [[ ! "${SIMULATOR_UDID}" =~ ^[A-Fa-f0-9]{8}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{12}$ ]]; then
-            echo "::error::Invalid main simulator UDID before odd-width screenshot test." >&2
-            exit 1
-          fi
-          echo "Shutting down main simulator ${SIMULATOR_UDID} before booting iPhone 15."
-          source ./scripts/ios/run_with_timeout.sh
-          if ! run_with_timeout 15 xcrun simctl shutdown "${SIMULATOR_UDID}"; then
-            echo "::warning::Main simulator shutdown request timed out or failed; checking observed state." >&2
-          fi
-          shutdown_deadline=$((SECONDS + 60))
-          simulator_state=""
-          while (( SECONDS < shutdown_deadline )); do
-            remaining=$((shutdown_deadline - SECONDS))
-            poll_timeout=$((remaining < 10 ? remaining : 10))
-            simulator_state="$(
-              run_with_timeout "${poll_timeout}" xcrun simctl list devices --json |
-                jq -r --arg udid "${SIMULATOR_UDID}" '.devices[][] | select(.udid == $udid) | .state'
-            )" || simulator_state=""
-            if [[ "${simulator_state}" == "Shutdown" ]]; then
-              break
-            fi
-            if (( SECONDS < shutdown_deadline )); then
-              sleep 2
-            fi
-          done
-          if [[ "${simulator_state}" != "Shutdown" ]]; then
-            echo "::error::Main simulator ${SIMULATOR_UDID} did not reach Shutdown within 60 seconds before booting iPhone 15." >&2
-            exit 1
-          fi
+          bash ./scripts/ios/shutdown-main-simulator.sh "${SIMULATOR_UDID}"
           ios_version="$(xcrun --sdk iphonesimulator --show-sdk-version)"
           result="$(bun run src/index.ts --boot-device --platform ios --create-if-missing --timeout-ms 600000 --name "iPhone 15" --min-os-version "${ios_version}" --max-os-version "${ios_version}")"
           odd_width_udid="$(printf '%s' "${result}" | jq -r '.deviceId')"

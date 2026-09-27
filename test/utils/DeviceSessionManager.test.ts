@@ -3,7 +3,6 @@ import { EventEmitter } from "events";
 import {
   DeviceSessionManager,
   DefaultDeviceClientProvider,
-  SIMULATOR_APP_OPEN_GATE_TTL_MS,
 } from "../../src/utils/DeviceSessionManager";
 import { IOSCtrlProxyManager } from "../../src/utils/IOSCtrlProxyManager";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
@@ -880,15 +879,10 @@ describe("DeviceSessionManager legacy iOS auto-start readiness", () => {
   });
 });
 
-describe("DeviceSessionManager iOS openSimulatorApp", () => {
-  let fakeAdb: FakeAdbExecutor;
-  let fakeDeviceUtils: FakeDeviceUtils;
+describe("DeviceSessionManager iOS presentation policy", () => {
   let originalAppearanceDefaults: AppearanceConfigInput;
 
   beforeEach(() => {
-    fakeAdb = new FakeAdbExecutor();
-    fakeDeviceUtils = new FakeDeviceUtils();
-
     originalAppearanceDefaults = serverConfig.getAppearanceDefaults();
     serverConfig.setAppearanceDefaults({
       ...originalAppearanceDefaults,
@@ -902,144 +896,21 @@ describe("DeviceSessionManager iOS openSimulatorApp", () => {
     serverConfig.setAppearanceDefaults(originalAppearanceDefaults);
   });
 
-  function buildIosProvider(
-    fakeAdb: FakeAdbExecutor,
-    fakeDeviceUtils: FakeDeviceUtils,
-    fakeSimctl: FakeSimCtlClient,
-  ): FakeDeviceClientProvider {
-    const iosManager = new FakeIOSCtrlProxyManager();
+  function createIosManager(fakeSimctl: FakeSimCtlClient, timer = new FakeTimer()) {
     const iosClient = new FakeIOSCtrlProxy();
     iosClient.setConnected(true);
-    return new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, fakeSimctl as any, {
-      iosCtrlProxyManager: iosManager,
-      iosCtrlProxyClient: iosClient,
+    const provider = new FakeDeviceClientProvider(
+      new FakeAdbExecutor(),
+      new FakeDeviceUtils(),
+      fakeSimctl as never,
+      { iosCtrlProxyManager: new FakeIOSCtrlProxyManager(), iosCtrlProxyClient: iosClient },
+    );
+    return DeviceSessionManager.createInstance(provider, undefined, {
+      runnerReadinessTimer: timer,
     });
   }
 
-  test("should call openSimulatorApp once on the first booted iOS device verification", async () => {
-    const fakeSimctl = new FakeSimCtlClient();
-    fakeSimctl.setDeviceInfo("ios-sim-1", {
-      udid: "ios-sim-1",
-      name: "iPhone 15",
-      state: "Booted",
-      isAvailable: true,
-    });
-
-    const manager = DeviceSessionManager.createInstance(
-      buildIosProvider(fakeAdb, fakeDeviceUtils, fakeSimctl),
-    );
-
-    await manager.verifyIosDevice("ios-sim-1");
-
-    expect(fakeSimctl.getMethodCalls("openSimulatorApp")).toHaveLength(1);
-  });
-
-  test("should not call openSimulatorApp again on subsequent verifications", async () => {
-    const fakeSimctl = new FakeSimCtlClient();
-    fakeSimctl.setDeviceInfo("ios-sim-1", {
-      udid: "ios-sim-1",
-      name: "iPhone 15",
-      state: "Booted",
-      isAvailable: true,
-    });
-
-    const manager = DeviceSessionManager.createInstance(
-      buildIosProvider(fakeAdb, fakeDeviceUtils, fakeSimctl),
-    );
-
-    await manager.verifyIosDevice("ios-sim-1");
-    await manager.verifyIosDevice("ios-sim-1");
-    await manager.verifyIosDevice("ios-sim-1");
-
-    expect(fakeSimctl.getMethodCalls("openSimulatorApp")).toHaveLength(1);
-  });
-
-  test("should not call openSimulatorApp when device is not booted", async () => {
-    const fakeSimctl = new FakeSimCtlClient();
-    fakeSimctl.setDeviceInfo("ios-sim-1", {
-      udid: "ios-sim-1",
-      name: "iPhone 15",
-      state: "Shutdown",
-      isAvailable: true,
-    });
-
-    const manager = DeviceSessionManager.createInstance(
-      buildIosProvider(fakeAdb, fakeDeviceUtils, fakeSimctl),
-    );
-
-    await manager.verifyIosDevice("ios-sim-1");
-
-    expect(fakeSimctl.getMethodCalls("openSimulatorApp")).toHaveLength(0);
-  });
-
-  test("should retry openSimulatorApp on subsequent verifications after a failure", async () => {
-    const fakeSimctl = new FakeSimCtlClient();
-    fakeSimctl.setDeviceInfo("ios-sim-1", {
-      udid: "ios-sim-1",
-      name: "iPhone 15",
-      state: "Booted",
-      isAvailable: true,
-    });
-
-    const manager = DeviceSessionManager.createInstance(
-      buildIosProvider(fakeAdb, fakeDeviceUtils, fakeSimctl),
-    );
-
-    // First call: openSimulatorApp throws — flag must NOT be set
-    fakeSimctl.setOpenSimulatorAppError(new Error("open: command not found"));
-    await manager.verifyIosDevice("ios-sim-1");
-    expect(fakeSimctl.getMethodCalls("openSimulatorApp")).toHaveLength(1);
-
-    // Second call: open succeeds now — flag gets set
-    fakeSimctl.setOpenSimulatorAppError(null);
-    await manager.verifyIosDevice("ios-sim-1");
-    expect(fakeSimctl.getMethodCalls("openSimulatorApp")).toHaveLength(2);
-
-    // Third call: flag is set, no retry
-    await manager.verifyIosDevice("ios-sim-1");
-    expect(fakeSimctl.getMethodCalls("openSimulatorApp")).toHaveLength(2);
-  });
-
-  // A headless verification must NOT latch the process-lifetime flag: the
-  // Simulator GUI was never launched, so the only thing that would ever launch
-  // it again is a later verification. Latching on a no-op left Simulator.app
-  // unopened for the daemon's lifetime once the host gained an Aqua session,
-  // and made SimCtlClient's headless-session cache TTL unreachable from the
-  // session path (PR #6830 review).
-  test("should re-attempt openSimulatorApp when the first call was a headless no-op", async () => {
-    const fakeSimctl = new FakeSimCtlClient();
-    fakeSimctl.setDeviceInfo("ios-sim-1", {
-      udid: "ios-sim-1",
-      name: "iPhone 15",
-      state: "Booted",
-      isAvailable: true,
-    });
-    fakeSimctl.setSimulatorAppHeadless(true);
-
-    const manager = DeviceSessionManager.createInstance(
-      buildIosProvider(fakeAdb, fakeDeviceUtils, fakeSimctl),
-    );
-
-    await manager.verifyIosDevice("ios-sim-1");
-    await manager.verifyIosDevice("ios-sim-1");
-    expect(fakeSimctl.getMethodCalls("openSimulatorApp")).toHaveLength(2);
-
-    // The host gains a GUI login session: the next verification launches, and
-    // only then does the flag latch.
-    fakeSimctl.setSimulatorAppHeadless(false);
-    await manager.verifyIosDevice("ios-sim-1");
-    expect(fakeSimctl.getMethodCalls("openSimulatorApp")).toHaveLength(3);
-
-    await manager.verifyIosDevice("ios-sim-1");
-    expect(fakeSimctl.getMethodCalls("openSimulatorApp")).toHaveLength(3);
-  });
-
-  // A GUI launch must not latch for the process lifetime: the daemon outlives
-  // the Aqua session, so a logout (or a user quitting Simulator.app) leaves the
-  // GUI closed with nothing left to reopen it. The gate expires after
-  // SIMULATOR_APP_OPEN_GATE_TTL_MS so GUI -> headless -> GUI transitions reach
-  // SimCtlClient's own headless-session probe again (PR #6830 review).
-  test("should re-probe openSimulatorApp once the GUI-launch gate expires", async () => {
+  test("repeated verification across multiple 30-second intervals never presents", async () => {
     const fakeSimctl = new FakeSimCtlClient();
     fakeSimctl.setDeviceInfo("ios-sim-1", {
       udid: "ios-sim-1",
@@ -1048,28 +919,62 @@ describe("DeviceSessionManager iOS openSimulatorApp", () => {
       isAvailable: true,
     });
     const timer = new FakeTimer();
+    const manager = createIosManager(fakeSimctl, timer);
 
-    const manager = DeviceSessionManager.createInstance(
-      buildIosProvider(fakeAdb, fakeDeviceUtils, fakeSimctl),
-      undefined,
-      { timer },
+    for (let attempt = 0; attempt < 4; attempt++) {
+      await manager.verifyIosDevice(
+        "ios-sim-1",
+        attempt % 2 === 0 ? { readiness: "booted" } : undefined,
+      );
+      timer.advanceTime(30_000);
+    }
+    expect(fakeSimctl.getMethodCalls("openSimulatorApp")).toHaveLength(0);
+  });
+
+  test("verification of a shutdown device never presents", async () => {
+    const fakeSimctl = new FakeSimCtlClient();
+    fakeSimctl.setDeviceInfo("ios-sim-1", {
+      udid: "ios-sim-1",
+      name: "iPhone 15",
+      state: "Shutdown",
+      isAvailable: true,
+    });
+    await createIosManager(fakeSimctl).verifyIosDevice("ios-sim-1");
+    expect(fakeSimctl.getMethodCalls("openSimulatorApp")).toHaveLength(0);
+  });
+
+  test("session auto-start presents after its own boot; reconnect to the booted device does not", async () => {
+    const fakeSimctl = new FakeSimctl();
+    const device = { deviceId: "ios-sim-1", name: "iPhone 15", platform: "ios" as const };
+    fakeSimctl.setAvailableSimulators([{ ...device, isAvailable: true }]);
+    fakeSimctl.setDeviceInfo(device.deviceId, {
+      udid: device.deviceId,
+      name: device.name,
+      state: "Booted",
+      isAvailable: true,
+    });
+    const presentations: Array<{ udid: string; generation: string }> = [];
+    Object.assign(fakeSimctl, {
+      presentSimulatorAfterStart: async (udid: string, generation: string) => {
+        presentations.push({ udid, generation });
+      },
+    });
+    const iosClient = new FakeIOSCtrlProxy();
+    iosClient.setConnected(true);
+    const provider = new FakeDeviceClientProvider(
+      new FakeAdbExecutor(),
+      new FakeDeviceUtils(),
+      fakeSimctl as never,
+      { iosCtrlProxyManager: new FakeIOSCtrlProxyManager(), iosCtrlProxyClient: iosClient },
     );
+    const manager = DeviceSessionManager.createInstance(provider);
 
-    await manager.verifyIosDevice("ios-sim-1");
-    expect(fakeSimctl.getMethodCalls("openSimulatorApp")).toHaveLength(1);
-
-    // Still inside the gate: no re-probe.
-    timer.advanceTime(SIMULATOR_APP_OPEN_GATE_TTL_MS - 1);
-    await manager.verifyIosDevice("ios-sim-1");
-    expect(fakeSimctl.getMethodCalls("openSimulatorApp")).toHaveLength(1);
-
-    // Gate expired: re-probe, and the fresh launch re-arms it.
-    timer.advanceTime(1);
-    await manager.verifyIosDevice("ios-sim-1");
-    expect(fakeSimctl.getMethodCalls("openSimulatorApp")).toHaveLength(2);
-
-    await manager.verifyIosDevice("ios-sim-1");
-    expect(fakeSimctl.getMethodCalls("openSimulatorApp")).toHaveLength(2);
+    await manager.findOrStartIosDevice({ readiness: "booted" });
+    expect(presentations).toHaveLength(1);
+    expect(presentations[0].udid).toBe(device.deviceId);
+    fakeSimctl.setBootedSimulators([device]);
+    await manager.findOrStartIosDevice({ readiness: "booted" });
+    expect(presentations).toHaveLength(1);
   });
 });
 

@@ -1,7 +1,6 @@
 package dev.jasonpearson.automobile.discover.ictrace
 
 import android.content.Intent
-import android.util.Log
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -25,12 +24,21 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.jasonpearson.automobile.sdk.TrackRecomposition
+
+internal fun exportIcTrace(recorder: IcTraceRecorder, share: (String) -> Unit) {
+  val jsonl = IcTraceFormatter.format(recorder.snapshot())
+  share(jsonl)
+}
+
+class IcTraceViewModel(val recorder: IcTraceRecorder = IcTraceRecorder()) : ViewModel()
 
 @Composable
 fun IcTraceScreen() {
   TrackRecomposition(id = "screen.icTrace", composableName = "IcTraceScreen") {
-    val recorder = remember { IcTraceRecorder() }
+    val recorder = viewModel<IcTraceViewModel>().recorder
     val events by recorder.events.collectAsState()
     val context = LocalContext.current
     var captureText by remember { mutableStateOf(false) }
@@ -82,14 +90,14 @@ fun IcTraceScreen() {
         Button(onClick = { recorder.clear() }) { Text("Clear") }
         Button(
           onClick = {
-            val jsonl = IcTraceFormatter.format(recorder.snapshot())
-            jsonl.lineSequence().filter { it.isNotEmpty() }.forEach { Log.i("IcTrace", it) }
-            val send =
-              Intent(Intent.ACTION_SEND).apply {
-                type = "text/plain"
-                putExtra(Intent.EXTRA_TEXT, jsonl)
-              }
-            context.startActivity(Intent.createChooser(send, "Export IC trace"))
+            exportIcTrace(recorder) { jsonl ->
+              val send =
+                Intent(Intent.ACTION_SEND).apply {
+                  type = "text/plain"
+                  putExtra(Intent.EXTRA_TEXT, jsonl)
+                }
+              context.startActivity(Intent.createChooser(send, "Export IC trace"))
+            }
           }
         ) {
           Text("Export")

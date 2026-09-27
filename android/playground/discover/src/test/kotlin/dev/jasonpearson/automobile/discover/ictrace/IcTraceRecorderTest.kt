@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.discover.ictrace
 
+import java.nio.charset.StandardCharsets
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -8,6 +9,32 @@ import org.junit.Test
 class IcTraceRecorderTest {
   private fun record(recorder: IcTraceRecorder, args: String = "") {
     recorder.record("commitText", args, 0, 1, -1, -1)
+  }
+
+  @Test
+  fun `default clock uses Android monotonic time source`() {
+    // The Android SDK stub cannot execute elapsedRealtime in a plain JVM test.
+    val recorderClass = IcTraceRecorder::class.java.getResourceAsStream("IcTraceRecorder.class")!!
+    val bytecode = recorderClass.use { String(it.readBytes(), StandardCharsets.ISO_8859_1) }
+    assertTrue(bytecode.contains("android/os/SystemClock"))
+    assertTrue(bytecode.contains("elapsedRealtime"))
+  }
+
+  @Test
+  fun `captured text is bounded and reports original length`() {
+    val recorder = IcTraceRecorder(captureText = true, nowMs = { 0L })
+    val text = "x".repeat(20_000)
+    val captured = recorder.textArg(text)
+    assertTrue(captured.length < 5_000)
+    assertTrue(captured.startsWith("\"x"))
+    assertTrue(captured.contains("truncated"))
+    assertTrue(captured.contains("length=20000"))
+    assertEquals("\"short\"", recorder.textArg("short"))
+    val nearCap = "x".repeat(4094)
+    assertEquals("\"$nearCap\"", recorder.textArg(nearCap))
+    assertTrue(recorder.textArg("\u0001".repeat(20_000)).length <= 4096)
+    recorder.setCaptureText(false)
+    assertEquals("length=20000", recorder.textArg(text))
   }
 
   @Test

@@ -58,6 +58,12 @@ class DeepLinkManagerTest {
   }
 
   @Test
+  fun testParseChatDeepLinkSelectsChatTab() {
+    val destination = DeepLinkManager.parseDeepLink(Uri.parse("automobile:playground/chat"))
+    assertEquals(HomeDestination(selectedTab = 0, selectedSubTab = 5), destination)
+  }
+
+  @Test
   fun testParseValidVideoPlayerDeepLink() {
     val uri = Uri.parse("automobile:playground/video_player/sample123")
     val destination = DeepLinkManager.parseDeepLink(uri)

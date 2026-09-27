@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { DeepLinkManager, type ChooserAppMetadata } from "../../src/utils/DeepLinkManager";
+import {
+  DeepLinkManager,
+  resolveChooserActivityLabel,
+  type ChooserAppMetadata,
+} from "../../src/utils/DeepLinkManager";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -8,8 +12,10 @@ const metadata = (
   nodes: unknown[],
   packageName?: string,
   listId?: string,
+  activityLabel?: string | null,
 ): ChooserAppMetadata => ({
   getLabel: async () => label,
+  getActivityLabel: async () => activityLabel ?? null,
   getFreshHierarchy: async (_device, _factory, minTimestamp) =>
     ({
       ...hierarchy(nodes, listId),
@@ -20,6 +26,142 @@ const metadata = (
 });
 
 const target = "com.example.app";
+
+const chromeQueryActivities = `1 activities found:
+  Activity #0:
+    priority=0 preferredOrder=0 match=0x208000 specificIndex=-1 isDefault=true
+    ActivityInfo:
+      name=com.google.android.apps.chrome.IntentDispatcher
+      packageName=com.android.chrome
+      enabled=true exported=true directBootAware=false
+      taskAffinity=null targetActivity=org.chromium.chrome.browser.document.ChromeLauncherActivity persistableMode=PERSIST_ROOT_ONLY
+      launchMode=LAUNCH_MULTIPLE flags=0x311220 privateFlags=0x2 theme=0x7f150219
+      screenOrientation=-1 configChanges=0x1fb3 softInputMode=0x0
+      lockTaskLaunchMode=LOCK_TASK_LAUNCH_MODE_DEFAULT
+      resizeMode=RESIZE_MODE_RESIZEABLE_VIA_SDK_VERSION
+      knownActivityEmbeddingCerts={}
+      requireContentUriPermissionFromCaller=CONTENT_URI_PERMISSION_NONE
+      ApplicationInfo:
+        name=org.chromium.chrome.browser.base.SplitChromeApplication
+        packageName=com.android.chrome
+        labelRes=0x7f1402c9 nonLocalizedLabel=null icon=0x7f090311 banner=0x0
+        className=org.chromium.chrome.browser.base.SplitChromeApplication
+        processName=com.android.chrome
+        taskAffinity=com.android.chrome
+        uid=10153 flags=0xa0cbbec5 privateFlags=0x84089110 theme=0x0
+        requiresSmallestWidthDp=0 compatibleWidthLimitDp=0 largestWidthLimitDp=0
+        sourceDir=/data/app/~~afYmDKAAY_-ODyVPxkmJ_g==/com.android.chrome-fA7oSWp6s_POwN2v4WbjQg==/Chrome.apk
+        resourceDirs=[/product/overlay/EmulationPixel7/EmulationPixel7Overlay.apk, /product/overlay/NavigationBarModeGestural/NavigationBarModeGesturalOverlay.apk]
+        overlayPaths=[/product/overlay/EmulationPixel7/EmulationPixel7Overlay.apk, /product/overlay/NavigationBarModeGestural/NavigationBarModeGesturalOverlay.apk]
+        seinfo=default:targetSdkVersion=34:partition=product
+        seinfoUser=:complete
+        dataDir=/data/user/0/com.android.chrome
+        deviceProtectedDataDir=/data/user_de/0/com.android.chrome
+        credentialProtectedDataDir=/data/user/0/com.android.chrome
+        sharedLibraryFiles=[/data/app/~~irmkDV_t22eDqWE3B405IA==/com.google.android.trichromelibrary_694313732-YasP6Id9bpKXd-s54WyXzA==/TrichromeLibrary.apk]
+        enabled=true minSdkVersion=29 targetSdkVersion=34 versionCode=694313732 targetSandboxVersion=1
+        manageSpaceActivityName=org.chromium.chrome.browser.site_settings.ManageSpaceActivity
+        supportsRtl=true
+        fullBackupContent=true
+        crossProfile=false
+        networkSecurityConfigRes=0x7f18002c
+        category=7
+        HiddenApiEnforcementPolicy=2
+        usesNonSdkApi=false
+        allowsPlaybackCapture=false
+        memtagMode=1
+        nativeHeapZeroInitialized=0
+        localeConfigRes=0x7f180026
+        enableOnBackInvokedCallback=true
+        allowCrossUidActivitySwitchFromBelow=true
+        mPageSizeAppCompatFlags=0
+        createTimestamp=5530718
+`;
+
+describe("ADB activity-label lookup", () => {
+  test("real Chrome query fixture has no activity label despite application label fields", async () => {
+    const adb = new FakeAdbExecutor();
+    expect(chromeQueryActivities).toContain("      ApplicationInfo:\n");
+    expect(chromeQueryActivities).toContain(
+      "        labelRes=0x7f1402c9 nonLocalizedLabel=null icon=0x7f090311 banner=0x0",
+    );
+    adb.setCommandResponse("query-activities", {
+      stdout: chromeQueryActivities,
+      stderr: "",
+    } as any);
+
+    expect(
+      await resolveChooserActivityLabel(adb, "com.android.chrome", "https://example.com"),
+    ).toBeNull();
+    expect(adb.getExecutedCommands()).toEqual([
+      "shell cmd package query-activities -a android.intent.action.VIEW -d 'https://example.com'",
+    ]);
+  });
+
+  test("reads a literal ActivityInfo label from the real query structure for a quoted URL", async () => {
+    const adb = new FakeAdbExecutor();
+    const labeledQuery = chromeQueryActivities.replace(
+      "      ApplicationInfo:",
+      "      labelRes=0x7f010001 nonLocalizedLabel=Open in Browser icon=0x7f090311\n      ApplicationInfo:",
+    );
+    adb.setCommandResponse("query-activities", { stdout: labeledQuery, stderr: "" } as any);
+
+    expect(
+      await resolveChooserActivityLabel(adb, "com.android.chrome", "example://item?q='x'&v=$HOME"),
+    ).toBe("Open in Browser");
+    expect(adb.getExecutedCommands()).toEqual([
+      "shell cmd package query-activities -a android.intent.action.VIEW -d 'example://item?q='\\''x'\\''&v=$HOME'",
+    ]);
+  });
+
+  test("returns null when two VIEW activities from the same package match", async () => {
+    const adb = new FakeAdbExecutor();
+    const firstActivity = chromeQueryActivities
+      .slice(chromeQueryActivities.indexOf("  Activity #0:"))
+      .replace(
+        "      ApplicationInfo:",
+        "      labelRes=0x7f010001 nonLocalizedLabel=Open in Browser icon=0x7f090311\n      ApplicationInfo:",
+      );
+    const secondActivity = firstActivity
+      .replace("Activity #0:", "Activity #1:")
+      .replace("IntentDispatcher", "OtherDispatcher")
+      .replace("Open in Browser", "Open in Other");
+    const twoActivities = `2 activities found:\n${firstActivity}${secondActivity}`;
+    adb.setCommandResponse("query-activities", { stdout: twoActivities, stderr: "" } as any);
+
+    expect(
+      await resolveChooserActivityLabel(adb, "com.android.chrome", "https://example.com"),
+    ).toBeNull();
+    expect(adb.getExecutedCommands()).toHaveLength(1);
+  });
+
+  test("ignores a literal ApplicationInfo label when ActivityInfo has none", async () => {
+    const adb = new FakeAdbExecutor();
+    const appLabeledQuery = chromeQueryActivities.replace(
+      "nonLocalizedLabel=null icon=0x7f090311",
+      "nonLocalizedLabel=Application Only icon=0x7f090311",
+    );
+    adb.setCommandResponse("query-activities", { stdout: appLabeledQuery, stderr: "" } as any);
+
+    expect(
+      await resolveChooserActivityLabel(adb, "com.android.chrome", "https://example.com"),
+    ).toBeNull();
+  });
+
+  test("does not invent a label for a resource-backed activity", async () => {
+    const adb = new FakeAdbExecutor();
+    const resourceLabeledQuery = chromeQueryActivities.replace(
+      "      ApplicationInfo:",
+      "      labelRes=0x7f010001 nonLocalizedLabel=null icon=0x7f090311\n      ApplicationInfo:",
+    );
+    adb.setCommandResponse("query-activities", { stdout: resourceLabeledQuery, stderr: "" } as any);
+
+    expect(
+      await resolveChooserActivityLabel(adb, "com.android.chrome", "https://example.com"),
+    ).toBeNull();
+  });
+});
+
 const row = (packageName: string, top: number) => ({
   clickable: true,
   bounds: { left: 0, top, right: 100, bottom: top + 40 },
@@ -41,7 +183,13 @@ const hierarchy = (nodes: unknown[], listId = "android:id/resolver_list") => ({
   },
 });
 
-async function choose(nodes: unknown[], label: string | null = null, listId?: string) {
+async function choose(
+  nodes: unknown[],
+  label: string | null = null,
+  listId?: string,
+  activityLabel?: string | null,
+  url?: string,
+) {
   const adb = new FakeAdbExecutor();
   adb.setDeviceTimestampMs(1000);
   const manager = new DeepLinkManager(
@@ -51,12 +199,13 @@ async function choose(nodes: unknown[], label: string | null = null, listId?: st
     null,
     undefined,
     undefined,
-    metadata(label, nodes, undefined, listId),
+    metadata(label, nodes, undefined, listId, activityLabel),
   );
   const result = await manager.handleIntentChooser(
     hierarchy(nodes, listId) as any,
     "custom",
     target,
+    url,
   );
   return { result, commands: adb.getExecutedCommands() };
 }
@@ -161,10 +310,27 @@ describe("custom intent chooser label fallback", () => {
     ...row("android", top),
     node: [{ text: label, package: "android" }],
   });
-  // #7724: Pending intent-label plumbing from HandleIntentChooser into DeepLinkManager.
-  test.skip("uses the resolved activity label when it differs from the application label", async () => {
-    const { result } = await choose([labelRow("Activity Name", 100)], "Application Name");
+  test("uses the resolved activity label when it differs from the application label", async () => {
+    const { result, commands } = await choose(
+      [labelRow("Activity Name", 100)],
+      "Application Name",
+      undefined,
+      "Activity Name",
+      "example://item",
+    );
     expect(result.success).toBe(true);
+    expect(commands).toEqual(["shell input tap 50 120"]);
+  });
+  test("falls back to the application label when the activity label is unavailable", async () => {
+    const { result, commands } = await choose(
+      [labelRow("Application Name", 100)],
+      "Application Name",
+      undefined,
+      null,
+      "example://item",
+    );
+    expect(result.success).toBe(true);
+    expect(commands).toEqual(["shell input tap 50 120"]);
   });
   test("matches the resolved label exactly and promotes its row", async () => {
     const { result, commands } = await choose(

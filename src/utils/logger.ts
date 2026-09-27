@@ -173,11 +173,6 @@ const logsDir = logSink === "stderr" ? undefined : ensureSecureLogsDirSync();
 const ownLogPrefix = resolveProcessLogPrefix(process.argv, process.pid);
 const logFilePath = logsDir ? path.join(logsDir, `${ownLogPrefix}.log`) : undefined;
 
-interface FailureProneStream {
-  on(event: "error", listener: (error: Error) => void): void;
-  destroy?(): void;
-}
-
 // A stream that opened successfully can still fail later — e.g. EACCES/ENOSPC
 // surfacing asynchronously once bun/node actually touches the fd. An 'error'
 // event with no listener throws and crashes the process, the exact failure
@@ -197,7 +192,7 @@ interface FailureProneStream {
 // preceding 'error' is rare enough (and self-healing via the next write's
 // lazy retry once a subsequent write actually fails) that it doesn't need a
 // handler here.
-const attachStreamFailureHandlers = (stream: FailureProneStream, target: string): void => {
+const attachStreamFailureHandlers = (stream: fs.WriteStream, target: string): void => {
   stream.on("error", (error) => {
     try {
       writeEmergencyLog(`Log stream error on ${target}`, error);
@@ -211,8 +206,39 @@ const attachStreamFailureHandlers = (stream: FailureProneStream, target: string)
     }
     // An asynchronously failed stream is no longer usable. Release its fd
     // before a later write retries opening this PID-scoped path.
-    stream.destroy?.();
+    deferReopenUntilClose(stream);
+    // Error listeners run in registration order. Wait until all of them have
+    // recorded this error before destroy can synchronously emit close.
+    queueMicrotask(() => stream.destroy?.());
   });
+};
+
+// Every old descriptor whose close was not confirmed keeps this path unavailable.
+// These are old-stream release barriers, never references to the current sink.
+const unconfirmedCloses = new Map<
+  fs.WriteStream,
+  { timer: Timer; timeoutHandle: NodeJS.Timeout; onClose: () => void }
+>();
+const deferReopenUntilClose = (stream: fs.WriteStream, timer: Timer = defaultTimer): void => {
+  if (stream.closed) {
+    return;
+  }
+  const previous = unconfirmedCloses.get(stream);
+  if (previous) {
+    previous.timer.clearTimeout(previous.timeoutHandle);
+    stream.off("close", previous.onClose);
+  }
+  const onClose = (): void => {
+    const entry = unconfirmedCloses.get(stream);
+    if (entry?.onClose === onClose) {
+      entry.timer.clearTimeout(entry.timeoutHandle);
+      stream.off("close", onClose);
+      unconfirmedCloses.delete(stream);
+    }
+  };
+  const timeoutHandle = timer.setTimeout(onClose, CLOSE_LOG_STREAM_TIMEOUT_MS);
+  unconfirmedCloses.set(stream, { timer, timeoutHandle, onClose });
+  stream.once("close", onClose);
 };
 
 // Constructing an appending WriteStream can throw synchronously — e.g. bun's
@@ -222,6 +248,14 @@ const attachStreamFailureHandlers = (stream: FailureProneStream, target: string)
 // lane). File logging is best-effort, so swallow the construction failure and
 // fall back to console-only logging rather than taking the process down.
 const openLogStream = (target: string): fs.WriteStream | undefined => {
+  for (const [stream, entry] of unconfirmedCloses) {
+    if (stream.closed) {
+      entry.onClose();
+    }
+  }
+  if (unconfirmedCloses.size > 0) {
+    return undefined;
+  }
   try {
     const stream = fs.createWriteStream(target, { flags: "a" });
     attachStreamFailureHandlers(stream, target);
@@ -488,14 +522,20 @@ if (logsDir) {
 // fire-and-forget `end()` races bun's epoll registration for the reused fd:
 // opening the new WriteStream while the old one's close is still in flight
 // can throw `EEXIST: file already exists, epoll_ctl` on the new stream's own
-// construction (issue #6149). A stream failing to close cleanly must not
-// block rotation itself, so that failure is caught and logged here rather
-// than propagated — the caller still proceeds to open the replacement.
-const closeStreamBeforeRotation = async (stream: fs.WriteStream): Promise<void> => {
+// construction (issue #6149). A failed close defers rotation until the
+// descriptor confirms release; writes degrade to stderr in the meantime.
+const closeStreamBeforeRotation = async (stream: fs.WriteStream): Promise<boolean> => {
   try {
     await closeLogStream(stream);
+    return true;
   } catch (closeError) {
+    const closeConfirmed = stream.closed === true;
+    // A timeout does not prove the old descriptor was released.
+    if (!closeConfirmed) {
+      deferReopenUntilClose(stream);
+    }
     await reportLogFailure("Failed to close log stream before rotation", closeError);
+    return closeConfirmed;
   }
 };
 
@@ -507,7 +547,10 @@ const rotateLogFile = async (paths: { dir: string; path: string }): Promise<void
   const closingStream = logStream;
   logStream = undefined;
   if (closingStream) {
-    await closeStreamBeforeRotation(closingStream);
+    if (!(await closeStreamBeforeRotation(closingStream))) {
+      bytesSinceLastRotationCheck = Number.POSITIVE_INFINITY;
+      return;
+    }
   }
 
   // Create backup filename with timestamp, scoped to this process's PID so
@@ -580,7 +623,7 @@ const recoverFromFailedRotation = async (
   paths: { dir: string; path: string },
   error: unknown,
 ): Promise<void> => {
-  if (logStream?.destroyed || !logStream?.writable) {
+  if (unconfirmedCloses.size === 0 && (logStream?.destroyed || !logStream?.writable)) {
     logStream = openLogStream(paths.path);
   }
   await reportLogFailure("Log rotation failed", error);
@@ -873,9 +916,13 @@ const writeToLogFile = async (level: string, message: string, args: any[]) => {
 const closeCurrentLogStream = async (timer: Timer = defaultTimer): Promise<void> => {
   if (logStream) {
     const closingStream = logStream;
-    await closeLogStream(closingStream, timer);
-    if (logStream === closingStream) {
-      logStream = undefined;
+    try {
+      await closeLogStream(closingStream, timer);
+    } finally {
+      if (logStream === closingStream) {
+        logStream = undefined;
+      }
+      deferReopenUntilClose(closingStream, timer);
     }
   }
 };
@@ -984,7 +1031,13 @@ export const logger: Logger = {
         lastWrite,
         new Promise<never>((_, reject) => {
           timeoutHandle = timer.setTimeout(() => {
-            logStream?.destroy();
+            const stalledStream = logStream;
+            if (stalledStream) {
+              logStream = undefined;
+              deferReopenUntilClose(stalledStream, timer);
+              stalledStream.destroy?.();
+            }
+            lastWrite = Promise.resolve();
             reject(
               toActionableError(
                 new Error("Pending log writes stalled"),

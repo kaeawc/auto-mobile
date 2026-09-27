@@ -134,7 +134,20 @@ describe("observe-to-resolve migration contract", () => {
       resolve: () => ({ chosen: fixed, candidates: [fixed, scrolling] }),
     };
     const reordered: ContractResolver = {
-      resolve: () => ({ chosen: scrolling, candidates: [scrolling, fixed] }),
+      resolve: () => ({ chosen: fixed, candidates: [scrolling, fixed] }),
+    };
+    expect(compareResolvers([selected], reference, reordered)).toEqual([selected.key]);
+  });
+  test("differential seam preserves class and className independently", () => {
+    const selected = cases[0];
+    const node = legacy.resolve(selected.capture, selected.query).chosen!;
+    const first = { ...node, class: "android.widget.Button", className: "Button" };
+    const second = { ...first, className: "TextView" };
+    const reference: ContractResolver = {
+      resolve: () => ({ chosen: first, candidates: [first, second] }),
+    };
+    const reordered: ContractResolver = {
+      resolve: () => ({ chosen: first, candidates: [second, first] }),
     };
     expect(compareResolvers([selected], reference, reordered)).toEqual([selected.key]);
   });

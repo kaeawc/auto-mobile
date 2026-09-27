@@ -53,7 +53,14 @@ describe("DaemonMcpProxy + real DaemonManager (version-mismatch integration)", (
   beforeEach(() => {
     tempDir = mkdtempSync(join(tmpdir(), "automobile-version-test-"));
     pidFilePath = join(tempDir, "test.pid");
-    realManager = new DaemonManager(undefined, undefined, undefined, undefined, pidFilePath);
+    realManager = new DaemonManager(
+      undefined,
+      undefined,
+      undefined,
+      join(tempDir, "test.lock"),
+      pidFilePath,
+      join(tempDir, "test.sock"),
+    );
     isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
     fakeTimer = new FakeTimer();
     fakeTimer.advanceTime(100_000);
@@ -363,7 +370,7 @@ describe("DaemonMcpProxy + real DaemonManager (version-mismatch integration)", (
   });
 
   test("PID file pointing at a dead PID is treated as not running, no restart attempted", async () => {
-    // PID 999999 is virtually never alive; status() should return running:false and unlink
+    // With neither a live PID nor an isolated socket, status reports not running without cleanup.
     const data: PidFileData = {
       pid: 999999,
       socketPath: join(tempDir, "test.sock"),

@@ -1,5 +1,6 @@
 import { DaemonUnavailableError } from "./client";
 
+export const DAEMON_REPUBLISH_IDENTITY_METHOD = "ide/republishIdentity";
 export const DAEMON_PREPARE_RESTART_METHOD = "ide/prepareRestart";
 export const DAEMON_PREPARE_MAINTENANCE_METHOD = "ide/prepareMaintenance";
 export const DAEMON_COMPLETE_MAINTENANCE_METHOD = "ide/completeMaintenance";

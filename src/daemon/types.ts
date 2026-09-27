@@ -275,6 +275,15 @@ export type DaemonSocketPaths = Record<DaemonSocketName, string>;
  * Daemon status information
  */
 export interface DaemonStatus {
+  reportedPidFilePath?: string;
+  reportedSocketPath?: string;
+  reportedSockets?: Record<string, string>;
+  /** Recovery never confuses an unverified socket owner with an absent daemon. */
+  recovery?: {
+    state: "repaired" | "replaced" | "deferred" | "unauthenticated" | "failed" | "joined";
+    reason?: string;
+    replacementOwner?: DaemonStatus;
+  };
   /** Whether daemon is running */
   running: boolean;
   /** Process ID if running */

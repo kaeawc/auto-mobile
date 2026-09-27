@@ -136,6 +136,7 @@ import { executionTracker } from "../server/executionTracker";
 import {
   DAEMON_COMPLETE_MAINTENANCE_METHOD,
   DAEMON_COMMIT_ACCEPTANCE_RESTART_METHOD,
+  DAEMON_REPUBLISH_IDENTITY_METHOD,
   DAEMON_PREPARE_MAINTENANCE_METHOD,
   DAEMON_PREPARE_RESTART_METHOD,
   DAEMON_RELEASE_ACCEPTANCE_RESTART_METHOD,
@@ -639,6 +640,12 @@ export class UnixSocketServer {
   private readonly identityStartedAt: number;
   private readonly processGenerationToken: string | undefined;
   private readonly startupOptions: DaemonOptions;
+  private readonly onRepublishIdentity?: () => Promise<boolean>;
+  private readonly identityDbPath?: string;
+  private readonly identityPidFilePath?: string;
+  private readonly identitySockets?: Record<string, string>;
+  private readonly identityProcessStartedAt?: number;
+  private identityRepublishInFlight?: Promise<{ accepted: boolean; reason?: string }>;
   private readonly onRestartAccepted?: () => void;
   private readonly liveAcceptanceStartupSecret: string | undefined;
   private readonly acceptanceDiscoveryCapability: string | undefined;
@@ -722,6 +729,11 @@ export class UnixSocketServer {
       processGenerationToken?: string;
       startupOptions?: DaemonOptions;
       enforce?: boolean;
+      onRepublishIdentity?: () => Promise<boolean>;
+      dbPath?: string;
+      pidFilePath?: string;
+      sockets?: Record<string, string>;
+      processStartedAt?: number;
       onRestartAccepted?: () => void;
       liveAcceptanceStartupSecret?: string;
       acceptanceDiscoveryCapability?: string;
@@ -762,6 +774,11 @@ export class UnixSocketServer {
     );
     this.processGenerationToken = handshakeConfig.processGenerationToken;
     this.startupOptions = snapshotDaemonOptions(handshakeConfig.startupOptions);
+    this.onRepublishIdentity = handshakeConfig.onRepublishIdentity;
+    this.identityDbPath = handshakeConfig.dbPath;
+    this.identityPidFilePath = handshakeConfig.pidFilePath;
+    this.identitySockets = handshakeConfig.sockets;
+    this.identityProcessStartedAt = handshakeConfig.processStartedAt;
     this.onRestartAccepted = handshakeConfig.onRestartAccepted;
     this.liveAcceptanceStartupSecret = handshakeConfig.liveAcceptanceStartupSecret;
     this.acceptanceDiscoveryCapability = handshakeConfig.acceptanceDiscoveryCapability;
@@ -3195,6 +3212,41 @@ export class UnixSocketServer {
     );
   }
 
+  /** Local admin RPC, generation-bound; publication never reserves tool admission. */
+  private async republishDaemonIdentity(
+    params: Record<string, unknown>,
+  ): Promise<{ accepted: boolean; reason?: string }> {
+    if (
+      !this.daemonGenerationMatches(params) ||
+      params.processGenerationToken !== this.processGenerationToken ||
+      params.processStartedAt !== this.identityProcessStartedAt
+    ) {
+      return { accepted: false, reason: "generation_changed" };
+    }
+    if (this.identityRepublishInFlight) {
+      return this.identityRepublishInFlight;
+    }
+    this.identityRepublishInFlight = this.publishIdentity();
+    try {
+      return await this.identityRepublishInFlight;
+    } finally {
+      this.identityRepublishInFlight = undefined;
+    }
+  }
+
+  private async publishIdentity(): Promise<{ accepted: boolean; reason?: string }> {
+    if (!this.onRepublishIdentity) {
+      return { accepted: false, reason: "republish_unavailable" };
+    }
+    try {
+      const accepted = await this.onRepublishIdentity();
+      return accepted ? { accepted: true } : { accepted: false, reason: "startup_pending" };
+    } catch (error) {
+      logger.warn("Failed to republish daemon identity", error);
+      return { accepted: false, reason: "republish_failed" };
+    }
+  }
+
   private prepareDaemonMaintenance(params: Record<string, unknown>): DaemonMaintenancePreparation {
     if (!this.daemonGenerationMatches(params)) {
       return { accepted: false, reason: "generation_changed" };
@@ -3608,6 +3660,9 @@ export class UnixSocketServer {
       case "ide/ping": {
         return { ok: true, timestamp: this.timer.now() };
       }
+      case DAEMON_REPUBLISH_IDENTITY_METHOD: {
+        return await this.republishDaemonIdentity(request.params);
+      }
       case DAEMON_PREPARE_RESTART_METHOD: {
         return this.prepareDaemonRestart(request.params);
       }
@@ -3645,6 +3700,11 @@ export class UnixSocketServer {
                 .slice(0, 8)
             : null,
           startedAt: this.identityStartedAt,
+          processStartedAt: this.identityProcessStartedAt,
+          dbPath: this.identityDbPath,
+          reportedPidFilePath: this.identityPidFilePath,
+          reportedSocketPath: this.socketPath,
+          reportedSockets: this.identitySockets,
           effectiveDebug: isDebugModeEnabled(),
           options: this.startupOptions,
           ...(this.processGenerationToken === undefined

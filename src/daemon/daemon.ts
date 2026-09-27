@@ -1,3 +1,4 @@
+import { republishOwnedIdentity } from "./identityRecovery";
 import { createServer as createHttpServer, Server as HttpServer } from "node:http";
 import { ActionableError } from "../models/ActionableError";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -36,6 +37,7 @@ import {
   cleanupDaemonFilesSync,
   PidFileLiveDaemonSessionIdProvider,
   readPidFileDataSync,
+  isProcessRunning,
   type LiveDaemonSessionIdProvider,
   writePidFileDataAtomic,
 } from "./daemonFiles";
@@ -307,6 +309,7 @@ export class Daemon {
   private deviceDisconnectMonitor: SingleFlightInterval | null = null;
   private deferredSessionRecoverySweeps: Set<Promise<void>> = new Set();
   private pidFileWritten = false;
+  private completeIdentityPublished = false;
   private socketBindCommitted = false;
   // Preserves a live incumbent daemon's PID record across our own early-owner
   // overwrite so the lock-less bind guard can (a) still see the live sibling on
@@ -688,6 +691,11 @@ export class Daemon {
           identityStartedAt: this.generationStartedAt,
           processGenerationToken: this.processGenerationToken,
           startupOptions: this.options,
+          onRepublishIdentity: () => this.republishIdentity(),
+          pidFilePath: PID_FILE_PATH,
+          sockets: getDaemonSocketPathsByName(),
+          dbPath: getDatabasePath(),
+          processStartedAt: this.processStartedAt,
           onRestartAccepted: () => {
             setImmediate(() => process.kill(process.pid, "SIGTERM"));
           },
@@ -761,6 +769,7 @@ export class Daemon {
 
     // Write PID file
     await this.writePidFile();
+    this.completeIdentityPublished = true;
 
     // Verify DaemonState is initialized
     const isInitialized = DaemonState.getInstance().isInitialized();
@@ -1306,6 +1315,23 @@ export class Daemon {
     await this.persistPidFileData(pidData, signal);
     signal?.throwIfAborted();
     logger.info(`PID file written to ${PID_FILE_PATH}`);
+  }
+
+  private republishIdentity(): Promise<boolean> {
+    return republishOwnedIdentity(
+      this.completeIdentityPublished,
+      {
+        pid: process.pid,
+        startedAt: this.generationStartedAt,
+        processGenerationToken: this.processGenerationToken,
+      },
+      {
+        readRecord: () => readPidFileDataSync(),
+        writeRecord: () => this.writePidFile(),
+        isProcessRunning,
+      },
+      getDaemonSocketPathsByName(),
+    );
   }
 
   private launchLogPath(): string | null {
@@ -2535,6 +2561,11 @@ export class Daemon {
             identityStartedAt: this.generationStartedAt,
             processGenerationToken: this.processGenerationToken,
             startupOptions: this.options,
+            onRepublishIdentity: () => this.republishIdentity(),
+            pidFilePath: PID_FILE_PATH,
+            sockets: getDaemonSocketPathsByName(),
+            dbPath: getDatabasePath(),
+            processStartedAt: this.processStartedAt,
             onRestartAccepted: () => {
               setImmediate(() => process.kill(process.pid, "SIGTERM"));
             },

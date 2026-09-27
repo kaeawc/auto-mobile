@@ -66,6 +66,12 @@ describe("searchable node derivation", () => {
     ).toBe(true);
   });
 
+  test("whitespace text does not mask an accessibility label", () => {
+    expect(toSearchable({ text: "  ", "ios-accessibility-label": "Open" }).categoryText).toBe(
+      "Open",
+    );
+  });
+
   test("unifies compact bounds and accessibility actions", () => {
     const node = toSearchable({
       bounds: [1, 2, 3, 4],

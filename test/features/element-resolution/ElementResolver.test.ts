@@ -331,3 +331,39 @@ test("text index counts displayed actionable rows rather than standalone text", 
   expect(resolver.resolve(capture, { text: "Row", index: 2 }, tap).chosen?.nativeId).toBe("third");
   expect(resolver.resolve(capture, { text: "Row" }, tap).chosen?.nativeId).toBe("second");
 });
+
+test("scroll text indices count scroll rows rather than inert labels", () => {
+  const capture = snapshot([
+    { bounds, scrollable: true, text: "Feed", node: [{ bounds, text: "Feed" }] },
+    { bounds, scrollable: true, text: "Feed", node: [{ bounds, text: "Feed" }] },
+  ]);
+  const result = resolver.resolve(capture, { text: "Feed", index: 1 }, { action: "scroll" });
+  expect(result.candidates).toHaveLength(2);
+  expect(result.chosen?.index).toBe(2);
+});
+
+test("sibling search never enters a nested collection", () => {
+  const capture = snapshot([
+    {
+      bounds,
+      node: [
+        { bounds, text: "Header" },
+        {
+          bounds,
+          class: "android.widget.GridView",
+          node: [{ bounds, "resource-id": "nested", clickable: true }],
+        },
+      ],
+    },
+  ]);
+  expect(
+    resolver.resolve(capture, { elementId: "nested", sibling: { text: "Header" } }, tap).chosen,
+  ).toBeNull();
+});
+
+test("contains matching uses the advertised synthetic view ID", () => {
+  const capture = snapshot([{ bounds, clickable: true, "view-id": "s-stable-123" }]);
+  expect(
+    resolver.resolve(capture, { elementId: "stable", match: "contains" }, tap).chosen?.nodeKey,
+  ).toBe("s-stable-123");
+});

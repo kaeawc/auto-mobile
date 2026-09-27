@@ -197,7 +197,7 @@ export class ElementResolver {
     }
     const matched = this.match(nodes, selector, intent);
     if (selector.text !== undefined || selector.contentDescription !== undefined) {
-      matched.matches = this.promoteTextMatches(matched.matches, snapshot, scope);
+      matched.matches = this.promoteTextMatches(matched.matches, snapshot, scope, intent);
     }
     const result: ElementResolution = {
       chosen: null,
@@ -317,7 +317,8 @@ export class ElementResolver {
         (node) =>
           isWithin(node, row, snapshot.nodes) &&
           node !== anchor &&
-          !isWithin(node, anchor, snapshot.nodes),
+          !isWithin(node, anchor, snapshot.nodes) &&
+          !this.crossesCollection(node, row, snapshot.nodes),
       );
       if (this.match(siblings, selector, intent).matches.length > 0) {
         return { nodes: siblings };
@@ -328,6 +329,22 @@ export class ElementResolver {
       parent = row.parentIndex;
     }
     return { nodes: [], error: "Sibling row not found" };
+  }
+
+  private crossesCollection(
+    node: SearchableEntry,
+    row: SearchableEntry,
+    nodes: readonly SearchableEntry[],
+  ): boolean {
+    let parent = node.parentIndex;
+    while (parent !== undefined && nodes[parent] !== row) {
+      const ancestor = nodes[parent];
+      if (!ancestor || ancestor.collection) {
+        return true;
+      }
+      parent = ancestor.parentIndex;
+    }
+    return parent === undefined;
   }
 
   private siblingAnchor(
@@ -348,6 +365,7 @@ export class ElementResolver {
     node: SearchableEntry,
     snapshot: ResolverSnapshot,
     scope: SearchableEntry | undefined,
+    intent: ResolutionIntent,
   ): SearchableEntry {
     if (node.affordances.length > 0) {
       return node;
@@ -358,7 +376,18 @@ export class ElementResolver {
       if (!ancestor || ancestor === scope) {
         break;
       }
-      if (ancestor.affordances.includes("tap") && ancestor.bounds) {
+      const targetActions: SearchableEntry["affordances"][number][] =
+        intent.action === "scroll"
+          ? ["scroll"]
+          : intent.action === "long-press"
+            ? ["long-press"]
+            : intent.action === "input" || intent.action === "focus"
+              ? ["input"]
+              : ["tap", "scroll"];
+      if (
+        ancestor.bounds &&
+        targetActions.some((action) => ancestor.affordances.includes(action))
+      ) {
         return ancestor;
       }
       parent = ancestor.parentIndex;
@@ -370,10 +399,11 @@ export class ElementResolver {
     matches: ElementResolution["matches"],
     snapshot: ResolverSnapshot,
     scope: SearchableEntry | undefined,
+    intent: ResolutionIntent,
   ): ElementResolution["matches"] {
     const unique = new Map<number, ElementResolution["matches"][number]>();
     for (const match of matches) {
-      const target = this.semanticTarget(match.node, snapshot, scope);
+      const target = this.semanticTarget(match.node, snapshot, scope, intent);
       const existing = unique.get(target.index);
       const sourceNodes = match.sourceNodes ?? [match.node];
       if (existing) {
@@ -495,7 +525,7 @@ export class ElementResolver {
     if (matchMode === "contains") {
       return {
         matches: nodes
-          .filter((node) => node.nativeId?.includes(query))
+          .filter((node) => node.elementId?.includes(query))
           .map((node) => ({ node, kind: "contains" })),
         matchMode,
       };

@@ -415,7 +415,10 @@ function describeIncompleteCapture(
   foreground: string | undefined,
   confirmedFrameworkErrorDialog: boolean,
 ): { sdkInt: number | undefined; reason: CtrlProxyIncompleteReason | undefined } | undefined {
-  if (hierarchy?.ctrlProxyIncomplete !== true || confirmedFrameworkErrorDialog) {
+  if (hierarchy?.ctrlProxyIncomplete !== true) {
+    return undefined;
+  }
+  if (confirmedFrameworkErrorDialog && hierarchy.packageName === FRAMEWORK_WINDOW_PACKAGE) {
     return undefined;
   }
   const observed = hierarchy.packageName;
@@ -893,6 +896,17 @@ export class RealObserveScreen implements ObserveScreen {
       // reload within the TTL, and a consumer reading the cached tree directly
       // (e.g. `SwipeOn.getScrollableContext`, nav/registry embeds) would accept a
       // phantom hierarchy without its `isFresh: false` signal (issue #5867).
+      // The framework-window probe is a serial ADB read. Keep it lazy, but share
+      // one result across both freshness checks for this execute() call.
+      let confirmedFrameworkErrorDialog: Promise<boolean> | undefined;
+      const getConfirmedFrameworkErrorDialog = (): Promise<boolean> => {
+        confirmedFrameworkErrorDialog ??= this.isConfirmedFrameworkErrorDialog(
+          result.viewHierarchy,
+          signal,
+        );
+        return confirmedFrameworkErrorDialog;
+      };
+
       result.freshness = computeFreshness({
         requestedAfter: minTimestamp > 0 ? minTimestamp : undefined,
         actualTimestamp: this.resolveObservationTimestampMs(result),
@@ -921,6 +935,7 @@ export class RealObserveScreen implements ObserveScreen {
           result,
           foregroundIdentity,
           postCaptureForeground,
+          getConfirmedFrameworkErrorDialog,
           signal,
         ),
         activityAttributionMismatch: postCaptureForeground.activityAttributionMismatch,
@@ -939,7 +954,7 @@ export class RealObserveScreen implements ObserveScreen {
             ? await this.confirmForegroundIdentity(postCaptureForeground, signal)
             : undefined,
           result.viewHierarchy?.ctrlProxyIncomplete === true
-            ? await this.isConfirmedFrameworkErrorDialog(result.viewHierarchy, signal)
+            ? await getConfirmedFrameworkErrorDialog()
             : false,
         ),
       });
@@ -2096,6 +2111,7 @@ export class RealObserveScreen implements ObserveScreen {
     result: ObserveResult,
     foregroundIdentity: Promise<string | undefined>,
     postCaptureForeground: PostCaptureForegroundIdentity,
+    getConfirmedFrameworkErrorDialog: () => Promise<boolean>,
     signal?: AbortSignal,
   ): Promise<{ observed: string; foreground: string } | undefined> {
     const foreground = await foregroundIdentity;
@@ -2115,7 +2131,7 @@ export class RealObserveScreen implements ObserveScreen {
     if (!confirmed || confirmed !== foreground || confirmed === observed) {
       return undefined;
     }
-    if (await this.isConfirmedFrameworkErrorDialog(result.viewHierarchy, signal)) {
+    if (await getConfirmedFrameworkErrorDialog()) {
       return undefined;
     }
     return { observed, foreground };

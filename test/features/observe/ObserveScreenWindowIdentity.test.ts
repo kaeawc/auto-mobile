@@ -518,6 +518,55 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     expect(result.freshness?.warning).toContain("isAccessibilityTool");
   });
 
+  test("a stale framework-dialog confirmation cannot suppress another window's incomplete verdict", async () => {
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchy({
+      ...calendarHierarchy(now),
+      ctrlProxyIncomplete: true,
+      sdkInt: 34,
+    } as any);
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setForegroundApp({ packageName: "com.example.other", userId: 0 });
+    const screen = makeScreen(viewHierarchy, fakeAdb, timer);
+    // Model a confirmation retained from a prior/different capture. The current
+    // hierarchy is Calendar, so that old confirmation must not validate it.
+    (screen as any).isConfirmedFrameworkErrorDialog = async () => true;
+
+    const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
+
+    expect(result.viewHierarchy?.packageName).toBe("com.google.android.calendar");
+    expect(result.freshness?.isFresh).toBe(false);
+    expect(result.freshness?.warning).toContain("capture as incomplete");
+  });
+
+  test("shares one focused-window confirmation read across freshness checks", async () => {
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchy(incompleteFrameworkDialogHierarchy(now));
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setForegroundApp({ packageName: "com.android.launcher3", userId: 0 });
+    fakeAdb.setCommandResponse("dumpsys window", {
+      stdout: "  mCurrentFocus=Window{8ddaeb2 u0 Application Error: example.app}\n",
+      stderr: "",
+      exitCode: 0,
+    } as any);
+
+    const result = await makeScreen(viewHierarchy, fakeAdb, timer).execute({
+      skipScreenshot: true,
+      skipBackStack: true,
+    });
+
+    expect(result.freshness?.isFresh).toBe(true);
+    expect(
+      fakeAdb.getExecutedCommands().filter((command) => command.includes("dumpsys window")),
+    ).toHaveLength(1);
+  });
+
   test("retracts an unrelated android hierarchy captured before a framework error dialog gains focus (#7454)", async () => {
     const now = 1_700_000_000_000;
     const timer = new FakeTimer();

@@ -31,6 +31,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -60,12 +61,18 @@ import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.flow.conflate
+import kotlinx.coroutines.flow.filter
 import kotlinx.serialization.Serializable
 
-/** Exact Android logcat tags emitted by CtrlProxy itself, hidden by default to expose app logs. */
+/**
+ * Exact Android logcat tags emitted by CtrlProxy itself, hidden by default to expose app logs.
+ * `MainActivity` is deliberately excluded because it is also a common app tag. Consequently,
+ * CtrlProxy's own `MainActivity` rows show by default alongside app rows; fixing that trade-off
+ * requires package or process identity on [TelemetryDisplayEvent.Log], which is out of scope here.
+ */
 val AUTO_MOBILE_INTERNAL_TAGS: Set<String> =
   setOf(
-    "MainActivity",
     "ViewHierarchyExtractor",
     "WebSocketServer",
     "LogcatReader",
@@ -237,6 +244,7 @@ fun LogsPanel(
   platform: LogPlatform = LogPlatform.Android,
   maxRows: Int = MAX_LOG_ROWS,
   modifier: Modifier = Modifier,
+  listState: LazyListState? = null,
   onFollowTailChange: (Boolean) -> Unit = {},
 ) {
   val colors = SharedTheme.globalColors
@@ -250,13 +258,21 @@ fun LogsPanel(
   var tag by remember { mutableStateOf("") }
   var enabledLevels by
     remember(activeDeviceId) {
-      val minimum = activeDeviceId?.let { deviceId ->
-        deserializeLogsMinLevelByDevice(settingsProvider.logsMinLevelByDevice)[deviceId]?.let { name
-          ->
-          LogLevel.entries.firstOrNull { it.name == name }
-        }
+      val savedLevels = activeDeviceId?.let { deviceId ->
+        deserializeLogsEnabledLevelsByDevice(settingsProvider.logsEnabledLevelsByDevice)[deviceId]
       }
-      mutableStateOf(defaultEnabledLevels(minimum))
+      val minimum =
+        if (savedLevels == null) {
+          activeDeviceId?.let { deviceId ->
+            deserializeLogsMinLevelByDevice(settingsProvider.logsMinLevelByDevice)[deviceId]?.let {
+              name ->
+              LogLevel.entries.firstOrNull { it.name == name }
+            }
+          }
+        } else {
+          null
+        }
+      mutableStateOf(savedLevels ?: defaultEnabledLevels(minimum))
     }
   var showInternalTags by remember(activeDeviceId) { mutableStateOf(false) }
   var savedViews by
@@ -282,7 +298,7 @@ fun LogsPanel(
     }
   // Per-device scroll state: recreated on a device switch so a device left scrolled up does not
   // carry its scroll offset (and suppress auto-follow) into the next device.
-  val listState = remember(activeDeviceId) { LazyListState() }
+  val resolvedListState = listState ?: remember(activeDeviceId) { LazyListState() }
 
   // Clear follow intent on the first user upward-scroll delta (see [clearsTailFollow]), so a row
   // arriving mid-fling no longer yanks the viewport back to the tail. The settle observer below
@@ -328,20 +344,44 @@ fun LogsPanel(
   // bottom. Immediate clearing on a user upward scroll is handled by [tailFollowScrollConnection];
   // this settle pass re-arms once the user returns to the bottom. Filter changes do not scroll, so
   // they never clear the intent. Keyed on activeDeviceId so a device switch restarts the observer.
-  LaunchedEffect(listState, activeDeviceId) {
-    snapshotFlow { listState.isScrollInProgress }
-      .collect { inProgress -> if (!inProgress) followTail = !listState.canScrollForward }
+  LaunchedEffect(resolvedListState, activeDeviceId) {
+    snapshotFlow { resolvedListState.isScrollInProgress }
+      .collect { inProgress ->
+        if (!inProgress) followTail = !resolvedListState.canScrollForward
+      }
   }
 
   // Surface follow-intent transitions to the caller (observation seam; see [onFollowTailChange]).
   LaunchedEffect(followTail) { onFollowTailChange(followTail) }
 
-  // Follow the tail when following: fires on every appended row (via appendCount, which advances
-  // even at the buffer cap) and on filter/platform changes (which re-anchor the list), so the
-  // newest visible row stays in view without fighting a scrolled-up user.
-  LaunchedEffect(appendCount, query, tag, enabledLevels, platform, followTail) {
-    if (followTail && filtered.isNotEmpty()) {
-      listState.scrollToItem(filtered.lastIndex)
+  // Keep one collector alive across appends: restarting a frame-waiting effect for every row can
+  // starve tail-follow while rows arrive faster than frames. The append signal also changes when
+  // the bounded buffer is full and its size and measured item count stay constant.
+  LaunchedEffect(
+    resolvedListState,
+    activeDeviceId,
+    query,
+    tag,
+    enabledLevels,
+    showInternalTags,
+    platform,
+    followTail,
+  ) {
+    if (followTail) {
+      snapshotFlow {
+        Triple(appendCount, filtered.lastIndex, resolvedListState.layoutInfo.totalItemsCount)
+      }
+        .filter { (_, lastIndex, measuredCount) ->
+          lastIndex >= 0 && measuredCount > lastIndex
+        }
+        .conflate()
+        .collect {
+          // LayoutInfo changes during measure; defer until the next frame to avoid a nested
+          // measure. Read the tail after waiting so an append during this frame wait is included.
+          withFrameNanos {}
+          val lastIndex = filtered.lastIndex
+          if (lastIndex >= 0) resolvedListState.scrollToItem(lastIndex)
+        }
     }
   }
 
@@ -356,17 +396,20 @@ fun LogsPanel(
       enabledLevels = enabledLevels,
       onToggleLevel = { level ->
         enabledLevels = if (level in enabledLevels) enabledLevels - level else enabledLevels + level
-        if (activeDeviceId != null && enabledLevels.isNotEmpty()) {
+        if (activeDeviceId != null) {
           val byDevice =
-            deserializeLogsMinLevelByDevice(settingsProvider.logsMinLevelByDevice).toMutableMap()
-          byDevice[activeDeviceId] = enabledLevels.minBy { it.ordinal }.name
-          settingsProvider.logsMinLevelByDevice = serializeLogsMinLevelByDevice(byDevice)
+            deserializeLogsEnabledLevelsByDevice(settingsProvider.logsEnabledLevelsByDevice)
+              .toMutableMap()
+          byDevice[activeDeviceId] = enabledLevels
+          settingsProvider.logsEnabledLevelsByDevice = serializeLogsEnabledLevelsByDevice(byDevice)
         }
       },
       showInternalTags = showInternalTags,
       onToggleInternalTags = { showInternalTags = !showInternalTags },
       savedViews = savedViews,
-      onOpenViews = { savedViews = deserializeLogsSavedViews(settingsProvider.logsSavedViews) },
+      onOpenViews = {
+        savedViews = deserializeLogsSavedViews(settingsProvider.logsSavedViews)
+      },
       onSaveView = { name ->
         val view = LogsSavedView(name, enabledLevels, tag.ifBlank { null }, query)
         savedViews = savedViews.filterNot { it.name == name } + view
@@ -413,7 +456,7 @@ fun LogsPanel(
       }
     } else {
       LazyColumn(
-        state = listState,
+        state = resolvedListState,
         modifier = Modifier.fillMaxSize().nestedScroll(tailFollowScrollConnection),
       ) {
         items(

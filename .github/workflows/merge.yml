@@ -648,6 +648,7 @@ jobs:
           AUTOMOBILE_IOS_SIMULATOR_WINDOW_TIMEOUT_MS: "15000"
         run: |
           set -uo pipefail
+          source ./scripts/ios/run_with_timeout.sh
 
           reap_before_retry() {
             pkill -f "index.js --daemon-mode" 2>/dev/null || true
@@ -657,7 +658,7 @@ jobs:
             pkill -KILL -x mediamtx 2>/dev/null || true
             pkill -KILL -f "index.js --daemon-mode" 2>/dev/null || true
             if [ -n "${AUTOMOBILE_IOS_SIMULATOR_UDID:-}" ]; then
-              if ! timeout 10 xcrun simctl bootstatus "${AUTOMOBILE_IOS_SIMULATOR_UDID}" -b >/dev/null 2>&1; then
+              if ! run_with_timeout 10 xcrun simctl bootstatus "${AUTOMOBILE_IOS_SIMULATOR_UDID}" -b >/dev/null 2>&1; then
                 echo "Simulator did not report booted within 10s after cleanup; skipping reboot (best-effort re-verify only, #7605)." >&2
               fi
             fi

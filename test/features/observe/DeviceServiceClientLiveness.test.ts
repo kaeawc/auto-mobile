@@ -108,6 +108,35 @@ describe("DeviceServiceClient liveness probe", () => {
     expect(client.isAutoReconnectScheduled()).toBe(true);
   });
 
+  test.each(["pong", "message", "ping"])(
+    "answered %s probe permits the next tick to detect a newly wedged peer",
+    async (event) => {
+      const timer = new FakeTimer();
+      let socket: FakeWebSocket | undefined;
+      client = new TestDeviceServiceClient(
+        timer,
+        (url) => {
+          socket = new FakeWebSocket(url, "none", 0, timer, "withhold");
+          socket.terminate = () => {
+            socket!.readyState = 3;
+            socket!.emit("close");
+          };
+          return socket;
+        },
+        { healthCheckIntervalMs: 1000 },
+      );
+      client.disableAutoReconnect();
+      expect(await client.ensureConnected()).toBe(true);
+      timer.advanceTime(1000);
+      socket!.emit(event, "{}");
+      timer.advanceTime(2999);
+      expect(client.isConnected()).toBe(true);
+      timer.advanceTime(1);
+      expect(client.isConnected()).toBe(false);
+      expect(client.connectionClosedCount).toBe(1);
+    },
+  );
+
   test("a connection that answers every ping stays alive across many health-check intervals", async () => {
     const timer = new FakeTimer();
     client = new TestDeviceServiceClient(timer, createSuccessWebSocketFactory(timer, "auto"), {

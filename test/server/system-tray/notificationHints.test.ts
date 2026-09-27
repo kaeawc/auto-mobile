@@ -6,6 +6,7 @@ import {
   nodeHasSystemTrayHint,
   nodeHasIosNotificationCenterHint,
   SYSTEM_TRAY_PACKAGE,
+  matchesNotificationResourceId,
 } from "../../../src/server/system-tray/notificationHints";
 import type { ViewHierarchyResult } from "../../../src/models";
 
@@ -30,6 +31,15 @@ describe("getNodeProperties", () => {
   it("treats an empty $ as no wrapper and returns the node", () => {
     expect(getNodeProperties({ $: null, class: "Bar" })).toEqual({ $: null, class: "Bar" });
   });
+});
+
+it("recognizes the captured SystemUI expand button without a translated description", () => {
+  expect(
+    matchesNotificationResourceId("com.android.systemui:id/expand_button", "expand_button"),
+  ).toBe(true);
+  expect(
+    matchesNotificationResourceId("com.android.systemui:id/expand_button_help", "expand_button"),
+  ).toBe(false);
 });
 
 describe("getHierarchyRoots", () => {

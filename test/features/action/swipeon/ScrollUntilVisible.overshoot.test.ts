@@ -558,6 +558,26 @@ describe("ScrollUntilVisible shared resolver identity", () => {
       ),
     ).rejects.toThrow(/com.one:id\/btn_login.*com.two:id\/btn_login/);
   });
+  test("text lookFor keeps the matched label rather than its clickable row", async () => {
+    const scroll = new ScrollUntilVisible({} as any);
+    const label = {
+      "resource-id": "com.app:id/target_label",
+      text: "Target",
+      bounds: { left: 0, top: 80, right: 100, bottom: 100 },
+    };
+    const found = await scroll.findElementInHierarchy({ text: "Target" }, {
+      hierarchy: {
+        node: {
+          "resource-id": "com.app:id/target_row",
+          clickable: true,
+          bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+          node: [label],
+        },
+      },
+    } as any);
+    expect(found?.["resource-id"]).toBe("com.app:id/target_label");
+    expect(found?.bounds).toEqual(label.bounds);
+  });
 });
 
 test("lookFor treats a temporarily missing container as a miss and retries within its scope", async () => {

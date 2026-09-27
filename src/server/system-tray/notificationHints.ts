@@ -112,7 +112,11 @@ export const NOTIFICATION_RESOURCE_IDS = {
     // Existing custom-layout fixture in systemTrayList.test.ts.
     "com.android.systemui:id/notification_header",
   ],
-  expand_button: ["android:id/expand_button", "android:id/expand_button_touch_container"],
+  expand_button: [
+    "android:id/expand_button",
+    "android:id/expand_button_touch_container",
+    "com.android.systemui:id/expand_button",
+  ],
   status_bar_latest_event_content: ["android:id/status_bar_latest_event_content"],
   notification_stack_scroller: ["com.android.systemui:id/notification_stack_scroller"],
 } satisfies Record<string, readonly string[]>;

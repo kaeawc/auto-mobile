@@ -242,7 +242,11 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
   public static resumeDevice(deviceId: string): void {
     IOSCtrlProxyManager.retiredDeviceIds.delete(deviceId);
-    IOSCtrlProxyManager.instances.get(deviceId)?.forcedRestartBudget.rearm("explicit device start");
+    const instance = IOSCtrlProxyManager.instances.get(deviceId);
+    if (instance) {
+      instance.rearmedRemovalGeneration = instance.removalGeneration;
+      instance.forcedRestartBudget.rearm("explicit device start");
+    }
   }
 
   public static isDeviceRetired(deviceId: string): boolean {

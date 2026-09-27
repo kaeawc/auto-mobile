@@ -593,6 +593,30 @@ describe("IOSCtrlProxyManager", function () {
   });
 
   describe("evict", function () {
+    test("explicit device start consumes the removal before a routine ready signal", async function () {
+      const manager = IOSCtrlProxyManager.getInstance(testDevice, fakeTimer);
+      const budget = manager.getForcedRestartBudget();
+      spyOn(manager, "stop").mockResolvedValue();
+
+      await manager.suspendForDeviceRemoval();
+      expect(budget.snapshot().state).toBe("suspended");
+      IOSCtrlProxyManager.resumeDevice(testDevice.deviceId);
+      expect(budget.snapshot().state).toBe("idle");
+
+      for (const delay of [30_000, 60_000, 0]) {
+        const token = budget.tryBeginAttempt();
+        expect(token).toBeDefined();
+        budget.recordFailure("startup timeout", token!);
+        fakeTimer.advanceTime(delay);
+      }
+      expect(budget.snapshot().state).toBe("exhausted");
+
+      await manager.rearmAfterDeviceReappearance();
+
+      expect(budget.snapshot().state).toBe("exhausted");
+      expect(budget.tryBeginAttempt()).toBeUndefined();
+    });
+
     test("does not rearm an exhausted budget on a ready signal without removal", async function () {
       const manager = IOSCtrlProxyManager.getInstance(testDevice, fakeTimer);
       const budget = manager.getForcedRestartBudget();

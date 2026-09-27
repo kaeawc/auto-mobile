@@ -4,6 +4,8 @@
 
 ## Take a tour
 
+<div class="content-tabs" markdown>
+
 ### Android
 
 <div class="copyable-prompt" markdown>
@@ -30,7 +32,11 @@
 
 </div>
 
+</div>
+
 ## Search for something
+
+<div class="content-tabs" markdown>
 
 ### Android
 
@@ -60,7 +66,11 @@
 
 </div>
 
+</div>
+
 ## Walk onboarding
+
+<div class="content-tabs" markdown>
 
 ### Android
 
@@ -82,7 +92,11 @@
 
 </div>
 
+</div>
+
 ## Fill out a form
+
+<div class="content-tabs" markdown>
 
 ### Android
 
@@ -114,7 +128,11 @@
 
 </div>
 
+</div>
+
 ## Scroll and find
+
+<div class="content-tabs" markdown>
 
 ### Android
 
@@ -146,7 +164,11 @@
 
 </div>
 
+</div>
+
 ## Reproduce a bug
+
+<div class="content-tabs" markdown>
 
 ### Android
 
@@ -182,7 +204,11 @@
 
 </div>
 
+</div>
+
 ## Measure performance
+
+<div class="content-tabs" markdown>
 
 ### Android
 
@@ -212,7 +238,11 @@
 
 </div>
 
+</div>
+
 ## Check accessibility
+
+<div class="content-tabs" markdown>
 
 ### Android
 
@@ -233,5 +263,7 @@
 > point out interactive elements that are difficult to use — small tap
 > targets, low contrast, missing labels, or unclear controls. Suggest what
 > to fix first.
+
+</div>
 
 </div>

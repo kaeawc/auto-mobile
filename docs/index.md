@@ -9,6 +9,8 @@ tests.
 
 ## Install
 
+<div class="content-tabs" markdown>
+
 ### One-line install
 
 <div class="install-command" markdown>
@@ -62,6 +64,8 @@ tap is reported untrusted.
 Place this server in the client’s documented MCP configuration, then restart
 the client. Going this route means you're going to handle dependencies like having
 bun and ffmpeg.
+
+</div>
 
 ## First use
 

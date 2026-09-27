@@ -66,6 +66,8 @@ Each example connects to the socket, sends one `input/tap`, reads the response
 line, and checks `success`. Swipes, buttons, keys, and text use the same
 envelope with a different `method` and `params`.
 
+<div class="content-tabs" markdown>
+
 ### Kotlin
 
 Uses JDK 16+ Unix domain sockets. `UnixSystem` supplies the uid.
@@ -201,6 +203,8 @@ def tap(x: int, y: int) -> dict:
         return json.loads(buffer.split(b"\n", 1)[0])
         # {"id": "1", "type": "mcp_response", "success": True, ...}
 ```
+
+</div>
 
 ## Sending other commands
 

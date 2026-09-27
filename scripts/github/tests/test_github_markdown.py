@@ -34,6 +34,14 @@ class CheckGithubMarkdownTest(unittest.TestCase):
         )
         self.assertEqual(self.check(text), [])
 
+    def test_valid_content_tabs_pass(self):
+        text = '<div class="content-tabs" markdown>\n\n### Android\n\nOne.\n\n### iOS\n\nTwo.\n\n</div>\n'
+        self.assertEqual(self.check(text), [])
+
+    def test_malformed_content_tabs_are_flagged(self):
+        self.assertFlags('<div class="content-tabs" markdown>\n\n### Android\n\nOne.\n\n</div>',
+                         "content-tabs (Android): expected at least two tabs")
+
     def test_flags_admonition(self):
         self.assertFlags('!!! note "Title"\n    Body.\n', "admonition")
 

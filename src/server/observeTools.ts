@@ -721,6 +721,42 @@ const isElementCenterOffScreen = (
   );
 };
 
+function shouldRetryCompoundText(
+  waitFor: ObserveWaitForOptions,
+  negative: boolean,
+  sets: readonly (readonly unknown[])[],
+): boolean {
+  if (negative || waitFor.matchType === "any" || waitFor.text === undefined) {
+    return false;
+  }
+  if (waitFor.textMatch !== undefined || sets.length < 2) {
+    return false;
+  }
+  return !sets.some((set) => sets.every((other) => set.some((node) => other.includes(node))));
+}
+
+function retryCompoundText<T>(
+  waitFor: ObserveWaitForOptions,
+  negative: boolean,
+  predicates: ResolverSelector[],
+  sets: T[][],
+  resolve: (selector: ResolverSelector) => T[],
+): void {
+  if (!shouldRetryCompoundText(waitFor, negative, sets)) {
+    return;
+  }
+  const textIndex = predicates.findIndex((selector) => selector.text !== undefined);
+  sets[textIndex] = resolve({ text: waitFor.text!, match: "contains" });
+}
+
+function isWaitSourceVisible(
+  element: Element | undefined,
+  viewHierarchy: ViewHierarchyResult,
+  negative: boolean,
+): boolean {
+  return element !== undefined && (negative || !isElementCenterOffScreen(element, viewHierarchy));
+}
+
 export const findWaitForElement = (
   finder: ConditionResolver,
   waitFor: ObserveWaitForOptions,
@@ -765,10 +801,7 @@ export const findWaitForElement = (
     const visibleSources = (resolution: typeof result) =>
       [
         ...new Set(resolution.matches.flatMap(({ node, sourceNodes }) => sourceNodes ?? [node])),
-      ].filter(
-        (node) =>
-          node.element && (negative || !isElementCenterOffScreen(node.element, viewHierarchy)),
-      );
+      ].filter((node) => isWaitSourceVisible(node.element, viewHierarchy, negative));
     let candidates = visibleSources(result);
     if (canTryVisibleContains(selector, key, result.matchMode, candidates.length)) {
       result = finder.resolve(
@@ -824,17 +857,7 @@ export const findWaitForElement = (
     }
     return candidates;
   });
-  if (
-    !negative &&
-    waitFor.matchType !== "any" &&
-    waitFor.text !== undefined &&
-    waitFor.textMatch === undefined &&
-    sets.length > 1 &&
-    !sets.some((set) => sets.every((other) => set.some((node) => other.includes(node))))
-  ) {
-    const textIndex = predicates.findIndex((selector) => selector.text !== undefined);
-    sets[textIndex] = resolve({ text: waitFor.text, match: "contains" });
-  }
+  retryCompoundText(waitFor, negative, predicates, sets, resolve);
   const candidates = [...new Set(sets.flat())].sort(
     (a, b) => a.windowRank - b.windowRank || a.index - b.index,
   );

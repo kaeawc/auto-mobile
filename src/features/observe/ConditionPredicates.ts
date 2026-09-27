@@ -49,6 +49,22 @@ function elements(result: ElementResolution | undefined): Element[] {
   return result?.matches.flatMap(({ node }) => (node.element ? [node.element] : [])) ?? [];
 }
 
+function ownsSelectorText(
+  selected: ElementResolution["chosen"] | undefined,
+  text: string | undefined,
+): boolean {
+  if (text === undefined) {
+    return true;
+  }
+  if (!selected) {
+    return false;
+  }
+  const query = normalizeQuotes(text).toLowerCase();
+  return Object.values(selected.textSources).some((value) =>
+    normalizeQuotes(value).toLowerCase().includes(query),
+  );
+}
+
 export function appear(
   resolver: ConditionResolver,
   selector: ConditionSelector,
@@ -98,15 +114,7 @@ export function clickable(
     const result = search(observation);
     const source = result?.matches.find(({ node }) => node === result.chosen)?.sourceNodes?.[0];
     const selected = source ?? result?.chosen;
-    const ownsText =
-      selector.text === undefined ||
-      (selected !== undefined &&
-        selected !== null &&
-        Object.values(selected.textSources).some((value) =>
-          normalizeQuotes(value)
-            .toLowerCase()
-            .includes(normalizeQuotes(selector.text!).toLowerCase()),
-        ));
+    const ownsText = ownsSelectorText(selected, selector.text);
     return {
       matched: Boolean(ownsText && selected?.affordances.includes("tap")),
       matchedElement:

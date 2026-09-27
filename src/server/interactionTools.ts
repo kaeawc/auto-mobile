@@ -16,6 +16,7 @@ import { RecentApps } from "../features/action/RecentApps";
 import { HomeScreen } from "../features/action/HomeScreen";
 import { Rotate } from "../features/action/Rotate";
 import { OpenURL } from "../features/action/OpenURL";
+import { HandleIntentChooser } from "../features/action/HandleIntentChooser";
 import { Clipboard } from "../features/action/Clipboard";
 import { Keyboard } from "../features/action/Keyboard";
 import { KEYBOARD_PROFILE_IDS } from "../features/action/keyboardProfiles";
@@ -854,6 +855,13 @@ export const openLinkSchema = withAppIdAliases(
           .boolean()
           .optional()
           .describe("On iOS, automatically tap Open when a system 'Open in <app>?' alert appears"),
+        chooserAppPackage: z
+          .string()
+          .min(1)
+          .optional()
+          .describe(
+            "On Android, select this exact package if opening the URL displays an intent chooser",
+          ),
         // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
         // not required — a device handle from getAndroid/getApple is sufficient on
         // its own.
@@ -873,6 +881,30 @@ export const openLinkSchema = withAppIdAliases(
 
 /** Outcome of a post-open waitFor poll, as produced by {@link waitForObservation}. */
 export type OpenLinkWaitOutcome = WaitForObservationOutcome;
+
+export async function selectAndroidOpenLinkChooser(
+  device: BootedDevice,
+  packageName: string,
+  opened: OpenURLResult,
+  chooser: Pick<HandleIntentChooser, "execute"> = new HandleIntentChooser(device),
+): Promise<OpenURLResult> {
+  if (device.platform !== "android") {
+    throw new ActionableError("chooserAppPackage is supported only on Android.");
+  }
+  if (!opened.success) {
+    return opened;
+  }
+  const selection = await chooser.execute("custom", packageName);
+  if (!selection.detected || !selection.success) {
+    return {
+      ...opened,
+      success: false,
+      error: selection.error ?? `Intent chooser for ${packageName} was not found`,
+      observation: selection.observation ?? opened.observation,
+    };
+  }
+  return { ...opened, observation: selection.observation ?? opened.observation };
+}
 
 /**
  * Build the openLink response payload. Without a wait it is the plain open
@@ -2359,9 +2391,15 @@ export function registerInteractionTools() {
     // entirely when the caller omitted it. Re-validate against the resolved
     // `device.platform` before opening the URL.
     assertActiveWindowWaitForSupportedOnPlatform(device.platform, args.waitFor);
+    if (args.chooserAppPackage && device.platform !== "android") {
+      throw new ActionableError("chooserAppPackage is supported only on Android.");
+    }
 
     const openUrl = new OpenURL(device);
-    const result = await openUrl.execute(args.url);
+    const opened = await openUrl.execute(args.url);
+    const result = args.chooserAppPackage
+      ? await selectAndroidOpenLinkChooser(device, args.chooserAppPackage, opened)
+      : opened;
     const iosClient = device.platform === "ios" ? IOSCtrlProxyClient.getInstance(device) : null;
     const acceptedOpenAlert =
       args.acceptOpenAlert && result.success

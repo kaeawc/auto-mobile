@@ -18,8 +18,10 @@ import {
 } from "../models";
 import type { ElementParser } from "./interfaces/ElementParser";
 import type { ElementGeometry } from "./interfaces/ElementGeometry";
+import type { Element } from "../models/Element";
 import { DefaultElementParser } from "../features/utility/ElementParser";
 import { DefaultElementGeometry } from "../features/utility/ElementGeometry";
+import { ViewHierarchy } from "../features/observe/ViewHierarchy";
 import { SimCtlClient } from "./ios-cmdline-tools/SimCtlClient";
 import { isIosSimulatorUdid } from "./ios-cmdline-tools/iosDeviceType";
 import { PlistClient, type PlistReader } from "./ios-cmdline-tools/PlistClient";
@@ -112,6 +114,34 @@ export interface DeepLinkManager {
   ): Promise<IntentChooserResult>;
 }
 
+export interface ChooserAppMetadata {
+  getLabel(device: BootedDevice, packageName: string): Promise<string | null>;
+  getFreshHierarchy(
+    device: BootedDevice,
+    adbFactory: AdbClientFactory,
+    minTimestamp: number,
+  ): Promise<ViewHierarchyResult>;
+}
+
+class ChooserRowMissingError extends Error {
+  capturedAt?: number;
+}
+
+const defaultChooserAppMetadata: ChooserAppMetadata = {
+  async getLabel(device, packageName) {
+    const { resolveAppLabel } = await import("../server/systemTrayHelpers");
+    return resolveAppLabel(device, packageName);
+  },
+  async getFreshHierarchy(device, adbFactory, minTimestamp) {
+    return new ViewHierarchy(device, adbFactory).getViewHierarchy(
+      undefined,
+      undefined,
+      true,
+      minTimestamp,
+    );
+  },
+};
+
 export class DeepLinkManager implements DeepLinkManager {
   private device: BootedDevice | null;
   private adbUtils: AdbExecutor;
@@ -130,6 +160,7 @@ export class DeepLinkManager implements DeepLinkManager {
     hostExec: HostExec | null = null,
     plist: PlistReader = new PlistClient(),
     appBundleMetadata: AppBundleMetadata = new AppBundleMetadataClient(),
+    private readonly chooserMetadata?: ChooserAppMetadata,
   ) {
     // Detect if the argument is a factory (has create method) or an executor
     if (
@@ -647,13 +678,7 @@ export class DeepLinkManager implements DeepLinkManager {
           }
         }
       } else if (preference === "custom" && customAppPackage) {
-        // Look for specific app in the list
-        for (const rootNode of rootNodes) {
-          targetElement = this.findAppInChooser(rootNode, customAppPackage);
-          if (targetElement) {
-            break;
-          }
-        }
+        targetElement = await this.findAppInChooserAcrossPages(viewHierarchy, customAppPackage);
       }
 
       if (targetElement) {
@@ -734,28 +759,235 @@ export class DeepLinkManager implements DeepLinkManager {
 
   /**
    * Find a specific app in the intent chooser list
-   * @param node - Root node to search from
+   * @param nodes - All chooser roots to search for distinct clickable rows
    * @param appPackage - App package to find
-   * @returns Found element or null
+   * @returns The unique matching clickable row; throws when missing or ambiguous
    */
-  private findAppInChooser(node: any, appPackage: string): any {
-    let foundElement: any = null;
+  private async findAppInChooser(
+    nodes: any[],
+    appPackage: string,
+    hierarchyPackage?: string,
+    resolvedLabel?: string | null,
+    originalUpdatedAt?: number,
+  ): Promise<any> {
+    const packageRows = new Set<any>();
+    const labelRows = new Map<any, Set<string>>();
+    const rowsWithPackageMetadata = new Set<any>();
+    for (const node of nodes) {
+      const rootProperties = this.parser.extractNodeProperties(node);
+      const hostPackage = hierarchyPackage ?? rootProperties.package ?? rootProperties.packageName;
+      const ancestors: any[] = [];
+      this.parser.traverseNode(node, (currentNode: any, depth: number) => {
+        ancestors.length = depth;
+        ancestors[depth] = currentNode;
+        const properties = this.parser.extractNodeProperties(currentNode);
+        const row = ancestors.toReversed().find((ancestor) => {
+          const clickable = this.parser.extractNodeProperties(ancestor).clickable;
+          return clickable === true || clickable === "true";
+        });
+        if (!row) {
+          return;
+        }
+        const resourceId = properties["resource-id"] ?? "";
+        const separator = resourceId.indexOf(":id/");
+        const namespace = separator > 0 ? resourceId.slice(0, separator) : undefined;
+        const inAppList = ancestors.some((ancestor) => {
+          const id = this.parser.extractNodeProperties(ancestor)["resource-id"];
+          return typeof id === "string" && /(?:^|\/)(?:resolver_list|chooser_list|list)$/.test(id);
+        });
+        // Framework-owned chooser widgets are not metadata for the represented app.
+        const packages = [properties.package, properties.packageName, namespace].filter(
+          (value): value is string =>
+            typeof value === "string" &&
+            value.length > 0 &&
+            value !== hostPackage &&
+            value !== "android" &&
+            value !== "com.android.intentresolver" &&
+            value !== "com.android.systemui",
+        );
+        if (packages.length > 0) {
+          rowsWithPackageMetadata.add(row);
+        }
+        if (inAppList && packages.includes(appPackage)) {
+          packageRows.add(row);
+        }
+        const labels = labelRows.get(row) ?? new Set<string>();
+        for (const value of [properties.text, properties["content-desc"]]) {
+          if (typeof value === "string" && value.length > 0) {
+            labels.add(value);
+          }
+        }
+        if (inAppList) {
+          labelRows.set(row, labels);
+        }
+      });
+    }
+    const candidates = [...packageRows];
+    if (candidates.length === 0 && this.device) {
+      return this.findChooserLabelFallback(
+        appPackage,
+        labelRows,
+        rowsWithPackageMetadata,
+        resolvedLabel,
+        originalUpdatedAt,
+      );
+    }
+    return this.selectUniqueChooserRow(candidates, labelRows, appPackage);
+  }
 
-    this.parser.traverseNode(node, (currentNode: any) => {
-      if (foundElement) {
-        return;
-      } // Already found
-
-      const properties = this.parser.extractNodeProperties(currentNode);
-      const resourceId = properties["resource-id"] || "";
-      const text = properties.text || properties["content-desc"] || "";
-
-      // Check if this element references the target app
-      if (resourceId.includes(appPackage) || text.includes(appPackage)) {
-        foundElement = currentNode;
+  private async findAppInChooserAcrossPages(
+    initialHierarchy: ViewHierarchyResult,
+    appPackage: string,
+  ): Promise<any> {
+    const metadata = this.chooserMetadata ?? defaultChooserAppMetadata;
+    let hierarchy = initialHierarchy;
+    for (let page = 0; page < 4; page += 1) {
+      const roots = this.parser.extractRootNodes(hierarchy);
+      try {
+        return await this.findAppInChooser(
+          roots,
+          appPackage,
+          hierarchy.packageName,
+          undefined,
+          hierarchy.updatedAt,
+        );
+      } catch (error) {
+        if (!(error instanceof ChooserRowMissingError) || page === 3) {
+          throw error;
+        }
+        const next = await this.scrollChooserList(
+          hierarchy,
+          roots,
+          metadata,
+          appPackage,
+          error.capturedAt,
+        );
+        if (!next) {
+          throw error;
+        }
+        hierarchy = next;
       }
-    });
+    }
+    throw new ChooserRowMissingError(`No exact clickable chooser row for ${appPackage}.`);
+  }
 
-    return foundElement;
+  private async scrollChooserList(
+    hierarchy: ViewHierarchyResult,
+    roots: any[],
+    metadata: ChooserAppMetadata,
+    appPackage: string,
+    capturedAt?: number,
+  ): Promise<ViewHierarchyResult | null> {
+    const lists: Element[] = [];
+    for (const root of roots) {
+      this.parser.traverseNode(root, (node: any) => {
+        const id = this.parser.extractNodeProperties(node)["resource-id"];
+        if (typeof id === "string" && /(?:^|\/)(?:resolver_list|chooser_list|list)$/.test(id)) {
+          const parsed = this.parser.parseNodeBounds(node);
+          if (parsed) {
+            lists.push(parsed);
+          }
+        }
+      });
+    }
+    const list = lists.at(-1);
+    if (!list || list.bounds.bottom - list.bounds.top < 40) {
+      return null;
+    }
+    const centerX = Math.round((list.bounds.left + list.bounds.right) / 2);
+    const height = list.bounds.bottom - list.bounds.top;
+    const fromY = Math.round(list.bounds.bottom - height / 4);
+    const toY = Math.round(list.bounds.top + height / 4);
+    const swipe = await this.adbUtils.executeCommand(
+      `shell input swipe ${centerX} ${fromY} ${centerX} ${toY} 350`,
+    );
+    if (swipe.stderr?.trim()) {
+      throw new Error(`Could not scroll chooser app list: ${swipe.stderr.trim()}`);
+    }
+    const nextTimestamp = Math.max(hierarchy.updatedAt ?? 0, capturedAt ?? 0) + 1;
+    const fresh = await metadata.getFreshHierarchy(this.device!, this.adbFactory, nextTimestamp);
+    if (fresh.updatedAt === undefined || fresh.updatedAt < nextTimestamp) {
+      throw new Error(`Chooser hierarchy did not refresh after scrolling for ${appPackage}.`);
+    }
+    if (!this.detectIntentChooser(fresh)) {
+      throw new Error(`Intent chooser disappeared while finding ${appPackage}.`);
+    }
+    return JSON.stringify(fresh.hierarchy) === JSON.stringify(hierarchy.hierarchy) ? null : fresh;
+  }
+
+  private async findChooserLabelFallback(
+    appPackage: string,
+    labelRows: Map<any, Set<string>>,
+    rowsWithPackageMetadata: Set<any>,
+    resolvedLabel: string | null | undefined,
+    originalUpdatedAt?: number,
+  ): Promise<any> {
+    if (resolvedLabel === undefined) {
+      if (originalUpdatedAt === undefined) {
+        throw new Error(
+          `Cannot safely refresh chooser for ${appPackage} without a capture timestamp.`,
+        );
+      }
+      const metadata = this.chooserMetadata ?? defaultChooserAppMetadata;
+      const label = await metadata.getLabel(this.device!, appPackage);
+      const freshHierarchy = await metadata.getFreshHierarchy(
+        this.device!,
+        this.adbFactory,
+        originalUpdatedAt + 1,
+      );
+      if (freshHierarchy.updatedAt === undefined || freshHierarchy.updatedAt <= originalUpdatedAt) {
+        throw new Error(`Chooser hierarchy did not refresh after resolving ${appPackage}.`);
+      }
+      if (!this.detectIntentChooser(freshHierarchy)) {
+        throw new Error(`Intent chooser disappeared while resolving ${appPackage}.`);
+      }
+      try {
+        return await this.findAppInChooser(
+          this.parser.extractRootNodes(freshHierarchy),
+          appPackage,
+          freshHierarchy.packageName,
+          label,
+        );
+      } catch (error) {
+        if (error instanceof ChooserRowMissingError) {
+          error.capturedAt = freshHierarchy.updatedAt;
+        }
+        throw error;
+      }
+    }
+    const candidates = resolvedLabel
+      ? [...labelRows]
+          .filter(([row, labels]) => !rowsWithPackageMetadata.has(row) && labels.has(resolvedLabel))
+          .map(([row]) => row)
+      : [];
+    return this.selectUniqueChooserRow(candidates, labelRows, appPackage);
+  }
+
+  private selectUniqueChooserRow(
+    candidates: any[],
+    labelRows: Map<any, Set<string>>,
+    appPackage: string,
+  ): any {
+    if (candidates.length > 1) {
+      const descriptions = candidates.map((row, index) => {
+        const properties = this.parser.extractNodeProperties(row);
+        return `${index + 1}: ${[...(labelRows.get(row) ?? [])].join(" / ")} bounds=${JSON.stringify(properties.bounds)}`;
+      });
+      throw new Error(
+        `Ambiguous chooser rows for ${appPackage}: ${descriptions.join("; ")}. Use a chooser with one exact app match.`,
+      );
+    }
+    if (candidates.length === 0) {
+      throw new ChooserRowMissingError(
+        `No exact clickable chooser row for ${appPackage}. Verify the app is installed and handles this link.`,
+      );
+    }
+    const target = this.parser.parseNodeBounds(candidates[0]);
+    if (!target) {
+      throw new Error(
+        `Exact chooser row for ${appPackage} has no usable bounds. Refresh the hierarchy before retrying.`,
+      );
+    }
+    return target;
   }
 }

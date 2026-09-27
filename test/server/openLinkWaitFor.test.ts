@@ -11,6 +11,7 @@ import {
   buildOpenLinkPayload,
   isIosAppOpenAlert,
   openLinkSchema,
+  selectAndroidOpenLinkChooser,
   resetTapOnElementFactory,
   setTapOnElementFactory,
 } from "../../src/server/interactionTools";
@@ -36,6 +37,15 @@ const noAlertHierarchy = {
 } as unknown as NonNullable<ObserveResult["viewHierarchy"]>;
 
 describe("openLinkSchema waitFor / settled", () => {
+  test("accepts exact Android chooser package selection in the public tool", () => {
+    expect(
+      openLinkSchema.parse({
+        platform: "android",
+        url: "example://item",
+        chooserAppPackage: "com.example.app",
+      }).chooserAppPackage,
+    ).toBe("com.example.app");
+  });
   test("accepts opt-in iOS app-open alert handling", () => {
     const parsed = openLinkSchema.parse({
       platform: "ios",
@@ -89,6 +99,45 @@ describe("openLinkSchema waitFor / settled", () => {
       }).success,
     ).toBe(false);
   });
+});
+
+test("openLink chooser path passes the exact package to the handler and surfaces its observation", async () => {
+  const device = {
+    platform: "android",
+    deviceId: "emulator-5554",
+    name: "Android",
+  } as BootedDevice;
+  const calls: unknown[][] = [];
+  const chosen = makeObservation("selected-app");
+  const result = await selectAndroidOpenLinkChooser(
+    device,
+    "com.example.app",
+    { success: true, url: "example://item" },
+    {
+      execute: async (...args) => {
+        calls.push(args);
+        return { success: true, detected: true, action: "custom", observation: chosen };
+      },
+    },
+  );
+  expect(calls).toEqual([["custom", "com.example.app"]]);
+  expect(result.observation).toBe(chosen);
+});
+
+test("openLink chooser path reports an expected chooser that never appeared", async () => {
+  const device = {
+    platform: "android",
+    deviceId: "emulator-5554",
+    name: "Android",
+  } as BootedDevice;
+  const result = await selectAndroidOpenLinkChooser(
+    device,
+    "com.example.app",
+    { success: true, url: "example://item" },
+    { execute: async () => ({ success: true, detected: false }) },
+  );
+  expect(result.success).toBe(false);
+  expect(result.error).toContain("com.example.app");
 });
 
 describe("openLink iOS app-open alert acceptance", () => {

@@ -12,8 +12,15 @@ import { getIosInstalledAppBundleId } from "../../utils/ios-cmdline-tools/iosIns
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { DeviceAppManager } from "../../utils/ios-cmdline-tools/DeviceAppManager";
 import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
-import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
-import { hasAmbientPerfTracker, runWithNestedPerfTracker } from "../../utils/PerfContext";
+import {
+  createGlobalPerformanceTracker,
+  type PerformanceTracker,
+} from "../../utils/PerformanceTracker";
+import {
+  getPerfTracker,
+  hasAmbientPerfTracker,
+  runWithNestedPerfTracker,
+} from "../../utils/PerfContext";
 import { logger } from "../../utils/logger";
 import { shellQuote } from "../../utils/shellQuote";
 import { IOSCtrlProxyClient } from "../observe/ios";
@@ -37,6 +44,7 @@ export class UninstallApp {
   private simctl: SimCtlClient;
   private deviceAppUninstaller: DeviceAppUninstaller;
   private installedAppsRepository: InstalledAppsStore;
+  private createPerformanceTracker: () => PerformanceTracker;
 
   constructor(
     device: BootedDevice,
@@ -44,6 +52,7 @@ export class UninstallApp {
     simctl: SimCtlClient | null = null,
     deviceAppUninstaller: DeviceAppUninstaller | null = null,
     installedAppsRepository: InstalledAppsStore = new InstalledAppsRepository(),
+    performanceTrackerFactory: () => PerformanceTracker = createGlobalPerformanceTracker,
   ) {
     this.device = device;
     this.adbFactory = adbFactory;
@@ -51,6 +60,7 @@ export class UninstallApp {
     this.simctl = simctl || new SimCtlClient(device);
     this.deviceAppUninstaller = deviceAppUninstaller || new DeviceAppManager();
     this.installedAppsRepository = installedAppsRepository;
+    this.createPerformanceTracker = performanceTrackerFactory;
   }
 
   private isSimulator(): boolean {
@@ -69,8 +79,8 @@ export class UninstallApp {
     userId?: number,
     signal?: AbortSignal,
   ): Promise<UninstallAppResult> {
-    const perf = createGlobalPerformanceTracker();
     const nested = hasAmbientPerfTracker();
+    const perf = nested ? getPerfTracker() : this.createPerformanceTracker();
     const result = await runWithNestedPerfTracker(perf, () =>
       this.executeInner(packageName, keepData, userId, perf, signal),
     );
@@ -87,7 +97,7 @@ export class UninstallApp {
     packageName: string,
     keepData: boolean,
     userId: number | undefined,
-    perf: ReturnType<typeof createGlobalPerformanceTracker>,
+    perf: PerformanceTracker,
     signal?: AbortSignal,
   ): Promise<UninstallAppResult> {
     throwIfAborted(signal);

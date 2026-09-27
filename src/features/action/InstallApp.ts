@@ -7,10 +7,10 @@ import {
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { AndroidUserTargetResolver } from "../../utils/android-cmdline-tools/AndroidUserTargetResolver";
 import { BootedDevice } from "../../models";
+import type { InstallAppResult } from "../../models/InstallAppResult";
 import {
   createGlobalPerformanceTracker,
   type PerformanceTracker,
-  type TimingData,
 } from "../../utils/PerformanceTracker";
 import { hasAmbientPerfTracker, runWithNestedPerfTracker } from "../../utils/PerfContext";
 import {
@@ -40,15 +40,6 @@ const ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS = 120_000;
 export interface DeviceAppInstaller {
   installApp(deviceUdid: string, artifactPath: string): Promise<void>;
 }
-
-type InstallAppResult = {
-  success: boolean;
-  upgrade: boolean;
-  userId: number;
-  packageName?: string;
-  warning?: string;
-  perfTiming?: TimingData;
-};
 
 export class InstallApp {
   private adb: AdbExecutor;

@@ -311,7 +311,7 @@ describe("disconnect monitor miss counting", () => {
     expect(misses.has("sim-1")).toBe(false);
   });
 
-  test("a forced missing device follows the three-miss debounce", () => {
+  test("a detached forced Android session follows the three-miss debounce", () => {
     const misses = new Map<string, number>();
     const forced = new Set(["emulator-5554"]);
     const input = {
@@ -321,7 +321,7 @@ describe("disconnect monitor miss counting", () => {
       bootedDeviceIds: new Set(),
       candidateDeviceIds: new Set(["emulator-5554"]),
       succeededPlatforms: new Set(["android" as const]),
-      candidatePlatforms: new Map([["emulator-5554", "android" as const]]),
+      candidatePlatforms: new Map(),
       missThreshold: DEVICE_DISCONNECT_MISS_THRESHOLD,
     };
 

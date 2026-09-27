@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { AndroidEmulatorClient } from "../../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
+import {
+  AndroidEmulatorClient,
+  AndroidOfflineProbeError,
+} from "../../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -81,7 +84,7 @@ describe("AndroidEmulatorClient.getOfflineDeviceIdsAmong", () => {
     expect(probed).toBe(false);
   });
 
-  test("degrades to an empty set instead of throwing when the probe fails", async () => {
+  test("distinguishes a failed offline probe from an authoritative empty result", async () => {
     const adb = new RejectingDeviceStatesAdbExecutor();
     const client = new AndroidEmulatorClient(
       async () => execResult(""),
@@ -90,9 +93,9 @@ describe("AndroidEmulatorClient.getOfflineDeviceIdsAmong", () => {
       new FakeAdbClientFactory(adb),
     );
 
-    const offline = await client.getOfflineDeviceIdsAmong(["emulator-5554"]);
-
-    expect(offline.size).toBe(0);
+    await expect(client.getOfflineDeviceIdsAmong(["emulator-5554"])).rejects.toBeInstanceOf(
+      AndroidOfflineProbeError,
+    );
   });
 });
 

@@ -64,20 +64,22 @@ export interface DisconnectMonitorEvaluationInput {
  * trigger a fresh recovery attempt rather than being silently skipped
  * forever (#7536).
  *
- * Note: a failed offline-state probe reports an empty `offlineDeviceIds` (the
- * caller's best-effort degrade), which this function reads no differently
- * than "every tracked serial recovered" — it prunes every attempted entry, so
- * a still-offline serial re-arms exactly one more reconnect on the next
- * successful probe rather than staying permanently marked as attempted.
+ * An undefined offline result means the probe failed: retain episode state
+ * unless the candidate disappeared or its incarnation changed.
  */
 export function pruneStaleOfflineRecoveryAttempts(
   attempted: ReadonlySet<string>,
   candidateDeviceIds: ReadonlySet<string>,
-  offlineDeviceIds: ReadonlySet<string>,
+  offlineDeviceIds: ReadonlySet<string> | undefined,
+  attemptedIncarnations: ReadonlyMap<string, DisconnectCandidateIncarnation> = new Map(),
+  candidateIncarnations: ReadonlyMap<string, DisconnectCandidateIncarnation> = new Map(),
 ): Set<string> {
   return new Set(
     [...attempted].filter(
-      (deviceId) => candidateDeviceIds.has(deviceId) && offlineDeviceIds.has(deviceId),
+      (deviceId) =>
+        candidateDeviceIds.has(deviceId) &&
+        (offlineDeviceIds === undefined || offlineDeviceIds.has(deviceId)) &&
+        attemptedIncarnations.get(deviceId) === candidateIncarnations.get(deviceId),
     ),
   );
 }
@@ -177,12 +179,11 @@ export function evaluateDeviceDisconnects(
     // a failed simctl sweep must not age out a devicectl-confirmed iPhone, and
     // a failed devicectl sweep must not age out a booted simulator (#5683).
     //
-    // A candidate with no known platform is maximally unverifiable: a device
-    // still assigned to a session but detached from the pool (ADB-reset
-    // recovery) is added by id alone, so no source can be asked about it.
-    // Ageing it out would disconnect a live session on the strength of a sweep
-    // that never covered it.
-    const platform = input.candidatePlatforms.get(deviceId);
+    // Forced detached sessions originate from Android ADB recovery. Unknown
+    // candidates without that evidence still cannot be attributed to a source.
+    const platform =
+      input.candidatePlatforms.get(deviceId) ??
+      (forceDisconnectedDeviceIds.has(deviceId) ? "android" : undefined);
     if (!platform || !didSourceSucceedForDevice(input, platform, deviceId)) {
       clearMiss(deviceId);
       continue;

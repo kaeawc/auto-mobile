@@ -620,6 +620,9 @@ const execAsync = async (
   );
 };
 
+/** Offline discovery failed; callers must retain the prior episode state. */
+export class AndroidOfflineProbeError extends ActionableError {}
+
 export class AndroidEmulatorClient implements AndroidEmulator {
   private execAsync: (file: string, args: string[], signal?: AbortSignal) => Promise<ExecResult>;
   private spawnFn: SpawnFn;
@@ -1324,9 +1327,8 @@ export class AndroidEmulatorClient implements AndroidEmulator {
    * from one that is genuinely gone (#7536): both look identical to the
    * online-only getBootedDevices filter.
    *
-   * Best-effort: a probe failure returns an empty set rather than throwing,
-   * so a missing offline-state signal never blocks disconnect-monitor
-   * evaluation itself.
+   * Probe failures throw AndroidOfflineProbeError so callers can distinguish
+   * unavailable evidence from an authoritative empty result.
    */
   async getOfflineDeviceIdsAmong(
     candidateIds: Iterable<string>,
@@ -1340,11 +1342,9 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     try {
       states = (await this.adbFactory.create(null).getDeviceStates?.(options)) ?? [];
     } catch (error) {
-      // Auxiliary diagnostic probe, same posture as detectOfflineFailure's own
-      // getDeviceStates() call: a failure here must not block or fail the
-      // disconnect monitor's sweep.
-      logger.debug(`Offline-state probe failed while checking candidates: ${errorMessage(error)}`);
-      return new Set();
+      throw new AndroidOfflineProbeError(`Offline-state probe failed: ${errorMessage(error)}`, {
+        cause: error,
+      });
     }
     return new Set(
       states

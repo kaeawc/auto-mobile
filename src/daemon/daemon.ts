@@ -5,6 +5,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { createMcpServer } from "../server";
 import { logger } from "../utils/logger";
 import { IOSCtrlProxyManager } from "../utils/IOSCtrlProxyManager";
+import { AndroidOfflineProbeError } from "../utils/android-cmdline-tools/AndroidEmulatorClient";
 import { MultiPlatformDeviceManager } from "../utils/deviceUtils";
 import { UnixSocketServer } from "./socketServer";
 import { SessionManager, type ActiveSessionExecutionQuery, type Session } from "./sessionManager";
@@ -324,6 +325,7 @@ export class Daemon {
   // episode (#7536). Pruned each sweep by pruneStaleOfflineRecoveryAttempts so
   // a later episode for the same serial gets a fresh attempt.
   private offlineRecoveryAttemptedDeviceIds: Set<string> = new Set();
+  private offlineRecoveryAttemptedIncarnations = new Map<string, number | string>();
   private stoppingRecordings: Set<string> = new Set();
   private sessionManager: SessionManager;
   private devicePool: DevicePool;
@@ -1924,12 +1926,25 @@ export class Daemon {
     }
   }
 
-  private startDeviceDisconnectMonitor(): void {
+  private startDeviceDisconnectMonitor(
+    deviceManager: Pick<
+      MultiPlatformDeviceManager,
+      "getBootedDevicesDetailed" | "getAndroidOfflineDeviceIds" | "recoverAndroidOfflineDevices"
+    > = new MultiPlatformDeviceManager(),
+    listRecordings: typeof listActiveVideoRecordings = listActiveVideoRecordings,
+  ): void {
     if (this.deviceDisconnectMonitor) {
       return;
     }
 
-    const deviceManager = new MultiPlatformDeviceManager();
+    const discoverAndReconcile = async (bypassAndroidDeviceListCache = false) => {
+      const discovery = await deviceManager.getBootedDevicesDetailed("either", {
+        bypassAndroidDeviceListCache,
+      });
+      // Every monitor observation reaches the pool before any identity is read.
+      await this.devicePool.reconcileDiscoveryObservation(discovery.devices, "disconnect-monitor");
+      return discovery;
+    };
 
     this.deviceDisconnectMonitor = new SingleFlightInterval(
       this.timer,
@@ -1951,17 +1966,11 @@ export class Daemon {
             }),
           );
 
-          const discovery = await deviceManager.getBootedDevicesDetailed("either");
-          // FUNNEL 1: this sweep joins the observation to `getAllDevices()` by
-          // serial below, so the pool must fold it in first (#6863 review).
-          await this.devicePool.reconcileDiscoveryObservation(
-            discovery.devices,
-            "disconnect-monitor",
-          );
+          let discovery = await discoverAndReconcile();
           const bootedDevices = discovery.devices;
-          const succeededPlatforms = discovery.succeededPlatforms;
+          let succeededPlatforms = discovery.succeededPlatforms;
           const bootedDeviceIds = new Set(bootedDevices.map((device) => device.deviceId));
-          const activeRecordings = await listActiveVideoRecordings();
+          const activeRecordings = await listRecordings();
 
           const missingByDevice = new Map<string, string[]>();
           const candidateDeviceIds = new Set<string>();
@@ -1976,8 +1985,11 @@ export class Daemon {
             candidatePlatforms.set(device.id, device.platform);
             candidateIncarnations.set(device.id, device.incarnation);
           }
-          for (const deviceId of this.sessionManager.getAssignedDevices()) {
-            candidateDeviceIds.add(deviceId);
+          for (const session of this.sessionManager.getAllSessions()) {
+            candidateDeviceIds.add(session.assignedDevice);
+            if (!candidatePlatforms.has(session.assignedDevice)) {
+              candidatePlatforms.set(session.assignedDevice, session.platform);
+            }
           }
 
           // Online-ness is otherwise binary: an in-session Android emulator
@@ -1992,14 +2004,27 @@ export class Daemon {
                 !bootedDeviceIds.has(deviceId) && candidatePlatforms.get(deviceId) === "android",
             ),
           );
-          const offlineDeviceIds =
-            missingAndroidCandidateIds.size > 0
-              ? await deviceManager.getAndroidOfflineDeviceIds(missingAndroidCandidateIds)
-              : new Set<string>();
+          let offlineDeviceIds: Set<string> | undefined;
+          try {
+            offlineDeviceIds =
+              missingAndroidCandidateIds.size > 0
+                ? await deviceManager.getAndroidOfflineDeviceIds(missingAndroidCandidateIds)
+                : new Set<string>();
+          } catch (error) {
+            if (!(error instanceof AndroidOfflineProbeError)) {
+              throw error;
+            }
+            // Auxiliary probe failure supplies no evidence that an offline episode ended.
+            logger.warn(
+              `[DisconnectMonitor] Retaining offline recovery attempts: ${errorMessage(error)}`,
+            );
+          }
           this.offlineRecoveryAttemptedDeviceIds = pruneStaleOfflineRecoveryAttempts(
             this.offlineRecoveryAttemptedDeviceIds,
             candidateDeviceIds,
             offlineDeviceIds,
+            this.offlineRecoveryAttemptedIncarnations,
+            candidateIncarnations,
           );
           // A serial that is mid-provisionDevice/startDevice already has its
           // own bounded offline recovery: AndroidEmulatorClient's
@@ -2010,20 +2035,26 @@ export class Daemon {
           // monitor never races a second reconnect against the readiness
           // wait's own dispatch.
           const inFlightStartupOfflineDeviceIds = new Set(
-            [...offlineDeviceIds].filter((deviceId) =>
+            [...(offlineDeviceIds ?? [])].filter((deviceId) =>
               this.devicePool.isDeviceLeasedForAndroidStartup(deviceId),
             ),
           );
           const offlineRecoveryTargets = selectOfflineRecoveryCandidates(
-            offlineDeviceIds,
+            offlineDeviceIds ?? new Set(),
             candidateDeviceIds,
             this.offlineRecoveryAttemptedDeviceIds,
             inFlightStartupOfflineDeviceIds,
           );
+          this.offlineRecoveryAttemptedDeviceIds = new Set([
+            ...this.offlineRecoveryAttemptedDeviceIds,
+            ...offlineRecoveryTargets,
+          ]);
+          this.offlineRecoveryAttemptedIncarnations = new Map(
+            [...candidateIncarnations].filter(([deviceId]) =>
+              this.offlineRecoveryAttemptedDeviceIds.has(deviceId),
+            ),
+          );
           if (offlineRecoveryTargets.length > 0) {
-            for (const deviceId of offlineRecoveryTargets) {
-              this.offlineRecoveryAttemptedDeviceIds.add(deviceId);
-            }
             logger.warn(
               `[DisconnectMonitor] In-session device(s) ADB-offline (${offlineRecoveryTargets.join(", ")}); attempting bounded 'adb reconnect offline' recovery before miss-counting`,
             );
@@ -2032,6 +2063,14 @@ export class Daemon {
             // inside recoverAndroidOfflineDevices so a probe or recovery
             // hiccup here never blocks the miss-count/disconnect path below.
             await deviceManager.recoverAndroidOfflineDevices();
+            // Reconnect may restore the transport during this await. Never use
+            // the pre-recovery absence for miss counting or ADB-reset detection.
+            discovery = await discoverAndReconcile(true);
+            succeededPlatforms = discovery.succeededPlatforms;
+            bootedDeviceIds.clear();
+            for (const device of discovery.devices) {
+              bootedDeviceIds.add(device.deviceId);
+            }
           }
 
           const disconnectResult = evaluateDeviceDisconnects({
@@ -2056,7 +2095,7 @@ export class Daemon {
           }
 
           for (const { deviceId, misses } of disconnectResult.missed) {
-            const missState = offlineDeviceIds.has(deviceId) ? "offline" : "absent";
+            const missState = offlineDeviceIds?.has(deviceId) ? "offline" : "absent";
             logger.info(
               `[DisconnectMonitor] Device ${deviceId} not in booted list (${missState}, miss ${misses}/${DEVICE_DISCONNECT_MISS_THRESHOLD}, booted=${bootedDeviceIds.size})`,
             );
@@ -2231,6 +2270,7 @@ export class Daemon {
               this.deviceDisconnectMisses.delete(deviceId);
               this.deviceDisconnectMissIncarnations.delete(deviceId);
               this.offlineRecoveryAttemptedDeviceIds.delete(deviceId);
+              this.offlineRecoveryAttemptedIncarnations.delete(deviceId);
               if (
                 this.forceDisconnectedDeviceGenerations.get(deviceId) ===
                 forceGenerationAtDisconnect

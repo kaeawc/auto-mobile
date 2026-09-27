@@ -113,6 +113,24 @@ describe("BoundedAndroidDeviceReboot", () => {
     expect(attempts).toBe(2);
   });
 
+  it("re-prunes attempts when backoff crosses the rolling-window boundary", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const recovery = new BoundedAndroidDeviceReboot(timer);
+    await recovery.run(target, async () => {});
+    timer.advanceTime(899_500);
+    let attempts = 0;
+    const result = await recovery.run(target, async () => {
+      attempts++;
+      if (attempts === 1) {
+        throw new Error("first attempt failed");
+      }
+    });
+    expect(result).toBe(true);
+    expect(attempts).toBe(2);
+    expect(timer.now()).toBe(901_500);
+  });
+
   it("clears the tracked budget for a target, e.g. after its AVD is deleted (#7545)", async () => {
     let attempts = 0;
     const timer = new FakeTimer();

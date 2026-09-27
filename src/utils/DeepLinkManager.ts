@@ -118,6 +118,7 @@ export interface ChooserAppMetadata {
   getFreshHierarchy(
     device: BootedDevice,
     adbFactory: AdbClientFactory,
+    minTimestamp: number,
   ): Promise<ViewHierarchyResult>;
 }
 
@@ -126,8 +127,13 @@ const defaultChooserAppMetadata: ChooserAppMetadata = {
     const { resolveAppLabel } = await import("../server/systemTrayHelpers");
     return resolveAppLabel(device, packageName);
   },
-  async getFreshHierarchy(device, adbFactory) {
-    return new ViewHierarchy(device, adbFactory).getViewHierarchy(undefined, undefined, true);
+  async getFreshHierarchy(device, adbFactory, minTimestamp) {
+    return new ViewHierarchy(device, adbFactory).getViewHierarchy(
+      undefined,
+      undefined,
+      true,
+      minTimestamp,
+    );
   },
 };
 
@@ -671,6 +677,8 @@ export class DeepLinkManager implements DeepLinkManager {
           rootNodes,
           customAppPackage,
           viewHierarchy.packageName,
+          undefined,
+          viewHierarchy.updatedAt,
         );
       }
 
@@ -761,6 +769,7 @@ export class DeepLinkManager implements DeepLinkManager {
     appPackage: string,
     hierarchyPackage?: string,
     resolvedLabel?: string | null,
+    originalUpdatedAt?: number,
   ): Promise<any> {
     const packageRows = new Set<any>();
     const labelRows = new Map<any, Set<string>>();
@@ -805,7 +814,13 @@ export class DeepLinkManager implements DeepLinkManager {
             labels.add(value);
           }
         }
-        labelRows.set(row, labels);
+        const inAppList = ancestors.some((ancestor) => {
+          const id = this.parser.extractNodeProperties(ancestor)["resource-id"];
+          return typeof id === "string" && /(?:^|\/)(?:resolver_list|chooser_list)$/.test(id);
+        });
+        if (inAppList) {
+          labelRows.set(row, labels);
+        }
       });
     }
     const candidates = [...packageRows];
@@ -815,6 +830,7 @@ export class DeepLinkManager implements DeepLinkManager {
         labelRows,
         rowsWithPackageMetadata,
         resolvedLabel,
+        originalUpdatedAt,
       );
     }
     return this.selectUniqueChooserRow(candidates, labelRows, appPackage);
@@ -825,11 +841,24 @@ export class DeepLinkManager implements DeepLinkManager {
     labelRows: Map<any, Set<string>>,
     rowsWithPackageMetadata: Set<any>,
     resolvedLabel: string | null | undefined,
+    originalUpdatedAt?: number,
   ): Promise<any> {
     if (resolvedLabel === undefined) {
+      if (originalUpdatedAt === undefined) {
+        throw new Error(
+          `Cannot safely refresh chooser for ${appPackage} without a capture timestamp.`,
+        );
+      }
       const metadata = this.chooserMetadata ?? defaultChooserAppMetadata;
       const label = await metadata.getLabel(this.device!, appPackage);
-      const freshHierarchy = await metadata.getFreshHierarchy(this.device!, this.adbFactory);
+      const freshHierarchy = await metadata.getFreshHierarchy(
+        this.device!,
+        this.adbFactory,
+        originalUpdatedAt + 1,
+      );
+      if (freshHierarchy.updatedAt === undefined || freshHierarchy.updatedAt <= originalUpdatedAt) {
+        throw new Error(`Chooser hierarchy did not refresh after resolving ${appPackage}.`);
+      }
       if (!this.detectIntentChooser(freshHierarchy)) {
         throw new Error(`Intent chooser disappeared while resolving ${appPackage}.`);
       }

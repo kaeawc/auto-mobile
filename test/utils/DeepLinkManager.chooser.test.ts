@@ -8,7 +8,7 @@ const metadata = (
   packageName?: string,
 ): ChooserAppMetadata => ({
   getLabel: async () => label,
-  getFreshHierarchy: async () => ({ ...hierarchy(nodes), packageName }) as any,
+  getFreshHierarchy: async () => ({ ...hierarchy(nodes), packageName, updatedAt: 101 }) as any,
 });
 
 const target = "com.example.app";
@@ -24,7 +24,13 @@ const row = (packageName: string, top: number) => ({
   ],
 });
 const hierarchy = (nodes: unknown[]) => ({
-  hierarchy: { node: { class: "com.android.internal.app.ChooserActivity", node: nodes } },
+  updatedAt: 100,
+  hierarchy: {
+    node: {
+      class: "com.android.internal.app.ChooserActivity",
+      node: [{ "resource-id": "android:id/resolver_list", node: nodes }],
+    },
+  },
 });
 
 async function choose(nodes: unknown[], label: string | null = null) {
@@ -100,6 +106,68 @@ describe("custom intent chooser label fallback", () => {
     expect(result.success).toBe(true);
     expect(adb.getExecutedCommands()).toEqual(["shell input tap 50 220"]);
   });
+  test("rejects a cached chooser instead of tapping stale coordinates", async () => {
+    const adb = new FakeAdbExecutor();
+    let requestedTimestamp = 0;
+    const manager = new DeepLinkManager(
+      { platform: "android", deviceId: "fake", name: "fake" },
+      adb,
+      null,
+      null,
+      undefined,
+      undefined,
+      {
+        getLabel: async () => "Example",
+        getFreshHierarchy: async (_device, _factory, minTimestamp) => {
+          requestedTimestamp = minTimestamp;
+          return hierarchy([labelRow("Example", 100)]) as any;
+        },
+      },
+    );
+    const result = await manager.handleIntentChooser(
+      hierarchy([labelRow("Example", 100)]) as any,
+      "custom",
+      target,
+    );
+    expect(requestedTimestamp).toBe(101);
+    expect(result.error).toContain("did not refresh");
+    expect(adb.getExecutedCommands()).toEqual([]);
+  });
+  test("ignores an action button named like the requested app", async () => {
+    const adb = new FakeAdbExecutor();
+    const fresh = {
+      updatedAt: 101,
+      hierarchy: {
+        node: {
+          class: "com.android.internal.app.ChooserActivity",
+          node: [
+            {
+              clickable: true,
+              text: "Always",
+              bounds: { left: 0, top: 0, right: 100, bottom: 40 },
+            },
+            { "resource-id": "android:id/resolver_list", node: [labelRow("Always", 100)] },
+          ],
+        },
+      },
+    };
+    const manager = new DeepLinkManager(
+      { platform: "android", deviceId: "fake", name: "fake" },
+      adb,
+      null,
+      null,
+      undefined,
+      undefined,
+      { getLabel: async () => "Always", getFreshHierarchy: async () => fresh as any },
+    );
+    const result = await manager.handleIntentChooser(
+      hierarchy([labelRow("Always", 100)]) as any,
+      "custom",
+      target,
+    );
+    expect(result.success).toBe(true);
+    expect(adb.getExecutedCommands()).toEqual(["shell input tap 50 120"]);
+  });
   test("falls back to a label-only row when another row carries package metadata", async () => {
     const { result, commands } = await choose(
       [row(`${target}.beta`, 0), labelRow("Example", 100)],
@@ -146,6 +214,7 @@ test("rejects ambiguity across hierarchy roots", async () => {
   const manager = new DeepLinkManager({ platform: "android", deviceId: "fake", name: "fake" }, adb);
   const result = await manager.handleIntentChooser(
     {
+      updatedAt: 100,
       hierarchy: {
         node: [
           { class: "com.android.internal.app.ChooserActivity", node: [row(target, 0)] },
@@ -205,6 +274,7 @@ test("excludes a captured OEM chooser host from represented app metadata", async
   );
   const result = await manager.handleIntentChooser(
     {
+      updatedAt: 100,
       hierarchy: {
         node: {
           $: { class: "com.android.internal.app.ChooserActivity" },

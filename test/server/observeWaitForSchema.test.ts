@@ -942,6 +942,20 @@ describe("findWaitForElement rich predicates", () => {
     ).toBeNull();
   });
 
+  test("exact textMatch preserves surrounding whitespace while normalizing quotes and case", () => {
+    const finder = new ElementResolver();
+    const hierarchy = makeHierarchy([{ $: { text: "Submit", bounds: bounds(0, 0, 100, 40) } }]);
+    expect(
+      findWaitForElement(finder, { text: " Submit ", textMatch: "exact" }, hierarchy),
+    ).toBeNull();
+    hierarchy.hierarchy.node.node = [
+      { $: { text: " Don’t Submit ", bounds: bounds(0, 0, 100, 40) } },
+    ];
+    expect(
+      findWaitForElement(finder, { text: " don't submit ", textMatch: "exact" }, hierarchy)?.text,
+    ).toBe(" Don’t Submit ");
+  });
+
   test("keeps contentDescription exact-only when textMatch is non-exact", () => {
     const finder = new ElementResolver();
     const hierarchy = makeHierarchy([

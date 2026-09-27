@@ -456,14 +456,19 @@ function byHierarchyOrder(a: SkeletonAccumulator, b: SkeletonAccumulator): numbe
  * `elementId` repeats within this skeleton, so a client can disambiguate with
  * `tapOn({ selector: { elementId }, index: entry.index })` instead of
  * guessing against the undocumented default `selectionStrategy: "first"`.
- * Entries with a unique `elementId` (including all entries with no
- * `elementId` at all) are left untouched — no spurious `index` on the common
- * case. See {@link byHierarchyOrder} for why ranking by `enter` reproduces
+ * Id-less rows with repeated labels also receive a text-selector index.
+ * See {@link byHierarchyOrder} for why ranking by `enter` reproduces
  * `tapOn.index` verbatim.
  */
 function assignDuplicateIndexes(entries: SkeletonAccumulator[]): void {
   const byElementId = new Map<string, SkeletonAccumulator[]>();
+  const byLabel = new Map<string, SkeletonAccumulator[]>();
   for (const entry of entries) {
+    if (entry.label !== undefined) {
+      const group = byLabel.get(entry.label) ?? [];
+      group.push(entry);
+      byLabel.set(entry.label, group);
+    }
     if (entry.elementId === undefined) {
       continue;
     }
@@ -481,6 +486,17 @@ function assignDuplicateIndexes(entries: SkeletonAccumulator[]): void {
     group.sort(byHierarchyOrder);
     group.forEach((entry, position) => {
       entry.index = position;
+    });
+  }
+  for (const group of byLabel.values()) {
+    if (group.length < 2) {
+      continue;
+    }
+    group.sort(byHierarchyOrder);
+    group.forEach((entry, position) => {
+      if (entry.elementId === undefined) {
+        entry.index = position;
+      }
     });
   }
 }

@@ -6,6 +6,7 @@ import {
 import { setElementProvenance } from "../../../../src/features/observe/output/elementProvenance";
 import { DefaultObserveElementCollector } from "../../../../src/features/observe/ObserveElementCollector";
 import { DefaultElementSelector } from "../../../../src/features/utility/DefaultElementSelector";
+import { ResolverElementSelector } from "../../../../src/features/utility/ResolverElementSelector";
 import { tapOnSchema } from "../../../../src/server/interactionTools";
 import type { Element } from "../../../../src/models/Element";
 import type { ObserveResult } from "../../../../src/models/ObserveResult";
@@ -856,6 +857,39 @@ describe("toSkeleton — acceptance criteria", () => {
   });
 
   describe("#6221 item 2: duplicate-id disambiguator", () => {
+    test("id-less iOS controls with duplicate accessibility labels get replayable indexes", () => {
+      const viewHierarchy = {
+        hierarchy: {
+          node: {
+            bounds: bounds(0, 0, 100, 200),
+            node: [
+              {
+                "ios-accessibility-label": "Remove",
+                clickable: true,
+                bounds: bounds(0, 0, 80, 40),
+              },
+              {
+                "ios-accessibility-label": "Remove",
+                clickable: true,
+                bounds: bounds(0, 60, 80, 100),
+              },
+            ],
+          },
+        },
+      } as ViewHierarchyResult;
+      const elements = new DefaultObserveElementCollector().collect(viewHierarchy, "ios");
+      const rows = toSkeleton(elements!).filter((entry) => entry.label === "Remove");
+      expect(rows.map((entry) => entry.index)).toEqual([0, 1]);
+      const selector = new ResolverElementSelector();
+      for (const row of rows) {
+        const result = selector.selectByText(viewHierarchy, row.label!, {
+          index: row.index,
+          partialMatch: false,
+        });
+        expect(result.element?.bounds).toEqual(bounds(...row.bounds));
+      }
+    });
+
     test("unique-id entries never carry an index", () => {
       const a: Element = { bounds: bounds(0, 0, 10, 10), "resource-id": "a", clickable: "true" };
       const b: Element = { bounds: bounds(0, 20, 10, 30), "resource-id": "b", clickable: "true" };

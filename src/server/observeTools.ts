@@ -48,6 +48,7 @@ import { elementContainerSchema } from "./elementSelectorSchemas";
 import { observeToolResultSchema } from "./toolOutputSchemas";
 import { ElementResolver, type MatchMode } from "../features/utility/ElementResolver";
 import { SearchableHierarchy } from "../features/utility/SearchableNode";
+import { normalizeQuotes } from "../features/utility/TextMatcher";
 import type { ResolverSelector } from "./elementSelectorSchemas";
 import type { ConditionResolver } from "../features/observe/ConditionPredicates";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
@@ -799,7 +800,18 @@ export const findWaitForElement = (
     const visibleSources = (resolution: typeof result) =>
       [
         ...new Set(resolution.matches.flatMap(({ node, sourceNodes }) => sourceNodes ?? [node])),
-      ].filter((node) => isWaitSourceVisible(node.element, viewHierarchy, negative));
+      ].filter((node) => {
+        if (!isWaitSourceVisible(node.element, viewHierarchy, negative)) {
+          return false;
+        }
+        if (selector.text === undefined || selector.match !== "exact") {
+          return true;
+        }
+        const expected = normalizeQuotes(selector.text).toLowerCase();
+        return Object.values(node.textSources).some(
+          (value) => normalizeQuotes(value).toLowerCase() === expected,
+        );
+      });
     let candidates = visibleSources(result);
     if (canTryVisibleContains(selector, key, result.matchMode, candidates.length)) {
       result = finder.resolve(

@@ -248,6 +248,41 @@ test("focus promotes a Compose label child to its editable ancestor (#7759)", ()
   expect(result.element?.bounds).toEqual(inputBounds);
 });
 
+test("focus prefers an exact label's promoted field over a partial match elsewhere (PR #7780 review)", () => {
+  const exactInputBounds = { left: 20, top: 100, right: 220, bottom: 160 };
+  const partialInputBounds = { left: 20, top: 200, right: 320, bottom: 280 };
+  const capture = {
+    hierarchy: {
+      bounds: { left: 0, top: 0, right: 400, bottom: 400 },
+      node: {
+        class: "android.widget.EditText",
+        bounds: exactInputBounds,
+        node: {
+          class: "android.widget.TextView",
+          text: "Email",
+          bounds: { left: 30, top: 110, right: 100, bottom: 140 },
+        },
+      },
+    },
+    windows: [
+      {
+        windowLayer: 10,
+        hierarchy: {
+          node: {
+            class: "android.widget.EditText",
+            text: "Email Address",
+            bounds: partialInputBounds,
+          },
+        },
+      },
+    ],
+  };
+  const result = new ResolverElementSelector().selectByText(capture, "Email", {
+    intentAction: "focus-input",
+  });
+  expect(result.element?.bounds).toEqual(exactInputBounds);
+});
+
 test("focus rejects a nested label outside a distant editable ancestor (#7759)", () => {
   const outerBounds = { left: 0, top: 0, right: 200, bottom: 80 };
   const labelBounds = { left: 20, top: 200, right: 100, bottom: 230 };

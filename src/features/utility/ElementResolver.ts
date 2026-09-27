@@ -313,7 +313,7 @@ export class ElementResolver {
       nodes = siblings.nodes;
     }
     const matched = this.prepareMatches(
-      this.match(nodes, selector, intent),
+      this.match(nodes, selector, intent, snapshot, scope),
       selector,
       snapshot,
       scope,
@@ -501,7 +501,7 @@ export class ElementResolver {
           !isWithin(node, anchor, snapshot.nodes) &&
           !this.crossesCollection(node, row, snapshot.nodes),
       );
-      if (this.match(siblings, selector, intent).matches.length > 0) {
+      if (this.match(siblings, selector, intent, snapshot, scope).matches.length > 0) {
         return { nodes: siblings };
       }
       if (row === scope) {
@@ -600,6 +600,8 @@ export class ElementResolver {
     nodes: SearchableEntry[],
     selector: ResolverSelector,
     intent: ResolutionIntent,
+    snapshot: ResolverSnapshot,
+    scope?: SearchableEntry,
   ): Pick<ElementResolution, "matches" | "matchMode" | "error"> {
     if (selector.elementId !== undefined) {
       return this.matchId(nodes, selector.elementId, selector.match ?? "exact", intent);
@@ -629,7 +631,7 @@ export class ElementResolver {
         matchMode: "exact",
       };
     }
-    return this.matchText(nodes, selector, intent, textQuery);
+    return this.matchText(nodes, selector, intent, textQuery, snapshot, scope);
   }
 
   private matchText(
@@ -637,6 +639,8 @@ export class ElementResolver {
     selector: ResolverSelector,
     intent: ResolutionIntent,
     textQuery: string,
+    snapshot: ResolverSnapshot,
+    scope?: SearchableEntry,
   ): Pick<ElementResolution, "matches" | "matchMode" | "error"> {
     const fields = (node: SearchableEntry): readonly string[] =>
       selector.contentDescription !== undefined
@@ -652,7 +656,7 @@ export class ElementResolver {
       fields(node).some((field) => normalize(field, selector.caseSensitive) === query),
     );
     const requested = intent.matchMode ?? selector.match;
-    const eligibleExact = this.hasEligibleExactTextMatch(exact, intent);
+    const eligibleExact = this.hasEligibleExactTextMatch(exact, intent, snapshot, scope);
     const matchMode =
       intent.negative && requested !== "regex"
         ? "exact"
@@ -688,8 +692,19 @@ export class ElementResolver {
     };
   }
 
-  private hasEligibleExactTextMatch(exact: SearchableEntry[], intent: ResolutionIntent): boolean {
-    return intent.action === "input" || intent.action === "focus" || intent.action === "focus-input"
+  private hasEligibleExactTextMatch(
+    exact: SearchableEntry[],
+    intent: ResolutionIntent,
+    snapshot: ResolverSnapshot,
+    scope?: SearchableEntry,
+  ): boolean {
+    if (intent.action === "focus-input") {
+      return exact.some(
+        (node) =>
+          eligible(node, intent) || this.focusInputTarget(node, snapshot, intent, scope) !== null,
+      );
+    }
+    return intent.action === "input" || intent.action === "focus"
       ? exact.some((node) => eligible(node, intent))
       : exact.length > 0;
   }

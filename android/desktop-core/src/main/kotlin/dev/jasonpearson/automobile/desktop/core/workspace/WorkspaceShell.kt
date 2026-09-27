@@ -777,6 +777,9 @@ private fun PaneMainContent(
   externalCaptureRequest: Pair<String, Int>?,
   modifier: Modifier,
 ) {
+  // Keep the last consumed request while Inspect replaces the stream subtree. A request issued
+  // there remains pending until the user returns to Input.
+  var handledCapture by remember(column.deviceId) { mutableStateOf(externalCaptureRequest) }
   if (column.mode == InteractionMode.Inspect) {
     Box(modifier.fillMaxWidth()) { inspectContent(column) }
   } else {
@@ -787,7 +790,9 @@ private fun PaneMainContent(
       observationStreamFactory,
       screenshotSaver,
       externalCaptureRequest,
-      modifier,
+      handledCapture,
+      onHandledCapture = { handledCapture = it },
+      modifier = modifier,
     )
   }
 }
@@ -807,13 +812,14 @@ private fun StreamArea(
   observationStreamFactory: (String) -> ObservationStream,
   screenshotSaver: ScreenshotSaver,
   externalCaptureRequest: Pair<String, Int>?,
+  handledCapture: Pair<String, Int>?,
+  onHandledCapture: (Pair<String, Int>?) -> Unit,
   modifier: Modifier,
 ) {
   // Result of the latest capture + a monotonically increasing request token. Keyed on deviceId so a
   // pane reused for a different device (panes are keyed by id, so this is defensive) starts clean.
   var savedNotice by remember(column.deviceId) { mutableStateOf<String?>(null) }
   var captureRequest by remember(column.deviceId) { mutableStateOf(0) }
-  var handledCapture by remember(column.deviceId) { mutableStateOf(externalCaptureRequest) }
 
   LaunchedEffect(column.deviceId, externalCaptureRequest) {
     if (
@@ -821,7 +827,7 @@ private fun StreamArea(
     ) {
       captureRequest++
     }
-    handledCapture = externalCaptureRequest
+    onHandledCapture(externalCaptureRequest)
   }
 
   // Each Screenshot tap bumps captureRequest, re-running this effect: open a fresh per-device

@@ -2,7 +2,6 @@ package dev.jasonpearson.automobile.desktop.core.workspace
 
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.test.ExperimentalTestApi
@@ -598,8 +597,9 @@ class NavigationFacetTest {
   @Test
   fun `conflated reconnect clears the old app and requests fresh navigation`() = runComposeUiTest {
     val fake = FakeObservationStream()
-    val observedStates = CopyOnWriteArrayList<ConnectionState>()
-    val downstreamMayResume = CompletableDeferred<Unit>()
+    val collectorBlocked = CompletableDeferred<Unit>()
+    val collectorMayResume = CompletableDeferred<Unit>()
+    val reconnectMayStart = CompletableDeferred<Unit>()
     setContent {
       CompositionLocalProvider(LocalAutoMobileGraph provides testGraph()) {
         MaterialTheme {
@@ -611,15 +611,15 @@ class NavigationFacetTest {
                 Result.Success(NavigationGraph(listOf(screen("Alpha")), emptyList()))
               )
             },
-            backoffDelay = {},
+            backoffDelay = { reconnectMayStart.await() },
             socketAvailable = { true },
+            connectionStateCollectorGate = { next ->
+              if (next is ConnectionState.Disconnected && next.reason == "Stream ended") {
+                collectorBlocked.complete(Unit)
+                collectorMayResume.await()
+              }
+            },
           )
-          LaunchedEffect(fake) {
-            fake.connectionState.collect {
-              observedStates += it
-              if (observedStates.size == 1) downstreamMayResume.await()
-            }
-          }
         }
       }
     }
@@ -631,10 +631,12 @@ class NavigationFacetTest {
     val requestsBeforeDrop = fake.navigationRequestCount
 
     runOnIdle { fake.emitConnectionState(ConnectionState.Disconnected("Stream ended")) }
+    waitUntil(timeoutMillis = 5_000) { collectorBlocked.isCompleted }
+    reconnectMayStart.complete(Unit)
     waitForIdle()
     assertEquals(2, fake.connectCallCount)
     assertEquals(ConnectionState.Connected(), fake.connectionState.value)
-    runOnIdle { downstreamMayResume.complete(Unit) }
+    runOnIdle { collectorMayResume.complete(Unit) }
     waitForIdle()
     assertTrue(
       "the new generation must request a fresh navigation payload",
@@ -904,6 +906,60 @@ class NavigationFacetTest {
       assertEquals("payload retry keeps the healthy stream", 1, fake.connectCallCount)
       onNodeWithText("Resolving navigation graph", substring = true).assertExists()
     }
+
+  @Test
+  fun `retry after reconnect timeout does not replay the pre-outage app`() = runComposeUiTest {
+    val fake = FakeObservationStream()
+    val reconnectTimeout = CompletableDeferred<Unit>()
+    val retryTimeout = CompletableDeferred<Unit>()
+    val retryStarted = AtomicBoolean(false)
+    setContent {
+      CompositionLocalProvider(LocalAutoMobileGraph provides testGraph()) {
+        MaterialTheme {
+          NavigationFacet(
+            column = column(),
+            observationStreamFactory = { fake },
+            navigationDataSourceProvider = {
+              StubNavigationDataSource(
+                Result.Success(NavigationGraph(listOf(screen("Alpha")), emptyList()))
+              )
+            },
+            backoffDelay = {},
+            socketAvailable = { true },
+            resolveTimeout = {
+              if (retryStarted.get()) retryTimeout.await() else reconnectTimeout.await()
+            },
+          )
+        }
+      }
+    }
+    waitForIdle()
+    fake.emitNavigation(navUpdate("com.example.a"))
+    waitUntil(timeoutMillis = 5_000) {
+      onAllNodesWithText("Alpha").fetchSemanticsNodes().isNotEmpty()
+    }
+    runOnIdle { fake.emitConnectionState(ConnectionState.Disconnected("Stream ended")) }
+    waitUntil(timeoutMillis = 5_000) { fake.connectCallCount == 2 }
+    waitUntil(timeoutMillis = 5_000) {
+      onAllNodesWithText("Alpha").fetchSemanticsNodes().isEmpty()
+    }
+    reconnectTimeout.complete(Unit)
+    waitUntil(timeoutMillis = 5_000) {
+      onAllNodesWithText("No navigation data received", substring = true)
+        .fetchSemanticsNodes()
+        .isNotEmpty()
+    }
+    retryStarted.set(true)
+    onNodeWithContentDescription("Retry resolving navigation graph").performClick()
+    waitForIdle()
+    assertTrue(onAllNodesWithText("Alpha").fetchSemanticsNodes().isEmpty())
+    retryTimeout.complete(Unit)
+    waitUntil(timeoutMillis = 5_000) {
+      onAllNodesWithText("No navigation data received", substring = true)
+        .fetchSemanticsNodes()
+        .isNotEmpty()
+    }
+  }
 
   @Test
   fun `switching apps resets fog so the new app starts with the full graph`() = runComposeUiTest {

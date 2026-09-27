@@ -342,6 +342,50 @@ class WorkspaceShellUiTest {
   }
 
   @Test
+  fun `capture requested in Inspect runs after returning to Input`() = runComposeUiTest {
+    val request = mutableStateOf<Pair<String, Int>?>(null)
+    val mode = mutableStateOf(InteractionMode.Inspect)
+    val fake = FakeObservationStream()
+    var savedName: String? = null
+    setContent {
+      MaterialTheme {
+        WorkspaceShell(
+          state =
+            WorkspaceUiState.Content(
+              columns = listOf(col("a", "Pixel 8").copy(mode = mode.value)),
+              focusedDeviceId = "a",
+            ),
+          onAction = {},
+          onOpenPicker = {},
+          inspectContent = { Text("inspect-slot") },
+          externalCaptureRequest = request.value,
+          observationStreamFactory = { fake },
+          screenshotSaver =
+            ScreenshotSaver { name, _ ->
+              savedName = name
+              "/tmp/shots/$name.png"
+            },
+        )
+      }
+    }
+    runOnIdle { request.value = "a" to 1 }
+    waitForIdle()
+    assertEquals(0, fake.observationRequestCount)
+    runOnIdle { mode.value = InteractionMode.Input }
+    waitUntil(timeoutMillis = 5_000L) { fake.observationRequestCount == 1 }
+    fake.emitScreenshot(
+      ScreenshotStreamUpdate(
+        "a",
+        0L,
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+        1,
+        1,
+      )
+    )
+    waitUntil(timeoutMillis = 5_000L) { savedName == "Pixel 8" }
+  }
+
+  @Test
   fun `Locale control opens a picker and selecting a locale dispatches SetLocale`() =
     runComposeUiTest {
       var action: WorkspaceAction? = null

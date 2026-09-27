@@ -77,6 +77,8 @@ class WorkspaceViewModelTest {
       )
     )
 
+    vm.onAction(WorkspaceAction.SetFirstPaneFraction("a", 0.5f))
+
     vm.onAction(
       WorkspaceAction.ObserveDevice(
         DeviceColumn(
@@ -92,6 +94,22 @@ class WorkspaceViewModelTest {
     assertEquals(1, state.columns.size)
     assertEquals("epoch-b", state.columns.single().deviceSessionUuid)
     assertEquals(Tool.Storage, state.columns.single().activeTool)
+    assertEquals(0.5f, state.columns.single().firstPaneFractionOverride)
+  }
+
+  @Test
+  fun `manual resize exits shrink preset`() = testScope.runTest {
+    val vm = WorkspaceViewModel(this)
+    vm.onAction(WorkspaceAction.ObserveDevice(column("a")))
+    vm.onAction(WorkspaceAction.ToggleShrink("a"))
+    vm.onAction(WorkspaceAction.SetFirstPaneFraction("a", 0.5f))
+    val resized = (vm.state.value as WorkspaceUiState.Content).columns.single()
+    assertEquals(false, resized.shrunk)
+    assertEquals(0.5f, resized.firstPaneFractionOverride)
+    vm.onAction(WorkspaceAction.ToggleShrink("a"))
+    val shrunk = (vm.state.value as WorkspaceUiState.Content).columns.single()
+    assertEquals(true, shrunk.shrunk)
+    assertNull(shrunk.firstPaneFractionOverride)
   }
 
   @Test

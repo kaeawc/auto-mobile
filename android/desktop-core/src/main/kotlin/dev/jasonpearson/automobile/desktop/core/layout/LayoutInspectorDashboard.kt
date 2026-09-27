@@ -16,6 +16,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
@@ -28,6 +29,9 @@ import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
 import dev.jasonpearson.automobile.desktop.core.tabs.PanelHeader
 import dev.jasonpearson.automobile.desktop.core.tabs.VerticalCollapsibleTab
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 
 /**
  * Main Layout Inspector dashboard with 3-panel layout:
@@ -52,6 +56,10 @@ fun LayoutInspectorDashboard(
    */
   liveFrame: androidx.compose.ui.graphics.ImageBitmap? = null,
   connectionGeneration: Int = 0,
+  frameDispatcher: CoroutineDispatcher = Dispatchers.Default,
+  beforeHierarchyParse: suspend () -> Unit = {},
+  onHierarchyUnavailable: (String) -> Unit = {},
+  socketAvailable: () -> Boolean = { ObservationStreamClient.socketExists() },
 ) {
   val state = rememberLayoutInspectorState()
   val colors = SharedTheme.globalColors
@@ -63,9 +71,17 @@ fun LayoutInspectorDashboard(
     )
 
   val streamClient = observationStream
+  var collectorGeneration by remember(streamClient) { mutableStateOf(connectionGeneration) }
 
   // Collect hierarchy updates from the stream
-  LaunchedEffect(streamClient) {
+  LaunchedEffect(streamClient, connectionGeneration) {
+    if (collectorGeneration != connectionGeneration) {
+      // Cancelling the old collector discards its buffered pre-outage frames. Clear replay before
+      // subscribing again, so the new collector cannot mistake that replay for a fresh frame.
+      state.disconnect()
+      streamClient.resetLayoutReplayCache()
+    }
+    collectorGeneration = connectionGeneration
     dashboardLog.info(
       "Starting hierarchy updates collection from stream client: ${streamClient.hashCode()}"
     )
@@ -77,7 +93,8 @@ fun LayoutInspectorDashboard(
         val frameGeneration = state.frameGeneration
         dashboardLog.info("Parsing hierarchy JSON...")
         val result =
-          kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+          kotlinx.coroutines.withContext(frameDispatcher) {
+            beforeHierarchyParse()
             val parsed = parseHierarchyFromJson(hierarchyJson) ?: return@withContext null
             val oldMap = state.currentElementMap
             val changedIds = state.computeChangedElements(oldMap, parsed.elementMap)
@@ -97,11 +114,12 @@ fun LayoutInspectorDashboard(
           )
           dashboardLog.info("Updated state with new hierarchy")
         } else {
-          if (
-            frameGeneration == state.frameGeneration &&
-              !state.recordHierarchyUnavailable(hierarchyJson)
-          ) {
-            dashboardLog.warn("Failed to parse hierarchy from JSON")
+          if (frameGeneration == state.frameGeneration) {
+            if (state.recordHierarchyUnavailable(hierarchyJson)) {
+              onHierarchyUnavailable(state.hierarchyUnavailableReason.orEmpty())
+            } else {
+              dashboardLog.warn("Failed to parse hierarchy from JSON")
+            }
           }
         }
       }
@@ -109,7 +127,10 @@ fun LayoutInspectorDashboard(
   }
 
   // Collect screenshot updates from the stream
-  LaunchedEffect(streamClient) {
+  LaunchedEffect(streamClient, connectionGeneration) {
+    if (collectorGeneration != connectionGeneration) {
+      snapshotFlow { collectorGeneration }.first { it == connectionGeneration }
+    }
     dashboardLog.info(
       "Starting screenshot updates collection from stream client: ${streamClient.hashCode()}"
     )
@@ -170,8 +191,6 @@ fun LayoutInspectorDashboard(
       if (observedGeneration != 0 && observedGeneration != connectionGeneration) {
         // A fast drop/reconnect can leave connectionState value-equal to the old Connected state.
         // Clear the old hierarchy and screenshot even when the grace-period collector missed it.
-        state.disconnect()
-        streamClient.resetLayoutReplayCache()
         gracePeriod.onStreamStateChange(streamClient.connectionState.value)
       }
       observedGeneration = connectionGeneration
@@ -190,14 +209,14 @@ fun LayoutInspectorDashboard(
 
   // Poll socket existence so the UI reacts when the daemon starts or stops.
   // Only active when disconnected/connecting — connected state doesn't need this.
-  var socketExists by remember { mutableStateOf(ObservationStreamClient.socketExists()) }
+  var socketExists by remember { mutableStateOf(socketAvailable()) }
   val isDisconnectedOrConnecting =
     state.connectionStatus == ConnectionStatus.Disconnected ||
       state.connectionStatus == ConnectionStatus.Connecting
   LaunchedEffect(isDisconnectedOrConnecting) {
     if (isDisconnectedOrConnecting) {
       while (true) {
-        socketExists = ObservationStreamClient.socketExists()
+        socketExists = socketAvailable()
         kotlinx.coroutines.delay(2000)
       }
     } else {

@@ -332,7 +332,8 @@ private fun DeviceGrid(
   thumbnail: @Composable (PickerDevice, Boolean) -> Unit,
 ) {
   val devices = filteredDevices(content.devices, content.filters)
-  val displayNames = disambiguateLabels(devices, PickerDevice::id, PickerDevice::name)
+  val displayNames = disambiguateLabels(devices, PickerDevice::uiKey, PickerDevice::name)
+  val sameNameAndIdCounts = devices.groupingBy { it.name to it.id }.eachCount()
   // Different platforms can share a raw id while retaining distinct, unique names.
   val nameCounts = devices.groupingBy(PickerDevice::name).eachCount()
   // Masonry (Pinterest-style) packing: every card is column-width, but each card's HEIGHT follows
@@ -349,7 +350,11 @@ private fun DeviceGrid(
         device = device,
         displayName =
           if (nameCounts.getValue(device.name) == 1) device.name
-          else displayNames.getValue(device.id),
+          else if (sameNameAndIdCounts.getValue(device.name to device.id) > 1) {
+            "${device.name} (${device.uiKey})"
+          } else {
+            displayNames.getValue(device.uiKey)
+          },
         selected = device.uiKey in content.selectedIds,
         booting = device.uiKey in content.bootingIds,
         error = content.bootErrors[device.uiKey],

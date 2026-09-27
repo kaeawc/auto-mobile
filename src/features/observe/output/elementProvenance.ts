@@ -64,6 +64,8 @@ export interface ElementProvenance {
   windowRank?: number;
   /** Root/window group index; ancestry only holds within one group. */
   group: number;
+  /** Window z-order captured with the source node for stable cross-window projection. */
+  windowRank?: number;
   /** Pre-order enter position over parsed nodes (distinct, monotonic across groups). */
   enter: number;
   /** Maximum `enter` within this node's parsed subtree (inclusive interval end). */

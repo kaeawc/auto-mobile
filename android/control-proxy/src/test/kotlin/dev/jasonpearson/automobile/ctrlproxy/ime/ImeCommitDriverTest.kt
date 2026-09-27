@@ -37,8 +37,9 @@ class ImeCommitDriverTest {
       result = it
     }
 
-    assertFalse(result!!.success)
-    assertFalse(result!!.partialApplication)
+    val outcome = requireNotNull(result)
+    assertFalse(outcome.success)
+    assertFalse(outcome.partialApplication)
     assertTrue(sink.sentKeyUnits.isEmpty())
   }
 

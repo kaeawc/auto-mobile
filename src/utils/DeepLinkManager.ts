@@ -122,6 +122,7 @@ export interface DeepLinkManager {
   ): Promise<IntentChooserResult>;
 }
 
+/** Injected chooser label and fresh-hierarchy lookups used by paging and fallback matching. */
 export interface ChooserAppMetadata {
   getLabel(device: BootedDevice, packageName: string): Promise<string | null>;
   getActivityLabel?(
@@ -143,6 +144,7 @@ export type ChooserActivityLabelResult =
   | { kind: "resource" }
   | { kind: "none" };
 
+/** Retry signal for a missing chooser row; carries the capture time when known so paging can continue safely. */
 class ChooserRowMissingError extends Error {
   capturedAt?: number;
 }
@@ -1106,6 +1108,7 @@ export class DeepLinkManager implements DeepLinkManager {
     return this.selectUniqueChooserRow(candidates, labelRows, appPackage, true);
   }
 
+  /** Scans at most four chooser pages, retrying missing rows after a swipe and propagating terminal errors. */
   private async findAppInChooserAcrossPages(
     initialHierarchy: ViewHierarchyResult,
     appPackage: string,
@@ -1389,6 +1392,7 @@ export class DeepLinkManager implements DeepLinkManager {
     );
   }
 
+  /** Swipes and refreshes the chooser hierarchy; returns null when no useful scroll is possible and throws on refresh failure. */
   private async scrollChooserList(
     hierarchy: ViewHierarchyResult,
     roots: any[],
@@ -1449,6 +1453,7 @@ export class DeepLinkManager implements DeepLinkManager {
     return lists.at(-1);
   }
 
+  /** Matches by resolved labels when package metadata yields no row; unsafe or stale refreshes throw. */
   private async findChooserLabelFallback(
     appPackage: string,
     labelRows: Map<any, Set<string>>,
@@ -1543,6 +1548,7 @@ export class DeepLinkManager implements DeepLinkManager {
     return labels;
   }
 
+  /** Returns the sole candidate with usable bounds; missing and ambiguous matches throw. */
   private selectUniqueChooserRow(
     candidates: any[],
     labelRows: Map<any, Set<string>>,

@@ -83,12 +83,16 @@ export function loadContractCaptures(directory: string): ContractCapture[] {
     });
 }
 
-export function contractCases(capture: ContractCapture): ContractCase[] {
+export function observedRows(capture: ContractCapture): SkeletonElement[] {
   const elements = new DefaultObserveElementCollector().collect(
     capture.hierarchy,
     capture.platform,
   )!;
-  const skeleton = projectSkeleton(elements).skeleton;
+  return projectSkeleton(elements).skeleton;
+}
+
+export function contractCases(capture: ContractCapture): ContractCase[] {
+  const skeleton = observedRows(capture);
   if (capture.scopedQueries) {
     return capture.scopedQueries.map(({ query, bounds }) => {
       const observed = skeleton.find((element) => element.bounds.join(",") === bounds.join(","));

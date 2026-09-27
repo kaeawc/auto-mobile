@@ -4,6 +4,7 @@ import {
   type ResolutionAction,
 } from "../../../src/features/utility/ElementResolver";
 import { SearchableHierarchy } from "../../../src/features/utility/SearchableNode";
+import { observedRows } from "./observeContract";
 import type {
   ContractCase,
   ContractCapture,
@@ -11,9 +12,31 @@ import type {
   ContractResolution,
   ContractResolver,
 } from "./observeContract";
+import type { ResolverSelector } from "../../../src/server/elementSelectorSchemas";
 
 const searchable = new SearchableHierarchy();
 const resolver = new ElementResolver(() => 0);
+
+function selectorFor(
+  kind: ContractQuery["kind"],
+  value: string,
+  query?: ContractQuery,
+): ResolverSelector {
+  const field = kind === "elementId" ? "elementId" : kind === "testTag" ? "testTag" : "text";
+  return {
+    [field]: value,
+    ...(query?.index === undefined ? {} : { index: query.index }),
+    ...(query?.strategy === undefined ? {} : { selectionStrategy: query.strategy }),
+    ...(query?.container
+      ? {
+          container: query.container.elementId
+            ? { elementId: query.container.elementId }
+            : { text: query.container.text },
+        }
+      : {}),
+    match: "exact",
+  };
+}
 
 /** Exercise the row's advertised action; an index is passed through unchanged. */
 export function contractAction(testCase: ContractCase): ResolutionAction {
@@ -37,9 +60,20 @@ export class ResolverContractAdapter implements ContractResolver {
   constructor(private readonly testCase: ContractCase) {}
 
   resolve(capture: ContractCapture, query: ContractQuery): ContractResolution {
+    const anchorValue = this.testCase.observed.elementId ?? this.testCase.observed.label;
+    const selector = query.sibling
+      ? {
+          ...selectorFor(
+            this.testCase.observed.elementId ? "elementId" : "text",
+            anchorValue ?? query.value,
+            query,
+          ),
+          sibling: selectorFor(query.kind, query.value),
+        }
+      : selectorFor(query.kind, query.value, query);
     const result = resolver.resolve(
       { id: capture.name, nodes: searchable.project(capture.hierarchy) },
-      { [query.kind]: query.value, index: query.index, match: "exact" },
+      selector,
       { action: query.intent === "focus-input" ? "focus" : contractAction(this.testCase) },
     );
     if (result.error) {
@@ -75,11 +109,24 @@ export function observedCandidates(
   testCase: ContractCase,
   allCases: ContractCase[],
 ): CandidateIdentity[] {
+  const query = testCase.query;
+  if (query.strategy === "random" && !query.container && !query.sibling) {
+    return observedRows(testCase.capture)
+      .filter((row) =>
+        query.kind === "elementId"
+          ? row.elementId === query.value
+          : query.kind === "testTag"
+            ? row.testTag === query.value
+            : row.label === query.value,
+      )
+      .map((row) => ({ elementId: row.elementId, bounds: row.bounds.join(",") }));
+  }
   const peers = allCases.filter(
     ({ capture, query }) =>
       capture === testCase.capture &&
       query.kind === testCase.query.kind &&
-      query.value === testCase.query.value,
+      query.value === testCase.query.value &&
+      JSON.stringify(query.container) === JSON.stringify(testCase.query.container),
   );
   const unique = new Map<string, CandidateIdentity>();
   for (const { observed } of peers) {

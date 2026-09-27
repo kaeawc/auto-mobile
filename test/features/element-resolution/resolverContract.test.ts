@@ -41,7 +41,7 @@ test("unindexed duplicate labels use the displayed default row in every captured
     groups.set(key, [...(groups.get(key) ?? []), entry]);
   }
   const duplicates = [...groups.entries()].filter(([, entries]) => entries.length > 1);
-  expect(duplicates).toHaveLength(5);
+  expect(duplicates).toHaveLength(6);
   for (const [key, entries] of duplicates) {
     const first = entries[0];
     const query = { ...first.query, index: undefined };

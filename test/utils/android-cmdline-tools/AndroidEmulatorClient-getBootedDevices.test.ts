@@ -283,6 +283,142 @@ describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
     ).toHaveLength(1);
   });
 
+  test("re-reads an emulator model when a different AVD reuses its serial", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setDevices([{ name: "ignored", platform: "android", deviceId: "emulator-5554" }]);
+    adb.setCommandResponse("emu avd name", execResult("Pixel_9\n"));
+    adb.setCommandResponse("shell getprop ro.product.model", execResult("Pixel 9\n"));
+    const client = new AndroidEmulatorClient(
+      null,
+      null,
+      new FakeTimer(),
+      new FakeAdbClientFactory(adb),
+      new FakeAvdConfigReader(null),
+    );
+
+    expect((await client.getBootedDevicesChecked())[0]?.model).toBe("Pixel 9");
+    adb.setCommandResponse("emu avd name", execResult("Pixel_10\n"));
+    adb.setCommandResponse("shell getprop ro.product.model", execResult("Pixel 10\n"));
+    expect((await client.getBootedDevicesChecked())[0]?.model).toBe("Pixel 10");
+    await client.getBootedDevicesChecked();
+    expect(
+      adb.getExecutedCommands().filter((command) => command === "shell getprop ro.product.model"),
+    ).toHaveLength(2);
+  });
+
+  test("shares one fake-clock deadline across emulator name, model, and ABI probes", async () => {
+    const timer = new FakeTimer();
+    class AdvancingAdbExecutor extends FakeAdbExecutor {
+      override async executeCommand(
+        command: string,
+        timeoutMs?: number,
+        maxBuffer?: number,
+        noRetry?: boolean,
+        signal?: AbortSignal,
+      ): Promise<ExecResult> {
+        if (command === "emu avd name") {
+          timer.advanceTime(1800);
+        }
+        if (command === "shell getprop ro.product.model") {
+          timer.advanceTime(150);
+        }
+        return super.executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+      }
+    }
+    const adb = new AdvancingAdbExecutor();
+    adb.setDevices([{ name: "ignored", platform: "android", deviceId: "emulator-5554" }]);
+    adb.setCommandResponse("emu avd name", execResult("Pixel_9\n"));
+    adb.setCommandResponse("shell getprop ro.product.model", execResult("Pixel 9\n"));
+    adb.setCommandResponse("shell getprop ro.product.cpu.abi", execResult("arm64-v8a\n"));
+    const client = new AndroidEmulatorClient(
+      null,
+      null,
+      timer,
+      new FakeAdbClientFactory(adb),
+      new FakeAvdConfigReader(null),
+    );
+
+    await client.getBootedDevicesChecked();
+    expect(
+      adb
+        .getCommandCalls()
+        .filter(({ command }) =>
+          [
+            "emu avd name",
+            "shell getprop ro.product.model",
+            "shell getprop ro.product.cpu.abi",
+          ].includes(command),
+        )
+        .map(({ timeoutMs }) => timeoutMs),
+    ).toEqual([2000, 200, 50]);
+  });
+
+  test("skips emulator metadata probes when AVD naming spends the whole budget", async () => {
+    const timer = new FakeTimer();
+    class BudgetSpentAdbExecutor extends FakeAdbExecutor {
+      override async executeCommand(
+        command: string,
+        timeoutMs?: number,
+        maxBuffer?: number,
+        noRetry?: boolean,
+        signal?: AbortSignal,
+      ): Promise<ExecResult> {
+        if (command === "emu avd name") {
+          timer.advanceTime(2000);
+        }
+        return super.executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+      }
+    }
+    const adb = new BudgetSpentAdbExecutor();
+    adb.setDevices([{ name: "ignored", platform: "android", deviceId: "emulator-5554" }]);
+    adb.setCommandResponse("emu avd name", execResult("Pixel_9\n"));
+    const client = new AndroidEmulatorClient(
+      null,
+      null,
+      timer,
+      new FakeAdbClientFactory(adb),
+      new FakeAvdConfigReader(null),
+    );
+
+    expect((await client.getBootedDevicesChecked())[0]?.name).toBe("Pixel_9");
+    expect(adb.getExecutedCommands()).toEqual(["emu avd name"]);
+  });
+
+  test.each(["shell getprop ro.product.model", "shell getprop ro.product.cpu.abi"])(
+    "propagates abort during optional physical metadata probe %s",
+    async (abortedCommand) => {
+      const controller = new AbortController();
+      const reason = new Error("discovery cancelled");
+      class AbortingAdbExecutor extends FakeAdbExecutor {
+        override async executeCommand(
+          command: string,
+          timeoutMs?: number,
+          maxBuffer?: number,
+          noRetry?: boolean,
+          signal?: AbortSignal,
+        ): Promise<ExecResult> {
+          if (command === abortedCommand) {
+            controller.abort(reason);
+            throw new Error("adb cancelled");
+          }
+          return super.executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+        }
+      }
+      const adb = new AbortingAdbExecutor();
+      adb.setDevices([{ name: "ignored", platform: "android", deviceId: "R58M12ABCDE" }]);
+      const client = new AndroidEmulatorClient(
+        null,
+        null,
+        new FakeTimer(),
+        new FakeAdbClientFactory(adb),
+      );
+
+      await expect(client.getBootedDevicesChecked(false, {}, controller.signal)).rejects.toBe(
+        reason,
+      );
+    },
+  );
+
   test("uses cached CPU ABI metadata for a physical device without an AVD image", async () => {
     const adb = new FakeAdbExecutor();
     adb.setDevices([
@@ -308,6 +444,9 @@ describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
 
     expect(
       adb.getExecutedCommands().filter((command) => command === "shell getprop ro.product.cpu.abi"),
+    ).toHaveLength(1);
+    expect(
+      adb.getExecutedCommands().filter((command) => command === "shell getprop ro.product.model"),
     ).toHaveLength(1);
   });
 

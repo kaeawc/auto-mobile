@@ -110,11 +110,12 @@ interface DeviceCapture {
   rotation: number | null;
   idleTimer: NodeJS.Timeout | null;
   /**
-   * Fires every `HEARTBEAT_INTERVAL_MS` once the source has produced its first chunk (issue
-   * #7549), null before then and after teardown. Gated on first data so a source that is dead
-   * from the very start of capture is never masked as alive.
+   * Fires every `HEARTBEAT_INTERVAL_MS` once either pipeline stage reports data (issue #7549),
+   * null before then and after teardown. A single stage arms retirement without sending packets.
    */
   heartbeatTimer: NodeJS.Timeout | null;
+  /** First producer or encoder evidence; bounds startup when the other stage never reports. */
+  firstEvidenceMs: number | null;
   /** Time of the latest fresh producer frame, never refreshed by replay or the relay. */
   lastSourceDataMs: number | null;
   /** Native producer-idle evidence; cleared by the next complete source frame. */
@@ -475,6 +476,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
       rotation: null,
       idleTimer: null,
       heartbeatTimer: null,
+      firstEvidenceMs: null,
       lastSourceDataMs: null,
       lastIdleMs: null,
       encodedSinceSourceFrame: false,
@@ -491,10 +493,11 @@ export class VideoStreamSocketServer extends BaseSocketServer {
         return;
       }
       capture.lastSourceDataMs = this.timer.now();
+      capture.firstEvidenceMs ??= capture.lastSourceDataMs;
       capture.sourceFrameSequence++;
       capture.lastIdleMs = null;
       capture.encodedSinceSourceFrame = false;
-      if (capture.lastEncodedDataMs !== null && !capture.heartbeatTimer) {
+      if (!capture.heartbeatTimer) {
         this.startHeartbeat(deviceId, capture);
       }
     };
@@ -508,8 +511,9 @@ export class VideoStreamSocketServer extends BaseSocketServer {
               return;
             }
             current.lastEncodedDataMs = this.timer.now();
+            current.firstEvidenceMs ??= current.lastEncodedDataMs;
             current.encodedSinceSourceFrame = true;
-            if (current.lastSourceDataMs !== null && !current.heartbeatTimer) {
+            if (!current.heartbeatTimer) {
               this.startHeartbeat(deviceId, current);
             }
             this.broadcast(deviceId, chunk);
@@ -933,6 +937,10 @@ export class VideoStreamSocketServer extends BaseSocketServer {
         }
         return;
       }
+      // The deadline runs from first evidence, but a lone stage cannot attest live video.
+      if (capture.lastSourceDataMs === null || capture.lastEncodedDataMs === null) {
+        return;
+      }
       const packet = encodeHeartbeat();
       for (const subscriber of capture.subscribers) {
         if (
@@ -948,6 +956,23 @@ export class VideoStreamSocketServer extends BaseSocketServer {
   }
 
   private hasFreshSourceEvidence(deviceId: string, capture: DeviceCapture): boolean {
+    if (capture.lastSourceDataMs === null || capture.lastEncodedDataMs === null) {
+      return this.incompleteEvidenceIsRecent(capture);
+    }
+    return this.hasFreshCompleteSourceEvidence(deviceId, capture);
+  }
+
+  private incompleteEvidenceIsRecent(capture: DeviceCapture): boolean {
+    const now = this.timer.now();
+    return (
+      capture.source !== null &&
+      capture.firstEvidenceMs !== null &&
+      (this.idleEvidenceIsRecent(capture, now) ||
+        now - capture.firstEvidenceMs < SOURCE_EVIDENCE_MAX_AGE_MS)
+    );
+  }
+
+  private hasFreshCompleteSourceEvidence(deviceId: string, capture: DeviceCapture): boolean {
     const { source, lastSourceDataMs, lastEncodedDataMs } = capture;
     if (!source || lastSourceDataMs === null || lastEncodedDataMs === null) {
       return false;
@@ -981,16 +1006,20 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     if (capture.legacySimulatorHelper) {
       return true;
     }
-    if (
-      capture.lastIdleMs !== null &&
-      capture.encodedSinceSourceFrame &&
-      now - capture.lastIdleMs <= SOURCE_EVIDENCE_MAX_AGE_MS
-    ) {
+    if (this.idleEvidenceIsRecent(capture, now)) {
       return true;
     }
     return (
       Math.max(now - capture.lastSourceDataMs, now - capture.lastEncodedDataMs, 0) <=
       SOURCE_EVIDENCE_MAX_AGE_MS
+    );
+  }
+
+  private idleEvidenceIsRecent(capture: DeviceCapture, now: number): boolean {
+    return (
+      capture.lastIdleMs !== null &&
+      capture.encodedSinceSourceFrame &&
+      now - capture.lastIdleMs <= SOURCE_EVIDENCE_MAX_AGE_MS
     );
   }
 

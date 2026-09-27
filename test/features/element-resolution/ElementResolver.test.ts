@@ -289,6 +289,22 @@ test("XCUI tables prevent sibling traversal into another cell", () => {
   ).toBeNull();
 });
 
+test("non-scrollable ViewPager prevents sibling traversal into another page", () => {
+  const capture = snapshot([
+    {
+      bounds,
+      class: "androidx.viewpager.widget.ViewPager",
+      node: [
+        node("first-page", "", { node: [node("label", "First", { clickable: false })] }),
+        node("second-page", "", { node: [node("remove", "Remove")] }),
+      ],
+    },
+  ]);
+  expect(
+    resolver.resolve(capture, { elementId: "remove", sibling: { text: "First" } }, tap).chosen,
+  ).toBeNull();
+});
+
 test("content-description indices count actionable rows after promotion", () => {
   const capture = snapshot([
     node("first-row", "", {

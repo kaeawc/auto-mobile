@@ -48,11 +48,13 @@ class LayoutInspectorDashboardUiTest {
       }
     }
     fun emit(reason: String) {
+      // Match the iOS hierarchy-unavailable contract so the dashboard reports accepted frames.
+      val prefix = "Failed to retrieve iOS view hierarchy from CtrlProxy iOS: "
       stream.emitHierarchy(
         HierarchyStreamUpdate(
           "device",
           0L,
-          Json.parseToJsonElement("""{"hierarchy":{"error":"$reason"}}"""),
+          Json.parseToJsonElement("""{"hierarchy":{"error":"$prefix$reason"}}"""),
         )
       )
     }

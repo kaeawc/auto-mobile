@@ -175,7 +175,9 @@ export function convertDebugStepsToRecords(
   });
 }
 
-function buildStepRecordTarget(params: Record<string, unknown> | undefined): string | null {
+function buildStepRecordTarget(
+  params: { text?: unknown; elementId?: unknown; direction?: unknown } | undefined,
+): string | null {
   if (!params) {
     return null;
   }

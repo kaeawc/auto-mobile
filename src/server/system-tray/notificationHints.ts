@@ -131,6 +131,7 @@ export const nodeIsSystemUi = (props: Record<string, any>): boolean => {
   if (packageName) {
     return packageName === SYSTEM_TRAY_PACKAGE;
   }
+  // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- F6/F7 preserves platform notification-layout classification, not user element selection.
   const resourceId = String(props["resource-id"] ?? props.resourceId ?? "");
   return resourceId.startsWith(`${SYSTEM_TRAY_PACKAGE}:id/`);
 };
@@ -140,6 +141,7 @@ export const nodeHasSystemTrayHint = (node: any): boolean => {
   if (!props) {
     return false;
   }
+  // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- F6/F7 preserves platform notification-layout classification, not user element selection.
   const resourceId = String(props["resource-id"] ?? props.resourceId ?? "");
   const className = String(props.className ?? props.class ?? "");
   const isSystemUi = nodeIsSystemUi(props);
@@ -159,7 +161,9 @@ export const nodeHasIosNotificationCenterHint = (node: any): boolean => {
     return false;
   }
   const className = String(props.className ?? props.class ?? "");
+  // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- F6/F7 preserves platform notification-layout classification, not user element selection.
   const contentDesc = String(props["content-desc"] ?? props["ios-accessibility-label"] ?? "");
+  // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- F6/F7 preserves platform notification-layout classification, not user element selection.
   const identifier = String(props["resource-id"] ?? props.resourceId ?? props.identifier ?? "");
   return IOS_NOTIFICATION_CENTER_CLASS_HINTS.some(
     (hint) => className.includes(hint) || contentDesc.includes(hint) || identifier.includes(hint),

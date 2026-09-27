@@ -1037,7 +1037,7 @@ class DefaultNavigationToolCallRecorder implements NavigationToolCallRecorder {
   }
 }
 
-function responseText(response: any): unknown {
+function responseText(response: { content?: unknown } | null | undefined): unknown {
   const first = Array.isArray(response?.content) ? response.content[0] : undefined;
   return first?.type === "text" ? first.text : undefined;
 }

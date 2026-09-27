@@ -11,6 +11,7 @@ import {
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { defaultTimer } from "../../../src/utils/SystemTimer";
+import { FakeTimer } from "../../fakes/FakeTimer";
 import {
   clearAndroidImeQuarantine,
   withAndroidImeLock,
@@ -48,9 +49,10 @@ function createObserver(
 function focusedAndroidObservation(
   text: string = "",
   properties: Record<string, unknown> = {},
+  timestamp: number = Date.now(),
 ): ObserveResult {
   return {
-    timestamp: Date.now(),
+    timestamp,
     viewHierarchy: {
       hierarchy: {
         node: {
@@ -138,6 +140,99 @@ function createAdbFactory(adb: FakeAdbExecutor): AdbClientFactory {
 }
 
 describe("SendKeys", () => {
+  test("a dispatched iOS semantic key with a lost response is indeterminate and non-retryable", async () => {
+    const timer = new FakeTimer();
+    let dispatch: (() => void) | undefined;
+    const executor: SendKeysCommandExecutor = {
+      type: async () => {
+        throw new Error("unexpected type");
+      },
+      clear: async () => {
+        throw new Error("unexpected clear");
+      },
+      key: async (_command, _signal, onDispatch) => {
+        dispatch = onDispatch;
+        return new Promise(() => {});
+      },
+    };
+    const sendKeys = new SendKeys(iosDevice, undefined, {
+      executor,
+      observer: createObserver({ timestamp: 0 } as ObserveResult),
+      timestampProvider: { now: async () => 0 },
+      timer,
+    });
+    const resultPromise = sendKeys.execute([{ action: "key", key: "done" }]);
+    for (let index = 0; index < 5 && !dispatch; index++) {
+      await Promise.resolve();
+    }
+    dispatch?.();
+    timer.advanceTime(5000);
+    const result = await resultPromise;
+    expect(result).toMatchObject({
+      success: false,
+      retryable: false,
+      completedCommands: 0,
+      commands: [{ key: "done", retryable: false }],
+    });
+    expect(result.error).toContain("indeterminate");
+  });
+
+  test("a stalled iOS IME pre-action path times out before dispatch without claiming mutation", async () => {
+    const timer = new FakeTimer();
+    const executor: SendKeysCommandExecutor = {
+      type: async () => {
+        throw new Error("unexpected type");
+      },
+      clear: async () => {
+        throw new Error("unexpected clear");
+      },
+      key: async () => {
+        throw new Error("key must not dispatch");
+      },
+    };
+    const sendKeys = new SendKeys(iosDevice, undefined, {
+      executor,
+      observer: createObserver({ timestamp: 0 } as ObserveResult),
+      timestampProvider: { now: async () => new Promise(() => {}) },
+      timer,
+    });
+    const resultPromise = sendKeys.execute([{ action: "key", key: "search" }]);
+    timer.advanceTime(5000);
+    expect(await resultPromise).toMatchObject({ success: false, retryable: true });
+  });
+
+  test("a completed iOS IME action survives a stalled final observation", async () => {
+    const timer = new FakeTimer();
+    const executor: SendKeysCommandExecutor = {
+      type: async () => {
+        throw new Error("unexpected type");
+      },
+      clear: async () => {
+        throw new Error("unexpected clear");
+      },
+      key: async (command, _signal, onDispatch) => {
+        onDispatch?.();
+        return { index: -1, action: "key", key: command.key, success: true };
+      },
+    };
+    const sendKeys = new SendKeys(iosDevice, undefined, {
+      executor,
+      observer: { execute: async () => new Promise(() => {}) },
+      timestampProvider: { now: async () => 0 },
+      timer,
+    });
+    const resultPromise = sendKeys.execute([{ action: "key", key: "next" }]);
+    for (let index = 0; index < 8; index++) {
+      await Promise.resolve();
+    }
+    timer.advanceTime(5000);
+    expect(await resultPromise).toMatchObject({
+      success: true,
+      completedCommands: 1,
+      commands: [{ key: "next", success: true }],
+    });
+  });
+
   test("executes commands in order, stops on failure, and observes once", async () => {
     const calls: string[] = [];
     const executor: SendKeysCommandExecutor = {
@@ -313,6 +408,75 @@ describe("SendKeys", () => {
 describe("DefaultSendKeysCommandExecutor", () => {
   const commitImeId = "dev.jasonpearson.automobile.ctrlproxy/.ime.CtrlProxyIme";
   const priorImeId = "com.example.keyboard/.Ime";
+
+  test("iOS insert keeps existing text at the caret", async () => {
+    const adb = new FakeAdbExecutor();
+    let field = "before";
+    let clearCalls = 0;
+    const textClient = createTextClient().client;
+    textClient.insert = async (text) => {
+      field += text;
+      return { success: true };
+    };
+    textClient.clear = async () => {
+      clearCalls++;
+      field = "";
+      return { success: true };
+    };
+    const executor = new DefaultSendKeysCommandExecutor(
+      iosDevice,
+      createAdbFactory(adb),
+      createObserver({ timestamp: 0 } as ObserveResult),
+      { textClient },
+    );
+
+    expect(
+      await executor.type({ action: "type", text: " after", operation: "insert" }),
+    ).toMatchObject({ success: true, resolvedMode: "xcuiTypeText" });
+    expect(field).toBe("before after");
+    expect(clearCalls).toBe(0);
+  });
+
+  test("standalone Android clear falls back to ADB deletes after accessibility failure", async () => {
+    const adb = new FakeAdbExecutor();
+    const textClient = createTextClient().client;
+    textClient.clear = async () => ({ success: false, error: "accessibility unavailable" });
+    const executor = new DefaultSendKeysCommandExecutor(
+      androidDevice,
+      createAdbFactory(adb),
+      createObserver(focusedAndroidObservation("old", {}, 0)),
+      { textClient },
+    );
+
+    expect(await executor.clear()).toMatchObject({ success: true });
+    expect(adb.getExecutedCommands()).toEqual([
+      "shell input keyevent KEYCODE_MOVE_END",
+      "shell input keyevent KEYCODE_DEL",
+      "shell input keyevent KEYCODE_DEL",
+      "shell input keyevent KEYCODE_DEL",
+    ]);
+  });
+
+  test("iOS semantic key forwards dispatch evidence to the text client", async () => {
+    const adb = new FakeAdbExecutor();
+    const textClient = createTextClient().client;
+    const dispatches: string[] = [];
+    textClient.ime = async (_action, _signal, onDispatch) => {
+      onDispatch?.();
+      return { success: true };
+    };
+    const executor = new DefaultSendKeysCommandExecutor(
+      iosDevice,
+      createAdbFactory(adb),
+      createObserver(),
+      { textClient },
+    );
+
+    expect(
+      await executor.key({ action: "key", key: "done" }, undefined, () => dispatches.push("sent")),
+    ).toMatchObject({ success: true });
+    expect(dispatches).toEqual(["sent"]);
+  });
 
   test("auto password typing uses legacy delivery before any IME mutation", async () => {
     for (const [operation, expectedMode] of [
@@ -535,7 +699,7 @@ describe("DefaultSendKeysCommandExecutor", () => {
     const explicitImeExecutor = new DefaultSendKeysCommandExecutor(
       androidDevice,
       createAdbFactory(new FakeAdbExecutor()),
-      createObserver(),
+      createObserver({ timestamp: 0 } as ObserveResult),
       { textClient: explicitImeClient.client },
     );
     const imeResult = await explicitImeExecutor.type({

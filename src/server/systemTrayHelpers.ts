@@ -2333,14 +2333,14 @@ const attributeTrayRow = (
   // Some custom RemoteViews (for example Clock timers) expose neither title
   // nor text extras, but render their app label in the row's own notification
   // header chrome. That structural label cannot be spoofed by same-named
-  // title/body content elsewhere in the row, and is evidence only when every
-  // requested record is content-less custom layout; absent header evidence
+  // title/body content elsewhere in the row, and is evidence when a requested
+  // record is content-less custom layout; absent header evidence
   // remains fail-closed for ambiguous or opaque records (#6875).
   if (
     appLabel !== null &&
     row.headerAppLabel === appLabel &&
     requestedRecords.length > 0 &&
-    requestedRecords.every(isContentlessCustomLayout)
+    requestedRecords.some(isContentlessCustomLayout)
   ) {
     return "header";
   }

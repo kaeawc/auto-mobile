@@ -55,6 +55,28 @@ const isRecord = (value: unknown): value is Record<string, any> => {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 };
 
+const isPlatform = (value: unknown): value is "android" | "ios" =>
+  value === "android" || value === "ios";
+
+const resolveStepPlatform = (
+  params: Record<string, any>,
+  planPlatform: unknown,
+  planDevices: unknown,
+): "android" | "ios" | undefined => {
+  if (isPlatform(params.platform)) {
+    return params.platform;
+  }
+  if (typeof params.device === "string" && Array.isArray(planDevices)) {
+    const device = planDevices.find(
+      (entry: unknown) => isRecord(entry) && entry.label === params.device,
+    );
+    if (isRecord(device) && isPlatform(device.platform)) {
+      return device.platform;
+    }
+  }
+  return isPlatform(planPlatform) ? planPlatform : undefined;
+};
+
 const recordWarning = (warnings: MigrationWarning[], message: string, stepIndex?: number): void => {
   warnings.push(stepIndex === undefined ? { message } : { message, stepIndex });
 };
@@ -151,6 +173,8 @@ const migrateStepFields = (
   step: Record<string, any>,
   stepIndex: number,
   warnings: MigrationWarning[],
+  planPlatform: unknown,
+  planDevices: unknown,
 ): boolean => {
   let changed = false;
 
@@ -237,7 +261,10 @@ const migrateStepFields = (
     const typeCommand: Record<string, unknown> = {
       action: "type",
       text: mergedParams.text,
-      operation: "replace",
+      operation:
+        resolveStepPlatform(mergedParams, planPlatform, planDevices) === "ios"
+          ? "insert"
+          : "replace",
     };
     delete mergedParams.text;
     if (mergedParams.mode !== undefined) {
@@ -442,7 +469,7 @@ export const migratePlan = (
       if (!isRecord(step)) {
         return step;
       }
-      const stepChanged = migrateStepFields(step, index, warnings);
+      const stepChanged = migrateStepFields(step, index, warnings, plan.platform, plan.devices);
       stepsChanged = stepsChanged || stepChanged;
       return step;
     });

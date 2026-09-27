@@ -873,6 +873,21 @@ describe("systemTray list content-less custom layouts", () => {
     expect(result.unattributedRows).toBe(0);
   });
 
+  test("keeps a content-less custom row when the package also has an ordinary record", async () => {
+    const { adb } = setup([page(customLayoutRow(clockLabel), row("Ordinary", clockLabel))]);
+    const snapshot = execResult(dumpsys(customRecord(), customRecord("Ordinary")));
+    adb.setCommandResponseSequence("dumpsys notification", [snapshot, snapshot]);
+
+    const result = await listSystemTrayNotifications(device, CLOCK, clockLabel, 5000);
+
+    expect(result.notifications).toHaveLength(2);
+    expect(result.notifications.map((notification) => notification.ownership)).toEqual([
+      "header",
+      "header",
+    ]);
+    expect(result.unattributedRows).toBe(0);
+  });
+
   test("fails closed when a content-less custom layout lacks rendered app-label evidence", async () => {
     const { adb } = setup([page(customLayoutRow("Timer"))]);
     const snapshot = execResult(dumpsys(customRecord()));
@@ -978,6 +993,19 @@ describe("systemTray clearAll dumpsys ownership", () => {
       action: "clearAll",
       notification: { appId: SHELL },
     });
+  const mockInstalledApps = (packageNames: string[], successful = true) =>
+    spyOn(ListInstalledApps.prototype, "executeDetailedResult").mockResolvedValue({
+      successful,
+      apps: {
+        profiles: {},
+        system: packageNames.map((packageName) => ({
+          packageName,
+          userIds: [0],
+          foreground: false,
+          recent: false,
+        })),
+      },
+    });
   const installClearAllDependencies = (timer: FakeTimer, adb: FakeAdbExecutor) => {
     timer.enableAutoAdvance();
     setSystemTrayDependencies({
@@ -992,10 +1020,7 @@ describe("systemTray clearAll dumpsys ownership", () => {
     const OTHER_APP = "com.example.other";
     const { adb, timer } = setup([page(customLayoutRow(shellLabel))], false);
     adb.setCommandResponse("dumpsys notification", execResult(dumpsys(customRecord())));
-    const installedAppsSpy = spyOn(ListInstalledApps.prototype, "execute").mockResolvedValue([
-      SHELL,
-      OTHER_APP,
-    ]);
+    const installedAppsSpy = mockInstalledApps([SHELL, OTHER_APP]);
     timer.enableAutoAdvance();
     setSystemTrayDependencies({
       adbFactory: () => adb,
@@ -1018,6 +1043,21 @@ describe("systemTray clearAll dumpsys ownership", () => {
     ).toHaveLength(0);
   });
 
+  test("clearAll rejects partial per-profile inventory before attributing or swiping", async () => {
+    const { adb, timer } = setup([page(customLayoutRow(shellLabel))], false);
+    const installedAppsSpy = mockInstalledApps([SHELL], false);
+    installClearAllDependencies(timer, adb);
+
+    try {
+      await expect(clearAll()).rejects.toThrow("installed-app inventory is incomplete");
+    } finally {
+      installedAppsSpy.mockRestore();
+    }
+    expect(adb.getExecutedCommands().filter((command) => command.includes("input swipe"))).toEqual(
+      [],
+    );
+  });
+
   test("clears a header-less content-less custom layout when its label is unique", async () => {
     const { adb, timer } = setup([page(customLayoutRow(shellLabel)), page()], false);
     adb.setCommandResponseSequence("dumpsys notification", [
@@ -1026,9 +1066,7 @@ describe("systemTray clearAll dumpsys ownership", () => {
       execResult(dumpsys(customRecord())),
       execResult(api36EmptyDumpsys()),
     ]);
-    const installedAppsSpy = spyOn(ListInstalledApps.prototype, "execute").mockResolvedValue([
-      SHELL,
-    ]);
+    const installedAppsSpy = mockInstalledApps([SHELL]);
     installClearAllDependencies(timer, adb);
 
     try {
@@ -1072,9 +1110,7 @@ describe("systemTray clearAll dumpsys ownership", () => {
       initialDump,
       execResult(dumpsys()),
     ]);
-    const installedAppsSpy = spyOn(ListInstalledApps.prototype, "execute").mockResolvedValue([
-      SHELL,
-    ]);
+    const installedAppsSpy = mockInstalledApps([SHELL]);
     installClearAllDependencies(timer, adb);
 
     try {
@@ -1112,9 +1148,7 @@ describe("systemTray clearAll dumpsys ownership", () => {
       execResult(dumpsys(...notifications.map(([title, body], id) => record(id + 1, title, body)))),
       execResult(dumpsys()),
     ]);
-    const installedAppsSpy = spyOn(ListInstalledApps.prototype, "execute").mockResolvedValue([
-      SHELL,
-    ]);
+    const installedAppsSpy = mockInstalledApps([SHELL]);
     installClearAllDependencies(timer, adb);
 
     try {
@@ -1141,9 +1175,7 @@ describe("systemTray clearAll dumpsys ownership", () => {
       execResult(dumpsys(record(1, "Shell notification", "Body"))),
       execResult(api36EmptyDumpsys()),
     ]);
-    const installedAppsSpy = spyOn(ListInstalledApps.prototype, "execute").mockResolvedValue([
-      SHELL,
-    ]);
+    const installedAppsSpy = mockInstalledApps([SHELL]);
     installClearAllDependencies(timer, adb);
 
     try {
@@ -1169,9 +1201,7 @@ describe("systemTray clearAll dumpsys ownership", () => {
       execResult(dumpsys(record(1, "Delta", "delta body"), record(2, "Gamma", "gamma body"))),
       execResult(api36EmptyDumpsys()),
     ]);
-    const installedAppsSpy = spyOn(ListInstalledApps.prototype, "execute").mockResolvedValue([
-      SHELL,
-    ]);
+    const installedAppsSpy = mockInstalledApps([SHELL]);
     installClearAllDependencies(timer, adb);
 
     try {
@@ -1206,9 +1236,7 @@ describe("systemTray clearAll dumpsys ownership", () => {
       ),
       execResult(dumpsys()),
     ]);
-    const installedAppsSpy = spyOn(ListInstalledApps.prototype, "execute").mockResolvedValue([
-      SHELL,
-    ]);
+    const installedAppsSpy = mockInstalledApps([SHELL]);
     installClearAllDependencies(timer, adb);
 
     try {
@@ -1242,9 +1270,7 @@ describe("systemTray clearAll dumpsys ownership", () => {
       dumpsys(...notifications.map(([title, body], id) => record(id + 1, title, body))),
     );
     adb.setCommandResponseSequence("dumpsys notification", [unchangedDump, unchangedDump]);
-    const installedAppsSpy = spyOn(ListInstalledApps.prototype, "execute").mockResolvedValue([
-      SHELL,
-    ]);
+    const installedAppsSpy = mockInstalledApps([SHELL]);
     installClearAllDependencies(timer, adb);
 
     try {
@@ -1274,9 +1300,7 @@ describe("systemTray clearAll dumpsys ownership", () => {
       execResult(dumpsys(...notifications.map(([title, body], id) => record(id + 1, title, body)))),
       execResult(dumpsys(record(3, "New shell notification", "New body"))),
     ]);
-    const installedAppsSpy = spyOn(ListInstalledApps.prototype, "execute").mockResolvedValue([
-      SHELL,
-    ]);
+    const installedAppsSpy = mockInstalledApps([SHELL]);
     installClearAllDependencies(timer, adb);
 
     try {
@@ -1300,9 +1324,7 @@ describe("systemTray clearAll dumpsys ownership", () => {
       execResult(dumpsys(record(1, "Shell notification", "Body"))),
       execResult("unrecognized but successful output"),
     ]);
-    const installedAppsSpy = spyOn(ListInstalledApps.prototype, "execute").mockResolvedValue([
-      SHELL,
-    ]);
+    const installedAppsSpy = mockInstalledApps([SHELL]);
     installClearAllDependencies(timer, adb);
 
     try {
@@ -1332,9 +1354,7 @@ describe("systemTray clearAll dumpsys ownership", () => {
       initialDump,
       execResult(dumpsys(record(2, ...notifications[1]))),
     ]);
-    const installedAppsSpy = spyOn(ListInstalledApps.prototype, "execute").mockResolvedValue([
-      SHELL,
-    ]);
+    const installedAppsSpy = mockInstalledApps([SHELL]);
     installClearAllDependencies(timer, adb);
 
     try {
@@ -1355,9 +1375,7 @@ describe("systemTray clearAll dumpsys ownership", () => {
   test("reports a dumpsys-verified empty tray as successful", async () => {
     const { adb, timer } = setup([page(silentRow("Other app", "Other body"))], false);
     adb.setCommandResponse("dumpsys notification", execResult(dumpsys()));
-    const installedAppsSpy = spyOn(ListInstalledApps.prototype, "execute").mockResolvedValue([
-      SHELL,
-    ]);
+    const installedAppsSpy = mockInstalledApps([SHELL]);
     installClearAllDependencies(timer, adb);
 
     try {

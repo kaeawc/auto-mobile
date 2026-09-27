@@ -4,6 +4,8 @@ AutoMobile plans run from a normal platform test: the test owns pass/fail
 assertions while the YAML plan keeps device actions easy to review. See
 [UI tests](../../../../using/ui-tests.md) for setup and copy-paste code.
 
+<div class="content-tabs" markdown>
+
 ## Android
 
 The JUnit runner lets a normal JVM test execute a plan against a connected
@@ -45,3 +47,5 @@ sequenceDiagram
   Daemon-->>Runner: success or failed step
   Runner-->>Xcode: pass or fail
 ```
+
+</div>

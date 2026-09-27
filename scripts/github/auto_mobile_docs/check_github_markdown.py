@@ -6,7 +6,8 @@ extension removed. If the output differs, the page uses that extension's
 syntax, which GitHub shows as literal text. Fenced code, inline code,
 blockquotes, and lists are therefore handled by the same parser that builds
 the site. Raw <style>/<script> elements are found in the rendered HTML,
-where code examples are already escaped.
+where code examples are already escaped. A final render with the site's
+content-tabs hook rejects malformed tab groups.
 
 Usage: python -m auto_mobile_docs.check_github_markdown [mkdocs.yml] [docs dir]
 
@@ -20,13 +21,15 @@ from pathlib import Path
 
 import markdown
 
+from auto_mobile_docs.content_tabs import ContentTabsError, ContentTabsExtension
+
 # Extension -> what to use instead. Only those enabled in mkdocs.yml matter:
 # a disabled extension renders its syntax literally on the site as well.
 MKDOCS_ONLY = {
     "admonition": "!!! admonition (use > [!NOTE])",
     "pymdownx.details": '??? collapsible (use <details markdown="1">)',
-    "pymdownx.tabbed": '=== "Tab" (use headings)',
-    "pymdownx.blocks.tab": "/// tab block (use headings)",
+    "pymdownx.tabbed": '=== "Tab" (use <div class="content-tabs" markdown> with headings)',
+    "pymdownx.blocks.tab": '/// tab block (use <div class="content-tabs" markdown> with headings)',
     "pymdownx.blocks.admonition": "/// admonition block (use > [!NOTE])",
     "pymdownx.blocks.details": '/// details block (use <details markdown="1">)',
     "attr_list": '{ .class } / { key=value } attr list (use <div class="..." markdown> or HTML)',
@@ -118,6 +121,13 @@ def check_text(text, names, configs):
     finder = _RawTagFinder()
     finder.feed(full)
     reasons += [f"inline <{tag}> (move to docs/assets via mkdocs.yml)" for tag in sorted(finder.found)]
+    try:
+        markdown.Markdown(
+            extensions=[*names, ContentTabsExtension()],
+            extension_configs={k: v for k, v in configs.items() if k in names},
+        ).convert(text)
+    except ContentTabsError as error:
+        reasons.append(str(error))
     return reasons
 
 

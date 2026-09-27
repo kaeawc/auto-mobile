@@ -6,6 +6,8 @@ in CI.
 
 ## 1. Install a test runner
 
+<div class="content-tabs" markdown>
+
 ### Android
 
 **Gradle**
@@ -37,7 +39,11 @@ For a Swift package manifest, use the released package:
 
 `from:` resolves the newest compatible AutoMobile release; it is not an exact pin. The package requires Swift 6, macOS 15, and iOS 17.
 
+</div>
+
 ## 2. Create a plan
+
+<div class="content-tabs" markdown>
 
 ### Android
 
@@ -92,7 +98,11 @@ steps:
     label: Close Reminders
 ```
 
+</div>
+
 ## 3. Consume the plan
+
+<div class="content-tabs" markdown>
 
 ### Android
 
@@ -147,6 +157,8 @@ final class RemindersTests: AutoMobileTestCase {
 Run the test target from Xcode or with `xcodebuild test` against a booted iOS
 Simulator. Keep selectors semantic and add `observe.waitFor` steps at important
 checkpoints so failures explain which state was missing.
+
+</div>
 
 ### Redacting sensitive parameters
 

@@ -18,6 +18,8 @@ copyright: "Copyright &copy; 2025-2026 Jason Pearson"
 # rendering each page with and without the MkDocs-only extensions below.
 hooks:
   - scripts/github/auto_mobile_docs/github_alerts.py
+  # Keep headings readable on GitHub and restore Material tabs on the site.
+  - scripts/github/auto_mobile_docs/content_tabs.py
 
 plugins:
   - search
@@ -49,6 +51,7 @@ theme:
   features:
     - content.code.copy
     - content.code.select
+    - content.tabs.link
 
 extra_css:
   - assets/stylesheets/automobile-brand.css

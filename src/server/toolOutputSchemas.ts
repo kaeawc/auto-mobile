@@ -825,9 +825,10 @@ export const skeletonElementSchema = z
       .nonnegative()
       .optional()
       .describe(
-        "Disambiguator present when elementId repeats, or an id-less row's label " +
-          "repeats elsewhere in this skeleton (issue #6221). Pass verbatim as tapOn({ selector, index }) to " +
-          "hit this exact entry.",
+        "Disambiguator present when a replay-eligible row's elementId, or id-less label, " +
+          "repeats among other replay-eligible rows (issue #6221). Eligibility requires valid bounds " +
+          "and an affordance; a known viewport excludes off-screen rows unless raw element search is enabled. " +
+          "Pass verbatim as tapOn({ selector, index }) to hit this exact entry.",
       ),
   })
   .passthrough();

@@ -8,6 +8,8 @@ import { DefaultObserveElementCollector } from "../../../../src/features/observe
 import { DefaultElementSelector } from "../../../../src/features/utility/DefaultElementSelector";
 import { ResolverElementSelector } from "../../../../src/features/utility/ResolverElementSelector";
 import { tapOnSchema } from "../../../../src/server/interactionTools";
+import { serverConfig } from "../../../../src/utils/ServerConfig";
+import { attachRawViewHierarchy } from "../../../../src/utils/viewHierarchySearch";
 import type { Element } from "../../../../src/models/Element";
 import type { ObserveResult } from "../../../../src/models/ObserveResult";
 import type { SkeletonElement } from "../../../../src/models/ObserveResult";
@@ -1016,6 +1018,73 @@ describe("toSkeleton — acceptance criteria", () => {
         });
         expect(result.element?.bounds).toEqual(bounds(...row.bounds));
       }
+    });
+
+    test("off-screen duplicate before an on-screen label replays both indexes in raw search", () => {
+      const label = "Remove";
+      const viewHierarchy = {
+        hierarchy: {
+          node: {
+            bounds: bounds(0, 0, 100, 200),
+            node: [
+              {
+                "ios-accessibility-label": label,
+                clickable: true,
+                bounds: bounds(0, 240, 80, 280),
+              },
+              { "ios-accessibility-label": label, clickable: true, bounds: bounds(0, 0, 80, 40) },
+            ],
+          },
+        },
+      } as ViewHierarchyResult;
+      const elements = new DefaultObserveElementCollector().collect(viewHierarchy, "ios");
+      const viewport = { width: 100, height: 200 };
+      const previous = serverConfig.isRawElementSearchEnabled();
+      try {
+        serverConfig.setRawElementSearchEnabled(false);
+        const visibleOnly = projectSkeleton(elements!, viewport).skeleton.filter(
+          (entry) => entry.label === label,
+        );
+        expect(visibleOnly).toHaveLength(2);
+        expect(visibleOnly.map((entry) => entry.index)).toEqual([undefined, undefined]);
+
+        // The raw carrier makes the resolver's viewport() return undefined.
+        attachRawViewHierarchy(viewHierarchy, structuredClone(viewHierarchy));
+        serverConfig.setRawElementSearchEnabled(true);
+        const rows = projectSkeleton(elements!, viewport).skeleton.filter(
+          (entry) => entry.label === label,
+        );
+        expect(rows.map((entry) => entry.index)).toEqual([0, 1]);
+        const selector = new ResolverElementSelector();
+        for (const row of rows) {
+          const result = selector.selectByText(viewHierarchy, label, {
+            index: row.index,
+            partialMatch: false,
+          });
+          expect(result.element?.bounds).toEqual(bounds(...row.bounds));
+        }
+      } finally {
+        serverConfig.setRawElementSearchEnabled(previous);
+      }
+    });
+
+    test("zero-sized fallback viewport keeps bounded duplicate labels eligible", () => {
+      const label = "Remove";
+      const first: Element = {
+        "ios-accessibility-label": label,
+        clickable: true,
+        bounds: bounds(0, 0, 80, 40),
+      };
+      const second: Element = {
+        "ios-accessibility-label": label,
+        clickable: true,
+        bounds: bounds(0, 60, 80, 100),
+      };
+      const rows = projectSkeleton(
+        makeElements({ clickable: [first, second], text: [first, second] }),
+        { width: 0, height: 0 },
+      ).skeleton;
+      expect(rows.map((entry) => entry.index)).toEqual([0, 1]);
     });
 
     test("id-less labels in an overlay rank ahead of the main hierarchy and replay both indexes", () => {

@@ -4,6 +4,7 @@ import { normalizeQuotes } from "../../utility/TextMatcher";
 import type { Element } from "../../../models/Element";
 import { isTruthy } from "../../../models/Element";
 import { getToggleContentDescription } from "../../../utils/elementProperties";
+import { serverConfig } from "../../../utils/ServerConfig";
 import type { Affordance, ObserveResult, SkeletonElement } from "../../../models/ObserveResult";
 import {
   ElementProvenance,
@@ -475,7 +476,11 @@ function isSelectableForReplay(
     right > left &&
     bottom > top &&
     entry.affordances.size > 0 &&
-    (!viewport || (x >= 0 && y >= 0 && x <= viewport.width && y <= viewport.height))
+    (serverConfig.isRawElementSearchEnabled() ||
+      !viewport ||
+      viewport.width <= 0 ||
+      viewport.height <= 0 ||
+      (x >= 0 && y >= 0 && x <= viewport.width && y <= viewport.height))
   );
 }
 

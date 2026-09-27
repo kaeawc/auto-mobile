@@ -17,6 +17,7 @@ import {
   resolveViewHierarchyForSearch,
 } from "../../../src/utils/viewHierarchySearch";
 import { serverConfig } from "../../../src/utils/ServerConfig";
+import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
 
 const hierarchy = (left: number): ViewHierarchyResult => ({
   updatedAt: 100 + left,
@@ -108,6 +109,11 @@ describe("hierarchy capture freshness policy", () => {
     serverConfig.setRawElementSearchEnabled(true);
     try {
       const diagnostic = await capture.capture({ freshness: "fresh", searchRaw: true });
+      expect(
+        new ResolverElementSelector().selectByText(diagnostic.hierarchy, "Target", {
+          intentAction: "drag",
+        }).element?.bounds.left,
+      ).toBe(5000);
       const actionable = await capture.capture({ freshness: "fresh" });
       expect(diagnostic.nodes[0].bounds?.left).toBe(5000);
       expect(actionable.nodes[0].bounds?.left).toBe(50);

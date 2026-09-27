@@ -367,3 +367,10 @@ test("contains matching uses the advertised synthetic view ID", () => {
     resolver.resolve(capture, { elementId: "stable", match: "contains" }, tap).chosen?.nodeKey,
   ).toBe("s-stable-123");
 });
+
+test("unbounded exact metadata does not suppress a bounded partial drag target", () => {
+  const capture = snapshot([{ text: "Card" }, { bounds, text: "Card item" }]);
+  const result = resolver.resolve(capture, { text: "Card" }, { action: "drag" });
+  expect(result.matchMode).toBe("contains");
+  expect(result.chosen?.label).toBe("Card item");
+});

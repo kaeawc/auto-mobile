@@ -295,7 +295,7 @@ run_lane() {
 
 @test "long-lived integration modes keep every file in one process" {
   local mode
-  for mode in --watch --hot; do
+  for mode in --watch --hot --inspect-wait --inspect-brk --inspect-wait=127.0.0.1:6499 --inspect-brk=127.0.0.1:6499; do
     run_lane integration "$mode"
     [ "$status" -eq 0 ]
     [ "$(grep -c 'bun test' <<< "$output")" -eq 1 ]

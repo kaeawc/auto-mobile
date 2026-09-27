@@ -455,7 +455,7 @@ case "$mode" in
       for passthrough_arg in "${passthrough_args[@]+"${passthrough_args[@]}"}"; do
         case "$passthrough_arg" in
           --coverage|--coverage=*) coverage_requested=true ;;
-          --watch|--hot) long_lived=true ;;
+          --watch|--hot|--inspect-wait|--inspect-brk|--inspect-wait=*|--inspect-brk=*) long_lived=true ;;
         esac
       done
       if [[ "$runner_os" == "Windows" || "$coverage_requested" == true || "$long_lived" == true ]]; then

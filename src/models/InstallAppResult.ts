@@ -1,10 +1,11 @@
 import { BaseActionResult } from "./BaseActionResult";
+import type { TimingData } from "../utils/PerformanceTracker";
 
 /**
  * Result of an install app operation
  */
 export interface InstallAppResult extends BaseActionResult {
-  artifactPath: string;
+  artifactPath?: string;
   /** Android user ID where the app was installed (0 for primary user, 10+ for work profiles) */
   userId?: number;
   /** Package name or bundle ID detected for the installed app, when available */
@@ -13,4 +14,6 @@ export interface InstallAppResult extends BaseActionResult {
   upgrade?: boolean;
   /** Warning message when best-effort detection was required */
   warning?: string;
+  /** Command-span timing tree, present only when `--debug-perf` is enabled. */
+  perfTiming?: TimingData;
 }

@@ -10,19 +10,26 @@ import { FakeInstalledAppsRepository } from "../../fakes/FakeInstalledAppsReposi
 import { AdbCommandTimeoutError } from "../../../src/utils/android-cmdline-tools/AdbClient";
 import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
 import { resetDbWriteBarrier } from "../../../src/db/dbWriteBarrier";
-import { setDebugPerfEnabled, type TimingEntry } from "../../../src/utils/PerformanceTracker";
+import {
+  createPerformanceTracker,
+  setDebugPerfEnabled,
+  type TimingEntry,
+} from "../../../src/utils/PerformanceTracker";
+import { runWithPerfTracker } from "../../../src/utils/PerfContext";
+import { FakeTimer } from "../../fakes/FakeTimer";
 
 // Keep action tests isolated from the production SQLite repository even when a
 // scenario does not need to inspect stale-marker rows explicitly.
 class UninstallApp extends ProductionUninstallApp {
   constructor(...args: ConstructorParameters<typeof ProductionUninstallApp>) {
-    const [device, adbFactory, simctl, deviceAppUninstaller, repository] = args;
+    const [device, adbFactory, simctl, deviceAppUninstaller, repository, trackerFactory] = args;
     super(
       device,
       adbFactory,
       simctl,
       deviceAppUninstaller,
       repository ?? new FakeInstalledAppsRepository(),
+      trackerFactory,
     );
   }
 }
@@ -102,18 +109,48 @@ describe("UninstallApp (iOS simulator)", () => {
   });
 
   test("returns the uninstall timing tree when --debug-perf is enabled", async () => {
-    setDebugPerfEnabled(true);
     fakeSimctl.setInstalledApps([]);
+    const fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
 
     const result = await new UninstallApp(
       iosSimDevice,
       nullAdbFactory,
       fakeSimctl,
       fakeUninstaller,
+      undefined,
+      () => createPerformanceTracker(true, fakeTimer),
     ).execute("com.example.app");
 
     expect(result.perfTiming).toBeDefined();
     expect((result.perfTiming as TimingEntry[])[0]?.name).toBe("uninstallApp");
+    expect((result.perfTiming as TimingEntry[])[0]?.durationMs).toBe(0);
+  });
+
+  test("records nested uninstall phases on the outer ambient tracker", async () => {
+    fakeSimctl.setInstalledApps([]);
+    const fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+    const outer = createPerformanceTracker(true, fakeTimer);
+    const uninstall = new UninstallApp(
+      iosSimDevice,
+      nullAdbFactory,
+      fakeSimctl,
+      fakeUninstaller,
+      undefined,
+      () => createPerformanceTracker(true, new FakeTimer()),
+    );
+
+    await runWithPerfTracker(outer, () => uninstall.execute("com.example.app"));
+
+    expect(outer.getTimings()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "uninstallApp",
+          children: expect.arrayContaining([expect.objectContaining({ name: "iOSUninstall" })]),
+        }),
+      ]),
+    );
   });
 
   test("omits perfTiming when --debug-perf is disabled", async () => {

@@ -71,6 +71,7 @@ describe("DragAndDrop - iOS", () => {
     fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
     fakeIosClient.setHierarchyData(createHierarchy());
+    fakeIosClient.setViewHierarchyResult(createHierarchy());
 
     fakeObserveScreen.setObserveResult(() => createObserveResult());
     fakeWindow.configureCachedActiveWindow(null);
@@ -102,7 +103,7 @@ describe("DragAndDrop - iOS", () => {
   });
 
   test("direct iOS sync cannot resolve an offscreen source excluded by observe", async () => {
-    fakeIosClient.setHierarchyData({
+    const freshHierarchy = {
       packageName: "com.test.app",
       updatedAt: 1,
       screenWidth: 100,
@@ -114,7 +115,9 @@ describe("DragAndDrop - iOS", () => {
           { "resource-id": "target-id", text: "Target", bounds: [0, 0, 50, 50] },
         ],
       },
-    } as any);
+    } as any;
+    fakeIosClient.setHierarchyData(freshHierarchy);
+    fakeIosClient.setViewHierarchyResult(freshHierarchy);
     const result = await dragAndDrop.execute({
       source: { elementId: "source-id" },
       target: { elementId: "target-id" },
@@ -210,7 +213,7 @@ describe("DragAndDrop - iOS", () => {
   test("drags against the freshly-refreshed hierarchy, not the stale observe cache", async () => {
     // The cached observe places the elements at (50,50)/(250,250); the fresh runner
     // snapshot reports new coordinates after the UI scrolled. The drag must use the fresh ones.
-    fakeIosClient.setHierarchyData({
+    const freshHierarchy = {
       hierarchy: {
         node: [
           {
@@ -233,7 +236,9 @@ describe("DragAndDrop - iOS", () => {
       },
       packageName: "com.test.app",
       updatedAt: Date.now(),
-    } as any);
+    } as any;
+    fakeIosClient.setHierarchyData(freshHierarchy);
+    fakeIosClient.setViewHierarchyResult(freshHierarchy);
     fakeIosClient.setDragResult({ success: true, totalTimeMs: 1, gestureTimeMs: 1 });
 
     const result = await dragAndDrop.execute({

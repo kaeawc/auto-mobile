@@ -286,6 +286,24 @@ run_lane() {
   done
 }
 
+@test "integration coverage retains one process and its complete LCOV output" {
+  run_lane integration --coverage --coverage-reporter lcov --coverage-dir scratch/integration-coverage
+  [ "$status" -eq 0 ]
+  [ "$(grep -c 'bun test' <<< "$output")" -eq 1 ]
+  [[ "$output" == *"--coverage --coverage-reporter lcov --coverage-dir scratch/integration-coverage"* ]]
+}
+
+@test "integration split reports a main watchdog timeout ahead of a transport failure" {
+  local report
+  report="$(mktemp)"
+  run env PATH="$STUB_BIN:$PATH" STUB_INTEGRATION_TRANSPORT_EXIT=7 \
+    STUB_INTEGRATION_MAIN_EXIT=124 bash "$SCRIPT" integration \
+    --reporter junit --reporter-outfile "$report"
+  [ "$status" -eq 124 ]
+  [ "$(grep -c '<testsuite ' "$report")" -eq 2 ]
+  rm -f "$report"
+}
+
 @test "integration split respects a shorter caller wall timeout" {
   local timeout_args
   timeout_args="$(mktemp)"

@@ -441,9 +441,18 @@ case "$mode" in
         "${integration_test_paths[@]+"${integration_test_paths[@]}"}" \
         "${passthrough_args[@]+"${passthrough_args[@]}"}"
     elif [[ "$has_test_targets" -eq 0 ]]; then
-      if [[ "$runner_os" == "Windows" ]]; then
+      coverage_requested=false
+      for passthrough_arg in "${passthrough_args[@]+"${passthrough_args[@]}"}"; do
+        if [[ "$passthrough_arg" == --coverage || "$passthrough_arg" == --coverage=* ]]; then
+          coverage_requested=true
+          break
+        fi
+      done
+      if [[ "$runner_os" == "Windows" || "$coverage_requested" == true ]]; then
         # The Windows lane already passes as one process, and its shell does not
         # use the POSIX watchdog needed for the stalled Unix transport suite.
+        # Coverage also stays in one process so Bun writes a complete LCOV
+        # report rather than overwriting the transport suite's first report.
         run_test_command \
           "${integration_args[@]}" \
           ".integration.test.ts" \
@@ -545,6 +554,7 @@ case "$mode" in
             cp "$report_dir/main.xml" "$report_outfile"
           fi
         fi
+        if ((transport_status == 124 || main_status == 124)); then exit 124; fi
         if ((transport_status != 0)); then exit "$transport_status"; fi
         if ((main_status != 0)); then exit "$main_status"; fi
       fi

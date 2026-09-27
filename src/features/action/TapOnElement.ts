@@ -2114,6 +2114,31 @@ export class TapOnElement extends BaseVisualChange {
     };
   }
 
+  private async refreshEnsureCheckedSelection(
+    options: TapOnElementOptions,
+    observation: ObserveResult,
+    selection: ElementSelectionResult,
+    signal?: AbortSignal,
+  ): Promise<{ selection: ElementSelectionResult; viewHierarchy: ViewHierarchyResult }> {
+    if (options.ensureChecked === undefined) {
+      return { selection, viewHierarchy: observation.viewHierarchy as ViewHierarchyResult };
+    }
+    const freshHierarchy = await this.refreshViewHierarchy(
+      POST_TAP_REFRESH_TIMEOUT_MS,
+      observation.screenSize,
+      signal,
+    );
+    if (!freshHierarchy) {
+      throw new ActionableError("tapOn ensureChecked: unable to refresh toggle before tapping");
+    }
+    const refound = this.findElementInHierarchy(options, freshHierarchy).selection;
+    if (!refound.element) {
+      throw new ActionableError("tapOn ensureChecked: toggle not found in fresh hierarchy");
+    }
+    this.replaceObservationHierarchy(observation, freshHierarchy, true);
+    return { selection: refound, viewHierarchy: freshHierarchy };
+  }
+
   private ensureCheckedAfterTap(
     options: TapOnElementOptions,
     observation: ObserveResult,
@@ -2254,7 +2279,14 @@ export class TapOnElement extends BaseVisualChange {
               signal,
             );
           }
-          const selection = searchOutcome.selection;
+          const liveSelection = await this.refreshEnsureCheckedSelection(
+            options,
+            observeResult,
+            searchOutcome.selection,
+            signal,
+          );
+          viewHierarchy = liveSelection.viewHierarchy;
+          const selection = liveSelection.selection;
           const element = selection.element as Element;
           let selectedElementMetadata = this.buildSelectedElementMetadata(selection);
           const ensureCheckedResult = this.ensureCheckedBeforeTap(
@@ -2743,6 +2775,26 @@ export class TapOnElement extends BaseVisualChange {
    * After a tap, check if the view hierarchy changed. If unchanged, retry the tap once.
    * Only called when retryIfNoChange is true.
    */
+  private resolveEnsureCheckedRetryTarget(
+    options: TapOnElementOptions,
+    hierarchy: ViewHierarchyResult,
+    action: string,
+    requireResourceId: boolean,
+  ): Element | null {
+    const refound = this.findElementInHierarchy(options, hierarchy).selection.element;
+    if (!refound || !isTruthyFlag(refound.checkable)) {
+      logger.warn(
+        "[TapOnElement][retryIfNoChange] Toggle not found in fresh hierarchy; skipping retry",
+      );
+      return null;
+    }
+    if (isTruthyFlag(refound.checked) === options.ensureChecked) {
+      logger.info("[TapOnElement][retryIfNoChange] Toggle reached requested checked state");
+      return null;
+    }
+    return this.resolveTapTargetElement(refound, hierarchy, action, requireResourceId).element;
+  }
+
   private async retryTapIfNoChange(
     preTapHash: string,
     tapPoint: { x: number; y: number },
@@ -2781,19 +2833,33 @@ export class TapOnElement extends BaseVisualChange {
       return;
     }
 
+    const retryTarget =
+      options.ensureChecked === undefined
+        ? tapElement
+        : this.resolveEnsureCheckedRetryTarget(
+            options,
+            postTapHierarchy,
+            action,
+            isTalkBackEnabled,
+          );
+    if (!retryTarget) {
+      return;
+    }
+    const retryPoint = retryTarget === tapElement ? tapPoint : this.resolveTapPoint(retryTarget);
+
     logger.warn(
       `[TapOnElement][retryIfNoChange] Hierarchy unchanged after tap at ` +
-        `(${tapPoint.x}, ${tapPoint.y}) — ghost tap detected, retrying`,
+        `(${retryPoint.x}, ${retryPoint.y}) — ghost tap detected, retrying`,
     );
 
     await this.timer.sleep(PRE_RETRY_DELAY_MS);
 
     await this.executeAndroidTap(
       action,
-      tapPoint.x,
-      tapPoint.y,
+      retryPoint.x,
+      retryPoint.y,
       longPressDuration,
-      tapElement,
+      retryTarget,
       signal,
       options,
       isTalkBackEnabled,

@@ -578,6 +578,21 @@ describe("ScrollUntilVisible shared resolver identity", () => {
     expect(found?.["resource-id"]).toBe("com.app:id/target_label");
     expect(found?.bounds).toEqual(label.bounds);
   });
+  test("text lookFor skips unrelated text on the promoted row", async () => {
+    const scroll = new ScrollUntilVisible({} as any);
+    const target = { text: "Target", bounds: { left: 0, top: 40, right: 100, bottom: 60 } };
+    const found = await scroll.findElementInHierarchy({ text: "Target" }, {
+      hierarchy: {
+        node: {
+          "content-desc": "Unrelated row label",
+          clickable: true,
+          bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+          node: [target],
+        },
+      },
+    } as any);
+    expect(found?.bounds).toEqual(target.bounds);
+  });
 });
 
 test("lookFor treats a temporarily missing container as a miss and retries within its scope", async () => {

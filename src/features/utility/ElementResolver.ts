@@ -152,6 +152,14 @@ function containerSource(
   );
 }
 
+function shouldPromoteText(selector: ResolverSelector, intent: ResolutionIntent): boolean {
+  return (
+    (selector.text !== undefined || selector.contentDescription !== undefined) &&
+    intent.action !== "drag" &&
+    intent.action !== "highlight"
+  );
+}
+
 function sameReferenceProof(node: SearchableEntry, ref: ElementReference): boolean {
   if (ref.bounds === undefined && ref.label === undefined) {
     return false;
@@ -273,7 +281,7 @@ export class ElementResolver {
             ({ node: other }) => other !== node && isWithin(other, node, snapshot.nodes),
           ),
       );
-    } else if (selector.text !== undefined || selector.contentDescription !== undefined) {
+    } else if (shouldPromoteText(selector, intent)) {
       matched.matches = this.promoteTextMatches(matched.matches, snapshot, scope, intent);
     }
     return matched;

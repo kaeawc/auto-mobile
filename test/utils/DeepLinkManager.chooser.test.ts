@@ -921,8 +921,113 @@ test("bounds post-tap polling and returns the typed unverified failure", async (
   expect(result.success).toBe(false);
   expect(result.error).toContain("Unverified chooser selection");
   expect(result.tappedAt).toBe(1000);
-  expect(floors).toEqual([101, 102, 1000, 1001, 1002, 1003, 1004]);
+  expect(floors).toEqual([101, 102, 1000, 1001, 1002, 1003]);
   expect(timer.getSleepHistory()).toEqual([50, 50, 50, 50]);
+});
+
+test("bounds a slow post-tap hierarchy read by the remaining verification budget", async () => {
+  const adb = new FakeAdbExecutor();
+  adb.setDeviceTimestampMs(1000);
+  const timer = new FakeTimer();
+  timer.enableAutoAdvance();
+  const chooser = chooserPage([{ ...row("android", 100), node: [{ text: "Example" }] }], 100);
+  const readBudgets: number[] = [];
+  const manager = new DeepLinkManager(
+    { platform: "android", deviceId: "fake", name: "fake" },
+    adb,
+    null,
+    null,
+    undefined,
+    undefined,
+    {
+      getLabel: async () => "Example",
+      getFreshHierarchy: async (_device, _factory, floor, timeoutMs) => {
+        if (floor < 1000) {
+          return { ...chooser, updatedAt: floor } as any;
+        }
+        readBudgets.push(timeoutMs ?? 0);
+        if (readBudgets.length === 1) {
+          return { hierarchy: { node: {} }, packageName: "com.other.app", updatedAt: floor } as any;
+        }
+        await timer.sleep(Math.min(11_000, timeoutMs ?? 11_000));
+        return { hierarchy: { node: {} }, packageName: "com.other.app", updatedAt: floor } as any;
+      },
+    },
+    timer,
+  );
+  const result = await manager.handleIntentChooser(chooser as any, "custom", target);
+  expect(result.success).toBe(false);
+  expect(result.error).toContain("Unverified chooser selection");
+  expect(result.packageVerified).toBe(false);
+  expect(readBudgets).toEqual([200, 150]);
+  expect(timer.getSleepHistory()).toEqual([50, 150]);
+  expect(timer.now()).toBe(200);
+});
+
+test("accepts a confirming hierarchy read that completes at the verification deadline", async () => {
+  const adb = new FakeAdbExecutor();
+  adb.setDeviceTimestampMs(1000);
+  const timer = new FakeTimer();
+  timer.enableAutoAdvance();
+  const chooser = chooserPage([{ ...row("android", 100), node: [{ text: "Example" }] }], 100);
+  const readBudgets: number[] = [];
+  const manager = new DeepLinkManager(
+    { platform: "android", deviceId: "fake", name: "fake" },
+    adb,
+    null,
+    null,
+    undefined,
+    undefined,
+    {
+      getLabel: async () => "Example",
+      getFreshHierarchy: async (_device, _factory, floor, timeoutMs) => {
+        if (floor < 1000) {
+          return { ...chooser, updatedAt: floor } as any;
+        }
+        readBudgets.push(timeoutMs ?? 0);
+        await timer.sleep(timeoutMs ?? 0);
+        return { hierarchy: { node: {} }, packageName: target, updatedAt: floor } as any;
+      },
+    },
+    timer,
+  );
+  const result = await manager.handleIntentChooser(chooser as any, "custom", target);
+  expect(result.success).toBe(true);
+  expect(result.packageVerified).toBe(false);
+  expect(readBudgets).toEqual([200]);
+  expect(timer.now()).toBe(200);
+});
+
+test("returns the typed verification failure when a bounded hierarchy read rejects", async () => {
+  const adb = new FakeAdbExecutor();
+  adb.setDeviceTimestampMs(1000);
+  const timer = new FakeTimer();
+  timer.enableAutoAdvance();
+  const chooser = chooserPage([{ ...row("android", 100), node: [{ text: "Example" }] }], 100);
+  const manager = new DeepLinkManager(
+    { platform: "android", deviceId: "fake", name: "fake" },
+    adb,
+    null,
+    null,
+    undefined,
+    undefined,
+    {
+      getLabel: async () => "Example",
+      getFreshHierarchy: async (_device, _factory, floor, timeoutMs) => {
+        if (floor < 1000) {
+          return { ...chooser, updatedAt: floor } as any;
+        }
+        await timer.sleep(timeoutMs ?? 11_000);
+        throw new Error("capture timed out");
+      },
+    },
+    timer,
+  );
+  const result = await manager.handleIntentChooser(chooser as any, "custom", target);
+  expect(result.success).toBe(false);
+  expect(result.error).toContain("Unverified chooser selection");
+  expect(result.packageVerified).toBe(false);
+  expect(timer.now()).toBe(200);
 });
 
 test("accepts a fresh target capture within the tap's device-second", async () => {
@@ -962,6 +1067,92 @@ test("accepts a fresh target capture within the tap's device-second", async () =
   expect(result.tappedAt).toBe(1000);
   expect(floors).toEqual([101, 102, 2000, 2000]);
   expect(timer.getSleepHistory()).toEqual([50]);
+});
+
+test("rejects an out-of-order target capture after a newer device-seconds observation", async () => {
+  const adb = new FakeAdbExecutor();
+  adb.setDeviceTimestampMs(1000);
+  adb.setDeviceTimestampSource("device-seconds");
+  const timer = new FakeTimer();
+  timer.enableAutoAdvance();
+  const chooser = chooserPage([{ ...row("android", 100), node: [{ text: "Example" }] }], 100);
+  const floors: number[] = [];
+  let postTapReads = 0;
+  const manager = new DeepLinkManager(
+    { platform: "android", deviceId: "fake", name: "fake" },
+    adb,
+    null,
+    null,
+    undefined,
+    undefined,
+    {
+      getLabel: async () => "Example",
+      getFreshHierarchy: async (_device, _factory, floor) => {
+        floors.push(floor);
+        if (floor < 2000) {
+          return { ...chooser, updatedAt: floor } as any;
+        }
+        postTapReads += 1;
+        if (postTapReads === 1) {
+          return { hierarchy: { node: {} }, packageName: "com.other.app", updatedAt: 2500 } as any;
+        }
+        if (postTapReads === 2) {
+          return { hierarchy: { node: {} }, packageName: target, updatedAt: 1600 } as any;
+        }
+        return { hierarchy: { node: {} }, packageName: "com.other.app", updatedAt: 2500 } as any;
+      },
+    },
+    timer,
+  );
+  const result = await manager.handleIntentChooser(chooser as any, "custom", target);
+  expect(result.success).toBe(false);
+  expect(result.packageVerified).toBe(false);
+  expect(result.error).toContain("Unverified chooser selection");
+  expect(floors.slice(0, 4)).toEqual([101, 102, 2000, 2501]);
+  expect(postTapReads).toBe(4);
+  expect(timer.now()).toBe(200);
+});
+
+test("rejects a millisecond-clock target capture older than the moving floor", async () => {
+  const adb = new FakeAdbExecutor();
+  adb.setDeviceTimestampMs(1000);
+  const timer = new FakeTimer();
+  timer.enableAutoAdvance();
+  const chooser = chooserPage([{ ...row("android", 100), node: [{ text: "Example" }] }], 100);
+  const floors: number[] = [];
+  let postTapReads = 0;
+  const manager = new DeepLinkManager(
+    { platform: "android", deviceId: "fake", name: "fake" },
+    adb,
+    null,
+    null,
+    undefined,
+    undefined,
+    {
+      getLabel: async () => "Example",
+      getFreshHierarchy: async (_device, _factory, floor) => {
+        floors.push(floor);
+        if (floor < 1000) {
+          return { ...chooser, updatedAt: floor } as any;
+        }
+        postTapReads += 1;
+        if (postTapReads === 1) {
+          return { hierarchy: { node: {} }, packageName: "com.other.app", updatedAt: 2500 } as any;
+        }
+        if (postTapReads === 2) {
+          return { hierarchy: { node: {} }, packageName: target, updatedAt: 1600 } as any;
+        }
+        return { hierarchy: { node: {} }, packageName: "com.other.app", updatedAt: floor } as any;
+      },
+    },
+    timer,
+  );
+  const result = await manager.handleIntentChooser(chooser as any, "custom", target);
+  expect(result.success).toBe(false);
+  expect(result.packageVerified).toBe(false);
+  expect(result.error).toContain("Unverified chooser selection");
+  expect(floors.slice(0, 4)).toEqual([101, 102, 1000, 2501]);
+  expect(postTapReads).toBe(4);
 });
 
 test("accepts a target app screen containing chooser button text and IDs", async () => {

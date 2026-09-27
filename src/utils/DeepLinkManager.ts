@@ -134,6 +134,7 @@ export interface ChooserAppMetadata {
     device: BootedDevice,
     adbFactory: AdbClientFactory,
     minTimestamp: number,
+    timeoutMs?: number,
   ): Promise<ViewHierarchyResult>;
 }
 
@@ -246,12 +247,14 @@ const defaultChooserAppMetadata: ChooserAppMetadata = {
   async getActivityLabel(_device, packageName, url, adb) {
     return resolveChooserActivityLabel(adb, packageName, url);
   },
-  async getFreshHierarchy(device, adbFactory, minTimestamp) {
+  async getFreshHierarchy(device, adbFactory, minTimestamp, timeoutMs) {
     return new ViewHierarchy(device, adbFactory).getViewHierarchy(
       undefined,
       undefined,
       true,
       minTimestamp,
+      undefined,
+      timeoutMs,
     );
   },
 };
@@ -905,14 +908,33 @@ export class DeepLinkManager implements DeepLinkManager {
     const metadata = this.chooserMetadata ?? defaultChooserAppMetadata;
     const deadline = this.timer.now() + POST_TAP_VERIFY_BUDGET_MS;
     let floor = tappedAt;
+    let latestObservedAt = -Infinity;
     for (;;) {
-      const observed = await metadata.getFreshHierarchy(this.device!, this.adbFactory, floor);
+      const readBudget = deadline - this.timer.now();
+      if (readBudget <= 0) {
+        return false;
+      }
+      let observed: ViewHierarchyResult;
+      try {
+        observed = await metadata.getFreshHierarchy(
+          this.device!,
+          this.adbFactory,
+          floor,
+          readBudget,
+        );
+      } catch (error) {
+        logger.warn(`[DeepLinkManager] Post-tap chooser hierarchy read failed: ${error}`);
+        return false;
+      }
       if (
-        observed.updatedAt !== undefined &&
-        observed.updatedAt >=
-          floor - (deviceSeconds ? DEVICE_TIMESTAMP_SECOND_GRANULARITY_MARGIN_MS : 0) &&
-        observed.packageName === appPackage &&
-        !this.hasResolverHostEvidence(observed)
+        this.isConfirmedPostTapPackage(
+          observed,
+          appPackage,
+          tappedAt,
+          deviceSeconds,
+          latestObservedAt,
+          floor,
+        )
       ) {
         return true;
       }
@@ -920,11 +942,31 @@ export class DeepLinkManager implements DeepLinkManager {
       if (remaining <= 0) {
         return false;
       }
+      latestObservedAt = Math.max(latestObservedAt, observed.updatedAt ?? -Infinity);
       floor = deviceSeconds
         ? Math.max(floor, (observed.updatedAt ?? floor - 1) + 1)
         : Math.max(floor, observed.updatedAt ?? floor) + 1;
       await this.timer.sleep(Math.min(POST_TAP_VERIFY_INTERVAL_MS, remaining));
     }
+  }
+
+  private isConfirmedPostTapPackage(
+    observed: ViewHierarchyResult,
+    appPackage: string,
+    tappedAt: number,
+    deviceSeconds: boolean,
+    latestObservedAt: number,
+    floor: number,
+  ): boolean {
+    return (
+      observed.updatedAt !== undefined &&
+      (deviceSeconds
+        ? observed.updatedAt >= latestObservedAt &&
+          observed.updatedAt >= tappedAt - DEVICE_TIMESTAMP_SECOND_GRANULARITY_MARGIN_MS
+        : observed.updatedAt >= floor) &&
+      observed.packageName === appPackage &&
+      !this.hasResolverHostEvidence(observed)
+    );
   }
 
   private hasResolverHostEvidence(observed: ViewHierarchyResult): boolean {

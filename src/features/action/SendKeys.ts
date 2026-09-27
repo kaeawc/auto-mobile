@@ -14,7 +14,6 @@ import { clearTextWithKeyEvents, getFocusedTextLength, hasFocusedTextInput } fro
 import { InputKey, type InputKeyModifier, type InputKeyName } from "./InputKey";
 import type { KeyboardProfileId } from "./keyboardProfiles";
 import { TapOnElement } from "./TapOnElement";
-import { containsWysiwygTriggerChar } from "./wysiwygTriggerChars";
 import { quarantineAndroidIme, withAndroidImeLock } from "./androidImeLock";
 import {
   ANDROID_KEYCOMBINATION_MIN_API_LEVEL,
@@ -217,12 +216,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     signal?.throwIfAborted();
     const operation = command.operation ?? "insert";
     const requestedMode = command.mode ?? "auto";
-    const resolvedMode = this.resolveMode(
-      operation,
-      requestedMode,
-      command.keyboardProfile,
-      command.text,
-    );
+    const resolvedMode = this.resolveMode(requestedMode);
     const autoImeFallback = getAutoImeFallback(
       operation,
       requestedMode,
@@ -325,22 +319,8 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     return this.textClient.clear();
   }
 
-  private resolveMode(
-    operation: SendKeysOperation,
-    requestedMode: SendKeysTypingMode,
-    keyboardProfile?: KeyboardProfileId,
-    text = "",
-  ): AndroidSendKeysTypingMode {
-    if (requestedMode !== "auto") {
-      return requestedMode;
-    }
-    if (keyboardProfile) {
-      return "ime";
-    }
-    if (containsWysiwygTriggerChar(text)) {
-      return "ime";
-    }
-    return operation === "insert" ? "eventAll" : "a11y";
+  private resolveMode(requestedMode: SendKeysTypingMode): AndroidSendKeysTypingMode {
+    return requestedMode === "auto" ? "ime" : requestedMode;
   }
 
   private async executeIosType(

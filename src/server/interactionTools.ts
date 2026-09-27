@@ -804,7 +804,7 @@ const sendKeysCommandSchema = withCanonicalDiscriminatedUnionJsonSchema(
           .enum(SEND_KEYS_TYPING_MODES)
           .default("auto")
           .describe(
-            "Android delivery mode. ime is an opt-in companion input method for WYSIWYG/markdown rich-text editors. iOS accepts these values for cross-platform plans and reports xcuiTypeText as the resolved mode",
+            "Android delivery mode. auto uses the AutoMobile IME when supported, otherwise eventAll for insert or a11y for replace. Explicit ime requires a compatible CtrlProxy APK. iOS reports xcuiTypeText as the resolved mode",
           ),
         keyboardProfile: z
           .enum(KEYBOARD_PROFILE_IDS)

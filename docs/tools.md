@@ -82,10 +82,14 @@ transform before correlating iOS `observe` or `tapAt` coordinates with
 }
 ```
 
-Text defaults to `operation: "insert"` and `mode: "auto"`. Modes are `auto`,
-`a11y`, `eventLast`, `eventAll`, and `eventOnly`. They select Android delivery
-strategies; iOS accepts the same values for cross-platform plans and reports the
-actual `xcuiTypeText` mechanism as `resolvedMode`. Raw keys are `enter`, `tab`,
+Text defaults to `operation: "insert"` and `mode: "auto"`. On Android, `auto`
+uses AutoMobile's IME when the installed CtrlProxy APK advertises commit and
+cancellation support. Older APKs fall back to `eventAll` for insertion and
+`a11y` for replacement. Modes `ime`, `a11y`, `eventLast`, `eventAll`, and
+`eventOnly` select a delivery strategy explicitly; `eventAll` sends Android
+key events for apps that depend on them. iOS accepts the same values for
+cross-platform plans and reports the actual `xcuiTypeText` mechanism as
+`resolvedMode`. Raw keys are `enter`, `tab`,
 `escape`, `backspace`, `delete`, and the four arrow keys; they accept `shift`,
 `ctrl`, `alt`, and `meta`. Semantic keys `next`, `previous`, `done`, `search`,
 `send`, and `go` perform the corresponding IME action and ignore modifiers. A

@@ -264,8 +264,13 @@ describe("DefaultSendKeysCommandExecutor", () => {
   const commitImeId = "dev.jasonpearson.automobile.ctrlproxy/.ime.CtrlProxyIme";
   const priorImeId = "com.example.keyboard/.Ime";
 
-  test("auto mode routes formatting text through IME for insert and replace", async () => {
-    for (const operation of ["insert", "replace"] as const) {
+  test("auto mode routes plain and formatting text through IME for insert and replace", async () => {
+    for (const [operation, text] of [
+      ["insert", "plain"],
+      ["replace", "plain"],
+      ["insert", "note `x`"],
+      ["replace", "note `x`"],
+    ] as const) {
       const adb = new FakeAdbExecutor();
       adb.setCommandResponseSequence("shell settings get secure default_input_method", [
         { stdout: `${priorImeId}\n`, stderr: "" },
@@ -279,39 +284,17 @@ describe("DefaultSendKeysCommandExecutor", () => {
         { textClient: textClient.client },
       );
 
-      const result = await executor.type({ action: "type", text: "note `x`", operation });
+      const result = await executor.type({ action: "type", text, operation });
 
       expect(result.resolvedMode).toBe("ime");
-      expect(textClient.commitViaImeCalls.length).toBeGreaterThan(0);
+      expect(textClient.commitViaImeCalls).toEqual([{ text, priorImeId }]);
+      expect(
+        adb.getExecutedCommands().every((command) => !command.startsWith("shell input keyevent")),
+      ).toBe(true);
     }
   });
 
-  test("auto mode keeps the existing defaults for plain text", async () => {
-    for (const [operation, mode] of [
-      ["insert", "eventAll"],
-      ["replace", "a11y"],
-    ] as const) {
-      const adb = new FakeAdbExecutor();
-      const textClient = createTextClient();
-      const executor = new DefaultSendKeysCommandExecutor(
-        androidDevice,
-        createAdbFactory(adb),
-        createObserver(focusedAndroidObservation()),
-        { textClient: textClient.client },
-      );
-
-      const result = await executor.type({ action: "type", text: "plain", operation });
-
-      expect(result.resolvedMode).toBe(mode);
-      if (mode === "eventAll") {
-        expect(adb.getExecutedCommands().length).toBeGreaterThan(0);
-      } else {
-        expect(textClient.calls).toContain("replace:plain");
-      }
-    }
-  });
-
-  test("auto IME falls back to the previous default when commit is unavailable", async () => {
+  test("auto IME falls back to the previous delivery modes when commit is unavailable", async () => {
     for (const [operation, mode] of [
       ["insert", "eventAll"],
       ["replace", "a11y"],
@@ -864,7 +847,7 @@ describe("DefaultSendKeysCommandExecutor", () => {
     });
   });
 
-  test("auto insert uses eventAll and accessibility-inserts unsupported runs", async () => {
+  test("explicit eventAll uses key events and accessibility-inserts unsupported runs", async () => {
     const adb = new FakeAdbExecutor();
     const observer = createObserver(focusedAndroidObservation());
     const { client, calls } = createTextClient();
@@ -875,12 +858,12 @@ describe("DefaultSendKeysCommandExecutor", () => {
       { textClient: client },
     );
 
-    const result = await executor.type({ action: "type", text: "a🙂" });
+    const result = await executor.type({ action: "type", text: "a🙂", mode: "eventAll" });
 
     expect(result).toMatchObject({
       success: true,
       operation: "insert",
-      requestedMode: "auto",
+      requestedMode: "eventAll",
       resolvedMode: "eventAll",
       textLength: 2,
     });
@@ -899,7 +882,7 @@ describe("DefaultSendKeysCommandExecutor", () => {
       { textClient: client },
     );
 
-    const result = await executor.type({ action: "type", text: "a🙂" });
+    const result = await executor.type({ action: "type", text: "a🙂", mode: "eventAll" });
 
     expect(result).toMatchObject({
       success: false,
@@ -919,7 +902,7 @@ describe("DefaultSendKeysCommandExecutor", () => {
       { textClient: createTextClient().client },
     );
 
-    const result = await executor.type({ action: "type", text: "ab" });
+    const result = await executor.type({ action: "type", text: "ab", mode: "eventAll" });
 
     expect(result).toMatchObject({
       success: false,
@@ -1028,7 +1011,7 @@ describe("DefaultSendKeysCommandExecutor", () => {
       { textClient: createTextClient().client },
     );
 
-    const result = await executor.type({ action: "type", text: "a" });
+    const result = await executor.type({ action: "type", text: "a", mode: "eventAll" });
 
     expect(result.success).toBe(true);
     expect(adb.getExecutedCommands()).toEqual(["shell input keyevent KEYCODE_A"]);

@@ -260,6 +260,46 @@ describe("SetAccessibilityFocus", () => {
     expect(service.calls).toEqual([{ method: "set", resourceId: "com.example:id/close_icon" }]);
   });
 
+  test("mixed selector fields retain resource ID then text precedence", async () => {
+    observeScreen.setObserveResult(
+      makeObserveResult(
+        makeViewHierarchy([
+          {
+            $: {
+              "resource-id": "com.example:id/id_target",
+              text: "ID row",
+              bounds: bounds(0, 0, 80, 40),
+            },
+          },
+          {
+            $: {
+              "resource-id": "com.example:id/text_target",
+              text: "Name",
+              bounds: bounds(0, 50, 80, 90),
+            },
+          },
+          {
+            $: {
+              "resource-id": "com.example:id/desc_target",
+              "content-desc": "Description",
+              bounds: bounds(0, 100, 80, 140),
+            },
+          },
+        ]),
+      ),
+    );
+    await makeFeature().execute({
+      resourceId: "id_target",
+      text: "Name",
+      contentDesc: "Description",
+    });
+    await makeFeature().execute({ text: "Name", contentDesc: "Description" });
+    expect(service.calls).toEqual([
+      { method: "set", resourceId: "com.example:id/id_target" },
+      { method: "set", resourceId: "com.example:id/text_target" },
+    ]);
+  });
+
   test("throws when a resourceId selector is shared by repeated rows", async () => {
     observeScreen.setObserveResult(
       makeObserveResult(

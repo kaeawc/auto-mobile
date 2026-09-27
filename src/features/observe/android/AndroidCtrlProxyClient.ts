@@ -2291,7 +2291,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       stableConnection = replaceStabilityWaiter();
     })
       .then(async (outcome) => {
-        if (outcome === "failed" || outcome === "unavailable") {
+        if (this.closed || outcome === "failed" || outcome === "unavailable") {
           this.failPendingRecoveryStability(`service recovery ${outcome}`);
           this.forcedRestartBudget.recordFailure(`service recovery ${outcome}`, token);
           return false;
@@ -2412,7 +2412,12 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     if (this.closed) {
       return "failed";
     }
-    if (!(await this.isDevicePresent())) {
+    const generation = this.connectionGeneration;
+    const present = await this.isDevicePresent();
+    if (generation !== this.connectionGeneration) {
+      return "failed";
+    }
+    if (!present) {
       logger.info(
         `[AndroidCtrlProxyClient] Device ${this.device.deviceId} is offline or missing; skipping recovery`,
       );
@@ -2421,6 +2426,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
     const manager = this.serviceManagerFactory(this.device);
     const healthy = await manager.isAccessibilityServiceHealthy();
+    if (generation !== this.connectionGeneration) {
+      return "failed";
+    }
     if (healthy) {
       logger.info(
         `[AndroidCtrlProxyClient] Accessibility service already healthy; skipping rebind`,
@@ -2431,20 +2439,41 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     onEscalation();
     logger.info(`[AndroidCtrlProxyClient] Accessibility service unhealthy; attempting rebind`);
     const rebound = (await manager.rebindIfUnhealthy?.()) ?? false;
-    if (rebound && (await manager.isAccessibilityServiceHealthy())) {
+    if (generation !== this.connectionGeneration) {
+      return "failed";
+    }
+    const repaired = rebound && (await manager.isAccessibilityServiceHealthy());
+    if (generation !== this.connectionGeneration) {
+      return "failed";
+    }
+    if (repaired) {
       return "repaired";
     }
 
     onEscalation();
     logger.info(`[AndroidCtrlProxyClient] Rebind did not restore health; running full setup`);
+    return this.setupRecoveryService(manager, generation);
+  }
+
+  private async setupRecoveryService(
+    manager: AndroidServiceRecoveryManager,
+    generation: number,
+  ): Promise<"repaired" | "failed"> {
     const result = await manager.setup(true);
+    if (generation !== this.connectionGeneration) {
+      return "failed";
+    }
     if (!result.success) {
       logger.warn(
         `[AndroidCtrlProxyClient] CtrlProxy setup failed during recovery: ${result.message}`,
       );
       return "failed";
     }
-    if (!(await manager.isAccessibilityServiceHealthy())) {
+    const healthy = await manager.isAccessibilityServiceHealthy();
+    if (generation !== this.connectionGeneration) {
+      return "failed";
+    }
+    if (!healthy) {
       logger.warn(`[AndroidCtrlProxyClient] Accessibility service remained unhealthy after setup`);
       return "failed";
     }

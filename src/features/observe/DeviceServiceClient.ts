@@ -374,8 +374,28 @@ export abstract class DeviceServiceClient {
   public terminateStaleConnection(): void {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       logger.warn(`[${this.logTag}] Terminating stale connection (connected but unresponsive)`);
-      this.ws.terminate();
+      const socket = this.ws;
+      this.finishEstablishedConnection(socket);
+      socket.terminate();
     }
+  }
+
+  /**
+   * Finish a lost connection exactly once, even when replacement beats its close event.
+   * Socket identity is the connection token; late events cannot clean up a replacement.
+   */
+  private finishEstablishedConnection(socket: WebSocket): void {
+    if (this.ws !== socket) {
+      return;
+    }
+    this.ws = null;
+    this.clearLifecycleSocket(socket);
+    this.isConnecting = false;
+    this.stopHealthCheck();
+    this.requestManager.cancelAll(new Error("WebSocket connection closed"));
+    this.onConnectionClosed();
+    this.onConnectAttemptFailed();
+    this.scheduleReconnect();
   }
 
   /**
@@ -486,6 +506,11 @@ export abstract class DeviceServiceClient {
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     interest: { release: () => void } = this.acquirePendingConnectInterest(),
   ): Promise<boolean> {
+    if (!this.backgroundConnectRequested && this.isConnecting) {
+      // Joining callers reseed background recovery without spending another dial.
+      this.backgroundReconnectAttempts = 0;
+      this.backgroundReconnectPaused = false;
+    }
     return this.connectWebSocketAttempt(perf, this.backgroundConnectRequested).finally(
       interest.release,
     );
@@ -516,7 +541,7 @@ export abstract class DeviceServiceClient {
     if (this.ws && this.ws.readyState !== WebSocket.OPEN) {
       logger.info(`[${this.logTag}] Cleaning up stale WebSocket (state: ${this.ws.readyState})`);
       const staleSocket = this.ws;
-      this.ws = null;
+      this.finishEstablishedConnection(staleSocket);
       this.clearLifecycleSocket(staleSocket);
       try {
         // This socket may emit close/error after a replacement is installed.
@@ -671,6 +696,9 @@ export abstract class DeviceServiceClient {
             });
 
             ws.on("message", (data: WebSocket.Data) => {
+              if (this.ws !== ws) {
+                return;
+              }
               // Any inbound frame proves the peer is alive, independent of
               // whether it happens to be a pong reply (#7554).
               this.markLivenessSeen();
@@ -678,7 +706,9 @@ export abstract class DeviceServiceClient {
             });
 
             ws.on("pong", () => {
-              this.markLivenessSeen();
+              if (this.ws === ws) {
+                this.markLivenessSeen();
+              }
             });
 
             // The Android Ktor CtrlProxy server pings the host every 15s
@@ -686,7 +716,9 @@ export abstract class DeviceServiceClient {
             // still surfaces them as a "ping" event on this side. That is a
             // free proof of life independent of the host's own probe (#7554).
             ws.on("ping", () => {
-              this.markLivenessSeen();
+              if (this.ws === ws) {
+                this.markLivenessSeen();
+              }
             });
 
             ws.on("error", (error) => {
@@ -716,23 +748,7 @@ export abstract class DeviceServiceClient {
                 return;
               }
               logger.info(`[${this.logTag}] WebSocket connection closed`);
-              this.ws = null;
-              this.isConnecting = false;
-
-              // Stop health check
-              this.stopHealthCheck();
-
-              // The transport is known dead, so commands cannot receive a
-              // response. Settle them immediately rather than retaining their
-              // request state and timers until the command timeout expires.
-              this.requestManager.cancelAll(new Error("WebSocket connection closed"));
-
-              // Platform-specific cleanup
-              this.onConnectionClosed();
-              this.onConnectAttemptFailed();
-
-              // Attempt automatic reconnection if enabled
-              this.scheduleReconnect();
+              this.finishEstablishedConnection(ws);
             });
           }),
       );
@@ -778,6 +794,10 @@ export abstract class DeviceServiceClient {
       return false;
     }
     const remaining = this.config.connectionResetMs - timeSinceLastAttempt;
+    if (background) {
+      // A healthy service recovery must not lose its retry while the caller cools down.
+      this.scheduleReconnect(remaining);
+    }
     logger.warn(
       `[${this.logTag}] Max connection attempts (${this.config.maxConnectionAttempts}) reached, cooldown remaining: ${remaining}ms`,
     );
@@ -863,13 +883,15 @@ export abstract class DeviceServiceClient {
   /**
    * Schedule automatic reconnection after disconnect.
    */
-  protected scheduleReconnect(): void {
+  protected scheduleReconnect(cooldownDelayMs?: number): void {
     if (this.autoReconnectEnabled && !this.backgroundReconnectPaused && !this.reconnectTimeoutId) {
-      const delayMs = exponentialBackoff({
-        initialDelayMs: this.config.reconnectDelayMs,
-        multiplier: 2,
-        maxDelayMs: this.config.connectionResetMs,
-      }).delayForAttempt(this.backgroundReconnectAttempts + 1);
+      const delayMs =
+        cooldownDelayMs ??
+        exponentialBackoff({
+          initialDelayMs: this.config.reconnectDelayMs,
+          multiplier: 2,
+          maxDelayMs: this.config.connectionResetMs,
+        }).delayForAttempt(this.backgroundReconnectAttempts + 1);
       logger.info(`[${this.logTag}] Scheduling reconnection in ${delayMs}ms`);
       this.reconnectTimeoutId = this.timer.setTimeout(() => {
         this.reconnectTimeoutId = null;
@@ -974,6 +996,10 @@ export abstract class DeviceServiceClient {
    * coarser than that).
    */
   private markLivenessSeen(): void {
+    if (this.livenessDeadlineTimeoutId !== null) {
+      this.timer.clearTimeout(this.livenessDeadlineTimeoutId);
+      this.livenessDeadlineTimeoutId = null;
+    }
     this.lastLivenessAt = this.timer.now();
     this.livenessSeq++;
     this.consecutiveRequestTimeouts = 0;
@@ -1006,6 +1032,9 @@ export abstract class DeviceServiceClient {
       // is itself evidence of trouble, so still arm the deadline below rather
       // than returning early.
       logger.debug(`[${this.logTag}] Failed to send liveness ping: ${error}`);
+    }
+    if (this.livenessSeq !== checkStartedAtSeq) {
+      return;
     }
     const livenessTimeoutMs =
       this.config.healthCheckIntervalMs * LIVENESS_TIMEOUT_INTERVAL_MULTIPLIER;

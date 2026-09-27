@@ -20,6 +20,11 @@ class TestDeviceServiceClient extends DeviceServiceClient {
   protected readonly logTag = "TestClient";
   connectionEstablishedCount = 0;
   connectionClosedCount = 0;
+  connectionFailureCount = 0;
+
+  protected onConnectAttemptFailed(): void {
+    this.connectionFailureCount++;
+  }
 
   constructor(
     timer: FakeTimer,
@@ -51,6 +56,10 @@ class TestDeviceServiceClient extends DeviceServiceClient {
     _perf: PerformanceTracker,
     _signal: AbortSignal,
   ): Promise<void> {}
+
+  registerPendingRequest(): Promise<boolean> {
+    return this.requestManager.register<boolean>("old", "test", 10000, () => false);
+  }
 
   getConnectionAttempts(): number {
     return this.connectionAttempts;
@@ -409,6 +418,93 @@ describe("DeviceServiceClient connection cooldown", () => {
     expect(factoryCalls).toBe(9);
     expect(client.isAutoReconnectScheduled()).toBe(false);
   });
+
+  test("foreground join reseeds retries while the final background handshake is pending", async () => {
+    const timer = new FakeTimer();
+    const sockets: FakeWebSocket[] = [];
+    client = new TestDeviceServiceClient(timer, (url) => {
+      const socket = new FakeWebSocket(url, "none", 0, timer);
+      const attempt = sockets.length;
+      const emit = socket.emit.bind(socket);
+      socket.emit = (event, ...args) => {
+        if (event === "open" && attempt > 0) {
+          socket.readyState = WebSocketState.CONNECTING;
+          if (attempt < 3) {
+            return emit("error", new Error("background failure"));
+          }
+          return true;
+        }
+        return emit(event, ...args);
+      };
+      sockets.push(socket);
+      return socket;
+    });
+    expect(await client.ensureConnected()).toBe(true);
+    // Drive two failed background dials using errors before their queued open.
+    sockets[0]!.emit("close");
+    for (const delay of [2000, 4000]) {
+      timer.advanceTime(delay);
+      for (let turn = 0; turn < 20; turn++) {
+        await Promise.resolve();
+      }
+    }
+    timer.advanceTime(8000);
+    for (let turn = 0; turn < 20; turn++) {
+      await Promise.resolve();
+    }
+    expect(sockets).toHaveLength(4);
+    const joining = client.ensureConnected();
+    sockets[3]!.emit("error", new Error("final background failure"));
+    for (let turn = 0; turn < 20; turn++) {
+      await Promise.resolve();
+    }
+    timer.advanceTime(100);
+    expect(await joining).toBe(false);
+    expect(client.isAutoReconnectScheduled()).toBe(true);
+    expect(client.getConnectionAttempts()).toBe(0);
+  });
+
+  test.each(["terminate", "closing"])(
+    "replacement before async stale close cancels old requests and closes exactly once (%s)",
+    async (mode) => {
+      const timer = new FakeTimer();
+      const sockets: FakeWebSocket[] = [];
+      client = new TestDeviceServiceClient(timer, (url) => {
+        const socket = new FakeWebSocket(url, "none", 0, timer);
+        socket.terminate = () => {
+          socket.readyState = WebSocketState.CLOSING;
+          timer.setTimeout(() => {
+            socket.readyState = WebSocketState.CLOSED;
+            socket.emit("close");
+          }, 10);
+        };
+        sockets.push(socket);
+        return socket;
+      });
+      expect(await client.ensureConnected()).toBe(true);
+      let cancelled = false;
+      const request = client.registerPendingRequest().catch(() => {
+        cancelled = true;
+        return false;
+      });
+      if (mode === "terminate") {
+        client.terminateStaleConnection();
+      } else {
+        sockets[0]!.terminate();
+      }
+      expect(await client.ensureConnected()).toBe(true);
+      await Promise.resolve();
+      expect(cancelled).toBe(true);
+      expect(await request).toBe(false);
+      expect(client.connectionClosedCount).toBe(1);
+      expect(client.connectionFailureCount).toBe(1);
+      timer.advanceTime(10);
+      expect(client.connectionFailureCount).toBe(1);
+      expect(client.connectionClosedCount).toBe(1);
+      expect(client.isConnected()).toBe(true);
+      expect(sockets).toHaveLength(2);
+    },
+  );
 
   test("recovery after cooldown with Nth-attempt success", async () => {
     const timer = new FakeTimer();

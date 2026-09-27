@@ -616,6 +616,7 @@ export class CtrlProxyHierarchy {
 
       // Try WebSocket request first (faster path). Returns the correlating requestId when sent so a
       // runner type:"error" frame for this hierarchy request can reject the wait fast (issue #3032).
+      const dispatchSocket = this.context.getWebSocket();
       const hierarchyRequestId = await perf.track("sendWsRequest", async () => {
         return this.sendHierarchyRequest(disableAllFiltering);
       });
@@ -651,7 +652,14 @@ export class CtrlProxyHierarchy {
       // getAccessibilityHierarchy) — nothing is discarded here.
       const correlationRequestId = hierarchyRequestId ?? broadcastRequestId ?? undefined;
       const freshData = await perf.track("waitForPush", () =>
-        this.waitForFreshData(effectiveTimeoutMs, startTime, false, signal, correlationRequestId),
+        this.waitForFreshData(
+          effectiveTimeoutMs,
+          startTime,
+          false,
+          signal,
+          correlationRequestId,
+          dispatchSocket,
+        ),
       );
 
       if (freshData) {
@@ -898,9 +906,20 @@ export class CtrlProxyHierarchy {
     useDeviceTimestamp: boolean,
     signal?: AbortSignal,
     requestId?: string,
+    dispatchSocket?: WebSocket | null,
   ): Promise<CachedHierarchy | null> {
+    // Dispatch can await an ADB broadcast while close notification is delivered.
+    // Validate the original socket before registering, including close+replacement.
+    if (
+      dispatchSocket !== undefined &&
+      (!dispatchSocket ||
+        dispatchSocket.readyState !== WebSocket.OPEN ||
+        this.context.getWebSocket() !== dispatchSocket)
+    ) {
+      return null;
+    }
+    const waitSocket = dispatchSocket === undefined ? this.context.getWebSocket() : dispatchSocket;
     const startTime = this.context.timer.now();
-    const waitSocket = this.context.getWebSocket();
     const checkInterval = 50;
     const screenCheckInterval = 1000;
     const staleCheckDelay = 2000;

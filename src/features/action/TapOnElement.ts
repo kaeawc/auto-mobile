@@ -87,6 +87,7 @@ import { hierarchyUpdatedAtToMillis } from "../observe/observeTimestamp";
 import { dispatchAndroidCoordinateTap, dispatchIosCoordinateTap } from "./coordinateTapDispatch";
 
 type SearchUntilStats = NonNullable<TapOnElementResult["searchUntil"]>;
+type FocusIdentifierKey = "resource-id" | "view-id" | "test-tag";
 
 const TEXT_SELECTION_INTENT_BY_ACTION: Record<TapOnElementOptions["action"], TextSelectionIntent> =
   {
@@ -1202,7 +1203,11 @@ export class TapOnElement extends BaseVisualChange {
       }
     }
     return (
-      boundsEqual(target.bounds, candidate.bounds) && this.hasStableFocusIdentity(target, candidate)
+      boundsNearlyEqual(
+        target.bounds,
+        candidate.bounds,
+        TapOnElement.ANDROID_PRE_TAP_BOUNDS_EPSILON_PX,
+      ) && this.hasStableFocusIdentity(target, candidate)
     );
   }
 
@@ -1273,11 +1278,90 @@ export class TapOnElement extends BaseVisualChange {
       : undefined;
   }
 
+  private findFocusIdentifier(
+    target: Element,
+    nodes: readonly SearchableEntry[],
+  ): { key: FocusIdentifierKey; value: string; shared: boolean } | undefined {
+    let shared: { key: FocusIdentifierKey; value: string; shared: boolean } | undefined;
+    for (const key of ["resource-id", "test-tag", "view-id"] as const) {
+      const value = target[key];
+      if (typeof value !== "string" || value.length === 0) {
+        continue;
+      }
+      const sources = new Set(
+        nodes
+          .filter(
+            (node) =>
+              node.element &&
+              isFocusEditableElement(node.properties) &&
+              node.element[key] === value,
+          )
+          .map((node) => node.source),
+      );
+      if (sources.size === 1) {
+        return { key, value, shared: false };
+      }
+      if (sources.size > 1) {
+        shared ??= { key, value, shared: true };
+      }
+    }
+    return shared;
+  }
+
+  private verifyIndexedFocusTarget(
+    options: TapOnElementOptions,
+    target: Element,
+    hierarchy: ViewHierarchyResult,
+    identifier: { key: FocusIdentifierKey; value: string },
+    selectedIndex?: number,
+  ): boolean {
+    const selected = this.findElementInHierarchy(
+      { ...options, index: options.index ?? selectedIndex },
+      hierarchy,
+    ).selection.element;
+    return Boolean(
+      selected &&
+      isFocusEditableElement(selected) &&
+      this.finder.isElementKeyboardFocused(selected) &&
+      selected[identifier.key] === identifier.value &&
+      target.class === selected.class &&
+      horizontalExtentNearlyEqual(
+        target.bounds,
+        selected.bounds,
+        TapOnElement.ANDROID_PRE_TAP_BOUNDS_EPSILON_PX,
+      ),
+    );
+  }
+
+  private isFocusedMatchingNode(target: Element, node: SearchableEntry): boolean {
+    return Boolean(
+      node.element &&
+      isFocusEditableElement(node.properties) &&
+      this.finder.isElementKeyboardFocused(node.element) &&
+      this.isSameFocusTarget(target, node.element),
+    );
+  }
+
+  private isRefoundFocusTarget(
+    options: TapOnElementOptions,
+    target: Element,
+    hierarchy: ViewHierarchyResult,
+  ): boolean {
+    const candidate = this.findElementInHierarchy(options, hierarchy).selection.element;
+    return Boolean(
+      candidate &&
+      isFocusEditableElement(candidate) &&
+      this.finder.isElementKeyboardFocused(candidate) &&
+      this.isSameFocusTarget(target, candidate),
+    );
+  }
+
   private verifyFocusedInputTarget(
     options: TapOnElementOptions,
     target: Element,
     observation?: ObserveResult,
     labelText?: string,
+    selectedIndex?: number,
   ): boolean {
     if (!observation?.viewHierarchy) {
       return false;
@@ -1285,13 +1369,27 @@ export class TapOnElement extends BaseVisualChange {
     const searchHierarchy =
       resolveViewHierarchyForSearch(observation.viewHierarchy) ?? observation.viewHierarchy;
     const nodes = new SearchableHierarchy().project(searchHierarchy);
-    const focused = nodes.find(
-      (node) =>
-        node.element &&
-        isFocusEditableElement(node.properties) &&
-        this.finder.isElementKeyboardFocused(node.element) &&
-        this.isSameFocusTarget(target, node.element),
-    );
+    const identifier = this.findFocusIdentifier(target, nodes);
+    if (identifier?.shared) {
+      return this.verifyIndexedFocusTarget(
+        options,
+        target,
+        observation.viewHierarchy,
+        identifier,
+        selectedIndex,
+      );
+    }
+    if (identifier) {
+      return nodes.some(
+        (node) =>
+          node.element &&
+          isFocusEditableElement(node.properties) &&
+          this.finder.isElementKeyboardFocused(node.element) &&
+          node.element[identifier.key] === identifier.value &&
+          this.isSameFocusTarget(target, node.element),
+      );
+    }
+    const focused = nodes.find((node) => this.isFocusedMatchingNode(target, node));
     if (focused) {
       return true;
     }
@@ -1301,14 +1399,7 @@ export class TapOnElement extends BaseVisualChange {
     if (!options.testTag && !(options.elementId && target["resource-id"])) {
       return false;
     }
-    const candidate = this.findElementInHierarchy(options, observation.viewHierarchy).selection
-      .element;
-    return Boolean(
-      candidate &&
-      isFocusEditableElement(candidate) &&
-      this.finder.isElementKeyboardFocused(candidate) &&
-      this.isSameFocusTarget(target, candidate),
-    );
+    return this.isRefoundFocusTarget(options, target, observation.viewHierarchy);
   }
 
   private requireTestTag(options: TapOnElementOptions): string {
@@ -2294,6 +2385,13 @@ export class TapOnElement extends BaseVisualChange {
                 error: "Android tap aborted: refreshed stable target selection was empty",
               };
             }
+            if (requestedAction === "focus") {
+              focusTarget = stableElement;
+              focusLabelText =
+                stable.selection.matchedElement !== stableElement
+                  ? stable.selection.matchedElement?.text
+                  : undefined;
+            }
             const ensureCheckedResult = this.ensureCheckedBeforeTap(
               options,
               stableElement,
@@ -2450,6 +2548,7 @@ export class TapOnElement extends BaseVisualChange {
           target,
           result.observation,
           focusLabelText,
+          result.selectedElement?.indexInMatches,
         );
         if (!result.focusVerified) {
           result.success = false;

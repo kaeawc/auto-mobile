@@ -67,7 +67,10 @@ function stubStabilityDeps(tap: TapOnElement, sequence: StubSequenceEntry[]): vo
   });
 }
 
-async function executeFocusWithDuplicateEmail(flag: "preTapStability" | "ensureTap") {
+async function executeFocusWithDuplicateEmail(
+  flag: "preTapStability" | "ensureTap",
+  moveDuringStability = false,
+) {
   const clickable: Element = {
     text: "Email",
     class: "android.widget.TextView",
@@ -75,22 +78,49 @@ async function executeFocusWithDuplicateEmail(flag: "preTapStability" | "ensureT
     bounds: { left: 10, top: 20, right: 110, bottom: 70 },
   };
   const editable: Element = {
-    text: "Email",
+    text: moveDuringStability ? undefined : "Email",
     class: "android.widget.EditText",
-    "resource-id": "com.app:id/email",
+    "resource-id": moveDuringStability ? undefined : "com.app:id/email",
+    ...(moveDuringStability ? { "view-id": "s2-initial" } : {}),
     bounds: { left: 10, top: 80, right: 110, bottom: 130 },
     focused: false,
   };
-  const focused = { ...editable, focused: true };
+  const stableEditable = moveDuringStability
+    ? {
+        ...editable,
+        "view-id": "s2-stable",
+        bounds: { left: 80, top: 80, right: 180, bottom: 130 },
+      }
+    : editable;
+  const focused = {
+    ...stableEditable,
+    ...(moveDuringStability ? { "view-id": "s2-focused" } : {}),
+    ...(moveDuringStability ? { text: "Email" } : {}),
+    focused: true,
+  };
   const before: ViewHierarchyResult = { hierarchy: { node: [clickable, editable] } };
+  const stableHierarchy: ViewHierarchyResult = {
+    hierarchy: { node: [clickable, stableEditable] },
+  };
   const after: ViewHierarchyResult = { hierarchy: { node: [clickable, focused] } };
   const selector = new FakeElementSelector();
   const selectionIntents: string[] = [];
-  selector.selectByText = (_hierarchy, _text, options) => {
+  selector.selectByText = (hierarchy, _text, options) => {
     const intent = options?.selectionIntent ?? "tap";
     selectionIntents.push(intent);
-    const element = intent === "focus-input" ? editable : clickable;
-    return { element, indexInMatches: 0, totalMatches: 1, strategy: "first" };
+    const element =
+      intent === "focus-input"
+        ? hierarchy === after
+          ? focused
+          : hierarchy === stableHierarchy
+            ? stableEditable
+            : editable
+        : clickable;
+    const matchedElement =
+      moveDuringStability && intent === "focus-input"
+        ? ({ text: hierarchy === stableHierarchy ? "Email" : "Stale label" } as Element)
+        : undefined;
+    return { element, matchedElement, indexInMatches: 0, totalMatches: 1, strategy: "first" };
   };
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
@@ -112,7 +142,7 @@ async function executeFocusWithDuplicateEmail(flag: "preTapStability" | "ensureT
   (tap as any).observedInteraction = async (
     action: (observation: { viewHierarchy: ViewHierarchyResult }) => Promise<object>,
   ) => ({ ...(await action({ viewHierarchy: before })), observation: { viewHierarchy: after } });
-  (tap as any).refreshViewHierarchy = async () => before;
+  (tap as any).refreshViewHierarchy = async () => (moveDuringStability ? stableHierarchy : before);
   (tap as any).executeAndroidTap = async (
     _action: string,
     _x: number,
@@ -133,7 +163,7 @@ async function executeFocusWithDuplicateEmail(flag: "preTapStability" | "ensureT
   (tap as any).enforceFreshnessConsistencyWithEffect = () => {};
 
   const result = await tap.execute({ text: "Email", action: "focus", index: 0, [flag]: true });
-  return { result, tapped, clickable, editable, selectionIntents };
+  return { result, tapped, clickable, editable, stableEditable, selectionIntents };
 }
 
 describe("focus intent through pre-tap stability", () => {
@@ -158,6 +188,19 @@ describe("focus intent through pre-tap stability", () => {
     expect(result.focusVerified).toBe(true);
     expect(result.success).toBe(true);
   });
+
+  test.each(["preTapStability", "ensureTap"] as const)(
+    "verifies the refreshed Compose field after horizontal movement with %s (#7800)",
+    async (flag) => {
+      const { result, tapped, stableEditable } = await executeFocusWithDuplicateEmail(flag, true);
+
+      expect(tapped).toEqual([stableEditable]);
+      expect(result.selectedElement?.bounds.left).toBe(stableEditable.bounds.left);
+      expect(result.selectedElement?.bounds.right).toBe(stableEditable.bounds.right);
+      expect(result.focusVerified).toBe(true);
+      expect(result.success).toBe(true);
+    },
+  );
 });
 
 describe("resolveAndroidStableTapTargetAfterRefreshes", () => {

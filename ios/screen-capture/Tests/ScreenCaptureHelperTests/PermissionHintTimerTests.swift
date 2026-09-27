@@ -49,4 +49,21 @@ final class PermissionHintTimerTests: XCTestCase {
         XCTAssertTrue(lines.snapshot().isEmpty)
         hint.stop()
     }
+
+    func testDefaultDispatchTimerFiresOffMain() {
+        let emitted = expectation(description: "permission hint emitted")
+        let hint = PermissionHintTimer(
+            firstFrameSignal: FirstFrameSignal(),
+            approvalTarget: "Terminal",
+            output: { line in
+                if line.hasPrefix("error: Screen Recording permission") {
+                    emitted.fulfill()
+                }
+            }
+        )
+
+        hint.arm(after: 0)
+        wait(for: [emitted], timeout: 1)
+        hint.stop()
+    }
 }

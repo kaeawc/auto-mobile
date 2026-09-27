@@ -313,6 +313,149 @@ describe("closeLogStream bounded close policy (#6700)", () => {
 });
 
 describe("logger closeAfterFlush lifecycle", () => {
+  test("a late error and close from stream A cannot release stream B's reopen barrier", async () => {
+    const streams: WritableFakeLogStream[] = [];
+    const { mod, restore } = await fileLoggerWithStreams(streams);
+    const timer = new FakeTimer();
+    const setTimeoutSpy = spyOn(defaultTimer, "setTimeout").mockImplementation((callback, ms) =>
+      timer.setTimeout(callback, ms),
+    );
+    const clearTimeoutSpy = spyOn(defaultTimer, "clearTimeout").mockImplementation((handle) =>
+      timer.clearTimeout(handle),
+    );
+    const stderr: string[] = [];
+    const stderrSpy = spyOn(process.stderr, "write").mockImplementation(((
+      chunk: unknown,
+      callback?: (error?: Error | null) => void,
+    ) => {
+      stderr.push(String(chunk));
+      callback?.(null);
+      return true;
+    }) as typeof process.stderr.write);
+    try {
+      const streamA = streams[0];
+      streamA.failClose(new Error("A failed"));
+      timer.advanceTime(CLOSE_LOG_STREAM_TIMEOUT_MS);
+      mod.logger.info("open B after A's timeout");
+      await mod.logger.flush();
+      expect(streams).toHaveLength(2);
+
+      const streamB = streams[1];
+      streamB.failClose(new Error("B failed"));
+      streamA.failClose(new Error("A reported another late error"));
+      streamA.emitClose();
+      mod.logger.info("B still holds the descriptor");
+      await mod.logger.flush();
+      expect(streams).toHaveLength(2);
+      expect(stderr.some((line) => line.includes("B still holds the descriptor"))).toBeTrue();
+
+      streamB.emitClose();
+      mod.logger.info("B released its descriptor");
+      await mod.logger.flush();
+      expect(streams).toHaveLength(3);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    } finally {
+      stderrSpy.mockRestore();
+      clearTimeoutSpy.mockRestore();
+      setTimeoutSpy.mockRestore();
+      restore();
+    }
+  });
+
+  test("rotates after shutdown reports an error but confirms close", async () => {
+    class ErrorThenCloseStream extends WritableFakeLogStream {
+      override end(): void {
+        this.ended = true;
+        queueMicrotask(() => {
+          this.failClose(new Error("shutdown failed"));
+          this.emitClose();
+        });
+      }
+    }
+    const streams: WritableFakeLogStream[] = [];
+    const { mod, dir, restore } = await fileLoggerWithStreams(
+      streams,
+      () => new ErrorThenCloseStream(),
+    );
+    const timer = new FakeTimer();
+    const setTimeoutSpy = spyOn(defaultTimer, "setTimeout").mockImplementation((callback, ms) =>
+      timer.setTimeout(callback, ms),
+    );
+    const clearTimeoutSpy = spyOn(defaultTimer, "clearTimeout").mockImplementation((handle) =>
+      timer.clearTimeout(handle),
+    );
+    const target = join(dir, `${mod.resolveProcessLogPrefix(process.argv, process.pid)}.log`);
+    fs.writeFileSync(target, "oversized");
+    fs.truncateSync(target, 10 * 1024 * 1024);
+    try {
+      mod.logger.info("rotate after confirmed close");
+      await mod.logger.flush();
+      expect(streams[0].closed).toBeTrue();
+      expect(streams).toHaveLength(2);
+      expect(fs.existsSync(target)).toBeFalse();
+      expect(
+        fs
+          .readdirSync(dir)
+          .some(
+            (name) =>
+              name.startsWith(`${mod.resolveProcessLogPrefix(process.argv, process.pid)}-`) &&
+              name.endsWith(".log"),
+          ),
+      ).toBeTrue();
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    } finally {
+      clearTimeoutSpy.mockRestore();
+      setTimeoutSpy.mockRestore();
+      restore();
+    }
+  });
+
+  test("closeAfterFlush transfers an error barrier to its injected timer", async () => {
+    let signalError!: () => void;
+    const errorEmitted = new Promise<void>((resolve) => {
+      signalError = resolve;
+    });
+    class ErrorWithoutCloseStream extends WritableFakeLogStream {
+      override end(): void {
+        this.ended = true;
+        queueMicrotask(() => {
+          this.failClose(new Error("end failed without close"));
+          signalError();
+        });
+      }
+    }
+    const streams: WritableFakeLogStream[] = [];
+    const { mod, restore } = await fileLoggerWithStreams(
+      streams,
+      () => new ErrorWithoutCloseStream(),
+    );
+    const productionTimer = new FakeTimer();
+    const closeTimer = new FakeTimer();
+    const setTimeoutSpy = spyOn(defaultTimer, "setTimeout").mockImplementation((callback, ms) =>
+      productionTimer.setTimeout(callback, ms),
+    );
+    const clearTimeoutSpy = spyOn(defaultTimer, "clearTimeout").mockImplementation((handle) =>
+      productionTimer.clearTimeout(handle),
+    );
+    try {
+      const closing = mod.logger.closeAfterFlush(closeTimer);
+      await errorEmitted;
+      closeTimer.advanceTime(CLOSE_LOG_STREAM_TIMEOUT_MS);
+      await expect(closing).rejects.toBeInstanceOf(ActionableError);
+      closeTimer.advanceTime(CLOSE_LOG_STREAM_TIMEOUT_MS);
+      mod.logger.info("reopen after injected barrier timeout");
+      await mod.logger.flush();
+      expect(streams).toHaveLength(2);
+      expect(productionTimer.getPendingTimeoutCount()).toBe(0);
+      expect(closeTimer.getPendingTimeoutCount()).toBe(0);
+    } finally {
+      productionTimer.advanceTime(CLOSE_LOG_STREAM_TIMEOUT_MS);
+      clearTimeoutSpy.mockRestore();
+      setTimeoutSpy.mockRestore();
+      restore();
+    }
+  });
+
   test("defers rotation and degrades writes when the old descriptor never confirms close", async () => {
     const streams: WritableFakeLogStream[] = [];
     const { mod, dir, restore } = await fileLoggerWithStreams(streams);

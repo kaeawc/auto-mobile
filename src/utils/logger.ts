@@ -213,28 +213,32 @@ const attachStreamFailureHandlers = (stream: fs.WriteStream, target: string): vo
   });
 };
 
-// An old descriptor whose close was not confirmed must keep this path unavailable.
-// This is an old-stream release barrier, never a second reference to the current sink.
-let unconfirmedClose: fs.WriteStream | undefined;
+// Every old descriptor whose close was not confirmed keeps this path unavailable.
+// These are old-stream release barriers, never references to the current sink.
+const unconfirmedCloses = new Map<
+  fs.WriteStream,
+  { timer: Timer; timeoutHandle: NodeJS.Timeout; onClose: () => void }
+>();
 const deferReopenUntilClose = (stream: fs.WriteStream, timer: Timer = defaultTimer): void => {
   if (stream.closed) {
     return;
   }
-  if (unconfirmedClose === stream) {
-    return;
+  const previous = unconfirmedCloses.get(stream);
+  if (previous) {
+    previous.timer.clearTimeout(previous.timeoutHandle);
+    stream.off("close", previous.onClose);
   }
-  unconfirmedClose = stream;
-  const timeoutHandle = timer.setTimeout(() => {
-    if (unconfirmedClose === stream) {
-      unconfirmedClose = undefined;
+  const onClose = (): void => {
+    const entry = unconfirmedCloses.get(stream);
+    if (entry?.onClose === onClose) {
+      entry.timer.clearTimeout(entry.timeoutHandle);
+      stream.off("close", onClose);
+      unconfirmedCloses.delete(stream);
     }
-  }, CLOSE_LOG_STREAM_TIMEOUT_MS);
-  stream.once("close", () => {
-    timer.clearTimeout(timeoutHandle);
-    if (unconfirmedClose === stream) {
-      unconfirmedClose = undefined;
-    }
-  });
+  };
+  const timeoutHandle = timer.setTimeout(onClose, CLOSE_LOG_STREAM_TIMEOUT_MS);
+  unconfirmedCloses.set(stream, { timer, timeoutHandle, onClose });
+  stream.once("close", onClose);
 };
 
 // Constructing an appending WriteStream can throw synchronously — e.g. bun's
@@ -244,10 +248,12 @@ const deferReopenUntilClose = (stream: fs.WriteStream, timer: Timer = defaultTim
 // lane). File logging is best-effort, so swallow the construction failure and
 // fall back to console-only logging rather than taking the process down.
 const openLogStream = (target: string): fs.WriteStream | undefined => {
-  if (unconfirmedClose?.closed) {
-    unconfirmedClose = undefined;
+  for (const [stream, entry] of unconfirmedCloses) {
+    if (stream.closed) {
+      entry.onClose();
+    }
   }
-  if (unconfirmedClose && !unconfirmedClose.closed) {
+  if (unconfirmedCloses.size > 0) {
     return undefined;
   }
   try {
@@ -523,10 +529,13 @@ const closeStreamBeforeRotation = async (stream: fs.WriteStream): Promise<boolea
     await closeLogStream(stream);
     return true;
   } catch (closeError) {
+    const closeConfirmed = stream.closed === true;
     // A timeout does not prove the old descriptor was released.
-    deferReopenUntilClose(stream);
+    if (!closeConfirmed) {
+      deferReopenUntilClose(stream);
+    }
     await reportLogFailure("Failed to close log stream before rotation", closeError);
-    return false;
+    return closeConfirmed;
   }
 };
 
@@ -614,7 +623,7 @@ const recoverFromFailedRotation = async (
   paths: { dir: string; path: string },
   error: unknown,
 ): Promise<void> => {
-  if (!unconfirmedClose && (logStream?.destroyed || !logStream?.writable)) {
+  if (unconfirmedCloses.size === 0 && (logStream?.destroyed || !logStream?.writable)) {
     logStream = openLogStream(paths.path);
   }
   await reportLogFailure("Log rotation failed", error);

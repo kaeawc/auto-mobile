@@ -28,7 +28,8 @@ test("fuzzy sibling selection keeps partial label anchors", () => {
     hierarchy: {
       node: {
         node: [
-          { bounds, clickable: true, text: "Email" },
+          { bounds, text: "Email address" },
+          { bounds, clickable: true, text: "Email primary" },
           { bounds, clickable: true, text: "Email backup" },
         ],
       },

@@ -73,26 +73,19 @@ export interface ElementProvenance {
 }
 
 /**
- * Symbol key for the provenance side-channel. A `Symbol`-keyed, non-enumerable
- * property never appears in `Object.keys` / `JSON.stringify` / structural
- * `toEqual`, so it neither leaks into the emitted `elements` output nor churns
- * fixture comparisons — it exists only for the in-process skeleton projection.
+ * Keep capture ancestry outside element descriptors so structural comparisons
+ * and serialized output contain only public element fields.
  */
-const PROVENANCE = Symbol("auto-mobile.elementProvenance");
+const provenanceByElement = new WeakMap<Element, ElementProvenance>();
 
-/** Attach ancestry provenance to a parsed element (non-enumerable; see {@link PROVENANCE}). */
+/** Attach ancestry provenance to a parsed element for in-process projection. */
 export function setElementProvenance(el: Element, provenance: ElementProvenance): void {
-  Object.defineProperty(el, PROVENANCE, {
-    value: provenance,
-    enumerable: false,
-    configurable: true,
-    writable: true,
-  });
+  provenanceByElement.set(el, provenance);
 }
 
 /** Read ancestry provenance from an element, or `undefined` when it was never tagged. */
 export function getElementProvenance(el: Element): ElementProvenance | undefined {
-  return (el as { [PROVENANCE]?: ElementProvenance })[PROVENANCE];
+  return provenanceByElement.get(el);
 }
 
 /**

@@ -640,12 +640,19 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   private lastDeniedRestartState: string | undefined;
   private static readonly MAX_FAILURES_BEFORE_RESTART = 3;
   private static readonly CONNECTION_RESET_MS = 2000;
+  /** A briefly open socket is not evidence that the runner recovered. */
+  private static readonly RESTART_REARM_STABILITY_MS = 2000;
+  private restartRearmTimeout: NodeJS.Timeout | null = null;
+  private pendingRestartToken: number | undefined;
+  private resolvePendingRestart: ((stable: boolean) => void) | undefined;
 
   // Auto-setup on connection failure
   private readonly serviceManagerFactory: ServiceManagerFactory;
   private readonly bootedDeviceLister: BootedDeviceLister;
   private readonly deviceConnectionLostNotifier: DeviceConnectionLostNotifier;
   private isAttemptingAutoSetup: boolean = false;
+  private recoveryPromise: Promise<boolean> | null = null;
+  public static readonly OBSERVE_RECOVERY_WAIT_MS = 20_000;
   private lastConnectFailure?: { reason: IosHierarchyUnavailableReason; detail?: string };
 
   // SDK-event ingestion (telemetry/failure fan-out + layout telemetry)
@@ -1150,6 +1157,11 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
 
   public override async close(): Promise<void> {
     this.closed = true;
+    if (this.restartRearmTimeout) {
+      this.timer.clearTimeout(this.restartRearmTimeout);
+      this.restartRearmTimeout = null;
+    }
+    this.failPendingRestart("Client closed before stable reconnect");
     await super.close();
   }
 
@@ -1372,12 +1384,33 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   protected onConnectionEstablished(): void {
     // Reset failure counter on successful connection
     this.consecutiveConnectionFailures = 0;
-    this.isRequestingServiceRestart = false;
-    const restartBudget = this.serviceManagerFactory(this.device).getForcedRestartBudget();
-    if (restartBudget.snapshot().state !== "suspended") {
-      restartBudget.recordSuccess();
+    // A short stability window proves the new socket remains usable. The
+    // injected timer lets a close cancel rearming without a wall-clock race.
+    if (this.restartRearmTimeout) {
+      this.timer.clearTimeout(this.restartRearmTimeout);
     }
-    this.lastDeniedRestartState = undefined;
+    this.restartRearmTimeout = this.timer.setTimeout(() => {
+      this.restartRearmTimeout = null;
+      if (!this.isConnected()) {
+        this.failPendingRestart("WebSocket closed before stable reconnect");
+        return;
+      }
+      const budget = this.serviceManagerFactory(this.device).getForcedRestartBudget();
+      if (budget.snapshot().state === "suspended") {
+        this.failPendingRestart("Restart budget suspended before stable reconnect");
+      } else {
+        const token = this.pendingRestartToken;
+        if (budget.recordSuccess(token)) {
+          this.pendingRestartToken = undefined;
+          this.lastDeniedRestartState = undefined;
+          if (token !== undefined) {
+            this.finishPendingRestart(true);
+          }
+        } else if (token !== undefined) {
+          this.failPendingRestart("WebSocket reconnect was superseded before stability");
+        }
+      }
+    }, IOSCtrlProxyClient.RESTART_REARM_STABILITY_MS);
     logger.info(`[IOSCtrlProxyClient] Connection established, reset failure counter`);
 
     this.syncHierarchyCadenceToDevice();
@@ -1685,6 +1718,11 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   }
 
   protected onConnectionClosed(): void {
+    if (this.restartRearmTimeout) {
+      this.timer.clearTimeout(this.restartRearmTimeout);
+      this.restartRearmTimeout = null;
+    }
+    this.failPendingRestart("WebSocket closed before stable reconnect");
     this.cancelScreenshotBackoff();
     this.onClientClosedWithoutConnection();
     this.cachedHierarchy = null;
@@ -2208,9 +2246,69 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       return;
     }
     this.isRequestingServiceRestart = true;
-    void this.restartServiceIfBooted(manager, budget).finally(() => {
-      this.isRequestingServiceRestart = false;
+    const recovery = this.restartServiceIfBooted(manager, budget).finally(() => {
+      // An older completion must not erase a newer recovery's promise or guard.
+      if (this.recoveryPromise === recovery) {
+        this.isRequestingServiceRestart = false;
+        this.recoveryPromise = null;
+      }
     });
+    this.recoveryPromise = recovery;
+  }
+
+  private failPendingRestart(reason: string): void {
+    const token = this.pendingRestartToken;
+    if (token !== undefined) {
+      this.pendingRestartToken = undefined;
+      this.serviceManagerFactory(this.device).getForcedRestartBudget().recordFailure(reason, token);
+    }
+    this.finishPendingRestart(false);
+  }
+
+  private finishPendingRestart(stable: boolean): void {
+    const resolve = this.resolvePendingRestart;
+    this.resolvePendingRestart = undefined;
+    resolve?.(stable);
+  }
+
+  /** Start a restart for this observed transport failure, subject to the manager budget. */
+  public ensureRecoveryStarted(): void {
+    this.triggerServiceRestart();
+  }
+
+  public async awaitRecovery(
+    budgetMs: number,
+    signal?: AbortSignal,
+  ): Promise<"recovered" | "not_recovering" | "failed" | "timed_out"> {
+    const recovery = this.recoveryPromise;
+    if (!recovery) {
+      return "not_recovering";
+    }
+    if (signal?.aborted) {
+      return "timed_out";
+    }
+    let timeout: NodeJS.Timeout | undefined;
+    let onAbort: (() => void) | undefined;
+    const deadline = new Promise<"timed_out">((resolve) => {
+      timeout = this.timer.setTimeout(() => resolve("timed_out"), budgetMs);
+      onAbort = () => resolve("timed_out");
+      signal?.addEventListener("abort", onAbort, { once: true });
+    });
+    try {
+      return await Promise.race([
+        recovery.then(
+          (connected) => (connected ? "recovered" : "failed") as "recovered" | "failed",
+        ),
+        deadline,
+      ]);
+    } finally {
+      if (timeout) {
+        this.timer.clearTimeout(timeout);
+      }
+      if (onAbort) {
+        signal?.removeEventListener("abort", onAbort);
+      }
+    }
   }
 
   private logDeniedRestart(budget: ForcedRestartBudget): void {
@@ -2230,28 +2328,33 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   private async restartServiceIfBooted(
     manager: CtrlProxyIosManager,
     budget: ForcedRestartBudget,
-  ): Promise<void> {
+  ): Promise<boolean> {
     try {
       const booted = await this.bootedDeviceLister();
       if (!booted.some((device) => device.deviceId === this.device.deviceId)) {
         logger.info(
           `[IOSCtrlProxyClient] Target simulator ${this.device.deviceId} is no longer booted, skipping restart`,
         );
-        return;
+        return false;
       }
     } catch (error) {
       logger.warn(
         `[IOSCtrlProxyClient] Failed to check simulator boot state: ${errorMessage(error)}`,
       );
+      return false;
     }
     if (this.closed || IOSCtrlProxyManager.isDeviceRetired(this.device.deviceId)) {
-      return;
+      return false;
     }
     const token = budget.tryBeginAttempt();
     if (token === undefined) {
       this.logDeniedRestart(budget);
-      return;
+      return false;
     }
+    this.pendingRestartToken = token;
+    const stableConnection = new Promise<boolean>((resolve) => {
+      this.resolvePendingRestart = resolve;
+    });
     this.lastDeniedRestartState = undefined;
     logger.info(
       `[IOSCtrlProxyClient] Triggering CtrlProxy restart after ${this.consecutiveConnectionFailures} connection failures`,
@@ -2259,19 +2362,23 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     try {
       // WebSocket failures are authoritative even when HTTP /health still responds.
       await manager.forceRestart();
-      if (!budget.recordSuccess(token)) {
-        return;
-      }
       this.syncPortFromManager(manager);
       this.resetConnectionBudget();
       logger.info(`[IOSCtrlProxyClient] CtrlProxy restart completed; reconnecting WebSocket`);
       const connected = await this.connectBackgroundWebSocket();
-      if (!connected) {
+      if (!connected || !this.isConnected()) {
+        this.failPendingRestart("WebSocket reconnect failed after CtrlProxy restart");
         logger.warn(`[IOSCtrlProxyClient] WebSocket reconnect failed after CtrlProxy restart`);
+        return false;
       }
+      if (this.pendingRestartToken !== undefined && !this.restartRearmTimeout) {
+        this.failPendingRestart("No stable WebSocket reconnect observed");
+      }
+      return await stableConnection;
     } catch (error) {
-      budget.recordFailure(errorMessage(error), token);
+      this.failPendingRestart(errorMessage(error));
       logger.warn(`[IOSCtrlProxyClient] CtrlProxy restart failed: ${errorMessage(error)}`);
+      return false;
     }
   }
 

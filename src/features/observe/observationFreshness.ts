@@ -15,6 +15,7 @@
  */
 
 import type { CtrlProxyIncompleteReason } from "../../models";
+import type { HierarchyUnavailableReason } from "../../models/ViewHierarchyResult";
 
 /**
  * How old a captured tree may be before it must be re-verified against the
@@ -31,6 +32,8 @@ import type { CtrlProxyIncompleteReason } from "../../models";
  * age near zero.
  */
 export const DEFAULT_MAX_OBSERVATION_AGE_MS = 5000;
+/** Bounds runner-authored diagnostics before they enter public freshness output. */
+export const MAX_UNAVAILABLE_DETAIL_LENGTH = 500;
 
 /** Env override, for hosts whose runner is slower or whose budget is tighter. */
 export function maxObservationAgeMs(): number {
@@ -69,6 +72,8 @@ export interface FreshnessInputs {
   verified?: boolean;
   /** The hierarchy could not be retrieved, so no freshness verdict is possible. */
   unavailable?: boolean;
+  unavailableReason?: HierarchyUnavailableReason;
+  unavailableDetail?: string;
   /**
    * The observed hierarchy's window identity does not match the device's current
    * top resumed activity — the tree is a stale wrong-window capture (issue
@@ -184,6 +189,9 @@ export interface FreshnessVerdict {
    * whether a re-capture resolves it. Present only when `isFresh` is false.
    */
   category?: FreshnessFailureCategory;
+  /** Present only for an unavailable hierarchy; `unknown` preserves old delegates. */
+  unavailableReason?: HierarchyUnavailableReason;
+  unavailableDetail?: string;
 }
 
 /**
@@ -405,12 +413,15 @@ function resolveIdentityMismatch(
  * incomplete flag (issue #6151) names the unreadable focused window and its
  * recovery instead of a bare "could not be retrieved".
  */
-function unavailableWarning(incompleteCapture: FreshnessInputs["incompleteCapture"]): string {
+function unavailableWarning(
+  incompleteCapture: FreshnessInputs["incompleteCapture"],
+  reason: HierarchyUnavailableReason,
+): string {
   if (!incompleteCapture) {
-    return "View hierarchy could not be retrieved, so its freshness cannot be established.";
+    return `View hierarchy could not be retrieved (${reason}), so its freshness cannot be established.`;
   }
-  const { sdkInt, reason } = incompleteCapture;
-  return `View hierarchy could not be retrieved: the accessibility service reported the capture as incomplete because ${incompleteCaptureLead(reason)}. ${incompleteCaptureGuidance(sdkInt, reason)}`;
+  const { sdkInt, reason: incompleteReason } = incompleteCapture;
+  return `View hierarchy could not be retrieved (incomplete_capture): the accessibility service reported the capture as incomplete because ${incompleteCaptureLead(incompleteReason)}. ${incompleteCaptureGuidance(sdkInt, incompleteReason)}`;
 }
 
 /**
@@ -420,6 +431,27 @@ function unavailableWarning(incompleteCapture: FreshnessInputs["incompleteCaptur
  * existing `waitFor` polling semantics are byte-identical. Only the branch that
  * used to return the constant `true` is new.
  */
+function computeUnavailableFreshness(
+  inputs: FreshnessInputs,
+  ageMs: number | undefined,
+): FreshnessVerdict {
+  const unavailableReason =
+    inputs.unavailableReason ?? (inputs.incompleteCapture ? "incomplete_capture" : "unknown");
+  return {
+    requestedAfter: inputs.requestedAfter,
+    actualTimestamp: inputs.actualTimestamp,
+    ageMs,
+    verified: inputs.verified,
+    isFresh: false,
+    warning: unavailableWarning(inputs.incompleteCapture, unavailableReason),
+    category: "unavailable",
+    unavailableReason,
+    ...(inputs.unavailableDetail === undefined
+      ? {}
+      : { unavailableDetail: inputs.unavailableDetail.slice(0, MAX_UNAVAILABLE_DETAIL_LENGTH) }),
+  };
+}
+
 export function computeFreshness(inputs: FreshnessInputs): FreshnessVerdict {
   const { requestedAfter, actualTimestamp, hostAgeBasisMs, now, verified, unavailable } = inputs;
   const maxAgeMs = inputs.maxAgeMs ?? maxObservationAgeMs();
@@ -427,15 +459,7 @@ export function computeFreshness(inputs: FreshnessInputs): FreshnessVerdict {
   const ageMs = resolveAgeMs(hostAgeBasisMs, actualTimestamp, now);
 
   if (unavailable) {
-    return {
-      requestedAfter,
-      actualTimestamp,
-      ageMs,
-      verified,
-      isFresh: false,
-      warning: unavailableWarning(inputs.incompleteCapture),
-      category: "unavailable",
-    };
+    return computeUnavailableFreshness(inputs, ageMs);
   }
 
   // An app-, activity-, or content-level identity split dominates every other signal: a

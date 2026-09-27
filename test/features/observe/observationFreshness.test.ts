@@ -55,6 +55,39 @@ describe("computeFreshness", () => {
       const v = computeFreshness({ actualTimestamp: NOW, now: NOW, unavailable: true });
       expect(v.isFresh).toBe(false);
       expect(v.warning).toContain("could not be retrieved");
+      expect(v.unavailableReason).toBe("unknown");
+    });
+
+    test.each(["connection_lost", "runner_not_running"] as const)(
+      "carries %s and detail only on unavailable verdicts",
+      (reason) => {
+        const unavailable = computeFreshness({
+          now: NOW,
+          unavailable: true,
+          unavailableReason: reason,
+          unavailableDetail: "runner died",
+        });
+        expect(unavailable.unavailableReason).toBe(reason);
+        expect(unavailable.unavailableDetail).toBe("runner died");
+        expect(unavailable.warning).toContain(reason);
+        const available = computeFreshness({
+          now: NOW,
+          actualTimestamp: NOW,
+          verified: true,
+          unavailableReason: reason,
+        });
+        expect(available.unavailableReason).toBeUndefined();
+      },
+    );
+
+    test("bounds unavailable detail in the public freshness verdict", () => {
+      const unavailable = computeFreshness({
+        unavailable: true,
+        unavailableReason: "connection_lost",
+        unavailableDetail: "x".repeat(700),
+        now: 0,
+      });
+      expect(unavailable.unavailableDetail).toBe("x".repeat(500));
     });
 
     test("the budget boundary is exclusive on the fresh side", () => {
@@ -105,6 +138,7 @@ describe("computeFreshness", () => {
         now: NOW,
         verified: true,
       });
+
       expect(v.ageMs).toBe(200);
       expect(v.actualTimestamp).toBe(NOW - 25_000); // still reports the device timestamp
       expect(v.isFresh).toBe(true);

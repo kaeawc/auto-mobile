@@ -15,6 +15,7 @@ import {
 } from "../../../fixtures/observe/observeFixture";
 import { DefaultObserveElementCollector } from "../../../../src/features/observe/ObserveElementCollector";
 import scrollBeforeFixture from "../../../fixtures/observe/diff/scroll-before.json";
+import { computeFreshness } from "../../../../src/features/observe/observationFreshness";
 
 /**
  * Unit tests for `sanitizeObserveResult` — the output-only transform for issue
@@ -79,6 +80,30 @@ function isBoundsTuple(v: unknown): v is BoundsTuple {
 }
 
 describe("sanitizeObserveResult", () => {
+  test.each([
+    ["android", "connection_lost"],
+    ["ios", "runner_not_running"],
+  ] as const)("default skeleton output retains %s unavailable reason", (platform, reason) => {
+    const source =
+      platform === "android" ? loadAndroidHomeObserve().observe : loadIosFractionalObserve();
+    source.viewHierarchy = {
+      hierarchy: {
+        error: "runner gone",
+        unavailableReason: reason,
+        ...(platform === "android" ? { transportFailure: true } : { iosUnavailableReason: reason }),
+      },
+    };
+    source.elements = undefined;
+    source.freshness = computeFreshness({
+      now: 0,
+      unavailable: true,
+      unavailableReason: source.viewHierarchy.hierarchy.unavailableReason,
+    });
+    const output = sanitizeObserveResult(source, { dropElements: true, project: "skeleton" });
+    expect(output.viewHierarchy).toBeUndefined();
+    expect(output.skeleton).toEqual([]);
+    expect(output.freshness?.unavailableReason).toBe(reason);
+  });
   describe("purity / output-only contract", () => {
     test("does not mutate the input ObserveResult (deep-clone boundary)", () => {
       const { observe } = loadAndroidHomeObserve();

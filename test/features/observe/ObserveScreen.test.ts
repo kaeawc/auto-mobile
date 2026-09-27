@@ -11,6 +11,7 @@ import { FakeViewHierarchy } from "../../fakes/FakeViewHierarchy";
 import { resetObserveCacheStore } from "../../../src/features/observe/cache/ObserveCacheRegistry";
 import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
 import { defaultTimer } from "../../../src/utils/SystemTimer";
+import { sanitizeObserveResult } from "../../../src/features/observe/output/ObserveResultOutput";
 
 describe("ObserveScreen", function () {
   describe("Unit Tests for Extracted Methods", function () {
@@ -148,6 +149,46 @@ describe("ObserveScreen", function () {
       }
     });
 
+    test.each([
+      ["android", "connection_lost"],
+      ["ios", "runner_not_running"],
+    ] as const)(
+      "default observe skeleton carries %s transport reason",
+      async (platform, reason) => {
+        const device = { ...mockDevice, platform };
+        const hierarchy = new FakeViewHierarchy();
+        hierarchy.configureHierarchy({
+          hierarchy: {
+            error: "runner gone",
+            unavailableReason: reason,
+            ...(platform === "android"
+              ? { transportFailure: true }
+              : { iosUnavailableReason: reason }),
+          },
+          updatedAt: 123,
+        });
+        try {
+          const screen = new RealObserveScreen(device, new FakeAdbClientFactory(fakeAdb), {
+            viewHierarchy: hierarchy,
+            cacheStore: new FakeObserveCacheStore(new FakeTimer()),
+            performanceAuditor: { run: async () => undefined } as any,
+            accessibilityAuditor: { run: async () => undefined } as any,
+            accessibilityStateDetector: { run: async () => undefined } as any,
+          });
+          const observation = await screen.execute({ skipScreenshot: true, skipBackStack: true });
+          const output = sanitizeObserveResult(observation, {
+            dropElements: true,
+            project: "skeleton",
+          });
+          expect(output.viewHierarchy).toBeUndefined();
+          expect(output.freshness?.category).toBe("unavailable");
+          expect(output.freshness?.unavailableReason).toBe(reason);
+        } finally {
+          resetObserveCacheStore();
+        }
+      },
+    );
+
     test("does not repopulate the observe cache when invalidated mid-observation (#5884)", async function () {
       const viewHierarchy = new FakeViewHierarchy();
       viewHierarchy.configureHierarchy({
@@ -185,6 +226,30 @@ describe("ObserveScreen", function () {
         // The in-flight observation's put must be rejected: the terminated app's
         // hierarchy must not repopulate the cache for the device.
         expect(cacheStore.getRecentInMemoryForDevice(mockDevice.deviceId)).toBeUndefined();
+      } finally {
+        resetObserveCacheStore();
+      }
+    });
+
+    test("rootless Android incomplete capture reports incomplete_capture", async function () {
+      const hierarchy = new FakeViewHierarchy();
+      hierarchy.configureHierarchy({
+        hierarchy: {},
+        ctrlProxyIncomplete: true,
+        ctrlProxyIncompleteReason: "null_root",
+        updatedAt: 123,
+      });
+      try {
+        const screen = new RealObserveScreen(mockDevice, new FakeAdbClientFactory(fakeAdb), {
+          viewHierarchy: hierarchy,
+          cacheStore: new FakeObserveCacheStore(new FakeTimer()),
+          performanceAuditor: { run: async () => undefined } as any,
+          accessibilityAuditor: { run: async () => undefined } as any,
+          accessibilityStateDetector: { run: async () => undefined } as any,
+        });
+        const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
+        expect(result.freshness?.category).toBe("unavailable");
+        expect(result.freshness?.unavailableReason).toBe("incomplete_capture");
       } finally {
         resetObserveCacheStore();
       }

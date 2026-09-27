@@ -36,6 +36,8 @@ function iosHierarchyUnavailable(result: CtrlProxyHierarchyResponse | null): Hie
   return {
     error: `Failed to retrieve iOS view hierarchy from CtrlProxy iOS: ${reason}${detail ? `: ${detail}` : ""}`,
     iosUnavailableReason: reason,
+    unavailableReason: reason,
+    unavailableDetail: detail,
   };
 }
 
@@ -46,6 +48,17 @@ function iosHierarchyUnavailable(result: CtrlProxyHierarchyResponse | null): Hie
  * through the hierarchy's `truncationReasons` so the drop is never silent (#6601).
  */
 export const MAX_FILTERED_CHILDREN_PER_NODE = 64;
+/** Reserve enough time for one useful device re-fetch after recovery. */
+export const MIN_RECOVERY_REFETCH_BUDGET_MS = 100;
+
+interface RecoveryReadContext {
+  queryOptions?: ViewHierarchyQueryOptions;
+  perf: PerformanceTracker;
+  skipWaitForFresh: boolean;
+  minTimestamp: number;
+  signal?: AbortSignal;
+  deadline?: number;
+}
 
 export class ViewHierarchy implements ViewHierarchyInterface {
   private device: BootedDevice;
@@ -114,21 +127,142 @@ export class ViewHierarchy implements ViewHierarchyInterface {
     signal?: AbortSignal,
     timeoutMs?: number,
   ): Promise<ViewHierarchyResult> {
-    switch (this.device.platform) {
-      case "ios":
-        return this.getiOSViewHierarchy(perf, skipWaitForFresh, minTimestamp, timeoutMs, signal);
-      case "android":
-        return this.getAndroidViewHierarchy(
-          queryOptions,
-          perf,
-          skipWaitForFresh,
-          minTimestamp,
-          signal,
-          timeoutMs,
-        );
-      default:
-        throw new Error("Unsupported platform");
+    if (this.device.platform !== "ios" && this.device.platform !== "android") {
+      throw new Error("Unsupported platform");
     }
+    const deadline = timeoutMs === undefined ? undefined : this.timer.now() + timeoutMs;
+    const result =
+      this.device.platform === "ios"
+        ? await this.getiOSViewHierarchy(perf, skipWaitForFresh, minTimestamp, timeoutMs, signal)
+        : await this.getAndroidViewHierarchy(
+            queryOptions,
+            perf,
+            skipWaitForFresh,
+            minTimestamp,
+            signal,
+            timeoutMs,
+          );
+    return this.retryAfterTransportRecovery(
+      result,
+      queryOptions,
+      perf,
+      skipWaitForFresh,
+      minTimestamp,
+      signal,
+      deadline,
+    );
+  }
+
+  private async retryAfterTransportRecovery(
+    result: ViewHierarchyResult,
+    queryOptions: ViewHierarchyQueryOptions | undefined,
+    perf: PerformanceTracker,
+    skipWaitForFresh: boolean,
+    minTimestamp: number,
+    signal: AbortSignal | undefined,
+    deadline: number | undefined,
+  ): Promise<ViewHierarchyResult> {
+    const context: RecoveryReadContext = {
+      queryOptions,
+      perf,
+      skipWaitForFresh,
+      minTimestamp,
+      signal,
+      deadline,
+    };
+    if (signal?.aborted) {
+      return result;
+    }
+    if (this.device.platform === "ios") {
+      return this.retryIosAfterRecovery(result, context);
+    }
+    return this.retryAndroidAfterRecovery(result, context);
+  }
+
+  private remainingRecoveryBudget(context: RecoveryReadContext): number | undefined {
+    return context.deadline === undefined
+      ? undefined
+      : Math.max(0, context.deadline - this.timer.now());
+  }
+
+  private hasRecoveryRefetchBudget(context: RecoveryReadContext): boolean {
+    const remaining = this.remainingRecoveryBudget(context);
+    return remaining === undefined || remaining >= MIN_RECOVERY_REFETCH_BUDGET_MS;
+  }
+
+  private recoveryWaitBudget(context: RecoveryReadContext, platformWaitMs: number): number {
+    const remaining = this.remainingRecoveryBudget(context);
+    return remaining === undefined
+      ? platformWaitMs
+      : Math.min(platformWaitMs, Math.max(0, remaining - MIN_RECOVERY_REFETCH_BUDGET_MS));
+  }
+
+  private async retryIosAfterRecovery(
+    result: ViewHierarchyResult,
+    context: RecoveryReadContext,
+  ): Promise<ViewHierarchyResult> {
+    if (
+      (result.hierarchy.unavailableReason !== "runner_not_running" &&
+        result.hierarchy.unavailableReason !== "connection_lost" &&
+        !(result.ctrlProxyReconnect && result.hierarchy.error)) ||
+      !this.hasRecoveryRefetchBudget(context)
+    ) {
+      return result;
+    }
+    const client = IOSCtrlProxyClient.getInstance(this.device);
+    client.ensureRecoveryStarted();
+    if (
+      (await client.awaitRecovery(
+        this.recoveryWaitBudget(context, IOSCtrlProxyClient.OBSERVE_RECOVERY_WAIT_MS),
+        context.signal,
+      )) !== "recovered" ||
+      !this.hasRecoveryRefetchBudget(context)
+    ) {
+      return result;
+    }
+    return this.getiOSViewHierarchy(
+      context.perf,
+      context.skipWaitForFresh,
+      context.minTimestamp,
+      this.remainingRecoveryBudget(context),
+      context.signal,
+    );
+  }
+
+  private async retryAndroidAfterRecovery(
+    result: ViewHierarchyResult,
+    context: RecoveryReadContext,
+  ): Promise<ViewHierarchyResult> {
+    if (result.hierarchy.transportFailure !== true) {
+      return result;
+    }
+    if (!this.hasRecoveryRefetchBudget(context)) {
+      return result;
+    }
+    this.accessibilityServiceClient.ensureRecoveryStarted?.();
+    if (
+      (await this.accessibilityServiceClient.awaitRecovery?.(
+        this.recoveryWaitBudget(context, AndroidCtrlProxyClient.OBSERVE_RECOVERY_WAIT_MS),
+        context.signal,
+      )) !== "recovered"
+    ) {
+      // This call may have started recovery after the first read assigned its reason.
+      result.hierarchy.unavailableReason = this.accessibilityServiceClient.isRecoveryInFlight?.()
+        ? "service_recovering"
+        : "connection_lost";
+      return result;
+    }
+    if (!this.hasRecoveryRefetchBudget(context)) {
+      return result;
+    }
+    return this.getAndroidViewHierarchy(
+      context.queryOptions,
+      context.perf,
+      context.skipWaitForFresh,
+      context.minTimestamp,
+      context.signal,
+      this.remainingRecoveryBudget(context),
+    );
   }
 
   /**
@@ -276,7 +410,16 @@ export class ViewHierarchy implements ViewHierarchyInterface {
         logger.debug(
           `[VIEW_HIERARCHY] Successfully retrieved hierarchy from accessibility service in ${duration}ms`,
         );
-        return this.prepareHierarchyForResponse(accessibilityHierarchy);
+        const prepared = this.prepareHierarchyForResponse(accessibilityHierarchy);
+        if (prepared.hierarchy.transportFailure) {
+          prepared.hierarchy.unavailableReason =
+            this.accessibilityServiceClient.isRecoveryInFlight?.()
+              ? "service_recovering"
+              : "connection_lost";
+        } else if (prepared.ctrlProxyIncomplete && !prepared.hierarchy.node) {
+          prepared.hierarchy.unavailableReason = "incomplete_capture";
+        }
+        return prepared;
       }
 
       // Accessibility service returned null. Every null return from
@@ -289,14 +432,26 @@ export class ViewHierarchy implements ViewHierarchyInterface {
       // trigger `onAvailabilityLost` downstream (#7534).
       perf.end();
       logger.warn("[VIEW_HIERARCHY] Accessibility service returned null hierarchy");
+      const error = await this.describeHierarchyFailure(
+        "Failed to retrieve view hierarchy from accessibility service",
+        signal,
+        timeoutMs,
+      );
+      // A confirmed keyguard block is a device state, so rebind cannot repair it.
+      const deviceLocked = error.startsWith("Device is locked;");
       return {
         hierarchy: {
-          error: await this.describeHierarchyFailure(
-            "Failed to retrieve view hierarchy from accessibility service",
-            signal,
-            timeoutMs,
-          ),
-          ...(signal?.aborted ? {} : { transportFailure: true }),
+          error,
+          ...(signal?.aborted || deviceLocked ? {} : { transportFailure: true }),
+          ...(signal?.aborted
+            ? {}
+            : {
+                unavailableReason: deviceLocked
+                  ? ("device_locked" as const)
+                  : this.accessibilityServiceClient.isRecoveryInFlight?.()
+                    ? ("service_recovering" as const)
+                    : ("connection_lost" as const),
+              }),
         },
         updatedAt: this.timer.now(),
       };
@@ -326,6 +481,13 @@ export class ViewHierarchy implements ViewHierarchyInterface {
             timeoutMs,
           ),
           ...(transportFailure ? { transportFailure: true } : {}),
+          ...(transportFailure
+            ? {
+                unavailableReason: this.accessibilityServiceClient.isRecoveryInFlight?.()
+                  ? ("service_recovering" as const)
+                  : ("connection_lost" as const),
+              }
+            : {}),
         },
         updatedAt: this.timer.now(),
       };

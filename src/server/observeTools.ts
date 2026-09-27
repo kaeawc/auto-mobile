@@ -1032,6 +1032,7 @@ export const waitForObservation = async (
   const observeOnce = () =>
     observeScreen.execute({
       queryOptions,
+      timeoutMs: Math.max(0, timeoutMs - (timer.now() - startTime)),
       perf: createGlobalPerformanceTracker(),
       skipWaitForFresh: false,
       minTimestamp: startTime,

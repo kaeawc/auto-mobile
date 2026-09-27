@@ -137,6 +137,10 @@ while [[ "$#" -gt 0 ]]; do
   esac
   shift
 done
+if [[ -n "${STUB_PER_FILE_FAIL:-}" && "$target" == *.integration.test.ts ]]; then
+  printf '%s exit=1\n' "$target" >> "$STUB_BUN_EXIT_FILE"
+  exit 1
+fi
 if [[ -z "$report" ]]; then
   exit 0
 fi
@@ -290,6 +294,26 @@ run_lane() {
     [ "$(grep -c '<testsuite ' "$report")" -eq 2 ]
     [ "$(wc -l < "$BUN_ARGS_FILE")" -eq 2 ]
     rm -f "$report"
+  done
+}
+
+@test "per-file integration mode rejects a numeric bail budget shared across files" {
+  local bail_args
+  export STUB_BUN_EXIT_FILE="$STUB_BIN/bun-exits.log"
+  for bail_args in "--bail=2" "--bail 2"; do
+    : > "$BUN_ARGS_FILE"
+    : > "$STUB_BUN_EXIT_FILE"
+    # Shell splitting intentionally exercises both supported argument forms.
+    # shellcheck disable=SC2086
+    run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_TEST_MODE=true STUB_PER_FILE_FAIL=1 \
+      bash "$SCRIPT" integration $bail_args \
+      test/server/deviceLabelSessionReleaseOrdering.integration.test.ts \
+      test/server/proxyServerTransportFailure.integration.test.ts \
+      test/server/toolRegistration.integration.test.ts
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"--bail=2 cannot be used with AUTOMOBILE_TEST_MODE=true"* ]]
+    [ ! -s "$BUN_ARGS_FILE" ]
+    [ ! -s "$STUB_BUN_EXIT_FILE" ]
   done
 }
 

@@ -1608,6 +1608,7 @@ internal constructor(
           OcclusionWindowIndex(entries, buckets, wide)
         }
     val occlusionInfo = mutableMapOf<NodeKey, OcclusionInfo>()
+    var indexEntriesVisited = 0L
 
     for (i in sortedNodes.indices) {
       val node = sortedNodes[i]
@@ -1632,11 +1633,20 @@ internal constructor(
       val nodeBuckets = occlusionBuckets(node.bounds)
       for ((windowKey, windowIndex) in nodesByWindow) {
         if (windowKey == node.windowKey) continue
+        // A query spanning several buckets is cheaper to scan once against the window index.
+        // For narrow queries, stream bucket entries so duplicates never form a flattened list.
         val possible =
-          if (nodeBuckets == null) windowIndex.all
-          else windowIndex.wide + nodeBuckets.flatMap { windowIndex.buckets[it].orEmpty() }
+          if (nodeBuckets == null || nodeBuckets.last - nodeBuckets.first >= 3) {
+            windowIndex.all.asSequence()
+          } else {
+            sequence {
+              yieldAll(windowIndex.wide)
+              for (bucket in nodeBuckets) yieldAll(windowIndex.buckets[bucket].orEmpty())
+            }
+          }
         val seen = mutableSetOf<Int>()
         for (entry in possible) {
+          indexEntriesVisited++
           if (!seen.add(entry.index)) continue
           val bounds = entry.value.bounds
           if (
@@ -1705,6 +1715,7 @@ internal constructor(
       }
     }
 
+    stats.occlusionIndexEntriesVisited.addAndGet(indexEntriesVisited)
     return occlusionInfo
   }
 

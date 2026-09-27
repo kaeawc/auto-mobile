@@ -191,4 +191,63 @@ class HierarchyCoalescingTest {
     assertEquals("state-2", debouncer.extractNowBlocking(skipFlowEmit = true)?.packageName)
     assertEquals(2L, stats.extractions.get())
   }
+
+  @Test
+  fun `quiescence during active extraction retains owner for trailing refresh`() = runTest {
+    val time = FakeTime()
+    val stats = CtrlProxyWorkStats()
+    var calls = 0
+    var completions = 0
+    lateinit var debouncer: HierarchyDebouncer
+    debouncer =
+      HierarchyDebouncer(
+        scope = backgroundScope,
+        timeProvider = time,
+        stats = stats,
+        beforeDebounceCompletion = {
+          if (++completions == 1) {
+            debouncer.extractAfterQuiescence(
+              quiescenceMs = 0,
+              maxWaitMs = 1,
+              initialEventWaitMs = 0,
+            )
+            debouncer.onAccessibilityEvent()
+          }
+        },
+        extractHierarchy = { _, _ -> ViewHierarchy(packageName = "state-${++calls}") },
+      )
+
+    debouncer.onAccessibilityEvent()
+    advanceTimeBy(5)
+    time.now += 5
+    runCurrent()
+    advanceTimeBy(250)
+    time.now += 250
+    runCurrent()
+    assertEquals(3L, stats.extractions.get())
+  }
+
+  @Test
+  fun `explicit request consumes queued default extraction`() = runTest {
+    val stats = CtrlProxyWorkStats()
+    val debouncer =
+      HierarchyDebouncer(
+        scope = backgroundScope,
+        timeProvider = FakeTime(),
+        stats = stats,
+        extractHierarchy = { disabled, _ ->
+          ViewHierarchy(packageName = if (disabled) "explicit" else "default")
+        },
+      )
+
+    debouncer.onAccessibilityEvent()
+    assertEquals(
+      "explicit",
+      debouncer.extractNowBlocking(skipFlowEmit = true, disableAllFiltering = true)?.packageName,
+    )
+    advanceTimeBy(5)
+    runCurrent()
+    assertEquals(1L, stats.extractions.get())
+    assertEquals("explicit", debouncer.getLastHierarchy()?.packageName)
+  }
 }

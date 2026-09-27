@@ -885,6 +885,35 @@ class ViewHierarchyExtractorTest {
   }
 
   @Test
+  fun `dense full-width windows visit each spatial candidate once`() {
+    val stats = CtrlProxyWorkStats()
+    val indexedExtractor = ViewHierarchyExtractor(stats = stats)
+    fun window(id: String): UIElementInfo =
+      elementWithBounds(
+        resourceId = "$id-root",
+        bounds = bounds(0, 0, 1080, 100),
+        children =
+          (0 until 100).map { index ->
+            elementWithBounds(
+              resourceId = "$id-$index",
+              bounds = bounds(0, 0, 1080, 100),
+            )
+          },
+      )
+
+    indexedExtractor.buildOcclusionInfoForTest(
+      listOf(
+        indexedExtractor.createWindowEntry(1, 0, window("app")),
+        indexedExtractor.createWindowEntry(2, 1, window("overlay")),
+      )
+    )
+    assertTrue(
+      "index visits must stay below the old pair-loop budget: ${stats.occlusionIndexEntriesVisited.get()}",
+      stats.occlusionIndexEntriesVisited.get() <= 20_402L,
+    )
+  }
+
+  @Test
   fun `cross-window occlusion annotates unlabeled occluder with view id`() {
     val target = elementWithBounds(resourceId = "partial-target", bounds = bounds(0, 0, 100, 100))
     val appRoot =

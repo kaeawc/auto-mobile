@@ -808,8 +808,9 @@ export const findWaitForElement = (
           return true;
         }
         const expected = normalizeQuotes(selector.text).toLowerCase();
+        const trimNode = selector.text === selector.text.trim();
         return Object.values(node.textSources).some(
-          (value) => normalizeQuotes(value).toLowerCase() === expected,
+          (value) => normalizeQuotes(trimNode ? value.trim() : value).toLowerCase() === expected,
         );
       });
     let candidates = visibleSources(result);

@@ -857,12 +857,60 @@ describe("toSkeleton — acceptance criteria", () => {
   });
 
   describe("#6221 item 2: duplicate-id disambiguator", () => {
-    test("id-less iOS controls with duplicate accessibility labels get replayable indexes", () => {
+    test("input-only fields with a shared elementId replay each focus-input index", () => {
+      const resourceId = "com.example:id/answer";
       const viewHierarchy = {
         hierarchy: {
           node: {
             bounds: bounds(0, 0, 100, 200),
             node: [
+              {
+                "resource-id": resourceId,
+                role: "textfield",
+                text: "First",
+                actions: ["set_text"],
+                bounds: bounds(0, 0, 80, 40),
+              },
+              {
+                "resource-id": resourceId,
+                role: "textfield",
+                text: "Second",
+                actions: ["set_text"],
+                bounds: bounds(0, 60, 80, 100),
+              },
+            ],
+          },
+        },
+      } as ViewHierarchyResult;
+      const elements = new DefaultObserveElementCollector().collect(viewHierarchy, "android");
+      const rows = projectSkeleton(elements!, { width: 100, height: 200 }).skeleton.filter(
+        (entry) => entry.elementId === resourceId,
+      );
+      expect(rows).toHaveLength(2);
+      expect(rows.map((entry) => entry.affordances)).toEqual([["input"], ["input"]]);
+      expect(rows.map((entry) => entry.index)).toEqual([0, 1]);
+
+      const selector = new ResolverElementSelector();
+      for (const row of rows) {
+        const result = selector.selectByResourceId(viewHierarchy, resourceId, {
+          index: row.index,
+          selectionIntent: "focus-input",
+        });
+        expect(result.element?.bounds).toEqual(bounds(...row.bounds));
+      }
+    });
+
+    test("id-less iOS controls index only visible duplicate labels and replay each index", () => {
+      const viewHierarchy = {
+        hierarchy: {
+          node: {
+            bounds: bounds(0, 0, 100, 200),
+            node: [
+              {
+                "ios-accessibility-label": "Remove",
+                clickable: true,
+                bounds: bounds(0, 240, 80, 280),
+              },
               {
                 "ios-accessibility-label": "Remove",
                 clickable: true,
@@ -878,16 +926,38 @@ describe("toSkeleton — acceptance criteria", () => {
         },
       } as ViewHierarchyResult;
       const elements = new DefaultObserveElementCollector().collect(viewHierarchy, "ios");
-      const rows = toSkeleton(elements!).filter((entry) => entry.label === "Remove");
-      expect(rows.map((entry) => entry.index)).toEqual([0, 1]);
+      const rows = projectSkeleton(elements!, { width: 100, height: 200 }).skeleton.filter(
+        (entry) => entry.label === "Remove",
+      );
+      const offscreen = rows.find((entry) => entry.bounds[1] === 240);
+      expect(offscreen).toBeDefined();
+      expect("index" in offscreen!).toBe(false);
+      const indexed = rows.filter((entry) => entry.index !== undefined);
+      expect(indexed.map((entry) => entry.index)).toEqual([0, 1]);
       const selector = new ResolverElementSelector();
-      for (const row of rows) {
+      for (const row of indexed) {
         const result = selector.selectByText(viewHierarchy, row.label!, {
           index: row.index,
           partialMatch: false,
         });
         expect(result.element?.bounds).toEqual(bounds(...row.bounds));
       }
+    });
+
+    test("id-less labels with different raw padding share emitted-label indexes", () => {
+      const padded: Element = {
+        "ios-accessibility-label": " Remove",
+        clickable: true,
+        bounds: bounds(0, 0, 80, 40),
+      };
+      const plain: Element = {
+        "ios-accessibility-label": "Remove",
+        clickable: true,
+        bounds: bounds(0, 60, 80, 100),
+      };
+      const rows = toSkeleton(makeElements({ clickable: [padded, plain] }));
+      expect(rows.map((entry) => entry.label)).toEqual(["Remove", "Remove"]);
+      expect(rows.map((entry) => entry.index)).toEqual([0, 1]);
     });
 
     test("unique-id entries never carry an index", () => {

@@ -128,6 +128,30 @@ function isWithin(
   return false;
 }
 
+function containerSource(
+  selector: ResolverSelector,
+  resolution: ElementResolution,
+): SearchableEntry | undefined {
+  const sources = resolution.matches.find(({ node }) => node === resolution.chosen)?.sourceNodes;
+  const query = selector.text ?? selector.contentDescription;
+  if (query === undefined) {
+    return sources?.[0];
+  }
+  const wanted = normalize(query, selector.caseSensitive);
+  return (
+    sources?.find((node) => {
+      const values =
+        selector.contentDescription === undefined
+          ? Object.values(node.textSources)
+          : [node.textSources["content-desc"]];
+      return values.some((value) => {
+        const actual = normalize(value ?? "", selector.caseSensitive);
+        return resolution.matchMode === "contains" ? actual.includes(wanted) : actual === wanted;
+      });
+    }) ?? sources?.[0]
+  );
+}
+
 function sameReferenceProof(node: SearchableEntry, ref: ElementReference): boolean {
   if (ref.bounds === undefined && ref.label === undefined) {
     return false;
@@ -180,7 +204,10 @@ export class ElementResolver {
       if (!container.chosen) {
         return { ...container, error: container.error ?? "Container not found" };
       }
-      scope = container.chosen;
+      // A text match may be promoted to its clickable row. Keep the container
+      // rooted at the node that actually supplied the text, so siblings in
+      // that row do not become descendants of the requested container.
+      scope = containerSource(selector.container, container) ?? container.chosen;
       nodes = nodes.filter((node) => isWithin(node, scope!, snapshot.nodes));
     }
     if (selector.sibling) {

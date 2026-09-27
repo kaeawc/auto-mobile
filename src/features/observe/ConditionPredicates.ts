@@ -1,223 +1,208 @@
-import type { Element, ObserveResult, ViewHierarchyResult } from "../../models";
-import type { ElementFinder } from "../../utils/interfaces/ElementFinder";
-import { isClickableElementProperties } from "../../utils/elementProperties";
+import type { Element, ObserveResult } from "../../models";
 import type { ConditionEvaluation, ConditionPredicate } from "./interfaces/WaitForCondition";
+import { ActionableError } from "../../models/ActionableError";
+import {
+  ElementResolver,
+  type ElementResolution,
+  type MatchMode,
+  type ResolutionIntent,
+} from "../utility/ElementResolver";
+import { SearchableHierarchy } from "../utility/SearchableNode";
+import type { ResolverSelector } from "../../server/elementSelectorSchemas";
+import { normalizeQuotes } from "../utility/TextMatcher";
 
-/**
- * A declarative selector for the built-in condition predicates. Deliberately the
- * narrow selector/container shapes the `ElementFinder` API already speaks (issue
- * #4389) — the predicates evaluate through the finder rather than re-walking the
- * tree.
- */
-export interface ConditionSelector {
-  elementId?: string;
-  text?: string;
-  container?: { elementId?: string; text?: string };
-}
+export type ConditionResolver = Pick<ElementResolver, "resolve">;
+export type ConditionSelector = Pick<ResolverSelector, "elementId" | "text" | "container">;
 
-/** Exact match for the selector via the finder (resource-id preferred, then text). */
-function findMatch(
-  finder: ElementFinder,
-  viewHierarchy: ViewHierarchyResult,
+/** One resolver and one match-mode lock per wait, never shared across waits. */
+function searchForWait(
+  resolver: ConditionResolver,
   selector: ConditionSelector,
-): Element | null {
-  const container = selector.container ?? null;
-  if (selector.elementId !== undefined) {
-    return finder.findElementByResourceId(viewHierarchy, selector.elementId, container);
-  }
-  if (selector.text !== undefined) {
-    return finder.findElementByText(viewHierarchy, selector.text, container, false, false);
-  }
-  return null;
-}
-
-/**
- * Near-matches for the selector, surfaced as `candidates` on timeout so a failed
- * wait is debuggable. Uses partial/looser matching through the same finder: a
- * partial resource-id match, or a case-insensitive partial text match.
- */
-function findNearMatches(
-  finder: ElementFinder,
-  viewHierarchy: ViewHierarchyResult,
-  selector: ConditionSelector,
-): Element[] {
-  const container = selector.container ?? null;
-  if (selector.elementId !== undefined) {
-    return finder.findElementsByResourceId(viewHierarchy, selector.elementId, container, true);
-  }
-  if (selector.text !== undefined) {
-    return finder.findElementsByText(viewHierarchy, selector.text, container, true, false);
-  }
-  return [];
-}
-
-/**
- * Predicate: the selector's element is present. Matches with that element; on a
- * miss reports partial matches as candidates.
- */
-export function appear(finder: ElementFinder, selector: ConditionSelector): ConditionPredicate {
-  return (observation: ObserveResult): ConditionEvaluation => {
-    const viewHierarchy = observation.viewHierarchy;
-    if (!viewHierarchy) {
-      return { matched: false, candidates: [] };
+  intent: ResolutionIntent,
+) {
+  const projection = new SearchableHierarchy();
+  let matchMode: MatchMode | undefined = intent.matchMode ?? "exact";
+  return (observation: ObserveResult): ElementResolution | undefined => {
+    if (!observation.viewHierarchy) {
+      return undefined;
     }
-    const match = findMatch(finder, viewHierarchy, selector);
-    if (match) {
-      return { matched: true, matchedElement: match, candidates: [match] };
+    const result = resolver.resolve(
+      {
+        id: String(observation.updatedAt ?? "wait"),
+        nodes: projection.project(observation.viewHierarchy),
+      },
+      selector.container?.text
+        ? { ...selector, container: { ...selector.container, match: "contains" } }
+        : selector,
+      { ...intent, matchMode },
+    );
+    if (result.error === "Container not found") {
+      return undefined;
     }
-    return { matched: false, candidates: findNearMatches(finder, viewHierarchy, selector) };
+    if (result.error) {
+      throw new ActionableError(result.error);
+    }
+    matchMode ??= result.matchMode;
+    return result;
   };
 }
 
-/**
- * Predicate: the selector's element is absent (e.g. a spinner has gone). A
- * missing hierarchy reads as absent. While the element persists it is reported as
- * the lone candidate so a timeout shows what never left.
- */
-export function disappear(finder: ElementFinder, selector: ConditionSelector): ConditionPredicate {
-  return (observation: ObserveResult): ConditionEvaluation => {
-    const viewHierarchy = observation.viewHierarchy;
-    if (!viewHierarchy) {
-      return { matched: true, candidates: [] };
-    }
-    const match = findMatch(finder, viewHierarchy, selector);
-    if (match) {
-      return { matched: false, candidates: [match] };
-    }
-    return { matched: true, candidates: [] };
-  };
+function elements(result: ElementResolution | undefined): Element[] {
+  return result?.matches.flatMap(({ node }) => (node.element ? [node.element] : [])) ?? [];
 }
 
-/** All elements matching the selector (exact match, optionally container-scoped). */
-function findAllMatches(
-  finder: ElementFinder,
-  viewHierarchy: ViewHierarchyResult,
+function ownsSelectorText(
+  selected: ElementResolution["chosen"] | undefined,
+  text: string | undefined,
+): boolean {
+  if (text === undefined) {
+    return true;
+  }
+  if (!selected) {
+    return false;
+  }
+  const query = normalizeQuotes(text).toLowerCase();
+  return Object.values(selected.textSources).some((value) =>
+    normalizeQuotes(value).toLowerCase().includes(query),
+  );
+}
+
+function matchedSource(result: ElementResolution | undefined, text: string | undefined) {
+  const match = result?.matches.find(({ node }) => node === result.chosen);
+  return match?.sourceNodes?.find((node) => ownsSelectorText(node, text)) ?? result?.chosen;
+}
+
+export function appear(
+  resolver: ConditionResolver,
   selector: ConditionSelector,
-): Element[] {
-  const container = selector.container ?? null;
-  if (selector.elementId !== undefined) {
-    return finder.findElementsByResourceId(viewHierarchy, selector.elementId, container, false);
-  }
-  if (selector.text !== undefined) {
-    return finder.findElementsByText(viewHierarchy, selector.text, container, false, false);
-  }
-  return [];
-}
-
-/**
- * Whether an element is clickable, using the SAME signal `TapOnElement` taps on
- * (`isClickableElementProperties`): the truthy `clickable` flag OR a `"click"`
- * accessibility action. Matching the tap definition matters — iOS nodes are
- * frequently tappable via a `click` action with `clickable` unset, so a narrower
- * flag-only check would make "wait for clickable, then tap" disagree with `tapOn`.
- */
-function isElementClickable(element: Element): boolean {
-  return isClickableElementProperties(element);
-}
-
-/**
- * Predicate: the selector's element is present AND clickable. A present-but-not-
- * clickable element (a disabled button mid-transition) is reported as a candidate
- * rather than a match, so a timeout shows the element was there but never became
- * tappable — the common "button enables after validation" wait.
- */
-export function clickable(finder: ElementFinder, selector: ConditionSelector): ConditionPredicate {
-  return (observation: ObserveResult): ConditionEvaluation => {
-    const viewHierarchy = observation.viewHierarchy;
-    if (!viewHierarchy) {
-      return { matched: false, candidates: [] };
+): ConditionPredicate {
+  const search = searchForWait(resolver, selector, { action: "inspect" });
+  return (observation): ConditionEvaluation => {
+    const result = search(observation);
+    const sources =
+      result?.matches
+        .flatMap(({ node, sourceNodes }) => sourceNodes ?? [node])
+        .filter((node) => ownsSelectorText(node, selector.text)) ?? [];
+    let candidates = sources.flatMap((node) => (node.element ? [node.element] : []));
+    if (!result?.chosen && selector.elementId !== undefined && observation.viewHierarchy) {
+      const diagnostic = resolver.resolve(
+        {
+          id: String(observation.updatedAt ?? "wait"),
+          nodes: new SearchableHierarchy().project(observation.viewHierarchy),
+        },
+        { ...selector, match: "contains" },
+        { action: "inspect", matchMode: "contains" },
+      );
+      if (!diagnostic.error) {
+        candidates = elements(diagnostic);
+      }
     }
-    const match = findMatch(finder, viewHierarchy, selector);
-    if (match && isElementClickable(match)) {
-      return { matched: true, matchedElement: match, candidates: [match] };
-    }
-    // Present-but-not-clickable → surface the element itself; absent → near matches.
     return {
-      matched: false,
-      candidates: match ? [match] : findNearMatches(finder, viewHierarchy, selector),
+      matched: Boolean(result?.chosen),
+      matchedElement: matchedSource(result, selector.text)?.element,
+      candidates,
     };
   };
 }
 
-/**
- * Predicate: an element shows `expected` text EXACTLY. `expected` is always the
- * required value; `selector.elementId`, when given, is the locator (wait for a
- * specific label to reach a value — a counter hitting "5"). Without an elementId
- * the predicate matches any element whose text equals `expected` exactly, which
- * differs from `appear`'s looser/normalized text matching by requiring equality.
- */
+export function disappear(
+  resolver: ConditionResolver,
+  selector: ConditionSelector,
+): ConditionPredicate {
+  const search = searchForWait(resolver, selector, { action: "inspect", negative: true });
+  return (observation): ConditionEvaluation => {
+    const result = search(observation);
+    return { matched: !result?.chosen, candidates: elements(result) };
+  };
+}
+
+export function clickable(
+  resolver: ConditionResolver,
+  selector: ConditionSelector,
+): ConditionPredicate {
+  const search = searchForWait(resolver, selector, { action: "inspect" });
+  return (observation): ConditionEvaluation => {
+    const result = search(observation);
+    const source = result?.matches.find(({ node }) => node === result.chosen)?.sourceNodes?.[0];
+    const selected = source ?? result?.chosen;
+    const ownsText = ownsSelectorText(selected, selector.text);
+    const actionable = Boolean(
+      ownsText && selected?.element && selected.bounds && selected.affordances.includes("tap"),
+    );
+    return {
+      matched: actionable,
+      matchedElement: actionable ? selected?.element : undefined,
+      candidates: elements(result),
+    };
+  };
+}
+
+/** Exact value comparisons are explicit and never take positive-wait fallback. */
 export function textEquals(
-  finder: ElementFinder,
+  resolver: ConditionResolver,
   selector: ConditionSelector,
   expected: string,
 ): ConditionPredicate {
-  return (observation: ObserveResult): ConditionEvaluation => {
-    const viewHierarchy = observation.viewHierarchy;
-    if (!viewHierarchy) {
+  const projection = new SearchableHierarchy();
+  return (observation): ConditionEvaluation => {
+    if (!observation.viewHierarchy) {
       return { matched: false, candidates: [] };
     }
-    if (selector.elementId !== undefined) {
-      const located = finder.findElementByResourceId(
-        viewHierarchy,
-        selector.elementId,
-        selector.container ?? null,
-      );
-      if (located && (located.text ?? "") === expected) {
-        return { matched: true, matchedElement: located, candidates: [located] };
-      }
-      return { matched: false, candidates: located ? [located] : [] };
-    }
-    // No locator: an exact (case-sensitive) text match IS the located element.
-    const located = finder.findElementByText(
-      viewHierarchy,
-      expected,
-      selector.container ?? null,
-      false,
-      true,
+    const container = selector.container?.text
+      ? { ...selector.container, match: "contains" as const }
+      : selector.container;
+    const result = resolver.resolve(
+      {
+        id: String(observation.updatedAt ?? "wait"),
+        nodes: projection.project(observation.viewHierarchy),
+      },
+      selector.elementId !== undefined
+        ? { elementId: selector.elementId, container }
+        : { text: expected, container, match: "exact", caseSensitive: true },
+      { action: "inspect", matchMode: "exact" },
     );
-    if (located) {
-      return { matched: true, matchedElement: located, candidates: [located] };
+    if (result.error === "Container not found") {
+      return { matched: false, candidates: [] };
     }
+    if (result.error) {
+      throw new ActionableError(result.error);
+    }
+    const exactText = (value: string | undefined) =>
+      value !== undefined && normalizeQuotes(value) === normalizeQuotes(expected);
+    const located =
+      selector.elementId !== undefined
+        ? result.chosen
+        : result.matches
+            .flatMap(({ node, sourceNodes }) => sourceNodes ?? [node])
+            .find((node) => exactText(node.textSources.text));
+    const matched = Boolean(located && exactText(located.textSources.text));
     return {
-      matched: false,
-      candidates: findNearMatches(finder, viewHierarchy, {
-        text: expected,
-        container: selector.container,
-      }),
+      matched,
+      matchedElement: matched ? located?.element : undefined,
+      candidates: elements(result),
     };
   };
 }
 
-/** Options for the {@link countStable} predicate. */
 export interface CountStableOptions {
-  /** Consecutive polls with an unchanged match count required to settle (default 2). */
   stableReads?: number;
 }
 
-/**
- * Predicate: the number of elements matching the selector has stopped changing.
- * The canonical "a list finished loading" wait. This builder is STATEFUL — it
- * returns a closure that tracks the previous count across polls; the
- * `WaitForCondition` loop calls the predicate exactly once per poll in order, so
- * the run counter mirrors `RealSettleObserve`'s `equalRun`. A count that keeps
- * changing never settles and the loop's mandatory timeout governs. Note a count
- * that is stable at zero (nothing ever matched) settles too — scope the selector
- * so an empty result is a real answer, not a missed wait.
- */
 export function countStable(
-  finder: ElementFinder,
+  resolver: ConditionResolver,
   selector: ConditionSelector,
   options: CountStableOptions = {},
 ): ConditionPredicate {
+  const search = searchForWait(resolver, selector, { action: "inspect" });
   const stableReads = options.stableReads ?? 2;
   let previousCount: number | undefined;
   let equalRun = 0;
-  return (observation: ObserveResult): ConditionEvaluation => {
-    const viewHierarchy = observation.viewHierarchy;
-    const matches = viewHierarchy ? findAllMatches(finder, viewHierarchy, selector) : [];
-    const count = matches.length;
+  return (observation): ConditionEvaluation => {
+    const result = search(observation);
+    const count = new Set(result?.matches.flatMap(({ node, sourceNodes }) => sourceNodes ?? [node]))
+      .size;
     equalRun = previousCount !== undefined && count === previousCount ? equalRun + 1 : 1;
     previousCount = count;
-    return { matched: equalRun >= stableReads, candidates: matches };
+    return { matched: equalRun >= stableReads, candidates: elements(result) };
   };
 }

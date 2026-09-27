@@ -46,10 +46,10 @@ import {
 } from "./toolSchemaHelpers";
 import { elementContainerSchema } from "./elementSelectorSchemas";
 import { observeToolResultSchema } from "./toolOutputSchemas";
-import { DefaultElementFinder } from "../features/utility/ElementFinder";
-import { DefaultElementParser } from "../features/utility/ElementParser";
-import { normalizeQuotes } from "../features/utility/TextMatcher";
-import type { ElementFinder } from "../utils/interfaces/ElementFinder";
+import { ElementResolver, type MatchMode } from "../features/utility/ElementResolver";
+import { SearchableHierarchy } from "../features/utility/SearchableNode";
+import type { ResolverSelector } from "./elementSelectorSchemas";
+import type { ConditionResolver } from "../features/observe/ConditionPredicates";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { consumeSetupTiming } from "./ToolExecutionContext";
 import { AndroidCtrlProxyManager } from "../utils/CtrlProxyManager";
@@ -303,7 +303,7 @@ const ELEMENT_PREDICATE_REQUIRED = [
 const ABSENT_PREDICATE_ADVERTISED_SCHEMA: Record<string, unknown> = {
   type: "object",
   additionalProperties: false,
-  description: "Wait until an element matching these fields is absent (text uses contains match)",
+  description: "Wait until an element matching these fields is absent (text uses exact match)",
   properties: {
     elementId: { type: "string" },
     text: { type: "string" },
@@ -601,7 +601,7 @@ const isConditionDsl = (waitFor: ObserveWaitForOptions): waitFor is WaitForCondi
  * refinement so the standalone tool path fails with the same actionable message.
  */
 export const buildConditionPredicate = (
-  finder: ElementFinder,
+  finder: ConditionResolver,
   kind: WaitForConditionKind,
   selector: ConditionSelector,
   options?: { stableReads?: number },
@@ -666,7 +666,7 @@ const runWaitForConditionDsl = async (
     };
   }
 
-  const finder = new DefaultElementFinder();
+  const finder = new ElementResolver();
   const predicate = buildConditionPredicate(
     finder,
     waitFor.for,
@@ -692,15 +692,13 @@ const runWaitForConditionDsl = async (
   };
 };
 
-const waitForContainerForFinder = (
-  waitFor: ObserveWaitForOptions,
-): { elementId?: string; text?: string } | null => {
+const waitForContainerForFinder = (waitFor: ObserveWaitForOptions): ResolverSelector | null => {
   if (!waitFor.container) {
     return null;
   }
   return "elementId" in waitFor.container
     ? { elementId: waitFor.container.elementId }
-    : { text: waitFor.container.text };
+    : { text: waitFor.container.text, match: "contains" };
 };
 
 const isElementCenterOffScreen = (
@@ -721,39 +719,153 @@ const isElementCenterOffScreen = (
   );
 };
 
+function shouldRetryCompoundText(
+  waitFor: ObserveWaitForOptions,
+  negative: boolean,
+  sets: readonly (readonly unknown[])[],
+): boolean {
+  if (negative || waitFor.matchType === "any" || waitFor.text === undefined) {
+    return false;
+  }
+  if (waitFor.textMatch !== undefined || sets.length < 2) {
+    return false;
+  }
+  return !sets.some((set) => set.some((node) => sets.every((other) => other.includes(node))));
+}
+
+function retryCompoundText<T>(
+  waitFor: ObserveWaitForOptions,
+  negative: boolean,
+  predicates: ResolverSelector[],
+  sets: T[][],
+  resolve: (selector: ResolverSelector) => T[],
+): void {
+  if (!shouldRetryCompoundText(waitFor, negative, sets)) {
+    return;
+  }
+  const textIndex = predicates.findIndex((selector) => selector.text !== undefined);
+  sets[textIndex] = resolve({ text: waitFor.text!, match: "contains" });
+}
+
+function isWaitSourceVisible(
+  element: Element | undefined,
+  viewHierarchy: ViewHierarchyResult,
+  negative: boolean,
+): boolean {
+  return element !== undefined && (negative || !isElementCenterOffScreen(element, viewHierarchy));
+}
+
 export const findWaitForElement = (
-  finder: ElementFinder,
+  finder: ConditionResolver,
   waitFor: ObserveWaitForOptions,
   viewHierarchy: ViewHierarchyResult,
   platform?: BootedDevice["platform"],
+  modes = new Map<string, MatchMode>(),
+  negative = false,
 ): Element | null => {
-  const container = waitForContainerForFinder(waitFor);
-
-  if (waitFor.elementId !== undefined && !hasRichElementPredicate(waitFor)) {
-    return finder.findElementByResourceId(viewHierarchy, waitFor.elementId, container);
-  }
-
-  if (waitFor.text !== undefined && !hasRichElementPredicate(waitFor)) {
-    return finder.findElementByText(viewHierarchy, waitFor.text, container, true, false);
-  }
-
-  if (waitFor.textAny !== undefined) {
-    for (const text of waitFor.textAny) {
-      const elements = finder.findElementsByText(viewHierarchy, text, container, true, false);
-      const element = elements.find(
-        (candidate) => !isElementCenterOffScreen(candidate, viewHierarchy),
+  const snapshot = {
+    id: "wait",
+    // Compound predicates describe one source node, not its hoisted display row.
+    nodes: new SearchableHierarchy().project(viewHierarchy).map((node) => ({
+      ...node,
+      textFields: Object.values(node.textSources),
+    })),
+  };
+  const canTryVisibleContains = (
+    selector: ResolverSelector,
+    key: string,
+    mode: MatchMode,
+    visibleCount: number,
+  ) =>
+    Boolean(waitFor.textAny) &&
+    !negative &&
+    selector.match === undefined &&
+    !modes.has(key) &&
+    mode === "exact" &&
+    visibleCount === 0;
+  const resolve = (selector: ResolverSelector) => {
+    const key = JSON.stringify(selector);
+    let result = finder.resolve(
+      snapshot,
+      { ...selector, container: waitForContainerForFinder(waitFor) ?? undefined },
+      { action: "inspect", negative, matchMode: modes.get(key) },
+    );
+    if (result.error === "Container not found") {
+      return [];
+    }
+    if (result.error) {
+      throw new ActionableError(result.error);
+    }
+    const visibleSources = (resolution: typeof result) =>
+      [
+        ...new Set(resolution.matches.flatMap(({ node, sourceNodes }) => sourceNodes ?? [node])),
+      ].filter((node) => isWaitSourceVisible(node.element, viewHierarchy, negative));
+    let candidates = visibleSources(result);
+    if (canTryVisibleContains(selector, key, result.matchMode, candidates.length)) {
+      result = finder.resolve(
+        snapshot,
+        {
+          ...selector,
+          container: waitForContainerForFinder(waitFor) ?? undefined,
+          match: "contains",
+        },
+        { action: "inspect", matchMode: "contains" },
       );
-      if (element) {
-        return element;
+      if (result.error) {
+        throw new ActionableError(result.error);
+      }
+      candidates = visibleSources(result);
+    }
+    if (!waitFor.textAny || candidates.length > 0) {
+      modes.set(key, result.matchMode);
+    }
+    return candidates;
+  };
+  if (waitFor.textAny) {
+    for (const text of waitFor.textAny) {
+      const candidate = resolve({ text, match: waitFor.textMatch })[0];
+      if (candidate) {
+        return candidate.element!;
       }
     }
   }
-
-  if (!hasElementPredicate(waitFor)) {
-    return null;
+  const predicates: ResolverSelector[] = [];
+  if (waitFor.elementId !== undefined) {
+    predicates.push({ elementId: waitFor.elementId });
   }
-
-  return findRichWaitForElement(finder, waitFor, viewHierarchy, platform);
+  if (waitFor.text !== undefined) {
+    predicates.push({ text: waitFor.text, match: waitFor.textMatch });
+  }
+  if (waitFor.className !== undefined) {
+    predicates.push({ className: waitFor.className });
+  }
+  if (waitFor.contentDescription !== undefined) {
+    predicates.push({ contentDescription: waitFor.contentDescription, match: "exact" });
+  }
+  const sets = predicates.map((selector) => {
+    const candidates = resolve(selector);
+    // Older iOS captures expose the accessibility label only as text. Keep this
+    // rich-wait compatibility local; field-specific focus selectors stay strict.
+    if (platform === "ios" && selector.contentDescription !== undefined) {
+      candidates.push(
+        ...resolve({ text: selector.contentDescription, match: "exact" }).filter(
+          (node) => !node.accessibleLabel && !node.textSources["content-desc"],
+        ),
+      );
+    }
+    return candidates;
+  });
+  retryCompoundText(waitFor, negative, predicates, sets, resolve);
+  const candidates = [...new Set(sets.flat())].sort(
+    (a, b) => a.windowRank - b.windowRank || a.index - b.index,
+  );
+  return (
+    candidates.find((candidate) =>
+      waitFor.matchType === "any"
+        ? sets.some((set) => set.includes(candidate))
+        : sets.every((set) => set.includes(candidate)),
+    )?.element ?? null
+  );
 };
 
 const hasElementPredicate = (waitFor: ObserveWaitForOptions): boolean =>
@@ -762,141 +874,6 @@ const hasElementPredicate = (waitFor: ObserveWaitForOptions): boolean =>
   waitFor.textAny !== undefined ||
   waitFor.className !== undefined ||
   waitFor.contentDescription !== undefined;
-
-const hasRichElementPredicate = (waitFor: ObserveWaitForOptions): boolean =>
-  waitFor.className !== undefined ||
-  waitFor.contentDescription !== undefined ||
-  waitFor.matchType !== undefined ||
-  waitFor.textMatch !== undefined ||
-  (waitFor.elementId !== undefined && waitFor.text !== undefined);
-
-const parser = new DefaultElementParser();
-
-const collectCandidateElements = (
-  finder: ElementFinder,
-  waitFor: ObserveWaitForOptions,
-  viewHierarchy: ViewHierarchyResult,
-): Element[] => {
-  const container = waitForContainerForFinder(waitFor);
-  const containerNode = container ? finder.findContainerNode(viewHierarchy, container) : null;
-  if (container && !containerNode) {
-    return [];
-  }
-
-  const roots = containerNode
-    ? [containerNode]
-    : [
-        ...parser.extractRootNodes(viewHierarchy),
-        ...parser.extractWindowRootNodes(viewHierarchy, "topmost-first"),
-      ];
-  const elements: Element[] = [];
-  for (const root of roots) {
-    parser.traverseNode(root, (node) => {
-      const element = parser.parseNodeBounds(node);
-      if (element) {
-        elements.push(element);
-      }
-    });
-  }
-  return elements;
-};
-
-const getClassName = (element: Element): string | undefined =>
-  typeof element.class === "string" ? element.class : undefined;
-
-const getContentDescription = (
-  element: Element,
-  platform?: BootedDevice["platform"],
-): string | undefined =>
-  typeof element["content-desc"] === "string"
-    ? element["content-desc"]
-    : typeof element["ios-accessibility-label"] === "string"
-      ? element["ios-accessibility-label"]
-      : platform === "ios" && typeof element.text === "string"
-        ? element.text
-        : undefined;
-
-const textFieldsForElement = (element: Element): string[] =>
-  [element.text, element["content-desc"], element["ios-accessibility-label"]].filter(
-    (value): value is string => typeof value === "string",
-  );
-
-const matchesString = (
-  actual: string | undefined,
-  expected: string,
-  matchMode: "exact" | "contains" | "regex" = "contains",
-): boolean => {
-  if (actual === undefined) {
-    return false;
-  }
-
-  if (matchMode === "regex") {
-    return new RegExp(expected, "i").test(actual);
-  }
-
-  const normalizedActual = normalizeQuotes(actual).toLowerCase();
-  const normalizedExpected = normalizeQuotes(expected).toLowerCase();
-  return matchMode === "exact"
-    ? normalizedActual === normalizedExpected
-    : normalizedActual.includes(normalizedExpected);
-};
-
-const matchesTextPredicate = (element: Element, waitFor: ObserveWaitForOptions): boolean => {
-  if (waitFor.text === undefined) {
-    return false;
-  }
-  return textFieldsForElement(element).some((text) =>
-    matchesString(text, waitFor.text!, waitFor.textMatch ?? "contains"),
-  );
-};
-
-const elementPredicateResults = (
-  element: Element,
-  waitFor: ObserveWaitForOptions,
-  platform?: BootedDevice["platform"],
-): boolean[] => {
-  const results: boolean[] = [];
-  if (waitFor.elementId !== undefined) {
-    results.push(element["resource-id"] === waitFor.elementId);
-  }
-  if (waitFor.text !== undefined) {
-    results.push(matchesTextPredicate(element, waitFor));
-  }
-  if (waitFor.className !== undefined) {
-    results.push(getClassName(element) === waitFor.className);
-  }
-  if (waitFor.contentDescription !== undefined) {
-    results.push(
-      matchesString(getContentDescription(element, platform), waitFor.contentDescription, "exact"),
-    );
-  }
-  return results;
-};
-
-const findRichWaitForElement = (
-  finder: ElementFinder,
-  waitFor: ObserveWaitForOptions,
-  viewHierarchy: ViewHierarchyResult,
-  platform?: BootedDevice["platform"],
-): Element | null => {
-  const candidates = collectCandidateElements(finder, waitFor, viewHierarchy).filter(
-    (candidate) => !isElementCenterOffScreen(candidate, viewHierarchy),
-  );
-  const matchType = waitFor.matchType ?? "all";
-
-  for (const candidate of candidates) {
-    const results = elementPredicateResults(candidate, waitFor, platform);
-    if (results.length === 0) {
-      continue;
-    }
-    const matched = matchType === "any" ? results.some(Boolean) : results.every(Boolean);
-    if (matched) {
-      return candidate;
-    }
-  }
-
-  return null;
-};
 
 const matchesActiveWindow = (
   observation: ObserveResult,
@@ -943,7 +920,7 @@ const matchesActiveWindow = (
 // the predicate is satisfied exactly when no element matches them. Returns true
 // (vacuously satisfied) when no `absent` predicate is configured.
 const matchesAbsent = (
-  finder: ElementFinder,
+  finder: ConditionResolver,
   waitFor: ObserveWaitForOptions,
   viewHierarchy: ViewHierarchyResult,
   platform?: BootedDevice["platform"],
@@ -955,20 +932,23 @@ const matchesAbsent = (
     ...waitFor.absent,
     container: waitFor.container,
   } as ObserveWaitForOptions;
-  return findWaitForElement(finder, absentAsWaitFor, viewHierarchy, platform) === null;
+  return (
+    findWaitForElement(finder, absentAsWaitFor, viewHierarchy, platform, new Map(), true) === null
+  );
 };
 
 const evaluateWaitForObservation = (
-  finder: ElementFinder,
+  finder: ConditionResolver,
   waitFor: ObserveWaitForOptions,
   observation: ObserveResult,
-  platform?: BootedDevice["platform"],
+  platform: BootedDevice["platform"] | undefined,
+  modes: Map<string, MatchMode>,
 ): { matched: boolean; awaitedElement?: Element } => {
   const activeWindowMatched = matchesActiveWindow(observation, waitFor, platform);
   const needsElementMatch = hasElementPredicate(waitFor);
   const awaitedElement =
     needsElementMatch && observation.viewHierarchy
-      ? findWaitForElement(finder, waitFor, observation.viewHierarchy, platform)
+      ? findWaitForElement(finder, waitFor, observation.viewHierarchy, platform, modes)
       : null;
   // Without a hierarchy we cannot confirm the absent element is gone, so treat
   // an unconfirmed absence as unsatisfied (keep waiting).
@@ -1038,7 +1018,7 @@ export const waitForObservation = async (
   const startTime = timer.now();
   const timeoutMs = waitFor.timeout ?? waitFor.timeoutMs ?? 5000;
   const settled = waitFor.settled;
-  const finder = new DefaultElementFinder();
+  const finder = new ElementResolver();
   const queryOptions = {
     text: waitFor.text ?? waitFor.textAny?.[0] ?? waitFor.contentDescription,
     elementId: waitFor.elementId,
@@ -1084,7 +1064,8 @@ export const waitForObservation = async (
   throwIfAborted(signal);
   let observation = await observeOnce();
   let polls = 1;
-  let waitEvaluation = evaluateWaitForObservation(finder, waitFor, observation, platform);
+  const modes = new Map<string, MatchMode>();
+  let waitEvaluation = evaluateWaitForObservation(finder, waitFor, observation, platform, modes);
 
   if (waitEvaluation.matched && settleReady(observation)) {
     const waitMs = timer.now() - startTime;
@@ -1125,7 +1106,7 @@ export const waitForObservation = async (
 
     observation = await observeOnce();
     polls++;
-    waitEvaluation = evaluateWaitForObservation(finder, waitFor, observation, platform);
+    waitEvaluation = evaluateWaitForObservation(finder, waitFor, observation, platform, modes);
 
     if (waitEvaluation.matched) {
       if (settleReady(observation)) {

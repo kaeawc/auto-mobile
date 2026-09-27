@@ -16,6 +16,7 @@ import {
   attachRawViewHierarchy,
   resolveViewHierarchyForSearch,
 } from "../../../src/utils/viewHierarchySearch";
+import { serverConfig } from "../../../src/utils/ServerConfig";
 
 const hierarchy = (left: number): ViewHierarchyResult => ({
   updatedAt: 100 + left,
@@ -94,6 +95,26 @@ describe("hierarchy capture freshness policy", () => {
     const result = await capture.capture({ freshness: "cached-ok" });
     expect(result.nodes[0].bounds?.left).toBe(0);
     expect(resolveViewHierarchyForSearch(result.hierarchy)).toBe(result.hierarchy);
+  });
+  test("diagnostic raw search projects attached nodes without widening actionable snapshots", async () => {
+    const reader = new FakeReader();
+    attachRawViewHierarchy(reader.fresh, hierarchy(5000));
+    const capture = new DefaultHierarchyCapture(
+      "android",
+      reader,
+      new FakeTimer(),
+      new CountingIdGenerator(),
+    );
+    serverConfig.setRawElementSearchEnabled(true);
+    try {
+      const diagnostic = await capture.capture({ freshness: "fresh", searchRaw: true });
+      const actionable = await capture.capture({ freshness: "fresh" });
+      expect(diagnostic.nodes[0].bounds?.left).toBe(5000);
+      expect(actionable.nodes[0].bounds?.left).toBe(50);
+      expect(resolveViewHierarchyForSearch(actionable.hierarchy)).toBe(actionable.hierarchy);
+    } finally {
+      serverConfig.setRawElementSearchEnabled(false);
+    }
   });
 });
 

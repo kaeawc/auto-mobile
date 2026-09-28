@@ -114,14 +114,16 @@ describe("tapOn schema", () => {
   });
 
   test.each([
-    ["a non-tap action", { action: "longPress" }],
-    ["random selection", { selectionStrategy: "random" }],
-  ])("rejects ensureChecked with %s", (_label, incompatible) => {
+    ["a non-tap action", true, { action: "longPress" }],
+    ["a non-tap action", false, { action: "longPress" }],
+    ["random selection", true, { selectionStrategy: "random" }],
+    ["random selection", false, { selectionStrategy: "random" }],
+  ])("rejects ensureChecked=%s with %s", (_label, ensureChecked, incompatible) => {
     const issue = zodIssues(() =>
       tapOnSchema.parse({
         platform: "android",
         selector: { text: "Wi-Fi" },
-        ensureChecked: true,
+        ensureChecked,
         ...incompatible,
       }),
     ).find((candidate) => candidate.path[0] === "ensureChecked");
@@ -147,11 +149,20 @@ describe("tapOn schema", () => {
     expect(result.index).toBe(1);
   });
 
+  test("accepts semantic link activation when ensureChecked is omitted", () => {
+    const result = tapOnSchema.parse({
+      platform: "android",
+      selector: { accessibilityLink: "Terms of Service" },
+    });
+    expect(result.ensureChecked).toBeUndefined();
+  });
+
   test.each([
     ["non-tap action", { action: "focus" }],
     ["retry", { retryIfNoChange: true }],
     ["ensure", { ensureTap: true }],
     ["ensureChecked", { ensureChecked: true }],
+    ["ensureChecked false", { ensureChecked: false }],
     ["searchUntil", { searchUntil: { duration: 500 } }],
   ] as const)("rejects semantic links with %s", (_label, target) => {
     expect(() =>
@@ -161,6 +172,20 @@ describe("tapOn schema", () => {
         selector: { accessibilityLink: "Terms of Service" },
       }),
     ).toThrow();
+  });
+
+  test("rejects semantic links with ensureChecked false on the ensureChecked path", () => {
+    const issue = zodIssues(() =>
+      tapOnSchema.parse({
+        platform: "android",
+        selector: { accessibilityLink: "Terms of Service" },
+        ensureChecked: false,
+      }),
+    ).find((candidate) => candidate.path[0] === "ensureChecked");
+    expect(issue).toMatchObject({
+      path: ["ensureChecked"],
+      message: "semantic link activation cannot ensure checked state",
+    });
   });
 
   test("accepts a container-scoped semantic link and defaults its occurrence", () => {

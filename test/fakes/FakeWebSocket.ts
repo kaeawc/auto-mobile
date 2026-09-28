@@ -181,3 +181,25 @@ export function createNthAttemptSuccessWebSocketFactory(
     return new FakeWebSocket(url, attempt >= successOnAttempt ? "none" : "instant", 0, timer);
   };
 }
+
+/** Factory whose fake server starts accepting connections after fake time advances. */
+export function createTimeGatedWebSocketFactory(
+  gateMs: number,
+  timer: Timer,
+  gateAfterAttempt: number = 1,
+  onGateStart?: () => void,
+): (url: string) => FakeWebSocket {
+  let attempt = 0;
+  let gateStartedAt: number | undefined;
+  return (url: string) => {
+    attempt++;
+    if (attempt >= gateAfterAttempt) {
+      if (gateStartedAt === undefined) {
+        onGateStart?.();
+      }
+      gateStartedAt ??= timer.now();
+    }
+    const accepting = gateStartedAt !== undefined && timer.now() - gateStartedAt >= gateMs;
+    return new FakeWebSocket(url, accepting ? "none" : "instant", 0, timer);
+  };
+}

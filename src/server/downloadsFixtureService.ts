@@ -66,7 +66,7 @@ export function createDownloadsFixtureService(
   );
 }
 
-function registerPendingDeviceCleanup(deviceId: string, cleanup: Promise<unknown>): void {
+export function registerPendingDeviceCleanup(deviceId: string, cleanup: Promise<unknown>): void {
   const daemonState = DaemonState.getInstance();
   if (daemonState.isInitialized()) {
     daemonState.getSessionManager().registerPendingDeviceCleanup(deviceId, cleanup);

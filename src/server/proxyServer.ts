@@ -393,7 +393,11 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
 
   // Maps a caught daemon error to its structured tool result. Extracted so the
   // tools/call handler stays under the complexity ceiling as branches accrue.
-  const resolveCallToolErrorResult = (error: unknown, name: string): CallToolResult => {
+  const resolveCallToolErrorResult = (
+    error: unknown,
+    name: string,
+    hasOutputSchema: boolean,
+  ): CallToolResult => {
     if (error instanceof DaemonBoundSessionExpiredError) {
       logger.warn(`[ProxyServer] Session ownership lost for ${error.sessionUuid}: ${error.reason}`);
       return sessionOwnershipLostResult(error);
@@ -403,13 +407,13 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
       return noActiveDeviceSessionResult(error);
     }
     if (error instanceof DaemonShuttingDownError) {
-      return daemonShuttingDownResult(advertisedToolOutputSchemas.get(name) ?? false);
+      return daemonShuttingDownResult(hasOutputSchema);
     }
     if (error instanceof DaemonRestartDeferredError) {
       return daemonRestartDeferredResult(error);
     }
     if (error instanceof McpOverloadError) {
-      return mcpOverloadResult(error, advertisedToolOutputSchemas.get(name) ?? false);
+      return mcpOverloadResult(error, hasOutputSchema);
     }
     if (error instanceof DeviceControlTransportError) {
       logger.warn(
@@ -433,6 +437,7 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
     if (!name) {
       throw new ActionableError("Tool name is missing in the request");
     }
+    const hasOutputSchema = advertisedToolOutputSchemas.get(name) ?? false;
 
     logger.info(`[ProxyServer] Forwarding tool call: ${name}`);
 
@@ -464,7 +469,7 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
       const result = await proxy.callTool(name, args, requestProgressToken, onProgress);
       return result;
     } catch (error) {
-      return resolveCallToolErrorResult(error, name);
+      return resolveCallToolErrorResult(error, name, hasOutputSchema);
     }
   });
 

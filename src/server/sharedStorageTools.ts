@@ -1,16 +1,33 @@
 import type { BootedDevice } from "../models";
 import { createJSONToolResponse } from "../utils/toolUtils";
+import { registerPendingDeviceCleanup } from "./downloadsFixtureService";
 import { stageSharedStorageSchema, type StageSharedStorageArgs } from "./sharedStorageContract";
-import { getSharedStorageService } from "./sharedStorageService";
+import { getSharedStorageService, type SharedStorageService } from "./sharedStorageService";
 import { ToolRegistry, type ProgressCallback } from "./toolRegistry";
 
-export function registerSharedStorageTools(): void {
+export function registerSharedStorageTools(
+  deps: {
+    sharedStorage?: () => SharedStorageService;
+    registerPendingDeviceCleanup?: (deviceId: string, cleanup: Promise<unknown>) => void;
+  } = {},
+): void {
   const stageHandler = async (
     device: BootedDevice,
     args: StageSharedStorageArgs,
     _progress?: ProgressCallback,
     signal?: AbortSignal,
-  ) => createJSONToolResponse(await getSharedStorageService().stage({ ...args, device, signal }));
+  ) => {
+    const stagedPromise = (deps.sharedStorage ?? getSharedStorageService)().stage({
+      ...args,
+      device,
+      signal,
+    });
+    (deps.registerPendingDeviceCleanup ?? registerPendingDeviceCleanup)(
+      device.deviceId,
+      stagedPromise,
+    );
+    return createJSONToolResponse(await stagedPromise);
+  };
 
   ToolRegistry.registerDeviceAware(
     "stageSharedStorage",

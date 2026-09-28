@@ -4,6 +4,10 @@ import {
   GENERATED_VIEW_ID_PATTERN,
   STABLE_VIEW_ID_PREFIX,
 } from "../../../../src/features/observe/android/StableNodeIdentity";
+import { DefaultElementFinder } from "../../../../src/features/utility/ElementFinder";
+import { DefaultElementParser } from "../../../../src/features/utility/ElementParser";
+import { DefaultTextMatcher } from "../../../../src/features/utility/TextMatcher";
+import type { ViewHierarchyResult } from "../../../../src/models";
 
 /**
  * Capture-layer stable node identity (issue #3228): the ingest pass that
@@ -400,6 +404,59 @@ describe("assignStableViewIds (#3228)", () => {
     assignStableViewIds(empty);
     assignStableViewIds(typed);
     expect(empty["view-id"]).not.toEqual(typed["view-id"]);
+  });
+
+  test("typing in one of two identical editable siblings preserves both observed ids and resolves the second", () => {
+    const capture = (emailText: string) => {
+      const fields = [
+        node({
+          "view-id": generatedUuid("email"),
+          class: "android.widget.EditText",
+          text: emailText,
+          bounds: { left: 0, top: 0, right: 200, bottom: 40 },
+        }),
+        node({
+          "view-id": generatedUuid("password"),
+          class: "android.widget.EditText",
+          text: "",
+          bounds: { left: 0, top: 50, right: 200, bottom: 90 },
+        }),
+      ];
+      const root = node({}, fields);
+      assignStableViewIds(root);
+      return { root, fields };
+    };
+
+    const before = capture("");
+    const after = capture("jason@example.com");
+    const observedEmailId = before.fields[0]["view-id"] as string;
+    const observedPasswordId = before.fields[1]["view-id"] as string;
+    expect(observedEmailId).toMatch(/^s2-[0-9a-f]{16}-1$/);
+    expect(observedPasswordId).toMatch(/^s2-[0-9a-f]{16}-2$/);
+    expect(after.fields[0]["view-id"]).toBe(observedEmailId);
+    expect(after.fields[1]["view-id"]).toBe(observedPasswordId);
+
+    const finder = new DefaultElementFinder(new DefaultElementParser(), new DefaultTextMatcher());
+    const resolved = finder.findElementByResourceId(
+      { hierarchy: after.root } as ViewHierarchyResult,
+      observedPasswordId,
+    );
+    expect(resolved?.bounds).toEqual(after.fields[1].bounds);
+  });
+
+  test("an editable field uses its stable hint instead of entered text", () => {
+    const inputId = (hint: string, text: string): string => {
+      const field = node({
+        "view-id": generatedUuid("input"),
+        class: "android.widget.EditText",
+        "hint-text": hint,
+        text,
+      });
+      assignStableViewIds(field);
+      return field["view-id"] as string;
+    };
+    expect(inputId("Email", "")).toBe(inputId("Email", "jason@example.com"));
+    expect(inputId("Email", "")).not.toBe(inputId("Password", ""));
   });
 });
 

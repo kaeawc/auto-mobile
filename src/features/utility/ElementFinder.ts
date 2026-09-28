@@ -619,12 +619,16 @@ export class DefaultElementFinder implements ElementFinder {
    * ordinal is unique by construction and must round-trip from skeleton to
    * tapOn (#7219). Capture provenance would be required to distinguish that safe
    * same-capture use from a later insert/reorder that reassigns an ordinal.
+   * Do not fall back from an old `s-H-k` to a now-unique bare `s-H`: the bare
+   * node could be a different survivor after the selected peer was removed.
+   * A one-node current group alone cannot prove it is the selected node.
    *
    * Descendant display text is deliberately excluded from the upward hash rollup
    * in `StableNodeIdentity.ts` (#6230), so a ticking child does not restamp its
-   * ancestor's id between captures. The node's own display fields still define
-   * its own identity; capture provenance is still required to distinguish a
-   * removed node from a newly-created content-identical replacement.
+   * ancestor's id between captures. Editable entered text is excluded from its
+   * own hash, while other own display text still defines identity. Capture
+   * provenance is still required to distinguish a removed node from a
+   * newly-created content-identical replacement.
    *
    * `activeScopeRoots` and `fullCaptureRoots` are deliberately DIFFERENT scopes
    * (issue #6229 review thread PRRT_kwDOP-GF5M6f2X6J): the real-`resource-id`

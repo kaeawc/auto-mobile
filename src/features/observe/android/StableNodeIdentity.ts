@@ -1,5 +1,8 @@
 import { createHash } from "crypto";
-import { getToggleContentDescription } from "../../../utils/elementProperties";
+import {
+  getToggleContentDescription,
+  isEditableElementProperties,
+} from "../../../utils/elementProperties";
 
 /**
  * Capture-layer stable node identity for id-less Android nodes (issue #3228).
@@ -32,11 +35,12 @@ import { getToggleContentDescription } from "../../../utils/elementProperties";
  * only its **structural** hash to an ancestor — class/className, `resource-id`,
  * `content-desc`, `test-tag`, and (recursively) its own children's structural
  * hashes — with volatile display `text` omitted from that upward contribution.
- * A node's *own* id still mixes in its own `text`/`content-desc` (a node's own
- * text edit remains a new identity, matching `nodeKey`/`contentIdentityKey`
- * semantics), so leaf text nodes stay distinct and the timer leaf's own id still
- * churns — only its ancestors are shielded from descendant text. A descendant's
- * `content-desc` now deliberately restamps its ancestors: Android icon buttons
+ * A node's *own* id still mixes in its own `text`/`content-desc`, except that
+ * editable inputs use their stable `hint-text` instead of the entered value
+ * and named toggles omit state text. Other leaf text nodes stay distinct and
+ * the timer leaf's own id still churns — only its ancestors are shielded from
+ * descendant text. A descendant's `content-desc` now deliberately restamps
+ * its ancestors: Android icon buttons
  * commonly put their accessible label on a child, so rolling that label upward
  * keeps otherwise-identical clickable containers distinct (issue #7311). That
  * accepted content-derived-id churn matches the module's existing trade-off for
@@ -112,8 +116,9 @@ export const STABLE_VIEW_ID_HASH_LENGTH = 16;
 /**
  * Node fields that participate in a node's *own* identity: the stable,
  * position-free description of what the node *is*, including its own display
- * text. Everything else is deliberately excluded: `bounds` and sibling order
- * shift on scroll; `focused` / `checked` / `selected` / `enabled` flip on
+ * text unless it is mutable input/toggle state. Everything else is deliberately
+ * excluded: `bounds` and sibling order shift on scroll; `focused` / `checked` /
+ * `selected` / `enabled` flip on
  * interaction (a toggle should surface as a `changed` delta, not an identity
  * change); `extras` and `occlusionState`/`occludedBy`/`occludedByViewId` churn
  * nondeterministically between captures (#3051, #3519).
@@ -128,7 +133,7 @@ const CONTENT_FIELDS: readonly string[] = ["resource-id", "content-desc", "text"
  * live counter, streaming text) must not restamp its ancestors' ids (issue
  * #6230), or the `s2-…` selector an `observe(project: "skeleton")` emitted
  * stops resolving on the fresh capture a `tapOn` runs against. A node's own
- * `text`/`content-desc` still count toward *its own* id via
+ * `content-desc` and stable `text` still count toward *its own* id via
  * {@link CONTENT_FIELDS}. #7219 considered folding a row's first text child
  * into that row's hash, but doing so would reopen the ticking-text guarantee.
  */
@@ -264,9 +269,9 @@ export function assignStableViewIds(root: unknown): Map<string, string> {
   //    descendant `content-desc` to distinguish Android icon-button containers
   //    (#7311), but excludes volatile descendant `text` so a ticking label does
   //    not restamp any ancestor's id (#6230).
-  //  - contentHash (emitted): class + CONTENT_FIELDS (incl. the node's OWN
-  //    `text`/`content-desc`) + children's structuralHashes. The node's own
-  //    display text still defines its own identity, but descendants roll up
+  //  - contentHash (emitted): class + CONTENT_FIELDS (with mutable input/toggle
+  //    text omitted or replaced by a stable hint) + children's structuralHashes.
+  //    Other own display text still defines identity; descendants roll up
   //    structurally only.
   //
   // Two nodes sharing a contentHash are content-identical up to descendant
@@ -289,12 +294,19 @@ export function assignStableViewIds(root: unknown): Map<string, string> {
         .update(
           JSON.stringify([
             attributes["class"] ?? attributes.className ?? "",
-            ...fields.map((field) =>
-              // A named toggle's text is state (On/Off), not identity (#6794).
-              field === "text" && getToggleContentDescription(attributes)
-                ? ""
-                : (attributeValue(attributes, field) ?? ""),
-            ),
+            ...fields.map((field) => {
+              if (field === "text") {
+                // A named toggle's text is state (On/Off), not identity (#6794).
+                if (getToggleContentDescription(attributes)) {
+                  return "";
+                }
+                // Editable text is the entered value; a hint stays fixed as the user types.
+                if (isEditableElementProperties(attributes)) {
+                  return attributes["hint-text"] ?? "";
+                }
+              }
+              return attributeValue(attributes, field) ?? "";
+            }),
             kids,
           ]),
         )

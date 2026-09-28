@@ -42,6 +42,7 @@ function createTap(
     selector.setNextElement(afterTap);
   };
   (tap as any).prepareSelectionCapture = async () => null;
+  (tap as any).refreshViewHierarchy = async () => hierarchy;
   (tap as any).captureTerminalObservationScreenshot = async () => {};
   (tap as any).recordDeferredPredictionOutcome = async () => {};
   (tap as any).selectionStateTracker.finalize = async () => [];
@@ -73,6 +74,36 @@ describe("tapOn ensureChecked", () => {
     expect(calls()).toBe(0);
   });
 
+  test("refreshes and re-resolves a cached checked toggle before deciding to skip", async () => {
+    const { tap, calls, setNextElement } = createTap(toggle("true"), toggle("true"));
+    let refreshes = 0;
+    (tap as any).refreshViewHierarchy = async () => {
+      refreshes++;
+      setNextElement(toggle("false"));
+      return hierarchy;
+    };
+
+    const result = await tap.execute({ text: "Wi-Fi", action: "tap", ensureChecked: true });
+
+    expect(refreshes).toBeGreaterThan(0);
+    expect(calls()).toBe(1);
+    expect(result.success).toBe(true);
+    expect(result.skipped).toBeUndefined();
+  });
+
+  test("skips a cached unchecked toggle that is checked in the fresh hierarchy", async () => {
+    const { tap, calls, setNextElement } = createTap(toggle("false"));
+    (tap as any).refreshViewHierarchy = async () => {
+      setNextElement(toggle("true"));
+      return hierarchy;
+    };
+
+    const result = await tap.execute({ text: "Wi-Fi", action: "tap", ensureChecked: true });
+
+    expect(result).toMatchObject({ success: true, skipped: "already-checked" });
+    expect(calls()).toBe(0);
+  });
+
   test("taps an unchecked toggle and verifies the checked state", async () => {
     const { tap, calls } = createTap(toggle("false"), toggle("true"));
 
@@ -81,6 +112,41 @@ describe("tapOn ensureChecked", () => {
     expect(result.success).toBe(true);
     expect(result.skipped).toBeUndefined();
     expect(calls()).toBe(1);
+  });
+
+  test("does not ghost-retry when the freshly re-resolved toggle reached the desired state", async () => {
+    const { tap, setNextElement } = createTap(toggle("false"));
+    let taps = 0;
+    (tap as any).strategy.retryTapIfNoChange = true;
+    (tap as any).executeAndroidTap = async () => {
+      taps++;
+      setNextElement(toggle(taps % 2 === 1));
+    };
+
+    const result = await tap.execute({
+      text: "Wi-Fi",
+      action: "tap",
+      ensureChecked: true,
+      retryIfNoChange: true,
+    });
+
+    expect(taps).toBe(1);
+    expect(result.success).toBe(true);
+  });
+
+  test("ghost-retries when the fresh toggle is still unchecked", async () => {
+    const { tap, calls } = createTap(toggle("false"));
+    (tap as any).strategy.retryTapIfNoChange = true;
+
+    const result = await tap.execute({
+      text: "Wi-Fi",
+      action: "tap",
+      ensureChecked: true,
+      retryIfNoChange: true,
+    });
+
+    expect(calls()).toBe(2);
+    expect(result.success).toBe(false);
   });
 
   test("rechecks the refreshed stable toggle before tapping", async () => {

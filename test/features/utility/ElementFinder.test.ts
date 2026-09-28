@@ -71,6 +71,64 @@ describe("DefaultElementFinder", () => {
       expect(results[0].bounds.bottom).toBe(50);
     });
 
+    test("tap falls back to a clickable partial row when the only exact match is an input", () => {
+      const hierarchy = makeHierarchy([
+        {
+          $: {
+            class: "android.widget.EditText",
+            text: "Dark",
+            clickable: "true",
+            bounds: bounds(0, 0, 100, 50),
+          },
+        },
+        {
+          $: {
+            class: "android.widget.TextView",
+            text: "Dark theme",
+            clickable: "true",
+            bounds: bounds(0, 50, 100, 100),
+          },
+        },
+      ]);
+
+      for (const [preserveTraversalOrder, includeWindows] of [
+        [false, false],
+        [false, true],
+        [true, true],
+      ]) {
+        const results = finder.findElementsByText(
+          hierarchy,
+          "Dark",
+          null,
+          true,
+          false,
+          preserveTraversalOrder,
+          includeWindows,
+          "tap",
+        );
+        expect(results.map((element) => element.text)).toEqual(["Dark theme"]);
+      }
+    });
+
+    test("tap keeps the exact bucket when it contains a clickable non-input target", () => {
+      const hierarchy = makeHierarchy([
+        { $: { text: "Dark", clickable: "true", bounds: bounds(0, 0, 100, 50) } },
+        { $: { text: "Dark theme", clickable: "true", bounds: bounds(0, 50, 100, 100) } },
+      ]);
+
+      const results = finder.findElementsByText(
+        hierarchy,
+        "Dark",
+        null,
+        true,
+        false,
+        false,
+        true,
+        "tap",
+      );
+      expect(results.map((element) => element.text)).toEqual(["Dark"]);
+    });
+
     test("ranks matching inputs according to explicit selection intent", () => {
       const hierarchy = makeHierarchy([
         {

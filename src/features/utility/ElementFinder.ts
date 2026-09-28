@@ -717,6 +717,25 @@ export class DefaultElementFinder implements ElementFinder {
     return matches;
   }
 
+  private usableTapTextMatches(matches: Element[]): Element[] {
+    return matches.filter(
+      (element) => !this.isAndroidInputNode(element) && this.isClickableNode(element),
+    );
+  }
+
+  private selectTextMatchBucket(
+    matches: { exactMatches: Element[]; partialMatches: Element[] },
+    selectionIntent?: TextSelectionIntent,
+  ): Element[] {
+    if (selectionIntent === "tap" && this.usableTapTextMatches(matches.exactMatches).length === 0) {
+      const tappablePartialMatches = this.usableTapTextMatches(matches.partialMatches);
+      if (tappablePartialMatches.length > 0) {
+        return tappablePartialMatches;
+      }
+    }
+    return matches.exactMatches.length > 0 ? matches.exactMatches : matches.partialMatches;
+  }
+
   private isCollectionNode(props: Record<string, unknown>): boolean {
     return isCollectionElementProperties(props);
   }
@@ -761,10 +780,7 @@ export class DefaultElementFinder implements ElementFinder {
       partialMatches: Element[];
     }): Element[] => {
       const eligibleMatches = this.filterTextMatchesForSelectionIntent(matches, selectionIntent);
-      const selectedMatches =
-        eligibleMatches.exactMatches.length > 0
-          ? eligibleMatches.exactMatches
-          : eligibleMatches.partialMatches;
+      const selectedMatches = this.selectTextMatchBucket(eligibleMatches, selectionIntent);
       // A text input selector may share label text with non-input UI (including
       // status-bar notifications). Those nodes are never valid focus targets:
       // ranking them below inputs still lets one win when no input matches.
@@ -822,10 +838,10 @@ export class DefaultElementFinder implements ElementFinder {
       const exactMatches = [mainMatches, ...windowMatches].flatMap(
         (matches) => matches.exactMatches,
       );
-      if (exactMatches.length > 0) {
-        return exactMatches;
-      }
-      return [mainMatches, ...windowMatches].flatMap((matches) => matches.partialMatches);
+      const partialMatches = [mainMatches, ...windowMatches].flatMap(
+        (matches) => matches.partialMatches,
+      );
+      return this.selectTextMatchBucket({ exactMatches, partialMatches }, selectionIntent);
     }
 
     const matchesByWindowOrder = [...windowMatches, mainMatches];
@@ -844,12 +860,14 @@ export class DefaultElementFinder implements ElementFinder {
       exactMatches: matches.exactMatches.filter((element) => allowedMatches.has(element)),
       partialMatches: matches.partialMatches.filter((element) => allowedMatches.has(element)),
     }));
-    const hasExactMatches = eligibleMatchesByWindow.some(
-      (matches) => matches.exactMatches.length > 0,
-    );
+    const selectedBucket = this.selectTextMatchBucket(filteredMatches, selectionIntent);
+    const useExactMatches = selectedBucket === filteredMatches.exactMatches;
+    const allowedSelectedMatches = new Set(selectedBucket);
     return eligibleMatchesByWindow.flatMap((matches) =>
       this.rankTextMatches(
-        hasExactMatches ? matches.exactMatches : matches.partialMatches,
+        (useExactMatches ? matches.exactMatches : matches.partialMatches).filter((element) =>
+          allowedSelectedMatches.has(element),
+        ),
         selectionIntent,
       ),
     );

@@ -1,9 +1,22 @@
 import { describe, expect, test } from "bun:test";
-import type { Element, ElementSelectionResult, ViewHierarchyResult } from "../../../src/models";
-import { TapOnElement } from "../../../src/features/action/TapOnElement";
-import { FakeAdbClient } from "../../fakes/FakeAdbClient";
+import type {
+  Element,
+  ElementSelectionResult,
+  ObserveResult,
+  TapOnSelectedElement,
+  ViewHierarchyResult,
+} from "../../../src/models";
+import {
+  ANDROID_PRE_TAP_REFIND_BUDGET_MS,
+  ANDROID_PRE_TAP_REFIND_BUDGET_MS_WHEN_LOADING,
+  ANDROID_PRE_TAP_REFIND_MIN_POLLS,
+  TapOnElement,
+} from "../../../src/features/action/TapOnElement";
+import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeElementSelector } from "../../fakes/FakeElementSelector";
+import { FakeTapStrategy } from "../../fakes/FakeTapStrategy";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import type { AdbExecutor } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 
 const STABLE_BOUNDS: Element["bounds"] = { left: 10, top: 20, right: 110, bottom: 70 };
 
@@ -24,6 +37,77 @@ function makeHierarchy(): ViewHierarchyResult {
   return { hierarchy: { node: {} } } as unknown as ViewHierarchyResult;
 }
 
+function makeSelection(
+  element: Element | null,
+  fields: Partial<Omit<ElementSelectionResult, "element">> = {},
+): ElementSelectionResult {
+  return {
+    element,
+    indexInMatches: 0,
+    totalMatches: element ? 1 : 0,
+    strategy: "first",
+    ...fields,
+  };
+}
+
+function makeFocusObservation(viewHierarchy: ViewHierarchyResult): ObserveResult {
+  return {
+    observationId: "focus-test",
+    updatedAt: 1,
+    screenSize: { width: 1080, height: 1920 },
+    systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+    viewHierarchy,
+  };
+}
+
+function hierarchyNode(element: Element): NonNullable<ViewHierarchyResult["hierarchy"]["node"]> {
+  return { $: element, bounds: element.bounds, "view-id": element["view-id"] };
+}
+
+class FocusTapOnElement extends TapOnElement {
+  override async captureTerminalObservationScreenshot(): Promise<void> {
+    throw new Error("Focus test must stub terminal screenshot capture");
+  }
+
+  override async recordDeferredPredictionOutcome(): Promise<void> {
+    throw new Error("Focus test must stub deferred prediction recording");
+  }
+}
+
+function fakeAdb(): AdbExecutor {
+  // FakeAdbExecutor predates streaming ADB; this suite never spawns a process.
+  return Object.assign(new FakeAdbExecutor(), {
+    spawn: async () => {
+      throw new Error("Unexpected streaming ADB command in pre-tap stability test");
+    },
+  });
+}
+
+type StableRefindResult = Awaited<
+  ReturnType<TapOnElement["resolveAndroidStableTapTargetAfterRefreshes"]>
+>;
+
+function successfulRefind(result: StableRefindResult): Extract<StableRefindResult, { ok: true }> {
+  if (!result.ok) {
+    throw new Error(`Expected a stable tap target: ${result.error}`);
+  }
+  return result;
+}
+
+function failedRefind(result: StableRefindResult): Extract<StableRefindResult, { ok: false }> {
+  if (result.ok) {
+    throw new Error("Expected the stability check to reject the tap target");
+  }
+  return result;
+}
+
+function selectedMetadata(value: TapOnSelectedElement | undefined): TapOnSelectedElement {
+  if (!value) {
+    throw new Error("Expected selected-element metadata");
+  }
+  return value;
+}
+
 function createTapOnElement(): { tap: TapOnElement; timer: FakeTimer } {
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
@@ -32,8 +116,8 @@ function createTapOnElement(): { tap: TapOnElement; timer: FakeTimer } {
       name: "test-device",
       platform: "android",
       deviceId: "emulator-5554",
-    } as any,
-    new FakeAdbClient() as any,
+    },
+    fakeAdb(),
     { timer },
   );
   return { tap, timer };
@@ -47,21 +131,21 @@ type StubSequenceEntry = {
 function stubStabilityDeps(tap: TapOnElement, sequence: StubSequenceEntry[]): void {
   let callIdx = 0;
 
-  (tap as any).refreshViewHierarchy = async () => {
+  tap.refreshViewHierarchy = async () => {
     const entry = sequence[Math.min(callIdx, sequence.length - 1)];
     callIdx++;
     return entry.hierarchy;
   };
 
-  (tap as any).findElementInHierarchy = (_opts: any, _vh: any) => {
+  tap.findElementInHierarchy = () => {
     const entry = sequence[Math.min(callIdx - 1, sequence.length - 1)];
     return {
-      selection: { element: entry.element },
+      selection: makeSelection(entry.element),
       containerFound: false,
     };
   };
 
-  (tap as any).resolveTapTargetElement = (el: Element) => ({
+  tap.resolveTapTargetElement = (el: Element) => ({
     element: el,
     usedParent: false,
   });
@@ -98,11 +182,15 @@ async function executeFocusWithDuplicateEmail(
     ...(moveDuringStability ? { text: "Email" } : {}),
     focused: true,
   };
-  const before: ViewHierarchyResult = { hierarchy: { node: [clickable, editable] } };
-  const stableHierarchy: ViewHierarchyResult = {
-    hierarchy: { node: [clickable, stableEditable] },
+  const before: ViewHierarchyResult = {
+    hierarchy: { node: { $: {}, node: [hierarchyNode(clickable), hierarchyNode(editable)] } },
   };
-  const after: ViewHierarchyResult = { hierarchy: { node: [clickable, focused] } };
+  const stableHierarchy: ViewHierarchyResult = {
+    hierarchy: { node: { $: {}, node: [hierarchyNode(clickable), hierarchyNode(stableEditable)] } },
+  };
+  const after: ViewHierarchyResult = {
+    hierarchy: { node: { $: {}, node: [hierarchyNode(clickable), hierarchyNode(focused)] } },
+  };
   const selector = new FakeElementSelector();
   const selectionIntents: string[] = [];
   selector.selectByText = (hierarchy, _text, options) => {
@@ -124,26 +212,25 @@ async function executeFocusWithDuplicateEmail(
   };
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
-  const tap = new TapOnElement(
-    { name: "test-device", platform: "android", deviceId: "emulator-5554" } as any,
-    new FakeAdbClient() as any,
+  const tapStrategy = new FakeTapStrategy();
+  tapStrategy.shouldRunPreTapStability = (options) => Boolean(options.preTapStability);
+  const tap = new FocusTapOnElement(
+    { name: "test-device", platform: "android", deviceId: "emulator-5554" },
+    fakeAdb(),
     {
       timer,
       elementSelector: selector,
-      tapStrategy: {
-        isAccessibilityServiceEnabled: async () => false,
-        shouldRunPreTapStability: (options: { preTapStability?: boolean }) =>
-          Boolean(options.preTapStability),
-      } as any,
-      selectionStateTracker: { finalize: async () => [] } as any,
+      tapStrategy,
+      selectionStateTracker: { prepare: async () => null, finalize: async () => [] },
     },
   );
   const tapped: Element[] = [];
-  (tap as any).observedInteraction = async (
-    action: (observation: { viewHierarchy: ViewHierarchyResult }) => Promise<object>,
-  ) => ({ ...(await action({ viewHierarchy: before })), observation: { viewHierarchy: after } });
-  (tap as any).refreshViewHierarchy = async () => (moveDuringStability ? stableHierarchy : before);
-  (tap as any).executeAndroidTap = async (
+  tap.observedInteraction = async (action) => ({
+    ...(await action(makeFocusObservation(before))),
+    observation: makeFocusObservation(after),
+  });
+  tap.refreshViewHierarchy = async () => (moveDuringStability ? stableHierarchy : before);
+  tap.executeAndroidTap = async (
     _action: string,
     _x: number,
     _y: number,
@@ -152,15 +239,15 @@ async function executeFocusWithDuplicateEmail(
   ) => {
     tapped.push(element);
   };
-  (tap as any).retryTapIfNoChange = async () => {};
-  (tap as any).prepareSelectionCapture = async () => null;
-  (tap as any).deriveTapEffectAfterPostTapObservation = async (
-    _previous: unknown,
-    observation: unknown,
-  ) => ({ observation });
-  (tap as any).captureTerminalObservationScreenshot = async () => {};
-  (tap as any).recordDeferredPredictionOutcome = async () => {};
-  (tap as any).enforceFreshnessConsistencyWithEffect = () => {};
+  tap.retryTapIfNoChange = async () => {};
+  tap.prepareSelectionCapture = async () => null;
+  tap.deriveTapEffectAfterPostTapObservation = async (_previous, observation) => ({
+    effect: undefined,
+    observation,
+  });
+  tap.captureTerminalObservationScreenshot = async () => {};
+  tap.recordDeferredPredictionOutcome = async () => {};
+  tap.enforceFreshnessConsistencyWithEffect = () => {};
 
   const result = await tap.execute({ text: "Email", action: "focus", index: 0, [flag]: true });
   return { result, tapped, clickable, editable, stableEditable, selectionIntents };
@@ -191,7 +278,7 @@ describe("focus intent through pre-tap stability", () => {
 
   test.each(["preTapStability", "ensureTap"] as const)(
     "verifies the refreshed Compose field after horizontal movement with %s (#7800)",
-    async (flag) => {
+    async (flag: "preTapStability" | "ensureTap") => {
       const { result, tapped, stableEditable } = await executeFocusWithDuplicateEmail(flag, true);
 
       expect(tapped).toEqual([stableEditable]);
@@ -209,17 +296,20 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
     const original = { ...makeElement(STABLE_BOUNDS), "view-id": "generated-row" };
     const moved = { ...original, bounds: SHIFTED_BOUNDS };
     const hierarchy = makeHierarchy();
-    (tap as any).findElementInHierarchy = () => ({ selection: { element: original } });
-    (tap as any).refreshViewHierarchy = async () => hierarchy;
-    (tap as any).resolveTapTargetElement = () => ({ element: moved, usedParent: false });
-    const result = await (tap as any).resolveAndroidStableTapTargetAfterRefreshes(
+    tap.findElementInHierarchy = () => ({
+      selection: makeSelection(original),
+      containerFound: false,
+    });
+    tap.refreshViewHierarchy = async () => hierarchy;
+    tap.resolveTapTargetElement = () => ({ element: moved, usedParent: false });
+    const result = await tap.resolveAndroidStableTapTargetAfterRefreshes(
       { text: "Contact Name", action: "tap" },
       { viewHierarchy: hierarchy, screenSize: { width: 1080, height: 1920 } },
       "tap",
       false,
     );
     expect(result.ok).toBe(true);
-    expect(result.tapElement.bounds).toEqual(SHIFTED_BOUNDS);
+    expect(successfulRefind(result).tapElement.bounds).toEqual(SHIFTED_BOUNDS);
   });
 
   test("synthetic ID stability checks the matched label, not its promoted row", async () => {
@@ -231,23 +321,24 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
     };
     const row = { ...makeElement(STABLE_BOUNDS), "resource-id": "row" };
     const hierarchy = makeHierarchy();
-    (tap as any).findElementInHierarchy = () => ({
-      selection: { element: row, matchedElement: label },
+    tap.findElementInHierarchy = () => ({
+      selection: makeSelection(row, { matchedElement: label }),
+      containerFound: false,
     });
-    (tap as any).refreshViewHierarchy = async () => hierarchy;
+    tap.refreshViewHierarchy = async () => hierarchy;
     let checked: Element | null = null;
-    (tap as any).staleSyntheticTarget = (original: Element) => {
+    tap.staleSyntheticTarget = (original: Element) => {
       checked = original;
       return "Stale reference: matched label changed";
     };
-    const result = await (tap as any).resolveAndroidStableTapTargetAfterRefreshes(
+    const result = await tap.resolveAndroidStableTapTargetAfterRefreshes(
       { elementId: "generated-label", action: "tap" },
       { viewHierarchy: hierarchy, screenSize: { width: 1080, height: 1920 } },
       "tap",
       false,
     );
     expect(checked).toBe(label);
-    expect(result.error).toContain("matched label changed");
+    expect(failedRefind(result).error).toContain("matched label changed");
   });
 
   test("returns ok when bounds are immediately stable (1 match required for text-only)", async () => {
@@ -257,7 +348,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
 
     stubStabilityDeps(tap, [{ hierarchy: vh, element: el }]);
 
-    const result = await (tap as any).resolveAndroidStableTapTargetAfterRefreshes(
+    const result = await tap.resolveAndroidStableTapTargetAfterRefreshes(
       { text: "Contact Name", action: "tap" },
       { screenSize: { width: 1080, height: 1920 } },
       "tap",
@@ -265,7 +356,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
     );
 
     expect(result.ok).toBe(true);
-    expect(result.tapElement).toBe(el);
+    expect(successfulRefind(result).tapElement).toBe(el);
   });
 
   test("returns ok after bounds converge within epsilon", async () => {
@@ -279,7 +370,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
       { hierarchy: vh, element: el2 },
     ]);
 
-    const result = await (tap as any).resolveAndroidStableTapTargetAfterRefreshes(
+    const result = await tap.resolveAndroidStableTapTargetAfterRefreshes(
       { text: "Row", sibling: true, action: "tap" },
       { screenSize: { width: 1080, height: 1920 } },
       "tap",
@@ -287,7 +378,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
     );
 
     expect(result.ok).toBe(true);
-    expect(result.tapElement.bounds).toEqual(WITHIN_EPSILON_BOUNDS);
+    expect(successfulRefind(result).tapElement.bounds).toEqual(WITHIN_EPSILON_BOUNDS);
   });
 
   test("fails when target is never re-found", async () => {
@@ -296,7 +387,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
 
     stubStabilityDeps(tap, [{ hierarchy: vh, element: null }]);
 
-    const result = await (tap as any).resolveAndroidStableTapTargetAfterRefreshes(
+    const result = await tap.resolveAndroidStableTapTargetAfterRefreshes(
       { text: "Ghost Element", action: "tap" },
       { screenSize: { width: 1080, height: 1920 } },
       "tap",
@@ -304,7 +395,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
     );
 
     expect(result.ok).toBe(false);
-    expect(result.error).toContain("could not re-find the target");
+    expect(failedRefind(result).error).toContain("could not re-find the target");
   });
 
   test("fails when bounds never stabilize (shifting every attempt)", async () => {
@@ -315,15 +406,15 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
     // element keeps moving for the entire wall-clock budget (the stability loop is
     // deadline-bounded, not attempt-count-bounded).
     let idx = 0;
-    (tap as any).refreshViewHierarchy = async () => vh;
-    (tap as any).findElementInHierarchy = () => {
+    tap.refreshViewHierarchy = async () => vh;
+    tap.findElementInHierarchy = () => {
       const element = makeElement({ left: idx * 20, top: 0, right: idx * 20 + 100, bottom: 50 });
       idx++;
-      return { selection: { element }, containerFound: false };
+      return { selection: makeSelection(element), containerFound: false };
     };
-    (tap as any).resolveTapTargetElement = (el: Element) => ({ element: el, usedParent: false });
+    tap.resolveTapTargetElement = (el: Element) => ({ element: el, usedParent: false });
 
-    const result = await (tap as any).resolveAndroidStableTapTargetAfterRefreshes(
+    const result = await tap.resolveAndroidStableTapTargetAfterRefreshes(
       { text: "Row", sibling: true, action: "tap" },
       { screenSize: { width: 1080, height: 1920 } },
       "tap",
@@ -331,7 +422,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
     );
 
     expect(result.ok).toBe(false);
-    expect(result.error).toContain("could not re-find the target");
+    expect(failedRefind(result).error).toContain("could not re-find the target");
   });
 
   // Regression for #1949: the target row is absent while a spinner is up and only
@@ -339,10 +430,9 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
   // that detecting a loading indicator extends BOTH the wall-clock budget and the
   // productive-poll floor, and assert elapsed time symbolically so the specific budget
   // values (not just "some big number") are what's under test.
-  const BASE_BUDGET_MS = (TapOnElement as any).ANDROID_PRE_TAP_REFIND_BUDGET_MS as number;
-  const LOADING_BUDGET_MS = (TapOnElement as any)
-    .ANDROID_PRE_TAP_REFIND_BUDGET_MS_WHEN_LOADING as number;
-  const MIN_POLLS = (TapOnElement as any).ANDROID_PRE_TAP_REFIND_MIN_POLLS as number;
+  const BASE_BUDGET_MS = ANDROID_PRE_TAP_REFIND_BUDGET_MS;
+  const LOADING_BUDGET_MS = ANDROID_PRE_TAP_REFIND_BUDGET_MS_WHEN_LOADING;
+  const MIN_POLLS = ANDROID_PRE_TAP_REFIND_MIN_POLLS;
 
   const LOADING_HIERARCHY: ViewHierarchyResult = {
     hierarchy: {
@@ -368,19 +458,19 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
     },
   ): { calls: () => number } {
     let call = 0;
-    (tap as any).refreshViewHierarchy = async () => {
+    tap.refreshViewHierarchy = async () => {
       if (opts.refreshDelayMs) {
         await timer.sleep(opts.refreshDelayMs);
       }
       const loading = opts.loadingFromCall !== undefined && call + 1 >= opts.loadingFromCall;
       return loading ? LOADING_HIERARCHY : (opts.hierarchy ?? makeHierarchy());
     };
-    (tap as any).findElementInHierarchy = () => {
+    tap.findElementInHierarchy = () => {
       call++;
       const element = call >= opts.appearsOnCall ? makeElement(STABLE_BOUNDS) : null;
-      return { selection: { element }, containerFound: false };
+      return { selection: makeSelection(element), containerFound: false };
     };
-    (tap as any).resolveTapTargetElement = (el: Element) => ({ element: el, usedParent: false });
+    tap.resolveTapTargetElement = (el: Element) => ({ element: el, usedParent: false });
     return { calls: () => call };
   }
 
@@ -391,7 +481,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
     stubLateAppearingTarget(tap, timer, { appearsOnCall: 25, hierarchy: LOADING_HIERARCHY });
 
     const t0 = timer.now();
-    const result = await (tap as any).resolveAndroidStableTapTargetAfterRefreshes(
+    const result = await tap.resolveAndroidStableTapTargetAfterRefreshes(
       { text: "Row", action: "tap" },
       { screenSize: { width: 1080, height: 1920 } },
       "tap",
@@ -399,7 +489,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
     );
 
     expect(result.ok).toBe(true);
-    expect(result.tapElement.bounds).toEqual(STABLE_BOUNDS);
+    expect(successfulRefind(result).tapElement.bounds).toEqual(STABLE_BOUNDS);
     // Proves the extension was load-bearing: it kept polling past the base budget.
     expect(timer.now() - t0).toBeGreaterThan(BASE_BUDGET_MS);
     expect(timer.now() - t0).toBeLessThan(LOADING_BUDGET_MS);
@@ -411,7 +501,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
     stubLateAppearingTarget(tap, timer, { appearsOnCall: 25 });
 
     const t0 = timer.now();
-    const result = await (tap as any).resolveAndroidStableTapTargetAfterRefreshes(
+    const result = await tap.resolveAndroidStableTapTargetAfterRefreshes(
       { text: "Row", action: "tap" },
       { screenSize: { width: 1080, height: 1920 } },
       "tap",
@@ -419,7 +509,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
     );
 
     expect(result.ok).toBe(false);
-    expect(result.error).toContain("could not re-find the target");
+    expect(failedRefind(result).error).toContain("could not re-find the target");
     // Decisive: it gave up AT the base budget, not merely "before the element" — the
     // elapsed time pins the 2500ms value, so raising the base budget fails this loudly.
     const elapsed = timer.now() - t0;
@@ -437,7 +527,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
       refreshDelayMs: 800,
     });
 
-    const result = await (tap as any).resolveAndroidStableTapTargetAfterRefreshes(
+    const result = await tap.resolveAndroidStableTapTargetAfterRefreshes(
       { text: "Row", action: "tap" },
       { screenSize: { width: 1080, height: 1920 } },
       "tap",
@@ -457,7 +547,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
     stubLateAppearingTarget(tap, timer, { appearsOnCall: 25, loadingFromCall: 11 });
 
     const t0 = timer.now();
-    const result = await (tap as any).resolveAndroidStableTapTargetAfterRefreshes(
+    const result = await tap.resolveAndroidStableTapTargetAfterRefreshes(
       { text: "Row", action: "tap" },
       { screenSize: { width: 1080, height: 1920 } },
       "tap",
@@ -477,7 +567,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
     });
 
     const t0 = timer.now();
-    const result = await (tap as any).resolveAndroidStableTapTargetAfterRefreshes(
+    const result = await tap.resolveAndroidStableTapTargetAfterRefreshes(
       { text: "Row", action: "tap" },
       { screenSize: { width: 1080, height: 1920 } },
       "tap",
@@ -495,17 +585,17 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
     // not shrink it back (the target appears past the base budget's reach).
     const { tap } = createTapOnElement();
     let call = 0;
-    (tap as any).refreshViewHierarchy = async () => {
+    tap.refreshViewHierarchy = async () => {
       call++;
       return call === 1 ? LOADING_HIERARCHY : makeHierarchy();
     };
-    (tap as any).findElementInHierarchy = () => ({
-      selection: { element: call >= 40 ? makeElement(STABLE_BOUNDS) : null },
+    tap.findElementInHierarchy = () => ({
+      selection: makeSelection(call >= 40 ? makeElement(STABLE_BOUNDS) : null),
       containerFound: false,
     });
-    (tap as any).resolveTapTargetElement = (el: Element) => ({ element: el, usedParent: false });
+    tap.resolveTapTargetElement = (el: Element) => ({ element: el, usedParent: false });
 
-    const result = await (tap as any).resolveAndroidStableTapTargetAfterRefreshes(
+    const result = await tap.resolveAndroidStableTapTargetAfterRefreshes(
       { text: "Row", action: "tap" },
       { screenSize: { width: 1080, height: 1920 } },
       "tap",
@@ -526,7 +616,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
       { hierarchy: vh, element: el },
     ]);
 
-    const result = await (tap as any).resolveAndroidStableTapTargetAfterRefreshes(
+    const result = await tap.resolveAndroidStableTapTargetAfterRefreshes(
       { text: "Contact Name", action: "tap" },
       { screenSize: { width: 1080, height: 1920 } },
       "tap",
@@ -534,7 +624,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
     );
 
     expect(result.ok).toBe(true);
-    expect(result.tapElement).toBe(el);
+    expect(successfulRefind(result).tapElement).toBe(el);
   });
 
   test("null hierarchies do not consume refind attempts — recovers after many nulls", async () => {
@@ -552,7 +642,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
 
     stubStabilityDeps(tap, sequence);
 
-    const result = await (tap as any).resolveAndroidStableTapTargetAfterRefreshes(
+    const result = await tap.resolveAndroidStableTapTargetAfterRefreshes(
       { text: "Contact Name", action: "tap" },
       { screenSize: { width: 1080, height: 1920 } },
       "tap",
@@ -560,7 +650,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
     );
 
     expect(result.ok).toBe(true);
-    expect(result.tapElement).toBe(el);
+    expect(successfulRefind(result).tapElement).toBe(el);
   });
 
   test("aborts with specific error after too many consecutive null hierarchies", async () => {
@@ -568,7 +658,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
 
     stubStabilityDeps(tap, [{ hierarchy: null, element: null }]);
 
-    const result = await (tap as any).resolveAndroidStableTapTargetAfterRefreshes(
+    const result = await tap.resolveAndroidStableTapTargetAfterRefreshes(
       { text: "Contact Name", action: "tap" },
       { screenSize: { width: 1080, height: 1920 } },
       "tap",
@@ -576,7 +666,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
     );
 
     expect(result.ok).toBe(false);
-    expect(result.error).toContain("accessibility service was unreachable");
+    expect(failedRefind(result).error).toContain("accessibility service was unreachable");
   });
 
   test("consecutive null counter resets when hierarchy returns", async () => {
@@ -593,7 +683,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
 
     stubStabilityDeps(tap, sequence);
 
-    const result = await (tap as any).resolveAndroidStableTapTargetAfterRefreshes(
+    const result = await tap.resolveAndroidStableTapTargetAfterRefreshes(
       { text: "Contact Name", sibling: true, action: "tap" },
       { screenSize: { width: 1080, height: 1920 } },
       "tap",
@@ -601,7 +691,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
     );
 
     expect(result.ok).toBe(true);
-    expect(result.tapElement).toBe(el);
+    expect(successfulRefind(result).tapElement).toBe(el);
   });
 
   test("uses longer delay after null hierarchy vs normal refind delay", async () => {
@@ -622,7 +712,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
       { hierarchy: vh, element: el },
     ]);
 
-    await (tap as any).resolveAndroidStableTapTargetAfterRefreshes(
+    await tap.resolveAndroidStableTapTargetAfterRefreshes(
       { text: "Contact Name", action: "tap" },
       { screenSize: { width: 1080, height: 1920 } },
       "tap",
@@ -646,7 +736,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
       { hierarchy: vh, element: elStable },
     ]);
 
-    const result = await (tap as any).resolveAndroidStableTapTargetAfterRefreshes(
+    const result = await tap.resolveAndroidStableTapTargetAfterRefreshes(
       { text: "Row", sibling: true, action: "tap" },
       { screenSize: { width: 1080, height: 1920 } },
       "tap",
@@ -654,7 +744,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
     );
 
     expect(result.ok).toBe(true);
-    expect(result.tapElement.bounds).toEqual(STABLE_BOUNDS);
+    expect(successfulRefind(result).tapElement.bounds).toEqual(STABLE_BOUNDS);
   });
 
   test("respects abort signal", async () => {
@@ -666,7 +756,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
 
     stubStabilityDeps(tap, [{ hierarchy: vh, element: el }]);
 
-    const resultPromise = (tap as any).resolveAndroidStableTapTargetAfterRefreshes(
+    const resultPromise = tap.resolveAndroidStableTapTargetAfterRefreshes(
       { text: "Contact Name", action: "tap" },
       { screenSize: { width: 1080, height: 1920 } },
       "tap",
@@ -700,16 +790,16 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
     };
 
     function stubRefreshedSelection(tap: TapOnElement, selection: ElementSelectionResult): void {
-      (tap as any).refreshViewHierarchy = async () => makeHierarchy();
-      (tap as any).findElementInHierarchy = () => ({ selection, containerFound: false });
-      (tap as any).resolveTapTargetElement = (el: Element) => ({ element: el, usedParent: false });
+      tap.refreshViewHierarchy = async () => makeHierarchy();
+      tap.findElementInHierarchy = () => ({ selection, containerFound: false });
+      tap.resolveTapTargetElement = (el: Element) => ({ element: el, usedParent: false });
     }
 
     test("ok result exposes the refreshed selection, not the pre-refresh one", async () => {
       const { tap } = createTapOnElement();
       stubRefreshedSelection(tap, FRESH_SELECTION);
 
-      const result = await (tap as any).resolveAndroidStableTapTargetAfterRefreshes(
+      const result = await tap.resolveAndroidStableTapTargetAfterRefreshes(
         { text: "Contact Name", action: "tap" },
         { screenSize: { width: 1080, height: 1920 } },
         "tap",
@@ -717,25 +807,27 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
       );
 
       expect(result.ok).toBe(true);
-      expect(result.selection).toBe(FRESH_SELECTION);
-      expect(result.selection.indexInMatches).toBe(3);
-      expect(result.selection.totalMatches).toBe(4);
-      expect(result.selection.element.bounds).toEqual(FRESH_BOUNDS);
+      expect(successfulRefind(result).selection).toBe(FRESH_SELECTION);
+      expect(successfulRefind(result).selection.indexInMatches).toBe(3);
+      expect(successfulRefind(result).selection.totalMatches).toBe(4);
+      expect(successfulRefind(result).selection.element?.bounds).toEqual(FRESH_BOUNDS);
     });
 
     test("metadata rebuilt from the refreshed selection reflects the tapped node, not stale positional fields", async () => {
       const { tap } = createTapOnElement();
       stubRefreshedSelection(tap, FRESH_SELECTION);
 
-      const result = await (tap as any).resolveAndroidStableTapTargetAfterRefreshes(
+      const result = await tap.resolveAndroidStableTapTargetAfterRefreshes(
         { text: "Contact Name", action: "tap" },
         { screenSize: { width: 1080, height: 1920 } },
         "tap",
         false,
       );
 
-      const stale = (tap as any).buildSelectedElementMetadata(STALE_SELECTION);
-      const rebuilt = (tap as any).buildSelectedElementMetadata(result.selection);
+      const stale = selectedMetadata(tap.buildSelectedElementMetadata(STALE_SELECTION));
+      const rebuilt = selectedMetadata(
+        tap.buildSelectedElementMetadata(successfulRefind(result).selection),
+      );
 
       // The fix must yield the refreshed positional fields...
       expect(rebuilt.indexInMatches).toBe(3);
@@ -757,11 +849,10 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
     describe("rebuildSelectedElementMetadataAfterStability seam (#5897)", () => {
       test("rebuilds from the refreshed selection when it has an element", () => {
         const { tap } = createTapOnElement();
-        const previous = (tap as any).buildSelectedElementMetadata(STALE_SELECTION);
+        const previous = selectedMetadata(tap.buildSelectedElementMetadata(STALE_SELECTION));
 
-        const rebuilt = (tap as any).rebuildSelectedElementMetadataAfterStability(
-          previous,
-          FRESH_SELECTION,
+        const rebuilt = selectedMetadata(
+          tap.rebuildSelectedElementMetadataAfterStability(previous, FRESH_SELECTION),
         );
 
         // The refreshed selection's positional fields win over the stale previous.
@@ -774,7 +865,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
 
       test("falls back to the previous metadata when the refreshed selection has no element", () => {
         const { tap } = createTapOnElement();
-        const previous = (tap as any).buildSelectedElementMetadata(STALE_SELECTION);
+        const previous = selectedMetadata(tap.buildSelectedElementMetadata(STALE_SELECTION));
         const emptySelection: ElementSelectionResult = {
           element: null,
           indexInMatches: 0,
@@ -782,9 +873,8 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
           strategy: "first",
         } as unknown as ElementSelectionResult;
 
-        const rebuilt = (tap as any).rebuildSelectedElementMetadataAfterStability(
-          previous,
-          emptySelection,
+        const rebuilt = selectedMetadata(
+          tap.rebuildSelectedElementMetadataAfterStability(previous, emptySelection),
         );
 
         // No refreshed element to describe: keep the pre-refresh metadata intact.
@@ -797,18 +887,22 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
 });
 
 describe("shared capture pre-tap resolution", () => {
-  const captureHierarchy = (id: string, bounds: Element["bounds"]): ViewHierarchyResult => ({
-    hierarchy: {
-      node: {
-        bounds: { left: 0, top: 0, right: 1080, bottom: 1920 },
-        node: { "resource-id": id, text: "Contact Name", clickable: true, bounds },
+  const captureHierarchy = (id: string, bounds: Element["bounds"]): ViewHierarchyResult => {
+    const child = { "resource-id": id, text: "Contact Name", clickable: true, bounds };
+    return {
+      hierarchy: {
+        node: {
+          $: {},
+          bounds: { left: 0, top: 0, right: 1080, bottom: 1920 },
+          node: [{ $: child, bounds }],
+        },
       },
-    },
-  });
+    };
+  };
 
   test.each([false, true])(
     "fresh capture verifies native identity (changed=%s)",
-    async (changed) => {
+    async (changed: boolean) => {
       const { DefaultHierarchyCapture, getHierarchySnapshot } =
         await import("../../../src/features/observe/HierarchyCapture");
       const timer = new FakeTimer();
@@ -834,10 +928,10 @@ describe("shared capture pre-tap resolution", () => {
       const observed = await capture.capture({ freshness: "cached-ok" });
       const tap = new TapOnElement(
         { name: "test", platform: "android", deviceId: "capture-test" },
-        new FakeAdbClient(),
+        fakeAdb(),
         { timer, hierarchyCapture: capture },
       );
-      const result = await (tap as any).resolveAndroidStableTapTargetAfterRefreshes(
+      const result = await tap.resolveAndroidStableTapTargetAfterRefreshes(
         { text: "Contact Name", action: "tap" },
         { viewHierarchy: observed.hierarchy, screenSize: { width: 1080, height: 1920 } },
         "tap",
@@ -846,10 +940,12 @@ describe("shared capture pre-tap resolution", () => {
       expect(policies).toEqual(["cached-ok", "fresh"]);
       expect(result.ok).toBe(!changed);
       if (changed) {
-        expect(result.error).toContain("Stale tap target");
+        expect(failedRefind(result).error).toContain("Stale tap target");
       } else {
-        expect(result.tapElement.bounds).toEqual(SHIFTED_BOUNDS);
-        expect(getHierarchySnapshot(result.viewHierarchy)?.captureId).not.toBe(observed.captureId);
+        expect(successfulRefind(result).tapElement.bounds).toEqual(SHIFTED_BOUNDS);
+        expect(getHierarchySnapshot(successfulRefind(result).viewHierarchy)?.captureId).not.toBe(
+          observed.captureId,
+        );
       }
     },
   );
@@ -861,13 +957,18 @@ test("tap rejects a reused generated ordinal after a fresh capture removes a dup
   const { DefaultHierarchyCapture } =
     await import("../../../src/features/observe/HierarchyCapture");
   const tree = (count: number): ViewHierarchyResult => {
-    const hierarchy = {
+    const hierarchy: ViewHierarchyResult["hierarchy"] = {
       node: {
+        $: {},
         bounds: { left: 0, top: 0, right: 1080, bottom: 1920 },
         node: Array.from({ length: count }, (_, index) => ({
+          $: {
+            "view-id": `0000000${index + 1}-0000-4000-8000-000000000000`,
+            text: "Same",
+            clickable: true,
+            bounds: STABLE_BOUNDS,
+          },
           "view-id": `0000000${index + 1}-0000-4000-8000-000000000000`,
-          text: "Same",
-          clickable: true,
           bounds: STABLE_BOUNDS,
         })),
       },
@@ -894,15 +995,15 @@ test("tap rejects a reused generated ordinal after a fresh capture removes a dup
   )[1].nodeKey!;
   const tap = new TapOnElement(
     { name: "test", platform: "android", deviceId: "ordinal-tap" },
-    new FakeAdbClient(),
+    fakeAdb(),
     { timer, hierarchyCapture: capture },
   );
-  const result = await (tap as any).resolveAndroidStableTapTargetAfterRefreshes(
+  const result = await tap.resolveAndroidStableTapTargetAfterRefreshes(
     { elementId: nodeKey, action: "tap" },
     { viewHierarchy: before.hierarchy },
     "tap",
     false,
   );
   expect(result.ok).toBe(false);
-  expect(result.error).toContain("Stale reference");
+  expect(failedRefind(result).error).toContain("Stale reference");
 });

@@ -106,7 +106,7 @@ interface TapOnElementDependencies {
   visionConfig?: VisionFallbackConfig;
   screenshotCapturer?: ScreenshotCapturer;
   visionAnalyzer?: VisionAnalyzer;
-  selectionStateTracker?: SelectionStateTracker;
+  selectionStateTracker?: Pick<SelectionStateTracker, "prepare" | "finalize">;
   accessibilityDetector?: AccessibilityDetector;
   timer?: Timer;
   elementSelector?: ElementSelector;
@@ -153,10 +153,25 @@ const POST_TAP_SETTLE_QUIET_PERIOD_MS = 1000;
  *  was detected. Just enough to let any inflight gesture queue drain. */
 const PRE_RETRY_DELAY_MS = 100;
 
+export const ANDROID_PRE_TAP_REFIND_BUDGET_MS = 2500;
+export const ANDROID_PRE_TAP_REFIND_MIN_POLLS = 8;
+export const ANDROID_PRE_TAP_REFIND_BUDGET_MS_WHEN_LOADING = 10000;
+
+/** Test-only typed override surface for pre-tap stability tests; production callers must not depend on it. */
+export interface TapPreTapStabilitySeam {
+  refreshViewHierarchy: TapOnElement["refreshViewHierarchy"];
+  findElementInHierarchy: TapOnElement["findElementInHierarchy"];
+  resolveTapTargetElement: TapOnElement["resolveTapTargetElement"];
+  resolveAndroidStableTapTargetAfterRefreshes: TapOnElement["resolveAndroidStableTapTargetAfterRefreshes"];
+  staleSyntheticTarget: TapOnElement["staleSyntheticTarget"];
+  buildSelectedElementMetadata: TapOnElement["buildSelectedElementMetadata"];
+  rebuildSelectedElementMetadataAfterStability: TapOnElement["rebuildSelectedElementMetadataAfterStability"];
+}
+
 /**
  * Command to tap on UI element containing specified text
  */
-export class TapOnElement extends BaseVisualChange {
+export class TapOnElement extends BaseVisualChange implements TapPreTapStabilitySeam {
   private finder: ElementFinder;
   private geometry: ElementGeometry;
   private elementParser: ElementParser;
@@ -164,7 +179,7 @@ export class TapOnElement extends BaseVisualChange {
   private visionConfig: VisionFallbackConfig;
   private screenshotCapturer: ScreenshotCapturer;
   private visionAnalyzer: VisionAnalyzer | undefined;
-  private selectionStateTracker: SelectionStateTracker;
+  private selectionStateTracker: Pick<SelectionStateTracker, "prepare" | "finalize">;
   private accessibilityDetector: AccessibilityDetector;
   private elementSelector: ElementSelector;
   private viewHierarchy: ViewHierarchy;
@@ -200,8 +215,8 @@ export class TapOnElement extends BaseVisualChange {
    * counts toward the deadline: time spent recovering from "no hierarchy" responses
    * is excluded (see {@link ANDROID_PRE_TAP_NO_HIERARCHY_MAX_CONSECUTIVE}).
    */
-  private static readonly ANDROID_PRE_TAP_REFIND_BUDGET_MS = 2500;
-  private static readonly ANDROID_PRE_TAP_REFIND_MIN_POLLS = 8;
+  private static readonly ANDROID_PRE_TAP_REFIND_BUDGET_MS = ANDROID_PRE_TAP_REFIND_BUDGET_MS;
+  private static readonly ANDROID_PRE_TAP_REFIND_MIN_POLLS = ANDROID_PRE_TAP_REFIND_MIN_POLLS;
 
   /**
    * Extended deadline + poll floor (hard ceilings) applied when the tree shows a
@@ -209,7 +224,8 @@ export class TapOnElement extends BaseVisualChange {
    * several seconds while content loads; give the re-find loop more wall-clock time
    * and more guaranteed polls before aborting.
    */
-  private static readonly ANDROID_PRE_TAP_REFIND_BUDGET_MS_WHEN_LOADING = 10000;
+  private static readonly ANDROID_PRE_TAP_REFIND_BUDGET_MS_WHEN_LOADING =
+    ANDROID_PRE_TAP_REFIND_BUDGET_MS_WHEN_LOADING;
   private static readonly ANDROID_PRE_TAP_REFIND_MIN_POLLS_WHEN_LOADING = 32;
 
   /**
@@ -666,7 +682,8 @@ export class TapOnElement extends BaseVisualChange {
     return results[0] ?? { screenChanged: false, basis: "insufficient observation data" };
   }
 
-  private async deriveTapEffectAfterPostTapObservation(
+  /** @internal Test seam for pre-tap stability tests (#7992); not part of the public API. */
+  async deriveTapEffectAfterPostTapObservation(
     previousObservation: ObserveResult | null,
     currentObservation: ObserveResult,
     signal?: AbortSignal,
@@ -888,7 +905,8 @@ export class TapOnElement extends BaseVisualChange {
    * Only ever retracts freshness — never invents a `screenChanged: true` an
    * observation didn't earn — and only when `effect` itself claims a change.
    */
-  private enforceFreshnessConsistencyWithEffect(
+  /** @internal Test seam for pre-tap stability tests (#7992); not part of the public API. */
+  enforceFreshnessConsistencyWithEffect(
     previousObservation: ObserveResult | null,
     result: { effect?: TapOnElementResult["effect"]; observation?: ObserveResult },
   ): void {
@@ -1039,7 +1057,8 @@ export class TapOnElement extends BaseVisualChange {
     }
   }
 
-  private async prepareSelectionCapture(
+  /** @internal Test seam for pre-tap stability tests (#7992); not part of the public API. */
+  async prepareSelectionCapture(
     action: string,
     observation: ObserveResult,
     element: Element,
@@ -1053,7 +1072,8 @@ export class TapOnElement extends BaseVisualChange {
     });
   }
 
-  private findElementInHierarchy(
+  /** @internal Test seam for pre-tap stability tests (#7992); not part of the public API. */
+  findElementInHierarchy(
     options: TapOnElementOptions,
     viewHierarchy: ViewHierarchyResult,
   ): { selection: ElementSelectionResult; containerFound: boolean } {
@@ -1440,7 +1460,8 @@ export class TapOnElement extends BaseVisualChange {
     return filtered ?? rawHierarchy;
   }
 
-  private async refreshViewHierarchy(
+  /** @internal Test seam for pre-tap stability tests (#7992); not part of the public API. */
+  async refreshViewHierarchy(
     timeoutMs: number,
     _screenSize?: ObserveResult["screenSize"],
     signal?: AbortSignal,
@@ -1517,9 +1538,10 @@ export class TapOnElement extends BaseVisualChange {
    * {@link androidPreTapConsecutiveStableMatchesRequired}). Refuses to fall back to pre-refresh
    * coordinates when the refreshed tree does not contain a matching target.
    */
-  private async resolveAndroidStableTapTargetAfterRefreshes(
+  /** @internal Test seam for pre-tap stability tests (#7992); not part of the public API. */
+  async resolveAndroidStableTapTargetAfterRefreshes(
     options: TapOnElementOptions,
-    observeResult: ObserveResult,
+    observeResult: Partial<Pick<ObserveResult, "viewHierarchy" | "screenSize">>,
     action: TapOnElementOptions["action"],
     requireResourceId: boolean,
     signal?: AbortSignal,
@@ -1723,7 +1745,8 @@ export class TapOnElement extends BaseVisualChange {
     };
   }
 
-  private staleSyntheticTarget(
+  /** @internal Test seam for pre-tap stability tests (#7992); not part of the public API. */
+  staleSyntheticTarget(
     original: Element | null,
     previous: ViewHierarchyResult | undefined,
     current: ViewHierarchyResult,
@@ -1891,7 +1914,8 @@ export class TapOnElement extends BaseVisualChange {
     };
   }
 
-  private buildSelectedElementMetadata(
+  /** @internal Test seam for pre-tap stability tests (#7992); not part of the public API. */
+  buildSelectedElementMetadata(
     selection: ElementSelectionResult,
   ): TapOnSelectedElement | undefined {
     if (!selection.element) {
@@ -1944,7 +1968,8 @@ export class TapOnElement extends BaseVisualChange {
    * This is the seam #5897 pins directly: the decision lived inline in `execute`
    * as a single line that no test exercised, so a refactor could silently drop it.
    */
-  private rebuildSelectedElementMetadataAfterStability(
+  /** @internal Test seam for pre-tap stability tests (#7992); not part of the public API. */
+  rebuildSelectedElementMetadataAfterStability(
     previous: TapOnSelectedElement | undefined,
     selection: ElementSelectionResult,
   ): TapOnSelectedElement | undefined {
@@ -2159,7 +2184,8 @@ export class TapOnElement extends BaseVisualChange {
       : `tapOn ensureChecked: tapped element but checked is now ${observed} (expected ${options.ensureChecked})`;
   }
 
-  private resolveTapTargetElement(
+  /** @internal Test seam for pre-tap stability tests (#7992); not part of the public API. */
+  resolveTapTargetElement(
     element: Element,
     viewHierarchy: ViewHierarchyResult | null,
     action: string,
@@ -2635,7 +2661,8 @@ export class TapOnElement extends BaseVisualChange {
    * @param signal - Abort signal
    * @param options - Tap options (for focusFirst parameter)
    */
-  private async executeAndroidTap(
+  /** @internal Test seam for pre-tap stability tests (#7992); not part of the public API. */
+  async executeAndroidTap(
     action: string,
     x: number,
     y: number,
@@ -2799,7 +2826,8 @@ export class TapOnElement extends BaseVisualChange {
     return this.resolveTapTargetElement(refound, hierarchy, action, requireResourceId).element;
   }
 
-  private async retryTapIfNoChange(
+  /** @internal Test seam for pre-tap stability tests (#7992); not part of the public API. */
+  async retryTapIfNoChange(
     preTapHash: string,
     tapPoint: { x: number; y: number },
     action: string,

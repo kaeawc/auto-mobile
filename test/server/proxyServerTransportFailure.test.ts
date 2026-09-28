@@ -136,7 +136,11 @@ describe("proxy server device-control transport errors", () => {
     });
   });
 
-  test("preserves daemon overload details for all list handlers", async () => {
+  test.each([
+    ["tools/list", (client: Client) => client.listTools()],
+    ["resources/list", (client: Client) => client.listResources()],
+    ["resources/templates/list", (client: Client) => client.listResourceTemplates()],
+  ] as const)("preserves daemon overload details for %s", async (_handler, request) => {
     isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
     const fakeClient = new FakeDaemonClient({
       onCallDaemonMethod: (method) => {
@@ -177,24 +181,18 @@ describe("proxy server device-control transport errors", () => {
       await client.connect(clientTransport);
       await proxy.callTool("observe", {});
 
-      for (const request of [
-        client.listTools(),
-        client.listResources(),
-        client.listResourceTemplates(),
-      ]) {
-        try {
-          await request;
-          throw new Error("expected list request to reject");
-        } catch (error) {
-          expect(error).toBeInstanceOf(McpError);
-          expect((error as McpError).data).toMatchObject({
-            error: {
-              code: "daemon_overloaded",
-              retryable: true,
-              retryAfterMs: 250,
-            },
-          });
-        }
+      try {
+        await request(client);
+        throw new Error("expected list request to reject");
+      } catch (error) {
+        expect(error).toBeInstanceOf(McpError);
+        expect((error as McpError).data).toMatchObject({
+          error: {
+            code: "daemon_overloaded",
+            retryable: true,
+            retryAfterMs: 250,
+          },
+        });
       }
     } finally {
       await client.close();

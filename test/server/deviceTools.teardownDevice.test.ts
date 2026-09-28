@@ -95,6 +95,9 @@ class TeardownDeviceManager extends FakeDeviceUtils {
    * review).
    */
   readonly bootedDiscoveryOptions: Array<BootedDeviceDiscoveryOptions | undefined> = [];
+  failDiscoveryOnCall?: number;
+  bootedDiscoveryCount = 0;
+  discoveryFailureTriggered = false;
   destroyError?: Error;
   killError?: Error;
   replacementAfterKill?: BootedDevice;
@@ -121,6 +124,11 @@ class TeardownDeviceManager extends FakeDeviceUtils {
     options?: BootedDeviceDiscoveryOptions,
   ): Promise<BootedDeviceDiscovery> {
     this.bootedDiscoveryOptions.push(options);
+    this.bootedDiscoveryCount++;
+    if (this.bootedDiscoveryCount === this.failDiscoveryOnCall) {
+      this.discoveryFailureTriggered = true;
+      throw new Error("transient post-release discovery failure");
+    }
     if (
       this.discoveriesSinceKill !== undefined &&
       this.clearBootedDevicesAfterDiscoveries !== undefined
@@ -761,6 +769,42 @@ describe("deleteDevice handler", () => {
     expect(responseBody(response).state).toBe("destroyed");
     expect(pool.getDevice(device.deviceId!)).toBeNull();
     expect(sessionManager.getSessionForDevice(device.deviceId!)).toBeNull();
+  });
+
+  test("retains already-stopped pooled ownership when its first recheck fails", async () => {
+    const timer = new FakeTimer();
+    const device: DeviceInfo = {
+      platform: "ios",
+      name: "iPhone 16",
+      deviceId: "IOS-DEVICE-1",
+      isRunning: false,
+    };
+    const repository = new FakeDeviceSessionRepository();
+    const sessionManager = new SessionManager(timer, repository);
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      manager,
+      new DefaultRetryExecutor(timer),
+      repository,
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    const bootedDevice: BootedDevice = { ...device, deviceId: device.deviceId! };
+    manager.setBootedDevices("ios", [bootedDevice]);
+    await pool.addDevice(bootedDevice, device);
+    await pool.assignMultipleDevices(["session-1"], 1_000, "ios");
+    manager.setBootedDevices("ios", []);
+    manager.setDeviceImages("ios", [device]);
+    manager.failDiscoveryOnCall = manager.bootedDiscoveryCount + 2;
+
+    const response = await teardownTool().handler(request("ios", device.deviceId!, device.name));
+
+    expect(manager.discoveryFailureTriggered).toBe(true);
+    expect(responseBody(response).state).toBe("failed");
+    expect(pool.getDevice(device.deviceId!)).not.toBeNull();
+    expect(pool.getAvailableDeviceCount()).toBe(0);
   });
 
   test("stops recordings for a pooled simulator that was already stopped", async () => {

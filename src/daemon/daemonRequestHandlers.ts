@@ -60,6 +60,7 @@ export interface DaemonStateAccess {
     getStats(): DevicePoolStats;
     releaseDevice(deviceId: string, expectedSessionId: string): Promise<void>;
     getAllDevices?(): PooledDevice[];
+    isPooledIdentityUnresolved?(deviceId: string): boolean;
     getRecoveryPolicy?(): DeviceRecoveryPolicy;
     getRecoveryEligibility?(deviceId: string): DeviceRecoveryEligibility;
     assertSessionReadyForAutomation?(sessionId: string): void;
@@ -94,6 +95,11 @@ export type DaemonMethodResult = {
   result?: Record<string, unknown>;
   error?: string;
 };
+
+/** Device-session listing entry; a quarantined UUID cannot be subscribed to until identity resolves. */
+export interface ListedDeviceSessionRecord extends DeviceSessionRecord {
+  identityUnresolved?: true;
+}
 
 export async function handleDaemonRequest(
   request: DaemonRequest,
@@ -330,11 +336,15 @@ export async function handleDaemonRequest(
     }
     case DAEMON_LIST_DEVICE_SESSIONS_METHOD: {
       const registry = state.getDeviceSessionRegistry();
-      const deviceSessions = registry.list().map((record) => ({
+      const pool = state.getDevicePool();
+      const deviceSessions: ListedDeviceSessionRecord[] = registry.list().map((record) => ({
         deviceSessionUuid: record.deviceSessionUuid,
         deviceId: record.deviceId,
         platform: record.platform,
         epochStartedAt: record.epochStartedAt,
+        ...(pool.isPooledIdentityUnresolved?.(record.deviceId) === true
+          ? { identityUnresolved: true as const }
+          : {}),
       }));
       return {
         success: true,

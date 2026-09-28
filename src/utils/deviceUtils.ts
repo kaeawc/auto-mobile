@@ -450,14 +450,19 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     this.timer = timer;
   }
 
-  private async canDiscoverIosLocally(): Promise<boolean> {
+  private async canDiscoverIosLocally(signal?: AbortSignal): Promise<boolean> {
+    const discoverySignal = combineWithAmbientAbort(signal);
+    discoverySignal?.throwIfAborted();
     if (process.platform === "darwin") {
       return true;
     }
 
     try {
-      return await this.simctl.isAvailable();
+      const available = await this.simctl.isAvailable({ signal: discoverySignal });
+      discoverySignal?.throwIfAborted();
+      return available;
     } catch (error) {
+      discoverySignal?.throwIfAborted();
       // simctl.isAvailable() throws on non-macOS hosts/missing Xcode tools; treat as "no local iOS discovery".
       logger.debug(`src/utils/deviceUtils.ts fallback failed: ${error}`, error);
       return false;
@@ -466,8 +471,9 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
 
   private async listIosDeviceImagesIfAvailable(options: {
     swallowDiscoveryErrors: boolean;
+    signal?: AbortSignal;
   }): Promise<DeviceInfo[]> {
-    if (!(await this.canDiscoverIosLocally())) {
+    if (!(await this.canDiscoverIosLocally(options.signal))) {
       return [];
     }
     try {
@@ -518,11 +524,12 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
       case "android":
         return this.listAndroidDeviceImages(signal);
       case "ios":
-        return this.listIosDeviceImagesIfAvailable({ swallowDiscoveryErrors: false });
+        return this.listIosDeviceImagesIfAvailable({ swallowDiscoveryErrors: false, signal });
       case "either":
         const emulators = await this.listAndroidDeviceImages(signal);
         const simulators = await this.listIosDeviceImagesIfAvailable({
           swallowDiscoveryErrors: true,
+          signal,
         });
         return [...emulators, ...simulators];
     }
@@ -726,7 +733,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     }
 
     if (platform === "ios" || platform === "either") {
-      if (!(await this.canDiscoverIosLocally())) {
+      if (!(await this.canDiscoverIosLocally(options.signal))) {
         discoveryErrors.ios = {
           code: "unavailable",
           message: "iOS device inventory is unavailable.",
@@ -796,7 +803,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     // iOS tooling that is genuinely unavailable on this host cannot confirm a
     // device is gone, so report it as un-discovered rather than empty. Neither
     // source ran, so neither is authoritative.
-    if (!(await this.canDiscoverIosLocally())) {
+    if (!(await this.canDiscoverIosLocally(signal))) {
       return {
         devices: [],
         simulatorsSucceeded: false,

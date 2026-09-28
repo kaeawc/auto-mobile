@@ -341,6 +341,33 @@ describe("MultiPlatformDeviceManager", () => {
     });
   });
 
+  test("getBootedDevicesDetailed propagates cancellation during the local simctl probe", async () => {
+    await withProcessPlatform("linux", async () => {
+      const controller = new AbortController();
+      const cancellation = new Error("iOS probe cancelled");
+      let probeSignal: AbortSignal | undefined;
+      const fakeSimctl = {
+        isAvailable: async (options?: { signal?: AbortSignal }) => {
+          probeSignal = options?.signal;
+          return await new Promise<boolean>((resolve) => {
+            options?.signal?.addEventListener("abort", () => resolve(false), { once: true });
+          });
+        },
+      } as unknown as SimCtlClient;
+      const manager = new MultiPlatformDeviceManager(
+        new FakeAdbClient() as unknown as AdbClient,
+        fakeSimctl,
+        createFakeAndroidEmulator({}),
+      );
+
+      const discovery = manager.getBootedDevicesDetailed("ios", { signal: controller.signal });
+      await Promise.resolve();
+      expect(probeSignal).toBe(controller.signal);
+      controller.abort(cancellation);
+      await expect(discovery).rejects.toBe(cancellation);
+    });
+  });
+
   test("getBootedDevicesDetailed aborts while a shared physical iOS discovery is pending", async () => {
     await withProcessPlatform("darwin", async () => {
       const controller = new AbortController();

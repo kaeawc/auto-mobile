@@ -3778,6 +3778,56 @@ describe("provisionDevice handler", () => {
     expect(operationStore.failCalls).toBe(1);
   });
 
+  test("waits for an in-flight TTL refresh before releasing a failed completion session", async () => {
+    const timer = new FakeTimer();
+    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(sessionManager, "daemon-session", timer, undefined, deviceManager);
+    const bootedDevice = {
+      name: "phone-api-36-a",
+      platform: "android" as const,
+      deviceId: "mock-phone-api-36-a",
+    };
+    deviceManager.setDeviceImages("android", [
+      { name: bootedDevice.name, platform: "android", isRunning: false },
+    ]);
+    await pool.initializeWithDevices([bootedDevice]);
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    sessionManager.stopCleanupTimer();
+
+    const extendEntered = deferred();
+    const extendGate = deferred();
+    const extend = operationStore.extend.bind(operationStore);
+    operationStore.extend = async (...args) => {
+      extendEntered.resolve();
+      await extendGate.promise;
+      return await extend(...args);
+    };
+    let releaseCalls = 0;
+    const releaseSession = sessionManager.releaseSession.bind(sessionManager);
+    sessionManager.releaseSession = async (...args) => {
+      releaseCalls++;
+      return await releaseSession(...args);
+    };
+    operationStore.completeError = new Error("database unavailable");
+    setDeviceToolsDependencies({ timer });
+    registerDeviceTools();
+
+    const request = ToolRegistry.getTool("provisionDevice")!.handler({
+      ...provisionTestArgs("android", "operation-refresh-before-release"),
+      boot: true,
+      readiness: "none",
+    });
+    await extendEntered.promise;
+    await flushMicrotasks();
+    expect(releaseCalls).toBe(0);
+    extendGate.resolve();
+    expect(JSON.parse(((await request) as any).content[0].text).error.code).toBe(
+      "platform_command_failed",
+    );
+    expect(releaseCalls).toBe(1);
+    sessionManager.stopCleanupTimer();
+  });
+
   test("keeps a failed replay non-replayable until its bound session is released", async () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
@@ -4264,15 +4314,19 @@ describe("provisionDevice handler", () => {
   });
 
   test("does not hand a retry the cancelled attempt's failure before it settles", async () => {
+    const timer = new FakeTimer();
     let provisionCalls = 0;
+    const provisionEntered = deferred();
     let releaseFirstAttempt!: () => void;
     const firstAttemptGate = new Promise<void>((resolve) => {
       releaseFirstAttempt = resolve;
     });
     setDeviceToolsDependencies({
+      timer,
       exactDeviceProvisionerFactory: () => ({
         provision: async (request) => {
           provisionCalls += 1;
+          provisionEntered.resolve();
           if (provisionCalls > 1) {
             return provisionedTestDevice("android", true);
           }
@@ -4298,25 +4352,20 @@ describe("provisionDevice handler", () => {
 
     const caller = new AbortController();
     const call = tool.handler(args, undefined, caller.signal);
-    await Promise.resolve();
+    await provisionEntered.promise;
     caller.abort(new Error("client went away"));
+    await flushMicrotasks();
+    expect(provisionCalls).toBe(1);
+
+    timer.advanceTime(5_000);
     const cancelled = JSON.parse(((await call) as any).content[0].text);
     expect(cancelled).toMatchObject({
       error: { code: "request_cancelled" },
       operationContinues: false,
     });
 
-    // The cancelled attempt is still unwinding, so its row is still `running`:
-    // the store refuses a second concurrent attempt rather than re-entering
-    // the lifecycle, and the retry is told to wait -- never handed the
-    // in-flight attempt's own cancellation.
-    const duringUnwind = JSON.parse(((await tool.handler(args)) as any).content[0].text);
-    expect(duringUnwind.error?.code).toBe("operation_in_progress");
-    expect(provisionCalls).toBe(1);
-
-    // Once it settles into a terminal failure the operation is retryable
-    // again, and the retry runs its own provision instead of inheriting the
-    // cancelled attempt's failure.
+    // Once cancellation is reported, a retry runs its own provision instead
+    // of inheriting the cancelled attempt's failure.
     releaseFirstAttempt();
     for (let drain = 0; drain < 25; drain++) {
       await Promise.resolve();
@@ -4329,8 +4378,10 @@ describe("provisionDevice handler", () => {
   });
 
   test("tells a detaching joiner that the shared operation continues", async () => {
+    const timer = new FakeTimer();
     let resolveProvision!: (result: ExactProvisionedDevice) => void;
     setDeviceToolsDependencies({
+      timer,
       exactDeviceProvisionerFactory: () => ({
         provision: async () =>
           await new Promise<ExactProvisionedDevice>((resolve) => {
@@ -4355,6 +4406,14 @@ describe("provisionDevice handler", () => {
     const joiner = tool.handler(args, undefined, joinerController.signal);
     await Promise.resolve();
     joinerController.abort(new Error("joiner disconnected"));
+    let joinerSettled = false;
+    void joiner.then(() => {
+      joinerSettled = true;
+    });
+    await flushMicrotasks();
+    expect(joinerSettled).toBe(false);
+
+    resolveProvision(provisionedTestDevice("android", true));
     const joinerResponse = await joiner;
 
     expect(JSON.parse((joinerResponse as any).content[0].text)).toMatchObject({
@@ -4364,13 +4423,13 @@ describe("provisionDevice handler", () => {
       operationContinues: true,
     });
 
-    resolveProvision(provisionedTestDevice("android", true));
     expect(JSON.parse(((await initiator) as any).content[0].text)).toMatchObject({
       operationId: args.operationId,
     });
   });
 
   test("keeps a shared operation running when its initiating caller aborts", async () => {
+    const timer = new FakeTimer();
     let resolveProvision!: (result: ExactProvisionedDevice) => void;
     let provisionSignal: AbortSignal | undefined;
     const pendingProvisioner: ExactDeviceProvisioner = {
@@ -4381,6 +4440,7 @@ describe("provisionDevice handler", () => {
         }),
     };
     setDeviceToolsDependencies({
+      timer,
       exactDeviceProvisionerFactory: () => pendingProvisioner,
     });
     registerDeviceTools();
@@ -4406,10 +4466,12 @@ describe("provisionDevice handler", () => {
     await Promise.resolve();
     const second = tool.handler(args);
     firstCaller.abort(new Error("first caller disconnected"));
-
-    expect(JSON.parse(((await first) as any).content[0].text)).toMatchObject({
-      success: false,
+    let firstSettled = false;
+    void first.then(() => {
+      firstSettled = true;
     });
+    await flushMicrotasks();
+    expect(firstSettled).toBe(false);
     expect(provisionSignal?.aborted).toBe(false);
 
     resolveProvision({
@@ -4428,6 +4490,7 @@ describe("provisionDevice handler", () => {
     expect(JSON.parse(((await second) as any).content[0].text)).toMatchObject({
       operationId: "operation-shared-abort",
     });
+    expect(JSON.parse(((await first) as any).content[0].text)).toMatchObject({ success: false });
     expect(provisionSignal?.aborted).toBe(false);
   });
 

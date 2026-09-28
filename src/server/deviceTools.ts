@@ -741,6 +741,32 @@ const PROVISION_DEVICE_OPERATION_TTL_MS = MAX_DEVICE_READY_TIMEOUT_MS + 15 * 60 
 const PROVISION_DEVICE_FINALIZATION_TTL_REFRESH_MS = Math.floor(
   PROVISION_DEVICE_OPERATION_TTL_MS / 2,
 );
+const PROVISION_DEVICE_SETTLEMENT_WAIT_MS = 5_000;
+const PROVISION_DEVICE_TTL_REFRESH_WAIT_MS = 1_000;
+
+async function waitForProvisionDeviceSettlement(
+  operation: Promise<unknown>,
+  timer: Pick<Timer, "setTimeout" | "clearTimeout">,
+  timeoutMs: number,
+): Promise<boolean> {
+  let timeout: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      // Only settlement matters; the original lifecycle failure is handled by its owner.
+      operation.then(
+        () => true,
+        () => true,
+      ),
+      new Promise<boolean>((resolve) => {
+        timeout = timer.setTimeout(() => resolve(false), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout) {
+      timer.clearTimeout(timeout);
+    }
+  }
+}
 
 // Terminal-but-retryable error code stamped on an operation row whose attempt
 // was rejected by an in-flight MCP session recovery. Distinct from a genuine
@@ -1235,6 +1261,9 @@ interface ActiveProvisionDeviceOperation {
 }
 
 const activeProvisionDeviceOperations = new Map<string, ActiveProvisionDeviceOperation>();
+executionTracker.setActiveProvisionDeviceQuery({
+  hasActiveProvisionDeviceOperation: () => activeProvisionDeviceOperations.size > 0,
+});
 
 /**
  * Detach one caller from a shared operation. Returns true when this was the
@@ -6931,13 +6960,23 @@ export function registerDeviceTools() {
         return provisionDeviceErrorResponse(error, args.operationId);
       }
       if (isProvisionDeviceCallerAbort(error, signal)) {
+        const settled = await waitForProvisionDeviceSettlement(
+          operation.promise,
+          getDeviceToolsDependencies().timer,
+          PROVISION_DEVICE_SETTLEMENT_WAIT_MS,
+        );
+        if (!settled) {
+          logger.warn(
+            `[DeviceTools] provisionDevice ${args.operationId} caller cancellation stopped waiting for operation settlement.`,
+          );
+        }
         // The caller went away, which is not a provisioning failure: report it
-        // with a code of its own, and say whether the operation is still
-        // running (so the caller can collect the result by re-issuing the same
-        // operationId) or was cancelled with it.
+        // with a code of its own, and say whether the operation was retained
+        // for other callers (so its result can be collected by re-issuing the
+        // same operationId) or was cancelled with this caller.
         logger.warn(
           `[DeviceTools] provisionDevice ${args.operationId} caller cancelled the request ` +
-            `(operation ${cancelledOperation ? "cancelled" : "still running"}): ` +
+            `(operation ${cancelledOperation ? "cancelled" : "retained for other callers"}): ` +
             `${errorMessage(error)}`,
           error,
         );
@@ -6947,7 +6986,7 @@ export function registerDeviceTools() {
             ? `provisionDevice request for operationId '${args.operationId}' was cancelled by ` +
                 "the caller; no other caller was waiting, so the operation was cancelled too."
             : `provisionDevice request for operationId '${args.operationId}' was cancelled by ` +
-                "the caller; the operation is still running and its result can be collected by " +
+                "the caller; the operation continued for other callers and its result can be collected by " +
                 "re-issuing the same operationId.",
           { operationId: args.operationId, operationContinues: !cancelledOperation },
         );
@@ -7615,10 +7654,23 @@ export function registerDeviceTools() {
     // A failed replay returns its row to succeeded when fail() settles. Release
     // the session first so no caller can claim that replay-visible old result
     // while the session it names is still being torn down.
-    const stopTtlRefresh = superseded
+    const ttlRefresh = superseded
       ? undefined
       : keepProvisionDeviceOperationAlive(store, args.operationId, attemptId, timer);
     try {
+      if (ttlRefresh) {
+        if (
+          !(await waitForProvisionDeviceSettlement(
+            ttlRefresh.ready,
+            timer,
+            PROVISION_DEVICE_TTL_REFRESH_WAIT_MS,
+          ))
+        ) {
+          logger.warn(
+            `[DeviceTools] provisionDevice ${args.operationId} TTL refresh did not settle before session release.`,
+          );
+        }
+      }
       await releaseProvisionDeviceSession(
         result,
         superseded
@@ -7632,7 +7684,19 @@ export function registerDeviceTools() {
         error,
       );
     } finally {
-      stopTtlRefresh?.();
+      if (ttlRefresh) {
+        if (
+          !(await waitForProvisionDeviceSettlement(
+            ttlRefresh.stop(),
+            timer,
+            PROVISION_DEVICE_TTL_REFRESH_WAIT_MS,
+          ))
+        ) {
+          logger.warn(
+            `[DeviceTools] provisionDevice ${args.operationId} TTL refresh did not settle after session release.`,
+          );
+        }
+      }
     }
 
     if (superseded) {
@@ -7656,11 +7720,15 @@ export function registerDeviceTools() {
     operationId: string,
     attemptId: string,
     timer: Pick<Timer, "now" | "setTimeout" | "clearTimeout">,
-  ): () => void {
+  ): { ready: Promise<void>; stop: () => Promise<void> } {
     let stopped = false;
     let timeout: NodeJS.Timeout | undefined;
+    let inFlight: Promise<void> | undefined;
     const extend = (): void => {
-      void store
+      if (inFlight) {
+        return;
+      }
+      const refresh = store
         .extend(operationId, attemptId, timer.now() + PROVISION_DEVICE_OPERATION_TTL_MS)
         .then((extended) => {
           if (!extended) {
@@ -7676,6 +7744,9 @@ export function registerDeviceTools() {
             error,
           );
         });
+      inFlight = refresh.finally(() => {
+        inFlight = undefined;
+      });
     };
     const schedule = (): void => {
       timeout = timer.setTimeout(() => {
@@ -7687,12 +7758,17 @@ export function registerDeviceTools() {
       }, PROVISION_DEVICE_FINALIZATION_TTL_REFRESH_MS);
     };
     extend();
+    const ready = inFlight ?? Promise.resolve();
     schedule();
-    return () => {
-      stopped = true;
-      if (timeout) {
-        timer.clearTimeout(timeout);
-      }
+    return {
+      ready,
+      stop: () => {
+        stopped = true;
+        if (timeout) {
+          timer.clearTimeout(timeout);
+        }
+        return inFlight ?? Promise.resolve();
+      },
     };
   }
 

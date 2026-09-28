@@ -1231,9 +1231,11 @@ struct ViewHierarchyDebugDemo: View {
             Text("Hidden & Decorative Views")
                 .font(theme.typography.titleMedium)
                 .foregroundStyle(theme.textPrimary)
-            Text("Views with accessibilityHidden or zero alpha exist in the UIView tree but not the accessibility tree.")
-                .font(theme.typography.labelMedium)
-                .foregroundStyle(theme.textSecondary)
+            Text(
+                "Views with accessibilityHidden or zero alpha exist in the UIView tree but not the accessibility tree."
+            )
+            .font(theme.typography.labelMedium)
+            .foregroundStyle(theme.textSecondary)
 
             VStack(spacing: 12) {
                 Text("Visible content")
@@ -1321,7 +1323,7 @@ struct StepperControlView: UIViewRepresentable {
         return stepper
     }
 
-    func updateUIView(_ uiView: UIStepper, context: Context) {
+    func updateUIView(_ uiView: UIStepper, context _: Context) {
         uiView.value = value
     }
 
@@ -1333,21 +1335,22 @@ struct StepperControlView: UIViewRepresentable {
         var value: Binding<Double>
         init(value: Binding<Double>) { self.value = value }
 
-        @objc func valueChanged(_ sender: UIStepper) {
+        @objc
+        func valueChanged(_ sender: UIStepper) {
             value.wrappedValue = sender.value
         }
     }
 }
 
 struct SegmentedControlView: UIViewRepresentable {
-    func makeUIView(context: Context) -> UISegmentedControl {
+    func makeUIView(context _: Context) -> UISegmentedControl {
         let control = UISegmentedControl(items: ["Low", "Medium", "High"])
         control.selectedSegmentIndex = 1
         control.accessibilityIdentifier = "uikit-segmented-control"
         return control
     }
 
-    func updateUIView(_ uiView: UISegmentedControl, context: Context) {}
+    func updateUIView(_: UISegmentedControl, context _: Context) {}
 }
 
 #Preview {

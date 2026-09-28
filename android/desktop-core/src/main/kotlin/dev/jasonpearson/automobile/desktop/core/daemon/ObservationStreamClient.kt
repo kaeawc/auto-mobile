@@ -101,6 +101,8 @@ class ObservationStreamClient(
   // is written. No-op in production.
   private val beforeStorageRequestSend: () -> Unit = {},
 ) : ObservationStream {
+  internal fun authenticatedSessionUuid(): String? = sessionUuidProvider()
+
   companion object {
     private const val STORAGE_UPDATE_BUFFER_CAPACITY = 64
     private const val READ_ERROR_LOG_INTERVAL_MS = 5_000L
@@ -789,7 +791,7 @@ class ObservationStreamClient(
         id = UUID.randomUUID().toString(),
         command = "request_navigation_graph",
         appId = appId,
-        sessionUuid = sessionUuidProvider(),
+        sessionUuid = authenticatedSessionUuid(),
       )
     sendRequest(request)
   }
@@ -804,17 +806,17 @@ class ObservationStreamClient(
    */
   override fun requestObservation(deviceId: String?) {
     if (!_connectionState.value.isConnected) return
-
-    val request =
-      StreamRequest(
-        id = UUID.randomUUID().toString(),
-        command = "request_observation",
-        deviceId = deviceId,
-        deviceSessionUuid = subscribedDeviceSessionUuid,
-        sessionUuid = sessionUuidProvider(),
-      )
-    sendRequest(request)
+    sendRequest(observationRequest(deviceId))
   }
+
+  internal fun observationRequest(deviceId: String?) =
+    StreamRequest(
+      id = UUID.randomUUID().toString(),
+      command = "request_observation",
+      deviceId = deviceId,
+      deviceSessionUuid = subscribedDeviceSessionUuid,
+      sessionUuid = authenticatedSessionUuid(),
+    )
 
   private fun sendPong() {
     val request =
@@ -888,7 +890,7 @@ class ObservationStreamClient(
           command = if (request.subscribe) "subscribe_storage" else "unsubscribe_storage",
           deviceId = subscribedDeviceId,
           deviceSessionUuid = subscribedDeviceSessionUuid,
-          sessionUuid = sessionUuidProvider(),
+          sessionUuid = authenticatedSessionUuid(),
           packageName = key.packageName,
           fileName = key.fileName,
         ),

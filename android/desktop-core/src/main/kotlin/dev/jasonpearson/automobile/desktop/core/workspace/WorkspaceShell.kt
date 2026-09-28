@@ -143,8 +143,10 @@ fun WorkspaceShell(
   // demand and write it to disk (#4694 AC3). Hoisted (defaulting to the real per-device
   // [ObservationStreamClient] / [RealScreenshotSaver]) so a test can drive the capture with a
   // [dev.jasonpearson.automobile.desktop.core.daemon.FakeObservationStream] and a fake saver.
-  observationStreamFactory: (String) -> ObservationStream = { ObservationStreamClient() },
   sessionUuidProvider: () -> String? = { null },
+  observationStreamFactory: (String) -> ObservationStream = {
+    ObservationStreamClient(sessionUuidProvider = sessionUuidProvider)
+  },
   screenshotSaver: ScreenshotSaver = RealScreenshotSaver(),
   // Body of the health sheet opened by clicking the status dot. Hoisted like [facetContent] so the
   // host (or a test) can substitute content; defaults to the live [DiagnosticsDashboard].

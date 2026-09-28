@@ -127,7 +127,7 @@ class WebRtcStreamSocketClient(
     return response.streams ?: listOfNotNull(response.stream)
   }
 
-  private fun request(action: String, deviceId: String? = null, streamId: String? = null) =
+  internal fun request(action: String, deviceId: String? = null, streamId: String? = null) =
     WebRtcStreamSocketRequest(
       id = UUID.randomUUID().toString(),
       action = action,

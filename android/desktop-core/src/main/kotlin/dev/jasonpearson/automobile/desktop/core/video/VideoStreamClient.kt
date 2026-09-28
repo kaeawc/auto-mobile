@@ -195,6 +195,15 @@ class VideoStreamClient(
    */
   private val nowMs: () -> Long = { System.nanoTime() / 1_000_000L },
 ) : VideoStreamSource {
+  internal fun subscribeRequest(deviceId: String?) =
+    VideoStreamRequest(
+      id = UUID.randomUUID().toString(),
+      sessionUuid = sessionUuidProvider(),
+      deviceId = deviceId,
+      quality = quality?.wire,
+      fps = fps,
+      bitrateKbps = bitrateKbps,
+    )
 
   // One dedicated reader thread per client (see the class doc for why not Dispatchers.IO).
   private val readerDispatcher =
@@ -326,14 +335,7 @@ class VideoStreamClient(
           writer.write(
             json.encodeToString(
               serializer<VideoStreamRequest>(),
-              VideoStreamRequest(
-                id = UUID.randomUUID().toString(),
-                sessionUuid = sessionUuidProvider(),
-                deviceId = deviceId,
-                quality = quality?.wire,
-                fps = fps,
-                bitrateKbps = bitrateKbps,
-              ),
+              subscribeRequest(deviceId),
             )
           )
           writer.newLine()

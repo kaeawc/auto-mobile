@@ -221,18 +221,28 @@ teardown() {
 
 teardown_file() {
   command -v lsof > /dev/null 2>&1 || return 0
+  # macOS runners do not necessarily have GNU timeout.
+  source scripts/ios/run_with_timeout.sh
 
-  local self_pid="$BASHPID" pipe holders pid ppid pgid command command_line elapsed ownership
+  local self_pid="$BASHPID" pipe pipe_record scan holders group_members pid ppid pgid command command_line elapsed ownership
   local root_pid started start_text start_epoch
   [[ -r "$BATS_FILE_TMPDIR/fd3-ownership" ]] || return 0
   read -r root_pid started < "$BATS_FILE_TMPDIR/fd3-ownership"
   [[ "$root_pid" == "$self_pid" && "$started" =~ ^[0-9]+$ ]] || return 0
-  pipe="$(lsof -nP -a -p "$self_pid" -d 3 -F n 2> /dev/null | sed -n 's/^n//p' | head -n 1)"
+  if ! pipe_record="$(run_with_timeout 3 lsof -nP -a -p "$self_pid" -d 3 -F n 3>&- 2> /dev/null)"; then
+    printf '# test-ts.bats could not inspect its fd 3 within 3s; skipping reaper\n' >&3
+    return 0
+  fi
+  pipe="$(sed -n 's/^n//p' <<< "$pipe_record" | head -n 1)"
   [[ -n "$pipe" ]] || return 0
 
-  # Finish the scan before handling matches so its own processes are gone.
-  holders="$({
-    lsof -nP -F pRgcfn 3>&- 2> /dev/null | awk -v pipe="$pipe" -v root="$root_pid" -v state="$BATS_FILE_TMPDIR/fd3-ownership" '
+  # The inherited fd is enough to link live descendants back to this root.
+  # Bound the fd-scoped scan so a busy runner cannot hold the TAP pipe open.
+  if ! scan="$(run_with_timeout 3 lsof -nP -a -d 3 -F pRgcfn 3>&- 2> /dev/null)"; then
+    printf '# test-ts.bats could not scan fd 3 holders within 3s; skipping reaper\n' >&3
+    return 0
+  fi
+  holders="$(awk -v pipe="$pipe" -v root="$root_pid" -v state="$BATS_FILE_TMPDIR/fd3-ownership" '
       BEGIN {
         while ((getline line < state) > 0) {
           if (line ~ /^g[0-9]+$/) own_group[substr(line, 2)] = 1
@@ -251,14 +261,6 @@ teardown_file() {
           current = parent[current]
         }
         return 0
-      }
-      function foreign_tree(candidate, current, seen) {
-        current = candidate
-        while (current != "" && current != 1 && !seen[current]++) {
-          if (current == root) return 0
-          current = parent[current]
-        }
-        return current == 1
       }
       END {
         # The file process and its ancestors are expected holders, not leaks.
@@ -279,34 +281,58 @@ teardown_file() {
               }
             }
           }
-          # A complete chain to init proves a live sibling belongs elsewhere.
-          # Incomplete chains still get a report-only diagnostic.
-          if (!owned && !orphan && parent[pid] != 1 && foreign_tree(pid)) continue
+          # With an fd-scoped listing, an incomplete chain cannot prove
+          # ownership. Leave those processes alone, including siblings.
+          if (!owned && !orphan) continue
           print pid "\t" (parent[pid] != "" ? parent[pid] : "?") "\t" \
             (group[pid] != "" ? group[pid] : "?") "\t" \
             (command[pid] != "" ? command[pid] : "?") "\t" \
-            (owned ? "descendant" : orphan ? "orphan" : "report")
+            (owned ? "descendant" : "orphan")
         }
       }
-    ' 3>&-
-  } 3>&-)"
+    ' <<< "$scan")"
 
   # lsof supplies parent and process group IDs even where ps is unavailable.
   while IFS=$'\t' read -r pid ppid pgid command ownership; do
     [[ "$pid" =~ ^[0-9]+$ ]] || continue
     kill -0 "$pid" 2> /dev/null || continue
-    command_line="$(ps -o command= -p "$pid" 2> /dev/null || true)"
-    printf '# test-ts.bats left fd 3 open after last test: pid=%s ppid=%s pgid=%s command=%s\n' \
-      "$pid" "$ppid" "$pgid" "${command_line:-$command}" >&3
 
     if [[ "$ownership" == orphan ]]; then
+      # The fd-scoped scan cannot see group members that closed fd 3. Check
+      # the complete group before treating a reparented process as ours.
+      [[ "$pgid" =~ ^[0-9]+$ ]] || continue
+      if ! group_members="$(run_with_timeout 3 lsof -nP -a -g "$pgid" -F pR 3>&- 2> /dev/null)"; then
+        printf '# test-ts.bats could not inspect process group %s within 3s; leaving pid=%s alone\n' \
+          "$pgid" "$pid" >&3
+        continue
+      fi
+      if ! awk -v root="$root_pid" -v candidate="$pid" '
+        /^p[0-9]/ { pid = substr($0, 2); member[pid] = 1 }
+        /^R/ { parent[pid] = substr($0, 2) }
+        function descendant(current, seen) {
+          while (current != "" && current != 1 && !seen[current]++) {
+            if (current == root) return 1
+            current = parent[current]
+          }
+          return 0
+        }
+        END {
+          if (!member[candidate]) exit 1
+          for (pid in member) {
+            if (pid != candidate && !descendant(pid)) exit 1
+          }
+        }
+      ' <<< "$group_members"; then
+        continue
+      fi
       start_text="$(ps -o lstart= -p "$pid" 2> /dev/null || true)"
       start_epoch="$(date -j -f '%a %b %e %T %Y' "$start_text" +%s 2> /dev/null || date -d "$start_text" +%s 2> /dev/null || true)"
       [[ "$start_epoch" =~ ^[0-9]+$ && "$start_epoch" -gt "$started" ]] || continue
-    elif [[ "$ownership" != descendant ]]; then
-      continue
     fi
 
+    command_line="$(ps -o command= -p "$pid" 2> /dev/null || true)"
+    printf '# test-ts.bats left fd 3 open after last test: pid=%s ppid=%s pgid=%s command=%s\n' \
+      "$pid" "$ppid" "$pgid" "${command_line:-$command}" >&3
     kill -TERM "$pid" 2> /dev/null || continue
     elapsed=0
     while kill -0 "$pid" 2> /dev/null && [[ "$elapsed" -lt 20 ]]; do

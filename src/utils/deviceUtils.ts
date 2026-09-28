@@ -13,7 +13,10 @@ import {
 import { isIosPhysicalUdid } from "./ios-cmdline-tools/iosDeviceType";
 import type { DiscoverySource } from "./discoverySource";
 import { AndroidEmulatorClient } from "./android-cmdline-tools/AndroidEmulatorClient";
-import type { AndroidEmulatorReadinessOptions } from "./android-cmdline-tools/AndroidEmulatorClient";
+import type {
+  AndroidEmulatorForDeviceManager,
+  AndroidEmulatorReadinessOptions,
+} from "./android-cmdline-tools/AndroidEmulatorClient";
 import { deleteAvd } from "./android-cmdline-tools/avdmanager";
 import { logger } from "./logger";
 import { isAndroidEmulatorSerial } from "./androidSerial";
@@ -418,7 +421,7 @@ function mergeIosDevices(simulators: BootedDevice[], physical: BootedDevice[]): 
 
 export class MultiPlatformDeviceManager implements PlatformDeviceManager {
   private adb: AdbExecutor;
-  private emulator: AndroidEmulatorClient;
+  private emulator: AndroidEmulatorForDeviceManager;
   private simctl: SimCtlClient;
   private readonly physicalIosDevices: IosPhysicalDeviceLister;
   private readonly lifecycleCoordinator: VirtualDeviceLifecycleCoordinator;
@@ -434,7 +437,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
   constructor(
     adb: AdbExecutor | null = null,
     simctl: SimCtlClient | null = null,
-    emulator: AndroidEmulatorClient | null = null,
+    emulator: AndroidEmulatorForDeviceManager | null = null,
     lifecycleCoordinator: VirtualDeviceLifecycleCoordinator = getVirtualDeviceLifecycleCoordinator(),
     timer: Pick<Timer, "now"> = defaultTimer,
     physicalIosDevices: IosPhysicalDeviceLister | null = null,

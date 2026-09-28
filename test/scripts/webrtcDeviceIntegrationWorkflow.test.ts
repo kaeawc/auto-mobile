@@ -82,6 +82,7 @@ describe("#4308 device WebRTC integration workflow", () => {
       "scripts/webrtc/**",
       "test/integration/webrtcDeviceCapture.integration.test.ts",
       "test/helpers/captureStageTimeline.ts",
+      "test/helpers/whepSubscriptionRecovery.ts",
       PULL_REQUEST_WORKFLOW,
       MERGE_WORKFLOW,
     ]) {

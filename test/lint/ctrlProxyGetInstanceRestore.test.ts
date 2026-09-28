@@ -309,13 +309,15 @@ describe("CtrlProxy getInstance mocks are restored in-file (issue #7052)", () =>
         );
       });
     };
-    const reassignedBindings = new Set<ts.Symbol>();
-    const recordReassignedTarget = (target: ts.Expression): void => {
+    const reassignedBindings = new Map<ts.Symbol, number[]>();
+    const recordReassignedTarget = (target: ts.Expression, position: number): void => {
       const core = unwrap(target);
       if (ts.isIdentifier(core)) {
         const binding = checker.getSymbolAtLocation(core);
         if (binding !== undefined) {
-          reassignedBindings.add(binding);
+          const positions = reassignedBindings.get(binding) ?? [];
+          positions.push(position);
+          reassignedBindings.set(binding, positions);
         }
         return;
       }
@@ -324,30 +326,39 @@ describe("CtrlProxy getInstance mocks are restored in-file (issue #7052)", () =>
           if (ts.isOmittedExpression(element)) {
             continue;
           }
-          recordReassignedTarget(ts.isSpreadElement(element) ? element.expression : element);
+          recordReassignedTarget(
+            ts.isSpreadElement(element) ? element.expression : element,
+            position,
+          );
         }
         return;
       }
       if (ts.isObjectLiteralExpression(core)) {
         for (const property of core.properties) {
           if (ts.isShorthandPropertyAssignment(property)) {
-            recordReassignedTarget(property.name);
+            recordReassignedTarget(property.name, position);
           } else if (ts.isPropertyAssignment(property) || ts.isSpreadAssignment(property)) {
-            recordReassignedTarget(property.initializer ?? property.expression);
+            recordReassignedTarget(property.initializer ?? property.expression, position);
           }
         }
       }
     };
     const reassignmentWalk = (node: ts.Node): void => {
       if (ts.isBinaryExpression(node) && ts.isAssignmentOperator(node.operatorToken.kind)) {
-        recordReassignedTarget(node.left);
+        recordReassignedTarget(node.left, node.pos);
+      }
+      if (
+        (ts.isForOfStatement(node) || ts.isForInStatement(node)) &&
+        !ts.isVariableDeclarationList(node.initializer)
+      ) {
+        recordReassignedTarget(node.initializer, node.pos);
       }
       ts.forEachChild(node, reassignmentWalk);
     };
     reassignmentWalk(sf);
 
     const teardownCallbacks = new Set<ts.FunctionLikeDeclaration>();
-    const addTeardownCallback = (argument: ts.Expression): void => {
+    const addTeardownCallback = (argument: ts.Expression, registrationPosition: number): void => {
       if (ts.isFunctionLike(argument)) {
         teardownCallbacks.add(argument);
         return;
@@ -356,7 +367,11 @@ describe("CtrlProxy getInstance mocks are restored in-file (issue #7052)", () =>
         return;
       }
       const binding = checker.getSymbolAtLocation(argument);
-      if (binding === undefined || reassignedBindings.has(binding)) {
+      // This models sequential source order and does not reason about branches, async callbacks, or loop execution order.
+      if (
+        binding === undefined ||
+        (reassignedBindings.get(binding) ?? []).some((position) => position < registrationPosition)
+      ) {
         return;
       }
       for (const declaration of binding?.declarations ?? []) {
@@ -370,7 +385,7 @@ describe("CtrlProxy getInstance mocks are restored in-file (issue #7052)", () =>
         if (isTeardownHook(node.expression)) {
           for (const argument of node.arguments) {
             if (!ts.isSpreadElement(argument)) {
-              addTeardownCallback(argument);
+              addTeardownCallback(argument, node.pos);
             }
           }
         }
@@ -1027,6 +1042,38 @@ describe("CtrlProxy getInstance mocks are restored in-file (issue #7052)", () =>
     expect([...f.restores]).toEqual(["AndroidCtrlProxyClient"]);
     expect(leaksOf("reassigned-named-teardown.ts", f)).toEqual([
       "reassigned-named-teardown.ts: installs AndroidCtrlProxyClient.getInstance but never restores it",
+    ]);
+  });
+
+  test("a reassignment after teardown registration preserves the captured callback", () => {
+    const f = analyzeSource(
+      `const original = AndroidCtrlProxyClient.getInstance;\n` +
+        `function restoreSingleton() {\n` +
+        `  AndroidCtrlProxyClient.getInstance = original;\n` +
+        `}\n` +
+        `afterEach(restoreSingleton);\n` +
+        `restoreSingleton = () => {};\n` +
+        `AndroidCtrlProxyClient.getInstance = mock(() => ({}));\n`,
+    );
+    expect([...f.installs]).toEqual(["AndroidCtrlProxyClient"]);
+    expect([...f.restores]).toEqual(["AndroidCtrlProxyClient"]);
+    expect(leaksOf("reassigned-after-registration.ts", f)).toEqual([]);
+  });
+
+  test("a for-of reassignment invalidates a named teardown callback", () => {
+    const f = analyzeSource(
+      `const original = AndroidCtrlProxyClient.getInstance;\n` +
+        `function restoreSingleton() {\n` +
+        `  AndroidCtrlProxyClient.getInstance = original;\n` +
+        `}\n` +
+        `for (restoreSingleton of [() => {}]) {}\n` +
+        `afterEach(restoreSingleton);\n` +
+        `AndroidCtrlProxyClient.getInstance = mock(() => ({}));\n`,
+    );
+    expect([...f.installs]).toEqual(["AndroidCtrlProxyClient"]);
+    expect([...f.restores]).toEqual(["AndroidCtrlProxyClient"]);
+    expect(leaksOf("for-of-reassigned-teardown.ts", f)).toEqual([
+      "for-of-reassigned-teardown.ts: installs AndroidCtrlProxyClient.getInstance but never restores it",
     ]);
   });
 

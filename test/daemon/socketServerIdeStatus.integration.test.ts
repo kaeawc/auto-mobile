@@ -17,6 +17,9 @@ import {
 import { FakeTimer } from "../fakes/FakeTimer";
 import type { DaemonResponse } from "../../src/daemon/types";
 import { AndroidCtrlProxyManager } from "../../src/utils/CtrlProxyManager";
+import { AndroidCtrlProxyClient } from "../../src/features/observe/android/AndroidCtrlProxyClient";
+import { IOSCtrlProxyClient } from "../../src/features/observe/ios/IOSCtrlProxyClient";
+import { IOSCtrlProxyManager } from "../../src/utils/IOSCtrlProxyManager";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import type { BootedDevice } from "../../src/models";
 import { RELEASE_CHECKSUM_REGISTRY, IOS_CTRL_PROXY_APP_HASH } from "../../src/constants/release";
@@ -35,7 +38,7 @@ import type { DaemonOptions } from "../../src/daemon/types";
 
 const SHA256_HEX = /^[0-9a-f]{64}$/;
 
-function createFakeDaemonState() {
+function createFakeDaemonState(isShutdownReserved: () => Promise<boolean> = async () => false) {
   return {
     isInitialized: () => true,
     getSessionManager: () => ({
@@ -44,6 +47,7 @@ function createFakeDaemonState() {
       releaseSession: async () => null,
     }),
     getDevicePool: () => ({
+      isShutdownReserved,
       refreshDevices: async () => 0,
       getStats: () => ({ total: 0, idle: 0, assigned: 0, error: 0 }),
       releaseDevice: async () => {},
@@ -92,18 +96,20 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
   let server: UnixSocketServer;
   let fakeTimer: FakeTimer;
   let restartRequests: number;
+  let shutdownReserved: boolean;
 
   beforeEach(async () => {
     socketPath = join(tmpdir(), `t-ids-${randomUUID().slice(0, 8)}.sock`);
     fakeTimer = new FakeTimer();
     restartRequests = 0;
+    shutdownReserved = false;
     executionTracker.clearDaemonMaintenancePreparation();
     executionTracker.clearDaemonRestartPreparation();
 
     server = new UnixSocketServer(
       socketPath,
       "http://localhost:0/mcp",
-      createFakeDaemonState(),
+      createFakeDaemonState(async () => shutdownReserved),
       fakeTimer,
       null,
       {
@@ -867,6 +873,71 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
     } finally {
       ctrlProxySpy.mockRestore();
       platformSpy.mockRestore();
+    }
+  });
+
+  test("A2 iOS updateService waits for the shutdown fence before resuming a fresh boot", async () => {
+    const device: BootedDevice = { deviceId: "sim-shutdown", platform: "ios", name: "iPhone 16" };
+    shutdownReserved = true;
+    const discovery = spyOn(PlatformDeviceManagerFactory, "getInstance").mockReturnValue({
+      getBootedDevices: async () => [device],
+    } as never);
+    const restart = spyOn(IOSCtrlProxyManager, "getInstance").mockReturnValue({
+      forceRestart: async () => {},
+    } as never);
+    const resume = spyOn(IOSCtrlProxyClient, "resumeAfterDeviceStart");
+    try {
+      const response = await sendRequest(socketPath, "ide/updateService", {
+        deviceId: device.deviceId,
+        platform: "ios",
+      });
+      expect(response.success).toBe(false);
+      expect(restart).not.toHaveBeenCalled();
+      expect(resume).not.toHaveBeenCalled();
+      shutdownReserved = false;
+      const restarted = await sendRequest(socketPath, "ide/updateService", {
+        deviceId: device.deviceId,
+        platform: "ios",
+      });
+      expect(restarted.success).toBe(true);
+      expect(resume).toHaveBeenCalledWith(device.deviceId);
+    } finally {
+      resume.mockRestore();
+      restart.mockRestore();
+      discovery.mockRestore();
+    }
+  });
+
+  test("A4 Android updateService resumes a freshly rediscovered booted emulator", async () => {
+    const device: BootedDevice = { deviceId: "emulator-5554", platform: "android", name: "Pixel" };
+    const discovery = spyOn(PlatformDeviceManagerFactory, "getInstance").mockReturnValue({
+      getBootedDevices: async () => [device],
+    } as never);
+    const manager = spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue({
+      ensureCompatibleVersion: async () => ({ status: "compatible" }),
+    } as never);
+    const resume = spyOn(AndroidCtrlProxyClient, "resumeAfterDeviceStart");
+    try {
+      shutdownReserved = true;
+      const blocked = await sendRequest(socketPath, "ide/updateService", {
+        deviceId: device.deviceId,
+        platform: "android",
+      });
+      expect(blocked.success).toBe(false);
+      expect(resume).not.toHaveBeenCalled();
+      expect(manager).not.toHaveBeenCalled();
+      shutdownReserved = false;
+      const response = await sendRequest(socketPath, "ide/updateService", {
+        deviceId: device.deviceId,
+        platform: "android",
+      });
+      expect(response.success).toBe(true);
+      expect(resume).toHaveBeenCalledWith(device.deviceId);
+      expect(manager).toHaveBeenCalled();
+    } finally {
+      resume.mockRestore();
+      manager.mockRestore();
+      discovery.mockRestore();
     }
   });
 });

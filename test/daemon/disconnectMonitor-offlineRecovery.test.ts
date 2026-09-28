@@ -266,3 +266,28 @@ test("alternating successful and failed offline probes do not repeat global reco
   expect(reconnects).toBe(2);
   await monitor.stop();
 });
+
+test("B1 defers the global reconnect when another offline candidate owns startup recovery", async () => {
+  let reconnects = 0;
+  class OfflineManager extends FakeDeviceManager {
+    async getAndroidOfflineDeviceIds() {
+      return new Set(["emulator-5554", "emulator-5556"]);
+    }
+    async recoverAndroidOfflineDevices() {
+      reconnects++;
+    }
+  }
+  const { daemon, device, monitor } = monitorHarness(new OfflineManager());
+  const protectedDevice = { ...device, id: "emulator-5556" };
+  daemon.devicePool.getAllDevices = () => [device, protectedDevice];
+  daemon.devicePool.isDeviceLeasedForAndroidStartup = (id: string) => id === protectedDevice.id;
+  await monitor.run();
+  const attempts = daemon.offlineRecoveryAttemptedDeviceIds.size;
+  const protectedReconnects = reconnects;
+  daemon.devicePool.isDeviceLeasedForAndroidStartup = () => false;
+  await monitor.run();
+  await monitor.stop();
+  expect(protectedReconnects).toBe(0);
+  expect(attempts).toBe(0);
+  expect(reconnects).toBe(1);
+});

@@ -2045,16 +2045,18 @@ export class Daemon {
             this.offlineRecoveryAttemptedDeviceIds,
             inFlightStartupOfflineDeviceIds,
           );
+          const dispatchTargets =
+            inFlightStartupOfflineDeviceIds.size > 0 ? [] : offlineRecoveryTargets;
           this.offlineRecoveryAttemptedDeviceIds = new Set([
             ...this.offlineRecoveryAttemptedDeviceIds,
-            ...offlineRecoveryTargets,
+            ...dispatchTargets,
           ]);
           this.offlineRecoveryAttemptedIncarnations = new Map(
             [...candidateIncarnations].filter(([deviceId]) =>
               this.offlineRecoveryAttemptedDeviceIds.has(deviceId),
             ),
           );
-          if (offlineRecoveryTargets.length > 0) {
+          if (dispatchTargets.length > 0) {
             logger.warn(
               `[DisconnectMonitor] In-session device(s) ADB-offline (${offlineRecoveryTargets.join(", ")}); attempting bounded 'adb reconnect offline' recovery before miss-counting`,
             );

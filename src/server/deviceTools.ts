@@ -1619,7 +1619,14 @@ function shouldClearIntentionalShutdownAfterFailure(
   return platform === "android" && !requestAbortSignal?.aborted;
 }
 
-function resumeCtrlProxyAfterFailedKill(device: BootedDevice): void {
+async function resumeCtrlProxyAfterFailedKill(device: BootedDevice): Promise<void> {
+  const daemonState = DaemonState.getInstance();
+  if (
+    daemonState.isInitialized() &&
+    (await daemonState.getDevicePool().isShutdownReserved(device.deviceId))
+  ) {
+    return;
+  }
   if (device.platform === "ios") {
     IOSCtrlProxyClient.resumeAfterDeviceStart(device.deviceId);
   } else if (device.platform === "android") {
@@ -1627,13 +1634,18 @@ function resumeCtrlProxyAfterFailedKill(device: BootedDevice): void {
   }
 }
 
-function resumeCtrlProxyAfterUnconfirmedFailure(
+async function resumeCtrlProxyAfterUnconfirmedFailure(
   device: BootedDevice,
+  error: unknown,
   requestAbortSignal: AbortSignal | undefined,
   shutdownWasConfirmed = false,
-): void {
-  if (!shutdownWasConfirmed && !requestAbortSignal?.aborted) {
-    resumeCtrlProxyAfterFailedKill(device);
+): Promise<void> {
+  if (
+    !shutdownWasConfirmed &&
+    !isAlreadyStoppedDeviceError(device.platform, device.deviceId, error) &&
+    !shouldKeepIntentionalShutdownAfterCommandError(error, requestAbortSignal)
+  ) {
+    await resumeCtrlProxyAfterFailedKill(device);
   }
 }
 
@@ -1642,7 +1654,7 @@ function resumeCtrlProxyWhenPreparationSettles(
   device: BootedDevice,
 ): void {
   // The same in-flight teardown retains the pool reservation on timeout/abort.
-  // Reopen the client registry only after it can no longer retire the device.
+  // A new shutdown or an unresolved shutdown marker keeps the client retired.
   void stop?.then(
     () => resumeCtrlProxyAfterFailedKill(device),
     () => resumeCtrlProxyAfterFailedKill(device),
@@ -1824,6 +1836,13 @@ async function restoreAndroidObserverAfterCommandFailure(
       observerState.deviceIdentity !== null &&
       isSameBootedDeviceIdentity(observerState.deviceIdentity, survivingDevice)
     ) {
+      const daemonState = DaemonState.getInstance();
+      if (
+        daemonState.isInitialized() &&
+        (await daemonState.getDevicePool().isShutdownReserved(device.deviceId))
+      ) {
+        return;
+      }
       AndroidCtrlProxyClient.resumeAfterDeviceStart(device.deviceId);
       const observer = AndroidCtrlProxyClient.getInstance(survivingDevice);
       // Bind before connecting so a frame arriving immediately after the socket
@@ -1882,6 +1901,39 @@ function handleShutdownCommandError(
     devicePool?.clearIntentionalShutdown(device.deviceId);
   }
   throw error;
+}
+
+async function recoverAfterShutdownFailure(
+  device: BootedDevice,
+  error: unknown,
+  requestAbortSignal: AbortSignal | undefined,
+  devicePool: DevicePool | undefined,
+  releaseShutdownReservation: () => Promise<void>,
+  shutdownWasConfirmed: boolean,
+): Promise<void> {
+  // Only a definitive failure may reopen CtrlProxy after our fence clears;
+  // the shared shutdown accessor still blocks a concurrent kill. Timeout or
+  // cancellation keeps the marker and the client retired for late shutdown.
+  if (
+    !shutdownWasConfirmed &&
+    shouldClearIntentionalShutdownAfterFailure(device.platform, requestAbortSignal) &&
+    !shouldKeepIntentionalShutdownAfterCommandError(error, requestAbortSignal)
+  ) {
+    devicePool?.clearIntentionalShutdown(device.deviceId);
+  }
+  if (
+    !shutdownWasConfirmed &&
+    !isAlreadyStoppedDeviceError(device.platform, device.deviceId, error) &&
+    !shouldKeepIntentionalShutdownAfterCommandError(error, requestAbortSignal)
+  ) {
+    await releaseShutdownReservation();
+  }
+  await resumeCtrlProxyAfterUnconfirmedFailure(
+    device,
+    error,
+    requestAbortSignal,
+    shutdownWasConfirmed,
+  );
 }
 
 function rethrowShutdownFailure(
@@ -2068,6 +2120,7 @@ async function getShutdownDiscovery(
         // device-loss failure instead of reaching confirm-or-refuse
         // ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
         excludeExecutionId: getShutdownInitiatingExecutionId(),
+        signal: getAbortSignal(),
         namesResolved: !skipAndroidNameEnrichment,
       });
       return discovery;
@@ -2749,6 +2802,7 @@ async function killProcessAndRetireOwnership(
   expectedPooledDevice: PooledDevice | null,
   expectedSession: Session | undefined,
   androidObserverState: AndroidObserverShutdownState,
+  releaseShutdownReservation: () => Promise<void>,
   shutdownDeadlineMs: number,
   retainReservationUntil: (
     retirement: Promise<void>,
@@ -2799,7 +2853,15 @@ async function killProcessAndRetireOwnership(
       requestAbortSignal,
     );
     retainLatePlatformShutdown(platformShutdown, platformShutdownSettled, retainReservationUntil);
-    resumeCtrlProxyAfterUnconfirmedFailure(device, requestAbortSignal);
+    if (
+      !keepIntentionalShutdown &&
+      !isAlreadyStoppedDeviceError(device.platform, device.deviceId, error)
+    ) {
+      // This command has settled. Drop our fence before testing for another kill's fence.
+      devicePool?.clearIntentionalShutdown(device.deviceId);
+      await releaseShutdownReservation();
+    }
+    await resumeCtrlProxyAfterUnconfirmedFailure(device, error, requestAbortSignal);
     await restoreAndroidObserverAfterCommandFailure(
       deviceManager,
       device,
@@ -2859,17 +2921,14 @@ async function killProcessAndRetireOwnership(
     perf.endOperation("retireOwnership");
     return undefined;
   } catch (error) {
-    // A failed disappearance confirmation leaves the original incarnation in
-    // the pool. It must remain eligible for normal unexpected-loss recovery.
-    // Caller cancellation is different: the platform command may already have
-    // succeeded, so retain the marker for its later process-exit cleanup.
-    resumeCtrlProxyAfterUnconfirmedFailure(device, requestAbortSignal, shutdownWasConfirmed);
-    if (
-      !shutdownWasConfirmed &&
-      shouldClearIntentionalShutdownAfterFailure(device.platform, requestAbortSignal)
-    ) {
-      devicePool?.clearIntentionalShutdown(device.deviceId);
-    }
+    await recoverAfterShutdownFailure(
+      device,
+      error,
+      requestAbortSignal,
+      devicePool,
+      releaseShutdownReservation,
+      shutdownWasConfirmed,
+    );
     throw error;
   }
 }
@@ -2974,6 +3033,7 @@ async function shutdownDevice(
           expectedPooledDevice,
           expectedSession,
           androidObserverState,
+          async () => await shutdownReservation?.release(),
           shutdownDeadlineMs,
           (retirement, releaseReservationAfterFailure) => {
             retainShutdownUntil(retirement, releaseReservationAfterFailure);
@@ -6284,6 +6344,9 @@ async function resolveAndroidStartupLeaseAvdName(
   if (budgets.androidAvdName !== undefined) {
     return budgets.androidAvdName;
   }
+  if (args.matchExactName && args.name) {
+    return args.name;
+  }
   if (!args.deviceId) {
     return undefined;
   }
@@ -6320,13 +6383,16 @@ async function resolveAndroidStartupLeaseImageName(
   signal: AbortSignal | undefined,
 ): Promise<string | undefined> {
   try {
+    // This optional hint must leave time to reserve the non-owning lease and
+    // continue acquisition when image discovery does not answer.
+    const lookupDeadlineMs = Math.min(bootDeadlineMs, timer.now() + 5_000);
     const images = await runWithinShutdownDeadline(
       { name: deviceId, platform: "android", deviceId },
       timer,
-      bootDeadlineMs,
+      lookupDeadlineMs,
       "Android AVD image lookup for the startup lease did not complete",
       signal,
-      async () => await deviceUtils.listDeviceImages("android"),
+      async (lookupSignal) => await deviceUtils.listDeviceImages("android", lookupSignal),
       undefined,
       "to name its Android startup lease",
     );
@@ -6390,14 +6456,86 @@ async function reserveAndroidStartupLease(
   }
   const timeout = timer.setTimeout(abortForTimeout, remainingMs);
   try {
+    const ownsOfflineRecovery = await ownsAndroidStartupOfflineRecovery(
+      exactAvdName,
+      devicePool,
+      deviceUtils,
+      bootDeadlineMs,
+      timer,
+      timeoutController.signal,
+    );
     return await devicePool.reserveAndroidStartupLease(
       requestedName,
       exactAvdName !== undefined,
       timeoutController.signal,
+      ownsOfflineRecovery,
     );
   } finally {
     timer.clearTimeout(timeout);
     signal?.removeEventListener("abort", abortForCaller);
+  }
+}
+
+async function ownsAndroidStartupOfflineRecovery(
+  avdName: string | undefined,
+  devicePool: DevicePool,
+  deviceUtils: PlatformDeviceManager,
+  deadlineMs: number,
+  timer: Timer,
+  signal: AbortSignal,
+): Promise<boolean> {
+  // A criteria-only request may reuse a running AVD, so it cannot claim
+  // ownership until an exact image has been resolved.
+  if (!avdName) {
+    return false;
+  }
+  // A pooled Android runtime may already be this AVD, including one whose
+  // emulator name could not be resolved. Treat it as warm without rediscovery.
+  if (
+    devicePool
+      .getAllDevices()
+      .some(
+        (device) =>
+          device.platform === "android" &&
+          (device.avdName === avdName ||
+            device.name === avdName ||
+            device.name === `Unknown (${device.id})`),
+      )
+  ) {
+    return false;
+  }
+  try {
+    const lookupDeadlineMs = Math.min(deadlineMs, timer.now() + 5_000);
+    const booted = await runWithinShutdownDeadline(
+      { platform: "android", name: avdName, deviceId: avdName },
+      timer,
+      lookupDeadlineMs,
+      "Android startup lease running-device discovery did not complete",
+      signal,
+      async (signal) => {
+        const discovery = await deviceUtils.getBootedDevicesDetailed("android", {
+          bypassAndroidDeviceListCache: true,
+          signal,
+        });
+        if (!discovery.succeededPlatforms.has("android")) {
+          throw new Error("Android startup lease running-device discovery was unavailable");
+        }
+        await reconcileDiscoveryObservation(discovery.devices, "android-startup-offline-recovery", {
+          signal,
+        });
+        return discovery.devices;
+      },
+    );
+    // An unresolved emulator name may be this AVD. Fail open rather than
+    // suppressing the disconnect monitor's only recovery for a warm device.
+    return !booted.some((device) => device.name === avdName || isUnknownAndroidRuntimeName(device));
+  } catch (error) {
+    // An uncertain running state must not suppress the monitor's recovery.
+    logger.warn(
+      `[DeviceTools] Could not classify startup lease for '${avdName}': ${errorMessage(error)}`,
+      error,
+    );
+    return false;
   }
 }
 
@@ -9770,6 +9908,10 @@ export function registerDeviceTools() {
   async function ensureCtrlProxyReady(request: RunnerReadinessRequest): Promise<void> {
     request.perf?.startOperation("ensureCtrlProxy");
     try {
+      const pool = getStartDevicePool(DaemonState.getInstance());
+      if (pool && (await pool.isShutdownReserved(request.device.deviceId))) {
+        throw new ActionableError(`Device '${request.device.deviceId}' is shutting down.`);
+      }
       if (request.device.platform === "ios") {
         IOSCtrlProxyClient.resumeAfterDeviceStart(request.device.deviceId);
       } else if (request.device.platform === "android") {

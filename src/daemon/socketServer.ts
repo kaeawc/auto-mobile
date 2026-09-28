@@ -3751,8 +3751,12 @@ export class UnixSocketServer {
         if (!targetDevice) {
           throw new Error(`Device not found: ${args.deviceId}`);
         }
+        if (await this.daemonState.getDevicePool().isShutdownReserved?.(targetDevice.deviceId)) {
+          throw new Error(`Device '${targetDevice.deviceId}' is shutting down.`);
+        }
 
         if (args.platform === "android") {
+          AndroidCtrlProxyClient.resumeAfterDeviceStart(targetDevice.deviceId);
           const manager = AndroidCtrlProxyManager.getInstance(targetDevice);
           const result = await manager.ensureCompatibleVersion({
             allowDownloadWhenInstalled: true,

@@ -342,6 +342,46 @@ describe("device state tools", () => {
     sessionManager.stopCleanupTimer();
   });
 
+  test("A3 setActiveDevice preserves a tombstone installed during discovery", async () => {
+    const timer = new FakeTimer();
+    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const device = createBootedDevice("sim-racing", "ios", "iPhone 16");
+    const manager = new FakeDeviceManager([], [device]);
+    const entered = Promise.withResolvers<void>();
+    const releaseDiscovery = Promise.withResolvers<void>();
+    manager.getBootedDevices = async () => {
+      entered.resolve();
+      await releaseDiscovery.promise;
+      return [device];
+    };
+    PlatformDeviceManagerFactory.setInstance(manager);
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      manager,
+      new DefaultRetryExecutor(timer),
+    );
+    await pool.initializeWithDevices([device]);
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    const selection = ToolRegistry.getTool("setActiveDevice")!.handler({
+      deviceId: device.deviceId,
+      platform: "ios",
+      sessionUuid: "session-1",
+    });
+    await entered.promise;
+    const shutdown = await pool.reserveDeviceForShutdown(device.deviceId);
+    await IOSCtrlProxyClient.retireInstance(device.deviceId);
+    const retired = IOSCtrlProxyClient.getInstance(device);
+    releaseDiscovery.resolve();
+    await expect(selection).rejects.toThrow(/shutting down/);
+    expect(await pool.isShutdownReserved(device.deviceId)).toBe(true);
+    expect(IOSCtrlProxyClient.getInstance(device)).toBe(retired);
+    await shutdown?.release();
+    sessionManager.stopCleanupTimer();
+  });
+
   test("setActiveDevice keeps a cached but no longer booted device retired", async () => {
     const fakeTimer = new FakeTimer();
     const sessionManager = new SessionManager(fakeTimer, new FakeDeviceSessionPersistence());

@@ -46,7 +46,7 @@ describe("DevicePool.isDeviceLeasedForAndroidStartup", () => {
     expect(pool.isDeviceLeasedForAndroidStartup(device.deviceId)).toBe(false);
   });
 
-  test("is true while a matching named startup lease is held", async () => {
+  test("is true while a matching recovery-owning startup lease is held", async () => {
     const timer = new FakeTimer();
     const pool = makePool(timer);
     await pool.addDevice(device, {
@@ -56,9 +56,25 @@ describe("DevicePool.isDeviceLeasedForAndroidStartup", () => {
       source: "local",
     });
 
-    const release = await pool.reserveAndroidStartupLease(device.name, true);
+    const release = await pool.reserveAndroidStartupLease(device.name, true, undefined, true);
     try {
       expect(pool.isDeviceLeasedForAndroidStartup(device.deviceId)).toBe(true);
+    } finally {
+      await release();
+    }
+  });
+
+  test("B2 warm startup lease does not suppress monitor recovery", async () => {
+    const pool = makePool(new FakeTimer());
+    await pool.addDevice(device, {
+      name: device.name,
+      platform: "android",
+      isRunning: true,
+      source: "local",
+    });
+    const release = await pool.reserveAndroidStartupLease(device.name, true);
+    try {
+      expect(pool.isDeviceLeasedForAndroidStartup(device.deviceId)).toBe(false);
     } finally {
       await release();
     }

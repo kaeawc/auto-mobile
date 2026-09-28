@@ -1,3 +1,6 @@
+import { isAlwaysOnTool } from "./toolSelectionControl";
+import { logger } from "../../utils/logger";
+
 /** One tool's enable/disable decision inside a batch write. */
 export interface SessionToolSelectionEntry {
   toolName: string;
@@ -87,6 +90,36 @@ function parseToolNames(raw: string | undefined): string[] {
   );
 }
 
+function getConfigurableToolNames(
+  toolNames: readonly string[],
+  knownToolNames: ReadonlySet<string>,
+  source: string,
+): string[] {
+  const configurable: string[] = [];
+  const ignoredAlwaysOn = new Set<string>();
+  let unknown: string | undefined;
+  for (const toolName of toolNames) {
+    if (knownToolNames.has(toolName)) {
+      configurable.push(toolName);
+    } else if (isAlwaysOnTool(toolName)) {
+      ignoredAlwaysOn.add(toolName);
+    } else if (unknown === undefined) {
+      unknown = toolName;
+    }
+  }
+  if (ignoredAlwaysOn.size > 0) {
+    logger.info(
+      `Ignoring always-on tool name(s) ${[...ignoredAlwaysOn].join(", ")} from ${source}; they have no configurable enable/disable state.`,
+    );
+  }
+  if (unknown !== undefined) {
+    throw new Error(
+      `Tool '${unknown}' is not a session-configurable tool name; ${source} accept session-configurable tools only (see the automobile:tools resource).`,
+    );
+  }
+  return configurable;
+}
+
 export function getEnvironmentToolDefaults(
   environment: Readonly<Record<string, string | undefined>>,
   knownToolNames: ReadonlySet<string>,
@@ -102,22 +135,23 @@ export function getEnvironmentToolDefaults(
 
   const enabled = parseToolNames(environment.AUTOMOBILE_ENABLED_TOOLS);
   const disabled = parseToolNames(environment.AUTOMOBILE_DISABLED_TOOLS);
-  const unknown = [...enabled, ...disabled].find((toolName) => !knownToolNames.has(toolName));
-  if (unknown) {
-    throw new Error(
-      `Tool '${unknown}' is not a session-configurable tool name; AUTOMOBILE_ENABLED_TOOLS/AUTOMOBILE_DISABLED_TOOLS accept session-configurable tools only (see the automobile:tools resource).`,
-    );
-  }
-  const disabledSet = new Set(disabled);
-  const conflict = enabled.find((toolName) => disabledSet.has(toolName));
+  const configurable = getConfigurableToolNames(
+    [...enabled, ...disabled],
+    knownToolNames,
+    "AUTOMOBILE_ENABLED_TOOLS/AUTOMOBILE_DISABLED_TOOLS",
+  );
+  const configurableEnabled = enabled.filter((toolName) => configurable.includes(toolName));
+  const configurableDisabled = disabled.filter((toolName) => configurable.includes(toolName));
+  const disabledSet = new Set(configurableDisabled);
+  const conflict = configurableEnabled.find((toolName) => disabledSet.has(toolName));
   if (conflict) {
     throw new Error(
       `Tool '${conflict}' cannot be both enabled and disabled in environment defaults.`,
     );
   }
   return new Map([
-    ...enabled.map((toolName) => [toolName, true] as const),
-    ...disabled.map((toolName) => [toolName, false] as const),
+    ...configurableEnabled.map((toolName) => [toolName, true] as const),
+    ...configurableDisabled.map((toolName) => [toolName, false] as const),
   ]);
 }
 
@@ -125,13 +159,8 @@ function assertKnownToolNames(
   toolNames: readonly string[],
   knownToolNames: ReadonlySet<string>,
   source: string,
-): void {
-  const unknown = toolNames.find((toolName) => !knownToolNames.has(toolName));
-  if (unknown) {
-    throw new Error(
-      `Tool '${unknown}' is not a session-configurable tool name; ${source} accept session-configurable tools only (see the automobile:tools resource).`,
-    );
-  }
+): string[] {
+  return getConfigurableToolNames(toolNames, knownToolNames, source);
 }
 
 export function getStartupToolDefaults(
@@ -141,17 +170,25 @@ export function getStartupToolDefaults(
   disabledTools: readonly string[] = [],
 ): ToolDefaultOverrides {
   const cliSource = "CLI startup defaults (--enable-tool/--disable-tool)";
-  assertKnownToolNames(enabledTools, knownToolNames, cliSource);
-  assertKnownToolNames(disabledTools, knownToolNames, cliSource);
-  const disabledSet = new Set(disabledTools);
-  const conflict = enabledTools.find((toolName) => disabledSet.has(toolName));
+  const configurableNames = assertKnownToolNames(
+    [...enabledTools, ...disabledTools],
+    knownToolNames,
+    cliSource,
+  );
+  const configurableNameSet = new Set(configurableNames);
+  const configurableEnabled = enabledTools.filter((toolName) => configurableNameSet.has(toolName));
+  const configurableDisabled = disabledTools.filter((toolName) =>
+    configurableNameSet.has(toolName),
+  );
+  const disabledSet = new Set(configurableDisabled);
+  const conflict = configurableEnabled.find((toolName) => disabledSet.has(toolName));
   if (conflict) {
     throw new Error(`Tool '${conflict}' cannot be both enabled and disabled in CLI defaults.`);
   }
   return new Map([
     ...getEnvironmentToolDefaults(environment, knownToolNames),
-    ...enabledTools.map((toolName) => [toolName, true] as const),
-    ...disabledTools.map((toolName) => [toolName, false] as const),
+    ...configurableEnabled.map((toolName) => [toolName, true] as const),
+    ...configurableDisabled.map((toolName) => [toolName, false] as const),
   ]);
 }
 

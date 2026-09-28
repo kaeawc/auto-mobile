@@ -205,7 +205,7 @@ describe("daemon tool-profile diagnostics", () => {
         ["--daemon", "stop"],
         {
           ...isolated.environment,
-          AUTOMOBILE_ENABLED_TOOLS: "getAndroid",
+          AUTOMOBILE_ENABLED_TOOLS: "notARealAutoMobileTool",
         },
         processes,
       );
@@ -276,7 +276,7 @@ describe("daemon tool-profile diagnostics", () => {
         [],
         {
           ...isolated.environment,
-          AUTOMOBILE_ENABLED_TOOLS: "getAndroid",
+          AUTOMOBILE_ENABLED_TOOLS: "notARealAutoMobileTool",
         },
         processes,
       );

@@ -159,6 +159,15 @@ describe("getEnvironmentToolDefaults", () => {
     );
   });
 
+  test("ignores always-on tool names in environment defaults", () => {
+    const defaults = getEnvironmentToolDefaults(
+      { AUTOMOBILE_ENABLED_TOOLS: "getAndroid" },
+      knownTools,
+    );
+
+    expect(defaults.has("getAndroid")).toBe(false);
+  });
+
   test("rejects unknown names, wrong casing, and same-layer conflicts", () => {
     expect(() =>
       getEnvironmentToolDefaults({ AUTOMOBILE_ENABLED_TOOLS: "Clipboard" }, knownTools),
@@ -198,6 +207,23 @@ describe("getEnvironmentToolDefaults", () => {
         ["observe", false],
         ["clipboard", true],
       ]),
+    );
+  });
+
+  test("ignores always-on tool names in CLI startup defaults", () => {
+    const defaults = getStartupToolDefaults({}, knownTools, ["setToolEnabled"], []);
+
+    expect(defaults.has("setToolEnabled")).toBe(false);
+  });
+
+  test("keeps rejecting genuinely unknown names with the existing errors", () => {
+    expect(() =>
+      getEnvironmentToolDefaults({ AUTOMOBILE_ENABLED_TOOLS: "totallyBogus" }, knownTools),
+    ).toThrow(
+      "Tool 'totallyBogus' is not a session-configurable tool name; AUTOMOBILE_ENABLED_TOOLS/AUTOMOBILE_DISABLED_TOOLS accept session-configurable tools only (see the automobile:tools resource).",
+    );
+    expect(() => getStartupToolDefaults({}, knownTools, ["totallyBogus"], [])).toThrow(
+      "Tool 'totallyBogus' is not a session-configurable tool name; CLI startup defaults (--enable-tool/--disable-tool) accept session-configurable tools only (see the automobile:tools resource).",
     );
   });
 });

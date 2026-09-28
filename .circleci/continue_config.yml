@@ -34,6 +34,8 @@ executors:
     # legacy m1/Intel classes, e.g. macos.m1.medium.gen1). Do NOT use m1/m2 — they
     # reached end-of-life 2026-02-16 and are rejected as invalid resource classes.
     resource_class: m4pro.medium
+    environment:
+      GIT_LFS_SKIP_SMUDGE: "1"
 
 commands:
   restore_spm_cache:

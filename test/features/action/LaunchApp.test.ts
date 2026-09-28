@@ -624,7 +624,7 @@ describe("LaunchApp", () => {
       ],
     });
 
-    fakeAdb.setForegroundApp({ packageName: settingsPackageName, userId: 0 });
+    fakeAdb.setForegroundApp({ packageName: companionPackageName, userId: 0 });
     fakeAdb.setCommandResponse("shell pm list packages --user 0", {
       stdout: `package:${settingsPackageName}\n`,
       stderr: "",
@@ -762,8 +762,12 @@ describe("LaunchApp", () => {
   test("collapses a notification shade covering the launched Android app", async () => {
     fakeTimer.enableAutoAdvance();
     const controller = new AbortController();
+    const gfxMetrics = { p50Ms: 17 };
+    const perfTiming = [{ phase: "launch", durationMs: 42 }];
     const notificationShadeObservation = {
       ...createObserveResult(),
+      gfxMetrics,
+      perfTiming,
       activeWindow: {
         appId: "com.android.systemui",
         activityName: "NotificationShade",
@@ -791,9 +795,15 @@ describe("LaunchApp", () => {
 
     expect(result.success).toBe(true);
     expect(result.observation?.activeWindow?.appId).toBe(packageName);
+    expect(result.observation?.gfxMetrics).toEqual(gfxMetrics);
+    expect(result.observation?.perfTiming).toEqual(perfTiming);
     expect(
       fakeAdb.getExecutedCommands().filter((command) => command === "shell cmd statusbar collapse"),
     ).toHaveLength(1);
+    expect(
+      fakeAdb.getCommandCalls().find((call) => call.command === "shell cmd statusbar collapse")
+        ?.signal,
+    ).toBe(controller.signal);
   });
 
   test("collapses a notification shade that appears during Android launch observation", async () => {

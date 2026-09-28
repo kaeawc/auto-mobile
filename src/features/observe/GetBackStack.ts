@@ -149,6 +149,7 @@ const ROOT_OF_TASK_LINE = /^\s*rootOfTask=(true|false)\b/;
  */
 interface HistRootEntry {
   firstHist0?: string;
+  firstHist0LaunchedFromPackage?: string;
   authoritative?: string;
   authoritativeLaunchedFromPackage?: string;
 }
@@ -350,7 +351,9 @@ export class GetBackStack implements BackStack {
     // field, if printed, we are waiting on. Mirrors parseActivities' openActivity
     // discipline (issue #4340) -- cleared at the next Hist row / task header /
     // consumed rootOfTask= so a value never bleeds across records.
-    let openHist: { owner: number; component: string; launchedFromPackage?: string } | undefined;
+    let openHist:
+      | { owner: number; component: string; histIndex: number; launchedFromPackage?: string }
+      | undefined;
 
     const histRootEntry = (owner: number): HistRootEntry => {
       let entry = histRoots.get(owner);
@@ -433,7 +436,11 @@ export class GetBackStack implements BackStack {
         }
         // This row opens a new ActivityRecord block; its own rootOfTask= (if
         // printed a few lines below) targets this row.
-        openHist = { owner, component: hist.component };
+        openHist = {
+          owner,
+          component: hist.component,
+          histIndex: hist.histIndex,
+        };
       } else if (HIST_LINE.test(line)) {
         // A Hist row in a shape parseHistRow does not recognize still counts,
         // and still ends the previous record's block.
@@ -445,6 +452,10 @@ export class GetBackStack implements BackStack {
       if (launchedFromPackage && openHist) {
         openHist.launchedFromPackage =
           launchedFromPackage[1] === "null" ? undefined : launchedFromPackage[1];
+        if (openHist.histIndex === 0 && openHist.launchedFromPackage !== undefined) {
+          histRootEntry(openHist.owner).firstHist0LaunchedFromPackage ??=
+            openHist.launchedFromPackage;
+        }
       }
 
       // The open record's own rootOfTask= field (see ROOT_OF_TASK_LINE / #4340).
@@ -492,8 +503,12 @@ export class GetBackStack implements BackStack {
         task.numActivities = histCounts.get(task.id) ?? 0;
       }
       const entry = histRoots.get(task.id);
-      if (entry?.authoritativeLaunchedFromPackage !== undefined) {
-        task.launchedFromPackage = entry.authoritativeLaunchedFromPackage;
+      const launchedFromPackage =
+        entry?.authoritative !== undefined
+          ? entry.authoritativeLaunchedFromPackage
+          : entry?.firstHist0LaunchedFromPackage;
+      if (launchedFromPackage !== undefined) {
+        task.launchedFromPackage = launchedFromPackage;
       }
       // No `Hist #0` row means nothing here resolves the task's root the way
       // this fallback is scoped to. A rootOfTask=true row alone does NOT

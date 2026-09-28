@@ -37,6 +37,7 @@ import { TTLCache } from "../cache/Cache";
 import { SingleFlight } from "../cache/SingleFlight";
 import { Timer, defaultTimer } from "../SystemTimer";
 import { isAdbMissingDeviceError, notifyAdbMissingDevice } from "./AdbDeviceHealth";
+import type { EmulatorConsoleBusyRegistry } from "./EmulatorConsoleBusyRegistry";
 import { DefaultSystemDetection, type SystemDetection } from "../system/SystemDetection";
 import {
   defaultDiscoveryObservationSequence,
@@ -44,11 +45,6 @@ import {
 } from "../DiscoveryObservationSequence";
 
 type ExecFileAsync = (file: string, args: string[], maxBuffer?: number) => Promise<ExecResult>;
-
-/** Read-only busy-state dependency for per-device ADB health notifications. */
-export interface AdbConsoleBusyRegistry {
-  isBusy(deviceId: string): boolean;
-}
 
 const PROCESS_SETTLEMENT_GRACE_MS = 1_000;
 
@@ -206,7 +202,7 @@ export class AdbClient implements AdbExecutor {
     private readonly systemDetectionFactory: () => SystemDetection = () =>
       new DefaultSystemDetection(),
     private readonly observationSequence: DiscoveryObservationSequence = defaultDiscoveryObservationSequence,
-    private readonly consoleBusyRegistry?: AdbConsoleBusyRegistry,
+    private readonly consoleBusyRegistry?: EmulatorConsoleBusyRegistry,
     private readonly defaultTimeoutMs: number = AdbClient.DEFAULT_COMMAND_TIMEOUT_MS,
   ) {
     this.device = device;
@@ -626,7 +622,7 @@ export class AdbClient implements AdbExecutor {
       startTime,
       args.join(" "),
     );
-    const busyAtDispatch = this.isConsoleBusyAtDispatch();
+    const busyAtDispatch = this.getConsoleBusyAtDispatch();
     const child = this.spawnFn(adbPath, fullArgs, {
       stdio: ["ignore", "pipe", "pipe"],
       signal: options.abortSignalScope === "startup" ? undefined : signal,
@@ -836,12 +832,19 @@ export class AdbClient implements AdbExecutor {
     return nonRetryablePatterns.some((pattern) => message.includes(pattern));
   }
 
-  private notifyMissingDeviceIfNeeded(error: unknown, busyAtDispatch: boolean): void {
+  private notifyMissingDeviceIfNeeded(
+    error: unknown,
+    busyAtDispatch: { busy: boolean; generation: number },
+  ): void {
     const deviceId = this.device?.deviceId;
     if (!deviceId || !isAdbMissingDeviceError(error, deviceId)) {
       return;
     }
-    if (busyAtDispatch || this.consoleBusyRegistry?.isBusy(deviceId)) {
+    if (
+      busyAtDispatch.busy ||
+      this.consoleBusyRegistry?.isBusy(deviceId) ||
+      (this.consoleBusyRegistry?.getGeneration(deviceId) ?? 0) !== busyAtDispatch.generation
+    ) {
       logger.debug(
         `[ADB] Suppressing missing-device notification for ${deviceId}: a console-exclusive operation is in flight`,
       );
@@ -851,9 +854,12 @@ export class AdbClient implements AdbExecutor {
     notifyAdbMissingDevice(deviceId, error);
   }
 
-  private isConsoleBusyAtDispatch(): boolean {
+  private getConsoleBusyAtDispatch(): { busy: boolean; generation: number } {
     const deviceId = this.device?.deviceId;
-    return deviceId !== undefined && (this.consoleBusyRegistry?.isBusy(deviceId) ?? false);
+    return {
+      generation: deviceId ? (this.consoleBusyRegistry?.getGeneration(deviceId) ?? 0) : 0,
+      busy: deviceId !== undefined && (this.consoleBusyRegistry?.isBusy(deviceId) ?? false),
+    };
   }
 
   private isMissingExecutableError(error: unknown): boolean {
@@ -1032,10 +1038,10 @@ export class AdbClient implements AdbExecutor {
 
     if (noRetry) {
       // No retry - just execute once
-      let busyAtDispatch = false;
+      let busyAtDispatch = { busy: false, generation: 0 };
       try {
         await beforeDispatch?.(this.getRemainingTimeoutMs(timeoutMs, startTime, command));
-        busyAtDispatch = this.isConsoleBusyAtDispatch();
+        busyAtDispatch = this.getConsoleBusyAtDispatch();
         const result = await this.execWithSignal(
           adbPath,
           fullArgs,
@@ -1062,15 +1068,15 @@ export class AdbClient implements AdbExecutor {
     }
 
     // Use retry executor for retryable commands
-    let busyAtDispatch = false;
+    let busyAtDispatch = { busy: false, generation: 0 };
     return this.retryExecutor.executeOrThrow(
       async () => {
-        busyAtDispatch = false;
+        busyAtDispatch = { busy: false, generation: 0 };
         if (resolvedSignal?.aborted) {
           throw this.getAbortError(resolvedSignal);
         }
         await beforeDispatch?.(this.getRemainingTimeoutMs(timeoutMs, startTime, command));
-        busyAtDispatch = this.isConsoleBusyAtDispatch();
+        busyAtDispatch = this.getConsoleBusyAtDispatch();
         const remainingMs = this.getRemainingTimeoutMs(timeoutMs, startTime, command);
         return await this.execWithSignal(
           adbPath,

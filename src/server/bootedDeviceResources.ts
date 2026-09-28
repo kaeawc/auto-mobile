@@ -1396,7 +1396,7 @@ export async function queryDeviceServiceStatus(
         expectedSha256,
         isCompatible,
         // isInstalled() is host-wide/unconditional for simulators; running is the per-device signal.
-        ...(running && version
+        ...(installed && running && version
           ? {
               versionInfo: version,
               ...(legacyVersion(version) ? { version: legacyVersion(version) } : {}),

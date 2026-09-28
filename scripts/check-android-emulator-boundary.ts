@@ -41,6 +41,27 @@ function isProcessExecutorType(type: ts.TypeNode | undefined): boolean {
   );
 }
 
+function isHostProcessExecutorType(type: ts.TypeNode | undefined): boolean {
+  return (
+    !!type &&
+    ts.isTypeReferenceNode(type) &&
+    ts.isIdentifier(type.typeName) &&
+    type.typeName.text === "HostProcessExecutor"
+  );
+}
+
+function isHostProcessExecutorReceiver(
+  expression: ts.Expression,
+  hostProcessExecutors: Set<string>,
+): boolean {
+  return (
+    (ts.isIdentifier(expression) && hostProcessExecutors.has(expression.text)) ||
+    (ts.isPropertyAccessExpression(expression) &&
+      expression.expression.kind === ts.SyntaxKind.ThisKeyword &&
+      hostProcessExecutors.has(expression.name.text))
+  );
+}
+
 function receiverName(
   expression: ts.Expression,
   processExecutors: Set<string>,
@@ -95,6 +116,7 @@ function findViolations(file: string): Violation[] {
     ts.ScriptKind.TS,
   );
   const processExecutors = new Set<string>();
+  const hostProcessExecutors = new Set<string>();
   const childProcessNamespaces = new Set<string>();
   const childProcessFunctions = new Set<string>();
   const violations: Violation[] = [];
@@ -167,10 +189,14 @@ function findViolations(file: string): Violation[] {
 
     if (
       (ts.isVariableDeclaration(node) || ts.isParameter(node) || ts.isPropertyDeclaration(node)) &&
-      ts.isIdentifier(node.name) &&
-      isProcessExecutorType(node.type)
+      ts.isIdentifier(node.name)
     ) {
-      processExecutors.add(node.name.text);
+      if (isProcessExecutorType(node.type)) {
+        processExecutors.add(node.name.text);
+      }
+      if (isHostProcessExecutorType(node.type)) {
+        hostProcessExecutors.add(node.name.text);
+      }
     }
 
     if (ts.isCallExpression(node)) {
@@ -183,7 +209,9 @@ function findViolations(file: string): Violation[] {
         record(node);
       } else if (ts.isPropertyAccessExpression(expression)) {
         if (DIRECT_CHILD_PROCESS_FUNCTIONS.has(expression.name.text)) {
-          record(node);
+          if (!isHostProcessExecutorReceiver(expression.expression, hostProcessExecutors)) {
+            record(node);
+          }
         } else if (
           (expression.name.text === "exec" &&
             receiverName(expression.expression, processExecutors, childProcessNamespaces)) ||

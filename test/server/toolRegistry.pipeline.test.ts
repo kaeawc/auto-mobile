@@ -13,7 +13,11 @@ import type {
   ObservationArtifactPayload,
   ObservationArtifactWriter,
 } from "../../src/server/finalizeToolResponse";
-import { createStructuredToolResponse, stringifyToolResponse } from "../../src/utils/toolUtils";
+import {
+  createJSONToolResponse,
+  createStructuredToolResponse,
+  stringifyToolResponse,
+} from "../../src/utils/toolUtils";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { TelemetryRecorder } from "../../src/features/telemetry/TelemetryRecorder";
@@ -223,6 +227,64 @@ describe("ToolRegistry device-aware pipeline", () => {
     ).resolves.toEqual({ restored: true });
     expect(lifecycleCalls).toEqual(["afterExecution"]);
   });
+
+  test.each([
+    { payload: { success: false, error: "device unavailable" }, deviceLossWins: true },
+    { payload: { success: true, value: "ok" }, deviceLossWins: false },
+    { payload: { value: "ok" }, deviceLossWins: false },
+  ])(
+    "classifies JSON-text response $payload after device loss",
+    async ({ payload, deviceLossWins }) => {
+      const controller = new AbortController();
+      const finalizedResponse = createJSONToolResponse(payload);
+      restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
+        executionTargetResolver: {
+          async resolveExecutionTarget(input: any) {
+            return {
+              args: input.args,
+              baseSessionUuid: "session-1",
+              device,
+              internalCall: false,
+              sessionUuid: "session-1",
+              shouldResolveDevice: true,
+            };
+          },
+        },
+        afterToolCall: {
+          async handle() {
+            controller.abort(
+              new DeviceLostError(
+                device.deviceId,
+                `device-disconnected:${device.deviceId}`,
+                "loss-test",
+              ),
+            );
+            return { durationMs: 0, finalizedResponse };
+          },
+        },
+        planLifecycleManager: {
+          async afterExecution() {},
+        },
+      });
+      ToolRegistry.registerDeviceAware(
+        "jsonTextFailureProbe",
+        "JSON text failure probe",
+        z.object({}),
+        async () => ({ success: true }),
+      );
+
+      const call = ToolRegistry.getTool("jsonTextFailureProbe")!.handler(
+        {},
+        undefined,
+        controller.signal,
+      );
+      if (deviceLossWins) {
+        await expect(call).rejects.toBeInstanceOf(DeviceLostError);
+      } else {
+        await expect(call).resolves.toEqual(finalizedResponse);
+      }
+    },
+  );
 
   test("logs and continues when best-effort CtrlProxy session bind fails", async () => {
     const fakeDeviceSessionManager = new FakeDeviceSessionManager();

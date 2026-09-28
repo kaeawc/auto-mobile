@@ -619,6 +619,60 @@ describe("AdbClient retry contract", () => {
 });
 
 describe("AdbClient missing-device notifications", () => {
+  test("does not forward a missing-device error after a console operation starts and settles during the command", async () => {
+    const busyRegistry = new FakeEmulatorConsoleBusyRegistry();
+    const notifications: AdbMissingDeviceEvent[] = [];
+    const stopListening = onAdbMissingDevice((event) => notifications.push(event));
+    const rejection = Promise.withResolvers<ExecResult>();
+    const dispatched = Promise.withResolvers<void>();
+    const client = new AdbClient(
+      DEVICE,
+      async () => {
+        dispatched.resolve();
+        return await rejection.promise;
+      },
+      null,
+      ...autoRetrySeam(),
+      undefined,
+      undefined,
+      busyRegistry,
+    );
+
+    try {
+      const command = client.executeCommand(
+        "shell getprop sys.boot_completed",
+        undefined,
+        undefined,
+        true,
+      );
+      await dispatched.promise;
+      await busyRegistry.runExclusive(DEVICE.deviceId, async () => undefined);
+      expect(busyRegistry.isBusy(DEVICE.deviceId)).toBe(false);
+      rejection.reject(new Error("adb: device 'emulator-5554' not found"));
+
+      await expect(command).rejects.toThrow("device 'emulator-5554' not found");
+      expect(notifications).toEqual([]);
+
+      const idleClient = new AdbClient(
+        DEVICE,
+        async () => {
+          throw new Error("adb: device 'emulator-5554' not found");
+        },
+        null,
+        ...autoRetrySeam(),
+        undefined,
+        undefined,
+        busyRegistry,
+      );
+      await expect(
+        idleClient.executeCommand("shell getprop sys.boot_completed", undefined, undefined, true),
+      ).rejects.toThrow("device 'emulator-5554' not found");
+      expect(notifications).toEqual([expect.objectContaining({ deviceId: DEVICE.deviceId })]);
+    } finally {
+      stopListening();
+    }
+  });
+
   test("does not forward a transient missing-device error while the emulator console is busy", async () => {
     const busyRegistry = new FakeEmulatorConsoleBusyRegistry();
     const notifications: AdbMissingDeviceEvent[] = [];

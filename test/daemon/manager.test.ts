@@ -1527,6 +1527,97 @@ describe("DaemonManager stop", () => {
     }
   });
 
+  test("treats a PID recycled by a non-daemon after SIGKILL as stopped", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "daemon-manager-stop-non-daemon-pid-reuse-"));
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const pid = 42468;
+    const expected: DaemonProcessRecord = {
+      pid,
+      ppid: 1,
+      command: "bun /repo/src/index.ts --daemon-mode",
+      startedAt: 1,
+      processGenerationToken: "old-generation",
+    };
+    let scans = 0;
+    const manager = new DaemonManager(
+      undefined,
+      undefined,
+      timer,
+      join(directory, "daemon.lock"),
+      join(directory, "daemon.pid"),
+      join(directory, "daemon.sock"),
+      {
+        findDaemonProcesses: () => {
+          scans++;
+          return [];
+        },
+        isProcessRunning: (targetPid) => targetPid === pid,
+      },
+    );
+
+    try {
+      await expect(
+        (
+          manager as unknown as {
+            waitForStop: (
+              targetPid: number,
+              timeout: number,
+              expected: DaemonProcessRecord,
+            ) => Promise<{ stopped: boolean; replacedByOtherGeneration: boolean }>;
+          }
+        ).waitForStop(pid, 100, expected),
+      ).resolves.toEqual({ stopped: true, replacedByOtherGeneration: false });
+      expect(timer.now()).toBe(0);
+      expect(scans).toBe(1);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("keeps waiting while the same daemon generation owns the PID", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "daemon-manager-stop-same-generation-"));
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const pid = 42469;
+    const expected: DaemonProcessRecord = {
+      pid,
+      ppid: 1,
+      command: "bun /repo/src/index.ts --daemon-mode",
+      startedAt: 1,
+      processGenerationToken: "old-generation",
+    };
+    const manager = new DaemonManager(
+      undefined,
+      undefined,
+      timer,
+      join(directory, "daemon.lock"),
+      join(directory, "daemon.pid"),
+      join(directory, "daemon.sock"),
+      {
+        findDaemonProcesses: () => [expected],
+        isProcessRunning: (targetPid) => targetPid === pid,
+      },
+    );
+
+    try {
+      await expect(
+        (
+          manager as unknown as {
+            waitForStop: (
+              targetPid: number,
+              timeout: number,
+              expected: DaemonProcessRecord,
+            ) => Promise<{ stopped: boolean; replacedByOtherGeneration: boolean }>;
+          }
+        ).waitForStop(pid, 100, expected),
+      ).resolves.toEqual({ stopped: false, replacedByOtherGeneration: false });
+      expect(timer.now()).toBe(100);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   test("does not treat PID reuse as a replacement when the PID file is missing", async () => {
     const directory = mkdtempSync(join(tmpdir(), "daemon-manager-stop-missing-pid-reuse-"));
     const pidFilePath = join(directory, "daemon.pid");

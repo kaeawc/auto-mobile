@@ -46,10 +46,12 @@ private const val INSPECTOR_PANE_FPS = 10
 @Composable
 fun LayoutFacet(
   column: DeviceColumn,
-  observationStreamFactory: () -> ObservationStream = { ObservationStreamClient() },
+  sessionUuidProvider: () -> String? = { null },
+  observationStreamFactory: () -> ObservationStream = {
+    ObservationStreamClient(sessionUuidProvider = sessionUuidProvider)
+  },
   backoffDelay: suspend (attempt: Int) -> Unit = { attempt -> delay(reconnectBackoffMs(attempt)) },
   socketAvailable: () -> Boolean = { ObservationStreamClient.socketExists() },
-  sessionUuidProvider: () -> String? = { null },
   // Window-focus gate (#5219): the desktop host passes `false` when its window is unfocused or
   // minimized, pausing the inspector's live mirror the same way the stream pane pauses. Default
   // `true` keeps other embeddings always-streaming.

@@ -14,6 +14,10 @@ import type { ObserveResult } from "../../src/models";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeDeviceSessionResolver } from "../fakes/FakeDeviceSessionResolver";
+import {
+  SessionScopedStreamAuthenticator,
+  type StreamSocketAuthenticator,
+} from "../../src/daemon/streamSocketAuth";
 import { loadCoordinateMappingVectors } from "../parity/coordinateMappingGoldenVectors";
 
 /** Deterministic deviceSessionUuid the harness mints for a given serial. */
@@ -34,8 +38,11 @@ function sessionUuidFor(deviceId: string): string {
 class TestableDeviceDataStreamSocketServer extends DeviceDataStreamSocketServer {
   readonly sessionResolver = new FakeDeviceSessionResolver();
 
-  constructor(timer: FakeTimer) {
-    super("/fake/path/test.sock", timer);
+  constructor(
+    timer: FakeTimer,
+    authenticator: StreamSocketAuthenticator = { authorize: () => {} },
+  ) {
+    super("/fake/path/test.sock", timer, authenticator);
     this.setDeviceSessionResolver(this.sessionResolver);
   }
 
@@ -3183,5 +3190,154 @@ describe("DeviceDataStreamSocketServer", () => {
       expect(messages).toHaveLength(1);
       expect(messages[0].deviceSessionUuid).toBe(sessionUuidFor("device-1"));
     });
+  });
+});
+
+describe("DeviceDataStreamSocketServer control command authorization (#7950)", () => {
+  function setup(env: NodeJS.ProcessEnv = {} as NodeJS.ProcessEnv) {
+    const authenticator = new SessionScopedStreamAuthenticator(
+      () => ({
+        getSession: (uuid) => (uuid === "owner" || uuid === "intruder" ? {} : null),
+        getSessionForDevice: (deviceId) => (deviceId === "device-1" ? "owner" : null),
+        getDeviceLabels: () => undefined,
+      }),
+      "observationStream",
+      env,
+    );
+    const server = new TestableDeviceDataStreamSocketServer(new FakeTimer(), authenticator);
+    server.sessionResolver.bind("device-1", "epoch-1");
+    const socket = new FakeSocket();
+    const calls: string[] = [];
+    server.setOnObservationRequested(async (request) => {
+      calls.push(`observe:${request.deviceId}`);
+      return [
+        {
+          deviceId: "device-1",
+          observation: {
+            updatedAt: "2026-06-24T00:00:00.000Z",
+            screenSize: { width: 1080, height: 1920 },
+            systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+            viewHierarchy: { updatedAt: 1, packageName: "app", hierarchy: {} },
+          } as ObserveResult,
+        },
+      ];
+    });
+    server.setOnNavigationGraphRequested(async () => {
+      calls.push("navigation");
+      return null;
+    });
+    server.setOnStorageSubscriptionRequested(async (request) => {
+      calls.push(`${request.subscribe ? "subscribe" : "unsubscribe"}:${request.deviceId}`);
+    });
+    const send = async (request: Record<string, unknown>) => {
+      await server.processLineForTest(socket, JSON.stringify({ id: "auth", ...request }));
+      return socket
+        .getWrittenMessages<{ type: string; success?: boolean; error?: string }>()
+        .at(-1);
+    };
+    return { server, calls, send };
+  }
+
+  const commands = [
+    { command: "request_observation", deviceId: "device-1" },
+    { command: "request_navigation_graph", deviceSessionUuid: "epoch-1" },
+    {
+      command: "subscribe_storage",
+      deviceSessionUuid: "epoch-1",
+      packageName: "app",
+      fileName: "prefs",
+    },
+    {
+      command: "unsubscribe_storage",
+      deviceSessionUuid: "epoch-1",
+      packageName: "app",
+      fileName: "prefs",
+    },
+  ];
+
+  for (const request of commands) {
+    it(`${request.command} rejects a missing session before device work`, async () => {
+      const { calls, send } = setup();
+      const response = await send(request);
+      expect(response).toMatchObject({ type: "error", success: false });
+      expect(response?.error).toContain("authenticated daemon session");
+      expect(calls).toEqual([]);
+    });
+
+    it(`${request.command} rejects a different device owner before device work`, async () => {
+      const { calls, send } = setup();
+      const response = await send({ ...request, sessionUuid: "intruder" });
+      expect(response).toMatchObject({ type: "error", success: false });
+      expect(response?.error).toContain("different daemon session");
+      expect(calls).toEqual([]);
+    });
+
+    it(`${request.command} honors the stream-auth escape hatch`, async () => {
+      const { send } = setup({ AUTOMOBILE_DAEMON_STREAM_AUTH: "0" } as NodeJS.ProcessEnv);
+      const response = await send(request);
+      expect(response?.success).toBe(true);
+    });
+  }
+
+  it("all-device observation and storage still require a live session", async () => {
+    const { calls, send } = setup();
+    const observation = await send({ command: "request_observation" });
+    const storage = await send({
+      command: "subscribe_storage",
+      packageName: "app",
+      fileName: "prefs",
+    });
+    expect(observation?.error).toContain("authenticated daemon session");
+    expect(storage?.error).toContain("authenticated daemon session");
+    expect(calls).toEqual([]);
+  });
+
+  it("the owning session can request observation by live epoch", async () => {
+    const { calls, send } = setup();
+    const response = await send({
+      command: "request_observation",
+      deviceSessionUuid: "epoch-1",
+      sessionUuid: "owner",
+    });
+    expect(response).toMatchObject({ type: "subscription_response", success: true });
+    expect(calls).toEqual(["observe:device-1"]);
+  });
+
+  it("the owning session can request a navigation graph by live epoch", async () => {
+    const { calls, send } = setup();
+    const response = await send({
+      command: "request_navigation_graph",
+      deviceSessionUuid: "epoch-1",
+      sessionUuid: "owner",
+    });
+    expect(response).toMatchObject({ type: "subscription_response", success: true });
+    expect(calls).toEqual(["navigation"]);
+  });
+
+  it("rejects a stale navigation epoch without calling the graph provider", async () => {
+    const { calls, send } = setup();
+    const response = await send({
+      command: "request_navigation_graph",
+      deviceSessionUuid: "stale",
+      sessionUuid: "owner",
+    });
+    expect(response).toMatchObject({ type: "error", success: false });
+    expect(response?.error).toContain("does not identify a live device session");
+    expect(calls).toEqual([]);
+  });
+
+  it("the owning session can subscribe and unsubscribe storage by live epoch", async () => {
+    const { calls, send } = setup();
+    for (const command of ["subscribe_storage", "unsubscribe_storage"]) {
+      const response = await send({
+        command,
+        deviceSessionUuid: "epoch-1",
+        sessionUuid: "owner",
+        packageName: "app",
+        fileName: "prefs",
+      });
+      expect(response).toMatchObject({ type: "subscription_response", success: true });
+    }
+    expect(calls).toEqual(["subscribe:device-1", "unsubscribe:device-1"]);
   });
 });

@@ -34,6 +34,149 @@ class ObservationStreamClientTest {
   private val wireJson = DaemonJson
 
   @Test
+  fun `stream request round trips session UUID`() {
+    val request =
+      StreamRequest(
+        id = "req-auth",
+        command = "request_observation",
+        sessionUuid = "desktop-session",
+      )
+    val encoded = wireJson.encodeToString(StreamRequest.serializer(), request)
+
+    assertTrue(encoded.contains("\"sessionUuid\":\"desktop-session\""), encoded)
+    assertEquals(request, wireJson.decodeFromString(StreamRequest.serializer(), encoded))
+  }
+
+  @Test
+  fun `stream request omits null session UUID`() {
+    val encoded =
+      wireJson.encodeToString(
+        StreamRequest.serializer(),
+        StreamRequest(id = "req-anonymous", command = "subscribe"),
+      )
+
+    assertFalse(encoded.contains("sessionUuid"), encoded)
+  }
+
+  @Test
+  fun `navigation graph request uses current session UUID`() {
+    assertAuthenticatedFrame("request_navigation_graph") {
+      it.requestNavigationGraph("com.example")
+    }
+  }
+
+  @Test
+  fun `observation request uses current session UUID`() {
+    assertAuthenticatedFrame("request_observation") { it.requestObservation("emulator-5554") }
+  }
+
+  @Test
+  fun `storage subscribe uses current session UUID`() {
+    assertAuthenticatedFrame("subscribe_storage") {
+      it.subscribeStorage("com.example", "prefs.xml")
+    }
+  }
+
+  @Test
+  fun `storage unsubscribe uses current session UUID`() {
+    assertAuthenticatedFrame("unsubscribe_storage") {
+      it.unsubscribeStorage("com.example", "prefs.xml")
+    }
+  }
+
+  @Test
+  fun `authenticated commands omit session UUID with default provider`() {
+    for (command in
+      listOf(
+        "request_navigation_graph",
+        "request_observation",
+        "subscribe_storage",
+        "unsubscribe_storage",
+      )) {
+      val frame = captureCommandFrame(command, null)
+      assertFalse(frame.contains("sessionUuid"), "$command: $frame")
+    }
+  }
+
+  private fun assertAuthenticatedFrame(command: String, action: (ObservationStreamClient) -> Unit) {
+    // The helper drives each command through the same fake writer as the production socket.
+    val frame = captureCommandFrame(command, "desktop-session", action)
+    assertTrue(frame.contains("\"sessionUuid\":\"desktop-session\""), frame)
+  }
+
+  private fun captureCommandFrame(
+    command: String,
+    sessionUuid: String?,
+    action: ((ObservationStreamClient) -> Unit)? = null,
+  ): String = runBlocking {
+    val tempSocket = Files.createTempFile("obs-stream-auth", ".sock")
+    val factory = RecordingTransportFactory(blocking = true)
+    val client =
+      if (sessionUuid == null) {
+        ObservationStreamClient(
+          transportFactory = factory,
+          socketPathProvider = { tempSocket.toString() },
+        )
+      } else {
+        ObservationStreamClient(
+          transportFactory = factory,
+          socketPathProvider = { tempSocket.toString() },
+          sessionUuidProvider = { sessionUuid },
+        )
+      }
+    try {
+      client.connect("emulator-5554")
+      val transport = factory.opened.single()
+      transport.awaitReadEntered()
+      val invoke =
+        action
+          ?: when (command) {
+            "request_navigation_graph" -> { stream: ObservationStreamClient ->
+              stream.requestNavigationGraph("com.example")
+            }
+            "request_observation" -> { stream: ObservationStreamClient ->
+              stream.requestObservation("emulator-5554")
+            }
+            "subscribe_storage" -> { stream: ObservationStreamClient ->
+              stream.subscribeStorage("com.example", "prefs.xml")
+            }
+            "unsubscribe_storage" -> { stream: ObservationStreamClient ->
+              stream.unsubscribeStorage("com.example", "prefs.xml")
+            }
+            else -> error("Unexpected command $command")
+          }
+
+      if (command == "unsubscribe_storage") {
+        client.subscribeStorage("com.example", "prefs.xml")
+        val subscription =
+          transport
+            .writtenFrames()
+            .lineSequence()
+            .filter { it.isNotBlank() }
+            .map {
+              wireJson.decodeFromString(StreamRequest.serializer(), it)
+            }
+            .last()
+        client.handleMessage(
+          """{"id":"${subscription.id}","type":"subscription_response","success":true}"""
+        )
+      }
+      invoke(client)
+      transport
+        .writtenFrames()
+        .lineSequence()
+        .filter { it.isNotBlank() }
+        .last { frame ->
+          wireJson.decodeFromString(StreamRequest.serializer(), frame).command == command
+        }
+    } finally {
+      client.dispose()
+      factory.opened.firstOrNull()?.releaseEof()
+      Files.deleteIfExists(tempSocket)
+    }
+  }
+
+  @Test
   fun `subscribe request carries requested cadence when provided`() {
     val request =
       StreamRequest(

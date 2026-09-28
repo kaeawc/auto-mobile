@@ -78,7 +78,10 @@ fun TwoDeviceCompareView(
   columnA: DeviceColumn,
   columnB: DeviceColumn,
   modifier: Modifier = Modifier,
-  observationStreamFactory: () -> ObservationStream = { ObservationStreamClient() },
+  sessionUuidProvider: () -> String? = { null },
+  observationStreamFactory: () -> ObservationStream = {
+    ObservationStreamClient(sessionUuidProvider = sessionUuidProvider)
+  },
   backoffDelay: suspend (attempt: Int) -> Unit = { attempt -> delay(reconnectBackoffMs(attempt)) },
   socketAvailable: () -> Boolean = { ObservationStreamClient.socketExists() },
   sideContent: @Composable (DeviceColumn, ObservationStream) -> Unit = { column, stream ->

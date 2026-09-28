@@ -50,6 +50,15 @@ export interface StreamSocketAuthenticator {
   authorize(input: StreamAuthorizeInput): void;
 }
 
+/** Check the device selected by discovery before starting device-side work. */
+export function authorizeResolvedDevice(
+  authenticator: StreamSocketAuthenticator,
+  sessionUuid: string | undefined,
+  resolvedDeviceId: string,
+): void {
+  authenticator.authorize({ sessionUuid, deviceId: resolvedDeviceId });
+}
+
 function authEnforced(env: NodeJS.ProcessEnv): boolean {
   const raw = (env[STREAM_SOCKET_AUTH_ENV] ?? "").trim().toLowerCase();
   return !(raw === "0" || raw === "false" || raw === "no" || raw === "off");

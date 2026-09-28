@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { Daemon } from "../../src/daemon/daemon";
 import { DaemonState } from "../../src/daemon/daemonState";
 import {
@@ -17,6 +18,7 @@ import { NavigationGraphManager } from "../../src/features/navigation/Navigation
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { createTestDatabase } from "../db/testDbHelper";
 import { FakeTimer } from "../fakes/FakeTimer";
+import type { OnObservationRequestedCallback } from "../../src/daemon/deviceDataStreamSocketServer";
 
 interface RoutingTarget {
   setDeviceSessionResolver(resolver: DeviceSessionResolver): void;
@@ -35,6 +37,11 @@ interface PooledEntry {
 }
 
 interface DaemonStreamInternals {
+  sessionManager: {
+    getSession(sessionUuid: string): unknown | null;
+    getSessionForDevice(deviceId: string): string | null;
+    getDeviceLabels(sessionUuid: string): Record<string, string> | undefined;
+  };
   devicePool: {
     isPooledIdentityUnresolved(deviceId: string): boolean;
     getAllDevices(): PooledEntry[];
@@ -47,11 +54,13 @@ interface DaemonStreamInternals {
   deviceSessionRegistry: DeviceSessionRegistry;
   getDeviceSessionRoutingTargets(): RoutingTargets;
   setupDeviceSessionRouting(): void;
+  setupDeviceDataStreamCallback(): void;
   setupNavigationGraphStreamListener(server: unknown): void;
   setupNavigationGraphUpdateListener(manager: NavigationGraphManager): void;
   attemptRecovery(failureKind?: string): Promise<void>;
   applyStorageSubscriptionRequest(request: {
     deviceId: string | null;
+    sessionUuid: string;
     packageName: string;
     fileName: string;
     subscribe: boolean;
@@ -73,6 +82,7 @@ class FakeDeviceDataStreamServer extends FakePushServer {
   screenshotCadenceCallbackInstalled = false;
   hierarchyCadenceCallbackInstalled = false;
   observationCallbackInstalled = false;
+  observationHandler: OnObservationRequestedCallback | null = null;
   observationRequestTimeoutMs: number | undefined;
   navigationRequestCallbackInstalled = false;
   storageSubscriptionCallbackInstalled = false;
@@ -102,8 +112,9 @@ class FakeDeviceDataStreamServer extends FakePushServer {
     this.hierarchyCadenceCallbackInstalled = true;
   }
 
-  setOnObservationRequested(_handler: unknown, timeoutMs?: number): void {
+  setOnObservationRequested(handler: OnObservationRequestedCallback, timeoutMs?: number): void {
     this.observationCallbackInstalled = true;
+    this.observationHandler = handler;
     this.observationRequestTimeoutMs = timeoutMs;
   }
 
@@ -486,6 +497,10 @@ describe("Daemon stream wiring", () => {
       );
       const internals = daemon as unknown as DaemonStreamInternals;
       internals.devicePool.getAllDevices = () => pooled;
+      internals.sessionManager.getSession = (sessionUuid) =>
+        sessionUuid === "caller-session" ? {} : null;
+      internals.sessionManager.getSessionForDevice = () => null;
+      internals.sessionManager.getDeviceLabels = () => undefined;
       internals.devicePool.assertDeviceActionable = (deviceId: string, purpose: string) => {
         if (quarantined.has(deviceId)) {
           throw new Error(`Refusing ${purpose} on device '${deviceId}'`);
@@ -507,6 +522,7 @@ describe("Daemon stream wiring", () => {
         await expect(
           internals.applyStorageSubscriptionRequest({
             deviceId: null,
+            sessionUuid: "caller-session",
             packageName: "com.example",
             fileName: "prefs.xml",
             subscribe: true,
@@ -526,6 +542,7 @@ describe("Daemon stream wiring", () => {
       try {
         await internals.applyStorageSubscriptionRequest({
           deviceId: null,
+          sessionUuid: "caller-session",
           packageName: "com.example",
           fileName: "prefs.xml",
           subscribe: true,
@@ -546,10 +563,71 @@ describe("Daemon stream wiring", () => {
       try {
         await internals.applyStorageSubscriptionRequest({
           deviceId: null,
+          sessionUuid: "caller-session",
           packageName: "com.example",
           fileName: "prefs.xml",
           subscribe: false,
         });
+      } finally {
+        daemon.getSessionManager().stopCleanupTimer();
+      }
+    });
+
+    test("refuses an all-device subscribe that expands to a device owned by another session", async () => {
+      const { daemon, internals } = await daemonWithPool(
+        [
+          { id: "emulator-5554", platform: "android" },
+          { id: "emulator-5556", platform: "android" },
+        ],
+        new Set(),
+      );
+      internals.sessionManager.getSessionForDevice = (deviceId) =>
+        deviceId === "emulator-5556" ? "other-session" : "caller-session";
+      const originalGetExistingInstance = AndroidCtrlProxyClient.getExistingInstance;
+      const touched: string[] = [];
+      AndroidCtrlProxyClient.getExistingInstance = ((deviceId: string) => ({
+        subscribeStorage: async () => {
+          touched.push(deviceId);
+        },
+      })) as typeof AndroidCtrlProxyClient.getExistingInstance;
+
+      try {
+        await expect(
+          internals.applyStorageSubscriptionRequest({
+            deviceId: null,
+            sessionUuid: "caller-session",
+            packageName: "com.example",
+            fileName: "prefs.xml",
+            subscribe: true,
+          }),
+        ).rejects.toThrow(/emulator-5556/);
+        expect(touched).toEqual(["emulator-5554"]);
+      } finally {
+        AndroidCtrlProxyClient.getExistingInstance = originalGetExistingInstance;
+        daemon.getSessionManager().stopCleanupTimer();
+      }
+    });
+
+    test("reports a per-device observation failure for another session's device", async () => {
+      const { daemon, internals } = await daemonWithPool(
+        [{ id: "emulator-5556", platform: "android" }],
+        new Set(),
+      );
+      internals.sessionManager.getSessionForDevice = () => "other-session";
+      const stream = new FakeDeviceDataStreamServer();
+      internals.getDeviceSessionRoutingTargets = () => targets(stream);
+
+      try {
+        internals.setupDeviceSessionRouting();
+        internals.setupDeviceDataStreamCallback();
+        const observations = await stream.observationHandler!({
+          deviceId: null,
+          sessionUuid: "caller-session",
+          signal: new AbortController().signal,
+        });
+        expect(observations).toHaveLength(1);
+        expect(observations[0]?.deviceId).toBe("emulator-5556");
+        expect(observations[0]?.observation.error).toMatch(/different daemon session/);
       } finally {
         daemon.getSessionManager().stopCleanupTimer();
       }

@@ -14,6 +14,7 @@ import { AndroidOfflineProbeError } from "../utils/android-cmdline-tools/Android
 import { MultiPlatformDeviceManager } from "../utils/deviceUtils";
 import { UnixSocketServer } from "./socketServer";
 import { SessionManager, type ActiveSessionExecutionQuery, type Session } from "./sessionManager";
+import { SessionScopedStreamAuthenticator } from "./streamSocketAuth";
 import { SessionHeartbeatMonitor } from "./SessionHeartbeatMonitor";
 import { SingleFlightInterval } from "./SingleFlightInterval";
 import { DevicePool, type PooledDevice } from "./devicePool";
@@ -1642,7 +1643,11 @@ export class Daemon {
       this.applyStorageSubscriptionRequest(request),
     );
 
-    server.setOnObservationRequested(async ({ deviceId, signal }) => {
+    server.setOnObservationRequested(async ({ deviceId, sessionUuid, signal }) => {
+      const authenticator = new SessionScopedStreamAuthenticator(
+        () => this.sessionManager,
+        "observationStream",
+      );
       const pooledDevices = deviceId
         ? [this.devicePool.getDevice(deviceId)].filter((device) => device !== null)
         : this.devicePool.getAllDevices();
@@ -1677,8 +1682,10 @@ export class Daemon {
         {
           timer: this.timer,
           signal,
-          assertDeviceActionable: (pooledDevice) =>
-            this.devicePool.assertDeviceActionable(pooledDevice.id, "to observe"),
+          assertDeviceActionable: (pooledDevice) => {
+            this.devicePool.assertDeviceActionable(pooledDevice.id, "to observe");
+            authenticator.authorize({ sessionUuid, deviceId: pooledDevice.id });
+          },
         },
       );
     }, PER_DEVICE_OBSERVATION_TIMEOUT_MS + OBSERVATION_BATCH_HEADROOM_MS);
@@ -1710,11 +1717,13 @@ export class Daemon {
    */
   private async applyStorageSubscriptionRequest({
     deviceId,
+    sessionUuid,
     packageName,
     fileName,
     subscribe,
   }: {
     deviceId: string | null;
+    sessionUuid?: string;
     packageName: string;
     fileName: string;
     subscribe: boolean;
@@ -1723,8 +1732,18 @@ export class Daemon {
       .getAllDevices()
       .filter((device) => deviceId === null || device.id === deviceId);
     const refusals: string[] = [];
+    const authenticator = new SessionScopedStreamAuthenticator(
+      () => this.sessionManager,
+      "observationStream",
+    );
     for (const device of devices) {
       if (device.platform !== "android") {
+        continue;
+      }
+      try {
+        authenticator.authorize({ sessionUuid, deviceId: device.id });
+      } catch (error) {
+        refusals.push(errorMessage(error));
         continue;
       }
       if (subscribe) {

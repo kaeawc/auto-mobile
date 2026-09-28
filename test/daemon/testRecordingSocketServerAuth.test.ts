@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { TestRecordingSocketServer } from "../../src/daemon/testRecordingSocketServer";
-import type { StreamSocketAuthenticator } from "../../src/daemon/streamSocketAuth";
+import {
+  SessionScopedStreamAuthenticator,
+  type StreamSocketAuthenticator,
+} from "../../src/daemon/streamSocketAuth";
 import type { TestRecordingCommand } from "../../src/daemon/testRecordingSocketTypes";
 import { ActionableError } from "../../src/models";
 import type { DeviceAdmissionGate } from "../../src/daemon/deviceAdmissionGate";
@@ -149,6 +152,39 @@ describe("TestRecordingSocketServer gates the resolved device before readiness (
 });
 
 describe("TestRecordingSocketServer authorization (issue #4752)", () => {
+  test("omitted deviceId is checked against the selected device before readiness", async () => {
+    const resolved: BootedDevice = { deviceId: "emu-1", name: "Pixel", platform: "android" };
+    let readyCalls = 0;
+    const resolution: TestRecordingDeviceResolution = {
+      selectDevice: async () => resolved,
+      readyDevice: async () => {
+        readyCalls++;
+        throw new Error("ready reached");
+      },
+    };
+    const owner = { current: "other" };
+    const auth = new SessionScopedStreamAuthenticator(
+      () => ({
+        getSession: (uuid) => (uuid === "live" || uuid === "other" ? {} : null),
+        getSessionForDevice: () => owner.current,
+        getDeviceLabels: () => undefined,
+      }),
+      "test recording",
+      {} as NodeJS.ProcessEnv,
+    );
+    const server = new TestableServer(undefined, undefined, auth, undefined, resolution);
+
+    await expect(server.invoke({ command: "start", sessionUuid: "live" })).rejects.toThrow(
+      /different daemon session/,
+    );
+    expect(readyCalls).toBe(0);
+
+    owner.current = "live";
+    await expect(server.invoke({ command: "start", sessionUuid: "live" })).rejects.toThrow(
+      "ready reached",
+    );
+    expect(readyCalls).toBe(1);
+  });
   test("rejects a start from an unauthenticated caller before any device work", async () => {
     const calls: Array<{ sessionUuid?: string; deviceId?: string }> = [];
     const server = new TestableServer(undefined, undefined, recordingAuthenticator(calls));

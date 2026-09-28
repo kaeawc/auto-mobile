@@ -108,7 +108,10 @@ private sealed interface NavigationFacetState {
 @Composable
 fun NavigationFacet(
   column: DeviceColumn,
-  observationStreamFactory: (String) -> ObservationStream = { ObservationStreamClient() },
+  sessionUuidProvider: () -> String? = { null },
+  observationStreamFactory: (String) -> ObservationStream = {
+    ObservationStreamClient(sessionUuidProvider = sessionUuidProvider)
+  },
   navigationDataSourceProvider: ((String) -> NavigationDataSource)? = null,
   backoffDelay: suspend (attempt: Int) -> Unit = { attempt -> delay(reconnectBackoffMs(attempt)) },
   socketAvailable: () -> Boolean = { ObservationStreamClient.socketExists() },

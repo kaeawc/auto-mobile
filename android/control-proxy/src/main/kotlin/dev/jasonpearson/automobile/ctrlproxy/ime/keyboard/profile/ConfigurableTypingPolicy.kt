@@ -7,6 +7,13 @@ class ConfigurableTypingPolicy(private val behavior: TypingBehavior) : TypingPol
   private var composingBuffer = ""
   private var composingCursor = 0
   private var composingStart = -1
+  private var automationFinishEchoCursor: Int? = null
+
+  fun finishComposingForAutomation(): List<ImeOp> {
+    automationFinishEchoCursor =
+      if (composingBuffer.isNotEmpty()) composingStart + composingCursor else null
+    return onFinishInput()
+  }
 
   override fun onText(text: String, snapshot: TextSnapshot): List<ImeOp> {
     updateComposingCursor(snapshot)
@@ -76,6 +83,12 @@ class ConfigurableTypingPolicy(private val behavior: TypingBehavior) : TypingPol
   }
 
   override fun onSelectionChanged(snapshot: TextSnapshot): List<ImeOp> {
+    val suppressRecompose =
+      automationFinishEchoCursor == snapshot.selectionStart &&
+        snapshot.selectionStart == snapshot.selectionEnd &&
+        snapshot.composingStart == -1 &&
+        snapshot.composingEnd == -1
+    automationFinishEchoCursor = null
     val ops = mutableListOf<ImeOp>()
     if (composingBuffer.isNotEmpty() && selectionLeftComposingSpan(snapshot)) {
       finishComposingInto(ops)
@@ -86,6 +99,7 @@ class ConfigurableTypingPolicy(private val behavior: TypingBehavior) : TypingPol
     // cursor lands in committed text, never while a word we are composing is still live.
     if (
       behavior.recomposeOnCursorMove &&
+        !suppressRecompose &&
         composingBuffer.isEmpty() &&
         snapshot.selectionStart == snapshot.selectionEnd
     ) {

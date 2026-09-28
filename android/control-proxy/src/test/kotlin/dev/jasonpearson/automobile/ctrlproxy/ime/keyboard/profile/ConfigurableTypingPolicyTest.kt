@@ -14,6 +14,22 @@ import org.robolectric.annotation.Config
 @Config(sdk = [24])
 class ConfigurableTypingPolicyTest {
   @Test
+  fun `automation finish echo does not recompose but next cursor move does`() {
+    val policy = policy(KeyboardProfiles.SAMSUNG)
+    val editor = FakeEditor()
+    type(policy, editor, "hello")
+    editor.apply(policy.finishComposingForAutomation())
+
+    assertEquals(-1, editor.composingStart)
+    assertTrue(policy.onSelectionChanged(editor.snapshot()).isEmpty())
+    editor.setSelection(3)
+    assertEquals(
+      listOf(ImeOp.SetComposingRegion(0, 5)),
+      policy.onSelectionChanged(editor.snapshot()),
+    )
+  }
+
+  @Test
   fun `direct commits every character without a composing span`() {
     val policy = policy(KeyboardProfiles.DIRECT)
     val editor = FakeEditor()

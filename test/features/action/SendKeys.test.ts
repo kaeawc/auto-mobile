@@ -958,6 +958,60 @@ describe("DefaultSendKeysCommandExecutor", () => {
     expect(events).toEqual(["profile:gboard", "commit", "profile:direct"]);
   });
 
+  test("abort during enabled-IME read stops before profile switch or commit", async () => {
+    const controller = new AbortController();
+    const adb = new FakeAdbExecutor();
+    adb.abortAfterCommand("shell ime list -s", controller);
+    const textClient = createTextClient();
+    const executor = new DefaultSendKeysCommandExecutor(
+      androidDevice,
+      createAdbFactory(adb),
+      createObserver(),
+      { textClient: textClient.client },
+    );
+
+    await expect(
+      executor.type(
+        { action: "type", text: "secret", mode: "ime", keyboardProfile: "gboard" },
+        controller.signal,
+      ),
+    ).rejects.toThrow();
+
+    expect(textClient.calls).not.toContain("setKeyboardProfile:gboard");
+    expect(textClient.commitViaImeCalls).toEqual([]);
+    expect(adb.getExecutedCommands()).not.toContain(`shell ime set ${commitImeId}`);
+  });
+
+  test("abort during profile switch restores profile without activating IME", async () => {
+    const controller = new AbortController();
+    const adb = new FakeAdbExecutor();
+    const textClient = createTextClient({
+      setKeyboardProfile: async (id) => {
+        if (id === "gboard") {
+          controller.abort();
+        }
+        return { success: true, previousProfileId: "direct" };
+      },
+    });
+    const executor = new DefaultSendKeysCommandExecutor(
+      androidDevice,
+      createAdbFactory(adb),
+      createObserver(),
+      { textClient: textClient.client },
+    );
+
+    await expect(
+      executor.type(
+        { action: "type", text: "secret", mode: "ime", keyboardProfile: "gboard" },
+        controller.signal,
+      ),
+    ).rejects.toThrow();
+
+    expect(textClient.calls).toContain("setKeyboardProfile:direct");
+    expect(textClient.commitViaImeCalls).toEqual([]);
+    expect(adb.getExecutedCommands()).not.toContain(`shell ime set ${commitImeId}`);
+  });
+
   test("per-call profile skips restoration when already active", async () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandResponseSequence("shell settings get secure default_input_method", [

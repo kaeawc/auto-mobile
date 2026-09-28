@@ -65,6 +65,8 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
   private var cancelActiveCommit: ((String) -> Unit)? = null
   private var lastPriorImeId: String? = null
   private var commitGeneration = 0L
+  internal var isInputStarted = false
+    private set
 
   override fun onCreate() {
     super.onCreate()
@@ -123,6 +125,7 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
 
   override fun onStartInput(attribute: EditorInfo?, restarting: Boolean) {
     super.onStartInput(attribute, restarting)
+    isInputStarted = true
     if (attribute != null) {
       uiState =
         session.onStartInput(
@@ -161,6 +164,7 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
   }
 
   override fun onFinishInput() {
+    isInputStarted = false
     cancelActiveCommit?.invoke("Editor disconnected during IME commit")
     commitGeneration++
     session.onFinishInput(connectionAdapter())
@@ -231,7 +235,7 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
       onResult(ImeCommitResult(success = false, error = "IME commit cancelled"))
       return
     }
-    if (currentInputStarted && currentInputConnection != null) {
+    if (isInputStarted && currentInputConnection != null) {
       driver.commit(
         text,
         priorImeId,
@@ -274,7 +278,7 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
       override fun nowMs(): Long = SystemClock.uptimeMillis()
 
       override fun editorInputType(): Int? =
-        if (currentInputStarted) currentInputEditorInfo?.inputType else null
+        if (isInputStarted) currentInputEditorInfo?.inputType else null
 
       override fun commitChar(ch: CharSequence): Boolean =
         session.typeForAutomation(ch.toString(), connectionAdapter())
@@ -305,15 +309,7 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
         mainHandler.postDelayed(action, delayMs)
       }
 
-      override fun syncEditorState(): Boolean =
-        connectionAdapter()?.let {
-          // Round-trip only: the returned text is intentionally ignored. Its sole purpose is to
-          // block until the app has applied the prior async (oneway) commit ops before we switch
-          // IMEs. A null/empty read (editors without text retrieval, e.g. some custom/WebView
-          // fields) is NOT a failure here; only a missing connection is.
-          it.textBeforeCursor(1)
-          true
-        } ?: false
+      override fun syncEditorState(): Boolean = editorSyncSucceeded(connectionAdapter())
 
       override fun switchToIme(imeId: String) {
         switchInputMethod(imeId)
@@ -399,6 +395,21 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
   }
 
   companion object {
+    /** A prompt null/empty read is valid; an exception or timed-out read is not. */
+    internal fun editorSyncSucceeded(
+      connection: ImeConnection?,
+      nowMs: () -> Long = SystemClock::uptimeMillis,
+    ): Boolean {
+      if (connection == null) return false
+      val startedMs = nowMs()
+      return runCatching {
+          connection.textBeforeCursorOrNull(1)
+          nowMs() - startedMs < INPUT_CONNECTION_SYNC_TIMEOUT_MS
+        }
+        .getOrDefault(false)
+    }
+
+    private const val INPUT_CONNECTION_SYNC_TIMEOUT_MS = 2_000L
     private const val INPUT_CONNECTION_TIMEOUT_MS = 2_000L
     private const val COMMIT_TIMEOUT_MS = 4_000L
     private const val INPUT_CONNECTION_POLL_MS = 50L

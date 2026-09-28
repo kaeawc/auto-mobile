@@ -83,6 +83,13 @@ class WebSocketServer(
         null
       }
 
+    /** Log only the protocol type and length, never free-form request fields. */
+    internal fun inboundFrameLogLine(connectionId: Int, raw: String): String {
+      val type =
+        extractStringField(raw, "type")?.takeIf { it.matches(Regex("[a-z_]+")) } ?: "unknown"
+      return "Received from client #$connectionId: type=$type length=${raw.length}"
+    }
+
     /** Substring every correlated frame carries and no `hierarchy_update`/event frame does. */
     private const val REQUEST_ID_TOKEN = "\"requestId\""
 
@@ -338,7 +345,7 @@ class WebSocketServer(
                     when (frame) {
                       is Frame.Text -> {
                         val text = frame.readText()
-                        Log.d(TAG, "Received from client #$connectionId: $text")
+                        Log.d(TAG, inboundFrameLogLine(connectionId, text))
                         handleClientMessage(text, this)
                       }
                       is Frame.Close -> {

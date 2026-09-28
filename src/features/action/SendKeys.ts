@@ -564,31 +564,38 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   ): Promise<
     TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode; imeActivationFailed?: boolean }
   > {
-    signal?.throwIfAborted();
+    this.checkAbort(signal);
     if (!(await this.textClient.supportsImeCommit())) {
+      this.checkAbort(signal);
       const error =
         "IME commit is not available: the installed control-proxy build does not advertise request_commit_text (re-cut/update the APK).";
       logger.warn(`[SendKeys] ${error}`);
       return { success: false, error };
     }
+    this.checkAbort(signal);
     if (mode === "imeKeyEvents" && !(await this.textClient.supportsImeKeyEvents())) {
+      this.checkAbort(signal);
       return {
         success: false,
         error: "IME key events are unavailable: update the control-proxy APK.",
       };
     }
+    this.checkAbort(signal);
 
     const profileSupport = await this.checkKeyboardProfileSupport(keyboardProfile);
+    this.checkAbort(signal);
     if (!profileSupport.success) {
       return { ...profileSupport, resolvedMode: mode };
     }
 
     const priorResult = await this.readDefaultIme();
+    this.checkAbort(signal);
     if (!priorResult.success) {
       return priorResult;
     }
     const prior = priorResult.imeId;
     const enabledResult = await this.readCommitImeEnabled();
+    this.checkAbort(signal);
     if (!enabledResult.success) {
       return enabledResult;
     }
@@ -616,11 +623,16 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   ): Promise<
     TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode; imeActivationFailed?: boolean }
   > {
+    this.checkAbort(signal);
     const profileResult = await this.setRequestedKeyboardProfile(keyboardProfile);
     if (!profileResult.success) {
       return { ...profileResult, resolvedMode: mode };
     }
     const previousProfileId = profileResult.previousProfileId;
+    if (signal?.aborted) {
+      await this.restoreKeyboardProfileIfNeeded(keyboardProfile, previousProfileId);
+      this.checkAbort(signal);
+    }
 
     if (!(await this.activateCommitIme(wasEnabled))) {
       await this.restoreIme(prior, wasEnabled);
@@ -634,12 +646,15 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
 
     let safeToRestore = true;
     try {
+      this.checkAbort(signal);
       if (operation === "replace") {
         const clearResult = await this.textClient.clear();
+        this.checkAbort(signal);
         if (!clearResult.success) {
           return { ...clearResult, resolvedMode: mode };
         }
       }
+      this.checkAbort(signal);
       const result = await this.textClient.commitViaIme(
         text,
         prior,
@@ -657,6 +672,10 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         await this.restoreIme(prior, wasEnabled);
       }
     }
+  }
+
+  private checkAbort(signal?: AbortSignal): void {
+    signal?.throwIfAborted();
   }
 
   private canRestoreAfterImeCommit(result: TextActionResult): boolean {

@@ -30,6 +30,16 @@ import org.robolectric.RobolectricTestRunner
 @RunWith(RobolectricTestRunner::class)
 class WebSocketServerTest {
 
+  @Test
+  fun `inbound frame log omits user text including malformed payloads`() {
+    val frame = """{"type":"request_commit_text","text":"hunter2","requestId":"secret"}"""
+    val line = WebSocketServer.inboundFrameLogLine(7, frame)
+    assertEquals("Received from client #7: type=request_commit_text length=${frame.length}", line)
+    assertFalse(line.contains("hunter2"))
+    assertFalse(line.contains("secret"))
+    assertFalse(WebSocketServer.inboundFrameLogLine(7, "hunter2").contains("hunter2"))
+  }
+
   private lateinit var server: WebSocketServer
   private lateinit var testScope: TestScope
 

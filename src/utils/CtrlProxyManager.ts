@@ -48,6 +48,10 @@ import {
 
 export const MAX_STALE_PREFETCH_DIRS_PER_STARTUP = 20;
 export const STALE_PREFETCH_SWEEP_DEADLINE_MS = 5_000;
+// API 36 can take about 6 seconds to bind CtrlProxy after a force-stop; allow
+// another 2 seconds for scheduler and adb polling delay before giving up.
+export const REBIND_BIND_WAIT_BUDGET_MS = 8_000;
+type AccessibilityServiceState = "bound" | "binding" | "crashed" | "absent" | "unbound";
 /** A rebind inspection failed before any accessibility setting was written. */
 export class CtrlProxyInspectionError extends ActionableError {}
 type ApkOverrideChecksumEntry = {
@@ -164,10 +168,9 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   private static readonly STATUS_CACHE_TTL = 30 * 60 * 1000; // 30 minutes
   // Let Android release the crashed process's listener before re-enabling it.
   private static readonly REBIND_FORCE_STOP_SETTLE_MS = 100;
-  // Give the framework a short, bounded window to bind the new process.
+  // Poll the framework while it binds the new process.
   private static readonly REBIND_HEALTH_POLL_MS = 200;
-  private static readonly REBIND_HEALTH_MAX_POLLS = 4;
-  private static readonly REBIND_BIND_GRACE_MS = 4_000;
+  private static readonly REBIND_BIND_GRACE_MS = REBIND_BIND_WAIT_BUDGET_MS;
   private bindingFirstObservedAt: number | null = null;
 
   // Cache for toggle capabilities (settings permissions don't change during session)
@@ -907,6 +910,19 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
    * it to "Crashed services", so isEnabled() alone cannot establish health.
    */
   async isAccessibilityServiceHealthy(): Promise<boolean> {
+    return (await this.accessibilityServiceState()) === "bound";
+  }
+
+  /** Wait for an already-binding service without starting another force-stop. */
+  async waitForAccessibilityServiceBinding(): Promise<boolean> {
+    const state = await this.accessibilityServiceState();
+    if (state === "bound") {
+      return true;
+    }
+    return state === "binding" && (await this.waitForHealthyAfterRebind());
+  }
+
+  private async accessibilityServiceState(): Promise<AccessibilityServiceState> {
     const result = await this.adb.executeCommand("shell dumpsys accessibility");
     const diagnostic = `${result.stdout}\n${result.stderr}`;
     if (isAndroidFrameworkUnavailable(diagnostic)) {
@@ -937,13 +953,17 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     const isBinding = bindingServices.includes(component);
     const isCrashed = crashedServices.includes(component);
     this.recordBindingObservation(isEnabled && isBinding && !isCrashed);
-    const healthy = isEnabled && isBound && !isBinding && !isCrashed;
-    logger.debug(
-      `[CTRL_PROXY] Accessibility service binding status: ${
-        healthy ? "bound" : isCrashed ? "crashed" : isBinding ? "binding" : "unbound"
-      }`,
-    );
-    return healthy;
+    const state: AccessibilityServiceState = isCrashed
+      ? "crashed"
+      : !isEnabled
+        ? "absent"
+        : isBinding
+          ? "binding"
+          : isBound
+            ? "bound"
+            : "unbound";
+    logger.debug(`[CTRL_PROXY] Accessibility service binding status: ${state}`);
+    return state;
   }
 
   private static isCtrlProxyBound(boundServices: string): boolean {
@@ -1161,15 +1181,21 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   }
 
   private async waitForHealthyAfterRebind(): Promise<boolean> {
-    for (let poll = 0; poll < AndroidCtrlProxyManager.REBIND_HEALTH_MAX_POLLS; poll++) {
-      if (poll > 0) {
-        await this.timer.sleep(AndroidCtrlProxyManager.REBIND_HEALTH_POLL_MS);
-      }
-      if (await this.isAccessibilityServiceHealthy()) {
+    const startedAt = this.timer.now();
+    for (;;) {
+      const state = await this.accessibilityServiceState();
+      if (state === "bound") {
         return true;
       }
+      if (state === "crashed" || state === "absent") {
+        return false;
+      }
+      const remainingMs = REBIND_BIND_WAIT_BUDGET_MS - (this.timer.now() - startedAt);
+      if (remainingMs <= 0) {
+        return false;
+      }
+      await this.timer.sleep(Math.min(AndroidCtrlProxyManager.REBIND_HEALTH_POLL_MS, remainingMs));
     }
-    return false;
   }
 
   private static accessibilityServiceSection(output: string, name: string): string {

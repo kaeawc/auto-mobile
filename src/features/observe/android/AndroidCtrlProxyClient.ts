@@ -1271,12 +1271,13 @@ class NoOpCtrlProxyForwardLease implements CtrlProxyForwardLease {
  * Narrow Android manager seam for connection-failure escalation (issue #7532),
  * analogous to `IOSCtrlProxyClient`'s `serviceManagerFactory`. Exposes only what
  * recovery needs: the binding-health probe, the crashed/unbound rebind added by
- * #7470, and full setup for a service that is missing or not installed at all.
- * `AndroidCtrlProxyManager` implements all three.
+ * #7470, a wait for an existing bind, and full setup for a service that is
+ * missing or not installed at all. `AndroidCtrlProxyManager` implements all four.
  */
 export interface AndroidServiceRecoveryManager {
   isAccessibilityServiceHealthy(): Promise<boolean>;
   rebindIfUnhealthy?(): Promise<boolean>;
+  waitForAccessibilityServiceBinding?(): Promise<boolean>;
   setup(force?: boolean, perf?: PerformanceTracker): Promise<ProxySetupResult>;
 }
 
@@ -2444,17 +2445,29 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     if (generation !== this.connectionGeneration) {
       return "failed";
     }
-    const repaired = rebound && (await manager.isAccessibilityServiceHealthy());
+    const rebindOutcome = await this.rebindRecoveryOutcome(manager, rebound);
     if (generation !== this.connectionGeneration) {
       return "failed";
     }
-    if (repaired) {
-      return "repaired";
+    if (rebindOutcome) {
+      return rebindOutcome;
     }
 
     onEscalation();
     logger.info(`[AndroidCtrlProxyClient] Rebind did not restore health; running full setup`);
     return this.setupRecoveryService(manager, generation);
+  }
+
+  private async rebindRecoveryOutcome(
+    manager: AndroidServiceRecoveryManager,
+    rebound: boolean,
+  ): Promise<"repaired" | "healthy" | null> {
+    if (rebound) {
+      return (await manager.isAccessibilityServiceHealthy()) ? "repaired" : null;
+    }
+    // A no-op rebind can mean the service was already binding. Let that bind
+    // finish before escalating to setup, which would force-stop it again.
+    return (await manager.waitForAccessibilityServiceBinding?.()) ? "healthy" : null;
   }
 
   private async setupRecoveryService(

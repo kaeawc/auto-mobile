@@ -577,4 +577,47 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
     expect(manager.rebindIfUnhealthyCallCount).toBe(1);
     expect(manager.setupCallCount).toBe(1);
   });
+
+  test("waits for an existing bind instead of force-stopping it through setup", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    let healthy = false;
+    let setupCalls = 0;
+    let bindingWaits = 0;
+    const manager: AndroidServiceRecoveryManager = {
+      isAccessibilityServiceHealthy: async () => healthy,
+      rebindIfUnhealthy: async () => false,
+      waitForAccessibilityServiceBinding: async () => {
+        bindingWaits++;
+        await timer.sleep(6_000);
+        healthy = true;
+        return true;
+      },
+      setup: async () => {
+        setupCalls++;
+        return { success: true, message: "setup ok" };
+      },
+    };
+    client = AndroidCtrlProxyClient.createForTesting(
+      testDevice,
+      buildFakeAdb(),
+      createSuccessWebSocketFactory(timer),
+      timer,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      () => manager,
+    );
+
+    client.ensureRecoveryStarted();
+    expect(await client.awaitRecovery(10_000)).toBe("recovered");
+    expect(bindingWaits).toBe(1);
+    expect(setupCalls).toBe(0);
+  });
 });

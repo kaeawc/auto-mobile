@@ -153,6 +153,51 @@ describe("DeviceSessionRepository", () => {
     ]);
   });
 
+  test("continues terminalizing expired recoverable sessions after one failure", async () => {
+    timer.advanceTime(10_000);
+    for (const sessionUuid of ["failing-expired", "remaining-expired"]) {
+      await repo.upsertActiveSession({
+        sessionUuid,
+        deviceId: `${sessionUuid}-device`,
+        platform: "android",
+        createdAtMs: 1,
+        lastUsedAtMs: 1,
+        expiresAtMs: 5_000,
+        sessionTimeoutMs: 60_000,
+        heartbeatTimeoutMs: 10_000,
+        hasReceivedHeartbeat: false,
+      });
+      await repo.markReleased(sessionUuid, "released", 1, "daemon-shutdown");
+    }
+
+    const originalMarkReleased = repo.markReleased.bind(repo);
+    const markReleasedSpy = spyOn(repo, "markReleased").mockImplementation(
+      async (sessionUuid, ...args) => {
+        if (sessionUuid === "failing-expired") {
+          throw new Error("terminalize failure");
+        }
+        return await originalMarkReleased(sessionUuid, ...args);
+      },
+    );
+    const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      await expect(repo.listRecoverableSessions()).resolves.toEqual([]);
+      expect(warnSpy.mock.calls.map(([message]) => String(message)).join("\n")).toContain(
+        "failing-expired",
+      );
+      expect(markReleasedSpy).toHaveBeenCalledWith(
+        "remaining-expired",
+        "expired",
+        10_000,
+        "expired",
+      );
+      expect(await repo.getSession("remaining-expired")).toMatchObject({ status: "expired" });
+    } finally {
+      markReleasedSpy.mockRestore();
+      warnSpy.mockRestore();
+    }
+  });
+
   test("rehydrates a device-restart release onto the same AVD after its adb port changes", async () => {
     const originalManager = new SessionManager(timer, repo);
     try {

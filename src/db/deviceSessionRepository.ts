@@ -2,6 +2,7 @@ import { sql, type Kysely } from "kysely";
 import { getDatabase } from "./database";
 import type { Database, DeviceSession, DeviceSessionStatus, NewDeviceSession } from "./types";
 import { logger } from "../utils/logger";
+import { errorMessage } from "../utils/describeUnknownError";
 import type { Platform } from "../models";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { toActionableError } from "../models/ActionableError";
@@ -426,7 +427,15 @@ export class DeviceSessionRepository {
       .where("expires_at_ms", "<=", nowMs)
       .execute();
     for (const row of expired) {
-      await this.markReleased(row.session_uuid, "expired", nowMs, "expired");
+      try {
+        await this.markReleased(row.session_uuid, "expired", nowMs, "expired");
+      } catch (error) {
+        logger.warn(
+          `[DeviceSessionRepository] Failed to terminalize expired recoverable session ${row.session_uuid}: ${errorMessage(error)}`,
+          error,
+        );
+        continue;
+      }
     }
     return await db
       .selectFrom("device_sessions")

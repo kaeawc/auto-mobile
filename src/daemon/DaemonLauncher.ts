@@ -35,6 +35,21 @@ function normalizeEntryScriptPath(entryScript: string): string {
 
 type CheckoutProvenanceProbe = (checkoutRoot: string) => boolean;
 
+function hasMatchingWindowsSiblingParent(
+  entryScript: string,
+  activeEntryScript: string | undefined,
+  candidateCheckoutRoot: string,
+  activeCheckoutRoot: string,
+): boolean {
+  if (!entryScript.includes("\\") && !activeEntryScript?.includes("\\")) {
+    return true;
+  }
+  return (
+    win32.dirname(candidateCheckoutRoot).replace(/\\/g, "/") ===
+    win32.dirname(activeCheckoutRoot).replace(/\\/g, "/")
+  );
+}
+
 // A stalled remote mount remains an accepted residual risk because this scan is synchronous by
 // design and bounded by `ps`; only siblings of the active checkout are probed, limiting the blast radius.
 const defaultCheckoutProbe: CheckoutProvenanceProbe = (checkoutRoot) => {
@@ -81,19 +96,28 @@ function isSiblingJjWorkspaceEntryScript(
 
   const activeCheckoutRoot = normalizedActiveEntryScript.slice(0, -distributionSuffix.length);
   const candidateCheckoutRoot = normalizedEntryScript.slice(0, -distributionSuffix.length);
-  const nativeDistributionSuffix = entryScript.includes("\\")
+  const nativeCandidateDistributionSuffix = entryScript.includes("\\")
     ? "\\dist\\src\\index.js"
     : distributionSuffix;
-  const nativeCandidateCheckoutRoot = entryScript.slice(0, -nativeDistributionSuffix.length);
-  const nativeActiveCheckoutRoot = activeEntryScript?.endsWith(nativeDistributionSuffix)
-    ? activeEntryScript.slice(0, -nativeDistributionSuffix.length)
+  const nativeActiveDistributionSuffix = activeEntryScript?.includes("\\")
+    ? "\\dist\\src\\index.js"
+    : distributionSuffix;
+  const nativeCandidateCheckoutRoot = entryScript.slice(
+    0,
+    -nativeCandidateDistributionSuffix.length,
+  );
+  const nativeActiveCheckoutRoot = activeEntryScript?.endsWith(nativeActiveDistributionSuffix)
+    ? activeEntryScript.slice(0, -nativeActiveDistributionSuffix.length)
     : undefined;
   return (
     posix.dirname(candidateCheckoutRoot) === posix.dirname(activeCheckoutRoot) &&
     nativeActiveCheckoutRoot !== undefined &&
-    (entryScript.includes("\\")
-      ? win32.dirname(nativeCandidateCheckoutRoot) === win32.dirname(nativeActiveCheckoutRoot)
-      : true) &&
+    hasMatchingWindowsSiblingParent(
+      entryScript,
+      activeEntryScript,
+      nativeCandidateCheckoutRoot,
+      nativeActiveCheckoutRoot,
+    ) &&
     probe(nativeCandidateCheckoutRoot)
   );
 }

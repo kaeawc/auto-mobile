@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import {
@@ -28,6 +28,35 @@ afterEach(() => {
 });
 
 describe("proxy server device-control transport errors", () => {
+  beforeAll(async () => {
+    const availabilitySpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+    const daemonManager = new FakeDaemonManager();
+    daemonManager.statusResult = {
+      ...daemonManager.statusResult,
+      version: DAEMON_VERSION,
+    };
+    const { server, proxy } = createProxyMcpServer({
+      proxyConfig: {
+        clientFactory: () => new FakeDaemonClient(),
+        daemonManager,
+        autoStartDaemon: false,
+      },
+    });
+    const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "transport-failure-warmup-client", version: "0.0.1" });
+
+    try {
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+      await proxy.callTool("observe", {});
+    } finally {
+      await client.close();
+      await server.close();
+      await proxy.close();
+      availabilitySpy.mockRestore();
+    }
+  });
+
   test("returns safe machine-readable transport failure details", () => {
     const failure: DeviceControlTransportFailure = {
       code: "device_control_transport_failure",
@@ -136,7 +165,11 @@ describe("proxy server device-control transport errors", () => {
     });
   });
 
-  test("preserves daemon overload details for all list handlers", async () => {
+  test.each([
+    ["tools/list", (client: Client) => client.listTools()],
+    ["resources/list", (client: Client) => client.listResources()],
+    ["resources/templates/list", (client: Client) => client.listResourceTemplates()],
+  ] as const)("preserves daemon overload details for %s", async (_handler, request) => {
     isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
     const fakeClient = new FakeDaemonClient({
       onCallDaemonMethod: (method) => {
@@ -177,24 +210,18 @@ describe("proxy server device-control transport errors", () => {
       await client.connect(clientTransport);
       await proxy.callTool("observe", {});
 
-      for (const request of [
-        client.listTools(),
-        client.listResources(),
-        client.listResourceTemplates(),
-      ]) {
-        try {
-          await request;
-          throw new Error("expected list request to reject");
-        } catch (error) {
-          expect(error).toBeInstanceOf(McpError);
-          expect((error as McpError).data).toMatchObject({
-            error: {
-              code: "daemon_overloaded",
-              retryable: true,
-              retryAfterMs: 250,
-            },
-          });
-        }
+      try {
+        await request(client);
+        throw new Error("expected list request to reject");
+      } catch (error) {
+        expect(error).toBeInstanceOf(McpError);
+        expect((error as McpError).data).toMatchObject({
+          error: {
+            code: "daemon_overloaded",
+            retryable: true,
+            retryAfterMs: 250,
+          },
+        });
       }
     } finally {
       await client.close();

@@ -913,13 +913,15 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     return (await this.accessibilityServiceState()) === "bound";
   }
 
-  /** Wait for an already-binding service without starting another force-stop. */
-  async waitForAccessibilityServiceBinding(): Promise<boolean> {
+  /** Distinguish an already-bound service from a bind completed during this wait. */
+  async waitForAccessibilityServiceBinding(): Promise<"already-bound" | "recovered" | "unhealthy"> {
     const state = await this.accessibilityServiceState();
     if (state === "bound") {
-      return true;
+      return "already-bound";
     }
-    return state === "binding" && (await this.waitForHealthyAfterRebind());
+    return state === "binding" && (await this.waitForHealthyAfterRebind())
+      ? "recovered"
+      : "unhealthy";
   }
 
   private async accessibilityServiceState(): Promise<AccessibilityServiceState> {

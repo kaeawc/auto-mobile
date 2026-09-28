@@ -695,11 +695,25 @@ describe("CtrlProxyManager", function () {
       ]);
 
       expect(await accessibilityServiceClient.rebindIfUnhealthy()).toBe(false);
-      expect(await accessibilityServiceClient.waitForAccessibilityServiceBinding()).toBe(true);
+      expect(await accessibilityServiceClient.waitForAccessibilityServiceBinding()).toBe(
+        "recovered",
+      );
       expect(timer.now()).toBe(6_000);
       expect(
         fakeAdb.wasCommandExecuted(`shell am force-stop ${AndroidCtrlProxyManager.PACKAGE}`),
       ).toBe(false);
+    });
+
+    test("distinguishes an already-bound service without waiting", async () => {
+      fakeAdb.setCommandResponse("shell dumpsys accessibility", {
+        stdout: accessibilityFixture("bound-label"),
+        stderr: "",
+      });
+
+      expect(await accessibilityServiceClient.waitForAccessibilityServiceBinding()).toBe(
+        "already-bound",
+      );
+      expect(timer.now()).toBe(0);
     });
 
     test("fails fast when the rebound service crashes", async () => {

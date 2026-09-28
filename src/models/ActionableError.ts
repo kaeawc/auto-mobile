@@ -22,3 +22,10 @@ export function toActionableError(error: unknown, context: string): ActionableEr
   const message = errorMessage(error);
   return new ActionableError(`${context}: ${message}`, { cause: error });
 }
+
+/** Build a consistent client-facing error for an action unavailable on a platform. */
+export function unsupportedPlatformError(platform: string, action: string): ActionableError {
+  return new ActionableError(
+    `${action} is not supported on platform '${platform}'. Supported platforms: android, ios.`,
+  );
+}

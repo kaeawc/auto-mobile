@@ -1,5 +1,8 @@
-import { describe, expect, test } from "bun:test";
-import { ActionableError, toActionableError } from "../../src/models/ActionableError";
+import {
+  ActionableError,
+  toActionableError,
+  unsupportedPlatformError,
+} from "../../src/models/ActionableError";
 
 describe("toActionableError", () => {
   test("prefixes context and extracts message from an Error", () => {
@@ -27,5 +30,14 @@ describe("toActionableError", () => {
     const result = toActionableError(original, "Context");
 
     expect(result).toBe(original);
+  });
+});
+
+describe("unsupportedPlatformError", () => {
+  test("names the unsupported platform and supported platforms", () => {
+    const error = unsupportedPlatformError("tvos", "tap on elements");
+    expect(error).toBeInstanceOf(ActionableError);
+    expect(error.message).toContain("tvos");
+    expect(error.message).toContain("android, ios");
   });
 });

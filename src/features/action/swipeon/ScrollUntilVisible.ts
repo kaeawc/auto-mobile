@@ -1,3 +1,4 @@
+import { unsupportedPlatformError } from "../../../models/ActionableError";
 import {
   ActionableError,
   BootedDevice,
@@ -548,7 +549,7 @@ export class ScrollUntilVisible {
           ).viewHierarchy;
           break;
         default:
-          throw new ActionableError(`Unsupported platform: ${this.deps.device.platform}`);
+          throw unsupportedPlatformError(this.deps.device.platform, "scroll until visible");
       }
 
       if (latestViewHierarchy) {

@@ -7,7 +7,7 @@ import { FakeAdbClientFactory } from "../../../fakes/FakeAdbClientFactory";
 import { BootedDevice } from "../../../../src/models";
 import { FakeWebSocket, WebSocketState } from "../../../fakes/FakeWebSocket";
 import { FakeTimer } from "../../../fakes/FakeTimer";
-import { FakeScreenshotBackoffScheduler } from "../../../../src/features/observe/ScreenshotBackoffScheduler";
+import { FakeScreenshotBackoffScheduler } from "../../../fakes/FakeScreenshotBackoffScheduler";
 import {
   startDeviceDataStreamSocketServer,
   stopDeviceDataStreamSocketServer,

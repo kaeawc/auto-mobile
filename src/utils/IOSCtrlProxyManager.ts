@@ -3960,7 +3960,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     return {
       supportsXCTest: true, // XCUITest is available on all iOS devices
       deviceType: isSimulator ? "simulator" : "physical",
-      iosVersion: null, // TODO: Get from device info
+      iosVersion: null, // iOS version is not sourced from device info.
     };
   }
 }

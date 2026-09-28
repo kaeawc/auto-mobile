@@ -350,7 +350,7 @@ describe("NoOpMigrationLock", () => {
     const lock = new NoOpMigrationLock();
     await lock.acquire();
     await lock.release();
-    expect(true).toBe(true);
+    await expect(lock.release()).resolves.toBeUndefined();
   });
 });
 

@@ -1,3 +1,4 @@
+import { unsupportedPlatformError } from "../../models/ActionableError";
 import { errorMessage } from "../../utils/describeUnknownError";
 import {
   AdbClientFactory,
@@ -60,7 +61,7 @@ export class Clipboard {
           return {
             success: false,
             action,
-            error: `Unsupported platform: ${this.device.platform}`,
+            error: unsupportedPlatformError(this.device.platform, "use the clipboard").message,
           };
       }
     } catch (error) {

@@ -1,3 +1,4 @@
+import { unsupportedPlatformError } from "../../models/ActionableError";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { BootedDevice, Point } from "../../models";
 import { FingerPath } from "../../models";
@@ -45,7 +46,7 @@ export class ExecuteGesture extends BaseVisualChange {
       case "ios":
         return await this.executeiOSSwipe(x1, y1, x2, y2, options, perf);
       default:
-        throw new Error(`Unsupported platform: ${this.device.platform}`);
+        throw unsupportedPlatformError(this.device.platform, "execute gesture");
     }
   }
 
@@ -275,7 +276,7 @@ export class ExecuteGesture extends BaseVisualChange {
       case "ios":
         return await this.executeiOSGesture(path, duration);
       default:
-        throw new Error(`Unsupported platform: ${this.device.platform}`);
+        throw unsupportedPlatformError(this.device.platform, "execute gesture");
     }
   }
 

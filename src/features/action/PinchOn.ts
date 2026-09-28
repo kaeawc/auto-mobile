@@ -1,3 +1,4 @@
+import { unsupportedPlatformError } from "../../models/ActionableError";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
 import {
@@ -93,7 +94,10 @@ export class PinchOn extends BaseVisualChange {
 
     if (this.device.platform !== "android" && this.device.platform !== "ios") {
       perf.end();
-      return this.createErrorResult(`Unsupported platform: ${this.device.platform}`, options);
+      return this.createErrorResult(
+        unsupportedPlatformError(this.device.platform, "pinch on elements").message,
+        options,
+      );
     }
 
     if (options.scale !== undefined && options.scale <= 0) {

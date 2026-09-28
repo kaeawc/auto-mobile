@@ -1,6 +1,6 @@
+import { unsupportedPlatformError } from "../../models/ActionableError";
 import { isDeepStrictEqual } from "node:util";
 import {
-  ActionableError,
   BootedDevice,
   ObserveResult,
   TapAtOptions,
@@ -205,7 +205,7 @@ export class TapAtCoordinate extends BaseVisualChange {
               );
               break;
             default:
-              throw new ActionableError(`Unsupported platform: ${this.device.platform}`);
+              throw unsupportedPlatformError(this.device.platform, "tap at coordinates");
           }
 
           return { success: true, x: resolved.x, y: resolved.y };

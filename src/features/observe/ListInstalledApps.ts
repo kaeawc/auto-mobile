@@ -542,7 +542,7 @@ export class ListInstalledApps {
       packageName,
       userIds: [userId],
       foreground: isForeground,
-      recent: false, // TODO: Implement recent app detection
+      recent: false, // Recent-app detection is not implemented; always false.
     };
     mergeSystemAppCatalogEntry(systemApp, userId, entry);
     systemAppsMap.set(packageName, systemApp);
@@ -778,7 +778,7 @@ export class ListInstalledApps {
         userId: user.userId,
         profileType: user.profileType ?? classifyAndroidUser(user.flags),
         foreground: this.isForegroundFor(accumulator, packageName, user.userId),
-        recent: false, // TODO: Implement recent app detection
+        recent: false, // Recent-app detection is not implemented; always false.
         ...catalog.get(packageName),
       });
       this.recordCacheEntry(accumulator, user, packageName, 0);

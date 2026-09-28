@@ -1,3 +1,4 @@
+import { unsupportedPlatformError } from "../../models/ActionableError";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { BaseVisualChange } from "./BaseVisualChange";
 import {
@@ -242,7 +243,7 @@ export class InputText extends BaseVisualChange {
               );
             default:
               perf.end();
-              throw new Error(`Unsupported platform: ${this.device.platform}`);
+              throw unsupportedPlatformError(this.device.platform, "input text");
           }
         } catch (error) {
           assertInputNotAborted(signal);

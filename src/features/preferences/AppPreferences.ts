@@ -5,7 +5,7 @@ import {
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { SimCtlClient, type SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
-import { shellQuote } from "../../utils/shellQuote";
+import { shellQuoteUnlessSafe } from "../../utils/shellQuote";
 import type { BootedDevice } from "../../models";
 import { ActionableError } from "../../models";
 import { isIosSimulatorDevice } from "../action/IosSimulatorPermissions";
@@ -653,13 +653,6 @@ function valuesEqual(
     return false;
   }
   return parsePreferenceValue(stringValue(actual), type) === expected;
-}
-
-function shellQuoteUnlessSafe(value: string): string {
-  if (/^[A-Za-z0-9_./:@%+=,-]+$/.test(value)) {
-    return value;
-  }
-  return shellQuote(value);
 }
 
 function looksLikeMissingIosDefault(error: unknown): boolean {

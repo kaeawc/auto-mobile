@@ -1,3 +1,4 @@
+import { unsupportedPlatformError } from "../../models/ActionableError";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { AndroidUserTargetResolver } from "../../utils/android-cmdline-tools/AndroidUserTargetResolver";
 import { BaseVisualChange } from "./BaseVisualChange";
@@ -376,7 +377,7 @@ export class LaunchApp extends BaseVisualChange {
           signal,
         );
       default:
-        throw new ActionableError(`Unsupported platform: ${this.device.platform}`);
+        throw unsupportedPlatformError(this.device.platform, "launch apps");
     }
   }
 
@@ -552,24 +553,6 @@ export class LaunchApp extends BaseVisualChange {
                 }
               }
             }
-
-            // CtrlProxy WebSocket launch path (disabled — kept for future comparison):
-            // const xcTestClient = IOSCtrlProxyClient.getInstance(this.device);
-            // perf.serial("ctrlProxyLaunch");
-            // const xcTestLaunchResult = await xcTestClient.requestLaunchApp(
-            //   bundleId, undefined, perf, coldBoot
-            // );
-            // if (xcTestLaunchResult.perfTiming) {
-            //   const timings = Array.isArray(xcTestLaunchResult.perfTiming)
-            //     ? xcTestLaunchResult.perfTiming
-            //     : [xcTestLaunchResult.perfTiming];
-            //   perf.addExternalTiming("ctrlProxySwiftBreakdown", timings);
-            // }
-            // perf.end();
-            // launchResult = {
-            //   success: xcTestLaunchResult.success,
-            //   error: xcTestLaunchResult.error
-            // };
           }
 
           if (launchResult.error) {

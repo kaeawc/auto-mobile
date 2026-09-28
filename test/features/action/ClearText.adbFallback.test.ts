@@ -280,4 +280,21 @@ describe("ClearText Android ADB fallback", () => {
       fakeAdb.getExecutedCommands().filter((cmd) => cmd === "shell input keyevent KEYCODE_DEL"),
     ).toHaveLength(200);
   });
+  test("unsupported platform result includes the platform name", async () => {
+    const unsupportedDevice = { ...device, platform: "tvos" } as unknown as BootedDevice;
+    const clearText = new ClearText(unsupportedDevice, fakeAdb as any);
+    observedSpy = spyOn(
+      clearText as unknown as {
+        observedInteraction: (fn: (o: ObserveResult) => Promise<unknown>) => Promise<unknown>;
+      },
+      "observedInteraction",
+    ).mockImplementation(async (fn: (o: ObserveResult) => Promise<unknown>) =>
+      fn(noHierarchyObserve()),
+    );
+
+    const result = await clearText.execute();
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("tvos");
+    expect(result.error).not.toBe("Failed to clear text");
+  });
 });

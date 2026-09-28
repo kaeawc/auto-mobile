@@ -3,9 +3,9 @@ import { promises as fs } from "fs";
 import { homedir } from "os";
 import { join } from "path";
 import { createHash, X509Certificate } from "crypto";
-import { Parser } from "xml2js";
 import { logger } from "../logger";
 import { Xcodebuild, XcodebuildClient } from "./XcodebuildClient";
+import { parsePlist, PlistReal, type PlistValue } from "./XctestrunPlist";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../workingDirectory";
 import { SecurityClient, type SecurityClientApi } from "./SecurityClient";
 import { defaultTimer, Timer } from "../SystemTimer";
@@ -61,6 +61,24 @@ interface SigningResolution {
   warnings: string[];
 }
 
+const plistValueToSigningValue = (value: PlistValue): unknown => {
+  if (value instanceof Map) {
+    return Object.fromEntries(
+      [...value.entries()].map(([key, child]) => [key, plistValueToSigningValue(child)]),
+    );
+  }
+  if (Array.isArray(value)) {
+    return value.map(plistValueToSigningValue);
+  }
+  if (value instanceof PlistReal) {
+    return value.value;
+  }
+  if (Buffer.isBuffer(value)) {
+    return value.toString("base64");
+  }
+  return value;
+};
+
 interface XcodeSigningDependencies {
   platform: () => NodeJS.Platform;
   securityClient: SecurityClientApi;
@@ -75,18 +93,6 @@ interface XcodeSigningDependencies {
   timer?: Timer;
 }
 
-const plistParser = new Parser({
-  explicitChildren: true,
-  preserveChildrenOrder: true,
-  explicitRoot: false,
-});
-
-type PlistNode = {
-  "#name": string;
-  _: string;
-  $$?: PlistNode[];
-};
-
 const createDefaultDependencies = (): XcodeSigningDependencies => ({
   platform: () => process.platform,
   securityClient: new SecurityClient(),
@@ -100,50 +106,6 @@ const createDefaultDependencies = (): XcodeSigningDependencies => ({
   now: () => Date.now(),
   timer: defaultTimer,
 });
-
-const parsePlistValue = (node: PlistNode | undefined): unknown => {
-  if (!node) {
-    return null;
-  }
-
-  switch (node["#name"]) {
-    case "dict": {
-      const result: Record<string, unknown> = {};
-      const children = node.$$ ?? [];
-      for (let i = 0; i < children.length; i += 2) {
-        const keyNode = children[i];
-        const valueNode = children[i + 1];
-        if (!keyNode || keyNode["#name"] !== "key") {
-          continue;
-        }
-        result[keyNode._] = parsePlistValue(valueNode);
-      }
-      return result;
-    }
-    case "array":
-      return (node.$$ ?? []).map((child) => parsePlistValue(child));
-    case "string":
-    case "data":
-      return node._ ?? "";
-    case "date":
-      return node._ ? new Date(node._) : null;
-    case "integer":
-    case "real":
-      return node._ ? Number(node._) : null;
-    case "true":
-      return true;
-    case "false":
-      return false;
-    default:
-      return node._ ?? null;
-  }
-};
-
-const parsePlist = async (xml: string): Promise<unknown> => {
-  const parsed = (await plistParser.parseStringPromise(xml)) as PlistNode;
-  const root = parsed["#name"] === "plist" ? parsed.$$?.[0] : parsed;
-  return parsePlistValue(root);
-};
 
 const fingerprintFromCertificate = (base64Der: string): CertificateInfo | null => {
   try {
@@ -578,7 +540,7 @@ export class XcodeSigningManager {
       if (!plist || typeof plist !== "object") {
         return null;
       }
-      const data = plist as Record<string, unknown>;
+      const data = plistValueToSigningValue(plist as PlistValue) as Record<string, unknown>;
       const uuid = String(data.UUID ?? "");
       const name = String(data.Name ?? "");
       const teamIds = Array.isArray(data.TeamIdentifier) ? data.TeamIdentifier.map(String) : [];

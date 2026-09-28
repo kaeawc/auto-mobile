@@ -1,3 +1,4 @@
+import { unsupportedPlatformError } from "../../models/ActionableError";
 import {
   DefaultHierarchyCapture,
   identifyObservedHierarchy,
@@ -595,7 +596,7 @@ export class TapAnyElement extends BaseVisualChange {
         return this.prepareViewHierarchyForResponse(hierarchy, screenSize);
       }
       default:
-        throw new ActionableError(`Unsupported platform: ${this.device.platform}`);
+        throw unsupportedPlatformError(this.device.platform, "tap any element");
     }
   }
 
@@ -1019,7 +1020,7 @@ export class TapAnyElement extends BaseVisualChange {
               );
               break;
             default:
-              throw new ActionableError(`Unsupported platform: ${this.device.platform}`);
+              throw unsupportedPlatformError(this.device.platform, "tap any element");
           }
 
           perf.end();

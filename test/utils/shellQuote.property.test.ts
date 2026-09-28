@@ -1,6 +1,6 @@
-import { describe, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import fc from "fast-check";
-import { shellQuote } from "../../src/utils/shellQuote";
+import { shellQuote, shellQuoteUnlessSafe } from "../../src/utils/shellQuote";
 
 // Property-based tests. See Backoff.property.test.ts for the pinned-seed rationale.
 const RUN_OPTIONS = { seed: 1_234_567, numRuns: 300 } as const;
@@ -76,5 +76,12 @@ describe("shellQuote (property-based)", () => {
       ),
       RUN_OPTIONS,
     );
+  });
+});
+
+describe("shellQuoteUnlessSafe", () => {
+  test("leaves safe words alone and quotes values containing shell metacharacters", () => {
+    expect(shellQuoteUnlessSafe("com.example.app")).toBe("com.example.app");
+    expect(shellQuoteUnlessSafe("a b")).toBe("'a b'");
   });
 });

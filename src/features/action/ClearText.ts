@@ -236,13 +236,17 @@ export class ClearText extends BaseVisualChange {
    * Kept as fallback if accessibility service is unavailable.
    */
   private async executeAdbClearText(observeResult: ObserveResult): Promise<ClearTextResult> {
-    if (!observeResult.viewHierarchy) {
+    if (!observeResult.viewHierarchy || observeResult.viewHierarchy.hierarchy.error) {
       // Fallback: if we can't get view hierarchy, use a reasonable default
       await this.clearWithDeletes(200);
       return { success: true };
     }
 
-    const textLength = getFocusedTextLength(observeResult.viewHierarchy, this.parser) ?? 0;
+    const textLength = getFocusedTextLength(observeResult.viewHierarchy, this.parser);
+    if (textLength === undefined) {
+      await this.clearWithDeletes(200);
+      return { success: true };
+    }
 
     // TODO: Move cursor to the end of the text
 

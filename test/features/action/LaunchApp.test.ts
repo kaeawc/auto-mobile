@@ -1530,6 +1530,30 @@ describe("LaunchApp", () => {
     expect(fakeAdb.wasCommandExecuted(`shell monkey -p '${packageName}' --user 0 1`)).toBe(true);
   });
 
+  test("does not launch Android when the injected cold boot fails", async () => {
+    fakeTimer.enableAutoAdvance();
+    fakeAdb.setCommandResponse("shell dumpsys activity processes", {
+      stdout: "123:com.example.app/u0a123\n",
+      stderr: "",
+    });
+    const action = new LaunchApp(device, fakeAdb as unknown as any, null, fakeTimer, {
+      createAndroidColdBoot: () => ({ execute: async () => ({ success: false, error: "x" }) }),
+    });
+    (action as any).awaitIdle = fakeAwaitIdle;
+    (action as any).observeScreen = fakeObserveScreen;
+    (action as any).window = fakeWindow;
+
+    const result = await action.execute(packageName, false, true);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Cold boot could not stop");
+    expect(
+      fakeAdb
+        .getExecutedCommands()
+        .some((command) => command.includes("am start") || command.includes("monkey")),
+    ).toBe(false);
+  });
+
   test("waits for foreground before returning observation", async () => {
     fakeAdb.setForegroundApp(null);
     fakeAdb.setCommandResponse("shell dumpsys activity processes", { stdout: "0\n", stderr: "" });

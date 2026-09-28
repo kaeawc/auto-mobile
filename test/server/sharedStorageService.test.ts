@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { createSharedStorageServiceForTesting } from "../../src/server/sharedStorageService";
+import {
+  createSharedStorageServiceForTesting,
+  type SharedStorageFileSystem,
+} from "../../src/server/sharedStorageService";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import type { BootedDevice } from "../../src/models";
@@ -298,5 +301,40 @@ describe("SharedStorageService", () => {
       }),
     ).rejects.toThrow("conflicts with a nested fixture");
     expect(adbFactory.getFakeClient().getAllCommands()).toEqual([]);
+  });
+
+  test("cleans inline fixture directories when active user resolution fails", async () => {
+    const removed: string[] = [];
+    let nextDir = 0;
+    const fileSystem: SharedStorageFileSystem = {
+      stat: async () => {
+        throw new Error("not used");
+      },
+      mkdtemp: async () => `/fake/shared-${++nextDir}`,
+      writeFileBuffer: async () => {},
+      rm: async (path) => {
+        removed.push(path);
+      },
+    };
+    const service = createSharedStorageServiceForTesting({
+      fileSystem,
+      createUserResolver: () => ({
+        resolve: async () => {
+          throw new Error("no profile");
+        },
+      }),
+    });
+
+    await expect(
+      service.stage({
+        device: androidDevice,
+        namespace: "run-42",
+        files: [
+          { contentText: "first", destinationPath: "first.txt" },
+          { contentBase64: "eA==", destinationPath: "second.txt" },
+        ],
+      }),
+    ).rejects.toThrow("no profile");
+    expect(removed).toEqual(["/fake/shared-1", "/fake/shared-2"]);
   });
 });

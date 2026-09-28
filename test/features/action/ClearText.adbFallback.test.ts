@@ -270,4 +270,14 @@ describe("ClearText Android ADB fallback", () => {
     const deletes = commands.filter((cmd) => cmd === "shell input keyevent KEYCODE_DEL");
     expect(deletes.length).toBe(200);
   });
+
+  test("uses the 200-delete fallback when the hierarchy is errored", async () => {
+    fakeA11yService.setClearTextResult({ success: false, totalTimeMs: 0, error: "unavailable" });
+    const result = await runClearText(hierarchyErrorObserve());
+
+    expect(result.success).toBe(true);
+    expect(
+      fakeAdb.getExecutedCommands().filter((cmd) => cmd === "shell input keyevent KEYCODE_DEL"),
+    ).toHaveLength(200);
+  });
 });

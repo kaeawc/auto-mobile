@@ -6,6 +6,7 @@ import {
   type CrashAppResult,
   type LaunchAppResult,
   type TerminateAppResult,
+  type InstallAppResult,
 } from "../models";
 import { toActionableError } from "../models/ActionableError";
 import { CrashApp } from "../features/action/CrashApp";
@@ -180,6 +181,30 @@ export function setCrashAppToolDependencies(deps: Partial<CrashAppToolDependenci
 
 export function resetCrashAppToolDependencies(): void {
   crashAppToolDependencies = null;
+}
+
+export interface InstallAppExecutor {
+  execute(artifactPath: string, userId?: number, signal?: AbortSignal): Promise<InstallAppResult>;
+}
+
+export interface InstallAppToolDependencies {
+  createInstallApp(device: BootedDevice): InstallAppExecutor;
+}
+
+let installAppToolDependencies: InstallAppToolDependencies | null = null;
+
+function getInstallAppToolDependencies(): InstallAppToolDependencies {
+  return (installAppToolDependencies ??= { createInstallApp: (device) => new InstallApp(device) });
+}
+
+export function setInstallAppToolDependencies(deps: Partial<InstallAppToolDependencies>): void {
+  installAppToolDependencies = {
+    createInstallApp: deps.createInstallApp ?? getInstallAppToolDependencies().createInstallApp,
+  };
+}
+
+export function resetInstallAppToolDependencies(): void {
+  installAppToolDependencies = null;
 }
 
 /**
@@ -893,8 +918,13 @@ export function registerAppTools() {
     signal?: AbortSignal,
   ) => {
     try {
-      const installApp = new InstallApp(device);
+      const installApp = getInstallAppToolDependencies().createInstallApp(device);
       const result = await installApp.execute(args.artifactPath, undefined, signal);
+      if (!result.success) {
+        throw new ActionableError(
+          result.error || `Failed to install app from ${args.artifactPath}`,
+        );
+      }
       const message = result.warning
         ? `Installed app from ${args.artifactPath}. Warning: ${result.warning}`
         : `Installed app from ${args.artifactPath}`;
@@ -904,6 +934,9 @@ export function registerAppTools() {
         ...result,
       });
     } catch (error) {
+      if (error instanceof ActionableError) {
+        throw error;
+      }
       throw new ActionableError(`Failed to install app: ${error}`);
     } finally {
       try {

@@ -50,32 +50,36 @@ function isHostProcessExecutorType(type: ts.TypeNode | undefined): boolean {
   );
 }
 
+type ExecutorType = "process" | "host" | "other";
+type ExecutorLookup = (name: string) => ExecutorType | undefined;
+
 function isHostProcessExecutorReceiver(
   expression: ts.Expression,
-  hostProcessExecutors: Set<string>,
+  executorType: ExecutorLookup,
 ): boolean {
   return (
-    (ts.isIdentifier(expression) && hostProcessExecutors.has(expression.text)) ||
+    (ts.isIdentifier(expression) && executorType(expression.text) === "host") ||
     (ts.isPropertyAccessExpression(expression) &&
       expression.expression.kind === ts.SyntaxKind.ThisKeyword &&
-      hostProcessExecutors.has(expression.name.text))
+      executorType(expression.name.text) === "host")
   );
 }
 
 function receiverName(
   expression: ts.Expression,
-  processExecutors: Set<string>,
+  executorType: ExecutorLookup,
   childProcessNamespaces: Set<string>,
 ): string | null {
   if (ts.isIdentifier(expression)) {
-    return processExecutors.has(expression.text) || childProcessNamespaces.has(expression.text)
+    return executorType(expression.text) === "process" ||
+      childProcessNamespaces.has(expression.text)
       ? expression.text
       : null;
   }
   if (
     ts.isPropertyAccessExpression(expression) &&
     expression.expression.kind === ts.SyntaxKind.ThisKeyword &&
-    processExecutors.has(expression.name.text)
+    executorType(expression.name.text) === "process"
   ) {
     return expression.getText();
   }
@@ -115,11 +119,20 @@ function findViolations(file: string): Violation[] {
     true,
     ts.ScriptKind.TS,
   );
-  const processExecutors = new Set<string>();
-  const hostProcessExecutors = new Set<string>();
+  const executorScopes: Map<string, ExecutorType>[] = [new Map()];
   const childProcessNamespaces = new Set<string>();
   const childProcessFunctions = new Set<string>();
   const violations: Violation[] = [];
+
+  const executorType: ExecutorLookup = (name) => {
+    for (let index = executorScopes.length - 1; index >= 0; index--) {
+      const type = executorScopes[index].get(name);
+      if (type !== undefined) {
+        return type;
+      }
+    }
+    return undefined;
+  };
 
   const isChildProcessRequire = (expression: ts.Expression): boolean =>
     ts.isCallExpression(expression) &&
@@ -146,6 +159,20 @@ function findViolations(file: string): Violation[] {
   };
 
   const visit = (node: ts.Node): void => {
+    const introducesScope =
+      ts.isBlock(node) ||
+      ts.isFunctionDeclaration(node) ||
+      ts.isFunctionExpression(node) ||
+      ts.isArrowFunction(node) ||
+      ts.isMethodDeclaration(node) ||
+      ts.isConstructorDeclaration(node) ||
+      ts.isGetAccessorDeclaration(node) ||
+      ts.isSetAccessorDeclaration(node) ||
+      ts.isCatchClause(node);
+    if (introducesScope) {
+      executorScopes.push(new Map());
+    }
+
     if (
       ts.isImportDeclaration(node) &&
       ts.isStringLiteral(node.moduleSpecifier) &&
@@ -191,12 +218,12 @@ function findViolations(file: string): Violation[] {
       (ts.isVariableDeclaration(node) || ts.isParameter(node) || ts.isPropertyDeclaration(node)) &&
       ts.isIdentifier(node.name)
     ) {
-      if (isProcessExecutorType(node.type)) {
-        processExecutors.add(node.name.text);
-      }
-      if (isHostProcessExecutorType(node.type)) {
-        hostProcessExecutors.add(node.name.text);
-      }
+      const type: ExecutorType = isProcessExecutorType(node.type)
+        ? "process"
+        : isHostProcessExecutorType(node.type)
+          ? "host"
+          : "other";
+      executorScopes[executorScopes.length - 1].set(node.name.text, type);
     }
 
     if (ts.isCallExpression(node)) {
@@ -209,12 +236,12 @@ function findViolations(file: string): Violation[] {
         record(node);
       } else if (ts.isPropertyAccessExpression(expression)) {
         if (DIRECT_CHILD_PROCESS_FUNCTIONS.has(expression.name.text)) {
-          if (!isHostProcessExecutorReceiver(expression.expression, hostProcessExecutors)) {
+          if (!isHostProcessExecutorReceiver(expression.expression, executorType)) {
             record(node);
           }
         } else if (
           (expression.name.text === "exec" &&
-            receiverName(expression.expression, processExecutors, childProcessNamespaces)) ||
+            receiverName(expression.expression, executorType, childProcessNamespaces)) ||
           isChildProcessFunction(expression)
         ) {
           record(node);
@@ -223,6 +250,9 @@ function findViolations(file: string): Violation[] {
     }
 
     ts.forEachChild(node, visit);
+    if (introducesScope) {
+      executorScopes.pop();
+    }
   };
 
   visit(sourceFile);

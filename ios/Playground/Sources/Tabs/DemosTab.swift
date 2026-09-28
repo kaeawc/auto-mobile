@@ -3,6 +3,8 @@ import SwiftUI
 
 struct DemosTab: View {
     @Environment(\.autoMobileTheme) private var theme
+    @State private var shouldOpenTapAtTargets = false
+    @State private var didCheckDeepLink = false
 
     var body: some View {
         NavigationStack {
@@ -105,6 +107,16 @@ struct DemosTab: View {
 
                 Section("Accessibility") {
                     NavigationLink {
+                        TapAtTargetsDemo()
+                    } label: {
+                        DemoRow(
+                            title: "Tap At Targets",
+                            description: "Measure visual coordinate tap accuracy",
+                            icon: "scope"
+                        )
+                    }
+
+                    NavigationLink {
                         AccessibilityDemo()
                     } label: {
                         DemoRow(
@@ -158,6 +170,15 @@ struct DemosTab: View {
                 }
             }
             .navigationTitle("Demos")
+            .navigationDestination(isPresented: $shouldOpenTapAtTargets) {
+                TapAtTargetsDemo()
+            }
+            .onAppear {
+                guard !didCheckDeepLink else { return }
+                didCheckDeepLink = true
+                shouldOpenTapAtTargets =
+                    ProcessInfo.processInfo.environment["PLAYGROUND_DEEP_LINK"] == "tapAtTargets"
+            }
             .trackNavigation(destination: "demos", metadata: ["type": "tab_switch"])
         }
     }

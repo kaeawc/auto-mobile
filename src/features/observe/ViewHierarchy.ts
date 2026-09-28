@@ -204,6 +204,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
     if (
       (result.hierarchy.unavailableReason !== "runner_not_running" &&
         result.hierarchy.unavailableReason !== "connection_lost" &&
+        result.hierarchy.unavailableReason !== "service_recovering" &&
         !(result.ctrlProxyReconnect && result.hierarchy.error)) ||
       !this.hasRecoveryRefetchBudget(context)
     ) {

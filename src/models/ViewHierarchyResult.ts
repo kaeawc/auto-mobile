@@ -162,12 +162,12 @@ export type IosHierarchyUnavailableReason =
   | "simulator_not_booted"
   | "request_timed_out"
   | "auto_setup_failed"
+  | "service_recovering"
   | "unknown";
 
 /** `unknown` covers older delegates that do not yet report a typed cause. */
 export type HierarchyUnavailableReason =
   | IosHierarchyUnavailableReason
-  | "service_recovering"
   | "device_locked"
   | "incomplete_capture";
 

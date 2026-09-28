@@ -210,7 +210,6 @@
 1	test/server/networkGraph.test.ts
 2	test/server/notificationTools.test.ts
 2	test/server/observeTools.raw.test.ts
-6	test/server/observeWaitForConditionDsl.test.ts
 33	test/server/observeWaitForSchema.test.ts
 2	test/server/openLinkWaitFor.test.ts
 6	test/server/planExecutionOrchestrator.integration.test.ts

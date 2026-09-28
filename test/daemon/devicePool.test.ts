@@ -688,6 +688,21 @@ describe("DevicePool", () => {
     }
   }
 
+  class GatedSnapshotDeviceManager extends FakeDeviceManager {
+    readonly snapshotTaken = Promise.withResolvers<void>();
+    readonly resumeDiscovery = Promise.withResolvers<void>();
+    gateDiscovery = false;
+
+    override async getBootedDevicesDetailed(platform: SomePlatform) {
+      const snapshot = await super.getBootedDevicesDetailed(platform);
+      if (this.gateDiscovery) {
+        this.snapshotTaken.resolve();
+        await this.resumeDiscovery.promise;
+      }
+      return snapshot;
+    }
+  }
+
   beforeEach(() => {
     fakeTimer = new FakeTimer();
     sessionManager = new SessionManager(fakeTimer, new FakeDeviceSessionPersistence());
@@ -978,6 +993,32 @@ describe("DevicePool", () => {
 
       // Retirement releases the reservation, so admission resumes.
       expect(() => devicePool.assertSessionReadyForAutomation("owner-session")).not.toThrow();
+    });
+
+    test("does not allocate a live marked incarnation after a timed-out kill releases its reservation", async () => {
+      const device = createBootedDevice("emulator-5554", "android", "Pixel 8");
+      await initializeLiveDevices([device]);
+      const captured = devicePool.getDevice(device.deviceId);
+      if (!captured) {
+        throw new Error("expected pooled shutdown device");
+      }
+      devicePool.markIntentionalShutdown(device.deviceId);
+      const reservation = await devicePool.reserveDeviceForShutdown(device.deviceId);
+      if (!reservation) {
+        throw new Error("expected shutdown reservation");
+      }
+      await reservation.release();
+
+      // The platform command is still unsettled. A booted observation alone
+      // cannot remove its late-exit fence or hand the device to a new session.
+      await devicePool.refreshDevices();
+      expect(devicePool.getIdleDevices().map((idle) => idle.id)).not.toContain(device.deviceId);
+
+      devicePool.noteLatePlatformShutdownSettled(captured);
+      await devicePool.refreshDevices();
+      expect(devicePool.getIdleDevices().map((idle) => idle.id)).toContain(device.deviceId);
+      expect(await devicePool.assignDeviceToSession("next", "android")).toBe(device.deviceId);
+      expect(() => devicePool.assertSessionReadyForAutomation("next")).not.toThrow();
     });
 
     test("captures the exact session identity after its idle deadline", async () => {
@@ -2629,6 +2670,93 @@ describe("DevicePool", () => {
   });
 
   describe("refreshDevices", () => {
+    test("prunes removal stamps after completed refreshes", async () => {
+      for (let index = 0; index < 6; index++) {
+        const device = createBootedDevice(`emulator-${5554 + index * 2}`, "android");
+        await devicePool.addDevice(device);
+        await devicePool.removeDevice(device.deviceId);
+        await devicePool.refreshDevices();
+        expect(devicePool.getDeviceRemovalStampCountForTest()).toBeLessThanOrEqual(1);
+      }
+    });
+
+    for (const [platform, deviceId, name] of [
+      ["android", "emulator-5554", "Pixel 8"],
+      ["ios", "sim-1", "iPhone 15"],
+    ] as const) {
+      test(`does not re-add a retired ${platform} serial from a pre-removal discovery snapshot`, async () => {
+        const device = createBootedDevice(deviceId, platform, name);
+        const manager = new GatedSnapshotDeviceManager([], [device]);
+        const readyDeviceIds: string[] = [];
+        devicePool = new DevicePool(
+          sessionManager,
+          "test-daemon-session-id",
+          fakeTimer,
+          fakeAppsRepo,
+          manager,
+          new DefaultRetryExecutor(fakeTimer),
+          undefined,
+          undefined,
+          undefined,
+          (readyId) => readyDeviceIds.push(readyId),
+        );
+        await devicePool.addDevice(device);
+        readyDeviceIds.length = 0;
+        const captured = devicePool.getDevice(deviceId);
+        if (!captured) {
+          throw new Error("expected pooled device");
+        }
+        devicePool.markIntentionalShutdown(deviceId);
+        const reservation = await devicePool.reserveDeviceForShutdown(deviceId);
+        if (!reservation) {
+          throw new Error("expected shutdown reservation");
+        }
+
+        manager.gateDiscovery = true;
+        const staleRefresh = devicePool.refreshDevices();
+        await manager.snapshotTaken.promise;
+        manager.bootedDevices = [];
+        expect(await devicePool.retireDeviceForShutdown(captured)).toBe(true);
+        await reservation.release();
+        manager.resumeDiscovery.resolve();
+        expect(await staleRefresh).toBe(0);
+
+        expect(devicePool.getDevice(deviceId)).toBeNull();
+        expect(readyDeviceIds).toEqual([]);
+      });
+    }
+
+    test("re-adds a rebooted serial when discovery starts after its removal", async () => {
+      const device = createBootedDevice("emulator-5554", "android", "Pixel 8");
+      const manager = new GatedSnapshotDeviceManager([], [device]);
+      const readyDeviceIds: string[] = [];
+      devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        fakeAppsRepo,
+        manager,
+        new DefaultRetryExecutor(fakeTimer),
+        undefined,
+        undefined,
+        undefined,
+        (readyId) => readyDeviceIds.push(readyId),
+      );
+      await devicePool.addDevice(device);
+      readyDeviceIds.length = 0;
+      const captured = devicePool.getDevice(device.deviceId);
+      if (!captured) {
+        throw new Error("expected pooled device");
+      }
+      expect(await devicePool.retireDeviceForShutdown(captured)).toBe(true);
+
+      expect(await devicePool.refreshDevices()).toBe(1);
+      expect(devicePool.getDevice(device.deviceId)?.incarnation).toBeGreaterThan(
+        captured.incarnation,
+      );
+      expect(readyDeviceIds).toEqual([device.deviceId]);
+    });
+
     test("marks a newly discovered Android placeholder identity unresolved", async () => {
       fakeDeviceManager.bootedDevices = [
         createBootedDevice("emulator-5554", "android", "Unknown (emulator-5554)"),
@@ -4471,6 +4599,9 @@ describe("DevicePool", () => {
         }
       }
 
+      expect(devicePool.getAvailableDeviceCount()).toBe(0);
+      devicePool.noteLatePlatformShutdownSettled(captured);
+      await devicePool.refreshDevices();
       expect(devicePool.getAvailableDeviceCount()).toBe(1);
       await expect(
         devicePool.bindOrReuseDeviceSession("session-1", device.deviceId, device.platform),

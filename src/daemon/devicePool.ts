@@ -13,6 +13,7 @@ import { Mutex } from "async-mutex";
 import {
   MultiPlatformDeviceManager,
   PlatformDeviceManager,
+  type BootedDeviceDiscovery,
   waitForDeviceReadyOrCancel,
 } from "../utils/deviceUtils";
 import { exponentialBackoff } from "../utils/Backoff";
@@ -754,6 +755,15 @@ export class DevicePool {
   private readonly emulatorLossRecoveryResolvers = new Map<string, () => void>();
   /** Latest refresh request; older discovery snapshots must not overwrite it. */
   private refreshGeneration = 0;
+  /** A discovery snapshot predating a removal cannot recreate that serial. */
+  private deviceRemovalGeneration = 0;
+  private readonly deviceRemovalStamps = new Map<string, number>();
+  private readonly inFlightRefreshFloors = new Map<number, number>();
+  /** A late kill settled; only a later fresh observation can lift its fence. */
+  private readonly settledLateShutdowns = new Map<
+    string,
+    { incarnation: number; refreshGeneration: number }
+  >();
   private readonly readinessReservationCounts: Map<string, number> = new Map();
   /**
    * Stable runtime names reserved while a booted serial is being replaced,
@@ -1173,12 +1183,19 @@ export class DevicePool {
     return (await this.refreshDevicesInternal(false)).addedCount;
   }
 
+  /** @internal Test support for checking removal-stamp retention. */
+  getDeviceRemovalStampCountForTest(): number {
+    return this.deviceRemovalStamps.size;
+  }
+
   private async refreshDevicesInternal(
     assignmentLockHeld: boolean,
   ): Promise<DevicePoolRefreshResult> {
     const startTime = this.timer.now();
     const perf = createGlobalPerformanceTracker();
     const refreshGeneration = ++this.refreshGeneration;
+    const removalGenerationAtDiscoveryStart = this.deviceRemovalGeneration;
+    this.inFlightRefreshFloors.set(refreshGeneration, removalGenerationAtDiscoveryStart);
     try {
       logger.info("Refreshing device pool - discovering connected devices...");
 
@@ -1221,14 +1238,31 @@ export class DevicePool {
       removedCount = removed;
 
       for (const device of bootedDevices) {
-        this.clearAutoStartSuppressionForBootedDevice(device);
         const updatePooledDevice = async () => {
-          if (refreshGeneration !== this.refreshGeneration) {
-            return false;
+          if (
+            this.shouldSkipRefreshedDevice(
+              device.deviceId,
+              refreshGeneration,
+              removalGenerationAtDiscoveryStart,
+            )
+          ) {
+            return undefined;
           }
+          this.clearAutoStartSuppressionForBootedDevice(device);
           const pooledDevice = this.devices.get(device.deviceId);
           if (pooledDevice) {
-            return await this.foldObservationIntoPooledEntry(pooledDevice, device, "refresh");
+            const updated = await this.foldObservationIntoPooledEntry(
+              pooledDevice,
+              device,
+              "refresh",
+            );
+            this.liftSettledShutdownAfterFreshObservation(
+              device,
+              pooledDevice,
+              discovery,
+              refreshGeneration,
+            );
+            return updated;
           }
           this.devices.set(device.deviceId, {
             id: device.deviceId,
@@ -1257,7 +1291,7 @@ export class DevicePool {
         if (added) {
           addedCount++;
         }
-        this.notifyDeviceReady(device.deviceId);
+        this.notifyRefreshedDeviceReady(device.deviceId, added);
       }
       perf.endOperation("poolUpdate");
 
@@ -1289,6 +1323,59 @@ export class DevicePool {
         logger.error(`Stack trace: ${error.stack}`);
       }
       return { addedCount: 0 };
+    } finally {
+      this.inFlightRefreshFloors.delete(refreshGeneration);
+      this.pruneDeviceRemovalStamps();
+    }
+  }
+
+  private pruneDeviceRemovalStamps(): void {
+    const floor =
+      this.inFlightRefreshFloors.size > 0
+        ? Math.min(...this.inFlightRefreshFloors.values())
+        : this.deviceRemovalGeneration;
+    for (const [deviceId, stamp] of this.deviceRemovalStamps) {
+      if (stamp <= floor) {
+        this.deviceRemovalStamps.delete(deviceId);
+      }
+    }
+  }
+
+  private shouldSkipRefreshedDevice(
+    deviceId: string,
+    refreshGeneration: number,
+    removalGenerationAtDiscoveryStart: number,
+  ): boolean {
+    return (
+      refreshGeneration !== this.refreshGeneration ||
+      (this.deviceRemovalStamps.get(deviceId) ?? 0) > removalGenerationAtDiscoveryStart
+    );
+  }
+
+  private notifyRefreshedDeviceReady(deviceId: string, added: boolean | undefined): void {
+    if (added !== undefined) {
+      this.notifyDeviceReady(deviceId);
+    }
+  }
+
+  private liftSettledShutdownAfterFreshObservation(
+    device: BootedDevice,
+    pooledDevice: PooledDevice,
+    discovery: BootedDeviceDiscovery,
+    refreshGeneration: number,
+  ): void {
+    const settled = this.settledLateShutdowns.get(device.deviceId);
+    if (
+      settled?.incarnation === pooledDevice.incarnation &&
+      refreshGeneration > settled.refreshGeneration &&
+      this.devices.get(device.deviceId) === pooledDevice &&
+      !pooledDevice.identityUnresolved &&
+      (discovery.freshDeviceIds
+        ? discovery.freshDeviceIds.has(device.deviceId)
+        : didSourceSucceedForDevice(discovery, device.platform, device.deviceId))
+    ) {
+      this.intentionalShutdowns.delete(device.deviceId);
+      this.settledLateShutdowns.delete(device.deviceId);
     }
   }
 
@@ -1456,6 +1543,8 @@ export class DevicePool {
     }
 
     this.devices.delete(deviceId);
+    this.deviceRemovalStamps.set(deviceId, ++this.deviceRemovalGeneration);
+    this.settledLateShutdowns.delete(deviceId);
     this.deferredDeviceReleases.delete(deviceId);
     this.notifyDeviceRemoved(deviceId, device.platform);
     this.deviceSessionStarts.delete(deviceId);
@@ -1896,6 +1985,7 @@ export class DevicePool {
       // Tie the marker to the incarnation present now, so a later same-serial
       // replacement is not treated as intentionally stopped.
       this.intentionalShutdowns.set(deviceId, device.incarnation);
+      this.settledLateShutdowns.delete(deviceId);
       return;
     }
     if (this.recoveringAndroidDeviceIds.has(deviceId)) {
@@ -1907,6 +1997,21 @@ export class DevicePool {
 
   clearIntentionalShutdown(deviceId: string): void {
     this.intentionalShutdowns.delete(deviceId);
+    this.settledLateShutdowns.delete(deviceId);
+  }
+
+  /** Permit a later fresh booted observation to lift a timed-out kill's fence. */
+  noteLatePlatformShutdownSettled(expectedDevice: PooledDevice): void {
+    if (
+      this.devices.get(expectedDevice.id) !== expectedDevice ||
+      this.intentionalShutdowns.get(expectedDevice.id) !== expectedDevice.incarnation
+    ) {
+      return;
+    }
+    this.settledLateShutdowns.set(expectedDevice.id, {
+      incarnation: expectedDevice.incarnation,
+      refreshGeneration: this.refreshGeneration,
+    });
   }
 
   private async removeDevicesMissingFrom(
@@ -7026,7 +7131,8 @@ export class DevicePool {
       this.isReservedForReadiness(device.id) ||
       this.hasReadinessNameReservation(device) ||
       this.isAndroidRecoveryHandoffReserved(device.id) ||
-      this.isReservedForShutdown(device)
+      this.isReservedForShutdown(device) ||
+      this.isDeviceUnderShutdown(device.id)
     );
   }
 

@@ -12,6 +12,7 @@ import type {
   PooledDevice,
 } from "../../src/daemon/devicePool";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
+import { createRegistryDeviceSessionResolver } from "../../src/daemon/deviceSessionResolver";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { CLI_SESSION_LIVENESS_POLICY } from "../../src/daemon/constants";
 
@@ -47,6 +48,10 @@ class FakeDevicePool {
 
   getAllDevices(): PooledDevice[] {
     return this.devices;
+  }
+
+  isPooledIdentityUnresolved(deviceId: string): boolean {
+    return this.devices.find((device) => device.id === deviceId)?.identityUnresolved === true;
   }
 
   getRecoveryEligibility(_deviceId: string): DeviceRecoveryEligibility {
@@ -448,6 +453,43 @@ describe("handleDaemonRequest", () => {
         deviceId: "00008030-001",
         platform: "ios",
         epochStartedAt: 5000,
+      },
+    ]);
+  });
+
+  test("marks a listed device session whose pooled identity is quarantined", async () => {
+    const deviceId = "emulator-5554";
+    const devicePool = new FakeDevicePool({ total: 1, idle: 1, assigned: 0, error: 0 });
+    devicePool.devices.push({
+      id: deviceId,
+      name: "Pixel_8_API_35",
+      platform: "android",
+      sessionId: null,
+      status: "idle",
+      lastUsedAt: 0,
+      assignmentCount: 0,
+      errorCount: 0,
+      incarnation: 1,
+    });
+    const registry = new DeviceSessionRegistry(fakeTimer, new FakeIdGenerator(["uuid-a"]));
+    registry.onDeviceConnected({ deviceId, platform: "android", incarnation: 1 });
+    devicePool.devices[0]!.identityUnresolved = true;
+    const resolver = createRegistryDeviceSessionResolver(registry, {
+      isPooledIdentityUnresolved: (serial) => devicePool.isPooledIdentityUnresolved(serial),
+      assertDeviceActionable: () => {},
+    });
+    expect(resolver.resolveDeviceId("uuid-a")).toBeNull();
+
+    const state = new FakeDaemonState(sessionManager, devicePool, registry);
+    const response = await handleDaemonRequest(buildRequest("daemon/listDeviceSessions"), state);
+
+    expect(response.result?.deviceSessions).toEqual([
+      {
+        deviceSessionUuid: "uuid-a",
+        deviceId,
+        platform: "android",
+        epochStartedAt: fakeTimer.now(),
+        identityUnresolved: true,
       },
     ]);
   });

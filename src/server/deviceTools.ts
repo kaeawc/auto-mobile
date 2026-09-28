@@ -187,6 +187,7 @@ import {
 } from "../utils/virtualDeviceLifecycleCoordinator";
 import { DeviceTeardownService, type DeviceTeardownPhase } from "../utils/deviceTeardownService";
 import { DeviceShutdownService } from "../utils/deviceShutdownService";
+import { fixedBackoff } from "../utils/Backoff";
 import { hasMutableDisplayName } from "../utils/ios-cmdline-tools/iosDeviceType";
 import { isAndroidEmulatorSerial } from "../utils/androidSerial";
 import { getProvisionedDeviceTransportFence } from "../utils/provisionedDeviceTransportFence";
@@ -729,6 +730,7 @@ export const DEVICE_ALREADY_STOPPED_ERROR_CODE = "device_already_stopped";
 const DEVICE_SHUTDOWN_TIMEOUT_MS = 30_000;
 const DEVICE_SHUTDOWN_POLL_INTERVAL_MS = 1_000;
 const DEVICE_SHUTDOWN_POST_RELEASE_RECHECK_TIMEOUT_MS = 1_000;
+const DEVICE_SHUTDOWN_DISCOVERY_RECHECK_BACKOFF = fixedBackoff(1_000);
 const DEVICE_SHUTDOWN_TERMINAL_RELEASE_RETRIES = 2;
 const TEARDOWN_OPERATION_RESULT_TTL_MS = 5 * 60 * 1_000;
 // A live provisionDevice attempt can legitimately hold its operation row for as
@@ -2330,11 +2332,6 @@ async function rebuildSameIdReplacement(
   if (!rebuilt) {
     return;
   }
-  daemonState.getDeviceSessionRegistry().onDeviceConnected({
-    deviceId: rebuilt.id,
-    platform: rebuilt.platform,
-    incarnation: rebuilt.incarnation,
-  });
 }
 
 function shutdownRecheckDeadlineMs(
@@ -2410,6 +2407,7 @@ function finishLateShutdownRetirement(
   retainReservationUntil: (retirement: Promise<void>) => void,
   terminalReleaseRetriesRemaining: number,
   skipAndroidNameEnrichment: boolean,
+  disappearanceConfirmed: boolean,
 ): void {
   const continueRetirement = async () => {
     await retireShutdownOwnership(
@@ -2423,7 +2421,8 @@ function finishLateShutdownRetirement(
       undefined,
       stopPerformanceMonitoring,
       retainReservationUntil,
-      false,
+      disappearanceConfirmed,
+      true,
       false,
       DEVICE_SHUTDOWN_TIMEOUT_MS,
       DEVICE_SHUTDOWN_TERMINAL_RELEASE_RETRIES,
@@ -2446,6 +2445,7 @@ function finishLateShutdownRetirement(
       undefined,
       stopPerformanceMonitoring,
       retainReservationUntil,
+      disappearanceConfirmed,
       false,
       false,
       DEVICE_SHUTDOWN_TIMEOUT_MS,
@@ -2462,49 +2462,6 @@ function finishLateShutdownRetirement(
   retainReservationUntil(lateRetirement);
 }
 
-function retainFailedShutdownRetirement(
-  error: unknown,
-  device: BootedDevice,
-  expectedPooledDevice: PooledDevice,
-  expectedSession: Session | undefined,
-  observedReplacement: BootedDevice | undefined,
-  deviceManager: PlatformDeviceManager,
-  timer: Timer,
-  deadlineMs: number,
-  stopPerformanceMonitoring: (deviceId: string) => void,
-  retainReservationUntil: (retirement: Promise<void>) => void,
-  retryAfterFailure: boolean,
-  skipAndroidNameEnrichment: boolean,
-): void {
-  const retirement = retryAfterFailure
-    ? timer.sleep(DEVICE_SHUTDOWN_POST_RELEASE_RECHECK_TIMEOUT_MS).then(async () => {
-        await retireShutdownOwnership(
-          device,
-          expectedPooledDevice,
-          expectedSession,
-          observedReplacement,
-          deviceManager,
-          timer,
-          deadlineMs,
-          undefined,
-          stopPerformanceMonitoring,
-          () => undefined,
-          false,
-          false,
-          DEVICE_SHUTDOWN_TIMEOUT_MS,
-          DEVICE_SHUTDOWN_TERMINAL_RELEASE_RETRIES,
-          skipAndroidNameEnrichment,
-        );
-      })
-    : Promise.reject(error);
-  retirement.catch((lateError) => {
-    logger.warn(
-      `[DeviceTools] Retaining shutdown reservation after retirement failed for ${device.deviceId}: ${lateError}`,
-    );
-  });
-  retainReservationUntil(retirement);
-}
-
 async function findReplacementOrRetainShutdownReservation(
   device: BootedDevice,
   expectedPooledDevice: PooledDevice,
@@ -2517,6 +2474,7 @@ async function findReplacementOrRetainShutdownReservation(
   stopPerformanceMonitoring: (deviceId: string) => void,
   retainReservationUntil: (retirement: Promise<void>) => void,
   retryAfterFailure: boolean,
+  disappearanceConfirmed: boolean,
   strictDeadline: boolean,
   timeoutMs: number,
   skipAndroidNameEnrichment = false,
@@ -2536,21 +2494,61 @@ async function findReplacementOrRetainShutdownReservation(
       ))
     );
   } catch (error) {
-    retainFailedShutdownRetirement(
-      error,
-      device,
-      expectedPooledDevice,
-      expectedSession,
-      observedReplacement,
-      deviceManager,
-      timer,
-      deadlineMs,
-      stopPerformanceMonitoring,
-      retainReservationUntil,
-      retryAfterFailure,
-      skipAndroidNameEnrichment,
-    );
-    throw error;
+    // Only this post-release discovery operation is retried. A failure from
+    // releaseSessionOwnership never reaches this catch and still retains the
+    // reservation until persistence succeeds.
+    logger.warn(`[DeviceTools] Post-release discovery failed for ${device.deviceId}: ${error}`);
+    if (!disappearanceConfirmed) {
+      // Teardown has not confirmed disappearance. A failed recheck cannot
+      // authorize retirement of an already-known-stopped pooled incarnation.
+      const retirement = Promise.reject(error);
+      retirement.catch((lateError) => {
+        logger.warn(
+          `[DeviceTools] Retaining shutdown reservation after retirement failed for ${device.deviceId}: ${lateError}`,
+        );
+      });
+      retainReservationUntil(retirement);
+      throw error;
+    }
+    if (retryAfterFailure) {
+      const retirement = timer
+        .sleep(DEVICE_SHUTDOWN_DISCOVERY_RECHECK_BACKOFF.delayForAttempt(1))
+        .then(async () => {
+          await retireShutdownOwnership(
+            device,
+            expectedPooledDevice,
+            expectedSession,
+            observedReplacement,
+            deviceManager,
+            timer,
+            deadlineMs,
+            undefined,
+            stopPerformanceMonitoring,
+            () => undefined,
+            disappearanceConfirmed,
+            false,
+            false,
+            DEVICE_SHUTDOWN_TIMEOUT_MS,
+            DEVICE_SHUTDOWN_TERMINAL_RELEASE_RETRIES,
+            skipAndroidNameEnrichment,
+          );
+        });
+      retirement.catch((lateError) => {
+        logger.warn(
+          `[DeviceTools] Retaining shutdown reservation after retirement failed for ${device.deviceId}: ${lateError}`,
+        );
+      });
+      retainReservationUntil(retirement);
+      throw error;
+    }
+    // Disappearance was already confirmed and ownership released. The exact
+    // captured incarnation guard makes retirement safe after a second failed
+    // recheck, while preserving a newer same-serial pool entry.
+    const ownership = captureCurrentShutdownPooledOwnership(device, expectedPooledDevice);
+    if (ownership && (await ownership.devicePool.retireDeviceForShutdown(expectedPooledDevice))) {
+      stopPerformanceMonitoring(device.deviceId);
+    }
+    return undefined;
   }
 }
 
@@ -2571,6 +2569,7 @@ function preserveLateShutdownRetirement(
   retainReservationUntil: (retirement: Promise<void>) => void,
   terminalReleaseRetriesRemaining: number,
   skipAndroidNameEnrichment: boolean,
+  disappearanceConfirmed: boolean,
 ): void {
   if (
     !isShutdownTimeoutError(error) &&
@@ -2598,6 +2597,7 @@ function preserveLateShutdownRetirement(
     retainReservationUntil,
     terminalReleaseRetriesRemaining,
     skipAndroidNameEnrichment,
+    disappearanceConfirmed,
   );
 }
 
@@ -2616,6 +2616,7 @@ async function releaseShutdownSessionOwnership(
   strictDeadline: boolean,
   timeoutMs: number,
   terminalReleaseRetriesRemaining: number,
+  disappearanceConfirmed: boolean,
   skipAndroidNameEnrichment = false,
 ): Promise<void> {
   const sessionManager = daemonState.getSessionManager();
@@ -2663,6 +2664,7 @@ async function releaseShutdownSessionOwnership(
       retainReservationUntil,
       terminalReleaseRetriesRemaining,
       skipAndroidNameEnrichment,
+      disappearanceConfirmed,
     );
     throw error;
   }
@@ -2701,6 +2703,7 @@ async function retireShutdownOwnership(
   abortSignal: AbortSignal | undefined,
   stopPerformanceMonitoring: (deviceId: string) => void,
   retainReservationUntil: (retirement: Promise<void>) => void,
+  disappearanceConfirmed: boolean,
   retryAfterDiscoveryFailure: boolean = true,
   strictDeadline = false,
   timeoutMs = DEVICE_SHUTDOWN_TIMEOUT_MS,
@@ -2728,6 +2731,7 @@ async function retireShutdownOwnership(
     strictDeadline,
     timeoutMs,
     terminalReleaseRetriesRemaining,
+    disappearanceConfirmed,
     skipAndroidNameEnrichment,
   );
   if (devicePool.getDevice(device.deviceId) !== capturedPooledDevice) {
@@ -2751,6 +2755,7 @@ async function retireShutdownOwnership(
     stopPerformanceMonitoring,
     retainReservationUntil,
     retryAfterDiscoveryFailure,
+    disappearanceConfirmed,
     strictDeadline,
     timeoutMs,
     skipAndroidNameEnrichment,
@@ -2770,7 +2775,6 @@ async function retireShutdownOwnership(
   }
   if (await devicePool.retireDeviceForShutdown(capturedPooledDevice)) {
     stopPerformanceMonitoring(device.deviceId);
-    daemonState.getDeviceSessionRegistry().onDeviceDisconnected(device.deviceId);
   }
 }
 
@@ -2884,7 +2888,21 @@ async function killProcessAndRetireOwnership(
       error,
       requestAbortSignal,
     );
-    retainLatePlatformShutdown(platformShutdown, platformShutdownSettled, retainReservationUntil);
+    retainLatePlatformShutdown(
+      platformShutdown,
+      platformShutdownSettled,
+      retainReservationUntil,
+      async () => {
+        if (!keepIntentionalShutdown || !expectedPooledDevice || !devicePool) {
+          return;
+        }
+        devicePool.noteLatePlatformShutdownSettled(expectedPooledDevice);
+        // Our deadline or abort already fired. The raw late error cannot
+        // distinguish platform failure from our cancellation. An immediate
+        // refresh could observe the still-booted device and lift the fence
+        // before its late exit; wait for an independent later observation.
+      },
+    );
     if (
       !keepIntentionalShutdown &&
       !isAlreadyStoppedDeviceError(device.platform, device.deviceId, error)
@@ -2945,6 +2963,7 @@ async function killProcessAndRetireOwnership(
       dependencies.stopPerformanceMonitoring,
       retainReservationUntil,
       true,
+      true,
       strictDeadline,
       timeoutMs,
       DEVICE_SHUTDOWN_TERMINAL_RELEASE_RETRIES,
@@ -2972,12 +2991,25 @@ function retainLatePlatformShutdown(
     retirement: Promise<void>,
     releaseReservationAfterFailure?: boolean,
   ) => void,
+  onSettled: (error?: unknown) => Promise<void>,
 ): void {
-  if (platformShutdown && !platformShutdownSettled) {
-    retainReservationUntil(
-      platformShutdown.then(() => undefined),
-      true,
-    );
+  if (!platformShutdown) {
+    return;
+  }
+  const settlement = platformShutdown.then(
+    () => onSettled(),
+    async (error) => {
+      await onSettled(error);
+      throw error;
+    },
+  );
+  if (platformShutdownSettled) {
+    void settlement.catch((error) => {
+      logger.debug(`[DeviceTools] Late platform shutdown had already settled: ${error}`);
+      // The command failure was already handled by the caller; no reservation remains here.
+    });
+  } else {
+    retainReservationUntil(settlement, true);
   }
 }
 
@@ -3091,6 +3123,7 @@ async function shutdownDevice(
             requestAbortSignal,
             dependencies.stopPerformanceMonitoring,
             retainShutdownUntil,
+            true,
             true,
             strictDeadline,
             timeoutMs,
@@ -4560,7 +4593,13 @@ async function retireTeardownPooledOwnership(
     retainsReservation = true;
     void retirement.then(
       () => reservation.release(),
-      () => reservation.release(),
+      (error) => {
+        // A failed retirement has not proved disappearance. Keep this exact
+        // pooled incarnation unavailable until a later explicit recovery.
+        logger.warn(
+          `[DeviceTools] Retaining teardown shutdown reservation for ${expectedPooledDevice.id}: ${error}`,
+        );
+      },
     );
   };
   const retirementDevice: BootedDevice = {
@@ -4591,6 +4630,7 @@ async function retireTeardownPooledOwnership(
       context.requestAbortSignal,
       context.dependencies.stopPerformanceMonitoring,
       retainReservationUntil,
+      false,
       false,
       true,
       context.timeoutMs,

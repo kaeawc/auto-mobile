@@ -115,7 +115,11 @@ class WebSocketServerIntegrationTest {
 
   private suspend fun startAndWait(target: WebSocketServer) {
     target.start()
-    waitFor { target.isRunning() }
+    // The first test in this class pays the cold Ktor CIO + connector-resolve cost on a
+    // background start job; on a loaded CI runner that alone can exceed 1s. The server's own
+    // budget is 2s per connector resolve plus retry backoff, so use a ceiling above it. This
+    // returns as soon as the server is running, so it costs nothing on the happy path.
+    waitFor(timeoutMs = SERVER_START_TIMEOUT_MS) { target.isRunning() }
   }
 
   private fun enqueueHighlightResponse(
@@ -1596,5 +1600,9 @@ class WebSocketServerIntegrationTest {
     } finally {
       hierarchyServer.stop()
     }
+  }
+
+  private companion object {
+    const val SERVER_START_TIMEOUT_MS = 10_000L
   }
 }

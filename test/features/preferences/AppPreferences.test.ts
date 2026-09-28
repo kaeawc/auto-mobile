@@ -605,14 +605,39 @@ describe("AppPreferences", () => {
     });
   });
 
+  test("rejects path-like iOS suite names before invoking simctl", async () => {
+    const simctl = new FakeSimCtlClient();
+    const preferences = new AppPreferences(iosSimulator, { simctl });
+
+    for (const suite of [
+      "/Users/someone/Library/Preferences/com.apple.foo",
+      "../../Library/LaunchAgents/x",
+      "group\\com.example",
+      "~otherDomain",
+    ]) {
+      await expect(
+        preferences.setPreference({
+          scope: "userDefaults",
+          appId: "com.example.app",
+          suite,
+          key: "flag",
+          value: true,
+          type: "bool",
+        }),
+      ).rejects.toThrow("iOS UserDefaults suite");
+    }
+
+    expect(simctl.getMethodCalls("executeCommandArgs")).toEqual([]);
+  });
+
   test("reads iOS simulator UserDefaults through argv-preserving defaults arguments", async () => {
     const simctl = new FakeSimCtlClient();
     simctl.setCommandResult(
-      "spawn 12345678-1234-1234-1234-123456789ABC defaults read group\\com.example path\\key",
+      "spawn 12345678-1234-1234-1234-123456789ABC defaults read group.com.example path\\key",
       "C:\\tmp\n",
     );
     simctl.setCommandResult(
-      "spawn 12345678-1234-1234-1234-123456789ABC defaults read-type group\\com.example path\\key",
+      "spawn 12345678-1234-1234-1234-123456789ABC defaults read-type group.com.example path\\key",
       "Type is string\n",
     );
 
@@ -620,7 +645,7 @@ describe("AppPreferences", () => {
     const result = await preferences.getPreference({
       scope: "userDefaults",
       appId: "com.example.app",
-      suite: "group\\com.example",
+      suite: "group.com.example",
       key: "path\\key",
     });
 
@@ -632,7 +657,7 @@ describe("AppPreferences", () => {
           "12345678-1234-1234-1234-123456789ABC",
           "defaults",
           "read",
-          "group\\com.example",
+          "group.com.example",
           "path\\key",
         ],
         timeoutMs: 10_000,
@@ -643,7 +668,7 @@ describe("AppPreferences", () => {
           "12345678-1234-1234-1234-123456789ABC",
           "defaults",
           "read-type",
-          "group\\com.example",
+          "group.com.example",
           "path\\key",
         ],
         timeoutMs: 10_000,

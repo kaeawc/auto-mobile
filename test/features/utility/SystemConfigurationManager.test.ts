@@ -658,7 +658,7 @@ describe("SystemConfigurationManager", () => {
 
       expect(result.success).toBe(true);
       expect(result.calendarSystem).toBe("japanese");
-      expect(fakeAdbClient.wasCommandExecuted("settings put system calendar_type japanese")).toBe(
+      expect(fakeAdbClient.wasCommandExecuted("settings put system calendar_type 'japanese'")).toBe(
         true,
       );
     });
@@ -1222,7 +1222,7 @@ describe("SystemConfigurationManager", () => {
 
     test("returns error when adb put command fails", async () => {
       fakeAdbClient.setCommandError(
-        "shell settings put system calendar_type islamic",
+        "shell settings put system calendar_type 'islamic'",
         new Error("write denied"),
       );
       const mgr = new SystemConfigurationManager(ANDROID_DEVICE, fakeAdbFactory, fakeExec);

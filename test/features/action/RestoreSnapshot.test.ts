@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import { RestoreSnapshot } from "../../../src/features/action/RestoreSnapshot";
 import { ActionableError, BootedDevice, DeviceSnapshotManifest } from "../../../src/models";
 import { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
@@ -10,6 +10,7 @@ import { DeviceSnapshotStore } from "../../../src/utils/DeviceSnapshotStore";
 import { promises as fs } from "fs";
 import * as path from "path";
 import * as os from "os";
+import { logger } from "../../../src/utils/logger";
 
 describe("RestoreSnapshot", () => {
   let device: BootedDevice;
@@ -438,6 +439,43 @@ describe("RestoreSnapshot", () => {
   });
 
   describe("settings restore", () => {
+    it("rejects unsafe keys and namespaces, counts failures, and restores valid keys", async () => {
+      const info = spyOn(logger, "info").mockImplementation(() => {});
+      const manifest: DeviceSnapshotManifest = {
+        snapshotName: "settings-input-validation",
+        timestamp: new Date().toISOString(),
+        deviceId: device.deviceId,
+        deviceName: device.name,
+        platform: "android",
+        snapshotType: "adb",
+        includeAppData: false,
+        includeSettings: true,
+        settings: {
+          global: { "x;reboot": "1", screen_brightness: "200" },
+          "global;reboot": { another_key: "1" },
+        } as DeviceSnapshotManifest["settings"],
+      };
+
+      try {
+        await restoreSnapshot.execute({
+          snapshotName: manifest.snapshotName,
+          manifest,
+          useVmSnapshot: false,
+        });
+
+        expect(
+          fakeAdb
+            .getCommandCalls()
+            .map((call) => call.command)
+            .filter((command) => command.startsWith("shell settings put")),
+        ).toEqual(["shell settings put global 'screen_brightness' '200'"]);
+        expect(info).toHaveBeenCalledWith("global settings restored: 1 succeeded, 1 failed");
+        expect(info).toHaveBeenCalledWith("global;reboot settings restored: 0 succeeded, 1 failed");
+      } finally {
+        info.mockRestore();
+      }
+    });
+
     it("should restore all settings types", async () => {
       const snapshotName = "test-restore-settings";
 
@@ -459,12 +497,12 @@ describe("RestoreSnapshot", () => {
       };
 
       // Setup settings restore commands
-      fakeAdb.setCommandResult("shell settings put global airplane_mode_on '1'", "");
-      fakeAdb.setCommandResult("shell settings put global wifi_on '0'", "");
-      fakeAdb.setCommandResult("shell settings put secure android_id 'xyz789'", "");
-      fakeAdb.setCommandResult("shell settings put secure mock_location '0'", "");
-      fakeAdb.setCommandResult("shell settings put system screen_brightness '200'", "");
-      fakeAdb.setCommandResult("shell settings put system font_scale '1.2'", "");
+      fakeAdb.setCommandResult("shell settings put global 'airplane_mode_on' '1'", "");
+      fakeAdb.setCommandResult("shell settings put global 'wifi_on' '0'", "");
+      fakeAdb.setCommandResult("shell settings put secure 'android_id' 'xyz789'", "");
+      fakeAdb.setCommandResult("shell settings put secure 'mock_location' '0'", "");
+      fakeAdb.setCommandResult("shell settings put system 'screen_brightness' '200'", "");
+      fakeAdb.setCommandResult("shell settings put system 'font_scale' '1.2'", "");
 
       await restoreSnapshot.execute({
         snapshotName,
@@ -473,18 +511,20 @@ describe("RestoreSnapshot", () => {
       });
 
       // Verify all settings were restored
-      expect(fakeAdb.wasCommandExecuted("shell settings put global airplane_mode_on '1'")).toBe(
+      expect(fakeAdb.wasCommandExecuted("shell settings put global 'airplane_mode_on' '1'")).toBe(
         true,
       );
-      expect(fakeAdb.wasCommandExecuted("shell settings put global wifi_on '0'")).toBe(true);
-      expect(fakeAdb.wasCommandExecuted("shell settings put secure android_id 'xyz789'")).toBe(
+      expect(fakeAdb.wasCommandExecuted("shell settings put global 'wifi_on' '0'")).toBe(true);
+      expect(fakeAdb.wasCommandExecuted("shell settings put secure 'android_id' 'xyz789'")).toBe(
         true,
       );
-      expect(fakeAdb.wasCommandExecuted("shell settings put secure mock_location '0'")).toBe(true);
-      expect(fakeAdb.wasCommandExecuted("shell settings put system screen_brightness '200'")).toBe(
+      expect(fakeAdb.wasCommandExecuted("shell settings put secure 'mock_location' '0'")).toBe(
         true,
       );
-      expect(fakeAdb.wasCommandExecuted("shell settings put system font_scale '1.2'")).toBe(true);
+      expect(
+        fakeAdb.wasCommandExecuted("shell settings put system 'screen_brightness' '200'"),
+      ).toBe(true);
+      expect(fakeAdb.wasCommandExecuted("shell settings put system 'font_scale' '1.2'")).toBe(true);
     });
 
     it("shell-quotes a setting value containing spaces and quotes when restoring it", async () => {
@@ -509,7 +549,7 @@ describe("RestoreSnapshot", () => {
 
       // Setup settings restore command with escaped value
       fakeAdb.setCommandResult(
-        "shell settings put global test_key 'value with spaces and '\\''quotes'\\'''",
+        "shell settings put global 'test_key' 'value with spaces and '\\''quotes'\\'''",
         "",
       );
 
@@ -524,9 +564,9 @@ describe("RestoreSnapshot", () => {
       const putCommands = fakeAdb
         .getCommandCalls()
         .map((call) => call.command)
-        .filter((command) => command.startsWith("shell settings put global test_key"));
+        .filter((command) => command.startsWith("shell settings put global 'test_key'"));
       expect(putCommands).toEqual([
-        "shell settings put global test_key 'value with spaces and '\\''quotes'\\'''",
+        "shell settings put global 'test_key' 'value with spaces and '\\''quotes'\\'''",
       ]);
     });
 
@@ -635,7 +675,7 @@ describe("RestoreSnapshot", () => {
         settings: { global: { airplane_mode_on: "1" }, secure: {}, system: {} },
         foregroundApp: "com.example.app",
       });
-      fakeAdb.setCommandResult("shell settings put global airplane_mode_on '1'", "");
+      fakeAdb.setCommandResult("shell settings put global 'airplane_mode_on' '1'", "");
 
       const result = await restoreSnapshot.execute({
         snapshotName: "settings-only",
@@ -644,7 +684,7 @@ describe("RestoreSnapshot", () => {
       });
 
       expect(result.snapshotType).toBe("adb");
-      expect(fakeAdb.wasCommandExecuted("shell settings put global airplane_mode_on '1'")).toBe(
+      expect(fakeAdb.wasCommandExecuted("shell settings put global 'airplane_mode_on' '1'")).toBe(
         true,
       );
       expect(

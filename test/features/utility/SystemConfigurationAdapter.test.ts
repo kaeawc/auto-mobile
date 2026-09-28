@@ -80,6 +80,27 @@ describe("SystemConfigurationAdapter", () => {
   }
 
   describe("AndroidSystemConfigurationAdapter behavior", () => {
+    it("quotes raw calendar input before the device shell and preserves normal identifiers", async () => {
+      const adb = new FakeAdbClient();
+      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb as any);
+      const payload = "gregorian; touch /data/local/tmp/pwn";
+      adb.setCommandResult("shell settings get system calendar_type", payload);
+
+      expect((await adapter.setCalendarSystem(payload)).success).toBe(true);
+      expect(
+        adb
+          .getCommandCalls()
+          .filter((call) => call.command.startsWith("shell settings put system"))
+          .map((call) => call.command),
+      ).toEqual(["shell settings put system calendar_type 'gregorian; touch /data/local/tmp/pwn'"]);
+
+      adb.setCommandResult("shell settings get system calendar_type", "gregory");
+      expect((await adapter.setCalendarSystem("gregory")).success).toBe(true);
+      expect(adb.wasCommandExecuted("shell settings put system calendar_type 'gregory'")).toBe(
+        true,
+      );
+    });
+
     it("sets an app-scoped locale with cmd locale when appId is provided", async () => {
       const adb = new FakeAdbClient();
       adb.setCommandResult("shell getprop ro.build.version.sdk", "36");

@@ -1,8 +1,19 @@
 import Ajv2020 from "ajv/dist/2020";
 import { describe, expect, test } from "bun:test";
-import { displayConfigSchema } from "../../src/server/utilityTools";
+import { changeLocalizationSchema, displayConfigSchema } from "../../src/server/utilityTools";
 import { createMcpServer } from "../../src/server/index";
 import { ToolRegistry } from "../../src/server/toolRegistry";
+
+test("calendar identifiers accept ICU keywords and reject shell syntax", () => {
+  expect(changeLocalizationSchema.safeParse({ calendarSystem: "gregory" }).success).toBe(true);
+  expect(changeLocalizationSchema.safeParse({ calendarSystem: "islamic-civil" }).success).toBe(
+    true,
+  );
+  expect(
+    changeLocalizationSchema.safeParse({ calendarSystem: "gregorian; touch /data/local/tmp/pwn" })
+      .success,
+  ).toBe(false);
+});
 
 describe("displayConfigSchema", () => {
   test("rejects reset combined with an explicit field before the handler runs", () => {

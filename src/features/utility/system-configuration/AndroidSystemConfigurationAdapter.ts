@@ -348,6 +348,7 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
 
     for (const key of targetKeys) {
       try {
+        // Both keys and the numeric value come from fixed literals above.
         await this.runShellCommand(`shell settings put global ${key} ${value}`);
         appliedSettings.push(key);
       } catch (error) {
@@ -380,6 +381,7 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
     const value = enabled ? "24" : "12";
 
     try {
+      // The value is selected only from the fixed "12" and "24" literals.
       await this.runShellCommand(`shell settings put system time_12_24 ${value}`);
       return {
         success: true,
@@ -402,7 +404,9 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
     const previousCalendarSystem = previous.calendarSystem ?? null;
 
     try {
-      await this.runShellCommand(`shell settings put system calendar_type ${calendarSystem}`);
+      await this.runShellCommand(
+        `shell settings put system calendar_type ${shellQuote(calendarSystem)}`,
+      );
       const readBack = await this.readSetting("shell settings get system calendar_type");
       if (!readBack || readBack !== calendarSystem) {
         return {

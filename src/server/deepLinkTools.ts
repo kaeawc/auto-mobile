@@ -1,7 +1,7 @@
 import { z } from "zod/v4";
 import { ToolRegistry } from "./toolRegistry";
 import { GetDeepLinks } from "../features/utility/GetDeepLinks";
-import { ActionableError, BootedDevice } from "../models";
+import { BootedDevice, toActionableError } from "../models";
 import { createJSONToolResponse } from "../utils/toolUtils";
 import { logger } from "../utils/logger";
 import { addDeviceTargetingToSchema, withAppIdAliases } from "./toolSchemaHelpers";
@@ -41,7 +41,7 @@ export function registerDeepLinkTools() {
       });
     } catch (error) {
       logger.error(`[getDeepLinks] Failed to get deep links: ${error}`);
-      throw new ActionableError(`Failed to get deep links: ${error}`);
+      throw toActionableError(error, `Failed to get deep links`);
     }
   };
 

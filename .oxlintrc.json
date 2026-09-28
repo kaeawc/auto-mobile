@@ -80,6 +80,7 @@
         "max-nested-callbacks": ["error", 3],
         "auto-mobile/no-accumulator-foreach": "error",
         "auto-mobile/no-inline-error-normalize": "error",
+        "auto-mobile/no-caught-error-interpolation": "warn",
 
         // Ratcheted rules with pre-existing baselined violations. oxlint has no
         // count-based bulk-suppressions file (ESLint's eslint-suppressions.json),

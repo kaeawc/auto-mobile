@@ -1,3 +1,4 @@
+import { toActionableError } from "../models/ActionableError";
 import { z } from "zod/v4";
 import { ToolRegistry } from "./toolRegistry";
 import { createJSONToolResponse } from "../utils/toolUtils";
@@ -103,7 +104,7 @@ export function registerSnapshotTools() {
         `Unsupported deviceSnapshot action: ${(args as { action: string }).action}`,
       );
     } catch (error) {
-      throw new ActionableError(`Failed to ${args.action} snapshot: ${error}`);
+      throw toActionableError(error, `Failed to ${args.action} snapshot`);
     }
   };
 

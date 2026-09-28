@@ -1,3 +1,4 @@
+import { toActionableError } from "../models/ActionableError";
 import { z } from "zod/v4";
 import { ToolRegistry } from "./toolRegistry";
 import { ActionableError, BootedDevice } from "../models";
@@ -387,7 +388,7 @@ export function registerStorageTools(): void {
       if (error instanceof ActionableError) {
         throw error;
       }
-      throw new ActionableError(`Failed to set key-value entry: ${error}`);
+      throw toActionableError(error, `Failed to set key-value entry`);
     }
   };
 
@@ -430,7 +431,7 @@ export function registerStorageTools(): void {
       if (error instanceof ActionableError) {
         throw error;
       }
-      throw new ActionableError(`Failed to remove key-value entry: ${error}`);
+      throw toActionableError(error, `Failed to remove key-value entry`);
     }
   };
 
@@ -471,7 +472,7 @@ export function registerStorageTools(): void {
       if (error instanceof ActionableError) {
         throw error;
       }
-      throw new ActionableError(`Failed to clear key-value file: ${error}`);
+      throw toActionableError(error, `Failed to clear key-value file`);
     }
   };
 
@@ -498,7 +499,7 @@ export function registerStorageTools(): void {
       if (isSharedPreferencesInspectionDisabledError(error)) {
         throw dataStoreInspectionDisabledError(args.appId);
       }
-      throw new ActionableError(`Failed to list data stores: ${error}`);
+      throw toActionableError(error, `Failed to list data stores`);
     }
   };
 
@@ -526,7 +527,7 @@ export function registerStorageTools(): void {
       if (isSharedPreferencesInspectionDisabledError(error)) {
         throw dataStoreInspectionDisabledError(args.appId);
       }
-      throw new ActionableError(`Failed to get data store: ${error}`);
+      throw toActionableError(error, `Failed to get data store`);
     }
   };
 

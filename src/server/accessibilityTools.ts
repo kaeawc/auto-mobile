@@ -1,3 +1,4 @@
+import { toActionableError } from "../models/ActionableError";
 import { z } from "zod/v4";
 import { ToolRegistry } from "./toolRegistry";
 import type { ProgressCallback } from "./toolRegistry";
@@ -59,7 +60,7 @@ export function registerAccessibilityTools() {
         } catch (error) {
           throw error instanceof ActionableError
             ? error
-            : new ActionableError(`Failed to toggle accessibility services: ${error}`);
+            : toActionableError(error, `Failed to toggle accessibility services`);
         }
       }
 

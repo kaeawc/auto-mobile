@@ -1,3 +1,4 @@
+import { toActionableError } from "../models/ActionableError";
 import { errorMessage } from "../utils/describeUnknownError";
 import { z } from "zod/v4";
 import { ToolRegistry } from "./toolRegistry";
@@ -1436,7 +1437,7 @@ export function registerObserveTools() {
 
       return createStructuredToolResponse(result);
     } catch (error) {
-      throw new ActionableError(`Failed to execute observe: ${error}`);
+      throw toActionableError(error, `Failed to execute observe`);
     }
   };
 
@@ -1461,7 +1462,7 @@ export function registerObserveTools() {
 
       return createJSONToolResponse(result);
     } catch (error) {
-      throw new ActionableError(`Failed to execute identifyInteractions: ${error}`);
+      throw toActionableError(error, `Failed to execute identifyInteractions`);
     }
   };
 

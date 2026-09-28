@@ -1,3 +1,4 @@
+import { toActionableError } from "../models/ActionableError";
 import { z } from "zod/v4";
 import { ToolRegistry } from "./toolRegistry";
 import { ActionableError } from "../models/ActionableError";
@@ -650,7 +651,7 @@ export function registerUtilityTools() {
       });
     } catch (error) {
       logger.error("Failed to set active device:", error);
-      throw new ActionableError(`Failed to set active device: ${error}`);
+      throw toActionableError(error, `Failed to set active device`);
     }
   };
 

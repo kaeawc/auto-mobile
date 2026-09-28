@@ -1,3 +1,4 @@
+import { toActionableError } from "../models/ActionableError";
 import { errorMessage } from "../utils/describeUnknownError";
 import { z } from "zod/v4";
 import { ToolRegistry, type ProgressCallback } from "./toolRegistry";
@@ -383,7 +384,7 @@ async function tryStopSegmentedSession(recordingId: string) {
       highlights: highlights?.map((highlight): SessionHighlight => ({ ...highlight, sessionId })),
     });
   } catch (error) {
-    throw new ActionableError(`Failed to stop segmented video recording: ${error}`);
+    throw toActionableError(error, `Failed to stop segmented video recording`);
   }
 }
 
@@ -419,7 +420,7 @@ async function stopRecordingById(recordingId: string) {
       evictedRecordingIds.push(evictedId);
     }
   } catch (error) {
-    throw new ActionableError(`Failed to stop video recording: ${error}`);
+    throw toActionableError(error, `Failed to stop video recording`);
   }
 
   return createJSONToolResponse({

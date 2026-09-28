@@ -1,3 +1,4 @@
+import { toActionableError } from "../../models/ActionableError";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { platform } from "node:os";
 import path from "node:path";
@@ -428,7 +429,7 @@ function throwAndroidRecordingStartFailure(
 ): never {
   throwIfRecordingStartAborted(abortSignal, "Android");
   logger.error(`[FfmpegVideo] Failed to start Android recording: ${error}`);
-  throw new ActionableError(`Failed to start Android recording: ${error}`);
+  throw toActionableError(error, `Failed to start Android recording`);
 }
 
 export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
@@ -1057,7 +1058,7 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
     try {
       await waitForSpawn(ffmpegProcess);
     } catch (error) {
-      throw new ActionableError(`Failed to start FFmpeg post-processing: ${error}`);
+      throw toActionableError(error, `Failed to start FFmpeg post-processing`);
     }
 
     const ffmpegTracker = trackProcess(ffmpegProcess);

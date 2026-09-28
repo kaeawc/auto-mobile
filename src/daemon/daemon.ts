@@ -1,5 +1,10 @@
 import { republishOwnedIdentity } from "./identityRecovery";
-import { createServer as createHttpServer, Server as HttpServer } from "node:http";
+import {
+  createServer as createHttpServer,
+  Server as HttpServer,
+  type IncomingMessage,
+  type ServerResponse,
+} from "node:http";
 import { ActionableError } from "../models/ActionableError";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { createMcpServer } from "../server";
@@ -202,6 +207,12 @@ import {
   type ToolSelectionProfileProvenanceLoader,
 } from "../server/toolSelectionProfileRegistry";
 
+const HTTP_BODY_TIMEOUT_MS = 60_000;
+const HTTP_BODY_MAX_BYTES = 256 * 1024 * 1024;
+const HTTP_SESSION_IDLE_TIMEOUT_MS = 30 * 60_000;
+
+type HttpBodyResult = { ok: true; body: string } | { ok: false; status: number; error: string };
+
 const DEVICE_DISCONNECT_POLL_INTERVAL_MS = 5000;
 const DEVICE_DISCONNECT_MISS_THRESHOLD = 3;
 const SSE_KEEPALIVE_INTERVAL_MS = 30_000;
@@ -299,6 +310,8 @@ export class Daemon {
   private httpServerClosePromise: Promise<void> | null = null;
   private socketServer: UnixSocketServer | null = null;
   private transports: Map<string, StreamableHTTPServerTransport> = new Map();
+  private readonly httpSessionIdleTimers = new Map<string, NodeJS.Timeout>();
+  private readonly activeHttpRequests = new Map<string, number>();
   private acceptingHttpSessions = false;
   private port: number;
   private host: string;
@@ -889,6 +902,7 @@ export class Daemon {
     this.httpServer = this.httpServerFactory();
     this.httpServerClosePromise = null;
     this.acceptingHttpSessions = true;
+    const allowedHosts = [`127.0.0.1:${this.port}`, `localhost:${this.port}`, `[::1]:${this.port}`];
 
     // Disable default timeouts on this loopback-only server. Node.js 18+ sets
     // requestTimeout to 300 000 ms (5 min), which kills Streamable HTTP
@@ -901,10 +915,12 @@ export class Daemon {
     this.httpServer.timeout = 0;
 
     this.httpServer.on("request", async (req, res) => {
-      // CORS headers for development
-      res.setHeader("Access-Control-Allow-Origin", "*");
-      res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
-      res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, MCP-Session-Id");
+      // Check every path before parsing the URL or handling preflight requests.
+      if (!req.headers.host || !allowedHosts.includes(req.headers.host) || req.headers.origin) {
+        res.writeHead(403, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Forbidden" }));
+        return;
+      }
 
       if (req.method === "OPTIONS") {
         res.writeHead(200);
@@ -921,19 +937,18 @@ export class Daemon {
           return;
         }
 
-        let body = "";
-        req.on("data", (chunk) => {
-          body += chunk.toString();
-        });
-
-        await new Promise<void>((resolve) => {
-          req.on("end", resolve);
-        });
+        const bodyResult = await this.readHttpBody(req);
+        if (!bodyResult.ok) {
+          this.respondToBodyReadFailure(res, bodyResult);
+          return;
+        }
 
         let payload: { sessionId?: string } | null = null;
         try {
-          payload = JSON.parse(body);
-        } catch {
+          payload = JSON.parse(bodyResult.body);
+        } catch (error) {
+          // Invalid client JSON is expected; the 400 response fully describes the failure.
+          logger.debug(`Invalid heartbeat JSON: ${error}`);
           res.writeHead(400, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ error: "Invalid JSON" }));
           return;
@@ -967,18 +982,17 @@ export class Daemon {
 
         // Parse body for POST requests
         if (req.method === "POST") {
-          let body = "";
-          req.on("data", (chunk) => {
-            body += chunk.toString();
-          });
-
-          await new Promise<void>((resolve) => {
-            req.on("end", resolve);
-          });
+          const bodyResult = await this.readHttpBody(req);
+          if (!bodyResult.ok) {
+            this.respondToBodyReadFailure(res, bodyResult);
+            return;
+          }
 
           try {
-            parsedBody = JSON.parse(body);
-          } catch {
+            parsedBody = JSON.parse(bodyResult.body);
+          } catch (error) {
+            // Invalid client JSON is expected; the 400 response fully describes the failure.
+            logger.debug(`Invalid MCP JSON: ${error}`);
             res.writeHead(400, { "Content-Type": "application/json" });
             res.end(JSON.stringify({ error: "Invalid JSON" }));
             return;
@@ -1054,6 +1068,8 @@ export class Daemon {
               : {}),
           };
           streamableTransport = new StreamableHTTPServerTransport({
+            enableDnsRebindingProtection: true,
+            allowedHosts,
             sessionIdGenerator: () => this.idGenerator.next(),
             onsessioninitialized: (newSessionId) => {
               if (!this.registerHttpTransport(newSessionId, streamableTransport)) {
@@ -1082,6 +1098,8 @@ export class Daemon {
           // Setup cleanup handlers
           streamableTransport.onclose = async () => {
             if (streamableTransport.sessionId) {
+              this.clearHttpSessionIdleTimer(streamableTransport.sessionId);
+              this.activeHttpRequests.delete(streamableTransport.sessionId);
               const cancelled = await executionTracker.cancelSessionExecutions(
                 streamableTransport.sessionId,
                 this.shutdownInProgress
@@ -1097,17 +1115,7 @@ export class Daemon {
 
           streamableTransport.onerror = async (error) => {
             if (streamableTransport.sessionId) {
-              const detail = describeUnknownError(error);
-              logger.error(
-                `Streamable HTTP transport error for session ${streamableTransport.sessionId}: ${detail}`,
-              );
-              await executionTracker.cancelSessionExecutions(
-                streamableTransport.sessionId,
-                this.shutdownInProgress
-                  ? new DaemonHandoffInterruptionError(DAEMON_HANDOFF_INTERRUPTED_MESSAGE)
-                  : `streamable_http_onerror: ${detail}`,
-              );
-              this.transports.delete(streamableTransport.sessionId);
+              this.handleHttpTransportError(streamableTransport.sessionId, error);
             }
           };
 
@@ -1150,6 +1158,10 @@ export class Daemon {
         res.on("finish", clearKeepalive);
 
         // Let the transport handle the request
+        const activeSessionId = streamableTransport.sessionId;
+        if (activeSessionId) {
+          this.beginHttpRequest(activeSessionId);
+        }
         try {
           await streamableTransport.handleRequest(req, res, parsedBody);
         } catch (error) {
@@ -1157,6 +1169,9 @@ export class Daemon {
           sendJsonRpcError("Server error", error);
         } finally {
           clearKeepalive();
+          if (activeSessionId) {
+            this.endHttpRequest(activeSessionId);
+          }
         }
       } else {
         // 404 for unknown paths
@@ -1206,7 +1221,120 @@ export class Daemon {
       return false;
     }
     this.transports.set(sessionId, transport);
+    this.armHttpSessionIdleTimer(sessionId, transport);
     return true;
+  }
+
+  private handleHttpTransportError(sessionId: string, error: unknown): void {
+    // The SDK also reports recoverable per-request failures here; keep the live session.
+    logger.warn(
+      `Streamable HTTP transport error for session ${sessionId}: ${describeUnknownError(error)}`,
+    );
+  }
+
+  private clearHttpSessionIdleTimer(sessionId: string): void {
+    const timer = this.httpSessionIdleTimers.get(sessionId);
+    if (timer) {
+      this.timer.clearTimeout(timer);
+      this.httpSessionIdleTimers.delete(sessionId);
+    }
+  }
+
+  private armHttpSessionIdleTimer(
+    sessionId: string,
+    transport: StreamableHTTPServerTransport,
+  ): void {
+    this.clearHttpSessionIdleTimer(sessionId);
+    const timer = this.timer.setTimeout(() => {
+      this.httpSessionIdleTimers.delete(sessionId);
+      if (this.transports.get(sessionId) !== transport) {
+        return;
+      }
+      if ((this.activeHttpRequests.get(sessionId) ?? 0) > 0) {
+        this.armHttpSessionIdleTimer(sessionId, transport);
+        return;
+      }
+      void transport.close().catch((error) => {
+        logger.warn(`Failed to reap idle HTTP session ${sessionId}`, error);
+        this.armHttpSessionIdleTimer(sessionId, transport);
+      });
+    }, HTTP_SESSION_IDLE_TIMEOUT_MS);
+    this.httpSessionIdleTimers.set(sessionId, timer);
+  }
+
+  private beginHttpRequest(sessionId: string): void {
+    this.clearHttpSessionIdleTimer(sessionId);
+    this.activeHttpRequests.set(sessionId, (this.activeHttpRequests.get(sessionId) ?? 0) + 1);
+  }
+
+  private endHttpRequest(sessionId: string): void {
+    const remaining = (this.activeHttpRequests.get(sessionId) ?? 1) - 1;
+    if (remaining > 0) {
+      this.activeHttpRequests.set(sessionId, remaining);
+    } else {
+      this.activeHttpRequests.delete(sessionId);
+      const transport = this.transports.get(sessionId);
+      if (transport) {
+        this.armHttpSessionIdleTimer(sessionId, transport);
+      }
+    }
+  }
+
+  private readHttpBody(req: IncomingMessage): Promise<HttpBodyResult> {
+    return new Promise((resolve) => {
+      const chunks: Buffer[] = [];
+      let bytes = 0;
+      let settled = false;
+      const finish = (result: HttpBodyResult): void => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        this.timer.clearTimeout(timeout);
+        req.off("data", onData);
+        req.off("end", onEnd);
+        req.off("error", onError);
+        req.off("aborted", onAborted);
+        req.off("close", onClose);
+        resolve(result);
+      };
+      const onData = (chunk: Buffer | string): void => {
+        const data = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        bytes += data.length;
+        if (bytes > HTTP_BODY_MAX_BYTES) {
+          finish({ ok: false, status: 413, error: "Request body too large" });
+          req.destroy();
+          return;
+        }
+        chunks.push(data);
+      };
+      const onEnd = (): void => finish({ ok: true, body: Buffer.concat(chunks).toString("utf8") });
+      const onError = (error: Error): void => {
+        logger.warn("HTTP request body read failed", error);
+        finish({ ok: false, status: 400, error: "Request body read failed" });
+      };
+      const onAborted = (): void => finish({ ok: false, status: 400, error: "Request aborted" });
+      const onClose = (): void => finish({ ok: false, status: 400, error: "Request closed" });
+      const timeout = this.timer.setTimeout(() => {
+        finish({ ok: false, status: 408, error: "Request body timed out" });
+        req.destroy();
+      }, HTTP_BODY_TIMEOUT_MS);
+      req.on("data", onData);
+      req.on("end", onEnd);
+      req.on("error", onError);
+      req.on("aborted", onAborted);
+      req.on("close", onClose);
+    });
+  }
+
+  private respondToBodyReadFailure(
+    res: ServerResponse,
+    result: Extract<HttpBodyResult, { ok: false }>,
+  ): void {
+    if (!res.destroyed) {
+      res.writeHead(result.status, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: result.error }));
+    }
   }
 
   private closeHttpListener(): Promise<void> {
@@ -2963,7 +3091,16 @@ export class Daemon {
               (message, error) => logger.warn(message, error),
             ),
         },
-        { name: "active HTTP session registry", run: () => this.transports.clear() },
+        {
+          name: "active HTTP session registry",
+          run: () => {
+            for (const sessionId of this.httpSessionIdleTimers.keys()) {
+              this.clearHttpSessionIdleTimer(sessionId);
+            }
+            this.activeHttpRequests.clear();
+            this.transports.clear();
+          },
+        },
         {
           name: "HTTP server",
           run: () => this.closeHttpListener(),

@@ -213,6 +213,7 @@ function snapshotDaemonOptions(options: DaemonOptions | undefined): DaemonOption
 }
 
 const MCP_CLIENT_IDLE_CLOSE_MS = 5 * 60 * 1000;
+const MCP_SESSION_TERMINATION_TIMEOUT_MS = 2_000;
 const DEVICE_ACQUISITION_TOOL_NAMES = new Set([
   "getAndroid",
   "getApple",
@@ -921,6 +922,7 @@ export class UnixSocketServer {
     logger.info(`New client connection: ${sessionId}`);
 
     let buffer = "";
+    const decoder = new TextDecoder();
 
     socket.setTimeout(DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS);
     socket.on("timeout", () => {
@@ -933,7 +935,7 @@ export class UnixSocketServer {
     socket.on("data", (data) => {
       const receivedAtMs = this.timer.now();
       const handler = (async () => {
-        buffer += data.toString();
+        buffer += typeof data === "string" ? data : decoder.decode(data, { stream: true });
 
         const lines = buffer.split("\n");
         buffer = lines.pop() || "";
@@ -5788,7 +5790,7 @@ export class UnixSocketServer {
           generation !== this.lifecycleGeneration ||
           this.mcpClientPromises.get(key) !== clientPromise
         ) {
-          await client.close();
+          await this.closeMcpClient(key, client);
           throw new Error("MCP client creation was superseded");
         }
         this.mcpClients.set(key, client);
@@ -5815,13 +5817,39 @@ export class UnixSocketServer {
       return;
     }
     const close = Promise.resolve()
-      .then(() => existingClient.close())
+      .then(() => this.closeMcpClient(key, existingClient))
       .catch((error) => {
         logger.warn(`Error closing MCP client for key ${key}:`, error);
       });
     if (closeMode === "wait") {
       await close;
     }
+  }
+
+  private async closeMcpClient(key: string, client: Client): Promise<void> {
+    const transport = client.transport;
+    if (transport instanceof StreamableHTTPClientTransport && transport.sessionId) {
+      let timeout: NodeJS.Timeout | undefined;
+      try {
+        await Promise.race([
+          transport.terminateSession(),
+          new Promise<never>((_resolve, reject) => {
+            timeout = this.timer.setTimeout(
+              () => reject(new Error("MCP session termination timed out")),
+              MCP_SESSION_TERMINATION_TIMEOUT_MS,
+            );
+          }),
+        ]);
+      } catch (error) {
+        // A failed DELETE is best-effort; closing the local client still releases its resources.
+        logger.debug(`Could not terminate MCP session for key ${key}: ${error}`);
+      } finally {
+        if (timeout) {
+          this.timer.clearTimeout(timeout);
+        }
+      }
+    }
+    await client.close();
   }
 
   private async resetMcpClientIfCurrent(
@@ -6073,7 +6101,7 @@ export class UnixSocketServer {
     this.mcpClientIdleTimers.clear();
     for (const [key, client] of clients) {
       try {
-        await client.close();
+        await this.closeMcpClient(key, client);
       } catch (error) {
         logger.warn(`Error closing MCP client for key ${key}:`, error);
       }

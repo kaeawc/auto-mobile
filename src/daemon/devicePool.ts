@@ -674,6 +674,28 @@ const EMULATOR_LOSS_INCIDENT_WAIT_TIMEOUT_MS = 120_000;
  *
  * Works with SessionManager to maintain bidirectional mappings.
  */
+export interface DevicePoolDependencies {
+  sessionManager: SessionManager;
+  daemonSessionId: string;
+  timer?: Timer;
+  installedAppsRepository?: InstalledAppsStore;
+  deviceManager?: PlatformDeviceManager;
+  retryExecutor?: RetryExecutor;
+  deviceSessionRepository?: Pick<DeviceSessionRepository, "markAutolockSession">;
+  criteriaMatcher?: DeviceCriteriaMatcher;
+  releaseSessionForDisconnectedDevice?: DeviceDisconnectSessionReleaser;
+  onDeviceReady?: DeviceReadyListener;
+  androidDeviceReboot?: AndroidDeviceReboot;
+  recoveryPolicy?: DeviceRecoveryPolicy;
+  onDeviceRemoved?: DeviceRemovedListener;
+  emulatorLossIncidentStore?: EmulatorLossIncidentStore;
+  cancelDeviceSessionExecutions?: DeviceSessionExecutionCanceller;
+  idGenerator?: IdGenerator;
+  lifecycleCoordinator?: VirtualDeviceLifecycleCoordinator;
+  consoleBusyRegistry?: EmulatorConsoleBusyRegistry;
+  deviceSessionContinuityEnabled?: boolean;
+}
+
 export class DevicePool {
   private devices: Map<string, PooledDevice> = new Map();
   private deviceSessionStarts: Map<string, number> = new Map();
@@ -828,6 +850,30 @@ export class DevicePool {
   private readonly DEVICE_WAIT_INTERVAL_MS = 1000; // Check every 1 second
   private readonly lifecycleCoordinator: VirtualDeviceLifecycleCoordinator;
   private readonly consoleBusyRegistry: EmulatorConsoleBusyRegistry;
+
+  static create(deps: DevicePoolDependencies): DevicePool {
+    return new DevicePool(
+      deps.sessionManager,
+      deps.daemonSessionId,
+      deps.timer,
+      deps.installedAppsRepository,
+      deps.deviceManager,
+      deps.retryExecutor,
+      deps.deviceSessionRepository,
+      deps.criteriaMatcher,
+      deps.releaseSessionForDisconnectedDevice,
+      deps.onDeviceReady,
+      deps.androidDeviceReboot,
+      deps.recoveryPolicy,
+      deps.onDeviceRemoved,
+      deps.emulatorLossIncidentStore,
+      deps.cancelDeviceSessionExecutions,
+      deps.idGenerator,
+      deps.lifecycleCoordinator,
+      deps.consoleBusyRegistry,
+      deps.deviceSessionContinuityEnabled,
+    );
+  }
 
   constructor(
     sessionManager: SessionManager,

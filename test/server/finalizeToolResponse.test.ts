@@ -23,6 +23,10 @@ import {
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import { z } from "zod/v4";
 import {
+  observationOutputSchema,
+  observationSummarySchema,
+} from "../../src/server/toolOutputSchemas";
+import {
   loadAndroidHomeObserve,
   loadIosFractionalObserve,
 } from "../fixtures/observe/observeFixture";
@@ -2538,7 +2542,7 @@ describe("finalizeToolResponse", () => {
       expect(JSON.parse(finalized.content[0].text)).toEqual(finalized.structuredContent);
     });
 
-    test("artifact writer receives the compacted diff after existing output transforms", () => {
+    test("full-projection diff spills the complete diff and returns only artifact metadata", () => {
       serverConfig.setActionsDiffObserveEnabled(true);
       const { store } = makeStore();
       finalizeToolResponse(createStructuredToolResponse(sameScreenObserve()), {
@@ -2548,6 +2552,11 @@ describe("finalizeToolResponse", () => {
       });
 
       const next = sameScreenObserve();
+      next.freshness = {
+        isFresh: false,
+        category: "unavailable",
+        unavailableDetail: "capture unavailable",
+      };
       (next.viewHierarchy!.hierarchy.node as any).node = [
         { "resource-id": "com.example:id/added", bounds: { left: 5, top: 6, right: 7, bottom: 8 } },
       ];
@@ -2567,17 +2576,61 @@ describe("finalizeToolResponse", () => {
       expect((writer.writes[0].data as any).isDiff).toBe(true);
       expect(writer.writes[0].payload).toBe("ObserveDiff");
       expect((writer.writes[0].data as any).added[0].attributes.bounds).toEqual([5, 6, 7, 8]);
-      expect((writer.writes[0].data as any).skeleton).toBeUndefined();
-      expect((finalized.structuredContent as any).observation.artifact.path).toBe(
-        "/tmp/auto-mobile/tapOn-1.json",
-      );
-      expect((finalized.structuredContent as any).observation.artifact.payload).toBe("ObserveDiff");
-      expect((finalized.structuredContent as any).observation.skeleton).toBeDefined();
+      expect((writer.writes[0].data as any).skeleton).toBeDefined();
+      expect((writer.writes[0].data as any).freshness).toEqual(next.freshness);
+      expect((finalized.structuredContent as any).observation).toEqual({
+        artifact: {
+          path: "/tmp/auto-mobile/tapOn-1.json",
+          format: "json",
+          payload: "ObserveDiff",
+          bytes: 123,
+          tool: "tapOn",
+        },
+      });
       expect((finalized.structuredContent as any).observationDiff).toMatchObject({
         mode: "diff",
         reason: "diff_emitted",
       });
       expect(finalized.content[0].text).toBe(stringifyToolResponse(finalized.structuredContent));
+    });
+
+    test("skeleton diff spill has a schema-valid non-diff inline shell with arrays in the artifact", () => {
+      serverConfig.setActionsDiffObserveEnabled(true);
+      const { store } = makeStore();
+      finalizeToolResponse(createStructuredToolResponse(sameScreenObserve()), {
+        name: "observe",
+        sessionUuid: "s1",
+        baselineStore: store,
+      });
+      const next = sameScreenObserve();
+      next.freshness = {
+        isFresh: false,
+        category: "unavailable",
+        unavailableDetail: "capture unavailable",
+      };
+      (next.viewHierarchy!.hierarchy.node as any).node = [
+        { "resource-id": "com.example:id/added", bounds: { left: 5, top: 6, right: 7, bottom: 8 } },
+      ];
+      const writer = new FakeObservationArtifactWriter();
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: next }),
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store, artifactWriter: writer } as any,
+      );
+      const observation = (finalized.structuredContent as any).observation;
+      expect(observationOutputSchema.safeParse(observation).success).toBe(true);
+      expect(observationSummarySchema.safeParse(observation).success).toBe(true);
+      expect(observation.isDiff).toBeUndefined();
+      expect(observation.added).toBeUndefined();
+      expect(observation.removed).toBeUndefined();
+      expect(observation.changed).toBeUndefined();
+      expect(observation.skeleton).toBeDefined();
+      expect(observation.freshness).toEqual(next.freshness);
+      expect(writer.writes[0].data).toMatchObject({
+        isDiff: true,
+        added: expect.any(Array),
+        removed: expect.any(Array),
+        changed: expect.any(Array),
+      });
     });
 
     test("internal calls receive full observations and do not write artifacts", () => {

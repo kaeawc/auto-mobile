@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   toSkeleton,
   projectSkeleton,
+  projectSkeletonElement,
 } from "../../../../src/features/observe/output/SkeletonProjection";
 import { setElementProvenance } from "../../../../src/features/observe/output/elementProvenance";
 import { DefaultObserveElementCollector } from "../../../../src/features/observe/ObserveElementCollector";
@@ -168,6 +169,7 @@ describe("toSkeleton — acceptance criteria", () => {
         bounds: bounds(0, 0, 100, 50),
         "resource-id": "android-field",
         class: "android.widget.EditText",
+        focusable: true,
         text: "hello",
       };
 
@@ -321,6 +323,57 @@ describe("toSkeleton — acceptance criteria", () => {
       expect(skeleton).toHaveLength(0);
       expect(context).toHaveLength(1);
       expect(context[0].affordances).toEqual([]);
+    });
+
+    test("explicitly non-focusable EditText never gains input from its class alone", () => {
+      const el: Element = {
+        bounds: bounds(0, 0, 100, 40),
+        class: "android.widget.EditText",
+        focusable: "false",
+        clickable: true,
+        text: "Read only",
+      };
+      expect(projectSkeletonElement(el)?.affordances).toEqual(["tap"]);
+      const { skeleton, context } = projectSkeleton(
+        makeElements({ text: [{ ...el, clickable: false }] }),
+      );
+      expect(skeleton).toEqual([]);
+      expect(context[0].affordances).toEqual([]);
+    });
+
+    test("clickable EditText with an omitted focusable flag keeps its input affordance", () => {
+      const el: Element = {
+        bounds: bounds(0, 0, 100, 40),
+        class: "android.widget.EditText",
+        clickable: true,
+      };
+      expect(toSkeleton(makeElements({ clickable: [el] }))[0].affordances).toEqual([
+        "tap",
+        "input",
+      ]);
+    });
+
+    test("set_text action remains input evidence even when the focusable flag is false", () => {
+      const el: Element = {
+        bounds: bounds(0, 0, 100, 40),
+        class: "android.widget.EditText",
+        focusable: false,
+        actions: ["set_text"],
+      };
+      expect(toSkeleton(makeElements({ clickable: [el] }))[0].affordances).toEqual(["input"]);
+    });
+
+    test("single-element diff row retains a Compose control's testTag selector", () => {
+      const el: Element = {
+        bounds: bounds(0, 0, 100, 40),
+        "test-tag": "removed-compose-control",
+        actions: ["click"],
+      };
+      expect(projectSkeletonElement(el)).toEqual({
+        bounds: [0, 0, 100, 40],
+        affordances: ["tap"],
+        testTag: "removed-compose-control",
+      });
     });
 
     test("checkable carries checked; non-checkable never does", () => {

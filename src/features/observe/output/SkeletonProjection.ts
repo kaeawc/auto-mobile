@@ -3,7 +3,10 @@ import { toSearchable } from "../../utility/SearchableNode";
 import { normalizeQuotes } from "../../utility/TextMatcher";
 import type { Element } from "../../../models/Element";
 import { isTruthy } from "../../../models/Element";
-import { getToggleContentDescription } from "../../../utils/elementProperties";
+import {
+  getToggleContentDescription,
+  hasAccessibilityAction,
+} from "../../../utils/elementProperties";
 import { serverConfig } from "../../../utils/ServerConfig";
 import type { Affordance, ObserveResult, SkeletonElement } from "../../../models/ObserveResult";
 import {
@@ -76,6 +79,20 @@ function deriveId(el: Element): string | undefined {
   return toSearchable(el).elementId;
 }
 
+/** Class names alone do not make an unfocusable field an actionable input. */
+function toSkeletonSearchable(el: Element): ReturnType<typeof toSearchable> {
+  const searchable = toSearchable(el);
+  const focusEvidence =
+    isTruthy(el.focusable) || (el.focusable === undefined && isTruthy(el.clickable));
+  if (!focusEvidence && !hasAccessibilityAction(el.actions, "set_text")) {
+    return {
+      ...searchable,
+      affordances: searchable.affordances.filter((affordance) => affordance !== "input"),
+    };
+  }
+  return searchable;
+}
+
 /** Preserve a named toggle's own state alongside its identifying label. */
 function deriveSublabel(el: Element, label: string | undefined): string | undefined {
   return getToggleContentDescription(el) && el.text !== label ? nonEmptyString(el.text) : undefined;
@@ -111,13 +128,16 @@ export function projectSkeletonElement(element: Element): SkeletonElement | unde
   if (!bounds) {
     return undefined;
   }
-  const { affordances, elementId, label } = toSearchable(element);
+  const { affordances, elementId, label, testTag } = toSkeletonSearchable(element);
   const entry: SkeletonElement = { bounds, affordances };
   if (elementId !== undefined) {
     entry.elementId = elementId;
   }
   if (label !== undefined) {
     entry.label = label.trim();
+  }
+  if (testTag !== undefined) {
+    entry.testTag = testTag;
   }
   if (affordances.includes("toggle")) {
     entry.checked = isTruthy(element.checked);
@@ -190,7 +210,7 @@ function accumulateByIdentity(
     if (!bounds) {
       continue;
     }
-    const { elementId, label, affordances } = toSearchable(el);
+    const { elementId, label, affordances } = toSkeletonSearchable(el);
     const key = identityKey(elementId, label, bounds);
 
     let acc = byIdentity.get(key);

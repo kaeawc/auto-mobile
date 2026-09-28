@@ -8,6 +8,17 @@ const INITIAL_SIGNATURE_SHA256 = "87531c89409eceb7d4d815126c3461acd6d759e46786fc
 const FOCUS_BASELINE_SHA256 = "de44394bfd0b94fcc979a112ca0bc45dd37e1336b7b987caa3533642e74c6ed7";
 const FOCUS_SIGNATURE_SHA256 = "262630c6315a6cfe945008abb58d52274dd5188903df949d0c239c95a785dd5b";
 const INITIAL_CASE_KEYS_SHA256 = "8c9983421c0379cb2bf76f4ca3745c7e1b280507c3cc12f46241890cec157191";
+// These two captures place Comments entirely behind the keyboard. The IME
+// occlusion projection removes its three public selector cases per capture.
+const REVIEWED_IME_OCCLUSION_CASE_REMOVALS = new Set(
+  ["diff/text-input-empty.json", "diff/text-input-typed.json"].flatMap((capture) =>
+    [
+      { kind: "elementId", value: "8b8e72b0-b1e8-cc95-d497-298e6a109546" },
+      { kind: "text", value: "Comments", intent: "focus-input" },
+      { kind: "text", value: "Comments" },
+    ].map((query) => `${capture}:${JSON.stringify(query)}:84,1795,996,2085`),
+  ),
+);
 const digest = (entries: string[]) =>
   createHash("sha256").update(entries.sort().join("\n")).digest("hex");
 
@@ -114,7 +125,9 @@ export function assertCaseInventoryDoesNotShrink(
     }
     return;
   }
-  const missing = parseKeys(baseline).filter((key) => !currentKeys.includes(key));
+  const missing = parseKeys(baseline).filter(
+    (key) => !currentKeys.includes(key) && !REVIEWED_IME_OCCLUSION_CASE_REMOVALS.has(key),
+  );
   if (missing.length > 0) {
     throw new Error(`Element-resolution case keys may only grow:\n${missing.join("\n")}`);
   }

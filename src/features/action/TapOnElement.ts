@@ -86,6 +86,8 @@ import type {
 } from "../observe/interfaces/WaitForCondition";
 import { hierarchyUpdatedAtToMillis } from "../observe/observeTimestamp";
 import { dispatchAndroidCoordinateTap, dispatchIosCoordinateTap } from "./coordinateTapDispatch";
+import { DefaultObserveElementCollector } from "../observe/ObserveElementCollector";
+import { getImeOccluderForElement, tapPointOutsideIme } from "../observe/output/SkeletonProjection";
 
 type SearchUntilStats = NonNullable<TapOnElementResult["searchUntil"]>;
 type FocusIdentifierKey = "resource-id" | "view-id" | "test-tag";
@@ -451,6 +453,29 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
 
   private resolveTapPoint(element: Element): { x: number; y: number } {
     return this.geometry.getElementCenter(element);
+  }
+
+  private resolveImeSafeTapPoint(
+    element: Element,
+    hierarchy: ViewHierarchyResult,
+  ): { x: number; y: number } {
+    if (this.device.platform !== "android") {
+      return this.resolveTapPoint(element);
+    }
+    const elements = new DefaultObserveElementCollector().collect(hierarchy, "android");
+    const ime = elements && getImeOccluderForElement(elements, element);
+    if (!ime) {
+      return this.resolveTapPoint(element);
+    }
+    const { left, top, right, bottom } = element.bounds;
+    const point = tapPointOutsideIme([left, top, right, bottom], ime.bounds);
+    if (point) {
+      return point;
+    }
+    const label = element.text ?? element["content-desc"] ?? element["resource-id"] ?? "element";
+    throw new ActionableError(
+      `Target "${label}" is covered by the soft keyboard; dismiss the keyboard first.`,
+    );
   }
 
   private async activateSemanticLink(
@@ -2467,7 +2492,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           }
 
           this.logClickableParentSelection(usedParent);
-          const tapPoint = this.resolveTapPoint(tapElement);
+          const tapPoint = this.resolveImeSafeTapPoint(tapElement, viewHierarchy);
           const tapBounds = tapElement.bounds;
           logger.info(
             `[TapOnElement] Tapping (${tapPoint.x}, ${tapPoint.y}) on element: ` +
@@ -2877,7 +2902,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     if (!retryTarget) {
       return;
     }
-    const retryPoint = retryTarget === tapElement ? tapPoint : this.resolveTapPoint(retryTarget);
+    const retryPoint = this.resolveImeSafeTapPoint(retryTarget, postTapHierarchy);
 
     logger.warn(
       `[TapOnElement][retryIfNoChange] Hierarchy unchanged after tap at ` +

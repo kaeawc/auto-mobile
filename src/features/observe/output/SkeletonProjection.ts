@@ -155,6 +155,8 @@ interface SkeletonAccumulator {
   bounds: SkeletonElement["bounds"];
   affordances: Set<Affordance>;
   checked?: boolean;
+  /** The Android IME covers every coordinate action on this app row. */
+  occluded?: true;
   /**
    * Root/window ancestry, when the collector supplied it (issue #5881). Present
    * on real captures; absent on hand-built fixtures and non-provenance producers,
@@ -435,6 +437,9 @@ function toSkeletonEntry(acc: SkeletonAccumulator): SkeletonElement {
     bounds: acc.bounds,
     affordances: AFFORDANCE_ORDER.filter((affordance) => acc.affordances.has(affordance)),
   };
+  if (acc.occluded) {
+    entry.occluded = true;
+  }
   if (acc.elementId !== undefined) {
     entry.elementId = acc.elementId;
   }
@@ -708,6 +713,112 @@ interface ImeWindow {
   group?: number;
   spanEnter: number;
   spanExit: number;
+}
+
+type Bounds = SkeletonElement["bounds"];
+
+/** A detected keyboard's measured rectangle and its window position. */
+export interface ImeOccluder {
+  bounds: Bounds;
+  group?: number;
+  windowRank?: number;
+  spanEnter: number;
+  spanExit: number;
+}
+
+/** Share the skeleton's authoritative/keycap-corroborated IME detection with actions. */
+export function getImeOccluder(elements: ObserveElements): ImeOccluder | undefined {
+  const ime = detectImeWindow(elements);
+  const row = imeAccumulator(elements, ime);
+  if (!ime || !row) {
+    return undefined;
+  }
+  const member = imeCandidates(elements, ime).find((el) => isImeKeycap(el, ime));
+  // Uncollected IME wrappers can span the app window even when the visible
+  // keyboard occupies only its bottom edge. Keep their bounds in the <ime>
+  // summary, but measure physical occlusion from collected IME elements.
+  const boxes = allElements(elements)
+    .filter((el) => isImeKeycap(el, ime))
+    .map(boundsTuple)
+    .filter((box): box is NonNullable<Bounds> => box !== undefined);
+  return {
+    bounds: boxes.length > 0 ? unionBounds(boxes) : row.bounds,
+    group: ime.group,
+    windowRank: member && getElementProvenance(member)?.windowRank,
+    spanEnter: ime.spanEnter,
+    spanExit: ime.spanExit,
+  };
+}
+
+function isBelowImeWindow(provenance: ElementProvenance | undefined, ime: ImeOccluder): boolean {
+  if (
+    ime.group !== undefined &&
+    provenance?.group === ime.group &&
+    provenance.enter >= ime.spanEnter &&
+    provenance.exit <= ime.spanExit
+  ) {
+    return false;
+  }
+  return !(
+    provenance?.windowRank !== undefined &&
+    ime.windowRank !== undefined &&
+    provenance.windowRank < ime.windowRank
+  );
+}
+
+function isSameHierarchyNode(candidate: Element, target: Element): boolean {
+  return (
+    candidate.bounds.left === target.bounds.left &&
+    candidate.bounds.top === target.bounds.top &&
+    candidate.bounds.right === target.bounds.right &&
+    candidate.bounds.bottom === target.bounds.bottom &&
+    candidate["resource-id"] === target["resource-id"]
+  );
+}
+
+/** Resolve occlusion only for a lower-window app target, never for an IME member. */
+export function getImeOccluderForElement(
+  elements: ObserveElements,
+  element: Element,
+): ImeOccluder | undefined {
+  const ime = detectImeWindow(elements);
+  const occluder = getImeOccluder(elements);
+  if (!ime || !occluder) {
+    return undefined;
+  }
+  const match = allElements(elements).find((candidate) => isSameHierarchyNode(candidate, element));
+  if (match && isImeKeycap(match, ime)) {
+    return undefined;
+  }
+  return isBelowImeWindow(match && getElementProvenance(match), occluder) ? occluder : undefined;
+}
+
+/**
+ * Keep the ordinary center when exposed. Otherwise choose the center of the
+ * largest remaining rectangle; equal areas prefer top, bottom, left, right.
+ */
+export function tapPointOutsideIme(bounds: Bounds, ime: Bounds): { x: number; y: number } | null {
+  const center = (box: Bounds) => ({
+    x: Math.floor((box[0] + box[2]) / 2),
+    y: Math.floor((box[1] + box[3]) / 2),
+  });
+  const original = center(bounds);
+  const contains = (point: { x: number; y: number }) =>
+    point.x >= ime[0] && point.x < ime[2] && point.y >= ime[1] && point.y < ime[3];
+  if (!contains(original)) {
+    return original;
+  }
+  const candidates: Bounds[] = [
+    [bounds[0], bounds[1], bounds[2], Math.min(bounds[3], ime[1])],
+    [bounds[0], Math.max(bounds[1], ime[3]), bounds[2], bounds[3]],
+    [bounds[0], bounds[1], Math.min(bounds[2], ime[0]), bounds[3]],
+    [Math.max(bounds[0], ime[2]), bounds[1], bounds[2], bounds[3]],
+  ];
+  const visible = candidates
+    .filter((box) => area(box) > 0)
+    .sort((a, b) => area(b) - area(a))
+    .find((box) => !contains(center(box)));
+  return visible ? center(visible) : null;
 }
 
 /** The IME package this element announces, by provenance first and keycap id second. */
@@ -1023,6 +1134,34 @@ export interface SkeletonProjectionResult {
   context: SkeletonElement[];
 }
 
+function markAppRowsCoveredByIme(
+  kept: SkeletonAccumulator[],
+  elements: ObserveElements,
+  ime: ImeWindow | undefined,
+): void {
+  // The iOS collector uses this fixed identity. Its existing keyboard collapse
+  // remains unchanged; only Android app-window rows get occlusion treatment.
+  if (!ime || ime.package === "com.apple.keyboard") {
+    return;
+  }
+  const occluder = getImeOccluder(elements);
+  if (!occluder) {
+    return;
+  }
+  for (const acc of kept) {
+    if (!isBelowImeWindow(acc.provenance, occluder)) {
+      continue;
+    }
+    if (tapPointOutsideIme(acc.bounds, occluder.bounds) !== null) {
+      continue;
+    }
+    // Every advertised action on a fully covered row requires a coordinate or
+    // focus there; keep its label/state in context without promising an action.
+    acc.affordances.clear();
+    acc.occluded = true;
+  }
+}
+
 /**
  * Project the flattened `elements` block into the actionable `skeleton` and
  * informational `context` arrays (issue #6221 item 1): merge + dedup the
@@ -1046,6 +1185,7 @@ export function projectSkeleton(
   attributeContainerLabels(accumulators);
 
   const kept = accumulators.filter((acc) => shouldKeep(acc, clickable));
+  markAppRowsCoveredByIme(kept, elements, ime);
   const actionable = kept.filter((acc) => acc.affordances.size > 0);
   const nonActionable = kept.filter((acc) => acc.affordances.size === 0);
 

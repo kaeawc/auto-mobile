@@ -344,7 +344,7 @@ describe("observe-to-resolve migration contract", () => {
     for (const { query } of cases) {
       counts[query.kind]++;
     }
-    expect(counts).toEqual({ elementId: 105, text: 101, testTag: 5 });
+    expect(counts).toEqual({ elementId: 103, text: 97, testTag: 5 });
     const brokenTags: ContractResolver = {
       resolve(capture, query) {
         return query.kind === "testTag"
@@ -393,7 +393,7 @@ describe("observe-to-resolve migration contract", () => {
   });
   test("public default queries remain unindexed and expose legacy Settings behavior", () => {
     const defaults = publicTextCases(cases);
-    expect(defaults).toHaveLength(77);
+    expect(defaults).toHaveLength(75);
     expect(defaults.every(({ query }) => query.index === undefined)).toBe(true);
     const duplicateDefaults = defaults.filter(({ capture, query }) =>
       cases.some(

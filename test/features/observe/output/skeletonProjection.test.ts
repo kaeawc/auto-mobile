@@ -16,6 +16,7 @@ import type { ObserveResult } from "../../../../src/models/ObserveResult";
 import type { SkeletonElement } from "../../../../src/models/ObserveResult";
 import type { ViewHierarchyResult } from "../../../../src/models/ViewHierarchyResult";
 import scrollBeforeFixture from "../../../fixtures/observe/diff/scroll-before.json";
+import { imeOcclusionHierarchy } from "../../../fixtures/observe/imeOcclusion";
 
 type ObserveElements = NonNullable<ObserveResult["elements"]>;
 
@@ -41,6 +42,49 @@ function bounds(left: number, top: number, right: number, bottom: number): Eleme
 function findById(skeleton: SkeletonElement[], id: string): SkeletonElement | undefined {
   return skeleton.find((entry) => entry.elementId === id);
 }
+
+describe("Android IME occlusion", () => {
+  test("moves fully covered app actions to occluded context and retains exposed actions", () => {
+    const elements = new DefaultObserveElementCollector().collect(
+      imeOcclusionHierarchy(),
+      "android",
+    );
+    const { skeleton, context } = projectSkeleton(elements!);
+    const covered = context.find((row) => row.label === "Continue as Guest");
+    expect(covered).toMatchObject({ occluded: true, affordances: [] });
+    expect(skeleton.find((row) => row.label === "Continue as Guest")).toBeUndefined();
+    expect(skeleton.find((row) => row.label === "Above Keyboard")?.affordances).toContain("tap");
+    expect(skeleton.find((row) => row.label === "Partly Covered")?.affordances).toContain("tap");
+  });
+
+  test("without an IME the same app actions remain tappable", () => {
+    const elements = new DefaultObserveElementCollector().collect(
+      imeOcclusionHierarchy(false),
+      "android",
+    );
+    const { skeleton } = projectSkeleton(elements!);
+    expect(skeleton.find((row) => row.label === "Continue as Guest")?.affordances).toContain("tap");
+  });
+
+  test("iOS keyboard overlap leaves app affordances unchanged", () => {
+    const hierarchy = imeOcclusionHierarchy();
+    const keyboard = hierarchy.windows?.[0]?.hierarchy.node;
+    if (!keyboard?.$ || !keyboard.node?.[0]?.$) {
+      throw new Error("Missing keyboard fixture");
+    }
+    keyboard.$ = { class: "UIKeyboard" };
+    keyboard.node[0].$ = {
+      class: "UIKeyboardKey",
+      text: "Q",
+      clickable: true,
+      bounds: { left: 0, top: 150, right: 400, bottom: 230 },
+    };
+    const elements = new DefaultObserveElementCollector().collect(hierarchy, "ios");
+    const { skeleton } = projectSkeleton(elements!);
+    expect(skeleton.find((row) => row.elementId === "<ime>")).toBeDefined();
+    expect(skeleton.find((row) => row.label === "Continue as Guest")?.affordances).toContain("tap");
+  });
+});
 
 describe("toSkeleton — acceptance criteria", () => {
   test("quick-settings switches preserve identity and state separately (#6794)", () => {

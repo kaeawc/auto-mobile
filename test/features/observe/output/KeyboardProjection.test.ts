@@ -58,19 +58,17 @@ describe("Android keyboard output projection", () => {
     expect(result.keyboard).toEqual({ visible: true, package: "example.keyboard" });
     expect(JSON.stringify(source.elements)).not.toContain("keyboard");
   });
-  test("folds keyboard descendants while retaining overlapping app controls", () => {
+  test("folds keyboard descendants and marks fully overlapped app controls occluded", () => {
     const source = observation();
     const before = JSON.stringify(source);
     const result = sanitizeObserveResult(source, { dropElements: true, project: "skeleton" });
-    expect(result.skeleton?.map((entry) => entry.label)).toEqual([
-      "SAVE",
-      "App control",
-      // The folded IME is still announced as ONE row (issue #6871), so a client
-      // can see the keyboard is up without being handed a key per cap.
-      "Keyboard (example.keyboard)",
-    ]);
+    // The folded IME is still announced as ONE row (issue #6871).
+    expect(result.skeleton?.map((entry) => entry.label)).toEqual(["Keyboard (example.keyboard)"]);
+    expect(result.context?.filter((entry) => "occluded" in entry && entry.occluded)).toHaveLength(
+      2,
+    );
     expect(result.keyboard).toEqual({ visible: true, package: "example.keyboard" });
-    expect(result.context).toBeUndefined();
+    expect(result.context?.map((entry) => entry.label)).toEqual(["SAVE", "App control"]);
     expect(JSON.stringify(source)).toBe(before);
   });
 
@@ -403,11 +401,8 @@ describe("IME window collapses to one skeleton node (#6871)", () => {
       dropElements: true,
       project: "skeleton",
     });
-    expect(result.skeleton?.map((entry) => entry.label)).toEqual([
-      "SAVE",
-      "App control",
-      "Keyboard (example.keyboard)",
-    ]);
+    expect(result.skeleton?.map((entry) => entry.label)).toEqual(["Keyboard (example.keyboard)"]);
+    expect(result.context?.map((entry) => entry.label)).toEqual(["SAVE", "App control"]);
   });
 });
 
@@ -886,11 +881,8 @@ describe("uncollected IME wrapper still bounds the fold (#6908)", () => {
     );
     expect(JSON.stringify(source.elements)).not.toContain("example.keyboard:id/keyboard_view");
     const result = sanitizeObserveResult(source, { dropElements: true, project: "skeleton" });
-    expect(result.skeleton?.map((entry) => entry.label)).toEqual([
-      "SAVE",
-      "App control",
-      "Keyboard (example.keyboard)",
-    ]);
+    expect(result.skeleton?.map((entry) => entry.label)).toEqual(["Keyboard (example.keyboard)"]);
+    expect(result.context?.map((entry) => entry.label)).toEqual(["SAVE", "App control"]);
     expect(result.skeleton!.find((entry) => entry.elementId === "<ime>")?.bounds).toEqual([
       0, 0, 100, 100,
     ]);

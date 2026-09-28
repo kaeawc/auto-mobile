@@ -164,6 +164,77 @@ describe("AndroidSegmentedPlanVideoSession", () => {
 });
 
 describe("AndroidSegmentedPlanVideoSession (timer-driven)", () => {
+  test("routes highlights to segment windows and returns session-timeline entries", async () => {
+    const timer = new FakeTimer();
+    const firstHighlight = {
+      description: "first",
+      shape: { type: "circle" as const, bounds: { x: 1, y: 2, width: 3, height: 4 } },
+      timing: { startTimeMs: 250 },
+    };
+    const secondHighlight = {
+      description: "second",
+      shape: { type: "circle" as const, bounds: { x: 5, y: 6, width: 7, height: 8 } },
+      timing: { startTimeMs: 1250 },
+    };
+    const start = mock(
+      async (request: { outputName?: string; highlights?: (typeof firstHighlight)[] }) =>
+        makeActiveRecording(`id-${request.outputName}`, `/tmp/${request.outputName}.mp4`),
+    );
+    const stop = mock(async (recordingId: string | undefined) => {
+      const id = recordingId ?? "missing";
+      const highlight = id === "id-vid" ? firstHighlight : secondHighlight;
+      return {
+        metadata: {
+          ...makeStopMetadata(id, `/tmp/${id}.mp4`),
+          highlights: [
+            {
+              description: highlight.description,
+              shape: highlight.shape,
+              timeline: { appearedAtSeconds: 0.25, disappearedAtSeconds: 0.5 },
+            },
+          ],
+        },
+        evictedRecordingIds: [] as string[],
+      };
+    });
+    const session = new AndroidSegmentedPlanVideoSession({
+      device: androidDevice,
+      outputNamePrefix: "vid",
+      timer,
+      segmentRotateAfterMs: 1000,
+      highlights: [
+        firstHighlight,
+        secondHighlight,
+        { ...secondHighlight, description: "never started", timing: { startTimeMs: 2250 } },
+      ],
+      startVideoRecording: start,
+      stopVideoRecording: stop,
+    });
+
+    await session.start();
+    expect(start.mock.calls[0]?.[0].highlights).toEqual([firstHighlight]);
+
+    timer.advanceTime(1000);
+    await flush();
+    expect(start.mock.calls[1]?.[0].highlights).toEqual([
+      { ...secondHighlight, timing: { startTimeMs: 250 } },
+    ]);
+
+    const result = await session.stop();
+    expect(result.highlights).toEqual([
+      {
+        description: "first",
+        shape: firstHighlight.shape,
+        timeline: { appearedAtSeconds: 0.25, disappearedAtSeconds: 0.5 },
+      },
+      {
+        description: "second",
+        shape: secondHighlight.shape,
+        timeline: { appearedAtSeconds: 1.25, disappearedAtSeconds: 1.5 },
+      },
+    ]);
+  });
+
   function makeSession(timer: FakeTimer) {
     const outputNames: Array<string | undefined> = [];
     const start = mock(async (req: { outputName?: string }) => {
@@ -236,7 +307,21 @@ describe("AndroidSegmentedPlanVideoSession (timer-driven)", () => {
 
   test("abort rolls back active and completed segments without publishing them", async () => {
     const timer = new FakeTimer();
-    const { stop } = makeSession(timer);
+    const stop = mock(async (recordingId: string | undefined) => {
+      const id = recordingId ?? "missing";
+      return {
+        metadata: {
+          ...makeStopMetadata(id, `/tmp/${id}.mp4`),
+          highlights: [
+            {
+              shape: { type: "circle" as const, bounds: { x: 1, y: 2, width: 3, height: 4 } },
+              timeline: { appearedAtSeconds: 0.1 },
+            },
+          ],
+        },
+        evictedRecordingIds: [] as string[],
+      };
+    });
     const rolledBack: string[] = [];
     const abortableSession = new AndroidSegmentedPlanVideoSession({
       device: androidDevice,
@@ -259,6 +344,7 @@ describe("AndroidSegmentedPlanVideoSession (timer-driven)", () => {
     expect(stop).toHaveBeenCalledTimes(1);
     expect(rolledBack).toEqual(["id-vid-seg1", "id-vid"]);
     expect(timer.getPendingTimeoutCount()).toBe(0);
+    expect((await abortableSession.finalize()).highlights).toBeUndefined();
   });
 
   test("rolls back a segment whose rotation stop failed", async () => {

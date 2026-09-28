@@ -13,8 +13,19 @@ import {
   stopVideoRecording as defaultStopVideoRecording,
 } from "./videoRecordingManager";
 import type { ActiveVideoRecording } from "../features/video";
-import type { VideoRecordingConfigInput, VideoRecordingMetadata } from "../models";
+import type {
+  VideoRecordingConfigInput,
+  VideoRecordingHighlightEntry,
+  VideoRecordingHighlightInput,
+  VideoRecordingMetadata,
+} from "../models";
 import { combineAbortSignals } from "../utils/AbortContext";
+
+interface SegmentedSessionResult {
+  filePaths: string[];
+  recordingIds: string[];
+  highlights?: VideoRecordingHighlightEntry[];
+}
 
 export interface AndroidSegmentedPlanVideoSessionOptions {
   device: BootedDevice;
@@ -31,6 +42,7 @@ export interface AndroidSegmentedPlanVideoSessionOptions {
   maxDurationSeconds?: number;
   /** Quality/config overrides forwarded to every segment's recording. */
   configOverrides?: VideoRecordingConfigInput;
+  highlights?: VideoRecordingHighlightInput[];
   /** Daemon session that owns every segment in this recording session. */
   ownerSessionUuid?: string;
   /** Cancellation for the caller-owned initial segment startup only. */
@@ -75,6 +87,8 @@ export class AndroidSegmentedPlanVideoSession {
 
   private readonly configOverrides: VideoRecordingConfigInput | undefined;
 
+  private readonly highlights: VideoRecordingHighlightInput[] | undefined;
+
   private readonly ownerSessionUuid: string | undefined;
 
   private readonly startupAbortSignal: AbortSignal | undefined;
@@ -104,7 +118,7 @@ export class AndroidSegmentedPlanVideoSession {
   /** Cancels a rotation queued after {@link abort} begins. */
   private readonly sessionAbortController = new AbortController();
 
-  private stopPromise: Promise<{ filePaths: string[]; recordingIds: string[] }> | undefined;
+  private stopPromise: Promise<SegmentedSessionResult> | undefined;
 
   private segmentIndex = 0;
 
@@ -113,6 +127,8 @@ export class AndroidSegmentedPlanVideoSession {
   private readonly completedFilePaths: string[] = [];
 
   private readonly completedRecordingIds: string[] = [];
+
+  private readonly completedHighlights: VideoRecordingHighlightEntry[] = [];
 
   /** IDs whose stop failed during rotation and still need rollback on abort. */
   private readonly pendingRollbackRecordingIds: string[] = [];
@@ -138,6 +154,7 @@ export class AndroidSegmentedPlanVideoSession {
       options.segmentRotateAfterMs ?? ANDROID_PLAN_VIDEO_SEGMENT_ROTATE_MS;
     this.maxDurationSeconds = options.maxDurationSeconds;
     this.configOverrides = options.configOverrides;
+    this.highlights = options.highlights;
     this.ownerSessionUuid = options.ownerSessionUuid;
     this.startupAbortSignal = options.startupAbortSignal;
     this.onFinalized = options.onFinalized;
@@ -240,7 +257,7 @@ export class AndroidSegmentedPlanVideoSession {
    * Stops the timer-driven session: clears both the rotation and max-duration timers,
    * waits for any in-flight rotation, then finalizes and returns every segment.
    */
-  async stop(): Promise<{ filePaths: string[]; recordingIds: string[] }> {
+  async stop(): Promise<SegmentedSessionResult> {
     if (this.stopPromise) {
       return this.stopPromise;
     }
@@ -252,7 +269,7 @@ export class AndroidSegmentedPlanVideoSession {
     return this.stopPromise;
   }
 
-  private async stopInternal(): Promise<{ filePaths: string[]; recordingIds: string[] }> {
+  private async stopInternal(): Promise<SegmentedSessionResult> {
     this.timerDriven = false;
     this.clearTimers();
     await this.pendingRotation;
@@ -290,6 +307,7 @@ export class AndroidSegmentedPlanVideoSession {
     this.activeRecordingId = undefined;
     this.completedRecordingIds.splice(0);
     this.completedFilePaths.splice(0);
+    this.completedHighlights.splice(0);
     this.pendingRollbackRecordingIds.splice(0);
     this.pendingRollbackErrors.splice(0);
     this.notifyFinalized();
@@ -339,11 +357,27 @@ export class AndroidSegmentedPlanVideoSession {
   }
 
   private async startSegment(abortSignal?: AbortSignal): Promise<ActiveVideoRecording> {
+    const segmentStartMs = this.segmentIndex * this.segmentRotateAfterMs;
+    const highlights = this.highlights
+      ?.filter((highlight) => {
+        const startTimeMs = highlight.timing?.startTimeMs ?? 0;
+        return (
+          startTimeMs >= segmentStartMs && startTimeMs < segmentStartMs + this.segmentRotateAfterMs
+        );
+      })
+      .map((highlight) => ({
+        ...highlight,
+        timing: {
+          ...highlight.timing,
+          startTimeMs: (highlight.timing?.startTimeMs ?? 0) - segmentStartMs,
+        },
+      }));
     const recording = await this.startVideoRecordingFn({
       device: this.device,
       outputName: this.segmentOutputName(),
       maxDurationSeconds: ANDROID_SCREENRECORD_MAX_SECONDS,
       configOverrides: this.configOverrides,
+      highlights,
       ownerSessionUuid: this.ownerSessionUuid,
       abortSignal: abortSignal ?? this.sessionAbortController.signal,
     });
@@ -356,6 +390,27 @@ export class AndroidSegmentedPlanVideoSession {
     return recording;
   }
 
+  private recordStoppedSegment(
+    recordingId: string,
+    metadata: VideoRecordingMetadata,
+    segmentIndex: number,
+  ): void {
+    this.completedRecordingIds.push(recordingId);
+    this.completedFilePaths.push(metadata.filePath);
+    const offsetSeconds = (segmentIndex * this.segmentRotateAfterMs) / 1000;
+    for (const highlight of metadata.highlights ?? []) {
+      this.completedHighlights.push({
+        ...highlight,
+        timeline: {
+          appearedAtSeconds: highlight.timeline.appearedAtSeconds + offsetSeconds,
+          ...(highlight.timeline.disappearedAtSeconds === undefined
+            ? {}
+            : { disappearedAtSeconds: highlight.timeline.disappearedAtSeconds + offsetSeconds }),
+        },
+      });
+    }
+  }
+
   private async rotateToNextSegment(): Promise<void> {
     if (!this.activeRecordingId) {
       return;
@@ -366,8 +421,7 @@ export class AndroidSegmentedPlanVideoSession {
     this.rotationAbortController = rotationAbortController;
     try {
       const stopped = await this.stopVideoRecordingFn(previousId);
-      this.completedRecordingIds.push(previousId);
-      this.completedFilePaths.push(stopped.metadata.filePath);
+      this.recordStoppedSegment(previousId, stopped.metadata, this.segmentIndex - 1);
       logger.info(
         `[SegmentedPlanVideo] Stopped segment recordingId=${previousId} path=${stopped.metadata.filePath}`,
       );
@@ -402,13 +456,12 @@ export class AndroidSegmentedPlanVideoSession {
   /**
    * Stops the active segment (if any) and returns every finished file path and recording id.
    */
-  async finalize(): Promise<{ filePaths: string[]; recordingIds: string[] }> {
+  async finalize(): Promise<SegmentedSessionResult> {
     if (this.activeRecordingId) {
       const id = this.activeRecordingId;
       try {
         const stopped = await this.stopVideoRecordingFn(id);
-        this.completedRecordingIds.push(id);
-        this.completedFilePaths.push(stopped.metadata.filePath);
+        this.recordStoppedSegment(id, stopped.metadata, this.segmentIndex - 1);
         this.activeRecordingId = undefined;
         logger.info(
           `[SegmentedPlanVideo] Final stop recordingId=${id} path=${stopped.metadata.filePath}`,
@@ -432,6 +485,7 @@ export class AndroidSegmentedPlanVideoSession {
     return {
       filePaths: [...this.completedFilePaths],
       recordingIds: [...this.completedRecordingIds],
+      highlights: this.completedHighlights.length > 0 ? [...this.completedHighlights] : undefined,
     };
   }
 }

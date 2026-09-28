@@ -6,6 +6,7 @@ import {
   BootedDevice,
   DeviceInfo,
   VideoFormat,
+  VideoRecordingHighlightEntry,
   VideoRecordingHighlightInput,
   VideoQualityPreset,
 } from "../models";
@@ -40,7 +41,10 @@ interface StoppedSegmentedSession {
   segments: StoppedSegment[];
   /** Absolute path of the written manifest, or undefined if the write failed. */
   manifestPath: string | undefined;
+  highlights?: VideoRecordingHighlightEntry[];
 }
+
+type SessionHighlight = VideoRecordingHighlightEntry & { sessionId: string };
 
 type SegmentedSessionRecordingDependencies = Pick<
   AndroidSegmentedPlanVideoSessionOptions,
@@ -100,7 +104,7 @@ const segmentedSessions = (() => {
       handle: string,
       session: AndroidSegmentedPlanVideoSession,
     ): Promise<StoppedSegmentedSession> {
-      const { filePaths, recordingIds } = await session.stop();
+      const { filePaths, recordingIds, highlights } = await session.stop();
       byHandle.delete(handle);
       const segments: StoppedSegment[] = recordingIds.map((id, index) => ({
         recordingId: id,
@@ -108,7 +112,7 @@ const segmentedSessions = (() => {
         segmentIndex: index,
       }));
       const manifestPath = await writeSegmentManifest(handle, segments);
-      return { sessionId: handle, segments, manifestPath };
+      return { sessionId: handle, segments, manifestPath, highlights };
     },
     async abortAndRemove(handle: string, session: AndroidSegmentedPlanVideoSession): Promise<void> {
       await session.abort();
@@ -364,7 +368,7 @@ async function tryStopSegmentedSession(recordingId: string) {
   }
 
   try {
-    const { sessionId, segments, manifestPath } = await segmentedSessions.stopAndRemove(
+    const { sessionId, segments, manifestPath, highlights } = await segmentedSessions.stopAndRemove(
       recordingId,
       session,
     );
@@ -376,6 +380,7 @@ async function tryStopSegmentedSession(recordingId: string) {
       // whether it came from a by-handle or a bare (multi-session) stop.
       recordings: segments.map((segment) => ({ ...segment, sessionId })),
       segmented: true,
+      highlights: highlights?.map((highlight): SessionHighlight => ({ ...highlight, sessionId })),
     });
   } catch (error) {
     throw new ActionableError(`Failed to stop segmented video recording: ${error}`);
@@ -456,6 +461,7 @@ export function registerVideoRecordingTools(): void {
               device: target,
               outputNamePrefix: args.outputName ?? `recording-${target.deviceId}`,
               configOverrides: buildConfigOverrides(args),
+              highlights: args.highlights,
               ownerSessionUuid: args.sessionUuid,
               timer: segmentedSessions.timer,
               maxDurationSeconds,
@@ -555,6 +561,7 @@ export function registerVideoRecordingTools(): void {
       const failures: Array<Record<string, unknown>> = [];
       const evictedRecordingIds: string[] = [];
       const manifestPaths: string[] = [];
+      const highlights: SessionHighlight[] = [];
       let stoppedAnySegmented = false;
       const targetDevices = await resolveTargetDevices(device, args);
       let activeRecords: VideoRecordingRecord[] | undefined;
@@ -569,9 +576,14 @@ export function registerVideoRecordingTools(): void {
           stoppedAnySegmented = true;
           for (const [handle, session] of deviceSessions) {
             try {
-              const { sessionId, segments, manifestPath } = await segmentedSessions.stopAndRemove(
-                handle,
-                session,
+              const {
+                sessionId,
+                segments,
+                manifestPath,
+                highlights: sessionHighlights,
+              } = await segmentedSessions.stopAndRemove(handle, session);
+              highlights.push(
+                ...(sessionHighlights ?? []).map((highlight) => ({ ...highlight, sessionId })),
               );
               if (manifestPath) {
                 manifestPaths.push(manifestPath);
@@ -660,6 +672,7 @@ export function registerVideoRecordingTools(): void {
         recordings: results,
         segmented: stoppedAnySegmented ? true : undefined,
         manifestPaths: manifestPaths.length > 0 ? manifestPaths : undefined,
+        highlights: highlights.length > 0 ? highlights : undefined,
         failures: failures.length > 0 ? failures : undefined,
         evictedRecordingIds: evictedRecordingIds.length > 0 ? evictedRecordingIds : undefined,
       });

@@ -364,6 +364,11 @@ describe("videoRecording tool segmentation branch", () => {
   });
 
   test("android recording <= 180s stays single (not segmented)", async () => {
+    const highlight = {
+      description: "single recording",
+      shape: { type: "circle" as const, bounds: { x: 1, y: 2, width: 3, height: 4 } },
+      timing: { startTimeMs: 0 },
+    };
     const res = parse(
       await handler()(androidDevice, {
         action: "start",
@@ -371,6 +376,7 @@ describe("videoRecording tool segmentation branch", () => {
         deviceId: androidDevice.deviceId,
         maxDuration: 60,
         outputName: "short",
+        highlights: [highlight],
       }),
     );
 
@@ -379,11 +385,17 @@ describe("videoRecording tool segmentation branch", () => {
     expect(recordings[0].segmented).toBeUndefined();
 
     // Clean up the single recording.
-    await handler()(androidDevice, {
-      action: "stop",
-      platform: "android",
-      recordingId: recordings[0].recordingId as string,
-    });
+    const stopRes = parse(
+      await handler()(androidDevice, {
+        action: "stop",
+        platform: "android",
+        recordingId: recordings[0].recordingId as string,
+      }),
+    );
+    const stopped = (stopRes.recordings as Array<Record<string, unknown>>)[0];
+    expect((stopped.metadata as VideoRecordingMetadata).highlights?.[0]?.description).toBe(
+      "single recording",
+    );
   });
 
   test("non-android recording past the android cap stays single (not segmented)", async () => {
@@ -536,8 +548,20 @@ describe("videoRecording tool segmentation branch", () => {
   });
 
   test("bare (by-device) stop finalizes the segmented session and leaves no rotation timer", async () => {
+    const highlightRequests: unknown[] = [];
+    const firstHighlight = {
+      description: "first",
+      shape: { type: "circle" as const, bounds: { x: 1, y: 2, width: 3, height: 4 } },
+      timing: { startTimeMs: 100 },
+    };
+    const secondHighlight = {
+      description: "second",
+      shape: { type: "circle" as const, bounds: { x: 5, y: 6, width: 7, height: 8 } },
+      timing: { startTimeMs: ANDROID_PLAN_VIDEO_SEGMENT_ROTATE_MS + 200 },
+    };
     setSegmentedSessionRecordingDependencies({
       startVideoRecording: async (request) => {
+        highlightRequests.push(request.highlights);
         const outputName = request.outputName;
         const recordingId = outputName ?? `segment-${segmentStarts.length}`;
         segmentStarts.push(recordingId);
@@ -547,7 +571,16 @@ describe("videoRecording tool segmentation branch", () => {
         const id = recordingId ?? `segment-${segmentStops.length}`;
         segmentStops.push(id);
         return {
-          metadata: makeSegmentMetadata(id),
+          metadata: {
+            ...makeSegmentMetadata(id),
+            highlights: [
+              {
+                description: id === "vid" ? "first" : "second",
+                shape: id === "vid" ? firstHighlight.shape : secondHighlight.shape,
+                timeline: { appearedAtSeconds: id === "vid" ? 0.1 : 0.2 },
+              },
+            ],
+          },
           evictedRecordingIds: [],
         };
       },
@@ -562,10 +595,12 @@ describe("videoRecording tool segmentation branch", () => {
         deviceId: androidDevice.deviceId,
         maxDuration: 300,
         outputName: "vid",
+        highlights: [firstHighlight, secondHighlight],
       }),
     );
     const started = (startRes.recordings as Array<Record<string, unknown>>)[0];
     expect(started.segmented).toBe(true);
+    expect(highlightRequests).toEqual([[firstHighlight]]);
     // Two timers are armed on the session's (injected) timer: the rotation timer, and
     // the session-level maxDurationSeconds auto-stop (review: PR #3847 - maxDuration=300
     // must actually bound total duration, not just gate whether segmentation kicks in).
@@ -581,6 +616,10 @@ describe("videoRecording tool segmentation branch", () => {
       () => segmentStarts.length === 2 && segmentStops.length === 1,
       "segment 2 to start after rotation",
     );
+    expect(highlightRequests).toEqual([
+      [firstHighlight],
+      [{ ...secondHighlight, timing: { startTimeMs: 200 } }],
+    ]);
 
     const stopRes = parse(
       await handler()(androidDevice, {
@@ -610,6 +649,20 @@ describe("videoRecording tool segmentation branch", () => {
     expect(sessionId).toBe(segments[0].recordingId);
     expect(segments.every((segment) => segment.sessionId === sessionId)).toBe(true);
     expect((stopRes.manifestPaths as string[]).length).toBe(1);
+    expect(stopRes.highlights).toEqual([
+      {
+        sessionId,
+        description: "first",
+        shape: firstHighlight.shape,
+        timeline: { appearedAtSeconds: 0.1 },
+      },
+      {
+        sessionId,
+        description: "second",
+        shape: secondHighlight.shape,
+        timeline: { appearedAtSeconds: ANDROID_PLAN_VIDEO_SEGMENT_ROTATE_MS / 1000 + 0.2 },
+      },
+    ]);
 
     // Invariant: the rotation timer must not survive a bare stop.
     expect(segmentTimer.getPendingTimeoutCount()).toBe(0);
@@ -698,6 +751,27 @@ describe("videoRecording tool segmentation branch", () => {
   });
 
   test("by-handle stop still works after wiring the bare-stop path", async () => {
+    const highlight = {
+      description: "single",
+      shape: { type: "circle" as const, bounds: { x: 1, y: 2, width: 3, height: 4 } },
+      timing: { startTimeMs: 0 },
+    };
+    setSegmentedSessionRecordingDependencies({
+      startVideoRecording: async (request) => makeSegmentRecording("vid", request.outputName),
+      stopVideoRecording: async () => ({
+        metadata: {
+          ...makeSegmentMetadata("vid"),
+          highlights: [
+            {
+              description: highlight.description,
+              shape: highlight.shape,
+              timeline: { appearedAtSeconds: 0 },
+            },
+          ],
+        },
+        evictedRecordingIds: [],
+      }),
+    });
     const startRes = parse(
       await handler()(androidDevice, {
         action: "start",
@@ -705,6 +779,7 @@ describe("videoRecording tool segmentation branch", () => {
         deviceId: androidDevice.deviceId,
         maxDuration: 300,
         outputName: "vid",
+        highlights: [highlight],
       }),
     );
     const handle = (startRes.recordings as Array<Record<string, unknown>>)[0].recordingId as string;
@@ -719,6 +794,14 @@ describe("videoRecording tool segmentation branch", () => {
 
     expect(stopRes.segmented).toBe(true);
     expect((stopRes.recordings as unknown[]).length).toBe(1);
+    expect(stopRes.highlights).toEqual([
+      {
+        sessionId: handle,
+        description: "single",
+        shape: highlight.shape,
+        timeline: { appearedAtSeconds: 0 },
+      },
+    ]);
     expect(segmentTimer.getPendingTimeoutCount()).toBe(0);
   });
 });

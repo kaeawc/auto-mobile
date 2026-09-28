@@ -71,9 +71,7 @@ jobs:
       - name: "Git Checkout"
         uses: actions/checkout@v6
         with:
-          # Conveyor reads the app icon (conveyor.conf `icons`), which is LFS-tracked, so unlike the
-          # jpackage workflow the pointer must be smudged to the real PNG.
-          lfs: true
+          # The Conveyor app icon is a direct Git blob (excluded from LFS in .gitattributes).
           persist-credentials: false
 
       - name: "Validate inputs"

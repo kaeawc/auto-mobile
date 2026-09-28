@@ -34,6 +34,33 @@ orbs:
   # Latest stable at time of writing. The filter job's base-revision/config-path/
   # mapping interface used below is unchanged across the 1.x–3.x line.
   path-filtering: circleci/path-filtering@3.0.0
+  continuation: circleci/continuation@2.0.1
+
+jobs:
+  detect-ios-changes:
+    docker:
+      - image: cimg/base:current
+    environment:
+      GIT_LFS_SKIP_SMUDGE: "1"
+    steps:
+      - checkout:
+          method: blobless
+      - path-filtering/set-parameters:
+          base-revision: main
+          config-path: .circleci/continue_config.yml
+          # Mirror GitHub's filter-ios paths (ios/**, scripts/ios/**,
+          # .swiftformat, .swiftlint.yml) plus .circleci/** so config changes
+          # revalidate. Keep this in sync with `filter-ios` in pull_request.yml.
+          mapping: |
+            ios/.* run-ios true
+            scripts/ios/.* run-ios true
+            \.swiftformat run-ios true
+            \.swiftlint\.yml run-ios true
+            \.circleci/.* run-ios true
+      - path-filtering/generate-config
+      - continuation/continue:
+          configuration_path: /tmp/generated-config.yml
+          parameters: /tmp/pipeline-parameters.json
 
 workflows:
   detect-ios-changes:
@@ -49,19 +76,7 @@ workflows:
       # validated it. Skipping main restores the old "halt on base branch" and
       # protects the limited macOS budget.
       #
-      # The mapping mirrors GitHub's filter-ios paths (ios/**, scripts/ios/**,
-      # .swiftformat, .swiftlint.yml) plus .circleci/** so a config change also
-      # revalidates. Keep it in sync with `filter-ios` in pull_request.yml.
-      - path-filtering/filter:
-          name: detect-ios-changes
-          base-revision: main
-          config-path: .circleci/continue_config.yml
+      - detect-ios-changes:
           filters:
             branches:
               ignore: main
-          mapping: |
-            ios/.* run-ios true
-            scripts/ios/.* run-ios true
-            \.swiftformat run-ios true
-            \.swiftlint\.yml run-ios true
-            \.circleci/.* run-ios true

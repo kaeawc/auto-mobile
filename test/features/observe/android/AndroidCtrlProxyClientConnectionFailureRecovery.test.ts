@@ -577,4 +577,144 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
     expect(manager.rebindIfUnhealthyCallCount).toBe(1);
     expect(manager.setupCallCount).toBe(1);
   });
+
+  test("waits for an existing bind instead of force-stopping it through setup", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    let healthy = false;
+    let setupCalls = 0;
+    let bindingWaits = 0;
+    const manager: AndroidServiceRecoveryManager = {
+      isAccessibilityServiceHealthy: async () => healthy,
+      rebindIfUnhealthy: async () => false,
+      waitForAccessibilityServiceBinding: async () => {
+        bindingWaits++;
+        await timer.sleep(6_000);
+        healthy = true;
+        return "recovered";
+      },
+      setup: async () => {
+        setupCalls++;
+        return { success: true, message: "setup ok" };
+      },
+    };
+    client = AndroidCtrlProxyClient.createForTesting(
+      testDevice,
+      buildFakeAdb(),
+      createSuccessWebSocketFactory(timer),
+      timer,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      () => manager,
+    );
+
+    client.ensureRecoveryStarted();
+    expect(await client.awaitRecovery(10_000)).toBe("recovered");
+    expect(bindingWaits).toBe(1);
+    expect(setupCalls).toBe(0);
+  });
+
+  test("a completed binding clears foreground cooldown and dials immediately", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const dialTimes: number[] = [];
+    let setupCalls = 0;
+    const manager: AndroidServiceRecoveryManager = {
+      isAccessibilityServiceHealthy: async () => false,
+      rebindIfUnhealthy: async () => false,
+      waitForAccessibilityServiceBinding: async () => {
+        await timer.sleep(100);
+        return "recovered";
+      },
+      setup: async () => {
+        setupCalls++;
+        return { success: true, message: "setup ok" };
+      },
+    };
+    const successSocket = createSuccessWebSocketFactory(timer);
+    client = AndroidCtrlProxyClient.createForTesting(
+      testDevice,
+      buildFakeAdb(),
+      (url) => {
+        dialTimes.push(timer.now());
+        return successSocket(url);
+      },
+      timer,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      () => manager,
+    );
+    const internals = client as any;
+    internals.connectionAttempts = 3;
+    internals.lastConnectionAttempt = timer.now();
+    internals.config.connectionResetMs = 30_000;
+    expect(client.getReconnectStatus()?.connectionAttempts).toBe(3);
+
+    client.ensureRecoveryStarted();
+    expect(await client.awaitRecovery(10_000)).toBe("recovered");
+    expect(dialTimes).toEqual([100]);
+    expect(setupCalls).toBe(0);
+  });
+
+  test("an already-bound service leaves foreground connection cooldown intact", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const dialTimes: number[] = [];
+    let setupCalls = 0;
+    const manager: AndroidServiceRecoveryManager = {
+      isAccessibilityServiceHealthy: async () => false,
+      rebindIfUnhealthy: async () => false,
+      waitForAccessibilityServiceBinding: async () => "already-bound",
+      setup: async () => {
+        setupCalls++;
+        return { success: true, message: "setup ok" };
+      },
+    };
+    const successSocket = createSuccessWebSocketFactory(timer);
+    client = AndroidCtrlProxyClient.createForTesting(
+      testDevice,
+      buildFakeAdb(),
+      (url) => {
+        dialTimes.push(timer.now());
+        return successSocket(url);
+      },
+      timer,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      () => manager,
+    );
+    const internals = client as any;
+    internals.connectionAttempts = 3;
+    internals.lastConnectionAttempt = timer.now();
+    internals.config.connectionResetMs = 30_000;
+    expect(client.getReconnectStatus()?.connectionAttempts).toBe(3);
+
+    client.ensureRecoveryStarted();
+    expect(await client.awaitRecovery(10_000)).toBe("timed_out");
+    expect(dialTimes).toEqual([]);
+    expect(client.getReconnectStatus()?.connectionAttempts).toBe(3);
+    expect(setupCalls).toBe(0);
+  });
 });

@@ -3,6 +3,7 @@ import {
   AndroidCtrlProxyManager,
   CtrlProxyInspectionError,
   MAX_STALE_PREFETCH_DIRS_PER_STARTUP,
+  REBIND_BIND_WAIT_BUDGET_MS,
   STALE_PREFETCH_SWEEP_DEADLINE_MS,
 } from "../../src/utils/CtrlProxyManager";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
@@ -435,7 +436,7 @@ describe("CtrlProxyManager", function () {
       });
       expect(await accessibilityServiceClient.isAccessibilityServiceHealthy()).toBe(false);
       expect(await accessibilityServiceClient.rebindIfUnhealthy()).toBe(false);
-      timer.advanceTime(4_000);
+      timer.advanceTime(REBIND_BIND_WAIT_BUDGET_MS);
       expect(await accessibilityServiceClient.rebindIfUnhealthy()).toBe(false);
       expect(fakeAdb.wasCommandExecuted("settings put secure enabled_accessibility_services")).toBe(
         false,
@@ -453,7 +454,7 @@ describe("CtrlProxyManager", function () {
         stderr: "",
       });
       expect(await accessibilityServiceClient.rebindIfUnhealthy()).toBe(false);
-      timer.advanceTime(4_001);
+      timer.advanceTime(REBIND_BIND_WAIT_BUDGET_MS + 1);
       fakeAdb.setCommandResponse("shell dumpsys accessibility", {
         stdout: accessibilityFixture("bound-label"),
         stderr: "",
@@ -642,7 +643,7 @@ describe("CtrlProxyManager", function () {
       };
       fakeAdb.setCommandResponseSequence("shell dumpsys accessibility", [
         crashed,
-        crashed,
+        { stdout: accessibilityFixture("binding"), stderr: "" },
         { stdout: accessibilityFixture("bound-label"), stderr: "" },
       ]);
 
@@ -655,19 +656,132 @@ describe("CtrlProxyManager", function () {
       expect(timer.getSleepHistory()).toEqual([100, 200]);
     });
 
-    test("returns attempted after bounded polls when the service stays crashed", async () => {
+    test("waits through six seconds of binding and observes a healthy rebound", async () => {
+      fakeAdb.setCommandResponseSequence("shell dumpsys accessibility", [
+        { stdout: accessibilityFixture("unbound"), stderr: "" },
+        ...Array.from({ length: 30 }, () => ({
+          stdout: accessibilityFixture("binding"),
+          stderr: "",
+        })),
+        { stdout: accessibilityFixture("bound-label"), stderr: "" },
+      ]);
+
+      expect(await accessibilityServiceClient.rebindIfUnhealthy()).toBe(true);
+      expect(await accessibilityServiceClient.isAccessibilityServiceHealthy()).toBe(true);
+      expect(timer.now()).toBeGreaterThanOrEqual(6_000);
+      expect(
+        fakeAdb
+          .getExecutedCommands()
+          .filter(
+            (command) => command === `shell am force-stop ${AndroidCtrlProxyManager.PACKAGE}`,
+          ),
+      ).toHaveLength(1);
+      expect(
+        fakeAdb
+          .getExecutedCommands()
+          .filter((command) =>
+            command.startsWith("shell settings put secure enabled_accessibility_services"),
+          ),
+      ).toHaveLength(2);
+    });
+
+    test("waits for an existing bind without starting a rebind", async () => {
+      fakeAdb.setCommandResponseSequence("shell dumpsys accessibility", [
+        ...Array.from({ length: 32 }, () => ({
+          stdout: accessibilityFixture("binding"),
+          stderr: "",
+        })),
+        { stdout: accessibilityFixture("bound-label"), stderr: "" },
+      ]);
+
+      expect(await accessibilityServiceClient.rebindIfUnhealthy()).toBe(false);
+      expect(await accessibilityServiceClient.waitForAccessibilityServiceBinding()).toBe(
+        "recovered",
+      );
+      expect(timer.now()).toBe(6_000);
+      expect(
+        fakeAdb.wasCommandExecuted(`shell am force-stop ${AndroidCtrlProxyManager.PACKAGE}`),
+      ).toBe(false);
+    });
+
+    test("distinguishes an already-bound service without waiting", async () => {
       fakeAdb.setCommandResponse("shell dumpsys accessibility", {
-        stdout: accessibilityFixture("crashed"),
+        stdout: accessibilityFixture("bound-label"),
         stderr: "",
       });
 
+      expect(await accessibilityServiceClient.waitForAccessibilityServiceBinding()).toBe(
+        "already-bound",
+      );
+      expect(timer.now()).toBe(0);
+    });
+
+    test("fails fast when the rebound service crashes", async () => {
+      fakeAdb.setCommandResponseSequence("shell dumpsys accessibility", [
+        { stdout: accessibilityFixture("unbound"), stderr: "" },
+        { stdout: accessibilityFixture("crashed"), stderr: "" },
+      ]);
+
       expect(await accessibilityServiceClient.rebindIfUnhealthy()).toBe(true);
+      expect(await accessibilityServiceClient.isAccessibilityServiceHealthy()).toBe(false);
       expect(
         fakeAdb
           .getExecutedCommands()
           .filter((command) => command === "shell dumpsys accessibility"),
-      ).toHaveLength(5);
-      expect(timer.getSleepHistory()).toEqual([100, 200, 200, 200]);
+      ).toHaveLength(3);
+      expect(timer.getSleepHistory()).toEqual([100]);
+    });
+
+    test("fails fast when the rebound service leaves enabled services", async () => {
+      fakeAdb.setCommandResponseSequence("shell dumpsys accessibility", [
+        { stdout: accessibilityFixture("unbound"), stderr: "" },
+        { stdout: accessibilityFixture("absent"), stderr: "" },
+      ]);
+
+      expect(await accessibilityServiceClient.rebindIfUnhealthy()).toBe(true);
+      expect(await accessibilityServiceClient.isAccessibilityServiceHealthy()).toBe(false);
+      expect(timer.getSleepHistory()).toEqual([100]);
+    });
+
+    test("stops waiting at the bind budget when binding never finishes", async () => {
+      fakeAdb.setCommandResponseSequence("shell dumpsys accessibility", [
+        { stdout: accessibilityFixture("unbound"), stderr: "" },
+        { stdout: accessibilityFixture("binding"), stderr: "" },
+      ]);
+
+      expect(await accessibilityServiceClient.rebindIfUnhealthy()).toBe(true);
+      expect(await accessibilityServiceClient.isAccessibilityServiceHealthy()).toBe(false);
+      expect(timer.now()).toBe(100 + REBIND_BIND_WAIT_BUDGET_MS);
+      expect(timer.getSleepHistory().reduce((total, ms) => total + ms, 0)).toBe(
+        100 + REBIND_BIND_WAIT_BUDGET_MS,
+      );
+    });
+
+    test("a second recovery during a long bind shares the first force-stop", async () => {
+      fakeAdb.setCommandResponseSequence("shell dumpsys accessibility", [
+        { stdout: accessibilityFixture("unbound"), stderr: "" },
+        ...Array.from({ length: 35 }, () => ({
+          stdout: accessibilityFixture("binding"),
+          stderr: "",
+        })),
+        { stdout: accessibilityFixture("bound-label"), stderr: "" },
+      ]);
+      let rearmed: Promise<boolean> | undefined;
+      timer.setTimeout(() => {
+        rearmed = accessibilityServiceClient.rebindIfUnhealthy();
+      }, 6_000);
+
+      expect(await accessibilityServiceClient.rebindIfUnhealthy()).toBe(true);
+      expect(rearmed).toBeDefined();
+      expect(await rearmed).toBe(true);
+      expect(await accessibilityServiceClient.isAccessibilityServiceHealthy()).toBe(true);
+      expect(
+        fakeAdb
+          .getExecutedCommands()
+          .filter(
+            (command) => command === `shell am force-stop ${AndroidCtrlProxyManager.PACKAGE}`,
+          ),
+      ).toHaveLength(1);
     });
 
     test("concurrent rebindIfUnhealthy calls share one force-stop/rebind sequence (issue #7532)", async function () {
@@ -766,7 +880,7 @@ describe("CtrlProxyManager", function () {
         stderr: "",
       });
       expect(await accessibilityServiceClient.rebindIfUnhealthy()).toBe(false);
-      timer.advanceTime(4_001);
+      timer.advanceTime(REBIND_BIND_WAIT_BUDGET_MS + 1);
       expect(await accessibilityServiceClient.forceRestartProcess()).toBe(true);
       expect(
         fakeAdb.wasCommandExecuted(`shell am force-stop ${AndroidCtrlProxyManager.PACKAGE}`),

@@ -319,6 +319,19 @@ export interface AndroidEmulator {
   ): Promise<BootedDevice>;
 }
 
+/** The Android emulator operations used by MultiPlatformDeviceManager. */
+export interface AndroidEmulatorForDeviceManager extends Pick<
+  AndroidEmulatorClient,
+  | "listAvds"
+  | "getBootedDevicesChecked"
+  | "getBootedDevices"
+  | "getOfflineDeviceIdsAmong"
+  | "recoverOfflineDevices"
+  | "launchEmulator"
+  | "killDevice"
+  | "waitForEmulatorReady"
+> {}
+
 /**
  * Decide whether the emulator should launch headless (`-no-window`).
  *
@@ -623,7 +636,7 @@ const execAsync = async (
 /** Offline discovery failed; callers must retain the prior episode state. */
 export class AndroidOfflineProbeError extends ActionableError {}
 
-export class AndroidEmulatorClient implements AndroidEmulator {
+export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorForDeviceManager {
   private execAsync: (file: string, args: string[], signal?: AbortSignal) => Promise<ExecResult>;
   private spawnFn: SpawnFn;
   private emulatorPath: string;

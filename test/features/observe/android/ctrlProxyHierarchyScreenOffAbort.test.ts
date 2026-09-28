@@ -4,6 +4,7 @@ import type { HierarchyDelegateContext } from "../../../../src/features/observe/
 import { RequestManager } from "../../../../src/utils/RequestManager";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { logger } from "../../../../src/utils/logger";
+import { runWithAbortSignal } from "../../../../src/utils/AbortContext";
 
 function createHarness(isScreenOn: (signal?: AbortSignal) => Promise<boolean>) {
   const timer = new FakeTimer();
@@ -45,19 +46,22 @@ describe("CtrlProxyHierarchy screen-off check with caller abort", () => {
 
   test("suppresses an in-flight screen-off warning after the caller aborts", async () => {
     let resolveScreenCheck: ((value: boolean) => void) | undefined;
-    const h = createHarness(
-      () =>
-        new Promise<boolean>((resolve) => {
-          resolveScreenCheck = resolve;
-        }),
-    );
+    let screenCheckSignal: AbortSignal | undefined;
+    const h = createHarness((signal) => {
+      screenCheckSignal = signal;
+      return new Promise<boolean>((resolve) => {
+        resolveScreenCheck = resolve;
+      });
+    });
     const controller = new AbortController();
     warnSpy = spyOn(logger, "warn");
-    const result = h.waitForFreshData(controller.signal);
+    const result = runWithAbortSignal(controller.signal, () => h.waitForFreshData());
 
     await h.timer.advanceTimeAsync(1000);
     expect(resolveScreenCheck).toBeDefined();
+    expect(screenCheckSignal).toBe(controller.signal);
     controller.abort(new Error("caller cancelled"));
+    expect(screenCheckSignal?.aborted).toBe(true);
     resolveScreenCheck?.(false);
     await Promise.resolve();
     await h.timer.advanceTimeAsync(50);

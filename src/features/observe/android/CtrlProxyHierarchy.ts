@@ -8,6 +8,7 @@ import { linkWindowRoots } from "../linkWindowRoots";
 
 import WebSocket from "ws";
 import { logger } from "../../../utils/logger";
+import { combineWithAmbientAbort } from "../../../utils/AbortContext";
 import type { PerformanceTracker, TimingEntry } from "../../../utils/PerformanceTracker";
 import { NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../../utils/toolUtils";
@@ -908,6 +909,7 @@ export class CtrlProxyHierarchy {
     requestId?: string,
     dispatchSocket?: WebSocket | null,
   ): Promise<CachedHierarchy | null> {
+    const combinedSignal = combineWithAmbientAbort(signal);
     // Dispatch can await an ADB broadcast while close notification is delivered.
     // Validate the original socket before registering, including close+replacement.
     if (
@@ -987,7 +989,7 @@ export class CtrlProxyHierarchy {
       }
 
       intervalId = this.context.timer.setInterval(() => {
-        if (signal?.aborted) {
+        if (combinedSignal?.aborted) {
           settleResolve(null);
           return;
         }
@@ -1049,10 +1051,10 @@ export class CtrlProxyHierarchy {
           lastScreenCheck = now;
 
           this.context.adb
-            .isScreenOn(signal)
+            .isScreenOn(combinedSignal)
             .then((isOn) => {
               screenCheckInProgress = false;
-              if (!isOn && !signal?.aborted) {
+              if (!isOn && !combinedSignal?.aborted) {
                 logger.warn(
                   "[CTRL_PROXY] Screen is off - failing fast instead of waiting for timeout",
                 );

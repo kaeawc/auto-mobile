@@ -48,7 +48,7 @@ export class SetAndroidNotificationsEnabled {
     try {
       await perf.track("setEnabled", async () => {
         const result = await this.adb.executeCommand(command, undefined, undefined, true);
-        const stdout = result.stdout ?? "";
+        const stdout = result.stdout;
         const stderr = result.stderr ?? "";
         if (outputLooksLikeShellFailure(stdout, stderr)) {
           throw new Error(

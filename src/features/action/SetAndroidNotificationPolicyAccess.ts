@@ -51,7 +51,7 @@ export class SetAndroidNotificationPolicyAccess {
     try {
       await perf.track(sub, async () => {
         const execResult = await this.adb.executeCommand(cmd, undefined, undefined, true);
-        const stdout = execResult.stdout ?? "";
+        const stdout = execResult.stdout;
         const stderr = execResult.stderr ?? "";
         const bad = outputLooksLikeShellFailure(stdout, stderr);
 

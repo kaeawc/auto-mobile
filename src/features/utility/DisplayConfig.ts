@@ -293,7 +293,7 @@ export class DisplayConfig {
   /** Read the current iOS Simulator theme via `simctl ui appearance` (no value = get). */
   private async readIosTheme(): Promise<DisplayTheme | undefined> {
     const result = await this.simctl.executeCommandArgs(["ui", this.device.deviceId, "appearance"]);
-    const value = (result.stdout ?? "").trim();
+    const value = result.stdout.trim();
     return value === "light" || value === "dark" ? value : undefined;
   }
 
@@ -813,7 +813,7 @@ export class DisplayConfig {
    */
   private async run(adb: AdbExecutor, command: string): Promise<string> {
     const result = await adb.executeCommand(command, undefined, undefined, true);
-    const stdout = result.stdout ?? "";
+    const stdout = result.stdout;
     const stderr = result.stderr ?? "";
     if (outputLooksLikeShellFailure(stdout, stderr)) {
       throw new Error(`'${command}' reported: ${`${stdout} ${stderr}`.trim()}`);
@@ -832,7 +832,7 @@ export class DisplayConfig {
   private async runChecked(adb: AdbExecutor, command: string): Promise<string[]> {
     try {
       const result = await adb.executeCommand(command, undefined, undefined, true);
-      const stdout = result.stdout ?? "";
+      const stdout = result.stdout;
       const stderr = result.stderr ?? "";
       if (outputLooksLikeShellFailure(stdout, stderr)) {
         return [`'${command}' reported: ${`${stdout} ${stderr}`.trim()}`];

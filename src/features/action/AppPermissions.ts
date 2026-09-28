@@ -484,7 +484,7 @@ export class AppPermissions {
         undefined,
         true,
       );
-      const stdout = result.stdout ?? "";
+      const stdout = result.stdout;
       if (/Unable to find package/i.test(stdout)) {
         return this.androidQueryFailure(
           normalizedAppId,

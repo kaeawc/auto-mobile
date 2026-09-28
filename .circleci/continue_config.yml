@@ -1,8 +1,8 @@
 version: 2.1
 
 # Continuation config for the CircleCI macOS/iOS lanes. Reached from
-# .circleci/config.yml (the setup pipeline) only when the path-filtering job
-# decided iOS sources changed and set `run-ios` to true. See that file's header
+# .circleci/config.yml (the setup pipeline) when path filtering set `run-ios`
+# or the post-merge coverage trigger set `run-swift-coverage-main`. See its header
 # for the why, the budget, and the REQUIRED dynamic-config project setting.
 #
 # Scope: ios-swift-packages and ios-xcode-build mirror the same-named jobs in
@@ -19,6 +19,9 @@ version: 2.1
 
 parameters:
   run-ios:
+    type: boolean
+    default: false
+  run-swift-coverage-main:
     type: boolean
     default: false
 
@@ -112,6 +115,20 @@ jobs:
           name: "Run Playground tests"
           command: ./scripts/ios/xcode-test.sh Playground
 
+  swift-code-coverage:
+    executor: ios
+    steps:
+      - checkout
+      - restore_spm_cache
+      - run:
+          name: "Resolve Swift coverage dependencies"
+          command: cd ios/control-proxy && swift package resolve
+      - run:
+          name: "Generate Swift Coverage Badge"
+          command: bash scripts/coverage/generate-swift-coverage.sh
+      - store_artifacts:
+          path: coverage/swift-coverage-badge.json
+
 workflows:
   ios-macos:
     # Gate the whole workflow on the parameter path-filtering set. When false
@@ -121,3 +138,8 @@ workflows:
       - ios-swift-packages
       - ios-xcode-build
       - ios-playground-tests
+
+  swift-coverage-main:
+    when: << pipeline.parameters.run-swift-coverage-main >>
+    jobs:
+      - swift-code-coverage

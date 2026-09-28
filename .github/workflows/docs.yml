@@ -100,11 +100,11 @@ jobs:
         run: scripts/github/deploy_pages.py build
 
       # The coverage badges are produced by the "On Merge" workflow's coverage
-      # jobs, not this run. Resolve the most recent successful On Merge run and
-      # pull its badge artifacts. Per the "let them lag" decision, this refreshes
+      # jobs, not this run. Kotlin lands on every merge; Swift lands only when
+      # coverage inputs change. Per the "let them lag" decision, this refreshes
       # the badges only when the site republishes.
-      - name: "Resolve latest coverage badge run"
-        id: badge-run
+      - name: "Resolve latest Kotlin coverage badge run"
+        id: kotlin-badge-run
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -117,6 +117,28 @@ jobs:
           fi
           echo "run-id=$run_id" >> "$GITHUB_OUTPUT"
 
+      - name: "Resolve latest Swift coverage badge run"
+        id: swift-badge-run
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          run_ids="$(gh run list --repo "${{ github.repository }}" \
+            --workflow merge.yml --branch main --status success \
+            --limit 20 --json databaseId --jq '.[].databaseId')"
+          while IFS= read -r run_id; do
+            if [ -z "$run_id" ]; then
+              continue
+            fi
+            badge_id="$(gh api --paginate "repos/${{ github.repository }}/actions/runs/$run_id/artifacts?per_page=100" \
+              --jq '[.artifacts[] | select(.name == "swift-coverage-badge" and .expired == false) | .id] | first // empty')"
+            if [ -n "$badge_id" ]; then
+              echo "run-id=$run_id" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done <<< "$run_ids"
+          echo "::error::No Swift coverage badge found in the latest 20 successful On Merge runs" >&2
+          exit 1
+
       # Distinct artifacts landing on distinct filenames, so they overlap. They
       # must stay AFTER "Build documentation" -- mkdocs regenerates/cleans
       # site/, which would delete a badge that landed early.
@@ -127,7 +149,7 @@ jobs:
         with:
           name: kotlin-coverage-badge
           path: site
-          run-id: ${{ steps.badge-run.outputs.run-id }}
+          run-id: ${{ steps.kotlin-badge-run.outputs.run-id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: "Download Swift Coverage Badge"
@@ -137,7 +159,7 @@ jobs:
         with:
           name: swift-coverage-badge
           path: site
-          run-id: ${{ steps.badge-run.outputs.run-id }}
+          run-id: ${{ steps.swift-badge-run.outputs.run-id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - wait: [dl-kotlin-badge, dl-swift-badge]

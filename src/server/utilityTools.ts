@@ -93,6 +93,8 @@ const changeLocalizationBaseSchema = z.object({
   calendarSystem: z
     .string()
     .min(1)
+    // ICU calendar keywords are lowercase tokens beginning with a letter.
+    .regex(/^[a-z][a-z0-9-]*$/)
     .optional()
     .describe("Calendar system (e.g., gregory, japanese, buddhist, islamic-civil)"),
   restartApp: z

@@ -55,6 +55,12 @@ export interface RestoreSnapshotResult {
   restoredAt: string;
 }
 
+const RESTORABLE_SETTINGS_NAMESPACES = new Set<string>(["global", "secure", "system"]);
+
+function isSettingsNamespace(value: string): value is SettingsNamespace {
+  return RESTORABLE_SETTINGS_NAMESPACES.has(value);
+}
+
 /**
  * Restore device state from snapshot, dispatching on device platform.
  *
@@ -289,17 +295,26 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
       let successCount = 0;
       let failureCount = 0;
 
+      if (!isSettingsNamespace(settingsType)) {
+        failureCount = Object.keys(values).length;
+        logger.warn(`Skipping unsupported settings namespace ${settingsType}`);
+        logger.info(
+          `${settingsType} settings restored: ${successCount} succeeded, ${failureCount} failed`,
+        );
+        continue;
+      }
+
       for (const [key, value] of Object.entries(values)) {
+        if (!/^[A-Za-z0-9_.:-]+$/.test(key)) {
+          failureCount++;
+          logger.warn(`Failed to restore ${settingsType} setting ${key}: invalid settings key`);
+          continue;
+        }
         try {
           let applied = false;
           try {
             const a11y = AndroidCtrlProxyClient.getInstance(this.device);
-            const a11yResult = await a11y.requestSettingsPut(
-              settingsType as SettingsNamespace,
-              key,
-              value,
-              "string",
-            );
+            const a11yResult = await a11y.requestSettingsPut(settingsType, key, value, "string");
             if (a11yResult.success) {
               applied = true;
             }
@@ -309,9 +324,9 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
             );
           }
           if (!applied) {
-            // ADB hands the command to the device shell, so preserve the setting value as one literal word.
+            // ADB hands the command to the device shell, so preserve the key and value as literal words.
             await this.adb.executeCommand(
-              `shell settings put ${settingsType} ${key} ${shellQuote(value)}`,
+              `shell settings put ${settingsType} ${shellQuote(key)} ${shellQuote(value)}`,
             );
           }
           successCount++;

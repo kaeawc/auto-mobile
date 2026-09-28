@@ -102,6 +102,23 @@ describe("preference tools", () => {
 
     expect(parsed.appId).toBe("com.example.app");
   });
+
+  test("rejects path-like suites while accepting reverse-DNS and Standard domains", () => {
+    const base = { platform: "ios", scope: "userDefaults", appId: "com.example.app", key: "k" };
+    expect(
+      getPreferenceSchema.safeParse({ ...base, suite: "group.com.example.prefs" }).success,
+    ).toBe(true);
+    expect(getPreferenceSchema.safeParse({ ...base, suite: "Standard" }).success).toBe(true);
+    expect(
+      getPreferenceSchema.safeParse({
+        ...base,
+        suite: "/Users/someone/Library/Preferences/com.apple.foo",
+      }).success,
+    ).toBe(false);
+    expect(
+      getPreferenceSchema.safeParse({ ...base, suite: "../../Library/LaunchAgents/x" }).success,
+    ).toBe(false);
+  });
 });
 
 // Issue #6348: the advertised `additionalProperties: false` was not enforced at

@@ -601,7 +601,8 @@
         "calendarSystem": {
           "description": "Calendar system (e.g., gregory, japanese, buddhist, islamic-civil)",
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9-]*$"
         },
         "restartApp": {
           "description": "iOS bundle ID to relaunch after locale change",
@@ -2305,7 +2306,8 @@
         },
         "suite": {
           "description": "SharedPreferences file name or UserDefaults suite/app group",
-          "type": "string"
+          "type": "string",
+          "pattern": "^(?:$|[A-Za-z0-9_-]+(?:\\.[A-Za-z0-9_-]+)*)$"
         },
         "key": {
           "description": "Preference key or Android system property name",
@@ -11128,7 +11130,8 @@
         },
         "suite": {
           "description": "SharedPreferences file name or UserDefaults suite/app group",
-          "type": "string"
+          "type": "string",
+          "pattern": "^(?:$|[A-Za-z0-9_-]+(?:\\.[A-Za-z0-9_-]+)*)$"
         },
         "key": {
           "description": "Preference key or Android system property name",

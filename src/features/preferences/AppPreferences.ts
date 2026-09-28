@@ -484,9 +484,20 @@ function assertAndroidSharedPreferencesInt(value: PreferenceValue): void {
 
 function iosDefaultsDomain(input: GetPreferenceInput): string {
   if (!input.suite || input.suite.trim() === "" || input.suite === "Standard") {
+    // The appId path relies on the caller's existing app-identifier validation.
     return input.appId!;
   }
-  return input.suite ?? input.appId!;
+  return sanitizeIosDefaultsDomain(input.suite);
+}
+
+function sanitizeIosDefaultsDomain(suite: string): string {
+  // A defaults domain must be an identifier, never a plist path.
+  if (!/^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*$/.test(suite)) {
+    throw new ActionableError(
+      "iOS UserDefaults suite must be an identifier using letters, numbers, underscore, dash, or dot, without path separators or empty path segments.",
+    );
+  }
+  return suite;
 }
 
 function iosDefaultsTypeFlag(type: PreferenceValueType): string {

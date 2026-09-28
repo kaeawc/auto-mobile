@@ -157,3 +157,46 @@ describe("capture-layer stable identity on the real scroll pair (#3228)", () => 
     expect(d.bytes).toBeLessThan(full.bytes * 0.1);
   });
 });
+
+test("label-only row identity avoids a false changed label when a list scrolls (#6728)", () => {
+  const capture = (labels: string[]): ObserveResult => {
+    let nextUuid = 1;
+    const generatedId = () =>
+      `${(nextUuid++).toString(16).padStart(8, "0")}-0000-4000-8000-000000000000`;
+    const root = {
+      "view-id": "com.app:id/list",
+      "resource-id": "com.app:id/list",
+      class: "androidx.recyclerview.widget.RecyclerView",
+      node: labels.map((label, index) => ({
+        "view-id": generatedId(),
+        class: "android.widget.LinearLayout",
+        bounds: { left: 0, top: index * 50, right: 200, bottom: index * 50 + 40 },
+        node: {
+          "view-id": "com.app:id/title",
+          "resource-id": "com.app:id/title",
+          class: "android.widget.TextView",
+          text: label,
+        },
+      })),
+    };
+    assignStableViewIds(root);
+    return { viewHierarchy: { hierarchy: { node: root } } } as ObserveResult;
+  };
+  const before = capture(["Alice", "Bob", "Carol"]);
+  const after = capture(["Bob", "Carol", "Dave"]);
+  const rows = (obs: ObserveResult) =>
+    (obs.viewHierarchy!.hierarchy!.node as Record<string, unknown>).node as Record<
+      string,
+      unknown
+    >[];
+  expect(rows(before)[1]["view-id"]).toBe(rows(after)[0]["view-id"]);
+  expect(rows(before)[2]["view-id"]).toBe(rows(after)[1]["view-id"]);
+  const diff = diffObserveResult(before, after);
+  expect(diff.changed.some((entry) => "text" in entry.changes)).toBe(false);
+  expect(
+    diff.added.some((entry) => entry.attributes["view-id"] === rows(after)[0]["view-id"]),
+  ).toBe(false);
+  expect(
+    diff.removed.some((entry) => entry.attributes["view-id"] === rows(before)[1]["view-id"]),
+  ).toBe(false);
+});

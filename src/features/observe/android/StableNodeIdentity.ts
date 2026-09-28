@@ -24,8 +24,8 @@ import {
  * node's own stable content fields plus its children's *structural* hashes —
  * deliberately excluding everything a scroll or interaction perturbs (bounds,
  * sibling position, `extras`, focus/checked/occlusion state). The same row
- * therefore keeps the same id before and after a scroll, and two rows with
- * different content can never share one.
+ * therefore keeps the same base id before and after a scroll. Its full id
+ * also persists when descendant content distinguishes it from structural peers.
  *
  * Descendant text stability (issue #6230). A node's id must not change merely
  * because some *descendant's* `text` ticked between captures — a row wrapping
@@ -45,24 +45,25 @@ import {
  * keeps otherwise-identical clickable containers distinct (issue #7311). That
  * accepted content-derived-id churn matches the module's existing trade-off for
  * a node's own content. Nodes that differ only by descendant text share one
- * structural identity (ordinal-suffixed as a duplicate group below); nodes
+ * structural base identity (disambiguated as a duplicate group below); nodes
  * differing in a descendant `content-desc` or structure — a distinct
  * `resource-id`, `class`, or `test-tag` anywhere in the subtree — get distinct
  * ids.
  *
- * Content-identical duplicates (repeated spacer rows, empty Compose click
- * surfaces) share a hash by construction, so the k-th duplicate (document
- * order, scoped independently to app and IME-window subtrees) gets an ordinal
- * `-k` suffix — and, critically, so does the FIRST (`-1`): whenever a hash
- * occurs more than once in its namespace, EVERY occurrence is
- * ordinal-suffixed, and the bare `s-<hash>` form is emitted only for a hash
- * that occurs exactly once there. Separating the IME namespace means keyboard
- * nodes appearing, disappearing, or changing size cannot shift an app node's
- * ordinal (issue #7311). The scheme lets the diff layer's
- * uniqueness-on-both-sides guard re-pair duplicates in encounter order — the
- * same best-effort heuristic `diffObserveResult` already applies to identical
- * same-path siblings. Distinct rows still cannot false-merge: an ordinal only
- * ever disambiguates nodes whose *entire* stable subtree content is identical.
+ * Identity has three tiers, independently scoped to app and IME subtrees.
+ * A unique structural content hash gets bare `s2-<hash>`; its child rollup
+ * remains shielded from descendant text churn (#6230). In a duplicate group,
+ * a member whose recursive digit-normalized descendant text/content-desc hash
+ * is unique gets `s2-<hash>~<texthash8>`. Editable descendants contribute their
+ * hint, never entered text (#7926). Members distinguished only by digits in
+ * descendant `text` (timestamps, counters) collide after normalization and get
+ * the existing document-order `s2-<hash>-k` ordinal, including `-1` for the
+ * first such member (#6229). Ordinals count all peers, so a mixed group can
+ * have gaps. IME nodes cannot shift app ordinals (#7311). The diff layer re-pairs
+ * label-distinct rows by full id and keeps its encounter-order heuristic for
+ * genuinely identical peers. Digit-only ticks in descendant `text` leave both
+ * the structural base and any `~<texthash8>` suffix unchanged; descendant
+ * `content-desc` still contributes to the structural base.
  *
  * Reserving the bare form for genuinely-unique content is what makes a bare id
  * safe to trust across a capture boundary (issue #6229). Previously the first
@@ -70,11 +71,11 @@ import {
  * `A` was then removed before the next capture, `B` became the sole survivor
  * and was reassigned that same bare `s-<hash>` — so a caller who had observed
  * `A`'s bare id silently retargeted `B` (a content-identical peer the caller
- * never selected). Emitting `-1` for `A` instead means the id a caller observes
+ * never selected). Emitting a suffix for `A` instead means the id a caller observes
  * for a member of a duplicate group is never the bare form, so the reassigned
  * survivor's bare id can no longer collide with it: the stale selector misses
  * (or, while ≥2 peers remain, `ElementFinder`'s ambiguity guard rejects it)
- * rather than acting on the wrong node. The bare `s-<hash>` invariant is now
+ * rather than acting on the wrong node. The bare `s2-<hash>` invariant is now
  * "this content was unique when observed".
  *
  * Rewriting at ingest (rather than in the Kotlin extractor) means it applies
@@ -112,6 +113,7 @@ export const STABLE_VIEW_ID_PREFIX = "s2-";
  * from here rather than guessing/duplicating the width.
  */
 export const STABLE_VIEW_ID_HASH_LENGTH = 16;
+export const STABLE_VIEW_ID_TEXT_HASH_LENGTH = 8;
 
 /**
  * Node fields that participate in a node's *own* identity: the stable,
@@ -138,6 +140,7 @@ const CONTENT_FIELDS: readonly string[] = ["resource-id", "content-desc", "text"
  * into that row's hash, but doing so would reopen the ticking-text guarantee.
  */
 const STRUCTURAL_FIELDS: readonly string[] = ["resource-id", "content-desc", "test-tag"];
+const DIGIT_RUN_PATTERN = /\p{Nd}+/gu;
 
 /** Normalize the `node` child slot (absent / single object / array) to an array. */
 function toChildArray(node: Record<string, unknown>): Record<string, unknown>[] {
@@ -234,10 +237,10 @@ function applyOcclusionViewIdRewrite(
 
 /**
  * Rewrite every generated (UUID-shaped) `view-id` under `root` — in place —
- * into a content-derived stable id: `s-<hash16>` for a node whose content hash
- * is UNIQUE in the capture, and `s-<hash16>-<k>` (document-order, 1-based) for
- * EVERY node in a content-identical duplicate group — including the first,
- * which takes `-1` rather than the bare form (issue #6229). Reserving the bare
+ * into a content-derived stable id: `s2-<hash16>` for a node whose content hash
+ * is UNIQUE in the capture, `s2-<hash16>~<texthash8>` for a duplicate-group
+ * member with unique descendant content, or `s2-<hash16>-<k>` (document-order,
+ * 1-based) when that content also collides (issue #6229). Reserving the bare
  * form for unique content keeps a reassigned survivor's bare id from silently
  * colliding with a suffixed id a caller observed for a since-removed peer.
  * Nodes whose `view-id` is absent or not UUID-shaped (resource-id-backed ids,
@@ -275,16 +278,17 @@ export function assignStableViewIds(root: unknown): Map<string, string> {
   //    structurally only.
   //
   // Two nodes sharing a contentHash are content-identical up to descendant
-  // display text; they are ordinal-suffixed as a duplicate group in pass 2b
-  // exactly as fully-identical subtrees already were. A distinct descendant
-  // `content-desc` or structure — a differing `resource-id`, `class`, or
+  // display text; pass 2b distinguishes them by that text when possible.
+  // A distinct descendant `content-desc` or structure — a differing `resource-id`, `class`, or
   // `test-tag` anywhere in the subtree — yields distinct structuralHashes and
   // therefore distinct ids.
   const contentHash = new Map<Record<string, unknown>, string>();
+  const descendantTextHash = new Map<Record<string, unknown>, string>();
   const hashCanonical = (
     fields: readonly string[],
     node: Record<string, unknown>,
     kids: string[],
+    normalizeDescendantDigits = false,
   ): string => {
     const attributes = attributesOf(node);
     return (
@@ -295,17 +299,19 @@ export function assignStableViewIds(root: unknown): Map<string, string> {
           JSON.stringify([
             attributes["class"] ?? attributes.className ?? "",
             ...fields.map((field) => {
+              let value = attributeValue(attributes, field) ?? "";
               if (field === "text") {
                 // A named toggle's text is state (On/Off), not identity (#6794).
                 if (getToggleContentDescription(attributes)) {
-                  return "";
-                }
-                // Editable text is the entered value; a hint stays fixed as the user types.
-                if (isEditableElementProperties(attributes)) {
-                  return attributes["hint-text"] ?? "";
+                  value = "";
+                } else if (isEditableElementProperties(attributes)) {
+                  // Editable text is the entered value; a hint stays fixed as the user types.
+                  value = attributes["hint-text"] ?? "";
                 }
               }
-              return attributeValue(attributes, field) ?? "";
+              return normalizeDescendantDigits && typeof value === "string"
+                ? value.replace(DIGIT_RUN_PATTERN, "0")
+                : value;
             }),
             kids,
           ]),
@@ -314,10 +320,22 @@ export function assignStableViewIds(root: unknown): Map<string, string> {
         .slice(0, STABLE_VIEW_ID_HASH_LENGTH)
     );
   };
-  const compute = (node: Record<string, unknown>): string => {
-    const childStructuralHashes = toChildArray(node).map(compute);
+  const compute = (node: Record<string, unknown>): [structural: string, subtreeText: string] => {
+    const children = toChildArray(node).map(compute);
+    const childStructuralHashes = children.map(([structural]) => structural);
+    const childTextHashes = children.map(([, subtreeText]) => subtreeText);
     contentHash.set(node, hashCanonical(CONTENT_FIELDS, node, childStructuralHashes));
-    return hashCanonical(STRUCTURAL_FIELDS, node, childStructuralHashes);
+    // The base identity above remains structural. Tree/class framing is the
+    // same for peers of that base, so this hash distinguishes only descendant
+    // text/content-desc within such a group. Own text never enters it.
+    descendantTextHash.set(
+      node,
+      hashCanonical([], node, childTextHashes).slice(0, STABLE_VIEW_ID_TEXT_HASH_LENGTH),
+    );
+    return [
+      hashCanonical(STRUCTURAL_FIELDS, node, childStructuralHashes),
+      hashCanonical(["content-desc", "text"], node, childTextHashes, true),
+    ];
   };
   compute(rootNode);
 
@@ -330,6 +348,7 @@ export function assignStableViewIds(root: unknown): Map<string, string> {
   // happens to share a content hash is left untouched and never competes for
   // the bare form.
   const rewrittenCounts = new Map<string, [outsideIme: number, insideIme: number]>();
+  const descendantTextCounts = new Map<string, number>();
   const countRewritten = (node: Record<string, unknown>, parentIsInImeWindow: boolean): void => {
     const nodeIsInImeWindow = isInImeWindow(node, parentIsInImeWindow);
     const attributes = attributesOf(node);
@@ -339,6 +358,8 @@ export function assignStableViewIds(root: unknown): Map<string, string> {
       const counts = rewrittenCounts.get(hash) ?? [0, 0];
       counts[nodeIsInImeWindow ? 1 : 0] += 1;
       rewrittenCounts.set(hash, counts);
+      const textKey = `${hash}:${nodeIsInImeWindow}:${descendantTextHash.get(node)}`;
+      descendantTextCounts.set(textKey, (descendantTextCounts.get(textKey) ?? 0) + 1);
     }
     for (const child of toChildArray(node)) {
       countRewritten(child, nodeIsInImeWindow);
@@ -347,9 +368,9 @@ export function assignStableViewIds(root: unknown): Map<string, string> {
   countRewritten(rootNode, false);
 
   // Pass 2b (pre-order): assign ids. A hash that occurs once in its app/IME
-  // namespace gets the bare `s-<hash>` form; a content-identical duplicate
-  // group gets a 1-based document-order ordinal on EVERY member — including the
-  // first (`-1`) — so the bare form is reserved for unique content and can
+  // namespace gets the bare `s2-<hash>` form. Duplicate-group members get
+  // `~<texthash8>` when unique by descendant text, otherwise a document-order
+  // ordinal. The bare form is reserved for unique structural content and can
   // never be silently reassigned to a since-removed peer's suffixed id (issue
   // #6229). Independent IME counters keep keyboard-capture changes from
   // perturbing app ordinals (#7311).
@@ -367,9 +388,13 @@ export function assignStableViewIds(root: unknown): Map<string, string> {
       occurrences.set(hash, counts);
       const seen = counts[namespace];
       const isDuplicateGroup = (rewrittenCounts.get(hash)?.[namespace] ?? 0) > 1;
-      const stableViewId = isDuplicateGroup
-        ? `${STABLE_VIEW_ID_PREFIX}${hash}-${seen}`
-        : `${STABLE_VIEW_ID_PREFIX}${hash}`;
+      const textHash = descendantTextHash.get(node)!;
+      const textKey = `${hash}:${nodeIsInImeWindow}:${textHash}`;
+      const stableViewId = !isDuplicateGroup
+        ? `${STABLE_VIEW_ID_PREFIX}${hash}`
+        : descendantTextCounts.get(textKey) === 1
+          ? `${STABLE_VIEW_ID_PREFIX}${hash}~${textHash}`
+          : `${STABLE_VIEW_ID_PREFIX}${hash}-${seen}`;
       setStableViewId(attributes, stableViewId);
       rewrittenViewIds.set(viewId, stableViewId);
     }

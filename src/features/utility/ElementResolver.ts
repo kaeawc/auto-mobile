@@ -878,8 +878,9 @@ export class ElementResolver {
     const ref = intent.ref!;
     const matches = result.candidates.filter((node) => node.nodeKey === ref.nodeKey);
     const node = matches.length === 1 ? matches[0] : undefined;
-    // Duplicate-generated ordinals are capture-local. Identical content and
-    // geometry cannot prove that a peer did not move into the old ordinal.
+    // A positional -k id is unsafe under reorder even when reference proof
+    // succeeds: another peer can move into its ordinal. A ~text suffix follows
+    // the same proof as a bare stable id, though its text can still change.
     const uniqueNativeId =
       node?.nativeId &&
       new Set(

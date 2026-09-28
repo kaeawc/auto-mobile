@@ -106,6 +106,148 @@ describe("assignStableViewIds (#3228)", () => {
     );
   });
 
+  test("a label-distinguished id-less row keeps its id across a scroll and resolves through ElementFinder (#6728)", () => {
+    const capture = (labels: string[]) => {
+      const rows = labels.map((label, index) =>
+        node(
+          {
+            "view-id": generatedUuid(`row-${index}`),
+            class: "android.widget.LinearLayout",
+            bounds: { left: 0, top: index * 50, right: 200, bottom: index * 50 + 40 },
+          },
+          [
+            node({
+              "view-id": "com.app:id/title",
+              "resource-id": "com.app:id/title",
+              class: "android.widget.TextView",
+              text: label,
+            }),
+          ],
+        ),
+      );
+      const root = node({ "view-id": "com.app:id/list", "resource-id": "com.app:id/list" }, rows);
+      assignStableViewIds(root);
+      return { root, rows };
+    };
+    const before = capture(["Alice", "Bob", "Carol"]);
+    const after = capture(["Bob", "Carol", "Dave"]);
+    const observedBobId = before.rows[1]["view-id"] as string;
+    const observedCarolId = before.rows[2]["view-id"] as string;
+    expect(new Set(before.rows.map((row) => row["view-id"])).size).toBe(3);
+    expect(after.rows[0]["view-id"]).toBe(observedBobId);
+    expect(after.rows[1]["view-id"]).toBe(observedCarolId);
+    expect(observedBobId).toMatch(/^s2-[0-9a-f]{16}~[0-9a-f]{8}$/);
+    expect(observedCarolId).toMatch(/^s2-[0-9a-f]{16}~[0-9a-f]{8}$/);
+
+    const finder = new DefaultElementFinder(new DefaultElementParser(), new DefaultTextMatcher());
+    const resolved = finder.findElementByResourceId(
+      { hierarchy: after.root } as ViewHierarchyResult,
+      observedBobId,
+    );
+    expect(resolved?.bounds).toEqual(after.rows[0].bounds);
+  });
+
+  test("only descendant-text collisions retain document-order ordinals", () => {
+    const rows = ["Alice", "Bob", "Bob"].map((label, index) =>
+      node({ "view-id": generatedUuid(`row-${index}`), class: "android.widget.LinearLayout" }, [
+        node({
+          "view-id": "com.app:id/title",
+          "resource-id": "com.app:id/title",
+          class: "android.widget.TextView",
+          text: label,
+        }),
+      ]),
+    );
+    assignStableViewIds(node({}, rows));
+    const ids = rows.map((row) => row["view-id"] as string);
+    expect(ids[0]).toMatch(/^s2-[0-9a-f]{16}~[0-9a-f]{8}$/);
+    const base = ids[0].split("~")[0];
+    expect(ids[1]).toBe(`${base}-2`);
+    expect(ids[2]).toBe(`${base}-3`);
+  });
+
+  test("stationary duplicate rows distinguished only by ticking timer digits keep ordinal ids", () => {
+    const capture = (seconds: number) => {
+      const rows = [0, 2].map((offset, index) =>
+        node({ "view-id": generatedUuid(`row-${index}`), class: "android.widget.LinearLayout" }, [
+          node({
+            "view-id": "com.app:id/timer",
+            class: "android.widget.TextView",
+            text: `00:${String(seconds + offset).padStart(2, "0")}`,
+          }),
+        ]),
+      );
+      assignStableViewIds(node({}, rows));
+      return rows.map((row) => row["view-id"] as string);
+    };
+    const before = capture(5);
+    const after = capture(6);
+    const base = before[0].replace(/-1$/, "");
+    expect(before).toEqual([`${base}-1`, `${base}-2`]);
+    expect(after).toEqual(before);
+  });
+
+  test("rows distinguished only by ASCII and Unicode digits use document-order ordinals", () => {
+    const rows = ["Item 1", "Item ٢", "Item ३"].map((label, index) =>
+      node({ "view-id": generatedUuid(`row-${index}`), class: "android.widget.LinearLayout" }, [
+        node({ "view-id": "com.app:id/title", class: "android.widget.TextView", text: label }),
+      ]),
+    );
+    assignStableViewIds(node({}, rows));
+    const ids = rows.map((row) => row["view-id"] as string);
+    const base = ids[0].replace(/-1$/, "");
+    expect(base).toMatch(/^s2-[0-9a-f]{16}$/);
+    expect(ids).toEqual([`${base}-1`, `${base}-2`, `${base}-3`]);
+  });
+
+  test("label-distinguished duplicate rows keep their text suffix when only counter digits tick", () => {
+    const capture = (minutes: number) => {
+      const rows = ["Alice", "Bob"].map((label, index) =>
+        node({ "view-id": generatedUuid(`row-${index}`), class: "android.widget.LinearLayout" }, [
+          node({ "view-id": "com.app:id/title", class: "android.widget.TextView", text: label }),
+          node({
+            "view-id": "com.app:id/age",
+            class: "android.widget.TextView",
+            text: `${minutes} min ago`,
+          }),
+        ]),
+      );
+      assignStableViewIds(node({}, rows));
+      return rows.map((row) => row["view-id"] as string);
+    };
+    const before = capture(5);
+    const after = capture(6);
+    expect(before).toEqual(after);
+    expect(before[0]).toMatch(/^s2-[0-9a-f]{16}~[0-9a-f]{8}$/);
+    expect(before[1]).toMatch(/^s2-[0-9a-f]{16}~[0-9a-f]{8}$/);
+    expect(before[0]).not.toBe(before[1]);
+  });
+
+  test("entered text in a descendant EditText never changes its row's text suffix (#7926)", () => {
+    const capture = (email: string) => {
+      const rows = [
+        ["Email", email],
+        ["Password", ""],
+      ].map(([hint, text], index) =>
+        node({ "view-id": generatedUuid(`row-${index}`), class: "android.widget.LinearLayout" }, [
+          node({
+            "view-id": generatedUuid(`field-${index}`),
+            class: "android.widget.EditText",
+            "hint-text": hint,
+            text,
+          }),
+        ]),
+      );
+      assignStableViewIds(node({}, rows));
+      return rows.map((row) => row["view-id"] as string);
+    };
+    const before = capture("");
+    const after = capture("jason@example.com");
+    expect(before).toEqual(after);
+    expect(before[0]).toMatch(/^s2-[0-9a-f]{16}~[0-9a-f]{8}$/);
+    expect(before[0]).not.toBe(before[1]);
+  });
+
   test("structurally distinct rows yield DIFFERENT ids (distinct rows never share)", () => {
     // Distinctness is structural: a differing resource-id / class / test-tag
     // anywhere in the subtree keeps the ancestors' ids distinct (#6230), even

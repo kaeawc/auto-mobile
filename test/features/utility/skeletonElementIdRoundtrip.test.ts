@@ -108,11 +108,11 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
     }
   });
 
-  test("a current-capture ordinal resolves its row while the shared bare id remains ambiguous (#7219)", () => {
+  test("a descendant-text suffix resolves its row while the shared bare id remains ambiguous (#7219)", () => {
     // Preference rows commonly keep their visible label in a text child rather
     // than on the clickable container. Descendant display text intentionally
     // does not affect an ancestor's stable hash (#6230), so these rows share a
-    // base and receive document-order ordinals despite their distinct labels.
+    // base but receive content-derived suffixes for their distinct labels.
     const nodeA = {
       class: "android.view.View",
       bounds: { left: 0, top: 0, right: 40, bottom: 40 },
@@ -145,10 +145,11 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
 
     // Deterministic, cleanly disambiguated — neither is the bare form.
     expect(idA).not.toBe(idB);
-    expect(idA).toMatch(/^s2-[0-9a-f]{16}-1$/);
-    expect(idB).toBe(`${idA.replace(/-1$/, "")}-2`);
+    expect(idA).toMatch(/^s2-[0-9a-f]{16}~[0-9a-f]{8}$/);
+    expect(idB).toMatch(/^s2-[0-9a-f]{16}~[0-9a-f]{8}$/);
+    expect(idB.split("~")[0]).toBe(idA.split("~")[0]);
 
-    // Each ordinal is assigned to one node within this unchanged capture, so
+    // Each suffix is assigned to one node within this capture, so
     // the selector handed out by skeleton must round-trip to that exact row.
     const firstResult = selector.selectByResourceId(viewHierarchy, idA);
     expect(firstResult.totalMatches).toBe(1);
@@ -156,7 +157,7 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
 
     // The shared bare form still cannot select one of the duplicate rows. Its
     // recovery hint must name only selector fields tapOn actually accepts.
-    const base = idA.replace(/-1$/, "");
+    const base = idA.split("~")[0];
     expect(() => selector.selectByResourceId(viewHierarchy, base)).toThrow(/textAny/i);
     expect(() => selector.selectByResourceId(viewHierarchy, base)).toThrow(new RegExp(idA));
     expect(() => selector.selectByResourceId(viewHierarchy, base)).toThrow(new RegExp(idB));
@@ -209,6 +210,27 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
       { hierarchy: afterRemoval } as ViewHierarchyResult,
       observedIdForA,
     );
+    expect(result.element).toBeNull();
+    expect(result.totalMatches).toBe(0);
+  });
+
+  test("a stale text suffix does not resolve to a different sole survivor (#6229)", () => {
+    const row = (label: string, seed: string) => ({
+      class: "android.view.View",
+      clickable: "true",
+      bounds: { left: 0, top: 0, right: 40, bottom: 40 },
+      "view-id": generatedViewId(seed),
+      node: { class: "android.widget.TextView", text: label },
+    });
+    const before = { node: [row("Alice", "alice"), row("Bob", "bob")] };
+    assignStableViewIds(before);
+    const staleAliceId = before.node[0]["view-id"];
+    expect(staleAliceId).toMatch(/^s2-[0-9a-f]{16}~[0-9a-f]{8}$/);
+
+    const after = { node: [row("Bob", "bob")] };
+    assignStableViewIds(after);
+    expect(after.node[0]["view-id"]).toMatch(/^s2-[0-9a-f]{16}$/);
+    const result = selector.selectByResourceId({ hierarchy: after }, staleAliceId);
     expect(result.element).toBeNull();
     expect(result.totalMatches).toBe(0);
   });

@@ -146,6 +146,8 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   private static readonly LEGACY_PACKAGE = "dev.jasonpearson.automobile.accessibilityservice";
 
   private static readonly ACCESSIBILITY_SERVICE_COMPONENT = `${AndroidCtrlProxyManager.PACKAGE}/${AndroidCtrlProxyManager.PACKAGE}.CtrlProxy`;
+  // android:label references accessibility_service_name in control-proxy/strings.xml.
+  private static readonly ACCESSIBILITY_SERVICE_LABEL = "AutoMobile CtrlProxy";
 
   // Static cache for service availability
   private cachedAvailability: { isAvailable: boolean; timestamp: number } | null = null;
@@ -165,6 +167,8 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   // Give the framework a short, bounded window to bind the new process.
   private static readonly REBIND_HEALTH_POLL_MS = 200;
   private static readonly REBIND_HEALTH_MAX_POLLS = 4;
+  private static readonly REBIND_BIND_GRACE_MS = 4_000;
+  private bindingFirstObservedAt: number | null = null;
 
   // Cache for toggle capabilities (settings permissions don't change during session)
   private cachedToggleCapabilities: ToggleCapabilities | null = null;
@@ -913,19 +917,56 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       diagnostic,
       "Bound services",
     );
+    const enabledServices = AndroidCtrlProxyManager.accessibilityServiceSection(
+      diagnostic,
+      "Enabled services",
+    );
+    const bindingServices = AndroidCtrlProxyManager.accessibilityServiceSection(
+      diagnostic,
+      "Binding services",
+    );
     const crashedServices = AndroidCtrlProxyManager.accessibilityServiceSection(
       diagnostic,
       "Crashed services",
     );
-    const isBound = boundServices.includes(AndroidCtrlProxyManager.PACKAGE);
-    const isCrashed = crashedServices.includes(AndroidCtrlProxyManager.PACKAGE);
-    const healthy = isBound && !isCrashed;
+    const component = AndroidCtrlProxyManager.ACCESSIBILITY_SERVICE_COMPONENT;
+    const isEnabled = enabledServices.includes(component);
+    // API 36 reports bound services by display label; retain component matching
+    // for dumpsys versions that identify the bound entry by component instead.
+    const isBound = AndroidCtrlProxyManager.isCtrlProxyBound(boundServices);
+    const isBinding = bindingServices.includes(component);
+    const isCrashed = crashedServices.includes(component);
+    this.recordBindingObservation(isEnabled && isBinding && !isCrashed);
+    const healthy = isEnabled && isBound && !isBinding && !isCrashed;
     logger.debug(
       `[CTRL_PROXY] Accessibility service binding status: ${
-        healthy ? "bound" : isCrashed ? "crashed" : "unbound"
+        healthy ? "bound" : isCrashed ? "crashed" : isBinding ? "binding" : "unbound"
       }`,
     );
     return healthy;
+  }
+
+  private static isCtrlProxyBound(boundServices: string): boolean {
+    return (
+      boundServices.includes(AndroidCtrlProxyManager.ACCESSIBILITY_SERVICE_COMPONENT) ||
+      boundServices.includes(`label=${AndroidCtrlProxyManager.ACCESSIBILITY_SERVICE_LABEL},`) ||
+      boundServices.includes(`label=${AndroidCtrlProxyManager.ACCESSIBILITY_SERVICE_LABEL}]`)
+    );
+  }
+
+  private recordBindingObservation(isBinding: boolean): void {
+    if (isBinding) {
+      this.bindingFirstObservedAt ??= this.timer.now();
+    } else {
+      this.bindingFirstObservedAt = null;
+    }
+  }
+
+  private isBindingWithinGracePeriod(): boolean {
+    return (
+      this.bindingFirstObservedAt !== null &&
+      this.timer.now() - this.bindingFirstObservedAt <= AndroidCtrlProxyManager.REBIND_BIND_GRACE_MS
+    );
   }
 
   /**
@@ -1018,8 +1059,10 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     let readdCompleted = false;
     let servicesWithCtrlProxy: string | undefined;
     try {
-      if (!force && (await this.isAccessibilityServiceHealthy())) {
-        return false;
+      if (!force) {
+        if ((await this.isAccessibilityServiceHealthy()) || this.isBindingWithinGracePeriod()) {
+          return false;
+        }
       }
 
       const result = await this.adb.executeCommand(
@@ -1048,6 +1091,8 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         true,
       );
       removalCompleted = true;
+      // The old binding attempt ended when its enabled-service entry was removed.
+      this.bindingFirstObservedAt = null;
       await this.adb.executeCommand(`shell am force-stop ${AndroidCtrlProxyManager.PACKAGE}`);
       await this.timer.sleep(AndroidCtrlProxyManager.REBIND_FORCE_STOP_SETTLE_MS);
       await this.adb.executeCommand(
@@ -1128,13 +1173,21 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   }
 
   private static accessibilityServiceSection(output: string, name: string): string {
-    const header = `${name}:`;
-    const start = output.indexOf(header);
-    if (start < 0) {
+    const header = new RegExp(`^[\\t ]*${name}:[\\t ]*\\{`, "m");
+    const match = header.exec(output);
+    if (!match) {
       return "";
     }
-    const end = output.indexOf("\n", start);
-    return output.slice(start + header.length, end < 0 ? undefined : end);
+    const start = match.index + match[0].length - 1;
+    let depth = 0;
+    for (let index = start; index < output.length; index++) {
+      if (output[index] === "{") {
+        depth++;
+      } else if (output[index] === "}" && --depth === 0) {
+        return output.slice(start + 1, index);
+      }
+    }
+    return "";
   }
 
   private static accessibilityServices(value: string): string[] {

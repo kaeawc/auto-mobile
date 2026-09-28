@@ -1,0 +1,19 @@
+User state[
+     attributes:{id=0, touchExplorationEnabled=false, serviceHandlesDoubleTap=false, requestMultiFingerGestures=false, requestTwoFingerPassthrough=false, sendMotionEventsEnabledfalse, displayMagnificationEnabled=false, autoclickEnabled=false, nonInteractiveUiTimeout=0, interactiveUiTimeout=0, installedServiceCount=6, magnificationModes={0=1}, magnificationCapabilities=3, audioDescriptionByDefaultEnabled=false, magnificationFollowTypingEnabled=true, alwaysOnMagnificationEnabled=true}
+     button mode: 1
+     shortcut key:{}
+     button:{}
+     button target:{null}
+     gesture:{}
+     qs shortcut targets:{}
+     a11y tiles in QS panel:{}
+     Bound services:{Service[label=AutoMobile CtrlProxy, feedbackType[FEEDBACK_GENERIC], capabilities=161, eventTypes=[TYPE_VIEW_CLICKED, TYPE_VIEW_LONG_CLICKED, TYPE_VIEW_SELECTED, TYPE_VIEW_FOCUSED, TYPE_VIEW_TEXT_CHANGED, TYPE_WINDOW_STATE_CHANGED, TYPE_WINDOW_CONTENT_CHANGED, TYPE_VIEW_SCROLLED, TYPE_VIEW_TEXT_SELECTION_CHANGED, TYPE_VIEW_ACCESSIBILITY_FOCUSED, TYPE_VIEW_ACCESSIBILITY_FOCUS_CLEARED, TYPE_WINDOWS_CHANGED], notificationTimeout=100, requestA11yBtn=false]}
+     Enabled services:{{dev.jasonpearson.automobile.ctrlproxy/dev.jasonpearson.automobile.ctrlproxy.CtrlProxy}}
+     Binding services:{}
+     Crashed services:{}
+     Client list info:{
+          Client list callbacks: 11
+          Client list killed: false
+          Client list broadcasts count: -1
+          Registered clients:{
+[com.google.android.apps.photos][com.google.android.tts][com.google.android.inputmethod.latin][dev.jasonpearson.automobile.playground][com.google.android.googlequicksearchbox][com.google.android.apps.wellbeing][com.google.android.deskclock][dev.jasonpearson.automobile.ctrlproxy][com.google.android.apps.nexuslauncher][com.google.android.apps.messaging][com.google.android.as]}]

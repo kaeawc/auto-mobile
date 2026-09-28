@@ -7,6 +7,16 @@ import java.util.Locale
 internal object ImeGraphemes {
   fun split(text: String): List<String> {
     if (text.isEmpty()) return emptyList()
+    if (text.hasOnlyIndependentCodePoints()) {
+      val graphemes = mutableListOf<String>()
+      var start = 0
+      while (start < text.length) {
+        val end = start + Character.charCount(Character.codePointAt(text, start))
+        graphemes += text.substring(start, end)
+        start = end
+      }
+      return graphemes
+    }
     val breaks = characterBreaks(text)
     val graphemes = mutableListOf<String>()
     var start = 0
@@ -29,6 +39,9 @@ internal object ImeGraphemes {
   fun previousStart(text: String, cursor: Int): Int {
     require(cursor in 0..text.length)
     if (cursor == 0) return 0
+    if (text.hasOnlyIndependentCodePoints()) {
+      return cursor - Character.charCount(Character.codePointBefore(text, cursor))
+    }
     val breaks = characterBreaks(text)
     var start = previousBoundary(breaks, cursor)
     while (start > 0) {
@@ -55,6 +68,51 @@ internal object ImeGraphemes {
 
   private fun previousBoundary(breaks: BreakIterator, offset: Int): Int =
     breaks.preceding(offset).takeIf { it != BreakIterator.DONE } ?: 0
+
+  private fun String.hasOnlyIndependentCodePoints(): Boolean {
+    var index = 0
+    while (index < length) {
+      val codePoint = Character.codePointAt(this, index)
+      if (codePoint.isExtend() || codePoint.isRegionalIndicator() || codePoint.mayJoinAnother()) {
+        return false
+      }
+      index += Character.charCount(codePoint)
+    }
+    return true
+  }
+
+  // Keep controls (including CR/LF), Hangul, and possible Prepend/Extend characters on ICU's path.
+  private fun Int.mayJoinAnother(): Boolean =
+    when (Character.getType(this)) {
+      Character.CONTROL.toInt(),
+      Character.FORMAT.toInt(),
+      Character.LINE_SEPARATOR.toInt(),
+      Character.PARAGRAPH_SEPARATOR.toInt(),
+      Character.UNASSIGNED.toInt(),
+      Character.PRIVATE_USE.toInt(),
+      Character.SURROGATE.toInt() -> true
+      Character.OTHER_LETTER.toInt() -> isConjoiningLetter()
+      Character.MODIFIER_LETTER.toInt() -> this in 0xff9e..0xff9f
+      else -> false
+    }
+
+  private fun Int.isConjoiningLetter(): Boolean =
+    this in 0x1100..0x11ff || // Hangul Jamo
+      this in 0xa960..0xa97c ||
+      this in 0xac00..0xd7a3 || // Hangul syllables can join following Jamo
+      this in 0xd7b0..0xd7fb ||
+      this == 0x16d63 ||
+      this in 0x16d67..0x16d6a ||
+      this == 0x0d4e || // Prepend and SpacingMark letters
+      this in 0x111c2..0x111c3 ||
+      this == 0x113d1 ||
+      this == 0x1193f ||
+      this == 0x11941 ||
+      this in 0x11a84..0x11a89 ||
+      this == 0x11d46 ||
+      this == 0x11f02 ||
+      this == 0x0e33 ||
+      this == 0x0eb3
 
   private fun String.hasOddRegionalIndicatorRunBefore(end: Int): Boolean {
     if (end >= length || !Character.codePointAt(this, end).isRegionalIndicator()) return false

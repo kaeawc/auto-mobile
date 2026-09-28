@@ -230,8 +230,8 @@ class ConfigurableTypingPolicy(private val behavior: TypingBehavior) : TypingPol
   private fun String.isWordGrapheme(): Boolean {
     val base = codePointAt(0)
     if (!Character.isLetterOrDigit(base) && base != '\''.code) return false
-    if (UCharacter.hasBinaryProperty(base, UProperty.EXTENDED_PICTOGRAPHIC)) return false
-    return !contains('\uFE0F') && !contains('\u20E3')
+    if (contains('\uFE0F') || contains('\u20E3')) return false
+    return base < 0x80 || !UCharacter.hasBinaryProperty(base, UProperty.EXTENDED_PICTOGRAPHIC)
   }
 
   private fun String.takeLastWord(): String {

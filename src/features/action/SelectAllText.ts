@@ -1,3 +1,4 @@
+import { unsupportedPlatformError } from "../../models/ActionableError";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
@@ -43,7 +44,7 @@ export class SelectAllText extends BaseVisualChange {
               return await perf.track("iOSSelectAll", () => this.executeiOSSelectAll());
             default:
               perf.end();
-              throw new Error(`Unsupported platform: ${this.device.platform}`);
+              throw unsupportedPlatformError(this.device.platform, "select all text");
           }
         } catch (error) {
           perf.end();

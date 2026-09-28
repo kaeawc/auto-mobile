@@ -1,3 +1,4 @@
+import { unsupportedPlatformError } from "../../models/ActionableError";
 import { Mutex } from "async-mutex";
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { BaseVisualChange } from "./BaseVisualChange";
@@ -719,7 +720,7 @@ export class Rotate extends BaseVisualChange {
       case "android":
         return this.executeAndroidRotation(orientation, progress, perf, lockOrientation);
       default:
-        throw new Error(`Unsupported platform: ${this.device.platform}`);
+        throw unsupportedPlatformError(this.device.platform, "rotate the device");
     }
   }
 

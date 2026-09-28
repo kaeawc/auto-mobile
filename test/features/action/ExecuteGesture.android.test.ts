@@ -4,6 +4,7 @@ import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
 import type { BootedDevice } from "../../../src/models";
+import { ActionableError } from "../../../src/models/ActionableError";
 
 describe("ExecuteGesture Android swipe", () => {
   const androidDevice: BootedDevice = {
@@ -131,6 +132,8 @@ describe("ExecuteGesture Android swipe", () => {
     // resolved device after construction to reach the swipe() default branch.
     (gesture as any).device.platform = "web";
 
-    await expect(gesture.swipe(0, 0, 1, 1)).rejects.toThrow("Unsupported platform: web");
+    const error = await gesture.swipe(0, 0, 1, 1).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(ActionableError);
+    expect((error as Error).message).toContain("web");
   });
 });

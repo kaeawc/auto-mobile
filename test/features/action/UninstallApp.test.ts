@@ -17,6 +17,7 @@ import {
 } from "../../../src/utils/PerformanceTracker";
 import { runWithPerfTracker } from "../../../src/utils/PerfContext";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { ActionableError } from "../../../src/models/ActionableError";
 
 // Keep action tests isolated from the production SQLite repository even when a
 // scenario does not need to inspect stale-marker rows explicitly.
@@ -234,7 +235,9 @@ describe("UninstallApp (unsupported platform)", () => {
       new FakeDeviceAppUninstaller(),
     );
 
-    await expect(uninstall.execute("com.example.app")).rejects.toThrow("Unsupported platform: web");
+    const error = await uninstall.execute("com.example.app").catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(ActionableError);
+    expect((error as Error).message).toContain("web");
   });
 });
 

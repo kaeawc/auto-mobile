@@ -1,3 +1,4 @@
+import { unsupportedPlatformError } from "../../models/ActionableError";
 import { errorMessage } from "../../utils/describeUnknownError";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
@@ -70,7 +71,7 @@ export class PressButton extends BaseVisualChange {
         case "ios":
           return await this.executeiOSButtonPress(button, timeoutMs, frameContext);
         default:
-          throw new Error(`Unsupported platform: ${this.device.platform}`);
+          throw unsupportedPlatformError(this.device.platform, "press buttons");
       }
     } catch (error) {
       return {

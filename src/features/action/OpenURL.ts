@@ -1,3 +1,4 @@
+import { unsupportedPlatformError } from "../../models/ActionableError";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { BaseVisualChange } from "./BaseVisualChange";
 import { BootedDevice, OpenURLResult } from "../../models";
@@ -137,7 +138,7 @@ export class OpenURL extends BaseVisualChange {
             return await perf.track("iOSOpenURL", () => this.executeiOSOpenURL(trimmedUrl));
           default:
             perf.end();
-            throw new Error(`Unsupported platform: ${this.device.platform}`);
+            throw unsupportedPlatformError(this.device.platform, "open URLs");
         }
       },
       {

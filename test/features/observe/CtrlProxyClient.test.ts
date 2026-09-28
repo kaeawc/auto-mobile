@@ -43,7 +43,7 @@ import {
   stopDeviceDataStreamSocketServer,
 } from "../../../src/daemon/deviceDataStreamSocketServer";
 import { FakeSocket } from "../../fakes/FakeNetServer";
-import { FakeScreenshotBackoffScheduler } from "../../../src/features/observe/ScreenshotBackoffScheduler";
+import { FakeScreenshotBackoffScheduler } from "../../fakes/FakeScreenshotBackoffScheduler";
 import { CTRLPROXY_RATE_LIMITED_ERROR } from "../../../src/features/observe/android/screenshotFallbackReason";
 import { STABLE_VIEW_ID_PREFIX } from "../../../src/features/observe/android/StableNodeIdentity";
 import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";

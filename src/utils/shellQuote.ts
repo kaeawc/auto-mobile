@@ -22,3 +22,11 @@
 export function shellQuote(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
 }
+
+/** Quote a shell value only when it contains characters that require quoting. */
+export function shellQuoteUnlessSafe(value: string): string {
+  if (/^[A-Za-z0-9_./:@%+=,-]+$/.test(value)) {
+    return value;
+  }
+  return shellQuote(value);
+}

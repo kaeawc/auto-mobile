@@ -1,3 +1,4 @@
+import { unsupportedPlatformError } from "../../models/ActionableError";
 import { ElementResolver, isFocusEditableElement } from "../utility/ElementResolver";
 import { SearchableHierarchy, type SearchableEntry } from "../utility/SearchableNode";
 import { resolveViewHierarchyForSearch } from "../../utils/viewHierarchySearch";
@@ -479,7 +480,10 @@ export class TapOnElement extends BaseVisualChange {
       ).requestActivateAccessibilityLink(text, occurrence, ownerResourceId as string | undefined);
       return { success: result.success, error: result.error };
     }
-    return { success: false, error: `Unsupported platform: ${this.device.platform}` };
+    return {
+      success: false,
+      error: unsupportedPlatformError(this.device.platform, "tap on elements").message,
+    };
   }
 
   private hasUniqueSemanticLinkOwner(
@@ -1503,7 +1507,7 @@ export class TapOnElement extends BaseVisualChange {
         return this.prepareViewHierarchyForResponse(rawHierarchy, screenSize);
       }
       default:
-        throw new ActionableError(`Unsupported platform: ${this.device.platform}`);
+        throw unsupportedPlatformError(this.device.platform, "tap on elements");
     }
   }
 
@@ -2482,7 +2486,7 @@ export class TapOnElement extends BaseVisualChange {
                 );
                 break;
               default:
-                throw new ActionableError(`Unsupported platform: ${this.device.platform}`);
+                throw unsupportedPlatformError(this.device.platform, "tap on elements");
             }
           });
 

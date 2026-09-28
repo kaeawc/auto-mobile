@@ -17,13 +17,8 @@
     "src/vision/index.ts",
     "test/helpers/test-database.ts"
   ],
-  "ignorePathPatterns": ["src/daemon/", "scripts/memory/"],
+  "ignorePathPatterns": ["scripts/memory/"],
   "ignoreEntries": [
-    {
-      "file": "src/features/action/UninstallApp.ts",
-      "name": "UninstallApp",
-      "reason": "TODO: planned usage in future PR"
-    },
     {
       "file": "src/utils/android-cmdline-tools/avdmanager.ts",
       "name": "COMMON_SYSTEM_IMAGES",
@@ -223,6 +218,31 @@
       "file": "test/models/DeviceResource.typecheck.ts",
       "name": "DeviceResourceContractChecks",
       "reason": "Compile-only type assertion; the export exists solely so the contract check is evaluated at type-check time"
+    },
+    {
+      "file": "src/daemon/liveAcceptanceCapability.ts",
+      "name": "daemonLiveAcceptanceCapabilityMatches",
+      "reason": "Daemon capability matcher is consumed through runtime registration; static export analysis misses the dynamic lookup."
+    },
+    {
+      "file": "src/daemon/sessionManager.ts",
+      "name": "MAX_CLI_SESSION_IDLE_TIMEOUT_MS",
+      "reason": "Session manager constant is used by internal consumers; static export analysis misses the module linkage."
+    },
+    {
+      "file": "src/daemon/sessionManager.ts",
+      "name": "sanitizeCliSessionIdleTimeoutMs",
+      "reason": "Session manager sanitizer is used by internal consumers; static export analysis misses the module linkage."
+    },
+    {
+      "file": "src/daemon/socketServer/index.ts",
+      "name": "DEFAULT_KEEPALIVE_CONFIG",
+      "reason": "Socket server configuration is consumed by the runtime composition; static export analysis misses the linkage."
+    },
+    {
+      "file": "src/daemon/videoStreamSocketServer.ts",
+      "name": "setVideoStreamSocketServerForTesting",
+      "reason": "Test-only dependency injection seam for the video stream socket server."
     }
   ]
 }

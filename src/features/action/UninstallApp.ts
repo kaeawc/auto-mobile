@@ -1,3 +1,4 @@
+import { unsupportedPlatformError } from "../../models/ActionableError";
 import { errorMessage } from "../../utils/describeUnknownError";
 import {
   AdbClientFactory,
@@ -124,7 +125,7 @@ export class UninstallApp {
         );
       default:
         perf.end();
-        throw new Error(`Unsupported platform: ${this.device.platform}`);
+        throw unsupportedPlatformError(this.device.platform, "uninstall apps");
     }
   }
 
@@ -264,7 +265,7 @@ export class UninstallApp {
         };
       }
 
-      // TODO: query if app was running and needed to be stopped
+      // Whether the app was running before uninstall is not checked.
       await this.adb.executeCommand(
         `shell am force-stop --user ${targetUserId} ${shellQuote(packageName)}`,
         undefined,

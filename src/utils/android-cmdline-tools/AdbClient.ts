@@ -145,8 +145,8 @@ const execFileAsync: ExecFileAsync = async (
 ): Promise<ExecResult> => {
   // Debug: Log when real exec is called (helps trace daemon startup in tests)
   if (process.env.DEBUG_ADB_EXEC) {
-    console.warn(`[DEBUG_ADB_EXEC] Real execFileAsync called: ${file} ${args.join(" ")}`);
-    console.warn(`[DEBUG_ADB_EXEC] Stack trace:`, new Error().stack);
+    logger.debug(`[DEBUG_ADB_EXEC] Real execFileAsync called: ${file} ${args.join(" ")}`);
+    logger.debug(`[DEBUG_ADB_EXEC] Stack trace:`, new Error().stack);
   }
   return runExecSeam(
     (execOptions) => sharedExecFileAsync(file, args, execOptions),
@@ -244,8 +244,8 @@ export class AdbClient implements AdbExecutor {
 
     // Debug: Log when a real (non-test) AdbClient is created
     if (process.env.DEBUG_ADB_EXEC && !this.isTestMode) {
-      console.warn(`[DEBUG_ADB_EXEC] Real AdbClient created (not test mode)`);
-      console.warn(`[DEBUG_ADB_EXEC] Stack trace:`, new Error().stack);
+      logger.debug(`[DEBUG_ADB_EXEC] Real AdbClient created (not test mode)`);
+      logger.debug(`[DEBUG_ADB_EXEC] Stack trace:`, new Error().stack);
     }
   }
 

@@ -1,3 +1,4 @@
+import { unsupportedPlatformError } from "../../models/ActionableError";
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
 import { ActionableError, BootedDevice, HomeScreenResult } from "../../models";
@@ -43,7 +44,7 @@ export class HomeScreen extends BaseVisualChange {
             await perf.track("iOSHomeNavigation", () => this.executeIosHomeNavigation(perf));
             break;
           default:
-            throw new Error(`Unsupported platform: ${this.device.platform}`);
+            throw unsupportedPlatformError(this.device.platform, "return to the home screen");
         }
 
         return {

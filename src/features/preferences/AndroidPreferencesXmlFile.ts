@@ -2,7 +2,7 @@ import { Builder, parseStringPromise } from "xml2js";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { ActionableError } from "../../models";
 import { errorMessage } from "../../utils/describeUnknownError";
-import { shellQuote } from "../../utils/shellQuote";
+import { shellQuoteUnlessSafe } from "../../utils/shellQuote";
 
 /**
  * Direct on-device XML manipulation for Android SharedPreferences files, shared by
@@ -163,13 +163,6 @@ function normalizeAndroidPreferencesDocument(parsed: unknown): AndroidPreference
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function shellQuoteUnlessSafe(value: string): string {
-  if (/^[A-Za-z0-9_./:@%+=,-]+$/.test(value)) {
-    return value;
-  }
-  return shellQuote(value);
 }
 
 function looksLikeMissingAndroidPrefsFile(error: unknown): boolean {

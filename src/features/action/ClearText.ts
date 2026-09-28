@@ -1,3 +1,4 @@
+import { toActionableError, unsupportedPlatformError } from "../../models/ActionableError";
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
@@ -129,18 +130,20 @@ export class ClearText extends BaseVisualChange {
               );
             default:
               perf.end();
-              throw new Error(`Unsupported platform: ${this.device.platform}`);
+              throw unsupportedPlatformError(this.device.platform, "clear text");
           }
         } catch (error) {
           perf.end();
+          const actionableError = toActionableError(error, "Failed to clear text");
+          logger.warn(`[ClearText] ${actionableError.message}`);
           return {
             success: false,
-            error: "Failed to clear text",
+            error: actionableError.message,
           };
         }
       },
       {
-        changeExpected: false, // TODO: can only make this true once we know for sure there was text in the text field
+        changeExpected: false, // Whether text changed cannot be determined reliably.
         tolerancePercent: 0.0,
         timeoutMs: 100,
         progress,
@@ -248,7 +251,7 @@ export class ClearText extends BaseVisualChange {
       return { success: true };
     }
 
-    // TODO: Move cursor to the end of the text
+    // Cursor position is not moved to the end of the text.
 
     if (textLength > 0) {
       await this.clearWithDeletes(textLength);

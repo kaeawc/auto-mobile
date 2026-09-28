@@ -74,6 +74,61 @@ teardown() {
   [[ "$output" == *"EmulatorBoundaryFixture.ts"* ]]
 }
 
+@test "allows HostProcessExecutor spawn in an emulator-related file" {
+  printf '%s\n' 'const executor: HostProcessExecutor = {} as HostProcessExecutor; executor.spawn("emulator", ["-avd", "Pixel"]);' > "$FIXTURE"
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"no direct production emulator invocations"* ]]
+}
+
+@test "rejects spawn on an untyped function-local shadow of a HostProcessExecutor" {
+  printf '%s\n' \
+    'const executor: HostProcessExecutor = adbHostProcessExecutor;' \
+    'function unrelated() {' \
+    '  const executor = getSomeUnrelatedThing();' \
+    '  executor.spawn("emulator", ["-avd", "Pixel"]);' \
+    '}' > "$FIXTURE"
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"EmulatorBoundaryFixture.ts"* ]]
+}
+
+@test "allows exec on an untyped function-local shadow of a ProcessExecutor" {
+  printf '%s\n' \
+    'const executor: ProcessExecutor = {} as ProcessExecutor;' \
+    'function unrelated() {' \
+    '  const executor = getSomeUnrelatedThing();' \
+    '  executor.exec("emulator -avd Pixel");' \
+    '}' > "$FIXTURE"
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"no direct production emulator invocations"* ]]
+}
+
+@test "rejects raw child_process spawn in an emulator-related file" {
+  printf '%s\n' 'import * as childProcess from "node:child_process"; childProcess.spawn("emulator", ["-avd", "Pixel"]);' > "$FIXTURE"
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"EmulatorBoundaryFixture.ts"* ]]
+}
+
+@test "rejects untyped spawn receivers in an emulator-related file" {
+  printf '%s\n' 'const executor = {} as HostProcessExecutor; executor.spawn("emulator", ["-avd", "Pixel"]);' > "$FIXTURE"
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"EmulatorBoundaryFixture.ts"* ]]
+}
+
 @test "rejects a synchronous child_process exec emulator launch" {
   printf '%s\n' 'import { execSync } from "node:child_process"; execSync("emulator -avd Pixel");' > "$FIXTURE"
 

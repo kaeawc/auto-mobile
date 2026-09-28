@@ -47,6 +47,29 @@ describe("booted iOS service-status transient handling (#7053)", () => {
     setServiceStatusProbe(null);
   });
 
+  test("omits iOS version identity when installation is unconfirmed despite a running tunnel", async () => {
+    const managerSpy = spyOn(IOSCtrlProxyManager, "getInstance").mockReturnValue({
+      isInstalled: async () => false,
+      isRunning: async () => true,
+      checkRunningWithReason: async () => ({ ok: true }),
+      getForcedRestartBudget: () => ({ snapshot: () => ({ state: "idle", attempts: 0 }) }),
+    } as unknown as IOSCtrlProxyManager);
+    try {
+      const status = await queryDeviceServiceStatus(
+        { name: "iPhone", platform: "ios", deviceId: "SIM-A" },
+        undefined,
+        { getVersion: async () => ({ build: "0.0.75", source: "ios-runner-bundle" }) },
+        new FakeTimer(),
+      );
+      expect(status?.installed).toBe(false);
+      expect(status?.running).toBe(true);
+      expect(status).not.toHaveProperty("versionInfo");
+      expect(status).not.toHaveProperty("version");
+    } finally {
+      managerSpy.mockRestore();
+    }
+  });
+
   test("a hung service-status probe yields a transient timeout diagnostic, not a settled status", async () => {
     const timer = new FakeTimer();
     const device = bootedIosDevice("SIM-A");

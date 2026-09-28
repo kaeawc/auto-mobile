@@ -472,6 +472,28 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+function isJSONTextFailureContent(content: unknown): boolean {
+  if (
+    !Array.isArray(content) ||
+    content.length !== 1 ||
+    !isRecord(content[0]) ||
+    content[0].type !== "text" ||
+    // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- This text is an MCP response envelope, not a UI selector.
+    typeof content[0].text !== "string"
+  ) {
+    return false;
+  }
+  try {
+    // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- This text is an MCP response envelope, not a UI selector.
+    const payload: unknown = JSON.parse(content[0].text);
+    return isRecord(payload) && payload.success === false;
+  } catch (error) {
+    // Plain text is a valid response, so an invalid JSON envelope remains a non-failure.
+    logger.debug(`[ToolRegistry] Response text is not JSON: ${error}`);
+    return false;
+  }
+}
+
 function isToolResponseFailure(response: unknown): boolean {
   if (!isRecord(response)) {
     return false;
@@ -480,7 +502,13 @@ function isToolResponseFailure(response: unknown): boolean {
     return true;
   }
   const structuredContent = getStructuredPayload(response);
-  return isRecord(structuredContent) && structuredContent.success === false;
+  if (isRecord(structuredContent) && typeof structuredContent.success === "boolean") {
+    return structuredContent.success === false;
+  }
+  if (response.success === true) {
+    return false;
+  }
+  return isJSONTextFailureContent(response.content);
 }
 
 function isViewHierarchyResult(value: unknown): value is ViewHierarchyResult {

@@ -877,6 +877,11 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     }
   }
 
+  /** @internal Dispatch one line through the normal parser with a fake Socket; no listener is needed. */
+  public async dispatchLineForTesting(socket: Socket, line: string): Promise<void> {
+    await this.processLine(socket, line);
+  }
+
   /**
    * Override processLine to handle additional commands and the onSubscriberConnected callback.
    */
@@ -1724,6 +1729,13 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
 
 // Singleton instance
 let socketServer: DeviceDataStreamSocketServer | null = null;
+
+/** @internal Install an unstarted fake-backed server for unit tests; no socket is opened. */
+export function installDeviceDataStreamSocketServerForTesting(
+  server: DeviceDataStreamSocketServer | null,
+): void {
+  socketServer = server;
+}
 
 export function getDeviceDataStreamServer(): DeviceDataStreamSocketServer | null {
   return socketServer;

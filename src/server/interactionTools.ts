@@ -638,13 +638,13 @@ export const pinchOnSchema = withJsonSchemaOverride(
           .number()
           .optional()
           .describe(
-            "Initial finger distance defaults to 60% of the target's smaller dimension for direction 'in' and 20% for 'out'; clamped to 10%-90% (minimum 10 px).",
+            "Initial finger distance defaults to 60% of the target's smaller dimension for direction 'in' and 20% for 'out'; clamped to 10%-90% with a 10 px floor capped by the 90% ceiling (below 10 px for targets under 11.1 px).",
           ),
         distanceEnd: z
           .number()
           .optional()
           .describe(
-            "Final finger distance defaults to 20% of the target's smaller dimension for direction 'in' and 60% for 'out'; clamped to 10%-90% (minimum 10 px).",
+            "Final finger distance defaults to 20% of the target's smaller dimension for direction 'in' and 60% for 'out'; clamped to 10%-90% with a 10 px floor capped by the 90% ceiling (below 10 px for targets under 11.1 px).",
           ),
         scale: z.number().optional().describe("Scale factor (overrides distances)"),
         duration: z.number().optional().describe("Gesture duration (ms)"),

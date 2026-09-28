@@ -8237,11 +8237,11 @@
           "enum": ["in", "out"]
         },
         "distanceStart": {
-          "description": "Initial finger distance defaults to 60% of the target's smaller dimension for direction 'in' and 20% for 'out'; clamped to 10%-90% (minimum 10 px).",
+          "description": "Initial finger distance defaults to 60% of the target's smaller dimension for direction 'in' and 20% for 'out'; clamped to 10%-90% with a 10 px floor capped by the 90% ceiling (below 10 px for targets under 11.1 px).",
           "type": "number"
         },
         "distanceEnd": {
-          "description": "Final finger distance defaults to 20% of the target's smaller dimension for direction 'in' and 60% for 'out'; clamped to 10%-90% (minimum 10 px).",
+          "description": "Final finger distance defaults to 20% of the target's smaller dimension for direction 'in' and 60% for 'out'; clamped to 10%-90% with a 10 px floor capped by the 90% ceiling (below 10 px for targets under 11.1 px).",
           "type": "number"
         },
         "scale": {

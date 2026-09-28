@@ -697,6 +697,7 @@ const runWaitForConditionDsl = async (
   const applySettledGate = async (
     outcome: WaitForObservationOutcome,
     matched: boolean,
+    recheck?: ConditionPredicate,
   ): Promise<WaitForObservationOutcome> => {
     if (!settled || !matched) {
       return outcome;
@@ -705,11 +706,15 @@ const runWaitForConditionDsl = async (
     let matchedHash = hashHierarchyForSettle(observation.viewHierarchy);
     let quietStart = timer.now();
     let polls = outcome.polls;
+    let matchedElement = outcome.matchedElement;
+    let awaitedElement = outcome.awaitedElement;
     while (timer.now() - startTime < timeoutMs) {
       if (matchedHash !== null && timer.now() - quietStart >= settled.quietPeriodMs) {
         return {
           ...outcome,
           observation,
+          matchedElement,
+          awaitedElement,
           matched: true,
           settled: true,
           timedOut: false,
@@ -731,6 +736,18 @@ const runWaitForConditionDsl = async (
         skipAccessibilityAudit: true,
       });
       polls++;
+      if (recheck) {
+        const evaluation = recheck(observation);
+        if (!evaluation.matched) {
+          matchedHash = null;
+          quietStart = timer.now();
+          matchedElement = undefined;
+          awaitedElement = undefined;
+          continue;
+        }
+        matchedElement = evaluation.matchedElement;
+        awaitedElement = evaluation.matchedElement;
+      }
       const hash = hashHierarchyForSettle(observation.viewHierarchy);
       if (hash === null || matchedHash === null || hash !== matchedHash) {
         matchedHash = hash;
@@ -740,6 +757,8 @@ const runWaitForConditionDsl = async (
     return {
       ...outcome,
       observation,
+      matchedElement: undefined,
+      awaitedElement: undefined,
       settled: false,
       timedOut: true,
       matched: false,
@@ -796,7 +815,7 @@ const runWaitForConditionDsl = async (
     matchedElement: result.matchedElement,
     candidates: result.candidates,
   };
-  return applySettledGate(outcome, result.matched);
+  return applySettledGate(outcome, result.matched, predicate);
 };
 
 const waitForContainerForFinder = (waitFor: ObserveWaitForOptions): ResolverSelector | null => {

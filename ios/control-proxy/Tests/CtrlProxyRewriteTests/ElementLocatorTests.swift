@@ -14,6 +14,16 @@ import XCTest
 /// (that fake arrives with the Phase 6 CommandHandler port). The `ForegroundTracker` tests use
 /// `var` because the reference's lock-guarded class became a `mutating`-method struct.
 final class ElementLocatorTests: XCTestCase {
+    // MARK: - Zero-area snapshot children
+
+    func testZeroAreaChildWithoutNonZeroAreaDescendantIsDropped() {
+        XCTAssertFalse(ElementLocator.shouldKeepZeroAreaChild(hasNonZeroAreaDescendant: false))
+    }
+
+    func testZeroAreaChildWithNonZeroAreaDescendantIsKept() {
+        XCTAssertTrue(ElementLocator.shouldKeepZeroAreaChild(hasNonZeroAreaDescendant: true))
+    }
+
     func testCopyingPreservesSemanticLinksOnRetainedLink() {
         let link = UIElementInfo(
             text: "Terms of Service",

@@ -2634,6 +2634,96 @@ describe("SessionManager", () => {
     });
   });
 
+  test.each(["heartbeat", "cache update", "cache read"] as const)(
+    "rolls back failed fire-and-forget %s activity without reverting ownership",
+    async (operation) => {
+      const timer = new FakeTimer();
+      const writeStarted = Promise.withResolvers<void>();
+      const persistence: DeviceSessionPersistence = {
+        async upsertActiveSession() {},
+        async recordActivity() {
+          writeStarted.resolve();
+          throw new Error("activity write failed");
+        },
+        async markReleased() {},
+      };
+      const manager = new SessionManager(timer, persistence, () => new FakeDbWriteBarrier());
+      try {
+        const session = await manager.createSession("activity-session", "emulator-5554", "android");
+        const before = {
+          lastUsedAt: session.lastUsedAt,
+          lastHeartbeat: session.lastHeartbeat,
+          expiresAt: session.expiresAt,
+        };
+        if (operation === "heartbeat") {
+          session.ownership = "awaiting-owner";
+        }
+        timer.advanceTime(10);
+        if (operation === "heartbeat") {
+          manager.recordHeartbeat("activity-session");
+        }
+        if (operation === "cache update") {
+          manager.updateSessionCache("activity-session", { lastObserveTime: 1 });
+        }
+        if (operation === "cache read") {
+          manager.getSessionCache("activity-session");
+        }
+        await writeStarted.promise;
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(session).toMatchObject(before);
+        if (operation === "heartbeat") {
+          expect(session.hasReceivedHeartbeat).toBe(true);
+          expect(session.ownership).toBe("owned");
+        }
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    },
+  );
+
+  test("an older failed cache activity write does not revert a newer heartbeat", async () => {
+    const timer = new FakeTimer();
+    const firstWriteStarted = Promise.withResolvers<void>();
+    const failFirstWrite = Promise.withResolvers<void>();
+    let writes = 0;
+    const persistence: DeviceSessionPersistence = {
+      async upsertActiveSession() {},
+      async recordActivity() {
+        writes++;
+        if (writes === 1) {
+          firstWriteStarted.resolve();
+          await failFirstWrite.promise;
+          throw new Error("older activity write failed");
+        }
+      },
+      async markReleased() {},
+    };
+    const manager = new SessionManager(timer, persistence, () => new FakeDbWriteBarrier());
+    try {
+      const session = await manager.createSession("activity-session", "emulator-5554", "android");
+      timer.advanceTime(10);
+      manager.updateSessionCache("activity-session", { lastObserveTime: 1 });
+      await firstWriteStarted.promise;
+      timer.advanceTime(10);
+      manager.recordHeartbeat("activity-session");
+      const newer = {
+        lastUsedAt: session.lastUsedAt,
+        lastHeartbeat: session.lastHeartbeat,
+        expiresAt: session.expiresAt,
+      };
+      failFirstWrite.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(session).toMatchObject(newer);
+    } finally {
+      failFirstWrite.resolve();
+      manager.stopCleanupTimer();
+    }
+  });
+
   test("acknowledges a liveness ownership claim only after durable persistence", async () => {
     const persistenceStarted = Promise.withResolvers<void>();
     const finishPersistence = Promise.withResolvers<void>();

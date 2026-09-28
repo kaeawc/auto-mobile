@@ -7,6 +7,7 @@ import { DAEMON_VERSION } from "../../src/daemon/constants";
 import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionReleaseBroadcast";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
+import { FakeTimer } from "../fakes/FakeTimer";
 
 let isAvailableSpy: ReturnType<typeof spyOn> | null = null;
 
@@ -28,6 +29,7 @@ describe("proxy server session ownership errors", () => {
     };
     const { server, proxy } = createProxyMcpServer({
       proxyConfig: {
+        timer: new FakeTimer(),
         initialSessionUuid: "session-123",
         clientFactory: () => fakeClient,
         daemonManager,
@@ -121,6 +123,7 @@ describe("proxy server session ownership errors", () => {
     };
     const { server, proxy } = createProxyMcpServer({
       proxyConfig: {
+        timer: new FakeTimer(),
         initialSessionUuid: "session-123",
         clientFactory: () => fakeClient,
         daemonManager,
@@ -186,6 +189,7 @@ describe("proxy server session ownership errors", () => {
     };
     const { server, proxy } = createProxyMcpServer({
       proxyConfig: {
+        timer: new FakeTimer(),
         clientFactory: () => {
           clientFactoryCalls += 1;
           return clientFactoryCalls === 1 ? originalClient : replacementClient;
@@ -281,6 +285,7 @@ describe("proxy server session ownership errors", () => {
     };
     const { server, proxy } = createProxyMcpServer({
       proxyConfig: {
+        timer: new FakeTimer(),
         clientFactory: () => {
           clientFactoryCalls += 1;
           return clientFactoryCalls === 1 ? originalClient : replacementClient;

@@ -3809,6 +3809,7 @@ describe("DaemonMcpProxy", () => {
     test.each(["daemon-restart", "device-restart:Pixel_8_API_35"])(
       "reconnects and reclaims a %s handoff instead of fencing it",
       async (releaseReason) => {
+        const timer = new FakeTimer();
         const staleClient = new FakeDaemonClient({
           daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
         });
@@ -3822,6 +3823,7 @@ describe("DaemonMcpProxy", () => {
           clientFactory: () => clients.shift()!,
           daemonManager: matchingDaemonManager(),
           autoStartDaemon: false,
+          timer,
         });
 
         try {
@@ -3855,6 +3857,7 @@ describe("DaemonMcpProxy", () => {
     );
 
     test("reconnects and reclaims a result-minted daemon-restart handoff", async () => {
+      const timer = new FakeTimer();
       const mintingResult = (sessionUuid: string) => ({
         content: [{ type: "text", text: JSON.stringify({ sessionId: sessionUuid }) }],
       });
@@ -3872,6 +3875,7 @@ describe("DaemonMcpProxy", () => {
         clientFactory: () => clients.shift()!,
         daemonManager: matchingDaemonManager(),
         autoStartDaemon: false,
+        timer,
       });
 
       try {
@@ -3895,6 +3899,90 @@ describe("DaemonMcpProxy", () => {
         ]);
       } finally {
         isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("preserves an earlier owned session on a recoverable release", async () => {
+      const timer = new FakeTimer();
+      let acquisitions = 0;
+      const client = new FakeDaemonClient({
+        toolResultFor: (name) => {
+          if (name !== "getAndroid") {
+            return undefined;
+          }
+          acquisitions++;
+          const sessionId = acquisitions === 1 ? "earlier-session" : "latest-session";
+          return { content: [{ type: "text", text: JSON.stringify({ sessionId }) }] };
+        },
+      });
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => client,
+        daemonManager: matchingDaemonManager(),
+        daemonAvailabilityProbe: async () => true,
+        autoStartDaemon: false,
+        timer,
+      });
+      try {
+        await proxy.callTool("getAndroid", {});
+        await proxy.callTool("getAndroid", {});
+        const owned = Reflect.get(proxy, "ownedDeviceSessions") as Set<string>;
+        expect(owned.has("earlier-session")).toBe(true);
+        expect(owned.has("latest-session")).toBe(true);
+        client.emitNotification(
+          SESSION_RELEASED_NOTIFICATION_METHOD,
+          "earlier-session",
+          "daemon-restart",
+        );
+        expect(owned.has("earlier-session")).toBe(true);
+      } finally {
+        await proxy.close();
+      }
+    });
+
+    test("a recoverable release fences in-flight discovery from caching stale tools", async () => {
+      const timer = new FakeTimer();
+      const firstListStarted = Promise.withResolvers<void>();
+      const finishFirstList = Promise.withResolvers<void>();
+      let listCalls = 0;
+      const client = new FakeDaemonClient({
+        daemonMethodResults: new Map([
+          ["tools/list", { tools: [{ name: "stale", inputSchema: {} }] }],
+        ]),
+        onCallDaemonMethod: async (method) => {
+          if (method !== "tools/list") {
+            return;
+          }
+          listCalls++;
+          if (listCalls === 1) {
+            firstListStarted.resolve();
+            await finishFirstList.promise;
+          }
+        },
+      });
+      const proxy = new DaemonMcpProxy({
+        initialSessionUuid: "session-a",
+        clientFactory: () => client,
+        daemonManager: matchingDaemonManager(),
+        daemonAvailabilityProbe: async () => true,
+        autoStartDaemon: false,
+        timer,
+      });
+      try {
+        await proxy.callTool("observe", {});
+        const firstList = proxy.listTools();
+        await firstListStarted.promise;
+        client.emitNotification(
+          SESSION_RELEASED_NOTIFICATION_METHOD,
+          "session-a",
+          "daemon-restart",
+        );
+        finishFirstList.resolve();
+        await firstList;
+        await proxy.listTools();
+        expect(listCalls).toBe(2);
+      } finally {
+        finishFirstList.resolve();
         await proxy.close();
       }
     });

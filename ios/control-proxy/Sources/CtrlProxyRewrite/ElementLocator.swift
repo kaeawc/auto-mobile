@@ -885,11 +885,18 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
             parentPath: String = "",
             childIndex: Int = 0,
             keyboardFocusFrame: CGRect? = nil,
-            disableAllFiltering: Bool = false
+            disableAllFiltering: Bool = false,
+            enclosingFrame: CGRect? = nil,
+            widgetContext: Bool = false
         )
             -> UIElementInfo
         {
-            let frame = snapshot.frame
+            let widgetContext = widgetContext || snapshot.identifier.localizedCaseInsensitiveContains("widget")
+            let frame = Self.screenFrame(
+                snapshot.frame,
+                enclosingFrame: enclosingFrame,
+                widgetContext: widgetContext
+            )
 
             // Skip zero-area elements
             let hasZeroArea = frame.width <= 0 || frame.height <= 0
@@ -932,7 +939,11 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
                             return nil
                         }
 
-                        let childFrame = child.frame
+                        let childFrame = Self.screenFrame(
+                            child.frame,
+                            enclosingFrame: hasZeroArea ? enclosingFrame : frame,
+                            widgetContext: widgetContext || child.identifier.localizedCaseInsensitiveContains("widget")
+                        )
 
                         if childFrame.width <= 0 || childFrame.height <= 0 {
                             // A zero-area wrapper can still contain on-screen descendants.
@@ -957,7 +968,9 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
                             parentPath: currentPath,
                             childIndex: idx,
                             keyboardFocusFrame: keyboardFocusFrame,
-                            disableAllFiltering: disableAllFiltering
+                            disableAllFiltering: disableAllFiltering,
+                            enclosingFrame: hasZeroArea ? enclosingFrame : frame,
+                            widgetContext: widgetContext
                         )
                     }
 
@@ -1479,6 +1492,29 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
     // macOS. On this `@MainActor` class they must be `nonisolated static` so non-isolated
     // test code (and the iOS instance methods, synchronously) can call them without hopping.
 
+    /// A widget snapshot can expose a descendant in its hosting view's local coordinates.
+    /// Translate only when the widget identifier identifies that subtree, the raw frame
+    /// escapes its enclosing screen-space frame, and translation places it fully inside.
+    /// This leaves ordinary screen-origin elements and already-absolute frames untouched.
+    nonisolated static func screenFrame(
+        _ frame: CGRect,
+        enclosingFrame: CGRect?,
+        widgetContext: Bool
+    )
+        -> CGRect
+    {
+        guard widgetContext,
+              let enclosingFrame,
+              !frame.isEmpty,
+              !enclosingFrame.isEmpty,
+              !enclosingFrame.contains(frame)
+        else {
+            return frame
+        }
+        let translated = frame.offsetBy(dx: enclosingFrame.minX, dy: enclosingFrame.minY)
+        return enclosingFrame.contains(translated) ? translated : frame
+    }
+
     /// Keep zero-area wrappers only when their subtree contains a usable frame.
     nonisolated static func shouldKeepZeroAreaChild(hasNonZeroAreaDescendant: Bool) -> Bool {
         return hasNonZeroAreaDescendant
@@ -1813,6 +1849,9 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
             if isDuplicateLabel(child, of: parent) {
                 continue
             }
+            if isUnlabeledIconSubview(child, of: parent) {
+                continue
+            }
             if isStructuralWrapperWithOnlyScrollBarNoise(child) {
                 continue
             }
@@ -1839,6 +1878,45 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
             return false
         }
         return true
+    }
+
+    /// XCUITest exposes SpringBoard icon artwork/title subviews as image or icon
+    /// snapshots. The generic image/icon type mapping marks them tappable even
+    /// though the named enclosing icon is the actionable accessibility target.
+    private nonisolated static func isUnlabeledIconSubview(_ child: UIElementInfo, of parent: UIElementInfo) -> Bool {
+        guard parent.className == "SBIconView",
+              parent.clickable == "true",
+              parent.text?.isEmpty == false,
+              let parentBounds = parent.bounds,
+              let childBounds = child.bounds,
+              child.className == "UIImageView" || child.className == "SBIconView",
+              child.text == nil,
+              child.value == nil,
+              child.contentDesc == nil,
+              child.resourceId == nil,
+              child.hintText == nil,
+              child.semanticLinks?.isEmpty ?? true,
+              child.node?.isEmpty ?? true,
+              child.role == (child.className == "UIImageView" ? "image" : "button"),
+              child.longClickable != "true",
+              child.focused != "true",
+              child.accessibilityFocused != "true",
+              child.selected != "true",
+              child.checkable != "true",
+              child.checked != "true",
+              child.scrollable != "true",
+              child.testTag == nil,
+              child.stateDescription == nil,
+              child.errorMessage == nil,
+              child.extras?.isEmpty ?? true,
+              child.actions?.isEmpty ?? true
+        else {
+            return false
+        }
+        return parentBounds.left <= childBounds.left
+            && parentBounds.top <= childBounds.top
+            && parentBounds.right >= childBounds.right
+            && parentBounds.bottom >= childBounds.bottom
     }
 
     private nonisolated static func isActionableContainer(_ element: UIElementInfo) -> Bool {

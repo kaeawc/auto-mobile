@@ -14,6 +14,35 @@ import XCTest
 /// (that fake arrives with the Phase 6 CommandHandler port). The `ForegroundTracker` tests use
 /// `var` because the reference's lock-guarded class became a `mutating`-method struct.
 final class ElementLocatorTests: XCTestCase {
+    // MARK: - Widget snapshot coordinates (#8047)
+
+    func testScreenFrame_translatesWidgetImageIntoEnclosingScreenFrame() {
+        let widget = CGRect(x: 24, y: 88, width: 168, height: 191)
+        let image = CGRect(x: 0, y: 0, width: 164, height: 164)
+
+        let result = ElementLocator.screenFrame(image, enclosingFrame: widget, widgetContext: true)
+
+        XCTAssertEqual(result, CGRect(x: 24, y: 88, width: 164, height: 164))
+    }
+
+    func testScreenFrame_keepsGenuineScreenOriginElement() {
+        let container = CGRect(x: 24, y: 88, width: 168, height: 191)
+        let topLeftElement = CGRect(x: 0, y: 0, width: 164, height: 164)
+
+        let result = ElementLocator.screenFrame(topLeftElement, enclosingFrame: container, widgetContext: false)
+
+        XCTAssertEqual(result, topLeftElement)
+    }
+
+    func testScreenFrame_keepsAlreadyAbsoluteWidgetChild() {
+        let widget = CGRect(x: 24, y: 88, width: 168, height: 191)
+        let absoluteImage = CGRect(x: 26, y: 90, width: 164, height: 164)
+
+        let result = ElementLocator.screenFrame(absoluteImage, enclosingFrame: widget, widgetContext: true)
+
+        XCTAssertEqual(result, absoluteImage)
+    }
+
     // MARK: - Zero-area snapshot children
 
     func testZeroAreaChildWithoutNonZeroAreaDescendantIsDropped() {
@@ -345,6 +374,59 @@ final class ElementLocatorTests: XCTestCase {
 
         XCTAssertEqual(result.count, 1)
         XCTAssertEqual(result[0].resourceId, "plus")
+    }
+
+    func testCleanup_removesUnlabeledSpringBoardIconSubviews() {
+        let icon = UIElementInfo(
+            text: "Reminders",
+            className: "SBIconView",
+            bounds: ElementBounds(left: 11, top: 261, right: 113, bottom: 394),
+            clickable: "true",
+            role: "button"
+        )
+        let artwork = UIElementInfo(
+            className: "UIImageView",
+            bounds: ElementBounds(left: 11, top: 339, right: 113, bottom: 394),
+            clickable: "true",
+            role: "image"
+        )
+        let title = UIElementInfo(
+            className: "SBIconView",
+            bounds: ElementBounds(left: 28, top: 357, right: 96, bottom: 377),
+            clickable: "true",
+            role: "button"
+        )
+
+        let result = ElementLocator.cleanupXCTestUIKitNoise(parent: icon, children: [artwork, title])
+
+        XCTAssertTrue(result.isEmpty)
+    }
+
+    func testCleanup_preservesIdentifiedIconSubviewAndIndependentControl() {
+        let icon = UIElementInfo(
+            text: "Maps",
+            className: "SBIconView",
+            bounds: ElementBounds(left: 11, top: 261, right: 113, bottom: 394),
+            clickable: "true"
+        )
+        let identifiedImage = UIElementInfo(
+            resourceId: "icon-badge",
+            className: "UIImageView",
+            bounds: ElementBounds(left: 28, top: 357, right: 96, bottom: 377),
+            clickable: "true"
+        )
+        let independentButton = UIElementInfo(
+            className: "UIButton",
+            bounds: ElementBounds(left: 28, top: 357, right: 96, bottom: 377),
+            clickable: "true"
+        )
+
+        let result = ElementLocator.cleanupXCTestUIKitNoise(
+            parent: icon,
+            children: [identifiedImage, independentButton]
+        )
+
+        XCTAssertEqual(result.count, 2)
     }
 
     func testCleanup_removesStructuralWrapperContainingOnlyScrollbarNoise() {

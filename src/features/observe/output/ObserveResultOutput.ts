@@ -673,6 +673,12 @@ export interface ObserveDiff {
    * diff-mode client gets the same ready-to-read resource URI as a full one.
    */
   observationScreenshotResourceUri?: string;
+  screenshotSettled?: boolean;
+  screenshotSettledError?: string;
+  screenshotOrientation?: "native" | "display";
+  screenshotPath?: string;
+  screenshotFormat?: "png";
+  screenshotMimeType?: "image/png";
   /**
    * Actionable-only selector surface (issue #6221 items 1 and 4.1), ALWAYS
    * present alongside the diff — the same array a full observation's

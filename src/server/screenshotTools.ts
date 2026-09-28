@@ -1,9 +1,10 @@
 import { z } from "zod/v4";
 import { TakeScreenshot, type ScreenshotOptions } from "../features/observe/TakeScreenshot";
 import type { BootedDevice } from "../models";
-import { ActionableError, toActionableError } from "../models/ActionableError";
+import { toActionableError } from "../models/ActionableError";
 import type { ScreenshotJobHandle, ScreenshotJobOptions } from "../utils/ScreenshotJobTracker";
 import { pathExists } from "../utils/filesystem/DefaultFileSystem";
+import { validateCapturedScreenshot } from "../features/observe/screenshot/validateCapturedScreenshot";
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
 import { captureScreenshotResultSchema } from "./toolOutputSchemas";
@@ -47,27 +48,17 @@ export function createCaptureScreenshotHandler(
       );
       const result = await promise;
 
-      if (!result.success) {
-        throw new ActionableError(
-          `Screenshot capture failed for device ${device.deviceId}: ${result.error ?? "no error details"}`,
-        );
-      }
-      if (!result.path) {
-        throw new ActionableError(
-          `Screenshot capture succeeded for device ${device.deviceId} but returned no file path.`,
-        );
-      }
-      if (!(await dependencies.pathExists(result.path))) {
-        throw new ActionableError(
-          `Screenshot capture succeeded for device ${device.deviceId} but the file is missing: ${result.path}`,
-        );
-      }
+      const path = await validateCapturedScreenshot(
+        result,
+        device.deviceId,
+        dependencies.pathExists,
+      );
 
       return createStructuredToolResponse({
         success: true,
         deviceId: device.deviceId,
         platform: device.platform,
-        path: result.path,
+        path,
         screenshotFormat: "png" as const,
         screenshotMimeType: "image/png" as const,
       });
@@ -82,7 +73,7 @@ export function registerScreenshotTools(
 ): void {
   ToolRegistry.registerDeviceAware(
     "captureScreenshot",
-    "Capture the entire selected device screen as a PNG file. On iOS Simulator, the image reflects the device framebuffer's native orientation and may not match observe's current rotated orientation; Android's image does rotate.",
+    "Deprecated: use observe({ screenshot: \"settled\" }) for a fresh, validated screenshot. Capture the entire selected device screen as a PNG file. On iOS Simulator, the image reflects the device framebuffer's native orientation and may not match observe's current rotated orientation; Android's image does rotate.",
     captureScreenshotSchema,
     createCaptureScreenshotHandler(dependencies),
     { defaultEnabled: true, outputSchema: captureScreenshotResultSchema },

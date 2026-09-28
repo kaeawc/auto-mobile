@@ -65,6 +65,9 @@ import { findAppWindowBounds, PerformanceAuditor } from "./audits/PerformanceAud
 import { AccessibilityAuditor, resolveLatestScreenshotPath } from "./audits/AccessibilityAuditor";
 import { AccessibilityStateDetector } from "./audits/AccessibilityStateDetector";
 import { appendObserveError } from "./ObserveError";
+import { resolveScreenshotMode, type ScreenshotMode } from "./automaticScreenshotPolicy";
+import { ActionableError, toActionableError } from "../../models/ActionableError";
+import { errorMessage as describeError } from "../../utils/describeUnknownError";
 import { ObserveElementsBuilder } from "./ObserveElementsBuilder";
 import {
   enforceHierarchyPlatform,
@@ -130,6 +133,14 @@ const SYSTEM_UI_PACKAGE = "com.android.systemui";
  * Same constant `androidSystemUiAnr.ts` keys the ANR dialog off.
  */
 const ACCESSIBILITY_WINDOW_TYPE_SYSTEM = 3;
+
+class StrictSettledScreenshotCaptureError extends ActionableError {
+  constructor(error: unknown, deviceId: string) {
+    super(toActionableError(error, `Failed to capture screenshot for device ${deviceId}`).message, {
+      cause: error,
+    });
+  }
+}
 
 type FocusedSystemUiSignal = "focused" | "topmost-suspect" | "none";
 
@@ -753,7 +764,9 @@ export class RealObserveScreen implements ObserveScreen {
     const minTimestamp = options?.minTimestamp ?? 0;
     const signal = options?.signal;
     const skipBackStack = options?.skipBackStack ?? false;
-    const skipScreenshot = options?.skipScreenshot ?? false;
+    const screenshotMode = options?.skipScreenshot
+      ? "none"
+      : resolveScreenshotMode(options?.screenshot);
 
     try {
       logger.debug(
@@ -841,11 +854,18 @@ export class RealObserveScreen implements ObserveScreen {
         result.elements = this.elementsBuilder.build(result.viewHierarchy, this.device.platform);
       }
 
-      // Screenshot: fire-and-forget unless an accessibility audit is configured
-      // (the audit needs the screenshot file on disk before it runs).
-      if (!skipScreenshot) {
+      // The hierarchy has completed before any capture starts.
+      if (screenshotMode !== "none") {
         result.screenshotCaptureAttempted = true;
-        if (serverConfig.getAccessibilityAuditConfig()) {
+        if (screenshotMode === "settled") {
+          result.screenshotOrientation = this.device.platform === "ios" ? "native" : "display";
+          await this.captureSettledScreenshot(
+            result,
+            perf,
+            signal,
+            options?.screenshot === "settled",
+          );
+        } else if (serverConfig.getAccessibilityAuditConfig()) {
           await this.screenshotRecorder.capture(result.observationId, perf, signal);
         } else {
           this.screenshotRecorder.start(result.observationId, perf, signal);
@@ -988,6 +1008,9 @@ export class RealObserveScreen implements ObserveScreen {
       logger.debug(`Total observe command execution took ${this.timer.now() - startTime}ms`);
       return result;
     } catch (err) {
+      if (err instanceof StrictSettledScreenshotCaptureError) {
+        throw err;
+      }
       const errorMessage = err instanceof Error ? err.stack || err.message : String(err);
       logger.error(`Critical error in observe command: ${errorMessage}`);
       ScreenshotJobTracker.cancelJob(this.device.deviceId);
@@ -1043,14 +1066,59 @@ export class RealObserveScreen implements ObserveScreen {
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     signal?: AbortSignal,
     observation?: ObserveResult,
+    screenshot?: ScreenshotMode,
   ): Promise<void> {
     const screenshotObservation = observation ?? this.createBaseResult();
+    const screenshotMode = resolveScreenshotMode(screenshot);
     if (observation) {
       observation.screenshotCaptureAttempted = true;
+      if (screenshotMode === "settled") {
+        observation.screenshotOrientation = this.device.platform === "ios" ? "native" : "display";
+      }
     }
-    await this.screenshotRecorder.captureFresh(screenshotObservation.observationId, perf, signal);
+    if (screenshotMode === "settled") {
+      await this.captureSettledScreenshot(
+        screenshotObservation,
+        perf,
+        signal,
+        screenshot === "settled",
+      );
+    } else {
+      await this.screenshotRecorder.captureFresh(screenshotObservation.observationId, perf, signal);
+    }
     if (observation) {
       await this.runAccessibilityAudit(observation, perf);
+    }
+  }
+
+  private async captureSettledScreenshot(
+    observation: ObserveResult,
+    perf: PerformanceTracker,
+    signal: AbortSignal | undefined,
+    strict: boolean,
+  ): Promise<void> {
+    try {
+      if (!this.screenshotRecorder.captureSettled) {
+        throw new ActionableError("Settled screenshot capture is unavailable");
+      }
+      const path = await this.screenshotRecorder.captureSettled(
+        observation.observationId,
+        perf,
+        signal,
+      );
+      observation.screenshotSettled = true;
+      observation.screenshotPath = path;
+      observation.screenshotFormat = "png";
+      observation.screenshotMimeType = "image/png";
+    } catch (error) {
+      if (strict) {
+        throw new StrictSettledScreenshotCaptureError(error, this.device.deviceId);
+      }
+      observation.screenshotSettled = false;
+      observation.screenshotSettledError = describeError(error);
+      logger.warn(
+        `[OBSERVE] Settled screenshot unavailable: ${observation.screenshotSettledError}`,
+      );
     }
   }
 

@@ -62,7 +62,11 @@ import { DaemonState } from "../daemon/daemonState";
 import { logger } from "../utils/logger";
 import { serverConfig } from "../utils/ServerConfig";
 import { NodeCryptoService } from "../utils/crypto";
-import { shouldSkipObserveWaitForScreenshot } from "../features/observe/automaticScreenshotPolicy";
+import {
+  resolveScreenshotMode,
+  shouldSkipObserveWaitForScreenshot,
+  type ScreenshotMode,
+} from "../features/observe/automaticScreenshotPolicy";
 
 // Schema definitions
 // waitFor accepts legacy selectors plus richer predicates. Element predicates are
@@ -522,6 +526,12 @@ const observeBaseSchema = withJsonSchemaOverride(
         .optional()
         .describe("After waitFor matches, wait for a quiet hierarchy period (requires waitFor)"),
       raw: z.boolean().optional().describe("Include raw view hierarchy"),
+      screenshot: z
+        .enum(["settled", "async", "none"])
+        .optional()
+        .describe(
+          "Screenshot mode: await a fresh validated capture, use background capture, or skip",
+        ),
       project: z
         .enum(["full", "skeleton"])
         .optional()
@@ -1129,15 +1139,22 @@ export const waitForObservation = async (
   skipBackStack: boolean = false,
   timer: Timer = defaultTimer,
   platform?: BootedDevice["platform"],
+  screenshot?: ScreenshotMode,
 ): Promise<WaitForObservationOutcome> => {
   const complete = async (
     outcome: WaitForObservationOutcome,
   ): Promise<WaitForObservationOutcome> => {
-    if (!shouldSkipObserveWaitForScreenshot() || serverConfig.isAccessibilityAuditEnabled()) {
+    const mode = resolveScreenshotMode(screenshot);
+    if (
+      mode === "settled" ||
+      (mode === "async" &&
+        (!shouldSkipObserveWaitForScreenshot() || serverConfig.isAccessibilityAuditEnabled()))
+    ) {
       await observeScreen.captureScreenshot?.(
         createGlobalPerformanceTracker(),
         signal,
         outcome.observation,
+        screenshot,
       );
     } else {
       await observeScreen.runAccessibilityAudit?.(
@@ -1362,6 +1379,7 @@ export function registerObserveTools() {
             args.skipBackStack ?? false,
             defaultTimer,
             device.platform,
+            args.screenshot,
           )
         : null;
       const result = waitOutcome
@@ -1370,11 +1388,18 @@ export function registerObserveTools() {
             perf: createGlobalPerformanceTracker(),
             skipWaitForFresh: true,
             signal,
+            screenshot: args.screenshot,
           });
 
       if (args.raw) {
         await observeScreen.appendRawViewHierarchy(result, signal);
       }
+
+      // The settled capture has resolved before either resource is announced.
+      await ResourceRegistry.notifyResourcesUpdated([
+        RESOURCE_URIS.LATEST_OBSERVATION,
+        RESOURCE_URIS.LATEST_SCREENSHOT,
+      ]);
 
       // Include setup timing if this is the first observe after accessibility service setup
       const setupTiming = consumeSetupTiming(device.deviceId);
@@ -1409,12 +1434,6 @@ export function registerObserveTools() {
             .getSessionManager()
             .invalidateAutomationReadiness(sessionUuid, reason),
       });
-
-      // Notify MCP clients that observation resources have been updated
-      await ResourceRegistry.notifyResourcesUpdated([
-        RESOURCE_URIS.LATEST_OBSERVATION,
-        RESOURCE_URIS.LATEST_SCREENSHOT,
-      ]);
 
       if (waitOutcome) {
         const waitMetadata: Omit<WaitForObservationOutcome, "observation"> = {

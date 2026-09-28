@@ -1291,6 +1291,12 @@ describe("finalizeToolResponse", () => {
         observationId: "passthrough-observation",
         deviceId: "emulator-5554",
         freshness,
+        screenshotSettled: true,
+        screenshotSettledError: "Settled screenshot capture timed out",
+        screenshotOrientation: "display",
+        screenshotPath: "/data/local/tmp/auto-mobile/screens/passthrough-observation.png",
+        screenshotFormat: "png",
+        screenshotMimeType: "image/png",
         settled: true,
         accessibilityAuditSkipped: "settled_capture_adopted",
       });

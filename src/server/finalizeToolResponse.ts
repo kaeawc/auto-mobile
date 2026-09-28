@@ -209,6 +209,12 @@ export const DIFF_PASSTHROUGH_METADATA_FIELDS = [
   "screenSize",
   "observationId",
   "deviceId",
+  "screenshotSettled",
+  "screenshotSettledError",
+  "screenshotOrientation",
+  "screenshotPath",
+  "screenshotFormat",
+  "screenshotMimeType",
   "settled",
   "accessibilityAuditSkipped",
 ] as const satisfies readonly (keyof ObserveResult)[];

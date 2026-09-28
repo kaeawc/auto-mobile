@@ -2,12 +2,11 @@ import { describe, test, expect, beforeEach } from "bun:test";
 import { GestureClassifier } from "../../../../src/features/record/android/GestureClassifier";
 import { GESTURE_THRESHOLDS } from "../../../../src/features/record/android/types";
 import type { RawTouchFrame } from "../../../../src/features/record/android/types";
-import type { CoordScaler } from "../../../../src/features/record/android/AxisRanges";
+import { buildScaler, type CoordScaler } from "../../../../src/features/record/android/AxisRanges";
 
 // Identity scaler: raw coords == screen coords
 const identityScaler: CoordScaler = {
-  toScreenX: (x: number) => x,
-  toScreenY: (y: number) => y,
+  toScreenPoint: (x: number, y: number) => ({ x, y }),
 };
 
 // density = 1.0 so dp thresholds equal pixel thresholds
@@ -76,7 +75,7 @@ describe("GestureClassifier", () => {
   // doubleTap
   // -------------------------------------------------------------------------
 
-  test("two taps at same location within DOUBLE_TAP_MS → doubleTap", () => {
+  test("classifier emits tap then doubleTap; recorder supersedes the tap step", () => {
     // First tap
     c.feedFrame(makeFrame(0, [{ slotId: 0, trackingId: 1, x: 500, y: 500 }]));
     const tap1 = c.feedFrame(makeFrame(50, [], [0]));
@@ -87,6 +86,7 @@ describe("GestureClassifier", () => {
     const result = c.feedFrame(makeFrame(150, [], [0]));
     expect(result?.type).toBe("doubleTap");
     expect(result?.screenX).toBe(500);
+    expect(result?.firstTapArrivedAt).toBe(50);
   });
 
   test("two taps too far apart in time → two separate taps", () => {
@@ -148,6 +148,26 @@ describe("GestureClassifier", () => {
     c.feedFrame(makeFrame(50, [{ slotId: 0, trackingId: 1, x: 500, y: 100 }]));
     const result = c.feedFrame(makeFrame(100, [], [0]));
     expect(result?.direction).toBe("up");
+  });
+
+  test("rotation 90 maps a raw X drag to a vertical screen swipe", () => {
+    const rotated = new GestureClassifier(
+      buildScaler({
+        xMin: 0,
+        xMax: 1079,
+        yMin: 0,
+        yMax: 2399,
+        displayWidth: 1080,
+        displayHeight: 2400,
+        rotation: 1,
+      }),
+      DENSITY,
+    );
+    rotated.feedFrame(makeFrame(0, [{ slotId: 0, trackingId: 1, x: 200, y: 1200 }]));
+    rotated.feedFrame(makeFrame(50, [{ slotId: 0, trackingId: 1, x: 800, y: 1200 }]));
+    const result = rotated.feedFrame(makeFrame(100, [], [0]));
+    expect(result).toMatchObject({ type: "swipe", direction: "up", startX: 1200, endX: 1200 });
+    expect(result?.startY).toBeGreaterThan(result?.endY ?? Infinity);
   });
 
   test("high-velocity swipe → speed fast", () => {

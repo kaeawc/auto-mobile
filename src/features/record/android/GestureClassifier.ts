@@ -118,10 +118,8 @@ export class GestureClassifier {
         return null;
       }
 
-      const downX = this.scaler.toScreenX(contact.startX);
-      const downY = this.scaler.toScreenY(contact.startY);
-      const upX = this.scaler.toScreenX(contact.lastX);
-      const upY = this.scaler.toScreenY(contact.lastY);
+      const { x: downX, y: downY } = this.scaler.toScreenPoint(contact.startX, contact.startY);
+      const { x: upX, y: upY } = this.scaler.toScreenPoint(contact.lastX, contact.lastY);
       const durationMs = frame.arrivedAt - contact.arrivedAt;
       const displacement = dist(downX, downY, upX, upY);
       const slopPx = GESTURE_THRESHOLDS.TOUCH_SLOP_DP * this.densityDp;
@@ -144,12 +142,9 @@ export class GestureClassifier {
   // -------------------------------------------------------------------------
 
   private screenDist(rawX1: number, rawY1: number, rawX2: number, rawY2: number): number {
-    return dist(
-      this.scaler.toScreenX(rawX1),
-      this.scaler.toScreenY(rawY1),
-      this.scaler.toScreenX(rawX2),
-      this.scaler.toScreenY(rawY2),
-    );
+    const first = this.scaler.toScreenPoint(rawX1, rawY1);
+    const second = this.scaler.toScreenPoint(rawX2, rawY2);
+    return dist(first.x, first.y, second.x, second.y);
   }
 
   private maybeEmitPinch(arrivedAt: number): GestureEvent | null {
@@ -188,8 +183,9 @@ export class GestureClassifier {
       const slopPx = GESTURE_THRESHOLDS.DOUBLE_TAP_SLOP_DP * this.densityDp;
 
       if (timeSinceLast <= GESTURE_THRESHOLDS.DOUBLE_TAP_MS && separation <= slopPx) {
+        const firstTapArrivedAt = this.lastTap.arrivedAt;
         this.lastTap = null;
-        return { type: "doubleTap", arrivedAt, screenX, screenY };
+        return { type: "doubleTap", arrivedAt, screenX, screenY, firstTapArrivedAt };
       }
     }
 

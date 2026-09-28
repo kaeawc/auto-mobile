@@ -11,6 +11,8 @@ import type {
 } from "../../../../src/features/record/android/types";
 import type { BootedDevice } from "../../../../src/models";
 import { FakeTimer } from "../../../fakes/FakeTimer";
+import { GestureClassifier } from "../../../../src/features/record/android/GestureClassifier";
+import type { RawTouchFrame } from "../../../../src/features/record/android/types";
 
 // ---------------------------------------------------------------------------
 // Fakes
@@ -85,6 +87,18 @@ const TAP_ELEMENT = {
   bounds: { left: 300, top: 860, right: 400, bottom: 920 },
 };
 
+function touchFrame(
+  arrivedAt: number,
+  activeSlots: Array<{ slotId: number; trackingId: number; x: number; y: number }>,
+  releasedSlots: number[] = [],
+): RawTouchFrame {
+  return {
+    arrivedAt,
+    activeSlots: activeSlots.map((slot) => ({ ...slot, pressure: 0 })),
+    releasedSlots,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -131,6 +145,75 @@ describe("DualTrackRecorder", () => {
     expect(steps[0].params.action).toBe("doubleTap");
   });
 
+  test("classifier double tap replaces an already matched tap with one CtrlProxy click", async () => {
+    fakeTimer = new FakeTimer();
+    recorder = new DualTrackRecorder(fakeDevice, fakeGestures, fakeA11y, fakeTimer);
+    const classifier = new GestureClassifier({ toScreenPoint: (x, y) => ({ x, y }) }, 1);
+    const emitFrame = (frame: RawTouchFrame) => {
+      const gesture = classifier.feedFrame(frame);
+      if (gesture) {
+        fakeGestures.emit(gesture);
+      }
+    };
+    await recorder.start();
+
+    emitFrame(touchFrame(0, [{ slotId: 0, trackingId: 1, x: 500, y: 500 }]));
+    fakeTimer.setCurrentTime(50);
+    emitFrame(touchFrame(50, [], [0]));
+    fakeA11y.emit({
+      type: "tap",
+      timestamp: 50,
+      element: {
+        "resource-id": "com.example:id/target",
+        bounds: { left: 450, top: 450, right: 550, bottom: 550 },
+      },
+    });
+    expect(recorder.stepCount).toBe(1);
+
+    fakeTimer.setCurrentTime(100);
+    emitFrame(touchFrame(100, [{ slotId: 0, trackingId: 2, x: 500, y: 500 }]));
+    fakeTimer.setCurrentTime(150);
+    emitFrame(touchFrame(150, [], [0]));
+    fakeTimer.advanceTime(300);
+
+    const { steps } = await recorder.stop();
+    expect(steps).toHaveLength(1);
+    expect(steps[0]).toMatchObject({
+      tool: "tapOn",
+      params: { action: "doubleTap", elementId: "com.example:id/target" },
+    });
+  });
+
+  test("doubleTap can use the pair's only click after the first merge window expires", async () => {
+    fakeTimer = new FakeTimer();
+    recorder = new DualTrackRecorder(fakeDevice, fakeGestures, fakeA11y, fakeTimer);
+    await recorder.start();
+
+    fakeGestures.emit({ type: "tap", arrivedAt: 50, screenX: 500, screenY: 500 });
+    fakeTimer.advanceTime(MERGE_WINDOW_MS);
+    expect(recorder.stepCount).toBe(0);
+
+    fakeTimer.setCurrentTime(150);
+    fakeGestures.emit({
+      type: "doubleTap",
+      arrivedAt: 150,
+      firstTapArrivedAt: 50,
+      screenX: 500,
+      screenY: 500,
+    });
+    fakeA11y.emit({
+      type: "tap",
+      timestamp: 150,
+      element: {
+        "resource-id": "com.example:id/target",
+        bounds: { left: 450, top: 450, right: 550, bottom: 550 },
+      },
+    });
+    const { steps } = await recorder.stop();
+    expect(steps).toHaveLength(1);
+    expect(steps[0].params.action).toBe("doubleTap");
+  });
+
   test("longPress gesture + matching A11y element → tapOn longPress step", async () => {
     await recorder.start();
 
@@ -144,7 +227,7 @@ describe("DualTrackRecorder", () => {
     expect(steps[0].params.action).toBe("longPress");
   });
 
-  test("swipe gesture with direction + A11y element → swipeOn step with direction", async () => {
+  test("swipe gesture + CtrlProxy scroll element → swipeOn step with direction", async () => {
     await recorder.start();
 
     fakeGestures.emit({
@@ -157,7 +240,7 @@ describe("DualTrackRecorder", () => {
       endY: 200,
     });
     fakeA11y.emit({
-      type: "swipe",
+      type: "scroll",
       timestamp: Date.now(),
       element: {
         "resource-id": "com.example:id/list",

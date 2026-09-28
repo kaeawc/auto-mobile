@@ -528,6 +528,14 @@ export function withDeviceServiceStatus(
   };
 }
 
+/** Applies a later OS boot-completion observation without changing static device facts. */
+export function withDeviceLifecycle(
+  description: DeviceDescription,
+  lifecycle: DeviceDescription["runtime"]["lifecycle"],
+): DeviceDescription {
+  return { ...description, runtime: { ...description.runtime, lifecycle } };
+}
+
 /** Applies observed live state without rebuilding or reinterpreting static device facts. */
 export function withDeviceRuntimeObservation(
   description: DeviceDescription,

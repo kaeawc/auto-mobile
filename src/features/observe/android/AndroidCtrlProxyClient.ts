@@ -41,6 +41,7 @@ import { AndroidCtrlProxyManager } from "../../../utils/CtrlProxyManager";
 import type { ProxySetupResult } from "../../../utils/interfaces/ProxyManager";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
 import { Timer, defaultTimer } from "../../../utils/SystemTimer";
+import { fixedBackoff } from "../../../utils/Backoff";
 import { ForcedRestartBudget } from "../../../utils/ctrlProxy/ForcedRestartBudget";
 import {
   NavigationGraphManager,
@@ -2297,7 +2298,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     };
     let stableConnection = replaceStabilityWaiter();
 
-    const recovery = this.recoverAccessibilityService(() => {
+    const generation = this.connectionGeneration;
+    const recovery = this.recoverAccessibilityService(generation, () => {
       stableConnection = replaceStabilityWaiter();
     })
       .then(async (outcome) => {
@@ -2329,7 +2331,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         );
         // Background reconnect respects the #7537 background-attempt cap
         // rather than consuming the caller's foreground connect budget.
-        const connected = await this.connectBackgroundWebSocket();
+        const connected =
+          outcome === "repaired"
+            ? await this.connectBackgroundWebSocketAfterRecovery(generation)
+            : await this.connectBackgroundWebSocket();
         if (!connected) {
           logger.warn(
             `[AndroidCtrlProxyClient] WebSocket reconnect failed after CtrlProxy recovery`,
@@ -2361,6 +2366,38 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     this.recoveryPromise = recovery;
   }
 
+  /** Retry the post-bind socket dial while the accessibility service finishes starting its server. */
+  private async connectBackgroundWebSocketAfterRecovery(generation: number): Promise<boolean> {
+    const startedAt = this.timer.now();
+    const backoff = fixedBackoff(100);
+    let attempt = 1;
+
+    while (
+      !this.closed &&
+      generation === this.connectionGeneration &&
+      this.timer.now() - startedAt < AndroidCtrlProxyClient.OBSERVE_RECOVERY_WAIT_MS
+    ) {
+      const connected = await this.connectBackgroundWebSocket();
+      if (connected) {
+        return (
+          !this.closed &&
+          generation === this.connectionGeneration &&
+          this.timer.now() - startedAt <= AndroidCtrlProxyClient.OBSERVE_RECOVERY_WAIT_MS
+        );
+      }
+
+      const remainingMs =
+        AndroidCtrlProxyClient.OBSERVE_RECOVERY_WAIT_MS - (this.timer.now() - startedAt);
+      if (this.closed || generation !== this.connectionGeneration || remainingMs <= 0) {
+        break;
+      }
+      await this.timer.sleep(Math.min(backoff.delayForAttempt(attempt), remainingMs));
+      attempt++;
+    }
+
+    return false;
+  }
+
   /** Start a recovery for this observed transport failure if none is pending. */
   public ensureRecoveryStarted(): void {
     if (!this.closed && this.autoReconnectEnabled && !this.recoveryPromise) {
@@ -2382,12 +2419,12 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
    * `enabled_accessibility_services` or not installed at all).
    */
   private async recoverAccessibilityService(
+    generation: number,
     onEscalation: () => void,
   ): Promise<"healthy" | "repaired" | "unavailable" | "failed"> {
     if (this.closed) {
       return "failed";
     }
-    const generation = this.connectionGeneration;
     const present = await this.isDevicePresent();
     if (generation !== this.connectionGeneration) {
       return "failed";

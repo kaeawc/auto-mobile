@@ -57,6 +57,10 @@ import { AvdManagerService } from "../utils/android-cmdline-tools/AvdManagerServ
 import type { AvdManager } from "../utils/android-cmdline-tools/interfaces/AvdManager";
 import { TTLCache } from "../utils/cache/Cache";
 import { SingleFlight } from "../utils/cache/SingleFlight";
+import {
+  getInFlightAndroidColdBootReader,
+  type InFlightAndroidColdBootReader,
+} from "../utils/deviceBootService";
 
 // Resource URIs
 export const BOOTED_DEVICE_RESOURCE_URIS = {
@@ -173,7 +177,7 @@ export interface ServiceStatusDiagnostic {
 
 // The resource keeps resource-specific metadata alongside the full canonical description.
 interface BootedDeviceInfo extends BootedDeviceDescription {
-  recoveryEligibility: DeviceRecoveryEligibility | null;
+  recoveryEligibility?: DeviceRecoveryEligibility | null;
   /**
    * Set when the bounded service-status probe for this observation timed out or
    * failed (CtrlProxy loopback refused/reset). The device stays booted and
@@ -193,7 +197,7 @@ interface BootedDeviceInfo extends BootedDeviceDescription {
    * built from discovery alone and carries no probed service status or lock
    * state ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
    */
-  identityUnresolved: boolean;
+  identityUnresolved?: boolean;
 }
 
 type BootedDeviceProbeTarget = {
@@ -267,6 +271,14 @@ export function setDeviceManager(manager: PlatformDeviceManager | null): void {
   // Disable service status queries when using a fake device manager,
   // since the real queries require adb/simctl which aren't available in tests.
   serviceStatusEnabled = manager === null;
+}
+
+let injectedInFlightAndroidColdBootReader: InFlightAndroidColdBootReader | null = null;
+export function setInFlightAndroidColdBootReader(
+  reader: InFlightAndroidColdBootReader | null,
+): void {
+  injectedInFlightAndroidColdBootReader = reader;
+  resetBootedDevicesResourceCache();
 }
 
 // Controls whether service status is queried for each device.
@@ -462,6 +474,47 @@ function toBootedDeviceInfo(
     recoveryEligibility: poolContext?.poolInfo.recoveryEligibility ?? null,
     identityUnresolved: false,
   };
+}
+
+/** A claimed AVD before adb has assigned its serial; configured inventory supplies only static facts. */
+function describeInFlightAndroidColdBoot(
+  avdName: string,
+  configured: StableConfiguredDeviceImage | undefined,
+): BootedDeviceInfo {
+  const description = describeDevice({
+    kind: "image",
+    image: configured ?? { name: avdName, platform: "android", isRunning: false },
+  });
+  return {
+    ...description,
+    name: avdName,
+    platform: "android",
+    isVirtual: true,
+    source: "local",
+    identity: { stableId: avdName },
+    availabilityError: null,
+    runtime: {
+      ...description.runtime,
+      lifecycle: { state: "booting", known: true },
+    },
+  };
+}
+
+function inFlightAndroidColdBootDescriptions(
+  platform: Platform,
+  discovered: readonly BootedDevice[],
+  configuredImages: ReadonlyMap<string, StableConfiguredDeviceImage>,
+): BootedDeviceInfo[] {
+  if (platform !== "android") {
+    return [];
+  }
+  const reader = injectedInFlightAndroidColdBootReader ?? getInFlightAndroidColdBootReader();
+  const discoveredNames = new Set(discovered.map((device) => device.name));
+  return [...new Set(reader.listInFlightAndroidColdBootAvdNames())]
+    .filter((avdName) => !discoveredNames.has(avdName))
+    .map((avdName) =>
+      describeInFlightAndroidColdBoot(avdName, configuredImages.get(`android:${avdName}`)),
+    );
 }
 
 export async function configuredImagesForBootedPlatform(
@@ -697,22 +750,26 @@ async function discoverBootedDevicesForPlatform(
     const complete = discovery.succeededSources
       ? sourcesForPlatform(platform).every((source) => discovery.succeededSources!.has(source))
       : discovery.succeededPlatforms.has(platform);
-    return {
-      devices: discovery.devices.map((device) =>
-        withIdentityQuarantineMarker(
-          toBootedDeviceInfo(
+    const devices = discovery.devices.map((device) =>
+      withIdentityQuarantineMarker(
+        toBootedDeviceInfo(
+          device,
+          resolvePoolDeviceContext(
+            devicePool,
             device,
-            resolvePoolDeviceContext(
-              devicePool,
-              device,
-              sessionInfoByDeviceId,
-              resolveDeviceSessionUuid,
-            ),
-            configuredImageForBootedDevice(device, configuredImages),
+            sessionInfoByDeviceId,
+            resolveDeviceSessionUuid,
           ),
-          devicePool,
+          configuredImageForBootedDevice(device, configuredImages),
         ),
+        devicePool,
       ),
+    );
+    devices.push(
+      ...inFlightAndroidColdBootDescriptions(platform, discovery.devices, configuredImages),
+    );
+    return {
+      devices,
       succeededPlatforms: complete ? new Set([platform]) : new Set(),
       sourceObservations: Object.fromEntries(
         sourcesForPlatform(platform).map((source) => [
@@ -834,7 +891,7 @@ function withIdentityQuarantineMarker(
  * explains ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
  */
 function isProbeableDevice(device: BootedDeviceInfo): boolean {
-  return device.identityUnresolved !== true;
+  return device.runtime.deviceId !== null && device.identityUnresolved !== true;
 }
 
 const SERVICE_STATUS_TIMEOUT_MS = 5000;
@@ -903,7 +960,7 @@ async function enrichDeviceBootCompletion(
     ),
   );
   for (let i = 0; i < devices.length; i++) {
-    if (devices[i].platform !== "android") {
+    if (devices[i].platform !== "android" || !isProbeableDevice(devices[i])) {
       continue;
     }
     const result = results[i];

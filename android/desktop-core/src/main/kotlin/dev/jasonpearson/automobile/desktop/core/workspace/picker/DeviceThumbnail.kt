@@ -87,17 +87,16 @@ internal suspend fun captureScreenshotWithRetry(
 
 /**
  * The static label a non-booted card shows over its black thumbnail: `"Booting"` while a boot is in
- * flight (its id is in the picker's `bootingIds`), `"Shutdown"` for a shut-down device, and null
- * for a booted device (its last screenshot renders instead). Pure so a same-module test can pin the
- * wording without composing the view. `bootingIds` is a subset of the shut-down ids, so a booted
- * device never reads as booting.
+ * flight (either from the daemon lifecycle or the picker's optimistic `bootingIds`), `"Shutdown"`
+ * for a shut-down device, and null for a booted device (its last screenshot renders instead). Pure
+ * so a same-module test can pin the wording without composing the view.
  *
  * A future "shutting down" transient (the grid has no kill path today) plugs in as one more branch
  * ahead of the shut-down case.
  */
 internal fun thumbnailPlaceholder(state: DeviceState, booting: Boolean): String? =
   when {
-    booting -> "Booting"
+    booting || state == DeviceState.Booting -> "Booting"
     state == DeviceState.Shutdown -> "Shutdown"
     else -> null
   }

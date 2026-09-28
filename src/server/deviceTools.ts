@@ -8800,6 +8800,14 @@ export function registerDeviceTools() {
       lifecycleLease,
       allowExternalLeaseAdoptionRecheck: true,
       lifecycleCoordinator: deps.lifecycleCoordinator,
+      onAndroidColdBootTrackingChanged: () => {
+        void deps.notifyDeviceInventoryResourcesChanged(false).catch((error) => {
+          logger.warn(
+            `[DeviceTools] Resource notify after cold-boot tracking change failed: ${errorMessage(error)}`,
+            error,
+          );
+        });
+      },
     });
     let boot: DeviceBootResult | undefined;
     let ownershipTransferred = false;
@@ -9459,6 +9467,14 @@ export function registerDeviceTools() {
       lifecycleLease,
       allowExternalLeaseAdoptionRecheck: true,
       lifecycleCoordinator: deps.lifecycleCoordinator,
+      onAndroidColdBootTrackingChanged: () => {
+        void deps.notifyDeviceInventoryResourcesChanged(false).catch((error) => {
+          logger.warn(
+            `[DeviceTools] Resource notify after cold-boot tracking change failed: ${errorMessage(error)}`,
+            error,
+          );
+        });
+      },
     });
     perf.startOperation("bootDevice");
     const recoveryTargets =

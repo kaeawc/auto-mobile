@@ -35,6 +35,24 @@ class DevicePickerViewModelTest {
   ) = DevicePickerViewModel(resourceClient, bootController, testScope, UnconfinedTestDispatcher())
 
   @Test
+  fun `daemon booting row cannot start another boot`() = testScope.runTest {
+    val client = fake()
+    val avdName = "Pixel_9_API_35"
+    val booting =
+      bootedEntry(avdName, avdName, stableId = avdName)
+        .replace("\"deviceId\":\"$avdName\"", "\"deviceId\":null")
+        .replace("\"state\":\"booted\"", "\"state\":\"booting\"")
+    client.bootedDevicesResponse = bootedResponse(booting)
+    client.deviceImagesResponse = imageResponse(imageEntry(avdName, avdName))
+    val boot = FakeDeviceBootController()
+    val viewModel = vm(client, boot)
+
+    assertEquals(DeviceState.Booting, content(viewModel).devices.single().state)
+    viewModel.onAction(DevicePickerAction.BootDevice("android:$avdName"))
+    assertTrue(boot.bootRequests.isEmpty())
+  }
+
+  @Test
   fun `identical raw runtime ids have distinct grid keys and selection targets`() =
     testScope.runTest {
       val client = fake()

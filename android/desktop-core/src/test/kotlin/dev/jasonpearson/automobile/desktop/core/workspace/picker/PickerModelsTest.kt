@@ -52,6 +52,22 @@ class PickerModelsTest {
   }
 
   @Test
+  fun `serial-less Android booting entry uses its AVD identity and does not leave a shutdown row`() {
+    val avdName = "Pixel_9_API_35"
+    val booting =
+      booted(avdName, avdName, isVirtual = true)
+        .copy(
+          identity = DeviceIdentity(avdName),
+          runtime = DeviceRuntime(deviceId = null, lifecycle = DeviceLifecycle("booting", true)),
+        )
+    val devices = buildPickerDevices(listOf(booting), listOf(image(avdName, avdName)))
+
+    assertEquals(1, devices.size)
+    assertEquals(avdName, devices.single().id)
+    assertEquals(DeviceState.Booting, devices.single().state)
+  }
+
+  @Test
   fun `an unresolved AVD probe preserves the successful boot attribution`() {
     val devices =
       buildPickerDevices(

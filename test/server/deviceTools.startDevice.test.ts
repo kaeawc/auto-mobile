@@ -702,7 +702,7 @@ describe("startDevice handler", () => {
     expect(pool.getDevice(androidDevice.deviceId)).toBeNull();
   });
 
-  it("reserves a public cold boot before resource notifications", async () => {
+  it("claim notifications do not withhold the public cold boot reservation", async () => {
     const timer = new FakeTimer();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const readyDeviceIds: string[] = [];
@@ -748,6 +748,8 @@ describe("startDevice handler", () => {
     });
     await waitForResources;
     try {
+      // Claim notification starts before the reservation commits and is fire-and-forget.
+      const result = await start;
       for (let attempt = 0; attempt < 50; attempt++) {
         await Promise.resolve();
       }
@@ -756,7 +758,7 @@ describe("startDevice handler", () => {
       expect(pool.getDevice("emulator-5554")?.status).toBe("busy");
       expect(pool.getDevice("emulator-5554")?.sessionId).toBe("session-1");
       expect(daemonSessionManager.getSession("session-1")).not.toBeNull();
-      expect((await start).runtime.session.sessionUuid).toBe("session-1");
+      expect(result.runtime.session.sessionUuid).toBe("session-1");
     } finally {
       releaseResources();
       await start;

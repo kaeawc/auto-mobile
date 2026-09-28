@@ -356,14 +356,15 @@ private fun DeviceGrid(
             displayNames.getValue(device.uiKey)
           },
         selected = device.uiKey in content.selectedIds,
-        booting = device.uiKey in content.bootingIds,
+        booting = device.state == DeviceState.Booting || device.uiKey in content.bootingIds,
         error = content.bootErrors[device.uiKey],
         thumbnail = thumbnail,
         onClick = { multiSelect ->
           when {
             // A shut-down card boots on click; the boot auto-observes once it completes.
-            device.state != DeviceState.Booted ->
+            device.state == DeviceState.Shutdown ->
               onAction(DevicePickerAction.BootDevice(device.uiKey))
+            device.state == DeviceState.Booting -> Unit
             // Cmd/Shift-click builds a multi-device selection to observe together.
             multiSelect -> onAction(DevicePickerAction.ToggleSelect(device.uiKey))
             // Plain click observes this device immediately.
@@ -387,7 +388,7 @@ private fun DeviceCard(
 ) {
   val booted = device.state == DeviceState.Booted
   // A shut-down card boots on click (unless a boot is already in flight); a booted card observes.
-  val clickable = booted || !booting
+  val clickable = booted || (device.state == DeviceState.Shutdown && !booting)
   val windowInfo = LocalWindowInfo.current
   val isIos = device.platform == Platform.Ios
   Column(
@@ -435,7 +436,11 @@ private fun DeviceCard(
           if (isIos) "iOS" else "Android",
           device.osLabel,
           device.architecture,
-          if (booted) "booted" else "Shut down",
+          when (device.state) {
+            DeviceState.Booted -> "booted"
+            DeviceState.Booting -> "Booting"
+            DeviceState.Shutdown -> "Shut down"
+          },
         )
         .joinToString(" · ")
     Text(

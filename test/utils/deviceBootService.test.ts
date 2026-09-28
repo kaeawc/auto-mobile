@@ -6,6 +6,7 @@ import {
   DeviceBootService,
   DeviceBootTimeoutError,
   enrichBootedDevicesFromImages,
+  getInFlightAndroidColdBootReader,
   type DeviceBootServiceDependencies,
   type DeviceBootProgress,
 } from "../../src/utils/deviceBootService";
@@ -40,7 +41,7 @@ function service(
   lifecycleCoordinator?: VirtualDeviceLifecycleCoordinator,
   lifecycleOptions?: Pick<
     DeviceBootServiceDependencies,
-    "allowExternalLeaseAdoptionRecheck" | "lifecycleLease"
+    "allowExternalLeaseAdoptionRecheck" | "lifecycleLease" | "onAndroidColdBootTrackingChanged"
   >,
 ): DeviceBootService {
   return new DeviceBootService({
@@ -61,6 +62,61 @@ function service(
 }
 
 describe("DeviceBootService", () => {
+  it("publishes only claim and release edges for a nested Android cold boot", async () => {
+    const devices = new FakeDeviceUtils();
+    const matcher = new FakeDeviceMatcher();
+    const timer = new FakeTimer();
+    const coordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
+    const reader = getInFlightAndroidColdBootReader(coordinator);
+    const phases: string[] = [];
+    let resolveClaim!: () => void;
+    const claimed = new Promise<void>((resolve) => {
+      resolveClaim = resolve;
+    });
+    let resolveReady!: (device: BootedDevice) => void;
+    const ready = new Promise<BootedDevice>((resolve) => {
+      resolveReady = resolve;
+    });
+    devices.setDeviceImages("android", [image]);
+    matcher.setImageResult(image);
+    devices.waitForDeviceReady = async () => ready;
+
+    const boot = service(devices, matcher, undefined, timer, coordinator, {
+      onAndroidColdBootTrackingChanged: (avdName, phase) => {
+        phases.push(`${avdName}:${phase}`);
+        if (phase === "claimed") {
+          resolveClaim();
+        }
+      },
+    }).boot({ platform: "android" });
+    await claimed;
+    expect(reader.listInFlightAndroidColdBootAvdNames()).toEqual([image.name]);
+    resolveReady({ name: image.name, platform: "android", deviceId: "emulator-5554" });
+    await boot;
+    expect(reader.listInFlightAndroidColdBootAvdNames()).toEqual([]);
+    expect(phases).toEqual([`${image.name}:claimed`, `${image.name}:released`]);
+  });
+
+  it("continues the boot when the advisory tracking listener throws", async () => {
+    const devices = new FakeDeviceUtils();
+    const matcher = new FakeDeviceMatcher();
+    const timer = new FakeTimer();
+    const coordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
+    devices.setDeviceImages("android", [image]);
+    matcher.setImageResult(image);
+
+    const result = await service(devices, matcher, undefined, timer, coordinator, {
+      onAndroidColdBootTrackingChanged: () => {
+        throw new Error("notification unavailable");
+      },
+    }).boot({ platform: "android" });
+
+    expect(result.source).toBe("cold-boot");
+    expect(
+      getInFlightAndroidColdBootReader(coordinator).listInFlightAndroidColdBootAvdNames(),
+    ).toEqual([]);
+  });
+
   it.each([
     { minOsVersion: "17.0" },
     { maxOsVersion: "18.0" },

@@ -118,13 +118,49 @@ const inFlightAndroidColdBoots = new WeakMap<
   Map<string, number>
 >();
 
+export interface InFlightAndroidColdBootReader {
+  /** AVD names with at least one in-flight (claimed, not yet released) Android cold boot. */
+  listInFlightAndroidColdBootAvdNames(): readonly string[];
+}
+
+export function getInFlightAndroidColdBootReader(
+  lifecycleCoordinator: VirtualDeviceLifecycleCoordinator = getVirtualDeviceLifecycleCoordinator(),
+): InFlightAndroidColdBootReader {
+  return {
+    listInFlightAndroidColdBootAvdNames: () => [
+      ...(inFlightAndroidColdBoots.get(lifecycleCoordinator)?.keys() ?? []),
+    ],
+  };
+}
+
+function notifyAndroidColdBootTrackingChanged(
+  listener: DeviceBootServiceDependencies["onAndroidColdBootTrackingChanged"],
+  avdName: string,
+  phase: "claimed" | "released",
+): void {
+  try {
+    listener?.(avdName, phase);
+  } catch (error) {
+    // Resource notification is advisory; listener failure must not fail the boot.
+    logger.warn(
+      `[DeviceBootService] Android cold-boot tracking listener failed: ${errorMessage(error)}`,
+      error,
+    );
+  }
+}
+
 function trackInFlightAndroidColdBoot(
   lifecycleCoordinator: VirtualDeviceLifecycleCoordinator,
   avdName: string,
+  listener?: DeviceBootServiceDependencies["onAndroidColdBootTrackingChanged"],
 ): () => void {
   const boots = inFlightAndroidColdBoots.get(lifecycleCoordinator) ?? new Map<string, number>();
   inFlightAndroidColdBoots.set(lifecycleCoordinator, boots);
-  boots.set(avdName, (boots.get(avdName) ?? 0) + 1);
+  const priorCount = boots.get(avdName) ?? 0;
+  boots.set(avdName, priorCount + 1);
+  if (priorCount === 0) {
+    notifyAndroidColdBootTrackingChanged(listener, avdName, "claimed");
+  }
   return () => {
     const remaining = (boots.get(avdName) ?? 1) - 1;
     if (remaining > 0) {
@@ -135,6 +171,7 @@ function trackInFlightAndroidColdBoot(
     if (boots.size === 0) {
       inFlightAndroidColdBoots.delete(lifecycleCoordinator);
     }
+    notifyAndroidColdBootTrackingChanged(listener, avdName, "released");
   };
 }
 
@@ -148,9 +185,10 @@ function hasInFlightAndroidColdBoot(
 function trackInFlightAndroidColdBootIfNeeded(
   lifecycleCoordinator: VirtualDeviceLifecycleCoordinator,
   image: DeviceInfo,
+  listener?: DeviceBootServiceDependencies["onAndroidColdBootTrackingChanged"],
 ): (() => void) | undefined {
   return image.platform === "android"
-    ? trackInFlightAndroidColdBoot(lifecycleCoordinator, image.name)
+    ? trackInFlightAndroidColdBoot(lifecycleCoordinator, image.name, listener)
     : undefined;
 }
 
@@ -260,6 +298,8 @@ export interface DeviceBootServiceDependencies {
   /** Bind a selector reservation to canonical identity before mutating the device. */
   onIdentityResolved?: (identity: StableVirtualDeviceIdentity) => Promise<void>;
   lifecycleCoordinator?: VirtualDeviceLifecycleCoordinator;
+  /** Fired synchronously, fire-and-forget on the 0->1 claim and 1->0 release transitions. */
+  onAndroidColdBootTrackingChanged?: (avdName: string, phase: "claimed" | "released") => void;
   /** Existing lease held by a caller through later session/readiness work. */
   lifecycleLease?: VirtualDeviceLifecycleLease;
   /** Opts an injected daemon lease into post-bind re-checks; deviceTools' reservation races tolerate shared cold boots. */
@@ -901,6 +941,7 @@ export class DeviceBootService {
     const releaseInFlightAndroidColdBoot = trackInFlightAndroidColdBootIfNeeded(
       this.lifecycleCoordinator,
       image,
+      this.dependencies.onAndroidColdBootTrackingChanged,
     );
     try {
       return await this.bootRecovery.run(
@@ -925,6 +966,7 @@ export class DeviceBootService {
     const releaseInFlightAndroidColdBoot = trackInFlightAndroidColdBootIfNeeded(
       this.lifecycleCoordinator,
       image,
+      this.dependencies.onAndroidColdBootTrackingChanged,
     );
     try {
       return await this.bootImageOnceWithOwnedLaunchTracking(image, context, progress, provisioned);

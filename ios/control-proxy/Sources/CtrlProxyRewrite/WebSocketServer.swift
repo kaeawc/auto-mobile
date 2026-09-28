@@ -8,9 +8,15 @@ import os
 /// coordinator deliberately knows nothing about the framework that records a failure: callers
 /// translate failures to strings at the boundary, keeping the production target framework-free.
 public final class CommandFailureCoordinator: Sendable {
+    static let maxFailures = 16
+    static let maxDescriptionBytes = 4096
+    private static let truncationIndicator = "Additional command failures truncated"
+
     private struct InFlightCommand: Sendable {
         let requestId: String?
         var failures: [String] = []
+        var descriptionBytes = 0
+        var truncated = false
     }
 
     private let inFlightCommand = OSAllocatedUnfairLock<InFlightCommand?>(initialState: nil)
@@ -21,27 +27,46 @@ public final class CommandFailureCoordinator: Sendable {
         inFlightCommand.withLock { $0 = InFlightCommand(requestId: requestId) }
     }
 
-    public func end() {
-        inFlightCommand.withLock { $0 = nil }
-    }
-
     /// Records a failure for the current command, returning whether the caller should deflect it.
     public func recordDeflectedFailure(_ description: String) -> Bool {
         inFlightCommand.withLock { state in
             guard var command = state else { return false }
-            command.failures.append(description)
+            if !command.truncated {
+                let remaining = Self.maxDescriptionBytes - Self.truncationIndicator.utf8.count
+                    - command.descriptionBytes
+                if command.failures.count == Self.maxFailures || description.utf8.count > remaining {
+                    if remaining > 0, command.failures.count < Self.maxFailures {
+                        var prefix = ""
+                        var prefixBytes = 0
+                        for scalar in description.unicodeScalars {
+                            let scalarBytes = String(scalar).utf8.count
+                            if prefixBytes + scalarBytes > remaining { break }
+                            prefix.unicodeScalars.append(scalar)
+                            prefixBytes += scalarBytes
+                        }
+                        if !prefix.isEmpty {
+                            command.failures.append(prefix)
+                            command.descriptionBytes += prefixBytes
+                        }
+                    }
+                    command.failures.append(Self.truncationIndicator)
+                    command.truncated = true
+                } else {
+                    command.failures.append(description)
+                    command.descriptionBytes += description.utf8.count
+                }
+            }
             state = command
             return true
         }
     }
 
-    /// Drains failures recorded for the current command without ending its in-flight window.
-    public func takeDeflectedFailures() -> [String] {
+    /// Returns all failures and closes the command window under the same lock.
+    public func finish() -> [String] {
         inFlightCommand.withLock { state in
-            guard var command = state else { return [] }
+            guard let command = state else { return [] }
             let failures = command.failures
-            command.failures.removeAll()
-            state = command
+            state = nil
             return failures
         }
     }
@@ -297,15 +322,13 @@ final class WebSocketServer: @unchecked Sendable {
     func handleMessage(_ data: Data, responder: any WebSocketResponding) async {
         let inFlightRequestId = failureCoordinator == nil ? nil : WireError.extractRequestId(from: data)
         failureCoordinator?.begin(requestId: inFlightRequestId)
-        defer { failureCoordinator?.end() }
-
         do {
             let request = try JSONDecoder().decode(WebSocketRequest.self, from: data)
             print(
                 "[WebSocketServer] Received request type=\(request.typeString) requestId=\(request.requestId ?? "nil")"
             )
 
-            let responseData = try await perf.withScope {
+            let (response, responseData) = try await perf.withScope {
                 self.perf.serial("handleRequest:\(request.typeString)")
                 let startTime = Date()
                 let response = await self.commandHandler.handle(request)
@@ -313,21 +336,40 @@ final class WebSocketServer: @unchecked Sendable {
                 self.perf.end()
 
                 let perfTiming = self.flushPerfTiming()
-                return try self.encodeResponse(response, totalTimeMs: totalTimeMs, perfTiming: perfTiming)
+                let data = try self.encodeResponse(response, totalTimeMs: totalTimeMs, perfTiming: perfTiming)
+                return (response, data)
             }
-            let deflectedFailures = failureCoordinator?.takeDeflectedFailures() ?? []
+            let deflectedFailures = failureCoordinator?.finish() ?? []
             if deflectedFailures.isEmpty {
                 responder.send(responseData)
             } else {
-                responder.send(ErrorResponse.build(
-                    requestId: inFlightRequestId,
-                    error: DeflectedCommandError(failures: deflectedFailures)
-                ))
+                let existingError = (response as? WebSocketResponse).flatMap { $0.success == false ? $0.error : nil }
+                let error = DeflectedCommandError(
+                    failures: deflectedFailures, underlyingMessage: existingError
+                )
+                if let original = response as? WebSocketResponse, existingError != nil {
+                    // Decode the already-encoded envelope so injected timing is retained.
+                    let encoded = try JSONDecoder().decode(WebSocketResponse.self, from: responseData)
+                    let deflected = WebSocketResponse(
+                        type: original.type,
+                        timestamp: original.timestamp,
+                        requestId: original.requestId,
+                        success: false,
+                        totalTimeMs: encoded.totalTimeMs,
+                        error: error.errorDescription,
+                        text: original.text,
+                        perfTiming: encoded.perfTiming,
+                        pinchPath: original.pinchPath
+                    )
+                    try responder.send(JSONEncoder().encode(deflected))
+                } else {
+                    responder.send(ErrorResponse.build(requestId: inFlightRequestId, error: error))
+                }
             }
         } catch {
             print("[WebSocketServer] Error handling message: \(error)")
             perf.clear()
-            let deflectedFailures = failureCoordinator?.takeDeflectedFailures() ?? []
+            let deflectedFailures = failureCoordinator?.finish() ?? []
             let responseError: any Error = if deflectedFailures.isEmpty {
                 error
             } else {

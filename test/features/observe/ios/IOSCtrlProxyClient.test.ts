@@ -296,6 +296,88 @@ describe("IOSCtrlProxyClient", function () {
 
   describe("connection lifecycle", function () {
     test.each([
+      ["service_recovering", true],
+      ["auto_setup_failed", false],
+    ] as const)(
+      "reports %s for runner exit during startup when recovery in flight is %s",
+      async (reason, recovering) => {
+        const timer = new FakeTimer();
+        timer.enableAutoAdvance();
+        const manager = {
+          isRunning: async () => false,
+          setup: async () => ({
+            success: false,
+            message: "Failed to setup CtrlProxy",
+            error: "iOS CtrlProxy runner exited during startup",
+            recoveryInterrupted: true,
+          }),
+          isRecoveryInFlight: () => recovering,
+        } as unknown as CtrlProxyIosManager;
+        const client = IOSCtrlProxyClient.createForTesting(
+          testDevice,
+          serverPort,
+          createInstantFailureWebSocketFactory(timer),
+          timer,
+          () => manager,
+          async () => [testDevice],
+        );
+        (client as any).autoReconnectEnabled = false;
+        try {
+          expect(await client.ensureConnected()).toBe(false);
+          expect(
+            (client as any).createHierarchyDelegateContext().getLastConnectFailure(),
+          ).toMatchObject({
+            reason,
+            detail: "iOS CtrlProxy runner exited during startup",
+          });
+        } finally {
+          await client.close();
+        }
+      },
+    );
+
+    test.each([
+      ["service_recovering", true],
+      ["auto_setup_failed", false],
+    ] as const)(
+      "reports %s for cancelled startup when recovery in flight is %s",
+      async (reason, recovering) => {
+        const timer = new FakeTimer();
+        timer.enableAutoAdvance();
+        const manager = {
+          isRunning: async () => false,
+          setup: async () => ({
+            success: false,
+            message: "Failed to setup CtrlProxy",
+            error: "iOS CtrlProxy startup was cancelled by stop()",
+            recoveryInterrupted: true,
+          }),
+          isRecoveryInFlight: () => recovering,
+        } as unknown as CtrlProxyIosManager;
+        const client = IOSCtrlProxyClient.createForTesting(
+          testDevice,
+          serverPort,
+          createInstantFailureWebSocketFactory(timer),
+          timer,
+          () => manager,
+          async () => [testDevice],
+        );
+        (client as any).autoReconnectEnabled = false;
+        try {
+          expect(await client.ensureConnected()).toBe(false);
+          expect(
+            (client as any).createHierarchyDelegateContext().getLastConnectFailure(),
+          ).toMatchObject({
+            reason,
+            detail: "iOS CtrlProxy startup was cancelled by stop()",
+          });
+        } finally {
+          await client.close();
+        }
+      },
+    );
+
+    test.each([
       ["simulator_not_booted", false, "unused"],
       ["auto_setup_failed", true, "runner install failed"],
     ] as const)("records %s from failed connection", async (reason, booted, message) => {

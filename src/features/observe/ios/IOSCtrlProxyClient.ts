@@ -34,7 +34,11 @@ import { Timer, defaultTimer } from "../../../utils/SystemTimer";
 import { RetryExecutor, defaultRetryExecutor } from "../../../utils/retry/RetryExecutor";
 import { IOS_CTRL_PROXY_RESERVED_PORTS, PortManager } from "../../../utils/PortManager";
 import { requireBootedDevice } from "../../../utils/requireBootedDevice";
-import { IOSCtrlProxyManager, CtrlProxyIosManager } from "../../../utils/IOSCtrlProxyManager";
+import {
+  IOSCtrlProxyManager,
+  CtrlProxyIosManager,
+  type CtrlProxyIosSetupResult,
+} from "../../../utils/IOSCtrlProxyManager";
 import { PlatformDeviceManagerFactory } from "../../../utils/factories/PlatformDeviceManagerFactory";
 import { NavigationGraphManager } from "../../navigation/NavigationGraphManager";
 import { serverConfig } from "../../../utils/ServerConfig";
@@ -1120,7 +1124,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
 
       if (!result.success) {
         logger.warn(`[IOSCtrlProxyClient] Auto-setup failed: ${result.message}`);
-        this.lastConnectFailure = { reason: "auto_setup_failed", detail: result.message };
+        this.lastConnectFailure = this.autoSetupFailure(result, manager);
         return false;
       }
 
@@ -1137,6 +1141,19 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     } finally {
       this.isAttemptingAutoSetup = false;
     }
+  }
+
+  private autoSetupFailure(
+    result: CtrlProxyIosSetupResult,
+    manager: CtrlProxyIosManager,
+  ): { reason: IosHierarchyUnavailableReason; detail: string } {
+    return {
+      reason:
+        result.recoveryInterrupted && manager.isRecoveryInFlight?.()
+          ? "service_recovering"
+          : "auto_setup_failed",
+      detail: result.recoveryInterrupted ? (result.error ?? result.message) : result.message,
+    };
   }
 
   private async reconnectAfterSetup(perf: PerformanceTracker): Promise<boolean> {
@@ -2410,7 +2427,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     );
     try {
       // WebSocket failures are authoritative even when HTTP /health still responds.
-      await manager.forceRestart();
+      await manager.forceRestart({ joinInFlightStart: true });
       this.restartAcceptsReplacement = true;
       this.syncPortFromManager(manager);
       this.acceptEarlyRestartReplacement();

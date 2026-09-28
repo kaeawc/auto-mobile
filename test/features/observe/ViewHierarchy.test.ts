@@ -536,6 +536,45 @@ describe("ViewHierarchy", function () {
       }
     });
 
+    test("waits once after a superseded iOS startup reports service_recovering", async function () {
+      const iosDevice: BootedDevice = {
+        deviceId: "test-ios-device",
+        name: "Test iPhone",
+        platform: "ios",
+      };
+      let reads = 0;
+      let waits = 0;
+      const client = {
+        getLatestHierarchy: async () =>
+          ++reads === 1
+            ? {
+                hierarchy: null,
+                unavailableReason: "service_recovering",
+                unavailableDetail: "startup superseded",
+              }
+            : { hierarchy: { hierarchy: { role: "text", text: "Recovered" } }, fresh: true },
+        ensureRecoveryStarted: () => {},
+        awaitRecovery: async () => {
+          waits++;
+          return "recovered";
+        },
+      };
+      const spy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(client as any);
+      try {
+        const vh = new ViewHierarchy(
+          iosDevice,
+          new FakeAdbClientFactory(fakeAdb),
+          mockCtrlProxyClient,
+          new FakeTimer(),
+        );
+        const result = await vh.getViewHierarchy();
+        expect([reads, waits]).toEqual([2, 1]);
+        expect(result.hierarchy.error).toBeUndefined();
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
     test("joins iOS cooldown recovery and refetches exactly once", async function () {
       const iosDevice: BootedDevice = {
         deviceId: "test-ios-device",

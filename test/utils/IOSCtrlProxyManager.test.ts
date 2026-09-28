@@ -15,6 +15,7 @@ import { PortManager } from "../../src/utils/PortManager";
 import { IOSCtrlProxyBuilder } from "../../src/utils/IOSCtrlProxyBuilder";
 import { IOSCtrlProxyProcessClient } from "../../src/utils/ios/IOSCtrlProxyProcessClient";
 import { logger } from "../../src/utils/logger";
+import { NoOpPerformanceTracker } from "../../src/utils/PerformanceTracker";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import type { Xcodebuild } from "../../src/utils/ios-cmdline-tools/XcodebuildClient";
 import type { DeviceAppManager } from "../../src/utils/ios-cmdline-tools/DeviceAppManager";
@@ -879,6 +880,174 @@ describe("IOSCtrlProxyManager", function () {
   });
 
   describe("forceRestart", function () {
+    test("replaces a joined startup when the runner exits during WebSocket initialization", async function () {
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeTimer,
+        createFakeBuilder(),
+        new FakeProcessExecutor(),
+      );
+      const internal = manager as unknown as {
+        startInternal(start: { controller: AbortController }): Promise<void>;
+        completeHealthStartup(
+          start: { controller: AbortController },
+          perf: NoOpPerformanceTracker,
+        ): Promise<void>;
+        cancelAndAwaitSharedStart(): Promise<void>;
+        retireRunnerAfterFinalSharedStartCancellation(): Promise<void>;
+        uninstallLegacyAppIfPresent(): Promise<void>;
+        sharedStart: { externalWaitingCallers: number } | null;
+        processSupervisor: { processExited(): void };
+      };
+      let launches = 0;
+      spyOn(internal, "startInternal").mockImplementation(async (start) => {
+        launches++;
+        if (launches === 1) {
+          await internal.completeHealthStartup(start, new NoOpPerformanceTracker());
+        }
+      });
+      spyOn(internal, "retireRunnerAfterFinalSharedStartCancellation").mockResolvedValue();
+      spyOn(internal, "uninstallLegacyAppIfPresent").mockResolvedValue();
+      spyOn(manager, "isRunning").mockResolvedValue(false);
+      const stop = spyOn(manager, "stop").mockImplementation(() =>
+        internal.cancelAndAwaitSharedStart(),
+      );
+      spyOn(
+        manager as unknown as { isRunnerStillHealthyAfterForcedTeardown(): Promise<boolean> },
+        "isRunnerStillHealthyAfterForcedTeardown",
+      ).mockResolvedValue(false);
+
+      const firstStart = manager.start();
+      const firstFailure = firstStart.catch((error: Error) => error.message);
+      for (let i = 0; i < 20 && fakeTimer.getSleepHistory().length === 0; i++) {
+        await Promise.resolve();
+      }
+      expect(fakeTimer.getSleepHistory()).toContain(500);
+      const autoSetup = manager.setup();
+      for (let i = 0; i < 20 && internal.sharedStart?.externalWaitingCallers !== 2; i++) {
+        await Promise.resolve();
+      }
+      expect(internal.sharedStart?.externalWaitingCallers).toBe(2);
+      const recovery = manager.forceRestart({ joinInFlightStart: true });
+      internal.processSupervisor.processExited();
+      await fakeTimer.advanceTimeAsync(500);
+
+      await recovery;
+      expect(await firstFailure).toBe("iOS CtrlProxy runner exited during startup");
+      expect(await autoSetup).toMatchObject({
+        success: false,
+        error: "iOS CtrlProxy runner exited during startup",
+        recoveryInterrupted: true,
+      });
+      expect(stop).toHaveBeenCalledTimes(1);
+      expect(launches).toBe(2);
+      expect(manager.getRunnerGeneration()).toBe(1);
+    });
+
+    test("reconnect restart joins auto-setup and supervisor startup after runner exit", async function () {
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeTimer,
+        undefined,
+        new FakeProcessExecutor(),
+      );
+      const internal = manager as unknown as {
+        startInternal(start: { controller: AbortController }): Promise<void>;
+        cancelAndAwaitSharedStart(): Promise<void>;
+        processSupervisor: { processExited(): void };
+      };
+      const startup = deferred();
+      let launches = 0;
+      let startupSignal: AbortSignal | undefined;
+      spyOn(internal, "startInternal").mockImplementation(async (start) => {
+        launches++;
+        startupSignal = start.controller.signal;
+        await startup.promise;
+        if (start.controller.signal.aborted) {
+          throw start.controller.signal.reason;
+        }
+      });
+      spyOn(manager, "stop").mockImplementation(() => internal.cancelAndAwaitSharedStart());
+      spyOn(
+        manager as unknown as { isRunnerStillHealthyAfterForcedTeardown(): Promise<boolean> },
+        "isRunnerStillHealthyAfterForcedTeardown",
+      ).mockResolvedValue(false);
+
+      internal.processSupervisor.processExited();
+      await Promise.resolve();
+      const autoSetup = manager.start();
+      const autoSetupOutcome = autoSetup.then(
+        () => "started",
+        () => "cancelled",
+      );
+      for (let i = 0; i < 8 && launches === 0; i++) {
+        await Promise.resolve();
+      }
+      expect(launches).toBe(1);
+      const originalPort = manager.getServicePort();
+      await fakeTimer.advanceTimeAsync(2_000);
+      const reconnectRestart = manager.forceRestart({
+        joinInFlightStart: true,
+      });
+      try {
+        await Promise.resolve();
+        expect(startupSignal?.aborted).toBe(false);
+        expect(launches).toBe(1);
+        startup.resolve();
+        await Promise.all([autoSetup, reconnectRestart]);
+        await expect(autoSetupOutcome).resolves.toBe("started");
+        expect(launches).toBe(1);
+        expect(manager.getServicePort()).toBe(originalPort);
+      } finally {
+        startup.resolve();
+        await Promise.allSettled([autoSetup, reconnectRestart]);
+      }
+    });
+
+    test("reconnect restart replaces a startup that remains wedged past its health deadline", async function () {
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeTimer,
+        undefined,
+        new FakeProcessExecutor(),
+      );
+      const internal = manager as unknown as {
+        startInternal(start: { controller: AbortController }): Promise<void>;
+        cancelAndAwaitSharedStart(): Promise<void>;
+      };
+      let launches = 0;
+      spyOn(internal, "startInternal").mockImplementation(async (start) => {
+        launches++;
+        if (launches === 1) {
+          await new Promise<void>((_resolve, reject) => {
+            start.controller.signal.addEventListener(
+              "abort",
+              () => reject(start.controller.signal.reason),
+              { once: true },
+            );
+          });
+        }
+      });
+      spyOn(manager, "stop").mockImplementation(() => internal.cancelAndAwaitSharedStart());
+      spyOn(
+        manager as unknown as { isRunnerStillHealthyAfterForcedTeardown(): Promise<boolean> },
+        "isRunnerStillHealthyAfterForcedTeardown",
+      ).mockResolvedValue(false);
+
+      const firstStart = manager.start();
+      const firstFailure = firstStart.catch((error: Error) => error.message);
+      for (let i = 0; i < 8 && launches === 0; i++) {
+        await Promise.resolve();
+      }
+      const retiredPort = manager.getServicePort();
+      const recovery = manager.forceRestart({ joinInFlightStart: true });
+      await fakeTimer.advanceTimeAsync(1_500);
+      await recovery;
+      expect(await firstFailure).toBe("iOS CtrlProxy startup was cancelled by stop()");
+      expect(launches).toBe(2);
+      expect(manager.getServicePort()).not.toBe(retiredPort);
+    });
+
     test("allocates a distinct service port for a successful targeted restart", async function () {
       const manager = IOSCtrlProxyManager.getInstance(testDevice);
       const retiredPort = manager.getServicePort();

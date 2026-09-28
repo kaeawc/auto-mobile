@@ -66,6 +66,22 @@ const FORCE_RESTART_DRAIN_POLL_INTERVAL_MS = 50;
  */
 export interface CtrlProxyIosSetupResult extends ProxySetupResult {
   buildResult?: CtrlProxyIosBuildResult;
+  /** Startup was cancelled while another recovery path may still be active. */
+  recoveryInterrupted?: boolean;
+}
+
+class CtrlProxyStartupRecoveryInterruptedError extends Error {}
+
+class CtrlProxyStartupCancelledByStopError extends CtrlProxyStartupRecoveryInterruptedError {
+  constructor() {
+    super("iOS CtrlProxy startup was cancelled by stop()");
+  }
+}
+
+class CtrlProxyRunnerExitedDuringStartupError extends CtrlProxyStartupRecoveryInterruptedError {
+  constructor() {
+    super("iOS CtrlProxy runner exited during startup");
+  }
 }
 
 export interface CtrlProxyStartOptions {
@@ -78,6 +94,8 @@ export interface CtrlProxyStartOptions {
   minimumHealthPollDurationMs?: number;
   /** Cancels only this caller's wait for shared startup. */
   signal?: AbortSignal;
+  /** Reconnect recovery joins an existing startup before considering a replacement. */
+  joinInFlightStart?: boolean;
 }
 
 interface SharedCtrlProxyStart {
@@ -112,6 +130,7 @@ export interface CtrlProxyIosManager extends ProxyManager {
   setAutoRestart(enabled: boolean): void;
   isAutoRestartEnabled(): boolean;
   forceRestart(options?: CtrlProxyStartOptions): Promise<void>;
+  isRecoveryInFlight?(): boolean;
 }
 
 interface RemoteCtrlProxyIOSRunner {
@@ -426,6 +445,15 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       },
       isAlive: () => this.isSupervisedCtrlProxyProcessAlive(),
       onExit: () => {
+        const sharedStart = this.sharedStart;
+        if (
+          sharedStart &&
+          !sharedStart.completed &&
+          !sharedStart.teardownCommitted &&
+          !sharedStart.controller.signal.aborted
+        ) {
+          sharedStart.controller.abort(new CtrlProxyRunnerExitedDuringStartupError());
+        }
         this.xcTestProcessId = null;
         this.xcTestProcess = null;
         this.clearCaches();
@@ -1620,7 +1648,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       return;
     }
     if (!sharedStart.teardownCommitted && !sharedStart.controller.signal.aborted) {
-      sharedStart.controller.abort(new Error("iOS CtrlProxy startup was cancelled by stop()"));
+      sharedStart.controller.abort(new CtrlProxyStartupCancelledByStopError());
     }
     try {
       await sharedStart.completion;
@@ -1888,6 +1916,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         success: false,
         message: "Failed to setup CtrlProxy",
         error: errorMsg,
+        recoveryInterrupted: error instanceof CtrlProxyStartupRecoveryInterruptedError,
         perfTiming: perf.getTimings(),
       };
     }
@@ -2300,6 +2329,21 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     return this.processSupervisor.isAutoRestartEnabled();
   }
 
+  public isRecoveryInFlight(): boolean {
+    const start = this.sharedStart;
+    return (
+      !!this.forceRestartInFlight ||
+      (!this.isStopping &&
+        (this.processSupervisor.isRestartPending() ||
+          !!(
+            start &&
+            !start.completed &&
+            !start.controller.signal.aborted &&
+            !start.teardownCommitted
+          )))
+    );
+  }
+
   /**
    * Force restart the service (useful when client detects issues)
    */
@@ -2315,6 +2359,29 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         return;
       }
       return this.forceRestart(options);
+    }
+
+    const sharedStart = this.sharedStart;
+    if (
+      options.joinInFlightStart &&
+      sharedStart &&
+      !sharedStart.completed &&
+      !sharedStart.controller.signal.aborted &&
+      !sharedStart.teardownCommitted
+    ) {
+      try {
+        // Join without disturbing a live startup. If it exceeds its health
+        // deadline, fall through to the ordinary teardown and replacement path.
+        await this.waitForReconnectStartup(sharedStart, options.signal);
+        return;
+      } catch (error) {
+        if (options.signal?.aborted) {
+          throw error;
+        }
+        logger.warn(
+          `[IOSCtrlProxy] Joined startup failed; forcing replacement: ${errorMessage(error)}`,
+        );
+      }
     }
 
     // Stop cannot be interrupted safely. Keep subsequent start/restart callers
@@ -2709,6 +2776,48 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         (error) => settle(() => reject(error)),
       );
     });
+  }
+
+  private async waitForReconnectStartup(
+    sharedStart: SharedCtrlProxyStart,
+    signal: AbortSignal | undefined,
+  ): Promise<void> {
+    const controller = new AbortController();
+    const fallbackDeadlineMs =
+      this.timer.now() + IOSCtrlProxyManager.resolveHealthPollMaxAttempts() * 500;
+    let timeout: ReturnType<Timer["setTimeout"]> | undefined;
+    const scheduleDeadline = () => {
+      const remainingMs =
+        Math.max(fallbackDeadlineMs, sharedStart.healthPollDeadlineMs ?? 0) - this.timer.now();
+      timeout = this.timer.setTimeout(
+        () => {
+          if (
+            Math.max(fallbackDeadlineMs, sharedStart.healthPollDeadlineMs ?? 0) > this.timer.now()
+          ) {
+            scheduleDeadline();
+            return;
+          }
+          controller.abort(
+            new Error("iOS CtrlProxy shared startup exceeded its recovery deadline"),
+          );
+        },
+        Math.max(0, remainingMs),
+      );
+    };
+    const onAbort = () => controller.abort(signal?.reason);
+    signal?.addEventListener("abort", onAbort, { once: true });
+    if (signal?.aborted) {
+      onAbort();
+    }
+    scheduleDeadline();
+    try {
+      await this.waitForSharedStart(sharedStart, controller.signal);
+    } finally {
+      if (timeout) {
+        this.timer.clearTimeout(timeout);
+      }
+      signal?.removeEventListener("abort", onAbort);
+    }
   }
 
   private async sleepForHealthPoll(delayMs: number, signal?: AbortSignal): Promise<void> {

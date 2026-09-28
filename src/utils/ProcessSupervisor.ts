@@ -11,6 +11,7 @@ export interface ProcessSupervisor {
   isAlive(): Promise<boolean>;
   setAutoRestart(enabled: boolean): void;
   isAutoRestartEnabled(): boolean;
+  isRestartPending(): boolean;
 }
 
 export interface ProcessSupervisorOptions {
@@ -30,6 +31,7 @@ export class DefaultProcessSupervisor implements ProcessSupervisor {
   private monitorInterval: ReturnType<Timer["setInterval"]> | null = null;
   private restartTimeout: ReturnType<Timer["setTimeout"]> | null = null;
   private restartAttempts = 0;
+  private restartRunning = false;
   private isStopping = false;
   private autoRestartEnabled = true;
   private lifecycleGeneration = 0;
@@ -52,6 +54,10 @@ export class DefaultProcessSupervisor implements ProcessSupervisor {
 
   public processExited(): void {
     void this.handleProcessExit();
+  }
+
+  public isRestartPending(): boolean {
+    return this.restartTimeout !== null || this.restartRunning;
   }
 
   private async handleProcessExit(): Promise<void> {
@@ -152,6 +158,7 @@ export class DefaultProcessSupervisor implements ProcessSupervisor {
   }
 
   private async restart(attempt: number): Promise<void> {
+    this.restartRunning = true;
     try {
       await this.options.restart();
       if (this.isStopping) {
@@ -167,6 +174,8 @@ export class DefaultProcessSupervisor implements ProcessSupervisor {
           `${errorMessage(error)}`,
       );
       this.scheduleRestart();
+    } finally {
+      this.restartRunning = false;
     }
   }
 

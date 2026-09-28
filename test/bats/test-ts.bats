@@ -224,12 +224,14 @@ teardown_file() {
   # macOS runners do not necessarily have GNU timeout.
   source scripts/ios/run_with_timeout.sh
 
-  local self_pid="$BASHPID" pipe pipe_record scan holders group_members pid ppid pgid command command_line elapsed ownership
+  local self_pid="$BASHPID" pipe pipe_record scan holders group_members status pid ppid pgid command command_line elapsed ownership
   local root_pid started start_text start_epoch
   [[ -r "$BATS_FILE_TMPDIR/fd3-ownership" ]] || return 0
   read -r root_pid started < "$BATS_FILE_TMPDIR/fd3-ownership"
   [[ "$root_pid" == "$self_pid" && "$started" =~ ^[0-9]+$ ]] || return 0
-  if ! pipe_record="$(run_with_timeout 3 lsof -nP -a -p "$self_pid" -d 3 -F n 3>&- 2> /dev/null)"; then
+  pipe_record="$(run_with_timeout 3 lsof -nP -a -p "$self_pid" -d 3 -F n 3>&- 2> /dev/null)"
+  status=$?
+  if [[ "$status" -eq 124 || -z "$pipe_record" ]]; then
     printf '# test-ts.bats could not inspect its fd 3 within 3s; skipping reaper\n' >&3
     return 0
   fi
@@ -238,7 +240,9 @@ teardown_file() {
 
   # The inherited fd is enough to link live descendants back to this root.
   # Bound the fd-scoped scan so a busy runner cannot hold the TAP pipe open.
-  if ! scan="$(run_with_timeout 3 lsof -nP -a -d 3 -F pRgcfn 3>&- 2> /dev/null)"; then
+  scan="$(run_with_timeout 3 lsof -nP -a -d 3 -F pRgcfn 3>&- 2> /dev/null)"
+  status=$?
+  if [[ "$status" -eq 124 || -z "$scan" ]]; then
     printf '# test-ts.bats could not scan fd 3 holders within 3s; skipping reaper\n' >&3
     return 0
   fi
@@ -301,9 +305,16 @@ teardown_file() {
       # The fd-scoped scan cannot see group members that closed fd 3. Check
       # the complete group before treating a reparented process as ours.
       [[ "$pgid" =~ ^[0-9]+$ ]] || continue
-      if ! group_members="$(run_with_timeout 3 lsof -nP -a -g "$pgid" -F pR 3>&- 2> /dev/null)"; then
-        printf '# test-ts.bats could not inspect process group %s within 3s; leaving pid=%s alone\n' \
-          "$pgid" "$pid" >&3
+      group_members="$(run_with_timeout 3 lsof -nP -a -g "$pgid" -F pR 3>&- 2> /dev/null)"
+      status=$?
+      if [[ "$status" -ne 0 ]]; then
+        if [[ "$status" -eq 124 ]]; then
+          printf '# test-ts.bats could not inspect process group %s within 3s; leaving pid=%s alone\n' \
+            "$pgid" "$pid" >&3
+        else
+          printf '# test-ts.bats lsof failed to inspect process group %s (status=%s); leaving pid=%s alone\n' \
+            "$pgid" "$status" "$pid" >&3
+        fi
         continue
       fi
       if ! awk -v root="$root_pid" -v candidate="$pid" '
@@ -413,6 +424,84 @@ EOF
   ! grep -q "pid=$sibling_pid " "$BATS_TEST_TMPDIR/diagnostics"
   ! grep -q "pid=$(cat "$BATS_TEST_TMPDIR/sibling-child") " "$BATS_TEST_TMPDIR/diagnostics"
   [ "$(cat "$BATS_TEST_TMPDIR/own-child")" != "$(cat "$BATS_TEST_TMPDIR/sibling-child")" ]
+}
+
+@test "lsof partial fd-3 output reaps descendants but failed group scans leave orphans alone" {
+  local fixture="$BATS_TEST_TMPDIR/fd3-hooks.sh" case_dir mode owner_pid child_pid index finished left_alive
+  awk '/^setup_file\(\) \{/ { copy=1 } /^run_lane\(\) \{/ { copy=0 } copy { print }' \
+    "$BATS_TEST_FILENAME" > "$fixture"
+  cat > "$STUB_BIN/lsof" <<'EOF'
+#!/usr/bin/env bash
+case " $* " in
+  *' -F g '*) printf 'g777777\n' ;;
+  *' -F n '*) printf 'nfd3-test-pipe\n'; exit 1 ;;
+  *' -F pRgcfn '*)
+    read -r root _ < "$FD3_TEST_DIR/fd3-ownership"
+    child="$(cat "$FD3_TEST_DIR/own-child")"
+    if [[ "$STUB_MODE" == orphan ]]; then parent=1; else parent="$root"; fi
+    printf 'p%s\nR%s\ng777777\ncsleep\nf3\nnfd3-test-pipe\n' "$child" "$parent"
+    exit 1
+    ;;
+  *' -F pR '*)
+    printf 'p%s\nR1\n' "$(cat "$FD3_TEST_DIR/own-child")"
+    exit 1
+    ;;
+esac
+EOF
+  chmod +x "$STUB_BIN/lsof"
+  cat > "$BATS_TEST_TMPDIR/owner.sh" <<'EOF'
+#!/usr/bin/env bash
+source "$1/../fd3-hooks.sh"
+BATS_FILE_TMPDIR="$1"
+setup_file
+# Make a successful group scan pass the start-time check, so failure must
+# protect the child rather than merely falling through to a later guard.
+printf '%s %s\ng777777\n' "$BASHPID" "$(($(date +%s) - 10))" > "$BATS_FILE_TMPDIR/fd3-ownership"
+sleep 30 &
+child="$!"
+printf '%s\n' "$child" > "$1/own-child"
+teardown_file
+if [[ "$STUB_MODE" == orphan ]]; then
+  kill -0 "$child" 2> /dev/null && touch "$1/child-left-alive"
+else
+  wait "$child" 2> /dev/null
+  [[ "$?" -gt 128 ]] && touch "$1/own-reaped"
+fi
+touch "$1/owner-done"
+EOF
+
+  for mode in descendant orphan; do
+    case_dir="$BATS_TEST_TMPDIR/$mode"
+    mkdir "$case_dir"
+    FD3_TEST_DIR="$case_dir" STUB_MODE="$mode" PATH="$STUB_BIN:$PATH" \
+      bash "$BATS_TEST_TMPDIR/owner.sh" "$case_dir" 3>> "$case_dir/diagnostics" &
+    owner_pid=$!
+    for ((index = 0; index < 100; index += 1)); do
+      [[ -e "$case_dir/owner-done" ]] && break
+      sleep 0.1
+    done
+    finished=false
+    [[ -e "$case_dir/owner-done" ]] && finished=true
+    child_pid="$(cat "$case_dir/own-child")"
+    left_alive=false
+    kill -0 "$child_pid" 2> /dev/null && left_alive=true
+    kill "$child_pid" 2> /dev/null || true
+    [[ "$finished" == true ]] || kill "$owner_pid" 2> /dev/null || true
+    wait "$owner_pid" || true
+
+    [ "$finished" = true ]
+    if [[ "$mode" == descendant ]]; then
+      [ -e "$case_dir/own-reaped" ]
+      grep -q "pid=$child_pid " "$case_dir/diagnostics"
+    else
+      [ "$left_alive" = true ]
+      [ -e "$case_dir/child-left-alive" ]
+      grep -q "lsof failed to inspect process group 777777 (status=1); leaving pid=$child_pid alone" \
+        "$case_dir/diagnostics"
+      run grep -q "left fd 3 open after last test: pid=$child_pid " "$case_dir/diagnostics"
+      [ "$status" -ne 0 ]
+    fi
+  done
 }
 
 @test "unit lane is parallel and excludes integration and stress" {

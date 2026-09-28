@@ -45,6 +45,21 @@ describe("DisplayedTimeMetricsCollector - Unit Tests", function () {
     expect(result[0].logcatTag).toBe("ActivityTaskManager");
   });
 
+  test("parses Android 14 displayed lines with a user suffix", function () {
+    const output =
+      "1694099697.123  1111  2222 I ActivityTaskManager: Displayed com.ex/.Main for user 0: +512ms";
+    const result = (collector as any).parseDisplayedMetrics(output, {
+      packageName: "com.ex",
+      startTimestampMs: 1694099697000,
+      endTimestampMs: 1694099698000,
+    });
+
+    expect(result).toHaveLength(1);
+    expect(result[0].componentName).toBe("com.ex/.Main");
+    expect(result[0].packageName).toBe("com.ex");
+    expect(result[0].displayedTimeMs).toBe(512);
+  });
+
   test("filters metrics by package and time window", function () {
     const output = [
       "1694099696.100  1234  5678 I ActivityManager: Displayed com.example/.SplashActivity: +200ms",

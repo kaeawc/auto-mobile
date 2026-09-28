@@ -144,6 +144,7 @@ fun WorkspaceShell(
   // [ObservationStreamClient] / [RealScreenshotSaver]) so a test can drive the capture with a
   // [dev.jasonpearson.automobile.desktop.core.daemon.FakeObservationStream] and a fake saver.
   observationStreamFactory: (String) -> ObservationStream = { ObservationStreamClient() },
+  sessionUuidProvider: () -> String? = { null },
   screenshotSaver: ScreenshotSaver = RealScreenshotSaver(),
   // Body of the health sheet opened by clicking the status dot. Hoisted like [facetContent] so the
   // host (or a test) can substitute content; defaults to the live [DiagnosticsDashboard].
@@ -151,7 +152,11 @@ fun WorkspaceShell(
   // Two-device compare surface opened by the top-bar ⧉ Compare glyph. Hoisted like the other bodies
   // so a test can assert routing without opening real streams; defaults to [TwoDeviceCompareView].
   compareContent: @Composable (DeviceColumn, DeviceColumn) -> Unit = { a, b ->
-    TwoDeviceCompareView(columnA = a, columnB = b)
+    TwoDeviceCompareView(
+      columnA = a,
+      columnB = b,
+      sessionUuidProvider = sessionUuidProvider,
+    )
   },
   // Body of the offline-browse overlay opened from the empty state's "Browse navigation history"
   // affordance. Lets the user inspect a persisted navigation graph with no device observed (Phase C

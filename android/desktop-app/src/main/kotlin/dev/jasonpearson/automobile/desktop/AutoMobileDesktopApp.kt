@@ -29,6 +29,7 @@ import dev.jasonpearson.automobile.desktop.core.daemon.CoalescingRecoveryLaunche
 import dev.jasonpearson.automobile.desktop.core.daemon.DaemonSocketPaths
 import dev.jasonpearson.automobile.desktop.core.daemon.DesktopDaemonSession
 import dev.jasonpearson.automobile.desktop.core.daemon.McpDaemonClient
+import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
 import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.core.mcp.DaemonMcpResourceClient
@@ -51,6 +52,7 @@ import dev.jasonpearson.automobile.desktop.core.workspace.LayoutFacet
 import dev.jasonpearson.automobile.desktop.core.workspace.LogsFacet
 import dev.jasonpearson.automobile.desktop.core.workspace.NavigationFacet
 import dev.jasonpearson.automobile.desktop.core.workspace.NetworkFacet
+import dev.jasonpearson.automobile.desktop.core.workspace.ObservationForegroundAppResolver
 import dev.jasonpearson.automobile.desktop.core.workspace.OnboardingScreen
 import dev.jasonpearson.automobile.desktop.core.workspace.PerformanceFacet
 import dev.jasonpearson.automobile.desktop.core.workspace.StorageFacet
@@ -133,6 +135,22 @@ fun AutoMobileDesktopApp(
 ) {
   val graph = LocalAutoMobileGraph.current
 
+  // One stable daemon session per app run, used to authenticate the stream sockets (#4751/#4977).
+  // The stream socket's getSession check is read-only, so the session must first be REGISTERED by
+  // a main-socket tool call — done below by binding the focused device with setActiveDevice.
+  // Unix-daemon only; other transports leave it null and the panes fall back to the auth escape
+  // hatch. `getOrNull` so a construction failure (no reachable daemon) degrades to a null provider.
+  val desktopDaemonSession =
+    remember(graph) {
+      if (graph.autoMobileClient.transportName == "Unix Socket") {
+        runCatching { DesktopDaemonSession.create() }
+          .onFailure { LOG.warn("Could not create a desktop daemon session: ${it.message}") }
+          .getOrNull()
+      } else {
+        null
+      }
+    }
+
   // Update availability (#5225): collect the controller and run one check at app startup — hoisted
   // above the surface switch so it runs regardless of the launch surface (onboarding, picker, or
   // workspace), not only after a device is observed. Keyed to the controller so a graph change
@@ -145,7 +163,16 @@ fun AutoMobileDesktopApp(
 
   val settings = remember(graph) { ObservableSettingsProvider(graph.settingsProvider) }
   val scope = rememberCoroutineScope()
-  val controlExecutor = remember(graph) { DaemonEmulatorControlExecutor(graph.autoMobileClient) }
+  val controlExecutor =
+    remember(graph, desktopDaemonSession) {
+      DaemonEmulatorControlExecutor(
+        graph.autoMobileClient,
+        foregroundAppResolver =
+          ObservationForegroundAppResolver(
+            sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null }
+          ),
+      )
+    }
   val workspaceViewModel =
     remember(scope, controlExecutor) { WorkspaceViewModel(scope, controlExecutor) }
   val workspaceState by workspaceViewModel.state.collectAsState()
@@ -215,21 +242,6 @@ fun AutoMobileDesktopApp(
     onDispose { menuBarActions.onTakeScreenshot = null }
   }
 
-  // One stable daemon session per app run, used to authenticate the stream sockets (#4751/#4977).
-  // The stream socket's getSession check is read-only, so the session must first be REGISTERED by
-  // a main-socket tool call — done below by binding the focused device with setActiveDevice.
-  // Unix-daemon only; other transports leave it null and the panes fall back to the auth escape
-  // hatch. `getOrNull` so a construction failure (no reachable daemon) degrades to a null provider.
-  val desktopDaemonSession =
-    remember(graph) {
-      if (graph.autoMobileClient.transportName == "Unix Socket") {
-        runCatching { DesktopDaemonSession.create() }
-          .onFailure { LOG.warn("Could not create a desktop daemon session: ${it.message}") }
-          .getOrNull()
-      } else {
-        null
-      }
-    }
   // Per-tap client factory for workspace device control. The DeviceControlSession closes the client
   // it mints per action, so this MUST return a fresh McpDaemonClient each call, never the shared
   // graph.autoMobileClient. Non-Unix transports don't support device input, so they yield null and
@@ -535,6 +547,7 @@ fun AutoMobileDesktopApp(
                 // inactive
                 // (non-daemon) transport.
                 onRecoverDaemon = { recoveryLauncher.launch() },
+                sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null },
               )
             else ->
               Box(Modifier.fillMaxSize()) {
@@ -587,7 +600,19 @@ fun AutoMobileDesktopApp(
                   onRecoverDaemon = { recoveryLauncher.launch() },
                   updateStatus = updateStatus,
                   onUpdateClick = { showUpdateDetails = true },
-                  facetContent = { column, tool -> WorkspaceFacet(column, tool) },
+                  facetContent = { column, tool ->
+                    WorkspaceFacet(
+                      column,
+                      tool,
+                      sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null },
+                    )
+                  },
+                  observationStreamFactory = {
+                    ObservationStreamClient(
+                      sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null }
+                    )
+                  },
+                  sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null },
                   // Inspect mode's Layout inspector renders live video for its pixels; the session
                   // provider authenticates that subscribe against the stream-socket guard (#4751),
                   // exactly as the stream pane below.
@@ -750,12 +775,16 @@ fun AutoMobileDesktopApp(
  * to the pane device by deviceId).
  */
 @Composable
-private fun WorkspaceFacet(column: DeviceColumn, tool: Tool) {
+private fun WorkspaceFacet(
+  column: DeviceColumn,
+  tool: Tool,
+  sessionUuidProvider: () -> String? = { null },
+) {
   when (tool) {
     Tool.Logs -> LogsFacet(column)
     // Storage works on both platforms now that iOS key-value mutations carry the platform to the
     // daemon and target the correct iOS device (#4708).
-    Tool.Storage -> StorageFacet(column)
+    Tool.Storage -> StorageFacet(column, sessionUuidProvider = sessionUuidProvider)
     // Network reads per-device via the getNetworkGraph MCP tool call (deviceId is an argument),
     // not the broadcast observation stream, so panes don't cross-contaminate.
     Tool.Network -> NetworkFacet(column)
@@ -764,7 +793,7 @@ private fun WorkspaceFacet(column: DeviceColumn, tool: Tool) {
     // Navigation is app-scoped (#4837 Phase C): the facet resolves the pane device's foreground app
     // from the stream, then pulls that app's persisted graph by appId — so same-app panes share the
     // graph and a foreign broadcast can't overwrite a pane (the #4838 contamination).
-    Tool.Navigation -> NavigationFacet(column)
+    Tool.Navigation -> NavigationFacet(column, sessionUuidProvider = sessionUuidProvider)
     // Test reads the per-device test-runs daemon resource (automobile:test-runs?deviceId=<id>,
     // #4715 / #5017), scoped to the pane device so panes don't cross-contaminate (#5019).
     Tool.Test -> TestFacet(column)

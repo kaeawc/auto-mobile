@@ -1413,7 +1413,10 @@ fun AutoMobileContent(
     var telClient: TelemetryPushSocketClient? = null
 
     if (deviceId != null) {
-      obsClient = ObservationStreamClient()
+      obsClient =
+        ObservationStreamClient(
+          sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null }
+        )
       LOG.info(
         "Connecting observation stream for device: $deviceId (client: ${obsClient.hashCode()})"
       )

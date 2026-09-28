@@ -1664,5 +1664,32 @@ describe("VideoStreamSocketServer", () => {
       expect(String(ack.error)).toContain("different daemon session");
       expect(h.sources).toHaveLength(0);
     });
+
+    test("rejects an omitted deviceId when the resolved device belongs to another session", async () => {
+      const h = await startHarness({
+        authenticator: enforcing(
+          fakeSessionManager({ getSessionForDevice: () => "other-session" }),
+        ),
+      });
+      const { ack } = await subscribe(h.socketPath, {
+        action: "subscribe",
+        sessionUuid: "session-1",
+      });
+      expect(ack.success).toBe(false);
+      expect(String(ack.error)).toContain("different daemon session");
+      expect(h.sources).toHaveLength(0);
+    });
+
+    test("accepts an omitted deviceId when the resolved device belongs to the caller", async () => {
+      const h = await startHarness({
+        authenticator: enforcing(fakeSessionManager({ getSessionForDevice: () => "session-1" })),
+      });
+      const { ack } = await subscribe(h.socketPath, {
+        action: "subscribe",
+        sessionUuid: "session-1",
+      });
+      expect(ack.success).toBe(true);
+      expect(h.sources).toHaveLength(1);
+    });
   });
 });

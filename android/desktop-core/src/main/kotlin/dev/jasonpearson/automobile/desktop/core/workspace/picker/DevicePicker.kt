@@ -72,6 +72,7 @@ fun DevicePicker(
   // out) is actually restarted — a plain reload would short-circuit on the still-open socket and
   // re-fail (#6082). Defaults to a no-op so the reload alone still covers a plain down daemon.
   onRecoverDaemon: () -> Unit = {},
+  sessionUuidProvider: () -> String? = { null },
   // The per-card device thumbnail. Hoisted (default = the screenshot [DeviceThumbnail]) so a test
   // can stub it and never open an observation socket while composing the grid. Thumbnails are
   // stills by design — a per-card live-video subscription would put a standing capture/decode cost
@@ -84,6 +85,7 @@ fun DevicePicker(
       device = device,
       booting = booting,
       modifier = Modifier.fillMaxWidth(),
+      sessionUuidProvider = sessionUuidProvider,
     )
   },
 ) {

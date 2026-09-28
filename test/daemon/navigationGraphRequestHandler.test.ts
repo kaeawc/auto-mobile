@@ -60,7 +60,7 @@ class FakeExporter implements NavigationGraphSummaryExporter {
 /** Minimal test double exposing processLine so the wired handler can be exercised end-to-end. */
 class TestableServer extends DeviceDataStreamSocketServer {
   constructor(timer: FakeTimer) {
-    super("/fake/path/nav-handler.sock", timer);
+    super("/fake/path/nav-handler.sock", timer, { authorize: () => {} });
   }
 
   async processLineForTest(socket: FakeSocket, line: string): Promise<void> {

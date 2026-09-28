@@ -71,13 +71,14 @@ private const val SCREENSHOT_RETRY_MAX_MS = 15_000L
 internal suspend fun captureScreenshotWithRetry(
   deviceId: String,
   source: DeviceThumbnailScreenshotSource,
+  sessionUuidProvider: () -> String? = { null },
   initialBackoffMs: Long = SCREENSHOT_RETRY_INITIAL_MS,
   maxBackoffMs: Long = SCREENSHOT_RETRY_MAX_MS,
   delayMs: suspend (Long) -> Unit = { delay(it) },
 ): ImageBitmap {
   var backoff = initialBackoffMs
   while (true) {
-    source.latest(deviceId)?.let {
+    source.latest(deviceId, sessionUuidProvider)?.let {
       return it
     }
     delayMs(backoff)
@@ -114,7 +115,10 @@ internal fun isThumbnailFrameFor(deviceId: String, update: ScreenshotStreamUpdat
 /** A last-known screenshot for a device, rendered as the grid thumbnail. */
 interface DeviceThumbnailScreenshotSource {
   /** The most recent screenshot for [deviceId], or null when none can be captured. */
-  suspend fun latest(deviceId: String): ImageBitmap?
+  suspend fun latest(
+    deviceId: String,
+    sessionUuidProvider: () -> String? = { null },
+  ): ImageBitmap?
 }
 
 /**
@@ -134,6 +138,7 @@ fun DeviceThumbnail(
   booting: Boolean,
   modifier: Modifier = Modifier,
   screenshotSource: DeviceThumbnailScreenshotSource? = ObservationScreenshotSource,
+  sessionUuidProvider: () -> String? = { null },
 ) {
   val placeholder = thumbnailPlaceholder(device.state, booting)
   // One still per boot, retried with backoff until the observation service yields one. The state
@@ -148,7 +153,7 @@ fun DeviceThumbnail(
   }
   LaunchedEffect(device.id, screenshotSource, placeholder) {
     if (placeholder == null && screenshotSource != null && screenshot == null) {
-      screenshot = captureScreenshotWithRetry(device.id, screenshotSource)
+      screenshot = captureScreenshotWithRetry(device.id, screenshotSource, sessionUuidProvider)
     }
   }
 
@@ -218,10 +223,12 @@ fun DeviceThumbnail(
  */
 object ObservationScreenshotSource : DeviceThumbnailScreenshotSource {
   private const val CAPTURE_TIMEOUT_MS = 5_000L
-  private val streamFactory: () -> ObservationStream = { ObservationStreamClient() }
 
-  override suspend fun latest(deviceId: String): ImageBitmap? {
-    val stream = streamFactory()
+  override suspend fun latest(
+    deviceId: String,
+    sessionUuidProvider: () -> String?,
+  ): ImageBitmap? {
+    val stream = ObservationStreamClient(sessionUuidProvider = sessionUuidProvider)
     return try {
       val base64 =
         withContext(Dispatchers.IO) {

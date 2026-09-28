@@ -18,6 +18,7 @@ import type {
 import type { WebRtcStreamingOverrides } from "../features/webrtc";
 import { assertWhipOverrideAllowed } from "../features/webrtc/webrtcStreamingConfig";
 import {
+  authorizeResolvedDevice,
   createDefaultStreamSocketAuthenticator,
   type StreamSocketAuthenticator,
 } from "./streamSocketAuth";
@@ -266,6 +267,7 @@ export class WebRtcStreamSocketServer extends RequestResponseSocketServer<
     }
     const device = await deps.resolveDevice(request.deviceId, request.platform ?? "android");
     this.admissionGate.assertDeviceActionable(device.deviceId, WEBRTC_STREAM_PURPOSE);
+    authorizeResolvedDevice(this.authenticator, request.sessionUuid, device.deviceId);
     const stream = await deps.startStream({
       device,
       streamId: request.streamId,

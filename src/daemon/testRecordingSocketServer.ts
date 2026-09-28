@@ -11,6 +11,7 @@ import {
 import { TestRecordingCommand, TestRecordingResponse } from "./testRecordingSocketTypes";
 import { TEST_RECORDING_SOCKET_CONFIG } from "./daemonFiles";
 import {
+  authorizeResolvedDevice,
   createDefaultStreamSocketAuthenticator,
   type StreamSocketAuthenticator,
 } from "./streamSocketAuth";
@@ -178,6 +179,7 @@ export class TestRecordingSocketServer extends RequestResponseSocketServer<
         const platform = ensurePlatform(request.platform);
         const selected = await this.deviceResolution.selectDevice(request.deviceId, platform);
         this.admissionGate.assertDeviceActionable(selected.deviceId, TEST_RECORDING_PURPOSE);
+        authorizeResolvedDevice(this.authenticator, request.sessionUuid, selected.deviceId);
         const device = await this.deviceResolution.readyDevice(selected);
         const result = await startTestRecording(device);
         return {

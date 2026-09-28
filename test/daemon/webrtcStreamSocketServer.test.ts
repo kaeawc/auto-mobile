@@ -649,6 +649,37 @@ describe("WebRtcStreamSocketServer", () => {
       expect(response.error).toContain("different daemon session");
       expect(started).toHaveLength(0);
     });
+
+    test("rejects an omitted deviceId when the resolved device belongs to another session", async () => {
+      const server = enforcingServer(
+        fakeSessionManager({ getSessionForDevice: () => "other-session" }),
+      );
+      const socket = new FakeSocket();
+      await server.simulate(socket, {
+        id: "omitted-other",
+        action: "start",
+        sessionUuid: "session-1",
+        whipEndpoint: "https://coord/whip",
+      });
+      expect(lastResponse(socket).success).toBe(false);
+      expect(lastResponse(socket).error).toContain("different daemon session");
+      expect(started).toHaveLength(0);
+    });
+
+    test("accepts an omitted deviceId when the resolved device belongs to the caller", async () => {
+      const server = enforcingServer(
+        fakeSessionManager({ getSessionForDevice: () => "session-1" }),
+      );
+      const socket = new FakeSocket();
+      await server.simulate(socket, {
+        id: "omitted-owner",
+        action: "start",
+        sessionUuid: "session-1",
+        whipEndpoint: "https://coord/whip",
+      });
+      expect(lastResponse(socket).success).toBe(true);
+      expect(started).toHaveLength(1);
+    });
   });
 
   describe("WHIP override policy (issue #4751)", () => {

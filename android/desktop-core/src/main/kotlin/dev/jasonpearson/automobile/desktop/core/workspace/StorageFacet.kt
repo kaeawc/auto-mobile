@@ -73,7 +73,10 @@ private sealed interface StorageFacetState {
 fun StorageFacet(
   column: DeviceColumn,
   loadInstalledApps: (suspend (String) -> Result<List<InstalledApp>>)? = null,
-  observationStreamFactory: (String) -> ObservationStream = { ObservationStreamClient() },
+  sessionUuidProvider: () -> String? = { null },
+  observationStreamFactory: (String) -> ObservationStream = {
+    ObservationStreamClient(sessionUuidProvider = sessionUuidProvider)
+  },
   backoffDelay: suspend (attempt: Int) -> Unit = { attempt -> delay(reconnectBackoffMs(attempt)) },
   socketAvailable: () -> Boolean = { ObservationStreamClient.socketExists() },
 ) {

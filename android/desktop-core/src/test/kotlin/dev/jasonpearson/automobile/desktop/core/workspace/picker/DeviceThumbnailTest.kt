@@ -25,9 +25,15 @@ class DeviceThumbnailTest {
   @Test
   fun `screenshot capture retries with backoff until it yields a still`() = runTest {
     var attempts = 0
+    val sessionUuidProvider = { "desktop-session" }
+    val receivedProviders = mutableListOf<() -> String?>()
     val source =
       object : DeviceThumbnailScreenshotSource {
-        override suspend fun latest(deviceId: String): ImageBitmap? {
+        override suspend fun latest(
+          deviceId: String,
+          sessionUuidProvider: () -> String?,
+        ): ImageBitmap? {
+          receivedProviders += sessionUuidProvider
           attempts++
           return if (attempts >= 3) ImageBitmap(1, 1) else null // fail twice, then succeed
         }
@@ -37,12 +43,18 @@ class DeviceThumbnailTest {
       captureScreenshotWithRetry(
         "d",
         source,
+        sessionUuidProvider = sessionUuidProvider,
         initialBackoffMs = 1_000L,
         maxBackoffMs = 15_000L,
         delayMs = { delays += it },
       )
     assertNotNull(shot) // recovered rather than sticking on a single failed attempt
     assertEquals(3, attempts)
+    assertEquals(
+      listOf(sessionUuidProvider, sessionUuidProvider, sessionUuidProvider),
+      receivedProviders,
+    )
+    assertEquals("desktop-session", receivedProviders.last()())
     assertEquals(listOf(1_000L, 2_000L), delays) // exponential backoff between the failed attempts
   }
 
@@ -77,7 +89,10 @@ class DeviceThumbnailTest {
     // renders the observation screenshot and never opens a video socket.
     val screenshot =
       object : DeviceThumbnailScreenshotSource {
-        override suspend fun latest(deviceId: String): ImageBitmap? = ImageBitmap(1, 1)
+        override suspend fun latest(
+          deviceId: String,
+          sessionUuidProvider: () -> String?,
+        ): ImageBitmap? = ImageBitmap(1, 1)
       }
     setContent {
       MaterialTheme { DeviceThumbnail(booted, booting = false, screenshotSource = screenshot) }

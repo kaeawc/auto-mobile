@@ -24,6 +24,7 @@ import {
 import { VIDEO_STREAM_SOCKET_CONFIG } from "./daemonFiles";
 import { BaseSocketServer, getSocketPath } from "./socketServer/index";
 import {
+  authorizeResolvedDevice,
   createDefaultStreamSocketAuthenticator,
   type StreamSocketAuthenticator,
 } from "./streamSocketAuth";
@@ -380,6 +381,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
       }
       const device = await this.deps.resolveDevice(request.deviceId);
       this.admissionGate.assertDeviceActionable(device.deviceId, VIDEO_STREAM_PURPOSE);
+      authorizeResolvedDevice(this.authenticator, request.sessionUuid, device.deviceId);
       const capture = await this.attach(socket, device, request);
 
       this.sendJson(socket, {

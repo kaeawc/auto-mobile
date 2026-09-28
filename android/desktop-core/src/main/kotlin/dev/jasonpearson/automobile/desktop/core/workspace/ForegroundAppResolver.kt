@@ -31,8 +31,9 @@ object NoOpForegroundAppResolver : ForegroundAppResolver {
  * a gone device can't hang the caller. Untested IO seam.
  */
 class ObservationForegroundAppResolver(
+  sessionUuidProvider: () -> String? = { null },
   private val observationStreamFactory: (String) -> ObservationStream = {
-    ObservationStreamClient()
+    ObservationStreamClient(sessionUuidProvider = sessionUuidProvider)
   },
   private val timeoutMs: Long = 10_000L,
 ) : ForegroundAppResolver {

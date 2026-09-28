@@ -16,6 +16,10 @@ import {
 } from "./deviceSessionResolver";
 import type { DeviceSessionRecord } from "./deviceSessionRegistry";
 import { DEVICE_DATA_STREAM_SOCKET_CONFIG } from "./daemonFiles";
+import {
+  createDefaultStreamSocketAuthenticator,
+  type StreamSocketAuthenticator,
+} from "./streamSocketAuth";
 import type { ScreenshotMetadata } from "../features/observe/ScreenshotMetadata";
 import { annotateHierarchyDiff, type HierarchyDiffSummary } from "./hierarchyStreamDiff";
 import { readImageHeaderDimensions } from "../utils/screenshot/imageHeaderDimensions";
@@ -286,6 +290,7 @@ export interface RequestedObservation {
  */
 export type OnObservationRequestedCallback = (request: {
   deviceId: string | null;
+  sessionUuid?: string;
   requestId?: string;
   signal: AbortSignal;
 }) => Promise<RequestedObservation[]>;
@@ -306,6 +311,7 @@ export type OnNavigationGraphRequestedCallback = (
  */
 export type OnStorageSubscriptionRequestedCallback = (request: {
   deviceId: string | null;
+  sessionUuid?: string;
   packageName: string;
   fileName: string;
   subscribe: boolean;
@@ -399,6 +405,9 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
   constructor(
     socketPath: string = getSocketPath(DEVICE_DATA_STREAM_SOCKET_CONFIG),
     timer: Timer = defaultTimer,
+    private readonly authenticator: StreamSocketAuthenticator = createDefaultStreamSocketAuthenticator(
+      "observationStream",
+    ),
   ) {
     super(socketPath, timer, "DeviceDataStream");
   }
@@ -875,6 +884,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     const request = this.parseJson<{
       id?: string;
       command: string;
+      sessionUuid?: string;
       deviceId?: string;
       deviceSessionUuid?: string;
       appId?: string;
@@ -903,29 +913,35 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
 
     // Handle request_navigation_graph command
     if (request.command === "request_navigation_graph") {
-      if (!this.onNavigationGraphRequested) {
-        const response: SubscriptionResponse = {
-          id: request.id,
-          type: "subscription_response",
-          success: true,
-        };
-        this.sendJson(socket, response);
-        return;
-      }
-
       try {
+        const deviceSessionUuid = this.parseDeviceSessionUuid(request.deviceSessionUuid);
+        const deviceId =
+          deviceSessionUuid === null
+            ? undefined
+            : (this.deviceSessionResolver.resolveDeviceId(deviceSessionUuid) ?? undefined);
+        if (deviceSessionUuid !== null && deviceId === undefined) {
+          throw new Error(
+            `deviceSessionUuid '${deviceSessionUuid}' does not identify a live device session`,
+          );
+        }
+        this.authenticator.authorize({ sessionUuid: request.sessionUuid, deviceId });
+        if (!this.onNavigationGraphRequested) {
+          this.sendJson(socket, {
+            id: request.id,
+            type: "subscription_response",
+            success: true,
+          } satisfies SubscriptionResponse);
+          return;
+        }
         const graphData = await this.onNavigationGraphRequested(request.appId ?? null);
         if (graphData) {
           // Echo the requester's device-session key so the pane can attribute this
           // on-demand response to its own device (epic #5256, item 3; #4837 AC2).
-          const deviceSessionUuid = request.deviceSessionUuid ?? null;
           const message: DeviceDataStreamMessage = {
             id: request.id,
             type: "navigation_update",
             deviceSessionUuid,
-            deviceId: deviceSessionUuid
-              ? (this.deviceSessionResolver.resolveDeviceId(deviceSessionUuid) ?? undefined)
-              : undefined,
+            deviceId,
             timestamp: this.timer.now(),
             navigationGraph: graphData,
           };
@@ -1430,6 +1446,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
       command: string;
       deviceId?: string;
       deviceSessionUuid?: string;
+      sessionUuid?: string;
       packageName?: string;
       fileName?: string;
     },
@@ -1449,6 +1466,10 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     let storageDeviceId: string | null;
     try {
       storageDeviceId = this.resolveStorageTargetDeviceId(request, subscribe);
+      this.authenticator.authorize({
+        sessionUuid: request.sessionUuid,
+        deviceId: storageDeviceId ?? undefined,
+      });
     } catch (error) {
       this.sendJson(socket, {
         id: request.id,
@@ -1463,7 +1484,13 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     // reconnecting pane receives a new session UUID for the same serial; keeping UUIDs in this
     // ownership key lets the retired pane's teardown unregister the refreshed pane's observer.
     const key = `${storageDeviceId ?? "all"}:${packageName}:${fileName}`;
-    const storageRequest = { deviceId: storageDeviceId, packageName, fileName, subscribe };
+    const storageRequest = {
+      deviceId: storageDeviceId,
+      sessionUuid: request.sessionUuid,
+      packageName,
+      fileName,
+      subscribe,
+    };
     try {
       if (subscribe) {
         await this.subscribeStorageForSocket(socket, key, storageRequest);
@@ -1532,32 +1559,36 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
 
   private async handleObservationRequest(
     socket: Socket,
-    request: { id?: string; deviceId?: string },
+    request: { id?: string; deviceId?: string; deviceSessionUuid?: string; sessionUuid?: string },
   ): Promise<void> {
-    if (!this.onObservationRequested) {
-      const response: SubscriptionResponse = {
-        id: request.id,
-        type: "error",
-        success: false,
-        error: "Observation requests are not available",
-      };
-      this.sendJson(socket, response);
-      return;
-    }
-
     try {
+      const deviceSessionUuid = this.parseDeviceSessionUuid(request.deviceSessionUuid);
+      const deviceId =
+        deviceSessionUuid === null
+          ? request.deviceId
+          : (this.deviceSessionResolver.resolveDeviceId(deviceSessionUuid) ?? undefined);
+      if (deviceSessionUuid !== null && deviceId === undefined) {
+        throw new Error(
+          `deviceSessionUuid '${deviceSessionUuid}' does not identify a live device session`,
+        );
+      }
+      this.authenticator.authorize({ sessionUuid: request.sessionUuid, deviceId });
+      if (!this.onObservationRequested) {
+        throw new Error("Observation requests are not available");
+      }
       // FUNNEL 2, BEFORE observing. A device-specific request names the serial,
       // and the quarantine is precisely the pool's inability to say which runtime
       // answers on it. Without this the handler observed the unknown runtime,
       // `pushForDevice` then dropped every frame because routing is suspended,
       // and the requester was acknowledged `success: true` with no hierarchy
       // ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
-      if (request.deviceId !== undefined) {
-        this.deviceSessionResolver.assertDeviceActionable(request.deviceId, "to observe");
+      if (deviceId !== undefined) {
+        this.deviceSessionResolver.assertDeviceActionable(deviceId, "to observe");
       }
       const frameContextGenerationsAtStart = new Map(this.frameContextGenerations);
       const observations = await this.requestObservationWithTimeout({
-        deviceId: request.deviceId ?? null,
+        deviceId: deviceId ?? null,
+        sessionUuid: request.sessionUuid,
         requestId: request.id,
       });
       if (observations.length === 0) {
@@ -1652,6 +1683,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
 
   private async requestObservationWithTimeout(request: {
     deviceId: string | null;
+    sessionUuid?: string;
     requestId?: string;
   }): Promise<RequestedObservation[]> {
     const controller = new AbortController();
@@ -1670,6 +1702,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
       return await Promise.race([
         this.onObservationRequested!({
           deviceId: request.deviceId,
+          sessionUuid: request.sessionUuid,
           requestId: request.requestId,
           signal: controller.signal,
         }),

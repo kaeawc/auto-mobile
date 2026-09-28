@@ -93,6 +93,7 @@ private class SocketChannelTransport(private val channel: SocketChannel) :
 class ObservationStreamClient(
   private val transportFactory: ObservationStreamTransportFactory = SocketChannelTransportFactory,
   private val socketPathProvider: () -> String = { getSocketPath() },
+  private val sessionUuidProvider: () -> String? = { null },
   // Test seam: invoked when a readMessages() invocation returns (superseded or not), so a test can
   // await a specific read loop's completion deterministically. No-op in production.
   private val onReadLoopExit: () -> Unit = {},
@@ -788,6 +789,7 @@ class ObservationStreamClient(
         id = UUID.randomUUID().toString(),
         command = "request_navigation_graph",
         appId = appId,
+        sessionUuid = sessionUuidProvider(),
       )
     sendRequest(request)
   }
@@ -809,6 +811,7 @@ class ObservationStreamClient(
         command = "request_observation",
         deviceId = deviceId,
         deviceSessionUuid = subscribedDeviceSessionUuid,
+        sessionUuid = sessionUuidProvider(),
       )
     sendRequest(request)
   }
@@ -885,6 +888,7 @@ class ObservationStreamClient(
           command = if (request.subscribe) "subscribe_storage" else "unsubscribe_storage",
           deviceId = subscribedDeviceId,
           deviceSessionUuid = subscribedDeviceSessionUuid,
+          sessionUuid = sessionUuidProvider(),
           packageName = key.packageName,
           fileName = key.fileName,
         ),
@@ -999,6 +1003,7 @@ data class StreamRequest(
   val subscriptionId: String? = null,
   val deviceId: String? = null,
   val deviceSessionUuid: String? = null,
+  val sessionUuid: String? = null,
   val appId: String? = null,
   val screenshotIntervalMs: Long? = null,
   val hierarchyIntervalMs: Long? = null,

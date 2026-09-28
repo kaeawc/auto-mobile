@@ -80,12 +80,18 @@ export function registerSnapshotTools() {
           useVmSnapshot: args.useVmSnapshot,
           vmSnapshotTimeoutMs: args.vmSnapshotTimeoutMs,
         });
+        const failures = result.failures ?? [];
+        const success = result.success !== false && failures.length === 0;
 
         return createJSONToolResponse({
-          message: `Snapshot '${args.snapshotName}' restored successfully`,
+          message: success
+            ? `Snapshot '${args.snapshotName}' restored successfully`
+            : `Snapshot '${args.snapshotName}' partially restored: ${failures.length} item(s) failed`,
           snapshotName: args.snapshotName,
           snapshotType: result.snapshotType,
           restoredAt: result.restoredAt,
+          success,
+          failures,
           deviceId: device.deviceId,
           deviceName: device.name,
         });

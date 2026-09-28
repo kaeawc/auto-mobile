@@ -439,6 +439,40 @@ describe("RestoreSnapshot", () => {
   });
 
   describe("settings restore", () => {
+    it("reports a setting whose ADB apply fails", async () => {
+      const manifest: DeviceSnapshotManifest = {
+        snapshotName: "settings-apply-failure",
+        timestamp: "2026-01-01T00:00:00.000Z",
+        deviceId: device.deviceId,
+        deviceName: device.name,
+        platform: "android",
+        snapshotType: "adb",
+        includeAppData: false,
+        includeSettings: true,
+        settings: { global: { screen_brightness: "200" } },
+      };
+      fakeAdb.setCommandError(
+        "shell settings put global 'screen_brightness' '200'",
+        new Error("device rejected setting"),
+      );
+
+      const result = await restoreSnapshot.execute({
+        snapshotName: manifest.snapshotName,
+        manifest,
+        useVmSnapshot: false,
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.failures).toEqual([
+        {
+          kind: "android_setting",
+          namespace: "global",
+          key: "screen_brightness",
+          reason: "device rejected setting",
+        },
+      ]);
+    });
+
     it("rejects unsafe keys and namespaces, counts failures, and restores valid keys", async () => {
       const info = spyOn(logger, "info").mockImplementation(() => {});
       const manifest: DeviceSnapshotManifest = {
@@ -457,11 +491,27 @@ describe("RestoreSnapshot", () => {
       };
 
       try {
-        await restoreSnapshot.execute({
+        const result = await restoreSnapshot.execute({
           snapshotName: manifest.snapshotName,
           manifest,
           useVmSnapshot: false,
         });
+
+        expect(result.success).toBe(false);
+        expect(result.failures).toEqual([
+          {
+            kind: "android_setting",
+            namespace: "global",
+            key: "x;reboot",
+            reason: "invalid settings key",
+          },
+          {
+            kind: "android_setting",
+            namespace: "global;reboot",
+            key: "another_key",
+            reason: "unsupported settings namespace",
+          },
+        ]);
 
         expect(
           fakeAdb
@@ -504,11 +554,14 @@ describe("RestoreSnapshot", () => {
       fakeAdb.setCommandResult("shell settings put system 'screen_brightness' '200'", "");
       fakeAdb.setCommandResult("shell settings put system 'font_scale' '1.2'", "");
 
-      await restoreSnapshot.execute({
+      const result = await restoreSnapshot.execute({
         snapshotName,
         manifest,
         useVmSnapshot: false,
       });
+
+      expect(result.success).toBe(true);
+      expect(result.failures).toEqual([]);
 
       // Verify all settings were restored
       expect(fakeAdb.wasCommandExecuted("shell settings put global 'airplane_mode_on' '1'")).toBe(
@@ -738,6 +791,125 @@ describe("RestoreSnapshot", () => {
   });
 });
 
+describe("RestoreSnapshot (iOS failure reporting)", () => {
+  const device: BootedDevice = {
+    deviceId: "ios-device-1",
+    name: "iPhone 15",
+    platform: "ios",
+  };
+  const simctl = new FakeSimCtlClient();
+  const store = new DeviceSnapshotStore("/virtual/snapshot-restore");
+
+  function makeRestoreWithFileOperations(
+    operations: NonNullable<ConstructorParameters<typeof RestoreSnapshot>[7]>,
+  ): RestoreSnapshot {
+    return new RestoreSnapshot(
+      device,
+      undefined,
+      undefined,
+      undefined,
+      store,
+      simctl as any,
+      undefined,
+      operations,
+    );
+  }
+
+  it("returns the failed bundle while another iOS bundle restores", async () => {
+    const copiedBundles: string[] = [];
+    const operations = {
+      pathExists: async () => true,
+      terminateAppIfRunning: async () => {},
+      getAppDataContainerPath: async (_deviceId: string, bundleId: string) => `/live/${bundleId}`,
+      rm: async () => {},
+      cp: async (sourcePath: string) => {
+        if (sourcePath.includes("com.example.failed")) {
+          throw new Error("copy denied");
+        }
+        copiedBundles.push(sourcePath);
+      },
+    };
+    simctl.setInstalledApps([
+      { bundleId: "com.example.failed" },
+      { bundleId: "com.example.working" },
+    ]);
+    const manifest: DeviceSnapshotManifest = {
+      snapshotName: "bundle-partial",
+      timestamp: "2026-01-01T00:00:00.000Z",
+      deviceId: device.deviceId,
+      deviceName: device.name,
+      platform: "ios",
+      snapshotType: "app_data",
+      includeAppData: true,
+      includeSettings: false,
+      appDataBackup: {
+        backupMethod: "simctl_copy",
+        backedUpPackages: ["com.example.failed", "com.example.working"],
+      },
+    };
+
+    const result = await makeRestoreWithFileOperations(operations).execute({
+      snapshotName: manifest.snapshotName,
+      manifest,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.failures).toHaveLength(1);
+    expect(result.failures?.[0]).toMatchObject({
+      kind: "ios_bundle",
+      bundleId: "com.example.failed",
+    });
+    expect(copiedBundles.some((sourcePath) => sourcePath.includes("com.example.working"))).toBe(
+      true,
+    );
+  });
+
+  it("reports that live iOS app data is gone after a wipe then failed copy", async () => {
+    let destinationWiped = false;
+    const operations = {
+      pathExists: async () => true,
+      terminateAppIfRunning: async () => {},
+      getAppDataContainerPath: async () => "/live/com.example.app",
+      rm: async () => {
+        destinationWiped = true;
+      },
+      cp: async () => {
+        expect(destinationWiped).toBe(true);
+        throw new Error("copy denied");
+      },
+    };
+    simctl.setInstalledApps([{ bundleId: "com.example.app" }]);
+    const manifest: DeviceSnapshotManifest = {
+      snapshotName: "wipe-failure",
+      timestamp: "2026-01-01T00:00:00.000Z",
+      deviceId: device.deviceId,
+      deviceName: device.name,
+      platform: "ios",
+      snapshotType: "app_data",
+      includeAppData: true,
+      includeSettings: false,
+      appDataBackup: {
+        backupMethod: "simctl_copy",
+        backedUpPackages: ["com.example.app"],
+      },
+    };
+
+    const result = await makeRestoreWithFileOperations(operations).execute({
+      snapshotName: manifest.snapshotName,
+      manifest,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.failures?.[0]).toMatchObject({
+      kind: "ios_bundle",
+      bundleId: "com.example.app",
+    });
+    expect(result.failures?.[0]?.reason).toMatch(
+      /destination data was wiped\/deleted and is now gone/i,
+    );
+  });
+});
+
 describe("RestoreSnapshot (iOS)", () => {
   let device: BootedDevice;
   let simctl: FakeSimCtlClient;
@@ -812,12 +984,14 @@ describe("RestoreSnapshot (iOS)", () => {
       },
     };
 
-    await makeRestore().execute({
+    const result = await makeRestore().execute({
       snapshotName,
       manifest,
       useVmSnapshot: false,
     });
 
+    expect(result.success).toBe(true);
+    expect(result.failures).toEqual([]);
     const restored = await fs.readFile(path.join(containerRoot, "Documents", "data.txt"), "utf-8");
     expect(restored).toBe("new-data");
     expect(simctl.getMethodCalls("terminateApp")).toHaveLength(1);

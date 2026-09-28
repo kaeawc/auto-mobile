@@ -503,21 +503,17 @@ export class Daemon {
         `maxAttempts=${recoveryConfiguration.policy.maxAttempts}`,
     );
     this.deviceSessionRegistry = new DeviceSessionRegistry(this.timer, this.idGenerator);
-    this.devicePool = new DevicePool(
-      this.sessionManager,
-      this.daemonSessionId,
-      this.timer,
-      this.installedAppsRepository,
-      undefined,
-      undefined,
-      this.deviceSessionRepository,
-      undefined,
-      (sessionId, _deviceId, releaseReason, shouldCommit) =>
+    this.devicePool = DevicePool.create({
+      sessionManager: this.sessionManager,
+      daemonSessionId: this.daemonSessionId,
+      timer: this.timer,
+      installedAppsRepository: this.installedAppsRepository,
+      deviceSessionRepository: this.deviceSessionRepository,
+      releaseSessionForDisconnectedDevice: (sessionId, _deviceId, releaseReason, shouldCommit) =>
         this.cancelAndReleaseSession(sessionId, releaseReason, false, undefined, shouldCommit),
-      (deviceId) => this.onDeviceReadyForSessionRegistry(deviceId),
-      undefined,
-      recoveryConfiguration.policy,
-      (deviceId, platform) => {
+      onDeviceReady: (deviceId) => this.onDeviceReadyForSessionRegistry(deviceId),
+      recoveryPolicy: recoveryConfiguration.policy,
+      onDeviceRemoved: (deviceId, platform) => {
         this.deviceSessionRegistry.onDeviceDisconnected(deviceId);
         if (platform === "ios") {
           const manager = IOSCtrlProxyManager.getExistingInstance(deviceId);
@@ -528,14 +524,12 @@ export class Daemon {
           });
         }
       },
-      new EmulatorLossIncidentRepository(this.timer, this.idGenerator),
-      (sessionId, reason, options) =>
+      emulatorLossIncidentStore: new EmulatorLossIncidentRepository(this.timer, this.idGenerator),
+      cancelDeviceSessionExecutions: (sessionId, reason, options) =>
         this.cancelAndDrainDeviceSessionExecutions(sessionId, reason, options),
-      this.idGenerator,
-      undefined,
-      undefined,
-      isDeviceSessionContinuityEnabled(recoveryPolicyEnvironment),
-    );
+      idGenerator: this.idGenerator,
+      deviceSessionContinuityEnabled: isDeviceSessionContinuityEnabled(recoveryPolicyEnvironment),
+    });
     // Initialize singleton for daemon state access
     DaemonState.getInstance().initialize(
       this.sessionManager,

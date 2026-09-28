@@ -1,37 +1,13 @@
+import { FakeDeviceSessionRepository } from "../fakes/FakeDeviceSessionRepository";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { resetDbWriteBarrier } from "../../src/db/dbWriteBarrier";
-import type {
-  DeviceSessionActivityUpdate,
-  DeviceSessionRecord,
-  DeviceSessionRepository,
-} from "../../src/db/deviceSessionRepository";
-import type { DeviceSessionStatus } from "../../src/db/types";
 import type { DevicePool } from "../../src/daemon/devicePool";
 import type { BootedDevice } from "../../src/models";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
-
-class FakeDeviceSessionRepository {
-  readonly released: string[] = [];
-
-  async upsertActiveSession(_record: DeviceSessionRecord): Promise<void> {}
-
-  async recordActivity(_sessionUuid: string, _update: DeviceSessionActivityUpdate): Promise<void> {}
-
-  async markReleased(
-    sessionUuid: string,
-    _status: DeviceSessionStatus,
-    _releasedAtMs: number,
-    _reason: string,
-  ): Promise<void> {
-    this.released.push(sessionUuid);
-  }
-
-  async markStaleActiveSessionsExpired(): Promise<void> {}
-}
 
 function stubPoolDiscovery(devicePool: DevicePool, devices: BootedDevice[]): FakeDeviceManager {
   const deviceManager = new FakeDeviceManager();
@@ -61,12 +37,7 @@ describe("Daemon identity fence at the session-release commit (#7031 round 2)", 
     // that await must stop the stale eviction from retiring the live session.
     const timer = new FakeTimer();
     const repository = new FakeDeviceSessionRepository();
-    const daemon = new Daemon(
-      {},
-      new FakeInstalledAppsRepository(),
-      timer,
-      repository as unknown as DeviceSessionRepository,
-    );
+    const daemon = new Daemon({}, new FakeInstalledAppsRepository(), timer, repository);
     const sessionManager = daemon.getSessionManager();
     const devicePool = daemon.getDevicePool();
     const device = stamped(

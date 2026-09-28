@@ -1,8 +1,8 @@
+import { FakeDeviceSessionRepository } from "../fakes/FakeDeviceSessionRepository";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { DaemonState } from "../../src/daemon/daemonState";
-import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
 import { DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV } from "../../src/daemon/liveAcceptanceCapability";
 import type { BootedDevice, SomePlatform } from "../../src/models";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
@@ -53,14 +53,6 @@ class DeferredDiscoveryDeviceManager extends FakeDeviceManager {
   releaseDiscovery(): void {
     this.release.resolve();
   }
-}
-
-class FakeDeviceSessionRepository extends DeviceSessionRepository {
-  override async getSession(): Promise<undefined> {
-    return undefined;
-  }
-  override async upsertActiveSession(): Promise<void> {}
-  override async replaceLivenessOwnership(): Promise<void> {}
 }
 
 function buildDaemon(timer: FakeTimer): Daemon {

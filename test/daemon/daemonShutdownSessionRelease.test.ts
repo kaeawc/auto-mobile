@@ -1,3 +1,4 @@
+import { FakeDeviceSessionRepository } from "../fakes/FakeDeviceSessionRepository";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
 import type { SessionDeviceAssigner } from "../../src/daemon/sessionManager";
@@ -5,12 +6,6 @@ import { DaemonState } from "../../src/daemon/daemonState";
 import * as daemonFilesModule from "../../src/daemon/daemonFiles";
 import * as databaseModule from "../../src/db";
 import { resetDbWriteBarrier } from "../../src/db/dbWriteBarrier";
-import {
-  type DeviceSessionActivityUpdate,
-  type DeviceSessionRecord,
-  DeviceSessionRepository,
-} from "../../src/db/deviceSessionRepository";
-import type { DeviceSessionStatus } from "../../src/db/types";
 import { SessionReleaseBroadcaster } from "../../src/server/sessionReleaseBroadcast";
 import {
   KeepScreenAwakeManager,
@@ -22,40 +17,6 @@ import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import type { DevicePool } from "../../src/daemon/devicePool";
 import type { BootedDevice } from "../../src/models";
-
-class FakeDeviceSessionRepository {
-  readonly events: string[] = [];
-  readonly sessions = new Map<
-    string,
-    {
-      status: DeviceSessionStatus;
-      releasedAtMs: number | null;
-      reason: string | null;
-    }
-  >();
-
-  async upsertActiveSession(record: DeviceSessionRecord): Promise<void> {
-    this.sessions.set(record.sessionUuid, {
-      status: "active",
-      releasedAtMs: null,
-      reason: null,
-    });
-  }
-
-  async recordActivity(_sessionUuid: string, _update: DeviceSessionActivityUpdate): Promise<void> {}
-
-  async markReleased(
-    sessionUuid: string,
-    status: DeviceSessionStatus,
-    releasedAtMs: number,
-    reason: string,
-  ): Promise<void> {
-    this.events.push("markReleased");
-    this.sessions.set(sessionUuid, { status, releasedAtMs, reason });
-  }
-
-  async markStaleActiveSessionsExpired(): Promise<void> {}
-}
 
 interface DaemonSocketServerInternals {
   socketServer: {
@@ -92,12 +53,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
   test("releases active sessions before closing the database", async () => {
     const timer = new FakeTimer();
     const repository = new FakeDeviceSessionRepository();
-    const daemon = new Daemon(
-      {},
-      new FakeInstalledAppsRepository(),
-      timer,
-      repository as unknown as DeviceSessionRepository,
-    );
+    const daemon = new Daemon({}, new FakeInstalledAppsRepository(), timer, repository);
     const sessionManager = daemon.getSessionManager();
     const devicePool = daemon.getDevicePool();
     const sessionId = "shutdown-session";
@@ -162,7 +118,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
       {},
       new FakeInstalledAppsRepository(),
       timer,
-      repository as unknown as DeviceSessionRepository,
+      repository,
       undefined,
       undefined,
       undefined,
@@ -201,12 +157,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
   test("continues releasing other sessions when one teardown fails", async () => {
     const timer = new FakeTimer();
     const repository = new FakeDeviceSessionRepository();
-    const daemon = new Daemon(
-      {},
-      new FakeInstalledAppsRepository(),
-      timer,
-      repository as unknown as DeviceSessionRepository,
-    );
+    const daemon = new Daemon({}, new FakeInstalledAppsRepository(), timer, repository);
     const sessionManager = daemon.getSessionManager();
     const brokenSessionId = "broken-shutdown-session";
     const healthySessionId = "healthy-shutdown-session";
@@ -243,12 +194,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
   test("continues releasing remaining sessions when restoration fails", async () => {
     const timer = new FakeTimer();
     const repository = new FakeDeviceSessionRepository();
-    const daemon = new Daemon(
-      {},
-      new FakeInstalledAppsRepository(),
-      timer,
-      repository as unknown as DeviceSessionRepository,
-    );
+    const daemon = new Daemon({}, new FakeInstalledAppsRepository(), timer, repository);
     const sessionManager = daemon.getSessionManager();
     const devicePool = daemon.getDevicePool();
     const brokenSessionId = "broken-shutdown-session";
@@ -300,12 +246,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
   test("publishes each concurrent bound-session shutdown before closing the control socket (#6336)", async () => {
     const timer = new FakeTimer();
     const repository = new FakeDeviceSessionRepository();
-    const daemon = new Daemon(
-      {},
-      new FakeInstalledAppsRepository(),
-      timer,
-      repository as unknown as DeviceSessionRepository,
-    );
+    const daemon = new Daemon({}, new FakeInstalledAppsRepository(), timer, repository);
     const sessionManager = daemon.getSessionManager();
     const events: string[] = [];
     const stopAcceptingSessionCreations =
@@ -363,12 +304,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
   test("rejects a session creation that outlives control-socket quiescence (#6336)", async () => {
     const timer = new FakeTimer();
     const repository = new FakeDeviceSessionRepository();
-    const daemon = new Daemon(
-      {},
-      new FakeInstalledAppsRepository(),
-      timer,
-      repository as unknown as DeviceSessionRepository,
-    );
+    const daemon = new Daemon({}, new FakeInstalledAppsRepository(), timer, repository);
     const sessionManager = daemon.getSessionManager();
     const continueAcquisition = Promise.withResolvers<void>();
     const lateCreation = (async () => {
@@ -413,12 +349,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const repository = new FakeDeviceSessionRepository();
-    const daemon = new Daemon(
-      {},
-      new FakeInstalledAppsRepository(),
-      timer,
-      repository as unknown as DeviceSessionRepository,
-    );
+    const daemon = new Daemon({}, new FakeInstalledAppsRepository(), timer, repository);
     const sessionManager = daemon.getSessionManager();
     const finishAssignment = Promise.withResolvers<void>();
     const assignmentStarted = Promise.withResolvers<void>();
@@ -467,12 +398,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
   test("drains a monitor release that removed its session before shutdown snapshots it", async () => {
     const timer = new FakeTimer();
     const repository = new FakeDeviceSessionRepository();
-    const daemon = new Daemon(
-      {},
-      new FakeInstalledAppsRepository(),
-      timer,
-      repository as unknown as DeviceSessionRepository,
-    );
+    const daemon = new Daemon({}, new FakeInstalledAppsRepository(), timer, repository);
     const sessionManager = daemon.getSessionManager();
     let allowPersistence!: () => void;
     const persistence = new Promise<void>((resolve) => {
@@ -519,12 +445,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const repository = new FakeDeviceSessionRepository();
-    const daemon = new Daemon(
-      {},
-      new FakeInstalledAppsRepository(),
-      timer,
-      repository as unknown as DeviceSessionRepository,
-    );
+    const daemon = new Daemon({}, new FakeInstalledAppsRepository(), timer, repository);
     const sessionManager = daemon.getSessionManager();
     const events: string[] = [];
     const persistence = Promise.withResolvers<void>();
@@ -585,12 +506,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
   test("publishes a daemon-shutdown reason upgrade after an ordinary release callback (#6336)", async () => {
     const timer = new FakeTimer();
     const repository = new FakeDeviceSessionRepository();
-    const daemon = new Daemon(
-      {},
-      new FakeInstalledAppsRepository(),
-      timer,
-      repository as unknown as DeviceSessionRepository,
-    );
+    const daemon = new Daemon({}, new FakeInstalledAppsRepository(), timer, repository);
     const sessionManager = daemon.getSessionManager();
     const persistence = Promise.withResolvers<void>();
     const persistenceStarted = Promise.withResolvers<void>();
@@ -654,12 +570,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
   test("does not block shutdown on a deferred recovery sweep that never settles", async () => {
     const timer = new FakeTimer();
     const repository = new FakeDeviceSessionRepository();
-    const daemon = new Daemon(
-      {},
-      new FakeInstalledAppsRepository(),
-      timer,
-      repository as unknown as DeviceSessionRepository,
-    );
+    const daemon = new Daemon({}, new FakeInstalledAppsRepository(), timer, repository);
     const internals = daemon as unknown as {
       trackDeferredSessionRecoverySweep(sweep: Promise<void>): void;
     };
@@ -687,12 +598,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
   test("releases expired sessions that remain in memory during shutdown", async () => {
     const timer = new FakeTimer();
     const repository = new FakeDeviceSessionRepository();
-    const daemon = new Daemon(
-      {},
-      new FakeInstalledAppsRepository(),
-      timer,
-      repository as unknown as DeviceSessionRepository,
-    );
+    const daemon = new Daemon({}, new FakeInstalledAppsRepository(), timer, repository);
     const sessionManager = daemon.getSessionManager();
     const devicePool = daemon.getDevicePool();
     const sessionId = "expired-shutdown-session";
@@ -740,12 +646,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
   test("cleans up daemon pid/socket files only after the logger has flushed and closed (issue #6194)", async () => {
     const timer = new FakeTimer();
     const repository = new FakeDeviceSessionRepository();
-    const daemon = new Daemon(
-      {},
-      new FakeInstalledAppsRepository(),
-      timer,
-      repository as unknown as DeviceSessionRepository,
-    );
+    const daemon = new Daemon({}, new FakeInstalledAppsRepository(), timer, repository);
     const events: string[] = [];
     const closeDatabaseSpy = spyOn(databaseModule, "closeDatabase").mockImplementation(async () => {
       events.push("closeDatabase");

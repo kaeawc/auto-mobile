@@ -1,3 +1,4 @@
+import { FakeMcpServer } from "../fakes/FakeMcpServer";
 import { beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
@@ -19,32 +20,6 @@ import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 // Minimal MCP-server stand-in for ResourceRegistry: registerWithServer installs
 // request handlers on `server.server` and tracks the wrapper for notification
 // fan-out; notifyResourceListChanged sends via `server.server.notification`.
-class FakeUnderlyingServer {
-  notifications: Array<{ method: string; params?: unknown }> = [];
-  handlersBySchema = new Map<unknown, (request: unknown, extra?: unknown) => Promise<unknown>>();
-  shouldThrow = false;
-  notificationStarted?: () => void;
-  notificationGate?: Promise<void>;
-  onclose?: () => void;
-  setRequestHandler(
-    schema: unknown,
-    handler: (request: unknown, extra?: unknown) => Promise<unknown>,
-  ): void {
-    this.handlersBySchema.set(schema, handler);
-  }
-  async notification(payload: { method: string; params?: unknown }): Promise<void> {
-    if (this.shouldThrow) {
-      throw new Error("Not connected");
-    }
-    this.notifications.push(payload);
-    this.notificationStarted?.();
-    await this.notificationGate;
-  }
-}
-
-class FakeMcpServer {
-  server = new FakeUnderlyingServer();
-}
 
 function methodsSent(server: FakeMcpServer): string[] {
   return server.server.notifications.map((n) => n.method);

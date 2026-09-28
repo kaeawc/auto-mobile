@@ -1,3 +1,4 @@
+import { FakeSocket } from "../../fakes/FakeNetServer";
 import { expect, describe, test, beforeEach } from "bun:test";
 import {
   consolePortFromSerial,
@@ -135,7 +136,6 @@ describe("RealEmulatorConsoleClient", () => {
   });
 });
 
-import { EventEmitter } from "node:events";
 import type * as net from "node:net";
 import { NetEmulatorConsoleTransport } from "../../../src/utils/android-cmdline-tools/EmulatorConsoleClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -146,21 +146,6 @@ import { FakeTimer } from "../../fakes/FakeTimer";
  * (setEncoding/write/destroy/removeAllListeners) is the only way to drive the
  * wire protocol without opening a real TCP connection.
  */
-class FakeSocket extends EventEmitter {
-  public written: string[] = [];
-  public destroyed = false;
-  setEncoding(): this {
-    return this;
-  }
-  write(data: string): boolean {
-    this.written.push(data);
-    return true;
-  }
-  destroy(): this {
-    this.destroyed = true;
-    return this;
-  }
-}
 
 describe("NetEmulatorConsoleTransport wire protocol", () => {
   function makeTransport(socket: FakeSocket, timer: FakeTimer): NetEmulatorConsoleTransport {

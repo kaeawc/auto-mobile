@@ -1,3 +1,4 @@
+import { FakeMcpServer } from "../fakes/FakeMcpServer";
 import { beforeEach, describe, expect, test } from "bun:test";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -6,21 +7,6 @@ import { ListChangedBroadcaster } from "../../src/server/listChangedBroadcast";
 // Minimal MCP-server stand-in: registerWithServer only calls registerTool (no-op
 // here), tracks the server, and hooks the underlying Protocol onclose for
 // pruning; notifyToolListChanged calls sendToolListChanged on every live server.
-class FakeMcpServer {
-  calls = 0;
-  shouldThrow = false;
-  // Underlying Protocol stand-in — registerWithServer chains `onclose` here.
-  server: { onclose?: () => void } = {};
-  registerTool(): void {
-    // no-op — we only care about the notify path
-  }
-  sendToolListChanged(): void {
-    this.calls += 1;
-    if (this.shouldThrow) {
-      throw new Error("send boom");
-    }
-  }
-}
 
 describe("ToolRegistry.notifyToolListChanged", () => {
   beforeEach(() => {

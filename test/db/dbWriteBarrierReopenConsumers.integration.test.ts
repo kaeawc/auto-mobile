@@ -1,3 +1,4 @@
+import { FakeTelemetryRepository as FakeRepository } from "../fakes/FakeTelemetryRepository";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { Kysely } from "kysely";
 import type { Database } from "../../src/db/types";
@@ -6,16 +7,8 @@ import {
   resetDbWriteBarrier,
   type DbWriteBarrier,
 } from "../../src/db/dbWriteBarrier";
-import {
-  TelemetryRecorder,
-  type TelemetryRepository,
-} from "../../src/features/telemetry/TelemetryRecorder";
-import type { RecordNetworkEventInput } from "../../src/db/networkEventRepository";
+import { TelemetryRecorder } from "../../src/features/telemetry/TelemetryRecorder";
 import type { RecordLogEventInput } from "../../src/db/logEventRepository";
-import type { RecordOsEventInput } from "../../src/db/osEventRepository";
-import type { RecordNavigationEventInput } from "../../src/db/navigationEventRepository";
-import type { RecordStorageEventInput } from "../../src/db/storageEventRepository";
-import type { RecordLayoutEventInput } from "../../src/db/layoutEventRepository";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { FailureAnalyticsRepository } from "../../src/db/failureAnalyticsRepository";
 import type { RecordFailureInput } from "../../src/db/failureAnalyticsRepository";
@@ -73,20 +66,6 @@ describe("captured-reference consumers survive a same-process barrier reopen (is
   }
 
   describe("TelemetryRecorder", () => {
-    class FakeRepository implements TelemetryRepository {
-      logEvents: RecordLogEventInput[] = [];
-      async recordNetworkEvent(_input: RecordNetworkEventInput): Promise<number> {
-        return 1;
-      }
-      async recordLogEvent(input: RecordLogEventInput): Promise<void> {
-        this.logEvents.push(input);
-      }
-      async recordOsEvent(_input: RecordOsEventInput): Promise<void> {}
-      async recordNavigationEvent(_input: RecordNavigationEventInput): Promise<void> {}
-      async recordStorageEvent(_input: RecordStorageEventInput): Promise<void> {}
-      async recordLayoutEvent(_input: RecordLayoutEventInput): Promise<void> {}
-    }
-
     function makeLogInput(): RecordLogEventInput {
       return {
         timestamp: 1000,

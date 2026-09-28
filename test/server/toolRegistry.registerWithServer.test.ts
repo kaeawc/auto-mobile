@@ -1,3 +1,4 @@
+import { FakeMcpServer } from "../fakes/FakeMcpServer";
 import { beforeEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 
@@ -8,27 +9,6 @@ import { z } from "zod/v4";
  * Uses a FakeMcpServer to capture registered tool handlers and verify behavior
  * without depending on a real MCP transport connection.
  */
-
-// Fake McpServer that captures registered tools and their handlers
-interface RegisteredMcpTool {
-  name: string;
-  config: { description?: string; inputSchema?: any; outputSchema?: any };
-  handler: (args: any, extra: any) => Promise<any>;
-}
-
-class FakeMcpServer {
-  registeredTools: RegisteredMcpTool[] = [];
-  // Underlying Protocol stand-in — registerWithServer chains `onclose` here.
-  server: { onclose?: () => void } = {};
-
-  registerTool(name: string, config: any, handler: any): void {
-    this.registeredTools.push({ name, config, handler });
-  }
-
-  getRegisteredHandler(name: string): ((args: any, extra: any) => Promise<any>) | undefined {
-    return this.registeredTools.find((t) => t.name === name)?.handler;
-  }
-}
 
 // Minimal ToolRegistry replica that tests the registerWithServer logic in isolation.
 // We import the real ToolRegistryClass behavior but isolate the test from the singleton.

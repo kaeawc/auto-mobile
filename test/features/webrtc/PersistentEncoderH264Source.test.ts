@@ -1,7 +1,7 @@
+import { FakeSpawnedProcess as FakeProcess } from "../../fakes/FakeSpawnedProcess";
+import { FakeSocket } from "../../fakes/FakeNetServer";
 import { describe, expect, test } from "bun:test";
-import { EventEmitter } from "node:events";
 import { createHash } from "node:crypto";
-import { PassThrough } from "node:stream";
 import {
   InMemoryActiveVideoSessionRegistry,
   PersistentEncoderH264Source,
@@ -12,7 +12,6 @@ import {
   type SocketConnector,
   type StreamSocket,
 } from "../../../src/features/webrtc/PersistentEncoderH264Source";
-import type { SpawnedProcess } from "../../../src/features/webrtc/processSpawner";
 import {
   VIDEO_SERVER_CODEC_ID_AMUX,
   VIDEO_SERVER_CODEC_ID_H264,
@@ -47,60 +46,6 @@ const hashToken = (token: string): string =>
 // Flush the nextTick + microtask queues so the source's async launch steps and
 // the PassThrough `data` emissions settle (no fake timer involved here).
 const tick = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
-
-class FakeProcess extends EventEmitter implements SpawnedProcess {
-  readonly stdout = new PassThrough();
-  readonly stderr = new PassThrough();
-  killed: string[] = [];
-  kill(signal?: NodeJS.Signals): boolean {
-    this.killed.push(signal ?? "SIGTERM");
-    return true;
-  }
-  ready(
-    token: string = SESSION_TOKEN,
-    socketName: string = SESSION_SOCKET,
-    pid: number = 1234,
-    proto: number | null = VIDEO_SERVER_HANDSHAKE_VERSION,
-  ): void {
-    const protoSuffix = proto === null ? "" : ` proto=${proto}`;
-    this.stdout.write(
-      Buffer.from(
-        `VIDEO_SESSION_READY token=${token} pid=${pid} socket=${socketName}${protoSuffix}\n`,
-      ),
-    );
-    this.stdout.write(
-      Buffer.from(`Waiting for client connection on localabstract:${socketName}\n`),
-    );
-  }
-  readyAndStreamingStarted(): void {
-    this.stdout.write(
-      Buffer.from(
-        `VIDEO_SESSION_READY token=${SESSION_TOKEN} pid=1234 socket=${SESSION_SOCKET}\n` +
-          "Streaming started\n",
-      ),
-    );
-  }
-  streamingStarted(): void {
-    this.stdout.write(Buffer.from("Streaming started\n"));
-  }
-  exit(code: number | null = 0, signal: NodeJS.Signals | null = null): void {
-    this.emit("exit", code, signal);
-  }
-}
-
-class FakeSocket extends EventEmitter implements StreamSocket {
-  destroyed = false;
-  readonly written: Buffer[] = [];
-  destroy(): void {
-    this.destroyed = true;
-  }
-  write(chunk: Buffer): void {
-    this.written.push(Buffer.from(chunk));
-  }
-  feed(chunk: Buffer): void {
-    this.emit("data", chunk);
-  }
-}
 
 /** Expected pre-stream handshake frame (issue #4729): MAGIC + VERSION + LEN + token. */
 function handshakeFrame(

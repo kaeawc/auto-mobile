@@ -1,10 +1,8 @@
+import { FakeToolSelectionRepository as FakeRepository } from "../fakes/FakeToolSelectionRepository";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import Ajv2020 from "ajv/dist/2020";
 import { z } from "zod/v4";
-import {
-  SessionToolSelectionService,
-  type SessionToolSelectionRepository,
-} from "../../src/features/toolSelection/SessionToolSelectionService";
+import { SessionToolSelectionService } from "../../src/features/toolSelection/SessionToolSelectionService";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import {
@@ -26,55 +24,6 @@ import {
  * confirmation. The single-name request and its three existing result fields
  * are unchanged.
  */
-
-class FakeRepository implements SessionToolSelectionRepository {
-  readonly rows = new Map<string, Map<string, boolean>>();
-  /** Every (sessionUuid, toolName, enabled) the repository was asked to persist. */
-  readonly writes: Array<[string, string, boolean]> = [];
-  /** Each batch as the repository received it — one entry per transactional write. */
-  readonly batches: Array<Array<[string, string, boolean]>> = [];
-  /** When set, `setMany` rejects with it AFTER staging nothing (see #6886 review). */
-  failBatchWith: Error | undefined;
-  /** When set, reporting the enabled set rejects after a successful write. */
-  failListWith: Error | undefined;
-
-  async list(sessionUuid: string): Promise<Map<string, boolean>> {
-    if (this.failListWith) {
-      throw this.failListWith;
-    }
-    return new Map(this.rows.get(sessionUuid) ?? []);
-  }
-
-  async set(sessionUuid: string, toolName: string, enabled: boolean): Promise<void> {
-    this.writes.push([sessionUuid, toolName, enabled]);
-    this.batches.push([[sessionUuid, toolName, enabled]]);
-    const values = this.rows.get(sessionUuid) ?? new Map<string, boolean>();
-    values.set(toolName, enabled);
-    this.rows.set(sessionUuid, values);
-  }
-
-  async setMany(
-    sessionUuid: string,
-    entries: ReadonlyArray<{ toolName: string; enabled: boolean }>,
-  ): Promise<void> {
-    if (this.failBatchWith) {
-      throw this.failBatchWith;
-    }
-    const values = this.rows.get(sessionUuid) ?? new Map<string, boolean>();
-    this.batches.push(
-      entries.map((entry) => {
-        this.writes.push([sessionUuid, entry.toolName, entry.enabled]);
-        values.set(entry.toolName, entry.enabled);
-        return [sessionUuid, entry.toolName, entry.enabled] as [string, string, boolean];
-      }),
-    );
-    this.rows.set(sessionUuid, values);
-  }
-
-  async deleteSession(sessionUuid: string): Promise<void> {
-    this.rows.delete(sessionUuid);
-  }
-}
 
 const SESSION_UUID = "session-6869";
 const PROFILE_UUID = "connection-profile-6869";
@@ -99,7 +48,7 @@ describe("setToolEnabled batch enable (#6869)", () => {
     JSON.parse(result.content.find((item) => item.type === "text")!.text!);
 
   beforeEach(() => {
-    repository = new FakeRepository();
+    repository = new FakeRepository("server");
     service = new SessionToolSelectionService(repository);
     ToolRegistry.clearTools();
     for (const [name, defaultEnabled] of [

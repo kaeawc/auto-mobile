@@ -7,7 +7,14 @@ import { FakeTalkBackTapStrategy } from "../../fakes/FakeTalkBackTapStrategy";
 import { FakeTalkBackNavigationDriver } from "../../fakes/FakeTalkBackNavigationDriver";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
-function createTap(options: { supported?: boolean; success?: boolean; throws?: boolean } = {}) {
+function createTap(
+  options: {
+    supported?: boolean;
+    success?: boolean;
+    throws?: boolean;
+    dispatchedTapFails?: boolean;
+  } = {},
+) {
   const adb = new FakeAdbClient();
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
@@ -24,6 +31,10 @@ function createTap(options: { supported?: boolean; success?: boolean; throws?: b
     },
     requestTapCoordinates: async (...args: unknown[]) => {
       gestures.push(args);
+      if (options.dispatchedTapFails) {
+        (args[6] as (() => void) | undefined)?.();
+        return { success: false, error: "Tap timed out after 5000ms" };
+      }
       return { success: true };
     },
   };
@@ -118,10 +129,21 @@ describe("DocumentsUI row activation (#6335)", () => {
       const { tap, adb, actions, gestures } = createTap();
       await execute(tap, { ...row, "resource-id": id });
       expect(actions).toHaveLength(0);
-      expect(gestures).toEqual([[540, 380, 10]]);
+      expect(gestures).toEqual([
+        [540, 380, 10, undefined, undefined, undefined, expect.any(Function)],
+      ]);
       expect(adb.getAllCommands()).toHaveLength(0);
     });
   }
+
+  test("does not replay a dispatched coordinate tap through TapOnElement", async () => {
+    const { tap, adb } = createTap({ dispatchedTapFails: true });
+
+    await expect(
+      execute(tap, { ...row, "resource-id": "com.example.app:id/item_root" }),
+    ).rejects.toThrow(/outcome is indeterminate.*Do not retry automatically/i);
+    expect(adb.getAllCommands()).toHaveLength(0);
+  });
 
   test("preserves two input taps for an explicit double tap", async () => {
     const { tap, adb, actions } = createTap();

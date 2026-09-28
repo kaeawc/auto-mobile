@@ -44,6 +44,7 @@ export class SharedGestureDelegate {
     perf?: PerformanceTracker,
     frameContext?: string,
     signal?: AbortSignal,
+    onDispatch?: () => void,
   ): Promise<BaseResult> {
     return sendCommand<BaseResult>(this.context, {
       idPrefix: "tap",
@@ -59,6 +60,7 @@ export class SharedGestureDelegate {
       // await and before dispatch, so an already-abandoned tap is never sent
       // to the device after the caller has given up (issue #6306 review).
       abortSignal: signal,
+      onDispatch,
     });
   }
 
@@ -71,6 +73,7 @@ export class SharedGestureDelegate {
     timeoutMs: number = 5000,
     perf?: PerformanceTracker,
     frameContext?: string,
+    onDispatch?: () => void,
   ): Promise<GestureTimingResult> {
     return sendCommand<GestureTimingResult>(this.context, {
       idPrefix: "swipe",
@@ -87,6 +90,7 @@ export class SharedGestureDelegate {
       timeoutMs,
       perf,
       errorLabel: "Swipe",
+      onDispatch,
     });
   }
 

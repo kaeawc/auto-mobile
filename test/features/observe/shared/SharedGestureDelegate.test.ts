@@ -50,6 +50,34 @@ async function callAndResolve<T>(
 }
 
 describe("SharedGestureDelegate", () => {
+  it("reports tap dispatch only after the request is sent", async () => {
+    const { context, sent } = createFakeContext();
+    const delegate = new SharedGestureDelegate(context, { logTag: "TEST", roundCoordinates: true });
+    const sentCounts: number[] = [];
+
+    await callAndResolve(sent, context.requestManager, () =>
+      delegate.requestTapCoordinates(10, 20, 0, 5000, undefined, undefined, undefined, () => {
+        sentCounts.push(sent.length);
+      }),
+    );
+
+    expect(sentCounts).toEqual([1]);
+  });
+
+  it("reports swipe dispatch only after the request is sent", async () => {
+    const { context, sent } = createFakeContext();
+    const delegate = new SharedGestureDelegate(context, { logTag: "TEST", roundCoordinates: true });
+    const sentCounts: number[] = [];
+
+    await callAndResolve(sent, context.requestManager, () =>
+      delegate.requestSwipe(1, 2, 3, 4, 300, 5000, undefined, undefined, () => {
+        sentCounts.push(sent.length);
+      }),
+    );
+
+    expect(sentCounts).toEqual([1]);
+  });
+
   describe("requestTapCoordinates abort signal (issue #6306 review)", () => {
     // A caller's outer deadline can expire WHILE `ensureConnected()` is
     // resolving a slow reconnect/auto-setup -- `ensureConnected()` itself is

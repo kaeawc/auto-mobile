@@ -4,20 +4,29 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
+import { DaemonManager, runDaemonCommand } from "../../src/daemon/manager";
 import {
   DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES,
   createDefaultDaemonProcessFinder,
-  daemonBuildIdentityStatusLines,
-  DaemonManager,
   parseBusyBoxDaemonProcessTable,
   parseDarwinDaemonProcessTable,
-  parseDaemonHeartbeatCommandArgs,
   parseDaemonProcessTable,
   PsDaemonProcessFinder,
-  runDaemonCommand,
   WindowsDaemonProcessFinder,
+  type DaemonProcessFinder,
+  type DaemonProcessLivenessChecker,
+  type DaemonProcessSignaler,
+  type DaemonProcessRecord,
+} from "../../src/daemon/processTable";
+import {
   NetDaemonPortAvailabilityChecker,
-} from "../../src/daemon/manager";
+  type DaemonPortAvailabilityChecker,
+  type ProbeListener,
+} from "../../src/daemon/portAvailability";
+import {
+  daemonBuildIdentityStatusLines,
+  parseDaemonHeartbeatCommandArgs,
+} from "../../src/daemon/cli/runDaemonCommand";
 import {
   darwinProcessGenerationToken,
   linuxProcessGenerationToken,
@@ -25,16 +34,7 @@ import {
 import { DaemonLauncher } from "../../src/daemon/DaemonLauncher";
 import type { BuildIdentity } from "../../src/daemon/buildIdentity";
 import type { DaemonOptions, DaemonStatus } from "../../src/daemon/types";
-import type {
-  DaemonProcessFinder,
-  DaemonProcessLivenessChecker,
-  DaemonProcessSignaler,
-  DaemonProcessSpawner,
-  DaemonProcessRecord,
-  DaemonPortAvailabilityChecker,
-  ProbeListener,
-  ExtractionCleaner,
-} from "../../src/daemon/manager";
+import type { DaemonProcessSpawner, ExtractionCleaner } from "../../src/daemon/manager";
 import type { DaemonStateLike } from "../../src/daemon/daemonState";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import type { DaemonClientLike } from "../../src/daemon/client";

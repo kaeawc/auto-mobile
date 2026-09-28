@@ -5,11 +5,8 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { writeSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-  DaemonManager,
-  type DaemonProcessFinder,
-  type DaemonProcessSpawner,
-} from "../../src/daemon/manager";
+import { DaemonManager, type DaemonProcessSpawner } from "../../src/daemon/manager";
+import type { DaemonProcessFinder } from "../../src/daemon/processTable";
 import {
   DAEMON_STARTUP_TIMEOUT_MS,
   DEFAULT_PID_FILE_PATH,

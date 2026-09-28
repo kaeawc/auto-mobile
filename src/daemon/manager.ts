@@ -5,8 +5,7 @@ import {
   type IdentityRecoveryIO,
 } from "./identityRecovery";
 import { errorMessage } from "../utils/describeUnknownError";
-import { execSync, type ChildProcess } from "node:child_process";
-import { createServer as createNetServer } from "node:net";
+import type { ChildProcess } from "node:child_process";
 import { open, readFile, rm } from "node:fs/promises";
 import {
   constants,
@@ -27,12 +26,7 @@ import {
 } from "../db/migrationDependencyIntegrity";
 import { ensureSecureLogsDirSync, resolveAutoMobileLogsDir } from "../utils/tempDir";
 import { outputReductionFlagsToArgs } from "../utils/outputReductionFlags";
-import {
-  EVENT_ALL_MARKERS_FLAG,
-  hasEventAllMarkersCliOverride,
-  parseEventAllMarkersConfig,
-} from "../utils/eventAllMarkers";
-import { shouldSkipCtrlProxyDownload } from "../utils/ctrlProxyDownloadControl";
+import { EVENT_ALL_MARKERS_FLAG } from "../utils/eventAllMarkers";
 import { ActionableError } from "../models";
 import {
   PID_FILE_PATH,
@@ -48,23 +42,14 @@ import {
   DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS,
   DAEMON_START_PROCESS_TABLE_SCAN_MAX_ATTEMPTS,
   DAEMON_START_PROCESS_TABLE_SCAN_RETRY_DELAYS_MS,
-  DAEMON_PORT_AVAILABILITY_PROBE_TIMEOUT_MS,
   DAEMON_RESTART_HANDOFF_DELAY_MS,
   READINESS_PROBE_MAX_ATTEMPTS,
   READINESS_PROBE_BACKOFF_MS,
   DEFAULT_DAEMON_PORT,
-  CLI_SESSION_LIVENESS_POLICY,
-  getCliSessionIdleTimeoutMs,
   DAEMON_VERSION,
   DAEMON_VERSION_RESTART_COOLDOWN_MS,
 } from "./constants";
 import { DaemonStatus, PidFileData, DaemonOptions } from "./types";
-import {
-  getDaemonHealthReport,
-  formatHealthReport,
-  runSocketDiagnostics,
-  formatSocketDiagnostics,
-} from "./debugTools";
 import {
   DaemonClient,
   type DaemonClientFactory,
@@ -97,13 +82,6 @@ import {
   DaemonSocketReachability,
   type DaemonSocketReachabilityLike,
 } from "./daemonSocketReachability";
-import {
-  buildIdentitiesMatch,
-  buildIdentityFromStatus,
-  describeBuildIdentity,
-  getCurrentBuildIdentity,
-  type BuildIdentity,
-} from "./buildIdentity";
 import { DaemonState, type DaemonStateLike } from "./daemonState";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { sequenceBackoff } from "../utils/Backoff";
@@ -111,7 +89,6 @@ import { DefaultRetryExecutor, type RetryExecutor } from "../utils/retry/RetryEx
 import {
   cleanupDaemonFiles,
   clearDaemonLaunchLogOwnerTombstoneSync,
-  isProcessRunning as isDaemonProcessRunning,
   readPidFileDataSync,
   shouldProtectLiveDaemonVersion,
 } from "./daemonFiles";
@@ -128,27 +105,59 @@ import {
   resolvePathFromDaemonLaunchWorkingDirectory,
   resolveStableDaemonWorkingDirectory,
 } from "../utils/workingDirectory";
-import {
-  parseToolOutputsDirConfig,
-  TOOL_OUTPUTS_DIR_FLAG,
-  TOOL_OUTPUT_DIR_FLAG_ALIAS,
-  TOOL_OUTPUTS_DIR_ENV,
-} from "../utils/toolOutputArtifacts";
+import { TOOL_OUTPUTS_DIR_ENV } from "../utils/toolOutputArtifacts";
 import {
   DaemonLauncher,
-  isDaemonEntryScriptPath,
   type DaemonLaunchCommand,
   type DaemonProcessSpawner,
 } from "./DaemonLauncher";
-import {
-  RUNNER_READINESS_TIMEOUT_ENV,
-  RUNNER_READINESS_TIMEOUT_FLAG,
-  parseRunnerReadinessTimeout,
-} from "../utils/runnerReadinessConfig";
+import { RUNNER_READINESS_TIMEOUT_FLAG } from "../utils/runnerReadinessConfig";
 import { daemonProcessEnvironment, daemonProcessOptions } from "./daemonOptionScopes";
-import { darwinProcessGenerationToken, readLinuxProcessGenerationToken } from "./processGeneration";
+import {
+  createDefaultDaemonProcessFinder,
+  isShellCommandWrapper,
+  type DaemonProcessFinder,
+  type DaemonProcessLivenessChecker,
+  type DaemonProcessRecord,
+  type DaemonProcessSignaler,
+} from "./processTable";
+import {
+  NetDaemonPortAvailabilityChecker,
+  type DaemonPortAvailabilityChecker,
+} from "./portAvailability";
+import {
+  runDaemonCommand as runDaemonCommandWithManager,
+  type RunDaemonCommandOptions,
+} from "./cli/runDaemonCommand";
 
 export type { DaemonLaunchCommand, DaemonProcessSpawner } from "./DaemonLauncher";
+export {
+  DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES,
+  PsDaemonProcessFinder,
+  WindowsDaemonProcessFinder,
+  createDefaultDaemonProcessFinder,
+  parseBusyBoxDaemonProcessTable,
+  parseDaemonProcessTable,
+  parseDarwinDaemonProcessTable,
+  parseWindowsDaemonProcessTable,
+} from "./processTable";
+export type {
+  DaemonProcessFinder,
+  DaemonProcessLivenessChecker,
+  DaemonProcessRecord,
+  DaemonProcessSignaler,
+} from "./processTable";
+export { NetDaemonPortAvailabilityChecker } from "./portAvailability";
+export type { DaemonPortAvailabilityChecker, ProbeListener } from "./portAvailability";
+export { parseDaemonArgs } from "./cli/daemonArgs";
+export {
+  daemonBuildIdentityStatusLines,
+  daemonCommandOptions,
+  parseAcceptanceSessionRestartScope,
+  parseDaemonHeartbeatCommandArgs,
+  parseRestartAdmittedMaintenanceToken,
+} from "./cli/runDaemonCommand";
+export type { DaemonHeartbeatCommandArgs, RunDaemonCommandOptions } from "./cli/runDaemonCommand";
 
 /**
  * Write a message to stderr so it never corrupts the MCP stdio channel.
@@ -183,386 +192,11 @@ export function relayDaemonStderr(daemonProcess: ChildProcess): void {
   (daemonStderr as typeof daemonStderr & { unref?: () => void }).unref?.();
 }
 
-export interface DaemonProcessRecord {
-  pid: number;
-  ppid: number;
-  command: string;
-  /** Approximate process creation time from the OS process table, when available. */
-  startedAt?: number;
-  /** Stable OS-derived identity for this process generation, when available. */
-  processGenerationToken?: string;
-}
-
-export interface DaemonProcessFinder {
-  /**
-   * @param timeoutMs Upper bound to apply to the underlying process-table scan, for a
-   * caller with a tight remaining budget (issue #6140). Always clamped to
-   * {@link DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS} as well — this can only shorten the
-   * scan, never lengthen it beyond that ceiling. Omit to use the ceiling itself.
-   */
-  findDaemonProcesses(timeoutMs?: number): DaemonProcessRecord[];
-}
-
 class DaemonGenerationExitedBeforeSignalError extends Error {}
 
 interface WaitForStopResult {
   stopped: boolean;
   replacedByOtherGeneration: boolean;
-}
-
-export const DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES = 16 * 1024 * 1024;
-
-/**
- * Floor the process-table scan timeout is clamped to (issue #6140 review). Node's
- * (and Bun's) `execSync` treats `timeout: 0` as "no timeout" — i.e. UNBOUNDED, the
- * opposite of "expire immediately" — not a short/immediate bound. A computed
- * remaining budget can legitimately be exactly `0`, so `boundedProcessTableScanTimeout`
- * must never forward that value as-is: doing so would silently remove the bound
- * this scan exists to enforce. Callers with zero budget remaining should skip the
- * scan entirely (as `tryJoinPeerDaemonAfterSpawnExit` already does); this floor is
- * defense-in-depth for any other caller of `findDaemonProcesses`/
- * `findLiveDaemonProcesses` that does not pre-check for a zero budget.
- */
-const MIN_PROCESS_TABLE_SCAN_TIMEOUT_MS = 1;
-
-type ProcessTableCommandRunner = (
-  command: string,
-  options: { encoding: "utf-8"; maxBuffer: number; timeout: number },
-) => string;
-
-function normalizeProcessCommand(command: string): string {
-  return command.replace(/\\/g, "/").replace(/\/+/g, "/");
-}
-
-function invokedCommand(command: string): string {
-  if (!isShellCommandWrapper(command)) {
-    return command.trim();
-  }
-
-  const shellInvocation = command
-    .trim()
-    .match(/(?:^|\s)(?:-c|\/c|-(?:command|encodedcommand|c|ec))\s+["']?(.+)$/i);
-  return shellInvocation?.[1].trim() ?? command.trim();
-}
-
-function isAutoMobileDaemonCommand(
-  command: string,
-  activeEntryScript: string | undefined = process.argv[1],
-): boolean {
-  const normalizedCommand = normalizeProcessCommand(command);
-  const invocation = invokedCommand(normalizedCommand);
-  if (!/(?:^|\s)--daemon-mode(?:\s|["']|$)/.test(invocation)) {
-    return false;
-  }
-
-  // Runtime flags are allowed only in the contiguous run immediately after the
-  // anchored executable. Bare separators, the daemon marker, and non-flag values
-  // are not skipped, so the next token remains the sole entry-script candidate.
-  const runtimeEntrypoint = invocation.match(
-    /^(?:(?:"?(?:env|\/usr\/bin\/env)"?)\s+)?(?:"(?:[^"]*\/)?(?:bun|node)(?:\.exe)?"|(?:(?:[A-Za-z]:\/[^"']*\/|[^"'\s]*\/)?(?:bun|node)(?:\.exe)?))\s+(?:(?!--daemon-mode(?:\s|$))-{1,2}[A-Za-z0-9][^\s"']*\s+)*(?:"([^"]+)"|'([^']+)'|([^\s"']+))/i,
-  );
-  const runsBundledEntrypoint =
-    runtimeEntrypoint !== null &&
-    isDaemonEntryScriptPath(
-      runtimeEntrypoint[1] ?? runtimeEntrypoint[2] ?? runtimeEntrypoint[3],
-      activeEntryScript,
-    );
-  const runsPublishedPackage =
-    /^(?:"?[^"'\s]*\/)?(?:bunx|npx)(?:\.exe)?\s+(?:(?:-y|--yes|--bun|--no-cache)\s+)*@kaeawc\/auto-mobile(?:@[^\s"']+)?(?:\s|["']|$)/.test(
-      invocation,
-    ) ||
-    /^(?:"?[^"'\s]*\/)?bun(?:\.exe)?\s+x\s+(?:(?:-y|--yes|--bun|--no-cache)\s+)*@kaeawc\/auto-mobile(?:@[^\s"']+)?(?:\s|["']|$)/.test(
-      invocation,
-    );
-  const runsStandaloneBinary = /^(?:"?[^"'\s]*\/)?auto-mobile(?:\.exe)?(?:\s|$)/i.test(invocation);
-
-  return runsBundledEntrypoint || runsPublishedPackage || runsStandaloneBinary;
-}
-
-function isShellCommandWrapper(command: string): boolean {
-  const normalizedCommand = normalizeProcessCommand(command);
-  const trimmedCommand = normalizedCommand.trim();
-  const executable = trimmedCommand.startsWith('"')
-    ? trimmedCommand.slice(1, trimmedCommand.indexOf('"', 1))
-    : (trimmedCommand.split(/\s+/, 1)[0] ?? "");
-
-  if (/(^|\/)(?:ba|da|z)?sh$/.test(executable) && normalizedCommand.includes(" -c ")) {
-    return true;
-  }
-
-  if (/(^|\/)cmd(?:\.exe)?$/i.test(executable) && /(?:^|\s)\/c(?:\s|$)/i.test(normalizedCommand)) {
-    return true;
-  }
-
-  return (
-    /(^|\/)(?:powershell|pwsh)(?:\.exe)?$/i.test(executable) &&
-    /(?:^|\s)-(?:command|encodedcommand|c|ec)(?:\s|$)/i.test(normalizedCommand)
-  );
-}
-
-export function parseDaemonProcessTable(
-  psOutput: string,
-  now: number = Date.now(),
-  activeEntryScript?: string,
-): DaemonProcessRecord[] {
-  const records: DaemonProcessRecord[] = [];
-
-  for (const line of psOutput.split("\n")) {
-    const match = line.match(/^\s*(\d+)\s+(\d+)\s+(?:(\d+)\s+)?(.+?)\s*$/);
-    if (!match) {
-      continue;
-    }
-
-    const pid = parseInt(match[1], 10);
-    const ppid = parseInt(match[2], 10);
-    const elapsedSeconds = match[3] === undefined ? undefined : parseInt(match[3], 10);
-    const command = match[4];
-
-    if (
-      !Number.isFinite(pid) ||
-      !Number.isFinite(ppid) ||
-      !isAutoMobileDaemonCommand(command, activeEntryScript)
-    ) {
-      continue;
-    }
-
-    // This fallback derives birth time from wall-clock `now`; a clock step between
-    // reconstruction and PID-record capture can shift it beyond identity tolerance.
-    records.push({
-      pid,
-      ppid,
-      command,
-      ...(elapsedSeconds === undefined ? {} : { startedAt: now - elapsedSeconds * 1000 }),
-    });
-  }
-
-  return records;
-}
-
-function parseBusyBoxElapsedSeconds(value: string): number | undefined {
-  const match = value.match(/^(?:(\d+)-)?(?:(\d{1,2}):)?(\d{2}):(\d{2})$/);
-  if (!match) {
-    return undefined;
-  }
-  const days = match[1] === undefined ? 0 : parseInt(match[1], 10);
-  const hours = match[2] === undefined ? 0 : parseInt(match[2], 10);
-  const minutes = parseInt(match[3], 10);
-  const seconds = parseInt(match[4], 10);
-  if (
-    ![days, hours, minutes, seconds].every(Number.isFinite) ||
-    hours > 23 ||
-    minutes > 59 ||
-    seconds > 59
-  ) {
-    return undefined;
-  }
-  return ((days * 24 + hours) * 60 + minutes) * 60 + seconds;
-}
-
-/** Parse BusyBox `ps -o pid,ppid,etime,args` output. */
-export function parseBusyBoxDaemonProcessTable(
-  psOutput: string,
-  now: number = Date.now(),
-  activeEntryScript?: string,
-): DaemonProcessRecord[] {
-  const records: DaemonProcessRecord[] = [];
-
-  for (const line of psOutput.split("\n")) {
-    const match = line.match(/^\s*(\d+)\s+(\d+)\s+(\S+)\s+(.+?)\s*$/);
-    if (!match) {
-      continue;
-    }
-
-    const pid = parseInt(match[1], 10);
-    const ppid = parseInt(match[2], 10);
-    const elapsedSeconds = parseBusyBoxElapsedSeconds(match[3]);
-    const command = match[4];
-    if (
-      !Number.isFinite(pid) ||
-      !Number.isFinite(ppid) ||
-      elapsedSeconds === undefined ||
-      !isAutoMobileDaemonCommand(command, activeEntryScript)
-    ) {
-      continue;
-    }
-
-    // This fallback derives birth time from wall-clock `now`; a clock step between
-    // reconstruction and PID-record capture can shift it beyond identity tolerance.
-    records.push({ pid, ppid, command, startedAt: now - elapsedSeconds * 1000 });
-  }
-
-  return records;
-}
-
-const LSTART_MONTHS = new Map([
-  ["Jan", 0],
-  ["Feb", 1],
-  ["Mar", 2],
-  ["Apr", 3],
-  ["May", 4],
-  ["Jun", 5],
-  ["Jul", 6],
-  ["Aug", 7],
-  ["Sep", 8],
-  ["Oct", 9],
-  ["Nov", 10],
-  ["Dec", 11],
-]);
-
-function parseLstart(value: string): number | undefined {
-  const match = value.match(
-    /^(?:Sun|Mon|Tue|Wed|Thu|Fri|Sat)\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})\s+(\d{2}):(\d{2}):(\d{2})\s+(\d{4})$/,
-  );
-  if (!match) {
-    return undefined;
-  }
-
-  const month = LSTART_MONTHS.get(match[1]);
-  if (month === undefined) {
-    return undefined;
-  }
-  const day = parseInt(match[2], 10);
-  const hour = parseInt(match[3], 10);
-  const minute = parseInt(match[4], 10);
-  const second = parseInt(match[5], 10);
-  const year = parseInt(match[6], 10);
-
-  // `ps lstart` reports local wall-clock time. Constructing this date locally
-  // keeps its epoch comparable to the Date.now() timestamp written to the PID
-  // file, while the component check rejects JavaScript's overflow normalization.
-  // During a fall-back repeated hour, this local time is ambiguous and Date applies its fixed offset rule.
-  const startedAt = new Date(year, month, day, hour, minute, second);
-  const hasComponentMismatch = [
-    startedAt.getFullYear() !== year,
-    startedAt.getMonth() !== month,
-    startedAt.getDate() !== day,
-    startedAt.getHours() !== hour,
-    startedAt.getMinutes() !== minute,
-    startedAt.getSeconds() !== second,
-  ];
-  if (hasComponentMismatch.some(Boolean)) {
-    return undefined;
-  }
-  return startedAt.getTime();
-}
-
-/**
- * Parse Darwin's `ps lstart` table. `lstart` has second precision, matching the
- * existing Linux `etimes` identity precision used to fence PID reuse.
- */
-export function parseDarwinDaemonProcessTable(
-  psOutput: string,
-  activeEntryScript?: string,
-): DaemonProcessRecord[] {
-  const records: DaemonProcessRecord[] = [];
-
-  for (const line of psOutput.split("\n")) {
-    const match = line.match(
-      /^\s*(\d+)\s+(\d+)\s+((?:Sun|Mon|Tue|Wed|Thu|Fri|Sat)\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\s+\d{4})\s+(.+?)\s*$/,
-    );
-    if (!match) {
-      continue;
-    }
-
-    const pid = parseInt(match[1], 10);
-    const ppid = parseInt(match[2], 10);
-    const startedAt = parseLstart(match[3]);
-    const command = match[4];
-    if (
-      !Number.isFinite(pid) ||
-      !Number.isFinite(ppid) ||
-      startedAt === undefined ||
-      !isAutoMobileDaemonCommand(command, activeEntryScript)
-    ) {
-      continue;
-    }
-
-    const processGenerationToken = darwinProcessGenerationToken(match[3]);
-    records.push({
-      pid,
-      ppid,
-      command,
-      startedAt,
-      ...(processGenerationToken === undefined ? {} : { processGenerationToken }),
-    });
-  }
-
-  return records;
-}
-
-interface WindowsProcessTableEntry {
-  ProcessId?: unknown;
-  ParentProcessId?: unknown;
-  CommandLine?: unknown;
-  StartedAt?: unknown;
-}
-
-function parseWindowsProcessId(value: unknown): number | undefined {
-  if (typeof value !== "number" && typeof value !== "string") {
-    return undefined;
-  }
-
-  const parsed = typeof value === "number" ? value : parseInt(value, 10);
-  return Number.isFinite(parsed) ? parsed : undefined;
-}
-
-function parseWindowsProcessTableEntry(
-  entry: WindowsProcessTableEntry,
-  activeEntryScript?: string,
-): DaemonProcessRecord | undefined {
-  const pid = parseWindowsProcessId(entry.ProcessId);
-  const ppid = parseWindowsProcessId(entry.ParentProcessId);
-  const command = entry.CommandLine;
-
-  if (
-    pid === undefined ||
-    ppid === undefined ||
-    typeof command !== "string" ||
-    !isAutoMobileDaemonCommand(command, activeEntryScript)
-  ) {
-    return undefined;
-  }
-
-  const startedAt =
-    typeof entry.StartedAt === "number" && Number.isFinite(entry.StartedAt)
-      ? entry.StartedAt
-      : undefined;
-  return {
-    pid,
-    ppid,
-    command,
-    ...(startedAt === undefined ? {} : { startedAt }),
-  };
-}
-
-export function parseWindowsDaemonProcessTable(
-  processTableJson: string,
-  activeEntryScript?: string,
-): DaemonProcessRecord[] {
-  const parsed: unknown = JSON.parse(processTableJson);
-  const entries = Array.isArray(parsed) ? parsed : [parsed];
-  const records: DaemonProcessRecord[] = [];
-
-  for (const entry of entries) {
-    if (!entry || typeof entry !== "object") {
-      continue;
-    }
-
-    const record = parseWindowsProcessTableEntry(entry, activeEntryScript);
-    if (record) {
-      records.push(record);
-    }
-  }
-
-  return records;
-}
-
-export interface DaemonProcessLivenessChecker {
-  isProcessRunning(pid: number): boolean;
-}
-
-export interface DaemonProcessSignaler {
-  signal(pid: number, signal: NodeJS.Signals): void;
 }
 
 /**
@@ -578,193 +212,8 @@ const defaultDaemonProcessSignaler: DaemonProcessSignaler = {
   },
 };
 
-function boundedProcessTableScanTimeout(timeoutMs: number | undefined): number {
-  return Math.max(
-    MIN_PROCESS_TABLE_SCAN_TIMEOUT_MS,
-    Math.min(
-      timeoutMs ?? DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS,
-      DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS,
-    ),
-  );
-}
-
-function isUnsupportedGnuProcessTableFormat(error: unknown): boolean {
-  return /(?:\betimes\b|\b(?:invalid|unrecognized|unknown|unsupported)\s+option\b|\bbad\s+-o\b)/i.test(
-    errorMessage(error),
-  );
-}
-
-export class PsDaemonProcessFinder implements DaemonProcessFinder, DaemonProcessLivenessChecker {
-  constructor(
-    private readonly runCommand: ProcessTableCommandRunner = execSync,
-    private readonly platform: NodeJS.Platform = process.platform,
-    private readonly timer: Timer = defaultTimer,
-    private readonly linuxProcessGenerationTokenForPid: (
-      pid: number,
-    ) => string | undefined = readLinuxProcessGenerationToken,
-    private readonly activeEntryScript: string | undefined = process.argv[1],
-  ) {}
-
-  findDaemonProcesses(timeoutMs?: number): DaemonProcessRecord[] {
-    const isDarwin = this.platform === "darwin";
-    const scanTimeoutMs = boundedProcessTableScanTimeout(timeoutMs);
-    const scanDeadline = this.timer.now() + scanTimeoutMs;
-    const runScan = (command: string): { output: string; scannedAt: number } => {
-      // Relative ages belong to the snapshot immediately before this scan, not
-      // to the later time at which a loaded host returns the process table.
-      const scannedAt = this.timer.now();
-      const remaining = scanDeadline - scannedAt;
-      if (remaining <= 0) {
-        throw new Error("Process-table inspection ETIMEDOUT before scan could begin");
-      }
-      return {
-        output: this.runCommand(command, {
-          encoding: "utf-8",
-          maxBuffer: DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES,
-          timeout: Math.max(MIN_PROCESS_TABLE_SCAN_TIMEOUT_MS, remaining),
-        }),
-        scannedAt,
-      };
-    };
-
-    if (isDarwin) {
-      const { output } = runScan("LC_ALL=C ps -axo pid=,ppid=,lstart=,command=");
-      return parseDarwinDaemonProcessTable(output, this.activeEntryScript);
-    }
-
-    try {
-      const { output, scannedAt } = runScan("ps -eo pid=,ppid=,etimes=,command=");
-      return this.withLinuxProcessGenerationTokens(
-        parseDaemonProcessTable(output, scannedAt, this.activeEntryScript),
-      );
-    } catch (error) {
-      if (!isUnsupportedGnuProcessTableFormat(error)) {
-        throw error;
-      }
-      const { output, scannedAt } = runScan("ps -o pid,ppid,etime,args");
-      return this.withLinuxProcessGenerationTokens(
-        parseBusyBoxDaemonProcessTable(output, scannedAt, this.activeEntryScript),
-      );
-    }
-  }
-
-  private withLinuxProcessGenerationTokens(records: DaemonProcessRecord[]): DaemonProcessRecord[] {
-    return records.map((record) => {
-      const processGenerationToken = this.linuxProcessGenerationTokenForPid(record.pid);
-      return processGenerationToken === undefined ? record : { ...record, processGenerationToken };
-    });
-  }
-
-  isProcessRunning(pid: number): boolean {
-    return isDaemonProcessRunning(pid);
-  }
-}
-
-export class WindowsDaemonProcessFinder
-  implements DaemonProcessFinder, DaemonProcessLivenessChecker
-{
-  constructor(
-    private readonly runCommand: ProcessTableCommandRunner = execSync,
-    private readonly activeEntryScript: string | undefined = process.argv[1],
-  ) {}
-
-  findDaemonProcesses(timeoutMs?: number): DaemonProcessRecord[] {
-    // CIM returns local DateTime values. Publish absolute UTC birth times so
-    // neither the host time zone nor PowerShell startup/scan latency shifts them.
-    const processTableJson = this.runCommand(
-      "powershell.exe -NoProfile -NonInteractive -Command \"Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,CommandLine,@{Name='StartedAt';Expression={([DateTimeOffset]$_.CreationDate.ToUniversalTime()).ToUnixTimeMilliseconds()}} | ConvertTo-Json -Compress\"",
-      {
-        encoding: "utf-8",
-        maxBuffer: DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES,
-        timeout: boundedProcessTableScanTimeout(timeoutMs),
-      },
-    );
-    return parseWindowsDaemonProcessTable(processTableJson, this.activeEntryScript);
-  }
-
-  isProcessRunning(pid: number): boolean {
-    return isDaemonProcessRunning(pid);
-  }
-}
-
-export function createDefaultDaemonProcessFinder(
-  platform: NodeJS.Platform = process.platform,
-): DaemonProcessFinder & DaemonProcessLivenessChecker {
-  return platform === "win32"
-    ? new WindowsDaemonProcessFinder()
-    : new PsDaemonProcessFinder(undefined, platform);
-}
-
 export interface ExtractionCleaner {
   removeExtractionForEntryScript(entryScript: string): Promise<boolean>;
-}
-
-/**
- * Confirms whether a TCP port is free to bind, from the MANAGER side (issue
- * #6260) — independent of process-table detection. `restart()` uses this as a
- * last line of defense right before `start()`: even when process discovery
- * believes every prior AutoMobile daemon was stopped, a still-bound canonical
- * port is definitive proof one was not, and `start()`'s own `findAvailablePort`
- * would otherwise silently fall back to the next port in range and report
- * unqualified success — precisely the split-brain #6260 describes.
- */
-export interface DaemonPortAvailabilityChecker {
-  /**
-   * `timeoutMs` caps the probe under the caller's remaining budget (issue #7001);
-   * the checker never waits longer than its own default probe timeout either way.
-   */
-  isPortFree(port: number, host: string, timeoutMs?: number): Promise<boolean>;
-}
-
-/**
- * Minimal listener surface the port probe needs; `node:net`'s `Server` satisfies
- * it and tests substitute an in-memory emitter.
- */
-export interface ProbeListener {
-  once(event: "error", listener: (error: NodeJS.ErrnoException) => void): unknown;
-  listen(port: number, host: string, listeningListener: () => void): unknown;
-  close(callback: () => void): unknown;
-}
-
-/**
- * Bind errors that mean the ADDRESS cannot host a listener at all (e.g. `::1`
- * on a container without IPv6 loopback), so no incumbent can be bound there.
- * Every other bind failure keeps the fail-closed "port is occupied" reading.
- */
-const UNBINDABLE_ADDRESS_ERROR_CODES = new Set(["EADDRNOTAVAIL", "EAFNOSUPPORT"]);
-
-export class NetDaemonPortAvailabilityChecker implements DaemonPortAvailabilityChecker {
-  constructor(private readonly createListener: () => ProbeListener = createNetServer) {}
-
-  isPortFree(
-    port: number,
-    host: string,
-    timeoutMs: number = DAEMON_PORT_AVAILABILITY_PROBE_TIMEOUT_MS,
-  ): Promise<boolean> {
-    const probeTimeoutMs = Math.min(DAEMON_PORT_AVAILABILITY_PROBE_TIMEOUT_MS, timeoutMs);
-    if (probeTimeoutMs <= 0) {
-      // No budget left to learn anything: report the port as bound so callers
-      // fail closed rather than launching a second daemon on unverified state.
-      return Promise.resolve(false);
-    }
-    return new Promise((resolvePromise) => {
-      const probeServer = this.createListener();
-      let settled = false;
-      const finish = (result: boolean): void => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        defaultTimer.clearTimeout(timeoutHandle);
-        probeServer.close(() => resolvePromise(result));
-      };
-      const timeoutHandle = defaultTimer.setTimeout(() => finish(false), probeTimeoutMs);
-      probeServer.once("error", (bindError) =>
-        finish(bindError.code !== undefined && UNBINDABLE_ADDRESS_ERROR_CODES.has(bindError.code)),
-      );
-      probeServer.listen(port, host, () => finish(true));
-    });
-  }
 }
 
 function resolveExtractionRootForEntryScript(entryScript: string): string | null {
@@ -4583,597 +4032,10 @@ export class DaemonManager implements DaemonManagerLike {
   }
 }
 
-export function parseDaemonArgs(
-  args: string[],
-  env: NodeJS.ProcessEnv = process.env,
-): DaemonOptions {
-  const options: DaemonOptions = shouldSkipCtrlProxyDownload(args, env)
-    ? { skipCtrlProxyDownload: true }
-    : {};
-  options.toolOutputsDir = parseToolOutputsDirConfig(
-    [],
-    env,
-    resolveDaemonLaunchWorkingDirectory(),
-  );
-  const eventAllMarkers = parseEventAllMarkersConfig(args, env);
-  const eventAllMarkersCliOverride = hasEventAllMarkersCliOverride(args);
-  if (eventAllMarkers.length > 0 || eventAllMarkersCliOverride) {
-    options.eventAllMarkers = eventAllMarkers;
-    options.eventAllMarkersCliOverride = eventAllMarkersCliOverride;
-  }
-  const envRunnerReadinessTimeout = parseRunnerReadinessTimeout(
-    env[RUNNER_READINESS_TIMEOUT_ENV] ?? env.AUTO_MOBILE_RUNNER_READINESS_TIMEOUT_MS,
-  );
-  if (envRunnerReadinessTimeout !== undefined) {
-    options.runnerReadinessTimeoutMs = envRunnerReadinessTimeout;
-  }
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--port") {
-      options.port = parseInt(args[i + 1], 10);
-      i++;
-    } else if (args[i] === "--host") {
-      const host = args[i + 1];
-      if (host && !host.startsWith("--")) {
-        options.host = host;
-        i++;
-      }
-    } else if (args[i] === "--strict-port") {
-      options.strictPort = true;
-    } else if (args[i] === "--debug") {
-      options.debug = true;
-    } else if (args[i] === "--debug-perf" || args[i] === "--ui-perf-debug") {
-      options.debugPerf = true;
-    } else if (args[i] === "--plan-execution-lock-scope") {
-      const scope = args[i + 1];
-      if (scope === "global" || scope === "session") {
-        options.planExecutionLockScope = scope;
-        i++;
-      }
-    } else if (args[i] === RUNNER_READINESS_TIMEOUT_FLAG) {
-      const timeoutMs = parseRunnerReadinessTimeout(args[i + 1]);
-      if (timeoutMs !== undefined) {
-        options.runnerReadinessTimeoutMs = timeoutMs;
-        i++;
-      }
-    } else if (args[i] === "--video-quality" || args[i] === "--video-quality-preset") {
-      options.videoQualityPreset = args[i + 1];
-      i++;
-    } else if (args[i] === "--video-target-bitrate-kbps") {
-      options.videoTargetBitrateKbps = parseInt(args[i + 1], 10);
-      i++;
-    } else if (args[i] === "--video-max-throughput-mbps") {
-      options.videoMaxThroughputMbps = Number(args[i + 1]);
-      i++;
-    } else if (args[i] === "--video-fps") {
-      options.videoFps = parseInt(args[i + 1], 10);
-      i++;
-    } else if (args[i] === "--video-format") {
-      options.videoFormat = args[i + 1];
-      i++;
-    } else if (args[i] === "--video-archive-size-mb") {
-      options.videoMaxArchiveSizeMb = Number(args[i + 1]);
-      i++;
-    } else if (args[i] === TOOL_OUTPUTS_DIR_FLAG || args[i] === TOOL_OUTPUT_DIR_FLAG_ALIAS) {
-      const toolOutputsDir = args[i + 1];
-      if (toolOutputsDir && !toolOutputsDir.startsWith("--")) {
-        options.toolOutputsDir = toolOutputsDir;
-        i++;
-      }
-    } else if (args[i] === "--network-mockable") {
-      options.networkMockable = true;
-    } else if (args[i] === "--embedded-sdk") {
-      options.embeddedSdk = true;
-    } else if (args[i] === "--enable-tool") {
-      const toolName = args[i + 1];
-      if (toolName && !toolName.startsWith("--")) {
-        options.enabledTools = [...(options.enabledTools ?? []), toolName];
-        i++;
-      }
-    } else if (args[i] === "--disable-tool") {
-      const toolName = args[i + 1];
-      if (toolName && !toolName.startsWith("--")) {
-        options.disabledTools = [...(options.disabledTools ?? []), toolName];
-        i++;
-      }
-    } else if (args[i] === "--dismiss-keyboard-after-input") {
-      options.dismissKeyboardAfterInput = true;
-    } else if (args[i] === "--no-ui-perf-mode") {
-      options.noUiPerfMode = true;
-    } else if (args[i] === "--no-navigation-screenshots") {
-      options.noNavigationScreenshots = true;
-    } else if (args[i] === "--no-waitfor-polling-overhead") {
-      options.noWaitForPollingOverhead = true;
-    } else if (args[i] === "--no-occlusion") {
-      options.noOcclusion = true;
-    } else if (args[i] === "--no-include-not-important-views") {
-      options.noA11yIncludeNotImportantViews = true;
-    } else if (args[i] === "--no-report-view-ids") {
-      options.noA11yReportViewIds = true;
-    } else if (args[i] === "--no-retrieve-interactive-windows") {
-      options.noA11yRetrieveInteractiveWindows = true;
-    } else if (args[i] === "--mem-perf-audit") {
-      options.memPerfAudit = true;
-    } else if (args[i] === "--accessibility-audit") {
-      options.accessibilityAudit = true;
-    } else if (args[i] === "--accessibility-level" || args[i] === "--a11y-level") {
-      options.accessibilityLevel = args[i + 1];
-      i++;
-    } else if (args[i] === "--accessibility-failure-mode" || args[i] === "--a11y-failure-mode") {
-      options.accessibilityFailureMode = args[i + 1];
-      i++;
-    } else if (args[i] === "--accessibility-min-severity" || args[i] === "--a11y-min-severity") {
-      options.accessibilityMinSeverity = args[i + 1];
-      i++;
-    } else if (args[i] === "--accessibility-use-baseline" || args[i] === "--a11y-use-baseline") {
-      options.accessibilityUseBaseline = true;
-    } else if (args[i] === "--predictive-ui" || args[i] === "--predictive") {
-      options.predictiveUi = true;
-    } else if (args[i] === "--raw-element-search") {
-      options.rawElementSearch = true;
-    } else if (
-      args[i] === "--skip-ctrl-proxy-download" ||
-      args[i] === "--skip-accessibility-download"
-    ) {
-      options.skipCtrlProxyDownload = true;
-    } else if (args[i] === "--mcp-recording") {
-      options.mcpRecording = true;
-    } else if (args[i] === "--observe-result-include-elements") {
-      options.observeResultIncludeElements = true;
-    } else if (args[i] === "--tool-results-no-structured-content") {
-      options.toolResultsNoStructuredContent = true;
-    } else if (args[i] === "--actions-diff-observe") {
-      options.actionsDiffObserve = true;
-    } else if (args[i] === "--actions-no-observe") {
-      options.actionsNoObserve = true;
-    }
-  }
-  return options;
-}
-
-/**
- * Run daemon management command
- */
-export interface RunDaemonCommandOptions {
-  clientFactory?: DaemonClientFactory;
-  stateProvider?: () => DaemonStateLike;
-  startupToolDefaults?: Pick<DaemonOptions, "enabledTools" | "disabledTools">;
-}
-
-export function daemonCommandOptions(
-  args: string[],
-  options: RunDaemonCommandOptions,
-): DaemonOptions {
-  const parsed = parseDaemonArgs(args);
-  if (!options.startupToolDefaults) {
-    return parsed;
-  }
-  return {
-    ...parsed,
-    ...(options.startupToolDefaults.enabledTools !== undefined
-      ? { enabledTools: [...options.startupToolDefaults.enabledTools] }
-      : {}),
-    ...(options.startupToolDefaults.disabledTools !== undefined
-      ? { disabledTools: [...options.startupToolDefaults.disabledTools] }
-      : {}),
-  };
-}
-
-export interface DaemonHeartbeatCommandArgs {
-  sessionId: string;
-  livenessOwnerToken?: string;
-  claimLivenessOwnership: boolean;
-}
-
-/**
- * Parse the ownership options used by first-party recurring heartbeat keepers.
- *
- * A bare `--daemon heartbeat <session>` intentionally stays tokenless for
- * legacy external callers. A keeper that spans several one-shot CLI processes
- * supplies one stable token, claiming it once and proving it on later ticks.
- */
-export function parseDaemonHeartbeatCommandArgs(args: string[]): DaemonHeartbeatCommandArgs {
-  const sessionId = args[0];
-  if (!sessionId) {
-    throw new ActionableError("heartbeat requires a session ID argument");
-  }
-
-  let livenessOwnerToken: string | undefined;
-  let claimLivenessOwnership = false;
-  for (let index = 1; index < args.length; index++) {
-    switch (args[index]) {
-      case "--liveness-owner-token": {
-        const ownerToken = args[index + 1];
-        if (!ownerToken || ownerToken.startsWith("--")) {
-          throw new ActionableError("--liveness-owner-token requires a non-empty value");
-        }
-        livenessOwnerToken = ownerToken;
-        index++;
-        break;
-      }
-      case "--claim-liveness-ownership":
-        claimLivenessOwnership = true;
-        break;
-      default:
-        throw new ActionableError(`Unknown heartbeat option: ${args[index]}`);
-    }
-  }
-
-  if (claimLivenessOwnership && !livenessOwnerToken) {
-    throw new ActionableError("--claim-liveness-ownership requires --liveness-owner-token");
-  }
-
-  return { sessionId, livenessOwnerToken, claimLivenessOwnership };
-}
-
-export function parseRestartAdmittedMaintenanceToken(args: string[]): string {
-  const tokenIndex = args.indexOf("--maintenance-token");
-  const token = tokenIndex === -1 ? undefined : args[tokenIndex + 1];
-  if (!token || token.startsWith("--")) {
-    throw new ActionableError("--maintenance-token requires a non-empty value");
-  }
-  return token;
-}
-
-export function parseAcceptanceSessionRestartScope(args: string[]): AcceptanceSessionRestartScope {
-  const read = (flag: string): string => {
-    const index = args.indexOf(flag);
-    const value = index === -1 ? undefined : args[index + 1];
-    if (!value || value.startsWith("--")) {
-      throw new ActionableError(`${flag} requires a non-empty value`);
-    }
-    return value;
-  };
-  const platform = read("--platform");
-  if (platform !== "android" && platform !== "ios") {
-    throw new ActionableError("--platform must be android or ios");
-  }
-  const expiresAt = Number(read("--expires-at"));
-  if (!Number.isFinite(expiresAt) || expiresAt <= 0) {
-    throw new ActionableError("--expires-at must be a positive finite timestamp");
-  }
-  return {
-    sessionUuid: read("--session-uuid"),
-    platform,
-    stableDeviceId: read("--stable-device-id"),
-    controls: {
-      androidSiblingAvdName: read("--android-sibling-avd-name"),
-      androidDuplicateSerial: read("--android-duplicate-serial"),
-      iosSameNameSiblingUdid: read("--ios-same-name-sibling-uuid"),
-    },
-    expiresAt,
-  };
-}
-
-/**
- * Build the `--daemon status` lines that surface the running daemon's build
- * identity (`buildId` + `entryScript`) and flag wrong-build skew against this
- * client. Pure so it is unit-testable without a live daemon. See #2736.
- *
- * @param status the running daemon's status (must be `running`)
- * @param client this client's build identity
- */
-export function daemonBuildIdentityStatusLines(
-  status: DaemonStatus,
-  client: BuildIdentity,
-): string[] {
-  const daemon = buildIdentityFromStatus(status);
-  const lines = [
-    `  Build ID: ${daemon.buildId || "unknown"}`,
-    `  Entry Script: ${daemon.entryScript || "unknown"}`,
-  ];
-
-  if (!buildIdentitiesMatch(client, daemon)) {
-    lines.push(
-      "\n⚠️  WARNING: the running daemon is a different build than this checkout:",
-      `  daemon build=${describeBuildIdentity(daemon)}`,
-      `  client build=${describeBuildIdentity(client)}`,
-      "\nRestart the daemon from this checkout (run `--daemon restart` with this same CLI) to align them.",
-    );
-  }
-
-  return lines;
-}
-
 export async function runDaemonCommand(
   command: string,
   args: string[],
   options: RunDaemonCommandOptions = {},
 ): Promise<void> {
-  const manager = new DaemonManager(options.clientFactory, options.stateProvider);
-
-  try {
-    switch (command) {
-      case "start": {
-        await manager.start(daemonCommandOptions(args, options));
-        break;
-      }
-
-      case "stop":
-        await manager.stop();
-        break;
-
-      case "status": {
-        const status = await manager.status();
-        if (status.recovery) {
-          console.log(
-            `  Identity recovery: ${status.recovery.state}${status.recovery.reason ? ` (${status.recovery.reason})` : ""}`,
-          );
-        }
-        if (status.running) {
-          console.log("Daemon is running");
-          console.log(`  PID: ${status.pid}`);
-          console.log(`  Port: ${status.port}`);
-          console.log(`  Socket: ${status.socketPath}`);
-          console.log(`  Database: ${status.dbPath || "unknown"}`);
-          console.log(`  Version: ${status.version || "unknown"}`);
-          console.log(
-            `  Started: ${status.startedAt ? new Date(status.startedAt).toISOString() : "unknown"}`,
-          );
-          for (const line of daemonBuildIdentityStatusLines(status, getCurrentBuildIdentity())) {
-            console.log(line);
-          }
-
-          // Check for other daemon processes (exclude current daemon)
-          const otherDaemons = manager.findOtherDaemonProcesses(status.pid);
-          if (otherDaemons.length > 0) {
-            console.log(
-              `\n⚠️  WARNING: Found ${otherDaemons.length} other daemon process(es) from other worktrees:`,
-            );
-            for (const pid of otherDaemons) {
-              console.log(`  - PID ${pid}`);
-            }
-            console.log(
-              `\nThese can cause device pool conflicts. Run 'bunx ${resolveDaemonInstallSpecifier()} --daemon restart' to stop them.`,
-            );
-          }
-        } else {
-          console.log("Daemon is not running");
-        }
-        break;
-      }
-
-      case "restart": {
-        await manager.restart(daemonCommandOptions(args, options));
-        break;
-      }
-
-      case "restart-admitted": {
-        await manager.restartAdmitted(
-          daemonCommandOptions(args, options),
-          parseRestartAdmittedMaintenanceToken(args),
-        );
-        break;
-      }
-
-      case "restart-acceptance-session": {
-        await manager.restartAcceptanceSession(parseAcceptanceSessionRestartScope(args));
-        break;
-      }
-
-      case "health": {
-        const report = await getDaemonHealthReport();
-        console.log(formatHealthReport(report));
-
-        // Exit with error code if daemon is not healthy
-        if (!report.daemonRunning || !report.socketConnectable) {
-          process.exit(1);
-        }
-        break;
-      }
-
-      case "diagnose": {
-        console.log("Running daemon diagnostics...\n");
-
-        // Run health check
-        const healthReport = await getDaemonHealthReport();
-        console.log(formatHealthReport(healthReport));
-
-        // Run socket diagnostics
-        const socketDiag = await runSocketDiagnostics();
-        console.log(formatSocketDiagnostics(socketDiag));
-
-        // Exit with error code if issues found
-        if (healthReport.recommendations.length > 0 || socketDiag.issues.length > 0) {
-          process.exit(1);
-        }
-        break;
-      }
-
-      case "available-devices": {
-        const formatPoolStats = (
-          stats?: { idle: number; assigned: number; error: number; total: number },
-          recoveryPolicy?: { onLoss: boolean; maxAttempts: number },
-          devices?: Array<{ deviceId: string; platform: string; recoveryEligibility?: unknown }>,
-        ) =>
-          JSON.stringify({
-            availableDevices: stats?.idle ?? 0,
-            totalDevices: stats?.total ?? 0,
-            assignedDevices: stats?.assigned ?? 0,
-            errorDevices: stats?.error ?? 0,
-            ...(recoveryPolicy ? { recoveryPolicy } : {}),
-            ...(devices ? { devices } : {}),
-          });
-
-        // Check if running in daemon process
-        const daemonState = manager.getDaemonState();
-        if (daemonState.isInitialized()) {
-          // Running inside daemon process
-          const pool = daemonState.getDevicePool();
-          console.log(
-            formatPoolStats(
-              pool.getStats(),
-              pool.getRecoveryPolicy(),
-              pool.getAllDevices().map((device) => ({
-                deviceId: device.id,
-                platform: device.platform,
-                recoveryEligibility: pool.getRecoveryEligibility(device.id),
-              })),
-            ),
-          );
-        } else {
-          // Running from CLI - query daemon via socket
-          const client = manager.createClient();
-          try {
-            await client.connect();
-            const result = await client.readResource("automobile:devices/booted");
-            const content = result?.contents?.[0]?.text;
-            if (!content) {
-              console.log(formatPoolStats());
-            } else {
-              const data = JSON.parse(content);
-              console.log(
-                formatPoolStats(
-                  data?.poolStatus,
-                  data?.poolStatus?.recoveryPolicy,
-                  data?.devices?.map(
-                    (device: {
-                      platform: string;
-                      runtime?: { deviceId?: string | null };
-                      recoveryEligibility?: unknown;
-                    }) => ({
-                      deviceId: device.runtime?.deviceId ?? "unknown",
-                      platform: device.platform,
-                      recoveryEligibility: device.recoveryEligibility,
-                    }),
-                  ),
-                ),
-              );
-            }
-            await client.close();
-          } catch (error) {
-            throw new ActionableError(`Failed to query available devices: ${errorMessage(error)}`);
-          }
-        }
-        break;
-      }
-      case "session-info": {
-        if (args.length === 0) {
-          throw new ActionableError("session-info requires a session ID argument");
-        }
-        const sessionId = args[0];
-
-        // Check if running in daemon process
-        const daemonState = manager.getDaemonState();
-        if (daemonState.isInitialized()) {
-          // Running inside daemon process
-          const sessionManager = daemonState.getSessionManager();
-          const session = sessionManager.getSession(sessionId);
-          if (!session) {
-            throw new ActionableError(`Session not found: ${sessionId}`);
-          }
-          console.log(
-            JSON.stringify({
-              sessionId: session.sessionId,
-              assignedDevice: session.assignedDevice,
-              createdAt: session.createdAt,
-              lastUsedAt: session.lastUsedAt,
-              expiresAt: session.expiresAt,
-              cacheSize: JSON.stringify(session.cacheData).length,
-            }),
-          );
-        } else {
-          // Running from CLI - query daemon via socket
-          const client = manager.createClient();
-          try {
-            await client.connect();
-            const result = await client.callDaemonMethod("daemon/sessionInfo", { sessionId });
-            console.log(JSON.stringify(result));
-            await client.close();
-          } catch (error) {
-            throw new ActionableError(`Failed to get session info: ${errorMessage(error)}`);
-          }
-        }
-        break;
-      }
-
-      case "release-session": {
-        if (args.length === 0) {
-          throw new ActionableError("release-session requires a session ID argument");
-        }
-        const sessionId = args[0];
-
-        // Check if running in daemon process
-        const daemonState = manager.getDaemonState();
-        if (daemonState.isInitialized()) {
-          // Running inside daemon process
-          const sessionManager = daemonState.getSessionManager();
-          const pool = daemonState.getDevicePool();
-          const session = sessionManager.getSession(sessionId);
-          if (!session) {
-            throw new ActionableError(`Session not found: ${sessionId}`);
-          }
-          const deviceId = session.assignedDevice;
-          sessionManager.releaseSession(sessionId);
-          pool.releaseDevice(deviceId, sessionId);
-          console.log(`Session ${sessionId} released`);
-          console.log(`Device ${deviceId} is now available`);
-        } else {
-          // Running from CLI - query daemon via socket
-          const client = manager.createClient();
-          try {
-            await client.connect();
-            await client.callDaemonMethod("daemon/releaseSession", { sessionId });
-            console.log(`Session ${sessionId} released`);
-            await client.close();
-          } catch (error) {
-            throw new ActionableError(`Failed to release session: ${errorMessage(error)}`);
-          }
-        }
-        break;
-      }
-
-      case "heartbeat": {
-        const { sessionId, livenessOwnerToken, claimLivenessOwnership } =
-          parseDaemonHeartbeatCommandArgs(args);
-        const daemonState = manager.getDaemonState();
-        if (daemonState.isInitialized()) {
-          const sessionManager = daemonState.getSessionManager();
-          if (!sessionManager.getSession(sessionId)) {
-            throw new ActionableError(`Session not found: ${sessionId}`);
-          }
-          sessionManager.recordHeartbeat(sessionId);
-        } else {
-          const client = manager.createClient();
-          try {
-            await client.connect();
-            await client.callDaemonMethod("daemon/heartbeat", {
-              sessionId,
-              livenessPolicy: CLI_SESSION_LIVENESS_POLICY,
-              idleTimeoutMs: getCliSessionIdleTimeoutMs(),
-              ...(livenessOwnerToken ? { livenessOwnerToken } : {}),
-              ...(claimLivenessOwnership ? { claimLivenessOwnership: true } : {}),
-            });
-          } catch (error) {
-            throw new ActionableError(`Failed to record session heartbeat: ${errorMessage(error)}`);
-          } finally {
-            await client.close();
-          }
-        }
-        console.log(`Session ${sessionId} heartbeat recorded`);
-        break;
-      }
-
-      default:
-        console.error(`Unknown daemon command: ${command}`);
-        console.log("\nAvailable commands:");
-        console.log("  start                 Start the daemon");
-        console.log("  stop                  Stop the daemon");
-        console.log("  status                Check daemon status");
-        console.log("  restart               Restart the daemon");
-        console.log("  health                Check daemon health");
-        console.log("  diagnose              Run full diagnostics");
-        console.log("  available-devices     Query device pool status");
-        console.log("  session-info <id>     Get information about a session");
-        console.log("  release-session <id>  Release a session and free its device");
-        console.log("  heartbeat <id>        Record a heartbeat for a session");
-        process.exit(1);
-    }
-  } catch (error) {
-    if (error instanceof ActionableError) {
-      console.error(`Error: ${error.message}`);
-    } else {
-      console.error(`Unexpected error: ${errorMessage(error)}`);
-    }
-    process.exit(1);
-  }
+  return runDaemonCommandWithManager(command, args, options, DaemonManager);
 }

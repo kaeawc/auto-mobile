@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { parseDaemonArgs } from "../../src/daemon/manager";
+import { parseDaemonArgs } from "../../src/daemon/cli/daemonArgs";
 import { shouldSkipCtrlProxyDownload } from "../../src/utils/ctrlProxyDownloadControl";
 
 describe("ctrlProxyDownloadControl", function () {

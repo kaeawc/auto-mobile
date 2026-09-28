@@ -1,6 +1,7 @@
 import { logger } from "../../../utils/logger";
 import type { BootedDevice, PlanStep, Element } from "../../../models";
 import type { GestureEmitter, GestureEvent, A11ySource } from "./types";
+import { GESTURE_THRESHOLDS } from "./types";
 import { AndroidCtrlProxyClient } from "../../observe/android";
 import { defaultAdbClientFactory } from "../../../utils/android-cmdline-tools/AdbClientFactory";
 import { discoverTouchNode } from "./TouchNodeDiscovery";
@@ -24,6 +25,7 @@ interface PendingGesture {
   gesture: GestureEvent;
   arrivedAt: number;
   resolved: boolean;
+  stepIndex?: number;
 }
 
 /**
@@ -148,6 +150,46 @@ export class DualTrackRecorder {
       return;
     }
 
+    this.pendingGestures = this.pendingGestures.filter(
+      (pending) =>
+        !pending.resolved ||
+        (pending.gesture.type === "tap" &&
+          gesture.arrivedAt - pending.gesture.arrivedAt <= GESTURE_THRESHOLDS.DOUBLE_TAP_MS),
+    );
+
+    if (gesture.type === "doubleTap") {
+      const priorTap = [...this.pendingGestures].reverse().find((pending) => {
+        const prior = pending.gesture;
+        if (prior.type !== "tap" || prior.screenX === undefined || prior.screenY === undefined) {
+          return false;
+        }
+        const elapsed = gesture.arrivedAt - prior.arrivedAt;
+        if (gesture.firstTapArrivedAt !== undefined) {
+          return (
+            prior.arrivedAt === gesture.firstTapArrivedAt &&
+            elapsed >= 0 &&
+            elapsed <= GESTURE_THRESHOLDS.DOUBLE_TAP_MS
+          );
+        }
+        // Direct emitter events lack the classifier's correlation time.
+        const dx = (gesture.screenX ?? Infinity) - prior.screenX;
+        const dy = (gesture.screenY ?? Infinity) - prior.screenY;
+        return (
+          elapsed >= 0 &&
+          elapsed <= GESTURE_THRESHOLDS.DOUBLE_TAP_MS &&
+          Math.hypot(dx, dy) <= GESTURE_THRESHOLDS.DOUBLE_TAP_SLOP_DP
+        );
+      });
+      if (priorTap) {
+        priorTap.resolved = true;
+      }
+      const step = priorTap?.stepIndex === undefined ? undefined : this.steps[priorTap.stepIndex];
+      if (step?.tool === "tapOn" && step.params.action === "tap") {
+        step.params.action = "doubleTap";
+        return;
+      }
+    }
+
     // tap / doubleTap / longPress / swipe → hold for merge window
     const pending: PendingGesture = {
       gesture,
@@ -187,6 +229,7 @@ export class DualTrackRecorder {
       matched.resolved = true;
       const step = buildMergedStep(matched.gesture, event);
       if (step) {
+        matched.stepIndex = this.steps.length;
         this.steps.push(step);
       }
     } else {
@@ -219,6 +262,7 @@ export class DualTrackRecorder {
       const event = this.bufferedInteractions.splice(idx, 1)[0];
       const step = buildMergedStep(pending.gesture, event);
       if (step) {
+        pending.stepIndex = this.steps.length;
         this.steps.push(step);
       }
     } else {
@@ -316,7 +360,7 @@ function isCompatibleType(gestureType: string, eventType: string): boolean {
     (gestureType === "tap" && eventType === "tap") ||
     (gestureType === "doubleTap" && eventType === "tap") ||
     (gestureType === "longPress" && eventType === "longPress") ||
-    (gestureType === "swipe" && eventType === "swipe")
+    (gestureType === "swipe" && (eventType === "scroll" || eventType === "swipe"))
   );
 }
 

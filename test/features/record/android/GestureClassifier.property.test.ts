@@ -18,8 +18,7 @@ const RUN_OPTIONS = { seed: 0x6e_57_1a_2f, numRuns: 400 } as const;
 // Identity scaler: raw sensor coordinates == logical screen pixels, so the
 // test can reason about geometry in a single coordinate space.
 const identityScaler: CoordScaler = {
-  toScreenX: (x: number) => x,
-  toScreenY: (y: number) => y,
+  toScreenPoint: (x: number, y: number) => ({ x, y }),
 };
 
 function makeFrame(

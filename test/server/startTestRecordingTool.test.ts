@@ -1,6 +1,11 @@
-import { afterEach, beforeAll, describe, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, mock, test } from "bun:test";
 import { registerPlanTools } from "../../src/server/planTools";
+import * as realTestRecordingManager from "../../src/server/testRecordingManager";
 import { ToolRegistry } from "../../src/server/toolRegistry";
+
+const realStartTestRecording = realTestRecordingManager.startTestRecording;
+const realStopTestRecording = realTestRecordingManager.stopTestRecording;
+const realGetTestRecordingStatus = realTestRecordingManager.getTestRecordingStatus;
 
 describe("startTestRecording tool", () => {
   const mockDevice = {
@@ -27,6 +32,14 @@ describe("startTestRecording tool", () => {
 
   afterEach(() => {
     mockStartTestRecording.mockClear();
+  });
+
+  afterAll(() => {
+    mock.module("../../src/server/testRecordingManager", () => ({
+      startTestRecording: realStartTestRecording,
+      stopTestRecording: realStopTestRecording,
+      getTestRecordingStatus: realGetTestRecordingStatus,
+    }));
   });
 
   test("successfully starts a new recording", async () => {

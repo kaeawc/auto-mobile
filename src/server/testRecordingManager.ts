@@ -1,5 +1,6 @@
 import * as yaml from "js-yaml";
 import { BootedDevice, Plan, PlanStep } from "../models";
+import { toActionableError } from "../models/ActionableError";
 import { logger } from "../utils/logger";
 import { getMcpServerVersion, releaseVersion } from "../utils/mcpVersion";
 import { PlanValidator } from "../utils/plan/PlanValidator";
@@ -40,10 +41,17 @@ interface RecordingSession {
   deviceId: string;
   platform: string;
   startedAt: number;
-  recorder: DualTrackRecorder;
+  recorder: TestRecorder;
 }
 
+type TestRecorder = Pick<DualTrackRecorder, "start" | "stop" | "stepCount">;
+type RecorderFactory = (device: BootedDevice) => TestRecorder;
+
 let activeRecording: RecordingSession | null = null;
+let startingRecording: {
+  session: RecordingSession;
+  promise: Promise<TestRecordingStartResult>;
+} | null = null;
 
 export function getTestRecordingStatus(timer: Timer = defaultTimer): TestRecordingStatus | null {
   if (!activeRecording) {
@@ -114,6 +122,7 @@ export async function startTestRecording(
   device: BootedDevice,
   timer: Timer = defaultTimer,
   idGenerator: IdGenerator = defaultIdGenerator,
+  recorderFactory: RecorderFactory = (target) => new DualTrackRecorder(target),
 ): Promise<TestRecordingStartResult> {
   if (activeRecording) {
     if (activeRecording.deviceId !== device.deviceId) {
@@ -133,6 +142,17 @@ export async function startTestRecording(
     };
   }
 
+  if (startingRecording) {
+    const { session, promise } = startingRecording;
+    if (session.deviceId !== device.deviceId) {
+      throw new Error(
+        `Recording already active on device ${session.deviceId} (${session.recordingId}). ` +
+          `Stop the existing recording before starting a new one on ${device.deviceId}.`,
+      );
+    }
+    return promise;
+  }
+
   if (device.platform !== "android") {
     throw new Error(
       `Test recording is only supported on Android right now (got ${device.platform}).`,
@@ -142,27 +162,42 @@ export async function startTestRecording(
   const recordingId = idGenerator.next();
   const startedAt = timer.now();
 
-  const recorder = new DualTrackRecorder(device);
-  await recorder.start();
-
   const session: RecordingSession = {
     recordingId,
     deviceId: device.deviceId,
     platform: device.platform,
     startedAt,
-    recorder,
+    recorder: recorderFactory(device),
   };
-
-  activeRecording = session;
-
-  logger.info(`[TestRecording] Started recording ${recordingId} on ${device.deviceId}`);
-
-  return {
-    recordingId,
-    startedAt: new Date(startedAt).toISOString(),
-    deviceId: device.deviceId,
-    platform: device.platform,
-  };
+  const promise = Promise.resolve().then(async () => {
+    try {
+      await session.recorder.start();
+      activeRecording = session;
+      logger.info(`[TestRecording] Started recording ${recordingId} on ${device.deviceId}`);
+      return {
+        recordingId,
+        startedAt: new Date(startedAt).toISOString(),
+        deviceId: device.deviceId,
+        platform: device.platform,
+      };
+    } catch (error) {
+      try {
+        await session.recorder.stop();
+      } catch (cleanupError) {
+        throw toActionableError(
+          new AggregateError([error, cleanupError], "Recorder startup and teardown both failed"),
+          "Failed to start test recording",
+        );
+      }
+      throw toActionableError(error, "Failed to start test recording");
+    } finally {
+      if (startingRecording?.session === session) {
+        startingRecording = null;
+      }
+    }
+  });
+  startingRecording = { session, promise };
+  return promise;
 }
 
 export async function stopTestRecording(
@@ -170,6 +205,9 @@ export async function stopTestRecording(
   planName?: string,
   timer: Timer = defaultTimer,
 ): Promise<TestRecordingStopResult> {
+  if (startingRecording) {
+    await startingRecording.promise;
+  }
   const session = activeRecording;
   if (!session) {
     throw new Error("No active recording. Start a recording before stopping.");

@@ -41,6 +41,8 @@ export interface GestureEvent {
   screenX?: number;
   screenY?: number;
   durationMs?: number;
+  /** First release time for a classifier-produced doubleTap. */
+  firstTapArrivedAt?: number;
 
   // swipe
   direction?: "up" | "down" | "left" | "right";

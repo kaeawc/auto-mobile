@@ -23,37 +23,24 @@ function ranges(
 }
 
 describe("buildScaler", () => {
-  test("portrait maps sensor X to display width and sensor Y to display height", () => {
-    const scaler = buildScaler(ranges({ rotation: 0 }));
-    // norm(4095) = 4095 / (4095 - 0 + 1) = 4095/4096
-    expect(scaler.toScreenX(4095)).toBe(1000);
-    expect(scaler.toScreenY(4095)).toBe(2000);
-    expect(scaler.toScreenX(2048)).toBe(500);
-  });
-
-  test("landscape (rotation 1) swaps the axes: sensor X maps to display height", () => {
-    const scaler = buildScaler(ranges({ rotation: 1 }));
-    expect(scaler.toScreenX(4095)).toBe(2000); // height, not width
-    expect(scaler.toScreenY(4095)).toBe(1000); // width, not height
-  });
-
-  test("landscape (rotation 3) swaps the axes just like rotation 1", () => {
-    const scaler = buildScaler(ranges({ rotation: 3 }));
-    expect(scaler.toScreenX(4095)).toBe(2000);
-    expect(scaler.toScreenY(4095)).toBe(1000);
-  });
-
-  test("reverse-portrait (rotation 2) keeps the portrait axis mapping", () => {
-    const scaler = buildScaler(ranges({ rotation: 2 }));
-    expect(scaler.toScreenX(4095)).toBe(1000);
-    expect(scaler.toScreenY(4095)).toBe(2000);
+  // Raw min/max are offset to prove inversion uses each axis's own range.
+  test.each([
+    [0, { x: 0, y: 0 }, { x: 1000, y: 0 }, { x: 0, y: 2000 }],
+    [1, { x: 0, y: 1000 }, { x: 0, y: 0 }, { x: 2000, y: 1000 }],
+    [2, { x: 1000, y: 2000 }, { x: 0, y: 2000 }, { x: 1000, y: 0 }],
+    [3, { x: 2000, y: 0 }, { x: 2000, y: 1000 }, { x: 0, y: 0 }],
+  ])("rotation %i maps raw X and Y with Android axis direction", (rotation, origin, xMax, yMax) => {
+    const scaler = buildScaler(ranges({ xMin: 10, xMax: 4105, yMin: 20, yMax: 4115, rotation }));
+    expect(scaler.toScreenPoint(10, 20)).toEqual(origin);
+    expect(scaler.toScreenPoint(4105, 20)).toEqual(xMax);
+    expect(scaler.toScreenPoint(10, 4115)).toEqual(yMax);
   });
 
   test("the +1 span divisor keeps a max-raw value just inside the display bound", () => {
     // 4095 raw across [0, 4095] over a 2400px axis lands at 2399, not 2400 —
     // the off-by-one that a naive (xMax - xMin) divisor would produce.
     const scaler = buildScaler(ranges({ displayWidth: 2400, rotation: 0 }));
-    expect(scaler.toScreenX(4095)).toBe(2399);
+    expect(scaler.toScreenPoint(4095, 0).x).toBe(2399);
   });
 });
 

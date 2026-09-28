@@ -14,25 +14,37 @@ interface AxisRanges {
 }
 
 export interface CoordScaler {
-  toScreenX(rawX: number): number;
-  toScreenY(rawY: number): number;
+  toScreenPoint(rawX: number, rawY: number): { x: number; y: number };
 }
 
 /**
  * Build a coordinate scaler that maps raw sensor values to logical display pixels.
- * In landscape mode (rotation 1 or 3) the sensor X axis maps to display height
- * and sensor Y axis maps to display width.
+ * Rotation follows Android's touch-device mapping: 90 uses raw Y for screen X
+ * and inverted raw X for screen Y; 270 reverses those inversions.
  */
 export function buildScaler(ranges: AxisRanges): CoordScaler {
-  const landscape = ranges.rotation === 1 || ranges.rotation === 3;
+  const scaleX = (rawX: number, inverted: boolean): number =>
+    Math.round(
+      ((inverted ? ranges.xMax - rawX : rawX - ranges.xMin) / (ranges.xMax - ranges.xMin + 1)) *
+        ranges.displayWidth,
+    );
+  const scaleY = (rawY: number, inverted: boolean): number =>
+    Math.round(
+      ((inverted ? ranges.yMax - rawY : rawY - ranges.yMin) / (ranges.yMax - ranges.yMin + 1)) *
+        ranges.displayHeight,
+    );
   return {
-    toScreenX(rawX: number): number {
-      const norm = (rawX - ranges.xMin) / (ranges.xMax - ranges.xMin + 1);
-      return Math.round(norm * (landscape ? ranges.displayHeight : ranges.displayWidth));
-    },
-    toScreenY(rawY: number): number {
-      const norm = (rawY - ranges.yMin) / (ranges.yMax - ranges.yMin + 1);
-      return Math.round(norm * (landscape ? ranges.displayWidth : ranges.displayHeight));
+    toScreenPoint(rawX: number, rawY: number): { x: number; y: number } {
+      switch (ranges.rotation) {
+        case 1:
+          return { x: scaleY(rawY, false), y: scaleX(rawX, true) };
+        case 2:
+          return { x: scaleX(rawX, true), y: scaleY(rawY, true) };
+        case 3:
+          return { x: scaleY(rawY, true), y: scaleX(rawX, false) };
+        default:
+          return { x: scaleX(rawX, false), y: scaleY(rawY, false) };
+      }
     },
   };
 }

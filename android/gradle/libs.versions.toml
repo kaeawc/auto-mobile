@@ -28,7 +28,7 @@ build-java-target = "21"                   # Used in root build.gradle.kts and p
 detekt = "2.0.0-alpha.6"
 
 # AndroidX versions
-androidx-core = "1.19.0"
+androidx-core = "1.19.1"
 androidx-activity-compose = "1.13.0"
 androidx-compose-bom = "2026.09.00"
 androidx-lifecycle = "2.11.0"

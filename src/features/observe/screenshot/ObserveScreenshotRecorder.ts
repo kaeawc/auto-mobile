@@ -13,6 +13,8 @@ import { ScreenshotJobTracker } from "../../../utils/ScreenshotJobTracker";
 import type { ScreenshotService } from "../interfaces/ScreenshotService";
 import type { ScreenshotOptions } from "../TakeScreenshot";
 import { getScreenshotStateStore, ScreenshotStateStore } from "./ScreenshotStateRegistry";
+import { validateCapturedScreenshot } from "./validateCapturedScreenshot";
+import { ActionableError, toActionableError } from "../../../models/ActionableError";
 
 /**
  * Minimal capability surface needed by the recorder: the standard
@@ -58,6 +60,13 @@ export interface ObserveScreenshotRecorder {
     perf?: PerformanceTracker,
     signal?: AbortSignal,
   ): Promise<void>;
+
+  /** Strict, queued PNG capture for settled observations. Optional for legacy fakes. */
+  captureSettled?(
+    observationId: string,
+    perf?: PerformanceTracker,
+    signal?: AbortSignal,
+  ): Promise<string>;
 }
 
 /**
@@ -156,6 +165,67 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
   ): Promise<void> {
     this.store.beginObservation(this.device.deviceId, observationId);
     await this.captureWithOptions(observationId, perf, signal, { queueAfterPending: true });
+  }
+
+  async captureSettled(
+    observationId: string,
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    signal?: AbortSignal,
+  ): Promise<string> {
+    this.store.beginObservation(this.device.deviceId, observationId);
+    try {
+      return await perf.track("screenshot", async () => {
+        for (let attempt = 0; attempt < 2; attempt++) {
+          const { result, cancelled } = await this.captureSettledAttempt(signal);
+          if (cancelled && attempt === 0 && !signal?.aborted) {
+            logger.debug("[OBSERVE] Retrying screenshot cancelled by another capture");
+            continue;
+          }
+          const validated = await validateCapturedScreenshot(
+            cancelled
+              ? { success: false, error: result.error ?? OPERATION_CANCELLED_MESSAGE }
+              : result,
+            this.device.deviceId,
+          );
+          this.store.update(this.device.deviceId, validated);
+          this.store.updateForObservation(this.device.deviceId, observationId, validated);
+          return validated;
+        }
+        throw new ActionableError("Screenshot capture retry exhausted");
+      });
+    } catch (error) {
+      const message = errorMessage(error);
+      this.store.updateForObservation(this.device.deviceId, observationId, undefined, message);
+      logger.warn(`[OBSERVE] Settled screenshot capture failed: ${message}`);
+      throw toActionableError(
+        error,
+        `Failed to capture screenshot for device ${this.device.deviceId}`,
+      );
+    }
+  }
+
+  private async captureSettledAttempt(
+    signal?: AbortSignal,
+  ): Promise<{ result: ScreenshotResult; cancelled: boolean }> {
+    const handle = this.screenshotUtil.startTrackedCapture(
+      { format: "png" },
+      { parentSignal: signal, queueAfterPending: true },
+    );
+    ScreenshotJobTracker.registerCompletionReader(handle.jobId);
+    try {
+      const result = await handle.promise;
+      const completion = ScreenshotJobTracker.getCompletion(handle.jobId);
+      return {
+        result,
+        cancelled:
+          handle.signal.aborted ||
+          completion?.aborted === true ||
+          completion?.isLatest === false ||
+          result.error?.includes(OPERATION_CANCELLED_MESSAGE) === true,
+      };
+    } finally {
+      ScreenshotJobTracker.releaseCompletionReader(handle.jobId);
+    }
   }
 
   private async captureWithOptions(

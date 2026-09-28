@@ -572,6 +572,15 @@ const observationScreenshotResourceUriSchema = z
     "Fully-encoded automobile:observation/{deviceId}/{observationId}/screenshot resource URI for this observation.",
   );
 
+const observationScreenshotOutputFields = {
+  screenshotSettled: z.boolean().optional(),
+  screenshotSettledError: z.string().optional(),
+  screenshotOrientation: z.enum(["native", "display"]).optional(),
+  screenshotPath: z.string().optional(),
+  screenshotFormat: z.literal("png").optional(),
+  screenshotMimeType: z.literal("image/png").optional(),
+};
+
 /**
  * Observation screenshot-resource properties (issue #7018). All three stay
  * optional on the zod parse schema so recorded captures that predate them still
@@ -715,6 +724,7 @@ export const observationSummarySchema = z
     observationId: observationIdSchema,
     deviceId: observationDeviceIdSchema,
     observationScreenshotResourceUri: observationScreenshotResourceUriSchema,
+    ...observationScreenshotOutputFields,
     selectedElements: z.array(selectedElementSchema).optional(),
     focusedElement: elementSchema.optional(),
     accessibilityFocusedElement: elementSchema.optional(),
@@ -933,6 +943,7 @@ export const observeDiffSchema = z
     observationId: observationIdSchema,
     deviceId: observationDeviceIdSchema,
     observationScreenshotResourceUri: observationScreenshotResourceUriSchema,
+    ...observationScreenshotOutputFields,
     skeleton: z
       .array(skeletonElementSchema)
       .describe(
@@ -1127,6 +1138,7 @@ export const observeResultSchema = z
     observationId: observationIdSchema,
     deviceId: observationDeviceIdSchema,
     observationScreenshotResourceUri: observationScreenshotResourceUriSchema,
+    ...observationScreenshotOutputFields,
     screenSize: screenSizeSchema.optional(),
     systemInsets: systemInsetsSchema.optional(),
     insets: observationInsetsSchema.optional(),

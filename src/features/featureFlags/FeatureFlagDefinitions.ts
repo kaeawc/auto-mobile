@@ -12,6 +12,7 @@ export type FeatureFlagKey =
   | "ai-recovery"
   | "mcp-recording"
   | "navigation-screenshots"
+  | "observe-settled-screenshot"
   | "observe-result-include-elements"
   | "tool-results-no-structured-content"
   | "actions-diff-observe"
@@ -144,6 +145,13 @@ export const FEATURE_FLAG_DEFINITIONS: FeatureFlagDefinition[] = [
     description:
       "Capture screenshots on navigation events to enrich the navigation graph. Disable to reduce device resource usage.",
     defaultValue: true,
+  },
+  {
+    key: "observe-settled-screenshot",
+    label: "Settled observation screenshots",
+    description:
+      "Wait for a validated, settled screenshot instead of capturing one in the background.",
+    defaultValue: false,
   },
   {
     key: "observe-result-include-elements",

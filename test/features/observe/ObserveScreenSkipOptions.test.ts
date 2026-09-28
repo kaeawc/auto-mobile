@@ -4,6 +4,7 @@ import {
   type HierarchyCapture,
 } from "../../../src/features/observe/HierarchyCapture";
 import type { ViewHierarchyResult } from "../../../src/models";
+import { ActionableError } from "../../../src/models/ActionableError";
 import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
@@ -31,6 +32,8 @@ class FakeScreenshotRecorder implements ObserveScreenshotRecorder {
   startCalls = 0;
   captureCalls = 0;
   captureFreshCalls = 0;
+  captureSettledCalls = 0;
+  settledError?: Error;
 
   start(_perf?: PerformanceTracker, _signal?: AbortSignal): void {
     this.startCalls++;
@@ -47,15 +50,29 @@ class FakeScreenshotRecorder implements ObserveScreenshotRecorder {
   ): Promise<void> {
     this.captureFreshCalls++;
   }
+
+  async captureSettled(): Promise<string> {
+    this.captureSettledCalls++;
+    if (this.settledError) {
+      throw this.settledError;
+    }
+    return "/fake/settled.png";
+  }
 }
 
 class FakeHierarchyCollector implements Pick<
   HierarchyCollector,
   "collect" | "collectRaw" | "extractScreenSize"
 > {
-  constructor(private foregroundActivity: string | null = "com.example/.MainActivity") {}
+  constructor(
+    private foregroundActivity: string | null = "com.example/.MainActivity",
+    private failure?: ActionableError,
+  ) {}
 
   async collect(result: ObserveResult, ...args: unknown[]): Promise<void> {
+    if (this.failure) {
+      throw this.failure;
+    }
     result.viewHierarchy =
       (args[6] as ViewHierarchyResult | undefined) ??
       ({
@@ -130,6 +147,7 @@ const device: BootedDevice = {
 function createObserveScreen(
   foregroundActivity: string | null = "com.example/.MainActivity",
   hierarchyCapture?: HierarchyCapture,
+  hierarchyFailure?: ActionableError,
 ) {
   const fakeTimer = new FakeTimer();
   const fakeScreenshotRecorder = new FakeScreenshotRecorder();
@@ -145,6 +163,7 @@ function createObserveScreen(
       screenshotRecorder: fakeScreenshotRecorder,
       hierarchyCollector: new FakeHierarchyCollector(
         foregroundActivity,
+        hierarchyFailure,
       ) as unknown as HierarchyCollector,
       deviceStateCollector: fakeDeviceStateCollector as unknown as DeviceStateCollector,
       performanceAuditor: new NoOpAuditor() as unknown as PerformanceAuditor,
@@ -199,6 +218,7 @@ describe("ObserveScreen skip options", () => {
       `automobile:observation/${device.deviceId}/${observation.observationId}/screenshot`,
     );
     expect(emitted.screenshotCaptureAttempted).toBeUndefined();
+    expect(observation.screenshotOrientation).toBeUndefined();
   });
 
   test("a skipped observation without deferred capture does not emit a screenshot URI", async () => {
@@ -228,6 +248,60 @@ describe("ObserveScreen skip options", () => {
       (result as ObserveResult & { screenshotCaptureAttempted?: boolean })
         .screenshotCaptureAttempted,
     ).toBe(true);
+    expect(result.screenshotOrientation).toBeUndefined();
+  });
+
+  test("explicit settled capture reaches the wire with validated screenshot scalars", async () => {
+    const result = await observeScreen.execute({ screenshot: "settled" });
+    expect(fakeScreenshotRecorder.captureSettledCalls).toBe(1);
+    expect(fakeScreenshotRecorder.startCalls).toBe(0);
+    const emitted = finalizeToolResponse(createStructuredToolResponse(result), {
+      name: "observe",
+    }).structuredContent as ObserveResult;
+    expect(emitted.screenshotSettled).toBe(true);
+    expect(emitted.screenshotOrientation).toBe("display");
+    expect(emitted.screenshotPath).toBe("/fake/settled.png");
+    expect(emitted.screenshotFormat).toBe("png");
+    expect(emitted.screenshotMimeType).toBe("image/png");
+  });
+
+  test("explicit settled failure throws the capture error", async () => {
+    fakeScreenshotRecorder.settledError = new ActionableError("capture failed");
+    await expect(observeScreen.execute({ screenshot: "settled" })).rejects.toThrow(
+      "capture failed",
+    );
+  });
+
+  test("explicit settled mode preserves the fallback for an unrelated hierarchy error", async () => {
+    const hierarchyFailure = new ActionableError("hierarchy unavailable");
+    const defaultScreen = createObserveScreen(undefined, undefined, hierarchyFailure);
+    const defaultResult = await defaultScreen.observeScreen.execute({});
+    const settledScreen = createObserveScreen(undefined, undefined, hierarchyFailure);
+    const settledResult = await settledScreen.observeScreen.execute({ screenshot: "settled" });
+
+    expect(defaultResult.errors?.[0]?.phase).toBe("critical");
+    expect(settledResult.errors).toEqual(defaultResult.errors);
+    expect(defaultResult.viewHierarchy).toBeUndefined();
+    expect(settledResult.viewHierarchy).toBeUndefined();
+    expect(settledScreen.fakeScreenshotRecorder.captureSettledCalls).toBe(0);
+  });
+
+  test("env-driven settled failure returns an observation with error metadata", async () => {
+    const original = process.env.AUTOMOBILE_OBSERVE_SETTLED_SCREENSHOT;
+    process.env.AUTOMOBILE_OBSERVE_SETTLED_SCREENSHOT = "true";
+    try {
+      fakeScreenshotRecorder.settledError = new ActionableError("capture failed");
+      const result = await observeScreen.execute();
+      expect(result.screenshotSettled).toBe(false);
+      expect(result.screenshotSettledError).toBe("capture failed");
+      expect(result.screenshotOrientation).toBe("display");
+    } finally {
+      if (original === undefined) {
+        delete process.env.AUTOMOBILE_OBSERVE_SETTLED_SCREENSHOT;
+      } else {
+        process.env.AUTOMOBILE_OBSERVE_SETTLED_SCREENSHOT = original;
+      }
+    }
   });
 
   test("uses the bootstrap active-window fallback only without CtrlProxy foreground metadata", async () => {

@@ -2,6 +2,7 @@ import type { HierarchyCaptureRequest } from "../HierarchyCapture";
 import type { ObserveResult } from "../../../models";
 import type { ViewHierarchyQueryOptions } from "../../../models/ViewHierarchyQueryOptions";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
+import type { ScreenshotMode } from "../automaticScreenshotPolicy";
 
 export interface ObserveScreenExecuteOptions {
   queryOptions?: ViewHierarchyQueryOptions;
@@ -15,6 +16,8 @@ export interface ObserveScreenExecuteOptions {
   signal?: AbortSignal;
   skipBackStack?: boolean;
   skipScreenshot?: boolean;
+  /** Per-call override; omitted reads the env and persisted flag. */
+  screenshot?: ScreenshotMode;
   /** Skip screenshot-dependent accessibility auditing for intermediate observations. */
   skipAccessibilityAudit?: boolean;
   /**
@@ -47,6 +50,7 @@ export interface ObserveScreen {
     perf?: PerformanceTracker,
     signal?: AbortSignal,
     observation?: ObserveResult,
+    screenshot?: ScreenshotMode,
   ): Promise<void>;
 
   /**

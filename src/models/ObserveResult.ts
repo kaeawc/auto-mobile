@@ -184,6 +184,17 @@ export interface ObserveResult {
    */
   screenshotCaptureAttempted?: boolean;
 
+  /** Whether this observation's requested settled screenshot was validated on disk. */
+  screenshotSettled?: boolean;
+  /** Short capture failure detail when an env/flag-driven settled capture fails. */
+  screenshotSettledError?: string;
+  /** Orientation of screenshot bytes: iOS framebuffer native, Android display. */
+  screenshotOrientation?: "native" | "display";
+  /** Local path to this observation's validated settled screenshot. */
+  screenshotPath?: string;
+  screenshotFormat?: "png";
+  screenshotMimeType?: "image/png";
+
   /**
    * Timestamp when the screen state was captured on the device (milliseconds since epoch)
    * This comes from the CtrlProxy on Android or equivalent on iOS

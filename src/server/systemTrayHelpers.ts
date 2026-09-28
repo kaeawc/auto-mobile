@@ -57,7 +57,10 @@ import type { ProgressCallback } from "./toolRegistry";
 import type { SystemTrayNotificationArgs } from "./interactionToolTypes";
 import { boundsArea, boundsEqual } from "../utils/bounds";
 import { logger } from "../utils/logger";
-import { shouldSkipActionObservationScreenshot } from "../features/observe/automaticScreenshotPolicy";
+import {
+  resolveScreenshotMode,
+  shouldSkipActionObservationScreenshot,
+} from "../features/observe/automaticScreenshotPolicy";
 import { getDeviceDataStreamServer } from "../daemon/deviceDataStreamSocketServer";
 import { serverConfig } from "../utils/ServerConfig";
 import type { PerformanceTracker } from "../utils/PerformanceTracker";
@@ -347,6 +350,7 @@ export const captureSystemTrayTerminalEvidence = async (
   const { observeScreenFactory } = getSystemTrayDependencies();
   const observeScreen = observeScreenFactory(device);
   const shouldCaptureScreenshot =
+    resolveScreenshotMode() === "settled" ||
     !shouldSkipActionObservationScreenshot() ||
     serverConfig.isAccessibilityAuditEnabled() ||
     (getDeviceDataStreamServer()?.hasSubscriberForDevice(device.deviceId) ?? false);

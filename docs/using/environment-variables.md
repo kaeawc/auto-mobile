@@ -104,6 +104,17 @@ export AUTOMOBILE_OBSERVE_WAIT_FOR_SKIP_SCREENSHOT=false
 `observe.waitFor` suppresses screenshots for all intermediate polls; enabling
 its flag captures only once, after the condition resolves or times out.
 
+Set `AUTOMOBILE_OBSERVE_SETTLED_SCREENSHOT=true` (or `1`) to await a fresh,
+validated screenshot for each final observation. `false` (or `0`) disables
+settled mode. This setting overrides the persisted `observe-settled-screenshot`
+feature flag; when settled mode is enabled it also overrides the two legacy
+skip flags. A per-call `observe({ screenshot: "settled" })` takes precedence over
+both. The resolver's code comment documents the full precedence.
+
+```bash
+export AUTOMOBILE_OBSERVE_SETTLED_SCREENSHOT=true
+```
+
 ## Device behavior
 
 AutoMobile does not create an emulator or simulator by default. The legacy

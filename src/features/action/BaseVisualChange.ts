@@ -31,7 +31,10 @@ import { PredictionAnalyzer, PredictionActionContext } from "../observe/Predicti
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { sequenceBackoff } from "../../utils/Backoff";
 import { getDeviceDataStreamServer } from "../../daemon/deviceDataStreamSocketServer";
-import { shouldSkipActionObservationScreenshot } from "../observe/automaticScreenshotPolicy";
+import {
+  resolveScreenshotMode,
+  shouldSkipActionObservationScreenshot,
+} from "../observe/automaticScreenshotPolicy";
 import { serverConfig } from "../../utils/ServerConfig";
 import { deviceIncarnationToken } from "../../utils/deviceIncarnation";
 
@@ -94,6 +97,7 @@ export class BaseVisualChange {
     // Preserve the pre-existing live-view behavior, while allowing other
     // clients to opt in with AUTOMOBILE_ACTION_OBSERVATION_SKIP_SCREENSHOT=0.
     return (
+      resolveScreenshotMode() === "settled" ||
       !shouldSkipActionObservationScreenshot() ||
       (getDeviceDataStreamServer()?.hasSubscriberForDevice(this.device.deviceId) ?? false)
     );

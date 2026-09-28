@@ -2979,7 +2979,7 @@ describe("killDevice handler", () => {
         "Timed out waiting for ios platform shutdown command",
       );
       expect(IOSCtrlProxyManager.isDeviceRetired(device.deviceId)).toBe(true);
-      expect(IOSCtrlProxyClient.getInstance(device).ensureConnected()).resolves.toBe(false);
+      await expect(IOSCtrlProxyClient.getInstance(device).ensureConnected()).resolves.toBe(false);
     } finally {
       stop.mockRestore();
     }

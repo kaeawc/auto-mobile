@@ -391,7 +391,7 @@ export const tapOnSchema = withJsonSchemaOverride(
               .min(100)
               .max(12000)
               .optional()
-              .describe("Polling duration (ms, default: 500)"),
+              .describe("Polling duration (ms, default: 1500)"),
           })
           .optional()
           .describe("Poll for element before tapping"),
@@ -518,7 +518,7 @@ export const tapAnySchema = withJsonSchemaOverride(
               .min(100)
               .max(12000)
               .optional()
-              .describe("Polling duration (ms, default: 500)"),
+              .describe("Polling duration (ms, default: 1500)"),
           })
           .optional()
           .describe("Poll for clickable element before tapping"),
@@ -634,8 +634,18 @@ export const pinchOnSchema = withJsonSchemaOverride(
     z
       .object({
         direction: z.enum(["in", "out"]).describe("Pinch direction"),
-        distanceStart: z.number().optional().describe("Initial finger distance (px, default: 400)"),
-        distanceEnd: z.number().optional().describe("Final finger distance (px, default: 100)"),
+        distanceStart: z
+          .number()
+          .optional()
+          .describe(
+            "Initial finger distance defaults to 60% of the target's smaller dimension for direction 'in' and 20% for 'out'; clamped to 10%-90% (minimum 10 px).",
+          ),
+        distanceEnd: z
+          .number()
+          .optional()
+          .describe(
+            "Final finger distance defaults to 20% of the target's smaller dimension for direction 'in' and 60% for 'out'; clamped to 10%-90% (minimum 10 px).",
+          ),
         scale: z.number().optional().describe("Scale factor (overrides distances)"),
         duration: z.number().optional().describe("Gesture duration (ms)"),
         rotationDegrees: z

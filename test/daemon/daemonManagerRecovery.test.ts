@@ -1182,4 +1182,34 @@ describe("DaemonManager control-state recovery", () => {
       strictPort: true,
     });
   });
+
+  test.each([
+    ["enabled", { disabledTools: ["foo"] }, { enabledTools: ["foo"] }, ["foo"], []],
+    ["disabled", { enabledTools: ["foo"] }, { disabledTools: ["foo"] }, [], ["foo"]],
+  ] as const)(
+    "recovery tool request wins conflicts with recorded %sTools",
+    async (_requestedMode, recordedOptions, requestedOptions, enabledTools, disabledTools) => {
+      const { lock, pid, socket } = paths();
+      const manager = new DaemonManager(undefined, undefined, new FakeTimer(), lock, pid, socket, {
+        findDaemonProcesses: () => [],
+        isProcessRunning: () => false,
+      });
+      const recoveryOptions = await (
+        manager as unknown as {
+          recoveryOptions(
+            status: { running: boolean; options: Record<string, unknown> },
+            options: Record<string, unknown>,
+          ): Promise<Record<string, unknown>>;
+        }
+      ).recoveryOptions({ running: false, options: recordedOptions }, requestedOptions);
+
+      expect(recoveryOptions.enabledTools ?? []).toEqual(enabledTools);
+      expect(recoveryOptions.disabledTools ?? []).toEqual(disabledTools);
+      expect(
+        (recoveryOptions.enabledTools ?? []).filter((name: string) =>
+          recoveryOptions.disabledTools?.includes(name),
+        ),
+      ).toEqual([]);
+    },
+  );
 });

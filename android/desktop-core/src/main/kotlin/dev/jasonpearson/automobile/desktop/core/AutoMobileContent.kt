@@ -73,7 +73,7 @@ import dev.jasonpearson.automobile.desktop.core.daemon.AppearanceClient
 import dev.jasonpearson.automobile.desktop.core.daemon.AppearanceSocketClient
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.DaemonSocketPaths
-import dev.jasonpearson.automobile.desktop.core.daemon.DesktopDaemonSession
+import dev.jasonpearson.automobile.desktop.core.daemon.DesktopDaemonSessionBinding
 import dev.jasonpearson.automobile.desktop.core.daemon.DeviceSnapshotActions
 import dev.jasonpearson.automobile.desktop.core.daemon.DeviceSnapshotConfigClient
 import dev.jasonpearson.automobile.desktop.core.daemon.DeviceSnapshotSocketClient
@@ -91,6 +91,7 @@ import dev.jasonpearson.automobile.desktop.core.daemon.VideoRecordingConfigClien
 import dev.jasonpearson.automobile.desktop.core.daemon.VideoRecordingSocketClient
 import dev.jasonpearson.automobile.desktop.core.daemon.WebRtcStreamClient
 import dev.jasonpearson.automobile.desktop.core.daemon.WebRtcStreamSocketClient
+import dev.jasonpearson.automobile.desktop.core.daemon.rememberDesktopDaemonSession
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
 import dev.jasonpearson.automobile.desktop.core.datasource.InstalledApp
 import dev.jasonpearson.automobile.desktop.core.datasource.Result
@@ -165,18 +166,12 @@ import dev.jasonpearson.automobile.desktop.core.video.VideoStreamState
 import dev.jasonpearson.automobile.desktop.domain.DeviceControlDecision
 import dev.jasonpearson.automobile.desktop.domain.DeviceControlInputs
 import dev.jasonpearson.automobile.desktop.domain.DeviceScreenControlMode
-import java.util.concurrent.atomic.AtomicLong
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
@@ -819,39 +814,15 @@ fun AutoMobileContent(
     }
   }
 
-  // One stable identity and long-lived client per connected Unix daemon. The stream sockets only
-  // read the daemon session registry; they never create or bind a session themselves.
-  val desktopDaemonSession: DesktopDaemonSession? =
-    remember(connectedMcpProcess, dataSourceMode) {
-      val process = connectedMcpProcess
-      if (
-        dataSourceMode == DataSourceMode.Real &&
-          process?.connectionType == McpConnectionType.UnixSocket
-      ) {
-        DesktopDaemonSession.create(process.socketPath ?: DaemonSocketPaths.socketPath())
-      } else {
-        null
+  val desktopSessionBinding = remember { mutableStateOf<DesktopDaemonSessionBinding?>(null) }
+  val desktopSocketPath =
+    connectedMcpProcess
+      ?.takeIf {
+        dataSourceMode == DataSourceMode.Real && it.connectionType == McpConnectionType.UnixSocket
       }
-    }
-
-  val desktopSessionCleanupScope =
-    remember(desktopDaemonSession) {
-      desktopDaemonSession?.let { CoroutineScope(SupervisorJob() + Dispatchers.IO) }
-    }
-
-  DisposableEffect(desktopDaemonSession, desktopSessionCleanupScope) {
-    onDispose {
-      if (desktopDaemonSession != null && desktopSessionCleanupScope != null) {
-        desktopSessionCleanupScope.launch {
-          runCatching { desktopDaemonSession.release() }
-            .onFailure { error ->
-              LOG.warn("Failed to release desktop daemon session: ${error.message}")
-            }
-          desktopSessionCleanupScope.cancel()
-        }
-      }
-    }
-  }
+      ?.let { it.socketPath ?: DaemonSocketPaths.socketPath() }
+  val desktopSessionState = rememberDesktopDaemonSession(desktopSocketPath, desktopSessionBinding)
+  val desktopDaemonSession = desktopSessionState.session
 
   // Client provider function for dashboards to access MCP data
   val clientProvider: (() -> AutoMobileClient)? =
@@ -877,71 +848,27 @@ fun AutoMobileContent(
       }
     }
 
-  var desktopSessionBoundDeviceId by
-    remember(desktopDaemonSession) {
-      mutableStateOf<String?>(null)
-    }
-  val desktopSessionBindingMutex = remember(desktopDaemonSession) { Mutex() }
-  val desktopSessionBindingGeneration = remember(desktopDaemonSession) { AtomicLong(0L) }
-  val desktopSessionReady = desktopSessionBoundDeviceId == activeDeviceId && activeDeviceId != null
-
-  LaunchedEffect(desktopDaemonSession, desktopSessionBoundDeviceId) {
-    if (desktopDaemonSession == null || desktopSessionBoundDeviceId == null) return@LaunchedEffect
-    while (isActive) {
-      delay(2_000)
-      runCatching {
-        withContext(Dispatchers.IO) { desktopDaemonSession.heartbeat() }
-      }
-        .onFailure { error ->
-          LOG.warn("Failed to refresh desktop daemon session: ${error.message}")
-        }
-    }
-  }
-
-  // Register and bind the selected device before creating authenticated stream clients. A
-  // stream-socket getSession lookup is read-only, so the main-socket tool call must happen first.
-  LaunchedEffect(dataSourceMode, activeDeviceId, realDevice, clientProvider, desktopDaemonSession) {
-    val bindingGeneration = desktopSessionBindingGeneration.incrementAndGet()
-    val selectedDeviceId = activeDeviceId
-    desktopSessionBoundDeviceId = null
+  val selectedDeviceId = activeDeviceId
+  val selectedBinding =
     if (
-      dataSourceMode != DataSourceMode.Real || selectedDeviceId == null || clientProvider == null
+      dataSourceMode == DataSourceMode.Real && selectedDeviceId != null && clientProvider != null
     ) {
-      return@LaunchedEffect
-    }
-
-    if (desktopDaemonSession == null) {
-      // Non-Unix transports retain their existing behavior; stream auth is a Unix-daemon concern.
-      desktopSessionBoundDeviceId = selectedDeviceId
-      return@LaunchedEffect
-    }
-
-    val platform =
-      if (
-        realDevice?.type == DeviceType.iOSSimulator || realDevice?.type == DeviceType.iOSPhysical
-      ) {
-        "ios"
-      } else {
-        "android"
-      }
-    try {
-      // Socket calls are synchronous and cannot be interrupted while a daemon is responding.
-      // Serialize them so a cancelled, stale request cannot overwrite a newer device binding.
-      desktopSessionBindingMutex.withLock {
-        kotlinx.coroutines.withContext(Dispatchers.IO) {
-          clientProvider.invoke().setActiveDevice(selectedDeviceId, platform)
-        }
-      }
-      if (desktopSessionBindingGeneration.get() == bindingGeneration) {
-        desktopSessionBoundDeviceId = selectedDeviceId
-      }
-      LOG.info(
-        "Registered desktop daemon session ${desktopDaemonSession.sessionUuid} for device $selectedDeviceId"
+      DesktopDaemonSessionBinding(
+        selectedDeviceId,
+        if (
+          realDevice?.type == DeviceType.iOSSimulator || realDevice?.type == DeviceType.iOSPhysical
+        ) {
+          "ios"
+        } else {
+          "android"
+        },
       )
-    } catch (error: Exception) {
-      LOG.warn("Failed to register desktop daemon session for $selectedDeviceId: ${error.message}")
+    } else {
+      null
     }
-  }
+  SideEffect { desktopSessionBinding.value = selectedBinding }
+  val desktopSessionReady =
+    desktopSessionState.boundDeviceId == activeDeviceId && activeDeviceId != null
 
   // Device snapshots span two transports: the verbs are MCP tool/resource calls, while the
   // retention config is its own Unix socket. Both are null in Fake mode so the dashboard renders

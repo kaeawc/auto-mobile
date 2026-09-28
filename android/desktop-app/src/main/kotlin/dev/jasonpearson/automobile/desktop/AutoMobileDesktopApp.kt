@@ -8,6 +8,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -27,9 +28,10 @@ import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.CoalescingRecoveryLauncher
 import dev.jasonpearson.automobile.desktop.core.daemon.DaemonSocketPaths
-import dev.jasonpearson.automobile.desktop.core.daemon.DesktopDaemonSession
+import dev.jasonpearson.automobile.desktop.core.daemon.DesktopDaemonSessionBinding
 import dev.jasonpearson.automobile.desktop.core.daemon.McpDaemonClient
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
+import dev.jasonpearson.automobile.desktop.core.daemon.rememberDesktopDaemonSession
 import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.core.mcp.DaemonMcpResourceClient
@@ -78,24 +80,13 @@ import dev.jasonpearson.automobile.desktop.core.workspace.picker.RealDeviceBootC
 import dev.jasonpearson.automobile.desktop.core.workspace.rememberWorkspaceDeviceControl
 import dev.jasonpearson.automobile.desktop.core.workspace.wireName
 import dev.jasonpearson.automobile.desktop.theme.AutoMobileTheme
-import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 private val LOG = LoggerFactory.getLogger("AutoMobileDesktopApp")
-
-// How often the workspace refreshes its daemon session so the idle watchdog does not reap it.
-// Matches AutoMobileContent's binding heartbeat cadence.
-private const val DESKTOP_SESSION_HEARTBEAT_MS = 2_000L
 
 // How often each observed pane's lock state is re-read so the contextual Unlock control appears or
 // disappears as the device locks/unlocks. Runs only while at least one device is observed. NOTE:
@@ -135,21 +126,16 @@ fun AutoMobileDesktopApp(
 ) {
   val graph = LocalAutoMobileGraph.current
 
-  // One stable daemon session per app run, used to authenticate the stream sockets (#4751/#4977).
-  // The stream socket's getSession check is read-only, so the session must first be REGISTERED by
-  // a main-socket tool call — done below by binding the focused device with setActiveDevice.
-  // Unix-daemon only; other transports leave it null and the panes fall back to the auth escape
-  // hatch. `getOrNull` so a construction failure (no reachable daemon) degrades to a null provider.
-  val desktopDaemonSession =
-    remember(graph) {
-      if (graph.autoMobileClient.transportName == "Unix Socket") {
-        runCatching { DesktopDaemonSession.create() }
-          .onFailure { LOG.warn("Could not create a desktop daemon session: ${it.message}") }
-          .getOrNull()
-      } else {
-        null
-      }
+  val desktopSessionBinding = remember { mutableStateOf<DesktopDaemonSessionBinding?>(null) }
+  var refreshAfterDaemonRecovery by remember { mutableStateOf<suspend () -> Boolean>({ true }) }
+  val desktopSocketPath =
+    if (graph.autoMobileClient.transportName == "Unix Socket") DaemonSocketPaths.socketPath()
+    else null
+  val desktopSessionState =
+    rememberDesktopDaemonSession(desktopSocketPath, desktopSessionBinding) {
+      refreshAfterDaemonRecovery()
     }
+  val desktopDaemonSession = desktopSessionState.session
 
   // Update availability (#5225): collect the controller and run one check at app startup — hoisted
   // above the surface switch so it runs regardless of the launch surface (onboarding, picker, or
@@ -178,6 +164,33 @@ fun AutoMobileDesktopApp(
   val workspaceState by workspaceViewModel.state.collectAsState()
 
   val resourceClient = remember(graph) { DaemonMcpResourceClient(graph.autoMobileClient) }
+  val refreshDesktopSessionState: suspend () -> Boolean =
+    remember(resourceClient, workspaceViewModel) {
+      {
+        val sessionUuids = runCatching {
+          withContext(Dispatchers.IO) { resourceClient.readResource(BOOTED_DEVICES_RESOURCE_URI) }
+        }
+          .onFailure {
+            LOG.warn("Failed to refresh device epochs after daemon recovery: ${it.message}")
+          }
+          .getOrNull()
+          ?.let { result ->
+            when (result) {
+              is ResourceReadResult.Success -> parseBootedDeviceSessionUuids(result.content)
+              is ResourceReadResult.Error -> {
+                LOG.warn("Failed to refresh device epochs after daemon recovery: ${result.message}")
+                emptyMap()
+              }
+            }
+          }
+          .orEmpty()
+        if (sessionUuids.isNotEmpty()) {
+          workspaceViewModel.onAction(WorkspaceAction.RefreshDeviceSessionUuids(sessionUuids))
+        }
+        sessionUuids.isNotEmpty()
+      }
+    }
+  SideEffect { refreshAfterDaemonRecovery = refreshDesktopSessionState }
   val bootController = remember(graph) { RealDeviceBootController(graph.autoMobileClient) }
   val pickerViewModel =
     remember(scope, resourceClient, bootController) {
@@ -254,35 +267,17 @@ fun AutoMobileDesktopApp(
         { null }
       }
     }
-  val sessionCleanupScope =
-    remember(desktopDaemonSession) {
-      desktopDaemonSession?.let { CoroutineScope(SupervisorJob() + Dispatchers.IO) }
-    }
-  DisposableEffect(desktopDaemonSession, sessionCleanupScope) {
-    onDispose {
-      if (desktopDaemonSession != null && sessionCleanupScope != null) {
-        sessionCleanupScope.launch {
-          runCatching { desktopDaemonSession.release() }
-            .onFailure { LOG.warn("Failed to release desktop daemon session: ${it.message}") }
-          sessionCleanupScope.cancel()
-        }
-      }
-    }
-  }
-
-  // Register + bind the session to the FOCUSED device, then heartbeat it, then RE-register whenever
-  // the heartbeat detects the session died — which is exactly what a daemon restart looks like: the
-  // registry is wiped, so the stream sockets reject the (now-unknown) session until it is
-  // recreated.
-  // One loop owns the whole lifecycle so a restart self-heals: re-register (setActiveDevice lazily
-  // recreates the session under the same stable UUID) → the panes' auto-reconnect then
-  // re-subscribes
-  // successfully. Stream auth admits every pane: the focused device is owned by this session; each
-  // other observed device is unowned, so its subscribe passes the unowned-device branch.
+  // Bind the focused device only: setActiveDevice allocates the device to this session. Other
+  // observed devices remain unowned, so their stream subscriptions use the daemon's unowned-device
+  // authorization path. The shared hook heartbeats and re-registers this binding after restarts.
   val focusedColumn =
     (workspaceState as? WorkspaceUiState.Content)?.let { content ->
       content.columns.firstOrNull { it.deviceId == content.focusedDeviceId }
     }
+  val focusedBinding = focusedColumn?.let {
+    DesktopDaemonSessionBinding(it.deviceId, it.platform.wireName())
+  }
+  SideEffect { desktopSessionBinding.value = focusedBinding }
   // Bind the session to the FOCUSED (observed) device ONLY. setActiveDevice is allocation-bearing —
   // it reserves the device for this session — so it must never run for a device the user isn't
   // observing: registering the session by reserving a booted grid device would hold that device
@@ -292,80 +287,8 @@ fun AutoMobileDesktopApp(
   // thumbnails are left to authenticate via the first observe — until then they degrade to the
   // screenshot fallback. Once any device is observed the session is registered, and the reopened
   // grid's other (unowned) devices then pass the stream auth's unowned-device branch.
-  // A focus change cancels this effect, but the cancellation cannot interrupt an in-flight
-  // synchronous setActiveDevice on Dispatchers.IO. Serialize binds through a mutex and gate each on
-  // a generation token so a stale bind that finishes after its replacement cannot leave the session
-  // pinned to the previously-focused device (mirrors AutoMobileContent's binding path).
-  val bindingMutex = remember(desktopDaemonSession) { Mutex() }
-  val bindingGeneration = remember(desktopDaemonSession) { AtomicLong(0L) }
-  LaunchedEffect(
-    desktopDaemonSession,
-    resourceClient,
-    focusedColumn?.deviceId,
-    focusedColumn?.platform,
-  ) {
-    val session = desktopDaemonSession ?: return@LaunchedEffect
-    val column = focusedColumn ?: return@LaunchedEffect
-    val platform = column.platform.wireName()
-    val generation = bindingGeneration.incrementAndGet()
-    var refreshDeviceEpochs = false
-    while (isActive) {
-      val registered = runCatching {
-        bindingMutex.withLock {
-          // A newer focus superseded us while we waited for the lock — abandon quietly.
-          if (bindingGeneration.get() != generation) return@LaunchedEffect
-          withContext(Dispatchers.IO) { session.client.setActiveDevice(column.deviceId, platform) }
-        }
-      }
-        .onFailure {
-          LOG.warn("Failed to bind desktop session to ${column.deviceId}: ${it.message}")
-        }
-        .isSuccess
-      // Do not keep or heartbeat a binding a newer focus already replaced.
-      if (bindingGeneration.get() != generation) return@LaunchedEffect
-      if (!registered) {
-        delay(DESKTOP_SESSION_HEARTBEAT_MS)
-        continue
-      }
-      // Registered: heartbeat until one fails, then fall through to re-register.
-      var alive = true
-      while (isActive && alive) {
-        if (refreshDeviceEpochs) {
-          val sessionUuids = runCatching {
-            withContext(Dispatchers.IO) {
-              resourceClient.readResource(BOOTED_DEVICES_RESOURCE_URI)
-            }
-          }
-            .onFailure {
-              LOG.warn("Failed to refresh device epochs after daemon recovery: ${it.message}")
-            }
-            .getOrNull()
-            ?.let { result ->
-              when (result) {
-                is ResourceReadResult.Success -> parseBootedDeviceSessionUuids(result.content)
-                is ResourceReadResult.Error -> {
-                  LOG.warn(
-                    "Failed to refresh device epochs after daemon recovery: ${result.message}"
-                  )
-                  emptyMap()
-                }
-              }
-            }
-            .orEmpty()
-          if (sessionUuids.isNotEmpty()) {
-            workspaceViewModel.onAction(WorkspaceAction.RefreshDeviceSessionUuids(sessionUuids))
-            refreshDeviceEpochs = false
-          }
-        }
-        delay(DESKTOP_SESSION_HEARTBEAT_MS)
-        alive =
-          runCatching { withContext(Dispatchers.IO) { session.heartbeat() } }
-            .onFailure { LOG.warn("Desktop daemon session lapsed, re-registering: ${it.message}") }
-            .isSuccess
-      }
-      if (!alive) refreshDeviceEpochs = true
-    }
-  }
+  // The shared session hook serializes synchronous binds on Dispatchers.IO and uses a generation
+  // token so a stale bind cannot leave the session pinned to the previously-focused device.
 
   // Window-level ⌘K/Ctrl+K (Main.kt) bumps openPaletteRequest; open the palette in response, but
   // only while the workspace is showing — onboarding and the device grid (shown while nothing is

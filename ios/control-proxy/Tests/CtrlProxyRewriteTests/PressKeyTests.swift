@@ -26,6 +26,39 @@ final class PressKeyTests: XCTestCase {
         XCTAssertFalse(GesturePerformer.didDeleteText(before: "hello", after: "helloo"))
     }
 
+    func testForwardDeleteMarkerSelectionFailsClosedWhenCandidatesAreUsed() {
+        XCTAssertEqual(GesturePerformer.forwardDeleteMarker(for: "hello"), "\u{E000}")
+        XCTAssertEqual(GesturePerformer.forwardDeleteMarker(for: "h\u{E000}ello"), "\u{E001}")
+        let allMarkers = (0xE000 ... 0xE007).compactMap(UnicodeScalar.init).map(String.init).joined()
+        XCTAssertNil(GesturePerformer.forwardDeleteMarker(for: allMarkers))
+    }
+
+    func testForwardDeleteProbeFindsCaretAndRejectsUntrustedValues() {
+        let marker = "\u{E000}"
+        XCTAssertEqual(
+            GesturePerformer.forwardDeleteMarkerIndex(original: "hello", probed: "hell\(marker)o", marker: marker),
+            4
+        )
+        XCTAssertEqual(
+            GesturePerformer.forwardDeleteMarkerIndex(original: "hello", probed: "hello\(marker)", marker: marker),
+            5
+        )
+        XCTAssertNil(GesturePerformer.forwardDeleteMarkerIndex(
+            original: "hello",
+            probed: "hell\(marker)O",
+            marker: marker
+        ))
+        XCTAssertNil(GesturePerformer.forwardDeleteMarkerIndex(
+            original: "hello",
+            probed: "hell\(marker)\(marker)o",
+            marker: marker
+        ))
+        XCTAssertNil(GesturePerformer.forwardDeleteMarkerIndex(original: "hello", probed: "hello", marker: marker))
+        XCTAssertTrue(GesturePerformer.caretHasFollowingCharacter(markerIndex: 4, originalLength: 5))
+        XCTAssertFalse(GesturePerformer.caretHasFollowingCharacter(markerIndex: 5, originalLength: 5))
+        XCTAssertFalse(GesturePerformer.caretHasFollowingCharacter(markerIndex: 0, originalLength: 0))
+    }
+
     func testDecodePreservesKeyAndModifiersAndResponseType() throws {
         let request = try JSONDecoder().decode(WebSocketRequest.self, from: Data(
             #"{"type":"request_press_key","requestId":"key-1","key":"tab","modifiers":["shift","meta"]}"#.utf8

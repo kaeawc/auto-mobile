@@ -100,6 +100,28 @@ public final class GesturePerformer: GesturePerforming {
         after.count < before.count
     }
 
+    nonisolated static func forwardDeleteMarker(for original: String) -> String? {
+        for codePoint in 0xE000 ... 0xE007 {
+            guard let scalar = UnicodeScalar(codePoint) else { continue }
+            let marker = String(scalar)
+            if !original.contains(marker) { return marker }
+        }
+        return nil
+    }
+
+    nonisolated static func forwardDeleteMarkerIndex(original: String, probed: String, marker: String) -> Int? {
+        guard probed.count == original.count + 1,
+              let range = probed.range(of: marker),
+              !probed[range.upperBound...].contains(marker),
+              String(probed[..<range.lowerBound]) + String(probed[range.upperBound...]) == original
+        else { return nil }
+        return probed.distance(from: probed.startIndex, to: range.lowerBound)
+    }
+
+    nonisolated static func caretHasFollowingCharacter(markerIndex: Int, originalLength: Int) -> Bool {
+        markerIndex < originalLength
+    }
+
     /// Includes a scoped owner when the owner is itself a link; XCUITest's
     /// descendants query otherwise excludes that element.
     nonisolated static func scopedLinkCandidates<Element>(
@@ -948,19 +970,17 @@ public final class GesturePerformer: GesturePerforming {
             }
 
             try catchingObjCException {
-                if isDestructiveKey {
-                    // Target the focused field: app-level key delivery has not reliably
-                    // reached it. Backspace uses text insertion; forward delete needs a key event.
+                if normalizedKey == "backspace" {
+                    // Backspace uses text insertion on the focused field because app-level
+                    // key delivery has not reliably reached it.
                     guard let focusedElement else {
                         throw GestureError.gestureFailed(
                             "Key '\(key)' was not delivered: focused field could not be observed"
                         )
                     }
-                    if normalizedKey == "backspace" {
-                        focusedElement.typeText(keyboardKey.rawValue)
-                    } else {
-                        focusedElement.typeKey(keyboardKey, modifierFlags: [])
-                    }
+                    focusedElement.typeText(keyboardKey.rawValue)
+                } else if normalizedKey == "delete" {
+                    app.typeKey(keyboardKey, modifierFlags: [])
                 } else {
                     app.typeKey(keyboardKey, modifierFlags: modifierFlags)
                 }
@@ -973,6 +993,14 @@ public final class GesturePerformer: GesturePerforming {
                 throw GestureError.gestureFailed(
                     "Key '\(key)' was not delivered: focused field could not be observed"
                 )
+            }
+
+            if normalizedKey == "delete",
+               let valueAfterNativeKeyPress = try catchingObjCException({ focusedElement.value as? String }),
+               valueAfterNativeKeyPress == valueBeforeKeyPress,
+               !GesturePerformer.didDeleteText(before: valueBeforeKeyPress, after: valueAfterNativeKeyPress)
+            {
+                try emulateForwardDelete(app: app, focusedElement: focusedElement, original: valueBeforeKeyPress)
             }
 
             let deadline = Date().addingTimeInterval(1.0)
@@ -993,6 +1021,71 @@ public final class GesturePerformer: GesturePerforming {
                 throw GestureError.gestureFailed(
                     "Key '\(key)' did not decrease text length: before \(valueBeforeKeyPress.count), observed \(valueAfterKeyPress.count)"
                 )
+            }
+        }
+
+        private func emulateForwardDelete(app: XCUIApplication, focusedElement: XCUIElement, original: String) throws {
+            guard let marker = GesturePerformer.forwardDeleteMarker(for: original) else { return }
+
+            do {
+                try catchingObjCException {
+                    focusedElement.typeText(marker)
+                    guard let probed = focusedElement.value as? String,
+                          let markerIndex = GesturePerformer.forwardDeleteMarkerIndex(
+                              original: original, probed: probed, marker: marker
+                          )
+                    else {
+                        throw GestureError.gestureFailed("Forward-delete caret probe did not round-trip")
+                    }
+
+                    focusedElement.typeText(XCUIKeyboardKey.delete.rawValue)
+                    guard focusedElement.value as? String == original else {
+                        throw GestureError.gestureFailed("Forward-delete caret probe did not restore the original text")
+                    }
+
+                    if GesturePerformer.caretHasFollowingCharacter(
+                        markerIndex: markerIndex,
+                        originalLength: original.count
+                    ) {
+                        app.typeKey(.rightArrow, modifierFlags: [])
+                        focusedElement.typeText(XCUIKeyboardKey.delete.rawValue)
+                    }
+                }
+            } catch {
+                try restoreForwardDeleteProbe(
+                    app: app,
+                    focusedElement: focusedElement,
+                    original: original,
+                    marker: marker
+                )
+                // The caller's existing post-condition reports the failed deletion.
+            }
+        }
+
+        private func restoreForwardDeleteProbe(
+            app: XCUIApplication, focusedElement: XCUIElement, original: String, marker: String
+        )
+            throws
+        {
+            if (try? catchingObjCException({ focusedElement.value as? String })) == original { return }
+
+            if (try? catchingObjCException({ focusedElement.value as? String }))?.contains(marker) == true {
+                try? catchingObjCException {
+                    focusedElement.typeText(XCUIKeyboardKey.delete.rawValue)
+                }
+                if (try? catchingObjCException({ focusedElement.value as? String })) == original { return }
+            }
+
+            do {
+                try catchingObjCException {
+                    app.typeKey("a", modifierFlags: .command)
+                    focusedElement.typeText(original.isEmpty ? XCUIKeyboardKey.delete.rawValue : original)
+                }
+            } catch {
+                throw GestureError.gestureFailed("Forward-delete probe recovery failed: \(error)")
+            }
+            guard (try? catchingObjCException({ focusedElement.value as? String })) == original else {
+                throw GestureError.gestureFailed("Forward-delete probe recovery could not confirm the original text")
             }
         }
 

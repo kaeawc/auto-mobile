@@ -51,6 +51,7 @@ describe("booted iOS service-status transient handling (#7053)", () => {
     const managerSpy = spyOn(IOSCtrlProxyManager, "getInstance").mockReturnValue({
       isInstalled: async () => false,
       isRunning: async () => true,
+      checkRunningWithReason: async () => ({ ok: true }),
       getForcedRestartBudget: () => ({ snapshot: () => ({ state: "idle", attempts: 0 }) }),
     } as unknown as IOSCtrlProxyManager);
     try {

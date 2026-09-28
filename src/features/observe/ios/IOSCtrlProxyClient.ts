@@ -570,9 +570,6 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   private static instances: Map<string, IOSCtrlProxyClient> = new Map();
   private closed = false;
 
-  // Session binding for multi-agent isolation
-  private boundSessionId: string | null = null;
-
   // Default port matches CtrlProxy on iOS
   public static readonly DEFAULT_PORT = 8765;
 
@@ -588,7 +585,6 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   // `Math.min(cacheFreshTtlMs, maxObservationAgeMs())` in CtrlProxyHierarchy, and
   // a stale CAPTURE age past maxObservationAgeMs still forces re-verification.
   private static readonly CACHE_FRESH_TTL_MS = 2000;
-  private hierarchyNavigationDetector: HierarchyNavigationDetector | null = null;
   private readonly hierarchyObservationStreamSuppressions: Map<string, NodeJS.Timeout> = new Map();
 
   // Push update callbacks
@@ -660,7 +656,6 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   private readonly bootedDeviceLister: BootedDeviceLister;
   private readonly deviceConnectionLostNotifier: DeviceConnectionLostNotifier;
   private isAttemptingAutoSetup: boolean = false;
-  private recoveryPromise: Promise<boolean> | null = null;
   public static readonly OBSERVE_RECOVERY_WAIT_MS = 20_000;
   private lastConnectFailure?: { reason: IosHierarchyUnavailableReason; detail?: string };
 
@@ -929,22 +924,6 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
    */
   public getBoundSessionIdForTesting(): string | null {
     return this.boundSessionId;
-  }
-
-  /**
-   * Release this client's binding to a session that has ended (#4984). If still
-   * bound to `sessionId`, drop the binding and dispose the cached hierarchy detector
-   * so a post-release event routes to the unattributed global manager, never the
-   * ended session's. Mirrors AndroidCtrlProxyClient.releaseSessionBinding.
-   */
-  public releaseSessionBinding(sessionId: string): void {
-    if (this.boundSessionId === sessionId) {
-      this.boundSessionId = null;
-      if (this.hierarchyNavigationDetector) {
-        this.hierarchyNavigationDetector.dispose();
-        this.hierarchyNavigationDetector = null;
-      }
-    }
   }
 
   /**
@@ -2335,41 +2314,6 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   /** Start a restart for this observed transport failure, subject to the manager budget. */
   public ensureRecoveryStarted(): void {
     this.triggerServiceRestart();
-  }
-
-  public async awaitRecovery(
-    budgetMs: number,
-    signal?: AbortSignal,
-  ): Promise<"recovered" | "not_recovering" | "failed" | "timed_out"> {
-    const recovery = this.recoveryPromise;
-    if (!recovery) {
-      return "not_recovering";
-    }
-    if (signal?.aborted) {
-      return "timed_out";
-    }
-    let timeout: NodeJS.Timeout | undefined;
-    let onAbort: (() => void) | undefined;
-    const deadline = new Promise<"timed_out">((resolve) => {
-      timeout = this.timer.setTimeout(() => resolve("timed_out"), budgetMs);
-      onAbort = () => resolve("timed_out");
-      signal?.addEventListener("abort", onAbort, { once: true });
-    });
-    try {
-      return await Promise.race([
-        recovery.then(
-          (connected) => (connected ? "recovered" : "failed") as "recovered" | "failed",
-        ),
-        deadline,
-      ]);
-    } finally {
-      if (timeout) {
-        this.timer.clearTimeout(timeout);
-      }
-      if (onAbort) {
-        signal?.removeEventListener("abort", onAbort);
-      }
-    }
   }
 
   /** Logs a denied restart once per non-idle budget state. */

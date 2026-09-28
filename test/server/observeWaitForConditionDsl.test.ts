@@ -5,6 +5,7 @@ import {
   observeSchema,
   registerObserveTools,
   waitForObservation,
+  type WaitForWithSettled,
 } from "../../src/server/observeTools";
 import { ElementResolver } from "../../src/features/utility/ElementResolver";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -163,7 +164,11 @@ describe("waitForObservation DSL branch", () => {
     ]);
     const outcome = await waitForObservation(
       observeScreen,
-      { for: "appear", elementId: "submit", settled: { quietPeriodMs: 250 } } as any,
+      {
+        for: "appear",
+        elementId: "submit",
+        settled: { quietPeriodMs: 250 },
+      } satisfies WaitForWithSettled,
       undefined,
       false,
       timer,
@@ -192,7 +197,7 @@ describe("waitForObservation DSL branch", () => {
         elementId: "submit",
         settled: { quietPeriodMs: 200 },
         timeoutMs: 500,
-      } as any,
+      } satisfies WaitForWithSettled,
       undefined,
       false,
       timer,
@@ -223,7 +228,7 @@ describe("waitForObservation DSL branch", () => {
         elementId: "submit",
         settled: { quietPeriodMs: 200 },
         timeoutMs: 700,
-      } as any,
+      } satisfies WaitForWithSettled,
       undefined,
       false,
       timer,
@@ -243,7 +248,7 @@ describe("waitForObservation DSL branch", () => {
     observeScreen.setObserveResult(makeObservation([node({ "resource-id": "submit" })]));
     await waitForObservation(
       observeScreen,
-      { for: "appear", elementId: "submit" } as any,
+      { for: "appear", elementId: "submit" } satisfies WaitForWithSettled,
       undefined,
       true,
       timer,
@@ -265,7 +270,7 @@ describe("waitForObservation DSL branch", () => {
 
     const outcome = await waitForObservation(
       observeScreen,
-      { for: "appear", elementId: "submit" } as any,
+      { for: "appear", elementId: "submit" } satisfies WaitForWithSettled,
       undefined,
       false,
       timer,
@@ -293,7 +298,7 @@ describe("waitForObservation DSL branch", () => {
 
     const outcome = await waitForObservation(
       observeScreen,
-      { for: "stable" } as any,
+      { for: "stable" } satisfies WaitForWithSettled,
       undefined,
       false,
       timer,
@@ -318,7 +323,7 @@ describe("waitForObservation DSL branch", () => {
 
     const outcome = await waitForObservation(
       observeScreen,
-      { for: "textEquals", elementId: "counter", text: "5" } as any,
+      { for: "textEquals", elementId: "counter", text: "5" } satisfies WaitForWithSettled,
       undefined,
       false,
       timer,
@@ -341,7 +346,7 @@ describe("waitForObservation DSL branch", () => {
 
     const outcome = await waitForObservation(
       observeScreen,
-      { for: "clickable", elementId: "submit", timeout: 300 } as any,
+      { for: "clickable", elementId: "submit", timeout: 300 } satisfies WaitForWithSettled,
       undefined,
       false,
       timer,
@@ -365,7 +370,7 @@ describe("waitForObservation DSL branch", () => {
 
     const outcome = await waitForObservation(
       observeScreen,
-      { for: "stable" } as any,
+      { for: "stable" } satisfies WaitForWithSettled,
       undefined,
       false,
       timer,
@@ -389,7 +394,7 @@ describe("waitForObservation DSL branch", () => {
 
     const outcome = await waitForObservation(
       observeScreen,
-      { for: "stable", timeout: 300 } as any,
+      { for: "stable", timeout: 300 } satisfies WaitForWithSettled,
       undefined,
       false,
       timer,

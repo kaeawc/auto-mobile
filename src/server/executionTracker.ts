@@ -51,6 +51,9 @@ export interface ActiveExecutionQuery {
 }
 
 export type DaemonRestartAdmission = "accepted" | "active_operations" | "restart_pending";
+export interface ActiveProvisionDeviceQuery {
+  hasActiveProvisionDeviceOperation(): boolean;
+}
 export type DaemonMaintenanceAdmission =
   | "accepted"
   | "active_operations"
@@ -67,10 +70,15 @@ export class ExecutionTracker {
   private idGenerator: IdGenerator;
   private daemonRestartPrepared = false;
   private daemonMaintenancePrepared = false;
+  private activeProvisionDeviceQuery?: ActiveProvisionDeviceQuery;
 
   constructor(timer: Timer = defaultTimer, idGenerator: IdGenerator = defaultIdGenerator) {
     this.timer = timer;
     this.idGenerator = idGenerator;
+  }
+
+  setActiveProvisionDeviceQuery(query: ActiveProvisionDeviceQuery): void {
+    this.activeProvisionDeviceQuery = query;
   }
 
   startExecution(
@@ -139,7 +147,10 @@ export class ExecutionTracker {
     if (this.daemonMaintenancePrepared && !maintenanceAdmitted) {
       return "restart_pending";
     }
-    if (this.executions.size > 0) {
+    if (
+      this.executions.size > 0 ||
+      this.activeProvisionDeviceQuery?.hasActiveProvisionDeviceOperation()
+    ) {
       return "active_operations";
     }
     this.daemonRestartPrepared = true;

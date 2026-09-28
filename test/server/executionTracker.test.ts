@@ -90,6 +90,16 @@ describe("ExecutionTracker", function () {
     expect(tracker.startExecution("provisionDevice", "after-clear").id).toBe("after-clear");
   });
 
+  test("restart admission observes active provisioning through the injected query", function () {
+    const tracker = new ExecutionTracker(new FakeTimer(), new FakeIdGenerator([]));
+    let active = true;
+    tracker.setActiveProvisionDeviceQuery({ hasActiveProvisionDeviceOperation: () => active });
+
+    expect(tracker.prepareForDaemonRestart()).toBe("active_operations");
+    active = false;
+    expect(tracker.prepareForDaemonRestart()).toBe("accepted");
+  });
+
   test("rejects active sessions before atomically fencing explicit maintenance work", function () {
     const tracker = new ExecutionTracker(
       new FakeTimer(),

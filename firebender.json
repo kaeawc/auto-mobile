@@ -1,17 +1,11 @@
 {
   "backgroundAgent": {
     "start": "bun run lint; bun run build",
-    "copyFiles": [
-      "roadmap/README.md",
-      "roadmap/bugs/TEMPLATE.md",
-      "roadmap/features/TEMPLATE.md",
-      "roadmap/features/README.md"
-    ],
     "install": "bun install"
   },
   "rules": [
     "This is a Node TypeScript MCP server that uses https://github.com/modelcontextprotocol/typescript-sdk to serve tool calls.",
-    "The goal of the project is to provide Android Debug Bridge (ADB) capabilities through MCP tool calls for Android device automation.,",
+    "AutoMobile is an MCP server providing device automation for both Android and iOS.",
     "Whenever terminal output isn't showing, write output to a file in the scratch directory",
     {
       "filePathMatches": "*",

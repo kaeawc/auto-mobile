@@ -8,6 +8,7 @@ node_modules
 /dist
 /venv
 /test_screenshots
+logs/
 .view_hierarchy_cache/
 /screenshots
 **/.DS_Store

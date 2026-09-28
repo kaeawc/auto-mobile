@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { AndroidAvdProvenanceCache } from "../../src/utils/AndroidAvdProvenanceCache";
 import {
   listDeviceImagesSchema,
@@ -14,8 +14,67 @@ import type { AdbClient } from "../../src/utils/android-cmdline-tools/AdbClient"
 import type { AndroidEmulatorClient } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
 import { FakeAvdManager } from "../fakes/FakeAvdManager";
+import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+import { FakeTimer } from "../fakes/FakeTimer";
+import { DaemonState } from "../../src/daemon/daemonState";
+import { DevicePool } from "../../src/daemon/devicePool";
+import { SessionManager } from "../../src/daemon/sessionManager";
+import { McpTestFixture } from "../fixtures/mcpTestFixture";
 
 describe("listDeviceImages", function () {
+  describe("inventory session state", () => {
+    const timer = new FakeTimer();
+    const device = { name: "Pixel_8", platform: "android" as const, deviceId: "emulator-5554" };
+    const deviceUtils = new FakeDeviceUtils();
+    const manager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(manager, "daemon-images", timer, undefined, deviceUtils);
+    const fixture = new McpTestFixture({ daemonMode: true });
+
+    beforeAll(async () => {
+      deviceUtils.setBootedDevices("android", [device]);
+      await pool.addDevice(device, { platform: "android", name: device.name, isRunning: true });
+      await pool.assignDeviceToSession("images-session", "android", {
+        platform: "android",
+        stableDeviceId: device.name,
+        deviceId: device.deviceId,
+        androidEmulator: true,
+        initialOwnership: "awaiting-owner",
+      });
+      DaemonState.getInstance().initialize(manager, pool);
+      setDeviceToolsDependencies({
+        deviceManagerFactory: () => deviceUtils,
+        avdManagerFactory: () => new FakeAvdManager(),
+      });
+      await fixture.setup();
+    });
+
+    afterAll(async () => {
+      await fixture.teardown();
+      DaemonState.getInstance().reset();
+      manager.stopCleanupTimer();
+    });
+
+    test("inventory admission keeps awaiting ownership and does not release expiry", async () => {
+      const session = manager
+        .getAllSessions()
+        .find((entry) => entry.sessionId === "images-session")!;
+      const call = () =>
+        fixture.client.callTool({
+          name: "listDeviceImages",
+          arguments: { platform: "ios", sessionUuid: "images-session" },
+        });
+
+      expect((await call()).isError).not.toBe(true);
+      expect(session.ownership).toBe("awaiting-owner");
+
+      session.expiresAt = timer.now() - 1;
+      await call();
+      expect(manager.getAllSessionIds()).toContain("images-session");
+      expect(pool.getDevice(device.deviceId)?.sessionId).toBe("images-session");
+    });
+  });
+
   beforeEach(function () {
     AndroidAvdProvenanceCache.resetForTests();
   });

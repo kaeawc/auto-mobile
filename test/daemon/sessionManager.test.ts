@@ -3811,6 +3811,26 @@ describe("SessionManager", () => {
     });
   });
 
+  test("read-only admission sees an expired session as absent without releasing it", async () => {
+    const timer = new FakeTimer();
+    const persistence = new FakeDeviceSessionPersistence();
+    const manager = new SessionManager(timer, persistence);
+    try {
+      const session = await manager.createSession("expired-read", "emulator-5554", "android");
+      session.expiresAt = timer.now() - 1;
+
+      expect(
+        await manager.admitIssuedSessionForAutomation("expired-read", undefined, {
+          access: "read-only",
+        }),
+      ).toBeUndefined();
+      expect(manager.getAllSessionIds()).toContain("expired-read");
+      expect((await persistence.getSession?.("expired-read"))?.release_reason).toBeNull();
+    } finally {
+      manager.stopCleanupTimer();
+    }
+  });
+
   describe("shutdown draining (issue #2792)", () => {
     // Minimal repo double capturing the fire-and-forget session writes.
     function makeRepo(): { repo: any; activity: string[]; released: string[] } {

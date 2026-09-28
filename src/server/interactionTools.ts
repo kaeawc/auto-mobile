@@ -450,9 +450,11 @@ export const tapOnSchema = withJsonSchemaOverride(
           ? ["ensureTap"]
           : ["ensureChecked"],
     );
-    addIssue(value.ensureChecked, "semantic link activation cannot ensure checked state", [
-      "ensureChecked",
-    ]);
+    addIssue(
+      value.ensureChecked !== undefined,
+      "semantic link activation cannot ensure checked state",
+      ["ensureChecked"],
+    );
     addIssue(value.searchUntil, "semantic link activation cannot use searchUntil", ["searchUntil"]);
     addIssue(
       value.subtext && value.index !== undefined,

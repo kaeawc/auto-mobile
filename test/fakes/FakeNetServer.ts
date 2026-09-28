@@ -1,5 +1,4 @@
-import { EventEmitter } from "events";
-import type { Socket } from "node:net";
+import { Socket } from "node:net";
 
 type FakeSocketContract = Pick<Socket, "destroyed" | "writable" | "destroy">;
 
@@ -7,7 +6,7 @@ type FakeSocketContract = Pick<Socket, "destroyed" | "writable" | "destroy">;
  * Fake Socket for testing socket-based servers without real network connections.
  * Works cross-platform (Windows, macOS, Linux) and doesn't require file system.
  */
-export class FakeSocket extends EventEmitter implements FakeSocketContract {
+export class FakeSocket extends Socket implements FakeSocketContract {
   public destroyed = false;
   public writable = true;
   private _writtenData: string[] = [];
@@ -16,6 +15,10 @@ export class FakeSocket extends EventEmitter implements FakeSocketContract {
   /**
    * Get all data written to this socket
    */
+  resetWrittenData(): void {
+    this._writtenData = [];
+  }
+
   getWrittenData(): string[] {
     return [...this._writtenData];
   }

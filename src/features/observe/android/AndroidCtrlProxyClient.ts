@@ -1328,7 +1328,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
   // Android-specific state
   private portForwardingSetup: boolean = false;
-  private readonly ctrlProxyForwardLease: CtrlProxyForwardLease;
+  /** @internal Test seam for CtrlProxyClient tests (#7992); not part of the public API. */
+  readonly ctrlProxyForwardLease: CtrlProxyForwardLease;
   private ctrlProxyForwardLeaseReleaseScheduled: boolean = false;
   private inFlightConnection: Promise<boolean> | null = null;
   private cleanupHeldPort: number | null = null;
@@ -1394,19 +1395,22 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   private screenshotBackoffScheduler: ScreenshotBackoffScheduler | null = null;
   // Screen geometry derived from hierarchies, carrying whether the daemon has actually seen a
   // hierarchy with that geometry (issue #3348). See TrackedScreenGeometry.
-  private readonly screenGeometry = new TrackedScreenGeometry();
+  /** @internal Test seam for CtrlProxyClient tests (#7992); not part of the public API. */
+  readonly screenGeometry = new TrackedScreenGeometry();
   // Runner-reported scale metadata from the most recent hierarchy (#4548). Android reports
   // nativeScale 1 with pixel dims equal to its (already-pixel) screen dims. Retained for #4549;
   // null until a #4548-aware runner reports it. Nothing in current behavior reads it.
   private reportedScaleMetadata: ScreenScaleMetadata | null = null;
-  private hierarchyObservationStreamSuppressions: Set<ObservationStreamSuppression> = new Set();
+  /** @internal Test seam for CtrlProxyClient tests (#7992); not part of the public API. */
+  hierarchyObservationStreamSuppressions: Set<ObservationStreamSuppression> = new Set();
   // Request ids whose screenshot responses must not be auto-pushed to the
   // observation stream. Scoped per-request so an unrelated in-flight screenshot
   // (e.g. backoff capture or MCP screenshot) cannot consume the suppression.
   private screenshotObservationStreamSuppressions: Set<string> = new Set();
   // Request ids cancelled after their screenshot frame was dispatched. The runner cannot retract a
   // request already on the wire, so a later response must be discarded rather than auto-pushed.
-  private lateCancelledScreenshotRequestIds: Set<string> = new Set();
+  /** @internal Test seam for CtrlProxyClient tests (#7992); not part of the public API. */
+  lateCancelledScreenshotRequestIds: Set<string> = new Set();
 
   // Capture identity bound to each in-flight screenshot request, keyed by requestId (issue #3348).
   // Recorded when the request is SENT and consumed when its response is pushed, so a hierarchy that
@@ -1417,7 +1421,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   // Track whether the device supports accessibility service screenshots (API 30+).
   // null = unknown, true = supported, false = unsupported (fall back to ADB screencap).
   // Only marked unsupported after consecutive failures to avoid disabling on transient timeouts.
-  private a11yScreenshotSupported: boolean | null = null;
+  /** @internal Test seam for CtrlProxyClient tests (#7992); not part of the public API. */
+  a11yScreenshotSupported: boolean | null = null;
   private a11yScreenshotFailures: number = 0;
   private static readonly A11Y_SCREENSHOT_MAX_FAILURES = 3;
   // Minimum interval between accessibility takeScreenshot() requests. The platform rate-limits
@@ -1543,6 +1548,11 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
   public static getExistingInstance(deviceId: string): AndroidCtrlProxyClient | null {
     return AndroidCtrlProxyClient.instances.get(deviceId) ?? null;
+  }
+
+  /** @internal Test seam for CtrlProxyClient tests (#7992); not part of the public API. */
+  public static registerForTesting(client: AndroidCtrlProxyClient, deviceId: string): void {
+    AndroidCtrlProxyClient.instances.set(deviceId, client);
   }
 
   /**
@@ -1843,6 +1853,16 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     return client;
   }
 
+  /** @internal Test seam for CtrlProxyClient tests (#7992); not part of the public API. */
+  public static createWithFileForwardLeaseForTesting(
+    device: BootedDevice,
+    adb: AdbExecutor,
+    webSocketFactory: WebSocketFactory,
+    timer: Timer,
+  ): AndroidCtrlProxyClient {
+    return new AndroidCtrlProxyClient(device, adb, webSocketFactory, timer);
+  }
+
   // ===========================================================================
   // Delegate Context Factories
   // ===========================================================================
@@ -1894,7 +1914,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     );
   }
 
-  private get hierarchy(): CtrlProxyHierarchy {
+  /** @internal Test seam for CtrlProxyClient tests (#7992); not part of the public API. */
+  get hierarchy(): CtrlProxyHierarchy {
     return this.lazyDelegate(
       () => this._hierarchy,
       (value) => {
@@ -2146,7 +2167,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     }
   }
 
-  protected onConnectionClosed(): void {
+  /** @internal Test seam for CtrlProxyClient tests (#7992); not part of the public API. */
+  public onConnectionClosed(): void {
     if (this.restartRearmTimeout) {
       this.timer.clearTimeout(this.restartRearmTimeout);
       this.restartRearmTimeout = null;
@@ -4055,7 +4077,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     }
   }
 
-  private async setupPortForwarding(
+  /** @internal Test seam for CtrlProxyClient tests (#7992); not part of the public API. */
+  async setupPortForwarding(
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     signal?: AbortSignal,
   ): Promise<void> {
@@ -4137,7 +4160,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
    * A newly-created singleton is registered before it can start connecting, so
    * its allocated port is treated as live even before port forwarding completes.
    */
-  private async sweepOrphanedCtrlProxyPortForwards(signal?: AbortSignal): Promise<void> {
+  /** @internal Test seam for CtrlProxyClient tests (#7992); not part of the public API. */
+  async sweepOrphanedCtrlProxyPortForwards(signal?: AbortSignal): Promise<void> {
     let stdout: string;
     try {
       const result = await this.adb.execute(["forward", "--list"], { signal });
@@ -4993,7 +5017,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     }
   }
 
-  private handleHierarchyUpdate(
+  /** @internal Test seam for CtrlProxyClient tests (#7992); not part of the public API. */
+  handleHierarchyUpdate(
     data: AccessibilityHierarchy,
     perfTiming?: AndroidPerfTiming[],
     frameContext?: string,
@@ -5145,7 +5170,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     this.startScreenshotBackoff();
   }
 
-  private pushScreenshotToObservationStream(
+  /** @internal Test seam for CtrlProxyClient tests (#7992); not part of the public API. */
+  pushScreenshotToObservationStream(
     screenshotBase64: string,
     metadata: ScreenshotMetadata = ANDROID_CTRLPROXY_SCREENSHOT_METADATA,
     binding?: ScreenGeometryBinding,
@@ -5411,7 +5437,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     }
   }
 
-  private startScreenshotBackoff(): void {
+  /** @internal Test seam for CtrlProxyClient tests (#7992); not part of the public API. */
+  startScreenshotBackoff(): void {
     const server = getDeviceDataStreamServer();
     if (!server || !server.hasSubscriberForDevice(this.device.deviceId)) {
       return;

@@ -2698,7 +2698,7 @@ export class DevicePool {
       if (device.status !== "idle" || !matches(device)) {
         continue;
       }
-      if (!(await this.ensurePooledDevicePresentForUse(device))) {
+      if (!(await this.ensurePooledDevicePresentForUse(device, false, false, true))) {
         evicted++;
       }
     }
@@ -2741,8 +2741,14 @@ export class DevicePool {
     device: PooledDevice,
     deferRecovery: boolean = false,
     assignmentLockHeld: boolean = false,
+    idleEviction: boolean = false,
   ): Promise<boolean> {
-    const present = await this.ensurePooledDevicePresent(device, deferRecovery, assignmentLockHeld);
+    const present = await this.ensurePooledDevicePresent(
+      device,
+      deferRecovery,
+      assignmentLockHeld,
+      idleEviction,
+    );
     return present && this.isPooledDeviceIdentityAssignable(device);
   }
 
@@ -2750,6 +2756,7 @@ export class DevicePool {
     device: PooledDevice,
     deferRecovery: boolean,
     assignmentLockHeld: boolean,
+    idleEviction: boolean,
   ): Promise<boolean> {
     if (!this.shouldValidatePooledDevicePresence(device)) {
       return true;
@@ -2781,6 +2788,34 @@ export class DevicePool {
       void eviction.catch((error) => {
         logger.warn(`[DevicePool] Deferred eviction failed for ${device.id}: ${error}`, error);
       });
+      return false;
+    }
+    if (idleEviction) {
+      const claimed = await this.assignmentMutex.runExclusive(() => {
+        // The discovery ran without the lock. A newer bind or incarnation wins
+        // over its absent snapshot; claim before any other bind can select it.
+        if (
+          this.devices.get(device.id) !== device ||
+          device.status !== "idle" ||
+          device.sessionId !== null
+        ) {
+          return false;
+        }
+        device.status = "error";
+        return true;
+      });
+      if (!claimed) {
+        return true;
+      }
+      const deferEviction = this.shouldRebootDisconnectedAndroidDevice(device);
+      const eviction = this.evictMissingPooledDevice(device, "not present in adb devices", true);
+      if (deferEviction) {
+        void eviction.catch((error) => {
+          logger.warn(`[DevicePool] Deferred eviction failed for ${device.id}: ${error}`, error);
+        });
+        return false;
+      }
+      await eviction;
       return false;
     }
     await this.evictMissingPooledDevice(device, "not present in adb devices", true);
@@ -4531,6 +4566,8 @@ export class DevicePool {
           retainLeaseUntil,
           allowActiveStop,
           replacementHandoffOwner,
+          preservedSessionId,
+          preservedSession,
         );
       } catch (error) {
         logger.warn(
@@ -4762,6 +4799,8 @@ export class DevicePool {
     retainLeaseUntil: (settlement: Promise<unknown>) => void,
     allowActiveStop: boolean,
     handoffOwner: symbol,
+    preservedSessionId: string | undefined,
+    preservedSession: Session | undefined,
   ): Promise<"stopped" | "same-avd" | "declined"> {
     const current = this.devices.get(device.id);
     if (this.sameAvdReplacements(device, avdName).length > 0) {
@@ -4793,6 +4832,8 @@ export class DevicePool {
         retainLeaseUntil,
         hadTrackedProcess,
         handoffOwner,
+        preservedSessionId,
+        preservedSession,
       );
     }
     return "stopped";
@@ -5033,6 +5074,8 @@ export class DevicePool {
     retainLeaseUntil: (settlement: Promise<unknown>) => void,
     adoptOnly: boolean,
     handoffOwner: symbol,
+    preservedSessionId: string | undefined,
+    preservedSession: Session | undefined,
   ): Promise<"stopped" | "same-avd"> {
     const timeoutMs = 30_000;
     const deadlineMs = this.timer.now() + timeoutMs;
@@ -5087,14 +5130,28 @@ export class DevicePool {
       if (!matchingAvd) {
         return "stopped";
       }
-      if (matchingAvd.deviceId !== disconnectedDevice.id) {
-        this.androidRecoveryHandoffOwners.set(matchingAvd.deviceId, handoffOwner);
+      if (matchingAvd.deviceId !== disconnectedDevice.id || adoptOnly) {
+        if (matchingAvd.deviceId === disconnectedDevice.id) {
+          if (
+            this.devices.get(disconnectedDevice.id) !== disconnectedDevice ||
+            !this.detachSessionForAndroidRecovery(
+              disconnectedDevice,
+              preservedSessionId,
+              preservedSession,
+            )
+          ) {
+            throw new ActionableError(
+              `Android emulator '${avdName}' changed ownership during recovery; recovery will not relaunch it`,
+            );
+          }
+          this.androidRecoveryHandoffOwners.set(matchingAvd.deviceId, handoffOwner);
+          await this.removeDevice(disconnectedDevice.id, true, disconnectedDevice);
+        } else {
+          this.androidRecoveryHandoffOwners.set(matchingAvd.deviceId, handoffOwner);
+        }
         await this.addDevice(matchingAvd, disconnectedDevice.androidImage);
         signal.throwIfAborted();
         return "same-avd";
-      }
-      if (adoptOnly) {
-        return "stopped";
       }
       await this.deviceManager.killDevice(matchingAvd, {
         timeoutMs: Math.max(1, deadlineMs - this.timer.now()),

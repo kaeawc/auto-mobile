@@ -5775,7 +5775,7 @@ describe("DevicePool", () => {
       }
     });
 
-    test("accepts a recovered replacement when the initial cold boot exited before tracking", async () => {
+    test("adopts the listed AVD when the initial cold boot launcher exited before tracking", async () => {
       const originalRebootOnDeath = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
       process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
       try {
@@ -5801,7 +5801,7 @@ describe("DevicePool", () => {
         await expect(
           devicePool.assignMultipleDevices(["session-1"], 1_000, "android"),
         ).resolves.toEqual(new Map([["session-1", "emulator-5554"]]));
-        expect(manager.childProcesses).toHaveLength(2);
+        expect(manager.childProcesses).toHaveLength(1);
         expect(devicePool.getDevice("emulator-5554")?.sessionId).toBe("session-1");
       } finally {
         if (originalRebootOnDeath === undefined) {

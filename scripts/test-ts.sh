@@ -345,7 +345,7 @@ run_unit_shards() {
         bun "$ROOT/scripts/lib/test-file-timings.ts" summary "$timing_log" || true
       fi
       exit "$shard_status"
-    ) > "$shard_root/shard-${shard}.log" 2>&1 &
+    ) > "$shard_root/shard-${shard}.log" 2>&1 3>&- &
     pids+=("$!")
   done
 

@@ -46,14 +46,13 @@ run_with_timeout() {
 
     # Monitor mode puts the child in its own process group (pgid == its pid),
     # which is what lets the group-directed kill below reach descendants.
-    # Restore the caller's setting right away so job-control notices do not
-    # leak into their output.
+    # Give both the command and watcher separate process groups, then restore
+    # the caller's setting before waiting on either job.
     local had_monitor=0
     case "$-" in *m*) had_monitor=1 ;; esac
     set -m
-    "$@" &
+    "$@" 3>&- &
     local cmd_pid=$!
-    if [ "${had_monitor}" -eq 0 ]; then set +m; fi
 
     (
       sleep "${secs}"
@@ -93,6 +92,7 @@ run_with_timeout() {
     # open after the timed command has already exited.
     ) > /dev/null 2>&1 3>&- &
     local watcher_pid=$!
+    if [ "${had_monitor}" -eq 0 ]; then set +m; fi
 
     wait "${cmd_pid}" 2> /dev/null || status=$?
     if [ -s "${fired_marker}" ]; then
@@ -102,7 +102,9 @@ run_with_timeout() {
       wait "${watcher_pid}" 2> /dev/null || true
       status=124
     else
-      kill "${watcher_pid}" 2> /dev/null || true
+      # The watcher may be waiting on sleep; stop its whole group so the
+      # in-flight timer cannot outlive an early-finishing command.
+      kill -TERM -"${watcher_pid}" 2> /dev/null || kill "${watcher_pid}" 2> /dev/null || true
       wait "${watcher_pid}" 2> /dev/null || true
       if [ -s "${fired_marker}" ]; then status=124; fi
     fi

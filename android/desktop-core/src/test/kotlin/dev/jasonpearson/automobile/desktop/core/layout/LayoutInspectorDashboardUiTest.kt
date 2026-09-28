@@ -1,16 +1,73 @@
 package dev.jasonpearson.automobile.desktop.core.layout
 
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.runComposeUiTest
+import dev.jasonpearson.automobile.desktop.core.daemon.FakeObservationStream
+import dev.jasonpearson.automobile.desktop.core.daemon.HierarchyStreamUpdate
 import dev.jasonpearson.automobile.desktop.domain.ElementBounds
 import dev.jasonpearson.automobile.desktop.domain.UIElementInfo
+import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.serialization.json.Json
+import org.junit.Assert.assertEquals
 import org.junit.Test
 
 @OptIn(ExperimentalTestApi::class)
 class LayoutInspectorDashboardUiTest {
+
+  @OptIn(ExperimentalCoroutinesApi::class)
+  @Test
+  fun `reconnect discards buffered pre-outage hierarchy frames`() = runComposeUiTest {
+    val stream = FakeObservationStream()
+    val generation = mutableStateOf(1)
+    val firstParseEntered = CompletableDeferred<Unit>()
+    val releaseFirstParse = CompletableDeferred<Unit>()
+    val parseCount = AtomicInteger()
+    val acceptedErrors = mutableListOf<String>()
+    setContent {
+      MaterialTheme {
+        LayoutInspectorDashboard(
+          observationStream = stream,
+          connectionGeneration = generation.value,
+          frameDispatcher = UnconfinedTestDispatcher(),
+          beforeHierarchyParse = {
+            if (parseCount.incrementAndGet() == 1) {
+              firstParseEntered.complete(Unit)
+              releaseFirstParse.await()
+            }
+          },
+          onHierarchyUnavailable = { acceptedErrors += it },
+          socketAvailable = { true },
+        )
+      }
+    }
+    fun emit(reason: String) {
+      // Match the iOS hierarchy-unavailable contract so the dashboard reports accepted frames.
+      val prefix = "Failed to retrieve iOS view hierarchy from CtrlProxy iOS: "
+      stream.emitHierarchy(
+        HierarchyStreamUpdate(
+          "device",
+          0L,
+          Json.parseToJsonElement("""{"hierarchy":{"error":"$prefix$reason"}}"""),
+        )
+      )
+    }
+    emit("old-first")
+    waitUntil(timeoutMillis = 5_000) { firstParseEntered.isCompleted }
+    emit("old-buffered")
+    runOnIdle { generation.value = 2 }
+    waitForIdle()
+    releaseFirstParse.complete(Unit)
+    emit("fresh")
+    waitUntil(timeoutMillis = 5_000) { acceptedErrors.contains("fresh") }
+    assertEquals(listOf("fresh"), acceptedErrors)
+  }
 
   private val sampleElement =
     UIElementInfo(

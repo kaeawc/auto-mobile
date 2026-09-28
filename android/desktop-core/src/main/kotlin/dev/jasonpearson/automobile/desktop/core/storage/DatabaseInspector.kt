@@ -188,7 +188,7 @@ fun DatabaseInspector(
           } else {
             Text(
               if (platform == StoragePlatform.iOS) {
-                "AutoMobile can inspect databases in a Simulator app's .app container. The SDK provides a richer inspection experience with live updates."
+                "AutoMobile can inspect databases in a Simulator app's data container. The SDK provides a richer inspection experience with live updates."
               } else {
                 "AutoMobile can inspect databases via adb shell for debuggable apps. The SDK provides a richer inspection experience with live updates."
               },

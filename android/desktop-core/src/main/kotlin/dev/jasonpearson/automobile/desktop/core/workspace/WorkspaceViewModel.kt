@@ -111,7 +111,10 @@ class WorkspaceViewModel(
         mutate(action.deviceId) { it.copy(shrunk = !it.shrunk, firstPaneFractionOverride = null) }
       is WorkspaceAction.SetFirstPaneFraction ->
         mutate(action.deviceId) {
-          it.copy(firstPaneFractionOverride = action.fraction.coerceIn(0.01f, 0.99f))
+          it.copy(
+            shrunk = false,
+            firstPaneFractionOverride = action.fraction.coerceIn(0.01f, 0.99f),
+          )
         }
       is WorkspaceAction.SelectTool -> mutate(action.deviceId) { it.copy(activeTool = action.tool) }
       is WorkspaceAction.RunControl -> runControl(action.deviceId, action.control)
@@ -225,6 +228,7 @@ class WorkspaceViewModel(
                 mode = existing.mode,
                 activeTool = existing.activeTool,
                 shrunk = existing.shrunk,
+                firstPaneFractionOverride = existing.firstPaneFractionOverride,
                 orientation = existing.orientation,
               )
             }

@@ -435,6 +435,7 @@ class McpStdioClient(
       process = null
       reader = null
       writer = null
+      initialized = false
     }
   }
 

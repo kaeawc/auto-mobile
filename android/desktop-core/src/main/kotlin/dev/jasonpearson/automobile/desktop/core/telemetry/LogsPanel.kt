@@ -65,6 +65,16 @@ import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.filter
 import kotlinx.serialization.Serializable
 
+/** Merge each pane's mutation against the provider's latest persisted value. */
+internal fun mutateLogsSavedViews(
+  settingsProvider: SettingsProvider,
+  transform: (List<LogsSavedView>) -> List<LogsSavedView>,
+): List<LogsSavedView> {
+  val updated = transform(deserializeLogsSavedViews(settingsProvider.logsSavedViews))
+  settingsProvider.logsSavedViews = serializeLogsSavedViews(updated)
+  return updated
+}
+
 /**
  * Exact Android logcat tags emitted by CtrlProxy itself, hidden by default to expose app logs.
  * `MainActivity` is deliberately excluded because it is also a common app tag. Consequently,
@@ -412,8 +422,10 @@ fun LogsPanel(
       },
       onSaveView = { name ->
         val view = LogsSavedView(name, enabledLevels, tag.ifBlank { null }, query)
-        savedViews = savedViews.filterNot { it.name == name } + view
-        settingsProvider.logsSavedViews = serializeLogsSavedViews(savedViews)
+        savedViews =
+          mutateLogsSavedViews(settingsProvider) { current ->
+            current.filterNot { it.name == name } + view
+          }
       },
       onApplyView = { view ->
         enabledLevels = view.enabledLevels
@@ -421,8 +433,10 @@ fun LogsPanel(
         query = view.query
       },
       onDeleteView = { view ->
-        savedViews = savedViews - view
-        settingsProvider.logsSavedViews = serializeLogsSavedViews(savedViews)
+        savedViews =
+          mutateLogsSavedViews(settingsProvider) { current ->
+            current.filterNot { it.name == view.name }
+          }
       },
     )
 

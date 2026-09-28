@@ -84,6 +84,20 @@ class DevicePickerUiTest {
   }
 
   @Test
+  fun `same-id same-name cards on different platforms retain distinct labels`() = runComposeUiTest {
+    picker(
+      DevicePickerUiState.Content(
+        listOf(
+          PickerDevice("shared", "Twin", Platform.Android, DeviceState.Booted),
+          PickerDevice("shared", "Twin", Platform.Ios, DeviceState.Booted),
+        )
+      )
+    )
+    onNodeWithContentDescription("Observe Twin (android:shared)").assertIsDisplayed()
+    onNodeWithContentDescription("Observe Twin (ios:shared)").assertIsDisplayed()
+  }
+
+  @Test
   fun `renders rail options and device cards`() = runComposeUiTest {
     picker()
     onNodeWithContentDescription("Select filter Booted").assertIsDisplayed()

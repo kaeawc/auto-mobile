@@ -175,6 +175,19 @@ class LogsPanelTest {
   }
 
   @Test
+  fun `saved view mutations in separate panes preserve concurrent additions and deletions`() {
+    val settings = FakeSettingsProvider()
+    val first = LogsSavedView("First", setOf(LogLevel.Info), null, "first")
+    val second = LogsSavedView("Second", setOf(LogLevel.Error), null, "second")
+    mutateLogsSavedViews(settings) { it + first }
+    mutateLogsSavedViews(settings) { it + second }
+    assertEquals(listOf(first, second), deserializeLogsSavedViews(settings.logsSavedViews))
+    mutateLogsSavedViews(settings) { current -> current.filterNot { it.name == first.name } }
+    mutateLogsSavedViews(settings) { current -> current.filterNot { it.name == second.name } }
+    assertEquals(emptyList<LogsSavedView>(), deserializeLogsSavedViews(settings.logsSavedViews))
+  }
+
+  @Test
   fun `disabling a level hides only that level`() {
     val logs =
       listOf(

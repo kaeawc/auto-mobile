@@ -116,6 +116,8 @@ fun NavigationFacet(
   // deterministically (e.g. awaiting a CompletableDeferred) with zero wall time instead of a real
   // 10s delay under a real-clock test dispatcher. Production uses the real delay.
   resolveTimeout: suspend () -> Unit = { delay(RESOLVE_TIMEOUT_MS) },
+  // Test seam for gating the facet's own connection collector before it handles an emission.
+  connectionStateCollectorGate: suspend (ConnectionState) -> Unit = {},
   // Resolves the per-device screenshot loader from a scope that outlives this facet's composition,
   // so its LRU cache survives facet open/close toggles. Injectable for tests; defaults to a
   // session-scoped registry.
@@ -141,6 +143,7 @@ fun NavigationFacet(
   // A manual retry is still useful for a connected stream that never delivers a payload, or for a
   // collector that threw. Neither failure changes the connection state watched by the helper.
   var collectorAttempt by remember(column.deviceId) { mutableStateOf(0) }
+  var navigationCollectorFailed by remember(column.deviceId) { mutableStateOf(false) }
 
   // A throw surfaced by either stream-collection flow (socket read error, parse failure) below.
   // Compose does NOT isolate exceptions thrown inside a LaunchedEffect — an unguarded `collect`
@@ -188,6 +191,7 @@ fun NavigationFacet(
       throw c
     } catch (e: Exception) {
       LOG.warn("Navigation stream collection failed: ${e.message}", e)
+      navigationCollectorFailed = true
       streamError = e.message ?: "Navigation stream error"
     }
   }
@@ -237,6 +241,7 @@ fun NavigationFacet(
             }
         }
         current.connectionState.collect { next ->
+          connectionStateCollectorGate(next)
           if (next !is ConnectionState.Connected) {
             if (wasConnected) clearOldApp()
             // A failed first connect is also an observed drop: its later successful
@@ -432,8 +437,10 @@ fun NavigationFacet(
           message = current.message,
           retryContentDescription = "Retry resolving navigation graph",
         ) {
+          val restartCollector = navigationCollectorFailed
+          navigationCollectorFailed = false
           streamError = null
-          collectorAttempt++
+          if (restartCollector) collectorAttempt++ else stream?.requestNavigationGraph()
         }
       } else {
         NavigationFacetNote(current.message, "Reconnecting to the AutoMobile daemon…")

@@ -16,9 +16,42 @@ import javax.net.ssl.SSLSession
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import org.junit.Test
 
 class McpStatusTimeoutTest {
+
+  @Test
+  fun `STDIO client reinitializes after a panel closes the shared client`() {
+    var starts = 0
+    var initializations = 0
+    val client =
+      McpStdioClient(
+        command = "unused",
+        processStarter = {
+          starts++
+          FakeProcess()
+        },
+        responseReader =
+          StdioResponseReader { _, _ ->
+            initializations++
+            JsonRpcResponse(
+              jsonrpc = "2.0",
+              result = buildJsonObject { put("protocolVersion", "2025-11-25") },
+            )
+          },
+      )
+    try {
+      client.ping()
+      client.close()
+      client.ping()
+      assertEquals(2, starts)
+      assertEquals(2, initializations)
+    } finally {
+      client.close()
+    }
+  }
 
   @Test
   fun `HTTP status probe shares one deadline across initialization and tools call`() {

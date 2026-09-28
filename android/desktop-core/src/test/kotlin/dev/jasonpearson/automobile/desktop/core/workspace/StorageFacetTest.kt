@@ -85,12 +85,12 @@ class StorageFacetTest {
       }
     }
     onNodeWithText("No databases detected").assertIsDisplayed()
-    onNodeWithText("Simulator app's .app container", substring = true).assertIsDisplayed()
+    onNodeWithText("Simulator app's data container", substring = true).assertIsDisplayed()
     onNodeWithText("adb shell", substring = true).assertDoesNotExist()
 
     runOnIdle { platform.value = StoragePlatform.Android }
     onNodeWithText("adb shell", substring = true).assertIsDisplayed()
-    onNodeWithText("Simulator app's .app container", substring = true).assertDoesNotExist()
+    onNodeWithText("Simulator app's data container", substring = true).assertDoesNotExist()
   }
 
   @Test

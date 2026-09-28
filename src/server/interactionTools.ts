@@ -807,37 +807,49 @@ const sendKeysSelectorSchema = z
 
 const sendKeysKeyValues = [...SUPPORTED_INPUT_KEYS, ...SEND_KEYS_SEMANTIC_KEYS] as const;
 
+const sendKeysTypeCommandSchema = withJsonSchemaOverride(
+  z
+    .object({
+      action: z.literal("type"),
+      text: z.string().min(1).describe("Text to insert or replace; never echoed in the result"),
+      operation: z
+        .enum(SEND_KEYS_OPERATIONS)
+        .default("insert")
+        .describe("Insert at the current selection (default) or replace the focused field"),
+      mode: z
+        .enum(SEND_KEYS_TYPING_MODES)
+        .default("auto")
+        .describe(
+          "Android delivery mode. auto uses the AutoMobile IME when supported, otherwise eventAll for insert or a11y for replace. Explicit ime commits text; imeKeyEvents dispatches printable ASCII key events through the IME input connection, requires a compatible CtrlProxy APK, and does not verify resulting editor text. iOS reports xcuiTypeText as the resolved mode",
+        ),
+      keyboardProfile: z
+        .enum(KEYBOARD_PROFILE_IDS)
+        .optional()
+        .describe("Android keyboard behavior profile for this IME type call; restored afterward"),
+    })
+    .strict()
+    .superRefine((command, context) => {
+      if (command.keyboardProfile && command.mode !== "auto" && command.mode !== "ime") {
+        context.addIssue({
+          code: "custom",
+          path: ["mode"],
+          message: "keyboardProfile requires mode: ime or auto",
+        });
+      }
+    }),
+  (jsonSchema) => {
+    jsonSchema.dependentSchemas = {
+      ...(jsonSchema.dependentSchemas as Record<string, unknown> | undefined),
+      keyboardProfile: {
+        properties: { mode: { enum: ["auto", "ime"] } },
+      },
+    };
+  },
+);
+
 const sendKeysCommandSchema = withCanonicalDiscriminatedUnionJsonSchema(
   z.discriminatedUnion("action", [
-    z
-      .object({
-        action: z.literal("type"),
-        text: z.string().min(1).describe("Text to insert or replace; never echoed in the result"),
-        operation: z
-          .enum(SEND_KEYS_OPERATIONS)
-          .default("insert")
-          .describe("Insert at the current selection (default) or replace the focused field"),
-        mode: z
-          .enum(SEND_KEYS_TYPING_MODES)
-          .default("auto")
-          .describe(
-            "Android delivery mode. auto uses the AutoMobile IME when supported, otherwise eventAll for insert or a11y for replace. Explicit ime commits text; imeKeyEvents dispatches printable ASCII key events through the IME input connection, requires a compatible CtrlProxy APK, and does not verify resulting editor text. iOS reports xcuiTypeText as the resolved mode",
-          ),
-        keyboardProfile: z
-          .enum(KEYBOARD_PROFILE_IDS)
-          .optional()
-          .describe("Android keyboard behavior profile for this IME type call; restored afterward"),
-      })
-      .strict()
-      .superRefine((command, context) => {
-        if (command.keyboardProfile && command.mode !== "auto" && command.mode !== "ime") {
-          context.addIssue({
-            code: "custom",
-            path: ["mode"],
-            message: "keyboardProfile requires mode: ime or auto",
-          });
-        }
-      }),
+    sendKeysTypeCommandSchema,
     z
       .object({
         action: z.literal("key"),

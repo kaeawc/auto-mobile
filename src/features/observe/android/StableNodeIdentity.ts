@@ -1,6 +1,7 @@
 import { createHash } from "crypto";
 import {
   getToggleContentDescription,
+  isClickableElementProperties,
   isEditableElementProperties,
 } from "../../../utils/elementProperties";
 
@@ -36,9 +37,12 @@ import {
  * `content-desc`, `test-tag`, and (recursively) its own children's structural
  * hashes — with volatile display `text` omitted from that upward contribution.
  * A node's *own* id still mixes in its own `text`/`content-desc`, except that
- * editable inputs use their stable `hint-text` instead of the entered value
- * and named toggles omit state text. Other leaf text nodes stay distinct and
- * the timer leaf's own id still churns — only its ancestors are shielded from
+ * editable inputs use their stable `hint-text` instead of the entered value,
+ * falling back to the first non-interactive direct child's text when the hint
+ * is absent. Compose TextField labels are ordinary child text, not framework
+ * `hint-text`, so this fallback gives those fields distinct own content hashes
+ * (#6728). Named toggles omit state text. Other leaf text nodes stay distinct
+ * and the timer leaf's own id still churns — only its ancestors are shielded from
  * descendant text. A descendant's `content-desc` now deliberately restamps
  * its ancestors: Android icon buttons
  * commonly put their accessible label on a child, so rolling that label upward
@@ -55,9 +59,10 @@ import {
  * remains shielded from descendant text churn (#6230). In a duplicate group,
  * a member whose recursive digit-normalized descendant text/content-desc hash
  * is unique gets `s2-<hash>~<texthash8>`. Editable descendants contribute their
- * hint, never entered text (#7926). Members distinguished only by digits in
- * descendant `text` (timestamps, counters) collide after normalization and get
- * the existing document-order `s2-<hash>-k` ordinal, including `-1` for the
+ * hint or direct-child label, never entered text (#7926, #6728). Members
+ * distinguished only by digits in descendant `text` (timestamps, counters)
+ * collide after normalization and get the existing document-order
+ * `s2-<hash>-k` ordinal, including `-1` for the
  * first such member (#6229). Ordinals count all peers, so a mixed group can
  * have gaps. IME nodes cannot shift app ordinals (#7311). The diff layer re-pairs
  * label-distinct rows by full id and keeps its encounter-order heuristic for
@@ -273,7 +278,8 @@ export function assignStableViewIds(root: unknown): Map<string, string> {
   //    (#7311), but excludes volatile descendant `text` so a ticking label does
   //    not restamp any ancestor's id (#6230).
   //  - contentHash (emitted): class + CONTENT_FIELDS (with mutable input/toggle
-  //    text omitted or replaced by a stable hint) + children's structuralHashes.
+  //    text omitted or replaced by a stable hint/child label) + children's
+  //    structuralHashes.
   //    Other own display text still defines identity; descendants roll up
   //    structurally only.
   //
@@ -305,8 +311,23 @@ export function assignStableViewIds(root: unknown): Map<string, string> {
                 if (getToggleContentDescription(attributes)) {
                   value = "";
                 } else if (isEditableElementProperties(attributes)) {
-                  // Editable text is the entered value; a hint stays fixed as the user types.
-                  value = attributes["hint-text"] ?? "";
+                  // Compose labels are direct children, not framework hints (#6728).
+                  // Ignore interactive child text, which may change with input.
+                  const hint = attributes["hint-text"];
+                  if (hint !== undefined && hint !== null) {
+                    value = hint;
+                  } else {
+                    const label = toChildArray(node)
+                      .map(attributesOf)
+                      .find(
+                        (child) =>
+                          !isEditableElementProperties(child) &&
+                          !isClickableElementProperties(child) &&
+                          typeof child.text === "string" &&
+                          child.text !== "",
+                      );
+                    value = label?.text ?? "";
+                  }
                 }
               }
               return normalizeDescendantDigits && typeof value === "string"

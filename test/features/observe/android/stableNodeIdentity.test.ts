@@ -586,6 +586,97 @@ describe("assignStableViewIds (#3228)", () => {
     expect(resolved?.bounds).toEqual(after.fields[1].bounds);
   });
 
+  test("Compose text fields keep label-distinguished ids when Email is filled (#6728)", () => {
+    const capture = (emailText: string) => {
+      const fields = [
+        node(
+          {
+            "view-id": generatedUuid("email"),
+            class: "android.widget.EditText",
+            text: emailText,
+            bounds: { left: 0, top: 0, right: 200, bottom: 40 },
+          },
+          [
+            node({ "view-id": generatedUuid("email-box1"), class: "android.view.View", text: "" }),
+            node({
+              "view-id": generatedUuid("email-label"),
+              class: "android.widget.TextView",
+              text: "Email",
+            }),
+            node({ "view-id": generatedUuid("email-box2"), class: "android.view.View", text: "" }),
+          ],
+        ),
+        node(
+          {
+            "view-id": generatedUuid("password"),
+            class: "android.widget.EditText",
+            text: "",
+            bounds: { left: 0, top: 50, right: 200, bottom: 90 },
+          },
+          [
+            node({
+              "view-id": generatedUuid("password-box1"),
+              class: "android.view.View",
+              text: "",
+            }),
+            node({
+              "view-id": generatedUuid("password-label"),
+              class: "android.widget.TextView",
+              text: "Password",
+            }),
+            node({
+              "view-id": generatedUuid("password-box2"),
+              class: "android.view.View",
+              text: "",
+            }),
+          ],
+        ),
+      ];
+      const root = node({}, fields);
+      assignStableViewIds(root);
+      return { root, fields };
+    };
+
+    const before = capture("");
+    const after = capture("mt@example.com");
+    const observedEmailId = before.fields[0]["view-id"] as string;
+    const observedPasswordId = before.fields[1]["view-id"] as string;
+    expect(observedEmailId).toMatch(/^s2-[0-9a-f]{16}$/);
+    expect(observedPasswordId).toMatch(/^s2-[0-9a-f]{16}$/);
+    expect(observedEmailId).not.toBe(observedPasswordId);
+    expect(after.fields[0]["view-id"]).toBe(observedEmailId);
+    expect(after.fields[1]["view-id"]).toBe(observedPasswordId);
+    expect(after.fields[0]["view-id"]).not.toBe(after.fields[1]["view-id"]);
+
+    const finder = new DefaultElementFinder(new DefaultElementParser(), new DefaultTextMatcher());
+    const resolved = finder.findElementByResourceId(
+      { hierarchy: after.root } as ViewHierarchyResult,
+      observedEmailId,
+    );
+    expect(resolved?.bounds).toEqual(after.fields[0].bounds);
+    expect(resolved?.text).toBe("mt@example.com");
+  });
+
+  test("editable label fallback skips interactive text and does not search grandchildren", () => {
+    const fieldId = (interactiveText: string, label: string, nested = false): string => {
+      const labelNode = node({ class: "android.widget.TextView", text: label });
+      const field = node(
+        { "view-id": generatedUuid("field"), class: "android.widget.EditText", text: "typed" },
+        [
+          node({ class: "android.widget.TextView", text: interactiveText, clickable: true }),
+          node({ class: "android.widget.EditText", text: interactiveText }),
+          nested ? node({ class: "android.view.View" }, [labelNode]) : labelNode,
+        ],
+      );
+      assignStableViewIds(field);
+      return field["view-id"] as string;
+    };
+
+    expect(fieldId("First", "Email")).toBe(fieldId("Second", "Email"));
+    expect(fieldId("First", "Email")).not.toBe(fieldId("First", "Password"));
+    expect(fieldId("First", "Email", true)).toBe(fieldId("First", "Password", true));
+  });
+
   test("an editable field uses its stable hint instead of entered text", () => {
     const inputId = (hint: string, text: string): string => {
       const field = node({

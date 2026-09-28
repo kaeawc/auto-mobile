@@ -83,8 +83,8 @@ import {
   type EmulatorLossIncident,
   type EmulatorLossIncidentStore,
   type EmulatorLossRecoverySettlement,
-  type EmulatorLossSessionSnapshot,
 } from "./emulatorLossIncident";
+import { EmulatorLossIncidentLedger } from "./emulatorLossIncidentLedger";
 import {
   getVirtualDeviceLifecycleCoordinator,
   type VirtualDeviceLifecycleCoordinator,
@@ -662,7 +662,6 @@ class EmulatorProcessOutputTail {
  * serial-scoped recovery-cancellation behavior (issue #4915).
  */
 const INCARNATION_ANY = -1;
-const EMULATOR_LOSS_INCIDENT_WAIT_TIMEOUT_MS = 120_000;
 
 /**
  * Device Pool
@@ -772,9 +771,16 @@ export class DevicePool {
   private readonly androidRecoveryHandoffOwners = new Map<string, symbol>();
   private readonly startedDeviceProcesses: Map<string, ChildProcess> = new Map();
   private readonly startedDeviceProcessOutput: Map<string, EmulatorProcessOutputTail> = new Map();
-  private readonly emulatorLossIncidentStore: EmulatorLossIncidentStore;
-  private readonly emulatorLossRecoverySettlements = new Map<string, Promise<void>>();
-  private readonly emulatorLossRecoveryResolvers = new Map<string, () => void>();
+  private readonly emulatorLossLedger: EmulatorLossIncidentLedger;
+  private get emulatorLossIncidentStore(): EmulatorLossIncidentStore {
+    return this.emulatorLossLedger.emulatorLossIncidentStore;
+  }
+  private get emulatorLossRecoverySettlements(): Map<string, Promise<void>> {
+    return this.emulatorLossLedger.emulatorLossRecoverySettlements;
+  }
+  private get emulatorLossRecoveryResolvers(): Map<string, () => void> {
+    return this.emulatorLossLedger.emulatorLossRecoveryResolvers;
+  }
   /** Latest refresh request; older discovery snapshots must not overwrite it. */
   private refreshGeneration = 0;
   /** A discovery snapshot predating a removal cannot recreate that serial. */
@@ -914,7 +920,18 @@ export class DevicePool {
     this.onDeviceReady = onDeviceReady;
     this.onDeviceRemoved = onDeviceRemoved;
     this.cancelDeviceSessionExecutions = cancelDeviceSessionExecutions ?? (async () => 0);
-    this.emulatorLossIncidentStore = emulatorLossIncidentStore;
+    this.emulatorLossLedger = new EmulatorLossIncidentLedger(
+      {
+        getDevice: (deviceId) => this.getDevice(deviceId),
+        getRecoveryPolicy: () => this.getRecoveryPolicy(),
+        getSessionForDevice: (deviceId) => this.sessionManager.getSessionForDevice(deviceId),
+        getSession: (sessionId) => this.sessionManager.getSession(sessionId),
+        getProcessOutputTail: (deviceId) => this.startedDeviceProcessOutput.get(deviceId),
+      },
+      emulatorLossIncidentStore,
+      this.timer,
+      this.retryExecutor,
+    );
     this.lifecycleCoordinator = resolveLifecycleCoordinator(lifecycleCoordinator);
     // Resolve recovery policy once so retries and status agree even if the
     // process environment changes after construction.
@@ -1772,64 +1789,12 @@ export class DevicePool {
     processExit?: { code: number | null; signal: NodeJS.Signals | null },
     lastAdbState?: string,
   ): Promise<string | undefined> {
-    const device = this.devices.get(deviceId);
-    if (!device || device.platform !== "android" || consolePortFromSerial(device.id) === null) {
-      return undefined;
-    }
-    try {
-      // Capture the tail inside the try so a finalize()/snapshot() rejection
-      // degrades to no tail rather than blocking device-loss cleanup.
-      const outputTail =
-        detectionPath === "watched-process-exit"
-          ? await this.startedDeviceProcessOutput.get(deviceId)?.finalize()
-          : this.startedDeviceProcessOutput.get(deviceId)?.snapshot();
-      const incident = await this.emulatorLossIncidentStore.open({
-        deviceId,
-        ...(device.avdName ? { avdName: device.avdName } : {}),
-        detectionPath,
-        ...(processExit ? { processExit } : {}),
-        ...(outputTail ? { outputTail } : {}),
-        ...(lastAdbState ? { lastAdbState } : {}),
-        ...this.captureEmulatorLossSessionFields(device),
-        recoveryPolicy: this.getRecoveryPolicy(),
-      });
-      const settlement = Promise.withResolvers<void>();
-      this.emulatorLossRecoverySettlements.set(incident.id, settlement.promise);
-      this.emulatorLossRecoveryResolvers.set(incident.id, settlement.resolve);
-      return incident.id;
-    } catch (error) {
-      logger.warn(
-        `[DevicePool] Failed to record emulator-loss incident for ${deviceId}: ${error}`,
-        error,
-      );
-      return undefined;
-    }
-  }
-
-  private captureEmulatorLossSession(
-    device: PooledDevice,
-  ): EmulatorLossSessionSnapshot | undefined {
-    const sessionId =
-      device.sessionId ??
-      device.adbServerResetSessionId ??
-      this.sessionManager.getSessionForDevice(device.id);
-    const session = sessionId ? this.sessionManager.getSession(sessionId) : null;
-    return session
-      ? {
-          sessionUuid: session.sessionId,
-          state: "recovering",
-          lastHeartbeatMs: session.lastHeartbeat,
-          hasReceivedHeartbeat: session.hasReceivedHeartbeat,
-          heartbeatTimeoutMs: session.heartbeatTimeoutMs,
-        }
-      : undefined;
-  }
-
-  private captureEmulatorLossSessionFields(device: PooledDevice): {
-    session?: EmulatorLossSessionSnapshot;
-  } {
-    const session = this.captureEmulatorLossSession(device);
-    return session ? { session } : {};
+    return this.emulatorLossLedger.recordEmulatorLossIncident(
+      deviceId,
+      detectionPath,
+      processExit,
+      lastAdbState,
+    );
   }
 
   private async completeRecoveryIfNotAttempted(
@@ -1845,17 +1810,7 @@ export class DevicePool {
     incidentId: string | undefined,
     attempt: { attempt: number; outcome: "failed" | "succeeded" },
   ): Promise<void> {
-    if (!incidentId) {
-      return;
-    }
-    try {
-      await this.emulatorLossIncidentStore.recordRecoveryAttempt(incidentId, attempt);
-    } catch (error) {
-      logger.warn(
-        `[DevicePool] Failed to record emulator-loss recovery attempt for ${incidentId}: ${error}`,
-        error,
-      );
-    }
+    return this.emulatorLossLedger.recordEmulatorLossRecoveryAttempt(incidentId, attempt);
   }
 
   private async completeEmulatorLossRecovery(
@@ -1863,39 +1818,11 @@ export class DevicePool {
     outcome: "recovered" | "exhausted" | "not-attempted",
     releasedSessionState?: "awaiting-device",
   ): Promise<void> {
-    if (!incidentId) {
-      return;
-    }
-    try {
-      await this.retryExecutor.executeOrThrow(
-        async () => {
-          const incident = await this.emulatorLossIncidentStore.get(incidentId);
-          const settlement = this.buildEmulatorLossRecoverySettlement(
-            incident,
-            outcome,
-            releasedSessionState,
-          );
-          await this.emulatorLossIncidentStore.completeRecovery(incidentId, outcome, settlement);
-          if (!incident?.session) {
-            this.settleEmulatorLossIncident(incidentId);
-          }
-        },
-        {
-          delays: 0,
-          onRetry: (error, attempt) => {
-            logger.warn(
-              `[DevicePool] Retrying emulator-loss incident ${incidentId} finalization after attempt ${attempt}: ${error}`,
-              error,
-            );
-          },
-        },
-      );
-    } catch (error) {
-      logger.warn(
-        `[DevicePool] Failed to finalize emulator-loss incident ${incidentId}: ${error}`,
-        error,
-      );
-    }
+    return this.emulatorLossLedger.completeEmulatorLossRecovery(
+      incidentId,
+      outcome,
+      releasedSessionState,
+    );
   }
 
   private buildEmulatorLossRecoverySettlement(
@@ -1903,60 +1830,29 @@ export class DevicePool {
     outcome: "recovered" | "exhausted" | "not-attempted",
     releasedSessionState?: "awaiting-device",
   ): EmulatorLossRecoverySettlement {
-    if (!incident?.session) {
-      return {};
-    }
-    const session = this.sessionManager.getSession(incident.session.sessionUuid);
-    return {
-      ...(session && session.assignedDevice !== incident.deviceId
-        ? { replacementDeviceId: session.assignedDevice }
-        : {}),
-      sessionState: session
-        ? outcome === "recovered" || outcome === "not-attempted"
-          ? "active"
-          : "recovering"
-        : (releasedSessionState ?? "released"),
-    };
+    return this.emulatorLossLedger.buildEmulatorLossRecoverySettlement(
+      incident,
+      outcome,
+      releasedSessionState,
+    );
   }
 
   async waitForEmulatorLossIncident(
     incidentId: string,
-    timeoutMs: number = EMULATOR_LOSS_INCIDENT_WAIT_TIMEOUT_MS,
+    timeoutMs?: number,
   ): Promise<Awaited<ReturnType<EmulatorLossIncidentStore["get"]>>> {
-    const settlement = this.emulatorLossRecoverySettlements.get(incidentId);
-    if (settlement && timeoutMs > 0) {
-      let timeoutHandle: NodeJS.Timeout | undefined;
-      try {
-        await Promise.race([
-          settlement,
-          new Promise<void>((resolve) => {
-            timeoutHandle = this.timer.setTimeout(resolve, timeoutMs);
-          }),
-        ]);
-      } finally {
-        if (timeoutHandle !== undefined) {
-          this.timer.clearTimeout(timeoutHandle);
-        }
-      }
-    }
-    return await this.emulatorLossIncidentStore.get(incidentId);
+    return this.emulatorLossLedger.waitForEmulatorLossIncident(incidentId, timeoutMs);
   }
 
   private settleEmulatorLossIncident(incidentId: string | undefined): void {
-    if (!incidentId) {
-      return;
-    }
-    this.emulatorLossRecoveryResolvers.get(incidentId)?.();
-    this.emulatorLossRecoveryResolvers.delete(incidentId);
-    this.emulatorLossRecoverySettlements.delete(incidentId);
+    this.emulatorLossLedger.settleEmulatorLossIncident(incidentId);
   }
 
   async finishEmulatorLossIncident(
     incidentId: string | undefined,
     outcome: "recovered" | "exhausted" | "not-attempted",
   ): Promise<void> {
-    await this.completeEmulatorLossRecovery(incidentId, outcome);
-    this.settleEmulatorLossIncident(incidentId);
+    return this.emulatorLossLedger.finishEmulatorLossIncident(incidentId, outcome);
   }
 
   private async wasRebootedAndroidDeviceRediscovered(
@@ -3980,13 +3876,9 @@ export class DevicePool {
     incidentId: string | undefined,
     fallbackOutcome: "exhausted" | "not-attempted",
   ): Promise<void> {
-    if (!incidentId) {
-      return;
-    }
-    const incident = await this.emulatorLossIncidentStore.get(incidentId);
-    await this.completeEmulatorLossRecovery(
+    return this.emulatorLossLedger.refreshEmulatorLossRecoverySettlement(
       incidentId,
-      incident?.recovery.outcome ?? fallbackOutcome,
+      fallbackOutcome,
     );
   }
 

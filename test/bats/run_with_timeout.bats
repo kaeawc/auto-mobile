@@ -1,5 +1,36 @@
 #!/usr/bin/env bats
 
+@test "portable watchdog closes fd 3 before starting a multi-statement command" {
+  probe="$BATS_TEST_TMPDIR/probe.sh"
+  result="$BATS_TEST_TMPDIR/probe-result"
+  inherited_fd="$BATS_TEST_TMPDIR/inherited-fd"
+  cat > "$probe" <<'EOF'
+#!/usr/bin/env bash
+/bin/true
+if { printf 'inherited\n' 2> /dev/null >&3; }; then
+  printf 'open\n' > "$1"
+else
+  printf 'closed\n' > "$1"
+fi
+printf 'finished\n' > "$1.finished"
+EOF
+  chmod +x "$probe"
+
+  run env AUTOMOBILE_FORCE_PORTABLE_TIMEOUT=1 bash -c '
+    source scripts/ios/run_with_timeout.sh
+    exec 3> "$3"
+    run_with_timeout 2 "$1" "$2"
+    result=$?
+    exec 3>&-
+    exit "$result"
+  ' bash "$probe" "$result" "$inherited_fd"
+
+  [ "$status" -eq 0 ]
+  [ "$(cat "$result")" = closed ]
+  [ "$(cat "$result.finished")" = finished ]
+  [ ! -s "$inherited_fd" ]
+}
+
 @test "portable watchdog writes a snapshot, names the active file, and returns 124" {
   timing_log="$BATS_TEST_TMPDIR/timing.ndjson"
   snapshot="$BATS_TEST_TMPDIR/watchdog.txt"

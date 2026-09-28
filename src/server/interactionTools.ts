@@ -2370,6 +2370,7 @@ export function registerInteractionTools() {
         const nextObservation = await observeScreen.execute({
           skipScreenshot: true,
           skipAccessibilityAudit: true,
+          skipPerformanceAudit: true,
         });
         await captureSystemTrayTerminalEvidence(device, nextObservation);
 
@@ -2450,6 +2451,7 @@ export function registerInteractionTools() {
         const nextObservation = await observeScreen.execute({
           skipScreenshot: true,
           skipAccessibilityAudit: true,
+          skipPerformanceAudit: true,
         });
         await captureSystemTrayTerminalEvidence(device, nextObservation);
 

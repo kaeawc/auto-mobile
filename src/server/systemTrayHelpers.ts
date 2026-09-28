@@ -287,6 +287,7 @@ const observeSystemTray = (
     minTimestamp,
     skipScreenshot: true,
     skipAccessibilityAudit: true,
+    skipPerformanceAudit: true,
     signal,
   });
 
@@ -307,6 +308,7 @@ export const observeSystemTrayAfterTap = async (
       timeoutMs: SYSTEM_TRAY_POST_TAP_TIMEOUT_MS,
       pollMs: SYSTEM_TRAY_POST_TAP_POLL_MS,
       initialMinTimestampMs: minTimestamp,
+      skipPerformanceAudit: true,
       signal,
     },
     (observation, previous) => {

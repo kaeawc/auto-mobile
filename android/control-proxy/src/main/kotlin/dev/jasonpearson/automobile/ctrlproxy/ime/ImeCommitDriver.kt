@@ -169,14 +169,13 @@ class ImeCommitDriver(private val sink: ImeCommitSink) {
             return
           }
           val seen = sink.readTextBeforeCursor(literal.length)
-          // seen == null: connection gone — proceed; the next commitChar fails cleanly.
-          // seen non-empty and != literal: the composer consumed the markers (converted).
-          // seen == literal (not yet converted) OR seen == "" (editor without text retrieval,
-          // e.g. some WebView/custom fields — InputConnection.getTextBeforeCursor returns ""):
-          // keep polling to the bounded ceiling so retrieval-less editors still get a fixed
-          // settle window instead of racing ahead instantly.
+          // A short read of an unconverted literal is its trailing suffix: readTextBeforeCursor
+          // returns the last N chars before the cursor. The full literal is also its own suffix.
+          // Keep waiting on either; any non-empty non-suffix read (full or short) confirms
+          // conversion. Null/empty reads wait to the bounded ceiling.
           val proceed =
-            seen == null || (seen.isNotEmpty() && seen != literal) || attempt >= MAX_POLL_ATTEMPTS
+            (seen != null && seen.isNotEmpty() && !literal.endsWith(seen)) ||
+              attempt >= MAX_POLL_ATTEMPTS
           if (proceed) {
             commitSegment(index + 1)
           } else {

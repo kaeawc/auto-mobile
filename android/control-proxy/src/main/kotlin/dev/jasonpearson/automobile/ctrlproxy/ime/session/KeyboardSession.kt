@@ -76,7 +76,7 @@ class KeyboardSession(
 
   fun finishComposingForAutomation(connection: ImeConnection?): Boolean {
     if (connection == null) return false
-    return InputConnectionDriver(connection).execute(policy.onFinishInput())
+    return InputConnectionDriver(connection).execute(policy.finishComposingForAutomation())
   }
 
   fun onFinishInput(connection: ImeConnection?) {

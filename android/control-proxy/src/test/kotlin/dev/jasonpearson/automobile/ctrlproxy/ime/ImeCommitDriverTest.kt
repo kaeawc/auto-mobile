@@ -200,7 +200,7 @@ class ImeCommitDriverTest {
   @Test
   fun `multi-span commit waits for conversion before typing next span`() {
     val sink = FakeImeCommitSink(inputType = InputType.TYPE_CLASS_TEXT)
-    sink.readText = { _, call -> if (call <= 2) "`a`" else "a" }
+    sink.readText = { _, call -> if (call <= 2) "`a`" else "abc" }
     var result: ImeCommitResult? = null
 
     ImeCommitDriver(sink).commit("`a` `b`", PRIOR_IME_ID) { result = it }
@@ -231,6 +231,36 @@ class ImeCommitDriverTest {
   }
 
   @Test
+  fun `unconverted suffix read-back waits while full changed read advances`() {
+    val sink = FakeImeCommitSink(inputType = InputType.TYPE_CLASS_TEXT)
+    sink.readText = { _, call -> if (call == 1) "bc`" else "xyz12" }
+    var result: ImeCommitResult? = null
+
+    ImeCommitDriver(sink).commit("`abc``b`", PRIOR_IME_ID) { result = it }
+
+    assertNull(result)
+    assertEquals("`abc`", sink.committedChars.joinToString(""))
+    assertEquals(listOf(40L), sink.delays)
+    sink.drain()
+    assertTrue(result!!.success)
+    assertEquals(listOf(5, 5), sink.readSizes)
+  }
+
+  @Test
+  fun `short converted read-back advances immediately near field start`() {
+    val sink = FakeImeCommitSink(inputType = InputType.TYPE_CLASS_TEXT)
+    sink.readText = { _, _ -> "abc" }
+    var result: ImeCommitResult? = null
+
+    ImeCommitDriver(sink).commit("`abc``b`", PRIOR_IME_ID) { result = it }
+
+    assertTrue(result!!.success)
+    assertEquals("`abc``b`", sink.committedChars.joinToString(""))
+    assertEquals(listOf(5), sink.readSizes)
+    assertTrue(sink.delays.isEmpty())
+  }
+
+  @Test
   fun `empty read-back falls back to the bounded settle window`() {
     // Editors without text retrieval return "" (not null) from getTextBeforeCursor; the driver
     // must keep polling to the ceiling rather than treat "" as converted and race ahead.
@@ -243,6 +273,18 @@ class ImeCommitDriverTest {
     assertEquals("`a``b`", sink.committedChars.joinToString(""))
     assertEquals(12, sink.delays.size)
     assertEquals(listOf(PRIOR_IME_ID), sink.switchedImeIds)
+  }
+
+  @Test
+  fun `null read-back falls back to the bounded settle window`() {
+    val sink = FakeImeCommitSink(inputType = InputType.TYPE_CLASS_TEXT)
+    sink.readText = { _, _ -> null }
+
+    val result = commit(sink, "`a``b`", PRIOR_IME_ID)
+
+    assertTrue(result.success)
+    assertEquals(12, sink.delays.size)
+    assertEquals(13, sink.readSizes.size)
   }
 
   @Test

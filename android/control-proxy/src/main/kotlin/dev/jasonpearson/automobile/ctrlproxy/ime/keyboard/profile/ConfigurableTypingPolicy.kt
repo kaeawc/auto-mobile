@@ -1,5 +1,7 @@
 package dev.jasonpearson.automobile.ctrlproxy.ime.keyboard.profile
 
+import android.icu.lang.UCharacter
+import android.icu.lang.UProperty
 import dev.jasonpearson.automobile.ctrlproxy.ime.ImeGraphemes
 import dev.jasonpearson.automobile.ctrlproxy.ime.keyboard.EditorConfig
 
@@ -19,12 +21,11 @@ class ConfigurableTypingPolicy(private val behavior: TypingBehavior) : TypingPol
     updateComposingCursor(snapshot)
     var cursorInEditor = snapshot.selectionStart
     val ops = mutableListOf<ImeOp>()
-    text.forEachCodePoint { codePoint ->
-      val char = String(Character.toChars(codePoint))
+    ImeGraphemes.split(text).forEach { char ->
       if (!behavior.composeWords) {
         ops += ImeOp.CommitText(char)
         cursorInEditor += char.length
-      } else if (codePoint.isWordCodePoint()) {
+      } else if (char.isWordGrapheme()) {
         if (composingBuffer.isEmpty()) composingStart = cursorInEditor
         composingBuffer = composingBuffer.insertAt(composingCursor, char)
         composingCursor += char.length
@@ -138,8 +139,8 @@ class ConfigurableTypingPolicy(private val behavior: TypingBehavior) : TypingPol
     if (before.isEmpty()) return emptyList()
     val deletedStart = ImeGraphemes.previousStart(before, before.length)
     val deletedWidth = before.length - deletedStart
-    val deletedCodePoint = Character.codePointBefore(before, before.length)
-    if (behavior.recomposeOnBackspaceIntoWord && deletedCodePoint.isWordCodePoint()) {
+    val deletedGrapheme = before.substring(deletedStart)
+    if (behavior.recomposeOnBackspaceIntoWord && deletedGrapheme.isWordGrapheme()) {
       val remainingText = before.dropLast(deletedWidth)
       val remainingWord = remainingText.takeLastWord()
       val ops = mutableListOf<ImeOp>(ImeOp.DeleteSurroundingText(deletedWidth, 0))
@@ -166,6 +167,15 @@ class ConfigurableTypingPolicy(private val behavior: TypingBehavior) : TypingPol
       snapshot.selectionStart > snapshot.composingEnd
 
   private fun recomposeWordAtCursor(snapshot: TextSnapshot): ImeOp.SetComposingRegion? {
+    val cursorOffset = snapshot.textBeforeCursor.length
+    var boundary = 0
+    val atGraphemeBoundary =
+      cursorOffset == 0 ||
+        ImeGraphemes.split(snapshot.textBeforeCursor + snapshot.textAfterCursor).any {
+          boundary += it.length
+          boundary == cursorOffset
+        }
+    if (!atGraphemeBoundary) return null
     val before = snapshot.textBeforeCursor.takeLastWord()
     val after = snapshot.textAfterCursor.takeWhileWord()
     if (before.isEmpty() && after.isEmpty()) return null
@@ -217,42 +227,27 @@ class ConfigurableTypingPolicy(private val behavior: TypingBehavior) : TypingPol
   private fun String.insertAt(index: Int, value: String): String =
     substring(0, index) + value + substring(index)
 
-  private inline fun String.forEachCodePoint(action: (Int) -> Unit) {
-    var index = 0
-    while (index < length) {
-      val codePoint = Character.codePointAt(this, index)
-      action(codePoint)
-      index += Character.charCount(codePoint)
-    }
+  private fun String.isWordGrapheme(): Boolean {
+    val base = codePointAt(0)
+    if (!Character.isLetterOrDigit(base) && base != '\''.code) return false
+    if (UCharacter.hasBinaryProperty(base, UProperty.EXTENDED_PICTOGRAPHIC)) return false
+    return !contains('\uFE0F') && !contains('\u20E3')
   }
-
-  private fun Int.isWordCodePoint(): Boolean =
-    Character.isLetterOrDigit(this) || isCombiningMark() || this == '\''.code
-
-  private fun Int.isCombiningMark(): Boolean =
-    when (Character.getType(this)) {
-      Character.NON_SPACING_MARK.toInt(),
-      Character.COMBINING_SPACING_MARK.toInt(),
-      Character.ENCLOSING_MARK.toInt() -> true
-      else -> false
-    }
 
   private fun String.takeLastWord(): String {
     var index = length
-    while (index > 0) {
-      val codePoint = Character.codePointBefore(this, index)
-      if (!codePoint.isWordCodePoint()) break
-      index -= Character.charCount(codePoint)
+    for (grapheme in ImeGraphemes.split(this).asReversed()) {
+      if (!grapheme.isWordGrapheme()) break
+      index -= grapheme.length
     }
     return substring(index)
   }
 
   private fun String.takeWhileWord(): String {
     var index = 0
-    while (index < length) {
-      val codePoint = Character.codePointAt(this, index)
-      if (!codePoint.isWordCodePoint()) break
-      index += Character.charCount(codePoint)
+    for (grapheme in ImeGraphemes.split(this)) {
+      if (!grapheme.isWordGrapheme()) break
+      index += grapheme.length
     }
     return substring(0, index)
   }

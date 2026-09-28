@@ -14,6 +14,148 @@ import org.robolectric.annotation.Config
 @Config(sdk = [24])
 class ConfigurableTypingPolicyTest {
   @Test
+  fun `direct profile commits each Unicode grapheme as one operation`() {
+    val cases =
+      listOf(
+        "👨‍👩‍👧" to listOf("👨‍👩‍👧"),
+        "👍🏽" to listOf("👍🏽"),
+        "🇯🇵" to listOf("🇯🇵"),
+        "❤️" to listOf("❤️"),
+        "1️⃣" to listOf("1️⃣"),
+        "e\u0301" to listOf("e\u0301"),
+        "é" to listOf("é"),
+        "日本" to listOf("日", "本"),
+        "a😀b👍🏽c👨‍👩‍👧d🇯🇵e❤️fé日本" to
+          listOf(
+            "a",
+            "😀",
+            "b",
+            "👍🏽",
+            "c",
+            "👨‍👩‍👧",
+            "d",
+            "🇯🇵",
+            "e",
+            "❤️",
+            "f",
+            "é",
+            "日",
+            "本",
+          ),
+        "🏳️‍🌈" to listOf("🏳️‍🌈"),
+        "👩🏽‍💻" to listOf("👩🏽‍💻"),
+        "ไทย" to listOf("ไ", "ท", "ย"),
+        "हिन्दी" to listOf("हि", "न्", "दी"),
+        "مرحبا" to listOf("م", "ر", "ح", "ب", "ا"),
+        "한국어" to listOf("한", "국", "어"),
+      )
+    cases.forEach { (input, units) ->
+      val editor = FakeEditor()
+      val ops = policy(KeyboardProfiles.DIRECT).onText(input, editor.snapshot())
+      assertEquals(input, units.map(ImeOp::CommitText), ops)
+      editor.apply(ops)
+      assertEquals(input, editor.text)
+      assertEquals(-1, editor.composingStart)
+    }
+  }
+
+  @Test
+  fun `gboard composes words and commits whole emoji graphemes`() {
+    val cases =
+      listOf(
+        "👨‍👩‍👧" to listOf<ImeOp>(ImeOp.CommitText("👨‍👩‍👧")),
+        "👍🏽" to listOf<ImeOp>(ImeOp.CommitText("👍🏽")),
+        "🇯🇵" to listOf<ImeOp>(ImeOp.CommitText("🇯🇵")),
+        "❤️" to listOf<ImeOp>(ImeOp.CommitText("❤️")),
+        "1️⃣" to listOf<ImeOp>(ImeOp.CommitText("1️⃣")),
+        "e\u0301" to listOf<ImeOp>(ImeOp.SetComposingText("e\u0301")),
+        "é" to listOf<ImeOp>(ImeOp.SetComposingText("é")),
+        "日本" to listOf<ImeOp>(ImeOp.SetComposingText("日"), ImeOp.SetComposingText("日本")),
+        "a😀b👍🏽c👨‍👩‍👧d🇯🇵e❤️fé日本" to
+          listOf<ImeOp>(
+            ImeOp.SetComposingText("a"),
+            ImeOp.FinishComposingText,
+            ImeOp.CommitText("😀"),
+            ImeOp.SetComposingText("b"),
+            ImeOp.FinishComposingText,
+            ImeOp.CommitText("👍🏽"),
+            ImeOp.SetComposingText("c"),
+            ImeOp.FinishComposingText,
+            ImeOp.CommitText("👨‍👩‍👧"),
+            ImeOp.SetComposingText("d"),
+            ImeOp.FinishComposingText,
+            ImeOp.CommitText("🇯🇵"),
+            ImeOp.SetComposingText("e"),
+            ImeOp.FinishComposingText,
+            ImeOp.CommitText("❤️"),
+            ImeOp.SetComposingText("f"),
+            ImeOp.SetComposingText("fé"),
+            ImeOp.SetComposingText("fé日"),
+            ImeOp.SetComposingText("fé日本"),
+          ),
+        "🏳️‍🌈" to listOf<ImeOp>(ImeOp.CommitText("🏳️‍🌈")),
+        "👩🏽‍💻" to listOf<ImeOp>(ImeOp.CommitText("👩🏽‍💻")),
+        "ไทย" to
+          listOf<ImeOp>(
+            ImeOp.SetComposingText("ไ"),
+            ImeOp.SetComposingText("ไท"),
+            ImeOp.SetComposingText("ไทย"),
+          ),
+        "हिन्दी" to
+          listOf<ImeOp>(
+            ImeOp.SetComposingText("हि"),
+            ImeOp.SetComposingText("हिन्"),
+            ImeOp.SetComposingText("हिन्दी"),
+          ),
+        "مرحبا" to
+          listOf<ImeOp>(
+            ImeOp.SetComposingText("م"),
+            ImeOp.SetComposingText("مر"),
+            ImeOp.SetComposingText("مرح"),
+            ImeOp.SetComposingText("مرحب"),
+            ImeOp.SetComposingText("مرحبا"),
+          ),
+        "한국어" to
+          listOf<ImeOp>(
+            ImeOp.SetComposingText("한"),
+            ImeOp.SetComposingText("한국"),
+            ImeOp.SetComposingText("한국어"),
+          ),
+      )
+    cases.forEach { (input, operations) ->
+      val editor = FakeEditor()
+      val expected =
+        if (operations.size >= 2) listOf(ImeOp.BeginBatchEdit) + operations + ImeOp.EndBatchEdit
+        else operations
+      val ops = policy(KeyboardProfiles.GBOARD).onText(input, editor.snapshot())
+      assertEquals(input, expected, ops)
+      editor.apply(ops)
+      assertEquals(input, editor.text)
+    }
+  }
+
+  @Test
+  fun `cursor recomposition and backspace never reopen part of a keycap`() {
+    val text = "a1️⃣b"
+    val policy = policy(KeyboardProfiles.SAMSUNG)
+    val editor = FakeEditor(text)
+    editor.setSelection(2) // After the digit, but inside the keycap grapheme.
+    assertTrue(policy.onSelectionChanged(editor.snapshot()).isEmpty())
+
+    editor.setSelection(4) // At the start of b, after the complete keycap.
+    assertEquals(
+      listOf(ImeOp.SetComposingRegion(4, 5)),
+      policy.onSelectionChanged(editor.snapshot()),
+    )
+
+    val beforeKeycap = FakeEditor("a1️⃣")
+    assertEquals(
+      listOf(ImeOp.DeleteSurroundingText(3, 0)),
+      policy(KeyboardProfiles.GBOARD).onBackspace(beforeKeycap.snapshot()),
+    )
+  }
+
+  @Test
   fun `automation finish echo does not recompose but next cursor move does`() {
     val policy = policy(KeyboardProfiles.SAMSUNG)
     val editor = FakeEditor()

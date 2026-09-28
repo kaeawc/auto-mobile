@@ -867,8 +867,16 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
             return alerts
         }
 
+        /// Check whether a zero-area wrapper contains an element with a usable frame.
+        private func hasNonZeroAreaDescendant(_ snapshot: XCUIElementSnapshot) -> Bool {
+            snapshot.children.contains { child in
+                let frame = child.frame
+                return (frame.width > 0 && frame.height > 0) || hasNonZeroAreaDescendant(child)
+            }
+        }
+
         /// Build element info from XCUIElementSnapshot - all data is already captured, no IPC calls
-        /// Applies early filtering: offscreen elements, zero-area elements
+        /// Applies early filtering: offscreen elements, empty zero-area subtrees
         /// Only sets boolean fields when true (nil = false) to reduce JSON size
         private func buildElementInfoFromSnapshot(
             _ snapshot: XCUIElementSnapshot,
@@ -908,7 +916,7 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
             let viewId = resId ?? generateDeterministicUuid(from: currentPath)
 
             // Get children from snapshot (already captured - fast!)
-            // Filter out offscreen and zero-area children
+            // Filter out offscreen children and zero-area subtrees without usable frames
             // Alert/sheet elements are SKIPPED here because they are extracted separately
             // by collectAlertElements() and added as top-level system dialogs. This ensures
             // system confirmations are always visible and never lost to hierarchy optimization.
@@ -926,16 +934,20 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
 
                         let childFrame = child.frame
 
-                        // Skip zero-area children
                         if childFrame.width <= 0 || childFrame.height <= 0 {
-                            return nil
-                        }
-
-                        // Skip completely offscreen children (with margin)
-                        let margin: CGFloat = 50
-                        let expandedScreen = screenBounds.insetBy(dx: -margin, dy: -margin)
-                        if !expandedScreen.intersects(childFrame) {
-                            return nil
+                            // A zero-area wrapper can still contain on-screen descendants.
+                            guard Self.shouldKeepZeroAreaChild(
+                                hasNonZeroAreaDescendant: hasNonZeroAreaDescendant(child)
+                            ) else {
+                                return nil
+                            }
+                        } else {
+                            // Skip completely offscreen children (with margin)
+                            let margin: CGFloat = 50
+                            let expandedScreen = screenBounds.insetBy(dx: -margin, dy: -margin)
+                            if !expandedScreen.intersects(childFrame) {
+                                return nil
+                            }
                         }
 
                         return buildElementInfoFromSnapshot(
@@ -1162,6 +1174,7 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
             case .secureTextField: return "UISecureTextField"
             case .textView: return "UITextView"
             case .image: return "UIImageView"
+            case .icon: return "SBIconView"
             case .switch: return "UISwitch"
             case .slider: return "UISlider"
             case .picker: return "UIPickerView"
@@ -1191,6 +1204,7 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
         private func mapRole(_ type: XCUIElement.ElementType) -> String? {
             switch type {
             case .button: return "button"
+            case .icon: return "button"
             case .link: return "link"
             case .switch: return "switch"
             case .checkBox: return "checkbox"
@@ -1253,8 +1267,8 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
             // Keyboard keys
             case .key:
                 return true
-            // Images can be tappable
-            case .image:
+            // Images and icons can be tappable
+            case .image, .icon:
                 return true
             // Everything else (UIView, window, staticText, etc.) is not inherently clickable
             default:
@@ -1464,6 +1478,11 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
     // outside the `#if os(iOS)` block and are exercised directly by the parity tests on
     // macOS. On this `@MainActor` class they must be `nonisolated static` so non-isolated
     // test code (and the iOS instance methods, synchronously) can call them without hopping.
+
+    /// Keep zero-area wrappers only when their subtree contains a usable frame.
+    nonisolated static func shouldKeepZeroAreaChild(hasNonZeroAreaDescendant: Bool) -> Bool {
+        return hasNonZeroAreaDescendant
+    }
 
     /// Returns the foreground match when available; otherwise consults SpringBoard.
     /// Keeping the fallback here makes all lookup paths preserve app precedence while

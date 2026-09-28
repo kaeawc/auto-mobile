@@ -295,7 +295,7 @@ describe("TapAtCoordinate", () => {
     expect(adb.wasCommandExecuted("shell input touchscreen tap 1 2")).toBe(false);
   });
 
-  test("re-observes and retries one Android stale-frame rejection when targeting layout is unchanged", async () => {
+  test("re-observes and retries one Android stale-frame rejection when the frame token advances and targeting layout is unchanged", async () => {
     const dispatches: Array<{ x: number; y: number; frameContext?: string }> = [];
     const client: CoordinateTapClient = {
       requestTapCoordinates: async (x, y, _duration, _timeout, _perf, frameContext) => {
@@ -337,6 +337,74 @@ describe("TapAtCoordinate", () => {
     ]);
     expect(observeScreen.getExecuteCallCount()).toBe(3);
     expect(adb.wasCommandExecuted("shell input touchscreen tap 20 30")).toBe(false);
+  });
+
+  test.each([
+    { location: "top-level", capture: "initial" },
+    { location: "nested view hierarchy", capture: "initial" },
+    { location: "top-level", capture: "refreshed" },
+    { location: "nested view hierarchy", capture: "refreshed" },
+  ])(
+    "refuses a stale-frame retry when the $capture $location is truncated",
+    async ({ location, capture }) => {
+      const dispatches: string[] = [];
+      const client: CoordinateTapClient = {
+        requestTapCoordinates: async (_x, _y, _duration, _timeout, _perf, frameContext) => {
+          dispatches.push(frameContext ?? "missing");
+          return dispatches.length === 1
+            ? {
+                success: false,
+                error: "Stale frame context for input/tap; observe a fresh frame before retrying",
+              }
+            : { success: true };
+        },
+      };
+      const initial = observation(100, 200, "epoch:1", 0, { text: "Settings" });
+      const refreshed = observation(100, 200, "epoch:2", 0, { text: "Settings" });
+      const truncated = capture === "initial" ? initial : refreshed;
+      if (location === "top-level") {
+        truncated.truncationReasons = ["max_nodes"];
+      } else if (truncated.viewHierarchy) {
+        truncated.viewHierarchy.truncationReasons = ["max_depth"];
+      }
+      const { tapAt, observeScreen } = createAndroidTapAtWithClient([initial, refreshed], client);
+
+      const result = await tapAt.execute({ x: 20, y: 30 });
+
+      expect(result).toMatchObject({
+        success: false,
+        error: expect.stringContaining("Stale frame context"),
+      });
+      expect(dispatches).toEqual(["epoch:1"]);
+      expect(observeScreen.getExecuteCallCount()).toBe(2);
+    },
+  );
+
+  test("refuses a stale-frame retry when the refreshed frame token is the rejected token", async () => {
+    const dispatches: string[] = [];
+    const client: CoordinateTapClient = {
+      requestTapCoordinates: async (_x, _y, _duration, _timeout, _perf, frameContext) => {
+        dispatches.push(frameContext ?? "missing");
+        return dispatches.length === 1
+          ? {
+              success: false,
+              error: "Stale frame context for input/tap; observe a fresh frame before retrying",
+            }
+          : { success: true };
+      },
+    };
+    const initial = observation(100, 200, "epoch:1", 0, { text: "Settings" });
+    const refreshed = observation(100, 200, "epoch:1", 0, { text: "Settings" });
+    const { tapAt, observeScreen } = createAndroidTapAtWithClient([initial, refreshed], client);
+
+    const result = await tapAt.execute({ x: 20, y: 30 });
+
+    expect(result).toMatchObject({
+      success: false,
+      error: expect.stringContaining("Stale frame context"),
+    });
+    expect(dispatches).toEqual(["epoch:1"]);
+    expect(observeScreen.getExecuteCallCount()).toBe(2);
   });
 
   test.each([

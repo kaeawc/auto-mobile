@@ -826,7 +826,7 @@ export function registerAppTools() {
       if (error instanceof ActionableError) {
         throw error;
       }
-      throw new ActionableError(`Failed to launch app: ${error}`);
+      throw toActionableError(error, `Failed to launch app`);
     } finally {
       if (!signal?.aborted) {
         try {
@@ -864,7 +864,7 @@ export function registerAppTools() {
       if (error instanceof ActionableError) {
         throw error;
       }
-      throw new ActionableError(`Failed to terminate app: ${error}`);
+      throw toActionableError(error, `Failed to terminate app`);
     } finally {
       try {
         invalidateInstalledAppResourceCache(device.deviceId);
@@ -897,7 +897,7 @@ export function registerAppTools() {
       if (isDeviceLostError(error) || error instanceof ActionableError) {
         throw error;
       }
-      throw new ActionableError(`Failed to crash app: ${error}`);
+      throw toActionableError(error, `Failed to crash app`);
     } finally {
       dependencies.invalidateAppResourceCache(device.deviceId);
       if (!signal?.aborted) {
@@ -937,7 +937,7 @@ export function registerAppTools() {
       if (error instanceof ActionableError) {
         throw error;
       }
-      throw new ActionableError(`Failed to install app: ${error}`);
+      throw toActionableError(error, `Failed to install app`);
     } finally {
       try {
         invalidateInstalledAppsCache(device.deviceId);
@@ -980,7 +980,7 @@ export function registerAppTools() {
       if (error instanceof ActionableError) {
         throw error;
       }
-      throw new ActionableError(`Failed to uninstall app: ${error}`);
+      throw toActionableError(error, `Failed to uninstall app`);
     } finally {
       try {
         invalidateInstalledAppsCache(device.deviceId);

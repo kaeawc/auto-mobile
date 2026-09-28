@@ -6,6 +6,7 @@ import {
 } from "../../src/server/appTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import type { BootedDevice, LaunchAppResult, ObserveResult } from "../../src/models";
+import { ActionableError } from "../../src/models";
 
 // #6868: exercise the REGISTERED launchApp handler (not just the response
 // builder) through an injected fake, so an already-foreground launch can never
@@ -91,6 +92,21 @@ describe("launchApp handler (registered handler wiring, #6868)", () => {
     await expect(
       ToolRegistry.getTool("launchApp")!.deviceAwareHandler!(device, { appId }),
     ).rejects.toThrow("App is not installed");
+  });
+
+  test("an existing actionable error is rethrown without another launch prefix", async () => {
+    const original = new ActionableError("permission prompt could not be dismissed");
+    setLaunchAppToolDependencies({
+      createLaunchApp: () => ({
+        execute: async () => {
+          throw original;
+        },
+      }),
+    });
+
+    await expect(
+      ToolRegistry.getTool("launchApp")!.deviceAwareHandler!(device, { appId }),
+    ).rejects.toMatchObject({ message: "permission prompt could not be dismissed" });
   });
 
   test("an ordinary cold launch is unchanged and carries no alreadyForeground flag", async () => {

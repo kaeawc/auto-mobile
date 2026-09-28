@@ -1,5 +1,6 @@
+import { toActionableError } from "../../models/ActionableError";
 import { errorMessage } from "../../utils/describeUnknownError";
-import { ActionableError, BootedDevice, Element, isTruthy, ObserveResult } from "../../models";
+import { BootedDevice, Element, isTruthy, ObserveResult } from "../../models";
 import { BaseVisualChange, ProgressCallback } from "../action/BaseVisualChange";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { createGlobalPerformanceTracker, PerformanceTracker } from "../../utils/PerformanceTracker";
@@ -374,7 +375,7 @@ export class Explore extends BaseVisualChange {
       return await this.generateReport(initialGraph, startTime, signal?.aborted === true);
     } catch (error) {
       perf.end();
-      throw new ActionableError(`Failed to execute exploration: ${error}`);
+      throw toActionableError(error, `Failed to execute exploration`);
     }
   }
 

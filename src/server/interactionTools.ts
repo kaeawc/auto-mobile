@@ -1,3 +1,4 @@
+import { toActionableError } from "../models/ActionableError";
 import { z } from "zod/v4";
 import { ToolRegistry, ProgressCallback } from "./toolRegistry";
 import { TapOnElement } from "../features/action/TapOnElement";
@@ -1902,7 +1903,7 @@ export async function selectAllTextHandler(
     });
     return result.success ? response : { ...response, isError: true as const };
   } catch (error) {
-    throw new ActionableError(`Failed to select all text: ${error}`);
+    throw toActionableError(error, `Failed to select all text`);
   }
 }
 
@@ -1942,7 +1943,7 @@ export async function pressButtonHandler(
     });
     return result.success ? response : { ...response, isError: true as const };
   } catch (error) {
-    throw new ActionableError(`Failed to press button: ${error}`);
+    throw toActionableError(error, `Failed to press button`);
   }
 }
 
@@ -1987,7 +1988,7 @@ export async function rotateHandler(
     });
     return result.success ? response : { ...response, isError: true as const };
   } catch (error) {
-    throw new ActionableError(`Failed to rotate device: ${error}`);
+    throw toActionableError(error, `Failed to rotate device`);
   }
 }
 
@@ -2493,7 +2494,7 @@ export function registerInteractionTools() {
       if (error instanceof ActionableError) {
         throw error;
       }
-      throw new ActionableError(`systemTray failed: ${error}`);
+      throw toActionableError(error, `systemTray failed`);
     }
   };
 
@@ -2643,7 +2644,7 @@ export function registerInteractionTools() {
         ...result,
       });
     } catch (error) {
-      throw new ActionableError(`Failed to shake device: ${error}`);
+      throw toActionableError(error, `Failed to shake device`);
     }
   };
 
@@ -2669,7 +2670,7 @@ export function registerInteractionTools() {
 
       return createJSONToolResponse(result);
     } catch (error) {
-      throw new ActionableError(`Failed to execute keyboard ${args.action}: ${error}`);
+      throw toActionableError(error, `Failed to execute keyboard ${args.action}`);
     }
   };
 
@@ -2689,7 +2690,7 @@ export function registerInteractionTools() {
         ...result,
       });
     } catch (error) {
-      throw new ActionableError(`Failed to open recent apps: ${error}`);
+      throw toActionableError(error, `Failed to open recent apps`);
     }
   };
 
@@ -2709,7 +2710,7 @@ export function registerInteractionTools() {
         ...result,
       });
     } catch (error) {
-      throw new ActionableError(`Failed to go to home screen: ${error}`);
+      throw toActionableError(error, `Failed to go to home screen`);
     }
   };
 
@@ -2730,7 +2731,7 @@ export function registerInteractionTools() {
         ...result,
       });
     } catch (error) {
-      throw new ActionableError(`Failed to execute clipboard ${args.action}: ${error}`);
+      throw toActionableError(error, `Failed to execute clipboard ${args.action}`);
     }
   };
 

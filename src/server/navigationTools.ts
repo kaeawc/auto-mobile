@@ -1,6 +1,7 @@
+import { toActionableError } from "../models/ActionableError";
 import { z } from "zod/v4";
 import { ToolRegistry, ProgressCallback } from "./toolRegistry";
-import { ActionableError, BootedDevice } from "../models";
+import { BootedDevice } from "../models";
 import { NavigateTo, NavigateToOptions } from "../features/navigation/NavigateTo";
 import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
 import { DefaultPathOptimizer } from "../features/navigation/DefaultPathOptimizer";
@@ -148,7 +149,7 @@ export const navigateToHandler = async (
       };
     }
   } catch (error) {
-    throw new ActionableError(`Failed to navigate: ${error}`);
+    throw toActionableError(error, `Failed to navigate`);
   }
 };
 
@@ -194,7 +195,7 @@ export function registerNavigationTools() {
         })),
       });
     } catch (error) {
-      throw new ActionableError(`Failed to get navigation graph: ${error}`);
+      throw toActionableError(error, `Failed to get navigation graph`);
     }
   };
 
@@ -254,7 +255,7 @@ export function registerNavigationTools() {
         ...result,
       });
     } catch (error) {
-      throw new ActionableError(`Failed to execute exploration: ${error}`);
+      throw toActionableError(error, `Failed to execute exploration`);
     }
   };
 

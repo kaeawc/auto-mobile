@@ -1,3 +1,4 @@
+import { toActionableError } from "../models/ActionableError";
 import { z } from "zod/v4";
 import { ToolRegistry } from "./toolRegistry";
 import { ActionableError, BootedDevice } from "../models";
@@ -207,7 +208,7 @@ export function registerDatabaseTools() {
       if (error instanceof ActionableError) {
         throw error;
       }
-      throw new ActionableError(`Failed to execute SQL: ${error}`);
+      throw toActionableError(error, `Failed to execute SQL`);
     }
   };
 

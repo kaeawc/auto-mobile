@@ -1,3 +1,4 @@
+import { toActionableError } from "../models/ActionableError";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { toJSONSchema } from "zod/v4";
 import { isAlwaysOnTool } from "../features/toolSelection/toolSelectionControl";
@@ -1546,7 +1547,7 @@ export class ToolRegistryClass {
               const deviceContext = resolvedTarget.device
                 ? ` on device ${resolvedTarget.device.deviceId}`
                 : "";
-              throw new ActionableError(`Failed to execute tool ${name}${deviceContext}: ${error}`);
+              throw toActionableError(error, `Failed to execute tool ${name}${deviceContext}`);
             } finally {
               await this.planLifecycleManager.afterExecution({
                 name,

@@ -1,3 +1,4 @@
+import { toActionableError } from "../models/ActionableError";
 import { z } from "zod/v4";
 import { ToolRegistry } from "./toolRegistry";
 import { ActionableError } from "../models/ActionableError";
@@ -108,7 +109,7 @@ export function registerDebugTools() {
       if (error instanceof ActionableError) {
         throw error;
       }
-      throw new ActionableError(`Failed to execute debug search: ${error}`);
+      throw toActionableError(error, `Failed to execute debug search`);
     }
   };
 

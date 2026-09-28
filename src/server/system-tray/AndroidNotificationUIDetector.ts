@@ -1,9 +1,9 @@
 import {
-  ActionableError,
   BootedDevice,
   Element,
   ObserveResult,
   ViewHierarchyResult,
+  toActionableError,
 } from "../../models";
 import { DefaultElementGeometry } from "../../features/utility/ElementGeometry";
 import type { NotificationUIDetector } from "../../utils/interfaces/NotificationUIDetector";
@@ -51,7 +51,7 @@ export class AndroidNotificationUIDetector implements NotificationUIDetector {
     try {
       await this.deps.executeAdbCommand("shell cmd statusbar expand-notifications");
     } catch (error) {
-      throw new ActionableError(`Failed to expand system tray: ${error}`);
+      throw toActionableError(error, `Failed to expand system tray`);
     }
   }
 
@@ -59,7 +59,7 @@ export class AndroidNotificationUIDetector implements NotificationUIDetector {
     try {
       await this.deps.executeAdbCommand("shell cmd statusbar collapse");
     } catch (error) {
-      throw new ActionableError(`Failed to collapse system tray: ${error}`);
+      throw toActionableError(error, `Failed to collapse system tray`);
     }
   }
 

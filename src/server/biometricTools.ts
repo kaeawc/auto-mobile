@@ -1,3 +1,4 @@
+import { toActionableError } from "../models/ActionableError";
 import { z } from "zod/v4";
 import { ToolRegistry, ProgressCallback } from "./toolRegistry";
 import { BiometricAuth, BiometricAuthOptions } from "../features/action/BiometricAuth";
@@ -135,7 +136,7 @@ export function registerBiometricTools() {
         ...result,
       });
     } catch (error) {
-      throw new ActionableError(`Failed to execute biometric authentication: ${error}`);
+      throw toActionableError(error, `Failed to execute biometric authentication`);
     }
   };
 

@@ -1,7 +1,7 @@
 import { errorMessage } from "../utils/describeUnknownError";
 import { z } from "zod/v4";
 import { ToolRegistry } from "./toolRegistry";
-import { ActionableError, BootedDevice } from "../models/index";
+import { ActionableError, BootedDevice, toActionableError } from "../models/index";
 import { logger } from "../utils/logger";
 import { createJSONToolResponse, throwIfAborted } from "../utils/toolUtils";
 import { CriticalSectionCoordinator } from "./CriticalSectionCoordinator";
@@ -163,9 +163,7 @@ const criticalSectionHandler = async (
   try {
     coordinator.registerExpectedDevices(lock, deviceCount, namespace);
   } catch (error) {
-    throw new ActionableError(
-      `Failed to register devices for critical section "${lock}": ${error}`,
-    );
+    throw toActionableError(error, `Failed to register devices for critical section "${lock}"`);
   }
 
   let release: (() => void) | undefined;

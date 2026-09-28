@@ -1,3 +1,4 @@
+import { toActionableError } from "../../models/ActionableError";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { ActionableError } from "../../models";
 import { errorMessage } from "../../utils/describeUnknownError";
@@ -379,7 +380,7 @@ function parseAndroidStringSet(value: string): string[] {
   try {
     parsed = JSON.parse(value);
   } catch (error) {
-    throw new ActionableError(`STRING_SET key-value must be a JSON array of strings: ${error}`);
+    throw toActionableError(error, `STRING_SET key-value must be a JSON array of strings`);
   }
   if (!Array.isArray(parsed) || !parsed.every((entry) => typeof entry === "string")) {
     throw new ActionableError(

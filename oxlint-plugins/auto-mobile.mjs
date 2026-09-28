@@ -757,6 +757,54 @@ const noInlineErrorNormalizeRule = {
   },
 };
 
+const noCaughtErrorInterpolationRule = {
+  meta: {
+    type: "problem",
+    messages: {
+      caughtErrorInterpolation:
+        "Pass caught errors to toActionableError(error, context) instead of interpolating them into ActionableError messages.",
+    },
+  },
+  create(context) {
+    const patternNames = (pattern, names = new Set()) => {
+      if (!pattern) return names;
+      if (pattern.type === "Identifier") names.add(pattern.name);
+      else if (pattern.type === "RestElement") patternNames(pattern.argument, names);
+      else if (pattern.type === "AssignmentPattern") patternNames(pattern.left, names);
+      else if (pattern.type === "ArrayPattern")
+        pattern.elements.forEach((item) => patternNames(item, names));
+      else if (pattern.type === "ObjectPattern")
+        pattern.properties.forEach((item) =>
+          patternNames(item.type === "RestElement" ? item.argument : item.value, names),
+        );
+      return names;
+    };
+    const inspect = (node, names) => {
+      if (!node || typeof node.type !== "string" || node.type === "CatchClause") return;
+      if (
+        node.type === "NewExpression" &&
+        node.callee?.type === "Identifier" &&
+        node.callee.name === "ActionableError" &&
+        node.arguments?.[0]?.type === "TemplateLiteral" &&
+        node.arguments[0].expressions.some(
+          (expression) => expression.type === "Identifier" && names.has(expression.name),
+        )
+      )
+        context.report({ node, messageId: "caughtErrorInterpolation" });
+      for (const [key, value] of Object.entries(node)) {
+        if (key === "parent") continue;
+        if (Array.isArray(value)) value.forEach((child) => inspect(child, names));
+        else if (value && typeof value === "object") inspect(value, names);
+      }
+    };
+    return {
+      CatchClause(node) {
+        if (node.param) inspect(node.body, patternNames(node.param));
+      },
+    };
+  },
+};
+
 // Scope-aware syntactic backstop for raw capture nodes. Typed Element results and
 // request DTOs are intentionally distinct from raw any/unknown/Record boundaries.
 const noRawSelectorFieldReadRule = {
@@ -1344,6 +1392,7 @@ const plugin = {
   rules: {
     "catch-convention": catchConventionRule,
     "no-inline-error-normalize": noInlineErrorNormalizeRule,
+    "no-caught-error-interpolation": noCaughtErrorInterpolationRule,
     "no-unknown-cast": noUnknownCastRule,
     "no-accumulator-foreach": noAccumulatorForEachRule,
     "no-bare-expect": noBareExpectRule,

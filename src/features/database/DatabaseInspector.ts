@@ -1,3 +1,4 @@
+import { toActionableError } from "../../models/ActionableError";
 import { ActionableError, BootedDevice } from "../../models";
 import { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "../../utils/logger";
@@ -186,7 +187,7 @@ export class DatabaseInspector {
       if (errorType === "PROVIDER_UNAVAILABLE") {
         throw new ProviderUnavailableError(`Database error (${errorType}): ${error}`);
       }
-      throw new ActionableError(`Database error (${errorType}): ${error}`);
+      throw toActionableError(error, `Database error (${errorType})`);
     }
 
     // Extract the JSON result by finding balanced braces/brackets

@@ -1,3 +1,4 @@
+import { toActionableError } from "../models/ActionableError";
 import { z } from "zod/v4";
 import { ToolRegistry } from "./toolRegistry";
 import { ActionableError, BootedDevice, Platform } from "../models";
@@ -179,7 +180,7 @@ export const postNotificationHandler = async (device: BootedDevice, args: PostNo
     // so too, exactly as tapOn/sendKeys do (#6200, #6251).
     return result.success ? response : { ...response, isError: true as const };
   } catch (error) {
-    throw new ActionableError(`Failed to post notification: ${error}`);
+    throw toActionableError(error, `Failed to post notification`);
   }
 };
 

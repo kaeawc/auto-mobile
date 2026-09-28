@@ -2244,7 +2244,7 @@ async function defaultResolveSimulatorWindowId(
   try {
     windows = (JSON.parse(result.stdout) as { windows?: SimulatorWindowInfo[] }).windows ?? [];
   } catch (error) {
-    throw new ActionableError(`Unable to parse iOS Simulator window list: ${error}`);
+    throw toActionableError(error, `Unable to parse iOS Simulator window list`);
   }
 
   if (audioEnabled && windows.length > 1) {

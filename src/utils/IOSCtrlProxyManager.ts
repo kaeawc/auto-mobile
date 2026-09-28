@@ -70,9 +70,17 @@ export interface CtrlProxyIosSetupResult extends ProxySetupResult {
   recoveryInterrupted?: boolean;
 }
 
-class CtrlProxyStartupCancelledByStopError extends Error {
+class CtrlProxyStartupRecoveryInterruptedError extends Error {}
+
+class CtrlProxyStartupCancelledByStopError extends CtrlProxyStartupRecoveryInterruptedError {
   constructor() {
     super("iOS CtrlProxy startup was cancelled by stop()");
+  }
+}
+
+class CtrlProxyRunnerExitedDuringStartupError extends CtrlProxyStartupRecoveryInterruptedError {
+  constructor() {
+    super("iOS CtrlProxy runner exited during startup");
   }
 }
 
@@ -437,6 +445,15 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       },
       isAlive: () => this.isSupervisedCtrlProxyProcessAlive(),
       onExit: () => {
+        const sharedStart = this.sharedStart;
+        if (
+          sharedStart &&
+          !sharedStart.completed &&
+          !sharedStart.teardownCommitted &&
+          !sharedStart.controller.signal.aborted
+        ) {
+          sharedStart.controller.abort(new CtrlProxyRunnerExitedDuringStartupError());
+        }
         this.xcTestProcessId = null;
         this.xcTestProcess = null;
         this.clearCaches();
@@ -1899,7 +1916,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         success: false,
         message: "Failed to setup CtrlProxy",
         error: errorMsg,
-        recoveryInterrupted: error instanceof CtrlProxyStartupCancelledByStopError,
+        recoveryInterrupted: error instanceof CtrlProxyStartupRecoveryInterruptedError,
         perfTiming: perf.getTimings(),
       };
     }

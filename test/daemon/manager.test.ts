@@ -2905,24 +2905,32 @@ describe("Daemon manager process detection", () => {
     expect(record.processGenerationToken).toBe(`darwin:${lstart}`);
   });
 
-  test("pins Darwin local Date resolution during the repeated DST fall-back hour", () => {
-    const originalTimezone = process.env.TZ;
-    try {
-      process.env.TZ = "America/Los_Angeles";
-      const lstart = "Sun Nov 1 01:30:00 2026";
-      const record = parseDarwinDaemonProcessTable(
-        `20 1 ${lstart} bunx -y @kaeawc/auto-mobile@0.0.38 --daemon-mode`,
-      )[0]!;
+  test.skipIf(process.platform === "win32")(
+    "pins Darwin local Date resolution during the repeated DST fall-back hour",
+    () => {
+      const originalTimezone = process.env.TZ;
+      try {
+        process.env.TZ = "America/Los_Angeles";
+        const timezoneOffset = new Date(2026, 10, 1, 1, 30, 0).getTimezoneOffset();
+        if (timezoneOffset !== 420 && timezoneOffset !== 480) {
+          // This runtime ignored the TZ override, so Date cannot resolve the pinned local time reliably.
+          return;
+        }
+        const lstart = "Sun Nov 1 01:30:00 2026";
+        const record = parseDarwinDaemonProcessTable(
+          `20 1 ${lstart} bunx -y @kaeawc/auto-mobile@0.0.38 --daemon-mode`,
+        )[0]!;
 
-      expect(record.startedAt).toBe(1_793_521_800_000);
-    } finally {
-      if (originalTimezone === undefined) {
-        delete process.env.TZ;
-      } else {
-        process.env.TZ = originalTimezone;
+        expect(record.startedAt).toBe(1_793_521_800_000);
+      } finally {
+        if (originalTimezone === undefined) {
+          delete process.env.TZ;
+        } else {
+          process.env.TZ = originalTimezone;
+        }
       }
-    }
-  });
+    },
+  );
 
   test.each([
     ["linux", "ps -eo pid=,ppid=,etimes=,command="],

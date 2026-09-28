@@ -1,13 +1,16 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import * as fs from "fs";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { basename, join } from "path";
+import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import {
   formatLockContent,
   parseLockContent,
   releaseExclusiveLock,
   tryAcquireExclusiveLock,
 } from "../../src/utils/fileLock";
+import { logger } from "../../src/utils/logger";
 
 describe("fileLock primitive", () => {
   let dir: string;
@@ -27,6 +30,24 @@ describe("fileLock primitive", () => {
       true,
     );
     expect(readFileSync(lockPath, "utf-8").trim()).toBe("100");
+  });
+
+  test("fresh acquire and release preserve pid and token ownership", () => {
+    const ids = new CountingIdGenerator("lock");
+    const ownerToken = ids.next();
+    const otherToken = ids.next();
+    expect(tryAcquireExclusiveLock(lockPath, { pid: 100, ownerToken })).toBe(true);
+    expect(parseLockContent(readFileSync(lockPath, "utf-8"))).toEqual({
+      pid: 100,
+      token: ownerToken,
+    });
+
+    releaseExclusiveLock(lockPath, 200, ownerToken);
+    releaseExclusiveLock(lockPath, 100, otherToken);
+    expect(readFileSync(lockPath, "utf-8")).toBe(formatLockContent(100, ownerToken));
+
+    releaseExclusiveLock(lockPath, 100, ownerToken);
+    expect(existsSync(lockPath)).toBe(false);
   });
 
   test("fails when a different live holder owns it", () => {
@@ -66,12 +87,56 @@ describe("fileLock primitive", () => {
   });
 
   test("reclaims a lock left by a dead holder", () => {
-    writeFileSync(lockPath, "9999");
-    expect(tryAcquireExclusiveLock(lockPath, { pid: 100, isProcessRunning: () => false })).toBe(
-      true,
-    );
-    expect(readFileSync(lockPath, "utf-8").trim()).toBe("100");
+    const ids = new CountingIdGenerator("lock");
+    const staleToken = ids.next();
+    const newToken = ids.next();
+    writeFileSync(lockPath, formatLockContent(9999, staleToken));
+    expect(
+      tryAcquireExclusiveLock(lockPath, {
+        pid: 100,
+        ownerToken: newToken,
+        isProcessRunning: () => false,
+      }),
+    ).toBe(true);
+    expect(parseLockContent(readFileSync(lockPath, "utf-8").trim())).toEqual({
+      pid: 100,
+      token: newToken,
+    });
   });
+
+  test.each([200, 9999])(
+    "does not steal a fresh lock created by PID %d during the stale-owner liveness check",
+    (competingPid) => {
+      const ids = new CountingIdGenerator("lock");
+      const staleToken = ids.next();
+      const competingToken = ids.next();
+      const callerToken = ids.next();
+      writeFileSync(lockPath, formatLockContent(9999, staleToken));
+
+      expect(
+        tryAcquireExclusiveLock(lockPath, {
+          pid: 100,
+          ownerToken: callerToken,
+          isProcessRunning: (checkedPid) => {
+            expect(checkedPid).toBe(9999);
+            expect(
+              tryAcquireExclusiveLock(lockPath, {
+                pid: competingPid,
+                ownerToken: competingToken,
+                isProcessRunning: () => false,
+              }),
+            ).toBe(true);
+            return false;
+          },
+        }),
+      ).toBe(false);
+      expect(parseLockContent(readFileSync(lockPath, "utf-8").trim())).toEqual({
+        pid: competingPid,
+        token: competingToken,
+      });
+      expect(readdirSync(dir)).toEqual([basename(lockPath)]);
+    },
+  );
 
   test("reclaim leaves no stray .reclaim marker behind", () => {
     writeFileSync(lockPath, "9999");
@@ -280,6 +345,27 @@ describe("fileLock primitive", () => {
   });
 
   describe("releaseExclusiveLock (compare-and-delete)", () => {
+    test("warns without throwing when unlink fails unexpectedly", () => {
+      expect(tryAcquireExclusiveLock(lockPath, { pid: 100 })).toBe(true);
+      const unlinkError = Object.assign(new Error("permission denied"), { code: "EPERM" });
+      const unlinkSpy = spyOn(fs, "unlinkSync").mockImplementation(() => {
+        throw unlinkError;
+      });
+      const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+
+      try {
+        expect(() => releaseExclusiveLock(lockPath, 100)).not.toThrow();
+        expect(warnSpy).toHaveBeenCalledWith(
+          `src/utils/fileLock.ts: failed to release exclusive lock at ${lockPath}: permission denied`,
+        );
+        expect(unlinkSpy).toHaveBeenCalledTimes(1);
+      } finally {
+        unlinkSpy.mockRestore();
+        warnSpy.mockRestore();
+      }
+      expect(existsSync(lockPath)).toBe(true);
+    });
+
     test("removes the file when it holds our pid", () => {
       writeFileSync(lockPath, "100");
       releaseExclusiveLock(lockPath, 100);

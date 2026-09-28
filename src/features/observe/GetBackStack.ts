@@ -47,6 +47,7 @@ const LEGACY_TASK_HEADER = /^\s*(?:Task\s+id\s+#(\d+)\b|\*?\s*TaskRecord\{\S+\s+
  */
 const HEADER_AFFINITY = /(?:^|\s)A=([^\s}]+)/;
 const HEADER_COMPONENT = /(?:^|\s)a?I=([^\s}]+)/;
+const HEADER_USER_ID = /(?:^|\s)U=(\d+)(?=\s|})/;
 
 /**
  * One printed activity: "* Hist  #0: ActivityRecord{2b2ce0f u0 pkg/.Cls t61}".
@@ -155,6 +156,7 @@ interface HistRootEntry {
 /** Fields carried by a modern task header line. */
 interface TaskHeaderFields {
   id: number;
+  userId?: number;
   /**
    * `Task.affinity`, verbatim. On Android 11+ this is uid-prefixed
    * ("10164:com.example") because `ActivityRecord.computeTaskAffinity`
@@ -192,8 +194,10 @@ function parseTaskHeader(line: string): TaskHeaderFields | undefined {
 function fieldsFromTail(id: number, tail: string): TaskHeaderFields {
   const affinity = tail.match(HEADER_AFFINITY);
   const component = tail.match(HEADER_COMPONENT);
+  const userId = tail.match(HEADER_USER_ID);
   return {
     id,
+    userId: userId ? parseInt(userId[1], 10) : undefined,
     affinity: affinity ? affinity[1] : undefined,
     component: component ? component[1] : undefined,
   };
@@ -399,6 +403,9 @@ export class GetBackStack implements BackStack {
         // "Running activities"; restarting there discarded everything already
         // parsed for that task (issue #4263).
         currentTask = tasks.get(currentTaskId) ?? { id: currentTaskId };
+        if (header.userId !== undefined) {
+          currentTask.userId = header.userId;
+        }
         // A task header ends the previous record's block (see openHist).
         openHist = undefined;
         if (header.affinity) {

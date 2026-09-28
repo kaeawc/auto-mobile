@@ -69,11 +69,13 @@ describe("GetBackStack", function () {
     expect(result.tasks).toHaveLength(2);
     expect(result.tasks[0]).toMatchObject({
       id: 1,
+      userId: 0,
       packageName: "com.android.launcher3",
       numActivities: 1,
     });
     expect(result.tasks[1]).toMatchObject({
       id: 123,
+      userId: 0,
       packageName: "dev.jasonpearson.automobile.playground",
       numActivities: 3,
     });

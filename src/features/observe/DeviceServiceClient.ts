@@ -27,6 +27,7 @@ import { RetryExecutor, defaultRetryExecutor } from "../../utils/retry/RetryExec
 import type { CtrlProxyReconnectStatus } from "../../models/CtrlProxyReconnectStatus";
 import { CtrlProxyForwardingLeaseConflictError } from "./shared/CtrlProxyForwardingLeaseConflictError";
 import type { DelegateContext } from "./shared/types";
+import type { HierarchyNavigationDetector } from "../navigation/HierarchyNavigationDetector";
 
 /**
  * Factory function type for creating WebSocket instances.
@@ -159,6 +160,12 @@ export abstract class DeviceServiceClient {
   protected readonly webSocketFactory: WebSocketFactory;
   protected readonly config: ConnectionConfig;
   protected readonly retryExecutor: RetryExecutor;
+
+  // State shared by both platform clients. The platform subclasses own the
+  // recovery lifecycle, while the base provides the common observation API.
+  protected boundSessionId: string | null = null;
+  protected hierarchyNavigationDetector: HierarchyNavigationDetector | null = null;
+  protected recoveryPromise: Promise<boolean> | null = null;
 
   // Logging tag for subclass identification
   protected abstract readonly logTag: string;
@@ -1146,6 +1153,55 @@ export abstract class DeviceServiceClient {
     const created = factory();
     set(created);
     return created;
+  }
+
+  /**
+   * Release this client's binding to a session that has ended. If still bound
+   * to that session, dispose its cached hierarchy detector before clearing it.
+   */
+  public releaseSessionBinding(sessionId: string): void {
+    if (this.boundSessionId === sessionId) {
+      this.boundSessionId = null;
+      if (this.hierarchyNavigationDetector) {
+        this.hierarchyNavigationDetector.dispose();
+        this.hierarchyNavigationDetector = null;
+      }
+    }
+  }
+
+  public async awaitRecovery(
+    budgetMs: number,
+    signal?: AbortSignal,
+  ): Promise<"recovered" | "not_recovering" | "failed" | "timed_out"> {
+    const recovery = this.recoveryPromise;
+    if (!recovery) {
+      return "not_recovering";
+    }
+    if (signal?.aborted) {
+      return "timed_out";
+    }
+    let timeout: NodeJS.Timeout | undefined;
+    let onAbort: (() => void) | undefined;
+    const deadline = new Promise<"timed_out">((resolve) => {
+      timeout = this.timer.setTimeout(() => resolve("timed_out"), budgetMs);
+      onAbort = () => resolve("timed_out");
+      signal?.addEventListener("abort", onAbort, { once: true });
+    });
+    try {
+      return await Promise.race([
+        recovery.then(
+          (connected) => (connected ? "recovered" : "failed") as "recovered" | "failed",
+        ),
+        deadline,
+      ]);
+    } finally {
+      if (timeout) {
+        this.timer.clearTimeout(timeout);
+      }
+      if (onAbort) {
+        signal?.removeEventListener("abort", onAbort);
+      }
+    }
   }
 
   /**

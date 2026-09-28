@@ -1306,9 +1306,6 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   private static instances: Map<string, AndroidCtrlProxyClient> = new Map();
   private static readonly retiredDeviceIds = new Set<string>();
 
-  // Session binding for multi-agent isolation
-  private boundSessionId: string | null = null;
-
   // Build/device provenance (#4984): lazily-built content-hash provider (cached by
   // (deviceId, packageId, versionCode)), the resolved build context per app (kept on
   // the per-device client so it survives session rebinds and is re-applied to the
@@ -1346,7 +1343,6 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   // Re-entry guard: a recovery burst that has not settled must not start a
   // second, overlapping recovery attempt.
   private isRecoveringService: boolean = false;
-  private recoveryPromise: Promise<boolean> | null = null;
   /** A socket must survive this interval before it can rearm a restart. */
   private static readonly RESTART_REARM_STABILITY_MS = 2000;
   private restartRearmTimeout: NodeJS.Timeout | null = null;
@@ -1385,7 +1381,6 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   private installedAppsRepository: InstalledAppsStore | null = null;
 
   // Hierarchy navigation detector
-  private hierarchyNavigationDetector: HierarchyNavigationDetector | null = null;
   private sdkNavigationAppIds: Set<string> = new Set();
   private navigationWriteTail: Promise<void> = Promise.resolve();
 
@@ -1653,22 +1648,6 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
    */
   public getBootedDeviceIdentity(): BootedDevice {
     return { ...this.device };
-  }
-
-  /**
-   * Release this client's binding to a session that has ended (#4984). If still
-   * bound to `sessionId`, drop the binding and dispose the cached hierarchy detector
-   * so a post-release event (before any new session binds the still-connected
-   * device) routes to the unattributed global manager, never the ended session's.
-   */
-  public releaseSessionBinding(sessionId: string): void {
-    if (this.boundSessionId === sessionId) {
-      this.boundSessionId = null;
-      if (this.hierarchyNavigationDetector) {
-        this.hierarchyNavigationDetector.dispose();
-        this.hierarchyNavigationDetector = null;
-      }
-    }
   }
 
   /**
@@ -2363,41 +2342,6 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
   public isRecoveryInFlight(): boolean {
     return this.recoveryPromise !== null;
-  }
-
-  public async awaitRecovery(
-    budgetMs: number,
-    signal?: AbortSignal,
-  ): Promise<"recovered" | "not_recovering" | "failed" | "timed_out"> {
-    const recovery = this.recoveryPromise;
-    if (!recovery) {
-      return "not_recovering";
-    }
-    if (signal?.aborted) {
-      return "timed_out";
-    }
-    let timeout: NodeJS.Timeout | undefined;
-    let onAbort: (() => void) | undefined;
-    const deadline = new Promise<"timed_out">((resolve) => {
-      timeout = this.timer.setTimeout(() => resolve("timed_out"), budgetMs);
-      onAbort = () => resolve("timed_out");
-      signal?.addEventListener("abort", onAbort, { once: true });
-    });
-    try {
-      return await Promise.race([
-        recovery.then(
-          (connected) => (connected ? "recovered" : "failed") as "recovered" | "failed",
-        ),
-        deadline,
-      ]);
-    } finally {
-      if (timeout) {
-        this.timer.clearTimeout(timeout);
-      }
-      if (onAbort) {
-        signal?.removeEventListener("abort", onAbort);
-      }
-    }
   }
 
   /**

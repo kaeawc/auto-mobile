@@ -284,6 +284,7 @@ describe("systemTray post-tap observation", () => {
         minTimestamp: 2001,
         skipScreenshot: true,
         skipAccessibilityAudit: true,
+        skipPerformanceAudit: true,
       });
       expect(
         fakeAdb.getExecutedCommands().filter((command) => command.includes("input tap")),
@@ -309,6 +310,7 @@ describe("systemTray post-tap observation", () => {
       const result = await observeSystemTrayAfterTap({ ...device, platform }, baseline);
       expect(result.settled).toBe(true);
       expect(observer.getExecuteOptions()[0].minTimestamp).toBe(901);
+      expect(observer.getExecuteOptions()[0].skipPerformanceAudit).toBe(true);
       expect(timer.now()).toBe(101050);
     });
   }
@@ -440,6 +442,9 @@ describe("systemTray find", () => {
     );
     expect(
       fakeObserveScreen.getExecuteOptions().every((options) => options.skipAccessibilityAudit),
+    ).toBe(true);
+    expect(
+      fakeObserveScreen.getExecuteOptions().every((options) => options.skipPerformanceAudit),
     ).toBe(true);
   });
 

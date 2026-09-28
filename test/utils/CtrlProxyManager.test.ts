@@ -11,6 +11,7 @@ import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/Adb
 import { BootedDevice } from "../../src/models";
 import * as fs from "fs/promises";
 import type { Dirent } from "fs";
+import { readFileSync } from "fs";
 import * as path from "path";
 import crypto from "crypto";
 import os from "os";
@@ -21,6 +22,59 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../src/utils/workingDirectory";
 import { logger } from "../../src/utils/logger";
+
+// Captured on a bound API 36 / Android 16 google_apis arm64 emulator. No older
+// API-level dumpsys captures exist in this repository; variants below are
+// derived from this capture solely to exercise state transitions and parsing.
+const boundAccessibilityCapture = readFileSync(
+  path.join(import.meta.dir, "../fixtures/ctrlproxy/accessibility-api36-bound.txt"),
+  "utf8",
+);
+const ctrlProxyComponent = `${AndroidCtrlProxyManager.PACKAGE}/${AndroidCtrlProxyManager.PACKAGE}.CtrlProxy`;
+const boundLine = boundAccessibilityCapture.match(/^     Bound services:.*$/m)?.[0];
+if (!boundLine) {
+  throw new Error("API 36 accessibility fixture lacks Bound services");
+}
+
+type AccessibilityFixtureState =
+  | "bound-label"
+  | "bound-component"
+  | "bound-multiline"
+  | "binding"
+  | "crashed"
+  | "unbound"
+  | "absent";
+
+function accessibilityFixture(state: AccessibilityFixtureState): string {
+  switch (state) {
+    case "bound-label":
+      return boundAccessibilityCapture;
+    case "bound-component":
+      return boundAccessibilityCapture.replace(
+        boundLine,
+        `     Bound services:{{${ctrlProxyComponent}}}`,
+      );
+    case "bound-multiline":
+      return boundAccessibilityCapture.replace(
+        boundLine,
+        "     Bound services:{Service[label=AutoMobile CtrlProxy,\n          metadata={nested={value}},\n          feedbackType[FEEDBACK_GENERIC]]}",
+      );
+    case "binding":
+      return boundAccessibilityCapture
+        .replace(boundLine, "     Bound services:{}")
+        .replace("     Binding services:{}", `     Binding services:{{${ctrlProxyComponent}}}`);
+    case "crashed":
+      return boundAccessibilityCapture
+        .replace(boundLine, "     Bound services:{}")
+        .replace("     Crashed services:{}", `     Crashed services:{{${ctrlProxyComponent}}}`);
+    case "unbound":
+      return boundAccessibilityCapture.replace(boundLine, "     Bound services:{}");
+    case "absent":
+      return boundAccessibilityCapture
+        .replace(boundLine, "     Bound services:{}")
+        .replace(`     Enabled services:{{${ctrlProxyComponent}}}`, "     Enabled services:{}");
+  }
+}
 
 describe("CtrlProxyManager", function () {
   let accessibilityServiceClient: AndroidCtrlProxyManager;
@@ -332,7 +386,7 @@ describe("CtrlProxyManager", function () {
 
     test("reports healthy when CtrlProxy is bound", async function () {
       fakeAdb.setCommandResponse("shell dumpsys accessibility", {
-        stdout: `Bound services:{{${serviceComponent}}}\nCrashed services:{}`,
+        stdout: accessibilityFixture("bound-label"),
         stderr: "",
       });
 
@@ -343,9 +397,100 @@ describe("CtrlProxyManager", function () {
       );
     });
 
+    test("accepts component-form and multiline nested bound entries", async () => {
+      for (const state of ["bound-component", "bound-multiline"] as const) {
+        fakeAdb.setCommandResponse("shell dumpsys accessibility", {
+          stdout: accessibilityFixture(state),
+          stderr: "",
+        });
+        expect(await accessibilityServiceClient.isAccessibilityServiceHealthy()).toBe(true);
+      }
+    });
+
+    test("reads multiline nested enabled, binding, and crashed sections", async () => {
+      const binding = accessibilityFixture("binding")
+        .replace(
+          `     Enabled services:{{${serviceComponent}}}`,
+          `     Enabled services:{\n          {${serviceComponent}}\n     }`,
+        )
+        .replace(
+          `     Binding services:{{${serviceComponent}}}`,
+          `     Binding services:{\n          {${serviceComponent}}\n     }`,
+        );
+      fakeAdb.setCommandResponse("shell dumpsys accessibility", { stdout: binding, stderr: "" });
+      expect(await accessibilityServiceClient.rebindIfUnhealthy()).toBe(false);
+
+      const crashed = accessibilityFixture("crashed").replace(
+        `     Crashed services:{{${serviceComponent}}}`,
+        `     Crashed services:{\n          {${serviceComponent}}\n     }`,
+      );
+      fakeAdb.setCommandResponse("shell dumpsys accessibility", { stdout: crashed, stderr: "" });
+      expect(await accessibilityServiceClient.rebindIfUnhealthy()).toBe(true);
+    });
+
+    test("waits through the binding grace period before rebinding", async () => {
+      fakeAdb.setCommandResponse("shell dumpsys accessibility", {
+        stdout: accessibilityFixture("binding"),
+        stderr: "",
+      });
+      expect(await accessibilityServiceClient.isAccessibilityServiceHealthy()).toBe(false);
+      expect(await accessibilityServiceClient.rebindIfUnhealthy()).toBe(false);
+      timer.advanceTime(4_000);
+      expect(await accessibilityServiceClient.rebindIfUnhealthy()).toBe(false);
+      expect(fakeAdb.wasCommandExecuted("settings put secure enabled_accessibility_services")).toBe(
+        false,
+      );
+      timer.advanceTime(1);
+      expect(await accessibilityServiceClient.rebindIfUnhealthy()).toBe(true);
+      expect(fakeAdb.wasCommandExecuted("settings put secure enabled_accessibility_services")).toBe(
+        true,
+      );
+    });
+
+    test("resets binding grace after a bound observation", async () => {
+      fakeAdb.setCommandResponse("shell dumpsys accessibility", {
+        stdout: accessibilityFixture("binding"),
+        stderr: "",
+      });
+      expect(await accessibilityServiceClient.rebindIfUnhealthy()).toBe(false);
+      timer.advanceTime(4_001);
+      fakeAdb.setCommandResponse("shell dumpsys accessibility", {
+        stdout: accessibilityFixture("bound-label"),
+        stderr: "",
+      });
+      expect(await accessibilityServiceClient.isAccessibilityServiceHealthy()).toBe(true);
+      fakeAdb.setCommandResponse("shell dumpsys accessibility", {
+        stdout: accessibilityFixture("binding"),
+        stderr: "",
+      });
+      expect(await accessibilityServiceClient.rebindIfUnhealthy()).toBe(false);
+    });
+
+    test("a crash bypasses and resets the binding grace period", async () => {
+      fakeAdb.setCommandResponse("shell dumpsys accessibility", {
+        stdout: accessibilityFixture("binding"),
+        stderr: "",
+      });
+      expect(await accessibilityServiceClient.rebindIfUnhealthy()).toBe(false);
+      fakeAdb.setCommandResponse("shell dumpsys accessibility", {
+        stdout: accessibilityFixture("crashed"),
+        stderr: "",
+      });
+      expect(await accessibilityServiceClient.rebindIfUnhealthy()).toBe(true);
+    });
+
+    test("rebinds immediately when the service leaves enabled services", async () => {
+      fakeAdb.setCommandResponse("shell dumpsys accessibility", {
+        stdout: accessibilityFixture("absent"),
+        stderr: "",
+      });
+      expect(await accessibilityServiceClient.isAccessibilityServiceHealthy()).toBe(false);
+      expect(await accessibilityServiceClient.rebindIfUnhealthy()).toBe(true);
+    });
+
     test("rebinds a crashed service without removing another enabled service", async function () {
       fakeAdb.setCommandResponse("shell dumpsys accessibility", {
-        stdout: `Bound services:{}\nCrashed services:{{${serviceComponent}}}`,
+        stdout: accessibilityFixture("crashed"),
         stderr: "",
       });
       fakeAdb.setCommandResponse("shell settings get secure enabled_accessibility_services", {
@@ -373,7 +518,7 @@ describe("CtrlProxyManager", function () {
     test("preserves every co-listed accessibility service while re-toggling CtrlProxy", async function () {
       const secondService = "com.example.screenreader/com.example.screenreader.ScreenReader";
       fakeAdb.setCommandResponse("shell dumpsys accessibility", {
-        stdout: "Bound services:{}\nCrashed services:{}",
+        stdout: accessibilityFixture("unbound"),
         stderr: "",
       });
       fakeAdb.setCommandResponse("shell settings get secure enabled_accessibility_services", {
@@ -401,7 +546,7 @@ describe("CtrlProxyManager", function () {
     test("quotes a co-listed component literally when rebinding", async () => {
       const nestedService = "com.example/.Outer$Service";
       fakeAdb.setCommandResponse("shell dumpsys accessibility", {
-        stdout: "Bound services:{}\nCrashed services:{}",
+        stdout: accessibilityFixture("unbound"),
         stderr: "",
       });
       fakeAdb.setCommandResponse("shell settings get secure enabled_accessibility_services", {
@@ -433,7 +578,7 @@ describe("CtrlProxyManager", function () {
 
     test("tries to restore CtrlProxy after the re-add write fails and preserves the original error", async () => {
       fakeAdb.setCommandResponse("shell dumpsys accessibility", {
-        stdout: "Bound services:{}\nCrashed services:{}",
+        stdout: accessibilityFixture("unbound"),
         stderr: "",
       });
       fakeAdb.setCommandResponse("shell settings get secure enabled_accessibility_services", {
@@ -462,15 +607,43 @@ describe("CtrlProxyManager", function () {
       ).toBe(true);
     });
 
+    test("restores enabled services when force-stop fails after removal", async () => {
+      fakeAdb.setCommandResponse("shell dumpsys accessibility", {
+        stdout: accessibilityFixture("crashed"),
+        stderr: "",
+      });
+      fakeAdb.setCommandResponse("shell settings get secure enabled_accessibility_services", {
+        stdout: `${otherService}:${serviceComponent}`,
+        stderr: "",
+      });
+      fakeAdb.setCommandError(
+        `shell am force-stop ${AndroidCtrlProxyManager.PACKAGE}`,
+        new Error("force-stop failed"),
+      );
+      await expect(accessibilityServiceClient.rebindIfUnhealthy()).rejects.toThrow(
+        "force-stop failed",
+      );
+      expect(
+        fakeAdb
+          .getExecutedCommands()
+          .filter((command) =>
+            command.startsWith("shell settings put secure enabled_accessibility_services"),
+          ),
+      ).toEqual([
+        `shell settings put secure enabled_accessibility_services '${otherService}'`,
+        `shell settings put secure enabled_accessibility_services '${otherService}:${serviceComponent}'`,
+      ]);
+    });
+
     test("stops polling when the rebound service becomes healthy", async () => {
       const crashed = {
-        stdout: `Bound services:{}\nCrashed services:{{${serviceComponent}}}`,
+        stdout: accessibilityFixture("crashed"),
         stderr: "",
       };
       fakeAdb.setCommandResponseSequence("shell dumpsys accessibility", [
         crashed,
         crashed,
-        { stdout: `Bound services:{{${serviceComponent}}}\nCrashed services:{}`, stderr: "" },
+        { stdout: accessibilityFixture("bound-label"), stderr: "" },
       ]);
 
       expect(await accessibilityServiceClient.rebindIfUnhealthy()).toBe(true);
@@ -484,7 +657,7 @@ describe("CtrlProxyManager", function () {
 
     test("returns attempted after bounded polls when the service stays crashed", async () => {
       fakeAdb.setCommandResponse("shell dumpsys accessibility", {
-        stdout: `Bound services:{}\nCrashed services:{{${serviceComponent}}}`,
+        stdout: accessibilityFixture("crashed"),
         stderr: "",
       });
 
@@ -503,7 +676,7 @@ describe("CtrlProxyManager", function () {
       // per-device singleton and can race. Without an in-flight guard, a second
       // caller would start its own force-stop/settings sequence mid-rebind.
       fakeAdb.setCommandResponse("shell dumpsys accessibility", {
-        stdout: `Bound services:{}\nCrashed services:{{${serviceComponent}}}`,
+        stdout: accessibilityFixture("crashed"),
         stderr: "",
       });
       fakeAdb.setCommandResponse("shell settings get secure enabled_accessibility_services", {
@@ -535,7 +708,7 @@ describe("CtrlProxyManager", function () {
 
       // A later call after the in-flight rebind settles starts its own sequence.
       fakeAdb.setCommandResponse("shell dumpsys accessibility", {
-        stdout: `Bound services:{{${serviceComponent}}}\nCrashed services:{}`,
+        stdout: accessibilityFixture("bound-label"),
         stderr: "",
       });
       expect(await accessibilityServiceClient.rebindIfUnhealthy()).toBe(false);
@@ -563,7 +736,7 @@ describe("CtrlProxyManager", function () {
 
     test("force-stops and re-adds the service even when dumpsys reports it already bound", async function () {
       fakeAdb.setCommandResponse("shell dumpsys accessibility", {
-        stdout: `Bound services:{{${serviceComponent}}}\nCrashed services:{}`,
+        stdout: accessibilityFixture("bound-label"),
         stderr: "",
       });
       fakeAdb.setCommandResponse("shell settings get secure enabled_accessibility_services", {
@@ -587,10 +760,36 @@ describe("CtrlProxyManager", function () {
       ]);
     });
 
+    test("force restart bypasses a service's binding grace period", async () => {
+      fakeAdb.setCommandResponse("shell dumpsys accessibility", {
+        stdout: accessibilityFixture("binding"),
+        stderr: "",
+      });
+      expect(await accessibilityServiceClient.rebindIfUnhealthy()).toBe(false);
+      timer.advanceTime(4_001);
+      expect(await accessibilityServiceClient.forceRestartProcess()).toBe(true);
+      expect(
+        fakeAdb.wasCommandExecuted(`shell am force-stop ${AndroidCtrlProxyManager.PACKAGE}`),
+      ).toBe(true);
+      const writesAfterRestart = fakeAdb
+        .getExecutedCommands()
+        .filter((command) =>
+          command.startsWith("shell settings put secure enabled_accessibility_services"),
+        ).length;
+      expect(await accessibilityServiceClient.rebindIfUnhealthy()).toBe(false);
+      expect(
+        fakeAdb
+          .getExecutedCommands()
+          .filter((command) =>
+            command.startsWith("shell settings put secure enabled_accessibility_services"),
+          ).length,
+      ).toBe(writesAfterRestart);
+    });
+
     test("does not restart a device adb no longer lists as present", async function () {
       fakeAdb.setDeviceStates([{ deviceId: testDevice.deviceId, state: "offline" }]);
       fakeAdb.setCommandResponse("shell dumpsys accessibility", {
-        stdout: `Bound services:{{${serviceComponent}}}\nCrashed services:{}`,
+        stdout: accessibilityFixture("bound-label"),
         stderr: "",
       });
 
@@ -603,7 +802,7 @@ describe("CtrlProxyManager", function () {
 
     test("shares the single-flight guard with rebindIfUnhealthy (issue #7532)", async function () {
       fakeAdb.setCommandResponse("shell dumpsys accessibility", {
-        stdout: `Bound services:{}\nCrashed services:{{${serviceComponent}}}`,
+        stdout: accessibilityFixture("crashed"),
         stderr: "",
       });
       fakeAdb.setCommandResponse("shell settings get secure enabled_accessibility_services", {
@@ -629,7 +828,7 @@ describe("CtrlProxyManager", function () {
 
     test("forces a restart after an in-flight healthy binding check no-ops", async () => {
       fakeAdb.setCommandResponse("shell dumpsys accessibility", {
-        stdout: `Bound services:{{${serviceComponent}}}\nCrashed services:{}`,
+        stdout: accessibilityFixture("bound-label"),
         stderr: "",
       });
       fakeAdb.setCommandResponse("shell settings get secure enabled_accessibility_services", {
@@ -665,7 +864,7 @@ describe("CtrlProxyManager", function () {
 
     test("claims the flight before checking device presence", async () => {
       fakeAdb.setCommandResponse("shell dumpsys accessibility", {
-        stdout: `Bound services:{{${serviceComponent}}}\nCrashed services:{}`,
+        stdout: accessibilityFixture("bound-label"),
         stderr: "",
       });
       fakeAdb.setCommandResponse("shell settings get secure enabled_accessibility_services", {

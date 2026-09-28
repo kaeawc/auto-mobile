@@ -57,6 +57,12 @@ async function resumeCtrlProxyIfCurrentlyBooted(
   if (!bootedDevices.some((device) => device.deviceId === deviceId)) {
     return;
   }
+  if (
+    DaemonState.getInstance().isInitialized() &&
+    (await DaemonState.getInstance().getDevicePool().isShutdownReserved(deviceId))
+  ) {
+    return;
+  }
   if (platform === "android") {
     AndroidCtrlProxyClient.resumeAfterDeviceStart(deviceId);
   } else {

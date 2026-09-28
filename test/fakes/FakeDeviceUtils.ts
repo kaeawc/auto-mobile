@@ -28,6 +28,11 @@ export class FakeDeviceUtils implements PlatformDeviceManager {
     options: DeviceImageDiscoveryOptions;
   }> = [];
   private bootedDevices: Map<Platform, BootedDevice[]> = new Map();
+  private hangingBootedDevicesDetailedPlatforms: Set<Platform> = new Set();
+  private bootedDevicesDetailedCalls: Array<{
+    platform: SomePlatform;
+    options: BootedDeviceDiscoveryOptions;
+  }> = [];
   private runningDeviceNames: Set<string> = new Set();
   private executedOperations: string[] = [];
   private mockChildProcesses: Map<string, ChildProcess | null> = new Map();
@@ -89,6 +94,21 @@ export class FakeDeviceUtils implements PlatformDeviceManager {
       this.runningDeviceNames.add(device.name);
       this.runningDeviceNames.add(device.deviceId);
     });
+  }
+
+  setBootedDevicesDetailedHangs(platform: Platform, hangs: boolean): void {
+    if (hangs) {
+      this.hangingBootedDevicesDetailedPlatforms.add(platform);
+    } else {
+      this.hangingBootedDevicesDetailedPlatforms.delete(platform);
+    }
+  }
+
+  getBootedDevicesDetailedCalls(): Array<{
+    platform: SomePlatform;
+    options: BootedDeviceDiscoveryOptions;
+  }> {
+    return [...this.bootedDevicesDetailedCalls];
   }
 
   /**
@@ -271,6 +291,21 @@ export class FakeDeviceUtils implements PlatformDeviceManager {
     options: BootedDeviceDiscoveryOptions = {},
   ): Promise<BootedDeviceDiscovery> {
     options.signal?.throwIfAborted();
+    this.bootedDevicesDetailedCalls.push({ platform, options });
+    const hangs =
+      platform === "either"
+        ? this.hangingBootedDevicesDetailedPlatforms.has("android") ||
+          this.hangingBootedDevicesDetailedPlatforms.has("ios")
+        : this.hangingBootedDevicesDetailedPlatforms.has(platform);
+    if (hangs) {
+      return new Promise<BootedDeviceDiscovery>((_resolve, reject) => {
+        options.signal?.addEventListener(
+          "abort",
+          () => reject(options.signal?.reason ?? new Error("aborted")),
+          { once: true },
+        );
+      });
+    }
     const requested: Platform[] = platform === "either" ? ["android", "ios"] : [platform];
     const devices: BootedDevice[] = [];
     const succeededPlatforms = new Set<Platform>();

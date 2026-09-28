@@ -279,6 +279,7 @@ export interface PooledDevice {
    * identity evidence and the entry remains actionable during this window.
    */
   identityReconcileAttempts?: number;
+  identityReconcileOwner?: symbol;
   /** Injected-timer start time for the active bounded reconciliation. */
   identityReconcileStartedAt?: number;
   /**
@@ -546,6 +547,7 @@ export interface AdbServerResetCohortDetachment {
 interface AndroidStartupLeaseRequest {
   name?: string;
   exactName: boolean;
+  ownsOfflineRecovery: boolean;
 }
 
 export interface SystemUiAnrRecoveryHandoff {
@@ -4115,9 +4117,10 @@ export class DevicePool {
     name: string | undefined,
     exactName: boolean,
     signal?: AbortSignal,
+    ownsOfflineRecovery = false,
   ): Promise<() => Promise<void>> {
     const owner = Symbol("android-startup-lease");
-    const request: AndroidStartupLeaseRequest = { name, exactName };
+    const request: AndroidStartupLeaseRequest = { name, exactName, ownsOfflineRecovery };
     for (;;) {
       let matchingReservations: AdbServerResetRecoveryReservation[] = [];
       let matchingRecoveryAvdNames: string[] = [];
@@ -4264,19 +4267,21 @@ export class DevicePool {
   }
 
   /**
-   * Whether the given serial's AVD currently has an in-flight
-   * `provisionDevice`/`startDevice` lease. Public wrapper around
-   * {@link isLeasedForAndroidStartup} — the same check
-   * {@link detachAdbServerResetCohort} uses to defer process-wide ADB-reset
-   * recovery until a matching startup completes — so the disconnect monitor's
-   * in-session offline recovery (#7536) can skip a serial that
-   * `AndroidEmulatorClient`'s own fresh-provision readiness wait
-   * (`maybeRecoverFreshOffline`) already owns recovery for. Returns `false`
+   * Whether the given serial's AVD has a startup lease that owns fresh-offline
+   * recovery. Warm startup leases still serialize ADB-reset recovery, but do
+   * not suppress the disconnect monitor's global reconnect. Returns `false`
    * for an untracked serial or one with no recorded `avdName`.
    */
   isDeviceLeasedForAndroidStartup(deviceId: string): boolean {
     const device = this.getDevice(deviceId);
-    return Boolean(device?.avdName) && this.isLeasedForAndroidStartup(device!.avdName!);
+    return (
+      Boolean(device?.avdName) &&
+      Array.from(this.androidStartupLeases.values()).some(
+        (request) =>
+          request.ownsOfflineRecovery &&
+          this.androidStartupRequestMatchesAvd(request, device!.avdName!),
+      )
+    );
   }
 
   private getAndroidStartupRecoveryMatches(request: AndroidStartupLeaseRequest): {
@@ -6180,7 +6185,11 @@ export class DevicePool {
       }
       this.releaseCapturedDeviceForShutdown(expectedDevice);
       await this.removeDevice(expectedDevice.id, false);
-      return !this.devices.has(expectedDevice.id);
+      const retired = !this.devices.has(expectedDevice.id);
+      if (retired) {
+        this.intentionalShutdowns.delete(expectedDevice.id);
+      }
+      return retired;
     });
   }
 
@@ -6230,6 +6239,7 @@ export class DevicePool {
       if (this.devices.has(expectedDevice.id)) {
         return undefined;
       }
+      this.intentionalShutdowns.delete(expectedDevice.id);
       beforeReplacementPublishes?.();
       await this.addDevice(
         replacement,
@@ -7371,6 +7381,10 @@ export class DevicePool {
     source: string,
     options: DiscoveryReconcileOptions = {},
   ): Promise<void> {
+    const signals = [options.signal, getAbortSignal()].filter(
+      (signal): signal is AbortSignal => signal !== undefined,
+    );
+    options = { ...options, signal: signals.length > 0 ? AbortSignal.any(signals) : undefined };
     for (const device of devices) {
       // A caller that settled its deadline/abort can no longer safely apply a
       // stale snapshot to pooled entries an unrelated acquisition may have bound
@@ -7688,15 +7702,14 @@ export class DevicePool {
       return;
     }
 
+    const owner = Symbol("identity-reconciliation");
+    pooled.identityReconcileOwner = owner;
     pooled.identityReconcileAttempts = 0;
     pooled.identityReconcileStartedAt = this.timer.now();
     let latestUnresolved = discovered;
     const result = await this.retryExecutor.execute(
       async (attempt) => {
-        if (
-          this.devices.get(pooled.id) !== pooled ||
-          pooled.identityReconcileAttempts !== attempt - 1
-        ) {
+        if (this.devices.get(pooled.id) !== pooled || pooled.identityReconcileOwner !== owner) {
           return { kind: "superseded" } as const;
         }
         pooled.identityReconcileAttempts = attempt;
@@ -7705,10 +7718,7 @@ export class DevicePool {
 
         // A concurrent resolved observation clears the attempt state. Likewise,
         // replacing/removing the entry makes this retry belong to an old epoch.
-        if (
-          this.devices.get(pooled.id) !== pooled ||
-          pooled.identityReconcileAttempts !== attempt
-        ) {
+        if (this.devices.get(pooled.id) !== pooled || pooled.identityReconcileOwner !== owner) {
           return { kind: "superseded" } as const;
         }
 
@@ -7738,6 +7748,9 @@ export class DevicePool {
       },
     );
 
+    if (pooled.identityReconcileOwner !== owner) {
+      return;
+    }
     if (result.success) {
       this.clearPooledIdentityReconciliation(pooled);
       if (result.value?.kind === "resolved") {
@@ -7778,6 +7791,7 @@ export class DevicePool {
   }
 
   private clearPooledIdentityReconciliation(pooled: PooledDevice): void {
+    delete pooled.identityReconcileOwner;
     delete pooled.identityReconcileAttempts;
     delete pooled.identityReconcileStartedAt;
   }
@@ -9009,6 +9023,12 @@ export class DevicePool {
       markerIncarnation === INCARNATION_ANY ||
       markerIncarnation === device.incarnation
     );
+  }
+
+  /** Read the shutdown fence under the assignment lock used to install it. */
+  // Do not call inside assignmentMutex.runExclusive: this accessor takes the same mutex.
+  async isShutdownReserved(deviceId: string): Promise<boolean> {
+    return await this.assignmentMutex.runExclusive(() => this.isDeviceUnderShutdown(deviceId));
   }
 
   /**

@@ -7581,6 +7581,88 @@ describe("DevicePool", () => {
       expect(devicePool.getDevice(device.deviceId)?.sessionId).toBe("owner-session");
     });
 
+    test("C1 stale reconciliation cannot clear a newer cycle at the same attempt", async () => {
+      const device = poolDevice("emulator-5554", "Pixel_8_API_35");
+      fakeDeviceManager.bootedDevices = [device];
+      await devicePool.initializeWithDevices([device]);
+      await devicePool.bindOrReuseDeviceSession(
+        "owner-session",
+        device.deviceId,
+        "android",
+        androidImage,
+      );
+      const enteredA = Promise.withResolvers<void>();
+      const enteredB = Promise.withResolvers<void>();
+      const releaseA = Promise.withResolvers<void>();
+      const releaseB = Promise.withResolvers<void>();
+      const discover = fakeDeviceManager.getBootedDevicesDetailed.bind(fakeDeviceManager);
+      let calls = 0;
+      fakeDeviceManager.getBootedDevicesDetailed = async (platform, options) => {
+        const call = ++calls;
+        if (call === 1) {
+          enteredA.resolve();
+          await releaseA.promise;
+        }
+        if (call === 2) {
+          enteredB.resolve();
+          await releaseB.promise;
+        }
+        fakeDeviceManager.bootedDevices = [unresolved(device.deviceId)];
+        return discover(platform, options);
+      };
+      const cycleA = devicePool.reconcileDiscoveryObservation(
+        [unresolved(device.deviceId)],
+        "test:C1-A",
+      );
+      await enteredA.promise;
+      const blockedDiscover = fakeDeviceManager.getBootedDevicesDetailed;
+      fakeDeviceManager.getBootedDevicesDetailed = discover;
+      await refreshWith([device]);
+      fakeDeviceManager.getBootedDevicesDetailed = blockedDiscover;
+      const cycleB = devicePool.reconcileDiscoveryObservation(
+        [unresolved(device.deviceId)],
+        "test:C1-B",
+      );
+      await enteredB.promise;
+      releaseA.resolve();
+      await cycleA;
+      const attemptsWhileBPending = devicePool.getDevice(
+        device.deviceId,
+      )?.identityReconcileAttempts;
+      releaseB.resolve();
+      await cycleB;
+      expect(attemptsWhileBPending).toBe(2);
+      expect(devicePool.isPooledIdentityUnresolved(device.deviceId)).toBe(true);
+    });
+
+    test("C2 ambient shutdown abort stops identity rediscovery without quarantine", async () => {
+      const device = poolDevice("emulator-5554", "Pixel_8_API_35");
+      fakeDeviceManager.bootedDevices = [device];
+      await devicePool.initializeWithDevices([device]);
+      await devicePool.bindOrReuseDeviceSession(
+        "owner-session",
+        device.deviceId,
+        "android",
+        androidImage,
+      );
+      const controller = new AbortController();
+      let calls = 0;
+      fakeDeviceManager.getBootedDevicesDetailed = async () => {
+        calls++;
+        controller.abort(new Error("shutdown deadline"));
+        throw controller.signal.reason;
+      };
+      await runWithAbortSignal(controller.signal, () =>
+        devicePool.reconcileDiscoveryObservation(
+          [unresolved(device.deviceId)],
+          "shutdown-preflight",
+        ),
+      );
+      expect(calls).toBe(1);
+      expect(devicePool.isPooledIdentityUnresolved(device.deviceId)).toBe(false);
+      expect(devicePool.getDevice(device.deviceId)?.identityReconcileAttempts).toBeUndefined();
+    });
+
     test("terminally quarantines a confirmed identity after the retry bound", async () => {
       const device = poolDevice("emulator-5554", "Pixel_8_API_35");
       fakeDeviceManager.bootedDevices = [device];

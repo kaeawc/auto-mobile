@@ -46,6 +46,7 @@ export interface DaemonStateAccess {
     releaseSession(sessionId: string): Promise<string | null>;
   };
   getDevicePool(): {
+    isShutdownReserved?(deviceId: string): Promise<boolean>;
     restoreAutolockSessionsForMcpSession?(
       sessionIds: readonly string[],
       mcpSessionId: string,

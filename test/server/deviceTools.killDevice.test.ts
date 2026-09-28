@@ -1176,6 +1176,55 @@ describe("killDevice handler", () => {
     expect(manager.getCallCount("startDevice")).toBe(2);
   });
 
+  test("an ambiguous platform kill failure keeps later crash recovery fenced", async () => {
+    const timer = new FakeTimer();
+    const deviceSessionRepository = new FakeDeviceSessionRepository();
+    sessionManager = new SessionManager(timer, deviceSessionRepository);
+    const image: DeviceInfo = {
+      name: "Pixel 8",
+      platform: "android",
+      deviceId: "emulator-5554",
+      isRunning: false,
+      source: "local",
+    };
+    manager.setDeviceImages("android", [image]);
+    manager.killDevice = async () => {
+      throw new ActionableError("Timed out waiting for android platform shutdown command");
+    };
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      manager,
+      new DefaultRetryExecutor(timer),
+      deviceSessionRepository,
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    await pool.assignMultipleDevices(["session-1"], 1_000, "android");
+
+    const tool = ToolRegistry.getTool("killDevice");
+    if (!tool) {
+      throw new Error("killDevice not registered");
+    }
+    const device: BootedDevice = {
+      name: image.name,
+      platform: "android",
+      deviceId: "emulator-5554",
+    };
+    await expect(tool.handler({ device })).rejects.toThrow(
+      "Timed out waiting for android platform shutdown command",
+    );
+
+    Object.assign(manager.childProcess, { exitCode: 1 });
+    manager.childProcess.emit("exit", 1, null);
+    for (let attempt = 0; attempt < 20; attempt++) {
+      await Promise.resolve();
+    }
+
+    expect(manager.getCallCount("startDevice")).toBe(1);
+  });
+
   test("a successful explicit shutdown does not reboot the emulator", async () => {
     const coordinator = getInstalledAppsCacheWriteCoordinator();
     const timer = new FakeTimer();
@@ -2366,12 +2415,10 @@ describe("killDevice handler", () => {
       "Timed out waiting for android device 'Pixel 8' (emulator-5554) to disappear",
     );
     expect(retired).toBeDefined();
-    expect(AndroidCtrlProxyClient.getInstance(device, new FakeAdbClientFactory())).not.toBe(
-      retired,
-    );
+    expect(AndroidCtrlProxyClient.getInstance(device, new FakeAdbClientFactory())).toBe(retired);
   });
 
-  test("clears the intentional-shutdown marker after confirmation times out", async () => {
+  test("retains the intentional-shutdown marker after confirmation times out", async () => {
     const timer = new FakeTimer();
     const delayedManager = new DelayedSuccessfulKillDeviceManager();
     manager = delayedManager;
@@ -2426,7 +2473,7 @@ describe("killDevice handler", () => {
     delayedManager.childProcess.emit("exit", 1, null);
     await new Promise((resolve) => setImmediate(resolve));
 
-    expect(delayedManager.getCallCount("startDevice")).toBe(2);
+    expect(delayedManager.getCallCount("startDevice")).toBe(1);
   });
 
   test("resumes shutdown polling when the same incarnation reappears after a transient absence", async () => {
@@ -2605,8 +2652,8 @@ describe("killDevice handler", () => {
       rejectStop!(new Error("CtrlProxy stop failed"));
       await deferredStop.catch(() => undefined);
       expect(pool.getStats()).toMatchObject({ idle: 1, assigned: 0 });
-      expect(IOSCtrlProxyManager.isDeviceRetired(device.deviceId)).toBe(false);
-      expect(IOSCtrlProxyClient.getInstance(device)).not.toBe(retired);
+      expect(IOSCtrlProxyManager.isDeviceRetired(device.deviceId)).toBe(true);
+      expect(IOSCtrlProxyClient.getInstance(device)).toBe(retired);
     } finally {
       (
         IOSCtrlProxyManager as unknown as {
@@ -2714,6 +2761,117 @@ describe("killDevice handler", () => {
       expect(IOSCtrlProxyClient.getInstance(device)).toBeDefined();
     } finally {
       managerSpy.mockRestore();
+    }
+  });
+
+  test("A1 late platform kill cannot reopen an iOS CtrlProxy tombstone", async () => {
+    const timer = new FakeTimer();
+    const device: BootedDevice = { name: "iPhone 16", platform: "ios", deviceId: "ios-late-kill" };
+    const started = Promise.withResolvers<void>();
+    const settleKill = Promise.withResolvers<void>();
+    manager.killDevice = async () => {
+      started.resolve();
+      await settleKill.promise;
+    };
+    setDeviceToolsDependencies({ deviceManagerFactory: () => manager, timer });
+    const stop = spyOn(IOSCtrlProxyManager, "getInstance").mockReturnValue({
+      stop: async () => {},
+    } as never);
+    try {
+      const kill = ToolRegistry.getTool("killDevice")!.handler({ device });
+      await started.promise;
+      timer.advanceTime(30_000);
+      await expect(kill).rejects.toThrow("platform shutdown command did not complete");
+      const retired = IOSCtrlProxyClient.getInstance(device);
+      expect(IOSCtrlProxyManager.isDeviceRetired(device.deviceId)).toBe(true);
+      settleKill.resolve();
+      await settleKill.promise;
+      expect(IOSCtrlProxyClient.getInstance(device)).toBe(retired);
+    } finally {
+      stop.mockRestore();
+    }
+  });
+
+  test("skips failed-kill CtrlProxy resume while another shutdown owns the reservation", async () => {
+    const timer = new FakeTimer();
+    const device: BootedDevice = {
+      name: "Pixel 8",
+      platform: "android",
+      deviceId: "emulator-5554",
+    };
+    manager.setBootedDevices("android", [device]);
+    sessionManager = new SessionManager(timer, new FakeDeviceSessionRepository());
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      manager,
+      new DefaultRetryExecutor(timer),
+    );
+    await pool.addDevice(device, { name: device.name, platform: "android", isRunning: true });
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    const reserve = pool.reserveDeviceForShutdown.bind(pool);
+    let concurrent: Awaited<ReturnType<typeof reserve>>;
+    let replaced = false;
+    const reserveSpy = spyOn(pool, "reserveDeviceForShutdown").mockImplementation(
+      async (...args) => {
+        const own = await reserve(...args);
+        if (!own) {
+          return own;
+        }
+        return {
+          ...own,
+          release: async () => {
+            await own.release();
+            if (!replaced) {
+              replaced = true;
+              concurrent = await reserve(device.deviceId);
+            }
+          },
+        };
+      },
+    );
+    const activeObserver = AndroidCtrlProxyClient.getInstance(device, new FakeAdbClientFactory());
+    const closeSpy = spyOn(activeObserver, "close").mockResolvedValue(undefined);
+    const resumeSpy = spyOn(AndroidCtrlProxyClient, "resumeAfterDeviceStart");
+    try {
+      await expect(ToolRegistry.getTool("killDevice")!.handler({ device })).rejects.toThrow(
+        "adb emu kill failed",
+      );
+      expect(await pool.isShutdownReserved(device.deviceId)).toBe(true);
+      // Both platforms use resumeCtrlProxyAfterFailedKill's shared fence.
+      expect(resumeSpy).not.toHaveBeenCalled();
+      expect(AndroidCtrlProxyClient.getExistingInstance(device.deviceId)).toBeNull();
+      const retired = AndroidCtrlProxyClient.getInstance(device, new FakeAdbClientFactory());
+      expect(await retired.ensureConnected()).toBe(false);
+    } finally {
+      resumeSpy.mockRestore();
+      closeSpy.mockRestore();
+      reserveSpy.mockRestore();
+      await concurrent?.release();
+    }
+  });
+
+  test("keeps iOS CtrlProxy retired after an ambiguous platform-command timeout", async () => {
+    const timer = new FakeTimer();
+    const device: BootedDevice = { name: "iPhone 16", platform: "ios", deviceId: "ios-timeout" };
+    manager.setBootedDevices("ios", [device]);
+    manager.killDevice = async () => {
+      throw new ActionableError("Timed out waiting for ios platform shutdown command");
+    };
+    setDeviceToolsDependencies({ deviceManagerFactory: () => manager, timer });
+    const stop = spyOn(IOSCtrlProxyManager, "getInstance").mockReturnValue({
+      stop: async () => {},
+    } as never);
+    try {
+      await expect(ToolRegistry.getTool("killDevice")!.handler({ device })).rejects.toThrow(
+        "Timed out waiting for ios platform shutdown command",
+      );
+      expect(IOSCtrlProxyManager.isDeviceRetired(device.deviceId)).toBe(true);
+      expect(IOSCtrlProxyClient.getInstance(device).ensureConnected()).resolves.toBe(false);
+    } finally {
+      stop.mockRestore();
     }
   });
 
@@ -4129,6 +4287,7 @@ describe("killDevice handler", () => {
             clearIntentionalShutdown: () => {
               clearedIntentionalShutdown++;
             },
+            assertDeviceActionable: () => {},
             reserveDeviceForShutdown: async () => undefined,
           } as never,
         );
@@ -4149,13 +4308,12 @@ describe("killDevice handler", () => {
       if (!tool) {
         throw new Error("killDevice not registered");
       }
-      const response = await tool.handler({
-        device: {
-          name: platform === "android" ? "Pixel 8" : "iPhone 16",
-          platform,
-          deviceId: platform === "android" ? "emulator-5554" : "IOS-UDID",
-        },
-      });
+      const device: BootedDevice = {
+        name: platform === "android" ? "Pixel 8" : "iPhone 16",
+        platform,
+        deviceId: platform === "android" ? "emulator-5554" : "IOS-UDID",
+      };
+      const response = await tool.handler({ device });
 
       expect(response.isError).toBe(true);
       expect(JSON.parse(response.content[0].text)).toEqual({
@@ -4171,6 +4329,10 @@ describe("killDevice handler", () => {
       if (platform === "android") {
         expect(markedIntentionalShutdown).toBe(1);
         expect(clearedIntentionalShutdown).toBe(0);
+        const retired = AndroidCtrlProxyClient.getInstance(device, new FakeAdbClientFactory());
+        expect(await retired.ensureConnected()).toBe(false);
+      } else {
+        expect(IOSCtrlProxyManager.isDeviceRetired(device.deviceId)).toBe(true);
       }
     },
   );

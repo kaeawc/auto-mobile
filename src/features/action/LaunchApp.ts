@@ -37,6 +37,7 @@ import { AndroidCtrlProxyClient } from "../observe/android";
 import { isAndroidPackageRunning } from "../../utils/android-cmdline-tools/androidProcessState";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { shellQuote } from "../../utils/shellQuote";
+import { combineWithAmbientAbort } from "../../utils/AbortContext";
 
 const LAUNCH_OBSERVATION_TIMEOUT_MS = 5000;
 const LAUNCH_OBSERVATION_POLL_INTERVAL_MS = 200;
@@ -1312,7 +1313,13 @@ export class LaunchApp extends BaseVisualChange {
     }
 
     try {
-      await this.adb.executeCommand("shell cmd statusbar collapse");
+      await this.adb.executeCommand(
+        "shell cmd statusbar collapse",
+        undefined,
+        undefined,
+        undefined,
+        combineWithAmbientAbort(signal),
+      );
     } catch (error) {
       logger.warn(
         `[LaunchApp] Failed to collapse notification shade: ${errorMessage(error)}`,
@@ -1329,7 +1336,13 @@ export class LaunchApp extends BaseVisualChange {
         skipAccessibilityAudit: true,
         skipPerformanceAudit: true,
       });
-      return { ...result, observation };
+      return {
+        ...result,
+        observation: this.preserveLaunchObservationMetadata(
+          observation,
+          result.observation ?? observation,
+        ),
+      };
     } catch (error) {
       logger.warn(
         `[LaunchApp] Failed to re-observe after collapsing notification shade: ${errorMessage(error)}`,

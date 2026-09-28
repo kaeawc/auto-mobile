@@ -457,4 +457,20 @@ describe("GetBackStack against real captures (#4329)", () => {
       expect(homeTask?.launchedFromPackage).toBeUndefined();
     });
   });
+
+  describe("API 24-29 legacy task provenance", () => {
+    test("uses the Hist #0 ActivityRecord launcher package without rootOfTask", async () => {
+      // Keep the capture's real API 25 TaskRecord/Hist layout; this launch
+      // package is substituted into its existing ActivityRecord field line.
+      const legacyCapture = readCapture("api25-home-settings-secondapp.log").replace(
+        "launchedFromUid=2000 launchedFromPackage=null userId=0",
+        "launchedFromUid=10123 launchedFromPackage=com.example.launcher userId=0",
+      );
+      const result = await parse(legacyCapture);
+      const contactsTask = result.tasks.find((task) => task.id === 8);
+
+      expect(legacyCapture).not.toContain("rootOfTask=");
+      expect(contactsTask?.launchedFromPackage).toBe("com.example.launcher");
+    });
+  });
 });

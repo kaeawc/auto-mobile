@@ -13,6 +13,7 @@ class FakeSocket extends EventEmitter {
 
   destroy(): this {
     this.destroyed = true;
+    this.emit("close");
     return this;
   }
 }
@@ -57,5 +58,57 @@ describe("DaemonClient socket error disconnect cause", () => {
       const disconnectCause = (error as DaemonUnavailableError).cause as DaemonDisconnectError;
       expect(disconnectCause.toolName).toBe("tools/list");
     }
+  });
+
+  test("decodes a response split inside a multibyte character", async () => {
+    const client = new DaemonClient(
+      "/fake/socket",
+      1_000,
+      new FakeTimer(),
+      {},
+      null,
+      undefined,
+      "win32",
+    );
+    await client.connect();
+    const response = client.callDaemonMethod("tools/list", {}, { timeoutMs: 250 });
+    await Promise.resolve();
+    const request = JSON.parse(createdSocket!.writes[0]);
+    const frame = Buffer.from(
+      JSON.stringify({ id: request.id, type: "mcp_response", success: true, result: "日" }) + "\n",
+    );
+    const split = frame.indexOf(Buffer.from("日")) + 1;
+    createdSocket!.emit("data", frame.subarray(0, split));
+    createdSocket!.emit("data", frame.subarray(split));
+    expect(await response).toBe("日");
+    await client.close();
+  });
+
+  test("drops an incomplete frame when a new socket connects", async () => {
+    const client = new DaemonClient(
+      "/fake/socket",
+      1_000,
+      new FakeTimer(),
+      {},
+      null,
+      undefined,
+      "win32",
+    );
+    await client.connect();
+    createdSocket!.emit("data", Buffer.from('{"id":"stale"'));
+    createdSocket!.emit("close");
+    await client.connect();
+    const response = client.callDaemonMethod("tools/list", {}, { timeoutMs: 250 });
+    await Promise.resolve();
+    const request = JSON.parse(createdSocket!.writes[0]);
+    createdSocket!.emit(
+      "data",
+      Buffer.from(
+        JSON.stringify({ id: request.id, type: "mcp_response", success: true, result: "fresh" }) +
+          "\n",
+      ),
+    );
+    expect(await response).toBe("fresh");
+    await client.close();
   });
 });

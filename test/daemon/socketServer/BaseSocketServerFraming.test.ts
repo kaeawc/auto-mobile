@@ -79,4 +79,15 @@ describe("BaseSocketServer line framing", () => {
     expect(server.dispatched).toHaveLength(2);
     expect(JSON.parse(server.dispatched[1])).toEqual({ id: "2", action: "b" });
   });
+
+  it("preserves a multibyte character split across socket reads", () => {
+    const server = new FramingTestServer();
+    const socket = new FakeSocket();
+    server.attach(socket);
+    const frame = Buffer.from('{"text":"日"}\n');
+    const split = frame.indexOf(Buffer.from("日")) + 1;
+    socket.emit("data", frame.subarray(0, split));
+    socket.emit("data", frame.subarray(split));
+    expect(server.dispatched).toEqual(['{"text":"日"}']);
+  });
 });

@@ -208,6 +208,7 @@ export abstract class BaseSocketServer {
    */
   protected handleConnection(socket: Socket): void {
     let buffer = "";
+    const decoder = new TextDecoder();
 
     if (this.idleTimeoutMs > 0 && typeof socket.setTimeout === "function") {
       socket.setTimeout(this.idleTimeoutMs);
@@ -220,7 +221,7 @@ export abstract class BaseSocketServer {
     }
 
     socket.on("data", (data) => {
-      buffer += data.toString();
+      buffer += typeof data === "string" ? data : decoder.decode(data, { stream: true });
       const lines = buffer.split("\n");
       buffer = lines.pop() || "";
 

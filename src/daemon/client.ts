@@ -305,6 +305,7 @@ export class DaemonClient {
     }
   > = new Map();
   private buffer: string = "";
+  private decoder = new TextDecoder();
   private connected: boolean = false;
   private notificationHandlers: Set<(notification: DaemonNotification) => void> = new Set();
   private connectionClosedHandlers: Set<() => void> = new Set();
@@ -599,6 +600,8 @@ export class DaemonClient {
       this.socket = createConnection(this.socketPath, () => {
         this.timer.clearTimeout(timeout);
         removeAbortListener();
+        this.buffer = "";
+        this.decoder = new TextDecoder();
         this.connected = true;
         logger.info(`Connected to daemon at ${this.socketPath}`);
         if (!settled) {
@@ -619,6 +622,8 @@ export class DaemonClient {
       this.socket.on("close", () => {
         this.connected = false;
         this.socket = null;
+        this.buffer = "";
+        this.decoder = new TextDecoder();
         logger.info("Daemon socket connection closed");
         for (const handler of this.connectionClosedHandlers) {
           handler();
@@ -644,7 +649,7 @@ export class DaemonClient {
    * Handle incoming data from daemon
    */
   private handleData(data: Buffer): void {
-    this.buffer += data.toString();
+    this.buffer += this.decoder.decode(data, { stream: true });
 
     // Process complete JSON messages (newline-delimited)
     const lines = this.buffer.split("\n");

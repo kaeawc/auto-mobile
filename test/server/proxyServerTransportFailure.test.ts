@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import {
@@ -28,6 +28,35 @@ afterEach(() => {
 });
 
 describe("proxy server device-control transport errors", () => {
+  beforeAll(async () => {
+    const availabilitySpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+    const daemonManager = new FakeDaemonManager();
+    daemonManager.statusResult = {
+      ...daemonManager.statusResult,
+      version: DAEMON_VERSION,
+    };
+    const { server, proxy } = createProxyMcpServer({
+      proxyConfig: {
+        clientFactory: () => new FakeDaemonClient(),
+        daemonManager,
+        autoStartDaemon: false,
+      },
+    });
+    const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "transport-failure-warmup-client", version: "0.0.1" });
+
+    try {
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+      await proxy.callTool("observe", {});
+    } finally {
+      await client.close();
+      await server.close();
+      await proxy.close();
+      availabilitySpy.mockRestore();
+    }
+  });
+
   test("returns safe machine-readable transport failure details", () => {
     const failure: DeviceControlTransportFailure = {
       code: "device_control_transport_failure",

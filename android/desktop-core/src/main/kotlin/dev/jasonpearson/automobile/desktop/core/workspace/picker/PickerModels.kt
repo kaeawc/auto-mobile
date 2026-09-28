@@ -4,12 +4,10 @@ import dev.jasonpearson.automobile.desktop.core.mcp.BootedDeviceInfo
 import dev.jasonpearson.automobile.desktop.core.mcp.DeviceImageInfo
 import dev.jasonpearson.automobile.desktop.core.workspace.Platform
 
-/**
- * State of a device in the picker. A "booting" state is intentionally absent — the daemon device
- * resources do not model it (only booted vs available), so it is deferred to a follow-up.
- */
+/** State of a device in the picker. */
 enum class DeviceState {
   Booted,
+  Booting,
   Shutdown,
 }
 
@@ -107,7 +105,9 @@ fun buildPickerDevices(
       id = deviceId,
       name = device.name,
       platform = platformOf(device.platform),
-      state = DeviceState.Booted,
+      state =
+        if (device.runtime.lifecycle.state == "booting") DeviceState.Booting
+        else DeviceState.Booted,
       osKey = osKey,
       osLabel = osLabel,
       architecture = null,

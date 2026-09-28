@@ -28,7 +28,14 @@ import {
   getBootedDevicesForPlatforms,
   resetBootedDevicesResourceCache,
   setBootCompletionAdbFactory,
+  setInFlightAndroidColdBootReader,
 } from "../../../src/server/bootedDeviceResources";
+import {
+  DeviceBootService,
+  getInFlightAndroidColdBootReader,
+} from "../../../src/utils/deviceBootService";
+import { FakeDeviceMatcher } from "../../fakes/FakeDeviceMatcher";
+import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../../src/utils/virtualDeviceLifecycleCoordinator";
 import { BootedDevice, Platform } from "../../../src/models";
 import { DaemonState } from "../../../src/daemon/daemonState";
 import { DevicePool } from "../../../src/daemon/devicePool";
@@ -94,6 +101,7 @@ describe("MCP Booted Device Resources", () => {
 
   afterEach(() => {
     setBootCompletionAdbFactory(null);
+    setInFlightAndroidColdBootReader(null);
     if (DaemonState.getInstance().isInitialized()) {
       DaemonState.getInstance().reset();
     }
@@ -132,6 +140,128 @@ describe("MCP Booted Device Resources", () => {
     resetBootedDevicesResourceCache();
     await getBootedDevicesForPlatforms(["android"], timer);
     expect(fakeDeviceUtils.getCallCount("getBootedDevices:android")).toBe(3);
+  });
+
+  test("cold-boot claim notifies both subscribers and yields one serial-less row until adb discovers it", async () => {
+    const timer = new FakeTimer();
+    const coordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
+    setInFlightAndroidColdBootReader(getInFlightAndroidColdBootReader(coordinator));
+    const avdName = mockAndroidDevice1.name;
+    const image = {
+      name: avdName,
+      platform: "android" as const,
+      isRunning: false,
+      apiLevel: 34,
+      screenWidth: 1080,
+    };
+    fakeDeviceUtils.setDeviceImages("android", [image]);
+    let resolveStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      resolveStarted = resolve;
+    });
+    const start = fakeDeviceUtils.startDevice.bind(fakeDeviceUtils);
+    fakeDeviceUtils.startDevice = async (...args) => {
+      const handle = await start(...args);
+      // FakeDeviceUtils normally lists the emulator immediately; preserve the pre-adb window.
+      fakeDeviceUtils.setBootedDevices("android", []);
+      resolveStarted();
+      return handle;
+    };
+    const matcher = new FakeDeviceMatcher();
+    matcher.setImageResult(image);
+    let resolveReady!: (device: BootedDevice) => void;
+    const ready = new Promise<BootedDevice>((resolve) => {
+      resolveReady = resolve;
+    });
+    fakeDeviceUtils.waitForDeviceReady = async () => ready;
+    const { client, server } = fixture.getContext();
+    const uris = ["automobile:devices/booted", "automobile:devices/booted/android"];
+    const sent: string[] = [];
+    const notification = spyOn(server.server, "notification").mockImplementation(
+      async (message) => {
+        if (message.method === "notifications/resources/updated") {
+          sent.push(message.params.uri);
+        }
+      },
+    );
+    let resolveClaim!: () => void;
+    const claimed = new Promise<void>((resolve) => {
+      resolveClaim = resolve;
+    });
+    const bootService = new DeviceBootService({
+      deviceManager: fakeDeviceUtils,
+      deviceMatcher: matcher,
+      deviceCreationGate: { isCreationAllowed: () => false, describeSource: () => "test" },
+      deviceProvisioner: {
+        provision: async () => {
+          throw new Error("unexpected provision");
+        },
+      },
+      matchingStrategy: "LATEST",
+      timer,
+      lifecycleCoordinator: coordinator,
+      onAndroidColdBootTrackingChanged: (_name, phase) => {
+        void notifyBootedDeviceResourcesUpdated().then(() => {
+          if (phase === "claimed") {
+            resolveClaim();
+          }
+        });
+      },
+    });
+    let boot: Promise<unknown> | undefined;
+    try {
+      for (const uri of uris) {
+        await client.request({ method: "resources/subscribe", params: { uri } }, z.object({}));
+      }
+      boot = bootService.boot({ platform: "android" });
+      await claimed;
+      await started;
+      expect(sent).toEqual(expect.arrayContaining(uris));
+      const read = async (uri: string): Promise<BootedDevicesResourceContent> =>
+        JSON.parse((await client.readResource({ uri })).contents[0].text!);
+      for (const uri of uris) {
+        const data = await read(uri);
+        expect(data.totalCount).toBe(1);
+        expect(data.androidCount).toBe(1);
+        expect(data.virtualCount).toBe(1);
+        expect(data.devices[0]).toMatchObject({
+          name: avdName,
+          platform: "android",
+          source: "local",
+          identity: { stableId: avdName },
+          apiLevel: 34,
+          display: { width: 1080 },
+          runtime: { deviceId: null, lifecycle: { state: "booting", known: true } },
+        });
+        expect(data.devices[0]).not.toHaveProperty("recoveryEligibility");
+        expect(data.devices[0]).not.toHaveProperty("identityUnresolved");
+      }
+
+      fakeDeviceUtils.setBootedDevices("android", [mockAndroidDevice1]);
+      const adb = new FakeAdbExecutor();
+      adb.setCommandResponse("shell getprop sys.boot_completed", { stdout: "0", stderr: "" });
+      setBootCompletionAdbFactory({ create: () => adb });
+      resetBootedDevicesResourceCache();
+      const preCompleted = await read(uris[1]);
+      expect(preCompleted.devices).toHaveLength(1);
+      expect(preCompleted.devices[0].runtime.deviceId).toBe(mockAndroidDevice1.deviceId);
+      expect(preCompleted.devices[0].runtime.lifecycle.state).toBe("booting");
+
+      adb.setCommandResponse("shell getprop sys.boot_completed", { stdout: "1", stderr: "" });
+      resetBootedDevicesResourceCache();
+      const completed = await read(uris[1]);
+      expect(completed.devices).toHaveLength(1);
+      expect(completed.devices[0].runtime.lifecycle.state).toBe("booted");
+    } finally {
+      resolveReady(mockAndroidDevice1);
+      if (boot) {
+        await boot;
+      }
+      for (const uri of uris) {
+        await client.request({ method: "resources/unsubscribe", params: { uri } }, z.object({}));
+      }
+      notification.mockRestore();
+    }
   });
 
   test.each([

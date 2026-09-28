@@ -1397,6 +1397,7 @@ describe("platform device preparation tools", () => {
       const syncEntered = Promise.withResolvers<void>();
       const releaseSync = Promise.withResolvers<void>();
       const notificationEntered = Promise.withResolvers<void>();
+      const postCommitNotificationEntered = Promise.withResolvers<void>();
       const notification = Promise.withResolvers<void>();
       let installedAppResourceSyncs = 0;
       let notifiedInstalledAppResourcesChanged: boolean | undefined;
@@ -1415,6 +1416,9 @@ describe("platform device preparation tools", () => {
           notificationStarted = true;
           notifiedInstalledAppResourcesChanged = installedAppResourcesChanged;
           notificationEntered.resolve();
+          if (installedAppResourcesChanged) {
+            postCommitNotificationEntered.resolve();
+          }
           await notification.promise;
         },
       });
@@ -1435,12 +1439,15 @@ describe("platform device preparation tools", () => {
           await Promise.resolve();
         }
         expect(requestSettled).toBe(true);
-        expect(notificationStarted).toBe(false);
+        expect(notificationStarted).toBe(platform === "android");
         expect(readinessReleases).toBe(1);
         expect(lifecycleReleases).toBe(1);
 
         releaseSync.resolve();
-        await awaitPromptly(notificationEntered.promise, "resource notification");
+        await awaitPromptly(
+          postCommitNotificationEntered.promise,
+          "post-commit resource notification",
+        );
         expect(installedAppResourceSyncs).toBe(1);
         expect(notifiedInstalledAppResourcesChanged).toBe(true);
         const [sessionId] = sessionManager.getAllSessionIds();

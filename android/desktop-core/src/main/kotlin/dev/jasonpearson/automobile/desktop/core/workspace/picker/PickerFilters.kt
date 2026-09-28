@@ -29,7 +29,12 @@ data class FilterOption(
 
 internal fun Platform.label(): String = if (this == Platform.Ios) "iOS" else "Android"
 
-internal fun DeviceState.label(): String = if (this == DeviceState.Booted) "Booted" else "Shutdown"
+internal fun DeviceState.label(): String =
+  when (this) {
+    DeviceState.Booted -> "Booted"
+    DeviceState.Booting -> "Booting"
+    DeviceState.Shutdown -> "Shutdown"
+  }
 
 /** Match a device against every active dimension except [ignore] (for faceted counting). */
 private fun matches(d: PickerDevice, f: PickerFilters, ignore: FilterDimension?): Boolean {

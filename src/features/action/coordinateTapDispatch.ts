@@ -4,7 +4,7 @@ import { logger } from "../../utils/logger";
 import { throwIfAborted } from "../../utils/toolUtils";
 
 /** The coordinate-tap subset shared by Android and iOS CtrlProxy clients. */
-export interface CoordinateTapClient {
+export interface CoordinateTapClient<Dispatch = never> {
   requestTapCoordinates(
     x: number,
     y: number,
@@ -12,6 +12,7 @@ export interface CoordinateTapClient {
     timeoutMs?: number,
     perf?: unknown,
     frameContext?: string,
+    onDispatch?: Dispatch,
   ): Promise<{ success: boolean; error?: string }>;
 }
 
@@ -33,16 +34,33 @@ export async function dispatchAndroidCoordinateTap(
   signal?: AbortSignal,
 ): Promise<void> {
   throwIfAborted(signal);
+  let dispatched = false;
+  const onDispatch = () => {
+    dispatched = true;
+  };
+  // TapAtCoordinate stores both platform clients under the shared interface.
+  // Only the Android client accepts a dispatch callback in position seven;
+  // the iOS client uses that position for an abort signal.
+  const androidService = accessibilityService as CoordinateTapClient<() => void>;
   const result =
     frameContext === undefined
-      ? await accessibilityService.requestTapCoordinates(x, y, durationMs)
-      : await accessibilityService.requestTapCoordinates(
+      ? await androidService.requestTapCoordinates(
+          x,
+          y,
+          durationMs,
+          undefined,
+          undefined,
+          undefined,
+          onDispatch,
+        )
+      : await androidService.requestTapCoordinates(
           x,
           y,
           durationMs,
           undefined,
           undefined,
           frameContext,
+          onDispatch,
         );
   if (result.success) {
     return;
@@ -53,6 +71,11 @@ export async function dispatchAndroidCoordinateTap(
   if (frameContext !== undefined && isStaleFrameContextRejection(result.error)) {
     throw new ActionableError(
       result.error ?? "Stale frame context; observe a fresh frame before retrying",
+    );
+  }
+  if (dispatched) {
+    throw new ActionableError(
+      `Tap outcome is indeterminate: the request was dispatched but no result was confirmed (${result.error ?? "unknown error"}). Do not retry automatically.`,
     );
   }
   logger.warn(

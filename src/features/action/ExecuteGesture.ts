@@ -109,11 +109,23 @@ export class ExecuteGesture extends BaseVisualChange {
     duration: number,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<SwipeResult> {
+    let dispatched = false;
+    const indeterminateResult = (reason: string): SwipeResult => ({
+      success: false,
+      x1,
+      y1,
+      x2,
+      y2,
+      duration,
+      error: `Swipe outcome is indeterminate: the request was dispatched but no result was confirmed (${reason}). Do not retry automatically.`,
+    });
     try {
       const client = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
 
       const result = await perf.track("a11ySwipe", async () => {
-        return await client.requestSwipe(x1, y1, x2, y2, duration, 5000, perf);
+        return await client.requestSwipe(x1, y1, x2, y2, duration, 5000, perf, undefined, () => {
+          dispatched = true;
+        });
       });
 
       if (result.success) {
@@ -131,6 +143,10 @@ export class ExecuteGesture extends BaseVisualChange {
           a11yGestureTimeMs: result.gestureTimeMs,
         };
       } else {
+        if (dispatched) {
+          logger.warn(`[SWIPE] A11y swipe outcome indeterminate: ${result.error}`);
+          return indeterminateResult(result.error ?? "unknown error");
+        }
         logger.warn(`[SWIPE] A11y swipe failed: ${result.error}, falling back to ADB`);
         // Fall back to ADB on failure
         await perf.track("adbInputSwipeFallback", async () => {
@@ -147,6 +163,10 @@ export class ExecuteGesture extends BaseVisualChange {
         };
       }
     } catch (error) {
+      if (dispatched) {
+        logger.warn(`[SWIPE] A11y swipe outcome indeterminate: ${error}`);
+        return indeterminateResult(`${error}`);
+      }
       logger.warn(`[SWIPE] A11y swipe exception: ${error}, falling back to ADB`);
       // Fall back to ADB on exception
       await perf.track("adbInputSwipeFallback", async () => {

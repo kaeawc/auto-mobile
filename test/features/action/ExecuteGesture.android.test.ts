@@ -80,6 +80,38 @@ describe("ExecuteGesture Android swipe", () => {
     expect(fakeAdb.getExecutedCommands()).toEqual(["shell input swipe 5 6 7 8 120"]);
   });
 
+  test("does not replay a dispatched a11y swipe when its response is lost", async () => {
+    fakeA11yService.setSwipeResult({
+      success: false,
+      totalTimeMs: 0,
+      error: "Swipe timed out after 5000ms",
+    });
+    fakeA11yService.setSwipeDispatchesBeforeResult(true);
+    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
+      fakeA11yService as unknown as AndroidCtrlProxyClient,
+    );
+
+    const result = await createGesture().swipe(5, 6, 7, 8, { scrollMode: "a11y", duration: 120 });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/outcome is indeterminate.*Do not retry automatically/i);
+    expect(fakeAdb.getExecutedCommands()).toEqual([]);
+  });
+
+  test("does not replay a dispatched a11y swipe if its request throws", async () => {
+    fakeA11yService.setFailureMode("swipe", new Error("response lost"));
+    fakeA11yService.setSwipeDispatchesBeforeResult(true);
+    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
+      fakeA11yService as unknown as AndroidCtrlProxyClient,
+    );
+
+    const result = await createGesture().swipe(5, 6, 7, 8, { scrollMode: "a11y", duration: 120 });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/outcome is indeterminate.*Do not retry automatically/i);
+    expect(fakeAdb.getExecutedCommands()).toEqual([]);
+  });
+
   test("falls back to an ADB swipe when the a11y service throws", async () => {
     fakeA11yService.setFailureMode("swipe", new Error("socket closed"));
     getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(

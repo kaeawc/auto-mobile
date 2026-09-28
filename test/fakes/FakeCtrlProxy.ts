@@ -99,6 +99,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
   private actionResult: A11yActionResult | null = null;
   private twoFingerSwipeResult: A11ySwipeResult | null = null;
   private swipeResult: A11ySwipeResult | null = null;
+  private swipeDispatchesBeforeResult: boolean = false;
   private clearTextResult: A11ySetTextResult | null = null;
 
   private setTextHistory: Array<{
@@ -234,6 +235,11 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
    */
   setSwipeResult(result: A11ySwipeResult | null): void {
     this.swipeResult = result;
+  }
+
+  /** Simulate a swipe reaching the device before its response or exception. */
+  setSwipeDispatchesBeforeResult(value: boolean): void {
+    this.swipeDispatchesBeforeResult = value;
   }
 
   /**
@@ -503,8 +509,13 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     duration: number = 300,
     timeoutMs: number = 5000,
     perf?: PerformanceTracker,
+    frameContext?: string,
+    onDispatch?: () => void,
   ): Promise<A11ySwipeResult> {
     await this.applyDelay("swipe");
+    if (this.swipeDispatchesBeforeResult) {
+      onDispatch?.();
+    }
     this.checkFailure("swipe");
 
     this.swipeHistory.push({ x1, y1, x2, y2, duration });

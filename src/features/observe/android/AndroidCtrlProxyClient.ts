@@ -925,6 +925,7 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
     timeoutMs?: number,
     perf?: PerformanceTracker,
     frameContext?: string,
+    onDispatch?: () => void,
   ): Promise<A11ySwipeResult>;
 
   requestTapCoordinates(
@@ -934,6 +935,7 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
     timeoutMs?: number,
     perf?: PerformanceTracker,
     frameContext?: string,
+    onDispatch?: () => void,
   ): Promise<A11yTapCoordinatesResult>;
 
   requestDrag(
@@ -2628,8 +2630,19 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     timeoutMs?: number,
     perf?: PerformanceTracker,
     frameContext?: string,
+    onDispatch?: () => void,
   ): Promise<A11ySwipeResult> {
-    return this.gestures.requestSwipe(x1, y1, x2, y2, duration, timeoutMs, perf, frameContext);
+    return this.gestures.requestSwipe(
+      x1,
+      y1,
+      x2,
+      y2,
+      duration,
+      timeoutMs,
+      perf,
+      frameContext,
+      onDispatch,
+    );
   }
 
   async requestTapCoordinates(
@@ -2642,8 +2655,18 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     timeoutMs?: number,
     perf?: PerformanceTracker,
     frameContext?: string,
+    onDispatch?: () => void,
   ): Promise<A11yTapCoordinatesResult> {
-    return this.gestures.requestTapCoordinates(x, y, duration, timeoutMs, perf, frameContext);
+    return this.gestures.requestTapCoordinates(
+      x,
+      y,
+      duration,
+      timeoutMs,
+      perf,
+      frameContext,
+      undefined,
+      onDispatch,
+    );
   }
 
   async requestTwoFingerSwipe(

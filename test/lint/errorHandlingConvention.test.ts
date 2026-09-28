@@ -159,6 +159,15 @@ export function run(reject: (error: unknown) => void): void {
     );
   });
 
+  test("ignores object property names when checking caught binding references", async () => {
+    const flagged = await lintSnippet(
+      `try {} catch (error) { return { done: false, error: "x" }; }`,
+    );
+    const forwarded = await lintSnippet(`try {} catch (error) { reject(error); }`);
+    expect(flagged.some((m) => m.startsWith("Catch block swallows the error"))).toBe(true);
+    expect(forwarded.some((m) => m.startsWith("Catch block swallows the error"))).toBe(false);
+  });
+
   test("allows non-fallback recovery returns", async () => {
     const messages = await lintSnippet(`
 function recover(error: unknown): string {
@@ -193,6 +202,51 @@ export function check(): { status: "pass" | "skip"; message?: string } {
     expect(messages).toContain(
       "Catch blocks that return a typed failure/status object must log at warn, not debug.",
     );
+  });
+
+  test("recognizes success false as a typed failure return", async () => {
+    const flagged = await lintSnippet(
+      `try {} catch (error) { return { success: false, message: "x" }; }`,
+    );
+    const logged = await lintSnippet(
+      `try {} catch (error) { logger.warn(error); return { success: false, message: "x" }; }`,
+    );
+    const successful = await lintSnippet(`try {} catch { return { success: true }; }`);
+    expect(flagged).toContain(
+      "Catch blocks that return a typed failure/status object must log at warn, not debug.",
+    );
+    expect(logged).not.toContain(
+      "Catch blocks that return a typed failure/status object must log at warn, not debug.",
+    );
+    expect(successful).not.toContain(
+      "Catch blocks that return a typed failure/status object must log at warn, not debug.",
+    );
+  });
+
+  test("reports each swallowed status-object catch only once", async () => {
+    const expected = [
+      "Catch blocks that return a typed failure/status object must log at warn, not debug.",
+    ];
+    const successFailure = await lintSnippet(
+      `try {} catch (error) { return { success: false, message: "x" }; }`,
+    );
+    const statusFailure = await lintSnippet(
+      `try {} catch { return { status: "skip", message: "x" }; }`,
+    );
+
+    expect(successFailure).toEqual(expected);
+    expect(statusFailure).toEqual(expected);
+  });
+
+  test("flags only empty inline promise catch handlers", async () => {
+    const swallowed = await lintSnippet(`promise.catch(() => {});`);
+    const logged = await lintSnippet(`promise.catch((error) => { logger.warn(error); });`);
+    const forwarded = await lintSnippet(`promise.catch((error) => { reject(error); });`);
+    const named = await lintSnippet(`promise.catch(handleError);`);
+    expect(swallowed.some((m) => m.startsWith("Promise .catch() handler swallows"))).toBe(true);
+    expect(logged.some((m) => m.startsWith("Promise .catch() handler swallows"))).toBe(false);
+    expect(forwarded.some((m) => m.startsWith("Promise .catch() handler swallows"))).toBe(false);
+    expect(named.some((m) => m.startsWith("Promise .catch() handler swallows"))).toBe(false);
   });
 
   test("rejects debug logging before returning a typed status failure", async () => {

@@ -10,6 +10,7 @@ import { resolvePathFromDaemonLaunchWorkingDirectory } from "../workingDirectory
 import { SecurityClient, type SecurityClientApi } from "./SecurityClient";
 import { defaultTimer, Timer } from "../SystemTimer";
 import { getAbortSignal } from "../AbortContext";
+import { getSharedAutoMobileDir } from "../tempDir";
 
 type SigningStyle = "automatic" | "manual";
 
@@ -661,6 +662,6 @@ export class XcodeSigningManager {
   }
 
   private entitlementsDirectory(): string {
-    return join(this.dependencies.homedir(), ".automobile", "ctrl-proxy", "entitlements");
+    return getSharedAutoMobileDir("ctrl-proxy/entitlements", this.dependencies.homedir());
   }
 }

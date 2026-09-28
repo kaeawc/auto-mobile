@@ -12,7 +12,7 @@ import {
 } from "../../src/constants/release";
 import { FakeIOSCtrlProxyBundleDownloader } from "../fakes/FakeIOSCtrlProxyBundleDownloader";
 import { FakeCtrlProxyCodesignVerifier } from "../fakes/FakeCtrlProxyCodesignVerifier";
-import { getTempDir } from "../../src/utils/tempDir";
+import { getSharedAutoMobileDir, getTempDir } from "../../src/utils/tempDir";
 import * as fs from "fs/promises";
 import * as path from "path";
 import os from "os";
@@ -223,7 +223,7 @@ describe("IOSCtrlProxyBuilder", function () {
       // getTempDir() uses the uid-private default and honors the explicit
       // AUTOMOBILE_DATA_DIR override used by CI.
       expect(config.derivedDataPath).toBe(getTempDir("derived-data"));
-      expect(config.bundleCacheDir).toBe(path.join(os.homedir(), ".automobile", "ctrl-proxy-ios"));
+      expect(config.bundleCacheDir).toBe(getSharedAutoMobileDir("ctrl-proxy-ios"));
     });
 
     test("should respect environment variable overrides", function () {

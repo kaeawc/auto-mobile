@@ -2,11 +2,19 @@ import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { load } from "js-yaml";
-import { loadWorkflow, type WorkflowStep } from "../helpers/workflowSteps";
+import { loadWorkflow, type WorkflowDefinition, type WorkflowStep } from "../helpers/workflowSteps";
 
 const repoRoot = join(import.meta.dir, "../..");
 const docsWorkflow = ".github/workflows/docs.yml";
 const circlePaths = [".circleci/config.yml", ".circleci/continue_config.yml"];
+
+function isWorkflowFile(name: string): boolean {
+  return name.endsWith(".yml") || name.endsWith(".yaml");
+}
+
+function isActionFile(name: string): boolean {
+  return name === "action.yml" || name === "action.yaml";
+}
 
 function actionFiles(directory: string): string[] {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -14,12 +22,12 @@ function actionFiles(directory: string): string[] {
     if (entry.isDirectory()) {
       return actionFiles(path);
     }
-    return entry.name === "action.yml" ? [relative(repoRoot, path).split(sep).join("/")] : [];
+    return isActionFile(entry.name) ? [relative(repoRoot, path).split(sep).join("/")] : [];
   });
 }
 
 const workflowPaths = readdirSync(join(repoRoot, ".github/workflows"))
-  .filter((name) => name.endsWith(".yml"))
+  .filter(isWorkflowFile)
   .map((name) => `.github/workflows/${name}`);
 const compositePaths = actionFiles(join(repoRoot, ".github/actions"));
 const workflowDocuments = workflowPaths.map((path) => ({ path, document: loadWorkflow(path) }));
@@ -30,10 +38,14 @@ interface StepLocation {
   step: WorkflowStep;
 }
 
-const workflowSteps: StepLocation[] = workflowDocuments.flatMap(({ path, document }) =>
-  Object.entries(document.jobs ?? {}).flatMap(([jobId, job]) =>
+function workflowStepLocations(path: string, document: WorkflowDefinition): StepLocation[] {
+  return Object.entries(document.jobs ?? {}).flatMap(([jobId, job]) =>
     (job?.steps ?? []).map((step) => ({ path, jobId, step })),
-  ),
+  );
+}
+
+const workflowSteps: StepLocation[] = workflowDocuments.flatMap(({ path, document }) =>
+  workflowStepLocations(path, document),
 );
 const compositeSteps: StepLocation[] = compositePaths.flatMap((path) => {
   const document = load(readFileSync(join(repoRoot, path), "utf8")) as {
@@ -75,6 +87,42 @@ function runsGitLfsDownload(run: string): boolean {
   });
 }
 
+function checkoutLfsOffenders(locations: StepLocation[]): string[] {
+  return locations
+    .filter(
+      (location) =>
+        location.step.uses?.startsWith("actions/checkout@") &&
+        String(location.step.with?.lfs) === "true" &&
+        !permitsLfs(location),
+    )
+    .map(({ path, jobId }) => `${path}:${jobId ?? "composite action"}`);
+}
+
+function circleRunCommand(step: string | Record<string, unknown>): string | undefined {
+  if (typeof step === "string") {
+    return undefined;
+  }
+  const run = step.run;
+  if (typeof run === "string") {
+    return run;
+  }
+  if (run !== null && typeof run === "object" && "command" in run) {
+    return typeof run.command === "string" ? run.command : undefined;
+  }
+  return undefined;
+}
+
+function circleLfsDownloadOffenders(path: string, config: CircleConfig): string[] {
+  return Object.entries(config.jobs ?? {}).flatMap(([name, job]) =>
+    (job.steps ?? [])
+      .filter((step) => {
+        const command = circleRunCommand(step);
+        return command !== undefined && runsGitLfsDownload(command);
+      })
+      .map(() => `${path}:${name}`),
+  );
+}
+
 function hasCheckout(job: CircleJob): boolean {
   return (job.steps ?? []).some(
     (step) => step === "checkout" || (typeof step === "object" && "checkout" in step),
@@ -102,15 +150,41 @@ describe("CI LFS checkout policy", () => {
   });
 
   test("only docs-publish checkout enables Git LFS", () => {
-    const offenders = [...workflowSteps, ...compositeSteps]
-      .filter(
-        (location) =>
-          location.step.uses?.startsWith("actions/checkout@") &&
-          String(location.step.with?.lfs) === "true" &&
-          !permitsLfs(location),
-      )
-      .map(({ path, jobId }) => `${path}:${jobId ?? "composite action"}`);
+    const offenders = checkoutLfsOffenders([...workflowSteps, ...compositeSteps]);
     expect(offenders).toEqual([]);
+  });
+
+  test("discovers .yaml workflows and composite actions and rejects their LFS checkouts", () => {
+    expect(isWorkflowFile("example.yaml")).toBe(true);
+    expect(isActionFile("action.yaml")).toBe(true);
+
+    const workflow = load(`
+jobs:
+  build:
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+`) as WorkflowDefinition;
+    const composite = load(`
+runs:
+  steps:
+    - uses: actions/checkout@v4
+      with:
+        lfs: true
+`) as { runs: { steps: WorkflowStep[] } };
+    expect(
+      checkoutLfsOffenders([
+        ...workflowStepLocations(".github/workflows/example.yaml", workflow),
+        ...composite.runs.steps.map((step) => ({
+          path: ".github/actions/example/action.yaml",
+          step,
+        })),
+      ]),
+    ).toEqual([
+      ".github/workflows/example.yaml:build",
+      ".github/actions/example/action.yaml:composite action",
+    ]);
   });
 
   test("only docs-publish may run git lfs pull or fetch", () => {
@@ -145,10 +219,31 @@ describe("CI LFS checkout policy", () => {
       }
     }
     expect(missing).toEqual([]);
+    expect(
+      circleDocuments.flatMap(({ path, document }) => circleLfsDownloadOffenders(path, document)),
+    ).toEqual([]);
     const setupConfig = circleDocuments[0]!.document;
     expect(setupConfig.workflows?.["detect-ios-changes"]?.jobs).toContainEqual({
       "detect-ios-changes": { filters: { branches: { ignore: "main" } } },
     });
     expect(hasCheckout(setupConfig.jobs?.["detect-ios-changes"] ?? {})).toBe(true);
+  });
+
+  test("CircleCI run steps reject git lfs pull and fetch in both run forms", () => {
+    const config = load(`
+jobs:
+  string-run:
+    steps:
+      - run: git lfs pull --include=docs/**
+  map-run:
+    steps:
+      - run:
+          name: Fetch assets
+          command: git lfs fetch --include=assets/**
+`) as CircleConfig;
+    expect(circleLfsDownloadOffenders(".circleci/fixture.yml", config)).toEqual([
+      ".circleci/fixture.yml:string-run",
+      ".circleci/fixture.yml:map-run",
+    ]);
   });
 });

@@ -15,46 +15,41 @@ import {
 import {
   STABLE_VIEW_ID_HASH_LENGTH,
   STABLE_VIEW_ID_PREFIX,
+  STABLE_VIEW_ID_TEXT_HASH_LENGTH,
 } from "../observe/android/StableNodeIdentity";
 import { ActionableError } from "../../models/ActionableError";
 
 /**
- * `assignStableViewIds` disambiguates content-identical duplicate nodes with an
- * ordinal `-<k>` suffix (`s-<hash>-1`, `s-<hash>-2`, ...) assigned by document
- * order AT CAPTURE TIME (`StableNodeIdentity.ts`) - EVERY member of a duplicate
- * group is suffixed, including the first (`-1`), and the bare, un-suffixed
- * `s-<hash>` is emitted only for a hash that is UNIQUE in the capture (issue
- * #6229). The ordinal forms are still capture-local whenever a duplicate
- * exists: an insert or reorder between the capture an id was observed from and
- * the fresh capture a later `tapOn`/`sendKeys` resolves it against can shift
- * which node an existing `-<k>` lands on - silently resolving to the WRONG
- * node rather than the one the caller meant (issue #6218 review thread
- * PRRT_kwDOP-GF5M6foer0, follow-up PRRT_kwDOP-GF5M6fomf-). The bare form, by
- * contrast, now means "this content was unique when observed", so it cannot be
- * silently reassigned to a since-removed peer (issue #6229).
+ * `assignStableViewIds` disambiguates structural duplicates with a descendant
+ * text hash (`~<texthash8>`) when it is unique within the group, and with a
+ * document-order ordinal (`-<k>`) for peers whose descendant text also
+ * collides. Every duplicate is suffixed; bare `s2-<hash>` means its structural
+ * content was unique when observed (#6229). Ordinals remain capture-local:
+ * an insert or reorder can shift which node holds `-<k>` (issue #6218 review
+ * threads PRRT_kwDOP-GF5M6foer0 and PRRT_kwDOP-GF5M6fomf-).
  *
- * This pattern requires the producer's EXACT shape - the `s-` prefix plus
+ * This pattern requires the producer's EXACT shape - the `s2-` prefix plus
  * exactly `STABLE_VIEW_ID_HASH_LENGTH` hex characters, with an optional
- * `-<k>` ordinal - so a real, resource-id-backed `view-id` that merely starts
- * with `s-` (e.g. a bare Compose testTag like `s-a` / `s-a-2`) is never
+ * `-<k>` ordinal or `~<texthash8>` content suffix - so a real resource id that
+ * merely starts with `s2-` (e.g. a Compose testTag like `s2-a`) is never
  * misclassified as synthetic (review thread PRRT_kwDOP-GF5M6fomgA).
  */
 const SYNTHETIC_STABLE_VIEW_ID_PATTERN = new RegExp(
-  `^(${STABLE_VIEW_ID_PREFIX}[0-9a-f]{${STABLE_VIEW_ID_HASH_LENGTH}})(?:-\\d+)?$`,
+  `^(${STABLE_VIEW_ID_PREFIX}[0-9a-f]{${STABLE_VIEW_ID_HASH_LENGTH}})(?:-\\d+|~[0-9a-f]{${STABLE_VIEW_ID_TEXT_HASH_LENGTH}})?$`,
 );
 
 /**
- * The base id (`s-<hash>`, un-suffixed) for a synthetic stable id, whether
- * `id` itself is the bare first-occurrence form or an ordinal-suffixed
- * duplicate. Returns null when `id` does not match the producer's exact
- * shape - including a real `view-id` that only superficially resembles one.
+ * The base id (`s2-<hash>`, un-suffixed) for a synthetic stable id, whether
+ * `id` itself is bare or carries either suffix. Returns null when `id` does
+ * not match the producer's exact shape - including a real `view-id` that only
+ * superficially resembles one.
  */
 function syntheticStableViewIdBase(id: string): string | null {
   const match = SYNTHETIC_STABLE_VIEW_ID_PATTERN.exec(id);
   return match ? match[1] : null;
 }
 
-/** True when `viewId` is a synthetic id (bare or ordinal-suffixed) sharing `base`. */
+/** True when `viewId` is a synthetic id (bare or either suffix) sharing `base`. */
 function sharesStableViewIdBase(viewId: string, base: string): boolean {
   return syntheticStableViewIdBase(viewId) === base;
 }
@@ -536,10 +531,10 @@ export class DefaultElementFinder implements ElementFinder {
    * True when some node within `searchRoots` carries `id` as its REAL
    * `resource-id` field (not merely a `view-id` that happens to look
    * synthetic-shaped). A real resource-id is never subject to
-   * `assignStableViewIds`' ordinal semantics, so it must win over a
-   * synthetic-ordinal interpretation of the same string (review thread
+   * `assignStableViewIds`' suffix semantics, so it must win over a
+   * synthetic-id interpretation of the same string (review thread
    * PRRT_kwDOP-GF5M6fomgA) even in the astronomically unlikely case a real id
-   * collides with the producer's exact `s-<16 hex>(-<k>)?` shape.
+   * collides with the producer's exact `s2-<16 hex>` shape and a valid suffix.
    */
   private hasExactResourceIdFieldMatch(searchRoots: ViewHierarchyNode[], id: string): boolean {
     let found = false;
@@ -577,7 +572,11 @@ export class DefaultElementFinder implements ElementFinder {
           hasBare = true;
         } else if (viewId === `${base}-1`) {
           hasFirstOrdinal = true;
-        } else if (typeof viewId === "string" && sharesStableViewIdBase(viewId, base)) {
+        } else if (
+          typeof viewId === "string" &&
+          viewId.startsWith(`${base}-`) &&
+          sharesStableViewIdBase(viewId, base)
+        ) {
           hasLaterOrdinal = true;
         }
       });
@@ -586,11 +585,11 @@ export class DefaultElementFinder implements ElementFinder {
   }
 
   /**
-   * Reject a bare synthetic stable-view-id selector (`s-<hash>`) when MORE THAN
-   * ONE node in the WHOLE capture shares its base content hash. An
-   * ordinal-suffixed `s-<hash>-<k>` selector is accepted when that complete
-   * string appears on exactly one node in this capture; otherwise it follows the
-   * same ambiguity path. A selector whose base hash is unique in the capture is
+   * Reject a bare synthetic stable-view-id selector (`s2-<hash>`) when MORE THAN
+   * ONE node in the WHOLE capture shares its base content hash. Either suffixed
+   * form is accepted when that complete string appears exactly once. A stale
+   * text suffix misses exactly; a stale ordinal still follows the ambiguity
+   * path because another peer can now hold that position. A unique bare id is
    * left alone, and so is a real `resource-id`-backed id that merely resembles
    * the synthetic shape (issue #6218 review threads
    * PRRT_kwDOP-GF5M6foer0, PRRT_kwDOP-GF5M6fomf-, PRRT_kwDOP-GF5M6fomgA).
@@ -606,27 +605,19 @@ export class DefaultElementFinder implements ElementFinder {
    * used both to reject a bare selector and to offer the ordinals actually
    * available now; a container must not hide peers from either result.
    *
-   * The since-removed-peer retarget (issue #6229, review threads
-   * PRRT_kwDOP-GF5M6fouI8, PRRT_kwDOP-GF5M6f1gS0) is closed both at the PRODUCER
-   * at the producer. `assignStableViewIds` no longer hands the first of a
-   * content-identical duplicate group the bare `s-H`; every member takes a
-   * `-<k>` ordinal (the first `-1`), and the bare form is reserved for content
-   * that was unique when observed. So a caller who observed `A` in a `[A, B]`
-   * group holds `s-H-1`, never bare `s-H`. If `A` is then removed and `B`
-   * becomes the sole survivor, `B` is reassigned the bare `s-H` (now unique) —
-   * which no longer equals the caller's `s-H-1`, so resolution MISSES instead of
-   * silently landing on `B`. Within one unchanged capture, however, each emitted
-   * ordinal is unique by construction and must round-trip from skeleton to
-   * tapOn (#7219). Capture provenance would be required to distinguish that safe
-   * same-capture use from a later insert/reorder that reassigns an ordinal.
-   * Do not fall back from an old `s-H-k` to a now-unique bare `s-H`: the bare
-   * node could be a different survivor after the selected peer was removed.
-   * A one-node current group alone cannot prove it is the selected node.
+   * The since-removed-peer retarget (#6229, review threads PRRT_kwDOP-GF5M6fouI8
+   * and PRRT_kwDOP-GF5M6f1gS0) stays closed at the producer: every duplicate
+   * gets a suffix, while a sole survivor gets bare `s2-H`. A stale `s2-H-k`
+   * or `s2-H~T` cannot fall back to that bare id, since the survivor could be
+   * a different node. Within one capture, each emitted suffix must round-trip
+   * from skeleton to tapOn (#7219). Capture provenance is still required to
+   * distinguish same-capture use of an ordinal from a later reassignment.
    *
    * Descendant display text is deliberately excluded from the upward hash rollup
    * in `StableNodeIdentity.ts` (#6230), so a ticking child does not restamp its
-   * ancestor's id between captures. Editable entered text is excluded from its
-   * own hash, while other own display text still defines identity. Capture
+   * ancestor's base id between captures. A duplicate-group text suffix may
+   * change for a ticking child. Editable entered text is excluded from both
+   * hashes, while other own display text still defines identity. Capture
    * provenance is still required to distinguish a removed node from a
    * newly-created content-identical replacement.
    *
@@ -663,26 +654,28 @@ export class DefaultElementFinder implements ElementFinder {
       );
     }
     const matchingViewIds = this.stableViewIdsSharingBase(fullCaptureRoots, base);
-    if (id !== base && matchingViewIds.filter((viewId) => viewId === id).length === 1) {
-      // `assignStableViewIds` gives an ordinal string to at most one node in a
-      // capture, so an exact full-id match safely round-trips a skeleton entry.
+    const exactMatches = matchingViewIds.filter((viewId) => viewId === id).length;
+    if (id !== base && exactMatches === 1) {
+      // Either suffix is unique in this capture and round-trips exactly.
+      return;
+    }
+    if (id.includes("~") && exactMatches === 0) {
+      // A stale content-derived suffix must miss, never resolve to a peer.
       return;
     }
     const duplicateCount = matchingViewIds.length;
     if (duplicateCount > 1) {
-      const ordinalIds = [...new Set(matchingViewIds.filter((viewId) => viewId !== base))];
-      const ordinalHint =
-        ordinalIds.length > 0
-          ? ` Current capture ordinal ids: ${ordinalIds.map((viewId) => `"${viewId}"`).join(", ")}.`
+      const suffixedIds = [...new Set(matchingViewIds.filter((viewId) => viewId !== base))];
+      const idHint =
+        suffixedIds.length > 0
+          ? ` Current capture suffixed ids: ${suffixedIds.map((viewId) => `"${viewId}"`).join(", ")}.`
           : "";
       throw new ActionableError(
         `Skeleton element id "${id}" is ambiguous in the current capture: ${duplicateCount} ` +
-          `content-identical elements share stable id "${base}", and which of them holds the ` +
-          'bare id vs. an "-N" ordinal suffix is assigned by document order at capture time. An ' +
-          "element insert or reorder since this id was observed can shift which element it now " +
-          "points to, so resolving it here could silently act on the wrong element. Use text or " +
+          `elements share structural stable id "${base}". A bare id cannot select a peer, ` +
+          "and a positional -N suffix can shift after an insert or reorder. Use text or " +
           "textAny (with index when multiple text matches) instead." +
-          ordinalHint,
+          idHint,
       );
     }
   }

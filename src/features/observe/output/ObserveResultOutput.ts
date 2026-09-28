@@ -1279,7 +1279,8 @@ function diffLayoutWarningsPerEntry(
  *
  * For id-less/text-less Android nodes the `view-id` slot is the capture layer's
  * content-derived stable id (`assignStableViewIds`, issue #3228) — stable across
- * a scroll and ordinal-suffixed for content-identical duplicates — which is what
+ * a scroll and text-suffixed when descendant labels distinguish structural
+ * duplicates (otherwise ordinal-suffixed) — which is what
  * lets this key re-pair rows the other three fields cannot describe.
  */
 function contentIdentityKey(attrs: Record<string, unknown>): string | null {

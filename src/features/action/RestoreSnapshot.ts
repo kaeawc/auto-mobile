@@ -53,6 +53,21 @@ export interface RestoreSnapshotArgs {
 export interface RestoreSnapshotResult {
   snapshotType: DeviceSnapshotType;
   restoredAt: string;
+  /** Optional for existing restore-provider fakes; concrete restores always set both fields. */
+  success?: boolean;
+  failures?: RestoreSnapshotFailure[];
+}
+
+export type RestoreSnapshotFailure =
+  | { kind: "ios_bundle"; bundleId: string; reason: string }
+  | { kind: "android_setting"; namespace: string; key: string; reason: string };
+
+interface IosRestoreOperations {
+  pathExists(path: string): Promise<boolean>;
+  terminateAppIfRunning(deviceId: string, bundleId: string): Promise<void>;
+  getAppDataContainerPath(deviceId: string, bundleId: string): Promise<string | null | undefined>;
+  rm(path: string, options: { recursive: true; force: true }): Promise<void>;
+  cp(source: string, destination: string, options: { recursive: true }): Promise<void>;
 }
 
 const RESTORABLE_SETTINGS_NAMESPACES = new Set<string>(["global", "secure", "system"]);
@@ -76,6 +91,7 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
   private store: DeviceSnapshotStore;
   private timer: Timer;
   private simctl: SimCtlClient;
+  private iosRestoreOperations: IosRestoreOperations;
 
   constructor(
     device: BootedDevice,
@@ -85,6 +101,7 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
     store: DeviceSnapshotStore = new DeviceSnapshotStore(),
     simctl?: SimCtlClient,
     private readonly consoleBusyRegistry: EmulatorConsoleBusyRegistry = defaultEmulatorConsoleBusyRegistry,
+    iosRestoreOperations?: IosRestoreOperations,
   ) {
     this.device = device;
     this.adb = adbFactory.create(device);
@@ -92,6 +109,15 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
     this.store = store;
     this.timer = timer;
     this.simctl = simctl || new SimCtlClient(device);
+    this.iosRestoreOperations = iosRestoreOperations ?? {
+      pathExists,
+      terminateAppIfRunning: (deviceId, bundleId) =>
+        terminateAppIfRunning(this.simctl, deviceId, bundleId),
+      getAppDataContainerPath: (deviceId, bundleId) =>
+        getAppDataContainerPath(this.simctl, deviceId, bundleId),
+      rm: (destination, options) => fs.rm(destination, options),
+      cp: (source, destination, options) => fs.cp(source, destination, options),
+    };
   }
 
   /**
@@ -157,6 +183,7 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
     const isEmulator = this.device.deviceId.startsWith("emulator-");
     const shouldUseVmSnapshot = useVmSnapshot && manifest.snapshotType === "vm" && isEmulator;
 
+    let failures: RestoreSnapshotFailure[] = [];
     if (shouldUseVmSnapshot) {
       await this.restoreVmSnapshot(
         snapshotName,
@@ -166,14 +193,22 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
         onBeforeVmSnapshotLoad,
       );
     } else {
-      await this.restoreSettingsSnapshot(manifest);
+      failures = await this.restoreSettingsSnapshot(manifest);
     }
 
-    logger.info(`Snapshot '${snapshotName}' restored successfully`);
+    if (failures.length === 0) {
+      logger.info(`Snapshot '${snapshotName}' restored successfully`);
+    } else {
+      logger.warn(
+        `Snapshot '${snapshotName}' partially restored: ${failures.length} item(s) failed`,
+      );
+    }
 
     return {
       snapshotType: manifest.snapshotType,
       restoredAt: new Date().toISOString(),
+      success: failures.length === 0,
+      failures,
     };
   }
 
@@ -256,12 +291,15 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
    * relaunches the foreground app only. There is no app-data clear/restore
    * phase — `pm clear` and `adb restore` are never issued.
    */
-  private async restoreSettingsSnapshot(manifest: DeviceSnapshotManifest): Promise<void> {
+  private async restoreSettingsSnapshot(
+    manifest: DeviceSnapshotManifest,
+  ): Promise<RestoreSnapshotFailure[]> {
     logger.info(`Restoring settings-only snapshot for device ${this.device.deviceId}`);
 
     try {
+      let failures: RestoreSnapshotFailure[] = [];
       if (manifest.includeSettings && manifest.settings) {
-        await this.restoreSettings(manifest.settings);
+        failures = await this.restoreSettings(manifest.settings);
       }
 
       // Restore foreground app if captured
@@ -270,6 +308,7 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
       }
 
       logger.info("Settings snapshot restoration complete");
+      return failures;
     } catch (error) {
       logger.error(`Failed to restore settings snapshot: ${error}`);
       throw new ActionableError(`Failed to restore settings snapshot: ${error}`);
@@ -283,8 +322,9 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
     global?: Record<string, string>;
     secure?: Record<string, string>;
     system?: Record<string, string>;
-  }): Promise<void> {
+  }): Promise<RestoreSnapshotFailure[]> {
     logger.info("Restoring device settings");
+    const failures: RestoreSnapshotFailure[] = [];
 
     for (const [settingsType, values] of Object.entries(settings)) {
       if (!values || Object.keys(values).length === 0) {
@@ -298,6 +338,14 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
       if (!isSettingsNamespace(settingsType)) {
         failureCount = Object.keys(values).length;
         logger.warn(`Skipping unsupported settings namespace ${settingsType}`);
+        for (const key of Object.keys(values)) {
+          failures.push({
+            kind: "android_setting",
+            namespace: settingsType,
+            key,
+            reason: "unsupported settings namespace",
+          });
+        }
         logger.info(
           `${settingsType} settings restored: ${successCount} succeeded, ${failureCount} failed`,
         );
@@ -308,6 +356,12 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
         if (!/^[A-Za-z0-9_.:-]+$/.test(key)) {
           failureCount++;
           logger.warn(`Failed to restore ${settingsType} setting ${key}: invalid settings key`);
+          failures.push({
+            kind: "android_setting",
+            namespace: settingsType,
+            key,
+            reason: "invalid settings key",
+          });
           continue;
         }
         try {
@@ -333,6 +387,12 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
         } catch (error) {
           failureCount++;
           logger.warn(`Failed to restore ${settingsType} setting ${key}: ${error}`);
+          failures.push({
+            kind: "android_setting",
+            namespace: settingsType,
+            key,
+            reason: errorMessage(error),
+          });
         }
       }
 
@@ -340,6 +400,7 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
         `${settingsType} settings restored: ${successCount} succeeded, ${failureCount} failed`,
       );
     }
+    return failures;
   }
 
   /**
@@ -382,13 +443,21 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
       await restoreIosSettings(this.simctl, this.device.deviceId, manifest.iosSettings);
     }
 
-    await this.restoreIosAppData(snapshotName, manifest);
+    const failures = await this.restoreIosAppData(snapshotName, manifest);
 
-    logger.info(`[iOS] Snapshot '${snapshotName}' restored successfully`);
+    if (failures.length === 0) {
+      logger.info(`[iOS] Snapshot '${snapshotName}' restored successfully`);
+    } else {
+      logger.warn(
+        `[iOS] Snapshot '${snapshotName}' partially restored: ${failures.length} bundle(s) failed`,
+      );
+    }
 
     return {
       snapshotType: manifest.snapshotType,
       restoredAt: new Date().toISOString(),
+      success: failures.length === 0,
+      failures,
     };
   }
 
@@ -399,27 +468,27 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
   private async restoreIosAppData(
     snapshotName: string,
     manifest: DeviceSnapshotManifest,
-  ): Promise<void> {
+  ): Promise<RestoreSnapshotFailure[]> {
     if (!manifest.includeAppData) {
       logger.info("[iOS] Snapshot does not include app data; skipping restore");
-      return;
+      return [];
     }
 
     const appDataPath = await this.resolveIosAppDataPath(snapshotName, manifest);
     if (!appDataPath) {
       logger.warn(`[iOS] App data directory not found for snapshot '${snapshotName}'`);
-      return;
+      return [];
     }
 
     if (manifest.appDataBackup?.backupMethod === "none") {
       logger.info("[iOS] Snapshot app data backup method is 'none'; skipping restore");
-      return;
+      return [];
     }
 
     const bundleIds = await this.resolveIosSnapshotBundleIds(appDataPath, manifest);
     if (bundleIds.length === 0) {
       logger.warn("[iOS] No app bundle IDs found to restore");
-      return;
+      return [];
     }
 
     const installedBundles = await this.getInstalledIosBundleIds();
@@ -434,13 +503,16 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
       logger.warn("[iOS] Unable to verify installed apps; proceeding with restore");
     }
 
+    const failures: RestoreSnapshotFailure[] = [];
     for (const bundleId of bundleIds) {
       try {
         await this.restoreIosBundleContainer(bundleId, appDataPath);
       } catch (error) {
         logger.warn(`[iOS] Failed to restore app data for ${bundleId}: ${error}`);
+        failures.push({ kind: "ios_bundle", bundleId, reason: errorMessage(error) });
       }
     }
+    return failures;
   }
 
   /**
@@ -457,7 +529,7 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
       snapshotName,
       this.getIosPathOptions(manifest.deviceId),
     );
-    if (await pathExists(manifestPath)) {
+    if (await this.iosRestoreOperations.pathExists(manifestPath)) {
       return manifestPath;
     }
 
@@ -469,7 +541,7 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
       snapshotName,
       this.getIosPathOptions(this.device.deviceId),
     );
-    if (!(await pathExists(fallbackPath))) {
+    if (!(await this.iosRestoreOperations.pathExists(fallbackPath))) {
       return undefined;
     }
 
@@ -485,25 +557,31 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
    * body's folder loop does not nest under the outer bundle loop.
    */
   private async restoreIosBundleContainer(bundleId: string, appDataPath: string): Promise<void> {
-    await terminateAppIfRunning(this.simctl, this.device.deviceId, bundleId);
-    const containerPath = await getAppDataContainerPath(
-      this.simctl,
+    await this.iosRestoreOperations.terminateAppIfRunning(this.device.deviceId, bundleId);
+    const containerPath = await this.iosRestoreOperations.getAppDataContainerPath(
       this.device.deviceId,
       bundleId,
     );
     if (!containerPath) {
-      return;
+      throw new ActionableError(`App data container not found for ${bundleId}`);
     }
 
     const snapshotBundlePath = path.join(appDataPath, bundleId);
     for (const folder of IOS_APP_DATA_FOLDERS) {
       const sourcePath = path.join(snapshotBundlePath, folder);
-      if (!(await pathExists(sourcePath))) {
+      if (!(await this.iosRestoreOperations.pathExists(sourcePath))) {
         continue;
       }
       const destinationPath = path.join(containerPath, folder);
-      await fs.rm(destinationPath, { recursive: true, force: true });
-      await fs.cp(sourcePath, destinationPath, { recursive: true });
+      await this.iosRestoreOperations.rm(destinationPath, { recursive: true, force: true });
+      try {
+        await this.iosRestoreOperations.cp(sourcePath, destinationPath, { recursive: true });
+      } catch (error) {
+        throw new ActionableError(
+          `Existing destination data was wiped/deleted and is now gone at '${destinationPath}'; restore copy failed: ${errorMessage(error)}`,
+          { cause: error },
+        );
+      }
     }
   }
 

@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import type { BootedDevice, DeviceSnapshotManifest } from "../../src/models";
+import type { RestoreSnapshotResult } from "../../src/features/action/RestoreSnapshot";
 import { deviceSnapshotSchema, registerSnapshotTools } from "../../src/server/snapshotTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import {
@@ -18,6 +19,7 @@ describe("snapshot tool", () => {
   let fakeTimer: FakeTimer;
   let captureCalls: Array<Record<string, unknown>>;
   let restoreCalls: Array<Record<string, unknown>>;
+  let restoreFailures: NonNullable<RestoreSnapshotResult["failures"]>;
 
   const device: BootedDevice = {
     deviceId: "ios-device-1",
@@ -33,6 +35,7 @@ describe("snapshot tool", () => {
     fakeTimer.enableAutoAdvance();
     captureCalls = [];
     restoreCalls = [];
+    restoreFailures = [];
 
     await setDeviceSnapshotManagerDependencies({
       snapshotRepository: repository as any,
@@ -79,6 +82,8 @@ describe("snapshot tool", () => {
           return {
             snapshotType: args.manifest.snapshotType,
             restoredAt: new Date(fakeTimer.now()).toISOString(),
+            success: restoreFailures.length === 0,
+            failures: restoreFailures,
           };
         },
       }),
@@ -92,6 +97,7 @@ describe("snapshot tool", () => {
   beforeEach(() => {
     captureCalls = [];
     restoreCalls = [];
+    restoreFailures = [];
   });
 
   afterAll(() => {
@@ -200,7 +206,47 @@ describe("snapshot tool", () => {
     expect(payload.snapshotName).toBe("snapshot-restore");
     expect(payload.snapshotType).toBe("app_data");
     expect(payload.message).toContain("restored successfully");
+    expect(payload.success).toBe(true);
+    expect(payload.failures).toEqual([]);
     expect(restoreCalls).toHaveLength(1);
+  });
+
+  test("reports a partial restore and its failed items", async () => {
+    const tool = ToolRegistry.getTool("deviceSnapshot");
+    const snapshotName = "snapshot-partial-restore";
+    const timestamp = new Date(fakeTimer.now()).toISOString();
+    const manifest: DeviceSnapshotManifest = {
+      snapshotName,
+      timestamp,
+      deviceId: device.deviceId,
+      deviceName: device.name,
+      platform: device.platform,
+      snapshotType: "app_data",
+      includeAppData: true,
+      includeSettings: false,
+    };
+    await repository.insertSnapshot({
+      snapshotName,
+      deviceId: device.deviceId,
+      deviceName: device.name,
+      platform: device.platform,
+      snapshotType: "app_data",
+      includeAppData: true,
+      includeSettings: false,
+      createdAt: timestamp,
+      lastAccessedAt: timestamp,
+      sizeBytes: 0,
+      manifest,
+    });
+    restoreFailures = [{ kind: "ios_bundle", bundleId: "com.example.app", reason: "copy denied" }];
+
+    const response = await tool!.deviceAwareHandler!(device, { action: "restore", snapshotName });
+    const payload = JSON.parse(response.content?.[0]?.text ?? "{}");
+
+    expect(payload.message).toContain("partially restored");
+    expect(payload.message).not.toContain("restored successfully");
+    expect(payload.success).toBe(false);
+    expect(payload.failures).toEqual(restoreFailures);
   });
 
   test("rejects restore without snapshotName", async () => {

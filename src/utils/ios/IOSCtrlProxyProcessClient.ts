@@ -6,6 +6,7 @@ import { defaultTimer } from "../SystemTimer";
 import { logger } from "../logger";
 import { errorMessage } from "../describeUnknownError";
 import { withRemainingBudget } from "../withRemainingBudget";
+import { ActionableError } from "../../models/ActionableError";
 
 /** Matches a `kill -0` failure caused by the target being owned by another
  * user/process (EPERM), not by it being gone (ESRCH). The process exists in
@@ -348,9 +349,8 @@ export class IOSCtrlProxyProcessClient {
   /**
    * When a caller names the device it believes owns `pid`, prove the PID is
    * still that owned runner before signaling. Returns true only when ownership
-   * is AFFIRMATIVELY disconfirmed (skip the kill). An inconclusive probe
-   * (exec/parse failure) returns false so termination falls through to our own
-   * possibly-hung runner rather than leaving it alive (#6579).
+   * is affirmatively disconfirmed (skip the kill). An inconclusive probe throws
+   * so a recycled PID cannot be signaled without confirmed ownership.
    */
   private async isTerminationTargetForeign(
     pid: number,
@@ -381,8 +381,13 @@ export class IOSCtrlProxyProcessClient {
       if (!failOpenAfterBudget) {
         this.remainingTimeoutMs(deadline);
       }
-      logger.debug(`[IOSCtrlProxy] Runner ownership remains inconclusive: ${error}`);
-      return false;
+      logger.warn(
+        `[IOSCtrlProxy] Runner ownership unconfirmed, refusing to signal PID ${pid}: ${error}`,
+      );
+      throw new ActionableError(
+        `CtrlProxy runner ownership unconfirmed; refusing to signal PID ${pid}`,
+        { cause: error },
+      );
     }
   }
 

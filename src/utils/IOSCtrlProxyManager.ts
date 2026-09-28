@@ -27,7 +27,11 @@ import {
   TcpHostPortAvailabilityChecker,
   type HostPortAvailabilityChecker,
 } from "./ios/IOSHostPortAvailabilityChecker";
-import { IOSCtrlProxyHealthClient, isValidCtrlProxyPort } from "./ios/IOSCtrlProxyHealthClient";
+import {
+  IOSCtrlProxyHealthClient,
+  isValidCtrlProxyPort,
+  type CtrlProxyHealthCheckResult,
+} from "./ios/IOSCtrlProxyHealthClient";
 import { IOSCtrlProxyProcessClient, type RunnerOwnership } from "./ios/IOSCtrlProxyProcessClient";
 import { withRemainingBudget } from "./withRemainingBudget";
 import type { ProxyManager, ProxySetupResult } from "./interfaces/ProxyManager";
@@ -1174,6 +1178,14 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       logger.warn(`[IOSCtrlProxy] Error checking running status: ${error}`);
       return false;
     }
+  }
+
+  /** Fresh, device-aware health for status callers that must distinguish transport failure. */
+  public async checkRunningWithReason(): Promise<CtrlProxyHealthCheckResult> {
+    return this.healthClient.checkHealthEndpointOnPortForDeviceWithReason(
+      this.servicePort,
+      this.device.deviceId,
+    );
   }
 
   /**
@@ -2359,9 +2371,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
    * and the restart may proceed. Honours the caller's abort signal while polling.
    *
    * Strict: a responder that omits deviceId must NOT be mistaken for the runner we
-   * just tried to stop. Fail closed here — unlike the liveness gate elsewhere, where a
-   * missing deviceId is compat-accepted — so a foreign/ambiguous responder on this
-   * port never blocks a legitimate restart (#6415 follow-up).
+   * just tried to stop. The primary liveness gate is strict by default too; this
+   * explicit option keeps the ownership requirement visible at the forced-teardown
+   * call site. An ambiguous responder must not block a legitimate restart (#6415 follow-up).
    */
   private async isRunnerStillHealthyAfterForcedTeardown(signal?: AbortSignal): Promise<boolean> {
     const graceDeadlineMs = this.timer.now() + FORCE_RESTART_DRAIN_GRACE_MS;

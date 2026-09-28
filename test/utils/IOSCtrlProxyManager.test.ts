@@ -1210,12 +1210,11 @@ describe("IOSCtrlProxyManager", function () {
     // #6415 follow-up: the forced-teardown gate must fail CLOSED on ownership —
     // a responder that omits deviceId must NOT be adopted as "still our
     // runner" (which would otherwise block a legitimate restart with the
-    // "still running after forced teardown" error). Unlike the primary
-    // liveness gate's missing-deviceId compat carve-out, here a missing
-    // deviceId means "not proven to be ours", so teardown proceeds and start
-    // is allowed. Exercised through the real health client (curl mock), not a
-    // mocked private method, so the strict wiring at the forceRestart call
-    // site is actually covered.
+    // "still running after forced teardown" error). Like the primary
+    // liveness gate, a missing deviceId means "not proven to be ours", so
+    // teardown proceeds and start is allowed. Exercised through the real
+    // health client (curl mock), not a mocked private method, so the strict
+    // wiring at the forceRestart call site is actually covered.
     test("does not mistake a forced-teardown responder that omits deviceId for our own runner", async function () {
       const fakeExecutor = new FakeProcessExecutor();
       fakeExecutor.setCommandHandler("curl -s", () => createExecResult('{"status":"ok"}', ""));
@@ -1530,6 +1529,19 @@ describe("IOSCtrlProxyManager", function () {
         fakeExecutor,
       );
 
+      expect(await manager.isRunning()).toBe(false);
+    });
+
+    test("checkRunningWithReason() rejects a responder that omits device identity", async function () {
+      installHealthBody('{"status":"ok"}');
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeTimer,
+        undefined,
+        fakeExecutor,
+      );
+
+      expect(await manager.checkRunningWithReason()).toEqual({ ok: false, reason: "unhealthy" });
       expect(await manager.isRunning()).toBe(false);
     });
 
@@ -2445,7 +2457,7 @@ describe("IOSCtrlProxyManager", function () {
       expect(ownedRunner.alive).toBe(false);
     });
 
-    test("forceStopForShutdown reserves SIGKILL time when the termination ownership probe times out (#6898)", async function () {
+    test("forceStopForShutdown does not SIGKILL an unconfirmed-ownership PID after the probe budget is exhausted (#6898)", async function () {
       const manager = IOSCtrlProxyManager.createForTestingWithDeps(
         testDevice,
         fakeTimer,
@@ -2469,6 +2481,47 @@ describe("IOSCtrlProxyManager", function () {
         // window before reporting its timeout. SIGKILL must still have its reserve.
         fakeTimer.advanceTime((deadline ?? fakeTimer.now()) - fakeTimer.now());
         throw new Error("runner ownership probe timed out");
+      };
+
+      const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        await (
+          manager as unknown as { forceStopForShutdown(deadline: number): Promise<void> }
+        ).forceStopForShutdown(250);
+
+        expect(ownershipChecks).toBe(2);
+        expect(fakeTimer.now()).toBeLessThan(250);
+        expect(fakeExecutor.wasCommandExecuted(`kill -KILL -- -${runnerPid}`)).toBe(false);
+        expect(fakeExecutor.wasCommandExecuted(`kill -TERM -- -${runnerPid}`)).toBe(false);
+        expect(ownedRunner.alive).toBe(true);
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.stringContaining(`Forced CtrlProxy runner termination failed`),
+        );
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    test("forceStopForShutdown reserves SIGKILL time after both ownership probes confirm the runner (#6898)", async function () {
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeTimer,
+        undefined,
+        fakeExecutor,
+      );
+      const runnerPid = 912354;
+      (manager as unknown as { xcTestProcessId: number }).xcTestProcessId = runnerPid;
+      const ownedRunner = { ...ownRunnerProcess(runnerPid), ppid: process.pid };
+      installListeningProcessFakes(fakeExecutor, [ownedRunner]);
+      const processClient = (manager as unknown as { processClient: IOSCtrlProxyProcessClient })
+        .processClient;
+      let ownershipChecks = 0;
+      processClient.checkRunnerOwnership = async (_pid, _deviceId, deadline) => {
+        ownershipChecks++;
+        if (ownershipChecks === 2) {
+          fakeTimer.advanceTime((deadline ?? fakeTimer.now()) - fakeTimer.now());
+        }
+        return "owned";
       };
 
       await (

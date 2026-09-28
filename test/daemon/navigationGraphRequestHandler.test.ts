@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, spyOn } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import {
   createNavigationGraphRequestHandler,
   convertSummaryToStreamData,
@@ -74,6 +74,10 @@ describe("createNavigationGraphRequestHandler", () => {
   beforeEach(() => {
     warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
     warnSpy.mockClear();
+  });
+
+  afterEach(() => {
+    warnSpy.mockRestore();
   });
 
   it("rethrows an ActionableError when the export fails, instead of swallowing to null", async () => {

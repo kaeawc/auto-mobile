@@ -67,6 +67,20 @@ describe("IOSCtrlProxyHealthClient (local curl transport)", function () {
     expect(await client.checkHealthEndpointOnPort(8765)).toBe(false);
   });
 
+  test("typed health check distinguishes refused, reset, and timeout while boolean stays false", async function () {
+    for (const [error, reason] of [
+      [Object.assign(new Error("connect failed"), { code: "ECONNREFUSED" }), "refused"],
+      [Object.assign(new Error("socket closed"), { code: "ECONNRESET" }), "reset"],
+      [Object.assign(new Error("aborted"), { name: "AbortError" }), "timeout"],
+    ] as const) {
+      const { client } = makeClient(() => {
+        throw error;
+      });
+      expect(await client.checkHealthEndpointOnPortWithReason(8765)).toEqual({ ok: false, reason });
+      expect(await client.checkHealthEndpointOnPort(8765)).toBe(false);
+    }
+  });
+
   test("checkHealthEndpointOnPortForDevice requires a matching device id", async function () {
     const matching = makeClient(() => execResult(`{"status":"ok","deviceId":"${DEVICE_ID}"}`));
     expect(await matching.client.checkHealthEndpointOnPortForDevice(8765, DEVICE_ID)).toBe(true);
@@ -75,16 +89,39 @@ describe("IOSCtrlProxyHealthClient (local curl transport)", function () {
     expect(await foreign.client.checkHealthEndpointOnPortForDevice(8765, DEVICE_ID)).toBe(false);
   });
 
+  test("device-aware typed health distinguishes transport failure from unhealthy identity", async function () {
+    for (const [error, reason] of [
+      [Object.assign(new Error("connect failed"), { code: "ECONNREFUSED" }), "refused"],
+      [Object.assign(new Error("socket closed"), { code: "ECONNRESET" }), "reset"],
+      [Object.assign(new Error("aborted"), { name: "AbortError" }), "timeout"],
+    ] as const) {
+      const { client } = makeClient(() => {
+        throw error;
+      });
+      expect(await client.checkHealthEndpointOnPortForDeviceWithReason(8765, DEVICE_ID)).toEqual({
+        ok: false,
+        reason,
+      });
+      expect(await client.checkHealthEndpointOnPortForDevice(8765, DEVICE_ID)).toBe(false);
+    }
+    const wrongDevice = makeClient(() => execResult('{"status":"ok","deviceId":"OTHER"}'));
+    expect(
+      await wrongDevice.client.checkHealthEndpointOnPortForDeviceWithReason(8765, DEVICE_ID),
+    ).toEqual({ ok: false, reason: "unhealthy" });
+    const matching = makeClient(() => execResult(`{"status":"ok","deviceId":"${DEVICE_ID}"}`));
+    expect(
+      await matching.client.checkHealthEndpointOnPortForDeviceWithReason(8765, DEVICE_ID),
+    ).toEqual({ ok: true });
+  });
+
   test("checkHealthEndpointOnPortForDevice rejects a non-JSON (Android 'OK') body", async function () {
     const { client } = makeClient(() => execResult("OK"));
     expect(await client.checkHealthEndpointOnPortForDevice(8765, DEVICE_ID)).toBe(false);
   });
 
-  // #6415: a runner build that reports no deviceId at all (older build, or the
-  // env-injection fallback that also drops the device-id var) must still count
-  // as "ours" when status is ok — only a PRESENT-but-different deviceId is a
-  // foreign runner. Without this compat carve-out, checkHealthEndpoint() could
-  // never route through the strict check without regressing older runners.
+  // #6415: compat mode can accept a runner build that reports no deviceId
+  // (older build or env-injection fallback), while the default liveness check
+  // requires an exact deviceId match.
   test("checkHealthEndpointOnPortForDevice accepts an 'ok' body reporting no deviceId (compat)", async function () {
     const { client } = makeClient(() => execResult('{"status":"ok"}'));
     expect(await client.checkHealthEndpointOnPortForDevice(8765, DEVICE_ID)).toBe(false);
@@ -95,8 +132,8 @@ describe("IOSCtrlProxyHealthClient (local curl transport)", function () {
     ).toBe(true);
   });
 
-  // #6415 follow-up: ownership/forced-teardown decisions must fail closed on a
-  // missing deviceId — the compat carve-out above is for the liveness gate only.
+  // #6415 follow-up: ownership/forced-teardown decisions explicitly require
+  // device identity, matching the strict default used by the liveness gate.
   describe("checkHealthEndpointOnPortForDevice with requireDeviceId (strict ownership gate)", function () {
     test("rejects an 'ok' body reporting no deviceId", async function () {
       const { client } = makeClient(() => execResult('{"status":"ok"}'));

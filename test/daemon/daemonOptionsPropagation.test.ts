@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { daemonCommandOptions, DaemonManager, parseDaemonArgs } from "../../src/daemon/manager";
+import { DaemonManager } from "../../src/daemon/manager";
+import { parseDaemonArgs } from "../../src/daemon/cli/daemonArgs";
+import { daemonCommandOptions } from "../../src/daemon/cli/runDaemonCommand";
 import { parseArgs } from "../../src/cli/parseArgs";
 import { REUSE_CRITICAL_OPTION_KEYS } from "../../src/daemon/daemonMcpProxy";
 import {

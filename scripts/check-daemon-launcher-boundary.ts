@@ -54,7 +54,7 @@ function isChildProcessRequire(expression: ts.Expression): boolean {
 
 function isDiagnosticProcessTableCall(file: string, node: ts.CallExpression): boolean {
   const command = node.arguments[0];
-  if (file !== "src/daemon/manager.ts" || !command || !ts.isStringLiteral(command)) {
+  if (file !== "src/daemon/processTable.ts" || !command || !ts.isStringLiteral(command)) {
     return false;
   }
   return command.text.startsWith("ps -eo ") || command.text.startsWith("powershell.exe ");

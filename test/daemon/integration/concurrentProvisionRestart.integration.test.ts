@@ -4,11 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DaemonMcpProxy } from "../../../src/daemon/daemonMcpProxy";
 import { DaemonRestartDeferredError } from "../../../src/daemon/daemonRestartAdmission";
-import {
-  DaemonManager,
-  type DaemonManagerLike,
-  type DaemonProcessSignaler,
-} from "../../../src/daemon/manager";
+import { DaemonManager, type DaemonManagerLike } from "../../../src/daemon/manager";
+import type { DaemonProcessSignaler } from "../../../src/daemon/processTable";
 import { UnixSocketServer } from "../../../src/daemon/socketServer";
 import type { DaemonOptions, DaemonStatus, PidFileData } from "../../../src/daemon/types";
 import { executionTracker } from "../../../src/server/executionTracker";

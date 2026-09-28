@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
 import { DaemonState } from "../../src/daemon/daemonState";
-import { parseDaemonArgs } from "../../src/daemon/manager";
+import { parseDaemonArgs } from "../../src/daemon/cli/daemonArgs";
 import { serverConfig } from "../../src/utils/ServerConfig";
 
 describe("Daemon --no-occlusion option", () => {

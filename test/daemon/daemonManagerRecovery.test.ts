@@ -3,14 +3,13 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-  DaemonManager,
-  type DaemonProcessFinder,
-  type DaemonProcessLivenessChecker,
-  type DaemonProcessSpawner,
-  type DaemonProcessRecord,
-  type DaemonProcessSignaler,
-} from "../../src/daemon/manager";
+import { DaemonManager, type DaemonProcessSpawner } from "../../src/daemon/manager";
+import type {
+  DaemonProcessFinder,
+  DaemonProcessLivenessChecker,
+  DaemonProcessRecord,
+  DaemonProcessSignaler,
+} from "../../src/daemon/processTable";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { FakeTimer } from "../fakes/FakeTimer";
 

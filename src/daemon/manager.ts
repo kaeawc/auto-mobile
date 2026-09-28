@@ -326,6 +326,8 @@ export function parseDaemonProcessTable(
       continue;
     }
 
+    // This fallback derives birth time from wall-clock `now`; a clock step between
+    // reconstruction and PID-record capture can shift it beyond identity tolerance.
     records.push({
       pid,
       ppid,
@@ -384,6 +386,8 @@ export function parseBusyBoxDaemonProcessTable(
       continue;
     }
 
+    // This fallback derives birth time from wall-clock `now`; a clock step between
+    // reconstruction and PID-record capture can shift it beyond identity tolerance.
     records.push({ pid, ppid, command, startedAt: now - elapsedSeconds * 1000 });
   }
 
@@ -426,6 +430,7 @@ function parseLstart(value: string): number | undefined {
   // `ps lstart` reports local wall-clock time. Constructing this date locally
   // keeps its epoch comparable to the Date.now() timestamp written to the PID
   // file, while the component check rejects JavaScript's overflow normalization.
+  // During a fall-back repeated hour, this local time is ambiguous and Date applies its fixed offset rule.
   const startedAt = new Date(year, month, day, hour, minute, second);
   const hasComponentMismatch = [
     startedAt.getFullYear() !== year,
@@ -2719,11 +2724,7 @@ export class DaemonManager implements DaemonManagerLike {
         Object.entries(options).filter(([, value]) => value !== undefined && value !== false),
       ) as DaemonOptions,
     );
-    return {
-      ...daemonProcessOptions(recordedOptions),
-      ...requestedOptions,
-      strictPort: true,
-    };
+    return mergeRestartOptions(daemonProcessOptions(recordedOptions), requestedOptions);
   }
 
   private async readRecoveryOptionsFromPidFile(): Promise<DaemonOptions> {

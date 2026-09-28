@@ -2808,6 +2808,16 @@ describe("Daemon manager process detection", () => {
     ]);
   });
 
+  test("pins wall-clock sensitivity of Linux elapsed process birth reconstruction", () => {
+    const psOutput = "20 1 12 bunx -y @kaeawc/auto-mobile@0.0.38 --daemon-mode";
+    const nowBeforeJump = 1_000_000;
+    const nowAfterJump = nowBeforeJump + 10_000;
+    const before = parseDaemonProcessTable(psOutput, nowBeforeJump)[0]!.startedAt!;
+    const after = parseDaemonProcessTable(psOutput, nowAfterJump)[0]!.startedAt!;
+
+    expect(after - before).toBe(10_000);
+  });
+
   test("keeps Linux's OS generation token stable when the wall clock jumps", () => {
     const stat = `123 (auto mobile) ${["S", ...Array(18).fill("0"), "424242"].join(" ")}`;
     const token = linuxProcessGenerationToken(stat, "boot-id");
@@ -2894,6 +2904,33 @@ describe("Daemon manager process detection", () => {
     expect(record.processGenerationToken).toBe(darwinProcessGenerationToken(lstart));
     expect(record.processGenerationToken).toBe(`darwin:${lstart}`);
   });
+
+  test.skipIf(process.platform === "win32")(
+    "pins Darwin local Date resolution during the repeated DST fall-back hour",
+    () => {
+      const originalTimezone = process.env.TZ;
+      try {
+        process.env.TZ = "America/Los_Angeles";
+        const timezoneOffset = new Date(2026, 10, 1, 1, 30, 0).getTimezoneOffset();
+        if (timezoneOffset !== 420 && timezoneOffset !== 480) {
+          // This runtime ignored the TZ override, so Date cannot resolve the pinned local time reliably.
+          return;
+        }
+        const lstart = "Sun Nov 1 01:30:00 2026";
+        const record = parseDarwinDaemonProcessTable(
+          `20 1 ${lstart} bunx -y @kaeawc/auto-mobile@0.0.38 --daemon-mode`,
+        )[0]!;
+
+        expect(record.startedAt).toBe(1_793_521_800_000);
+      } finally {
+        if (originalTimezone === undefined) {
+          delete process.env.TZ;
+        } else {
+          process.env.TZ = originalTimezone;
+        }
+      }
+    },
+  );
 
   test.each([
     ["linux", "ps -eo pid=,ppid=,etimes=,command="],

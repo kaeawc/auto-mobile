@@ -10152,7 +10152,16 @@
                   }
                 },
                 "required": ["action", "text"],
-                "additionalProperties": false
+                "additionalProperties": false,
+                "dependentSchemas": {
+                  "keyboardProfile": {
+                    "properties": {
+                      "mode": {
+                        "enum": ["auto", "ime"]
+                      }
+                    }
+                  }
+                }
               },
               {
                 "type": "object",

@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import type { BootedDevice } from "../../src/models";
-import { assertSendKeysRunnerCompatible, sendKeysSchema } from "../../src/server/interactionTools";
+import {
+  assertSendKeysRunnerCompatible,
+  registerInteractionTools,
+  sendKeysSchema,
+} from "../../src/server/interactionTools";
+import { ToolRegistry } from "../../src/server/toolRegistry";
 
 describe("sendKeysSchema", () => {
   test("accepts device, session, and bound-session targeting without a platform", () => {
@@ -35,6 +40,7 @@ describe("sendKeysSchema", () => {
   });
 
   test("accepts keyboard profiles only with automatic or IME delivery", () => {
+    registerInteractionTools();
     for (const mode of [undefined, "auto", "ime"]) {
       expect(
         sendKeysSchema.safeParse({
@@ -57,6 +63,29 @@ describe("sendKeysSchema", () => {
         commands: [{ action: "type", text: "value", keyboardProfile: "unknown" }],
       }).success,
     ).toBe(false);
+
+    const sendKeysTool = ToolRegistry.getToolDefinitions().find((tool) => tool.name === "sendKeys");
+    expect(sendKeysTool).toBeDefined();
+    const inputSchema = sendKeysTool!.inputSchema as {
+      properties: {
+        commands: {
+          items: {
+            anyOf: Array<{
+              properties?: { action?: { const?: string } };
+              dependentSchemas?: {
+                keyboardProfile?: { properties?: { mode?: { enum?: string[] } } };
+              };
+            }>;
+          };
+        };
+      };
+    };
+    const typeCommand = inputSchema.properties.commands.items.anyOf.find(
+      (branch) => branch.properties?.action?.const === "type",
+    );
+    const modeValues = typeCommand?.dependentSchemas?.keyboardProfile?.properties?.mode?.enum;
+    expect(modeValues).toEqual(expect.arrayContaining(["auto", "ime"]));
+    expect(modeValues).toHaveLength(2);
   });
 
   test("rejects empty sequences and sequences over 100 commands", () => {

@@ -1028,12 +1028,15 @@ function listDevicePayloads(
   const sessionManager = DaemonState.getInstance().isInitialized()
     ? DaemonState.getInstance().getSessionManager()
     : undefined;
+  const sessions = new Map(
+    sessionManager?.getAllSessions().map((session) => [session.sessionId, session]),
+  );
   return booted.map((device) => {
     const pooled = devicePool?.describesPooledRuntime(device)
       ? (devicePool.getDevice(device.deviceId) ?? undefined)
       : undefined;
     const session = pooled?.sessionId
-      ? (sessionManager?.getSession(pooled.sessionId) ?? { sessionId: pooled.sessionId })
+      ? (sessions.get(pooled.sessionId) ?? { sessionId: pooled.sessionId })
       : undefined;
     const description = describeDevice({
       kind: "booted",

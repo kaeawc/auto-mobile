@@ -60,6 +60,32 @@ function route(
 }
 
 describe("UnixSocketServer sessionless acquisition tool-selection forwarding", () => {
+  test("inventory reads with an expired session identity do not bind a socket client", () => {
+    const server = createServer();
+    const internals = server as unknown as {
+      getMcpForwardRoute: (request: DaemonRequest, socketSessionId: string) => McpForwardRoute;
+      recordBoundMcpClientKey: (
+        request: DaemonRequest,
+        socketSessionId: string,
+        route: McpForwardRoute,
+        sessionWasActiveBeforeForward: boolean,
+        response: unknown,
+      ) => void;
+      boundMcpClientKeysBySocketSession: Map<string, unknown>;
+    };
+    for (const name of ["listDevices", "listDeviceImages"]) {
+      const socketSessionId = `socket-${name}`;
+      const request: DaemonRequest = {
+        id: name,
+        method: "tools/call",
+        params: { name, arguments: { sessionUuid: "expired-session" } },
+      };
+      const route = internals.getMcpForwardRoute(request, socketSessionId);
+      internals.recordBoundMcpClientKey(request, socketSessionId, route, false, { content: [] });
+      expect(internals.boundMcpClientKeysBySocketSession.has(socketSessionId)).toBe(false);
+    }
+  });
+
   test("carries a connection profile from setToolEnabled to sessionless provisionDevice", () => {
     const server = createServer();
     const socketSessionId = "socket-enabled";

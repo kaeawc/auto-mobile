@@ -74,6 +74,7 @@ import {
 import { InputText, type AppendKeyEventValidator } from "../features/action/InputText";
 import { getCurrentBuildIdentity } from "./buildIdentity";
 import { DaemonState } from "./daemonState";
+import { isDeviceInventoryTool } from "./daemonMcpProxy";
 import { DaemonStateAccess, handleDaemonRequest } from "./daemonRequestHandlers";
 import { deviceIncarnationToken } from "../utils/deviceIncarnation";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
@@ -2009,6 +2010,9 @@ export class UnixSocketServer {
     response: unknown,
   ): void {
     if (request.method !== "tools/call") {
+      return;
+    }
+    if (isDeviceInventoryTool(request.params?.name)) {
       return;
     }
     const sessionUuid = this.getSessionUuid(request.params?.arguments);

@@ -96,6 +96,13 @@ const COLD_RESOURCE_CONNECT_RETRY_DELAYS_MS = [250, 1_000, 4_000] as const;
 // getAndroid/getApple reacquisition (#7144).
 const SESSIONLESS_DEVICE_DISCOVERY_TOOLS = ["listDevices", "listDeviceImages"] as const;
 
+export function isDeviceInventoryTool(name: unknown): boolean {
+  return (
+    typeof name === "string" &&
+    (SESSIONLESS_DEVICE_DISCOVERY_TOOLS as readonly string[]).includes(name)
+  );
+}
+
 /** A transport failed before dispatch, rather than a reconciliation policy gate. */
 class DaemonPreflightConnectionError extends DaemonUnavailableError {
   constructor(readonly cause: DaemonUnavailableError) {
@@ -2540,7 +2547,7 @@ export class DaemonMcpProxy {
     const isTerminalSessionlessDiscovery =
       this.terminalBoundSession !== undefined &&
       this.sessionUuidFromArgs(callerArgs) === undefined &&
-      (SESSIONLESS_DEVICE_DISCOVERY_TOOLS as readonly string[]).includes(name);
+      isDeviceInventoryTool(name);
     const usesDeviceSelector =
       this.toolTargetsDevice(name) &&
       this.hasImplicitDeviceSelector(callerArgs, name === "setActiveDevice");
@@ -3342,7 +3349,7 @@ export class DaemonMcpProxy {
     if (name === SET_TOOL_ENABLED_TOOL_NAME) {
       return;
     }
-    if (name === "listDevices") {
+    if (isDeviceInventoryTool(name)) {
       // Inventory observation must not bind or heartbeat a session it does not own.
       return;
     }
@@ -3404,7 +3411,7 @@ export class DaemonMcpProxy {
   // (issue #4610). Excluded, because none of them refreshed a live session:
   //   - executePlan owns its own binding lifecycle via the release signal; leave
   //     it untouched so a pre-handler plan rejection does not strand the binding.
-  //   - listDevices is observation-only and its read-only admission did not
+  //   - inventory tools are observation-only and their read-only admission did not
   //     acquire or refresh the forwarded session.
   //   - a recoverable error (DaemonUnavailableError transport/connect failure,
   //     "Session not found", or an unknown-tool build-skew), or a device-control
@@ -3421,7 +3428,7 @@ export class DaemonMcpProxy {
       name === "executePlan" ||
       name === "setActiveDevice" ||
       name === SET_TOOL_ENABLED_TOOL_NAME ||
-      name === "listDevices" ||
+      isDeviceInventoryTool(name) ||
       error instanceof DaemonBoundSessionExpiredError ||
       error instanceof DaemonBoundSessionLostError ||
       this.isRecoverableDaemonSessionError(error) ||
@@ -3465,7 +3472,7 @@ export class DaemonMcpProxy {
    *   - a connection already fenced terminally — its session is gone;
    *   - a tool that owns its own binding lifecycle (`executePlan`), does not
    *     route by device session (`setToolEnabled`, `setActiveDevice`), only
-   *     observes inventory (`listDevices`), or mints its session in the RESULT
+   *     observes inventory, or mints its session in the RESULT
    *     (the acquisition tools, handled above);
    *   - an envelope that declares the named session gone
    *     ({@link declaresDeviceSessionInvalid}) — resurrecting it would heartbeat
@@ -3506,7 +3513,7 @@ export class DaemonMcpProxy {
       name === "executePlan" ||
       name === "setActiveDevice" ||
       name === SET_TOOL_ENABLED_TOOL_NAME ||
-      name === "listDevices" ||
+      isDeviceInventoryTool(name) ||
       isDeviceSessionAcquisitionTool(name)
     ) {
       return false;

@@ -1131,6 +1131,7 @@ export class SessionManager {
     sessionId: string,
     expireDespiteActiveExecution: boolean,
     execution?: SessionExecutionMetadata,
+    releaseExpired = true,
   ): Session | null {
     if (this.terminalReleaseSnapshots.has(sessionId)) {
       return null;
@@ -1148,6 +1149,9 @@ export class SessionManager {
       );
     }
     if (this.shouldExpireSession(session, expireDespiteActiveExecution, execution)) {
+      if (!releaseExpired) {
+        return null;
+      }
       // Release owns this exact session object until it has restored device state
       // and removed its assignment. Keep expiry cleanup from creating a second
       // incarnation with the same UUID before teardown completes, without
@@ -1367,9 +1371,12 @@ export class SessionManager {
         // startup-rehydrated session is not proof that its owner returned. In
         // particular, do not enter reclaimAndRefreshExistingSession(), whose
         // acquisition semantics promote awaiting-owner to owned.
-        const existing = this.getSessionForNewExecution(sessionId, execution);
-        if (existing) {
-          return existing;
+        const observed = this.getSessionInternal(sessionId, true, execution, false);
+        if (observed) {
+          return observed;
+        }
+        if (this.sessions.has(sessionId)) {
+          return undefined;
         }
       }
       return await this.getOrCreateSession(

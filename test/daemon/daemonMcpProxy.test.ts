@@ -3504,7 +3504,7 @@ describe("DaemonMcpProxy", () => {
       }
     });
 
-    test("does not remember a UUID passed to a tool that does not accept sessions", async () => {
+    test("inventory tools do not adopt a forwarded session UUID", async () => {
       const client = new ScriptedDaemonClient({
         toolResult: { content: [{ type: "text", text: "ok" }] },
       });
@@ -3520,11 +3520,19 @@ describe("DaemonMcpProxy", () => {
       try {
         await proxy.callTool("observe", { sessionUuid: "session-a" });
         await proxy.callTool("listDevices", { sessionUuid: "unissued-session" });
+        await proxy.callTool("listDeviceImages", {
+          platform: "ios",
+          sessionUuid: "unissued-session",
+        });
         await proxy.callTool("observe", {});
 
         expect(client.callToolCalls).toEqual([
           { toolName: "observe", params: { sessionUuid: "session-a" } },
           { toolName: "listDevices", params: { sessionUuid: "unissued-session" } },
+          {
+            toolName: "listDeviceImages",
+            params: { platform: "ios", sessionUuid: "unissued-session" },
+          },
           { toolName: "observe", params: { sessionUuid: "session-a" } },
         ]);
       } finally {

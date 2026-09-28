@@ -14,6 +14,7 @@ import { createDefaultPlanExecutionLock, type PlanExecutionLock } from "./PlanEx
 import { SessionToolBinding } from "./SessionToolBinding";
 import { SessionReleaseBroadcaster } from "./sessionReleaseBroadcast";
 import { DaemonSessionCreationRejectedError, TerminalSessionError } from "../daemon/sessionManager";
+import { isDeviceInventoryTool } from "../daemon/daemonMcpProxy";
 import { daemonShuttingDownMcpOutcome } from "../daemon/daemonShutdownOutcome";
 import { DaemonRestartPendingError } from "../daemon/daemonRestartAdmission";
 import { resolveDirectSessionDevice, unregisterDirectSession } from "./directSessionDeviceRegistry";
@@ -1057,21 +1058,24 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       requestedToolSelectionProfileUuid === connectionProfileUuid
         ? (sessionToolBinding.boundDeviceSessionUuid(sessionId) ?? routingSessionUuid)
         : routingSessionUuid;
-    const routingBaseSessionUuid = resolveToolSelectionBaseSessionUuid(
-      routingSessionUuidForLabelLookup,
-      selectionSessionManager,
-    );
+    const routingBaseSessionUuid = isDeviceInventoryTool(name)
+      ? routingSessionUuidForLabelLookup
+      : resolveToolSelectionBaseSessionUuid(
+          routingSessionUuidForLabelLookup,
+          selectionSessionManager,
+        );
     const derivedLabelSessionUuid =
       tool.requiresDevice && requestedDeviceLabel && routingBaseSessionUuid
         ? selectionSessionManager?.getDeviceLabels(routingBaseSessionUuid)?.[requestedDeviceLabel]
         : undefined;
-    const labelSessionUuids = routingBaseSessionUuid
-      ? Array.from(
-          new Set(
-            Object.values(selectionSessionManager?.getDeviceLabels(routingBaseSessionUuid) ?? {}),
-          ),
-        )
-      : [];
+    const labelSessionUuids =
+      routingBaseSessionUuid && !isDeviceInventoryTool(name)
+        ? Array.from(
+            new Set(
+              Object.values(selectionSessionManager?.getDeviceLabels(routingBaseSessionUuid) ?? {}),
+            ),
+          )
+        : [];
     // Only ever honor these two when the call is DAEMON-forwarded. Extraction
     // happens on the RAW `toolParams` before schema validation, and a direct
     // (non-daemon, e.g. stdio) caller controls those raw arguments outright --
@@ -1313,7 +1317,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
               executionId: execution.id,
               startTime: execution.startTime,
             },
-            name === "listDevices" ? { access: "read-only" } : undefined,
+            isDeviceInventoryTool(name) ? { access: "read-only" } : undefined,
           );
       }
       const runToolHandler = () =>
@@ -1430,7 +1434,10 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         ? DaemonState.getInstance().getSessionManager()
         : undefined;
       const sessionForBinding =
-        daemonSessionManager && providedSessionUuid && !isRecordingIdCleanup
+        daemonSessionManager &&
+        providedSessionUuid &&
+        !isRecordingIdCleanup &&
+        !isDeviceInventoryTool(name)
           ? daemonSessionManager.getSessionForNewExecution(providedSessionUuid, {
               executionId: execution.id,
               startTime: execution.startTime,
@@ -1438,6 +1445,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
           : undefined;
       if (
         !isDeviceSessionAcquisitionTool(name) &&
+        !isDeviceInventoryTool(name) &&
         name !== SET_TOOL_ENABLED_TOOL_NAME &&
         !result?.isError &&
         providedSessionUuid &&

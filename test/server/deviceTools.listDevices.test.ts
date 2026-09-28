@@ -545,6 +545,36 @@ describe("listDevices tool (#5870)", () => {
     }
   });
 
+  test("expired pooled session is not released by listDevices", async () => {
+    const timer = new FakeTimer();
+    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      fakeDeviceUtils,
+      new DefaultRetryExecutor(timer),
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    await pool.addDevice(android, { platform: "android", name: android.name, isRunning: true });
+    await pool.assignDeviceToSession("expired-inventory", "android");
+    const session = sessionManager
+      .getAllSessions()
+      .find((entry) => entry.sessionId === "expired-inventory")!;
+    session.expiresAt = timer.now() - 1;
+
+    try {
+      const payload = await callListDevices({ platform: "android" });
+      expect(payload.devices[0].runtime.session.sessionUuid).toBe("expired-inventory");
+      expect(sessionManager.getAllSessionIds()).toContain("expired-inventory");
+      expect(pool.getDevice(android.deviceId)?.sessionId).toBe("expired-inventory");
+    } finally {
+      DaemonState.getInstance().reset();
+      sessionManager.stopCleanupTimer();
+    }
+  });
+
   test("read-only admission does not reclaim an awaiting-owner session", async () => {
     const harness = await createAwaitingOwnerHarness();
     try {

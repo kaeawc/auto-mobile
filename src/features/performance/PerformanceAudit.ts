@@ -14,6 +14,10 @@ import { PerformanceAuditRepository } from "../../db/performanceAuditRepository"
 import { defaultTimer } from "../../utils/SystemTimer";
 import { selectTopContributors } from "../../utils/topContributors";
 import { shellQuote } from "../../utils/shellQuote";
+import {
+  getPreferredDisplayedLogcatTag,
+  parseDisplayedDurationMs,
+} from "./DisplayedTimeMetricsCollector";
 
 /**
  * Performance metrics collected during audit
@@ -535,11 +539,10 @@ export class PerformanceAudit {
     perf: PerformanceTracker,
   ): Promise<number | null> {
     try {
-      // Clear logcat and launch the app to measure fresh TTFF
-      // This looks for recent "Displayed" entries in logcat
+      const logcatTag = await getPreferredDisplayedLogcatTag(this.adb);
       const { stdout } = await perf.track("adbLogcatTtff", () =>
         this.adb.executeCommand(
-          `shell "logcat -d -s ActivityManager:I | grep -E 'Displayed.*'${shellQuote(packageName)} | tail -1"`,
+          `shell "logcat -d -s ${logcatTag}:I | grep -E 'Displayed.*'${shellQuote(packageName)} | tail -1"`,
         ),
       );
 
@@ -548,29 +551,8 @@ export class PerformanceAudit {
         return null;
       }
 
-      // Parse format: "Displayed com.example.app/.MainActivity: +500ms" or "+1s200ms"
-      const ttffMatch = stdout.match(/Displayed\s+\S+:\s*\+?(\d+)s?(\d*)m?s?/);
-      if (!ttffMatch) {
-        // Try alternative format: "+500ms" or "+1s200ms"
-        const altMatch = stdout.match(/\+(\d+)s(\d+)ms|\+(\d+)ms/);
-        if (altMatch) {
-          if (altMatch[1] && altMatch[2]) {
-            // Format: +Xs+Yms
-            const seconds = parseInt(altMatch[1], 10);
-            const ms = parseInt(altMatch[2], 10);
-            return seconds * 1000 + ms;
-          } else if (altMatch[3]) {
-            // Format: +Xms
-            return parseInt(altMatch[3], 10);
-          }
-        }
-        return null;
-      }
-
-      const seconds = ttffMatch[1] ? parseInt(ttffMatch[1], 10) : 0;
-      const ms = ttffMatch[2] ? parseInt(ttffMatch[2], 10) : 0;
-
-      return seconds * 1000 + ms;
+      const durationMatch = stdout.match(/\+\s*\d+(?:s\d+ms|ms|s)/);
+      return durationMatch ? parseDisplayedDurationMs(durationMatch[0]) : null;
     } catch (error) {
       logger.warn(`[PerformanceAudit] Failed to measure TTFF: ${error}`);
       return null;

@@ -16,6 +16,38 @@ interface DisplayedTimeCaptureOptions {
 // AdbExecutor extended with optional AdbClient-specific methods
 type ExtendedAdbExecutor = AdbExecutor & { getAndroidApiLevel?: () => Promise<number | null> };
 
+export async function getPreferredDisplayedLogcatTag(
+  adb: AdbExecutor,
+): Promise<DisplayedLogcatTag> {
+  const extendedAdb = adb as ExtendedAdbExecutor;
+  if (typeof extendedAdb.getAndroidApiLevel === "function") {
+    const apiLevel = await extendedAdb.getAndroidApiLevel();
+    if (apiLevel !== null && apiLevel >= 29) {
+      return "ActivityTaskManager";
+    }
+  }
+  return "ActivityManager";
+}
+
+export function parseDisplayedDurationMs(value: string): number | null {
+  const trimmed = value.replace("+", "").trim();
+  const secondsWithMsMatch = trimmed.match(/^(\d+)s(\d+)ms$/);
+  if (secondsWithMsMatch) {
+    return (
+      Number.parseInt(secondsWithMsMatch[1], 10) * 1000 + Number.parseInt(secondsWithMsMatch[2], 10)
+    );
+  }
+  const msMatch = trimmed.match(/^(\d+)ms$/);
+  if (msMatch) {
+    return Number.parseInt(msMatch[1], 10);
+  }
+  const secondsMatch = trimmed.match(/^(\d+)s$/);
+  if (secondsMatch) {
+    return Number.parseInt(secondsMatch[1], 10) * 1000;
+  }
+  return null;
+}
+
 export class DisplayedTimeMetricsCollector {
   private adb: ExtendedAdbExecutor;
   private device: BootedDevice;
@@ -73,13 +105,7 @@ export class DisplayedTimeMetricsCollector {
       return this.logcatTagCache;
     }
 
-    // Guard: getAndroidApiLevel is AdbClient-specific, not part of AdbExecutor interface
-    let apiLevel: number | null = null;
-    if (typeof this.adb.getAndroidApiLevel === "function") {
-      apiLevel = await this.adb.getAndroidApiLevel();
-    }
-    this.logcatTagCache =
-      apiLevel !== null && apiLevel >= 29 ? "ActivityTaskManager" : "ActivityManager";
+    this.logcatTagCache = await getPreferredDisplayedLogcatTag(this.adb);
     return this.logcatTagCache;
   }
 
@@ -181,8 +207,8 @@ export class DisplayedTimeMetricsCollector {
   }
 
   private extractComponentName(message: string): string | null {
-    const match = message.match(/Displayed\s+([^:]+):/);
-    return match ? match[1].trim() : null;
+    const match = message.match(/Displayed\s+(\S+?)(?:\s+for user \d+)?:/);
+    return match ? match[1] : null;
   }
 
   private parseComponent(component: string): {
@@ -214,25 +240,6 @@ export class DisplayedTimeMetricsCollector {
   }
 
   private parseDurationMs(value: string): number | null {
-    const trimmed = value.replace("+", "").trim();
-    const secondsWithMsMatch = trimmed.match(/^(\d+)s(\d+)ms$/);
-    if (secondsWithMsMatch) {
-      return (
-        Number.parseInt(secondsWithMsMatch[1], 10) * 1000 +
-        Number.parseInt(secondsWithMsMatch[2], 10)
-      );
-    }
-
-    const msMatch = trimmed.match(/^(\d+)ms$/);
-    if (msMatch) {
-      return Number.parseInt(msMatch[1], 10);
-    }
-
-    const secondsMatch = trimmed.match(/^(\d+)s$/);
-    if (secondsMatch) {
-      return Number.parseInt(secondsMatch[1], 10) * 1000;
-    }
-
-    return null;
+    return parseDisplayedDurationMs(value);
   }
 }

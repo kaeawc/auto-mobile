@@ -121,7 +121,7 @@ export class GrantAndroidPermissions {
             `pm${action[0].toUpperCase()}${action.slice(1)}:${trimmed}`,
             async () => {
               const execResult = await this.adb.executeCommand(cmd, undefined, undefined, true);
-              const stdout = execResult.stdout ?? "";
+              const stdout = execResult.stdout;
               const stderr = execResult.stderr ?? "";
 
               if (outputLooksLikeShellFailure(stdout, stderr)) {
@@ -238,7 +238,7 @@ export class GrantAndroidPermissions {
           undefined,
           true,
         );
-        const stdout = execResult.stdout ?? "";
+        const stdout = execResult.stdout;
         const stderr = execResult.stderr ?? "";
 
         if (outputLooksLikeShellFailure(stdout, stderr)) {

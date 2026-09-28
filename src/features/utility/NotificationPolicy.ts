@@ -154,7 +154,7 @@ export class NotificationPolicy {
         undefined,
         true,
       );
-      const policyAccess = parseAndroidPolicyAccess(result.stdout ?? "", appId);
+      const policyAccess = parseAndroidPolicyAccess(result.stdout, appId);
       return {
         success: !policyAccess.error,
         appId,

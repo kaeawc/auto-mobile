@@ -203,7 +203,7 @@ export class AndroidApkContentHasher implements AppContentHasher {
     try {
       const script = apkPaths.map((p) => `sha256sum ${shellQuote(p)}`).join("; ");
       const onDevice = await this.adb.executeCommand(`shell sh -c ${shellQuote(script)}`);
-      digests = extractApkDigests(onDevice.stdout ?? "");
+      digests = extractApkDigests(onDevice.stdout);
     } catch (error) {
       logger.debug(`[ContentHash] on-device sha256sum failed for ${packageId}: ${error}`);
     }
@@ -220,7 +220,7 @@ export class AndroidApkContentHasher implements AppContentHasher {
 
   private async resolveApkPaths(packageId: string): Promise<string[]> {
     const listing = await this.adb.executeCommand(`shell pm path ${shellQuote(packageId)}`);
-    return parsePmPathOutput(listing.stdout ?? "");
+    return parsePmPathOutput(listing.stdout);
   }
 
   private async computeViaPull(remotePaths: string[], packageId: string): Promise<string> {

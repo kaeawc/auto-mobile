@@ -169,7 +169,7 @@ export class DefaultArchiveExtractor implements ArchiveExtractor {
         timeoutMs,
         signal,
       });
-      return parseTarEntries(result.stdout ?? "");
+      return parseTarEntries(result.stdout);
     } catch (error) {
       throw new ActionableError(
         `Unable to inspect archive '${archivePath}' before extraction: ${errorMessage(error)}. ` +

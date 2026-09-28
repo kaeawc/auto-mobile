@@ -20,6 +20,7 @@ import {
   Element,
   ObserveResult,
   ViewHierarchyResult,
+  ViewHierarchyNode,
   isTruthy,
 } from "../models";
 import type { ObserveScreenExecuteOptions } from "../features/observe/interfaces/ObserveScreen";
@@ -235,10 +236,10 @@ type SystemTrayMatchKey = keyof SystemTrayMatchResult["matches"];
 
 export interface SystemTrayNotificationCandidate {
   windowRank?: number;
-  node: any;
+  node: ViewHierarchyNode;
   depth: number;
   element?: Element;
-  groupNode?: any;
+  groupNode?: ViewHierarchyNode;
 }
 
 export interface SystemTrayNotificationMatch {
@@ -465,7 +466,7 @@ export const resolveAppLabel = async (
   }
 };
 
-const createSubHierarchy = (node: any): ViewHierarchyResult => {
+const createSubHierarchy = (node: ViewHierarchyNode): ViewHierarchyResult => {
   return {
     hierarchy: {
       node,
@@ -478,7 +479,7 @@ const getNotificationCriteriaCount = (criteria: SystemTrayNotificationArgs): num
     .length;
 };
 
-const nodeHasNotificationRowHint = (node: any): boolean => {
+const nodeHasNotificationRowHint = (node: ViewHierarchyNode): boolean => {
   const props = getNodeProperties(node);
   if (!props) {
     return false;
@@ -514,9 +515,9 @@ const nodeHasNotificationRowHint = (node: any): boolean => {
 // Android's standard SystemUI places this container as an immediate child
 // of the group row node. If a future OEM wraps it deeper, this will need
 // to become a recursive search.
-export const nodeIsNotificationGroup = (node: any): boolean => {
+export const nodeIsNotificationGroup = (node: ViewHierarchyNode): boolean => {
   const children = node.node;
-  const checkChild = (child: any): boolean => {
+  const checkChild = (child: ViewHierarchyNode | undefined): boolean => {
     if (!child) {
       return false;
     }
@@ -535,7 +536,7 @@ export const nodeIsNotificationGroup = (node: any): boolean => {
   return checkChild(children);
 };
 
-const nodeContainsNotificationChildrenContainer = (node: any): boolean => {
+const nodeContainsNotificationChildrenContainer = (node: ViewHierarchyNode): boolean => {
   if (!node) {
     return false;
   }
@@ -552,24 +553,26 @@ export const isMatchInCollapsedGroup = (match: SystemTrayNotificationMatch): boo
   return !!match.candidate.groupNode;
 };
 
-const getDirectChildNodes = (node: any): any[] => {
+const getDirectChildNodes = (node: ViewHierarchyNode | null | undefined): ViewHierarchyNode[] => {
   if (Array.isArray(node?.node)) {
     return node.node;
   }
   return node?.node ? [node.node] : [];
 };
 
-const getNotificationGroupChildrenContainer = (groupNode: any): any | null =>
-  getDirectChildNodes(groupNode).find((child: any) => {
+const getNotificationGroupChildrenContainer = (
+  groupNode: ViewHierarchyNode,
+): ViewHierarchyNode | null =>
+  getDirectChildNodes(groupNode).find((child: ViewHierarchyNode) => {
     const props = getNodeProperties(child);
     // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- F6/F7 preserves notification layout and field classification; user element selectors use the resolver.
     const resourceId = String(props?.["resource-id"] ?? props?.resourceId ?? "");
     return matchesNotificationResourceId(resourceId, "notification_children_container");
   }) ?? null;
 
-const getNotificationGroupHeader = (groupNode: any): any | null => {
+const getNotificationGroupHeader = (groupNode: ViewHierarchyNode): ViewHierarchyNode | null => {
   const groupChildren = getDirectChildNodes(groupNode);
-  const header = groupChildren.find((child: any) => {
+  const header = groupChildren.find((child: ViewHierarchyNode) => {
     const props = getNodeProperties(child);
     // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- F6/F7 preserves notification layout and field classification; user element selectors use the resolver.
     const resourceId = String(props?.["resource-id"] ?? props?.resourceId ?? "");
@@ -581,7 +584,7 @@ const getNotificationGroupHeader = (groupNode: any): any | null => {
 
   const childrenContainer = getNotificationGroupChildrenContainer(groupNode);
   return (
-    getDirectChildNodes(childrenContainer).find((child: any) => {
+    getDirectChildNodes(childrenContainer).find((child: ViewHierarchyNode) => {
       const props = getNodeProperties(child);
       // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- F6/F7 preserves notification layout and field classification; user element selectors use the resolver.
       const resourceId = String(props?.["resource-id"] ?? props?.resourceId ?? "");
@@ -591,7 +594,7 @@ const getNotificationGroupHeader = (groupNode: any): any | null => {
 };
 
 const getExpandButtonResourceIdBounds = (
-  node: any,
+  node: ViewHierarchyNode,
   parser: DefaultElementParser,
 ): Element | null => {
   const props = getNodeProperties(node);
@@ -603,7 +606,7 @@ const getExpandButtonResourceIdBounds = (
 };
 
 const getExpandButtonContentDescriptionBounds = (
-  node: any,
+  node: ViewHierarchyNode,
   parser: DefaultElementParser,
 ): Element | null => {
   const props = getNodeProperties(node);
@@ -614,11 +617,11 @@ const getExpandButtonContentDescriptionBounds = (
   return contentDescription === "expand" ? (parser.parseNodeBounds(node) ?? null) : null;
 };
 
-const findExpandButtonInGroup = (groupNode: any): Element | null => {
+const findExpandButtonInGroup = (groupNode: ViewHierarchyNode): Element | null => {
   const parser = new DefaultElementParser();
   let contentDescriptionMatch: Element | null = null;
 
-  const search = (node: any): Element | null => {
+  const search = (node: ViewHierarchyNode | null): Element | null => {
     if (!node) {
       return null;
     }
@@ -672,14 +675,16 @@ export const expandNotificationGroup = async (
   return true;
 };
 
-export const getNotificationGroupChildRows = (groupNode: any): any[] => {
+export const getNotificationGroupChildRows = (
+  groupNode: ViewHierarchyNode,
+): ViewHierarchyNode[] => {
   const childrenContainer = getNotificationGroupChildrenContainer(groupNode);
   if (!childrenContainer) {
     return [];
   }
 
   const children = getDirectChildNodes(childrenContainer);
-  return children.filter((child: any) => {
+  return children.filter((child: ViewHierarchyNode) => {
     const props = getNodeProperties(child);
     // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- F6/F7 preserves notification layout and field classification; user element selectors use the resolver.
     const resourceId = String(props?.["resource-id"] ?? props?.resourceId ?? "");
@@ -693,7 +698,7 @@ export const getNotificationGroupChildRows = (groupNode: any): any[] => {
 export type NotificationGroupExpansionState = "expanded" | "collapsed" | "unknown";
 
 const nodeHasResourceIdDescendant = (
-  node: any,
+  node: ViewHierarchyNode,
   resourceIdFragment: keyof typeof NOTIFICATION_RESOURCE_IDS,
 ): boolean => {
   const props = getNodeProperties(node);
@@ -707,7 +712,7 @@ const nodeHasResourceIdDescendant = (
   );
 };
 
-const getNodeExpandButtonContentDescription = (node: any): string | null => {
+const getNodeExpandButtonContentDescription = (node: ViewHierarchyNode): string | null => {
   const props = getNodeProperties(node);
   // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- F6/F7 preserves notification layout and field classification; user element selectors use the resolver.
   const resourceId = String(props?.["resource-id"] ?? props?.resourceId ?? "");
@@ -718,8 +723,11 @@ const getNodeExpandButtonContentDescription = (node: any): string | null => {
   return contentDescription && (isExpandButton || isRecognizedState) ? contentDescription : null;
 };
 
-const getHeaderExpandButtonContentDescription = (groupNode: any): string | null => {
-  const search = (node: any): string | null => {
+const getHeaderExpandButtonContentDescription = (groupNode: ViewHierarchyNode): string | null => {
+  const search = (node: ViewHierarchyNode | null): string | null => {
+    if (!node) {
+      return null;
+    }
     const contentDescription = getNodeExpandButtonContentDescription(node);
     if (contentDescription) {
       return contentDescription;
@@ -736,22 +744,24 @@ const getHeaderExpandButtonContentDescription = (groupNode: any): string | null 
   return search(getNotificationGroupHeader(groupNode));
 };
 
-const getChildRowBounds = (groupNode: any) => {
+const getChildRowBounds = (groupNode: ViewHierarchyNode) => {
   const parser = new DefaultElementParser();
   return getNotificationGroupChildRows(groupNode)
     .map((childRow) => parser.parseNodeBounds(childRow)?.bounds)
     .filter((bounds): bounds is NonNullable<typeof bounds> => bounds !== undefined);
 };
 
-const getNotificationGroupHeaderBounds = (groupNode: any) =>
-  new DefaultElementParser().parseNodeBounds(getNotificationGroupHeader(groupNode))?.bounds;
+const getNotificationGroupHeaderBounds = (groupNode: ViewHierarchyNode) => {
+  const header = getNotificationGroupHeader(groupNode);
+  return header ? new DefaultElementParser().parseNodeBounds(header)?.bounds : undefined;
+};
 
 // The 0.35 collapsed capture ratio is header-relative to avoid mdpi fixed-pixel misclassification.
 const COLLAPSED_ROW_HEIGHT_TO_HEADER_RATIO_MAX = 0.5;
 // The 1.48 expanded capture ratio is header-relative to avoid mdpi fixed-pixel misclassification.
 const EXPANDED_ROW_HEIGHT_TO_HEADER_RATIO_MIN = 1.3;
 
-const hasCollapsedRowGeometry = (groupNode: any): boolean => {
+const hasCollapsedRowGeometry = (groupNode: ViewHierarchyNode): boolean => {
   const childRows = getChildRowBounds(groupNode);
   const headerBounds = getNotificationGroupHeaderBounds(groupNode);
   if (childRows.length === 0 || !headerBounds) {
@@ -766,7 +776,7 @@ const hasCollapsedRowGeometry = (groupNode: any): boolean => {
   );
 };
 
-const hasExpandedRowGeometry = (groupNode: any): boolean => {
+const hasExpandedRowGeometry = (groupNode: ViewHierarchyNode): boolean => {
   const childRows = getChildRowBounds(groupNode);
   const headerBounds = getNotificationGroupHeaderBounds(groupNode);
   if (childRows.length === 0 || !headerBounds) {
@@ -787,7 +797,7 @@ const hasExpandedRowGeometry = (groupNode: any): boolean => {
 };
 
 export const resolveNotificationGroupExpansionState = (
-  groupNode: any,
+  groupNode: ViewHierarchyNode,
 ): NotificationGroupExpansionState => {
   const childRows = getNotificationGroupChildRows(groupNode);
   if (
@@ -816,7 +826,7 @@ export const resolveNotificationGroupExpansionState = (
   return geometryState ?? headerState ?? "unknown";
 };
 
-export const isNotificationGroupExpanded = (groupNode: any): boolean =>
+export const isNotificationGroupExpanded = (groupNode: ViewHierarchyNode): boolean =>
   resolveNotificationGroupExpansionState(groupNode) === "expanded";
 
 const collectNotificationCandidates = (
@@ -826,7 +836,11 @@ const collectNotificationCandidates = (
   const visited = new Set<unknown>();
   const parser = new DefaultElementParser();
 
-  const visitChildren = (node: any, depth: number, groupNode?: any): void => {
+  const visitChildren = (
+    node: ViewHierarchyNode,
+    depth: number,
+    groupNode?: ViewHierarchyNode,
+  ): void => {
     const children = node.node;
     if (Array.isArray(children)) {
       for (const child of children) {
@@ -837,7 +851,7 @@ const collectNotificationCandidates = (
     }
   };
 
-  const visitNotificationGroupChildren = (node: any, depth: number): void => {
+  const visitNotificationGroupChildren = (node: ViewHierarchyNode, depth: number): void => {
     const childRows = getNotificationGroupChildRows(node);
     if (childRows.length === 0) {
       const element = parser.parseNodeBounds(node) ?? undefined;
@@ -849,7 +863,7 @@ const collectNotificationCandidates = (
     }
   };
 
-  const visit = (node: any, depth: number, groupNode?: any): void => {
+  const visit = (node: ViewHierarchyNode, depth: number, groupNode?: ViewHierarchyNode): void => {
     if (!node || visited.has(node)) {
       return;
     }
@@ -891,7 +905,7 @@ const buildNormalizedSearchTexts = (texts: string[]): NormalizedSearchText[] => 
     .map((text) => ({ text, normalized: text.toLowerCase() }));
 };
 
-const extractNodeTextCandidates = (node: any): string[] => {
+const extractNodeTextCandidates = (node: ViewHierarchyNode): string[] => {
   const props = getNodeProperties(node);
   if (!props) {
     return [];
@@ -905,7 +919,7 @@ const extractNodeTextCandidates = (node: any): string[] => {
   );
 };
 
-const collectNodeSubtreeTextCandidates = (node: any): string[] => {
+const collectNodeSubtreeTextCandidates = (node: ViewHierarchyNode): string[] => {
   if (!node) {
     return [];
   }
@@ -1020,14 +1034,14 @@ const collectCompositeNotificationCandidates = (
   const visited = new Set<unknown>();
   const parser = new DefaultElementParser();
 
-  const childRowMatchesContentCriteria = (childRow: any): boolean => {
+  const childRowMatchesContentCriteria = (childRow: ViewHierarchyNode): boolean => {
     const childTexts = collectNodeSubtreeTextCandidates(childRow).map((text) => text.toLowerCase());
     const matches = (searchText: NormalizedSearchText | null): boolean =>
       !searchText || childTexts.some((text) => text.includes(searchText.normalized));
     return matches(titleText) && matches(bodyText) && matches(actionText);
   };
 
-  const resolveNodeMatches = (node: any): SystemTrayMatchResult["matches"] => {
+  const resolveNodeMatches = (node: ViewHierarchyNode): SystemTrayMatchResult["matches"] => {
     const nodeTextCandidates = extractNodeTextCandidates(node);
     if (nodeTextCandidates.length === 0) {
       return {};
@@ -1068,9 +1082,9 @@ const collectCompositeNotificationCandidates = (
   };
 
   const visit = (
-    node: any,
+    node: ViewHierarchyNode,
     depth: number,
-    groupNode?: any,
+    groupNode?: ViewHierarchyNode,
   ): { matches: SystemTrayMatchResult["matches"]; hasAll: boolean } => {
     if (!node || visited.has(node)) {
       return { matches: {}, hasAll: false };
@@ -1342,7 +1356,7 @@ const buildNotificationCandidateMatch = (
     : direct;
 };
 
-const nodeIsNotificationStackScroller = (node: any): boolean => {
+const nodeIsNotificationStackScroller = (node: ViewHierarchyNode): boolean => {
   const props = getNodeProperties(node);
   // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- Classifies a SystemUI layout node; user element selection uses the resolver.
   const resourceId = String(props?.["resource-id"] ?? props?.resourceId ?? "");
@@ -1545,9 +1559,9 @@ export const ensureSystemTrayClosed = async (
 
 // Collect every text/content-desc string inside a candidate notification row's
 // subtree. Iterative (not recursive) to keep depth shallow for the lint ratchet.
-const collectNotificationSubtreeTexts = (node: any): string[] => {
+const collectNotificationSubtreeTexts = (node: ViewHierarchyNode): string[] => {
   const texts: string[] = [];
-  const stack: any[] = [node];
+  const stack: ViewHierarchyNode[] = [node];
   while (stack.length > 0) {
     const current = stack.pop();
     if (!current) {
@@ -1701,7 +1715,7 @@ const NOTIFICATION_TITLE_FIELD_IDS = [
   "notification_title",
 ];
 
-const findHeaderAppLabel = (header: any): string | undefined => {
+const findHeaderAppLabel = (header: ViewHierarchyNode | null | undefined): string | undefined => {
   const props = getNodeProperties(header);
   // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- F6/F7 preserves notification layout and field classification; user element selectors use the resolver.
   const resourceId = String(props?.["resource-id"] ?? props?.resourceId ?? "").toLowerCase();
@@ -1718,14 +1732,14 @@ const findHeaderAppLabel = (header: any): string | undefined => {
   return undefined;
 };
 
-const collectNotificationGroupChildTitles = (groupNode: any): string[] => {
+const collectNotificationGroupChildTitles = (groupNode: ViewHierarchyNode): string[] => {
   const childrenContainer = getNotificationGroupChildrenContainer(groupNode);
   if (!childrenContainer) {
     return [];
   }
 
   const titles: string[] = [];
-  const visit = (node: any): void => {
+  const visit = (node: ViewHierarchyNode): void => {
     const props = getNodeProperties(node);
     // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- F6/F7 preserves notification layout and field classification; user element selectors use the resolver.
     const resourceId = String(props?.["resource-id"] ?? props?.resourceId ?? "");
@@ -1749,7 +1763,9 @@ const collectNotificationGroupChildTitles = (groupNode: any): string[] => {
   return titles;
 };
 
-const getNotificationGroupIdentity = (groupNode: any): NotificationGroupIdentity | null => {
+const getNotificationGroupIdentity = (
+  groupNode: ViewHierarchyNode,
+): NotificationGroupIdentity | null => {
   const bounds = new DefaultElementParser().parseNodeBounds(groupNode)?.bounds;
   if (!bounds) {
     return null;
@@ -1765,7 +1781,7 @@ const getNotificationGroupIdentity = (groupNode: any): NotificationGroupIdentity
 
 const isSameNotificationGroup = (
   original: NotificationGroupIdentity | null,
-  rematchedGroupNode: any,
+  rematchedGroupNode: ViewHierarchyNode,
 ): boolean => {
   const rematched = getNotificationGroupIdentity(rematchedGroupNode);
   if (
@@ -1789,7 +1805,10 @@ const isSameNotificationGroup = (
   return original.top === rematched.top;
 };
 
-const isSameNotificationRow = (originalNode: any, rematchedNode: any): boolean => {
+const isSameNotificationRow = (
+  originalNode: ViewHierarchyNode,
+  rematchedNode: ViewHierarchyNode,
+): boolean => {
   const original = readTrayNotificationFields(originalNode);
   const identifyingText = original.title ?? original.bodies[0] ?? original.contentTexts[0];
   if (!identifyingText) {
@@ -2033,7 +2052,7 @@ const isRowContent = (parentIsContent: boolean, id: string): boolean =>
 
 // Read semantic Android notification fields, preserving custom-layout text as a
 // fallback. A group header must not inherit fields from its sibling child rows.
-const readTrayNotificationFields = (root: any) => {
+const readTrayNotificationFields = (root: ViewHierarchyNode) => {
   const childRows = new Set(
     collectNotificationCandidates(createSubHierarchy(root)).map((candidate) => candidate.node),
   );
@@ -2106,8 +2125,10 @@ const readTrayNotificationFields = (root: any) => {
         messages.push(text);
       }
     }
-    const children = [node.node].flat().filter((child) => child && typeof child === "object");
-    pending.push(...children.map((node: any) => ({ node, messages, content })));
+    const children = [node.node]
+      .flat()
+      .filter((child): child is ViewHierarchyNode => Boolean(child));
+    pending.push(...children.map((node: ViewHierarchyNode) => ({ node, messages, content })));
   }
   const messages = messageLayouts.reduce((fullest, layout) =>
     layout.length > fullest.length ? layout : fullest,
@@ -2275,7 +2296,7 @@ const readDumpsysNotificationOutput = async (
       true,
       signal,
     );
-    return result.stdout ?? "";
+    return result.stdout;
   } catch (error) {
     signal?.throwIfAborted();
     logger.warn(

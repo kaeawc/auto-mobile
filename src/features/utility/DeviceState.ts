@@ -1213,7 +1213,7 @@ export class DeviceState {
           error: `notifyutil failed: ${stderr}`,
         };
       }
-      const enrolled = parseNotifyutilState(result.stdout ?? "");
+      const enrolled = parseNotifyutilState(result.stdout);
       if (enrolled === null) {
         return {
           supported: true,
@@ -1267,7 +1267,7 @@ export class DeviceState {
           error: `notifyutil failed: ${stderr}`,
         };
       }
-      const enrolled = parseNotifyutilState(result.stdout ?? "");
+      const enrolled = parseNotifyutilState(result.stdout);
       const verified = enrolled === (enrollment === "enrolled");
       return {
         supported: true,
@@ -1337,7 +1337,7 @@ export class DeviceState {
         undefined,
         true,
       );
-      stdout = result.stdout ?? "";
+      stdout = result.stdout;
     } catch (error) {
       // Strategy 2: log, then return a typed failure — the tool reports the
       // error to the client instead of throwing out of a read-only state dump.
@@ -1535,7 +1535,7 @@ export class DeviceState {
     command: string,
   ): Promise<string | undefined> {
     const result = await adb.executeCommand(command, undefined, undefined, true);
-    const stdout = result.stdout ?? "";
+    const stdout = result.stdout;
     const stderr = result.stderr ?? "";
     return outputLooksLikeShellFailure(stdout, stderr)
       ? `${stdout}\n${stderr}`.trim() || `${command} reported an error`
@@ -1585,7 +1585,7 @@ export class DeviceState {
         undefined,
         true,
       );
-      return parseAndroidZenMode(result.stdout ?? "");
+      return parseAndroidZenMode(result.stdout);
     } catch (error) {
       return {
         supported: true,
@@ -1607,7 +1607,7 @@ export class DeviceState {
         undefined,
         true,
       );
-      const stdout = setResult.stdout ?? "";
+      const stdout = setResult.stdout;
       const stderr = setResult.stderr ?? "";
       if (outputLooksLikeShellFailure(stdout, stderr)) {
         return {
@@ -1698,7 +1698,7 @@ export class DeviceState {
     try {
       const adb = this.adbFactory.create(this.device);
       const result = await adb.executeCommand("emu network status", undefined, undefined, true);
-      const stdout = result.stdout ?? "";
+      const stdout = result.stdout;
       const stderr = result.stderr ?? "";
       if (emulatorConsoleReportsFailure(stdout, stderr)) {
         return {
@@ -1887,7 +1887,7 @@ export class DeviceState {
   ): Promise<string | null> {
     for (const command of commands) {
       const result = await adb.executeCommand(command, undefined, undefined, true);
-      const stdout = result.stdout ?? "";
+      const stdout = result.stdout;
       const stderr = result.stderr ?? "";
       if (emulatorConsoleReportsFailure(stdout, stderr)) {
         return `${stdout}\n${stderr}`.trim() || `${command} reported an error`;
@@ -1956,7 +1956,7 @@ export class DeviceState {
   ): Promise<string | undefined> {
     try {
       const result = await adb.executeCommand(command, undefined, undefined, true);
-      const stdout = result.stdout ?? "";
+      const stdout = result.stdout;
       const stderr = result.stderr ?? "";
       if (outputLooksLikeShellFailure(stdout, stderr)) {
         return `Wi-Fi toggle '${command}' reported: ${`${stdout} ${stderr}`.trim()}`;

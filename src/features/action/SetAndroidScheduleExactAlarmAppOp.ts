@@ -72,7 +72,7 @@ export class SetAndroidScheduleExactAlarmAppOp {
     try {
       await perf.track(`appops.${input.mode}`, async () => {
         const execResult = await this.adb.executeCommand(cmd, undefined, undefined, true);
-        const stdout = execResult.stdout ?? "";
+        const stdout = execResult.stdout;
         const stderr = execResult.stderr ?? "";
         const bad = outputLooksLikeShellFailure(stdout, stderr);
 

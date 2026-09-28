@@ -27,6 +27,7 @@ import {
   type CtrlProxyVersionLookup,
   getBootedDevicesForPlatforms,
   resetBootedDevicesResourceCache,
+  setBootCompletionAdbFactory,
 } from "../../../src/server/bootedDeviceResources";
 import { BootedDevice, Platform } from "../../../src/models";
 import { DaemonState } from "../../../src/daemon/daemonState";
@@ -43,6 +44,7 @@ import { resolveApkChecksum, resolveIpaChecksum } from "../../../src/constants/r
 import { z } from "zod/v4";
 import { FakeOrientationReader } from "../../fakes/FakeOrientationReader";
 import { AndroidAvdProvenanceCache } from "../../../src/utils/AndroidAvdProvenanceCache";
+import { notifyDeviceImageResourcesUpdated } from "../../../src/server/deviceImageResources";
 
 describe("MCP Booted Device Resources", () => {
   let fixture: McpTestFixture;
@@ -91,6 +93,7 @@ describe("MCP Booted Device Resources", () => {
   });
 
   afterEach(() => {
+    setBootCompletionAdbFactory(null);
     if (DaemonState.getInstance().isInitialized()) {
       DaemonState.getInstance().reset();
     }
@@ -129,6 +132,31 @@ describe("MCP Booted Device Resources", () => {
     resetBootedDevicesResourceCache();
     await getBootedDevicesForPlatforms(["android"], timer);
     expect(fakeDeviceUtils.getCallCount("getBootedDevices:android")).toBe(3);
+  });
+
+  test.each([
+    ["0", { state: "booting", known: true }],
+    ["1", { state: "booted", known: true }],
+  ] as const)("reports Android OS boot completion %s", async (property, lifecycle) => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("shell getprop sys.boot_completed", { stdout: property, stderr: "" });
+    setBootCompletionAdbFactory({ create: () => adb });
+    fakeDeviceUtils.setBootedDevices("android", [mockAndroidDevice1]);
+
+    const result = await getBootedDevicesForPlatforms(["android"], new FakeTimer());
+    expect(result.devices[0].runtime.lifecycle).toEqual(lifecycle);
+    expect(adb.getExecutedCommands()).toContain("shell getprop sys.boot_completed");
+  });
+
+  test("keeps an Android device with unknown lifecycle when boot completion fails", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandError("shell getprop sys.boot_completed", new Error("transport unavailable"));
+    setBootCompletionAdbFactory({ create: () => adb });
+    fakeDeviceUtils.setBootedDevices("android", [mockAndroidDevice1]);
+
+    const result = await getBootedDevicesForPlatforms(["android"], new FakeTimer());
+    expect(result.devices[0].runtime.deviceId).toBe(mockAndroidDevice1.deviceId);
+    expect(result.devices[0].runtime.lifecycle).toEqual({ state: "booted", known: false });
   });
 
   test("marks iOS physical discovery failure incomplete even when simctl succeeds", async () => {
@@ -371,7 +399,7 @@ describe("MCP Booted Device Resources", () => {
         identity: { stableId: "Pixel_7_API_34" },
         runtime: {
           connectionId: "emulator-5554",
-          lifecycle: { state: "booted", known: true },
+          lifecycle: { state: "booted", known: false },
           readiness: { state: "unknown" },
           serviceStatus: null,
         },
@@ -819,9 +847,66 @@ describe("MCP Booted Device Resources", () => {
         expect(spy).toHaveBeenCalledTimes(1);
         const uris = spy.mock.calls[0][0];
         expect(uris).toContain("automobile:devices/booted");
+        expect(uris).toContain("automobile:devices/booted/android");
+        expect(uris).toContain("automobile:devices/booted/ios");
         expect(uris).toContain("automobile:devices/lockStates");
       } finally {
         spy.mockRestore();
+      }
+    });
+
+    test("notifies subscribed platform booted resources through the real registry", async () => {
+      const { client, server } = fixture.getContext();
+      const uris = [
+        "automobile:devices/booted",
+        "automobile:devices/booted/android",
+        "automobile:devices/booted/ios",
+        "automobile:devices/lockStates",
+      ];
+      const sent: string[] = [];
+      const notification = spyOn(server.server, "notification").mockImplementation(
+        async (message) => {
+          if (message.method === "notifications/resources/updated") {
+            sent.push(message.params.uri);
+          }
+        },
+      );
+      try {
+        for (const uri of uris) {
+          await client.request({ method: "resources/subscribe", params: { uri } }, z.object({}));
+        }
+        await notifyBootedDeviceResourcesUpdated();
+        expect(sent.sort()).toEqual([...uris].sort());
+      } finally {
+        for (const uri of uris) {
+          await client.request({ method: "resources/unsubscribe", params: { uri } }, z.object({}));
+        }
+        notification.mockRestore();
+      }
+    });
+
+    test("notifies subscribed platform image resources through the real registry", async () => {
+      const { client, server } = fixture.getContext();
+      const uris = ["automobile:devices/images/android", "automobile:devices/images/ios"];
+      const sent: string[] = [];
+      const notification = spyOn(server.server, "notification").mockImplementation(
+        async (message) => {
+          if (message.method === "notifications/resources/updated") {
+            sent.push(message.params.uri);
+          }
+        },
+      );
+      try {
+        for (const uri of uris) {
+          await client.request({ method: "resources/subscribe", params: { uri } }, z.object({}));
+        }
+        await notifyDeviceImageResourcesUpdated();
+        expect(sent.sort()).toEqual([...uris].sort());
+      } finally {
+        for (const uri of uris) {
+          await client.request({ method: "resources/unsubscribe", params: { uri } }, z.object({}));
+        }
+        notification.mockRestore();
       }
     });
 
@@ -1273,7 +1358,7 @@ describe("MCP Booted Device Resources", () => {
             expect.objectContaining({
               runtime: expect.objectContaining({
                 deviceId: mockAndroidDevice1.deviceId,
-                lifecycle: { state: "booted", known: true },
+                lifecycle: { state: "booted", known: false },
                 session: null,
                 deviceSessionUuid: registry.getByDeviceId(mockAndroidDevice1.deviceId)
                   ?.deviceSessionUuid,

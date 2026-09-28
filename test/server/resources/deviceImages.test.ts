@@ -119,6 +119,20 @@ describe("Device Image Resources with Fakes", () => {
     }
   });
 
+  test("notifies both platform image resource URIs", async () => {
+    const notify = spyOn(ResourceRegistry, "notifyResourcesUpdated").mockResolvedValue(undefined);
+    try {
+      await notifyDeviceImageResourcesUpdated();
+      expect(notify).toHaveBeenCalledWith([
+        "automobile:devices/images",
+        "automobile:devices/images/android",
+        "automobile:devices/images/ios",
+      ]);
+    } finally {
+      notify.mockRestore();
+    }
+  });
+
   describe("createDeviceImageResourcesHandler", () => {
     test("returns a normalized provisioning catalog for Android and iOS", async () => {
       fakeDeviceUtils.setDeviceImages("android", []);

@@ -22,11 +22,13 @@ import {
   describeDevice,
   projectBootedDevice,
   withDeviceRuntimeObservation,
+  withDeviceLifecycle,
   withDeviceServiceStatus,
   type BootedDeviceDescription,
   type DeviceDescription,
 } from "./deviceDescription";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
+import type { AdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
 import { getAndroidAppMetadataViaAdb } from "../features/observe/GetAppMetadata";
 import { AndroidCtrlProxyManager } from "../utils/CtrlProxyManager";
@@ -270,6 +272,12 @@ export function setDeviceManager(manager: PlatformDeviceManager | null): void {
 // Controls whether service status is queried for each device.
 // Disabled automatically when a test device manager is injected.
 let serviceStatusEnabled = true;
+
+// A fake factory opts resource tests into the same narrow probe without touching real adb.
+let injectedBootCompletionAdbFactory: AdbClientFactory | null = null;
+export function setBootCompletionAdbFactory(factory: AdbClientFactory | null): void {
+  injectedBootCompletionAdbFactory = factory;
+}
 
 /** Probes a device's lock state; returns `undefined` when it can't be determined. */
 export type DeviceLockProbe = (device: BootedDevice) => Promise<boolean | undefined>;
@@ -830,6 +838,86 @@ function isProbeableDevice(device: BootedDeviceInfo): boolean {
 }
 
 const SERVICE_STATUS_TIMEOUT_MS = 5000;
+const BOOT_COMPLETION_TIMEOUT_MS = 3000;
+
+async function probeBootCompletionWithBudget(
+  device: BootedDeviceInfo,
+  factory: AdbClientFactory,
+  deadlineMs: number,
+  timer: Timer,
+): Promise<string | null> {
+  let timeoutHandle: NodeJS.Timeout | undefined;
+  const controller = new AbortController();
+  try {
+    return await withRemainingBudget(
+      deadlineMs,
+      timer,
+      undefined,
+      async (_signal, remainingMs) =>
+        await Promise.race([
+          factory
+            .create(probeTarget(device))
+            .executeCommand(
+              "shell getprop sys.boot_completed",
+              remainingMs,
+              undefined,
+              true,
+              controller.signal,
+            )
+            .then((result) => result.stdout.trim()),
+          new Promise<null>((resolve) => {
+            timeoutHandle = timer.setTimeout(() => {
+              controller.abort();
+              logger.warn(
+                `[BootedDeviceResources] Boot completion probe timed out for ${device.runtime.deviceId}`,
+              );
+              resolve(null);
+            }, remainingMs);
+          }),
+        ]),
+    );
+  } catch (error) {
+    logger.warn(
+      `[BootedDeviceResources] Boot completion probe failed for ${device.runtime.deviceId}: ${errorMessage(error)}`,
+    );
+    return null;
+  } finally {
+    if (timeoutHandle) {
+      timer.clearTimeout(timeoutHandle);
+    }
+  }
+}
+
+async function enrichDeviceBootCompletion(
+  devices: BootedDeviceInfo[],
+  timer: Timer,
+): Promise<void> {
+  const factory =
+    injectedBootCompletionAdbFactory ?? (serviceStatusEnabled ? defaultAdbClientFactory : null);
+  const deadlineMs = timer.now() + BOOT_COMPLETION_TIMEOUT_MS;
+  const results = await Promise.all(
+    devices.map((device) =>
+      device.platform === "android" && isProbeableDevice(device) && factory
+        ? probeBootCompletionWithBudget(device, factory, deadlineMs, timer)
+        : Promise.resolve(null),
+    ),
+  );
+  for (let i = 0; i < devices.length; i++) {
+    if (devices[i].platform !== "android") {
+      continue;
+    }
+    const result = results[i];
+    const updated = withDeviceLifecycle(
+      devices[i],
+      result === null
+        ? { state: "booted", known: false }
+        : result === "1"
+          ? { state: "booted", known: true }
+          : { state: "booting", known: true },
+    );
+    devices[i] = { ...devices[i], runtime: updated.runtime };
+  }
+}
 
 /** Probes one device's automation-service status; resolves undefined when the platform has none. */
 export type ServiceStatusProbe = (
@@ -1093,6 +1181,7 @@ async function enrichDeviceOrientations(
 // Core computation to fetch booted devices for specified platforms
 async function computeBootedDevicesForPlatforms(
   platforms: Platform[],
+  timer: Timer,
 ): Promise<BootedDevicesResourceContent> {
   const devices: BootedDeviceInfo[] = [];
   const daemonContext = readDaemonDeviceContext();
@@ -1117,6 +1206,7 @@ async function computeBootedDevicesForPlatforms(
   }
 
   await Promise.all([
+    enrichDeviceBootCompletion(devices, timer),
     enrichDeviceServiceStatuses(devices),
     enrichDeviceLockStates(devices),
     enrichDeviceOrientations(devices),
@@ -1159,7 +1249,7 @@ export async function getBootedDevicesForPlatforms(
 
   return await bootedDevicesResourceSingleFlight.run(cacheKey, async () => {
     const generation = ++bootedDevicesResourceGeneration;
-    const result = await computeBootedDevicesForPlatforms(canonicalPlatforms);
+    const result = await computeBootedDevicesForPlatforms(canonicalPlatforms, timer);
     if (generation >= bootedDevicesResourcePublishedGeneration) {
       bootedDevicesResourcePublishedGeneration = generation;
       getBootedDevicesResourceCache(timer).set(cacheKey, result);
@@ -1472,6 +1562,8 @@ export async function notifyBootedDeviceResourcesUpdated(): Promise<void> {
   resetBootedDevicesResourceCache();
   await ResourceRegistry.notifyResourcesUpdated([
     BOOTED_DEVICE_RESOURCE_URIS.ALL_BOOTED,
+    `${BOOTED_DEVICE_RESOURCE_URIS.ALL_BOOTED}/android`,
+    `${BOOTED_DEVICE_RESOURCE_URIS.ALL_BOOTED}/ios`,
     DEVICE_LOCK_STATES_RESOURCE_URI,
   ]);
 }

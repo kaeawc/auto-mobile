@@ -364,8 +364,8 @@ export class DeviceSessionManager implements DeviceSessionManager {
   private _adb: AdbExecutor | undefined;
   private readonly idGenerator: IdGenerator;
 
-  // Track devices that have push update listeners registered
-  private static pushUpdateListenersRegistered: Set<string> = new Set();
+  // Client recreation after an iOS device restart needs a fresh callback.
+  private static pushUpdateListenersRegistered: WeakSet<IOSCtrlProxy> = new WeakSet();
 
   private constructor(
     provider: DeviceClientProvider,
@@ -1413,13 +1413,12 @@ export class DeviceSessionManager implements DeviceSessionManager {
    */
   private registerPushUpdateListener(device: BootedDevice): void {
     const deviceId = device.deviceId;
-    if (DeviceSessionManager.pushUpdateListenersRegistered.has(deviceId)) {
-      return; // Already registered
-    }
-
     try {
       const manager = this.provider.getIOSCtrlProxyManager(device);
       const xcTestClient = this.provider.getIOSCtrlProxyClient(device, manager.getServicePort());
+      if (DeviceSessionManager.pushUpdateListenersRegistered.has(xcTestClient)) {
+        return;
+      }
 
       const observeCache = this.provider.getObserveScreenCache();
       xcTestClient.onPushUpdate(() => {
@@ -1429,7 +1428,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
         observeCache.clearForDevice(deviceId);
       });
 
-      DeviceSessionManager.pushUpdateListenersRegistered.add(deviceId);
+      DeviceSessionManager.pushUpdateListenersRegistered.add(xcTestClient);
       logger.info(`[DeviceSessionManager] Registered push update listener for ${deviceId}`);
     } catch (error) {
       logger.warn(

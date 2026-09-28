@@ -575,6 +575,53 @@ describe("DeviceSessionManager iOS push-update cache invalidation", () => {
     expect(observeCache.getClearedDevices()).toEqual(["ios-push-1"]);
   });
 
+  test("re-registers cache invalidation on a replacement iOS client only once", async () => {
+    const deviceId = "ios-restarted-push";
+    const fakeSimctl = new FakeSimCtlClient();
+    fakeSimctl.setDeviceInfo(deviceId, {
+      udid: deviceId,
+      name: "iPhone 15",
+      state: "Booted",
+      isAvailable: true,
+    });
+    const iosManager = new FakeIOSCtrlProxyManager();
+    iosManager.setRunning(true);
+    const callbacksA: Array<() => void> = [];
+    const callbacksB: Array<() => void> = [];
+    const makeClient = (callbacks: Array<() => void>) =>
+      stubIOSCtrlProxy({
+        isConnected: () => true,
+        verifyServiceReady: () => Promise.resolve(true),
+        onPushUpdate: (callback: () => void) => {
+          callbacks.push(callback);
+          return () => {};
+        },
+      });
+    const options = {
+      iosCtrlProxyManager: iosManager,
+      iosCtrlProxyClient: makeClient(callbacksA),
+      observeScreenCache: new FakeObserveScreenCache(),
+    };
+    const provider = new FakeDeviceClientProvider(
+      fakeAdb,
+      fakeDeviceUtils,
+      fakeSimctl as any,
+      options,
+    );
+    const manager = DeviceSessionManager.createInstance(provider);
+
+    await manager.verifyIosDevice(deviceId);
+    await manager.verifyIosDevice(deviceId);
+    expect(callbacksA).toHaveLength(1);
+
+    options.iosCtrlProxyClient = makeClient(callbacksB);
+    await manager.verifyIosDevice(deviceId);
+    await manager.verifyIosDevice(deviceId);
+    expect(callbacksB).toHaveLength(1);
+    callbacksB[0]();
+    expect(options.observeScreenCache.getClearedDevices()).toEqual([deviceId]);
+  });
+
   test("waits for startup reaping before confirming a connected iOS runner is ready", async () => {
     const reaping = deferred();
     const reapSpy = spyOn(

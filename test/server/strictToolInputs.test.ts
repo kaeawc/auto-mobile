@@ -165,9 +165,9 @@ describe("issues #6712/#6613: object-shaped tool inputs reject undeclared argume
     expect(biometricAuthSchema.safeParse({ action: "error", errorCode: 7 }).success).toBe(true);
   });
 
-  test("navigation schemas keep their platform default under strict mode", () => {
-    expect(navigateToSchema.parse({ targetScreen: "Home" }).platform).toBe("android");
-    expect(getNavigationGraphSchema.parse({}).platform).toBe("android");
-    expect(exploreSchema.parse({}).platform).toBe("android");
+  test("navigation schemas preserve an omitted platform under strict mode", () => {
+    expect(navigateToSchema.parse({ targetScreen: "Home" }).platform).toBeUndefined();
+    expect(getNavigationGraphSchema.parse({}).platform).toBeUndefined();
+    expect(exploreSchema.parse({}).platform).toBeUndefined();
   });
 });

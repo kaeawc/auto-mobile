@@ -13,12 +13,13 @@ import { addDeviceTargetingToSchema, platformSchema } from "./toolSchemaHelpers"
 // Schema definitions
 // #6712: `.strict()` on each of these — the advertised schemas already said
 // `additionalProperties: false`, but a plain z.object silently DROPPED an
-// undeclared caller argument at runtime. Defaults (`platform`) are unaffected.
+// undeclared caller argument at runtime. Keep platform optional so device
+// resolution can select the active or session-bound device.
 export const navigateToSchema = addDeviceTargetingToSchema(
   z
     .object({
       targetScreen: z.string().describe("Target screen name"),
-      platform: platformSchema.default("android"),
+      platform: platformSchema.optional(),
     })
     .strict(),
 );
@@ -26,7 +27,7 @@ export const navigateToSchema = addDeviceTargetingToSchema(
 export const getNavigationGraphSchema = addDeviceTargetingToSchema(
   z
     .object({
-      platform: platformSchema.default("android"),
+      platform: platformSchema.optional(),
       appId: z
         .string()
         .optional()
@@ -52,7 +53,7 @@ export const exploreSchema = addDeviceTargetingToSchema(
         .describe("Mode (default: hybrid)"),
       packageName: z.string().optional().describe("Package to limit exploration"),
       dryRun: z.boolean().optional().describe("Dry run (no interactions)"),
-      platform: platformSchema.default("android"),
+      platform: platformSchema.optional(),
     })
     .strict(),
 );
@@ -60,18 +61,18 @@ export const exploreSchema = addDeviceTargetingToSchema(
 // Export interfaces for type safety
 export interface NavigateToArgs {
   targetScreen: string;
-  platform: Platform;
+  platform?: Platform;
   sessionUuid?: string;
 }
 
 export interface GetNavigationGraphArgs {
-  platform: Platform;
+  platform?: Platform;
   appId?: string;
   sessionUuid?: string;
 }
 
 export interface ExploreArgs extends ExploreOptions {
-  platform: Platform;
+  platform?: Platform;
   sessionUuid?: string;
 }
 
@@ -125,7 +126,7 @@ export const navigateToHandler = async (
     const navigateTo = navigateToFactory(device, args);
     const options: NavigateToOptions = {
       targetScreen: args.targetScreen,
-      platform: args.platform || "android",
+      platform: args.platform || device.platform,
       sessionUuid: args.sessionUuid,
     };
     const result = await navigateTo.execute(options, progress);

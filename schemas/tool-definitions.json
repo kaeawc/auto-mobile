@@ -1628,7 +1628,6 @@
           "type": "boolean"
         },
         "platform": {
-          "default": "android",
           "type": "string",
           "enum": ["android", "ios"]
         },
@@ -2178,7 +2177,6 @@
       "type": "object",
       "properties": {
         "platform": {
-          "default": "android",
           "type": "string",
           "enum": ["android", "ios"]
         },
@@ -4083,7 +4081,6 @@
           "type": "string"
         },
         "platform": {
-          "default": "android",
           "type": "string",
           "enum": ["android", "ios"]
         },

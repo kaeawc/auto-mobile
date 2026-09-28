@@ -3,12 +3,21 @@ import { Explore } from "../../src/features/navigation/Explore";
 import { NavigateTo } from "../../src/features/navigation/NavigateTo";
 import { NavigationGraphManager } from "../../src/features/navigation/NavigationGraphManager";
 import { RealObserveScreen } from "../../src/features/observe/ObserveScreen";
-import { registerNavigationTools } from "../../src/server/navigationTools";
+import {
+  exploreSchema,
+  getNavigationGraphSchema,
+  navigateToHandler,
+  navigateToSchema,
+  registerNavigationTools,
+  resetNavigateToFactory,
+  setNavigateToFactory,
+} from "../../src/server/navigationTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { setDebugModeEnabled } from "../../src/utils/debug";
 import { PortManager } from "../../src/utils/PortManager";
 import type { BootedDevice } from "../../src/models";
 import { FakeNavigationGraphManager } from "../fakes/FakeNavigationGraphManager";
+import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 
 describe("navigation tool session graph selection", () => {
   const device: BootedDevice = {
@@ -26,6 +35,114 @@ describe("navigation tool session graph selection", () => {
   afterEach(() => {
     ToolRegistry.clearTools();
     setDebugModeEnabled(false);
+    resetNavigateToFactory();
+  });
+
+  test("omitted platform leaves iOS device resolution open for every navigation tool", async () => {
+    const navigateArgs = navigateToSchema.parse({ targetScreen: "Settings" });
+    expect(navigateArgs.platform).toBeUndefined();
+    expect(getNavigationGraphSchema.parse({}).platform).toBeUndefined();
+    expect(exploreSchema.parse({}).platform).toBeUndefined();
+
+    let executedPlatform: string | undefined;
+    setNavigateToFactory(() => ({
+      execute: async (options) => {
+        executedPlatform = options.platform;
+        return {
+          success: true,
+          currentScreen: "Settings",
+          targetScreen: "Settings",
+          stepsExecuted: 0,
+        };
+      },
+    }));
+    await navigateToHandler(device, navigateArgs);
+    expect(executedPlatform).toBe("ios");
+  });
+
+  test("explicit navigation platform remains authoritative", async () => {
+    const navigateArgs = navigateToSchema.parse({ targetScreen: "Settings", platform: "android" });
+    expect(getNavigationGraphSchema.parse({ platform: "android" }).platform).toBe("android");
+    expect(exploreSchema.parse({ platform: "android" }).platform).toBe("android");
+
+    let executedPlatform: string | undefined;
+    setNavigateToFactory(() => ({
+      execute: async (options) => {
+        executedPlatform = options.platform;
+        return {
+          success: true,
+          currentScreen: "Settings",
+          targetScreen: "Settings",
+          stepsExecuted: 0,
+        };
+      },
+    }));
+    await navigateToHandler(device, navigateArgs);
+    expect(executedPlatform).toBe("android");
+  });
+
+  test("registered navigation tools resolve an omitted platform to the active iOS device", async () => {
+    const fakeDevices = new FakeDeviceSessionManager();
+    fakeDevices.setConnectedDevices([device]);
+    fakeDevices.setCurrentDevice(device, "ios");
+    const registry = ToolRegistry as unknown as {
+      deviceSessionManager: FakeDeviceSessionManager;
+      tools: Map<string, { handler: (args: unknown) => Promise<unknown> }>;
+    };
+    const originalDevices = registry.deviceSessionManager;
+    registry.deviceSessionManager = fakeDevices;
+    const graph = new FakeNavigationGraphManager();
+    Object.assign(graph, {
+      getStatsForApp: async () => ({
+        nodeCount: 0,
+        edgeCount: 0,
+        currentScreen: null,
+        knownEdgeCount: 0,
+        unknownEdgeCount: 0,
+      }),
+      exportGraphForApp: async () => ({ nodes: [], edges: [] }),
+    });
+    const graphSpy = spyOn(NavigationGraphManager, "getInstance").mockReturnValue(
+      graph as unknown as NavigationGraphManager,
+    );
+    const exploreSpy = spyOn(Explore.prototype, "execute").mockResolvedValue({
+      success: true,
+      interactionsPerformed: 0,
+      screensDiscovered: 0,
+      coverage: { explored: 0, total: 0, percentage: 0 },
+    } as Awaited<ReturnType<Explore["execute"]>>);
+    setNavigateToFactory(() => ({
+      execute: async () => ({
+        success: true,
+        currentScreen: "Settings",
+        targetScreen: "Settings",
+        stepsExecuted: 0,
+      }),
+    }));
+
+    try {
+      const calls = [
+        ["navigateTo", navigateToSchema.parse({ targetScreen: "Settings" })],
+        ["explore", exploreSchema.parse({})],
+        ["getNavigationGraph", getNavigationGraphSchema.parse({})],
+      ] as const;
+      for (const [name, args] of calls) {
+        await registry.tools.get(name)!.handler(args);
+        expect(fakeDevices.getLastEnsureDeviceReadyPlatform()).toBe("either");
+      }
+      expect(fakeDevices.getEnsureDeviceReadyCallCount()).toBe(3);
+
+      await expect(
+        registry.tools
+          .get("navigateTo")!
+          .handler(navigateToSchema.parse({ targetScreen: "Settings", platform: "android" })),
+      ).rejects.toThrow("No android device found");
+      expect(fakeDevices.getLastEnsureDeviceReadyPlatform()).toBe("android");
+    } finally {
+      registry.deviceSessionManager = originalDevices;
+      graphSpy.mockRestore();
+      exploreSpy.mockRestore();
+    }
   });
 
   test("routes navigateTo and explore through the label-resolved session graph", async () => {

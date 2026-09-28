@@ -1,7 +1,6 @@
 import { errorMessage } from "./describeUnknownError";
 import * as fs from "fs/promises";
 import * as path from "path";
-import os from "os";
 import { logger } from "./logger";
 import { defaultTimer, type Timer } from "./SystemTimer";
 import { NoOpPerformanceTracker, type PerformanceTracker } from "./PerformanceTracker";
@@ -26,7 +25,7 @@ import {
 } from "./IOSCtrlProxyBundleDownloader";
 import { hashAppBundle } from "./ios-cmdline-tools/AppBundleHasher";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "./workingDirectory";
-import { getTempDir } from "./tempDir";
+import { getSharedAutoMobileDir, getTempDir } from "./tempDir";
 import { ensureSecureDir } from "./filesystem/securePermissions";
 import {
   buildPlist,
@@ -201,11 +200,7 @@ export class IOSCtrlProxyBuilder {
   private static readonly DEFAULT_DERIVED_DATA_SUBDIR = "derived-data";
   private static readonly DEFAULT_SCHEME = "AutoMobileTest";
   private static readonly DEFAULT_DESTINATION = "generic/platform=iOS Simulator";
-  private static readonly DEFAULT_BUNDLE_CACHE_DIR = path.join(
-    os.homedir(),
-    ".automobile",
-    "ctrl-proxy-ios",
-  );
+  private static readonly DEFAULT_BUNDLE_CACHE_SUBDIR = "ctrl-proxy-ios";
   private static readonly DEFAULT_BUNDLE_FILENAME = "control-proxy.ipa";
   private static readonly METADATA_FILENAME = "ctrl-proxy-ios-bundle.json";
   private static readonly MIN_BUNDLE_SIZE_BYTES = 10000;
@@ -295,7 +290,7 @@ export class IOSCtrlProxyBuilder {
       bundleCacheDir:
         config.bundleCacheDir ||
         process.env.AUTOMOBILE_CTRL_PROXY_IOS_CACHE_DIR ||
-        IOSCtrlProxyBuilder.DEFAULT_BUNDLE_CACHE_DIR,
+        getSharedAutoMobileDir(IOSCtrlProxyBuilder.DEFAULT_BUNDLE_CACHE_SUBDIR),
     };
     this.downloader = dependencies.downloader ?? new DefaultIOSCtrlProxyBundleDownloader();
   }

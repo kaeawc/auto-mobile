@@ -97,7 +97,12 @@ function isStatusObjectReturn(argument) {
   return (
     argument?.type === "ObjectExpression" &&
     argument.properties.some(
-      (property) => property.type === "Property" && propertyName(property.key) === "status",
+      (property) =>
+        property.type === "Property" &&
+        (propertyName(property.key) === "status" ||
+          (propertyName(property.key) === "success" &&
+            isBooleanReturn(property.value) &&
+            property.value.value === false)),
     )
   );
 }
@@ -107,8 +112,7 @@ function isFallbackReturn(argument) {
     !argument ||
     (argument.type === "Literal" && argument.value === null) ||
     isUndefinedReturn(argument) ||
-    isBooleanReturn(argument) ||
-    isStatusObjectReturn(argument)
+    isBooleanReturn(argument)
   );
 }
 
@@ -158,7 +162,11 @@ function identifierIsReferenced(node, name, seen = new WeakSet()) {
     return true;
   }
   for (const [key, value] of Object.entries(node)) {
-    if (key === "parent") {
+    if (
+      key === "parent" ||
+      (node.type === "Property" && key === "key" && !node.computed) ||
+      (node.type === "MemberExpression" && key === "property" && !node.computed)
+    ) {
       continue;
     }
     if (Array.isArray(value)) {
@@ -197,6 +205,8 @@ const catchConventionRule = {
         "Catch blocks that return a typed failure/status object must log at warn, not debug.",
       tracelessCatch:
         "Catch block swallows the error with no trace: it does not log, does not throw, and never references the caught error. Per the error-handling convention, log it (logger.debug/warn/error) or throw a structured error (see CLAUDE.md).",
+      tracelessPromiseCatch:
+        "Promise .catch() handler swallows the error with no trace: it does not log, does not throw, and never references the caught error. Per the error-handling convention, log it (logger.debug/warn/error) or throw a structured error (see CLAUDE.md).",
     },
   },
   create(context) {
@@ -234,7 +244,53 @@ const catchConventionRule = {
       }
     }
 
+    function hasStatusObjectReturn(statements) {
+      return statements.some((statement) => {
+        if (statement.type === "ReturnStatement" && isStatusObjectReturn(statement.argument)) {
+          return true;
+        }
+        if (statement.type !== "IfStatement") {
+          return false;
+        }
+        return (
+          hasStatusObjectReturn(
+            statement.consequent.type === "BlockStatement"
+              ? statement.consequent.body
+              : [statement.consequent],
+          ) ||
+          (statement.alternate !== null &&
+            hasStatusObjectReturn(
+              statement.alternate.type === "BlockStatement"
+                ? statement.alternate.body
+                : [statement.alternate],
+            ))
+        );
+      });
+    }
+
     return {
+      CallExpression(node) {
+        if (
+          node.callee?.type !== "MemberExpression" ||
+          propertyName(node.callee.property) !== "catch"
+        ) {
+          return;
+        }
+        const handler = node.arguments[0];
+        if (
+          !handler ||
+          (handler.type !== "ArrowFunctionExpression" && handler.type !== "FunctionExpression") ||
+          handler.body.type !== "BlockStatement" ||
+          handler.body.body.length !== 0 ||
+          hasAnyLoggerCall(handler.body) ||
+          hasThrowStatement(handler.body) ||
+          (handler.params[0]?.type === "Identifier" &&
+            identifierIsReferenced(handler.body, handler.params[0].name))
+        ) {
+          return;
+        }
+        context.report({ node, messageId: "tracelessPromiseCatch" });
+      },
       CatchClause(node) {
         const statements = node.body.body;
         if (
@@ -247,6 +303,7 @@ const catchConventionRule = {
           // message — checked precedence-first so it is not reclassified.
           context.report({ node: statements[0], messageId: "fallbackReturn" });
         } else if (
+          !hasStatusObjectReturn(statements) &&
           !hasAnyLoggerCall(node.body) &&
           !hasThrowStatement(node.body) &&
           !referencesCaughtError(node)

@@ -219,6 +219,47 @@ teardown() {
   rm -f "$BUN_ARGS_FILE" "$STUB_RECHECK_INDEX"
 }
 
+reap_remaining_fd3_descendants() {
+  local root_pid="$1" own_group scan status candidates pid ppid command
+  own_group="$(sed -n 's/^g\([0-9][0-9]*\)$/\1/p' "$BATS_FILE_TMPDIR/fd3-ownership" | head -n 1)"
+  [[ "$own_group" =~ ^[0-9]+$ ]] || return 0
+  # Scan all descriptors in the recorded group. Unlike an fd-3-only scan,
+  # this retains parent links through intermediate processes that closed fd 3.
+  scan="$(run_with_timeout 3 lsof -nP -a -g "$own_group" -F pRgcfn 3>&- 2> /dev/null)"
+  status=$?
+  [[ "$status" -ne 124 && -n "$scan" ]] || return 0
+  candidates="$(awk -v root="$root_pid" '
+    /^p[0-9]/ { pid = substr($0, 2); fd = "" }
+    /^R/ { parent[pid] = substr($0, 2) }
+    /^c/ { command[pid] = substr($0, 2) }
+    /^f/ { fd = substr($0, 2) }
+    /^n/ && fd == 3 { fd3[pid] = substr($0, 2) }
+    function descendant(candidate, current, seen) {
+      current = candidate
+      while (current != "" && current != 1 && !seen[current]++) {
+        if (current == root) return 1
+        current = parent[current]
+      }
+      return 0
+    }
+    END {
+      pipe = fd3[root]
+      if (pipe == "") exit
+      for (pid in fd3) {
+        if (pid != root && fd3[pid] == pipe && descendant(pid))
+          print pid "\t" parent[pid] "\t" command[pid]
+      }
+    }
+  ' <<< "$scan")"
+
+  while IFS=$'\t' read -r pid ppid command; do
+    [[ "$pid" =~ ^[0-9]+$ && "$ppid" =~ ^[0-9]+$ ]] || continue
+    printf '# test-ts.bats left fd 3 open after last test: pid=%s ppid=%s command=%s (final sweep)\n' \
+      "$pid" "$ppid" "$command" >&3
+    kill -KILL "$pid" 2> /dev/null || true
+  done <<< "$candidates"
+}
+
 teardown_file() {
   command -v lsof > /dev/null 2>&1 || return 0
   # macOS runners do not necessarily have GNU timeout.
@@ -233,10 +274,14 @@ teardown_file() {
   status=$?
   if [[ "$status" -eq 124 || -z "$pipe_record" ]]; then
     printf '# test-ts.bats could not inspect its fd 3 within 3s; skipping reaper\n' >&3
+    reap_remaining_fd3_descendants "$root_pid"
     return 0
   fi
   pipe="$(sed -n 's/^n//p' <<< "$pipe_record" | head -n 1)"
-  [[ -n "$pipe" ]] || return 0
+  if [[ -z "$pipe" ]]; then
+    reap_remaining_fd3_descendants "$root_pid"
+    return 0
+  fi
 
   # The inherited fd is enough to link live descendants back to this root.
   # Bound the fd-scoped scan so a busy runner cannot hold the TAP pipe open.
@@ -244,6 +289,7 @@ teardown_file() {
   status=$?
   if [[ "$status" -eq 124 || -z "$scan" ]]; then
     printf '# test-ts.bats could not scan fd 3 holders within 3s; skipping reaper\n' >&3
+    reap_remaining_fd3_descendants "$root_pid"
     return 0
   fi
   holders="$(awk -v pipe="$pipe" -v root="$root_pid" -v state="$BATS_FILE_TMPDIR/fd3-ownership" '
@@ -354,6 +400,7 @@ teardown_file() {
       kill -KILL "$pid" 2> /dev/null || true
     fi
   done <<< "$holders"
+  reap_remaining_fd3_descendants "$root_pid"
 }
 
 run_lane() {
@@ -368,7 +415,7 @@ run_lane() {
   cat > "$BATS_TEST_TMPDIR/sibling.sh" <<'EOF'
 #!/usr/bin/env bash
 trap 'printf "TERM\n" >> "$1/signalled"' TERM
-sleep 30 &
+sleep 30 3>&3 &
 printf '%s\n' "$!" > "$1/sibling-child"
 touch "$1/sibling-ready"
 while [[ ! -e "$1/stop-sibling" ]]; do sleep 0.1; done
@@ -379,7 +426,7 @@ EOF
 source "$1/fd3-hooks.sh"
 BATS_FILE_TMPDIR="$1"
 setup_file
-sleep 30 &
+sleep 30 3>&3 &
 own_child="$!"
 printf '%s\n' "$own_child" > "$1/own-child"
 while [[ ! -e "$1/sibling-ready" ]]; do sleep 0.1; done
@@ -391,7 +438,7 @@ touch "$1/owner-done"
 EOF
   mkfifo "$BATS_TEST_TMPDIR/shared-pipe"
   exec 9<> "$BATS_TEST_TMPDIR/shared-pipe"
-  cat "$BATS_TEST_TMPDIR/shared-pipe" 9>&- > "$BATS_TEST_TMPDIR/diagnostics" &
+  cat "$BATS_TEST_TMPDIR/shared-pipe" 3>&- 9>&- > "$BATS_TEST_TMPDIR/diagnostics" &
   local reader_pid=$!
   bash "$BATS_TEST_TMPDIR/sibling.sh" "$BATS_TEST_TMPDIR" 3>&9 9>&- &
   sibling_pid=$!
@@ -399,7 +446,10 @@ EOF
   owner_pid=$!
   exec 9>&-
 
-  for ((index = 0; index < 100; index += 1)); do
+  # The portable timeout allows 3s plus a 2s kill grace per call. Three
+  # targeted calls, 2s TERM grace, and one final scan total at most 22s of
+  # bounded work for this fixture; 60s leaves over twice that for CI load.
+  for ((index = 0; index < 600; index += 1)); do
     [[ -e "$BATS_TEST_TMPDIR/owner-done" ]] && break
     sleep 0.1
   done
@@ -457,7 +507,7 @@ setup_file
 # Make a successful group scan pass the start-time check, so failure must
 # protect the child rather than merely falling through to a later guard.
 printf '%s %s\ng777777\n' "$BASHPID" "$(($(date +%s) - 10))" > "$BATS_FILE_TMPDIR/fd3-ownership"
-sleep 30 &
+sleep 30 3>&3 &
 child="$!"
 printf '%s\n' "$child" > "$1/own-child"
 teardown_file
@@ -502,6 +552,19 @@ EOF
       [ "$status" -ne 0 ]
     fi
   done
+}
+
+@test "final fd-3 sweep kills a remaining child on the real bats pipe" {
+  command -v lsof > /dev/null || skip "lsof is required"
+  source scripts/ios/run_with_timeout.sh
+  sleep 30 3>&3 &
+  local child_pid=$! wait_status=0 sweep_status=0
+  reap_remaining_fd3_descendants "$BASHPID" || sweep_status=$?
+  # TERM is cleanup if the sweep missed it; only the sweep sends KILL.
+  kill "$child_pid" 2> /dev/null || true
+  wait "$child_pid" 2> /dev/null || wait_status=$?
+  [ "$sweep_status" -eq 0 ]
+  [ "$wait_status" -eq 137 ]
 }
 
 @test "unit lane is parallel and excludes integration and stress" {

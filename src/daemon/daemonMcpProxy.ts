@@ -1268,6 +1268,8 @@ export class DaemonMcpProxy {
       // the binding so the next call/heartbeat can reclaim it after reconnecting.
       this.recoverableBoundSessionHandoff = releasedSessionUuid;
       this.livenessOwnershipClaimSent = false;
+      this.discoveryEpoch += 1;
+      this.invalidateCache();
       return;
     }
     this.recordSessionReleased(releasedSessionUuid, notification.reason);
@@ -1292,7 +1294,7 @@ export class DaemonMcpProxy {
     releasedSessionUuid: string,
     isRecoverableHandoff: boolean,
   ): boolean {
-    return isRecoverableHandoff && releasedSessionUuid === this.boundSessionUuid;
+    return isRecoverableHandoff && this.ownedDeviceSessions.has(releasedSessionUuid);
   }
 
   private hasRecoverableBoundSessionHandoff(): boolean {
@@ -2172,7 +2174,9 @@ export class DaemonMcpProxy {
     // stays off the success path (and can't fail a list whose live call would
     // have succeeded, e.g. daemonManager.status() throwing during a restart).
     try {
-      return await this.listTools();
+      const tools = await this.listTools();
+      this.connectedFallbackReconcileAttempt = 0;
+      return tools;
     } catch (error) {
       if (
         error instanceof DaemonBoundSessionExpiredError ||
@@ -2285,12 +2289,18 @@ export class DaemonMcpProxy {
     this.backgroundConnectRetryAttempt = 0;
   }
 
-  private scheduleConnectedFallbackReconcile(): void {
-    if (this.closing || !this.connected || this.connectedFallbackReconcile) {
+  private scheduleConnectedFallbackReconcile(replacingAttempt = false): void {
+    const delay = COLD_RESOURCE_CONNECT_RETRY_DELAYS_MS[this.connectedFallbackReconcileAttempt];
+    if (this.closing || !this.connected || delay === undefined) {
+      if (replacingAttempt) {
+        this.connectedFallbackReconcile = null;
+        if (!this.closing && !this.connected) {
+          this.servedStaticToolList = true;
+        }
+      }
       return;
     }
-    const delay = COLD_RESOURCE_CONNECT_RETRY_DELAYS_MS[this.connectedFallbackReconcileAttempt];
-    if (delay === undefined) {
+    if (this.connectedFallbackReconcile && !replacingAttempt) {
       return;
     }
     this.connectedFallbackReconcileAttempt += 1;
@@ -2300,14 +2310,18 @@ export class DaemonMcpProxy {
   }
 
   private async attemptConnectedFallbackReconcile(): Promise<void> {
-    this.connectedFallbackReconcile = null;
     if (this.closing || !this.connected) {
+      this.connectedFallbackReconcile = null;
+      if (!this.closing) {
+        this.servedStaticToolList = true;
+      }
       return;
     }
     this.invalidateListCache("tools");
     try {
       await this.listTools();
       this.connectedFallbackReconcileAttempt = 0;
+      this.connectedFallbackReconcile = null;
       this.notifyListChanged("tools");
     } catch (error) {
       // Best-effort: callable static schemas were already returned, and the
@@ -2315,7 +2329,7 @@ export class DaemonMcpProxy {
       logger.debug(
         `[DaemonMcpProxy] connected static fallback reconciliation failed: ${errorMessage(error)}`,
       );
-      this.scheduleConnectedFallbackReconcile();
+      this.scheduleConnectedFallbackReconcile(true);
     }
   }
 

@@ -3383,13 +3383,21 @@ export class SessionManager {
       ...session.cacheData,
       ...updates,
     };
+    const previousActivity = {
+      lastUsedAt: session.lastUsedAt,
+      lastHeartbeat: session.lastHeartbeat,
+      expiresAt: session.expiresAt,
+    };
     session.lastUsedAt = this.timer.now();
     session.lastHeartbeat = this.timer.now();
+    session.activityGeneration++;
+    const capturedGeneration = session.activityGeneration;
     void this.getBarrier()
       .track(() => this.recordSessionActivity(session))
-      .catch((error) =>
-        logger.warn(`[SessionManager] Failed to record session activity: ${error}`),
-      );
+      .catch((error) => {
+        rollbackSessionActivityIfCurrent(session, previousActivity, capturedGeneration);
+        logger.warn(`[SessionManager] Failed to record session activity: ${error}`);
+      });
 
     logger.debug(`Updated cache for session ${sessionId}`);
   }
@@ -3645,13 +3653,21 @@ export class SessionManager {
     }
 
     // Update last used time when accessing cache
+    const previousActivity = {
+      lastUsedAt: session.lastUsedAt,
+      lastHeartbeat: session.lastHeartbeat,
+      expiresAt: session.expiresAt,
+    };
     session.lastUsedAt = this.timer.now();
     session.lastHeartbeat = this.timer.now();
+    session.activityGeneration++;
+    const capturedGeneration = session.activityGeneration;
     void this.getBarrier()
       .track(() => this.recordSessionActivity(session))
-      .catch((error) =>
-        logger.warn(`[SessionManager] Failed to record session activity: ${error}`),
-      );
+      .catch((error) => {
+        rollbackSessionActivityIfCurrent(session, previousActivity, capturedGeneration);
+        logger.warn(`[SessionManager] Failed to record session activity: ${error}`);
+      });
 
     return session.cacheData;
   }
@@ -3666,9 +3682,16 @@ export class SessionManager {
       return;
     }
     const now = this.timer.now();
+    const previousActivity = {
+      lastUsedAt: session.lastUsedAt,
+      lastHeartbeat: session.lastHeartbeat,
+      expiresAt: session.expiresAt,
+    };
     session.lastHeartbeat = now;
     session.lastUsedAt = now;
     session.expiresAt = now + session.sessionTimeoutMs;
+    session.activityGeneration++;
+    const capturedGeneration = session.activityGeneration;
     session.hasReceivedHeartbeat = true;
     if (session.ownership === "awaiting-owner") {
       session.ownership = "owned";
@@ -3676,9 +3699,10 @@ export class SessionManager {
     }
     void this.getBarrier()
       .track(() => this.recordSessionActivity(session))
-      .catch((error) =>
-        logger.warn(`[SessionManager] Failed to record session activity: ${error}`),
-      );
+      .catch((error) => {
+        rollbackSessionActivityIfCurrent(session, previousActivity, capturedGeneration);
+        logger.warn(`[SessionManager] Failed to record session activity: ${error}`);
+      });
   }
 
   /**

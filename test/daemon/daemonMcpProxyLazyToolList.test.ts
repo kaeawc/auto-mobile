@@ -403,6 +403,135 @@ describe("DaemonMcpProxy.listAdvertisedTools (lazy tools/list — issue #5879)",
     }
   });
 
+  test("notifies after reconnect when a fallback retry fires while disconnected", async () => {
+    const timer = new FakeTimer();
+    let liveListFails = true;
+    const staleClient = new FakeDaemonClient({
+      onCallDaemonMethod: (method) => {
+        if (method === "tools/list" && liveListFails) {
+          throw new Error("list unavailable");
+        }
+      },
+    });
+    const liveTool = { name: "liveTool", inputSchema: {} };
+    const recoveredClient = new FakeDaemonClient({
+      daemonMethodResults: new Map([["tools/list", { tools: [liveTool] }]]),
+    });
+    const clients = [staleClient, recoveredClient];
+    const proxy = new DaemonMcpProxy({
+      clientFactory: () => clients.shift()!,
+      daemonManager: matchingDaemonManager(),
+      daemonAvailabilityProbe: async () => true,
+      autoStartDaemon: false,
+      timer,
+      staticToolDefinitionsProvider: () => [{ name: "staticTool", inputSchema: {} }],
+    });
+    const kinds: ListChangedKind[] = [];
+    proxy.onListChanged((kind) => kinds.push(kind));
+    try {
+      await proxy.callTool("observe", {});
+      await proxy.listAdvertisedTools();
+      staleClient.emitConnectionClosed();
+      await timer.advanceTimeAsync(250);
+      expect(proxy.isConnected()).toBe(false);
+      liveListFails = false;
+      await proxy.callTool("observe", {});
+      expect(kinds).toEqual(["tools"]);
+    } finally {
+      await proxy.close();
+    }
+  });
+
+  test("a foreground live list resets an exhausted fallback retry budget", async () => {
+    const timer = new FakeTimer();
+    let liveListFails = true;
+    const liveTool = { name: "liveTool", inputSchema: {} };
+    const client = new FakeDaemonClient({
+      daemonMethodResults: new Map([["tools/list", { tools: [liveTool] }]]),
+      onCallDaemonMethod: (method) => {
+        if (method === "tools/list" && liveListFails) {
+          throw new Error("list unavailable");
+        }
+      },
+    });
+    const proxy = new DaemonMcpProxy({
+      clientFactory: () => client,
+      daemonManager: matchingDaemonManager(),
+      daemonAvailabilityProbe: async () => true,
+      autoStartDaemon: false,
+      timer,
+      staticToolDefinitionsProvider: () => [{ name: "staticTool", inputSchema: {} }],
+    });
+    try {
+      await proxy.callTool("observe", {});
+      await proxy.listAdvertisedTools();
+      await timer.advanceTimeAsync(250);
+      await timer.advanceTimeAsync(1_000);
+      await timer.advanceTimeAsync(4_000);
+      expect(timer.getPendingTimeouts()).toEqual([]);
+
+      liveListFails = false;
+      expect(await proxy.listAdvertisedTools()).toEqual([liveTool]);
+      proxy.invalidateCache();
+      liveListFails = true;
+      await proxy.listAdvertisedTools();
+      expect(timer.getPendingTimeouts()).toEqual([250]);
+    } finally {
+      await proxy.close();
+    }
+  });
+
+  test("one in-flight fallback retry emits only one recovery notification", async () => {
+    const timer = new FakeTimer();
+    const retryStarted = Promise.withResolvers<void>();
+    const finishRetry = Promise.withResolvers<void>();
+    let listCalls = 0;
+    const liveTool = { name: "liveTool", inputSchema: {} };
+    const client = new FakeDaemonClient({
+      daemonMethodResults: new Map([["tools/list", { tools: [liveTool] }]]),
+      onCallDaemonMethod: async (method) => {
+        if (method !== "tools/list") {
+          return;
+        }
+        listCalls++;
+        if (listCalls === 1 || listCalls === 3) {
+          throw new Error("list unavailable");
+        }
+        if (listCalls === 2) {
+          retryStarted.resolve();
+          await finishRetry.promise;
+        }
+      },
+    });
+    const proxy = new DaemonMcpProxy({
+      clientFactory: () => client,
+      daemonManager: matchingDaemonManager(),
+      daemonAvailabilityProbe: async () => true,
+      autoStartDaemon: false,
+      timer,
+      staticToolDefinitionsProvider: () => [{ name: "staticTool", inputSchema: {} }],
+    });
+    const kinds: ListChangedKind[] = [];
+    proxy.onListChanged((kind) => kinds.push(kind));
+    try {
+      await proxy.callTool("observe", {});
+      await proxy.listAdvertisedTools();
+      await timer.advanceTimeAsync(250);
+      await retryStarted.promise;
+      await proxy.listAdvertisedTools();
+      expect(timer.getPendingTimeouts()).toEqual([]);
+      finishRetry.resolve();
+      for (let turn = 0; turn < 8; turn++) {
+        await Promise.resolve();
+      }
+      await timer.advanceTimeAsync(1_000);
+      expect(kinds).toEqual(["tools"]);
+    } finally {
+      finishRetry.resolve();
+      await proxy.close();
+    }
+  });
+
   test("close cancels pending connected static fallback reconciliation", async () => {
     const fakeTimer = new FakeTimer();
     const fakeClient = new FakeDaemonClient({

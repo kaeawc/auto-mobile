@@ -1,0 +1,539 @@
+import type { ChildProcess } from "child_process";
+import { ActionableError, BootedDevice, DeviceInfo } from "../models";
+import type { DeviceMatcher } from "../utils/deviceMatcher";
+import { PlatformDeviceManager } from "../utils/deviceUtils";
+import { DEVICE_POOL_MATCHING, isDevicePoolAutolockEnabled } from "../daemon/poolConfig";
+import { DaemonState } from "../daemon/daemonState";
+import type { DeviceReadinessLevel } from "../utils/DeviceSessionManager";
+import type { DeviceReadinessReservation } from "../daemon/devicePool";
+import { DeviceBootService, type DeviceBootResult } from "../utils/deviceBootService";
+import { IOSCtrlProxyClient } from "../features/observe/ios/IOSCtrlProxyClient";
+import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
+import { logger } from "../utils/logger";
+import { createPerformanceTracker } from "../utils/PerformanceTracker";
+import { ambientPerfFor, runWithPerfTracker } from "../utils/PerfContext";
+import { createStructuredToolResponse, type StructuredToolResponse } from "../utils/toolUtils";
+import {
+  deviceReadinessLockKey,
+  moveDeviceAcquisitionReadiness,
+  trackDeviceAcquisitionReadiness,
+} from "../utils/deviceReadinessLock";
+import {
+  createDefaultRunnerReadinessService,
+  type RunnerReadinessRequest,
+} from "../utils/RunnerReadinessService";
+import { DEFAULT_START_DEVICE_TIMEOUT_MS } from "../utils/deviceTimeouts";
+import type { VirtualDeviceLifecycleLease } from "../utils/virtualDeviceLifecycleCoordinator";
+import { registerDirectSessionDevice } from "./directSessionDeviceRegistry";
+import { describeDevice, projectBootedDevice } from "./deviceDescription";
+import { ProgressCallback } from "./toolRegistry";
+import { errorMessage } from "../utils/describeUnknownError";
+import type { StableConfiguredDeviceImage } from "../utils/configuredDeviceInventory";
+import {
+  acquisitionLifecycleTimeoutError,
+  androidSourceImageWithBootedMetadata,
+  assertAndroidBootDidNotEnterRecovery,
+  clearColdBootShutdownMarker,
+  configuredImageForAcquiredDevice,
+  deviceIdentityPayload,
+  getDeviceToolsDependencies,
+  getStartDevicePool,
+  getVerifiedWarmAndroidAvdIdentity,
+  initializedDevicePool,
+  prepareStartDeviceRunnerReadiness,
+  publishWarmDeviceReady,
+  refreshResourcesAfterCommittedBoot,
+  reserveInitialDeviceForReadiness,
+  resolveRunnerReadinessTimeoutMs,
+  runOperationWithinDeadline,
+  startDeviceSchema,
+  validateBootIdentity,
+  validatePooledDeviceMapping,
+  validatePreservedSystemUiAnrRecoverySession,
+  validateRequestedAndroidSerial,
+} from "./deviceTools";
+import type {
+  DevicePreparationBudgets,
+  DeviceToolsDependencies,
+  StartDeviceArgs,
+} from "./deviceTools";
+
+type StartDeviceHooks = {
+  prepareDevice: (
+    args: StartDeviceArgs,
+    budgets: DevicePreparationBudgets,
+    progress?: ProgressCallback,
+    signal?: AbortSignal,
+  ) => Promise<StructuredToolResponse>;
+  stripInternalAcquisitionParams: (rawArgs: object) => Record<string, unknown>;
+};
+
+export function createStartDeviceHandlers(hooks: StartDeviceHooks) {
+  const { prepareDevice, stripInternalAcquisitionParams } = hooks;
+
+  const bootAndPrepareDevice = async (
+    args: StartDeviceArgs,
+    budgets: DevicePreparationBudgets,
+    deps: DeviceToolsDependencies,
+    deviceUtils: PlatformDeviceManager,
+    deviceMatcher: DeviceMatcher,
+    bootDeadlineMs: number,
+    requestedIdentity: string,
+    progress: ProgressCallback | undefined,
+    signal: AbortSignal | undefined,
+    perf: ReturnType<typeof createPerformanceTracker>,
+    releaseReadinessReservations: DeviceReadinessReservation[],
+    lifecycleLease: VirtualDeviceLifecycleLease,
+    state: {
+      boot: DeviceBootResult | undefined;
+      ownershipTransferred: boolean;
+      // Every unowned cold boot this request cancelled, recovery included. The
+      // lifecycle lease is released only once all of them have settled.
+      coldBootSettlements: Promise<void>[];
+      bindingSettlements: Promise<unknown>[];
+    },
+  ) => {
+    const bootService = new DeviceBootService({
+      deviceManager: deviceUtils,
+      deviceMatcher,
+      deviceCreationGate: deps.deviceCreationGateFactory(),
+      deviceProvisioner: deps.deviceProvisionerFactory(),
+      matchingStrategy: DEVICE_POOL_MATCHING,
+      timer: deps.timer,
+      lifecycleLease,
+      allowExternalLeaseAdoptionRecheck: true,
+      lifecycleCoordinator: deps.lifecycleCoordinator,
+      onAndroidColdBootTrackingChanged: () => {
+        void deps.notifyDeviceInventoryResourcesChanged(false).catch((error) => {
+          logger.warn(
+            `[DeviceTools] Resource notify after cold-boot tracking change failed: ${errorMessage(error)}`,
+            error,
+          );
+        });
+      },
+    });
+    perf.startOperation("bootDevice");
+    const recoveryTargets =
+      args.platform === "android"
+        ? getStartDevicePool(DaemonState.getInstance())?.getRecoveringAndroidTargets()
+        : undefined;
+    // Establish the (--debug-perf-gated) ambient tracker around the shared
+    // acquisition boot attempt (getAndroid/getApple/startDevice), matching
+    // provisionDevice's boot scope, so the emulator/simctl/adb discovery, boot,
+    // and boot-readiness commands attribute their spans here (see PerfContext).
+    state.boot = await runWithPerfTracker(ambientPerfFor(perf), () =>
+      bootService.boot(
+        {
+          ...args,
+          operationName: budgets.operationName,
+          timeoutMs: budgets.bootTimeoutMs,
+          totalDeadlineMs: bootDeadlineMs,
+          signal,
+          excludeDeviceNames: recoveryTargets?.names,
+          excludeDeviceIds: recoveryTargets?.serials,
+        },
+        progress ? { report: progress } : undefined,
+      ),
+    );
+    assertAndroidBootDidNotEnterRecovery(args, state.boot);
+    perf.endOperation("bootDevice");
+    validateBootIdentity(args, state.boot.device, state.boot.source, state.boot.sourceImage);
+    validateRequestedAndroidSerial(
+      budgets.requestedAndroidIdentifierPair,
+      state.boot.device,
+      state.boot.sourceImage,
+    );
+    validatePooledDeviceMapping(state.boot.device, requestedIdentity);
+    // A warm AVD has no cold-boot source image, but its explicit getAndroid
+    // identifier is still the stable identity needed for later recovery.
+    let sourceImage =
+      state.boot.sourceImage ??
+      (budgets.androidAvdName
+        ? {
+            name: budgets.androidAvdName,
+            platform: "android" as const,
+            isRunning: true,
+            source: "local" as const,
+          }
+        : undefined);
+    sourceImage = androidSourceImageWithBootedMetadata(
+      state.boot.device,
+      sourceImage,
+      initializedDevicePool()?.getDevice(state.boot.device.deviceId)?.androidImage,
+    );
+    const daemonState = DaemonState.getInstance();
+    await reserveInitialDeviceForReadiness(
+      daemonState,
+      state.boot,
+      releaseReadinessReservations,
+      args.__mcpSessionId,
+    );
+
+    // A new incarnation must not inherit a prior intentional-shutdown marker
+    // while its per-device runner setup is in flight.
+    clearColdBootShutdownMarker(state.boot.source, state.boot.device.deviceId);
+
+    const ctrlProxySetup = deps.ensureCtrlProxyReady ?? ensureCtrlProxyReady;
+    // #6280 P2 follow-up: mark this device's readiness lock key as having an
+    // acquisition in flight for the ENTIRE span from runner setup through
+    // session bind/record, not just while the readiness lock itself is held.
+    // `RunnerReadinessService.ensureReady` (invoked inside
+    // `prepareStartDeviceRunnerReadiness`) releases that lock the instant
+    // CtrlProxy setup finishes — well before this function goes on to bind
+    // (or reuse) the session and record its achieved readiness below. A
+    // concurrent tool call on an already-known session UUID (a post-restart
+    // recovered session reused rather than freshly created here) can queue
+    // behind the readiness lock and acquire it in that gap; without this
+    // marker it would observe still-unrecorded readiness and redundantly
+    // reset/rerun CtrlProxy on the device just prepared.
+    // `ensureReadinessUpgraded` in `ToolExecutionContext` awaits this marker
+    // instead of racing a second setup.
+    const acquisitionReadinessKey = deviceReadinessLockKey(
+      state.boot.device.platform,
+      state.boot.device.deviceId,
+    );
+    const sessionId = await trackDeviceAcquisitionReadiness(acquisitionReadinessKey, async () => {
+      const readinessResult = await prepareStartDeviceRunnerReadiness({
+        boot: state.boot!,
+        args,
+        operationName: budgets.operationName,
+        bootService,
+        deviceUtils,
+        daemonState,
+        totalDeadlineMs: budgets.automationDeadlineMs,
+        readinessTimeoutMs: budgets.automationReadyTimeoutMs,
+        timer: deps.timer,
+        signal,
+        progress,
+        perf,
+        requestedIdentity,
+        ensureCtrlProxyReady: ctrlProxySetup,
+        releaseReadinessReservations,
+        publishRecoveredReadinessMarker: (replacement) =>
+          moveDeviceAcquisitionReadiness(
+            acquisitionReadinessKey,
+            deviceReadinessLockKey(replacement.platform, replacement.deviceId),
+          ),
+        collectColdBootSettlement: (settlement) => {
+          if (settlement) {
+            state.coldBootSettlements.push(settlement);
+          }
+        },
+      });
+      try {
+        state.boot = readinessResult.boot;
+        moveDeviceAcquisitionReadiness(
+          acquisitionReadinessKey,
+          deviceReadinessLockKey(state.boot.device.platform, state.boot.device.deviceId),
+        );
+        sourceImage = state.boot.sourceImage ?? sourceImage;
+        sourceImage = androidSourceImageWithBootedMetadata(
+          state.boot.device,
+          sourceImage,
+          initializedDevicePool()?.getDevice(state.boot.device.deviceId)?.androidImage,
+        );
+        // Re-check under the later binding lock because pool identity can change
+        // while runner setup is in flight.
+        validatePooledDeviceMapping(state.boot.device, requestedIdentity);
+
+        // Publish only after runner health passes. Readiness remains per-device,
+        // so 20-40 concurrent emulators do not serialize on a host-wide gate.
+        publishWarmDeviceReady(state.boot.source, state.boot.device.deviceId);
+        await validatePreservedSystemUiAnrRecoverySession(
+          readinessResult.preservedSessionId,
+          readinessResult.validatePreservedSession,
+          readinessResult.retireReplacement,
+        );
+        const verifiedWarmAndroidAvdIdentity = getVerifiedWarmAndroidAvdIdentity(
+          state.boot,
+          sourceImage,
+        );
+        // Recovery must revalidate the caller through the same autolock path;
+        // a preserved UUID alone is not proof that this client owns the session.
+        // Read the flag once so the reuse decision below cannot disagree with
+        // the readiness recording that follows it.
+        const autolockEnabled = isDevicePoolAutolockEnabled();
+        const boundSessionId =
+          readinessResult.preservedSessionId && !autolockEnabled
+            ? readinessResult.preservedSessionId
+            : await runOperationWithinDeadline(
+                deps.timer,
+                budgets.automationDeadlineMs,
+                signal,
+                () =>
+                  acquisitionLifecycleTimeoutError(
+                    budgets,
+                    requestedIdentity,
+                    "binding the device session",
+                  ),
+                async () =>
+                  await bindBootedDeviceSession(
+                    state.boot!.device,
+                    args,
+                    state.boot!.sourceImage && !readinessResult.preservedSessionId
+                      ? sourceImage
+                      : undefined,
+                    // Recovery already registered this process and its output tail.
+                    readinessResult.preservedSessionId ? undefined : state.boot!.processHandle,
+                    new Set(releaseReadinessReservations.map((reservation) => reservation.owner)),
+                    verifiedWarmAndroidAvdIdentity,
+                    "automationReady",
+                    (settlement) => {
+                      state.bindingSettlements.push(settlement);
+                    },
+                  ),
+                (settlement) => {
+                  state.bindingSettlements.push(settlement);
+                },
+              );
+        if (readinessResult.preservedSessionId && !autolockEnabled) {
+          // #6227 round 7: without autolock, System UI ANR recovery bypasses
+          // `bindBootedDeviceSession` (and therefore its own
+          // `recordAcquiredSessionReadiness` call) entirely when a preserved
+          // session is being reused. But by this point
+          // `prepareStartDeviceRunnerReadiness` has already run the *same*
+          // `ensureCtrlProxyReady` setup this function always awaits for a
+          // freshly-bound session — recovery re-verified runner readiness on the
+          // replacement device before handing back `preservedSessionId` (see
+          // `ensureRunnerReadyWithSystemUiAnrRecovery`) — so the achieved level
+          // here is unconditionally `automationReady`, exactly like the
+          // freshly-bound branch. Recording it here closes the gap where a
+          // recovered session's readiness cache stayed `undefined` and the first
+          // `automationReady` tool after recovery redundantly re-ran setup.
+          // WITH autolock the branch above went through `bindBootedDeviceSession`
+          // instead, and `autolockDevice` already recorded readiness for the
+          // session it returned — which need not be `preservedSessionId`, so
+          // recording it here would bump an unrelated session's expiry.
+          recordAcquiredSessionReadiness(
+            daemonState,
+            readinessResult.preservedSessionId,
+            "automationReady",
+          );
+        }
+        return boundSessionId;
+      } finally {
+        readinessResult.releaseRecoveryRouteLease?.();
+      }
+    });
+    state.ownershipTransferred = true;
+
+    refreshResourcesAfterCommittedBoot(state.boot, deps);
+    return buildBootedResponse(
+      state.boot.device,
+      state.boot.source,
+      perf,
+      sessionId,
+      state.boot.processId,
+      sourceImage,
+      configuredImageForAcquiredDevice(state.boot.device, sourceImage),
+    );
+  };
+
+  const startDeviceHandler = async (
+    rawArgs: StartDeviceArgs,
+    progress?: ProgressCallback,
+    signal?: AbortSignal,
+  ) => {
+    const internalSessionId = rawArgs.__mcpSessionId;
+    const args = {
+      ...startDeviceSchema.parse(stripInternalAcquisitionParams(rawArgs)),
+      __mcpSessionId: internalSessionId,
+    };
+    const exactAndroidAvdName = args.platform === "android" ? args.avdName : undefined;
+    const target = {
+      ...args,
+      ...(exactAndroidAvdName ? { name: exactAndroidAvdName, matchExactName: true } : {}),
+    };
+    const totalTimeoutMs = args.timeoutMs ?? DEFAULT_START_DEVICE_TIMEOUT_MS;
+    return await prepareDevice(
+      target,
+      {
+        bootTimeoutMs: totalTimeoutMs,
+        automationReadyTimeoutMs: resolveRunnerReadinessTimeoutMs(args),
+        automationDeadlineMs: getDeviceToolsDependencies().timer.now() + totalTimeoutMs,
+        operationName: "startDevice",
+        stableTarget:
+          args.platform === "android" && target.name && !args.deviceId
+            ? { platform: "android", stableId: target.name }
+            : args.platform === "ios" && args.deviceId
+              ? { platform: "ios", stableId: args.deviceId }
+              : undefined,
+        ...(args.platform === "android" && args.avdName && args.deviceId
+          ? {
+              androidAvdName: args.avdName,
+              requestedAndroidIdentifierPair: {
+                avdName: args.avdName,
+                deviceId: args.deviceId,
+              },
+            }
+          : {}),
+      },
+      progress,
+      signal,
+    );
+  };
+
+  async function ensureCtrlProxyReady(request: RunnerReadinessRequest): Promise<void> {
+    request.perf?.startOperation("ensureCtrlProxy");
+    try {
+      const pool = getStartDevicePool(DaemonState.getInstance());
+      if (pool && (await pool.isShutdownReserved(request.device.deviceId))) {
+        throw new ActionableError(`Device '${request.device.deviceId}' is shutting down.`);
+      }
+      if (request.device.platform === "ios") {
+        IOSCtrlProxyClient.resumeAfterDeviceStart(request.device.deviceId);
+      } else if (request.device.platform === "android") {
+        AndroidCtrlProxyClient.resumeAfterDeviceStart(request.device.deviceId);
+      }
+      await createDefaultRunnerReadinessService(getDeviceToolsDependencies().timer).ensureReady(
+        request,
+      );
+    } finally {
+      request.perf?.endOperation("ensureCtrlProxy");
+    }
+  }
+
+  async function bindBootedDeviceSession(
+    device: BootedDevice,
+    args: StartDeviceArgs,
+    sourceImage?: DeviceInfo,
+    childProcess?: ChildProcess | null,
+    readinessReservationOwners?: ReadonlySet<symbol>,
+    verifiedAndroidAvdIdentity?: DeviceInfo,
+    achievedReadiness: DeviceReadinessLevel = "automationReady",
+    collectCancellationSettlement?: (settlement: Promise<void>) => void,
+  ): Promise<string> {
+    // Reserve the exact ready device before resource notifications publish it
+    // to concurrent allocators.
+    const daemonState = DaemonState.getInstance();
+    if (isDevicePoolAutolockEnabled() && daemonState.isInitialized()) {
+      const autolockSessionId = await daemonState
+        .getDevicePool()
+        .autolockDevice(
+          device.deviceId,
+          device.platform,
+          args.__mcpSessionId,
+          sourceImage,
+          childProcess,
+          device,
+          readinessReservationOwners,
+          verifiedAndroidAvdIdentity,
+          achievedReadiness,
+          collectCancellationSettlement,
+        );
+      if (autolockSessionId) {
+        // #6227 (round 9): readiness is recorded INSIDE `autolockDevice`, before
+        // it publishes the session to the `mcpSessionAutolockMap` route, so a
+        // concurrent tool call from the same MCP client cannot observe an
+        // unrecorded readiness. Recording here (after exposure) would reopen
+        // that race, so it must not move back out.
+        return autolockSessionId;
+      }
+    }
+
+    const sessionId = getDeviceToolsDependencies().idGenerator.next();
+    if (!daemonState.isInitialized()) {
+      registerDirectSessionDevice(sessionId, device);
+      return sessionId;
+    }
+    const boundSessionId = await daemonState
+      .getDevicePool()
+      .bindOrReuseDeviceSession(
+        sessionId,
+        device.deviceId,
+        device.platform,
+        sourceImage,
+        childProcess,
+        device,
+        false,
+        readinessReservationOwners,
+        verifiedAndroidAvdIdentity,
+        undefined,
+        args.__mcpSessionId,
+      );
+    recordAcquiredSessionReadiness(daemonState, boundSessionId, achievedReadiness);
+    return boundSessionId;
+  }
+
+  /**
+   * Record the readiness level actually ACHIEVED by acquisition for a session
+   * bound by `bindBootedDeviceSession` (#6227 P1 follow-up, round 6 fix). By
+   * the time that function runs, the caller has already awaited whatever
+   * readiness setup it chose to run for this device: normal `getAndroid` /
+   * `startDevice` acquisition always awaits `prepareStartDeviceRunnerReadiness`
+   * successfully, so CtrlProxy / accessibility-service setup is genuinely done
+   * and `automationReady` is correct. But `provisionDevice({ readiness: "none" })`
+   * deliberately SKIPS that setup in `ensureProvisionDeviceReadiness` — for that
+   * path recording a hardcoded `automationReady` would be a lie: a later
+   * `observe` (or any other `automationReady`-requiring tool) would see the
+   * session's `deviceReadiness` slot already satisfied and skip the setup it
+   * still needs. Callers must pass the readiness level actually achieved
+   * (`achievedReadiness`), not assume the highest one.
+   *
+   * Called directly (bypassing `bindBootedDeviceSession`) from
+   * `bootAndPrepareDevice`'s `readinessResult.preservedSessionId` branch too
+   * (#6227 round 7): recovery re-verifies runner readiness on the
+   * replacement device before handing back a preserved session id, so that
+   * path's achieved level is likewise always `automationReady`.
+   *
+   * The setter this delegates to (`SessionManager.setDeviceReadiness`) is
+   * monotonic by achieved level (#6227 round 7): a lower level passed here
+   * for a session that already recorded a higher one is a no-op rather than
+   * a downgrade, so callers do not need to compare against the existing
+   * record themselves.
+   */
+  function recordAcquiredSessionReadiness(
+    daemonState: DaemonState,
+    sessionId: string,
+    achievedReadiness: DeviceReadinessLevel,
+  ): void {
+    daemonState.getSessionManager().setDeviceReadiness(sessionId, achievedReadiness);
+  }
+
+  function buildBootedResponse(
+    device: BootedDevice,
+    source: "booted" | "cold-boot",
+    perf: ReturnType<typeof createPerformanceTracker>,
+    sessionId: string,
+    processId?: number,
+    sourceImage?: DeviceInfo,
+    configuredImage?: StableConfiguredDeviceImage,
+    achievedReadiness: DeviceReadinessLevel = "automationReady",
+  ) {
+    perf.end();
+    const timing = perf.getTimings();
+    const description = describeDevice({
+      kind: "booted",
+      device,
+      pooled: initializedDevicePool()?.getDevice(device.deviceId) ?? undefined,
+      discovery: sourceImage,
+      configured: configuredImage,
+      session: { sessionId },
+      serviceStatus:
+        achievedReadiness === "automationReady"
+          ? { installed: true, enabled: true, running: true, isCompatible: true }
+          : { installed: true, enabled: true, running: false, isCompatible: true },
+    });
+    const acquisition = source === "booted" ? "already-booted" : "cold-boot";
+    const projected = projectBootedDevice(description);
+    return createStructuredToolResponse({
+      message: `${device.platform} '${device.name}' is ready (${source})`,
+      ...projected,
+      deviceIdentity: deviceIdentityPayload(device, sourceImage),
+      processId: processId ?? null,
+      isReady: true,
+      acquisition,
+      // TimingData's runtime shape is serialized as the legacy flat result.
+      // oxlint-disable-next-line auto-mobile/no-unknown-cast
+      timing: (timing ?? {}) as unknown as Record<string, number>,
+    });
+  }
+
+  return {
+    bootAndPrepareDevice,
+    startDeviceHandler,
+    bindBootedDeviceSession,
+    recordAcquiredSessionReadiness,
+    ensureCtrlProxyReady,
+  };
+}

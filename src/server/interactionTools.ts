@@ -820,7 +820,7 @@ const sendKeysTypeCommandSchema = withJsonSchemaOverride(
         .enum(SEND_KEYS_TYPING_MODES)
         .default("auto")
         .describe(
-          "Android delivery mode. auto uses the AutoMobile IME when supported, otherwise eventAll for insert or a11y for replace. Explicit ime commits text; imeKeyEvents dispatches printable ASCII key events through the IME input connection, requires a compatible CtrlProxy APK, and does not verify resulting editor text. iOS reports xcuiTypeText as the resolved mode",
+          "Android delivery mode. Use ime, a11y, or auto for Unicode and emoji. auto uses the AutoMobile IME when supported, otherwise eventAll for insert or a11y for replace. ime commits complete graphemes; eventAll and eventLast mix ASCII key events with accessibility insertion and can split keycaps or decomposed letters. eventOnly and imeKeyEvents are ASCII-only; imeKeyEvents requires a compatible CtrlProxy APK and does not verify resulting editor text. iOS uses xcuiTypeText for every requested mode",
         ),
       keyboardProfile: z
         .enum(KEYBOARD_PROFILE_IDS)
@@ -2751,7 +2751,7 @@ export function registerInteractionTools() {
 
   ToolRegistry.registerDeviceAware(
     "sendKeys",
-    "Execute an ordered sequence of text insertion/replacement, clear, raw keys, and semantic IME keys.",
+    "Execute ordered text insertion/replacement, clear, raw keys, and semantic IME keys. For Unicode and emoji use Android ime/a11y/auto or any iOS mode; Android eventOnly and imeKeyEvents are ASCII-only.",
     sendKeysSchema,
     sendKeysHandler,
     { defaultEnabled: true, supportsProgress: true },

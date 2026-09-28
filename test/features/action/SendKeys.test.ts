@@ -29,6 +29,18 @@ const iosDevice: BootedDevice = {
   platform: "ios",
 };
 
+const unicodeCorpus = [
+  "a😀b👍🏽c👨‍👩‍👧d🇯🇵e❤️fé日本",
+  "1️⃣",
+  "é",
+  "🏳️‍🌈",
+  "👩🏽‍💻",
+  "ไทย",
+  "हिन्दी",
+  "مرحبا",
+  "한국어",
+] as const;
+
 function createObserver(
   result: ObserveResult = { timestamp: Date.now() } as ObserveResult,
 ): SendKeysObserver & {
@@ -408,6 +420,137 @@ describe("SendKeys", () => {
 describe("DefaultSendKeysCommandExecutor", () => {
   const commitImeId = "dev.jasonpearson.automobile.ctrlproxy/.ime.CtrlProxyIme";
   const priorImeId = "com.example.keyboard/.Ime";
+
+  test.each(unicodeCorpus)("iOS forwards Unicode corpus %s intact for every mode", async (text) => {
+    for (const mode of [
+      "auto",
+      "a11y",
+      "ime",
+      "eventAll",
+      "eventLast",
+      "eventOnly",
+      "imeKeyEvents",
+    ] as const) {
+      const textClient = createTextClient();
+      const executor = new DefaultSendKeysCommandExecutor(
+        iosDevice,
+        createAdbFactory(new FakeAdbExecutor()),
+        createObserver(),
+        { textClient: textClient.client },
+      );
+      expect(await executor.type({ action: "type", text, mode })).toMatchObject({
+        success: true,
+        resolvedMode: "xcuiTypeText",
+        textLength: Array.from(text).length,
+      });
+      expect(textClient.calls).toEqual([`insert:${text}`]);
+    }
+  });
+
+  test.each(unicodeCorpus)(
+    "Android a11y and IME forward Unicode corpus %s intact",
+    async (text) => {
+      for (const mode of ["a11y", "ime", "auto"] as const) {
+        const adb = new FakeAdbExecutor();
+        adb.setCommandResponseSequence("shell settings get secure default_input_method", [
+          { stdout: priorImeId, stderr: "" },
+          { stdout: commitImeId, stderr: "" },
+        ]);
+        const textClient = createTextClient();
+        const executor = new DefaultSendKeysCommandExecutor(
+          androidDevice,
+          createAdbFactory(adb),
+          createObserver(focusedAndroidObservation()),
+          { textClient: textClient.client },
+        );
+        expect(await executor.type({ action: "type", text, mode })).toMatchObject({
+          success: true,
+          resolvedMode: mode === "a11y" ? "a11y" : "ime",
+        });
+        if (mode === "a11y") {
+          expect(textClient.calls).toEqual([`insert:${text}`]);
+        } else {
+          expect(textClient.commitViaImeCalls).toEqual([{ text, priorImeId }]);
+        }
+      }
+    },
+  );
+
+  test.each(unicodeCorpus)(
+    "Android ASCII-only modes reject Unicode corpus %s before mutation",
+    async (text) => {
+      for (const mode of ["eventOnly", "imeKeyEvents"] as const) {
+        const adb = new FakeAdbExecutor();
+        const textClient = createTextClient();
+        const executor = new DefaultSendKeysCommandExecutor(
+          androidDevice,
+          createAdbFactory(adb),
+          createObserver(focusedAndroidObservation("old")),
+          { textClient: textClient.client },
+        );
+        expect(
+          await executor.type({ action: "type", text, mode, operation: "replace" }),
+        ).toMatchObject({
+          success: false,
+          error: expect.stringContaining(mode === "eventOnly" ? "cannot type" : "printable ASCII"),
+        });
+        expect(textClient.calls).toEqual([]);
+        expect(adb.getExecutedCommands()).toEqual([]);
+      }
+    },
+  );
+
+  test.each(["eventAll", "eventLast"] as const)(
+    "%s delivers Unicode runs intact around ASCII key events",
+    async (mode) => {
+      const text = unicodeCorpus[0];
+      const adb = new FakeAdbExecutor();
+      const textClient = createTextClient();
+      const executor = new DefaultSendKeysCommandExecutor(
+        androidDevice,
+        createAdbFactory(adb),
+        createObserver(focusedAndroidObservation()),
+        { textClient: textClient.client },
+      );
+      expect(await executor.type({ action: "type", text, mode })).toMatchObject({
+        success: true,
+        resolvedMode: mode,
+      });
+      expect(textClient.calls).toEqual(
+        mode === "eventAll"
+          ? ["insert:😀", "insert:👍🏽", "insert:👨‍👩‍👧", "insert:🇯🇵", "insert:❤️", "insert:é日本"]
+          : ["insert:a😀b👍🏽c👨‍👩‍👧d🇯🇵e❤️", "insert:é日本"],
+      );
+      expect(
+        textClient.calls
+          .filter((call) => call.startsWith("insert:"))
+          .every((call) => !/^[\p{M}\u200D\uDC00-\uDFFF]/u.test(call.slice(7))),
+      ).toBe(true);
+    },
+  );
+
+  test.each(["eventAll", "eventLast"] as const)(
+    "%s documents a11y inserts that start inside ASCII-base graphemes",
+    async (mode) => {
+      for (const [text, remainder] of [
+        ["1️⃣", "️⃣"],
+        ["e\u0301", "\u0301"],
+      ] as const) {
+        const textClient = createTextClient();
+        const executor = new DefaultSendKeysCommandExecutor(
+          androidDevice,
+          createAdbFactory(new FakeAdbExecutor()),
+          createObserver(focusedAndroidObservation()),
+          { textClient: textClient.client },
+        );
+        // Current event modes split after the ASCII base; the a11y suffix begins with a mark.
+        expect(await executor.type({ action: "type", text, mode })).toMatchObject({
+          success: true,
+        });
+        expect(textClient.calls).toEqual([`insert:${remainder}`]);
+      }
+    },
+  );
 
   test("iOS insert keeps existing text at the caret", async () => {
     const adb = new FakeAdbExecutor();

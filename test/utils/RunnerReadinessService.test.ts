@@ -1230,6 +1230,29 @@ describe("RunnerReadinessService", () => {
     expect(iosClient.healthCalls).toBe(2);
   });
 
+  test("allows a cold iOS restart past the health window within the total deadline", async () => {
+    const timer = new FakeTimer();
+    const iosManager = new FakeIosManager();
+    const iosClient = new FakeReadinessClient();
+    iosClient.healthResults = [false, true];
+    iosManager.onForceRestart = async () => {
+      await Promise.resolve();
+      timer.advanceTime(2_000);
+    };
+    const { service } = createService({ timer, iosManager, iosClient, autoAdvance: false });
+
+    await service.ensureReady({
+      device: iosDevice,
+      requestedIdentity: "platform=ios deviceId=IOS-UDID",
+      totalDeadlineMs: 10_000,
+      readinessTimeoutMs: 1_000,
+    });
+
+    expect(iosManager.forceRestartCalls).toBe(1);
+    expect(iosClient.healthCalls).toBe(2);
+    expect(timer.now()).toBe(2_000);
+  });
+
   test("uses the post-restart iOS service port for readiness", async () => {
     const iosManager = new FakeIosManager();
     const staleClient = new FakeReadinessClient();
@@ -1300,7 +1323,7 @@ describe("RunnerReadinessService", () => {
     });
   }
 
-  test("cancels the iOS force-restart when its readiness budget expires", async () => {
+  test("cancels the iOS force-restart when its total deadline expires", async () => {
     const timer = new FakeTimer();
     const iosManager = new FakeIosManager();
     const iosClient = new FakeReadinessClient();
@@ -1325,10 +1348,10 @@ describe("RunnerReadinessService", () => {
 
     expect(iosManager.forceRestartCalls).toBe(1);
     expect(iosManager.forceRestartOptions?.signal).toBeDefined();
-    timer.advanceTime(1_000);
-    await expect(ready).rejects.toThrow(/phase=runner-health/);
+    timer.advanceTime(10_000);
+    await expect(ready).rejects.toThrow(/phase=runner-setup/);
     expect(iosManager.forceRestartOptions?.signal?.aborted).toBe(true);
-    expect(timer.now()).toBe(1_000);
+    expect(timer.now()).toBe(10_000);
   });
 
   // #6416: the disconnected branch of ensureIosReady called manager.setup()

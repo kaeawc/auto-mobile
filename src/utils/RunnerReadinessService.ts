@@ -867,12 +867,15 @@ export class RunnerReadinessService {
       // hierarchy. In that state setup() would short-circuit on port health,
       // leaving the runner wedged indefinitely. Restart the process so the
       // next health probe uses a fresh observation stream (#5532).
-      await this.runPhase(context, "runner-health", 1, (signal) =>
+      await this.runPhase(context, "runner-setup", 1, (signal) =>
         manager.forceRestart({
           signal,
           minimumHealthPollDurationMs: this.remainingForPhase(context, "runner-health"),
         }),
       );
+      // A cold restart can outlast the original health window. Probe the new
+      // process in a fresh window, still capped by the total deadline.
+      context.healthDeadlineMs = null;
       // Restart can reallocate the service port when its prior listener became
       // unavailable. Do not let a stale client accept another device's runner.
       client = this.dependencies.getIosClient(context.device, manager.getServicePort());

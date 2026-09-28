@@ -1,3 +1,4 @@
+import { FakeTelemetryRepository as FakeRepository } from "../../fakes/FakeTelemetryRepository";
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import {
   TelemetryRecorder,
@@ -6,11 +7,9 @@ import {
   type TelemetryEvent,
 } from "../../../src/features/telemetry/TelemetryRecorder";
 import { NetworkState } from "../../../src/server/NetworkState";
-import type { RecordNetworkEventInput } from "../../../src/db/networkEventRepository";
 import type { RecordLogEventInput } from "../../../src/db/logEventRepository";
 import type { RecordOsEventInput } from "../../../src/db/osEventRepository";
 import type { RecordNavigationEventInput } from "../../../src/db/navigationEventRepository";
-import type { RecordStorageEventInput } from "../../../src/db/storageEventRepository";
 import type { RecordLayoutEventInput } from "../../../src/db/layoutEventRepository";
 import { InMemoryDbWriteBarrier } from "../../../src/db/dbWriteBarrier";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -18,55 +17,6 @@ import {
   TelemetryEventBuffer,
   type BatchTelemetryRepository,
 } from "../../../src/features/telemetry/TelemetryEventBuffer";
-
-class FakeRepository implements TelemetryRepository {
-  networkEvents: RecordNetworkEventInput[] = [];
-  logEvents: RecordLogEventInput[] = [];
-  osEvents: RecordOsEventInput[] = [];
-  navigationEvents: RecordNavigationEventInput[] = [];
-  storageEvents: RecordStorageEventInput[] = [];
-  layoutEvents: RecordLayoutEventInput[] = [];
-  shouldThrow = false;
-  private nextNetworkId = 1;
-
-  async recordNetworkEvent(input: RecordNetworkEventInput): Promise<number> {
-    if (this.shouldThrow) {
-      throw new Error("db error");
-    }
-    this.networkEvents.push(input);
-    return this.nextNetworkId++;
-  }
-  async recordLogEvent(input: RecordLogEventInput): Promise<void> {
-    if (this.shouldThrow) {
-      throw new Error("db error");
-    }
-    this.logEvents.push(input);
-  }
-  async recordOsEvent(input: RecordOsEventInput): Promise<void> {
-    if (this.shouldThrow) {
-      throw new Error("db error");
-    }
-    this.osEvents.push(input);
-  }
-  async recordNavigationEvent(input: RecordNavigationEventInput): Promise<void> {
-    if (this.shouldThrow) {
-      throw new Error("db error");
-    }
-    this.navigationEvents.push(input);
-  }
-  async recordStorageEvent(input: RecordStorageEventInput): Promise<void> {
-    if (this.shouldThrow) {
-      throw new Error("db error");
-    }
-    this.storageEvents.push(input);
-  }
-  async recordLayoutEvent(input: RecordLayoutEventInput): Promise<void> {
-    if (this.shouldThrow) {
-      throw new Error("db error");
-    }
-    this.layoutEvents.push(input);
-  }
-}
 
 class FakePushTarget implements TelemetryPushTarget {
   pushedEvents: TelemetryEvent[] = [];

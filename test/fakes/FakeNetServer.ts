@@ -9,6 +9,10 @@ type FakeSocketContract = Pick<Socket, "destroyed" | "writable" | "destroy">;
 export class FakeSocket extends Socket implements FakeSocketContract {
   public destroyed = false;
   public writable = true;
+  readonly written: Array<string | Buffer> = [];
+  get writes(): string[] {
+    return this.getWrittenData();
+  }
   private _writtenData: string[] = [];
   private _peer: FakeSocket | null = null;
 
@@ -55,6 +59,7 @@ export class FakeSocket extends Socket implements FakeSocketContract {
       throw new Error("Socket is destroyed");
     }
     const str = typeof data === "string" ? data : data.toString();
+    this.written.push(typeof data === "string" ? data : Buffer.from(data));
     this._writtenData.push(str);
     return true;
   }
@@ -65,6 +70,12 @@ export class FakeSocket extends Socket implements FakeSocketContract {
   simulateData(data: string): void {
     if (!this.destroyed) {
       this.emit("data", Buffer.from(data));
+    }
+  }
+
+  feed(chunk: Buffer): void {
+    if (!this.destroyed) {
+      this.emit("data", chunk);
     }
   }
 
@@ -125,6 +136,7 @@ export class FakeSocket extends Socket implements FakeSocketContract {
    */
   reset(): void {
     this._writtenData = [];
+    this.written.length = 0;
     this.destroyed = false;
     this.writable = true;
     this._peer = null;

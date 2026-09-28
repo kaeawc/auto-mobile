@@ -1,3 +1,5 @@
+import { FakeDeviceStateCollector } from "../../fakes/FakeDeviceStateCollector";
+import { FakeScreenshotRecorder } from "../../fakes/FakeScreenshotRecorder";
 import {
   DefaultHierarchyCapture,
   getHierarchySnapshot,
@@ -19,46 +21,12 @@ import { FakeViewHierarchy } from "../../fakes/FakeViewHierarchy";
 import { AndroidCtrlProxyManager } from "../../../src/utils/CtrlProxyManager";
 import { resetObserveCacheStore } from "../../../src/features/observe/cache/ObserveCacheRegistry";
 import { resetScreenshotStateStore } from "../../../src/features/observe/screenshot/ScreenshotStateRegistry";
-import type { ObserveScreenshotRecorder } from "../../../src/features/observe/screenshot/ObserveScreenshotRecorder";
 import type { HierarchyCollector } from "../../../src/features/observe/collectors/HierarchyCollector";
 import type { DeviceStateCollector } from "../../../src/features/observe/collectors/DeviceStateCollector";
 import type { PerformanceAuditor } from "../../../src/features/observe/audits/PerformanceAuditor";
 import type { AccessibilityAuditor } from "../../../src/features/observe/audits/AccessibilityAuditor";
 import type { AccessibilityStateDetector } from "../../../src/features/observe/audits/AccessibilityStateDetector";
 import type { BootedDevice, ObserveResult } from "../../../src/models";
-import type { PerformanceTracker } from "../../../src/utils/PerformanceTracker";
-
-class FakeScreenshotRecorder implements ObserveScreenshotRecorder {
-  startCalls = 0;
-  captureCalls = 0;
-  captureFreshCalls = 0;
-  captureSettledCalls = 0;
-  settledError?: Error;
-
-  start(_perf?: PerformanceTracker, _signal?: AbortSignal): void {
-    this.startCalls++;
-  }
-
-  async capture(_perf?: PerformanceTracker, _signal?: AbortSignal): Promise<void> {
-    this.captureCalls++;
-  }
-
-  async captureFresh(
-    _observationId: string,
-    _perf?: PerformanceTracker,
-    _signal?: AbortSignal,
-  ): Promise<void> {
-    this.captureFreshCalls++;
-  }
-
-  async captureSettled(): Promise<string> {
-    this.captureSettledCalls++;
-    if (this.settledError) {
-      throw this.settledError;
-    }
-    return "/fake/settled.png";
-  }
-}
 
 class FakeHierarchyCollector implements Pick<
   HierarchyCollector,
@@ -88,46 +56,6 @@ class FakeHierarchyCollector implements Pick<
 
   extractScreenSize(): { width: number; height: number } | null {
     return { width: 1080, height: 1920 };
-  }
-}
-
-class FakeDeviceStateCollector implements Pick<
-  DeviceStateCollector,
-  | "collectBackStack"
-  | "collectWakefulness"
-  | "collectDeviceLock"
-  | "collectActiveWindow"
-  | "collectForegroundIdentity"
-> {
-  backStackCalls = 0;
-  activeWindowCalls = 0;
-  deviceLockCalls = 0;
-
-  async collectForegroundIdentity(_signal?: AbortSignal): Promise<string | undefined> {
-    return undefined;
-  }
-
-  async collectBackStack(
-    result: ObserveResult,
-    _perf: PerformanceTracker,
-    _signal?: AbortSignal,
-  ): Promise<void> {
-    this.backStackCalls++;
-    result.backStack = [{ activity: "com.example/.MainActivity", taskId: 1 }] as any;
-  }
-
-  async collectWakefulness(result: ObserveResult): Promise<void> {
-    result.wakefulness = "Awake";
-  }
-
-  async collectDeviceLock(result: ObserveResult): Promise<void> {
-    this.deviceLockCalls++;
-    result.deviceLock = { locked: false, keyguardShowing: false, secure: false };
-  }
-
-  async collectActiveWindow(result: ObserveResult): Promise<void> {
-    this.activeWindowCalls++;
-    result.activeWindow = { appId: "com.example", activityName: ".MainActivity", layoutSeqSum: 0 };
   }
 }
 

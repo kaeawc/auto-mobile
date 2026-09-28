@@ -1,3 +1,4 @@
+import { FakeToolSelectionRepository as FakeRepository } from "../../fakes/FakeToolSelectionRepository";
 import { describe, expect, test } from "bun:test";
 import {
   getEnvironmentToolDefaults,
@@ -5,39 +6,6 @@ import {
   SessionToolSelectionService,
   type SessionToolSelectionRepository,
 } from "../../../src/features/toolSelection/SessionToolSelectionService";
-
-class FakeRepository implements SessionToolSelectionRepository {
-  readonly rows = new Map<string, Map<string, boolean>>();
-  readonly singleWrites: Array<[string, string, boolean]> = [];
-  readonly batches: Array<[string, ReadonlyArray<{ toolName: string; enabled: boolean }>]> = [];
-
-  async list(sessionUuid: string): Promise<Map<string, boolean>> {
-    return new Map(this.rows.get(sessionUuid) ?? []);
-  }
-
-  async set(sessionUuid: string, toolName: string, enabled: boolean): Promise<void> {
-    this.singleWrites.push([sessionUuid, toolName, enabled]);
-    const values = this.rows.get(sessionUuid) ?? new Map<string, boolean>();
-    values.set(toolName, enabled);
-    this.rows.set(sessionUuid, values);
-  }
-
-  async setMany(
-    sessionUuid: string,
-    entries: ReadonlyArray<{ toolName: string; enabled: boolean }>,
-  ): Promise<void> {
-    this.batches.push([sessionUuid, entries]);
-    const values = this.rows.get(sessionUuid) ?? new Map<string, boolean>();
-    for (const entry of entries) {
-      values.set(entry.toolName, entry.enabled);
-    }
-    this.rows.set(sessionUuid, values);
-  }
-
-  async deleteSession(sessionUuid: string): Promise<void> {
-    this.rows.delete(sessionUuid);
-  }
-}
 
 /** A repository with no batch support, to exercise the per-name fallback. */
 class SingleWriteOnlyRepository implements SessionToolSelectionRepository {

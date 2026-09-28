@@ -1,3 +1,5 @@
+import { FakeDeviceStateCollector } from "../../fakes/FakeDeviceStateCollector";
+import { FakeScreenshotRecorder } from "../../fakes/FakeScreenshotRecorder";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
@@ -7,7 +9,6 @@ import { FakeObserveCacheStore } from "../../fakes/FakeObserveCacheStore";
 import { FakeScreenshotStateStore } from "../../fakes/FakeScreenshotStateStore";
 import { resetObserveCacheStore } from "../../../src/features/observe/cache/ObserveCacheRegistry";
 import { resetScreenshotStateStore } from "../../../src/features/observe/screenshot/ScreenshotStateRegistry";
-import type { ObserveScreenshotRecorder } from "../../../src/features/observe/screenshot/ObserveScreenshotRecorder";
 import type { HierarchyCollector } from "../../../src/features/observe/collectors/HierarchyCollector";
 import type { DeviceStateCollector } from "../../../src/features/observe/collectors/DeviceStateCollector";
 import type { PerformanceAuditor } from "../../../src/features/observe/audits/PerformanceAuditor";
@@ -19,15 +20,9 @@ import {
   getPerformanceMonitor,
 } from "../../../src/features/performance/PerformanceMonitor";
 import type { BootedDevice, ObserveResult } from "../../../src/models";
-import type { PerformanceTracker } from "../../../src/utils/PerformanceTracker";
 
 const ENABLE_ENV = "AUTOMOBILE_OBSERVE_PERF_SNAPSHOT";
 const DEVICE_ID = "perf-device";
-
-class FakeScreenshotRecorder implements ObserveScreenshotRecorder {
-  start(_perf?: PerformanceTracker, _signal?: AbortSignal): void {}
-  async capture(_perf?: PerformanceTracker, _signal?: AbortSignal): Promise<void> {}
-}
 
 class FakeHierarchyCollector implements Pick<
   HierarchyCollector,
@@ -45,31 +40,6 @@ class FakeHierarchyCollector implements Pick<
   async collectRaw(): Promise<void> {}
   extractScreenSize(): { width: number; height: number } | null {
     return { width: 1080, height: 1920 };
-  }
-}
-
-class FakeDeviceStateCollector implements Pick<
-  DeviceStateCollector,
-  | "collectBackStack"
-  | "collectWakefulness"
-  | "collectDeviceLock"
-  | "collectActiveWindow"
-  | "collectForegroundIdentity"
-> {
-  async collectForegroundIdentity(): Promise<string | undefined> {
-    return undefined;
-  }
-  async collectBackStack(result: ObserveResult): Promise<void> {
-    result.backStack = [{ activity: "com.example/.MainActivity", taskId: 1 }] as any;
-  }
-  async collectWakefulness(result: ObserveResult): Promise<void> {
-    result.wakefulness = "Awake";
-  }
-  async collectDeviceLock(result: ObserveResult): Promise<void> {
-    result.deviceLock = { locked: false, keyguardShowing: false, secure: false };
-  }
-  async collectActiveWindow(result: ObserveResult): Promise<void> {
-    result.activeWindow = { appId: "com.example", activityName: ".MainActivity", layoutSeqSum: 0 };
   }
 }
 

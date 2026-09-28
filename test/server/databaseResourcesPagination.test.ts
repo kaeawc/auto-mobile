@@ -1,3 +1,4 @@
+import { FakeMcpServer } from "../fakes/FakeMcpServer";
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { SubscribeRequestSchema } from "@modelcontextprotocol/sdk/types.js";
@@ -14,21 +15,6 @@ import { ProviderUnavailableError } from "../../src/features/storage/ProviderUna
 // Minimal MCP-server stand-in, matching the pattern in
 // resourceRegistryListChanged.test.ts: registerWithServer installs request
 // handlers on `server.server`, and notifyResourceUpdated sends through it.
-class FakeUnderlyingServer {
-  notifications: Array<{ method: string; params?: unknown }> = [];
-  handlersBySchema = new Map<unknown, (request: unknown) => Promise<unknown>>();
-  onclose?: () => void;
-  setRequestHandler(schema: unknown, handler: (request: unknown) => Promise<unknown>): void {
-    this.handlersBySchema.set(schema, handler);
-  }
-  async notification(payload: { method: string; params?: unknown }): Promise<void> {
-    this.notifications.push(payload);
-  }
-}
-
-class FakeMcpServer {
-  server = new FakeUnderlyingServer();
-}
 
 // Issue #6133: the table-data resource template previously registered a
 // literal `?appId={appId}&limit={limit}&offset={offset}` query string, which

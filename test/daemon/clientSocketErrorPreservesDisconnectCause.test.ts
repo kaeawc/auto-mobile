@@ -1,22 +1,7 @@
-import { EventEmitter } from "node:events";
+import { FakeSocket } from "../fakes/FakeNetServer";
 import * as net from "node:net";
 import { describe, expect, mock, test } from "bun:test";
 import { FakeTimer } from "../fakes/FakeTimer";
-
-class FakeSocket extends EventEmitter {
-  destroyed = false;
-  writes: string[] = [];
-
-  write(chunk: string): void {
-    this.writes.push(chunk);
-  }
-
-  destroy(): this {
-    this.destroyed = true;
-    this.emit("close");
-    return this;
-  }
-}
 
 let createdSocket: FakeSocket | undefined;
 mock.module("node:net", () => ({

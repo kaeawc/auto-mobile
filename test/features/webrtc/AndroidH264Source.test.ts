@@ -1,6 +1,5 @@
+import { FakeSpawnedProcess as FakeProcess } from "../../fakes/FakeSpawnedProcess";
 import { describe, expect, test } from "bun:test";
-import { EventEmitter } from "node:events";
-import { PassThrough } from "node:stream";
 import {
   ANDROID_FORCED_KEYFRAME_MIN_INTERVAL_MS,
   ANDROID_HEALTHY_SEGMENT_AGE_MS,
@@ -19,19 +18,6 @@ const DEVICE: BootedDevice = {
   platform: "android",
   name: "test",
 } as BootedDevice;
-
-class FakeProcess extends EventEmitter implements SpawnedProcess {
-  readonly stdout = new PassThrough();
-  readonly stderr = new PassThrough();
-  killed: string[] = [];
-  kill(signal?: NodeJS.Signals): boolean {
-    this.killed.push(signal ?? "SIGTERM");
-    return true;
-  }
-  simulateExit(code: number | null = 0, signal: NodeJS.Signals | null = null): void {
-    this.emit("exit", code, signal);
-  }
-}
 
 function fakeAdbFactory(
   commands: string[] = [],

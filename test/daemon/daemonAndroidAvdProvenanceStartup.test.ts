@@ -1,5 +1,5 @@
+import { FakeDeviceSessionRepository } from "../fakes/FakeDeviceSessionRepository";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
 import { Daemon } from "../../src/daemon/daemon";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { AndroidAvdProvenanceCache } from "../../src/utils/AndroidAvdProvenanceCache";
@@ -14,16 +14,6 @@ import { FakeTimer } from "../fakes/FakeTimer";
 interface DaemonAndroidAvdProvenanceStartupInternals {
   warmAndroidAvdProvenanceCache(): void;
   androidAvdProvenanceWarmPromise?: Promise<unknown>;
-}
-
-class FakeDeviceSessionRepository extends DeviceSessionRepository {
-  override async getSession(): Promise<undefined> {
-    return undefined;
-  }
-
-  override async upsertActiveSession(): Promise<void> {}
-
-  override async replaceLivenessOwnership(): Promise<void> {}
 }
 
 function buildDaemon(

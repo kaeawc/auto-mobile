@@ -1,3 +1,4 @@
+import { FakeMcpServer } from "../fakes/FakeMcpServer";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { SubscribeRequestSchema } from "@modelcontextprotocol/sdk/types.js";
@@ -27,26 +28,6 @@ import { FakeAvdSnapshotService, fakeAvdSnapshotPath } from "../fakes/FakeAvdSna
 import { VM_SNAPSHOT_SAVE_DISPATCHED } from "../../src/features/action/CaptureSnapshot";
 import type { DeviceSnapshotRecord } from "../../src/db/deviceSnapshotRepository";
 import { sequenceBackoff } from "../../src/utils/Backoff";
-
-class FakeUnderlyingServer {
-  notifications: Array<{ method: string; params?: unknown }> = [];
-  handlersBySchema = new Map<unknown, (request: unknown, extra?: unknown) => Promise<unknown>>();
-
-  setRequestHandler(
-    schema: unknown,
-    handler: (request: unknown, extra?: unknown) => Promise<unknown>,
-  ): void {
-    this.handlersBySchema.set(schema, handler);
-  }
-
-  async notification(payload: { method: string; params?: unknown }): Promise<void> {
-    this.notifications.push(payload);
-  }
-}
-
-class FakeMcpServer {
-  server = new FakeUnderlyingServer();
-}
 
 const AVD_NAME = "am-api36-ga-arm64";
 const EMULATOR: BootedDevice = {

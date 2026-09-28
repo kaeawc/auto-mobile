@@ -1,3 +1,4 @@
+import { FakeScreenshotRecorder } from "../../fakes/FakeScreenshotRecorder";
 /**
  * Standalone repro for the AutoMobile `observe` freshness defect (upstream issue:
  * "observe (iOS): the standalone observe glance reports freshness.isFresh: true
@@ -43,7 +44,6 @@ import { resetObserveCacheStore } from "../../../src/features/observe/cache/Obse
 import { resetScreenshotStateStore } from "../../../src/features/observe/screenshot/ScreenshotStateRegistry";
 import { CtrlProxyHierarchy } from "../../../src/features/observe/ios/CtrlProxyHierarchy";
 import { RequestManager } from "../../../src/utils/RequestManager";
-import type { ObserveScreenshotRecorder } from "../../../src/features/observe/screenshot/ObserveScreenshotRecorder";
 import type { HierarchyCollector } from "../../../src/features/observe/collectors/HierarchyCollector";
 import type { DeviceStateCollector } from "../../../src/features/observe/collectors/DeviceStateCollector";
 import type { PerformanceAuditor } from "../../../src/features/observe/audits/PerformanceAuditor";
@@ -51,7 +51,6 @@ import type { AccessibilityAuditor } from "../../../src/features/observe/audits/
 import type { AccessibilityStateDetector } from "../../../src/features/observe/audits/AccessibilityStateDetector";
 import type { HierarchyPlatformValidator } from "../../../src/features/observe/HierarchyPlatformValidator";
 import type { BootedDevice, ObserveResult } from "../../../src/models";
-import type { PerformanceTracker } from "../../../src/utils/PerformanceTracker";
 import type {
   CtrlProxyCachedHierarchy,
   HierarchyDelegateContext,
@@ -61,11 +60,6 @@ import type {
 // ---------------------------------------------------------------------------
 // Shared no-op fakes so `execute()` completes without touching a real device.
 // ---------------------------------------------------------------------------
-
-class FakeScreenshotRecorder implements ObserveScreenshotRecorder {
-  start(_perf?: PerformanceTracker, _signal?: AbortSignal): void {}
-  async capture(_perf?: PerformanceTracker, _signal?: AbortSignal): Promise<void> {}
-}
 
 class NoOpAuditor implements Pick<
   PerformanceAuditor & AccessibilityAuditor & AccessibilityStateDetector,

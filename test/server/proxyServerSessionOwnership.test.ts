@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
@@ -17,6 +17,38 @@ afterEach(() => {
 });
 
 describe("proxy server session ownership errors", () => {
+  beforeAll(async () => {
+    const availabilitySpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+    const daemonManager = new FakeDaemonManager();
+    daemonManager.statusResult = {
+      ...daemonManager.statusResult,
+      version: DAEMON_VERSION,
+    };
+    const { server, proxy } = createProxyMcpServer({
+      proxyConfig: {
+        timer: new FakeTimer(),
+        initialSessionUuid: "warmup-session",
+        clientFactory: () => new FakeDaemonClient(),
+        daemonManager,
+        autoStartDaemon: false,
+      },
+    });
+    const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "ownership-warmup-client", version: "0.0.1" });
+
+    try {
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+      await proxy.listTools();
+      await proxy.callTool("observe", {});
+    } finally {
+      await client.close();
+      await server.close();
+      await proxy.close();
+      availabilitySpy.mockRestore();
+    }
+  });
+
   test("returns machine-readable ownership loss as an error CallToolResult", async () => {
     isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
     const fakeClient = new FakeDaemonClient({

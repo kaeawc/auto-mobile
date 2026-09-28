@@ -720,7 +720,7 @@ export interface StorageTelemetryInput {
 /**
  * WebSocket message types that carry an SDK telemetry event to be fanned out to
  * `TelemetryRecorder` via {@link AndroidSdkEventIngestor.recordSdkEvent} (#2764).
- * These are not part of the typed `WebSocketMessage` union.
+ * `custom_event` is the runtime-only exception to the typed `WebSocketMessage` union.
  */
 const SDK_TELEMETRY_EVENT_TYPES: ReadonlySet<string> = new Set([
   "network_event",
@@ -872,6 +872,12 @@ type WebSocketMessage =
   | WsBroadcastEventMessage
   | WsLifecycleEventMessage
   | WsStorageChangedMessage;
+
+type WebSocketMessageHandlers = {
+  [Type in WebSocketMessage["type"]]: (
+    message: Extract<WebSocketMessage, { type: Type }>,
+  ) => void | Promise<void>;
+};
 
 /**
  * Interface for accessibility service providing Android UI hierarchy and interaction capabilities
@@ -4282,51 +4288,67 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     }
   }
 
-  private async handleWebSocketMessage(data: WebSocket.Data): Promise<void> {
-    try {
-      const message = parseCtrlProxyJson<WebSocketMessage>(data.toString());
+  /** Resolve request responses only when the runner supplies a truthy request ID. */
+  private resolvePendingResponse<Message extends { requestId?: string }, Payload>(
+    message: Message,
+    buildPayload: (message: Message) => Payload,
+  ): void {
+    if (message.requestId) {
+      this.requestManager.resolve<Payload>(message.requestId, buildPayload(message));
+    }
+  }
 
-      if (message.type === "connected") {
-        this.supportedCommands = Array.isArray(message.supportedCommands)
-          ? new Set(message.supportedCommands)
-          : new Set();
-        logger.debug(`[CTRL_PROXY] Received connection confirmation`);
-        this.refreshObservationStreamHierarchyCadence();
-        return;
+  /** SDK event frames include custom_event, which is intentionally outside WebSocketMessage. */
+  private async recordSdkTelemetryEvent(message: {
+    type: string;
+    timestamp?: number;
+    event?: Record<string, unknown>;
+  }): Promise<void> {
+    const event = message.event;
+    if (event) {
+      await this.getSdkEventIngestor().recordSdkEvent(
+        {
+          type: message.type,
+          timestamp: message.timestamp ?? this.timer.now(),
+          payload: { event },
+        },
+        (event.applicationId as string) ?? null,
+      );
+    }
+  }
+
+  private readonly webSocketMessageHandlers = {
+    connected: (message) => {
+      this.supportedCommands = Array.isArray(message.supportedCommands)
+        ? new Set(message.supportedCommands)
+        : new Set();
+      logger.debug(`[CTRL_PROXY] Received connection confirmation`);
+      this.refreshObservationStreamHierarchyCadence();
+    },
+
+    error: (message) => {
+      const errorText = rewriteUnknownCommandError(
+        message.error || "Runner reported an unstructured protocol error",
+        "android",
+      );
+      logger.warn(
+        `[CTRL_PROXY] Runner error (requestId: ${message.requestId ?? "none"}): ${errorText}`,
+      );
+      if (message.requestId) {
+        this.lateCancelledScreenshotRequestIds.delete(message.requestId);
+        this.requestManager.resolveError(message.requestId, errorText);
+        this._hierarchy?.rejectPendingHierarchy(message.requestId, errorText);
       }
+    },
 
-      // Structured protocol-boundary error from the runner (issue #2985): a command failed to
-      // decode or its handler threw. Fail the correlated request fast instead of letting the
-      // awaiter hang to timeout. requestId is best-effort — when null the runner could not
-      // correlate it, so there is no pending request to resolve (resolveError no-ops on unknown
-      // ids anyway).
-      //
-      // Fan the error out to ALL wait mechanisms, not just RequestManager: request_hierarchy does
-      // not await through RequestManager, so an error frame for a hierarchy requestId must also be
-      // routed into CtrlProxyHierarchy's bespoke wait or the hierarchy caller hangs to timeout
-      // (issue #3032). Both calls are safe no-ops on unknown ids.
-      if (message.type === "error") {
-        const errorText = rewriteUnknownCommandError(
-          message.error || "Runner reported an unstructured protocol error",
-          "android",
-        );
-        logger.warn(
-          `[CTRL_PROXY] Runner error (requestId: ${message.requestId ?? "none"}): ${errorText}`,
-        );
-        if (message.requestId) {
-          this.lateCancelledScreenshotRequestIds.delete(message.requestId);
-          this.requestManager.resolveError(message.requestId, errorText);
-          this._hierarchy?.rejectPendingHierarchy(message.requestId, errorText);
-        }
-        return;
-      }
-
-      if (message.type === "hierarchy_update" && message.data) {
+    hierarchy_update: (message) => {
+      if (message.data) {
         this.handleHierarchyUpdate(message.data, message.perfTiming, message.frameContext);
       }
+    },
 
-      // Handle screenshot response
-      if (message.type === "screenshot" && message.requestId) {
+    screenshot: (message) => {
+      if (message.requestId) {
         const cancelledAfterDispatch = this.lateCancelledScreenshotRequestIds.delete(
           message.requestId,
         );
@@ -4366,9 +4388,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           ...screenshotPerformanceMetadataFrom(message),
         });
       }
+    },
 
-      // Handle screenshot error
-      if (message.type === "screenshot_error" && message.requestId) {
+    screenshot_error: (message) => {
+      if (message.requestId) {
         this.lateCancelledScreenshotRequestIds.delete(message.requestId);
         logger.warn(
           `[CTRL_PROXY] Screenshot error (requestId: ${message.requestId}): ${message.error}`,
@@ -4378,43 +4401,15 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           error: message.error || "Unknown error",
         });
       }
+    },
 
-      // Handle swipe result
-      if (message.type === "swipe_result") {
-        logger.debug(
-          `[CTRL_PROXY] Swipe result (requestId: ${message.requestId}, success: ${message.success})`,
-        );
+    swipe_result: (message) => {
+      logger.debug(
+        `[CTRL_PROXY] Swipe result (requestId: ${message.requestId}, success: ${message.success})`,
+      );
 
-        if (message.requestId) {
-          this.requestManager.resolve<A11ySwipeResult>(message.requestId, {
-            success: message.success,
-            totalTimeMs: message.totalTimeMs,
-            gestureTimeMs: message.gestureTimeMs,
-            error: message.error,
-            perfTiming: message.perfTiming,
-          });
-        }
-      }
-
-      // Handle tap coordinates result
-      if (message.type === "tap_coordinates_result") {
-        logger.info(
-          `[CTRL_PROXY] Tap coordinates result (requestId: ${message.requestId}, success: ${message.success})`,
-        );
-
-        if (message.requestId) {
-          this.requestManager.resolve<A11yTapCoordinatesResult>(message.requestId, {
-            success: message.success,
-            totalTimeMs: message.totalTimeMs,
-            error: message.error,
-            perfTiming: message.perfTiming,
-          });
-        }
-      }
-
-      // Handle drag result
-      if (message.type === "drag_result" && message.requestId) {
-        this.requestManager.resolve<A11yDragResult>(message.requestId, {
+      if (message.requestId) {
+        this.requestManager.resolve<A11ySwipeResult>(message.requestId, {
           success: message.success,
           totalTimeMs: message.totalTimeMs,
           gestureTimeMs: message.gestureTimeMs,
@@ -4422,198 +4417,196 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           perfTiming: message.perfTiming,
         });
       }
+    },
 
-      // Handle pinch result
-      if (message.type === "pinch_result" && message.requestId) {
-        this.requestManager.resolve<A11yPinchResult>(message.requestId, {
-          success: message.success,
-          totalTimeMs: message.totalTimeMs,
-          gestureTimeMs: message.gestureTimeMs,
-          error: message.error,
-          perfTiming: message.perfTiming,
-        });
-      }
+    tap_coordinates_result: (message) => {
+      logger.info(
+        `[CTRL_PROXY] Tap coordinates result (requestId: ${message.requestId}, success: ${message.success})`,
+      );
 
-      // Handle set text result
-      if (message.type === "set_text_result" && message.requestId) {
-        this.requestManager.resolve<A11ySetTextResult>(message.requestId, {
+      if (message.requestId) {
+        this.requestManager.resolve<A11yTapCoordinatesResult>(message.requestId, {
           success: message.success,
           totalTimeMs: message.totalTimeMs,
           error: message.error,
           perfTiming: message.perfTiming,
         });
       }
+    },
 
-      if (message.type === "commit_text_result" && message.requestId) {
-        this.requestManager.resolve<ImeCommitActionResult>(message.requestId, {
-          success: message.success,
-          totalTimeMs: message.totalTimeMs,
-          error: message.error,
-          partialApplication: message.partialApplication,
-          perfTiming: message.perfTiming,
-        });
-      }
+    drag_result: (message) =>
+      this.resolvePendingResponse(message, (message): A11yDragResult => ({
+        success: message.success,
+        totalTimeMs: message.totalTimeMs,
+        gestureTimeMs: message.gestureTimeMs,
+        error: message.error,
+        perfTiming: message.perfTiming,
+      })),
 
-      if (message.type === "cancel_ime_commit_result" && message.requestId) {
-        this.requestManager.resolve(message.requestId, {
-          success: message.success,
-          targetRequestId: message.targetRequestId,
-          partialApplication: message.partialApplication,
-          error: message.error,
-        });
-      }
+    pinch_result: (message) =>
+      this.resolvePendingResponse(message, (message): A11yPinchResult => ({
+        success: message.success,
+        totalTimeMs: message.totalTimeMs,
+        gestureTimeMs: message.gestureTimeMs,
+        error: message.error,
+        perfTiming: message.perfTiming,
+      })),
 
-      if (message.type === "set_keyboard_profile_result" && message.requestId) {
-        this.requestManager.resolve(message.requestId, {
-          success: message.success,
-          activeProfileId: message.activeProfileId,
-          previousProfileId: message.previousProfileId,
-          error: message.error,
-        });
-      }
+    set_text_result: (message) =>
+      this.resolvePendingResponse(message, (message): A11ySetTextResult => ({
+        success: message.success,
+        totalTimeMs: message.totalTimeMs,
+        error: message.error,
+        perfTiming: message.perfTiming,
+      })),
 
-      if (message.type === "keyboard_profiles_result" && message.requestId) {
-        this.requestManager.resolve<KeyboardProfileCatalog>(message.requestId, {
-          success: message.success,
-          catalogId: message.catalogId,
-          catalogVersion: message.catalogVersion,
-          supportedCatalogVersions: message.supportedCatalogVersions,
-          activeProfileId: message.activeProfileId,
-          profiles: message.profiles,
-          error: message.error,
-        });
-      }
+    commit_text_result: (message) =>
+      this.resolvePendingResponse(message, (message): ImeCommitActionResult => ({
+        success: message.success,
+        totalTimeMs: message.totalTimeMs,
+        error: message.error,
+        partialApplication: message.partialApplication,
+        perfTiming: message.perfTiming,
+      })),
 
-      if (message.type === "insert_text_result" && message.requestId) {
-        this.requestManager.resolve<A11ySetTextResult>(message.requestId, {
-          success: message.success,
-          totalTimeMs: message.totalTimeMs,
-          error: message.error,
-          partialApplication: message.partialApplication,
-          perfTiming: message.perfTiming,
-        });
-      }
+    cancel_ime_commit_result: (message) =>
+      this.resolvePendingResponse(message, (message) => ({
+        success: message.success,
+        targetRequestId: message.targetRequestId,
+        partialApplication: message.partialApplication,
+        error: message.error,
+      })),
 
-      // Handle IME action result
-      if (message.type === "ime_action_result" && message.requestId) {
-        this.requestManager.resolve<A11yImeActionResult>(message.requestId, {
-          success: message.success,
-          action: message.action,
-          totalTimeMs: message.totalTimeMs,
-          error: message.error,
-          perfTiming: message.perfTiming,
-        });
-      }
+    set_keyboard_profile_result: (message) =>
+      this.resolvePendingResponse(message, (message) => ({
+        success: message.success,
+        activeProfileId: message.activeProfileId,
+        previousProfileId: message.previousProfileId,
+        error: message.error,
+      })),
 
-      // Handle select all result
-      if (message.type === "select_all_result" && message.requestId) {
-        this.requestManager.resolve<A11ySelectAllResult>(message.requestId, {
-          success: message.success,
-          totalTimeMs: message.totalTimeMs,
-          error: message.error,
-          perfTiming: message.perfTiming,
-        });
-      }
+    keyboard_profiles_result: (message) =>
+      this.resolvePendingResponse(message, (message): KeyboardProfileCatalog => ({
+        success: message.success,
+        catalogId: message.catalogId,
+        catalogVersion: message.catalogVersion,
+        supportedCatalogVersions: message.supportedCatalogVersions,
+        activeProfileId: message.activeProfileId,
+        profiles: message.profiles,
+        error: message.error,
+      })),
 
-      // Handle action result
-      if (message.type === "action_result" && message.requestId) {
-        this.requestManager.resolve<A11yActionResult>(message.requestId, {
-          success: message.success,
-          action: message.action,
-          totalTimeMs: message.totalTimeMs,
-          error: message.error,
-          perfTiming: message.perfTiming,
-        });
-      }
+    insert_text_result: (message) =>
+      this.resolvePendingResponse(message, (message): A11ySetTextResult => ({
+        success: message.success,
+        totalTimeMs: message.totalTimeMs,
+        error: message.error,
+        partialApplication: message.partialApplication,
+        perfTiming: message.perfTiming,
+      })),
 
-      // Handle clipboard result
-      if (message.type === "clipboard_result" && message.requestId) {
-        this.requestManager.resolve<A11yClipboardResult>(message.requestId, {
-          success: message.success,
-          action: message.action,
-          text: message.text,
-          totalTimeMs: message.totalTimeMs,
-          error: message.error,
-          perfTiming: message.perfTiming,
-        });
-      }
+    ime_action_result: (message) =>
+      this.resolvePendingResponse(message, (message): A11yImeActionResult => ({
+        success: message.success,
+        action: message.action,
+        totalTimeMs: message.totalTimeMs,
+        error: message.error,
+        perfTiming: message.perfTiming,
+      })),
 
-      // Handle settings results
-      if (message.type === "settings_get_result" && message.requestId) {
-        this.requestManager.resolve<A11ySettingsGetResult>(message.requestId, {
-          success: message.success,
-          value: message.value,
-          found: message.found ?? false,
-          totalTimeMs: message.totalTimeMs,
-          error: message.error,
-          perfTiming: message.perfTiming,
-        });
-      }
+    select_all_result: (message) =>
+      this.resolvePendingResponse(message, (message): A11ySelectAllResult => ({
+        success: message.success,
+        totalTimeMs: message.totalTimeMs,
+        error: message.error,
+        perfTiming: message.perfTiming,
+      })),
 
-      if (message.type === "settings_put_result" && message.requestId) {
-        this.requestManager.resolve<A11ySettingsPutResult>(message.requestId, {
-          success: message.success,
-          totalTimeMs: message.totalTimeMs,
-          error: message.error,
-          perfTiming: message.perfTiming,
-        });
-      }
+    action_result: (message) =>
+      this.resolvePendingResponse(message, (message): A11yActionResult => ({
+        success: message.success,
+        action: message.action,
+        totalTimeMs: message.totalTimeMs,
+        error: message.error,
+        perfTiming: message.perfTiming,
+      })),
 
-      if (message.type === "settings_list_result" && message.requestId) {
-        this.requestManager.resolve<A11ySettingsListResult>(message.requestId, {
-          success: message.success,
-          entries: message.entries,
-          totalTimeMs: message.totalTimeMs,
-          error: message.error,
-          perfTiming: message.perfTiming,
-        });
-      }
+    clipboard_result: (message) =>
+      this.resolvePendingResponse(message, (message): A11yClipboardResult => ({
+        success: message.success,
+        action: message.action,
+        text: message.text,
+        totalTimeMs: message.totalTimeMs,
+        error: message.error,
+        perfTiming: message.perfTiming,
+      })),
 
-      // Handle installed packages result
-      if (message.type === "installed_packages_result" && message.requestId) {
-        this.requestManager.resolve<A11yInstalledPackagesResult>(message.requestId, {
-          success: message.success ?? false,
-          userId: message.userId ?? -1,
-          packages: message.packages ?? [],
-          totalTimeMs: message.totalTimeMs ?? 0,
-          error: message.error,
-        });
-      }
+    settings_get_result: (message) =>
+      this.resolvePendingResponse(message, (message): A11ySettingsGetResult => ({
+        success: message.success,
+        value: message.value,
+        found: message.found ?? false,
+        totalTimeMs: message.totalTimeMs,
+        error: message.error,
+        perfTiming: message.perfTiming,
+      })),
 
-      // Handle package info result
-      if (message.type === "package_info_result" && message.requestId) {
-        this.requestManager.resolve<A11yPackageInfoResult>(message.requestId, {
-          success: message.success ?? false,
-          packageName: message.packageName ?? "",
-          isSystem: message.isSystem ?? false,
-          applicationLabel: message.applicationLabel,
-          versionName: message.versionName,
-          versionCode: message.versionCode,
-          installerPackage: message.installerPackage,
-          firstInstallTime: message.firstInstallTime,
-          lastUpdateTime: message.lastUpdateTime,
-          allowBackup: message.allowBackup,
-          requestedPermissions: message.requestedPermissions ?? [],
-          grantedPermissions: message.grantedPermissions ?? {},
-          mainActivity: message.mainActivity,
-          totalTimeMs: message.totalTimeMs ?? 0,
-          error: message.error,
-        });
-      }
+    settings_put_result: (message) =>
+      this.resolvePendingResponse(message, (message): A11ySettingsPutResult => ({
+        success: message.success,
+        totalTimeMs: message.totalTimeMs,
+        error: message.error,
+        perfTiming: message.perfTiming,
+      })),
 
-      // Handle launch intent result
-      if (message.type === "launch_intent_result" && message.requestId) {
-        this.requestManager.resolve<A11yLaunchIntentResult>(message.requestId, {
-          success: message.success ?? false,
-          packageName: message.packageName ?? "",
-          componentName: message.componentName,
-          totalTimeMs: message.totalTimeMs ?? 0,
-          error: message.error,
-        });
-      }
+    settings_list_result: (message) =>
+      this.resolvePendingResponse(message, (message): A11ySettingsListResult => ({
+        success: message.success,
+        entries: message.entries,
+        totalTimeMs: message.totalTimeMs,
+        error: message.error,
+        perfTiming: message.perfTiming,
+      })),
 
-      // Handle CA certificate result
-      if (message.type === "ca_cert_result" && message.requestId) {
+    installed_packages_result: (message) =>
+      this.resolvePendingResponse(message, (message): A11yInstalledPackagesResult => ({
+        success: message.success ?? false,
+        userId: message.userId ?? -1,
+        packages: message.packages ?? [],
+        totalTimeMs: message.totalTimeMs ?? 0,
+        error: message.error,
+      })),
+
+    package_info_result: (message) =>
+      this.resolvePendingResponse(message, (message): A11yPackageInfoResult => ({
+        success: message.success ?? false,
+        packageName: message.packageName ?? "",
+        isSystem: message.isSystem ?? false,
+        applicationLabel: message.applicationLabel,
+        versionName: message.versionName,
+        versionCode: message.versionCode,
+        installerPackage: message.installerPackage,
+        firstInstallTime: message.firstInstallTime,
+        lastUpdateTime: message.lastUpdateTime,
+        allowBackup: message.allowBackup,
+        requestedPermissions: message.requestedPermissions ?? [],
+        grantedPermissions: message.grantedPermissions ?? {},
+        mainActivity: message.mainActivity,
+        totalTimeMs: message.totalTimeMs ?? 0,
+        error: message.error,
+      })),
+
+    launch_intent_result: (message) =>
+      this.resolvePendingResponse(message, (message): A11yLaunchIntentResult => ({
+        success: message.success ?? false,
+        packageName: message.packageName ?? "",
+        componentName: message.componentName,
+        totalTimeMs: message.totalTimeMs ?? 0,
+        error: message.error,
+      })),
+
+    ca_cert_result: (message) => {
+      if (message.requestId) {
         // Try delegate handler first (for remove)
         if (
           !this.certificates.handleCaCertRemovalResult(message.requestId, {
@@ -4636,148 +4629,130 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           });
         }
       }
+    },
 
-      // Handle device owner status result
-      if (message.type === "device_owner_status_result" && message.requestId) {
-        this.requestManager.resolve<A11yDeviceOwnerStatusResult>(message.requestId, {
-          success: message.success,
-          isDeviceOwner: message.isDeviceOwner ?? false,
-          isAdminActive: message.isAdminActive ?? false,
-          packageName: message.packageName,
-          totalTimeMs: message.totalTimeMs,
-          error: message.error,
-          perfTiming: message.perfTiming,
-        });
-      }
+    device_owner_status_result: (message) =>
+      this.resolvePendingResponse(message, (message): A11yDeviceOwnerStatusResult => ({
+        success: message.success,
+        isDeviceOwner: message.isDeviceOwner ?? false,
+        isAdminActive: message.isAdminActive ?? false,
+        packageName: message.packageName,
+        totalTimeMs: message.totalTimeMs,
+        error: message.error,
+        perfTiming: message.perfTiming,
+      })),
 
-      // Handle permission result
-      if (message.type === "permission_result" && message.requestId) {
-        this.requestManager.resolve<A11yPermissionResult>(message.requestId, {
-          success: message.success ?? false,
-          permission: message.permission ?? "unknown",
-          granted: message.granted ?? false,
-          totalTimeMs: message.totalTimeMs ?? 0,
-          requestLaunched: message.requestLaunched ?? false,
-          canRequest: message.canRequest ?? false,
-          requiresSettings: message.requiresSettings ?? false,
-          instructions: message.instructions,
-          adbCommand: message.adbCommand,
-          error: message.error,
-          perfTiming: message.perfTiming,
-        });
-      }
+    permission_result: (message) =>
+      this.resolvePendingResponse(message, (message): A11yPermissionResult => ({
+        success: message.success ?? false,
+        permission: message.permission ?? "unknown",
+        granted: message.granted ?? false,
+        totalTimeMs: message.totalTimeMs ?? 0,
+        requestLaunched: message.requestLaunched ?? false,
+        canRequest: message.canRequest ?? false,
+        requiresSettings: message.requiresSettings ?? false,
+        instructions: message.instructions,
+        adbCommand: message.adbCommand,
+        error: message.error,
+        perfTiming: message.perfTiming,
+      })),
 
-      // Handle current focus result
-      if (message.type === "current_focus_result" && message.requestId) {
+    current_focus_result: (message) =>
+      this.resolvePendingResponse(message, (message): CurrentFocusResult => {
         const focusedElement = message.focusedElement
           ? this.focus.convertAccessibilityNodeToElement(message.focusedElement)
           : null;
-
-        this.requestManager.resolve<CurrentFocusResult>(message.requestId, {
+        return {
           focusedElement,
           totalTimeMs: message.totalTimeMs,
           requestId: message.requestId,
           error: message.error,
-        });
-      }
+        };
+      }),
 
-      // Handle traversal order result
-      if (message.type === "traversal_order_result" && message.requestId) {
+    traversal_order_result: (message) =>
+      this.resolvePendingResponse(message, (message): TraversalOrderResult => {
         const result = message.result;
-
         if (result && result.elements) {
           const elements = result.elements.map((node: AccessibilityNode) =>
             this.focus.convertAccessibilityNodeToElement(node),
           );
-
-          this.requestManager.resolve<TraversalOrderResult>(message.requestId, {
+          return {
             elements,
             focusedIndex: result.focusedIndex,
             totalCount: result.totalCount,
             totalTimeMs: message.totalTimeMs,
             requestId: message.requestId,
             error: message.error,
-          });
-        } else {
-          this.requestManager.resolve<TraversalOrderResult>(message.requestId, {
-            elements: [],
-            focusedIndex: null,
-            totalCount: 0,
-            totalTimeMs: message.totalTimeMs,
-            requestId: message.requestId,
-            error: message.error || "No result data",
-          });
+          };
         }
-      }
-
-      // Handle highlight response
-      if (message.type === "highlight_response" && message.requestId) {
-        this.requestManager.resolve<HighlightOperationResult>(message.requestId, {
-          success: message.success ?? false,
-          error: message.error,
+        return {
+          elements: [],
+          focusedIndex: null,
+          totalCount: 0,
+          totalTimeMs: message.totalTimeMs,
           requestId: message.requestId,
-          timestamp: message.timestamp,
-        });
-      }
+          error: message.error || "No result data",
+        };
+      }),
 
-      // Handle global action result
-      if (message.type === "global_action_result" && message.requestId) {
-        this.requestManager.resolve(message.requestId, {
-          success: message.success ?? false,
-          action: message.action,
-          totalTimeMs: message.totalTimeMs ?? 0,
-          error: message.error,
-        });
-      }
+    highlight_response: (message) =>
+      this.resolvePendingResponse(message, (message): HighlightOperationResult => ({
+        success: message.success ?? false,
+        error: message.error,
+        requestId: message.requestId,
+        timestamp: message.timestamp,
+      })),
 
-      if (message.type === "frame_context_validation_result" && message.requestId) {
-        this.requestManager.resolve(message.requestId, {
-          success: message.success ?? false,
-          totalTimeMs: message.totalTimeMs ?? 0,
-          error: message.error,
-        });
-      }
+    global_action_result: (message) =>
+      this.resolvePendingResponse(message, (message) => ({
+        success: message.success ?? false,
+        action: message.action,
+        totalTimeMs: message.totalTimeMs ?? 0,
+        error: message.error,
+      })),
 
-      // Handle device info result
-      if (message.type === "device_info_result" && message.requestId) {
-        this.requestManager.resolve(message.requestId, {
-          success: message.success ?? false,
-          screenWidth: message.screenWidth,
-          screenHeight: message.screenHeight,
-          density: message.density,
-          rotation: message.rotation,
-          sdkInt: message.sdkInt,
-          deviceModel: message.deviceModel,
-          isEmulator: message.isEmulator,
-          wakefulness: message.wakefulness,
-          foregroundActivity: message.foregroundActivity,
-          totalTimeMs: message.totalTimeMs ?? 0,
-          error: message.error,
-        });
-      }
+    frame_context_validation_result: (message) =>
+      this.resolvePendingResponse(message, (message) => ({
+        success: message.success ?? false,
+        totalTimeMs: message.totalTimeMs ?? 0,
+        error: message.error,
+      })),
 
-      // Handle storage result messages
-      // Note: Android sends "preference_files" but we register with "list_preference_files"
-      if (message.type === "preference_files" && message.requestId) {
-        this.requestManager.resolve(message.requestId, {
-          success: message.success ?? false,
-          files: message.files || [],
-          totalTimeMs: message.totalTimeMs ?? 0,
-          error: message.error,
-        });
-      }
+    device_info_result: (message) =>
+      this.resolvePendingResponse(message, (message) => ({
+        success: message.success ?? false,
+        screenWidth: message.screenWidth,
+        screenHeight: message.screenHeight,
+        density: message.density,
+        rotation: message.rotation,
+        sdkInt: message.sdkInt,
+        deviceModel: message.deviceModel,
+        isEmulator: message.isEmulator,
+        wakefulness: message.wakefulness,
+        foregroundActivity: message.foregroundActivity,
+        totalTimeMs: message.totalTimeMs ?? 0,
+        error: message.error,
+      })),
 
-      // Note: Android sends "preferences" but we register with "get_preferences"
-      if (message.type === "preferences" && message.requestId) {
-        this.requestManager.resolve(message.requestId, {
-          success: message.success ?? false,
-          entries: message.entries || [],
-          totalTimeMs: message.totalTimeMs ?? 0,
-          error: message.error,
-        });
-      }
+    preference_files: (message) =>
+      this.resolvePendingResponse(message, (message) => ({
+        success: message.success ?? false,
+        files: message.files || [],
+        totalTimeMs: message.totalTimeMs ?? 0,
+        error: message.error,
+      })),
 
-      if (message.type === "subscribe_storage_result" && message.requestId) {
+    preferences: (message) =>
+      this.resolvePendingResponse(message, (message) => ({
+        success: message.success ?? false,
+        entries: message.entries || [],
+        totalTimeMs: message.totalTimeMs ?? 0,
+        error: message.error,
+      })),
+
+    subscribe_storage_result: (message) =>
+      this.resolvePendingResponse(message, (message) => {
         // Android sends flat packageName/fileName/subscriptionId fields, not a nested `subscription`
         // object (like preference_files/preferences above). Rebuild the subscription from them so
         // the awaiting subscribeStorage() promise gets a usable StorageSubscription.
@@ -4789,23 +4764,23 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
                 subscriptionId: message.subscriptionId,
               }
             : undefined;
-        this.requestManager.resolve(message.requestId, {
+        return {
           success: message.success ?? false,
           subscription,
           totalTimeMs: message.totalTimeMs ?? 0,
           error: message.error,
-        });
-      }
+        };
+      }),
 
-      if (message.type === "unsubscribe_storage_result" && message.requestId) {
-        this.requestManager.resolve(message.requestId, {
-          success: message.success ?? false,
-          totalTimeMs: message.totalTimeMs ?? 0,
-          error: message.error,
-        });
-      }
+    unsubscribe_storage_result: (message) =>
+      this.resolvePendingResponse(message, (message) => ({
+        success: message.success ?? false,
+        totalTimeMs: message.totalTimeMs ?? 0,
+        error: message.error,
+      })),
 
-      if (message.type === "get_preference_result" && message.requestId) {
+    get_preference_result: (message) =>
+      this.resolvePendingResponse(message, (message) => {
         // Build entry from key/value/type fields (Android sends flat structure, not nested entry)
         const entry =
           message.found && message.key
@@ -4815,199 +4790,203 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
                 type: message.valueType ?? "UNKNOWN",
               }
             : undefined;
-        this.requestManager.resolve(message.requestId, {
+        return {
           success: message.success ?? false,
           found: message.found ?? false,
           entry,
           totalTimeMs: message.totalTimeMs ?? 0,
           error: message.error,
-        });
-      }
+        };
+      }),
 
-      if (message.type === "set_preference_result" && message.requestId) {
-        this.requestManager.resolve(message.requestId, {
-          success: message.success ?? false,
-          totalTimeMs: message.totalTimeMs ?? 0,
-          error: message.error,
-        });
-      }
+    set_preference_result: (message) =>
+      this.resolvePendingResponse(message, (message) => ({
+        success: message.success ?? false,
+        totalTimeMs: message.totalTimeMs ?? 0,
+        error: message.error,
+      })),
 
-      if (message.type === "remove_preference_result" && message.requestId) {
-        this.requestManager.resolve(message.requestId, {
-          success: message.success ?? false,
-          totalTimeMs: message.totalTimeMs ?? 0,
-          error: message.error,
-        });
-      }
+    remove_preference_result: (message) =>
+      this.resolvePendingResponse(message, (message) => ({
+        success: message.success ?? false,
+        totalTimeMs: message.totalTimeMs ?? 0,
+        error: message.error,
+      })),
 
-      if (message.type === "clear_preferences_result" && message.requestId) {
-        this.requestManager.resolve(message.requestId, {
-          success: message.success ?? false,
-          totalTimeMs: message.totalTimeMs ?? 0,
-          error: message.error,
-        });
-      }
+    clear_preferences_result: (message) =>
+      this.resolvePendingResponse(message, (message) => ({
+        success: message.success ?? false,
+        totalTimeMs: message.totalTimeMs ?? 0,
+        error: message.error,
+      })),
 
-      // Handle navigation event
-      if (message.type === "navigation_event") {
-        const event = message.event;
-        if (event) {
-          // The WebSocket protocol puts timestamp on the outer message, not inside event.
-          // Ensure the event has a timestamp for the navigation graph manager.
-          if (event.timestamp === undefined && message.timestamp !== undefined) {
-            event.timestamp = message.timestamp;
-          }
-          if (event.applicationId) {
-            this.sdkNavigationAppIds.add(event.applicationId);
-            // Eagerly resolve build/device provenance for this app (#4984).
-            // Non-blocking: later events pick up the resolved build key; this
-            // event may still record under the default key.
-            this.ensureBuildContext(event.applicationId);
-          }
-          // Attach last interaction for telemetry correlation
-          if (this.lastInteraction) {
-            event.triggeringInteraction = {
-              type: this.lastInteraction.type,
-              elementText: this.lastInteraction.elementText,
-              elementResourceId: this.lastInteraction.elementResourceId,
-            };
-          }
-
-          logger.info(
-            `[CTRL_PROXY] Navigation event: ${event.destination} (app: ${event.applicationId})`,
-          );
-          // Barrier-tracked via trackExisting so graceful shutdown drains this
-          // fire-and-forget write, WITHOUT wrapping it in track(): the caller keeps
-          // awaiting the original promise, so the nav-event↔hierarchy-update
-          // interleaving that "preserve SDK screen names" depends on is unchanged
-          // (issue #2885). If the write is still in flight when the drain window
-          // closes, Part 1's dialect reject-on-closed drops the row cleanly
-          // (issue #2792).
-          const navWrite = this.enqueueNavigationGraphWrite(event);
-          void getDbWriteBarrier().trackExisting(navWrite);
-          await navWrite;
-
-          if (
-            event.applicationId &&
-            event.destination &&
-            serverConfig.isNavigationScreenshotsEnabled()
-          ) {
-            NavigationScreenshotManager.getInstance()
-              .captureAndStore(this.device, this.adb, event.applicationId, event.destination)
-              .then((screenshotPath) => {
-                if (screenshotPath) {
-                  this.getNavigationGraphManager()
-                    .updateNodeScreenshot(event.applicationId!, event.destination!, screenshotPath)
-                    .catch((err) =>
-                      logger.warn(`[CTRL_PROXY] Failed to update screenshot: ${err}`),
-                    );
-                }
-              })
-              .catch((err) => logger.debug(`[CTRL_PROXY] Screenshot capture skipped: ${err}`));
-          }
+    navigation_event: async (message) => {
+      const event = message.event;
+      if (event) {
+        // The WebSocket protocol puts timestamp on the outer message, not inside event.
+        // Ensure the event has a timestamp for the navigation graph manager.
+        if (event.timestamp === undefined && message.timestamp !== undefined) {
+          event.timestamp = message.timestamp;
         }
-      }
-
-      if (message.type === "package_event") {
-        const event = message.event;
-        if (event) {
-          await this.handlePackageEvent(event, message.timestamp);
+        if (event.applicationId) {
+          this.sdkNavigationAppIds.add(event.applicationId);
+          // Eagerly resolve build/device provenance for this app (#4984).
+          // Non-blocking: later events pick up the resolved build key; this
+          // event may still record under the default key.
+          this.ensureBuildContext(event.applicationId);
         }
-      }
-
-      if (message.type === "interaction_event") {
-        const interaction = message.event;
-        if (interaction) {
-          this.lastInteraction = {
-            type: interaction.type,
-            elementText: interaction.element?.text ?? undefined,
-            elementResourceId: interaction.element?.["resource-id"] ?? undefined,
-            timestamp: interaction.timestamp,
+        // Attach last interaction for telemetry correlation
+        if (this.lastInteraction) {
+          event.triggeringInteraction = {
+            type: this.lastInteraction.type,
+            elementText: this.lastInteraction.elementText,
+            elementResourceId: this.lastInteraction.elementResourceId,
           };
-          this.notifyInteractionListeners(interaction);
+        }
+
+        logger.info(
+          `[CTRL_PROXY] Navigation event: ${event.destination} (app: ${event.applicationId})`,
+        );
+        // Barrier-tracked via trackExisting so graceful shutdown drains this
+        // fire-and-forget write, WITHOUT wrapping it in track(): the caller keeps
+        // awaiting the original promise, so the nav-event↔hierarchy-update
+        // interleaving that "preserve SDK screen names" depends on is unchanged
+        // (issue #2885). If the write is still in flight when the drain window
+        // closes, Part 1's dialect reject-on-closed drops the row cleanly
+        // (issue #2792).
+        const navWrite = this.enqueueNavigationGraphWrite(event);
+        void getDbWriteBarrier().trackExisting(navWrite);
+        await navWrite;
+
+        if (
+          event.applicationId &&
+          event.destination &&
+          serverConfig.isNavigationScreenshotsEnabled()
+        ) {
+          NavigationScreenshotManager.getInstance()
+            .captureAndStore(this.device, this.adb, event.applicationId, event.destination)
+            .then((screenshotPath) => {
+              if (screenshotPath) {
+                this.getNavigationGraphManager()
+                  .updateNodeScreenshot(event.applicationId!, event.destination!, screenshotPath)
+                  .catch((err) => logger.warn(`[CTRL_PROXY] Failed to update screenshot: ${err}`));
+              }
+            })
+            .catch((err) => logger.debug(`[CTRL_PROXY] Screenshot capture skipped: ${err}`));
         }
       }
+    },
 
-      if (message.type === "handled_exception_event") {
-        const event = message.event;
-        if (event) {
-          await this.handleHandledExceptionEvent(event);
-        }
+    package_event: async (message) => {
+      const event = message.event;
+      if (event) {
+        await this.handlePackageEvent(event, message.timestamp);
       }
+    },
 
-      if (message.type === "crash_event") {
-        const event = message.event;
-        if (event) {
-          await this.handleCrashEvent(event);
-        }
+    interaction_event: (message) => {
+      const interaction = message.event;
+      if (interaction) {
+        this.lastInteraction = {
+          type: interaction.type,
+          elementText: interaction.element?.text ?? undefined,
+          elementResourceId: interaction.element?.["resource-id"] ?? undefined,
+          timestamp: interaction.timestamp,
+        };
+        this.notifyInteractionListeners(interaction);
       }
+    },
 
-      if (message.type === "anr_event") {
-        const event = message.event;
-        if (event) {
-          await this.handleAnrEvent(event);
-        }
+    handled_exception_event: async (message) => {
+      const event = message.event;
+      if (event) {
+        await this.handleHandledExceptionEvent(event);
       }
+    },
 
-      if (message.type === "frame_metrics_event" && message.frameMetrics) {
+    crash_event: async (message) => {
+      const event = message.event;
+      if (event) {
+        await this.handleCrashEvent(event);
+      }
+    },
+
+    anr_event: async (message) => {
+      const event = message.event;
+      if (event) {
+        await this.handleAnrEvent(event);
+      }
+    },
+
+    frame_metrics_event: (message) => {
+      if (message.frameMetrics) {
         this.handleFrameMetricsEvent(message.frameMetrics);
       }
+    },
 
-      // Handle telemetry events from SDK event batch. The fan-out to
-      // TelemetryRecorder is owned by AndroidSdkEventIngestor (issue #2764); the
-      // client only recognizes the wire type and forwards the typed event. These
-      // telemetry messages are not part of the typed WebSocketMessage union, so
-      // compare against a plain string type.
-      const messageType = (message as { type: string }).type;
-      if (SDK_TELEMETRY_EVENT_TYPES.has(messageType)) {
-        const event = (message as { event?: Record<string, unknown> }).event;
-        if (event) {
-          await this.getSdkEventIngestor().recordSdkEvent(
-            {
-              type: messageType,
-              timestamp: message.timestamp ?? this.timer.now(),
-              payload: { event },
-            },
-            (event.applicationId as string) ?? null,
-          );
-        }
+    storage_changed: (message) => {
+      const normalizedValue = normalizeStorageWireValue(message.value, message.valueType);
+      if (normalizedValue === undefined) {
+        logger.warn(
+          `[CTRL_PROXY] Ignoring unsafe legacy LONG storage value for ${message.packageName ?? "unknown"}/${message.fileName ?? "unknown"}`,
+        );
+        return;
+      }
+      const storageEvent: StorageChangedEvent = {
+        packageName: message.packageName ?? "",
+        fileName: message.fileName ?? "",
+        key: message.key ?? null,
+        // Non-string preference types arrive as bare JSON (number/boolean/array); re-encode
+        // to the JSON string contract so the desktop storage_update frame decodes (#4709 review).
+        value: normalizedValue,
+        valueType: message.valueType ?? "STRING",
+        timestamp: message.timestamp ?? this.timer.now(),
+        sequenceNumber: message.sequenceNumber ?? 0,
+      };
+      logger.debug(
+        `[CTRL_PROXY] Storage changed: ${storageEvent.packageName}/${storageEvent.fileName} key=${storageEvent.key}`,
+      );
+
+      this.storage.notifyStorageChangeListeners(storageEvent);
+
+      const server = getDeviceDataStreamServer();
+      if (server) {
+        server.pushStorageUpdate(this.device.deviceId, storageEvent);
       }
 
-      // Handle storage_changed push event
-      if (message.type === "storage_changed") {
-        const normalizedValue = normalizeStorageWireValue(message.value, message.valueType);
-        if (normalizedValue === undefined) {
-          logger.warn(
-            `[CTRL_PROXY] Ignoring unsafe legacy LONG storage value for ${message.packageName ?? "unknown"}/${message.fileName ?? "unknown"}`,
-          );
-          return;
-        }
-        const storageEvent: StorageChangedEvent = {
-          packageName: message.packageName ?? "",
-          fileName: message.fileName ?? "",
-          key: message.key ?? null,
-          // Non-string preference types arrive as bare JSON (number/boolean/array); re-encode
-          // to the JSON string contract so the desktop storage_update frame decodes (#4709 review).
-          value: normalizedValue,
-          valueType: message.valueType ?? "STRING",
-          timestamp: message.timestamp ?? this.timer.now(),
-          sequenceNumber: message.sequenceNumber ?? 0,
-        };
-        logger.debug(
-          `[CTRL_PROXY] Storage changed: ${storageEvent.packageName}/${storageEvent.fileName} key=${storageEvent.key}`,
+      // Record to telemetry timeline (fan-out owned by the ingestor, #2764).
+      this.getSdkEventIngestor().recordStorageEvent(
+        storageTelemetryInputFromWire(message, storageEvent.timestamp),
+      );
+    },
+
+    network_event: (message) => this.recordSdkTelemetryEvent(message),
+
+    websocket_frame_event: (message) => this.recordSdkTelemetryEvent(message),
+
+    log_event: (message) => this.recordSdkTelemetryEvent(message),
+
+    broadcast_event: (message) => this.recordSdkTelemetryEvent(message),
+
+    lifecycle_event: (message) => this.recordSdkTelemetryEvent(message),
+  } satisfies WebSocketMessageHandlers;
+
+  private async handleWebSocketMessage(data: WebSocket.Data): Promise<void> {
+    try {
+      const message = parseCtrlProxyJson<WebSocketMessage>(data.toString());
+      const type = (message as { type: string }).type;
+      if (Object.hasOwn(this.webSocketMessageHandlers, type)) {
+        // The mapped type checks each entry; this cast reconnects key and value after lookup.
+        const handler = this.webSocketMessageHandlers[type as WebSocketMessage["type"]] as (
+          message: WebSocketMessage,
+        ) => void | Promise<void>;
+        await handler(message);
+      } else if (SDK_TELEMETRY_EVENT_TYPES.has(type)) {
+        await this.recordSdkTelemetryEvent(
+          message as { type: string; timestamp?: number; event?: Record<string, unknown> },
         );
-
-        this.storage.notifyStorageChangeListeners(storageEvent);
-
-        const server = getDeviceDataStreamServer();
-        if (server) {
-          server.pushStorageUpdate(this.device.deviceId, storageEvent);
-        }
-
-        // Record to telemetry timeline (fan-out owned by the ingestor, #2764).
-        this.getSdkEventIngestor().recordStorageEvent(
-          storageTelemetryInputFromWire(message, storageEvent.timestamp),
-        );
+      } else {
+        logger.debug(`[CTRL_PROXY] Ignoring unknown WebSocket message type: ${type}`);
       }
     } catch (error) {
       logger.warn(`[CTRL_PROXY] Error handling WebSocket message: ${error}`);

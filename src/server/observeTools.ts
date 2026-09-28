@@ -6,7 +6,10 @@ import { RESOURCE_URIS } from "./observationResources";
 import { OBSERVE_APP_RESOURCE_URI } from "./observeAppResource";
 import { ActionableError } from "../models/ActionableError";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
-import type { ObserveScreen } from "../features/observe/interfaces/ObserveScreen";
+import type {
+  ObserveScreen,
+  ObserveScreenExecuteOptions,
+} from "../features/observe/interfaces/ObserveScreen";
 import { RealSettleObserve } from "../features/observe/SettleObserve";
 import { RealWaitForCondition } from "../features/observe/WaitForCondition";
 import type { ConditionPredicate } from "../features/observe/interfaces/WaitForCondition";
@@ -638,21 +641,141 @@ export const buildConditionPredicate = (
  * for settle / countStable, which have no single element); `awaitTimeout` reflects
  * "did not settle" / "timed out".
  */
+// eslint-disable-next-line complexity -- primitive dispatch and its additive settled gate share the DSL outcome boundary.
 const runWaitForConditionDsl = async (
   observeScreen: ObserveScreen,
   waitFor: WaitForConditionDsl,
   signal: AbortSignal | undefined,
   timer: Timer,
+  skipBackStack: boolean = false,
 ): Promise<WaitForObservationOutcome> => {
+  const startTime = timer.now();
+  const timeoutMs =
+    waitFor.timeout ?? waitFor.timeoutMs ?? (waitFor.for === "stable" ? 2500 : 5000);
+  const pollingScreen: ObserveScreen = skipBackStack
+    ? {
+        execute: (options?: ObserveScreenExecuteOptions) =>
+          observeScreen.execute({ ...options, skipBackStack: true }),
+        appendRawViewHierarchy: (result, abortSignal) =>
+          observeScreen.appendRawViewHierarchy(result, abortSignal),
+        getMostRecentCachedObserveResult: () => observeScreen.getMostRecentCachedObserveResult(),
+        ...(observeScreen.captureScreenshot
+          ? {
+              captureScreenshot: (
+                ...args: Parameters<NonNullable<ObserveScreen["captureScreenshot"]>>
+              ) => observeScreen.captureScreenshot!(...args),
+            }
+          : {}),
+        ...(observeScreen.runAccessibilityAudit
+          ? {
+              runAccessibilityAudit: (
+                ...args: Parameters<NonNullable<ObserveScreen["runAccessibilityAudit"]>>
+              ) => observeScreen.runAccessibilityAudit!(...args),
+            }
+          : {}),
+        ...(observeScreen.processRecomposition
+          ? {
+              processRecomposition: (
+                ...args: Parameters<NonNullable<ObserveScreen["processRecomposition"]>>
+              ) => observeScreen.processRecomposition!(...args),
+            }
+          : {}),
+        ...(observeScreen.captureCacheGeneration
+          ? { captureCacheGeneration: () => observeScreen.captureCacheGeneration!() }
+          : {}),
+        ...(observeScreen.cacheObserveResult
+          ? {
+              cacheObserveResult: (
+                ...args: Parameters<NonNullable<ObserveScreen["cacheObserveResult"]>>
+              ) => observeScreen.cacheObserveResult!(...args),
+            }
+          : {}),
+      }
+    : observeScreen;
+  const settled = (waitFor as WaitForWithSettled).settled;
   const pollMs = waitFor.pollMs;
+  const applySettledGate = async (
+    outcome: WaitForObservationOutcome,
+    matched: boolean,
+    recheck?: ConditionPredicate,
+  ): Promise<WaitForObservationOutcome> => {
+    if (!settled || !matched) {
+      return outcome;
+    }
+    let observation = outcome.observation;
+    let matchedHash = hashHierarchyForSettle(observation.viewHierarchy);
+    let quietStart = timer.now();
+    let polls = outcome.polls;
+    let matchedElement = outcome.matchedElement;
+    let awaitedElement = outcome.awaitedElement;
+    while (timer.now() - startTime < timeoutMs) {
+      if (matchedHash !== null && timer.now() - quietStart >= settled.quietPeriodMs) {
+        return {
+          ...outcome,
+          observation,
+          matchedElement,
+          awaitedElement,
+          matched: true,
+          settled: true,
+          timedOut: false,
+          awaitTimeout: false,
+          waitMs: timer.now() - startTime,
+          awaitDuration: timer.now() - startTime,
+          polls,
+        };
+      }
+      await timer.sleep(WAIT_FOR_POLL_INTERVAL_MS);
+      throwIfAborted(signal);
+      observation = await pollingScreen.execute({
+        timeoutMs: Math.max(0, timeoutMs - (timer.now() - startTime)),
+        skipWaitForFresh: false,
+        minTimestamp: startTime,
+        signal,
+        skipBackStack: skipBackStack || undefined,
+        skipScreenshot: true,
+        skipAccessibilityAudit: true,
+      });
+      polls++;
+      if (recheck) {
+        const evaluation = recheck(observation);
+        if (!evaluation.matched) {
+          matchedHash = null;
+          quietStart = timer.now();
+          matchedElement = undefined;
+          awaitedElement = undefined;
+          continue;
+        }
+        matchedElement = evaluation.matchedElement;
+        awaitedElement = evaluation.matchedElement;
+      }
+      const hash = hashHierarchyForSettle(observation.viewHierarchy);
+      if (hash === null || matchedHash === null || hash !== matchedHash) {
+        matchedHash = hash;
+        quietStart = timer.now();
+      }
+    }
+    return {
+      ...outcome,
+      observation,
+      matchedElement: undefined,
+      awaitedElement: undefined,
+      settled: false,
+      timedOut: true,
+      matched: false,
+      awaitTimeout: true,
+      waitMs: timer.now() - startTime,
+      awaitDuration: timer.now() - startTime,
+      polls,
+    };
+  };
   if (waitFor.for === "stable") {
-    const settle = await new RealSettleObserve(observeScreen, timer).execute({
+    const settle = await new RealSettleObserve(pollingScreen, timer).execute({
       timeoutMs: waitFor.timeout ?? waitFor.timeoutMs,
       pollMs,
       stableReads: waitFor.stableReads,
       signal,
     });
-    return {
+    const outcome: WaitForObservationOutcome = {
       observation: settle.observation,
       awaitedElement: undefined,
       awaitDuration: settle.waitMs,
@@ -665,6 +788,7 @@ const runWaitForConditionDsl = async (
       polls: settle.polls,
       waitMs: settle.waitMs,
     };
+    return applySettledGate(outcome, settle.settled);
   }
 
   const finder = new ElementResolver();
@@ -674,12 +798,12 @@ const runWaitForConditionDsl = async (
     { elementId: waitFor.elementId, text: waitFor.text, container: waitFor.container },
     { stableReads: waitFor.stableReads },
   );
-  const result = await new RealWaitForCondition(observeScreen, timer).execute(predicate, {
+  const result = await new RealWaitForCondition(pollingScreen, timer).execute(predicate, {
     timeoutMs: waitFor.timeout ?? waitFor.timeoutMs,
     pollMs,
     signal,
   });
-  return {
+  const outcome: WaitForObservationOutcome = {
     observation: result.observation,
     awaitedElement: result.matchedElement,
     awaitDuration: result.waitMs,
@@ -691,6 +815,7 @@ const runWaitForConditionDsl = async (
     matchedElement: result.matchedElement,
     candidates: result.candidates,
   };
+  return applySettledGate(outcome, result.matched, predicate);
 };
 
 const waitForContainerForFinder = (waitFor: ObserveWaitForOptions): ResolverSelector | null => {
@@ -1025,7 +1150,9 @@ export const waitForObservation = async (
   // Declarative `for` DSL (issue #4398) routes to the #4389 primitives; the
   // legacy element/textAny/activeWindow path below is unchanged (back-compat).
   if (isConditionDsl(waitFor)) {
-    return complete(await runWaitForConditionDsl(observeScreen, waitFor, signal, timer));
+    return complete(
+      await runWaitForConditionDsl(observeScreen, waitFor, signal, timer, skipBackStack),
+    );
   }
 
   const startTime = timer.now();

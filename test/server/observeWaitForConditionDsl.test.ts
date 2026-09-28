@@ -149,6 +149,111 @@ describe("buildConditionPredicate", () => {
 // observe waitFor DSL path via the injectable waitForObservation seam (AC3)
 // ---------------------------------------------------------------------------
 describe("waitForObservation DSL branch", () => {
+  test("for:'appear' applies the settled quiet period and returns its stable hierarchy", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const observeScreen = new FakeObserveScreen();
+    const stable = makeObservation(
+      [node({ "resource-id": "submit" }), node({ text: "stable" })],
+      30,
+    );
+    observeScreen.setObserveSequence([
+      makeObservation([node({ "resource-id": "spinner" })], 10),
+      stable,
+    ]);
+    const outcome = await waitForObservation(
+      observeScreen,
+      { for: "appear", elementId: "submit", settled: { quietPeriodMs: 250 } } as any,
+      undefined,
+      false,
+      timer,
+    );
+    expect(outcome.settled).toBe(true);
+    expect(outcome.timedOut).toBe(false);
+    expect(outcome.polls).toBeGreaterThan(1);
+    expect(outcome.observation.viewHierarchy).toEqual(stable.viewHierarchy);
+  });
+
+  test("for:'appear' times out when the element disappears during the settled quiet period", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const observeScreen = new FakeObserveScreen();
+    const withoutSubmit = makeObservation([node({ "resource-id": "spinner" })], 30);
+    observeScreen.setObserveSequence([
+      makeObservation([node({ "resource-id": "submit" })], 10),
+      makeObservation([node({ "resource-id": "submit" })], 20),
+      withoutSubmit,
+    ]);
+
+    const outcome = await waitForObservation(
+      observeScreen,
+      {
+        for: "appear",
+        elementId: "submit",
+        settled: { quietPeriodMs: 200 },
+        timeoutMs: 500,
+      } as any,
+      undefined,
+      false,
+      timer,
+    );
+
+    expect(outcome.matched).toBe(false);
+    expect(outcome.settled).toBe(false);
+    expect(outcome.timedOut).toBe(true);
+    expect(outcome.matchedElement).toBeUndefined();
+    expect(outcome.awaitedElement).toBeUndefined();
+  });
+
+  test("for:'appear' returns the current element after a failed settled recheck recovers", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const observeScreen = new FakeObserveScreen();
+    observeScreen.setObserveSequence([
+      makeObservation([node({ "resource-id": "submit", text: "old" })], 10),
+      makeObservation([node({ "resource-id": "submit", text: "old" })], 20),
+      makeObservation([node({ "resource-id": "spinner" })], 30),
+      makeObservation([node({ "resource-id": "submit", text: "new" })], 40),
+    ]);
+
+    const outcome = await waitForObservation(
+      observeScreen,
+      {
+        for: "appear",
+        elementId: "submit",
+        settled: { quietPeriodMs: 200 },
+        timeoutMs: 700,
+      } as any,
+      undefined,
+      false,
+      timer,
+    );
+
+    expect(outcome.matched).toBe(true);
+    expect(outcome.settled).toBe(true);
+    expect(outcome.timedOut).toBe(false);
+    expect(outcome.matchedElement?.text).toBe("new");
+    expect(outcome.awaitedElement?.text).toBe("new");
+  });
+
+  test("for:'appear' threads skipBackStack through every poll", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const observeScreen = new FakeObserveScreen();
+    observeScreen.setObserveResult(makeObservation([node({ "resource-id": "submit" })]));
+    await waitForObservation(
+      observeScreen,
+      { for: "appear", elementId: "submit" } as any,
+      undefined,
+      true,
+      timer,
+    );
+    expect(observeScreen.getExecuteOptions().length).toBeGreaterThan(0);
+    expect(
+      observeScreen.getExecuteOptions().every((options) => options.skipBackStack === true),
+    ).toBe(true);
+  });
+
   test("for:'appear' retains condition metadata alongside the awaited-element compatibility field", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();

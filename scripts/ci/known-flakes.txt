@@ -25,3 +25,4 @@ Node Host Integration Tests*|*WATCHDOG: integration test exceeded*toolRegistry.c
 iOS Device Capture to WHEP|*did not recover to a fresh IDR*|RERUN-DONT-FIX|macos-26 capture stall after healthy connect; standalone advisory job on main; #7222
 *|*dependabot*sharp*sharp: could not load the sharp module*|KNOWN-NONFIX|pinned sharp/jimp graph rejects the bump by design; close or ignore the Dependabot PR, do not patch code
 *|*dependabot*sharp*sharp native matrix is incoherent*|KNOWN-NONFIX|pinned sharp/jimp graph rejects the bump by design; close or ignore the Dependabot PR, do not patch code
+BATS Shell Tests (macos-latest)|*BATS unit lane took *s, exceeding 420s*|RERUN-DONT-FIX|macOS post-merge BATS lane over wall budget (#7768); undiagnosed, read the bats-unit joblog artifact before patching, no in-test fd-3 reapers

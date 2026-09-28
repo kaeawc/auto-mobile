@@ -72,6 +72,9 @@ class FailingKillDeviceManager extends FakeDeviceUtils {
       signalCode: null,
       kill: () => false,
     });
+    // These tests model the tracked emulator itself exiting. A dead emulator
+    // disappears from ADB discovery even if an earlier explicit kill failed.
+    this.childProcess.on("exit", () => this.setBootedDevices("android", []));
   }
 
   override async startDevice(device: DeviceInfo, timeoutMs?: number): Promise<ChildProcess> {

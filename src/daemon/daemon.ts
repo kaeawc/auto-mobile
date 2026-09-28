@@ -2752,6 +2752,7 @@ export class Daemon {
         // Per-device timeout to prevent hanging on unresponsive devices
         perDeviceTimeoutMs: 5000,
         pendingPrefetch: () => IOSCtrlProxyBuilder.pendingPrefetch(),
+        isShuttingDown: () => this.shutdownInProgress,
         verifyIosDevice: (deviceId, options) =>
           deviceSessionManager.verifyIosDevice(deviceId, options),
       },

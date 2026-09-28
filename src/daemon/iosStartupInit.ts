@@ -26,6 +26,8 @@ export interface IosStartupInitDependencies {
   /** The in-flight runner-bundle prefetch, or null when none is pending. */
   pendingPrefetch: () => Promise<unknown> | null;
   verifyIosDevice: (deviceId: string, options: IosStartupVerifyOptions) => Promise<void>;
+  /** Daemon shutdown state, sampled before each verification and deferred log. */
+  isShuttingDown?: () => boolean;
 }
 
 export interface IosStartupInitResult {
@@ -100,6 +102,12 @@ export async function initializeIosCtrlProxyAtStartup(
 
   await Promise.all(
     deviceIds.map(async (deviceId) => {
+      if (deps.isShuttingDown?.() ?? false) {
+        logger.info(
+          `[Daemon] Skipping CtrlProxy iOS startup for ${deviceId}: daemon shutdown is in progress`,
+        );
+        return;
+      }
       logger.info(`[Daemon] Setting up CtrlProxy iOS for iOS device ${deviceId}`);
       try {
         const verification = deps.verifyIosDevice(deviceId, {
@@ -115,15 +123,29 @@ export async function initializeIosCtrlProxyAtStartup(
           );
           result.deferred.push(deviceId);
           void verification.then(
-            () =>
+            () => {
+              if (deps.isShuttingDown?.() ?? false) {
+                logger.info(
+                  `[Daemon] Deferred CtrlProxy iOS startup for ${deviceId} completed after daemon shutdown began; ignoring`,
+                );
+                return;
+              }
               logger.info(
                 `[Daemon] Deferred CtrlProxy iOS startup completed for ${deviceId} after warm-up timeout`,
-              ),
-            (error) =>
+              );
+            },
+            (error) => {
+              if (deps.isShuttingDown?.() ?? false) {
+                logger.info(
+                  `[Daemon] Deferred CtrlProxy iOS startup for ${deviceId} failed after daemon shutdown began; ignoring: ${errorMessage(error)}`,
+                );
+                return;
+              }
               logger.warn(
                 `[Daemon] Deferred CtrlProxy iOS startup failed for ${deviceId}: ${errorMessage(error)}`,
                 error,
-              ),
+              );
+            },
           );
           return;
         }

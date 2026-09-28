@@ -270,6 +270,30 @@ describe("IOSCtrlProxyProcessClient", () => {
     expect(commands.some((command) => command.startsWith("kill "))).toBe(false);
   });
 
+  test("refuses to signal when the separate pre-kill ownership budget has expired", async () => {
+    const timer = new FakeTimer();
+    const commands: string[] = [];
+    const host: HostCommandExecutor = {
+      async executeCommand(file, args) {
+        commands.push(`${file} ${args.join(" ")}`);
+        if (file === "kill" && args[0] === "-0") {
+          throw new Error("No such process");
+        }
+        return result();
+      },
+    };
+    const client = new IOSCtrlProxyProcessClient(host, timer);
+
+    await expect(
+      client.terminateProcessTree(42, 250, {
+        skipGraceful: true,
+        expectedDeviceId: "DEVICE-1",
+        preKillDeadlineMs: 0,
+      }),
+    ).rejects.toThrow("ownership unconfirmed");
+    expect(commands.filter((command) => command.startsWith("kill "))).toEqual([]);
+  });
+
   test("preserves a transient ownership inspection failure", async () => {
     const failure = new Error("ps temporarily unavailable");
     const host: HostCommandExecutor = {

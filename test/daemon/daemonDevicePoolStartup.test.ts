@@ -237,4 +237,38 @@ describe("Daemon startup device discovery", () => {
       }
     }
   });
+
+  test("daemon shutdown stops warm-up before verifying the next iOS device", async () => {
+    const previousSecret = process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV];
+    delete process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV];
+    const verifiedDeviceIds: string[] = [];
+    let daemon: Daemon;
+    const getInstanceSpy = spyOn(DeviceSessionManager, "getInstance").mockReturnValue({
+      verifyIosDevice: async (deviceId: string) => {
+        verifiedDeviceIds.push(deviceId);
+        (daemon as unknown as { shutdownInProgress: boolean }).shutdownInProgress = true;
+      },
+    } as unknown as DeviceSessionManager);
+    const pendingPrefetchSpy = spyOn(IOSCtrlProxyBuilder, "pendingPrefetch").mockReturnValue(null);
+    try {
+      daemon = buildDaemon(new FakeTimer());
+      const internals = daemon as unknown as DaemonStartupInternals;
+      await internals.devicePool.initializeWithDevices([
+        { deviceId: "first-simulator", name: "First iPhone", platform: "ios" },
+        { deviceId: "second-simulator", name: "Second iPhone", platform: "ios" },
+      ]);
+
+      await internals.initializeIosServices();
+
+      expect(verifiedDeviceIds).toEqual(["first-simulator"]);
+    } finally {
+      pendingPrefetchSpy.mockRestore();
+      getInstanceSpy.mockRestore();
+      if (previousSecret === undefined) {
+        delete process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV];
+      } else {
+        process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV] = previousSecret;
+      }
+    }
+  });
 });

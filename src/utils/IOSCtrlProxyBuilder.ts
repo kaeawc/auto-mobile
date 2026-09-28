@@ -1197,6 +1197,9 @@ export class IOSCtrlProxyBuilder {
     // uid — extracting into a directory we do not own reopens the TOCTOU window
     // this hardening closes (issue #4759).
     await this.assertDerivedDataDirOwnedByCurrentUid();
+    // The extracted tree is about to be replaced. A later failure must not leave
+    // the previous release's metadata describing a different runner on disk.
+    await fs.rm(this.getMetadataPath(), { force: true });
     await this.downloader.extractBundle(bundlePath, this.config.derivedDataPath);
     // Authoritatively restrict the extraction tree to owner-only (0o700),
     // independent of the downloader implementation: the runner is launched from

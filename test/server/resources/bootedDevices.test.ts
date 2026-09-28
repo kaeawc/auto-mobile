@@ -1842,7 +1842,10 @@ describe("booted device readiness", () => {
     const installedSpy = spyOn(IOSCtrlProxyManager.prototype, "isInstalled").mockResolvedValue(
       true,
     );
-    const runningSpy = spyOn(IOSCtrlProxyManager.prototype, "isRunning").mockResolvedValue(false);
+    const runningSpy = spyOn(
+      IOSCtrlProxyManager.prototype,
+      "checkRunningWithReason",
+    ).mockResolvedValue({ ok: false, reason: "unhealthy" });
     const versionLookup: CtrlProxyVersionLookup = {
       getVersion: async () => ({
         versionName: "2.0.0",
@@ -1880,7 +1883,10 @@ describe("booted device readiness", () => {
     const manager = IOSCtrlProxyManager.getInstance(device, timer);
     const budget = manager.getForcedRestartBudget();
     const installed = spyOn(IOSCtrlProxyManager.prototype, "isInstalled").mockResolvedValue(true);
-    const running = spyOn(IOSCtrlProxyManager.prototype, "isRunning").mockResolvedValue(false);
+    const running = spyOn(
+      IOSCtrlProxyManager.prototype,
+      "checkRunningWithReason",
+    ).mockResolvedValue({ ok: false, reason: "unhealthy" });
     try {
       for (const delay of [30_000, 60_000, 0]) {
         const token = budget.tryBeginAttempt()!;
@@ -1930,7 +1936,10 @@ describe("booted device readiness", () => {
     const manager = IOSCtrlProxyManager.getInstance(device, timer);
     const budget = manager.getForcedRestartBudget();
     const installed = spyOn(IOSCtrlProxyManager.prototype, "isInstalled").mockResolvedValue(true);
-    const running = spyOn(IOSCtrlProxyManager.prototype, "isRunning").mockResolvedValue(false);
+    const running = spyOn(
+      IOSCtrlProxyManager.prototype,
+      "checkRunningWithReason",
+    ).mockResolvedValue({ ok: false, reason: "unhealthy" });
     let releaseVersion!: () => void;
     let enteredVersion!: () => void;
     const versionEntered = new Promise<void>((resolve) => (enteredVersion = resolve));
@@ -1971,7 +1980,10 @@ describe("booted device readiness", () => {
     const manager = IOSCtrlProxyManager.getInstance(device, timer);
     const budget = manager.getForcedRestartBudget();
     const installed = spyOn(IOSCtrlProxyManager.prototype, "isInstalled").mockResolvedValue(true);
-    const running = spyOn(IOSCtrlProxyManager.prototype, "isRunning").mockResolvedValue(false);
+    const running = spyOn(
+      IOSCtrlProxyManager.prototype,
+      "checkRunningWithReason",
+    ).mockResolvedValue({ ok: false, reason: "unhealthy" });
     try {
       const token = budget.tryBeginAttempt()!;
       budget.recordFailure(`/private/secret/path ${"s".repeat(1000)}`, token);
@@ -1993,7 +2005,10 @@ describe("booted device readiness", () => {
     const installedSpy = spyOn(IOSCtrlProxyManager.prototype, "isInstalled").mockResolvedValue(
       true,
     );
-    const runningSpy = spyOn(IOSCtrlProxyManager.prototype, "isRunning").mockResolvedValue(true);
+    const runningSpy = spyOn(
+      IOSCtrlProxyManager.prototype,
+      "checkRunningWithReason",
+    ).mockResolvedValue({ ok: true });
     try {
       const status = await queryDeviceServiceStatus(
         {
@@ -2018,7 +2033,10 @@ describe("booted device readiness", () => {
     const installedSpy = spyOn(IOSCtrlProxyManager.prototype, "isInstalled").mockResolvedValue(
       false,
     );
-    const runningSpy = spyOn(IOSCtrlProxyManager.prototype, "isRunning").mockResolvedValue(false);
+    const runningSpy = spyOn(
+      IOSCtrlProxyManager.prototype,
+      "checkRunningWithReason",
+    ).mockResolvedValue({ ok: false, reason: "unhealthy" });
     try {
       const status = await queryDeviceServiceStatus(
         {
@@ -2113,7 +2131,10 @@ describe("booted device readiness", () => {
     const installedSpy = spyOn(IOSCtrlProxyManager.prototype, "isInstalled").mockResolvedValue(
       true,
     );
-    const runningSpy = spyOn(IOSCtrlProxyManager.prototype, "isRunning").mockResolvedValue(false);
+    const runningSpy = spyOn(
+      IOSCtrlProxyManager.prototype,
+      "checkRunningWithReason",
+    ).mockResolvedValue({ ok: false, reason: "unhealthy" });
     try {
       const statusPromise = queryDeviceServiceStatus(
         {
@@ -2150,7 +2171,10 @@ describe("booted device readiness", () => {
     const installedSpy = spyOn(IOSCtrlProxyManager.prototype, "isInstalled").mockResolvedValue(
       true,
     );
-    const runningSpy = spyOn(IOSCtrlProxyManager.prototype, "isRunning").mockResolvedValue(true);
+    const runningSpy = spyOn(
+      IOSCtrlProxyManager.prototype,
+      "checkRunningWithReason",
+    ).mockResolvedValue({ ok: true });
     const versionSpy = spyOn(
       IOSCtrlProxyManager.prototype,
       "getInstalledVersionIdentity",
@@ -2179,7 +2203,10 @@ describe("booted device readiness", () => {
     const installedSpy = spyOn(IOSCtrlProxyManager.prototype, "isInstalled").mockResolvedValue(
       true,
     );
-    const runningSpy = spyOn(IOSCtrlProxyManager.prototype, "isRunning").mockResolvedValue(false);
+    const runningSpy = spyOn(
+      IOSCtrlProxyManager.prototype,
+      "checkRunningWithReason",
+    ).mockResolvedValue({ ok: false, reason: "unhealthy" });
     const versionSpy = spyOn(
       IOSCtrlProxyManager.prototype,
       "getInstalledVersionIdentity",

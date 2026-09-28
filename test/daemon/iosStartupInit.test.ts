@@ -14,6 +14,72 @@ import { FakeTimer } from "../fakes/FakeTimer";
 describe("initializeIosCtrlProxyAtStartup (#7032)", () => {
   const BUDGET_MS = 5_000;
 
+  test("skips a device when shutdown begins before its verification starts", async () => {
+    const timer = new FakeTimer();
+    const calls: string[] = [];
+    let shuttingDown = false;
+    const infoSpy = spyOn(logger, "info").mockImplementation(() => {});
+    try {
+      const result = await initializeIosCtrlProxyAtStartup(["sim-a", "sim-b"], {
+        timer,
+        perDeviceTimeoutMs: BUDGET_MS,
+        pendingPrefetch: () => null,
+        isShuttingDown: () => shuttingDown,
+        verifyIosDevice: async (deviceId) => {
+          calls.push(deviceId);
+          shuttingDown = true;
+        },
+      });
+      expect(calls).toEqual(["sim-a"]);
+      expect(result).toEqual({ ready: ["sim-a"], deferred: [] });
+      expect(
+        daemonMessages(infoSpy).some(
+          (message) => message.includes("sim-b") && message.includes("shutdown"),
+        ),
+      ).toBe(true);
+    } finally {
+      infoSpy.mockRestore();
+    }
+  });
+
+  test("reports a deferred completion after shutdown as ignored", async () => {
+    const timer = new FakeTimer();
+    const verification = Promise.withResolvers<void>();
+    let shuttingDown = false;
+    const infoSpy = spyOn(logger, "info").mockImplementation(() => {});
+    const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const init = initializeIosCtrlProxyAtStartup(["sim-a"], {
+        timer,
+        perDeviceTimeoutMs: BUDGET_MS,
+        pendingPrefetch: () => null,
+        isShuttingDown: () => shuttingDown,
+        verifyIosDevice: () => verification.promise,
+      });
+      await Promise.resolve();
+      timer.advanceTime(BUDGET_MS);
+      expect(await init).toEqual({ ready: [], deferred: ["sim-a"] });
+      shuttingDown = true;
+      verification.resolve();
+      await Promise.resolve();
+      const messages = daemonMessages(infoSpy);
+      expect(
+        messages.some(
+          (message) =>
+            message.includes("sim-a") &&
+            message.includes("shutdown") &&
+            message.includes("ignoring"),
+        ),
+      ).toBe(true);
+      expect(messages.some((message) => message.includes("startup completed for sim-a"))).toBe(
+        false,
+      );
+    } finally {
+      infoSpy.mockRestore();
+      warnSpy.mockRestore();
+    }
+  });
+
   /**
    * Messages logged through `spy` by this module. Scoped by its wording because
    * other suites' leaked async work may log unrelated `[Daemon]` lines.

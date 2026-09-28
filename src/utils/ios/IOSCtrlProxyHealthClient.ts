@@ -24,6 +24,29 @@ export interface CtrlProxyHealthContext {
   readonly deviceId: string;
 }
 
+export type CtrlProxyHealthCheckResult =
+  | { ok: true }
+  | { ok: false; reason: "unhealthy" | "refused" | "reset" | "timeout" | "unknown" };
+
+function healthProbeFailureReason(
+  error: unknown,
+): Exclude<CtrlProxyHealthCheckResult, { ok: true }>["reason"] {
+  const code =
+    typeof error === "object" && error !== null && "code" in error ? String(error.code) : "";
+  const name = error instanceof Error ? error.name : "";
+  const message = String(error).toLowerCase();
+  if (code === "ECONNREFUSED" || message.includes("connection refused")) {
+    return "refused";
+  }
+  if (code === "ECONNRESET" || message.includes("reset")) {
+    return "reset";
+  }
+  if (name === "AbortError" || code === "ETIMEDOUT" || message.includes("timed out")) {
+    return "timeout";
+  }
+  return "unknown";
+}
+
 /**
  * Reads and interprets the CtrlProxy iOS runner `/health` endpoint.
  *
@@ -51,22 +74,47 @@ export class IOSCtrlProxyHealthClient {
     return body !== null && (body.includes("ok") || body.includes("healthy"));
   }
 
+  /** Preserve transport failure reasons for callers that need to retry selectively. */
+  public async checkHealthEndpointOnPortWithReason(
+    port: number,
+    timeoutMs?: number,
+  ): Promise<CtrlProxyHealthCheckResult> {
+    try {
+      const body = await this.requestHealthEndpointBodyOnPort(port, timeoutMs);
+      return body.includes("ok") || body.includes("healthy")
+        ? { ok: true }
+        : { ok: false, reason: "unhealthy" };
+    } catch (error) {
+      const reason = healthProbeFailureReason(error);
+      // Failed port probes are expected while a runner is starting; the typed reason is safe to return.
+      if (reason === "unknown") {
+        logger.warn(
+          `[IOSCtrlProxy] Health probe on port ${port} failed (${reason}): ${error}`,
+          error,
+        );
+      } else {
+        logger.debug(
+          `[IOSCtrlProxy] Health probe on port ${port} failed (${reason}): ${error}`,
+          error,
+        );
+      }
+      return { ok: false, reason };
+    }
+  }
+
   /**
    * Device-identity-aware `/health` check: the runner answered with
    * `status === "ok"` and its reported `deviceId` is compatible with the
    * requested `deviceId`, per `options.requireDeviceId`:
    *
-   * - **compat (`requireDeviceId: false`)** — a MISSING `deviceId`
-   *   still counts as a match (an older runner build, or the env-injection
-   *   fallback #2731 that can drop the device-id var along with the port).
-   *   Used by the primary liveness gate (`isRunning`/`waitForHealthEndpoint`
-   *   in {@link IOSCtrlProxyManager}) so those older/degraded runners are not
-   *   spuriously treated as down.
-   * - **strict (default)** — a MISSING `deviceId` is rejected;
-   *   only an exact match counts. Used by ownership/forced-teardown decisions
-   *   (issue #6415 follow-up) where adopting a foreign responder that omits
-   *   `deviceId` — a sibling simulator's runner, or another process entirely —
-   *   could mistake it for this device's runner.
+   * - **strict (default)** — a MISSING `deviceId` is rejected; only an exact
+   *   match counts. The primary liveness gate (`isRunning`/`waitForHealthEndpoint`
+   *   in {@link IOSCtrlProxyManager}) and ownership/forced-teardown decisions
+   *   use this mode so an ambiguous responder cannot be mistaken for this device's runner.
+   * - **compat (`requireDeviceId: false`)** — a MISSING `deviceId` still counts
+   *   as a match (an older runner build, or the env-injection fallback #2731
+   *   that can drop the device-id var along with the port). This mode is available
+   *   for callers that need that tolerance but is currently unused in production.
    *
    * Both modes reject a payload whose `deviceId` is PRESENT but different — a
    * sibling simulator's runner or the Android runner answering the same/default
@@ -85,6 +133,44 @@ export class IOSCtrlProxyHealthClient {
       return false;
     }
 
+    return this.isHealthBodyForDevice(body, deviceId, options);
+  }
+
+  /** Device-aware status with transport failures kept distinct from an unhealthy responder. */
+  public async checkHealthEndpointOnPortForDeviceWithReason(
+    port: number,
+    deviceId: string,
+    timeoutMs?: number,
+    options?: { requireDeviceId?: boolean },
+  ): Promise<CtrlProxyHealthCheckResult> {
+    try {
+      const body = await this.requestHealthEndpointBodyOnPort(port, timeoutMs);
+      return this.isHealthBodyForDevice(body, deviceId, options)
+        ? { ok: true }
+        : { ok: false, reason: "unhealthy" };
+    } catch (error) {
+      const reason = healthProbeFailureReason(error);
+      // A runner may be starting or gone; keep the transport reason for status callers.
+      if (reason === "unknown") {
+        logger.warn(
+          `[IOSCtrlProxy] Health probe on port ${port} failed (${reason}): ${error}`,
+          error,
+        );
+      } else {
+        logger.debug(
+          `[IOSCtrlProxy] Health probe on port ${port} failed (${reason}): ${error}`,
+          error,
+        );
+      }
+      return { ok: false, reason };
+    }
+  }
+
+  private isHealthBodyForDevice(
+    body: string,
+    deviceId: string,
+    options?: { requireDeviceId?: boolean },
+  ): boolean {
     try {
       const health = JSON.parse(body) as { status?: unknown; deviceId?: unknown };
       if (health.status !== "ok") {
@@ -95,7 +181,7 @@ export class IOSCtrlProxyHealthClient {
       }
       return health.deviceId === undefined || health.deviceId === deviceId;
     } catch (error) {
-      // Malformed/non-JSON health body means we can't trust this runner's identity; treat it as not matching.
+      // Malformed/non-JSON health body cannot establish runner identity.
       logger.debug(`src/utils/ios/IOSCtrlProxyHealthClient.ts fallback failed: ${error}`, error);
       return false;
     }
@@ -137,35 +223,39 @@ export class IOSCtrlProxyHealthClient {
     timeoutMs?: number,
   ): Promise<string | null> {
     try {
-      const requestTimeoutMs = Math.min(
-        IOSCtrlProxyHealthClient.FETCH_TIMEOUT_MS,
-        Math.max(1, timeoutMs ?? IOSCtrlProxyHealthClient.FETCH_TIMEOUT_MS),
-      );
-      const host = this.context.useRemoteRunner() ? this.context.getHost() : "localhost";
-      if (this.context.useRemoteRunner()) {
-        const controller = new AbortController();
-        const timeoutId = this.timer.setTimeout(() => controller.abort(), requestTimeoutMs);
-        try {
-          const response = await fetch(`http://${host}:${port}/health`, {
-            signal: controller.signal,
-          });
-          return await response.text();
-        } finally {
-          this.timer.clearTimeout(timeoutId);
-        }
-      }
-
-      // Use curl to check the health endpoint locally
-      const { stdout } = await this.processExecutor.executeCommand(
-        "curl",
-        ["-s", "--max-time", String(requestTimeoutMs / 1000), `http://${host}:${port}/health`],
-        { timeoutMs: requestTimeoutMs },
-      );
-      return stdout;
+      return await this.requestHealthEndpointBodyOnPort(port, timeoutMs);
     } catch (error) {
       // No runner listening on this port (connection refused/timeout) is the expected case; null means "not up yet".
       logger.debug(`src/utils/ios/IOSCtrlProxyHealthClient.ts fallback failed: ${error}`, error);
       return null;
     }
+  }
+
+  private async requestHealthEndpointBodyOnPort(port: number, timeoutMs?: number): Promise<string> {
+    const requestTimeoutMs = Math.min(
+      IOSCtrlProxyHealthClient.FETCH_TIMEOUT_MS,
+      Math.max(1, timeoutMs ?? IOSCtrlProxyHealthClient.FETCH_TIMEOUT_MS),
+    );
+    const host = this.context.useRemoteRunner() ? this.context.getHost() : "localhost";
+    if (this.context.useRemoteRunner()) {
+      const controller = new AbortController();
+      const timeoutId = this.timer.setTimeout(() => controller.abort(), requestTimeoutMs);
+      try {
+        const response = await fetch(`http://${host}:${port}/health`, {
+          signal: controller.signal,
+        });
+        return await response.text();
+      } finally {
+        this.timer.clearTimeout(timeoutId);
+      }
+    }
+
+    // Use curl to check the health endpoint locally
+    const { stdout } = await this.processExecutor.executeCommand(
+      "curl",
+      ["-s", "--max-time", String(requestTimeoutMs / 1000), `http://${host}:${port}/health`],
+      { timeoutMs: requestTimeoutMs },
+    );
+    return stdout;
   }
 }

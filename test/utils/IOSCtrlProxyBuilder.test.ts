@@ -159,6 +159,34 @@ describe("IOSCtrlProxyBuilder", function () {
   });
 
   describe("getInstalledBundleVersion", function () {
+    test("invalidates the previous version when re-extraction fails after replacing the tree", async function () {
+      const derivedDataPath = path.join(tempDir, "DerivedData");
+      const bundleCacheDir = path.join(tempDir, "cache");
+      const overridePath = path.join(tempDir, "replacement.ipa");
+      await fs.mkdir(bundleCacheDir);
+      await fs.writeFile(
+        path.join(bundleCacheDir, "ctrl-proxy-ios-bundle.json"),
+        JSON.stringify({ version: "previous-release", checksum: null, extractedAt: "old" }),
+      );
+      await fs.writeFile(overridePath, "a".repeat(12000));
+      process.env.AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH = overridePath;
+      const downloader = new FakeIOSCtrlProxyBundleDownloader();
+      downloader.checksum = "replacement-checksum";
+      downloader.runnerChecksum = "wrong-runner-checksum";
+      IOSCtrlProxyBuilder.setExpectedChecksumForTesting("replacement-checksum");
+      IOSCtrlProxyBuilder.setExpectedRunnerChecksumForTesting("expected-runner-checksum", "xctest");
+      const builder = IOSCtrlProxyBuilder.getInstance(
+        { derivedDataPath, bundleCacheDir },
+        { downloader },
+      );
+
+      const result = await builder.build("simulator");
+      expect(downloader.extractedPaths).toEqual([derivedDataPath]);
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("runner binary SHA256 mismatch (post-extract)");
+      expect(await builder.getInstalledBundleVersion()).toBeNull();
+    });
+
     test("returns the persisted extracted bundle version", async function () {
       const cacheDir = path.join(tempDir, "bundle-cache");
       await fs.mkdir(cacheDir);

@@ -1,13 +1,16 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import {
   enrichDeviceServiceStatuses,
   probeServiceStatusWithBudget,
+  queryDeviceServiceStatus,
   setServiceStatusProbe,
   type ServiceStatusProbe,
 } from "../../../src/server/bootedDeviceResources";
 import type { DeviceServiceStatus } from "../../../src/server/bootedDeviceResources";
 import { describeDevice } from "../../../src/server/deviceDescription";
+import { IOSCtrlProxyManager } from "../../../src/utils/IOSCtrlProxyManager";
+import { logger } from "../../../src/utils/logger";
 
 // A booted iOS simulator entry as the resource builds it from discovery, before service-status
 // enrichment. `readiness.unknown` and `capabilities.automation === null` are the freshly-discovered
@@ -78,6 +81,74 @@ describe("booted iOS service-status transient handling (#7053)", () => {
     expect(outcome.status).toBeUndefined();
     expect(outcome.diagnostic?.state).toBe("unreachable");
     expect(outcome.diagnostic?.reason).toContain("ECONNREFUSED");
+  });
+
+  test("real iOS status query sends transient health failures to the diagnostic classifier", async () => {
+    const installed = spyOn(IOSCtrlProxyManager.prototype, "isInstalled").mockResolvedValue(true);
+    const health = spyOn(IOSCtrlProxyManager.prototype, "checkRunningWithReason");
+    const device = { name: "iPhone", platform: "ios" as const, deviceId: "SIM-HEALTH" };
+    const timer = new FakeTimer();
+    try {
+      for (const reason of ["refused", "reset", "timeout"] as const) {
+        health.mockResolvedValue({ ok: false, reason });
+        const outcome = await probeServiceStatusWithBudget(
+          device,
+          (target) =>
+            queryDeviceServiceStatus(
+              target,
+              undefined,
+              { getVersion: async () => undefined },
+              timer,
+            ),
+          timer.now() + 5000,
+          timer,
+        );
+        expect(outcome.status).toBeUndefined();
+        expect(outcome.diagnostic?.state).toBe("unreachable");
+        expect(outcome.diagnostic?.reason).toContain(reason);
+      }
+      health.mockResolvedValue({ ok: false, reason: "unhealthy" });
+      const settled = await probeServiceStatusWithBudget(
+        device,
+        (target) =>
+          queryDeviceServiceStatus(target, undefined, { getVersion: async () => undefined }, timer),
+        timer.now() + 5000,
+        timer,
+      );
+      expect(settled.diagnostic).toBeUndefined();
+      expect(settled.status?.running).toBe(false);
+    } finally {
+      health.mockRestore();
+      installed.mockRestore();
+      IOSCtrlProxyManager.resetInstances();
+    }
+  });
+
+  test("real iOS status query still swallows unrelated manager failures", async () => {
+    const installed = spyOn(IOSCtrlProxyManager.prototype, "isInstalled").mockRejectedValue(
+      new Error("installation lookup failed"),
+    );
+    const health = spyOn(IOSCtrlProxyManager.prototype, "checkRunningWithReason").mockResolvedValue(
+      {
+        ok: true,
+      },
+    );
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const status = await queryDeviceServiceStatus(
+        { name: "iPhone", platform: "ios", deviceId: "SIM-HEALTH" },
+        undefined,
+        { getVersion: async () => undefined },
+        new FakeTimer(),
+      );
+      expect(status).toBeUndefined();
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("installation lookup failed"));
+    } finally {
+      warn.mockRestore();
+      health.mockRestore();
+      installed.mockRestore();
+      IOSCtrlProxyManager.resetInstances();
+    }
   });
 
   test("respects the caller deadline budget: an already-elapsed budget returns immediately without probing", async () => {

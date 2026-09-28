@@ -31,6 +31,7 @@ import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlP
 import { getAndroidAppMetadataViaAdb } from "../features/observe/GetAppMetadata";
 import { AndroidCtrlProxyManager } from "../utils/CtrlProxyManager";
 import { IOSCtrlProxyManager } from "../utils/IOSCtrlProxyManager";
+import type { CtrlProxyHealthCheckResult } from "../utils/ios/IOSCtrlProxyHealthClient";
 import { IOSCtrlProxyBuilder } from "../utils/IOSCtrlProxyBuilder";
 import {
   IOSCtrlProxyClient,
@@ -1282,6 +1283,38 @@ export async function queryDeviceServiceStatus(
       ? defaultCtrlProxyVersionLookup
       : noOpCtrlProxyVersionLookup);
 
+  let iosProbe:
+    | {
+        manager: IOSCtrlProxyManager;
+        installed: boolean;
+        health: CtrlProxyHealthCheckResult;
+        version: CtrlProxyVersionInfo | undefined;
+      }
+    | undefined;
+  if (device.platform === "ios") {
+    try {
+      const manager = IOSCtrlProxyManager.getInstance(bootedDevice);
+      const [installed, health, version] = await Promise.all([
+        manager.isInstalled(),
+        manager.checkRunningWithReason(),
+        getCtrlProxyVersion(bootedDevice, resolvedVersionLookup, timer),
+      ]);
+      iosProbe = { manager, installed, health, version };
+    } catch (error) {
+      logger.warn(
+        `[BootedDeviceResources] Service status query failed for ${device.deviceId}: ${error}`,
+      );
+      return undefined;
+    }
+    if (!iosProbe.health.ok && ["refused", "reset", "timeout"].includes(iosProbe.health.reason)) {
+      // The bounded probe classifies transient transport failures as diagnostics.
+      // Throw outside the best-effort status catch so it can observe the failure.
+      throw new Error(
+        `CtrlProxy iOS health probe ${iosProbe.health.reason} for ${device.deviceId}`,
+      );
+    }
+  }
+
   try {
     if (device.platform === "android") {
       const manager = androidLookup.getManager(bootedDevice);
@@ -1313,13 +1346,9 @@ export async function queryDeviceServiceStatus(
             }
           : {}),
       };
-    } else if (device.platform === "ios") {
-      const manager = IOSCtrlProxyManager.getInstance(bootedDevice);
-      const [installed, running, version] = await Promise.all([
-        manager.isInstalled(),
-        manager.isRunning(),
-        getCtrlProxyVersion(bootedDevice, resolvedVersionLookup, timer),
-      ]);
+    } else if (device.platform === "ios" && iosProbe) {
+      const { manager, installed, health, version } = iosProbe;
+      const running = health.ok;
       const expectedSha256 = resolveIpaChecksum();
 
       // The iOS runner exposes no hash/version, so identity comes from the cached

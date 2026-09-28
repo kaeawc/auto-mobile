@@ -17,6 +17,8 @@ setup() {
   mkdir -p "${STUB_BIN}"
 
   ORIG_PATH="${PATH}"
+  ORIG_TMPDIR="${TMPDIR-}"
+  ORIG_TMPDIR_SET="${TMPDIR+x}"
   RM="$(command -v rm)"
   LN="$(command -v ln)"
   CHMOD="$(command -v chmod)"
@@ -33,6 +35,7 @@ setup() {
   done
 
   export PATH="${STUB_BIN}:/usr/bin:/bin"
+  export TMPDIR="${TEST_DIR}"
   export INSTALL_SH_SOURCE_ONLY=true
   # shellcheck source=/dev/null
   source scripts/install.sh
@@ -66,6 +69,11 @@ teardown() {
     kill -KILL "$(cat "${WATCHDOG_SLEEP_PID_FILE}")" 2> /dev/null || true
   fi
   export PATH="${ORIG_PATH}"
+  if [[ -n "${ORIG_TMPDIR_SET}" ]]; then
+    export TMPDIR="${ORIG_TMPDIR}"
+  else
+    unset TMPDIR
+  fi
   "$RM" -rf "${TEST_DIR}"
 }
 

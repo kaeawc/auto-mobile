@@ -8,10 +8,22 @@ setup() {
   mkdir -p "${STUB_BIN}"
 
   ORIG_PATH="${PATH}"
+  ORIG_TMPDIR="${TMPDIR-}"
+  ORIG_TMPDIR_SET="${TMPDIR+x}"
   CHMOD="$(command -v chmod)"
   RM="$(command -v rm)"
 
   export PATH="${STUB_BIN}:/usr/bin:/bin"
+  export TMPDIR="${TEST_DIR}"
+  # Ubuntu has /usr/bin/timeout; macOS normally has no system timeout. Keep
+  # every test on the same bounded-install path, independent of the host.
+  cat > "${STUB_BIN}/timeout" <<'STUB'
+#!/usr/bin/env bash
+[[ "${1:-}" == "-k" && "$#" -ge 5 ]] || exit 125
+shift 3 # -k GRACE SECONDS
+exec "$@"
+STUB
+  "$CHMOD" +x "${STUB_BIN}/timeout"
   export INSTALL_SH_SOURCE_ONLY=true
   # shellcheck source=/dev/null
   source scripts/install.sh
@@ -26,6 +38,11 @@ setup() {
 
 teardown() {
   export PATH="${ORIG_PATH}"
+  if [[ -n "${ORIG_TMPDIR_SET}" ]]; then
+    export TMPDIR="${ORIG_TMPDIR}"
+  else
+    unset TMPDIR
+  fi
   "$RM" -rf "${TEST_DIR}"
 }
 
@@ -47,6 +64,7 @@ STUB
   "$CHMOD" +x "${STUB_BIN}/brew"
 
   run _install_dev_tools_brew
+  echo "$output"
 
   [ "$status" -ne 0 ]
   [[ "$output" == *"dev tool(s) could not be installed"* ]]
@@ -54,6 +72,7 @@ STUB
 
 @test "macOS development tools are installed in one Homebrew invocation" {
   local brew_args="${TEST_DIR}/brew-args"
+  local brew_calls="${TEST_DIR}/brew-calls"
   local installed_formulae="${TEST_DIR}/installed-formulae"
 
   cat > "${STUB_BIN}/brew" <<'STUB'
@@ -67,6 +86,7 @@ fi
 
 if [[ "${1:-}" == "install" ]]; then
   shift
+  printf 'install\n' >> "${BREW_CALLS}"
   printf '%s\n' "$@" > "${BREW_ARGS}"
   printf '%s\n' "$@" > "${INSTALLED_FORMULAE}"
   exit 0
@@ -77,13 +97,16 @@ STUB
   "$CHMOD" +x "${STUB_BIN}/brew"
 
   export BREW_ARGS="${brew_args}"
+  export BREW_CALLS="${brew_calls}"
   export INSTALLED_FORMULAE="${installed_formulae}"
   run _install_dev_tools_brew
+  echo "$output"
 
   [ "$status" -eq 0 ]
-  [ "$(wc -l < "${brew_args}")" -eq 12 ]
-  grep -qx "shellcheck" "${brew_args}"
-  grep -qx "ideviceinstaller" "${brew_args}"
+  [ "$(cat "${brew_calls}")" = "install" ]
+  local expected_packages
+  expected_packages="$(printf '%s\n' shellcheck jq ripgrep yq gum hadolint xmlstarlet swiftformat swiftlint xcodegen libusbmuxd ideviceinstaller)"
+  [ "$(cat "${brew_args}")" = "${expected_packages}" ]
 }
 
 @test "macOS development tool installer fails when Homebrew fails after listing packages" {
@@ -111,6 +134,7 @@ STUB
   export INSTALL_ATTEMPTED="${install_attempted}"
 
   run _install_dev_tools_brew
+  echo "$output"
 
   [ "$status" -eq 42 ]
   [[ "$output" == *"Homebrew reported an error"* ]]
@@ -142,6 +166,7 @@ STUB
   "$CHMOD" +x "${STUB_BIN}/sudo"
 
   run _install_dev_tools_apt
+  echo "$output"
 
   [ "$status" -ne 0 ]
   [[ "$output" == *"dev tool(s) could not be installed"* ]]

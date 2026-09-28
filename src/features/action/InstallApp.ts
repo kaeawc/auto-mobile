@@ -274,6 +274,7 @@ export class InstallApp {
     const warning = warnings.length > 0 ? warnings.join(" ") : undefined;
     return {
       success: success,
+      error: success ? undefined : installAttempt.output || undefined,
       upgrade: isInstalled && success,
       userId: targetUserId,
       packageName: packageName,
@@ -433,9 +434,22 @@ export class InstallApp {
       throw new Error(OPERATION_CANCELLED_MESSAGE);
     }
 
-    const beforeApps = await perf.track("listAppsBefore", () =>
-      this.simctl.listApps(this.device.deviceId),
-    );
+    let beforeApps: any[] | undefined;
+    let beforeError: unknown;
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      try {
+        beforeApps = await perf.track("listAppsBefore", () =>
+          this.simctl.listAppsOrThrow(this.device.deviceId),
+        );
+        break;
+      } catch (error) {
+        beforeError = error;
+        // One immediate retry handles a transient baseline listing error without adding timer DI.
+      }
+    }
+    if (!beforeApps) {
+      throw beforeError;
+    }
     const beforeBundleIds = this.extractBundleIds(beforeApps);
 
     const downgraded = await perf.track("simctlInstall", () =>
@@ -448,9 +462,16 @@ export class InstallApp {
       throw new Error(OPERATION_CANCELLED_MESSAGE);
     }
 
-    const afterApps = await perf.track("listAppsAfter", () =>
-      this.simctl.listApps(this.device.deviceId),
-    );
+    let afterApps: any[] = [];
+    let postListingWarning: string | undefined;
+    try {
+      afterApps = await perf.track("listAppsAfter", () =>
+        this.simctl.listAppsOrThrow(this.device.deviceId),
+      );
+    } catch (error) {
+      postListingWarning = `Could not verify installed bundle: ${errorMessage(error)}`;
+      logger.warn(`[InstallApp] ${postListingWarning}`, error);
+    }
     const afterBundleIds = this.extractBundleIds(afterApps);
 
     const newBundles = this.diffSets(beforeBundleIds, afterBundleIds);
@@ -459,7 +480,7 @@ export class InstallApp {
       packageName = newBundles[0];
     }
 
-    if (!packageName) {
+    if (!packageName && !postListingWarning) {
       const expectedBundleId = await perf.track("resolveBundleId", () =>
         this.resolveAppBundleId(appPath),
       );
@@ -475,6 +496,10 @@ export class InstallApp {
     }
 
     const warnings: string[] = [];
+
+    if (postListingWarning) {
+      warnings.push(postListingWarning);
+    }
 
     if (downgraded) {
       warnings.push(

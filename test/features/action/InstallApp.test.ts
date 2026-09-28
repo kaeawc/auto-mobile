@@ -62,6 +62,8 @@ const createExecResult = (stdout: string, stderr: string = ""): ExecResult => ({
 
 class SequencedFakeSimctl extends FakeSimctl {
   private listResponses: any[][] = [];
+  private strictListResponses: Array<any[] | Error> = [];
+  strictListCalls = 0;
 
   setListResponses(responses: any[][]): void {
     this.listResponses = [...responses];
@@ -69,6 +71,19 @@ class SequencedFakeSimctl extends FakeSimctl {
 
   override async listApps(deviceId?: string): Promise<any[]> {
     return this.listResponses.shift() ?? super.listApps(deviceId);
+  }
+
+  setStrictListResponses(responses: Array<any[] | Error>): void {
+    this.strictListResponses = [...responses];
+  }
+
+  override async listAppsOrThrow(deviceId?: string): Promise<any[]> {
+    this.strictListCalls += 1;
+    const response = this.strictListResponses.shift();
+    if (response instanceof Error) {
+      throw response;
+    }
+    return response ?? this.listApps(deviceId);
   }
 }
 
@@ -1089,6 +1104,53 @@ describe("InstallApp", () => {
     expect(simctl.getMethodCalls("uninstallApp")[0].bundleId).toBe("com.example.app");
     // Only the successful reinstall is recorded; the first attempt threw before recording.
     expect(simctl.getMethodCallCount("installApp")).toBe(1);
+  });
+
+  test("keeps iOS simulator install successful when post-install listing fails", async () => {
+    const simctl = new SequencedFakeSimctl();
+    simctl.setStrictListResponses([[], new Error("simctl listapps temporarily unavailable")]);
+    const appPath = "/tmp/MyApp.app";
+    const installApp = new InstallApp(
+      iosSimulatorDevice,
+      fakeAdbFactory,
+      fakeHost,
+      fakeLocator,
+      undefined,
+      simctl,
+      undefined,
+      fakePlist("com.example.app"),
+      new FakeInstalledAppsRepository(),
+    );
+
+    const result = await installApp.execute(appPath);
+
+    expect(result.success).toBe(true);
+    expect(result.warning).toContain("Could not verify installed bundle");
+    expect(result.packageName).toBeUndefined();
+    expect(simctl.getMethodCalls("installApp")).toHaveLength(1);
+  });
+
+  test("retries the pre-install iOS simulator listing once and then fails loudly", async () => {
+    const simctl = new SequencedFakeSimctl();
+    simctl.setStrictListResponses([
+      new Error("first listapps failure"),
+      new Error("second listapps failure"),
+    ]);
+    const installApp = new InstallApp(
+      iosSimulatorDevice,
+      fakeAdbFactory,
+      fakeHost,
+      fakeLocator,
+      undefined,
+      simctl,
+      undefined,
+      fakePlist("com.example.app"),
+      new FakeInstalledAppsRepository(),
+    );
+
+    await expect(installApp.execute("/tmp/MyApp.app")).rejects.toThrow("second listapps failure");
+    expect(simctl.strictListCalls).toBe(2);
+    expect(simctl.getMethodCalls("installApp")).toHaveLength(0);
   });
 
   test("iOS simulator downgrade fails clearly when bundle ID cannot be read", async () => {

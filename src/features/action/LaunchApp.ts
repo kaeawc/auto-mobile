@@ -869,13 +869,19 @@ export class LaunchApp extends BaseVisualChange {
           this.assertLaunchNotAborted(signal);
           didTerminateOrClear = true;
         } else if (coldBoot) {
-          await perf.track("terminateApp", async () => {
+          const coldBootResult = await perf.track("terminateApp", async () => {
             return this.createAndroidColdBoot(this.device).execute(packageName, {
               skipObservation: true,
               userId: targetUserId,
             });
           });
           this.assertLaunchNotAborted(signal);
+          if (!coldBootResult.success) {
+            const error = `Cold boot could not stop ${packageName}: ${coldBootResult.error ?? "unknown error"}`;
+            logger.warn(`[LaunchApp] ${error}`);
+            perf.end();
+            return { success: false, packageName, userId: targetUserId, error };
+          }
           didTerminateOrClear = true;
         }
 

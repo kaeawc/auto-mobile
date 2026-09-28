@@ -1,5 +1,7 @@
 import {
   closeSync,
+  existsSync,
+  linkSync,
   mkdirSync,
   openSync,
   readFileSync,
@@ -9,6 +11,7 @@ import {
 } from "fs";
 import { dirname } from "path";
 import { isProcessRunning as defaultIsProcessRunning } from "../daemon/daemonFiles";
+import { errorMessage } from "./describeUnknownError";
 import { logger } from "./logger";
 import { toActionableError } from "../models/ActionableError";
 
@@ -211,11 +214,10 @@ export function tryAcquireExclusiveLock(
   // then both `wx`-create — so both would "own" it and enter migrateToLatest()
   // concurrently, reintroducing the PRIMARY KEY collision this lock prevents.
   //
-  // Instead claim the stale file with an atomic rename to a per-PID marker: only
-  // the opener whose rename succeeds consumed that exact stale instance; a racing
-  // opener's rename throws (the path is already gone) and it retries, finding the
-  // fresh lock held. The final `wx` create is still the arbiter against a third
-  // opener that creates a brand-new lock in the gap.
+  // Rename the path to a per-PID marker, then re-read the marker's PID and token.
+  // A competing opener may have replaced the stale path before our rename, so the
+  // rename alone does not prove that we claimed the instance we judged stale.
+  // The final `wx` create still arbitrates with a third opener after reclaim.
   const reclaimMarker = `${lockFilePath}.${pid}.reclaim`;
   try {
     renameSync(lockFilePath, reclaimMarker);
@@ -225,10 +227,42 @@ export function tryAcquireExclusiveLock(
     logger.debug(`src/utils/fileLock.ts fallback failed: ${error}`, error);
     return false;
   }
+  let claimedContent: string | undefined;
+  try {
+    claimedContent = readFileSync(reclaimMarker, "utf-8").trim();
+  } catch (error) {
+    logger.warn(`src/utils/fileLock.ts: reclaimed marker unreadable at ${reclaimMarker}: ${error}`);
+  }
+  const claimedOwner = claimedContent === undefined ? undefined : parseLockContent(claimedContent);
+  if (claimedOwner?.pid !== ownerPid || claimedOwner?.token !== tokenLine) {
+    // Hard-linking restores the displaced lock only if the destination is free;
+    // unlike rename-over-existing, it cannot clobber a third opener's fresh lock.
+    try {
+      linkSync(reclaimMarker, lockFilePath);
+    } catch (error) {
+      if (!existsSync(lockFilePath)) {
+        throw toActionableError(error, `Failed to restore displaced lock at ${lockFilePath}`);
+      }
+      // An occupied path is an expected race (including Windows EPERM); leave it.
+      logger.debug(
+        `src/utils/fileLock.ts: restore destination occupied at ${lockFilePath}: ${error}`,
+      );
+    }
+    try {
+      unlinkSync(reclaimMarker);
+    } catch (error) {
+      logger.warn(`src/utils/fileLock.ts: reclaim marker cleanup failed: ${error}`);
+    }
+    return false;
+  }
   try {
     unlinkSync(reclaimMarker);
-  } catch {
-    // Best-effort: the consumed stale marker is ours to remove.
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw toActionableError(error, `Failed to remove stale lock marker at ${reclaimMarker}`);
+    }
+    // Concurrent cleanup already removed the stale marker; final `wx` still arbitrates.
+    logger.debug(`src/utils/fileLock.ts: stale marker cleanup failed: ${error}`);
   }
   return writeExclusiveLockFile(lockFilePath, pid, ownerToken, metadata);
 }
@@ -303,8 +337,15 @@ export function releaseExclusiveLock(
 
   try {
     unlinkSync(lockFilePath);
-  } catch {
-    // Best-effort: removed concurrently between the read and here.
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      logger.warn(
+        `src/utils/fileLock.ts: failed to release exclusive lock at ${lockFilePath}: ${errorMessage(error)}`,
+      );
+      return;
+    }
+    // Concurrent release already removed the lock, so there is nothing to delete.
+    logger.debug(`src/utils/fileLock.ts: release raced with removal: ${error}`);
   }
 }
 

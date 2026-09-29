@@ -1,4 +1,5 @@
 import { errorMessage } from "../describeUnknownError";
+import { logger } from "../logger";
 import { ActionableError, type ExecResult } from "../../models";
 import { runExecSeam } from "../ExecSeam";
 import { execFileAsync as sharedExecFileAsync } from "../HostCommandExecutor";
@@ -109,14 +110,23 @@ export class AppBundleMetadataClient implements AppBundleMetadata {
     });
   }
 
-  private async parseEntitlements(output: ExecResult): Promise<PlistDictionary> {
+  private async parseEntitlements(output: ExecResult): Promise<PlistDictionary | null> {
+    if (!output.stdout.trim()) {
+      // Unsigned simulator builds may produce no entitlement plist at all.
+      logger.debug("[AppBundleMetadataClient] codesign returned no app-bundle entitlements");
+      return null;
+    }
+
     try {
       const parsed = await this.plist.readJsonBytes(Buffer.from(output.stdout, "utf8"));
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
         throw new Error("Expected an entitlement plist dictionary");
       }
       return parsed as PlistDictionary;
-    } catch {
+    } catch (error) {
+      logger.warn(
+        `[AppBundleMetadataClient] Unable to parse app-bundle entitlements: ${errorMessage(error)}`,
+      );
       throw new ActionableError(
         "Unable to parse app-bundle entitlements. The signed artifact returned malformed metadata.",
       );
@@ -128,6 +138,8 @@ export class AppBundleMetadataClient implements AppBundleMetadata {
       throw cancellationError();
     }
     if (isUnsignedBundle(error)) {
+      // codesign reports unsigned simulator bundles as a failed inspection; no entitlements is a valid result.
+      logger.debug("[AppBundleMetadataClient] codesign reports the app bundle is unsigned");
       return null;
     }
     if (error instanceof ActionableError) {

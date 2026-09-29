@@ -442,7 +442,8 @@ export class DeepLinkManager implements DeepLinkManager {
       const info = (await this.plist.readJsonFile(`${appPath}/Info.plist`)) as IosInfoPlist;
 
       const schemes = this.parseCFBundleURLSchemes(info);
-      const hosts = await this.parseAssociatedDomains(appPath, bundleId);
+      const associatedDomains = await this.parseAssociatedDomains(appPath, bundleId);
+      const hosts = associatedDomains.hosts;
       const supportedMimeTypes = this.parseDocumentTypes(info);
 
       return {
@@ -455,6 +456,7 @@ export class DeepLinkManager implements DeepLinkManager {
           intentFilters: this.synthesizeIosIntentFilters(schemes, hosts),
         },
         rawOutput: JSON.stringify(info),
+        note: associatedDomains.note,
       };
     } catch (error) {
       logger.error(`[DeepLinkManager] Failed to get iOS deep links for ${bundleId}: ${error}`);
@@ -499,19 +501,31 @@ export class DeepLinkManager implements DeepLinkManager {
    * Universal-link hosts from the bundle's typed code-signing entitlements.
    * Unsigned bundles or bundles without associated domains yield `[]`, not an error.
    */
-  private async parseAssociatedDomains(appPath: string, bundleId: string): Promise<string[]> {
+  private async parseAssociatedDomains(
+    appPath: string,
+    bundleId: string,
+  ): Promise<{ hosts: string[]; note?: string }> {
     const entitlements = await this.appBundleMetadata.readEntitlements({
       appBundlePath: appPath,
       deviceId: this.device!.deviceId,
       bundleId,
     });
+    if (!entitlements || Object.keys(entitlements).length === 0) {
+      // Missing entitlements are expected for unsigned simulator builds.
+      return {
+        hosts: [],
+        note: "The app is unsigned or has no entitlements; no associated domains are available.",
+      };
+    }
     const domains = entitlements?.["com.apple.developer.associated-domains"];
     if (!Array.isArray(domains)) {
-      return [];
+      return { hosts: [] };
     }
-    return domains
-      .filter((d): d is string => typeof d === "string" && d.startsWith("applinks:"))
-      .map((d) => d.slice("applinks:".length));
+    return {
+      hosts: domains
+        .filter((d): d is string => typeof d === "string" && d.startsWith("applinks:"))
+        .map((d) => d.slice("applinks:".length)),
+    };
   }
 
   /**

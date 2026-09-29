@@ -25,6 +25,7 @@ export interface DeepLinkResult {
   deepLinks: DeepLinkInfo;
   rawOutput?: string;
   error?: string;
+  note?: string;
 }
 
 /**

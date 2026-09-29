@@ -86,6 +86,7 @@ import type {
   WaitForConditionResult,
 } from "../observe/interfaces/WaitForCondition";
 import { hierarchyUpdatedAtToMillis } from "../observe/observeTimestamp";
+import { sequenceBackoff } from "../../utils/Backoff";
 import { dispatchAndroidCoordinateTap, dispatchIosCoordinateTap } from "./coordinateTapDispatch";
 import {
   checkAndroidTapHierarchyChange,
@@ -187,6 +188,12 @@ interface TapOnElementDependencies {
  * the new screen.
  */
 const POST_TAP_EFFECT_TIMEOUT_MS = 2500;
+const ENSURE_CHECKED_POLL_BACKOFF_MS = [50, 100, 200, 400] as const;
+const ensureCheckedPollBackoff = sequenceBackoff(ENSURE_CHECKED_POLL_BACKOFF_MS);
+const ENSURE_CHECKED_POLL_TIMEOUT_MS = ENSURE_CHECKED_POLL_BACKOFF_MS.reduce(
+  (total, delayMs) => total + delayMs,
+  0,
+);
 const POST_TAP_EFFECT_POLL_MS = 150;
 
 /**
@@ -2480,20 +2487,87 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     return { selection: refound, viewHierarchy: freshHierarchy };
   }
 
-  private ensureCheckedAfterTap(
+  private async ensureCheckedAfterTap(
     options: TapOnElementOptions,
     observation: ObserveResult,
-  ): string | undefined {
+    signal?: AbortSignal,
+  ): Promise<string | undefined> {
     if (options.ensureChecked === undefined) {
       return undefined;
     }
-    const refound = observation.viewHierarchy
-      ? this.findElementInHierarchy(options, observation.viewHierarchy).selection.element
-      : undefined;
-    const observed = refound ? isTruthyFlag(refound.checked) : "not found";
+    const readChecked = (): boolean | "not found" => {
+      const refound = observation.viewHierarchy
+        ? this.findElementInHierarchy(options, observation.viewHierarchy).selection.element
+        : undefined;
+      return refound ? isTruthyFlag(refound.checked) : "not found";
+    };
+    let observed: boolean | "not found" = readChecked();
+    if (observed !== options.ensureChecked) {
+      observed = await this.pollEnsureCheckedAfterTap(
+        readChecked,
+        options.ensureChecked,
+        observation,
+        signal,
+      );
+    }
     return observed === options.ensureChecked
       ? undefined
       : `tapOn ensureChecked: tapped element but checked is now ${observed} (expected ${options.ensureChecked})`;
+  }
+
+  private async applyEnsureCheckedResult(
+    result: TapOnElementResult,
+    options: TapOnElementOptions,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    if (options.ensureChecked === undefined) {
+      return;
+    }
+    const observation = result.observation;
+    if (observation === undefined) {
+      return;
+    }
+    const ensureCheckedError = await this.ensureCheckedAfterTap(options, observation, signal);
+    if (ensureCheckedError !== undefined) {
+      result.success = false;
+      result.error = ensureCheckedError;
+    }
+  }
+
+  private async pollEnsureCheckedAfterTap(
+    readChecked: () => boolean | "not found",
+    expected: boolean,
+    observation: ObserveResult,
+    signal?: AbortSignal,
+  ): Promise<boolean | "not found"> {
+    const deadline = this.timer.now() + ENSURE_CHECKED_POLL_TIMEOUT_MS;
+    let observed = readChecked();
+    for (let attempt = 1; this.timer.now() < deadline; attempt++) {
+      throwIfAborted(signal);
+      const delayMs = Math.min(
+        ensureCheckedPollBackoff.delayForAttempt(attempt),
+        deadline - this.timer.now(),
+      );
+      await this.timer.sleep(delayMs);
+      const remainingMs = deadline - this.timer.now();
+      if (remainingMs <= 0) {
+        break;
+      }
+      const freshHierarchy = await this.refreshViewHierarchy(
+        Math.min(POST_TAP_REFRESH_TIMEOUT_MS, remainingMs),
+        observation.screenSize,
+        signal,
+      );
+      if (!freshHierarchy) {
+        continue;
+      }
+      this.replaceObservationHierarchy(observation, freshHierarchy, true);
+      observed = readChecked();
+      if (observed === expected) {
+        return observed;
+      }
+    }
+    return observed;
   }
 
   /** @internal Test seam for pre-tap stability tests (#7992); not part of the public API. */
@@ -2555,6 +2629,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     let searchUntilStats: SearchUntilStats | undefined;
     let focusTarget: Element | undefined;
     let focusLabelText: string | undefined;
+    let ensureCheckedTapTimestamp: number | undefined;
 
     try {
       throwIfAborted(signal);
@@ -2851,6 +2926,9 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
                 throw unsupportedPlatformError(this.device.platform, "tap on elements");
             }
           });
+          if (options.ensureChecked !== undefined) {
+            ensureCheckedTapTimestamp = this.timer.now();
+          }
 
           if (preTapHash && this.strategy.retryTapIfNoChange) {
             await this.retryTapIfNoChange(
@@ -2890,6 +2968,9 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           signal,
           deferPredictionOutcome: true,
           deferPostActionScreenshot: true,
+          ...(options.ensureChecked !== undefined
+            ? { observationTimestampProvider: () => ensureCheckedTapTimestamp }
+            : {}),
           predictionContext: {
             toolName: "tapOn",
             toolArgs: {
@@ -2919,11 +3000,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         // The observation that established the effect must be returned and become
         // the caller's diff baseline, rather than the earlier source capture.
         result.observation = postTap.observation;
-        const ensureCheckedError = this.ensureCheckedAfterTap(options, result.observation);
-        if (ensureCheckedError) {
-          result.success = false;
-          result.error = ensureCheckedError;
-        }
+        await this.applyEnsureCheckedResult(result, options, signal);
         await this.captureTerminalObservationScreenshot(result.observation, perf, signal);
         await this.recordDeferredPredictionOutcome(result, result.observation);
         const selectedElements = await this.selectionStateTracker.finalize({

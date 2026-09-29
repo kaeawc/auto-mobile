@@ -22,7 +22,12 @@ function toggle(checked: boolean | string): Element {
 function createTap(
   initial: Element,
   afterTap = initial,
-): { tap: TapOnElement; calls: () => number; setNextElement: (element: Element) => void } {
+): {
+  tap: TapOnElement;
+  calls: () => number;
+  setNextElement: (element: Element) => void;
+  timer: FakeTimer;
+} {
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
   const selector = new FakeElementSelector(initial);
@@ -61,6 +66,7 @@ function createTap(
     tap,
     calls: () => tapCalls,
     setNextElement: (element) => selector.setNextElement(element),
+    timer,
   };
 }
 
@@ -112,6 +118,49 @@ describe("tapOn ensureChecked", () => {
     expect(result.success).toBe(true);
     expect(result.skipped).toBeUndefined();
     expect(calls()).toBe(1);
+  });
+
+  test("requires a post-dispatch hierarchy and accepts its flipped state", async () => {
+    const { tap, setNextElement, timer } = createTap(toggle("false"), toggle("true"));
+    let preTapCaptureTimestamp = 0;
+    let observationFloor = 0;
+    Object.assign(tap, {
+      refreshViewHierarchy: async () => {
+        timer.setCurrentTime(20);
+        preTapCaptureTimestamp = timer.now();
+        return { ...hierarchy, updatedAt: preTapCaptureTimestamp };
+      },
+      executeAndroidTap: async () => {
+        timer.setCurrentTime(30);
+        setNextElement(toggle("true"));
+      },
+      observedInteraction: async (
+        block: (result: ObserveResult) => Promise<unknown>,
+        options: { observationTimestampProvider?: () => number | undefined },
+      ) => {
+        const actionStartTime = timer.now();
+        const result = await block(observation);
+        observationFloor = options.observationTimestampProvider?.() ?? actionStartTime;
+        const staleCacheAccepted = preTapCaptureTimestamp >= observationFloor;
+        setNextElement(staleCacheAccepted ? toggle("false") : toggle("true"));
+        return {
+          ...(result as object),
+          observation: {
+            ...observation,
+            viewHierarchy: {
+              ...hierarchy,
+              updatedAt: staleCacheAccepted ? preTapCaptureTimestamp : observationFloor + 1,
+            },
+          },
+        };
+      },
+    });
+
+    const result = await tap.execute({ text: "Wi-Fi", action: "tap", ensureChecked: true });
+
+    expect(preTapCaptureTimestamp).toBeGreaterThan(0);
+    expect(observationFloor).toBeGreaterThan(preTapCaptureTimestamp);
+    expect(result.success).toBe(true);
   });
 
   test("does not ghost-retry when the freshly re-resolved toggle reached the desired state", async () => {
@@ -193,14 +242,24 @@ describe("tapOn ensureChecked", () => {
     expect(calls()).toBe(0);
   });
 
-  test("returns a typed failure when the checked state does not change", async () => {
-    const { tap, calls } = createTap(toggle("false"));
+  test("returns a typed failure after the bounded poll when checked never changes", async () => {
+    const { tap, calls, timer } = createTap(toggle("false"));
+    let refreshes = 0;
+    Object.assign(tap, {
+      refreshViewHierarchy: async () => {
+        refreshes++;
+        return hierarchy;
+      },
+    });
+    const startTime = timer.now();
 
     const result = await tap.execute({ text: "Wi-Fi", action: "tap", ensureChecked: true });
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("checked is now false");
     expect(calls()).toBe(1);
+    expect(refreshes).toBe(4);
+    expect(timer.now() - startTime).toBeLessThanOrEqual(750);
   });
 
   test("rejects a non-toggle and reports its affordances", async () => {

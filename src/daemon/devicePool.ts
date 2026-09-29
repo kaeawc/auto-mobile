@@ -1724,9 +1724,24 @@ export class DevicePool {
     if (device && current && current !== device) {
       return true;
     }
+    await this.consumeIntentionalShutdownAndRemove(deviceId, device);
+    return true;
+  }
+
+  private async consumeIntentionalShutdownAndRemove(
+    deviceId: string,
+    device: PooledDevice | undefined,
+  ): Promise<void> {
+    if (device?.sessionId) {
+      // removeDevice would refuse an assigned entry; keep the marker so it still
+      // applies (and suppresses recovery) once the session releases (#6392).
+      logger.warn(
+        `[DevicePool] Retaining intentionally stopped device ${deviceId} until session ${device.sessionId} releases it`,
+      );
+      return;
+    }
     this.intentionalShutdowns.delete(deviceId);
     await this.removeDevice(deviceId, true, device);
-    return true;
   }
 
   private async shouldDeferDisconnectCleanup(
@@ -1767,7 +1782,14 @@ export class DevicePool {
       return;
     }
     if (device.sessionId) {
-      await this.removeDevice(deviceId, true, device);
+      // removeDevice refuses assigned entries. A disconnect reaching here with
+      // sessionId still set is a release deferred behind late session teardown
+      // (releaseCapturedDevice); freeing the serial now could hand it out
+      // mid-teardown. Retain it — the deferred release returns it to idle and
+      // the next disconnect evaluation removes it (#6392).
+      logger.warn(
+        `[DevicePool] Retaining disconnected device ${deviceId} until session ${device.sessionId} teardown completes`,
+      );
       await this.finishEmulatorLossIncident(incidentId, "not-attempted");
       return;
     }
@@ -2058,7 +2080,12 @@ export class DevicePool {
         }
       }
 
-      await this.evictMissingPooledDevice(device, "not present in refresh discovery", true);
+      if (this.shouldRebootDisconnectedAndroidDevice(device)) {
+        // This prune runs inside assignmentMutex; the recovery reboot must not (#6391).
+        this.startDetachedRecoveringEviction(device, "not present in refresh discovery");
+      } else {
+        await this.evictMissingPooledDevice(device, "not present in refresh discovery", true);
+      }
       removedCount++;
     }
 
@@ -2895,13 +2922,7 @@ export class DevicePool {
     }
 
     if (deferRecovery && this.shouldRebootDisconnectedAndroidDevice(device)) {
-      const eviction = this.evictMissingPooledDevice(device, "not present in adb devices", true);
-      if (this.devices.get(device.id) === device) {
-        device.status = "error";
-      }
-      void eviction.catch((error) => {
-        logger.warn(`[DevicePool] Deferred eviction failed for ${device.id}: ${error}`, error);
-      });
+      this.startDetachedRecoveringEviction(device, "not present in adb devices");
       return false;
     }
     if (idleEviction) {
@@ -3020,6 +3041,23 @@ export class DevicePool {
     return assignmentLockHeld
       ? await replaceIfStillIdle()
       : await this.assignmentMutex.runExclusive(replaceIfStillIdle);
+  }
+
+  /**
+   * Start a recovering eviction without awaiting it, marking the entry
+   * unassignable meanwhile. The Android recovery it runs stops and cold-boots an
+   * emulator for minutes, so no assignmentMutex critical section may await it
+   * (#6391): the lifecycle lease serializes the boot instead, and the eviction
+   * re-validates pool identity after each await.
+   */
+  private startDetachedRecoveringEviction(device: PooledDevice, reason: string): void {
+    const eviction = this.evictMissingPooledDevice(device, reason, true);
+    if (this.devices.get(device.id) === device) {
+      device.status = "error";
+    }
+    void eviction.catch((error) => {
+      logger.warn(`[DevicePool] Deferred eviction failed for ${device.id}: ${error}`, error);
+    });
   }
 
   private async evictMissingPooledDevice(
@@ -7169,11 +7207,12 @@ export class DevicePool {
     unavailableMessage: string,
     readinessReservationOwners?: ReadonlySet<symbol>,
   ): Promise<PooledDevice> {
-    if (await this.ensurePooledDevicePresentForUse(device, false, true)) {
+    // Runs under assignmentMutex, so a recovery reboot is detached (#6391).
+    if (await this.ensurePooledDevicePresentForUse(device, true, true)) {
       return device;
     }
     const replacement = this.devices.get(device.id);
-    if (!replacement) {
+    if (!replacement || (replacement === device && device.status === "error")) {
       throw new ActionableError(unavailableMessage);
     }
     // An exact-device request names the serial, and the quarantine is precisely

@@ -26,6 +26,49 @@ const corpus = {
 const commitImeId = "dev.jasonpearson.automobile.ctrlproxy/.ime.CtrlProxyIme";
 const priorImeId = "com.example.keyboard/.Ime";
 
+function createAdbFactory(adb: FakeAdbExecutor): AdbClientFactory {
+  // The catalog verifies component state with argv reads after `ime set`.
+  // Existing command stubs model the commit path; this adapter models the
+  // installed catalog and the device's post-selection readback.
+  let selectedIme: string | undefined;
+  const execute = adb.execute.bind(adb);
+  const catalogAdb = new Proxy(adb, {
+    get(target, property, receiver) {
+      if (property === "execute") {
+        return async (args: string[], options?: Parameters<FakeAdbExecutor["execute"]>[1]) => {
+          const result = await execute(args, options);
+          const command = args.join(" ");
+          if (command === "shell ime list -a -s" && !result.stdout.trim()) {
+            return { ...result, stdout: `${priorImeId}\n${commitImeId}\n` };
+          }
+          if (command === "shell ime list -s" && !result.stdout.trim()) {
+            return { ...result, stdout: `${priorImeId}\n${commitImeId}\n` };
+          }
+          if (command.startsWith("shell ime set ") && !result.stderr.trim()) {
+            selectedIme = args[3];
+          }
+          if (command === "shell settings get secure default_input_method" && selectedIme) {
+            return { ...result, stdout: selectedIme };
+          }
+          return result;
+        };
+      }
+      if (property === "executeCommand") {
+        return async (...args: Parameters<FakeAdbExecutor["executeCommand"]>) => {
+          const result = await target.executeCommand(...args);
+          if (args[0].startsWith("shell ime set ") && !result.stderr.trim()) {
+            selectedIme = args[0].slice("shell ime set ".length);
+          }
+          return result;
+        };
+      }
+      const value = Reflect.get(target, property, receiver);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+  return { create: () => catalogAdb };
+}
+
 function harness(device: BootedDevice) {
   const adb = new FakeAdbExecutor();
   adb.setCommandResponseSequence("shell settings get secure default_input_method", [
@@ -55,7 +98,7 @@ function harness(device: BootedDevice) {
       return { success: true };
     },
   };
-  const adbFactory: AdbClientFactory = { create: () => adb };
+  const adbFactory = createAdbFactory(adb);
   return {
     adb,
     inserted,

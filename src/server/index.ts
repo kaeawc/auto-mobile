@@ -528,7 +528,7 @@ function extractInternalAcceptanceDiscoveryOrder(
   return value === "forward" || value === "reverse" ? value : undefined;
 }
 
-function stripInternalToolParams(params: unknown): unknown {
+export function stripInternalToolParams(params: unknown): unknown {
   if (!params || typeof params !== "object" || Array.isArray(params)) {
     return params;
   }

@@ -2,6 +2,7 @@ import type { DaemonClientLike } from "../../src/daemon/client";
 import { DaemonUnavailableError } from "../../src/daemon/client";
 import { DAEMON_BOUND_SESSION_PARAM } from "../../src/daemon/constants";
 import type { DaemonNotification } from "../../src/daemon/types";
+import { FakeIdGenerator } from "./FakeIdGenerator";
 
 export interface FakeDaemonClientOptions {
   toolResult?: any;
@@ -68,12 +69,18 @@ export class FakeDaemonClient implements DaemonClientLike {
   }
 
   readonly callToolProgressTokens: Array<string | number | undefined> = [];
+  readonly callToolRequestIds: string[] = [];
+  private readonly requestIdGenerator = new FakeIdGenerator();
 
   async callTool(
     toolName: string,
     params: Record<string, any>,
     progressToken?: string | number,
+    onRequestId?: (requestId: string) => void,
   ): Promise<any> {
+    const requestId = this.requestIdGenerator.next();
+    this.callToolRequestIds.push(requestId);
+    onRequestId?.(requestId);
     const recordedParams = { ...params };
     delete recordedParams[DAEMON_BOUND_SESSION_PARAM];
     this.callToolCalls.push({ toolName, params: recordedParams });
@@ -146,12 +153,14 @@ export class FakeDaemonClient implements DaemonClientLike {
     progress: number,
     total?: number,
     message?: string,
+    requestId = this.callToolRequestIds.at(-1),
   ): void {
     for (const handler of this.notificationHandlers) {
       handler({
         type: "daemon_notification",
         method: "notifications/progress",
         progressToken,
+        requestId,
         progress,
         ...(total !== undefined ? { total } : {}),
         ...(message !== undefined ? { message } : {}),

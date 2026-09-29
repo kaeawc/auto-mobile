@@ -325,12 +325,20 @@ describe("DaemonClient per-request timeout is extended by progress, bounded (#62
     fakeTimer = new FakeTimer();
   });
 
-  function deliverProgress(client: DaemonClient, progressToken: string | number): void {
+  function deliverProgress(
+    client: DaemonClient,
+    progressToken: string | number,
+    requestId = [...(client as any).pendingRequests.entries()].find(
+      ([, pending]: [string, { progressToken?: string | number }]) =>
+        pending.progressToken === progressToken,
+    )?.[0],
+  ): void {
     const frame =
       JSON.stringify({
         type: "daemon_notification",
         method: PROGRESS_NOTIFICATION_METHOD,
         progressToken,
+        requestId,
         progress: 1,
         total: 1,
       }) + "\n";
@@ -424,5 +432,30 @@ describe("DaemonClient per-request timeout is extended by progress, bounded (#62
     } finally {
       await client.close();
     }
+  });
+
+  test("two requests reusing a token extend only the matching request id", async () => {
+    const client = createConnectedClient(fakeTimer);
+    let firstId = "";
+    let secondId = "";
+    const first = client.callTool("tapOn", {}, "reused", (id) => {
+      firstId = id;
+    });
+    const second = client.callTool("tapOn", {}, "reused", (id) => {
+      secondId = id;
+    });
+    const firstResult = first.catch((error: unknown) => error);
+    const secondResult = second.catch((error: unknown) => error);
+
+    expect(firstId).not.toBe(secondId);
+    fakeTimer.advanceTime(20_000);
+    deliverProgress(client, "reused", secondId);
+    deliverProgress(client, "wrong-token", firstId);
+    fakeTimer.advanceTime(10_000);
+
+    expect(await firstResult).toBeInstanceOf(McpTimeoutError);
+    expect((client as any).pendingRequests.has(secondId)).toBe(true);
+    await client.close();
+    expect(await secondResult).toBeInstanceOf(DaemonUnavailableError);
   });
 });

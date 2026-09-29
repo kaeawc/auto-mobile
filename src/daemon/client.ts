@@ -688,7 +688,9 @@ export class DaemonClient {
       // fires and rejects the call out from under it (issue #6222 review,
       // P1). Bounded by ProgressExtendableDeadline's own ceiling, so a
       // request that stops progressing is still killed.
-      this.extendPendingRequestOnProgress(notification.progressToken);
+      if (notification.requestId !== undefined) {
+        this.extendPendingRequestOnProgress(notification.requestId, notification.progressToken);
+      }
     }
     for (const handler of this.notificationHandlers) {
       try {
@@ -700,42 +702,32 @@ export class DaemonClient {
   }
 
   /**
-   * Reset the local timer for whichever pending request registered this
-   * `progressToken` (only requests sent with one carry `deadline`/
-   * `progressToken` at all -- see `sendRequest`). A token with no matching
-   * pending request (the call already settled, or a stray/unexpected frame)
-   * is silently ignored, matching how the daemon's own progress relay treats
-   * an unmatched token.
+   * Reset only the pending request identified by both its id and token. A
+   * missing or mismatched request is ignored, including after a token is reused.
    */
-  private extendPendingRequestOnProgress(progressToken: string | number): void {
-    for (const [requestId, pending] of this.pendingRequests) {
-      if (
-        pending.progressToken !== progressToken ||
-        !pending.deadline ||
-        pending.requestTimeoutMs === undefined
-      ) {
-        continue;
-      }
-      const nowMs = this.timer.now();
-      pending.deadline.extendOnProgress(nowMs, pending.requestTimeoutMs);
-      const remainingMs = pending.deadline.value - nowMs;
-      if (remainingMs <= 0) {
-        // Already at (or past) the hard ceiling -- let the existing timer
-        // fire on its own schedule rather than rescheduling to a
-        // non-positive delay, which would fire immediately anyway.
-        return;
-      }
-      this.timer.clearTimeout(pending.timeout);
-      pending.timeout = this.scheduleRequestTimeout(
-        requestId,
-        pending.toolName,
-        remainingMs,
-        pending.reject,
-      );
-      // A progressToken is caller-chosen per in-flight call; at most one
-      // pending request can match.
+  private extendPendingRequestOnProgress(requestId: string, progressToken: string | number): void {
+    const pending = this.pendingRequests.get(requestId);
+    if (
+      pending?.progressToken !== progressToken ||
+      !pending.deadline ||
+      pending.requestTimeoutMs === undefined
+    ) {
       return;
     }
+    const nowMs = this.timer.now();
+    pending.deadline.extendOnProgress(nowMs, pending.requestTimeoutMs);
+    const remainingMs = pending.deadline.value - nowMs;
+    if (remainingMs <= 0) {
+      // The existing timer already covers a deadline at or past the ceiling.
+      return;
+    }
+    this.timer.clearTimeout(pending.timeout);
+    pending.timeout = this.scheduleRequestTimeout(
+      requestId,
+      pending.toolName,
+      remainingMs,
+      pending.reject,
+    );
   }
 
   /**
@@ -868,6 +860,7 @@ export class DaemonClient {
     toolName: string,
     params: Record<string, any>,
     progressToken?: string | number,
+    onRequestId?: (requestId: string) => void,
   ): Promise<any> {
     return this.sendRequest(
       "tools/call",
@@ -876,6 +869,7 @@ export class DaemonClient {
         arguments: params,
       },
       progressToken,
+      onRequestId,
     );
   }
 
@@ -890,6 +884,7 @@ export class DaemonClient {
     method: string,
     params: Record<string, any>,
     progressToken?: string | number,
+    onRequestId?: (requestId: string) => void,
   ): Promise<any> {
     // Ensure we're connected
     if (!this.connected) {
@@ -938,6 +933,7 @@ export class DaemonClient {
         requestTimeoutMs,
         disconnectCause,
       });
+      onRequestId?.(requestId);
 
       if (!this.socket) {
         this.timer.clearTimeout(timeout);
@@ -1115,6 +1111,7 @@ export interface DaemonClientLike {
     toolName: string,
     params: Record<string, any>,
     progressToken?: string | number,
+    onRequestId?: (requestId: string) => void,
   ): Promise<any>;
   readResource(uri: string, params?: Record<string, any>): Promise<any>;
   callDaemonMethod(

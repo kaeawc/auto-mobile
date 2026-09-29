@@ -10,10 +10,13 @@ import {
   writeFileSync,
 } from "fs";
 import { dirname } from "path";
-import { isProcessRunning as defaultIsProcessRunning } from "../daemon/daemonFiles";
+import { isProcessRunning as defaultIsProcessRunning } from "./processLiveness";
 import { errorMessage } from "./describeUnknownError";
 import { logger } from "./logger";
 import { toActionableError } from "../models/ActionableError";
+
+const isProcessRunningWithDebug = (pid: number): boolean =>
+  defaultIsProcessRunning(pid, { debugLog: logger.debug });
 
 /**
  * The canonical cross-process file-lock primitive (issue #2794).
@@ -155,7 +158,7 @@ export function tryAcquireExclusiveLock(
   options: ExclusiveLockOptions = {},
 ): boolean {
   const pid = options.pid ?? process.pid;
-  const isProcessRunning = options.isProcessRunning ?? defaultIsProcessRunning;
+  const isProcessRunning = options.isProcessRunning ?? isProcessRunningWithDebug;
   const reclaimOwnPid = options.reclaimOwnPid ?? false;
   const ownerToken = options.ownerToken;
   const metadata = options.metadata;
@@ -277,7 +280,7 @@ export function tryAcquireExclusiveLock(
  */
 export function readLockOwnerPid(
   lockFilePath: string,
-  isProcessRunning: (pid: number) => boolean = defaultIsProcessRunning,
+  isProcessRunning: (pid: number) => boolean = isProcessRunningWithDebug,
 ): number | undefined {
   let content: string;
   try {

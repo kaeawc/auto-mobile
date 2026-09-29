@@ -1,6 +1,8 @@
 import { platform } from "node:os";
 import { getMcpServerVersion } from "../utils/mcpVersion";
+import { DAEMON_NON_FINITE_ENCODED_PARAM } from "../utils/nonFiniteJson";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
+export { DAEMON_NON_FINITE_ENCODED_PARAM } from "../utils/nonFiniteJson";
 
 /**
  * Get the user ID for the current process
@@ -353,7 +355,6 @@ export const DAEMON_RELEASED_SESSION_PARAM = "__autoMobileReleasedSessionUuid";
  * in-memory / stdio clients (whose requests were never encoded) skip the revival
  * walk entirely. It is stripped before the tool runs (see `stripInternalToolParams`).
  */
-export const DAEMON_NON_FINITE_ENCODED_PARAM = "__autoMobileNonFiniteEncoded";
 
 /**
  * Every internal argument name `server/index.ts` may inject into a tool call's

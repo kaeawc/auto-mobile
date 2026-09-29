@@ -14,6 +14,7 @@ import {
 import { Timer, defaultTimer } from "./SystemTimer";
 import { toActionableError } from "../models/ActionableError";
 import { raceWithDeadline } from "./raceWithDeadline";
+import { isProcessRunning } from "./processLiveness";
 
 export {
   parseAutomobileLogFormat,
@@ -419,8 +420,9 @@ const ABANDONED_LOG_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 // `daemon-launch-<pid>.log`'s fd is inherited by the detached daemon child, so
 // it must not be swept while that daemon is live even though the manager named
 // in the filename has exited (issue #6194). The daemon pidfile module is
-// required lazily so this foundational logger module keeps no static import of
-// it (daemonFiles.ts imports THIS module) and it is resolved only at sweep time.
+// required lazily for readPidFileDataSync and listDaemonPidFilesSync so this
+// foundational logger module keeps no static import of daemonFiles.ts (which
+// imports THIS module) and it is resolved only at sweep time.
 //
 // Crucially this considers EVERY daemon namespace that could own a launch log
 // in the shared log dir — the pruning process's own pid file plus co-located
@@ -431,7 +433,7 @@ const ABANDONED_LOG_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 // to `pruneLogFiles` via `daemonPidFiles` + `readDaemonOwner` below.
 const isDaemonRunning = (): boolean => {
   try {
-    const { readPidFileDataSync, isProcessRunning, listDaemonPidFilesSync } =
+    const { readPidFileDataSync, listDaemonPidFilesSync } =
       require("../daemon/daemonFiles") as typeof import("../daemon/daemonFiles");
     const { pidFiles, uncertain } = listDaemonPidFilesSync();
     // Enumeration incomplete (custom namespace / failed scan): a live daemon may

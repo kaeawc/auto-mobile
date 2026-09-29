@@ -5,7 +5,7 @@ import type { Timer } from "../utils/SystemTimer";
 import { defaultTimer } from "../utils/SystemTimer";
 
 export const DEFAULT_MAX_RETAINED_EMULATOR_LOSS_INCIDENTS = 50;
-export const DEVICE_LOSS_OUTCOME_CODE = "device_lost";
+export { DEVICE_LOSS_OUTCOME_CODE, DeviceLostError } from "../models/DeviceLostError";
 
 export type EmulatorLossDetectionPath =
   | "watched-process-exit"
@@ -54,19 +54,6 @@ export interface EmulatorLossIncident {
     attempts: EmulatorLossRecoveryAttempt[];
     outcome?: EmulatorRecoveryOutcome;
   };
-}
-
-export class DeviceLostError extends Error {
-  readonly code = DEVICE_LOSS_OUTCOME_CODE;
-
-  constructor(
-    readonly deviceId: string,
-    reason: string,
-    readonly incidentId?: string,
-  ) {
-    super(reason);
-    this.name = "DeviceLostError";
-  }
 }
 
 export interface OpenEmulatorLossIncidentInput {

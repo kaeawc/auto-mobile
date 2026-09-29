@@ -48,6 +48,8 @@ export interface StreamSocketAuthenticator {
    * device bound to a different session.
    */
   authorize(input: StreamAuthorizeInput): void;
+  /** Canonical base identity for lease ownership, when available. */
+  resolveSessionIdentity?(sessionUuid?: string): string | undefined;
 }
 
 /** Check the device selected by discovery before starting device-side work. */
@@ -76,6 +78,20 @@ export class SessionScopedStreamAuthenticator implements StreamSocketAuthenticat
     private readonly env: NodeJS.ProcessEnv = process.env,
   ) {}
 
+  resolveSessionIdentity(sessionUuid?: string): string | undefined {
+    const uuid = typeof sessionUuid === "string" ? sessionUuid.trim() : "";
+    if (!uuid) {
+      return undefined;
+    }
+    if (!authEnforced(this.env)) {
+      return uuid;
+    }
+    const sessionManager = this.resolveSessionManager();
+    return sessionManager
+      ? (resolveToolSelectionBaseSessionUuid(uuid, sessionManager) ?? uuid)
+      : uuid;
+  }
+
   authorize({ sessionUuid, deviceId }: StreamAuthorizeInput): void {
     if (!authEnforced(this.env)) {
       return;
@@ -100,7 +116,7 @@ export class SessionScopedStreamAuthenticator implements StreamSocketAuthenticat
 
     // Resolve derived `${base}:${label}` device-label sessions to the base whose
     // identity the daemon tracks, exactly as the main socket does (#4611/#4655).
-    const baseSessionUuid = resolveToolSelectionBaseSessionUuid(uuid, sessionManager) ?? uuid;
+    const baseSessionUuid = this.resolveSessionIdentity(uuid) ?? uuid;
     if (!sessionManager.getSession(baseSessionUuid)) {
       throw new ActionableError(
         `${this.operation} rejected: session ${uuid} is not an active daemon session (unknown or expired).`,

@@ -69,6 +69,7 @@ tool before opening the socket; every request must carry that tool's
 `sessionUuid`. The example always includes `deviceId` and `platform` so the iOS
 path cannot silently fall back to Android. The stream reconnects after transient
 network failures; browser viewers may need to reconnect too.
+With `AUTOMOBILE_DAEMON_STREAM_AUTH=0`, lease ownership enforcement is advisory only and is not enforced.
 
 ## Troubleshooting
 

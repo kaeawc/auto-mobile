@@ -20,6 +20,7 @@ import Foundation
 public final class CtrlProxy {
     public static let defaultPort: UInt16 = 8765
 
+    private let port: UInt16
     private let perf: PerfProvider
     private let frameContext: FrameContext
     private let sdkHierarchyCache: SdkHierarchyCache
@@ -139,6 +140,7 @@ public final class CtrlProxy {
             }
         )
 
+        self.port = port
         self.perf = perf
         self.frameContext = frameContext
         self.sdkHierarchyCache = sdkHierarchyCache
@@ -258,9 +260,9 @@ public final class CtrlProxy {
             applyClientPresence()
 
             print("[CtrlProxy] Service started")
-            print("[CtrlProxy] WebSocket server listening on port \(Self.defaultPort)")
-            print("[CtrlProxy] Endpoint: ws://localhost:\(Self.defaultPort)/ws")
-            print("[CtrlProxy] Health check: http://localhost:\(Self.defaultPort)/health")
+            print("[CtrlProxy] WebSocket server listening on port \(port)")
+            print("[CtrlProxy] Endpoint: ws://localhost:\(port)/ws")
+            print("[CtrlProxy] Health check: http://localhost:\(port)/health")
             print("[CtrlProxy] Device samplers idle until a client connects")
             print("[CtrlProxy] Ready to accept connections")
         }

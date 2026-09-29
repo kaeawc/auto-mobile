@@ -1,4 +1,4 @@
-import { unsupportedPlatformError } from "../../models/ActionableError";
+import { toActionableError, unsupportedPlatformError } from "../../models/ActionableError";
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
 import { ActionableError, BootedDevice, HomeScreenResult } from "../../models";
@@ -8,6 +8,8 @@ import { AndroidCtrlProxyClient } from "../observe/android";
 import { logger } from "../../utils/logger";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { combineWithAmbientAbort } from "../../utils/AbortContext";
+import { deriveIosScreenIdentity } from "../observe/ios/IosScreenIdentity";
+import type { CtrlProxyHierarchy } from "../observe/ios/types";
 
 /**
  * Navigates to the home screen using the accessibility service global action
@@ -24,6 +26,9 @@ export class HomeScreen extends BaseVisualChange {
    * request signal (issue #6289).
    */
   private static readonly HOME_KEYEVENT_TIMEOUT_MS = 3000;
+  private static readonly IOS_HOME_VERIFICATION_TIMEOUT_MS = 4000;
+  private static readonly IOS_HOME_HIERARCHY_READ_TIMEOUT_MS = 1000;
+  private static readonly IOS_HOME_RETRY_DELAYS_MS: readonly number[] = [300, 600, 900];
 
   constructor(device: BootedDevice, adb: AdbClient | null = null, timer: Timer = defaultTimer) {
     super(device, adb, timer);
@@ -112,7 +117,73 @@ export class HomeScreen extends BaseVisualChange {
     const client = IOSCtrlProxyClient.getInstance(this.device);
     const result = await client.requestPressHome(5000, perf);
     if (!result.success) {
-      throw new Error(result.error ?? "Failed to press iOS home button");
+      throw new ActionableError(result.error ?? "Failed to press iOS home button");
     }
+    await this.verifyIosHomeForeground(client, perf);
+  }
+
+  private async verifyIosHomeForeground(
+    client: IOSCtrlProxyClient,
+    perf?: PerformanceTracker,
+    retryDelaysMs: readonly number[] = HomeScreen.IOS_HOME_RETRY_DELAYS_MS,
+  ): Promise<void> {
+    const deadline = this.timer.now() + HomeScreen.IOS_HOME_VERIFICATION_TIMEOUT_MS;
+    let lastHierarchy: CtrlProxyHierarchy | undefined;
+
+    for (let attempt = 0; ; attempt++) {
+      const remainingMs = deadline - this.timer.now();
+      if (remainingMs <= 0) {
+        break;
+      }
+      const hierarchy = await this.readIosHomeForeground(client, perf, remainingMs);
+      if (hierarchy) {
+        lastHierarchy = hierarchy;
+      }
+      if (hierarchy?.packageName === "com.apple.springboard" && this.timer.now() < deadline) {
+        return;
+      }
+
+      const delayMs = retryDelaysMs[attempt];
+      if (delayMs === undefined || this.timer.now() + delayMs >= deadline) {
+        break;
+      }
+      await this.timer.sleep(delayMs);
+    }
+
+    this.throwIosHomeNotForeground(client, lastHierarchy);
+  }
+
+  private async readIosHomeForeground(
+    client: IOSCtrlProxyClient,
+    perf: PerformanceTracker | undefined,
+    remainingMs: number,
+  ): Promise<CtrlProxyHierarchy | undefined> {
+    try {
+      // Request a fresh foreground hierarchy after the press. A cached
+      // pre-press hierarchy cannot establish the Home postcondition.
+      const response = await client.requestHierarchySync(
+        perf,
+        true,
+        undefined,
+        Math.min(HomeScreen.IOS_HOME_HIERARCHY_READ_TIMEOUT_MS, remainingMs),
+      );
+      return response?.hierarchy;
+    } catch (error) {
+      throw toActionableError(error, "Failed to verify the iOS foreground app after pressing Home");
+    }
+  }
+
+  private throwIosHomeNotForeground(
+    client: IOSCtrlProxyClient,
+    lastHierarchy: CtrlProxyHierarchy | undefined,
+  ): never {
+    const foregroundApp = lastHierarchy?.packageName ?? "unknown app";
+    const modal = lastHierarchy
+      ? deriveIosScreenIdentity(client.convertToViewHierarchyResult(lastHierarchy))?.components
+      : undefined;
+    const alert = modal?.modalClass
+      ? `: a system alert (${modal.modalClass}${modal.modalTitle ? ` '${modal.modalTitle}'` : ""}) is blocking Home; dismiss it first`
+      : "; the home screen did not become foreground";
+    throw new ActionableError(`Home press did not background ${foregroundApp}${alert}`);
   }
 }

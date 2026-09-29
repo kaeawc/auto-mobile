@@ -44,13 +44,23 @@ final class RewriteFakeGesturePerformer: GesturePerforming {
     private var keyboardOpen = false
     var keyCalls: [(String, [String])] = []
     var keyError: CommandError?
+    var tapCalls = 0
+    var multiFingerSwipeCalls = 0
+    var pinchCalls = 0
+    var clearTextCalls = 0
+    var selectAllCalls = 0
+    var imeActionCalls = 0
+    var shakeCalls = 0
+    var actionCalls = 0
+    var activateAccessibilityLinkCalls = 0
+    var setOrientationCalls = 0
 
     func pressKey(key: String, modifiers: [String]) throws {
         if let keyError { throw keyError }
         keyCalls.append((key, modifiers))
     }
 
-    func tap(x _: Double, y _: Double, duration _: TimeInterval) throws {}
+    func tap(x _: Double, y _: Double, duration _: TimeInterval) throws { tapCalls += 1 }
     func doubleTap(x _: Double, y _: Double) throws {}
     func longPress(x _: Double, y _: Double, duration _: TimeInterval) throws {}
     func swipe(startX _: Double, startY _: Double, endX _: Double, endY _: Double, duration _: TimeInterval) throws {}
@@ -58,7 +68,7 @@ final class RewriteFakeGesturePerformer: GesturePerforming {
         startX _: Double, startY _: Double, endX _: Double, endY _: Double,
         fingerCount _: Int, fingerSpacing _: Double, duration _: TimeInterval
     )
-        throws {}
+        throws { multiFingerSwipeCalls += 1 }
     func drag(
         startX _: Double, startY _: Double, endX _: Double, endY _: Double,
         pressDuration _: TimeInterval, dragDuration _: TimeInterval, holdDuration _: TimeInterval
@@ -68,13 +78,18 @@ final class RewriteFakeGesturePerformer: GesturePerforming {
         centerX _: Double, centerY _: Double, distanceStart _: Double, distanceEnd _: Double,
         rotationDegrees _: Double, duration _: TimeInterval
     )
-        throws -> PinchGesturePath { .eventPath }
+        throws -> PinchGesturePath
+    {
+        pinchCalls += 1
+        return .eventPath
+    }
+
     func typeText(text _: String) throws {}
     func appendText(text _: String) throws {}
     func setText(resourceId _: String, text _: String) throws {}
-    func clearText(resourceId _: String?) throws {}
-    func selectAll() throws {}
-    func performImeAction(_: String) throws {}
+    func clearText(resourceId _: String?) throws { clearTextCalls += 1 }
+    func selectAll() throws { selectAllCalls += 1 }
+    func performImeAction(_: String) throws { imeActionCalls += 1 }
     func keyboard(action: String) throws -> Bool {
         switch action {
         case "open": keyboardOpen = true
@@ -85,14 +100,21 @@ final class RewriteFakeGesturePerformer: GesturePerforming {
     }
 
     func clipboard(action _: String, text _: String?) throws -> String? { nil }
-    func performAction(_: String, resourceId _: String?, label _: String?) throws {}
-    func activateAccessibilityLink(text _: String, occurrence _: Int, ownerResourceId _: String?) throws {}
+    func performAction(_: String, resourceId _: String?, label _: String?) throws { actionCalls += 1 }
+    func activateAccessibilityLink(text _: String, occurrence _: Int, ownerResourceId _: String?) throws {
+        activateAccessibilityLinkCalls += 1
+    }
+
     func getScreenshot() throws -> Data { Data() }
-    func setOrientation(_ orientation: String) throws { self.orientation = orientation }
+    func setOrientation(_ orientation: String) throws {
+        setOrientationCalls += 1
+        self.orientation = orientation
+    }
+
     func getOrientation() -> String { orientation }
     func pressHome() throws {}
     func pressBack() throws {}
-    func shake() throws {}
+    func shake() throws { shakeCalls += 1 }
     func pressButton(_: String) throws {}
     func openRecentApps() throws -> Bool { true }
     func launchApp(bundleId _: String) throws {}

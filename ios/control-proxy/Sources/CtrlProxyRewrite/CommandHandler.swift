@@ -235,6 +235,7 @@ final class CommandHandler: CommandHandling {
     }
 
     // MARK: - Perf helpers
+
     //
     // The rewrite's expression of the reference `PerfProvider.track` over the injected
     // `any PerfTracking` (`serial` opens the scope, `end` closes it in `defer`). `tracked`
@@ -579,7 +580,12 @@ final class CommandHandler: CommandHandling {
         }
     }
 
-    private func handleTapCoordinates(_ request: RequestTapCoordinates, startTime: Date) async throws -> WebSocketResponse {
+    private func handleTapCoordinates(
+        _ request: RequestTapCoordinates,
+        startTime: Date
+    )
+        async throws -> WebSocketResponse
+    {
         try requireFinite(request.x, field: "x")
         try requireFinite(request.y, field: "y")
         let duration = request.duration ?? 0
@@ -632,15 +638,17 @@ final class CommandHandler: CommandHandling {
         let fingerSpacing = request.offset ?? 25
         try requireFinite(fingerSpacing, field: "offset")
 
-        try await gesturePerformer.multiFingerSwipe(
-            startX: request.x1,
-            startY: request.y1,
-            endX: request.x2,
-            endY: request.y2,
-            fingerCount: fingerCount,
-            fingerSpacing: fingerSpacing,
-            duration: TimeInterval(duration) / 1000.0
-        )
+        try await performContextCheckedGesture(expected: request.frameContext) {
+            try self.gesturePerformer.multiFingerSwipe(
+                startX: request.x1,
+                startY: request.y1,
+                endX: request.x2,
+                endY: request.y2,
+                fingerCount: fingerCount,
+                fingerSpacing: fingerSpacing,
+                duration: TimeInterval(duration) / 1000.0
+            )
+        }
 
         return WebSocketResponse.success(
             type: ResponseType.multiFingerSwipeResult.rawValue,
@@ -681,14 +689,16 @@ final class CommandHandler: CommandHandling {
         try requireFinite(request.distanceStart, field: "distanceStart")
         try requireFinite(request.distanceEnd, field: "distanceEnd")
         try requireFinite(Double(request.rotationDegrees ?? 0), field: "rotationDegrees")
-        let path = try await gesturePerformer.pinch(
-            centerX: request.centerX,
-            centerY: request.centerY,
-            distanceStart: request.distanceStart,
-            distanceEnd: request.distanceEnd,
-            rotationDegrees: Double(request.rotationDegrees ?? 0),
-            duration: TimeInterval(request.duration ?? 300) / 1000.0
-        )
+        let path = try await performContextCheckedGesture(expected: request.frameContext) {
+            try self.gesturePerformer.pinch(
+                centerX: request.centerX,
+                centerY: request.centerY,
+                distanceStart: request.distanceStart,
+                distanceEnd: request.distanceEnd,
+                rotationDegrees: Double(request.rotationDegrees ?? 0),
+                duration: TimeInterval(request.duration ?? 300) / 1000.0
+            )
+        }
 
         return WebSocketResponse.success(
             type: ResponseType.pinchResult.rawValue,
@@ -755,8 +765,10 @@ final class CommandHandler: CommandHandling {
         defer { perf.end() }
 
         do {
-            try await trackedAsync("clearText") {
-                try await self.gesturePerformer.clearText(resourceId: resourceId)
+            try await performContextCheckedGesture(expected: request.frameContext) {
+                try self.tracked("clearText") {
+                    try self.gesturePerformer.clearText(resourceId: resourceId)
+                }
             }
         } catch {
             print("[CommandHandler] handleClearText FAILED resourceId=\(resourceId ?? "nil") error=\(error)")
@@ -777,8 +789,10 @@ final class CommandHandler: CommandHandling {
         defer { perf.end() }
 
         do {
-            try await trackedAsync("imeAction") {
-                try await self.gesturePerformer.performImeAction(action)
+            try await performContextCheckedGesture(expected: request.frameContext) {
+                try self.tracked("imeAction") {
+                    try self.gesturePerformer.performImeAction(action)
+                }
             }
         } catch {
             print("[CommandHandler] handleImeAction FAILED action=\(action) error=\(error)")
@@ -797,8 +811,10 @@ final class CommandHandler: CommandHandling {
         defer { perf.end() }
 
         do {
-            try await trackedAsync("selectAll") {
-                try await self.gesturePerformer.selectAll()
+            try await performContextCheckedGesture(expected: request.frameContext) {
+                try self.tracked("selectAll") {
+                    try self.gesturePerformer.selectAll()
+                }
             }
         } catch {
             print("[CommandHandler] handleSelectAll FAILED error=\(error)")
@@ -836,8 +852,10 @@ final class CommandHandler: CommandHandling {
         perf.serial("handlePressKey")
         defer { perf.end() }
 
-        try await trackedAsync("pressKey") {
-            try await self.gesturePerformer.pressKey(key: request.key, modifiers: request.modifiers)
+        try await performContextCheckedGesture(expected: request.frameContext) {
+            try self.tracked("pressKey") {
+                try self.gesturePerformer.pressKey(key: request.key, modifiers: request.modifiers)
+            }
         }
 
         return WebSocketResponse.success(
@@ -934,8 +952,10 @@ final class CommandHandler: CommandHandling {
         perf.serial("handleShake")
         defer { perf.end() }
 
-        try await trackedAsync("shake") {
-            try await self.gesturePerformer.shake()
+        try await performContextCheckedGesture(expected: request.frameContext) {
+            try self.tracked("shake") {
+                try self.gesturePerformer.shake()
+            }
         }
 
         return WebSocketResponse.success(
@@ -982,7 +1002,11 @@ final class CommandHandler: CommandHandling {
     // MARK: - Actions
 
     private func handleAction(_ request: RequestAction, startTime: Date) async throws -> WebSocketResponse {
-        try await gesturePerformer.performAction(request.action, resourceId: request.resourceId, label: request.label)
+        try await performContextCheckedGesture(expected: request.frameContext) {
+            try self.gesturePerformer.performAction(
+                request.action, resourceId: request.resourceId, label: request.label
+            )
+        }
 
         return WebSocketResponse.success(
             type: ResponseType.actionResult.rawValue,
@@ -1007,19 +1031,22 @@ final class CommandHandler: CommandHandling {
         } else {
             nil
         }
-        if let coordinate = SemanticLinkActivation.coordinate(
+        let coordinate = SemanticLinkActivation.coordinate(
             in: fresh,
             ownerResourceId: request.ownerResourceId,
             text: request.text,
             occurrence: request.occurrence
-        ) {
-            try await gesturePerformer.tap(x: coordinate.x, y: coordinate.y, duration: 0)
-        } else {
-            try await gesturePerformer.activateAccessibilityLink(
-                text: request.text,
-                occurrence: request.occurrence,
-                ownerResourceId: request.ownerResourceId
-            )
+        )
+        try await performContextCheckedGesture(expected: request.frameContext) {
+            if let coordinate {
+                try self.gesturePerformer.tap(x: coordinate.x, y: coordinate.y, duration: 0)
+            } else {
+                try self.gesturePerformer.activateAccessibilityLink(
+                    text: request.text,
+                    occurrence: request.occurrence,
+                    ownerResourceId: request.ownerResourceId
+                )
+            }
         }
         return WebSocketResponse.success(
             type: ResponseType.actionResult.rawValue,
@@ -1148,19 +1175,18 @@ final class CommandHandler: CommandHandling {
             throw CommandError.invalidParameter("orientation", orientation)
         }
 
-        // Normalize to "portrait" or "landscape" for the result.
-        let normalizedPrevious = previousOrientation.hasPrefix("landscape") ? "landscape" : "portrait"
+        // Keep the coarse portrait/landscape summary in `value`.
         let normalizedTarget = iosOrientation.hasPrefix("landscape") ? "landscape" : "portrait"
         let value = normalizedTarget == "portrait" ? 0 : 1
 
         // Check if already in the desired orientation.
-        if normalizedPrevious == normalizedTarget {
+        if previousOrientation == iosOrientation {
             return RotateResponse(
                 requestId: request.requestId,
                 success: true,
                 totalTimeMs: totalTimeMs(from: startTime),
-                previousOrientation: normalizedPrevious,
-                currentOrientation: normalizedTarget,
+                previousOrientation: previousOrientation,
+                currentOrientation: iosOrientation,
                 value: value,
                 rotationPerformed: false
             )
@@ -1172,8 +1198,8 @@ final class CommandHandler: CommandHandling {
             requestId: request.requestId,
             success: true,
             totalTimeMs: totalTimeMs(from: startTime),
-            previousOrientation: normalizedPrevious,
-            currentOrientation: normalizedTarget,
+            previousOrientation: previousOrientation,
+            currentOrientation: iosOrientation,
             value: value,
             rotationPerformed: true
         )
@@ -1197,7 +1223,12 @@ final class CommandHandler: CommandHandling {
     /// Report the element holding the VoiceOver cursor. The cursor is only visible in-process,
     /// so it reaches us as `accessibility-focused` on the SDK-enriched hierarchy (see
     /// HierarchyMerger, #3924). A null focusedElement is a success, not an error.
-    private func handleGetCurrentFocus(_ request: RequestEnvelope, startTime: Date) async throws -> CurrentFocusResponse {
+    private func handleGetCurrentFocus(
+        _ request: RequestEnvelope,
+        startTime: Date
+    )
+        async throws -> CurrentFocusResponse
+    {
         let enriched = try await enrichedHierarchyForAccessibility()
         let focused = enriched.hierarchy.flatMap { Self.findAccessibilityFocused($0) }
         return CurrentFocusResponse(
@@ -1209,7 +1240,12 @@ final class CommandHandler: CommandHandling {
 
     /// Report accessibility elements in VoiceOver traversal (depth-first) order, plus the
     /// index of the focused one when the cursor is present (#3924).
-    private func handleGetTraversalOrder(_ request: RequestEnvelope, startTime: Date) async throws -> TraversalOrderResponse {
+    private func handleGetTraversalOrder(
+        _ request: RequestEnvelope,
+        startTime: Date
+    )
+        async throws -> TraversalOrderResponse
+    {
         let enriched = try await enrichedHierarchyForAccessibility()
         var ordered: [UIElementInfo] = []
         if let root = enriched.hierarchy {
@@ -1392,7 +1428,12 @@ final class CommandHandler: CommandHandling {
         )
     }
 
-    private func handleGetPreferences(_ request: RequestGetPreferences, startTime: Date) async -> StorageEntriesResponse {
+    private func handleGetPreferences(
+        _ request: RequestGetPreferences,
+        startTime: Date
+    )
+        async -> StorageEntriesResponse
+    {
         guard let inspector = storageInspector else {
             return StorageEntriesResponse(
                 requestId: request.requestId,
@@ -1454,7 +1495,12 @@ final class CommandHandler: CommandHandling {
         }
     }
 
-    private func handleSetPreference(_ request: RequestSetPreference, startTime: Date) async throws -> WebSocketResponse {
+    private func handleSetPreference(
+        _ request: RequestSetPreference,
+        startTime: Date
+    )
+        async throws -> WebSocketResponse
+    {
         guard let inspector = storageInspector else {
             return WebSocketResponse.error(
                 type: ResponseType.setPreferenceResult.rawValue,
@@ -1554,7 +1600,11 @@ final class CommandHandler: CommandHandling {
 
         do {
             try await validateDatabaseAppId(request.appId)
-            let result = try await client.executeSQL(databasePath: databasePath, query: query, sessionId: request.sessionId)
+            let result = try await client.executeSQL(
+                databasePath: databasePath,
+                query: query,
+                sessionId: request.sessionId
+            )
             if let error = result.error {
                 return ExecuteSqlResponse(
                     requestId: request.requestId,

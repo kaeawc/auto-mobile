@@ -120,14 +120,19 @@ export class FakeTapOnElement implements TapOnElementLike {
 export class FakeInputText implements InputTextLike {
   private calls: InputTextCall[] = [];
   private result: SendTextResult = { success: true, text: "" };
+  private resultsByText = new Map<string, SendTextResult>();
 
   async execute(text: string, imeAction?: string): Promise<SendTextResult> {
     this.calls.push({ text, imeAction });
-    return { ...this.result, text };
+    return { ...(this.resultsByText.get(text) ?? this.result), text };
   }
 
   setResult(result: SendTextResult): void {
     this.result = result;
+  }
+
+  setResultForText(text: string, result: SendTextResult): void {
+    this.resultsByText.set(text, result);
   }
 
   getCalls(): InputTextCall[] {
@@ -140,6 +145,7 @@ export class FakeInputText implements InputTextLike {
 
   reset(): void {
     this.calls = [];
+    this.resultsByText.clear();
   }
 }
 

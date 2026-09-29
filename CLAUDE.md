@@ -197,11 +197,12 @@ ratchet rule as its own rule (the custom plugin already does) rather than foldin
 selectors into a shared one, so a baselined violation cannot be silently traded
 for a genuinely-dangerous one.
 
-Rules with a numeric threshold: `complexity` 12, `max-depth` 3,
-`max-nested-callbacks` 3 (0 baselined), `auto-mobile/no-accumulator-foreach`
-(src/ only, 0 baselined). The full set the ratchet gates (per the section above)
-also includes `auto-mobile/catch-convention`, `auto-mobile/no-unknown-cast`,
-`typescript/no-floating-promises`, and `typescript/no-misused-promises`.
+Rules with a numeric threshold: `complexity` 12, `max-depth` 3, `max-params` 6,
+`max-lines-per-function` 150, `max-nested-callbacks` 3 (0 baselined),
+`auto-mobile/no-accumulator-foreach` (src/ only, 0 baselined). The full set the
+ratchet gates (per the section above) also includes `auto-mobile/catch-convention`,
+`auto-mobile/no-unknown-cast`, `typescript/no-floating-promises`, and
+`typescript/no-misused-promises`.
 
 Explicit loops (`for`, `for-of`, `for-in`, `while`) are deliberately NOT linted.
 The ratchet nudges toward declarative style where a clean declarative form

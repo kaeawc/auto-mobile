@@ -73,6 +73,15 @@ describe(".oxlintrc.json rule scoping (via oxlint --print-config)", () => {
     }
   });
 
+  test("max-params and max-lines-per-function are scoped to src/**", () => {
+    for (const rule of ["max-params", "max-lines-per-function"]) {
+      const override = scopedRuleOverride(rule);
+      expect(override?.files).toEqual(["src/**/*.ts"]);
+      expect(Array.isArray(override?.rules?.[rule])).toBe(true);
+      expect((override?.rules?.[rule] as unknown[])[0]).toBe("warn");
+    }
+  });
+
   test("no-accumulator-foreach is scoped to src/** (not the whole tree)", () => {
     expectScopedRule("auto-mobile/no-accumulator-foreach", ["src/**/*.ts"], "deny");
   });

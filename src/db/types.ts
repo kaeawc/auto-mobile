@@ -189,6 +189,17 @@ export interface NavigationEdgeObservationsTable {
   created_at: Generated<string>;
 }
 
+export interface NavigationSuggestionObservationsTable {
+  id: Generated<number>;
+  suggestion_id: number;
+  build_key_id: number;
+  device_id: string;
+  session_uuid: string;
+  first_seen_at: number;
+  last_seen_at: number;
+  created_at: Generated<string>;
+}
+
 // Navigation node fingerprints table - tracks fingerprints associated with named nodes
 interface NavigationNodeFingerprintsTable {
   id: Generated<number>;
@@ -818,6 +829,7 @@ export interface Database {
   anrs: AnrsTable;
   navigation_node_fingerprints: NavigationNodeFingerprintsTable;
   navigation_suggestions: NavigationSuggestionsTable;
+  navigation_suggestion_observations: NavigationSuggestionObservationsTable;
   navigation_build_keys: NavigationBuildKeysTable;
   navigation_node_observations: NavigationNodeObservationsTable;
   navigation_edge_observations: NavigationEdgeObservationsTable;
@@ -874,6 +886,7 @@ export type NewNavigationBuildKey = Insertable<NavigationBuildKeysTable>;
 
 export type NavigationNodeObservation = Selectable<NavigationNodeObservationsTable>;
 export type NewNavigationNodeObservation = Insertable<NavigationNodeObservationsTable>;
+export type NewNavigationSuggestionObservation = Insertable<NavigationSuggestionObservationsTable>;
 
 export type NavigationEdgeObservation = Selectable<NavigationEdgeObservationsTable>;
 export type NewNavigationEdgeObservation = Insertable<NavigationEdgeObservationsTable>;

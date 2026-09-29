@@ -36,6 +36,7 @@ function fakeRetention(options: { onPrune?: () => void; throwOnce?: boolean } = 
         screenshotsCleared: 0,
         nodeObservationsDeleted: 0,
         edgeObservationsDeleted: 0,
+        suggestionObservationsDeleted: 0,
         buildKeysDeleted: 0,
         prunedAt: now,
       };
@@ -88,6 +89,7 @@ describe("NavigationRetentionMonitor", () => {
           screenshotsCleared: 0,
           nodeObservationsDeleted: 0,
           edgeObservationsDeleted: 0,
+          suggestionObservationsDeleted: 0,
           buildKeysDeleted: 0,
           prunedAt: now,
         };

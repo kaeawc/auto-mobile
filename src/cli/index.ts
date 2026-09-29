@@ -630,10 +630,10 @@ export async function runCliCommand(
     // Parse tool name, session UUID, and parameters
     const { toolName, sessionUuid, params } = parseCliArgs(args);
 
-    // Add session UUID to params if provided. Acquisition tools MINT a session
-    // rather than joining one, and their schemas are `.strict()`, so folding the
-    // flag in made every `--session-uuid ... getAndroid` call fail with
-    // `Unrecognized key: "sessionUuid"` before any device work started.
+    // Add session UUID to params if provided. Acquisition tools mint a new
+    // session instead of joining one, so the CLI leaves this option out for
+    // them. The shared dispatcher also strips `sessionUuid` for any strict
+    // schema that does not declare it (#8183).
     if (sessionUuid) {
       if (isDeviceSessionAcquisitionTool(toolName)) {
         logger.debug(`Ignoring session UUID for acquisition tool ${toolName}: it mints its own`);
@@ -693,9 +693,10 @@ Examples:
 Options:
   help [tool-name]              Show help for a specific tool
   --session-uuid <uuid>         Associate tool execution with a session (optional).
-                                Ignored for the device-acquisition tools
-                                (${DEVICE_SESSION_ACQUISITION_TOOLS.join(", ")}),
-                                which mint their own session.
+                                The CLI omits it for acquisition tools
+                                (${DEVICE_SESSION_ACQUISITION_TOOLS.join(", ")}), which mint
+                                their own session. For other tools, an undeclared
+                                sessionUuid is removed before strict validation.
 
 Parameters:
   Parameters are passed as --key value pairs

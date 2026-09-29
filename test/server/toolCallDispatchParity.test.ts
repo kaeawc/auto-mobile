@@ -31,6 +31,7 @@ import { McpTestFixture } from "../fixtures/mcpTestFixture";
 const OK_TOOL = "__dispatch_parity_ok__";
 const FAIL_TOOL = "__dispatch_parity_fail__";
 const UNKNOWN_TOOL = "__dispatch_parity_unknown__";
+const DECLARED_SESSION_TOOL = "__dispatch_parity_declared_session__";
 
 interface Outcome {
   isError: boolean;
@@ -105,7 +106,7 @@ describe("tools/call entry points share one dispatcher (issue #6545)", () => {
     ToolRegistry.register(
       OK_TOOL,
       "parity probe that succeeds",
-      z.object({ count: z.number() }),
+      z.object({ count: z.number() }).strict(),
       async (args: Record<string, unknown>) => {
         handlerArgs.push(args);
         return { content: [{ type: "text", text: `count=${String(args.count)}` }] };
@@ -114,6 +115,15 @@ describe("tools/call entry points share one dispatcher (issue #6545)", () => {
     ToolRegistry.register(FAIL_TOOL, "parity probe that fails", z.object({}), async () => {
       throw new ActionableError("parity probe failed");
     });
+    ToolRegistry.register(
+      DECLARED_SESSION_TOOL,
+      "parity probe that declares sessionUuid",
+      z.object({ sessionUuid: z.string(), count: z.number() }).strict(),
+      async (args: Record<string, unknown>) => {
+        handlerArgs.push(args);
+        return { content: [{ type: "text", text: `session=${String(args.sessionUuid)}` }] };
+      },
+    );
     await direct.setup();
     await daemonLoopback.setup();
 
@@ -148,6 +158,7 @@ describe("tools/call entry points share one dispatcher (issue #6545)", () => {
     isAvailableSpy?.mockRestore();
     ToolRegistry.unregister(OK_TOOL);
     ToolRegistry.unregister(FAIL_TOOL);
+    ToolRegistry.unregister(DECLARED_SESSION_TOOL);
   });
 
   const entryPoints: Array<[string, CallEntryPoint]> = [
@@ -210,5 +221,34 @@ describe("tools/call entry points share one dispatcher (issue #6545)", () => {
     // per-tool callback (shadowed) would have refused the call instead.
     expect(handlerArgs).toHaveLength(1);
     expect(typeof handlerArgs[0][INTERNAL_EXECUTION_ID_PARAM]).toBe("string");
+  });
+
+  test("undeclared sessionUuid is stripped before strict validation on every entry point", async () => {
+    for (const [, call] of entryPoints) {
+      const outcome = await call(OK_TOOL, { count: 1, sessionUuid: "" });
+      expect(outcome).toEqual({ isError: false, text: "count=1" });
+    }
+    expect(handlerArgs).toHaveLength(entryPoints.length);
+    expect(handlerArgs.every((args) => !("sessionUuid" in args))).toBe(true);
+  });
+
+  test("sessionUuid declared by a strict tool reaches its handler", async () => {
+    for (const [, call] of entryPoints) {
+      const outcome = await call(DECLARED_SESSION_TOOL, {
+        count: 1,
+        sessionUuid: "",
+      });
+      expect(outcome).toEqual({ isError: false, text: "session=" });
+    }
+    expect(handlerArgs).toHaveLength(entryPoints.length);
+    expect(handlerArgs.every((args) => args.sessionUuid === "")).toBe(true);
+  });
+
+  test("unrelated unknown keys remain rejected", async () => {
+    for (const [, call] of entryPoints) {
+      const outcome = await call(OK_TOOL, { count: 1, sessionUuid: "", bogusKey: true });
+      expect(outcome.isError).toBe(true);
+      expect(outcome.text).toContain('Unrecognized key: "bogusKey"');
+    }
   });
 });

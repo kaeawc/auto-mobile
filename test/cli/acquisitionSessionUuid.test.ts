@@ -78,11 +78,13 @@ describe("CLI --session-uuid with device-session acquisition tools", () => {
     expect(calls[1].params.sessionUuid).toBe("session-abc");
   });
 
-  test("help says acquisition tools mint their own session", async () => {
+  test("help explains acquisition and undeclared sessionUuid behavior", async () => {
     const lines: string[] = [];
     const output: CliOutput = { log: (message) => lines.push(message), error: () => {} };
     await runCliCommand(["help"], undefined, output);
     const help = lines.join("\n");
-    expect(help).toContain("mint their own session");
+    expect(help).toContain("which mint");
+    expect(help).toContain("undeclared");
+    expect(help).toContain("removed before strict validation");
   });
 });

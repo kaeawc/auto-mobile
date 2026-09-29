@@ -28,6 +28,7 @@ import type { FailureObservationSummary } from "../../models/FailureObservation"
 import { ScreenshotJobTracker } from "../ScreenshotJobTracker";
 import { isDeviceLostError } from "../../server/deviceLossOutcome";
 import { formatToolParamError } from "../../server/toolParamError";
+import { stripUndeclaredSessionUuid } from "../toolParams";
 import { formatStructuredToolError } from "../formatStructuredToolError";
 import {
   summarizeObserveResultForFailure,
@@ -300,7 +301,9 @@ export class DefaultPlanExecutor implements PlanExecutor {
       // (`observe` always resets it). This capture is for the plan's failure
       // summary, not shown to the agent. Parse against the tool schema first, then
       // pass the resolved tool to the seam so the timeout race stays local.
-      const parsedParams = observeTool.schema.parse(enhancedParams) as Record<string, unknown>;
+      const parsedParams = observeTool.schema.parse(
+        stripUndeclaredSessionUuid(enhancedParams, observeTool.schema),
+      ) as Record<string, unknown>;
 
       let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
       const deadline = new AbortController();
@@ -460,7 +463,9 @@ export class DefaultPlanExecutor implements PlanExecutor {
       // below so finalize emits the full observation on the step envelope - never
       // a diff or a stripped payload - regardless of
       // `--actions-diff-observe`/`--actions-no-observe`.
-      const parsedParams = tool.schema.parse(enhancedParams) as Record<string, unknown>;
+      const parsedParams = tool.schema.parse(
+        stripUndeclaredSessionUuid(enhancedParams, tool.schema),
+      ) as Record<string, unknown>;
 
       if (context.deviceId) {
         ScreenshotJobTracker.cancelJob(context.deviceId);

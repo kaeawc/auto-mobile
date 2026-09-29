@@ -917,6 +917,16 @@ export class DaemonMcpProxy {
     this.clientAssetVersion = isExplicitPin() ? resolveAssetVersion(resolvePinnedVersion()) : null;
   }
 
+  /** Test-only seam for checking active progress listener cleanup. */
+  getProgressListenerCountForTesting(): number {
+    return this.progressListeners.size;
+  }
+
+  /** Test-only seam for building a tool-unavailable error. */
+  buildToolUnavailableErrorForTesting(name: string): Promise<Error> {
+    return this.toolUnavailableError(name);
+  }
+
   /**
    * Ensure we have a connection to the daemon
    * Will auto-start daemon if configured and daemon is not running

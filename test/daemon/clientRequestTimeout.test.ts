@@ -26,8 +26,7 @@ function createBlackHoleSocket(): Duplex {
 
 function createConnectedClient(fakeTimer: FakeTimer, connectionTimeout = 1000): DaemonClient {
   const client = new DaemonClient("/fake/socket", connectionTimeout, fakeTimer);
-  (client as any).connected = true;
-  (client as any).socket = createBlackHoleSocket();
+  client.attachSocketForTesting(createBlackHoleSocket());
   return client;
 }
 
@@ -63,8 +62,7 @@ function createDeferredConnectClient(
     connectTimeouts.push(timeoutMs);
     markConnectStarted();
     await connectGate;
-    (client as any).connected = true;
-    (client as any).socket = socket;
+    client.attachSocketForTesting(socket);
     onConnected?.();
   };
   return {
@@ -252,7 +250,7 @@ describe("DaemonClient per-request timeout", () => {
     expect(request?.timeoutMs).toBe(600);
     expect(fakeTimer.getPendingTimeouts()).toEqual([600]);
 
-    (harness.client as any).handleData(
+    harness.client.simulateIncomingDataForTesting(
       Buffer.from(
         `${JSON.stringify({
           id: request?.id,
@@ -328,10 +326,7 @@ describe("DaemonClient per-request timeout is extended by progress, bounded (#62
   function deliverProgress(
     client: DaemonClient,
     progressToken: string | number,
-    requestId = [...(client as any).pendingRequests.entries()].find(
-      ([, pending]: [string, { progressToken?: string | number }]) =>
-        pending.progressToken === progressToken,
-    )?.[0],
+    requestId = client.findPendingRequestIdByProgressTokenForTesting(progressToken),
   ): void {
     const frame =
       JSON.stringify({
@@ -342,7 +337,7 @@ describe("DaemonClient per-request timeout is extended by progress, bounded (#62
         progress: 1,
         total: 1,
       }) + "\n";
-    (client as any).handleData(Buffer.from(frame));
+    client.simulateIncomingDataForTesting(Buffer.from(frame));
   }
 
   test("a request that emits periodic progress survives past its default 30s deadline", async () => {
@@ -454,7 +449,7 @@ describe("DaemonClient per-request timeout is extended by progress, bounded (#62
     fakeTimer.advanceTime(10_000);
 
     expect(await firstResult).toBeInstanceOf(McpTimeoutError);
-    expect((client as any).pendingRequests.has(secondId)).toBe(true);
+    expect(client.hasPendingRequestForTesting(secondId)).toBe(true);
     await client.close();
     expect(await secondResult).toBeInstanceOf(DaemonUnavailableError);
   });

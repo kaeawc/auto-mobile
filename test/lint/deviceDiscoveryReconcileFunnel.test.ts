@@ -55,7 +55,7 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
   const ALLOWLIST: Readonly<Record<string, Allowed>> = {
     // --- The funnel itself, and its producers -------------------------------
     "src/daemon/devicePool.ts": {
-      calls: 9,
+      calls: 8,
       reason:
         "The pool IS the funnel: refresh sweep, assignment-time liveness check, and the " +
         "bounded cache-bypassing identity rediscovery all reconcile through the pool.",
@@ -164,6 +164,11 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
     "src/features/observe/ios/IOSCtrlProxyClient.ts": {
       calls: 1,
       reason: "iOS only — simulator UDIDs are never reused, so there is no identity to reconcile.",
+    },
+    "src/daemon/idleDeviceReaper.ts": {
+      calls: 1,
+      reason:
+        "iOS-only liveness sweep of idle pooled devices; the Android identity reconcile funnel does not apply.",
     },
     "src/doctor/checks/android.ts": {
       calls: 1,

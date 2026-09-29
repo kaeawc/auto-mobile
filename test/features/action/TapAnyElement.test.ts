@@ -3,6 +3,8 @@ import { TapAnyElement } from "../../../src/features/action/TapAnyElement";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeElementSelector } from "../../fakes/FakeElementSelector";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeAccessibilityDetector } from "../../fakes/FakeAccessibilityDetector";
+import { FakeTalkBackTapStrategy } from "../../fakes/FakeTalkBackTapStrategy";
 
 const createTapAnyElement = (selector: FakeElementSelector) => {
   return new TapAnyElement(
@@ -29,11 +31,14 @@ const makeElement = () =>
 describe("TapAnyElement", () => {
   test("budgets an Android long press beyond the default ADB timeout", async () => {
     const adb = new FakeAdbClient();
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
     const tapAny = new TapAnyElement(
       { name: "test-device", platform: "android", deviceId: "emulator-5554" },
       adb as any,
-      { timer: new FakeTimer(), elementSelector: new FakeElementSelector(makeElement()) },
+      { timer, elementSelector: new FakeElementSelector(makeElement()) },
     );
+    (tapAny as any).refreshViewHierarchy = async () => null;
     (tapAny as any).observedInteraction = (action: (result: any) => Promise<unknown>) =>
       action({
         viewHierarchy: { hierarchy: { node: {} } },
@@ -43,7 +48,7 @@ describe("TapAnyElement", () => {
     await tapAny.execute({ action: "longPress", duration: 20_000 });
     const swipe = adb
       .getCommandCalls()
-      .find((call) => call.command.startsWith("shell input swipe"));
+      .find((call) => call.command.startsWith("shell input touchscreen swipe"));
     expect(swipe?.timeoutMs).toBe(22_000);
   });
 
@@ -178,6 +183,144 @@ describe("TapAnyElement", () => {
   });
 });
 
+describe("TapAnyElement Android gesture dispatch", () => {
+  const hierarchy = { hierarchy: { node: { marker: "before" } } };
+
+  function setup(
+    result: { success: boolean; error?: string } = { success: true },
+    talkBackEnabled = false,
+    element = makeElement(),
+  ) {
+    const adb = new FakeAdbClient();
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const detector = new FakeAccessibilityDetector();
+    detector.setTalkBackEnabled(talkBackEnabled);
+    const strategy = new FakeTalkBackTapStrategy();
+    const calls: Array<{ x: number; y: number; duration: number | undefined }> = [];
+    const adbTapCountAtRequest: number[] = [];
+    const semanticCalls: string[] = [];
+    const service = {
+      requestTapCoordinates: async (x: number, y: number, duration?: number) => {
+        adbTapCountAtRequest.push(
+          adb.getCommandCalls().filter((call) => call.command.includes("input touchscreen tap"))
+            .length,
+        );
+        calls.push({ x, y, duration });
+        return result;
+      },
+      requestAction: async (action: string) => {
+        semanticCalls.push(action);
+        return { success: true };
+      },
+    };
+    const tapAny = new TapAnyElement(
+      { name: "test-device", platform: "android", deviceId: "emulator-5554" },
+      adb as any,
+      {
+        timer,
+        elementSelector: new FakeElementSelector(element),
+        accessibilityDetector: detector,
+        accessibilityService: service as any,
+        talkBackStrategy: strategy as any,
+        talkBackDriverFactory: { createDriver: () => ({}) as any },
+      },
+    );
+    (tapAny as any).observedInteraction = (action: (value: any) => Promise<unknown>) =>
+      action({ viewHierarchy: hierarchy, screenSize: { width: 500, height: 500 } });
+    (tapAny as any).refreshViewHierarchy = async () => ({
+      hierarchy: { node: { marker: "after" } },
+    });
+    return { tapAny, adb, timer, detector, strategy, calls, adbTapCountAtRequest, semanticCalls };
+  }
+
+  test("tap uses CtrlProxy first and skips ADB when it succeeds", async () => {
+    const { tapAny, adb, calls } = setup();
+    const result = await tapAny.execute({ action: "tap" });
+    expect(result.success).toBe(true);
+    expect(calls).toEqual([{ x: 60, y: 45, duration: 10 }]);
+    expect(
+      adb
+        .getCommandCalls()
+        .filter((call) => call.command.includes("input") && call.command.includes("tap")),
+    ).toEqual([]);
+  });
+
+  test("failed CtrlProxy tap falls back to touchscreen ADB input", async () => {
+    const { tapAny, adb, calls, adbTapCountAtRequest } = setup({
+      success: false,
+      error: "unavailable",
+    });
+    const result = await tapAny.execute({ action: "tap" });
+    expect(result.success).toBe(true);
+    expect(calls).toHaveLength(1);
+    expect(adbTapCountAtRequest).toEqual([0]);
+    expect(adb.getCommandCalls().map((call) => call.command)).toContain(
+      "shell input touchscreen tap 60 45",
+    );
+  });
+
+  test("TalkBack activates the native element through accessibility action", async () => {
+    const { tapAny, adb, strategy, calls } = setup({ success: true }, true);
+    const result = await tapAny.execute({ action: "tap" });
+    expect(result.success).toBe(true);
+    expect(strategy.directActivationCalls).toHaveLength(1);
+    expect(calls).toHaveLength(0);
+    expect(
+      adb.getCommandCalls().some((call) => call.command.includes("input touchscreen tap")),
+    ).toBe(false);
+  });
+
+  test("failed TalkBack activation tries its coordinate fallback before ADB", async () => {
+    const { tapAny, adb, strategy } = setup({ success: true }, true);
+    strategy.setDirectActivationResult({
+      success: false,
+      method: "accessibility-action",
+      error: "missing node",
+    });
+    const result = await tapAny.execute({ action: "tap" });
+    expect(result.success).toBe(true);
+    expect(strategy.directActivationCalls).toHaveLength(1);
+    expect(strategy.fallbackCalls).toHaveLength(1);
+    expect(
+      adb.getCommandCalls().some((call) => call.command.includes("input touchscreen tap")),
+    ).toBe(false);
+  });
+
+  test("unchanged hierarchy retries exactly once", async () => {
+    const { tapAny, calls } = setup();
+    (tapAny as any).refreshViewHierarchy = async () => hierarchy;
+    const result = await tapAny.execute({ action: "tap" });
+    expect(result.success).toBe(true);
+    expect(calls).toHaveLength(2);
+  });
+
+  test("double tap uses two CtrlProxy presses separated by 200ms", async () => {
+    const { tapAny, timer, calls } = setup();
+    const sleeps: number[] = [];
+    const originalSleep = timer.sleep.bind(timer);
+    timer.sleep = async (ms) => {
+      sleeps.push(ms);
+      return originalSleep(ms);
+    };
+    const result = await tapAny.execute({ action: "doubleTap" });
+    expect(result.success).toBe(true);
+    expect(calls).toHaveLength(2);
+    expect(sleeps).toContain(200);
+  });
+
+  test("long press tries the native accessibility action before ADB", async () => {
+    const element = { ...makeElement(), "resource-id": "app:id/target" };
+    const { tapAny, adb, semanticCalls } = setup({ success: true }, false, element);
+    const result = await tapAny.execute({ action: "longPress", duration: 1200 });
+    expect(result.success).toBe(true);
+    expect(semanticCalls).toEqual(["long_click"]);
+    expect(
+      adb.getCommandCalls().some((call) => call.command.includes("input touchscreen swipe")),
+    ).toBe(false);
+  });
+});
+
 test.each([false, true])(
   "cached miss then fresh hit reports its coordinate capture (transient failure=%s)",
   async (failFirstCapture) => {
@@ -226,8 +369,16 @@ test.each([false, true])(
     const tapAny = new TapAnyElement(
       { deviceId: "capture-tapany", name: "Test", platform: "android" },
       adb as any,
-      { timer, hierarchyCapture: capture },
+      {
+        timer,
+        hierarchyCapture: capture,
+        accessibilityService: { requestTapCoordinates: async () => ({ success: false }) } as any,
+      },
     );
+    const originalRefresh = (tapAny as any).refreshViewHierarchy.bind(tapAny);
+    let searchFinished = false;
+    (tapAny as any).refreshViewHierarchy = async (...args: any[]) =>
+      searchFinished ? { hierarchy: { node: { marker: "after" } } } : originalRefresh(...args);
     const cached = {
       observationId: "old-capture",
       screenSize: { width: 100, height: 100 },
@@ -235,12 +386,20 @@ test.each([false, true])(
     };
     (tapAny as any).observedInteraction = (action: (result: any) => Promise<unknown>) =>
       action(cached);
+    // The search capture completes before the gesture; only the post-tap probe changes.
+    const originalTap = (tapAny as any).executeAndroidTap.bind(tapAny);
+    (tapAny as any).executeAndroidTap = async (...args: any[]) => {
+      searchFinished = true;
+      return originalTap(...args);
+    };
     const result = await tapAny.execute({ action: "tap", searchUntil: { duration: 500 } });
-    expect(result.success).toBe(true);
+    expect(result).toMatchObject({ success: true });
     expect(requests).toEqual(failFirstCapture ? ["fresh", "fresh"] : ["fresh"]);
     expect(result.element["resource-id"]).toBe("app:id/continue");
     expect(result.element.bounds.left).toBe(200);
-    expect(adb.getCommandCalls().map((call) => call.command)).toContain("shell input tap 250 130");
+    expect(adb.getCommandCalls().map((call) => call.command)).toContain(
+      "shell input touchscreen tap 250 130",
+    );
     const snapshot = getHierarchySnapshot(fresh);
     expect(result.captureId).toBeDefined();
     expect(result.captureId).not.toBe("old-capture");

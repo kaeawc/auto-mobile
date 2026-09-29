@@ -86,6 +86,11 @@ import type {
 } from "../observe/interfaces/WaitForCondition";
 import { hierarchyUpdatedAtToMillis } from "../observe/observeTimestamp";
 import { dispatchAndroidCoordinateTap, dispatchIosCoordinateTap } from "./coordinateTapDispatch";
+import {
+  checkAndroidTapHierarchyChange,
+  POST_TAP_REFRESH_TIMEOUT_MS,
+  PRE_RETRY_DELAY_MS,
+} from "./androidGhostTapRetry";
 import { DefaultObserveElementCollector } from "../observe/ObserveElementCollector";
 import { getImeOccluderForElement, tapPointOutsideIme } from "../observe/output/SkeletonProjection";
 import { getHierarchyNodeSource } from "../observe/output/elementProvenance";
@@ -156,8 +161,6 @@ interface TapOnElementDependencies {
  * transitions, which gets misread as a ghost tap and causes a stray retry on
  * the new screen.
  */
-const POST_TAP_SETTLE_MS = 300;
-const POST_TAP_REFRESH_TIMEOUT_MS = 1500;
 const POST_TAP_EFFECT_TIMEOUT_MS = 2500;
 const POST_TAP_EFFECT_POLL_MS = 150;
 
@@ -170,10 +173,6 @@ const POST_TAP_EFFECT_POLL_MS = 150;
  * that merely survives the first few 150ms polls.
  */
 const POST_TAP_SETTLE_QUIET_PERIOD_MS = 1000;
-
-/** Brief debounce between the original tap and the retry tap when a ghost tap
- *  was detected. Just enough to let any inflight gesture queue drain. */
-const PRE_RETRY_DELAY_MS = 100;
 
 export const ANDROID_PRE_TAP_REFIND_BUDGET_MS = 2500;
 export const ANDROID_PRE_TAP_REFIND_MIN_POLLS = 8;
@@ -2876,15 +2875,14 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     screenSize: ObserveResult["screenSize"],
     signal?: AbortSignal,
   ): Promise<void> {
-    await this.timer.sleep(POST_TAP_SETTLE_MS);
-
-    const postTapHierarchy = await this.refreshViewHierarchy(
-      POST_TAP_REFRESH_TIMEOUT_MS,
-      screenSize,
-      signal,
+    const probe = await checkAndroidTapHierarchyChange(
+      this.timer,
+      (timeoutMs) => this.refreshViewHierarchy(timeoutMs, screenSize, signal),
+      (hierarchy) => this.hashViewHierarchy(hierarchy),
+      preTapHash,
     );
 
-    if (!postTapHierarchy) {
+    if (probe.status === "unavailable") {
       // Refresh timed out — we can't tell whether the tap registered. A retry
       // here is more likely to land on a transitioning screen and bounce us
       // off-path than to recover a real ghost tap. Bail and let the next
@@ -2896,9 +2894,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       return;
     }
 
-    const postTapHash = this.hashViewHierarchy(postTapHierarchy);
-
-    if (postTapHash && postTapHash !== preTapHash) {
+    if (probe.status === "changed") {
       logger.info(`[TapOnElement][retryIfNoChange] Hierarchy changed after tap — tap registered`);
       return;
     }
@@ -2906,16 +2902,11 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     const retryTarget =
       options.ensureChecked === undefined
         ? tapElement
-        : this.resolveEnsureCheckedRetryTarget(
-            options,
-            postTapHierarchy,
-            action,
-            isTalkBackEnabled,
-          );
+        : this.resolveEnsureCheckedRetryTarget(options, probe.hierarchy, action, isTalkBackEnabled);
     if (!retryTarget) {
       return;
     }
-    const retryPoint = this.resolveImeSafeTapPoint(retryTarget, postTapHierarchy);
+    const retryPoint = this.resolveImeSafeTapPoint(retryTarget, probe.hierarchy);
 
     logger.warn(
       `[TapOnElement][retryIfNoChange] Hierarchy unchanged after tap at ` +

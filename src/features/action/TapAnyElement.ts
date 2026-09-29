@@ -45,6 +45,20 @@ import { iosVoiceOverDetector as defaultIosVoiceOverDetector } from "../../utils
 import { FeatureFlagService } from "../featureFlags/FeatureFlagService";
 import { IOS_HIERARCHY_REQUEST_TIMEOUT_MS } from "../observe/ios/CtrlProxyHierarchy";
 import { IOS_VOICEOVER_STATE_REQUEST_TIMEOUT_MS } from "../observe/ios/CtrlProxyVoiceOver";
+import type { AccessibilityDetector } from "../../utils/interfaces/AccessibilityDetector";
+import { accessibilityDetector as defaultAccessibilityDetector } from "../../utils/AccessibilityDetector";
+import { dispatchAndroidCoordinateTap } from "./coordinateTapDispatch";
+import {
+  requiresNodeSelector,
+  stableNodeSelectorForElement,
+  TalkBackTapStrategy,
+} from "../talkback/TalkBackTapStrategy";
+import { hasAccessibilityAction } from "../../utils/elementProperties";
+import { checkAndroidTapHierarchyChange, PRE_RETRY_DELAY_MS } from "./androidGhostTapRetry";
+import {
+  DefaultTalkBackNavigationDriverFactory,
+  type TalkBackNavigationDriverFactory,
+} from "../talkback/TalkBackNavigationDriver";
 
 interface TapAnyElementDependencies {
   hierarchyCapture?: HierarchyCapture;
@@ -52,6 +66,10 @@ interface TapAnyElementDependencies {
   elementSelector?: ElementSelector;
   iosVoiceOverDetector?: IosVoiceOverDetector;
   featureFlags?: FeatureFlagService;
+  accessibilityDetector?: AccessibilityDetector;
+  talkBackStrategy?: TalkBackTapStrategy;
+  talkBackDriverFactory?: TalkBackNavigationDriverFactory;
+  accessibilityService?: AndroidCtrlProxyClient;
 }
 
 /**
@@ -349,6 +367,9 @@ export class TapAnyElement extends BaseVisualChange {
   private hierarchyCapture: HierarchyCapture;
   private iosVoiceOverDetector: IosVoiceOverDetector;
   private featureFlags: FeatureFlagService;
+  private accessibilityDetector: AccessibilityDetector;
+  private talkBackStrategy: TalkBackTapStrategy;
+  private talkBackDriverFactory: TalkBackNavigationDriverFactory;
 
   private static readonly SEARCH_UNTIL_DEFAULT_MS = TAP_ANY_SEARCH_UNTIL_DEFAULT_MS;
   private static readonly SEARCH_UNTIL_MIN_MS = 100;
@@ -364,7 +385,8 @@ export class TapAnyElement extends BaseVisualChange {
     this.geometry = new DefaultElementGeometry();
     this.elementSelector = options.elementSelector ?? new ResolverElementSelector();
     this.finder = new DefaultElementFinder();
-    this.accessibilityService = AndroidCtrlProxyClient.getInstance(device, this.adbFactory);
+    this.accessibilityService =
+      options.accessibilityService ?? AndroidCtrlProxyClient.getInstance(device, this.adbFactory);
     this.viewHierarchy = new ViewHierarchy(device, this.adbFactory);
     this.hierarchyCapture =
       options.hierarchyCapture ??
@@ -397,6 +419,209 @@ export class TapAnyElement extends BaseVisualChange {
       );
     this.iosVoiceOverDetector = options.iosVoiceOverDetector ?? defaultIosVoiceOverDetector;
     this.featureFlags = options.featureFlags ?? FeatureFlagService.getInstance();
+    this.accessibilityDetector = options.accessibilityDetector ?? defaultAccessibilityDetector;
+    this.talkBackDriverFactory =
+      options.talkBackDriverFactory ?? new DefaultTalkBackNavigationDriverFactory(this.adbFactory);
+    this.talkBackStrategy =
+      options.talkBackStrategy ??
+      new TalkBackTapStrategy({ timer: this.timer, driverFactory: this.talkBackDriverFactory });
+  }
+
+  private async executeAndroidTap(
+    action: TapAnyElementOptions["action"],
+    x: number,
+    y: number,
+    durationMs: number,
+    element: Element,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const talkBackEnabled =
+      element["hierarchy-source"] !== "uiautomator" &&
+      (await this.accessibilityDetector.detectMethod(
+        this.device.deviceId,
+        this.adb,
+        this.featureFlags,
+      )) === "talkback";
+    if (
+      talkBackEnabled &&
+      (await this.executeAndroidTalkBackTap(action, x, y, durationMs, element))
+    ) {
+      return;
+    }
+
+    if (action === "longPress") {
+      if (
+        element["hierarchy-source"] !== "uiautomator" &&
+        (await this.trySemanticAndroidLongPress(element, signal))
+      ) {
+        return;
+      }
+      // Match tapOn's touchscreen source and retain the generic input fallback.
+      try {
+        await this.adb.executeCommand(
+          `shell input touchscreen swipe ${x} ${y} ${x} ${y} ${durationMs}`,
+          resolveTapAnyCtrlProxyTimeoutMs(durationMs),
+          undefined,
+          undefined,
+          signal,
+        );
+      } catch (error) {
+        throwIfAborted(signal);
+        logger.warn(
+          `[TapAnyElement] touch input swipe failed, falling back to input swipe: ${error}`,
+        );
+        await this.adb.executeCommand(
+          `shell input swipe ${x} ${y} ${x} ${y} ${durationMs}`,
+          resolveTapAnyCtrlProxyTimeoutMs(durationMs),
+          undefined,
+          undefined,
+          signal,
+        );
+      }
+      return;
+    }
+
+    await dispatchAndroidCoordinateTap(
+      this.accessibilityService,
+      this.adb,
+      x,
+      y,
+      10,
+      undefined,
+      signal,
+    );
+    if (action === "doubleTap") {
+      await this.timer.sleep(TAP_ANY_DOUBLE_TAP_GAP_MS);
+      await dispatchAndroidCoordinateTap(
+        this.accessibilityService,
+        this.adb,
+        x,
+        y,
+        10,
+        undefined,
+        signal,
+      );
+    }
+  }
+
+  private async trySemanticAndroidLongPress(
+    element: Element,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    const selector = stableNodeSelectorForElement(element);
+    if (!selector) {
+      return false;
+    }
+    const needsNodeSelector = requiresNodeSelector(selector);
+    if (needsNodeSelector && !(await this.accessibilityService.supportsNodeActionSelectors())) {
+      return false;
+    }
+    try {
+      throwIfAborted(signal);
+      const result = needsNodeSelector
+        ? await this.accessibilityService.requestNodeAction("long_click", selector)
+        : await this.accessibilityService.requestAction("long_click", selector.resourceId);
+      if (result.success) {
+        return true;
+      }
+      if (hasAccessibilityAction(element.actions, "long_click")) {
+        throw new ActionableError(
+          `Semantic long press failed for the selected element: ${result.error ?? "unknown error"}`,
+        );
+      }
+      logger.warn(`[TapAnyElement] Accessibility long click failed: ${result.error}`);
+    } catch (error) {
+      throwIfAborted(signal);
+      if (error instanceof ActionableError) {
+        throw error;
+      }
+      logger.warn(`[TapAnyElement] Accessibility long click error: ${error}`);
+    }
+    return false;
+  }
+
+  private async executeAndroidTalkBackTap(
+    action: TapAnyElementOptions["action"],
+    x: number,
+    y: number,
+    durationMs: number,
+    element: Element,
+  ): Promise<boolean> {
+    const driver = this.talkBackDriverFactory.createDriver(this.device);
+    if (action === "longPress") {
+      const result = await this.talkBackStrategy.executeLongPress(
+        x,
+        y,
+        durationMs,
+        element,
+        driver,
+      );
+      if (!result.success && result.semanticActionFailure) {
+        throw new ActionableError(
+          `Semantic long press failed for the selected element: ${result.error ?? "unknown error"}`,
+        );
+      }
+      return result.success;
+    }
+    if (action === "tap") {
+      const direct = await this.talkBackStrategy.executeDirectActivation(element, driver);
+      if (direct.success) {
+        return true;
+      }
+      logger.warn(
+        `[TapAnyElement] Direct accessibility activation failed (${direct.error}); trying coordinate fallback`,
+      );
+    }
+    const fallback = await this.talkBackStrategy.executeCoordinateFallback(
+      x,
+      y,
+      action,
+      durationMs,
+      driver,
+    );
+    return fallback.success;
+  }
+
+  private async retryAndroidTapIfNoChange(
+    preTapHash: string | null,
+    element: Element,
+    action: TapAnyElementOptions["action"],
+    durationMs: number,
+    screenSize?: ObserveResult["screenSize"],
+    signal?: AbortSignal,
+  ): Promise<void> {
+    if (!preTapHash) {
+      return;
+    }
+    const probe = await checkAndroidTapHierarchyChange(
+      this.timer,
+      (timeoutMs) => this.refreshViewHierarchy(timeoutMs, screenSize, signal),
+      (postTapHierarchy) => this.hashViewHierarchy(postTapHierarchy),
+      preTapHash,
+    );
+    if (probe.status === "unavailable") {
+      logger.warn("[TapAnyElement] Post-tap refresh returned no hierarchy; skipping retry");
+      return;
+    }
+    if (probe.status === "changed") {
+      return;
+    }
+    // The first tap was unobserved. Like tapOn, retry exactly once after debounce.
+    const retryElement =
+      this.findClickableElement({ action }, probe.hierarchy, screenSize).element ?? element;
+    const retryPoint = this.geometry.getElementCenter(retryElement);
+    logger.warn(
+      `[TapAnyElement] Hierarchy unchanged after tap at (${retryPoint.x}, ${retryPoint.y}); retrying`,
+    );
+    await this.timer.sleep(PRE_RETRY_DELAY_MS);
+    await this.executeAndroidTap(
+      action,
+      retryPoint.x,
+      retryPoint.y,
+      durationMs,
+      retryElement,
+      signal,
+    );
   }
 
   private createErrorResult(action: string, error: string): TapOnElementResult {
@@ -995,20 +1220,26 @@ export class TapAnyElement extends BaseVisualChange {
           );
 
           switch (this.device.platform) {
-            case "android":
-              if (action === "longPress") {
-                await this.adb.executeCommand(
-                  `shell input swipe ${tapPoint.x} ${tapPoint.y} ${tapPoint.x} ${tapPoint.y} ${longPressDuration}`,
-                  resolveTapAnyCtrlProxyTimeoutMs(longPressDuration),
-                );
-              } else if (action === "doubleTap") {
-                await this.adb.executeCommand(`shell input tap ${tapPoint.x} ${tapPoint.y}`);
-                await this.timer.sleep(50);
-                await this.adb.executeCommand(`shell input tap ${tapPoint.x} ${tapPoint.y}`);
-              } else {
-                await this.adb.executeCommand(`shell input tap ${tapPoint.x} ${tapPoint.y}`);
-              }
+            case "android": {
+              const preTapHash = this.hashViewHierarchy(selectedCapture.hierarchy);
+              await this.executeAndroidTap(
+                action,
+                tapPoint.x,
+                tapPoint.y,
+                longPressDuration,
+                element,
+                signal,
+              );
+              await this.retryAndroidTapIfNoChange(
+                preTapHash,
+                element,
+                action,
+                longPressDuration,
+                observeResult.screenSize,
+                signal,
+              );
               break;
+            }
             case "ios":
               await this.executeIosTap(
                 action,

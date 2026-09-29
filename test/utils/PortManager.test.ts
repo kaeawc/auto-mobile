@@ -403,6 +403,23 @@ describe("BunPortAvailabilityChecker (real checker, injected fake BunRuntime)", 
       expect(checker.isPortAvailable(9999)).toBe(false);
     });
 
+    test("PortManager.allocate returns the base port through the real checker when ::1 is absent", () => {
+      const { runtime } = recordingRuntime((hostname) =>
+        hostname === "::1" ? new Error("Failed to listen at ::1") : "ok",
+      );
+
+      PortManager.reset();
+      try {
+        expect(
+          PortManager.allocate("ipv6-less-host", {
+            availabilityChecker: new BunPortAvailabilityChecker(runtime),
+          }),
+        ).toBe(expectedAllocatedPort(0));
+      } finally {
+        PortManager.reset();
+      }
+    });
+
     test("the ::1 family probe runs once per checker, however many ports are checked", () => {
       const absent = recordingRuntime((hostname) =>
         hostname === "::1" ? new Error("Failed to listen at ::1") : "ok",

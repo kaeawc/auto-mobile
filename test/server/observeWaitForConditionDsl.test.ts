@@ -210,6 +210,35 @@ describe("waitForObservation DSL branch", () => {
     expect(outcome.awaitedElement).toBeUndefined();
   });
 
+  test("for:'appear' reports matched:true when the element stays present but hierarchy never settles", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const observeScreen = new FakeObserveScreen();
+    observeScreen.setObserveResult((index) =>
+      makeObservation([node({ "resource-id": "submit", text: String(index) })], index + 1),
+    );
+    observeScreen.enableAutoVaryHierarchy();
+
+    const outcome = await waitForObservation(
+      observeScreen,
+      {
+        for: "appear",
+        elementId: "submit",
+        settled: { quietPeriodMs: 200 },
+        timeoutMs: 500,
+      } satisfies WaitForWithSettled,
+      undefined,
+      false,
+      timer,
+    );
+
+    expect(outcome.matched).toBe(true);
+    expect(outcome.settled).toBe(false);
+    expect(outcome.timedOut).toBe(true);
+    expect(outcome.matchedElement?.["resource-id"]).toBe("submit");
+    expect(outcome.awaitedElement?.["resource-id"]).toBe("submit");
+  });
+
   test("for:'appear' returns the current element after a failed settled recheck recovers", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();

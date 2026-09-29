@@ -58,11 +58,8 @@ transform before correlating iOS `observe` or `tapAt` coordinates with
 | ↔️ <code>dragAndDrop</code>   | Drags one element to another.                                                                                                  |
 | 🤏 <code>pinchOn</code>       | Pinches to zoom.                                                                                                               |
 | ⌨️ <code>sendKeys</code>      | Runs ordered text, clear, raw-key, and semantic-key commands.                                                                  |
-| ⌨️ <code>inputText</code>     | Legacy text input retained for compatibility; disabled by default.                                                             |
 | 🧩 <code>setUIState</code>    | Sets multiple form fields to a desired state.                                                                                  |
-| 🗑️ <code>clearText</code>     | Legacy focused-input clear; disabled by default.                                                                               |
 | ✨ <code>selectAllText</code> | Selects all text in the focused input.                                                                                         |
-| ↩️ <code>imeAction</code>     | Legacy standalone IME action; disabled by default.                                                                             |
 | 🔘 <code>pressButton</code>   | Presses a device or navigation button.                                                                                         |
 | ⌨️ <code>keyboard</code>      | Opens, closes, or detects the keyboard; selects AutoMobile profiles or installed Android IMEs.                                 |
 | 📋 <code>clipboard</code>     | Copies, pastes, clears, or reads the clipboard.                                                                                |
@@ -131,21 +128,8 @@ typing can depend on the simulator's **Connect Hardware Keyboard** setting and
 active keyboard language; non-Latin keyboard configurations are not covered by
 the simulator-free tests.
 
-`inputText` reserves an error response for a failed text write. When the text
-lands but the optional `dismissKeyboard` cleanup cannot be confirmed, the
-response stays a success carrying `keyboardDismissed: false` and a
-`warnings: ["keyboard dismissal failed: ..."]` entry — so a client never has to
-parse prose to decide whether retyping would double the text. Inside
-`executePlan` those warnings are promoted to the response's own `warnings` list,
-each entry naming the `stepIndex`, `tool`, and (for multi-device plans) the
-`device` that reported it, so an ordinary plan does not have to opt into the
-`captureObserveSteps` debug trace to see them.
-
-`sendKeys` is the default text-input path on any AutoMobile release whose
-CtrlProxy artifacts are 0.0.68 or newer, which is the case for current releases.
-On older pinned releases `inputText` and `clearText` are default-enabled instead
-and `sendKeys` is off; select `sendKeys` for discovery there with `setToolEnabled`
-or `--enable-tool sendKeys`; it remains callable directly by name.
+`sendKeys` is the text-input tool. Its `type` command enters text, while `key`
+and `clear` commands send keys and clear the focused field, respectively.
 
 <details class="note" markdown="1">
 <summary>Pinch rotation semantics</summary>

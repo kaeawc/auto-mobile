@@ -34,8 +34,8 @@ resource IDs, content descriptions, or app-defined test tags over coordinates.
 ## Settled embedded observations
 
 A navigation-class action (`tapOn`, `tapAny`, `openLink`, `homeScreen`,
-`recentApps`, a navigation `pressButton`, and a submitting `inputText` /
-`sendKeys` / `imeAction`) replaces the screen. Android can hand back a
+`recentApps`, a navigation `pressButton`, and a submitting `sendKeys`) replaces
+the screen. Android can hand back a
 hierarchy for the destination before that screen finishes inflating, so the
 capture embedded in the action's response could miss a child that had not
 attached yet — for Settings rows, the `switchWidget` node that is the only

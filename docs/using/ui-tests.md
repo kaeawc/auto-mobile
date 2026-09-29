@@ -183,8 +183,10 @@ secretParameters:
   - apiToken
   - password
 steps:
-  - tool: inputText
-    text: "${apiToken}"
+  - tool: sendKeys
+    commands:
+      - action: type
+        text: "${apiToken}"
 ```
 
 Or pass them from the test runner. Android:
@@ -217,9 +219,11 @@ steps:
   - tool: launchApp
     device: recipient
     appId: com.example.chat
-  - tool: inputText
+  - tool: sendKeys
     device: sender
-    text: Hello
+    commands:
+      - action: type
+        text: Hello
 ```
 
 Use `barrier` to make device tracks meet at a point, or `criticalSection` only

@@ -1,4 +1,5 @@
 import { createConnection, Socket } from "node:net";
+import type { Duplex } from "node:stream";
 import { existsSync, statSync } from "node:fs";
 import { platform } from "node:os";
 import { z } from "zod";
@@ -291,7 +292,7 @@ export interface DaemonMethodCallOptions {
  * - Handle timeouts and errors
  */
 export class DaemonClient {
-  private socket: Socket | null = null;
+  private socket: Socket | Duplex | null = null;
   private socketPath: string;
   private connectionTimeout: number;
   private timer: Timer;
@@ -365,6 +366,34 @@ export class DaemonClient {
     this.clientIdentity = clientIdentity;
     this.idGenerator = idGenerator;
     this.platform = platformOverride;
+  }
+
+  /** Test-only seam for attaching an in-memory socket. */
+  attachSocketForTesting(socket: Duplex): void {
+    this.socket = socket;
+    this.connected = true;
+  }
+
+  /** Test-only seam for delivering a daemon frame. */
+  simulateIncomingDataForTesting(data: Buffer): void {
+    this.handleData(data);
+  }
+
+  /** Test-only seam for locating a pending request by its progress token. */
+  findPendingRequestIdByProgressTokenForTesting(
+    progressToken: string | number,
+  ): string | undefined {
+    for (const [requestId, pending] of this.pendingRequests) {
+      if (pending.progressToken === progressToken) {
+        return requestId;
+      }
+    }
+    return undefined;
+  }
+
+  /** Test-only seam for checking whether a request remains pending. */
+  hasPendingRequestForTesting(requestId: string): boolean {
+    return this.pendingRequests.has(requestId);
   }
 
   /**

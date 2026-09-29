@@ -102,7 +102,8 @@ export class Explore extends BaseVisualChange {
   private previousScreen: string | null = null;
   private targetPackageName: string | null = null;
   private consecutiveOutOfAppCount: number = 0;
-  private graphTraversalState: GraphTraversalState | null = null;
+  /** @internal Exposed for focused traversal report tests. */
+  graphTraversalState: GraphTraversalState | null = null;
   private currentTargetEdge: NavigationEdge | null = null;
   private currentElementConfidence: number = 0;
   private sessionUuid?: string;

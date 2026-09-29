@@ -1434,11 +1434,11 @@ describe("Explore", () => {
 
       // Inject fakeGraph via constructor
       explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
-      (explore as any).observeScreen = mockObserveScreen;
+      explore.observeScreen = mockObserveScreen;
 
       // Initialize traversal state on explore instance
-      (explore as any).graphTraversalState = await initializeGraphTraversal(fakeGraph);
-      const state = (explore as any).graphTraversalState;
+      explore.graphTraversalState = await initializeGraphTraversal(fakeGraph);
+      const state = explore.graphTraversalState;
 
       // Validate the edge stored in the graph, as validate mode does.
       markEdgeTraversed(state, mockEdge, "Screen2", true, fakeTimer);

@@ -103,8 +103,12 @@ describe("UnixSocketServer.handleIdeRequest extends the deadline on progress (#6
       reconnects++;
       return {
         callTool: async () => result,
+        listTools: async () => ({ tools: [] }),
+        listResources: async () => ({ resources: [] }),
+        readResource: async () => ({ contents: [] }),
+        listResourceTemplates: async () => ({ resourceTemplates: [] }),
         close: async () => {},
-      } as any;
+      };
     };
 
     fakeTimer.advanceTime(20_000);

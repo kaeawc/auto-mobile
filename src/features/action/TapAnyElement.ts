@@ -67,10 +67,22 @@ interface TapAnyElementDependencies {
   iosVoiceOverDetector?: IosVoiceOverDetector;
   featureFlags?: FeatureFlagService;
   accessibilityDetector?: AccessibilityDetector;
-  talkBackStrategy?: TalkBackTapStrategy;
+  talkBackStrategy?: Pick<
+    TalkBackTapStrategy,
+    "executeDirectActivation" | "executeCoordinateFallback" | "executeLongPress"
+  >;
   talkBackDriverFactory?: TalkBackNavigationDriverFactory;
-  accessibilityService?: AndroidCtrlProxyClient;
+  accessibilityService?: Pick<
+    AndroidCtrlProxyClient,
+    "requestTapCoordinates" | "requestAction" | "requestNodeAction" | "supportsNodeActionSelectors"
+  >;
 }
+
+type RefreshViewHierarchy = (
+  timeoutMs: number,
+  screenSize?: ObserveResult["screenSize"],
+  signal?: AbortSignal,
+) => Promise<ViewHierarchyResult | null>;
 
 /**
  * Headroom added to a long-press duration when sizing the CtrlProxy request
@@ -362,14 +374,28 @@ export class TapAnyElement extends BaseVisualChange {
   private geometry: ElementGeometry;
   private elementSelector: ElementSelector;
   private finder: ElementFinder;
-  private accessibilityService: AndroidCtrlProxyClient;
+  private accessibilityService: Pick<
+    AndroidCtrlProxyClient,
+    "requestTapCoordinates" | "requestAction" | "requestNodeAction" | "supportsNodeActionSelectors"
+  >;
+  private hierarchyAccessibilityService: AndroidCtrlProxyClient;
   private viewHierarchy: ViewHierarchy;
   private hierarchyCapture: HierarchyCapture;
   private iosVoiceOverDetector: IosVoiceOverDetector;
   private featureFlags: FeatureFlagService;
   private accessibilityDetector: AccessibilityDetector;
-  private talkBackStrategy: TalkBackTapStrategy;
+  private talkBackStrategy: Pick<
+    TalkBackTapStrategy,
+    "executeDirectActivation" | "executeCoordinateFallback" | "executeLongPress"
+  >;
   private talkBackDriverFactory: TalkBackNavigationDriverFactory;
+  private refreshViewHierarchyOverrideForTesting?: (
+    refresh: RefreshViewHierarchy,
+    timeoutMs: number,
+    screenSize?: ObserveResult["screenSize"],
+    signal?: AbortSignal,
+  ) => Promise<ViewHierarchyResult | null>;
+  private beforeAndroidTapForTesting?: () => void;
 
   private static readonly SEARCH_UNTIL_DEFAULT_MS = TAP_ANY_SEARCH_UNTIL_DEFAULT_MS;
   private static readonly SEARCH_UNTIL_MIN_MS = 100;
@@ -387,6 +413,10 @@ export class TapAnyElement extends BaseVisualChange {
     this.finder = new DefaultElementFinder();
     this.accessibilityService =
       options.accessibilityService ?? AndroidCtrlProxyClient.getInstance(device, this.adbFactory);
+    this.hierarchyAccessibilityService = AndroidCtrlProxyClient.getInstance(
+      device,
+      this.adbFactory,
+    );
     this.viewHierarchy = new ViewHierarchy(device, this.adbFactory);
     this.hierarchyCapture =
       options.hierarchyCapture ??
@@ -427,6 +457,23 @@ export class TapAnyElement extends BaseVisualChange {
       new TalkBackTapStrategy({ timer: this.timer, driverFactory: this.talkBackDriverFactory });
   }
 
+  /** Test-only seam for supplying the post-gesture hierarchy probe result. */
+  setRefreshViewHierarchyForTesting(
+    refresh: (
+      defaultRefresh: RefreshViewHierarchy,
+      timeoutMs: number,
+      screenSize?: ObserveResult["screenSize"],
+      signal?: AbortSignal,
+    ) => Promise<ViewHierarchyResult | null>,
+  ): void {
+    this.refreshViewHierarchyOverrideForTesting = refresh;
+  }
+
+  /** Test-only seam for observing when Android gesture dispatch begins. */
+  setBeforeAndroidTapForTesting(callback: () => void): void {
+    this.beforeAndroidTapForTesting = callback;
+  }
+
   private async executeAndroidTap(
     action: TapAnyElementOptions["action"],
     x: number,
@@ -435,6 +482,7 @@ export class TapAnyElement extends BaseVisualChange {
     element: Element,
     signal?: AbortSignal,
   ): Promise<void> {
+    this.beforeAndroidTapForTesting?.();
     const talkBackEnabled =
       element["hierarchy-source"] !== "uiautomator" &&
       (await this.accessibilityDetector.detectMethod(
@@ -749,6 +797,23 @@ export class TapAnyElement extends BaseVisualChange {
     _screenSize?: ObserveResult["screenSize"],
     signal?: AbortSignal,
   ): Promise<ViewHierarchyResult | null> {
+    if (this.refreshViewHierarchyOverrideForTesting) {
+      return this.refreshViewHierarchyOverrideForTesting(
+        (defaultTimeoutMs, screenSize, defaultSignal) =>
+          this.refreshViewHierarchyDefault(defaultTimeoutMs, screenSize, defaultSignal),
+        timeoutMs,
+        _screenSize,
+        signal,
+      );
+    }
+    return this.refreshViewHierarchyDefault(timeoutMs, _screenSize, signal);
+  }
+
+  private async refreshViewHierarchyDefault(
+    timeoutMs: number,
+    _screenSize?: ObserveResult["screenSize"],
+    signal?: AbortSignal,
+  ): Promise<ViewHierarchyResult | null> {
     throwIfAborted(signal);
     if (timeoutMs <= 0) {
       return null;
@@ -785,7 +850,7 @@ export class TapAnyElement extends BaseVisualChange {
     switch (this.device.platform) {
       case "android": {
         const rawHierarchy = await refreshAndroidViewHierarchy(
-          this.accessibilityService,
+          this.hierarchyAccessibilityService,
           effectiveTimeoutMs,
           signal,
           { adb: this.adb, timer: this.timer },

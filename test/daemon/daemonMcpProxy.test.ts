@@ -191,7 +191,7 @@ describe("DaemonMcpProxy", () => {
       expect(secondProgress).toEqual([4]);
       secondGate.resolve();
       await second;
-      expect((proxy as any).progressListeners.size).toBe(0);
+      expect(proxy.getProgressListenerCountForTesting()).toBe(0);
     } finally {
       firstGate.resolve();
       secondGate.resolve();
@@ -5706,7 +5706,7 @@ describe("DaemonMcpProxy", () => {
           buildIdentity: client,
         });
         try {
-          const unavailable = await (proxy as any).toolUnavailableError("setPreference");
+          const unavailable = await proxy.buildToolUnavailableErrorForTesting("setPreference");
           expect(unavailable).toBeInstanceOf(DaemonToolUnavailableError);
           expect(unavailable.message.includes("wrong-build")).toBe(mismatch);
           expect(unavailable.message).toContain(explanation);

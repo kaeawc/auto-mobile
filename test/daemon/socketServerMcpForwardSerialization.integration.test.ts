@@ -917,6 +917,9 @@ describe("UnixSocketServer MCP forward serialization", () => {
           },
         );
       }
+      // In this same-process test, a peer write during the client's read dispatch
+      // is dropped on Windows named pipes; production client and daemon are separate processes.
+      await new Promise<void>((resolve) => setImmediate(resolve));
       fakeTimer.advanceTime(501);
       releaseFirstCall.resolve();
       await expect(first).resolves.toMatchObject({ success: true });

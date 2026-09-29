@@ -43,3 +43,13 @@ export function unregisterLiveDeadline(key: string): void {
 export function getLiveDeadlineMs(key: string): number | undefined {
   return registry.get(key)?.value;
 }
+
+/**
+ * Subscribe to extensions of the deadline registered under `key` (issue
+ * #6283): `listener` runs synchronously every time that deadline is pushed
+ * forward. Returns an unsubscribe function, or `undefined` when no entry is
+ * registered under `key` (nothing to observe).
+ */
+export function subscribeLiveDeadline(key: string, listener: () => void): (() => void) | undefined {
+  return registry.get(key)?.onExtended(listener);
+}

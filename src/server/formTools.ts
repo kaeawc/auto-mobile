@@ -1,6 +1,6 @@
 import { z } from "zod/v4";
 import { ToolRegistry, ProgressCallback } from "./toolRegistry";
-import { SetUIState } from "../features/action/SetUIState";
+import { SetUIState, type LiveDeadlineSubscriber } from "../features/action/SetUIState";
 import { BootedDevice } from "../models";
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
@@ -12,7 +12,7 @@ import {
   INTERNAL_EXECUTION_START_TIME_PARAM,
   INTERNAL_LIVE_DEADLINE_KEY_PARAM,
 } from "../daemon/constants";
-import { getLiveDeadlineMs } from "../daemon/liveDeadlineRegistry";
+import { getLiveDeadlineMs, subscribeLiveDeadline } from "../daemon/liveDeadlineRegistry";
 
 /**
  * Schema for a single field specification
@@ -156,7 +156,7 @@ function resolveTransportDeadlineMs(args: unknown): number | undefined {
  * `SetUIState.execute()` falls back to the frozen `transportDeadlineMs`
  * snapshot from {@link resolveTransportDeadlineMs}.
  */
-function resolveLiveTransportDeadlineGetter(args: unknown): (() => number | undefined) | undefined {
+function resolveLiveDeadlineKey(args: unknown): string | undefined {
   if (!args || typeof args !== "object") {
     return undefined;
   }
@@ -164,7 +164,23 @@ function resolveLiveTransportDeadlineGetter(args: unknown): (() => number | unde
   if (typeof key !== "string" || key.length === 0) {
     return undefined;
   }
-  return () => getLiveDeadlineMs(key);
+  return key;
+}
+
+function resolveLiveTransportDeadlineGetter(args: unknown): (() => number | undefined) | undefined {
+  const key = resolveLiveDeadlineKey(args);
+  return key === undefined ? undefined : () => getLiveDeadlineMs(key);
+}
+
+/**
+ * Resolve a subscription to extensions of that same live deadline, so
+ * `SetUIState` re-arms an in-flight race the moment the daemon applies an
+ * extension rather than only when a later progress tick re-reads it (issue
+ * #6283). `undefined` whenever {@link resolveLiveTransportDeadlineGetter} is.
+ */
+function resolveLiveTransportDeadlineSubscriber(args: unknown): LiveDeadlineSubscriber | undefined {
+  const key = resolveLiveDeadlineKey(args);
+  return key === undefined ? undefined : (listener) => subscribeLiveDeadline(key, listener);
 }
 
 export const setUIStateHandler = async (
@@ -176,6 +192,7 @@ export const setUIStateHandler = async (
   const setUIState = setUIStateFactory(device);
   const transportDeadlineMs = resolveTransportDeadlineMs(args);
   const getLiveTransportDeadlineMs = resolveLiveTransportDeadlineGetter(args);
+  const subscribeLiveTransportDeadline = resolveLiveTransportDeadlineSubscriber(args);
 
   const result = await setUIState.execute(
     {
@@ -193,6 +210,7 @@ export const setUIStateHandler = async (
     signal,
     transportDeadlineMs,
     getLiveTransportDeadlineMs,
+    subscribeLiveTransportDeadline,
   );
 
   const response = createStructuredToolResponse({

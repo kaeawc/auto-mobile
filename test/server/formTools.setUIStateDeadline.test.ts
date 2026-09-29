@@ -24,6 +24,7 @@ import {
 import { ProgressExtendableDeadline } from "../../src/daemon/mcpRequestTimeout";
 import type { BootedDevice } from "../../src/models";
 import type { SetUIStateArgs } from "../../src/server/formTools";
+import type { LiveDeadlineSubscriber } from "../../src/features/action/SetUIState";
 
 const androidDevice: BootedDevice = {
   deviceId: "emulator-5554",
@@ -104,6 +105,58 @@ describe("setUIStateHandler transport-deadline wiring (issue #6222 P1 reopen)", 
     await setUIStateHandler(androidDevice, baseArgs);
 
     expect(capturedGetLiveTransportDeadlineMs).toBeUndefined();
+  });
+
+  test("passes a live-deadline subscriber that fires on each extension (issue #6283)", async () => {
+    const liveKey = "test-live-key-subscribe";
+    const deadline = new ProgressExtendableDeadline(0, 10_000);
+    registerLiveDeadline(liveKey, deadline);
+
+    let capturedSubscriber: LiveDeadlineSubscriber | undefined;
+    setSetUIStateFactory(() => ({
+      execute: async (
+        _options,
+        _progress,
+        _signal,
+        _transportDeadlineMs,
+        _getLiveTransportDeadlineMs,
+        subscribeLiveTransportDeadline,
+      ) => {
+        capturedSubscriber = subscribeLiveTransportDeadline;
+        return { success: true, fields: [], totalAttempts: 0 };
+      },
+    }));
+
+    await setUIStateHandler(
+      androidDevice,
+      Object.assign({}, baseArgs, { [INTERNAL_LIVE_DEADLINE_KEY_PARAM]: liveKey }),
+    );
+
+    let notified = 0;
+    const unsubscribe = capturedSubscriber?.(() => {
+      notified++;
+    });
+    deadline.extendOnProgress(9_000, 10_000);
+    expect(notified).toBe(1);
+    unsubscribe?.();
+    deadline.extendOnProgress(18_000, 10_000);
+    expect(notified).toBe(1);
+
+    unregisterLiveDeadline(liveKey);
+  });
+
+  test("resolves no live-deadline subscriber on a direct/non-daemon call (issue #6283)", async () => {
+    let capturedSubscriber: LiveDeadlineSubscriber | undefined = () => undefined;
+    setSetUIStateFactory(() => ({
+      execute: async (_o, _p, _s, _t, _g, subscribeLiveTransportDeadline) => {
+        capturedSubscriber = subscribeLiveTransportDeadline;
+        return { success: true, fields: [], totalAttempts: 0 };
+      },
+    }));
+
+    await setUIStateHandler(androidDevice, baseArgs);
+
+    expect(capturedSubscriber).toBeUndefined();
   });
 
   test("the live getter reads undefined once the registry entry is gone (call already settled)", async () => {

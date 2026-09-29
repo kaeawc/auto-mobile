@@ -12,6 +12,13 @@ import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import type { ObserveScreen } from "../observe/interfaces/ObserveScreen";
 
 /**
+ * Subscribes `listener` to extensions of the live transport deadline and
+ * returns an unsubscribe function, or `undefined` when there is nothing to
+ * observe (issue #6283).
+ */
+export type LiveDeadlineSubscriber = (listener: () => void) => (() => void) | undefined;
+
+/**
  * Interface for TapOnElement dependency
  */
 interface TapOnElementLike {
@@ -220,6 +227,16 @@ export class SetUIState extends BaseVisualChange {
    *   returns `undefined` (e.g. the daemon-side entry was never registered,
    *   or the call is not daemon-forwarded), `transportDeadlineMs` is used
    *   as-is (issue #6222 P1 reopen, fuQ88 review).
+   * @param subscribeLiveTransportDeadline - Optional subscription to
+   *   extensions of that same live deadline: invoked with a listener, it
+   *   calls the listener whenever the deadline is pushed forward and returns
+   *   an unsubscribe function (or `undefined` when there is nothing to
+   *   observe). The extension is applied by the daemon's own `onprogress`
+   *   handler, which can run AFTER this call's progress callback -- and so
+   *   after the `onTick` re-arm -- has already returned; re-reading only on
+   *   tick can therefore miss it and leave an in-flight race armed against
+   *   the old cutoff. Subscribing re-arms the moment the extension lands
+   *   (issue #6283).
    * @returns Result of the operation
    */
   async execute(
@@ -228,6 +245,7 @@ export class SetUIState extends BaseVisualChange {
     signal?: AbortSignal,
     transportDeadlineMs?: number,
     getLiveTransportDeadlineMs?: () => number | undefined,
+    subscribeLiveTransportDeadline?: LiveDeadlineSubscriber,
   ): Promise<SetUIStateResult> {
     const scrollDirection = options.scrollDirection ?? DEFAULT_SCROLL_DIRECTION;
 
@@ -383,6 +401,7 @@ export class SetUIState extends BaseVisualChange {
       () => this.getObserveScreen().execute(undefined, undefined, false, 0, signal),
       () => cutoffMs(),
       "initial observation",
+      subscribeLiveTransportDeadline,
     );
     if (initialObservationRaced === "timed-out") {
       const missing = options.fields.map((f) => this.describeSelector(f.selector));
@@ -449,6 +468,7 @@ export class SetUIState extends BaseVisualChange {
             ),
           () => cutoffMs(),
           this.describeSelector(fieldSpec.selector),
+          subscribeLiveTransportDeadline,
         ).catch((error: unknown): InternalFieldResult => ({
           selector: fieldSpec.selector,
           success: false,
@@ -524,6 +544,7 @@ export class SetUIState extends BaseVisualChange {
             () => this.observationAfterSuccess(result, signal),
             () => cutoffMs(),
             "post-success observation refresh",
+            subscribeLiveTransportDeadline,
           );
 
           if (observationRaced === "timed-out") {
@@ -626,6 +647,7 @@ export class SetUIState extends BaseVisualChange {
           },
           () => cutoffMs(),
           "off-screen search (swipe + re-observe)",
+          subscribeLiveTransportDeadline,
         );
 
         if (searchRaced === "timed-out") {
@@ -842,6 +864,11 @@ export class SetUIState extends BaseVisualChange {
    *   Read fresh on every (re-)arm, never cached.
    * @param describeWork - Only used to identify the work in a debug log if
    *   its promise eventually settles after the race already timed out.
+   * @param subscribeToCutoffMoves - Optional subscription to live-deadline
+   *   extensions. While the race is pending, every extension re-arms the
+   *   timeout exactly like `onTick`, so an extension that lands after the
+   *   last tick's re-read (but before the old cutoff) still keeps the work
+   *   running (issue #6283). Unsubscribed as soon as the race settles.
    * @returns The work's real result if it settles in time, or the literal
    *   string `"timed-out"` if the timeout wins the race.
    */
@@ -849,6 +876,7 @@ export class SetUIState extends BaseVisualChange {
     startWork: (onTick: () => void) => Promise<T>,
     getCutoffMs: () => number,
     describeWork: string,
+    subscribeToCutoffMoves?: LiveDeadlineSubscriber,
   ): Promise<T | "timed-out"> {
     // A background settlement after abandonment has no observer left to
     // report to beyond this debug trace -- expected once the work's own
@@ -881,12 +909,14 @@ export class SetUIState extends BaseVisualChange {
       // lines down handles that case instead.
       // oxlint-disable-next-line prefer-const -- see comment above: `let` is required for TDZ safety, not a style preference.
       let workPromise: Promise<T> | undefined;
+      let unsubscribeCutoffMoves: (() => void) | undefined;
 
       const finishTimedOut = (): void => {
         if (settled) {
           return;
         }
         settled = true;
+        unsubscribeCutoffMoves?.();
         if (timeoutHandle !== undefined) {
           this.timer.clearTimeout(timeoutHandle);
           timeoutHandle = undefined;
@@ -924,6 +954,13 @@ export class SetUIState extends BaseVisualChange {
       };
 
       armTimeout();
+      // Re-arm whenever the live deadline is extended, not only on a tick:
+      // the daemon applies the extension in its own `onprogress` handler,
+      // which may run after this call's tick already re-read the old value
+      // (issue #6283).
+      if (!settled) {
+        unsubscribeCutoffMoves = subscribeToCutoffMoves?.(armTimeout);
+      }
       // Armed above; only now does the work actually start.
       workPromise = startWork(onTick);
       const startedWorkPromise = workPromise;
@@ -941,6 +978,7 @@ export class SetUIState extends BaseVisualChange {
             return;
           }
           settled = true;
+          unsubscribeCutoffMoves?.();
           if (timeoutHandle !== undefined) {
             this.timer.clearTimeout(timeoutHandle);
           }
@@ -951,6 +989,7 @@ export class SetUIState extends BaseVisualChange {
             return;
           }
           settled = true;
+          unsubscribeCutoffMoves?.();
           if (timeoutHandle !== undefined) {
             this.timer.clearTimeout(timeoutHandle);
           }

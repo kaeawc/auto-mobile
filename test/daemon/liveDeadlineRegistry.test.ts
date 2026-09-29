@@ -3,6 +3,7 @@ import {
   registerLiveDeadline,
   unregisterLiveDeadline,
   getLiveDeadlineMs,
+  subscribeLiveDeadline,
 } from "../../src/daemon/liveDeadlineRegistry";
 import { ProgressExtendableDeadline } from "../../src/daemon/mcpRequestTimeout";
 
@@ -58,5 +59,29 @@ describe("liveDeadlineRegistry", () => {
     expect(getLiveDeadlineMs(key)).toBe(second.value);
 
     unregisterLiveDeadline(key);
+  });
+
+  test("subscribeLiveDeadline notifies on each extension of the registered deadline (issue #6283)", () => {
+    const key = "req-subscribe";
+    const deadline = new ProgressExtendableDeadline(0, 10_000);
+    registerLiveDeadline(key, deadline);
+    let notified = 0;
+    const unsubscribe = subscribeLiveDeadline(key, () => {
+      notified++;
+    });
+    expect(unsubscribe).toBeDefined();
+
+    deadline.extendOnProgress(9_000, 10_000);
+    expect(notified).toBe(1);
+
+    unsubscribe?.();
+    deadline.extendOnProgress(18_000, 10_000);
+    expect(notified).toBe(1);
+
+    unregisterLiveDeadline(key);
+  });
+
+  test("subscribeLiveDeadline returns undefined for an unknown key", () => {
+    expect(subscribeLiveDeadline("unknown-subscribe-key", () => {})).toBeUndefined();
   });
 });

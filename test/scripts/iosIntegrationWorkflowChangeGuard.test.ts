@@ -17,14 +17,22 @@ describe("Fast Validation independence from XCTestRunner", () => {
     expect(steps.some((step) => step.name?.includes("forced XCTestRunner"))).toBe(false);
   });
 
-  test("retains the dedicated XCTestRunner simulator job", () => {
+  test("retains the paused dedicated XCTestRunner simulator job", () => {
     const job = loadWorkflow(WORKFLOW).jobs?.["ios-xctest-runner-simulator-tests"];
     expect(job).toBeDefined();
-    expect(job?.if).toContain("ios_integration_should_run");
+    expect(job?.if).toBe("${{ false }}");
     expect(loadJobSteps(WORKFLOW, "ios-xctest-runner-simulator-tests").length).toBeGreaterThan(0);
   });
 
-  test("runs XCTestRunner when its recording session cleanup helpers change", () => {
+  test("runs Playground tests only with a run-native or run-ios label and iOS and Fast Validation gates", () => {
+    const job = loadWorkflow(WORKFLOW).jobs?.["ios-playground-tests"];
+    expect(job?.if).toBe(
+      "(contains(github.event.pull_request.labels.*.name, 'run-native') || contains(github.event.pull_request.labels.*.name, 'run-ios')) && needs.detect-changes.outputs.ios_should_run == 'true' && needs.fast-validation.result == 'success'",
+    );
+    expect(loadJobSteps(WORKFLOW, "ios-playground-tests").length).toBeGreaterThan(0);
+  });
+
+  test("tracks recording cleanup helpers for future XCTestRunner runs", () => {
     const filterStep = loadJobSteps(WORKFLOW, "detect-changes").find(
       (step) => step.id === "filter-native-integration",
     );

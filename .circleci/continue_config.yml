@@ -4,6 +4,7 @@ version: 2.1
 # .circleci/config.yml (the setup pipeline) only when the path-filtering job
 # decided iOS sources changed and set `run-ios` to true. See that file's header
 # for the why, the budget, and the REQUIRED dynamic-config project setting.
+# PAUSED: see the 2026-09-29 note in .circleci/config.yml.
 #
 # Scope: ios-swift-packages and ios-xcode-build mirror the same-named jobs in
 # .github/workflows/pull_request.yml — the ones feeding the required "iOS Build"

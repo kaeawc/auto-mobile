@@ -1,6 +1,10 @@
 version: 2.1
 
 # AutoMobile — CircleCI is used ONLY for macOS/iOS runners.
+# PAUSED (2026-09-29): out of macOS credits. To resume, flip
+# circleci-enabled's default to true to restore path-based Playground runs in
+# CircleCI. detect-ios-changes derives run-ios from changed paths, not PR labels;
+# keep GHA Playground label-only if it remains the manual fallback.
 #
 # Everything else (Node/TypeScript, Android/Gradle, Python, docs) stays on
 # GitHub Actions, where it runs free and fast on Linux. CircleCI exists here for
@@ -29,6 +33,11 @@ version: 2.1
 # .circleci/** reach the macOS lanes; everything else costs a few Linux seconds.
 
 setup: true
+
+parameters:
+  circleci-enabled:
+    type: boolean
+    default: false
 
 orbs:
   # Latest stable at time of writing. The filter job's base-revision/config-path/
@@ -64,6 +73,7 @@ jobs:
 
 workflows:
   detect-ios-changes:
+    when: << pipeline.parameters.circleci-enabled >>
     jobs:
       # Runs on a small Linux executor. Computes the changed-file set vs main
       # (merge-base) and sets the `run-ios` pipeline parameter, then continues to

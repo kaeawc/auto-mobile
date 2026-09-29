@@ -553,6 +553,8 @@ jobs:
 
   ios-device-webrtc:
     name: "iOS Device Capture to WHEP"
+    # Paused: remove this condition to re-enable the advisory iOS capture lane.
+    if: ${{ false }}
     runs-on: macos-26
     timeout-minutes: 35
     steps:

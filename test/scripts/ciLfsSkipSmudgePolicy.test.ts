@@ -61,9 +61,10 @@ interface CircleJob {
 }
 
 interface CircleConfig {
+  parameters?: Record<string, { type?: string; default?: boolean }>;
   jobs?: Record<string, CircleJob>;
   executors?: Record<string, { environment?: Record<string, string> }>;
-  workflows?: Record<string, { jobs?: Array<string | Record<string, unknown>> }>;
+  workflows?: Record<string, { when?: string; jobs?: Array<string | Record<string, unknown>> }>;
 }
 
 const circleDocuments = circlePaths.map((path) => ({
@@ -140,6 +141,19 @@ function skipsLfs(job: CircleJob, config: CircleConfig): boolean {
 }
 
 describe("CI LFS checkout policy", () => {
+  test("keeps the CircleCI setup workflow disabled by default", () => {
+    const setupConfig = circleDocuments.find(
+      ({ path }) => path === ".circleci/config.yml",
+    )?.document;
+    expect(setupConfig?.parameters?.["circleci-enabled"]).toEqual({
+      type: "boolean",
+      default: false,
+    });
+    expect(setupConfig?.workflows?.["detect-ios-changes"]?.when).toBe(
+      "<< pipeline.parameters.circleci-enabled >>",
+    );
+  });
+
   test("enumerates workflows, composite actions, and both CircleCI configs", () => {
     expect(workflowPaths.length).toBeGreaterThanOrEqual(20);
     expect(workflowSteps.length).toBeGreaterThanOrEqual(100);

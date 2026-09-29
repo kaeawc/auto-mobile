@@ -1893,9 +1893,10 @@ jobs:
         # parallel, halving this required leg's wall time. The "iOS Build" gate
         # reads needs.ios-xcode-build.result, which aggregates the whole matrix
         # (green only if every shard is green), so the gate needs no change. Costs
-        # one extra concurrent macOS slot per PR — offset by moving the Playground
-        # tests to CircleCI (see .circleci/continue_config.yml). Names must match
-        # the generated <name>.xcodeproj basenames passed to xcode-build.sh.
+        # one extra concurrent macOS slot per PR. Playground tests run on GitHub
+        # Actions only with run-native / run-ios labels during the macOS budget
+        # pause. Names must match the generated <name>.xcodeproj
+        # basenames passed to xcode-build.sh.
         project:
           - Playground
           - CtrlProxy
@@ -1959,19 +1960,14 @@ jobs:
           echo "build took ${SECONDS}s"
 
   # The Playground design-system tests (colour/contrast/typography/shape, #5102)
-  # normally run on CircleCI (.circleci/continue_config.yml → ios-playground-tests),
-  # which frees a concurrent GitHub macOS slot for the sharded build lanes above.
-  # CircleCI derives its run-ios parameter from changed PATHS only, so it cannot
-  # see the run-ios / run-native LABEL force. This GHA job is the fallback for that
-  # one case: a label-forced run whose diff touches no iOS path (ios_should_run is
-  # true only via the label, ios_changed is false). On a normal iOS-path PR
-  # ios_changed is true and this job is skipped — CircleCI runs Playground instead,
-  # so there is no double-run. Advisory, like the other simulator tests.
+  # run on GitHub Actions only with a run-native / run-ios label during the
+  # macOS budget pause, even when iOS paths change. Advisory, like the other
+  # simulator tests.
   ios-playground-tests:
     name: "iOS Playground Tests (${{ matrix.config.name }})"
     runs-on: ${{ matrix.config.runner }}
     needs: [detect-changes, fast-validation]
-    if: needs.detect-changes.outputs.ios_should_run == 'true' && needs.detect-changes.outputs.ios_changed != 'true' && needs.fast-validation.result == 'success'
+    if: (contains(github.event.pull_request.labels.*.name, 'run-native') || contains(github.event.pull_request.labels.*.name, 'run-ios')) && needs.detect-changes.outputs.ios_should_run == 'true' && needs.fast-validation.result == 'success'
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -2032,14 +2028,14 @@ jobs:
 
   ios-xctest-runner-simulator-tests:
     name: "XCTestRunner Simulator Tests"
+    # Paused: nothing depends on XCTestRunner right now; restore the condition below to re-enable it.
+    if: ${{ false }}
     runs-on: macos-26
     # The advisory simulator lane should not consume a scarce macOS runner for
     # a revision already rejected by inexpensive Ubuntu validation.
     needs: [detect-changes, fast-validation]
-    # Wired to native_integration (src/** device surface + ios/**), NOT ios_should_run,
-    # so this TS<->runner integration test still runs on the TypeScript PRs that can
-    # break it while the pure-Swift build jobs skip on src-only changes.
-    if: needs.detect-changes.outputs.ios_integration_should_run == 'true' && needs.fast-validation.result == 'success'
+    # When re-enabled, restore the native_integration condition (src/** device
+    # surface + ios/**) so TypeScript changes that affect the runner are covered.
     timeout-minutes: 45
     # CI's XCUITest cold-start routinely exceeds the defaults; give the daemon a
     # generous health-poll window (240 × 500ms = 120s) so it doesn't give up (and
@@ -3441,8 +3437,9 @@ jobs:
 
   ios-device-webrtc:
     name: "iOS Device Capture to WHEP"
+    # Paused: restore the webrtc_should_run and fast-validation condition to re-enable it.
+    if: ${{ false }}
     needs: [detect-changes, fast-validation]
-    if: needs.detect-changes.outputs.webrtc_should_run == 'true' && needs.fast-validation.result == 'success'
     runs-on: macos-26
     timeout-minutes: 35
     steps:
@@ -3602,12 +3599,10 @@ jobs:
     timeout-minutes: 10
     name: "iOS"
     if: always() && needs.detect-changes.outputs.auto_chore != 'true'
-    # ios-playground-tests normally runs on CircleCI; the GHA job stays in this
-    # roll-up for the label-forced-without-iOS-paths fallback, where it runs here.
-    # In the common iOS-path case it is skipped (result 'skipped'), which this
-    # gate treats as non-failing. XCTestRunner Simulator Tests is intentionally
-    # not part of this roll-up: the ~10-30 minute, simulator-flaky macOS lane
-    # remains a standalone, non-required advisory check outside the gate.
+    # ios-playground-tests runs only with a run-native / run-ios label during
+    # the macOS budget pause; this gate treats its skipped result as non-failing.
+    # XCTestRunner Simulator Tests remains a standalone, non-required advisory
+    # check outside this roll-up.
     needs:
       - detect-changes
       - ios-build-gate

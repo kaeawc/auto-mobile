@@ -194,6 +194,17 @@ wiring_requires_yq() {
   done
 }
 
+@test "ios-gate accepts skipped Playground tests" {
+  wiring_requires_yq
+  local script tmpfile
+  script="$(yq -r '.jobs."ios-gate".steps[] | select(.name == "Check results") | .run' "$WF" | sed -E 's/\$\{\{ needs\.[A-Za-z0-9_-]+\.result \}\}/success/g; s/ios-playground-tests=success/ios-playground-tests=skipped/')"
+  tmpfile="$BATS_TEST_TMPDIR/ios-playground-skipped.sh"
+  printf '%s\n' "$script" >"$tmpfile"
+  run /bin/bash -u -e -o pipefail "$tmpfile"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"::error::"* ]]
+}
+
 @test "portable PR matrices leave macOS coverage to nightly" {
   wiring_requires_yq
   local job expected
@@ -306,7 +317,7 @@ wiring_requires_yq() {
   [[ ! -e ".github/workflows/webrtc-device-integration.yml" ]]
 }
 
-@test "PR WebRTC device jobs share path and opt-in gating" {
+@test "PR Android WebRTC job keeps opt-in gating while iOS capture is paused" {
   local block
   block="$(job_block android-device-webrtc)"
   [[ "$block" == *"needs: [detect-changes, build-android-control-proxy]"* ]]
@@ -314,7 +325,20 @@ wiring_requires_yq() {
 
   block="$(job_block ios-device-webrtc)"
   [[ "$block" == *"needs: [detect-changes, fast-validation]"* ]]
-  [[ "$block" == *"if: needs.detect-changes.outputs.webrtc_should_run == 'true' && needs.fast-validation.result == 'success'"* ]]
+  [[ "$block" == *'if: ${{ false }}'* ]]
+  block="$(job_block ios-device-webrtc .github/workflows/merge.yml)"
+  [[ "$block" == *'if: ${{ false }}'* ]]
+}
+
+@test "webrtc-gate accepts skipped iOS capture without weakening other lanes" {
+  wiring_requires_yq
+  local script tmpfile
+  script="$(yq -r '.jobs."webrtc-gate".steps[] | select(.name == "Check results") | .run' "$WF" | sed -E 's/\$\{\{ needs\.[A-Za-z0-9_-]+\.result \}\}/success/g; s/ios-device-webrtc=success/ios-device-webrtc=skipped/')"
+  tmpfile="$BATS_TEST_TMPDIR/webrtc-skipped.sh"
+  printf '%s\n' "$script" >"$tmpfile"
+  run /bin/bash -u -e -o pipefail "$tmpfile"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"::error::"* ]]
 }
 
 @test "WebRTC change detection covers publisher and device inputs" {

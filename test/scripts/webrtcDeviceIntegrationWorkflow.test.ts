@@ -91,7 +91,7 @@ describe("#4308 device WebRTC integration workflow", () => {
     expect(filter?.with?.filters).not.toContain("src/index.ts");
   });
 
-  test("gates both PR device lanes through shared detection while merge runs both unconditionally", () => {
+  test("gates Android on PR detection and pauses iOS in both workflows", () => {
     const pullRequest = workflow(PULL_REQUEST_WORKFLOW);
     const merge = workflow(MERGE_WORKFLOW);
 
@@ -103,18 +103,17 @@ describe("#4308 device WebRTC integration workflow", () => {
       "detect-changes",
       "fast-validation",
     ]);
-    const pullRequestConditions = {
-      "android-device-webrtc": "needs.detect-changes.outputs.webrtc_should_run == 'true'",
-      "ios-device-webrtc":
-        "needs.detect-changes.outputs.webrtc_should_run == 'true' && needs.fast-validation.result == 'success'",
-    } as const;
     for (const jobId of DEVICE_JOB_IDS) {
-      expect(pullRequest.jobs?.[jobId]?.if).toBe(pullRequestConditions[jobId]);
       expect(merge.jobs?.[jobId]?.needs).toBe(
         jobId === "android-device-webrtc" ? "build-android-control-proxy" : undefined,
       );
-      expect(merge.jobs?.[jobId]?.if).toBeUndefined();
     }
+    expect(pullRequest.jobs?.["android-device-webrtc"]?.if).toBe(
+      "needs.detect-changes.outputs.webrtc_should_run == 'true'",
+    );
+    expect(merge.jobs?.["android-device-webrtc"]?.if).toBeUndefined();
+    expect(pullRequest.jobs?.["ios-device-webrtc"]?.if).toBe("${{ false }}");
+    expect(merge.jobs?.["ios-device-webrtc"]?.if).toBe("${{ false }}");
   });
 
   test("downloads existing Android products before the emulator composite installs them", () => {

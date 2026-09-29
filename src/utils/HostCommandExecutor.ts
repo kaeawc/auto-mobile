@@ -1,4 +1,4 @@
-import { execFile, spawn, type ChildProcess, type SpawnOptions } from "child_process";
+import { execFile, spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
 import { promisify } from "util";
 import type { ExecResult } from "../models";
 import { wrapCommandError } from "./CommandError";
@@ -10,6 +10,9 @@ import {
 } from "./ExecSeam";
 
 export type HostCommandOptions = ExecRequestOptions;
+
+/** Narrow injectable long-lived process launcher shared by Android clients. */
+export type SpawnFn = (file: string, args: string[], options?: SpawnOptions) => ChildProcess;
 
 export interface HostCommandExecutor {
   executeCommand(file: string, args?: string[], options?: HostCommandOptions): Promise<ExecResult>;

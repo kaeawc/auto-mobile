@@ -1,8 +1,7 @@
 import { errorMessage } from "../describeUnknownError";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import { ActionableError, type ExecResult } from "../../models";
-import { createExecResult } from "../execResult";
+import { runExecSeam } from "../ExecSeam";
+import { execFileAsync as sharedExecFileAsync } from "../HostCommandExecutor";
 import { logger } from "../logger";
 import { defaultTimer, type Timer } from "../SystemTimer";
 
@@ -51,13 +50,12 @@ const defaultExecute = async (
   args: string[],
   options: SecurityExecutionOptions = {},
 ): Promise<ExecResult> => {
-  const result = await promisify(execFile)(file, args, {
-    signal: options.signal,
-    killSignal: options.killSignal ?? "SIGKILL",
-  });
-  const stdout = String(result.stdout);
-  const stderr = String(result.stderr);
-  return createExecResult(stdout, stderr);
+  return runExecSeam(
+    (execOptions) => sharedExecFileAsync(file, args, execOptions),
+    { signal: options.signal, killSignal: options.killSignal ?? "SIGKILL" },
+    { command: file, args },
+    { preserveError: true },
+  );
 };
 
 const parseIdentities = (output: string): SecurityIdentity[] =>

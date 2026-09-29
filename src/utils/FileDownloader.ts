@@ -1,5 +1,4 @@
 import { errorMessage } from "./describeUnknownError";
-import { execFile } from "child_process";
 import { createWriteStream } from "fs";
 import * as fs from "fs/promises";
 import http from "http";
@@ -7,13 +6,23 @@ import https from "https";
 import * as path from "path";
 import type { Readable } from "stream";
 import { pipeline } from "stream/promises";
-import { promisify } from "util";
+import { runExecSeam, type ExecSeamOptions } from "./ExecSeam";
+import { execFileAsync as sharedExecFileAsync } from "./HostCommandExecutor";
 import { logger } from "./logger";
 import { getAbortSignal } from "./AbortContext";
 import { toActionableError } from "../models/ActionableError";
 import { type IdGenerator, defaultIdGenerator } from "./IdGenerator";
 
-const execFileAsync = promisify(execFile);
+type DownloadExec = (file: string, args: string[], options: ExecSeamOptions) => Promise<void>;
+
+const defaultDownloadExec: DownloadExec = async (file, args, options) => {
+  await runExecSeam(
+    (execOptions) => sharedExecFileAsync(file, args, execOptions),
+    { timeoutMs: options.timeout, maxBuffer: options.maxBuffer, signal: options.signal },
+    { command: file, args },
+    { preserveError: true },
+  );
+};
 
 export interface FileDownloader {
   download(url: string, destination: string, signal?: AbortSignal): Promise<void>;
@@ -22,7 +31,10 @@ export interface FileDownloader {
 export class DefaultFileDownloader implements FileDownloader {
   private onFirstResponseByte?: () => void;
 
-  constructor(private readonly idGenerator: IdGenerator = defaultIdGenerator) {}
+  constructor(
+    private readonly idGenerator: IdGenerator = defaultIdGenerator,
+    private readonly execute: DownloadExec = defaultDownloadExec,
+  ) {}
 
   public async download(url: string, destination: string, signal?: AbortSignal): Promise<void> {
     signal ??= getAbortSignal();
@@ -63,7 +75,7 @@ export class DefaultFileDownloader implements FileDownloader {
     destination: string,
     signal?: AbortSignal,
   ): Promise<void> {
-    await execFileAsync(
+    await this.execute(
       "curl",
       [
         "--fail",
@@ -87,7 +99,7 @@ export class DefaultFileDownloader implements FileDownloader {
     destination: string,
     signal?: AbortSignal,
   ): Promise<void> {
-    await execFileAsync("wget", ["--tries=3", "--timeout=30", "-O", destination, url], {
+    await this.execute("wget", ["--tries=3", "--timeout=30", "-O", destination, url], {
       timeout: 120000,
       maxBuffer: 10 * 1024 * 1024,
       signal,

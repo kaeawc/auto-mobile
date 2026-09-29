@@ -1,19 +1,20 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import type { AppearanceMode } from "../models";
+import { DefaultHostCommandExecutor, type HostCommandExecutor } from "./HostCommandExecutor";
 import { DefaultHostDefaultsClient, type HostDefaultsClient } from "./HostDefaultsClient";
 import { logger } from "./logger";
-
-const execFileAsync = promisify(execFile);
 
 type CommandResult = {
   stdout: string;
   stderr: string;
 };
 
-async function runCommand(command: string, args: string[]): Promise<CommandResult | null> {
+async function runCommand(
+  command: string,
+  args: string[],
+  executor: HostCommandExecutor,
+): Promise<CommandResult | null> {
   try {
-    const result = await execFileAsync(command, args, { timeout: 2000 });
+    const result = await executor.executeCommand(command, args, { timeoutMs: 2000 });
     return {
       stdout: result.stdout ? result.stdout.toString() : "",
       stderr: result.stderr ? result.stderr.toString() : "",
@@ -34,6 +35,7 @@ function isDarkThemeValue(value: string): boolean {
 
 export async function detectHostAppearance(
   hostDefaults: HostDefaultsClient = new DefaultHostDefaultsClient(),
+  executor: HostCommandExecutor = new DefaultHostCommandExecutor(),
 ): Promise<AppearanceMode> {
   if (hostDefaults.isSupported()) {
     const style = await hostDefaults.readGlobal("AppleInterfaceStyle");
@@ -41,27 +43,31 @@ export async function detectHostAppearance(
   }
 
   if (process.platform === "linux") {
-    const gnomeScheme = await runCommand("gsettings", [
-      "get",
-      "org.gnome.desktop.interface",
-      "color-scheme",
-    ]);
+    const gnomeScheme = await runCommand(
+      "gsettings",
+      ["get", "org.gnome.desktop.interface", "color-scheme"],
+      executor,
+    );
     if (gnomeScheme?.stdout) {
       return isDarkThemeValue(gnomeScheme.stdout) ? "dark" : "light";
     }
 
-    const gnomeTheme = await runCommand("gsettings", [
-      "get",
-      "org.gnome.desktop.interface",
-      "gtk-theme",
-    ]);
+    const gnomeTheme = await runCommand(
+      "gsettings",
+      ["get", "org.gnome.desktop.interface", "gtk-theme"],
+      executor,
+    );
     if (gnomeTheme?.stdout) {
       return isDarkThemeValue(gnomeTheme.stdout) ? "dark" : "light";
     }
 
     const kdeTheme =
-      (await runCommand("kreadconfig5", ["--group", "General", "--key", "ColorScheme"])) ??
-      (await runCommand("kreadconfig6", ["--group", "General", "--key", "ColorScheme"]));
+      (await runCommand(
+        "kreadconfig5",
+        ["--group", "General", "--key", "ColorScheme"],
+        executor,
+      )) ??
+      (await runCommand("kreadconfig6", ["--group", "General", "--key", "ColorScheme"], executor));
     if (kdeTheme?.stdout) {
       return isDarkThemeValue(kdeTheme.stdout) ? "dark" : "light";
     }

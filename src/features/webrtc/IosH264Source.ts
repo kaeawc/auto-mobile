@@ -57,6 +57,7 @@ import type {
 import { H264AnnexBParser, isKeyFrameNal, NAL_TYPE_IDR } from "./h264";
 import { h264MacroblocksPerFrame, WEBRTC_H264_MAX_MACROBLOCKS_PER_FRAME } from "./h264Level";
 import { WEBRTC_IOS_SIMULATOR_FPS_DEFAULT } from "./webrtcStreamingConfig";
+import { defaultProcessSpawner, type ProcessSpawner } from "./processSpawner";
 import {
   IOS_SCREEN_CAPTURE_HELPER_ENV,
   IOS_SCREEN_CAPTURE_HELPER_ENV_ALIAS,
@@ -252,7 +253,7 @@ export interface IosH264EncoderProcess {
   once(event: "error", listener: (error: Error) => void): void;
 }
 
-export type IosH264EncoderSpawner = (command: string, args: string[]) => IosH264EncoderProcess;
+export type IosH264EncoderSpawner = ProcessSpawner<IosH264EncoderProcess>;
 export type IosFrameCaptureHelperFactory = (
   options: IosScreenCaptureHelperOptions,
 ) => IosFrameCaptureHelper;
@@ -282,7 +283,7 @@ const defaultCommandRunner: CommandRunner = (command, args, signal) =>
       reject(new Error(`Command aborted: ${command}`));
       return;
     }
-    const child = nodeSpawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
+    const child = defaultProcessSpawner(command, args);
     let stdout = "";
     let stderr = "";
     let settled = false;
@@ -2331,4 +2332,3 @@ function simulatorTitleNamesDeviceExactly(title: string, deviceName: string): bo
   const [leadingSegment] = normalized.split(/\s+[—–-]\s+/, 1);
   return leadingSegment.trim() === deviceName;
 }
-import { spawn as nodeSpawn } from "node:child_process";

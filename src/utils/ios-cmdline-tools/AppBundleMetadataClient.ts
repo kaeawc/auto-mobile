@@ -1,8 +1,7 @@
 import { errorMessage } from "../describeUnknownError";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import { ActionableError, type ExecResult } from "../../models";
-import { createExecResult } from "../execResult";
+import { runExecSeam } from "../ExecSeam";
+import { execFileAsync as sharedExecFileAsync } from "../HostCommandExecutor";
 import { defaultTimer, type Timer } from "../SystemTimer";
 import { PlistClient } from "./PlistClient";
 
@@ -33,13 +32,13 @@ export interface AppBundleMetadata {
 
 const defaultExecutor: CodesignExecutor = {
   async execute(args, signal) {
-    const result = await promisify(execFile)("codesign", [...args], {
-      maxBuffer: 16 * 1024 * 1024,
-      signal,
-    });
-    const stdout = String(result.stdout);
-    const stderr = String(result.stderr);
-    return createExecResult(stdout, stderr);
+    const commandArgs = [...args];
+    return runExecSeam(
+      (options) => sharedExecFileAsync("codesign", commandArgs, options),
+      { maxBuffer: 16 * 1024 * 1024, signal },
+      { command: "codesign", args: commandArgs },
+      { preserveError: true },
+    );
   },
 };
 

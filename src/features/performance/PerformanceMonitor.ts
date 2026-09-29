@@ -25,11 +25,13 @@ import {
   AdbClientFactory,
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { SimCtlClient, SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
-import { execFile } from "child_process";
-import { promisify } from "util";
+import { execFileAsync as sharedExecFileAsync } from "../../utils/HostCommandExecutor";
 import { registerDeviceIncarnationListener } from "../../utils/deviceIncarnation";
 
-const defaultExecFileAsync = promisify(execFile);
+const defaultExecFileAsync: ExecFileAsyncFn = async (file, args) => {
+  const result = await sharedExecFileAsync(file, args);
+  return { stdout: String(result.stdout), stderr: String(result.stderr) };
+};
 
 /** Minimal interface for performance telemetry emission. */
 export interface PerformanceTelemetryEmitter {

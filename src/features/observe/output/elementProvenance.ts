@@ -1,5 +1,6 @@
 import type { Element } from "../../../models/Element";
 import type { ObserveResult } from "../../../models/ObserveResult";
+import type { ViewHierarchyNode } from "../../../models/ViewHierarchyResult";
 
 const CAPTURED_KEYBOARD = Symbol("auto-mobile.capturedKeyboard");
 
@@ -77,6 +78,17 @@ export interface ElementProvenance {
  * and serialized output contain only public element fields.
  */
 const provenanceByElement = new WeakMap<Element, ElementProvenance>();
+
+/** Original hierarchy node, retained across independent parser passes and collector clones. */
+const sourceByElement = new WeakMap<Element, ViewHierarchyNode>();
+
+export function setHierarchyNodeSource(element: Element, source: ViewHierarchyNode): void {
+  sourceByElement.set(element, source);
+}
+
+export function getHierarchyNodeSource(element: Element): ViewHierarchyNode | undefined {
+  return sourceByElement.get(element);
+}
 
 /** Attach ancestry provenance to a parsed element for in-process projection. */
 export function setElementProvenance(el: Element, provenance: ElementProvenance): void {

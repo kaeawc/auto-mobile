@@ -3,6 +3,7 @@ import { ElementBounds, ViewHierarchyNode, ViewHierarchyResult } from "../../mod
 import { resolveViewHierarchyForSearch } from "../../utils/viewHierarchySearch";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
 import { parseBounds } from "../../utils/bounds";
+import { setHierarchyNodeSource } from "../observe/output/elementProvenance";
 
 type WindowSearchOrder = "topmost-first" | "bottommost-first";
 
@@ -59,7 +60,9 @@ export class DefaultElementParser implements ElementParser {
     }
 
     parsedNode.bounds = parsedBounds;
-    return parsedNode as Element;
+    const element = parsedNode as Element;
+    setHierarchyNodeSource(element, node);
+    return element;
   }
 
   /**

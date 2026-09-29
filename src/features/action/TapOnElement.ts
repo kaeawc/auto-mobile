@@ -88,6 +88,7 @@ import { hierarchyUpdatedAtToMillis } from "../observe/observeTimestamp";
 import { dispatchAndroidCoordinateTap, dispatchIosCoordinateTap } from "./coordinateTapDispatch";
 import { DefaultObserveElementCollector } from "../observe/ObserveElementCollector";
 import { getImeOccluderForElement, tapPointOutsideIme } from "../observe/output/SkeletonProjection";
+import { getHierarchyNodeSource } from "../observe/output/elementProvenance";
 
 type SearchUntilStats = NonNullable<TapOnElementResult["searchUntil"]>;
 type FocusIdentifierKey = "resource-id" | "view-id" | "test-tag";
@@ -99,6 +100,25 @@ const TEXT_SELECTION_INTENT_BY_ACTION: Record<TapOnElementOptions["action"], Tex
     longPress: "tap",
     focus: "focus-input",
   };
+
+/** Prefer the exact parsed node when geometry and public IDs collide across windows. */
+function findTapTargetNode(
+  nodes: readonly SearchableEntry[],
+  element: Element,
+): SearchableEntry | undefined {
+  const source = getHierarchyNodeSource(element);
+  return (
+    (source && nodes.find((node) => node.source === source)) ??
+    nodes.find(
+      (node) =>
+        node.element &&
+        node.bounds &&
+        boundsEqual(node.bounds, element.bounds) &&
+        node.nativeId === element["resource-id"] &&
+        node.nodeKey === element["view-id"],
+    )
+  );
+}
 
 /**
  * Dependencies for TapOnElement that can be injected for testing.
@@ -2220,14 +2240,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       return { element, usedParent: false };
     }
     const nodes = new SearchableHierarchy().project(viewHierarchy);
-    let candidate = nodes.find(
-      (node) =>
-        node.element &&
-        node.bounds &&
-        boundsEqual(node.bounds, element.bounds) &&
-        node.nativeId === element["resource-id"] &&
-        node.nodeKey === element["view-id"],
-    );
+    let candidate = findTapTargetNode(nodes, element);
     while (candidate) {
       const canAct =
         action === "longPress"

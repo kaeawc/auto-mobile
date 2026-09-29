@@ -1,5 +1,5 @@
 import { Database as BunDatabase } from "bun:sqlite";
-import { Kysely } from "kysely";
+import { Kysely, sql } from "kysely";
 import { BunSqliteDialect } from "../../src/db/bunSqliteDialect";
 import type { Database } from "../../src/db/types";
 import { runMigrations } from "../../src/db/migrator";
@@ -51,9 +51,13 @@ export async function createTestDatabase(
   if (options.foreignKeys) {
     bunDb.exec("PRAGMA foreign_keys = ON;");
   }
-  return new Kysely<Database>({
+  const db = new Kysely<Database>({
     dialect: new BunSqliteDialect({
       database: bunDb,
     }),
   });
+  // Initialize the driver's connection state so destroy() closes this cloned
+  // database even when the caller has not run a query yet.
+  await sql`select 1`.execute(db);
+  return db;
 }

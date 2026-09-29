@@ -4,12 +4,6 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 
 type JsonSchema = Record<string, unknown>;
 
-// `keyboard` belongs to the separately owned IME lane; keep this strictness
-// sweep from changing that lane's contract in the observe schema fix.
-const STRICTNESS_ALLOWLIST: Readonly<Record<string, string>> = {
-  keyboard: "IME schema is owned by a separate implementation lane",
-};
-
 function exampleForSchema(schema: JsonSchema, depth = 0): unknown {
   if (depth > 6) {
     return undefined;
@@ -80,10 +74,6 @@ describe("advertised tool input strictness", () => {
     expect(advertised.length).toBeGreaterThan(0);
 
     for (const definition of advertised) {
-      if (definition.name in STRICTNESS_ALLOWLIST) {
-        continue;
-      }
-
       const tool = registered.get(definition.name);
       expect(tool, `${definition.name} must have a registered runtime schema`).toBeDefined();
       if (!tool) {
@@ -109,5 +99,19 @@ describe("advertised tool input strictness", () => {
     }
 
     expect(mismatches).toEqual([]);
+  });
+
+  test("keyboard rejects an unknown key at the tool input boundary", () => {
+    const keyboard = ToolRegistry.getAllTools({ includeUnavailable: true }).find(
+      (tool) => tool.name === "keyboard",
+    );
+    expect(keyboard).toBeDefined();
+    const result = keyboard?.schema.safeParse({ action: "detect", bogusKey: true });
+    expect(result?.success).toBe(false);
+    if (result && !result.success) {
+      expect(result.error.issues.map((issue) => issue.message).join(" ")).toContain(
+        "Unrecognized key",
+      );
+    }
   });
 });

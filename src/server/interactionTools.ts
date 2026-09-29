@@ -90,7 +90,7 @@ import {
   elementContainerSchema,
   elementSelectionStrategySchema,
 } from "./elementSelectorSchemas";
-import { tapOnResultSchema } from "./toolOutputSchemas";
+import { keyboardResultSchema, sendKeysResultSchema, tapOnResultSchema } from "./toolOutputSchemas";
 
 // Import from extracted modules
 import type {
@@ -2214,27 +2214,35 @@ export function registerInteractionTools() {
       if (args.action === "open") {
         const result = await ensureSystemTrayOpen(device, awaitTimeoutMs, progress);
         await captureSystemTrayTerminalEvidence(device, result.observation);
-        return createJSONToolResponse({
+        const success = result.skipped || result.opened;
+        const response = createJSONToolResponse({
           message: result.skipped
             ? "System tray already open; no swipe needed"
-            : "Opened system tray by swiping down from the status bar",
+            : result.opened
+              ? "Opened system tray"
+              : "Failed to open system tray: the tray remained closed",
           observation: result.observation,
-          success: true,
+          success,
           skipped: result.skipped,
         });
+        return success ? response : { ...response, isError: true as const };
       }
 
       if (args.action === "close") {
         const result = await ensureSystemTrayClosed(device, awaitTimeoutMs, progress);
         await captureSystemTrayTerminalEvidence(device, result.observation);
-        return createJSONToolResponse({
+        const success = result.skipped || result.closed;
+        const response = createJSONToolResponse({
           message: result.skipped
             ? "System tray already closed; no collapse needed"
-            : "Closed system tray (collapsed notification shade)",
+            : result.closed
+              ? "Closed system tray (collapsed notification shade)"
+              : "Failed to close system tray: the tray remained open",
           observation: result.observation,
-          success: true,
+          success,
           skipped: result.skipped,
         });
+        return success ? response : { ...response, isError: true as const };
       }
 
       if (args.action === "list") {
@@ -2797,7 +2805,7 @@ export function registerInteractionTools() {
     "Execute ordered text insertion/replacement, clear, raw keys, and semantic IME keys. For Unicode and emoji use Android ime/a11y/auto or any iOS mode; Android eventOnly and imeKeyEvents are ASCII-only.",
     sendKeysSchema,
     sendKeysHandler,
-    { defaultEnabled: true, supportsProgress: true },
+    { defaultEnabled: true, supportsProgress: true, outputSchema: sendKeysResultSchema },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -2874,7 +2882,7 @@ export function registerInteractionTools() {
     "Open, close, detect, list/select installed Android IMEs, or switch the AutoMobile typing profile",
     keyboardSchema,
     keyboardHandler,
-    { defaultEnabled: true },
+    { defaultEnabled: true, outputSchema: keyboardResultSchema },
   );
 
   ToolRegistry.registerDeviceAware(

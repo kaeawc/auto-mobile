@@ -1,6 +1,6 @@
-import { spawn as nodeSpawn, type SpawnOptions } from "node:child_process";
 import type { Readable, Writable } from "node:stream";
 import { ActionableError } from "../../models";
+import { DefaultHostCommandExecutor, type HostProcessExecutor } from "../HostCommandExecutor";
 import {
   trackProcess,
   waitForExit,
@@ -18,7 +18,7 @@ export interface FfmpegProcess extends TrackedChildProcess {
 export interface FfmpegStartRequest {
   readonly args: string[];
   readonly context: string;
-  readonly stdio?: SpawnOptions["stdio"];
+  readonly stdio?: NonNullable<Parameters<HostProcessExecutor["spawn"]>[2]>["stdio"];
 }
 
 export interface FfmpegRunRequest extends FfmpegStartRequest {
@@ -68,7 +68,7 @@ export interface FfmpegClient {
 export type FfmpegSpawner = (
   binaryPath: string,
   args: string[],
-  options: SpawnOptions,
+  options: Parameters<HostProcessExecutor["spawn"]>[2],
 ) => FfmpegProcess;
 
 export interface ResolveFfmpegBinaryOptions {
@@ -97,9 +97,10 @@ export interface DefaultFfmpegClientOptions extends ResolveFfmpegBinaryOptions {
   readonly timer?: Timer;
 }
 
+const defaultExecutor: HostProcessExecutor = new DefaultHostCommandExecutor();
 const defaultSpawn: FfmpegSpawner = (binaryPath, args, options) =>
   // eslint-disable-next-line auto-mobile/no-unknown-cast -- Node's ChildProcess supplies the restricted FFmpeg process contract exposed by this client.
-  nodeSpawn(binaryPath, args, options) as unknown as FfmpegProcess;
+  defaultExecutor.spawn(binaryPath, args, options) as unknown as FfmpegProcess;
 
 /**
  * The only production owner for FFmpeg resolution and execution. Consumers pass

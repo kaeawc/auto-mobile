@@ -2671,6 +2671,81 @@
       },
       "required": ["action"],
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "installed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "enabled": {
+                "type": "boolean"
+              },
+              "active": {
+                "type": "boolean"
+              },
+              "capabilities": {
+                "type": "object",
+                "properties": {
+                  "visibleKeyTap": {
+                    "type": "boolean"
+                  },
+                  "gesture": {
+                    "type": "boolean"
+                  },
+                  "suggestion": {
+                    "type": "boolean"
+                  },
+                  "clipboard": {
+                    "type": "boolean"
+                  },
+                  "semanticText": {
+                    "type": "boolean"
+                  }
+                },
+                "required": ["visibleKeyTap", "gesture", "suggestion", "clipboard", "semanticText"],
+                "additionalProperties": false
+              }
+            },
+            "required": ["id", "enabled", "active", "capabilities"],
+            "additionalProperties": {}
+          }
+        },
+        "backend": {
+          "type": "string",
+          "const": "installedIme"
+        },
+        "capability": {
+          "type": "string",
+          "const": "visibleKeyTap"
+        },
+        "keyboard": {
+          "type": "object",
+          "properties": {
+            "component": {
+              "type": "string"
+            },
+            "package": {
+              "type": "string"
+            },
+            "versionName": {
+              "type": "string"
+            },
+            "subtype": {
+              "type": "string"
+            }
+          },
+          "required": ["component", "package"],
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": {}
     }
   },
   {
@@ -10284,6 +10359,49 @@
       },
       "required": ["commands"],
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "commands": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "backend": {
+                "type": "string",
+                "const": "autoMobileIme"
+              },
+              "capability": {
+                "type": "string",
+                "const": "semanticText"
+              },
+              "keyboard": {
+                "type": "object",
+                "properties": {
+                  "component": {
+                    "type": "string"
+                  },
+                  "package": {
+                    "type": "string"
+                  },
+                  "versionName": {
+                    "type": "string"
+                  },
+                  "subtype": {
+                    "type": "string"
+                  }
+                },
+                "required": ["component", "package"],
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": {}
+          }
+        }
+      },
+      "additionalProperties": {}
     }
   },
   {

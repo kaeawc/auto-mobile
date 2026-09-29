@@ -920,6 +920,69 @@ describe("Android systemTray close", () => {
     expect(result.skipped).toBe(true);
     expect(fakeAdb.wasCommandExecuted("cmd statusbar collapse")).toBe(false);
   });
+
+  test("reports failure when the shade stays open", async () => {
+    const fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+    const fakeAdb = new SequencedFakeAdbExecutor([1000, 2000]);
+    const fakeObserveScreen = new SequencedObserveScreen([
+      createObservation(createTrayHierarchy("Note")),
+      createObservation(createTrayHierarchy("Note")),
+    ]);
+    setSystemTrayDependencies({
+      timer: fakeTimer,
+      adbFactory: () => fakeAdb,
+      observeScreenFactory: () => fakeObserveScreen,
+    });
+    ToolRegistry.clearTools();
+    registerInteractionTools();
+
+    const response = await ToolRegistry.getTool("systemTray")!.deviceAwareHandler!(device, {
+      action: "close",
+      awaitTimeout: 500,
+      platform: "android",
+    });
+    const payload = JSON.parse((response.content[0] as { text: string }).text);
+
+    expect(payload.success).toBe(false);
+    expect(payload.message).toContain("Failed to close system tray");
+    expect(response).toHaveProperty("isError", true);
+  });
+});
+
+describe("Android systemTray open", () => {
+  afterEach(() => {
+    resetSystemTrayDependencies();
+    ToolRegistry.clearTools();
+  });
+
+  test("reports failure when the shade stays closed", async () => {
+    const fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+    const fakeAdb = new SequencedFakeAdbExecutor([1000, 2000]);
+    const fakeObserveScreen = new SequencedObserveScreen([
+      createObservation(createClosedHierarchy()),
+      createObservation(createClosedHierarchy()),
+    ]);
+    setSystemTrayDependencies({
+      timer: fakeTimer,
+      adbFactory: () => fakeAdb,
+      observeScreenFactory: () => fakeObserveScreen,
+    });
+    ToolRegistry.clearTools();
+    registerInteractionTools();
+
+    const response = await ToolRegistry.getTool("systemTray")!.deviceAwareHandler!(device, {
+      action: "open",
+      awaitTimeout: 500,
+      platform: "android",
+    });
+    const payload = JSON.parse((response.content[0] as { text: string }).text);
+
+    expect(payload.success).toBe(false);
+    expect(payload.message).toContain("Failed to open system tray");
+    expect(response).toHaveProperty("isError", true);
+  });
 });
 
 // ============================================================================
@@ -931,15 +994,19 @@ const IOS_SPRINGBOARD_PACKAGE = "com.apple.springboard";
 class FakeIosClient implements SystemTrayIosClient {
   swipeCalls: Array<{ x1: number; y1: number; x2: number; y2: number; duration?: number }> = [];
   tapCalls: Array<{ x: number; y: number }> = [];
+  swipeSuccess = true;
+  tapSuccess = true;
+  swipeError?: string;
+  tapError?: string;
 
   async requestSwipe(x1: number, y1: number, x2: number, y2: number, duration?: number) {
     this.swipeCalls.push({ x1, y1, x2, y2, duration });
-    return { success: true };
+    return { success: this.swipeSuccess, error: this.swipeError };
   }
 
   async requestTapCoordinates(x: number, y: number) {
     this.tapCalls.push({ x, y });
-    return { success: true };
+    return { success: this.tapSuccess, error: this.tapError };
   }
 }
 
@@ -3761,6 +3828,28 @@ describe("iOS systemTray tap and dismiss", () => {
     // Swipe left: startX > endX
     expect(swipe.x1).toBeGreaterThan(swipe.x2);
     expect(swipe.duration).toBe(300);
+  });
+
+  test("reports a rejected CtrlProxy tap", async () => {
+    const fakeIosClient = new FakeIosClient();
+    fakeIosClient.tapSuccess = false;
+    fakeIosClient.tapError = "coordinates outside screen bounds";
+    setSystemTrayDependencies({ timer: new FakeTimer(), iosClientFactory: () => fakeIosClient });
+
+    await expect(
+      tapElement(iosDevice, { bounds: { left: 10, top: 100, right: 380, bottom: 200 } }),
+    ).rejects.toThrow("Failed to tap notification: coordinates outside screen bounds");
+  });
+
+  test("reports a rejected CtrlProxy dismiss swipe", async () => {
+    const fakeIosClient = new FakeIosClient();
+    fakeIosClient.swipeSuccess = false;
+    fakeIosClient.swipeError = "runner busy";
+    setSystemTrayDependencies({ timer: new FakeTimer(), iosClientFactory: () => fakeIosClient });
+
+    await expect(
+      swipeElement(iosDevice, { bounds: { left: 10, top: 100, right: 380, bottom: 200 } }),
+    ).rejects.toThrow("Failed to dismiss notification: runner busy");
   });
 });
 

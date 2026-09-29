@@ -1,4 +1,6 @@
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { AndroidCtrlProxyManager } from "../../utils/CtrlProxyManager";
+import { logger } from "../../utils/logger";
 import { withAndroidImeLock } from "./androidImeLock";
 
 /** `ime set` normally completes well under 1s; bound the post-dispatch
@@ -9,6 +11,97 @@ export interface InstalledIme {
   id: string;
   enabled: boolean;
   active: boolean;
+  capabilities: ImeCapabilities;
+}
+
+export interface ImeCapabilities {
+  visibleKeyTap: boolean;
+  gesture: boolean;
+  suggestion: boolean;
+  clipboard: boolean;
+  semanticText: boolean;
+}
+
+export interface KeyboardIdentity {
+  component: string;
+  package: string;
+  versionName?: string;
+  subtype?: string;
+}
+
+export interface ImeSubtypeSnapshot {
+  id: number | null;
+  locale?: string;
+}
+
+export const AUTO_MOBILE_IME_ID = `${AndroidCtrlProxyManager.PACKAGE}/.ime.CtrlProxyIme`;
+
+export function imeCapabilities(id: string): ImeCapabilities {
+  return {
+    visibleKeyTap: id !== AUTO_MOBILE_IME_ID,
+    gesture: false,
+    suggestion: false,
+    clipboard: false,
+    semanticText: id === AUTO_MOBILE_IME_ID,
+  };
+}
+
+export function parseSelectedImeSubtype(output: string | undefined): number | null {
+  const value = output?.trim();
+  if (!value || value === "null") {
+    return null;
+  }
+  if (!/^-?\d+$/.test(value)) {
+    throw new Error(`Invalid selected IME subtype: ${value}`);
+  }
+  const id = Number(value);
+  if (!Number.isSafeInteger(id)) {
+    throw new Error(`Invalid selected IME subtype: ${value}`);
+  }
+  return id === -1 ? null : id;
+}
+
+/** Restrict package metadata to the Packages block, avoiding versionName in unrelated dumps. */
+export function parsePackageVersionName(output: string, packageName: string): string | undefined {
+  const packages = output.split(/^Packages:\s*$/m)[1]?.split(/^\S[^\n]*:\s*$/m)[0];
+  const packageBlock = packages?.split(/^\s{2}Package \[([^\]]+)\][^\n]*:\s*$/m).slice(1);
+  if (!packageBlock) {
+    return undefined;
+  }
+  for (let index = 0; index < packageBlock.length; index += 2) {
+    if (packageBlock[index] === packageName) {
+      return packageBlock[index + 1]?.match(/^\s+versionName=(\S+)\s*$/m)?.[1];
+    }
+  }
+  return undefined;
+}
+
+/** Parse subtype rows scoped to the selected IME's mId block in dumpsys input_method. */
+export function parseAdvertisedImeSubtypes(
+  output: string,
+  imeId: string,
+): Map<number, string | undefined> | undefined {
+  const block = output
+    .split(/^\s*mId=/m)
+    .slice(1)
+    .find(
+      (part) =>
+        part.startsWith(imeId) && (part.length === imeId.length || /\s/.test(part[imeId.length])),
+    );
+  if (!block) {
+    return undefined;
+  }
+  const subtypes = new Map<number, string | undefined>();
+  for (const line of block.split(/\r?\n/)) {
+    const id = line.match(/\b(?:mSubtypeId|subtypeId)=(-?\d+)\b/);
+    if (id) {
+      const numericId = Number(id[1]);
+      if (Number.isSafeInteger(numericId)) {
+        subtypes.set(numericId, line.match(/\b(?:mSubtypeLocale|locale)=([^\s,}]+)/)?.[1]);
+      }
+    }
+  }
+  return subtypes;
 }
 
 export interface ImeCatalogState {
@@ -36,8 +129,89 @@ export class AndroidImeCatalog {
         id,
         enabled: enabledIds.has(id),
         active: id === active,
+        capabilities: imeCapabilities(id),
       })),
     };
+  }
+
+  async readSubtype(imeId: string, signal?: AbortSignal): Promise<ImeSubtypeSnapshot> {
+    const selected = await this.adb.execute(
+      ["shell", "settings", "get", "secure", "selected_input_method_subtype"],
+      { signal },
+    );
+    if (selected.stderr.trim()) {
+      throw new Error(`Failed to read IME subtype: ${selected.stderr.trim()}`);
+    }
+    const id = parseSelectedImeSubtype(selected.stdout);
+    if (id === null) {
+      return { id: null };
+    }
+    const subtypes = await this.advertisedSubtypes(imeId, signal);
+    return { id, ...(subtypes?.get(id) ? { locale: subtypes.get(id) } : {}) };
+  }
+
+  /** Caller holds the per-device lock; an unavailable subtype table is verified by readback. */
+  async restoreSubtypeWithinLock(imeId: string, snapshot: ImeSubtypeSnapshot): Promise<void> {
+    if (snapshot.id !== null) {
+      const advertised = await this.advertisedSubtypes(imeId);
+      if (advertised && !advertised.has(snapshot.id)) {
+        throw new Error(`Original IME subtype ${snapshot.id} is no longer advertised by ${imeId}.`);
+      }
+    }
+    const args =
+      snapshot.id === null
+        ? ["shell", "settings", "delete", "secure", "selected_input_method_subtype"]
+        : [
+            "shell",
+            "settings",
+            "put",
+            "secure",
+            "selected_input_method_subtype",
+            String(snapshot.id),
+          ];
+    const result = await this.adb.execute(args);
+    if (result.stderr.trim()) {
+      throw new Error(`Failed to restore IME subtype: ${result.stderr.trim()}`);
+    }
+    const after = await this.adb.execute([
+      "shell",
+      "settings",
+      "get",
+      "secure",
+      "selected_input_method_subtype",
+    ]);
+    if (after.stderr.trim() || parseSelectedImeSubtype(after.stdout) !== snapshot.id) {
+      throw new Error(`IME subtype restoration could not be verified for ${imeId}.`);
+    }
+  }
+
+  async identity(imeId: string, subtype?: ImeSubtypeSnapshot): Promise<KeyboardIdentity> {
+    const packageName = imeId.split("/")[0];
+    const identity: KeyboardIdentity = { component: imeId, package: packageName };
+    try {
+      const result = await this.adb.execute(["shell", "dumpsys", "package", packageName]);
+      if (!result.stderr.trim()) {
+        const versionName = parsePackageVersionName(result.stdout, packageName);
+        if (versionName) {
+          identity.versionName = versionName;
+        }
+      }
+    } catch (error) {
+      // Package metadata is optional; failure does not affect the selected keyboard or tap.
+      logger.debug(`[AndroidImeCatalog] Optional package metadata unavailable: ${String(error)}`);
+    }
+    if (subtype?.locale) {
+      identity.subtype = subtype.locale;
+    }
+    return identity;
+  }
+
+  private async advertisedSubtypes(imeId: string, signal?: AbortSignal) {
+    const result = await this.adb.execute(["shell", "dumpsys", "input_method"], { signal });
+    if (result.stderr.trim()) {
+      throw new Error(`Failed to inspect IME subtypes: ${result.stderr.trim()}`);
+    }
+    return parseAdvertisedImeSubtypes(result.stdout, imeId);
   }
 
   async select(id: string, signal?: AbortSignal): Promise<ImeCatalogState> {

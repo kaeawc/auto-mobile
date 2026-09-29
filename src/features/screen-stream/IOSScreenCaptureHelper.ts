@@ -1,13 +1,13 @@
 import { errorMessage } from "../../utils/describeUnknownError";
-import {
-  spawn as nodeSpawn,
-  type ChildProcessWithoutNullStreams,
-  type SpawnOptions,
-} from "node:child_process";
 import { EventEmitter } from "node:events";
+import type { Readable, Writable } from "node:stream";
 import { ActionableError } from "../../models/ActionableError";
 import { logger } from "../../utils/logger";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
+import {
+  DefaultHostCommandExecutor,
+  type HostProcessExecutor,
+} from "../../utils/HostCommandExecutor";
 import {
   type DecodedFrame,
   type DecodedAudio,
@@ -46,8 +46,14 @@ export type CapturePermission = "screen-recording";
 export type HelperSpawner = (
   command: string,
   args: string[],
-  options: SpawnOptions,
-) => ChildProcessWithoutNullStreams;
+  options: Parameters<HostProcessExecutor["spawn"]>[2],
+) => HelperProcess;
+
+type HelperProcess = ReturnType<HostProcessExecutor["spawn"]> & {
+  stdin: Writable;
+  stdout: Readable;
+  stderr: Readable;
+};
 
 export type HelperProcessGroupKiller = (pid: number, signal: NodeJS.Signals) => void;
 
@@ -177,7 +183,7 @@ export class IOSScreenCaptureHelper extends EventEmitter {
   private readonly decoder = new FrameDecoder();
   private readonly frameQueue: LatestFrameQueue;
   private readonly frameDeliveryScheduler: FrameDeliveryScheduler;
-  private process: ChildProcessWithoutNullStreams | null = null;
+  private process: HelperProcess | null = null;
   private readonly helperCapabilities = new Set<string>();
   private stderrBuffer = "";
   private exitPromise: Promise<{ code: number | null; signal: NodeJS.Signals | null }> | null =
@@ -480,7 +486,7 @@ export class IOSScreenCaptureHelper extends EventEmitter {
     }
   }
 
-  private cleanupProcess(proc: ChildProcessWithoutNullStreams): void {
+  private cleanupProcess(proc: HelperProcess): void {
     proc.stdout.removeAllListeners();
     proc.stderr.removeAllListeners();
     proc.removeAllListeners();
@@ -605,8 +611,9 @@ const immediateFrameDeliveryScheduler: FrameDeliveryScheduler = {
 
 export const IOS_HELPER_STOP_GRACE_MS = 2_000;
 
+const defaultHelperExecutor: HostProcessExecutor = new DefaultHostCommandExecutor();
 const defaultHelperSpawner: HelperSpawner = (command, args, options) =>
-  nodeSpawn(command, args, options) as ChildProcessWithoutNullStreams;
+  defaultHelperExecutor.spawn(command, args, options) as HelperProcess;
 
 const defaultProcessGroupKiller: HelperProcessGroupKiller = (pid, signal) => {
   process.kill(-pid, signal);

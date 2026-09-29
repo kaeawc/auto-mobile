@@ -5,6 +5,7 @@ import { join, resolve } from "node:path";
 import { ActionableError } from "../../models";
 import { defaultTimer, type Timer } from "../SystemTimer";
 import { logger } from "../logger";
+import { resolveAndroidSdkRoot } from "./androidSdkRoot";
 import { DefaultHostCommandExecutor, type HostProcessExecutor } from "../HostCommandExecutor";
 import {
   detectAndroidCommandLineTools,
@@ -251,10 +252,17 @@ export class AvdManagerClient {
 
   private getAndroidSdkEnv(location: AndroidToolsLocation): NodeJS.ProcessEnv | undefined {
     const env = this.dependencies.environment;
+    const environmentSdkRoot = resolveAndroidSdkRoot(
+      env,
+      (candidate) =>
+        this.dependencies.existsSync(join(candidate, "system-images")) ||
+        this.looksLikeSdkRoot(candidate),
+    );
+    if (environmentSdkRoot) {
+      return { ...env, ANDROID_HOME: environmentSdkRoot, ANDROID_SDK_ROOT: environmentSdkRoot };
+    }
+
     const candidates = [
-      env.ANDROID_SDK_ROOT,
-      env.ANDROID_HOME,
-      env.ANDROID_SDK_HOME,
       this.stripCmdlineToolsPath(location.path),
       location.path,
       resolve(location.path, ".."),

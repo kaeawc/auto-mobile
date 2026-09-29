@@ -234,6 +234,19 @@ function bootedSimulatorListResult() {
   );
 }
 
+function shutdownSimulatorListResult() {
+  return createExecResult(
+    JSON.stringify({
+      devices: {
+        "com.apple.CoreSimulator.SimRuntime.iOS-26-0": [
+          { udid: UDID, name: "iPhone 17", state: "Shutdown", isAvailable: true },
+        ],
+      },
+    }),
+    "",
+  );
+}
+
 function createConcurrentStartHarness(
   bootstatus: (
     invocation: number,
@@ -259,6 +272,7 @@ function createConcurrentStartHarness(
   const lifecycleCalls: string[] = [];
   let bootstatusCount = 0;
   let shutdownCount = 0;
+  let shutdownSucceeded = false;
   let listDevicesCount = 0;
   const execAsync = async (
     file: string,
@@ -278,10 +292,15 @@ function createConcurrentStartHarness(
     if (command === `xcrun simctl shutdown ${UDID}`) {
       shutdownCount++;
       lifecycleCalls.push("shutdown");
-      return options.shutdown?.(shutdownCount, signal) ?? createExecResult("", "");
+      const result = await (options.shutdown?.(shutdownCount, signal) ?? createExecResult("", ""));
+      shutdownSucceeded = true;
+      return result;
     }
     if (command === "xcrun simctl list devices --json") {
       listDevicesCount++;
+      if (shutdownSucceeded && shutdownCount >= bootstatusCount) {
+        return shutdownSimulatorListResult();
+      }
       return listDevices(listDevicesCount, signal);
     }
     if (options.openSimulatorApp && command === "launchctl managername") {
@@ -670,6 +689,7 @@ describe("SimCtlClient boot self-verification", () => {
   test("does not reuse an owner identity after coordinated state eviction", async () => {
     const harness = createConcurrentStartHarness(() => Promise.resolve(createExecResult("", "")));
     const staleHandle = await harness.createClient().startSimulator(UDID, 5_000);
+    harness.timer.enableAutoAdvance();
     await harness.createClient().killSimulator({
       name: "iPhone 17",
       platform: "ios",
@@ -1192,6 +1212,7 @@ describe("SimCtlClient boot self-verification", () => {
     expect(harness.shutdownInvocations()).toBe(0);
 
     completeReadiness();
+    harness.timer.enableAutoAdvance();
 
     await expect(readiness).resolves.toMatchObject({ deviceId: UDID });
     await expect(kill).resolves.toBeUndefined();
@@ -1234,6 +1255,7 @@ describe("SimCtlClient boot self-verification", () => {
     await readiness;
     await drainMicrotasks();
     expect(harness.shutdownInvocations()).toBe(0);
+    harness.timer.enableAutoAdvance();
     await harness
       .createClient()
       .killSimulator({ name: "iPhone 17", platform: "ios", deviceId: UDID });

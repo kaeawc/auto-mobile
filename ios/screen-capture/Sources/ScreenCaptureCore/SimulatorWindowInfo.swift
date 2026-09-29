@@ -40,6 +40,8 @@ public struct SimulatorWindowListResponse: Codable, Equatable {
 
 /// Bundle identifier of the iOS Simulator host application on macOS.
 public let simulatorBundleIdentifier = "com.apple.iphonesimulator"
+/// Xcode 27 hosts simulator windows in Device Hub.
+public let deviceHubBundleIdentifier = "com.apple.dt.Devices"
 
 public func simulatorWindowTitle(_ title: String?, namesDevice name: String) -> Bool {
     let name = name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -54,7 +56,7 @@ public func simulatorWindowTitle(_ title: String?, namesDevice name: String) -> 
 /// resolve to an unrelated application's window. Re-checking here lets the
 /// caller fail closed instead of silently capturing the wrong window (#4763).
 public func isSimulatorWindow(bundleIdentifier: String?) -> Bool {
-    bundleIdentifier == simulatorBundleIdentifier
+    bundleIdentifier == simulatorBundleIdentifier || bundleIdentifier == deviceHubBundleIdentifier
 }
 
 /// ScreenCaptureKit cannot isolate a single Simulator window's audio from the

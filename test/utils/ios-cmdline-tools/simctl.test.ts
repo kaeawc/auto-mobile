@@ -1076,14 +1076,56 @@ describe("Simctl", function () {
       };
       simctl = new Simctl(null, mockExecAsync, timer);
       expect(await simctl.getBootedSimulatorsChecked()).toHaveLength(1);
+      timer.enableAutoAdvance();
       await simctl.killSimulator({
         deviceId: "test-ios-device-id",
         platform: "ios",
         name: "iPhone 17",
       });
       expect(await simctl.getBootedSimulatorsChecked()).toEqual([]);
-      expect(reads).toBe(2);
-      expect(timer.now()).toBe(0);
+      expect(reads).toBe(12);
+      expect(timer.now()).toBe(10_000);
+    });
+
+    test("reports a simulator revived by Device Hub nine seconds after shutdown", async function () {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      let shutdown = false;
+      let processProbes = 0;
+      mockExecAsync = async (file: string, args: string[]): Promise<ExecResult> => {
+        if (file === "xcrun" && args.join(" ") === "simctl list devices --json") {
+          return createExecResult(
+            simulatorListPayload([
+              {
+                udid: "test-ios-device-id",
+                name: "iPhone 17",
+                state: shutdown && timer.now() < 9_000 ? "Shutdown" : "Booted",
+                isAvailable: true,
+              },
+            ]),
+            "",
+          );
+        }
+        if (args.includes("shutdown")) {
+          shutdown = true;
+        }
+        if (file === "pgrep") {
+          expect(args).toEqual(["-f", "/DeviceHub.app/Contents/"]);
+          processProbes++;
+          return createExecResult("1234\n", "");
+        }
+        return createExecResult("", "");
+      };
+      simctl = new Simctl(null, mockExecAsync, timer);
+      await expect(
+        simctl.killSimulator({
+          deviceId: "test-ios-device-id",
+          platform: "ios",
+          name: "iPhone 17",
+        }),
+      ).rejects.toThrow(/revived after shutdown.*Device Hub is running/);
+      expect(timer.now()).toBe(9_000);
+      expect(processProbes).toBe(1);
     });
 
     test("getBootedSimulatorsChecked keeps a Booted simulator whose isAvailable field is omitted", async function () {

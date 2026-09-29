@@ -1,5 +1,5 @@
-import XCTest
 @testable import ScreenCaptureCore
+import XCTest
 
 /// Guards the capture-time re-verification predicate that closes the windowID
 /// reuse / TOCTOU gap (#4763): a recycled `CGWindowID` may resolve to a live
@@ -8,6 +8,7 @@ import XCTest
 final class IsSimulatorWindowTests: XCTestCase {
     func testAcceptsSimulatorBundleIdentifier() {
         XCTAssertTrue(isSimulatorWindow(bundleIdentifier: simulatorBundleIdentifier))
+        XCTAssertTrue(isSimulatorWindow(bundleIdentifier: deviceHubBundleIdentifier))
     }
 
     func testRejectsNonSimulatorBundleIdentifier() {

@@ -35,6 +35,7 @@ import { iosSimulatorCapabilityInventory } from "../../features/device-control/v
 import { compareSimctlVersions, parseSimctlVersion } from "./simctlVersion";
 import { compareStrictNumericVersions } from "../deviceMatcher";
 import { defaultIdGenerator, type IdGenerator } from "../IdGenerator";
+import { fixedBackoff } from "../Backoff";
 import { DefaultSimulatorAppPresenter, type SimulatorAppPresenter } from "./SimulatorAppPresenter";
 import {
   SimCtlSimulatorDeviceTypeProfiles,
@@ -51,6 +52,8 @@ const SIMCTL_AVAILABILITY_PROBE_TIMEOUT_MS = 10_000;
  * wedged `simctl`, not model a real device-state transition.
  */
 const STATE_READ_RETRY_BACKOFF_MS = 250;
+const SHUTDOWN_SETTLE_MS = 10_000;
+const SHUTDOWN_SETTLE_BACKOFF = fixedBackoff(1_000);
 
 export interface AppleDevice {
   udid: string;
@@ -1300,10 +1303,57 @@ export class SimCtlClient implements SimCtl {
     options: { timeoutMs?: number; signal?: AbortSignal } = {},
   ): Promise<void> {
     logger.debug(`Killing iOS simulator ${device.deviceId}`);
-    await this.shutdownSimulatorCoordinated(
-      device.deviceId,
-      options.timeoutMs ?? 10_000,
-      options.signal ?? getAbortSignal(),
+    const signal = options.signal ?? getAbortSignal();
+    await this.shutdownSimulatorCoordinated(device.deviceId, options.timeoutMs ?? 10_000, signal);
+    await this.verifyShutdownSettled(device, signal);
+  }
+
+  private async verifyShutdownSettled(device: BootedDevice, signal?: AbortSignal): Promise<void> {
+    const deadlineMs = this.timer.now() + SHUTDOWN_SETTLE_MS;
+    for (let attempt = 1; ; attempt++) {
+      signal?.throwIfAborted();
+      const remainingMs = deadlineMs - this.timer.now();
+      const state = await this.readSimulatorState(device.deviceId, Math.max(1, remainingMs));
+      if (state === "Booted") {
+        throw await this.revivedSimulatorError(device, signal);
+      }
+      if (remainingMs <= 0) {
+        if (state !== "Shutdown") {
+          throw new ActionableError(
+            `iOS simulator '${device.name}' did not remain Shutdown after shutdown (state: ${state ?? "unknown"}).`,
+          );
+        }
+        return;
+      }
+      await this.timer.sleep(
+        Math.min(SHUTDOWN_SETTLE_BACKOFF.delayForAttempt(attempt), remainingMs),
+      );
+    }
+  }
+
+  private async revivedSimulatorError(
+    device: BootedDevice,
+    signal?: AbortSignal,
+  ): Promise<ActionableError> {
+    let deviceHubRunning = false;
+    try {
+      // DeviceHub.app runs DevicesTrampoline, so match the app path instead of its executable name.
+      const result = await this.execAsync(
+        "pgrep",
+        ["-f", "/DeviceHub.app/Contents/"],
+        undefined,
+        signal,
+      );
+      deviceHubRunning = /^\d+$/m.test(result.stdout.trim());
+    } catch (error) {
+      // pgrep exits 1 when Device Hub is not running.
+      logger.debug(`[iOS] Device Hub process probe found no process: ${errorMessage(error)}`);
+    }
+    return new ActionableError(
+      `iOS simulator '${device.name}' was revived after shutdown.` +
+        (deviceHubRunning
+          ? " Device Hub is running; close Device Hub or stop displaying this device, then try again."
+          : " Close the application displaying this device, then try again."),
     );
   }
 

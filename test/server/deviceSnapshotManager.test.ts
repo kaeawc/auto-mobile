@@ -934,6 +934,61 @@ describe("deviceSnapshotManager", () => {
     }
   });
 
+  test("evicting an iOS snapshot preserves an unrelated legacy flat Android snapshot (#5746)", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-manager-ios-evict-"));
+    try {
+      const realStore = new DeviceSnapshotStore(tempRoot);
+      await realStore.ensureSnapshotsDirectory();
+      await setDeviceSnapshotManagerDependencies({ snapshotStore: realStore });
+
+      const snapshotName = "shared-name";
+      const iosDeviceId = "ios-simulator-udid";
+      const iosOptions = { platform: "ios" as const, deviceId: iosDeviceId };
+      const flatDir = realStore.getSnapshotPath(snapshotName);
+      const scopedDir = realStore.getSnapshotPathWithOptions(snapshotName, iosOptions);
+      await fs.mkdir(flatDir, { recursive: true });
+      await fs.writeFile(path.join(flatDir, "android-settings.json"), "legacy Android data");
+      await fs.mkdir(scopedDir, { recursive: true });
+      await fs.writeFile(path.join(scopedDir, "settings.json"), "{}");
+
+      const timestamp = new Date(fakeTimer.now()).toISOString();
+      const manifest: DeviceSnapshotManifest = {
+        snapshotName,
+        timestamp,
+        deviceId: iosDeviceId,
+        deviceName: "iPhone 16",
+        platform: "ios",
+        snapshotType: "adb",
+        includeAppData: false,
+        includeSettings: true,
+      };
+      await repository.insertSnapshot({
+        snapshotName,
+        deviceId: iosDeviceId,
+        deviceName: "iPhone 16",
+        platform: "ios",
+        snapshotType: "adb",
+        includeAppData: false,
+        includeSettings: true,
+        createdAt: timestamp,
+        lastAccessedAt: timestamp,
+        sizeBytes: 5 * 1024 * 1024,
+        manifest,
+      });
+
+      await updateDeviceSnapshotConfig({ maxArchiveSizeMb: 1 });
+
+      expect(await realStore.snapshotDirectoryExists(snapshotName, iosOptions)).toBe(false);
+      expect(await repository.getSnapshot(snapshotName)).toBeNull();
+      expect(await realStore.snapshotDirectoryExists(snapshotName)).toBe(true);
+      expect(await fs.readFile(path.join(flatDir, "android-settings.json"), "utf8")).toBe(
+        "legacy Android data",
+      );
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   test("captureDeviceSnapshot rejects a reserved scope-root name (#5707)", async () => {
     for (const reserved of ["android", "ios"]) {
       await expect(captureDeviceSnapshot(TEST_DEVICE, { snapshotName: reserved })).rejects.toThrow(

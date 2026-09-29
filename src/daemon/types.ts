@@ -3,6 +3,7 @@ import type { SessionReleaseSnapshot } from "./sessionManager";
 import type { DaemonHandshakeFailure } from "./daemonHandshake";
 import type { DaemonShuttingDownFailure } from "./daemonShutdownOutcome";
 import type { McpOverloadFailure } from "./McpTimeoutError";
+import type { SocketRequestAdmissionQueue } from "./socketRequestAdmission";
 
 /**
  * Request sent from CLI client to daemon
@@ -494,8 +495,6 @@ export interface SessionContext {
   sessionId: string;
   /** Timestamp when session was created */
   createdAt: number;
-  /** Queue of pending requests for this session */
-  requestQueue: Array<() => Promise<any>>;
-  /** Whether a request is currently being processed */
-  processing: boolean;
+  /** Admission queue ordering this socket's requests (issue #6387) */
+  requestQueue: SocketRequestAdmissionQueue;
 }

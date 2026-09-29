@@ -30,6 +30,7 @@ import {
   SOCKET_PATH,
   DAEMON_HANDSHAKE_ENABLED,
   DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD,
+  DAEMON_CANCEL_REQUEST_METHOD,
   DAEMON_HEARTBEAT_METHOD,
   DAEMON_SESSION_TOOL_BINDING_HEADER,
   DAEMON_RELEASED_SESSION_HEADER,
@@ -124,6 +125,7 @@ import {
 } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { canonicalPixelsToPoints } from "./canonicalPixels";
 import { ActionableError, toActionableError } from "../models/ActionableError";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { getDeviceDataStreamServer } from "./deviceDataStreamSocketServer";
 import type { KeyValueType } from "../features/storage/storageTypes";
 import type {
@@ -913,6 +915,7 @@ export class UnixSocketServer {
       createdAt: this.timer.now(),
       requestQueue: [],
       processing: false,
+      requestCancellations: new Map(),
     };
 
     this.sessions.set(sessionId, session);
@@ -1030,8 +1033,16 @@ export class UnixSocketServer {
   private mcpRequestSignal(
     sessionId: string,
     ownerSocket: Socket | undefined = this.clientSockets.get(sessionId),
+    cancelSignal?: AbortSignal,
   ): { signal: AbortSignal; dispose: () => void } {
     const controller = new AbortController();
+    // A client cancel frame (issue #6384) aborts this one forward, not its siblings.
+    const onCancel = () => controller.abort(cancelSignal?.reason);
+    if (cancelSignal?.aborted) {
+      onCancel();
+    } else {
+      cancelSignal?.addEventListener("abort", onCancel, { once: true });
+    }
     const controllers =
       this.mcpRequestAbortControllers.get(sessionId) ?? new Set<AbortController>();
     controllers.add(controller);
@@ -1043,6 +1054,7 @@ export class UnixSocketServer {
     return {
       signal: controller.signal,
       dispose: () => {
+        cancelSignal?.removeEventListener("abort", onCancel);
         controllers.delete(controller);
         if (
           controllers.size === 0 &&
@@ -1249,15 +1261,21 @@ export class UnixSocketServer {
       };
     }
 
+    // Must bypass the queue: queued, it would wait behind the very request it cancels.
+    if (request.method === DAEMON_CANCEL_REQUEST_METHOD) {
+      return this.cancelSocketRequest(session, request);
+    }
+
     const totalTimeoutMs = resolveMcpRequestTimeoutMs(request);
     // Mutable: extended by progress notifications for this specific request
     // (see ProgressExtendableDeadline) -- untouched for a request that never
     // emits progress, which keeps its exact original deadline.
     const deadline = new ProgressExtendableDeadline(receivedAtMs, totalTimeoutMs);
     let activeRequestSignal: AbortSignal | undefined;
+    const cancellation = this.registerRequestCancellation(session, request.id);
 
     // Enqueue request to maintain order
-    return this.enqueueRequest(session, async () => {
+    const handler = async (): Promise<DaemonResponse> => {
       try {
         if (request.method.startsWith("daemon/")) {
           const daemonResponse = await handleDaemonRequest(request, this.daemonState);
@@ -1283,7 +1301,7 @@ export class UnixSocketServer {
         }
         const initialRoute = this.getMcpForwardRoute(request, sessionId);
 
-        const mcpRequest = this.mcpRequestSignal(sessionId, ownerSocket);
+        const mcpRequest = this.mcpRequestSignal(sessionId, ownerSocket, cancellation.signal);
         activeRequestSignal = mcpRequest.signal;
         try {
           const result = await this.runMcpForwardForCurrentRoute(
@@ -1377,7 +1395,60 @@ export class UnixSocketServer {
           ...(error instanceof InputTypeTextAppendError ? { charsSent: error.charsSent } : {}),
         };
       }
-    });
+    };
+    return this.enqueueRequest(session, handler, cancellation.signal).finally(cancellation.dispose);
+  }
+
+  /**
+   * Track a socket request so a later `daemon/cancelRequest` frame can abandon
+   * it (issue #6384). A duplicate id replaces the older entry; `dispose` only
+   * removes its own entry so it cannot drop the newer one.
+   */
+  private registerRequestCancellation(
+    session: SessionContext,
+    requestId: string,
+  ): { signal: AbortSignal; dispose: () => void } {
+    const controller = new AbortController();
+    session.requestCancellations.set(requestId, controller);
+    return {
+      signal: controller.signal,
+      dispose: () => {
+        if (session.requestCancellations.get(requestId) === controller) {
+          session.requestCancellations.delete(requestId);
+        }
+      },
+    };
+  }
+
+  /**
+   * Answer a client cancel frame out-of-band (issue #6384). A queued request is
+   * skipped when dequeued; an in-flight one has its MCP forward aborted and
+   * releases the socket queue immediately. The cancelled request itself is
+   * answered with an error response, which the cancelling client ignores.
+   */
+  private cancelSocketRequest(session: SessionContext, request: DaemonRequest): DaemonResponse {
+    const targetId: unknown = request.params?.requestId;
+    if (typeof targetId !== "string" || targetId.length === 0) {
+      return {
+        id: request.id,
+        type: "mcp_response",
+        success: false,
+        error: `${DAEMON_CANCEL_REQUEST_METHOD} requires a non-empty string params.requestId`,
+      };
+    }
+    const controller = session.requestCancellations.get(targetId);
+    if (!controller) {
+      // Already answered (a timeout racing the response) or never seen: nothing to cancel.
+      return { id: request.id, type: "mcp_response", success: true, result: { cancelled: false } };
+    }
+    session.requestCancellations.delete(targetId);
+    const reason = new ActionableError(
+      `Request ${targetId} was cancelled by its client (client-side timeout or abort); ` +
+        "the daemon abandoned it so the next request on this connection can run.",
+    );
+    logger.warn(`[SocketCancel] socketSession=${session.sessionId} ${reason.message}`);
+    controller.abort(reason);
+    return { id: request.id, type: "mcp_response", success: true, result: { cancelled: true } };
   }
 
   private requireRemainingMcpForwardBudget(
@@ -5965,11 +6036,15 @@ export class UnixSocketServer {
   /**
    * Enqueue a request in the session to maintain sequential order
    */
-  private async enqueueRequest<T>(session: SessionContext, handler: () => Promise<T>): Promise<T> {
+  private async enqueueRequest<T>(
+    session: SessionContext,
+    handler: () => Promise<T>,
+    cancelSignal?: AbortSignal,
+  ): Promise<T> {
     return new Promise((resolve, reject) => {
       session.requestQueue.push(async () => {
         try {
-          const result = await handler();
+          const result = await this.runCancellableQueuedHandler(handler, cancelSignal);
           resolve(result);
         } catch (error) {
           reject(error);
@@ -5980,6 +6055,34 @@ export class UnixSocketServer {
       if (!session.processing) {
         this.processQueue(session);
       }
+    });
+  }
+
+  /**
+   * Run one queued handler, releasing the socket queue as soon as its client
+   * cancels it (issue #6384). A cancelled handler that has not started never
+   * runs; a started one keeps winding down on its aborted signal, tracked so
+   * shutdown still drains it, while the next queued request proceeds.
+   */
+  private async runCancellableQueuedHandler<T>(
+    handler: () => Promise<T>,
+    cancelSignal: AbortSignal | undefined,
+  ): Promise<T> {
+    if (!cancelSignal) {
+      return await handler();
+    }
+    cancelSignal.throwIfAborted();
+    const operation = handler();
+    this.trackRequestHandler(
+      operation.then(
+        () => {},
+        () => {},
+      ),
+    );
+    return await raceWithDeadline(operation, {
+      timer: this.timer,
+      signal: cancelSignal,
+      label: "Cancelled socket request",
     });
   }
 

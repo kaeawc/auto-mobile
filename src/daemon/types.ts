@@ -498,4 +498,9 @@ export interface SessionContext {
   requestQueue: Array<() => Promise<any>>;
   /** Whether a request is currently being processed */
   processing: boolean;
+  /**
+   * Abort controllers for this socket's queued or in-flight requests, keyed by
+   * request id, so a client cancel frame can abandon one (issue #6384).
+   */
+  requestCancellations: Map<string, AbortController>;
 }

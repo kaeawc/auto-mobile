@@ -4,6 +4,7 @@ import type { Readable, Writable } from "node:stream";
 import { ActionableError } from "../../models/ActionableError";
 import { logger } from "../../utils/logger";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import {
   DefaultHostCommandExecutor,
   type HostProcessExecutor,
@@ -473,16 +474,19 @@ export class IOSScreenCaptureHelper extends EventEmitter {
     signal: NodeJS.Signals | null;
   } | null> {
     const exitPromise = this.exitPromise ?? Promise.resolve(null);
-    let timeout: NodeJS.Timeout | undefined;
-    const timedOut = new Promise<null>((resolve) => {
-      timeout = this.timer.setTimeout(() => resolve(null), this.stopGraceMs);
-    });
+    const timeout = new Error("Screen capture helper stop grace expired");
     try {
-      return await Promise.race([exitPromise, timedOut]);
-    } finally {
-      if (timeout) {
-        this.timer.clearTimeout(timeout);
+      return await raceWithDeadline(exitPromise, {
+        timer: this.timer,
+        timeoutMs: this.stopGraceMs,
+        label: "Screen capture helper stop",
+        timeoutError: () => timeout,
+      });
+    } catch (error) {
+      if (error === timeout) {
+        return null;
       }
+      throw error;
     }
   }
 

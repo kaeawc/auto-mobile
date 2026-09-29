@@ -1,6 +1,7 @@
 import type { AdbClientFactory } from "./AdbClientFactory";
 import { defaultAdbClientFactory } from "./AdbClientFactory";
 import { defaultTimer, type Timer } from "../SystemTimer";
+import { raceWithDeadline } from "../raceWithDeadline";
 
 export const MANAGED_ADB_SERVER_ENV = "AUTOMOBILE_MANAGED_ADB_SERVER";
 export const LEGACY_MANAGED_ADB_SERVER_ENV = "AUTO_MOBILE_MANAGED_ADB_SERVER";
@@ -34,27 +35,19 @@ export async function stopManagedAdbServer(
   const timer = dependencies.timer ?? defaultTimer;
   const controller = new AbortController();
   const adb = (dependencies.adbFactory ?? defaultAdbClientFactory).create();
-  let timeoutHandle: NodeJS.Timeout | undefined;
   const timeoutMessage = `Managed ADB server shutdown timed out after ${timeoutMs}ms`;
-  const timeout = new Promise<never>((_, reject) => {
-    timeoutHandle = timer.setTimeout(() => {
-      controller.abort(new Error(timeoutMessage));
-      reject(new Error(timeoutMessage));
-    }, timeoutMs);
-  });
-
-  try {
-    await Promise.race([
-      adb.execute(["kill-server"], {
-        timeoutMs,
-        noRetry: true,
-        signal: controller.signal,
-      }),
-      timeout,
-    ]);
-  } finally {
-    if (timeoutHandle !== undefined) {
-      timer.clearTimeout(timeoutHandle);
-    }
-  }
+  await raceWithDeadline(
+    adb.execute(["kill-server"], {
+      timeoutMs,
+      noRetry: true,
+      signal: controller.signal,
+    }),
+    {
+      timer,
+      timeoutMs,
+      label: "Managed ADB server shutdown",
+      timeoutError: () => new Error(timeoutMessage),
+      onTimeout: () => controller.abort(new Error(timeoutMessage)),
+    },
+  );
 }

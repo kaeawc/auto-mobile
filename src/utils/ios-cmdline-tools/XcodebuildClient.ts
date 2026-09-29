@@ -12,6 +12,7 @@ import {
   type HostProcessExecutor,
 } from "../HostCommandExecutor";
 import { defaultTimer, Timer } from "../SystemTimer";
+import { raceWithDeadline } from "../raceWithDeadline";
 import { combineAbortSignals, getAbortSignal } from "../AbortContext";
 import { DEFAULT_RUNNER_READINESS_TIMEOUT_MS } from "../runnerReadinessConfig";
 import { trackProcess, waitForExit, waitForSpawn } from "../ChildProcessTracker";
@@ -166,28 +167,22 @@ export class XcodebuildClient implements Xcodebuild {
     };
 
     if (timeoutMs) {
-      let timeoutId: NodeJS.Timeout;
       const controller = new AbortController();
       const signal = callerSignal
         ? AbortSignal.any([callerSignal, controller.signal])
         : controller.signal;
       const timeoutError = new Error(`Command timed out after ${timeoutMs}ms: ${fullCommand}`);
-      const timeoutPromise = new Promise<ExecResult>((_, reject) => {
-        timeoutId = this.timer.setTimeout(() => {
-          controller.abort();
-          reject(timeoutError);
-        }, timeoutMs);
-      });
-
       const runPromise = run(signal);
       // Once the timeout wins the race the aborted run promise rejects with an
       // AbortError; keep it handled so it can't surface as an unhandledRejection.
-      runPromise.catch(() => {
-        /* settled after timeout; result consumed via race */
-      });
-
       try {
-        const result = await Promise.race([runPromise, timeoutPromise]);
+        const result = await raceWithDeadline(runPromise, {
+          timer: this.timer,
+          timeoutMs,
+          label: "Command",
+          timeoutError: () => timeoutError,
+          onTimeout: () => controller.abort(),
+        });
         const duration = this.timer.now() - startTime;
         logger.debug(`[iOS] Command completed in ${duration}ms: ${fullCommand}`);
         return result;
@@ -197,8 +192,6 @@ export class XcodebuildClient implements Xcodebuild {
           `[iOS] Command failed after ${duration}ms: ${fullCommand} - ${(error as Error).message}`,
         );
         throw controller.signal.aborted ? timeoutError : error;
-      } finally {
-        this.timer.clearTimeout(timeoutId!);
       }
     }
 
@@ -327,28 +320,14 @@ export class XcodebuildClient implements Xcodebuild {
       ? AbortSignal.any([callerSignal, controller.signal])
       : controller.signal;
     callerSignal?.throwIfAborted();
-    let onAbort: (() => void) | undefined;
-    const cancelled = new Promise<never>((_resolve, reject) => {
-      if (callerSignal) {
-        onAbort = () => reject(callerSignal.reason);
-        callerSignal.addEventListener("abort", onAbort, { once: true });
-      }
+    return await raceWithDeadline(this.isLocalXcodebuildAvailable(signal), {
+      timer: this.timer,
+      timeoutMs,
+      signal: callerSignal,
+      label: "xcodebuild availability check",
+      timeoutError: () => new Error(`xcodebuild availability check timed out after ${timeoutMs}ms`),
+      onTimeout: () => controller.abort(),
     });
-    let timeoutId: NodeJS.Timeout;
-    const timeout = new Promise<boolean>((_, reject) => {
-      timeoutId = this.timer.setTimeout(() => {
-        controller.abort();
-        reject(new Error(`xcodebuild availability check timed out after ${timeoutMs}ms`));
-      }, timeoutMs);
-    });
-    try {
-      return await Promise.race([this.isLocalXcodebuildAvailable(signal), timeout, cancelled]);
-    } finally {
-      this.timer.clearTimeout(timeoutId!);
-      if (onAbort) {
-        callerSignal?.removeEventListener("abort", onAbort);
-      }
-    }
   }
 
   private async isLocalXcodebuildAvailable(signal?: AbortSignal): Promise<boolean> {

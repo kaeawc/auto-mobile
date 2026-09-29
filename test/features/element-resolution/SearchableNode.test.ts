@@ -37,6 +37,18 @@ describe("searchable node derivation", () => {
     expect(node.focusable).toBe(true);
   });
 
+  test("does not expose an editable hint as searchable label or text", () => {
+    const node = toSearchable({
+      bounds,
+      class: "android.widget.EditText",
+      focusable: true,
+      "hint-text": "Email",
+    });
+    expect(node.label).toBeUndefined();
+    expect(node.textFields).toEqual([]);
+    expect(node.textSources).toEqual({});
+  });
+
   test("keeps category text separate from editable display value", () => {
     const node = toSearchable({
       bounds,

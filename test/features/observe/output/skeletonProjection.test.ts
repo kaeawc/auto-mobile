@@ -17,6 +17,7 @@ import type { SkeletonElement } from "../../../../src/models/ObserveResult";
 import type { ViewHierarchyResult } from "../../../../src/models/ViewHierarchyResult";
 import scrollBeforeFixture from "../../../fixtures/observe/diff/scroll-before.json";
 import { imeOcclusionHierarchy } from "../../../fixtures/observe/imeOcclusion";
+import iosFormsEmptyFields from "../../../fixtures/observe/ios-forms-empty-fields";
 
 type ObserveElements = NonNullable<ObserveResult["elements"]>;
 
@@ -178,6 +179,31 @@ describe("toSkeleton — acceptance criteria", () => {
   });
 
   describe("editable value labels", () => {
+    test("uses distinct iOS Forms hints for empty fields with child UITextFieldLabel nodes", () => {
+      const elements = new DefaultObserveElementCollector().collect(iosFormsEmptyFields, "ios");
+      const rows = projectSkeleton(elements!).skeleton.filter(
+        (entry) => entry.elementId === "name-field" || entry.elementId === "email-field",
+      );
+
+      expect(rows.map(({ label, sublabel }) => ({ label, sublabel }))).toEqual([
+        { label: "Name", sublabel: undefined },
+        { label: "Email", sublabel: undefined },
+      ]);
+    });
+
+    test("uses hint-text for an unlabeled editable skeleton row", () => {
+      const field: Element = {
+        bounds: bounds(0, 0, 100, 50),
+        "resource-id": "email-field",
+        actions: ["set_text"],
+        "hint-text": "Email",
+      };
+
+      expect(toSkeleton(makeElements({ clickable: [field] }))).toMatchObject([
+        { elementId: "email-field", label: "Email", affordances: ["input"] },
+      ]);
+    });
+
     test("prefers an iOS editable value over the placeholder text", () => {
       const field: Element = {
         bounds: bounds(0, 0, 100, 50),
@@ -215,11 +241,17 @@ describe("toSkeleton — acceptance criteria", () => {
         class: "android.widget.EditText",
         focusable: true,
         text: "hello",
+        "hint-text": "Email",
       };
 
       const skeleton = toSkeleton(makeElements({ clickable: [field] }));
 
-      expect(skeleton[0].label).toBe("hello");
+      expect(skeleton[0]).toEqual({
+        elementId: "android-field",
+        label: "hello",
+        bounds: [0, 0, 100, 50],
+        affordances: ["input"],
+      });
     });
 
     test("does not use value as a non-editable label", () => {

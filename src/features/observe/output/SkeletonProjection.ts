@@ -150,6 +150,7 @@ export function projectSkeletonElement(element: Element): SkeletonElement | unde
 interface SkeletonAccumulator {
   elementId?: string;
   label?: string;
+  editableHint?: string;
   sublabel?: string;
   testTag?: string;
   semanticLinks?: SkeletonElement["semanticLinks"];
@@ -221,6 +222,7 @@ function accumulateByIdentity(
       acc = {
         elementId,
         label,
+        editableHint: affordances.includes("input") ? nonEmptyString(el["hint-text"]) : undefined,
         sublabel: deriveSublabel(el, label),
         bounds,
         affordances: new Set<Affordance>(),
@@ -318,6 +320,15 @@ function hoistContainerLabels(
   for (const [container, texts] of groupTextByContainer(accumulators, clickable)) {
     texts.sort(byReadingOrder);
     applyHoistedLabels(container, distinctHoistParts(container, texts));
+  }
+}
+
+/** Use an editable field's placeholder only when it has no label after descendant hoisting. */
+function applyEditableHintFallback(accumulators: SkeletonAccumulator[]): void {
+  for (const acc of accumulators) {
+    if (acc.label === undefined && acc.affordances.has("input") && acc.editableHint !== undefined) {
+      acc.label = acc.editableHint;
+    }
   }
 }
 
@@ -1189,6 +1200,7 @@ export function projectSkeleton(
   // Hoist descendant text onto labelless/underlabelled clickable rows (issue
   // #5869) before the keep filter suppresses the now-folded text accumulators.
   hoistContainerLabels(accumulators, clickable);
+  applyEditableHintFallback(accumulators);
   // …then attribute an owning row's label to the state-carrying containers that
   // hoisting deliberately never folds into (issue #6871).
   attributeContainerLabels(accumulators);

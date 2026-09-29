@@ -2557,6 +2557,65 @@ describe("NetDaemonPortAvailabilityChecker", () => {
     }
   });
 
+  describe("codeless bind errors (Bun's node:net on an address with no loopback)", () => {
+    function codelessError(): NodeJS.ErrnoException {
+      return new Error("Failed to listen at ::1");
+    }
+
+    function portAwareChecker(bindErrorFor: (port: number) => NodeJS.ErrnoException | undefined): {
+      checker: NetDaemonPortAvailabilityChecker;
+      ports: number[];
+    } {
+      const ports: number[] = [];
+      const checker = new NetDaemonPortAvailabilityChecker(() => {
+        let port = -1;
+        return {
+          once(_event: "error", listener: (error: NodeJS.ErrnoException) => void) {
+            queueMicrotask(() => {
+              const error = bindErrorFor(port);
+              if (error) {
+                listener(error);
+              }
+            });
+            return this;
+          },
+          listen(requestedPort: number, _host: string, listeningListener: () => void) {
+            port = requestedPort;
+            ports.push(requestedPort);
+            queueMicrotask(() => {
+              if (!bindErrorFor(requestedPort)) {
+                listeningListener();
+              }
+            });
+            return this;
+          },
+          close(callback: () => void) {
+            callback();
+            return this;
+          },
+        };
+      });
+      return { checker, ports };
+    }
+
+    test("reports free when the ephemeral-port bind on the same host also fails codeless", async () => {
+      const { checker } = portAwareChecker(() => codelessError());
+      await expect(checker.isPortFree(3000, "::1", 30_000)).resolves.toBe(true);
+    });
+
+    test("reports occupied when the ephemeral-port bind succeeds, so the host is bindable", async () => {
+      const { checker } = portAwareChecker((port) => (port === 3000 ? codelessError() : undefined));
+      await expect(checker.isPortFree(3000, "::1", 30_000)).resolves.toBe(false);
+    });
+
+    test("probes the host with an ephemeral port once per checker", async () => {
+      const { checker, ports } = portAwareChecker(() => codelessError());
+      await checker.isPortFree(3000, "::1", 30_000);
+      await checker.isPortFree(3001, "::1", 30_000);
+      expect(ports).toEqual([3000, 0, 3001]);
+    });
+  });
+
   test("fails closed without opening a socket when the budget is exhausted", async () => {
     let created = 0;
     const checker = new NetDaemonPortAvailabilityChecker(() => {

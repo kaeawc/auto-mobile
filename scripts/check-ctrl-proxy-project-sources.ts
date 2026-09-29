@@ -6,7 +6,9 @@ type Source = string | { path: string; excludes?: string[] };
 type Project = { targets?: Record<string, { sources?: Source[] }> };
 
 const projectDir = process.argv[2];
-if (!projectDir) throw new Error("CtrlProxy project directory is required");
+if (!projectDir) {
+  throw new Error("CtrlProxy project directory is required");
+}
 
 const yaml = load(await readFile(join(projectDir, "project.yml"), "utf8")) as Project;
 if (!yaml?.targets || typeof yaml.targets !== "object") {
@@ -26,8 +28,9 @@ async function collect(path: string, sourceRoot: string, excludes: string[]): Pr
           (pattern) =>
             new Bun.Glob(pattern).match(relativeChild) || new Bun.Glob(pattern).match(child.name),
         )
-      )
+      ) {
         continue;
+      }
       await collect(childPath, sourceRoot, excludes);
     }
   } else if (entry.isFile() && path.endsWith(".swift")) {
@@ -36,7 +39,9 @@ async function collect(path: string, sourceRoot: string, excludes: string[]): Pr
 }
 
 for (const [target, config] of Object.entries(yaml.targets)) {
-  if (!Array.isArray(config.sources)) continue;
+  if (!Array.isArray(config.sources)) {
+    continue;
+  }
   for (const source of config.sources) {
     const path = typeof source === "string" ? source : source?.path;
     const excludes = typeof source === "string" ? [] : (source.excludes ?? []);
@@ -51,18 +56,24 @@ const pbxproj = await readFile(join(projectDir, "CtrlProxy.xcodeproj/project.pbx
 const fileReferences = pbxproj
   .split("/* Begin PBXFileReference section */")[1]
   ?.split("/* End PBXFileReference section */")[0];
-if (!fileReferences) throw new Error("project.pbxproj has no PBXFileReference section");
+if (!fileReferences) {
+  throw new Error("project.pbxproj has no PBXFileReference section");
+}
 
 // XcodeGen writes one PBXFileReference per Swift source. Count identical names
 // so a different source with the same basename cannot mask an omitted file.
 const referenceCounts = new Map<string, number>();
 for (const line of fileReferences.split("\n")) {
-  if (!line.includes("lastKnownFileType = sourcecode.swift;")) continue;
+  if (!line.includes("lastKnownFileType = sourcecode.swift;")) {
+    continue;
+  }
   const value = line
-    .match(/(?:^|; )path = (?:"((?:\\.|[^"])*)"|([^;]+));/)
+    .match(/(?:^|; )path = (?:"((?:[^"\\]|\\.)*)"|([^;]+));/)
     ?.slice(1)
     .find(Boolean);
-  if (value) referenceCounts.set(value, (referenceCounts.get(value) ?? 0) + 1);
+  if (value) {
+    referenceCounts.set(value, (referenceCounts.get(value) ?? 0) + 1);
+  }
 }
 
 const requiredCounts = new Map<string, number>();

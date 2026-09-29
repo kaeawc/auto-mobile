@@ -24,6 +24,22 @@ PBX
   [[ "${output}" == *"references all 1 Swift files"* ]]
 }
 
+@test "handles a backslash-heavy unterminated path promptly" {
+  {
+    printf '%s' '/* Begin PBXFileReference section */
+  BBB = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "'
+    perl -e 'print "\\" x 256'
+    printf '%s\n' '; sourceTree = "<group>"; };'
+    printf '%s\n' '  AAA = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Existing.swift"; sourceTree = "<group>"; };'
+    printf '%s\n' '/* End PBXFileReference section */'
+  } > "${project_dir}/CtrlProxy.xcodeproj/project.pbxproj"
+
+  run perl -e 'alarm 3; exec @ARGV or die $!' \
+    env CTRL_PROXY_PROJECT_DIR="${project_dir}" bash "${script}"
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *"references all 1 Swift files"* ]]
+}
+
 @test "rejects a Swift source whose file reference was removed" {
   printf '%s\n' '/* Begin PBXFileReference section */' '/* End PBXFileReference section */' > \
     "${project_dir}/CtrlProxy.xcodeproj/project.pbxproj"

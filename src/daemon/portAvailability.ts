@@ -1,4 +1,5 @@
 import { createServer as createNetServer } from "node:net";
+import { logger } from "../utils/logger";
 import { defaultTimer } from "../utils/SystemTimer";
 import { DAEMON_PORT_AVAILABILITY_PROBE_TIMEOUT_MS } from "./constants";
 
@@ -36,10 +37,18 @@ export interface ProbeListener {
  */
 const UNBINDABLE_ADDRESS_ERROR_CODES = new Set(["EADDRNOTAVAIL", "EAFNOSUPPORT"]);
 
+type BindOutcome = { kind: "bound" } | { kind: "timeout" } | { kind: "error"; code?: string };
+
 export class NetDaemonPortAvailabilityChecker implements DaemonPortAvailabilityChecker {
+  /**
+   * Per-host answer to "can this address host a listener at all?", learned from
+   * an ephemeral-port bind the first time a codeless bind error needs it.
+   */
+  private readonly hostBindable = new Map<string, boolean>();
+
   constructor(private readonly createListener: () => ProbeListener = createNetServer) {}
 
-  isPortFree(
+  async isPortFree(
     port: number,
     host: string,
     timeoutMs: number = DAEMON_PORT_AVAILABILITY_PROBE_TIMEOUT_MS,
@@ -48,12 +57,53 @@ export class NetDaemonPortAvailabilityChecker implements DaemonPortAvailabilityC
     if (probeTimeoutMs <= 0) {
       // No budget left to learn anything: report the port as bound so callers
       // fail closed rather than launching a second daemon on unverified state.
-      return Promise.resolve(false);
+      return false;
     }
+    const deadline = defaultTimer.now() + probeTimeoutMs;
+    const outcome = await this.bind(port, host, probeTimeoutMs);
+    if (outcome.kind !== "error") {
+      return outcome.kind === "bound";
+    }
+    if (outcome.code !== undefined) {
+      return UNBINDABLE_ADDRESS_ERROR_CODES.has(outcome.code);
+    }
+    // Bun's `node:net` reports an address with no loopback configured (`::1`
+    // on an IPv6-less container) as a codeless error, indistinguishable from a
+    // conflict on its own. An ephemeral-port bind cannot conflict, so if that
+    // fails too the address cannot host any incumbent.
+    return !(await this.isHostBindable(host, deadline - defaultTimer.now()));
+  }
+
+  private async isHostBindable(host: string, budgetMs: number): Promise<boolean> {
+    const cached = this.hostBindable.get(host);
+    if (cached !== undefined) {
+      return cached;
+    }
+    if (budgetMs <= 0) {
+      // Inconclusive: assume bindable so the codeless failure reads as occupied.
+      return true;
+    }
+    const outcome = await this.bind(0, host, budgetMs);
+    if (outcome.kind === "timeout") {
+      return true;
+    }
+    const bindable =
+      outcome.kind === "bound" ||
+      (outcome.code !== undefined && !UNBINDABLE_ADDRESS_ERROR_CODES.has(outcome.code));
+    if (!bindable) {
+      // Safe to swallow: an ephemeral-port bind cannot be busy, so this means
+      // the address itself is absent and no daemon can be listening on it.
+      logger.debug(`[DaemonPortAvailability] ${host} cannot host a listener on this machine`);
+    }
+    this.hostBindable.set(host, bindable);
+    return bindable;
+  }
+
+  private bind(port: number, host: string, timeoutMs: number): Promise<BindOutcome> {
     return new Promise((resolvePromise) => {
       const probeServer = this.createListener();
       let settled = false;
-      const finish = (result: boolean): void => {
+      const finish = (result: BindOutcome): void => {
         if (settled) {
           return;
         }
@@ -61,11 +111,9 @@ export class NetDaemonPortAvailabilityChecker implements DaemonPortAvailabilityC
         defaultTimer.clearTimeout(timeoutHandle);
         probeServer.close(() => resolvePromise(result));
       };
-      const timeoutHandle = defaultTimer.setTimeout(() => finish(false), probeTimeoutMs);
-      probeServer.once("error", (bindError) =>
-        finish(bindError.code !== undefined && UNBINDABLE_ADDRESS_ERROR_CODES.has(bindError.code)),
-      );
-      probeServer.listen(port, host, () => finish(true));
+      const timeoutHandle = defaultTimer.setTimeout(() => finish({ kind: "timeout" }), timeoutMs);
+      probeServer.once("error", (bindError) => finish({ kind: "error", code: bindError.code }));
+      probeServer.listen(port, host, () => finish({ kind: "bound" }));
     });
   }
 }

@@ -150,8 +150,17 @@ export function isDeviceControlTransportRequest(request: DaemonRequest): boolean
   return toolName === "launchApp" || toolName === "observe";
 }
 
+/**
+ * Tools whose re-execution after an ambiguous delivery cannot change device
+ * state. Shared by the daemon's response-phase recovery and the proxy's
+ * reconnect replay so both layers agree on what may run twice (issue #6382).
+ */
+export function isReplaySafeToolName(toolName: unknown): boolean {
+  return toolName === "observe";
+}
+
 export function isReplaySafeAfterResponseClosure(request: DaemonRequest): boolean {
-  return request.method === "tools/call" && request.params?.name === "observe";
+  return request.method === "tools/call" && isReplaySafeToolName(request.params?.name);
 }
 
 export function deviceControlToolName(request: DaemonRequest): string {

@@ -1,17 +1,16 @@
 import type { ObserveResult, ViewHierarchyResult } from "../models";
 import type { Timer } from "./SystemTimer";
 import { logger } from "./logger";
+import { hierarchyFingerprint } from "./hierarchyFingerprint";
 
 /**
  * Structural fingerprint of an observed hierarchy. Two observations of a
  * stationary screen produce the same fingerprint; a mid-scroll frame does not.
+ * Delegates to the shared {@link hierarchyFingerprint} so scroll-idle agrees with
+ * every other "did the screen change?" site; `""` means no hierarchy.
  */
-export const computeHierarchyFingerprint = (viewHierarchy?: ViewHierarchyResult): string => {
-  if (!viewHierarchy?.hierarchy) {
-    return "";
-  }
-  return JSON.stringify(viewHierarchy.hierarchy);
-};
+export const computeHierarchyFingerprint = (viewHierarchy?: ViewHierarchyResult): string =>
+  hierarchyFingerprint(viewHierarchy) ?? "";
 
 export interface ScrollIdleOptions {
   /** Re-observe the screen. Must return a fresh (non-cached) observation. */

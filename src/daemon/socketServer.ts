@@ -7,6 +7,7 @@ import { ensureSecureDir, secureFile } from "../utils/filesystem/securePermissio
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import {
   StreamableHTTPClientTransport,
+  StreamableHTTPError,
   type StreamableHTTPReconnectionOptions,
 } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { logger } from "../utils/logger";
@@ -45,6 +46,7 @@ import {
   INTERNAL_LIVE_DEADLINE_KEY_PARAM,
   DAEMON_SHUTTING_DOWN_ERROR_MESSAGE,
 } from "./constants";
+import { resolveSocketAdmissionLane, SocketRequestAdmissionQueue } from "./socketRequestAdmission";
 import { daemonShuttingDownFailure, isDaemonShuttingDownToolResult } from "./daemonShutdownOutcome";
 import { registerLiveDeadline, unregisterLiveDeadline } from "./liveDeadlineRegistry";
 import {
@@ -240,6 +242,17 @@ const DAEMON_REQUEST_HANDLER_DRAIN_TIMEOUT_MS = 1_000;
 /** Keep shutdown bounded if a client cannot flush a release notification. */
 const DAEMON_NOTIFICATION_WRITE_DRAIN_TIMEOUT_MS = 1_000;
 
+/**
+ * The loopback MCP HTTP server answers an unknown `mcp-session-id` with 404
+ * before the request reaches any handler, so the forward provably never ran and
+ * a replay on a fresh client cannot repeat a device action. Match the SDK's
+ * structured status code rather than the shared "Session not found" wording,
+ * which other lifecycles also use (issue #6383).
+ */
+function isExpiredLoopbackMcpSession(error: unknown): boolean {
+  return error instanceof StreamableHTTPError && error.code === 404;
+}
+
 class ReleasedBoundSessionError extends Error {
   constructor(readonly failure: BoundSessionLoss) {
     super(
@@ -407,7 +420,7 @@ function resolveSocketBindGuard(
  * The SDK's Streamable HTTP client may auto-reopen a standalone GET (SSE) after a disconnect.
  * The server transport allows only one such stream per session; a second GET while the first
  * is still mapped returns 409 and tears down the session. We disable that auto-reconnect here;
- * stale sessions are recovered via `getMcpClient()` + "Session not found" retry.
+ * stale sessions are recovered via `getMcpClient()` + the loopback 404 retry.
  */
 /** Matches SDK defaults except `maxRetries`, which must stay 0 to avoid duplicate GET SSE. */
 const DAEMON_LOOPBACK_STREAMABLE_HTTP_RECONNECTION: StreamableHTTPReconnectionOptions = {
@@ -913,8 +926,7 @@ export class UnixSocketServer {
     const session: SessionContext = {
       sessionId,
       createdAt: this.timer.now(),
-      requestQueue: [],
-      processing: false,
+      requestQueue: new SocketRequestAdmissionQueue(),
       requestCancellations: new Map(),
     };
 
@@ -1274,7 +1286,6 @@ export class UnixSocketServer {
     let activeRequestSignal: AbortSignal | undefined;
     const cancellation = this.registerRequestCancellation(session, request.id);
 
-    // Enqueue request to maintain order
     const handler = async (): Promise<DaemonResponse> => {
       try {
         if (request.method.startsWith("daemon/")) {
@@ -1396,7 +1407,13 @@ export class UnixSocketServer {
         };
       }
     };
-    return this.enqueueRequest(session, handler, cancellation.signal).finally(cancellation.dispose);
+    // Admit through the socket's queue: same-lane requests keep arrival order, while an
+    // explicit-device call does not wait behind another device's call (issue #6387).
+    return session.requestQueue
+      .run(resolveSocketAdmissionLane(request), () =>
+        this.runCancellableQueuedHandler(handler, cancellation.signal),
+      )
+      .finally(cancellation.dispose);
   }
 
   /**
@@ -2284,8 +2301,7 @@ export class UnixSocketServer {
       if (error instanceof ReleasedBoundSessionError) {
         throw error;
       }
-      const message = errorMessage(error);
-      if (message.includes("Session not found")) {
+      if (isExpiredLoopbackMcpSession(error)) {
         return this.retryExpiredMcpSession(context, identity, mcpClient);
       }
       if (this.isDeviceControlSocketClosure(context.request, error)) {
@@ -6034,35 +6050,10 @@ export class UnixSocketServer {
   }
 
   /**
-   * Enqueue a request in the session to maintain sequential order
-   */
-  private async enqueueRequest<T>(
-    session: SessionContext,
-    handler: () => Promise<T>,
-    cancelSignal?: AbortSignal,
-  ): Promise<T> {
-    return new Promise((resolve, reject) => {
-      session.requestQueue.push(async () => {
-        try {
-          const result = await this.runCancellableQueuedHandler(handler, cancelSignal);
-          resolve(result);
-        } catch (error) {
-          reject(error);
-        }
-      });
-
-      // Process queue if not already processing
-      if (!session.processing) {
-        this.processQueue(session);
-      }
-    });
-  }
-
-  /**
-   * Run one queued handler, releasing the socket queue as soon as its client
-   * cancels it (issue #6384). A cancelled handler that has not started never
+   * Run one admitted handler, releasing its socket admission slot as soon as its
+   * client cancels it (issue #6384). A cancelled handler that has not started never
    * runs; a started one keeps winding down on its aborted signal, tracked so
-   * shutdown still drains it, while the next queued request proceeds.
+   * shutdown still drains it, while later requests proceed.
    */
   private async runCancellableQueuedHandler<T>(
     handler: () => Promise<T>,
@@ -6084,28 +6075,6 @@ export class UnixSocketServer {
       signal: cancelSignal,
       label: "Cancelled socket request",
     });
-  }
-
-  /**
-   * Process queued requests sequentially
-   */
-  private async processQueue(session: SessionContext): Promise<void> {
-    if (session.processing || session.requestQueue.length === 0) {
-      return;
-    }
-
-    session.processing = true;
-
-    while (session.requestQueue.length > 0) {
-      const handler = session.requestQueue.shift()!;
-      try {
-        await handler();
-      } catch (error) {
-        logger.error(`Error processing queued request:`, error);
-      }
-    }
-
-    session.processing = false;
   }
 
   /**

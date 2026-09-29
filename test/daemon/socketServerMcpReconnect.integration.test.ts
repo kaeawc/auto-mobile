@@ -6,6 +6,7 @@ import { unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
+import { StreamableHTTPError } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
 import { SOCKET_REQUEST_DEADLINE_MS, sendSocketRequest } from "./helpers/socketRequest";
 import { defaultTimer } from "../../src/utils/SystemTimer";
@@ -39,6 +40,11 @@ function createFakeMcpClient(overrides: Partial<FakeMcpClient> = {}): FakeMcpCli
     close: async () => {},
     ...overrides,
   };
+}
+
+/** What the SDK client raises when the loopback server 404s an expired session. */
+function expiredLoopbackSession(): StreamableHTTPError {
+  return new StreamableHTTPError(404, 'Error POSTing to endpoint: {"error":"Session not found"}');
 }
 
 function socketClosedError(sensitiveDetail = ""): Error {
@@ -276,7 +282,7 @@ describe("UnixSocketServer MCP session reconnect", () => {
       return createFakeMcpClient({
         listTools: async () => {
           if (clientIndex === 1) {
-            throw new Error("Session not found");
+            throw expiredLoopbackSession();
           }
           return { tools: [{ name: "observe" }] };
         },
@@ -292,6 +298,59 @@ describe("UnixSocketServer MCP session reconnect", () => {
     expect(result.tools[0].name).toBe("observe");
   });
 
+  test("does not replay a tools/call on a message-only 'Session not found' (#6383)", async () => {
+    let clientsCreated = 0;
+    let callsDispatched = 0;
+
+    server.mcpClientFactory = async () => {
+      ++clientsCreated;
+      return createFakeMcpClient({
+        callTool: async () => {
+          callsDispatched++;
+          // Handler-side wording, not the loopback 404: no proof it never ran.
+          throw new Error("Session not found: device-session-a");
+        },
+      });
+    };
+
+    const response = await sendRequest(socketPath, "tools/call", {
+      name: "tapOn",
+      arguments: { text: "Submit" },
+    });
+
+    expect(response.success).toBe(false);
+    expect(response.error).toContain("Session not found: device-session-a");
+    expect(clientsCreated).toBe(1);
+    expect(callsDispatched).toBe(1);
+  });
+
+  test("replays a tools/call once when the loopback server 404s its MCP session", async () => {
+    let clientsCreated = 0;
+    const dispatchedTo: number[] = [];
+
+    server.mcpClientFactory = async () => {
+      const clientIndex = ++clientsCreated;
+      return createFakeMcpClient({
+        callTool: async () => {
+          dispatchedTo.push(clientIndex);
+          if (clientIndex === 1) {
+            throw expiredLoopbackSession();
+          }
+          return { content: [{ type: "text", text: "tapped" }] };
+        },
+      });
+    };
+
+    const response = await sendRequest(socketPath, "tools/call", {
+      name: "tapOn",
+      arguments: { text: "Submit" },
+    });
+
+    expect(response.success).toBe(true);
+    expect(clientsCreated).toBe(2);
+    expect(dispatchedTo).toEqual([1, 2]);
+  });
+
   test("resets cached client before reconnecting so getMcpClient creates a fresh one", async () => {
     let clientsCreated = 0;
 
@@ -300,7 +359,7 @@ describe("UnixSocketServer MCP session reconnect", () => {
       return createFakeMcpClient({
         listTools: async () => {
           if (clientsCreated === 1) {
-            throw new Error("Session not found: MCP session expired");
+            throw expiredLoopbackSession();
           }
           return { tools: [] };
         },
@@ -583,7 +642,7 @@ describe("UnixSocketServer MCP session reconnect", () => {
         callTool: async () => {
           callsDispatched++;
           if (clientIndex === 1) {
-            throw new Error("Session not found");
+            throw expiredLoopbackSession();
           }
           throw socketClosedError(" endpoint=https://secret.invalid?token=hidden");
         },
@@ -621,7 +680,7 @@ describe("UnixSocketServer MCP session reconnect", () => {
         callTool: async () => {
           if (clientIndex === 1) {
             autolockSessionUuid = "session-a";
-            throw new Error("Session not found");
+            throw expiredLoopbackSession();
           }
           throw socketClosedError();
         },
@@ -1450,7 +1509,7 @@ describe("UnixSocketServer MCP session reconnect", () => {
       return createFakeMcpClient({
         listTools: async () => {
           if (isFailing) {
-            throw new Error("Session not found");
+            throw expiredLoopbackSession();
           }
           return { tools: [] };
         },
@@ -1476,7 +1535,7 @@ describe("UnixSocketServer MCP session reconnect", () => {
       return createFakeMcpClient({
         listTools: async () => {
           if (isFirstClient) {
-            throw new Error("Session not found");
+            throw expiredLoopbackSession();
           }
           return { tools: [{ name: boundSessionUuid ?? "unbound" }] };
         },

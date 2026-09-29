@@ -330,6 +330,118 @@ describe("BunPortAvailabilityChecker (real checker, injected fake BunRuntime)", 
     expect(checker.isPortAvailable(9999)).toBe(false);
   });
 
+  describe("one-time ::1 family probe (ephemeral port 0)", () => {
+    type Listen = (hostname: string, port: number) => "ok" | Error;
+
+    function recordingRuntime(listen: Listen): {
+      runtime: BunRuntime;
+      calls: Array<{ hostname: string; port: number }>;
+    } {
+      const calls: Array<{ hostname: string; port: number }> = [];
+      const runtime: BunRuntime = {
+        listen({ hostname, port }) {
+          calls.push({ hostname, port });
+          const behavior = listen(hostname, port);
+          if (behavior instanceof Error) {
+            throw behavior;
+          }
+          return { stop() {} };
+        },
+      };
+      return { runtime, calls };
+    }
+
+    test("a codeless ::1 port-0 failure marks IPv6 absent, so every port is available when IPv4 binds", () => {
+      const { runtime } = recordingRuntime((hostname) =>
+        hostname === "::1" ? new Error("Failed to listen at ::1") : "ok",
+      );
+      const checker = new BunPortAvailabilityChecker(runtime);
+
+      expect([8765, 8766, 9999, 65535].map((port) => checker.isPortAvailable(port))).toEqual([
+        true,
+        true,
+        true,
+        true,
+      ]);
+    });
+
+    test("a family-unavailable errno on the ::1 port-0 probe marks IPv6 absent", () => {
+      const { runtime } = recordingRuntime((hostname) =>
+        hostname === "::1" ? fakeErrno("EAFNOSUPPORT") : "ok",
+      );
+      const checker = new BunPortAvailabilityChecker(runtime);
+
+      expect([8765, 9999].map((port) => checker.isPortAvailable(port))).toEqual([true, true]);
+    });
+
+    test("with IPv6 present, a port busy only on ::1 is unavailable", () => {
+      const { runtime } = recordingRuntime((hostname, port) =>
+        hostname === "::1" && port === 8766 ? fakeErrno("EADDRINUSE") : "ok",
+      );
+      const checker = new BunPortAvailabilityChecker(runtime);
+
+      expect(checker.isPortAvailable(8765)).toBe(true);
+      expect(checker.isPortAvailable(8766)).toBe(false);
+      expect(checker.isPortAvailable(8767)).toBe(true);
+    });
+
+    test("with IPv6 present, a codeless per-port ::1 failure still fails closed", () => {
+      const { runtime } = recordingRuntime((hostname, port) =>
+        hostname === "::1" && port === 8766 ? new Error("Failed to listen at ::1") : "ok",
+      );
+      const checker = new BunPortAvailabilityChecker(runtime);
+
+      expect(checker.isPortAvailable(8766)).toBe(false);
+    });
+
+    test("with IPv6 present, a non-family errno (EMFILE) on ::1 fails closed", () => {
+      const { runtime } = recordingRuntime((hostname, port) =>
+        hostname === "::1" && port === 9999 ? fakeErrno("EMFILE") : "ok",
+      );
+      const checker = new BunPortAvailabilityChecker(runtime);
+
+      expect(checker.isPortAvailable(9999)).toBe(false);
+    });
+
+    test("PortManager.allocate returns the base port through the real checker when ::1 is absent", () => {
+      const { runtime } = recordingRuntime((hostname) =>
+        hostname === "::1" ? new Error("Failed to listen at ::1") : "ok",
+      );
+
+      PortManager.reset();
+      try {
+        expect(
+          PortManager.allocate("ipv6-less-host", {
+            availabilityChecker: new BunPortAvailabilityChecker(runtime),
+          }),
+        ).toBe(expectedAllocatedPort(0));
+      } finally {
+        PortManager.reset();
+      }
+    });
+
+    test("the ::1 family probe runs once per checker, however many ports are checked", () => {
+      const absent = recordingRuntime((hostname) =>
+        hostname === "::1" ? new Error("Failed to listen at ::1") : "ok",
+      );
+      const absentChecker = new BunPortAvailabilityChecker(absent.runtime);
+      const present = recordingRuntime(() => "ok");
+      const presentChecker = new BunPortAvailabilityChecker(present.runtime);
+
+      for (let port = 8765; port < 8865; port++) {
+        absentChecker.isPortAvailable(port);
+        presentChecker.isPortAvailable(port);
+      }
+
+      const familyProbes = (calls: Array<{ hostname: string; port: number }>) =>
+        calls.filter((call) => call.hostname === "::1" && call.port === 0).length;
+      expect(familyProbes(absent.calls)).toBe(1);
+      expect(familyProbes(present.calls)).toBe(1);
+      expect(absent.calls.filter((call) => call.hostname === "::1")).toHaveLength(1);
+      expect(present.calls.filter((call) => call.hostname === "::1")).toHaveLength(101);
+    });
+  });
+
   // No test exercises the `new BunPortAvailabilityChecker()` (no-arg) default
   // path against the real `globalThis.Bun`: that global is non-configurable
   // in the Bun test runtime (can't be swapped for a fake), and binding a real

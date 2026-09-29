@@ -1,5 +1,5 @@
 import { describe, expect, test, spyOn, beforeEach, afterEach } from "bun:test";
-import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
+import { DaemonMcpProxy, DaemonToolOutcomeUnknownError } from "../../src/daemon/daemonMcpProxy";
 import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
@@ -871,8 +871,11 @@ describe("proxy binds and heartbeats a result-minted device session (issue #5689
       });
       await oldClientClosed.promise;
 
-      await expect(recovery).resolves.toEqual(deviceStartResult("replacement-after-reset"));
-      expect(replacementDaemon.nextIndex()).toBe(1);
+      // The acquisition frame was written before the socket dropped, so it may
+      // already have run: the reset still settles, but the call is not replayed
+      // against the replacement daemon (issue #6382).
+      await expect(recovery).rejects.toBeInstanceOf(DaemonToolOutcomeUnknownError);
+      expect(replacementDaemon.nextIndex()).toBe(0);
     } finally {
       await proxy.close();
     }

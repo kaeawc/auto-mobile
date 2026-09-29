@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { IdentifyInteractions } from "../../../src/features/observe/IdentifyInteractions";
+import { swipeOnSchema, tapOnSchema } from "../../../src/server/interactionTools";
 import type { ObserveResult } from "../../../src/models/ObserveResult";
 import type { NavigationEdge } from "../../../src/utils/interfaces/NavigationGraph";
 
@@ -68,15 +69,63 @@ describe("IdentifyInteractions", () => {
     expect(button?.type).toBe("action");
     expect(button?.suggestedToolCall).toEqual({
       tool: "tapOn",
-      params: { id: "btn_submit", action: "tap" },
+      params: { selector: { elementId: "btn_submit" }, action: "tap" },
     });
 
     // Only genuine input fields get the focus action.
     expect(input?.type).toBe("input");
     expect(input?.suggestedToolCall).toEqual({
       tool: "tapOn",
-      params: { id: "field_email", action: "focus" },
+      params: { selector: { elementId: "field_email" }, action: "focus" },
     });
+  });
+
+  test("every suggested tool call validates against its registered input schema", () => {
+    const result = classifier.analyze(
+      hierarchyOf([
+        // tapOn: elementId selector and tap action (resource ID takes precedence).
+        {
+          class: "android.widget.Button",
+          clickable: "true",
+          text: "With ID",
+          "resource-id": "button_with_id",
+        },
+        // tapOn: text selector and tap action, including content-description fallback.
+        { class: "android.widget.Button", clickable: "true", text: "Text only" },
+        { class: "android.widget.Button", clickable: "true", "content-desc": "Description only" },
+        // tapOn: both selector forms with focus action.
+        {
+          class: "android.widget.EditText",
+          focusable: "true",
+          text: "Input with ID",
+          "resource-id": "input_with_id",
+        },
+        { class: "android.widget.EditText", focusable: "true", text: "Input text only" },
+        // swipeOn: container elementId, text, and absent selector branches.
+        { class: "android.widget.ScrollView", scrollable: "true", "resource-id": "feed" },
+        { class: "android.widget.ScrollView", scrollable: "true", text: "Feed by text" },
+        {
+          class: "android.widget.ScrollView",
+          scrollable: "true",
+          "content-desc": "Feed by description",
+        },
+        { class: "android.widget.ScrollView", scrollable: "true" },
+      ]),
+      { platform: "android" },
+      "HomeScreen",
+      [],
+    );
+
+    const calls = result.interactions.flatMap((interaction) =>
+      interaction.suggestedToolCall ? [interaction.suggestedToolCall] : [],
+    );
+
+    expect(calls).toHaveLength(9);
+    for (const call of calls) {
+      const schema = call.tool === "tapOn" ? tapOnSchema : swipeOnSchema;
+      const parsed = schema.safeParse(call.params);
+      expect(parsed.success, `${call.tool} params: ${JSON.stringify(call.params)}`).toBe(true);
+    }
   });
 
   test("classifies 'Design system' as navigation because 'sign' is a substring (documents the false positive)", () => {

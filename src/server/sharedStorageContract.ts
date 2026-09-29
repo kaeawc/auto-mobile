@@ -131,21 +131,26 @@ export const sharedStorageFileSchema = z
 
 export const stageSharedStorageSchema = withJsonSchemaOverride(
   addDeviceTargetingToSchema(
-    z.object({
-      platform: z.literal("android").optional().default("android").describe("Android platform"),
-      namespace: z.string().describe("One caller-named child directory beneath Downloads"),
-      reset: z
-        .boolean()
-        .optional()
-        .default(false)
-        .describe("Remove only this declared namespace before writing"),
-      indexMedia: z
-        .boolean()
-        .optional()
-        .default(true)
-        .describe("Request Android media indexing for media files"),
-      files: z.array(sharedStorageFileSchema).min(1).describe("Files to stage into the namespace"),
-    }),
+    z
+      .object({
+        platform: z.literal("android").optional().default("android").describe("Android platform"),
+        namespace: z.string().describe("One caller-named child directory beneath Downloads"),
+        reset: z
+          .boolean()
+          .optional()
+          .default(false)
+          .describe("Remove only this declared namespace before writing"),
+        indexMedia: z
+          .boolean()
+          .optional()
+          .default(true)
+          .describe("Request Android media indexing for media files"),
+        files: z
+          .array(sharedStorageFileSchema)
+          .min(1)
+          .describe("Files to stage into the namespace"),
+      })
+      .strict(),
   ).superRefine((args, ctx) => {
     try {
       normalizeSharedStorageNamespace(args.namespace);

@@ -13,11 +13,13 @@ import type { SQLResult } from "../features/database/DatabaseInspector";
 // Schema for sqlQuery tool
 const sqlQuerySchema = withAppIdAliases(
   addDeviceTargetingToSchema(
-    z.object({
-      appId: z.string(),
-      databasePath: z.string().describe("Database path"),
-      query: z.string().describe("SQL query"),
-    }),
+    z
+      .object({
+        appId: z.string(),
+        databasePath: z.string().describe("Database path"),
+        query: z.string().describe("SQL query"),
+      })
+      .strict(),
   ),
 );
 

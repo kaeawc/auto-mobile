@@ -475,34 +475,39 @@ const appPermissionActionSchema = z.enum(["grant", "revoke", "reset"]);
 export const setAppPermissionsSchema = withJsonSchemaOverride(
   withAppIdAliases(
     addDeviceTargetingToSchema(
-      z.object({
-        appId: z.string().trim().min(1),
-        action: appPermissionActionSchema
-          .optional()
-          .describe(
-            "Action (default grant). Android reset requires permissions=['all'] device-wide; " +
-              "iOS physical devices support reset only.",
-          ),
-        permissions: z
-          .array(z.string().min(1))
-          .optional()
-          .describe("Permissions; Android reset accepts only 'all'; physical iOS accepts it too"),
-        userId: z
-          .number()
-          .int()
-          .nonnegative()
-          .optional()
-          .describe("Android user ID for grant/revoke, not reset"),
-        notificationsEnabled: z
-          .boolean()
-          .optional()
-          .describe("Android notification state, independent of POST_NOTIFICATIONS"),
-        notificationPolicyAccess: z.boolean().optional().describe("Android: set DND policy access"),
-        scheduleExactAlarm: z
-          .enum(["allow", "deny"])
-          .optional()
-          .describe("Android: set SCHEDULE_EXACT_ALARM appop"),
-      }),
+      z
+        .object({
+          appId: z.string().trim().min(1),
+          action: appPermissionActionSchema
+            .optional()
+            .describe(
+              "Action (default grant). Android reset requires permissions=['all'] device-wide; " +
+                "iOS physical devices support reset only.",
+            ),
+          permissions: z
+            .array(z.string().min(1))
+            .optional()
+            .describe("Permissions; Android reset accepts only 'all'; physical iOS accepts it too"),
+          userId: z
+            .number()
+            .int()
+            .nonnegative()
+            .optional()
+            .describe("Android user ID for grant/revoke, not reset"),
+          notificationsEnabled: z
+            .boolean()
+            .optional()
+            .describe("Android notification state, independent of POST_NOTIFICATIONS"),
+          notificationPolicyAccess: z
+            .boolean()
+            .optional()
+            .describe("Android: set DND policy access"),
+          scheduleExactAlarm: z
+            .enum(["allow", "deny"])
+            .optional()
+            .describe("Android: set SCHEDULE_EXACT_ALARM appop"),
+        })
+        .strict(),
     ),
   )
     .refine(
@@ -552,32 +557,36 @@ export const setAppPermissionsSchema = withJsonSchemaOverride(
 
 export const getAppPermissionsSchema = withAppIdAliases(
   addDeviceTargetingToSchema(
-    z.object({
-      appId: z.string(),
-      permissions: z
-        .array(z.string().min(1))
-        .optional()
-        .describe("Optional permissions or simulator privacy services to query"),
-    }),
+    z
+      .object({
+        appId: z.string(),
+        permissions: z
+          .array(z.string().min(1))
+          .optional()
+          .describe("Optional permissions or simulator privacy services to query"),
+      })
+      .strict(),
   ),
 );
 
 export const resetKeychainSchema = withAppIdAliases(
   addDeviceTargetingToSchema(
-    z.object({
-      appId: z
-        .string()
-        .trim()
-        .min(1)
-        .describe(
-          "Required. The app whose Keychain/Keystore state to reset. NOTE: iOS Simulator only supports a device-wide reset and erases EVERY app's Keychain regardless of this value.",
-        ),
-      confirm: z
-        .boolean()
-        .describe(
-          "Required. Must be true to proceed. On iOS Simulator this erases the Keychain for EVERY app on the target simulator, not just appId.",
-        ),
-    }),
+    z
+      .object({
+        appId: z
+          .string()
+          .trim()
+          .min(1)
+          .describe(
+            "Required. The app whose Keychain/Keystore state to reset. NOTE: iOS Simulator only supports a device-wide reset and erases EVERY app's Keychain regardless of this value.",
+          ),
+        confirm: z
+          .boolean()
+          .describe(
+            "Required. Must be true to proceed. On iOS Simulator this erases the Keychain for EVERY app on the target simulator, not just appId.",
+          ),
+      })
+      .strict(),
   ),
 );
 

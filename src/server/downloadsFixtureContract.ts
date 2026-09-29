@@ -99,6 +99,7 @@ export const stageSessionDownloadsSchema = withJsonSchemaOverride(
         .min(1)
         .describe("Files to stage into the declared Downloads directory"),
     })
+    .strict()
     .superRefine((args, ctx) => {
       try {
         normalizeSharedStorageNamespace(args.directory);

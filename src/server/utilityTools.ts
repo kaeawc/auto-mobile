@@ -73,37 +73,41 @@ async function resumeCtrlProxyIfCurrentlyBooted(
 
 // Schema definitions
 export const setActiveDeviceSchema = addSessionUuidToSchema(
-  z.object({
-    deviceId: z.string(),
-    // #5870: the platform is inferred from the resolved device (or the session),
-    // so callers targeting a concrete `deviceId` need not also send `platform`.
-    platform: platformSchema.optional(),
-  }),
+  z
+    .object({
+      deviceId: z.string(),
+      // #5870: the platform is inferred from the resolved device (or the session),
+      // so callers targeting a concrete `deviceId` need not also send `platform`.
+      platform: platformSchema.optional(),
+    })
+    .strict(),
 );
 
-const changeLocalizationBaseSchema = z.object({
-  // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
-  // not required — a device handle from getAndroid/getApple is sufficient on
-  // its own.
-  platform: platformSchema.optional(),
-  appId: z.string().min(1).optional().describe("Android app package for locale changes"),
-  locale: z.string().min(1).optional().describe("Locale tag (e.g., ar-SA, ja-JP)"),
-  timeZone: z.string().min(1).optional().describe("Zone ID (e.g., America/Los_Angeles)"),
-  textDirection: z.enum(["ltr", "rtl"]).optional().describe("Text direction"),
-  timeFormat: z.enum(["12", "24"]).optional().describe("Time format"),
-  calendarSystem: z
-    .string()
-    .min(1)
-    // ICU calendar keywords are lowercase tokens beginning with a letter.
-    .regex(/^[a-z][a-z0-9-]*$/)
-    .optional()
-    .describe("Calendar system (e.g., gregory, japanese, buddhist, islamic-civil)"),
-  restartApp: z
-    .string()
-    .min(1)
-    .optional()
-    .describe("iOS bundle ID to relaunch after locale change"),
-});
+const changeLocalizationBaseSchema = z
+  .object({
+    // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
+    // not required — a device handle from getAndroid/getApple is sufficient on
+    // its own.
+    platform: platformSchema.optional(),
+    appId: z.string().min(1).optional().describe("Android app package for locale changes"),
+    locale: z.string().min(1).optional().describe("Locale tag (e.g., ar-SA, ja-JP)"),
+    timeZone: z.string().min(1).optional().describe("Zone ID (e.g., America/Los_Angeles)"),
+    textDirection: z.enum(["ltr", "rtl"]).optional().describe("Text direction"),
+    timeFormat: z.enum(["12", "24"]).optional().describe("Time format"),
+    calendarSystem: z
+      .string()
+      .min(1)
+      // ICU calendar keywords are lowercase tokens beginning with a letter.
+      .regex(/^[a-z][a-z0-9-]*$/)
+      .optional()
+      .describe("Calendar system (e.g., gregory, japanese, buddhist, islamic-civil)"),
+    restartApp: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("iOS bundle ID to relaunch after locale change"),
+  })
+  .strict();
 
 export const changeLocalizationSchema = withAppIdAliases(
   addDeviceTargetingToSchema(changeLocalizationBaseSchema),
@@ -265,36 +269,38 @@ const networkConditionInputSchema = z
 // supports theme only (via `simctl ui appearance`); physical iOS has no
 // automatable per-device control for any field.
 export const displayConfigSchema = addDeviceTargetingToSchema(
-  z.object({
-    fontScale: z
-      .union([z.number().min(0.1).max(10), z.literal("default")])
-      .optional()
-      .describe(
-        "System text scale, or 'default' to remove Android's explicit override and restore " +
-          "its inherited default. Android only. Omit to leave unchanged.",
-      ),
-    density: z
-      .union([z.number().min(72), z.enum(["smaller", "default", "larger"])])
-      .optional()
-      .describe(
-        "Effective display density: an explicit dpi (e.g. 480), or a relative bucket " +
-          "(smaller/default/larger). Android only; best-effort on physical devices. Omit to " +
-          "leave unchanged.",
-      ),
-    theme: z
-      .enum(["light", "dark", "system", "custom"])
-      .optional()
-      .describe(
-        "Light, dark, system (follow-device), or custom (Android user-defined night-mode " +
-          "schedule) theme / night mode. Supported on Android; the iOS Simulator supports only " +
-          "'light'/'dark'. 'custom' mainly exists to restore a device previously on a custom " +
-          "schedule (from an earlier call's `previous.theme`). Omit to leave unchanged.",
-      ),
-    reset: z
-      .boolean()
-      .optional()
-      .describe("Restore font scale, density, and theme to device defaults."),
-  }),
+  z
+    .object({
+      fontScale: z
+        .union([z.number().min(0.1).max(10), z.literal("default")])
+        .optional()
+        .describe(
+          "System text scale, or 'default' to remove Android's explicit override and restore " +
+            "its inherited default. Android only. Omit to leave unchanged.",
+        ),
+      density: z
+        .union([z.number().min(72), z.enum(["smaller", "default", "larger"])])
+        .optional()
+        .describe(
+          "Effective display density: an explicit dpi (e.g. 480), or a relative bucket " +
+            "(smaller/default/larger). Android only; best-effort on physical devices. Omit to " +
+            "leave unchanged.",
+        ),
+      theme: z
+        .enum(["light", "dark", "system", "custom"])
+        .optional()
+        .describe(
+          "Light, dark, system (follow-device), or custom (Android user-defined night-mode " +
+            "schedule) theme / night mode. Supported on Android; the iOS Simulator supports only " +
+            "'light'/'dark'. 'custom' mainly exists to restore a device previously on a custom " +
+            "schedule (from an earlier call's `previous.theme`). Omit to leave unchanged.",
+        ),
+      reset: z
+        .boolean()
+        .optional()
+        .describe("Restore font scale, density, and theme to device defaults."),
+    })
+    .strict(),
 ).superRefine((values, ctx) => {
   if (
     values.reset === true &&
@@ -309,17 +315,19 @@ export const displayConfigSchema = addDeviceTargetingToSchema(
 });
 
 export const getDeviceStateSchema = addDeviceTargetingToSchema(
-  z.object({
-    include: z
-      .array(z.enum(DEVICE_STATE_READABLE_FIELDS))
-      .min(1)
-      .optional()
-      .describe(
-        "State fields to read; supports doNotDisturb, connectivity, biometrics, and " +
-          "networkCondition. Defaults to doNotDisturb + connectivity, so a bare call answers " +
-          "whether Airplane mode / Wi-Fi / Bluetooth / Location are already on.",
-      ),
-  }),
+  z
+    .object({
+      include: z
+        .array(z.enum(DEVICE_STATE_READABLE_FIELDS))
+        .min(1)
+        .optional()
+        .describe(
+          "State fields to read; supports doNotDisturb, connectivity, biometrics, and " +
+            "networkCondition. Defaults to doNotDisturb + connectivity, so a bare call answers " +
+            "whether Airplane mode / Wi-Fi / Bluetooth / Location are already on.",
+        ),
+    })
+    .strict(),
 );
 
 // The networkCondition sub-object's zod refinement ("at least one meaningful
@@ -349,20 +357,22 @@ const NETWORK_CONDITION_REQUIRED_ANY_OF = [
 
 export const setDeviceStateSchema = withJsonSchemaOverride(
   addDeviceTargetingToSchema(
-    z.object({
-      doNotDisturb: doNotDisturbStateInputSchema
-        .optional()
-        .describe("Do Not Disturb state to apply."),
-      biometrics: biometricStateInputSchema
-        .optional()
-        .describe("iOS Simulator biometric enrollment state to apply."),
-      connectivity: connectivityStateInputSchema
-        .optional()
-        .describe("Android connectivity toggles to apply."),
-      networkCondition: networkConditionInputSchema
-        .optional()
-        .describe("Device-wide network condition to apply (Android emulator only)."),
-    }),
+    z
+      .object({
+        doNotDisturb: doNotDisturbStateInputSchema
+          .optional()
+          .describe("Do Not Disturb state to apply."),
+        biometrics: biometricStateInputSchema
+          .optional()
+          .describe("iOS Simulator biometric enrollment state to apply."),
+        connectivity: connectivityStateInputSchema
+          .optional()
+          .describe("Android connectivity toggles to apply."),
+        networkCondition: networkConditionInputSchema
+          .optional()
+          .describe("Device-wide network condition to apply (Android emulator only)."),
+      })
+      .strict(),
   ).refine(
     (values) =>
       values.doNotDisturb !== undefined ||

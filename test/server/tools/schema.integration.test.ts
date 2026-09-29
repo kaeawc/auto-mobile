@@ -140,30 +140,24 @@ describe("MCP Tools Schema", () => {
   // the "matches valid schema" test above (same listDeviceImages call, same
   // assertion) — removed as a pure duplicate.
 
-  // D9 (issue #4181): the old "contains fields not defined by the schema"
-  // test was unfalsifiable — its try/catch accepted BOTH a success and a
-  // validation error, so it passed on every branch. The proposed replacement
-  // ("strict schemas reject it") was REFUTED: listDeviceImages actually
-  // ACCEPTS unlisted top-level fields. Pin that real, falsifiable behavior —
-  // if listDeviceImages ever became strict this row reds.
-  test("listDeviceImages accepts an unlisted top-level field (its schema is permissive)", async function () {
+  test("listDeviceImages rejects an unlisted top-level field", async function () {
     const { client } = fixture.getContext();
 
-    const result = await client.request(
-      {
-        method: "tools/call",
-        params: {
-          name: "listDeviceImages",
-          arguments: {
-            platform: "android",
-            unknownField: "ignored, not rejected",
+    await expect(
+      client.request(
+        {
+          method: "tools/call",
+          params: {
+            name: "listDeviceImages",
+            arguments: {
+              platform: "android",
+              unknownField: "rejected",
+            },
           },
         },
-      },
-      z.object({ content: z.array(z.any()).optional() }).passthrough(),
-    );
-
-    expect(typeof result).toBe("object");
+        z.object({ content: z.array(z.any()).optional() }).passthrough(),
+      ),
+    ).rejects.toThrow('Unrecognized key: "unknownField"');
   });
 
   test("tapOn rejects a defined field with the wrong type", async function () {

@@ -128,10 +128,12 @@ const ADAPTER_NAME_DESCRIPTION =
 // listDataStores: enumerate the DataStore instances exposed by a host-registered adapter (Android).
 const listDataStoresSchema = withAppIdAliases(
   addDeviceTargetingToSchema(
-    z.object({
-      appId: z.string(),
-      adapterName: z.string().describe(ADAPTER_NAME_DESCRIPTION),
-    }),
+    z
+      .object({
+        appId: z.string(),
+        adapterName: z.string().describe(ADAPTER_NAME_DESCRIPTION),
+      })
+      .strict(),
   ),
 );
 
@@ -143,11 +145,13 @@ interface ListDataStoresArgs {
 // getDataStore: read all entries from a named DataStore instance (Android).
 const getDataStoreSchema = withAppIdAliases(
   addDeviceTargetingToSchema(
-    z.object({
-      appId: z.string(),
-      adapterName: z.string().describe(ADAPTER_NAME_DESCRIPTION),
-      name: z.string().describe("DataStore instance name"),
-    }),
+    z
+      .object({
+        appId: z.string(),
+        adapterName: z.string().describe(ADAPTER_NAME_DESCRIPTION),
+        name: z.string().describe("DataStore instance name"),
+      })
+      .strict(),
   ),
 );
 
@@ -167,24 +171,28 @@ function resolveStorageName(args: { name?: string; fileName?: string }): string 
 const setKeyValueSchema = withAppIdAliases(
   z.union([
     addDeviceTargetingToSchema(
-      z.object({
-        appId: z.string(),
-        name: z.string().describe(STORAGE_NAME_DESCRIPTION),
-        fileName: z.string().optional().describe(legacyFileNameDescription),
-        key: z.string().describe("Key"),
-        value: z.string().nullable().describe("Value string; null clears"),
-        type: z.enum(KEY_VALUE_TYPES).describe("Value type"),
-      }),
+      z
+        .object({
+          appId: z.string(),
+          name: z.string().describe(STORAGE_NAME_DESCRIPTION),
+          fileName: z.string().optional().describe(legacyFileNameDescription),
+          key: z.string().describe("Key"),
+          value: z.string().nullable().describe("Value string; null clears"),
+          type: z.enum(KEY_VALUE_TYPES).describe("Value type"),
+        })
+        .strict(),
     ),
     addDeviceTargetingToSchema(
-      z.object({
-        appId: z.string(),
-        name: z.string().optional().describe(STORAGE_NAME_DESCRIPTION),
-        fileName: z.string().describe(legacyFileNameDescription),
-        key: z.string().describe("Key"),
-        value: z.string().nullable().describe("Value string; null clears"),
-        type: z.enum(KEY_VALUE_TYPES).describe("Value type"),
-      }),
+      z
+        .object({
+          appId: z.string(),
+          name: z.string().optional().describe(STORAGE_NAME_DESCRIPTION),
+          fileName: z.string().describe(legacyFileNameDescription),
+          key: z.string().describe("Key"),
+          value: z.string().nullable().describe("Value string; null clears"),
+          type: z.enum(KEY_VALUE_TYPES).describe("Value type"),
+        })
+        .strict(),
     ),
   ]),
 );
@@ -193,20 +201,24 @@ const setKeyValueSchema = withAppIdAliases(
 const removeKeyValueSchema = withAppIdAliases(
   z.union([
     addDeviceTargetingToSchema(
-      z.object({
-        appId: z.string(),
-        name: z.string().describe(STORAGE_NAME_DESCRIPTION),
-        fileName: z.string().optional().describe(legacyFileNameDescription),
-        key: z.string().describe("Key"),
-      }),
+      z
+        .object({
+          appId: z.string(),
+          name: z.string().describe(STORAGE_NAME_DESCRIPTION),
+          fileName: z.string().optional().describe(legacyFileNameDescription),
+          key: z.string().describe("Key"),
+        })
+        .strict(),
     ),
     addDeviceTargetingToSchema(
-      z.object({
-        appId: z.string(),
-        name: z.string().optional().describe(STORAGE_NAME_DESCRIPTION),
-        fileName: z.string().describe(legacyFileNameDescription),
-        key: z.string().describe("Key"),
-      }),
+      z
+        .object({
+          appId: z.string(),
+          name: z.string().optional().describe(STORAGE_NAME_DESCRIPTION),
+          fileName: z.string().describe(legacyFileNameDescription),
+          key: z.string().describe("Key"),
+        })
+        .strict(),
     ),
   ]),
 );
@@ -215,18 +227,22 @@ const removeKeyValueSchema = withAppIdAliases(
 const clearKeyValueFileSchema = withAppIdAliases(
   z.union([
     addDeviceTargetingToSchema(
-      z.object({
-        appId: z.string(),
-        name: z.string().describe(STORAGE_NAME_DESCRIPTION),
-        fileName: z.string().optional().describe(legacyFileNameDescription),
-      }),
+      z
+        .object({
+          appId: z.string(),
+          name: z.string().describe(STORAGE_NAME_DESCRIPTION),
+          fileName: z.string().optional().describe(legacyFileNameDescription),
+        })
+        .strict(),
     ),
     addDeviceTargetingToSchema(
-      z.object({
-        appId: z.string(),
-        name: z.string().optional().describe(STORAGE_NAME_DESCRIPTION),
-        fileName: z.string().describe(legacyFileNameDescription),
-      }),
+      z
+        .object({
+          appId: z.string(),
+          name: z.string().optional().describe(STORAGE_NAME_DESCRIPTION),
+          fileName: z.string().describe(legacyFileNameDescription),
+        })
+        .strict(),
     ),
   ]),
 );

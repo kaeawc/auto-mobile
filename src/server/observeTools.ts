@@ -514,37 +514,39 @@ export const overrideWaitForJsonSchema: JsonSchemaOverride = (jsonSchema) => {
 
 const observeBaseSchema = withJsonSchemaOverride(
   addDeviceTargetingToSchema(
-    z.object({
-      // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
-      // not required — a device handle from getAndroid/getApple is sufficient on
-      // its own.
-      platform: platformSchema.optional(),
-      waitFor: waitForSchema
-        .optional()
-        .describe("Wait for element to appear before returning observation"),
-      settled: settledSchema
-        .optional()
-        .describe("After waitFor matches, wait for a quiet hierarchy period (requires waitFor)"),
-      raw: z.boolean().optional().describe("Include raw view hierarchy"),
-      screenshot: z
-        .enum(["settled", "async", "none"])
-        .optional()
-        .describe(
-          "Screenshot mode: await a fresh validated capture, use background capture, or skip",
-        ),
-      project: z
-        .enum(["full", "skeleton"])
-        .optional()
-        .describe(
-          "Output projection. 'skeleton' (default) returns a flat, actionable-only list " +
-            "(elementId/label/bounds/affordances) in place of viewHierarchy/elements. Each skeleton " +
-            "elementId/label is directly usable as a tapOn selector, except the collapsed keyboard " +
-            "row `<ime>` (drive it with sendKeys); " +
-            "re-request with raw/project:'full' to disambiguate.",
-        ),
-      skipBackStack: z.boolean().optional().describe("Skip back stack during waitFor polling"),
-      scope: observeScopeSchema.optional(),
-    }),
+    z
+      .object({
+        // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
+        // not required — a device handle from getAndroid/getApple is sufficient on
+        // its own.
+        platform: platformSchema.optional(),
+        waitFor: waitForSchema
+          .optional()
+          .describe("Wait for element to appear before returning observation"),
+        settled: settledSchema
+          .optional()
+          .describe("After waitFor matches, wait for a quiet hierarchy period (requires waitFor)"),
+        raw: z.boolean().optional().describe("Include raw view hierarchy"),
+        screenshot: z
+          .enum(["settled", "async", "none"])
+          .optional()
+          .describe(
+            "Screenshot mode: await a fresh validated capture, use background capture, or skip",
+          ),
+        project: z
+          .enum(["full", "skeleton"])
+          .optional()
+          .describe(
+            "Output projection. 'skeleton' (default) returns a flat, actionable-only list " +
+              "(elementId/label/bounds/affordances) in place of viewHierarchy/elements. Each skeleton " +
+              "elementId/label is directly usable as a tapOn selector, except the collapsed keyboard " +
+              "row `<ime>` (drive it with sendKeys); " +
+              "re-request with raw/project:'full' to disambiguate.",
+          ),
+        skipBackStack: z.boolean().optional().describe("Skip back stack during waitFor polling"),
+        scope: observeScopeSchema.optional(),
+      })
+      .strict(),
   ).superRefine(refineWaitForArgs),
   overrideWaitForJsonSchema,
 );
@@ -552,31 +554,33 @@ const observeBaseSchema = withJsonSchemaOverride(
 export const observeSchema = withAppIdAliases(observeBaseSchema);
 
 export const identifyInteractionsSchema = addDeviceTargetingToSchema(
-  z.object({
-    // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
-    // not required — a device handle from getAndroid/getApple is sufficient on
-    // its own.
-    platform: platformSchema.optional(),
-    filter: z
-      .object({
-        types: z
-          .array(z.enum(["navigation", "input", "action", "scroll", "toggle"]))
-          .optional()
-          .describe("Interaction types"),
-        minConfidence: z.number().min(0).max(1).optional().describe("Min confidence (0-1)"),
-        limit: z.number().int().positive().optional().describe("Max results"),
-      })
-      .optional()
-      .describe("Filter options"),
-    includeContext: z
-      .object({
-        navigationGraph: z.boolean().optional().describe("Include nav graph predictions"),
-        elementDetails: z.boolean().optional().describe("Include element details"),
-        suggestedParams: z.boolean().optional().describe("Include tool params"),
-      })
-      .optional()
-      .describe("Context options"),
-  }),
+  z
+    .object({
+      // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
+      // not required — a device handle from getAndroid/getApple is sufficient on
+      // its own.
+      platform: platformSchema.optional(),
+      filter: z
+        .object({
+          types: z
+            .array(z.enum(["navigation", "input", "action", "scroll", "toggle"]))
+            .optional()
+            .describe("Interaction types"),
+          minConfidence: z.number().min(0).max(1).optional().describe("Min confidence (0-1)"),
+          limit: z.number().int().positive().optional().describe("Max results"),
+        })
+        .optional()
+        .describe("Filter options"),
+      includeContext: z
+        .object({
+          navigationGraph: z.boolean().optional().describe("Include nav graph predictions"),
+          elementDetails: z.boolean().optional().describe("Include element details"),
+          suggestedParams: z.boolean().optional().describe("Include tool params"),
+        })
+        .optional()
+        .describe("Context options"),
+    })
+    .strict(),
 );
 
 const WAIT_FOR_POLL_INTERVAL_MS = 100;

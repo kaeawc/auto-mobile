@@ -9,9 +9,11 @@ import { addDeviceTargetingToSchema, withAppIdAliases } from "./toolSchemaHelper
 // Schema definitions for tool arguments
 export const getDeepLinksSchema = withAppIdAliases(
   addDeviceTargetingToSchema(
-    z.object({
-      appId: z.string(),
-    }),
+    z
+      .object({
+        appId: z.string(),
+      })
+      .strict(),
   ),
 );
 

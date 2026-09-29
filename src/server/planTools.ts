@@ -35,25 +35,30 @@ const testMetadataSchema = z.object({
 });
 
 // Execute plan tool schema
-const executePlanSchema = z.object({
-  planContent: z.string().describe("YAML plan content"),
-  startStep: z.number().default(0).describe("Start step index"),
-  platform: z.enum(["android", "ios"]),
-  sessionUuid: z.string().optional().describe("Session"),
-  keepScreenAwake: z.boolean().optional(),
-  deviceId: z.string().optional(),
-  device: z.string().optional().describe(DEVICE_LABEL_DESCRIPTION),
-  devices: z.array(z.string()).optional().describe("Device labels"),
-  deviceAllocationTimeoutMs: z.number().default(300000).describe("Allocation timeout ms"),
-  abortStrategy: z
-    .enum(["immediate", "finish-current-step"])
-    .default("immediate")
-    .describe("Abort strategy"),
-  testMetadata: testMetadataSchema.optional().describe("Test metadata"),
-  cleanupAppId: z.string().optional().describe("Cleanup app ID"),
-  cleanupClearAppData: z.boolean().optional().describe("Clear app data"),
-  captureObserveSteps: z.enum(["summary", "full"]).optional().describe("Attach observe snapshots"),
-});
+const executePlanSchema = z
+  .object({
+    planContent: z.string().describe("YAML plan content"),
+    startStep: z.number().default(0).describe("Start step index"),
+    platform: z.enum(["android", "ios"]),
+    sessionUuid: z.string().optional().describe("Session"),
+    keepScreenAwake: z.boolean().optional(),
+    deviceId: z.string().optional(),
+    device: z.string().optional().describe(DEVICE_LABEL_DESCRIPTION),
+    devices: z.array(z.string()).optional().describe("Device labels"),
+    deviceAllocationTimeoutMs: z.number().default(300000).describe("Allocation timeout ms"),
+    abortStrategy: z
+      .enum(["immediate", "finish-current-step"])
+      .default("immediate")
+      .describe("Abort strategy"),
+    testMetadata: testMetadataSchema.optional().describe("Test metadata"),
+    cleanupAppId: z.string().optional().describe("Cleanup app ID"),
+    cleanupClearAppData: z.boolean().optional().describe("Clear app data"),
+    captureObserveSteps: z
+      .enum(["summary", "full"])
+      .optional()
+      .describe("Attach observe snapshots"),
+  })
+  .strict();
 
 const executePlanDebugStepSchema = z.object({
   step: z.string(),
@@ -152,7 +157,7 @@ const executePlanTool = async (
 };
 
 // Start test recording tool schema (empty - uses active device)
-const startTestRecordingSchema = addSessionUuidToSchema(z.object({}));
+const startTestRecordingSchema = addSessionUuidToSchema(z.object({}).strict());
 
 const startTestRecordingResultSchema = z.object({
   success: z.boolean(),
@@ -186,10 +191,12 @@ const startTestRecordingTool = async (device: BootedDevice): Promise<any> => {
 
 // Export plan tool schema
 const exportPlanSchema = addSessionUuidToSchema(
-  z.object({
-    recordingId: z.string().optional().describe("Recording ID"),
-    planName: z.string().optional().describe("Plan name"),
-  }),
+  z
+    .object({
+      recordingId: z.string().optional().describe("Recording ID"),
+      planName: z.string().optional().describe("Plan name"),
+    })
+    .strict(),
 );
 
 const exportPlanResultSchema = z.object({
@@ -253,10 +260,12 @@ const exportPlanTool = async (params: {
 // ============================================================================
 
 const recordStepsSchema = addSessionUuidToSchema(
-  z.object({
-    action: z.enum(["begin", "end", "status"]),
-    planName: z.string().optional().describe("Plan name for action=end"),
-  }),
+  z
+    .object({
+      action: z.enum(["begin", "end", "status"]),
+      planName: z.string().optional().describe("Plan name for action=end"),
+    })
+    .strict(),
 );
 
 const recordStepsResultSchema = z.object({

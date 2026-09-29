@@ -4,24 +4,33 @@ import { observeSchema } from "../../src/server/observeTools";
 import { formatToolParamError } from "../../src/server/toolParamError";
 
 describe("actionable interaction schema errors", () => {
+  test("observe rejects an unknown root argument", () => {
+    const input = { bogusKey: 123 };
+    const result = observeSchema.safeParse(input);
+    expect(result.success).toBe(false);
+    if (result.success) {
+      throw new Error("expected invalid observe input");
+    }
+    expect(formatToolParamError("observe", result.error, input, observeSchema)).toContain(
+      'Unrecognized key: "bogusKey"',
+    );
+  });
+
   for (const action of ["find", "tap"]) {
-    test.each([
-      {},
-      { text: "mt sms" },
-      { title: "sender" },
-      { body: "mt sms" },
-      { appId: "com.app" },
-    ])(`systemTray ${action} names the notification object for %j`, (criteria) => {
-      const input = { action, ...criteria };
-      const result = systemTraySchema.safeParse(input);
-      expect(result.success).toBe(false);
-      if (result.success) {
-        throw new Error("expected invalid criteria");
-      }
-      expect(formatToolParamError("systemTray", result.error, input)).toContain(
-        `${action} requires at least one criterion under 'notification': notification: { title | body | appId }`,
-      );
-    });
+    test.each([{}, { notification: {} }])(
+      `systemTray ${action} names the notification object for %j`,
+      (criteria) => {
+        const input = { action, ...criteria };
+        const result = systemTraySchema.safeParse(input);
+        expect(result.success).toBe(false);
+        if (result.success) {
+          throw new Error("expected invalid criteria");
+        }
+        expect(formatToolParamError("systemTray", result.error, input)).toContain(
+          `${action} requires at least one criterion under 'notification': notification: { title | body | appId }`,
+        );
+      },
+    );
     test.each(["title", "body", "appId"])(`systemTray ${action} accepts notification.%s`, (key) => {
       expect(systemTraySchema.safeParse({ action, notification: { [key]: "value" } }).success).toBe(
         true,

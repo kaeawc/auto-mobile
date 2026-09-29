@@ -2849,6 +2849,10 @@
         "platform": {
           "type": "string",
           "enum": ["android", "ios"]
+        },
+        "sessionUuid": {
+          "description": "Session used for inventory admission",
+          "type": "string"
         }
       },
       "required": ["platform"],

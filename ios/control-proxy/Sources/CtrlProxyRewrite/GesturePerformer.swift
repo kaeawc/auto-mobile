@@ -98,6 +98,72 @@ public final class GesturePerformer: GesturePerforming {
         hasFocus && (isKnownTextInput || (isOther && (forKeyPress || hasTextInputEvidence)))
     }
 
+    enum SnapshotFocusElementType {
+        case textField, secureTextField, searchField, textView, other
+    }
+
+    nonisolated static func acceptSnapshotFocus(
+        keyboardVisible: Bool, focusedElementType: SnapshotFocusElementType
+    )
+        -> Bool
+    {
+        if keyboardVisible { return true }
+        switch focusedElementType {
+        case .textField, .secureTextField, .searchField, .textView: return true
+        case .other: return false
+        }
+    }
+
+    struct FocusDiagnosticEntry {
+        let kind: String
+        let identifier: String
+        let hasFocus: Bool
+        let isSelected: Bool
+        let valueLength: Int
+        let frame: CGRect
+    }
+
+    struct FocusDiagnosticSummary {
+        var counts: [String: Int] = [:]
+        var entries: [String: [FocusDiagnosticEntry]] = [:]
+        var visitedNodes = 0
+        var truncated = false
+    }
+
+    /// Visit at most `maxNodes` snapshot nodes, without building a second tree.
+    nonisolated static func boundedFocusDiagnostic<Node>(
+        root: Node,
+        maxNodes: Int = 200,
+        maxDepth: Int = 64,
+        children: (Node) -> [Node],
+        describe: (Node) -> FocusDiagnosticEntry?
+    )
+        -> FocusDiagnosticSummary
+    {
+        var summary = FocusDiagnosticSummary()
+        var pending: [(node: Node, depth: Int)] = [(root, 0)]
+        while let current = pending.popLast() {
+            if summary.visitedNodes >= maxNodes {
+                summary.truncated = true
+                break
+            }
+            summary.visitedNodes += 1
+            if let entry = describe(current.node) {
+                summary.counts[entry.kind, default: 0] += 1
+                if summary.entries[entry.kind, default: []].count < 5 {
+                    summary.entries[entry.kind, default: []].append(entry)
+                }
+            }
+            let descendants = children(current.node)
+            if current.depth >= maxDepth {
+                if !descendants.isEmpty { summary.truncated = true }
+                continue
+            }
+            pending.append(contentsOf: descendants.reversed().map { ($0, current.depth + 1) })
+        }
+        return summary
+    }
+
     nonisolated static func canVerifyDestructiveKey(focusedValue: String?) -> Bool {
         focusedValue != nil
     }
@@ -280,19 +346,20 @@ public final class GesturePerformer: GesturePerforming {
         /// would register as focused text and we'd try to delete from it.
         ///
         /// Depth-guarded at 64 to bound recursion on pathological trees.
-        private static func snapshotHasTextInputWithFocus(
+        private static func focusedTextInputType(
             _ snapshot: XCUIElementSnapshot,
             forKeyPress: Bool = false,
             depth: Int = 0
         )
-            -> Bool
+            -> XCUIElement.ElementType?
         {
-            if depth > 64 { return false }
+            if depth > 64 { return nil }
 
             let type = snapshot.elementType
             let isKnownTextInput = type == .textField
                 || type == .textView
                 || type == .secureTextField
+                || type == .searchField
             let isTextLikeOther = type == .other && snapshotLooksLikeTextInput(snapshot)
 
             if isFocusedSnapshotCandidate(
@@ -302,14 +369,14 @@ public final class GesturePerformer: GesturePerforming {
                 hasTextInputEvidence: isTextLikeOther,
                 forKeyPress: forKeyPress
             ) {
-                return true
+                return type
             }
-            for child in snapshot.children where snapshotHasTextInputWithFocus(
-                child, forKeyPress: forKeyPress, depth: depth + 1
-            ) {
-                return true
+            for child in snapshot.children {
+                if let focusedType = focusedTextInputType(child, forKeyPress: forKeyPress, depth: depth + 1) {
+                    return focusedType
+                }
             }
-            return false
+            return nil
         }
 
         /// Heuristic for treating an `.other`-typed snapshot as a text-input
@@ -352,12 +419,25 @@ public final class GesturePerformer: GesturePerforming {
 
                 // Strategy 2: snapshot.hasFocus traversal. Skip SpringBoard —
                 // the app we want is never SpringBoard in a text-input flow.
-                if app.identifier != "com.apple.springboard" {
-                    if let snapshot = try? app.snapshot(),
-                       GesturePerformer.snapshotHasTextInputWithFocus(snapshot, forKeyPress: forKeyPress)
-                    {
+                if app.identifier != "com.apple.springboard",
+                   let snapshot = try? app.snapshot(),
+                   let focusedType = GesturePerformer.focusedTextInputType(snapshot, forKeyPress: forKeyPress)
+                {
+                    let keyboardVisible = app.keyboards.firstMatch.exists
+                    let focusType: SnapshotFocusElementType
+                    switch focusedType {
+                    case .textField: focusType = .textField
+                    case .secureTextField: focusType = .secureTextField
+                    case .searchField: focusType = .searchField
+                    case .textView: focusType = .textView
+                    default: focusType = .other
+                    }
+                    if GesturePerformer.acceptSnapshotFocus(
+                        keyboardVisible: keyboardVisible, focusedElementType: focusType
+                    ) {
                         return (true, "snapshot.hasFocus")
                     }
+                    return (false, "snapshot.hasFocus-without-keyboard")
                 }
 
                 // Strategy 3: keyboard-visibility probe. Covers the case
@@ -450,44 +530,52 @@ public final class GesturePerformer: GesturePerforming {
         /// failures. Returned as a single line so it fits in a WebSocket error.
         private func buildFocusDiagnostic(app: XCUIApplication, reason: String) -> String {
             catchingObjCExceptionNonThrowing({
+                guard let snapshot = try? app.snapshot() else {
+                    return "reason=\"\(reason)\" [diagnostic collection failed]"
+                }
+                let summary = GesturePerformer.boundedFocusDiagnostic(
+                    root: snapshot,
+                    children: { $0.children },
+                    describe: { node in
+                        let kind: String
+                        switch node.elementType {
+                        case .textField: kind = "textFields"
+                        case .secureTextField: kind = "secureTextFields"
+                        case .textView: kind = "textViews"
+                        case .searchField: kind = "searchFields"
+                        default: return nil
+                        }
+                        return FocusDiagnosticEntry(
+                            kind: kind,
+                            identifier: node.identifier,
+                            hasFocus: node.hasFocus,
+                            isSelected: node.isSelected,
+                            valueLength: (node.value as? String)?.count ?? 0,
+                            frame: node.frame
+                        )
+                    }
+                )
                 var parts: [String] = []
                 parts.append("reason=\"\(reason)\"")
-                parts.append("app.label=\"\(app.label)\"")
-                parts.append("app.identifier=\"\(app.identifier)\"")
+                parts.append("app.label=\"\(snapshot.label)\"")
+                parts.append("app.identifier=\"\(snapshot.identifier)\"")
 
-                let typesToProbe: [(String, XCUIElement.ElementType)] = [
-                    ("textFields", .textField),
-                    ("secureTextFields", .secureTextField),
-                    ("textViews", .textView),
-                    ("searchFields", .searchField),
-                ]
-
-                for (name, type) in typesToProbe {
-                    let query = app.descendants(matching: type)
-                    let count = query.count
-                    parts.append("\(name).count=\(count)")
-
-                    // Only introspect a small number to avoid heavy XPC.
-                    let cap = min(count, 5)
-                    if cap > 0 {
-                        for i in 0 ..< cap {
-                            let el = query.element(boundBy: i)
-                            let hasFocus = (el.value(forKey: "hasKeyboardFocus") as? Bool) ?? false
-                            let identifier = el.identifier
-                            let value = (el.value as? String) ?? ""
-                            let isSelected = el.isSelected
-                            let isHittable = el.isHittable
-                            let frame = el.frame
-                            parts
-                                .append(
-                                    "\(name)[\(i)]={id=\"\(identifier)\",hasKeyboardFocus=\(hasFocus),isSelected=\(isSelected),isHittable=\(isHittable),value.len=\(value.count),frame=\(Int(frame.origin.x)),\(Int(frame.origin.y)),\(Int(frame.size.width)),\(Int(frame.size.height))}"
-                                )
-                        }
+                for name in ["textFields", "secureTextFields", "textViews", "searchFields"] {
+                    parts.append("\(name).count=\(summary.counts[name, default: 0])")
+                    for (index, entry) in (summary.entries[name] ?? []).enumerated() {
+                        let frame = entry.frame
+                        parts.append(
+                            "\(name)[\(index)]={id=\"\(entry.identifier)\",hasKeyboardFocus=unknown,hasFocus=\(entry.hasFocus),isSelected=\(entry.isSelected),isHittable=unknown,value.len=\(entry.valueLength),frame=\(Int(frame.origin.x)),\(Int(frame.origin.y)),\(Int(frame.size.width)),\(Int(frame.size.height))}"
+                        )
                     }
                 }
 
-                parts.append("app.keyboards.count=\(app.keyboards.count)")
-                parts.append("springboard.keyboards.count=\(self.springboard.keyboards.count)")
+                // A single app snapshot cannot establish keyboard visibility or
+                // SpringBoard state; preserve these diagnostic keys honestly.
+                parts.append("app.keyboards.count=unknown")
+                parts.append("springboard.keyboards.count=unknown")
+                parts.append("snapshot.nodes=\(summary.visitedNodes)")
+                parts.append("snapshot.truncated=\(summary.truncated)")
                 return parts.joined(separator: " | ")
             }, fallback: "reason=\"\(reason)\" [diagnostic collection failed]")
         }

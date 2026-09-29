@@ -68,3 +68,50 @@ final class GesturePerformerSemanticLinkTests: XCTestCase {
         )
     }
 }
+
+final class GesturePerformerFocusDiagnosticTests: XCTestCase {
+    func testSnapshotFocusRequiresKeyboardForTextLikeWrapper() {
+        XCTAssertFalse(GesturePerformer.acceptSnapshotFocus(
+            keyboardVisible: false, focusedElementType: .other
+        ))
+        XCTAssertTrue(GesturePerformer.acceptSnapshotFocus(
+            keyboardVisible: true, focusedElementType: .other
+        ))
+    }
+
+    func testSnapshotFocusAcceptsRealEditableInputsWithoutSoftwareKeyboard() {
+        for type in [
+            GesturePerformer.SnapshotFocusElementType.textField,
+            .secureTextField,
+            .searchField,
+            .textView,
+        ] {
+            XCTAssertTrue(GesturePerformer.acceptSnapshotFocus(
+                keyboardVisible: false, focusedElementType: type
+            ))
+        }
+    }
+
+    func testDiagnosticStopsAfterNodeCap() {
+        struct Node {
+            let isEditable: Bool
+            let children: [Int]
+        }
+        let nodes = [Node(isEditable: false, children: Array(1 ... 201))]
+            + (1 ... 201).map { Node(isEditable: $0 == 201, children: []) }
+        let summary = GesturePerformer.boundedFocusDiagnostic(
+            root: 0,
+            children: { nodes[$0].children },
+            describe: { index in
+                guard nodes[index].isEditable else { return nil }
+                return GesturePerformer.FocusDiagnosticEntry(
+                    kind: "textFields", identifier: "beyond-cap", hasFocus: true,
+                    isSelected: false, valueLength: 0, frame: .zero
+                )
+            }
+        )
+        XCTAssertEqual(summary.visitedNodes, 200)
+        XCTAssertTrue(summary.truncated)
+        XCTAssertEqual(summary.counts["textFields", default: 0], 0)
+    }
+}

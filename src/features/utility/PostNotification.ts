@@ -42,6 +42,22 @@ const NOTIFICATION_RECEIVER =
 const SDK_RESULT_SUCCESS = 1;
 const DEVICE_IMAGE_DIR = "/sdcard/Download/automobile";
 const NOTIFICATION_IMAGE_PUSH_TIMEOUT_MS = 60_000;
+const NOTIFICATION_AUTHORIZATION_GUIDANCE =
+  "The app has not been granted notification authorization on this simulator; launch the app and accept its notification prompt (or have the app call requestAuthorization) before calling postNotification.";
+
+function isNotificationAuthorizationError(error: string): boolean {
+  return (
+    error.includes("Source is not authorized") ||
+    (error.includes("UNErrorDomain") && /\bcode\s*=\s*2003\b/.test(error))
+  );
+}
+
+function preserveOrExplainSimctlPushError(error: string): string {
+  if (isNotificationAuthorizationError(error)) {
+    return `${NOTIFICATION_AUTHORIZATION_GUIDANCE} simctl error: ${error}`;
+  }
+  return error;
+}
 
 export class PostNotification {
   private device: BootedDevice;
@@ -169,7 +185,7 @@ export class PostNotification {
         success: false,
         supported: true,
         appId: bundleId,
-        error: result.error ?? "simctl push failed.",
+        error: preserveOrExplainSimctlPushError(result.error ?? "simctl push failed."),
         warning,
       };
     }

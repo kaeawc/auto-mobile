@@ -20,6 +20,7 @@ export interface DecodedCtrlProxyMessage {
   requestId: string;
   result?: unknown;
   errorMessage?: string;
+  runnerBusy?: boolean;
   totalTimeMs?: number;
 }
 
@@ -41,6 +42,24 @@ export function decodeCtrlProxyMessage(message: WebSocketMessage): DecodedCtrlPr
   const { type, requestId } = message;
   if (!requestId) {
     return null;
+  }
+
+  if (message.error === "runner_busy") {
+    const blockingType =
+      typeof message.blockingCommandType === "string" && message.blockingCommandType.length > 0
+        ? message.blockingCommandType
+        : "an unknown command";
+    const elapsedMs = message.blockingElapsedMs;
+    const elapsedDuration =
+      typeof elapsedMs === "number" && Number.isFinite(elapsedMs) && elapsedMs >= 0
+        ? `${(elapsedMs / 1000).toFixed(1)}s`
+        : "an unknown duration";
+    return {
+      requestId,
+      runnerBusy: true,
+      errorMessage: `iOS runner is busy executing ${blockingType} for ${elapsedDuration}; retry shortly`,
+      totalTimeMs: message.totalTimeMs ?? 0,
+    };
   }
 
   let result: unknown;

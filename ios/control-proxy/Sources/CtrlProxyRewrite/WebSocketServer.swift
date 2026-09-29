@@ -2,6 +2,30 @@ import Foundation
 import Network
 import os
 
+struct InFlightRunnerCommand: Sendable, Equatable {
+    let type: String
+    let requestId: String?
+    let startedAtMs: Int64
+}
+
+enum CommandAdmissionDecision: Equatable {
+    case queue
+    case busy(blockingType: String, elapsedMs: Int64)
+}
+
+/// Pure admission rule. The caller snapshots state and time under the dispatch lock.
+func admissionDecision(
+    inFlight: InFlightRunnerCommand?, nowMs: Int64, budgetMs: Int64
+)
+    -> CommandAdmissionDecision
+{
+    guard let inFlight else { return .queue }
+    let elapsedMs = max(0, nowMs - inFlight.startedAtMs)
+    return elapsedMs > budgetMs
+        ? .busy(blockingType: inFlight.type, elapsedMs: elapsedMs)
+        : .queue
+}
+
 /// Coordinates failures recorded while one WebSocket command is in flight.
 ///
 /// The server executes commands serially, so one lock-confined slot is sufficient. The
@@ -117,13 +141,21 @@ final class WebSocketServer: @unchecked Sendable {
 
     private let queue = DispatchQueue(label: "com.ctrlproxy.server")
 
-    /// Serial command execution. Each dispatched command chains after the previous one's
-    /// completion, so per-connection command ordering is preserved even though `handle` is
-    /// now `async` (the reference used a single serial `commandQueue`; this is the
-    /// async-native equivalent). Lock-guarded so `dispatchCommand` is callable from any
-    /// thread, and non-blocking so the accept `queue` is freed the instant a command is
-    /// enqueued rather than hopping onto a second serial queue (issue #5374).
-    private let commandTail = OSAllocatedUnfairLock<Task<Void, Never>?>(initialState: nil)
+    /// Serial command execution and the active command share one lock. The task tail
+    /// preserves ordering; the active command snapshot lets the receive queue make
+    /// an admission decision without waiting for an XCUITest call (issue #5374).
+    private struct CommandState {
+        var tail: Task<Void, Never>?
+        var inFlight: InFlightRunnerCommand?
+    }
+
+    /// Normal multi-second text entry, gestures, and app launches can make concurrent
+    /// observe/hierarchy requests wait successfully. A 3s limit would reject them;
+    /// the main-thread wedge this guards against lasted 45-51s, so >10s is pathological.
+    static let defaultBusyBudgetMs: Int64 = 10000
+    private let busyBudgetMs: Int64
+    private let monotonicNowMs: @Sendable () -> Int64
+    private let commandState = OSAllocatedUnfairLock<CommandState>(initialState: CommandState())
 
     // Queue-confined (accessed only on `queue`).
     private var listener: (any ServerListening)?
@@ -148,6 +180,10 @@ final class WebSocketServer: @unchecked Sendable {
         drainLogEvents: (@Sendable () -> [Data])? = nil,
         onClientPresenceChanged: (@Sendable (Bool) -> Void)? = nil,
         broadcastSink: (@Sendable (Data) -> Void)? = nil,
+        busyBudgetMs: Int64 = WebSocketServer.defaultBusyBudgetMs,
+        monotonicNowMs: @escaping @Sendable () -> Int64 = {
+            Int64(ProcessInfo.processInfo.systemUptime * 1000)
+        },
         listenerFactory: @escaping @Sendable (UInt16) throws -> any ServerListening = { port in
             let parameters = NWParameters.tcp
             parameters.allowLocalEndpointReuse = true
@@ -164,6 +200,8 @@ final class WebSocketServer: @unchecked Sendable {
         self.drainLogEvents = drainLogEvents
         self.onClientPresenceChanged = onClientPresenceChanged
         self.broadcastSink = broadcastSink
+        self.busyBudgetMs = busyBudgetMs
+        self.monotonicNowMs = monotonicNowMs
     }
 
     var isRunning: Bool {
@@ -304,11 +342,40 @@ final class WebSocketServer: @unchecked Sendable {
     /// (issue #5374) — while `await previous?.value` keeps commands strictly ordered.
     /// `responder` is captured strongly so it outlives the hop; enqueuing is non-blocking.
     func dispatchCommand(_ data: Data, responder: any WebSocketResponding) {
-        commandTail.withLock { tail in
-            let previous = tail
-            tail = Task { [weak self] in
+        // Network.framework delivers this call on the server queue, never the main actor.
+        // Parse only the wire envelope here; malformed requests still take the normal
+        // queued decode/error path. Keep send outside the lock and task-chain.
+        let envelope = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        let type = envelope?["type"] as? String ?? "unknown"
+        let requestId = envelope?["requestId"] as? String
+        let decision = commandState.withLock { state -> CommandAdmissionDecision in
+            let decision = admissionDecision(
+                inFlight: state.inFlight, nowMs: monotonicNowMs(), budgetMs: busyBudgetMs
+            )
+            guard decision == .queue else { return decision }
+            let previous = state.tail
+            state.tail = Task { [weak self] in
                 await previous?.value
-                await self?.handleMessage(data, responder: responder)
+                guard let self else { return }
+                self.commandState.withLock { state in
+                    state.inFlight = InFlightRunnerCommand(
+                        type: type, requestId: requestId, startedAtMs: self.monotonicNowMs()
+                    )
+                }
+                await self.handleMessage(data, responder: responder)
+                self.commandState.withLock { $0.inFlight = nil }
+            }
+            return .queue
+        }
+        if case let .busy(blockingType, elapsedMs) = decision {
+            let response = WebSocketResponse(
+                type: "error", requestId: requestId, success: false, error: "runner_busy",
+                blockingCommandType: blockingType, blockingElapsedMs: elapsedMs
+            )
+            do {
+                try responder.send(JSONEncoder().encode(response))
+            } catch {
+                print("[WebSocketServer] Failed to encode runner_busy response: \(error)")
             }
         }
     }
@@ -357,6 +424,8 @@ final class WebSocketServer: @unchecked Sendable {
                         success: false,
                         totalTimeMs: encoded.totalTimeMs,
                         error: error.errorDescription,
+                        blockingCommandType: original.blockingCommandType,
+                        blockingElapsedMs: original.blockingElapsedMs,
                         text: original.text,
                         perfTiming: encoded.perfTiming,
                         pinchPath: original.pinchPath
@@ -416,6 +485,8 @@ final class WebSocketServer: @unchecked Sendable {
                     success: wsResponse.success,
                     totalTimeMs: wsResponse.totalTimeMs ?? totalTimeMs,
                     error: wsResponse.error,
+                    blockingCommandType: wsResponse.blockingCommandType,
+                    blockingElapsedMs: wsResponse.blockingElapsedMs,
                     text: wsResponse.text,
                     perfTiming: perfTiming
                 )

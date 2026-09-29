@@ -6,6 +6,7 @@ import {
   getRequiredIosRunnerFeatureFlags,
 } from "../../../../src/features/observe/ios/IOSCtrlProxyClient";
 import { BootedDevice, HighlightShape } from "../../../../src/models";
+import { ActionableError } from "../../../../src/models/ActionableError";
 import { NetworkState } from "../../../../src/server/NetworkState";
 import { serverConfig } from "../../../../src/utils/ServerConfig";
 import {
@@ -2581,6 +2582,50 @@ describe("IOSCtrlProxyClient", function () {
         expect(result.totalTimeMs).toBe(3);
         expect(result.error).toContain("rejected request_press_back as unknown");
         expect(result.error).toContain("likely older than this daemon");
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("rejects runner_busy as an ActionableError without retrying an action", async function () {
+      const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer,
+      );
+
+      try {
+        const resultPromise = testClient.requestPressBack(5000);
+        const socket = await waitForSocket(getSocket);
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+        await waitForSentMessages(socket, 1);
+        const commands = commandPayloads(socket!);
+        expect(commands).toHaveLength(1);
+
+        socket!.simulateMessage(
+          JSON.stringify({
+            type: "error",
+            requestId: commands[0].requestId,
+            success: false,
+            error: "runner_busy",
+            blockingCommandType: "request_set_text",
+            blockingElapsedMs: 4200,
+          }),
+        );
+
+        try {
+          await resultPromise;
+          throw new Error("Expected runner_busy to reject");
+        } catch (error) {
+          expect(error).toBeInstanceOf(ActionableError);
+          expect((error as Error).message).toBe(
+            "iOS runner is busy executing request_set_text for 4.2s; retry shortly",
+          );
+        }
+        expect(commandPayloads(socket!)).toHaveLength(1);
       } finally {
         await testClient.close();
       }

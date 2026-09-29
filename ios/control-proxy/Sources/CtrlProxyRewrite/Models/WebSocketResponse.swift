@@ -9,6 +9,9 @@ public struct WebSocketResponse: Codable, Sendable {
     public let success: Bool?
     public let totalTimeMs: Int64?
     public let error: String?
+    /// Present only on a runner_busy error response.
+    public let blockingCommandType: String?
+    public let blockingElapsedMs: Int64?
     public let text: String?
     public let perfTiming: PerfTiming?
     /// Which mechanism performed a pinch: `"event-path"` (private synthesis, honors
@@ -23,6 +26,8 @@ public struct WebSocketResponse: Codable, Sendable {
         success: Bool? = nil,
         totalTimeMs: Int64? = nil,
         error: String? = nil,
+        blockingCommandType: String? = nil,
+        blockingElapsedMs: Int64? = nil,
         text: String? = nil,
         perfTiming: PerfTiming? = nil,
         pinchPath: String? = nil
@@ -33,6 +38,8 @@ public struct WebSocketResponse: Codable, Sendable {
         self.success = success
         self.totalTimeMs = totalTimeMs
         self.error = error
+        self.blockingCommandType = blockingCommandType
+        self.blockingElapsedMs = blockingElapsedMs
         self.text = text
         self.perfTiming = perfTiming
         self.pinchPath = pinchPath

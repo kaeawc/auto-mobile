@@ -2505,15 +2505,19 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     if (requestId) {
       const decoded = decodeCtrlProxyMessage(message);
       if (decoded) {
+        if (decoded.runnerBusy && decoded.errorMessage !== undefined) {
+          this.requestManager.reject(decoded.requestId, new ActionableError(decoded.errorMessage));
+          return;
+        }
         if (decoded.errorMessage !== undefined) {
           this.requestManager.resolveError(
             decoded.requestId,
             decoded.errorMessage,
             decoded.totalTimeMs ?? 0,
           );
-        } else {
-          this.requestManager.resolve(decoded.requestId, decoded.result);
+          return;
         }
+        this.requestManager.resolve(decoded.requestId, decoded.result);
         return;
       }
     }

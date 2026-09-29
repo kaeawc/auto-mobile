@@ -16,6 +16,89 @@ final class WebSocketServerBehaviorTests: XCTestCase {
 
     // MARK: - dispatch → handle → encode → send
 
+    func testDefaultBusyBudgetIsTenSeconds() {
+        XCTAssertEqual(WebSocketServer.defaultBusyBudgetMs, 10000)
+    }
+
+    func testAdmissionDecisionUsesElapsedInFlightTime() {
+        XCTAssertEqual(admissionDecision(inFlight: nil, nowMs: 5000, budgetMs: 3000), .queue)
+        let inFlight = InFlightRunnerCommand(type: "request_set_text", requestId: "blocker", startedAtMs: 1000)
+        XCTAssertEqual(admissionDecision(inFlight: inFlight, nowMs: 4000, budgetMs: 3000), .queue)
+        XCTAssertEqual(
+            admissionDecision(inFlight: inFlight, nowMs: 4001, budgetMs: 3000),
+            .busy(blockingType: "request_set_text", elapsedMs: 3001)
+        )
+    }
+
+    func testBlockedPerformerRejectsNewCommandBeforeItCanQueue() {
+        let started = expectation(description: "blocking performer started")
+        let busy = expectation(description: "queued request rejected promptly")
+        let finished = expectation(description: "blocking performer finished")
+        let release = DispatchSemaphore(value: 0)
+        let clock = FakeMonotonicClock()
+        let blocker = CapturingResponder(onEach: { finished.fulfill() })
+        let newcomer = CapturingResponder(onEach: { busy.fulfill() })
+        let server = makeTestServer(
+            handler: { request in
+                started.fulfill()
+                release.wait()
+                return WebSocketResponse.success(type: "set_text_result", requestId: request.requestId, totalTimeMs: 0)
+            },
+            busyBudgetMs: 3000,
+            monotonicNowMs: { clock.now() }
+        )
+
+        server.dispatchCommand(
+            Data(#"{"type":"request_set_text","requestId":"blocker","text":"hello"}"#.utf8),
+            responder: blocker
+        )
+        wait(for: [started], timeout: 2)
+        clock.advance(by: 3100)
+        server.dispatchCommand(
+            Data(#"{"type":"request_hierarchy","requestId":"waiting"}"#.utf8),
+            responder: newcomer
+        )
+        wait(for: [busy], timeout: 1)
+        let response = decodeObject(newcomer.captured[0])
+        XCTAssertEqual(response?["requestId"] as? String, "waiting")
+        XCTAssertEqual(response?["error"] as? String, "runner_busy")
+        XCTAssertEqual(response?["blockingCommandType"] as? String, "request_set_text")
+        XCTAssertEqual(response?["blockingElapsedMs"] as? Int, 3100)
+        XCTAssertTrue(blocker.captured.isEmpty, "the blocking command has not finished")
+        release.signal()
+        wait(for: [finished], timeout: 2)
+    }
+
+    func testCommandUnderBudgetKeepsSerialOrdering() {
+        let started = expectation(description: "first performer started")
+        let firstFinished = expectation(description: "first response")
+        let secondFinished = expectation(description: "second response")
+        let release = DispatchSemaphore(value: 0)
+        let clock = FakeMonotonicClock()
+        let first = CapturingResponder(onEach: { firstFinished.fulfill() })
+        let second = CapturingResponder(onEach: { secondFinished.fulfill() })
+        let server = makeTestServer(
+            handler: { request in
+                if request.requestId == "first" {
+                    started.fulfill()
+                    release.wait()
+                }
+                return WebSocketResponse.success(type: "screenshot", requestId: request.requestId, totalTimeMs: 0)
+            },
+            busyBudgetMs: 3000,
+            monotonicNowMs: { clock.now() }
+        )
+
+        server.dispatchCommand(Data(#"{"type":"request_screenshot","requestId":"first"}"#.utf8), responder: first)
+        wait(for: [started], timeout: 2)
+        clock.advance(by: 3000)
+        server.dispatchCommand(Data(#"{"type":"request_screenshot","requestId":"second"}"#.utf8), responder: second)
+        XCTAssertTrue(second.captured.isEmpty)
+        release.signal()
+        wait(for: [firstFinished, secondFinished], timeout: 2, enforceOrder: true)
+        XCTAssertEqual(decodeObject(second.captured[0])?["success"] as? Bool, true)
+    }
+
     func testDispatchCommandEncodesAndSendsResponse() {
         let exp = expectation(description: "response sent")
         let responder = CapturingResponder(onEach: { exp.fulfill() })

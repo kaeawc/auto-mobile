@@ -16,6 +16,24 @@ const msg = (partial: Partial<WebSocketMessage> & { type: string }): WebSocketMe
 });
 
 describe("decodeCtrlProxyMessage", () => {
+  test("decodes runner_busy with the blocking command and elapsed time", () => {
+    expect(
+      decodeCtrlProxyMessage(
+        msg({
+          type: "error",
+          error: "runner_busy",
+          blockingCommandType: "request_set_text",
+          blockingElapsedMs: 3100,
+        }),
+      ),
+    ).toEqual({
+      requestId: REQ,
+      runnerBusy: true,
+      errorMessage: "iOS runner is busy executing request_set_text for 3.1s; retry shortly",
+      totalTimeMs: 0,
+    });
+  });
+
   test("returns null for a push message with no requestId", () => {
     expect(decodeCtrlProxyMessage({ type: "hierarchy_update" })).toBeNull();
     expect(decodeCtrlProxyMessage({ type: "performance_update" })).toBeNull();

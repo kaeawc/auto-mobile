@@ -144,6 +144,9 @@ export interface WebSocketMessage {
   open?: boolean;
   totalTimeMs?: number;
   error?: string;
+  /** Typed runner_busy metadata for a command rejected before entering the serial queue. */
+  blockingCommandType?: string;
+  blockingElapsedMs?: number;
   perfTiming?: CtrlProxyPerfTiming | CtrlProxyPerfTiming[];
   previousOrientation?: string;
   currentOrientation?: string;

@@ -10,6 +10,8 @@ import { registerDeviceResourceTools } from "./deviceResourceTools";
 import { createProvisionDeviceHandler } from "./deviceToolsProvisioning";
 import { createAcquisitionHandlers } from "./deviceToolsAcquisition";
 import { createStartDeviceHandlers } from "./deviceToolsStartDevice";
+import { createLifecycleHandlers } from "./deviceToolsLifecycle";
+import { createListingHandlers } from "./deviceToolsListing";
 import {
   DefaultDeviceResourceController,
   type DeviceResourceController,
@@ -25,7 +27,6 @@ import {
   MultiPlatformDeviceManager,
   PlatformDeviceManager,
 } from "../utils/deviceUtils";
-import { type DiscoverySource, sourcesForPlatform } from "../utils/discoverySource";
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import { ActionableError, BootedDevice, DeviceInfo, Platform, SomePlatform } from "../models";
 import type { FormFactor } from "../models/DeviceMatchCriteria";
@@ -38,10 +39,8 @@ import {
   notifyDeviceImageResourcesUpdated,
 } from "./deviceImageResources";
 import {
-  createConfiguredInventoryContract,
   configuredImageForBootedDevice,
   configuredImagesByStableId,
-  projectConfiguredDeviceInventory,
   type StableConfiguredDeviceImage,
 } from "../utils/configuredDeviceInventory";
 import { AvdManagerService } from "../utils/android-cmdline-tools/AvdManagerService";
@@ -49,7 +48,6 @@ import type { AvdManager } from "../utils/android-cmdline-tools/interfaces/AvdMa
 import type { AvdInfo } from "../utils/android-cmdline-tools/avdmanager";
 import {
   describeDevice,
-  projectConfiguredImage,
   projectListDevicesEntry,
   listDevicesEntrySchema,
   provisionedDeviceSchema,
@@ -165,7 +163,7 @@ import {
   type VirtualDeviceLifecycleLease,
   type VirtualDeviceLifecycleOperation,
 } from "../utils/virtualDeviceLifecycleCoordinator";
-import { DeviceTeardownService, type DeviceTeardownPhase } from "../utils/deviceTeardownService";
+import { DeviceTeardownService } from "../utils/deviceTeardownService";
 import { DeviceShutdownService } from "../utils/deviceShutdownService";
 import { fixedBackoff } from "../utils/Backoff";
 import { hasMutableDisplayName } from "../utils/ios-cmdline-tools/iosDeviceType";
@@ -706,7 +704,7 @@ export const DEVICE_ALREADY_STOPPED_ERROR_CODE = "device_already_stopped";
 // A successful platform shutdown command only confirms that the request was
 // accepted. Keep the public killDevice result coupled to the observable device
 // lifecycle, while bounding the wait so a wedged platform command is actionable.
-const DEVICE_SHUTDOWN_TIMEOUT_MS = 30_000;
+export const DEVICE_SHUTDOWN_TIMEOUT_MS = 30_000;
 const DEVICE_SHUTDOWN_POLL_INTERVAL_MS = 1_000;
 const DEVICE_SHUTDOWN_POST_RELEASE_RECHECK_TIMEOUT_MS = 1_000;
 const DEVICE_SHUTDOWN_DISCOVERY_RECHECK_BACKOFF = fixedBackoff(1_000);
@@ -798,7 +796,7 @@ export function createToolErrorResponse(
   };
 }
 
-function createKillDeviceResponse(
+export function createKillDeviceResponse(
   args: KillDeviceArgs,
   timing: unknown,
   alreadyStoppedMessage?: string,
@@ -1027,7 +1025,7 @@ function androidDeviceIdentityPayload(
   };
 }
 
-function listDevicePayloads(
+export function listDevicePayloads(
   booted: BootedDevice[],
   devicePool: DevicePool | undefined,
   configuredImages: ReadonlyMap<string, StableConfiguredDeviceImage>,
@@ -1112,7 +1110,7 @@ function initializedDeviceSessionUuid(deviceId: string): string | undefined {
   return daemonState.getDeviceSessionRegistry().getByDeviceId(deviceId)?.deviceSessionUuid;
 }
 
-async function configuredImagesForBootedDevices(
+export async function configuredImagesForBootedDevices(
   deviceManager: PlatformDeviceManager,
   avdManager: Pick<AvdManager, "listDeviceImages">,
   booted: readonly BootedDevice[],
@@ -1184,7 +1182,7 @@ export function acceptancePresentationOrder(
   return order === "forward" || order === "reverse" ? order : undefined;
 }
 
-function detailedDiscoveryOptions(
+export function detailedDiscoveryOptions(
   presentationOrder: "forward" | "reverse" | undefined,
 ): BootedDeviceDiscoveryOptions {
   return presentationOrder === undefined ? {} : { presentationOrder };
@@ -1602,7 +1600,7 @@ async function stopAndroidCtrlProxyBeforeShutdown(
   return observerState;
 }
 
-function shutdownTimeoutError(
+export function shutdownTimeoutError(
   device: BootedDevice,
   detail: string,
   timeoutMs = DEVICE_SHUTDOWN_TIMEOUT_MS,
@@ -2962,7 +2960,7 @@ interface ShutdownResult {
 
 const deviceShutdownService = new DeviceShutdownService();
 
-async function shutdownDevice(
+export async function shutdownDevice(
   context: ShutdownEntryContext,
   dependencies: DeviceToolsDependencies,
   operationName: string,
@@ -3156,7 +3154,7 @@ async function shutdownDevice(
 
 type TeardownFailurePhase = "precondition" | "stop" | "destroy" | "verification";
 
-type TeardownResolvedTarget =
+export type TeardownResolvedTarget =
   | {
       device: DeviceInfo;
       wasBooted: false;
@@ -3177,7 +3175,7 @@ function isVirtualAndroidDevice(device: BootedDevice): boolean {
   return device.platform === "android" && isAndroidEmulatorSerial(device.deviceId);
 }
 
-function resolveKillDeviceStableTarget(
+export function resolveKillDeviceStableTarget(
   device: BootedDevice,
   devicePool: DevicePool | undefined,
 ): StableDeviceTarget | undefined {
@@ -3357,7 +3355,7 @@ function pooledAvdCaptureRequiringConfirmation(
  * The same capture, paired with the caller's `force` flag, in the shape
  * `shutdownDevice` carries into its execute step (#6864).
  */
-function pooledAvdKillIdentity(
+export function pooledAvdKillIdentity(
   result: PooledAvdCaptureResult,
   force: boolean,
 ): PooledAvdKillIdentity {
@@ -3370,7 +3368,7 @@ function pooledAvdKillIdentity(
  * unwrapped, and its own type lets `deleteDevice` report it as
  * `target_identity_unresolved` instead of a generic operation failure.
  */
-class PooledAvdIdentityError extends ActionableError {}
+export class PooledAvdIdentityError extends ActionableError {}
 
 /**
  * The caller's own deadline for the destructive action, which the verification
@@ -3395,7 +3393,7 @@ interface PooledAvdNameProbeBudget {
  * strictly more actionable than the shutdown timeout that would otherwise
  * follow.
  */
-function capturePooledAvdIdentity(
+export function capturePooledAvdIdentity(
   device: BootedDevice,
   devicePool: DevicePool | undefined,
   budget: PooledAvdNameProbeBudget,
@@ -3534,7 +3532,10 @@ async function confirmPooledAvdIdentity(
     : { kind: "refusal", refusal: { reason: "conflict", pooledAvdName, runtimeAvdName } };
 }
 
-function pooledAvdNameRefusalMessage(device: BootedDevice, refusal: PooledAvdNameRefusal): string {
+export function pooledAvdNameRefusalMessage(
+  device: BootedDevice,
+  refusal: PooledAvdNameRefusal,
+): string {
   if (refusal.reason === "moved") {
     return (
       `Refusing to act on Android emulator '${device.deviceId}': this daemon had it recorded as ` +
@@ -3633,7 +3634,7 @@ function matchesTeardownStableId(
     : device.deviceId === stableId;
 }
 
-function teardownDeadlineDevice(args: TeardownDeviceArgs): BootedDevice {
+export function teardownDeadlineDevice(args: TeardownDeviceArgs): BootedDevice {
   return {
     platform: args.target.platform,
     name: args.target.stableId,
@@ -3665,7 +3666,7 @@ function createTeardownResponse(
   });
 }
 
-function createTeardownFailureResponse(
+export function createTeardownFailureResponse(
   args: TeardownDeviceArgs,
   phase: TeardownFailurePhase,
   code: string,
@@ -3955,7 +3956,9 @@ export function isTeardownFailure(response: TeardownToolResponse): boolean {
 
 let deviceTeardownService: DeviceTeardownService | undefined;
 
-function getDeviceTeardownService(dependencies: DeviceToolsDependencies): DeviceTeardownService {
+export function getDeviceTeardownService(
+  dependencies: DeviceToolsDependencies,
+): DeviceTeardownService {
   deviceTeardownService ??= new DeviceTeardownService({
     lifecycleCoordinator: dependencies.lifecycleCoordinator,
     operationStore: dependencies.teardownDeviceOperationStoreFactory(),
@@ -3967,7 +3970,7 @@ function getDeviceTeardownService(dependencies: DeviceToolsDependencies): Device
 
 type TeardownResolution = { target: TeardownResolvedTarget } | { response: TeardownToolResponse };
 
-interface TeardownContext {
+export interface TeardownContext {
   args: TeardownDeviceArgs;
   dependencies: DeviceToolsDependencies;
   deviceManager: PlatformDeviceManager;
@@ -4022,7 +4025,7 @@ function captureTeardownInitialAndroidScan(
   };
 }
 
-async function stopSegmentedVideoRecordingsBeforeDestroy(
+export async function stopSegmentedVideoRecordingsBeforeDestroy(
   context: TeardownContext,
   target: TeardownResolvedTarget,
 ): Promise<void> {
@@ -4217,7 +4220,7 @@ async function evictTeardownManagers(context: TeardownContext, runtimeId?: strin
   }
 }
 
-async function finalizeTeardownEviction(
+export async function finalizeTeardownEviction(
   context: TeardownContext,
   target: TeardownResolvedTarget,
   androidManager: AndroidCtrlProxyManager | undefined,
@@ -4394,7 +4397,7 @@ async function rebindIosTeardownLease(
   });
 }
 
-async function resolveTeardownTarget(context: TeardownContext): Promise<TeardownResolution> {
+export async function resolveTeardownTarget(context: TeardownContext): Promise<TeardownResolution> {
   const daemonState = DaemonState.getInstance();
   const devicePool = daemonState.isInitialized() ? daemonState.getDevicePool() : undefined;
   const booted = await readTeardownTargetDiscovery(context, devicePool);
@@ -4602,7 +4605,7 @@ async function retireTeardownPooledOwnership(
   }
 }
 
-async function retireStoppedTeardownOwnership(
+export async function retireStoppedTeardownOwnership(
   context: TeardownContext,
   target: TeardownResolvedTarget,
 ): Promise<void> {
@@ -4639,7 +4642,7 @@ async function retireAbsentTeardownOwnership(context: TeardownContext): Promise<
   }
 }
 
-async function destroyTeardownTarget(
+export async function destroyTeardownTarget(
   context: TeardownContext,
   target: TeardownResolvedTarget,
   retainStableLifecycleUntil: (operation: Promise<unknown>) => void,
@@ -4693,7 +4696,7 @@ async function destroyTeardownTarget(
   }
 }
 
-async function checkForRestartedTeardownTarget(
+export async function checkForRestartedTeardownTarget(
   context: TeardownContext,
   target: TeardownResolvedTarget,
   phase: "stop" | "verification",
@@ -4995,7 +4998,7 @@ function clearDeletedAndroidAvdRebootBudget(target: TeardownResolvedTarget): voi
   }
 }
 
-async function verifyTeardownAbsence(
+export async function verifyTeardownAbsence(
   context: TeardownContext,
   target: TeardownResolvedTarget,
   stop: "accepted" | "not_required",
@@ -6753,7 +6756,7 @@ export async function resolveAndroidStartStableDeviceLifecycleTarget(
   return { platform: "android", stableId: [...stableIds][0] };
 }
 
-function availableDeviceResourceNote() {
+export function availableDeviceResourceNote() {
   const listedResourceUris = new Set(
     ResourceRegistry.getResourceDefinitions().map((resource) => resource.uri),
   );
@@ -6778,7 +6781,7 @@ function availableDeviceResourceNote() {
   };
 }
 
-async function androidProvenanceByAvdName(
+export async function androidProvenanceByAvdName(
   avdManager: Pick<AvdManager, "listDeviceImages">,
   timer: Timer,
 ): Promise<ReadonlyMap<string, AvdInfo>> {
@@ -6815,120 +6818,7 @@ export const acquisitionLifecycleTimeoutError = (
   );
 
 export function registerDeviceTools() {
-  // List AVDs handler
-  const listDeviceImagesHandler = async (args: ListDeviceImagesArgs) => {
-    try {
-      const deps = getDeviceToolsDependencies();
-      const deviceUtils = deps.deviceManagerFactory();
-      const discovery = await deviceUtils.getDeviceImagesDetailed(args.platform, {
-        bypassIosDeviceListCache: args.platform === "ios",
-      });
-      const projection = projectConfiguredDeviceInventory(args.platform, discovery);
-      const configuredInventory = createConfiguredInventoryContract([args.platform], {
-        [args.platform]: projection.observation,
-      });
-      const androidProvenance =
-        args.platform === "android"
-          ? await androidProvenanceByAvdName(deps.avdManagerFactory(), deps.timer)
-          : undefined;
-      const images = projection.sourceImages.map((image) => {
-        const description = describeDevice({
-          kind: "image",
-          image,
-          androidProvenance: androidProvenance?.get(image.name),
-        });
-        return projectConfiguredImage(description);
-      });
-
-      return createStructuredToolResponse({
-        message: `Found ${images.length} configured ${args.platform} device images`,
-        images,
-        count: images.length,
-        platform: args.platform,
-        configuredInventory,
-      });
-    } catch (error) {
-      throw new ActionableError(`Failed to list ${args.platform} AVDs: ${error}`);
-    }
-  };
-
-  const listDevicesHandler = async (args: ListDevicesArgs & Record<string, unknown>) => {
-    // #5870: a tool named `listDevices` returns the devices. The data is right
-    // here — enumerate booted devices directly instead of forcing a modality
-    // switch to resources. The resource pointers (which also cover not-yet-booted
-    // images and richer per-device detail) survive as a `note`.
-    const platform: SomePlatform = args.platform ?? "either";
-    const presentationOrder = acceptancePresentationOrder(args);
-    const requestedPlatforms: Platform[] = platform === "either" ? ["android", "ios"] : [platform];
-    const deps = getDeviceToolsDependencies();
-    const deviceManager = deps.deviceManagerFactory();
-    let booted: BootedDevice[] = [];
-    // #5893 item 4: `getBootedDevices` collapses a failed per-platform probe to
-    // `[]`, so a transient tooling failure is indistinguishable from a genuinely
-    // empty inventory. Use the detailed contract, which reports which platforms
-    // completed, and surface an incomplete/error marker so the two are distinct.
-    let succeededPlatforms = new Set<Platform>(requestedPlatforms);
-    // #5918: iOS is discovered by two independent sources (simctl + devicectl).
-    // `succeededPlatforms.ios` tracks only the simulator source, so a devicectl
-    // failure leaves the platform "succeeded" while physical-iOS discovery is
-    // actually incomplete. Derive completeness from the finer per-source set,
-    // falling back to the platform aggregate for producers that predate #5683
-    // (which return no `succeededSources`).
-    let succeededSources: Set<DiscoverySource> | undefined;
-    let discoveryErrors: BootedDeviceDiscovery["discoveryErrors"];
-    try {
-      const discovery = await deviceManager.getBootedDevicesDetailed(
-        platform,
-        detailedDiscoveryOptions(presentationOrder),
-      );
-      // FUNNEL 1: listDevices publishes each entry's pool-derived label/epoch
-      // through the same join the booted-devices resource uses (#6863 review).
-      await reconcileDiscoveryObservation(discovery.devices, "listDevices");
-      booted = discovery.devices;
-      succeededPlatforms = discovery.succeededPlatforms;
-      succeededSources = discovery.succeededSources;
-      discoveryErrors = discovery.discoveryErrors;
-    } catch (error) {
-      // Discovery is best-effort — a partial/failed probe still returns the
-      // resource guidance rather than failing the whole call. A thrown error
-      // means no platform (and thus no source) completed.
-      logger.warn(`listDevices booted-device discovery failed: ${errorMessage(error)}`, error);
-      succeededPlatforms = new Set<Platform>();
-      succeededSources = new Set<DiscoverySource>();
-    }
-
-    const failedPlatforms = requestedPlatforms.filter((p) => !succeededPlatforms.has(p));
-    const failedSources = succeededSources
-      ? requestedPlatforms
-          .flatMap((p) => sourcesForPlatform(p))
-          .filter((source) => !succeededSources!.has(source))
-      : undefined;
-    const discovery = {
-      complete: failedSources ? failedSources.length === 0 : failedPlatforms.length === 0,
-      failedPlatforms,
-      ...(failedSources && failedSources.length > 0 ? { failedSources } : {}),
-      ...(discoveryErrors && Object.keys(discoveryErrors).length > 0
-        ? { errors: discoveryErrors }
-        : {}),
-    };
-
-    const configuredImages = await configuredImagesForBootedDevices(
-      deviceManager,
-      deps.avdManagerFactory(),
-      booted,
-      deps.timer,
-    );
-    const devices = listDevicePayloads(booted, initializedDevicePool(), configuredImages);
-    const platformFilter = args.platform ? ` (${args.platform} only)` : "";
-
-    return createStructuredToolResponse({
-      message: `Found ${devices.length} booted device${devices.length === 1 ? "" : "s"}${platformFilter}`,
-      devices,
-      count: devices.length,
-      discovery,
-      note: availableDeviceResourceNote(),
-    });
-  };
+  const { listDeviceImagesHandler, listDevicesHandler } = createListingHandlers();
 
   let startDeviceHandlers: ReturnType<typeof createStartDeviceHandlers> | undefined = undefined;
   const acquisitionHandlers = createAcquisitionHandlers({
@@ -6946,264 +6836,7 @@ export function registerDeviceTools() {
   } = startDeviceHandlers;
   const { getAndroidHandler, getAppleHandler } = acquisitionHandlers;
 
-  const killDeviceHandler = async (
-    args: KillDeviceArgs,
-    _progress?: ProgressCallback,
-    abortSignal?: AbortSignal,
-  ) => {
-    const deps = getDeviceToolsDependencies();
-    const requestAbortSignal = abortSignal ?? getAbortSignal();
-    const deadlineMs = deps.timer.now() + DEVICE_SHUTDOWN_TIMEOUT_MS;
-    const daemonState = DaemonState.getInstance();
-    const devicePool = daemonState.isInitialized() ? daemonState.getDevicePool() : undefined;
-    // Preflight: if this target's AVD name comes from the pool rather than from
-    // the runtime, pin the label to its epoch. The runtime is made to confirm it
-    // immediately before the platform kill, not here (#6863 review).
-    const pooledAvdCapture = capturePooledAvdIdentity(args.device, devicePool, {
-      timer: deps.timer,
-      deadlineMs,
-      signal: requestAbortSignal,
-    });
-    if (pooledAvdCapture.kind === "refusal") {
-      throw new PooledAvdIdentityError(
-        pooledAvdNameRefusalMessage(args.device, pooledAvdCapture.refusal),
-      );
-    }
-    const stableTarget = resolveKillDeviceStableTarget(args.device, devicePool);
-    const lifecycleLease = stableTarget
-      ? await reserveStableDeviceLifecycle(
-          stableTarget,
-          args.device,
-          deps.timer,
-          deadlineMs,
-          requestAbortSignal,
-          undefined,
-          "shutdown",
-          deps.lifecycleCoordinator,
-        )
-      : await deps.lifecycleCoordinator.reserve(
-          { kind: "selector", platform: args.device.platform, selector: args.device.deviceId },
-          { operation: "shutdown", deadlineMs, signal: requestAbortSignal },
-        );
-    const signals = [requestAbortSignal, lifecycleLease.signal].filter(
-      (signal): signal is AbortSignal => signal !== undefined,
-    );
-    let retainLifecycleLease = false;
-    const retainLifecycleUntil = (operation: Promise<unknown>): void => {
-      retainLifecycleLease = true;
-      void operation.then(
-        () => lifecycleLease.release(),
-        () => lifecycleLease.release(),
-      );
-    };
-    try {
-      const result = await shutdownDevice(
-        {
-          device: args.device,
-          timer: deps.timer,
-          deadlineMs,
-          requestAbortSignal: signals.length === 1 ? signals[0] : AbortSignal.any(signals),
-          stopPerformanceMonitoring: deps.stopPerformanceMonitoring,
-        },
-        deps,
-        "killDevice",
-        {
-          strictDeadline: false,
-          timeoutMs: DEVICE_SHUTDOWN_TIMEOUT_MS,
-          retainLifecycleUntil,
-          pooledAvdIdentity: pooledAvdKillIdentity(pooledAvdCapture, args.force ?? false),
-        },
-      );
-      return createKillDeviceResponse(args, result.timing, result.alreadyStoppedMessage);
-    } finally {
-      if (!retainLifecycleLease) {
-        lifecycleLease.release();
-      }
-    }
-  };
-
-  async function executeDeleteDevice(
-    args: TeardownDeviceArgs,
-    deps: DeviceToolsDependencies,
-    callerSignal: AbortSignal | undefined,
-    teardownService: DeviceTeardownService,
-    lifecycleLease?: VirtualDeviceLifecycleLease,
-  ): Promise<TeardownToolResponse> {
-    const timeoutMs = args.timeoutMs ?? DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS;
-    const deadlineMs = deps.timer.now() + timeoutMs;
-    type TeardownState = {
-      context: TeardownContext;
-      target: TeardownResolvedTarget;
-      androidManager?: AndroidCtrlProxyManager;
-      earlyResponse?: TeardownToolResponse;
-    };
-    try {
-      return await teardownService.teardown<
-        TeardownState,
-        "accepted" | "not_required",
-        TeardownToolResponse
-      >(
-        {
-          operationId: args.operationId,
-          fingerprint: teardownOperationFingerprint(args),
-          identity: args.target,
-          deadlineMs,
-          callerSignal,
-          cancellationPolicy: args.cancellationPolicy ? "cancel-on-caller-abort" : undefined,
-          lifecycleLease,
-        },
-        {
-          resolve: async (requestAbortSignal, lifecycleLease) => {
-            const context: TeardownContext = {
-              args,
-              dependencies: deps,
-              deviceManager: deps.deviceManagerFactory(),
-              requestAbortSignal,
-              deadlineDevice: teardownDeadlineDevice(args),
-              deadlineMs,
-              timeoutMs,
-              cancelOnRequestAbort: args.cancellationPolicy === "cancel-on-request-abort",
-              lifecycleLease,
-              mode: args.force === true ? "serial-only" : "named",
-              initialScan: { serials: new Set(), pooledEntries: [] },
-            };
-            const resolution = await resolveTeardownTarget(context);
-            if ("response" in resolution) {
-              return { response: resolution.response };
-            }
-            const runtime = resolution.target.wasBooted
-              ? resolution.target.bootedDevice
-              : undefined;
-            const androidManager =
-              runtime?.platform === "android"
-                ? AndroidCtrlProxyManager.getExistingInstance(runtime.deviceId)
-                : undefined;
-            return { target: { context, target: resolution.target, androidManager } };
-          },
-          stop: async (state, requestAbortSignal, retainLeaseUntil) => {
-            const { context, target } = state;
-            let stop: "accepted" | "not_required" = "not_required";
-            if (target.wasBooted) {
-              const stopped = await shutdownDevice(
-                {
-                  device: target.bootedDevice,
-                  timer: deps.timer,
-                  deadlineMs: context.deadlineMs,
-                  requestAbortSignal,
-                  stopPerformanceMonitoring: deps.stopPerformanceMonitoring,
-                },
-                deps,
-                "deleteDevice",
-                {
-                  strictDeadline: true,
-                  timeoutMs: context.timeoutMs,
-                  retainLifecycleUntil: retainLeaseUntil,
-                  pooledAvdIdentity: {
-                    capture: target.pooledAvdCapture,
-                    force: args.force ?? false,
-                  },
-                },
-              );
-              stop = stopped.alreadyStoppedMessage ? "not_required" : "accepted";
-            } else {
-              await stopSegmentedVideoRecordingsBeforeDestroy(context, target);
-              await retireStoppedTeardownOwnership(context, target);
-            }
-
-            const restarted = await checkForRestartedTeardownTarget(context, target, "stop");
-            if (restarted) {
-              state.earlyResponse = restarted;
-            }
-            return stop;
-          },
-          destroy: async (state, _requestAbortSignal, retainLeaseUntil, markDestructionStarted) => {
-            if (state.earlyResponse) {
-              return;
-            }
-            const { context, target } = state;
-            await destroyTeardownTarget(
-              context,
-              target,
-              retainLeaseUntil,
-              markDestructionStarted,
-              () => {
-                void finalizeTeardownEviction(context, target, state.androidManager);
-              },
-            );
-            await finalizeTeardownEviction(context, target, state.androidManager);
-          },
-          verify: async (state, stop) => {
-            if (state.earlyResponse) {
-              return state.earlyResponse;
-            }
-            return await verifyTeardownAbsence(state.context, state.target, stop);
-          },
-          conflict: () =>
-            createTeardownFailureResponse(
-              args,
-              "precondition",
-              "operation_id_conflict",
-              "The operation ID has already been used with different teardown arguments.",
-            ),
-          failure: (phase: DeviceTeardownPhase, error, state) => {
-            const effectiveError =
-              phase === "precondition" &&
-              error instanceof Error &&
-              error.message.startsWith("Timed out waiting to teardown")
-                ? shutdownTimeoutError(
-                    teardownDeadlineDevice(args),
-                    "waiting for stable device lifecycle reservation",
-                    timeoutMs,
-                  )
-                : error;
-            logger.warn(
-              `[DeviceTools] teardown operation ${args.operationId} failed during ${phase} ` +
-                `for ${args.target.platform}:${args.target.stableId}: ${effectiveError}`,
-              effectiveError,
-            );
-            return createTeardownFailureResponse(
-              args,
-              phase,
-              // The last-moment identity check refuses a target this daemon
-              // cannot tie to the runtime; that is an identity outcome, not a
-              // generic operation failure (#6863 review).
-              effectiveError instanceof PooledAvdIdentityError
-                ? "target_identity_unresolved"
-                : "operation_failed",
-              String(effectiveError instanceof Error ? effectiveError.message : effectiveError),
-              state?.target.device,
-            );
-          },
-          isFailure: isTeardownFailure,
-        },
-      );
-    } catch (error) {
-      // Caller cancellation ends only this wait; the accepted teardown continues independently.
-      logger.debug(
-        `[DeviceTools] teardown caller stopped waiting for ${args.operationId}: ${String(error instanceof Error ? error.message : error)}`,
-      );
-      return createTeardownFailureResponse(
-        args,
-        "precondition",
-        "operation_cancelled",
-        String(error instanceof Error ? error.message : error),
-      );
-    }
-  }
-
-  const deleteDeviceHandler = async (
-    args: TeardownDeviceArgs,
-    _progress?: ProgressCallback,
-    abortSignal?: AbortSignal,
-  ) => {
-    const deps = getDeviceToolsDependencies();
-    return await executeDeleteDevice(
-      args,
-      deps,
-      abortSignal ?? getAbortSignal(),
-      getDeviceTeardownService(deps),
-    );
-  };
+  const { killDeviceHandler, executeDeleteDevice, deleteDeviceHandler } = createLifecycleHandlers();
 
   const provisionDeviceHandler = createProvisionDeviceHandler({
     bindBootedDeviceSession,

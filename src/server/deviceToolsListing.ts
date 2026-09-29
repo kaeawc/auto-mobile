@@ -1,0 +1,142 @@
+import { ActionableError, type BootedDevice, type Platform, type SomePlatform } from "../models";
+import type { BootedDeviceDiscovery } from "../utils/deviceUtils";
+import { type DiscoverySource, sourcesForPlatform } from "../utils/discoverySource";
+import {
+  createConfiguredInventoryContract,
+  projectConfiguredDeviceInventory,
+} from "../utils/configuredDeviceInventory";
+import { describeDevice, projectConfiguredImage } from "./deviceDescription";
+import { createStructuredToolResponse } from "../utils/toolUtils";
+import { reconcileDiscoveryObservation } from "../daemon/discoveryReconcile";
+import { logger } from "../utils/logger";
+import { errorMessage } from "../utils/describeUnknownError";
+import {
+  acceptancePresentationOrder,
+  androidProvenanceByAvdName,
+  availableDeviceResourceNote,
+  configuredImagesForBootedDevices,
+  detailedDiscoveryOptions,
+  getDeviceToolsDependencies,
+  initializedDevicePool,
+  listDevicePayloads,
+} from "./deviceTools";
+import type { ListDeviceImagesArgs, ListDevicesArgs } from "./deviceTools";
+
+export function createListingHandlers() {
+  // List AVDs handler
+  const listDeviceImagesHandler = async (args: ListDeviceImagesArgs) => {
+    try {
+      const deps = getDeviceToolsDependencies();
+      const deviceUtils = deps.deviceManagerFactory();
+      const discovery = await deviceUtils.getDeviceImagesDetailed(args.platform, {
+        bypassIosDeviceListCache: args.platform === "ios",
+      });
+      const projection = projectConfiguredDeviceInventory(args.platform, discovery);
+      const configuredInventory = createConfiguredInventoryContract([args.platform], {
+        [args.platform]: projection.observation,
+      });
+      const androidProvenance =
+        args.platform === "android"
+          ? await androidProvenanceByAvdName(deps.avdManagerFactory(), deps.timer)
+          : undefined;
+      const images = projection.sourceImages.map((image) => {
+        const description = describeDevice({
+          kind: "image",
+          image,
+          androidProvenance: androidProvenance?.get(image.name),
+        });
+        return projectConfiguredImage(description);
+      });
+
+      return createStructuredToolResponse({
+        message: `Found ${images.length} configured ${args.platform} device images`,
+        images,
+        count: images.length,
+        platform: args.platform,
+        configuredInventory,
+      });
+    } catch (error) {
+      throw new ActionableError(`Failed to list ${args.platform} AVDs: ${error}`);
+    }
+  };
+
+  const listDevicesHandler = async (args: ListDevicesArgs & Record<string, unknown>) => {
+    // #5870: a tool named `listDevices` returns the devices. The data is right
+    // here — enumerate booted devices directly instead of forcing a modality
+    // switch to resources. The resource pointers (which also cover not-yet-booted
+    // images and richer per-device detail) survive as a `note`.
+    const platform: SomePlatform = args.platform ?? "either";
+    const presentationOrder = acceptancePresentationOrder(args);
+    const requestedPlatforms: Platform[] = platform === "either" ? ["android", "ios"] : [platform];
+    const deps = getDeviceToolsDependencies();
+    const deviceManager = deps.deviceManagerFactory();
+    let booted: BootedDevice[] = [];
+    // #5893 item 4: `getBootedDevices` collapses a failed per-platform probe to
+    // `[]`, so a transient tooling failure is indistinguishable from a genuinely
+    // empty inventory. Use the detailed contract, which reports which platforms
+    // completed, and surface an incomplete/error marker so the two are distinct.
+    let succeededPlatforms = new Set<Platform>(requestedPlatforms);
+    // #5918: iOS is discovered by two independent sources (simctl + devicectl).
+    // `succeededPlatforms.ios` tracks only the simulator source, so a devicectl
+    // failure leaves the platform "succeeded" while physical-iOS discovery is
+    // actually incomplete. Derive completeness from the finer per-source set,
+    // falling back to the platform aggregate for producers that predate #5683
+    // (which return no `succeededSources`).
+    let succeededSources: Set<DiscoverySource> | undefined;
+    let discoveryErrors: BootedDeviceDiscovery["discoveryErrors"];
+    try {
+      const discovery = await deviceManager.getBootedDevicesDetailed(
+        platform,
+        detailedDiscoveryOptions(presentationOrder),
+      );
+      // FUNNEL 1: listDevices publishes each entry's pool-derived label/epoch
+      // through the same join the booted-devices resource uses (#6863 review).
+      await reconcileDiscoveryObservation(discovery.devices, "listDevices");
+      booted = discovery.devices;
+      succeededPlatforms = discovery.succeededPlatforms;
+      succeededSources = discovery.succeededSources;
+      discoveryErrors = discovery.discoveryErrors;
+    } catch (error) {
+      // Discovery is best-effort — a partial/failed probe still returns the
+      // resource guidance rather than failing the whole call. A thrown error
+      // means no platform (and thus no source) completed.
+      logger.warn(`listDevices booted-device discovery failed: ${errorMessage(error)}`, error);
+      succeededPlatforms = new Set<Platform>();
+      succeededSources = new Set<DiscoverySource>();
+    }
+
+    const failedPlatforms = requestedPlatforms.filter((p) => !succeededPlatforms.has(p));
+    const failedSources = succeededSources
+      ? requestedPlatforms
+          .flatMap((p) => sourcesForPlatform(p))
+          .filter((source) => !succeededSources!.has(source))
+      : undefined;
+    const discovery = {
+      complete: failedSources ? failedSources.length === 0 : failedPlatforms.length === 0,
+      failedPlatforms,
+      ...(failedSources && failedSources.length > 0 ? { failedSources } : {}),
+      ...(discoveryErrors && Object.keys(discoveryErrors).length > 0
+        ? { errors: discoveryErrors }
+        : {}),
+    };
+
+    const configuredImages = await configuredImagesForBootedDevices(
+      deviceManager,
+      deps.avdManagerFactory(),
+      booted,
+      deps.timer,
+    );
+    const devices = listDevicePayloads(booted, initializedDevicePool(), configuredImages);
+    const platformFilter = args.platform ? ` (${args.platform} only)` : "";
+
+    return createStructuredToolResponse({
+      message: `Found ${devices.length} booted device${devices.length === 1 ? "" : "s"}${platformFilter}`,
+      devices,
+      count: devices.length,
+      discovery,
+      note: availableDeviceResourceNote(),
+    });
+  };
+
+  return { listDeviceImagesHandler, listDevicesHandler };
+}

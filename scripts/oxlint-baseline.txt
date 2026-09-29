@@ -122,7 +122,7 @@
 1	src/server/deviceSnapshotManager.ts	eslint(complexity)
 1	src/server/deviceToolsAcquisition.ts	auto-mobile(no-caught-error-interpolation)
 1	src/server/deviceTools.ts	auto-mobile(catch-convention)
-1	src/server/deviceTools.ts	auto-mobile(no-caught-error-interpolation)
+1	src/server/deviceToolsListing.ts	auto-mobile(no-caught-error-interpolation)
 1	src/server/finalizeToolResponse.ts	eslint(max-depth)
 1	src/server/highlightTools.ts	eslint(complexity)
 1	src/server/index.ts	eslint(complexity)

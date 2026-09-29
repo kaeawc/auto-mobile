@@ -16,31 +16,56 @@ import XCTest
 final class ElementLocatorTests: XCTestCase {
     // MARK: - Widget snapshot coordinates (#8047)
 
-    func testScreenFrame_translatesWidgetImageIntoEnclosingScreenFrame() {
-        let widget = CGRect(x: 24, y: 88, width: 168, height: 191)
-        let image = CGRect(x: 0, y: 0, width: 164, height: 164)
+    func testScreenFrame_switchesAtUnnamedWidgetContainerAndOffsetsItsLeaf() {
+        let widget = CGRect(x: 26, y: 89, width: 164, height: 165)
+        let mapsView = (identifier: "", text: "Maps", frame: CGRect(x: 0, y: 0, width: 164, height: 164))
+        let mapImage = (identifier: "NearbyWidgetMapImage", frame: CGRect(x: 0, y: 0, width: 164, height: 164))
+        let ancestor = ElementLocator.screenFrame(widget, enclosingFrame: nil, coordinateOffset: .zero)
+        // The unnamed Maps UIView resets coordinates before the identified leaf.
+        let maps = ElementLocator.screenFrame(
+            mapsView.frame,
+            enclosingFrame: ancestor.frame,
+            coordinateOffset: ancestor.offset
+        )
+        let nearbyWidgetMapImage = ElementLocator.screenFrame(
+            mapImage.frame,
+            enclosingFrame: maps.frame,
+            coordinateOffset: maps.offset
+        )
 
-        let result = ElementLocator.screenFrame(image, enclosingFrame: widget, widgetContext: true)
-
-        XCTAssertEqual(result, CGRect(x: 24, y: 88, width: 164, height: 164))
+        XCTAssertEqual(maps.offset, CGPoint(x: 26, y: 89))
+        XCTAssertEqual(nearbyWidgetMapImage.frame, CGRect(x: 26, y: 89, width: 164, height: 164))
+        XCTAssertTrue(widget.contains(nearbyWidgetMapImage.frame))
+        XCTAssertNotEqual(nearbyWidgetMapImage.frame.origin, .zero)
     }
 
-    func testScreenFrame_keepsGenuineScreenOriginElement() {
-        let container = CGRect(x: 24, y: 88, width: 168, height: 191)
-        let topLeftElement = CGRect(x: 0, y: 0, width: 164, height: 164)
+    func testScreenFrame_keepsScreenOriginOverlayWhenTranslationStillEscapesParent() {
+        let container = CGRect(x: 26, y: 89, width: 164, height: 165)
+        let topLeftElement = CGRect(x: 0, y: 0, width: 200, height: 200)
 
-        let result = ElementLocator.screenFrame(topLeftElement, enclosingFrame: container, widgetContext: false)
+        let result = ElementLocator.screenFrame(topLeftElement, enclosingFrame: container, coordinateOffset: .zero)
 
-        XCTAssertEqual(result, topLeftElement)
+        XCTAssertEqual(result.frame, topLeftElement)
+        XCTAssertEqual(result.offset, .zero)
     }
 
     func testScreenFrame_keepsAlreadyAbsoluteWidgetChild() {
-        let widget = CGRect(x: 24, y: 88, width: 168, height: 191)
-        let absoluteImage = CGRect(x: 26, y: 90, width: 164, height: 164)
+        let widget = CGRect(x: 26, y: 89, width: 164, height: 165)
+        let absoluteImage = CGRect(x: 26, y: 89, width: 164, height: 164)
 
-        let result = ElementLocator.screenFrame(absoluteImage, enclosingFrame: widget, widgetContext: true)
+        let result = ElementLocator.screenFrame(absoluteImage, enclosingFrame: widget, coordinateOffset: .zero)
 
-        XCTAssertEqual(result, absoluteImage)
+        XCTAssertEqual(result.frame, absoluteImage)
+        XCTAssertEqual(result.offset, .zero)
+    }
+
+    func testScreenFrame_keepsFullScreenChildUnderFullScreenParent() {
+        let screen = CGRect(x: 0, y: 0, width: 402, height: 874)
+
+        let result = ElementLocator.screenFrame(screen, enclosingFrame: screen, coordinateOffset: .zero)
+
+        XCTAssertEqual(result.frame, screen)
+        XCTAssertEqual(result.offset, .zero)
     }
 
     // MARK: - Zero-area snapshot children
@@ -378,28 +403,54 @@ final class ElementLocatorTests: XCTestCase {
 
     func testCleanup_removesUnlabeledSpringBoardIconSubviews() {
         let icon = UIElementInfo(
-            text: "Reminders",
+            text: "Photos",
             className: "SBIconView",
-            bounds: ElementBounds(left: 11, top: 261, right: 113, bottom: 394),
+            bounds: ElementBounds(left: 120, top: 288, right: 188, bottom: 379),
             clickable: "true",
-            role: "button"
-        )
-        let artwork = UIElementInfo(
-            className: "UIImageView",
-            bounds: ElementBounds(left: 11, top: 339, right: 113, bottom: 394),
-            clickable: "true",
-            role: "image"
-        )
-        let title = UIElementInfo(
-            className: "SBIconView",
-            bounds: ElementBounds(left: 28, top: 357, right: 96, bottom: 377),
-            clickable: "true",
-            role: "button"
+            role: "button",
+            node: [
+                UIElementInfo(
+                    className: "UIView",
+                    bounds: ElementBounds(left: 122, top: 290, right: 186, bottom: 368),
+                    node: [
+                        UIElementInfo(
+                            resourceId: "label-view",
+                            className: "UIView",
+                            bounds: ElementBounds(left: 126, top: 357, right: 182, bottom: 377),
+                            node: [
+                                UIElementInfo(
+                                    className: "UIView",
+                                    node: [
+                                        UIElementInfo(
+                                            className: "UIImageView",
+                                            bounds: ElementBounds(left: 109, top: 339, right: 200, bottom: 394),
+                                            clickable: "true",
+                                            role: "image"
+                                        ),
+                                        UIElementInfo(
+                                            className: "UIImageView",
+                                            bounds: ElementBounds(left: 126, top: 357, right: 182, bottom: 377),
+                                            clickable: "true"
+                                        ),
+                                    ]
+                                ),
+                            ]
+                        ),
+                    ]
+                ),
+            ]
         )
 
-        let result = ElementLocator.cleanupXCTestUIKitNoise(parent: icon, children: [artwork, title])
+        let result = ElementLocator.removingUnlabeledIconDescendants(icon)
 
-        XCTAssertTrue(result.isEmpty)
+        func descendants(of element: UIElementInfo) -> [UIElementInfo] {
+            (element.node ?? []).flatMap { [$0] + descendants(of: $0) }
+        }
+
+        XCTAssertEqual(result.text, "Photos")
+        XCTAssertEqual(result.className, "SBIconView")
+        XCTAssertEqual(descendants(of: result).filter { $0.resourceId == "label-view" }.count, 1)
+        XCTAssertFalse(descendants(of: result).contains { $0.className == "UIImageView" })
     }
 
     func testCleanup_preservesIdentifiedIconSubviewAndIndependentControl() {
@@ -421,12 +472,32 @@ final class ElementLocatorTests: XCTestCase {
             clickable: "true"
         )
 
-        let result = ElementLocator.cleanupXCTestUIKitNoise(
-            parent: icon,
-            children: [identifiedImage, independentButton]
+        let result = ElementLocator.removingUnlabeledIconDescendants(
+            ElementLocator.copying(icon, node: [identifiedImage, independentButton])
         )
 
-        XCTAssertEqual(result.count, 2)
+        XCTAssertEqual(result.node?.count, 2)
+        XCTAssertEqual(result.node?.first?.resourceId, "icon-badge")
+        XCTAssertEqual(result.node?.last?.className, "UIButton")
+    }
+
+    func testCleanup_preservesImageOutsideSpringBoardIcon() {
+        let image = UIElementInfo(className: "UIImageView", role: "image")
+        let ordinaryView = UIElementInfo(className: "UIView", node: [image])
+
+        let result = ElementLocator.removingUnlabeledIconDescendants(ordinaryView)
+
+        XCTAssertEqual(result.node?.first?.className, "UIImageView")
+    }
+
+    func testCleanup_removesUnlabeledIconContainerAfterItsArtworkIsRemoved() {
+        let artwork = UIElementInfo(className: "UIImageView", role: "image")
+        let unlabeledContainer = UIElementInfo(className: "SBIconView", role: "button", node: [artwork])
+        let icon = UIElementInfo(text: "Photos", className: "SBIconView", clickable: "true", node: [unlabeledContainer])
+
+        let result = ElementLocator.removingUnlabeledIconDescendants(icon)
+
+        XCTAssertNil(result.node)
     }
 
     func testCleanup_removesStructuralWrapperContainingOnlyScrollbarNoise() {

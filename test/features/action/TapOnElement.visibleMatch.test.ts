@@ -58,6 +58,40 @@ function hierarchy(
   };
 }
 
+function topClippedHierarchy(labelBottom: number, topInset?: number): ViewHierarchyResult {
+  const viewport = { left: 0, top: 0, right: 466, bottom: 678 };
+  const row = { left: 16, top: -37, right: 450, bottom: labelBottom };
+  return {
+    screenWidth: 466,
+    screenHeight: 678,
+    ...(topInset === undefined
+      ? {}
+      : { systemInsets: { top: topInset, bottom: 0, left: 0, right: 0 } }),
+    hierarchy: {
+      node: {
+        $: { class: "XCUIElementTypeWindow", bounds: viewport },
+        node: [
+          {
+            $: { class: "XCUIElementTypeScrollView", bounds: viewport, scrollable: true },
+            node: [
+              {
+                $: { class: "XCUIElementTypeCell", bounds: row, clickable: true },
+                node: [{ $: { class: "UILabel", text: "Forms & Input", bounds: row } }],
+              },
+            ],
+          },
+          {
+            $: {
+              class: "XCUIElementTypeStatusBar",
+              bounds: { left: 0, top: 0, right: 466, bottom: 54 },
+            },
+          },
+        ],
+      },
+    },
+  };
+}
+
 async function run(
   platform: "ios" | "android",
   initial: ViewHierarchyResult,
@@ -169,6 +203,61 @@ describe("tapOn visible matched element", () => {
     const { result, points } = await run("ios", hierarchy(label, row));
     expect(result.success).toBe(true);
     expect(points).toEqual([{ x: 141, y: 862 }]);
+  });
+
+  for (const topInset of [54, undefined]) {
+    test(`iOS refuses a row visible only under the status bar (${topInset === undefined ? "node bounds" : "system inset"})`, async () => {
+      const { result, points } = await run("ios", topClippedHierarchy(40, topInset));
+      expect(result.success).toBe(false);
+      expect(points).toEqual([]);
+      expect(result.error).toContain("Scroll it into view with swipeOn");
+    });
+  }
+
+  test("iOS taps the part of a top-clipped row below the status bar", async () => {
+    const { result, points } = await run("ios", topClippedHierarchy(80, 54));
+    expect(result.success).toBe(true);
+    expect(points).toEqual([{ x: 233, y: 67 }]);
+  });
+
+  test("Android does not shrink the visible row by the top system inset", async () => {
+    const { result, points } = await run("android", topClippedHierarchy(40, 54));
+    expect(result.success).toBe(true);
+    expect(points).toHaveLength(1);
+    expect(points[0]?.y).toBeGreaterThanOrEqual(0);
+    expect(points[0]?.y).toBeLessThan(40);
+  });
+
+  test("iOS keeps a matched status-bar control tappable", async () => {
+    const viewport = { left: 0, top: 0, right: 466, bottom: 678 };
+    const statusBar = { left: 0, top: 0, right: 466, bottom: 54 };
+    const capture: ViewHierarchyResult = {
+      screenWidth: 466,
+      screenHeight: 678,
+      systemInsets: { top: 54, bottom: 0, left: 0, right: 0 },
+      hierarchy: {
+        node: {
+          $: { class: "XCUIElementTypeWindow", bounds: viewport },
+          node: [
+            {
+              $: { class: "XCUIElementTypeStatusBar", bounds: statusBar, clickable: true },
+              node: [
+                {
+                  $: {
+                    class: "UILabel",
+                    text: "Forms & Input",
+                    bounds: { left: 84, top: 10, right: 198, bottom: 30 },
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      },
+    };
+    const { result, points } = await run("ios", capture);
+    expect(result.success).toBe(true);
+    expect(points).toEqual([{ x: 141, y: 20 }]);
   });
 
   test("iOS keeps a tab bar's own matched label tappable", async () => {

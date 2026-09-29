@@ -121,6 +121,12 @@ function hasTapArea(bounds: ElementBounds | undefined): bounds is ElementBounds 
   return !!bounds && bounds.left < bounds.right && bounds.top < bounds.bottom;
 }
 
+const IOS_STATUS_BAR_CLASSES = new Set([
+  "XCUIElementTypeStatusBar",
+  "UIStatusBar",
+  "UIStatusBarWindow",
+]);
+
 type SearchUntilStats = NonNullable<TapOnElementResult["searchUntil"]>;
 type FocusIdentifierKey = "resource-id" | "view-id" | "test-tag";
 
@@ -1069,7 +1075,16 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     if (!screenSize || this.device.platform !== "ios") {
       return visible;
     }
-    return this.clipBelowTabBars(visible, matchForTap, target, hierarchy, screenSize);
+    const belowStatusBar = this.clipBelowStatusBar(
+      visible,
+      matchForTap,
+      target,
+      hierarchy,
+      screenSize,
+    );
+    return belowStatusBar
+      ? this.clipBelowTabBars(belowStatusBar, matchForTap, target, hierarchy, screenSize)
+      : null;
   }
 
   private matchedTapElement(
@@ -1103,6 +1118,47 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     return ime
       ? tapPointOutsideIme([left, top, right, bottom], ime.bounds)
       : this.geometry.getElementCenter({ bounds: visibleBounds });
+  }
+
+  private clipBelowStatusBar(
+    visible: ElementBounds,
+    matched: Element,
+    target: Element,
+    hierarchy: ViewHierarchyResult,
+    screenSize: NonNullable<ObserveResult["screenSize"]>,
+  ): ElementBounds | null {
+    const nodes = new SearchableHierarchy().project(hierarchy);
+    const isStatusBar = (node: SearchableEntry): boolean =>
+      IOS_STATUS_BAR_CLASSES.has(node.className ?? "");
+    const matchedNode = findTapTargetNode(nodes, matched);
+    const targetNode = matchedNode ?? findTapTargetNode(nodes, target);
+    // A status-bar control is itself a valid target even though app content
+    // beneath the bar must not receive a coordinate tap there.
+    if (
+      (targetNode &&
+        nodes.some(
+          (bar) => isStatusBar(bar) && this.isInsideHierarchyNode(targetNode, bar, nodes),
+        )) ||
+      [matched.class, target.class].some((className) => IOS_STATUS_BAR_CLASSES.has(className ?? ""))
+    ) {
+      return visible;
+    }
+    const top =
+      hierarchy.systemInsets?.top ??
+      nodes.find(
+        (node) =>
+          isStatusBar(node) &&
+          node.bounds &&
+          node.bounds.bottom > 0 &&
+          node.bounds.bottom < screenSize.height,
+      )?.bounds?.bottom ??
+      0;
+    return intersectTapBounds(visible, {
+      left: 0,
+      top: Math.max(0, top),
+      right: screenSize.width,
+      bottom: screenSize.height,
+    });
   }
 
   private clipBelowTabBars(

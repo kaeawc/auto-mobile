@@ -438,7 +438,7 @@ describe("ExploreBlockerDetection", () => {
     }
 
     test("handlePermissionDialog taps an Allow button with text and resource-id by id only", async () => {
-      const { calls, deps } = captureTapOptions();
+      const { calls, deps, timer } = captureTapOptions();
       const elements = [
         createMockElement({ text: "Allow camera access?", clickable: false }),
         createMockElement({
@@ -463,6 +463,29 @@ describe("ExploreBlockerDetection", () => {
           action: "tap",
         },
       ]);
+      expect(timer.wasSleepCalled(1000)).toBe(true);
+    });
+
+    test("handlePermissionDialog reports a failed tap as unhandled without retrying", async () => {
+      const tap = new FakeDialogTapAction({
+        result: { success: false, error: "tap target not found" },
+      });
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const elements = [createMockElement({ text: "Allow" })];
+
+      const handled = await handlePermissionDialog(
+        elements,
+        hierarchyOf(elements),
+        androidDevice,
+        null,
+        undefined,
+        { tapActionFactory: tap.factory, timer },
+      );
+
+      expect(handled).toBe(false);
+      expect(tap.calls).toHaveLength(1);
+      expect(timer.getSleepCallCount()).toBe(0);
     });
 
     // Issue #6122: the allow-button keyword "ok" was matched as a bare
@@ -843,7 +866,7 @@ describe("ExploreBlockerDetection", () => {
     });
 
     test("dismissDialog taps a Not now button with text and resource-id by id only", async () => {
-      const { calls, deps } = captureTapOptions();
+      const { calls, deps, timer } = captureTapOptions();
       const elements = [
         createMockElement({ text: "Enjoying the app? Rate us!", clickable: false }),
         createMockElement({ text: "Not now", "resource-id": "com.test:id/dismiss_button" }),
@@ -865,6 +888,37 @@ describe("ExploreBlockerDetection", () => {
 
       expect(handled).toBe(true);
       expect(calls).toEqual([{ elementId: "com.test:id/dismiss_button", action: "tap" }]);
+      expect(timer.wasSleepCalled(1000)).toBe(true);
+    });
+
+    test("dismissDialog reports a failed tap as unhandled without retrying", async () => {
+      const tap = new FakeDialogTapAction({
+        result: { success: false, error: "tap target not found" },
+      });
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const elements = [
+        createMockElement({ text: "Enjoying the app? Rate us!", clickable: false }),
+        createMockElement({ text: "Not now", "resource-id": "com.test:id/dismiss_button" }),
+      ];
+      const parser = {
+        flattenViewHierarchy: () =>
+          elements.map((element, index) => ({ element, index, depth: 0 })),
+      } as unknown as ElementParser;
+
+      const handled = await detectAndHandleBlockers(
+        { viewHierarchy: hierarchyOf(elements) } as unknown as ObserveResult,
+        androidDevice,
+        null,
+        parser,
+        async () => {},
+        undefined,
+        { tapActionFactory: tap.factory, timer },
+      );
+
+      expect(handled).toBe(false);
+      expect(tap.calls).toHaveLength(1);
+      expect(timer.getSleepCallCount()).toBe(0);
     });
 
     // Discriminating regression test: "Disclosed" contains "close" and

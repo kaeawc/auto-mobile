@@ -1,4 +1,10 @@
-import type { BootedDevice, Element, ObserveResult, ViewHierarchyResult } from "../../models";
+import type {
+  BaseActionResult,
+  BootedDevice,
+  Element,
+  ObserveResult,
+  ViewHierarchyResult,
+} from "../../models";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { ProgressCallback } from "../action/BaseVisualChange";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
@@ -9,12 +15,12 @@ import { extractAllElements, tapSelectorFor } from "./ExploreElementExtraction";
 import { defaultTimer, Timer } from "../../utils/SystemTimer";
 
 /**
- * Minimal tap-action seam consumed by the blocker handlers. Only `execute`
- * is used, and its result is ignored (the handlers just need the tap to fire),
- * so this exposes exactly that (YAGNI). `TapOnElement` satisfies it directly.
+ * Minimal tap-action seam consumed by the blocker handlers. They inspect the
+ * result's `success` field to distinguish a completed tap from a failed one.
+ * `TapOnElement` satisfies it directly.
  */
 export interface DialogTapAction {
-  execute(options: TapOnElementOptions, progress?: ProgressCallback): Promise<unknown>;
+  execute(options: TapOnElementOptions, progress?: ProgressCallback): Promise<BaseActionResult>;
 }
 
 /**
@@ -402,24 +408,31 @@ export async function handlePermissionDialog(
   const tapActionFactory = deps.tapActionFactory ?? defaultTapActionFactory;
   const timer = deps.timer ?? defaultTimer;
   for (const element of elements) {
-    if (!element.clickable) {
+    if (!element.clickable || !isAffirmativeGrantElement(element)) {
       continue;
     }
 
-    if (isAffirmativeGrantElement(element)) {
-      const selector = tapSelectorFor(element, viewHierarchy);
-      if (!selector) {
-        continue;
-      }
-      try {
-        const tapOn = tapActionFactory(device, adb);
-        await tapOn.execute({ ...selector, action: "tap" }, progress);
-        await timer.sleep(1000);
-        return true;
-      } catch (error) {
-        logger.warn(`[Explore] Failed to handle permission dialog: ${error}`);
-      }
+    const selector = tapSelectorFor(element, viewHierarchy);
+    if (!selector) {
+      continue;
     }
+    const tapOn = tapActionFactory(device, adb);
+    let tapResult: BaseActionResult;
+    try {
+      tapResult = await tapOn.execute({ ...selector, action: "tap" }, progress);
+    } catch (error) {
+      logger.warn(`[Explore] Failed to handle permission dialog: ${error}`);
+      continue;
+    }
+    if (!tapResult.success) {
+      logger.warn(
+        `[Explore] Failed to handle permission dialog: tap returned success=false` +
+          (tapResult.error ? `: ${tapResult.error}` : ""),
+      );
+      return false;
+    }
+    await timer.sleep(1000);
+    return true;
   }
 
   return false;
@@ -443,24 +456,31 @@ async function dismissDialog(
   const tapActionFactory = deps.tapActionFactory ?? defaultTapActionFactory;
   const timer = deps.timer ?? defaultTimer;
   for (const element of elements) {
-    if (!element.clickable) {
+    if (!element.clickable || !matchesAnyKeywordInAnyField(DISMISS_KEYWORD_TOKENS, element)) {
       continue;
     }
 
-    if (matchesAnyKeywordInAnyField(DISMISS_KEYWORD_TOKENS, element)) {
-      const selector = tapSelectorFor(element, viewHierarchy);
-      if (!selector) {
-        continue;
-      }
-      try {
-        const tapOn = tapActionFactory(device, adb);
-        await tapOn.execute({ ...selector, action: "tap" }, progress);
-        await timer.sleep(1000);
-        return true;
-      } catch (error) {
-        logger.warn(`[Explore] Failed to dismiss dialog: ${error}`);
-      }
+    const selector = tapSelectorFor(element, viewHierarchy);
+    if (!selector) {
+      continue;
     }
+    const tapOn = tapActionFactory(device, adb);
+    let tapResult: BaseActionResult;
+    try {
+      tapResult = await tapOn.execute({ ...selector, action: "tap" }, progress);
+    } catch (error) {
+      logger.warn(`[Explore] Failed to dismiss dialog: ${error}`);
+      continue;
+    }
+    if (!tapResult.success) {
+      logger.warn(
+        `[Explore] Failed to dismiss dialog: tap returned success=false` +
+          (tapResult.error ? `: ${tapResult.error}` : ""),
+      );
+      return false;
+    }
+    await timer.sleep(1000);
+    return true;
   }
 
   return false;

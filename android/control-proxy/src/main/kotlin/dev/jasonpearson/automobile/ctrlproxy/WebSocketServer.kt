@@ -47,6 +47,8 @@ class WebSocketServer(
     true
   },
   private val onRetryLockAcquired: () -> Unit = {},
+  /** Test seam for a new request arriving as a prior terminal frame finishes enqueueing. */
+  private val onCorrelatedRoutingStep: () -> Unit = {},
   private val sendFrame: suspend (DefaultWebSocketSession, String) -> Unit =
     { connection, message ->
       connection.send(Frame.Text(message))
@@ -218,7 +220,6 @@ class WebSocketServer(
   private var startRetryJob: Job? = null
   private val connections = mutableSetOf<ConnectedClient>()
   private val requestConnections = mutableMapOf<String, ConnectedClient>()
-  private val deliveringRequests = mutableSetOf<String>()
   private val connectionCount = AtomicInteger(0)
   private val firstClientConnection = CompletableDeferred<Unit>()
   private var activeClientConnection = CompletableDeferred<Unit>()
@@ -666,20 +667,15 @@ class WebSocketServer(
     if (requestId == null) {
       return false
     }
-    val target =
-      synchronized(connections) {
-        requestConnections[requestId]?.takeIf { deliveringRequests.add(requestId) }
-      }
-    if (target == null) {
-      Log.w(TAG, "Dropping response for disconnected or completed request $requestId")
-    } else {
-      try {
+    // Registration cannot replace this owner between selection and enqueue. Once queued, a reused
+    // ID may register and its response follows through the bounded per-client outgoing queue.
+    synchronized(connections) {
+      val target = requestConnections.remove(requestId)
+      if (target == null) {
+        Log.w(TAG, "Dropping response for disconnected or completed request $requestId")
+      } else {
         sendToClient(target, message)
-        synchronized(connections) {
-          if (requestConnections[requestId] === target) requestConnections.remove(requestId)
-        }
-      } finally {
-        synchronized(connections) { deliveringRequests.remove(requestId) }
+        onCorrelatedRoutingStep()
       }
     }
     return true

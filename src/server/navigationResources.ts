@@ -14,6 +14,7 @@ import {
 import { logger } from "../utils/logger";
 import { buildNavigationNodeScreenshotUri } from "../utils/navigationResourceUri";
 import { defaultTimer } from "../utils/SystemTimer";
+import { DaemonState } from "../daemon/daemonState";
 
 export const NAVIGATION_RESOURCE_URIS = {
   APPS: "automobile:navigation/apps",
@@ -78,8 +79,19 @@ type NavigationGraphResourceProvider = NavigationGraphSummaryProvider &
 
 let navigationGraphProvider: NavigationGraphResourceProvider | null = null;
 
+function resolveUnscopedNavigationGraphManager(): NavigationGraphResourceProvider {
+  const daemonState = DaemonState.getInstance();
+  if (daemonState.isInitialized()) {
+    const sessions = daemonState.getSessionManager().getAllSessions();
+    if (sessions.length === 1) {
+      return NavigationGraphManager.getInstanceForSession(sessions[0]!.sessionId);
+    }
+  }
+  return NavigationGraphManager.getInstance();
+}
+
 function getNavigationGraphProvider(): NavigationGraphResourceProvider {
-  return navigationGraphProvider ?? NavigationGraphManager.getInstance();
+  return navigationGraphProvider ?? resolveUnscopedNavigationGraphManager();
 }
 let updateListenerProvider: NavigationGraphSummaryProvider | null = null;
 let updateTimeout: ReturnType<typeof setTimeout> | null = null;

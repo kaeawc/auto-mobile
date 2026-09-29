@@ -1817,10 +1817,21 @@ export class Daemon {
     // above are also wired to each active session manager, which is where tool
     // execution records navigation state.
     server.setOnNavigationGraphRequested(
-      createNavigationGraphRequestHandler(NavigationGraphManager.getInstance()),
+      createNavigationGraphRequestHandler({
+        exportGraphSummary: () => this.resolveUnscopedNavigationGraphManager().exportGraphSummary(),
+        exportGraphSummaryForApp: (appId) =>
+          this.resolveUnscopedNavigationGraphManager().exportGraphSummaryForApp(appId),
+      }),
     );
 
     logger.info("[Daemon] Navigation graph stream listener configured");
+  }
+
+  private resolveUnscopedNavigationGraphManager(): NavigationGraphManager {
+    const sessions = this.sessionManager.getAllSessions();
+    return sessions.length === 1
+      ? NavigationGraphManager.getInstanceForSession(sessions[0]!.sessionId)
+      : NavigationGraphManager.getInstance();
   }
 
   private setupNavigationGraphUpdateListener(navGraphManager: NavigationGraphManager): void {

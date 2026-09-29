@@ -9,7 +9,6 @@ import { registerToolSelectionTools } from "../../src/server/toolSelectionTools"
 import {
   PersistentToolSelectionProfileRegistry,
   InMemoryToolSelectionProfileRegistry,
-  type ToolSelectionProfileProvenanceStore,
   type ToolSelectionProfileRegistry,
 } from "../../src/server/toolSelectionProfileRegistry";
 import { DaemonState } from "../../src/daemon/daemonState";
@@ -22,21 +21,8 @@ import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeToolSelectionProfileProvenanceStore } from "../fakes/FakeToolSelectionProfileProvenanceStore";
 import { DEVICE_SESSION_ACQUISITION_TOOLS } from "../../src/server/deviceSessionResult";
-
-class FakeToolSelectionProfileProvenanceStore implements ToolSelectionProfileProvenanceStore {
-  readonly stored = new Set<string>();
-  readonly insertCalls: string[] = [];
-
-  async insert(profileUuid: string): Promise<void> {
-    this.insertCalls.push(profileUuid);
-    this.stored.add(profileUuid);
-  }
-
-  async loadAll(): Promise<string[]> {
-    return [...this.stored];
-  }
-}
 
 /**
  * #6148 round 4 — the DEFAULT deployment forwards `setToolEnabled` through

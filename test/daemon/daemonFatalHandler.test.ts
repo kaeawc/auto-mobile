@@ -1,10 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { createDaemonFatalProcessHandler } from "../../src/daemon/daemonFatalHandler";
-import {
-  ProcessLifecycleHandlers,
-  type ProcessLifecycleEventMap,
-  type ProcessLifecycleProcess,
-} from "../../src/processLifecycle";
+import { ProcessLifecycleHandlers } from "../../src/processLifecycle";
+import { FakeProcess } from "../fakes/FakeProcess";
 
 interface LoggedError {
   message: string;
@@ -22,35 +19,6 @@ function makeFakeLogger(): {
       errors.push({ message, args });
     },
   };
-}
-
-class FakeProcess implements ProcessLifecycleProcess {
-  readonly listeners = new Map<keyof ProcessLifecycleEventMap, Array<(...args: any[]) => void>>();
-  readonly exitCodes: number[] = [];
-
-  on<K extends keyof ProcessLifecycleEventMap>(
-    event: K,
-    listener: (...args: ProcessLifecycleEventMap[K]) => void,
-  ): unknown {
-    const eventListeners = this.listeners.get(event) ?? [];
-    eventListeners.push(listener);
-    this.listeners.set(event, eventListeners);
-    return this;
-  }
-
-  exit(code: number = 0): never {
-    this.exitCodes.push(code);
-    return undefined as never;
-  }
-
-  emit<K extends keyof ProcessLifecycleEventMap>(
-    event: K,
-    ...args: ProcessLifecycleEventMap[K]
-  ): void {
-    for (const listener of this.listeners.get(event) ?? []) {
-      listener(...args);
-    }
-  }
 }
 
 async function flushMicrotasks(): Promise<void> {

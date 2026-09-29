@@ -2,8 +2,8 @@ import { describe, expect, test } from "bun:test";
 import {
   InMemoryToolSelectionProfileRegistry,
   PersistentToolSelectionProfileRegistry,
-  type ToolSelectionProfileProvenanceStore,
 } from "../../src/server/toolSelectionProfileRegistry";
+import { FakeToolSelectionProfileProvenanceStore } from "../fakes/FakeToolSelectionProfileProvenanceStore";
 
 /**
  * A synchronous in-memory stand-in for `ToolSelectionProfileProvenanceStore`
@@ -16,20 +16,6 @@ import {
  * write-through is exercised via the fire-and-forget `record()` path. Keeps
  * this suite <100ms with no DB (per CLAUDE.md).
  */
-class FakeToolSelectionProfileProvenanceStore implements ToolSelectionProfileProvenanceStore {
-  readonly stored = new Set<string>();
-  insertCalls: string[] = [];
-
-  async insert(profileUuid: string): Promise<void> {
-    this.insertCalls.push(profileUuid);
-    this.stored.add(profileUuid);
-  }
-
-  async loadAll(): Promise<string[]> {
-    return [...this.stored];
-  }
-}
-
 /**
  * #6148 round 4 — the registry is the provenance signal that must survive the
  * daemon-proxy loopback hop: a value is recognized purely by having been

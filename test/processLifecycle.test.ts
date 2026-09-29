@@ -1,45 +1,8 @@
 import { describe, expect, spyOn, test } from "bun:test";
-import {
-  ProcessLifecycleHandlers,
-  runAllCleanupOperations,
-  type ProcessLifecycleEventMap,
-  type ProcessLifecycleProcess,
-} from "../src/processLifecycle";
+import { ProcessLifecycleHandlers, runAllCleanupOperations } from "../src/processLifecycle";
 import { FakeTimer } from "./fakes/FakeTimer";
 import { DAEMON_SHUTDOWN_TIMEOUT_MS } from "../src/daemon/constants";
-
-class FakeProcess implements ProcessLifecycleProcess {
-  readonly listeners = new Map<keyof ProcessLifecycleEventMap, Array<(...args: any[]) => void>>();
-  readonly exitCodes: number[] = [];
-
-  on<K extends keyof ProcessLifecycleEventMap>(
-    event: K,
-    listener: (...args: ProcessLifecycleEventMap[K]) => void,
-  ): unknown {
-    const eventListeners = this.listeners.get(event) ?? [];
-    eventListeners.push(listener);
-    this.listeners.set(event, eventListeners);
-    return this;
-  }
-
-  exit(code: number = 0): never {
-    this.exitCodes.push(code);
-    return undefined as never;
-  }
-
-  emit<K extends keyof ProcessLifecycleEventMap>(
-    event: K,
-    ...args: ProcessLifecycleEventMap[K]
-  ): void {
-    for (const listener of this.listeners.get(event) ?? []) {
-      listener(...args);
-    }
-  }
-
-  listenerCount(event: keyof ProcessLifecycleEventMap): number {
-    return this.listeners.get(event)?.length ?? 0;
-  }
-}
+import { FakeProcess } from "./fakes/FakeProcess";
 
 type StdinEventMap = {
   end: [];

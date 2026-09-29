@@ -1310,10 +1310,11 @@ async function removeSnapshotArchiveAndRow(record: DeviceSnapshotRecord): Promis
   // misses that data: the row would be deleted and its bytes reported reclaimed
   // while the flat directory survives (and, if it holds a legacy manifest.json,
   // listDeviceSnapshots re-imports it, so the archive limit can never evict it).
-  // When scoping applied, also clear the flat path — but never a reserved scope
-  // root (a snapshot literally named "android"/"ios", whose flat path IS the
-  // scope tree); name sanitization is tracked separately (#5705).
-  if (pathOptions && !isReservedScopeSegment(record.snapshotName)) {
+  // Only Android emulator records moved from flat to AVD-scoped paths. iOS has
+  // always been scoped, so its flat path could hold unrelated Android data.
+  // Never clear a reserved scope root (a snapshot literally named "android"/"ios",
+  // whose flat path IS the scope tree); name sanitization is tracked separately (#5705).
+  if (pathOptions?.platform === "android" && !isReservedScopeSegment(record.snapshotName)) {
     await snapshotStore.deleteSnapshotData(record.snapshotName);
   }
   const deleted = await snapshotRepository.deleteSnapshot(record.snapshotName);

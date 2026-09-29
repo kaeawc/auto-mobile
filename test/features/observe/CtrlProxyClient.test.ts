@@ -125,12 +125,18 @@ describe("AndroidCtrlProxyClient", function () {
       name: "Test Device",
     };
 
-    // Create FakeAdbClientFactory for AndroidCtrlProxyManager
-    fakeAdbFactory = new FakeAdbClientFactory();
+    // Back the manager with the same fake ADB the tests configure.
+    fakeAdbFactory = new FakeAdbClientFactory(fakeAdb);
 
     // Reset singleton instances for clean test state
     AndroidCtrlProxyManager.resetInstances();
     AndroidCtrlProxyClient.resetInstances();
+
+    // Register the manager singleton BEFORE constructing the client: the client
+    // constructor calls AndroidCtrlProxyManager.getInstance(device) with the default
+    // factory, which would otherwise bind a real AdbClient and spawn the host `adb`
+    // binary from isAvailable() (about 1.8s per call, and not hermetic).
+    AndroidCtrlProxyManager.getInstance(testDevice, fakeAdbFactory).clearAvailabilityCache();
 
     // Pass FakeAdbExecutor directly to createForTesting since it implements AdbExecutor
     accessibilityServiceClient = AndroidCtrlProxyClient.createForTesting(
@@ -139,7 +145,6 @@ describe("AndroidCtrlProxyClient", function () {
       createSuccessWebSocketFactory(),
       fakeTimer,
     );
-    AndroidCtrlProxyManager.getInstance(testDevice, fakeAdbFactory).clearAvailabilityCache();
 
     // Clear any cached hierarchy data to prevent cache contamination between tests (issue #72)
     accessibilityServiceClient.invalidateCache();

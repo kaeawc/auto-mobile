@@ -2,7 +2,6 @@ import { errorMessage } from "../utils/describeUnknownError";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
   ListToolsRequestSchema,
-  CallToolRequestSchema,
   ListResourcesRequestSchema,
   ReadResourceRequestSchema,
   ListResourceTemplatesRequestSchema,
@@ -38,6 +37,7 @@ import {
 import { ACCEPTANCE_DISCOVERY_CAPABILITY_ENV } from "../daemon/constants";
 import { getStartupToolDefaults } from "../features/toolSelection/SessionToolSelectionService";
 import { ToolRegistry } from "./toolRegistry";
+import { installToolCallDispatcher } from "./toolCallDispatch";
 
 const LIVE_ACCEPTANCE_ENV = "AUTOMOBILE_ACCEPTANCE_LIVE";
 const ACCEPTANCE_DISCOVERY_ORDER_ENV = "AUTOMOBILE_ACCEPTANCE_DISCOVERY_ORDER";
@@ -429,48 +429,33 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
     };
   };
 
-  // Register tools/call handler - forward to daemon
-  server.server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
-    const name = request.params.name;
-    const args = (request.params.arguments || {}) as Record<string, unknown>;
+  // Register tools/call handler - forward to daemon through the shared
+  // dispatch envelope (#6545).
+  installToolCallDispatcher(server, {
+    progressFailureMessage: "[ProxyServer] Failed to relay progress notification",
+    execute: async ({ name, args, progressToken, progress }) => {
+      const hasOutputSchema = advertisedToolOutputSchemas.get(name) ?? false;
 
-    if (!name) {
-      throw new ActionableError("Tool name is missing in the request");
-    }
-    const hasOutputSchema = advertisedToolOutputSchemas.get(name) ?? false;
+      logger.info(`[ProxyServer] Forwarding tool call: ${name}`);
 
-    logger.info(`[ProxyServer] Forwarding tool call: ${name}`);
-
-    // Echo the CLIENT's own progress token through the daemon round trip
-    // (issue #6205) — the direct server (#6118) already refuses to fabricate
-    // one, and the proxy must not either: relay a tick only when the client
-    // asked, tagged with that SAME token.
-    const requestProgressToken = extra._meta?.progressToken;
-    const onProgress =
-      requestProgressToken !== undefined
-        ? (progress: number, total?: number, message?: string): void => {
-            extra
-              .sendNotification({
-                method: "notifications/progress",
-                params: {
-                  progressToken: requestProgressToken,
-                  progress,
-                  total,
-                  ...(message && { message }),
-                },
-              })
-              .catch((error: unknown) => {
-                logger.warn(`[ProxyServer] Failed to relay progress notification: ${error}`);
-              });
+      // Echo the CLIENT's own progress token through the daemon round trip
+      // (issue #6205) — the direct server (#6118) already refuses to fabricate
+      // one, and the proxy must not either: relay a tick only when the client
+      // asked, tagged with that SAME token. The relay is fire-and-forget; the
+      // shared echo logs a failed send instead of rejecting.
+      const onProgress = progress
+        ? (tick: number, total?: number, message?: string): void => {
+            void progress(tick, total, message);
           }
         : undefined;
 
-    try {
-      const result = await proxy.callTool(name, args, requestProgressToken, onProgress);
-      return result;
-    } catch (error) {
-      return resolveCallToolErrorResult(error, name, hasOutputSchema);
-    }
+      try {
+        const result = await proxy.callTool(name, args, progressToken, onProgress);
+        return result;
+      } catch (error) {
+        return resolveCallToolErrorResult(error, name, hasOutputSchema);
+      }
+    },
   });
 
   // Register resources/list handler. Serves a cold (empty/cached) roster without

@@ -530,6 +530,38 @@ class WebSocketServerTest {
     }
 
   @Test
+  fun `reused request id during delivery reaches its new owner`() =
+    runTest(testScope.testScheduler) {
+      val firstTransport = RecordingTransport()
+      val nextTransport = RecordingTransport()
+      var first = true
+      lateinit var nextOwner: WebSocketServer.ConnectedClient
+      val firstResponse = """{"type":"result","requestId":"reused","owner":"first"}"""
+      val nextResponse = """{"type":"result","requestId":"reused","owner":"next"}"""
+      server =
+        WebSocketServer(
+          port = 0,
+          scope = testScope,
+          onCorrelatedRoutingStep = {
+            if (first) {
+              first = false
+              server.registerRequestOwner("reused", nextOwner)
+              server.routeCorrelatedResponse("reused", nextResponse)
+            }
+          },
+        )
+      val firstOwner = server.registerClient(1, firstTransport)
+      nextOwner = server.registerClient(2, nextTransport)
+      server.registerRequestOwner("reused", firstOwner)
+
+      server.routeCorrelatedResponse("reused", firstResponse)
+      runCurrent()
+
+      assertEquals(listOf(firstResponse), firstTransport.messages)
+      assertEquals(listOf(nextResponse), nextTransport.messages)
+    }
+
+  @Test
   fun `unknown and expired correlated frames are dropped`() =
     runTest(testScope.testScheduler) {
       val transport = RecordingTransport()

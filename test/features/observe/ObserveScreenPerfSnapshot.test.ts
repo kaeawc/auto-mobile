@@ -1,3 +1,4 @@
+import { FakeHierarchyCollector } from "../../fakes/FakeHierarchyCollector";
 import { FakeDeviceStateCollector } from "../../fakes/FakeDeviceStateCollector";
 import { FakeScreenshotRecorder } from "../../fakes/FakeScreenshotRecorder";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
@@ -19,29 +20,10 @@ import {
   _resetPerformanceMonitor,
   getPerformanceMonitor,
 } from "../../../src/features/performance/PerformanceMonitor";
-import type { BootedDevice, ObserveResult } from "../../../src/models";
+import type { BootedDevice } from "../../../src/models";
 
 const ENABLE_ENV = "AUTOMOBILE_OBSERVE_PERF_SNAPSHOT";
 const DEVICE_ID = "perf-device";
-
-class FakeHierarchyCollector implements Pick<
-  HierarchyCollector,
-  "collect" | "collectRaw" | "extractScreenSize"
-> {
-  async collect(result: ObserveResult): Promise<void> {
-    result.viewHierarchy = {
-      hierarchy: {},
-      screenWidth: 1080,
-      screenHeight: 1920,
-      wakefulness: "Awake",
-      foregroundActivity: "com.example/.MainActivity",
-    } as any;
-  }
-  async collectRaw(): Promise<void> {}
-  extractScreenSize(): { width: number; height: number } | null {
-    return { width: 1080, height: 1920 };
-  }
-}
 
 class NoOpAuditor implements Pick<
   PerformanceAuditor & AccessibilityAuditor & AccessibilityStateDetector,

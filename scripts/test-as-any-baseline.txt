@@ -129,8 +129,6 @@
 8	test/features/observe/ObservePoll.test.ts
 43	test/features/observe/ObserveScreen.test.ts
 37	test/features/observe/ObserveScreenMissingForegroundWindow.test.ts
-2	test/features/observe/ObserveScreenPerfSnapshot.test.ts
-2	test/features/observe/ObserveScreenSkipOptions.test.ts
 198	test/features/observe/ObserveScreenWindowIdentity.test.ts
 4	test/features/observe/SettleObserve.test.ts
 8	test/features/observe/TakeScreenshot.AndroidAdbFilePull.test.ts

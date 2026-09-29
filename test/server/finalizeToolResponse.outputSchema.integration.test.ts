@@ -1,30 +1,13 @@
+import { FakeArtifactWriter } from "../fakes/FakeArtifactWriter";
 import { describe, expect, test } from "bun:test";
 import Ajv2020 from "ajv/dist/2020";
 import { createMcpServer } from "../../src/server/index";
 import {
   DEFAULT_OBSERVATION_INLINE_MAX_BYTES,
   finalizeToolResponse,
-  type ObservationArtifactMetadata,
-  type ObservationArtifactWriteInput,
-  type ObservationArtifactWriter,
 } from "../../src/server/finalizeToolResponse";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
-
-class FakeArtifactWriter implements ObservationArtifactWriter {
-  writeJsonArtifact(_input: ObservationArtifactWriteInput): ObservationArtifactMetadata {
-    return {
-      artifact: {
-        path: "/tmp/auto-mobile/output-schema-contract.json",
-        format: "json",
-        payload: "ToolResponse",
-        bytes: 1,
-        tool: "contract",
-        resourceUri: "automobile:tool-output/output-schema-contract.json",
-      },
-    };
-  }
-}
 
 type ObjectOutputSchema = {
   shape: Record<string, { isOptional(): boolean }>;

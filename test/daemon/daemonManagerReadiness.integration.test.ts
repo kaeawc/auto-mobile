@@ -1,11 +1,10 @@
+import { FakeDaemonSpawner } from "../fakes/FakeDaemonSpawner";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
-import { EventEmitter } from "node:events";
 import { createServer, type Server } from "node:net";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { writeSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DaemonManager, type DaemonProcessSpawner } from "../../src/daemon/manager";
+import { DaemonManager } from "../../src/daemon/manager";
 import type { DaemonProcessFinder } from "../../src/daemon/processTable";
 import {
   DAEMON_STARTUP_TIMEOUT_MS,
@@ -17,7 +16,6 @@ import type { DaemonClientLike } from "../../src/daemon/client";
 import type { DaemonSocketReachabilityLike } from "../../src/daemon/daemonSocketReachability";
 import type { PidFileData } from "../../src/daemon/types";
 import { FakeTimer } from "../fakes/FakeTimer";
-import type { ChildProcess, SpawnOptions } from "node:child_process";
 
 class ProbeClient implements DaemonClientLike {
   connectCallCount = 0;
@@ -54,47 +52,6 @@ class ProbeClient implements DaemonClientLike {
 
   async callDaemonMethod(): Promise<any> {
     throw new Error("not used");
-  }
-}
-
-class FakeDaemonProcess extends EventEmitter {
-  pid = 12345;
-  exitCode: number | null = null;
-  signalCode: NodeJS.Signals | null = null;
-  killed = false;
-  readonly signals: NodeJS.Signals[] = [];
-
-  unref(): void {}
-
-  kill(signal: NodeJS.Signals): boolean {
-    this.killed = true;
-    this.signals.push(signal);
-    this.exitCode = 0;
-    this.signalCode = signal;
-    this.emit("exit", 0, signal);
-    return true;
-  }
-}
-
-class FakeDaemonSpawner implements DaemonProcessSpawner {
-  readonly spawned: Array<{ command: string; args: string[]; options: SpawnOptions }> = [];
-  readonly process = new FakeDaemonProcess();
-  logText = "";
-  onSpawn?: (process: FakeDaemonProcess) => void;
-
-  spawn(command: string, args: string[], options: SpawnOptions): ChildProcess {
-    this.spawned.push({ command, args, options });
-    const logFd =
-      Array.isArray(options.stdio) && typeof options.stdio[1] === "number"
-        ? options.stdio[1]
-        : undefined;
-    if (logFd !== undefined && this.logText.length > 0) {
-      writeSync(logFd, this.logText);
-    }
-    if (this.onSpawn) {
-      setImmediate(() => this.onSpawn!(this.process));
-    }
-    return this.process as unknown as ChildProcess;
   }
 }
 
@@ -756,7 +713,7 @@ describe("DaemonManager readiness", () => {
     const { lockPath, pidPath, socketPath } = createPaths();
     const fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
-    const spawner = new FakeDaemonSpawner();
+    const spawner = new FakeDaemonSpawner(true);
     spawner.logText = `OLD_LOG_START\n${"a".repeat(5000)}\nSQLiteError: database is locked\nstack line\n`;
 
     const manager = new DaemonManager(
@@ -790,7 +747,7 @@ describe("DaemonManager readiness", () => {
   test("preserves the spawned daemon when its exact PID becomes reachable at the deadline", async () => {
     const { lockPath, pidPath, socketPath } = createPaths();
     const fakeTimer = new FakeTimer();
-    const spawner = new FakeDaemonSpawner();
+    const spawner = new FakeDaemonSpawner(true);
     const clients: ProbeClient[] = [];
     const manager = new DaemonManager(
       () => {
@@ -837,7 +794,7 @@ describe("DaemonManager readiness", () => {
     const { lockPath, pidPath, socketPath } = createPaths();
     const fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
-    const spawner = new FakeDaemonSpawner();
+    const spawner = new FakeDaemonSpawner(true);
     spawner.logText = "fatal startup error\nSQLITE_BUSY: database is locked\n";
     spawner.onSpawn = (process) => process.emit("exit", 7, null);
 
@@ -868,7 +825,7 @@ describe("DaemonManager readiness", () => {
   test("subprocess failure wins when readiness polling is aborted", async () => {
     const { lockPath, pidPath, socketPath } = createPaths();
     const fakeTimer = new FakeTimer();
-    const spawner = new FakeDaemonSpawner();
+    const spawner = new FakeDaemonSpawner(true);
     spawner.logText = "fatal startup error\nSQLITE_BUSY: database is locked\n";
     spawner.onSpawn = (process) => process.emit("exit", 7, null);
 
@@ -897,7 +854,7 @@ describe("DaemonManager readiness", () => {
     const { lockPath, pidPath, socketPath } = createPaths();
     const fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
-    const spawner = new FakeDaemonSpawner();
+    const spawner = new FakeDaemonSpawner(true);
     // Our spawned child loses the socket-ownership race and exits 1.
     spawner.onSpawn = (daemonProcess) => daemonProcess.emit("exit", 1, null);
 
@@ -944,7 +901,7 @@ describe("DaemonManager readiness", () => {
   test("still fails promptly when no peer daemon is coming up after our subprocess exits (#6103)", async () => {
     const { lockPath, pidPath, socketPath } = createPaths();
     const fakeTimer = new FakeTimer();
-    const spawner = new FakeDaemonSpawner();
+    const spawner = new FakeDaemonSpawner(true);
     spawner.logText = "fatal startup error\nSQLITE_BUSY: database is locked\n";
     spawner.onSpawn = (daemonProcess) => daemonProcess.emit("exit", 1, null);
 
@@ -981,7 +938,7 @@ describe("DaemonManager readiness", () => {
     const { lockPath, pidPath, socketPath } = createPaths();
     const fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
-    const spawner = new FakeDaemonSpawner();
+    const spawner = new FakeDaemonSpawner(true);
     spawner.onSpawn = (daemonProcess) => daemonProcess.emit("exit", 1, null);
 
     // The peer is already accepting on the socket.
@@ -1024,7 +981,7 @@ describe("DaemonManager readiness", () => {
     const { lockPath, pidPath, socketPath } = createPaths();
     const fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
-    const spawner = new FakeDaemonSpawner();
+    const spawner = new FakeDaemonSpawner(true);
     spawner.onSpawn = (daemonProcess) => daemonProcess.emit("exit", 1, null);
 
     // The peer publishes its socket right after the first probe: reachable only on the
@@ -1062,7 +1019,7 @@ describe("DaemonManager readiness", () => {
     const { lockPath, pidPath, socketPath } = createPaths();
     const fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
-    const spawner = new FakeDaemonSpawner();
+    const spawner = new FakeDaemonSpawner(true);
     spawner.logText = "fatal startup error\nSQLITE_BUSY: database is locked\n";
 
     // A reachable peer would be joined if probed — the ONLY reason nothing gets probed
@@ -1104,7 +1061,7 @@ describe("DaemonManager readiness", () => {
     const { lockPath, pidPath, socketPath } = createPaths();
     const fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
-    const spawner = new FakeDaemonSpawner();
+    const spawner = new FakeDaemonSpawner(true);
     spawner.logText = "fatal startup error\nSQLITE_BUSY: database is locked\n";
     // Our child exits only near the deadline: it burns all but ~1s of the ~30s start
     // budget, then exits 1. Scheduling the exit inside onSpawn (after the spawn is wired
@@ -1155,7 +1112,7 @@ describe("DaemonManager readiness", () => {
   test("preserves the original spawn-exit diagnostic when peer discovery fails during recovery (#6103)", async () => {
     const { lockPath, pidPath, socketPath } = createPaths();
     const fakeTimer = new FakeTimer();
-    const spawner = new FakeDaemonSpawner();
+    const spawner = new FakeDaemonSpawner(true);
     spawner.logText = "fatal startup error\nSQLITE_BUSY: database is locked\n";
     spawner.onSpawn = (daemonProcess) => daemonProcess.emit("exit", 1, null);
 
@@ -1206,7 +1163,7 @@ describe("DaemonManager readiness", () => {
     const { lockPath, pidPath, socketPath } = createPaths();
     const fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
-    const spawner = new FakeDaemonSpawner();
+    const spawner = new FakeDaemonSpawner(true);
     spawner.onSpawn = (process) => {
       const error = new Error("spawn /bin/sh ENOENT");
       (error as NodeJS.ErrnoException).code = "ENOENT";
@@ -1334,7 +1291,7 @@ describe("DaemonManager readiness", () => {
       lockPath,
       pidPath,
       socketPath,
-      spawner: new FakeDaemonSpawner(),
+      spawner: new FakeDaemonSpawner(true),
       reachability,
     });
 
@@ -1376,7 +1333,7 @@ describe("DaemonManager readiness", () => {
       lockPath,
       pidPath,
       socketPath,
-      spawner: new FakeDaemonSpawner(),
+      spawner: new FakeDaemonSpawner(true),
       reachability,
     });
     // An unrelated auto-mobile daemon (a different worktree/namespace) is always

@@ -10,16 +10,20 @@ import ts from "typescript";
  */
 const FAKES_DIR = path.join(import.meta.dir);
 const EXPECTED_CONTRACT_TYPES: Record<string, string> = {
+  "FakeArtifactWriter.ts:FakeArtifactWriter": "ObservationArtifactWriter",
   "FakeProcess.ts:FakeProcess": "ProcessLifecycleProcess",
   "FakeToolSelectionProfileProvenanceStore.ts:FakeToolSelectionProfileProvenanceStore":
     "ToolSelectionProfileProvenanceStore",
   "FakeAdbClient.ts:FakeAdbClient": "AdbExecutor",
+  "FakeDaemonProcess.ts:FakeDaemonProcess": "DaemonLaunchedProcess",
+  "FakeDaemonSpawner.ts:FakeDaemonSpawner": "DaemonProcessSpawner",
   "FakeDeviceSnapshotConfigRepository.ts:FakeDeviceSnapshotConfigRepository": "ConfigRepository",
   "FakeDeviceSnapshotRepository.ts:FakeDeviceSnapshotRepository": "DeviceSnapshotRepository",
   "FakeDeviceSnapshotStore.ts:FakeDeviceSnapshotStore": "DeviceSnapshotStore",
   "FakeDeviceSessionRepository.ts:FakeDeviceSessionRepository": "DeviceSessionRepository",
   "FakeDeviceStateCollector.ts:FakeDeviceStateCollector": "DeviceStateCollector",
   "FakeHighlightClient.ts:FakeHighlightClient": "VisualHighlightClient",
+  "FakeHierarchyCollector.ts:FakeHierarchyCollector": "HierarchyCollector",
   "FakeMcpServer.ts:FakeMcpServer": "McpServer",
   "FakeNetServer.ts:FakeSocket": "Socket",
   "FakeScreenshotRecorder.ts:FakeScreenshotRecorder": "ObserveScreenshotRecorder",

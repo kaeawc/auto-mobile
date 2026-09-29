@@ -1,3 +1,4 @@
+import { FakeArtifactWriter } from "../fakes/FakeArtifactWriter";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   CLI_OUTPUT_INLINE_MAX_BYTES,
@@ -25,11 +26,6 @@ import { ToolOutputArtifactLedger } from "../../src/server/toolOutputArtifactLed
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
-import type {
-  ObservationArtifactMetadata,
-  ObservationArtifactWriteInput,
-  ObservationArtifactWriter,
-} from "../../src/server/finalizeToolResponse";
 import { isolateCliDataDir, type IsolatedCliDataDir } from "../helpers/cliDataDirIsolation";
 
 let isolatedCliDataDir: IsolatedCliDataDir;
@@ -41,28 +37,6 @@ beforeEach(() => {
 afterEach(() => {
   isolatedCliDataDir.restore();
 });
-
-class FakeArtifactWriter implements ObservationArtifactWriter {
-  readonly writes: ObservationArtifactWriteInput[] = [];
-  throwOnWrite: Error | undefined;
-
-  writeJsonArtifact(input: ObservationArtifactWriteInput): ObservationArtifactMetadata {
-    if (this.throwOnWrite) {
-      throw this.throwOnWrite;
-    }
-    this.writes.push(input);
-    return {
-      artifact: {
-        path: `/tmp/auto-mobile/tool-outputs/${input.tool}-1.json`,
-        format: "json",
-        payload: input.payload,
-        bytes: 99_999,
-        tool: input.tool,
-        resourceUri: `automobile:tool-output/${input.tool}-1.json`,
-      },
-    };
-  }
-}
 
 /** A result whose pretty-printed JSON is comfortably past the CLI ceiling. */
 function oversizedResult(): Record<string, unknown> {

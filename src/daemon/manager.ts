@@ -5,7 +5,6 @@ import {
   type IdentityRecoveryIO,
 } from "./identityRecovery";
 import { errorMessage } from "../utils/describeUnknownError";
-import type { ChildProcess } from "node:child_process";
 import { open, readFile, rm } from "node:fs/promises";
 import {
   constants,
@@ -109,6 +108,7 @@ import { TOOL_OUTPUTS_DIR_ENV } from "../utils/toolOutputArtifacts";
 import {
   DaemonLauncher,
   type DaemonLaunchCommand,
+  type DaemonLaunchedProcess,
   type DaemonProcessSpawner,
 } from "./DaemonLauncher";
 import { RUNNER_READINESS_TIMEOUT_FLAG } from "../utils/runnerReadinessConfig";
@@ -178,7 +178,7 @@ function stderrLog(message: string): void {
  * stderr pipe promptly; while the host is alive, pause/resume honors sink
  * backpressure instead of accumulating arbitrary buffered output.
  */
-export function relayDaemonStderr(daemonProcess: ChildProcess): void {
+export function relayDaemonStderr(daemonProcess: Pick<DaemonLaunchedProcess, "stderr">): void {
   const daemonStderr = daemonProcess.stderr;
   if (!daemonStderr) {
     return;

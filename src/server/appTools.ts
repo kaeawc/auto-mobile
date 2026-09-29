@@ -14,6 +14,7 @@ import { LaunchApp } from "../features/action/LaunchApp";
 import { TerminateApp } from "../features/action/TerminateApp";
 import { InstallApp } from "../features/action/InstallApp";
 import { UninstallApp } from "../features/action/UninstallApp";
+import type { UninstallAppResult } from "../models/UninstallAppResult";
 import { AppPermissions } from "../features/action/AppPermissions";
 import { ResetKeychain } from "../features/action/ResetKeychain";
 import { resolveMissingForegroundWindow } from "../features/observe/ObserveScreen";
@@ -31,7 +32,6 @@ import {
 } from "./toolSchemaHelpers";
 import {
   invalidateInstalledAppsCache,
-  invalidateInstalledAppResourceCache,
   notifyInstalledAppResourceUpdated,
   queryInstalledApps,
   type AppsQueryResourceContent,
@@ -39,6 +39,36 @@ import {
 } from "./appResources";
 import { logger } from "../utils/logger";
 import { isDeviceLostError } from "./deviceLossOutcome";
+
+export interface InstalledAppResourceRefresh {
+  invalidate(deviceId: string): void;
+  notify(deviceId: string): Promise<void>;
+}
+
+let installedAppResourceRefresh: InstalledAppResourceRefresh = {
+  invalidate: invalidateInstalledAppsCache,
+  notify: notifyInstalledAppResourceUpdated,
+};
+
+export function setInstalledAppResourceRefresh(refresh: InstalledAppResourceRefresh): void {
+  installedAppResourceRefresh = refresh;
+}
+
+export function resetInstalledAppResourceRefresh(): void {
+  installedAppResourceRefresh = {
+    invalidate: invalidateInstalledAppsCache,
+    notify: notifyInstalledAppResourceUpdated,
+  };
+}
+
+async function refreshInstalledAppResources(deviceId: string): Promise<void> {
+  try {
+    installedAppResourceRefresh.invalidate(deviceId);
+    await installedAppResourceRefresh.notify(deviceId);
+  } catch (error) {
+    logger.warn(`[AppTools] Failed to refresh app resources: ${error}`);
+  }
+}
 
 export interface ListAppsToolDependencies {
   toolResponseFormatter: ToolResponseFormatter;
@@ -152,8 +182,6 @@ export interface CrashAppExecutor {
 
 export interface CrashAppToolDependencies {
   createCrashApp(device: BootedDevice): CrashAppExecutor;
-  invalidateAppResourceCache(deviceId: string): void;
-  notifyAppResourceUpdated(deviceId: string): Promise<void>;
 }
 
 let crashAppToolDependencies: CrashAppToolDependencies | null = null;
@@ -162,8 +190,6 @@ function getCrashAppToolDependencies(): CrashAppToolDependencies {
   if (!crashAppToolDependencies) {
     crashAppToolDependencies = {
       createCrashApp: (device) => new CrashApp(device),
-      invalidateAppResourceCache: invalidateInstalledAppResourceCache,
-      notifyAppResourceUpdated: notifyInstalledAppResourceUpdated,
     };
   }
   return crashAppToolDependencies;
@@ -173,9 +199,6 @@ export function setCrashAppToolDependencies(deps: Partial<CrashAppToolDependenci
   const currentDeps = getCrashAppToolDependencies();
   crashAppToolDependencies = {
     createCrashApp: deps.createCrashApp ?? currentDeps.createCrashApp,
-    invalidateAppResourceCache:
-      deps.invalidateAppResourceCache ?? currentDeps.invalidateAppResourceCache,
-    notifyAppResourceUpdated: deps.notifyAppResourceUpdated ?? currentDeps.notifyAppResourceUpdated,
   };
 }
 
@@ -189,6 +212,38 @@ export interface InstallAppExecutor {
 
 export interface InstallAppToolDependencies {
   createInstallApp(device: BootedDevice): InstallAppExecutor;
+}
+
+export interface UninstallAppExecutor {
+  execute(
+    appId: string,
+    keepData?: boolean,
+    userId?: number,
+    signal?: AbortSignal,
+  ): Promise<UninstallAppResult>;
+}
+
+export interface UninstallAppToolDependencies {
+  createUninstallApp(device: BootedDevice): UninstallAppExecutor;
+}
+
+let uninstallAppToolDependencies: UninstallAppToolDependencies | null = null;
+
+function getUninstallAppToolDependencies(): UninstallAppToolDependencies {
+  return (uninstallAppToolDependencies ??= {
+    createUninstallApp: (device) => new UninstallApp(device),
+  });
+}
+
+export function setUninstallAppToolDependencies(deps: Partial<UninstallAppToolDependencies>): void {
+  uninstallAppToolDependencies = {
+    createUninstallApp:
+      deps.createUninstallApp ?? getUninstallAppToolDependencies().createUninstallApp,
+  };
+}
+
+export function resetUninstallAppToolDependencies(): void {
+  uninstallAppToolDependencies = null;
 }
 
 let installAppToolDependencies: InstallAppToolDependencies | null = null;
@@ -810,9 +865,11 @@ export function registerAppTools() {
     _progress?: unknown,
     signal?: AbortSignal,
   ) => {
+    let mutationMayHaveHappened = false;
     try {
       signal?.throwIfAborted();
       const launchApp = getLaunchAppToolDependencies().createLaunchApp(device);
+      mutationMayHaveHappened = true;
       const result = await launchApp.execute(
         args.appId,
         args.clearAppData ?? false,
@@ -837,21 +894,24 @@ export function registerAppTools() {
       }
       throw toActionableError(error, `Failed to launch app`);
     } finally {
-      if (!signal?.aborted) {
-        try {
-          invalidateInstalledAppResourceCache(device.deviceId);
-          await notifyInstalledAppResourceUpdated(device.deviceId);
-        } catch (error) {
-          logger.warn(`[AppTools] Failed to refresh app resources after launch: ${error}`);
-        }
+      if (mutationMayHaveHappened) {
+        await refreshInstalledAppResources(device.deviceId);
       }
     }
   };
 
   // Terminate app handler
-  const terminateAppHandler = async (device: BootedDevice, args: AppActionArgs) => {
+  const terminateAppHandler = async (
+    device: BootedDevice,
+    args: AppActionArgs,
+    _progress?: unknown,
+    signal?: AbortSignal,
+  ) => {
+    let mutationMayHaveHappened = false;
     try {
+      signal?.throwIfAborted();
       const terminateApp = getTerminateAppToolDependencies().createTerminateApp(device);
+      mutationMayHaveHappened = true;
       const result = await terminateApp.execute(args.appId, {
         skipUiStability: true, // skip the 12+ second stability polling
       });
@@ -875,11 +935,8 @@ export function registerAppTools() {
       }
       throw toActionableError(error, `Failed to terminate app`);
     } finally {
-      try {
-        invalidateInstalledAppResourceCache(device.deviceId);
-        await notifyInstalledAppResourceUpdated(device.deviceId);
-      } catch (error) {
-        logger.warn(`[AppTools] Failed to refresh app resources after terminate: ${error}`);
+      if (mutationMayHaveHappened) {
+        await refreshInstalledAppResources(device.deviceId);
       }
     }
   };
@@ -891,8 +948,10 @@ export function registerAppTools() {
     signal?: AbortSignal,
   ) => {
     const dependencies = getCrashAppToolDependencies();
+    let mutationMayHaveHappened = false;
     try {
       signal?.throwIfAborted();
+      mutationMayHaveHappened = true;
       const result = await dependencies.createCrashApp(device).execute(args.appId, signal);
       signal?.throwIfAborted();
 
@@ -908,13 +967,8 @@ export function registerAppTools() {
       }
       throw toActionableError(error, `Failed to crash app`);
     } finally {
-      dependencies.invalidateAppResourceCache(device.deviceId);
-      if (!signal?.aborted) {
-        try {
-          await dependencies.notifyAppResourceUpdated(device.deviceId);
-        } catch (error) {
-          logger.warn(`[AppTools] Failed to refresh app resources after crash: ${error}`);
-        }
+      if (mutationMayHaveHappened) {
+        await refreshInstalledAppResources(device.deviceId);
       }
     }
   };
@@ -926,8 +980,11 @@ export function registerAppTools() {
     _progress?: unknown,
     signal?: AbortSignal,
   ) => {
+    let mutationMayHaveHappened = false;
     try {
+      signal?.throwIfAborted();
       const installApp = getInstallAppToolDependencies().createInstallApp(device);
+      mutationMayHaveHappened = true;
       const result = await installApp.execute(args.artifactPath, undefined, signal);
       if (!result.success) {
         throw new ActionableError(
@@ -948,11 +1005,8 @@ export function registerAppTools() {
       }
       throw toActionableError(error, `Failed to install app`);
     } finally {
-      try {
-        invalidateInstalledAppsCache(device.deviceId);
-        await notifyInstalledAppResourceUpdated(device.deviceId);
-      } catch (error) {
-        logger.warn(`[AppTools] Failed to refresh app resources after install: ${error}`);
+      if (mutationMayHaveHappened) {
+        await refreshInstalledAppResources(device.deviceId);
       }
     }
   };
@@ -964,8 +1018,11 @@ export function registerAppTools() {
     _progress?: unknown,
     signal?: AbortSignal,
   ) => {
+    let mutationMayHaveHappened = false;
     try {
-      const uninstallApp = new UninstallApp(device);
+      signal?.throwIfAborted();
+      const uninstallApp = getUninstallAppToolDependencies().createUninstallApp(device);
+      mutationMayHaveHappened = true;
       const result = await uninstallApp.execute(
         args.appId,
         args.keepData ?? false,
@@ -991,11 +1048,8 @@ export function registerAppTools() {
       }
       throw toActionableError(error, `Failed to uninstall app`);
     } finally {
-      try {
-        invalidateInstalledAppsCache(device.deviceId);
-        await notifyInstalledAppResourceUpdated(device.deviceId);
-      } catch (error) {
-        logger.warn(`[AppTools] Failed to refresh app resources after uninstall: ${error}`);
+      if (mutationMayHaveHappened) {
+        await refreshInstalledAppResources(device.deviceId);
       }
     }
   };

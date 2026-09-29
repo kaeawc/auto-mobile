@@ -126,19 +126,17 @@ public enum HierarchyMerger {
         // the direct match (for injection placement) and the full match (direct or the
         // smallest enclosing node, for enrichment) on a mirror tree.
         let matched = matchTree(xcuitestRoot, context: context)
-
-        // Counted bag of SDK keys that a full match consumed, so identical-keyed SDK
-        // siblings aren't collapsed when deciding what to inject. Derived from the
-        // cached matches — no re-matching.
-        var matchedSdkKeyCounts: [LookupKey: Int] = [:]
-        accumulateMatchedKeys(matched, into: &matchedSdkKeyCounts)
+        var xcuitestNodesByClass: [String: [UIElementInfo]] = [:]
+        indexXcuitestNodes(xcuitestRoot, into: &xcuitestNodesByClass)
 
         // Build the enriched + injected output tree from the cached matches.
-        var injectedParentKeys = Set<LookupKey>()
+        var injectedParentKeys = Set<InjectionKey>()
+        var injectedNodeKeys = Set<InjectionKey>()
         let injectedRoot = buildNode(
             matched,
-            matchedSdkKeyCounts: matchedSdkKeyCounts,
-            injectedParentKeys: &injectedParentKeys
+            xcuitestNodesByClass: xcuitestNodesByClass,
+            injectedParentKeys: &injectedParentKeys,
+            injectedNodeKeys: &injectedNodeKeys
         ).element
 
         return ViewHierarchy(
@@ -178,6 +176,80 @@ public enum HierarchyMerger {
         let top: Int
         let right: Int
         let bottom: Int
+    }
+
+    /// SDK subtrees with the same visible identity and children are one injection.
+    /// Child identities keep distinct SDK-only content under colocated wrappers.
+    private struct InjectionKey: Hashable {
+        let bounds: LookupKey
+        let identifier: String?
+        let label: String?
+        let children: [InjectionKey]
+    }
+
+    private static func injectionKey(for node: SdkViewNode) -> InjectionKey {
+        InjectionKey(
+            bounds: exactKey(for: node),
+            identifier: node.accessibilityIdentifier,
+            label: node.accessibilityLabel,
+            children: node.children?.map { injectionKey(for: $0) } ?? []
+        )
+    }
+
+    private static func classFamily(_ className: String) -> String {
+        switch className {
+        case "UIKitTextField", "UITextField": return "UITextField"
+        case "UIKitSearchBar", "UISearchBar": return "UISearchBar"
+        default: return className
+        }
+    }
+
+    private static func indexXcuitestNodes(_ node: UIElementInfo, into index: inout [String: [UIElementInfo]]) {
+        if let className = node.className {
+            index[classFamily(className), default: []].append(node)
+        }
+        for child in node.node ?? [] {
+            indexXcuitestNodes(child, into: &index)
+        }
+    }
+
+    private static func isCounterpart(_ sdkNode: SdkViewNode, of element: UIElementInfo) -> Bool {
+        guard let className = element.className,
+              let bounds = element.bounds
+        else { return false }
+        return isCounterpart(sdkNode, className: className, identifier: element.resourceId, bounds: bounds)
+    }
+
+    private static func isCounterpart(
+        _ sdkNode: SdkViewNode,
+        className: String,
+        identifier: String?,
+        bounds: ElementBounds
+    )
+        -> Bool
+    {
+        guard classFamily(className) == classFamily(sdkNode.className) else { return false }
+        if let sdkId = sdkNode.accessibilityIdentifier, !sdkId.isEmpty,
+           let identifier, !identifier.isEmpty, sdkId != identifier
+        {
+            return false
+        }
+        let sdkBounds = sdkNode.bounds
+        return abs(bounds.left - sdkBounds.left) <= boundsTolerance &&
+            abs(bounds.top - sdkBounds.top) <= boundsTolerance &&
+            abs(bounds.right - sdkBounds.right) <= boundsTolerance &&
+            abs(bounds.bottom - sdkBounds.bottom) <= boundsTolerance
+    }
+
+    private static func isRepresented(_ sdkNode: SdkViewNode, by index: [String: [UIElementInfo]]) -> Bool {
+        index[classFamily(sdkNode.className)]?.contains { isCounterpart(sdkNode, of: $0) } == true
+    }
+
+    private static func identifiersCompatible(_ sdkNode: SdkViewNode, _ resourceId: String?) -> Bool {
+        guard let sdkId = sdkNode.accessibilityIdentifier, !sdkId.isEmpty,
+              let resourceId, !resourceId.isEmpty
+        else { return true }
+        return sdkId == resourceId
     }
 
     private static func buildLookup(
@@ -244,6 +316,7 @@ public enum HierarchyMerger {
         let lookup: [LookupKey: SdkViewNode]
         let boundsLookup: [BoundsKey: SdkViewNode]
         let identifierLookup: [String: SdkViewNode]
+        let sdkNodesByClass: [String: [SdkViewNode]]
         /// SDK nodes sorted by ascending area. Swift's sort is stable, so equal-area
         /// nodes retain their original document order — matching the old scan's
         /// "first smallest-area container wins" tie-break exactly.
@@ -265,6 +338,7 @@ public enum HierarchyMerger {
             self.lookup = lookup
             self.boundsLookup = boundsLookup
             self.identifierLookup = identifierLookup
+            sdkNodesByClass = Dictionary(grouping: allSdkNodes, by: { classFamily($0.className) })
             sortedByArea = allSdkNodes.sorted { lhs, rhs in
                 (lhs.bounds.width * lhs.bounds.height) < (rhs.bounds.width * rhs.bounds.height)
             }
@@ -278,7 +352,25 @@ public enum HierarchyMerger {
                 bounds: bounds.map { BoundsKey(left: $0.left, top: $0.top, right: $0.right, bottom: $0.bottom) }
             )
             if let cached = directCache[key] { return cached }
-            let result = findDirectMatch(
+            // Prefer a real counterpart before the legacy bounds-only fallback,
+            // which can pick a colocated UIKit wrapper instead of its text field.
+            var strict: SdkViewNode?
+            if let className, let bounds {
+                let candidates = sdkNodesByClass[classFamily(className)]?.filter {
+                    isCounterpart($0, className: className, identifier: resourceId, bounds: bounds)
+                } ?? []
+                func exactBounds(_ node: SdkViewNode) -> Bool {
+                    node.bounds.left == bounds.left && node.bounds.top == bounds.top &&
+                        node.bounds.right == bounds.right && node.bounds.bottom == bounds.bottom
+                }
+                func sameIdentifier(_ node: SdkViewNode) -> Bool {
+                    resourceId != nil && node.accessibilityIdentifier == resourceId
+                }
+                strict = candidates.first { sameIdentifier($0) && exactBounds($0) } ??
+                    candidates.first { sameIdentifier($0) } ??
+                    candidates.first { exactBounds($0) } ?? candidates.first
+            }
+            let result = strict ?? findDirectMatch(
                 className: className,
                 resourceId: resourceId,
                 bounds: bounds,
@@ -338,7 +430,8 @@ public enum HierarchyMerger {
         )
         // Enrichment uses the smallest-enclosing fallback only when there is no direct hit,
         // mirroring the old `findMatch` (direct ?? enclosing).
-        let full = direct ?? context.enclosingMatch(bounds: element.bounds)
+        let enclosing = context.enclosingMatch(bounds: element.bounds)
+        let full = direct ?? enclosing.flatMap { identifiersCompatible($0, element.resourceId) ? $0 : nil }
         let children = element.node?.map { matchTree($0, context: context) }
         return MatchedNode(element: element, directMatch: direct, fullMatch: full, children: children)
     }
@@ -364,12 +457,12 @@ public enum HierarchyMerger {
                     className: className,
                     left: bounds.left, top: bounds.top,
                     right: bounds.right, bottom: bounds.bottom
-                )] {
+                )], identifiersCompatible(exact, resourceId) {
                     return exact
                 }
                 if let near = probeToleranceMatch(bounds: bounds, in: lookup, makeKey: { l, t, r, b in
                     LookupKey(className: className, left: l, top: t, right: r, bottom: b)
-                }) {
+                }, accept: { identifiersCompatible($0, resourceId) }) {
                     return near
                 }
             }
@@ -378,12 +471,12 @@ public enum HierarchyMerger {
             if let boundsMatch = boundsLookup[BoundsKey(
                 left: bounds.left, top: bounds.top,
                 right: bounds.right, bottom: bounds.bottom
-            )] {
+            )], identifiersCompatible(boundsMatch, resourceId) {
                 return boundsMatch
             }
             if let near = probeToleranceMatch(bounds: bounds, in: boundsLookup, makeKey: { l, t, r, b in
                 BoundsKey(left: l, top: t, right: r, bottom: b)
-            }) {
+            }, accept: { identifiersCompatible($0, resourceId) }) {
                 return near
             }
         }
@@ -404,7 +497,8 @@ public enum HierarchyMerger {
     private static func probeToleranceMatch<Key: Hashable>(
         bounds: ElementBounds,
         in index: [Key: SdkViewNode],
-        makeKey: (_ left: Int, _ top: Int, _ right: Int, _ bottom: Int) -> Key
+        makeKey: (_ left: Int, _ top: Int, _ right: Int, _ bottom: Int) -> Key,
+        accept: (SdkViewNode) -> Bool
     )
         -> SdkViewNode?
     {
@@ -418,7 +512,7 @@ public enum HierarchyMerger {
                             bounds.left + dl, bounds.top + dt,
                             bounds.right + dr, bounds.bottom + db
                         )
-                        if let hit = index[key] {
+                        if let hit = index[key], accept(hit) {
                             return hit
                         }
                     }
@@ -426,22 +520,6 @@ public enum HierarchyMerger {
             }
         }
         return nil
-    }
-
-    // MARK: - Matched-key accounting
-
-    /// Walk the cached match tree and tally the exact lookup key of every full match,
-    /// so injection can tell which SDK nodes already have an XCUITest counterpart.
-    /// Uses a counted bag so identical-keyed siblings each get their own match slot.
-    private static func accumulateMatchedKeys(_ node: MatchedNode, into matched: inout [LookupKey: Int]) {
-        if let sdkNode = node.fullMatch {
-            matched[exactKey(for: sdkNode), default: 0] += 1
-        }
-        if let children = node.children {
-            for child in children {
-                accumulateMatchedKeys(child, into: &matched)
-            }
-        }
     }
 
     // MARK: - Enrichment + injection (single output pass)
@@ -452,8 +530,9 @@ public enum HierarchyMerger {
     /// `UIElementInfo` copy is skipped for untouched nodes.
     private static func buildNode(
         _ node: MatchedNode,
-        matchedSdkKeyCounts: [LookupKey: Int],
-        injectedParentKeys: inout Set<LookupKey>
+        xcuitestNodesByClass: [String: [UIElementInfo]],
+        injectedParentKeys: inout Set<InjectionKey>,
+        injectedNodeKeys: inout Set<InjectionKey>
     )
         -> (element: UIElementInfo, changed: Bool)
     {
@@ -469,8 +548,9 @@ public enum HierarchyMerger {
             for child in children {
                 let built = buildNode(
                     child,
-                    matchedSdkKeyCounts: matchedSdkKeyCounts,
-                    injectedParentKeys: &injectedParentKeys
+                    xcuitestNodesByClass: xcuitestNodesByClass,
+                    injectedParentKeys: &injectedParentKeys,
+                    injectedNodeKeys: &injectedNodeKeys
                 )
                 out.append(built.element)
                 if built.changed { childrenChanged = true }
@@ -479,21 +559,20 @@ public enum HierarchyMerger {
         }
 
         // SDK children of the direct match that have no XCUITest counterpart get injected.
-        // Local counts handle identical siblings: if 3 SDK children share a key but only 2
-        // were matched, the 3rd is still injected.
+        // Prune matched descendants too: an unmatched wrapper can contain UIKit views
+        // that XCUITest already exposed elsewhere in its hierarchy.
         var injected: [UIElementInfo] = []
         if let currentSdk = node.directMatch,
-           injectedParentKeys.insert(exactKey(for: currentSdk)).inserted,
+           injectedParentKeys.insert(injectionKey(for: currentSdk)).inserted,
            let sdkChildren = currentSdk.children
         {
-            var localKeyCounts: [LookupKey: Int] = [:]
             for sdkChild in sdkChildren {
-                let childKey = exactKey(for: sdkChild)
-                let localCount = (localKeyCounts[childKey] ?? 0) + 1
-                localKeyCounts[childKey] = localCount
-                let matchedCount = matchedSdkKeyCounts[childKey] ?? 0
-                if localCount > matchedCount, isWorthInjecting(sdkChild) {
-                    injected.append(convertSdkNode(sdkChild))
+                if let converted = convertSdkNode(
+                    sdkChild,
+                    xcuitestNodesByClass: xcuitestNodesByClass,
+                    injectedNodeKeys: &injectedNodeKeys
+                ) {
+                    injected.append(converted)
                 }
             }
         }
@@ -645,9 +724,9 @@ public enum HierarchyMerger {
 
     // MARK: - Injection helpers
 
-    /// Whether an SDK-only node is worth injecting into the XCUITest tree.
-    /// Skips purely structural container views that add no useful information.
-    private static func isWorthInjecting(_ node: SdkViewNode) -> Bool {
+    /// Whether this SDK node contributes content on its own. A structural wrapper
+    /// is retained only if it has an SDK-only descendant after pruning.
+    private static func hasMeaningfulContent(_ node: SdkViewNode) -> Bool {
         // Must have an accessibility identifier, label, custom actions, or be interactive
         if node.accessibilityIdentifier != nil { return true }
         if node.accessibilityLabel != nil { return true }
@@ -662,25 +741,31 @@ public enum HierarchyMerger {
         if node.borderWidth > 0 { return true }
         // Layer-only node surfaces SwiftUI shape visuals that UIView walking misses.
         if node.isLayerNode { return true }
-        // Has non-trivial children worth surfacing
-        if let children = node.children, children.contains(where: { isWorthInjecting($0) }) {
-            return true
-        }
         return false
     }
 
     /// Convert an SDK node (and its subtree) to a UIElementInfo for injection.
-    private static func convertSdkNode(_ node: SdkViewNode) -> UIElementInfo {
+    private static func convertSdkNode(
+        _ node: SdkViewNode,
+        xcuitestNodesByClass: [String: [UIElementInfo]],
+        injectedNodeKeys: inout Set<InjectionKey>
+    )
+        -> UIElementInfo?
+    {
+        if isRepresented(node, by: xcuitestNodesByClass) { return nil }
+        let key = injectionKey(for: node)
+        if !injectedNodeKeys.insert(key).inserted { return nil }
+        let convertedChildren = node.children?.compactMap { child in
+            convertSdkNode(
+                child,
+                xcuitestNodesByClass: xcuitestNodesByClass,
+                injectedNodeKeys: &injectedNodeKeys
+            )
+        }
+        if !hasMeaningfulContent(node), convertedChildren?.isEmpty ?? true { return nil }
         // `sdk.source` marks injected nodes and is always present; the remaining sdk.*
         // fields are appended only when non-default (issue #5475).
         let extras = appendSdkExtras(to: ["sdk.source": "sdkWalker"], from: node) ?? ["sdk.source": "sdkWalker"]
-
-        let convertedChildren: [UIElementInfo]? = node.children?.compactMap { child in
-            if isWorthInjecting(child) {
-                return convertSdkNode(child)
-            }
-            return nil
-        }
 
         return UIElementInfo(
             text: node.accessibilityLabel,

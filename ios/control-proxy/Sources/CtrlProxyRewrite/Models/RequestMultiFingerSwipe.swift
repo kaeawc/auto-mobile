@@ -2,6 +2,7 @@ import Foundation
 
 public struct RequestMultiFingerSwipe: Decodable, Sendable {
     public var requestId: String?
+    public var frameContext: String?
     public var x1: Double
     public var y1: Double
     public var x2: Double

@@ -2,6 +2,7 @@ import Foundation
 
 public struct RequestClearText: Decodable, Sendable {
     public var requestId: String?
+    public var frameContext: String?
     public var resourceId: String?
 }
 

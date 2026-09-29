@@ -2,6 +2,7 @@ import Foundation
 
 public struct RequestPinch: Decodable, Sendable {
     public var requestId: String?
+    public var frameContext: String?
     public var centerX: Double
     public var centerY: Double
     public var distanceStart: Double

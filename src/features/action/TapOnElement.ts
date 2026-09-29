@@ -13,6 +13,7 @@ import {
   ActionableError,
   BootedDevice,
   Element,
+  ElementBounds,
   ElementSelectionResult,
   ObserveResult,
   TapOnElementResult,
@@ -94,6 +95,30 @@ import {
 import { DefaultObserveElementCollector } from "../observe/ObserveElementCollector";
 import { getImeOccluderForElement, tapPointOutsideIme } from "../observe/output/SkeletonProjection";
 import { getHierarchyNodeSource } from "../observe/output/elementProvenance";
+import { getScreenBounds } from "../../utils/screenBounds";
+
+function intersectTapBounds(a: ElementBounds, b: ElementBounds): ElementBounds | null {
+  const bounds = {
+    left: Math.max(a.left, b.left),
+    top: Math.max(a.top, b.top),
+    right: Math.min(a.right, b.right),
+    bottom: Math.min(a.bottom, b.bottom),
+  };
+  return bounds.left < bounds.right && bounds.top < bounds.bottom ? bounds : null;
+}
+
+function pointInTapBounds(point: { x: number; y: number }, bounds: ElementBounds): boolean {
+  return (
+    point.x >= bounds.left &&
+    point.x < bounds.right &&
+    point.y >= bounds.top &&
+    point.y < bounds.bottom
+  );
+}
+
+function hasTapArea(bounds: ElementBounds | undefined): bounds is ElementBounds {
+  return !!bounds && bounds.left < bounds.right && bounds.top < bounds.bottom;
+}
 
 type SearchUntilStats = NonNullable<TapOnElementResult["searchUntil"]>;
 type FocusIdentifierKey = "resource-id" | "view-id" | "test-tag";
@@ -988,15 +1013,178 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
   }
 
   private isElementTapTargetOffScreen(
-    element: Element,
+    selection: ElementSelectionResult,
+    viewHierarchy: ViewHierarchyResult,
     screenSize?: ObserveResult["screenSize"],
+    options?: TapOnElementOptions,
   ): boolean {
-    if (!screenSize?.width || !screenSize?.height || !element.bounds) {
+    if (!screenSize?.width || !screenSize?.height) {
       return false;
     }
-    const centerX = (element.bounds.left + element.bounds.right) / 2;
-    const centerY = (element.bounds.top + element.bounds.bottom) / 2;
-    return centerX < 0 || centerX > screenSize.width || centerY < 0 || centerY > screenSize.height;
+    return !this.visibleTapBounds(selection, viewHierarchy, screenSize, options);
+  }
+
+  private invisibleMatchError(
+    selection: ElementSelectionResult,
+    options: TapOnElementOptions,
+  ): string {
+    const matched = selection.matchedElement ?? selection.element;
+    return (
+      `Matched element ${JSON.stringify(matched?.text ?? options.text ?? options.elementId ?? "target")} ` +
+      `has no visible tap area (bounds ${JSON.stringify(matched?.bounds)}). ` +
+      "Scroll it into view with swipeOn, then retry tapOn."
+    );
+  }
+
+  private visibleTapBounds(
+    selection: ElementSelectionResult,
+    hierarchy: ViewHierarchyResult,
+    screenSize?: ObserveResult["screenSize"],
+    options?: TapOnElementOptions,
+    tapTarget?: Element,
+  ): ElementBounds | null {
+    const target = tapTarget ?? selection.element;
+    if (!target?.bounds) {
+      return null;
+    }
+    const matched = this.matchedTapElement(selection, target, options);
+    const matchedBounds = matched.bounds;
+    const matchForTap = hasTapArea(matchedBounds) ? matched : target;
+    const overlap = intersectTapBounds(target.bounds, matchForTap.bounds);
+    // Some injected/legacy captures omit screen dimensions. In that case we
+    // still constrain the point to the matched/actionable overlap; live observe
+    // supplies dimensions for the viewport and chrome checks.
+    const screen = screenSize ? getScreenBounds(screenSize, undefined, true) : undefined;
+    const visible = overlap && screen ? intersectTapBounds(overlap, screen) : overlap;
+    if (!visible) {
+      return null;
+    }
+    if (!screenSize || this.device.platform !== "ios") {
+      return visible;
+    }
+    return this.clipBelowTabBars(visible, matchForTap, target, hierarchy, screenSize);
+  }
+
+  private matchedTapElement(
+    selection: ElementSelectionResult,
+    target: Element,
+    options?: TapOnElementOptions,
+  ): Element {
+    // Sibling selectors act on a different node from their anchor; focus
+    // selectors may similarly promote a label to its editable field.
+    return options?.sibling || options?.action === "focus"
+      ? target
+      : (selection.matchedElement ?? target);
+  }
+
+  private resolveVisibleTapPoint(
+    target: Element,
+    hierarchy: ViewHierarchyResult,
+    visibleBounds: ElementBounds,
+    options: TapOnElementOptions,
+  ): { x: number; y: number } | null {
+    const point = this.resolveImeSafeTapPoint(target, hierarchy, options);
+    if (pointInTapBounds(point, visibleBounds)) {
+      return point;
+    }
+    const { left, top, right, bottom } = visibleBounds;
+    const elements =
+      this.device.platform === "android"
+        ? new DefaultObserveElementCollector().collect(hierarchy, "android")
+        : null;
+    const ime = elements && getImeOccluderForElement(elements, target);
+    return ime
+      ? tapPointOutsideIme([left, top, right, bottom], ime.bounds)
+      : this.geometry.getElementCenter({ bounds: visibleBounds });
+  }
+
+  private clipBelowTabBars(
+    visible: ElementBounds,
+    matched: Element,
+    target: Element,
+    hierarchy: ViewHierarchyResult,
+    screenSize: NonNullable<ObserveResult["screenSize"]>,
+  ): ElementBounds | null {
+    // A tab bar is app chrome, so it need not appear in systemInsets.
+    const nodes = new SearchableHierarchy().project(hierarchy);
+    const matchedNode = findTapTargetNode(nodes, matched);
+    const targetNode = matchedNode ?? findTapTargetNode(nodes, target);
+    if (!targetNode) {
+      return visible;
+    }
+    let clipped: ElementBounds | null = visible;
+    for (const bar of nodes) {
+      if (!clipped) {
+        return null;
+      }
+      if (!this.isTabBarCovering(bar, clipped)) {
+        continue;
+      }
+      if (!this.isTabBarAboveMatch(bar, targetNode)) {
+        continue;
+      }
+      if (!this.isMatchedInsideTabBar(matchedNode, matched, bar, nodes)) {
+        clipped = intersectTapBounds(clipped, {
+          left: 0,
+          top: 0,
+          right: screenSize.width,
+          bottom: bar.bounds?.top ?? 0,
+        });
+      }
+    }
+    return clipped;
+  }
+
+  private isTabBarAboveMatch(bar: SearchableEntry, matchedNode: SearchableEntry): boolean {
+    return bar.rootGroup === matchedNode.rootGroup && bar.windowRank <= matchedNode.windowRank;
+  }
+
+  private isMatchedInsideTabBar(
+    matchedNode: SearchableEntry | undefined,
+    matched: Element,
+    bar: SearchableEntry,
+    nodes: readonly SearchableEntry[],
+  ): boolean {
+    if (matchedNode) {
+      return this.isInsideHierarchyNode(matchedNode, bar, nodes);
+    }
+    const bounds = matched.bounds;
+    const barBounds = bar.bounds;
+    return (
+      !!bounds &&
+      !!barBounds &&
+      bounds.left >= barBounds.left &&
+      bounds.top >= barBounds.top &&
+      bounds.right <= barBounds.right &&
+      bounds.bottom <= barBounds.bottom
+    );
+  }
+
+  private isTabBarCovering(bar: SearchableEntry, visible: ElementBounds): boolean {
+    const bounds = bar.bounds;
+    return (
+      (bar.className === "UITabBar" || bar.className === "XCUIElementTypeTabBar") &&
+      !!bounds &&
+      bounds.left < visible.right &&
+      bounds.right > visible.left &&
+      bounds.top < visible.bottom &&
+      bounds.bottom > visible.top
+    );
+  }
+
+  private isInsideHierarchyNode(
+    node: SearchableEntry | undefined,
+    ancestor: SearchableEntry,
+    nodes: readonly SearchableEntry[],
+  ): boolean {
+    let current = node;
+    while (current) {
+      if (current === ancestor) {
+        return true;
+      }
+      current = current.parentIndex === undefined ? undefined : nodes[current.parentIndex];
+    }
+    return false;
   }
 
   private getScreenSizeFromHierarchy(
@@ -1190,7 +1378,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
             });
         lastSelection = selection;
         if (selection.element) {
-          if (this.isElementTapTargetOffScreen(selection.element, screenSize)) {
+          if (this.isElementTapTargetOffScreen(selection, viewHierarchy, screenSize, options)) {
             offScreenSelection = selection;
             continue;
           }
@@ -1905,6 +2093,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
      * (issue #6284).
      */
     refreshedFromDevice: boolean;
+    visibilityError?: string;
   }> {
     const viewHierarchy = observeResult.viewHierarchy;
     if (!viewHierarchy) {
@@ -1916,6 +2105,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     let requestCount = 0;
     let changeCount = 0;
     let offScreenRejections = 0;
+    let visibilityError: string | undefined;
     let lastHash = this.hashViewHierarchy(viewHierarchy);
 
     let latestViewHierarchy = viewHierarchy;
@@ -1925,9 +2115,16 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     let selection = initialSearch.selection;
     let element = selection.element;
     let containerFoundEver = initialSearch.containerFound;
+    if (!element && selection.matchedElement) {
+      visibilityError = this.invisibleMatchError(selection, options);
+    }
 
-    if (!element || this.isElementTapTargetOffScreen(element, latestScreenSize)) {
+    if (
+      !element ||
+      this.isElementTapTargetOffScreen(selection, latestViewHierarchy, latestScreenSize, options)
+    ) {
       if (element) {
+        visibilityError = this.invisibleMatchError(selection, options);
         logger.warn(
           `[TapOnElement] Element found but tap target is off-screen, will retry. ` +
             `bounds=${JSON.stringify(element.bounds)}, ` +
@@ -1980,7 +2177,14 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         selection = searchResult.selection;
         element = selection.element;
         containerFoundEver = containerFoundEver || searchResult.containerFound;
-        if (element && this.isElementTapTargetOffScreen(element, latestScreenSize)) {
+        if (!element && selection.matchedElement) {
+          visibilityError = this.invisibleMatchError(selection, options);
+        }
+        if (
+          element &&
+          this.isElementTapTargetOffScreen(selection, refreshedHierarchy, latestScreenSize, options)
+        ) {
+          visibilityError = this.invisibleMatchError(selection, options);
           logger.warn(
             `[TapOnElement] Element found but tap target is off-screen, retrying. ` +
               `bounds=${JSON.stringify(element.bounds)}`,
@@ -1997,9 +2201,9 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     }
 
     if (offScreenRejections > 0 && !element) {
-      logger.error(
-        `[TapOnElement] Element was found ${offScreenRejections} time(s) but always with off-screen bounds. ` +
-          `The accessibility framework is reporting incorrect bounds for this element.`,
+      logger.warn(
+        `[TapOnElement] Element was found ${offScreenRejections} time(s) but had no visible tap area. ` +
+          "Scroll it into view before retrying.",
       );
     }
 
@@ -2018,6 +2222,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       // when a refresh-loop iteration replaced it with a live device re-capture;
       // the target being present in the initial hierarchy returns it unchanged.
       refreshedFromDevice: latestViewHierarchy !== viewHierarchy,
+      ...(visibilityError && !element ? { visibilityError } : {}),
     };
   }
 
@@ -2402,6 +2607,9 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           );
           viewHierarchy = searchOutcome.viewHierarchy;
           if (!searchOutcome.selection.element) {
+            if (searchOutcome.visibilityError) {
+              throw new ActionableError(searchOutcome.visibilityError);
+            }
             await this.handleElementNotFound(
               options,
               observeResult,
@@ -2417,6 +2625,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           );
           viewHierarchy = liveSelection.viewHierarchy;
           const selection = liveSelection.selection;
+          let finalSelection = selection;
           const element = selection.element as Element;
           let selectedElementMetadata = this.buildSelectedElementMetadata(selection);
           const ensureCheckedResult = this.ensureCheckedBeforeTap(
@@ -2530,6 +2739,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
             this.replaceObservationHierarchy(observeResult, stable.viewHierarchy, true);
             viewHierarchy = stable.viewHierarchy;
             tapElement = stable.tapElement;
+            finalSelection = stable.selection;
             usedParent = stable.usedParent;
             // Rebuild from the refreshed selection so the reported selectedElement
             // (bounds/indexInMatches/totalMatches) describes the node actually
@@ -2567,7 +2777,33 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           }
 
           this.logClickableParentSelection(usedParent);
-          const tapPoint = this.resolveImeSafeTapPoint(tapElement, viewHierarchy, options);
+          const screenSize =
+            this.getScreenSizeFromHierarchy(viewHierarchy) ?? observeResult.screenSize;
+          const visibleBounds = this.visibleTapBounds(
+            finalSelection,
+            viewHierarchy,
+            screenSize,
+            requestedAction === "focus" ? { ...options, action: "focus" } : options,
+            tapElement,
+          );
+          if (!visibleBounds) {
+            throw new ActionableError(
+              "Matched element has no visible tap area on this screen. " +
+                "Scroll it into view with swipeOn, then retry tapOn.",
+            );
+          }
+          const tapPoint = this.resolveVisibleTapPoint(
+            tapElement,
+            viewHierarchy,
+            visibleBounds,
+            options,
+          );
+          if (!tapPoint) {
+            throw new ActionableError(
+              "Matched element has no unobstructed visible tap area. " +
+                "Dismiss the keyboard or scroll it into view, then retry tapOn.",
+            );
+          }
           const tapBounds = tapElement.bounds;
           logger.info(
             `[TapOnElement] Tapping (${tapPoint.x}, ${tapPoint.y}) on element: ` +
@@ -2627,6 +2863,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
               isAccessibilityServiceEnabled,
               observeResult.screenSize,
               signal,
+              finalSelection,
             );
           }
 
@@ -2926,6 +3163,44 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     return this.resolveTapTargetElement(refound, hierarchy, action, requireResourceId).element;
   }
 
+  private refreshedRetrySelection(
+    options: TapOnElementOptions,
+    hierarchy: ViewHierarchyResult,
+    tapElement: Element,
+    previous?: ElementSelectionResult,
+  ): ElementSelectionResult {
+    if (options.text || options.textAny?.length || options.elementId || options.testTag) {
+      return this.findElementInHierarchy(options, hierarchy).selection;
+    }
+    return (
+      previous ?? { element: tapElement, indexInMatches: -1, totalMatches: 1, strategy: "first" }
+    );
+  }
+
+  private resolveRefreshedRetryTarget(
+    options: TapOnElementOptions,
+    hierarchy: ViewHierarchyResult,
+    action: string,
+    isTalkBackEnabled: boolean,
+    selection: ElementSelectionResult,
+    previousTarget: Element,
+  ): Element | null {
+    if (options.ensureChecked !== undefined) {
+      return this.resolveEnsureCheckedRetryTarget(options, hierarchy, action, isTalkBackEnabled);
+    }
+    if (selection.element) {
+      return this.resolveTapTargetElement(selection.element, hierarchy, action, isTalkBackEnabled)
+        .element;
+    }
+    if (options.text || options.textAny?.length || options.elementId || options.testTag) {
+      logger.warn(
+        "[TapOnElement][retryIfNoChange] Target not found in refreshed hierarchy; skipping retry",
+      );
+      return null;
+    }
+    return previousTarget;
+  }
+
   /** @internal Test seam for pre-tap stability tests (#7992); not part of the public API. */
   async retryTapIfNoChange(
     preTapHash: string,
@@ -2937,6 +3212,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     isTalkBackEnabled: boolean,
     screenSize: ObserveResult["screenSize"],
     signal?: AbortSignal,
+    selection?: ElementSelectionResult,
   ): Promise<void> {
     const probe = await checkAndroidTapHierarchyChange(
       this.timer,
@@ -2962,15 +3238,47 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       return;
     }
 
-    const retryTarget =
-      options.ensureChecked === undefined
-        ? tapElement
-        : this.resolveEnsureCheckedRetryTarget(options, probe.hierarchy, action, isTalkBackEnabled);
+    const refreshedSelection = this.refreshedRetrySelection(
+      options,
+      probe.hierarchy,
+      tapElement,
+      selection,
+    );
+    const retryTarget = this.resolveRefreshedRetryTarget(
+      options,
+      probe.hierarchy,
+      action,
+      isTalkBackEnabled,
+      refreshedSelection,
+      tapElement,
+    );
     if (!retryTarget) {
       return;
     }
-    const retryPoint = this.resolveImeSafeTapPoint(retryTarget, probe.hierarchy, options);
-
+    const retryBounds = this.visibleTapBounds(
+      refreshedSelection.element
+        ? refreshedSelection
+        : (selection ?? { ...refreshedSelection, element: retryTarget }),
+      probe.hierarchy,
+      screenSize,
+      options,
+      retryTarget,
+    );
+    if (!retryBounds) {
+      logger.warn(
+        "[TapOnElement][retryIfNoChange] Refreshed target has no visible tap area; skipping retry",
+      );
+      return;
+    }
+    const retryPoint = pointInTapBounds(tapPoint, retryBounds)
+      ? tapPoint
+      : this.resolveVisibleTapPoint(retryTarget, probe.hierarchy, retryBounds, options);
+    if (!retryPoint) {
+      logger.warn(
+        "[TapOnElement][retryIfNoChange] Refreshed target has no unobstructed tap point; skipping retry",
+      );
+      return;
+    }
     logger.warn(
       `[TapOnElement][retryIfNoChange] Hierarchy unchanged after tap at ` +
         `(${retryPoint.x}, ${retryPoint.y}) — ghost tap detected, retrying`,

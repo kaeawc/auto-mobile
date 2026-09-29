@@ -4,8 +4,8 @@ import dev.jasonpearson.automobile.protocol.ErrorResponse
 import dev.jasonpearson.automobile.protocol.HierarchyUpdateEvent
 import dev.jasonpearson.automobile.protocol.SetKeyboardProfileResult
 import dev.jasonpearson.automobile.protocol.SwipeResult
-import io.ktor.websocket.DefaultWebSocketSession
-import io.mockk.mockk
+import io.ktor.websocket.CloseReason
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
@@ -259,6 +259,159 @@ class WebSocketServerTest {
       assertEquals("Connection count should start at 0", 0, server.getConnectionCount())
     }
 
+  @Test
+  fun `droppable burst sheds frames and preserves correlated response after a brief stall`() =
+    runTest(testScope.testScheduler) {
+      val stalled = StalledTransport()
+      val client = server.registerClient(1, stalled)
+      server.broadcast("in-flight")
+      runCurrent()
+
+      repeat(WebSocketServer.OUTGOING_CAPACITY + 80) { index ->
+        val type = if (index % 2 == 0) "log_event" else "network_event"
+        server.broadcast("""{"type":"$type","index":$index}""")
+      }
+      val response = """{"type":"action_result","requestId":"awaited"}"""
+      server.sendToClient(client, response)
+
+      assertEquals(1, server.getConnectionCount())
+      assertNull(stalled.closeReason)
+      assertTrue(client.droppedCount > 0)
+      assertEquals(WebSocketServer.OUTGOING_CAPACITY, client.pendingCount)
+      stalled.unblock()
+      runCurrent()
+      assertEquals("in-flight", stalled.messages.first())
+      assertFalse(stalled.messages.contains("""{"type":"log_event","index":0}"""))
+      assertTrue(stalled.messages.contains("""{"type":"network_event","index":143}"""))
+      assertEquals(response, stalled.messages.last())
+    }
+
+  @Test
+  fun `correlated response uses reserve behind must deliver frames`() =
+    runTest(testScope.testScheduler) {
+      val stalled = StalledTransport()
+      val client = server.registerClient(1, stalled)
+      server.broadcast("in-flight")
+      runCurrent()
+      repeat(WebSocketServer.OUTGOING_CAPACITY) {
+        server.broadcast("""{"type":"must_deliver","index":$it}""")
+      }
+      val response = """{"type":"action_result","requestId":"awaited"}"""
+      server.sendToClient(client, response)
+
+      assertEquals(WebSocketServer.OUTGOING_CAPACITY + 1, client.pendingCount)
+      assertEquals(1, server.getConnectionCount())
+      stalled.unblock()
+      runCurrent()
+      assertEquals(response, stalled.messages.last())
+    }
+
+  @Test
+  fun `pending hierarchy updates coalesce in place`() =
+    runTest(testScope.testScheduler) {
+      val stalled = StalledTransport()
+      val client = server.registerClient(1, stalled)
+      server.broadcast("in-flight")
+      runCurrent()
+      val first = """{"type":"hierarchy_update","data":"old"}"""
+      val newest = """{"type":"hierarchy_update","data":"new"}"""
+      server.broadcast(first)
+      server.broadcast("marker")
+      server.broadcast(newest)
+
+      assertEquals(1L, client.droppedCount)
+      assertEquals(2, client.pendingCount)
+      stalled.unblock()
+      runCurrent()
+      assertEquals(listOf("in-flight", newest, "marker"), stalled.messages)
+    }
+
+  @Test
+  fun `stalled client is closed at hard ceiling while healthy client receives ordered frames`() =
+    runTest(testScope.testScheduler) {
+      val stalled = StalledTransport()
+      val healthy = RecordingTransport()
+      val stalledClient = server.registerClient(1, stalled)
+      server.registerClient(2, healthy)
+      runCurrent()
+
+      val messages =
+        (0..WebSocketServer.OUTGOING_HARD_CEILING + 1).map {
+          """{"type":"must_deliver","index":$it}"""
+        }
+      server.broadcast(messages.first())
+      runCurrent() // The stalled sender is now blocked on its first frame.
+      messages.drop(1).take(WebSocketServer.OUTGOING_HARD_CEILING).chunked(32).forEach { batch ->
+        batch.forEach { server.broadcast(it) }
+        runCurrent() // Healthy client drains independently after each short burst.
+      }
+      // One frame is in flight and exactly the hard ceiling is waiting behind it.
+      assertEquals(2, server.getConnectionCount())
+      assertNull(stalled.closeReason)
+
+      messages.drop(WebSocketServer.OUTGOING_HARD_CEILING + 1).forEach { server.broadcast(it) }
+      runCurrent()
+
+      assertEquals(messages, healthy.messages)
+      assertEquals(1, server.getConnectionCount())
+      assertTrue(
+        stalledClient.outgoing
+          .trySend(
+            WebSocketServer.OutgoingFrame(
+              "after-disconnect",
+              WebSocketServer.OutgoingTier.MUST_DELIVER,
+            )
+          )
+          .isFailure
+      )
+      assertEquals(CloseReason.Codes.TRY_AGAIN_LATER.code, stalled.closeReason?.code)
+      assertTrue(stalled.closeReason?.message?.contains("Outgoing buffer full") == true)
+    }
+
+  @Test
+  fun `sync hierarchy enqueue precedes correlated response for its client`() =
+    runTest(testScope.testScheduler) {
+      val transport = RecordingTransport()
+      val client = server.registerClient(1, transport)
+      val hierarchy = """{"type":"hierarchy_update","data":"current"}"""
+      val response = """{"type":"action_result","requestId":"awaited"}"""
+
+      server.broadcastWithPerfSync { hierarchy }
+      server.sendToClient(client, response)
+      runCurrent()
+
+      assertEquals(listOf(hierarchy, response), transport.messages)
+    }
+
+  private class StalledTransport : WebSocketServer.ClientTransport {
+    var closeReason: CloseReason? = null
+    val messages = mutableListOf<String>()
+    private val released = CompletableDeferred<Unit>()
+
+    override suspend fun send(message: String) {
+      released.await()
+      messages.add(message)
+    }
+
+    fun unblock() {
+      released.complete(Unit)
+    }
+
+    override suspend fun close(reason: CloseReason) {
+      closeReason = reason
+    }
+  }
+
+  private class RecordingTransport : WebSocketServer.ClientTransport {
+    val messages = mutableListOf<String>()
+
+    override suspend fun send(message: String) {
+      messages.add(message)
+    }
+
+    override suspend fun close(reason: CloseReason) = Unit
+  }
+
   // ---------------------------------------------------------------------------
   // Error-envelope helpers (issue #2985) — pure, no network I/O.
   // ---------------------------------------------------------------------------
@@ -318,106 +471,81 @@ class WebSocketServerTest {
   }
 
   @Test
-  fun `failed primary send delivers correlated fallback to the request owner`() =
+  fun `correlated response is queued only for its request owner`() =
     runTest(testScope.testScheduler) {
-      val owner = mockk<DefaultWebSocketSession>()
-      val bystander = mockk<DefaultWebSocketSession>()
-      val delivered = mutableListOf<Pair<DefaultWebSocketSession, String>>()
-      var firstAttempt = true
-      server =
-        WebSocketServer(
-          port = 0,
-          scope = testScope,
-          sendFrame = { connection, message ->
-            if (firstAttempt) {
-              firstAttempt = false
-              throw IllegalStateException("transient send failure")
-            }
-            delivered.add(connection to message)
-          },
-        )
+      val ownerTransport = RecordingTransport()
+      val bystanderTransport = RecordingTransport()
+      val owner = server.registerClient(1, ownerTransport)
+      server.registerClient(2, bystanderTransport)
       server.registerRequestOwner("req-failed", owner)
-      server.registerRequestOwner("other-request", bystander)
 
       server.broadcast(
         SwipeResult(timestamp = 0L, requestId = "req-failed", success = true, totalTimeMs = 5L)
       )
+      runCurrent()
 
-      assertEquals(1, delivered.size)
-      assertTrue(delivered.single().first === owner)
-      assertEquals("req-failed", WebSocketServer.extractRequestId(delivered.single().second))
-      assertTrue(delivered.single().second.contains("transient send failure"))
-      assertTrue(delivered.single().second.contains("\"type\":\"error\""))
+      assertEquals(1, ownerTransport.messages.size)
+      assertEquals("req-failed", WebSocketServer.extractRequestId(ownerTransport.messages.single()))
+      assertTrue(bystanderTransport.messages.isEmpty())
       server.broadcast(ErrorResponse(requestId = "req-failed", error = "duplicate fallback"))
-      assertEquals(1, delivered.size)
+      runCurrent()
+      assertEquals(1, ownerTransport.messages.size)
+      assertTrue(bystanderTransport.messages.isEmpty())
     }
 
   @Test
   fun `guard fallback routes to the owner when result creation fails before delivery`() =
     runTest(testScope.testScheduler) {
-      val owner = mockk<DefaultWebSocketSession>()
-      val bystander = mockk<DefaultWebSocketSession>()
-      val delivered = mutableListOf<Pair<DefaultWebSocketSession, String>>()
-      server =
-        WebSocketServer(
-          port = 0,
-          scope = testScope,
-          sendFrame = { connection, message -> delivered.add(connection to message) },
-        )
+      val ownerTransport = RecordingTransport()
+      val bystanderTransport = RecordingTransport()
+      val owner = server.registerClient(1, ownerTransport)
+      server.registerClient(2, bystanderTransport)
       server.registerRequestOwner("req-guard", owner)
-      server.registerRequestOwner("other-request", bystander)
       val broadcaster =
         ResultBroadcaster(broadcastError = { server.broadcast(it) }, logError = { _, _ -> })
 
       broadcaster.guard(requestId = "req-guard", action = "swipe_result") {
         throw IllegalStateException("result serialization failed")
       }
+      runCurrent()
 
-      assertEquals(1, delivered.size)
-      assertTrue(delivered.single().first === owner)
-      assertEquals("req-guard", WebSocketServer.extractRequestId(delivered.single().second))
-      assertTrue(delivered.single().second.contains("result serialization failed"))
+      assertEquals(1, ownerTransport.messages.size)
+      assertEquals("req-guard", WebSocketServer.extractRequestId(ownerTransport.messages.single()))
+      assertTrue(ownerTransport.messages.single().contains("result serialization failed"))
+      assertTrue(bystanderTransport.messages.isEmpty())
     }
 
   @Test
   fun `duplicate correlated frame is dropped after successful delivery`() =
     runTest(testScope.testScheduler) {
-      val owner = mockk<DefaultWebSocketSession>()
-      val delivered = mutableListOf<String>()
-      server =
-        WebSocketServer(
-          port = 0,
-          scope = testScope,
-          sendFrame = { _, message -> delivered.add(message) },
-        )
+      val transport = RecordingTransport()
+      val owner = server.registerClient(1, transport)
       server.registerRequestOwner("req-done", owner)
 
       server.broadcast("""{"type":"result","requestId":"req-done"}""")
       server.broadcast(ErrorResponse(requestId = "req-done", error = "duplicate"))
+      runCurrent()
 
-      assertEquals(listOf("""{"type":"result","requestId":"req-done"}"""), delivered)
+      assertEquals(listOf("""{"type":"result","requestId":"req-done"}"""), transport.messages)
     }
 
   @Test
   fun `unknown and expired correlated frames are dropped`() =
     runTest(testScope.testScheduler) {
-      val owner = mockk<DefaultWebSocketSession>()
-      val delivered = mutableListOf<String>()
-      server =
-        WebSocketServer(
-          port = 0,
-          scope = testScope,
-          sendFrame = { _, message -> delivered.add(message) },
-        )
+      val transport = RecordingTransport()
+      val owner = server.registerClient(1, transport)
 
       server.broadcast(ErrorResponse(requestId = "never-registered", error = "unknown"))
-      assertTrue(delivered.isEmpty())
+      runCurrent()
+      assertTrue(transport.messages.isEmpty())
       server.registerRequestOwner("expired", owner)
       server.broadcast("""{"type":"result","requestId":"expired"}""")
-      delivered.clear()
+      runCurrent()
+      transport.messages.clear()
       server.broadcast(ErrorResponse(requestId = "expired", error = "late"))
+      runCurrent()
 
-      assertTrue(delivered.isEmpty())
+      assertTrue(transport.messages.isEmpty())
     }
 
   @Test

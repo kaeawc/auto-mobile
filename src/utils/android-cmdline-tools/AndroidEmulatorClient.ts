@@ -1,5 +1,4 @@
 import { errorMessage } from "../describeUnknownError";
-import type { ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { logger } from "../logger";
 import { testOverrides } from "../testOverrides";
@@ -8,6 +7,7 @@ import {
   DefaultHostCommandExecutor,
   execFileAsync as sharedExecFileAsync,
   type HostProcessExecutor,
+  type HostChildProcess as ChildProcess,
   type SpawnFn,
 } from "../HostCommandExecutor";
 import { BootedDevice, DeviceInfo, ExecResult, ActionableError } from "../../models";

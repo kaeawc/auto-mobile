@@ -1,5 +1,9 @@
-import { ResourceRegistry, ResourceContent } from "./resourceRegistry";
+import { ResourceRegistry, ResourceContent, getRequestedResourceUri } from "./resourceRegistry";
 import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
+import {
+  diffGraphSummaryByBuild,
+  filterGraphSummaryByBuild,
+} from "../features/navigation/NavigationBuildLens";
 import { NavigationScreenshotManager } from "../features/navigation/NavigationScreenshotManager";
 import { testCoverageAnalyzer } from "../features/navigation/TestCoverageAnalyzer";
 import {
@@ -10,6 +14,9 @@ import {
   NavigationGraphHistoryProvider,
   NavigationAppSummary,
   NavigationAppListProvider,
+  NavigationBuildFilterSummary,
+  NavigationBuildDiffSummary,
+  NavigationProvenanceBuildKey,
 } from "../utils/interfaces/NavigationGraph";
 import { logger } from "../utils/logger";
 import { buildNavigationNodeScreenshotUri } from "../utils/navigationResourceUri";
@@ -20,6 +27,10 @@ export const NAVIGATION_RESOURCE_URIS = {
   APPS: "automobile:navigation/apps",
   GRAPH: "automobile:navigation/graph",
   GRAPH_WITH_APP_ID: "automobile:navigation/graph?appId={appId}",
+  GRAPH_BUILD_FILTER:
+    "automobile:navigation/graph/build-filter?appId={appId}&versionCode={versionCode}&contentHash={contentHash}",
+  GRAPH_BUILD_DIFF:
+    "automobile:navigation/graph/build-diff?appId={appId}&versionCodeA={versionCodeA}&contentHashA={contentHashA}&versionCodeB={versionCodeB}&contentHashB={contentHashB}",
   NODE_BY_ID: "automobile:navigation/nodes/{nodeId}",
   NODE_BY_ID_WITH_APP_ID: "automobile:navigation/nodes/{nodeId}?appId={appId}",
   NODE_BY_SCREEN: "automobile:navigation/nodes?screen={screenName}",
@@ -34,6 +45,8 @@ export const NAVIGATION_RESOURCE_URIS = {
 
 export type NavigationGraphResourceContent = NavigationGraphSummary;
 export type NavigationNodeResourceContent = NavigationGraphNodeResource;
+export type NavigationBuildFilterResourceContent = NavigationBuildFilterSummary;
+export type NavigationBuildDiffResourceContent = NavigationBuildDiffSummary;
 /**
  * Payload of the `automobile:navigation/apps` resource: apps that have a
  * persisted navigation graph. Each entry's `lastUpdated` reflects the app
@@ -190,6 +203,85 @@ async function getNavigationGraphResource(appId?: string): Promise<ResourceConte
         2,
       ),
     };
+  }
+}
+
+function parseBuildVersionCode(raw: string | undefined, name: string): number {
+  const versionCode = Number(decodeUriParam(raw));
+  if (!Number.isFinite(versionCode)) {
+    throw new Error(`Invalid ${name}: ${raw}`);
+  }
+  return versionCode;
+}
+
+function buildNavigationBuildError(uri: string, error: string): ResourceContent {
+  return { uri, mimeType: "application/json", text: JSON.stringify({ error }, null, 2) };
+}
+
+async function getNavigationBuildFilterResource(
+  params: Record<string, string>,
+): Promise<ResourceContent> {
+  const uri = getRequestedResourceUri(params) ?? NAVIGATION_RESOURCE_URIS.GRAPH_BUILD_FILTER;
+  try {
+    const appId = decodeUriParam(params.appId);
+    if (!appId) {
+      throw new Error("App ID is required.");
+    }
+    const buildKey: NavigationProvenanceBuildKey = {
+      packageId: appId,
+      versionCode: parseBuildVersionCode(params.versionCode, "versionCode"),
+      contentHash: decodeUriParam(params.contentHash) ?? "",
+    };
+    const provider = getNavigationGraphProvider();
+    const summary = await (provider.exportGraphSummaryForApp?.(appId) ??
+      provider.exportGraphSummary());
+    return {
+      uri,
+      mimeType: "application/json",
+      text: JSON.stringify(filterGraphSummaryByBuild(summary, buildKey), null, 2),
+    };
+  } catch (error) {
+    logger.error(`[NavigationResources] Failed to get build-filtered navigation graph: ${error}`);
+    return buildNavigationBuildError(
+      uri,
+      `Failed to retrieve build-filtered navigation graph: ${error}`,
+    );
+  }
+}
+
+async function getNavigationBuildDiffResource(
+  params: Record<string, string>,
+): Promise<ResourceContent> {
+  const uri = getRequestedResourceUri(params) ?? NAVIGATION_RESOURCE_URIS.GRAPH_BUILD_DIFF;
+  try {
+    const appId = decodeUriParam(params.appId);
+    if (!appId) {
+      throw new Error("App ID is required.");
+    }
+    const buildA: NavigationProvenanceBuildKey = {
+      packageId: appId,
+      versionCode: parseBuildVersionCode(params.versionCodeA, "versionCodeA"),
+      contentHash: decodeUriParam(params.contentHashA) ?? "",
+    };
+    const buildB: NavigationProvenanceBuildKey = {
+      packageId: appId,
+      versionCode: parseBuildVersionCode(params.versionCodeB, "versionCodeB"),
+      contentHash: decodeUriParam(params.contentHashB) ?? "",
+    };
+    const provider = getNavigationGraphProvider();
+    const summary = await (provider.exportGraphSummaryForApp?.(appId) ??
+      provider.exportGraphSummary());
+    return {
+      uri,
+      mimeType: "application/json",
+      text: JSON.stringify(diffGraphSummaryByBuild(summary, buildA, buildB), null, 2),
+    };
+  } catch (error) {
+    logger.error(`[NavigationResources] Failed to get build diff navigation graph: ${error}`);
+    return buildNavigationBuildError(
+      uri,
+      `Failed to retrieve build diff navigation graph: ${error}`,
+    );
   }
 }
 
@@ -444,6 +536,22 @@ export function registerNavigationResources(
       const appId = decodeUriParam(params.appId);
       return getNavigationGraphResource(appId);
     },
+  );
+
+  ResourceRegistry.registerTemplate(
+    NAVIGATION_RESOURCE_URIS.GRAPH_BUILD_FILTER,
+    "Navigation Graph (Build Filter)",
+    "App-union navigation graph annotated for one app build.",
+    "application/json",
+    getNavigationBuildFilterResource,
+  );
+
+  ResourceRegistry.registerTemplate(
+    NAVIGATION_RESOURCE_URIS.GRAPH_BUILD_DIFF,
+    "Navigation Graph (Build Diff)",
+    "Navigation nodes and edges reached by either of two app builds, with presence labels.",
+    "application/json",
+    getNavigationBuildDiffResource,
   );
 
   ResourceRegistry.register(

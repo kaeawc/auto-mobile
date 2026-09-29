@@ -238,6 +238,49 @@ export interface NavigationGraphSummary {
   currentScreen: string | null;
 }
 
+/** Build membership in a two-build comparison of the app-union graph (#4987). */
+export type NavigationBuildDiffPresence = "both" | "onlyA" | "onlyB";
+
+/** A union-graph node annotated with membership in the selected build (#4987). */
+export interface NavigationBuildFilteredNode extends NavigationGraphSummaryNode {
+  inFilterBuild: boolean;
+}
+
+/** A union-graph edge annotated for filtering and navigation hints (#4987). */
+export interface NavigationBuildFilteredEdge extends NavigationGraphSummaryEdge {
+  inFilterBuild: boolean;
+  /** True when another build observed this edge but the selected build did not. */
+  unverifiedForFilterBuild: boolean;
+}
+
+/** The full app-union graph annotated for one build (#4987). */
+export interface NavigationBuildFilterSummary {
+  appId: string | null;
+  buildKey: NavigationProvenanceBuildKey;
+  currentScreen: string | null;
+  nodes: NavigationBuildFilteredNode[];
+  edges: NavigationBuildFilteredEdge[];
+}
+
+/** A union-graph node reached by at least one compared build (#4987). */
+export interface NavigationBuildDiffNode extends NavigationGraphSummaryNode {
+  presence: NavigationBuildDiffPresence;
+}
+
+/** A union-graph edge reached by at least one compared build (#4987). */
+export interface NavigationBuildDiffEdge extends NavigationGraphSummaryEdge {
+  presence: NavigationBuildDiffPresence;
+}
+
+/** Nodes and edges reached by either compared build in input order (#4987). */
+export interface NavigationBuildDiffSummary {
+  appId: string | null;
+  buildA: NavigationProvenanceBuildKey;
+  buildB: NavigationProvenanceBuildKey;
+  nodes: NavigationBuildDiffNode[];
+  edges: NavigationBuildDiffEdge[];
+}
+
 /**
  * Detailed navigation node representation for MCP resources.
  */

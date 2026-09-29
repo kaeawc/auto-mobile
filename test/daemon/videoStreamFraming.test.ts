@@ -50,6 +50,11 @@ describe("videoStreamFraming", () => {
   });
 
   describe("pts and flags", () => {
+    test("rotation and dropped-frame flags occupy distinct bits", () => {
+      expect(PACKET_FLAG_ROTATION_PRESENT).not.toBe(PACKET_FLAG_DROPPED_FRAMES);
+      expect(PACKET_FLAG_ROTATION_PRESENT & PACKET_FLAG_DROPPED_FRAMES).toBe(0n);
+    });
+
     test("a plain frame carries only the timestamp", () => {
       expect(encodePtsAndFlags(12345n)).toBe(12345n);
     });
@@ -82,6 +87,19 @@ describe("videoStreamFraming", () => {
       }
     });
 
+    test("config, key-frame, and rotation flags round-trip independently and together", () => {
+      const rotationOnly = encodePtsAndFlags(23n, { isConfig: true, rotation: 0 });
+      expect(rotationOnly & PACKET_FLAG_CONFIG).toBe(PACKET_FLAG_CONFIG);
+      expect(rotationOnly & PACKET_FLAG_ROTATION_PRESENT).toBe(PACKET_FLAG_ROTATION_PRESENT);
+      expect(rotationOnly & PACKET_FLAG_KEY_FRAME).toBe(0n);
+
+      const combined = encodePtsAndFlags(23n, { isConfig: true, isKeyFrame: true, rotation: 3 });
+      expect(combined & PACKET_FLAG_CONFIG).toBe(PACKET_FLAG_CONFIG);
+      expect(combined & PACKET_FLAG_KEY_FRAME).toBe(PACKET_FLAG_KEY_FRAME);
+      expect(combined & PACKET_FLAG_ROTATION_PRESENT).toBe(PACKET_FLAG_ROTATION_PRESENT);
+      expect((combined & ROTATION_MASK) >> ROTATION_SHIFT).toBe(3n);
+    });
+
     test("a null rotation leaves the presence bit clear so the desktop reads unknown", () => {
       const ptsAndFlags = encodePtsAndFlags(1000n, { isConfig: true, rotation: null });
 
@@ -101,10 +119,21 @@ describe("videoStreamFraming", () => {
   describe("packet header", () => {
     test("encodes cumulative dropped-frame telemetry as a zero-payload record", () => {
       const packet = encodeDroppedFrames(42);
+      const ptsAndFlags = BigInt.asUintN(64, packet.readBigInt64BE(0));
 
       expect(packet.length).toBe(12);
       expect(packet.readInt32BE(8)).toBe(0);
-      expect(BigInt.asUintN(64, packet.readBigInt64BE(0)) & PTS_MASK).toBe(42n);
+      expect(ptsAndFlags & PACKET_FLAG_DROPPED_FRAMES).toBe(PACKET_FLAG_DROPPED_FRAMES);
+      expect(ptsAndFlags & PACKET_FLAG_ROTATION_PRESENT).toBe(0n);
+      expect(ptsAndFlags & PACKET_FLAG_CONFIG).toBe(0n);
+      expect(ptsAndFlags & PTS_MASK).toBe(42n);
+    });
+
+    test("a config rotation packet does not carry the dropped-frame flag", () => {
+      const ptsAndFlags = encodePtsAndFlags(42n, { isConfig: true, rotation: 2 });
+
+      expect(ptsAndFlags & PACKET_FLAG_ROTATION_PRESENT).toBe(PACKET_FLAG_ROTATION_PRESENT);
+      expect(ptsAndFlags & PACKET_FLAG_DROPPED_FRAMES).toBe(0n);
     });
     test("is 12 bytes of ptsAndFlags then size", () => {
       const header = encodePacketHeader(42n, 1024);
@@ -145,6 +174,15 @@ describe("videoStreamFraming", () => {
       expect(ptsAndFlags & PACKET_FLAG_HEARTBEAT).toBe(PACKET_FLAG_HEARTBEAT);
       expect(ptsAndFlags & PACKET_FLAG_CONFIG).toBe(0n);
       expect(ptsAndFlags & PACKET_FLAG_KEY_FRAME).toBe(0n);
+    });
+
+    test("a heartbeat round-trips only its own flag", () => {
+      const ptsAndFlags = BigInt.asUintN(64, encodeHeartbeat().readBigInt64BE(0));
+
+      expect(ptsAndFlags & PACKET_FLAG_HEARTBEAT).toBe(PACKET_FLAG_HEARTBEAT);
+      expect(ptsAndFlags & PACKET_FLAG_DROPPED_FRAMES).toBe(0n);
+      expect(ptsAndFlags & PACKET_FLAG_ROTATION_PRESENT).toBe(0n);
+      expect(ptsAndFlags & PTS_MASK).toBe(0n);
     });
 
     test("the heartbeat bit does not collide with dropped-frame telemetry (both non-config)", () => {

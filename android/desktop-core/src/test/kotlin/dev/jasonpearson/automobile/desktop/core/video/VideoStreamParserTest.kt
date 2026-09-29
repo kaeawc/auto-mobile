@@ -119,7 +119,7 @@ class VideoStreamParserTest {
     val telemetry =
       ByteBuffer.allocate(12)
         .order(ByteOrder.BIG_ENDIAN)
-        .putLong((1L shl 61) or droppedFrames)
+        .putLong((1L shl 59) or droppedFrames)
         .putInt(0)
         .array()
 

@@ -567,10 +567,8 @@ export class VideoStreamSocketServer extends BaseSocketServer {
               return;
             }
             const packet = encodeDroppedFrames(droppedFrames);
-            for (const subscriber of current.subscribers) {
-              if (!subscriber.destroyed) {
-                subscriber.write(packet);
-              }
+            for (const subscriber of capture.subscribers) {
+              this.writePacketToSubscriber(deviceId, capture, subscriber, packet, false, false);
             }
           },
           onError: (error) => {

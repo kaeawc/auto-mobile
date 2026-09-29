@@ -21,14 +21,16 @@ export const PACKET_FLAG_KEY_FRAME = 1n << 62n;
  * carry an attested display rotation. This layer has no REPLAYED flag, so bit 61 is free — it is a
  * presence marker distinct from the device-side protocol's bit 61 (REPLAYED). A relay whose source
  * cannot attest rotation (screenrecord, iOS) leaves this bit clear, and the desktop reads `null`
- * (control fails closed).
+ * (control fails closed). Dropped-frame telemetry uses the distinct bit 59, which is safe because
+ * rotation bits are meaningful only on CONFIG packets.
  */
 export const PACKET_FLAG_ROTATION_PRESENT = 1n << 61n;
 /**
  * A zero-payload telemetry packet carries the source encoder's cumulative dropped-frame count in
- * its low 59 bits. It shares bit 61 with rotation presence only when CONFIG is clear.
+ * its low 59 bits. Bit 59 is also part of the CONFIG-only rotation value field, but dropped-frame
+ * packets never set CONFIG, so bit 59 is safe to reuse here just as bit 60 is for heartbeats.
  */
-export const PACKET_FLAG_DROPPED_FRAMES = 1n << 61n;
+export const PACKET_FLAG_DROPPED_FRAMES = 1n << 59n;
 
 /**
  * Bit 60 of `ptsAndFlags` on a non-CONFIG, zero-payload packet: a relay-originated heartbeat

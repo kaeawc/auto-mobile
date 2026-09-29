@@ -15,7 +15,12 @@ import {
   type StreamAuthSessionManager,
   type StreamSocketAuthenticator,
 } from "../../src/daemon/streamSocketAuth";
-import { CODEC_ID_H264, PACKET_FLAG_HEARTBEAT } from "../../src/daemon/videoStreamFraming";
+import {
+  CODEC_ID_H264,
+  encodeDroppedFrames,
+  PACKET_FLAG_DROPPED_FRAMES,
+  PACKET_FLAG_HEARTBEAT,
+} from "../../src/daemon/videoStreamFraming";
 import { SIMULATOR_FPS_DEFAULT } from "../../src/features/screen-stream/IOSScreenCaptureHelper";
 import {
   permissiveDeviceAdmissionGate,
@@ -451,8 +456,8 @@ describe("VideoStreamSocketServer", () => {
     await waitFor(() => binary().length >= beforeDropPacket + 12);
 
     const packet = binary().subarray(beforeDropPacket, beforeDropPacket + 12);
-    expect(packet.readBigInt64BE(0) & ((1n << 61n) - 1n)).toBe(42n);
-    expect(packet.readBigInt64BE(0) & (1n << 61n)).toBe(1n << 61n);
+    expect(packet.readBigInt64BE(0) & PACKET_FLAG_DROPPED_FRAMES).toBe(PACKET_FLAG_DROPPED_FRAMES);
+    expect(packet.readBigInt64BE(0) & ((1n << 59n) - 1n)).toBe(42n);
 
     fakeTimer.advanceTime(10_000);
     await defaultTimer.sleep(10);
@@ -1375,7 +1380,7 @@ describe("VideoStreamSocketServer", () => {
     expect(late.binary().includes(idr)).toBe(true);
   });
 
-  test("a drained backpressured subscriber is handed an immediate key frame, not a GOP-long freeze", async () => {
+  test("backpressured subscribers skip dropped telemetry and recover with an immediate key frame", async () => {
     const h = await startHarness();
     const client = await subscribe(h.socketPath);
     await waitFor(() => h.sources.length > 0);
@@ -1402,6 +1407,7 @@ describe("VideoStreamSocketServer", () => {
       h.emit(frame);
     }
     h.emit(Buffer.from([0x00, 0x00, 0x00, 0x01, 0x01]));
+    h.emitDroppedFrames(42);
 
     // Baseline AFTER the subscribe-time IDR request: while the subscriber is still stuck (no drain
     // yet) the count must not climb further.
@@ -1413,6 +1419,7 @@ describe("VideoStreamSocketServer", () => {
     await waitFor(() => source.keyFrameRequests > before);
 
     expect(source.keyFrameRequests).toBeGreaterThan(before);
+    expect(client.binary().includes(encodeDroppedFrames(42))).toBe(false);
   });
 
   test("a key frame throttled at subscribe time is retried until the source honors one", async () => {

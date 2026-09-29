@@ -69,9 +69,12 @@ EOF
 }
 
 @test "last poll observing Shutdown at or after deadline still succeeds" {
+  # The deadline uses whole-second SECONDS, so a 1s window can expire during
+  # the request on a loaded runner and skip the poll entirely. A 2s window
+  # always admits one poll; the 3s parse still finishes past the deadline.
   run env PATH="${stub_bin}:${PATH}" SIMCTL_CALLS="${calls}" \
-    POLL_PARSE_SLEEP=2 SIMULATOR_STATE=Shutdown \
-    bash "${script}" "${udid}" 1
+    POLL_PARSE_SLEEP=3 SIMULATOR_STATE=Shutdown \
+    bash "${script}" "${udid}" 2
   [ "$status" -eq 0 ]
   grep -q '^simctl list devices --json$' "${calls}"
 }

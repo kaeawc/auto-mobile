@@ -1,5 +1,12 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { ListToolsRequestSchema, CallToolRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import {
+  installToolCallDispatcher,
+  type McpToolCallExtra,
+  type McpToolCallResult,
+  type ToolCall,
+  type ToolCallRequest,
+} from "./toolCallDispatch";
 import { timingSafeEqual } from "node:crypto";
 import { ActionableError } from "../models";
 import { formatToolParamError } from "./toolParamError";
@@ -833,7 +840,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     };
   });
 
-  server.server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
+  const prepareToolCallRequest = (request: ToolCallRequest): void => {
     // Revive non-finite arguments the daemon client encoded as sentinels so they
     // survive the socket + loopback-HTTP hops (#5854 §2). Done BEFORE logging and
     // validation so the request trace shows the real Infinity/-Infinity/NaN
@@ -855,16 +862,16 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       >;
     }
     logger.info("Request: ", request);
+  };
 
-    // Extract tool name and arguments from the request
-    const name = request.params.name;
-    const toolParams = request.params.arguments || {};
-
-    // Check if name is undefined
-    if (!name) {
-      throw new ActionableError("Tool name is missing in the request");
-    }
-
+  // The shared envelope (`dispatchToolCall`, #6545) has already read the tool
+  // name and arguments and rejected a missing name.
+  const executeToolCall = async ({
+    name,
+    args: toolParams,
+    progress,
+    extra,
+  }: ToolCall<McpToolCallExtra>): Promise<McpToolCallResult> => {
     const sessionId = options.sessionContext?.sessionId;
     // Forwarded identity is trusted only on the daemon's internal transport.
     // Direct callers cannot override their connection's autolock ownership.
@@ -1223,32 +1230,10 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
           }
         : parsedParams;
 
-    // Create progress callback if the tool supports progress AND the client
-    // asked for it. Per the MCP spec, progress notifications must echo the
-    // token the client supplied in `params._meta.progressToken` — a
-    // server-fabricated token has no registered handler on the client, so
-    // sending one for a request that never asked is worse than sending none
-    // (issue #6118).
-    const requestProgressToken = extra._meta?.progressToken;
-    const progressCallback =
-      tool.supportsProgress && requestProgressToken !== undefined
-        ? async (progress: number, total?: number, message?: string) => {
-            try {
-              await extra.sendNotification({
-                method: "notifications/progress",
-                params: {
-                  progressToken: requestProgressToken,
-                  progress,
-                  total,
-                  ...(message && { message }),
-                },
-              });
-            } catch (error) {
-              // Log progress notification errors but don't fail the tool execution
-              logger.warn(`Failed to send progress notification: ${error}`);
-            }
-          }
-        : undefined;
+    // `progress` echoes the client's own token and is undefined when the
+    // client did not ask for progress (issue #6118); only tools that report
+    // progress receive it.
+    const progressCallback = tool.supportsProgress ? progress : undefined;
 
     let cleanupAcquisitionRelease: (() => void) | undefined;
     const releasedAcquisitionSessions = new Set<string>();
@@ -1576,6 +1561,11 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       cleanupAcquisitionRelease?.();
       executionTracker.endExecution(execution.id);
     }
+  };
+  installToolCallDispatcher(server, {
+    progressFailureMessage: "Failed to send progress notification",
+    prepare: prepareToolCallRequest,
+    execute: executeToolCall,
   });
   startupBenchmark.endPhase("serverHandlerRegistration");
 

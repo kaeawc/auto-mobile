@@ -293,6 +293,15 @@ interface InternalToolInvocationContext {
 // expected in plans (so getToolForPlan does not warn about it).
 const PLAN_ONLY_GATE_REASON = "plan-only tool";
 
+// `McpServer.registerTool` requires a per-tool callback, but the SDK dispatcher
+// that would call it is replaced by the shared `tools/call` handler (#6545).
+// Fail loudly rather than run a tool without the real dispatch's guards.
+async function shadowedSdkToolCallback(): Promise<never> {
+  throw new ActionableError(
+    "tools/call reached the SDK's per-tool callback; install the shared dispatcher with installToolCallDispatcher (issue #6545)",
+  );
+}
+
 interface ToolRegistrationOptions {
   /** Built-in session default before startup or persisted exact-tool overrides. */
   defaultEnabled?: boolean;
@@ -1793,7 +1802,10 @@ export class ToolRegistryClass {
     return tool;
   }
 
-  // Register all tools with an MCP server
+  // Register all tools with an MCP server. This advertises the tools
+  // capability and schemas only: the server's one `tools/call` handler is
+  // installed by `installToolCallDispatcher` (#6545) and replaces the SDK's
+  // per-tool dispatch, so the callback below is never live.
   registerWithServer(server: McpServer): void {
     // Retained so runtime changes that alter tool definitions can emit
     // notifications/tools/list_changed (issue #2963) to EVERY live session, not
@@ -1806,40 +1818,6 @@ export class ToolRegistryClass {
         return;
       }
 
-      // Create a wrapper that adapts our ToolHandler to the MCP server's expected signature
-      const wrappedHandler = async (args: any, extra: any) => {
-        const signal: AbortSignal | undefined = extra?.signal;
-
-        // Only echo the client's own token (issue #6118) — never fabricate
-        // one, since the client has no handler registered for a token it
-        // never sent and would surface a spurious protocol error.
-        const progressToken: string | number | undefined = extra?._meta?.progressToken;
-        if (tool.supportsProgress && progressToken !== undefined) {
-          const progressCallback: ProgressCallback = async (
-            progress: number,
-            total?: number,
-            message?: string,
-          ) => {
-            try {
-              await extra.sendNotification({
-                method: "notifications/progress",
-                params: {
-                  progressToken,
-                  progress,
-                  total,
-                  ...(message && { message }),
-                },
-              });
-            } catch (error) {
-              logger.warn(`Failed to send progress notification: ${error}`);
-            }
-          };
-          return await tool.handler(args, progressCallback, signal);
-        } else {
-          return await tool.handler(args, undefined, signal);
-        }
-      };
-
       server.registerTool(
         tool.name,
         {
@@ -1849,7 +1827,7 @@ export class ToolRegistryClass {
             _meta: { "anthropic/alwaysLoad": true },
           }),
         },
-        wrappedHandler,
+        shadowedSdkToolCallback,
       );
     });
   }

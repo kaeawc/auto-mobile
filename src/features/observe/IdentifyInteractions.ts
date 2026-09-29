@@ -519,7 +519,7 @@ export class IdentifyInteractions {
       return {
         tool: "tapOn",
         params: {
-          id: identifiers.resourceId,
+          selector: { elementId: identifiers.resourceId },
           action: type === "input" ? "focus" : "tap",
         },
       };
@@ -529,7 +529,7 @@ export class IdentifyInteractions {
       return {
         tool: "tapOn",
         params: {
-          text: targetText,
+          selector: { text: targetText },
           action: type === "input" ? "focus" : "tap",
         },
       };

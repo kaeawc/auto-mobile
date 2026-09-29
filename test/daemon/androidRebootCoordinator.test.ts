@@ -1,0 +1,223 @@
+import { describe, expect, test } from "bun:test";
+import type { ChildProcess } from "child_process";
+import type { BootedDevice } from "../../src/models";
+import {
+  AndroidRebootCoordinator,
+  type AndroidRebootCoordinatorPoolPort,
+} from "../../src/daemon/androidRebootCoordinator";
+import { AndroidRecoveryRecordLedger } from "../../src/daemon/androidRecoveryRecordLedger";
+import type { IdentityEvidence } from "../../src/daemon/deviceIdentityEvidence";
+import type { DeviceRecoveryPolicy, PooledDevice } from "../../src/daemon/devicePool";
+import { DeviceCriteriaMatcher } from "../../src/daemon/DeviceCriteriaMatcher";
+import { BoundedAndroidDeviceReboot } from "../../src/utils/androidDeviceReboot";
+import type { PlatformDeviceManager } from "../../src/utils/deviceUtils";
+import { FakeTimer } from "../fakes/FakeTimer";
+
+const oldDevice: PooledDevice = {
+  id: "emulator-5554",
+  name: "Pixel",
+  platform: "android",
+  avdName: "Pixel",
+  androidImage: { name: "Pixel", platform: "android", isRunning: false, source: "local" },
+  sessionId: null,
+  status: "idle",
+  lastUsedAt: 0,
+  assignmentCount: 0,
+  errorCount: 0,
+  incarnation: 1,
+};
+const ready: BootedDevice = { deviceId: "emulator-5556", name: "Pixel", platform: "android" };
+
+class FakePoolPort implements AndroidRebootCoordinatorPoolPort {
+  readonly calls: string[] = [];
+  readonly outcomes: string[] = [];
+  readonly attempts: string[] = [];
+  cancelAt = 0;
+  cancellationChecks = 0;
+
+  constructor(
+    private readonly manager: PlatformDeviceManager,
+    private readonly timer: FakeTimer,
+  ) {}
+
+  getDeviceManager(): PlatformDeviceManager {
+    return this.manager;
+  }
+  getTimer(): FakeTimer {
+    return this.timer;
+  }
+  getRecoveryPolicy(): DeviceRecoveryPolicy {
+    return { onLoss: true, maxAttempts: 1 } as DeviceRecoveryPolicy;
+  }
+  async completeEmulatorLossRecovery(
+    _incidentId: string | undefined,
+    outcome: "recovered" | "exhausted" | "not-attempted",
+  ): Promise<void> {
+    this.outcomes.push(outcome);
+  }
+  async recordEmulatorLossRecoveryAttempt(
+    _incidentId: string | undefined,
+    attempt: { attempt: number; outcome: "failed" | "succeeded" },
+  ): Promise<void> {
+    this.attempts.push(attempt.outcome);
+  }
+  setRecoveringAndroidImage(): void {
+    this.calls.push("set-image");
+  }
+  addRecoveringAndroidDeviceId(id: string): void {
+    this.calls.push(`recovering:${id}`);
+  }
+  setAndroidRecoveryHandoffOwner(): void {
+    this.calls.push("set-owner");
+  }
+  clearAndroidRecoveryHandoffOwnerIfCurrent(): void {
+    this.calls.push("clear-owner");
+  }
+  finishAndroidRecoveryAttempt(): void {
+    this.calls.push("finish");
+  }
+  async stopAndroidEmulatorForRecovery(): Promise<"stopped"> {
+    this.calls.push("stop");
+    return "stopped";
+  }
+  async rebindSameAvdReplacementSession(): Promise<boolean> {
+    this.calls.push("rebind-same-avd");
+    return true;
+  }
+  detachSessionForAndroidRecovery(): boolean {
+    this.calls.push("detach");
+    return true;
+  }
+  async removeDevice(
+    id: string,
+    awaitCacheCleanup = true,
+    expectedDevice?: PooledDevice,
+  ): Promise<void> {
+    this.calls.push(`remove:${id}:${awaitCacheCleanup}:${expectedDevice === oldDevice}`);
+  }
+  async addDevice(device: BootedDevice): Promise<void> {
+    this.calls.push(`add:${device.deviceId}`);
+  }
+  identityEvidenceForBootedDevice(): IdentityEvidence {
+    this.calls.push("identity");
+    return {} as IdentityEvidence;
+  }
+  async bindRecoveredAndroidDeviceSession(
+    _previousDeviceId: string,
+    _avdName: string,
+    preservedSessionId: string | undefined,
+  ): Promise<void> {
+    await this.bindOrReuseDeviceSession(preservedSessionId);
+  }
+  async bindOrReuseDeviceSession(sessionId: string | undefined): Promise<void> {
+    // This represents the pool-owned bind operation, which may self-lock internally.
+    this.calls.push(`bind:${sessionId ?? "none"}`);
+  }
+  async stopEmulatorProcess(_child?: ChildProcess | null): Promise<void> {
+    this.calls.push("stop-process");
+  }
+  consumeAndroidRecoveryCancellation(): boolean {
+    this.cancellationChecks++;
+    return this.cancellationChecks === this.cancelAt;
+  }
+  // This represents direct assignmentMutex access. The coordinator has no such port member.
+  acquireAssignmentMutex(): never {
+    throw new Error("coordinator acquired assignmentMutex");
+  }
+}
+
+function setup(startDevice: () => Promise<ChildProcess | null> = async () => null) {
+  const timer = new FakeTimer();
+  const manager = {
+    startDevice,
+    waitForDeviceReady: async () => ready,
+  } as PlatformDeviceManager;
+  const port = new FakePoolPort(manager, timer);
+  const { outcomes, attempts } = port;
+  const recordLedger = new AndroidRecoveryRecordLedger(
+    { getDevice: () => null, getSession: () => null, clearAdbResetReservation: () => {} },
+    timer,
+  );
+  // A legitimate pool bind may self-lock. Only a direct coordinator mutex access is forbidden.
+  const guardedPort = new Proxy(port, {
+    get(target, property, receiver) {
+      if (property === "assignmentMutex" || property === "runExclusive") {
+        return target.acquireAssignmentMutex();
+      }
+      return Reflect.get(target, property, receiver);
+    },
+  });
+  const coordinator = new AndroidRebootCoordinator(
+    guardedPort,
+    recordLedger,
+    new DeviceCriteriaMatcher(),
+    new BoundedAndroidDeviceReboot(timer, 1),
+  );
+  return { coordinator, port, outcomes, attempts, timer, recordLedger };
+}
+
+async function run(
+  coordinator: AndroidRebootCoordinator,
+  options: { preserveSessionId?: string } = {},
+) {
+  return await coordinator.rebootDisconnectedAndroidDeviceCoordinated(
+    oldDevice,
+    "incident",
+    options,
+    new AbortController().signal,
+    () => {},
+  );
+}
+
+describe("AndroidRebootCoordinator", () => {
+  test("reboots and rebinds in the original incarnation handoff order", async () => {
+    const { coordinator, port, outcomes, attempts, recordLedger } = setup();
+    const record = recordLedger.startAndroidRecoveryRecord("session", { deviceId: oldDevice.id }, [
+      "loss",
+    ]);
+    expect(await run(coordinator, { preserveSessionId: "session" })).toBe(true);
+    expect(record.reservations.has("image")).toBe(true);
+    expect(port.calls).toEqual([
+      "set-image",
+      "recovering:emulator-5554",
+      "stop",
+      "detach",
+      "remove:emulator-5554:true:true",
+      "recovering:emulator-5556",
+      "set-owner",
+      "identity",
+      "add:emulator-5556",
+      "bind:session",
+      "clear-owner",
+      "finish",
+    ]);
+    expect(attempts).toEqual(["succeeded"]);
+    expect(outcomes).toEqual(["recovered"]);
+  });
+
+  test("records a failed relaunch and exhausts the reboot budget", async () => {
+    const { coordinator, port, outcomes, attempts } = setup(async () => {
+      throw new Error("launch failed");
+    });
+    expect(await run(coordinator)).toBe(false);
+    expect(attempts).toEqual(["failed"]);
+    expect(outcomes).toEqual(["exhausted"]);
+    expect(port.calls.at(-1)).toBe("finish");
+  });
+
+  test("consumes a cancellation after readiness without binding", async () => {
+    const { coordinator, port, outcomes } = setup();
+    port.cancelAt = 2;
+    expect(await run(coordinator)).toBe(false);
+    expect(port.calls).toContain("stop-process");
+    expect(port.calls).not.toContain("bind:none");
+    expect(outcomes).toEqual(["not-attempted"]);
+  });
+
+  test("never accesses assignmentMutex directly through its port", async () => {
+    const { coordinator, port } = setup();
+    expect(await run(coordinator)).toBe(true);
+    expect(port.calls).toContain("bind:none");
+    // The guarded port throws on direct mutex access while allowing the pool's self-locking bind.
+  });
+});

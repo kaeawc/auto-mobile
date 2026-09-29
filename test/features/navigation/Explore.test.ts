@@ -485,6 +485,39 @@ describe("Explore", () => {
       expect(fakeTap.calls).toHaveLength(1);
     });
 
+    test("does not fast-path an unconfirmed permission-like app screen", async () => {
+      const fakeTap = new FakeDialogTapAction();
+      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph, undefined, fakeTap.factory);
+      const observation = createMockObservation([
+        createMockViewHierarchyNode({ class: "android.widget.TextView", text: "App permissions" }),
+        createMockViewHierarchyNode({ text: "OK", "resource-id": "com.example.app:id/ok_button" }),
+      ]);
+
+      expect(await (explore as any).handlePermissionDialogFastPath(observation)).toBe("none");
+      expect(fakeTap.calls).toEqual([]);
+    });
+
+    test("caps taps on a repeatedly appearing confirmed permission dialog", async () => {
+      const fakeTap = new FakeDialogTapAction();
+      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph, undefined, fakeTap.factory);
+      const observation = createMockObservation([
+        createMockViewHierarchyNode({
+          text: "Allow",
+          "resource-id": "com.android.permissioncontroller:id/permission_allow_button",
+        }),
+        createMockViewHierarchyNode({
+          class: "android.widget.TextView",
+          text: "Allow camera access",
+        }),
+      ]);
+
+      for (let i = 0; i < 10; i++) {
+        await (explore as any).handlePermissionDialogFastPath(observation);
+      }
+
+      expect(fakeTap.calls).toHaveLength(3);
+    });
+
     test("should detect login screens", async () => {
       const elements = [
         createMockElement({ text: "Sign in", class: "android.widget.Button" }),

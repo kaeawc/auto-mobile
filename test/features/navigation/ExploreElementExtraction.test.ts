@@ -1,4 +1,5 @@
 import { expect, describe, test, beforeEach } from "bun:test";
+import fc from "fast-check";
 import { Element } from "../../../src/models";
 import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
 import type { ElementParser } from "../../../src/utils/interfaces/ElementParser";
@@ -248,6 +249,79 @@ describe("ExploreElementExtraction", () => {
   });
 
   describe("getElementKey", () => {
+    test("distinguishes identical siblings by selector index and stays stable", () => {
+      const rows = [0, 1].map((index) => ({
+        $: {
+          class: "android.widget.TextView",
+          text: "Same row",
+          "resource-id": "com.test:id/row",
+          clickable: "true",
+          bounds: { left: 0, top: index * 50, right: 200, bottom: index * 50 + 40 },
+        },
+      }));
+      const hierarchy1 = createMockViewHierarchy(rows);
+      const hierarchy2 = createMockViewHierarchy(
+        rows.map((row) => ({ $: { ...row.$, bounds: { ...row.$.bounds } } })),
+      );
+      const elements1 = extractAllElements(hierarchy1 as any, elementParser);
+      const elements2 = extractAllElements(hierarchy2 as any, elementParser);
+
+      expect(getElementKey(elements1[0]!, hierarchy1 as any)).not.toBe(
+        getElementKey(elements1[1]!, hierarchy1 as any),
+      );
+      expect(getElementKey(elements1[0]!, hierarchy1 as any)).toBe(
+        getElementKey(elements2[0]!, hierarchy2 as any),
+      );
+    });
+
+    test("keeps unexhausted identical sibling rows independently available", () => {
+      const nodes = [0, 1, 2].map((index) => ({
+        $: {
+          class: "android.widget.TextView",
+          text: "Same row",
+          "resource-id": "com.test:id/row",
+          clickable: "true",
+          bounds: { left: 0, top: index * 50, right: 200, bottom: index * 50 + 40 },
+        },
+      }));
+      const hierarchy = createMockViewHierarchy(nodes);
+      const elements = extractAllElements(hierarchy as any, elementParser);
+      const tracked = new Map<string, TrackedElement>([
+        [
+          getElementKey(elements[0]!, hierarchy as any),
+          {
+            interactionCount: 2,
+            lastInteractionScreen: "Screen1",
+          },
+        ],
+      ]);
+
+      const filtered = filterUnexhaustedElements(elements, tracked, "Screen1", hierarchy as any);
+      expect(filtered).toHaveLength(2);
+      expect(filtered.map((element) => element.bounds.top)).toEqual([50, 100]);
+    });
+
+    test("produces distinct keys for generated identical sibling rows", () => {
+      fc.assert(
+        fc.property(fc.integer({ min: 2, max: 5 }), (count) => {
+          const nodes = Array.from({ length: count }, (_, index) => ({
+            $: {
+              class: "android.widget.TextView",
+              text: "Same row",
+              "resource-id": "com.test:id/row",
+              clickable: "true",
+              bounds: { left: 0, top: index * 50, right: 200, bottom: index * 50 + 40 },
+            },
+          }));
+          const hierarchy = createMockViewHierarchy(nodes);
+          const elements = extractAllElements(hierarchy as any, elementParser);
+          expect(
+            new Set(elements.map((element) => getElementKey(element, hierarchy as any))).size,
+          ).toBe(count);
+        }),
+        { seed: 1_234_567, numRuns: 20 },
+      );
+    });
     test("should generate key from resource-id and text", () => {
       const element = createMockElement({
         "resource-id": "com.test:id/btn",

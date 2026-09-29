@@ -11,7 +11,6 @@ import {
   PooledAvdIdentityError,
   capturePooledAvdIdentity,
   checkForRestartedTeardownTarget,
-  createKillDeviceResponse,
   createTeardownFailureResponse,
   destroyTeardownTarget,
   finalizeTeardownEviction,
@@ -24,13 +23,16 @@ import {
   resolveKillDeviceStableTarget,
   resolveTeardownTarget,
   retireStoppedTeardownOwnership,
-  shutdownDevice,
-  shutdownTimeoutError,
   stopSegmentedVideoRecordingsBeforeDestroy,
   teardownDeadlineDevice,
   teardownOperationFingerprint,
   verifyTeardownAbsence,
 } from "./deviceTools";
+import {
+  createKillDeviceResponse,
+  shutdownDevice,
+  shutdownTimeoutError,
+} from "./deviceToolsShutdown";
 import type {
   DeviceToolsDependencies,
   KillDeviceArgs,

@@ -18,7 +18,8 @@ private const val FLAG_KEY_FRAME = 1L shl 62
  * `src/daemon/videoStreamFraming.ts` for the encoder.
  */
 private const val FLAG_ROTATION_PRESENT = 1L shl 61
-private const val FLAG_DROPPED_FRAMES = 1L shl 61
+/** Bit 59 is CONFIG-only rotation data, so it is free for non-CONFIG dropped-frame telemetry. */
+private const val FLAG_DROPPED_FRAMES = 1L shl 59
 private const val ROTATION_SHIFT = 59
 private const val ROTATION_MASK = 0b11L shl ROTATION_SHIFT
 

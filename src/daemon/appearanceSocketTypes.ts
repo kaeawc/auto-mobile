@@ -10,6 +10,7 @@ export type AppearanceSocketRequest = {
   type?: "appearance_request";
   command?: AppearanceSocketCommand;
   method?: AppearanceSocketCommand;
+  sessionUuid?: string;
   enabled?: boolean;
   mode?: AppearanceSyncMode | string;
   params?: {

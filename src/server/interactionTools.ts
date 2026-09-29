@@ -90,7 +90,12 @@ import {
   elementContainerSchema,
   elementSelectionStrategySchema,
 } from "./elementSelectorSchemas";
-import { keyboardResultSchema, sendKeysResultSchema, tapOnResultSchema } from "./toolOutputSchemas";
+import {
+  keyboardResultSchema,
+  openLinkResultSchema,
+  sendKeysResultSchema,
+  tapOnResultSchema,
+} from "./toolOutputSchemas";
 
 // Import from extracted modules
 import type {
@@ -1060,15 +1065,18 @@ export const buildOpenLinkPayload = (
   openResult: OpenURLResult,
   waitOutcome: OpenLinkWaitOutcome | null,
 ) => {
+  const message = openResult.success
+    ? `Opened link ${url}`
+    : `Failed to open ${url}: ${openResult.error || "unknown error"}`;
   if (!waitOutcome) {
     return {
-      message: `Opened link ${url}`,
+      message,
       ...openResult,
       observation: openResult.observation,
     };
   }
   return {
-    message: `Opened link ${url}`,
+    message,
     ...openResult,
     observation: waitOutcome.observation,
     awaitedElement: waitOutcome.awaitedElement,
@@ -2823,7 +2831,7 @@ export function registerInteractionTools() {
     "Open URL in browser",
     openLinkSchema,
     openLinkHandler,
-    { defaultEnabled: false },
+    { defaultEnabled: false, outputSchema: openLinkResultSchema },
   );
 
   ToolRegistry.registerDeviceAware(

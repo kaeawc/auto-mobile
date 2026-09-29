@@ -15,8 +15,67 @@ import { shellQuote } from "../../utils/shellQuote";
 import { LaunchApp } from "./LaunchApp";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { IOSCtrlProxyClient } from "../observe/ios/IOSCtrlProxyClient";
+import { resolveMissingForegroundWindow } from "../observe/ObserveScreen";
+import type { ObserveResult } from "../../models";
+import { type Timer, defaultTimer } from "../../utils/SystemTimer";
+import { sequenceBackoff } from "../../utils/Backoff";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
 
 const SAFARI_BUNDLE_ID = "com.apple.mobilesafari";
+const FOREGROUND_CHANGE_TIMEOUT_MS = 5_000;
+const foregroundPollBackoff = sequenceBackoff([100, 200, 400]);
+const FOREGROUND_CHANGE_WARNING =
+  "URL was accepted, but an iOS foreground app change was not confirmed; observe before acting on the screen.";
+
+interface ForegroundObservationReader {
+  read(): Promise<ObserveResult>;
+}
+
+const foregroundAppId = (observation: ObserveResult): string | undefined => {
+  if (resolveMissingForegroundWindow(observation)) {
+    return undefined;
+  }
+  return (
+    observation.activeWindow?.appId ||
+    observation.viewHierarchy?.packageName ||
+    observation.viewHierarchy?.foregroundActivity?.split("/")[0] ||
+    undefined
+  );
+};
+
+export async function waitForIosForegroundChange(
+  expectedAppId: string,
+  reader: ForegroundObservationReader,
+  timer: Timer,
+): Promise<boolean> {
+  const deadline = timer.now() + FOREGROUND_CHANGE_TIMEOUT_MS;
+  for (let attempt = 1; timer.now() < deadline; attempt++) {
+    try {
+      const observation = await raceWithDeadline(reader.read(), {
+        timer,
+        timeoutMs: deadline - timer.now(),
+        label: "iOS foreground change observation",
+      });
+      const currentApp = foregroundAppId(observation);
+      if (
+        observation.freshness?.isFresh !== false &&
+        observation.freshness?.verified !== false &&
+        currentApp &&
+        currentApp === expectedAppId
+      ) {
+        return true;
+      }
+    } catch (error) {
+      logger.warn(`[OpenURL] Could not confirm foreground change: ${error}`, error);
+      return false;
+    }
+    const remaining = deadline - timer.now();
+    if (remaining > 0) {
+      await timer.sleep(Math.min(remaining, foregroundPollBackoff.delayForAttempt(attempt)));
+    }
+  }
+  return false;
+}
 
 /**
  * URL schemes that iOS resolves to a *system* handler (Mail, Phone, Messages,
@@ -25,12 +84,27 @@ const SAFARI_BUNDLE_ID = "com.apple.mobilesafari";
  * bundle, which almost certainly can't open a `mailto:`/`tel:` payload. The
  * simulator path already gets this for free via `simctl openurl`.
  */
-const SYSTEM_URL_SCHEMES = new Set(["mailto", "tel", "sms", "facetime", "facetime-audio", "maps"]);
+const SYSTEM_URL_HANDLERS: ReadonlyMap<string, string> = new Map([
+  ["mailto", "com.apple.mobilemail"],
+  ["tel", "com.apple.mobilephone"],
+  ["sms", "com.apple.MobileSMS"],
+  ["facetime", "com.apple.facetime"],
+  ["facetime-audio", "com.apple.facetime"],
+  ["maps", "com.apple.Maps"],
+]);
+
+const expectedIosForegroundHandler = (url: string): string | undefined => {
+  if (/^https?:\/\//i.test(url)) {
+    return SAFARI_BUNDLE_ID;
+  }
+  const scheme = url.match(/^([a-z][a-z0-9+.-]*):/i)?.[1].toLowerCase();
+  return scheme ? SYSTEM_URL_HANDLERS.get(scheme) : undefined;
+};
 
 /** True when `url`'s scheme is one iOS routes to a built-in system handler. */
 const isSystemUrlScheme = (url: string): boolean => {
   const match = url.trim().match(/^([a-z][a-z0-9+.-]*):/i);
-  return match ? SYSTEM_URL_SCHEMES.has(match[1].toLowerCase()) : false;
+  return match ? SYSTEM_URL_HANDLERS.has(match[1].toLowerCase()) : false;
 };
 
 export class OpenURL extends BaseVisualChange {
@@ -48,8 +122,9 @@ export class OpenURL extends BaseVisualChange {
     adb: AdbExecutor | null = null,
     simctl: SimCtlClient | null = null,
     devicectl: DeviceUrlLauncher | null = null,
+    timer: Timer = defaultTimer,
   ) {
-    super(device, adb);
+    super(device, adb, timer);
     this.device = device;
     this.simctl = simctl;
     this.devicectl = devicectl;
@@ -129,13 +204,15 @@ export class OpenURL extends BaseVisualChange {
     logger.info(`[OpenURL] Processing as regular URL: ${trimmedUrl}`);
 
     return this.observedInteraction(
-      async () => {
+      async (previousObservation) => {
         // Platform-specific URL opening execution
         switch (this.device.platform) {
           case "android":
             return await perf.track("androidOpenURL", () => this.executeAndroidOpenURL(trimmedUrl));
           case "ios":
-            return await perf.track("iOSOpenURL", () => this.executeiOSOpenURL(trimmedUrl));
+            return await perf.track("iOSOpenURL", () =>
+              this.executeiOSOpenURL(trimmedUrl, previousObservation),
+            );
           default:
             perf.end();
             throw unsupportedPlatformError(this.device.platform, "open URLs");
@@ -182,9 +259,12 @@ export class OpenURL extends BaseVisualChange {
    * @param url - URL to open
    * @returns Result of the URL opening operation
    */
-  private async executeiOSOpenURL(url: string): Promise<OpenURLResult> {
+  private async executeiOSOpenURL(
+    url: string,
+    previousObservation?: ObserveResult,
+  ): Promise<OpenURLResult> {
     if (isIosSimulatorUdid(this.device.deviceId)) {
-      return this.executeiOSSimulatorOpenURL(url);
+      return this.executeiOSSimulatorOpenURL(url, previousObservation);
     }
     return this.executeiOSPhysicalOpenURL(url);
   }
@@ -194,9 +274,12 @@ export class OpenURL extends BaseVisualChange {
    * @param url - URL to open
    * @returns Result of the URL opening operation
    */
-  private async executeiOSSimulatorOpenURL(url: string): Promise<OpenURLResult> {
+  private async executeiOSSimulatorOpenURL(
+    url: string,
+    previousObservation?: ObserveResult,
+  ): Promise<OpenURLResult> {
+    const simctl = this.simctl ?? new SimCtlClient();
     try {
-      const simctl = this.simctl ?? new SimCtlClient();
       // xcrun simctl openurl <device> <url>, issued as argv so the URL reaches
       // execFile byte-for-byte. The string path re-splits its command, which
       // mangles quotes and backslashes (issue #4213 / #4196).
@@ -205,11 +288,6 @@ export class OpenURL extends BaseVisualChange {
       // changing the tracked app hierarchy. Retire the pre-link cache so the
       // post-action observation performs a real cross-window capture.
       IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache();
-
-      return {
-        success: true,
-        url,
-      };
     } catch (error) {
       logger.error(`[OpenURL] simctl openurl failed: ${error}`);
       return {
@@ -221,6 +299,30 @@ export class OpenURL extends BaseVisualChange {
         ).message,
       };
     }
+    const openedAt = this.timer.now();
+    const expectedHandler = expectedIosForegroundHandler(url);
+    const previousApp = previousObservation && foregroundAppId(previousObservation);
+    const shouldWait = expectedHandler && previousApp && previousApp !== expectedHandler;
+    const confirmed = shouldWait
+      ? await waitForIosForegroundChange(
+          expectedHandler,
+          {
+            read: () =>
+              this.observeScreen.execute({
+                skipWaitForFresh: false,
+                minTimestamp: openedAt,
+                skipScreenshot: true,
+                skipAccessibilityAudit: true,
+              }),
+          },
+          this.timer,
+        )
+      : true;
+    return {
+      success: true,
+      url,
+      ...(!confirmed ? { warnings: [FOREGROUND_CHANGE_WARNING] } : {}),
+    };
   }
 
   /**

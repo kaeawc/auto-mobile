@@ -222,7 +222,7 @@ bun run benchmark-npm-unpacked-size --output reports/npm-unpacked-size.json
 
 Measure the latency of `observe` with `screenshot: "async"`, `"settled"`, and
 `"none"` on a connected emulator or simulator. This informs the latency choice
-for issue #8042 PR 2 (retiring `captureScreenshot`). The script also measures a
+for issue #8042 PR 2 (using `observe({ screenshot: "settled" })` for fresh screenshots). The script also measures a
 `pressButton volume_up` action probe under the server's ambient screenshot
 default; volume keys do not change app or window state. `pressButton` does not
 accept a screenshot mode, so this action sample is not mode-controlled.

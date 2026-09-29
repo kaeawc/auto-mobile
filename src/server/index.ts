@@ -292,7 +292,6 @@ import { registerCriticalSectionTools } from "./criticalSectionTools";
 import { registerBarrierTools } from "./barrierTools";
 import { registerVideoRecordingTools } from "./videoRecordingTools";
 import { registerSnapshotTools } from "./snapshotTools";
-import { registerScreenshotTools } from "./screenshotTools";
 import { registerBiometricTools } from "./biometricTools";
 import { registerTelephonyTools } from "./telephonyTools";
 import { registerHighlightTools } from "./highlightTools";
@@ -591,7 +590,6 @@ export function registerMcpTools(daemonMode: boolean): void {
     registerBarrierTools();
   }
   registerVideoRecordingTools();
-  registerScreenshotTools();
   registerSnapshotTools();
   registerBiometricTools();
   registerTelephonyTools();

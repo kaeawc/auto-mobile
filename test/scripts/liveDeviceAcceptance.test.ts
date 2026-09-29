@@ -50,14 +50,7 @@ interface Harness {
 
 const IOS_UDID = "00000000-0000-0000-0000-000000000001";
 const LIVE_ACCEPTANCE_ENV = "AUTOMOBILE_ACCEPTANCE_LIVE";
-const ENABLED_ACCEPTANCE_TOOLS = [
-  "observe",
-  "getDeviceState",
-  "killDevice",
-  "tapAt",
-  "captureScreenshot",
-  "rotate",
-];
+const ENABLED_ACCEPTANCE_TOOLS = ["observe", "getDeviceState", "killDevice", "tapAt", "rotate"];
 const posixTest = process.platform === "win32" ? test.skip : test;
 const androidArgs: AcceptanceArgs = {
   platform: "android",
@@ -624,6 +617,14 @@ function createHarness(
           structuredContent: {
             screenSize,
             rotation: currentOrientation === "portrait" ? 0 : 1,
+            ...(arguments_.screenshot === "settled"
+              ? {
+                  deviceId: matrixPlatform === "ios" ? IOS_UDID : androidTargetSerial,
+                  platform: matrixPlatform,
+                  screenshotPath: `${matrixPlatform}-${currentOrientation}.png`,
+                  screenshotOrientation: matrixPlatform === "ios" ? "native" : "display",
+                }
+              : {}),
             skeleton: [
               {
                 elementId: "test-target",
@@ -644,18 +645,6 @@ function createHarness(
             success: true,
             orientation: currentOrientation,
             ...(matrixPlatform === "android" ? { orientationLockState: "unlocked" } : {}),
-          },
-        };
-      }
-      if (name === "captureScreenshot") {
-        const sessionUuid = String(arguments_.sessionUuid);
-        requireMintedSessionCapability(sessionUuid, "captureScreenshot");
-        return {
-          structuredContent: {
-            success: true,
-            deviceId: matrixPlatform === "ios" ? IOS_UDID : androidTargetSerial,
-            platform: matrixPlatform,
-            path: `${matrixPlatform}-${currentOrientation}.png`,
           },
         };
       }
@@ -1127,7 +1116,7 @@ describe("live device acceptance harness", () => {
       "--avd-name",
       "Pixel_8_API_35",
       "--enable-tools",
-      '["observe","getDeviceState","killDevice","tapAt","captureScreenshot","rotate"]',
+      '["observe","getDeviceState","killDevice","tapAt","rotate"]',
     ]);
     expect(
       harness.calls.find(
@@ -1291,7 +1280,7 @@ describe("live device acceptance harness", () => {
       "--device-id",
       IOS_UDID,
       "--enable-tools",
-      '["observe","getDeviceState","killDevice","tapAt","captureScreenshot","rotate"]',
+      '["observe","getDeviceState","killDevice","tapAt","rotate"]',
     ]);
     expect(
       harness.calls.filter((call) => call.name === "getApple").map((call) => call.arguments),
@@ -2906,6 +2895,7 @@ describe("additive absolute-coordinate live-device acceptance gates", () => {
   test("enforces the documented Android and iOS screenshot orientation contracts", async () => {
     for (const platform of ["android", "ios"] as const) {
       let orientation: "portrait" | "landscape" = "portrait";
+      let settledObservations = 0;
       const client: McpSessionClient = {
         async callTool(name, arguments_) {
           if (name === "rotate") {
@@ -2913,6 +2903,9 @@ describe("additive absolute-coordinate live-device acceptance gates", () => {
             return success({ orientationLockState: "unlocked" });
           }
           if (name === "observe") {
+            if (arguments_.screenshot === "settled") {
+              settledObservations++;
+            }
             const screenSize =
               platform === "ios"
                 ? orientation === "portrait"
@@ -2923,6 +2916,10 @@ describe("additive absolute-coordinate live-device acceptance gates", () => {
                   : { width: 2400, height: 1080 };
             return success({
               screenSize,
+              deviceId: `${platform}-device`,
+              platform,
+              screenshotPath: `${platform}-${orientation}.png`,
+              screenshotOrientation: platform === "ios" ? "native" : "display",
               rotation: orientation === "portrait" ? 0 : 1,
               skeleton: [
                 {
@@ -2932,13 +2929,6 @@ describe("additive absolute-coordinate live-device acceptance gates", () => {
                   affordances: ["tap"],
                 },
               ],
-            });
-          }
-          if (name === "captureScreenshot") {
-            return success({
-              path: `${platform}-${orientation}.png`,
-              deviceId: `${platform}-device`,
-              platform,
             });
           }
           if (name === "tapAt") {
@@ -2974,6 +2964,7 @@ describe("additive absolute-coordinate live-device acceptance gates", () => {
       expect(result.landscape).toEqual(
         platform === "ios" ? { width: 852, height: 393 } : { width: 2400, height: 1080 },
       );
+      expect(settledObservations).toBe(2);
     }
   });
 
@@ -2991,6 +2982,10 @@ describe("additive absolute-coordinate live-device acceptance gates", () => {
               orientation === "portrait"
                 ? { width: 393, height: 852 }
                 : { width: 852, height: 393 },
+            deviceId: "ios-device",
+            platform: "ios",
+            screenshotPath: `ios-${orientation}.png`,
+            screenshotOrientation: "native",
             rotation: orientation === "portrait" ? 0 : 1,
             skeleton: [
               {
@@ -3000,13 +2995,6 @@ describe("additive absolute-coordinate live-device acceptance gates", () => {
                 affordances: ["tap"],
               },
             ],
-          });
-        }
-        if (name === "captureScreenshot") {
-          return success({
-            path: `ios-${orientation}.png`,
-            deviceId: "ios-device",
-            platform: "ios",
           });
         }
         if (name === "tapAt") {
@@ -3051,6 +3039,10 @@ describe("additive absolute-coordinate live-device acceptance gates", () => {
               orientation === "portrait"
                 ? { width: 393, height: 852 }
                 : { width: 852, height: 393 },
+            deviceId: "ios-device",
+            platform: "ios",
+            screenshotPath: `ios-${orientation}.png`,
+            screenshotOrientation: "native",
             rotation: orientation === "portrait" ? 0 : 1,
             skeleton: [
               {
@@ -3066,13 +3058,6 @@ describe("additive absolute-coordinate live-device acceptance gates", () => {
                 affordances: ["input"],
               },
             ],
-          });
-        }
-        if (name === "captureScreenshot") {
-          return success({
-            path: `ios-${orientation}.png`,
-            deviceId: "ios-device",
-            platform: "ios",
           });
         }
         throw new Error(`Unexpected tool ${name}`);
@@ -3102,6 +3087,10 @@ describe("additive absolute-coordinate live-device acceptance gates", () => {
               orientation === "portrait"
                 ? { width: 393, height: 852 }
                 : { width: 852, height: 393 },
+            deviceId: "ios-device",
+            platform: "ios",
+            screenshotPath: `ios-${orientation}.png`,
+            screenshotOrientation: "native",
             rotation: orientation === "portrait" ? 0 : 1,
             skeleton: [
               {
@@ -3111,13 +3100,6 @@ describe("additive absolute-coordinate live-device acceptance gates", () => {
                 affordances: ["tap"],
               },
             ],
-          });
-        }
-        if (name === "captureScreenshot") {
-          return success({
-            path: `ios-${orientation}.png`,
-            deviceId: "ios-device",
-            platform: "ios",
           });
         }
         throw new Error(`Unexpected tool ${name}`);
@@ -3153,6 +3135,10 @@ describe("additive absolute-coordinate live-device acceptance gates", () => {
                   : { width: 2400, height: 1080 };
             return success({
               screenSize,
+              deviceId: `${platform}-device`,
+              platform,
+              screenshotPath: `${platform}-${orientation}.png`,
+              screenshotOrientation: platform === "ios" ? "native" : "display",
               rotation: orientation === "portrait" ? 0 : 1,
               skeleton: [
                 {
@@ -3163,9 +3149,6 @@ describe("additive absolute-coordinate live-device acceptance gates", () => {
                 },
               ],
             });
-          }
-          if (name === "captureScreenshot") {
-            return success({ path: `${platform}-${orientation}.png` });
           }
           if (name === "tapAt") {
             return success({ x: arguments_.x, y: arguments_.y });

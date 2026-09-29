@@ -43,6 +43,18 @@ jobs:
     environment:
       GIT_LFS_SKIP_SMUDGE: "1"
     steps:
+      # CircleCI's native checkout ignores GIT_LFS_SKIP_SMUDGE (git-lfs does not
+      # honor its skip switches under checkout-index, git-lfs#4858), so the
+      # checkout still smudged LFS objects and failed once the budget ran out.
+      # Neutralize the lfs filter in global git config instead: git then leaves
+      # LFS pointers untouched and never invokes git-lfs. Keep in sync with the
+      # `checkout_without_lfs` command in continue_config.yml.
+      - run:
+          name: "Disable Git LFS filter before checkout"
+          command: |
+            git config --global filter.lfs.process ""
+            git config --global filter.lfs.smudge cat
+            git config --global filter.lfs.required false
       - checkout:
           method: blobless
       - path-filtering/set-parameters:

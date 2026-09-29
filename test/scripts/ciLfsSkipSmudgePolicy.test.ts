@@ -60,8 +60,11 @@ interface CircleJob {
   steps?: Array<string | Record<string, unknown>>;
 }
 
+type CircleStep = string | Record<string, unknown>;
+
 interface CircleConfig {
   jobs?: Record<string, CircleJob>;
+  commands?: Record<string, { steps?: CircleStep[] }>;
   executors?: Record<string, { environment?: Record<string, string> }>;
   workflows?: Record<string, { jobs?: Array<string | Record<string, unknown>> }>;
 }
@@ -123,20 +126,42 @@ function circleLfsDownloadOffenders(path: string, config: CircleConfig): string[
   );
 }
 
-function hasCheckout(job: CircleJob): boolean {
-  return (job.steps ?? []).some(
-    (step) => step === "checkout" || (typeof step === "object" && "checkout" in step),
+function circleStepName(step: CircleStep): string | undefined {
+  return typeof step === "string" ? step : Object.keys(step)[0];
+}
+
+// Inline reusable `commands:` so a job's effective step sequence is inspectable.
+function expandCircleSteps(steps: CircleStep[], config: CircleConfig): CircleStep[] {
+  return steps.flatMap((step) => {
+    const command = config.commands?.[circleStepName(step) ?? ""];
+    return command ? expandCircleSteps(command.steps ?? [], config) : [step];
+  });
+}
+
+function isCheckout(step: CircleStep): boolean {
+  return circleStepName(step) === "checkout";
+}
+
+function hasCheckout(job: CircleJob, config: CircleConfig): boolean {
+  return expandCircleSteps(job.steps ?? [], config).some(isCheckout);
+}
+
+// CircleCI's native checkout ignores GIT_LFS_SKIP_SMUDGE (git-lfs#4858), so the
+// only effective guard is a run step that neutralizes the lfs filter in global
+// git config BEFORE the checkout step.
+function disablesLfsFilter(step: CircleStep): boolean {
+  const command = circleRunCommand(step);
+  return (
+    command !== undefined &&
+    command.includes(`git config --global filter.lfs.process ""`) &&
+    command.includes("git config --global filter.lfs.smudge cat")
   );
 }
 
 function skipsLfs(job: CircleJob, config: CircleConfig): boolean {
-  if (job.environment?.GIT_LFS_SKIP_SMUDGE === "1") {
-    return true;
-  }
-  const executor = typeof job.executor === "string" ? job.executor : job.executor?.name;
-  return (
-    executor !== undefined && config.executors?.[executor]?.environment?.GIT_LFS_SKIP_SMUDGE === "1"
-  );
+  const steps = expandCircleSteps(job.steps ?? [], config);
+  const checkoutIndex = steps.findIndex(isCheckout);
+  return checkoutIndex > 0 && steps.slice(0, checkoutIndex).some(disablesLfsFilter);
 }
 
 describe("CI LFS checkout policy", () => {
@@ -199,7 +224,7 @@ runs:
     expect(offenders).toEqual([]);
   });
 
-  test("every CircleCI checkout inherits GIT_LFS_SKIP_SMUDGE before checkout", () => {
+  test("every CircleCI checkout disables the lfs filter before checkout", () => {
     const missing: string[] = [];
     for (const { path, document } of circleDocuments) {
       // Orb jobs hide their own checkout, so workflow invocations must resolve
@@ -213,7 +238,7 @@ runs:
         }
       }
       for (const [name, job] of Object.entries(document.jobs ?? {})) {
-        if (hasCheckout(job) && !skipsLfs(job, document)) {
+        if (hasCheckout(job, document) && !skipsLfs(job, document)) {
           missing.push(`${path}:${name}`);
         }
       }
@@ -226,7 +251,7 @@ runs:
     expect(setupConfig.workflows?.["detect-ios-changes"]?.jobs).toContainEqual({
       "detect-ios-changes": { filters: { branches: { ignore: "main" } } },
     });
-    expect(hasCheckout(setupConfig.jobs?.["detect-ios-changes"] ?? {})).toBe(true);
+    expect(hasCheckout(setupConfig.jobs?.["detect-ios-changes"] ?? {}, setupConfig)).toBe(true);
   });
 
   test("CircleCI run steps reject git lfs pull and fetch in both run forms", () => {
@@ -245,5 +270,36 @@ jobs:
       ".circleci/fixture.yml:string-run",
       ".circleci/fixture.yml:map-run",
     ]);
+  });
+  test("CircleCI checkout policy rejects env-only skips and a late filter override", () => {
+    const config = load(`
+commands:
+  safe_checkout:
+    steps:
+      - run: |
+          git config --global filter.lfs.process ""
+          git config --global filter.lfs.smudge cat
+      - checkout
+jobs:
+  via-command:
+    steps:
+      - safe_checkout
+  env-only:
+    environment:
+      GIT_LFS_SKIP_SMUDGE: "1"
+    steps:
+      - checkout
+  late-override:
+    steps:
+      - checkout
+      - run: |
+          git config --global filter.lfs.process ""
+          git config --global filter.lfs.smudge cat
+`) as CircleConfig;
+    const jobs = config.jobs ?? {};
+    expect(hasCheckout(jobs["via-command"]!, config)).toBe(true);
+    expect(skipsLfs(jobs["via-command"]!, config)).toBe(true);
+    expect(skipsLfs(jobs["env-only"]!, config)).toBe(false);
+    expect(skipsLfs(jobs["late-override"]!, config)).toBe(false);
   });
 });

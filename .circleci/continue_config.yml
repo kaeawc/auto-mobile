@@ -38,6 +38,21 @@ executors:
       GIT_LFS_SKIP_SMUDGE: "1"
 
 commands:
+  # CircleCI's native checkout ignores GIT_LFS_SKIP_SMUDGE (git-lfs does not
+  # honor its skip switches under checkout-index, git-lfs#4858), so the checkout
+  # still smudged LFS objects and failed once the budget ran out. Neutralize the
+  # lfs filter in global git config first: git then leaves LFS pointers untouched
+  # and never invokes git-lfs. Keep in sync with detect-ios-changes in config.yml.
+  checkout_without_lfs:
+    steps:
+      - run:
+          name: "Disable Git LFS filter before checkout"
+          command: |
+            git config --global filter.lfs.process ""
+            git config --global filter.lfs.smudge cat
+            git config --global filter.lfs.required false
+      - checkout
+
   restore_spm_cache:
     steps:
       - run:
@@ -52,7 +67,7 @@ jobs:
   ios-swift-packages:
     executor: ios
     steps:
-      - checkout
+      - checkout_without_lfs
       - restore_spm_cache
       - run:
           name: "Report toolchain"
@@ -75,7 +90,7 @@ jobs:
   ios-xcode-build:
     executor: ios
     steps:
-      - checkout
+      - checkout_without_lfs
       - run:
           name: "Install XcodeGen"
           # CircleCI's macOS image has a non-writable /usr/local/share, which the
@@ -103,7 +118,7 @@ jobs:
   ios-playground-tests:
     executor: ios
     steps:
-      - checkout
+      - checkout_without_lfs
       - restore_spm_cache
       - run:
           name: "Ensure iOS Simulator runtime"

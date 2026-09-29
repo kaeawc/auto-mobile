@@ -1,4 +1,4 @@
-import type { FeatureFlagKey } from "../features/featureFlags/FeatureFlagDefinitions";
+import type { FeatureFlagKey } from "../models/FeatureFlagDefinitions";
 
 /**
  * Config plumbing for the MCP output-context reduction effort (issue #2756).

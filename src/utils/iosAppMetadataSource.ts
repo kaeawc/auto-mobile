@@ -1,4 +1,4 @@
-import type { IosAppMetadataSource } from "../features/observe/GetAppMetadata";
+import type { IosAppMetadataSource } from "../models/IosAppMetadataSource";
 import type { BootedDevice } from "../models";
 import { DeviceAppManager } from "./ios-cmdline-tools/DeviceAppManager";
 import { SimCtlClient } from "./ios-cmdline-tools/SimCtlClient";

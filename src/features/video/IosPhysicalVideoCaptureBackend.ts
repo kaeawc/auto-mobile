@@ -8,6 +8,7 @@ import {
   type ProcessTracker,
 } from "../../utils/ChildProcessTracker";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import {
   DefaultHostCommandExecutor,
   type HostCommandExecutor,
@@ -1007,14 +1008,18 @@ async function waitForCaptureStart<T>(operation: Promise<T>, signal?: AbortSigna
   if (!signal) {
     return operation;
   }
-  let abortListener: (() => void) | undefined;
-  const aborted = new Promise<never>((_resolve, reject) => {
-    abortListener = () =>
-      reject(new ActionableError("Physical iOS recording start was cancelled during shutdown."));
-    signal.addEventListener("abort", abortListener, { once: true });
-  });
+  const cancellation = new AbortController();
+  const abortListener = () =>
+    cancellation.abort(
+      new ActionableError("Physical iOS recording start was cancelled during shutdown."),
+    );
+  signal.addEventListener("abort", abortListener, { once: true });
   try {
-    return await Promise.race([operation, aborted]);
+    return await raceWithDeadline(operation, {
+      timer: defaultTimer,
+      signal: cancellation.signal,
+      label: "Physical iOS recording start",
+    });
   } finally {
     if (abortListener) {
       signal.removeEventListener("abort", abortListener);

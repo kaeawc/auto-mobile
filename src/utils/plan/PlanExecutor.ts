@@ -23,6 +23,7 @@ import { PlanPartitioner, TrackedStep } from "./PlanPartitioner";
 import { computeSafeBarrierResumeStep } from "./BarrierResumeGuard";
 import { DaemonState } from "../../daemon/daemonState";
 import { Timer, defaultTimer } from "../SystemTimer";
+import { raceWithDeadline } from "../raceWithDeadline";
 import type { FailureObservationSummary } from "../../models/FailureObservation";
 import { ScreenshotJobTracker } from "../ScreenshotJobTracker";
 import { isDeviceLostError } from "../../server/deviceLossOutcome";
@@ -302,16 +303,19 @@ export class DefaultPlanExecutor implements PlanExecutor {
       const parsedParams = observeTool.schema.parse(enhancedParams) as Record<string, unknown>;
 
       let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+      const deadline = new AbortController();
       let response: unknown;
       try {
-        response = await Promise.race([
-          ToolRegistry.callInternal(observeTool, parsedParams),
-          new Promise<never>((_, reject) => {
-            timeoutHandle = this.timer.setTimeout(() => {
-              reject(new Error("failure observation timed out"));
-            }, DefaultPlanExecutor.FAILURE_OBSERVATION_TIMEOUT_MS);
-          }),
-        ]);
+        const operation = ToolRegistry.callInternal(observeTool, parsedParams);
+        timeoutHandle = this.timer.setTimeout(
+          () => deadline.abort(new Error("failure observation timed out")),
+          DefaultPlanExecutor.FAILURE_OBSERVATION_TIMEOUT_MS,
+        );
+        response = await raceWithDeadline(operation, {
+          timer: this.timer,
+          signal: deadline.signal,
+          label: "failure observation",
+        });
       } finally {
         if (timeoutHandle) {
           this.timer.clearTimeout(timeoutHandle);

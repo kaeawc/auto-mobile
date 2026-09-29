@@ -13,6 +13,7 @@ import {
 } from "./loggingConfig";
 import { Timer, defaultTimer } from "./SystemTimer";
 import { toActionableError } from "../models/ActionableError";
+import { raceWithDeadline } from "./raceWithDeadline";
 
 export {
   parseAutomobileLogFormat,
@@ -1031,27 +1032,28 @@ export const logger: Logger = {
 
   async closeAfterFlush(timer: Timer = defaultTimer): Promise<void> {
     let timeoutHandle: NodeJS.Timeout | undefined;
+    const deadline = new AbortController();
     try {
-      await Promise.race([
-        lastWrite,
-        new Promise<never>((_, reject) => {
-          timeoutHandle = timer.setTimeout(() => {
-            const stalledStream = logStream;
-            if (stalledStream) {
-              logStream = undefined;
-              deferReopenUntilClose(stalledStream, timer);
-              stalledStream.destroy?.();
-            }
-            lastWrite = Promise.resolve();
-            reject(
-              toActionableError(
-                new Error("Pending log writes stalled"),
-                `Log writes did not flush within ${CLOSE_LOG_WRITES_TIMEOUT_MS}ms`,
-              ),
-            );
-          }, CLOSE_LOG_WRITES_TIMEOUT_MS);
-        }),
-      ]);
+      timeoutHandle = timer.setTimeout(() => {
+        const stalledStream = logStream;
+        if (stalledStream) {
+          logStream = undefined;
+          deferReopenUntilClose(stalledStream, timer);
+          stalledStream.destroy?.();
+        }
+        lastWrite = Promise.resolve();
+        deadline.abort(
+          toActionableError(
+            new Error("Pending log writes stalled"),
+            `Log writes did not flush within ${CLOSE_LOG_WRITES_TIMEOUT_MS}ms`,
+          ),
+        );
+      }, CLOSE_LOG_WRITES_TIMEOUT_MS);
+      await raceWithDeadline(lastWrite, {
+        timer,
+        signal: deadline.signal,
+        label: "Log writes",
+      });
     } finally {
       if (timeoutHandle !== undefined) {
         timer.clearTimeout(timeoutHandle);

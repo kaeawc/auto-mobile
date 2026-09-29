@@ -21,8 +21,8 @@ export interface IosNotificationUIDetectorDeps {
     x2: number,
     y2: number,
     duration?: number,
-  ): Promise<{ success: boolean }>;
-  requestTapCoordinates(x: number, y: number): Promise<{ success: boolean }>;
+  ): Promise<{ success: boolean; error?: string }>;
+  requestTapCoordinates(x: number, y: number): Promise<{ success: boolean; error?: string }>;
   /** Host-side monotonic clock used as the iOS observation timestamp. */
   now(): number;
 }
@@ -64,24 +64,26 @@ export class IosNotificationUIDetector implements NotificationUIDetector {
 
   async expandTray(observation?: ObserveResult): Promise<void> {
     const { width, height } = this.requireScreenSize(observation, "open");
-    await this.deps.requestSwipe(
+    const result = await this.deps.requestSwipe(
       Math.floor(width * 0.5),
       5,
       Math.floor(width * 0.5),
       Math.floor(height * 0.7),
       IOS_OPEN_SWIPE_DURATION_MS,
     );
+    this.requireGestureSuccess(result, "open Notification Center");
   }
 
   async collapseTray(observation?: ObserveResult): Promise<void> {
     const { width, height } = this.requireScreenSize(observation, "close");
-    await this.deps.requestSwipe(
+    const result = await this.deps.requestSwipe(
       Math.floor(width * 0.5),
       Math.floor(height * 0.65),
       Math.floor(width * 0.5),
       Math.floor(height * 0.08),
       IOS_CLOSE_SWIPE_DURATION_MS,
     );
+    this.requireGestureSuccess(result, "close Notification Center");
   }
 
   async getObservationTimestamp(): Promise<number> {
@@ -91,19 +93,32 @@ export class IosNotificationUIDetector implements NotificationUIDetector {
   async tapElement(element: Element): Promise<void> {
     const geometry = new DefaultElementGeometry();
     const center = geometry.getElementCenter(element);
-    await this.deps.requestTapCoordinates(center.x, center.y);
+    const result = await this.deps.requestTapCoordinates(center.x, center.y);
+    this.requireGestureSuccess(result, "tap notification");
   }
 
   async swipeElement(element: Element): Promise<void> {
     const geometry = new DefaultElementGeometry();
     const { startX, startY, endX, endY } = geometry.getSwipeWithinBounds("left", element.bounds);
-    await this.deps.requestSwipe(
+    const result = await this.deps.requestSwipe(
       Math.floor(startX),
       Math.floor(startY),
       Math.floor(endX),
       Math.floor(endY),
       SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS,
     );
+    this.requireGestureSuccess(result, "dismiss notification");
+  }
+
+  private requireGestureSuccess(
+    result: { success: boolean; error?: string },
+    gesture: string,
+  ): void {
+    if (!result.success) {
+      throw new ActionableError(
+        `Failed to ${gesture}: ${result.error || "CtrlProxy rejected the gesture"}`,
+      );
+    }
   }
 
   private requireScreenSize(

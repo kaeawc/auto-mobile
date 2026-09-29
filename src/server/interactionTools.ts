@@ -2214,27 +2214,35 @@ export function registerInteractionTools() {
       if (args.action === "open") {
         const result = await ensureSystemTrayOpen(device, awaitTimeoutMs, progress);
         await captureSystemTrayTerminalEvidence(device, result.observation);
-        return createJSONToolResponse({
+        const success = result.skipped || result.opened;
+        const response = createJSONToolResponse({
           message: result.skipped
             ? "System tray already open; no swipe needed"
-            : "Opened system tray by swiping down from the status bar",
+            : result.opened
+              ? "Opened system tray"
+              : "Failed to open system tray: the tray remained closed",
           observation: result.observation,
-          success: true,
+          success,
           skipped: result.skipped,
         });
+        return success ? response : { ...response, isError: true as const };
       }
 
       if (args.action === "close") {
         const result = await ensureSystemTrayClosed(device, awaitTimeoutMs, progress);
         await captureSystemTrayTerminalEvidence(device, result.observation);
-        return createJSONToolResponse({
+        const success = result.skipped || result.closed;
+        const response = createJSONToolResponse({
           message: result.skipped
             ? "System tray already closed; no collapse needed"
-            : "Closed system tray (collapsed notification shade)",
+            : result.closed
+              ? "Closed system tray (collapsed notification shade)"
+              : "Failed to close system tray: the tray remained open",
           observation: result.observation,
-          success: true,
+          success,
           skipped: result.skipped,
         });
+        return success ? response : { ...response, isError: true as const };
       }
 
       if (args.action === "list") {

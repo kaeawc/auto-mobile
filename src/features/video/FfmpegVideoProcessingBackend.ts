@@ -6,6 +6,7 @@ import { promises as fsPromises } from "node:fs";
 import { pathExists } from "../../utils/filesystem/DefaultFileSystem";
 import { ActionableError, type BootedDevice } from "../../models";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { exponentialBackoff, normalizeBackoff, type BackoffInput } from "../../utils/Backoff";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
@@ -237,12 +238,14 @@ async function waitWithinDeadline<T>(
   timeoutMessage: string,
 ): Promise<T> {
   const remainingMs = Math.max(0, deadlineMs - timer.now());
-  let timeoutId: NodeJS.Timeout | undefined;
-  const timeout = new Promise<never>((_resolve, reject) => {
-    timeoutId = timer.setTimeout(() => reject(new Error(timeoutMessage)), remainingMs);
-  });
+  const deadline = new AbortController();
+  const timeoutId = timer.setTimeout(() => deadline.abort(new Error(timeoutMessage)), remainingMs);
   try {
-    return await Promise.race([operation, timeout]);
+    return await raceWithDeadline(operation, {
+      timer,
+      signal: deadline.signal,
+      label: "FFmpeg operation",
+    });
   } finally {
     if (timeoutId) {
       timer.clearTimeout(timeoutId);
@@ -264,22 +267,16 @@ async function runWithinDeadline<T>(
     : deadlineController.signal;
   const timeoutError = new Error(timeoutMessage);
   const remainingMs = Math.max(0, deadlineMs - timer.now());
-  let rejectOnAbort: ((reason?: unknown) => void) | undefined;
-  const aborted = new Promise<never>((_resolve, reject) => {
-    rejectOnAbort = reject;
-  });
-  const onAbort = () => rejectOnAbort?.(signal.reason ?? timeoutError);
-  signal.addEventListener("abort", onAbort, { once: true });
-  if (signal.aborted) {
-    onAbort();
-  }
   const operationPromise = operation(signal);
   const timeoutId = timer.setTimeout(() => deadlineController.abort(timeoutError), remainingMs);
 
   try {
-    return await Promise.race([operationPromise, aborted]);
+    return await raceWithDeadline(operationPromise, {
+      timer,
+      signal,
+      label: "FFmpeg operation",
+    });
   } finally {
-    signal.removeEventListener("abort", onAbort);
     timer.clearTimeout(timeoutId);
   }
 }

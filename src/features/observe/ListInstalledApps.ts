@@ -4,6 +4,7 @@ import {
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "../../utils/logger";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { errorMessage } from "../../utils/describeUnknownError";
 import {
   ActionableError,
@@ -118,35 +119,31 @@ export class CtrlProxyInstalledPackageSource implements AndroidInstalledPackageS
       return client.requestInstalledPackages(true, undefined, 4000);
     }
 
-    let onAbort!: () => void;
-    const aborted = new Promise<never>((_resolve, reject) => {
-      onAbort = () => reject(signal.reason);
-      signal.addEventListener("abort", onAbort, { once: true });
+    const request = client.requestInstalledPackages(true, undefined, 4000);
+    void request.then(
+      () => {
+        if (signal.aborted) {
+          // The request settled after cancellation won the race, so its result is safe to ignore.
+          logger.debug(
+            `[ListInstalledApps] ignoring late installed_packages response for device ${this.device.deviceId}`,
+          );
+        }
+      },
+      (error) => {
+        if (signal.aborted) {
+          // The request settled after cancellation won the race, so its failure is safe to ignore.
+          logger.debug(
+            `[ListInstalledApps] ignoring late installed_packages failure for device ${this.device.deviceId}: ${errorMessage(error)}`,
+          );
+        }
+      },
+    );
+    return await raceWithDeadline(request, {
+      timer: defaultTimer,
+      signal,
+      label: "Installed packages request",
+      relabelDefaultAbort: false,
     });
-    try {
-      const request = client.requestInstalledPackages(true, undefined, 4000);
-      void request.then(
-        () => {
-          if (signal.aborted) {
-            // The request settled after cancellation won the race, so its result is safe to ignore.
-            logger.debug(
-              `[ListInstalledApps] ignoring late installed_packages response for device ${this.device.deviceId}`,
-            );
-          }
-        },
-        (error) => {
-          if (signal.aborted) {
-            // The request settled after cancellation won the race, so its failure is safe to ignore.
-            logger.debug(
-              `[ListInstalledApps] ignoring late installed_packages failure for device ${this.device.deviceId}: ${errorMessage(error)}`,
-            );
-          }
-        },
-      );
-      return await Promise.race([aborted, request]);
-    } finally {
-      signal.removeEventListener("abort", onAbort);
-    }
   }
 
   async requestInstalledPackages(signal?: AbortSignal): Promise<AndroidInstalledPackagesRequest> {

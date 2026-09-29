@@ -5,6 +5,7 @@ import { logger } from "../../utils/logger";
 import { defaultIdGenerator, type IdGenerator } from "../../utils/IdGenerator";
 import { shellQuote } from "../../utils/shellQuote";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import {
   exponentialBackoff,
   normalizeBackoff,
@@ -1647,6 +1648,7 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
     }
 
     const controller = new AbortController();
+    const raceController = new AbortController();
     let timedOut = false;
     const abortForTeardown = (): void => controller.abort();
     if (reconnectSignal.aborted) {
@@ -1659,27 +1661,30 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
       timedOut = true;
       controller.abort();
     }, remainingMs);
-    const timeoutFailure = new Promise<never>((_, reject) => {
-      const rejectOnAbort = (): void =>
-        reject(
-          new Error(
-            timedOut
-              ? "video-server socket reconnect attempt timed out"
-              : "video-server socket reconnect attempt aborted",
-          ),
-        );
-      if (controller.signal.aborted) {
-        rejectOnAbort();
-      } else {
-        controller.signal.addEventListener("abort", rejectOnAbort, { once: true });
-      }
-    });
+    const rejectOnAbort = (): void =>
+      raceController.abort(
+        new Error(
+          timedOut
+            ? "video-server socket reconnect attempt timed out"
+            : "video-server socket reconnect attempt aborted",
+        ),
+      );
+    if (controller.signal.aborted) {
+      rejectOnAbort();
+    } else {
+      controller.signal.addEventListener("abort", rejectOnAbort, { once: true });
+    }
 
     try {
-      return await Promise.race([connection, timeoutFailure]);
+      return await raceWithDeadline(connection, {
+        timer: this.timer,
+        signal: raceController.signal,
+        label: "video-server socket reconnect attempt",
+      });
     } finally {
       this.timer.clearTimeout(timeout);
       reconnectSignal.removeEventListener("abort", abortForTeardown);
+      controller.signal.removeEventListener("abort", rejectOnAbort);
       if (controller.signal.aborted) {
         // A connector that ignored cancellation may still resolve. Do not leave
         // that late local socket open after either deadline or source teardown.

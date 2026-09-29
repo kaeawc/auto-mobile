@@ -42,6 +42,7 @@ import {
   type FfmpegProcess,
 } from "../../utils/media/FfmpegClient";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import {
   exponentialBackoff,
   normalizeBackoff,
@@ -942,18 +943,19 @@ export class IosH264Source implements H264CaptureSource {
     timeoutMs: number,
     context: string,
   ): Promise<T> {
-    let timeout: NodeJS.Timeout | undefined;
-    const timedOut = new Promise<never>((_, reject) => {
-      const cancel = (): void => reject(new ActionableError(`${context} cancelled by stop.`));
-      this.cancelPreCaptureDeadline = cancel;
-      timeout = this.timer.setTimeout(
-        () => reject(new ActionableError(`${context} timed out after ${timeoutMs}ms.`)),
-        timeoutMs,
-      );
-    });
-    const cancel = this.cancelPreCaptureDeadline;
+    const deadline = new AbortController();
+    const cancel = (): void => deadline.abort(new ActionableError(`${context} cancelled by stop.`));
+    this.cancelPreCaptureDeadline = cancel;
+    const timeout = this.timer.setTimeout(
+      () => deadline.abort(new ActionableError(`${context} timed out after ${timeoutMs}ms.`)),
+      timeoutMs,
+    );
     try {
-      return await Promise.race([operation, timedOut]);
+      return await raceWithDeadline(operation, {
+        timer: this.timer,
+        signal: deadline.signal,
+        label: context,
+      });
     } finally {
       if (this.cancelPreCaptureDeadline === cancel) {
         this.cancelPreCaptureDeadline = null;

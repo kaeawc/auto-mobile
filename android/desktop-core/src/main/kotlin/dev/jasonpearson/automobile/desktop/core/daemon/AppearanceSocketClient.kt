@@ -59,8 +59,8 @@ data class AppearanceResult(
 /**
  * Controls device appearance through the daemon.
  *
- * This is deliberately not per-device: `appearance.sock` takes no device id and applies to every
- * pooled device plus the current session device. Callers should present it as a global control.
+ * This is deliberately not per-device: `appearance.sock` takes no device id and applies to pooled
+ * and current devices that the caller's daemon session may control.
  */
 interface AppearanceClient {
   fun getConfig(): AppearanceResult
@@ -84,6 +84,7 @@ interface AppearanceClient {
 class AppearanceSocketClient(
   private val socketPathValue: String = AutoMobileSocketPaths.socketPath(APPEARANCE_SOCKET_FILE),
   private val json: Json = DaemonJson,
+  private val sessionUuidProvider: () -> String? = { null },
 ) : AppearanceClient {
 
   override fun isAvailable(): Boolean = Files.exists(File(socketPathValue).toPath())
@@ -97,7 +98,12 @@ class AppearanceSocketClient(
     send(request("set_appearance", AppearanceParams(mode = mode.wireName)))
 
   private fun request(command: String, params: AppearanceParams? = null) =
-    AppearanceSocketRequest(id = UUID.randomUUID().toString(), command = command, params = params)
+    AppearanceSocketRequest(
+      id = UUID.randomUUID().toString(),
+      command = command,
+      sessionUuid = sessionUuidProvider(),
+      params = params,
+    )
 
   private fun send(request: AppearanceSocketRequest): AppearanceResult {
     ensureSocketExists()
@@ -143,6 +149,7 @@ internal data class AppearanceSocketRequest(
   val id: String,
   val type: String = "appearance_request",
   val command: String,
+  val sessionUuid: String? = null,
   val params: AppearanceParams? = null,
 )
 

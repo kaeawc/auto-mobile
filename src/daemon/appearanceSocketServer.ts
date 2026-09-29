@@ -15,10 +15,58 @@ import { DeviceSessionManager } from "../utils/DeviceSessionManager";
 import { applyAppearanceToDevice } from "../utils/deviceAppearance";
 import { triggerAppearanceSync } from "../utils/appearance/AppearanceSyncScheduler";
 import { DaemonState } from "./daemonState";
-import type { AppearanceMode, BootedDevice } from "../models";
+import type {
+  AppearanceConfig,
+  AppearanceConfigInput,
+  AppearanceMode,
+  BootedDevice,
+} from "../models";
 import { APPEARANCE_SOCKET_CONFIG } from "./daemonFiles";
+import {
+  createDefaultStreamSocketAuthenticator,
+  type StreamSocketAuthenticator,
+} from "./streamSocketAuth";
 
 const VALID_MODES = new Set(["light", "dark", "auto"]);
+
+export interface AppearanceDeviceSource {
+  getPooledDevices(): BootedDevice[];
+  getCurrentDevice(): BootedDevice | undefined;
+}
+
+const defaultDeviceSource: AppearanceDeviceSource = {
+  getPooledDevices: () => {
+    const daemonState = DaemonState.getInstance();
+    if (!daemonState.isInitialized()) {
+      return [];
+    }
+    return daemonState
+      .getDevicePool()
+      .getAllDevices()
+      .map((device) => ({
+        deviceId: device.id,
+        name: device.name,
+        platform: device.platform,
+      }));
+  },
+  getCurrentDevice: () => DeviceSessionManager.getInstance().getCurrentDevice(),
+};
+
+export interface AppearanceSocketServerDependencies {
+  getConfig: () => Promise<AppearanceConfig>;
+  updateConfig: (update: AppearanceConfigInput | null) => Promise<AppearanceConfig>;
+  resolveMode: (config: AppearanceConfig) => Promise<AppearanceMode>;
+  applyToDevice: (device: BootedDevice, mode: AppearanceMode) => Promise<void>;
+  triggerSync: () => Promise<void>;
+}
+
+const defaultDependencies: AppearanceSocketServerDependencies = {
+  getConfig: getAppearanceConfig,
+  updateConfig: updateAppearanceConfig,
+  resolveMode: resolveAppearanceMode,
+  applyToDevice: applyAppearanceToDevice,
+  triggerSync: triggerAppearanceSync,
+};
 
 /**
  * Socket server for appearance configuration.
@@ -31,6 +79,11 @@ export class AppearanceSocketServer extends RequestResponseSocketServer<
   constructor(
     socketPath: string = getSocketPath(APPEARANCE_SOCKET_CONFIG),
     timer: Timer = defaultTimer,
+    private readonly authenticator: StreamSocketAuthenticator = createDefaultStreamSocketAuthenticator(
+      "appearance",
+    ),
+    private readonly deviceSource: AppearanceDeviceSource = defaultDeviceSource,
+    private readonly dependencies: AppearanceSocketServerDependencies = defaultDependencies,
   ) {
     super(socketPath, timer, "Appearance");
   }
@@ -42,7 +95,7 @@ export class AppearanceSocketServer extends RequestResponseSocketServer<
 
     switch (command) {
       case "get_appearance_config": {
-        const config = await getAppearanceConfig();
+        const config = await this.dependencies.getConfig();
         return {
           id: request.id,
           type: "appearance_response",
@@ -51,13 +104,14 @@ export class AppearanceSocketServer extends RequestResponseSocketServer<
         };
       }
       case "set_appearance_sync": {
+        this.authenticator.authorize({ sessionUuid: request.sessionUuid });
         const enabled = request.params?.enabled ?? request.enabled;
         if (typeof enabled !== "boolean") {
           throw new Error("set_appearance_sync requires enabled boolean");
         }
-        const config = await updateAppearanceConfig({ syncWithHost: enabled });
-        const appliedMode = await this.applyToTargets(config);
-        await triggerAppearanceSync();
+        const config = await this.dependencies.updateConfig({ syncWithHost: enabled });
+        const appliedMode = await this.applyToTargets(config, request.sessionUuid);
+        await this.dependencies.triggerSync();
         return {
           id: request.id,
           type: "appearance_response",
@@ -69,17 +123,18 @@ export class AppearanceSocketServer extends RequestResponseSocketServer<
         };
       }
       case "set_appearance": {
+        this.authenticator.authorize({ sessionUuid: request.sessionUuid });
         const mode = request.params?.mode ?? request.mode;
         if (!mode || !VALID_MODES.has(String(mode).toLowerCase())) {
           throw new Error("set_appearance requires mode: light | dark | auto");
         }
         const normalizedMode = String(mode).toLowerCase();
-        const config = await updateAppearanceConfig({
+        const config = await this.dependencies.updateConfig({
           defaultMode: normalizedMode,
           syncWithHost: normalizedMode === "auto",
         });
-        const appliedMode = await this.applyToTargets(config, normalizedMode);
-        await triggerAppearanceSync();
+        const appliedMode = await this.applyToTargets(config, request.sessionUuid, normalizedMode);
+        await this.dependencies.triggerSync();
         return {
           id: request.id,
           type: "appearance_response",
@@ -105,22 +160,23 @@ export class AppearanceSocketServer extends RequestResponseSocketServer<
   }
 
   private async applyToTargets(
-    config: Awaited<ReturnType<typeof getAppearanceConfig>>,
+    config: AppearanceConfig,
+    sessionUuid: string | undefined,
     explicitMode?: string,
   ): Promise<AppearanceMode | null> {
     const mode =
       explicitMode && explicitMode !== "auto"
         ? (explicitMode as AppearanceMode)
-        : await resolveAppearanceMode(config);
+        : await this.dependencies.resolveMode(config);
 
-    const targets = this.getTargets();
+    const targets = this.getTargets(sessionUuid);
     if (targets.length === 0) {
       return null;
     }
 
     for (const device of targets) {
       try {
-        await applyAppearanceToDevice(device, mode);
+        await this.dependencies.applyToDevice(device, mode);
       } catch (error) {
         logger.warn(`[Appearance] Failed to apply appearance to ${device.deviceId}: ${error}`);
       }
@@ -129,28 +185,29 @@ export class AppearanceSocketServer extends RequestResponseSocketServer<
     return mode;
   }
 
-  private getTargets(): BootedDevice[] {
-    const daemonState = DaemonState.getInstance();
+  private getTargets(sessionUuid: string | undefined): BootedDevice[] {
     const targets = new Map<string, BootedDevice>();
 
-    if (daemonState.isInitialized()) {
-      const pool = daemonState.getDevicePool();
-      const pooledDevices = pool.getAllDevices();
-      for (const device of pooledDevices) {
-        targets.set(device.id, {
-          deviceId: device.id,
-          name: device.name,
-          platform: device.platform,
-        });
-      }
+    for (const device of this.deviceSource.getPooledDevices()) {
+      targets.set(device.deviceId, device);
     }
 
-    const current = DeviceSessionManager.getInstance().getCurrentDevice();
+    const current = this.deviceSource.getCurrentDevice();
     if (current) {
       targets.set(current.deviceId, current);
     }
 
-    return Array.from(targets.values());
+    const authorized: BootedDevice[] = [];
+    for (const device of targets.values()) {
+      try {
+        this.authenticator.authorize({ sessionUuid, deviceId: device.deviceId });
+        authorized.push(device);
+      } catch (error) {
+        // A device owned by another session is an expected exclusion from a pool-wide request.
+        logger.debug(`[Appearance] Excluded device ${device.deviceId}: ${error}`);
+      }
+    }
+    return authorized;
   }
 }
 

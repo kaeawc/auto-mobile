@@ -30,6 +30,20 @@ class AppearanceSocketClientTest {
       val request = s.awaitRequest()
       assertEquals("get_appearance_config", request["command"]?.jsonPrimitive?.content)
       assertEquals("appearance_request", request["type"]?.jsonPrimitive?.content)
+      assertTrue("sessionUuid" !in request)
+    }
+  }
+
+  @Test
+  fun `set_appearance carries the session uuid the provider supplies`() {
+    server(resultJson = """{"config": $configJson, "appliedMode": "dark"}""").use { s ->
+      AppearanceSocketClient(
+          socketPathValue = s.socketPath.toString(),
+          sessionUuidProvider = { "session-abc" },
+        )
+        .setMode(AppearanceSyncMode.Dark)
+
+      assertEquals("session-abc", s.awaitRequest()["sessionUuid"]?.jsonPrimitive?.content)
     }
   }
 

@@ -883,8 +883,14 @@ fun AutoMobileContent(
   // Appearance and video recording follow the same split: config over their own sockets, verbs
   // over the MCP client.
   val appearanceClient: AppearanceClient? =
-    remember(dataSourceMode) {
-      if (dataSourceMode == DataSourceMode.Real) AppearanceSocketClient() else null
+    remember(dataSourceMode, desktopDaemonSession) {
+      if (dataSourceMode == DataSourceMode.Real) {
+        AppearanceSocketClient(
+          sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null }
+        )
+      } else {
+        null
+      }
     }
   val recordingConfigClient: VideoRecordingConfigClient? =
     remember(dataSourceMode) {

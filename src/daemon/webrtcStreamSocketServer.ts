@@ -215,12 +215,14 @@ export class WebRtcStreamSocketServer extends RequestResponseSocketServer<
     // Authenticate before touching device state or the WebRTC stack (issue
     // #4751). An unauthenticated or cross-session request is rejected here.
     this.authenticator.authorize({ sessionUuid: request.sessionUuid, deviceId: request.deviceId });
+    const sessionUuid =
+      this.authenticator.resolveSessionIdentity?.(request.sessionUuid) ?? request.sessionUuid;
     const deps = await this.getDeps();
     switch (request.action) {
       case "start":
-        return this.handleStart(deps, request);
+        return this.handleStart(deps, request, sessionUuid);
       case "stop": {
-        const stream = await deps.stopStream(request.streamId, request.leaseId);
+        const stream = await deps.stopStream(request.streamId, request.leaseId, sessionUuid);
         return {
           id: request.id,
           success: true,
@@ -230,7 +232,7 @@ export class WebRtcStreamSocketServer extends RequestResponseSocketServer<
         };
       }
       case "status":
-        return this.handleStatus(deps, request);
+        return this.handleStatus(deps, request, sessionUuid);
       case "list":
         return {
           id: request.id,
@@ -240,7 +242,7 @@ export class WebRtcStreamSocketServer extends RequestResponseSocketServer<
           streams: deps.listStreams(),
         };
       case "await":
-        return this.handleAwait(deps, request);
+        return this.handleAwait(deps, request, sessionUuid);
       default:
         throw new ActionableError(`Unsupported webrtcStream action: ${request.action}`);
     }
@@ -249,6 +251,7 @@ export class WebRtcStreamSocketServer extends RequestResponseSocketServer<
   private async handleStart(
     deps: WebRtcStreamSocketServerDependencies,
     request: WebRtcStreamSocketRequest,
+    sessionUuid?: string,
   ): Promise<WebRtcStreamSocketResponse> {
     // A WHIP endpoint supplied over the wire may only target a trusted origin
     // (issue #4751); the protocol (https-or-loopback) is enforced downstream in
@@ -272,6 +275,7 @@ export class WebRtcStreamSocketServer extends RequestResponseSocketServer<
       device,
       streamId: request.streamId,
       leaseId: request.leaseId,
+      sessionUuid,
       overrides: resolveStartOverrides(request),
     });
     logger.info(`[WebRtcStream] started stream ${stream.streamId} for device ${device.deviceId}`);
@@ -289,6 +293,7 @@ export class WebRtcStreamSocketServer extends RequestResponseSocketServer<
   private async handleAwait(
     deps: WebRtcStreamSocketServerDependencies,
     request: WebRtcStreamSocketRequest,
+    sessionUuid?: string,
   ): Promise<WebRtcStreamSocketResponse> {
     if (!request.streamId) {
       throw new ActionableError("The WebRTC await action requires streamId.");
@@ -301,6 +306,7 @@ export class WebRtcStreamSocketServer extends RequestResponseSocketServer<
       request.readiness ?? "publishing",
       request.timeoutMs,
       request.leaseId,
+      sessionUuid,
     );
     return {
       id: request.id,
@@ -316,9 +322,10 @@ export class WebRtcStreamSocketServer extends RequestResponseSocketServer<
   private handleStatus(
     deps: WebRtcStreamSocketServerDependencies,
     request: WebRtcStreamSocketRequest,
+    sessionUuid?: string,
   ): WebRtcStreamSocketResponse {
     if (request.streamId) {
-      const stream = deps.getStream(request.streamId, request.leaseId);
+      const stream = deps.getStream(request.streamId, request.leaseId, sessionUuid);
       if (!stream) {
         throw new ActionableError(`No active WebRTC stream with id ${request.streamId}.`);
       }

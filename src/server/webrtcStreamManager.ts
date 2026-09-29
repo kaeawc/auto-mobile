@@ -3,6 +3,7 @@ import { ActionableError, type BootedDevice } from "../models";
 import { logger } from "../utils/logger";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { DaemonState } from "../daemon/daemonState";
 import {
   createH264CaptureSource,
   resolveVideoServerJar,
@@ -65,6 +66,7 @@ export interface StartWebRtcStreamRequest {
   streamId?: string;
   /** Existing lease identity to renew instead of minting another consumer. */
   leaseId?: string;
+  sessionUuid?: string;
   overrides?: WebRtcStreamingOverrides;
 }
 
@@ -105,7 +107,7 @@ interface WebRtcStreamRecord {
   cachedSps: Buffer | null;
   cachedPps: Buffer | null;
   stateWaiters: Set<() => void>;
-  leases: Map<string, number>;
+  leases: Map<string, { expiresAt: number; sessionUuid?: string }>;
   leaseExpiryHandle: NodeJS.Timeout | null;
 }
 
@@ -122,6 +124,12 @@ export interface WebRtcStreamManagerDependencies {
   resolveVideoJar: (device: BootedDevice) => Promise<string | null>;
   now: () => Date;
   timer: Timer;
+  isSessionLive?: (sessionUuid: string) => boolean;
+}
+
+function isDaemonSessionLive(sessionUuid: string): boolean {
+  const state = DaemonState.getInstance();
+  return state.isInitialized() ? Boolean(state.getSessionManager().getSession(sessionUuid)) : false;
 }
 
 const defaultDependencies: WebRtcStreamManagerDependencies = {
@@ -132,6 +140,7 @@ const defaultDependencies: WebRtcStreamManagerDependencies = {
     device.platform === "android" ? resolveVideoServerJar() : Promise.resolve(null),
   now: () => new Date(),
   timer: defaultTimer,
+  isSessionLive: isDaemonSessionLive,
 };
 
 let dependencies: WebRtcStreamManagerDependencies = { ...defaultDependencies };
@@ -184,12 +193,12 @@ async function withRecord(
 }
 
 function leaseExpiryAt(record: WebRtcStreamRecord, leaseId: string): string | undefined {
-  const expiresAt = record.leases.get(leaseId);
-  if (expiresAt === undefined) {
+  const lease = record.leases.get(leaseId);
+  if (!lease) {
     return undefined;
   }
   return new Date(
-    dependencies.now().getTime() + Math.max(0, expiresAt - dependencies.timer.now()),
+    dependencies.now().getTime() + Math.max(0, lease.expiresAt - dependencies.timer.now()),
   ).toISOString();
 }
 
@@ -225,7 +234,9 @@ function scheduleLeaseExpiry(record: WebRtcStreamRecord): void {
     dependencies.timer.clearTimeout(record.leaseExpiryHandle);
     record.leaseExpiryHandle = null;
   }
-  const earliestExpiry = Math.min(...record.leases.values());
+  const earliestExpiry = Math.min(
+    ...Array.from(record.leases.values(), (lease) => lease.expiresAt),
+  );
   if (!Number.isFinite(earliestExpiry)) {
     return;
   }
@@ -235,8 +246,8 @@ function scheduleLeaseExpiry(record: WebRtcStreamRecord): void {
         return;
       }
       const now = dependencies.timer.now();
-      for (const [leaseId, expiresAt] of record.leases) {
-        if (expiresAt <= now) {
+      for (const [leaseId, lease] of record.leases) {
+        if (lease.expiresAt <= now) {
           record.leases.delete(leaseId);
         }
       }
@@ -253,17 +264,62 @@ function scheduleLeaseExpiry(record: WebRtcStreamRecord): void {
   );
 }
 
-function acquireLease(record: WebRtcStreamRecord, requestedLeaseId?: string): string {
-  const leaseId =
-    requestedLeaseId && record.leases.has(requestedLeaseId)
-      ? requestedLeaseId
-      : `lease_${dependencies.idGenerator.next()}`;
-  record.leases.set(leaseId, dependencies.timer.now() + WEBRTC_STREAM_LEASE_TTL_MS);
+function assertLeaseAccess(
+  record: WebRtcStreamRecord,
+  leaseId: string,
+  ownerSessionUuid: string | undefined,
+  sessionUuid: string | undefined,
+): void {
+  if (
+    ownerSessionUuid &&
+    sessionUuid &&
+    ownerSessionUuid !== sessionUuid &&
+    dependencies.isSessionLive?.(ownerSessionUuid)
+  ) {
+    throw new ActionableError(
+      `WebRTC lease ${leaseId} for stream ${record.streamId} belongs to another active session.`,
+    );
+  }
+}
+
+function acquireLease(
+  record: WebRtcStreamRecord,
+  requestedLeaseId?: string,
+  sessionUuid?: string,
+  mintIfUnknown = false,
+): string {
+  let leaseId: string;
+  let ownerSessionUuid = sessionUuid;
+  if (requestedLeaseId !== undefined) {
+    const existing = record.leases.get(requestedLeaseId);
+    if (!existing && !mintIfUnknown) {
+      throw new ActionableError(
+        `No active WebRTC lease ${requestedLeaseId} for stream ${record.streamId}; call start to resume.`,
+      );
+    }
+    if (existing) {
+      assertLeaseAccess(record, requestedLeaseId, existing.sessionUuid, sessionUuid);
+      leaseId = requestedLeaseId;
+      ownerSessionUuid = sessionUuid ?? existing.sessionUuid;
+    } else {
+      leaseId = `lease_${dependencies.idGenerator.next()}`;
+    }
+  } else {
+    leaseId = `lease_${dependencies.idGenerator.next()}`;
+  }
+  record.leases.set(leaseId, {
+    expiresAt: dependencies.timer.now() + WEBRTC_STREAM_LEASE_TTL_MS,
+    sessionUuid: ownerSessionUuid,
+  });
   scheduleLeaseExpiry(record);
   return leaseId;
 }
 
-function releaseLease(record: WebRtcStreamRecord, leaseId: string): boolean {
+function releaseLease(record: WebRtcStreamRecord, leaseId: string, sessionUuid?: string): boolean {
+  const existing = record.leases.get(leaseId);
+  if (existing) {
+    assertLeaseAccess(record, leaseId, existing.sessionUuid, sessionUuid);
+  }
   const removed = record.leases.delete(leaseId);
   if (removed) {
     scheduleLeaseExpiry(record);
@@ -622,7 +678,10 @@ export async function startWebRtcStream(
   const requestReceived = dependencies.now().toISOString();
   const existing = activeStreamForDevice(request.device.deviceId);
   if (existing) {
-    return describeRecord(existing, acquireLease(existing, request.leaseId));
+    return describeRecord(
+      existing,
+      acquireLease(existing, request.leaseId, request.sessionUuid, true),
+    );
   }
 
   const config = resolveWebRtcStreamingConfig(request.overrides);
@@ -637,8 +696,8 @@ export async function startWebRtcStream(
     bitrateBps,
     requestReceived,
   );
+  const leaseId = acquireLease(record, request.leaseId, request.sessionUuid, true);
   streams.set(streamId, record);
-  const leaseId = acquireLease(record, request.leaseId);
 
   try {
     record.jarPath = await dependencies.resolveVideoJar(request.device);
@@ -674,17 +733,33 @@ export async function startWebRtcStream(
   }
 }
 
-/** Release one lease, or stop a stream immediately when no lease is supplied. */
+/** Release one lease, or the caller's and unowned leases when no lease is supplied. */
 export async function stopWebRtcStream(
   streamId?: string,
   leaseId?: string,
+  sessionUuid?: string,
 ): Promise<WebRtcStreamDescriptor> {
   const record = resolveStreamRecord(streamId);
-  if (leaseId && !releaseLease(record, leaseId)) {
+  if (leaseId !== undefined && !releaseLease(record, leaseId, sessionUuid)) {
     throw new ActionableError(`No active WebRTC lease ${leaseId} for stream ${record.streamId}.`);
   }
-  if (leaseId && record.leases.size > 0) {
+  if (leaseId !== undefined && record.leases.size > 0) {
     return describeRecord(record);
+  }
+  if (leaseId === undefined) {
+    for (const [activeLeaseId, lease] of record.leases) {
+      if (lease.sessionUuid === undefined || lease.sessionUuid === sessionUuid) {
+        record.leases.delete(activeLeaseId);
+      }
+    }
+    if (
+      Array.from(record.leases.values()).some(
+        (lease) => lease.sessionUuid && dependencies.isSessionLive?.(lease.sessionUuid),
+      )
+    ) {
+      scheduleLeaseExpiry(record);
+      return describeRecord(record);
+    }
   }
   streams.delete(record.streamId);
   if (record.leaseExpiryHandle) {
@@ -704,12 +779,14 @@ export function listWebRtcStreams(): WebRtcStreamDescriptor[] {
 export function getWebRtcStreamDescriptor(
   streamId: string,
   leaseId?: string,
+  sessionUuid?: string,
 ): WebRtcStreamDescriptor | null {
   const record = streams.get(streamId);
   if (!record) {
     return null;
   }
-  const activeLeaseId = leaseId ? acquireLease(record, leaseId) : undefined;
+  const activeLeaseId =
+    leaseId !== undefined ? acquireLease(record, leaseId, sessionUuid) : undefined;
   return describeRecord(record, activeLeaseId);
 }
 
@@ -795,6 +872,7 @@ export async function waitForWebRtcStreamReadiness(
   readiness: "capture_ready" | "publishing",
   timeoutMs: number = DEFAULT_STREAM_READY_TIMEOUT_MS,
   leaseId?: string,
+  sessionUuid?: string,
 ): Promise<WebRtcStreamDescriptor> {
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
     throw new ActionableError(
@@ -812,8 +890,8 @@ export async function waitForWebRtcStreamReadiness(
     }
     const record = resolved.record;
     lastRecord = record;
-    if (activeLeaseId) {
-      activeLeaseId = acquireLease(record, activeLeaseId);
+    if (activeLeaseId !== undefined) {
+      activeLeaseId = acquireLease(record, activeLeaseId, sessionUuid);
     }
     if (isReadinessSatisfied(record, readiness)) {
       return describeRecord(record, activeLeaseId);

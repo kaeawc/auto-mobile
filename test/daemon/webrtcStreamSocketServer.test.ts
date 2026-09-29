@@ -632,6 +632,72 @@ describe("WebRtcStreamSocketServer", () => {
       expect(started).toHaveLength(1);
     });
 
+    test("forwards the resolved base session to every lease operation", async () => {
+      const identities: string[] = [];
+      const sm = fakeSessionManager({
+        getDeviceLabels: (uuid) =>
+          uuid === "session-1" ? { phone: "session-1:phone" } : undefined,
+      });
+      const server = new TestableServer(
+        makeDeps({
+          startStream: async (request) => {
+            identities.push(request.sessionUuid ?? "missing");
+            return descriptor("stream-1");
+          },
+          getStream: (_streamId, _leaseId, sessionUuid) => {
+            identities.push(sessionUuid ?? "missing");
+            return descriptor("stream-1");
+          },
+          awaitReadiness: async (_streamId, _readiness, _timeoutMs, _leaseId, sessionUuid) => {
+            identities.push(sessionUuid ?? "missing");
+            return descriptor("stream-1");
+          },
+          stopStream: async (_streamId, _leaseId, sessionUuid) => {
+            identities.push(sessionUuid ?? "missing");
+            return descriptor("stream-1", "stopped");
+          },
+        }),
+        new SessionScopedStreamAuthenticator(() => sm, "webrtcStream", {} as NodeJS.ProcessEnv),
+      );
+      const socket = new FakeSocket();
+      for (const action of ["start", "status", "await", "stop"] as const) {
+        await server.simulate(socket, {
+          id: action,
+          action,
+          streamId: "stream-1",
+          sessionUuid: "session-1:phone",
+          whipEndpoint: action === "start" ? "https://coord/whip" : undefined,
+        });
+        expect(lastResponse(socket).success).toBe(true);
+      }
+      expect(identities).toEqual(Array(4).fill("session-1"));
+    });
+
+    test("forwards the wire identity when no resolver is available or auth is disabled", async () => {
+      const identities: string[] = [];
+      const deps = makeDeps({
+        getStream: (_streamId, _leaseId, sessionUuid) => {
+          identities.push(sessionUuid ?? "missing");
+          return descriptor("stream-1");
+        },
+      });
+      const socket = new FakeSocket();
+      const request: WebRtcStreamSocketRequest = {
+        id: "status",
+        action: "status",
+        streamId: "stream-1",
+        sessionUuid: "session-1:phone",
+      };
+      await new TestableServer(deps).simulate(socket, request);
+      const disabled = new SessionScopedStreamAuthenticator(
+        () => fakeSessionManager(),
+        "webrtcStream",
+        { AUTOMOBILE_DAEMON_STREAM_AUTH: "0" } as NodeJS.ProcessEnv,
+      );
+      await new TestableServer(deps, disabled).simulate(socket, request);
+      expect(identities).toEqual(["session-1:phone", "session-1:phone"]);
+    });
+
     test("rejects targeting a device owned by another session", async () => {
       const server = enforcingServer(
         fakeSessionManager({ getSessionForDevice: () => "other-session" }),

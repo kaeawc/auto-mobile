@@ -169,6 +169,289 @@ afterEach(() => {
 });
 
 describe("webrtcStreamManager", () => {
+  test("rejects another live session renewing an owned lease", async () => {
+    installFakes();
+    setWebRtcStreamManagerDependencies({ isSessionLive: () => true });
+    const started = await startWebRtcStream({
+      device: ANDROID,
+      sessionUuid: "session-a",
+      overrides: { whipEndpoint: ENDPOINT },
+    });
+
+    expect(() =>
+      getWebRtcStreamDescriptor(started.streamId, started.lease?.id, "session-b"),
+    ).toThrow(ActionableError);
+    expect(getWebRtcStreamDescriptor(started.streamId)?.consumerCount).toBe(1);
+    await expect(
+      waitForWebRtcStreamReadiness(
+        started.streamId,
+        "capture_ready",
+        100,
+        started.lease?.id,
+        "session-b",
+      ),
+    ).rejects.toThrow(ActionableError);
+    await expect(
+      stopWebRtcStream(started.streamId, started.lease?.id, "session-b"),
+    ).rejects.toThrow(ActionableError);
+    expect((await stopWebRtcStream(started.streamId, undefined, "session-b")).consumerCount).toBe(
+      1,
+    );
+    expect(getWebRtcStreamDescriptor(started.streamId)?.consumerCount).toBe(1);
+  });
+
+  test("lease-less stop releases caller and unowned leases while another live owner continues", async () => {
+    const timer = new FakeTimer();
+    const { publishers } = installFakes();
+    setWebRtcStreamManagerDependencies({ timer, isSessionLive: () => true });
+    const own = await startWebRtcStream({
+      device: ANDROID,
+      sessionUuid: "session-a",
+      overrides: { whipEndpoint: ENDPOINT },
+    });
+    const unowned = await startWebRtcStream({
+      device: ANDROID,
+      overrides: { whipEndpoint: ENDPOINT },
+    });
+    const foreign = await startWebRtcStream({
+      device: ANDROID,
+      sessionUuid: "session-b",
+      overrides: { whipEndpoint: ENDPOINT },
+    });
+
+    const detached = await stopWebRtcStream(own.streamId, undefined, "session-a");
+    expect(detached.consumerCount).toBe(1);
+    expect(listWebRtcStreams()).toHaveLength(1);
+    expect(publishers[0].stopped).toBe(false);
+    expect(() => getWebRtcStreamDescriptor(own.streamId, own.lease?.id)).toThrow(ActionableError);
+    expect(() => getWebRtcStreamDescriptor(own.streamId, unowned.lease?.id)).toThrow(
+      ActionableError,
+    );
+    expect(getWebRtcStreamDescriptor(own.streamId, foreign.lease?.id, "session-b")?.lease?.id).toBe(
+      foreign.lease?.id,
+    );
+
+    const stopped = await stopWebRtcStream(own.streamId, undefined, "session-b");
+    expect(stopped.state).toBe("stopped");
+    expect(stopped.consumerCount).toBe(0);
+    expect(publishers[0].stopped).toBe(true);
+    expect(listWebRtcStreams()).toHaveLength(0);
+  });
+
+  test("lease-less stop leaves dead foreign leases for teardown without deleting them", async () => {
+    installFakes();
+    setWebRtcStreamManagerDependencies({ isSessionLive: () => false });
+    const foreign = await startWebRtcStream({
+      device: ANDROID,
+      sessionUuid: "session-b",
+      overrides: { whipEndpoint: ENDPOINT },
+    });
+    const stopped = await stopWebRtcStream(foreign.streamId, undefined, "session-a");
+    expect(stopped.state).toBe("stopped");
+    expect(stopped.consumerCount).toBe(1);
+    expect(listWebRtcStreams()).toHaveLength(0);
+  });
+
+  test("start mints a fresh lease for an unknown id on an active device stream", async () => {
+    installFakes();
+    setWebRtcStreamManagerDependencies({ isSessionLive: () => true });
+    const first = await startWebRtcStream({
+      device: ANDROID,
+      sessionUuid: "session-a",
+      overrides: { whipEndpoint: ENDPOINT },
+    });
+    const recovered = await startWebRtcStream({
+      device: ANDROID,
+      leaseId: "stale-lease",
+      sessionUuid: "session-b",
+      overrides: { whipEndpoint: ENDPOINT },
+    });
+    expect(recovered.streamId).toBe(first.streamId);
+    expect(recovered.lease?.id).not.toBe("stale-lease");
+    expect(recovered.lease?.id).not.toBe(first.lease?.id);
+    expect(recovered.consumerCount).toBe(2);
+    await expect(
+      startWebRtcStream({
+        device: ANDROID,
+        leaseId: first.lease?.id,
+        sessionUuid: "session-b",
+        overrides: { whipEndpoint: ENDPOINT },
+      }),
+    ).rejects.toThrow(ActionableError);
+  });
+
+  test("start recovers with a fresh lease after the old stream is reaped", async () => {
+    const timer = new FakeTimer();
+    installFakes();
+    setWebRtcStreamManagerDependencies({ timer, isSessionLive: () => true });
+    const first = await startWebRtcStream({
+      device: ANDROID,
+      sessionUuid: "session-a",
+      overrides: { whipEndpoint: ENDPOINT },
+    });
+    timer.advanceTime(WEBRTC_STREAM_LEASE_TTL_MS);
+    expect(listWebRtcStreams()).toHaveLength(0);
+    const recovered = await startWebRtcStream({
+      device: ANDROID,
+      leaseId: first.lease?.id,
+      sessionUuid: "session-a",
+      overrides: { whipEndpoint: ENDPOINT },
+    });
+    expect(recovered.streamId).not.toBe(first.streamId);
+    expect(recovered.lease?.id).not.toBe(first.lease?.id);
+    expect(recovered.consumerCount).toBe(1);
+  });
+
+  test("status and await still reject unknown lease ids", async () => {
+    installFakes();
+    const started = await startWebRtcStream({
+      device: ANDROID,
+      overrides: { whipEndpoint: ENDPOINT },
+    });
+    expect(() => getWebRtcStreamDescriptor(started.streamId, "stale-lease")).toThrow(
+      ActionableError,
+    );
+    await expect(
+      waitForWebRtcStreamReadiness(started.streamId, "capture_ready", 100, "stale-lease"),
+    ).rejects.toThrow(ActionableError);
+    expect(getWebRtcStreamDescriptor(started.streamId)?.consumerCount).toBe(1);
+  });
+
+  test("renews its own lease and refreshes the deadline", async () => {
+    const timer = new FakeTimer();
+    installFakes();
+    setWebRtcStreamManagerDependencies({
+      timer,
+      now: () => new Date(Date.parse("2026-07-11T00:00:00.000Z") + timer.now()),
+      isSessionLive: () => true,
+    });
+    const started = await startWebRtcStream({
+      device: ANDROID,
+      sessionUuid: "session-a",
+      overrides: { whipEndpoint: ENDPOINT },
+    });
+    timer.advanceTime(1_000);
+    const renewed = getWebRtcStreamDescriptor(started.streamId, started.lease?.id, "session-a");
+    expect(renewed?.lease?.id).toBe(started.lease?.id);
+    expect(
+      Date.parse(renewed?.lease?.expiresAt ?? "") - Date.parse(started.lease?.expiresAt ?? ""),
+    ).toBe(1_000);
+    timer.advanceTime(WEBRTC_STREAM_LEASE_TTL_MS - 1_000);
+    expect(listWebRtcStreams()).toHaveLength(1);
+  });
+
+  test("allows a fresh lease after explicit release", async () => {
+    installFakes();
+    setWebRtcStreamManagerDependencies({ isSessionLive: () => true });
+    const a = await startWebRtcStream({
+      device: ANDROID,
+      sessionUuid: "session-a",
+      overrides: { whipEndpoint: ENDPOINT },
+    });
+    const keeper = await startWebRtcStream({
+      device: ANDROID,
+      sessionUuid: "session-a",
+      overrides: { whipEndpoint: ENDPOINT },
+    });
+    await stopWebRtcStream(a.streamId, a.lease?.id, "session-a");
+    const b = await startWebRtcStream({
+      device: ANDROID,
+      sessionUuid: "session-b",
+      overrides: { whipEndpoint: ENDPOINT },
+    });
+    expect(b.lease?.id).not.toBe(a.lease?.id);
+    expect(b.lease?.id).not.toBe(keeper.lease?.id);
+    expect(b.consumerCount).toBe(2);
+  });
+
+  test("allows a fresh lease after the old lease is reaped", async () => {
+    const timer = new FakeTimer();
+    installFakes();
+    setWebRtcStreamManagerDependencies({ timer, isSessionLive: () => true });
+    const a = await startWebRtcStream({
+      device: ANDROID,
+      sessionUuid: "session-a",
+      overrides: { whipEndpoint: ENDPOINT },
+    });
+    timer.advanceTime(1);
+    await startWebRtcStream({
+      device: ANDROID,
+      sessionUuid: "session-a",
+      overrides: { whipEndpoint: ENDPOINT },
+    });
+    timer.advanceTime(WEBRTC_STREAM_LEASE_TTL_MS - 1);
+    expect(getWebRtcStreamDescriptor(a.streamId)?.consumerCount).toBe(1);
+    const b = await startWebRtcStream({
+      device: ANDROID,
+      sessionUuid: "session-b",
+      overrides: { whipEndpoint: ENDPOINT },
+    });
+    expect(b.lease?.id).not.toBe(a.lease?.id);
+    expect(b.consumerCount).toBe(2);
+  });
+
+  test("takes over a dead owner's lease before its TTL", async () => {
+    installFakes();
+    const live = new Set(["session-a", "session-b"]);
+    setWebRtcStreamManagerDependencies({ isSessionLive: (uuid) => live.has(uuid) });
+    const a = await startWebRtcStream({
+      device: ANDROID,
+      sessionUuid: "session-a",
+      overrides: { whipEndpoint: ENDPOINT },
+    });
+    live.delete("session-a");
+    const b = getWebRtcStreamDescriptor(a.streamId, a.lease?.id, "session-b");
+    expect(b?.lease?.id).toBe(a.lease?.id);
+    expect(b?.consumerCount).toBe(1);
+    live.add("session-a");
+    expect(() => getWebRtcStreamDescriptor(a.streamId, a.lease?.id, "session-a")).toThrow(
+      ActionableError,
+    );
+  });
+
+  test("allows releasing a dead owner's lease", async () => {
+    installFakes();
+    setWebRtcStreamManagerDependencies({ isSessionLive: () => false });
+    const a = await startWebRtcStream({
+      device: ANDROID,
+      sessionUuid: "session-a",
+      overrides: { whipEndpoint: ENDPOINT },
+    });
+    const stopped = await stopWebRtcStream(a.streamId, a.lease?.id, "session-b");
+    expect(stopped.state).toBe("stopped");
+  });
+
+  test("rejects a guessed or reaped lease without adding a consumer", async () => {
+    installFakes();
+    const started = await startWebRtcStream({
+      device: ANDROID,
+      overrides: { whipEndpoint: ENDPOINT },
+    });
+    expect(() => getWebRtcStreamDescriptor(started.streamId, "not-a-real-lease")).toThrow(
+      ActionableError,
+    );
+    expect(() => getWebRtcStreamDescriptor(started.streamId, "")).toThrow(ActionableError);
+    expect(getWebRtcStreamDescriptor(started.streamId)?.consumerCount).toBe(1);
+  });
+
+  test("claims an unowned lease on a session renewal", async () => {
+    installFakes();
+    setWebRtcStreamManagerDependencies({ isSessionLive: () => true });
+    const started = await startWebRtcStream({
+      device: ANDROID,
+      overrides: { whipEndpoint: ENDPOINT },
+    });
+    expect(
+      getWebRtcStreamDescriptor(started.streamId, started.lease?.id, "session-a")?.lease?.id,
+    ).toBe(started.lease?.id);
+    expect(() =>
+      getWebRtcStreamDescriptor(started.streamId, started.lease?.id, "session-b"),
+    ).toThrow(ActionableError);
+    expect(getWebRtcStreamDescriptor(started.streamId, started.lease?.id)?.lease?.id).toBe(
+      started.lease?.id,
+    );
+  });
+
   test("start creates a publisher, starts the source, and returns a descriptor", async () => {
     const { publishers, sources } = installFakes();
     const descriptor = await startWebRtcStream({

@@ -99,11 +99,37 @@ describe("PostNotification - iOS Simulator", () => {
     expect(pushCalls()).toHaveLength(0);
   });
 
-  test("simctl push failure surfaces as supported failure", async () => {
-    simctl.setPushNotificationResult({ success: false, error: "No such device" });
+  test("maps UNErrorDomain notification authorization failures to guidance", async () => {
+    const simctlError =
+      "(domain=UNErrorDomain, code=2003) Repository could not save notification. Source is not authorized.";
+    simctl.setPushNotificationResult({ success: false, error: simctlError });
     const result = await make(SIM_UDID).execute({ title: "t", body: "b", appId: "com.x" });
     expect(result.success).toBe(false);
     expect(result.supported).toBe(true);
-    expect(result.error).toContain("No such device");
+    expect(result.error).toContain(
+      "The app has not been granted notification authorization on this simulator",
+    );
+    expect(result.error).toContain("launch the app and accept its notification prompt");
+    expect(result.error).toContain("requestAuthorization");
+    expect(result.error).toContain(simctlError);
+  });
+
+  test("maps Source is not authorized even without domain and code", async () => {
+    const simctlError = "Repository could not save notification. Source is not authorized.";
+    simctl.setPushNotificationResult({ success: false, error: simctlError });
+    const result = await make(SIM_UDID).execute({ title: "t", body: "b", appId: "com.x" });
+    expect(result.success).toBe(false);
+    expect(result.supported).toBe(true);
+    expect(result.error).toContain("notification authorization on this simulator");
+    expect(result.error).toContain(simctlError);
+  });
+
+  test("leaves unrelated simctl push failures unchanged", async () => {
+    const simctlError = "No such device";
+    simctl.setPushNotificationResult({ success: false, error: simctlError });
+    const result = await make(SIM_UDID).execute({ title: "t", body: "b", appId: "com.x" });
+    expect(result.success).toBe(false);
+    expect(result.supported).toBe(true);
+    expect(result.error).toBe(simctlError);
   });
 });

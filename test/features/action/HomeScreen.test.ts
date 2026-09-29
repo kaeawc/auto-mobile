@@ -3,6 +3,7 @@ import { HomeScreen } from "../../../src/features/action/HomeScreen";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { BootedDevice, ObserveResult } from "../../../src/models";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
+import type { CtrlProxyHierarchy } from "../../../src/features/observe/ios/types";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeWindow } from "../../fakes/FakeWindow";
@@ -51,6 +52,10 @@ function sequencedWindow(appIds: string[]): WindowInterface {
     async setCachedActiveWindow(): Promise<void> {},
     async clearCache(): Promise<void> {},
   };
+}
+
+function iosHierarchy(packageName: string): CtrlProxyHierarchy {
+  return { packageName, updatedAt: 1, hierarchy: { className: "XCUIApplication" } };
 }
 
 describe("HomeScreen", () => {
@@ -105,6 +110,22 @@ describe("HomeScreen", () => {
     getInstanceSpy = null;
   });
 
+  function createIosHomeScreen(): { action: HomeScreen; client: FakeIOSCtrlProxy } {
+    const iosDevice: BootedDevice = {
+      name: "iPhone 15",
+      platform: "ios",
+      deviceId: "ios-device",
+    };
+    const action = new HomeScreen(iosDevice, fakeAdb, fakeTimer);
+    (action as any).observeScreen = fakeObserveScreen;
+    (action as any).window = fakeWindow;
+    (action as any).awaitIdle = fakeAwaitIdle;
+
+    const client = new FakeIOSCtrlProxy(fakeTimer);
+    getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(client as any);
+    return { action, client };
+  }
+
   describe("execute", () => {
     test("should execute hardware navigation using keyevent 3", async () => {
       fakeAdb.setCommandResponse("shell input keyevent 3", { stdout: "", stderr: "" });
@@ -144,28 +165,66 @@ describe("HomeScreen", () => {
     });
 
     test("should use CtrlProxy iOS press home on iOS", async () => {
-      const iosDevice: BootedDevice = {
-        name: "iPhone 15",
-        platform: "ios",
-        deviceId: "ios-device",
-      };
-      const iosHomeScreen = new HomeScreen(iosDevice, fakeAdb);
-      (iosHomeScreen as any).observeScreen = fakeObserveScreen;
-      (iosHomeScreen as any).window = fakeWindow;
-      (iosHomeScreen as any).awaitIdle = fakeAwaitIdle;
+      const { action, client } = createIosHomeScreen();
+      client.setHierarchyData(iosHierarchy("com.apple.springboard"));
 
-      const fakeIOSCtrlProxy = new FakeIOSCtrlProxy();
-      const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-        fakeIOSCtrlProxy as any,
+      const result = await action.execute();
+      expect(result.success).toBe(true);
+      expect(client.getPressHomeRequestCount()).toBe(1);
+      expect(client.getHierarchyRequestCount()).toBe(1);
+      expect(fakeTimer.getSleepHistory()).toEqual([]);
+    });
+
+    test("reports the foreground app and blocking alert after bounded iOS retries", async () => {
+      const { action, client } = createIosHomeScreen();
+      client.setHierarchyData(iosHierarchy("com.apple.Maps"));
+      spyOn(client, "convertToViewHierarchyResult").mockReturnValue({
+        packageName: "com.apple.Maps",
+        hierarchy: {
+          node: {
+            $: { class: "XCUIApplication" },
+            node: [
+              {
+                $: { class: "XCUIElementTypeAlert", text: "Allow Maps to use your location?" },
+              },
+            ],
+          },
+        },
+      });
+
+      await expect(action.execute()).rejects.toThrow(
+        /com\.apple\.Maps.*XCUIElementTypeAlert.*Allow Maps to use your location\?/,
       );
+      expect(client.getHierarchyRequestCount()).toBe(4);
+      expect(fakeTimer.getSleepHistory()).toEqual([300, 600, 900]);
+    });
 
-      try {
-        const result = await iosHomeScreen.execute();
-        expect(result.success).toBe(true);
-        expect(fakeIOSCtrlProxy.getPressHomeRequestCount()).toBe(1);
-      } finally {
-        getInstanceSpy.mockRestore();
-      }
+    test("reports the foreground app when iOS Home is blocked without an alert", async () => {
+      const { action, client } = createIosHomeScreen();
+      client.setHierarchyData(iosHierarchy("com.apple.Maps"));
+
+      await expect(action.execute()).rejects.toThrow(
+        "Home press did not background com.apple.Maps; the home screen did not become foreground",
+      );
+      expect(client.getHierarchyRequestCount()).toBe(4);
+    });
+
+    test("waits for SpringBoard when the first iOS hierarchy still shows the app", async () => {
+      const { action, client } = createIosHomeScreen();
+      const hierarchies = [
+        iosHierarchy("com.apple.Maps"),
+        iosHierarchy("com.apple.Maps"),
+        iosHierarchy("com.apple.springboard"),
+      ];
+      let readCount = 0;
+      spyOn(client, "requestHierarchySync").mockImplementation(async () => ({
+        hierarchy: hierarchies[Math.min(readCount++, hierarchies.length - 1)],
+      }));
+
+      const result = await action.execute();
+      expect(result.success).toBe(true);
+      expect(readCount).toBe(3);
+      expect(fakeTimer.getSleepHistory()).toEqual([300, 600]);
     });
   });
 

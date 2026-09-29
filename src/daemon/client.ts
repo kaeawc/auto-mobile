@@ -553,7 +553,9 @@ export class DaemonClient {
     if (!pidData || typeof pidData.pid !== "number") {
       return originalError;
     }
-    const processRunning = this.recoveryOptions.isProcessRunning ?? isProcessRunning;
+    const processRunning =
+      this.recoveryOptions.isProcessRunning ??
+      ((pid: number) => isProcessRunning(pid, { debugLog: logger.debug }));
     if (processRunning(pidData.pid)) {
       return originalError;
     }

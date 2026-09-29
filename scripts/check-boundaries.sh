@@ -25,6 +25,7 @@ cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)" || exit 1
 parallel_checks=(
   "bun scripts/check-no-direct-plutil.ts"
   "bash scripts/check-no-new-direct-git-metadata.sh"
+  "bash scripts/check-utils-import-direction.sh"
   "bash scripts/check-no-local-shell-quote.sh"
   "bash scripts/check-app-bundle-metadata-boundary.sh"
   "bash scripts/check-ffmpeg-execution-boundary.sh"

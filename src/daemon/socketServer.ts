@@ -383,7 +383,7 @@ const defaultSocketOwnerLiveness: SocketOwnerLiveness = {
     if (!pidData || pidData.pid === process.pid) {
       return "unknown";
     }
-    return isProcessRunning(pidData.pid) ? "live" : "dead";
+    return isProcessRunning(pidData.pid, { debugLog: logger.debug }) ? "live" : "dead";
   },
 };
 

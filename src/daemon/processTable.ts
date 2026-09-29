@@ -1,5 +1,6 @@
 import { execSync } from "node:child_process";
 import { errorMessage } from "../utils/describeUnknownError";
+import { logger } from "../utils/logger";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS } from "./constants";
 import { isDaemonEntryScriptPath } from "./DaemonLauncher";
@@ -457,7 +458,7 @@ export class PsDaemonProcessFinder implements DaemonProcessFinder, DaemonProcess
   }
 
   isProcessRunning(pid: number): boolean {
-    return isDaemonProcessRunning(pid);
+    return isDaemonProcessRunning(pid, { debugLog: logger.debug });
   }
 }
 
@@ -484,7 +485,7 @@ export class WindowsDaemonProcessFinder
   }
 
   isProcessRunning(pid: number): boolean {
-    return isDaemonProcessRunning(pid);
+    return isDaemonProcessRunning(pid, { debugLog: logger.debug });
   }
 }
 

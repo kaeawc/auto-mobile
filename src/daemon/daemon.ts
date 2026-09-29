@@ -1453,7 +1453,7 @@ export class Daemon {
       {
         readRecord: () => readPidFileDataSync(),
         writeRecord: () => this.writePidFile(),
-        isProcessRunning,
+        isProcessRunning: (pid) => isProcessRunning(pid, { debugLog: logger.debug }),
       },
       getDaemonSocketPathsByName(),
     );

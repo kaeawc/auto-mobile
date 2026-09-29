@@ -21,7 +21,7 @@
 //      actually encoded (flagged via `DAEMON_NON_FINITE_ENCODED_PARAM`), so direct
 //      in-memory / stdio clients skip the walk entirely.
 
-import { DAEMON_NON_FINITE_ENCODED_PARAM } from "../daemon/constants";
+export const DAEMON_NON_FINITE_ENCODED_PARAM = "__autoMobileNonFiniteEncoded";
 
 // Deliberately unlikely to collide with a real payload key.
 const NON_FINITE_TAG = "__autoMobileNonFinite__";

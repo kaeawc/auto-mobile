@@ -1,4 +1,4 @@
-import { DeviceLostError } from "../daemon/emulatorLossIncident";
+import { DeviceLostError } from "../models/DeviceLostError";
 import {
   type RetiredProvisionedDeviceTransport,
   ProvisionedDeviceTransportTombstoneRepository,

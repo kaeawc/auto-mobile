@@ -703,6 +703,59 @@ describe("isProcessRunning", () => {
     ).toBe(false);
   });
 
+  test("reports signal and procfs diagnostics without changing liveness", () => {
+    const diagnostics: Array<[string, unknown]> = [];
+    const debugLog = (message: string, error?: unknown): void => {
+      diagnostics.push([message, error]);
+    };
+    const signalError = Object.assign(new Error("ESRCH"), { code: "ESRCH" });
+    expect(
+      isProcessRunning(7190, {
+        signalProcess: () => {
+          throw signalError;
+        },
+        debugLog,
+      }),
+    ).toBe(false);
+    expect(diagnostics[0]?.[1]).toBe(signalError);
+
+    const procfsError = new Error("procfs unavailable");
+    expect(
+      isProcessRunning(7190, {
+        platform: "linux",
+        signalProcess: successfulSignal,
+        readProcStat: () => {
+          throw procfsError;
+        },
+        debugLog,
+      }),
+    ).toBe(true);
+    expect(diagnostics[1]?.[1]).toBe(procfsError);
+
+    expect(
+      isProcessRunning(7190, {
+        platform: "linux",
+        signalProcess: successfulSignal,
+        readProcStat: () => "invalid stat",
+        debugLog,
+      }),
+    ).toBe(true);
+    expect(diagnostics[2]?.[1]).toBe("invalid stat");
+  });
+
+  test("ignores a failing diagnostic sink", () => {
+    expect(
+      isProcessRunning(7190, {
+        signalProcess: () => {
+          throw Object.assign(new Error("ESRCH"), { code: "ESRCH" });
+        },
+        debugLog: () => {
+          throw new Error("logger unavailable");
+        },
+      }),
+    ).toBe(false);
+  });
+
   test.each(["Z", "X"])("reports a Linux process in state %s as not running", (state) => {
     expect(
       isProcessRunning(7190, {

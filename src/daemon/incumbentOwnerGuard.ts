@@ -78,7 +78,8 @@ export class IncumbentOwnerGuard {
     this.deps = {
       readPidFile: deps?.readPidFile ?? (() => readPidFileDataSync()),
       persistPidFile: deps?.persistPidFile ?? defaultPersistPidFile,
-      isProcessRunning: deps?.isProcessRunning ?? isProcessRunning,
+      isProcessRunning:
+        deps?.isProcessRunning ?? ((pid) => isProcessRunning(pid, { debugLog: logger.debug })),
       selfPid: deps?.selfPid ?? process.pid,
     };
   }

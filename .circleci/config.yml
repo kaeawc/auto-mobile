@@ -43,8 +43,35 @@ jobs:
     environment:
       GIT_LFS_SKIP_SMUDGE: "1"
     steps:
-      - checkout:
-          method: blobless
+      # CircleCI's native `checkout` ignores GIT_LFS_SKIP_SMUDGE (git-lfs does not
+      # honor its skip switches under checkout-index, git-lfs#4858), so it kept
+      # downloading LFS objects and failed once the repository's LFS budget ran out.
+      # This replaces it with a plain git clone that never invokes git-lfs.
+      # Keep the command identical to `checkout_without_lfs` in continue_config.yml
+      # (the policy test enforces it).
+      - run:
+          name: "Checkout without Git LFS"
+          command: |
+            set -euo pipefail
+            # Neutralize the lfs filter so no git operation in this job invokes git-lfs.
+            git config --global filter.lfs.process ""
+            git config --global filter.lfs.smudge ""
+            git config --global filter.lfs.clean ""
+            git config --global filter.lfs.required false
+            # Public repo: clone over HTTPS so no checkout SSH key is needed. Blobless
+            # keeps it cheap; the default branch (main) comes along for path-filtering.
+            git clone --filter=blob:none --no-checkout \
+              "https://github.com/${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}.git" .
+            # Fetch the exact commit so fork PR heads (not on any origin branch) resolve.
+            git fetch --filter=blob:none origin "${CIRCLE_SHA1}"
+            git checkout --force --detach "${CIRCLE_SHA1}"
+            # Fail loudly if any LFS-tracked path holds real content instead of a pointer.
+            git ls-files -z ':(attr:filter=lfs)' | while IFS= read -r -d '' path; do
+              if ! head -c 40 "${path}" | grep -q '^version https://git-lfs'; then
+                echo "LFS content was downloaded for ${path}; checkout must stay LFS-free" >&2
+                exit 1
+              fi
+            done
       - path-filtering/set-parameters:
           base-revision: main
           config-path: .circleci/continue_config.yml

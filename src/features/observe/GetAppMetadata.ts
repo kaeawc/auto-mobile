@@ -9,17 +9,9 @@ import { logger } from "../../utils/logger";
 import { AndroidCtrlProxyClient } from "./android";
 import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
 import { shellQuote } from "../../utils/shellQuote";
+import type { IosAppMetadataSource } from "../../models/IosAppMetadataSource";
 
-/**
- * Source of iOS app metadata — injectable for testing.
- */
-export interface IosAppMetadataSource {
-  listApps(deviceId?: string): Promise<Record<string, unknown>[]>;
-  getPhysicalDeviceAppInfo(
-    deviceId: string,
-    bundleId: string,
-  ): Promise<Record<string, unknown> | null>;
-}
+export type { IosAppMetadataSource };
 
 export class GetAppMetadata {
   private readonly device: BootedDevice;

@@ -128,7 +128,6 @@ import {
 } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { canonicalPixelsToPoints } from "./canonicalPixels";
 import { ActionableError, toActionableError } from "../models/ActionableError";
-import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { getDeviceDataStreamServer } from "./deviceDataStreamSocketServer";
 import type { KeyValueType } from "../features/storage/storageTypes";
 import type {
@@ -628,6 +627,23 @@ class McpClientReconnectDeadlineError extends Error {
   }
 }
 
+export interface SocketFrameTraceEvent {
+  event:
+    | "frame_parsed"
+    | "admission_requested"
+    | "admission_granted"
+    | "callTool_entered"
+    | "callTool_settled"
+    | "response_write_started"
+    | "response_write_callback"
+    | "socket_drain"
+    | "socket_pause";
+  atMs: number;
+  requestId: string;
+  deviceId?: string;
+  error?: string;
+}
+
 export class UnixSocketServer {
   private server: NetServer | null = null;
   private serverClosePromise: Promise<void> | null = null;
@@ -666,6 +682,7 @@ export class UnixSocketServer {
   private activeMcpClientForwardCounts: Map<string, number> = new Map();
   private mcpClientIdleTimers: Map<string, NodeJS.Timeout> = new Map();
   private timer: Timer;
+  private readonly onFrameTrace?: (event: SocketFrameTraceEvent) => void;
   private readonly idGenerator: IdGenerator;
   /** Observation-only liveness probe used before an existing socket's reclaim (issue #6232). */
   private readonly socketReachability: DaemonSocketReachabilityLike;
@@ -777,6 +794,7 @@ export class UnixSocketServer {
       liveAcceptanceStartupSecret?: string;
       acceptanceDiscoveryCapability?: string;
       sessionToolSelectionService?: Pick<SessionToolSelectionService, "isEnabled" | "setEnabled">;
+      onFrameTrace?: (event: SocketFrameTraceEvent) => void;
     } = {},
     idGenerator: IdGenerator = defaultIdGenerator,
     bindGuard: SocketBindGuardOptions = {},
@@ -786,6 +804,7 @@ export class UnixSocketServer {
     this.mcpEndpoint = mcpEndpoint;
     this.daemonState = daemonState;
     this.timer = timer;
+    this.onFrameTrace = handshakeConfig.onFrameTrace;
     this.idGenerator = idGenerator;
     // The reclaim lock's per-instance owner token comes from the module default
     // generator, NOT the injected `idGenerator` — that one is reserved for socket
@@ -969,37 +988,27 @@ export class UnixSocketServer {
       socket.destroy();
     });
 
+    if (this.onFrameTrace) {
+      socket.on("drain", () => this.traceFrame("socket_drain", "*"));
+      socket.on("pause", () => this.traceFrame("socket_pause", "*"));
+    }
+
     socket.on("data", (data) => {
       const receivedAtMs = this.timer.now();
-      const handler = (async () => {
-        buffer += typeof data === "string" ? data : decoder.decode(data, { stream: true });
+      buffer += typeof data === "string" ? data : decoder.decode(data, { stream: true });
 
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-
-        const requestHandlers = lines
-          .filter((line) => line.trim())
-          .map(async (line) => {
-            let requestId = "unknown";
-            try {
-              const request: DaemonRequest = JSON.parse(line);
-              requestId = request.id;
-              const response = await this.handleRequest(sessionId, socket, request, receivedAtMs);
-              this.writeFrame(socket, sessionId, response);
-            } catch (error) {
-              logger.error(`Error processing request ${requestId} from ${sessionId}:`, error);
-              const errorResponse: DaemonResponse = {
-                id: requestId,
-                type: "mcp_response",
-                success: false,
-                error: errorMessage(error),
-              };
-              this.writeFrame(socket, sessionId, errorResponse);
-            }
-          });
-        await Promise.all(requestHandlers);
-      })();
-      this.trackRequestHandler(handler);
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+      // Parse each chunk synchronously and track each frame on its own. A held
+      // device call must not keep another frame attached to its chunk's
+      // completion promise (issue #6387).
+      for (const line of lines) {
+        if (line.trim()) {
+          this.trackRequestHandler(
+            this.processSocketRequestLine(sessionId, socket, line, receivedAtMs),
+          );
+        }
+      }
     });
 
     socket.on("close", () => {
@@ -1014,6 +1023,51 @@ export class UnixSocketServer {
         socket.destroy();
       }
     });
+  }
+
+  private async processSocketRequestLine(
+    sessionId: string,
+    socket: Socket,
+    line: string,
+    receivedAtMs: number,
+  ): Promise<void> {
+    let requestId = "unknown";
+    let deviceId: string | undefined;
+    try {
+      const request: DaemonRequest = JSON.parse(line);
+      requestId = request.id;
+      deviceId = this.onFrameTrace ? this.frameDeviceId(request) : undefined;
+      if (this.onFrameTrace) {
+        this.traceFrame("frame_parsed", requestId, deviceId);
+      }
+      const response = await this.handleRequest(sessionId, socket, request, receivedAtMs);
+      this.writeFrame(socket, sessionId, response, undefined, deviceId);
+    } catch (error) {
+      logger.error(`Error processing request ${requestId} from ${sessionId}:`, error);
+      const errorResponse: DaemonResponse = {
+        id: requestId,
+        type: "mcp_response",
+        success: false,
+        error: errorMessage(error),
+      };
+      this.writeFrame(socket, sessionId, errorResponse, undefined, deviceId);
+    }
+  }
+
+  private frameDeviceId(request: DaemonRequest): string | undefined {
+    const deviceId: unknown = request.params?.arguments?.deviceId;
+    return typeof deviceId === "string" ? deviceId : undefined;
+  }
+
+  private traceFrame(
+    event: SocketFrameTraceEvent["event"],
+    requestId: string,
+    deviceId?: string,
+    error?: string,
+  ): void {
+    if (this.onFrameTrace) {
+      this.onFrameTrace({ event, atMs: this.timer.now(), requestId, deviceId, error });
+    }
   }
 
   private releaseSocketSession(sessionId: string, socket: Socket): void {
@@ -1216,9 +1270,27 @@ export class UnixSocketServer {
     sessionId: string,
     frame: DaemonResponse | DaemonNotification,
     onFlushed?: () => void,
+    deviceId?: string,
+  ): void {
+    if (this.onFrameTrace && frame.type === "mcp_response") {
+      this.traceFrame("response_write_started", frame.id, deviceId);
+      this.writeFrameData(socket, sessionId, frame, (error) => {
+        this.traceFrame("response_write_callback", frame.id, deviceId, error?.message);
+        onFlushed?.();
+      });
+      return;
+    }
+    this.writeFrameData(socket, sessionId, frame, onFlushed);
+  }
+
+  private writeFrameData(
+    socket: Socket,
+    sessionId: string,
+    frame: DaemonResponse | DaemonNotification,
+    onFlushed?: (error?: Error | null) => void,
   ): void {
     if (socket.destroyed) {
-      onFlushed?.();
+      onFlushed?.(new Error("socket destroyed"));
       return;
     }
     try {
@@ -1229,7 +1301,7 @@ export class UnixSocketServer {
         );
       }
     } catch (error) {
-      onFlushed?.();
+      onFlushed?.(error instanceof Error ? error : new Error(errorMessage(error)));
       logger.warn(`Daemon RPC write failed for ${sessionId}: ${error}`);
       if (!socket.destroyed) {
         socket.destroy();
@@ -1446,10 +1518,17 @@ export class UnixSocketServer {
     };
     // Admit through the socket's queue: same-lane requests keep arrival order, while an
     // explicit-device call does not wait behind another device's call (issue #6387).
+    const deviceId = this.onFrameTrace ? this.frameDeviceId(request) : undefined;
+    if (this.onFrameTrace) {
+      this.traceFrame("admission_requested", request.id, deviceId);
+    }
     return session.requestQueue
-      .run(resolveSocketAdmissionLane(request), () =>
-        this.runCancellableQueuedHandler(handler, cancellation.signal),
-      )
+      .run(resolveSocketAdmissionLane(request), () => {
+        if (this.onFrameTrace) {
+          this.traceFrame("admission_granted", request.id, deviceId);
+        }
+        return this.runCancellableQueuedHandler(handler, cancellation.signal);
+      })
       .finally(cancellation.dispose);
   }
 
@@ -5795,13 +5874,15 @@ export class UnixSocketServer {
             socketSessionId,
             timeoutMs,
           );
-          return await mcpClient.callTool(
-            {
-              name: request.params.name,
-              arguments: this.withLiveDeadlineKey(forwardedArguments, liveDeadlineKey),
-            },
-            undefined,
-            callOptions,
+          return await this.traceCallTool(request, () =>
+            mcpClient.callTool(
+              {
+                name: request.params.name,
+                arguments: this.withLiveDeadlineKey(forwardedArguments, liveDeadlineKey),
+              },
+              undefined,
+              callOptions,
+            ),
           );
         } finally {
           cleanup();
@@ -5832,6 +5913,19 @@ export class UnixSocketServer {
       }
       default:
         throw new Error(`Unsupported daemon method: ${request.method}`);
+    }
+  }
+
+  private async traceCallTool<T>(request: DaemonRequest, callTool: () => Promise<T>): Promise<T> {
+    if (!this.onFrameTrace) {
+      return await callTool();
+    }
+    const deviceId = this.frameDeviceId(request);
+    this.traceFrame("callTool_entered", request.id, deviceId);
+    try {
+      return await callTool();
+    } finally {
+      this.traceFrame("callTool_settled", request.id, deviceId);
     }
   }
 

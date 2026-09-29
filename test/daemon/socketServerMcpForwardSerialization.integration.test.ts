@@ -6,6 +6,7 @@ import { unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
+import type { SocketFrameTraceEvent } from "../../src/daemon/socketServer";
 import { DaemonClient } from "../../src/daemon/client";
 import { SOCKET_REQUEST_DEADLINE_MS, sendRawSocketRequest } from "./helpers/socketRequest";
 import { defaultTimer } from "../../src/utils/SystemTimer";
@@ -214,11 +215,17 @@ function sendTwoToolsCallsOnOneSocket(
   });
 }
 
+const frameTraceEvents: SocketFrameTraceEvent[] = [];
+const clientReceiveEvents: Array<{ atMs: number; requestId: string }> = [];
+let printFrameTrace = false;
+
 class PersistentSocketClient {
   private readonly socket = new Socket();
   private buffer = "";
   private readonly responses = new Map<string, DaemonResponse>();
   private readonly waiters = new Map<string, (response: DaemonResponse) => void>();
+
+  constructor(private readonly onFrameReceived?: (response: DaemonResponse) => void) {}
 
   async connect(socketPath: string): Promise<void> {
     await new Promise<void>((resolve, reject) => {
@@ -233,6 +240,7 @@ class PersistentSocketClient {
             continue;
           }
           const response = JSON.parse(line) as DaemonResponse;
+          this.onFrameReceived?.(response);
           const waiter = this.waiters.get(response.id);
           if (waiter) {
             this.waiters.delete(response.id);
@@ -522,6 +530,11 @@ describe("UnixSocketServer MCP forward serialization", () => {
   });
 
   afterEach(async () => {
+    if (printFrameTrace) {
+      console.error("#6387 server frame trace:", JSON.stringify(frameTraceEvents, null, 2));
+      console.error("#6387 client receive trace:", JSON.stringify(clientReceiveEvents, null, 2));
+      printFrameTrace = false;
+    }
     await server.close();
     if (existsSync(socketPath)) {
       await unlink(socketPath);
@@ -748,7 +761,10 @@ describe("UnixSocketServer MCP forward serialization", () => {
     }
   });
 
-  async function restartWithFakeTimer(prefix: string): Promise<void> {
+  async function restartWithFakeTimer(
+    prefix: string,
+    onFrameTrace?: (event: SocketFrameTraceEvent) => void,
+  ): Promise<void> {
     await server.close();
     socketPath = join(tmpdir(), `${prefix}-${randomUUID()}.sock`);
     fakeTimer = new FakeTimer();
@@ -757,6 +773,8 @@ describe("UnixSocketServer MCP forward serialization", () => {
       "http://localhost:0/mcp",
       createFakeDaemonState(sessionDevices, sessionDeviceLabels, mcpAutolockSessions),
       fakeTimer,
+      null,
+      { onFrameTrace },
     );
     await server.start();
   }
@@ -804,7 +822,10 @@ describe("UnixSocketServer MCP forward serialization", () => {
   });
 
   test("does not charge another device's in-flight call against a queued call's timeout (#6387)", async () => {
-    await restartWithFakeTimer("mcp-per-device-deadline");
+    frameTraceEvents.length = 0;
+    clientReceiveEvents.length = 0;
+    printFrameTrace = true;
+    await restartWithFakeTimer("mcp-per-device-deadline", (event) => frameTraceEvents.push(event));
     const firstCallStarted = Promise.withResolvers<void>();
     const releaseFirstCall = Promise.withResolvers<void>();
     const calledDevices: string[] = [];
@@ -825,7 +846,9 @@ describe("UnixSocketServer MCP forward serialization", () => {
       close: async () => {},
     });
 
-    const client = new PersistentSocketClient();
+    const client = new PersistentSocketClient((response) => {
+      clientReceiveEvents.push({ atMs: fakeTimer.now(), requestId: response.id });
+    });
     await client.connect(socketPath);
     try {
       const first = client.request("tools/call", {
@@ -861,7 +884,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
       releaseFirstCall.resolve();
       client.close();
     }
-  });
+  }, 15_000);
 
   test("binds a generated selection profile to the socket and reuses it for discovery", async () => {
     const clients: FakeMcpClient[] = [];

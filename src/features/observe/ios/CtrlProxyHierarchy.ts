@@ -801,14 +801,27 @@ export class CtrlProxyHierarchy {
    * Filter hierarchy node - removes structural wrappers and nodes without meaningful properties
    * Similar to Android's optimizeHierarchy + filterViewHierarchy
    */
-  private filterHierarchyNode(node: ConvertedNode, isRoot: boolean = false): ConvertedNode | null {
+  private filterHierarchyNode(
+    node: ConvertedNode,
+    isRoot: boolean = false,
+    insideSpringBoardIcon: boolean = false,
+  ): ConvertedNode | null {
     const attrs = node.$ || {};
     const children = node.node || [];
+
+    // XCTest exposes the title/artwork of a SpringBoard icon as tappable
+    // UIImageView leaves. The enclosing SBIconView is the actual tap target.
+    // This relationship survives wrapper promotion and does not depend on the
+    // icon already having a label or clickable flag in the runner snapshot.
+    if (insideSpringBoardIcon && this.isIconArtworkImage(node)) {
+      return null;
+    }
+    const inIcon = insideSpringBoardIcon || attrs["class"] === "SBIconView";
 
     // Process children first (recursively)
     const filteredChildren: ConvertedNode[] = [];
     for (const child of children) {
-      const filtered = this.filterHierarchyNode(child);
+      const filtered = this.filterHierarchyNode(child, false, inIcon);
       if (filtered) {
         // If child filtering returned an array (promoted grandchildren), flatten it
         if (Array.isArray(filtered)) {
@@ -874,6 +887,28 @@ export class CtrlProxyHierarchy {
       result.node = dedupedChildren;
     }
     return result;
+  }
+
+  private isIconArtworkImage(node: ConvertedNode): boolean {
+    const attrs = node.$ ?? {};
+    const protectedFields = [
+      "text",
+      "hint-text",
+      "semantic-links",
+      "state-description",
+      "error-message",
+      "actions",
+    ];
+    return (
+      attrs["class"] === "UIImageView" &&
+      !node.node?.length &&
+      !node.extras &&
+      !protectedFields.some((field) => Boolean(attrs[field])) &&
+      !this.hasStandaloneContentProperties(attrs) &&
+      !this.hasStateProperties(attrs) &&
+      attrs["long-clickable"] !== "true" &&
+      attrs["checkable"] !== "true"
+    );
   }
 
   private dedupeNoiseSiblings(children: ConvertedNode[]): ConvertedNode[] {

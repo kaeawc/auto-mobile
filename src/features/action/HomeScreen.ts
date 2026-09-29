@@ -35,7 +35,7 @@ export class HomeScreen extends BaseVisualChange {
   private static readonly IOS_HOME_HIERARCHY_READ_TIMEOUT_MS = 1000;
   private static readonly IOS_HOME_RETRY_DELAYS_MS: readonly number[] = [300, 600, 900];
   private static readonly IOS_SIMULATOR_RETRY_DELAYS_MS: readonly number[] = [100, 200, 400, 500];
-  private static readonly IOS_SIMULATOR_READ_TIMEOUT_MS = 600;
+  private static readonly IOS_SIMULATOR_READ_TIMEOUT_MS = 1500;
   private static readonly IOS_SIMCTL_LAUNCH_TIMEOUT_MS = 1000;
 
   constructor(
@@ -269,12 +269,7 @@ export class HomeScreen extends BaseVisualChange {
     try {
       // Request a fresh foreground hierarchy after Home navigation. A cached
       // earlier hierarchy cannot establish the Home postcondition.
-      const response = await client.requestHierarchySync(
-        perf,
-        true,
-        undefined,
-        Math.min(HomeScreen.IOS_HOME_HIERARCHY_READ_TIMEOUT_MS, remainingMs),
-      );
+      const response = await client.requestHierarchySync(perf, true, undefined, remainingMs);
       return response?.hierarchy;
     } catch (error) {
       throw toActionableError(

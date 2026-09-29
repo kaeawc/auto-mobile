@@ -289,6 +289,21 @@ describe("HomeScreen", () => {
       expect(client.getPressHomeRequestCount()).toBe(0);
     });
 
+    test("simulator allows a slow hierarchy read within the 5s deadline", async () => {
+      const { action, client } = createIosHomeScreen({
+        simulator: true,
+        simctl: { executeCommandArgs: async () => ({ stdout: "", stderr: "" }) },
+      });
+      const readSpy = spyOn(client, "requestHierarchySync").mockImplementation(async () => {
+        await fakeTimer.sleep(1200);
+        return { hierarchy: iosHierarchy("com.apple.springboard") };
+      });
+
+      await action.executeIosHomeNavigation();
+      expect(readSpy.mock.calls[0]?.[3]).toBe(1500);
+      expect(fakeTimer.now()).toBe(1200);
+    });
+
     test("simctl launch reports the remaining foreground app after the bounded wait", async () => {
       const { action, client } = createIosHomeScreen({
         simulator: true,
@@ -322,11 +337,13 @@ describe("HomeScreen", () => {
         simctl: { executeCommandArgs: async () => ({ stdout: "", stderr: "" }) },
       });
       client.setHierarchyData(iosHierarchy("com.apple.Maps"));
+      const readSpy = spyOn(client, "requestHierarchySync");
 
       await expect(action.executeIosHomeNavigation(undefined, undefined, 500)).rejects.toThrow(
         /SpringBoard.*com\.apple\.Maps/,
       );
       expect(fakeTimer.now()).toBe(500);
+      expect(readSpy.mock.calls.every((call) => (call[3] ?? 0) <= 500)).toBe(true);
     });
 
     test("unknown initial foreground succeeds once SpringBoard appears", async () => {

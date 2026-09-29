@@ -635,13 +635,22 @@ export interface SocketFrameTraceEvent {
     | "callTool_entered"
     | "callTool_settled"
     | "response_write_started"
+    | "response_write_returned"
     | "response_write_callback"
     | "socket_drain"
-    | "socket_pause";
+    | "socket_pause"
+    | "socket_end"
+    | "socket_close"
+    | "socket_finish";
   atMs: number;
+  wallMs: number;
   requestId: string;
   deviceId?: string;
   error?: string;
+  byteLength?: number;
+  writableLengthAfterWrite?: number;
+  writableLengthInCallback?: number;
+  hadError?: boolean;
 }
 
 export class UnixSocketServer {
@@ -991,6 +1000,8 @@ export class UnixSocketServer {
     if (this.onFrameTrace) {
       socket.on("drain", () => this.traceFrame("socket_drain", "*"));
       socket.on("pause", () => this.traceFrame("socket_pause", "*"));
+      socket.on("end", () => this.traceFrame("socket_end", "*"));
+      socket.on("finish", () => this.traceFrame("socket_finish", "*"));
     }
 
     socket.on("data", (data) => {
@@ -1011,7 +1022,10 @@ export class UnixSocketServer {
       }
     });
 
-    socket.on("close", () => {
+    socket.on("close", (hadError) => {
+      if (this.onFrameTrace) {
+        this.traceFrame("socket_close", "*", undefined, undefined, { hadError });
+      }
       logger.info(`Client disconnected: ${sessionId}`);
       this.releaseSocketSession(sessionId, socket);
     });
@@ -1064,9 +1078,18 @@ export class UnixSocketServer {
     requestId: string,
     deviceId?: string,
     error?: string,
+    details?: Partial<SocketFrameTraceEvent>,
   ): void {
     if (this.onFrameTrace) {
-      this.onFrameTrace({ event, atMs: this.timer.now(), requestId, deviceId, error });
+      this.onFrameTrace({
+        event,
+        atMs: this.timer.now(),
+        wallMs: performance.now(),
+        requestId,
+        deviceId,
+        error,
+        ...details,
+      });
     }
   }
 
@@ -1274,10 +1297,23 @@ export class UnixSocketServer {
   ): void {
     if (this.onFrameTrace && frame.type === "mcp_response") {
       this.traceFrame("response_write_started", frame.id, deviceId);
-      this.writeFrameData(socket, sessionId, frame, (error) => {
-        this.traceFrame("response_write_callback", frame.id, deviceId, error?.message);
-        onFlushed?.();
-      });
+      this.writeFrameData(
+        socket,
+        sessionId,
+        frame,
+        (error) => {
+          this.traceFrame("response_write_callback", frame.id, deviceId, error?.message, {
+            writableLengthInCallback: socket.writableLength,
+          });
+          onFlushed?.();
+        },
+        (writableLengthAfterWrite, byteLength) => {
+          this.traceFrame("response_write_returned", frame.id, deviceId, undefined, {
+            byteLength,
+            writableLengthAfterWrite,
+          });
+        },
+      );
       return;
     }
     this.writeFrameData(socket, sessionId, frame, onFlushed);
@@ -1288,13 +1324,18 @@ export class UnixSocketServer {
     sessionId: string,
     frame: DaemonResponse | DaemonNotification,
     onFlushed?: (error?: Error | null) => void,
+    onWritten?: (writableLengthAfterWrite: number, byteLength: number) => void,
   ): void {
     if (socket.destroyed) {
       onFlushed?.(new Error("socket destroyed"));
       return;
     }
     try {
-      const ok = socket.write(JSON.stringify(frame) + "\n", onFlushed);
+      const payload = JSON.stringify(frame) + "\n";
+      const ok = socket.write(payload, onFlushed);
+      if (onWritten) {
+        onWritten(socket.writableLength, Buffer.byteLength(payload));
+      }
       if (!ok) {
         logger.debug(
           `Daemon RPC socket ${sessionId} backpressured; awaiting drain (idle timeout still armed)`,

@@ -217,6 +217,17 @@ function sendTwoToolsCallsOnOneSocket(
 
 const frameTraceEvents: SocketFrameTraceEvent[] = [];
 const clientReceiveEvents: Array<{ atMs: number; requestId: string }> = [];
+type ClientRawEvent =
+  | {
+      event: "data";
+      byteLength: number;
+      wallMs: number;
+      completeLines: number;
+      residueLength: number;
+      residuePrefix: string;
+    }
+  | { event: "end" | "close" | "error"; wallMs: number; hadError?: boolean; message?: string };
+const clientRawEvents: ClientRawEvent[] = [];
 let printFrameTrace = false;
 
 class PersistentSocketClient {
@@ -225,16 +236,38 @@ class PersistentSocketClient {
   private readonly responses = new Map<string, DaemonResponse>();
   private readonly waiters = new Map<string, (response: DaemonResponse) => void>();
 
-  constructor(private readonly onFrameReceived?: (response: DaemonResponse) => void) {}
+  constructor(
+    private readonly onFrameReceived?: (response: DaemonResponse) => void,
+    private readonly onRawEvent?: (event: ClientRawEvent) => void,
+  ) {}
 
   async connect(socketPath: string): Promise<void> {
     await new Promise<void>((resolve, reject) => {
       this.socket.connect(socketPath, resolve);
-      this.socket.on("error", reject);
+      this.socket.on("error", (error) => {
+        this.onRawEvent?.({ event: "error", wallMs: performance.now(), message: error.message });
+        reject(error);
+      });
+      if (this.onRawEvent) {
+        this.socket.on("end", () => this.onRawEvent?.({ event: "end", wallMs: performance.now() }));
+        this.socket.on("close", (hadError) =>
+          this.onRawEvent?.({ event: "close", wallMs: performance.now(), hadError }),
+        );
+      }
       this.socket.on("data", (data) => {
         this.buffer += data.toString();
         const lines = this.buffer.split("\n");
         this.buffer = lines.pop() ?? "";
+        if (this.onRawEvent) {
+          this.onRawEvent({
+            event: "data",
+            byteLength: data.byteLength,
+            wallMs: performance.now(),
+            completeLines: lines.length,
+            residueLength: this.buffer.length,
+            residuePrefix: this.buffer.slice(0, 120),
+          });
+        }
         for (const line of lines) {
           if (!line.trim()) {
             continue;
@@ -530,14 +563,18 @@ describe("UnixSocketServer MCP forward serialization", () => {
   });
 
   afterEach(async () => {
-    if (printFrameTrace) {
-      console.error("#6387 server frame trace:", JSON.stringify(frameTraceEvents, null, 2));
-      console.error("#6387 client receive trace:", JSON.stringify(clientReceiveEvents, null, 2));
-      printFrameTrace = false;
-    }
-    await server.close();
-    if (existsSync(socketPath)) {
-      await unlink(socketPath);
+    try {
+      await server.close();
+      if (existsSync(socketPath)) {
+        await unlink(socketPath);
+      }
+    } finally {
+      if (printFrameTrace) {
+        console.error("#6387 server frame trace:", JSON.stringify(frameTraceEvents, null, 2));
+        console.error("#6387 client receive trace:", JSON.stringify(clientReceiveEvents, null, 2));
+        console.error("#6387 client raw-event trace:", JSON.stringify(clientRawEvents, null, 2));
+        printFrameTrace = false;
+      }
     }
   });
 
@@ -824,6 +861,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
   test("does not charge another device's in-flight call against a queued call's timeout (#6387)", async () => {
     frameTraceEvents.length = 0;
     clientReceiveEvents.length = 0;
+    clientRawEvents.length = 0;
     printFrameTrace = true;
     await restartWithFakeTimer("mcp-per-device-deadline", (event) => frameTraceEvents.push(event));
     const firstCallStarted = Promise.withResolvers<void>();
@@ -846,9 +884,12 @@ describe("UnixSocketServer MCP forward serialization", () => {
       close: async () => {},
     });
 
-    const client = new PersistentSocketClient((response) => {
-      clientReceiveEvents.push({ atMs: fakeTimer.now(), requestId: response.id });
-    });
+    const client = new PersistentSocketClient(
+      (response) => {
+        clientReceiveEvents.push({ atMs: fakeTimer.now(), requestId: response.id });
+      },
+      (event) => clientRawEvents.push(event),
+    );
     await client.connect(socketPath);
     try {
       const first = client.request("tools/call", {
@@ -876,6 +917,9 @@ describe("UnixSocketServer MCP forward serialization", () => {
           },
         );
       }
+      // In this same-process test, a peer write during the client's read dispatch
+      // is dropped on Windows named pipes; production client and daemon are separate processes.
+      await new Promise<void>((resolve) => setImmediate(resolve));
       fakeTimer.advanceTime(501);
       releaseFirstCall.resolve();
       await expect(first).resolves.toMatchObject({ success: true });

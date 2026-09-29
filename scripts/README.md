@@ -218,6 +218,33 @@ bun run benchmark-npm-unpacked-size --output reports/npm-unpacked-size.json
 - Runs `prepublishOnly` before packing to match the published package contents.
 - Requires a prior `bun run build` so `dist/` is present.
 
+## Manual Device Benchmark: Observe Screenshot Modes
+
+Measure the latency of `observe` with `screenshot: "async"`, `"settled"`, and
+`"none"` on a connected emulator or simulator. This informs the latency choice
+for issue #8042 PR 2 (retiring `captureScreenshot`). The script also measures a
+`pressButton volume_up` action probe under the server's ambient screenshot
+default; volume keys do not change app or window state. `pressButton` does not
+accept a screenshot mode, so this action sample is not mode-controlled.
+
+```bash
+bun run bench:settled-screenshot --platform android --iterations 30
+bun run bench:settled-screenshot --platform ios --iterations 30
+# Or target a specific device identifier
+bun run bench:settled-screenshot --device <device-id> --app <bundle-or-package>
+```
+
+Options include `--warmup W` (default 3), `--iterations N` (default 30),
+`--server <path>`, and `--json`. A timestamped full JSON report is always saved
+under `scratch/`; `--json` selects JSON for console output.
+
+This is manual only and is never run in CI or fast gates. It starts the specified
+server entry script as a fresh MCP stdio child. It creates a unique temporary
+`AUTOMOBILE_AUX_SOCKET_DIR` for that child and removes it in cleanup, isolating
+auxiliary daemon sockets from `~/.auto-mobile` and `/tmp/auto-mobile-daemon-*`.
+It does not access or alter the resident daemon. No device state is changed
+beyond the optional one-time `launchApp` and the volume-up probe.
+
 ## Other Scripts
 
 ### Build Scripts

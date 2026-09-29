@@ -75,6 +75,7 @@
     "estimate-context": "bun scripts/estimate-context-usage.ts",
     "benchmark-context": "bun scripts/benchmark-context-thresholds.ts",
     "benchmark-tools": "bun scripts/benchmark-mcp-tools.ts",
+    "bench:settled-screenshot": "bun scripts/benchmark-settled-screenshot.ts",
     "benchmark-startup": "bash scripts/benchmark-startup.sh",
     "benchmark-npm-unpacked-size": "bun scripts/benchmark-npm-unpacked-size.ts",
     "profile:memory": "bun --expose-gc --inspect scripts/detect-memory-leaks.ts --mode=profile",

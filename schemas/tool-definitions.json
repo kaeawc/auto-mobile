@@ -5714,6 +5714,11 @@
                   "enum": ["tap", "long-press", "input", "scroll", "toggle"]
                 }
               },
+              "occluded": {
+                "description": "Fully covered by the Android IME window; this row has no actionable affordance.",
+                "type": "boolean",
+                "const": true
+              },
               "checked": {
                 "type": "boolean"
               },
@@ -5799,6 +5804,11 @@
                   "type": "string",
                   "enum": ["tap", "long-press", "input", "scroll", "toggle"]
                 }
+              },
+              "occluded": {
+                "description": "Fully covered by the Android IME window; this row has no actionable affordance.",
+                "type": "boolean",
+                "const": true
               },
               "checked": {
                 "type": "boolean"
@@ -12902,6 +12912,11 @@
                           "enum": ["tap", "long-press", "input", "scroll", "toggle"]
                         }
                       },
+                      "occluded": {
+                        "description": "Fully covered by the Android IME window; this row has no actionable affordance.",
+                        "type": "boolean",
+                        "const": true
+                      },
                       "checked": {
                         "type": "boolean"
                       },
@@ -12987,6 +13002,11 @@
                           "type": "string",
                           "enum": ["tap", "long-press", "input", "scroll", "toggle"]
                         }
+                      },
+                      "occluded": {
+                        "description": "Fully covered by the Android IME window; this row has no actionable affordance.",
+                        "type": "boolean",
+                        "const": true
                       },
                       "checked": {
                         "type": "boolean"

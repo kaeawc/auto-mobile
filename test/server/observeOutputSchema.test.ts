@@ -5,6 +5,7 @@ import {
   observeDiffSchema,
   observeResultSchema,
   observeToolResultSchema,
+  skeletonElementSchema,
   viewHierarchyNodeSchema,
 } from "../../src/server/toolOutputSchemas";
 import { applyJsonSchemaOverride } from "../../src/server/toolSchemaHelpers";
@@ -730,6 +731,28 @@ describe("observeResultSchema: every bounds site is the advertised union (#3025)
     // The collapsed object arm preserves the union's description, so the prose
     // still documents the positional tuple order.
     expect(json).toContain("left, top, right, bottom");
+  });
+});
+
+describe("observe skeleton IME occlusion", () => {
+  test("parses an occluded context row through the row and observe output schemas", () => {
+    const row = {
+      elementId: "id/covered",
+      bounds: [0, 400, 200, 500] as [number, number, number, number],
+      affordances: [],
+      occluded: true,
+    } as const;
+    expect(skeletonElementSchema.parse(row).occluded).toBe(true);
+    expect(observeToolResultSchema.parse({ context: [row] })).toMatchObject({
+      context: [{ occluded: true }],
+    });
+  });
+
+  test("advertises the occluded field on skeleton rows", () => {
+    const published = publishedObserveOutputSchema();
+    const serialized = JSON.stringify(published);
+    expect(serialized).toContain('"occluded"');
+    expect(serialized).toContain("Fully covered by the Android IME window");
   });
 });
 

@@ -829,6 +829,10 @@ export const skeletonElementSchema = z
         "for skeleton entries.",
     ),
     affordances: z.array(z.enum(["tap", "long-press", "input", "scroll", "toggle"])),
+    occluded: z
+      .literal(true)
+      .optional()
+      .describe("Fully covered by the Android IME window; this row has no actionable affordance."),
     checked: z.boolean().optional(),
     index: z
       .number()

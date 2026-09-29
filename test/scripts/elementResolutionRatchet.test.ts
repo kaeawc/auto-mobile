@@ -15,6 +15,16 @@ test("case-key ratchet preserves existing obligations while allowing additions",
   expect(() => assertCaseInventoryDoesNotShrink('["a"]', undefined)).toThrow("reviewed initial");
 });
 
+test("case-key ratchet permits only the reviewed IME-covered Comments removal", () => {
+  const covered = 'diff/text-input-empty.json:{"kind":"text","value":"Comments"}:84,1795,996,2085';
+  expect(() =>
+    assertCaseInventoryDoesNotShrink('["other"]', JSON.stringify([covered, "other"])),
+  ).not.toThrow();
+  expect(() =>
+    assertCaseInventoryDoesNotShrink('["other"]', JSON.stringify([covered, "unrelated", "other"])),
+  ).toThrow("unrelated");
+});
+
 test("allows only removal within the original finding", () => {
   expect(() => assertRatchetDoesNotGrow('{"B1":["a"]}', '{"B1":["a","b"]}')).not.toThrow();
   expect(() => assertRatchetDoesNotGrow('{"B1":["a","new"]}', '{"B1":["a","b"]}')).toThrow(

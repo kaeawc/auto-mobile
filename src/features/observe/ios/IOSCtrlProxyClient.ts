@@ -193,7 +193,11 @@ import { CtrlProxyScreenshot } from "./CtrlProxyScreenshot";
 import { CtrlProxyNavigation } from "./CtrlProxyNavigation";
 import { CtrlProxyClipboard } from "./CtrlProxyClipboard";
 import { CtrlProxyStorage } from "./CtrlProxyStorage";
-import { CtrlProxyVoiceOver } from "./CtrlProxyVoiceOver";
+import {
+  CtrlProxyVoiceOver,
+  type VoiceOverActivationOptions,
+  type CtrlProxyRequestActionOptions,
+} from "./CtrlProxyVoiceOver";
 import { CtrlProxyKeyboard } from "./CtrlProxyKeyboard";
 import type { InputKeyModifier, InputKeyName } from "../../action/InputKey";
 import { CtrlProxyHighlights } from "./CtrlProxyHighlights";
@@ -455,6 +459,7 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     action: "activate" | "long_press",
     timeoutMs?: number,
     perf?: PerformanceTracker,
+    options?: VoiceOverActivationOptions,
   ): Promise<CtrlProxyActionResult>;
 
   requestSetVoiceOverEnabled(
@@ -469,7 +474,7 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     label?: string,
     timeoutMs?: number,
     perf?: PerformanceTracker,
-    abortSignal?: AbortSignal,
+    options?: CtrlProxyRequestActionOptions,
   ): Promise<CtrlProxyActionResult>;
 
   requestActivateAccessibilityLink(
@@ -3200,8 +3205,9 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     action: "activate" | "long_press",
     timeoutMs?: number,
     perf?: PerformanceTracker,
+    options?: VoiceOverActivationOptions,
   ): Promise<CtrlProxyActionResult> {
-    return this.voiceOver.requestVoiceOverActivate(label, action, timeoutMs, perf);
+    return this.voiceOver.requestVoiceOverActivate(label, action, timeoutMs, perf, options);
   }
 
   async requestSetVoiceOverEnabled(
@@ -3218,9 +3224,9 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     label?: string,
     timeoutMs?: number,
     perf?: PerformanceTracker,
-    abortSignal?: AbortSignal,
+    options?: CtrlProxyRequestActionOptions,
   ): Promise<CtrlProxyActionResult> {
-    return this.voiceOver.requestAction(action, resourceId, label, timeoutMs, perf, abortSignal);
+    return this.voiceOver.requestAction(action, resourceId, label, timeoutMs, perf, options);
   }
 
   async requestActivateAccessibilityLink(

@@ -1110,12 +1110,15 @@ export class TapAnyElement extends BaseVisualChange {
     resourceId: string,
     voiceOverAction: "activate" | "long_press",
     timeoutMs: number | undefined,
+    duration?: number,
   ): Promise<void> {
     const result = await xcTestClient.requestAction(
       voiceOverAction,
       resourceId,
       undefined,
       timeoutMs,
+      undefined,
+      duration === undefined ? undefined : { duration },
     );
     if (!result.success) {
       throw new ActionableError(
@@ -1154,7 +1157,13 @@ export class TapAnyElement extends BaseVisualChange {
         : resolveTapAnyOrdinaryTapCtrlProxyTimeoutMs(TAP_ANY_ORDINARY_TAP_DURATION_MS);
 
     if (resourceId) {
-      await this.activateIosByResourceId(xcTestClient, resourceId, voiceOverAction, timeoutMs);
+      await this.activateIosByResourceId(
+        xcTestClient,
+        resourceId,
+        voiceOverAction,
+        timeoutMs,
+        action === "longPress" ? longPressDuration : undefined,
+      );
       return;
     }
 
@@ -1162,6 +1171,11 @@ export class TapAnyElement extends BaseVisualChange {
       label as string,
       voiceOverAction,
       timeoutMs,
+      undefined,
+      {
+        bounds: element.bounds,
+        duration: action === "longPress" ? longPressDuration : undefined,
+      },
     );
 
     if (!result.success) {

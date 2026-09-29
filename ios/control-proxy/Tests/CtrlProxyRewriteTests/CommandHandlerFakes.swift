@@ -32,6 +32,7 @@ final class RewriteFakeElementLocator: ElementLocating {
     func getViewHierarchy(disableAllFiltering _: Bool) throws -> ViewHierarchy { hierarchy }
     func findElement(byResourceId _: String) -> Any? { nil }
     func findElement(byText _: String) -> Any? { nil }
+    func findElement(byText _: String, bounds _: ElementBounds) -> Any? { nil }
     func trackObservedBundleId(_: String) {}
     func switchForegroundApp(bundleId: String) { foregroundBundleId = bundleId }
     func getAppState(bundleId _: String) -> ObservedAppState { appState }
@@ -41,6 +42,14 @@ final class RewriteFakeElementLocator: ElementLocating {
 
 @MainActor
 final class RewriteFakeGesturePerformer: GesturePerforming {
+    struct ActionCall {
+        let action: String
+        let resourceId: String?
+        let label: String?
+        let bounds: ElementBounds?
+        let duration: Int?
+    }
+
     private var orientation = "portrait"
     private var keyboardOpen = false
     var keyCalls: [(String, [String])] = []
@@ -53,6 +62,7 @@ final class RewriteFakeGesturePerformer: GesturePerforming {
     var imeActionCalls = 0
     var shakeCalls = 0
     var actionCalls = 0
+    var lastAction: ActionCall?
     var activateAccessibilityLinkCalls = 0
     var setOrientationCalls = 0
     var onPressHome: (() -> Void)?
@@ -112,7 +122,21 @@ final class RewriteFakeGesturePerformer: GesturePerforming {
     }
 
     func clipboard(action _: String, text _: String?) throws -> String? { nil }
-    func performAction(_: String, resourceId _: String?, label _: String?) throws { actionCalls += 1 }
+    func performAction(
+        _ action: String,
+        resourceId: String?,
+        label: String?,
+        bounds: ElementBounds?,
+        duration: Int?
+    )
+        throws
+    {
+        actionCalls += 1
+        lastAction = ActionCall(
+            action: action, resourceId: resourceId, label: label, bounds: bounds, duration: duration
+        )
+    }
+
     func activateAccessibilityLink(text _: String, occurrence _: Int, ownerResourceId _: String?) throws {
         activateAccessibilityLinkCalls += 1
     }
@@ -155,6 +179,7 @@ final class RewriteFakeGesturePerformer: GesturePerforming {
         }
         return orientation
     }
+
     func pressHome() throws {
         if let pressHomeError { throw pressHomeError }
         onPressHome?()

@@ -3903,7 +3903,16 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       action === "longPress" ? "long_press" : "activate";
 
     const client = IOSCtrlProxyClient.getInstance(this.device);
-    const result = await client.requestVoiceOverActivate(label, voiceOverAction);
+    const result = await client.requestVoiceOverActivate(
+      label,
+      voiceOverAction,
+      undefined,
+      undefined,
+      {
+        bounds: element.bounds,
+        duration: action === "longPress" ? durationMs : undefined,
+      },
+    );
 
     this.invalidateIosCacheOnSuccess(result);
 

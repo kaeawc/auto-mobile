@@ -469,98 +469,6 @@
     }
   },
   {
-    "name": "captureScreenshot",
-    "description": "Deprecated: use observe({ screenshot: \"settled\" }) for a fresh, validated screenshot. Capture the entire selected device screen as a PNG file. On iOS Simulator, the image reflects the device framebuffer's native orientation and may not match observe's current rotated orientation; Android's image does rotate.",
-    "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "type": "object",
-      "properties": {
-        "platform": {
-          "type": "string",
-          "enum": ["android", "ios"]
-        },
-        "sessionUuid": {
-          "description": "Session",
-          "type": "string"
-        },
-        "keepScreenAwake": {
-          "type": "boolean"
-        },
-        "device": {
-          "description": "Device label",
-          "type": "string"
-        }
-      },
-      "additionalProperties": false
-    },
-    "outputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "type": "object",
-      "properties": {
-        "success": {
-          "type": "boolean"
-        },
-        "deviceId": {
-          "type": "string"
-        },
-        "platform": {
-          "type": "string",
-          "enum": ["android", "ios"]
-        },
-        "path": {
-          "type": "string"
-        },
-        "screenshotFormat": {
-          "type": "string",
-          "const": "png"
-        },
-        "screenshotMimeType": {
-          "type": "string",
-          "const": "image/png"
-        },
-        "artifact": {
-          "$schema": "https://json-schema.org/draft/2020-12/schema",
-          "type": "object",
-          "properties": {
-            "path": {
-              "type": "string"
-            },
-            "format": {
-              "type": "string",
-              "const": "json"
-            },
-            "payload": {
-              "type": "string"
-            },
-            "bytes": {
-              "type": "integer",
-              "minimum": 0,
-              "maximum": 9007199254740991
-            },
-            "tool": {
-              "type": "string"
-            },
-            "resourceUri": {
-              "description": "automobile: resource URI to fetch this artifact's JSON in-band",
-              "type": "string"
-            }
-          },
-          "required": ["path", "format", "payload", "bytes", "tool"],
-          "additionalProperties": {}
-        }
-      },
-      "required": [
-        "success",
-        "deviceId",
-        "platform",
-        "path",
-        "screenshotFormat",
-        "screenshotMimeType"
-      ],
-      "additionalProperties": false
-    }
-  },
-  {
     "name": "changeLocalization",
     "description": "Change locale, time zone, text direction, time format, and calendar system",
     "inputSchema": {
@@ -1780,7 +1688,6 @@
               "accessibility",
               "accessibilityFocus",
               "biometricAuth",
-              "captureScreenshot",
               "changeLocalization",
               "clearKeyValueFile",
               "clearMockNetwork",
@@ -1904,7 +1811,6 @@
               "accessibility",
               "accessibilityFocus",
               "biometricAuth",
-              "captureScreenshot",
               "changeLocalization",
               "clearKeyValueFile",
               "clearMockNetwork",
@@ -9063,7 +8969,6 @@
               "accessibility",
               "accessibilityFocus",
               "biometricAuth",
-              "captureScreenshot",
               "changeLocalization",
               "clearKeyValueFile",
               "clearMockNetwork",
@@ -11377,7 +11282,6 @@
             "accessibility",
             "accessibilityFocus",
             "biometricAuth",
-            "captureScreenshot",
             "changeLocalization",
             "clearKeyValueFile",
             "clearMockNetwork",
@@ -11467,7 +11371,6 @@
               "accessibility",
               "accessibilityFocus",
               "biometricAuth",
-              "captureScreenshot",
               "changeLocalization",
               "clearKeyValueFile",
               "clearMockNetwork",

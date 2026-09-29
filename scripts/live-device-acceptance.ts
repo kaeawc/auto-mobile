@@ -47,14 +47,7 @@ import { inferIosFormFactor } from "../src/utils/ios-cmdline-tools/iosDeviceType
 import { stableStringify } from "../src/utils/stableStringify";
 import { defaultTimer, type Timer } from "../src/utils/SystemTimer";
 
-const ENABLED_TOOLS = [
-  "observe",
-  "getDeviceState",
-  "killDevice",
-  "tapAt",
-  "captureScreenshot",
-  "rotate",
-] as const;
+const ENABLED_TOOLS = ["observe", "getDeviceState", "killDevice", "tapAt", "rotate"] as const;
 const MAX_CLEANUP_RESERVE_MS = 15_000;
 const MAX_EVIDENCE_RESERVE_MS = 5_000;
 const MAX_REAP_RESERVE_MS = 1_000;
@@ -1004,14 +997,14 @@ async function defaultReadPngDimensions(
     !bytes.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE) ||
     bytes.toString("ascii", 12, 16) !== "IHDR"
   ) {
-    throw new Error(`captureScreenshot returned a malformed PNG: ${path}`);
+    throw new Error(`observe settled returned a malformed PNG: ${path}`);
   }
   const dimensions = {
     width: bytes.readUInt32BE(16),
     height: bytes.readUInt32BE(20),
   };
   if (dimensions.width <= 0 || dimensions.height <= 0) {
-    throw new Error(`captureScreenshot returned a PNG with invalid dimensions: ${path}`);
+    throw new Error(`observe settled returned a PNG with invalid dimensions: ${path}`);
   }
   return dimensions;
 }
@@ -1587,37 +1580,34 @@ export async function runCoordinateOrientationCheck(
       const sample = async (orientation: "portrait" | "landscape") => {
         await rotateCoordinateDevice(client, args.platform, args.sessionUuid, orientation, signal);
         const observation = toolPayload(
-          await callCoordinateTool(client, "observe", { sessionUuid: args.sessionUuid }, signal),
+          await callCoordinateTool(
+            client,
+            "observe",
+            { sessionUuid: args.sessionUuid, screenshot: "settled" },
+            signal,
+          ),
           "observe",
         );
         const screen = screenDimensionsFromPayload(observation);
-        const screenshot = successfulToolPayload(
-          await callCoordinateTool(
-            client,
-            "captureScreenshot",
-            { sessionUuid: args.sessionUuid },
-            signal,
-          ),
-          "captureScreenshot",
-        );
         if (args.expectedDeviceId) {
           const screenshotDeviceId = stringField(
-            screenshot,
+            observation,
             "deviceId",
-            "captureScreenshot response",
+            "observe settled response",
           );
           if (screenshotDeviceId !== args.expectedDeviceId) {
             throw new Error(
-              `captureScreenshot reported deviceId ${screenshotDeviceId}, expected ${args.expectedDeviceId}`,
+              `observe settled reported deviceId ${screenshotDeviceId}, expected ${args.expectedDeviceId}`,
             );
           }
-          if (screenshot.platform !== args.platform) {
+          const expectedOrientation = args.platform === "ios" ? "native" : "display";
+          if (observation.screenshotOrientation !== expectedOrientation) {
             throw new Error(
-              `captureScreenshot reported platform ${String(screenshot.platform)}, expected ${args.platform}`,
+              `observe settled reported screenshotOrientation ${String(observation.screenshotOrientation)}, expected ${expectedOrientation}`,
             );
           }
         }
-        const path = stringField(screenshot, "path", "captureScreenshot response");
+        const path = stringField(observation, "screenshotPath", "observe settled response");
         return { observation, screen, raster: await readPngDimensions(path, signal) };
       };
 

@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Removed
+
+- Remove the deprecated `captureScreenshot` MCP tool. Use `observe({ screenshot: "settled" })` and its `screenshotPath` for a fresh, validated screenshot.
+
 ## [v0.0.81] - 2026-09-21
 
 ### Fixed

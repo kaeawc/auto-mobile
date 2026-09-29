@@ -29,14 +29,16 @@ That stream contract is intentional and does not transform MCP `observe` or
 native absolute-input coordinates.
 
 `observe`, `observe.screenSize`, and `tapAt` use the device's current-orientation
-native coordinate space described above. `captureScreenshot` returns a
-native-scale PNG whose orientation follows the device framebuffer: on the iOS
-Simulator, the framebuffer can remain portrait after `rotate`, even while the
-device orientation is landscape (this is simulator framebuffer behavior, not an
-AutoMobile bug); on Android, the raster rotates with the device. Therefore,
-after rotation, callers must apply a platform- and orientation-specific
+native coordinate space described above. For a fresh screenshot matching an
+observation, call `observe({ screenshot: "settled" })` and read its
+`screenshotPath`. The screenshot's orientation follows the device framebuffer:
+on the iOS Simulator, the framebuffer can remain portrait after `rotate`, even
+while the device orientation is landscape (this is simulator framebuffer
+behavior, not an AutoMobile bug); on Android, the raster rotates with the
+device. Therefore, after rotation, callers must apply a platform- and orientation-specific
 transform before correlating iOS `observe` or `tapAt` coordinates with
-`captureScreenshot` pixels. No such transform is needed on Android.
+`observe` screenshot pixels. No such transform is needed on Android. The
+`screenshotOrientation` field identifies the returned raster orientation.
 
 | Tool                                 | What it does                                               |
 | ------------------------------------ | ---------------------------------------------------------- |

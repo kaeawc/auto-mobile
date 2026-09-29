@@ -169,6 +169,49 @@ describe("settled cancellation retry", () => {
     expect(started).toBe(true);
   });
 
+  test("requests a queued PNG and rejects a capture whose file is missing", async () => {
+    const missingPath = join(directory, "missing.png");
+    const controller = new AbortController();
+    const requests: Array<{
+      format: string | undefined;
+      queueAfterPending: boolean | undefined;
+      parentSignal: AbortSignal | undefined;
+    }> = [];
+    const service: TrackedScreenshotService = {
+      async execute() {
+        throw new Error("unused");
+      },
+      generateScreenshotPath() {
+        return missingPath;
+      },
+      async getActivityHash() {
+        return "hash";
+      },
+      startTrackedCapture(options, trackerOptions) {
+        requests.push({
+          format: options?.format,
+          queueAfterPending: trackerOptions?.queueAfterPending,
+          parentSignal: trackerOptions?.parentSignal,
+        });
+        return ScreenshotJobTracker.startJob(
+          device.deviceId,
+          async () => ({ success: true, path: missingPath }),
+          trackerOptions,
+        );
+      },
+    };
+    const store = new FakeScreenshotStateStore(timer);
+    const recorder = new DefaultObserveScreenshotRecorder(device, service, store);
+
+    await expect(
+      recorder.captureSettled("missing-observation", undefined, controller.signal),
+    ).rejects.toThrow(`the file is missing: ${missingPath}`);
+    expect(requests).toEqual([
+      { format: "png", queueAfterPending: true, parentSignal: controller.signal },
+    ]);
+    expect(store.getPathForObservation(device.deviceId, "missing-observation")).toBeUndefined();
+  });
+
   test("retries once, queued, after another caller cancels the first capture", async () => {
     const fake = recorderWithCancelledFirstAttempt({
       success: true,

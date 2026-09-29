@@ -2,7 +2,7 @@ import type { ScreenshotResult } from "../../../models/ScreenshotResult";
 import { ActionableError } from "../../../models/ActionableError";
 import { pathExists } from "../../../utils/filesystem/DefaultFileSystem";
 
-/** Validate the same existence-only contract as the captureScreenshot tool. */
+/** Validate a captured screenshot path before exposing it as observation evidence. */
 export async function validateCapturedScreenshot(
   result: ScreenshotResult,
   deviceId: string,

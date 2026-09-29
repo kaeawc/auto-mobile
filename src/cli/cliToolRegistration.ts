@@ -24,7 +24,6 @@ import { registerNavigationTools } from "../server/navigationTools";
 import { registerNetworkTools } from "../server/networkTools";
 import { registerPreferenceTools } from "../server/preferenceTools";
 import { registerSnapshotTools } from "../server/snapshotTools";
-import { registerScreenshotTools } from "../server/screenshotTools";
 import { registerStorageTools } from "../server/storageTools";
 import { registerTelephonyTools } from "../server/telephonyTools";
 import { registerSessionLogTools } from "../server/sessionLogTools";
@@ -57,7 +56,6 @@ export function initializeCliTools(): void {
   registerNavigationTools();
   registerNetworkTools();
   registerPreferenceTools();
-  registerScreenshotTools();
   registerSnapshotTools();
   registerStorageTools();
   registerTelephonyTools();

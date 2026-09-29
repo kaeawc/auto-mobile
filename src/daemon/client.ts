@@ -22,6 +22,7 @@ import {
   CONNECTION_TIMEOUT_MS,
   DAEMON_VERSION,
   DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD,
+  DAEMON_CANCEL_REQUEST_METHOD,
   DAEMON_NON_FINITE_ENCODED_PARAM,
   DAEMON_SHUTTING_DOWN_ERROR_MESSAGE,
 } from "./constants";
@@ -94,6 +95,9 @@ export const daemonOptionsSchema = z.object({
 type DaemonOptionsSchemaCoversAllKeys =
   Exclude<keyof DaemonOptions, keyof typeof daemonOptionsSchema.shape> extends never ? true : never;
 export const daemonOptionsSchemaCoversAllKeys: DaemonOptionsSchemaCoversAllKeys = true;
+
+/** Bound on remembered cancelled request ids (issue #6384); oldest are evicted first. */
+const MAX_CANCELLED_REQUEST_IDS = 256;
 
 const socketIdentityStatusSchema = z.object({
   reportedPidFilePath: z.string().min(1).optional(),
@@ -322,6 +326,12 @@ export class DaemonClient {
       disconnectCause: McpTimeoutError | DaemonDisconnectError;
     }
   > = new Map();
+  /**
+   * Ids of requests this client cancelled (and of the cancel frames it sent),
+   * whose late daemon answers are expected and dropped quietly (issue #6384).
+   * Insertion-ordered and capped so a daemon that never answers cannot grow it.
+   */
+  private readonly cancelledRequestIds = new Set<string>();
   private buffer: string = "";
   private decoder = new TextDecoder();
   private connected: boolean = false;
@@ -792,6 +802,7 @@ export class DaemonClient {
   ): NodeJS.Timeout {
     return this.timer.setTimeout(() => {
       this.pendingRequests.delete(requestId);
+      this.sendCancelFrame(requestId);
       reject(
         new McpTimeoutError({
           toolName,
@@ -800,6 +811,46 @@ export class DaemonClient {
         }),
       );
     }, delayMs);
+  }
+
+  /**
+   * Tell the daemon this client abandoned `requestId` (issue #6384), so it skips
+   * or aborts the request instead of holding this socket's FIFO queue for work
+   * nobody awaits. Best-effort: a dead socket already cancels via disconnect,
+   * and an older daemon answers the unknown method with an ignored error.
+   */
+  private sendCancelFrame(requestId: string): void {
+    const socket = this.socket;
+    if (!socket || socket.destroyed) {
+      return;
+    }
+    const cancelId = this.idGenerator.next();
+    this.rememberCancelledRequestId(requestId);
+    this.rememberCancelledRequestId(cancelId);
+    const frame: DaemonRequest = {
+      id: cancelId,
+      type: "daemon_request",
+      method: DAEMON_CANCEL_REQUEST_METHOD,
+      params: { requestId },
+      ...this.handshakeFields(),
+    };
+    try {
+      socket.write(this.serializeRequestFrame(frame));
+    } catch (error) {
+      // The caller is already being rejected; a failed write means the socket is
+      // going away, and the daemon aborts a closed socket's requests itself.
+      logger.debug(`Daemon cancel frame for ${requestId} not sent: ${error}`);
+    }
+  }
+
+  private rememberCancelledRequestId(requestId: string): void {
+    this.cancelledRequestIds.add(requestId);
+    if (this.cancelledRequestIds.size > MAX_CANCELLED_REQUEST_IDS) {
+      const oldest = this.cancelledRequestIds.values().next().value;
+      if (oldest !== undefined) {
+        this.cancelledRequestIds.delete(oldest);
+      }
+    }
   }
 
   /**
@@ -841,6 +892,10 @@ export class DaemonClient {
    */
   private handleResponse(response: DaemonResponse): void {
     const pending = this.pendingRequests.get(response.id);
+    if (!pending && this.cancelledRequestIds.delete(response.id)) {
+      logger.debug(`Dropped daemon response for cancelled request ID: ${response.id}`);
+      return;
+    }
     if (!pending) {
       logger.warn(`Received response for unknown request ID: ${response.id}`);
       return;
@@ -1069,6 +1124,7 @@ export class DaemonClient {
       const timeout = this.timer.setTimeout(() => {
         removeAbortListener();
         this.pendingRequests.delete(requestId);
+        this.sendCancelFrame(requestId);
         reject(
           new McpTimeoutError({
             toolName: method,
@@ -1086,7 +1142,9 @@ export class DaemonClient {
           // Destroying this dedicated lifecycle connection tells the daemon to
           // abandon a still-queued local control RPC. Merely rejecting the
           // caller would leave a delayed metadata repair free to publish after
-          // doctor has already reported its deadline.
+          // doctor has already reported its deadline. The cancel frame goes first
+          // so a daemon that reads it before the close skips the request too.
+          this.sendCancelFrame(requestId);
           this.socket?.destroy();
           reject(
             new DaemonUnavailableError(`Daemon request ${method} aborted`, {

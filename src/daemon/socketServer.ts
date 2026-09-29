@@ -32,6 +32,7 @@ import {
   SOCKET_PATH,
   DAEMON_HANDSHAKE_ENABLED,
   DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD,
+  DAEMON_CANCEL_REQUEST_METHOD,
   DAEMON_HEARTBEAT_METHOD,
   DAEMON_SESSION_TOOL_BINDING_HEADER,
   DAEMON_RELEASED_SESSION_HEADER,
@@ -626,6 +627,23 @@ class McpClientReconnectDeadlineError extends Error {
   }
 }
 
+export interface SocketFrameTraceEvent {
+  event:
+    | "frame_parsed"
+    | "admission_requested"
+    | "admission_granted"
+    | "callTool_entered"
+    | "callTool_settled"
+    | "response_write_started"
+    | "response_write_callback"
+    | "socket_drain"
+    | "socket_pause";
+  atMs: number;
+  requestId: string;
+  deviceId?: string;
+  error?: string;
+}
+
 export class UnixSocketServer {
   private server: NetServer | null = null;
   private serverClosePromise: Promise<void> | null = null;
@@ -664,6 +682,7 @@ export class UnixSocketServer {
   private activeMcpClientForwardCounts: Map<string, number> = new Map();
   private mcpClientIdleTimers: Map<string, NodeJS.Timeout> = new Map();
   private timer: Timer;
+  private readonly onFrameTrace?: (event: SocketFrameTraceEvent) => void;
   private readonly idGenerator: IdGenerator;
   /** Observation-only liveness probe used before an existing socket's reclaim (issue #6232). */
   private readonly socketReachability: DaemonSocketReachabilityLike;
@@ -775,6 +794,7 @@ export class UnixSocketServer {
       liveAcceptanceStartupSecret?: string;
       acceptanceDiscoveryCapability?: string;
       sessionToolSelectionService?: Pick<SessionToolSelectionService, "isEnabled" | "setEnabled">;
+      onFrameTrace?: (event: SocketFrameTraceEvent) => void;
     } = {},
     idGenerator: IdGenerator = defaultIdGenerator,
     bindGuard: SocketBindGuardOptions = {},
@@ -784,6 +804,7 @@ export class UnixSocketServer {
     this.mcpEndpoint = mcpEndpoint;
     this.daemonState = daemonState;
     this.timer = timer;
+    this.onFrameTrace = handshakeConfig.onFrameTrace;
     this.idGenerator = idGenerator;
     // The reclaim lock's per-instance owner token comes from the module default
     // generator, NOT the injected `idGenerator` — that one is reserved for socket
@@ -949,6 +970,7 @@ export class UnixSocketServer {
       sessionId,
       createdAt: this.timer.now(),
       requestQueue: new SocketRequestAdmissionQueue(),
+      requestCancellations: new Map(),
     };
 
     this.sessions.set(sessionId, session);
@@ -966,37 +988,27 @@ export class UnixSocketServer {
       socket.destroy();
     });
 
+    if (this.onFrameTrace) {
+      socket.on("drain", () => this.traceFrame("socket_drain", "*"));
+      socket.on("pause", () => this.traceFrame("socket_pause", "*"));
+    }
+
     socket.on("data", (data) => {
       const receivedAtMs = this.timer.now();
-      const handler = (async () => {
-        buffer += typeof data === "string" ? data : decoder.decode(data, { stream: true });
+      buffer += typeof data === "string" ? data : decoder.decode(data, { stream: true });
 
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-
-        const requestHandlers = lines
-          .filter((line) => line.trim())
-          .map(async (line) => {
-            let requestId = "unknown";
-            try {
-              const request: DaemonRequest = JSON.parse(line);
-              requestId = request.id;
-              const response = await this.handleRequest(sessionId, socket, request, receivedAtMs);
-              this.writeFrame(socket, sessionId, response);
-            } catch (error) {
-              logger.error(`Error processing request ${requestId} from ${sessionId}:`, error);
-              const errorResponse: DaemonResponse = {
-                id: requestId,
-                type: "mcp_response",
-                success: false,
-                error: errorMessage(error),
-              };
-              this.writeFrame(socket, sessionId, errorResponse);
-            }
-          });
-        await Promise.all(requestHandlers);
-      })();
-      this.trackRequestHandler(handler);
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+      // Parse each chunk synchronously and track each frame on its own. A held
+      // device call must not keep another frame attached to its chunk's
+      // completion promise (issue #6387).
+      for (const line of lines) {
+        if (line.trim()) {
+          this.trackRequestHandler(
+            this.processSocketRequestLine(sessionId, socket, line, receivedAtMs),
+          );
+        }
+      }
     });
 
     socket.on("close", () => {
@@ -1011,6 +1023,51 @@ export class UnixSocketServer {
         socket.destroy();
       }
     });
+  }
+
+  private async processSocketRequestLine(
+    sessionId: string,
+    socket: Socket,
+    line: string,
+    receivedAtMs: number,
+  ): Promise<void> {
+    let requestId = "unknown";
+    let deviceId: string | undefined;
+    try {
+      const request: DaemonRequest = JSON.parse(line);
+      requestId = request.id;
+      deviceId = this.onFrameTrace ? this.frameDeviceId(request) : undefined;
+      if (this.onFrameTrace) {
+        this.traceFrame("frame_parsed", requestId, deviceId);
+      }
+      const response = await this.handleRequest(sessionId, socket, request, receivedAtMs);
+      this.writeFrame(socket, sessionId, response, undefined, deviceId);
+    } catch (error) {
+      logger.error(`Error processing request ${requestId} from ${sessionId}:`, error);
+      const errorResponse: DaemonResponse = {
+        id: requestId,
+        type: "mcp_response",
+        success: false,
+        error: errorMessage(error),
+      };
+      this.writeFrame(socket, sessionId, errorResponse, undefined, deviceId);
+    }
+  }
+
+  private frameDeviceId(request: DaemonRequest): string | undefined {
+    const deviceId: unknown = request.params?.arguments?.deviceId;
+    return typeof deviceId === "string" ? deviceId : undefined;
+  }
+
+  private traceFrame(
+    event: SocketFrameTraceEvent["event"],
+    requestId: string,
+    deviceId?: string,
+    error?: string,
+  ): void {
+    if (this.onFrameTrace) {
+      this.onFrameTrace({ event, atMs: this.timer.now(), requestId, deviceId, error });
+    }
   }
 
   private releaseSocketSession(sessionId: string, socket: Socket): void {
@@ -1066,8 +1123,16 @@ export class UnixSocketServer {
   private mcpRequestSignal(
     sessionId: string,
     ownerSocket: Socket | undefined = this.clientSockets.get(sessionId),
+    cancelSignal?: AbortSignal,
   ): { signal: AbortSignal; dispose: () => void } {
     const controller = new AbortController();
+    // A client cancel frame (issue #6384) aborts this one forward, not its siblings.
+    const onCancel = () => controller.abort(cancelSignal?.reason);
+    if (cancelSignal?.aborted) {
+      onCancel();
+    } else {
+      cancelSignal?.addEventListener("abort", onCancel, { once: true });
+    }
     const controllers =
       this.mcpRequestAbortControllers.get(sessionId) ?? new Set<AbortController>();
     controllers.add(controller);
@@ -1079,6 +1144,7 @@ export class UnixSocketServer {
     return {
       signal: controller.signal,
       dispose: () => {
+        cancelSignal?.removeEventListener("abort", onCancel);
         controllers.delete(controller);
         if (
           controllers.size === 0 &&
@@ -1204,9 +1270,27 @@ export class UnixSocketServer {
     sessionId: string,
     frame: DaemonResponse | DaemonNotification,
     onFlushed?: () => void,
+    deviceId?: string,
+  ): void {
+    if (this.onFrameTrace && frame.type === "mcp_response") {
+      this.traceFrame("response_write_started", frame.id, deviceId);
+      this.writeFrameData(socket, sessionId, frame, (error) => {
+        this.traceFrame("response_write_callback", frame.id, deviceId, error?.message);
+        onFlushed?.();
+      });
+      return;
+    }
+    this.writeFrameData(socket, sessionId, frame, onFlushed);
+  }
+
+  private writeFrameData(
+    socket: Socket,
+    sessionId: string,
+    frame: DaemonResponse | DaemonNotification,
+    onFlushed?: (error?: Error | null) => void,
   ): void {
     if (socket.destroyed) {
-      onFlushed?.();
+      onFlushed?.(new Error("socket destroyed"));
       return;
     }
     try {
@@ -1217,7 +1301,7 @@ export class UnixSocketServer {
         );
       }
     } catch (error) {
-      onFlushed?.();
+      onFlushed?.(error instanceof Error ? error : new Error(errorMessage(error)));
       logger.warn(`Daemon RPC write failed for ${sessionId}: ${error}`);
       if (!socket.destroyed) {
         socket.destroy();
@@ -1285,16 +1369,20 @@ export class UnixSocketServer {
       };
     }
 
+    // Must bypass the queue: queued, it would wait behind the very request it cancels.
+    if (request.method === DAEMON_CANCEL_REQUEST_METHOD) {
+      return this.cancelSocketRequest(session, request);
+    }
+
     const totalTimeoutMs = resolveMcpRequestTimeoutMs(request);
     // Mutable: extended by progress notifications for this specific request
     // (see ProgressExtendableDeadline) -- untouched for a request that never
     // emits progress, which keeps its exact original deadline.
     const deadline = new ProgressExtendableDeadline(receivedAtMs, totalTimeoutMs);
     let activeRequestSignal: AbortSignal | undefined;
+    const cancellation = this.registerRequestCancellation(session, request.id);
 
-    // Admit through the socket's queue: same-lane requests keep arrival order, while an
-    // explicit-device call does not wait behind another device's call (issue #6387).
-    return session.requestQueue.run(resolveSocketAdmissionLane(request), async () => {
+    const handler = async (): Promise<DaemonResponse> => {
       try {
         if (request.method.startsWith("daemon/")) {
           const daemonResponse = await handleDaemonRequest(request, this.daemonState);
@@ -1320,7 +1408,7 @@ export class UnixSocketServer {
         }
         const initialRoute = this.getMcpForwardRoute(request, sessionId);
 
-        const mcpRequest = this.mcpRequestSignal(sessionId, ownerSocket);
+        const mcpRequest = this.mcpRequestSignal(sessionId, ownerSocket, cancellation.signal);
         activeRequestSignal = mcpRequest.signal;
         try {
           const result = await this.runMcpForwardForCurrentRoute(
@@ -1427,7 +1515,73 @@ export class UnixSocketServer {
           ...(error instanceof InputTypeTextAppendError ? { charsSent: error.charsSent } : {}),
         };
       }
-    });
+    };
+    // Admit through the socket's queue: same-lane requests keep arrival order, while an
+    // explicit-device call does not wait behind another device's call (issue #6387).
+    const deviceId = this.onFrameTrace ? this.frameDeviceId(request) : undefined;
+    if (this.onFrameTrace) {
+      this.traceFrame("admission_requested", request.id, deviceId);
+    }
+    return session.requestQueue
+      .run(resolveSocketAdmissionLane(request), () => {
+        if (this.onFrameTrace) {
+          this.traceFrame("admission_granted", request.id, deviceId);
+        }
+        return this.runCancellableQueuedHandler(handler, cancellation.signal);
+      })
+      .finally(cancellation.dispose);
+  }
+
+  /**
+   * Track a socket request so a later `daemon/cancelRequest` frame can abandon
+   * it (issue #6384). A duplicate id replaces the older entry; `dispose` only
+   * removes its own entry so it cannot drop the newer one.
+   */
+  private registerRequestCancellation(
+    session: SessionContext,
+    requestId: string,
+  ): { signal: AbortSignal; dispose: () => void } {
+    const controller = new AbortController();
+    session.requestCancellations.set(requestId, controller);
+    return {
+      signal: controller.signal,
+      dispose: () => {
+        if (session.requestCancellations.get(requestId) === controller) {
+          session.requestCancellations.delete(requestId);
+        }
+      },
+    };
+  }
+
+  /**
+   * Answer a client cancel frame out-of-band (issue #6384). A queued request is
+   * skipped when dequeued; an in-flight one has its MCP forward aborted and
+   * releases the socket queue immediately. The cancelled request itself is
+   * answered with an error response, which the cancelling client ignores.
+   */
+  private cancelSocketRequest(session: SessionContext, request: DaemonRequest): DaemonResponse {
+    const targetId: unknown = request.params?.requestId;
+    if (typeof targetId !== "string" || targetId.length === 0) {
+      return {
+        id: request.id,
+        type: "mcp_response",
+        success: false,
+        error: `${DAEMON_CANCEL_REQUEST_METHOD} requires a non-empty string params.requestId`,
+      };
+    }
+    const controller = session.requestCancellations.get(targetId);
+    if (!controller) {
+      // Already answered (a timeout racing the response) or never seen: nothing to cancel.
+      return { id: request.id, type: "mcp_response", success: true, result: { cancelled: false } };
+    }
+    session.requestCancellations.delete(targetId);
+    const reason = new ActionableError(
+      `Request ${targetId} was cancelled by its client (client-side timeout or abort); ` +
+        "the daemon abandoned it so the next request on this connection can run.",
+    );
+    logger.warn(`[SocketCancel] socketSession=${session.sessionId} ${reason.message}`);
+    controller.abort(reason);
+    return { id: request.id, type: "mcp_response", success: true, result: { cancelled: true } };
   }
 
   private requireRemainingMcpForwardBudget(
@@ -5720,13 +5874,15 @@ export class UnixSocketServer {
             socketSessionId,
             timeoutMs,
           );
-          return await mcpClient.callTool(
-            {
-              name: request.params.name,
-              arguments: this.withLiveDeadlineKey(forwardedArguments, liveDeadlineKey),
-            },
-            undefined,
-            callOptions,
+          return await this.traceCallTool(request, () =>
+            mcpClient.callTool(
+              {
+                name: request.params.name,
+                arguments: this.withLiveDeadlineKey(forwardedArguments, liveDeadlineKey),
+              },
+              undefined,
+              callOptions,
+            ),
           );
         } finally {
           cleanup();
@@ -5757,6 +5913,19 @@ export class UnixSocketServer {
       }
       default:
         throw new Error(`Unsupported daemon method: ${request.method}`);
+    }
+  }
+
+  private async traceCallTool<T>(request: DaemonRequest, callTool: () => Promise<T>): Promise<T> {
+    if (!this.onFrameTrace) {
+      return await callTool();
+    }
+    const deviceId = this.frameDeviceId(request);
+    this.traceFrame("callTool_entered", request.id, deviceId);
+    try {
+      return await callTool();
+    } finally {
+      this.traceFrame("callTool_settled", request.id, deviceId);
     }
   }
 
@@ -6082,6 +6251,34 @@ export class UnixSocketServer {
     const created = this.appendTextFactory(device);
     this.appendTextInputs.set(device.deviceId, { input: created, incarnationToken });
     return { input: created, fromCache: false };
+  }
+
+  /**
+   * Run one admitted handler, releasing its socket admission slot as soon as its
+   * client cancels it (issue #6384). A cancelled handler that has not started never
+   * runs; a started one keeps winding down on its aborted signal, tracked so
+   * shutdown still drains it, while later requests proceed.
+   */
+  private async runCancellableQueuedHandler<T>(
+    handler: () => Promise<T>,
+    cancelSignal: AbortSignal | undefined,
+  ): Promise<T> {
+    if (!cancelSignal) {
+      return await handler();
+    }
+    cancelSignal.throwIfAborted();
+    const operation = handler();
+    this.trackRequestHandler(
+      operation.then(
+        () => {},
+        () => {},
+      ),
+    );
+    return await raceWithDeadline(operation, {
+      timer: this.timer,
+      signal: cancelSignal,
+      label: "Cancelled socket request",
+    });
   }
 
   /**

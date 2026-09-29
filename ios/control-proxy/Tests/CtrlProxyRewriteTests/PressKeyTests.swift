@@ -59,14 +59,59 @@ final class PressKeyTests: XCTestCase {
         XCTAssertFalse(GesturePerformer.caretHasFollowingCharacter(markerIndex: 0, originalLength: 0))
     }
 
-    func testHorizontalArrowCaretPostconditionAcceptsMovementOrBoundaryOnly() {
-        XCTAssertTrue(GesturePerformer.arrowCaretMoved(key: "arrow_left", before: 3, after: 2, length: 3))
-        XCTAssertFalse(GesturePerformer.arrowCaretMoved(key: "arrow_left", before: 2, after: 2, length: 3))
-        XCTAssertTrue(GesturePerformer.arrowCaretMoved(key: "arrow_left", before: 0, after: 0, length: 3))
-        XCTAssertTrue(GesturePerformer.arrowCaretMoved(key: "arrow_right", before: 1, after: 2, length: 3))
-        XCTAssertFalse(GesturePerformer.arrowCaretMoved(key: "arrow_right", before: 1, after: 1, length: 3))
-        XCTAssertTrue(GesturePerformer.arrowCaretMoved(key: "arrow_right", before: 3, after: 3, length: 3))
-        XCTAssertFalse(GesturePerformer.arrowCaretMoved(key: "arrow_right", before: 2, after: 1, length: 3))
+    func testHorizontalArrowOutcomeRejectsChangedValueBeforeConsideringCaret() {
+        XCTAssertEqual(GesturePerformer.arrowOutcome(
+            key: "arrow_left", original: "abc", observed: "←abc", before: 0, after: 0
+        ), .valueChanged)
+        XCTAssertEqual(GesturePerformer.arrowOutcome(
+            key: "arrow_right", original: "abc", observed: "abc→", before: 1, after: 2
+        ), .valueChanged)
+    }
+
+    func testHorizontalArrowOutcomeRequiresMovementInTheRequestedDirection() {
+        XCTAssertEqual(GesturePerformer.arrowOutcome(
+            key: "arrow_left", original: "abc", observed: "abc", before: 3, after: 2
+        ), .moved)
+        XCTAssertEqual(GesturePerformer.arrowOutcome(
+            key: "arrow_right", original: "abc", observed: "abc", before: 1, after: 2
+        ), .moved)
+        XCTAssertEqual(GesturePerformer.arrowOutcome(
+            key: "arrow_left", original: "abc", observed: "abc", before: 2, after: 2
+        ), .noEffect)
+        XCTAssertEqual(GesturePerformer.arrowOutcome(
+            key: "arrow_right", original: "abc", observed: "abc", before: 1, after: 1
+        ), .noEffect)
+        XCTAssertEqual(GesturePerformer.arrowOutcome(
+            key: "arrow_right", original: "abc", observed: "abc", before: 2, after: 1
+        ), .wrongDirection)
+    }
+
+    func testHorizontalArrowOutcomeAcceptsOnlyUnchangedBoundaryNoOps() {
+        XCTAssertEqual(GesturePerformer.arrowOutcome(
+            key: "arrow_left", original: "abc", observed: "abc", before: 0, after: 0
+        ), .boundaryNoOp)
+        XCTAssertEqual(GesturePerformer.arrowOutcome(
+            key: "arrow_right", original: "abc", observed: "abc", before: 3, after: 3
+        ), .boundaryNoOp)
+        XCTAssertEqual(GesturePerformer.arrowOutcome(
+            key: "arrow_left", original: "", observed: "", before: 0, after: 0
+        ), .boundaryNoOp)
+    }
+
+    func testHorizontalArrowOutcomeIsUnverifiedWithoutCaretProbe() {
+        XCTAssertNil(GesturePerformer.arrowOutcome(
+            key: "arrow_left", original: "abc", observed: "abc", before: nil, after: nil
+        ))
+        XCTAssertNil(GesturePerformer.arrowOutcome(
+            key: "arrow_right", original: "abc", observed: "abc", before: 1, after: nil
+        ))
+    }
+
+    func testHorizontalArrowNoEffectUsesExactActionableMessage() {
+        XCTAssertEqual(
+            GesturePerformer.GestureError.arrowNoEffect.localizedDescription,
+            "arrow keys have no effect on this iOS runtime; use Cmd+arrow (line start/end) or sendKeys text editing instead"
+        )
     }
 
     func testDecodePreservesKeyAndModifiersAndResponseType() throws {

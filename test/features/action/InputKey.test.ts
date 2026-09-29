@@ -27,7 +27,8 @@ describe("InputKey", () => {
   test("preserves an iOS arrow failure and an unverified result from the runner", async () => {
     let response = {
       success: false,
-      error: "Gesture failed: arrow key had no effect: 'arrow_left'",
+      error:
+        "arrow keys have no effect on this iOS runtime; use Cmd+arrow (line start/end) or sendKeys text editing instead",
       verified: undefined as boolean | undefined,
     };
     const requestPressKey = mock(async () => response);
@@ -41,7 +42,8 @@ describe("InputKey", () => {
 
     expect(await inputKey.press("arrow_left")).toMatchObject({
       success: false,
-      error: "Gesture failed: arrow key had no effect: 'arrow_left'",
+      error:
+        "arrow keys have no effect on this iOS runtime; use Cmd+arrow (line start/end) or sendKeys text editing instead",
     });
     response = { success: true, error: undefined, verified: false };
     expect(await inputKey.press("arrow_left")).toMatchObject({ success: true, verified: false });

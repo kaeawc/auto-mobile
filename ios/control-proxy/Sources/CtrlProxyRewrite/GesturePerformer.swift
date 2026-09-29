@@ -36,6 +36,7 @@ public final class GesturePerformer: GesturePerforming {
         case noApplication
         case elementNotFound(String)
         case gestureFailed(String)
+        case arrowNoEffect
         case notSupported(String)
         case missingParameter(String)
         case clipboardEmpty
@@ -50,6 +51,8 @@ public final class GesturePerformer: GesturePerforming {
                 return "Element not found: \(id)"
             case let .gestureFailed(reason):
                 return "Gesture failed: \(reason)"
+            case .arrowNoEffect:
+                return "arrow keys have no effect on this iOS runtime; use Cmd+arrow (line start/end) or sendKeys text editing instead"
             case let .notSupported(feature):
                 return "Feature not supported: \(feature)"
             case let .missingParameter(param):
@@ -122,9 +125,30 @@ public final class GesturePerformer: GesturePerforming {
         markerIndex < originalLength
     }
 
-    nonisolated static func arrowCaretMoved(key: String, before: Int, after: Int, length: Int) -> Bool {
-        if key == "arrow_left" { return after < before || before == 0 && after == 0 }
-        return after > before || before == length && after == length
+    enum ArrowOutcome: Equatable {
+        case moved
+        case boundaryNoOp
+        case valueChanged
+        case noEffect
+        case wrongDirection
+    }
+
+    nonisolated static func arrowOutcome(
+        key: String, original: String, observed: String, before: Int?, after: Int?
+    )
+        -> ArrowOutcome?
+    {
+        if observed != original { return .valueChanged }
+        guard let before, let after else { return nil }
+        if key == "arrow_left" {
+            if after < before { return .moved }
+            if before == 0 && after == 0 { return .boundaryNoOp }
+        } else {
+            if after > before { return .moved }
+            if before == original.count && after == before { return .boundaryNoOp }
+        }
+        if after != before { return .wrongDirection }
+        return .noEffect
     }
 
     /// Includes a scoped owner when the owner is itself a link; XCUITest's
@@ -997,38 +1021,33 @@ public final class GesturePerformer: GesturePerforming {
                     focusedElement.typeText(keyboardKey.rawValue)
                 } else if normalizedKey == "delete" {
                     app.typeKey(keyboardKey, modifierFlags: [])
-                } else if isPlainHorizontalArrow, let focusedElement {
-                    // XCUITest's app-level arrow events can silently miss the focused field.
-                    do {
-                        try catchingObjCException { focusedElement.typeText(keyboardKey.rawValue) }
-                    } catch {
-                        app.typeKey(keyboardKey, modifierFlags: modifierFlags)
-                    }
                 } else {
                     app.typeKey(keyboardKey, modifierFlags: modifierFlags)
                 }
             }
 
             if isPlainHorizontalArrow {
-                guard let focusedElement, let valueBeforeKeyPress, let caretBefore else { return false }
-                guard let caretAfter = try probeCaretIndex(
-                    app: app, focusedElement: focusedElement, original: valueBeforeKeyPress
+                guard let focusedElement, let valueBeforeKeyPress else { return false }
+                guard let firstOutcome = try observeArrowOutcome(
+                    key: normalizedKey, app: app, focusedElement: focusedElement,
+                    original: valueBeforeKeyPress, caretBefore: caretBefore
                 ) else { return false }
-                if GesturePerformer.arrowCaretMoved(
-                    key: normalizedKey, before: caretBefore, after: caretAfter, length: valueBeforeKeyPress.count
-                ) { return true }
-
-                // Keep app-level synthesis as a fallback if element delivery had no effect.
-                try catchingObjCException { app.typeKey(keyboardKey, modifierFlags: modifierFlags) }
-                guard let fallbackCaret = try probeCaretIndex(
-                    app: app, focusedElement: focusedElement, original: valueBeforeKeyPress
-                ) else { return false }
-                guard GesturePerformer.arrowCaretMoved(
-                    key: normalizedKey, before: caretBefore, after: fallbackCaret, length: valueBeforeKeyPress.count
-                ) else {
-                    throw GestureError.gestureFailed("arrow key had no effect: '\(key)'")
+                if firstOutcome == .moved || firstOutcome == .boundaryNoOp { return true }
+                if firstOutcome == .wrongDirection {
+                    throw GestureError.gestureFailed("arrow key moved the caret in the wrong direction")
                 }
-                return true
+
+                // App-level delivery can miss the focused field. Retry only after a verified interior no-op.
+                try catchingObjCException { focusedElement.typeKey(keyboardKey, modifierFlags: []) }
+                guard let secondOutcome = try observeArrowOutcome(
+                    key: normalizedKey, app: app, focusedElement: focusedElement,
+                    original: valueBeforeKeyPress, caretBefore: caretBefore
+                ) else { return false }
+                if secondOutcome == .moved || secondOutcome == .boundaryNoOp { return true }
+                if secondOutcome == .wrongDirection {
+                    throw GestureError.gestureFailed("arrow key moved the caret in the wrong direction")
+                }
+                throw GestureError.arrowNoEffect
             }
 
             if isHorizontalArrow { return false }
@@ -1070,6 +1089,34 @@ public final class GesturePerformer: GesturePerforming {
                 )
             }
             return nil
+        }
+
+        private func observeArrowOutcome(
+            key: String, app: XCUIApplication, focusedElement: XCUIElement,
+            original: String, caretBefore: Int?
+        )
+            throws -> ArrowOutcome?
+        {
+            guard let observed = try catchingObjCException({ focusedElement.value as? String }) else { return nil }
+            if GesturePerformer.arrowOutcome(
+                key: key, original: original, observed: observed, before: caretBefore, after: nil
+            ) == .valueChanged {
+                try restoreForwardDeleteProbe(app: app, focusedElement: focusedElement, original: original, marker: "")
+                throw GestureError.gestureFailed("arrow key changed the focused field value")
+            }
+            guard let caretBefore,
+                  let caretAfter = try probeCaretIndex(app: app, focusedElement: focusedElement, original: original)
+            else { return nil }
+            guard let valueAfterProbe = try catchingObjCException({ focusedElement.value as? String })
+            else { return nil }
+            let outcome = GesturePerformer.arrowOutcome(
+                key: key, original: original, observed: valueAfterProbe, before: caretBefore, after: caretAfter
+            )
+            if outcome == .valueChanged {
+                try restoreForwardDeleteProbe(app: app, focusedElement: focusedElement, original: original, marker: "")
+                throw GestureError.gestureFailed("arrow key changed the focused field value")
+            }
+            return outcome
         }
 
         private func probeCaretIndex(
@@ -1148,7 +1195,9 @@ public final class GesturePerformer: GesturePerforming {
         {
             if (try? catchingObjCException({ focusedElement.value as? String })) == original { return }
 
-            if (try? catchingObjCException({ focusedElement.value as? String }))?.contains(marker) == true {
+            if !marker.isEmpty,
+               (try? catchingObjCException({ focusedElement.value as? String }))?.contains(marker) == true
+            {
                 try? catchingObjCException {
                     focusedElement.typeText(XCUIKeyboardKey.delete.rawValue)
                 }

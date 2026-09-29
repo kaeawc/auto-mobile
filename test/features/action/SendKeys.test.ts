@@ -354,7 +354,8 @@ describe("SendKeys", () => {
         success: false,
         key: "arrow_left",
         keyCode: "arrow_left",
-        error: "Gesture failed: arrow key had no effect: 'arrow_left'",
+        error:
+          "arrow keys have no effect on this iOS runtime; use Cmd+arrow (line start/end) or sendKeys text editing instead",
       }),
     };
     const executor = new DefaultSendKeysCommandExecutor(
@@ -378,9 +379,14 @@ describe("SendKeys", () => {
       success: false,
       completedCommands: 0,
       failedIndex: 0,
-      error: "Gesture failed: arrow key had no effect: 'arrow_left'",
+      error:
+        "arrow keys have no effect on this iOS runtime; use Cmd+arrow (line start/end) or sendKeys text editing instead",
       commands: [
-        { success: false, error: "Gesture failed: arrow key had no effect: 'arrow_left'" },
+        {
+          success: false,
+          error:
+            "arrow keys have no effect on this iOS runtime; use Cmd+arrow (line start/end) or sendKeys text editing instead",
+        },
       ],
     });
     expect(calls).toEqual([]);

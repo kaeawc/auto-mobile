@@ -98,12 +98,14 @@ describe("decodeCtrlProxyMessage", () => {
         msg({
           type: "press_key_result",
           success: false,
-          error: "Gesture failed: arrow key had no effect: 'arrow_left'",
+          error:
+            "arrow keys have no effect on this iOS runtime; use Cmd+arrow (line start/end) or sendKeys text editing instead",
         }),
       )?.result,
     ).toMatchObject({
       success: false,
-      error: "Gesture failed: arrow key had no effect: 'arrow_left'",
+      error:
+        "arrow keys have no effect on this iOS runtime; use Cmd+arrow (line start/end) or sendKeys text editing instead",
     });
     expect(
       decodeCtrlProxyMessage(msg({ type: "press_key_result", verified: false }))?.result,

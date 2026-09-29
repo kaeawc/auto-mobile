@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.desktop.core.video
 
+import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.io.OutputStream
@@ -18,7 +19,12 @@ import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -27,12 +33,13 @@ import kotlinx.serialization.json.jsonPrimitive
  * Drives [VideoStreamClient] against a real Unix socket serving a real H.264 stream, so the
  * handshake, the binary framing, and the decoder are all exercised together.
  *
- * These use `runBlocking` rather than `runTest` deliberately: the work happens on a real IO thread
- * and a real decoder, and `runTest`'s virtual clock would skip the waits without any of it having
- * happened.
+ * The socket/decoder integration tests use `runBlocking`: their work happens on a real IO thread.
+ * The reconnect state test uses an injected reader and virtual-time dispatcher instead.
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 class VideoStreamClientTest {
 
+  private val log = LoggerFactory.getLogger("VideoStreamClientTest")
   private val json = Json { ignoreUnknownKeys = true }
   private val servers = mutableListOf<FakeRelay>()
 
@@ -399,31 +406,50 @@ class VideoStreamClientTest {
   }
 
   @Test
-  fun `a rapid reconnect is not wedged by the superseded reader's teardown`() = runBlocking {
-    // The stall / first-frame watchdog reconnects with disconnect()+connect() back-to-back. The
-    // cancelled reader's channel-close throws on its blocking read AFTER the replacement reader is
-    // already installed; keyed only on the mutable readerJob it would publish its terminal
-    // Unavailable over the new session's Streaming and wedge the pane. Session identity must drop
-    // that stale write. Cycled several times to widen the interleaving window against real IO
-    // threads.
-    val server = relay(payload = sampleH264(), keepOpen = true, maxConnections = 8)
-    val client = VideoStreamClient(socketPathValue = server.socketPath.toString())
+  fun `a rapid reconnect is not wedged by the superseded reader's teardown`() = runTest {
+    // Keep each reader's publisher so its terminal event can arrive after a replacement is live.
+    // The old socket test checked a replayed frame from the first session on every later attempt,
+    // which did not establish that those attempts had even started.
+    val reader = FakeSessionRunner()
+    val client =
+      VideoStreamClient(
+        sessionRunner = reader,
+        readerCoroutineDispatcher = StandardTestDispatcher(testScheduler),
+      )
 
-    repeat(6) {
-      client.connect("emulator-5554")
-      server.awaitFirstFrameFrom(client)
-      client.disconnect()
+    try {
+      repeat(7) { attempt ->
+        client.connect("emulator-5554")
+        runCurrent()
+        assertEquals(attempt + 1, reader.publishers.size)
+        assertEquals(VideoStreamState.Streaming(320, 240), client.state.value)
+
+        // Simulate old readers unwinding after the new reader has reached Streaming.
+        reader.publishers.dropLast(1).forEach {
+          it(VideoStreamState.Unavailable("superseded reader stopped"))
+        }
+        assertEquals(VideoStreamState.Streaming(320, 240), client.state.value)
+        if (attempt < 6) {
+          client.disconnect()
+          assertEquals(VideoStreamState.Idle, client.state.value)
+        }
+      }
+    } finally {
+      client.dispose()
     }
+  }
 
-    // Final session must settle on live video, never a stale Unavailable from a prior reader.
-    client.connect("emulator-5554")
-    server.awaitFirstFrameFrom(client)
-    waitUntil { client.state.value is VideoStreamState.Streaming }
-    assertTrue(
-      client.state.value is VideoStreamState.Streaming,
-      "expected Streaming, was ${client.state.value}",
-    )
-    client.dispose()
+  private class FakeSessionRunner : VideoStreamSessionRunner {
+    val publishers = mutableListOf<(VideoStreamState) -> Unit>()
+
+    override fun isAvailable(): Boolean = true
+
+    override suspend fun run(deviceId: String?, publish: (VideoStreamState) -> Unit) {
+      assertEquals("emulator-5554", deviceId)
+      publishers += publish
+      publish(VideoStreamState.Streaming(320, 240))
+      awaitCancellation()
+    }
   }
 
   private suspend fun waitUntil(timeoutMs: Long = 5_000, predicate: () -> Boolean) {
@@ -519,8 +545,9 @@ class VideoStreamClientTest {
           val handler = Thread {
             try {
               handle(socket)
-            } catch (_: Throwable) {
+            } catch (e: Exception) {
               // The client disconnecting mid-stream is the normal end of a handler.
+              log.debug("Relay handler stopped after client disconnect: ${e.message}")
             }
           }
             .also {
@@ -529,8 +556,9 @@ class VideoStreamClientTest {
             }
           synchronized(handlers) { handlers.add(handler) }
         }
-      } catch (_: Throwable) {
+      } catch (e: Exception) {
         // The server channel closing on teardown ends the accept loop.
+        log.debug("Relay accept loop stopped during teardown: ${e.message}")
       }
     }
       .also {

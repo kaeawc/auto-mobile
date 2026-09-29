@@ -13,6 +13,7 @@ import java.nio.channels.SocketChannel
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.util.UUID
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -147,6 +148,13 @@ fun DecodedFrame.toImageBitmap(): ImageBitmap =
     )
     .toComposeImageBitmap()
 
+/** Controllable reader for testing session changes without sockets or wall-clock scheduling. */
+interface VideoStreamSessionRunner {
+  fun isAvailable(): Boolean
+
+  suspend fun run(deviceId: String?, publish: (VideoStreamState) -> Unit)
+}
+
 /**
  * Streams a device's screen from `~/.auto-mobile/video-stream.sock` and decodes it to frames.
  *
@@ -194,6 +202,8 @@ class VideoStreamClient(
    * `System.nanoTime()` source by default; injectable for deterministic tests.
    */
   private val nowMs: () -> Long = { System.nanoTime() / 1_000_000L },
+  private val sessionRunner: VideoStreamSessionRunner? = null,
+  readerCoroutineDispatcher: CoroutineDispatcher? = null,
 ) : VideoStreamSource {
   internal fun subscribeRequest(deviceId: String?) =
     VideoStreamRequest(
@@ -206,11 +216,14 @@ class VideoStreamClient(
     )
 
   // One dedicated reader thread per client (see the class doc for why not Dispatchers.IO).
-  private val readerDispatcher =
-    java.util.concurrent.Executors.newSingleThreadExecutor { runnable ->
-        Thread(runnable, "video-stream-reader").apply { isDaemon = true }
-      }
-      .asCoroutineDispatcher()
+  private val ownedReaderDispatcher =
+    if (readerCoroutineDispatcher == null)
+      java.util.concurrent.Executors.newSingleThreadExecutor { runnable ->
+          Thread(runnable, "video-stream-reader").apply { isDaemon = true }
+        }
+        .asCoroutineDispatcher()
+    else null
+  private val readerDispatcher = readerCoroutineDispatcher ?: requireNotNull(ownedReaderDispatcher)
   private val scope = CoroutineScope(SupervisorJob() + readerDispatcher)
 
   private val frameSequence = java.util.concurrent.atomic.AtomicLong(0L)
@@ -247,27 +260,34 @@ class VideoStreamClient(
   private val sessionIds = java.util.concurrent.atomic.AtomicLong(0L)
   @Volatile private var activeSessionId = 0L
 
-  override fun isAvailable(): Boolean = Files.exists(File(socketPathValue).toPath())
+  override fun isAvailable(): Boolean =
+    sessionRunner?.isAvailable() ?: Files.exists(File(socketPathValue).toPath())
 
   override fun connect(deviceId: String?) {
-    if (readerJob?.isActive == true) return
-    if (!isAvailable()) {
-      _state.value =
-        VideoStreamState.Unavailable(
-          "Live mirroring is unavailable on this daemon",
-          VideoStreamState.UnavailableCause.NO_RELAY,
-        )
-      return
-    }
+    synchronized(sessionLock) {
+      if (readerJob?.isActive == true) return
+      if (!isAvailable()) {
+        _state.value =
+          VideoStreamState.Unavailable(
+            "Live mirroring is unavailable on this daemon",
+            VideoStreamState.UnavailableCause.NO_RELAY,
+          )
+        return
+      }
 
-    val sessionId = sessionIds.incrementAndGet()
-    activeSessionId = sessionId
-    _state.value = VideoStreamState.Connecting
-    readerJob = scope.launch {
-      // Name the dedicated thread per target so a farm's dozens of readers are tellable
-      // apart in a thread dump.
-      Thread.currentThread().name = "video-stream-reader-${deviceId ?: "default"}"
-      runSession(deviceId, sessionId)
+      val sessionId = sessionIds.incrementAndGet()
+      activeSessionId = sessionId
+      _state.value = VideoStreamState.Connecting
+      readerJob = scope.launch {
+        // Name the dedicated thread per target so a farm's dozens of readers are tellable
+        // apart in a thread dump.
+        if (sessionRunner == null) {
+          Thread.currentThread().name = "video-stream-reader-${deviceId ?: "default"}"
+          runSession(deviceId, sessionId)
+        } else {
+          sessionRunner.run(deviceId) { state -> publish(sessionId, state) }
+        }
+      }
     }
   }
 
@@ -279,24 +299,28 @@ class VideoStreamClient(
       readerJob?.cancel()
       readerJob = null
       closeChannel()
+      _state.value = VideoStreamState.Idle
     }
-    _state.value = VideoStreamState.Idle
   }
 
   /** Disconnects and cancels the internal scope. The instance must not be reused afterwards. */
   override fun dispose() {
     disconnect()
     scope.coroutineContext[Job]?.cancel()
-    readerDispatcher.close()
+    ownedReaderDispatcher?.close()
+  }
+
+  private fun publish(sessionId: Long, state: VideoStreamState) {
+    synchronized(sessionLock) {
+      if (sessionId == activeSessionId) _state.value = state
+    }
   }
 
   private fun runSession(deviceId: String?, sessionId: Long) {
     // Only the current session may touch shared state; a reader superseded by a reconnect (or a
     // disconnect) publishes nothing, so its late teardown can't clobber the live session.
     fun isCurrent() = sessionId == activeSessionId
-    fun publish(state: VideoStreamState) {
-      if (isCurrent()) _state.value = state
-    }
+    fun publish(state: VideoStreamState) = publish(sessionId, state)
     // Reset per-session so a stale value from a prior connect (a different daemon, or a refused
     // subscribe) never survives into this attempt (issue #7549).
     if (isCurrent()) {
@@ -367,6 +391,9 @@ class VideoStreamClient(
       if (isCurrent()) {
         LOG.warn("Live mirroring stopped: ${e.message}", e)
         publish(VideoStreamState.Unavailable(e.message ?: "Live mirroring stopped"))
+      } else {
+        // A cancelled reader may fail while its socket closes; the replacement owns visible state.
+        LOG.debug("Superseded video stream reader stopped: ${e.message}")
       }
     } finally {
       decoder.close()
@@ -438,7 +465,7 @@ class VideoStreamClient(
             ) {
               // The real size comes from the SPS, not the advertised header, and changes on
               // device rotation.
-              _state.value = VideoStreamState.Streaming(frame.width, frame.height)
+              publish(sessionId, VideoStreamState.Streaming(frame.width, frame.height))
             }
             // Present here, on the reader thread, while the decoder's reused buffer is valid:
             // the immutable raster produced by toImageBitmap is the only per-frame copy, and

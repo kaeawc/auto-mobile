@@ -853,7 +853,10 @@ private fun StreamArea(
       val base64 =
         withContext(Dispatchers.IO) {
           // Connect/subscribe are blocking socket writes — keep them off the UI thread.
-          stream.connect(column.deviceId)
+          stream.connect(
+            column.deviceId,
+            deviceSessionUuid = column.deviceSessionUuid,
+          )
           stream.requestObservation(column.deviceId)
           withTimeoutOrNull(SCREENSHOT_CAPTURE_TIMEOUT_MS) {
             stream.screenshotUpdates.first { !it.screenshotBase64.isNullOrEmpty() }.screenshotBase64

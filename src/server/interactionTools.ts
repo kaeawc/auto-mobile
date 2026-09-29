@@ -2812,7 +2812,7 @@ export function registerInteractionTools() {
 
   ToolRegistry.registerDeviceAware(
     "sendKeys",
-    "Execute ordered text insertion/replacement, clear, raw keys, and semantic IME keys. For Unicode and emoji use Android ime/a11y/auto or any iOS mode; Android eventOnly and imeKeyEvents are ASCII-only.",
+    "Execute ordered typing, clear, raw-key, and semantic IME commands. Unicode: iOS any mode; Android a11y/ime/auto/eventAll/eventLast (event modes use a11y for unsupported runs). Android eventOnly/imeKeyEvents are ASCII-only. textLength counts code points.",
     sendKeysSchema,
     sendKeysHandler,
     { defaultEnabled: true, supportsProgress: true, outputSchema: sendKeysResultSchema },

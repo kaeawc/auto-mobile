@@ -115,17 +115,19 @@ standalone `{ "action": "clear" }` command clears the focused field. Execution
 stops on the first failure and returns compact command metadata plus the final
 observation without copying type-command text into the metadata.
 
-| Platform / mode                                | Unicode text, including emoji                            | Delivery                                                                                                                                                                                                                |
-| ---------------------------------------------- | -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| iOS, any requested mode                        | Supported; the requested mode resolves to `xcuiTypeText` | XCUITest `typeText` receives the whole string.                                                                                                                                                                          |
-| Android `a11y`                                 | Supported                                                | Accessibility `ACTION_SET_TEXT` writes the whole string.                                                                                                                                                                |
-| Android `ime`, or `auto` when IME is available | Supported                                                | CtrlProxy IME delivers complete graphemes through `InputConnection`; `auto` can fall back as described above.                                                                                                           |
-| Android `eventAll`, `eventLast`                | Supported with split delivery                            | ASCII uses key events; other text uses accessibility insertion. A keycap or decomposed letter can split after its ASCII base, leaving an accessibility insertion beginning with a combining mark or variation selector. |
-| Android `eventOnly`, `imeKeyEvents`            | ASCII only                                               | `eventOnly` preflights available key events; `imeKeyEvents` accepts printable ASCII only. Unsupported text fails before editing.                                                                                        |
+| Platform / mode                                | Unicode text, including emoji                            | Delivery                                                                                                                                                                                                                                              |
+| ---------------------------------------------- | -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| iOS, any requested mode                        | Supported; the requested mode resolves to `xcuiTypeText` | XCUITest `typeText` receives the whole string.                                                                                                                                                                                                        |
+| Android `a11y`                                 | Supported                                                | Accessibility `ACTION_SET_TEXT` writes the whole string.                                                                                                                                                                                              |
+| Android `ime`, or `auto` when IME is available | Supported                                                | CtrlProxy IME delivers complete graphemes through `InputConnection`; `auto` can fall back as described above.                                                                                                                                         |
+| Android `eventAll`, `eventLast`                | Supported with split delivery                            | ASCII uses key events; other text uses accessibility insertion. A keycap, decomposed letter, or ASCII followed by ZWJ can split after its ASCII base, leaving an accessibility insertion beginning with a combining mark, variation selector, or ZWJ. |
+| Android `eventOnly`, `imeKeyEvents`            | ASCII only                                               | `eventOnly` preflights available key events; `imeKeyEvents` accepts printable ASCII only. Unsupported text fails before editing.                                                                                                                      |
 
-Use `ime`, `a11y`, or `auto` for emoji and other Unicode text when complete
-grapheme delivery matters. `SendKeysCommandResult.textLength` counts Unicode
-code points, rather than graphemes or UTF-16 code units. On iOS, XCUITest
+Use `ime` or `a11y` for emoji and other Unicode text when complete grapheme
+delivery matters. `auto` uses the IME when available, but its Android insertion
+fallback can split graphemes across key events and accessibility inserts.
+`SendKeysCommandResult.textLength` counts Unicode code points, rather than
+graphemes or UTF-16 code units. On iOS, XCUITest
 typing can depend on the simulator's **Connect Hardware Keyboard** setting and
 active keyboard language; non-Latin keyboard configurations are not covered by
 the simulator-free tests.
@@ -145,9 +147,12 @@ Unicode code points individually; they do not preserve grapheme boundaries.
 | Android `eventOnly`                      | Rejected before mutation                               | Rejected before mutation                                                                  | Rejected before mutation                                                                | Rejected before mutation                               | Preflights the entire string and fails at the first character without a key-event plan.                                                                                                                                                              |
 
 For event-based delivery, surrogate pairs stay together during code-point
-iteration, but a grapheme containing an ASCII key-event character can be split
-across delivery mechanisms. Tests pin the dispatched text chunks; they do not
-claim a device editor's rendered result for those split graphemes.
+iteration, so an accessibility insertion does not begin with a low surrogate.
+A grapheme containing an ASCII key-event character can still be split across
+delivery mechanisms, and its accessibility insertion may begin with a lone
+combining mark, variation selector, or ZWJ. Tests pin the dispatched text
+chunks; they do not claim a device editor's rendered result for those split
+graphemes.
 
 `sendKeys` is the text-input tool. Its `type` command enters text, while `key`
 and `clear` commands send keys and clear the focused field, respectively.

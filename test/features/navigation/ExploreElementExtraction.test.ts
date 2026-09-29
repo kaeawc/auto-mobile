@@ -1,6 +1,6 @@
 import { expect, describe, test, beforeEach } from "bun:test";
 import fc from "fast-check";
-import { Element } from "../../../src/models";
+import { Element, ViewHierarchyResult, ViewHierarchyNode } from "../../../src/models";
 import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
 import type { ElementParser } from "../../../src/utils/interfaces/ElementParser";
 import {
@@ -33,7 +33,10 @@ describe("ExploreElementExtraction", () => {
     } as Element;
   }
 
-  function createMockViewHierarchy(nodes: any[] = [], packageName: string = "com.test.app") {
+  function createMockViewHierarchy(
+    nodes: ViewHierarchyNode[] = [],
+    packageName: string = "com.test.app",
+  ): ViewHierarchyResult {
     return {
       hierarchy: {
         node: nodes,
@@ -42,7 +45,7 @@ describe("ExploreElementExtraction", () => {
     };
   }
 
-  function createMockNode(overrides: any = {}) {
+  function createMockNode(overrides: Partial<ViewHierarchyNode["$"]> = {}): ViewHierarchyNode {
     const defaults = {
       $: {
         class: "android.widget.Button",
@@ -107,15 +110,15 @@ describe("ExploreElementExtraction", () => {
     test("should handle string boolean values from XML", () => {
       const element = {
         ...createMockElement(),
-        clickable: "true" as any,
-        enabled: "true" as any,
+        clickable: "true",
+        enabled: "true",
       };
       expect(isNavigationCandidate(element)).toBe(true);
 
       const disabledElement = {
         ...createMockElement(),
-        clickable: "true" as any,
-        enabled: "false" as any,
+        clickable: "true",
+        enabled: "false",
       };
       expect(isNavigationCandidate(disabledElement)).toBe(false);
     });
@@ -176,7 +179,7 @@ describe("ExploreElementExtraction", () => {
   describe("enrichElementWithChildProperties", () => {
     test("should copy text from child node if parent has none", () => {
       const element = createMockElement({ text: undefined });
-      (element as any).node = [{ text: "Child Text" }];
+      element.node = [{ text: "Child Text" }];
 
       const enriched = enrichElementWithChildProperties(element);
 
@@ -185,7 +188,7 @@ describe("ExploreElementExtraction", () => {
 
     test("should not override existing text", () => {
       const element = createMockElement({ text: "Parent Text" });
-      (element as any).node = [{ text: "Child Text" }];
+      element.node = [{ text: "Child Text" }];
 
       const enriched = enrichElementWithChildProperties(element);
 
@@ -263,14 +266,14 @@ describe("ExploreElementExtraction", () => {
       const hierarchy2 = createMockViewHierarchy(
         rows.map((row) => ({ $: { ...row.$, bounds: { ...row.$.bounds } } })),
       );
-      const elements1 = extractAllElements(hierarchy1 as any, elementParser);
-      const elements2 = extractAllElements(hierarchy2 as any, elementParser);
+      const elements1 = extractAllElements(hierarchy1, elementParser);
+      const elements2 = extractAllElements(hierarchy2, elementParser);
 
-      expect(getElementKey(elements1[0]!, hierarchy1 as any)).not.toBe(
-        getElementKey(elements1[1]!, hierarchy1 as any),
+      expect(getElementKey(elements1[0]!, hierarchy1)).not.toBe(
+        getElementKey(elements1[1]!, hierarchy1),
       );
-      expect(getElementKey(elements1[0]!, hierarchy1 as any)).toBe(
-        getElementKey(elements2[0]!, hierarchy2 as any),
+      expect(getElementKey(elements1[0]!, hierarchy1)).toBe(
+        getElementKey(elements2[0]!, hierarchy2),
       );
     });
 
@@ -285,10 +288,10 @@ describe("ExploreElementExtraction", () => {
         },
       }));
       const hierarchy = createMockViewHierarchy(nodes);
-      const elements = extractAllElements(hierarchy as any, elementParser);
+      const elements = extractAllElements(hierarchy, elementParser);
       const tracked = new Map<string, TrackedElement>([
         [
-          getElementKey(elements[0]!, hierarchy as any),
+          getElementKey(elements[0]!, hierarchy),
           {
             interactionCount: 2,
             lastInteractionScreen: "Screen1",
@@ -296,7 +299,7 @@ describe("ExploreElementExtraction", () => {
         ],
       ]);
 
-      const filtered = filterUnexhaustedElements(elements, tracked, "Screen1", hierarchy as any);
+      const filtered = filterUnexhaustedElements(elements, tracked, "Screen1", hierarchy);
       expect(filtered).toHaveLength(2);
       expect(filtered.map((element) => element.bounds.top)).toEqual([50, 100]);
     });
@@ -314,10 +317,10 @@ describe("ExploreElementExtraction", () => {
             },
           }));
           const hierarchy = createMockViewHierarchy(nodes);
-          const elements = extractAllElements(hierarchy as any, elementParser);
-          expect(
-            new Set(elements.map((element) => getElementKey(element, hierarchy as any))).size,
-          ).toBe(count);
+          const elements = extractAllElements(hierarchy, elementParser);
+          expect(new Set(elements.map((element) => getElementKey(element, hierarchy))).size).toBe(
+            count,
+          );
         }),
         { seed: 1_234_567, numRuns: 20 },
       );

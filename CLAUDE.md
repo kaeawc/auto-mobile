@@ -180,7 +180,8 @@ bun run lint:baseline   # alias of lint:prune (regenerate the baseline)
 
 Everything in `.oxlintrc.json` set to `error` is gated directly by `oxlint` (a
 non-zero exit). The ratchet only gates the rules set to `warn` because they carry
-pre-existing violations: `complexity`, `max-depth`, `auto-mobile/catch-convention`,
+pre-existing violations: `complexity`, `max-depth`, `max-params`,
+`max-lines-per-function`, `auto-mobile/catch-convention`,
 `auto-mobile/no-unknown-cast`, and the two type-aware promise rules
 (`typescript/no-floating-promises`, `typescript/no-misused-promises`). The baseline
 is keyed per file + per rule with only a **count**, so it does not churn on line
@@ -197,11 +198,13 @@ ratchet rule as its own rule (the custom plugin already does) rather than foldin
 selectors into a shared one, so a baselined violation cannot be silently traded
 for a genuinely-dangerous one.
 
-Rules with a numeric threshold: `complexity` 12, `max-depth` 3,
-`max-nested-callbacks` 3 (0 baselined), `auto-mobile/no-accumulator-foreach`
-(src/ only, 0 baselined). The full set the ratchet gates (per the section above)
-also includes `auto-mobile/catch-convention`, `auto-mobile/no-unknown-cast`,
-`typescript/no-floating-promises`, and `typescript/no-misused-promises`.
+Rules with a numeric threshold: `complexity` 12, `max-depth` 3, `max-params` 6,
+`max-lines-per-function` 150, `max-nested-callbacks` 3 (0 baselined),
+`auto-mobile/no-accumulator-foreach` (src/ only, 0 baselined). The full set the
+ratchet gates (per the section above) also includes `max-params`,
+`max-lines-per-function`, `auto-mobile/catch-convention`,
+`auto-mobile/no-unknown-cast`, `typescript/no-floating-promises`, and
+`typescript/no-misused-promises`.
 
 Explicit loops (`for`, `for-of`, `for-in`, `while`) are deliberately NOT linted.
 The ratchet nudges toward declarative style where a clean declarative form

@@ -90,6 +90,11 @@
         // stays fast and CI type-checks only once.
         "complexity": ["warn", 12],
         "max-depth": ["warn", 3],
+        "max-params": ["warn", 6],
+        "max-lines-per-function": [
+          "warn",
+          { "max": 150, "skipBlankLines": true, "skipComments": true }
+        ],
         "auto-mobile/catch-convention": "warn",
         "auto-mobile/no-raw-promise-race": "warn",
         "auto-mobile/no-unknown-cast": "warn",

@@ -9,7 +9,8 @@
 # external gate -- exactly like scripts/typecheck-baseline.sh does for `tsc`.
 #
 # The rules gated here are the ones .oxlintrc.json sets to "warn" because they
-# carry pre-existing violations (complexity, max-depth,
+# carry pre-existing violations (complexity, max-depth, max-params,
+# max-lines-per-function,
 # auto-mobile/catch-convention, auto-mobile/no-unknown-cast, and the two
 # type-aware promise rules). Every OTHER rule is "error" in the config and is
 # gated directly by `oxlint` (a non-zero exit), so it does not belong here. The
@@ -57,9 +58,10 @@ if [[ "$ALLOW_GROW" == "true" && "$MODE" != "update" ]]; then
   exit 2
 fi
 
-# The oxlint rule codes gated by this ratchet. Kept in lock-step with the "warn"
+# The oxlint rule codes gated by this ratchet (including max-params and
+# max-lines-per-function). Kept in lock-step with the "warn"
 # rules in .oxlintrc.json.
-RATCHET_CODES="eslint(complexity) eslint(max-depth) auto-mobile(catch-convention) auto-mobile(no-raw-promise-race) auto-mobile(no-unknown-cast) auto-mobile(no-caught-error-interpolation) typescript(no-floating-promises) typescript(no-misused-promises)"
+RATCHET_CODES="eslint(complexity) eslint(max-depth) eslint(max-params) eslint(max-lines-per-function) auto-mobile(catch-convention) auto-mobile(no-raw-promise-race) auto-mobile(no-unknown-cast) auto-mobile(no-caught-error-interpolation) typescript(no-floating-promises) typescript(no-misused-promises)"
 
 # Emit the JSON report. OXLINT_JSON_CMD overrides the invocation -- used by the
 # BATS tests to inject a canned report. It is `eval`ed, so treat it as TRUSTED

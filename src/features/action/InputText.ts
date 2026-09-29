@@ -70,6 +70,8 @@ type TextInputTargetFocuserFactory = (device: BootedDevice) => TextInputTargetFo
 function isFocusResultConfirmed(
   result: Awaited<ReturnType<TextInputTargetFocuser["focus"]>>,
 ): boolean {
+  // The focuser verifies the selected field's own keyboard focus or its nearest
+  // editable ancestor/descendant before any text is sent.
   return result.success && result.focusVerified === true;
 }
 

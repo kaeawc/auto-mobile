@@ -1242,7 +1242,55 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     };
   }
 
-  private isSameFocusTarget(target: Element, candidate: Element): boolean {
+  private isSameFocusTarget(
+    target: Element,
+    candidate: Element,
+    nodes?: readonly SearchableEntry[],
+    selectedNode?: SearchableEntry,
+  ): boolean {
+    const candidateSource = getHierarchyNodeSource(candidate);
+    if (selectedNode && candidateSource === selectedNode.source) {
+      return true;
+    }
+    if (!selectedNode && this.hasDirectFocusIdentity(target, candidate)) {
+      return true;
+    }
+    if (!nodes || !candidateSource) {
+      return false;
+    }
+    const targets = selectedNode
+      ? [selectedNode]
+      : nodes.filter((node) => node.element && this.hasDirectFocusIdentity(target, node.element));
+    // Focus can be serialized on the search bar while its inner text field is
+    // selected (or vice versa). Only the nearest editable node on the same
+    // ancestry chain represents the same field.
+    return nodes.some((focusedNode) => {
+      if (focusedNode.source !== candidateSource || !focusedNode.element) {
+        return false;
+      }
+      return targets.some((matchedNode) => {
+        for (const [start, end] of [
+          [focusedNode, matchedNode],
+          [matchedNode, focusedNode],
+        ] as const) {
+          let parent = start.parentIndex;
+          while (parent !== undefined) {
+            const ancestor = nodes[parent];
+            if (ancestor === end) {
+              return true;
+            }
+            if (isFocusEditableElement(ancestor.properties)) {
+              break;
+            }
+            parent = ancestor.parentIndex;
+          }
+        }
+        return false;
+      });
+    });
+  }
+
+  private hasDirectFocusIdentity(target: Element, candidate: Element): boolean {
     for (const key of ["resource-id", "view-id", "test-tag"] as const) {
       const targetValue = target[key];
       const candidateValue = candidate[key];
@@ -1379,10 +1427,20 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       { ...options, index: options.index ?? selectedIndex },
       hierarchy,
     ).selection.element;
+    const nodes = new SearchableHierarchy().project(hierarchy);
+    const selectedSource = selected && getHierarchyNodeSource(selected);
+    const selectedNode = nodes.find((node) => node.source === selectedSource);
     return Boolean(
       selected &&
       isFocusEditableElement(selected) &&
-      this.finder.isElementKeyboardFocused(selected) &&
+      selectedNode &&
+      nodes.some(
+        (node) =>
+          node.element &&
+          isFocusEditableElement(node.properties) &&
+          this.finder.isElementKeyboardFocused(node.element) &&
+          this.isSameFocusTarget(selected, node.element, nodes, selectedNode),
+      ) &&
       selected[identifier.key] === identifier.value &&
       target.class === selected.class &&
       horizontalExtentNearlyEqual(
@@ -1393,12 +1451,16 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     );
   }
 
-  private isFocusedMatchingNode(target: Element, node: SearchableEntry): boolean {
+  private isFocusedMatchingNode(
+    target: Element,
+    node: SearchableEntry,
+    nodes: readonly SearchableEntry[],
+  ): boolean {
     return Boolean(
       node.element &&
       isFocusEditableElement(node.properties) &&
       this.finder.isElementKeyboardFocused(node.element) &&
-      this.isSameFocusTarget(target, node.element),
+      this.isSameFocusTarget(target, node.element, nodes),
     );
   }
 
@@ -1412,7 +1474,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       candidate &&
       isFocusEditableElement(candidate) &&
       this.finder.isElementKeyboardFocused(candidate) &&
-      this.isSameFocusTarget(target, candidate),
+      this.isSameFocusTarget(target, candidate, new SearchableHierarchy().project(hierarchy)),
     );
   }
 
@@ -1446,10 +1508,10 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           isFocusEditableElement(node.properties) &&
           this.finder.isElementKeyboardFocused(node.element) &&
           node.element[identifier.key] === identifier.value &&
-          this.isSameFocusTarget(target, node.element),
+          this.isSameFocusTarget(target, node.element, nodes),
       );
     }
-    const focused = nodes.find((node) => this.isFocusedMatchingNode(target, node));
+    const focused = nodes.find((node) => this.isFocusedMatchingNode(target, node, nodes));
     if (focused) {
       return true;
     }

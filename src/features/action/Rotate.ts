@@ -729,8 +729,10 @@ export class Rotate extends BaseVisualChange {
     progress: ProgressCallback | undefined,
     perf: ReturnType<typeof createGlobalPerformanceTracker>,
   ): Promise<RotateResult> {
-    return this.observedInteraction(
-      async () => {
+    let previousScreenSize: { width: number; height: number } | undefined;
+    const result: RotateResult = await this.observedInteraction(
+      async (previousObservation) => {
+        previousScreenSize = previousObservation.screenSize;
         try {
           const client = IOSCtrlProxyClient.getInstance(this.device);
           const result = await perf.track("iOSRotation", () =>
@@ -763,13 +765,34 @@ export class Rotate extends BaseVisualChange {
         }
       },
       {
-        changeExpected: true,
+        // The runner can report a successful no-op. A hierarchy diff is not
+        // evidence that its screen rotated, and a no-op needs no visual change.
+        changeExpected: false,
         timeoutMs: 5000,
         progress,
         perf,
         skipUiStability: true,
       },
     );
+    const currentScreenSize = result.observation?.screenSize;
+    if (
+      result.success &&
+      result.rotationPerformed &&
+      result.previousOrientation === "unknown" &&
+      previousScreenSize &&
+      currentScreenSize &&
+      previousScreenSize.width === currentScreenSize.width &&
+      previousScreenSize.height === currentScreenSize.height
+    ) {
+      return {
+        ...result,
+        success: false,
+        rotationPerformed: false,
+        currentOrientation: "unknown",
+        error: "Rotation is not supported on this display (the screen size did not change)",
+      };
+    }
+    return result;
   }
 
   private async executeAndroidRotation(

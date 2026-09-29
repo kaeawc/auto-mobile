@@ -51,4 +51,44 @@ final class RotateOrientationTests: XCTestCase {
     func testSameOrientationSkipsSetter() async throws {
         try await assertRotation(from: "landscape_left", to: "landscape_left", performed: false, value: 1)
     }
+
+    func testUnsupportedDisplayKeepsPreviousOrientation() async throws {
+        let gestures = RewriteFakeGesturePerformer()
+        try gestures.setOrientation("unknown")
+        gestures.rotationSupported = false
+        let handler = CommandHandler(
+            elementLocator: RewriteFakeElementLocator(),
+            gesturePerformer: gestures,
+            perf: PerfProvider()
+        )
+        let result = await handler.handle(.rotate(RequestRotate(requestId: "rotate-test", orientation: "landscape")))
+        let response = try XCTUnwrap(result as? RotateResponse)
+        XCTAssertFalse(response.success)
+        XCTAssertEqual(response.error, "Rotation is not supported on this display (the screen size did not change)")
+        XCTAssertEqual(response.currentOrientation, "unknown")
+        XCTAssertFalse(response.rotationPerformed)
+        let portraitResult = await handler.handle(.rotate(RequestRotate(
+            requestId: "portrait-test",
+            orientation: "portrait"
+        )))
+        let portraitResponse = try XCTUnwrap(portraitResult as? RotateResponse)
+        XCTAssertTrue(portraitResponse.success)
+        XCTAssertFalse(portraitResponse.rotationPerformed)
+        XCTAssertEqual(gestures.setOrientationCalls, 2)
+    }
+
+    func testUnknownPortraitOnPortraitDisplayIsNoOp() async throws {
+        let gestures = RewriteFakeGesturePerformer()
+        try gestures.setOrientation("unknown")
+        let handler = CommandHandler(
+            elementLocator: RewriteFakeElementLocator(),
+            gesturePerformer: gestures,
+            perf: PerfProvider()
+        )
+        let result = await handler.handle(.rotate(RequestRotate(requestId: "rotate-test", orientation: "portrait")))
+        let response = try XCTUnwrap(result as? RotateResponse)
+        XCTAssertTrue(response.success)
+        XCTAssertFalse(response.rotationPerformed)
+        XCTAssertEqual(gestures.setOrientationCalls, 1)
+    }
 }

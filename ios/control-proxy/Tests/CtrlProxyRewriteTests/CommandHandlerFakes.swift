@@ -57,6 +57,8 @@ final class RewriteFakeGesturePerformer: GesturePerforming {
     var setOrientationCalls = 0
     var onPressHome: (() -> Void)?
     var pressHomeError: CommandError?
+    var rotationSupported = true
+    private var displayLandscape = false
 
     var keyVerified: Bool?
 
@@ -111,10 +113,20 @@ final class RewriteFakeGesturePerformer: GesturePerforming {
         activateAccessibilityLinkCalls += 1
     }
 
-    func getScreenshot() throws -> Data { Data() }
+    func getScreenshot() throws -> Data {
+        var bytes = [UInt8](repeating: 0, count: 24)
+        bytes.replaceSubrange(0 ..< 8, with: [137, 80, 78, 71, 13, 10, 26, 10])
+        let width: UInt32 = displayLandscape ? 812 : 375
+        let height: UInt32 = displayLandscape ? 375 : 812
+        bytes.replaceSubrange(16 ..< 20, with: withUnsafeBytes(of: width.bigEndian) { Array($0) })
+        bytes.replaceSubrange(20 ..< 24, with: withUnsafeBytes(of: height.bigEndian) { Array($0) })
+        return Data(bytes)
+    }
+
     func setOrientation(_ orientation: String) throws {
         setOrientationCalls += 1
         self.orientation = orientation
+        if rotationSupported { displayLandscape = orientation.hasPrefix("landscape") }
     }
 
     func getOrientation() -> String { orientation }

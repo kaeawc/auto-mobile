@@ -14,32 +14,12 @@ const optionsOf = (s: boolean | undefined): TapOnElementOptions =>
   ({ sibling: s }) as unknown as TapOnElementOptions;
 
 describe("androidPreTapConsecutiveStableMatchesRequired (property-based)", () => {
-  test("returns only 1 or the strict count", () => {
+  test("always returns the strict count regardless of sibling", () => {
     fc.assert(
       fc.property(sibling, (s) => {
         const n = androidPreTapConsecutiveStableMatchesRequired(optionsOf(s));
-        return n === 1 || n === ANDROID_PRE_TAP_STABLE_MATCHES_STRICT;
+        return n === ANDROID_PRE_TAP_STABLE_MATCHES_STRICT;
       }),
-      RUN_OPTIONS,
-    );
-  });
-
-  test("requires the strict count iff sibling is exactly true", () => {
-    fc.assert(
-      fc.property(sibling, (s) => {
-        const n = androidPreTapConsecutiveStableMatchesRequired(optionsOf(s));
-        return n === (s === true ? ANDROID_PRE_TAP_STABLE_MATCHES_STRICT : 1);
-      }),
-      RUN_OPTIONS,
-    );
-  });
-
-  test("a non-sibling tap (false or absent) requires a single stable match", () => {
-    fc.assert(
-      fc.property(
-        fc.constantFrom<boolean | undefined>(false, undefined),
-        (s) => androidPreTapConsecutiveStableMatchesRequired(optionsOf(s)) === 1,
-      ),
       RUN_OPTIONS,
     );
   });

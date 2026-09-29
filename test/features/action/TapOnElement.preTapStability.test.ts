@@ -258,7 +258,7 @@ describe("focus intent through pre-tap stability", () => {
     const { result, tapped, editable, selectionIntents } =
       await executeFocusWithDuplicateEmail("preTapStability");
 
-    expect(selectionIntents).toEqual(["focus-input", "focus-input", "focus-input"]);
+    expect(selectionIntents).toEqual(["focus-input", "focus-input", "focus-input", "focus-input"]);
     expect(tapped).toEqual([editable]);
     expect(result.element).toBe(editable);
     expect(result.focusVerified).toBe(true);
@@ -269,7 +269,7 @@ describe("focus intent through pre-tap stability", () => {
     const { result, tapped, editable, selectionIntents } =
       await executeFocusWithDuplicateEmail("ensureTap");
 
-    expect(selectionIntents).toEqual(["focus-input", "focus-input", "focus-input"]);
+    expect(selectionIntents).toEqual(["focus-input", "focus-input", "focus-input", "focus-input"]);
     expect(tapped).toEqual([editable]);
     expect(result.element).toBe(editable);
     expect(result.focusVerified).toBe(true);
@@ -357,6 +357,89 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
 
     expect(result.ok).toBe(true);
     expect(successfulRefind(result).tapElement).toBe(el);
+  });
+
+  test("non-sibling waits for two matching samples after bounds move", async () => {
+    const { tap } = createTapOnElement();
+    const vh = makeHierarchy();
+    const first = makeElement(STABLE_BOUNDS);
+    const moved = makeElement(SHIFTED_BOUNDS);
+    const settled = makeElement(SHIFTED_BOUNDS);
+    const sequence = [first, moved, settled];
+    let refreshes = 0;
+    stubStabilityDeps(
+      tap,
+      sequence.map((element) => ({ hierarchy: vh, element })),
+    );
+    const refresh = tap.refreshViewHierarchy.bind(tap);
+    tap.refreshViewHierarchy = async (...args) => {
+      refreshes++;
+      return refresh(...args);
+    };
+
+    const result = await tap.resolveAndroidStableTapTargetAfterRefreshes(
+      { text: "Contact Name", action: "tap" },
+      { screenSize: { width: 1080, height: 1920 } },
+      "tap",
+      false,
+    );
+
+    expect(result.ok).toBe(true);
+    expect(successfulRefind(result).tapElement.bounds).toEqual(SHIFTED_BOUNDS);
+    expect(refreshes).toBe(3);
+    expect(successfulRefind(result).tapElement).toBe(settled);
+  });
+
+  test("non-sibling settles after the minimum two matching samples", async () => {
+    const { tap } = createTapOnElement();
+    const vh = makeHierarchy();
+    const first = makeElement(STABLE_BOUNDS);
+    const second = makeElement(STABLE_BOUNDS);
+    let refreshes = 0;
+    stubStabilityDeps(tap, [
+      { hierarchy: vh, element: first },
+      { hierarchy: vh, element: second },
+    ]);
+    const refresh = tap.refreshViewHierarchy.bind(tap);
+    tap.refreshViewHierarchy = async (...args) => {
+      refreshes++;
+      return refresh(...args);
+    };
+
+    const result = await tap.resolveAndroidStableTapTargetAfterRefreshes(
+      { text: "Contact Name", action: "tap" },
+      { screenSize: { width: 1080, height: 1920 } },
+      "tap",
+      false,
+    );
+
+    expect(result.ok).toBe(true);
+    expect(refreshes).toBe(2);
+    expect(successfulRefind(result).tapElement).toBe(second);
+  });
+
+  test("non-sibling fails when bounds never stabilize", async () => {
+    const { tap } = createTapOnElement();
+    const vh = makeHierarchy();
+    let idx = 0;
+    tap.refreshViewHierarchy = async () => vh;
+    tap.findElementInHierarchy = () => {
+      const element = makeElement({ left: idx * 20, top: 0, right: idx * 20 + 100, bottom: 50 });
+      idx++;
+      return { selection: makeSelection(element), containerFound: false };
+    };
+    tap.resolveTapTargetElement = (el: Element) => ({ element: el, usedParent: false });
+
+    const result = await tap.resolveAndroidStableTapTargetAfterRefreshes(
+      { text: "Row", action: "tap" },
+      { screenSize: { width: 1080, height: 1920 } },
+      "tap",
+      false,
+    );
+
+    expect(result.ok).toBe(false);
+    expect(failedRefind(result).error).toContain("could not re-find the target");
+    expect(failedRefind(result).error).toContain("with stable bounds after repeated refreshes");
   });
 
   test("returns ok after bounds converge within epsilon", async () => {
@@ -937,7 +1020,7 @@ describe("shared capture pre-tap resolution", () => {
         "tap",
         false,
       );
-      expect(policies).toEqual(["cached-ok", "fresh"]);
+      expect(policies).toEqual(changed ? ["cached-ok", "fresh"] : ["cached-ok", "fresh", "fresh"]);
       expect(result.ok).toBe(!changed);
       if (changed) {
         expect(failedRefind(result).error).toContain("Stale tap target");

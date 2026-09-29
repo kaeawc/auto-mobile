@@ -23,8 +23,9 @@ struct SimulatorOverlayTarget {
 enum SimulatorDisplayGeometry {
     static func targets() -> [SimulatorOverlayTarget] {
         let simulatorPIDs = Set(
-            NSRunningApplication
-                .runningApplications(withBundleIdentifier: simulatorBundleIdentifier).map(\.processIdentifier)
+            NSWorkspace.shared.runningApplications
+                .filter { isSimulatorWindow(bundleIdentifier: $0.bundleIdentifier) }
+                .map(\.processIdentifier)
         )
         let windows = CGWindowListCopyWindowInfo(
             [.optionOnScreenOnly, .excludeDesktopElements],
@@ -48,7 +49,7 @@ enum SimulatorDisplayGeometry {
         let matches = targets().filter { simulatorWindowTitle($0.title, namesDevice: deviceName) }
         guard matches.count == 1 else {
             throw OverlayError(
-                "Expected one visible Simulator window named \(deviceName), found \(matches.count). Open that Simulator and close duplicate windows."
+                "Expected one visible Simulator or Device Hub window named \(deviceName), found \(matches.count). Open that device window and close duplicate windows."
             )
         }
         return matches[0]

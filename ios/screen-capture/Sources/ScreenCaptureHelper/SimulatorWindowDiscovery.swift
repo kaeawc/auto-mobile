@@ -1,6 +1,6 @@
 import Foundation
-import ScreenCaptureKit
 import ScreenCaptureCore
+import ScreenCaptureKit
 
 /// Outcome of resolving a `CGWindowID` to a capturable window. `find` returns
 /// this instead of a bare `SCWindow?` so the caller can distinguish a recycled
@@ -21,7 +21,7 @@ enum SimulatorWindowDiscovery {
             onScreenWindowsOnly: true
         )
         return content.windows
-            .filter { $0.owningApplication?.bundleIdentifier == simulatorBundleIdentifier }
+            .filter { isSimulatorWindow(bundleIdentifier: $0.owningApplication?.bundleIdentifier) }
             .map(toInfo)
     }
 

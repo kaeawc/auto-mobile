@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import fc from "fast-check";
 import {
   DEFAULT_MCP_REQUEST_TIMEOUT_MS,
+  MAX_CALLER_MCP_REQUEST_TIMEOUT_MS,
   MIN_START_DEVICE_MCP_TIMEOUT_MS,
   START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
   resolveMcpRequestTimeoutMs,
@@ -37,7 +38,8 @@ function getAppleRequest(args: Record<string, unknown>, timeoutMs?: number): Dae
 
 // Independent re-derivation of the daemon's budget math, used as the oracle. A
 // value only counts toward the boot/automation sum when it is a finite positive
-// number; anything else falls back to the tool's default.
+// number; anything else falls back to the tool's default. A caller timeout is
+// capped at MAX_CALLER_MCP_REQUEST_TIMEOUT_MS before the floors apply (#6385).
 function positiveFinite(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
 }
@@ -51,7 +53,7 @@ function expectedNamedBudget(args: Record<string, unknown>): number {
 function expectedResolved(args: Record<string, unknown>, timeoutMs?: number): number {
   const base =
     typeof timeoutMs === "number" && Number.isFinite(timeoutMs) && timeoutMs > 0
-      ? timeoutMs
+      ? Math.min(timeoutMs, MAX_CALLER_MCP_REQUEST_TIMEOUT_MS)
       : DEFAULT_MCP_REQUEST_TIMEOUT_MS;
   return Math.max(base, MIN_START_DEVICE_MCP_TIMEOUT_MS, expectedNamedBudget(args));
 }

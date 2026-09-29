@@ -19,6 +19,8 @@ import {
   TAP_ANY_LONG_PRESS_MCP_TIMEOUT_HEADROOM_MS,
   TAP_ANY_LONG_PRESS_NON_PRESS_OVERHEAD_MS,
   MAX_SETTIMEOUT_DELAY_MS,
+  MAX_CALLER_MCP_REQUEST_TIMEOUT_MS,
+  clampCallerMcpRequestTimeoutMs,
   resolveMcpRequestTimeoutMs,
   ProgressExtendableDeadline,
   MAX_PROGRESS_EXTENDED_MCP_REQUEST_TIMEOUT_MS,
@@ -433,6 +435,41 @@ describe("resolveMcpRequestTimeoutMs", () => {
     expect(DEFAULT_OBSERVE_MCP_TIMEOUT_MS).toBeGreaterThan(DEFAULT_MCP_REQUEST_TIMEOUT_MS);
     expect(DEFAULT_OPEN_LINK_MCP_TIMEOUT_MS).toBeGreaterThan(DEFAULT_MCP_REQUEST_TIMEOUT_MS);
     expect(MIN_CRASH_APP_MCP_TIMEOUT_MS).toBeGreaterThan(DEFAULT_MCP_REQUEST_TIMEOUT_MS);
+  });
+
+  // Issue #6385: clients now send their own deadline; the daemon honours it
+  // with a sane upper clamp so a runaway value cannot pin a request forever.
+  test("honours a caller timeoutMs above the default", () => {
+    const request: DaemonRequest = {
+      id: "1",
+      type: "mcp_request",
+      method: "tools/call",
+      params: { name: "tapOn", arguments: {} },
+      timeoutMs: 120_000,
+    };
+    expect(resolveMcpRequestTimeoutMs(request)).toBe(120_000);
+  });
+
+  test("clamps an oversized caller timeoutMs to MAX_CALLER_MCP_REQUEST_TIMEOUT_MS", () => {
+    const request: DaemonRequest = {
+      id: "1",
+      type: "mcp_request",
+      method: "tools/call",
+      params: { name: "tapOn", arguments: {} },
+      timeoutMs: Number.MAX_SAFE_INTEGER,
+    };
+    expect(resolveMcpRequestTimeoutMs(request)).toBe(MAX_CALLER_MCP_REQUEST_TIMEOUT_MS);
+    expect(MAX_CALLER_MCP_REQUEST_TIMEOUT_MS).toBeLessThan(MAX_SETTIMEOUT_DELAY_MS);
+  });
+
+  test("clampCallerMcpRequestTimeoutMs rejects missing, non-finite and non-positive values", () => {
+    expect(clampCallerMcpRequestTimeoutMs(undefined)).toBeUndefined();
+    expect(clampCallerMcpRequestTimeoutMs("5000")).toBeUndefined();
+    expect(clampCallerMcpRequestTimeoutMs(Number.NaN)).toBeUndefined();
+    expect(clampCallerMcpRequestTimeoutMs(Number.POSITIVE_INFINITY)).toBeUndefined();
+    expect(clampCallerMcpRequestTimeoutMs(0)).toBeUndefined();
+    expect(clampCallerMcpRequestTimeoutMs(-1)).toBeUndefined();
+    expect(clampCallerMcpRequestTimeoutMs(250)).toBe(250);
   });
 
   test("videoRecording preserves the compatibility floor", () => {

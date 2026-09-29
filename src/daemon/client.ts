@@ -28,7 +28,11 @@ import {
 } from "./constants";
 import { isDaemonShuttingDownFailure } from "./daemonShutdownOutcome";
 import { type BuildIdentity, getCurrentBuildIdentity } from "./buildIdentity";
-import { resolveMcpRequestTimeoutMs, ProgressExtendableDeadline } from "./mcpRequestTimeout";
+import {
+  clampCallerMcpRequestTimeoutMs,
+  resolveMcpRequestTimeoutMs,
+  ProgressExtendableDeadline,
+} from "./mcpRequestTimeout";
 import { McpOverloadError, McpTimeoutError, sanitizeMcpOverloadFailure } from "./McpTimeoutError";
 import { DaemonDisconnectError } from "./DaemonDisconnectError";
 import { type Timer, defaultTimer } from "../utils/SystemTimer";
@@ -1006,7 +1010,17 @@ export class DaemonClient {
       ...this.handshakeFields(),
     };
 
-    const requestTimeoutMs = Math.max(resolveMcpRequestTimeoutMs(request), this.connectionTimeout);
+    // Only the client's own configured timeout is clamped; server-derived
+    // per-tool floors (already in resolveMcpRequestTimeoutMs) may exceed the cap.
+    const requestTimeoutMs = Math.max(
+      resolveMcpRequestTimeoutMs(request),
+      clampCallerMcpRequestTimeoutMs(this.connectionTimeout) ?? 0,
+    );
+    // Send the deadline this client will actually wait (#6385). Without it the
+    // daemon fell back to its 30s default and aborted calls the client was still
+    // prepared to wait for (the client's default is 120s). The daemon applies
+    // the same clamp and floors, so both sides resolve the same deadline.
+    request.timeoutMs = requestTimeoutMs;
     const toolName = method === "tools/call" ? (params?.name ?? method) : method;
     const disconnectCause = new DaemonDisconnectError({
       toolName,

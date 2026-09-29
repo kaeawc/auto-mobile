@@ -610,6 +610,7 @@ class McpDaemonClient(
           method = method,
           params = buildJsonObject(params),
           clientVersion = clientVersion,
+          timeoutMs = inputRequestTimeoutMs,
         )
       val expired = java.util.concurrent.atomic.AtomicBoolean(false)
       val watchdog =
@@ -970,6 +971,10 @@ class McpDaemonClient(
    * see src/daemon/mcpRequestTimeout.ts) and a blanket client ceiling would disconnect a valid slow
    * call while it is still running. Only the input helpers pass a value, where a hang freezes the
    * video pane's single dispatch thread.
+   *
+   * When set, the same deadline is sent as `DaemonRequest.timeoutMs` (#6385) so the daemon abandons
+   * the request when this client gives up, instead of running on to its 30s default. When null the
+   * field is omitted and the daemon applies its default plus per-tool floors.
    */
   private fun sendRequest(
     method: String,
@@ -1028,6 +1033,7 @@ class McpDaemonClient(
             method = method,
             params = params,
             clientVersion = clientVersion,
+            timeoutMs = timeoutMs,
           )
 
         writer.write(json.encodeToString(request))
@@ -1225,6 +1231,8 @@ internal data class DaemonRequest(
   val method: String,
   val params: JsonObject,
   val clientVersion: String? = null,
+  /** Caller's deadline in ms; omitted (explicitNulls = false) when the call is unbounded. */
+  val timeoutMs: Long? = null,
 )
 
 @Serializable

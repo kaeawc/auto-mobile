@@ -246,6 +246,34 @@ class McpDaemonClientInputTest {
   }
 
   @Test
+  fun `bounded requests send their deadline as timeoutMs and unbounded tool calls omit it`() {
+    TestDaemonSocket(
+        responses =
+          listOf(
+            SocketResponse("""{ "action": "input/tap", "success": true }"""),
+            SocketResponse("""{ "content": [] }"""),
+          )
+      )
+      .use { server ->
+        val client =
+          McpDaemonClient(
+            socketPathValue = server.socketPath.toString(),
+            inputRequestTimeoutMs = 1_234,
+          )
+
+        client.inputTap(x = 1.0, y = 2.0)
+        client.callTool("observe", JsonObject(emptyMap()))
+
+        val requests = server.awaitRequests()
+        // #6385: the daemon must abandon an input request when the client's hang ceiling fires,
+        // not run on to its 30s default.
+        assertEquals(1_234L, requests[0].timeoutMs)
+        // Ordinary tool calls are unbounded client-side, so the daemon's per-tool floors apply.
+        assertNull(requests[1].timeoutMs)
+      }
+  }
+
+  @Test
   fun `inputTap serializes to input tap socket request`() {
     val responseResult =
       """
@@ -792,6 +820,7 @@ class McpDaemonClientInputTest {
                 method = request.getValue("method").jsonPrimitive.content,
                 params = request.getValue("params").jsonObject,
                 clientVersion = request["clientVersion"]?.jsonPrimitive?.content,
+                timeoutMs = request["timeoutMs"]?.jsonPrimitive?.content?.toLong(),
               )
             )
             writer.write(responseLine(request.getValue("id").jsonPrimitive.content, response))
@@ -864,4 +893,5 @@ private data class CapturedDaemonRequest(
   val method: String,
   val params: JsonObject,
   val clientVersion: String?,
+  val timeoutMs: Long? = null,
 )

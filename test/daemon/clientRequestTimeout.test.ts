@@ -5,6 +5,8 @@ import { McpTimeoutError } from "../../src/daemon/McpTimeoutError";
 import { DaemonDisconnectError } from "../../src/daemon/DaemonDisconnectError";
 import {
   DEFAULT_MCP_REQUEST_TIMEOUT_MS,
+  MAX_CALLER_MCP_REQUEST_TIMEOUT_MS,
+  MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS,
   MIN_UNINSTALL_APP_MCP_TIMEOUT_MS,
   MAX_PROGRESS_EXTENDED_MCP_REQUEST_TIMEOUT_MS,
 } from "../../src/daemon/mcpRequestTimeout";
@@ -33,6 +35,7 @@ function createConnectedClient(fakeTimer: FakeTimer, connectionTimeout = 1000): 
 function createDeferredConnectClient(
   fakeTimer: FakeTimer,
   onConnected?: () => void,
+  connectionTimeout = 1000,
 ): {
   client: DaemonClient;
   connectStarted: Promise<void>;
@@ -57,7 +60,7 @@ function createDeferredConnectClient(
       callback();
     },
   });
-  const client = new DaemonClient("/fake/socket", 1000, fakeTimer);
+  const client = new DaemonClient("/fake/socket", connectionTimeout, fakeTimer);
   client.connect = async (timeoutMs = 1000) => {
     connectTimeouts.push(timeoutMs);
     markConnectStarted();
@@ -182,6 +185,46 @@ describe("DaemonClient per-request timeout", () => {
     } finally {
       await client.close();
     }
+  });
+
+  // Issue #6385: the daemon used to fall back to its 30s default because
+  // sendRequest never put timeoutMs on the wire.
+  async function sendToolAndCaptureTimeout(
+    connectionTimeout: number,
+    toolName: string,
+  ): Promise<{ wireTimeoutMs: unknown; pendingTimeouts: number[] }> {
+    const harness = createDeferredConnectClient(fakeTimer, undefined, connectionTimeout);
+    const promise = harness.client.callTool(toolName, {}).catch(() => {});
+    await harness.connectStarted;
+    harness.releaseConnect();
+    await new Promise((resolve) => setImmediate(resolve));
+    const result = {
+      wireTimeoutMs: harness.requests[0]?.timeoutMs,
+      pendingTimeouts: fakeTimer.getPendingTimeouts(),
+    };
+    await harness.client.close();
+    await promise;
+    return result;
+  }
+
+  test("sendRequest sends the client's own timeout to the daemon", async () => {
+    const { wireTimeoutMs, pendingTimeouts } = await sendToolAndCaptureTimeout(120_000, "tapOn");
+    expect(wireTimeoutMs).toBe(120_000);
+    expect(pendingTimeouts).toEqual([120_000]);
+  });
+
+  test("sendRequest sends a per-tool floor that exceeds the client timeout", async () => {
+    const { wireTimeoutMs } = await sendToolAndCaptureTimeout(120_000, "executePlan");
+    expect(wireTimeoutMs).toBe(MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS);
+  });
+
+  test("sendRequest clamps an oversized client timeout before sending it", async () => {
+    const { wireTimeoutMs, pendingTimeouts } = await sendToolAndCaptureTimeout(
+      MAX_CALLER_MCP_REQUEST_TIMEOUT_MS * 10,
+      "tapOn",
+    );
+    expect(wireTimeoutMs).toBe(MAX_CALLER_MCP_REQUEST_TIMEOUT_MS);
+    expect(pendingTimeouts).toEqual([MAX_CALLER_MCP_REQUEST_TIMEOUT_MS]);
   });
 
   test("callDaemonMethod bounds deferred connect and request to one timeout", async () => {

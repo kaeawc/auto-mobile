@@ -10,6 +10,7 @@ import {
 import { timingSafeEqual } from "node:crypto";
 import { ActionableError } from "../models";
 import { formatToolParamError } from "./toolParamError";
+import { stripUndeclaredSessionUuid } from "../utils/toolParams";
 import { reviveNonFiniteArguments } from "../utils/nonFiniteJson";
 import { stringifyToolResponse } from "../utils/toolUtils";
 import { logger } from "../utils/logger";
@@ -1131,7 +1132,10 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
 
     // Parse and validate the parameters
     let parsedParams;
-    const strippedToolParams = stripInternalToolParams(toolParams);
+    const strippedToolParams = stripUndeclaredSessionUuid(
+      stripInternalToolParams(toolParams),
+      tool.schema,
+    );
     try {
       parsedParams = tool.schema.parse(strippedToolParams);
     } catch (error) {

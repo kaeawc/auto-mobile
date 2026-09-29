@@ -4,6 +4,7 @@ import {
   DaemonBoundSessionLostError,
   DaemonClient,
   DaemonHandshakeMismatchError,
+  DaemonRequestNotDeliveredError,
   DaemonShuttingDownError,
   DaemonUnavailableError,
   type DaemonClientLike,
@@ -67,7 +68,8 @@ import {
   describeBuildIdentity,
   getCurrentBuildIdentity,
 } from "./buildIdentity";
-import { DeviceControlTransportError } from "./deviceControlTransportFailure";
+import { ActionableError } from "../models";
+import { DeviceControlTransportError, isReplaySafeToolName } from "./deviceControlTransportFailure";
 import { McpOverloadError } from "./McpTimeoutError";
 import {
   getConnectedStaticToolDefinitions,
@@ -109,6 +111,41 @@ class DaemonPreflightConnectionError extends DaemonUnavailableError {
     super(cause.message);
     this.name = "DaemonPreflightConnectionError";
   }
+}
+
+/**
+ * A non-idempotent `tools/call` failed without structured proof that the daemon
+ * never dispatched it (e.g. the connection closed after the request frame was
+ * written), so it may already have run on the device. Replaying it could repeat
+ * the action (issues #6382, #6383), so the outcome is surfaced instead.
+ */
+export class DaemonToolOutcomeUnknownError extends ActionableError {
+  constructor(
+    readonly toolName: string,
+    cause: unknown,
+  ) {
+    super(
+      `The daemon request for ${toolName} failed after it may have been delivered, so it may ` +
+        `or may not have run on the device (${errorMessage(cause)}). It was not retried ` +
+        "automatically to avoid repeating a device action; observe the device state before retrying.",
+      { cause },
+    );
+    this.name = "DaemonToolOutcomeUnknownError";
+  }
+}
+
+/** The tool name when replaying it could repeat a device action, else undefined. */
+function nonIdempotentToolName(name: string): string | undefined {
+  return isReplaySafeToolName(name) || isDeviceInventoryTool(name) ? undefined : name;
+}
+
+/** Failures that give no evidence the forwarded session is still live and admitted. */
+function isUnprovenSessionAdmissionError(error: unknown): boolean {
+  return (
+    error instanceof DaemonBoundSessionExpiredError ||
+    error instanceof DaemonBoundSessionLostError ||
+    error instanceof DaemonToolOutcomeUnknownError
+  );
 }
 
 async function runPreflightTransport<T>(operation: () => Promise<T>): Promise<T> {
@@ -1973,6 +2010,7 @@ export class DaemonMcpProxy {
     attemptedSessionUuid?: string,
     allowReleasedSession?: boolean,
     fenceSessionNotFoundOnRetry = true,
+    nonIdempotentToolName?: string,
   ): Promise<T> {
     if (this.closing) {
       throw new DaemonUnavailableError("MCP proxy is closing");
@@ -2001,23 +2039,20 @@ export class DaemonMcpProxy {
         throw error;
       }
       this.throwIfBoundSessionFenced(allowReleasedSession);
-      if (error instanceof DaemonBoundSessionLostError) {
-        if (error.failure.sessionUuid !== this.boundSessionUuid) {
-          throw new DaemonBoundSessionExpiredError(
-            error.failure.sessionUuid,
-            error.failure.reason,
-            error.failure.release,
-          );
-        }
-        this.fenceBoundSessionUuid(
-          error.failure.sessionUuid,
-          error.failure.reason,
-          error.failure.release,
-        );
-        throw this.boundSessionExpiredError();
-      }
+      this.throwIfBoundSessionLost(error);
       if (!this.isRecoverableDaemonSessionError(error, established)) {
         throw error;
+      }
+      const refusedToolName = this.ambiguousReplayToolName(
+        error,
+        established,
+        nonIdempotentToolName,
+      );
+      if (refusedToolName !== undefined) {
+        // The tool may have reached the daemon and run. Reset the dead transport
+        // for the next call, but never re-run this one (issue #6382).
+        await this.resetConnection();
+        throw new DaemonToolOutcomeUnknownError(refusedToolName, error);
       }
 
       logger.warn(
@@ -2089,6 +2124,55 @@ export class DaemonMcpProxy {
     // "Unknown tool" is recoverable only when the frontend advertises that tool.
     // A reconnect cannot make a frontend-unregistered name exist in the daemon.
     return this.isDaemonSessionNotFoundError(error) || this.isRecoverableUnknownToolError(error);
+  }
+
+  private throwIfBoundSessionLost(error: unknown): void {
+    if (!(error instanceof DaemonBoundSessionLostError)) {
+      return;
+    }
+    if (error.failure.sessionUuid !== this.boundSessionUuid) {
+      throw new DaemonBoundSessionExpiredError(
+        error.failure.sessionUuid,
+        error.failure.reason,
+        error.failure.release,
+      );
+    }
+    this.fenceBoundSessionUuid(
+      error.failure.sessionUuid,
+      error.failure.reason,
+      error.failure.release,
+    );
+    throw this.boundSessionExpiredError();
+  }
+
+  /**
+   * The non-idempotent tool whose replay must be refused because nothing proves
+   * the failed attempt never dispatched it; undefined when a replay is safe.
+   * Before establishment the operation never ran, so a replay is always safe.
+   */
+  private ambiguousReplayToolName(
+    error: unknown,
+    established: boolean,
+    nonIdempotentToolName: string | undefined,
+  ): string | undefined {
+    if (!established || this.isProvablyUndispatchedError(error)) {
+      return undefined;
+    }
+    return nonIdempotentToolName;
+  }
+
+  /**
+   * Structured evidence that the daemon never dispatched the request: the frame
+   * was never written, or the daemon rejected it before admission. Message
+   * substrings (e.g. "Session not found") are deliberately not evidence here.
+   */
+  private isProvablyUndispatchedError(error: unknown): boolean {
+    return (
+      error instanceof DaemonRequestNotDeliveredError ||
+      error instanceof DaemonShuttingDownError ||
+      error instanceof DaemonHandshakeMismatchError ||
+      this.isRecoverableUnknownToolError(error)
+    );
   }
 
   private isDaemonSessionNotFoundError(error: unknown): boolean {
@@ -2503,6 +2587,8 @@ export class DaemonMcpProxy {
         // Acquisition is admitted while fenced; the terminal fence is cleared once
         // the result-minted session establishes a fresh binding.
         allowReleasedSession,
+        true,
+        nonIdempotentToolName(name),
       );
       if (result?.isError) {
         // Provisioning retains its usable device session when optional resource
@@ -3461,8 +3547,7 @@ export class DaemonMcpProxy {
       name === "setActiveDevice" ||
       name === SET_TOOL_ENABLED_TOOL_NAME ||
       isDeviceInventoryTool(name) ||
-      error instanceof DaemonBoundSessionExpiredError ||
-      error instanceof DaemonBoundSessionLostError ||
+      isUnprovenSessionAdmissionError(error) ||
       this.isRecoverableDaemonSessionError(error) ||
       this.isPreDispatchDaemonSessionError(error) ||
       this.shouldSkipLeaseRefreshForDeviceControlTransportError(error)

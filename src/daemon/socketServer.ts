@@ -7,6 +7,7 @@ import { ensureSecureDir, secureFile } from "../utils/filesystem/securePermissio
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import {
   StreamableHTTPClientTransport,
+  StreamableHTTPError,
   type StreamableHTTPReconnectionOptions,
 } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { logger } from "../utils/logger";
@@ -238,6 +239,17 @@ const DAEMON_REQUEST_HANDLER_DRAIN_TIMEOUT_MS = 1_000;
 /** Keep shutdown bounded if a client cannot flush a release notification. */
 const DAEMON_NOTIFICATION_WRITE_DRAIN_TIMEOUT_MS = 1_000;
 
+/**
+ * The loopback MCP HTTP server answers an unknown `mcp-session-id` with 404
+ * before the request reaches any handler, so the forward provably never ran and
+ * a replay on a fresh client cannot repeat a device action. Match the SDK's
+ * structured status code rather than the shared "Session not found" wording,
+ * which other lifecycles also use (issue #6383).
+ */
+function isExpiredLoopbackMcpSession(error: unknown): boolean {
+  return error instanceof StreamableHTTPError && error.code === 404;
+}
+
 class ReleasedBoundSessionError extends Error {
   constructor(readonly failure: BoundSessionLoss) {
     super(
@@ -405,7 +417,7 @@ function resolveSocketBindGuard(
  * The SDK's Streamable HTTP client may auto-reopen a standalone GET (SSE) after a disconnect.
  * The server transport allows only one such stream per session; a second GET while the first
  * is still mapped returns 409 and tears down the session. We disable that auto-reconnect here;
- * stale sessions are recovered via `getMcpClient()` + "Session not found" retry.
+ * stale sessions are recovered via `getMcpClient()` + the loopback 404 retry.
  */
 /** Matches SDK defaults except `maxRetries`, which must stay 0 to avoid duplicate GET SSE. */
 const DAEMON_LOOPBACK_STREAMABLE_HTTP_RECONNECTION: StreamableHTTPReconnectionOptions = {
@@ -2213,8 +2225,7 @@ export class UnixSocketServer {
       if (error instanceof ReleasedBoundSessionError) {
         throw error;
       }
-      const message = errorMessage(error);
-      if (message.includes("Session not found")) {
+      if (isExpiredLoopbackMcpSession(error)) {
         return this.retryExpiredMcpSession(context, identity, mcpClient);
       }
       if (this.isDeviceControlSocketClosure(context.request, error)) {

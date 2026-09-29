@@ -6,10 +6,12 @@ import {
   DaemonRestartDeferredError,
   DaemonToolUnavailableError,
   DaemonBoundSessionExpiredError,
+  DaemonToolOutcomeUnknownError,
 } from "../../src/daemon/daemonMcpProxy";
 import {
   DaemonBoundSessionLostError,
   DaemonClient,
+  DaemonRequestNotDeliveredError,
   DaemonShuttingDownError,
   DaemonUnavailableError,
   type DaemonClientLike,
@@ -3163,6 +3165,87 @@ describe("DaemonMcpProxy", () => {
       }
     });
 
+    test("does not replay a mutating tool whose connection was lost mid-flight (#6382)", async () => {
+      const staleClient = new ScriptedDaemonClient({
+        toolError: new DaemonUnavailableError("Daemon socket connection lost: connection closed"),
+      });
+      const freshClient = new ScriptedDaemonClient({});
+      const clients = [staleClient, freshClient];
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => clients.shift()!,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        const call = proxy.callTool("tapOn", { text: "Submit" });
+        await expect(call).rejects.toBeInstanceOf(DaemonToolOutcomeUnknownError);
+        await expect(call).rejects.toThrow(/tapOn.*may or may not have run/);
+
+        // Forwarded exactly once; the dead transport is still reset.
+        expect(staleClient.callToolCalls).toEqual([
+          { toolName: "tapOn", params: { text: "Submit" } },
+        ]);
+        expect(staleClient.closeCallCount).toBe(1);
+        expect(freshClient.callToolCalls).toEqual([]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("does not replay a mutating tool on a message-only 'Session not found' (#6383)", async () => {
+      const staleClient = new ScriptedDaemonClient({
+        toolError: new Error("Session not found"),
+      });
+      const freshClient = new ScriptedDaemonClient({});
+      const clients = [staleClient, freshClient];
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => clients.shift()!,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        await expect(proxy.callTool("inputText", { text: "abc" })).rejects.toBeInstanceOf(
+          DaemonToolOutcomeUnknownError,
+        );
+        expect(staleClient.callToolCalls).toHaveLength(1);
+        expect(freshClient.callToolCalls).toEqual([]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("replays a mutating tool whose request frame was never written (#6382)", async () => {
+      const staleClient = new ScriptedDaemonClient({
+        toolError: new DaemonRequestNotDeliveredError("Socket connection lost"),
+      });
+      const recoveredResult = { content: [{ type: "text", text: "tapped" }] };
+      const freshClient = new ScriptedDaemonClient({ toolResult: recoveredResult });
+      const clients = [staleClient, freshClient];
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => clients.shift()!,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        await expect(proxy.callTool("tapOn", { text: "Submit" })).resolves.toEqual(recoveredResult);
+        expect(staleClient.closeCallCount).toBe(1);
+        expect(freshClient.callToolCalls).toEqual([
+          { toolName: "tapOn", params: { text: "Submit" } },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
     test("replays a successful session binding on later sessionless calls after reconnect", async () => {
       const staleClient = new ScriptedDaemonClient({
         toolResult: { content: [{ type: "text", text: "bound" }] },
@@ -3173,7 +3256,7 @@ describe("DaemonMcpProxy", () => {
           const recordedParams = { ...params };
           delete recordedParams.__autoMobileBoundSessionUuid;
           staleClient.callToolCalls.push({ toolName, params: recordedParams });
-          throw new DaemonUnavailableError("Daemon socket connection lost: connection closed");
+          throw new DaemonRequestNotDeliveredError("Socket connection lost");
         }
         return await originalCallTool(toolName, params);
       };
@@ -3722,7 +3805,9 @@ describe("DaemonMcpProxy", () => {
       try {
         await proxy.callTool("observe", { sessionUuid: "session-a" });
         timer.advanceTime(DAEMON_BOUND_SESSION_REPLAY_TTL_MS - 1);
-        await expect(proxy.callTool("tapOn", {})).rejects.toBeInstanceOf(DaemonUnavailableError);
+        await expect(proxy.callTool("tapOn", {})).rejects.toBeInstanceOf(
+          DaemonToolOutcomeUnknownError,
+        );
         timer.advanceTime(DAEMON_BOUND_SESSION_REPLAY_TTL_MS - 1);
         await proxy.callTool("observe", {});
 

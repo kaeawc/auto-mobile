@@ -19,6 +19,7 @@ async function executeAt(
   platform: "android" | "ios" = "android",
   sameRoot = false,
   fixture?: ViewHierarchyResult,
+  anonymous = false,
 ) {
   const hierarchy = fixture ?? imeOcclusionHierarchy(withIme);
   const keyboard = hierarchy.windows?.[0]?.hierarchy.node;
@@ -42,6 +43,11 @@ async function executeAt(
   const element = new DefaultElementParser().parseNodeBounds(source);
   if (!element) {
     throw new Error(`Invalid fixture bounds for ${label}`);
+  }
+  if (anonymous) {
+    delete element.text;
+    delete element["content-desc"];
+    delete element["resource-id"];
   }
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
@@ -116,6 +122,20 @@ describe("tapOn Android IME occlusion", () => {
     expect(points).toEqual([]);
     expect(result.success).toBe(false);
     expect(result.error).toContain("covered by the soft keyboard");
+  });
+
+  test("uses the caller text selector when the matched element has no label", async () => {
+    const { result, points } = await executeAt(
+      "Continue as Guest",
+      true,
+      "android",
+      false,
+      undefined,
+      true,
+    );
+    expect(points).toEqual([]);
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('"Continue as Guest"');
   });
 
   test("also protects an app sibling when the IME subtree shares its root group", async () => {

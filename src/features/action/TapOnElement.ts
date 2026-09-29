@@ -477,6 +477,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
   private resolveImeSafeTapPoint(
     element: Element,
     hierarchy: ViewHierarchyResult,
+    options: TapOnElementOptions,
   ): { x: number; y: number } {
     if (this.device.platform !== "android") {
       return this.resolveTapPoint(element);
@@ -491,9 +492,17 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     if (point) {
       return point;
     }
-    const label = element.text ?? element["content-desc"] ?? element["resource-id"] ?? "element";
+    const elementLabel = element.text ?? element["content-desc"] ?? element["resource-id"];
+    const focusTarget = this.describeFocusTarget(element, options);
+    const selectorLabel =
+      focusTarget !== "the matched element"
+        ? focusTarget
+        : JSON.stringify(
+            options.elementId ?? options.testTag ?? options.accessibilityLink ?? "element",
+          );
+    const label = JSON.stringify(elementLabel) ?? selectorLabel;
     throw new ActionableError(
-      `Target "${label}" is covered by the soft keyboard; dismiss the keyboard first.`,
+      `Target ${label} is covered by the soft keyboard; dismiss the keyboard first.`,
     );
   }
 
@@ -2558,7 +2567,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           }
 
           this.logClickableParentSelection(usedParent);
-          const tapPoint = this.resolveImeSafeTapPoint(tapElement, viewHierarchy);
+          const tapPoint = this.resolveImeSafeTapPoint(tapElement, viewHierarchy, options);
           const tapBounds = tapElement.bounds;
           logger.info(
             `[TapOnElement] Tapping (${tapPoint.x}, ${tapPoint.y}) on element: ` +
@@ -2960,7 +2969,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     if (!retryTarget) {
       return;
     }
-    const retryPoint = this.resolveImeSafeTapPoint(retryTarget, probe.hierarchy);
+    const retryPoint = this.resolveImeSafeTapPoint(retryTarget, probe.hierarchy, options);
 
     logger.warn(
       `[TapOnElement][retryIfNoChange] Hierarchy unchanged after tap at ` +

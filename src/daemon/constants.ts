@@ -420,17 +420,6 @@ export const DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD = "daemon/subscribe-notificat
 export const DAEMON_HEARTBEAT_METHOD = "daemon/heartbeat";
 
 /**
- * Client-to-daemon cancellation frame (issue #6384). Sent by `DaemonClient`
- * when it abandons a request (its own timeout or an abort) with
- * `params.requestId` naming the abandoned request on the same socket. Like
- * {@link DAEMON_HEARTBEAT_METHOD} it is answered out-of-band, ahead of the
- * per-socket FIFO: queued behind the request it cancels it could never act.
- * The daemon skips the request if it has not started, or aborts it and frees
- * the socket queue if it is in flight.
- */
-export const DAEMON_CANCEL_REQUEST_METHOD = "daemon/cancelRequest";
-
-/**
  * Optional `daemon/heartbeat` parameter value declaring that the heartbeating
  * client is a one-shot `--cli` process (issue #6870).
  *

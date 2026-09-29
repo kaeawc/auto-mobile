@@ -20,10 +20,14 @@ import { createTestDatabase } from "../../db/testDbHelper";
 describe("MCP Navigation Graph Resource", () => {
   let fixture: McpTestFixture;
   let fakeGraph: FakeNavigationGraphManager;
+  let sessionDb: Awaited<ReturnType<typeof createTestDatabase>>;
 
   beforeAll(async () => {
     fixture = new McpTestFixture();
     await fixture.setup();
+    // The migration template is process-local, so an isolated timing recheck
+    // would otherwise charge its first creation to the one test that needs a DB.
+    sessionDb = await createTestDatabase();
   });
 
   beforeEach(() => {
@@ -39,6 +43,9 @@ describe("MCP Navigation Graph Resource", () => {
   afterAll(async () => {
     if (fixture) {
       await fixture.teardown();
+    }
+    if (sessionDb) {
+      await sessionDb.destroy();
     }
   });
 
@@ -151,7 +158,6 @@ describe("MCP Navigation Graph Resource", () => {
 
   test("unscoped graph resource resolves the sole daemon session manager", async () => {
     setNavigationGraphProvider(null);
-    const db = await createTestDatabase();
     const sessionId = "resource-session";
     const sessionManager = {
       getAllSessions: () => [{ sessionId }],
@@ -161,8 +167,8 @@ describe("MCP Navigation Graph Resource", () => {
       bumpDeviceIncarnation: () => 0,
     };
     const sessionGraph = NavigationGraphManager.createForTesting(
-      new NavigationRepository(db),
-      new TestCoverageRepository(undefined, db),
+      new NavigationRepository(sessionDb),
+      new TestCoverageRepository(undefined, sessionDb),
       undefined,
       sessionId,
     );
@@ -199,7 +205,6 @@ describe("MCP Navigation Graph Resource", () => {
     } finally {
       DaemonState.getInstance().reset();
       NavigationGraphManager.resetInstance();
-      await db.destroy();
       setNavigationGraphProvider(fakeGraph);
     }
   });

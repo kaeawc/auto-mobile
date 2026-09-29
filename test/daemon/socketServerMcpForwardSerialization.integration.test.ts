@@ -832,6 +832,9 @@ describe("UnixSocketServer MCP forward serialization", () => {
         name: "tapOn",
         arguments: { deviceId: "device-1" },
       });
+      // If the second request fails, keep the held first request's watchdog
+      // rejection from escaping before cleanup can release it.
+      void first.catch(() => {});
       await firstCallStarted.promise;
       const other = client.request(
         "tools/call",
@@ -840,12 +843,22 @@ describe("UnixSocketServer MCP forward serialization", () => {
       );
       // The device-2 call starts on receipt, so its budget is measured from its
       // own start, not from how long device-1 keeps the socket busy.
-      await expect(other).resolves.toMatchObject({ success: true });
+      try {
+        expect(await other).toMatchObject({ success: true });
+      } catch (error) {
+        throw new Error(
+          `Device-2 forward failed; callTool entered for [${calledDevices.join(", ")}]`,
+          {
+            cause: error,
+          },
+        );
+      }
       fakeTimer.advanceTime(501);
       releaseFirstCall.resolve();
       await expect(first).resolves.toMatchObject({ success: true });
       expect(calledDevices).toEqual(["device-1", "device-2"]);
     } finally {
+      releaseFirstCall.resolve();
       client.close();
     }
   });

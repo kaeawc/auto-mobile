@@ -94,6 +94,7 @@ let adbPathCaches = new WeakMap<ExecFileAsync, TTLCache<string, string>>();
 
 const DEVICE_LIST_CACHE_TTL_MS = 5000; // 5 seconds
 const ADB_PATH_CACHE_TTL_MS = 60000; // 1 minute - ADB path rarely changes
+const MACOS_MISSING_ADB_PROBE_COOLDOWN_MS = 30000;
 
 function getDeviceListCache(timer: Timer): TTLCache<string, BootedDevice[]> {
   if (!deviceListCache) {
@@ -116,6 +117,7 @@ export function resetAdbClientCaches(): void {
   deviceListSingleFlight = new SingleFlight();
   deviceListPublishedGeneration = ++deviceListGeneration;
   adbPathCaches = new WeakMap();
+  AdbClient.resetMissingAdbProbeState();
 }
 
 export function resetAdbDeviceListCache(): void {
@@ -174,6 +176,7 @@ export class AdbClient implements AdbExecutor {
   private static readonly ADB_RETRY_BACKOFF = sequenceBackoff([200, 500, 1000]);
   private static readonly MAX_MACOS_MISSING_ADB_PROBES = 3;
   private static macosMissingAdbProbes = 0;
+  private static macosMissingAdbProbeStartedAt: number | null = null;
 
   /**
    * Create an AdbClient instance
@@ -499,7 +502,14 @@ export class AdbClient implements AdbExecutor {
 
     // Detect and cache the path
     const detectedPath = await this.getAdbPath(timeoutMs, signal);
-    cache.set("adbPath", detectedPath);
+    if (detectedPath === "adb") {
+      // The bare command is only a guess. Let the next request retry discovery
+      // instead of treating this fallback as a resolved path for one minute.
+      cache.delete("adbPath");
+    } else {
+      cache.set("adbPath", detectedPath);
+      AdbClient.resetMissingAdbProbeState();
+    }
     this.adbPath = detectedPath;
     return this.adbPath;
   }
@@ -584,6 +594,7 @@ export class AdbClient implements AdbExecutor {
       beforeDispatch,
       waitForProcessSettlementAfterAbort,
     );
+    AdbClient.resetMissingAdbProbeState();
     const duration = this.timer.now() - startTime;
     const command = args.join(" ");
 
@@ -975,10 +986,18 @@ export class AdbClient implements AdbExecutor {
     if (this.isTestMode) {
       return false;
     }
-    return (
-      process.platform === "darwin" &&
-      AdbClient.macosMissingAdbProbes >= AdbClient.MAX_MACOS_MISSING_ADB_PROBES
-    );
+    if (
+      process.platform !== "darwin" ||
+      AdbClient.macosMissingAdbProbes < AdbClient.MAX_MACOS_MISSING_ADB_PROBES
+    ) {
+      return false;
+    }
+    const skippedAt = AdbClient.macosMissingAdbProbeStartedAt;
+    if (skippedAt !== null && this.timer.now() - skippedAt >= MACOS_MISSING_ADB_PROBE_COOLDOWN_MS) {
+      AdbClient.resetMissingAdbProbeState();
+      return false;
+    }
+    return true;
   }
 
   private recordMissingAdbProbe(): void {
@@ -988,10 +1007,17 @@ export class AdbClient implements AdbExecutor {
 
     AdbClient.macosMissingAdbProbes += 1;
     if (AdbClient.macosMissingAdbProbes === AdbClient.MAX_MACOS_MISSING_ADB_PROBES) {
+      AdbClient.macosMissingAdbProbeStartedAt = this.timer.now();
       logger.debug(
         "[ADB] adb not found after 3 probes; skipping passive Android device scans on this macOS host.",
       );
     }
+  }
+
+  /** @internal Reset shared probe state for recovery and cache-isolated tests. */
+  static resetMissingAdbProbeState(): void {
+    AdbClient.macosMissingAdbProbes = 0;
+    AdbClient.macosMissingAdbProbeStartedAt = null;
   }
 
   /**

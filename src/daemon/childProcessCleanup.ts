@@ -10,6 +10,7 @@ import {
 import { IOSCtrlProxyManager } from "../utils/IOSCtrlProxyManager";
 import { logger } from "../utils/logger";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
 
 // DaemonManager and stdin lifecycle both force-exit after ten seconds. Keep each
 // best-effort stage short enough for the fallback force-stop to run before that
@@ -156,22 +157,25 @@ async function settleWithin<T>(
   timer: Timer,
   timeoutMs: number,
 ): Promise<Settled<T>> {
-  let handle: NodeJS.Timeout | undefined;
   const settled: Promise<Settled<T>> = work.then(
     (value) => ({ status: "fulfilled", value }),
     (error) => ({ status: "failed", error }),
   );
-  const timeout = new Promise<Settled<T>>((resolve) => {
-    handle = timer.setTimeout(
-      () => resolve({ status: "failed", error: new Error(`timed out after ${timeoutMs}ms`) }),
-      timeoutMs,
-    );
-  });
-  try {
-    return await Promise.race([settled, timeout]);
-  } finally {
-    if (handle) {
-      timer.clearTimeout(handle);
-    }
+  const timeoutError = new Error(`timed out after ${timeoutMs}ms`);
+  const outcome = await raceWithDeadline(settled, {
+    timer,
+    timeoutMs,
+    label: "Child process cleanup",
+    timeoutError: () => timeoutError,
+  }).then(
+    (value) => ({ value }),
+    (error: unknown) => ({ error }),
+  );
+  if ("value" in outcome) {
+    return outcome.value;
   }
+  if (outcome.error === timeoutError) {
+    return { status: "failed", error: outcome.error };
+  }
+  throw outcome.error;
 }

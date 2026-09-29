@@ -1,6 +1,7 @@
 import { consolePortFromSerial } from "../utils/android-cmdline-tools/EmulatorConsoleClient";
 import { logger } from "../utils/logger";
 import type { Timer } from "../utils/SystemTimer";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
 import type { RetryExecutor } from "../utils/retry/RetryExecutor";
 import type { PooledDevice, DeviceRecoveryPolicy } from "./devicePool";
 import type { Session } from "./sessionManager";
@@ -189,17 +190,17 @@ export class EmulatorLossIncidentLedger {
   ): Promise<Awaited<ReturnType<EmulatorLossIncidentStore["get"]>>> {
     const settlement = this.emulatorLossRecoverySettlements.get(incidentId);
     if (settlement && timeoutMs > 0) {
-      let timeoutHandle: NodeJS.Timeout | undefined;
+      const timeoutError = new Error("Emulator loss incident wait timed out");
       try {
-        await Promise.race([
-          settlement,
-          new Promise<void>((resolve) => {
-            timeoutHandle = this.timer.setTimeout(resolve, timeoutMs);
-          }),
-        ]);
-      } finally {
-        if (timeoutHandle !== undefined) {
-          this.timer.clearTimeout(timeoutHandle);
+        await raceWithDeadline(settlement, {
+          timer: this.timer,
+          timeoutMs,
+          label: "Emulator loss incident wait",
+          timeoutError: () => timeoutError,
+        });
+      } catch (error) {
+        if (error !== timeoutError) {
+          throw error;
         }
       }
     }

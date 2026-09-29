@@ -30,6 +30,7 @@ import {
 import { isAndroidEmulatorSerial, isAndroidTransportAddressSerial } from "../utils/androidSerial";
 import { Mutex } from "async-mutex";
 import { errorMessage } from "../utils/describeUnknownError";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
 
 /**
  * Device-label → session-UUID map. `buildDeviceLabelMap` assigns each configured
@@ -2250,19 +2251,28 @@ export class SessionManager {
       ...Array.from(this.activeReleasePromises, (release) => release.promise),
       ...additionalReleases,
     ];
-    let timeoutHandle: NodeJS.Timeout | undefined;
     try {
       if (releases.length === 0) {
         return true;
       }
-      const timeout = new Promise<boolean>((resolve) => {
-        timeoutHandle = this.timer.setTimeout(() => resolve(false), timeoutMs);
-      });
-      return await Promise.race([Promise.allSettled(releases).then(() => true), timeout]);
-    } finally {
-      if (timeoutHandle !== undefined) {
-        this.timer.clearTimeout(timeoutHandle);
+      const deadline = new Error("Release drain timed out");
+      try {
+        return await raceWithDeadline(
+          Promise.allSettled(releases).then(() => true),
+          {
+            timer: this.timer,
+            timeoutMs,
+            label: "Release drain",
+            timeoutError: () => deadline,
+          },
+        );
+      } catch (error) {
+        if (error === deadline) {
+          return false;
+        }
+        throw error;
       }
+    } finally {
       this.pendingNonTerminalReleaseSnapshots.clear();
     }
   }
@@ -2705,33 +2715,31 @@ export class SessionManager {
     sessionId: string,
     setups: readonly Promise<void>[],
   ): Promise<{ pending: Promise<void> | null }> {
-    let timeoutHandle: NodeJS.Timeout | undefined;
     const settled = Promise.allSettled(setups);
-    const timeout = new Promise<"timed-out">((resolve) => {
-      timeoutHandle = this.timer.setTimeout(
-        () => resolve("timed-out"),
-        SESSION_SETUP_DRAIN_TIMEOUT_MS,
-      );
+    const timeout = new Error("Session setup drain timed out");
+    const result = await raceWithDeadline(settled, {
+      timer: this.timer,
+      timeoutMs: SESSION_SETUP_DRAIN_TIMEOUT_MS,
+      label: "Session setup drain",
+      timeoutError: () => timeout,
+    }).catch((error: unknown) => {
+      if (error === timeout) {
+        return "timed-out" as const;
+      }
+      throw error;
     });
-    try {
-      const result = await Promise.race([settled, timeout]);
-      if (result === "timed-out") {
-        logger.warn(
-          `Timed out after ${SESSION_SETUP_DRAIN_TIMEOUT_MS}ms waiting for session ${sessionId} setup during release`,
-        );
-        return { pending: settled.then(() => undefined) };
-      }
-      for (const setup of result) {
-        if (setup.status === "rejected") {
-          logger.warn(`Failed session setup for ${sessionId} before release: ${setup.reason}`);
-        }
-      }
-      return { pending: null };
-    } finally {
-      if (timeoutHandle !== undefined) {
-        this.timer.clearTimeout(timeoutHandle);
+    if (result === "timed-out") {
+      logger.warn(
+        `Timed out after ${SESSION_SETUP_DRAIN_TIMEOUT_MS}ms waiting for session ${sessionId} setup during release`,
+      );
+      return { pending: settled.then(() => undefined) };
+    }
+    for (const setup of result) {
+      if (setup.status === "rejected") {
+        logger.warn(`Failed session setup for ${sessionId} before release: ${setup.reason}`);
       }
     }
+    return { pending: null };
   }
 
   private async restoreKeepScreenAwakeBestEffort(
@@ -2740,35 +2748,33 @@ export class SessionManager {
     if (!session.cacheData.keepScreenAwake?.applied) {
       return { pending: null };
     }
-    let timeoutHandle: NodeJS.Timeout | undefined;
     const restoration = this.restoreKeepScreenAwake(session).then(
       () => ({ outcome: "restored" as const }),
       (error) => ({ outcome: "failed" as const, error }),
     );
-    const timeout = new Promise<{ outcome: "timed-out" }>((resolve) => {
-      timeoutHandle = this.timer.setTimeout(
-        () => resolve({ outcome: "timed-out" }),
-        KEEP_SCREEN_AWAKE_RESTORE_TIMEOUT_MS,
-      );
+    const timeout = new Error("Keep-awake restore timed out");
+    const result = await raceWithDeadline(restoration, {
+      timer: this.timer,
+      timeoutMs: KEEP_SCREEN_AWAKE_RESTORE_TIMEOUT_MS,
+      label: "Keep-awake restore",
+      timeoutError: () => timeout,
+    }).catch((error: unknown) => {
+      if (error === timeout) {
+        return { outcome: "timed-out" as const };
+      }
+      throw error;
     });
-    try {
-      const result = await Promise.race([restoration, timeout]);
-      if (result.outcome === "failed") {
-        logger.warn(
-          `Failed to restore keep-awake state for session ${session.sessionId}: ${result.error}`,
-        );
-      } else if (result.outcome === "timed-out") {
-        logger.warn(
-          `Timed out after ${KEEP_SCREEN_AWAKE_RESTORE_TIMEOUT_MS}ms restoring keep-awake state for session ${session.sessionId}`,
-        );
-        return { pending: restoration.then(() => undefined) };
-      }
-      return { pending: null };
-    } finally {
-      if (timeoutHandle !== undefined) {
-        this.timer.clearTimeout(timeoutHandle);
-      }
+    if (result.outcome === "failed") {
+      logger.warn(
+        `Failed to restore keep-awake state for session ${session.sessionId}: ${result.error}`,
+      );
+    } else if (result.outcome === "timed-out") {
+      logger.warn(
+        `Timed out after ${KEEP_SCREEN_AWAKE_RESTORE_TIMEOUT_MS}ms restoring keep-awake state for session ${session.sessionId}`,
+      );
+      return { pending: restoration.then(() => undefined) };
     }
+    return { pending: null };
   }
 
   /**
@@ -2814,35 +2820,33 @@ export class SessionManager {
       () => ({ outcome: "restored" as const }),
       (error) => ({ outcome: "failed" as const, error }),
     );
-    let timeoutHandle: NodeJS.Timeout | undefined;
-    const timeout = new Promise<{ outcome: "timed-out" }>((resolve) => {
-      timeoutHandle = this.timer.setTimeout(
-        () => resolve({ outcome: "timed-out" }),
-        BIOMETRIC_ENROLLMENT_RESTORE_TIMEOUT_MS,
-      );
+    const timeout = new Error("Biometric restore timed out");
+    const result = await raceWithDeadline(restoration, {
+      timer: this.timer,
+      timeoutMs: BIOMETRIC_ENROLLMENT_RESTORE_TIMEOUT_MS,
+      label: "Biometric restore",
+      timeoutError: () => timeout,
+    }).catch((error: unknown) => {
+      if (error === timeout) {
+        return { outcome: "timed-out" as const };
+      }
+      throw error;
     });
-    try {
-      const result = await Promise.race([restoration, timeout]);
-      if (result.outcome === "failed") {
-        logger.warn(
-          `Failed to restore biometric enrollment for session ${session.sessionId}: ${result.error}`,
-        );
-        // Quarantine the device until the retries below settle; a prompt
-        // rejection otherwise returns a dirty simulator straight to the pool.
-        return { pending: this.retryBiometricEnrollmentRestore(target, result.error) };
-      }
-      if (result.outcome === "timed-out") {
-        logger.warn(
-          `Timed out after ${BIOMETRIC_ENROLLMENT_RESTORE_TIMEOUT_MS}ms restoring biometric enrollment for session ${session.sessionId}`,
-        );
-        return { pending: this.settleBiometricEnrollmentRestore(target, restoration) };
-      }
-      return { pending: null };
-    } finally {
-      if (timeoutHandle !== undefined) {
-        this.timer.clearTimeout(timeoutHandle);
-      }
+    if (result.outcome === "failed") {
+      logger.warn(
+        `Failed to restore biometric enrollment for session ${session.sessionId}: ${result.error}`,
+      );
+      // Quarantine the device until the retries below settle; a prompt
+      // rejection otherwise returns a dirty simulator straight to the pool.
+      return { pending: this.retryBiometricEnrollmentRestore(target, result.error) };
     }
+    if (result.outcome === "timed-out") {
+      logger.warn(
+        `Timed out after ${BIOMETRIC_ENROLLMENT_RESTORE_TIMEOUT_MS}ms restoring biometric enrollment for session ${session.sessionId}`,
+      );
+      return { pending: this.settleBiometricEnrollmentRestore(target, restoration) };
+    }
+    return { pending: null };
   }
 
   /** A slow restore can still fail; retry before the device leaves quarantine. */
@@ -2994,37 +2998,35 @@ export class SessionManager {
       () => ({ outcome: "restored" as const }),
       (error) => ({ outcome: "failed" as const, error }),
     );
-    let timeoutHandle: NodeJS.Timeout | undefined;
-    const timeout = new Promise<{ outcome: "timed-out" }>((resolve) => {
-      timeoutHandle = this.timer.setTimeout(
-        () => resolve({ outcome: "timed-out" }),
-        NETWORK_CONDITION_RESTORE_TIMEOUT_MS,
-      );
+    const timeout = new Error("Network condition restore timed out");
+    const result = await raceWithDeadline(restoration, {
+      timer: this.timer,
+      timeoutMs: NETWORK_CONDITION_RESTORE_TIMEOUT_MS,
+      label: "Network condition restore",
+      timeoutError: () => timeout,
+    }).catch((error: unknown) => {
+      if (error === timeout) {
+        return { outcome: "timed-out" as const };
+      }
+      throw error;
     });
-    try {
-      const result = await Promise.race([restoration, timeout]);
-      if (result.outcome === "failed") {
-        logger.warn(
-          `Failed to restore network condition for session ${session.sessionId}; device ` +
-            `${target.deviceId} may hold session-modified shaping: ${result.error}`,
-        );
-        // Quarantine the device until the retries below settle; a prompt
-        // rejection otherwise returns a shaped emulator straight to the pool.
-        return { pending: this.retryNetworkConditionRestore(target, result.error) };
-      }
-      if (result.outcome === "timed-out") {
-        logger.warn(
-          `Timed out after ${NETWORK_CONDITION_RESTORE_TIMEOUT_MS}ms restoring network condition ` +
-            `for session ${session.sessionId}`,
-        );
-        return { pending: this.settleNetworkConditionRestore(target, restoration) };
-      }
-      return { pending: null };
-    } finally {
-      if (timeoutHandle !== undefined) {
-        this.timer.clearTimeout(timeoutHandle);
-      }
+    if (result.outcome === "failed") {
+      logger.warn(
+        `Failed to restore network condition for session ${session.sessionId}; device ` +
+          `${target.deviceId} may hold session-modified shaping: ${result.error}`,
+      );
+      // Quarantine the device until the retries below settle; a prompt
+      // rejection otherwise returns a shaped emulator straight to the pool.
+      return { pending: this.retryNetworkConditionRestore(target, result.error) };
     }
+    if (result.outcome === "timed-out") {
+      logger.warn(
+        `Timed out after ${NETWORK_CONDITION_RESTORE_TIMEOUT_MS}ms restoring network condition ` +
+          `for session ${session.sessionId}`,
+      );
+      return { pending: this.settleNetworkConditionRestore(target, restoration) };
+    }
+    return { pending: null };
   }
 
   /** A slow restore can still fail; retry before the device leaves quarantine. */

@@ -189,6 +189,11 @@ export class TelemetryRecorder {
     requestBody?: string | null;
     responseBody?: string | null;
     contentType?: string | null;
+    requestId?: string | null;
+    connectionId?: string | null;
+    direction?: string | null;
+    metadata?: Record<string, string> | null;
+    sequenceNumber?: number | null;
   }): Promise<void> {
     // Snapshot context before async work to avoid race with concurrent setContext() calls
     const { deviceId, sessionId } = this.snapshotContext();

@@ -24,7 +24,7 @@ data class PickerDevice(
   val osKey: String? = null,
   /** Human label: "API 34" / "iOS 17". */
   val osLabel: String? = null,
-  /** CPU architecture ("arm64"/"x86_64"); only iOS images currently carry it. */
+  /** CPU architecture ("arm64"/"x86_64"). */
   val architecture: String? = null,
   /** Whether the booted device's keyguard is up (from the booted resource). Shutdown -> false. */
   val locked: Boolean = false,
@@ -34,6 +34,8 @@ data class PickerDevice(
   val deviceSessionUuid: String? = null,
   /** Retained after an incomplete sweep; absence is not evidence of shutdown. */
   val inventoryUncertain: Boolean = false,
+  /** Device form factor ("phone"/"tablet"/"foldable"); unknown is absent. */
+  val formFactor: String? = null,
 ) {
   /** UI identity is platform scoped; id remains the raw daemon command target. */
   val uiKey: String
@@ -77,8 +79,7 @@ private fun osOfImage(image: DeviceImageInfo): Pair<String?, String?> =
  *
  * Physical devices are not re-keyed, so they dedup by exact id only and never hide a distinct
  * same-named shut-down image. This keeps devices that merely share a display name (common for
- * simulators) from vanishing when a sibling boots. Booted devices carry no OS/architecture from the
- * daemon today.
+ * simulators) from vanishing when a sibling boots.
  */
 fun buildPickerDevices(
   booted: List<BootedDeviceInfo>,
@@ -110,7 +111,8 @@ fun buildPickerDevices(
         else DeviceState.Booted,
       osKey = osKey,
       osLabel = osLabel,
-      architecture = null,
+      architecture = device.architecture,
+      formFactor = device.formFactor.takeUnless { it == "unknown" },
       // Seed value only; an unknown (null) lock state seeds unlocked and the host poll refines it.
       locked = device.runtime.locked == true,
       isVirtual = device.isVirtual,
@@ -165,6 +167,7 @@ fun buildPickerDevices(
           osKey = osKey,
           osLabel = osLabel,
           architecture = image.architecture,
+          formFactor = image.formFactor.takeUnless { it == "unknown" },
         )
       }
 

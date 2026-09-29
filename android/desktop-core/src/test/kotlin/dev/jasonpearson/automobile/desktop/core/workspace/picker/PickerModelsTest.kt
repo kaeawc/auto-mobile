@@ -16,12 +16,16 @@ class PickerModelsTest {
     deviceId: String,
     isVirtual: Boolean,
     locked: Boolean? = null,
+    architecture: String? = null,
+    formFactor: String = "unknown",
   ) =
     BootedDeviceInfo(
       name = name,
       platform = "android",
       source = "local",
       isVirtual = isVirtual,
+      architecture = architecture,
+      formFactor = formFactor,
       identity = DeviceIdentity(deviceId),
       runtime =
         DeviceRuntime(
@@ -32,13 +36,44 @@ class PickerModelsTest {
         ),
     )
 
-  private fun image(name: String, deviceId: String) =
+  private fun image(name: String, deviceId: String, formFactor: String = "unknown") =
     DeviceImageInfo(
       name = name,
       platform = "android",
       identity = DeviceIdentity(deviceId),
+      formFactor = formFactor,
       runtime = DeviceRuntime(lifecycle = DeviceLifecycle("configured", true)),
     )
+
+  @Test
+  fun `booted and shutdown devices carry known facets and omit unknown form factor`() {
+    val devices =
+      buildPickerDevices(
+          booted =
+            listOf(
+              booted(
+                "Pixel phone",
+                "booted-phone",
+                true,
+                architecture = "arm64",
+                formFactor = "phone",
+              ),
+              booted("Unknown device", "booted-unknown", false, formFactor = "unknown"),
+            ),
+          images =
+            listOf(
+              image("Tablet", "shutdown-tablet", formFactor = "tablet"),
+              image("Unknown image", "shutdown-unknown", formFactor = "unknown"),
+            ),
+        )
+        .associateBy { it.id }
+
+    assertEquals("arm64", devices.getValue("booted-phone").architecture)
+    assertEquals("phone", devices.getValue("booted-phone").formFactor)
+    assertEquals("tablet", devices.getValue("shutdown-tablet").formFactor)
+    assertEquals(null, devices.getValue("booted-unknown").formFactor)
+    assertEquals(null, devices.getValue("shutdown-unknown").formFactor)
+  }
 
   @Test
   fun `booted picker device seeds lock state from canonical runtime`() {

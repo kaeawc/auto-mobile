@@ -8,6 +8,7 @@ enum class FilterDimension(val title: String) {
   Platform("Platform"),
   OsVersion("OS version"),
   Architecture("Architecture"),
+  FormFactor("Form factor"),
 }
 
 /** Active filter selections + the rail search query. Empty set for a dimension = no constraint. */
@@ -17,6 +18,7 @@ data class PickerFilters(
   val osKeys: Set<String> = emptySet(),
   val architectures: Set<String> = emptySet(),
   val query: String = "",
+  val formFactors: Set<String> = emptySet(),
 )
 
 /** One selectable option in the rail, with its live count under the current sibling filters. */
@@ -51,6 +53,12 @@ private fun matches(d: PickerDevice, f: PickerFilters, ignore: FilterDimension?)
     ignore != FilterDimension.Architecture &&
       f.architectures.isNotEmpty() &&
       (d.architecture == null || d.architecture !in f.architectures)
+  )
+    return false
+  if (
+    ignore != FilterDimension.FormFactor &&
+      f.formFactors.isNotEmpty() &&
+      (d.formFactor == null || d.formFactor !in f.formFactors)
   )
     return false
   return true
@@ -120,6 +128,19 @@ fun options(
               arch,
               visible.count { it.architecture == arch },
               arch in f.architectures,
+            )
+          }
+      FilterDimension.FormFactor ->
+        visible
+          .mapNotNull { it.formFactor }
+          .distinct()
+          .sorted()
+          .map { formFactor ->
+            FilterOption(
+              formFactor,
+              formFactor,
+              visible.count { it.formFactor == formFactor },
+              formFactor in f.formFactors,
             )
           }
     }

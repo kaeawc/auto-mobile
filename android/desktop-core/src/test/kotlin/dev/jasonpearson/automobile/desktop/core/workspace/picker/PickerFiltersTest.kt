@@ -14,7 +14,8 @@ class PickerFiltersTest {
     osKey: String? = null,
     osLabel: String? = null,
     arch: String? = null,
-  ) = PickerDevice(id, "name-$id", platform, state, osKey, osLabel, arch)
+    formFactor: String? = null,
+  ) = PickerDevice(id, "name-$id", platform, state, osKey, osLabel, arch, formFactor = formFactor)
 
   private val devices =
     listOf(
@@ -72,6 +73,37 @@ class PickerFiltersTest {
     val arch = options(devices, PickerFilters(), FilterDimension.Architecture)
     assertEquals(listOf("arm64", "x86_64"), arch.map { it.value })
     assertTrue(arch.all { it.count == 1 })
+  }
+
+  @Test
+  fun `form factor options count known values under sibling filters`() {
+    val withFormFactors =
+      listOf(
+        dev("a", Platform.Android, DeviceState.Booted, formFactor = "phone"),
+        dev("b", Platform.Android, DeviceState.Shutdown, formFactor = "tablet"),
+        dev("c", Platform.Ios, DeviceState.Booted, formFactor = "phone"),
+        dev("d", Platform.Ios, DeviceState.Shutdown),
+      )
+
+    assertEquals(
+      listOf("phone" to 2, "tablet" to 1),
+      options(withFormFactors, PickerFilters(), FilterDimension.FormFactor).map {
+        it.value to it.count
+      },
+    )
+    assertEquals(
+      listOf("phone" to 1, "tablet" to 1),
+      options(
+          withFormFactors,
+          PickerFilters(platforms = setOf(Platform.Android)),
+          FilterDimension.FormFactor,
+        )
+        .map { it.value to it.count },
+    )
+    assertEquals(
+      listOf("a", "c"),
+      filteredDevices(withFormFactors, PickerFilters(formFactors = setOf("phone"))).map { it.id },
+    )
   }
 
   @Test

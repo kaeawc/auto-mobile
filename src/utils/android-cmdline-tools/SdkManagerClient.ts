@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { defaultTimer, type Timer } from "../SystemTimer";
 import { logger } from "../logger";
+import { resolveAndroidSdkRoot } from "./androidSdkRoot";
 import { DefaultHostCommandExecutor, type HostProcessExecutor } from "../HostCommandExecutor";
 import { redactAndroidCommandOutput } from "./redactAndroidCommandOutput";
 import {
@@ -220,10 +221,17 @@ export class SdkManagerClient {
 
   private resolveSdkRoot(location: AndroidToolsLocation): string | undefined {
     const environment = this.dependencies.environment;
+    const environmentSdkRoot = resolveAndroidSdkRoot(
+      environment,
+      (candidate) =>
+        this.dependencies.existsSync(join(candidate, "system-images")) ||
+        this.looksLikeSdkRoot(candidate),
+    );
+    if (environmentSdkRoot) {
+      return environmentSdkRoot;
+    }
+
     const candidates = [
-      environment.ANDROID_SDK_ROOT,
-      environment.ANDROID_HOME,
-      environment.ANDROID_SDK_HOME,
       this.stripCmdlineToolsPath(location.path),
       location.path,
       resolve(location.path, ".."),

@@ -151,9 +151,19 @@ describe("Android Command Line Tools - Detection", () => {
       expect(path).toBe("/path/to/android-sdk-root");
     });
 
-    test("should return null when neither environment variable points to existing path", () => {
+    test("should use ANDROID_SDK_HOME when higher-priority roots do not exist", () => {
+      systemDetection.setEnvVar("ANDROID_HOME", "/nonexistent/home");
+      systemDetection.setEnvVar("ANDROID_SDK_ROOT", "/nonexistent/root");
+      systemDetection.setEnvVar("ANDROID_SDK_HOME", "/path/to/android-sdk-home");
+      systemDetection.addExistingFile("/path/to/android-sdk-home");
+
+      expect(getAndroidSdkFromEnvironment(systemDetection)).toBe("/path/to/android-sdk-home");
+    });
+
+    test("should return null when no environment variable points to an existing path", () => {
       systemDetection.setEnvVar("ANDROID_HOME", "/nonexistent/path1");
       systemDetection.setEnvVar("ANDROID_SDK_ROOT", "/nonexistent/path2");
+      systemDetection.setEnvVar("ANDROID_SDK_HOME", "/nonexistent/path3");
 
       const path = getAndroidSdkFromEnvironment(systemDetection);
 

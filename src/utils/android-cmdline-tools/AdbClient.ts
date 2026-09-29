@@ -21,6 +21,7 @@ import {
   detectAndroidCommandLineTools,
   getBestAndroidToolsLocation,
 } from "./detection";
+import { resolveAndroidSdkRoot } from "./androidSdkRoot";
 import {
   AdbExecutor,
   type AdbExecuteOptions,
@@ -267,8 +268,7 @@ export class AdbClient implements AdbExecutor {
    */
   private getFallbackAdbPath(): string {
     // Try environment variables
-    const androidHome =
-      process.env.ANDROID_HOME || process.env.ANDROID_SDK_ROOT || process.env.ANDROID_SDK_HOME;
+    const androidHome = resolveAndroidSdkRoot(process.env);
     if (androidHome) {
       return `${androidHome}/platform-tools/adb`;
     }

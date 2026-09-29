@@ -1,6 +1,7 @@
 import { join, dirname } from "path";
 import { logger } from "../logger";
 import { SystemDetection, DefaultSystemDetection } from "../system/SystemDetection";
+import { resolveAndroidSdkRoot, resolveAndroidSdkRootAsync } from "./androidSdkRoot";
 
 /**
  * Signals that a caller-owned deadline expired while this module was probing
@@ -238,34 +239,31 @@ async function getHomebrewAndroidToolsPathAsync(
 export function getAndroidSdkFromEnvironment(
   systemDetection = createDefaultSystemDetection(),
 ): string | null {
-  // Check ANDROID_HOME first, then ANDROID_SDK_ROOT
-  const androidHome = systemDetection.getEnvVar("ANDROID_HOME");
-  if (androidHome && systemDetection.fileExistsSync(androidHome)) {
-    return androidHome;
-  }
-
-  const androidSdkRoot = systemDetection.getEnvVar("ANDROID_SDK_ROOT");
-  if (androidSdkRoot && systemDetection.fileExistsSync(androidSdkRoot)) {
-    return androidSdkRoot;
-  }
-
-  return null;
+  return (
+    resolveAndroidSdkRoot(
+      {
+        ANDROID_HOME: systemDetection.getEnvVar("ANDROID_HOME"),
+        ANDROID_SDK_ROOT: systemDetection.getEnvVar("ANDROID_SDK_ROOT"),
+        ANDROID_SDK_HOME: systemDetection.getEnvVar("ANDROID_SDK_HOME"),
+      },
+      (path) => systemDetection.fileExistsSync(path),
+    ) ?? null
+  );
 }
 
 async function getAndroidSdkFromEnvironmentAsync(
   systemDetection: SystemDetection,
 ): Promise<string | null> {
-  const androidHome = systemDetection.getEnvVar("ANDROID_HOME");
-  if (androidHome && (await systemDetection.fileExists(androidHome))) {
-    return androidHome;
-  }
-
-  const androidSdkRoot = systemDetection.getEnvVar("ANDROID_SDK_ROOT");
-  if (androidSdkRoot && (await systemDetection.fileExists(androidSdkRoot))) {
-    return androidSdkRoot;
-  }
-
-  return null;
+  return (
+    (await resolveAndroidSdkRootAsync(
+      {
+        ANDROID_HOME: systemDetection.getEnvVar("ANDROID_HOME"),
+        ANDROID_SDK_ROOT: systemDetection.getEnvVar("ANDROID_SDK_ROOT"),
+        ANDROID_SDK_HOME: systemDetection.getEnvVar("ANDROID_SDK_HOME"),
+      },
+      (path) => systemDetection.fileExists(path),
+    )) ?? null
+  );
 }
 
 /**

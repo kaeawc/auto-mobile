@@ -361,6 +361,150 @@ describe("ScrollUntilVisible overshoot recovery", () => {
     expect(allDirections[allDirections.length - 1]).toBe("down");
   });
 
+  test("stale unchanged observation is re-observed before deciding to reverse", async () => {
+    finder.nextScrollableContainer = CONTAINER_ELEMENT;
+    let findCount = 0;
+    finder.findElementByText = () => (++findCount >= 3 ? TARGET_ELEMENT : null);
+
+    const initial = makeObserveResult(0);
+    const stale = { ...makeObserveResult(0), freshness: { isFresh: false } };
+    const moved = makeObserveResult(1);
+    const final = makeObserveResult(2);
+    let repeatedObservationReads = 0;
+    const observeResults = new Proxy([initial, stale, final], {
+      get(results, property, receiver) {
+        if (property === "1") {
+          repeatedObservationReads++;
+          // The swipe result and idle poll are stale; the direct corroborating
+          // capture, then the next swipe's starting frame, show movement.
+          return repeatedObservationReads <= 2 ? stale : moved;
+        }
+        return Reflect.get(results, property, receiver);
+      },
+    });
+    const observeOptions: Array<Record<string, unknown> | undefined> = [];
+    const suv = makeScrollUntilVisible({
+      accessibilityDetector: detector,
+      finder,
+      timer,
+      accessibilityService,
+      observeResults,
+      talkBackExecutor,
+      observeOptions,
+    });
+
+    const result = await suv.execute(BASE_OPTIONS);
+
+    expect(result.success).toBe(true);
+    expect(talkBackExecutor.getDirections()).toEqual(["up", "up"]);
+    expect(observeOptions).toHaveLength(4); // initial, idle, corroboration, next idle
+    expect(repeatedObservationReads).toBeGreaterThanOrEqual(3);
+  });
+
+  test("fresh unchanged observation still enters reverse mode", async () => {
+    const firstContainer = {
+      ...CONTAINER_ELEMENT,
+      bounds: { left: 0, top: 0, right: 400, bottom: 900 },
+    };
+    const shiftedContainer = {
+      ...CONTAINER_ELEMENT,
+      bounds: { left: 100, top: 100, right: 300, bottom: 700 },
+    };
+    let containerLookups = 0;
+    finder.findScrollableContainer = () =>
+      ++containerLookups === 1 ? firstContainer : shiftedContainer;
+    let findCount = 0;
+    finder.findElementByText = () => (++findCount >= 3 ? TARGET_ELEMENT : null);
+    const sameObs = { ...makeObserveResult(0), freshness: { isFresh: true } };
+    const suv = makeScrollUntilVisible({
+      accessibilityDetector: detector,
+      finder,
+      timer,
+      accessibilityService,
+      observeResults: [sameObs, sameObs, makeObserveResult(1)],
+      talkBackExecutor,
+    });
+
+    const result = await suv.execute(BASE_OPTIONS);
+
+    expect(result.success).toBe(true);
+    expect(talkBackExecutor.getDirections()).toEqual(["up", "down"]);
+    expect(talkBackExecutor.getSwipeCalls()[1]).toMatchObject({
+      x1: 200,
+      y1: 250,
+      x2: 200,
+      y2: 550,
+    });
+  });
+
+  test("uses shifted container bounds for the post-swipe target check", async () => {
+    const firstContainer = {
+      ...CONTAINER_ELEMENT,
+      bounds: { left: 0, top: 0, right: 200, bottom: 900 },
+    };
+    const shiftedContainer = {
+      ...CONTAINER_ELEMENT,
+      bounds: { left: 200, top: 100, right: 400, bottom: 700 },
+    };
+    const shiftedTarget = {
+      ...TARGET_ELEMENT,
+      bounds: { left: 250, top: 200, right: 300, bottom: 250 },
+    };
+    let containerLookups = 0;
+    finder.findScrollableContainer = () =>
+      ++containerLookups === 1 ? firstContainer : shiftedContainer;
+    let findCount = 0;
+    finder.findElementByText = () => (++findCount >= 2 ? shiftedTarget : null);
+    const suv = makeScrollUntilVisible({
+      accessibilityDetector: detector,
+      finder,
+      timer,
+      accessibilityService,
+      observeResults: [makeObserveResult(0), makeObserveResult(1)],
+      talkBackExecutor,
+    });
+
+    const result = await suv.execute(BASE_OPTIONS);
+
+    expect(result.success).toBe(true);
+    expect(result.element).toEqual(shiftedTarget);
+    expect(result.scrollIterations).toBe(1);
+    expect(containerLookups).toBeGreaterThan(1);
+  });
+
+  test("keeps last-known container bounds when a later observation has none", async () => {
+    const lastKnownContainer = {
+      ...CONTAINER_ELEMENT,
+      bounds: { left: 50, top: 100, right: 350, bottom: 700 },
+    };
+    let containerLookups = 0;
+    finder.findScrollableContainer = () => (++containerLookups === 1 ? lastKnownContainer : null);
+    let findCount = 0;
+    finder.findElementByText = () => (++findCount >= 3 ? TARGET_ELEMENT : null);
+    const sameObs = makeObserveResult(0);
+    const suv = makeScrollUntilVisible({
+      accessibilityDetector: detector,
+      finder,
+      timer,
+      accessibilityService,
+      observeResults: [sameObs, sameObs, makeObserveResult(1)],
+      talkBackExecutor,
+    });
+
+    const result = await suv.execute(BASE_OPTIONS);
+
+    expect(result.success).toBe(true);
+    expect(containerLookups).toBeGreaterThan(1);
+    expect(talkBackExecutor.getSwipeCalls()[1]).toMatchObject({
+      direction: "down",
+      x1: 200,
+      y1: 250,
+      x2: 200,
+      y2: 550,
+      containerElement: lastKnownContainer,
+    });
+  });
+
   test("scroll idle detection: uses settled observation when swipe returns mid-scroll state", async () => {
     // Scenario: observedInteraction returns a mid-scroll hierarchy (hierarchyId=1).
     // Direct execute() calls for idle polling return a different obs (hierarchyId=2) first,

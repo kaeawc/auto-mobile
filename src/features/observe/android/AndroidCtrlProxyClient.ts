@@ -734,7 +734,9 @@ const SDK_TELEMETRY_EVENT_TYPES: ReadonlySet<string> = new Set([
 
 /**
  * Build the telemetry `recordStorageEvent` input from a `storage_changed` wire
- * message. The runner-supplied `previousValue` is threaded through ONLY when the
+ * message, normalizing its value to the string contract used by storage updates.
+ * Unsafe legacy bare LONG values are logged and rejected. The runner-supplied
+ * `previousValue` is threaded through ONLY when the
  * wire message carries it (`!== undefined`), so the repository's
  * `previousValue !== undefined` guard falls through to the per-insert auto-lookup
  * for legacy runners that omit it (#3000). An explicit null ("no prior value")
@@ -743,13 +745,20 @@ const SDK_TELEMETRY_EVENT_TYPES: ReadonlySet<string> = new Set([
 export function storageTelemetryInputFromWire(
   message: WsStorageChangedMessage,
   resolvedTimestamp: number,
-): StorageTelemetryInput {
+): StorageTelemetryInput | undefined {
+  const normalizedValue = normalizeStorageWireValue(message.value, message.valueType);
+  if (normalizedValue === undefined) {
+    logger.warn(
+      `[CTRL_PROXY] Ignoring unsafe legacy LONG storage value for telemetry ${message.packageName ?? "unknown"}/${message.fileName ?? "unknown"}`,
+    );
+    return undefined;
+  }
   const input: StorageTelemetryInput = {
     timestamp: resolvedTimestamp,
     applicationId: message.packageName ?? null,
     fileName: message.fileName ?? "",
     key: message.key ?? null,
-    value: message.value ?? null,
+    value: normalizedValue,
     valueType: message.valueType ?? "STRING",
     changeType: message.changeType ?? "modify",
   };
@@ -5016,9 +5025,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       }
 
       // Record to telemetry timeline (fan-out owned by the ingestor, #2764).
-      this.getSdkEventIngestor().recordStorageEvent(
-        storageTelemetryInputFromWire(message, storageEvent.timestamp),
-      );
+      const telemetryInput = storageTelemetryInputFromWire(message, storageEvent.timestamp);
+      if (telemetryInput !== undefined) {
+        this.getSdkEventIngestor().recordStorageEvent(telemetryInput);
+      }
     },
 
     network_event: (message) => this.recordSdkTelemetryEvent(message),

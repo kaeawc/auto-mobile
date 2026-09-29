@@ -147,6 +147,58 @@ class ScriptedDaemonClient implements DaemonClientLike {
 }
 
 describe("DaemonMcpProxy", () => {
+  test("reused progress token routes by request id and survives sibling completion", async () => {
+    const firstGate = Promise.withResolvers<void>();
+    const secondGate = Promise.withResolvers<void>();
+    const bothStarted = Promise.withResolvers<void>();
+    const fakeClient = new FakeDaemonClient({
+      onCallTool: (name) => {
+        if (fakeClient.callToolRequestIds.length === 2) {
+          bothStarted.resolve();
+        }
+        return name === "tapOn" ? firstGate.promise : secondGate.promise;
+      },
+    });
+    const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+    const proxy = new DaemonMcpProxy({
+      clientFactory: () => fakeClient,
+      daemonManager: matchingDaemonManager(),
+      autoStartDaemon: false,
+      timer: new FakeTimer(),
+    });
+    const firstProgress: number[] = [];
+    const secondProgress: number[] = [];
+    const first = proxy.callTool("tapOn", {}, "reused", (progress) => firstProgress.push(progress));
+    const second = proxy.callTool("swipeOn", {}, "reused", (progress) =>
+      secondProgress.push(progress),
+    );
+
+    try {
+      await bothStarted.promise;
+      const [firstId, secondId] = fakeClient.callToolRequestIds;
+      fakeClient.emitProgress("reused", 1, undefined, undefined, firstId);
+      fakeClient.emitProgress("other-token", 2, undefined, undefined, secondId);
+      expect(firstProgress).toEqual([1]);
+      expect(secondProgress).toEqual([]);
+
+      firstGate.resolve();
+      await first;
+      fakeClient.emitProgress("reused", 3, undefined, undefined, firstId);
+      fakeClient.emitProgress("reused", 4, undefined, undefined, secondId);
+      expect(firstProgress).toEqual([1]);
+      expect(secondProgress).toEqual([4]);
+      secondGate.resolve();
+      await second;
+      expect((proxy as any).progressListeners.size).toBe(0);
+    } finally {
+      firstGate.resolve();
+      secondGate.resolve();
+      await Promise.allSettled([first, second]);
+      await proxy.close();
+      isAvailableSpy.mockRestore();
+    }
+  });
+
   test("restores the current owned session before older sessions after reconnect", async () => {
     const mintingResult = (sessionUuid: string) => ({
       content: [{ type: "text", text: JSON.stringify({ sessionId: sessionUuid }) }],

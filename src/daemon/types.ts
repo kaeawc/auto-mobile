@@ -199,8 +199,7 @@ export const PROGRESS_NOTIFICATION_METHOD = "notifications/progress";
 
 /**
  * Server-pushed notification frame sent from daemon to a subscribed CLI client
- * over the control socket (issue #3223). Unlike {@link DaemonResponse} it has no
- * `id` — it does not correlate to a request. Clients discriminate on `type`.
+ * over the control socket (issue #3223). Clients discriminate on `type`.
  * Only sent to sessions that opted in via `daemon/subscribe-notifications`, so
  * legacy/Kotlin/Swift clients never see an unexpected frame shape.
  */
@@ -225,6 +224,8 @@ export interface DaemonNotification {
    * daemon-fabricated value. Absent for every other notification method.
    */
   progressToken?: string | number;
+  /** Originating daemon request id for `notifications/progress` frames. */
+  requestId?: string;
   /** Progress value for `notifications/progress` frames. */
   progress?: number;
   /** Optional total for `notifications/progress` frames. */

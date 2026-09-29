@@ -1590,8 +1590,7 @@ describe("UnixSocketServer MCP session reconnect", () => {
 
     const reconnectPromise = internals.reconnectMcpClientWithinDeadline({
       route: { executionKey: "exec-1", clientKey: key },
-      remainingTimeoutMs: 1000,
-      forwardStartMs: 0,
+      deadline: new ProgressExtendableDeadline(fakeTimer.now(), 1000),
     });
 
     // getMcpClient registers this wait's pending creation synchronously.

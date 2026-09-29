@@ -91,6 +91,61 @@ function callHandleIdeRequest(
 }
 
 describe("UnixSocketServer.handleIdeRequest extends the deadline on progress (#6222)", () => {
+  test("device-control recovery reconnects after the original budget when progress extends the live deadline", async () => {
+    const fakeTimer = new FakeTimer();
+    const server = createServer(fakeTimer);
+    const timeoutMs = 30_000;
+    const deadline = new ProgressExtendableDeadline(fakeTimer.now(), timeoutMs);
+    const originalRemainingMs = deadline.value - fakeTimer.now();
+    const result = { content: [{ type: "text", text: "recovered" }] };
+    let reconnects = 0;
+    server.mcpClientFactory = async () => {
+      reconnects++;
+      return {
+        callTool: async () => result,
+        close: async () => {},
+      } as any;
+    };
+
+    fakeTimer.advanceTime(20_000);
+    deadline.extendOnProgress(fakeTimer.now(), timeoutMs);
+    fakeTimer.advanceTime(15_000);
+    expect(originalRemainingMs - fakeTimer.now()).toBeLessThan(0);
+    const internals = server as unknown as {
+      requireRemainingMcpForwardBudget: (
+        request: DaemonRequest,
+        timeout: number,
+        deadline: ProgressExtendableDeadline,
+        phase: string,
+      ) => number;
+      remainingMcpForwardBudget: (input: { deadline: ProgressExtendableDeadline }) => number;
+      recoverDeviceControlTransport: (input: unknown) => Promise<unknown>;
+    };
+    const request: DaemonRequest = {
+      id: "recovery-request",
+      type: "mcp_request",
+      method: "tools/call",
+      params: { name: "observe", arguments: {} },
+      progressToken: "recovery-token",
+    };
+    expect(internals.remainingMcpForwardBudget({ deadline })).toBe(15_000);
+    expect(
+      internals.requireRemainingMcpForwardBudget(request, timeoutMs, deadline, "recovery"),
+    ).toBe(15_000);
+    await expect(
+      internals.recoverDeviceControlTransport({
+        request,
+        route: { executionKey: "execution", clientKey: "recovery-client" },
+        socketSessionId: "socket-recovery",
+        totalTimeoutMs: timeoutMs,
+        deadline,
+        phase: "connect",
+        identity: {},
+      }),
+    ).resolves.toEqual(result);
+    expect(reconnects).toBe(1);
+  });
+
   test("propagates owner-socket cancellation to an abort-ignoring late acquisition", async () => {
     const fakeTimer = new FakeTimer();
     const server = createServer(fakeTimer);
@@ -556,9 +611,9 @@ describe("pushProgressNotification is independent of the general notification su
   ): void {
     (
       server as unknown as {
-        pushProgressNotification: (s: string, t: string | number, p: number) => void;
+        pushProgressNotification: (s: string, id: string, t: string | number, p: number) => void;
       }
-    ).pushProgressNotification(sessionId, progressToken, progress);
+    ).pushProgressNotification(sessionId, "request-1", progressToken, progress);
   }
 
   test("delivers a progress tick to a session that never subscribed to general notifications", () => {
@@ -572,6 +627,7 @@ describe("pushProgressNotification is independent of the general notification su
     const frame = JSON.parse(writes[0]);
     expect(frame.method).toBe(PROGRESS_NOTIFICATION_METHOD);
     expect(frame.progressToken).toBe("tok-1");
+    expect(frame.requestId).toBe("request-1");
     expect(frame.progress).toBe(1);
   });
 

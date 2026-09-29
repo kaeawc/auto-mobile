@@ -515,8 +515,6 @@ interface McpForwardRecoveryContext {
    * value, not the original one.
    */
   deadline: ProgressExtendableDeadline;
-  remainingTimeoutMs: number;
-  forwardStartMs: number;
 }
 
 interface DeviceControlTransportRecoveryContext extends McpForwardRecoveryContext {
@@ -1124,8 +1122,8 @@ export class UnixSocketServer {
    * requested it (issue #6205), carrying the SAME `progressToken` that
    * session's `tools/call` request declared. Unlike the broadcast helpers
    * above, this targets exactly one socket rather than every subscriber — the
-   * per-session request queue serializes `tools/call`s, so at most one call is
-   * ever in flight per session and no correlation beyond the token is needed.
+   * request id identifies the originating call even if another call on the
+   * same connection uses the same token.
    *
    * Deliberately NOT gated on the opt-in general-notification subscription
    * (unlike the broadcast helpers above). A progress tick is a directed reply
@@ -1143,6 +1141,7 @@ export class UnixSocketServer {
    */
   private pushProgressNotification(
     sessionId: string,
+    requestId: string,
     progressToken: string | number,
     progress: number,
     total?: number,
@@ -1155,6 +1154,7 @@ export class UnixSocketServer {
     const notification: DaemonNotification = {
       type: "daemon_notification",
       method: PROGRESS_NOTIFICATION_METHOD,
+      requestId,
       progressToken,
       progress,
       ...(total !== undefined ? { total } : {}),
@@ -1291,18 +1291,16 @@ export class UnixSocketServer {
             request,
             sessionId,
             async (route) => {
-              const remainingTimeoutMs = deadline.value - this.timer.now();
-              const queueWaitMs = totalTimeoutMs - remainingTimeoutMs;
-              const forwardLabel = UnixSocketServer.describeMcpForwardRequest(request);
-              logger.debug(
-                `[McpForward] start executionKey=${route.executionKey} clientKey=${route.clientKey} socketSession=${sessionId} requestId=${request.id} ${forwardLabel} queueWaitMs=${queueWaitMs} remainingTimeoutMs=${remainingTimeoutMs}`,
-              );
-
-              this.requireRemainingMcpForwardBudget(
+              const remainingTimeoutMs = this.requireRemainingMcpForwardBudget(
                 request,
                 totalTimeoutMs,
                 deadline,
                 "waiting in queue",
+              );
+              const queueWaitMs = Math.max(0, totalTimeoutMs - remainingTimeoutMs);
+              const forwardLabel = UnixSocketServer.describeMcpForwardRequest(request);
+              logger.debug(
+                `[McpForward] start executionKey=${route.executionKey} clientKey=${route.clientKey} socketSession=${sessionId} requestId=${request.id} ${forwardLabel} queueWaitMs=${queueWaitMs} remainingTimeoutMs=${remainingTimeoutMs}`,
               );
 
               const forwardStartMs = this.timer.now();
@@ -1315,8 +1313,6 @@ export class UnixSocketServer {
                   signal: mcpRequest.signal,
                   totalTimeoutMs,
                   deadline,
-                  remainingTimeoutMs,
-                  forwardStartMs,
                 });
                 if (this.isMcpRequestOwnerCurrent(sessionId, mcpRequest.signal)) {
                   this.recordBoundMcpClientKey(
@@ -1393,7 +1389,7 @@ export class UnixSocketServer {
     // Read live: a progress notification received since this request first
     // started may already have pushed `deadline.value` out (issue #6222
     // review, P1) -- caching it earlier would silently ignore that extension.
-    const remainingTimeoutMs = deadline.value - this.timer.now();
+    const remainingTimeoutMs = this.remainingMcpForwardBudget({ deadline });
     const queueWaitMs = Math.max(0, totalTimeoutMs - remainingTimeoutMs);
     if (
       remainingTimeoutMs > 0 &&
@@ -2589,17 +2585,13 @@ export class UnixSocketServer {
     return new DeviceControlTransportError(message, failure);
   }
 
-  private remainingMcpForwardBudget(input: {
-    remainingTimeoutMs: number;
-    forwardStartMs: number;
-  }): number {
-    return input.remainingTimeoutMs - (this.timer.now() - input.forwardStartMs);
+  private remainingMcpForwardBudget(input: { deadline: ProgressExtendableDeadline }): number {
+    return input.deadline.value - this.timer.now();
   }
 
   private async reconnectMcpClientWithinDeadline(input: {
     route: McpForwardRoute;
-    remainingTimeoutMs: number;
-    forwardStartMs: number;
+    deadline: ProgressExtendableDeadline;
     signal?: AbortSignal;
   }): Promise<Client> {
     input.signal?.throwIfAborted();
@@ -5590,6 +5582,7 @@ export class UnixSocketServer {
               abortTimer = armAbort(deadline.value - this.timer.now());
               this.pushProgressNotification(
                 socketSessionId,
+                request.id,
                 progressToken,
                 notification.progress,
                 notification.total,

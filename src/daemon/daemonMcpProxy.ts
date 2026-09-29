@@ -859,12 +859,13 @@ export class DaemonMcpProxy {
   // Listeners for daemon-forwarded list-changed notifications (issue #3223),
   // fired after the matching cache is invalidated so a re-fetch is never stale.
   private readonly listChangedListeners = new Set<(kind: ListChangedKind) => void>();
-  // In-flight `callTool` progress callbacks keyed by the client's own
-  // progressToken (issue #6205) — registered just before forwarding and
-  // removed in the call's `finally`, so a relayed `notifications/progress`
-  // frame is routed to the right caller purely by echoing that token, with no
-  // daemon-fabricated correlation id needed.
-  private readonly progressListeners = new Map<string | number, DaemonProxyProgressCallback>();
+  // A token can be reused by concurrent callers, and a new connection can
+  // reuse a request id. Scope listeners to the client connection, then match
+  // both the daemon request id and echoed caller token.
+  private readonly progressListeners = new Map<
+    DaemonClientLike,
+    Map<string, { progressToken: string | number; listener: DaemonProxyProgressCallback }>
+  >();
   // Releases this proxy's handler on the current client. Needed because a
   // clientFactory may return a shared/reused client (test fakes do); without it
   // every reconnect would stack another handler on that client.
@@ -1003,7 +1004,7 @@ export class DaemonMcpProxy {
     if (supportsNotifications) {
       this.notificationUnsubscribe?.();
       this.notificationUnsubscribe = client.onNotification!((notification) =>
-        this.handleDaemonNotification(notification),
+        this.handleDaemonNotification(notification, client),
       );
     }
     this.subscribeToClientConnectionClosed(client);
@@ -1191,14 +1192,17 @@ export class DaemonMcpProxy {
     };
   }
 
-  private handleDaemonNotification(notification: DaemonNotification): void {
+  private handleDaemonNotification(
+    notification: DaemonNotification,
+    sourceClient: DaemonClientLike,
+  ): void {
     if (notification.method === SESSION_RELEASED_NOTIFICATION_METHOD) {
       this.handleSessionReleasedNotification(notification);
       return;
     }
 
     if (notification.method === PROGRESS_NOTIFICATION_METHOD) {
-      this.handleProgressNotification(notification);
+      this.handleProgressNotification(notification, sourceClient);
       return;
     }
 
@@ -1226,27 +1230,44 @@ export class DaemonMcpProxy {
     }
   }
 
-  // Route a relayed `notifications/progress` frame to the caller that
-  // registered for its token (issue #6205). A token with no registered
-  // listener (the call already completed, or a stray/unexpected frame) is
-  // silently dropped — never surfaced as an error, since a race between the
-  // final tick and call completion is expected.
-  private handleProgressNotification(notification: DaemonNotification): void {
-    if (notification.progressToken === undefined || notification.progress === undefined) {
+  // A late or unmatched progress frame is expected around call completion.
+  private handleProgressNotification(
+    notification: DaemonNotification,
+    sourceClient: DaemonClientLike,
+  ): void {
+    if (
+      notification.requestId === undefined ||
+      notification.progressToken === undefined ||
+      notification.progress === undefined
+    ) {
       return;
     }
-    const listener = this.progressListeners.get(notification.progressToken);
-    if (!listener) {
+    const registered = this.progressListeners.get(sourceClient)?.get(notification.requestId);
+    if (registered?.progressToken !== notification.progressToken) {
       return;
     }
     try {
-      listener(notification.progress, notification.total, notification.message);
+      registered.listener(notification.progress, notification.total, notification.message);
     } catch (error) {
       // Best-effort: a throwing progress consumer must never break the
       // notification channel or the in-flight tool call it belongs to.
       logger.warn(
         `[DaemonMcpProxy] progress listener failed for token ${notification.progressToken}: ${error}`,
       );
+    }
+  }
+
+  private removeProgressListener(
+    client: DaemonClientLike | undefined,
+    requestId: string | undefined,
+  ): void {
+    if (!client || requestId === undefined) {
+      return;
+    }
+    const listeners = this.progressListeners.get(client);
+    listeners?.delete(requestId);
+    if (listeners?.size === 0) {
+      this.progressListeners.delete(client);
     }
   }
 
@@ -2452,17 +2473,30 @@ export class DaemonMcpProxy {
       name,
     );
     this.retainAcquisitionReleaseEpoch(learnsResultSession, callReleaseEpoch);
-    if (progressToken !== undefined && onProgress) {
-      this.progressListeners.set(progressToken, onProgress);
-    }
+    let registeredRequestId: string | undefined;
+    let registeredClient: DaemonClientLike | undefined;
     try {
       const result = await this.withRecoverableReconnect(
         () => {
           this.throwIfForwardedSessionReleasedSince(forwardedArgs, callReleaseEpoch);
-          return this.client!.callTool(
+          const client = this.client!;
+          return client.callTool(
             name,
             this.withToolSelectionProfile(forwardedArgs),
             progressToken,
+            (requestId) => {
+              this.removeProgressListener(registeredClient, registeredRequestId);
+              registeredClient = client;
+              registeredRequestId = requestId;
+              if (progressToken !== undefined && onProgress) {
+                let listeners = this.progressListeners.get(client);
+                if (!listeners) {
+                  listeners = new Map();
+                  this.progressListeners.set(client, listeners);
+                }
+                listeners.set(requestId, { progressToken, listener: onProgress });
+              }
+            },
           );
         },
         forwardedSessionUuid,
@@ -2521,9 +2555,7 @@ export class DaemonMcpProxy {
     } finally {
       this.releaseReleaseEpochReference(forwardedSessionUuid);
       this.releaseAcquisitionReleaseEpoch(learnsResultSession, callReleaseEpoch);
-      if (progressToken !== undefined) {
-        this.progressListeners.delete(progressToken);
-      }
+      this.removeProgressListener(registeredClient, registeredRequestId);
     }
   }
 

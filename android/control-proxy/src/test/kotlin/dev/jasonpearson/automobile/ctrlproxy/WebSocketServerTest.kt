@@ -4,6 +4,8 @@ import dev.jasonpearson.automobile.protocol.ErrorResponse
 import dev.jasonpearson.automobile.protocol.HierarchyUpdateEvent
 import dev.jasonpearson.automobile.protocol.SetKeyboardProfileResult
 import dev.jasonpearson.automobile.protocol.SwipeResult
+import io.ktor.websocket.DefaultWebSocketSession
+import io.mockk.mockk
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
@@ -314,6 +316,109 @@ class WebSocketServerTest {
     val event = HierarchyUpdateEvent(timestamp = 0L, data = "{}")
     assertNull(WebSocketServer.correlationRequestId(event))
   }
+
+  @Test
+  fun `failed primary send delivers correlated fallback to the request owner`() =
+    runTest(testScope.testScheduler) {
+      val owner = mockk<DefaultWebSocketSession>()
+      val bystander = mockk<DefaultWebSocketSession>()
+      val delivered = mutableListOf<Pair<DefaultWebSocketSession, String>>()
+      var firstAttempt = true
+      server =
+        WebSocketServer(
+          port = 0,
+          scope = testScope,
+          sendFrame = { connection, message ->
+            if (firstAttempt) {
+              firstAttempt = false
+              throw IllegalStateException("transient send failure")
+            }
+            delivered.add(connection to message)
+          },
+        )
+      server.registerRequestOwner("req-failed", owner)
+      server.registerRequestOwner("other-request", bystander)
+
+      server.broadcast(
+        SwipeResult(timestamp = 0L, requestId = "req-failed", success = true, totalTimeMs = 5L)
+      )
+
+      assertEquals(1, delivered.size)
+      assertTrue(delivered.single().first === owner)
+      assertEquals("req-failed", WebSocketServer.extractRequestId(delivered.single().second))
+      assertTrue(delivered.single().second.contains("transient send failure"))
+      assertTrue(delivered.single().second.contains("\"type\":\"error\""))
+      server.broadcast(ErrorResponse(requestId = "req-failed", error = "duplicate fallback"))
+      assertEquals(1, delivered.size)
+    }
+
+  @Test
+  fun `guard fallback routes to the owner when result creation fails before delivery`() =
+    runTest(testScope.testScheduler) {
+      val owner = mockk<DefaultWebSocketSession>()
+      val bystander = mockk<DefaultWebSocketSession>()
+      val delivered = mutableListOf<Pair<DefaultWebSocketSession, String>>()
+      server =
+        WebSocketServer(
+          port = 0,
+          scope = testScope,
+          sendFrame = { connection, message -> delivered.add(connection to message) },
+        )
+      server.registerRequestOwner("req-guard", owner)
+      server.registerRequestOwner("other-request", bystander)
+      val broadcaster =
+        ResultBroadcaster(broadcastError = { server.broadcast(it) }, logError = { _, _ -> })
+
+      broadcaster.guard(requestId = "req-guard", action = "swipe_result") {
+        throw IllegalStateException("result serialization failed")
+      }
+
+      assertEquals(1, delivered.size)
+      assertTrue(delivered.single().first === owner)
+      assertEquals("req-guard", WebSocketServer.extractRequestId(delivered.single().second))
+      assertTrue(delivered.single().second.contains("result serialization failed"))
+    }
+
+  @Test
+  fun `duplicate correlated frame is dropped after successful delivery`() =
+    runTest(testScope.testScheduler) {
+      val owner = mockk<DefaultWebSocketSession>()
+      val delivered = mutableListOf<String>()
+      server =
+        WebSocketServer(
+          port = 0,
+          scope = testScope,
+          sendFrame = { _, message -> delivered.add(message) },
+        )
+      server.registerRequestOwner("req-done", owner)
+
+      server.broadcast("""{"type":"result","requestId":"req-done"}""")
+      server.broadcast(ErrorResponse(requestId = "req-done", error = "duplicate"))
+
+      assertEquals(listOf("""{"type":"result","requestId":"req-done"}"""), delivered)
+    }
+
+  @Test
+  fun `unknown and expired correlated frames are dropped`() =
+    runTest(testScope.testScheduler) {
+      val owner = mockk<DefaultWebSocketSession>()
+      val delivered = mutableListOf<String>()
+      server =
+        WebSocketServer(
+          port = 0,
+          scope = testScope,
+          sendFrame = { _, message -> delivered.add(message) },
+        )
+
+      server.broadcast(ErrorResponse(requestId = "never-registered", error = "unknown"))
+      assertTrue(delivered.isEmpty())
+      server.registerRequestOwner("expired", owner)
+      server.broadcast("""{"type":"result","requestId":"expired"}""")
+      delivered.clear()
+      server.broadcast(ErrorResponse(requestId = "expired", error = "late"))
+
+      assertTrue(delivered.isEmpty())
+    }
 
   @Test
   fun `mightCarryRequestId short-circuits frames without the requestId token`() {

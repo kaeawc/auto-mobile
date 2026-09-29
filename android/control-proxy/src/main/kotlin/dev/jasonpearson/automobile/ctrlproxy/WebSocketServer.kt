@@ -48,6 +48,10 @@ class WebSocketServer(
     true
   },
   private val onRetryLockAcquired: () -> Unit = {},
+  private val sendFrame: suspend (DefaultWebSocketSession, String) -> Unit =
+    { connection, message ->
+      connection.send(Frame.Text(message))
+    },
 ) {
   companion object {
     private const val TAG = "WebSocketServer"
@@ -211,6 +215,7 @@ class WebSocketServer(
   private var broadcastJob: Job? = null
   private val connections = mutableSetOf<DefaultWebSocketSession>()
   private val requestConnections = mutableMapOf<String, DefaultWebSocketSession>()
+  private val deliveringRequests = mutableSetOf<String>()
   private val connectionCount = AtomicInteger(0)
   private val firstClientConnection = CompletableDeferred<Unit>()
   private var activeClientConnection = CompletableDeferred<Unit>()
@@ -557,6 +562,10 @@ class WebSocketServer(
     }
   }
 
+  internal fun registerRequestOwner(requestId: String, connection: DefaultWebSocketSession) {
+    synchronized(connections) { requestConnections[requestId] = connection }
+  }
+
   /**
    * Sends a correlated response only to its originating client.
    *
@@ -567,15 +576,47 @@ class WebSocketServer(
    * @return `true` when [requestId] was present and the frame was delivered or deliberately
    *   dropped; `false` for uncorrelated frames that the caller should broadcast normally.
    */
-  private suspend fun routeCorrelatedResponse(requestId: String?, message: String): Boolean {
+  internal suspend fun routeCorrelatedResponse(requestId: String?, message: String): Boolean {
     if (requestId == null) {
       return false
     }
-    val target = synchronized(connections) { requestConnections.remove(requestId) }
+    val target =
+      synchronized(connections) {
+        requestConnections[requestId]?.takeIf { deliveringRequests.add(requestId) }
+      }
     if (target == null) {
       Log.w(TAG, "Dropping response for disconnected or completed request $requestId")
     } else {
-      sendToClient(target, message)
+      try {
+        try {
+          sendFrame(target, message)
+          synchronized(connections) {
+            if (requestConnections[requestId] === target) requestConnections.remove(requestId)
+          }
+        } catch (e: CancellationException) {
+          throw e
+        } catch (e: Exception) {
+          Log.w(TAG, "Failed to deliver response for request $requestId", e)
+          // The primary frame was not delivered. Keep its owner until a correlated fallback has
+          // been attempted, so a transient send failure can still fail the daemon awaiter fast.
+          if (synchronized(connections) { requestConnections[requestId] === target }) {
+            val fallback =
+              CorrelatedErrorReporter.frame(
+                requestId,
+                "Failed to deliver response: ${CorrelatedErrorReporter.causeOf(e)}",
+              )
+            sendToClient(
+              target,
+              responseJson.encodeToString(WebSocketResponse.serializer(), fallback),
+            )
+            synchronized(connections) {
+              if (requestConnections[requestId] === target) requestConnections.remove(requestId)
+            }
+          }
+        }
+      } finally {
+        synchronized(connections) { deliveringRequests.remove(requestId) }
+      }
     }
     return true
   }
@@ -643,7 +684,7 @@ class WebSocketServer(
   /** Internal method to send a message to a single client connection. */
   private suspend fun sendToClient(connection: DefaultWebSocketSession, message: String) {
     try {
-      connection.send(Frame.Text(message))
+      sendFrame(connection, message)
     } catch (e: CancellationException) {
       // Cooperative cancellation means `scope` is shutting down, not that the connection is
       // dead — rethrow so the caller unwinds instead of mis-marking a live connection (#3191).
@@ -782,7 +823,7 @@ class WebSocketServer(
     // not this map, so skipping the record preserves PR #3159's targeted delivery.
     if (recordsRequestOwner(request)) {
       request.requestId?.let { requestId ->
-        synchronized(connections) { requestConnections[requestId] = connection }
+        registerRequestOwner(requestId, connection)
       }
     }
     // Dispatch inline on the WebSocket read loop (already a coroutine) rather than launching into

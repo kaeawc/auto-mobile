@@ -22,6 +22,29 @@ import org.junit.Test
 class ResultBroadcasterTest {
 
   @Test
+  fun `failed primary attempt is followed by a correlated fallback attempt`() = runTest {
+    val attempts = mutableListOf<String>()
+    val fallbackFrames = mutableListOf<ErrorResponse>()
+    val broadcaster =
+      ResultBroadcaster(
+        broadcastError = {
+          attempts.add("fallback")
+          fallbackFrames.add(it)
+        },
+        logError = { _, _ -> },
+      )
+
+    broadcaster.guard(requestId = "req-two-frame", action = "swipe_result") {
+      attempts.add("primary")
+      throw IllegalStateException("primary send failed")
+    }
+
+    assertEquals(listOf("primary", "fallback"), attempts)
+    assertEquals("req-two-frame", fallbackFrames.single().requestId)
+    assertTrue(fallbackFrames.single().error.contains("primary send failed"))
+  }
+
+  @Test
   fun `broadcasts correlated error frame when the broadcast block throws`() = runTest {
     val broadcasts = mutableListOf<ErrorResponse>()
     val broadcaster =

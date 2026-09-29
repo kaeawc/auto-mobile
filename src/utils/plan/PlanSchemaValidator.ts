@@ -279,46 +279,55 @@ export class PlanSchemaValidator {
 
   /**
    * Attempt to find the line number of a field in YAML content
-   * This is a best-effort approach using regex matching
+   * This is a best-effort approach using literal key matching
    */
   private findLineNumber(
     yamlContent: string,
     fieldPath: string,
   ): { line: number; column: number } | undefined {
-    const lines = yamlContent.split("\n");
+    try {
+      const lines = yamlContent.split("\n");
+      const findField = (key: string): { line: number; column: number } | undefined => {
+        for (let i = 0; i < lines.length; i++) {
+          const trimmed = lines[i].trimStart();
+          if (trimmed.startsWith(key) && trimmed.slice(key.length).trimStart().startsWith(":")) {
+            return { line: i + 1, column: 1 };
+          }
+        }
+        return undefined;
+      };
 
-    // Handle root-level fields
-    if (!fieldPath.includes(".") && !fieldPath.includes("[")) {
-      const pattern = new RegExp(`^\\s*${fieldPath}\\s*:`);
-      for (let i = 0; i < lines.length; i++) {
-        if (pattern.test(lines[i])) {
-          const match = lines[i].match(pattern);
-          return { line: i + 1, column: (match?.index ?? 0) + 1 };
+      // Handle root-level fields
+      if (!fieldPath.includes(".") && !fieldPath.includes("[")) {
+        const found = findField(fieldPath);
+        if (found) {
+          return found;
         }
       }
-    }
 
-    // Handle nested fields like "steps[0].tool" or "metadata.version"
-    const parts = fieldPath.split(/[.\[\]]+/).filter((p) => p);
+      // Handle nested fields like "steps[0].tool" or "metadata.version"
+      const parts = fieldPath.split(/[.\[\]]+/).filter((p) => p);
 
-    // Try to find the deepest field we can locate
-    for (let depth = parts.length; depth > 0; depth--) {
-      const searchField = parts[depth - 1];
+      // Try to find the deepest field we can locate
+      for (let depth = parts.length; depth > 0; depth--) {
+        const searchField = parts[depth - 1];
 
-      // Skip numeric indices
-      if (/^\d+$/.test(searchField)) {
-        continue;
-      }
+        // Skip numeric indices
+        if (/^\d+$/.test(searchField)) {
+          continue;
+        }
 
-      const pattern = new RegExp(`^\\s*${searchField}\\s*:`);
-      for (let i = 0; i < lines.length; i++) {
-        if (pattern.test(lines[i])) {
-          const match = lines[i].match(pattern);
-          return { line: i + 1, column: (match?.index ?? 0) + 1 };
+        const found = findField(searchField);
+        if (found) {
+          return found;
         }
       }
-    }
 
-    return undefined;
+      return undefined;
+    } catch (error) {
+      // Line locations are optional, so validation can continue without one.
+      logger.warn("Could not locate plan validation error line", error);
+      return undefined;
+    }
   }
 }

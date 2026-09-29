@@ -340,28 +340,29 @@ const SNAPSHOT_SPECS: SnapshotSpec[] = [
   {
     name: "list_preference_files",
     builder: "CtrlProxyStorage.listPreferenceFiles",
-    invoke: (h) => new CtrlProxyStorage(h.context).listPreferenceFiles("unused"),
+    invoke: (h) => new CtrlProxyStorage(h.context).listPreferenceFiles("com.example.app"),
     resolveWith: { success: true, files: [] },
   },
   {
     name: "get_preferences",
     builder: "CtrlProxyStorage.getPreferenceEntries",
-    invoke: (h) => new CtrlProxyStorage(h.context).getPreferenceEntries("unused", "Standard"),
+    invoke: (h) =>
+      new CtrlProxyStorage(h.context).getPreferenceEntries("com.example.app", "Standard"),
     resolveWith: { success: true, entries: [] },
   },
   {
     name: "get_preference",
     builder: "CtrlProxyStorage.getPreference",
     invoke: (h) =>
-      new CtrlProxyStorage(h.context).getPreference("unused", "Standard", "launch_count"),
+      new CtrlProxyStorage(h.context).getPreference("com.example.app", "Standard", "launch_count"),
     resolveWith: { success: true, found: false },
   },
   {
     name: "set_preference",
     builder: "CtrlProxyStorage.setPreference",
     invoke: (h) =>
-      new CtrlProxyStorage(h.context).setPreference(
-        "unused",
+      new CtrlProxyStorage(h.context, () => "fixture-session-id").setPreference(
+        "com.example.app",
         "Standard",
         "launch_count",
         "42",
@@ -373,13 +374,21 @@ const SNAPSHOT_SPECS: SnapshotSpec[] = [
     name: "remove_preference",
     builder: "CtrlProxyStorage.removePreference",
     invoke: (h) =>
-      new CtrlProxyStorage(h.context).removePreference("unused", "Standard", "launch_count"),
+      new CtrlProxyStorage(h.context, () => "fixture-session-id").removePreference(
+        "com.example.app",
+        "Standard",
+        "launch_count",
+      ),
     resolveWith: { success: true },
   },
   {
     name: "clear_preferences",
     builder: "CtrlProxyStorage.clearPreferenceStore",
-    invoke: (h) => new CtrlProxyStorage(h.context).clearPreferenceStore("unused", "Standard"),
+    invoke: (h) =>
+      new CtrlProxyStorage(h.context, () => "fixture-session-id").clearPreferenceStore(
+        "com.example.app",
+        "Standard",
+      ),
     resolveWith: { success: true },
   },
   {

@@ -339,7 +339,8 @@
       "builder": "CtrlProxyStorage.listPreferenceFiles",
       "wire": {
         "type": "list_preference_files",
-        "requestId": "fixture-request-id"
+        "requestId": "fixture-request-id",
+        "appId": "com.example.app"
       }
     },
     {
@@ -348,6 +349,7 @@
       "wire": {
         "type": "get_preferences",
         "requestId": "fixture-request-id",
+        "appId": "com.example.app",
         "fileName": "Standard"
       }
     },
@@ -357,6 +359,7 @@
       "wire": {
         "type": "get_preference",
         "requestId": "fixture-request-id",
+        "appId": "com.example.app",
         "fileName": "Standard",
         "key": "launch_count"
       }
@@ -367,10 +370,12 @@
       "wire": {
         "type": "set_preference",
         "requestId": "fixture-request-id",
+        "appId": "com.example.app",
         "fileName": "Standard",
         "key": "launch_count",
         "value": "42",
-        "valueType": "INT"
+        "valueType": "INT",
+        "sessionId": "fixture-session-id"
       }
     },
     {
@@ -379,8 +384,10 @@
       "wire": {
         "type": "remove_preference",
         "requestId": "fixture-request-id",
+        "appId": "com.example.app",
         "fileName": "Standard",
-        "key": "launch_count"
+        "key": "launch_count",
+        "sessionId": "fixture-session-id"
       }
     },
     {
@@ -389,7 +396,9 @@
       "wire": {
         "type": "clear_preferences",
         "requestId": "fixture-request-id",
-        "fileName": "Standard"
+        "appId": "com.example.app",
+        "fileName": "Standard",
+        "sessionId": "fixture-session-id"
       }
     },
     {

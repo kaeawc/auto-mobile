@@ -1,10 +1,16 @@
 import { describe, expect, test } from "bun:test";
 import { TapAnyElement } from "../../../src/features/action/TapAnyElement";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
+import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeElementSelector } from "../../fakes/FakeElementSelector";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeAccessibilityDetector } from "../../fakes/FakeAccessibilityDetector";
 import { FakeTalkBackTapStrategy } from "../../fakes/FakeTalkBackTapStrategy";
+import { FakeTalkBackNavigationDriver } from "../../fakes/FakeTalkBackNavigationDriver";
+import type {
+  A11yTapCoordinatesResult,
+  AccessibilityNodeSelector,
+} from "../../../src/features/observe/android/types";
 
 const createTapAnyElement = (selector: FakeElementSelector) => {
   return new TapAnyElement(
@@ -38,8 +44,8 @@ describe("TapAnyElement", () => {
       adb as any,
       { timer, elementSelector: new FakeElementSelector(makeElement()) },
     );
-    (tapAny as any).refreshViewHierarchy = async () => null;
-    (tapAny as any).observedInteraction = (action: (result: any) => Promise<unknown>) =>
+    tapAny.setRefreshViewHierarchyForTesting(async () => null);
+    tapAny.observedInteraction = (action) =>
       action({
         viewHierarchy: { hierarchy: { node: {} } },
         screenSize: { width: 500, height: 500 },
@@ -187,11 +193,11 @@ describe("TapAnyElement Android gesture dispatch", () => {
   const hierarchy = { hierarchy: { node: { marker: "before" } } };
 
   function setup(
-    result: { success: boolean; error?: string } = { success: true },
+    result: A11yTapCoordinatesResult = { success: true, totalTimeMs: 1 },
     talkBackEnabled = false,
     element = makeElement(),
   ) {
-    const adb = new FakeAdbClient();
+    const adb = new FakeAdbExecutor();
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const detector = new FakeAccessibilityDetector();
@@ -207,30 +213,36 @@ describe("TapAnyElement Android gesture dispatch", () => {
             .length,
         );
         calls.push({ x, y, duration });
-        return result;
+        return { ...result, totalTimeMs: 1 };
       },
       requestAction: async (action: string) => {
         semanticCalls.push(action);
-        return { success: true };
+        return { success: true, action, totalTimeMs: 1 };
       },
+      requestNodeAction: async (action: string, _selector: AccessibilityNodeSelector) => ({
+        success: true,
+        action,
+        totalTimeMs: 1,
+      }),
+      supportsNodeActionSelectors: async () => true,
     };
     const tapAny = new TapAnyElement(
       { name: "test-device", platform: "android", deviceId: "emulator-5554" },
-      adb as any,
+      adb,
       {
         timer,
         elementSelector: new FakeElementSelector(element),
         accessibilityDetector: detector,
-        accessibilityService: service as any,
-        talkBackStrategy: strategy as any,
-        talkBackDriverFactory: { createDriver: () => ({}) as any },
+        accessibilityService: service,
+        talkBackStrategy: strategy,
+        talkBackDriverFactory: { createDriver: () => new FakeTalkBackNavigationDriver() },
       },
     );
-    (tapAny as any).observedInteraction = (action: (value: any) => Promise<unknown>) =>
+    tapAny.observedInteraction = (action) =>
       action({ viewHierarchy: hierarchy, screenSize: { width: 500, height: 500 } });
-    (tapAny as any).refreshViewHierarchy = async () => ({
+    tapAny.setRefreshViewHierarchyForTesting(async () => ({
       hierarchy: { node: { marker: "after" } },
-    });
+    }));
     return { tapAny, adb, timer, detector, strategy, calls, adbTapCountAtRequest, semanticCalls };
   }
 
@@ -250,6 +262,7 @@ describe("TapAnyElement Android gesture dispatch", () => {
     const { tapAny, adb, calls, adbTapCountAtRequest } = setup({
       success: false,
       error: "unavailable",
+      totalTimeMs: 1,
     });
     const result = await tapAny.execute({ action: "tap" });
     expect(result.success).toBe(true);
@@ -289,7 +302,7 @@ describe("TapAnyElement Android gesture dispatch", () => {
 
   test("unchanged hierarchy retries exactly once", async () => {
     const { tapAny, calls } = setup();
-    (tapAny as any).refreshViewHierarchy = async () => hierarchy;
+    tapAny.setRefreshViewHierarchyForTesting(async () => hierarchy);
     const result = await tapAny.execute({ action: "tap" });
     expect(result.success).toBe(true);
     expect(calls).toHaveLength(2);
@@ -372,26 +385,28 @@ test.each([false, true])(
       {
         timer,
         hierarchyCapture: capture,
-        accessibilityService: { requestTapCoordinates: async () => ({ success: false }) } as any,
+        accessibilityService: {
+          requestTapCoordinates: async () => ({ success: false, totalTimeMs: 1 }),
+          requestAction: async (action) => ({ success: true, action, totalTimeMs: 1 }),
+          requestNodeAction: async (action) => ({ success: true, action, totalTimeMs: 1 }),
+          supportsNodeActionSelectors: async () => true,
+        },
       },
     );
-    const originalRefresh = (tapAny as any).refreshViewHierarchy.bind(tapAny);
     let searchFinished = false;
-    (tapAny as any).refreshViewHierarchy = async (...args: any[]) =>
-      searchFinished ? { hierarchy: { node: { marker: "after" } } } : originalRefresh(...args);
+    tapAny.setRefreshViewHierarchyForTesting(async (refresh, ...args) =>
+      searchFinished ? { hierarchy: { node: { marker: "after" } } } : refresh(...args),
+    );
     const cached = {
       observationId: "old-capture",
       screenSize: { width: 100, height: 100 },
       viewHierarchy: { hierarchy: { node: {} } },
     };
-    (tapAny as any).observedInteraction = (action: (result: any) => Promise<unknown>) =>
-      action(cached);
+    tapAny.observedInteraction = (action) => action(cached);
     // The search capture completes before the gesture; only the post-tap probe changes.
-    const originalTap = (tapAny as any).executeAndroidTap.bind(tapAny);
-    (tapAny as any).executeAndroidTap = async (...args: any[]) => {
+    tapAny.setBeforeAndroidTapForTesting(() => {
       searchFinished = true;
-      return originalTap(...args);
-    };
+    });
     const result = await tapAny.execute({ action: "tap", searchUntil: { duration: 500 } });
     expect(result).toMatchObject({ success: true });
     expect(requests).toEqual(failFirstCapture ? ["fresh", "fresh"] : ["fresh"]);

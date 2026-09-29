@@ -1,0 +1,515 @@
+import { ActionableError } from "../models";
+import type { DeviceMatchCriteria } from "../models/DeviceMatchCriteria";
+import { DEVICE_POOL_MATCHING } from "../daemon/poolConfig";
+import type { DeviceReadinessReservation } from "../daemon/devicePool";
+import { INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM } from "../daemon/constants";
+import type { DeviceMatcher } from "../utils/deviceMatcher";
+import type { PlatformDeviceManager } from "../utils/deviceUtils";
+import type { Timer } from "../utils/SystemTimer";
+import type { DeviceBootResult } from "../utils/deviceBootService";
+import type {
+  VirtualDeviceLifecycleCoordinator,
+  VirtualDeviceLifecycleLease,
+} from "../utils/virtualDeviceLifecycleCoordinator";
+import { stableStringify } from "../utils/stableStringify";
+import { createPerformanceTracker } from "../utils/PerformanceTracker";
+import { ambientPerfFor, runWithPerfTracker } from "../utils/PerfContext";
+import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../utils/deviceTimeouts";
+import { DEFAULT_RUNNER_PROVISION_TIMEOUT_MS } from "../utils/runnerReadinessConfig";
+import { isAndroidEmulatorSerial } from "../utils/androidSerial";
+import { logger } from "../utils/logger";
+import { errorMessage } from "../utils/describeUnknownError";
+import type { ProgressCallback } from "./toolRegistry";
+import {
+  acceptancePresentationOrder,
+  acquisitionLifecycleTimeoutError,
+  cancelUnownedColdBoot,
+  describeStartDeviceRequest,
+  getAndroidSchema,
+  getAppleSchema,
+  getDeviceToolsDependencies,
+  reserveAndroidStartupLease,
+  reserveStableDeviceLifecycle,
+  resolveAndroidStartStableDeviceLifecycleTarget,
+  runWithinShutdownDeadline,
+  validateRequestedAndroidIdentifiersBeforeBoot,
+} from "./deviceTools";
+import type {
+  DevicePreparationBudgets,
+  DeviceToolsDependencies,
+  GetAndroidArgs,
+  GetAppleArgs,
+  StableDeviceTarget,
+  StartDeviceArgs,
+} from "./deviceTools";
+import type { createStartDeviceHandlers } from "./deviceToolsStartDevice";
+
+type AcquisitionHooks = {
+  getBootAndPrepareDevice: () => ReturnType<
+    typeof createStartDeviceHandlers
+  >["bootAndPrepareDevice"];
+};
+
+export function createAcquisitionHandlers(hooks: AcquisitionHooks) {
+  const { getBootAndPrepareDevice } = hooks;
+
+  const reserveStartStableDeviceLifecycle = async (
+    stableTarget: StableDeviceTarget | undefined,
+    budgets: DevicePreparationBudgets,
+    timer: Timer,
+    deadlineMs: number,
+    signal: AbortSignal | undefined,
+    coordinator: VirtualDeviceLifecycleCoordinator,
+  ): Promise<VirtualDeviceLifecycleLease | undefined> => {
+    if (!stableTarget) {
+      return undefined;
+    }
+    return await reserveStableDeviceLifecycle(
+      stableTarget,
+      {
+        name: stableTarget.stableId,
+        platform: stableTarget.platform,
+        deviceId: stableTarget.stableId,
+      },
+      timer,
+      deadlineMs,
+      signal,
+      (detail) =>
+        acquisitionLifecycleTimeoutError(
+          budgets,
+          `${stableTarget.platform}:${stableTarget.stableId}`,
+          detail,
+        ),
+      "start",
+      coordinator,
+    );
+  };
+
+  const resolveStartStableDeviceLifecycleTarget = async (
+    args: StartDeviceArgs,
+    budgets: DevicePreparationBudgets,
+    deviceUtils: PlatformDeviceManager,
+    deviceMatcher: DeviceMatcher,
+    timer: Timer,
+    signal: AbortSignal | undefined,
+  ): Promise<StableDeviceTarget | undefined> => {
+    if (budgets.stableTarget) {
+      return budgets.stableTarget;
+    }
+    if (args.platform === "android" && args.deviceId) {
+      return await resolveAndroidStartStableDeviceLifecycleTarget(
+        args.deviceId,
+        budgets.automationDeadlineMs,
+        deviceUtils,
+        timer,
+        signal,
+      );
+    }
+    if (args.platform !== "ios" || !args.name || args.deviceId) {
+      return undefined;
+    }
+    const discovery = await runWithinShutdownDeadline(
+      { name: args.name, platform: "ios", deviceId: args.name },
+      timer,
+      budgets.automationDeadlineMs,
+      "iOS simulator identity discovery did not complete",
+      signal,
+      async () =>
+        await deviceUtils.getDeviceImagesDetailed("ios", {
+          bypassIosDeviceListCache: true,
+        }),
+    );
+    if (!discovery.succeededPlatforms.has("ios")) {
+      throw new ActionableError(
+        `Cannot uniquely resolve iOS device '${args.name}' for lifecycle coordination; provide deviceId.`,
+      );
+    }
+    const criteria: DeviceMatchCriteria = {
+      platform: "ios",
+      name: args.name,
+      minOsVersion: args.minOsVersion,
+      maxOsVersion: args.maxOsVersion,
+      formFactor: args.formFactor,
+      screenSize: args.screenSize,
+    };
+    const match = deviceMatcher.matchDeviceImage(
+      criteria,
+      discovery.devices.filter((device) => device.platform === "ios" && device.deviceId),
+      DEVICE_POOL_MATCHING,
+    );
+    if (!match?.deviceId) {
+      // This legacy name is a creation criterion when create-if-missing is
+      // enabled, not the stable identity of an existing simulator.
+      return undefined;
+    }
+    return { platform: "ios", stableId: match.deviceId };
+  };
+
+  const reserveStartSelectorDeviceLifecycle = async (
+    args: StartDeviceArgs,
+    budgets: DevicePreparationBudgets,
+    deps: DeviceToolsDependencies,
+    signal: AbortSignal | undefined,
+  ): Promise<VirtualDeviceLifecycleLease> => {
+    const selector = stableStringify({
+      deviceId: args.deviceId,
+      name: args.name,
+      minOsVersion: args.minOsVersion,
+      maxOsVersion: args.maxOsVersion,
+      formFactor: args.formFactor,
+      screenSize: args.screenSize,
+    });
+    try {
+      return await deps.lifecycleCoordinator.reserve(
+        { kind: "selector", platform: args.platform, selector },
+        { operation: "start", deadlineMs: budgets.automationDeadlineMs, signal },
+      );
+    } catch (error) {
+      // Same acquisition-phase labeling as the stable-identity path above; the
+      // selector fallback had no deadline attribution at all.
+      if (deps.timer.now() >= budgets.automationDeadlineMs) {
+        throw acquisitionLifecycleTimeoutError(
+          budgets,
+          `${args.platform}:${selector}`,
+          "waiting for selector device lifecycle reservation",
+        );
+      }
+      throw error;
+    }
+  };
+
+  const reserveStartDeviceLifecycleReservations = async (
+    args: StartDeviceArgs,
+    budgets: DevicePreparationBudgets,
+    deps: DeviceToolsDependencies,
+    deviceUtils: PlatformDeviceManager,
+    deviceMatcher: DeviceMatcher,
+    bootDeadlineMs: number,
+    signal: AbortSignal | undefined,
+  ): Promise<{
+    releaseAndroidStartupLease: (() => Promise<void>) | undefined;
+    lifecycleLease: VirtualDeviceLifecycleLease;
+  }> => {
+    let releaseAndroidStartupLease: (() => Promise<void>) | undefined;
+    let lifecycleLease: VirtualDeviceLifecycleLease | undefined;
+    try {
+      releaseAndroidStartupLease = await reserveAndroidStartupLease(
+        args,
+        budgets,
+        bootDeadlineMs,
+        deps.timer,
+        deviceUtils,
+        signal,
+      );
+      const stableTarget = await resolveStartStableDeviceLifecycleTarget(
+        args,
+        budgets,
+        deviceUtils,
+        deviceMatcher,
+        deps.timer,
+        signal,
+      );
+      lifecycleLease =
+        (await reserveStartStableDeviceLifecycle(
+          stableTarget,
+          budgets,
+          deps.timer,
+          budgets.automationDeadlineMs,
+          signal,
+          deps.lifecycleCoordinator,
+        )) ?? (await reserveStartSelectorDeviceLifecycle(args, budgets, deps, signal));
+      if (stableTarget?.platform === "ios" && args.name && !args.deviceId) {
+        const revalidatedTarget = await resolveStartStableDeviceLifecycleTarget(
+          args,
+          budgets,
+          deviceUtils,
+          deviceMatcher,
+          deps.timer,
+          signal,
+        );
+        if (
+          revalidatedTarget?.platform !== "ios" ||
+          revalidatedTarget.stableId !== stableTarget.stableId
+        ) {
+          throw new ActionableError(
+            `iOS simulator '${args.name}' changed while waiting for lifecycle coordination; retry the request.`,
+          );
+        }
+      }
+      return { releaseAndroidStartupLease, lifecycleLease };
+    } catch (error) {
+      lifecycleLease?.release();
+      await releaseAndroidStartupLease?.();
+      throw error;
+    }
+  };
+
+  const prepareDevice = async (
+    args: StartDeviceArgs,
+    budgets: DevicePreparationBudgets,
+    progress?: ProgressCallback,
+    signal?: AbortSignal,
+  ) => {
+    const perf = createPerformanceTracker(true);
+    perf.serial(budgets.operationName);
+    const deps = getDeviceToolsDependencies();
+    const deviceUtils = deps.deviceManagerFactory();
+    const deviceMatcher = deps.deviceMatcherFactory();
+    const bootDeadlineMs = deps.timer.now() + budgets.bootTimeoutMs;
+    const requestedIdentity = describeStartDeviceRequest(args);
+    const state: {
+      boot: DeviceBootResult | undefined;
+      ownershipTransferred: boolean;
+      // Every unowned cold boot this request cancelled, recovery included, plus
+      // a pre-boot reconcile still in flight when its deadline fired. The
+      // lifecycle lease is released only once all of them have settled.
+      coldBootSettlements: Promise<void>[];
+      bindingSettlements: Promise<unknown>[];
+    } = {
+      boot: undefined,
+      ownershipTransferred: false,
+      coldBootSettlements: [],
+      bindingSettlements: [],
+    };
+    const releaseReadinessReservations: DeviceReadinessReservation[] = [];
+    let lifecycleReservations:
+      | Awaited<ReturnType<typeof reserveStartDeviceLifecycleReservations>>
+      | undefined;
+    try {
+      // Scope the pre-boot lifecycle reservation (runs `getDeviceImagesDetailed`
+      // → `simctl list` discovery) so its commands attribute into perfTiming,
+      // matching the boot scope inside bootAndPrepareDevice (see PerfContext).
+      lifecycleReservations = await runWithPerfTracker(ambientPerfFor(perf), () =>
+        reserveStartDeviceLifecycleReservations(
+          args,
+          budgets,
+          deps,
+          deviceUtils,
+          deviceMatcher,
+          bootDeadlineMs,
+          signal,
+        ),
+      );
+      const coordinatedSignals = [signal, lifecycleReservations.lifecycleLease.signal].filter(
+        (candidate): candidate is AbortSignal => candidate !== undefined,
+      );
+      const coordinatedSignal =
+        coordinatedSignals.length === 1
+          ? coordinatedSignals[0]
+          : AbortSignal.any(coordinatedSignals);
+      // Reject a contradictory Android avdName + deviceId pair before booting,
+      // so a stopped AVD is not cold-booted and killed just to report it. Run
+      // after its lifecycle lease, however, so a serial not yet visible during
+      // reset recovery gets a chance to appear before discovery decides.
+      await runWithPerfTracker(ambientPerfFor(perf), () =>
+        validateRequestedAndroidIdentifiersBeforeBoot(
+          budgets.requestedAndroidIdentifierPair,
+          deviceUtils,
+          bootDeadlineMs,
+          deps.timer,
+          coordinatedSignal,
+          (settlement) => {
+            if (settlement) {
+              state.coldBootSettlements.push(settlement);
+            }
+          },
+        ),
+      );
+      return await getBootAndPrepareDevice()(
+        args,
+        budgets,
+        deps,
+        deviceUtils,
+        deviceMatcher,
+        bootDeadlineMs,
+        requestedIdentity,
+        progress,
+        coordinatedSignal,
+        perf,
+        releaseReadinessReservations,
+        lifecycleReservations.lifecycleLease,
+        state,
+      );
+    } catch (error) {
+      perf.end();
+      if (!state.ownershipTransferred) {
+        const settlement = cancelUnownedColdBoot(state.boot);
+        if (settlement) {
+          state.coldBootSettlements.push(settlement);
+        }
+      }
+      if (error instanceof ActionableError) {
+        throw error;
+      }
+      throw new ActionableError(`Failed to start ${args.platform} device: ${error}`);
+    } finally {
+      const releaseReadiness = async () => {
+        for (const releaseReservation of releaseReadinessReservations.reverse()) {
+          await releaseReservation();
+        }
+      };
+      if (state.bindingSettlements.length > 0) {
+        // A cancelled binding may still hold the assignment mutex while its
+        // persistence write drains. Keep identity reservations until rollback
+        // settles, but do not make the timed-out caller wait for that write.
+        void Promise.allSettled([...state.bindingSettlements, ...state.coldBootSettlements])
+          .then(async () => {
+            try {
+              await releaseReadiness();
+            } finally {
+              lifecycleReservations?.lifecycleLease.release();
+              await lifecycleReservations?.releaseAndroidStartupLease?.();
+            }
+          })
+          .catch((error: unknown) => {
+            logger.warn(
+              `[DeviceTools] Deferred binding reservation release failed: ${errorMessage(error)}`,
+              error,
+            );
+          });
+      } else {
+        await releaseReadiness();
+        if (state.coldBootSettlements.length > 0) {
+          // Release exactly once whatever the settlements do — the bounded wait in
+          // `cancelUnownedColdBoot` guarantees each completes, and `finally`
+          // guarantees the lease is not stranded if one completes by rejecting.
+          // A System UI ANR replacement retired mid-recovery settles here too, so
+          // the AVD's key cannot be handed to the next request while the emulator
+          // this one only signalled is still running.
+          void Promise.allSettled(state.coldBootSettlements)
+            .finally(() => lifecycleReservations?.lifecycleLease.release())
+            .catch((error: unknown) => {
+              logger.warn(
+                `[DeviceTools] Deferred lifecycle lease release failed: ${errorMessage(error)}`,
+                error,
+              );
+            });
+        } else {
+          lifecycleReservations?.lifecycleLease.release();
+        }
+        await lifecycleReservations?.releaseAndroidStartupLease?.();
+      }
+    }
+  };
+
+  // Compatibility implementation. New callers use getAndroid/getApple so their
+  // platform identity and readiness budgets are explicit.
+  const stripInternalAcquisitionParams = (rawArgs: object) => {
+    const externalArgs = { ...rawArgs } as Record<string, unknown>;
+    delete externalArgs.__mcpSessionId;
+    delete externalArgs.__executionId;
+    delete externalArgs.__executionStartTime;
+    delete externalArgs.__mcpRequestTimeoutMs;
+    delete externalArgs.__mcpRequestDeadlineMs;
+    delete externalArgs.__mcpLiveDeadlineKey;
+    delete externalArgs[INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM];
+    return externalArgs;
+  };
+  const getAndroidHandler = async (
+    rawArgs: GetAndroidArgs & Record<string, unknown>,
+    progress?: ProgressCallback,
+    signal?: AbortSignal,
+  ) => {
+    const { __mcpSessionId } = rawArgs;
+    const presentationOrder = acceptancePresentationOrder(rawArgs);
+    const externalArgs = stripInternalAcquisitionParams(rawArgs);
+    const args = getAndroidSchema.parse(externalArgs);
+    const bootTimeoutMs = args.bootTimeoutMs ?? DEFAULT_DEVICE_READY_TIMEOUT_MS;
+    const automationReadyTimeoutMs =
+      args.automationReadyTimeoutMs ?? DEFAULT_RUNNER_PROVISION_TIMEOUT_MS;
+    const startedAtMs = getDeviceToolsDependencies().timer.now();
+    const mcpSessionId = typeof __mcpSessionId === "string" ? __mcpSessionId : undefined;
+    // Prefer the AVD name (exact virtual-device identity); otherwise target the
+    // booted serial by deviceId (#5870). A paired AVD name and serial keeps
+    // lifecycle coordination by stable name while directing boot to the
+    // validated serial.
+    const explicitAdbSerial =
+      args.deviceId && isAndroidEmulatorSerial(args.deviceId) ? args.deviceId : undefined;
+    const target: StartDeviceArgs = args.avdName
+      ? {
+          platform: "android",
+          name: args.avdName,
+          ...(explicitAdbSerial ? { deviceId: explicitAdbSerial } : {}),
+          matchExactName: true,
+          ...(presentationOrder !== undefined ? { presentationOrder } : {}),
+          preferRunning: true,
+          createIfMissing: false,
+          __mcpSessionId: mcpSessionId,
+        }
+      : {
+          platform: "android",
+          deviceId: args.deviceId,
+          preferRunning: true,
+          createIfMissing: false,
+          __mcpSessionId: mcpSessionId,
+        };
+    return await prepareDevice(
+      target,
+      {
+        bootTimeoutMs,
+        automationReadyTimeoutMs,
+        automationDeadlineMs: startedAtMs + bootTimeoutMs + automationReadyTimeoutMs,
+        operationName: "getAndroid",
+        ...(args.avdName
+          ? {
+              androidAvdName: args.avdName,
+              stableTarget: { platform: "android", stableId: args.avdName },
+              ...(args.deviceId
+                ? {
+                    requestedAndroidIdentifierPair: {
+                      avdName: args.avdName,
+                      deviceId: args.deviceId,
+                    },
+                  }
+                : {}),
+            }
+          : {}),
+      },
+      progress,
+      signal,
+    );
+  };
+
+  const getAppleHandler = async (
+    rawArgs: GetAppleArgs & Record<string, unknown>,
+    progress?: ProgressCallback,
+    signal?: AbortSignal,
+  ) => {
+    const { __mcpSessionId } = rawArgs;
+    const presentationOrder = acceptancePresentationOrder(rawArgs);
+    const externalArgs = stripInternalAcquisitionParams(rawArgs);
+    const args = getAppleSchema.parse(externalArgs);
+    // #5870: `deviceId` is an accepted alias for `udid` on iOS.
+    const udid = args.udid ?? args.deviceId!;
+    const bootTimeoutMs = args.bootTimeoutMs ?? DEFAULT_DEVICE_READY_TIMEOUT_MS;
+    const automationReadyTimeoutMs =
+      args.automationReadyTimeoutMs ?? DEFAULT_RUNNER_PROVISION_TIMEOUT_MS;
+    const startedAtMs = getDeviceToolsDependencies().timer.now();
+    return await prepareDevice(
+      {
+        platform: "ios",
+        deviceId: udid,
+        preferRunning: true,
+        ...(presentationOrder !== undefined ? { presentationOrder } : {}),
+        createIfMissing: false,
+        __mcpSessionId: typeof __mcpSessionId === "string" ? __mcpSessionId : undefined,
+      },
+      {
+        bootTimeoutMs,
+        automationReadyTimeoutMs,
+        automationDeadlineMs: startedAtMs + bootTimeoutMs + automationReadyTimeoutMs,
+        operationName: "getApple",
+        stableTarget: { platform: "ios", stableId: udid },
+      },
+      progress,
+      signal,
+    );
+  };
+
+  return {
+    prepareDevice,
+    stripInternalAcquisitionParams,
+    getAndroidHandler,
+    getAppleHandler,
+  };
+}

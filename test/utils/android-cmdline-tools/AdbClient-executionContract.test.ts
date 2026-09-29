@@ -92,6 +92,62 @@ describe("AdbClient retry contract", () => {
     expect(dispatches).toBe(0);
   });
 
+  test("does not retry a genuine adb authorization error", async () => {
+    let calls = 0;
+    const client = new AdbClient(
+      DEVICE,
+      async () => {
+        calls += 1;
+        throw new Error("error: unauthorized");
+      },
+      null,
+      ...autoRetrySeam(),
+    );
+
+    await expect(client.executeCommand("shell dumpsys window")).rejects.toThrow("unauthorized");
+    expect(calls).toBe(1);
+  });
+
+  test("does not classify echoed command output as an adb non-retryable error", async () => {
+    let calls = 0;
+    const client = new AdbClient(
+      DEVICE,
+      async () => {
+        calls += 1;
+        throw wrapCommandError(new Error("exit 1"), {
+          command: "adb",
+          args: ["shell", "some-command"],
+          stdout: "app reported status offline",
+        });
+      },
+      null,
+      ...autoRetrySeam(),
+    );
+
+    await expect(client.executeCommand("shell dumpsys window")).rejects.toThrow("offline");
+    expect(calls).toBe(4);
+  });
+
+  test.each([
+    "Failure [INSTALL_FAILED_VERSION_DOWNGRADE]",
+    "Failure [INSTALL_FAILED_UPDATE_INCOMPATIBLE]",
+    "Failure [INSTALL_PARSE_FAILED_NO_CERTIFICATES]",
+  ])("does not retry deterministic package install failure: %s", async (message) => {
+    let calls = 0;
+    const client = new AdbClient(
+      DEVICE,
+      async () => {
+        calls += 1;
+        throw new Error(message);
+      },
+      null,
+      ...autoRetrySeam(),
+    );
+
+    await expect(client.executeCommand("install app.apk")).rejects.toThrow(message);
+    expect(calls).toBe(1);
+  });
+
   test("retries a transient failure and succeeds within MAX_ADB_RETRIES", async () => {
     let calls = 0;
     const exec = (): Promise<ExecResult> => {

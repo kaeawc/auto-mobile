@@ -808,8 +808,18 @@ export class AdbClient implements AdbExecutor {
    * Returns true if the error should NOT be retried.
    */
   private isNonRetryableError(error: Error): boolean {
-    const message = error.message.toLowerCase();
-    if (isAdbMissingDeviceError(error, this.device?.deviceId)) {
+    const underlying = error.cause instanceof Error ? error.cause : error;
+    const stderr = (underlying as Error & { stderr?: string | Buffer }).stderr;
+    const message = (
+      stderr
+        ? Buffer.isBuffer(stderr)
+          ? stderr.toString()
+          : stderr
+        : underlying.message.startsWith("Command failed:")
+          ? ""
+          : underlying.message
+    ).toLowerCase();
+    if (isAdbMissingDeviceError(underlying, this.device?.deviceId)) {
       return true;
     }
     const nonRetryablePatterns = [
@@ -822,6 +832,11 @@ export class AdbClient implements AdbExecutor {
       "syntax error",
       "device not found",
       "no devices",
+      "install_failed_version_downgrade",
+      "install_failed_update_incompatible",
+      "install_parse_failed_no_certificates",
+      "install_parse_failed_inconsistent_certificates",
+      "install_parse_failed_unexpected_exception",
     ];
     return nonRetryablePatterns.some((pattern) => message.includes(pattern));
   }

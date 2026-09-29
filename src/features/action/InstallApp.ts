@@ -1,3 +1,4 @@
+import { packageListingContains } from "../../utils/android-cmdline-tools/shellOutputHeuristics";
 import { errorMessage } from "../../utils/describeUnknownError";
 import path from "path";
 import {
@@ -165,7 +166,7 @@ export class InstallApp {
 
     let isInstalled = false;
     if (packageName) {
-      const packageNameForCommand = packageName;
+      const packageNameToCheck = packageName;
       // Check if app is already installed for this user.
       isInstalled = await perf.track("checkInstalled", async () => {
         try {
@@ -178,7 +179,7 @@ export class InstallApp {
           // fall through to ADB
         }
         try {
-          const isInstalledCmd = `shell pm list packages --user ${targetUserId} -f ${shellQuote(packageNameForCommand)} | grep -c ${shellQuote(packageNameForCommand)}`;
+          const isInstalledCmd = `shell pm list packages --user ${targetUserId}`;
           const isInstalledOutput = await this.adb.executeCommand(
             isInstalledCmd,
             undefined,
@@ -186,7 +187,7 @@ export class InstallApp {
             true,
             signal,
           );
-          return parseInt(isInstalledOutput.trim(), 10) > 0;
+          return packageListingContains(isInstalledOutput.toString(), packageNameToCheck);
         } catch (error) {
           // Both the a11y check and this pm/grep fallback failed; treat the package as
           // not installed rather than blocking the install flow on a query error.
@@ -319,7 +320,7 @@ export class InstallApp {
         installArgs,
         ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS,
         undefined,
-        undefined,
+        true,
         signal,
       );
       const output = [result.stdout, result.stderr].filter(Boolean).join("\n");

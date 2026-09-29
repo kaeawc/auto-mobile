@@ -1,6 +1,11 @@
 import { beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { Keyboard } from "../../../src/features/action/Keyboard";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
+import { decodeCtrlProxyMessage } from "../../../src/features/observe/ios/decodeCtrlProxyMessage";
+import type {
+  CtrlProxyKeyboardResult,
+  WebSocketMessage,
+} from "../../../src/features/observe/ios/types";
 import { BootedDevice, ViewHierarchyResult } from "../../../src/models";
 import { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
@@ -449,6 +454,99 @@ describe("Keyboard", () => {
       const result = await keyboard.execute("close");
 
       expect(result).toMatchObject({ success: true, open: false, method, message });
+    } finally {
+      getInstanceSpy.mockRestore();
+    }
+  });
+
+  test("ios close preserves the method and warning from a Swift-shaped JSON response", async () => {
+    const wire = JSON.parse(
+      JSON.stringify({
+        type: "keyboard_result",
+        timestamp: 1_780_000_000_000,
+        requestId: "keyboard-1",
+        success: true,
+        open: false,
+        totalTimeMs: 418,
+        error: null,
+        method: "returnKey",
+      }),
+    ) as WebSocketMessage;
+    const decoded = decodeCtrlProxyMessage(wire);
+    expect(decoded?.requestId).toBe("keyboard-1");
+    const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+      requestKeyboard: async () => decoded?.result as CtrlProxyKeyboardResult,
+    } as IOSCtrlProxyClient);
+
+    try {
+      const keyboard = new Keyboard(iosDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
+      const result = await keyboard.execute("close");
+      expect(result).toMatchObject({
+        success: true,
+        open: false,
+        method: "returnKey",
+        message:
+          "Keyboard closed with Return; the field may have submitted or committed autocorrect",
+      });
+    } finally {
+      getInstanceSpy.mockRestore();
+    }
+  });
+
+  test("ios close timeout succeeds if one bounded detect confirms closed", async () => {
+    const calls: Array<{ action: string; timeoutMs?: number }> = [];
+    const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+      requestKeyboard: async (action: string, timeoutMs?: number) => {
+        calls.push({ action, timeoutMs });
+        return action === "close"
+          ? {
+              success: false,
+              open: false,
+              totalTimeMs: 8000,
+              error: "Keyboard timed out after 8000ms",
+            }
+          : { success: true, open: false, totalTimeMs: 10 };
+      },
+    } as IOSCtrlProxyClient);
+
+    try {
+      const keyboard = new Keyboard(iosDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
+      const result = await keyboard.execute("close");
+      expect(result.success).toBe(true);
+      expect(result.open).toBe(false);
+      expect(result.message).toContain("dismissal method unknown");
+      expect(calls).toEqual([
+        { action: "close", timeoutMs: undefined },
+        { action: "detect", timeoutMs: 2000 },
+      ]);
+    } finally {
+      getInstanceSpy.mockRestore();
+    }
+  });
+
+  test("ios close timeout makes one detect and returns the original error after a 2s probe cap", async () => {
+    const calls: string[] = [];
+    const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+      requestKeyboard: async (action: string) => {
+        calls.push(action);
+        if (action === "close") {
+          return {
+            success: false,
+            open: false,
+            totalTimeMs: 8000,
+            error: "Keyboard timed out after 8000ms",
+          };
+        }
+        return new Promise<CtrlProxyKeyboardResult>(() => {});
+      },
+    } as IOSCtrlProxyClient);
+
+    try {
+      const keyboard = new Keyboard(iosDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
+      const result = await keyboard.execute("close");
+      expect(result).toMatchObject({ success: false, error: "Keyboard timed out after 8000ms" });
+      expect(calls).toEqual(["close", "detect"]);
+      expect(fakeTimer.now()).toBe(2000);
     } finally {
       getInstanceSpy.mockRestore();
     }

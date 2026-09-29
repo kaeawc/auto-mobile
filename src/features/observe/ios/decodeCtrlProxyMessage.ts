@@ -135,6 +135,7 @@ export function decodeCtrlProxyMessage(message: WebSocketMessage): DecodedCtrlPr
       result = {
         success: message.success ?? true,
         open: message.open ?? false,
+        method: message.method,
         totalTimeMs: message.totalTimeMs ?? 0,
         error: message.error,
         perfTiming: message.perfTiming,

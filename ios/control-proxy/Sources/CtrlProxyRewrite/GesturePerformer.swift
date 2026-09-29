@@ -250,6 +250,18 @@ public final class GesturePerformer: GesturePerforming {
         return dismiss + returns
     }
 
+    /// Next close poll, bounded by both the current attempt and the whole action.
+    nonisolated static func closePollDelay(
+        now: TimeInterval,
+        attemptDeadline: TimeInterval,
+        closeDeadline: TimeInterval
+    )
+        -> TimeInterval?
+    {
+        let remaining = min(attemptDeadline, closeDeadline) - now
+        return remaining > 0 ? min(0.1, remaining) : nil
+    }
+
     #if canImport(XCTest) && os(iOS)
         private weak var application: XCUIApplication?
         /// Strong reference to keep the application alive when set via updateApplication.
@@ -979,6 +991,7 @@ public final class GesturePerformer: GesturePerforming {
                 }
                 return KeyboardActionResult(open: waitForKeyboardVisibility(app: app, expected: true))
             case "close":
+                let closeDeadline = ProcessInfo.processInfo.systemUptime + 3.5
                 if !isKeyboardVisible(app: app) {
                     return KeyboardActionResult(open: false)
                 }
@@ -987,8 +1000,12 @@ public final class GesturePerformer: GesturePerforming {
                 } catch {
                     print("[GesturePerformer] keyboard Escape failed: \(error)")
                 }
-                if !waitForKeyboardVisibility(app: app, expected: false) {
+                if waitForKeyboardClose(app: app, closeDeadline: closeDeadline) {
                     return KeyboardActionResult(open: false, method: "escape")
+                }
+
+                guard ProcessInfo.processInfo.systemUptime < closeDeadline else {
+                    return KeyboardActionResult(open: isKeyboardVisible(app: app))
                 }
 
                 let keys: [XCUIElement]
@@ -1006,6 +1023,13 @@ public final class GesturePerformer: GesturePerforming {
                     return KeyboardActionResult(open: open, method: open ? nil : "escape")
                 }
                 for candidate in Self.closeKeyCandidates(labels) {
+                    // Escape may have finished hiding the keyboard during key lookup.
+                    if !isKeyboardVisible(app: app) {
+                        return KeyboardActionResult(open: false, method: "escape")
+                    }
+                    guard ProcessInfo.processInfo.systemUptime < closeDeadline else {
+                        return KeyboardActionResult(open: true)
+                    }
                     do {
                         try catchingObjCException { keys[candidate.index].tap() }
                     } catch {
@@ -1015,11 +1039,11 @@ public final class GesturePerformer: GesturePerforming {
                         }
                         continue
                     }
-                    if !waitForKeyboardVisibility(app: app, expected: false) {
+                    if waitForKeyboardClose(app: app, closeDeadline: closeDeadline) {
                         return KeyboardActionResult(open: false, method: candidate.method)
                     }
                 }
-                return KeyboardActionResult(open: true)
+                return KeyboardActionResult(open: isKeyboardVisible(app: app))
             default:
                 throw GestureError.notSupported("Keyboard action: \(action)")
             }
@@ -1336,6 +1360,19 @@ public final class GesturePerformer: GesturePerforming {
                 visible = isKeyboardVisible(app: app)
             }
             return visible
+        }
+
+        private func waitForKeyboardClose(app: XCUIApplication, closeDeadline: TimeInterval) -> Bool {
+            let attemptDeadline = min(ProcessInfo.processInfo.systemUptime + 0.6, closeDeadline)
+            while isKeyboardVisible(app: app) {
+                guard let delay = Self.closePollDelay(
+                    now: ProcessInfo.processInfo.systemUptime,
+                    attemptDeadline: attemptDeadline,
+                    closeDeadline: closeDeadline
+                ) else { return false }
+                RunLoop.current.run(until: Date().addingTimeInterval(delay))
+            }
+            return true
         }
 
         private func isKeyboardVisible(app: XCUIApplication) -> Bool {

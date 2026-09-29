@@ -3662,6 +3662,7 @@ describe("Daemon manager process detection", () => {
   });
 
   test("degrades after persistent process-table timeouts during daemon start", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "daemon-manager-timeout-degraded-start-test-"));
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const processFinder = new TimeoutThenSuccessDaemonProcessFinder(Number.POSITIVE_INFINITY);
@@ -3670,9 +3671,9 @@ describe("Daemon manager process detection", () => {
       undefined,
       undefined,
       timer,
-      undefined,
-      undefined,
-      undefined,
+      join(directory, "daemon.lock"),
+      join(directory, "daemon.pid"),
+      join(directory, "daemon.sock"),
       processFinder,
       undefined,
       undefined,
@@ -3704,6 +3705,7 @@ describe("Daemon manager process detection", () => {
       expect(warnSpy).toHaveBeenCalledTimes(1);
     } finally {
       warnSpy.mockRestore();
+      rmSync(directory, { recursive: true, force: true });
     }
   });
 
@@ -3768,6 +3770,7 @@ describe("Daemon manager process detection", () => {
   });
 
   test("fails closed after persistent process-table timeouts when the canonical port is bound", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "daemon-manager-timeout-bound-port-test-"));
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const processFinder = new TimeoutThenSuccessDaemonProcessFinder(Number.POSITIVE_INFINITY);
@@ -3776,9 +3779,9 @@ describe("Daemon manager process detection", () => {
       undefined,
       undefined,
       timer,
-      undefined,
-      undefined,
-      undefined,
+      join(directory, "daemon.lock"),
+      join(directory, "daemon.pid"),
+      join(directory, "daemon.sock"),
       processFinder,
       undefined,
       undefined,
@@ -3790,21 +3793,27 @@ describe("Daemon manager process detection", () => {
       portChecker,
     );
 
-    const findForStart = (
-      manager as unknown as {
-        findLiveDaemonProcessesForStart(
-          options: DaemonOptions,
-          startDeadline: number,
-        ): Promise<number[]>;
-      }
-    ).findLiveDaemonProcessesForStart.bind(manager);
+    try {
+      const findForStart = (
+        manager as unknown as {
+          findLiveDaemonProcessesForStart(
+            options: DaemonOptions,
+            startDeadline: number,
+          ): Promise<number[]>;
+        }
+      ).findLiveDaemonProcessesForStart.bind(manager);
 
-    await expect(findForStart({}, timer.now() + DAEMON_STARTUP_TIMEOUT_MS)).resolves.toEqual([-1]);
-    expect(processFinder.calls).toBe(3);
-    expect(portChecker.checkedProbes).toEqual([
-      { host: "127.0.0.1", port: 3000 },
-      { host: "::1", port: 3000 },
-    ]);
+      await expect(findForStart({}, timer.now() + DAEMON_STARTUP_TIMEOUT_MS)).resolves.toEqual([
+        -1,
+      ]);
+      expect(processFinder.calls).toBe(3);
+      expect(portChecker.checkedProbes).toEqual([
+        { host: "127.0.0.1", port: 3000 },
+        { host: "::1", port: 3000 },
+      ]);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   test("probes the persisted owner port after configured and default ports during timeout degradation", async () => {
@@ -3985,6 +3994,9 @@ describe("Daemon manager process detection", () => {
   });
 
   test("probes loopback alternates so an incumbent on 127.0.0.1:3000 is found from a ::1 start", async () => {
+    const directory = mkdtempSync(
+      join(tmpdir(), "daemon-manager-timeout-loopback-alternates-test-"),
+    );
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const processFinder = new TimeoutThenSuccessDaemonProcessFinder(Number.POSITIVE_INFINITY);
@@ -3995,9 +4007,9 @@ describe("Daemon manager process detection", () => {
       undefined,
       undefined,
       timer,
-      undefined,
-      undefined,
-      undefined,
+      join(directory, "daemon.lock"),
+      join(directory, "daemon.pid"),
+      join(directory, "daemon.sock"),
       processFinder,
       undefined,
       undefined,
@@ -4008,29 +4020,34 @@ describe("Daemon manager process detection", () => {
       undefined,
       portChecker,
     );
-    const findForStart = (
-      manager as unknown as {
-        findLiveDaemonProcessesForStart(
-          options: DaemonOptions,
-          startDeadline: number,
-        ): Promise<number[]>;
-      }
-    ).findLiveDaemonProcessesForStart.bind(manager);
+    try {
+      const findForStart = (
+        manager as unknown as {
+          findLiveDaemonProcessesForStart(
+            options: DaemonOptions,
+            startDeadline: number,
+          ): Promise<number[]>;
+        }
+      ).findLiveDaemonProcessesForStart.bind(manager);
 
-    const options: DaemonOptions = { host: "::1", port: 4567 };
-    await expect(findForStart(options, timer.now() + DAEMON_STARTUP_TIMEOUT_MS)).resolves.toEqual([
-      -1,
-    ]);
-    expect(options.strictPort).toBeUndefined();
-    expect(portChecker.checkedProbes).toEqual([
-      { host: "::1", port: 4567 },
-      { host: "127.0.0.1", port: 4567 },
-      { host: "::1", port: 3000 },
-      { host: "127.0.0.1", port: 3000 },
-    ]);
+      const options: DaemonOptions = { host: "::1", port: 4567 };
+      await expect(findForStart(options, timer.now() + DAEMON_STARTUP_TIMEOUT_MS)).resolves.toEqual(
+        [-1],
+      );
+      expect(options.strictPort).toBeUndefined();
+      expect(portChecker.checkedProbes).toEqual([
+        { host: "::1", port: 4567 },
+        { host: "127.0.0.1", port: 4567 },
+        { host: "::1", port: 3000 },
+        { host: "127.0.0.1", port: 3000 },
+      ]);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   test("runs degraded port probes concurrently within the remaining start deadline", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "daemon-manager-timeout-concurrent-probes-test-"));
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const processFinder = new TimeoutThenSuccessDaemonProcessFinder(Number.POSITIVE_INFINITY);
@@ -4039,9 +4056,9 @@ describe("Daemon manager process detection", () => {
       undefined,
       undefined,
       timer,
-      undefined,
-      undefined,
-      undefined,
+      join(directory, "daemon.lock"),
+      join(directory, "daemon.pid"),
+      join(directory, "daemon.sock"),
       processFinder,
       undefined,
       undefined,
@@ -4052,28 +4069,32 @@ describe("Daemon manager process detection", () => {
       undefined,
       portChecker,
     );
-    const findForStart = (
-      manager as unknown as {
-        findLiveDaemonProcessesForStart(
-          options: DaemonOptions,
-          startDeadline: number,
-        ): Promise<number[]>;
-      }
-    ).findLiveDaemonProcessesForStart.bind(manager);
+    try {
+      const findForStart = (
+        manager as unknown as {
+          findLiveDaemonProcessesForStart(
+            options: DaemonOptions,
+            startDeadline: number,
+          ): Promise<number[]>;
+        }
+      ).findLiveDaemonProcessesForStart.bind(manager);
 
-    const startDeadline = timer.now() + DAEMON_STARTUP_TIMEOUT_MS;
-    await expect(findForStart({ port: 4567 }, startDeadline)).resolves.toEqual([]);
+      const startDeadline = timer.now() + DAEMON_STARTUP_TIMEOUT_MS;
+      await expect(findForStart({ port: 4567 }, startDeadline)).resolves.toEqual([]);
 
-    // Four probes (two ports x two loopback hosts) all in flight together, each
-    // handed the SAME remaining budget rather than an independent timer.
-    expect(portChecker.maxInFlight).toBe(4);
-    expect(portChecker.checkedProbes).toHaveLength(4);
-    const budgets = new Set(portChecker.probeBudgets);
-    expect(budgets.size).toBe(1);
-    const [budget] = [...budgets];
-    expect(budget).toBeGreaterThan(0);
-    expect(budget).toBeLessThanOrEqual(DAEMON_STARTUP_TIMEOUT_MS);
-    expect(timer.now()).toBeLessThanOrEqual(startDeadline);
+      // Four probes (two ports x two loopback hosts) all in flight together, each
+      // handed the SAME remaining budget rather than an independent timer.
+      expect(portChecker.maxInFlight).toBe(4);
+      expect(portChecker.checkedProbes).toHaveLength(4);
+      const budgets = new Set(portChecker.probeBudgets);
+      expect(budgets.size).toBe(1);
+      const [budget] = [...budgets];
+      expect(budget).toBeGreaterThan(0);
+      expect(budget).toBeLessThanOrEqual(DAEMON_STARTUP_TIMEOUT_MS);
+      expect(timer.now()).toBeLessThanOrEqual(startDeadline);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   test("fails closed without probing ports when the start deadline leaves no probe budget", async () => {

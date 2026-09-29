@@ -1723,6 +1723,79 @@ steps:
   });
 
   describe("Error message quality", () => {
+    it("validates metadata keys with punctuation promptly", () => {
+      const longValue = `${"a".repeat(40)}!`;
+      const yaml = `name: metadata-keys
+steps:
+  - tool: observe
+metadata:
+  treatments:
+    "(a+)+$": 1
+  note: "${longValue}"
+  ${longValue}: decoy
+`;
+
+      const started = performance.now();
+      const result = validator.validateYaml(yaml);
+      const elapsed = performance.now() - started;
+
+      expect(elapsed).toBeLessThan(50);
+      expect(result.valid).toBe(false);
+      expect(result.errors).toContainEqual({
+        field: "metadata.treatments.(a+)+$",
+        message: "Must be of type 'string', but got number",
+        line: 5,
+        column: 1,
+      });
+    });
+
+    it("returns a validation error for a metadata key with unmatched punctuation", () => {
+      const yaml = `name: metadata-keys
+steps:
+  - tool: observe
+metadata:
+  treatments:
+    a(: 1
+`;
+
+      const result = validator.validateYaml(yaml);
+
+      expect(result.valid).toBe(false);
+      expect(result.errors).toContainEqual({
+        field: "metadata.treatments.a(",
+        message: "Must be of type 'string', but got number",
+        line: 6,
+        column: 1,
+      });
+    });
+
+    it("retains line numbers for ordinary metadata keys", () => {
+      const yaml = `name: metadata-keys
+steps:
+  - tool: observe
+metadata:
+  treatments:
+    exp_1: 1
+    dotted.key: 2
+`;
+
+      const result = validator.validateYaml(yaml);
+
+      expect(result.valid).toBe(false);
+      expect(result.errors).toContainEqual({
+        field: "metadata.treatments.exp_1",
+        message: "Must be of type 'string', but got number",
+        line: 6,
+        column: 1,
+      });
+      expect(result.errors).toContainEqual({
+        field: "metadata.treatments.dotted.key",
+        message: "Must be of type 'string', but got number",
+        line: 5,
+        column: 1,
+      });
+    });
+
     it("should provide helpful error for additionalProperties", () => {
       const yaml = `
 name: test-plan

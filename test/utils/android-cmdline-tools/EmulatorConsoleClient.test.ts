@@ -1,15 +1,17 @@
 import { FakeSocket } from "../../fakes/FakeNetServer";
 import { expect, describe, test, beforeEach } from "bun:test";
+import { ActionableError } from "../../../src/models/ActionableError";
 import {
   consolePortFromSerial,
   EmulatorConsoleAuthTokenReader,
+  parseConsoleAcknowledgement,
   RealEmulatorConsoleClient,
   EmulatorConsoleTransport,
 } from "../../../src/utils/android-cmdline-tools/EmulatorConsoleClient";
 
 class RecordingTransport implements EmulatorConsoleTransport {
   public calls: { host: string; port: number; authToken: string | null; commands: string[] }[] = [];
-  public nextOutput: string = "OK\n";
+  public nextOutput: string = "Android Console\nOK\nOK\nOK\n";
   public failWith: Error | null = null;
 
   async execute(
@@ -75,6 +77,47 @@ describe("RealEmulatorConsoleClient", () => {
     expect(transport.calls[0].commands).toEqual(["gsm call +15551234567"]);
   });
 
+  test("accepts an explicit OK terminal line", async () => {
+    transport.nextOutput = "Android Console\nOK\nOK\nOK\n";
+    await expect(client.gsmCall("5551234567")).resolves.toBeUndefined();
+  });
+
+  test("accepts CRLF banner, auth, and command acknowledgements", async () => {
+    transport.nextOutput = "Android Console\r\nOK\r\nOK\r\nOK\r\n";
+    await expect(client.gsmCall("5551234567")).resolves.toBeUndefined();
+  });
+
+  test("rejects a close after banner and auth acknowledgements without a command ack", async () => {
+    // The first OK is the banner acknowledgement and the second is auth; there
+    // is no third terminal line acknowledging the command.
+    transport.nextOutput = "Android Console\r\nOK\r\nOK\r\n";
+    await expect(client.gsmCall("5551234567")).rejects.toThrow(/closed before acknowledging/);
+  });
+
+  test("rejects a response closed before an OK terminal line (#6569)", async () => {
+    // Regression for #6569: this fails before the fix because no KO was
+    // treated as success, so the call resolves instead of rejecting.
+    transport.nextOutput = "";
+    await expect(client.gsmCall("5551234567")).rejects.toThrow(/closed before acknowledging/);
+  });
+
+  test("rejects partial output without an OK or KO terminal line", async () => {
+    transport.nextOutput = "some partial garbage with no terminal line\n";
+    await expect(client.gsmCall("5551234567")).rejects.toThrow(/closed before acknowledging/);
+  });
+
+  test("propagates transport timeout errors unchanged", async () => {
+    const timeout = new ActionableError("Emulator console connection timed out after 5000ms");
+    transport.failWith = timeout;
+    await expect(client.gsmCall("5551234567")).rejects.toBe(timeout);
+  });
+
+  test("accepts data lines before an explicit OK terminal line", async () => {
+    transport.nextOutput =
+      "Android Console: type 'help' for a list of commands\nOK\nOK\nsome data line\nOK\n";
+    await expect(client.gsmCall("5551234567")).resolves.toBeUndefined();
+  });
+
   test("gsmAccept/gsmCancel/gsmBusy each send their respective command", async () => {
     await client.gsmAccept("5551234567");
     await client.gsmCancel("5551234567");
@@ -99,6 +142,7 @@ describe("RealEmulatorConsoleClient", () => {
 
   test("falls back to null auth token when reader returns null", async () => {
     client = new RealEmulatorConsoleClient(5554, transport, new StaticTokenReader(null));
+    transport.nextOutput = "Android Console\r\nOK\r\nOK\r\n";
     await client.gsmCall("5551234567");
     expect(transport.calls[0].authToken).toBeNull();
   });
@@ -124,15 +168,46 @@ describe("RealEmulatorConsoleClient", () => {
 
   test("throws ActionableError when transport output contains a KO: response", async () => {
     transport.nextOutput =
-      "Android Console: type 'help' for a list of commands\nOK\nKO: unknown command\n";
+      "Android Console: type 'help' for a list of commands\r\nOK\r\nOK\r\nKO: unknown command\r\n";
     await expect(client.gsmCall("5551234567")).rejects.toThrow(
       /Emulator console rejected command: unknown command/,
     );
   });
 
+  test("reports CRLF KO reasons without carriage returns", async () => {
+    transport.nextOutput = "Android Console\r\nOK\r\nOK\r\nKO: some reason\r\n";
+    const error = await client.gsmCall("5551234567").catch((caught: Error) => caught);
+    expect(error.message).toContain("some reason");
+    expect(error.message).not.toContain("\r");
+  });
+
   test("propagates transport errors", async () => {
     transport.failWith = new Error("ECONNREFUSED");
     await expect(client.smsSend("5551234567", "hi")).rejects.toThrow(/ECONNREFUSED/);
+  });
+});
+
+describe("parseConsoleAcknowledgement", () => {
+  test("succeeds with exactly one OK per command after banner and auth", () => {
+    expect(parseConsoleAcknowledgement("OK\r\nOK\r\nOK\r\n", true, 1)).toEqual({ ok: true });
+  });
+
+  test("fails with one fewer OK than commands after banner and auth", () => {
+    expect(parseConsoleAcknowledgement("OK\r\nOK\r\nOK\r\n", true, 2)).toEqual({
+      ok: false,
+    });
+  });
+
+  test("fails with a post-skip KO and reports its reason", () => {
+    expect(parseConsoleAcknowledgement("OK\r\nOK\r\nKO: rejected\r\n", true, 1)).toEqual({
+      ok: false,
+      reason: "rejected",
+    });
+  });
+
+  test("skips only the banner acknowledgement when there is no auth token", () => {
+    expect(parseConsoleAcknowledgement("OK\r\nOK\r\n", false, 1)).toEqual({ ok: true });
+    expect(parseConsoleAcknowledgement("OK\r\n", false, 1)).toEqual({ ok: false });
   });
 });
 

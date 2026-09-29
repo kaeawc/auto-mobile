@@ -68,7 +68,42 @@ export class FileEmulatorConsoleAuthTokenReader implements EmulatorConsoleAuthTo
   }
 }
 
-const KO_REGEX = /^KO:\s*(.+)$/m;
+export type ConsoleAcknowledgementResult = { ok: true } | { ok: false; reason?: string };
+
+/**
+ * Checks that every command has a corresponding successful console response.
+ * The first terminal line acknowledges the console banner, followed by an
+ * optional auth response, before command responses begin.
+ */
+export function parseConsoleAcknowledgement(
+  rawOutput: string,
+  hadAuthToken: boolean,
+  commandCount: number,
+): ConsoleAcknowledgementResult {
+  const output = rawOutput.replace(/\r\n?/g, "\n");
+  type TerminalLine = { type: "ok" } | { type: "ko"; reason: string };
+  const terminalLines: TerminalLine[] = [];
+  for (const rawLine of output.split("\n")) {
+    const line = rawLine.trim();
+    if (line === "OK" || line.startsWith("OK:")) {
+      terminalLines.push({ type: "ok" });
+    } else if (line.startsWith("KO:")) {
+      terminalLines.push({ type: "ko", reason: line.slice(3).trim() });
+    }
+  }
+
+  const skipCount = 1 + (hadAuthToken ? 1 : 0);
+  const commandAcknowledgements = terminalLines.slice(skipCount);
+  const rejected = commandAcknowledgements.find(
+    (line): line is Extract<TerminalLine, { type: "ko" }> => line.type === "ko",
+  );
+  if (rejected) {
+    return { ok: false, reason: rejected.reason };
+  }
+
+  const okCount = commandAcknowledgements.filter((line) => line.type === "ok").length;
+  return okCount >= commandCount ? { ok: true } : { ok: false };
+}
 
 export class NetEmulatorConsoleTransport implements EmulatorConsoleTransport {
   constructor(
@@ -197,9 +232,14 @@ export class RealEmulatorConsoleClient implements EmulatorConsoleClient {
     return trackAmbient(`emulator-console ${verb}`.trimEnd(), async () => {
       const token = await this.tokenReader.read();
       const output = await this.transport.execute("localhost", this.port, token, commands);
-      const ko = KO_REGEX.exec(output);
-      if (ko) {
-        throw new ActionableError(`Emulator console rejected command: ${ko[1].trim()}`);
+      const acknowledgement = parseConsoleAcknowledgement(output, token !== null, commands.length);
+      if (!acknowledgement.ok && acknowledgement.reason !== undefined) {
+        throw new ActionableError(`Emulator console rejected command: ${acknowledgement.reason}`);
+      }
+      if (!acknowledgement.ok) {
+        throw new ActionableError(
+          `Emulator console closed before acknowledging '${commands.join(", ")}'`,
+        );
       }
     });
   }

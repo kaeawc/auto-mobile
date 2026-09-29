@@ -9,20 +9,10 @@ const CHILD_PROCESS_MODULES = new Set(["child_process", "node:child_process"]);
 const ALLOWED_IMPORTERS = new Set([
   "src/daemon/DaemonLauncher.ts",
   "src/daemon/devicePool.ts",
-  "src/daemon/manager.ts",
   "src/daemon/processTable.ts",
-  "src/features/webrtc/processSpawner.ts",
-  "src/server/deviceToolsProvisioning.ts",
-  "src/server/deviceToolsStartDevice.ts",
   "src/utils/GitMetadataClient.ts",
   "src/utils/HostCommandExecutor.ts",
   "src/utils/IOSCtrlProxyManager.ts",
-  "src/utils/android-cmdline-tools/AdbClient.ts",
-  "src/utils/android-cmdline-tools/AndroidEmulatorClient.ts",
-  "src/utils/android-cmdline-tools/AvdManagerClient.ts",
-  "src/utils/android-cmdline-tools/SdkManagerClient.ts",
-  "src/utils/deviceBootService.ts",
-  "src/utils/deviceUtils.ts",
 ]);
 
 interface Violation {

@@ -1,4 +1,5 @@
 import { errorMessage } from "./describeUnknownError";
+import { DefaultHostCommandExecutor, type HostProcessExecutor } from "./HostCommandExecutor";
 import { logger } from "./logger";
 import { shellQuote } from "./shellQuote";
 import {
@@ -50,37 +51,29 @@ import {
  */
 export type HostExec = (file: string, args: string[], stdin?: string) => Promise<ExecResult>;
 
-const makeExecResult = (stdout: string, stderr: string): ExecResult => ({
-  stdout,
-  stderr,
-  toString() {
-    return stdout;
-  },
-  trim() {
-    return stdout.trim();
-  },
-  includes(searchString: string) {
-    return stdout.includes(searchString);
-  },
-});
+const hostProcessExecutor = new DefaultHostCommandExecutor();
 
-const defaultHostExec: HostExec = async (file, args, stdin) => {
-  const { execFile } = await import("child_process");
-  return new Promise<ExecResult>((resolve, reject) => {
-    const child = execFile(file, args, { maxBuffer: 16 * 1024 * 1024 }, (error, stdout, stderr) => {
-      if (error) {
-        reject(error);
-        return;
-      }
-      const out = typeof stdout === "string" ? stdout : stdout.toString();
-      const err = typeof stderr === "string" ? stderr : stderr.toString();
-      resolve(makeExecResult(out, err));
-    });
-    if (stdin !== undefined) {
-      child.stdin?.end(stdin);
-    }
-  });
-};
+export const createDefaultHostExec =
+  (
+    executor: Pick<HostProcessExecutor, "executeCommandWithChild"> = hostProcessExecutor,
+  ): HostExec =>
+  (file, args, stdin) =>
+    Promise.resolve()
+      .then(() => {
+        const { child, result } = executor.executeCommandWithChild(file, args, {
+          maxBuffer: 16 * 1024 * 1024,
+        });
+        if (stdin !== undefined) {
+          child.stdin?.end(stdin);
+        }
+        return result;
+      })
+      .then(undefined, (error: Error) => {
+        // The host seam wraps callback and startup errors; HostExec exposes the raw error.
+        throw error.cause ?? error;
+      });
+
+const defaultHostExec = createDefaultHostExec();
 
 /**
  * Interface for deep link management and intent chooser handling

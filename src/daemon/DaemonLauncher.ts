@@ -1,6 +1,5 @@
 import {
   execFileSync as nodeExecFileSync,
-  spawn as nodeSpawn,
   type ChildProcess,
   type SpawnOptions,
 } from "node:child_process";
@@ -15,6 +14,7 @@ import {
 import { posix, win32 } from "node:path";
 import { ActionableError } from "../models";
 import { trackProcess, waitForExit, type TrackedChildProcess } from "../utils/ChildProcessTracker";
+import { DefaultHostCommandExecutor } from "../utils/HostCommandExecutor";
 import { releaseVersion } from "../utils/mcpVersion";
 import { logger } from "../utils/logger";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
@@ -180,6 +180,10 @@ export interface DaemonProcessSpawner {
   spawn(command: string, args: string[], options: SpawnOptions): DaemonLaunchedProcess;
 }
 
+const hostProcessExecutor = new DefaultHostCommandExecutor();
+const defaultDaemonSpawn: DaemonProcessSpawner["spawn"] = (command, args, options) =>
+  hostProcessExecutor.spawn(command, args, options);
+
 /** Process surface used during daemon startup and stderr relay. */
 export interface DaemonLaunchedProcess extends TrackedChildProcess {
   unref(): void;
@@ -313,7 +317,7 @@ export class DaemonLauncher {
     this.platform = dependencies.platform ?? process.platform;
     this.processExecPath = dependencies.processExecPath ?? process.execPath;
     this.executableExists = dependencies.executableExists ?? existsSync;
-    this.spawn = dependencies.spawn ?? nodeSpawn;
+    this.spawn = dependencies.spawn ?? defaultDaemonSpawn;
     this.timer = dependencies.timer ?? defaultTimer;
     this.processGroupKiller = dependencies.processGroupKiller ?? defaultProcessGroupKiller;
   }

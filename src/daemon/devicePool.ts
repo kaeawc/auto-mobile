@@ -16,7 +16,6 @@ import {
   type BootedDeviceDiscovery,
   waitForDeviceReadyOrCancel,
 } from "../utils/deviceUtils";
-import { exponentialBackoff } from "../utils/Backoff";
 import { toActionableError } from "../models/ActionableError";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { type IdGenerator, defaultIdGenerator } from "../utils/IdGenerator";
@@ -86,6 +85,12 @@ import {
 } from "./emulatorLossIncident";
 import { EmulatorLossIncidentLedger } from "./emulatorLossIncidentLedger";
 import {
+  AndroidRecoveryRecordLedger,
+  type AndroidRecoveryRecordFinalization,
+  type AndroidRecoveryRecord,
+  type AndroidRecoveryReservationKind,
+} from "./androidRecoveryRecordLedger";
+import {
   getVirtualDeviceLifecycleCoordinator,
   type VirtualDeviceLifecycleCoordinator,
 } from "../utils/virtualDeviceLifecycleCoordinator";
@@ -139,14 +144,6 @@ export class DevicePoolError extends Error {
 export type DeviceStatus = "idle" | "busy" | "error";
 type AndroidRediscoveryVerification = "rediscovered" | "not-rediscovered" | "unknown";
 export type CurrentDisconnectStatus = "current" | "recovered" | "unknown";
-const FAILED_RELEASE_RETRY_BASE_DELAY_MS = 5_000;
-const FAILED_RELEASE_RETRY_BACKOFF_MULTIPLIER = 2;
-const FAILED_RELEASE_RETRY_MAX_DELAY_MS = 300_000;
-const failedReleaseRetryBackoff = exponentialBackoff({
-  initialDelayMs: FAILED_RELEASE_RETRY_BASE_DELAY_MS,
-  multiplier: FAILED_RELEASE_RETRY_BACKOFF_MULTIPLIER,
-  maxDelayMs: FAILED_RELEASE_RETRY_MAX_DELAY_MS,
-});
 const UNCONFIRMED_RECOVERY_SHUTDOWN_COOLDOWN_MS = 30_000;
 const RECOVERING_IMAGE_SETTLEMENT_MISSING_RETRY_MS = 250;
 const MAX_DEFERRED_RECOVERY_SHUTDOWNS = 1;
@@ -169,27 +166,6 @@ export type SessionPreservingRecoveryResult =
 interface SessionPreservingRecovery {
   promise: Promise<SessionPreservingRecoveryResult>;
   incidentId?: string;
-}
-type AndroidRecoveryReservationKind =
-  | "image"
-  | "reset-cohort"
-  | "quarantine"
-  | "loss"
-  | "failed-release";
-
-interface AndroidRecoveryRecord {
-  sessionId: string;
-  generation: number;
-  deviceId: string;
-  expectedDevice?: PooledDevice;
-  incidentId?: string;
-  preparation?: symbol;
-  avdName?: string;
-  deferredUntil?: number;
-  deferredShutdowns: number;
-  failedReleaseAttempts?: number;
-  state: "pending" | "deferred" | "released" | "finalized";
-  reservations: Set<AndroidRecoveryReservationKind>;
 }
 export interface SessionRecoveryPreparation {
   sessionId: string;
@@ -761,17 +737,19 @@ export class DevicePool {
   private readonly androidStartupLeases: Map<symbol, AndroidStartupLeaseRequest> = new Map();
   /** Sessions whose old serial may be reused before their reset cohort settles. */
   private readonly adbServerResetQuarantinedSessions: Set<string> = new Set();
-  /** Recovery sessions whose durable terminal release must be retried before unquarantining. */
-  private readonly failedTerminalRecoveryReleases: Set<string> = new Set();
-  /** The canonical recovery record for each session; legacy callers observe this same map. */
-  private readonly recoveringSessionLosses = new Map<string, AndroidRecoveryRecord>();
-  private nextAndroidRecoveryGeneration = 0;
   private readonly sessionPreservingRecoveries = new Map<string, SessionPreservingRecovery>();
   private readonly recoveringAndroidDeviceIds: Set<string> = new Set();
   private readonly androidRecoveryHandoffOwners = new Map<string, symbol>();
   private readonly startedDeviceProcesses: Map<string, ChildProcess> = new Map();
   private readonly startedDeviceProcessOutput: Map<string, EmulatorProcessOutputTail> = new Map();
   private readonly emulatorLossLedger: EmulatorLossIncidentLedger;
+  private readonly androidRecoveryRecordLedger: AndroidRecoveryRecordLedger;
+  private get recoveringSessionLosses(): Map<string, AndroidRecoveryRecord> {
+    return this.androidRecoveryRecordLedger.recoveringSessionLosses;
+  }
+  private get failedTerminalRecoveryReleases(): Set<string> {
+    return this.androidRecoveryRecordLedger.failedTerminalRecoveryReleases;
+  }
   private get emulatorLossIncidentStore(): EmulatorLossIncidentStore {
     return this.emulatorLossLedger.emulatorLossIncidentStore;
   }
@@ -920,6 +898,14 @@ export class DevicePool {
     this.onDeviceReady = onDeviceReady;
     this.onDeviceRemoved = onDeviceRemoved;
     this.cancelDeviceSessionExecutions = cancelDeviceSessionExecutions ?? (async () => 0);
+    this.androidRecoveryRecordLedger = new AndroidRecoveryRecordLedger(
+      {
+        getDevice: (deviceId) => this.getDevice(deviceId),
+        getSession: (sessionId) => this.sessionManager.getSession(sessionId),
+        clearAdbResetReservation: (record) => this.clearAdbResetRecoveryReservation(record),
+      },
+      this.timer,
+    );
     this.emulatorLossLedger = new EmulatorLossIncidentLedger(
       {
         getDevice: (deviceId) => this.getDevice(deviceId),
@@ -1009,44 +995,25 @@ export class DevicePool {
     reservations: readonly AndroidRecoveryReservationKind[],
     replace = false,
   ): AndroidRecoveryRecord {
-    let record = this.recoveringSessionLosses.get(sessionId);
-    if (!record || replace) {
-      record = {
+    return this.trackAndroidRecoveryQuarantine(
+      this.androidRecoveryRecordLedger.startAndroidRecoveryRecord(
         sessionId,
-        generation: ++this.nextAndroidRecoveryGeneration,
-        deviceId: details.deviceId ?? "",
-        deferredShutdowns: 0,
-        state: "pending",
-        reservations: new Set(),
-      };
-      this.recoveringSessionLosses.set(sessionId, record);
-    } else {
-      // Reusing the record starts a new attempt. The previous attempt's
-      // expired deadline must not survive into it: a terminal failure that
-      // retains the fence would otherwise stay "due" for every deferred-retry
-      // sweep and relaunch recovery instead of waiting for a later durable
-      // release. A released record keeps that state so the attempt finalizes.
-      record.deferredUntil = undefined;
-      if (record.state !== "released") {
-        record.state = "pending";
-      }
-    }
-    Object.assign(record, details);
-    for (const reservation of reservations) {
-      record.reservations.add(reservation);
-    }
+        details,
+        reservations,
+        replace,
+      ),
+    );
+  }
+
+  private trackAndroidRecoveryQuarantine(record: AndroidRecoveryRecord): AndroidRecoveryRecord {
     if (record.reservations.has("quarantine")) {
-      this.adbServerResetQuarantinedSessions.add(sessionId);
+      this.adbServerResetQuarantinedSessions.add(record.sessionId);
     }
     return record;
   }
 
   private markAndroidRecoveryRecordReleased(sessionId: string): AndroidRecoveryRecord | undefined {
-    const record = this.recoveringSessionLosses.get(sessionId);
-    if (record && record.state !== "finalized") {
-      record.state = "released";
-    }
-    return record;
+    return this.androidRecoveryRecordLedger.markAndroidRecoveryRecordReleased(sessionId);
   }
 
   /**
@@ -1057,24 +1024,26 @@ export class DevicePool {
     sessionId: string,
     expectedRecord?: AndroidRecoveryRecord,
   ): boolean {
-    const record = this.recoveringSessionLosses.get(sessionId);
-    if (!record || (expectedRecord !== undefined && record !== expectedRecord)) {
+    return this.completeAndroidRecoveryRecordFinalization(
+      this.androidRecoveryRecordLedger.finalizeRecoveryRecord(sessionId, expectedRecord),
+    );
+  }
+
+  private completeAndroidRecoveryRecordFinalization(
+    finalization: AndroidRecoveryRecordFinalization | undefined,
+  ): boolean {
+    if (!finalization) {
       return false;
     }
-    record.state = "finalized";
+    const { record } = finalization;
     if (record.reservations.has("image") && record.avdName) {
       this.clearRecoveringAndroidImage(record.avdName);
     }
-    this.clearAdbResetRecoveryReservation(record);
+    finalization.clearAdbResetReservation();
     if (record.reservations.has("quarantine")) {
-      this.adbServerResetQuarantinedSessions.delete(sessionId);
+      this.adbServerResetQuarantinedSessions.delete(record.sessionId);
     }
-    if (record.reservations.has("failed-release")) {
-      this.failedTerminalRecoveryReleases.delete(sessionId);
-      record.reservations.delete("failed-release");
-      record.failedReleaseAttempts = 0;
-    }
-    this.recoveringSessionLosses.delete(sessionId);
+    finalization.finish();
     return true;
   }
 
@@ -1094,11 +1063,7 @@ export class DevicePool {
   }
 
   private markAndroidRecoveryReleaseFailure(record: AndroidRecoveryRecord): void {
-    record.reservations.add("failed-release");
-    this.failedTerminalRecoveryReleases.add(record.sessionId);
-    record.failedReleaseAttempts = (record.failedReleaseAttempts ?? 0) + 1;
-    record.deferredUntil =
-      this.timer.now() + failedReleaseRetryBackoff.delayForAttempt(record.failedReleaseAttempts);
+    this.androidRecoveryRecordLedger.markAndroidRecoveryReleaseFailure(record);
   }
 
   private async finalizeReleasedRecoveryAfterAwait(

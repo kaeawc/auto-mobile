@@ -84,7 +84,7 @@ final class PerfProvider: PerfTracking {
     /// binding survives its `await`s into `@MainActor`/off-main collaborators. `body` is
     /// `nonisolated(nonsending)` so this resolves to the non-deprecated `TaskLocal.withValue`
     /// overload (the `isolation:`-parameter form is deprecated under Swift 6.2).
-    func withScope<T>(_ body: nonisolated(nonsending) () async throws -> T) async rethrows -> T {
+    func withScope<T>(_ body: nonisolated(nonsending)() async throws -> T) async rethrows -> T {
         try await PerfProvider.$activeScope.withValue(PerfCallScope(), operation: body)
     }
 
@@ -250,6 +250,15 @@ final class PerfProvider: PerfTracking {
         }
         entries.append(contentsOf: shared.withLock { $0.completed })
         return entries
+    }
+
+    /// Snapshot the innermost open entry with this name in the current scope without ending it
+    /// or reading or changing the shared completed-root pool.
+    func snapshot(_ name: String) -> PerfTiming? {
+        guard let entry = PerfProvider.scope?.entryStack.last(where: { $0.name == name }) else {
+            return nil
+        }
+        return entry.toTiming(timeProvider: timeProvider)
     }
 
     /// Whether there is any accumulated timing data (current-scope root, pooled roots, or debounce).

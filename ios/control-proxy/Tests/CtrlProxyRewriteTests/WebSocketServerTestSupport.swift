@@ -15,9 +15,11 @@ struct FakeCommandHandling: CommandHandling {
 /// the server's use of it is orchestration, so calls aren't recorded here).
 struct FakePerfTracking: PerfTracking {
     let flushResult: [PerfTiming]?
+    let snapshotResult: PerfTiming? = nil
     func serial(_: String) {}
     func end() {}
     func flush() -> [PerfTiming]? { flushResult }
+    func snapshot(_: String) -> PerfTiming? { snapshotResult }
     func clear() {}
     func withScope<T>(_ body: nonisolated(nonsending)() async throws -> T) async rethrows -> T {
         try await body()

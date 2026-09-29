@@ -391,13 +391,13 @@ final class CommandHandler: CommandHandling {
 
         let enriched = await enrichWithMatchingSdkHierarchy(hierarchy)
 
-        // Get accumulated timing for this operation.
-        let perfTimings = perf.flush()
+        // Snapshot this operation without closing the outer request span or draining pooled roots.
+        let perfTiming = perf.snapshot("handleRequestHierarchy")
 
         return HierarchyUpdateResponse(
             requestId: request.requestId,
             data: enriched,
-            perfTiming: perfTimings?.first,
+            perfTiming: perfTiming,
             frameContext: frameContext.context(for: enriched)
         )
     }

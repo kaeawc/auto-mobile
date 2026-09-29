@@ -3492,6 +3492,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     // immediately rather than blocking on the CtrlProxy wait until its timeout
     // (issue #6289).
     const combinedSignal = combineWithAmbientAbort(signal);
+    let requestId: string | undefined;
     try {
       // Fast-fail if not already connected to avoid stalling callers
       // (all callers fall back to ADB keyevent on failure)
@@ -3512,7 +3513,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         };
       }
 
-      const requestId = this.requestManager.generateId("global_action");
+      requestId = this.requestManager.generateId("global_action");
       const promise = this.requestManager.register<{
         success: boolean;
         action: string;
@@ -3539,6 +3540,12 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
       return await this.awaitCancellableRequest(requestId, promise, combinedSignal, startTime);
     } catch (error) {
+      if (requestId) {
+        this.requestManager.reject(
+          requestId,
+          error instanceof Error ? error : new Error(String(error)),
+        );
+      }
       return {
         success: false,
         action,
@@ -3562,6 +3569,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     // request does not keep the keyed device operation busy for the remaining
     // request budget (issue #6289).
     const combinedSignal = combineWithAmbientAbort(signal);
+    let requestId: string | undefined;
     try {
       if (!this.isConnected()) {
         return {
@@ -3578,7 +3586,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         };
       }
 
-      const requestId = this.requestManager.generateId("validate_frame_context");
+      requestId = this.requestManager.generateId("validate_frame_context");
       const promise = this.requestManager.register<{
         success: boolean;
         totalTimeMs: number;
@@ -3600,6 +3608,12 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
       return await this.awaitCancellableRequest(requestId, promise, combinedSignal, startTime);
     } catch (error) {
+      if (requestId) {
+        this.requestManager.reject(
+          requestId,
+          error instanceof Error ? error : new Error(String(error)),
+        );
+      }
       return { success: false, totalTimeMs: this.timer.now() - startTime, error: `${error}` };
     }
   }
@@ -3661,6 +3675,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     error?: string;
   }> {
     const startTime = this.timer.now();
+    let requestId: string | undefined;
     try {
       const connected = await perf.track("ensureConnection", () => this.connectWebSocket(perf));
       if (!connected) {
@@ -3671,7 +3686,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         };
       }
 
-      const requestId = this.requestManager.generateId("device_info");
+      requestId = this.requestManager.generateId("device_info");
       const promise = this.requestManager.register<any>(
         requestId,
         "device_info",
@@ -3691,6 +3706,12 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
       return await promise;
     } catch (error) {
+      if (requestId) {
+        this.requestManager.reject(
+          requestId,
+          error instanceof Error ? error : new Error(String(error)),
+        );
+      }
       return { success: false, totalTimeMs: this.timer.now() - startTime, error: `${error}` };
     }
   }

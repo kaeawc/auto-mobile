@@ -250,8 +250,12 @@ class WorkspaceShellUiTest {
       var savedDeviceName: String? = null
       var savedBytes: ByteArray? = null
       var dispatched: WorkspaceAction? = null
+      val deviceSessionUuid = "session-a"
       val state =
-        WorkspaceUiState.Content(columns = listOf(col("a", "Pixel 8")), focusedDeviceId = "a")
+        WorkspaceUiState.Content(
+          columns = listOf(col("a", "Pixel 8").copy(deviceSessionUuid = deviceSessionUuid)),
+          focusedDeviceId = "a",
+        )
       setContent {
         MaterialTheme {
           WorkspaceShell(
@@ -275,6 +279,7 @@ class WorkspaceShellUiTest {
       waitUntil(timeoutMillis = 5_000L) { fake.observationRequestCount == 1 }
       assertEquals(null, dispatched)
       assertEquals("a", fake.lastConnectedDeviceId)
+      assertEquals(deviceSessionUuid, fake.lastConnectedDeviceSessionUuid)
       assertEquals("a", fake.lastObservationDeviceId)
 
       // The returned frame's PNG bytes are written via the saver, and the pane confirms where.

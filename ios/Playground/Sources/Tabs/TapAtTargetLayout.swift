@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 /// Geometry and hit-testing for the visual-only tap target canvas.
@@ -35,6 +36,15 @@ enum TapAtTargetLayout {
 
         var center: CGPoint {
             CGPoint(x: rect.midX, y: rect.midY)
+        }
+
+        func contains(_ point: CGPoint) -> Bool {
+            guard rect.contains(point) else { return false }
+            if case .circle = kind {
+                let radius = rect.width / 2
+                return hypot(point.x - center.x, point.y - center.y) <= radius
+            }
+            return true
         }
     }
 
@@ -98,14 +108,14 @@ enum TapAtTargetLayout {
         }
 
         return Resolution(
-            hitTargetID: targets.first(where: { $0.rect.contains(point) })?.id,
+            hitTargetID: targets.first(where: { $0.contains(point) })?.id,
             nearestTargetID: nearest.id,
             distanceFromNearestCenter: distance(from: point, to: nearest)
         )
     }
 
-    static func summary(hitTargetIDs: Set<String>) -> String {
+    static func summary(hitTargetIDs: Set<String>, backgroundMisses: Int) -> String {
         let misses = (1 ... targetCount).map { "T\($0)" }.filter { !hitTargetIDs.contains($0) }
-        return "hits: \(targetCount - misses.count)/\(targetCount), misses: [\(misses.joined(separator: ", "))]"
+        return "hits: \(targetCount - misses.count)/\(targetCount), misses: [\(misses.joined(separator: ", "))], background misses: \(backgroundMisses)"
     }
 }

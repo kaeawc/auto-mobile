@@ -8,6 +8,7 @@ import SwiftUI
 struct TapAtTargetsDemo: View {
     @Environment(\.autoMobileTheme) private var theme
     @State private var hitTargetIDs = Set<String>()
+    @State private var backgroundMisses = 0
     @State private var lastResult: String?
     @State private var flashedTargetID: String?
     @State private var flashToken = UUID()
@@ -73,7 +74,7 @@ struct TapAtTargetsDemo: View {
                 .foregroundStyle(theme.textPrimary)
                 .accessibilityIdentifier("tapat-last-result")
 
-            Text(TapAtTargetLayout.summary(hitTargetIDs: hitTargetIDs))
+            Text(TapAtTargetLayout.summary(hitTargetIDs: hitTargetIDs, backgroundMisses: backgroundMisses))
                 .font(theme.typography.labelMedium)
                 .foregroundStyle(theme.textSecondary)
                 .accessibilityIdentifier("tapat-summary")
@@ -81,8 +82,10 @@ struct TapAtTargetsDemo: View {
             HStack {
                 Button("Reset") {
                     hitTargetIDs.removeAll()
+                    backgroundMisses = 0
                     lastResult = nil
                     flashedTargetID = nil
+                    flashToken = UUID()
                 }
                 .accessibilityIdentifier("tapat-reset")
 
@@ -165,6 +168,7 @@ struct TapAtTargetsDemo: View {
                 flashedTargetID = nil
             }
         } else {
+            backgroundMisses += 1
             flashedTargetID = nil
         }
     }

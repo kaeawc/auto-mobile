@@ -1,4 +1,4 @@
-import type { BootedDevice } from "../../src/models";
+import type { BaseActionResult, BootedDevice } from "../../src/models";
 import type { AdbExecutor } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { ProgressCallback } from "../../src/features/action/BaseVisualChange";
 import type { TapOnElementOptions } from "../../src/models/TapOnElementOptions";
@@ -19,15 +19,18 @@ import type {
 export class FakeDialogTapAction implements DialogTapAction {
   readonly calls: TapOnElementOptions[] = [];
   readonly builtFor: Array<{ device: BootedDevice; adb: AdbExecutor | null }> = [];
-  private readonly result: unknown;
+  private readonly result: BaseActionResult;
   private readonly error?: Error;
 
-  constructor(options: { result?: unknown; error?: Error } = {}) {
-    this.result = options.result ?? { success: true, action: "tap" };
+  constructor(options: { result?: BaseActionResult; error?: Error } = {}) {
+    this.result = options.result ?? { success: true };
     this.error = options.error;
   }
 
-  async execute(options: TapOnElementOptions, _progress?: ProgressCallback): Promise<unknown> {
+  async execute(
+    options: TapOnElementOptions,
+    _progress?: ProgressCallback,
+  ): Promise<BaseActionResult> {
     this.calls.push(options);
     if (this.error) {
       throw this.error;

@@ -2542,6 +2542,18 @@ describe("UnixSocketServer MCP forward serialization", () => {
   test.skipIf(process.platform === "win32")(
     "rejects queue-depleted work with a structured retryable overload before deadline",
     async () => {
+      // Manual time: an auto-advancing timer would fire the chain-wait bound (issue #6388)
+      // before this test's 450ms advance and release.
+      await server.close();
+      socketPath = join(tmpdir(), `mcp-overload-${randomUUID()}.sock`);
+      fakeTimer = new FakeTimer();
+      server = new UnixSocketServer(
+        socketPath,
+        "http://localhost:0/mcp",
+        createFakeDaemonState(sessionDevices, sessionDeviceLabels, mcpAutolockSessions),
+        fakeTimer,
+      );
+      await server.start();
       const started = Promise.withResolvers<void>();
       const release = Promise.withResolvers<void>();
       let readCount = 0;
@@ -2703,4 +2715,201 @@ describe("UnixSocketServer MCP forward serialization", () => {
       });
     },
   );
+});
+
+// Issue #6388: a forward whose route moves to another execution key must release the key it
+// holds before acquiring the next one, and a waiter parked on a key must be bounded by its
+// request deadline. Manual time: an auto-advancing timer would fire the wait bound early.
+describe("UnixSocketServer MCP forward execution-key rerouting (issue #6388)", () => {
+  let socketPath: string;
+  let server: UnixSocketServer;
+  let fakeTimer: FakeTimer;
+  let sessionDevices: Map<string, string>;
+  let blockers: Map<string, PromiseWithResolvers<void>>;
+  let calls: string[];
+
+  async function settleEventLoop(): Promise<void> {
+    for (let i = 0; i < 20; i++) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+  }
+
+  function toolsCall(args: Record<string, unknown>, timeoutMs?: number): Promise<DaemonResponse> {
+    return sendRequest(socketPath, {
+      id: randomUUID(),
+      type: "mcp_request",
+      method: "tools/call",
+      params: { name: "tapOn", arguments: args },
+      ...(timeoutMs === undefined ? {} : { timeoutMs }),
+    });
+  }
+
+  /** Occupies `device:<deviceId>` inside callTool until `release(deviceId)`. */
+  async function holdDevice(deviceId: string): Promise<{ response: Promise<DaemonResponse> }> {
+    blockers.set(deviceId, Promise.withResolvers<void>());
+    const response = toolsCall({ deviceId });
+    await settleEventLoop();
+    expect(calls).toContain(`device:${deviceId}`);
+    // Wrapped: returning the bare promise from an async function would await it.
+    return { response };
+  }
+
+  function release(deviceId: string): void {
+    const blocker = blockers.get(deviceId);
+    blockers.delete(deviceId);
+    blocker?.resolve();
+  }
+
+  beforeEach(async () => {
+    socketPath = join(tmpdir(), `mcp-rekey-${randomUUID()}.sock`);
+    fakeTimer = new FakeTimer();
+    sessionDevices = new Map();
+    blockers = new Map();
+    calls = [];
+    server = new UnixSocketServer(
+      socketPath,
+      "http://localhost:0/mcp",
+      createFakeDaemonState(sessionDevices, new Map(), new Map()),
+      fakeTimer,
+    );
+    server.mcpClientFactory = async () => ({
+      listTools: async () => ({ tools: [] }),
+      callTool: async (request: unknown) => {
+        const args = (request as { arguments: Record<string, unknown> }).arguments;
+        const deviceId = typeof args.deviceId === "string" ? args.deviceId : undefined;
+        calls.push(deviceId ? `device:${deviceId}` : `session:${String(args.sessionUuid)}`);
+        if (deviceId) {
+          await blockers.get(deviceId)?.promise;
+        }
+        return { content: [] };
+      },
+      listResources: async () => ({ resources: [] }),
+      readResource: async () => ({ contents: [] }),
+      listResourceTemplates: async () => ({ resourceTemplates: [] }),
+      close: async () => {},
+    });
+    await server.start();
+  });
+
+  afterEach(async () => {
+    for (const blocker of blockers.values()) {
+      blocker.resolve();
+    }
+    await server.close();
+    if (existsSync(socketPath)) {
+      await unlink(socketPath);
+    }
+  });
+
+  test("two forwards whose routes cross both complete instead of deadlocking", async () => {
+    const { response: holdD1 } = await holdDevice("device-1");
+    const { response: holdD2 } = await holdDevice("device-2");
+    sessionDevices.set("s1", "device-1");
+    sessionDevices.set("s2", "device-2");
+    const a = toolsCall({ sessionUuid: "s1" });
+    const b = toolsCall({ sessionUuid: "s2" });
+    await settleEventLoop();
+
+    // Swap while both wait: each will acquire its original key and re-resolve to the other's.
+    sessionDevices.set("s1", "device-2");
+    sessionDevices.set("s2", "device-1");
+    release("device-1");
+    release("device-2");
+
+    const results = await Promise.all([holdD1, holdD2, a, b]);
+    expect(results.map((result) => result.success)).toEqual([true, true, true, true]);
+    expect(calls.filter((call) => call.startsWith("session:")).sort()).toEqual([
+      "session:s1",
+      "session:s2",
+    ]);
+
+    // Both keys are free again: fresh calls run without waiting on any stale tail.
+    const followUps = await Promise.all([
+      toolsCall({ deviceId: "device-1" }),
+      toolsCall({ deviceId: "device-2" }),
+    ]);
+    expect(followUps.map((result) => result.success)).toEqual([true, true]);
+  });
+
+  test("a forward whose route flips back to a key it held does not wait on itself", async () => {
+    const { response: holdD1 } = await holdDevice("device-1");
+    const { response: holdD2 } = await holdDevice("device-2");
+    sessionDevices.set("s1", "device-1");
+    const a = toolsCall({ sessionUuid: "s1" });
+    await settleEventLoop();
+
+    // device-1 -> device-2 on the first acquisition...
+    sessionDevices.set("s1", "device-2");
+    release("device-1");
+    await holdD1;
+    await settleEventLoop();
+    // ...and back to device-1 on the second.
+    sessionDevices.set("s1", "device-1");
+    release("device-2");
+
+    expect((await holdD2).success).toBe(true);
+    expect((await a).success).toBe(true);
+    expect(calls).toContain("session:s1");
+
+    const followUp = await toolsCall({ deviceId: "device-1" });
+    expect(followUp.success).toBe(true);
+  });
+
+  test("a route that changes on every resolution fails after the reroute cap", async () => {
+    let resolutions = 0;
+    const churningDevices = new Map<string, string>();
+    churningDevices.get = (sessionId: string) =>
+      sessionId === "s1" ? `device-${++resolutions}` : undefined;
+    churningDevices.has = (sessionId: string) => sessionId === "s1";
+    await server.close();
+    socketPath = join(tmpdir(), `mcp-rekey-churn-${randomUUID()}.sock`);
+    server = new UnixSocketServer(
+      socketPath,
+      "http://localhost:0/mcp",
+      createFakeDaemonState(churningDevices, new Map(), new Map()),
+      fakeTimer,
+    );
+    server.mcpClientFactory = async () => ({
+      listTools: async () => ({ tools: [] }),
+      callTool: async () => {
+        calls.push("ran");
+        return { content: [] };
+      },
+      listResources: async () => ({ resources: [] }),
+      readResource: async () => ({ contents: [] }),
+      listResourceTemplates: async () => ({ resourceTemplates: [] }),
+      close: async () => {},
+    });
+    await server.start();
+
+    const response = await toolsCall({ sessionUuid: "s1" });
+
+    expect(response.success).toBe(false);
+    expect(response.error).toContain("re-routed more than 3 times");
+    expect(response.error).toContain("device:");
+    expect(calls).toEqual([]);
+  });
+
+  test("a waiter parked on a held key times out at its deadline without releasing the key early", async () => {
+    const { response: holdD1 } = await holdDevice("device-1");
+    const waiter = toolsCall({ deviceId: "device-1" }, 500);
+    await settleEventLoop();
+
+    fakeTimer.advanceTime(500);
+    const timedOut = await waiter;
+    expect(timedOut.success).toBe(false);
+    expect(timedOut.error).toContain("waiting in queue for device:device-1");
+    expect(calls).toEqual(["device:device-1"]);
+
+    // The key is still held: a later call must keep waiting for the holder, not
+    // slip in behind the waiter that gave up.
+    const later = toolsCall({ deviceId: "device-1" });
+    await settleEventLoop();
+    expect(calls).toEqual(["device:device-1"]);
+
+    release("device-1");
+    expect((await holdD1).success).toBe(true);
+    expect((await later).success).toBe(true);
+    expect(calls).toEqual(["device:device-1", "device:device-1"]);
+  });
 });

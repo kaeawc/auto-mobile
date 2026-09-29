@@ -15,6 +15,7 @@ import { resolveMcpRequestTimeoutMs, ProgressExtendableDeadline } from "./mcpReq
 import { McpOverloadError, McpTimeoutError } from "./McpTimeoutError";
 import { DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import { errorMessage } from "../utils/describeUnknownError";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { isDebugModeEnabled } from "../utils/debug";
 import {
   BOUND_SESSION_LOSS_CODE,
@@ -127,7 +128,6 @@ import {
 } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { canonicalPixelsToPoints } from "./canonicalPixels";
 import { ActionableError, toActionableError } from "../models/ActionableError";
-import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { getDeviceDataStreamServer } from "./deviceDataStreamSocketServer";
 import type { KeyValueType } from "../features/storage/storageTypes";
 import type {
@@ -172,6 +172,12 @@ import {
 } from "./deviceControlTransportFailure";
 
 export const MCP_FORWARD_START_HEADROOM_MS = 100;
+/**
+ * How many times one forward may follow its route to a different execution key before it
+ * fails. Each hop releases the previous key first, so this only bounds route churn; it is
+ * not what prevents the crossed-route deadlock (issue #6388).
+ */
+export const MAX_MCP_FORWARD_REROUTES = 3;
 const MCP_OVERLOAD_RETRY_AFTER_MS = 250;
 
 function requestFailureCause(
@@ -493,6 +499,23 @@ interface BoundMcpClient {
   toolSelectionProfileUuid?: string;
   requiresLiveDaemonSession: boolean;
 }
+
+/**
+ * Bounds how long a forward may park on another forward's execution-key chain. Without it a
+ * waiter is only timed out after it acquires the key, so a stuck holder parks it (and its
+ * socket's admission queue) forever (issue #6388).
+ */
+interface McpForwardChainWait {
+  /** Milliseconds this waiter may still spend waiting, read at each acquisition. */
+  remainingMs: () => number;
+  /** Error to reject with once that budget is spent. */
+  timeoutError: (executionKey: string) => Error;
+}
+
+/** One keyed attempt either ran the forward or found its route moved to another key. */
+type McpForwardAttempt<T> =
+  | { kind: "done"; value: T }
+  | { kind: "reroute"; route: McpForwardRoute };
 
 interface McpForwardRoute {
   /** Serializes work that targets the same physical device or session. */
@@ -1362,6 +1385,19 @@ export class UnixSocketServer {
                 // even when a forward throws before reaching this finally (issue #4610).
               }
             },
+            {
+              remainingMs: () => this.remainingMcpForwardBudget({ deadline }),
+              timeoutError: (executionKey) =>
+                new McpTimeoutError({
+                  toolName:
+                    request.method === "tools/call"
+                      ? (request.params?.name ?? request.method)
+                      : request.method,
+                  timeoutMs: totalTimeoutMs,
+                  origin: "UnixSocketServer.handleRequest",
+                  detail: `spent ${totalTimeoutMs - this.remainingMcpForwardBudget({ deadline })}ms waiting in queue for ${executionKey}`,
+                }),
+            },
           );
 
           if (isDaemonShuttingDownToolResult(result)) {
@@ -1564,23 +1600,35 @@ export class UnixSocketServer {
     executionKey: string,
     fn: () => Promise<T>,
     idleCloseKey?: string,
+    chainWait?: McpForwardChainWait,
   ): Promise<T> {
     if (idleCloseKey) {
       const idleCloseKeys = this.mcpForwardIdleCloseKeys.get(executionKey) ?? new Set<string>();
       idleCloseKeys.add(idleCloseKey);
       this.mcpForwardIdleCloseKeys.set(executionKey, idleCloseKeys);
     }
-    const previous = this.mcpForwardTails.get(executionKey) ?? Promise.resolve();
-    const run = previous.then(() => {
+    const heldTail = this.mcpForwardTails.get(executionKey);
+    const previous = heldTail ?? Promise.resolve();
+    // Only a contended acquisition needs a bound; an idle key is taken immediately.
+    const acquired =
+      heldTail && chainWait
+        ? this.waitForMcpForwardChain(executionKey, heldTail, chainWait)
+        : previous;
+    const run = acquired.then(() => {
       if (idleCloseKey) {
         this.clearMcpClientIdleTimer(idleCloseKey);
       }
       return fn();
     });
-    const tail = run.then(
-      () => undefined,
-      () => undefined,
-    );
+    // The tail also waits for `previous`: a waiter that gave up must not let the next
+    // waiter run concurrently with the forward still holding this key.
+    const tail = Promise.all([
+      previous,
+      run.then(
+        () => undefined,
+        () => undefined,
+      ),
+    ]).then(() => undefined);
     this.mcpForwardTails.set(executionKey, tail);
     void tail.finally(() => {
       if (this.mcpForwardTails.get(executionKey) === tail) {
@@ -1593,6 +1641,26 @@ export class UnixSocketServer {
       }
     });
     return run;
+  }
+
+  private async waitForMcpForwardChain(
+    executionKey: string,
+    heldTail: Promise<void>,
+    chainWait: McpForwardChainWait,
+  ): Promise<void> {
+    try {
+      await raceWithDeadline(heldTail, {
+        timer: this.timer,
+        timeoutMs: Math.max(0, chainWait.remainingMs()),
+        label: `MCP forward wait for ${executionKey}`,
+      });
+    } catch (error) {
+      // Tails never reject, so only the wait bound lands here (issue #6388).
+      logger.warn(
+        `[McpForward] chain wait expired executionKey=${executionKey}: ${errorMessage(error)}`,
+      );
+      throw chainWait.timeoutError(executionKey);
+    }
   }
 
   private async runWithActiveMcpClient<T>(clientKey: string, fn: () => Promise<T>): Promise<T> {
@@ -1620,50 +1688,91 @@ export class UnixSocketServer {
     }
   }
 
-  private runMcpForwardForCurrentRoute<T>(
+  /**
+   * Run `fn` holding the execution key of the request's current route. When the route moves
+   * to another key while the request waits, the held key is RELEASED before the new one is
+   * acquired: holding one key while waiting on another deadlocks two requests whose routes
+   * cross, or one request whose route flips back to a key it still holds (issue #6388).
+   */
+  private async runMcpForwardForCurrentRoute<T>(
     initialRoute: McpForwardRoute,
     request: DaemonRequest,
     socketSessionId: string,
     fn: (route: McpForwardRoute) => Promise<T>,
+    chainWait?: McpForwardChainWait,
   ): Promise<T> {
-    return this.runKeyedMcpForward(initialRoute.executionKey, async () => {
-      const currentRoute = this.getMcpForwardRoute(request, socketSessionId);
-      if (currentRoute.executionKey !== initialRoute.executionKey) {
-        logger.debug(
-          `[McpForward] rekey requestId=${request.id} initialExecutionKey=${initialRoute.executionKey} currentExecutionKey=${currentRoute.executionKey}`,
-        );
-        return await this.runMcpForwardForCurrentRoute(currentRoute, request, socketSessionId, fn);
+    const visitedKeys = [initialRoute.executionKey];
+    let route = initialRoute;
+    for (;;) {
+      const admittedRoute = route;
+      const attempt = await this.runKeyedMcpForward(
+        admittedRoute.executionKey,
+        () => this.runMcpForwardAttempt(admittedRoute, request, socketSessionId, fn),
+        undefined,
+        chainWait,
+      );
+      if (attempt.kind === "done") {
+        return attempt.value;
       }
-      // The execution target is unchanged, so this request keeps the client and
-      // session it was admitted with. Re-resolving may replace a session-specific
-      // clientKey with the shared unbound client (e.g. a mid-flight disconnect
-      // cleared the binding before this recompute) under the same executionKey;
-      // that would run the admitted tool with no tool-selection profile. Only the
-      // execution target may be re-resolved, never the admitted client/session
-      // (issue #4610).
-      //
-      // Exception: when the admitted route was seeded for a specific daemon
-      // session and that session was RELEASED while this request waited in the
-      // queue, invoking the stale session-scoped client would re-seed the released
-      // UUID and RESURRECT the session (getOrCreateSession recreates it and
-      // reacquires a device the caller never asked for). A mid-flight socket
-      // disconnect, by contrast, leaves the daemon session live — so the daemon
-      // session still being active is exactly what distinguishes a disconnect
-      // (keep the admitted client, preserving the tool-selection profile above) from a
-      // real release (re-resolve to the current, unseeded route). Only re-resolve
-      // when the recompute actually points somewhere else (issue #4610).
-      if (
-        initialRoute.sessionUuid !== undefined &&
-        currentRoute.clientKey !== initialRoute.clientKey &&
-        !this.hasActiveDaemonSession(initialRoute.sessionUuid)
-      ) {
-        logger.debug(
-          `[McpForward] released-session re-resolve requestId=${request.id} releasedSession=${initialRoute.sessionUuid} clientKey=${initialRoute.clientKey} -> ${currentRoute.clientKey}`,
+      route = attempt.route;
+      visitedKeys.push(route.executionKey);
+      if (visitedKeys.length > MAX_MCP_FORWARD_REROUTES + 1) {
+        throw new ActionableError(
+          `MCP request ${request.id} was re-routed more than ${MAX_MCP_FORWARD_REROUTES} times while waiting to run ` +
+            `(execution keys: ${visitedKeys.join(" -> ")}). The target device or session kept changing; retry once it is stable.`,
         );
-        return await this.runWithActiveMcpClient(currentRoute.clientKey, () => fn(currentRoute));
       }
-      return await this.runWithActiveMcpClient(initialRoute.clientKey, () => fn(initialRoute));
-    });
+      logger.debug(
+        `[McpForward] rekey requestId=${request.id} initialExecutionKey=${admittedRoute.executionKey} currentExecutionKey=${route.executionKey}`,
+      );
+    }
+  }
+
+  private async runMcpForwardAttempt<T>(
+    initialRoute: McpForwardRoute,
+    request: DaemonRequest,
+    socketSessionId: string,
+    fn: (route: McpForwardRoute) => Promise<T>,
+  ): Promise<McpForwardAttempt<T>> {
+    const currentRoute = this.getMcpForwardRoute(request, socketSessionId);
+    if (currentRoute.executionKey !== initialRoute.executionKey) {
+      return { kind: "reroute", route: currentRoute };
+    }
+    // The execution target is unchanged, so this request keeps the client and
+    // session it was admitted with. Re-resolving may replace a session-specific
+    // clientKey with the shared unbound client (e.g. a mid-flight disconnect
+    // cleared the binding before this recompute) under the same executionKey;
+    // that would run the admitted tool with no tool-selection profile. Only the
+    // execution target may be re-resolved, never the admitted client/session
+    // (issue #4610).
+    //
+    // Exception: when the admitted route was seeded for a specific daemon
+    // session and that session was RELEASED while this request waited in the
+    // queue, invoking the stale session-scoped client would re-seed the released
+    // UUID and RESURRECT the session (getOrCreateSession recreates it and
+    // reacquires a device the caller never asked for). A mid-flight socket
+    // disconnect, by contrast, leaves the daemon session live — so the daemon
+    // session still being active is exactly what distinguishes a disconnect
+    // (keep the admitted client, preserving the tool-selection profile above) from a
+    // real release (re-resolve to the current, unseeded route). Only re-resolve
+    // when the recompute actually points somewhere else (issue #4610).
+    if (
+      initialRoute.sessionUuid !== undefined &&
+      currentRoute.clientKey !== initialRoute.clientKey &&
+      !this.hasActiveDaemonSession(initialRoute.sessionUuid)
+    ) {
+      logger.debug(
+        `[McpForward] released-session re-resolve requestId=${request.id} releasedSession=${initialRoute.sessionUuid} clientKey=${initialRoute.clientKey} -> ${currentRoute.clientKey}`,
+      );
+      return {
+        kind: "done",
+        value: await this.runWithActiveMcpClient(currentRoute.clientKey, () => fn(currentRoute)),
+      };
+    }
+    return {
+      kind: "done",
+      value: await this.runWithActiveMcpClient(initialRoute.clientKey, () => fn(initialRoute)),
+    };
   }
 
   private getMcpForwardRoute(request: DaemonRequest, socketSessionId: string): McpForwardRoute {

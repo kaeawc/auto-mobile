@@ -5,19 +5,8 @@ import {
   computeConfiguredScanEnd,
   IOS_CTRL_PROXY_RESERVED_PORTS,
   PortManager,
-  type PortAvailabilityChecker,
 } from "../../src/utils/PortManager";
-
-class FakePortAvailabilityChecker implements PortAvailabilityChecker {
-  public readonly checkedPorts: number[] = [];
-
-  public constructor(private readonly unavailablePorts: Set<number> = new Set()) {}
-
-  public isPortAvailable(port: number): boolean {
-    this.checkedPorts.push(port);
-    return !this.unavailablePorts.has(port);
-  }
-}
+import { FakePortAvailabilityChecker } from "../fakes/FakePortAvailabilityChecker";
 
 function expectedAllocatedPort(index: number): number {
   return 8765 + index;

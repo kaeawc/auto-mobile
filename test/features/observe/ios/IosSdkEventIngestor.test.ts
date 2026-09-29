@@ -11,6 +11,10 @@ import type { ViewHierarchyResult } from "../../../../src/models";
 import type { NavigationEvent } from "../../../../src/utils/interfaces/NavigationGraph";
 import { FakeFailureRecorder } from "../../../fakes/FakeFailureRecorder";
 import { NavigationScreenshotManager } from "../../../../src/features/navigation/NavigationScreenshotManager";
+import {
+  DefaultAndroidSdkEventIngestor,
+  type AndroidTelemetryRecorder,
+} from "../../../../src/features/observe/android/AndroidSdkEventIngestor";
 
 const DEVICE_ID = "A1B2C3D4-E5F6-7890-ABCD-EF1234567890";
 
@@ -145,7 +149,97 @@ describe("DefaultIosSdkEventIngestor", () => {
       durationMs: 0,
       requestBodySize: -1,
       responseBodySize: -1,
+      requestId: null,
+      connectionId: null,
+      direction: null,
+      metadata: null,
+      sequenceNumber: null,
     });
+  });
+
+  test("network_request maps every iOS SDK wire field", async () => {
+    const payload = {
+      url: "https://x.test/a",
+      method: "POST",
+      requestId: "req-1",
+      connectionId: "conn-2",
+      direction: "request",
+      protocolName: "h2",
+      metadata: { trace: "abc" },
+      sequenceNumber: 7,
+      requestHeaders: { accept: "json" },
+      requestBodySize: 11,
+      statusCode: 201,
+      responseHeaders: { server: "test" },
+      responseBodySize: 13,
+      durationMs: 15,
+      error: "failed",
+      host: "x.test",
+      path: "/a",
+      requestBody: "in",
+      responseBody: "out",
+      contentType: "application/json",
+    };
+    await ingestor.recordSdkEvent(event("network_request", payload), "com.app");
+    const mappedFields = Object.fromEntries(
+      Object.entries(payload).filter(([key]) => key !== "protocolName"),
+    );
+    expect(recorder.network[0].event).toMatchObject({ ...mappedFields, protocol: "h2" });
+  });
+
+  test("network_request falls back to protocol when protocolName is absent", async () => {
+    await ingestor.recordSdkEvent(event("network_request", { protocol: "http/1.1" }), null);
+    expect(recorder.network[0].event.protocol).toBe("http/1.1");
+  });
+
+  test("network_request prefers protocolName over protocol", async () => {
+    await ingestor.recordSdkEvent(
+      event("network_request", { protocolName: "h2", protocol: "http/1.1" }),
+      null,
+    );
+    expect(recorder.network[0].event.protocol).toBe("h2");
+  });
+
+  test("shared network fields match Android ingestion", async () => {
+    const shared = {
+      method: "POST",
+      url: "https://x.test/a",
+      statusCode: 201,
+      durationMs: 15,
+      requestBodySize: 11,
+      responseBodySize: 13,
+      protocol: "h2",
+      host: "x.test",
+      path: "/a",
+      error: "failed",
+      requestHeaders: { accept: "json" },
+      responseHeaders: { server: "test" },
+      requestBody: "in",
+      responseBody: "out",
+      contentType: "application/json",
+    };
+    await ingestor.recordSdkEvent(
+      event("network_request", { ...shared, protocolName: "h2" }),
+      "com.app",
+    );
+    const androidRecorder = new CapturingTelemetryRecorder();
+    const android = new DefaultAndroidSdkEventIngestor({
+      deviceId: DEVICE_ID,
+      getNavigationScreenSource: () => ({ getCurrentScreen: () => null }),
+      parseStackTrace: () => [],
+      now: () => 1000,
+      telemetryRecorder: androidRecorder as unknown as AndroidTelemetryRecorder,
+      failureRecorder,
+    });
+    await android.recordSdkEvent(
+      {
+        type: "network_event",
+        timestamp: 1000,
+        payload: { event: { ...shared, applicationId: "com.app" } },
+      },
+      null,
+    );
+    expect(recorder.network[0].event).toMatchObject(androidRecorder.network[0].event);
   });
 
   test("sets device context during ingestion and restores it afterward", async () => {

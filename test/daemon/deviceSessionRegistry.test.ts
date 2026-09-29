@@ -1,5 +1,6 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, spyOn } from "bun:test";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
+import { logger } from "../../src/utils/logger";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -237,6 +238,51 @@ describe("DeviceSessionRegistry", () => {
         { kind: "ended", uuid: "uuid-a", deviceId: "emulator-5554", platform: "android" },
         { kind: "started", uuid: "uuid-b", deviceId: "emulator-5554", platform: "android" },
       ]);
+    });
+
+    it("warns on listener faults and preserves identity across a reincarnation", () => {
+      const { registry } = makeRegistry(["uuid-a", "uuid-b"]);
+      const failure = new Error("stream push failed");
+      const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+      registry.setLifecycleListener({
+        onSessionStarted: () => {
+          throw failure;
+        },
+        onSessionEnded: () => {
+          throw failure;
+        },
+      });
+
+      try {
+        const first = registry.onDeviceConnected({
+          deviceId: "emulator-5554",
+          platform: "android",
+          incarnation: 1,
+        });
+        expect(registry.getByDeviceId("emulator-5554")).toEqual(first);
+        expect(registry.getByUuid("uuid-a")).toEqual(first);
+
+        const second = registry.onDeviceConnected({
+          deviceId: "emulator-5554",
+          platform: "android",
+          incarnation: 2,
+        });
+        expect(registry.getByUuid("uuid-a")).toBeUndefined();
+        expect(registry.getByDeviceId("emulator-5554")).toEqual(second);
+        expect(registry.getByUuid("uuid-b")).toEqual(second);
+
+        registry.onDeviceDisconnected("emulator-5554");
+        expect(registry.getByDeviceId("emulator-5554")).toBeUndefined();
+        expect(registry.getByUuid("uuid-b")).toBeUndefined();
+        expect(warnSpy.mock.calls.map(([message]) => message)).toEqual([
+          "[DeviceSessionRegistry] onSessionStarted listener threw: Error: stream push failed",
+          "[DeviceSessionRegistry] onSessionEnded listener threw: Error: stream push failed",
+          "[DeviceSessionRegistry] onSessionStarted listener threw: Error: stream push failed",
+          "[DeviceSessionRegistry] onSessionEnded listener threw: Error: stream push failed",
+        ]);
+      } finally {
+        warnSpy.mockRestore();
+      }
     });
   });
 });

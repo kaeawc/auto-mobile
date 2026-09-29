@@ -1,7 +1,6 @@
 [test]
-# Installs process-wide test defaults before any test file imports production
-# singletons. This currently neutralizes telemetry writes so fire-and-forget
-# recording cannot touch the real file-backed DB during tests (issue #3084).
-preload = ["./test/setup/testPreload.ts"]
+# Installs test defaults before any test file imports production singletons.
+# Keep the Android port checker setup separate from the existing preload.
+preload = ["./test/setup/testPreload.ts", "./test/setup/portAvailabilityPreload.ts"]
 coverageReporter = ["text", "lcov"]
 coverageDir = "./coverage"

@@ -277,6 +277,15 @@ describe("discardHierarchyDerivedData", () => {
     expect(result.screenIdentity).toBeUndefined();
   });
 
+  test("resets updatedAt from a rejected hierarchy", () => {
+    const result = contaminatedResult();
+    result.updatedAt = 1_700_000_000_000;
+
+    discardHierarchyDerivedData(result);
+
+    expect(result.updatedAt).toBe(0);
+  });
+
   test("resets hierarchy-derived screen metrics to base defaults", () => {
     const result = contaminatedResult();
     result.rotation = 1;

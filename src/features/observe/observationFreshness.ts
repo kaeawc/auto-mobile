@@ -206,9 +206,10 @@ function computeRequestedFreshness(
   ageMs: number | undefined,
   verified: boolean | undefined,
 ): FreshnessVerdict {
-  const isFresh = actualTimestamp !== undefined && actualTimestamp >= requestedAfter;
+  const floorMet = actualTimestamp !== undefined && actualTimestamp >= requestedAfter;
+  const isFresh = floorMet && verified !== false;
   const staleDurationMs =
-    !isFresh && actualTimestamp !== undefined ? requestedAfter - actualTimestamp : undefined;
+    !floorMet && actualTimestamp !== undefined ? requestedAfter - actualTimestamp : undefined;
   return {
     requestedAfter,
     actualTimestamp,
@@ -218,10 +219,12 @@ function computeRequestedFreshness(
     staleDurationMs,
     warning: isFresh
       ? undefined
-      : actualTimestamp === undefined
-        ? "Observation carries no capture timestamp, so the requested minimum could not be checked."
-        : `Observation was captured ${staleDurationMs}ms before the requested minimum timestamp.`,
-    category: isFresh ? undefined : "requested_min",
+      : floorMet
+        ? "Hierarchy was served from the host-side cache without being re-verified against the device."
+        : actualTimestamp === undefined
+          ? "Observation carries no capture timestamp, so the requested minimum could not be checked."
+          : `Observation was captured ${staleDurationMs}ms before the requested minimum timestamp.`,
+    category: isFresh ? undefined : floorMet ? "cache_age" : "requested_min",
   };
 }
 

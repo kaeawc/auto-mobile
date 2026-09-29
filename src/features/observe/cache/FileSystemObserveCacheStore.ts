@@ -170,7 +170,7 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
         deviceId,
         observationId: result.observationId,
         filename,
-        observeResult: result,
+        observeResult: structuredClone(result),
       });
       await this.saveObserveResultToDisk(filename, result);
       await this.reapExpiredDiskFiles(deviceId);
@@ -201,7 +201,9 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
 
   getRecentInMemoryEntry(): RecentObserveCacheEntry | undefined {
     const entry = this.collectLiveMostRecent();
-    return entry ? { deviceId: entry.deviceId, result: entry.observeResult } : undefined;
+    return entry
+      ? { deviceId: entry.deviceId, result: structuredClone(entry.observeResult) }
+      : undefined;
   }
 
   getRecentInMemoryForDevice(deviceId: string): ObserveResult | undefined {
@@ -276,7 +278,8 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
   }
 
   private findMostRecentInMemory(deviceId?: string): ObserveResult | undefined {
-    return this.collectLiveMostRecent(deviceId)?.observeResult;
+    const result = this.collectLiveMostRecent(deviceId)?.observeResult;
+    return result ? structuredClone(result) : undefined;
   }
 
   private checkInMemory(deviceId: string): ObserveResult | undefined {
@@ -295,7 +298,7 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
       logger.debug(
         `[OBSERVE_CACHE] Found most recent in-memory result for device ${deviceId} (age: ${age}ms)`,
       );
-      return entry.observeResult;
+      return structuredClone(entry.observeResult);
     }
 
     logger.debug(`[OBSERVE_CACHE] No valid entries in in-memory cache for device ${deviceId}`);
@@ -376,7 +379,7 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
         observeResult: cachedResult,
       });
       logger.debug(`[OBSERVE_CACHE] Updated in-memory cache from disk cache`);
-      return cachedResult;
+      return structuredClone(cachedResult);
     } catch (error) {
       logger.warn(`[OBSERVE_CACHE] Error checking disk cache: ${error}`);
       return undefined;

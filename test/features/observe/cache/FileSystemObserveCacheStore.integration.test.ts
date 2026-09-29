@@ -51,7 +51,35 @@ describe("FileSystemObserveCacheStore", function () {
   test("put then getRecentInMemoryForDevice returns the cached result", async function () {
     const result = makeResult("a");
     await store.put("device-1", result);
-    expect(store.getRecentInMemoryForDevice("device-1")).toBe(result);
+    expect(store.getRecentInMemoryForDevice("device-1")).toEqual(result);
+  });
+
+  test("put stores a copy separate from the caller's result", async function () {
+    const result = makeResult("before mutation");
+    await store.put("device-1", result);
+
+    result.screenSize = { width: 999, height: 999 };
+
+    expect(store.getRecentInMemoryForDevice("device-1")?.screenSize).toEqual({
+      width: 100,
+      height: 200,
+    });
+  });
+
+  test("reads return copies separate from the cached result", async function () {
+    const result = makeResult("cached");
+    await store.put("device-1", result);
+
+    const firstRead = store.getRecentInMemoryForDevice("device-1");
+    if (!firstRead) {
+      throw new Error("Expected cached result");
+    }
+    firstRead.screenSize = { width: 999, height: 999 };
+
+    expect(store.getRecentInMemoryForDevice("device-1")?.screenSize).toEqual({
+      width: 100,
+      height: 200,
+    });
   });
 
   test("uses an explicit cached timestamp for in-memory ordering and the clock when omitted", async function () {
@@ -63,7 +91,7 @@ describe("FileSystemObserveCacheStore", function () {
     timer.advanceTime(1);
     await store.put(deviceId, wallClockNewer);
 
-    expect(store.getRecentInMemoryForDevice(deviceId)).toBe(explicitlyNewer);
+    expect(store.getRecentInMemoryForDevice(deviceId)).toEqual(explicitlyNewer);
 
     const wallClockFirst = makeResult("wall-clock-first");
     const wallClockSecond = makeResult("wall-clock-second");
@@ -72,7 +100,7 @@ describe("FileSystemObserveCacheStore", function () {
     timer.advanceTime(1);
     await store.put("device-2", wallClockSecond);
 
-    expect(store.getRecentInMemoryForDevice("device-2")).toBe(wallClockSecond);
+    expect(store.getRecentInMemoryForDevice("device-2")).toEqual(wallClockSecond);
   });
 
   test("updates an observationId in place without changing its cache recency", async function () {
@@ -87,7 +115,7 @@ describe("FileSystemObserveCacheStore", function () {
     timer.advanceTime(1);
     await store.put(deviceId, completed, undefined, 1_000_001);
 
-    expect(store.getRecentInMemoryForDevice(deviceId)).toBe(completed);
+    expect(store.getRecentInMemoryForDevice(deviceId)).toEqual(completed);
     expect(store.getRecentCachedAtForDevice(deviceId)).toBe(1_000_000);
     expect(readdirSync(cacheDir).filter((file) => file.endsWith(".json"))).toHaveLength(1);
 
@@ -121,8 +149,8 @@ describe("FileSystemObserveCacheStore", function () {
     await store.put("device-1", r1);
     timer.advanceTime(5);
     await store.put("device-2", r2);
-    expect(store.getRecentInMemoryForDevice("device-1")).toBe(r1);
-    expect(store.getRecentInMemoryForDevice("device-2")).toBe(r2);
+    expect(store.getRecentInMemoryForDevice("device-1")).toEqual(r1);
+    expect(store.getRecentInMemoryForDevice("device-2")).toEqual(r2);
   });
 
   test("disk fallback: getMostRecent restores from disk after memory clear", async function () {

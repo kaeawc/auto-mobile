@@ -102,7 +102,7 @@ import {
   activeProvisionDeviceOperations,
 } from "./deviceTools";
 import type { DeviceToolsDependencies, ProvisionDeviceArgs, StartDeviceArgs } from "./deviceTools";
-import type { ChildProcess } from "child_process";
+import type { HostChildProcess as ChildProcess } from "../utils/HostCommandExecutor";
 import type { RunnerReadinessRequest } from "../utils/RunnerReadinessService";
 
 type ProvisioningHooks = {

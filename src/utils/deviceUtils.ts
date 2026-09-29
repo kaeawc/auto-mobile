@@ -1,6 +1,6 @@
 import { errorMessage } from "./describeUnknownError";
-import { ChildProcess } from "child_process";
-export type { ChildProcess } from "child_process";
+import type { HostChildProcess as ChildProcess } from "./HostCommandExecutor";
+export type { HostChildProcess as ChildProcess } from "./HostCommandExecutor";
 import { DeviceInfo, ActionableError, SomePlatform, BootedDevice, Platform } from "../models";
 import { toActionableError } from "../models/ActionableError";
 import { defaultAdbClientFactory } from "./android-cmdline-tools/AdbClientFactory";

@@ -1,4 +1,4 @@
-import type { ChildProcess } from "child_process";
+import type { HostChildProcess as ChildProcess } from "./HostCommandExecutor";
 import type { BootedDevice, DeviceInfo, Platform } from "../models";
 import { ActionableError } from "../models";
 import type {

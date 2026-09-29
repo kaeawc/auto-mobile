@@ -1,11 +1,15 @@
-import { type ChildProcess, type SpawnOptions } from "node:child_process";
 import { trackAmbient } from "../PerfContext";
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { defaultTimer, type Timer } from "../SystemTimer";
 import { logger } from "../logger";
 import { resolveAndroidSdkRoot } from "./androidSdkRoot";
-import { DefaultHostCommandExecutor, type HostProcessExecutor } from "../HostCommandExecutor";
+import {
+  DefaultHostCommandExecutor,
+  type HostChildProcess as ChildProcess,
+  type HostProcessExecutor,
+  type HostSpawnOptions as SpawnOptions,
+} from "../HostCommandExecutor";
 import { redactAndroidCommandOutput } from "./redactAndroidCommandOutput";
 import {
   detectAndroidCommandLineTools,

@@ -1,11 +1,11 @@
 import { errorMessage } from "../describeUnknownError";
-import type { ChildProcess } from "node:child_process";
 import { logger } from "../logger";
 import { runExecSeam } from "../ExecSeam";
 import {
   DefaultHostCommandExecutor,
   execFileAsync as sharedExecFileAsync,
   type HostProcessExecutor,
+  type HostChildProcess as ChildProcess,
   type SpawnFn,
 } from "../HostCommandExecutor";
 import {

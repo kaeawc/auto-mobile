@@ -156,6 +156,7 @@ export class AdbClient implements AdbExecutor {
   spawnFn: SpawnFn;
   private adbPath: string;
   private isTestMode: boolean;
+  private readonly hostProcessExecutor: HostProcessExecutor;
   private activeProcesses: Set<ChildProcess> = new Set();
   /**
    * Cached API level for the current device. Intentionally never expires during
@@ -183,6 +184,7 @@ export class AdbClient implements AdbExecutor {
    * @param observationSequence - Monotonic discovery ordering source
    * @param consoleBusyRegistry - Shared console-exclusive operation state
    * @param defaultTimeoutMs - Per-command budget when no timeout is supplied
+   * @param hostProcessExecutor - Host process executor for cancellable commands
    */
   constructor(
     device: BootedDevice | null = null,
@@ -198,8 +200,10 @@ export class AdbClient implements AdbExecutor {
     private readonly observationSequence: DiscoveryObservationSequence = defaultDiscoveryObservationSequence,
     private readonly consoleBusyRegistry?: EmulatorConsoleBusyRegistry,
     private readonly defaultTimeoutMs: number = AdbClient.DEFAULT_COMMAND_TIMEOUT_MS,
+    hostProcessExecutor: HostProcessExecutor = adbHostProcessExecutor,
   ) {
     this.device = device;
+    this.hostProcessExecutor = hostProcessExecutor;
     // Test mode if: custom execAsync provided OR global test mode flag is set
     // Check for any truthy value (not just exactly "true") to handle different env var formats
     const testModeEnv = process.env.AUTOMOBILE_TEST_MODE;
@@ -1157,7 +1161,7 @@ export class AdbClient implements AdbExecutor {
       let pendingTerminationError: Error | undefined;
       let terminationTimeoutId: NodeJS.Timeout | undefined;
       let killSettlementTimeoutId: NodeJS.Timeout | undefined;
-      const { child, result } = adbHostProcessExecutor.executeCommandWithChild(
+      const { child, result } = this.hostProcessExecutor.executeCommandWithChild(
         file,
         args,
         maxBuffer ? { maxBuffer } : undefined,

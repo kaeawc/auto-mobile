@@ -6,7 +6,10 @@ import {
   AdbCommandTimeoutError,
   adbHostProcessExecutor,
 } from "../../../src/utils/android-cmdline-tools/AdbClient";
-import type { StartedHostCommand } from "../../../src/utils/HostCommandExecutor";
+import type {
+  HostProcessExecutor,
+  StartedHostCommand,
+} from "../../../src/utils/HostCommandExecutor";
 import { DefaultRetryExecutor, defaultRetryExecutor } from "../../../src/utils/retry/RetryExecutor";
 import { logger } from "../../../src/utils/logger";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -102,6 +105,65 @@ describe.serial("AdbClient execWithSignal shared process seam", () => {
 
     await expect(result).rejects.toThrow("Command timed out after 5ms: adb shell getprop");
     expect(dispatches).toBe(1);
+  });
+
+  test("dispatches non-test commands through the injected host process executor", async () => {
+    const originalTestMode = process.env.AUTOMOBILE_TEST_MODE;
+    process.env.AUTOMOBILE_TEST_MODE = "false";
+    try {
+      const child = new EventEmitter() as ChildProcess;
+      child.kill = () => true;
+      let injectedDispatches = 0;
+      const injectedExecutor = {
+        executeCommandWithChild: (): StartedHostCommand => {
+          injectedDispatches++;
+          return {
+            child,
+            result: Promise.resolve({
+              stdout: "injected",
+              stderr: "",
+              toString() {
+                return "injected";
+              },
+              trim() {
+                return "injected";
+              },
+              includes() {
+                return true;
+              },
+            }),
+          };
+        },
+      } as HostProcessExecutor;
+      const realExecutorSpy = spyOn(adbHostProcessExecutor, "executeCommandWithChild");
+      const client = new AdbClient(
+        null,
+        null,
+        null,
+        defaultRetryExecutor,
+        new FakeTimer(),
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        injectedExecutor,
+      );
+      const internals = client as unknown as AdbClientInternals;
+      expect(internals.isTestMode).toBe(false);
+
+      await expect(internals.execWithSignal("adb", ["version"])).resolves.toMatchObject({
+        stdout: "injected",
+      });
+      expect(injectedDispatches).toBe(1);
+      expect(realExecutorSpy).not.toHaveBeenCalled();
+      realExecutorSpy.mockRestore();
+    } finally {
+      if (originalTestMode === undefined) {
+        delete process.env.AUTOMOBILE_TEST_MODE;
+      } else {
+        process.env.AUTOMOBILE_TEST_MODE = originalTestMode;
+      }
+    }
   });
 
   test("keeps the injected timeout error when SIGTERM rejects during graceful settlement", async () => {

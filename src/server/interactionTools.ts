@@ -186,35 +186,37 @@ export const shakeSchema = addDeviceTargetingToSchema(
 );
 
 export const keyboardSchema = addDeviceTargetingToSchema(
-  z.object({
-    action: z
-      .enum([
-        "open",
-        "close",
-        "detect",
-        "setProfile",
-        "listProfiles",
-        "listImes",
-        "setIme",
-        "tapImeKey",
-      ])
-      .describe(
-        "Keyboard action; listProfiles returns AutoMobile behavior models and listImes returns installed Android input methods",
-      ),
-    profile: z
-      .enum(KEYBOARD_PROFILE_IDS)
-      .optional()
-      .describe("AutoMobile keyboard behavior profile; required for setProfile"),
-    imeId: z.string().optional().describe("Installed Android IME component; required for setIme"),
-    key: z
-      .string()
-      .optional()
-      .describe("Exact visible key text or accessibility label; required for tapImeKey"),
-    // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
-    // not required — a device handle from getAndroid/getApple is sufficient on
-    // its own.
-    platform: platformSchema.optional(),
-  }),
+  z
+    .object({
+      action: z
+        .enum([
+          "open",
+          "close",
+          "detect",
+          "setProfile",
+          "listProfiles",
+          "listImes",
+          "setIme",
+          "tapImeKey",
+        ])
+        .describe(
+          "Keyboard action; listProfiles returns AutoMobile behavior models and listImes returns installed Android input methods",
+        ),
+      profile: z
+        .enum(KEYBOARD_PROFILE_IDS)
+        .optional()
+        .describe("AutoMobile keyboard behavior profile; required for setProfile"),
+      imeId: z.string().optional().describe("Installed Android IME component; required for setIme"),
+      key: z
+        .string()
+        .optional()
+        .describe("Exact visible key text or accessibility label; required for tapImeKey"),
+      // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
+      // not required — a device handle from getAndroid/getApple is sufficient on
+      // its own.
+      platform: platformSchema.optional(),
+    })
+    .strict(),
 );
 
 export async function setKeyboardProfileForTool(

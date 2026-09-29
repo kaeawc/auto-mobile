@@ -454,7 +454,8 @@ export class DefaultPlanExecutor implements PlanExecutor {
         context.sessionUuid,
       );
 
-      // Parse and validate the parameters (schema.parse strips unknown keys).
+      // Parse and validate parameters; strict schemas throw on unknown keys, which
+      // are caught here and reported as a failed or skipped step.
       // The internal marker (#3053) is applied by the callInternal seam (#3108)
       // below so finalize emits the full observation on the step envelope - never
       // a diff or a stripped payload - regardless of

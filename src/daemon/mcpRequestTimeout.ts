@@ -25,6 +25,29 @@ export { START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS, MAX_SETTIMEOUT_DELAY_MS };
 export const DEFAULT_MCP_REQUEST_TIMEOUT_MS = 30_000;
 
 /**
+ * Upper bound on a caller-supplied `DaemonRequest.timeoutMs` (#6385). Clients
+ * now send their own deadline, and the daemon honours it -- but a buggy or
+ * hostile value (e.g. `Number.MAX_SAFE_INTEGER`) must not pin a request's
+ * device lock and queue slot indefinitely, nor overflow `setTimeout` (which
+ * fires immediately past `MAX_SETTIMEOUT_DELAY_MS`). Server-derived per-tool
+ * floors are applied after this clamp, so a tool whose own floor is larger
+ * still gets it.
+ */
+export const MAX_CALLER_MCP_REQUEST_TIMEOUT_MS = 1_800_000;
+
+/**
+ * Clamp a caller-supplied timeout into `(0, MAX_CALLER_MCP_REQUEST_TIMEOUT_MS]`.
+ * Returns `undefined` for a missing, non-finite, or non-positive value so the
+ * caller falls back to {@link DEFAULT_MCP_REQUEST_TIMEOUT_MS}.
+ */
+export function clampCallerMcpRequestTimeoutMs(raw: unknown): number | undefined {
+  if (typeof raw !== "number" || !Number.isFinite(raw) || raw <= 0) {
+    return undefined;
+  }
+  return Math.min(raw, MAX_CALLER_MCP_REQUEST_TIMEOUT_MS);
+}
+
+/**
  * Floor for `executePlan` when forwarding socket requests to the in-daemon MCP HTTP client.
  * Short timeouts abort the inner `callTool`, which drops the Streamable HTTP session and
  * cancels in-flight plan execution (`Operation cancelled`).
@@ -408,11 +431,7 @@ function resolveTapAnyOrdinaryTapBudgetMs(request: DaemonRequest): number | unde
 }
 
 export function resolveMcpRequestTimeoutMs(request: DaemonRequest): number {
-  const raw = request.timeoutMs;
-  const base =
-    typeof raw === "number" && Number.isFinite(raw) && raw > 0
-      ? raw
-      : DEFAULT_MCP_REQUEST_TIMEOUT_MS;
+  const base = clampCallerMcpRequestTimeoutMs(request.timeoutMs) ?? DEFAULT_MCP_REQUEST_TIMEOUT_MS;
   const floor =
     request.method === "tools/call" ? resolveToolTimeoutFloorMs(request.params?.name) : undefined;
   const devicePreparationBudget = resolveDevicePreparationToolBudgetMs(request);

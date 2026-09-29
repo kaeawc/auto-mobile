@@ -592,6 +592,9 @@ final class CommandHandler: CommandHandling {
         try await performContextCheckedGesture(expected: request.frameContext) {
             try self.gesturePerformer.tap(x: request.x, y: request.y, duration: TimeInterval(duration) / 1000.0)
         }
+        if let locator = elementLocator as? ElementLocator {
+            await locator.clearAppSwitcherHint()
+        }
 
         return WebSocketResponse.success(
             type: ResponseType.tapCoordinatesResult.rawValue,
@@ -987,6 +990,9 @@ final class CommandHandler: CommandHandling {
         // Explicit state transition: app switcher is SpringBoard UI.
         await trackedAsync("switchForegroundApp") {
             await self.elementLocator.switchForegroundApp(bundleId: "com.apple.springboard")
+        }
+        if let locator = elementLocator as? ElementLocator {
+            await locator.noteAppSwitcherOpened()
         }
         await trackedAsync("updateApplication") {
             await self.gesturePerformer.updateApplication(bundleId: "com.apple.springboard")

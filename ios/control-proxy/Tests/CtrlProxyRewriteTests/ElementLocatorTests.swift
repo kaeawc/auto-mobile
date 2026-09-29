@@ -14,6 +14,39 @@ import XCTest
 /// (that fake arrives with the Phase 6 CommandHandler port). The `ForegroundTracker` tests use
 /// `var` because the reference's lock-guarded class became a `mutating`-method struct.
 final class ElementLocatorTests: XCTestCase {
+    func testForegroundBundleId_switcherOwnsForegroundOverAppCards() {
+        XCTAssertEqual(
+            ElementLocator.foregroundBundleId(
+                from: ["dev.jasonpearson.automobile.Playground", "com.apple.mobilesafari"],
+                springboardRunning: true,
+                switcherVisible: true
+            ),
+            "com.apple.springboard"
+        )
+    }
+
+    func testForegroundBundleId_dismissedSwitcherReturnsAppCandidate() {
+        XCTAssertEqual(
+            ElementLocator.foregroundBundleId(
+                from: ["dev.jasonpearson.automobile.Playground", "com.apple.mobilesafari"],
+                springboardRunning: true,
+                switcherVisible: false
+            ),
+            "dev.jasonpearson.automobile.Playground"
+        )
+    }
+
+    func testForegroundBundleId_requiresRunningSpringboard() {
+        XCTAssertEqual(
+            ElementLocator.foregroundBundleId(
+                from: ["dev.jasonpearson.automobile.Playground"],
+                springboardRunning: false,
+                switcherVisible: true
+            ),
+            "dev.jasonpearson.automobile.Playground"
+        )
+    }
+
     // MARK: - Widget snapshot coordinates (#8047)
 
     func testScreenFrame_switchesAtUnnamedWidgetContainerAndOffsetsItsLeaf() {

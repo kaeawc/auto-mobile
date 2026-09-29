@@ -1725,32 +1725,8 @@ public final class GesturePerformer: GesturePerforming {
                 )
             }
 
-            return isAppSwitcherVisible()
-        }
-
-        private func isAppSwitcherVisible() -> Bool {
-            catchingObjCExceptionNonThrowing({
-                let candidates = [
-                    self.springboard.otherElements["AppSwitcher"],
-                    self.springboard.otherElements["App Switcher"],
-                    self.springboard.otherElements["AppSwitcherContentView"],
-                    self.springboard.collectionViews["AppSwitcher"],
-                    self.springboard.scrollViews["AppSwitcher"],
-                ]
-
-                for candidate in candidates where candidate.waitForExistence(timeout: 0.2) {
-                    return true
-                }
-
-                let appSwitcherPredicate = NSPredicate(
-                    format: "identifier CONTAINS[c] %@ OR label CONTAINS[c] %@",
-                    "AppSwitcher",
-                    "App Switcher"
-                )
-                return self.springboard.descendants(matching: .any)
-                    .matching(appSwitcherPredicate)
-                    .firstMatch
-                    .waitForExistence(timeout: 0.5)
+            return catchingObjCExceptionNonThrowing({
+                AppSwitcherDetector.isVisible(in: springboard)
             }, fallback: false)
         }
 

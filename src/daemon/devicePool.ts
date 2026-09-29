@@ -18,6 +18,7 @@ import {
 } from "../utils/deviceUtils";
 import { toActionableError } from "../models/ActionableError";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { type IdGenerator, defaultIdGenerator } from "../utils/IdGenerator";
 import type { InstalledAppsStore } from "../db/installedAppsRepository";
 import { InstalledAppsRepository } from "../db/installedAppsRepository";
@@ -598,17 +599,17 @@ class EmulatorProcessOutputTail {
   }
 
   private async waitForStreamClose(): Promise<void> {
-    let timeout: NodeJS.Timeout | undefined;
+    const timeout = new Error("Stream close timed out");
     try {
-      await Promise.race([
-        this.streamsClosed,
-        new Promise<void>((resolve) => {
-          timeout = this.timer.setTimeout(resolve, 1_000);
-        }),
-      ]);
-    } finally {
-      if (timeout) {
-        this.timer.clearTimeout(timeout);
+      await raceWithDeadline(this.streamsClosed, {
+        timer: this.timer,
+        timeoutMs: 1_000,
+        label: "Stream close",
+        timeoutError: () => timeout,
+      });
+    } catch (error) {
+      if (error !== timeout) {
+        throw error;
       }
     }
   }
@@ -5183,18 +5184,22 @@ export class DevicePool {
     exited: Promise<void>,
     timeoutMs: number,
   ): Promise<boolean> {
-    let timeout: NodeJS.Timeout | undefined;
+    const timeout = new Error("Tracked process exit timed out");
     try {
-      return await Promise.race([
+      return await raceWithDeadline(
         exited.then(() => true),
-        new Promise<boolean>((resolve) => {
-          timeout = this.timer.setTimeout(() => resolve(false), timeoutMs);
-        }),
-      ]);
-    } finally {
-      if (timeout) {
-        this.timer.clearTimeout(timeout);
+        {
+          timer: this.timer,
+          timeoutMs,
+          label: "Tracked process exit",
+          timeoutError: () => timeout,
+        },
+      );
+    } catch (error) {
+      if (error === timeout) {
+        return false;
       }
+      throw error;
     }
   }
 

@@ -2,6 +2,7 @@ import { errorMessage } from "../utils/describeUnknownError";
 import { Socket } from "node:net";
 import { logger } from "../utils/logger";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
 import {
   PushSubscriptionSocketServer,
   getSocketPath,
@@ -1692,32 +1693,22 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     requestId?: string;
   }): Promise<RequestedObservation[]> {
     const controller = new AbortController();
-    let timeoutHandle: NodeJS.Timeout | null = null;
-
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      timeoutHandle = this.timer.setTimeout(() => {
-        controller.abort();
-        reject(
+    return await raceWithDeadline(
+      this.onObservationRequested!({
+        deviceId: request.deviceId,
+        sessionUuid: request.sessionUuid,
+        requestId: request.requestId,
+        signal: controller.signal,
+      }),
+      {
+        timer: this.timer,
+        timeoutMs: this.observationRequestTimeoutMs,
+        label: "Observation request",
+        timeoutError: () =>
           new Error(`Observation request timed out after ${this.observationRequestTimeoutMs}ms`),
-        );
-      }, this.observationRequestTimeoutMs);
-    });
-
-    try {
-      return await Promise.race([
-        this.onObservationRequested!({
-          deviceId: request.deviceId,
-          sessionUuid: request.sessionUuid,
-          requestId: request.requestId,
-          signal: controller.signal,
-        }),
-        timeoutPromise,
-      ]);
-    } finally {
-      if (timeoutHandle) {
-        this.timer.clearTimeout(timeoutHandle);
-      }
-    }
+        onTimeout: () => controller.abort(),
+      },
+    );
   }
 
   private clearStorageOperation(key: string, operation: Promise<void>): void {

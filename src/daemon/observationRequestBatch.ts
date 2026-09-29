@@ -5,6 +5,7 @@ import type { Timer } from "../utils/SystemTimer";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
 import { createTimestampedId, defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
 
 /**
  * Each device gets the full outer request budget because batch devices now race
@@ -83,25 +84,19 @@ export async function runObservationRequestBatch<TDevice extends ObservationRequ
         `Observation request timed out after ${perDeviceTimeoutMs}ms for device ${device.id}`,
       );
       const combinedSignal = AbortSignal.any([signal, controller.signal]);
-      let timeoutHandle: NodeJS.Timeout | null = null;
-      const timeoutPromise = new Promise<never>((_, reject) => {
-        timeoutHandle = timer.setTimeout(() => {
-          controller.abort();
-          reject(timeoutError);
-        }, perDeviceTimeoutMs);
-      });
-
       try {
-        const observation = await Promise.race([execute(device, combinedSignal), timeoutPromise]);
+        const observation = await raceWithDeadline(execute(device, combinedSignal), {
+          timer,
+          timeoutMs: perDeviceTimeoutMs,
+          label: "Observation request",
+          timeoutError: () => timeoutError,
+          onTimeout: () => controller.abort(),
+        });
         return { deviceId: device.id, observation };
       } catch (error) {
         const message = errorMessage(error);
         logger.warn(`[Daemon] Failed to observe ${device.id}: ${message}`);
         return failedRequestObservation(timer, idGenerator, device.id, message);
-      } finally {
-        if (timeoutHandle) {
-          timer.clearTimeout(timeoutHandle);
-        }
       }
     }),
   );

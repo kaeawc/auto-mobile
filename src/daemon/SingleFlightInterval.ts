@@ -1,5 +1,6 @@
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { logger } from "../utils/logger";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
 
 const DEFAULT_STOP_TIMEOUT_MS = 5_000;
 
@@ -89,23 +90,26 @@ export class SingleFlightInterval {
       return true;
     }
 
-    let timeoutHandle: NodeJS.Timeout | undefined;
-    const timeout = new Promise<boolean>((resolve) => {
-      timeoutHandle = this.timer.setTimeout(() => resolve(false), this.stopTimeoutMs);
-    });
+    const timeout = new Error("Interval stop timed out");
 
     try {
-      return await Promise.race([
+      return await raceWithDeadline(
         activeTick.then(
           () => true,
           () => true,
         ),
-        timeout,
-      ]);
-    } finally {
-      if (timeoutHandle) {
-        this.timer.clearTimeout(timeoutHandle);
+        {
+          timer: this.timer,
+          timeoutMs: this.stopTimeoutMs,
+          label: "Interval stop",
+          timeoutError: () => timeout,
+        },
+      );
+    } catch (error) {
+      if (error === timeout) {
+        return false;
       }
+      throw error;
     }
   }
 

@@ -5,6 +5,7 @@ import {
   type IdentityRecoveryIO,
 } from "./identityRecovery";
 import { errorMessage } from "../utils/describeUnknownError";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { open, readFile, rm } from "node:fs/promises";
 import {
   constants,
@@ -1099,18 +1100,19 @@ export class DaemonManager implements DaemonManagerLike {
     if (budget <= 0 || !this.identityRecoveryIO.socketExists()) {
       return { running: false };
     }
-    let timeout: NodeJS.Timeout | undefined;
+    const timeout = new Error("Lock follower owner probe timed out");
     try {
-      return await Promise.race([
-        this.authenticateSocketOwner(),
-        new Promise<DaemonStatus>((resolve) => {
-          timeout = this.timer.setTimeout(() => resolve({ running: false }), budget);
-        }),
-      ]);
-    } finally {
-      if (timeout !== undefined) {
-        this.timer.clearTimeout(timeout);
+      return await raceWithDeadline(this.authenticateSocketOwner(), {
+        timer: this.timer,
+        timeoutMs: budget,
+        label: "Lock follower owner probe",
+        timeoutError: () => timeout,
+      });
+    } catch (error) {
+      if (error === timeout) {
+        return { running: false };
       }
+      throw error;
     }
   }
 
@@ -3885,24 +3887,17 @@ export class DaemonManager implements DaemonManagerLike {
     const probeAbort = new AbortController();
     const forwardAbort = () => probeAbort.abort();
     signal?.addEventListener("abort", forwardAbort, { once: true });
-    let timeout: NodeJS.Timeout | undefined;
-
     try {
-      await Promise.race([
-        client.connect(timeoutMs, probeAbort.signal),
-        new Promise<never>((_, reject) => {
-          timeout = this.timer.setTimeout(() => {
-            probeAbort.abort();
-            reject(new Error(`Daemon readiness probe timed out after ${timeoutMs}ms`));
-          }, timeoutMs);
-        }),
-      ]);
+      await raceWithDeadline(client.connect(timeoutMs, probeAbort.signal), {
+        timer: this.timer,
+        timeoutMs,
+        label: "Daemon readiness probe",
+        timeoutError: () => new Error(`Daemon readiness probe timed out after ${timeoutMs}ms`),
+        onTimeout: () => probeAbort.abort(),
+      });
     } finally {
       probeAbort.abort();
       signal?.removeEventListener("abort", forwardAbort);
-      if (timeout) {
-        this.timer.clearTimeout(timeout);
-      }
     }
   }
 

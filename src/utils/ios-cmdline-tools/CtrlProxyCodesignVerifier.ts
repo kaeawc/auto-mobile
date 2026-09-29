@@ -1,4 +1,5 @@
-import { execFile } from "node:child_process";
+import { runExecSeam } from "../ExecSeam";
+import { execFileAsync as sharedExecFileAsync } from "../HostCommandExecutor";
 
 /**
  * Result of running `codesign`/`spctl` against the downloaded CtrlProxy runner
@@ -48,25 +49,25 @@ export type CodesignExec = (file: string, args: readonly string[]) => Promise<Co
 const CODESIGN = "codesign";
 const SPCTL = "spctl";
 
-const defaultExec: CodesignExec = (file, args) =>
-  new Promise<CodesignExecOutput>((resolve) => {
-    execFile(file, [...args], { maxBuffer: 16 * 1024 * 1024 }, (error, stdout, stderr) => {
-      const out = String(stdout);
-      const err = String(stderr);
-      if (error) {
-        // execFile surfaces the process exit code on `error.code` when it is a
-        // number; a string there is a spawn error (e.g. ENOENT) which we map to
-        // a non-zero sentinel so the caller treats it as "did not verify".
-        const code =
-          typeof (error as { code?: unknown }).code === "number"
-            ? (error as { code: number }).code
-            : 1;
-        resolve({ code, stdout: out, stderr: err });
-        return;
-      }
-      resolve({ code: 0, stdout: out, stderr: err });
-    });
-  });
+const defaultExec: CodesignExec = async (file, args) => {
+  try {
+    const result = await runExecSeam(
+      (options) => sharedExecFileAsync(file, [...args], options),
+      { maxBuffer: 16 * 1024 * 1024 },
+      { command: file, args: [...args] },
+      { preserveError: true },
+    );
+    return { code: 0, stdout: result.stdout, stderr: result.stderr };
+  } catch (error) {
+    // This verifier reports command failures as structured outcomes for the caller.
+    const commandError = error as { code?: unknown; stdout?: unknown; stderr?: unknown };
+    return {
+      code: typeof commandError.code === "number" ? commandError.code : 1,
+      stdout: String(commandError.stdout ?? ""),
+      stderr: String(commandError.stderr ?? ""),
+    };
+  }
+};
 
 const TEAM_ID_PATTERN = /^TeamIdentifier=(.+)$/m;
 

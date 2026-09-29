@@ -1,6 +1,6 @@
 import { errorMessage } from "../describeUnknownError";
-import { spawn } from "node:child_process";
 import { ActionableError } from "../../models";
+import { DefaultHostCommandExecutor } from "../HostCommandExecutor";
 import { defaultTimer, type Timer } from "../SystemTimer";
 import { logger } from "../logger";
 
@@ -40,6 +40,7 @@ export interface PlistClientOptions {
 
 const DEFAULT_TIMEOUT_MS = 15_000;
 const DEFAULT_MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
+const hostProcessExecutor = new DefaultHostCommandExecutor();
 
 const defaultProcess: PlistProcess = ({ args, input, signal, maxOutputBytes }) =>
   new Promise((resolve, reject) => {
@@ -47,7 +48,7 @@ const defaultProcess: PlistProcess = ({ args, input, signal, maxOutputBytes }) =
       reject(new Error("plutil execution was cancelled"));
       return;
     }
-    const child = spawn("plutil", args, { stdio: ["pipe", "pipe", "pipe"] });
+    const child = hostProcessExecutor.spawn("plutil", args, { stdio: ["pipe", "pipe", "pipe"] });
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
     let outputBytes = 0;

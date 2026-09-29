@@ -1,6 +1,7 @@
 import { ActionableError } from "../../models";
 import { logger } from "../../utils/logger";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
 
 export const DEFAULT_WHIP_REQUEST_TIMEOUT_MS = 15_000;
 
@@ -215,21 +216,23 @@ export class WhipClient {
     method: string,
   ): Promise<string> {
     let timeout: NodeJS.Timeout | undefined;
+    const deadline = new AbortController();
     try {
-      return await Promise.race([
-        response.text(),
-        new Promise<never>((_, reject) => {
-          timeout = this.timer.setTimeout(
-            () =>
-              reject(
-                new ActionableError(
-                  `WHIP ${method} response body timed out after ${this.requestTimeoutMs}ms.`,
-                ),
-              ),
-            this.requestTimeoutMs,
-          );
-        }),
-      ]);
+      const operation = response.text();
+      timeout = this.timer.setTimeout(
+        () =>
+          deadline.abort(
+            new ActionableError(
+              `WHIP ${method} response body timed out after ${this.requestTimeoutMs}ms.`,
+            ),
+          ),
+        this.requestTimeoutMs,
+      );
+      return await raceWithDeadline(operation, {
+        timer: this.timer,
+        signal: deadline.signal,
+        label: `WHIP ${method} response body`,
+      });
     } finally {
       if (timeout) {
         this.timer.clearTimeout(timeout);

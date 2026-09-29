@@ -1,6 +1,9 @@
 import { errorMessage } from "../describeUnknownError";
 import { trackAmbient } from "../PerfContext";
-import { ChildProcess, type SpawnOptions } from "child_process";
+import type {
+  HostChildProcess as ChildProcess,
+  HostSpawnOptions as SpawnOptions,
+} from "../HostCommandExecutor";
 import { promises as fsPromises } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";

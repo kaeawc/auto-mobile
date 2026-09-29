@@ -887,16 +887,16 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
             keyboardFocusFrame: CGRect? = nil,
             disableAllFiltering: Bool = false,
             enclosingFrame: CGRect? = nil,
-            widgetContext: Bool = false
+            coordinateOffset: CGPoint = .zero
         )
             -> UIElementInfo
         {
-            let widgetContext = widgetContext || snapshot.identifier.localizedCaseInsensitiveContains("widget")
-            let frame = Self.screenFrame(
+            let resolved = Self.screenFrame(
                 snapshot.frame,
                 enclosingFrame: enclosingFrame,
-                widgetContext: widgetContext
+                coordinateOffset: coordinateOffset
             )
+            let frame = resolved.frame
 
             // Skip zero-area elements
             let hasZeroArea = frame.width <= 0 || frame.height <= 0
@@ -941,9 +941,9 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
 
                         let childFrame = Self.screenFrame(
                             child.frame,
-                            enclosingFrame: hasZeroArea ? enclosingFrame : frame,
-                            widgetContext: widgetContext || child.identifier.localizedCaseInsensitiveContains("widget")
-                        )
+                            enclosingFrame: frame,
+                            coordinateOffset: resolved.offset
+                        ).frame
 
                         if childFrame.width <= 0 || childFrame.height <= 0 {
                             // A zero-area wrapper can still contain on-screen descendants.
@@ -969,8 +969,8 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
                             childIndex: idx,
                             keyboardFocusFrame: keyboardFocusFrame,
                             disableAllFiltering: disableAllFiltering,
-                            enclosingFrame: hasZeroArea ? enclosingFrame : frame,
-                            widgetContext: widgetContext
+                            enclosingFrame: frame,
+                            coordinateOffset: resolved.offset
                         )
                     }
 
@@ -1157,7 +1157,7 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
 
             // Root element is always kept
             if isRoot {
-                return [Self.copying(element, node: optimizedChildren)]
+                return [ElementLocator.removingUnlabeledIconDescendants(Self.copying(element, node: optimizedChildren))]
             }
 
             // Only promote children (flatten hierarchy) if this is a bounds-only wrapper AND not interactive
@@ -1173,8 +1173,11 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
                 return []
             }
 
-            // Keep this element with optimized children
-            return [Self.copying(element, node: optimizedChildren)]
+            // Keep this element with optimized children. Strip icon artwork after
+            // bottom-up wrapper promotion so identified intermediate views cannot
+            // hide unlabeled descendants from the icon-level cleanup.
+            let retained = Self.copying(element, node: optimizedChildren)
+            return [ElementLocator.removingUnlabeledIconDescendants(retained)]
         }
 
         private func mapElementType(_ type: XCUIElement.ElementType) -> String {
@@ -1492,27 +1495,36 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
     // macOS. On this `@MainActor` class they must be `nonisolated static` so non-isolated
     // test code (and the iOS instance methods, synchronously) can call them without hopping.
 
-    /// A widget snapshot can expose a descendant in its hosting view's local coordinates.
-    /// Translate only when the widget identifier identifies that subtree, the raw frame
-    /// escapes its enclosing screen-space frame, and translation places it fully inside.
-    /// This leaves ordinary screen-origin elements and already-absolute frames untouched.
+    /// Resolve a snapshot frame using the offset inherited from its parent. When the
+    /// candidate escapes a non-empty resolved parent but adding that parent's origin
+    /// makes it fit, the node starts a local coordinate space. Return the composed
+    /// offset so descendants use the same space even when they fill their local parent.
+    /// Frames that already fit, or still escape after translation, stay unshifted.
     nonisolated static func screenFrame(
         _ frame: CGRect,
         enclosingFrame: CGRect?,
-        widgetContext: Bool
+        coordinateOffset: CGPoint
     )
-        -> CGRect
+        -> (frame: CGRect, offset: CGPoint)
     {
-        guard widgetContext,
-              let enclosingFrame,
-              !frame.isEmpty,
-              !enclosingFrame.isEmpty,
-              !enclosingFrame.contains(frame)
+        let candidate = frame.offsetBy(dx: coordinateOffset.x, dy: coordinateOffset.y)
+        guard let enclosingFrame,
+              frame.width > 0,
+              frame.height > 0,
+              enclosingFrame.width > 0,
+              enclosingFrame.height > 0,
+              !enclosingFrame.contains(candidate)
         else {
-            return frame
+            return (candidate, coordinateOffset)
         }
-        let translated = frame.offsetBy(dx: enclosingFrame.minX, dy: enclosingFrame.minY)
-        return enclosingFrame.contains(translated) ? translated : frame
+        let translated = candidate.offsetBy(dx: enclosingFrame.minX, dy: enclosingFrame.minY)
+        guard enclosingFrame.contains(translated) else {
+            return (candidate, coordinateOffset)
+        }
+        return (
+            translated,
+            CGPoint(x: coordinateOffset.x + enclosingFrame.minX, y: coordinateOffset.y + enclosingFrame.minY)
+        )
     }
 
     /// Keep zero-area wrappers only when their subtree contains a usable frame.
@@ -1849,9 +1861,6 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
             if isDuplicateLabel(child, of: parent) {
                 continue
             }
-            if isUnlabeledIconSubview(child, of: parent) {
-                continue
-            }
             if isStructuralWrapperWithOnlyScrollBarNoise(child) {
                 continue
             }
@@ -1880,16 +1889,35 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
         return true
     }
 
-    /// XCUITest exposes SpringBoard icon artwork/title subviews as image or icon
-    /// snapshots. The generic image/icon type mapping marks them tappable even
-    /// though the named enclosing icon is the actionable accessibility target.
-    private nonisolated static func isUnlabeledIconSubview(_ child: UIElementInfo, of parent: UIElementInfo) -> Bool {
-        guard parent.className == "SBIconView",
-              parent.clickable == "true",
-              parent.text?.isEmpty == false,
-              let parentBounds = parent.bounds,
-              let childBounds = child.bounds,
-              child.className == "UIImageView" || child.className == "SBIconView",
+    /// Remove unlabeled image/icon artwork anywhere below a labeled, clickable
+    /// SpringBoard icon. An identified intermediate view can survive wrapper
+    /// promotion, so direct-child cleanup alone cannot reach its descendants.
+    nonisolated static func removingUnlabeledIconDescendants(_ element: UIElementInfo) -> UIElementInfo {
+        guard element.className == "SBIconView",
+              element.clickable == "true",
+              element.text?.isEmpty == false
+        else {
+            return element
+        }
+        return copying(element, node: stripUnlabeledIconDescendants(element.node))
+    }
+
+    private nonisolated static func stripUnlabeledIconDescendants(_ children: [UIElementInfo]?) -> [UIElementInfo]? {
+        guard let children else { return nil }
+        let retained = children.compactMap { child -> UIElementInfo? in
+            let pruned = child.node == nil
+                ? child
+                : copying(child, node: stripUnlabeledIconDescendants(child.node))
+            return isUnlabeledIconSubview(pruned) ? nil : pruned
+        }
+        return retained.isEmpty ? nil : retained
+    }
+
+    /// XCTest maps icon image/title artwork as tappable image or icon snapshots,
+    /// although the named enclosing icon is the accessibility target. Geometry
+    /// cannot distinguish this artwork: it may extend beyond the icon bounds.
+    private nonisolated static func isUnlabeledIconSubview(_ child: UIElementInfo) -> Bool {
+        guard child.className == "UIImageView" || child.className == "SBIconView",
               child.text == nil,
               child.value == nil,
               child.contentDesc == nil,
@@ -1897,7 +1925,6 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
               child.hintText == nil,
               child.semanticLinks?.isEmpty ?? true,
               child.node?.isEmpty ?? true,
-              child.role == (child.className == "UIImageView" ? "image" : "button"),
               child.longClickable != "true",
               child.focused != "true",
               child.accessibilityFocused != "true",
@@ -1913,10 +1940,7 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
         else {
             return false
         }
-        return parentBounds.left <= childBounds.left
-            && parentBounds.top <= childBounds.top
-            && parentBounds.right >= childBounds.right
-            && parentBounds.bottom >= childBounds.bottom
+        return true
     }
 
     private nonisolated static func isActionableContainer(_ element: UIElementInfo) -> Bool {

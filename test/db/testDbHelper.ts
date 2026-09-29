@@ -15,18 +15,45 @@ export interface TestDatabaseOptions {
   foreignKeys?: boolean;
 }
 
+let migratedTemplateBytesPromise: Promise<Uint8Array> | null = null;
+
+async function getMigratedTemplateBytes(): Promise<Uint8Array> {
+  if (!migratedTemplateBytesPromise) {
+    migratedTemplateBytesPromise = (async () => {
+      const bunDb = new BunDatabase(":memory:");
+      const db = new Kysely<Database>({
+        dialect: new BunSqliteDialect({ database: bunDb }),
+      });
+      try {
+        await runMigrations(db as Kysely<unknown>);
+        return bunDb.serialize();
+      } finally {
+        await db.destroy();
+      }
+    })();
+  }
+
+  try {
+    return await migratedTemplateBytesPromise;
+  } catch (error) {
+    migratedTemplateBytesPromise = null;
+    throw error;
+  }
+}
+
 export async function createTestDatabase(
   options: TestDatabaseOptions = {},
 ): Promise<Kysely<Database>> {
-  const bunDb = new BunDatabase(":memory:");
+  const templateBytes = await getMigratedTemplateBytes();
+  // Give bun:sqlite a fresh copy in case its constructor takes ownership of the
+  // supplied bytes. Every caller must get an independent in-memory database.
+  const bunDb = new BunDatabase(new Uint8Array(templateBytes));
   if (options.foreignKeys) {
     bunDb.exec("PRAGMA foreign_keys = ON;");
   }
-  const db = new Kysely<Database>({
+  return new Kysely<Database>({
     dialect: new BunSqliteDialect({
       database: bunDb,
     }),
   });
-  await runMigrations(db as Kysely<unknown>);
-  return db;
 }

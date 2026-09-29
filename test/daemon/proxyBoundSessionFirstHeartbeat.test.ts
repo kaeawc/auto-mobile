@@ -487,6 +487,93 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
     }
   });
 
+  // Issue #6389: the daemon socket closes while the establishment heartbeat is in
+  // flight. DaemonClient runs the close subscriber synchronously (nulling the
+  // proxy's client) and then rejects the pending heartbeat, which the
+  // best-effort establishment path swallows. doConnect must not then publish
+  // connected=true over a null client.
+  function closingOnFirstHeartbeatClient(): {
+    client: FakeDaemonClient;
+    ownershipClaims: () => number;
+  } {
+    let attempts = 0;
+    const client: FakeDaemonClient = new FakeDaemonClient({
+      onCallDaemonMethod: (method, params) => {
+        if (method !== "daemon/heartbeat" || typeof params.sessionId !== "string") {
+          return;
+        }
+        attempts += 1;
+        if (attempts === 1) {
+          client.emitConnectionClosed();
+          throw new DaemonUnavailableError("Daemon socket connection lost: connection closed");
+        }
+        sessionManager.recordHeartbeat(params.sessionId);
+      },
+    });
+    const ownershipClaims = () =>
+      client.callDaemonMethodCalls.filter(
+        (call) => call.method === "daemon/heartbeat" && call.params.claimLivenessOwnership === true,
+      ).length;
+    return { client, ownershipClaims };
+  }
+
+  test("does not report connected when the socket closes during the first heartbeat (#6389)", async () => {
+    await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", 60_000);
+    const { client: fakeClient, ownershipClaims } = closingOnFirstHeartbeatClient();
+    const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+    const proxy = new DaemonMcpProxy({
+      initialSessionUuid: BOUND_SESSION,
+      clientFactory: () => fakeClient,
+      daemonManager: matchingDaemonManager(),
+      autoStartDaemon: false,
+      timer,
+    });
+    const pendingBefore = timer.getPendingIntervalCount();
+
+    try {
+      await expect(proxy.ensureConnected()).rejects.toBeInstanceOf(DaemonUnavailableError);
+      expect(ownershipClaims()).toBe(1);
+      expect(proxy.isConnected()).toBe(false);
+      // The binding is not left behind a stale flag with no keeper.
+      expect(timer.getPendingIntervalCount()).toBe(pendingBefore);
+
+      // The next call reconnects, re-delivers the ownership heartbeat, and starts the keeper.
+      await expect(proxy.callTool("observe", { deviceId: "device-a" })).resolves.toBeDefined();
+      expect(ownershipClaims()).toBe(2);
+      expect(proxy.isConnected()).toBe(true);
+      expect(timer.getPendingIntervalCount()).toBe(pendingBefore + 1);
+      expect(sessionManager.getSession(BOUND_SESSION)?.ownership).toBe("owned");
+    } finally {
+      isAvailableSpy.mockRestore();
+      await proxy.close();
+    }
+  });
+
+  test("reconnects and retries a call whose establishment loses the socket mid-heartbeat (#6389)", async () => {
+    await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", 60_000);
+    const { client: fakeClient, ownershipClaims } = closingOnFirstHeartbeatClient();
+    const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+    const proxy = new DaemonMcpProxy({
+      initialSessionUuid: BOUND_SESSION,
+      clientFactory: () => fakeClient,
+      daemonManager: matchingDaemonManager(),
+      autoStartDaemon: false,
+      timer,
+    });
+    const pendingBefore = timer.getPendingIntervalCount();
+
+    try {
+      await expect(proxy.callTool("observe", { deviceId: "device-a" })).resolves.toBeDefined();
+      expect(ownershipClaims()).toBe(2);
+      expect(fakeClient.callToolCalls.map((call) => call.toolName)).toEqual(["observe"]);
+      expect(proxy.isConnected()).toBe(true);
+      expect(timer.getPendingIntervalCount()).toBe(pendingBefore + 1);
+    } finally {
+      isAvailableSpy.mockRestore();
+      await proxy.close();
+    }
+  });
+
   // AC3: connection establishment delivers exactly one first heartbeat — a
   // reconnect must not compound duplicates onto a fresh transport.
   test("delivers exactly one heartbeat on a single establishment", async () => {

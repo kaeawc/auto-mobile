@@ -3,6 +3,7 @@ import { ExecuteGesture } from "../../../src/features/action/ExecuteGesture";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
+import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import type { BootedDevice } from "../../../src/models";
 
@@ -51,6 +52,40 @@ describe("ExecuteGesture", () => {
     const passed = getInstanceSpy!.mock.calls[0][1] as { create?: unknown };
     expect(typeof passed).toBe("object");
     expect(typeof passed.create).toBe("function");
+  });
+
+  test("returns a typed failure when the default ADB swipe command fails", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandError("shell input swipe", new Error("device offline"));
+    const result = await new ExecuteGesture(androidDevice, adb).swipe(0, 0, 100, 100);
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("device offline");
+  });
+
+  test("keeps the default ADB swipe successful when its command resolves", async () => {
+    const result = await new ExecuteGesture(androidDevice, new FakeAdbExecutor()).swipe(
+      0,
+      0,
+      100,
+      100,
+    );
+    expect(result.success).toBe(true);
+  });
+
+  test("reports both a11y and ADB failures when the fallback command fails", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandError("shell input swipe", new Error("ADB device offline"));
+    const fakeClient = {
+      requestSwipe: async () => ({ success: false, error: "a11y dispatch rejected" }),
+    } as unknown as AndroidCtrlProxyClient;
+    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(fakeClient);
+    const result = await new ExecuteGesture(androidDevice, adb).swipe(0, 0, 100, 100, {
+      scrollMode: "a11y",
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("a11y dispatch rejected");
+    expect(result.error).toContain("ADB device offline");
+    expect(result.fallbackReason).toBe("a11y dispatch rejected");
   });
 
   test("delegates iOS multi-finger FingerPath gestures to CtrlProxy with supplied spacing", async () => {

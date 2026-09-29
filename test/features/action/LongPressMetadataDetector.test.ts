@@ -84,6 +84,21 @@ describe("LongPressMetadataDetector", () => {
     expect(result.pressRecognized).toBe(true);
   });
 
+  test("recognizes a new root with object-shaped bounds at a different position", () => {
+    const before = {
+      class: "DecorView",
+      bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+      node: [],
+    };
+    const after = {
+      class: "DecorView",
+      bounds: { left: 10, top: 10, right: 110, bottom: 110 },
+      node: [],
+    };
+    const result = detector.detect(observation(before), observation(after));
+    expect(result.pressRecognized).toBe(true);
+  });
+
   test("returns all-false when current observation is missing", () => {
     const before = node({ "resource-id": "root", class: "FrameLayout", bounds: "[0,0][100,100]" });
     const result = detector.detect(observation(before), undefined);

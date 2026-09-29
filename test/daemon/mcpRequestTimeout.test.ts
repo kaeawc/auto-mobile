@@ -1168,4 +1168,22 @@ describe("ProgressExtendableDeadline", () => {
     // No extendOnProgress call at all.
     expect(deadline.value).toBe(1_000 + DEFAULT_MCP_REQUEST_TIMEOUT_MS);
   });
+
+  test("onExtended listeners fire only when the deadline actually moves forward, and stop after unsubscribe (issue #6283)", () => {
+    const deadline = new ProgressExtendableDeadline(0, 30_000);
+    const seen: number[] = [];
+    const unsubscribe = deadline.onExtended(() => seen.push(deadline.value));
+
+    deadline.extendOnProgress(1_000, 10_000); // proposes 11s < 30s: no-op
+    expect(seen).toEqual([]);
+
+    deadline.extendOnProgress(29_000, 30_000);
+    expect(seen).toEqual([59_000]);
+
+    unsubscribe();
+    unsubscribe(); // idempotent
+    deadline.extendOnProgress(40_000, 30_000);
+    expect(deadline.value).toBe(70_000);
+    expect(seen).toEqual([59_000]);
+  });
 });

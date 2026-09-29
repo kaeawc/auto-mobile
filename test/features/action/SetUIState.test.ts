@@ -2,7 +2,10 @@ import { beforeEach, describe, expect, test } from "bun:test";
 import { SetUIState } from "../../../src/features/action/SetUIState";
 import { BootedDevice, Element, ObserveResult, ViewHierarchyResult } from "../../../src/models";
 import { FakeTimer } from "../../fakes/FakeTimer";
-import { MIN_SET_UI_STATE_MCP_TIMEOUT_MS } from "../../../src/daemon/mcpRequestTimeout";
+import {
+  MIN_SET_UI_STATE_MCP_TIMEOUT_MS,
+  ProgressExtendableDeadline,
+} from "../../../src/daemon/mcpRequestTimeout";
 import {
   FakeTapOnElement,
   FakeInputText,
@@ -2139,6 +2142,84 @@ describe("SetUIState whole-call result deadline (issue #6222 reopen)", () => {
     expect(result.fields[0].timedOut).toBeFalsy();
     expect(fakeTimer.now() - callStartMs).toBeGreaterThan(30_000);
     expect(fakeTimer.now()).toBeLessThan(liveDeadlineMs);
+  });
+
+  test("an extension landing AFTER the field's last progress tick but before the old cutoff still re-arms the in-flight race (issue #6283)", async () => {
+    // The daemon extends the live deadline in its own `onprogress` handler,
+    // which can run after this call's progress callback -- and so after the
+    // `onTick` re-read -- has already returned. Here the tick re-reads the
+    // OLD 30s deadline (cutoff 27s); the extension only lands at 26s, from a
+    // separate timer, while the field's clear step is still running until
+    // 40s. Only a subscription to the extension keeps the field alive.
+    const callStartMs = fakeTimer.now();
+    const deadline = new ProgressExtendableDeadline(callStartMs, 30_000);
+    fakeTimer.setTimeout(() => deadline.extendOnProgress(fakeTimer.now(), 60_000), 26_000);
+    let clearStarted = false;
+
+    const setUIState = new SetUIState(device, null, {
+      tapOnElement: {
+        execute: async (
+          _opts: unknown,
+          progress?: (p: number, t?: number, m?: string) => Promise<void>,
+        ) => {
+          fakeTimer.advanceTime(10_000);
+          await progress?.(1, 2, "tap done");
+          return { success: true };
+        },
+      },
+      clearText: {
+        execute: () =>
+          new Promise<{ success: boolean }>((resolve) => {
+            clearStarted = true;
+            fakeTimer.setTimeout(() => resolve({ success: true }), 30_000);
+          }),
+      },
+      inputText: { execute: async (text: string) => ({ success: true, text }) },
+      swipeOn: fakeSwipe,
+      observeScreen: fakeObserve,
+      fieldTypeDetector: fakeFieldTypeDetector,
+      timer: fakeTimer,
+    });
+    fakeFieldTypeDetector.setSkipVerification("firstName", true);
+    fakeObserve.setResult({
+      updatedAt: 0,
+      screenSize: { width: 1080, height: 1920 },
+      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      viewHierarchy: threeFieldHierarchy,
+    });
+
+    const resultPromise = setUIState.execute(
+      { fields: [{ selector: { elementId: "firstName" }, value: "Grace" }] },
+      // Models `extra.sendNotification()` resolving WITHOUT the receiver
+      // having extended the deadline yet.
+      async () => {},
+      undefined,
+      callStartMs + 30_000,
+      () => deadline.value,
+      (listener) => deadline.onExtended(listener),
+    );
+
+    // Let the field reach its (fake-timer-driven) clear step before moving
+    // the clock; advancing earlier would drain every due event before the
+    // clear step's own timer exists.
+    for (let i = 0; i < 20 && !clearStarted; i++) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+    expect(clearStarted).toBe(true);
+    // Still before the extension (26s) and the old cutoff (27s).
+    expect(fakeTimer.now() - callStartMs).toBeLessThan(26_000);
+
+    await fakeTimer.advanceTimeAsync(callStartMs + 40_000 - fakeTimer.now());
+    const result = await resultPromise;
+
+    expect(result.fields[0].timedOut).toBeFalsy();
+    expect(result.fields[0].success).toBe(true);
+    expect(result.success).toBe(true);
+    expect(fakeTimer.now() - callStartMs).toBeGreaterThan(27_000);
+
+    // The race unsubscribed once it settled: a later extension arms nothing.
+    deadline.extendOnProgress(fakeTimer.now(), 60_000);
+    expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
   });
 
   test("a stalled initial observation with a tight post-queue budget returns bounded all-notAttempted results, never awaited unbounded (issue #6222 P1, fujun)", async () => {

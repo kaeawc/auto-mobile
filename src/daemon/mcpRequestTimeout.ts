@@ -477,6 +477,7 @@ export const MAX_PROGRESS_EXTENDED_MCP_REQUEST_TIMEOUT_MS = 300_000;
 export class ProgressExtendableDeadline {
   private currentMs: number;
   private readonly ceilingMs: number;
+  private readonly extensionListeners = new Set<() => void>();
 
   constructor(
     receivedAtMs: number,
@@ -507,6 +508,28 @@ export class ProgressExtendableDeadline {
    */
   extendOnProgress(nowMs: number, extensionMs: number): void {
     const proposed = Math.min(nowMs + extensionMs, this.ceilingMs);
-    this.currentMs = Math.max(this.currentMs, proposed);
+    if (proposed <= this.currentMs) {
+      return;
+    }
+    this.currentMs = proposed;
+    // Snapshot so a listener that unsubscribes itself mid-notify is safe.
+    for (const listener of [...this.extensionListeners]) {
+      listener();
+    }
+  }
+
+  /**
+   * Subscribe to extensions: `listener` runs synchronously each time
+   * `extendOnProgress` actually moves the deadline forward (never on a
+   * no-op proposal). Lets a consumer holding a timer armed against an
+   * earlier `value` re-arm the moment the extension lands, rather than only
+   * when it next happens to re-read (issue #6283). Returns an unsubscribe
+   * function that is safe to call more than once.
+   */
+  onExtended(listener: () => void): () => void {
+    this.extensionListeners.add(listener);
+    return () => {
+      this.extensionListeners.delete(listener);
+    };
   }
 }

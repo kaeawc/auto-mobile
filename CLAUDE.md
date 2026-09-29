@@ -241,7 +241,7 @@ This is a high-level summary of core MCP tools exposed by the server.
 ## Interaction
 
 - `tapOn`, `swipeOn`, `dragAndDrop`, `pinchOn`
-- `inputText`, `clearText`, `pressButton`, `pressKey`
+- `sendKeys`, `pressButton`, `selectAllText`, `clipboard`
 
 ## App Management
 

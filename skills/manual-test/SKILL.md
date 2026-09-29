@@ -223,7 +223,7 @@ Make the target device active and leave the other alone. For **each** checklist 
   field or effect exists (e.g. `occludedByViewId` populated with a real node id;
   `tapOn.index` selects distinct instances; per-app locale actually set).
 - **Regression sweep:** run the changed-surface tools (observe, tapOn, swipeOn,
-  inputText/clearText, pressButton, dragAndDrop, pinchOn, rotate, launch/terminate,
+  sendKeys, pressButton, dragAndDrop, pinchOn, rotate, launch/terminate,
   device state, navigation) and confirm well-formed output on the fresh runners.
 
 **Known blockers — record, don't fight:**

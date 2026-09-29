@@ -27,7 +27,7 @@ request before anything is written. Always-on names such as `setToolEnabled`,
 ```json
 {
   "name": "setToolEnabled",
-  "arguments": { "toolNames": ["inputText", "clearText", "imeAction"] }
+  "arguments": { "toolNames": ["sendKeys", "clipboard", "highlight"] }
 }
 ```
 
@@ -50,7 +50,7 @@ call:
   "name": "getAndroid",
   "arguments": {
     "avdName": "Pixel_9",
-    "enableTools": ["inputText", "clearText", "imeAction"]
+    "enableTools": ["sendKeys", "clipboard", "highlight"]
   }
 }
 ```

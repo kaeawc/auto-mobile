@@ -899,16 +899,18 @@ final class CommandHandler: CommandHandling {
         perf.serial("handlePressKey")
         defer { perf.end() }
 
-        try await performContextCheckedGesture(expected: request.frameContext) {
+        let verified = try await performContextCheckedGesture(expected: request.frameContext) {
             try self.tracked("pressKey") {
                 try self.gesturePerformer.pressKey(key: request.key, modifiers: request.modifiers)
             }
         }
 
-        return WebSocketResponse.success(
+        return WebSocketResponse(
             type: ResponseType.pressKeyResult.rawValue,
             requestId: request.requestId,
-            totalTimeMs: totalTimeMs(from: startTime)
+            success: true,
+            totalTimeMs: totalTimeMs(from: startTime),
+            verified: verified
         )
     }
 

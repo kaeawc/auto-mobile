@@ -135,6 +135,7 @@ export interface SendKeysCommandResult {
   partialApplication?: boolean;
   error?: string;
   retryable?: boolean;
+  verified?: boolean;
   backend?: "autoMobileIme";
   capability?: "semanticText";
   keyboard?: KeyboardIdentity;
@@ -229,7 +230,7 @@ export interface SendKeysInputKey {
     timeoutMs?: number,
     frameContext?: string,
     modifiers?: readonly InputKeyModifier[],
-  ): Promise<{ success: boolean; error?: string }>;
+  ): Promise<{ success: boolean; error?: string; verified?: boolean }>;
 }
 
 export interface SendKeysPlatformDependencies {
@@ -403,6 +404,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       key: command.key,
       modifiers,
       success: result.success,
+      ...(result.verified === undefined ? {} : { verified: result.verified }),
       ...(result.error ? { error: result.error } : {}),
     };
   }

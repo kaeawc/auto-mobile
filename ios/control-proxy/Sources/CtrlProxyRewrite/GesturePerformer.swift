@@ -122,6 +122,11 @@ public final class GesturePerformer: GesturePerforming {
         markerIndex < originalLength
     }
 
+    nonisolated static func arrowCaretMoved(key: String, before: Int, after: Int, length: Int) -> Bool {
+        if key == "arrow_left" { return after < before || before == 0 && after == 0 }
+        return after > before || before == length && after == length
+    }
+
     /// Includes a scoped owner when the owner is itself a link; XCUITest's
     /// descendants query otherwise excludes that element.
     nonisolated static func scopedLinkCandidates<Element>(
@@ -909,7 +914,8 @@ public final class GesturePerformer: GesturePerforming {
             }
         }
 
-        public func pressKey(key: String, modifiers: [String]) throws {
+        @discardableResult
+        public func pressKey(key: String, modifiers: [String]) throws -> Bool? {
             guard let app = resolveTextInputApp() else {
                 throw GestureError.noApplication
             }
@@ -960,8 +966,18 @@ public final class GesturePerformer: GesturePerforming {
             )
 
             let isDestructiveKey = normalizedKey == "backspace" || normalizedKey == "delete"
-            let focusedElement = isDestructiveKey ? resolveFocusedTextElement(app: app) : nil
+            let isHorizontalArrow = normalizedKey == "arrow_left" || normalizedKey == "arrow_right"
+            let isPlainHorizontalArrow = isHorizontalArrow && modifierFlags.isEmpty
+            let focusedElement = isDestructiveKey || isPlainHorizontalArrow ? resolveFocusedTextElement(app: app) : nil
             let valueBeforeKeyPress = focusedElement?.value as? String
+            let caretBefore: Int?
+            if isPlainHorizontalArrow, let focusedElement {
+                caretBefore = try probeCaretIndex(
+                    app: app, focusedElement: focusedElement, original: valueBeforeKeyPress
+                )
+            } else {
+                caretBefore = nil
+            }
 
             if isDestructiveKey, !GesturePerformer.canVerifyDestructiveKey(focusedValue: valueBeforeKeyPress) {
                 throw GestureError.gestureFailed(
@@ -981,13 +997,44 @@ public final class GesturePerformer: GesturePerforming {
                     focusedElement.typeText(keyboardKey.rawValue)
                 } else if normalizedKey == "delete" {
                     app.typeKey(keyboardKey, modifierFlags: [])
+                } else if isPlainHorizontalArrow, let focusedElement {
+                    // XCUITest's app-level arrow events can silently miss the focused field.
+                    do {
+                        try catchingObjCException { focusedElement.typeText(keyboardKey.rawValue) }
+                    } catch {
+                        app.typeKey(keyboardKey, modifierFlags: modifierFlags)
+                    }
                 } else {
                     app.typeKey(keyboardKey, modifierFlags: modifierFlags)
                 }
             }
 
+            if isPlainHorizontalArrow {
+                guard let focusedElement, let valueBeforeKeyPress, let caretBefore else { return false }
+                guard let caretAfter = try probeCaretIndex(
+                    app: app, focusedElement: focusedElement, original: valueBeforeKeyPress
+                ) else { return false }
+                if GesturePerformer.arrowCaretMoved(
+                    key: normalizedKey, before: caretBefore, after: caretAfter, length: valueBeforeKeyPress.count
+                ) { return true }
+
+                // Keep app-level synthesis as a fallback if element delivery had no effect.
+                try catchingObjCException { app.typeKey(keyboardKey, modifierFlags: modifierFlags) }
+                guard let fallbackCaret = try probeCaretIndex(
+                    app: app, focusedElement: focusedElement, original: valueBeforeKeyPress
+                ) else { return false }
+                guard GesturePerformer.arrowCaretMoved(
+                    key: normalizedKey, before: caretBefore, after: fallbackCaret, length: valueBeforeKeyPress.count
+                ) else {
+                    throw GestureError.gestureFailed("arrow key had no effect: '\(key)'")
+                }
+                return true
+            }
+
+            if isHorizontalArrow { return false }
+
             guard isDestructiveKey else {
-                return
+                return nil
             }
             guard let focusedElement, let valueBeforeKeyPress else {
                 throw GestureError.gestureFailed(
@@ -1006,22 +1053,54 @@ public final class GesturePerformer: GesturePerforming {
             let deadline = Date().addingTimeInterval(1.0)
             while Date() < deadline {
                 guard focusedElement.exists, let valueAfterKeyPress = focusedElement.value as? String else {
-                    return
+                    return nil
                 }
                 if GesturePerformer.didDeleteText(before: valueBeforeKeyPress, after: valueAfterKeyPress) {
-                    return
+                    return nil
                 }
                 RunLoop.current.run(until: Date().addingTimeInterval(0.05))
             }
 
             guard focusedElement.exists, let valueAfterKeyPress = focusedElement.value as? String else {
-                return
+                return nil
             }
             if !GesturePerformer.didDeleteText(before: valueBeforeKeyPress, after: valueAfterKeyPress) {
                 throw GestureError.gestureFailed(
                     "Key '\(key)' did not decrease text length: before \(valueBeforeKeyPress.count), observed \(valueAfterKeyPress.count)"
                 )
             }
+            return nil
+        }
+
+        private func probeCaretIndex(
+            app: XCUIApplication, focusedElement: XCUIElement, original: String?
+        )
+            throws -> Int?
+        {
+            guard let original, let marker = GesturePerformer.forwardDeleteMarker(for: original) else { return nil }
+            do {
+                let index = try catchingObjCException { () -> Int? in
+                    focusedElement.typeText(marker)
+                    guard let probed = focusedElement.value as? String,
+                          let index = GesturePerformer.forwardDeleteMarkerIndex(
+                              original: original, probed: probed, marker: marker
+                          )
+                    else { return nil }
+                    focusedElement.typeText(XCUIKeyboardKey.delete.rawValue)
+                    guard focusedElement.value as? String == original else { return nil }
+                    return index
+                }
+                if index != nil { return index }
+            } catch {
+                try restoreForwardDeleteProbe(
+                    app: app, focusedElement: focusedElement, original: original, marker: marker
+                )
+                return nil
+            }
+            try restoreForwardDeleteProbe(
+                app: app, focusedElement: focusedElement, original: original, marker: marker
+            )
+            return nil
         }
 
         private func emulateForwardDelete(app: XCUIApplication, focusedElement: XCUIElement, original: String) throws {
@@ -1929,7 +2008,8 @@ public final class GesturePerformer: GesturePerforming {
             throw GestureError.notSupported("XCUITest only available on iOS")
         }
 
-        public func pressKey(key _: String, modifiers _: [String]) throws {
+        @discardableResult
+        public func pressKey(key _: String, modifiers _: [String]) throws -> Bool? {
             throw GestureError.notSupported("XCUITest only available on iOS")
         }
 

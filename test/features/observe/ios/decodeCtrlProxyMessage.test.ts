@@ -72,7 +72,6 @@ describe("decodeCtrlProxyMessage", () => {
     "append_text_result",
     "clear_text_result",
     "select_all_result",
-    "press_key_result",
     "press_button_result",
     "press_home_result",
     "press_back_result",
@@ -92,6 +91,24 @@ describe("decodeCtrlProxyMessage", () => {
       });
     });
   }
+
+  test("press_key_result preserves runner failure and verification metadata", () => {
+    expect(
+      decodeCtrlProxyMessage(
+        msg({
+          type: "press_key_result",
+          success: false,
+          error: "Gesture failed: arrow key had no effect: 'arrow_left'",
+        }),
+      )?.result,
+    ).toMatchObject({
+      success: false,
+      error: "Gesture failed: arrow key had no effect: 'arrow_left'",
+    });
+    expect(
+      decodeCtrlProxyMessage(msg({ type: "press_key_result", verified: false }))?.result,
+    ).toMatchObject({ success: true, verified: false });
+  });
 
   test("pinch_result carries element-anchored pinchPath through (#2910)", () => {
     const decoded = decodeCtrlProxyMessage(

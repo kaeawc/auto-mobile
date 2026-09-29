@@ -140,6 +140,7 @@ export interface WebSocketMessage {
   format?: string;
   rotation?: number;
   success?: boolean;
+  verified?: boolean;
   ok?: boolean;
   open?: boolean;
   totalTimeMs?: number;
@@ -200,7 +201,9 @@ export interface CtrlProxyKeyboardResult extends BaseResult {
 }
 
 /** Discrete keyboard key result from CtrlProxy iOS */
-export type CtrlProxyPressKeyResult = BaseResult;
+export interface CtrlProxyPressKeyResult extends BaseResult {
+  verified?: boolean;
+}
 
 /** Press home result from CtrlProxy iOS */
 export type CtrlProxyPressHomeResult = BaseResult;

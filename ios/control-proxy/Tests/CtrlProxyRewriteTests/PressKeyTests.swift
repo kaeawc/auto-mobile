@@ -59,6 +59,16 @@ final class PressKeyTests: XCTestCase {
         XCTAssertFalse(GesturePerformer.caretHasFollowingCharacter(markerIndex: 0, originalLength: 0))
     }
 
+    func testHorizontalArrowCaretPostconditionAcceptsMovementOrBoundaryOnly() {
+        XCTAssertTrue(GesturePerformer.arrowCaretMoved(key: "arrow_left", before: 3, after: 2, length: 3))
+        XCTAssertFalse(GesturePerformer.arrowCaretMoved(key: "arrow_left", before: 2, after: 2, length: 3))
+        XCTAssertTrue(GesturePerformer.arrowCaretMoved(key: "arrow_left", before: 0, after: 0, length: 3))
+        XCTAssertTrue(GesturePerformer.arrowCaretMoved(key: "arrow_right", before: 1, after: 2, length: 3))
+        XCTAssertFalse(GesturePerformer.arrowCaretMoved(key: "arrow_right", before: 1, after: 1, length: 3))
+        XCTAssertTrue(GesturePerformer.arrowCaretMoved(key: "arrow_right", before: 3, after: 3, length: 3))
+        XCTAssertFalse(GesturePerformer.arrowCaretMoved(key: "arrow_right", before: 2, after: 1, length: 3))
+    }
+
     func testDecodePreservesKeyAndModifiersAndResponseType() throws {
         let request = try JSONDecoder().decode(WebSocketRequest.self, from: Data(
             #"{"type":"request_press_key","requestId":"key-1","key":"tab","modifiers":["shift","meta"]}"#.utf8
@@ -92,12 +102,17 @@ final class PressKeyDispatchTests: XCTestCase {
         XCTAssertEqual(gestures.keyCalls.count, 1)
         XCTAssertEqual(gestures.keyCalls.first?.0, "tab")
         XCTAssertEqual(gestures.keyCalls.first?.1, ["shift", "meta"])
+        gestures.keyVerified = false
+        let unverifiedResult = await handler.handle(request)
+        let unverified = try XCTUnwrap(unverifiedResult as? WebSocketResponse)
+        XCTAssertEqual(unverified.success, true)
+        XCTAssertEqual(unverified.verified, false)
         gestures.keyError = .executionFailed("No focus")
         let failedResult = await handler.handle(request)
         let failure = try XCTUnwrap(failedResult as? WebSocketResponse)
         XCTAssertEqual(failure.success, false)
         XCTAssertEqual(failure.type, "press_key_result")
         XCTAssertEqual(failure.requestId, "key-1")
-        XCTAssertEqual(gestures.keyCalls.count, 1)
+        XCTAssertEqual(gestures.keyCalls.count, 2)
     }
 }

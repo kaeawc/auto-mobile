@@ -88,7 +88,9 @@ public protocol GesturePerforming: Sendable {
 
     /// Open, close, or detect the software keyboard. Returns whether the
     /// keyboard is visible after the requested action.
-    func pressKey(key: String, modifiers: [String]) throws
+    /// Returns true when caret movement was checked, false when it could not be checked,
+    /// and nil for keys without a caret post-condition.
+    func pressKey(key: String, modifiers: [String]) throws -> Bool?
     func keyboard(action: String) throws -> Bool
 
     // MARK: - Clipboard

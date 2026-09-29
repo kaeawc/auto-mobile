@@ -58,9 +58,12 @@ final class RewriteFakeGesturePerformer: GesturePerforming {
     var onPressHome: (() -> Void)?
     var pressHomeError: CommandError?
 
-    func pressKey(key: String, modifiers: [String]) throws {
+    var keyVerified: Bool?
+
+    func pressKey(key: String, modifiers: [String]) throws -> Bool? {
         if let keyError { throw keyError }
         keyCalls.append((key, modifiers))
+        return keyVerified
     }
 
     func tap(x _: Double, y _: Double, duration _: TimeInterval) throws { tapCalls += 1 }

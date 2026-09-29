@@ -90,6 +90,7 @@
 		76AF1BC9492B889D1EF00682 /* NetworkErrorSimulationDTO.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6BA709265F7E2B2597159DCD /* NetworkErrorSimulationDTO.swift */; };
 		787A16707A2491C62C5763C3 /* SdkStorageCapabilities.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3EF41BE84B004D16947F5C5 /* SdkStorageCapabilities.swift */; };
 		7CD72A94D6DD1BBFCC5A8355 /* RequestStorageCapabilities.swift in Sources */ = {isa = PBXBuildFile; fileRef = E75FD4F7E1A317B6151CDD1C /* RequestStorageCapabilities.swift */; };
+		7EAF9F56CFE709431DB8DE33 /* AppSwitcherDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08125C56479E153437ACE83C /* AppSwitcherDetector.swift */; };
 		7F0A1FBC49EE6CFD37F53294 /* CtrlProxyUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 802717F6B1F37809C4806C23 /* CtrlProxyUITests.swift */; };
 		8042BC14FFCE449CF774EB8B /* ListDatabasesResponse.swift in Sources */ = {isa = PBXBuildFile; fileRef = 929A3A8D39F74FF457388031 /* ListDatabasesResponse.swift */; };
 		80A9C386313397C265317240 /* NWByteChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25155DA16B0B4FAA517B15FF /* NWByteChannel.swift */; };
@@ -257,6 +258,7 @@
 		057109D870A95BFD61146C25 /* DisplayLinkFPSMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisplayLinkFPSMonitor.swift; sourceTree = "<group>"; };
 		0603E765B283E038514EA598 /* SystemChromeInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemChromeInfo.swift; sourceTree = "<group>"; };
 		06F95688CD75045850929012 /* DeviceRotation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceRotation.swift; sourceTree = "<group>"; };
+		08125C56479E153437ACE83C /* AppSwitcherDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSwitcherDetector.swift; sourceTree = "<group>"; };
 		0A992C21EBABF539A2F7C333 /* StorageError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorageError.swift; sourceTree = "<group>"; };
 		0B4AF05BB8592BAC9A569E2F /* ViewHierarchy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewHierarchy.swift; sourceTree = "<group>"; };
 		0B7202FD30E71BA78B33FAFF /* ByteChannelState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ByteChannelState.swift; sourceTree = "<group>"; };
@@ -467,6 +469,7 @@
 			isa = PBXGroup;
 			children = (
 				DCDAF8EC4DC718D7EB961451 /* AppStateExpectation.swift */,
+				08125C56479E153437ACE83C /* AppSwitcherDetector.swift */,
 				4F8A0CC4855579D12DEB7BFA /* BundleId.swift */,
 				CA7AF3DFF9E964313765FFF7 /* ByteChannel.swift */,
 				0B7202FD30E71BA78B33FAFF /* ByteChannelState.swift */,
@@ -886,6 +889,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				826D052CB1DD825E578A1C0D /* AppStateExpectation.swift in Sources */,
+				7EAF9F56CFE709431DB8DE33 /* AppSwitcherDetector.swift in Sources */,
 				D5F848B6EF05467488BF266A /* BundleId.swift in Sources */,
 				B93612A6DB1A13DC93E9C4E7 /* ByteChannel.swift in Sources */,
 				8598FD0E079DAA01B51BFC7C /* ByteChannelState.swift in Sources */,

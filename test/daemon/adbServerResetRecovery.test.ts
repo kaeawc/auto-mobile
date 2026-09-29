@@ -86,6 +86,7 @@ describe("ADB server reset session recovery", () => {
       undefined,
       original,
     );
+    expect(sessionManager.getDeviceReadiness("session-1")).toBeUndefined();
     const captured = pool.getDevice(original.deviceId);
     if (!captured) {
       throw new Error("expected captured device");
@@ -110,6 +111,10 @@ describe("ADB server reset session recovery", () => {
         autolockSessionId: "session-1",
       });
       expect(sessionManager.getSession("session-1")?.assignedDevice).toBe("emulator-5560");
+      expect(sessionManager.getDeviceReadiness("session-1")).toBe("booted");
+      sessionManager.setDeviceReadiness("session-1", "automationReady");
+      sessionManager.setDeviceReadiness("session-1", "booted");
+      expect(sessionManager.getDeviceReadiness("session-1")).toBe("automationReady");
     } finally {
       sessionManager.stopCleanupTimer();
     }
@@ -974,6 +979,7 @@ describe("ADB server reset session recovery", () => {
         status: "busy",
       });
       expect(sessionManager.getSession("session-1")?.assignedDevice).toBe(original.deviceId);
+      expect(sessionManager.getDeviceReadiness("session-1")).toBe("booted");
       await pool.releaseAdbServerResetCohortReservations(detached.devices);
       expect(pool.isSessionRecoveryInFlight("session-1")).toBe(false);
     } finally {

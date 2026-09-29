@@ -616,6 +616,7 @@ export function registerUtilityTools() {
               `Device '${args.deviceId}' is already assigned to session ${boundSession}`,
             );
           }
+          sessionManager.setDeviceReadiness(args.sessionUuid, "booted");
         }
         logger.info(
           `[setActiveDevice] Bound device ${args.deviceId} to session ${args.sessionUuid}`,

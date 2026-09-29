@@ -5,6 +5,12 @@ import {
   tapFrameBoundImeKey,
 } from "../../../src/features/action/InstalledImeKeySession";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import {
+  AndroidImeCatalog,
+  AUTO_MOBILE_IME_ID,
+  imeCapabilities,
+} from "../../../src/features/action/AndroidImeCatalog";
 
 const original = "com.example.original/.Ime";
 const target = "com.example.keyboard/.Ime";
@@ -62,7 +68,11 @@ function fixture(
   let selectionSettled: (() => void) | undefined;
   let openCount = 0;
   let afterTapDispatch: (() => void) | undefined;
-  const session = new InstalledImeKeySession(`native-session-device-${++fixtureNumber}`, {
+  let keyboardGate: Promise<void> | undefined;
+  const deviceId = `native-session-device-${++fixtureNumber}`;
+  let subtype: number | null = 7;
+  let subtypeRestoreError: string | undefined;
+  const session = new InstalledImeKeySession(deviceId, {
     catalog: {
       list: async () => ({
         activeImeId: active,
@@ -70,6 +80,7 @@ function fixture(
           id,
           enabled: true,
           active: id === active,
+          capabilities: imeCapabilities(id),
         })),
       }),
       selectWithinLock: async (id, signal) => {
@@ -87,14 +98,32 @@ function fixture(
             id: item,
             enabled: true,
             active: item === active,
+            capabilities: imeCapabilities(item),
           })),
         };
       },
+      readSubtype: async (id) => {
+        void id;
+        return { id: subtype, ...(subtype === null ? {} : { locale: "en_US" }) };
+      },
+      restoreSubtypeWithinLock: async (id, snapshot) => {
+        events.push(`restoreSubtype:${id}:${snapshot.id ?? "unset"}`);
+        if (subtypeRestoreError) {
+          throw new Error(subtypeRestoreError);
+        }
+        subtype = snapshot.id;
+      },
+      identity: async (id, snapshot) => ({
+        component: id,
+        package: id.split("/")[0],
+        ...(snapshot?.locale ? { subtype: snapshot.locale } : {}),
+      }),
     },
     keyboard: {
       execute: async () => {
         openCount++;
         afterSelection?.();
+        await keyboardGate;
         return { success: true };
       },
     },
@@ -112,12 +141,22 @@ function fixture(
   });
   return {
     session,
+    deviceId,
     events,
+    setKeyboardGate: (gate: Promise<void>) => {
+      keyboardGate = gate;
+    },
     setTapError: (error: string) => {
       tapError = error;
     },
     setRestoreError: (error: string) => {
       restoreError = error;
+    },
+    setSubtypeRestoreError: (error: string) => {
+      subtypeRestoreError = error;
+    },
+    setSubtype: (id: number | null) => {
+      subtype = id;
     },
     setAfterSelection: (action: () => void) => {
       afterSelection = action;
@@ -144,11 +183,15 @@ test("taps one observed key in the selected IME window and restores the prior IM
       status: "unavailable",
       reason: "Focused editor identity or text was unavailable before the tap.",
     },
+    backend: "installedIme",
+    capability: "visibleKeyTap",
+    keyboard: { component: target, package: "com.example.keyboard", subtype: "en_US" },
   });
   expect(events).toEqual([
     `select:${target}:cleanup`,
     "tap:120,420:frame-one",
     `select:${original}:cleanup`,
+    `restoreSubtype:${original}:7`,
   ]);
   expect(getActive()).toBe(original);
 });
@@ -157,7 +200,7 @@ test("restores after a failed tap", async () => {
   const { session, events, setTapError, getActive } = fixture();
   setTapError("tap rejected");
   await expect(session.tapKey(target, "a")).rejects.toThrow("tap rejected");
-  expect(events.at(-1)).toBe(`select:${original}:cleanup`);
+  expect(events.at(-1)).toBe(`restoreSubtype:${original}:7`);
   expect(getActive()).toBe(original);
 });
 
@@ -169,7 +212,7 @@ test("does not tap an app control when no real IME window contains the key", asy
   const { session, events } = fixture(fakeWindow);
   await expect(session.tapKey(target, "a")).rejects.toThrow("Visible key");
   expect(events.some((event) => event.startsWith("tap:"))).toBe(false);
-  expect(events.at(-1)).toBe(`select:${original}:cleanup`);
+  expect(events.at(-1)).toBe(`restoreSubtype:${original}:7`);
 });
 
 test("does not tap a key from another IME package", async () => {
@@ -328,6 +371,7 @@ test("a stale layout rejects the bound tap without fallback and still restores",
     `select:${target}:cleanup`,
     "tap:120,420:frame-one",
     `select:${original}:cleanup`,
+    `restoreSubtype:${original}:7`,
   ]);
 });
 
@@ -413,7 +457,11 @@ test("restores the original IME after cancellation", async () => {
   const controller = new AbortController();
   setAfterSelection(() => controller.abort());
   await expect(session.tapKey(target, "a", controller.signal)).rejects.toThrow();
-  expect(events).toEqual([`select:${target}:signaled`, `select:${original}:cleanup`]);
+  expect(events).toEqual([
+    `select:${target}:signaled`,
+    `select:${original}:cleanup`,
+    `restoreSubtype:${original}:7`,
+  ]);
   expect(getActive()).toBe(original);
 });
 
@@ -424,7 +472,11 @@ test("does not open the keyboard when selection completes with cancellation", as
 
   await expect(session.tapKey(target, "a", controller.signal)).rejects.toThrow();
   expect(getOpenCount()).toBe(0);
-  expect(events).toEqual([`select:${target}:signaled`, `select:${original}:cleanup`]);
+  expect(events).toEqual([
+    `select:${target}:signaled`,
+    `select:${original}:cleanup`,
+    `restoreSubtype:${original}:7`,
+  ]);
   expect(getActive()).toBe(original);
 });
 
@@ -441,6 +493,7 @@ test("reports an applied key when cancellation arrives after physical dispatch",
     `select:${target}:signaled`,
     "tap:120,420:frame-one",
     `select:${original}:cleanup`,
+    `restoreSubtype:${original}:7`,
   ]);
   expect(getActive()).toBe(original);
 });
@@ -448,6 +501,79 @@ test("reports an applied key when cancellation arrives after physical dispatch",
 test("reports unverifiable restoration and quarantines the device", async () => {
   const { session, setRestoreError } = fixture();
   setRestoreError("restore rejected");
-  await expect(session.tapKey(target, "a")).rejects.toThrow("could not verify restoration");
+  await expect(session.tapKey(target, "a")).rejects.toThrow(
+    `Could not restore the original keyboard ${original}`,
+  );
   await expect(session.tapKey(target, "a")).rejects.toThrow("IME state is unknown");
+});
+
+test("restores an unset subtype after restoring the component", async () => {
+  const { session, events, setSubtype } = fixture();
+  setSubtype(null);
+  const result = await session.tapKey(target, "a");
+  expect(result.keyboard).toEqual({ component: target, package: "com.example.keyboard" });
+  expect(events.slice(-2)).toEqual([
+    `select:${original}:cleanup`,
+    `restoreSubtype:${original}:unset`,
+  ]);
+});
+
+test("subtype restore failure quarantines the device and names the original IME", async () => {
+  const { session, events, setSubtypeRestoreError } = fixture();
+  setSubtypeRestoreError("subtype no longer advertised");
+  await expect(session.tapKey(target, "a")).rejects.toThrow(
+    `Could not restore the original keyboard ${original}; run "keyboard setIme ${original}"`,
+  );
+  expect(events.at(-1)).toBe(`restoreSubtype:${original}:7`);
+  await expect(session.tapKey(target, "a")).rejects.toThrow("IME state is unknown");
+});
+
+test("AutoMobile IME rejects visible key taps explicitly", async () => {
+  const { session, events } = fixture(keyWindow, focused, keyWindow, AUTO_MOBILE_IME_ID);
+  await expect(session.tapKey(AUTO_MOBILE_IME_ID, "a")).rejects.toThrow(
+    "AutoMobile IME does not support visibleKeyTap",
+  );
+  expect(events).toEqual([]);
+});
+
+test("persistent selection waits for the session's subtype restore under the same device lock", async () => {
+  const { session, deviceId, events, setKeyboardGate, setAfterSelection } = fixture();
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let selected!: () => void;
+  const selectionReached = new Promise<void>((resolve) => {
+    selected = resolve;
+  });
+  setKeyboardGate(gate);
+  setAfterSelection(selected);
+  const tap = session.tapKey(target, "a");
+  await selectionReached;
+
+  const adb = new FakeAdbExecutor();
+  adb.setCommandResponse("shell ime list -a -s", { stdout: `${original}\n`, stderr: "" });
+  adb.setCommandResponse("shell ime list -s", { stdout: `${original}\n`, stderr: "" });
+  adb.setCommandResponse("shell settings get secure default_input_method", {
+    stdout: original,
+    stderr: "",
+  });
+  const catalog = new AndroidImeCatalog(
+    {
+      execute: async (args) => {
+        events.push(`persistent:${args.join(" ")}`);
+        return adb.execute(args);
+      },
+    },
+    deviceId,
+  );
+  const selection = catalog.select(original);
+  await Promise.resolve();
+  expect(events.some((event) => event.startsWith("persistent:"))).toBe(false);
+  release();
+  await tap;
+  await selection;
+  expect(events.indexOf(`restoreSubtype:${original}:7`)).toBeLessThan(
+    events.findIndex((event) => event.startsWith("persistent:")),
+  );
 });

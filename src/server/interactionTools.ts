@@ -90,7 +90,7 @@ import {
   elementContainerSchema,
   elementSelectionStrategySchema,
 } from "./elementSelectorSchemas";
-import { tapOnResultSchema } from "./toolOutputSchemas";
+import { keyboardResultSchema, sendKeysResultSchema, tapOnResultSchema } from "./toolOutputSchemas";
 
 // Import from extracted modules
 import type {
@@ -2797,7 +2797,7 @@ export function registerInteractionTools() {
     "Execute ordered text insertion/replacement, clear, raw keys, and semantic IME keys. For Unicode and emoji use Android ime/a11y/auto or any iOS mode; Android eventOnly and imeKeyEvents are ASCII-only.",
     sendKeysSchema,
     sendKeysHandler,
-    { defaultEnabled: true, supportsProgress: true },
+    { defaultEnabled: true, supportsProgress: true, outputSchema: sendKeysResultSchema },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -2874,7 +2874,7 @@ export function registerInteractionTools() {
     "Open, close, detect, list/select installed Android IMEs, or switch the AutoMobile typing profile",
     keyboardSchema,
     keyboardHandler,
-    { defaultEnabled: true },
+    { defaultEnabled: true, outputSchema: keyboardResultSchema },
   );
 
   ToolRegistry.registerDeviceAware(

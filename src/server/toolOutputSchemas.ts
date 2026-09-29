@@ -1,6 +1,17 @@
 import { z } from "zod/v4";
 import { withJsonSchemaOverride, withPostFlattenJsonSchemaOverride } from "./toolSchemaHelpers";
 
+/** A successful openurl may still need a foreground confirmation before the next action. */
+export const openLinkResultSchema = z
+  .object({
+    success: z.boolean(),
+    url: z.string(),
+    message: z.string(),
+    error: z.string().optional(),
+    warnings: z.array(z.string()).optional(),
+  })
+  .passthrough();
+
 const keyboardIdentitySchema = z.object({
   component: z.string(),
   package: z.string(),

@@ -545,6 +545,15 @@ describe("buildOpenLinkPayload", () => {
     expect("awaitedElement" in payload).toBe(false);
   });
 
+  test("failure message describes the open error", () => {
+    const payload = buildOpenLinkPayload(
+      "automobile://playground",
+      { success: false, url: "automobile://playground", error: "no app handles this URL" },
+      null,
+    );
+    expect(payload.message).toBe("Failed to open automobile://playground: no app handles this URL");
+  });
+
   test("surfaces the awaited observation and await fields when a wait occurred", () => {
     const awaited = makeObservation("home");
     const awaitedElement = { "resource-id": "home_tab_bar" } as unknown as Element;

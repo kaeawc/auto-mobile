@@ -80,6 +80,21 @@ describe("AppBundleMetadataClient", () => {
     ).resolves.toBeNull();
   });
 
+  test("returns null when codesign emits no entitlement plist", async () => {
+    const executor: CodesignExecutor = { execute: async () => result(" \n\t") };
+    const plist: EntitlementPlistReader = {
+      readJsonBytes: async () => {
+        throw new Error("empty output should not be parsed");
+      },
+    };
+
+    await expect(
+      new AppBundleMetadataClient(executor, plist).readEntitlements({
+        appBundlePath: "/tmp/Unsigned.app",
+      }),
+    ).resolves.toBeNull();
+  });
+
   test("returns an actionable redacted error when codesign is unavailable", async () => {
     const executor: CodesignExecutor = {
       execute: async () => {

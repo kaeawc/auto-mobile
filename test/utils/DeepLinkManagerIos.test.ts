@@ -190,6 +190,7 @@ describe("DeepLinkManager iOS", () => {
     expect(result.success).toBe(true);
     expect(result.deepLinks.schemes).toEqual(["myapp"]);
     expect(result.deepLinks.hosts).toEqual([]);
+    expect(result.note).toContain("unsigned or has no entitlements");
   });
 
   test("metadata inspection errors make iOS deep-link discovery fail", async () => {

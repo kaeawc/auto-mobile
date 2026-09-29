@@ -38,6 +38,7 @@ export function registerDeepLinkTools() {
         hosts: result.deepLinks.hosts,
         intentFilters: result.deepLinks.intentFilters,
         supportedMimeTypes: result.deepLinks.supportedMimeTypes,
+        note: result.note,
         error: result.error,
         rawOutput: result.rawOutput,
       });

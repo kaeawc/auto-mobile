@@ -31,6 +31,8 @@ export type ToolDefaultOverrides = ReadonlyMap<string, boolean>;
  * default; startup and session overrides only replace that declared value.
  */
 export class SessionToolSelectionService {
+  private readonly pendingLists = new Map<string, Promise<Map<string, boolean>>>();
+
   constructor(
     private readonly repository: SessionToolSelectionRepository,
     private readonly startupDefaults: ToolDefaultOverrides = new Map(),
@@ -45,15 +47,32 @@ export class SessionToolSelectionService {
     if (!sessionUuid) {
       return startupDefault;
     }
-    const overrides = await this.repository.list(sessionUuid);
+    const overrides = await this.listOverrides(sessionUuid);
     return overrides.get(toolName) ?? startupDefault;
   }
 
   async getOverride(sessionUuid: string, toolName: string): Promise<boolean | undefined> {
-    return (await this.repository.list(sessionUuid)).get(toolName);
+    return (await this.listOverrides(sessionUuid)).get(toolName);
+  }
+
+  private listOverrides(sessionUuid: string): Promise<Map<string, boolean>> {
+    const pending = this.pendingLists.get(sessionUuid);
+    if (pending) {
+      return pending;
+    }
+    const request = this.repository.list(sessionUuid);
+    this.pendingLists.set(sessionUuid, request);
+    const clearPending = (): void => {
+      if (this.pendingLists.get(sessionUuid) === request) {
+        this.pendingLists.delete(sessionUuid);
+      }
+    };
+    void request.then(clearPending, clearPending);
+    return request;
   }
 
   async setEnabled(sessionUuid: string, toolName: string, enabled: boolean): Promise<void> {
+    this.pendingLists.delete(sessionUuid);
     await this.repository.set(sessionUuid, toolName, enabled);
   }
 
@@ -66,6 +85,7 @@ export class SessionToolSelectionService {
     toolNames: readonly string[],
     enabled: boolean,
   ): Promise<void> {
+    this.pendingLists.delete(sessionUuid);
     const entries = toolNames.map((toolName) => ({ toolName, enabled }));
     if (this.repository.setMany) {
       await this.repository.setMany(sessionUuid, entries);
@@ -77,6 +97,7 @@ export class SessionToolSelectionService {
   }
 
   async deleteSession(sessionUuid: string): Promise<void> {
+    this.pendingLists.delete(sessionUuid);
     await this.repository.deleteSession(sessionUuid);
   }
 }

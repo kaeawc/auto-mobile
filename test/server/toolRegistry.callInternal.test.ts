@@ -102,6 +102,25 @@ describe("ToolRegistry.callInternal (#3108)", () => {
     expect(captured[0].args[INTERNAL_NO_DIFF_PARAM]).toBe(true);
   });
 
+  test("hidden tools are omitted from discovery but remain directly and internally callable", async () => {
+    registerCapturingTool("hiddenStep");
+    registerCapturingTool("visibleStep");
+    const visible = ToolRegistry.getTool("visibleStep");
+    expect(visible?.name).toBe("visibleStep");
+    const registered = ToolRegistry.getRegisteredTool("hiddenStep");
+    if (!registered) {
+      throw new Error("test tool was not registered");
+    }
+    registered.hidden = true;
+
+    expect(ToolRegistry.getAllTools()).not.toContain(registered);
+    expect(ToolRegistry.getTool("hiddenStep")).toBe(registered);
+
+    const response = await ToolRegistry.callInternal("hiddenStep", { text: "Go" });
+    expect(response).toBe(SENTINEL);
+    expect(captured).toHaveLength(1);
+  });
+
   test("AC2: forPlan resolves a plan-executable tool that getTool hides", async () => {
     // A gated (debugOnly) but planExecutable tool: getTool hides it, getToolForPlan
     // returns it. Only the `forPlan` resolution should reach it.

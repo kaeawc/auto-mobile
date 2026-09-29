@@ -29,6 +29,48 @@ class SingleWriteOnlyRepository implements SessionToolSelectionRepository {
 }
 
 describe("SessionToolSelectionService", () => {
+  test("shares concurrent reads per session and refreshes after writes", async () => {
+    class CountingRepository implements SessionToolSelectionRepository {
+      calls = new Map<string, number>();
+      rows = new Map<string, Map<string, boolean>>();
+      async list(sessionUuid: string): Promise<Map<string, boolean>> {
+        this.calls.set(sessionUuid, (this.calls.get(sessionUuid) ?? 0) + 1);
+        return new Map(this.rows.get(sessionUuid) ?? []);
+      }
+      async set(sessionUuid: string, toolName: string, enabled: boolean): Promise<void> {
+        const values = this.rows.get(sessionUuid) ?? new Map<string, boolean>();
+        values.set(toolName, enabled);
+        this.rows.set(sessionUuid, values);
+      }
+      async deleteSession(sessionUuid: string): Promise<void> {
+        this.rows.delete(sessionUuid);
+      }
+    }
+    const repository = new CountingRepository();
+    const service = new SessionToolSelectionService(repository);
+    const results = await Promise.all([
+      service.isEnabled("one", "a", true),
+      service.getOverride("one", "b"),
+      service.isEnabled("one", "c", false),
+      service.getOverride("one", "d"),
+      service.isEnabled("one", "e", true),
+      service.isEnabled("two", "a", true),
+    ]);
+    expect(results).toEqual([true, undefined, false, undefined, true, true]);
+    expect(repository.calls).toEqual(
+      new Map([
+        ["one", 1],
+        ["two", 1],
+      ]),
+    );
+
+    await service.setEnabled("one", "b", true);
+    expect(
+      await Promise.all([service.getOverride("one", "b"), service.isEnabled("one", "b", false)]),
+    ).toEqual([true, true]);
+    expect(repository.calls.get("one")).toBe(2);
+  });
+
   test("uses each tool's declared default before a session override exists", async () => {
     const service = new SessionToolSelectionService(new FakeRepository());
 

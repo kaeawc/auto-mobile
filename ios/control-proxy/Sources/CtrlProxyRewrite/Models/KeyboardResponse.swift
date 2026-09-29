@@ -3,10 +3,12 @@ import Foundation
 public struct KeyboardActionResult: Sendable {
     public let open: Bool
     public let method: String?
+    public let error: String?
 
-    public init(open: Bool, method: String? = nil) {
+    public init(open: Bool, method: String? = nil, error: String? = nil) {
         self.open = open
         self.method = method
+        self.error = error
     }
 }
 

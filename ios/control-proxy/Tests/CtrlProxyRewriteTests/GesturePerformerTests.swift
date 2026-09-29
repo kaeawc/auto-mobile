@@ -24,18 +24,30 @@ final class KeyboardCloseKeySelectionTests: XCTestCase {
         XCTAssertEqual(candidates.map(\.method), ["dismissKey", "returnKey", "returnKey"])
     }
 
-    func testCloseAttemptsTryEnabledButtonThenNewlineThenEscape() {
+    func testSingleLineCloseAttemptsTryEnabledButtonThenNewlineThenEscape() {
         XCTAssertEqual(
-            GesturePerformer.closeAttemptOrder(hasEnabledMatch: true),
+            GesturePerformer.closeAttemptOrder(hasEnabledMatch: true, isMultiline: false),
             [.matchedButton, .newline, .escape]
         )
     }
 
-    func testCloseAttemptsSkipDisabledButtonBeforeNewlineAndEscape() {
+    func testSingleLineCloseAttemptsSkipDisabledButtonBeforeNewlineAndEscape() {
         XCTAssertEqual(
-            GesturePerformer.closeAttemptOrder(hasEnabledMatch: false),
+            GesturePerformer.closeAttemptOrder(hasEnabledMatch: false, isMultiline: false),
             [.newline, .escape]
         )
+    }
+
+    func testMultilineCloseAttemptsOnlyUseDismissButtonThenEscape() {
+        XCTAssertEqual(
+            GesturePerformer.closeAttemptOrder(hasEnabledMatch: true, isMultiline: true),
+            [.matchedButton, .escape]
+        )
+        let candidates = GesturePerformer.closeKeyCandidates([
+            (label: "Return", identifier: ""),
+            (label: "Hide Keyboard", identifier: ""),
+        ], isMultiline: true)
+        XCTAssertEqual(candidates.map(\.method), ["dismissKey"])
     }
 
     func testRecognizesSubmitLabelsAndIgnoresUnrelatedKeys() {
@@ -60,11 +72,23 @@ final class KeyboardCloseKeySelectionTests: XCTestCase {
         XCTAssertTrue(candidates.allSatisfy { $0.method == "returnKey" })
     }
 
-    func testNoFallbackWhenKeyboardHasNoDismissOrSubmitKey() {
+    func testMultilineNoFallbackWhenKeyboardHasNoDismissOrSubmitKey() {
         XCTAssertTrue(GesturePerformer.closeKeyCandidates([
             (label: "Space", identifier: ""),
             (label: "Delete", identifier: ""),
         ]).isEmpty)
+        XCTAssertEqual(
+            GesturePerformer.closeAttemptOrder(hasEnabledMatch: false, isMultiline: true),
+            [.escape]
+        )
+    }
+
+    func testMultilineCloseErrorEncodesInKeyboardResponse() throws {
+        let error =
+            "Keyboard did not close: the focused field is multiline and has no dismiss key; tap outside the field or use a different action"
+        let response = KeyboardResponse(requestId: "close", success: false, open: true, totalTimeMs: 1, error: error)
+        let decoded = try JSONDecoder().decode(KeyboardResponse.self, from: JSONEncoder().encode(response))
+        XCTAssertEqual(decoded.error, error)
     }
 
     func testClosePollRespectsAttemptAndOverallDeadlines() {

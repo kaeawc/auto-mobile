@@ -432,6 +432,35 @@ describe("Keyboard", () => {
     }
   });
 
+  test("ios close surfaces the multiline dismissal error from the Swift response", async () => {
+    const error =
+      "Keyboard did not close: the focused field is multiline and has no dismiss key; tap outside the field or use a different action";
+    const wire = JSON.parse(
+      JSON.stringify({
+        type: "keyboard_result",
+        timestamp: 1_780_000_000_000,
+        requestId: "keyboard-multiline",
+        success: false,
+        open: true,
+        totalTimeMs: 418,
+        error,
+        method: null,
+      }),
+    ) as WebSocketMessage;
+    const decoded = decodeCtrlProxyMessage(wire);
+    const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+      requestKeyboard: async () => decoded?.result as CtrlProxyKeyboardResult,
+    } as IOSCtrlProxyClient);
+
+    try {
+      const keyboard = new Keyboard(iosDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
+      const result = await keyboard.execute("close");
+      expect(result).toMatchObject({ success: false, open: true, error, message: error });
+    } finally {
+      getInstanceSpy.mockRestore();
+    }
+  });
+
   test.each([
     ["escape", "Keyboard closed"],
     ["dismissKey", "Keyboard closed"],

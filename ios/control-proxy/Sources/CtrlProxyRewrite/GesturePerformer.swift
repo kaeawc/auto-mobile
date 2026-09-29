@@ -236,6 +236,8 @@ public final class GesturePerformer: GesturePerforming {
         "return", "return_arrow", "returnarrow", "go", "search", "done", "next",
         "send", "join", "route", "↵", "⏎", "↩",
     ]
+    private nonisolated static let multilineCloseError =
+        "Keyboard did not close: the focused field is multiline and has no dismiss key; tap outside the field or use a different action"
 
     enum CloseAttempt: Equatable {
         case matchedButton
@@ -243,14 +245,19 @@ public final class GesturePerformer: GesturePerforming {
         case escape
     }
 
-    nonisolated static func closeAttemptOrder(hasEnabledMatch: Bool) -> [CloseAttempt] {
-        (hasEnabledMatch ? [.matchedButton] : []) + [.newline, .escape]
+    nonisolated static func closeAttemptOrder(hasEnabledMatch: Bool, isMultiline: Bool) -> [CloseAttempt] {
+        (hasEnabledMatch ? [.matchedButton] : []) + (isMultiline ? [] : [.newline]) + [.escape]
     }
 
-    nonisolated static func closeKeyCandidates(_ labels: [(label: String, identifier: String)]) -> [(
-        index: Int,
-        method: String
-    )] {
+    nonisolated static func closeKeyCandidates(
+        _ labels: [(label: String, identifier: String)],
+        isMultiline: Bool = false
+    )
+        -> [(
+            index: Int,
+            method: String
+        )]
+    {
         let keys = labels.map { "\($0.label) \($0.identifier)".lowercased() }
         let dismiss = keys.indices.filter {
             keys[$0].contains("dismiss keyboard") || keys[$0].contains("hide keyboard") ||
@@ -265,7 +272,7 @@ public final class GesturePerformer: GesturePerforming {
                 || ["↵", "⏎", "↩"].contains { keys[index].contains($0) }
             return !dismiss.contains(where: { $0.index == index }) && isSubmit
         }.map { (index: $0, method: "returnKey") }
-        return dismiss + returns
+        return dismiss + (isMultiline ? [] : returns)
     }
 
     /// Next close poll, bounded by both the current attempt and the whole action.
@@ -1013,8 +1020,20 @@ public final class GesturePerformer: GesturePerforming {
                 if !isKeyboardVisible(app: app) {
                     return KeyboardActionResult(open: false)
                 }
-                guard ProcessInfo.processInfo.systemUptime < closeDeadline else {
-                    return KeyboardActionResult(open: isKeyboardVisible(app: app))
+
+                // A focused text view treats Return as content, so only a hide key
+                // or Escape may dismiss its keyboard without changing the field.
+                let isMultiline: Bool
+                do {
+                    isMultiline = try catchingObjCException {
+                        let focused = app.descendants(matching: .any)
+                            .matching(NSPredicate(format: "hasKeyboardFocus == true"))
+                            .firstMatch
+                        return focused.exists && focused.elementType == .textView
+                    }
+                } catch {
+                    print("[GesturePerformer] keyboard close focus lookup failed: \(error)")
+                    isMultiline = true
                 }
 
                 var enabledKey: (element: XCUIElement, method: String)?
@@ -1031,7 +1050,7 @@ public final class GesturePerformer: GesturePerforming {
                         guard ProcessInfo.processInfo.systemUptime < closeDeadline else { break }
                         try labels.append(catchingObjCException { (label: key.label, identifier: key.identifier) })
                     }
-                    for candidate in Self.closeKeyCandidates(labels) {
+                    for candidate in Self.closeKeyCandidates(labels, isMultiline: isMultiline) {
                         guard ProcessInfo.processInfo.systemUptime < closeDeadline else { break }
                         let key = keys[candidate.index]
                         if try catchingObjCException({ key.isEnabled }) {
@@ -1043,7 +1062,7 @@ public final class GesturePerformer: GesturePerforming {
                     print("[GesturePerformer] keyboard close key lookup failed: \(error)")
                 }
 
-                for attempt in Self.closeAttemptOrder(hasEnabledMatch: enabledKey != nil) {
+                for attempt in Self.closeAttemptOrder(hasEnabledMatch: enabledKey != nil, isMultiline: isMultiline) {
                     if !isKeyboardVisible(app: app) {
                         return KeyboardActionResult(open: false)
                     }
@@ -1071,7 +1090,11 @@ public final class GesturePerformer: GesturePerforming {
                         return KeyboardActionResult(open: false, method: method)
                     }
                 }
-                return KeyboardActionResult(open: isKeyboardVisible(app: app))
+                let open = isKeyboardVisible(app: app)
+                return KeyboardActionResult(
+                    open: open,
+                    error: open && isMultiline ? Self.multilineCloseError : nil
+                )
             default:
                 throw GestureError.notSupported("Keyboard action: \(action)")
             }

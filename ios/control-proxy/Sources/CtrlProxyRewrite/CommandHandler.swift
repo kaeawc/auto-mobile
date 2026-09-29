@@ -891,7 +891,7 @@ final class CommandHandler: CommandHandling {
             success: success,
             open: result.open,
             totalTimeMs: totalTimeMs(from: startTime),
-            error: success ? nil : "Keyboard did not \(action.lowercased())",
+            error: success ? nil : (result.error ?? "Keyboard did not \(action.lowercased())"),
             method: result.method
         )
     }

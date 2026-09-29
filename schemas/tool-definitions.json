@@ -11259,10 +11259,20 @@
           "type": "string"
         },
         "value": {
-          "description": "Value string; null clears",
+          "description": "Value; null clears",
           "anyOf": [
             {
-              "type": "string"
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                }
+              ]
             },
             {
               "type": "null"

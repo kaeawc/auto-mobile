@@ -28,7 +28,7 @@ export const NATIVE_FRAME_METRICS_PREFIX = "automobile-frame-metrics:";
  * Prefix of the startup capability handshake line the helper writes to stderr
  * (issue #4787). One token per line: `capture-capability: <token>`. A helper that
  * predates the handshake emits no such line, so its absence is how a version
- * skew is detected — see {@link IOSScreenCaptureHelper.assertSupportsEncodedVideo}.
+ * skew is detected — see {@link IosScreenCaptureHelper.assertSupportsEncodedVideo}.
  */
 export const CAPTURE_CAPABILITY_PREFIX = "capture-capability:";
 /** Capability token advertising in-helper H.264 encoded output (issue #4787). */
@@ -165,7 +165,7 @@ export interface NativeFrameMetrics {
  * Spawns and supervises the Swift `screen-capture-helper` binary, forwarding
  * decoded BGRA frames to listeners.
  *
- *     const helper = new IOSScreenCaptureHelper({
+ *     const helper = new IosScreenCaptureHelper({
  *       binaryPath,
  *       target: { kind: "simulator", windowID: 12345 },
  *     });
@@ -174,7 +174,7 @@ export interface NativeFrameMetrics {
  *     …
  *     await helper.stop();
  */
-export class IOSScreenCaptureHelper extends EventEmitter {
+export class IosScreenCaptureHelper extends EventEmitter {
   private readonly binaryPath: string;
   private readonly target: CaptureTarget;
   private readonly spawner: HelperSpawner;
@@ -332,7 +332,7 @@ export class IOSScreenCaptureHelper extends EventEmitter {
 
   private appendStderr(text: string): void {
     this.stderrBuffer += text;
-    if (this.stderrBuffer.length > IOSScreenCaptureHelper.STDERR_BUFFER_MAX) {
+    if (this.stderrBuffer.length > IosScreenCaptureHelper.STDERR_BUFFER_MAX) {
       // Helper sent a long line with no newline; flush to avoid unbounded growth.
       this.emit("stderr", this.stderrBuffer);
       this.stderrBuffer = "";

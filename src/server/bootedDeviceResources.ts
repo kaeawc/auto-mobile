@@ -33,8 +33,8 @@ import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlP
 import { getAndroidAppMetadataViaAdb } from "../features/observe/GetAppMetadata";
 import { AndroidCtrlProxyManager } from "../utils/CtrlProxyManager";
 import { IOSCtrlProxyManager } from "../utils/IOSCtrlProxyManager";
-import type { CtrlProxyHealthCheckResult } from "../utils/ios/IOSCtrlProxyHealthClient";
-import { IOSCtrlProxyBuilder } from "../utils/IOSCtrlProxyBuilder";
+import type { CtrlProxyHealthCheckResult } from "../utils/ios/IosCtrlProxyHealthClient";
+import { IosCtrlProxyBuilder } from "../utils/IosCtrlProxyBuilder";
 import {
   IOSCtrlProxyClient,
   IOS_RUNNER_FEATURE_COMMANDS,
@@ -50,7 +50,7 @@ import {
 import { withRemainingBudget } from "../utils/withRemainingBudget";
 import {
   AndroidOrientationReader,
-  IOSOrientationReader,
+  IosOrientationReader,
   type OrientationReader,
 } from "../features/action/OrientationReader";
 import { AvdManagerService } from "../utils/android-cmdline-tools/AvdManagerService";
@@ -336,7 +336,7 @@ export function setOrientationReaderFactory(factory: OrientationReaderFactory | 
 function realOrientationReader(device: BootedDevice): OrientationReader {
   return device.platform === "android"
     ? new AndroidOrientationReader(defaultAdbClientFactory.create(device))
-    : new IOSOrientationReader();
+    : new IosOrientationReader();
 }
 
 function activeOrientationReaderFactory(): OrientationReaderFactory | null {
@@ -1532,7 +1532,7 @@ export async function queryDeviceServiceStatus(
       const isCompatible =
         supportedCommandsComplete === true &&
         supportedFeaturesComplete === true &&
-        !IOSCtrlProxyBuilder.isPinnedVersionUnverifiable();
+        !IosCtrlProxyBuilder.isPinnedVersionUnverifiable();
       const restartBudget = manager.getForcedRestartBudget().snapshot();
 
       return {

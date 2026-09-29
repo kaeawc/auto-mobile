@@ -20,9 +20,9 @@ import {
 } from "../../utils/media/FfmpegClient";
 import type { DecodedFrame } from "../screen-stream/frameProtocol";
 import {
-  IOSScreenCaptureHelper,
+  IosScreenCaptureHelper,
   type IosScreenCaptureHelperOptions,
-} from "../screen-stream/IOSScreenCaptureHelper";
+} from "../screen-stream/IosScreenCaptureHelper";
 import { ScreenCaptureHelperProvider } from "../screen-stream/ScreenCaptureHelperProvider";
 import {
   IOS_SCREEN_CAPTURE_HELPER_ENV,
@@ -113,7 +113,7 @@ export interface ScreenCaptureHelperEnsurer {
 }
 
 /**
- * The slice of {@link IOSScreenCaptureHelper} this backend drives. Narrow on
+ * The slice of {@link IosScreenCaptureHelper} this backend drives. Narrow on
  * purpose: a fake only has to emit frames and exit.
  */
 export interface PhysicalIosCaptureHelper {
@@ -229,7 +229,7 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
     this.helperProvider = options.helperProvider ?? ScreenCaptureHelperProvider.getInstance();
     this.deviceLister = options.deviceLister ?? new HelperCaptureDeviceLister();
     this.createHelper =
-      options.createHelper ?? ((helperOptions) => new IOSScreenCaptureHelper(helperOptions));
+      options.createHelper ?? ((helperOptions) => new IosScreenCaptureHelper(helperOptions));
     this.platformProvider = options.platformProvider ?? (() => process.platform);
     this.fileSize = options.fileSize ?? getFileSize;
     this.encoderFinalizeTimeoutMs =

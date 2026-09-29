@@ -139,7 +139,7 @@ async function main() {
   const { FeatureFlagService } = await import("./features/featureFlags/FeatureFlagService");
   const { serverConfig } = await import("./utils/ServerConfig");
   const { AndroidCtrlProxyManager } = await import("./utils/CtrlProxyManager");
-  const { IOSCtrlProxyBuilder } = await import("./utils/IOSCtrlProxyBuilder");
+  const { IosCtrlProxyBuilder } = await import("./utils/IosCtrlProxyBuilder");
   const { IOSCtrlProxyManager } = await import("./utils/IOSCtrlProxyManager");
   const { cleanupDaemonChildProcesses } = await import("./daemon/childProcessCleanup");
   const { stopManagedAdbServer } = await import("./utils/android-cmdline-tools/AdbServerLifecycle");
@@ -317,7 +317,7 @@ async function main() {
         startupBenchmark.recordPhase("iosCtrlProxyPrefetch", 0);
       } else {
         startupBenchmark.startPhase("iosCtrlProxyPrefetch");
-        void IOSCtrlProxyBuilder.prefetchBuild().then(() => {
+        void IosCtrlProxyBuilder.prefetchBuild().then(() => {
           startupBenchmark.endPhase("iosCtrlProxyPrefetch");
         });
       }

@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import {
-  IOSCtrlProxyHealthClient,
+  IosCtrlProxyHealthClient,
   isValidCtrlProxyPort,
   type CtrlProxyHealthContext,
-} from "../../../src/utils/ios/IOSCtrlProxyHealthClient";
+} from "../../../src/utils/ios/IosCtrlProxyHealthClient";
 import { FakeProcessExecutor } from "../../fakes/FakeProcessExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import type { ExecResult } from "../../../src/models";
@@ -31,10 +31,10 @@ function localContext(): CtrlProxyHealthContext {
 function makeClient(
   handler: (command: string) => ExecResult,
   context: CtrlProxyHealthContext = localContext(),
-): { client: IOSCtrlProxyHealthClient; executor: FakeProcessExecutor } {
+): { client: IosCtrlProxyHealthClient; executor: FakeProcessExecutor } {
   const executor = new FakeProcessExecutor();
   executor.setCommandHandler("curl", handler);
-  const client = new IOSCtrlProxyHealthClient(executor, new FakeTimer(), context);
+  const client = new IosCtrlProxyHealthClient(executor, new FakeTimer(), context);
   return { client, executor };
 }
 
@@ -54,7 +54,7 @@ describe("isValidCtrlProxyPort", function () {
   });
 });
 
-describe("IOSCtrlProxyHealthClient (local curl transport)", function () {
+describe("IosCtrlProxyHealthClient (local curl transport)", function () {
   test("checkHealthEndpointOnPort is true for an 'ok'/'healthy' body", async function () {
     const { client } = makeClient(() => execResult('{"status":"ok"}'));
     expect(await client.checkHealthEndpointOnPort(8765)).toBe(true);

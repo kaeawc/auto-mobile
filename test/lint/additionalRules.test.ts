@@ -92,4 +92,22 @@ describe("auto-mobile/naming-convention", () => {
   test("does not flag a well-named class expression", () => {
     expect(fires("naming-convention", "const Adapter = class Device { };")).toBe(false);
   });
+  test("flags an exported iOS class with the IOS prefix", () => {
+    expect(fires("naming-convention", "export class IOSCaptureHelper { }; ")).toBe(true);
+  });
+  test("allows an exported iOS class with the Ios prefix", () => {
+    expect(fires("naming-convention", "export class IosCaptureHelper { }; ")).toBe(false);
+  });
+  test("flags the legacy IOS client name outside its deferred file", () => {
+    expect(fires("naming-convention", "export class IOSCtrlProxyClient { }; ")).toBe(true);
+  });
+  test("allows the deferred IOS client export in its existing file", () => {
+    expect(
+      runRule(
+        plugin.rules["naming-convention"],
+        "export class IOSCtrlProxyClient { }",
+        "src/features/observe/ios/IOSCtrlProxyClient.ts",
+      ),
+    ).toHaveLength(0);
+  });
 });

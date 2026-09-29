@@ -242,7 +242,7 @@ and runs the rewrite. Chosen mechanism: **repurpose the existing `CtrlProxyUITes
 to source `Sources/CtrlProxyRewrite` (with the Swift-6/`complete`/iOS-17 settings) instead of the
 reference `Sources/CtrlProxy`, keeping the target name, `CtrlProxyUITests-Runner.app`, the xctest
 bundle, and the `-only-testing:CtrlProxyUITests/CtrlProxyUITests/testRunService` identifier unchanged —
-so the TS MCP layer (`IOSCtrlProxyManager`/`IOSCtrlProxyBuilder`/`IOSCtrlProxyProcessClient`, incl. the
+so the TS MCP layer (`IOSCtrlProxyManager`/`IosCtrlProxyBuilder`/`IosCtrlProxyProcessClient`, incl. the
 fragile daemon process-recovery command-shape matchers) and the `scripts/ios/ctrl-proxy-*.sh` drive it
 **with zero changes** (no TS touched → typecheck baseline unaffected). The runner class is renamed to
 `CtrlProxyUITests` (a minimal `@MainActor` runner over the public `CtrlProxy` surface); the additive

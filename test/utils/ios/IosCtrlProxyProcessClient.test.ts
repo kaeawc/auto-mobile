@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { IOSCtrlProxyProcessClient } from "../../../src/utils/ios/IOSCtrlProxyProcessClient";
+import { IosCtrlProxyProcessClient } from "../../../src/utils/ios/IosCtrlProxyProcessClient";
 import type {
   HostCommandExecutor,
   HostCommandOptions,
@@ -17,7 +17,7 @@ function result(stdout = "", stderr = "") {
   };
 }
 
-describe("IOSCtrlProxyProcessClient", () => {
+describe("IosCtrlProxyProcessClient", () => {
   test("force termination retains a separate-group child after the root exits", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
@@ -45,7 +45,7 @@ describe("IOSCtrlProxyProcessClient", () => {
         return result();
       },
     };
-    const client = new IOSCtrlProxyProcessClient(host, timer);
+    const client = new IosCtrlProxyProcessClient(host, timer);
 
     await client.terminateProcessTree(42, 250, { skipGraceful: true });
 
@@ -70,7 +70,7 @@ describe("IOSCtrlProxyProcessClient", () => {
         return result();
       },
     };
-    const client = new IOSCtrlProxyProcessClient(host, timer);
+    const client = new IosCtrlProxyProcessClient(host, timer);
 
     await expect(client.terminateProcessTree(42, 250, { skipGraceful: true })).rejects.toThrow(
       "descendant discovery failed",
@@ -92,7 +92,7 @@ describe("IOSCtrlProxyProcessClient", () => {
         return result(file === "ps" ? "42 1\n43 42\n" : "");
       },
     };
-    const client = new IOSCtrlProxyProcessClient(host, timer);
+    const client = new IosCtrlProxyProcessClient(host, timer);
 
     await expect(client.terminateProcessTree(42, 250, { skipGraceful: true })).rejects.toThrow(
       "deadline elapsed",
@@ -118,7 +118,7 @@ describe("IOSCtrlProxyProcessClient", () => {
         return result();
       },
     };
-    const client = new IOSCtrlProxyProcessClient(host, timer);
+    const client = new IosCtrlProxyProcessClient(host, timer);
 
     await client.findStartupCandidatePids(100);
 
@@ -135,7 +135,7 @@ describe("IOSCtrlProxyProcessClient", () => {
       ),
     );
     host.setCommandResponse("ps eww -p 42 -o command=", result("AUTOMOBILE_DEVICE_ID=DEVICE-1"));
-    const client = new IOSCtrlProxyProcessClient(host, new FakeTimer());
+    const client = new IosCtrlProxyProcessClient(host, new FakeTimer());
 
     const process = await client.findExternalXcodebuildCtrlProxyProcess("DEVICE-1");
 
@@ -164,7 +164,7 @@ describe("IOSCtrlProxyProcessClient", () => {
         "1 /bin/sh -c xcodebuild test-without-building -xctestrun /tmp/CtrlProxy.xctestrun -destination platform=iOS Simulator,id=DEVICE-1 -only-testing:CtrlProxyUITests/CtrlProxyUITests/testRunService",
       ),
     );
-    const client = new IOSCtrlProxyProcessClient(host, new FakeTimer());
+    const client = new IosCtrlProxyProcessClient(host, new FakeTimer());
 
     const process = await client.findExternalXcodebuildCtrlProxyProcess("DEVICE-1");
 
@@ -178,7 +178,7 @@ describe("IOSCtrlProxyProcessClient", () => {
       "ps -p 42 -o ppid= -o args=",
       result("1 xcodebuild test -destination id=DEVICE-1"),
     );
-    const client = new IOSCtrlProxyProcessClient(host, new FakeTimer());
+    const client = new IosCtrlProxyProcessClient(host, new FakeTimer());
 
     await expect(client.isOwnedRunnerAlive(42, "DEVICE-1")).resolves.toBe(false);
   });
@@ -193,7 +193,7 @@ describe("IOSCtrlProxyProcessClient", () => {
           return result(args.includes("-ww") ? command : command.slice(0, 256));
         },
       };
-      const client = new IOSCtrlProxyProcessClient(host, new FakeTimer(), { ownerPid: 100 });
+      const client = new IosCtrlProxyProcessClient(host, new FakeTimer(), { ownerPid: 100 });
       expect(await client.isOwnedRunnerAlive(42, "DEVICE-1")).toBe(parentPid === 100);
     },
   );
@@ -209,7 +209,7 @@ describe("IOSCtrlProxyProcessClient", () => {
         throw new Error("wrapped command failure", { cause: failure });
       },
     };
-    const client = new IOSCtrlProxyProcessClient(host, new FakeTimer());
+    const client = new IosCtrlProxyProcessClient(host, new FakeTimer());
     expect(await client.isOwnedRunnerAlive(42, "DEVICE-1")).toBe(false);
   });
 
@@ -223,7 +223,7 @@ describe("IOSCtrlProxyProcessClient", () => {
         "100 xcodebuild test-without-building -xctestrun /tmp/CtrlProxy.xctestrun -destination id=DEVICE-1",
       ),
     );
-    const client = new IOSCtrlProxyProcessClient(host, new FakeTimer(), { ownerPid: 100 });
+    const client = new IosCtrlProxyProcessClient(host, new FakeTimer(), { ownerPid: 100 });
 
     await expect(client.checkRunnerOwnership(44, "DEVICE-1")).resolves.toBe("owned");
     await expect(client.checkRunnerOwnership(42, "DEVICE-1")).resolves.toBe("absent");
@@ -244,7 +244,7 @@ describe("IOSCtrlProxyProcessClient", () => {
         return result();
       },
     };
-    const client = new IOSCtrlProxyProcessClient(host, new FakeTimer());
+    const client = new IosCtrlProxyProcessClient(host, new FakeTimer());
 
     await client.terminateProcessTree(42, 250, {
       skipGraceful: true,
@@ -265,7 +265,7 @@ describe("IOSCtrlProxyProcessClient", () => {
         return result("101 unrelated-process");
       },
     };
-    const client = new IOSCtrlProxyProcessClient(host, new FakeTimer(), { ownerPid: 100 });
+    const client = new IosCtrlProxyProcessClient(host, new FakeTimer(), { ownerPid: 100 });
     await client.terminateProcessTree(42, 250, { expectedDeviceId: "DEVICE-1" });
     expect(commands.some((command) => command.startsWith("kill "))).toBe(false);
   });
@@ -282,7 +282,7 @@ describe("IOSCtrlProxyProcessClient", () => {
         return result();
       },
     };
-    const client = new IOSCtrlProxyProcessClient(host, timer);
+    const client = new IosCtrlProxyProcessClient(host, timer);
 
     await expect(
       client.terminateProcessTree(42, 250, {
@@ -301,7 +301,7 @@ describe("IOSCtrlProxyProcessClient", () => {
         throw failure;
       },
     };
-    const client = new IOSCtrlProxyProcessClient(host, new FakeTimer());
+    const client = new IosCtrlProxyProcessClient(host, new FakeTimer());
     await expect(client.isOwnedRunnerAlive(42, "DEVICE-1")).rejects.toBe(failure);
   });
   test("signals the owned process group, then descendants, and escalates after the bounded wait", async () => {
@@ -311,7 +311,7 @@ describe("IOSCtrlProxyProcessClient", () => {
     host.setCommandResponse("ps -axo pid=,ppid=", result("42 1\n43 42\n"));
     host.setCommandResponse("kill -0 42", result());
     host.setCommandResponse("kill -0 43", result());
-    const client = new IOSCtrlProxyProcessClient(host, timer, {
+    const client = new IosCtrlProxyProcessClient(host, timer, {
       releaseAttempts: 1,
       releaseGraceMs: 1,
     });
@@ -351,7 +351,7 @@ describe("IOSCtrlProxyProcessClient", () => {
         return result();
       },
     };
-    const client = new IOSCtrlProxyProcessClient(host, timer, {
+    const client = new IosCtrlProxyProcessClient(host, timer, {
       releaseAttempts: 1,
       releaseGraceMs: 1,
     });
@@ -373,7 +373,7 @@ describe("IOSCtrlProxyProcessClient", () => {
         return result();
       },
     };
-    const client = new IOSCtrlProxyProcessClient(host, timer, {
+    const client = new IosCtrlProxyProcessClient(host, timer, {
       releaseAttempts: 1,
       releaseGraceMs: 1,
     });
@@ -386,7 +386,7 @@ describe("IOSCtrlProxyProcessClient", () => {
   test("treats permission failures as an unavailable PID rather than signaling it", async () => {
     const host = new FakeHostCommandExecutor();
     host.setCommandResponse("kill -0 77", result("", "Operation not permitted"));
-    const client = new IOSCtrlProxyProcessClient(host, new FakeTimer());
+    const client = new IosCtrlProxyProcessClient(host, new FakeTimer());
 
     await expect(client.isRunning(77)).resolves.toBe(false);
     expect(host.getExecutedCommands()).toEqual(["kill -0 77"]);
@@ -400,7 +400,7 @@ describe("IOSCtrlProxyProcessClient", () => {
         );
       },
     };
-    const client = new IOSCtrlProxyProcessClient(host, new FakeTimer());
+    const client = new IosCtrlProxyProcessClient(host, new FakeTimer());
 
     await expect(client.isRunning(77)).resolves.toBe(true);
   });
@@ -413,7 +413,7 @@ describe("IOSCtrlProxyProcessClient", () => {
         );
       },
     };
-    const client = new IOSCtrlProxyProcessClient(host, new FakeTimer());
+    const client = new IosCtrlProxyProcessClient(host, new FakeTimer());
 
     await expect(client.isRunning(77)).resolves.toBe(false);
   });
@@ -421,7 +421,7 @@ describe("IOSCtrlProxyProcessClient", () => {
   test("treats a clean kill -0 exit as the process running", async () => {
     const host = new FakeHostCommandExecutor();
     host.setCommandResponse("kill -0 77", result());
-    const client = new IOSCtrlProxyProcessClient(host, new FakeTimer());
+    const client = new IosCtrlProxyProcessClient(host, new FakeTimer());
 
     await expect(client.isRunning(77)).resolves.toBe(true);
   });

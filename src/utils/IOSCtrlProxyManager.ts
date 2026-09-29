@@ -9,7 +9,7 @@ import {
   type PerformanceTracker,
 } from "./PerformanceTracker";
 import { Timer, defaultTimer } from "./SystemTimer";
-import { IOSCtrlProxyBuilder, type CtrlProxyIosBuildResult } from "./IOSCtrlProxyBuilder";
+import { IosCtrlProxyBuilder, type CtrlProxyIosBuildResult } from "./IosCtrlProxyBuilder";
 import { checkIosCtrlProxyOverride } from "./iosCtrlProxyOverride";
 import { ActionableError, toActionableError } from "../models/ActionableError";
 import { resolvePinnedVersion } from "../constants/release";
@@ -28,11 +28,11 @@ import {
   type HostPortAvailabilityChecker,
 } from "./ios/IOSHostPortAvailabilityChecker";
 import {
-  IOSCtrlProxyHealthClient,
+  IosCtrlProxyHealthClient,
   isValidCtrlProxyPort,
   type CtrlProxyHealthCheckResult,
-} from "./ios/IOSCtrlProxyHealthClient";
-import { IOSCtrlProxyProcessClient, type RunnerOwnership } from "./ios/IOSCtrlProxyProcessClient";
+} from "./ios/IosCtrlProxyHealthClient";
+import { IosCtrlProxyProcessClient, type RunnerOwnership } from "./ios/IosCtrlProxyProcessClient";
 import { withRemainingBudget } from "./withRemainingBudget";
 import type { ProxyManager, ProxySetupResult } from "./interfaces/ProxyManager";
 
@@ -244,15 +244,15 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   private readonly timer: Timer;
   private readonly forcedRestartBudget: ForcedRestartBudget;
   private servicePort: number;
-  private readonly builder: IOSCtrlProxyBuilder;
+  private readonly builder: IosCtrlProxyBuilder;
   private readonly processExecutor: HostProcessExecutor;
   private readonly xcodebuild: Xcodebuild;
-  private readonly processClient: IOSCtrlProxyProcessClient;
+  private readonly processClient: IosCtrlProxyProcessClient;
   private readonly signingManager: XcodeSigningManager;
   private readonly deviceAppManager: DeviceAppManager;
   private readonly remoteRunner: RemoteCtrlProxyIOSRunner;
   private readonly hostPortAvailabilityChecker: HostPortAvailabilityChecker;
-  private readonly healthClient: IOSCtrlProxyHealthClient;
+  private readonly healthClient: IosCtrlProxyHealthClient;
   private remoteRunnerAvailability: Promise<boolean> | null = null;
 
   // Singleton instances per device
@@ -386,14 +386,14 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   private constructor(
     device: BootedDevice,
     timer: Timer = defaultTimer,
-    builder?: IOSCtrlProxyBuilder,
+    builder?: IosCtrlProxyBuilder,
     processExecutor: HostProcessExecutor = new DefaultHostCommandExecutor(),
     signingManager: XcodeSigningManager = new XcodeSigningManager(),
     deviceAppManager: DeviceAppManager = new DeviceAppManager(),
     remoteRunner?: RemoteCtrlProxyIOSRunner,
     hostPortAvailabilityChecker: HostPortAvailabilityChecker = new TcpHostPortAvailabilityChecker(),
     xcodebuild: Xcodebuild = new XcodebuildClient(),
-    processClient?: IOSCtrlProxyProcessClient,
+    processClient?: IosCtrlProxyProcessClient,
   ) {
     this.device = device;
     this.timer = timer;
@@ -401,10 +401,10 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     // to the shared budget's three-attempt cap; Android keeps its own policy.
     this.forcedRestartBudget = new ForcedRestartBudget(timer, 3, undefined, 300_000);
     this.servicePort = this.allocateServicePort();
-    this.builder = builder || IOSCtrlProxyBuilder.getInstance();
+    this.builder = builder || IosCtrlProxyBuilder.getInstance();
     this.processExecutor = processExecutor;
     this.xcodebuild = xcodebuild;
-    this.processClient = processClient ?? new IOSCtrlProxyProcessClient();
+    this.processClient = processClient ?? new IosCtrlProxyProcessClient();
     this.signingManager = signingManager;
     this.deviceAppManager = deviceAppManager;
     this.hostPortAvailabilityChecker = hostPortAvailabilityChecker;
@@ -423,7 +423,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       stop: async () => ({ success: false, error: "Remote runner is disabled" }),
       status: async () => ({ success: false, error: "Remote runner is disabled" }),
     };
-    this.healthClient = new IOSCtrlProxyHealthClient(this.processExecutor, this.timer, {
+    this.healthClient = new IosCtrlProxyHealthClient(this.processExecutor, this.timer, {
       useRemoteRunner: () => this.useRemoteRunner(),
       getHost: () => this.remoteRunner.getHost(),
       deviceId: this.device.deviceId,
@@ -568,7 +568,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   public static createForTesting(
     device: BootedDevice,
     timer: Timer,
-    builder?: IOSCtrlProxyBuilder,
+    builder?: IosCtrlProxyBuilder,
   ): IOSCtrlProxyManager {
     return new IOSCtrlProxyManager(device, timer, builder);
   }
@@ -579,14 +579,14 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   public static createForTestingWithDeps(
     device: BootedDevice,
     timer: Timer,
-    builder: IOSCtrlProxyBuilder | undefined,
+    builder: IosCtrlProxyBuilder | undefined,
     processExecutor: HostProcessExecutor,
     signingManager?: XcodeSigningManager,
     deviceAppManager?: DeviceAppManager,
     remoteRunner?: RemoteCtrlProxyIOSRunner,
     hostPortAvailabilityChecker?: HostPortAvailabilityChecker,
     xcodebuild?: Xcodebuild,
-    processClient?: IOSCtrlProxyProcessClient,
+    processClient?: IosCtrlProxyProcessClient,
   ): IOSCtrlProxyManager {
     return new IOSCtrlProxyManager(
       device,
@@ -603,7 +603,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
           timer,
           processExecutor.spawn.bind(processExecutor),
         ),
-      processClient ?? new IOSCtrlProxyProcessClient(processExecutor, timer),
+      processClient ?? new IosCtrlProxyProcessClient(processExecutor, timer),
     );
   }
 
@@ -907,7 +907,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
    * promise so the first simulator request cannot adopt a runner being reaped.
    */
   public static startOrphanRunnerReapOnStartup(
-    processClient: IOSCtrlProxyProcessClient = new IOSCtrlProxyProcessClient(),
+    processClient: IosCtrlProxyProcessClient = new IosCtrlProxyProcessClient(),
     timer: Timer = defaultTimer,
   ): Promise<void> {
     const work = IOSCtrlProxyManager.reapOrphanedRunnerProcessesOnStartup(processClient, timer);
@@ -924,7 +924,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
    * behind by a previously crashed daemon.
    */
   public static async reapOrphanedRunnerProcessesOnStartup(
-    processClient: IOSCtrlProxyProcessClient = new IOSCtrlProxyProcessClient(),
+    processClient: IosCtrlProxyProcessClient = new IosCtrlProxyProcessClient(),
     timer: Timer = defaultTimer,
   ): Promise<void> {
     const deadline = timer.now() + STARTUP_ORPHAN_RUNNER_REAP_DEADLINE_MS;
@@ -969,7 +969,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   }
 
   private static async reapStartupOrphanRunnerCandidate(
-    processClient: IOSCtrlProxyProcessClient,
+    processClient: IosCtrlProxyProcessClient,
     pid: number,
     deadline: number,
     timer: Timer,
@@ -1006,7 +1006,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   }
 
   private static async findStartupOrphanRunnerRoot(
-    processClient: IOSCtrlProxyProcessClient,
+    processClient: IosCtrlProxyProcessClient,
     pid: number,
     deadline: number,
     timer: Timer,
@@ -1809,7 +1809,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
     // Fail closed before any reuse/short-circuit (already-running, already-attempted)
     // can serve an unverifiable pinned runner (#2746).
-    if (IOSCtrlProxyBuilder.isPinnedVersionUnverifiable()) {
+    if (IosCtrlProxyBuilder.isPinnedVersionUnverifiable()) {
       perf.end();
       return {
         success: false,
@@ -1865,14 +1865,14 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       let buildResult: CtrlProxyIosBuildResult | null = null;
       if (needsBuild) {
         // Check for prefetched result first
-        const prefetchedResult = IOSCtrlProxyBuilder.getPrefetchedResult();
+        const prefetchedResult = IosCtrlProxyBuilder.getPrefetchedResult();
         if (prefetchedResult && prefetchedResult.success) {
           logger.info("[IOSCtrlProxy] Using prefetched build result");
           buildResult = prefetchedResult;
         } else {
           // Wait for prefetch if in progress
           const waitedResult = await perf.track("waitForPrefetch", () =>
-            IOSCtrlProxyBuilder.waitForPrefetch(),
+            IosCtrlProxyBuilder.waitForPrefetch(),
           );
           if (waitedResult && waitedResult.success) {
             logger.info("[IOSCtrlProxy] Using completed prefetch build result");
@@ -3179,7 +3179,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   }
 
   private static async findDaemonManagedRunnerTreeRoot(
-    processClient: IOSCtrlProxyProcessClient,
+    processClient: IosCtrlProxyProcessClient,
     process: ListeningProcess,
     options: {
       requireOrphanedRoot?: boolean;
@@ -3195,7 +3195,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     let parentPid = process.ppid;
     const visitedPids = new Set<number>([process.pid]);
 
-    if (IOSCtrlProxyProcessClient.isDaemonManagedSimulatorXcodebuildCommandShape(process.command)) {
+    if (IosCtrlProxyProcessClient.isDaemonManagedSimulatorXcodebuildCommandShape(process.command)) {
       rootPid = IOSCtrlProxyManager.rootPidForDaemonManagedProcess(
         process.pid,
         process.ppid,
@@ -3282,7 +3282,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     requireOrphanedRoot: boolean | undefined,
   ): DaemonManagedRunnerParentRoot | null {
     if (
-      !IOSCtrlProxyProcessClient.isDaemonManagedSimulatorXcodebuildCommandShape(process.command)
+      !IosCtrlProxyProcessClient.isDaemonManagedSimulatorXcodebuildCommandShape(process.command)
     ) {
       return null;
     }
@@ -3292,7 +3292,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         process.ppid,
         requireOrphanedRoot,
       ),
-      terminal: IOSCtrlProxyProcessClient.isShellCommand(process.command),
+      terminal: IosCtrlProxyProcessClient.isShellCommand(process.command),
     };
   }
 
@@ -3316,10 +3316,10 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
   // Runner-identification predicates (hasDeviceIdentity, isCtrlProxyRunnerCommand,
   // isDirectCtrlProxyRunnerCommand, isDaemonManagedSimulatorXcodebuildProcess and its
-  // supporting shape/shell helpers) now live solely on IOSCtrlProxyProcessClient — see
-  // IOSCtrlProxyProcessClient.ts. Keeping private copies here let them silently diverge
+  // supporting shape/shell helpers) now live solely on IosCtrlProxyProcessClient — see
+  // IosCtrlProxyProcessClient.ts. Keeping private copies here let them silently diverge
   // (#6372 follow-up); callers in this file delegate to `this.processClient` /
-  // `IOSCtrlProxyProcessClient` instead.
+  // `IosCtrlProxyProcessClient` instead.
 
   /**
    * Check if the tracked iproxy process is alive.

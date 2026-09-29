@@ -179,7 +179,7 @@
       "outputLogs": "new-only"
     },
     "check:ios-ctrl-proxy-process-boundary": {
-      "description": "Keep CtrlProxy PID tooling behind IOSCtrlProxyProcessClient",
+      "description": "Keep CtrlProxy PID tooling behind IosCtrlProxyProcessClient",
       "inputs": [
         "src/**",
         "scripts/check-ios-ctrl-proxy-process-boundary.ts",

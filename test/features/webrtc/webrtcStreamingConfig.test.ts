@@ -13,7 +13,7 @@ import {
   assertWhipOverrideAllowed,
   isLoopbackWhipHost,
 } from "../../../src/features/webrtc/webrtcStreamingConfig";
-import { SIMULATOR_FPS_DEFAULT } from "../../../src/features/screen-stream/IOSScreenCaptureHelper";
+import { SIMULATOR_FPS_DEFAULT } from "../../../src/features/screen-stream/IosScreenCaptureHelper";
 
 describe("parseIceServers", () => {
   test("parses a comma-separated URL list", () => {

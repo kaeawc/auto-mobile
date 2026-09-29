@@ -92,10 +92,10 @@ at a time to conserve context; never let two actors drive devices at once.
        local build that never ran.
      - **Anything else, including cached-but-not-running** — setup reaches
        `needsRebuild()` (`src/utils/IOSCtrlProxyManager.ts:1001`), which returns true
-       whenever an override is set (`src/utils/IOSCtrlProxyBuilder.ts:393-396`).
+       whenever an override is set (`src/utils/IosCtrlProxyBuilder.ts:393-396`).
        `build()` then calls `ensureBundleDownloaded()`, which throws
        `CtrlProxy bundle override is not a file`
-       (`src/utils/IOSCtrlProxyBuilder.ts:741-742`); that becomes a failed build
+       (`src/utils/IosCtrlProxyBuilder.ts:741-742`); that becomes a failed build
        result (`:485-495`) and `setup()` returns the failure
        (`src/utils/IOSCtrlProxyManager.ts:1020-1028`). There is **no** fallback to
        cached artifacts — CtrlProxy iOS **setup fails loudly**.
@@ -114,7 +114,7 @@ at a time to conserve context; never let two actors drive devices at once.
      Landing the build in the default derived-data path is **not** sufficient on
      its own: `needsRebuild()` also consults release metadata cached **separately**
      in `~/.automobile/ctrl-proxy-ios/ctrl-proxy-ios-bundle.json`, which the build
-     script never writes (`src/utils/IOSCtrlProxyBuilder.ts:398-433`). These states
+     script never writes (`src/utils/IosCtrlProxyBuilder.ts:398-433`). These states
      are only reached when the service is **not** already running (a live runner is
      reused and the builder never runs at all). Three of them download the
      **released** runner and extract it straight over
@@ -131,9 +131,9 @@ at a time to conserve context; never let two actors drive devices at once.
      Only when metadata is already present **and** matches the current version does
      the "no env var" path reuse your local build. The skip flag short-circuits
      `needsRebuild()` before any of those checks
-     (`src/utils/IOSCtrlProxyBuilder.ts:379-382`), so it is the reliable switch — and
+     (`src/utils/IosCtrlProxyBuilder.ts:379-382`), so it is the reliable switch — and
      it is the only thing that also covers the daemon-startup **prefetch**
-     (`IOSCtrlProxyBuilder.prefetchBuild()`, `src/index.ts:538`), which runs
+     (`IosCtrlProxyBuilder.prefetchBuild()`, `src/index.ts:538`), which runs
      `needsRebuild()`/`build()` in the background independently of `setup()` and can
      overwrite your local build before you make a single tool call.
      **Caveat — it is process-wide, not iOS-only:** it also suppresses the Android
@@ -147,7 +147,7 @@ at a time to conserve context; never let two actors drive devices at once.
      launch your build — a second gate rejects it. Before launch the daemon
      re-hashes the runner binary and refuses on any mismatch against the
      release-pinned `runnerSha256`
-     (`assertRunnerBinaryHash()`, `src/utils/IOSCtrlProxyBuilder.ts`), and a
+     (`assertRunnerBinaryHash()`, `src/utils/IosCtrlProxyBuilder.ts`), and a
      locally built runner **always** hashes differently:
 
      ```

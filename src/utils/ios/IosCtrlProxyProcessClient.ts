@@ -38,7 +38,7 @@ interface ProcessClientOptions {
  * Keeping PID discovery, ownership checks and signaling here prevents device IDs,
  * ports and PIDs from being interpolated into shell commands by lifecycle callers.
  */
-export class IOSCtrlProxyProcessClient {
+export class IosCtrlProxyProcessClient {
   private static readonly DEFAULT_PORT = 8765;
   private readonly releaseAttempts: number;
   private readonly releaseGraceMs: number;
@@ -78,7 +78,7 @@ export class IOSCtrlProxyProcessClient {
         port:
           this.parseCtrlProxyPort(process.command) ??
           this.parseCtrlProxyPort(process.environment ?? "") ??
-          IOSCtrlProxyProcessClient.DEFAULT_PORT,
+          IosCtrlProxyProcessClient.DEFAULT_PORT,
       };
     }
     return null;
@@ -436,7 +436,7 @@ export class IOSCtrlProxyProcessClient {
    */
   async isDaemonManagedSimulatorXcodebuildProcess(process: CtrlProxyProcessInfo): Promise<boolean> {
     const command = process.command;
-    if (!IOSCtrlProxyProcessClient.isDaemonManagedSimulatorXcodebuildCommandShape(command)) {
+    if (!IosCtrlProxyProcessClient.isDaemonManagedSimulatorXcodebuildCommandShape(command)) {
       return false;
     }
     if (process.ppid === 1) {
@@ -459,8 +459,8 @@ export class IOSCtrlProxyProcessClient {
       return false;
     }
     return (
-      IOSCtrlProxyProcessClient.isShellCommand(parentInfo.command) &&
-      IOSCtrlProxyProcessClient.isDaemonManagedSimulatorXcodebuildCommandShape(parentInfo.command)
+      IosCtrlProxyProcessClient.isShellCommand(parentInfo.command) &&
+      IosCtrlProxyProcessClient.isDaemonManagedSimulatorXcodebuildCommandShape(parentInfo.command)
     );
   }
 

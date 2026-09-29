@@ -14,7 +14,7 @@ import { DefaultHostCommandExecutor } from "../../utils/HostCommandExecutor";
 import { logger, type Logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { resolveAssetVersion, resolvePinnedVersion } from "../../constants/release";
-import { IOSCtrlProxyBuilder } from "../../utils/IOSCtrlProxyBuilder";
+import { IosCtrlProxyBuilder } from "../../utils/IosCtrlProxyBuilder";
 import { IOSCtrlProxyManager } from "../../utils/IOSCtrlProxyManager";
 import {
   IOSCtrlProxyClient,
@@ -1182,7 +1182,7 @@ export async function checkIosCtrlProxyRunner(
     // An unverifiable explicit pin is a hard configuration failure — classifyRunner
     // only checks the advertised command set, so without this a running runner would
     // still report `pass` and leave the `doctor --ios` hermetic gate green (#2746).
-    if (IOSCtrlProxyBuilder.isPinnedVersionUnverifiable()) {
+    if (IosCtrlProxyBuilder.isPinnedVersionUnverifiable()) {
       return {
         name,
         status: "fail",

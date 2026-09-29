@@ -38,7 +38,7 @@ export function getIosCtrlProxyOverridePath(env: NodeJS.ProcessEnv = process.env
  * Requiring both rejects a path that exists but cannot be a runner bundle -- a
  * text file like /etc/hosts, a stale .xctestrun, or a tiny fixture -- which
  * otherwise reported `usable: true` and let the capability guard open on a value
- * that never loads (#4221 review). Mirrors IOSCtrlProxyBuilder's own
+ * that never loads (#4221 review). Mirrors IosCtrlProxyBuilder's own
  * MIN_BUNDLE_SIZE_BYTES / verifyBundle checks.
  */
 const MIN_BUNDLE_SIZE_BYTES = 10_000;

@@ -8,7 +8,7 @@ import {
   CAPTURE_PERMISSION_TARGET_PREFIX,
   encodeFrameHeader,
   IOS_HELPER_STOP_GRACE_MS,
-  IOSScreenCaptureHelper,
+  IosScreenCaptureHelper,
   parseCaptureIdleMarker,
   NATIVE_FRAME_METRICS_PREFIX,
   type CaptureTarget,
@@ -43,11 +43,11 @@ function withFakeSpawner(
 ): {
   fake: FakeChildProcess;
   spawnArgs: { command: string; args: string[] };
-  helper: IOSScreenCaptureHelper;
+  helper: IosScreenCaptureHelper;
 } {
   const fake = new FakeChildProcess();
   const spawnArgs = { command: "", args: [] as string[] };
-  const helper = new IOSScreenCaptureHelper({
+  const helper = new IosScreenCaptureHelper({
     binaryPath: "/fake/screen-capture-helper",
     target,
     spawner: (command, args) => {
@@ -84,7 +84,7 @@ class ManualFrameDeliveryScheduler implements FrameDeliveryScheduler {
   }
 }
 
-describe("IOSScreenCaptureHelper", () => {
+describe("IosScreenCaptureHelper", () => {
   test("passes --device-id for device target with deviceId", () => {
     const { spawnArgs, helper } = withFakeSpawner();
     helper.start();
@@ -129,7 +129,7 @@ describe("IOSScreenCaptureHelper", () => {
     "rejects an out-of-range or non-integer simulator fps %p on start()",
     (fps) => {
       const fake = new FakeChildProcess();
-      const helper = new IOSScreenCaptureHelper({
+      const helper = new IosScreenCaptureHelper({
         binaryPath: "/fake/screen-capture-helper",
         target: { kind: "simulator", windowID: 1, fps },
         spawner: () => fake as unknown as ChildProcessWithoutNullStreams,
@@ -157,7 +157,7 @@ describe("IOSScreenCaptureHelper", () => {
     const fake = new FakeChildProcess();
     const scheduler = new ManualFrameDeliveryScheduler();
     let now = 1_000;
-    const helper = new IOSScreenCaptureHelper({
+    const helper = new IosScreenCaptureHelper({
       binaryPath: "/fake/screen-capture-helper",
       target: { kind: "device" },
       now: () => now,
@@ -463,7 +463,7 @@ describe("IOSScreenCaptureHelper", () => {
       fake.killed = true;
       return true;
     };
-    const helper = new IOSScreenCaptureHelper({
+    const helper = new IosScreenCaptureHelper({
       binaryPath: "/fake/screen-capture-helper",
       target: { kind: "simulator", windowID: 1 },
       spawner: () => fake as unknown as ChildProcessWithoutNullStreams,
@@ -495,7 +495,7 @@ describe("IOSScreenCaptureHelper", () => {
         fake.killed = true;
         return true;
       };
-      const helper = new IOSScreenCaptureHelper({
+      const helper = new IosScreenCaptureHelper({
         binaryPath: "/fake/screen-capture-helper",
         target: { kind: "simulator", windowID: 1 },
         spawner: () => fake as unknown as ChildProcessWithoutNullStreams,
@@ -528,7 +528,7 @@ describe("IOSScreenCaptureHelper", () => {
       fake.killed = true;
       return true;
     };
-    const helper = new IOSScreenCaptureHelper({
+    const helper = new IosScreenCaptureHelper({
       binaryPath: "/fake/screen-capture-helper",
       target: { kind: "simulator", windowID: 1 },
       spawner: () => fake as unknown as ChildProcessWithoutNullStreams,

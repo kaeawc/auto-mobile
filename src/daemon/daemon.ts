@@ -150,7 +150,7 @@ import { InstalledAppsRepository } from "../db/installedAppsRepository";
 import { DeviceSessionRepository } from "../db/deviceSessionRepository";
 import { EmulatorLossIncidentRepository } from "../db/emulatorLossIncidentRepository";
 import { DeviceSessionManager } from "../utils/DeviceSessionManager";
-import { IOSCtrlProxyBuilder } from "../utils/IOSCtrlProxyBuilder";
+import { IosCtrlProxyBuilder } from "../utils/IosCtrlProxyBuilder";
 import { initializeIosCtrlProxyAtStartup } from "./iosStartupInit";
 import {
   startAppearanceSyncScheduler,
@@ -2909,7 +2909,7 @@ export class Daemon {
         timer: this.timer,
         // Per-device timeout to prevent hanging on unresponsive devices
         perDeviceTimeoutMs: 5000,
-        pendingPrefetch: () => IOSCtrlProxyBuilder.pendingPrefetch(),
+        pendingPrefetch: () => IosCtrlProxyBuilder.pendingPrefetch(),
         isShuttingDown: () => this.shutdownInProgress,
         verifyIosDevice: (deviceId, options) =>
           deviceSessionManager.verifyIosDevice(deviceId, options),

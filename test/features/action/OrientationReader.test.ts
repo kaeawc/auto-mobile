@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   AndroidOrientationReader,
-  IOSOrientationReader,
+  IosOrientationReader,
 } from "../../../src/features/action/OrientationReader";
 import type { BootedDevice, ExecResult } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
@@ -90,7 +90,7 @@ describe("OrientationReader", () => {
 
   test("returns null for iOS until CtrlProxy has a read-only orientation query", async () => {
     expect(
-      await new IOSOrientationReader().readOrientation({ ...device, platform: "ios" }),
+      await new IosOrientationReader().readOrientation({ ...device, platform: "ios" }),
     ).toBeNull();
   });
 });

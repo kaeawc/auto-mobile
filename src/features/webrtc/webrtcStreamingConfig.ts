@@ -1,7 +1,7 @@
 import { ActionableError } from "../../models";
 import type { RTCIceServer } from "werift";
 import { h264MacroblocksPerFrame, WEBRTC_H264_MAX_MACROBLOCKS_PER_FRAME } from "./h264Level";
-import { SIMULATOR_FPS_MAX, SIMULATOR_FPS_MIN } from "../screen-stream/IOSScreenCaptureHelper";
+import { SIMULATOR_FPS_MAX, SIMULATOR_FPS_MIN } from "../screen-stream/IosScreenCaptureHelper";
 
 /**
  * Safe range for the iOS Simulator WebRTC capture rate. These mirror the

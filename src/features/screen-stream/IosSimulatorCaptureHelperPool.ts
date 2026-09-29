@@ -3,7 +3,7 @@ import { logger } from "../../utils/logger";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import {
-  IOSScreenCaptureHelper,
+  IosScreenCaptureHelper,
   type CapturePermission,
   type CaptureTarget,
   type FrameQueueMetrics,
@@ -11,7 +11,7 @@ import {
   type IosScreenCaptureHelperOptions,
   type IosScreenCaptureReadiness,
   type NativeFrameMetrics,
-} from "./IOSScreenCaptureHelper";
+} from "./IosScreenCaptureHelper";
 import type {
   DecodedAudio,
   DecodedEncodedVideo,
@@ -52,7 +52,7 @@ export interface IosSimulatorCaptureHelperLease {
 }
 
 type SimulatorHelper = Pick<
-  IOSScreenCaptureHelper,
+  IosScreenCaptureHelper,
   "start" | "stop" | "isRunning" | "requestKeyFrame"
 > & {
   on<E extends keyof IosScreenCaptureHelperEvents>(
@@ -102,7 +102,7 @@ interface HelperEntry {
  * cache is disabled, and every lease attach forces a fresh IDR so a late lease
  * never starts on undecodable P-frames. Raw-lease behavior is unchanged.
  */
-export class IOSSimulatorCaptureHelperPool {
+export class IosSimulatorCaptureHelperPool {
   private readonly idleTtlMs: number;
   private readonly timer: Timer;
   private readonly createHelper: SimulatorHelperFactory;
@@ -113,7 +113,7 @@ export class IOSSimulatorCaptureHelperPool {
     this.idleTtlMs = options.idleTtlMs ?? IOS_SIMULATOR_HELPER_IDLE_TTL_MS;
     this.timer = options.timer ?? defaultTimer;
     this.createHelper =
-      options.createHelper ?? ((helperOptions) => new IOSScreenCaptureHelper(helperOptions));
+      options.createHelper ?? ((helperOptions) => new IosScreenCaptureHelper(helperOptions));
   }
 
   acquire(options: IosScreenCaptureHelperOptions): IosSimulatorCaptureHelperLease {
@@ -463,7 +463,7 @@ class PooledSimulatorCaptureHelperLease
   entryKey: string | null = null;
 
   constructor(
-    private readonly pool: IOSSimulatorCaptureHelperPool,
+    private readonly pool: IosSimulatorCaptureHelperPool,
     readonly options: IosScreenCaptureHelperOptions,
   ) {
     super();
@@ -553,4 +553,4 @@ function isFatalHelperStderr(line: string): boolean {
   return normalized.startsWith("error:") || normalized.includes("warn: no frames received");
 }
 
-export const iosSimulatorCaptureHelperPool = new IOSSimulatorCaptureHelperPool();
+export const iosSimulatorCaptureHelperPool = new IosSimulatorCaptureHelperPool();

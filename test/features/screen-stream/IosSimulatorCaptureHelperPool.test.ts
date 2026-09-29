@@ -5,12 +5,12 @@ import { logger } from "../../../src/utils/logger";
 import type {
   IosScreenCaptureHelperEvents,
   IosScreenCaptureHelperOptions,
-} from "../../../src/features/screen-stream/IOSScreenCaptureHelper";
+} from "../../../src/features/screen-stream/IosScreenCaptureHelper";
 import {
   IOS_SIMULATOR_HELPER_IDLE_TTL_MS,
   IOS_SIMULATOR_HELPER_STOP_TIMEOUT_MS,
-  IOSSimulatorCaptureHelperPool,
-} from "../../../src/features/screen-stream/IOSSimulatorCaptureHelperPool";
+  IosSimulatorCaptureHelperPool,
+} from "../../../src/features/screen-stream/IosSimulatorCaptureHelperPool";
 
 class FakeSimulatorHelper extends EventEmitter {
   starts = 0;
@@ -78,11 +78,11 @@ async function flushMicrotasks(count = 10): Promise<void> {
   }
 }
 
-describe("IOSSimulatorCaptureHelperPool", () => {
+describe("IosSimulatorCaptureHelperPool", () => {
   test("evicts an idle stalled window without failing a different window attach", async () => {
     const timer = new FakeTimer();
     const helpers: FakeSimulatorHelper[] = [];
-    const pool = new IOSSimulatorCaptureHelperPool({
+    const pool = new IosSimulatorCaptureHelperPool({
       timer,
       createHelper: () => {
         const helper =
@@ -119,7 +119,7 @@ describe("IOSSimulatorCaptureHelperPool", () => {
   test("times out a failed helper stop and releases the serialized attach queue", async () => {
     const timer = new FakeTimer();
     const helpers: FakeSimulatorHelper[] = [];
-    const pool = new IOSSimulatorCaptureHelperPool({
+    const pool = new IosSimulatorCaptureHelperPool({
       timer,
       createHelper: () => {
         const helper =
@@ -158,7 +158,7 @@ describe("IOSSimulatorCaptureHelperPool", () => {
 
   test("reuses a warm helper and replays its latest frame to the next lease", async () => {
     const helpers: FakeSimulatorHelper[] = [];
-    const pool = new IOSSimulatorCaptureHelperPool({
+    const pool = new IosSimulatorCaptureHelperPool({
       createHelper: () => {
         const helper = new FakeSimulatorHelper();
         helpers.push(helper);
@@ -210,7 +210,7 @@ describe("IOSSimulatorCaptureHelperPool", () => {
 
   test("discards a helper reporting a fatal capture error before the next lease", async () => {
     const helpers: FakeSimulatorHelper[] = [];
-    const pool = new IOSSimulatorCaptureHelperPool({
+    const pool = new IosSimulatorCaptureHelperPool({
       createHelper: () => {
         const helper = new FakeSimulatorHelper();
         helpers.push(helper);
@@ -242,7 +242,7 @@ describe("IOSSimulatorCaptureHelperPool", () => {
 
   test("discards a silent helper before reusing its window and keeps another window active", async () => {
     const helpers: FakeSimulatorHelper[] = [];
-    const pool = new IOSSimulatorCaptureHelperPool({
+    const pool = new IosSimulatorCaptureHelperPool({
       createHelper: () => {
         const helper = new FakeSimulatorHelper();
         helpers.push(helper);
@@ -275,7 +275,7 @@ describe("IOSSimulatorCaptureHelperPool", () => {
 
   test("logs a rejected failed-helper cleanup instead of leaving an unhandled rejection", async () => {
     const helpers: FakeSimulatorHelper[] = [];
-    const pool = new IOSSimulatorCaptureHelperPool({
+    const pool = new IosSimulatorCaptureHelperPool({
       createHelper: () => {
         const helper = new FakeSimulatorHelper();
         helpers.push(helper);
@@ -304,7 +304,7 @@ describe("IOSSimulatorCaptureHelperPool", () => {
 
   test("drops a poisoned entry after a failed stop so the next attach gets a fresh helper", async () => {
     const helpers: FakeSimulatorHelper[] = [];
-    const pool = new IOSSimulatorCaptureHelperPool({
+    const pool = new IosSimulatorCaptureHelperPool({
       createHelper: () => {
         const helper = new FakeSimulatorHelper();
         helpers.push(helper);
@@ -348,7 +348,7 @@ describe("IOSSimulatorCaptureHelperPool", () => {
   test("does not create a helper when a lease stops before its queued attachment", async () => {
     const timer = new FakeTimer();
     const helpers: FakeSimulatorHelper[] = [];
-    const pool = new IOSSimulatorCaptureHelperPool({
+    const pool = new IosSimulatorCaptureHelperPool({
       timer,
       idleTtlMs: 1,
       createHelper: () => {
@@ -369,7 +369,7 @@ describe("IOSSimulatorCaptureHelperPool", () => {
   });
 
   test("clears only the attachment generation that completed", async () => {
-    const pool = new IOSSimulatorCaptureHelperPool({
+    const pool = new IosSimulatorCaptureHelperPool({
       createHelper: () => new FakeSimulatorHelper(),
     });
     const lease = pool.acquire(simulatorOptions());
@@ -385,7 +385,7 @@ describe("IOSSimulatorCaptureHelperPool", () => {
 
   test("replaces the helper when the simulator window is recreated with a new ID", async () => {
     const helpers: FakeSimulatorHelper[] = [];
-    const pool = new IOSSimulatorCaptureHelperPool({
+    const pool = new IosSimulatorCaptureHelperPool({
       createHelper: () => {
         const helper = new FakeSimulatorHelper();
         helpers.push(helper);
@@ -406,7 +406,7 @@ describe("IOSSimulatorCaptureHelperPool", () => {
 
   test("keeps active streams for different simulator windows isolated", async () => {
     const helpers: FakeSimulatorHelper[] = [];
-    const pool = new IOSSimulatorCaptureHelperPool({
+    const pool = new IosSimulatorCaptureHelperPool({
       createHelper: () => {
         const helper = new FakeSimulatorHelper();
         helpers.push(helper);
@@ -430,7 +430,7 @@ describe("IOSSimulatorCaptureHelperPool", () => {
   test("stops an idle helper at the configured TTL and on shutdown", async () => {
     const timer = new FakeTimer();
     const helpers: FakeSimulatorHelper[] = [];
-    const pool = new IOSSimulatorCaptureHelperPool({
+    const pool = new IosSimulatorCaptureHelperPool({
       timer,
       createHelper: () => {
         const helper = new FakeSimulatorHelper();
@@ -456,7 +456,7 @@ describe("IOSSimulatorCaptureHelperPool", () => {
 
   test("forces an IDR on every encoded lease attach and never replays a raw frame", async () => {
     const helpers: FakeSimulatorHelper[] = [];
-    const pool = new IOSSimulatorCaptureHelperPool({
+    const pool = new IosSimulatorCaptureHelperPool({
       createHelper: () => {
         const helper = new FakeSimulatorHelper();
         helpers.push(helper);
@@ -489,7 +489,7 @@ describe("IOSSimulatorCaptureHelperPool", () => {
 
   test("forwards encoded records and the capability handshake to every lease", async () => {
     const helpers: FakeSimulatorHelper[] = [];
-    const pool = new IOSSimulatorCaptureHelperPool({
+    const pool = new IosSimulatorCaptureHelperPool({
       createHelper: () => {
         const helper = new FakeSimulatorHelper();
         helpers.push(helper);
@@ -523,7 +523,7 @@ describe("IOSSimulatorCaptureHelperPool", () => {
 
   test("gives a mismatched encoder config an independent helper entry", async () => {
     const helpers: FakeSimulatorHelper[] = [];
-    const pool = new IOSSimulatorCaptureHelperPool({
+    const pool = new IosSimulatorCaptureHelperPool({
       createHelper: () => {
         const helper = new FakeSimulatorHelper();
         helpers.push(helper);

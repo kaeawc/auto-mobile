@@ -32,8 +32,8 @@ import {
 } from "../../../src/features/webrtc/h264Level";
 import {
   IOS_SIMULATOR_HELPER_STOP_TIMEOUT_MS,
-  IOSSimulatorCaptureHelperPool,
-} from "../../../src/features/screen-stream/IOSSimulatorCaptureHelperPool";
+  IosSimulatorCaptureHelperPool,
+} from "../../../src/features/screen-stream/IosSimulatorCaptureHelperPool";
 import { logger } from "../../../src/utils/logger";
 import { WEBRTC_IOS_SIMULATOR_FPS_DEFAULT } from "../../../src/features/webrtc/webrtcStreamingConfig";
 import { ENCODED_VIDEO_CAPABILITY } from "../../../src/features/screen-stream";
@@ -629,7 +629,7 @@ describe("IosH264Source", () => {
 
   test("leaves an injected simulator helper pool warm after stream stop", async () => {
     const helper = new FakeFrameCaptureHelper();
-    const pool = new IOSSimulatorCaptureHelperPool({
+    const pool = new IosSimulatorCaptureHelperPool({
       createHelper: () => helper,
     });
     const encoder = new FakeChildProcess();
@@ -661,7 +661,7 @@ describe("IosH264Source", () => {
     const timer = new FakeTimer();
     const helpers: FakeFrameCaptureHelper[] = [];
     const errors: Error[] = [];
-    const pool = new IOSSimulatorCaptureHelperPool({
+    const pool = new IosSimulatorCaptureHelperPool({
       timer,
       createHelper: () => {
         const helper = new FakeFrameCaptureHelper();
@@ -710,7 +710,7 @@ describe("IosH264Source", () => {
   test("retries a silent pooled Simulator helper once without replacing the source", async () => {
     const timer = new FakeTimer();
     const helpers: FakeFrameCaptureHelper[] = [];
-    const pool = new IOSSimulatorCaptureHelperPool({
+    const pool = new IosSimulatorCaptureHelperPool({
       createHelper: () => {
         const helper = new FakeFrameCaptureHelper();
         helpers.push(helper);
@@ -753,7 +753,7 @@ describe("IosH264Source", () => {
     const timer = new FakeTimer();
     const helpers: FakeFrameCaptureHelper[] = [];
     const helperTargets: CaptureTarget[] = [];
-    const pool = new IOSSimulatorCaptureHelperPool({
+    const pool = new IosSimulatorCaptureHelperPool({
       createHelper: (options) => {
         helperTargets.push(options.target);
         const helper = new FakeFrameCaptureHelper();
@@ -806,7 +806,7 @@ describe("IosH264Source", () => {
     const timer = new FakeTimer();
     const helpers: FakeFrameCaptureHelper[] = [];
     const helperTargets: CaptureTarget[] = [];
-    const pool = new IOSSimulatorCaptureHelperPool({
+    const pool = new IosSimulatorCaptureHelperPool({
       createHelper: (options) => {
         helperTargets.push(options.target);
         const helper = new FakeFrameCaptureHelper();
@@ -858,7 +858,7 @@ describe("IosH264Source", () => {
 
   test("reports a typed Screen Recording denial after a second legacy no-frame warning", async () => {
     const helpers: FakeFrameCaptureHelper[] = [];
-    const pool = new IOSSimulatorCaptureHelperPool({
+    const pool = new IosSimulatorCaptureHelperPool({
       createHelper: () => {
         const helper = new FakeFrameCaptureHelper();
         helpers.push(helper);
@@ -904,7 +904,7 @@ describe("IosH264Source", () => {
 
   test("fails closed when warning-triggered silent-helper cleanup fails", async () => {
     const helpers: FakeFrameCaptureHelper[] = [];
-    const pool = new IOSSimulatorCaptureHelperPool({
+    const pool = new IosSimulatorCaptureHelperPool({
       createHelper: () => {
         const helper = new FakeFrameCaptureHelper();
         helpers.push(helper);
@@ -951,7 +951,7 @@ describe("IosH264Source", () => {
   test("evicts a second timed-out pooled Simulator helper before a later lease", async () => {
     const timer = new FakeTimer();
     const helpers: FakeFrameCaptureHelper[] = [];
-    const pool = new IOSSimulatorCaptureHelperPool({
+    const pool = new IosSimulatorCaptureHelperPool({
       createHelper: () => {
         const helper = new FakeFrameCaptureHelper();
         helpers.push(helper);
@@ -1002,7 +1002,7 @@ describe("IosH264Source", () => {
   test("does not retry a pooled Simulator timeout after the source stops", async () => {
     const timer = new FakeTimer();
     const helpers: FakeFrameCaptureHelper[] = [];
-    const pool = new IOSSimulatorCaptureHelperPool({
+    const pool = new IosSimulatorCaptureHelperPool({
       createHelper: () => {
         const helper = new FakeFrameCaptureHelper();
         helpers.push(helper);
@@ -1037,7 +1037,7 @@ describe("IosH264Source", () => {
   test("fails instead of retrying when invalidating a silent pooled Simulator helper fails", async () => {
     const timer = new FakeTimer();
     const helpers: FakeFrameCaptureHelper[] = [];
-    const pool = new IOSSimulatorCaptureHelperPool({
+    const pool = new IosSimulatorCaptureHelperPool({
       createHelper: () => {
         const helper = new FakeFrameCaptureHelper();
         helpers.push(helper);
@@ -1072,7 +1072,7 @@ describe("IosH264Source", () => {
 
   test("classifies the released helper's Screen Recording denial from a pooled Simulator helper", async () => {
     const helpers: FakeFrameCaptureHelper[] = [];
-    const pool = new IOSSimulatorCaptureHelperPool({
+    const pool = new IosSimulatorCaptureHelperPool({
       createHelper: () => {
         const helper = new FakeFrameCaptureHelper();
         helpers.push(helper);
@@ -2097,7 +2097,7 @@ describe("IosH264Source", () => {
   test("exhausts bounded reconnects after a pooled helper stop stalls the shared queue", async () => {
     const timer = new FakeTimer();
     const helpers: FakeFrameCaptureHelper[] = [];
-    const pool = new IOSSimulatorCaptureHelperPool({
+    const pool = new IosSimulatorCaptureHelperPool({
       timer,
       createHelper: (options) => {
         const helper =

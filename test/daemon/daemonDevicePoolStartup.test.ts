@@ -7,7 +7,7 @@ import { DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV } from "../../src/daemon/live
 import type { BootedDevice, SomePlatform } from "../../src/models";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { DeviceSessionManager } from "../../src/utils/DeviceSessionManager";
-import { IOSCtrlProxyBuilder } from "../../src/utils/IOSCtrlProxyBuilder";
+import { IosCtrlProxyBuilder } from "../../src/utils/IosCtrlProxyBuilder";
 import { IOSCtrlProxyManager } from "../../src/utils/IOSCtrlProxyManager";
 import { FakeIOSCtrlProxyManager } from "../fakes/FakeIOSCtrlProxyManager";
 import { FakeDatabaseInitializer } from "../fakes/FakeDatabaseInitializer";
@@ -204,7 +204,7 @@ describe("Daemon startup device discovery", () => {
         verifiedDeviceIds.push(deviceId);
       },
     } as unknown as DeviceSessionManager);
-    const pendingPrefetchSpy = spyOn(IOSCtrlProxyBuilder, "pendingPrefetch").mockReturnValue(null);
+    const pendingPrefetchSpy = spyOn(IosCtrlProxyBuilder, "pendingPrefetch").mockReturnValue(null);
     try {
       const daemon = buildDaemon(new FakeTimer());
       const internals = daemon as unknown as DaemonStartupInternals;
@@ -241,7 +241,7 @@ describe("Daemon startup device discovery", () => {
         (daemon as unknown as { shutdownInProgress: boolean }).shutdownInProgress = true;
       },
     } as unknown as DeviceSessionManager);
-    const pendingPrefetchSpy = spyOn(IOSCtrlProxyBuilder, "pendingPrefetch").mockReturnValue(null);
+    const pendingPrefetchSpy = spyOn(IosCtrlProxyBuilder, "pendingPrefetch").mockReturnValue(null);
     try {
       daemon = buildDaemon(new FakeTimer());
       const internals = daemon as unknown as DaemonStartupInternals;

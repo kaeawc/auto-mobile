@@ -46,6 +46,15 @@ describe("auto-mobile/no-raw-timer", () => {
   });
 });
 
+describe("auto-mobile/no-raw-promise-race", () => {
+  test("flags a direct Promise.race call", () => {
+    expect(fires("no-raw-promise-race", "Promise.race([first, second]);")).toBe(true);
+  });
+  test("does not flag a different race method", () => {
+    expect(fires("no-raw-promise-race", "coordinator.race([first, second]);")).toBe(false);
+  });
+});
+
 describe("auto-mobile/no-structured-content-read", () => {
   test("flags reading a field off structuredContent", () => {
     expect(fires("no-structured-content-read", "const m = res.structuredContent.marker;")).toBe(

@@ -91,6 +91,7 @@
         "complexity": ["warn", 12],
         "max-depth": ["warn", 3],
         "auto-mobile/catch-convention": "warn",
+        "auto-mobile/no-raw-promise-race": "warn",
         "auto-mobile/no-unknown-cast": "warn",
         "typescript/no-floating-promises": "warn",
         "typescript/no-misused-promises": "warn"
@@ -116,6 +117,12 @@
       "files": ["test/stress/**/*.ts"],
       "rules": {
         "auto-mobile/stress-explicit-timeout": "error"
+      }
+    },
+    {
+      "files": ["src/utils/raceWithDeadline.ts"],
+      "rules": {
+        "auto-mobile/no-raw-promise-race": "off"
       }
     },
     {

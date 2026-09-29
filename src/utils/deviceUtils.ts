@@ -24,6 +24,7 @@ import { isUnresolvedAndroidEmulatorName } from "../daemon/deviceIdentityEvidenc
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "./deviceTimeouts";
 import { combineWithAmbientAbort, getAbortSignal, runWithAbortSignal } from "./AbortContext";
 import { defaultTimer, type Timer } from "./SystemTimer";
+import { raceWithDeadline } from "./raceWithDeadline";
 import {
   getVirtualDeviceLifecycleCoordinator,
   type VirtualDeviceLifecycleCoordinator,
@@ -33,36 +34,6 @@ import {
 export { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "./deviceTimeouts";
 
 const READINESS_ABORT_SETTLEMENT_TURNS = 8;
-
-function raceWithAbortSignal<T>(operation: Promise<T>, signal?: AbortSignal): Promise<T> {
-  if (!signal) {
-    return operation;
-  }
-  // The operation may be shared with other callers, so aborting this wait must not cancel it.
-  operation.catch(() => {});
-  return new Promise<T>((resolve, reject) => {
-    const abort = () => {
-      cleanup();
-      reject(signal.reason ?? new DOMException("The operation was aborted.", "AbortError"));
-    };
-    const cleanup = () => signal.removeEventListener("abort", abort);
-    if (signal.aborted) {
-      abort();
-      return;
-    }
-    signal.addEventListener("abort", abort, { once: true });
-    operation.then(
-      (value) => {
-        cleanup();
-        resolve(value);
-      },
-      (error: unknown) => {
-        cleanup();
-        reject(error);
-      },
-    );
-  });
-}
 
 /**
  * A configured Android image with incomplete ADB liveness must not be used for
@@ -818,7 +789,12 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     // Physical-device discovery runs regardless of the simulator outcome and
     // cannot fail the sweep: it is best-effort by contract.
     const physicalPromise = this.listPhysicalIosDevices();
-    const physical = await raceWithAbortSignal(physicalPromise, signal);
+    const physical = await raceWithDeadline(physicalPromise, {
+      timer: defaultTimer,
+      signal,
+      label: "iOS physical-device discovery",
+      relabelDefaultAbort: false,
+    });
     if (!physical.complete) {
       logger.warn(
         "[DeviceManager] iOS physical-device discovery was incomplete; " +

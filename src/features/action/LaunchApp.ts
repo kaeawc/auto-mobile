@@ -39,6 +39,7 @@ import { isAndroidPackageRunning } from "../../utils/android-cmdline-tools/andro
 import { errorMessage } from "../../utils/describeUnknownError";
 import { shellQuote } from "../../utils/shellQuote";
 import { combineWithAmbientAbort } from "../../utils/AbortContext";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
 
 const LAUNCH_OBSERVATION_TIMEOUT_MS = 5000;
 const LAUNCH_OBSERVATION_POLL_INTERVAL_MS = 200;
@@ -659,7 +660,6 @@ export class LaunchApp extends BaseVisualChange {
     if (expectedPackageName) {
       let pushUnsubscribe: (() => void) | undefined;
       let timeoutHandle: NodeJS.Timeout | undefined;
-      let abortListener: (() => void) | undefined;
 
       const pushPromise = new Promise<string>((resolve) => {
         timeoutHandle = this.timer.setTimeout(() => resolve("timeout"), timeoutMs);
@@ -689,36 +689,19 @@ export class LaunchApp extends BaseVisualChange {
           return new Promise<never>(() => {});
         });
 
-      const abortPromise = signal
-        ? new Promise<never>((_resolve, reject) => {
-            abortListener = () => {
-              try {
-                signal.throwIfAborted();
-              } catch (error) {
-                reject(error);
-              }
-            };
-            signal.addEventListener("abort", abortListener, { once: true });
-            if (signal.aborted) {
-              abortListener();
-            }
-          })
-        : undefined;
       let winner: string;
       try {
-        winner = await Promise.race([
-          pushPromise,
-          syncPromise,
-          ...(abortPromise ? [abortPromise] : []),
-        ]);
+        winner = await raceWithDeadline(Promise.race([pushPromise, syncPromise]), {
+          timer: this.timer,
+          signal,
+          label: "iOS hierarchy readiness",
+          relabelDefaultAbort: false,
+        });
         signal?.throwIfAborted();
       } finally {
         pushUnsubscribe?.();
         if (timeoutHandle) {
           this.timer.clearTimeout(timeoutHandle);
-        }
-        if (signal && abortListener) {
-          signal.removeEventListener("abort", abortListener);
         }
       }
 

@@ -24,10 +24,39 @@ final class KeyboardCloseKeySelectionTests: XCTestCase {
         XCTAssertEqual(candidates.map(\.method), ["dismissKey", "returnKey", "returnKey"])
     }
 
+    func testCloseAttemptsTryEnabledButtonThenNewlineThenEscape() {
+        XCTAssertEqual(
+            GesturePerformer.closeAttemptOrder(hasEnabledMatch: true),
+            [.matchedButton, .newline, .escape]
+        )
+    }
+
+    func testCloseAttemptsSkipDisabledButtonBeforeNewlineAndEscape() {
+        XCTAssertEqual(
+            GesturePerformer.closeAttemptOrder(hasEnabledMatch: false),
+            [.newline, .escape]
+        )
+    }
+
     func testRecognizesSubmitLabelsAndIgnoresUnrelatedKeys() {
-        let labels = ["Go", "Search", "Done", "Next", "Send", "Return", "Space", "Delete", "Google"]
+        let labels = [
+            "Go",
+            "Search",
+            "Done",
+            "Next",
+            "Send",
+            "Join",
+            "Route",
+            "Return",
+            "↵",
+            "⏎",
+            "↩",
+            "Space",
+            "Delete",
+            "Google",
+        ]
         let candidates = GesturePerformer.closeKeyCandidates(labels.map { (label: $0, identifier: "") })
-        XCTAssertEqual(candidates.map(\.index), [0, 1, 2, 3, 4, 5])
+        XCTAssertEqual(candidates.map(\.index), Array(0 ... 10))
         XCTAssertTrue(candidates.allSatisfy { $0.method == "returnKey" })
     }
 

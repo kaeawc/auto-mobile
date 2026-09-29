@@ -231,6 +231,22 @@ public final class GesturePerformer: GesturePerforming {
         return nil
     }
 
+    private nonisolated static let closeButtonNames = [
+        "dismiss keyboard", "hide keyboard", "dismisskeyboard", "hidekeyboard",
+        "return", "return_arrow", "returnarrow", "go", "search", "done", "next",
+        "send", "join", "route", "↵", "⏎", "↩",
+    ]
+
+    enum CloseAttempt: Equatable {
+        case matchedButton
+        case newline
+        case escape
+    }
+
+    nonisolated static func closeAttemptOrder(hasEnabledMatch: Bool) -> [CloseAttempt] {
+        (hasEnabledMatch ? [.matchedButton] : []) + [.newline, .escape]
+    }
+
     nonisolated static func closeKeyCandidates(_ labels: [(label: String, identifier: String)]) -> [(
         index: Int,
         method: String
@@ -242,7 +258,9 @@ public final class GesturePerformer: GesturePerforming {
         }.map { (index: $0, method: "dismissKey") }
         let returns = keys.indices.filter { index in
             let words = keys[index].components(separatedBy: CharacterSet.alphanumerics.inverted)
-            let isSubmit = ["return", "go", "search", "done", "next", "send"].contains { words.contains($0) }
+            let isSubmit = ["return", "go", "search", "done", "next", "send", "join", "route"].contains {
+                words.contains($0)
+            }
                 || keys[index].contains("returnarrow")
                 || ["↵", "⏎", "↩"].contains { keys[index].contains($0) }
             return !dismiss.contains(where: { $0.index == index }) && isSubmit
@@ -995,52 +1013,62 @@ public final class GesturePerformer: GesturePerforming {
                 if !isKeyboardVisible(app: app) {
                     return KeyboardActionResult(open: false)
                 }
-                do {
-                    try typeKeyboardKey(.escape, app: app)
-                } catch {
-                    print("[GesturePerformer] keyboard Escape failed: \(error)")
-                }
-                if waitForKeyboardClose(app: app, closeDeadline: closeDeadline) {
-                    return KeyboardActionResult(open: false, method: "escape")
-                }
-
                 guard ProcessInfo.processInfo.systemUptime < closeDeadline else {
                     return KeyboardActionResult(open: isKeyboardVisible(app: app))
                 }
 
-                let keys: [XCUIElement]
-                let labels: [(label: String, identifier: String)]
+                var enabledKey: (element: XCUIElement, method: String)?
                 do {
-                    keys = try catchingObjCException {
-                        app.keyboards.buttons.allElementsBoundByIndex + app.keyboards.keys.allElementsBoundByIndex
+                    let keys = try catchingObjCException {
+                        app.keyboards.buttons.matching(NSPredicate(
+                            format: "identifier IN[c] %@ OR label IN[c] %@",
+                            Self.closeButtonNames,
+                            Self.closeButtonNames
+                        )).allElementsBoundByIndex
                     }
-                    labels = try keys.map { key in
-                        try catchingObjCException { (label: key.label, identifier: key.identifier) }
+                    var labels: [(label: String, identifier: String)] = []
+                    for key in keys {
+                        guard ProcessInfo.processInfo.systemUptime < closeDeadline else { break }
+                        try labels.append(catchingObjCException { (label: key.label, identifier: key.identifier) })
+                    }
+                    for candidate in Self.closeKeyCandidates(labels) {
+                        guard ProcessInfo.processInfo.systemUptime < closeDeadline else { break }
+                        let key = keys[candidate.index]
+                        if try catchingObjCException({ key.isEnabled }) {
+                            enabledKey = (element: key, method: candidate.method)
+                            break
+                        }
                     }
                 } catch {
                     print("[GesturePerformer] keyboard close key lookup failed: \(error)")
-                    let open = isKeyboardVisible(app: app)
-                    return KeyboardActionResult(open: open, method: open ? nil : "escape")
                 }
-                for candidate in Self.closeKeyCandidates(labels) {
-                    // Escape may have finished hiding the keyboard during key lookup.
+
+                for attempt in Self.closeAttemptOrder(hasEnabledMatch: enabledKey != nil) {
                     if !isKeyboardVisible(app: app) {
-                        return KeyboardActionResult(open: false, method: "escape")
+                        return KeyboardActionResult(open: false)
                     }
                     guard ProcessInfo.processInfo.systemUptime < closeDeadline else {
-                        return KeyboardActionResult(open: true)
+                        break
                     }
+                    let method: String
                     do {
-                        try catchingObjCException { keys[candidate.index].tap() }
-                    } catch {
-                        print("[GesturePerformer] keyboard close key tap failed: \(error)")
-                        if !isKeyboardVisible(app: app) {
-                            return KeyboardActionResult(open: false, method: candidate.method)
+                        switch attempt {
+                        case .matchedButton:
+                            guard let enabledKey else { continue }
+                            method = enabledKey.method
+                            try catchingObjCException { enabledKey.element.tap() }
+                        case .newline:
+                            method = "returnKey"
+                            try catchingObjCException { app.typeText("\n") }
+                        case .escape:
+                            method = "escape"
+                            try typeKeyboardKey(.escape, app: app)
                         }
-                        continue
+                    } catch {
+                        print("[GesturePerformer] keyboard close \(attempt) failed: \(error)")
                     }
                     if waitForKeyboardClose(app: app, closeDeadline: closeDeadline) {
-                        return KeyboardActionResult(open: false, method: candidate.method)
+                        return KeyboardActionResult(open: false, method: method)
                     }
                 }
                 return KeyboardActionResult(open: isKeyboardVisible(app: app))

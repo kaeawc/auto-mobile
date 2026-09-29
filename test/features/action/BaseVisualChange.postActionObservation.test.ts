@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { BaseVisualChange } from "../../../src/features/action/BaseVisualChange";
+import {
+  BaseVisualChange,
+  FINAL_OBSERVATION_MAX_RETRY_ATTEMPTS,
+  FINAL_OBSERVATION_RETRY_BACKOFF_MS,
+} from "../../../src/features/action/BaseVisualChange";
 import { BootedDevice, ObserveResult } from "../../../src/models";
 import { PortManager } from "../../../src/utils/PortManager";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
@@ -220,5 +224,70 @@ describe("BaseVisualChange post-action observation", () => {
     await (instance as any).recordDeferredPredictionOutcome(result, finalObservation);
     await (instance as any).recordDeferredPredictionOutcome(result, initialObservation);
     expect(recordedObservations).toEqual([finalObservation]);
+  });
+
+  describe("changeExpected compares hierarchy content, not identity (issue #6435)", () => {
+    const staticTree = () => ({ node: { $: { text: "Inbox" } } });
+
+    test("fails with 'No visual change observed' when captures differ only in metadata", async () => {
+      const instance = createVisualChange("ios");
+      // Distinct objects per call, same tree, different capture timestamps — what
+      // two captures of a static screen look like. Index 0 is the pre-action cache read.
+      fakeObserveScreen.setObserveResult((index) =>
+        makeObserve({
+          viewHierarchy: {
+            hierarchy: staticTree(),
+            updatedAt: 1_000 + index,
+            receivedAt: 2_000 + index,
+            frameContext: `frame-${index}`,
+          },
+        }),
+      );
+
+      const result = await instance.observedInteraction(async () => ({}), {
+        changeExpected: true,
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe("No visual change observed");
+      // The unchanged-content retry now fires and runs to its cap.
+      expect(fakeObserveScreen.getExecuteCallCount()).toBe(
+        1 + FINAL_OBSERVATION_MAX_RETRY_ATTEMPTS,
+      );
+      expect(fakeTimer.getSleepHistory()).toEqual([...FINAL_OBSERVATION_RETRY_BACKOFF_MS]);
+    });
+
+    test("succeeds without retrying when one node's text changed", async () => {
+      const instance = createVisualChange("ios");
+      fakeObserveScreen.setObserveResult((index) =>
+        makeObserve({
+          viewHierarchy: { hierarchy: { node: { $: { text: index === 0 ? "Inbox" : "Sent" } } } },
+        }),
+      );
+
+      const result = await instance.observedInteraction(async () => ({}), {
+        changeExpected: true,
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.error).toBeUndefined();
+      expect(fakeObserveScreen.getExecuteCallCount()).toBe(1);
+      expect(fakeTimer.getSleepHistory()).toEqual([]);
+    });
+
+    test("never overwrites an inner-block failure with the visual-change verdict", async () => {
+      const instance = createVisualChange("ios");
+      fakeObserveScreen.setObserveResult(() =>
+        makeObserve({ viewHierarchy: { hierarchy: staticTree() } }),
+      );
+
+      const result = await instance.observedInteraction(
+        async () => ({ success: false, error: "key event rejected" }),
+        { changeExpected: true },
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe("key event rejected");
+    });
   });
 });

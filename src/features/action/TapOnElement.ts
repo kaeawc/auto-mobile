@@ -50,7 +50,7 @@ import { AccessibilityDetector } from "../../utils/interfaces/AccessibilityDetec
 import { accessibilityDetector as defaultAccessibilityDetector } from "../../utils/AccessibilityDetector";
 import type { ElementSelector } from "../../utils/interfaces/ElementSelector";
 import { MAX_SETTIMEOUT_DELAY_MS, type Timer } from "../../utils/SystemTimer";
-import { NodeCryptoService } from "../../utils/crypto";
+import { hierarchyFingerprint } from "../../utils/hierarchyFingerprint";
 import { ViewHierarchy } from "../observe/ViewHierarchy";
 import { serverConfig } from "../../utils/ServerConfig";
 import { refreshAndroidViewHierarchy } from "./refreshAndroidViewHierarchy";
@@ -620,15 +620,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
   }
 
   private hashViewHierarchy(viewHierarchy: ViewHierarchyResult | null): string | null {
-    if (!viewHierarchy) {
-      return null;
-    }
-    try {
-      return NodeCryptoService.generateCacheKey(JSON.stringify(viewHierarchy.hierarchy));
-    } catch (error) {
-      logger.debug(`[TapOnElement] Failed to hash view hierarchy: ${error}`);
-      return null;
-    }
+    return hierarchyFingerprint(viewHierarchy);
   }
 
   private compareScreenIdentity(

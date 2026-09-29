@@ -39,7 +39,7 @@ import { ViewHierarchy } from "../observe/ViewHierarchy";
 import { serverConfig } from "../../utils/ServerConfig";
 import { attachRawViewHierarchy } from "../../utils/viewHierarchySearch";
 import { refreshAndroidViewHierarchy } from "./refreshAndroidViewHierarchy";
-import { NodeCryptoService } from "../../utils/crypto";
+import { hierarchyFingerprint } from "../../utils/hierarchyFingerprint";
 import type { IosVoiceOverDetector } from "../../utils/interfaces/IosVoiceOverDetector";
 import { iosVoiceOverDetector as defaultIosVoiceOverDetector } from "../../utils/IosVoiceOverDetector";
 import { FeatureFlagService } from "../featureFlags/FeatureFlagService";
@@ -709,17 +709,7 @@ export class TapAnyElement extends BaseVisualChange {
   }
 
   private hashViewHierarchy(viewHierarchy: ViewHierarchyResult | null): string | null {
-    if (!viewHierarchy) {
-      return null;
-    }
-    try {
-      return NodeCryptoService.generateCacheKey(JSON.stringify(viewHierarchy.hierarchy));
-    } catch (error) {
-      // Hashing is only used to key an optional cache lookup; if JSON.stringify or the
-      // hash fails on a malformed hierarchy, skip the cache instead of failing the tap.
-      logger.debug(`src/features/action/TapAnyElement.ts fallback failed: ${error}`, error);
-      return null;
-    }
+    return hierarchyFingerprint(viewHierarchy);
   }
 
   private prepareViewHierarchyForResponse(

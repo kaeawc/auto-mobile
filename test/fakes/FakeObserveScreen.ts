@@ -77,7 +77,7 @@ export class FakeObserveScreen implements ObserveScreen {
 
   /**
    * Enable auto-varying hierarchy mode. When enabled, each call adds a unique
-   * counter to the viewHierarchy so that BaseVisualChange sees different hashes
+   * counter to the view hierarchy tree so that BaseVisualChange sees different hashes
    * and doesn't trigger retry loops. Call this in tests where changeExpected=true.
    */
   enableAutoVaryHierarchy(): void {
@@ -103,12 +103,13 @@ export class FakeObserveScreen implements ObserveScreen {
     }
 
     if (this.autoVaryHierarchy && result.viewHierarchy) {
-      // Add unique counter to make each observation have a different hash
+      // Add a unique counter inside the tree itself: the shared hierarchy
+      // fingerprint ignores capture metadata on the ViewHierarchyResult envelope.
       result = {
         ...result,
         viewHierarchy: {
           ...result.viewHierarchy,
-          _fakeCallId: this.callCounter,
+          hierarchy: { ...result.viewHierarchy.hierarchy, _fakeCallId: this.callCounter },
         },
       };
     }

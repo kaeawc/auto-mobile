@@ -23,7 +23,7 @@ import {
 } from "../../models";
 import { ViewHierarchyQueryOptions } from "../../models/ViewHierarchyQueryOptions";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
-import { NodeCryptoService } from "../../utils/crypto";
+import { hierarchyChanged, hierarchyFingerprint } from "../../utils/hierarchyFingerprint";
 import { throwIfAborted } from "../../utils/toolUtils";
 import { combineWithAmbientAbort } from "../../utils/AbortContext";
 import { NavigationGraphManager } from "../navigation/NavigationGraphManager";
@@ -418,7 +418,7 @@ export class BaseVisualChange {
     const minTimestamp = options.actionStartTime ?? 0;
     const retryBackoff = sequenceBackoff(FINAL_OBSERVATION_RETRY_BACKOFF_MS);
     const maxRetryAttempts = FINAL_OBSERVATION_MAX_RETRY_ATTEMPTS;
-    const previousHash = this.hashViewHierarchy(previousObserveResult?.viewHierarchy);
+    const previousHash = hierarchyFingerprint(previousObserveResult?.viewHierarchy);
 
     perf.serial("finalObserve");
     // Wait for fresh data from accessibility service (skipWaitForFresh=false)
@@ -450,7 +450,7 @@ export class BaseVisualChange {
       if (!options.changeExpected) {
         return false;
       }
-      const currentHash = this.hashViewHierarchy(observation.viewHierarchy);
+      const currentHash = hierarchyFingerprint(observation.viewHierarchy);
       return !!previousHash && !!currentHash && previousHash === currentHash;
     };
 
@@ -492,16 +492,15 @@ export class BaseVisualChange {
       await this.captureTerminalObservationScreenshot(latestObservation, perf, options.signal);
     }
 
-    if (
-      options.changeExpected &&
-      latestObservation.viewHierarchy &&
-      previousObserveResult &&
-      previousObserveResult?.viewHierarchy
-    ) {
+    // Compare content fingerprints, not object identity: every observe returns a
+    // fresh ViewHierarchyResult, so `!==` was always true (issue #6435).
+    const visualChange = options.changeExpected
+      ? hierarchyChanged(previousObserveResult?.viewHierarchy, latestObservation.viewHierarchy)
+      : null;
+    if (visualChange !== null) {
       // Don't override an explicit failure from the inner block — the action itself failed
       if (blockResult.success !== false) {
-        blockResult.success =
-          latestObservation.viewHierarchy !== previousObserveResult.viewHierarchy;
+        blockResult.success = visualChange;
         if (!blockResult.success) {
           blockResult.error = "No visual change observed";
         }
@@ -540,18 +539,6 @@ export class BaseVisualChange {
     }
 
     return blockResult;
-  }
-
-  private hashViewHierarchy(viewHierarchy?: ObserveResult["viewHierarchy"]): string | null {
-    if (!viewHierarchy) {
-      return null;
-    }
-    try {
-      return NodeCryptoService.generateCacheKey(JSON.stringify(viewHierarchy));
-    } catch (error) {
-      logger.debug(`[BaseVisualChange] Failed to hash view hierarchy: ${error}`);
-      return null;
-    }
   }
 
   private buildPredictionContext(

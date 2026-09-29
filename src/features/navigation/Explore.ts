@@ -64,6 +64,7 @@ import {
   detectAndHandleBlockers,
   filterPermissionNavigationCandidates,
   isPermissionDialog,
+  isConfirmedPermissionDialogForNavigation,
   handlePermissionDialog,
 } from "./ExploreBlockerDetection";
 import type { BlockerHandlerDeps, DialogTapActionFactory } from "./ExploreBlockerDetection";
@@ -93,6 +94,8 @@ export class Explore extends BaseVisualChange {
   private elementSelections: ElementSelectionStats[] = [];
   private consecutiveBackCount: number = 0;
   private consecutiveNoChangeCount: number = 0;
+  private permissionDialogIdentity: string | null = null;
+  private permissionDialogTapAttempts: number = 0;
   private loopDetection: Map<string, number> = new Map();
   private elementParser: ElementParser;
   private stopReason: string = "";
@@ -108,6 +111,7 @@ export class Explore extends BaseVisualChange {
   // Constants for safety limits
   private static readonly MAX_CONSECUTIVE_BACKS = 5;
   private static readonly MAX_CONSECUTIVE_NO_CHANGE = 40;
+  private static readonly MAX_PERMISSION_DIALOG_TAP_ATTEMPTS = 3;
   private static readonly MAX_LOOP_ITERATIONS = 3;
   private static readonly DEFAULT_MAX_INTERACTIONS = 200;
   private static readonly DEFAULT_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
@@ -174,6 +178,8 @@ export class Explore extends BaseVisualChange {
       this.lastResetAt = 0;
       this.consecutiveBackCount = 0;
       this.consecutiveNoChangeCount = 0;
+      this.permissionDialogIdentity = null;
+      this.permissionDialogTapAttempts = 0;
       this.stopReason = "";
       this.previousScreen = null;
       this.consecutiveOutOfAppCount = 0;
@@ -530,9 +536,32 @@ export class Explore extends BaseVisualChange {
       return "none";
     }
     const elements = extractAllElements(viewHierarchy, this.elementParser);
-    if (!isPermissionDialog(elements)) {
+    if (!isPermissionDialog(elements) || !isConfirmedPermissionDialogForNavigation(elements)) {
       return "none";
     }
+
+    const identity = elements
+      .filter((element) => isTruthy(element.clickable))
+      .map((element) => getElementKey(element, viewHierarchy))
+      .sort()
+      .join("|");
+    if (identity !== this.permissionDialogIdentity) {
+      this.permissionDialogIdentity = identity;
+      this.permissionDialogTapAttempts = 0;
+    }
+    if (this.permissionDialogTapAttempts >= Explore.MAX_PERMISSION_DIALOG_TAP_ATTEMPTS) {
+      this.consecutiveNoChangeCount++;
+      logger.warn(
+        `[Explore] Permission dialog tap cap reached for identity "${identity}" ` +
+          `(${this.permissionDialogTapAttempts}/${Explore.MAX_PERMISSION_DIALOG_TAP_ATTEMPTS})`,
+      );
+      if (this.shouldBreakForSafety(observation)) {
+        logger.warn("[Explore] Unresolvable permission dialog treated as blocker, stopping");
+        return "break";
+      }
+      return "continue";
+    }
+    this.permissionDialogTapAttempts++;
 
     logger.info("[Explore] Detected permission dialog, attempting to dismiss");
     const granted = await handlePermissionDialog(
@@ -714,6 +743,7 @@ export class Explore extends BaseVisualChange {
         safeCandidates,
         this.exploredElements,
         currentScreen,
+        viewHierarchy,
       );
 
       if (unexhaustedElements.length === 0) {
@@ -792,7 +822,7 @@ export class Explore extends BaseVisualChange {
     perf?: PerformanceTracker,
     signal?: AbortSignal,
   ): Promise<boolean> {
-    const elementKey = getElementKey(element);
+    const elementKey = getElementKey(element, observation.viewHierarchy);
     const currentScreen = this.navigationManager.getCurrentScreen() ?? "unknown";
 
     try {

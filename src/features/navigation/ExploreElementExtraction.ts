@@ -233,7 +233,16 @@ function occurrenceIndex(select: SelectOccurrence, element: Element): { index?: 
 /**
  * Generate unique key for element tracking
  */
-export function getElementKey(element: Element): string {
+export function getElementKey(element: Element, viewHierarchy?: ViewHierarchyResult): string {
+  if (viewHierarchy) {
+    const selector = tapSelectorFor(element, viewHierarchy);
+    if (selector) {
+      const key =
+        "elementId" in selector ? `sel-id:${selector.elementId}` : `sel-text:${selector.text}`;
+      return selector.index !== undefined ? `${key}#${selector.index}` : key;
+    }
+  }
+
   const parts: string[] = [];
 
   if (element["resource-id"]) {
@@ -259,9 +268,10 @@ export function filterUnexhaustedElements(
   elements: Element[],
   exploredElements: Map<string, TrackedElement>,
   currentScreen: string | null,
+  viewHierarchy?: ViewHierarchyResult,
 ): Element[] {
   return elements.filter((element) => {
-    const elementKey = getElementKey(element);
+    const elementKey = getElementKey(element, viewHierarchy);
     const tracked = exploredElements.get(elementKey);
 
     // Allow if never tried

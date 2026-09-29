@@ -248,7 +248,7 @@ export function isPermissionDialog(elements: Element[]): boolean {
   return elements.some((el) => matchesAnyKeywordInAnyField(PERMISSION_KEYWORD_TOKENS, el));
 }
 
-function isConfirmedPermissionDialogForNavigation(elements: Element[]): boolean {
+export function isConfirmedPermissionDialogForNavigation(elements: Element[]): boolean {
   return elements.some((element) => {
     const resourceId = element["resource-id"]?.toLowerCase() ?? "";
     return (

@@ -1,5 +1,6 @@
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
 import { CriticalSectionCoordinator } from "../../src/server/CriticalSectionCoordinator";
+import { ActionableError } from "../../src/models";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 describe("CriticalSectionCoordinator", () => {
@@ -126,6 +127,29 @@ describe("CriticalSectionCoordinator", () => {
     await expect(allPromises).rejects.toThrow(/Timeout waiting for critical section/);
   });
 
+  test("barrier timeout removes the waiter and its arrival before a later round", async () => {
+    const lockName = "lock-timeout-clean-state";
+    const firstRound = coordinator.awaitBarrier(lockName, "device-1", 2, 100);
+    fakeTimer.advanceTime(100);
+    await expect(firstRound).rejects.toThrow(/Timeout waiting for critical section/);
+
+    const state = coordinator as unknown as {
+      barrierCounts: Map<string, Set<string>>;
+      barrierResolvers: Map<string, unknown[]>;
+    };
+    expect(state.barrierCounts.get(lockName)?.has("device-1")).toBe(false);
+    expect(state.barrierResolvers.get(lockName)).toHaveLength(0);
+
+    const device2 = coordinator.awaitBarrier(lockName, "device-2", 2, 100);
+    let device2Entered = false;
+    void device2.then((release) => {
+      device2Entered = true;
+    });
+    await coordinator.awaitBarrier(lockName, "device-3", 2, 100);
+    await device2;
+    expect(device2Entered).toBe(true);
+  });
+
   test("timeout error reports arrived/expected count and the default 30000ms duration", async () => {
     const lockName = "lock-timeout-body";
     coordinator.registerExpectedDevices(lockName, 2);
@@ -236,12 +260,20 @@ describe("CriticalSectionCoordinator", () => {
     // Start one device
     const promise = coordinator.enterCriticalSection(lockName, "device-1", 200);
 
-    // Force cleanup (simulating error scenario)
+    // Force cleanup (simulating error scenario) must reject parked devices
+    // synchronously without waiting for their barrier timeout.
+    const timeBeforeCleanup = fakeTimer.now();
+    let rejection: unknown;
+    const handledPromise = promise.catch((error: unknown) => {
+      rejection = error;
+    });
     coordinator.forceCleanup(lockName);
-
-    // The waiting device should timeout since barrier was cleared
+    expect(fakeTimer.now()).toBe(timeBeforeCleanup);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(rejection).toBeInstanceOf(ActionableError);
+    expect(rejection).toMatchObject({ message: expect.stringContaining(lockName) });
     fakeTimer.advanceTime(200);
-    await expect(promise).rejects.toThrow(/Timeout waiting for critical section/);
+    await handledPromise;
 
     // After force cleanup, lock state is gone
     await expect(coordinator.enterCriticalSection(lockName, "device-2")).rejects.toThrow(
@@ -338,6 +370,59 @@ describe("CriticalSectionCoordinator", () => {
     ]);
 
     expect(executionLog.length).toBe(2);
+  });
+
+  test("stale cleanup leaves a newer live barrier round intact", async () => {
+    const lockName = "lock-stale-cleanup";
+    coordinator.registerExpectedDevices(lockName, 2);
+
+    const firstRound = Promise.all([
+      (async () => {
+        const release = await coordinator.enterCriticalSection(lockName, "device-1");
+        release();
+      })(),
+      (async () => {
+        const release = await coordinator.enterCriticalSection(lockName, "device-2");
+        release();
+      })(),
+    ]);
+    await firstRound;
+
+    // Reuse the registered lock before the previous round's cleanup delay.
+    const secondDevice = coordinator.enterCriticalSection(lockName, "device-3", 10000);
+    let secondDeviceSettled = false;
+    const secondSettled = secondDevice.then(
+      (release) => {
+        secondDeviceSettled = true;
+        release();
+      },
+      () => {
+        secondDeviceSettled = true;
+      },
+    );
+
+    fakeTimer.advanceTime(5001);
+    expect(secondDeviceSettled).toBe(false);
+
+    const thirdDevice = coordinator.enterCriticalSection(lockName, "device-4", 10000);
+    const release4 = await thirdDevice;
+    release4();
+    await secondSettled;
+  });
+
+  test("non-stale cleanup still clears state after five seconds", async () => {
+    const lockName = "lock-cleanup-current-generation";
+    await coordinator.awaitBarrier(lockName, "device-1", 1);
+
+    fakeTimer.advanceTime(5000);
+    let device2Settled = false;
+    const device2 = coordinator.awaitBarrier(lockName, "device-2", 2).then(() => {
+      device2Settled = true;
+    });
+    expect(device2Settled).toBe(false);
+    await coordinator.awaitBarrier(lockName, "device-3", 2);
+    await device2;
+    expect(device2Settled).toBe(true);
   });
 
   // Regression: the coordinator is a process-wide singleton, and the plan

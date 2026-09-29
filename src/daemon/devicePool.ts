@@ -2469,12 +2469,21 @@ export class DevicePool {
               ),
               device,
             );
-            await this.addDevice(ready, device, true, this.identityEvidenceForBootedDevice(ready));
             return { ready, childProcess };
           },
         );
         if (startResult) {
-          await this.trackStartedDeviceProcess(startResult.ready, startResult.childProcess);
+          // The lifecycle lease is released before taking assignmentMutex: never
+          // acquire the pool assignment lock while holding a start lease.
+          await this.assignmentMutex.runExclusive(async () => {
+            await this.addDevice(
+              startResult.ready,
+              device,
+              false,
+              this.identityEvidenceForBootedDevice(startResult.ready),
+            );
+            await this.trackStartedDeviceProcess(startResult.ready, startResult.childProcess);
+          });
           started++;
         }
       }
@@ -2643,14 +2652,23 @@ export class DevicePool {
             ),
             device,
           );
-          await this.addDevice(ready, device, true, this.identityEvidenceForBootedDevice(ready));
           return { ready, childProcess };
         },
       );
       if (!startResult) {
         return null;
       }
-      await this.trackStartedDeviceProcess(startResult.ready, startResult.childProcess);
+      // Start readiness and the lifecycle lease settle before assignmentMutex;
+      // the pool publish and process association share one assignment turn.
+      await this.assignmentMutex.runExclusive(async () => {
+        await this.addDevice(
+          startResult.ready,
+          device,
+          false,
+          this.identityEvidenceForBootedDevice(startResult.ready),
+        );
+        await this.trackStartedDeviceProcess(startResult.ready, startResult.childProcess);
+      });
       return this.devices.get(startResult.ready.deviceId) ?? null;
     } catch (error) {
       logger.warn(
@@ -2904,7 +2922,16 @@ export class DevicePool {
         return true;
       }
       const deferEviction = this.shouldRebootDisconnectedAndroidDevice(device);
-      const eviction = this.evictMissingPooledDevice(device, "not present in adb devices", true);
+      const eviction = this.evictMissingPooledDevice(
+        device,
+        "not present in adb devices",
+        true,
+        undefined,
+        false,
+        undefined,
+        undefined,
+        true,
+      );
       if (deferEviction) {
         void eviction.catch((error) => {
           logger.warn(`[DevicePool] Deferred eviction failed for ${device.id}: ${error}`, error);
@@ -3003,6 +3030,7 @@ export class DevicePool {
     incidentCaptureComplete: boolean = false,
     recoveryPreparation?: SessionRecoveryPreparation,
     identityObservation?: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">,
+    lockPoolRemoval?: boolean,
   ): Promise<void> {
     if (this.shouldAbortEvictionUpfront(device, reason, identityObservation)) {
       return;
@@ -3038,7 +3066,7 @@ export class DevicePool {
       await this.finishEmulatorLossIncident(correlatedIncidentId, "not-attempted");
       return;
     }
-    device.status = "idle";
+    this.prepareEvictedDeviceForRemoval(device, lockPoolRemoval);
     if (attemptDeviceLossRecovery && this.shouldRebootDisconnectedAndroidDevice(device)) {
       if (this.shouldAbortEvictionForStaleIdentityObservation(device, identityObservation)) {
         return;
@@ -3050,8 +3078,29 @@ export class DevicePool {
     if (this.shouldAbortEvictionForStaleIdentityObservation(device, identityObservation)) {
       return;
     }
-    await this.removeDevice(device.id, true, device);
+    await this.removeEvictedDevice(device, lockPoolRemoval);
     this.settleEmulatorLossIncident(correlatedIncidentId);
+  }
+
+  private async removeEvictedDevice(
+    device: PooledDevice,
+    lockPoolRemoval?: boolean,
+  ): Promise<void> {
+    if (!lockPoolRemoval) {
+      await this.removeDevice(device.id, true, device);
+      return;
+    }
+    // Incident and recovery I/O completed before assignmentMutex. Only the
+    // compare-and-delete runs under the lock, after any lifecycle lease settles.
+    await this.assignmentMutex.runExclusive(() => this.removeDevice(device.id, false, device));
+  }
+
+  private prepareEvictedDeviceForRemoval(device: PooledDevice, lockPoolRemoval?: boolean): void {
+    // An idle preallocation eviction already claimed this entry as error under
+    // assignmentMutex; keep it unavailable until its guarded removal completes.
+    if (!lockPoolRemoval) {
+      device.status = "idle";
+    }
   }
 
   private async releaseSessionForEvictedDevice(
@@ -4788,7 +4837,12 @@ export class DevicePool {
         this.adbServerResetTrackedProcesses.delete(device);
         this.startedDeviceProcesses.set(replacement.id, detachedProcess);
       }
-      return this.sessionManager.getSession(preservedSessionId)?.assignedDevice === replacement.id;
+      const rebound =
+        this.sessionManager.getSession(preservedSessionId)?.assignedDevice === replacement.id;
+      if (rebound) {
+        this.sessionManager.setDeviceReadiness(preservedSessionId, "booted");
+      }
+      return rebound;
     } catch (error) {
       logger.warn(
         `[DevicePool] Could not rebind session ${preservedSessionId} to same-AVD replacement ${avdName}: ${error}`,
@@ -4871,6 +4925,7 @@ export class DevicePool {
       undefined,
       previousDeviceId,
     );
+    this.sessionManager.setDeviceReadiness(preservedSessionId, "booted");
     const replacement = this.devices.get(ready.deviceId);
     if (replacement?.sessionId === preservedSessionId) {
       replacement.autolockSessionId = preservedAutolockSessionId;
@@ -5574,6 +5629,11 @@ export class DevicePool {
 
     while (device) {
       const skippedDeviceId = device.id;
+      if (this.devices.get(device.id) !== device) {
+        candidates = candidates.filter((candidate) => candidate.id !== skippedDeviceId);
+        device = this.selectIdleDevice(candidates);
+        continue;
+      }
       // Quarantined: the serial is there, but which AVD answers on it is not
       // known, so handing it to a session would bind that session to a runtime the
       // pool cannot name. Checked here as well as inside the shared gate below so
@@ -5606,7 +5666,7 @@ export class DevicePool {
           `[DevicePool] Removing idle iOS ${this.iosDeviceNoun(device.id)} ${device.id}: ` +
             "iOS discovery no longer reports it as booted",
         );
-        await this.removeDevice(device.id);
+        await this.removeDevice(device.id, true, device);
       } else {
         livenessUnknown = true;
         logger.warn(
@@ -5707,7 +5767,7 @@ export class DevicePool {
     let removedCount = 0;
     for (const candidate of iosCandidates) {
       const device = this.devices.get(candidate.id);
-      if (!device) {
+      if (device !== candidate || device.status !== "idle" || device.sessionId) {
         continue;
       }
       if (this.getIdleDeviceLivenessStatus(device, iosLiveness) === "stale") {
@@ -5715,8 +5775,22 @@ export class DevicePool {
           `[DevicePool] Removing idle iOS ${this.iosDeviceNoun(device.id)} ${device.id}: ` +
             "iOS discovery no longer reports it as booted",
         );
-        await this.removeDevice(device.id);
-        removedCount++;
+        // Discovery completed outside the lock. Recheck the captured entry
+        // under assignmentMutex before applying its snapshot to the pool.
+        const removed = await this.assignmentMutex.runExclusive(async () => {
+          if (
+            this.devices.get(device.id) !== device ||
+            device.status !== "idle" ||
+            device.sessionId
+          ) {
+            return false;
+          }
+          await this.removeDevice(device.id, false, device);
+          return !this.devices.has(device.id);
+        });
+        if (removed) {
+          removedCount++;
+        }
       }
     }
     return removedCount;
@@ -5798,6 +5872,9 @@ export class DevicePool {
     }
 
     const iosLiveness = device.platform === "ios" ? await this.getIosLivenessSnapshot() : undefined;
+    if (this.devices.get(device.id) !== device) {
+      throw new ActionableError(unavailableMessage);
+    }
     const status = this.getIdleDeviceLivenessStatus(device, iosLiveness);
     if (status === "assignable") {
       return;
@@ -5808,7 +5885,7 @@ export class DevicePool {
         `[DevicePool] Removing idle iOS ${this.iosDeviceNoun(device.id)} ${device.id}: ` +
           "iOS discovery no longer reports it as booted",
       );
-      await this.removeDevice(device.id);
+      await this.removeDevice(device.id, true, device);
       throw new ActionableError(unavailableMessage);
     }
 
@@ -6103,7 +6180,7 @@ export class DevicePool {
         return false;
       }
       this.releaseCapturedDeviceForShutdown(expectedDevice);
-      await this.removeDevice(expectedDevice.id, false);
+      await this.removeDevice(expectedDevice.id, false, expectedDevice);
       const retired = !this.devices.has(expectedDevice.id);
       if (retired) {
         this.intentionalShutdowns.delete(expectedDevice.id);
@@ -6154,7 +6231,7 @@ export class DevicePool {
         return undefined;
       }
       this.releaseCapturedDeviceForShutdown(expectedDevice);
-      await this.removeDevice(expectedDevice.id, false);
+      await this.removeDevice(expectedDevice.id, false, expectedDevice);
       if (this.devices.has(expectedDevice.id)) {
         return undefined;
       }

@@ -307,6 +307,14 @@ describe("device state tools", () => {
     expect(sessionManager.getSession("session-1")?.assignedDevice).toBe("sim-new");
     expect(devicePool.getDevice("sim-new")?.sessionId).toBe("session-1");
     expect(devicePool.getDevice("sim-new")?.status).toBe("busy");
+    expect(sessionManager.getDeviceReadiness("session-1")).toBe("booted");
+    sessionManager.setDeviceReadiness("session-1", "automationReady");
+    await setActiveDevice!.handler({
+      deviceId: "sim-new",
+      platform: "ios",
+      sessionUuid: "session-1",
+    });
+    expect(sessionManager.getDeviceReadiness("session-1")).toBe("automationReady");
     expect(IOSCtrlProxyClient.getInstance(device)).not.toBe(retired);
 
     sessionManager.stopCleanupTimer();

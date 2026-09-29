@@ -159,6 +159,44 @@ final class PerfProviderTests: XCTestCase {
         XCTAssertEqual(roots[0].durationMs, 2)
     }
 
+    /// A handler snapshot leaves its enclosing request open and does not consume roots completed
+    /// by another scope before the server performs its top-level flush.
+    func testNamedSnapshotPreservesOuterRequestAndSharedCompletedRoots() throws {
+        let clock = FakeTimeProvider()
+        let provider = PerfProvider(timeProvider: clock)
+
+        try provider.withScope {
+            provider.serial("handleRequest:hierarchy")
+            clock.advance(by: 2)
+            provider.serial("handleRequestHierarchy")
+            clock.advance(by: 3)
+
+            let snapshot = try XCTUnwrap(provider.snapshot("handleRequestHierarchy"))
+            XCTAssertEqual(snapshot.name, "handleRequestHierarchy")
+            XCTAssertEqual(snapshot.durationMs, 3)
+            XCTAssertTrue(provider.hasData)
+
+            // Simulate a separate request or poll completing between snapshot and top-level flush.
+            provider.withScope {
+                provider.serial("concurrent")
+                clock.advance(by: 4)
+                provider.end()
+            }
+
+            // The handler's own defer closes only its nested span; the enclosing request remains.
+            provider.end()
+            XCTAssertTrue(provider.hasData)
+            clock.advance(by: 2)
+            provider.end()
+
+            let roots = try XCTUnwrap(provider.flush())
+            XCTAssertEqual(roots.map(\.name), ["concurrent", "handleRequest:hierarchy"])
+            XCTAssertEqual(roots[0].durationMs, 4)
+            XCTAssertEqual(roots[1].durationMs, 11)
+            XCTAssertEqual(try XCTUnwrap(roots[1].children).map(\.name), ["handleRequestHierarchy"])
+        }
+    }
+
     /// `clear()` wipes both the active scope and the shared pool.
     func testClearWipesScopeAndPool() {
         let clock = FakeTimeProvider()
@@ -202,7 +240,7 @@ final class PerfProviderTests: XCTestCase {
     /// Phase-6 coordinator can share one instance across the command path and the `@MainActor` UI
     /// domain without `@unchecked`.
     func testPerfProviderIsSendable() {
-        func requireSendable(_ value: some Sendable) {}
+        func requireSendable(_: some Sendable) {}
         requireSendable(PerfProvider(timeProvider: FakeTimeProvider()))
     }
 }

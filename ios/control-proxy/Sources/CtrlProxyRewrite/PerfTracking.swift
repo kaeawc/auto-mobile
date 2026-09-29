@@ -10,6 +10,7 @@ protocol PerfTracking: Sendable {
     func serial(_ name: String)
     func end()
     func flush() -> [PerfTiming]?
+    func snapshot(_ name: String) -> PerfTiming?
     func clear()
 
     /// Bind a fresh task-scoped call-tree for `body`, so the `serial`/`end`/`track` calls
@@ -19,7 +20,7 @@ protocol PerfTracking: Sendable {
     /// no-op. Async so the binding survives those awaits; declared `throws` (a protocol
     /// requirement cannot be `rethrows`, so the concrete `PerfProvider.withScope`'s
     /// `rethrows` witnesses this `throws` requirement).
-    func withScope<T>(_ body: nonisolated(nonsending) () async throws -> T) async throws -> T
+    func withScope<T>(_ body: nonisolated(nonsending)() async throws -> T) async throws -> T
 
     /// Synchronous variant of `withScope`, for entry points that bind a scope around a
     /// synchronous instrumented call with no `await` to cross — the background

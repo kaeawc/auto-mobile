@@ -8,7 +8,13 @@ import { ViewHierarchy } from "../observe/ViewHierarchy";
 import { DefaultElementFinder } from "../utility/ElementFinder";
 import { DefaultElementParser } from "../utility/ElementParser";
 import { toSearchable } from "../utility/SearchableNode";
-import { AndroidImeCatalog, type ImeCatalogState } from "./AndroidImeCatalog";
+import {
+  AndroidImeCatalog,
+  AUTO_MOBILE_IME_ID,
+  type ImeCatalogState,
+  type ImeSubtypeSnapshot,
+  type KeyboardIdentity,
+} from "./AndroidImeCatalog";
 import { Keyboard } from "./Keyboard";
 import { quarantineAndroidIme, withAndroidImeLock } from "./androidImeLock";
 
@@ -43,7 +49,10 @@ export async function tapFrameBoundImeKey(
 }
 
 export interface InstalledImeKeySessionDependencies {
-  catalog: Pick<AndroidImeCatalog, "list" | "selectWithinLock">;
+  catalog: Pick<
+    AndroidImeCatalog,
+    "list" | "selectWithinLock" | "readSubtype" | "restoreSubtypeWithinLock" | "identity"
+  >;
   keyboard: {
     execute(action: "open", signal?: AbortSignal): Promise<{ success: boolean; error?: string }>;
   };
@@ -71,6 +80,9 @@ export class InstalledImeKeySession {
     x: number;
     y: number;
     editorVerification: EditorVerification;
+    backend: "installedIme";
+    capability: "visibleKeyTap";
+    keyboard: KeyboardIdentity;
   }> {
     if (!key.trim()) {
       throw new Error("IME key label must be non-empty.");
@@ -80,11 +92,9 @@ export class InstalledImeKeySession {
 
   private async tapKeyLocked(imeId: string, key: string, signal?: AbortSignal) {
     const { catalog } = this.dependencies;
-    const { before, editorBefore } = await this.validateStartingState(imeId, signal);
+    const { before, subtype, editorBefore } = await this.validateStartingState(imeId, signal);
     const original = before.activeImeId!;
-    let result:
-      | { imeId: string; key: string; x: number; y: number; editorVerification: EditorVerification }
-      | undefined;
+    let result: Awaited<ReturnType<typeof this.performTap>> | undefined;
     let failure: unknown;
     try {
       result = await this.performTap(imeId, key, editorBefore, signal);
@@ -95,7 +105,27 @@ export class InstalledImeKeySession {
     // Cleanup deliberately ignores cancellation: the same device lock remains held until
     // the original component and enabled set have been verified.
     try {
-      await catalog.selectWithinLock(original);
+      let componentError: unknown;
+      try {
+        await catalog.selectWithinLock(original);
+      } catch (error) {
+        componentError = error;
+      }
+      try {
+        // The subtype write must run after the component, even if selection rejects.
+        await catalog.restoreSubtypeWithinLock(original, subtype);
+      } catch (error) {
+        if (componentError !== undefined) {
+          throw new AggregateError(
+            [componentError, error],
+            "IME component and subtype restoration failed.",
+          );
+        }
+        throw error;
+      }
+      if (componentError !== undefined) {
+        throw componentError;
+      }
       const after = await catalog.list();
       if (after.activeImeId !== original || !sameEnabledSet(before, after)) {
         throw new Error("IME state did not return to its original active and enabled state.");
@@ -104,7 +134,7 @@ export class InstalledImeKeySession {
       quarantineAndroidIme(this.deviceId);
       throw new AggregateError(
         failure === undefined ? [restoreError] : [failure, restoreError],
-        "Native IME session could not verify restoration; restart AutoMobile before changing IMEs.",
+        `Could not restore the original keyboard ${original}; run "keyboard setIme ${original}" or restart the daemon.`,
       );
     }
     if (failure !== undefined) {
@@ -116,7 +146,11 @@ export class InstalledImeKeySession {
   private async validateStartingState(
     imeId: string,
     signal?: AbortSignal,
-  ): Promise<{ before: ImeCatalogState; editorBefore: FocusedEditorEvidence | null }> {
+  ): Promise<{
+    before: ImeCatalogState;
+    subtype: ImeSubtypeSnapshot;
+    editorBefore: FocusedEditorEvidence | null;
+  }> {
     const { catalog, hierarchy } = this.dependencies;
     const before = await catalog.list(signal);
     const original = before.activeImeId;
@@ -126,12 +160,18 @@ export class InstalledImeKeySession {
     if (!before.installed.some((ime) => ime.id === imeId && ime.enabled)) {
       throw new Error(`IME ${imeId} is not installed and enabled on this device.`);
     }
+    if (imeId === AUTO_MOBILE_IME_ID) {
+      throw new Error(
+        "AutoMobile IME does not support visibleKeyTap; use sendKeys mode: ime for semanticText.",
+      );
+    }
+    const subtype = await catalog.readSubtype(original, signal);
     const initialHierarchy = await hierarchy.read(signal);
     const editorBefore = initialHierarchy ? focusedEditorEvidence(initialHierarchy) : null;
     if (!initialHierarchy || !new DefaultElementFinder().findFocusedTextInput(initialHierarchy)) {
       throw new Error("Focus a text input before tapping a native IME key.");
     }
-    return { before, editorBefore };
+    return { before, subtype, editorBefore };
   }
 
   private async performTap(
@@ -163,7 +203,18 @@ export class InstalledImeKeySession {
     // The tap has already reached the runner. Finish verification and restoration even if
     // cancellation arrives now, so callers do not mistake an applied key for a canceled one.
     const editorVerification = await this.verifyEditorAfterTap(editorBefore);
-    return { imeId, key, x: point.x, y: point.y, editorVerification };
+    const subtype = await catalog.readSubtype(imeId);
+    const identity = await catalog.identity(imeId, subtype);
+    return {
+      imeId,
+      key,
+      x: point.x,
+      y: point.y,
+      editorVerification,
+      backend: "installedIme" as const,
+      capability: "visibleKeyTap" as const,
+      keyboard: identity,
+    };
   }
 
   private async verifyEditorAfterTap(

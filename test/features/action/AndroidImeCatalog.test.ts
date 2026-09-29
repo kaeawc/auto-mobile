@@ -1,5 +1,12 @@
 import { expect, test } from "bun:test";
-import { AndroidImeCatalog } from "../../../src/features/action/AndroidImeCatalog";
+import {
+  AndroidImeCatalog,
+  AUTO_MOBILE_IME_ID,
+  imeCapabilities,
+  parseAdvertisedImeSubtypes,
+  parsePackageVersionName,
+  parseSelectedImeSubtype,
+} from "../../../src/features/action/AndroidImeCatalog";
 import { withAndroidImeLock } from "../../../src/features/action/androidImeLock";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import type { AdbExecuteOptions } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
@@ -24,8 +31,8 @@ test("lists actual installed IMEs separately from enabled and active state", asy
   expect(await catalog.list()).toEqual({
     activeImeId: gboard,
     installed: [
-      { id: gboard, enabled: true, active: true },
-      { id: samsung, enabled: false, active: false },
+      { id: gboard, enabled: true, active: true, capabilities: imeCapabilities(gboard) },
+      { id: samsung, enabled: false, active: false, capabilities: imeCapabilities(samsung) },
     ],
   });
 });
@@ -173,4 +180,145 @@ test("cancels set before dispatch without changing the active IME", async () => 
   await expect(selection).rejects.toThrow();
   expect(dispatched).toBe(false);
   expect(adb.getExecutedArgv()).not.toContainEqual(["shell", "ime", "set", samsung]);
+});
+
+test("reports static capabilities for installed and AutoMobile IMEs", () => {
+  expect(imeCapabilities(gboard)).toEqual({
+    visibleKeyTap: true,
+    gesture: false,
+    suggestion: false,
+    clipboard: false,
+    semanticText: false,
+  });
+  expect(imeCapabilities(AUTO_MOBILE_IME_ID)).toEqual({
+    visibleKeyTap: false,
+    gesture: false,
+    suggestion: false,
+    clipboard: false,
+    semanticText: true,
+  });
+});
+
+test("parses selected subtype sentinels and rejects diagnostics", () => {
+  expect(parseSelectedImeSubtype("null\n")).toBeNull();
+  expect(parseSelectedImeSubtype("-1\n")).toBeNull();
+  expect(parseSelectedImeSubtype("42\n")).toBe(42);
+  expect(parseSelectedImeSubtype("-42\n")).toBe(-42);
+  expect(() => parseSelectedImeSubtype("Permission denied")).toThrow(
+    "Invalid selected IME subtype",
+  );
+  expect(() => parseSelectedImeSubtype("9007199254740993")).toThrow("Invalid selected IME subtype");
+});
+
+test("advertised subtype parsing requires an exact component and accepts signed IDs", () => {
+  const dump = `mId=${gboard}Extra\n  mSubtypeId=42 mSubtypeLocale=wrong\nmId=${gboard}\n  mSubtypeId=-42 mSubtypeLocale=en_US`;
+  expect(parseAdvertisedImeSubtypes(dump, gboard)?.get(-42)).toBe("en_US");
+  expect(parseAdvertisedImeSubtypes(dump, gboard)?.has(42)).toBe(false);
+});
+
+test("finds only the target package version in realistic multi-package dumpsys output", () => {
+  const dump = `Packages:
+  Package [com.example.other] (8765):
+    userId=10001
+    pkg=Package{123 com.example.other}
+    versionCode=11 minSdk=23 targetSdk=35
+    versionName=9.9.9
+  Package [com.google.android.inputmethod.latin] (4321):
+    userId=10002
+    pkg=Package{456 com.google.android.inputmethod.latin}
+    versionCode=150000 minSdk=23 targetSdk=35
+    versionName=15.2.08.677488654-release-arm64-v8a
+    signatures=PackageSignatures{abc}
+Shared users:
+  SharedUser [android.uid.system] (123):
+    versionName=unrelated
+Dexopt state:
+  [com.google.android.inputmethod.latin]
+    versionName=also-unrelated`;
+  expect(parsePackageVersionName(dump, "com.google.android.inputmethod.latin")).toBe(
+    "15.2.08.677488654-release-arm64-v8a",
+  );
+  expect(parsePackageVersionName(dump, "com.example.missing")).toBeUndefined();
+});
+
+test("captures identity and subtype without inventing absent optional fields", async () => {
+  const { adb, catalog } = fixture();
+  adb.setCommandResponse("shell settings get secure selected_input_method_subtype", {
+    stdout: "42\n",
+    stderr: "",
+  });
+  adb.setCommandResponse("shell dumpsys input_method", {
+    stdout: `mId=${gboard}\n  mSubtypeId=42 mSubtypeLocale=en_US\nmId=${samsung}\n  mSubtypeId=42 mSubtypeLocale=ko_KR`,
+    stderr: "",
+  });
+  expect(
+    parseAdvertisedImeSubtypes(
+      `mId=${gboard}\n  mSubtypeId=42 mSubtypeLocale=en_US\nmId=${samsung}\n  mSubtypeId=42 mSubtypeLocale=ko_KR`,
+      gboard,
+    )?.get(42),
+  ).toBe("en_US");
+  adb.setCommandResponse("shell dumpsys package", {
+    stdout: `Packages:\n  Package [com.google.android.inputmethod.latin] (abc):\n    versionName=15.2.0\nShared users:\n`,
+    stderr: "",
+  });
+  const subtype = await catalog.readSubtype(gboard);
+  expect(subtype).toEqual({ id: 42, locale: "en_US" });
+  expect(await catalog.identity(gboard, subtype)).toEqual({
+    component: gboard,
+    package: "com.google.android.inputmethod.latin",
+    versionName: "15.2.0",
+    subtype: "en_US",
+  });
+  adb.setCommandResponse("shell dumpsys package", { stdout: "Packages:\n", stderr: "" });
+  expect(await catalog.identity(gboard, { id: null })).toEqual({
+    component: gboard,
+    package: "com.google.android.inputmethod.latin",
+  });
+});
+
+test("restores a selected subtype and deletes an unset one after verifying readback", async () => {
+  const { adb, catalog } = fixture();
+  adb.setCommandResponse("shell dumpsys input_method", {
+    stdout: `mId=${gboard}\n  mSubtypeId=42 mSubtypeLocale=en_US`,
+    stderr: "",
+  });
+  adb.setCommandResponseSequence("shell settings get secure selected_input_method_subtype", [
+    { stdout: "42", stderr: "" },
+    { stdout: "null", stderr: "" },
+  ]);
+  await catalog.restoreSubtypeWithinLock(gboard, { id: 42 });
+  await catalog.restoreSubtypeWithinLock(gboard, { id: null });
+  expect(adb.getExecutedArgv()).toContainEqual([
+    "shell",
+    "settings",
+    "put",
+    "secure",
+    "selected_input_method_subtype",
+    "42",
+  ]);
+  expect(adb.getExecutedArgv()).toContainEqual([
+    "shell",
+    "settings",
+    "delete",
+    "secure",
+    "selected_input_method_subtype",
+  ]);
+});
+
+test("rejects a subtype that is no longer advertised before writing it", async () => {
+  const { adb, catalog } = fixture();
+  adb.setCommandResponse("shell dumpsys input_method", {
+    stdout: `mId=${gboard}\n  mSubtypeId=99 mSubtypeLocale=en_US`,
+    stderr: "",
+  });
+  await expect(catalog.restoreSubtypeWithinLock(gboard, { id: 42 })).rejects.toThrow(
+    "no longer advertised",
+  );
+  expect(
+    adb
+      .getExecutedCommands()
+      .some((command) =>
+        command.startsWith("shell settings put secure selected_input_method_subtype"),
+      ),
+  ).toBe(false);
 });

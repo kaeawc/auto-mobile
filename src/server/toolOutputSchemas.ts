@@ -1,6 +1,59 @@
 import { z } from "zod/v4";
 import { withJsonSchemaOverride, withPostFlattenJsonSchemaOverride } from "./toolSchemaHelpers";
 
+const keyboardIdentitySchema = z.object({
+  component: z.string(),
+  package: z.string(),
+  versionName: z.string().optional(),
+  subtype: z.string().optional(),
+});
+
+const imeCapabilitiesSchema = z.object({
+  visibleKeyTap: z.boolean(),
+  gesture: z.boolean(),
+  suggestion: z.boolean(),
+  clipboard: z.boolean(),
+  semanticText: z.boolean(),
+});
+
+/** Keyboard has several actions; these fields describe its installed-IME results. */
+export const keyboardResultSchema = z
+  .object({
+    installed: z
+      .array(
+        z
+          .object({
+            id: z.string(),
+            enabled: z.boolean(),
+            active: z.boolean(),
+            capabilities: imeCapabilitiesSchema,
+          })
+          .passthrough(),
+      )
+      .optional(),
+    backend: z.literal("installedIme").optional(),
+    capability: z.literal("visibleKeyTap").optional(),
+    keyboard: keyboardIdentitySchema.optional(),
+  })
+  .passthrough();
+
+/** IME fields live on each command result, never on the sendKeys envelope. */
+export const sendKeysResultSchema = z
+  .object({
+    commands: z
+      .array(
+        z
+          .object({
+            backend: z.literal("autoMobileIme").optional(),
+            capability: z.literal("semanticText").optional(),
+            keyboard: keyboardIdentitySchema.optional(),
+          })
+          .passthrough(),
+      )
+      .optional(),
+  })
+  .passthrough();
+
 // Android accessibility returns boolean attributes as strings ("true"/"false")
 // This schema accepts both for compatibility
 const booleanOrString = z.union([z.boolean(), z.literal("true"), z.literal("false")]).optional();

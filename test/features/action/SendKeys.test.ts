@@ -148,8 +148,50 @@ function createTextClient(
 }
 
 function createAdbFactory(adb: FakeAdbExecutor): AdbClientFactory {
-  return { create: () => adb };
+  // The catalog verifies component state with argv reads after `ime set`.
+  // Existing command stubs model the commit path; this adapter models the
+  // installed catalog and the device's post-selection readback.
+  let selectedIme: string | undefined;
+  const execute = adb.execute.bind(adb);
+  const catalogAdb = new Proxy(adb, {
+    get(target, property, receiver) {
+      if (property === "execute") {
+        return async (args: string[], options?: Parameters<FakeAdbExecutor["execute"]>[1]) => {
+          const result = await execute(args, options);
+          const command = args.join(" ");
+          if (command === "shell ime list -a -s" && !result.stdout.trim()) {
+            return { ...result, stdout: `${priorImeIdForFake}\n${commitImeIdForFake}\n` };
+          }
+          if (command === "shell ime list -s" && !result.stdout.trim()) {
+            return { ...result, stdout: `${priorImeIdForFake}\n${commitImeIdForFake}\n` };
+          }
+          if (command.startsWith("shell ime set ") && !result.stderr.trim()) {
+            selectedIme = args[3];
+          }
+          if (command === "shell settings get secure default_input_method" && selectedIme) {
+            return { ...result, stdout: selectedIme };
+          }
+          return result;
+        };
+      }
+      if (property === "executeCommand") {
+        return async (...args: Parameters<FakeAdbExecutor["executeCommand"]>) => {
+          const result = await target.executeCommand(...args);
+          if (args[0].startsWith("shell ime set ") && !result.stderr.trim()) {
+            selectedIme = args[0].slice("shell ime set ".length);
+          }
+          return result;
+        };
+      }
+      const value = Reflect.get(target, property, receiver);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+  return { create: () => catalogAdb };
 }
+
+const priorImeIdForFake = "com.example.keyboard/.Ime";
+const commitImeIdForFake = "dev.jasonpearson.automobile.ctrlproxy/.ime.CtrlProxyIme";
 
 describe("SendKeys", () => {
   test("a dispatched iOS semantic key with a lost response is indeterminate and non-retryable", async () => {
@@ -721,6 +763,7 @@ describe("DefaultSendKeysCommandExecutor", () => {
       const result = await executor.type({ action: "type", text: "note `x`", operation });
 
       expect(result).toMatchObject({ success: true, resolvedMode: mode });
+      expect(result.backend).toBeUndefined();
       expect(textClient.commitViaImeCalls).toEqual([]);
       if (mode === "eventAll") {
         expect(adb.getExecutedCommands().length).toBeGreaterThan(0);
@@ -728,6 +771,33 @@ describe("DefaultSendKeysCommandExecutor", () => {
         expect(textClient.calls).toContain("replace:note `x`");
       }
     }
+  });
+
+  test("a failing non-IME fallback does not claim AutoMobile IME delivery", async () => {
+    const adb = new FakeAdbExecutor();
+    const textClient = createTextClient({ supportsImeCommit: false });
+    textClient.client.replace = async () => {
+      throw new Error("fallback rejected");
+    };
+    const executor = new DefaultSendKeysCommandExecutor(
+      androidDevice,
+      createAdbFactory(adb),
+      createObserver(focusedAndroidObservation()),
+      { textClient: textClient.client },
+    );
+    const result = await executor.type({
+      action: "type",
+      text: "value",
+      operation: "replace",
+      mode: "auto",
+    });
+    expect(result).toMatchObject({
+      success: false,
+      resolvedMode: "a11y",
+      error: "fallback rejected",
+    });
+    expect(result.backend).toBeUndefined();
+    expect(result.keyboard).toBeUndefined();
   });
 
   test("auto IME activation failure falls back before any editor mutation", async () => {
@@ -960,19 +1030,22 @@ describe("DefaultSendKeysCommandExecutor", () => {
 
     const result = await executor.type({ action: "type", text: "*bold*", mode: "ime" });
 
-    expect(result).toMatchObject({ success: true, resolvedMode: "ime" });
+    expect(result).toMatchObject({
+      success: true,
+      resolvedMode: "ime",
+      backend: "autoMobileIme",
+      capability: "semanticText",
+      keyboard: { component: commitImeId, package: "dev.jasonpearson.automobile.ctrlproxy" },
+    });
     expect(textClient.getSupportsImeCommitCalls()).toBe(1);
     expect(textClient.commitViaImeCalls).toEqual([{ text: "*bold*", priorImeId }]);
-    expect(events).toEqual([
-      "adb:shell settings get secure default_input_method",
-      "adb:shell ime list -s",
-      `adb:shell ime enable ${commitImeId}`,
-      `adb:shell ime set ${commitImeId}`,
-      "adb:shell settings get secure default_input_method",
-      `commit:*bold*:${priorImeId}`,
-      `adb:shell ime set ${priorImeId}`,
-      `adb:shell ime disable ${commitImeId}`,
-    ]);
+    expect(events).toContain(`commit:*bold*:${priorImeId}`);
+    expect(events.indexOf(`adb:shell ime set ${priorImeId}`)).toBeLessThan(
+      events.indexOf("adb:shell settings delete secure selected_input_method_subtype"),
+    );
+    expect(
+      events.indexOf("adb:shell settings delete secure selected_input_method_subtype"),
+    ).toBeLessThan(events.indexOf(`adb:shell ime disable ${commitImeId}`));
   });
 
   test("ime mode preserves a companion keyboard that was already enabled", async () => {
@@ -1000,7 +1073,7 @@ describe("DefaultSendKeysCommandExecutor", () => {
     expect(adb.getExecutedCommands()).toContain(`shell ime set ${priorImeId}`);
   });
 
-  test("ime disable failures do not fail a successful commit", async () => {
+  test("ime disable failures surface restoration failure after a successful commit", async () => {
     for (const failure of ["stderr", "throw"] as const) {
       const adb = new FakeAdbExecutor();
       adb.setCommandResponseSequence("shell settings get secure default_input_method", [
@@ -1021,8 +1094,15 @@ describe("DefaultSendKeysCommandExecutor", () => {
 
       const result = await executor.type({ action: "type", text: "value", mode: "ime" });
 
-      expect(result).toMatchObject({ success: true, resolvedMode: "ime" });
+      expect(result).toMatchObject({
+        success: false,
+        resolvedMode: "ime",
+        error: expect.stringContaining(
+          `Text commit succeeded, but Could not restore the original keyboard ${priorImeId}`,
+        ),
+      });
       expect(adb.getExecutedCommands()).toContain(`shell ime disable ${commitImeId}`);
+      clearAndroidImeQuarantine(androidDevice.deviceId);
     }
   });
 
@@ -1277,9 +1357,147 @@ describe("DefaultSendKeysCommandExecutor", () => {
 
     expect(result).toMatchObject({ success: false, resolvedMode: "ime", error: "commit rejected" });
     expect(textClient.commitViaImeCalls).toEqual([{ text: "value", priorImeId }]);
-    expect(events.at(-3)).toBe("commit:rejected");
-    expect(events.at(-2)).toBe(`adb:shell ime set ${priorImeId}`);
-    expect(events.at(-1)).toBe(`adb:shell ime disable ${commitImeId}`);
+    expect(events.indexOf("commit:rejected")).toBeLessThan(
+      events.indexOf(`adb:shell ime set ${priorImeId}`),
+    );
+    expect(events.indexOf(`adb:shell ime set ${priorImeId}`)).toBeLessThan(
+      events.indexOf(`adb:shell ime disable ${commitImeId}`),
+    );
+  });
+
+  test("ime mode restores the selected subtype after the original component", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponseSequence("shell settings get secure default_input_method", [
+      { stdout: priorImeId, stderr: "" },
+      { stdout: commitImeId, stderr: "" },
+    ]);
+    adb.setCommandResponse("shell settings get secure selected_input_method_subtype", {
+      stdout: "42",
+      stderr: "",
+    });
+    adb.setCommandResponse("shell dumpsys input_method", {
+      stdout: `mId=${priorImeId}\n  mSubtypeId=42 mSubtypeLocale=en_US`,
+      stderr: "",
+    });
+    const executor = new DefaultSendKeysCommandExecutor(
+      androidDevice,
+      createAdbFactory(adb),
+      createObserver(),
+      {
+        textClient: createTextClient().client,
+      },
+    );
+    expect(await executor.type({ action: "type", text: "value", mode: "ime" })).toMatchObject({
+      success: true,
+    });
+    const commands = adb.getExecutedCommands();
+    expect(commands.indexOf(`shell ime set ${priorImeId}`)).toBeLessThan(
+      commands.indexOf("shell settings put secure selected_input_method_subtype 42"),
+    );
+  });
+
+  test("a no-longer-advertised subtype reports both commit and restore failures", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponseSequence("shell settings get secure default_input_method", [
+      { stdout: priorImeId, stderr: "" },
+      { stdout: commitImeId, stderr: "" },
+    ]);
+    adb.setCommandResponse("shell settings get secure selected_input_method_subtype", {
+      stdout: "42",
+      stderr: "",
+    });
+    adb.setCommandResponseSequence("shell dumpsys input_method", [
+      { stdout: `mId=${priorImeId}\n  mSubtypeId=42 mSubtypeLocale=en_US`, stderr: "" },
+      { stdout: `mId=${priorImeId}\n  mSubtypeId=99 mSubtypeLocale=en_US`, stderr: "" },
+    ]);
+    const textClient = createTextClient({
+      commitViaIme: async () => ({ success: false, error: "commit rejected" }),
+    });
+    const executor = new DefaultSendKeysCommandExecutor(
+      androidDevice,
+      createAdbFactory(adb),
+      createObserver(),
+      {
+        textClient: textClient.client,
+      },
+    );
+    const result = await executor.type({ action: "type", text: "value", mode: "ime" });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("commit rejected");
+    expect(result.error).toContain(`Could not restore the original keyboard ${priorImeId}`);
+    expect(adb.getExecutedCommands()).not.toContain(
+      "shell settings put secure selected_input_method_subtype 42",
+    );
+    clearAndroidImeQuarantine(androidDevice.deviceId);
+  });
+
+  test("activation and subtype restore failures both reach the caller", async () => {
+    const device = { ...androidDevice, deviceId: "ime-activation-restore-failure" };
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("shell settings get secure default_input_method", {
+      stdout: priorImeId,
+      stderr: "",
+    });
+    adb.setCommandResponse(`shell ime set ${commitImeId}`, {
+      stdout: "",
+      stderr: "activation rejected",
+    });
+    adb.setCommandResponse("shell settings get secure selected_input_method_subtype", {
+      stdout: "42",
+      stderr: "",
+    });
+    adb.setCommandResponseSequence("shell dumpsys input_method", [
+      { stdout: `mId=${priorImeId}\n  mSubtypeId=42 mSubtypeLocale=en_US`, stderr: "" },
+      { stdout: `mId=${priorImeId}\n  mSubtypeId=99 mSubtypeLocale=en_US`, stderr: "" },
+    ]);
+    const executor = new DefaultSendKeysCommandExecutor(
+      device,
+      createAdbFactory(adb),
+      createObserver(),
+      {
+        textClient: createTextClient().client,
+      },
+    );
+    const result = await executor.type({ action: "type", text: "value", mode: "ime" });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Failed to activate the IME for text commit.");
+    expect(result.error).toContain(`Could not restore the original keyboard ${priorImeId}`);
+    clearAndroidImeQuarantine(device.deviceId);
+  });
+
+  test("auto mode does not fall back after activation plus restoration failure", async () => {
+    const device = { ...androidDevice, deviceId: "ime-auto-restore-failure" };
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("shell settings get secure default_input_method", {
+      stdout: priorImeId,
+      stderr: "",
+    });
+    adb.setCommandResponse(`shell ime set ${commitImeId}`, {
+      stdout: "",
+      stderr: "activation rejected",
+    });
+    adb.setCommandResponse("shell settings get secure selected_input_method_subtype", {
+      stdout: "42",
+      stderr: "",
+    });
+    adb.setCommandResponseSequence("shell dumpsys input_method", [
+      { stdout: `mId=${priorImeId}\n  mSubtypeId=42 mSubtypeLocale=en_US`, stderr: "" },
+      { stdout: `mId=${priorImeId}\n  mSubtypeId=99 mSubtypeLocale=en_US`, stderr: "" },
+    ]);
+    const textClient = createTextClient();
+    const executor = new DefaultSendKeysCommandExecutor(
+      device,
+      createAdbFactory(adb),
+      createObserver(),
+      {
+        textClient: textClient.client,
+      },
+    );
+    const result = await executor.type({ action: "type", text: "value", mode: "auto" });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain(`Could not restore the original keyboard ${priorImeId}`);
+    expect(textClient.calls.some((call) => call.startsWith("insert:"))).toBe(false);
+    clearAndroidImeQuarantine(device.deviceId);
   });
 
   test("unacknowledged cancellation retains the IME and blocks later switches", async () => {
@@ -1396,8 +1614,8 @@ describe("DefaultSendKeysCommandExecutor", () => {
     expect(events).toEqual(snapshotAtBlock);
 
     releaseFirst();
-    expect((await first).success).toBe(true);
-    expect((await second).success).toBe(true);
+    expect(await first).toMatchObject({ success: true });
+    expect(await second).toMatchObject({ success: true });
 
     // No interleave: call 2 does nothing until call 1 has fully restored.
     const firstRestoreIdx = events.indexOf(`adb:shell ime set ${priorImeId}`);

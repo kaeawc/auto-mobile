@@ -3,7 +3,6 @@ import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClie
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { readAndroidDeviceApiLevel } from "../../utils/android-cmdline-tools/readAndroidDeviceApiLevel";
-import { AndroidCtrlProxyManager } from "../../utils/CtrlProxyManager";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
@@ -17,6 +16,14 @@ import { TapOnElement } from "./TapOnElement";
 import { FieldTypeDetector } from "./FieldTypeDetector";
 import { DefaultElementParser } from "../utility/ElementParser";
 import { quarantineAndroidIme, withAndroidImeLock } from "./androidImeLock";
+import {
+  AndroidImeCatalog,
+  AUTO_MOBILE_IME_ID,
+  type ImeSubtypeSnapshot,
+  type KeyboardIdentity,
+} from "./AndroidImeCatalog";
+
+class ImeRestorationError extends Error {}
 import {
   ANDROID_KEYCOMBINATION_MIN_API_LEVEL,
   asciiKeyEventNeedsKeyCombination,
@@ -128,6 +135,9 @@ export interface SendKeysCommandResult {
   partialApplication?: boolean;
   error?: string;
   retryable?: boolean;
+  backend?: "autoMobileIme";
+  capability?: "semanticText";
+  keyboard?: KeyboardIdentity;
 }
 
 export interface SendKeysResult {
@@ -262,11 +272,15 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       requestedMode,
       resolvedMode: this.reportedMode(resolvedMode),
     };
-
     try {
       const validationError = this.validateTypeCommand(command);
       if (validationError) {
-        return { ...baseResult, success: false, error: validationError };
+        return {
+          ...baseResult,
+          ...this.imeResultFields(baseResult.resolvedMode),
+          success: false,
+          error: validationError,
+        };
       }
       resolvedMode = await this.resolveAutoPasswordMode(requestedMode, operation, signal);
       baseResult.resolvedMode = this.reportedMode(resolvedMode);
@@ -291,15 +305,42 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       return {
         ...baseResult,
         success: result.success,
-        ...(result.error ? { error: result.error } : {}),
+        error: result.error,
         ...(result.partialApplication ? { partialApplication: true } : {}),
         ...(result.resolvedMode ? { resolvedMode: result.resolvedMode } : {}),
+        ...this.imeResultFields(result.resolvedMode ?? baseResult.resolvedMode),
       };
     } catch (error) {
-      signal?.throwIfAborted();
+      // A restore failure still needs its recovery instruction after cancellation.
+      if (!this.isImeRestorationFailure(error)) {
+        signal?.throwIfAborted();
+      }
       logger.warn("[SendKeys] Text command failed", error);
-      return { ...baseResult, success: false, error: errorMessage(error) };
+      return {
+        ...baseResult,
+        ...this.imeResultFields(baseResult.resolvedMode),
+        success: false,
+        error: errorMessage(error),
+      };
     }
+  }
+
+  private imeResultFields(mode: ResolvedSendKeysTypingMode) {
+    return this.device.platform === "android" && mode === "ime"
+      ? {
+          backend: "autoMobileIme" as const,
+          capability: "semanticText" as const,
+          keyboard: { component: this.commitImeId, package: AUTO_MOBILE_IME_ID.split("/")[0] },
+        }
+      : {};
+  }
+
+  private isImeRestorationFailure(error: unknown): boolean {
+    return (
+      error instanceof ImeRestorationError ||
+      (error instanceof AggregateError &&
+        error.errors.some((entry) => entry instanceof ImeRestorationError))
+    );
   }
 
   private validateTypeCommand(command: SendKeysTypeCommand): string | null {
@@ -525,15 +566,21 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         return result;
       }
     }
-    const fallback = await this.executeAndroidType(
-      text,
-      operation,
-      autoImeFallback,
-      keyboardProfile,
-      undefined,
-      signal,
-    );
-    return { ...fallback, resolvedMode: fallback.resolvedMode ?? autoImeFallback };
+    try {
+      const fallback = await this.executeAndroidType(
+        text,
+        operation,
+        autoImeFallback,
+        keyboardProfile,
+        undefined,
+        signal,
+      );
+      return { ...fallback, resolvedMode: fallback.resolvedMode ?? autoImeFallback };
+    } catch (error) {
+      signal?.throwIfAborted();
+      logger.warn("[SendKeys] Fallback text command failed", error);
+      return { success: false, error: errorMessage(error), resolvedMode: autoImeFallback };
+    }
   }
 
   private async executeAndroidImeCommit(
@@ -600,6 +647,8 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       return enabledResult;
     }
     const wasEnabled = enabledResult.enabled;
+    const catalog = new AndroidImeCatalog(this.adb, this.device.deviceId);
+    const priorSubtype = await catalog.readSubtype(prior ?? AUTO_MOBILE_IME_ID, signal);
 
     return this.commitWithActiveIme(
       text,
@@ -607,6 +656,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       keyboardProfile,
       prior,
       wasEnabled,
+      priorSubtype,
       signal,
       mode,
     );
@@ -618,6 +668,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     keyboardProfile: KeyboardProfileId | undefined,
     prior: string | null,
     wasEnabled: boolean,
+    priorSubtype: ImeSubtypeSnapshot,
     signal?: AbortSignal,
     mode: "ime" | "imeKeyEvents" = "ime",
   ): Promise<
@@ -635,15 +686,50 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     }
 
     if (!(await this.activateCommitIme(wasEnabled))) {
-      await this.restoreIme(prior, wasEnabled);
-      await this.restoreKeyboardProfileIfNeeded(keyboardProfile, previousProfileId);
+      let restoreFailure: string | undefined;
+      try {
+        await this.restoreIme(prior, wasEnabled, priorSubtype);
+      } catch (error) {
+        restoreFailure = errorMessage(error);
+      } finally {
+        await this.restoreKeyboardProfileIfNeeded(keyboardProfile, previousProfileId);
+      }
       return {
         success: false,
-        error: "Failed to activate the IME for text commit.",
-        imeActivationFailed: true,
+        error: `Failed to activate the IME for text commit.${restoreFailure ? ` ${restoreFailure}` : ""}`,
+        // A fallback is safe only after the original IME was restored.
+        imeActivationFailed: !restoreFailure,
       };
     }
 
+    const { outcome, failure, safeToRestore } = await this.performImeCommit(
+      text,
+      operation,
+      prior,
+      signal,
+      mode,
+    );
+    if (safeToRestore) {
+      await this.restoreKeyboardProfileIfNeeded(keyboardProfile, previousProfileId);
+      return this.restoreAfterImeCommit(prior, wasEnabled, priorSubtype, outcome, failure, mode);
+    }
+    if (failure !== undefined) {
+      throw failure;
+    }
+    return outcome!;
+  }
+
+  private async performImeCommit(
+    text: string,
+    operation: SendKeysOperation,
+    prior: string | null,
+    signal: AbortSignal | undefined,
+    mode: "ime" | "imeKeyEvents",
+  ): Promise<{
+    outcome?: TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode };
+    failure?: unknown;
+    safeToRestore: boolean;
+  }> {
     let safeToRestore = true;
     try {
       this.checkAbort(signal);
@@ -651,7 +737,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         const clearResult = await this.textClient.clear();
         this.checkAbort(signal);
         if (!clearResult.success) {
-          return { ...clearResult, resolvedMode: mode };
+          return { outcome: { ...clearResult, resolvedMode: mode }, safeToRestore };
         }
       }
       this.checkAbort(signal);
@@ -663,15 +749,48 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       );
       safeToRestore = this.canRestoreAfterImeCommit(result);
       return {
-        ...(operation === "replace" ? markPartialAfterMutation(result) : result),
+        outcome: {
+          ...(operation === "replace" ? markPartialAfterMutation(result) : result),
+          resolvedMode: mode,
+        },
+        safeToRestore,
+      };
+    } catch (error) {
+      return { failure: error, safeToRestore };
+    }
+  }
+
+  private async restoreAfterImeCommit(
+    prior: string | null,
+    wasEnabled: boolean,
+    priorSubtype: ImeSubtypeSnapshot,
+    outcome: (TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode }) | undefined,
+    failure: unknown,
+    mode: "ime" | "imeKeyEvents",
+  ): Promise<TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode }> {
+    try {
+      await this.restoreIme(prior, wasEnabled, priorSubtype);
+    } catch (restoreError) {
+      const restoreMessage = errorMessage(restoreError);
+      if (failure !== undefined) {
+        throw new AggregateError(
+          [failure, restoreError],
+          `${errorMessage(failure)}; ${restoreMessage}`,
+        );
+      }
+      if (outcome && !outcome.success) {
+        return { ...outcome, error: `${outcome.error ?? "Text commit failed."} ${restoreMessage}` };
+      }
+      return {
+        success: false,
+        error: `Text commit succeeded, but ${restoreMessage}`,
         resolvedMode: mode,
       };
-    } finally {
-      if (safeToRestore) {
-        await this.restoreKeyboardProfileIfNeeded(keyboardProfile, previousProfileId);
-        await this.restoreIme(prior, wasEnabled);
-      }
     }
+    if (failure !== undefined) {
+      throw failure;
+    }
+    return outcome!;
   }
 
   private checkAbort(signal?: AbortSignal): void {
@@ -760,6 +879,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     try {
       const result = await this.adb.executeCommand("shell ime list -s");
       if (result.stderr.trim()) {
+        logger.warn(`[SendKeys] Failed to list enabled IMEs: ${result.stderr.trim()}`);
         return { success: false, error: `Failed to list enabled IMEs: ${result.stderr.trim()}` };
       }
       return {
@@ -767,6 +887,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         enabled: result.stdout.split(/\r?\n/).some((id) => id.trim() === this.commitImeId),
       };
     } catch (error) {
+      logger.warn("[SendKeys] Failed to list enabled IMEs", error);
       return { success: false, error: `Failed to list enabled IMEs: ${errorMessage(error)}` };
     }
   }
@@ -808,37 +929,89 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     }
   }
 
-  private async restoreIme(priorImeId: string | null, wasEnabled: boolean): Promise<void> {
+  private async restoreIme(
+    priorImeId: string | null,
+    wasEnabled: boolean,
+    subtype: ImeSubtypeSnapshot,
+  ): Promise<void> {
+    const catalog = new AndroidImeCatalog(this.adb, this.device.deviceId);
+    try {
+      await this.restoreComponentAndSubtype(catalog, priorImeId, subtype);
+      await this.verifyRestoredIme(catalog, priorImeId, wasEnabled);
+    } catch (error) {
+      quarantineAndroidIme(this.device.deviceId);
+      logger.warn("[SendKeys] Original keyboard restoration failed", error);
+      const recovery =
+        priorImeId === null
+          ? 'run "keyboard listImes" and select an enabled IME, or restart the daemon.'
+          : `run "keyboard setIme ${priorImeId}" or restart the daemon.`;
+      throw new ImeRestorationError(
+        `Could not restore the original keyboard ${priorImeId ?? "(none)"}; ${recovery}`,
+        { cause: error },
+      );
+    }
+  }
+
+  private async restoreComponentAndSubtype(
+    catalog: AndroidImeCatalog,
+    priorImeId: string | null,
+    subtype: ImeSubtypeSnapshot,
+  ): Promise<void> {
+    let componentError: unknown;
+    try {
+      if (priorImeId !== null) {
+        // The caller already holds the per-device lock; select() would deadlock.
+        await catalog.selectWithinLock(priorImeId);
+      }
+    } catch (error) {
+      componentError = error;
+    }
+    try {
+      // Restore subtype after component, including when component selection fails.
+      await catalog.restoreSubtypeWithinLock(priorImeId ?? AUTO_MOBILE_IME_ID, subtype);
+    } catch (error) {
+      if (componentError !== undefined) {
+        throw new AggregateError(
+          [componentError, error],
+          "IME component and subtype restoration failed.",
+        );
+      }
+      throw error;
+    }
+    if (componentError !== undefined) {
+      throw componentError;
+    }
+  }
+
+  private async verifyRestoredIme(
+    catalog: AndroidImeCatalog,
+    priorImeId: string | null,
+    wasEnabled: boolean,
+  ): Promise<void> {
     if (priorImeId !== null) {
-      try {
-        const result = await this.adb.executeCommand(`shell ime set ${priorImeId}`);
-        if (result.stderr.trim()) {
-          logger.warn(`[SendKeys] Failed to restore the prior IME: ${result.stderr.trim()}`);
-        }
-      } catch (error) {
-        // Restoration is best-effort so it cannot mask the text-commit result.
-        logger.warn("[SendKeys] Failed to restore the prior IME", error);
+      const after = await catalog.list();
+      if (after.activeImeId !== priorImeId) {
+        throw new Error(`Expected ${priorImeId}, got ${after.activeImeId ?? "none"}.`);
       }
     }
     if (!wasEnabled) {
       await this.disableCommitIme();
     }
+    const enabled = await this.readCommitImeEnabled();
+    if (!enabled.success || enabled.enabled !== wasEnabled) {
+      throw new Error("Text-commit IME enabled state did not return to its original value.");
+    }
   }
 
   private get commitImeId(): string {
-    return `${AndroidCtrlProxyManager.PACKAGE}/.ime.CtrlProxyIme`;
+    return AUTO_MOBILE_IME_ID;
   }
 
   private async disableCommitIme(): Promise<void> {
     // This removes the companion from the keyboard picker; activateCommitIme re-enables it next time.
-    try {
-      const result = await this.adb.executeCommand(`shell ime disable ${this.commitImeId}`);
-      if (result.stderr.trim()) {
-        logger.warn(`[SendKeys] Failed to disable the text-commit IME: ${result.stderr.trim()}`);
-      }
-    } catch (error) {
-      // Disabling is best-effort so it cannot mask the text-commit result.
-      logger.warn("[SendKeys] Failed to disable the text-commit IME", error);
+    const result = await this.adb.executeCommand(`shell ime disable ${this.commitImeId}`);
+    if (result.stderr.trim()) {
+      throw new Error(`Failed to disable the text-commit IME: ${result.stderr.trim()}`);
     }
   }
 

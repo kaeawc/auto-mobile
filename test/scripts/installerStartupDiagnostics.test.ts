@@ -28,21 +28,20 @@ describe("#4631 installer startup diagnostics", () => {
   });
 
   test("keeps auxiliary socket startup active until every server is ready", () => {
-    const socketStartsBegin = daemonSource.indexOf("await startVideoRecordingSocketServer()");
-    const socketStartsEnd = daemonSource.indexOf("await startVideoStreamSocketServer()");
-    const phaseStart = daemonSource.lastIndexOf(
+    const phaseStart = daemonSource.indexOf(
       'startupBenchmark.startPhase("auxiliarySocketServerStart")',
-      socketStartsBegin,
     );
+    const socketStartsBegin = daemonSource.indexOf(
+      'await this.startAuxiliarySocket("video-recording"',
+    );
+    const socketStartsEnd = daemonSource.indexOf('await this.startAuxiliarySocket("video-stream"');
     const phaseEnd = daemonSource.indexOf(
       'startupBenchmark.endPhase("auxiliarySocketServerStart")',
-      socketStartsEnd,
     );
 
-    expect(socketStartsBegin).toBeGreaterThanOrEqual(0);
-    expect(socketStartsEnd).toBeGreaterThan(socketStartsBegin);
     expect(phaseStart).toBeGreaterThanOrEqual(0);
-    expect(phaseStart).toBeLessThan(socketStartsBegin);
+    expect(socketStartsBegin).toBeGreaterThan(phaseStart);
+    expect(socketStartsEnd).toBeGreaterThan(socketStartsBegin);
     expect(phaseEnd).toBeGreaterThan(socketStartsEnd);
   });
 });

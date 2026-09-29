@@ -4,6 +4,7 @@ import {
   readdirSync,
   readFileSync,
   renameSync,
+  statSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -130,6 +131,8 @@ export const AUXILIARY_SOCKET_CONFIGS_BY_NAME: Record<
 export interface DaemonFileCleanupOptions {
   pidFilePath?: string;
   socketPaths?: string[];
+  /** Bound aux socket identities, used to avoid unlinking a successor's replacement path. */
+  socketFileIdentities?: ReadonlyMap<string, { dev: number; ino: number }>;
   expectedPid?: number;
   /**
    * Whether this process actually acquired the daemon socket bind. When
@@ -336,6 +339,24 @@ export function getDaemonSocketPathList(): string[] {
   ];
 }
 
+function stillOwnsSocketFile(
+  socketPath: string,
+  identities: DaemonFileCleanupOptions["socketFileIdentities"],
+): boolean {
+  const identity = identities?.get(socketPath);
+  if (!identity) {
+    return true;
+  }
+  try {
+    const current = statSync(socketPath);
+    return current.dev === identity.dev && current.ino === identity.ino;
+  } catch (error) {
+    // A vanished or unreadable path is not safe to unlink during shutdown.
+    logger.warn(`daemon socket ownership check failed for ${socketPath}: ${error}`, error);
+    return false;
+  }
+}
+
 export async function cleanupDaemonFiles(options: DaemonFileCleanupOptions = {}): Promise<boolean> {
   const pidFilePath = options.pidFilePath ?? PID_FILE_PATH;
   const socketPaths = options.socketPaths ?? getDaemonSocketPathList();
@@ -349,13 +370,14 @@ export async function cleanupDaemonFiles(options: DaemonFileCleanupOptions = {})
   }
 
   for (const socketPath of socketPaths) {
-    if (!existsSync(socketPath)) {
+    if (!existsSync(socketPath) || !stillOwnsSocketFile(socketPath, options.socketFileIdentities)) {
       continue;
     }
     try {
       await unlink(socketPath);
-    } catch {
-      // Best-effort cleanup; callers should not fail shutdown/startup on stale files.
+    } catch (error) {
+      // Cleanup is best effort so a stale path cannot abort shutdown/startup.
+      logger.warn(`Could not remove daemon socket ${socketPath}: ${error}`, error);
     }
   }
 
@@ -363,8 +385,9 @@ export async function cleanupDaemonFiles(options: DaemonFileCleanupOptions = {})
     try {
       persistDaemonLaunchLogOwnerTombstoneSync(pidFilePath);
       await unlink(pidFilePath);
-    } catch {
-      // Best-effort cleanup.
+    } catch (error) {
+      // Cleanup is best effort so an unreadable PID path cannot abort shutdown/startup.
+      logger.warn(`Could not remove daemon PID file ${pidFilePath}: ${error}`, error);
     }
   }
   return true;
@@ -383,13 +406,14 @@ export function cleanupDaemonFilesSync(options: DaemonFileCleanupOptions = {}): 
   }
 
   for (const socketPath of socketPaths) {
-    if (!existsSync(socketPath)) {
+    if (!existsSync(socketPath) || !stillOwnsSocketFile(socketPath, options.socketFileIdentities)) {
       continue;
     }
     try {
       unlinkSync(socketPath);
-    } catch {
-      // Best-effort cleanup.
+    } catch (error) {
+      // Cleanup is best effort so a stale path cannot abort shutdown/startup.
+      logger.warn(`Could not remove daemon socket ${socketPath}: ${error}`, error);
     }
   }
 
@@ -397,8 +421,9 @@ export function cleanupDaemonFilesSync(options: DaemonFileCleanupOptions = {}): 
     try {
       persistDaemonLaunchLogOwnerTombstoneSync(pidFilePath);
       unlinkSync(pidFilePath);
-    } catch {
-      // Best-effort cleanup.
+    } catch (error) {
+      // Cleanup is best effort so an unreadable PID path cannot abort shutdown/startup.
+      logger.warn(`Could not remove daemon PID file ${pidFilePath}: ${error}`, error);
     }
   }
   return true;

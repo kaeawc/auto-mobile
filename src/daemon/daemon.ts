@@ -34,7 +34,8 @@ import {
   DAEMON_LAUNCH_LOG_PATH_ENV,
   ACCEPTANCE_DISCOVERY_CAPABILITY_ENV,
 } from "./constants";
-import { DaemonOptions, PidFileData } from "./types";
+import { DaemonOptions, PidFileData, type AuxiliaryDaemonSocketName } from "./types";
+import { statSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { dirname, isAbsolute } from "node:path";
 import { PID_FILE_PATH, DAEMON_VERSION } from "./constants";
@@ -326,6 +327,7 @@ export class Daemon {
   private pidFileWritten = false;
   private completeIdentityPublished = false;
   private socketBindCommitted = false;
+  private readonly boundAuxSocketIdentities = new Map<string, { dev: number; ino: number }>();
   // Preserves a live incumbent daemon's PID record across our own early-owner
   // overwrite so the lock-less bind guard can (a) still see the live sibling on
   // an inconclusive probe and (b) restore its record if we refuse (issue #6232).
@@ -435,7 +437,9 @@ export class Daemon {
       getServer: getDeviceDataStreamServer,
       stopServer: stopDeviceDataStreamSocketServer,
       startServer: async () => {
-        await startDeviceDataStreamSocketServer(this.timer);
+        await this.startAuxiliarySocket("observation-stream", () =>
+          startDeviceDataStreamSocketServer(this.timer),
+        );
       },
       configureCallbacks: () => this.configureDeviceDataStreamServer(),
     });
@@ -730,8 +734,8 @@ export class Daemon {
       // owner record (issue #2871) makes the `expectedPid` self-check pass even
       // though we do not own the socket, so a lock-less contender refused over a
       // live sibling (issue #6232) must NOT clean up on exit and brick the winner
-      // (the #6140 failure mode via a bypassed launch). The socket bind is the
-      // single event that authorizes destructive cleanup.
+      // (the #6140 failure mode via a bypassed launch). This authorizes cleanup
+      // of the control socket and PID file; each aux bind is tracked separately.
       this.socketBindCommitted = true;
       startupBenchmark.endPhase("socketServerStart");
     } catch (error) {
@@ -754,22 +758,24 @@ export class Daemon {
     logger.info("Unix socket server started");
 
     startupBenchmark.startPhase("auxiliarySocketServerStart");
-    await startVideoRecordingSocketServer();
-    await startTestRecordingSocketServer();
-    await startDeviceSnapshotSocketServer();
-    await startAppearanceSocketServer();
-    await startPerformanceStreamSocketServer();
-    await startDeviceDataStreamSocketServer(this.timer);
+    await this.startAuxiliarySocket("video-recording", startVideoRecordingSocketServer);
+    await this.startAuxiliarySocket("test-recording", startTestRecordingSocketServer);
+    await this.startAuxiliarySocket("device-snapshot", startDeviceSnapshotSocketServer);
+    await this.startAuxiliarySocket("appearance", startAppearanceSocketServer);
+    await this.startAuxiliarySocket("performance-stream", startPerformanceStreamSocketServer);
+    await this.startAuxiliarySocket("observation-stream", () =>
+      startDeviceDataStreamSocketServer(this.timer),
+    );
     this.configureDeviceDataStreamServer();
-    await startPerformancePushSocketServer();
+    await this.startAuxiliarySocket("performance-push", startPerformancePushSocketServer);
     this.setupDeviceSessionRouting();
-    await startFailuresStreamSocketServer();
-    await startFailuresPushSocketServer();
+    await this.startAuxiliarySocket("failures-stream", startFailuresStreamSocketServer);
+    await this.startAuxiliarySocket("failures-push", startFailuresPushSocketServer);
     this.setupDeviceSessionRouting();
-    await startTelemetryPushSocketServer();
+    await this.startAuxiliarySocket("telemetry-push", startTelemetryPushSocketServer);
     this.setupDeviceSessionRouting();
-    await startWebRtcStreamSocketServer();
-    await startVideoStreamSocketServer();
+    await this.startAuxiliarySocket("webrtc-stream", startWebRtcStreamSocketServer);
+    await this.startAuxiliarySocket("video-stream", startVideoStreamSocketServer);
     startupBenchmark.endPhase("auxiliarySocketServerStart");
 
     startAppearanceSyncScheduler();
@@ -3296,9 +3302,26 @@ export class Daemon {
     }
   }
 
+  private async startAuxiliarySocket(
+    name: AuxiliaryDaemonSocketName,
+    start: () => Promise<unknown>,
+  ): Promise<void> {
+    await start();
+    const socketPath = getDaemonSocketPathsByName()[name];
+    try {
+      const { dev, ino } = statSync(socketPath);
+      this.boundAuxSocketIdentities.set(socketPath, { dev, ino });
+    } catch (error) {
+      // A bound path we cannot identify must not be unlinked by exit cleanup.
+      logger.warn(`[Daemon] Cannot record ownership of auxiliary socket ${socketPath}: ${error}`);
+    }
+  }
+
   private getDaemonFileCleanupOptions(): {
     expectedPid?: number;
     socketBindCommitted: boolean;
+    socketPaths: string[];
+    socketFileIdentities: ReadonlyMap<string, { dev: number; ino: number }>;
   } {
     // Gate destructive cleanup on actually holding the socket bind. A lock-less
     // contender refused over a live sibling (issue #6232) has written its early
@@ -3306,15 +3329,21 @@ export class Daemon {
     // `expectedPid` self-check would authorize deletion — yet it never bound the
     // socket. Threading `socketBindCommitted` through makes the cleanup a no-op
     // for that loser, so the live winner's socket/PID files survive its exit
-    // (the #6140 brick, prevented here rather than reached).
+    // (the #6140 brick, prevented here rather than reached). An aux bind can
+    // still be refused after this control bind, so only recorded aux paths join
+    // the cleanup list.
     const socketBindCommitted = this.socketBindCommitted;
+    const socketPaths = socketBindCommitted
+      ? [SOCKET_PATH, ...this.boundAuxSocketIdentities.keys()]
+      : [];
+    const socketFileIdentities = this.boundAuxSocketIdentities;
     if (this.pidFileWritten) {
-      return { expectedPid: process.pid, socketBindCommitted };
+      return { expectedPid: process.pid, socketBindCommitted, socketPaths, socketFileIdentities };
     }
     const pidData = readPidFileDataSync();
     return pidData && pidData.pid !== process.pid
-      ? { expectedPid: process.pid, socketBindCommitted }
-      : { socketBindCommitted };
+      ? { expectedPid: process.pid, socketBindCommitted, socketPaths, socketFileIdentities }
+      : { socketBindCommitted, socketPaths, socketFileIdentities };
   }
 
   /**

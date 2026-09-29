@@ -73,6 +73,7 @@ export const setToolEnabledSchema = z
         "Active connection or routing-session profile to update. Omit to update this MCP connection's profile.",
       ),
   })
+  .strict()
   .superRefine((value, ctx) => {
     if ((value.toolName === undefined) === (value.toolNames === undefined)) {
       ctx.addIssue({

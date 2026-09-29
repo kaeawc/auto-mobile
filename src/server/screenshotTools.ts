@@ -10,7 +10,7 @@ import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
 import { captureScreenshotResultSchema } from "./toolOutputSchemas";
 import { ToolRegistry, type ProgressCallback } from "./toolRegistry";
 
-export const captureScreenshotSchema = addDeviceTargetingToSchema(z.object({}));
+export const captureScreenshotSchema = addDeviceTargetingToSchema(z.object({}).strict());
 
 export type CaptureScreenshotArgs = z.infer<typeof captureScreenshotSchema>;
 

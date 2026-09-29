@@ -72,16 +72,18 @@ export function checkPostNotificationPlatformConstraints(
 export const postNotificationSchema = withAppIdAliases(
   withJsonSchemaOverride(
     addDeviceTargetingToSchema(
-      z.object({
-        ...postNotificationCommonShape,
-        appId: z.string().min(1).optional().describe(postNotificationAppIdDescription),
-        // #5870/#6154: a `sessionUuid`/`deviceId` resolves the platform, so
-        // `platform` is not required — a device handle from getAndroid/getApple
-        // is sufficient on its own. The per-platform appId rules below only
-        // fire when the caller provided an explicit `platform`; the omitted
-        // case is enforced post-resolution in postNotificationHandler.
-        platform: platformSchema.optional(),
-      }),
+      z
+        .object({
+          ...postNotificationCommonShape,
+          appId: z.string().min(1).optional().describe(postNotificationAppIdDescription),
+          // #5870/#6154: a `sessionUuid`/`deviceId` resolves the platform, so
+          // `platform` is not required — a device handle from getAndroid/getApple
+          // is sufficient on its own. The per-platform appId rules below only
+          // fire when the caller provided an explicit `platform`; the omitted
+          // case is enforced post-resolution in postNotificationHandler.
+          platform: platformSchema.optional(),
+        })
+        .strict(),
     ).superRefine((values, ctx) => {
       const violation = checkPostNotificationPlatformConstraints(values.platform, values);
       if (violation) {
@@ -104,18 +106,22 @@ export const postNotificationSchema = withAppIdAliases(
 
 export const getNotificationPolicySchema = withAppIdAliases(
   addDeviceTargetingToSchema(
-    z.object({
-      appId: z.string().min(1),
-    }),
+    z
+      .object({
+        appId: z.string().min(1),
+      })
+      .strict(),
   ),
 );
 
 export const setNotificationPolicySchema = withAppIdAliases(
   addDeviceTargetingToSchema(
-    z.object({
-      appId: z.string().min(1),
-      policyAccess: z.boolean().describe("Android: allow DND policy access"),
-    }),
+    z
+      .object({
+        appId: z.string().min(1),
+        policyAccess: z.boolean().describe("Android: allow DND policy access"),
+      })
+      .strict(),
   ),
 );
 

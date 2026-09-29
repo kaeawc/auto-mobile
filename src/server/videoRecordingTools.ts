@@ -234,32 +234,34 @@ const highlightSchema = z.object({
 });
 
 const videoRecordingSchema = addDeviceTargetingToSchema(
-  z.object({
-    action: z.enum(["start", "stop"]),
-    // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
-    // not required — a device handle from getAndroid/getApple is sufficient on
-    // its own.
-    platform: platformSchema.optional(),
-    deviceId: z.string().optional(),
-    recordingId: z.string().optional().describe("Recording ID"),
-    qualityPreset: z.enum(["low", "medium", "high"]).optional(),
-    targetBitrateKbps: z.number().int().positive().optional().describe("Bitrate Kbps"),
-    maxThroughputMbps: z.number().positive().optional().describe("Max throughput Mbps"),
-    fps: z.number().int().positive().optional().describe("FPS"),
-    resolution: resolutionSchema.optional().describe("Resolution"),
-    format: z.enum(["mp4"]).optional(),
-    // Outer ceiling only; the manager enforces the real per-platform cap (iOS up to
-    // IOS_MAX_DURATION_SECONDS, non-iOS 300s — see resolveMaxDurationSeconds).
-    maxDuration: z
-      .number()
-      .int()
-      .positive()
-      .max(IOS_MAX_DURATION_SECONDS)
-      .optional()
-      .describe("Max duration seconds"),
-    outputName: z.string().optional().describe("Recording label"),
-    highlights: z.array(highlightSchema).optional().describe("Recording highlights"),
-  }),
+  z
+    .object({
+      action: z.enum(["start", "stop"]),
+      // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
+      // not required — a device handle from getAndroid/getApple is sufficient on
+      // its own.
+      platform: platformSchema.optional(),
+      deviceId: z.string().optional(),
+      recordingId: z.string().optional().describe("Recording ID"),
+      qualityPreset: z.enum(["low", "medium", "high"]).optional(),
+      targetBitrateKbps: z.number().int().positive().optional().describe("Bitrate Kbps"),
+      maxThroughputMbps: z.number().positive().optional().describe("Max throughput Mbps"),
+      fps: z.number().int().positive().optional().describe("FPS"),
+      resolution: resolutionSchema.optional().describe("Resolution"),
+      format: z.enum(["mp4"]).optional(),
+      // Outer ceiling only; the manager enforces the real per-platform cap (iOS up to
+      // IOS_MAX_DURATION_SECONDS, non-iOS 300s — see resolveMaxDurationSeconds).
+      maxDuration: z
+        .number()
+        .int()
+        .positive()
+        .max(IOS_MAX_DURATION_SECONDS)
+        .optional()
+        .describe("Max duration seconds"),
+      outputName: z.string().optional().describe("Recording label"),
+      highlights: z.array(highlightSchema).optional().describe("Recording highlights"),
+    })
+    .strict(),
 );
 
 function buildConfigOverrides(args: VideoRecordingArgs): VideoRecordingConfigInput {

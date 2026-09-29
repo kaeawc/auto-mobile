@@ -38,13 +38,15 @@ const fieldSpecSchema = z
 /**
  * Schema for setUIState tool input
  */
-export const setUIStateSchema = z.object({
-  fields: z
-    .array(fieldSpecSchema)
-    .min(1, "At least one field is required")
-    .describe("Fields to set"),
-  scrollDirection: z.enum(["up", "down"]).optional().describe("Initial search scroll direction"),
-});
+export const setUIStateSchema = z
+  .object({
+    fields: z
+      .array(fieldSpecSchema)
+      .min(1, "At least one field is required")
+      .describe("Fields to set"),
+    scrollDirection: z.enum(["up", "down"]).optional().describe("Initial search scroll direction"),
+  })
+  .strict();
 
 /**
  * Output schema for field result

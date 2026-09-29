@@ -108,9 +108,7 @@ describe("accessibilityTools", () => {
       { name: "voiceover as a string", input: { voiceover: "yes" }, valid: false },
       { name: "voiceover as a number", input: { voiceover: 1 }, valid: false },
       { name: "voiceover as null", input: { voiceover: null }, valid: false },
-      // z.object strips unknown keys rather than rejecting them, so an
-      // unknown key is accepted (verified: accepted, issue #4183 item 18).
-      { name: "an unknown key", input: { unknownKey: true }, valid: true },
+      { name: "an unknown key", input: { unknownKey: true }, valid: false },
     ];
 
     test.each(cases)("$valid for $name", ({ input, valid }) => {

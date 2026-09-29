@@ -16,18 +16,20 @@ import { logger } from "../utils/logger";
 import { accessibilityStateSchema } from "./toolOutputSchemas";
 
 export const accessibilitySchema = addDeviceTargetingToSchema(
-  z.object({
-    talkback: z
-      .boolean()
-      .optional()
-      .describe("Enable (true) or disable (false) TalkBack on the active Android device"),
-    voiceover: z
-      .boolean()
-      .optional()
-      .describe(
-        "Enable (true) or disable (false) VoiceOver on an iOS device (Simulator via simctl; physical devices are driven through the Settings app)",
-      ),
-  }),
+  z
+    .object({
+      talkback: z
+        .boolean()
+        .optional()
+        .describe("Enable (true) or disable (false) TalkBack on the active Android device"),
+      voiceover: z
+        .boolean()
+        .optional()
+        .describe(
+          "Enable (true) or disable (false) VoiceOver on an iOS device (Simulator via simctl; physical devices are driven through the Settings app)",
+        ),
+    })
+    .strict(),
 );
 
 interface AccessibilityArgs {

@@ -198,13 +198,18 @@ export function findExactProvisionedBootedDevice(
 }
 
 // Schema definitions
-export const listDeviceImagesSchema = z.object({
-  platform: platformSchema,
-});
+export const listDeviceImagesSchema = z
+  .object({
+    platform: platformSchema,
+    sessionUuid: z.string().optional().describe("Session used for inventory admission"),
+  })
+  .strict();
 
-export const listDevicesSchema = z.object({
-  platform: platformSchema.optional(),
-});
+export const listDevicesSchema = z
+  .object({
+    platform: platformSchema.optional(),
+  })
+  .strict();
 
 const listDeviceImagesOutputSchema = z.object({
   message: z.string(),
@@ -636,14 +641,16 @@ const FORCE_SKIP_AVD_VERIFICATION_DESCRIPTION =
   "image while a booted emulator that cannot be identified at all is attached. Android " +
   "emulators only; accepted and ignored for iOS and physical devices.";
 
-export const killDeviceSchema = z.object({
-  device: z.object({
-    name: z.string().describe("Device image name"),
-    deviceId: z.string(),
-    platform: platformSchema,
-  }),
-  force: z.boolean().default(false).describe(FORCE_SKIP_AVD_VERIFICATION_DESCRIPTION),
-});
+export const killDeviceSchema = z
+  .object({
+    device: z.object({
+      name: z.string().describe("Device image name"),
+      deviceId: z.string(),
+      platform: platformSchema,
+    }),
+    force: z.boolean().default(false).describe(FORCE_SKIP_AVD_VERIFICATION_DESCRIPTION),
+  })
+  .strict();
 
 const TEARDOWN_OPERATION_ID_JSON_SCHEMA_PATTERN =
   "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$";

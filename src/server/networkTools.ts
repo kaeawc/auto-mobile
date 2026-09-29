@@ -39,6 +39,7 @@ const simulateErrorsSchema = z
     durationSeconds: z.number().positive().optional().describe("Simulation duration seconds"),
     cancel: z.boolean().optional().describe("Cancel active simulation"),
   })
+  .strict()
   .superRefine((value, ctx) => {
     if (value.cancel !== true && value.durationSeconds === undefined) {
       ctx.addIssue({
@@ -50,13 +51,15 @@ const simulateErrorsSchema = z
   });
 
 const networkSchema = addDeviceTargetingToSchema(
-  z.object({
-    capture: z.boolean().optional().describe("Toggle capture"),
-    simulateErrors: simulateErrorsSchema.optional().describe("Error simulation settings"),
-    notifFilter: z.enum(["all", "errors", "slow"]).optional().describe("Notification filter"),
-    notifDebounceMs: z.number().int().min(0).optional().describe("Notification debounce ms"),
-    slowThresholdMs: z.number().int().positive().optional().describe("Slow threshold ms"),
-  }),
+  z
+    .object({
+      capture: z.boolean().optional().describe("Toggle capture"),
+      simulateErrors: simulateErrorsSchema.optional().describe("Error simulation settings"),
+      notifFilter: z.enum(["all", "errors", "slow"]).optional().describe("Notification filter"),
+      notifDebounceMs: z.number().int().min(0).optional().describe("Notification debounce ms"),
+      slowThresholdMs: z.number().int().positive().optional().describe("Slow threshold ms"),
+    })
+    .strict(),
 );
 
 type NetworkArgs = z.infer<typeof networkSchema>;
@@ -64,22 +67,24 @@ type NetworkArgs = z.infer<typeof networkSchema>;
 // --- mockNetwork tool ---
 
 const mockNetworkSchema = addDeviceTargetingToSchema(
-  z.object({
-    host: z.string().describe("Host pattern (regex)"),
-    path: z.string().describe("Path pattern (regex)"),
-    method: z.string().optional().describe("HTTP method; default *"),
-    limit: z.number().int().positive().optional().describe("Mock response limit"),
-    statusCode: z
-      .number()
-      .int()
-      .min(100)
-      .max(599)
-      .optional()
-      .describe("Response status; default 200"),
-    responseHeaders: z.record(z.string(), z.string()).optional().describe("Response headers"),
-    responseBody: z.string().optional().describe("Response body (max 10KB)"),
-    contentType: z.string().optional().describe("Content-Type; default application/json"),
-  }),
+  z
+    .object({
+      host: z.string().describe("Host pattern (regex)"),
+      path: z.string().describe("Path pattern (regex)"),
+      method: z.string().optional().describe("HTTP method; default *"),
+      limit: z.number().int().positive().optional().describe("Mock response limit"),
+      statusCode: z
+        .number()
+        .int()
+        .min(100)
+        .max(599)
+        .optional()
+        .describe("Response status; default 200"),
+      responseHeaders: z.record(z.string(), z.string()).optional().describe("Response headers"),
+      responseBody: z.string().optional().describe("Response body (max 10KB)"),
+      contentType: z.string().optional().describe("Content-Type; default application/json"),
+    })
+    .strict(),
 );
 
 type MockNetworkArgs = z.infer<typeof mockNetworkSchema>;
@@ -104,9 +109,11 @@ function assertValidResponseHeaders(responseHeaders: Record<string, string> | un
 // --- clearMockNetwork tool ---
 
 const clearMockNetworkSchema = addDeviceTargetingToSchema(
-  z.object({
-    mockId: z.string().optional().describe("Mock ID; omit to clear all"),
-  }),
+  z
+    .object({
+      mockId: z.string().optional().describe("Mock ID; omit to clear all"),
+    })
+    .strict(),
 );
 
 type ClearMockNetworkArgs = z.infer<typeof clearMockNetworkSchema>;
@@ -114,11 +121,13 @@ type ClearMockNetworkArgs = z.infer<typeof clearMockNetworkSchema>;
 // --- getNetworkGraph tool ---
 
 const getNetworkGraphSchema = addDeviceTargetingToSchema(
-  z.object({
-    sinceSeconds: z.number().positive().optional().describe("Lookback seconds"),
-    method: z.string().optional().describe("Filter by HTTP method"),
-    minRequests: z.number().int().min(1).optional().describe("Minimum request count"),
-  }),
+  z
+    .object({
+      sinceSeconds: z.number().positive().optional().describe("Lookback seconds"),
+      method: z.string().optional().describe("Filter by HTTP method"),
+      minRequests: z.number().int().min(1).optional().describe("Minimum request count"),
+    })
+    .strict(),
 );
 
 type GetNetworkGraphArgs = z.infer<typeof getNetworkGraphSchema>;

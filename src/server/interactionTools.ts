@@ -172,15 +172,17 @@ export { setSystemTrayDependencies, resetSystemTrayDependencies, waitForNotifica
 // ============================================================================
 
 export const shakeSchema = addDeviceTargetingToSchema(
-  z.object({
-    duration: z.number().optional().describe("Shake duration ms (default 1000)"),
-    intensity: z.number().optional().describe("Shake intensity (Android; default 100)"),
-    // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
-    // not required — a device handle from getAndroid/getApple is sufficient on
-    // its own.
-    platform: platformSchema.optional(),
-    ...responseShapeControlFields,
-  }),
+  z
+    .object({
+      duration: z.number().optional().describe("Shake duration ms (default 1000)"),
+      intensity: z.number().optional().describe("Shake intensity (Android; default 100)"),
+      // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
+      // not required — a device handle from getAndroid/getApple is sufficient on
+      // its own.
+      platform: platformSchema.optional(),
+      ...responseShapeControlFields,
+    })
+    .strict(),
 );
 
 export const keyboardSchema = addDeviceTargetingToSchema(
@@ -673,24 +675,28 @@ export const pinchOnSchema = withJsonSchemaOverride(
 );
 
 export const selectAllTextSchema = addDeviceTargetingToSchema(
-  z.object({
-    // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
-    // not required — a device handle from getAndroid/getApple is sufficient on
-    // its own.
-    platform: platformSchema.optional(),
-    ...responseShapeControlFields,
-  }),
+  z
+    .object({
+      // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
+      // not required — a device handle from getAndroid/getApple is sufficient on
+      // its own.
+      platform: platformSchema.optional(),
+      ...responseShapeControlFields,
+    })
+    .strict(),
 );
 
 export const pressButtonSchema = addDeviceTargetingToSchema(
-  z.object({
-    button: z.enum(["home", "back", "menu", "power", "volume_up", "volume_down", "recent"]),
-    // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
-    // not required — a device handle from getAndroid/getApple is sufficient on
-    // its own.
-    platform: platformSchema.optional(),
-    ...responseShapeControlFields,
-  }),
+  z
+    .object({
+      button: z.enum(["home", "back", "menu", "power", "volume_up", "volume_down", "recent"]),
+      // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
+      // not required — a device handle from getAndroid/getApple is sufficient on
+      // its own.
+      platform: platformSchema.optional(),
+      ...responseShapeControlFields,
+    })
+    .strict(),
 );
 
 const systemTrayNotificationSchema = z.object({
@@ -700,25 +706,27 @@ const systemTrayNotificationSchema = z.object({
   tapActionLabel: z.string().optional().describe("Action button label to tap (for 'tap' action)"),
 });
 
-const systemTraySchemaBase = z.object({
-  action: z
-    .enum(["open", "close", "list", "find", "tap", "dismiss", "clearAll"])
-    .describe("open/close/list/find/tap/dismiss/clearAll notification"),
-  notification: systemTrayNotificationSchema
-    .optional()
-    .describe(
-      "Notification criteria to match; list requires appId and scans up to three swipes on Android",
-    ),
-  awaitTimeout: z
-    .number()
-    .optional()
-    .describe("Timeout in ms to wait for notification (default: 5000)"),
-  // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
-  // not required — a device handle from getAndroid/getApple is sufficient on
-  // its own.
-  platform: platformSchema.optional(),
-  ...responseShapeControlFields,
-});
+const systemTraySchemaBase = z
+  .object({
+    action: z
+      .enum(["open", "close", "list", "find", "tap", "dismiss", "clearAll"])
+      .describe("open/close/list/find/tap/dismiss/clearAll notification"),
+    notification: systemTrayNotificationSchema
+      .optional()
+      .describe(
+        "Notification criteria to match; list requires appId and scans up to three swipes on Android",
+      ),
+    awaitTimeout: z
+      .number()
+      .optional()
+      .describe("Timeout in ms to wait for notification (default: 5000)"),
+    // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
+    // not required — a device handle from getAndroid/getApple is sufficient on
+    // its own.
+    platform: platformSchema.optional(),
+    ...responseShapeControlFields,
+  })
+  .strict();
 
 export const systemTraySchema = withJsonSchemaOverride(
   withAppIdAliases(
@@ -881,19 +889,21 @@ const sendKeysCommandSchema = withCanonicalDiscriminatedUnionJsonSchema(
 );
 
 export const sendKeysSchema = addDeviceTargetingToSchema(
-  z.object({
-    selector: sendKeysSelectorSchema
-      .optional()
-      .describe("Field to focus once before executing the ordered command sequence"),
-    commands: z
-      .array(sendKeysCommandSchema)
-      .min(1)
-      .max(100)
-      .describe("One to 100 commands executed serially; execution stops on the first failure"),
-    // #5870: Device or session targeting resolves the platform.
-    platform: platformSchema.optional(),
-    ...responseShapeControlFields,
-  }),
+  z
+    .object({
+      selector: sendKeysSelectorSchema
+        .optional()
+        .describe("Field to focus once before executing the ordered command sequence"),
+      commands: z
+        .array(sendKeysCommandSchema)
+        .min(1)
+        .max(100)
+        .describe("One to 100 commands executed serially; execution stops on the first failure"),
+      // #5870: Device or session targeting resolves the platform.
+      platform: platformSchema.optional(),
+      ...responseShapeControlFields,
+    })
+    .strict(),
 );
 
 export interface SendKeysRunnerCommandSource {
@@ -927,18 +937,20 @@ export async function assertSendKeysRunnerCompatible(
 }
 
 export const wakeAndUnlockSchema = addDeviceTargetingToSchema(
-  z.object({
-    pin: z
-      .string()
-      .optional()
-      .describe(
-        "Credential to unlock a secure Android device. Optional; logically required to unlock a secure lock unless a pin was already remembered this session. Ignored on iOS.",
-      ),
-    // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
-    // not required — a device handle from getAndroid/getApple is sufficient on
-    // its own.
-    platform: platformSchema.optional(),
-  }),
+  z
+    .object({
+      pin: z
+        .string()
+        .optional()
+        .describe(
+          "Credential to unlock a secure Android device. Optional; logically required to unlock a secure lock unless a pin was already remembered this session. Ignored on iOS.",
+        ),
+      // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
+      // not required — a device handle from getAndroid/getApple is sufficient on
+      // its own.
+      platform: platformSchema.optional(),
+    })
+    .strict(),
 );
 
 // openLink gains an optional integrated waitFor (issue #3490 §5): after opening
@@ -947,31 +959,37 @@ export const wakeAndUnlockSchema = addDeviceTargetingToSchema(
 export const openLinkSchema = withAppIdAliases(
   withJsonSchemaOverride(
     addDeviceTargetingToSchema(
-      z.object({
-        url: z.string().describe("URL to open"),
-        acceptOpenAlert: z
-          .boolean()
-          .optional()
-          .describe("On iOS, automatically tap Open when a system 'Open in <app>?' alert appears"),
-        chooserAppPackage: z
-          .string()
-          .min(1)
-          .optional()
-          .describe(
-            "On Android, select this exact package if opening the URL displays an intent chooser",
-          ),
-        // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
-        // not required — a device handle from getAndroid/getApple is sufficient on
-        // its own.
-        platform: platformSchema.optional(),
-        waitFor: waitForSchema
-          .optional()
-          .describe("After opening, wait for this predicate before returning the observation"),
-        settled: settledSchema
-          .optional()
-          .describe("After waitFor matches, wait for a quiet hierarchy period (requires waitFor)"),
-        ...responseShapeControlFields,
-      }),
+      z
+        .object({
+          url: z.string().describe("URL to open"),
+          acceptOpenAlert: z
+            .boolean()
+            .optional()
+            .describe(
+              "On iOS, automatically tap Open when a system 'Open in <app>?' alert appears",
+            ),
+          chooserAppPackage: z
+            .string()
+            .min(1)
+            .optional()
+            .describe(
+              "On Android, select this exact package if opening the URL displays an intent chooser",
+            ),
+          // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
+          // not required — a device handle from getAndroid/getApple is sufficient on
+          // its own.
+          platform: platformSchema.optional(),
+          waitFor: waitForSchema
+            .optional()
+            .describe("After opening, wait for this predicate before returning the observation"),
+          settled: settledSchema
+            .optional()
+            .describe(
+              "After waitFor matches, wait for a quiet hierarchy period (requires waitFor)",
+            ),
+          ...responseShapeControlFields,
+        })
+        .strict(),
     ).superRefine(refineWaitForArgs),
     overrideWaitForJsonSchema,
   ),
@@ -1065,40 +1083,46 @@ export const buildOpenLinkPayload = (
 };
 
 export const recentAppsSchema = addDeviceTargetingToSchema(
-  z.object({
-    // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
-    // not required — a device handle from getAndroid/getApple is sufficient on
-    // its own.
-    platform: platformSchema.optional(),
-    ...responseShapeControlFields,
-  }),
+  z
+    .object({
+      // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
+      // not required — a device handle from getAndroid/getApple is sufficient on
+      // its own.
+      platform: platformSchema.optional(),
+      ...responseShapeControlFields,
+    })
+    .strict(),
 );
 
 export const homeScreenSchema = addDeviceTargetingToSchema(
-  z.object({
-    // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
-    // not required — a device handle from getAndroid/getApple is sufficient on
-    // its own.
-    platform: platformSchema.optional(),
-    ...responseShapeControlFields,
-  }),
+  z
+    .object({
+      // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
+      // not required — a device handle from getAndroid/getApple is sufficient on
+      // its own.
+      platform: platformSchema.optional(),
+      ...responseShapeControlFields,
+    })
+    .strict(),
 );
 
 export const rotateSchema = addDeviceTargetingToSchema(
-  z.object({
-    orientation: z.enum(["portrait", "landscape"]),
-    lockOrientation: z
-      .boolean()
-      .optional()
-      .describe(
-        "Android only. true keeps the requested orientation locked after rotation; false explicitly restores automatic rotation after a persistent request. Omit to preserve the existing behavior.",
-      ),
-    // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
-    // not required — a device handle from getAndroid/getApple is sufficient on
-    // its own.
-    platform: platformSchema.optional(),
-    ...responseShapeControlFields,
-  }),
+  z
+    .object({
+      orientation: z.enum(["portrait", "landscape"]),
+      lockOrientation: z
+        .boolean()
+        .optional()
+        .describe(
+          "Android only. true keeps the requested orientation locked after rotation; false explicitly restores automatic rotation after a persistent request. Omit to preserve the existing behavior.",
+        ),
+      // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
+      // not required — a device handle from getAndroid/getApple is sufficient on
+      // its own.
+      platform: platformSchema.optional(),
+      ...responseShapeControlFields,
+    })
+    .strict(),
 );
 
 const clipboardTextRequiredMessage = "text is required when action is copy";
@@ -1116,35 +1140,43 @@ const clipboardPlatformSchema = {
 
 export const clipboardSchema = z.discriminatedUnion("action", [
   addDeviceTargetingToSchema(
-    z.object({
-      action: z.literal("copy").describe("Clipboard action"),
-      text: z
-        .string({ error: clipboardTextRequiredMessage })
-        .min(1, clipboardTextRequiredMessage)
-        .describe("Text to copy (required for 'copy' action)"),
-      ...clipboardPlatformSchema,
-    }),
+    z
+      .object({
+        action: z.literal("copy").describe("Clipboard action"),
+        text: z
+          .string({ error: clipboardTextRequiredMessage })
+          .min(1, clipboardTextRequiredMessage)
+          .describe("Text to copy (required for 'copy' action)"),
+        ...clipboardPlatformSchema,
+      })
+      .strict(),
   ),
   addDeviceTargetingToSchema(
-    z.object({
-      action: z.literal("paste").describe("Clipboard action"),
-      text: optionalClipboardTextSchema,
-      ...clipboardPlatformSchema,
-    }),
+    z
+      .object({
+        action: z.literal("paste").describe("Clipboard action"),
+        text: optionalClipboardTextSchema,
+        ...clipboardPlatformSchema,
+      })
+      .strict(),
   ),
   addDeviceTargetingToSchema(
-    z.object({
-      action: z.literal("clear").describe("Clipboard action"),
-      text: optionalClipboardTextSchema,
-      ...clipboardPlatformSchema,
-    }),
+    z
+      .object({
+        action: z.literal("clear").describe("Clipboard action"),
+        text: optionalClipboardTextSchema,
+        ...clipboardPlatformSchema,
+      })
+      .strict(),
   ),
   addDeviceTargetingToSchema(
-    z.object({
-      action: z.literal("get").describe("Clipboard action"),
-      text: optionalClipboardTextSchema,
-      ...clipboardPlatformSchema,
-    }),
+    z
+      .object({
+        action: z.literal("get").describe("Clipboard action"),
+        text: optionalClipboardTextSchema,
+        ...clipboardPlatformSchema,
+      })
+      .strict(),
   ),
 ]);
 

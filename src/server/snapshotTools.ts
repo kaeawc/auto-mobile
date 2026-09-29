@@ -30,21 +30,25 @@ const deviceSnapshotCommonShape = {
 
 export const deviceSnapshotSchema = z.discriminatedUnion("action", [
   addDeviceTargetingToSchema(
-    z.object({
-      action: z.literal("capture"),
-      snapshotName: optionalSnapshotNameSchema,
-      ...deviceSnapshotCommonShape,
-    }),
+    z
+      .object({
+        action: z.literal("capture"),
+        snapshotName: optionalSnapshotNameSchema,
+        ...deviceSnapshotCommonShape,
+      })
+      .strict(),
   ),
   addDeviceTargetingToSchema(
-    z.object({
-      action: z.literal("restore"),
-      snapshotName: z
-        .string({ error: snapshotNameRequiredMessage })
-        .min(1, snapshotNameRequiredMessage)
-        .describe("Snapshot name"),
-      ...deviceSnapshotCommonShape,
-    }),
+    z
+      .object({
+        action: z.literal("restore"),
+        snapshotName: z
+          .string({ error: snapshotNameRequiredMessage })
+          .min(1, snapshotNameRequiredMessage)
+          .describe("Snapshot name"),
+        ...deviceSnapshotCommonShape,
+      })
+      .strict(),
   ),
 ]);
 

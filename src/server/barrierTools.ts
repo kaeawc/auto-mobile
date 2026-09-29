@@ -18,25 +18,32 @@ import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
 // `schema.parse`. Without them every track's barrier would route to the base
 // session's device and fail as a duplicate arrival (#6117).
 const barrierSchema = addDeviceTargetingToSchema(
-  z.object({
-    lock: z
-      .string()
-      .describe("Shared barrier name; all devices using the same name synchronize together"),
-    deviceCount: z
-      .number()
-      .int()
-      .positive()
-      .describe("Number of devices that must arrive before the barrier lifts"),
-    timeout: z.number().int().positive().optional().describe("Barrier timeout ms (default 30000)"),
-    // Internal: the plan's base session UUID, injected by PlanExecutor
-    // (buildEnhancedStepParams). Scopes the shared coordinator so two independent
-    // plans that reuse the same lock name get isolated barriers instead of
-    // colliding. Not authored by users; stripped from recordings via INTERNAL_PARAMS.
-    __lockNamespace: z
-      .string()
-      .optional()
-      .describe("Internal plan-scoped lock namespace (injected)"),
-  }),
+  z
+    .object({
+      lock: z
+        .string()
+        .describe("Shared barrier name; all devices using the same name synchronize together"),
+      deviceCount: z
+        .number()
+        .int()
+        .positive()
+        .describe("Number of devices that must arrive before the barrier lifts"),
+      timeout: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe("Barrier timeout ms (default 30000)"),
+      // Internal: the plan's base session UUID, injected by PlanExecutor
+      // (buildEnhancedStepParams). Scopes the shared coordinator so two independent
+      // plans that reuse the same lock name get isolated barriers instead of
+      // colliding. Not authored by users; stripped from recordings via INTERNAL_PARAMS.
+      __lockNamespace: z
+        .string()
+        .optional()
+        .describe("Internal plan-scoped lock namespace (injected)"),
+    })
+    .strict(),
 );
 
 type BarrierParams = z.infer<typeof barrierSchema>;

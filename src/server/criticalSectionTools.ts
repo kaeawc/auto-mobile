@@ -35,23 +35,30 @@ type CriticalSectionStepInput = z.infer<typeof criticalSectionStepSchema>;
 
 // Critical section tool schema
 const criticalSectionSchema = addDeviceTargetingToSchema(
-  z.object({
-    lock: z.string().describe("Shared barrier lock name"),
-    steps: z
-      .array(criticalSectionStepSchema)
-      .min(1)
-      .describe("Serial steps; each needs params.device"),
-    deviceCount: z.number().int().positive().describe("Devices required at barrier"),
-    timeout: z.number().int().positive().optional().describe("Barrier timeout ms (default 30000)"),
-    // Internal: the plan's base session UUID, injected by PlanExecutor
-    // (buildEnhancedStepParams). Scopes the shared coordinator so two independent
-    // plans that reuse the same lock name get isolated barriers instead of
-    // colliding. Not authored by users; stripped from recordings via INTERNAL_PARAMS.
-    __lockNamespace: z
-      .string()
-      .optional()
-      .describe("Internal plan-scoped lock namespace (injected)"),
-  }),
+  z
+    .object({
+      lock: z.string().describe("Shared barrier lock name"),
+      steps: z
+        .array(criticalSectionStepSchema)
+        .min(1)
+        .describe("Serial steps; each needs params.device"),
+      deviceCount: z.number().int().positive().describe("Devices required at barrier"),
+      timeout: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe("Barrier timeout ms (default 30000)"),
+      // Internal: the plan's base session UUID, injected by PlanExecutor
+      // (buildEnhancedStepParams). Scopes the shared coordinator so two independent
+      // plans that reuse the same lock name get isolated barriers instead of
+      // colliding. Not authored by users; stripped from recordings via INTERNAL_PARAMS.
+      __lockNamespace: z
+        .string()
+        .optional()
+        .describe("Internal plan-scoped lock namespace (injected)"),
+    })
+    .strict(),
 );
 
 type CriticalSectionParams = z.infer<typeof criticalSectionSchema>;

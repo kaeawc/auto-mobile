@@ -18,7 +18,6 @@ import {
 } from "../utils/deviceUtils";
 import { toActionableError } from "../models/ActionableError";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
-import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { type IdGenerator, defaultIdGenerator } from "../utils/IdGenerator";
 import type { InstalledAppsStore } from "../db/installedAppsRepository";
 import { InstalledAppsRepository } from "../db/installedAppsRepository";
@@ -599,17 +598,17 @@ class EmulatorProcessOutputTail {
   }
 
   private async waitForStreamClose(): Promise<void> {
-    const timeout = new Error("Stream close timed out");
+    let timeout: NodeJS.Timeout | undefined;
     try {
-      await raceWithDeadline(this.streamsClosed, {
-        timer: this.timer,
-        timeoutMs: 1_000,
-        label: "Stream close",
-        timeoutError: () => timeout,
-      });
-    } catch (error) {
-      if (error !== timeout) {
-        throw error;
+      await Promise.race([
+        this.streamsClosed,
+        new Promise<void>((resolve) => {
+          timeout = this.timer.setTimeout(resolve, 1_000);
+        }),
+      ]);
+    } finally {
+      if (timeout) {
+        this.timer.clearTimeout(timeout);
       }
     }
   }
@@ -5184,22 +5183,18 @@ export class DevicePool {
     exited: Promise<void>,
     timeoutMs: number,
   ): Promise<boolean> {
-    const timeout = new Error("Tracked process exit timed out");
+    let timeout: NodeJS.Timeout | undefined;
     try {
-      return await raceWithDeadline(
+      return await Promise.race([
         exited.then(() => true),
-        {
-          timer: this.timer,
-          timeoutMs,
-          label: "Tracked process exit",
-          timeoutError: () => timeout,
-        },
-      );
-    } catch (error) {
-      if (error === timeout) {
-        return false;
+        new Promise<boolean>((resolve) => {
+          timeout = this.timer.setTimeout(() => resolve(false), timeoutMs);
+        }),
+      ]);
+    } finally {
+      if (timeout) {
+        this.timer.clearTimeout(timeout);
       }
-      throw error;
     }
   }
 

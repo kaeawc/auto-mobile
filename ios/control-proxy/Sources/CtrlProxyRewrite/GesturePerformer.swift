@@ -1,5 +1,6 @@
 import Foundation
 import ObjCExceptionCatcher
+import os
 #if os(iOS)
     import UIKit
 #endif
@@ -32,6 +33,8 @@ import ObjCExceptionCatcher
 /// with a non-blocking wait.
 @MainActor
 public final class GesturePerformer: GesturePerforming {
+    private let logger = Logger(subsystem: "dev.jasonpearson.automobile", category: "GesturePerformer")
+
     public enum GestureError: LocalizedError {
         case noApplication
         case elementNotFound(String)
@@ -716,12 +719,20 @@ public final class GesturePerformer: GesturePerforming {
         // MARK: - Text Input
 
         private func fieldText(_ el: XCUIElement) -> String {
-            let snapshot = el.snapshot()
-            return GesturePerformer.fieldText(
-                snapshotValue: snapshot.value as? String,
-                value: el.value as? String,
-                placeholderValue: snapshot.placeholderValue
-            )
+            do {
+                let snapshot = try catchingObjCException { try el.snapshot() }
+                return GesturePerformer.fieldText(
+                    snapshotValue: snapshot.value as? String,
+                    value: el.value as? String,
+                    placeholderValue: snapshot.placeholderValue
+                )
+            } catch {
+                // Text can still be read from the element when its snapshot is unavailable.
+                logger.warning("Text field snapshot failed; reading element value: \(error)")
+                let value = el.value as? String
+                let placeholder = el.placeholderValue
+                return value == placeholder ? "" : value ?? ""
+            }
         }
 
         /// Resolve the XCUIApplication to use for text-input accessibility queries.

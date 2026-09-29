@@ -497,4 +497,9 @@ export interface SessionContext {
   createdAt: number;
   /** Admission queue ordering this socket's requests (issue #6387) */
   requestQueue: SocketRequestAdmissionQueue;
+  /**
+   * Abort controllers for this socket's queued or in-flight requests, keyed by
+   * request id, so a client cancel frame can abandon one (issue #6384).
+   */
+  requestCancellations: Map<string, AbortController>;
 }

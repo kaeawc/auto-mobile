@@ -62,6 +62,12 @@ final class ValueBox<Element: Sendable>: @unchecked Sendable {
     var values: [Element] { storage.withLock { $0 } }
 }
 
+final class FakeMonotonicClock: Sendable {
+    private let milliseconds = OSAllocatedUnfairLock<Int64>(initialState: 0)
+    func now() -> Int64 { milliseconds.withLock { $0 } }
+    func advance(by delta: Int64) { milliseconds.withLock { $0 += delta } }
+}
+
 func makeTestServer(
     failureCoordinator: CommandFailureCoordinator? = nil,
     handler: @escaping @Sendable (WebSocketRequest) -> any WebSocketResponsePayload = { _ in
@@ -70,7 +76,11 @@ func makeTestServer(
     flush: [PerfTiming]? = nil,
     frameToken: String? = nil,
     onPresence: (@Sendable (Bool) -> Void)? = nil,
-    broadcastSink: (@Sendable (Data) -> Void)? = nil
+    broadcastSink: (@Sendable (Data) -> Void)? = nil,
+    busyBudgetMs: Int64 = WebSocketServer.defaultBusyBudgetMs,
+    monotonicNowMs: @escaping @Sendable () -> Int64 = {
+        Int64(ProcessInfo.processInfo.systemUptime * 1000)
+    }
 )
     -> WebSocketServer
 {
@@ -83,6 +93,8 @@ func makeTestServer(
         onSdkEventBatch: nil,
         drainLogEvents: nil,
         onClientPresenceChanged: onPresence,
-        broadcastSink: broadcastSink
+        broadcastSink: broadcastSink,
+        busyBudgetMs: busyBudgetMs,
+        monotonicNowMs: monotonicNowMs
     )
 }

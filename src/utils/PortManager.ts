@@ -89,6 +89,9 @@ function errnoCode(error: unknown): string | undefined {
  * fake runtime instead of mutating the process-global `Bun.listen`.
  */
 export class BunPortAvailabilityChecker implements PortAvailabilityChecker {
+  /** Cached once per checker: does this host have an IPv6 loopback at all? */
+  private ipv6LoopbackAvailable: boolean | undefined;
+
   public constructor(
     private readonly bun: BunRuntime | undefined = (globalThis as { Bun?: BunRuntime }).Bun,
   ) {}
@@ -105,11 +108,55 @@ export class BunPortAvailabilityChecker implements PortAvailabilityChecker {
     // closed. IPv6 is best-effort: a host with no IPv6 loopback configured
     // (Docker with IPv6 disabled, some CI runners) throws EADDRNOTAVAIL for
     // every ::1 bind, which is "that family is unavailable here", not "the
-    // port is busy" — but only for that narrow, recognized set of errnos.
+    // port is busy". That is decided once per checker by an ephemeral-port
+    // probe (see hasIpv6Loopback), so per-port ::1 failures stay strict.
     if (!this.probeRequired(bun, "127.0.0.1", port)) {
       return false;
     }
+    if (!this.hasIpv6Loopback(bun)) {
+      return true;
+    }
     return this.probeOptionalFamily(bun, "::1", port);
+  }
+
+  /**
+   * One-time IPv6 loopback family check. Binding `::1` on port 0 (ephemeral)
+   * cannot fail because a port is busy, so a failure there with a recognized
+   * family-unavailable errno — or with no errno at all, which is how Bun
+   * reports a missing IPv6 loopback on some Linux containers — means the
+   * family is absent and every per-port `::1` probe is skipped. Any other
+   * errno (e.g. `EMFILE`) is inconclusive and keeps the strict per-port probe.
+   */
+  private hasIpv6Loopback(bun: BunRuntime): boolean {
+    if (this.ipv6LoopbackAvailable === undefined) {
+      this.ipv6LoopbackAvailable = this.probeIpv6LoopbackFamily(bun);
+    }
+    return this.ipv6LoopbackAvailable;
+  }
+
+  private probeIpv6LoopbackFamily(bun: BunRuntime): boolean {
+    let server: BunTcpServer | undefined;
+    try {
+      server = bun.listen({ hostname: "::1", port: 0, socket: noopSocketHandler });
+      return true;
+    } catch (error) {
+      const code = errnoCode(error);
+      if (code === undefined || FAMILY_UNAVAILABLE_CODES.has(code)) {
+        // Safe to swallow: an ephemeral bind can't hit a busy port, so this
+        // only means the host has no IPv6 loopback; IPv4 is still required.
+        logger.debug(
+          `[PortManager] ::1 loopback unavailable on this host, skipping IPv6 probes: ${error}`,
+        );
+        return false;
+      }
+      // Safe to swallow: inconclusive, so fall back to strict per-port ::1 probes.
+      logger.debug(
+        `[PortManager] ::1 loopback family probe inconclusive, probing per port: ${error}`,
+      );
+      return true;
+    } finally {
+      server?.stop(true);
+    }
   }
 
   /** IPv4: any bind failure means the port cannot be used, full stop. */

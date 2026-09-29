@@ -560,6 +560,33 @@ const noRawTimerRule = {
   },
 };
 
+// New operation races should use the shared deadline and abort cleanup seam.
+const noRawPromiseRaceRule = {
+  meta: {
+    type: "problem",
+    messages: {
+      rawRace:
+        "Use raceWithDeadline() instead. Import { raceWithDeadline } from 'utils/raceWithDeadline'.",
+    },
+  },
+  create(context) {
+    return {
+      CallExpression(node) {
+        const callee = node.callee;
+        if (
+          callee?.type === "MemberExpression" &&
+          callee.object?.type === "Identifier" &&
+          callee.object.name === "Promise" &&
+          callee.property?.type === "Identifier" &&
+          callee.property.name === "race"
+        ) {
+          context.report({ node, messageId: "rawRace" });
+        }
+      },
+    };
+  },
+};
+
 // Bans reading a field off an MCP envelope's `structuredContent` directly (the
 // #2907 dead-read foot-gun: only success/error are hoisted, so a missing field
 // is a silent undefined). Matches any MemberExpression whose object is itself a
@@ -1398,6 +1425,7 @@ const plugin = {
     "no-bare-expect": noBareExpectRule,
     "stress-explicit-timeout": stressExplicitTimeoutRule,
     "no-extension-import": noExtensionImportRule,
+    "no-raw-promise-race": noRawPromiseRaceRule,
     "no-raw-timer": noRawTimerRule,
     "no-raw-selector-field-read": noRawSelectorFieldReadRule,
     "no-structured-content-read": noStructuredContentReadRule,

@@ -1984,6 +1984,13 @@ describe("Simctl", function () {
       expect(openCalls()).toHaveLength(0);
     });
 
+    test("opening a specific simulator does not activate the app twice", async function () {
+      simctl = new Simctl(null, recordingExec("Aqua"), new FakeTimer(), "darwin");
+      expect(await simctl.openSimulatorApp("device-udid")).toBe(true);
+      expect(openCalls()).toHaveLength(1);
+      expect(calls.filter((call) => call.file === "osascript")).toHaveLength(0);
+    });
+
     test("caches the headless detection so launchctl is probed at most once", async function () {
       simctl = new Simctl(null, recordingExec("Aqua"), new FakeTimer(), "darwin");
       await simctl.openSimulatorApp();

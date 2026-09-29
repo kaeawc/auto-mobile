@@ -2714,27 +2714,8 @@ export class SimCtlClient implements SimCtl {
     await trackAmbient("open -a Simulator", () =>
       this.execAsync("open", ["-a", "Simulator"], undefined, signal),
     );
-    // If a specific device is requested, focus it by switching to it
-    // --args -CurrentDeviceUDID only works on fresh launch; for already-running
-    // Simulator, we activate the app which brings all device windows forward
-    if (udid) {
-      try {
-        await trackAmbient("osascript activate Simulator", () =>
-          this.execAsync(
-            "osascript",
-            ["-e", 'tell application "Simulator" to activate'],
-            undefined,
-            signal,
-          ),
-        );
-      } catch (error) {
-        if (signal?.aborted) {
-          throw error;
-        }
-        logger.debug(`[iOS] Could not activate Simulator.app for ${udid}: ${error}`);
-      }
-    }
-
+    // The start presenter already limits this to one call per boot. `open -a`
+    // presents the app; activating it again would steal focus a second time.
     return true;
   }
 

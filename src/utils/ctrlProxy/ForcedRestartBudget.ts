@@ -16,6 +16,7 @@ export class ForcedRestartBudget {
   private suspendedReason: string | undefined;
   private inFlight = false;
   private generation = 0;
+  private firstAttemptAtMs: number | undefined;
 
   constructor(
     private readonly timer: Timer = defaultTimer,
@@ -25,10 +26,21 @@ export class ForcedRestartBudget {
       multiplier: 2,
       maxDelayMs: 300_000,
     }),
+    private readonly maxElapsedMs?: number,
   ) {
     if (!Number.isInteger(maxAttempts) || maxAttempts < 1) {
       throw new Error("Forced restart maxAttempts must be a positive integer");
     }
+    if (maxElapsedMs !== undefined && (!Number.isFinite(maxElapsedMs) || maxElapsedMs <= 0)) {
+      throw new Error("Forced restart maxElapsedMs must be positive and finite");
+    }
+  }
+
+  /** Time left in this recovery episode; the first admitted attempt starts the clock. */
+  timeRemainingMs(): number | undefined {
+    return this.firstAttemptAtMs === undefined || this.maxElapsedMs === undefined
+      ? undefined
+      : Math.max(0, this.firstAttemptAtMs + this.maxElapsedMs - this.timer.now());
   }
 
   /** Reports the current admission state, including the next retry time while backing off. */
@@ -38,6 +50,15 @@ export class ForcedRestartBudget {
         state: "suspended",
         attempts: this.attempts,
         lastFailureReason: this.suspendedReason,
+      };
+    }
+    if (this.timeRemainingMs() === 0) {
+      return {
+        state: "exhausted",
+        attempts: this.attempts,
+        lastFailureReason:
+          `Recovery exceeded ${this.maxElapsedMs} ms` +
+          (this.lastFailureReason ? `; last failure: ${this.lastFailureReason}` : ""),
       };
     }
     if (this.attempts >= this.maxAttempts) {
@@ -68,6 +89,7 @@ export class ForcedRestartBudget {
       return undefined;
     }
     this.inFlight = true;
+    this.firstAttemptAtMs ??= this.timer.now();
     return ++this.generation;
   }
 
@@ -90,6 +112,9 @@ export class ForcedRestartBudget {
     if (token !== undefined && (!this.inFlight || token !== this.generation)) {
       return false;
     }
+    if (token !== undefined && this.snapshot().state === "exhausted") {
+      return false;
+    }
     this.rearm("restart succeeded");
     return true;
   }
@@ -107,6 +132,7 @@ export class ForcedRestartBudget {
     this.generation++;
     this.inFlight = false;
     this.attempts = 0;
+    this.firstAttemptAtMs = undefined;
     this.lastFailureReason = undefined;
     this.nextAttemptAtMs = undefined;
     this.suspendedReason = undefined;

@@ -10,12 +10,16 @@ import { FakeTimer } from "../../../fakes/FakeTimer";
 import type { CtrlProxyIosManager } from "../../../../src/utils/IOSCtrlProxyManager";
 import { FakeIOSCtrlProxyManager } from "../../../fakes/FakeIOSCtrlProxyManager";
 import { ForcedRestartBudget } from "../../../../src/utils/ctrlProxy/ForcedRestartBudget";
+import { fixedBackoff } from "../../../../src/utils/Backoff";
+import { ActionableError } from "../../../../src/models/ActionableError";
 import { ViewHierarchy } from "../../../../src/features/observe/ViewHierarchy";
 import { FakeAdbClientFactory } from "../../../fakes/FakeAdbClientFactory";
 import type { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
 
-function createFakeManager(timer: FakeTimer): CtrlProxyIosManager & { forceRestartCount: number } {
-  const budget = new ForcedRestartBudget(timer);
+function createFakeManager(
+  timer: FakeTimer,
+  budget = new ForcedRestartBudget(timer),
+): CtrlProxyIosManager & { forceRestartCount: number } {
   const manager = {
     getForcedRestartBudget: () => budget,
     forceRestartCount: 0,
@@ -148,10 +152,14 @@ describe("IOSCtrlProxyClient restart threshold", () => {
       fakeTimer,
       () => fakeManager,
     );
-    for (const delay of [0, 30_000, 60_000]) {
+    for (const [attempt, delay] of [0, 30_000, 60_000].entries()) {
       fakeTimer.advanceTime(delay);
       client.ensureRecoveryStarted();
-      expect(await client.awaitRecovery(20_000)).toBe("failed");
+      if (attempt === 2) {
+        await expect(client.awaitRecovery(20_000)).rejects.toBeInstanceOf(ActionableError);
+      } else {
+        expect(await client.awaitRecovery(20_000)).toBe("failed");
+      }
     }
     expect(fakeManager.getForcedRestartBudget().snapshot().state).toBe("exhausted");
     // A fresh device-presence event is the existing external rearm seam.
@@ -161,6 +169,34 @@ describe("IOSCtrlProxyClient restart threshold", () => {
     expect(await client.awaitRecovery(20_000)).toBe("recovered");
     await fakeTimer.advanceTimeAsync(2000);
     expect(fakeManager.getForcedRestartBudget().snapshot()).toMatchObject({
+      state: "idle",
+      attempts: 0,
+    });
+  });
+
+  test("a stable connection on the second attempt succeeds within the budget", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const manager = createFakeManager(timer);
+    let reconnectWorks = false;
+    const failed = createInstantFailureWebSocketFactory(timer);
+    const succeeds = createSuccessWebSocketFactory(timer);
+    client = IOSCtrlProxyClient.createForTesting(
+      testDevice,
+      8765,
+      (url) => (reconnectWorks ? succeeds(url) : failed(url)),
+      timer,
+      () => manager,
+    );
+    client.ensureRecoveryStarted();
+    expect(await client.awaitRecovery(20_000)).toBe("failed");
+    expect(manager.getForcedRestartBudget().snapshot().attempts).toBe(1);
+    timer.advanceTime(30_000);
+    reconnectWorks = true;
+    client.ensureRecoveryStarted();
+    expect(await client.awaitRecovery(20_000)).toBe("recovered");
+    expect(manager.forceRestartCount).toBe(2);
+    expect(manager.getForcedRestartBudget().snapshot()).toMatchObject({
       state: "idle",
       attempts: 0,
     });
@@ -181,10 +217,14 @@ describe("IOSCtrlProxyClient restart threshold", () => {
       timer,
       () => manager,
     );
-    for (const delay of [0, 30_000, 60_000]) {
+    for (const [attempt, delay] of [0, 30_000, 60_000].entries()) {
       timer.advanceTime(delay);
       client.ensureRecoveryStarted();
-      await client.awaitRecovery(20_000);
+      if (attempt === 2) {
+        await expect(client.awaitRecovery(20_000)).rejects.toBeInstanceOf(ActionableError);
+      } else {
+        await client.awaitRecovery(20_000);
+      }
       await timer.advanceTimeAsync(2000);
     }
     expect(manager.getForcedRestartBudget().snapshot()).toMatchObject({
@@ -211,6 +251,34 @@ describe("IOSCtrlProxyClient restart threshold", () => {
     client.ensureRecoveryStarted();
     expect(await client.awaitRecovery(20_000)).toBe("failed");
     expect(manager.getForcedRestartBudget().snapshot().attempts).toBe(1);
+  });
+
+  test("time limit returns a typed terminal error while runner restart is unfinished", async () => {
+    const timer = new FakeTimer();
+    const budget = new ForcedRestartBudget(timer, 3, fixedBackoff(1_000), 5_000);
+    const manager = createFakeManager(timer, budget);
+    manager.forceRestart = async () => {
+      manager.forceRestartCount++;
+      await new Promise<void>(() => {});
+    };
+    client = IOSCtrlProxyClient.createForTesting(
+      testDevice,
+      8765,
+      createInstantFailureWebSocketFactory(timer),
+      timer,
+      () => manager,
+    );
+    client.ensureRecoveryStarted();
+    for (let i = 0; i < 8; i++) {
+      await Promise.resolve();
+    }
+    expect(manager.forceRestartCount).toBe(1);
+    const waiting = client.awaitRecovery(20_000);
+    timer.advanceTime(5_000);
+    await expect(waiting).rejects.toThrow(/recovery exhausted.*Recovery exceeded 5000 ms/);
+    await expect(client.awaitRecovery(20_000)).rejects.toBeInstanceOf(ActionableError);
+    expect(budget.snapshot().state).toBe("exhausted");
+    expect(budget.tryBeginAttempt()).toBeUndefined();
   });
 
   test("recovery waits for the replacement socket after an old reconnect stabilizes during teardown", async () => {

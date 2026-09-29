@@ -110,13 +110,21 @@ describe("HomeScreen", () => {
     getInstanceSpy = null;
   });
 
-  function createIosHomeScreen(): { action: HomeScreen; client: FakeIOSCtrlProxy } {
+  function createIosHomeScreen(options?: {
+    simulator?: boolean;
+    simctl?: {
+      executeCommandArgs: (
+        args: string[],
+        timeoutMs?: number,
+      ) => Promise<{ stdout: string; stderr: string }>;
+    };
+  }): { action: HomeScreen; client: FakeIOSCtrlProxy } {
     const iosDevice: BootedDevice = {
       name: "iPhone 15",
       platform: "ios",
-      deviceId: "ios-device",
+      deviceId: options?.simulator ? "A1B2C3D4-E5F6-7890-ABCD-EF1234567890" : "ios-device",
     };
-    const action = new HomeScreen(iosDevice, fakeAdb, fakeTimer);
+    const action = new HomeScreen(iosDevice, fakeAdb, fakeTimer, options?.simctl);
     (action as any).observeScreen = fakeObserveScreen;
     (action as any).window = fakeWindow;
     (action as any).awaitIdle = fakeAwaitIdle;
@@ -225,6 +233,101 @@ describe("HomeScreen", () => {
       expect(result.success).toBe(true);
       expect(readCount).toBe(3);
       expect(fakeTimer.getSleepHistory()).toEqual([300, 600]);
+    });
+
+    test("runner timeout on simulator falls back to simctl and verifies SpringBoard", async () => {
+      const calls: string[][] = [];
+      const { action, client } = createIosHomeScreen({
+        simulator: true,
+        simctl: {
+          executeCommandArgs: async (args) => {
+            calls.push(args);
+            return { stdout: "", stderr: "" };
+          },
+        },
+      });
+      client.setFailureMode("pressHome", new Error("Press home timed out after 2000ms"));
+      client.setHierarchyData(iosHierarchy("com.apple.springboard"));
+      const pressSpy = spyOn(client, "requestPressHome");
+
+      const result = await action.execute();
+      expect(result.success).toBe(true);
+      expect(pressSpy.mock.calls[0]?.[0]).toBe(2000);
+      expect(calls).toEqual([
+        ["launch", "A1B2C3D4-E5F6-7890-ABCD-EF1234567890", "com.apple.springboard"],
+      ]);
+      expect(client.getHierarchyRequestCount()).toBe(1);
+    });
+
+    test("simulator fallback failure reports the failed launch", async () => {
+      const { action, client } = createIosHomeScreen({
+        simulator: true,
+        simctl: {
+          executeCommandArgs: async () => {
+            throw new Error("simctl launch rejected SpringBoard");
+          },
+        },
+      });
+      client.setFailureMode("pressHome", new Error("Press home timed out after 2000ms"));
+
+      await expect(action.execute()).rejects.toThrow(/simctl launch rejected SpringBoard/);
+    });
+
+    test("simctl launch cannot report success while the app remains foreground", async () => {
+      const { action, client } = createIosHomeScreen({
+        simulator: true,
+        simctl: { executeCommandArgs: async () => ({ stdout: "", stderr: "" }) },
+      });
+      client.setFailureMode("pressHome", new Error("Press home timed out after 2000ms"));
+      client.setHierarchyData(iosHierarchy("com.apple.Maps"));
+
+      await expect(action.execute()).rejects.toThrow(
+        /simctl launched SpringBoard.*com\.apple\.Maps/,
+      );
+      expect(fakeTimer.getSleepHistory()).toEqual([100, 200]);
+    });
+
+    test("simulator falls back when the runner reports success but the app remains foreground", async () => {
+      const calls: string[][] = [];
+      const { action, client } = createIosHomeScreen({
+        simulator: true,
+        simctl: {
+          executeCommandArgs: async (args) => {
+            calls.push(args);
+            return { stdout: "", stderr: "" };
+          },
+        },
+      });
+      const hierarchies = [
+        iosHierarchy("com.apple.Maps"),
+        iosHierarchy("com.apple.Maps"),
+        iosHierarchy("com.apple.springboard"),
+      ];
+      let readCount = 0;
+      spyOn(client, "requestHierarchySync").mockImplementation(async () => ({
+        hierarchy: hierarchies[Math.min(readCount++, hierarchies.length - 1)],
+      }));
+
+      expect((await action.execute()).success).toBe(true);
+      expect(calls).toHaveLength(1);
+      expect(readCount).toBe(3);
+      expect(fakeTimer.getSleepHistory()).toEqual([100]);
+    });
+
+    test("physical iOS failure never invokes simctl", async () => {
+      let launches = 0;
+      const { action, client } = createIosHomeScreen({
+        simctl: {
+          executeCommandArgs: async () => {
+            launches++;
+            return { stdout: "", stderr: "" };
+          },
+        },
+      });
+      client.setFailureMode("pressHome", new Error("hardware home failed"));
+
+      await expect(action.execute()).rejects.toThrow("hardware home failed");
+      expect(launches).toBe(0);
     });
   });
 

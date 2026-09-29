@@ -18,6 +18,9 @@ import type {
 } from "./types";
 import { sendCommand } from "../DeviceServiceUtils";
 
+// Leave room in the tool budget for simulator fallback and foreground verification.
+export const IOS_SIMULATOR_HOME_RUNNER_TIMEOUT_MS = 2000;
+
 /**
  * Delegate class for handling navigation operations.
  */

@@ -54,6 +54,8 @@ final class RewriteFakeGesturePerformer: GesturePerforming {
     var actionCalls = 0
     var activateAccessibilityLinkCalls = 0
     var setOrientationCalls = 0
+    var onPressHome: (() -> Void)?
+    var pressHomeError: CommandError?
 
     func pressKey(key: String, modifiers: [String]) throws {
         if let keyError { throw keyError }
@@ -112,7 +114,11 @@ final class RewriteFakeGesturePerformer: GesturePerforming {
     }
 
     func getOrientation() -> String { orientation }
-    func pressHome() throws {}
+    func pressHome() throws {
+        if let pressHomeError { throw pressHomeError }
+        onPressHome?()
+    }
+
     func pressBack() throws {}
     func shake() throws { shakeCalls += 1 }
     func pressButton(_: String) throws {}

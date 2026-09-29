@@ -919,7 +919,17 @@ final class CommandHandler: CommandHandling {
             }
         }
 
-        // Explicit state transition: home screen means springboard is now foreground.
+        // A completed XCUIDevice press can be a no-op on some simulators. Detect
+        // foreground before updating the tracked app, or later observations lie.
+        guard await elementLocator.refreshForegroundBundleId() == "com.apple.springboard" else {
+            return WebSocketResponse.error(
+                type: ResponseType.pressHomeResult.rawValue,
+                requestId: request.requestId,
+                error: "Home press did not bring SpringBoard to the foreground",
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        }
+
         await trackedAsync("switchForegroundApp") {
             await self.elementLocator.switchForegroundApp(bundleId: "com.apple.springboard")
         }

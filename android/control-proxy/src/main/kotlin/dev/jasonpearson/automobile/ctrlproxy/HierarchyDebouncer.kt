@@ -81,6 +81,16 @@ internal constructor(
     private const val TAG = "HierarchyDebouncer"
   }
 
+  /*
+   * Threading (#6447): this class is driven from the AccessibilityService main thread
+   * (onAccessibilityEvent), the injected IO scope (debounced and immediate extractions) and caller
+   * threads (extractNowBlocking/extractAfterQuiescence/reset). Every field below is guarded by
+   * [eventLock], a short lock that is never held across extractHierarchy. [extractionLock] serializes
+   * whole extractions; when both are needed the order is always extractionLock -> eventLock.
+   */
+  private val eventLock = Any()
+  private val extractionLock = Any()
+
   // Last known structural hash
   private var lastStructuralHash: Int = 0
 
@@ -91,11 +101,12 @@ internal constructor(
 
   // Debounce job
   private var debounceJob: Job? = null
-  private val eventLock = Any()
-  private val extractionLock = Any()
   private var extractionInFlight = false
   private var pendingRefresh = false
   private var lastUnsolicitedStart: Long? = null
+
+  // Extractions launched by extractNow, tracked so getState/reset can see and cancel them.
+  private val immediateJobs = mutableSetOf<Job>()
 
   fun setUnsolicitedIntervalMs(intervalMs: Long) {
     synchronized(eventLock) {
@@ -174,24 +185,22 @@ internal constructor(
       return
     }
 
-    // Retain animation skipping, but remember the last event for a trailing refresh.
-    if (inAnimationMode && now < animationModeEndTime) {
-      skippedEventCount++
-      synchronized(eventLock) {
+    synchronized(eventLock) {
+      // Retain animation skipping, but remember the last event for a trailing refresh.
+      if (inAnimationMode && now < animationModeEndTime) {
+        skippedEventCount++
         stats.coalescedEvents.incrementAndGet()
         pendingRefresh = true
         schedulePendingRefresh()
+        return
       }
-      return
-    }
 
-    // Exit animation mode if window expired
-    if (inAnimationMode && now >= animationModeEndTime) {
-      Log.d(TAG, "Exiting animation mode after skipping $skippedEventCount events")
-      inAnimationMode = false
-    }
+      // Exit animation mode if window expired
+      if (inAnimationMode) {
+        Log.d(TAG, "Exiting animation mode after skipping $skippedEventCount events")
+        inAnimationMode = false
+      }
 
-    synchronized(eventLock) {
       if (
         pendingRefresh ||
           extractionInFlight ||
@@ -209,8 +218,18 @@ internal constructor(
    * immediately after launching the extraction.
    */
   fun extractNow(disableAllFiltering: Boolean = false) {
-    inAnimationMode = false
-    scope.launch { extractAndCompare(disableAllFiltering = disableAllFiltering) }
+    val job =
+      scope.launch(start = CoroutineStart.LAZY) {
+        extractAndCompare(disableAllFiltering = disableAllFiltering)
+      }
+    synchronized(eventLock) {
+      inAnimationMode = false
+      immediateJobs.add(job)
+    }
+    // Also fires for a job cancelled before it ever ran (reset or scope cancellation).
+    job.invokeOnCompletion { synchronized(eventLock) { immediateJobs.remove(job) } }
+    // Start outside eventLock: an undispatched start would take extractionLock under it.
+    job.start()
   }
 
   /**
@@ -228,8 +247,8 @@ internal constructor(
     disableAllFiltering: Boolean = false,
     snapshotOptions: HierarchySnapshotOptions = HierarchySnapshotOptions(),
   ): ViewHierarchy? {
-    inAnimationMode = false
     synchronized(eventLock) {
+      inAnimationMode = false
       if (!extractionInFlight) {
         debounceJob?.cancel()
         debounceJob = null
@@ -285,8 +304,8 @@ internal constructor(
           debounceJob = null
         }
         pendingRefresh = false
+        inAnimationMode = false
       }
-      inAnimationMode = false
 
       val hierarchy =
         kotlinx.coroutines.runBlocking {
@@ -408,53 +427,52 @@ internal constructor(
           val structuralHash = StructuralHasher.computeHash(hierarchy)
           perfProvider.endOperation("computeHash")
 
-          if (structuralHash == lastStructuralHash) {
-            stats.unchangedCaptures.incrementAndGet()
-            // Structure unchanged - likely animation
-            // Enter animation mode to skip subsequent events
-            inAnimationMode = true
-            animationModeEndTime = timeProvider.currentTimeMillis() + animationSkipWindowMs
+          // Compare-and-publish under eventLock so the hash, animation window and cached
+          // hierarchy always describe the same extraction and are visible to the main thread.
+          synchronized(eventLock) {
+            if (structuralHash == lastStructuralHash) {
+              stats.unchangedCaptures.incrementAndGet()
+              // Structure unchanged - likely animation
+              // Enter animation mode to skip subsequent events
+              inAnimationMode = true
+              animationModeEndTime = timeProvider.currentTimeMillis() + animationSkipWindowMs
 
-            resultToEmit =
-              HierarchyResult.Unchanged(
-                hierarchy = hierarchy,
-                hash = structuralHash,
-                extractionTimeMs = extractionTime,
-                skippedEventCount = skippedEventCount,
+              resultToEmit =
+                HierarchyResult.Unchanged(
+                  hierarchy = hierarchy,
+                  hash = structuralHash,
+                  extractionTimeMs = extractionTime,
+                  skippedEventCount = skippedEventCount,
+                )
+
+              Log.d(
+                TAG,
+                "Structure unchanged (hash=$structuralHash), entering animation mode for ${animationSkipWindowMs}ms",
               )
-            hierarchyToCache = hierarchy
+            } else {
+              // Structure changed - this is a real content change
+              val oldHash = lastStructuralHash
+              inAnimationMode = false
+              lastStructuralHash = structuralHash
 
-            Log.d(
-              TAG,
-              "Structure unchanged (hash=$structuralHash), entering animation mode for ${animationSkipWindowMs}ms",
-            )
+              resultToEmit =
+                HierarchyResult.Changed(
+                  hierarchy = hierarchy,
+                  hash = structuralHash,
+                  extractionTimeMs = extractionTime,
+                )
 
-            // Reset skipped count
+              Log.d(TAG, "Structure changed (oldHash=$oldHash, newHash=$structuralHash)")
+            }
             skippedEventCount = 0
-          } else {
-            // Structure changed - this is a real content change
-            val oldHash = lastStructuralHash
-            inAnimationMode = false
-            lastStructuralHash = structuralHash
-
-            resultToEmit =
-              HierarchyResult.Changed(
-                hierarchy = hierarchy,
-                hash = structuralHash,
-                extractionTimeMs = extractionTime,
-              )
             hierarchyToCache = hierarchy
-
-            Log.d(TAG, "Structure changed (oldHash=$oldHash, newHash=$structuralHash)")
-
-            skippedEventCount = 0
+            lastHierarchy = hierarchy
           }
         }
       } finally {
         // End perf block BEFORE emit to prevent nesting if emit suspends
         perfProvider.end()
       }
-      hierarchyToCache?.let { lastHierarchy = it }
     }
 
     // Emit AFTER perf block is closed - this can suspend without causing nesting issues
@@ -502,15 +520,16 @@ internal constructor(
   }
 
   /** Get current state for debugging. */
-  fun getState(): DebounceState {
-    return DebounceState(
-      lastHash = lastStructuralHash,
-      inAnimationMode = inAnimationMode,
-      animationModeEndTime = animationModeEndTime,
-      skippedEventCount = skippedEventCount,
-      hasActiveJob = debounceJob?.isActive == true,
-    )
-  }
+  fun getState(): DebounceState =
+    synchronized(eventLock) {
+      DebounceState(
+        lastHash = lastStructuralHash,
+        inAnimationMode = inAnimationMode,
+        animationModeEndTime = animationModeEndTime,
+        skippedEventCount = skippedEventCount,
+        hasActiveJob = debounceJob?.isActive == true || immediateJobs.any { it.isActive },
+      )
+    }
 
   /** Reset all state (for testing or reconnection). */
   fun reset() {
@@ -518,14 +537,18 @@ internal constructor(
       debounceJob?.cancel()
       debounceJob = null
       pendingRefresh = false
+      // Copy first: cancelling can run a completion handler that mutates the set inline.
+      val immediate = immediateJobs.toList()
+      immediateJobs.clear()
+      immediate.forEach { it.cancel() }
       extractionInFlight = false
       lastUnsolicitedStart = null
+      lastStructuralHash = 0
+      inAnimationMode = false
+      animationModeEndTime = 0
+      skippedEventCount = 0
+      lastHierarchy = null
     }
-    lastStructuralHash = 0
-    inAnimationMode = false
-    animationModeEndTime = 0
-    skippedEventCount = 0
-    lastHierarchy = null
   }
 
   /** Debugging state info. */

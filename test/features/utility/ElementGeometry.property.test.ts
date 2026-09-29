@@ -24,13 +24,14 @@ const validBounds: fc.Arbitrary<ElementBounds> = fc
   )
   .map(([x1, y1, w, h]) => ({ left: x1, top: y1, right: x1 + w, bottom: y1 + h }));
 
-// Strictly positive width AND height, so directional swipes make real progress.
+// At least two pixels in each dimension, so floored swipe endpoints can make
+// directional progress while remaining within the bounds.
 const nonDegenerateBounds: fc.Arbitrary<ElementBounds> = fc
   .tuple(
     fc.integer({ min: -5000, max: 5000 }),
     fc.integer({ min: -5000, max: 5000 }),
-    fc.integer({ min: 1, max: 10_000 }),
-    fc.integer({ min: 1, max: 10_000 }),
+    fc.integer({ min: 2, max: 10_000 }),
+    fc.integer({ min: 2, max: 10_000 }),
   )
   .map(([x1, y1, w, h]) => ({ left: x1, top: y1, right: x1 + w, bottom: y1 + h }));
 
@@ -131,6 +132,23 @@ describe("DefaultElementGeometry.getVisibleBounds (property-based)", () => {
 });
 
 describe("DefaultElementGeometry.getSwipeWithinBounds (property-based)", () => {
+  test("opposing swipes have equal travel and integer coordinates", () => {
+    fc.assert(
+      fc.property(nonDegenerateBounds, (b) => {
+        const swipes = (["up", "down", "left", "right"] as const).map((d) =>
+          geometry.getSwipeWithinBounds(d, b),
+        );
+        const [up, down, left, right] = swipes;
+        return (
+          Math.abs(up.endY - up.startY) === Math.abs(down.endY - down.startY) &&
+          Math.abs(left.endX - left.startX) === Math.abs(right.endX - right.startX) &&
+          swipes.every((s) => [s.startX, s.startY, s.endX, s.endY].every(Number.isInteger))
+        );
+      }),
+      { seed: 6522, numRuns: 50 },
+    );
+  });
+
   test("every swipe endpoint stays within the container bounds", () => {
     fc.assert(
       fc.property(validBounds, direction, (b, d) => {

@@ -249,7 +249,6 @@ class PersistentSocketClient {
     method: string,
     params: Record<string, unknown>,
     timeoutMs?: number,
-    clientDeadlineMs = SOCKET_REQUEST_DEADLINE_MS,
   ): Promise<DaemonResponse> {
     const id = randomUUID();
     this.socket.write(
@@ -274,10 +273,10 @@ class PersistentSocketClient {
         this.socket.destroy();
         reject(
           new Error(
-            `No response to ${method} within ${clientDeadlineMs}ms — bounded socket-test deadline hit`,
+            `No response to ${method} within ${SOCKET_REQUEST_DEADLINE_MS}ms — bounded socket-test deadline hit`,
           ),
         );
-      }, clientDeadlineMs);
+      }, SOCKET_REQUEST_DEADLINE_MS);
       this.waiters.set(id, (response) => {
         defaultTimer.clearTimeout(deadline);
         resolve(response);
@@ -829,15 +828,13 @@ describe("UnixSocketServer MCP forward serialization", () => {
     const client = new PersistentSocketClient();
     await client.connect(socketPath);
     try {
-      // This response is deliberately held until the other request completes.
-      // Its watchdog must cover both phases; the other request keeps its own
-      // 10-second bound so a stalled concurrent forward still fails promptly.
-      const first = client.request(
-        "tools/call",
-        { name: "tapOn", arguments: { deviceId: "device-1" } },
-        undefined,
-        2 * SOCKET_REQUEST_DEADLINE_MS,
-      );
+      const first = client.request("tools/call", {
+        name: "tapOn",
+        arguments: { deviceId: "device-1" },
+      });
+      // If the second request fails, keep the held first request's watchdog
+      // rejection from escaping before cleanup can release it.
+      void first.catch(() => {});
       await firstCallStarted.promise;
       const other = client.request(
         "tools/call",
@@ -846,12 +843,22 @@ describe("UnixSocketServer MCP forward serialization", () => {
       );
       // The device-2 call starts on receipt, so its budget is measured from its
       // own start, not from how long device-1 keeps the socket busy.
-      await expect(other).resolves.toMatchObject({ success: true });
+      try {
+        expect(await other).toMatchObject({ success: true });
+      } catch (error) {
+        throw new Error(
+          `Device-2 forward failed; callTool entered for [${calledDevices.join(", ")}]`,
+          {
+            cause: error,
+          },
+        );
+      }
       fakeTimer.advanceTime(501);
       releaseFirstCall.resolve();
       await expect(first).resolves.toMatchObject({ success: true });
       expect(calledDevices).toEqual(["device-1", "device-2"]);
     } finally {
+      releaseFirstCall.resolve();
       client.close();
     }
   });

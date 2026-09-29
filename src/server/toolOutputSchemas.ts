@@ -30,6 +30,7 @@ const imeCapabilitiesSchema = z.object({
 /** Keyboard has several actions; these fields describe its installed-IME results. */
 export const keyboardResultSchema = z
   .object({
+    method: z.enum(["escape", "dismissKey", "returnKey"]).optional(),
     installed: z
       .array(
         z

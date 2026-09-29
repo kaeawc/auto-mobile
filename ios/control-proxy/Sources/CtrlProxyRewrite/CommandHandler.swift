@@ -881,17 +881,18 @@ final class CommandHandler: CommandHandling {
         perf.serial("handleKeyboard")
         defer { perf.end() }
 
-        let open = try await trackedAsync("keyboard") {
+        let result = try await trackedAsync("keyboard") {
             try await self.gesturePerformer.keyboard(action: action)
         }
-        let success = keyboardActionSucceeded(action: action, open: open)
+        let success = keyboardActionSucceeded(action: action, open: result.open)
 
         return KeyboardResponse(
             requestId: request.requestId,
             success: success,
-            open: open,
+            open: result.open,
             totalTimeMs: totalTimeMs(from: startTime),
-            error: success ? nil : "Keyboard did not \(action.lowercased())"
+            error: success ? nil : "Keyboard did not \(action.lowercased())",
+            method: result.method
         )
     }
 

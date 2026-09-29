@@ -427,6 +427,33 @@ describe("Keyboard", () => {
     }
   });
 
+  test.each([
+    ["escape", "Keyboard closed"],
+    ["dismissKey", "Keyboard closed"],
+    [
+      "returnKey",
+      "Keyboard closed with Return; the field may have submitted or committed autocorrect",
+    ],
+  ] as const)("ios close passes through %s", async (method, message) => {
+    const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+      requestKeyboard: async () => ({
+        success: true,
+        open: false,
+        totalTimeMs: 5,
+        method,
+      }),
+    } as IOSCtrlProxyClient);
+
+    try {
+      const keyboard = new Keyboard(iosDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
+      const result = await keyboard.execute("close");
+
+      expect(result).toMatchObject({ success: true, open: false, method, message });
+    } finally {
+      getInstanceSpy.mockRestore();
+    }
+  });
+
   test("ios open fails when keyboard remains closed", async () => {
     const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
       requestKeyboard: async () => ({

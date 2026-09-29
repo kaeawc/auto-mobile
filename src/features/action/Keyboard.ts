@@ -171,21 +171,29 @@ export class Keyboard {
       action === "detect" ||
       (action === "open" && result.open) ||
       (action === "close" && !result.open);
-    const message = this.keyboardMessage(action, result.open);
+    const message = this.keyboardMessage(action, result.open, result.method);
     return {
       success,
       open: result.open,
       message,
+      ...(action === "close" && result.method ? { method: result.method } : {}),
       ...(success ? {} : { error: message }),
     };
   }
 
-  private keyboardMessage(action: KeyboardAction, open: boolean): string {
+  private keyboardMessage(
+    action: KeyboardAction,
+    open: boolean,
+    method?: "escape" | "dismissKey" | "returnKey",
+  ): string {
     if (action === "detect") {
       return open ? "Keyboard is open" : "Keyboard is closed";
     }
     if (action === "open") {
       return open ? "Keyboard opened" : "Keyboard did not open";
+    }
+    if (!open && method === "returnKey") {
+      return "Keyboard closed with Return; the field may have submitted or committed autocorrect";
     }
     return open ? "Keyboard did not close" : "Keyboard closed";
   }

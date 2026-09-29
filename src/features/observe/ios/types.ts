@@ -198,6 +198,7 @@ export type CtrlProxySelectAllResult = BaseResult;
 /** Keyboard action result from CtrlProxy iOS */
 export interface CtrlProxyKeyboardResult extends BaseResult {
   open: boolean;
+  method?: "escape" | "dismissKey" | "returnKey";
 }
 
 /** Discrete keyboard key result from CtrlProxy iOS */

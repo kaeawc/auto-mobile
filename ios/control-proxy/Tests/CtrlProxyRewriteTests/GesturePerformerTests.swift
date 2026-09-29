@@ -1,6 +1,44 @@
 @testable import CtrlProxyRewrite
 import XCTest
 
+final class KeyboardCloseKeySelectionTests: XCTestCase {
+    func testKeyboardResponseEncodesDismissalMethod() throws {
+        let response = KeyboardResponse(
+            requestId: "close",
+            success: true,
+            open: false,
+            totalTimeMs: 1,
+            method: "returnKey"
+        )
+        let decoded = try JSONDecoder().decode(KeyboardResponse.self, from: JSONEncoder().encode(response))
+        XCTAssertEqual(decoded.method, "returnKey")
+    }
+
+    func testDismissKeyPrecedesReturnAcrossButtonsAndKeys() {
+        let candidates = GesturePerformer.closeKeyCandidates([
+            (label: "Search", identifier: ""),
+            (label: "", identifier: "RETURN_ARROW"),
+            (label: "Hide Keyboard", identifier: ""),
+        ])
+        XCTAssertEqual(candidates.map(\.index), [2, 0, 1])
+        XCTAssertEqual(candidates.map(\.method), ["dismissKey", "returnKey", "returnKey"])
+    }
+
+    func testRecognizesSubmitLabelsAndIgnoresUnrelatedKeys() {
+        let labels = ["Go", "Search", "Done", "Next", "Send", "Return", "Space", "Delete", "Google"]
+        let candidates = GesturePerformer.closeKeyCandidates(labels.map { (label: $0, identifier: "") })
+        XCTAssertEqual(candidates.map(\.index), [0, 1, 2, 3, 4, 5])
+        XCTAssertTrue(candidates.allSatisfy { $0.method == "returnKey" })
+    }
+
+    func testNoFallbackWhenKeyboardHasNoDismissOrSubmitKey() {
+        XCTAssertTrue(GesturePerformer.closeKeyCandidates([
+            (label: "Space", identifier: ""),
+            (label: "Delete", identifier: ""),
+        ]).isEmpty)
+    }
+}
+
 // Host-testable pure helpers of the rewrite's `@MainActor` `GesturePerformer`, mirroring
 // `CtrlProxyTests.ClipboardResolutionTests` and `CtrlProxyTests.GesturePerformerSemanticLinkTests`.
 // These statics are `nonisolated static` on the rewrite class specifically so a

@@ -231,6 +231,25 @@ public final class GesturePerformer: GesturePerforming {
         return nil
     }
 
+    nonisolated static func closeKeyCandidates(_ labels: [(label: String, identifier: String)]) -> [(
+        index: Int,
+        method: String
+    )] {
+        let keys = labels.map { "\($0.label) \($0.identifier)".lowercased() }
+        let dismiss = keys.indices.filter {
+            keys[$0].contains("dismiss keyboard") || keys[$0].contains("hide keyboard") ||
+                keys[$0].contains("dismisskeyboard") || keys[$0].contains("hidekeyboard")
+        }.map { (index: $0, method: "dismissKey") }
+        let returns = keys.indices.filter { index in
+            let words = keys[index].components(separatedBy: CharacterSet.alphanumerics.inverted)
+            let isSubmit = ["return", "go", "search", "done", "next", "send"].contains { words.contains($0) }
+                || keys[index].contains("returnarrow")
+                || ["↵", "⏎", "↩"].contains { keys[index].contains($0) }
+            return !dismiss.contains(where: { $0.index == index }) && isSubmit
+        }.map { (index: $0, method: "returnKey") }
+        return dismiss + returns
+    }
+
     #if canImport(XCTest) && os(iOS)
         private weak var application: XCUIApplication?
         /// Strong reference to keep the application alive when set via updateApplication.
@@ -940,17 +959,17 @@ public final class GesturePerformer: GesturePerforming {
             }
         }
 
-        public func keyboard(action: String) throws -> Bool {
+        public func keyboard(action: String) throws -> KeyboardActionResult {
             guard let app = resolveTextInputApp() else {
                 throw GestureError.noApplication
             }
 
             switch action.lowercased() {
             case "detect":
-                return isKeyboardVisible(app: app)
+                return KeyboardActionResult(open: isKeyboardVisible(app: app))
             case "open":
                 if isKeyboardVisible(app: app) {
-                    return true
+                    return KeyboardActionResult(open: true)
                 }
                 guard let focused = resolveFocusedTextElement(app: app) else {
                     throw GestureError.notSupported("No focused text input to open keyboard")
@@ -958,13 +977,49 @@ public final class GesturePerformer: GesturePerforming {
                 try catchingObjCException {
                     focused.tap()
                 }
-                return waitForKeyboardVisibility(app: app, expected: true)
+                return KeyboardActionResult(open: waitForKeyboardVisibility(app: app, expected: true))
             case "close":
                 if !isKeyboardVisible(app: app) {
-                    return false
+                    return KeyboardActionResult(open: false)
                 }
-                try typeKeyboardKey(.escape, app: app)
-                return waitForKeyboardVisibility(app: app, expected: false)
+                do {
+                    try typeKeyboardKey(.escape, app: app)
+                } catch {
+                    print("[GesturePerformer] keyboard Escape failed: \(error)")
+                }
+                if !waitForKeyboardVisibility(app: app, expected: false) {
+                    return KeyboardActionResult(open: false, method: "escape")
+                }
+
+                let keys: [XCUIElement]
+                let labels: [(label: String, identifier: String)]
+                do {
+                    keys = try catchingObjCException {
+                        app.keyboards.buttons.allElementsBoundByIndex + app.keyboards.keys.allElementsBoundByIndex
+                    }
+                    labels = try keys.map { key in
+                        try catchingObjCException { (label: key.label, identifier: key.identifier) }
+                    }
+                } catch {
+                    print("[GesturePerformer] keyboard close key lookup failed: \(error)")
+                    let open = isKeyboardVisible(app: app)
+                    return KeyboardActionResult(open: open, method: open ? nil : "escape")
+                }
+                for candidate in Self.closeKeyCandidates(labels) {
+                    do {
+                        try catchingObjCException { keys[candidate.index].tap() }
+                    } catch {
+                        print("[GesturePerformer] keyboard close key tap failed: \(error)")
+                        if !isKeyboardVisible(app: app) {
+                            return KeyboardActionResult(open: false, method: candidate.method)
+                        }
+                        continue
+                    }
+                    if !waitForKeyboardVisibility(app: app, expected: false) {
+                        return KeyboardActionResult(open: false, method: candidate.method)
+                    }
+                }
+                return KeyboardActionResult(open: true)
             default:
                 throw GestureError.notSupported("Keyboard action: \(action)")
             }
@@ -2111,7 +2166,7 @@ public final class GesturePerformer: GesturePerforming {
             throw GestureError.notSupported("XCUITest only available on iOS")
         }
 
-        public func keyboard(action _: String) throws -> Bool {
+        public func keyboard(action _: String) throws -> KeyboardActionResult {
             throw GestureError.notSupported("XCUITest only available on iOS")
         }
 

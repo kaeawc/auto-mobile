@@ -7,6 +7,7 @@ import {
   WebSocketState,
 } from "../../../fakes/FakeWebSocket";
 import { FakeTimer } from "../../../fakes/FakeTimer";
+import { ActionableError } from "../../../../src/models/ActionableError";
 
 describe("CtrlProxyStorage (iOS)", function () {
   let testDevice: BootedDevice;
@@ -124,6 +125,7 @@ describe("CtrlProxyStorage (iOS)", function () {
 
         const sentMsg = commandPayloads(socket!)[0];
         expect(sentMsg.type).toBe("list_preference_files");
+        expect(sentMsg.appId).toBe("com.example.app");
         expect(typeof sentMsg.requestId).toBe("string");
 
         socket!.simulateMessage(
@@ -194,6 +196,7 @@ describe("CtrlProxyStorage (iOS)", function () {
 
         const sentMsg = commandPayloads(socket!)[0];
         expect(sentMsg.type).toBe("get_preferences");
+        expect(sentMsg.appId).toBe("com.example.app");
         expect(sentMsg.fileName).toBe("Standard");
 
         socket!.simulateMessage(
@@ -243,6 +246,7 @@ describe("CtrlProxyStorage (iOS)", function () {
 
         const sentMsg = commandPayloads(socket!)[0];
         expect(sentMsg.type).toBe("get_preference");
+        expect(sentMsg.appId).toBe("com.example.app");
         expect(sentMsg.fileName).toBe("Standard");
         expect(sentMsg.key).toBe("theme");
 
@@ -319,6 +323,7 @@ describe("CtrlProxyStorage (iOS)", function () {
       );
 
       try {
+        client.bindSession("session-1");
         const resultPromise = client.setPreference(
           "com.example.app",
           "Standard",
@@ -332,10 +337,12 @@ describe("CtrlProxyStorage (iOS)", function () {
 
         const sentMsg = commandPayloads(socket!)[0];
         expect(sentMsg.type).toBe("set_preference");
+        expect(sentMsg.appId).toBe("com.example.app");
         expect(sentMsg.fileName).toBe("Standard");
         expect(sentMsg.key).toBe("theme");
         expect(sentMsg.value).toBe("dark");
         expect(sentMsg.valueType).toBe("STRING");
+        expect(sentMsg.sessionId).toBe("session-1");
 
         socket!.simulateMessage(
           JSON.stringify({
@@ -407,6 +414,7 @@ describe("CtrlProxyStorage (iOS)", function () {
       );
 
       try {
+        client.bindSession("session-1");
         const resultPromise = client.removePreference("com.example.app", "Standard", "theme");
         const socket = await waitForSocket(getSocket);
         await waitForSocketOpen(socket);
@@ -414,8 +422,10 @@ describe("CtrlProxyStorage (iOS)", function () {
 
         const sentMsg = commandPayloads(socket!)[0];
         expect(sentMsg.type).toBe("remove_preference");
+        expect(sentMsg.appId).toBe("com.example.app");
         expect(sentMsg.fileName).toBe("Standard");
         expect(sentMsg.key).toBe("theme");
+        expect(sentMsg.sessionId).toBe("session-1");
 
         socket!.simulateMessage(
           JSON.stringify({
@@ -448,6 +458,7 @@ describe("CtrlProxyStorage (iOS)", function () {
       );
 
       try {
+        client.bindSession("session-1");
         const resultPromise = client.clearPreferenceStore(
           "com.example.app",
           "com.example.settings",
@@ -458,7 +469,9 @@ describe("CtrlProxyStorage (iOS)", function () {
 
         const sentMsg = commandPayloads(socket!)[0];
         expect(sentMsg.type).toBe("clear_preferences");
+        expect(sentMsg.appId).toBe("com.example.app");
         expect(sentMsg.fileName).toBe("com.example.settings");
+        expect(sentMsg.sessionId).toBe("session-1");
 
         socket!.simulateMessage(
           JSON.stringify({
@@ -504,6 +517,29 @@ describe("CtrlProxyStorage delegate outcomes (6 ops x 4)", () => {
   beforeEach(() => {
     h = createIosDelegateHarness();
     storage = new CtrlProxyStorage(h.context);
+  });
+
+  test.each([
+    "The target app is not active in the foreground; bring it to the foreground and retry",
+    "iOS key-value storage app id mismatch",
+  ])("surfaces runner conflict as an ActionableError: %s", async (message) => {
+    const promise = storage.setPreference(
+      "com.app",
+      "Standard",
+      "theme",
+      "dark",
+      "STRING",
+      TIMEOUT,
+    );
+    await flush();
+    h.resolveLast({ success: false, totalTimeMs: 1, error: message });
+    try {
+      await promise;
+      throw new Error("Expected preference mutation to fail");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ActionableError);
+      expect((error as ActionableError).message).toBe(message);
+    }
   });
 
   interface Op {

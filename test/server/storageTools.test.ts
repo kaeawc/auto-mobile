@@ -1,18 +1,25 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { registerStorageTools, validateTypeForPlatform } from "../../src/server/storageTools";
+import {
+  registerStorageTools,
+  resetStorageToolsDependencies,
+  setStorageToolsDependenciesForTesting,
+  validateTypeForPlatform,
+} from "../../src/server/storageTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { ActionableError } from "../../src/models";
+import type { BootedDevice } from "../../src/models";
 
 describe("Storage Tools Registration", () => {
   beforeEach(() => {
-    (ToolRegistry as any).tools.clear();
+    ToolRegistry.clearTools();
     serverConfig.setEmbeddedSdkEnabled(true);
   });
 
   afterEach(() => {
-    (ToolRegistry as any).tools.clear();
+    ToolRegistry.clearTools();
     serverConfig.setEmbeddedSdkEnabled(false);
+    resetStorageToolsDependencies();
   });
 
   test("registers all three storage write tools", () => {
@@ -140,6 +147,80 @@ describe("Storage Tools Registration", () => {
           type: "STRING",
         }),
       ).not.toThrow();
+    });
+
+    test("accepts numeric and boolean values for typed storage", () => {
+      registerStorageTools();
+      const tool = ToolRegistry.getTool("setKeyValue");
+      const base = { platform: "ios", appId: "com.example.app", name: "Standard", key: "count" };
+      expect(tool!.schema.parse({ ...base, value: 42, type: "INT" }).value).toBe(42);
+      expect(tool!.schema.parse({ ...base, value: false, type: "BOOLEAN" }).value).toBe(false);
+    });
+
+    test("coerces a numeric value before sending it to the iOS client", async () => {
+      registerStorageTools();
+      const calls: Array<{
+        appId: string;
+        suite: string;
+        key: string;
+        value: string;
+        type: string;
+      }> = [];
+      setStorageToolsDependenciesForTesting({
+        iosClientFactory: () => ({
+          setPreference: async (appId, suite, key, value, type) => {
+            calls.push({ appId, suite, key, value, type });
+          },
+          removePreference: async () => {},
+          clearPreferenceStore: async () => {},
+        }),
+      });
+      const tool = ToolRegistry.getAllTools({ includeUnavailable: true }).find(
+        (candidate) => candidate.name === "setKeyValue",
+      );
+      const device: BootedDevice = { deviceId: "ios-test", name: "iPhone", platform: "ios" };
+      const args = tool!.schema.parse({
+        appId: "com.example.app",
+        name: "duoStore",
+        key: "kvDuo",
+        value: 42,
+        type: "INT",
+      });
+      await tool!.deviceAwareHandler!(device, args);
+      expect(calls).toEqual([
+        { appId: "com.example.app", suite: "duoStore", key: "kvDuo", value: "42", type: "INT" },
+      ]);
+    });
+
+    test("surfaces unavailable iOS SDK storage as an ActionableError", async () => {
+      registerStorageTools();
+      let sdkCalls = 0;
+      setStorageToolsDependenciesForTesting({
+        iosClientFactory: () => ({
+          setPreference: async () => {
+            sdkCalls += 1;
+            throw new Error(
+              "iOS key-value storage requires the target app to embed and initialize the AutoMobile SDK",
+            );
+          },
+          removePreference: async () => {},
+          clearPreferenceStore: async () => {},
+        }),
+      });
+      const tool = ToolRegistry.getAllTools({ includeUnavailable: true }).find(
+        (candidate) => candidate.name === "setKeyValue",
+      );
+      const device: BootedDevice = { deviceId: "ios-test", name: "iPhone", platform: "ios" };
+      await expect(
+        tool!.deviceAwareHandler!(device, {
+          appId: "com.example.app",
+          name: "duoStore",
+          key: "kvDuo",
+          value: "42",
+          type: "INT",
+        }),
+      ).rejects.toThrow(ActionableError);
+      expect(sdkCalls).toBe(1);
     });
 
     test("rejects missing required fields", () => {

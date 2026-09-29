@@ -26,6 +26,7 @@ public final class CtrlProxy {
     private let sdkHierarchyCache: SdkHierarchyCache
     private let sdkHierarchyClient: SdkHierarchyClient
     private let sdkDatabaseClient: SdkDatabaseClient
+    private let sdkPreferenceClient: SdkPreferenceClient
     private let elementLocator: ElementLocator
     private let gesturePerformer: GesturePerformer
     private let hierarchyDebouncer: HierarchyDebouncer
@@ -58,7 +59,7 @@ public final class CtrlProxy {
     /// test (`CtrlProxyLifecycleTests`) that substitutes a `FakeProxyTimer`.
     public convenience init(
         port: UInt16 = defaultPort,
-        storageInspector: (any StorageInspecting)? = DefaultStorageInspecting(),
+        storageInspector: (any StorageInspecting)? = nil,
         coordinator: CommandFailureCoordinator? = nil
     ) {
         self.init(
@@ -78,7 +79,7 @@ public final class CtrlProxy {
     /// unambiguous against that convenience one.
     init(
         port: UInt16 = defaultPort,
-        storageInspector: (any StorageInspecting)? = DefaultStorageInspecting(),
+        storageInspector: (any StorageInspecting)? = nil,
         hierarchyPollTimer: any ProxyTimer,
         coordinator: CommandFailureCoordinator? = nil,
         hasClients: (@Sendable () -> Bool)? = nil,
@@ -89,6 +90,7 @@ public final class CtrlProxy {
         let sdkHierarchyCache = SdkHierarchyCache()
         let sdkHierarchyClient = SdkHierarchyClient()
         let sdkDatabaseClient = SdkDatabaseClient()
+        let sdkPreferenceClient = SdkPreferenceClient()
         #if os(iOS)
             let elementLocator = ElementLocator(perf: perf)
         #else
@@ -108,6 +110,7 @@ public final class CtrlProxy {
             sdkHierarchyClient: sdkHierarchyClient,
             sdkHierarchyCache: sdkHierarchyCache,
             sdkDatabaseClient: sdkDatabaseClient,
+            sdkPreferenceClient: sdkPreferenceClient,
             hierarchyDebouncer: hierarchyDebouncer,
             frameContext: frameContext
         )
@@ -146,6 +149,7 @@ public final class CtrlProxy {
         self.sdkHierarchyCache = sdkHierarchyCache
         self.sdkHierarchyClient = sdkHierarchyClient
         self.sdkDatabaseClient = sdkDatabaseClient
+        self.sdkPreferenceClient = sdkPreferenceClient
         self.elementLocator = elementLocator
         self.gesturePerformer = gesturePerformer
         self.hierarchyDebouncer = hierarchyDebouncer

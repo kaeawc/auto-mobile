@@ -2,6 +2,8 @@ import Foundation
 
 public struct RequestSetPreference: Decodable, Sendable {
     public var requestId: String?
+    public var appId: String?
+    public var sessionId: String?
     public var key: String
     public var value: String?
     public var valueType: String

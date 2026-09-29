@@ -1317,7 +1317,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       (value) => {
         this._storage = value;
       },
-      () => new CtrlProxyStorage(this.createDelegateContext()),
+      () => new CtrlProxyStorage(this.createDelegateContext(), () => this.boundSessionId),
     );
   }
 

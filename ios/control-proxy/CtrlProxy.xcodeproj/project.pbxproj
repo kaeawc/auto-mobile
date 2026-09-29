@@ -89,6 +89,7 @@
 		760A66A0FCBBD82C78F6FC92 /* SdkHierarchyFetching.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CB3829011D3086CDB1E76EB /* SdkHierarchyFetching.swift */; };
 		76AF1BC9492B889D1EF00682 /* NetworkErrorSimulationDTO.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6BA709265F7E2B2597159DCD /* NetworkErrorSimulationDTO.swift */; };
 		787A16707A2491C62C5763C3 /* SdkStorageCapabilities.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3EF41BE84B004D16947F5C5 /* SdkStorageCapabilities.swift */; };
+		7BDD419F6FB6A41A3017007D /* SdkPreferenceClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 520057BB8FF70A53CA17C826 /* SdkPreferenceClient.swift */; };
 		7CD72A94D6DD1BBFCC5A8355 /* RequestStorageCapabilities.swift in Sources */ = {isa = PBXBuildFile; fileRef = E75FD4F7E1A317B6151CDD1C /* RequestStorageCapabilities.swift */; };
 		7EAF9F56CFE709431DB8DE33 /* AppSwitcherDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08125C56479E153437ACE83C /* AppSwitcherDetector.swift */; };
 		7F0A1FBC49EE6CFD37F53294 /* CtrlProxyUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 802717F6B1F37809C4806C23 /* CtrlProxyUITests.swift */; };
@@ -306,6 +307,7 @@
 		4EB47E18423E1A008B101D2C /* RequestAction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RequestAction.swift; sourceTree = "<group>"; };
 		4F8A0CC4855579D12DEB7BFA /* BundleId.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BundleId.swift; sourceTree = "<group>"; };
 		51908107F65189FFE5F1B48E /* WebSocketFraming.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSocketFraming.swift; sourceTree = "<group>"; };
+		520057BB8FF70A53CA17C826 /* SdkPreferenceClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkPreferenceClient.swift; sourceTree = "<group>"; };
 		5221B349FCFBC47E268B8C47 /* StorageEntriesResponse.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorageEntriesResponse.swift; sourceTree = "<group>"; };
 		542D4AB842B818229F5C7B80 /* VoiceOverToggling.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceOverToggling.swift; sourceTree = "<group>"; };
 		5546E563FFB0CEE4BFC158E9 /* Highlight.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Highlight.swift; sourceTree = "<group>"; };
@@ -527,6 +529,7 @@
 				3240EAF1FF9AF78B790635AA /* SdkHierarchyExtractor.swift */,
 				3CB3829011D3086CDB1E76EB /* SdkHierarchyFetching.swift */,
 				8EF6BFF065F9DB523A393ACB /* SdkHighlightOutcome.swift */,
+				520057BB8FF70A53CA17C826 /* SdkPreferenceClient.swift */,
 				E3B7971543104EE96224A55A /* SemanticLinkActivation.swift */,
 				4E3B4AB77576629153CC8D2E /* ServerListening.swift */,
 				0A992C21EBABF539A2F7C333 /* StorageError.swift */,
@@ -1023,6 +1026,7 @@
 				760A66A0FCBBD82C78F6FC92 /* SdkHierarchyFetching.swift in Sources */,
 				D6995CAAA55D6B0E05D6A89F /* SdkHierarchyServerInfo.swift in Sources */,
 				FDE8DFD325AF94C838839E56 /* SdkHighlightOutcome.swift in Sources */,
+				7BDD419F6FB6A41A3017007D /* SdkPreferenceClient.swift in Sources */,
 				72A66F5FBE1BD997634A2A4E /* SdkSemanticLink.swift in Sources */,
 				787A16707A2491C62C5763C3 /* SdkStorageCapabilities.swift in Sources */,
 				CDE214EDD5DBEFBBB213FA17 /* SdkStorageDiagnostic.swift in Sources */,

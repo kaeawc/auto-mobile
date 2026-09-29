@@ -42,6 +42,7 @@
         private let queue = DispatchQueue(label: "dev.jasonpearson.automobile.sdk.hierarchy-server")
         private weak var tracker: (any SdkHierarchyServing)?
         private let databaseRouteHandler = SdkDatabaseRouteHandler()
+        private let preferenceRouteHandler = SdkPreferenceRouteHandler()
 
         init(
             tracker: any SdkHierarchyServing,
@@ -173,6 +174,10 @@
                     } else if request.contains("POST /db/table-structure") {
                         self.handleBodyRoute(connection, initialData: requestData) {
                             self.databaseRouteHandler.handleTableStructure(body: $0)
+                        }
+                    } else if request.contains("POST /preferences") {
+                        self.handleBodyRoute(connection, initialData: requestData) {
+                            self.preferenceRouteHandler.handle(body: $0)
                         }
                     } else {
                         self.sendResponse(connection, statusCode: 404, body: Data("{\"error\":\"not_found\"}".utf8))

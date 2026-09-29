@@ -7,6 +7,7 @@
  */
 
 import { logger } from "../../../utils/logger";
+import { ActionableError } from "../../../models/ActionableError";
 import type { DelegateContext } from "./types";
 import type {
   PreferenceFile,
@@ -26,19 +27,22 @@ import type {
 export class CtrlProxyStorage {
   private readonly context: DelegateContext;
 
-  constructor(context: DelegateContext) {
+  constructor(
+    context: DelegateContext,
+    private readonly sessionId?: () => string | null,
+  ) {
     this.context = context;
   }
 
   /**
    * List all UserDefaults suites.
    *
-   * @param _packageName - Unused on iOS (UserDefaults are per-process), kept for API parity with Android
+   * @param packageName - Target app bundle identifier
    * @param timeoutMs - Maximum time to wait for response in milliseconds
    * @returns Promise resolving to array of preference files (suites)
    */
   async listPreferenceFiles(
-    _packageName: string,
+    packageName: string,
     timeoutMs: number = 5000,
   ): Promise<PreferenceFile[]> {
     const startTime = this.context.timer.now();
@@ -62,6 +66,7 @@ export class CtrlProxyStorage {
     const message = JSON.stringify({
       type: "list_preference_files",
       requestId,
+      appId: packageName,
     });
 
     const ws = this.context.getWebSocket();
@@ -70,7 +75,7 @@ export class CtrlProxyStorage {
 
     const result = await promise;
     if (!result.success) {
-      throw new Error(result.error || "Failed to list preference files");
+      throw new ActionableError(result.error || "Failed to list preference files");
     }
 
     return result.files || [];
@@ -79,13 +84,13 @@ export class CtrlProxyStorage {
   /**
    * Get all key-value entries from a UserDefaults suite.
    *
-   * @param _packageName - Unused on iOS, kept for API parity
+   * @param packageName - Target app bundle identifier
    * @param fileName - Suite name ("Standard" for default suite, or custom suite name)
    * @param timeoutMs - Maximum time to wait for response in milliseconds
    * @returns Promise resolving to array of key-value entries
    */
   async getPreferenceEntries(
-    _packageName: string,
+    packageName: string,
     fileName: string,
     timeoutMs: number = 5000,
   ): Promise<KeyValueEntry[]> {
@@ -110,6 +115,7 @@ export class CtrlProxyStorage {
     const message = JSON.stringify({
       type: "get_preferences",
       requestId,
+      appId: packageName,
       fileName,
     });
 
@@ -121,7 +127,7 @@ export class CtrlProxyStorage {
 
     const result = await promise;
     if (!result.success) {
-      throw new Error(result.error || "Failed to get preference entries");
+      throw new ActionableError(result.error || "Failed to get preference entries");
     }
 
     return result.entries || [];
@@ -130,14 +136,14 @@ export class CtrlProxyStorage {
   /**
    * Get a single preference entry by key.
    *
-   * @param _packageName - Unused on iOS, kept for API parity
+   * @param packageName - Target app bundle identifier
    * @param fileName - Suite name
    * @param key - The key to retrieve
    * @param timeoutMs - Maximum time to wait for response in milliseconds
    * @returns Promise resolving to the entry if found, null if not found
    */
   async getPreference(
-    _packageName: string,
+    packageName: string,
     fileName: string,
     key: string,
     timeoutMs: number = 5000,
@@ -164,6 +170,7 @@ export class CtrlProxyStorage {
     const message = JSON.stringify({
       type: "get_preference",
       requestId,
+      appId: packageName,
       fileName,
       key,
     });
@@ -176,7 +183,7 @@ export class CtrlProxyStorage {
 
     const result = await promise;
     if (!result.success) {
-      throw new Error(result.error || "Failed to get preference");
+      throw new ActionableError(result.error || "Failed to get preference");
     }
 
     return result.found && result.entry ? result.entry : null;
@@ -185,7 +192,7 @@ export class CtrlProxyStorage {
   /**
    * Set a preference value.
    *
-   * @param _packageName - Unused on iOS, kept for API parity
+   * @param packageName - Target app bundle identifier
    * @param fileName - Suite name
    * @param key - The key to set
    * @param value - The value to set (serialized as string, or null)
@@ -193,7 +200,7 @@ export class CtrlProxyStorage {
    * @param timeoutMs - Maximum time to wait for response in milliseconds
    */
   async setPreference(
-    _packageName: string,
+    packageName: string,
     fileName: string,
     key: string,
     value: string | null,
@@ -218,13 +225,16 @@ export class CtrlProxyStorage {
       }),
     );
 
+    const sessionId = this.sessionId?.();
     const message = JSON.stringify({
       type: "set_preference",
       requestId,
+      appId: packageName,
       fileName,
       key,
       value,
       valueType: type,
+      ...(sessionId ? { sessionId } : {}),
     });
 
     const ws = this.context.getWebSocket();
@@ -235,20 +245,20 @@ export class CtrlProxyStorage {
 
     const result = await promise;
     if (!result.success) {
-      throw new Error(result.error || "Failed to set preference");
+      throw new ActionableError(result.error || "Failed to set preference");
     }
   }
 
   /**
    * Remove a preference entry.
    *
-   * @param _packageName - Unused on iOS, kept for API parity
+   * @param packageName - Target app bundle identifier
    * @param fileName - Suite name
    * @param key - The key to remove
    * @param timeoutMs - Maximum time to wait for response in milliseconds
    */
   async removePreference(
-    _packageName: string,
+    packageName: string,
     fileName: string,
     key: string,
     timeoutMs: number = 5000,
@@ -271,11 +281,14 @@ export class CtrlProxyStorage {
       }),
     );
 
+    const sessionId = this.sessionId?.();
     const message = JSON.stringify({
       type: "remove_preference",
       requestId,
+      appId: packageName,
       fileName,
       key,
+      ...(sessionId ? { sessionId } : {}),
     });
 
     const ws = this.context.getWebSocket();
@@ -286,19 +299,19 @@ export class CtrlProxyStorage {
 
     const result = await promise;
     if (!result.success) {
-      throw new Error(result.error || "Failed to remove preference");
+      throw new ActionableError(result.error || "Failed to remove preference");
     }
   }
 
   /**
    * Clear all preferences in a suite.
    *
-   * @param _packageName - Unused on iOS, kept for API parity
+   * @param packageName - Target app bundle identifier
    * @param fileName - Suite name to clear
    * @param timeoutMs - Maximum time to wait for response in milliseconds
    */
   async clearPreferenceStore(
-    _packageName: string,
+    packageName: string,
     fileName: string,
     timeoutMs: number = 5000,
   ): Promise<void> {
@@ -320,10 +333,13 @@ export class CtrlProxyStorage {
       }),
     );
 
+    const sessionId = this.sessionId?.();
     const message = JSON.stringify({
       type: "clear_preferences",
       requestId,
+      appId: packageName,
       fileName,
+      ...(sessionId ? { sessionId } : {}),
     });
 
     const ws = this.context.getWebSocket();
@@ -334,7 +350,7 @@ export class CtrlProxyStorage {
 
     const result = await promise;
     if (!result.success) {
-      throw new Error(result.error || "Failed to clear preferences");
+      throw new ActionableError(result.error || "Failed to clear preferences");
     }
   }
 }

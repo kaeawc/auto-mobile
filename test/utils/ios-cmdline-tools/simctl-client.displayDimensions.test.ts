@@ -1,16 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { SimCtlClient } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
 import type { SimulatorDeviceTypeProfileSource } from "../../../src/utils/ios-cmdline-tools/SimulatorDeviceTypeProfiles";
 import { createExecResult } from "../../../src/utils/execResult";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { loadDuoEnumerate } from "../../fixtures/loadDuoEnumerate";
 
 const UDID = "11111111-2222-3333-4444-555555555555";
-const duoEnumerate = readFileSync(
-  join(import.meta.dir, "../../fixtures/duo-enumerate.txt"),
-  "utf8",
-);
+const duoEnumerate = loadDuoEnumerate();
 
 describe("SimCtlClient display dimension enrichment", () => {
   test("publishes profile dimensions and both enumerated Duo screens", async () => {

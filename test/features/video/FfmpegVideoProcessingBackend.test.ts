@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { readFileSync } from "node:fs";
 import path from "node:path";
 import { PassThrough } from "node:stream";
 import {
@@ -32,11 +31,9 @@ import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeAdbProcess } from "../../fakes/FakeAdbProcess";
 import type { AdbExecutor } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { defaultTimer, type Timer } from "../../../src/utils/SystemTimer";
+import { loadDuoEnumerate } from "../../fixtures/loadDuoEnumerate";
 
-const duoEnumerate = readFileSync(
-  path.join(import.meta.dir, "../../fixtures/duo-enumerate.txt"),
-  "utf8",
-);
+const duoEnumerate = loadDuoEnumerate();
 
 function createProcessTracker(stderr: string[] = []): ProcessTracker {
   const process = new EventEmitter() as ProcessTracker["process"];

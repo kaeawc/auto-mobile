@@ -1,15 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import {
   parseSimulatorDisplays,
   selectLiveSimulatorDisplay,
 } from "../../../src/utils/ios-cmdline-tools/SimulatorDisplays";
+import { loadDuoEnumerate } from "../../fixtures/loadDuoEnumerate";
 
-const duoEnumerate = readFileSync(
-  join(import.meta.dir, "../../fixtures/duo-enumerate.txt"),
-  "utf8",
-);
+const duoEnumerate = loadDuoEnumerate();
 const singleEnumerate = duoEnumerate.replace(
   /    \(3\) LCD-1:\n[\s\S]*?(?=    \(5\) Resizable:)/,
   "",

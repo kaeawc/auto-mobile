@@ -1,14 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { SimCtlClient } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
 import type { BootedDevice } from "../../../src/models";
 import { createExecResult } from "../../../src/utils/execResult";
+import { loadDuoEnumerate } from "../../fixtures/loadDuoEnumerate";
 
-const duoEnumerate = readFileSync(
-  join(import.meta.dir, "../../fixtures/duo-enumerate.txt"),
-  "utf8",
-);
+const duoEnumerate = loadDuoEnumerate();
 const withoutInnerScreen = duoEnumerate.replace(
   /    \(3\) LCD-1:\n[\s\S]*?(?=    \(5\) Resizable:)/,
   "",

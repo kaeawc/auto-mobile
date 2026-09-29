@@ -58,12 +58,24 @@ export class KeepScreenAwakeManager {
 
     const svcState = await this.readSvcStayonState();
     if (await this.tryEnableSvcStayon()) {
-      return {
-        applied: true,
-        method: "svc",
-        svcWasEnabled: svcState.enabled,
-        originalStayOnWhilePluggedIn: svcState.value,
-      };
+      const verifiedSvcState = await this.readSvcStayonState();
+      if (verifiedSvcState.enabled === true) {
+        return {
+          applied: true,
+          method: "svc",
+          svcWasEnabled: svcState.enabled,
+          originalStayOnWhilePluggedIn: svcState.value,
+        };
+      }
+      if (verifiedSvcState.value === undefined) {
+        logger.warn(
+          `[KeepScreenAwake] Unable to verify svc stayon on ${this.device.deviceId}; falling back to settings`,
+        );
+      } else {
+        logger.warn(
+          `[KeepScreenAwake] svc stayon did not enable stay_on_while_plugged_in on ${this.device.deviceId}; falling back to settings`,
+        );
+      }
     }
 
     const settingsResult = await this.applySettingsFallback();
@@ -93,6 +105,7 @@ export class KeepScreenAwakeManager {
           "global",
           "stay_on_while_plugged_in",
           state.originalStayOnWhilePluggedIn,
+          "int",
         );
         if (restored) {
           return;
@@ -142,11 +155,17 @@ export class KeepScreenAwakeManager {
         "global",
         "stay_on_while_plugged_in",
         state.originalStayOnWhilePluggedIn,
+        "int",
       );
     }
 
     if (state.appliedSettings.screenOffTimeout) {
-      await this.restoreSetting("system", "screen_off_timeout", state.originalScreenOffTimeout);
+      await this.restoreSetting(
+        "system",
+        "screen_off_timeout",
+        state.originalScreenOffTimeout,
+        "long",
+      );
     }
   }
 
@@ -356,6 +375,7 @@ export class KeepScreenAwakeManager {
     scope: "global" | "system",
     key: string,
     originalValue?: string | null,
+    valueType: "int" | "long" = "int",
   ): Promise<boolean> {
     if (originalValue === undefined) {
       logger.warn(
@@ -368,7 +388,7 @@ export class KeepScreenAwakeManager {
       if (originalValue === null) {
         await this.deleteSetting(scope, key);
       } else {
-        await this.putSetting(scope, key, originalValue);
+        await this.putSetting(scope, key, originalValue, valueType);
       }
       return true;
     } catch (error) {

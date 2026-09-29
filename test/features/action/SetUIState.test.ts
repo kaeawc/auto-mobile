@@ -2154,6 +2154,7 @@ describe("SetUIState whole-call result deadline (issue #6222 reopen)", () => {
     const callStartMs = fakeTimer.now();
     const deadline = new ProgressExtendableDeadline(callStartMs, 30_000);
     fakeTimer.setTimeout(() => deadline.extendOnProgress(fakeTimer.now(), 60_000), 26_000);
+    let clearStarted = false;
 
     const setUIState = new SetUIState(device, null, {
       tapOnElement: {
@@ -2169,6 +2170,7 @@ describe("SetUIState whole-call result deadline (issue #6222 reopen)", () => {
       clearText: {
         execute: () =>
           new Promise<{ success: boolean }>((resolve) => {
+            clearStarted = true;
             fakeTimer.setTimeout(() => resolve({ success: true }), 30_000);
           }),
       },
@@ -2197,7 +2199,17 @@ describe("SetUIState whole-call result deadline (issue #6222 reopen)", () => {
       (listener) => deadline.onExtended(listener),
     );
 
-    await fakeTimer.advanceTimeAsync(60_000);
+    // Let the field reach its (fake-timer-driven) clear step before moving
+    // the clock; advancing earlier would drain every due event before the
+    // clear step's own timer exists.
+    for (let i = 0; i < 20 && !clearStarted; i++) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+    expect(clearStarted).toBe(true);
+    // Still before the extension (26s) and the old cutoff (27s).
+    expect(fakeTimer.now() - callStartMs).toBeLessThan(26_000);
+
+    await fakeTimer.advanceTimeAsync(callStartMs + 40_000 - fakeTimer.now());
     const result = await resultPromise;
 
     expect(result.fields[0].timedOut).toBeFalsy();

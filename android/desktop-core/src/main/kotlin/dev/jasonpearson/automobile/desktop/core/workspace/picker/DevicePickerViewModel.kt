@@ -63,6 +63,8 @@ sealed interface DevicePickerAction {
 
   data class ToggleArch(val arch: String) : DevicePickerAction
 
+  data class ToggleFormFactor(val formFactor: String) : DevicePickerAction
+
   data class SetQuery(val query: String) : DevicePickerAction
 
   data class ClearFilter(val dimension: FilterDimension) : DevicePickerAction
@@ -168,6 +170,8 @@ class DevicePickerViewModel(
         updateFilters { it.copy(osKeys = it.osKeys.toggle(action.osKey)) }
       is DevicePickerAction.ToggleArch ->
         updateFilters { it.copy(architectures = it.architectures.toggle(action.arch)) }
+      is DevicePickerAction.ToggleFormFactor ->
+        updateFilters { it.copy(formFactors = it.formFactors.toggle(action.formFactor)) }
       is DevicePickerAction.SetQuery -> updateFilters { it.copy(query = action.query) }
       is DevicePickerAction.ClearFilter -> clearFilter(action.dimension)
       is DevicePickerAction.ToggleSelect -> toggleSelect(action.deviceId)
@@ -607,6 +611,7 @@ class DevicePickerViewModel(
         FilterDimension.Platform -> it.copy(platforms = emptySet(), osKeys = emptySet())
         FilterDimension.OsVersion -> it.copy(osKeys = emptySet())
         FilterDimension.Architecture -> it.copy(architectures = emptySet())
+        FilterDimension.FormFactor -> it.copy(formFactors = emptySet())
       }
     }
   }

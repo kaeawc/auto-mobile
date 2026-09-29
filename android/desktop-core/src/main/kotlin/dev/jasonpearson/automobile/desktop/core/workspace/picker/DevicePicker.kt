@@ -266,6 +266,9 @@ private fun ActiveChips(filters: PickerFilters, onAction: (DevicePickerAction) -
     }
     filters.osKeys.forEach { add(it to { onAction(DevicePickerAction.ToggleOs(it)) }) }
     filters.architectures.forEach { add(it to { onAction(DevicePickerAction.ToggleArch(it)) }) }
+    filters.formFactors.forEach {
+      add(it to { onAction(DevicePickerAction.ToggleFormFactor(it)) })
+    }
   }
   if (chips.isEmpty()) return
   Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
@@ -490,5 +493,6 @@ private fun toggle(
     FilterDimension.Platform -> onAction(DevicePickerAction.TogglePlatform(Platform.valueOf(value)))
     FilterDimension.OsVersion -> onAction(DevicePickerAction.ToggleOs(value))
     FilterDimension.Architecture -> onAction(DevicePickerAction.ToggleArch(value))
+    FilterDimension.FormFactor -> onAction(DevicePickerAction.ToggleFormFactor(value))
   }
 }

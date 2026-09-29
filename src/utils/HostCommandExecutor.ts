@@ -13,6 +13,8 @@ export type HostCommandOptions = ExecRequestOptions;
 
 /** Narrow injectable long-lived process launcher shared by Android clients. */
 export type SpawnFn = (file: string, args: string[], options?: SpawnOptions) => ChildProcess;
+export type HostChildProcess = ChildProcess;
+export type HostSpawnOptions = SpawnOptions;
 
 export interface HostCommandExecutor {
   executeCommand(file: string, args?: string[], options?: HostCommandOptions): Promise<ExecResult>;

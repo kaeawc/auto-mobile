@@ -1,8 +1,8 @@
-import type { ChildProcess } from "node:child_process";
 import { z } from "zod/v4";
 import type { BootedDevice, HighlightOperationResult, HighlightShape } from "../../models";
 import {
   DefaultHostCommandExecutor,
+  type HostChildProcess as ChildProcess,
   type HostProcessExecutor,
 } from "../../utils/HostCommandExecutor";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";

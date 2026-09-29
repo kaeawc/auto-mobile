@@ -1,4 +1,7 @@
-import { type ChildProcess, type SpawnOptions } from "node:child_process";
+import type {
+  HostChildProcess as ChildProcess,
+  HostSpawnOptions as SpawnOptions,
+} from "../HostCommandExecutor";
 import { runDetachedFromPerf, trackAmbient } from "../PerfContext";
 import { ActionableError, ExecResult } from "../../models";
 import { logger } from "../logger";

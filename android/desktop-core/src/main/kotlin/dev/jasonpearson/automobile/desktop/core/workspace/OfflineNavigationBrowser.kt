@@ -34,7 +34,9 @@ import dev.jasonpearson.automobile.desktop.core.datasource.RealNavigationDataSou
 import dev.jasonpearson.automobile.desktop.core.datasource.Result
 import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
+import dev.jasonpearson.automobile.desktop.core.navigation.DefaultNavigationScreenshotLoaderRegistry
 import dev.jasonpearson.automobile.desktop.core.navigation.NavigationDashboard
+import dev.jasonpearson.automobile.desktop.core.navigation.ScreenshotLoader
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -81,7 +83,8 @@ private sealed interface AppGraphState {
  */
 @Composable
 fun OfflineNavigationBrowser(
-  navigationDataSourceProvider: ((String?) -> NavigationDataSource)? = null
+  navigationDataSourceProvider: ((String?) -> NavigationDataSource)? = null,
+  screenshotLoaderProvider: ((String) -> ScreenshotLoader)? = null,
 ) {
   val graph = LocalAutoMobileGraph.current
   // Construct RealNavigationDataSource directly rather than routing through
@@ -106,7 +109,12 @@ fun OfflineNavigationBrowser(
   } else {
     val app = selectedApp
     if (app != null) {
-      AppGraphStep(app = app, provider = provider, onBack = { selectedApp = null })
+      AppGraphStep(
+        app = app,
+        provider = provider,
+        screenshotLoaderProvider = screenshotLoaderProvider,
+        onBack = { selectedApp = null },
+      )
     }
   }
 }
@@ -210,11 +218,21 @@ private fun AppRow(app: NavigationAppSummary, onClick: (NavigationAppSummary) ->
 private fun AppGraphStep(
   app: NavigationAppSummary,
   provider: (String?) -> NavigationDataSource,
+  screenshotLoaderProvider: ((String) -> ScreenshotLoader)?,
   onBack: () -> Unit,
 ) {
   val graph = LocalAutoMobileGraph.current
   var attempt by remember(app.appId) { mutableStateOf(0) }
   var state by remember(app.appId) { mutableStateOf<AppGraphState>(AppGraphState.Loading) }
+  val clientProvider = remember { { graph.autoMobileClient } }
+  val loaderProvider =
+    screenshotLoaderProvider
+      ?: remember(clientProvider) {
+        { appId: String ->
+          DefaultNavigationScreenshotLoaderRegistry.forDevice(appId, clientProvider)
+        }
+      }
+  val screenshotLoader = remember(app.appId, loaderProvider) { loaderProvider(app.appId) }
 
   LaunchedEffect(app.appId, attempt) {
     state = AppGraphState.Loading
@@ -275,14 +293,7 @@ private fun AppGraphStep(
         is AppGraphState.Resolved ->
           NavigationDashboard(
             providedGraph = current.graph,
-            // No screenshot loader offline (screenshotLoader defaults to null → placeholder). The
-            // daemon's automobile:navigation/nodes/{id}/screenshot resource resolves the image via
-            // NavigationGraphManager.getCurrentAppId() + screenName, not the browsed app, so a
-            // node whose screen name collides with the daemon's current app (Home, MainActivity, …)
-            // would render the WRONG app's thumbnail — and not-found otherwise. Node ids are
-            // globally unique so the graph structure is correct; only per-node screenshots are
-            // mis-scoped. App-scoped offline screenshots are the follow-up #4933 (add ?appId= to
-            // the daemon resource); until then browse without thumbnails.
+            screenshotLoader = screenshotLoader,
             settingsProvider = graph.settingsProvider,
             selectedAppId = app.appId,
             // Offline: device-side navigate actions are unavailable; browsing/panning still work.

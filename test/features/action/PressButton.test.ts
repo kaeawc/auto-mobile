@@ -19,11 +19,10 @@ describe("PressButton", () => {
     name: "iPhone Simulator",
   };
 
-  test("simulator home button uses simctl after runner failure and verifies foreground", async () => {
+  test("simulator home button uses simctl without runner Home and verifies foreground", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const client = new FakeIOSCtrlProxy(timer);
-    client.setFailureMode("pressHome", new Error("Press home timed out after 2000ms"));
     client.setHierarchyData({
       packageName: "com.apple.springboard",
       updatedAt: 1,
@@ -44,6 +43,7 @@ describe("PressButton", () => {
       const result = await pressButton.press("home");
       expect(result.success).toBe(true);
       expect(launches).toEqual([["launch", iosSimulator.deviceId, "com.apple.springboard"]]);
+      expect(client.getPressHomeRequestCount()).toBe(0);
     } finally {
       getInstanceSpy.mockRestore();
     }

@@ -10,11 +10,10 @@ import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { combineWithAmbientAbort } from "../../utils/AbortContext";
 import { deriveIosScreenIdentity } from "../observe/ios/IosScreenIdentity";
 import type { CtrlProxyHierarchy } from "../observe/ios/types";
-import { IOS_SIMULATOR_HOME_RUNNER_TIMEOUT_MS } from "../observe/ios/CtrlProxyNavigation";
 import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import type { SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
-import { sequenceBackoff } from "../../utils/Backoff";
+import { sequenceBackoff, type BackoffPolicy } from "../../utils/Backoff";
 import { errorMessage } from "../../utils/describeUnknownError";
 
 /**
@@ -35,7 +34,7 @@ export class HomeScreen extends BaseVisualChange {
   private static readonly IOS_HOME_VERIFICATION_TIMEOUT_MS = 4000;
   private static readonly IOS_HOME_HIERARCHY_READ_TIMEOUT_MS = 1000;
   private static readonly IOS_HOME_RETRY_DELAYS_MS: readonly number[] = [300, 600, 900];
-  private static readonly IOS_SIMULATOR_VERIFY_TIMEOUT_MS = 1200;
+  private static readonly IOS_SIMULATOR_RETRY_DELAYS_MS: readonly number[] = [100, 200, 400, 500];
   private static readonly IOS_SIMULATOR_READ_TIMEOUT_MS = 600;
   private static readonly IOS_SIMCTL_LAUNCH_TIMEOUT_MS = 1000;
 
@@ -132,21 +131,10 @@ export class HomeScreen extends BaseVisualChange {
     frameContext?: string,
     timeoutMs?: number,
   ): Promise<void> {
-    const client = IOSCtrlProxyClient.getInstance(this.device);
     const simulator = isIosSimulatorUdid(this.device.deviceId);
-    const deadline = simulator ? this.timer.now() + (timeoutMs ?? 5000) : undefined;
-    const runnerTimeoutMs = simulator
-      ? Math.min(IOS_SIMULATOR_HOME_RUNNER_TIMEOUT_MS, Math.max(1, (timeoutMs ?? 5000) - 2000))
-      : 5000;
-    let pressError = await this.tryIosRunnerHome(
-      client,
-      runnerTimeoutMs,
-      perf,
-      frameContext,
-      simulator,
-    );
-
     if (!simulator) {
+      const client = IOSCtrlProxyClient.getInstance(this.device);
+      const pressError = await this.tryIosRunnerHome(client, 5000, perf, frameContext);
       if (pressError) {
         throw new ActionableError(pressError);
       }
@@ -154,34 +142,29 @@ export class HomeScreen extends BaseVisualChange {
       return;
     }
 
-    if (!pressError) {
-      pressError = await this.checkIosRunnerForeground(client, perf, deadline);
-      if (!pressError) {
-        return;
-      }
-    }
-
-    logger.debug(`[HOME] ${pressError}; launching SpringBoard with simctl`);
+    const deadline = this.timer.now() + (timeoutMs ?? 5000);
     try {
       await this.simctl.executeCommandArgs(
         ["launch", this.device.deviceId, "com.apple.springboard"],
         Math.min(HomeScreen.IOS_SIMCTL_LAUNCH_TIMEOUT_MS, this.iosHomeRemainingMs(deadline)),
       );
     } catch (error) {
-      throw toActionableError(error, `Failed to return to SpringBoard after ${pressError}`);
+      throw toActionableError(error, "Failed to launch SpringBoard with simctl");
     }
 
     try {
+      const client = IOSCtrlProxyClient.getInstance(this.device);
       await this.verifyIosHomeForeground(
         client,
         perf,
-        [100, 200],
-        Math.min(HomeScreen.IOS_SIMULATOR_VERIFY_TIMEOUT_MS, this.iosHomeRemainingMs(deadline)),
+        HomeScreen.IOS_SIMULATOR_RETRY_DELAYS_MS,
+        this.iosHomeRemainingMs(deadline),
         HomeScreen.IOS_SIMULATOR_READ_TIMEOUT_MS,
+        true,
       );
     } catch (error) {
       throw new ActionableError(
-        `simctl launched SpringBoard after ${pressError}, but foreground verification failed: ${errorMessage(error)}`,
+        `simctl launched SpringBoard, but foreground verification failed: ${errorMessage(error)}`,
         { cause: error },
       );
     }
@@ -192,7 +175,6 @@ export class HomeScreen extends BaseVisualChange {
     timeoutMs: number,
     perf: PerformanceTracker | undefined,
     frameContext: string | undefined,
-    simulator: boolean,
   ): Promise<string | undefined> {
     try {
       const result = await client.requestPressHome(timeoutMs, perf, frameContext);
@@ -204,35 +186,12 @@ export class HomeScreen extends BaseVisualChange {
       if (errorMessage(error).includes("Stale frame context")) {
         throw toActionableError(error, "Home press rejected a stale frame context");
       }
-      if (!simulator) {
-        throw toActionableError(error, "Failed to press iOS home button");
-      }
-      return errorMessage(error);
+      throw toActionableError(error, "Failed to press iOS home button");
     }
   }
 
-  private async checkIosRunnerForeground(
-    client: IOSCtrlProxyClient,
-    perf: PerformanceTracker | undefined,
-    deadline: number | undefined,
-  ): Promise<string | undefined> {
-    try {
-      const hierarchy = await this.readIosHomeForeground(
-        client,
-        perf,
-        Math.min(HomeScreen.IOS_SIMULATOR_READ_TIMEOUT_MS, this.iosHomeRemainingMs(deadline)),
-      );
-      return hierarchy?.packageName === "com.apple.springboard"
-        ? undefined
-        : `runner reported success but ${hierarchy?.packageName ?? "unknown app"} remains foreground`;
-    } catch (error) {
-      logger.warn(`Could not verify runner Home press: ${errorMessage(error)}`, error);
-      return `runner foreground check failed: ${errorMessage(error)}`;
-    }
-  }
-
-  private iosHomeRemainingMs(deadline: number | undefined): number {
-    const remaining = deadline === undefined ? 5000 : deadline - this.timer.now();
+  private iosHomeRemainingMs(deadline: number): number {
+    const remaining = deadline - this.timer.now();
     if (remaining <= 0) {
       throw new ActionableError("iOS Home deadline exhausted before SpringBoard could be verified");
     }
@@ -245,6 +204,7 @@ export class HomeScreen extends BaseVisualChange {
     retryDelaysMs: readonly number[] = HomeScreen.IOS_HOME_RETRY_DELAYS_MS,
     timeoutMs: number = HomeScreen.IOS_HOME_VERIFICATION_TIMEOUT_MS,
     readTimeoutMs: number = HomeScreen.IOS_HOME_HIERARCHY_READ_TIMEOUT_MS,
+    pollUntilDeadline = false,
   ): Promise<void> {
     const deadline = this.timer.now() + timeoutMs;
     const backoff = sequenceBackoff(retryDelaysMs);
@@ -263,21 +223,42 @@ export class HomeScreen extends BaseVisualChange {
       if (hierarchy) {
         lastHierarchy = hierarchy;
       }
-      if (hierarchy?.packageName === "com.apple.springboard" && this.timer.now() < deadline) {
+      if (hierarchy?.packageName === "com.apple.springboard" && this.timer.now() <= deadline) {
         return;
       }
 
-      if (attempt >= retryDelaysMs.length) {
+      if (
+        !(await this.waitForIosHomeRetry(
+          attempt,
+          retryDelaysMs.length,
+          backoff,
+          deadline,
+          pollUntilDeadline,
+        ))
+      ) {
         break;
       }
-      const delayMs = backoff.delayForAttempt(attempt + 1);
-      if (this.timer.now() + delayMs >= deadline) {
-        break;
-      }
-      await this.timer.sleep(delayMs);
     }
 
     this.throwIosHomeNotForeground(client, lastHierarchy);
+  }
+
+  private async waitForIosHomeRetry(
+    attempt: number,
+    retryLimit: number,
+    backoff: BackoffPolicy,
+    deadline: number,
+    pollUntilDeadline: boolean,
+  ): Promise<boolean> {
+    if (!pollUntilDeadline && attempt >= retryLimit) {
+      return false;
+    }
+    const delayMs = backoff.delayForAttempt(attempt + 1);
+    if (!pollUntilDeadline && this.timer.now() + delayMs >= deadline) {
+      return false;
+    }
+    await this.timer.sleep(Math.min(delayMs, deadline - this.timer.now()));
+    return true;
   }
 
   private async readIosHomeForeground(
@@ -286,8 +267,8 @@ export class HomeScreen extends BaseVisualChange {
     remainingMs: number,
   ): Promise<CtrlProxyHierarchy | undefined> {
     try {
-      // Request a fresh foreground hierarchy after the press. A cached
-      // pre-press hierarchy cannot establish the Home postcondition.
+      // Request a fresh foreground hierarchy after Home navigation. A cached
+      // earlier hierarchy cannot establish the Home postcondition.
       const response = await client.requestHierarchySync(
         perf,
         true,
@@ -296,7 +277,10 @@ export class HomeScreen extends BaseVisualChange {
       );
       return response?.hierarchy;
     } catch (error) {
-      throw toActionableError(error, "Failed to verify the iOS foreground app after pressing Home");
+      throw toActionableError(
+        error,
+        "Failed to verify the iOS foreground app after Home navigation",
+      );
     }
   }
 
@@ -311,6 +295,9 @@ export class HomeScreen extends BaseVisualChange {
     const alert = modal?.modalClass
       ? `: a system alert (${modal.modalClass}${modal.modalTitle ? ` '${modal.modalTitle}'` : ""}) is blocking Home; dismiss it first`
       : "; the home screen did not become foreground";
+    if (foregroundApp === "unknown app") {
+      throw new ActionableError("Home press did not bring SpringBoard to the foreground");
+    }
     throw new ActionableError(`Home press did not background ${foregroundApp}${alert}`);
   }
 }

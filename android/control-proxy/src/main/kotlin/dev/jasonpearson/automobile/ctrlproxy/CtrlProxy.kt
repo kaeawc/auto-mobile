@@ -3474,8 +3474,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   /**
    * Broadcast hierarchy update to WebSocket clients (suspend function for proper ordering).
    *
-   * @param sync If true, waits for delivery to all clients before returning. Use for critical
-   *   ordering.
+   * @param sync If true, enqueues for each client in call order; each client's sender drains its
+   *   queue FIFO. Returns before socket delivery.
    */
   private suspend fun broadcastHierarchyUpdate(
     hierarchy: ViewHierarchy,
@@ -3511,7 +3511,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       }
 
       if (sync) {
-        // Synchronous broadcast - waits for delivery to ensure ordering
+        // Enqueue in call order; each client's sender preserves FIFO without waiting for delivery.
         webSocketServer.broadcastWithPerfSync(messageBuilder)
       } else {
         // Async broadcast - for normal event-driven updates

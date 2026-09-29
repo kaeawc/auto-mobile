@@ -19,8 +19,7 @@ import java.net.ServerSocket
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.*
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.channels.Channel
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -58,6 +57,11 @@ class WebSocketServer(
     private const val MAX_START_ATTEMPTS = 5
     private const val START_RETRY_BASE_DELAY_MS = 250L
     private const val CONNECTOR_RESOLVE_TIMEOUT_MS = 2_000L
+    // Normal bound; bursts above it shed expendable frames before using the emergency reserve.
+    internal const val OUTGOING_CAPACITY = 64
+    // Four normal windows absorb short must-deliver bursts while bounding a stalled socket.
+    internal const val OUTGOING_HARD_CEILING = 256
+    private const val DROP_WARNING_INTERVAL = 32
 
     /**
      * Maximum accepted inbound WebSocket frame (64 MiB). ktor caps frame size by default;
@@ -212,9 +216,8 @@ class WebSocketServer(
   @Volatile private var server: EmbeddedServer<*, *>? = null
   private val startLock = Any()
   private var startRetryJob: Job? = null
-  private var broadcastJob: Job? = null
-  private val connections = mutableSetOf<DefaultWebSocketSession>()
-  private val requestConnections = mutableMapOf<String, DefaultWebSocketSession>()
+  private val connections = mutableSetOf<ConnectedClient>()
+  private val requestConnections = mutableMapOf<String, ConnectedClient>()
   private val deliveringRequests = mutableSetOf<String>()
   private val connectionCount = AtomicInteger(0)
   private val firstClientConnection = CompletableDeferred<Unit>()
@@ -227,9 +230,6 @@ class WebSocketServer(
    * reads a consistent size. See [observerSessionGeneration].
    */
   private var observerSessionGen = 0
-
-  // Flow to broadcast messages to all connected clients
-  private val _messageFlow = MutableSharedFlow<String>(replay = 0, extraBufferCapacity = 10)
 
   private val json = Json {
     prettyPrint = false
@@ -248,6 +248,117 @@ class WebSocketServer(
     prettyPrint = false
     encodeDefaults = true
     classDiscriminator = "type"
+  }
+
+  /** Small transport seam so a blocked socket can be exercised with a virtual-time fake. */
+  internal interface ClientTransport {
+    suspend fun send(message: String)
+
+    suspend fun close(reason: CloseReason)
+  }
+
+  internal enum class OutgoingTier {
+    DROPPABLE,
+    COALESCIBLE,
+    MUST_DELIVER,
+  }
+
+  internal data class OutgoingFrame(var message: String, val tier: OutgoingTier)
+
+  internal class ConnectedClient
+  internal constructor(
+    val id: Int,
+    val transport: ClientTransport,
+    val outgoing: Channel<OutgoingFrame>,
+    val ready: Channel<Unit>,
+  ) {
+    lateinit var sender: Job
+    internal var pendingCount = 0
+    internal var droppedCount = 0L
+    internal var pendingDroppableCount = 0
+    internal var pendingHierarchy: OutgoingFrame? = null
+  }
+
+  internal fun registerClient(id: Int, transport: ClientTransport): ConnectedClient {
+    val client =
+      ConnectedClient(
+        id,
+        transport,
+        Channel(OUTGOING_HARD_CEILING),
+        Channel<Unit>(Channel.CONFLATED),
+      )
+    client.sender =
+      scope.launch(start = CoroutineStart.LAZY) {
+        try {
+          for (ignored in client.ready) {
+            while (true) {
+              val frame =
+                synchronized(connections) {
+                  client.outgoing.tryReceive().getOrNull()?.also {
+                    client.pendingCount--
+                    if (it.tier == OutgoingTier.DROPPABLE) client.pendingDroppableCount--
+                    if (it === client.pendingHierarchy) client.pendingHierarchy = null
+                  }
+                } ?: break
+              transport.send(frame.message)
+            }
+          }
+        } catch (e: CancellationException) {
+          throw e
+        } catch (e: Exception) {
+          Log.w(TAG, "Client #$id send failed; disconnecting", e)
+          disconnectClient(client, "Outbound send failed")
+        }
+      }
+    synchronized(connections) {
+      if (connections.isEmpty()) observerSessionGen++
+      connections.add(client)
+      activeClientConnection.complete(Unit)
+    }
+    firstClientConnection.complete(Unit)
+    client.sender.start()
+    return client
+  }
+
+  internal fun unregisterClient(client: ConnectedClient) {
+    disconnectClient(client, "Connection closed", CloseReason.Codes.NORMAL)
+  }
+
+  private fun disconnectClient(
+    client: ConnectedClient,
+    reason: String,
+    code: CloseReason.Codes = CloseReason.Codes.TRY_AGAIN_LATER,
+  ) {
+    val discarded =
+      synchronized(connections) {
+        if (!connections.remove(client)) null
+        else {
+          requestConnections.values.removeAll { it == client }
+          if (connections.isEmpty()) activeClientConnection = CompletableDeferred()
+          val count = client.pendingCount
+          client.pendingCount = 0
+          client.pendingDroppableCount = 0
+          client.pendingHierarchy = null
+          client.outgoing.cancel()
+          client.ready.cancel()
+          count
+        }
+      }
+    if (discarded == null) return
+    Log.w(
+      TAG,
+      "Disconnecting client #${client.id}: $reason; discarded $discarded queued frames; shed ${client.droppedCount} frames total",
+    )
+    client.sender.cancel()
+    scope.launch {
+      try {
+        client.transport.close(CloseReason(code, reason))
+      } catch (e: CancellationException) {
+        throw e
+      } catch (e: Exception) {
+        Log.w(TAG, "Failed to close client #${client.id}", e)
+      }
+    }
   }
 
   /** Start the WebSocket server */
@@ -331,35 +442,40 @@ class WebSocketServer(
                     )
                   )
 
-                  synchronized(connections) {
-                    // Bump the observer-session generation only when this connection is the first
-                    // of
-                    // a new session (the set was empty before this add), NOT when a concurrent
-                    // client joins an already-observed session. Checked against the pre-add size
-                    // inside the same monitor that guards every add/remove.
-                    if (connections.isEmpty()) {
-                      observerSessionGen++
-                    }
-                    connections.add(this)
-                    activeClientConnection.complete(Unit)
-                  }
-                  firstClientConnection.complete(Unit)
+                  val session = this
+                  val client =
+                    registerClient(
+                      connectionId,
+                      object : ClientTransport {
+                        override suspend fun send(message: String) {
+                          session.send(Frame.Text(message))
+                        }
 
-                  // Listen for incoming messages
-                  for (frame in incoming) {
-                    when (frame) {
-                      is Frame.Text -> {
-                        val text = frame.readText()
-                        Log.d(TAG, inboundFrameLogLine(connectionId, text))
-                        handleClientMessage(text, this)
-                      }
-                      is Frame.Close -> {
-                        Log.d(TAG, "Client #$connectionId closed connection")
-                      }
-                      else -> {
-                        Log.d(TAG, "Received frame type: ${frame.frameType}")
+                        override suspend fun close(reason: CloseReason) {
+                          session.close(reason)
+                        }
+                      },
+                    )
+
+                  try {
+                    // Listen for incoming messages
+                    for (frame in incoming) {
+                      when (frame) {
+                        is Frame.Text -> {
+                          val text = frame.readText()
+                          Log.d(TAG, inboundFrameLogLine(connectionId, text))
+                          handleClientMessage(text, client)
+                        }
+                        is Frame.Close -> {
+                          Log.d(TAG, "Client #$connectionId closed connection")
+                        }
+                        else -> {
+                          Log.d(TAG, "Received frame type: ${frame.frameType}")
+                        }
                       }
                     }
+                  } finally {
+                    unregisterClient(client)
                   }
                 } catch (e: CancellationException) {
                   // Read loop is a coroutine: on scope shutdown, `incoming` / the inline
@@ -370,13 +486,6 @@ class WebSocketServer(
                 } catch (e: Exception) {
                   Log.e(TAG, "Error in WebSocket connection #$connectionId", e)
                 } finally {
-                  synchronized(connections) {
-                    connections.remove(this)
-                    requestConnections.values.removeAll { it == this }
-                    if (connections.isEmpty()) {
-                      activeClientConnection = CompletableDeferred()
-                    }
-                  }
                   Log.d(
                     TAG,
                     "Client #$connectionId disconnected. Active connections: ${connections.size}",
@@ -398,12 +507,6 @@ class WebSocketServer(
       }
       server = candidate
 
-      // Only the current listener owns a collector; stop/start must not duplicate deliveries.
-      broadcastJob?.cancel()
-      broadcastJob = scope.launch {
-        _messageFlow.asSharedFlow().collect { message -> broadcastToClients(message) }
-      }
-
       Log.i(TAG, "WebSocket server started on port $port")
       return true
     } catch (e: Exception) {
@@ -424,25 +527,9 @@ class WebSocketServer(
       synchronized(startLock) {
         startRetryJob?.cancel()
         startRetryJob = null
-        broadcastJob?.cancel()
-        broadcastJob = null
-        synchronized(connections) {
-          connections.forEach { connection ->
-            scope.launch {
-              try {
-                connection.close(CloseReason(CloseReason.Codes.GOING_AWAY, "Server shutting down"))
-              } catch (e: CancellationException) {
-                // Let cooperative cancellation unwind cleanly rather than logging it as an error
-                // (#3130).
-                throw e
-              } catch (e: Exception) {
-                Log.e(TAG, "Error closing connection", e)
-              }
-            }
-          }
-          connections.clear()
-          requestConnections.clear()
-          activeClientConnection = CompletableDeferred()
+        val clients = synchronized(connections) { connections.toList() }
+        clients.forEach {
+          disconnectClient(it, "Server shutting down", CloseReason.Codes.GOING_AWAY)
         }
 
         server?.stop(1000, 2000)
@@ -459,7 +546,7 @@ class WebSocketServer(
     if (routeCorrelatedResponse(extractRequestId(message), message)) {
       return
     }
-    _messageFlow.emit(message)
+    broadcastToClients(message)
   }
 
   /**
@@ -475,12 +562,12 @@ class WebSocketServer(
     if (routeCorrelatedResponse(extractRequestId(message), message)) {
       return
     }
-    _messageFlow.emit(message)
+    broadcastToClients(message)
   }
 
   /**
-   * Broadcast a message synchronously (waits for delivery to all clients). Use this when message
-   * ordering is critical (e.g., hierarchy update before set_text_result).
+   * Enqueue a message for each client in broadcast order. Each client writes its own queue in
+   * order, so a slow socket cannot hold up later broadcasts to other clients.
    *
    * @param messageBuilder Function that takes optional perfTiming JsonElement and returns the
    *   complete message
@@ -498,12 +585,12 @@ class WebSocketServer(
   // Type-Safe Broadcast API (Protocol Types)
   // =============================================================================
 
-  /** Broadcast mode for controlling message delivery. */
+  /** Broadcast mode retained for callers; both modes enqueue in per-client wire order. */
   sealed interface BroadcastMode {
-    /** Async broadcast via SharedFlow - non-blocking, best for event-driven updates */
+    /** Enqueue without waiting for a socket write. */
     data object Async : BroadcastMode
 
-    /** Sync broadcast - waits for delivery, use when ordering is critical */
+    /** Enqueue in call order without waiting for a socket write. */
     data object Sync : BroadcastMode
   }
 
@@ -513,10 +600,10 @@ class WebSocketServer(
    * This is the preferred API for sending responses as it provides:
    * - Type safety via sealed class hierarchy
    * - Automatic JSON serialization
-   * - Unified sync/async control
+   * - Ordered per-client queuing for both broadcast modes
    *
    * @param response The typed response object to broadcast
-   * @param mode Broadcast mode - Async (default) or Sync for ordering guarantees
+   * @param mode Retained for callers; both modes enqueue without waiting for socket writes
    */
   suspend fun broadcast(
     response: WebSocketResponse,
@@ -547,6 +634,7 @@ class WebSocketServer(
     broadcastSerialized(message, mode, waitForClient)
   }
 
+  @Suppress("UNUSED_PARAMETER")
   private suspend fun broadcastSerialized(
     message: String,
     mode: BroadcastMode,
@@ -555,14 +643,11 @@ class WebSocketServer(
     if (waitForClient) {
       broadcastToClientsWhenClientConnected(message)
     } else {
-      when (mode) {
-        BroadcastMode.Async -> _messageFlow.emit(message)
-        BroadcastMode.Sync -> broadcastToClients(message)
-      }
+      broadcastToClients(message)
     }
   }
 
-  internal fun registerRequestOwner(requestId: String, connection: DefaultWebSocketSession) {
+  internal fun registerRequestOwner(requestId: String, connection: ConnectedClient) {
     synchronized(connections) { requestConnections[requestId] = connection }
   }
 
@@ -570,13 +655,14 @@ class WebSocketServer(
    * Sends a correlated response only to its originating client.
    *
    * A request owner is removed when the socket disconnects and when its first terminal response is
-   * delivered. A later response with that request ID is therefore not an event: broadcasting it
-   * could leak one client's screenshot or action result to every other connected client.
+   * accepted into its outgoing queue. A later response with that request ID is therefore not an
+   * event: broadcasting it could leak one client's screenshot or action result to every other
+   * connected client.
    *
    * @return `true` when [requestId] was present and the frame was delivered or deliberately
    *   dropped; `false` for uncorrelated frames that the caller should broadcast normally.
    */
-  internal suspend fun routeCorrelatedResponse(requestId: String?, message: String): Boolean {
+  internal fun routeCorrelatedResponse(requestId: String?, message: String): Boolean {
     if (requestId == null) {
       return false
     }
@@ -588,31 +674,9 @@ class WebSocketServer(
       Log.w(TAG, "Dropping response for disconnected or completed request $requestId")
     } else {
       try {
-        try {
-          sendFrame(target, message)
-          synchronized(connections) {
-            if (requestConnections[requestId] === target) requestConnections.remove(requestId)
-          }
-        } catch (e: CancellationException) {
-          throw e
-        } catch (e: Exception) {
-          Log.w(TAG, "Failed to deliver response for request $requestId", e)
-          // The primary frame was not delivered. Keep its owner until a correlated fallback has
-          // been attempted, so a transient send failure can still fail the daemon awaiter fast.
-          if (synchronized(connections) { requestConnections[requestId] === target }) {
-            val fallback =
-              CorrelatedErrorReporter.frame(
-                requestId,
-                "Failed to deliver response: ${CorrelatedErrorReporter.causeOf(e)}",
-              )
-            sendToClient(
-              target,
-              responseJson.encodeToString(WebSocketResponse.serializer(), fallback),
-            )
-            synchronized(connections) {
-              if (requestConnections[requestId] === target) requestConnections.remove(requestId)
-            }
-          }
+        sendToClient(target, message)
+        synchronized(connections) {
+          if (requestConnections[requestId] === target) requestConnections.remove(requestId)
         }
       } finally {
         synchronized(connections) { deliveringRequests.remove(requestId) }
@@ -625,7 +689,7 @@ class WebSocketServer(
    * Broadcast a typed SdkEvent to all connected clients.
    *
    * @param event The SDK event to broadcast
-   * @param mode Broadcast mode - Async (default) or Sync for ordering guarantees
+   * @param mode Retained for callers; both modes enqueue without waiting for socket writes
    */
   suspend fun broadcast(
     event: SdkEvent,
@@ -636,74 +700,106 @@ class WebSocketServer(
     broadcastSerialized(message, mode, waitForClient)
   }
 
-  /**
-   * Sends only after at least one current client accepts the message.
-   *
-   * A client can disconnect after a caller observes it but before the send begins. Retrying from
-   * the synchronized connection snapshot keeps queued SDK events available for a replacement.
-   */
+  /** Wait for a live client to accept the event into its bounded outgoing queue. */
   private suspend fun broadcastToClientsWhenClientConnected(message: String) {
     while (!broadcastToClients(message)) {
       awaitClientConnection()
     }
   }
 
-  /** Internal method to send message to all connected clients. */
-  private suspend fun broadcastToClients(message: String): Boolean {
-    val deadConnections = mutableListOf<DefaultWebSocketSession>()
-    var delivered = false
+  private fun outgoingFrame(message: String): OutgoingFrame {
+    // A request ID always wins over the frame type, including for future protocol additions.
+    if (mightCarryRequestId(message)) return OutgoingFrame(message, OutgoingTier.MUST_DELIVER)
+    // Our serializers emit type first. Read only that field, avoiding a full parse of large
+    // hierarchy trees; fall back to structured parsing for other field orders.
+    val type =
+      if (message.startsWith("{\"type\":\""))
+        message.substringAfter("{\"type\":\"").substringBefore('"')
+      else extractStringField(message, "type")
+    val tier =
+      when (type) {
+        "hierarchy_update" -> OutgoingTier.COALESCIBLE
+        "log_event",
+        "network_event",
+        "websocket_frame_event",
+        "broadcast_event",
+        "lifecycle_event" -> OutgoingTier.DROPPABLE
+        else -> OutgoingTier.MUST_DELIVER
+      }
+    return OutgoingFrame(message, tier)
+  }
 
-    val currentConnections = synchronized(connections) { connections.toList() }
-    currentConnections.forEach { connection ->
-      try {
-        connection.send(Frame.Text(message))
-        delivered = true
-      } catch (e: CancellationException) {
-        // The broadcast collector is cancelled when `scope` shuts down mid-send; let it unwind
-        // rather than mis-marking a live connection as dead and continuing the loop (#3130).
-        throw e
-      } catch (e: Exception) {
-        Log.w(TAG, "Failed to send to connection, marking as dead", e)
-        deadConnections.add(connection)
+  /** Only called while holding [connections], including on the sender's dequeue path. */
+  private fun enqueueForClient(client: ConnectedClient, frame: OutgoingFrame): Boolean {
+    if (frame.tier == OutgoingTier.COALESCIBLE && client.pendingHierarchy != null) {
+      client.pendingHierarchy?.message = frame.message
+      recordShed(client)
+      return true
+    }
+    if (client.pendingCount >= OUTGOING_CAPACITY && client.pendingDroppableCount > 0) {
+      discardOldestDroppable(client)
+      client.pendingCount--
+      client.pendingDroppableCount--
+      recordShed(client)
+    }
+    if (client.pendingCount == OUTGOING_HARD_CEILING) return false
+    if (!client.outgoing.trySend(frame).isSuccess) return false
+    client.pendingCount++
+    if (frame.tier == OutgoingTier.DROPPABLE) client.pendingDroppableCount++
+    if (frame.tier == OutgoingTier.COALESCIBLE) client.pendingHierarchy = frame
+    client.ready.trySend(Unit)
+    return true
+  }
+
+  /** Rotate the bounded channel under the connection lock to preserve every survivor's position. */
+  private fun discardOldestDroppable(client: ConnectedClient) {
+    var discarded = false
+    repeat(client.pendingCount) {
+      val pending = client.outgoing.tryReceive().getOrNull() ?: error("Outgoing count drift")
+      if (!discarded && pending.tier == OutgoingTier.DROPPABLE) {
+        discarded = true
+      } else {
+        check(client.outgoing.trySend(pending).isSuccess)
       }
     }
+    check(discarded)
+  }
 
-    // Remove dead connections
-    if (deadConnections.isNotEmpty()) {
-      synchronized(connections) {
-        connections.removeAll(deadConnections.toSet())
-        if (connections.isEmpty()) {
-          activeClientConnection = CompletableDeferred()
-        }
+  private fun recordShed(client: ConnectedClient) {
+    client.droppedCount++
+    // First loss is visible; sustained load reports only at 32-frame milestones.
+    if (client.droppedCount == 1L || client.droppedCount % DROP_WARNING_INTERVAL == 0L) {
+      Log.w(TAG, "Client #${client.id} shed ${client.droppedCount} queued frames total")
+    }
+  }
+
+  /** A hard-full queue disconnects only its owner; other clients still accept the same frame. */
+  private fun broadcastToClients(message: String): Boolean {
+    val frame = outgoingFrame(message)
+    val overflowed = mutableListOf<ConnectedClient>()
+    var delivered = false
+    synchronized(connections) {
+      connections.forEach { client ->
+        if (enqueueForClient(client, frame.copy())) delivered = true else overflowed.add(client)
       }
-      Log.d(TAG, "Removed ${deadConnections.size} dead connections. Active: ${connections.size}")
+      overflowed.forEach { disconnectClient(it, "Outgoing buffer full") }
     }
     return delivered
   }
 
   /** Internal method to send a message to a single client connection. */
-  private suspend fun sendToClient(connection: DefaultWebSocketSession, message: String) {
-    try {
-      sendFrame(connection, message)
-    } catch (e: CancellationException) {
-      // Cooperative cancellation means `scope` is shutting down, not that the connection is
-      // dead — rethrow so the caller unwinds instead of mis-marking a live connection (#3191).
-      throw e
-    } catch (e: Exception) {
-      Log.w(TAG, "Failed to send to originating connection, marking as dead", e)
+  internal fun sendToClient(connection: ConnectedClient, message: String) {
+    val frame = outgoingFrame(message)
+    val overflowed =
       synchronized(connections) {
-        connections.remove(connection)
-        requestConnections.values.removeAll { it == connection }
-        if (connections.isEmpty()) {
-          activeClientConnection = CompletableDeferred()
-        }
+        connections.contains(connection) && !enqueueForClient(connection, frame)
       }
-    }
+    if (overflowed) disconnectClient(connection, "Outgoing buffer full")
   }
 
   /** Send a typed error response only to the client whose inbound message failed. */
   private suspend fun sendErrorResponse(
-    connection: DefaultWebSocketSession,
+    connection: ConnectedClient,
     response: ErrorResponse,
   ) {
     val message = responseJson.encodeToString(WebSocketResponse.serializer(), response)
@@ -780,7 +876,7 @@ class WebSocketServer(
   }
 
   /** Handle an incoming client message by decoding it and dispatching via [messageHandler]. */
-  private suspend fun handleClientMessage(message: String, connection: DefaultWebSocketSession) {
+  private suspend fun handleClientMessage(message: String, connection: ConnectedClient) {
     val handler = messageHandler
     if (handler == null) {
       Log.w(TAG, "No message handler configured; ignoring inbound message: $message")

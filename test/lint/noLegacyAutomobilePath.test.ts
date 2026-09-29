@@ -15,16 +15,34 @@ function sourceFiles(directory: string): string[] {
   });
 }
 
+function findOffenseLines(source: string): number[] {
+  if (!source.includes(".automobile")) {
+    return [];
+  }
+
+  return source
+    .split(/\r?\n/)
+    .flatMap((line, index) => (/(["'])\.automobile\1/.test(line) ? [index + 1] : []));
+}
+
+describe("legacy AutoMobile path matcher", () => {
+  test("matches only quoted .automobile literals", () => {
+    expect(findOffenseLines("const a = \".automobile\";\nconst b = '.automobile';")).toEqual([
+      1, 2,
+    ]);
+    expect(
+      findOffenseLines(
+        'const a = ".automobile\';\nconst b = \'.automobile";\nconst c = ".automobile-foo";',
+      ),
+    ).toEqual([]);
+  });
+});
+
 describe("shared AutoMobile directory path literals", () => {
   test("does not use the legacy .automobile path component", () => {
     const offenses = sourceFiles(SOURCE_DIR).flatMap((file) => {
       const source = readFileSync(file, "utf8");
-      const lines = source.split(/\r?\n/);
-      return lines.flatMap((line, index) =>
-        /(["'])\.automobile\1/.test(line)
-          ? [`${path.relative(SOURCE_DIR, file)}:${index + 1}`]
-          : [],
-      );
+      return findOffenseLines(source).map((line) => `${path.relative(SOURCE_DIR, file)}:${line}`);
     });
 
     expect(offenses).toEqual([]);

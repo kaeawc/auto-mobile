@@ -18,7 +18,10 @@ import { NavigationGraphManager } from "../../src/features/navigation/Navigation
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { createTestDatabase } from "../db/testDbHelper";
 import { FakeTimer } from "../fakes/FakeTimer";
-import type { OnObservationRequestedCallback } from "../../src/daemon/deviceDataStreamSocketServer";
+import type {
+  OnNavigationGraphRequestedCallback,
+  OnObservationRequestedCallback,
+} from "../../src/daemon/deviceDataStreamSocketServer";
 
 interface RoutingTarget {
   setDeviceSessionResolver(resolver: DeviceSessionResolver): void;
@@ -85,6 +88,7 @@ class FakeDeviceDataStreamServer extends FakePushServer {
   observationHandler: OnObservationRequestedCallback | null = null;
   observationRequestTimeoutMs: number | undefined;
   navigationRequestCallbackInstalled = false;
+  navigationRequestHandler: OnNavigationGraphRequestedCallback | null = null;
   storageSubscriptionCallbackInstalled = false;
 
   pushDeviceSessionStarted(record: DeviceSessionRecord): void {
@@ -118,8 +122,9 @@ class FakeDeviceDataStreamServer extends FakePushServer {
     this.observationRequestTimeoutMs = timeoutMs;
   }
 
-  setOnNavigationGraphRequested(_handler: unknown): void {
+  setOnNavigationGraphRequested(handler: OnNavigationGraphRequestedCallback): void {
     this.navigationRequestCallbackInstalled = true;
+    this.navigationRequestHandler = handler;
   }
 
   setOnStorageSubscriptionRequested(_handler: unknown): void {
@@ -294,6 +299,57 @@ describe("Daemon stream wiring", () => {
       expect(stream.navigationUpdates).toEqual([{ appId: "com.example.session", deviceId: null }]);
     } finally {
       daemon.getSessionManager().stopCleanupTimer();
+    }
+  });
+
+  test("on-demand unscoped graph request resolves the sole session manager", async () => {
+    const timer = new FakeTimer();
+    const db = await createTestDatabase();
+    const sessionId = "navigation-request-session";
+    const sessionNavigation = NavigationGraphManager.createForTesting(
+      new NavigationRepository(db),
+      new TestCoverageRepository(undefined, db),
+      undefined,
+      sessionId,
+    );
+    NavigationGraphManager.setInstanceForTesting(
+      NavigationGraphManager.createForTesting(
+        new NavigationRepository(db),
+        new TestCoverageRepository(undefined, db),
+      ),
+    );
+    NavigationGraphManager.setInstanceForSessionForTesting(sessionId, sessionNavigation);
+    const daemon = new Daemon(
+      {},
+      undefined,
+      timer,
+      new DeviceSessionRepository(db),
+      new CountingIdGenerator("daemon"),
+    );
+    const internals = daemon as unknown as DaemonStreamInternals;
+    const stream = new FakeDeviceDataStreamServer();
+    internals.getDeviceSessionRoutingTargets = () => targets(stream);
+
+    try {
+      await daemon.getSessionManager().createSession(sessionId, "emulator-5554", "android");
+      await sessionNavigation.setCurrentApp("com.example.session");
+      await sessionNavigation.recordNavigationEvent({
+        destination: "Home",
+        source: "",
+        arguments: {},
+        metadata: {},
+        timestamp: 1,
+        sequenceNumber: 1,
+      });
+      internals.setupNavigationGraphStreamListener(stream);
+
+      const summary = await stream.navigationRequestHandler?.();
+      expect(summary?.appId).toBe("com.example.session");
+      expect(summary?.nodes.length).toBeGreaterThan(0);
+    } finally {
+      daemon.getSessionManager().stopCleanupTimer();
+      NavigationGraphManager.resetInstance();
+      await db.destroy();
     }
   });
 

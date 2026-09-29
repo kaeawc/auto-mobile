@@ -11,6 +11,11 @@ import {
 import { FakeNavigationGraphManager } from "../../fakes/FakeNavigationGraphManager";
 import { ResourceRegistry } from "../../../src/server/resourceRegistry";
 import { z } from "zod/v4";
+import { DaemonState } from "../../../src/daemon/daemonState";
+import { NavigationGraphManager } from "../../../src/features/navigation/NavigationGraphManager";
+import { NavigationRepository } from "../../../src/db/navigationRepository";
+import { TestCoverageRepository } from "../../../src/db/testCoverageRepository";
+import { createTestDatabase } from "../../db/testDbHelper";
 
 describe("MCP Navigation Graph Resource", () => {
   let fixture: McpTestFixture;
@@ -142,6 +147,61 @@ describe("MCP Navigation Graph Resource", () => {
     expect(graph.edges).toHaveLength(1);
     expect(graph.nodes[0]?.id).toBeDefined();
     expect(graph.edges[0]?.toolName).toBe("tapOn");
+  });
+
+  test("unscoped graph resource resolves the sole daemon session manager", async () => {
+    setNavigationGraphProvider(null);
+    const db = await createTestDatabase();
+    const sessionId = "resource-session";
+    const sessionManager = {
+      getAllSessions: () => [{ sessionId }],
+    };
+    const devicePool = {
+      getDeviceIncarnation: () => 0,
+      bumpDeviceIncarnation: () => 0,
+    };
+    const sessionGraph = NavigationGraphManager.createForTesting(
+      new NavigationRepository(db),
+      new TestCoverageRepository(undefined, db),
+      undefined,
+      sessionId,
+    );
+    NavigationGraphManager.setInstanceForSessionForTesting(sessionId, sessionGraph);
+    DaemonState.getInstance().initialize(sessionManager as never, devicePool as never);
+
+    try {
+      await sessionGraph.setCurrentApp("com.example.session");
+      await sessionGraph.recordNavigationEvent({
+        destination: "Home",
+        source: "",
+        arguments: {},
+        metadata: {},
+        timestamp: 1,
+        sequenceNumber: 1,
+      });
+      const { client } = fixture.getContext();
+      const response = await client.request(
+        { method: "resources/read", params: { uri: NAVIGATION_RESOURCE_URIS.GRAPH } },
+        z.object({ contents: z.array(z.object({ text: z.string().optional() })) }),
+      );
+      const graph: NavigationGraphResourceContent = JSON.parse(response.contents[0]!.text!);
+      expect(graph.appId).toBe("com.example.session");
+      expect(graph.nodes.length).toBeGreaterThan(0);
+
+      const scoped = await client.request(
+        {
+          method: "resources/read",
+          params: { uri: `${NAVIGATION_RESOURCE_URIS.GRAPH}?appId=com.example.session` },
+        },
+        z.object({ contents: z.array(z.object({ text: z.string().optional() })) }),
+      );
+      expect(scoped.contents[0]?.text).toBe(response.contents[0]?.text);
+    } finally {
+      DaemonState.getInstance().reset();
+      NavigationGraphManager.resetInstance();
+      await db.destroy();
+      setNavigationGraphProvider(fakeGraph);
+    }
   });
 
   test("should include navigation node templates in list", async () => {

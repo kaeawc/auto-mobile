@@ -53,7 +53,18 @@ describe("SetUIState", () => {
   const createSetUIState = () => {
     return new SetUIState(device, null, {
       tapOnElement: fakeTap,
-      inputText: fakeInput,
+      inputText: {
+        execute: async (text: string, imeAction?: string) => {
+          const result = await fakeInput.execute(text, imeAction);
+          const calls = fakeTap.getCalls();
+          const target = calls[calls.length - 1]?.options;
+          const key = target?.elementId ?? target?.text;
+          if (key && result.success) {
+            fakeFieldTypeDetector.setTextValue(key, text);
+          }
+          return result;
+        },
+      },
       clearText: fakeClear,
       swipeOn: fakeSwipe,
       observeScreen: fakeObserve,
@@ -106,9 +117,9 @@ describe("SetUIState", () => {
       expect(result.fields[0].success).toBe(true);
       expect(result.fields[0].fieldType).toBe("text");
 
-      // Verify tap was called for focus
+      // Verify the target field's focus was confirmed before clearing.
       expect(fakeTap.getCallCount()).toBeGreaterThanOrEqual(1);
-      expect(fakeTap.getCalls()[0].options.action).toBe("tap");
+      expect(fakeTap.getCalls()[0].options.action).toBe("focus");
 
       // Verify clear was called
       expect(fakeClear.getCallCount()).toBe(1);
@@ -510,12 +521,13 @@ describe("SetUIState", () => {
   });
 
   describe("password fields", () => {
-    test("auto-detects password fields and skips verification", async () => {
+    test("auto-detects password text fields and skips masked value verification", async () => {
       fakeObserve.setResult(
         createObserveResult(
           createHierarchyWithElement({
             "resource-id": "password",
             text: "",
+            value: "••••••••",
             class: "android.widget.EditText",
             password: "true",
           }),
@@ -531,8 +543,9 @@ describe("SetUIState", () => {
       });
 
       expect(result.success).toBe(true);
-      // The field should NOT have verified=true because it's a password
+      expect(result.fields[0].attempts).toBe(1);
       expect(result.fields[0].verified).toBeUndefined();
+      expect(fakeInput.getCallCount()).toBe(1);
     });
   });
 
@@ -741,14 +754,22 @@ describe("SetUIState", () => {
   });
 
   describe("text selector", () => {
-    test("finds element by text selector and skips verification", async () => {
-      // Text-only selectors on mutable fields skip verification because
-      // typing replaces the label text used as the selector
-      const hierarchy = createHierarchyWithElement({
+    test("verifies text fields selected by a stable text label", async () => {
+      const initialHierarchy = createHierarchyWithElement({
         text: "Username",
+        value: "",
         class: "android.widget.EditText",
       });
-      fakeObserve.setResult(createObserveResult(hierarchy));
+      const updatedHierarchy = createHierarchyWithElement({
+        text: "Username",
+        value: "john",
+        class: "android.widget.EditText",
+      });
+      let observeCallCount = 0;
+      fakeObserve.setResultFactory(() => {
+        observeCallCount++;
+        return createObserveResult(observeCallCount === 1 ? initialHierarchy : updatedHierarchy);
+      });
       fakeFieldTypeDetector.setFieldType("Username", "text");
 
       const setUIState = createSetUIState();
@@ -758,8 +779,156 @@ describe("SetUIState", () => {
 
       expect(result.success).toBe(true);
       expect(result.fields[0].success).toBe(true);
-      // Verification should be skipped for text-only selector on text field
+      expect(result.fields[0].verified).toBe(true);
+    });
+
+    test("retries once and reports the observed value when clear only removes one character", async () => {
+      let currentValue = "Duo Tester";
+      let focusConfirmed = false;
+      const calls: string[] = [];
+      const hierarchy = (): ViewHierarchyResult => ({
+        hierarchy: {
+          node: [
+            {
+              $: {
+                bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+                text: "Name",
+                value: currentValue,
+                class: "UITextField",
+              },
+            },
+          ],
+        },
+      });
+      fakeObserve.setResultFactory(() => createObserveResult(hierarchy()));
+      fakeFieldTypeDetector.setFieldType("Name", "text");
+
+      const setUIState = new SetUIState(device, null, {
+        observeScreen: fakeObserve,
+        fieldTypeDetector: fakeFieldTypeDetector,
+        timer: fakeTimer,
+        tapOnElement: {
+          execute: async (options) => {
+            calls.push(`focus:${options.action}`);
+            focusConfirmed = options.action === "focus";
+            return { success: true, focusVerified: focusConfirmed };
+          },
+        },
+        clearText: {
+          execute: async () => {
+            calls.push("clear");
+            if (focusConfirmed) {
+              // The clear action consistently leaves the stale prefix behind.
+              currentValue = "Duo Teste";
+            }
+            return { success: true };
+          },
+        },
+        inputText: {
+          execute: async (text: string) => {
+            calls.push("input");
+            currentValue += text;
+            return { success: true, text };
+          },
+        },
+      });
+
+      const result = await setUIState.execute({
+        fields: [{ selector: { text: "Name" }, value: "Fold Test" }],
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.fields[0].success).toBe(false);
+      expect(result.fields[0].attempts).toBe(2);
+      expect(result.fields[0].error).toContain('expected "Fold Test"');
+      expect(result.fields[0].error).toContain('observed "Duo TesteFold Test"');
+      expect(calls).toEqual(["focus:focus", "clear", "input", "focus:focus", "clear", "input"]);
+    });
+
+    test("skips verification for an iOS text field without a value attribute", async () => {
+      fakeObserve.setResult(
+        createObserveResult(
+          createHierarchyWithElement({
+            "resource-id": "ios-email",
+            text: "Email address",
+            class: "UITextField",
+          }),
+        ),
+      );
+      fakeFieldTypeDetector.setFieldType("ios-email", "text");
+
+      const setUIState = createSetUIState();
+      const result = await setUIState.execute({
+        fields: [{ selector: { elementId: "ios-email" }, value: "jane@example.com" }],
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.fields[0].success).toBe(true);
+      expect(result.fields[0].attempts).toBe(1);
       expect(result.fields[0].verified).toBeUndefined();
+      expect(fakeInput.getCallCount()).toBe(1);
+    });
+
+    test("succeeds as unverified when a text selector no longer finds the field", async () => {
+      const initialHierarchy = createHierarchyWithElement({
+        text: "Name",
+        value: "",
+        class: "android.widget.EditText",
+      });
+      let observeCallCount = 0;
+      fakeObserve.setResultFactory(() => {
+        observeCallCount++;
+        return createObserveResult(
+          observeCallCount === 1 ? initialHierarchy : { hierarchy: { node: [] } },
+        );
+      });
+      fakeFieldTypeDetector.setFieldType("Name", "text");
+
+      const setUIState = createSetUIState();
+      const result = await setUIState.execute({
+        fields: [{ selector: { text: "Name" }, value: "Jane" }],
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.fields[0].success).toBe(true);
+      expect(result.fields[0].attempts).toBe(1);
+      expect(result.fields[0].verified).toBeUndefined();
+      expect(fakeInput.getCallCount()).toBe(1);
+    });
+
+    test("does not clear a text field when focus was not confirmed", async () => {
+      fakeObserve.setResult(
+        createObserveResult(
+          createHierarchyWithElement({
+            text: "Name",
+            value: "Duo Tester",
+            class: "UITextField",
+          }),
+        ),
+      );
+      fakeFieldTypeDetector.setFieldType("Name", "text");
+      let clearCalls = 0;
+      const setUIState = new SetUIState(device, null, {
+        observeScreen: fakeObserve,
+        fieldTypeDetector: fakeFieldTypeDetector,
+        timer: fakeTimer,
+        tapOnElement: { execute: async () => ({ success: true, focusVerified: false }) },
+        clearText: {
+          execute: async () => {
+            clearCalls++;
+            return { success: true };
+          },
+        },
+        inputText: { execute: async (text: string) => ({ success: true, text }) },
+      });
+
+      const result = await setUIState.execute({
+        fields: [{ selector: { text: "Name" }, value: "Fold Test" }],
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.fields[0].success).toBe(false);
+      expect(clearCalls).toBe(0);
     });
   });
 
@@ -913,7 +1082,18 @@ describe("SetUIState search budget and unclassifiable fields (#4242)", () => {
   const build = () =>
     new SetUIState(device, null, {
       tapOnElement: fakeTap,
-      inputText: fakeInput,
+      inputText: {
+        execute: async (text: string, imeAction?: string) => {
+          const result = await fakeInput.execute(text, imeAction);
+          const calls = fakeTap.getCalls();
+          const target = calls[calls.length - 1]?.options;
+          const key = target?.elementId ?? target?.text;
+          if (key && result.success) {
+            fakeFieldTypeDetector.setTextValue(key, text);
+          }
+          return result;
+        },
+      },
       clearText: fakeClear,
       swipeOn: fakeSwipe,
       observeScreen: fakeObserve,
@@ -1046,7 +1226,18 @@ describe("SetUIState budget bounds searching, not successful work (#4252 review)
   const build = () =>
     new SetUIState(device, null, {
       tapOnElement: fakeTap,
-      inputText: fakeInput,
+      inputText: {
+        execute: async (text: string, imeAction?: string) => {
+          const result = await fakeInput.execute(text, imeAction);
+          const calls = fakeTap.getCalls();
+          const target = calls[calls.length - 1]?.options;
+          const key = target?.elementId ?? target?.text;
+          if (key && result.success) {
+            fakeFieldTypeDetector.setTextValue(key, text);
+          }
+          return result;
+        },
+      },
       clearText: fakeClear,
       swipeOn: fakeSwipe,
       observeScreen: fakeObserve,
@@ -1130,7 +1321,18 @@ describe("SetUIState progress reporting and observe reuse (#6222)", () => {
   const build = () =>
     new SetUIState(device, null, {
       tapOnElement: fakeTap,
-      inputText: fakeInput,
+      inputText: {
+        execute: async (text: string, imeAction?: string) => {
+          const result = await fakeInput.execute(text, imeAction);
+          const calls = fakeTap.getCalls();
+          const target = calls[calls.length - 1]?.options;
+          const key = target?.elementId ?? target?.text;
+          if (key) {
+            fakeFieldTypeDetector.setTextValue(key, text);
+          }
+          return result;
+        },
+      },
       clearText: fakeClear,
       swipeOn: fakeSwipe,
       observeScreen: fakeObserve,
@@ -1291,6 +1493,7 @@ describe("SetUIState progress reporting and observe reuse (#6222)", () => {
         }
         return {
           success: true,
+          focusVerified: true,
           action: "tap",
           element: { bounds: { left: 0, top: 0, right: 100, bottom: 50 } },
         };
@@ -1304,7 +1507,18 @@ describe("SetUIState progress reporting and observe reuse (#6222)", () => {
 
     const setUIState = new SetUIState(device, null, {
       tapOnElement: tapReportingFullCompletion as any,
-      inputText: fakeInput,
+      inputText: {
+        execute: async (text: string, imeAction?: string) => {
+          const result = await fakeInput.execute(text, imeAction);
+          const calls = fakeTap.getCalls();
+          const target = calls[calls.length - 1]?.options;
+          const key = target?.elementId ?? target?.text;
+          if (key && result.success) {
+            fakeFieldTypeDetector.setTextValue(key, text);
+          }
+          return result;
+        },
+      },
       clearText: fakeClear,
       swipeOn: fakeSwipe,
       observeScreen: fakeObserve,
@@ -1470,7 +1684,18 @@ describe("SetUIState budget is unaffected by slow work before the search (#4252 
   const build = () =>
     new SetUIState(device, null, {
       tapOnElement: fakeTap,
-      inputText: fakeInput,
+      inputText: {
+        execute: async (text: string, imeAction?: string) => {
+          const result = await fakeInput.execute(text, imeAction);
+          const calls = fakeTap.getCalls();
+          const target = calls[calls.length - 1]?.options;
+          const key = target?.elementId ?? target?.text;
+          if (key) {
+            fakeFieldTypeDetector.setTextValue(key, text);
+          }
+          return result;
+        },
+      },
       clearText: fakeClear,
       swipeOn: fakeSwipe,
       observeScreen: fakeObserve,
@@ -1582,10 +1807,12 @@ describe("SetUIState whole-call result deadline (issue #6222 reopen)", () => {
    * (SetUIState's field loop) the CLI->daemon path drives in production.
    */
   function buildSlowFieldDependencies(perFieldMs: number) {
+    let focusedKey: string | undefined;
     const tapOnElement = {
-      execute: async () => {
+      execute: async (options: { text?: string; elementId?: string }) => {
         fakeTimer.advanceTime(Math.round(perFieldMs * 0.6));
-        return { success: true };
+        focusedKey = options.elementId ?? options.text;
+        return { success: true, focusVerified: true };
       },
     };
     const clearText = {
@@ -1597,6 +1824,9 @@ describe("SetUIState whole-call result deadline (issue #6222 reopen)", () => {
     const inputText = {
       execute: async (text: string) => {
         fakeTimer.advanceTime(Math.round(perFieldMs * 0.2));
+        if (focusedKey) {
+          fakeFieldTypeDetector.setTextValue(focusedKey, text);
+        }
         return { success: true, text };
       },
     };
@@ -2084,7 +2314,7 @@ describe("SetUIState whole-call result deadline (issue #6222 reopen)", () => {
         ) => {
           fakeTimer.advanceTime(10_000);
           await progress?.(1, 2, "tap done");
-          return { success: true };
+          return { success: true, focusVerified: true };
         },
       },
       clearText: {
@@ -2096,6 +2326,7 @@ describe("SetUIState whole-call result deadline (issue #6222 reopen)", () => {
       inputText: {
         execute: async (text: string) => {
           fakeTimer.advanceTime(20_000);
+          fakeFieldTypeDetector.setTextValue("firstName", text);
           return { success: true, text };
         },
       },
@@ -2164,7 +2395,7 @@ describe("SetUIState whole-call result deadline (issue #6222 reopen)", () => {
         ) => {
           fakeTimer.advanceTime(10_000);
           await progress?.(1, 2, "tap done");
-          return { success: true };
+          return { success: true, focusVerified: true };
         },
       },
       clearText: {
@@ -2174,7 +2405,12 @@ describe("SetUIState whole-call result deadline (issue #6222 reopen)", () => {
             fakeTimer.setTimeout(() => resolve({ success: true }), 30_000);
           }),
       },
-      inputText: { execute: async (text: string) => ({ success: true, text }) },
+      inputText: {
+        execute: async (text: string) => {
+          fakeFieldTypeDetector.setTextValue("firstName", text);
+          return { success: true, text };
+        },
+      },
       swipeOn: fakeSwipe,
       observeScreen: fakeObserve,
       fieldTypeDetector: fakeFieldTypeDetector,
@@ -2419,33 +2655,33 @@ describe("SetUIState post-success observation refresh is bounded by the result d
     fakeTimer = new FakeTimer();
   });
 
-  test("a stalled post-success observation refresh after a verification-skipped field returns the accumulated result instead of letting the outer abort discard it", async () => {
-    // Password fields skip verification, so `processField()` returns without
-    // a `freshObservation` -- `observationAfterSuccess()`'s fallback then
-    // issues an unbounded `ObserveScreen.execute()`. If THAT stalls, it must
-    // still be bounded by the same live cutoff every other device call in
-    // this method already respects.
+  test("a stalled post-success observation refresh returns the accumulated result instead of letting the outer abort discard it", async () => {
+    // Checkboxes do not need a value-verification observe, so
+    // `observationAfterSuccess()`'s fallback issues an unbounded
+    // `ObserveScreen.execute()`. If THAT stalls, it must still be bounded by
+    // the same live cutoff every other device call in this method respects.
     const callStartMs = fakeTimer.now();
     const transportDeadlineMs = callStartMs + 30_000;
 
-    const passwordHierarchy: ViewHierarchyResult = {
+    const checkboxHierarchy: ViewHierarchyResult = {
       hierarchy: {
         node: [
           {
             $: {
               bounds: { left: 0, top: 0, right: 100, bottom: 50 },
-              "resource-id": "password",
+              "resource-id": "checkbox",
               text: "",
-              class: "android.widget.EditText",
-              password: "true",
+              class: "android.widget.CheckBox",
+              checkable: "true",
+              checked: "false",
             },
           },
         ],
       },
     };
 
-    fakeFieldTypeDetector.setFieldType("password", "text");
-    fakeFieldTypeDetector.setIsPasswordField("password", true);
+    fakeFieldTypeDetector.setFieldType("checkbox", "checkbox");
+    fakeFieldTypeDetector.setSkipVerification("checkbox", true);
 
     let observeCalls = 0;
     const observeScreen = {
@@ -2456,7 +2692,7 @@ describe("SetUIState post-success observation refresh is bounded by the result d
             updatedAt: fakeTimer.now(),
             screenSize: { width: 1080, height: 1920 },
             systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-            viewHierarchy: passwordHierarchy,
+            viewHierarchy: checkboxHierarchy,
           };
         }
         // The post-success observation refresh -- never resolves.
@@ -2475,7 +2711,7 @@ describe("SetUIState post-success observation refresh is bounded by the result d
     });
 
     const resultPromise = setUIState.execute(
-      { fields: [{ selector: { elementId: "password" }, value: "secret123" }] },
+      { fields: [{ selector: { elementId: "checkbox" }, selected: true }] },
       undefined,
       undefined,
       transportDeadlineMs,

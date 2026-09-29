@@ -31,7 +31,13 @@ interface TapOnElementLike {
     },
     progress?: ProgressCallback,
     signal?: AbortSignal,
-  ): Promise<{ success: boolean; element?: Element; observation?: ObserveResult; error?: string }>;
+  ): Promise<{
+    success: boolean;
+    element?: Element;
+    focusVerified?: boolean;
+    observation?: ObserveResult;
+    error?: string;
+  }>;
 }
 
 /**
@@ -94,6 +100,13 @@ interface SetUIStateDependencies {
  */
 interface InternalFieldResult extends FieldResult {
   freshObservation?: ObserveResult;
+}
+
+interface FieldVerificationOutcome {
+  verified?: boolean;
+  observation?: ObserveResult;
+  error?: string;
+  stopRetrying?: boolean;
 }
 
 const DEFAULT_MAX_RETRIES = 3;
@@ -1024,19 +1037,7 @@ export class SetUIState extends BaseVisualChange {
       try {
         // On retry, re-find the element via scroll
         if (attempts > 1) {
-          const freshObs = await this.getObserveScreen().execute(
-            undefined,
-            undefined,
-            false,
-            0,
-            signal,
-          );
-          const found = freshObs?.viewHierarchy
-            ? this.findElement(fieldSpec.selector, freshObs.viewHierarchy)
-            : null;
-          if (found) {
-            element = found;
-          }
+          element = await this.refreshFieldElement(fieldSpec, element, signal);
         }
 
         // Detect field type
@@ -1081,37 +1082,34 @@ export class SetUIState extends BaseVisualChange {
           continue;
         }
 
-        // Skip verification when:
-        // - Password field (value is masked)
-        // - iOS element without value attribute
-        // - Text-only selector on a mutable field type (typing replaces the label text
-        //   used as the selector, so re-lookup by original text fails)
-        let verified: boolean | undefined;
-        let freshObservation: ObserveResult | undefined;
-        const hasTextOnlySelector =
-          fieldSpec.selector.text !== undefined && fieldSpec.selector.elementId === undefined;
-        const isMutableTextField = fieldType === "text" || fieldType === "dropdown";
-        const shouldSkipVerify =
-          this.fieldTypeDetector.isPasswordField(element) ||
-          this.fieldTypeDetector.shouldSkipVerification(element, fieldType) ||
-          (hasTextOnlySelector && isMutableTextField);
-        if (!shouldSkipVerify) {
-          const verifyResult = await this.verifyFieldValue(fieldSpec, fieldType, signal);
-          verified = verifyResult.verified;
-          freshObservation = verifyResult.observation;
-          if (!verified) {
-            lastError = `Verification failed for ${this.describeSelector(fieldSpec.selector)}`;
-            continue;
+        const verification = await this.verifyAppliedFieldValue(
+          fieldSpec,
+          fieldType,
+          element,
+          attempts,
+          signal,
+        );
+        if (verification.error) {
+          lastError = verification.error;
+          if (verification.stopRetrying) {
+            return {
+              selector: fieldSpec.selector,
+              success: false,
+              attempts,
+              error: lastError,
+              fieldType,
+            };
           }
+          continue;
         }
 
         return {
           selector: fieldSpec.selector,
           success: true,
           attempts,
-          verified,
+          verified: verification.verified,
           fieldType,
-          freshObservation,
+          freshObservation: verification.observation,
         };
       } catch (error) {
         lastError = errorMessage(error);
@@ -1126,6 +1124,84 @@ export class SetUIState extends BaseVisualChange {
       error: lastError,
       fieldType,
     };
+  }
+
+  private async verifyAppliedFieldValue(
+    fieldSpec: FieldSpec,
+    fieldType: FieldType,
+    element: Element,
+    attempts: number,
+    signal?: AbortSignal,
+  ): Promise<FieldVerificationOutcome> {
+    if (this.shouldSkipFieldVerification(fieldSpec, fieldType, element)) {
+      return {};
+    }
+
+    const verifyResult = await this.verifyFieldValue(fieldSpec, fieldType, signal, element);
+    if (verifyResult.unverifiable) {
+      return { observation: verifyResult.observation };
+    }
+    if (verifyResult.verified) {
+      return { verified: true, observation: verifyResult.observation };
+    }
+
+    return {
+      error:
+        `Verification failed for ${this.describeSelector(fieldSpec.selector)}: ` +
+        `expected ${JSON.stringify(fieldSpec.value)}, observed ${JSON.stringify(verifyResult.observedValue)}`,
+      stopRetrying: fieldType === "text" && attempts >= 2,
+    };
+  }
+
+  private shouldSkipFieldVerification(
+    fieldSpec: FieldSpec,
+    fieldType: FieldType,
+    element: Element,
+  ): boolean {
+    if (
+      this.fieldTypeDetector.isPasswordField(element) ||
+      this.fieldTypeDetector.shouldSkipVerification(element, fieldType)
+    ) {
+      return true;
+    }
+
+    return (
+      fieldType !== "text" &&
+      fieldType === "dropdown" &&
+      fieldSpec.selector.text !== undefined &&
+      fieldSpec.selector.elementId === undefined
+    );
+  }
+
+  private async refreshFieldElement(
+    fieldSpec: FieldSpec,
+    previousElement: Element,
+    signal?: AbortSignal,
+  ): Promise<Element> {
+    const observation = await this.getObserveScreen().execute(
+      undefined,
+      undefined,
+      false,
+      0,
+      signal,
+    );
+    if (!observation?.viewHierarchy) {
+      return previousElement;
+    }
+
+    const found = this.findElement(fieldSpec.selector, observation.viewHierarchy);
+    if (found) {
+      return found;
+    }
+
+    const resourceId = previousElement["resource-id"];
+    if (fieldSpec.selector.text && resourceId) {
+      return (
+        this.finder.findElementByResourceId(observation.viewHierarchy, resourceId) ??
+        previousElement
+      );
+    }
+    return previousElement;
   }
 
   /**
@@ -1209,19 +1285,22 @@ export class SetUIState extends BaseVisualChange {
 
           const selectorDesc = this.describeSelector(fieldSpec.selector);
 
-          // Tap to focus
-          logger.debug(`[SetUIState] text.tap selector=${selectorDesc}`);
+          // The focus action verifies that this editable field, rather than a
+          // previously focused field, owns input before ClearText can mutate it.
+          logger.debug(`[SetUIState] text.focus selector=${selectorDesc}`);
           const tapStart = Date.now();
-          const tapResult = await tapOnElement.execute(
-            this.buildTapOptions(fieldSpec.selector, "tap"),
-            progress,
-            signal,
-          );
+          const focusOptions = element["resource-id"]
+            ? { elementId: element["resource-id"], action: "focus" }
+            : this.buildTapOptions(fieldSpec.selector, "focus");
+          const tapResult = await tapOnElement.execute(focusOptions, progress, signal);
           logger.debug(
-            `[SetUIState] text.tap done selector=${selectorDesc} success=${tapResult.success} totalMs=${Date.now() - tapStart}${tapResult.error ? ` error=${tapResult.error}` : ""}`,
+            `[SetUIState] text.focus done selector=${selectorDesc} success=${tapResult.success} focusVerified=${tapResult.focusVerified === true} totalMs=${Date.now() - tapStart}${tapResult.error ? ` error=${tapResult.error}` : ""}`,
           );
-          if (!tapResult.success) {
-            return { success: false, error: `Failed to tap on field: ${tapResult.error}` };
+          if (!tapResult.success || tapResult.focusVerified !== true) {
+            return {
+              success: false,
+              error: `Failed to tap/focus on field: ${tapResult.error ?? "focus was not verified"}`,
+            };
           }
 
           // Clear existing text
@@ -1340,7 +1419,13 @@ export class SetUIState extends BaseVisualChange {
     fieldSpec: FieldSpec,
     fieldType: FieldType,
     signal?: AbortSignal,
-  ): Promise<{ verified: boolean; observation?: ObserveResult }> {
+    previouslyMatchedElement?: Element,
+  ): Promise<{
+    verified: boolean;
+    observation?: ObserveResult;
+    observedValue?: string;
+    unverifiable?: boolean;
+  }> {
     // Get fresh observation. The caller (processField -> execute) reuses this
     // as its own post-success refresh instead of issuing a second, effectively
     // redundant observe against the device (#6222).
@@ -1352,12 +1437,25 @@ export class SetUIState extends BaseVisualChange {
       signal,
     );
     if (!observation?.viewHierarchy) {
+      if (fieldType === "text") {
+        return { verified: false, observation, unverifiable: true };
+      }
       return { verified: false, observation };
     }
 
     // Find the element again
-    const element = this.findElement(fieldSpec.selector, observation.viewHierarchy);
+    let element = this.findElement(fieldSpec.selector, observation.viewHierarchy);
+    // A text selector can name the field's current label/value, which changes
+    // after input. Prefer the matched field's stable resource ID in the fresh
+    // hierarchy when the original text no longer identifies it.
+    const resourceId = previouslyMatchedElement?.["resource-id"];
+    if (!element && resourceId) {
+      element = this.finder.findElementByResourceId(observation.viewHierarchy, resourceId);
+    }
     if (!element) {
+      if (fieldType === "text") {
+        return { verified: false, observation, unverifiable: true };
+      }
       return { verified: false, observation };
     }
 
@@ -1365,8 +1463,8 @@ export class SetUIState extends BaseVisualChange {
     switch (fieldType) {
       case "text":
         if (fieldSpec.value !== undefined) {
-          const currentValue = this.fieldTypeDetector.getTextValue(element);
-          return { verified: currentValue === fieldSpec.value, observation };
+          const observedValue = this.fieldTypeDetector.getTextValue(element);
+          return { verified: observedValue === fieldSpec.value, observation, observedValue };
         }
         return { verified: true, observation };
 

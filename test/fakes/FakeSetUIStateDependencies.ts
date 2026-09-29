@@ -73,6 +73,7 @@ export class FakeTapOnElement implements TapOnElementLike {
   private defaultResult: TapOnElementResult = {
     success: true,
     action: "tap",
+    focusVerified: true,
     element: { bounds: { left: 0, top: 0, right: 100, bottom: 50 } },
   };
 

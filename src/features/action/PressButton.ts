@@ -11,9 +11,17 @@ import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType"
 import { isNavigationPressButton, resolveAndroidKeyCode } from "./pressButtonPolicy";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { combineWithAmbientAbort } from "../../utils/AbortContext";
+import { HomeScreen } from "./HomeScreen";
+import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
+import type { SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
 
 export class PressButton extends BaseVisualChange {
-  constructor(device: BootedDevice, adb: AdbExecutor | null = null, timer: Timer = defaultTimer) {
+  constructor(
+    device: BootedDevice,
+    adb: AdbExecutor | null = null,
+    timer: Timer = defaultTimer,
+    private readonly simctl: Pick<SimCtl, "executeCommandArgs"> = new SimCtlClient(device),
+  ) {
     super(device, adb, timer);
     this.device = device;
   }
@@ -74,6 +82,7 @@ export class PressButton extends BaseVisualChange {
           throw unsupportedPlatformError(this.device.platform, "press buttons");
       }
     } catch (error) {
+      logger.warn(`Failed to press ${button}: ${errorMessage(error)}`, error);
       return {
         success: false,
         button,
@@ -404,6 +413,14 @@ export class PressButton extends BaseVisualChange {
   ): Promise<{ success: boolean; error?: string }> {
     switch (button) {
       case "home":
+        if (isIosSimulatorUdid(this.device.deviceId)) {
+          await new HomeScreen(this.device, null, this.timer, this.simctl).executeIosHomeNavigation(
+            undefined,
+            frameContext,
+            timeoutMs,
+          );
+          return { success: true };
+        }
         return client.requestPressHome(timeoutMs, undefined, frameContext);
       case "back":
         return client.requestPressBack(timeoutMs, undefined, frameContext);

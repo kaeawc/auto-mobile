@@ -4,6 +4,7 @@ import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { BootedDevice } from "../../../src/models";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 
 describe("PressButton", () => {
   const iosDevice: BootedDevice = {
@@ -17,6 +18,36 @@ describe("PressButton", () => {
     platform: "ios",
     name: "iPhone Simulator",
   };
+
+  test("simulator home button uses simctl without runner Home and verifies foreground", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const client = new FakeIOSCtrlProxy(timer);
+    client.setHierarchyData({
+      packageName: "com.apple.springboard",
+      updatedAt: 1,
+      hierarchy: { className: "XCUIApplication" },
+    });
+    const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
+      client as unknown as IOSCtrlProxyClient,
+    );
+    const launches: string[][] = [];
+    try {
+      const pressButton = new PressButton(iosSimulator, null, timer, {
+        executeCommandArgs: async (args) => {
+          launches.push(args);
+          return { stdout: "", stderr: "" };
+        },
+      });
+
+      const result = await pressButton.press("home");
+      expect(result.success).toBe(true);
+      expect(launches).toEqual([["launch", iosSimulator.deviceId, "com.apple.springboard"]]);
+      expect(client.getPressHomeRequestCount()).toBe(0);
+    } finally {
+      getInstanceSpy.mockRestore();
+    }
+  });
 
   test("ios back delegates to CtrlProxy pressBack", async () => {
     let backCalls = 0;

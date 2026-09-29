@@ -9,6 +9,7 @@ import Foundation
 @MainActor
 final class RewriteFakeElementLocator: ElementLocating {
     var foregroundBundleId: String?
+    var appState: ObservedAppState = .notRunning
     private let hierarchy: ViewHierarchy
 
     init(hierarchy: ViewHierarchy = RewriteFakeElementLocator.defaultHierarchy) {
@@ -33,7 +34,7 @@ final class RewriteFakeElementLocator: ElementLocating {
     func findElement(byText _: String) -> Any? { nil }
     func trackObservedBundleId(_: String) {}
     func switchForegroundApp(bundleId: String) { foregroundBundleId = bundleId }
-    func getAppState(bundleId _: String) -> ObservedAppState { .notRunning }
+    func getAppState(bundleId _: String) -> ObservedAppState { appState }
     func awaitAppState(bundleId _: String, expectedState _: AppStateExpectation) -> Bool { true }
     func refreshForegroundBundleId() -> String? { foregroundBundleId }
 }
@@ -54,6 +55,8 @@ final class RewriteFakeGesturePerformer: GesturePerforming {
     var actionCalls = 0
     var activateAccessibilityLinkCalls = 0
     var setOrientationCalls = 0
+    var onPressHome: (() -> Void)?
+    var pressHomeError: CommandError?
 
     func pressKey(key: String, modifiers: [String]) throws {
         if let keyError { throw keyError }
@@ -112,7 +115,11 @@ final class RewriteFakeGesturePerformer: GesturePerforming {
     }
 
     func getOrientation() -> String { orientation }
-    func pressHome() throws {}
+    func pressHome() throws {
+        if let pressHomeError { throw pressHomeError }
+        onPressHome?()
+    }
+
     func pressBack() throws {}
     func shake() throws { shakeCalls += 1 }
     func pressButton(_: String) throws {}

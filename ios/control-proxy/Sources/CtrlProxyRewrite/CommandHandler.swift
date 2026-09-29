@@ -1,5 +1,30 @@
 import Foundation
 
+enum SdkHierarchyProbeDecision: Equatable {
+    case probe
+    case skip
+    case clear
+
+    static func decide(
+        foregroundBundleId: String,
+        cachedBundleId: String?,
+        appState: ObservedAppState?
+    )
+        -> Self
+    {
+        if foregroundBundleId == "com.apple.springboard" {
+            return cachedBundleId == nil ? .skip : .clear
+        }
+        if let cachedBundleId, cachedBundleId != foregroundBundleId {
+            return .clear
+        }
+        if appState != .runningForeground {
+            return cachedBundleId == nil ? .skip : .clear
+        }
+        return cachedBundleId == nil ? .probe : .skip
+    }
+}
+
 /// Routes a decoded `WebSocketRequest` to a typed, `Sendable`, encodable response.
 ///
 /// Rewrite archetype — **`Sendable` POD router, NOT `@MainActor`** (#5374): its blocking
@@ -422,26 +447,42 @@ final class CommandHandler: CommandHandling {
         return sdkHierarchyCache?.reconcile(matchingBundleId: foregroundBundleId)
     }
 
-    /// The refresh path (`request_hierarchy`). Ported faithfully with the reference's
-    /// `latest` / `clear` / `update` branching interleaved with the async server / fresh
-    /// fetches; a fresh walk is only issued when the SDK server owns the foreground app.
+    /// The refresh path (`request_hierarchy`). A background SDK may still listen on its
+    /// port without answering, so only probe when its app is actually foreground.
     private func matchingSdkHierarchy(for hierarchy: ViewHierarchy) async -> SdkViewHierarchy? {
         guard let foregroundBundleId = normalizedBundleId(hierarchy.packageName) else {
             return nil
         }
 
-        if let cached = sdkHierarchyCache?.latest {
-            if sdkHierarchy(cached, matches: foregroundBundleId) {
-                return cached
-            }
-            guard await sdkServerMatchesForegroundBundleId(foregroundBundleId) else {
-                sdkHierarchyCache?.clear()
-                return nil
-            }
-        } else if sdkHierarchyClient != nil {
-            guard await sdkServerMatchesForegroundBundleId(foregroundBundleId) else {
-                return nil
-            }
+        let cached = sdkHierarchyCache?.latest
+        // Preserve an invalid cached bundle as a mismatch rather than treating it as no cache.
+        let cachedBundleId = cached.map { normalizedBundleId($0.bundleId) ?? "" }
+        let appState: ObservedAppState?
+        if foregroundBundleId == "com.apple.springboard" ||
+            (cached != nil && cachedBundleId != foregroundBundleId) ||
+            (cached == nil && sdkHierarchyClient == nil)
+        {
+            appState = nil
+        } else {
+            appState = await elementLocator.getAppState(bundleId: foregroundBundleId)
+        }
+
+        switch SdkHierarchyProbeDecision.decide(
+            foregroundBundleId: foregroundBundleId,
+            cachedBundleId: cachedBundleId,
+            appState: appState
+        ) {
+        case .clear:
+            sdkHierarchyCache?.clear()
+            return nil
+        case .skip:
+            return cached
+        case .probe:
+            break
+        }
+
+        guard await sdkServerMatchesForegroundBundleId(foregroundBundleId) else {
+            return nil
         }
 
         guard let fresh = await sdkHierarchyClient?.fetchFreshHierarchy(),
@@ -919,7 +960,17 @@ final class CommandHandler: CommandHandling {
             }
         }
 
-        // Explicit state transition: home screen means springboard is now foreground.
+        // A completed XCUIDevice press can be a no-op on some simulators. Detect
+        // foreground before updating the tracked app, or later observations lie.
+        guard await elementLocator.refreshForegroundBundleId() == "com.apple.springboard" else {
+            return WebSocketResponse.error(
+                type: ResponseType.pressHomeResult.rawValue,
+                requestId: request.requestId,
+                error: "Home press did not bring SpringBoard to the foreground",
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        }
+
         await trackedAsync("switchForegroundApp") {
             await self.elementLocator.switchForegroundApp(bundleId: "com.apple.springboard")
         }

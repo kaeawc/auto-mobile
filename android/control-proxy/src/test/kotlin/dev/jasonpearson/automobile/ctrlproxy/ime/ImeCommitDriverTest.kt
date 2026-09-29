@@ -144,6 +144,36 @@ class ImeCommitDriverTest {
   }
 
   @Test
+  fun `unicode corpus commits exact text without lone UTF-16 surrogates`() {
+    unicodeCorpus().forEach { input ->
+      val sink = FakeImeCommitSink(inputType = InputType.TYPE_CLASS_TEXT)
+
+      val result = commit(sink, input, PRIOR_IME_ID)
+
+      assertTrue("Failed input: $input", result.success)
+      assertEquals(input, sink.committedChars.joinToString(""))
+      assertTrue(
+        "A commit contained a lone UTF-16 surrogate for input: $input",
+        sink.committedChars.all { it.hasWellFormedUtf16() },
+      )
+    }
+  }
+
+  @Test
+  fun `graphemeSequencesStayTogetherInCommits_asTrackedForIssue7999`() {
+    val graphemes = listOf("1️⃣", "e\u0301", "👨‍👩‍👧", "🇯🇵", "👍🏽", "🏳️‍🌈", "👩🏽‍💻")
+
+    graphemes.forEach { grapheme ->
+      val sink = FakeImeCommitSink(inputType = InputType.TYPE_CLASS_TEXT)
+
+      val result = commit(sink, grapheme, PRIOR_IME_ID)
+
+      assertTrue("Failed grapheme: $grapheme", result.success)
+      assertEquals(listOf(grapheme), sink.committedChars)
+    }
+  }
+
+  @Test
   fun `failed automation unit preserves complete cluster and partial progress`() {
     val sink = FakeImeCommitSink(inputType = InputType.TYPE_CLASS_TEXT, failAtCommitIndex = 1)
 
@@ -515,6 +545,34 @@ class ImeCommitDriverTest {
     ImeCommitDriver(sink).commit(text, priorImeId) { result = it }
     sink.drain()
     return requireNotNull(result)
+  }
+
+  private fun unicodeCorpus() =
+    listOf(
+      "a😀b👍🏽c👨‍👩‍👧d🇯🇵e❤️fé日本",
+      "1️⃣",
+      "e\u0301",
+      "🏳️‍🌈",
+      "👩🏽‍💻",
+      "ไทย",
+      "हिन्दी",
+      "مرحبا",
+      "한국어",
+    )
+
+  private fun String.hasWellFormedUtf16(): Boolean {
+    var index = 0
+    while (index < length) {
+      when {
+        this[index].isHighSurrogate() -> {
+          if (index + 1 >= length || !this[index + 1].isLowSurrogate()) return false
+          index += 2
+        }
+        this[index].isLowSurrogate() -> return false
+        else -> index++
+      }
+    }
+    return true
   }
 
   private class FakeImeCommitSink(

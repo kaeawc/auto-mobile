@@ -17,6 +17,7 @@ import dev.jasonpearson.automobile.desktop.core.datasource.NavigationGraph
 import dev.jasonpearson.automobile.desktop.core.datasource.Result
 import dev.jasonpearson.automobile.desktop.core.di.AutoMobileGraphProvider
 import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
+import dev.jasonpearson.automobile.desktop.core.navigation.FakeScreenshotLoader
 import dev.jasonpearson.automobile.desktop.core.navigation.NavigationDashboard
 import dev.jasonpearson.automobile.desktop.core.navigation.ScreenNode
 import dev.jasonpearson.automobile.desktop.core.platform.AppVersion
@@ -258,6 +259,7 @@ class OfflineNavigationBrowserTest {
   fun `switching apps after Back renders the new app graph not the previous one`() =
     runComposeUiTest {
       // Distinct graph per appId so a stale render is detectable by screen name.
+      val loaderAppIds = mutableListOf<String>()
       val provider: (String?) -> NavigationDataSource = { appId ->
         when (appId) {
           null ->
@@ -270,17 +272,39 @@ class OfflineNavigationBrowserTest {
             )
           "com.example.a" ->
             SuppliedDataSource(
-              graph = { Result.Success(NavigationGraph(listOf(screen("Alpha")), emptyList())) }
+              graph = {
+                Result.Success(
+                  NavigationGraph(
+                    listOf(screen("Alpha").copy(screenshotUri = "shot?appId=com.example.a")),
+                    emptyList(),
+                  )
+                )
+              }
             )
           else ->
             SuppliedDataSource(
-              graph = { Result.Success(NavigationGraph(listOf(screen("Beta")), emptyList())) }
+              graph = {
+                Result.Success(
+                  NavigationGraph(
+                    listOf(screen("Beta").copy(screenshotUri = "shot?appId=com.example.b")),
+                    emptyList(),
+                  )
+                )
+              }
             )
         }
       }
       setContent {
         CompositionLocalProvider(LocalAutoMobileGraph provides testGraph()) {
-          MaterialTheme { OfflineNavigationBrowser(navigationDataSourceProvider = provider) }
+          MaterialTheme {
+            OfflineNavigationBrowser(
+              navigationDataSourceProvider = provider,
+              screenshotLoaderProvider = { appId ->
+                loaderAppIds.add(appId)
+                FakeScreenshotLoader()
+              },
+            )
+          }
         }
       }
       waitUntil(timeoutMillis = 5_000) {
@@ -305,34 +329,66 @@ class OfflineNavigationBrowserTest {
         "app B's graph must render, not the previously-opened app A's",
         onAllNodesWithText("Alpha").fetchSemanticsNodes().isEmpty(),
       )
+      assertTrue(
+        "loader must resolve per selected app",
+        loaderAppIds.containsAll(listOf("com.example.a", "com.example.b")),
+      )
     }
 
   @Test
-  fun `offline browse does not fetch a mis-scoped node screenshot`() = runComposeUiTest {
-    // The daemon's node-screenshot resource resolves via getCurrentAppId(), not the browsed app,
-    // so offline thumbnails could render the wrong app's image. The offline path wires no
-    // screenshot loader; prove it never reads the screenshot resource even when a node carries a
-    // screenshotUri. A real loader would call client.readResource on render of the node card.
-    val client = FakeAutoMobileClient()
-    val graphProvider =
-      object : AutoMobileGraphProvider {
-        override val autoMobileClient = client
-        override val daemonBootstrap = DaemonBootstrap.inactive()
-        override val settingsProvider = FakeSettingsProvider()
-        override val dataSourceFactory = DefaultDataSourceFactory(client)
-        override val updateController = FakeUpdateController()
-        override val appVersionProvider = AppVersionProvider { AppVersion.Dev }
+  fun `offline graph resolves loader for browsed app and requests app-scoped screenshot URI`() =
+    runComposeUiTest {
+      val uri = "automobile:navigation/nodes/1/screenshot?appId=com.example.app"
+      val loader = FakeScreenshotLoader()
+      val source =
+        FakeBrowserDataSource(
+          appsResult = Result.Success(listOf(appSummary("com.example.app", "Sample"))),
+          graphResult =
+            Result.Success(
+              NavigationGraph(listOf(screen("Alpha").copy(screenshotUri = uri)), emptyList())
+            ),
+        )
+      setContent {
+        CompositionLocalProvider(LocalAutoMobileGraph provides testGraph()) {
+          MaterialTheme {
+            OfflineNavigationBrowser(
+              navigationDataSourceProvider = { source },
+              screenshotLoaderProvider = { appId ->
+                assertTrue(appId == "com.example.app")
+                loader
+              },
+            )
+          }
+        }
       }
-    val nodeWithShot =
-      screen("Alpha").copy(screenshotUri = "automobile:navigation/nodes/1/screenshot")
+      waitUntil(timeoutMillis = 5_000) {
+        onAllNodesWithText("Sample").fetchSemanticsNodes().isNotEmpty()
+      }
+      onNodeWithContentDescription("Open navigation graph for Sample").performClick()
+      waitUntil(timeoutMillis = 5_000) { loader.getLoadCalls().contains(uri) }
+      assertTrue("loader receives app-scoped screenshot URI", loader.getLoadCalls().contains(uri))
+    }
+
+  @Test
+  fun `offline screenshot missing shows placeholder`() = runComposeUiTest {
+    val uri = "automobile:navigation/nodes/1/screenshot?appId=com.example.app"
+    val loader = FakeScreenshotLoader()
     val source =
       FakeBrowserDataSource(
         appsResult = Result.Success(listOf(appSummary("com.example.app", "Sample"))),
-        graphResult = Result.Success(NavigationGraph(listOf(nodeWithShot), emptyList())),
+        graphResult =
+          Result.Success(
+            NavigationGraph(listOf(screen("Alpha").copy(screenshotUri = uri)), emptyList())
+          ),
       )
     setContent {
-      CompositionLocalProvider(LocalAutoMobileGraph provides graphProvider) {
-        MaterialTheme { OfflineNavigationBrowser(navigationDataSourceProvider = { source }) }
+      CompositionLocalProvider(LocalAutoMobileGraph provides testGraph()) {
+        MaterialTheme {
+          OfflineNavigationBrowser(
+            navigationDataSourceProvider = { source },
+            screenshotLoaderProvider = { loader },
+          )
+        }
       }
     }
     waitUntil(timeoutMillis = 5_000) {
@@ -340,13 +396,13 @@ class OfflineNavigationBrowserTest {
     }
     onNodeWithContentDescription("Open navigation graph for Sample").performClick()
     waitUntil(timeoutMillis = 5_000) {
-      onAllNodesWithText("Alpha").fetchSemanticsNodes().isNotEmpty()
+      loader.getLoadCalls().contains(uri)
     }
-
-    assertTrue(
-      "offline browse must not read the (mis-scoped) node-screenshot resource",
-      client.calls.none { it == "readResource" },
-    )
+    onNodeWithText("Alpha").performClick()
+    waitUntil(timeoutMillis = 5_000) {
+      onAllNodesWithText("No screenshot").fetchSemanticsNodes().isNotEmpty()
+    }
+    onNodeWithText("No screenshot").assertExists()
   }
 
   @Test

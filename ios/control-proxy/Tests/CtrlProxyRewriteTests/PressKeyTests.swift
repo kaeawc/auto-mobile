@@ -18,12 +18,35 @@ final class PressKeyTests: XCTestCase {
         ))
     }
 
-    func testDestructiveKeyRequiresObservableFieldAndAcceptsSelectionDeletion() {
+    func testDestructiveKeyRequiresObservableField() {
         XCTAssertFalse(GesturePerformer.canVerifyDestructiveKey(focusedValue: nil))
         XCTAssertTrue(GesturePerformer.canVerifyDestructiveKey(focusedValue: ""))
-        XCTAssertTrue(GesturePerformer.didDeleteText(before: "hello", after: "hel"))
-        XCTAssertFalse(GesturePerformer.didDeleteText(before: "hello", after: "hello"))
-        XCTAssertFalse(GesturePerformer.didDeleteText(before: "hello", after: "helloo"))
+    }
+
+    func testDestructiveKeyOutcomeAcceptsEmptyFieldBoundary() {
+        XCTAssertEqual(GesturePerformer.destructiveKeyOutcome(before: "", after: ""), .boundaryNoOp)
+        XCTAssertEqual(GesturePerformer.destructiveKeyOutcome(before: "", after: "unexpected"), .boundaryNoOp)
+    }
+
+    func testDestructiveKeyOutcomeRequiresDeletionFromNonEmptyField() {
+        XCTAssertEqual(GesturePerformer.destructiveKeyOutcome(before: "hello", after: "hel"), .deleted)
+        XCTAssertEqual(GesturePerformer.destructiveKeyOutcome(before: "hello", after: "hello"), .noEffect)
+        XCTAssertEqual(GesturePerformer.destructiveKeyOutcome(before: "hello", after: "helloo"), .noEffect)
+    }
+
+    func testFieldTextExcludesEmptyFieldPlaceholders() {
+        XCTAssertEqual(GesturePerformer.fieldText(
+            snapshotValue: nil, value: "Search or enter website name", placeholderValue: "Search or enter website name"
+        ), "")
+        XCTAssertEqual(GesturePerformer.fieldText(
+            snapshotValue: nil, value: "stale text", placeholderValue: "Search or enter website name"
+        ), "")
+        XCTAssertEqual(GesturePerformer.fieldText(
+            snapshotValue: "", value: "Search or enter website", placeholderValue: "Search or enter website"
+        ), "")
+        XCTAssertEqual(GesturePerformer.fieldText(
+            snapshotValue: "abc", value: "abc", placeholderValue: "Search or enter website"
+        ), "abc")
     }
 
     func testForwardDeleteMarkerSelectionFailsClosedWhenCandidatesAreUsed() {
@@ -95,6 +118,21 @@ final class PressKeyTests: XCTestCase {
         ), .boundaryNoOp)
         XCTAssertEqual(GesturePerformer.arrowOutcome(
             key: "arrow_left", original: "", observed: "", before: 0, after: 0
+        ), .boundaryNoOp)
+    }
+
+    func testHorizontalArrowOutcomeIgnoresChangingPlaceholdersOnEmptyField() {
+        let original = GesturePerformer.fieldText(
+            snapshotValue: nil, value: "Search or enter website name", placeholderValue: "Search or enter website name"
+        )
+        let observed = GesturePerformer.fieldText(
+            snapshotValue: nil, value: "Search or enter website", placeholderValue: "Search or enter website"
+        )
+        XCTAssertEqual(GesturePerformer.arrowOutcome(
+            key: "arrow_left", original: original, observed: observed, before: 0, after: 0
+        ), .boundaryNoOp)
+        XCTAssertEqual(GesturePerformer.arrowOutcome(
+            key: "arrow_right", original: original, observed: observed, before: 0, after: 0
         ), .boundaryNoOp)
     }
 

@@ -99,8 +99,20 @@ public final class GesturePerformer: GesturePerforming {
         focusedValue != nil
     }
 
-    nonisolated static func didDeleteText(before: String, after: String) -> Bool {
-        after.count < before.count
+    enum DestructiveKeyOutcome: Equatable {
+        case deleted
+        case boundaryNoOp
+        case noEffect
+    }
+
+    nonisolated static func destructiveKeyOutcome(before: String, after: String) -> DestructiveKeyOutcome {
+        if before.isEmpty { return .boundaryNoOp }
+        return after.count < before.count ? .deleted : .noEffect
+    }
+
+    nonisolated static func fieldText(snapshotValue: String?, value: String?, placeholderValue: String?) -> String {
+        guard snapshotValue != nil, value != placeholderValue else { return "" }
+        return value ?? ""
     }
 
     nonisolated static func forwardDeleteMarker(for original: String) -> String? {
@@ -703,6 +715,15 @@ public final class GesturePerformer: GesturePerforming {
 
         // MARK: - Text Input
 
+        private func fieldText(_ el: XCUIElement) -> String {
+            let snapshot = el.snapshot()
+            return GesturePerformer.fieldText(
+                snapshotValue: snapshot.value as? String,
+                value: el.value as? String,
+                placeholderValue: snapshot.placeholderValue
+            )
+        }
+
         /// Resolve the XCUIApplication to use for text-input accessibility queries.
         ///
         /// Prefers the ElementLocator's tracked foreground bundle ID over the
@@ -993,7 +1014,7 @@ public final class GesturePerformer: GesturePerforming {
             let isHorizontalArrow = normalizedKey == "arrow_left" || normalizedKey == "arrow_right"
             let isPlainHorizontalArrow = isHorizontalArrow && modifierFlags.isEmpty
             let focusedElement = isDestructiveKey || isPlainHorizontalArrow ? resolveFocusedTextElement(app: app) : nil
-            let valueBeforeKeyPress = focusedElement?.value as? String
+            let valueBeforeKeyPress = focusedElement.map { fieldText($0) }
             let caretBefore: Int?
             if isPlainHorizontalArrow, let focusedElement {
                 caretBefore = try probeCaretIndex(
@@ -1060,30 +1081,44 @@ public final class GesturePerformer: GesturePerforming {
                     "Key '\(key)' was not delivered: focused field could not be observed"
                 )
             }
-
-            if normalizedKey == "delete",
-               let valueAfterNativeKeyPress = try catchingObjCException({ focusedElement.value as? String }),
-               valueAfterNativeKeyPress == valueBeforeKeyPress,
-               !GesturePerformer.didDeleteText(before: valueBeforeKeyPress, after: valueAfterNativeKeyPress)
+            if GesturePerformer.destructiveKeyOutcome(before: valueBeforeKeyPress, after: valueBeforeKeyPress)
+                == .boundaryNoOp
             {
-                try emulateForwardDelete(app: app, focusedElement: focusedElement, original: valueBeforeKeyPress)
+                return nil
+            }
+
+            if normalizedKey == "delete" {
+                let valueAfterNativeKeyPress = try catchingObjCException { fieldText(focusedElement) }
+                if valueAfterNativeKeyPress == valueBeforeKeyPress,
+                   GesturePerformer.destructiveKeyOutcome(
+                       before: valueBeforeKeyPress, after: valueAfterNativeKeyPress
+                   ) == .noEffect
+                {
+                    try emulateForwardDelete(app: app, focusedElement: focusedElement, original: valueBeforeKeyPress)
+                }
             }
 
             let deadline = Date().addingTimeInterval(1.0)
             while Date() < deadline {
-                guard focusedElement.exists, let valueAfterKeyPress = focusedElement.value as? String else {
+                guard focusedElement.exists else {
                     return nil
                 }
-                if GesturePerformer.didDeleteText(before: valueBeforeKeyPress, after: valueAfterKeyPress) {
+                let valueAfterKeyPress = try catchingObjCException { fieldText(focusedElement) }
+                if GesturePerformer.destructiveKeyOutcome(before: valueBeforeKeyPress, after: valueAfterKeyPress)
+                    == .deleted
+                {
                     return nil
                 }
                 RunLoop.current.run(until: Date().addingTimeInterval(0.05))
             }
 
-            guard focusedElement.exists, let valueAfterKeyPress = focusedElement.value as? String else {
+            guard focusedElement.exists else {
                 return nil
             }
-            if !GesturePerformer.didDeleteText(before: valueBeforeKeyPress, after: valueAfterKeyPress) {
+            let valueAfterKeyPress = try catchingObjCException { fieldText(focusedElement) }
+            if GesturePerformer.destructiveKeyOutcome(before: valueBeforeKeyPress, after: valueAfterKeyPress)
+                == .noEffect
+            {
                 throw GestureError.gestureFailed(
                     "Key '\(key)' did not decrease text length: before \(valueBeforeKeyPress.count), observed \(valueAfterKeyPress.count)"
                 )
@@ -1097,7 +1132,7 @@ public final class GesturePerformer: GesturePerforming {
         )
             throws -> ArrowOutcome?
         {
-            guard let observed = try catchingObjCException({ focusedElement.value as? String }) else { return nil }
+            let observed = try catchingObjCException { fieldText(focusedElement) }
             if GesturePerformer.arrowOutcome(
                 key: key, original: original, observed: observed, before: caretBefore, after: nil
             ) == .valueChanged {
@@ -1107,8 +1142,7 @@ public final class GesturePerformer: GesturePerforming {
             guard let caretBefore,
                   let caretAfter = try probeCaretIndex(app: app, focusedElement: focusedElement, original: original)
             else { return nil }
-            guard let valueAfterProbe = try catchingObjCException({ focusedElement.value as? String })
-            else { return nil }
+            let valueAfterProbe = try catchingObjCException { fieldText(focusedElement) }
             let outcome = GesturePerformer.arrowOutcome(
                 key: key, original: original, observed: valueAfterProbe, before: caretBefore, after: caretAfter
             )
@@ -1128,13 +1162,13 @@ public final class GesturePerformer: GesturePerforming {
             do {
                 let index = try catchingObjCException { () -> Int? in
                     focusedElement.typeText(marker)
-                    guard let probed = focusedElement.value as? String,
-                          let index = GesturePerformer.forwardDeleteMarkerIndex(
-                              original: original, probed: probed, marker: marker
-                          )
+                    let probed = fieldText(focusedElement)
+                    guard let index = GesturePerformer.forwardDeleteMarkerIndex(
+                        original: original, probed: probed, marker: marker
+                    )
                     else { return nil }
                     focusedElement.typeText(XCUIKeyboardKey.delete.rawValue)
-                    guard focusedElement.value as? String == original else { return nil }
+                    guard fieldText(focusedElement) == original else { return nil }
                     return index
                 }
                 if index != nil { return index }
@@ -1156,16 +1190,16 @@ public final class GesturePerformer: GesturePerforming {
             do {
                 try catchingObjCException {
                     focusedElement.typeText(marker)
-                    guard let probed = focusedElement.value as? String,
-                          let markerIndex = GesturePerformer.forwardDeleteMarkerIndex(
-                              original: original, probed: probed, marker: marker
-                          )
+                    let probed = fieldText(focusedElement)
+                    guard let markerIndex = GesturePerformer.forwardDeleteMarkerIndex(
+                        original: original, probed: probed, marker: marker
+                    )
                     else {
                         throw GestureError.gestureFailed("Forward-delete caret probe did not round-trip")
                     }
 
                     focusedElement.typeText(XCUIKeyboardKey.delete.rawValue)
-                    guard focusedElement.value as? String == original else {
+                    guard fieldText(focusedElement) == original else {
                         throw GestureError.gestureFailed("Forward-delete caret probe did not restore the original text")
                     }
 
@@ -1193,26 +1227,30 @@ public final class GesturePerformer: GesturePerforming {
         )
             throws
         {
-            if (try? catchingObjCException({ focusedElement.value as? String })) == original { return }
+            if (try? catchingObjCException({ fieldText(focusedElement) })) == original { return }
 
             if !marker.isEmpty,
-               (try? catchingObjCException({ focusedElement.value as? String }))?.contains(marker) == true
+               (try? catchingObjCException({ fieldText(focusedElement) }))?.contains(marker) == true
             {
                 try? catchingObjCException {
                     focusedElement.typeText(XCUIKeyboardKey.delete.rawValue)
                 }
-                if (try? catchingObjCException({ focusedElement.value as? String })) == original { return }
+                if (try? catchingObjCException({ fieldText(focusedElement) })) == original { return }
             }
 
             do {
                 try catchingObjCException {
                     app.typeKey("a", modifierFlags: .command)
-                    focusedElement.typeText(original.isEmpty ? XCUIKeyboardKey.delete.rawValue : original)
+                    if original.isEmpty {
+                        focusedElement.typeText(XCUIKeyboardKey.delete.rawValue)
+                    } else {
+                        focusedElement.typeText(original)
+                    }
                 }
             } catch {
                 throw GestureError.gestureFailed("Forward-delete probe recovery failed: \(error)")
             }
-            guard (try? catchingObjCException({ focusedElement.value as? String })) == original else {
+            guard (try? catchingObjCException({ fieldText(focusedElement) })) == original else {
                 throw GestureError.gestureFailed("Forward-delete probe recovery could not confirm the original text")
             }
         }

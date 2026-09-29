@@ -298,6 +298,12 @@ interface ToolRegistrationOptions {
   defaultEnabled?: boolean;
   supportsProgress?: boolean;
   debugOnly?: boolean;
+  /**
+   * Hidden from `tools/list` and discovery (`getAllTools` and
+   * `registerWithServer`'s MCP-SDK registration). Still directly callable by
+   * name via `tools/call` — for example, `startDevice` is called directly by
+   * the session-acquisition flow and CLI despite not being advertised.
+   */
   hidden?: boolean;
   outputSchema?: any;
   /** Accept the plan executor's internal coordination namespace. */
@@ -1413,6 +1419,25 @@ export class ToolRegistryClass {
     return this.getToolAvailabilityGateReasons(tool).length === 0;
   }
 
+  private toolReachable(
+    tool: RegisteredTool,
+    context: "list" | "call" | "plan" | "register",
+    options: { includeUnavailable?: boolean } = {},
+  ): boolean {
+    switch (context) {
+      case "list":
+      case "register":
+        // `includeUnavailable` skips availability gates, but never discovery hiding.
+        return !tool.hidden && (options.includeUnavailable === true || this.isToolAvailable(tool));
+      case "call":
+        // Hidden tools remain directly callable; availability gates still apply.
+        return this.isToolAvailable(tool);
+      case "plan":
+        // Plans may use explicitly plan-executable tools through availability gates.
+        return this.isToolAvailable(tool) || tool.planExecutable === true;
+    }
+  }
+
   // Register a new tool
   register(
     name: string,
@@ -1597,10 +1622,7 @@ export class ToolRegistryClass {
   // Get all registered tools
   getAllTools(options: ToolListingOptions = {}): RegisteredTool[] {
     const tools = Array.from(this.tools.values());
-    if (options.includeUnavailable) {
-      return tools.filter((tool) => !tool.hidden);
-    }
-    return tools.filter((tool) => !tool.hidden && this.isToolAvailable(tool));
+    return tools.filter((tool) => this.toolReachable(tool, "list", options));
   }
 
   getConfigurableToolNames(): string[] {
@@ -1636,7 +1658,7 @@ export class ToolRegistryClass {
   // Get a specific tool by name
   getTool(name: string): RegisteredTool | undefined {
     const tool = this.tools.get(name);
-    if (!tool || !this.isToolAvailable(tool)) {
+    if (!tool || !this.toolReachable(tool, "call")) {
       return undefined;
     }
     return tool;
@@ -1756,7 +1778,7 @@ export class ToolRegistryClass {
     }
 
     const gateReasons = this.getToolAvailabilityGateReasons(tool);
-    if (gateReasons.length > 0 && !tool.planExecutable) {
+    if (!this.toolReachable(tool, "plan")) {
       return undefined;
     }
     // A `planOnly` tool is hidden from discovery by design and is expected in
@@ -1780,7 +1802,7 @@ export class ToolRegistryClass {
     this.trackServer(server);
 
     this.tools.forEach((tool) => {
-      if (tool.hidden || !this.isToolAvailable(tool)) {
+      if (!this.toolReachable(tool, "register")) {
         return;
       }
 

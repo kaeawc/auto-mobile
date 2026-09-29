@@ -15,11 +15,42 @@ object AutoMobileSocketPaths {
   private const val SOCKET_DIR = ".auto-mobile"
 
   /** Absolute path of the named socket, e.g. `socketPath("device-snapshot.sock")`. */
-  fun socketPath(fileName: String): String {
+  fun socketPath(fileName: String): String =
+    resolveSocketPath(
+      fileName,
+      envProvider = System::getenv,
+      userHome = System.getProperty("user.home", ""),
+      userDir = System.getProperty("user.dir", "."),
+    )
+
+  internal fun resolveSocketPath(
+    fileName: String,
+    envProvider: (String) -> String?,
+    userHome: String = System.getProperty("user.home", ""),
+    userDir: String = System.getProperty("user.dir", "."),
+  ): String {
+    return File(resolveSocketDir(envProvider, userHome, userDir), fileName).path
+  }
+
+  internal fun resolveSocketDir(
+    envProvider: (String) -> String?,
+    userHome: String = System.getProperty("user.home", ""),
+    userDir: String = System.getProperty("user.dir", "."),
+  ): String {
+    val override = envProvider("AUTOMOBILE_AUX_SOCKET_DIR")?.trim()
+    if (!override.isNullOrEmpty()) {
+      val overridePath = Path.of(override)
+      if (overridePath.isAbsolute) return override
+      val launchCwd =
+        envProvider("AUTOMOBILE_DAEMON_LAUNCH_CWD")?.trim().takeUnless { it.isNullOrEmpty() }
+          ?: userDir
+      return Path.of(launchCwd, override).toString()
+    }
+
     // Falling back to "." keeps this a relative path rather than interpolating "null" into it on
     // the rare JVM where user.home is unset.
-    val home = System.getProperty("user.home", "").ifBlank { "." }
-    return File(home, "$SOCKET_DIR/$fileName").path
+    val home = userHome.ifBlank { "." }
+    return File(home, SOCKET_DIR).path
   }
 
   /** True when the daemon currently exposes this socket. False on daemons that predate it. */

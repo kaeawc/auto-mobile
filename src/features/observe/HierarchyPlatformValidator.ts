@@ -95,8 +95,10 @@ export class RealHierarchyPlatformValidator implements HierarchyPlatformValidato
  * direct device queries rather than the rejected hierarchy and are left intact.
  *
  * Note: if you add a new hierarchy-derived field to ObserveResult, clear it here.
+ * `updatedAt` is hierarchy-derived and must stay covered by this scrubber.
  */
 export function discardHierarchyDerivedData(result: ObserveResult): void {
+  result.updatedAt = 0;
   result.viewHierarchy = undefined;
   result.elements = undefined;
   result.selectedElements = undefined;

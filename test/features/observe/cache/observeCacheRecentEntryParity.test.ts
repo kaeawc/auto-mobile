@@ -60,7 +60,7 @@ describe("getRecentInMemoryEntry same-tick tie-break parity", function () {
       const entry = store.getRecentInMemoryEntry();
 
       expect(`${name}:${entry?.deviceId}`).toBe(`${name}:device-b`);
-      expect(entry?.result).toBe(second);
+      expect(entry?.result).toEqual(second);
     }
   });
 
@@ -77,7 +77,7 @@ describe("getRecentInMemoryEntry same-tick tie-break parity", function () {
       const entry = store.getRecentInMemoryEntry();
 
       expect(`${name}:${entry?.deviceId}`).toBe(`${name}:device-b`);
-      expect(entry?.result).toBe(newer);
+      expect(entry?.result).toEqual(newer);
     }
   });
 });

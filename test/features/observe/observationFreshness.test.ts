@@ -193,6 +193,42 @@ describe("computeFreshness", () => {
       expect(v.staleDurationMs).toBeUndefined();
     });
 
+    test("a satisfied minimum is not fresh when the cached tree was not re-verified", () => {
+      const v = computeFreshness({
+        requestedAfter: NOW - 1_000,
+        actualTimestamp: NOW - 1,
+        now: NOW,
+        verified: false,
+      });
+      expect(v.isFresh).toBe(false);
+      expect(v.staleDurationMs).toBeUndefined();
+      expect(v.category).toBe("cache_age");
+      expect(v.warning).toContain("without being re-verified");
+    });
+
+    test("a satisfied minimum stays fresh when the tree was verified", () => {
+      const v = computeFreshness({
+        requestedAfter: NOW - 1_000,
+        actualTimestamp: NOW - 1,
+        now: NOW,
+        verified: true,
+      });
+      expect(v.isFresh).toBe(true);
+      expect(v.category).toBeUndefined();
+    });
+
+    test("an unverified tree below the requested minimum keeps requested_min shortfall", () => {
+      const v = computeFreshness({
+        requestedAfter: NOW - 500,
+        actualTimestamp: NOW - 181_858,
+        now: NOW,
+        verified: false,
+      });
+      expect(v.isFresh).toBe(false);
+      expect(v.staleDurationMs).toBe(181_358);
+      expect(v.category).toBe("requested_min");
+    });
+
     test("semantics are unchanged: not satisfied, staleDurationMs is the shortfall", () => {
       const v = computeFreshness({
         requestedAfter: NOW - 500,

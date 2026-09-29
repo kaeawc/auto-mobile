@@ -8,6 +8,8 @@ import {
   resetListAppsToolDependencies,
   resetTerminateAppToolDependencies,
   setCrashAppToolDependencies,
+  resetInstalledAppResourceRefresh,
+  setInstalledAppResourceRefresh,
   setListAppsToolDependencies,
   setTerminateAppToolDependencies,
 } from "../../src/server/appTools";
@@ -49,6 +51,7 @@ describe("listApps tool", () => {
     ToolRegistry.clearTools();
     resetListAppsToolDependencies();
     resetTerminateAppToolDependencies();
+    resetInstalledAppResourceRefresh();
   });
 
   const device: BootedDevice = {
@@ -398,8 +401,10 @@ describe("crashApp tool", () => {
           throw new Error("unreachable");
         },
       }),
-      invalidateAppResourceCache: () => invalidations++,
-      notifyAppResourceUpdated: async () => {
+    });
+    setInstalledAppResourceRefresh({
+      invalidate: () => invalidations++,
+      notify: async () => {
         notifications++;
       },
     });
@@ -410,7 +415,7 @@ describe("crashApp tool", () => {
     ).rejects.toThrow();
 
     expect(invalidations).toBe(1);
-    expect(notifications).toBe(0);
+    expect(notifications).toBe(1);
   });
 });
 

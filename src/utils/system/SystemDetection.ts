@@ -1,8 +1,7 @@
 import { existsSync } from "fs";
 import { access } from "fs/promises";
 import { homedir, platform } from "os";
-import { execFile } from "child_process";
-import { promisify } from "util";
+import { DefaultHostCommandExecutor, type HostCommandExecutor } from "../HostCommandExecutor";
 
 /**
  * Interface for system detection operations
@@ -42,6 +41,7 @@ export interface SystemDetection {
  * Default system detection implementation using Node.js built-ins
  */
 export class DefaultSystemDetection implements SystemDetection {
+  constructor(private readonly executor: HostCommandExecutor = new DefaultHostCommandExecutor()) {}
   getCurrentPlatform(): string {
     return platform();
   }
@@ -69,7 +69,6 @@ export class DefaultSystemDetection implements SystemDetection {
     file: string,
     args: string[] = [],
   ): Promise<{ stdout: string; stderr: string }> {
-    const execFileAsync = promisify(execFile);
-    return execFileAsync(file, args) as Promise<{ stdout: string; stderr: string }>;
+    return this.executor.executeCommand(file, args);
   }
 }

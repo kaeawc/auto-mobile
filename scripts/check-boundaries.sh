@@ -28,6 +28,7 @@ parallel_checks=(
   "bash scripts/check-no-local-shell-quote.sh"
   "bash scripts/check-app-bundle-metadata-boundary.sh"
   "bash scripts/check-ffmpeg-execution-boundary.sh"
+  "bash scripts/check-child-process-import-boundary.sh"
   "bash scripts/check-simulator-tcc-sqlite-boundary.sh"
   "bash scripts/check-daemon-launcher-boundary.sh"
   "bash scripts/check-android-emulator-boundary.sh"

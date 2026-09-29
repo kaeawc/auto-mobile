@@ -1,11 +1,12 @@
 import { errorMessage } from "../describeUnknownError";
-import { type ChildProcess, type SpawnOptions } from "child_process";
+import type { ChildProcess } from "node:child_process";
 import { logger } from "../logger";
 import { runExecSeam } from "../ExecSeam";
 import {
   DefaultHostCommandExecutor,
   execFileAsync as sharedExecFileAsync,
   type HostProcessExecutor,
+  type SpawnFn,
 } from "../HostCommandExecutor";
 import {
   BootedDevice,
@@ -47,13 +48,6 @@ import {
 type ExecFileAsync = (file: string, args: string[], maxBuffer?: number) => Promise<ExecResult>;
 
 const PROCESS_SETTLEMENT_GRACE_MS = 1_000;
-
-/**
- * The long-lived spawn seam. Kept as its own injectable type so the default can
- * route through the shared {@link HostProcessExecutor} while tests still inject a
- * fake. Deliberately narrower than node's overloaded `typeof spawn`.
- */
-type SpawnFn = (file: string, args: string[], options?: SpawnOptions) => ChildProcess;
 
 // Route the default long-lived spawn through the shared host-process seam so the
 // client no longer reaches for `child_process.spawn` directly (issue #5459). The

@@ -15,7 +15,7 @@ export interface SpawnedProcess {
   removeListener(event: "error", listener: (error: Error) => void): void;
 }
 
-export type ProcessSpawner = (command: string, args: string[]) => SpawnedProcess;
+export type ProcessSpawner<T = SpawnedProcess> = (command: string, args: string[]) => T;
 
 export const defaultProcessSpawner: ProcessSpawner = (command, args) => {
   const child = nodeSpawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });

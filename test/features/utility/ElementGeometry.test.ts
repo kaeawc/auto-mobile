@@ -20,8 +20,8 @@ describe("ElementGeometry getSwipeWithinBounds", () => {
 
     expect(swipe.startX).toBe(500);
     expect(swipe.endX).toBe(500);
-    expect(swipe.startY).toBeCloseTo(391.5, 3);
-    expect(swipe.endY).toBeCloseTo(499.5, 3);
+    expect(swipe.startY).toBe(391);
+    expect(swipe.endY).toBe(499);
   });
 
   test("uses element width for horizontal swipe padding", () => {
@@ -35,6 +35,41 @@ describe("ElementGeometry getSwipeWithinBounds", () => {
     expect(swipe.startX).toBe(1160);
     expect(swipe.endX).toBe(840);
   });
+
+  const opposingSwipes = [
+    ["up", "down", "startY", "endY"],
+    ["left", "right", "startX", "endX"],
+  ] as const;
+  it.each(opposingSwipes)(
+    "%s and %s swipes have equal travel",
+    (first, second, startKey, endKey) => {
+      const geometry = new DefaultElementGeometry();
+      const bounds = { left: 0.25, top: 1.5, right: 10.75, bottom: 16.25 };
+      const firstSwipe = geometry.getSwipeWithinBounds(first, bounds);
+      const secondSwipe = geometry.getSwipeWithinBounds(second, bounds);
+
+      expect(Math.abs(firstSwipe[endKey] - firstSwipe[startKey])).toBe(
+        Math.abs(secondSwipe[endKey] - secondSwipe[startKey]),
+      );
+    },
+  );
+
+  it.each(["up", "down", "left", "right"] as const)(
+    "%s swipe coordinates are integers",
+    (direction) => {
+      const geometry = new DefaultElementGeometry();
+      const swipe = geometry.getSwipeWithinBounds(direction, {
+        left: 0.25,
+        top: 1.5,
+        right: 10.75,
+        bottom: 16.25,
+      });
+
+      expect([swipe.startX, swipe.startY, swipe.endX, swipe.endY].every(Number.isInteger)).toBe(
+        true,
+      );
+    },
+  );
 });
 
 describe("ElementGeometry getSwipeDirectionForScroll", () => {

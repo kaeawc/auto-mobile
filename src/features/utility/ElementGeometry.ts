@@ -103,7 +103,7 @@ export class DefaultElementGeometry implements ElementGeometry {
     switch (direction) {
       case "up":
         // For "up" direction: Swipe finger from bottom to top
-        startY = bounds.bottom - height * 0.25;
+        startY = bounds.bottom - height * 0.1;
         endY = bounds.top + height * 0.1;
         break;
       case "down":
@@ -123,7 +123,12 @@ export class DefaultElementGeometry implements ElementGeometry {
         break;
     }
 
-    return { startX, startY, endX, endY };
+    return {
+      startX: Math.floor(startX),
+      startY: Math.floor(startY),
+      endX: Math.floor(endX),
+      endY: Math.floor(endY),
+    };
   }
 
   /**

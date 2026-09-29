@@ -9,6 +9,7 @@ import { PerformanceTracker, NoOpPerformanceTracker } from "../../utils/Performa
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { logger } from "../../utils/logger";
+import { errorMessage } from "../../utils/describeUnknownError";
 
 /**
  * Executes gestures using platform-specific commands
@@ -77,9 +78,14 @@ export class ExecuteGesture extends BaseVisualChange {
     }
 
     // Default ADB mode
-    await perf.track("adbInputSwipe", async () => {
-      await this.adb.executeCommand(`shell input swipe ${x1} ${y1} ${x2} ${y2} ${duration}`);
-    });
+    try {
+      await perf.track("adbInputSwipe", async () => {
+        await this.adb.executeCommand(`shell input swipe ${x1} ${y1} ${x2} ${y2} ${duration}`);
+      });
+    } catch (error) {
+      logger.warn(`[SWIPE] ADB swipe failed: ${errorMessage(error)}`);
+      return { success: false, x1, y1, x2, y2, duration, error: errorMessage(error) };
+    }
 
     return {
       success: true,
@@ -150,9 +156,23 @@ export class ExecuteGesture extends BaseVisualChange {
         }
         logger.warn(`[SWIPE] A11y swipe failed: ${result.error}, falling back to ADB`);
         // Fall back to ADB on failure
-        await perf.track("adbInputSwipeFallback", async () => {
-          await this.adb.executeCommand(`shell input swipe ${x1} ${y1} ${x2} ${y2} ${duration}`);
-        });
+        try {
+          await perf.track("adbInputSwipeFallback", async () => {
+            await this.adb.executeCommand(`shell input swipe ${x1} ${y1} ${x2} ${y2} ${duration}`);
+          });
+        } catch (error) {
+          logger.warn(`[SWIPE] ADB fallback failed after a11y failure: ${errorMessage(error)}`);
+          return {
+            success: false,
+            x1,
+            y1,
+            x2,
+            y2,
+            duration,
+            fallbackReason: result.error,
+            error: `Accessibility swipe failed: ${result.error ?? "unknown error"}; ADB fallback failed: ${errorMessage(error)}`,
+          };
+        }
         return {
           success: true,
           x1,
@@ -170,9 +190,25 @@ export class ExecuteGesture extends BaseVisualChange {
       }
       logger.warn(`[SWIPE] A11y swipe exception: ${error}, falling back to ADB`);
       // Fall back to ADB on exception
-      await perf.track("adbInputSwipeFallback", async () => {
-        await this.adb.executeCommand(`shell input swipe ${x1} ${y1} ${x2} ${y2} ${duration}`);
-      });
+      try {
+        await perf.track("adbInputSwipeFallback", async () => {
+          await this.adb.executeCommand(`shell input swipe ${x1} ${y1} ${x2} ${y2} ${duration}`);
+        });
+      } catch (fallbackError) {
+        logger.warn(
+          `[SWIPE] ADB fallback failed after a11y exception: ${errorMessage(fallbackError)}`,
+        );
+        return {
+          success: false,
+          x1,
+          y1,
+          x2,
+          y2,
+          duration,
+          fallbackReason: errorMessage(error),
+          error: `Accessibility swipe failed: ${errorMessage(error)}; ADB fallback failed: ${errorMessage(fallbackError)}`,
+        };
+      }
       return {
         success: true,
         x1,
@@ -180,7 +216,7 @@ export class ExecuteGesture extends BaseVisualChange {
         x2,
         y2,
         duration,
-        fallbackReason: `${error}`,
+        fallbackReason: errorMessage(error),
       };
     }
   }

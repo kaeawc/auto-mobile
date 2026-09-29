@@ -188,6 +188,16 @@ describe("NavigationRetention prune", () => {
     await repo.recordNodeObservation(nodeId, buildKeyId, "device-1", session, seenAt);
   }
 
+  async function suggestionObs(
+    appId: string,
+    buildKeyId: number,
+    session: string,
+    seenAt: number,
+  ): Promise<void> {
+    const suggestion = await repo.addOrUpdateSuggestion(appId, `fp-${session}`, "{}", seenAt);
+    await repo.recordSuggestionObservation(suggestion.id, buildKeyId, "device-1", session, seenAt);
+  }
+
   async function countNodeObs(): Promise<number> {
     const row = await db
       .selectFrom("navigation_node_observations")
@@ -326,6 +336,22 @@ describe("NavigationRetention prune", () => {
   });
 
   // ---- LONG tier: observation TTL ----
+
+  test("prunes aged suggestion observations but preserves the active build", async () => {
+    const oldBuild = await buildKey(APP, 1);
+    const activeBuild = await buildKey(APP, 2);
+    await suggestionObs(APP, oldBuild, "old", 100);
+    await suggestionObs(APP, activeBuild, "active", 100_000);
+
+    const summary = await retention().prune(50_000);
+
+    expect(summary.suggestionObservationsDeleted).toBe(1);
+    const rows = await db
+      .selectFrom("navigation_suggestion_observations")
+      .select("session_uuid")
+      .execute();
+    expect(rows.map((row) => row.session_uuid)).toEqual(["active"]);
+  });
 
   test("prunes old node + edge observations, keeps recent ones", async () => {
     const nodeId = await seedNode("Home", 100);
@@ -602,10 +628,10 @@ describe("NavigationRetention prune", () => {
         const protectedIds = await computeProtectedBuildKeyIds(database, buildKeys, scopedAppIds);
         if (scopedAppIds === undefined) {
           fullProtectedReads += 1;
-          // With empty screenshot/TTL tiers, the fourth full read is the global
+          // With empty screenshot/TTL tiers, the fifth full read is the global
           // eviction snapshot. Land the new app-A observation after that query
           // has returned its stale result but before its first batch transaction.
-          if (fullProtectedReads === 4) {
+          if (fullProtectedReads === 5) {
             await nodeObs(appANode, appANewBuild, "a-active", 1_000);
             shiftedAppA = true;
           }
@@ -737,7 +763,64 @@ describe("NavigationRetention prune", () => {
     expect(sessions).toEqual(["p1", "p2"]);
   });
 
+  test("per-app cap counts suggestion rows and evicts their oldest reaches", async () => {
+    const build = await buildKey(APP, 1);
+    for (let index = 0; index < 4; index += 1) {
+      await suggestionObs(APP, build, `s${index}`, 100 + index);
+    }
+
+    const summary = await retention({
+      ...CONFIG,
+      structureTtlMs: 10_000_000,
+      perAppMaxObservations: 2,
+    }).prune(1_000_000);
+
+    expect(summary.suggestionObservationsDeleted).toBe(2);
+    const rows = await db
+      .selectFrom("navigation_suggestion_observations")
+      .select("session_uuid")
+      .execute();
+    expect(rows.map((row) => row.session_uuid).sort()).toEqual(["s2", "s3"]);
+  });
+
+  test("global cap counts suggestion rows across apps", async () => {
+    const firstBuild = await buildKey(APP, 1);
+    const secondBuild = await buildKey(APP2, 1);
+    await suggestionObs(APP, firstBuild, "old", 100);
+    await suggestionObs(APP, firstBuild, "active-a", 300);
+    await suggestionObs(APP2, secondBuild, "active-b", 400);
+
+    const summary = await retention({
+      ...CONFIG,
+      structureTtlMs: 10_000_000,
+      globalMaxObservations: 2,
+    }).prune(1_000_000);
+
+    expect(summary.suggestionObservationsDeleted).toBe(1);
+    const rows = await db
+      .selectFrom("navigation_suggestion_observations")
+      .select("session_uuid")
+      .execute();
+    expect(rows.map((row) => row.session_uuid).sort()).toEqual(["active-a", "active-b"]);
+  });
+
   // ---- FK-safe orphan build-key cleanup + idempotency ----
+
+  test("keeps a build key referenced only by a pending suggestion observation", async () => {
+    const suggestionBuild = await buildKey(APP, 1);
+    const activeBuild = await buildKey(APP, 2);
+    await suggestionObs(APP, suggestionBuild, "pending", 100_000);
+    const nodeId = await seedNode("Active", 100_001);
+    await nodeObs(nodeId, activeBuild, "active", 100_001);
+
+    const summary = await retention().prune(100_001);
+
+    expect(summary.buildKeysDeleted).toBe(0);
+    const keys = await db.selectFrom("navigation_build_keys").select("id").execute();
+    expect(keys.map((key) => key.id)).toEqual([suggestionBuild, activeBuild]);
+    const rows = await db.selectFrom("navigation_suggestion_observations").selectAll().execute();
+    expect(rows).toHaveLength(1);
+  });
 
   test("sweeps orphaned build keys after pruning observations (FK-safe), keeps protected", async () => {
     const nodeId = await seedNode("Home", 100);

@@ -1,10 +1,15 @@
 import { Database as BunDatabase } from "bun:sqlite";
 import { Kysely, sql } from "kysely";
+import { FileMigrationProvider, type MigrationProvider } from "kysely/migration";
+import { promises as fs } from "node:fs";
+import * as path from "node:path";
 import { BunSqliteDialect } from "../../src/db/bunSqliteDialect";
 import type { Database } from "../../src/db/types";
-import { runMigrations } from "../../src/db/migrator";
+import { resolveMigrationFolder, runMigrations } from "../../src/db/migrator";
 
 export interface TestDatabaseOptions {
+  /** Build an in-memory database at an earlier migration for upgrade tests. */
+  throughMigration?: string;
   /**
    * Enable `PRAGMA foreign_keys = ON` so cascade deletes fire, matching the
    * production connection (`configureSqliteDatabase` in `src/db/database.ts`).
@@ -15,28 +20,50 @@ export interface TestDatabaseOptions {
   foreignKeys?: boolean;
 }
 
-let migratedTemplateBytesPromise: Promise<Uint8Array> | null = null;
+const migratedTemplateBytesPromises = new Map<string | null, Promise<Uint8Array>>();
 
-async function getMigratedTemplateBytes(): Promise<Uint8Array> {
-  if (!migratedTemplateBytesPromise) {
-    migratedTemplateBytesPromise = (async () => {
+async function getMigratedTemplateBytes(throughMigration?: string): Promise<Uint8Array> {
+  const cacheKey = throughMigration ?? null;
+  let templateBytesPromise = migratedTemplateBytesPromises.get(cacheKey);
+  if (!templateBytesPromise) {
+    templateBytesPromise = (async () => {
       const bunDb = new BunDatabase(":memory:");
       const db = new Kysely<Database>({
         dialect: new BunSqliteDialect({ database: bunDb }),
       });
       try {
-        await runMigrations(db as Kysely<unknown>);
+        let provider: MigrationProvider | undefined;
+        if (throughMigration) {
+          const source = new FileMigrationProvider({
+            fs,
+            path,
+            migrationFolder: resolveMigrationFolder(),
+          });
+          const migrations = await source.getMigrations();
+          if (!(throughMigration in migrations)) {
+            throw new Error(`Unknown migration: ${throughMigration}`);
+          }
+          provider = {
+            async getMigrations() {
+              return Object.fromEntries(
+                Object.entries(migrations).filter(([name]) => name <= throughMigration),
+              );
+            },
+          };
+        }
+        await runMigrations(db as Kysely<unknown>, { provider });
         return bunDb.serialize();
       } finally {
         await db.destroy();
       }
     })();
+    migratedTemplateBytesPromises.set(cacheKey, templateBytesPromise);
   }
 
   try {
-    return await migratedTemplateBytesPromise;
+    return await templateBytesPromise;
   } catch (error) {
-    migratedTemplateBytesPromise = null;
+    migratedTemplateBytesPromises.delete(cacheKey);
     throw error;
   }
 }
@@ -44,7 +71,7 @@ async function getMigratedTemplateBytes(): Promise<Uint8Array> {
 export async function createTestDatabase(
   options: TestDatabaseOptions = {},
 ): Promise<Kysely<Database>> {
-  const templateBytes = await getMigratedTemplateBytes();
+  const templateBytes = await getMigratedTemplateBytes(options.throughMigration);
   // Give bun:sqlite a fresh copy in case its constructor takes ownership of the
   // supplied bytes. Every caller must get an independent in-memory database.
   const bunDb = new BunDatabase(new Uint8Array(templateBytes));

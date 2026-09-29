@@ -9,7 +9,7 @@
 //      pointer cleared (and the file best-effort unlinked); the light node row
 //      itself survives under the long tier.
 //   2. LONG TTL — nav-graph structure + provenance. The per-observation rows
-//      (navigation_node_observations / navigation_edge_observations) are the
+//      (node / edge / suggestion observations) are the
 //      unbounded surface — one row per (build, device, session) per node/edge —
 //      so they are pruned by age, and build keys orphaned by that prune are
 //      swept. Nodes/edges themselves are bounded (one per screen/transition) and
@@ -123,6 +123,7 @@ export interface NavigationRetentionSummary {
   screenshotsCleared: number;
   nodeObservationsDeleted: number;
   edgeObservationsDeleted: number;
+  suggestionObservationsDeleted: number;
   buildKeysDeleted: number;
   /** Clock time (ms) the pass ran at. */
   prunedAt: number;
@@ -133,6 +134,7 @@ function emptySummary(prunedAt: number): NavigationRetentionSummary {
     screenshotsCleared: 0,
     nodeObservationsDeleted: 0,
     edgeObservationsDeleted: 0,
+    suggestionObservationsDeleted: 0,
     buildKeysDeleted: 0,
     prunedAt,
   };
@@ -235,7 +237,7 @@ interface BuildKeyRow {
 }
 
 interface EvictionCandidate {
-  isNode: boolean;
+  kind: "node" | "edge" | "suggestion";
   id: number;
   buildKeyId: number;
   lastSeenAt: number;
@@ -248,7 +250,7 @@ interface EvictionCandidate {
  * and recency-based: inject the clock `now` and (optionally) a file remover so
  * the whole thing is deterministic under FakeTimer + an in-memory DB.
  *
- * The two observation tables are handled by explicit node/edge branches rather
+ * The three observation tables are handled by explicit branches rather
  * than a table-name variable: their relevant columns are identical, but keeping
  * the table a literal lets Kysely fully type every query (no `any`).
  */
@@ -439,6 +441,7 @@ export class NavigationRetention {
 
     summary.nodeObservationsDeleted += await this.pruneNodeObservationsByTtl(cutoff);
     summary.edgeObservationsDeleted += await this.pruneEdgeObservationsByTtl(cutoff);
+    summary.suggestionObservationsDeleted += await this.pruneSuggestionObservationsByTtl(cutoff);
   }
 
   private async pruneNodeObservationsByTtl(cutoff: number): Promise<number> {
@@ -575,6 +578,73 @@ export class NavigationRetention {
     }
   }
 
+  private async pruneSuggestionObservationsByTtl(cutoff: number): Promise<number> {
+    let deletedTotal = 0;
+    let protectedIds = await this.resolveProtectedBuildKeyIds(this.db);
+    for (;;) {
+      const batchResult = await this.db.transaction().execute(async (trx) => {
+        let query = trx
+          .selectFrom("navigation_suggestion_observations as observation")
+          .innerJoin("navigation_build_keys as buildKey", "buildKey.id", "observation.build_key_id")
+          .select(["observation.id", "observation.build_key_id", "buildKey.app_id"])
+          .where("observation.last_seen_at", "<", cutoff);
+        if (protectedIds.length > 0) {
+          query = query.where("observation.build_key_id", "not in", protectedIds);
+        }
+        const rows = await query.limit(this.config.evictionChunkSize).execute();
+        if (rows.length === 0) {
+          return null;
+        }
+
+        const batchAppIds = Array.from(new Set(rows.map((row) => row.app_id)));
+        const currentProtectedIds = await this.resolveProtectedBuildKeyIds(
+          trx,
+          undefined,
+          batchAppIds,
+        );
+        const currentProtected = new Set(currentProtectedIds);
+        const eligibleIds = rows
+          .filter((row) => !currentProtected.has(row.build_key_id))
+          .map((row) => row.id);
+        const protectionChanged = currentProtectedIds.some((id) => !protectedIds.includes(id));
+        if (eligibleIds.length === 0) {
+          return {
+            deletedCount: 0,
+            isFullBatch: rows.length === this.config.evictionChunkSize,
+            protectionChanged,
+          };
+        }
+        const result = await trx
+          .deleteFrom("navigation_suggestion_observations")
+          .where("id", "in", eligibleIds)
+          .executeTakeFirst();
+        return {
+          deletedCount: Number(result.numDeletedRows ?? 0),
+          isFullBatch: rows.length === this.config.evictionChunkSize,
+          protectionChanged,
+        };
+      });
+      if (batchResult === null) {
+        return deletedTotal;
+      }
+      deletedTotal += batchResult.deletedCount;
+      if (batchResult.protectionChanged) {
+        protectedIds = await this.resolveProtectedBuildKeyIds(this.db);
+        if (batchResult.deletedCount === 0) {
+          await this.yieldBetweenBatches();
+          continue;
+        }
+      }
+      if (
+        (!batchResult.isFullBatch && !batchResult.protectionChanged) ||
+        batchResult.deletedCount === 0
+      ) {
+        return deletedTotal;
+      }
+      await this.yieldBetweenBatches();
+    }
+  }
+
   /**
    * Backstop: enforce the per-app budget first, then the global budget, evicting
    * the oldest observation rows by `last_seen_at`. The budgets count ALL of an
@@ -681,8 +751,11 @@ export class NavigationRetention {
           return { evictedCount: 0, protectionChanged: false };
         }
 
-        const nodeIds = eligibleVictims.filter((v) => v.isNode).map((v) => v.id);
-        const edgeIds = eligibleVictims.filter((v) => !v.isNode).map((v) => v.id);
+        const nodeIds = eligibleVictims.filter((v) => v.kind === "node").map((v) => v.id);
+        const edgeIds = eligibleVictims.filter((v) => v.kind === "edge").map((v) => v.id);
+        const suggestionIds = eligibleVictims
+          .filter((v) => v.kind === "suggestion")
+          .map((v) => v.id);
         if (nodeIds.length > 0) {
           const deleted = await trx
             .deleteFrom("navigation_node_observations")
@@ -696,6 +769,13 @@ export class NavigationRetention {
             .where("id", "in", edgeIds)
             .executeTakeFirst();
           summary.edgeObservationsDeleted += Number(deleted.numDeletedRows ?? 0);
+        }
+        if (suggestionIds.length > 0) {
+          const deleted = await trx
+            .deleteFrom("navigation_suggestion_observations")
+            .where("id", "in", suggestionIds)
+            .executeTakeFirst();
+          summary.suggestionObservationsDeleted += Number(deleted.numDeletedRows ?? 0);
         }
         return { evictedCount: eligibleVictims.length, protectionChanged: false };
       });
@@ -738,6 +818,9 @@ export class NavigationRetention {
           )
           .where("id", "not in", (eb) =>
             eb.selectFrom("navigation_edge_observations").select("build_key_id"),
+          )
+          .where("id", "not in", (eb) =>
+            eb.selectFrom("navigation_suggestion_observations").select("build_key_id"),
           );
 
         if (protectedIds.length > 0) {
@@ -830,7 +913,7 @@ function containSameIds(left: readonly number[], right: readonly number[]): bool
   return left.every((id) => rightIds.has(id));
 }
 
-/** Greatest `last_seen_at` per build key across both observation tables. */
+/** Greatest `last_seen_at` per build key across all observation tables. */
 async function loadMaxSeenByBuildKey(
   db: Kysely<Database>,
   appIds?: readonly string[],
@@ -849,15 +932,24 @@ async function loadMaxSeenByBuildKey(
       "observation.build_key_id",
       eb.fn.max("observation.last_seen_at").as("max_seen"),
     ]);
+  let suggestionQuery = db
+    .selectFrom("navigation_suggestion_observations as observation")
+    .innerJoin("navigation_build_keys as buildKey", "buildKey.id", "observation.build_key_id")
+    .select((eb) => [
+      "observation.build_key_id",
+      eb.fn.max("observation.last_seen_at").as("max_seen"),
+    ]);
   if (appIds && appIds.length > 0) {
     nodeQuery = nodeQuery.where("buildKey.app_id", "in", appIds);
     edgeQuery = edgeQuery.where("buildKey.app_id", "in", appIds);
+    suggestionQuery = suggestionQuery.where("buildKey.app_id", "in", appIds);
   }
   const nodeMax = await nodeQuery.groupBy("observation.build_key_id").execute();
   const edgeMax = await edgeQuery.groupBy("observation.build_key_id").execute();
+  const suggestionMax = await suggestionQuery.groupBy("observation.build_key_id").execute();
 
   const maxSeen = new Map<number, number>();
-  for (const row of [...nodeMax, ...edgeMax]) {
+  for (const row of [...nodeMax, ...edgeMax, ...suggestionMax]) {
     const seen = Number(row.max_seen ?? 0);
     const prev = maxSeen.get(row.build_key_id);
     if (prev === undefined || seen > prev) {
@@ -894,8 +986,14 @@ async function loadMaxSeenByBuildKeyForIds(
     .where("build_key_id", "in", ids)
     .groupBy("build_key_id")
     .execute();
+  const suggestionMax = await db
+    .selectFrom("navigation_suggestion_observations")
+    .select((eb) => ["build_key_id", eb.fn.max("last_seen_at").as("max_seen")])
+    .where("build_key_id", "in", ids)
+    .groupBy("build_key_id")
+    .execute();
   const maxSeen = new Map<number, number>();
-  for (const row of [...nodeMax, ...edgeMax]) {
+  for (const row of [...nodeMax, ...edgeMax, ...suggestionMax]) {
     const seen = Number(row.max_seen ?? 0);
     const previous = maxSeen.get(row.build_key_id);
     if (previous === undefined || seen > previous) {
@@ -923,23 +1021,31 @@ async function loadProtectedNodeRows(
 }
 
 /**
- * Count observation rows (node + edge). `appId === null` counts every row
+ * Count observation rows (node + edge + suggestion). `appId === null` counts every row
  * (global); otherwise it joins on `app_id` (one bound param) rather than an id
  * list of the app's build keys.
  */
 async function countObservations(trx: Kysely<Database>, appId: string | null): Promise<number> {
-  if (appId === null) {
-    const nodeRow = await trx
-      .selectFrom("navigation_node_observations")
-      .select((eb) => eb.fn.countAll<number>().as("c"))
-      .executeTakeFirst();
-    const edgeRow = await trx
-      .selectFrom("navigation_edge_observations")
-      .select((eb) => eb.fn.countAll<number>().as("c"))
-      .executeTakeFirst();
-    return Number(nodeRow?.c ?? 0) + Number(edgeRow?.c ?? 0);
-  }
+  return appId === null ? countGlobalObservations(trx) : countAppObservations(trx, appId);
+}
 
+async function countGlobalObservations(trx: Kysely<Database>): Promise<number> {
+  const nodeRow = await trx
+    .selectFrom("navigation_node_observations")
+    .select((eb) => eb.fn.countAll<number>().as("c"))
+    .executeTakeFirst();
+  const edgeRow = await trx
+    .selectFrom("navigation_edge_observations")
+    .select((eb) => eb.fn.countAll<number>().as("c"))
+    .executeTakeFirst();
+  const suggestionRow = await trx
+    .selectFrom("navigation_suggestion_observations")
+    .select((eb) => eb.fn.countAll<number>().as("c"))
+    .executeTakeFirst();
+  return Number(nodeRow?.c ?? 0) + Number(edgeRow?.c ?? 0) + Number(suggestionRow?.c ?? 0);
+}
+
+async function countAppObservations(trx: Kysely<Database>, appId: string): Promise<number> {
   const nodeRow = await trx
     .selectFrom("navigation_node_observations as o")
     .innerJoin("navigation_build_keys as bk", "bk.id", "o.build_key_id")
@@ -952,7 +1058,13 @@ async function countObservations(trx: Kysely<Database>, appId: string | null): P
     .select((eb) => eb.fn.countAll<number>().as("c"))
     .where("bk.app_id", "=", appId)
     .executeTakeFirst();
-  return Number(nodeRow?.c ?? 0) + Number(edgeRow?.c ?? 0);
+  const suggestionRow = await trx
+    .selectFrom("navigation_suggestion_observations as o")
+    .innerJoin("navigation_build_keys as bk", "bk.id", "o.build_key_id")
+    .select((eb) => eb.fn.countAll<number>().as("c"))
+    .where("bk.app_id", "=", appId)
+    .executeTakeFirst();
+  return Number(nodeRow?.c ?? 0) + Number(edgeRow?.c ?? 0) + Number(suggestionRow?.c ?? 0);
 }
 
 /**
@@ -969,24 +1081,37 @@ async function collectOldestEvictable(
 ): Promise<EvictionCandidate[]> {
   const nodeRows = await buildOldestNodeEvictableQuery(trx, appId, protectedIds, limit).execute();
   const edgeRows = await buildOldestEdgeEvictableQuery(trx, appId, protectedIds, limit).execute();
+  const suggestionRows = await buildOldestSuggestionEvictableQuery(
+    trx,
+    appId,
+    protectedIds,
+    limit,
+  ).execute();
 
   const candidates: EvictionCandidate[] = [
     ...nodeRows.map((row) => ({
-      isNode: true,
+      kind: "node" as const,
       id: row.id,
       buildKeyId: row.build_key_id,
       lastSeenAt: row.last_seen_at,
     })),
     ...edgeRows.map((row) => ({
-      isNode: false,
+      kind: "edge" as const,
+      id: row.id,
+      buildKeyId: row.build_key_id,
+      lastSeenAt: row.last_seen_at,
+    })),
+    ...suggestionRows.map((row) => ({
+      kind: "suggestion" as const,
       id: row.id,
       buildKeyId: row.build_key_id,
       lastSeenAt: row.last_seen_at,
     })),
   ];
-  // Oldest first; break ties by table (nodes before edges) then id for determinism.
+  // Oldest first; break ties by table and then id for determinism.
+  const kindOrder = { node: 0, edge: 1, suggestion: 2 };
   candidates.sort(
-    (a, b) => a.lastSeenAt - b.lastSeenAt || Number(b.isNode) - Number(a.isNode) || a.id - b.id,
+    (a, b) => a.lastSeenAt - b.lastSeenAt || kindOrder[a.kind] - kindOrder[b.kind] || a.id - b.id,
   );
   return candidates.slice(0, limit);
 }
@@ -1064,6 +1189,39 @@ export function buildOldestEdgeEvictableQuery(
             .selectFrom("navigation_edge_observations as t")
             .select((sb) => sb.fn.max("t.last_seen_at").as("m"))
             .whereRef("t.build_key_id", "=", "navigation_edge_observations.build_key_id"),
+        ),
+      ]),
+    );
+  }
+  return query.orderBy("last_seen_at", "asc").orderBy("id", "asc").limit(limit);
+}
+
+/** Suggestion-table counterpart of {@link buildOldestNodeEvictableQuery}. */
+export function buildOldestSuggestionEvictableQuery(
+  db: Kysely<Database>,
+  appId: string | null,
+  protectedIds: number[],
+  limit: number,
+) {
+  let query = db
+    .selectFrom("navigation_suggestion_observations")
+    .select(["id", "build_key_id", "last_seen_at"]);
+  if (appId !== null) {
+    query = query.where("build_key_id", "in", (eb) =>
+      eb.selectFrom("navigation_build_keys").select("id").where("app_id", "=", appId),
+    );
+  }
+  if (protectedIds.length > 0) {
+    query = query.where((eb) =>
+      eb.or([
+        eb("build_key_id", "not in", protectedIds),
+        eb(
+          "last_seen_at",
+          "<>",
+          eb
+            .selectFrom("navigation_suggestion_observations as t")
+            .select((sb) => sb.fn.max("t.last_seen_at").as("m"))
+            .whereRef("t.build_key_id", "=", "navigation_suggestion_observations.build_key_id"),
         ),
       ]),
     );

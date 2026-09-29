@@ -393,4 +393,131 @@ describe("NavigationGraphManager provenance write path", () => {
     expect(bk.version_code).toBe(0);
     expect(bk.content_hash).toBe("");
   });
+
+  test("suggestion reaches retain distinct build/device/session provenance and transfer on promotion", async () => {
+    await manager.setCurrentApp(APP);
+    const repo = new NavigationRepository(db);
+    await repo.getOrCreateNode(APP, "Existing", 1);
+    manager.setBuildContext({ appId: APP, deviceId: "emu-1", versionCode: 7, contentHash: "a" });
+    const reach = (timestamp: number) =>
+      manager.recordHierarchyNavigation({
+        fromFingerprint: null,
+        toFingerprint: "unmatched",
+        fingerprintData: "{}",
+        timestamp,
+        packageName: APP,
+      });
+
+    await reach(200);
+    await reach(100); // out-of-order arrival widens the observation window
+    manager.setBuildContext({ appId: APP, deviceId: "emu-2", versionCode: 8, contentHash: "b" });
+    await reach(300);
+
+    const suggestion = (await repo.getSuggestions(APP))[0];
+    const suggestionObs = await db
+      .selectFrom("navigation_suggestion_observations")
+      .selectAll()
+      .where("suggestion_id", "=", suggestion.id)
+      .orderBy("device_id")
+      .execute();
+    expect(suggestionObs).toHaveLength(2);
+    expect(
+      suggestionObs.map((row) => [
+        row.device_id,
+        row.session_uuid,
+        row.first_seen_at,
+        row.last_seen_at,
+      ]),
+    ).toEqual([
+      ["emu-1", SESSION, 100, 200],
+      ["emu-2", SESSION, 300, 300],
+    ]);
+
+    // Promotion-time context is unrelated to the historical reaches.
+    manager.setBuildContext({ appId: APP, deviceId: "emu-3", versionCode: 9, contentHash: "c" });
+    await manager.promoteSuggestion(suggestion.id, "Promoted");
+    expect(
+      await db
+        .selectFrom("navigation_suggestion_observations")
+        .select("id")
+        .where("suggestion_id", "=", suggestion.id)
+        .execute(),
+    ).toEqual([]);
+    const node = await repo.getNode(APP, "Promoted");
+    const nodeObs = await db
+      .selectFrom("navigation_node_observations")
+      .selectAll()
+      .where("node_id", "=", node!.id)
+      .orderBy("device_id")
+      .execute();
+    expect(
+      nodeObs.map((row) => [
+        row.build_key_id,
+        row.device_id,
+        row.session_uuid,
+        row.first_seen_at,
+        row.last_seen_at,
+      ]),
+    ).toEqual(
+      suggestionObs.map((row) => [
+        row.build_key_id,
+        row.device_id,
+        row.session_uuid,
+        row.first_seen_at,
+        row.last_seen_at,
+      ]),
+    );
+    const keys = await db.selectFrom("navigation_build_keys").selectAll().execute();
+    expect(
+      keys
+        .filter((key) => nodeObs.some((obs) => obs.build_key_id === key.id))
+        .map((key) => [key.version_code, key.content_hash])
+        .sort(),
+    ).toEqual([
+      [7, "a"],
+      [8, "b"],
+    ]);
+  });
+
+  test("cross-app suggestion promotion skips transfer and records fallback provenance", async () => {
+    const otherApp = "com.example.other";
+    await manager.setCurrentApp(APP);
+    const repo = new NavigationRepository(db);
+    await repo.getOrCreateApp(otherApp);
+    const suggestion = await repo.addOrUpdateSuggestion(otherApp, "foreign-fp", "{}", 100);
+    const otherBuild = await repo.getOrCreateBuildKey(otherApp, 7, "foreign-build");
+    await repo.recordSuggestionObservation(
+      suggestion.id,
+      otherBuild.id,
+      "other-device",
+      "other",
+      100,
+    );
+
+    await manager.promoteSuggestion(suggestion.id, "Promoted");
+
+    const node = await repo.getNode(APP, "Promoted");
+    const nodeObs = await db
+      .selectFrom("navigation_node_observations")
+      .selectAll()
+      .where("node_id", "=", node!.id)
+      .execute();
+    expect(nodeObs).toHaveLength(1);
+    expect(nodeObs[0].build_key_id).not.toBe(otherBuild.id);
+    expect(nodeObs[0].device_id).toBe("legacy");
+    const fallbackBuild = await db
+      .selectFrom("navigation_build_keys")
+      .selectAll()
+      .where("id", "=", nodeObs[0].build_key_id)
+      .executeTakeFirstOrThrow();
+    expect(fallbackBuild.app_id).toBe(APP);
+    expect(fallbackBuild.version_code).toBe(0);
+    expect(
+      await db
+        .selectFrom("navigation_suggestion_observations")
+        .select("build_key_id")
+        .where("suggestion_id", "=", suggestion.id)
+        .execute(),
+    ).toEqual([{ build_key_id: otherBuild.id }]);
+  });
 });

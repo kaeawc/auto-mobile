@@ -22,6 +22,7 @@ import type {
   NewNavigationBuildKey,
   NewNavigationNodeObservation,
   NewNavigationEdgeObservation,
+  NewNavigationSuggestionObservation,
 } from "./types";
 import { logger } from "../utils/logger";
 
@@ -1116,6 +1117,63 @@ export class NavigationRepository {
     return result;
   }
 
+  /** Record one uncorrelated reach under its actual build/device/session. */
+  async recordSuggestionObservation(
+    suggestionId: number,
+    buildKeyId: number,
+    deviceId: string,
+    sessionUuid: string,
+    seenAt: number,
+  ): Promise<void> {
+    const observation: NewNavigationSuggestionObservation = {
+      suggestion_id: suggestionId,
+      build_key_id: buildKeyId,
+      device_id: deviceId,
+      session_uuid: sessionUuid,
+      first_seen_at: seenAt,
+      last_seen_at: seenAt,
+    };
+    await this.getDb()
+      .insertInto("navigation_suggestion_observations")
+      .values(observation)
+      .onConflict((oc) =>
+        oc.columns(["suggestion_id", "build_key_id", "device_id", "session_uuid"]).doUpdateSet({
+          first_seen_at: sql`min(navigation_suggestion_observations.first_seen_at, ${seenAt})`,
+          last_seen_at: sql`max(navigation_suggestion_observations.last_seen_at, ${seenAt})`,
+        }),
+      )
+      .execute();
+  }
+
+  /** Move every historical reach to its named node, preserving observation windows.
+   * The caller's promotion transaction makes transfer and cleanup atomic.
+   * Returns false for pre-migration suggestions with no known provenance. */
+  async transferSuggestionObservations(suggestionId: number, nodeId: number): Promise<boolean> {
+    const rows = await this.getDb()
+      .selectFrom("navigation_suggestion_observations")
+      .select(["build_key_id", "device_id", "session_uuid", "first_seen_at", "last_seen_at"])
+      .where("suggestion_id", "=", suggestionId)
+      .execute();
+
+    for (const row of rows) {
+      await this.recordNodeObservationWindow(
+        nodeId,
+        row.build_key_id,
+        row.device_id,
+        row.session_uuid,
+        row.first_seen_at,
+        row.last_seen_at,
+      );
+    }
+    if (rows.length > 0) {
+      await this.getDb()
+        .deleteFrom("navigation_suggestion_observations")
+        .where("suggestion_id", "=", suggestionId)
+        .execute();
+    }
+    return rows.length > 0;
+  }
+
   /**
    * Promote a suggestion to a named node.
    * Creates a fingerprint record for the node and links the suggestion.
@@ -1255,14 +1313,32 @@ export class NavigationRepository {
     sessionUuid: string,
     seenAt: number,
   ): Promise<void> {
+    await this.recordNodeObservationWindow(
+      nodeId,
+      buildKeyId,
+      deviceId,
+      sessionUuid,
+      seenAt,
+      seenAt,
+    );
+  }
+
+  private async recordNodeObservationWindow(
+    nodeId: number,
+    buildKeyId: number,
+    deviceId: string,
+    sessionUuid: string,
+    firstSeenAt: number,
+    lastSeenAt: number,
+  ): Promise<void> {
     const db = this.getDb();
     const observation: NewNavigationNodeObservation = {
       node_id: nodeId,
       build_key_id: buildKeyId,
       device_id: deviceId,
       session_uuid: sessionUuid,
-      first_seen_at: seenAt,
-      last_seen_at: seenAt,
+      first_seen_at: firstSeenAt,
+      last_seen_at: lastSeenAt,
     };
 
     await db
@@ -1270,8 +1346,8 @@ export class NavigationRepository {
       .values(observation)
       .onConflict((oc) =>
         oc.columns(["node_id", "build_key_id", "device_id", "session_uuid"]).doUpdateSet({
-          first_seen_at: sql`min(navigation_node_observations.first_seen_at, ${seenAt})`,
-          last_seen_at: sql`max(navigation_node_observations.last_seen_at, ${seenAt})`,
+          first_seen_at: sql`min(navigation_node_observations.first_seen_at, ${firstSeenAt})`,
+          last_seen_at: sql`max(navigation_node_observations.last_seen_at, ${lastSeenAt})`,
         }),
       )
       .execute();

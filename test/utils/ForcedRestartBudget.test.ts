@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { ForcedRestartBudget } from "../../src/utils/ctrlProxy/ForcedRestartBudget";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { fixedBackoff } from "../../src/utils/Backoff";
 
 describe("ForcedRestartBudget", () => {
   test("admits one attempt and backs off for 30 then 60 seconds", () => {
@@ -41,7 +42,7 @@ describe("ForcedRestartBudget", () => {
     });
     timer.advanceTime(3_600_000);
     expect(budget.tryBeginAttempt()).toBeUndefined();
-    budget.rearm("device reappeared");
+    expect(budget.recordSuccess()).toBe(true);
     expect(budget.snapshot()).toEqual({ state: "idle", attempts: 0 });
     expect(budget.tryBeginAttempt()).toBeDefined();
   });
@@ -64,6 +65,26 @@ describe("ForcedRestartBudget", () => {
     });
     expect(budget.tryBeginAttempt()).toBeUndefined();
     budget.rearm("device reappeared");
+    expect(budget.tryBeginAttempt()).toBeDefined();
+  });
+
+  test("time limit exhausts an in-flight attempt and rejects its late success", () => {
+    const timer = new FakeTimer();
+    const budget = new ForcedRestartBudget(timer, 3, fixedBackoff(1_000), 1_500);
+    const first = budget.tryBeginAttempt()!;
+    budget.recordFailure("runner launched but connection failed", first);
+    timer.advanceTime(1_000);
+    const second = budget.tryBeginAttempt()!;
+    timer.advanceTime(500);
+    expect(budget.snapshot()).toMatchObject({
+      state: "exhausted",
+      attempts: 1,
+      lastFailureReason: expect.stringContaining("Recovery exceeded 1500 ms"),
+    });
+    expect(budget.recordSuccess(second)).toBe(false);
+    expect(budget.tryBeginAttempt()).toBeUndefined();
+    expect(budget.recordSuccess()).toBe(true);
+    expect(budget.snapshot()).toEqual({ state: "idle", attempts: 0 });
     expect(budget.tryBeginAttempt()).toBeDefined();
   });
 });

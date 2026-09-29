@@ -397,7 +397,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   ) {
     this.device = device;
     this.timer = timer;
-    this.forcedRestartBudget = new ForcedRestartBudget(timer);
+    // iOS automatic runner recovery has a five-minute episode limit in addition
+    // to the shared budget's three-attempt cap; Android keeps its own policy.
+    this.forcedRestartBudget = new ForcedRestartBudget(timer, 3, undefined, 300_000);
     this.servicePort = this.allocateServicePort();
     this.builder = builder || IOSCtrlProxyBuilder.getInstance();
     this.processExecutor = processExecutor;

@@ -31,6 +31,7 @@ import { readScreenScaleMetadata } from "../../../models/ScreenScaleMetadata";
 import { ViewHierarchyQueryOptions } from "../../../models/ViewHierarchyQueryOptions";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
 import { Timer, defaultTimer } from "../../../utils/SystemTimer";
+import { raceWithDeadline } from "../../../utils/raceWithDeadline";
 import { RetryExecutor, defaultRetryExecutor } from "../../../utils/retry/RetryExecutor";
 import { IOS_CTRL_PROXY_RESERVED_PORTS, PortManager } from "../../../utils/PortManager";
 import { requireBootedDevice } from "../../../utils/requireBootedDevice";
@@ -2316,6 +2317,31 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     this.triggerServiceRestart();
   }
 
+  public override async awaitRecovery(
+    budgetMs: number,
+    signal?: AbortSignal,
+  ): Promise<"recovered" | "not_recovering" | "failed" | "timed_out"> {
+    const budget = this.serviceManagerFactory(this.device).getForcedRestartBudget();
+    const throwIfExhausted = (): void => {
+      const snapshot = budget.snapshot();
+      if (snapshot.state === "exhausted") {
+        throw new ActionableError(
+          `Automatic iOS CtrlProxy recovery exhausted for ${this.device.deviceId} ` +
+            `after ${snapshot.attempts} attempts: ${snapshot.lastFailureReason ?? "runner remained unavailable"}. ` +
+            "Restart the simulator to rearm recovery.",
+        );
+      }
+    };
+    throwIfExhausted();
+    const remainingMs = budget.timeRemainingMs();
+    const result = await super.awaitRecovery(
+      remainingMs === undefined ? budgetMs : Math.min(budgetMs, remainingMs),
+      signal,
+    );
+    throwIfExhausted();
+    return result;
+  }
+
   /** Logs a denied restart once per non-idle budget state. */
   private logDeniedRestart(budget: ForcedRestartBudget): void {
     const snapshot = budget.snapshot();
@@ -2370,14 +2396,20 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       `[IOSCtrlProxyClient] Triggering CtrlProxy restart after ${this.consecutiveConnectionFailures} connection failures`,
     );
     try {
+      const withinRecoveryBudget = <T>(operation: Promise<T>, phase: string): Promise<T> =>
+        raceWithDeadline(operation, {
+          timer: this.timer,
+          timeoutMs: budget.timeRemainingMs(),
+          label: `iOS CtrlProxy ${phase} for ${this.device.deviceId}`,
+        });
       // WebSocket failures are authoritative even when HTTP /health still responds.
-      await manager.forceRestart({ joinInFlightStart: true });
+      await withinRecoveryBudget(manager.forceRestart({ joinInFlightStart: true }), "restart");
       this.restartAcceptsReplacement = true;
       this.syncPortFromManager(manager);
       this.acceptEarlyRestartReplacement();
       this.resetConnectionBudget();
       logger.info(`[IOSCtrlProxyClient] CtrlProxy restart completed; reconnecting WebSocket`);
-      const connected = await this.connectBackgroundWebSocket();
+      const connected = await withinRecoveryBudget(this.connectBackgroundWebSocket(), "reconnect");
       if (!connected || !this.isConnected()) {
         this.failPendingRestart("WebSocket reconnect failed after CtrlProxy restart");
         logger.warn(`[IOSCtrlProxyClient] WebSocket reconnect failed after CtrlProxy restart`);
@@ -2390,7 +2422,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       if (this.pendingRestartToken !== undefined && !this.restartRearmTimeout) {
         this.failPendingRestart("No stable WebSocket reconnect observed");
       }
-      return await stableConnection;
+      return await withinRecoveryBudget(stableConnection, "stable reconnect");
     } catch (error) {
       this.failPendingRestart(errorMessage(error));
       logger.warn(`[IOSCtrlProxyClient] CtrlProxy restart failed: ${errorMessage(error)}`);

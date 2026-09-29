@@ -2,6 +2,7 @@
 # so a Windows checkout with core.autocrlf=true cannot rewrite them to CRLF and
 # break the byte-exact fixture premise.
 test/features/observe/activityActivitiesDumps/*.log text eol=lf
+test/fixtures/duo-enumerate.txt text eol=lf
 scripts/utils-import-direction-baseline.txt text eol=lf
 
 # Git LFS tracking for binary assets

@@ -28,6 +28,53 @@ function plistReader(value: unknown): PlistReader {
 }
 
 describe("SimCtlSimulatorDeviceTypeProfiles", () => {
+  test("finds new simulator types by bundlePath without a static model table", async () => {
+    const paths: string[] = [];
+    const duo = deviceType({
+      identifier: "com.apple.CoreSimulator.SimDeviceType.iPhone-Duo",
+      bundlePath: "/Profiles/iPhone Duo.simdevicetype",
+    });
+    const pro = deviceType({
+      identifier: "com.apple.CoreSimulator.SimDeviceType.iPhone-18-Pro",
+      bundlePath: "/Profiles/iPhone 18 Pro.simdevicetype",
+    });
+    const reader = plistReader({});
+    reader.readJsonFile = async (path) => {
+      paths.push(path);
+      return path.includes("Duo")
+        ? {
+            mainScreenWidth: 2007,
+            mainScreenHeight: 2853,
+            mainScreenScale: 3,
+            mainScreenWidthDPI: 460,
+          }
+        : {
+            mainScreenWidth: 1206,
+            mainScreenHeight: 2622,
+            mainScreenScale: 3,
+            mainScreenWidthDPI: 460,
+          };
+    };
+    const profiles = new SimCtlSimulatorDeviceTypeProfiles(
+      { getDeviceTypes: async () => [duo, pro] },
+      reader,
+    );
+    expect(await profiles.profileFor(duo.identifier)).toMatchObject({
+      pixelWidth: 2007,
+      pixelHeight: 2853,
+      scale: 3,
+    });
+    expect(await profiles.profileFor(pro.identifier)).toMatchObject({
+      pixelWidth: 1206,
+      pixelHeight: 2622,
+      scale: 3,
+    });
+    expect(paths).toEqual([
+      "/Profiles/iPhone Duo.simdevicetype/Contents/Resources/profile.plist",
+      "/Profiles/iPhone 18 Pro.simdevicetype/Contents/Resources/profile.plist",
+    ]);
+  });
+
   test("reads display dimensions from a device type profile", async () => {
     const lister: SimulatorDeviceTypeLister = { getDeviceTypes: async () => [deviceType()] };
     const profiles = new SimCtlSimulatorDeviceTypeProfiles(

@@ -11,6 +11,8 @@ import { exponentialBackoff, normalizeBackoff, type BackoffInput } from "../../u
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { SimCtlClient, type SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
+import { selectLiveSimulatorDisplay } from "../../utils/ios-cmdline-tools/SimulatorDisplays";
+import { IOSCtrlProxyClient } from "../observe/ios/IOSCtrlProxyClient";
 import { logger } from "../../utils/logger";
 import { withRemainingBudget } from "../../utils/withRemainingBudget";
 import { defaultRecordingCodecProbe, type RecordingCodecProbe } from "./recordingCodec";
@@ -68,6 +70,7 @@ const FFMPEG_POST_PROCESS_TIMEOUT_MS = 60000;
 // fail rather than hang — but at the same order as the stop-side waits, which
 // already carry the "loaded CI macOS runner" rationale.
 export const IOS_RECORDING_START_TIMEOUT_MS = 15000;
+const IOS_LIVE_DISPLAY_PROBE_TIMEOUT_MS = 2000;
 const IOS_RECORDING_START_CLEANUP_TIMEOUT_MS = 500;
 // A cold or loaded simulator can silently miss the very first `recordVideo`
 // start handshake (#4076): simctl produces no "Recording started" and no error,
@@ -451,6 +454,23 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
     // Injectable so the stale-capture cleanup between iOS start attempts can be
     // asserted without touching the real filesystem.
     private readonly captureFileRemover: RecordingFileRemover = defaultRecordingFileRemover,
+    private readonly liveScreenPixels: (
+      device: BootedDevice,
+      timeoutMs: number,
+    ) => Promise<{ width: number; height: number } | null> = async (device, timeoutMs) => {
+      const client = IOSCtrlProxyClient.getInstance(device);
+      if (!(await client.ensureConnected())) {
+        return null;
+      }
+      const hierarchy = await client.requestHierarchySyncWithoutObservationStreamPush(
+        undefined,
+        false,
+        undefined,
+        timeoutMs,
+      );
+      const metadata = hierarchy ? client.getScreenScaleMetadata() : null;
+      return metadata ? { width: metadata.pixelWidth, height: metadata.pixelHeight } : null;
+    },
   ) {}
 
   async start(config: VideoCaptureConfig): Promise<RecordingHandle> {
@@ -688,6 +708,87 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
       : undefined;
   }
 
+  private async recordingDisplayArg(
+    simctl: SimCtl,
+    device: BootedDevice,
+    deadlineMs: number,
+  ): Promise<string | undefined> {
+    const remainingMs = deadlineMs - this.timer.now();
+    if (remainingMs <= 0) {
+      return undefined;
+    }
+    let displays: Awaited<ReturnType<SimCtl["enumerateDisplays"]>>;
+    try {
+      const probeBudgetMs = Math.min(remainingMs, IOS_LIVE_DISPLAY_PROBE_TIMEOUT_MS);
+      displays = await runWithinDeadline(
+        (signal) => simctl.enumerateDisplays(device.deviceId, probeBudgetMs, signal),
+        this.timer.now() + probeBudgetMs,
+        this.timer,
+        undefined,
+        "Timed out enumerating iOS simulator recording displays",
+      );
+    } catch (error) {
+      // Older simctl versions may not expose enumerate; preserve their recording command.
+      logger.warn(`Unable to enumerate iOS simulator recording displays: ${errorMessage(error)}`);
+      return undefined;
+    }
+    if (displays.length === 0) {
+      logger.warn(
+        `Unable to select the live recording display for ${device.name}: no Integrated screens found`,
+      );
+      return undefined;
+    }
+    if (displays.length === 1) {
+      return undefined;
+    }
+    try {
+      const probeBudgetMs = Math.min(
+        deadlineMs - this.timer.now(),
+        IOS_LIVE_DISPLAY_PROBE_TIMEOUT_MS,
+      );
+      if (probeBudgetMs <= 0) {
+        logger.warn(
+          `Unable to select the live recording display for ${device.name}: start deadline expired`,
+        );
+        return undefined;
+      }
+      const live = await runWithinDeadline(
+        () => this.liveScreenPixels(device, probeBudgetMs),
+        this.timer.now() + probeBudgetMs,
+        this.timer,
+        undefined,
+        "Timed out probing the live iOS simulator display",
+      );
+      const selected = live ? selectLiveSimulatorDisplay(displays, live.width, live.height) : null;
+      if (selected?.name) {
+        return selected.name;
+      }
+      logger.warn(
+        `Unable to select the live recording display for ${device.name}: no uniquely matching Integrated screen with a Device Name`,
+      );
+      return undefined;
+    } catch (error) {
+      logger.warn(
+        `Unable to select the live recording display for ${device.name}: ${errorMessage(error)}`,
+      );
+      return undefined;
+    }
+  }
+
+  private recordingCommandArgs(
+    deviceId: string,
+    displayArg: string | undefined,
+    capturePath: string,
+  ): string[] {
+    return [
+      "io",
+      deviceId,
+      "recordVideo",
+      ...(displayArg ? [`--display=${displayArg}`] : []),
+      capturePath,
+    ];
+  }
+
   private async startIos(
     device: BootedDevice,
     config: VideoCaptureConfig,
@@ -721,6 +822,8 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
       throw new ActionableError("simctl is not available. Install Xcode command line tools.");
     }
 
+    const displayArg = await this.recordingDisplayArg(simctl, device, startDeadlineMs);
+
     const captureBaseName = `${config.recordingId}-raw`;
 
     const maxAttempts = Math.max(1, this.iosRecordingStartMaxAttempts);
@@ -747,7 +850,7 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
         config.outputDirectory,
         attempt === 1 ? `${captureBaseName}.mov` : `${captureBaseName}-attempt${attempt}.mov`,
       );
-      const args = ["io", device.deviceId, "recordVideo", capturePath];
+      const args = this.recordingCommandArgs(device.deviceId, displayArg, capturePath);
       if (previousCapturePath !== undefined) {
         // Best-effort disk hygiene only: drop the prior attempt's partial so retries
         // don't leak `.mov` files. Correctness no longer depends on this succeeding —

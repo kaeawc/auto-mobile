@@ -574,7 +574,10 @@ describe("Simctl", function () {
           },
         ],
       });
-      expect(commands).toEqual(["xcrun simctl list devices --json"]);
+      expect(commands).toEqual([
+        "xcrun simctl list devices --json",
+        "xcrun simctl io iphone-17-pro-udid enumerate",
+      ]);
     });
 
     test("enriches a simulator with its injected device type display profile", async function () {

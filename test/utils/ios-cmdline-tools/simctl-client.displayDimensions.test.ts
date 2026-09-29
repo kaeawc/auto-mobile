@@ -3,10 +3,71 @@ import { SimCtlClient } from "../../../src/utils/ios-cmdline-tools/SimCtlClient"
 import type { SimulatorDeviceTypeProfileSource } from "../../../src/utils/ios-cmdline-tools/SimulatorDeviceTypeProfiles";
 import { createExecResult } from "../../../src/utils/execResult";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { loadDuoEnumerate } from "../../fixtures/loadDuoEnumerate";
 
 const UDID = "11111111-2222-3333-4444-555555555555";
+const duoEnumerate = loadDuoEnumerate();
 
 describe("SimCtlClient display dimension enrichment", () => {
+  test("publishes profile dimensions and both enumerated Duo screens", async () => {
+    const typeId = "com.apple.CoreSimulator.SimDeviceType.iPhone-Duo";
+    const commands: string[] = [];
+    const simctl = new SimCtlClient(
+      null,
+      async (_file, args) => {
+        commands.push(args.join(" "));
+        if (args.includes("enumerate")) {
+          return createExecResult(duoEnumerate, "");
+        }
+        return createExecResult(
+          JSON.stringify({
+            devices: {
+              "iOS-27-1": [
+                {
+                  udid: UDID,
+                  name: "iPhone Duo",
+                  state: "Booted",
+                  isAvailable: true,
+                  deviceTypeIdentifier: typeId,
+                },
+              ],
+            },
+          }),
+          "",
+        );
+      },
+      undefined,
+      "darwin",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        profileFor: async () => ({
+          deviceTypeId: typeId,
+          productFamily: "iPhone",
+          modelIdentifier: null,
+          pixelWidth: 2007,
+          pixelHeight: 2853,
+          scale: 3,
+          dpi: 460,
+        }),
+      },
+    );
+    const [device] = await simctl.listSimulatorImages(100, { bypassCache: true });
+    expect(device).toMatchObject({
+      screenWidth: 2007,
+      screenHeight: 2853,
+      screenDensity: 460,
+      displays: [
+        { id: "1", name: "primary", width: 1398, height: 2034 },
+        { id: "3", name: "primary-1", width: 2007, height: 2853 },
+      ],
+    });
+    expect(commands).toContain(`simctl io ${UDID} enumerate`);
+  });
+
   const simulatorList = () =>
     createExecResult(
       JSON.stringify({

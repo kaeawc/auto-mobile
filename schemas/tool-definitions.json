@@ -3239,6 +3239,56 @@
                 "required": ["width", "height", "density", "units"],
                 "additionalProperties": false
               },
+              "displays": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "name": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "width": {
+                      "type": "number"
+                    },
+                    "height": {
+                      "type": "number"
+                    },
+                    "density": {
+                      "anyOf": [
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "units": {
+                      "type": "string",
+                      "const": "physical-pixels"
+                    }
+                  },
+                  "required": ["id", "name", "width", "height", "density", "units"],
+                  "additionalProperties": false
+                }
+              },
               "capabilityInventory": {
                 "anyOf": [
                   {
@@ -3818,6 +3868,56 @@
                 },
                 "required": ["width", "height", "density", "units"],
                 "additionalProperties": false
+              },
+              "displays": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "name": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "width": {
+                      "type": "number"
+                    },
+                    "height": {
+                      "type": "number"
+                    },
+                    "density": {
+                      "anyOf": [
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "units": {
+                      "type": "string",
+                      "const": "physical-pixels"
+                    }
+                  },
+                  "required": ["id", "name", "width", "height", "density", "units"],
+                  "additionalProperties": false
+                }
               },
               "capabilityInventory": {
                 "anyOf": [
@@ -9448,6 +9548,56 @@
               },
               "required": ["width", "height", "density", "units"],
               "additionalProperties": false
+            },
+            "displays": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "name": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "width": {
+                    "type": "number"
+                  },
+                  "height": {
+                    "type": "number"
+                  },
+                  "density": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "units": {
+                    "type": "string",
+                    "const": "physical-pixels"
+                  }
+                },
+                "required": ["id", "name", "width", "height", "density", "units"],
+                "additionalProperties": false
+              }
             },
             "capabilityInventory": {
               "anyOf": [

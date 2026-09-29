@@ -2,6 +2,7 @@ import { z } from "zod/v4";
 import type { PooledDevice } from "../daemon/devicePool";
 import type { Session } from "../daemon/sessionManager";
 import type { BootedDevice, DeviceInfo } from "../models";
+import type { DeviceDisplayInfo } from "../models/DeviceInfo";
 import type { ExactProvisionedDevice } from "../utils/exactDeviceProvisioning";
 import type { StableConfiguredDeviceImage } from "../utils/configuredDeviceInventory";
 import { iosSimulatorCapabilityInventory } from "../features/device-control/virtualDeviceCapabilities";
@@ -53,6 +54,7 @@ export interface DeviceDescription {
     density: number | null;
     units: Extract<ObservationInsets["units"], "physical-pixels">;
   };
+  displays?: DeviceDisplayInfo[];
   capabilityInventory: CapabilityInventory | null;
   image: {
     path: string | null;
@@ -244,6 +246,7 @@ function describeImage(
     identity: { stableId },
     ...staticFacts,
     display: displayFrom(image),
+    ...(image.displays?.length ? { displays: image.displays } : {}),
     capabilityInventory: capabilityInventory(image, true),
     image: {
       path: platform === "android" ? (androidProvenance?.path ?? imageLinkFrom(image).path) : null,
@@ -309,6 +312,7 @@ function describeBooted(
     identity: { stableId },
     ...staticFacts,
     display: displayFrom(merged),
+    ...(merged.displays?.length ? { displays: merged.displays } : {}),
     capabilityInventory: capabilityInventory(merged, isVirtual),
     image: imageLinkWithConfiguredFallback(admittedImage, configured),
     availabilityError: device.platform === "ios" ? (merged.availabilityError ?? null) : null,
@@ -349,6 +353,7 @@ function mergeRuntimeFacts(
     screenWidth: preferred(device.screenWidth, admittedImage?.screenWidth),
     screenHeight: preferred(device.screenHeight, admittedImage?.screenHeight),
     screenDensity: preferred(device.screenDensity, admittedImage?.screenDensity),
+    displays: preferred(device.displays, admittedImage?.displays),
     formFactor: preferred(device.formFactor, admittedImage?.formFactor),
     runtimeId: preferred(device.runtimeId, admittedImage?.runtimeId),
     runtime: preferred(device.runtime, admittedImage?.runtime),
@@ -642,6 +647,20 @@ export const deviceDescriptionSchema = z
         units: z.literal("physical-pixels"),
       })
       .strict(),
+    displays: z
+      .array(
+        z
+          .object({
+            id: nullableString,
+            name: nullableString,
+            width: z.number(),
+            height: z.number(),
+            density: nullableNumber,
+            units: z.literal("physical-pixels"),
+          })
+          .strict(),
+      )
+      .optional(),
     capabilityInventory: z
       .object({
         schemaVersion: z.number(),

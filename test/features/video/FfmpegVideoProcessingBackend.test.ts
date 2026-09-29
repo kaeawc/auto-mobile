@@ -24,11 +24,16 @@ import {
 } from "../../../src/features/video/VideoRecorderService";
 import type { BootedDevice } from "../../../src/models";
 import type { SimCtl } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
+import { parseSimulatorDisplays } from "../../../src/utils/ios-cmdline-tools/SimulatorDisplays";
+import type { FfmpegClient } from "../../../src/utils/media/FfmpegClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeAdbProcess } from "../../fakes/FakeAdbProcess";
 import type { AdbExecutor } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { defaultTimer, type Timer } from "../../../src/utils/SystemTimer";
+import { loadDuoEnumerate } from "../../fixtures/loadDuoEnumerate";
+
+const duoEnumerate = loadDuoEnumerate();
 
 function createProcessTracker(stderr: string[] = []): ProcessTracker {
   const process = new EventEmitter() as ProcessTracker["process"];
@@ -151,6 +156,89 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
     }, 0);
     return child;
   }
+
+  test("reselects the Duo recording display after folding changes", async () => {
+    const commands: string[][] = [];
+    let live = { width: 1398, height: 2034 };
+    let enumerateFails = false;
+    let probeFails = false;
+    const simctl = {
+      isAvailable: async () => true,
+      enumerateDisplays: async () => {
+        if (enumerateFails) {
+          throw new Error("enumerate unavailable");
+        }
+        return parseSimulatorDisplays(duoEnumerate);
+      },
+      startCommandArgs: async (args: string[]) => {
+        commands.push(args);
+        return makeCaptureChild(true);
+      },
+    } as SimCtl;
+    const ffmpeg = {
+      binaryPath: "ffmpeg",
+      probe: async () => ({ version: "7.1", encoders: [] }),
+      start: () => {
+        throw new Error("not used");
+      },
+      run: async () => {
+        throw new Error("not used");
+      },
+      pipe: () => {
+        throw new Error("not used");
+      },
+    } satisfies FfmpegClient;
+    const recorder = new FfmpegVideoProcessingBackend(
+      undefined,
+      () => simctl,
+      ffmpeg,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      async () => {
+        if (probeFails) {
+          throw new Error("hierarchy unavailable");
+        }
+        return live;
+      },
+    );
+    await recorder.start({
+      ...mockConfig,
+      device: { ...mockDevice, platform: "ios", deviceId: "duo-udid" },
+    });
+    expect(commands[0]).toEqual([
+      "io",
+      "duo-udid",
+      "recordVideo",
+      "--display=primary",
+      path.join(mockConfig.outputDirectory, "test-recording-raw.mov"),
+    ]);
+    live = { width: 2007, height: 2853 };
+    await recorder.start({
+      ...mockConfig,
+      recordingId: "unfolded-recording",
+      device: { ...mockDevice, platform: "ios", deviceId: "duo-udid" },
+    });
+    expect(commands[1]).toContain("--display=primary-1");
+    live = { width: 1, height: 1 };
+    const record = async (recordingId: string) =>
+      recorder.start({
+        ...mockConfig,
+        recordingId,
+        device: { ...mockDevice, platform: "ios", deviceId: "duo-udid" },
+      });
+    await record("unknown-display-recording");
+    probeFails = true;
+    await record("failed-probe-recording");
+    enumerateFails = true;
+    await record("failed-enumerate-recording");
+    expect(commands).toHaveLength(5);
+    for (const args of commands.slice(2)) {
+      expect(args).not.toContain("--display=primary");
+      expect(args).not.toContain("--display=primary-1");
+    }
+  });
 
   function diagnosticsExecResult(state: string) {
     return {

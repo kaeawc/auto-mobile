@@ -1,10 +1,16 @@
 import { describe, expect, test } from "bun:test";
 import { SimCtlClient } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
-import { BootedDevice } from "../../../src/models";
+import type { BootedDevice } from "../../../src/models";
 import { createExecResult } from "../../../src/utils/execResult";
+import { loadDuoEnumerate } from "../../fixtures/loadDuoEnumerate";
 
-// Issue #6584: getScreenSize's LCD-section parser must not mix width/height
-// from one `simctl io enumerate` section with uiScale from another section.
+const duoEnumerate = loadDuoEnumerate();
+const withoutInnerScreen = duoEnumerate.replace(
+  /    \(3\) LCD-1:\n[\s\S]*?(?=    \(5\) Resizable:)/,
+  "",
+);
+
+// Issue #6584: fields from separate Connected Screens entries must not mix.
 describe("SimCtlClient getScreenSize", () => {
   const device: BootedDevice = {
     deviceId: "ios-device-screensize",
@@ -12,115 +18,46 @@ describe("SimCtlClient getScreenSize", () => {
     platform: "ios",
     source: "local",
   };
+  const client = (stdout: string) =>
+    new SimCtlClient(device, async () => createExecResult(stdout, ""));
 
-  test("does not mix Pixel Size and Preferred UI Scale across separate sections", async () => {
-    // Synthetic multi-section output: the first Integrated screen section only
-    // reports Pixel Size, and a second, unrelated section only reports
-    // Preferred UI Scale. A naive parser that never resets its accumulators
-    // between sections would combine the two into {828/3, 1792/3} = {276, 597}.
-    const stdout = [
-      "== Devices ==",
-      "-- iPhone --",
-      "Class: Display",
-      "Screen Type: Integrated",
-      "LCD:",
-      "  Pixel Size: {828, 1792}",
-      "Port: com.apple.iphonesimulator.lcd-1",
-      "Class: Display",
-      "Screen Type: Integrated",
-      "LCD:",
-      "  Preferred UI Scale: 3",
-      "Port: com.apple.iphonesimulator.lcd-2",
-    ].join("\n");
-
-    const execAsync = async () => createExecResult(stdout, "");
-    const simctl = new SimCtlClient(device, execAsync);
-
-    // Neither section has both fields, so the fix should refuse to combine
-    // them and throw rather than silently returning a mismatched size.
-    await expect(simctl.getScreenSize()).rejects.toThrow(
+  test("does not mix Pixel Size and Preferred UI Scale across screens", async () => {
+    const stdout = duoEnumerate
+      .replace("        Preferred UI Scale: 3\n", "")
+      .replace("        Pixel Size: {2007, 2853}\n", "");
+    await expect(client(stdout).getScreenSize()).rejects.toThrow(
       "Unable to determine screen size from provided data.",
     );
   });
 
-  test("uses the first complete section and ignores a later, differently-scaled section", async () => {
-    const stdout = [
-      "== Devices ==",
-      "-- iPhone --",
-      "Class: Display",
-      "Screen Type: Integrated",
-      "LCD:",
-      "  Pixel Size: {828, 1792}",
-      "  Preferred UI Scale: 2",
-      "Port: com.apple.iphonesimulator.lcd-1",
-      "Class: Display",
-      "Screen Type: Integrated",
-      "LCD:",
-      "  Pixel Size: {1242, 2688}",
-      "  Preferred UI Scale: 3",
-      "Port: com.apple.iphonesimulator.lcd-2",
-    ].join("\n");
-
-    const execAsync = async () => createExecResult(stdout, "");
-    const simctl = new SimCtlClient(device, execAsync);
-
-    const size = await simctl.getScreenSize();
-
-    expect(size).toEqual({ width: 414, height: 896 });
+  test("uses the first complete Integrated screen", async () => {
+    await expect(client(duoEnumerate).getScreenSize()).resolves.toEqual({
+      width: 466,
+      height: 678,
+    });
   });
 
-  test("still returns a valid size for a single well-formed section", async () => {
-    const stdout = [
-      "Class: Display",
-      "Screen Type: Integrated",
-      "LCD:",
-      "  Pixel Size: {1179, 2556}",
-      "  Preferred UI Scale: 3",
-      "Port: com.apple.iphonesimulator.lcd-1",
-    ].join("\n");
-
-    const execAsync = async () => createExecResult(stdout, "");
-    const simctl = new SimCtlClient(device, execAsync);
-
-    const size = await simctl.getScreenSize();
-
-    expect(size).toEqual({ width: 393, height: 852 });
+  test("uses a later complete screen if the first is missing its UI scale", async () => {
+    const stdout = duoEnumerate.replace("        Preferred UI Scale: 3\n", "");
+    await expect(client(stdout).getScreenSize()).resolves.toEqual({
+      width: 669,
+      height: 951,
+    });
   });
 
-  test("preserves fields when LCD markers are interleaved in one section", async () => {
-    const stdout = [
-      "Class: Display",
-      "LCD:",
-      "  Pixel Size: {1179, 2556}",
-      "Screen Type: Integrated",
-      "  Preferred UI Scale: 3",
-      "Port: com.apple.iphonesimulator.lcd-1",
-    ].join("\n");
-
-    const execAsync = async () => createExecResult(stdout, "");
-    const simctl = new SimCtlClient(device, execAsync);
-
-    await expect(simctl.getScreenSize()).resolves.toEqual({ width: 393, height: 852 });
+  test("uses the single Integrated screen when LCD-1 is absent", async () => {
+    expect(withoutInnerScreen).not.toBe(duoEnumerate);
+    await expect(client(withoutInnerScreen).getScreenSize()).resolves.toEqual({
+      width: 466,
+      height: 678,
+    });
   });
 
-  test("returns the completed size when the final LCD block has no trailing Port: line", async () => {
-    // Regression test: `simctl io <udid> enumerate` output does not always end
-    // with a trailing "Port:" line after the last section. The parser must
-    // finalize a complete in-progress section at EOF rather than only ever
-    // finalizing on a subsequent "Port:" sentinel.
-    const stdout = [
-      "Class: Display",
-      "Screen Type: Integrated",
-      "LCD:",
-      "  Pixel Size: {1179, 2556}",
-      "  Preferred UI Scale: 3",
-    ].join("\n");
-
-    const execAsync = async () => createExecResult(stdout, "");
-    const simctl = new SimCtlClient(device, execAsync);
-
-    const size = await simctl.getScreenSize();
-
-    expect(size).toEqual({ width: 393, height: 852 });
+  test("finishes the final Connected Screens entry at EOF", async () => {
+    const stdout = duoEnumerate.slice(0, duoEnumerate.indexOf("    (2) TVOut:"));
+    await expect(client(stdout).getScreenSize()).resolves.toEqual({
+      width: 466,
+      height: 678,
+    });
   });
 });

@@ -108,6 +108,53 @@ describe("raceWithDeadline", () => {
     await Promise.resolve();
   });
 
+  test("custom timeout error is preserved and cleanup runs once after rejection", async () => {
+    const timer = new TrackingTimer();
+    const controller = new AbortController();
+    const timeoutError = new Error("custom deadline");
+    const events: string[] = [];
+    const raced = raceWithDeadline(deferred<string>().promise, {
+      timer,
+      timeoutMs: 25,
+      signal: controller.signal,
+      label: "custom lookup",
+      timeoutError: () => {
+        events.push("error");
+        return timeoutError;
+      },
+      onTimeout: () => {
+        events.push("cleanup");
+        controller.abort();
+      },
+    });
+
+    timer.advanceTime(25);
+    expect(await raced.catch((error: unknown) => error)).toBe(timeoutError);
+    expect(events).toEqual(["error", "cleanup"]);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("completed operation does not call timeout hooks", async () => {
+    const timer = new TrackingTimer();
+    let calls = 0;
+    expect(
+      await raceWithDeadline(Promise.resolve("done"), {
+        timer,
+        timeoutMs: 25,
+        label: "lookup",
+        timeoutError: () => {
+          calls++;
+          return new Error("late");
+        },
+        onTimeout: () => {
+          calls++;
+        },
+      }),
+    ).toBe("done");
+    timer.advanceTime(25);
+    expect(calls).toBe(0);
+  });
+
   test("default abort reason becomes a labelled ActionableError", async () => {
     const timer = new TrackingTimer();
     const controller = new AbortController();

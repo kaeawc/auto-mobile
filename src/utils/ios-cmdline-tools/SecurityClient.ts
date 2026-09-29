@@ -4,6 +4,7 @@ import { runExecSeam } from "../ExecSeam";
 import { execFileAsync as sharedExecFileAsync } from "../HostCommandExecutor";
 import { logger } from "../logger";
 import { defaultTimer, type Timer } from "../SystemTimer";
+import { raceWithDeadline } from "../raceWithDeadline";
 
 const SECURITY_COMMAND = "security";
 const DEFAULT_TIMEOUT_MS = 5_000;
@@ -145,37 +146,25 @@ export class SecurityClient implements SecurityClientApi {
     }
 
     const controller = new AbortController();
-    let rejectCancellation: ((error: ActionableError) => void) | undefined;
-    const cancellation = new Promise<never>((_resolve, reject) => {
-      rejectCancellation = reject;
-    });
     const abort = () => {
-      controller.abort();
-      rejectCancellation?.(new ActionableError(`Security ${operation} was cancelled.`));
+      controller.abort(new ActionableError(`Security ${operation} was cancelled.`));
     };
     options.signal?.addEventListener("abort", abort, { once: true });
     const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-    let timeoutId: NodeJS.Timeout | undefined;
-    const timeout = new Promise<never>((_resolve, reject) => {
-      timeoutId = this.timer.setTimeout(() => {
-        controller.abort();
-        reject(new Error(`Security ${operation} timed out after ${timeoutMs}ms.`));
-      }, timeoutMs);
-    });
     const execution = this.dependencies.execute(SECURITY_COMMAND, args, {
       signal: controller.signal,
       killSignal: "SIGKILL",
     });
-    execution.catch(() => {
-      /* handled by the race when aborting a child */
-    });
-
     try {
-      return await Promise.race([execution, timeout, cancellation]);
+      return await raceWithDeadline(execution, {
+        timer: this.timer,
+        timeoutMs,
+        signal: controller.signal,
+        label: `Security ${operation}`,
+        timeoutError: () => new Error(`Security ${operation} timed out after ${timeoutMs}ms.`),
+        onTimeout: () => controller.abort(),
+      });
     } finally {
-      if (timeoutId) {
-        this.timer.clearTimeout(timeoutId);
-      }
       options.signal?.removeEventListener("abort", abort);
     }
   }

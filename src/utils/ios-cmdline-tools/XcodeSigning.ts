@@ -9,6 +9,7 @@ import { parsePlist, PlistReal, type PlistValue } from "./XctestrunPlist";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../workingDirectory";
 import { SecurityClient, type SecurityClientApi } from "./SecurityClient";
 import { defaultTimer, Timer } from "../SystemTimer";
+import { raceWithDeadline } from "../raceWithDeadline";
 import { getAbortSignal } from "../AbortContext";
 import { getSharedAutoMobileDir } from "../tempDir";
 
@@ -341,17 +342,8 @@ export class XcodeSigningManager {
       return false;
     }
     const signal = parent ? AbortSignal.any([parent, controller.signal]) : controller.signal;
-    let onAbort!: () => void;
-    const cancelled = new Promise<false>((resolve) => {
-      onAbort = () => resolve(false);
-      signal.addEventListener("abort", onAbort, { once: true });
-    });
-    const timeoutId = timer.setTimeout(
-      () => controller.abort(),
-      XCODEBUILD_AVAILABILITY_PROBE_TIMEOUT_MS,
-    );
     try {
-      return await Promise.race([
+      return await raceWithDeadline(
         this.dependencies.xcodebuild
           .isAvailable({
             timeoutMs: XCODEBUILD_AVAILABILITY_PROBE_TIMEOUT_MS,
@@ -361,11 +353,19 @@ export class XcodeSigningManager {
             (available) => available,
             () => false,
           ),
-        cancelled,
-      ]);
-    } finally {
-      timer.clearTimeout(timeoutId);
-      signal.removeEventListener("abort", onAbort);
+        {
+          timer,
+          timeoutMs: XCODEBUILD_AVAILABILITY_PROBE_TIMEOUT_MS,
+          signal: parent,
+          label: "xcodebuild availability probe",
+          onTimeout: () => controller.abort(),
+        },
+      );
+    } catch (error) {
+      logger.warn(
+        `[XcodeSigning] xcodebuild availability probe did not complete: ${errorMessage(error)}`,
+      );
+      return false;
     }
   }
 

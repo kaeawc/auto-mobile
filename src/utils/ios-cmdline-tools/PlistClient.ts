@@ -2,6 +2,7 @@ import { errorMessage } from "../describeUnknownError";
 import { ActionableError } from "../../models";
 import { DefaultHostCommandExecutor } from "../HostCommandExecutor";
 import { defaultTimer, type Timer } from "../SystemTimer";
+import { raceWithDeadline } from "../raceWithDeadline";
 import { logger } from "../logger";
 
 export interface PlistProcessRequest {
@@ -174,7 +175,6 @@ export class PlistClient implements PlistReader {
       options.signal?.addEventListener("abort", onAbort, { once: true });
     }
     const timeoutMs = options.timeoutMs ?? this.timeoutMs;
-    let timeout: NodeJS.Timeout | undefined;
     const command = `plutil ${args.map((arg) => JSON.stringify(arg)).join(" ")}`;
     const run = this.process({
       args,
@@ -182,15 +182,15 @@ export class PlistClient implements PlistReader {
       signal: controller.signal,
       maxOutputBytes: this.maxOutputBytes,
     });
-    run.catch(() => {});
-    const timeoutPromise = new Promise<PlistProcessResult>((_, reject) => {
-      timeout = this.timer.setTimeout(() => {
-        reject(new ActionableError(`plutil timed out after ${timeoutMs}ms: ${command}`));
-        controller.abort();
-      }, timeoutMs);
-    });
     try {
-      const result = await Promise.race([run, timeoutPromise]);
+      const result = await raceWithDeadline(run, {
+        timer: this.timer,
+        timeoutMs,
+        label: "plutil",
+        timeoutError: () =>
+          new ActionableError(`plutil timed out after ${timeoutMs}ms: ${command}`),
+        onTimeout: () => controller.abort(),
+      });
       if (result.stdout.length > this.maxOutputBytes) {
         throw new ActionableError(`plutil output exceeded ${this.maxOutputBytes} bytes`);
       }
@@ -202,9 +202,6 @@ export class PlistClient implements PlistReader {
       const detail = errorMessage(error);
       throw new ActionableError(`plutil failed (${command}): ${detail}`);
     } finally {
-      if (timeout) {
-        this.timer.clearTimeout(timeout);
-      }
       options.signal?.removeEventListener("abort", onAbort);
     }
   }

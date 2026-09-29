@@ -16,6 +16,7 @@ import {
 } from "../HostCommandExecutor";
 import { ExecResult, ActionableError, DeviceInfo, BootedDevice, ScreenSize } from "../../models";
 import { defaultTimer, Timer } from "../SystemTimer";
+import { raceWithDeadline } from "../raceWithDeadline";
 import {
   defaultDiscoveryObservationSequence,
   type DiscoveryObservationSequence,
@@ -706,20 +707,13 @@ export class SimCtlClient implements SimCtl {
 
   private async openSimulatorAppBounded(udid: string): Promise<boolean> {
     const controller = new AbortController();
-    let timeoutHandle: NodeJS.Timeout | undefined;
-    const timeout = new Promise<never>((_resolve, reject) => {
-      timeoutHandle = this.timer.setTimeout(() => {
-        controller.abort();
-        reject(new Error(`Timed out opening Simulator.app for ${udid}`));
-      }, 1_000);
+    return await raceWithDeadline(this.openSimulatorApp(udid, controller.signal), {
+      timer: this.timer,
+      timeoutMs: 1_000,
+      label: "Simulator.app open",
+      timeoutError: () => new Error(`Timed out opening Simulator.app for ${udid}`),
+      onTimeout: () => controller.abort(),
     });
-    try {
-      return await Promise.race([this.openSimulatorApp(udid, controller.signal), timeout]);
-    } finally {
-      if (timeoutHandle) {
-        this.timer.clearTimeout(timeoutHandle);
-      }
-    }
   }
 
   /**
@@ -807,11 +801,10 @@ export class SimCtlClient implements SimCtl {
     const runCommand = (signal?: AbortSignal) =>
       this.execAsync("xcrun", localArgs, undefined, signal);
 
-    // Use Promise.race to implement timeout if specified. On timeout we abort the
+    // On timeout we abort the
     // controller so the underlying child process is killed rather than left
     // running orphaned (issue #3938).
     if (timeoutMs) {
-      let timeoutId: NodeJS.Timeout;
       let timeoutError: Error | undefined;
       let runPromise: Promise<ExecResult> | undefined;
       const controller = new AbortController();
@@ -819,22 +812,16 @@ export class SimCtlClient implements SimCtl {
         ? AbortSignal.any([callerSignal, controller.signal])
         : controller.signal;
 
-      const timeoutPromise = new Promise<ExecResult>((_, reject) => {
-        timeoutId = this.timer.setTimeout(() => {
-          timeoutError = new Error(`Command timed out after ${timeoutMs}ms: ${fullCommand}`);
-          controller.abort(timeoutError);
-          reject(timeoutError);
-        }, timeoutMs);
-      });
-
       try {
         runPromise = runCommand(signal);
-        // Once the timeout wins the race the aborted run promise rejects with an
-        // AbortError; keep it handled so it can't surface as an unhandledRejection.
-        runPromise.catch(() => {
-          /* settled after timeout; result consumed via race */
+        const result = await raceWithDeadline(runPromise, {
+          timer: this.timer,
+          timeoutMs,
+          label: "simctl command",
+          timeoutError: () =>
+            (timeoutError = new Error(`Command timed out after ${timeoutMs}ms: ${fullCommand}`)),
+          onTimeout: () => controller.abort(timeoutError),
         });
-        const result = await Promise.race([runPromise, timeoutPromise]);
         const duration = this.timer.now() - startTime;
         logger.debug(`[iOS] Command completed in ${duration}ms: ${command}`);
         return result;
@@ -848,8 +835,6 @@ export class SimCtlClient implements SimCtl {
           `[iOS] Command failed after ${duration}ms: ${command} - ${errorMessage(commandError)}`,
         );
         throw commandError;
-      } finally {
-        this.timer.clearTimeout(timeoutId!);
       }
     }
 
@@ -873,25 +858,27 @@ export class SimCtlClient implements SimCtl {
     runPromise: Promise<ExecResult>,
     command: string,
   ): Promise<void> {
-    let settlementTimeout: NodeJS.Timeout | undefined;
     let settlementTimedOut = false;
-    const gracePeriod = new Promise<void>((resolve) => {
-      settlementTimeout = this.timer.setTimeout(() => {
-        settlementTimedOut = true;
-        resolve();
-      }, COMMAND_SETTLEMENT_GRACE_MS);
-    });
+    const timeout = new Error("simctl command settlement grace expired");
     try {
-      await Promise.race([
+      await raceWithDeadline(
         runPromise.then(
           () => undefined,
           () => undefined,
         ),
-        gracePeriod,
-      ]);
-    } finally {
-      if (settlementTimeout) {
-        this.timer.clearTimeout(settlementTimeout);
+        {
+          timer: this.timer,
+          timeoutMs: COMMAND_SETTLEMENT_GRACE_MS,
+          label: "simctl command settlement",
+          timeoutError: () => timeout,
+          onTimeout: () => {
+            settlementTimedOut = true;
+          },
+        },
+      );
+    } catch (error) {
+      if (error !== timeout) {
+        throw error;
       }
     }
     if (settlementTimedOut) {
@@ -914,36 +901,26 @@ export class SimCtlClient implements SimCtl {
     signal?: AbortSignal;
   }): Promise<boolean> {
     const controller = new AbortController();
-    let timeoutId: NodeJS.Timeout | undefined;
     const signal = options?.signal
       ? AbortSignal.any([options.signal, controller.signal])
       : controller.signal;
     const probe = this.execAsync("xcrun", ["--find", "simctl"], undefined, signal);
-    probe.catch(() => {
-      // The race below owns the result; this also handles an abort after it wins.
-    });
-    const timeout = new Promise<false>((resolve) => {
-      timeoutId = this.timer.setTimeout(() => {
-        controller.abort();
-        resolve(false);
-      }, options?.timeoutMs ?? SIMCTL_AVAILABILITY_PROBE_TIMEOUT_MS);
-    });
-
     try {
-      return await Promise.race([
+      return await raceWithDeadline(
         probe.then(
           () => true,
           () => false,
         ),
-        timeout,
-      ]);
+        {
+          timer: this.timer,
+          timeoutMs: options?.timeoutMs ?? SIMCTL_AVAILABILITY_PROBE_TIMEOUT_MS,
+          label: "simctl availability",
+          onTimeout: () => controller.abort(),
+        },
+      );
     } catch (error) {
       logger.debug(`src/utils/ios-cmdline-tools/SimCtlClient.ts fallback failed: ${error}`, error);
       return false;
-    } finally {
-      if (timeoutId) {
-        this.timer.clearTimeout(timeoutId);
-      }
     }
   }
 
@@ -1080,28 +1057,18 @@ export class SimCtlClient implements SimCtl {
     }
     const presentation = this.presentSimulatorAfterStart(udid, bootGeneration);
 
-    let timeoutHandle: NodeJS.Timeout | undefined;
-    let abortListener: (() => void) | undefined;
-    const timeout = new Promise<void>((resolve) => {
-      timeoutHandle = this.timer.setTimeout(resolve, remainingMs);
-    });
-    const contenders = [presentation, timeout];
-    if (signal) {
-      contenders.push(
-        new Promise<void>((resolve) => {
-          abortListener = resolve;
-          signal.addEventListener("abort", abortListener, { once: true });
-        }),
-      );
-    }
+    const timeout = new Error("Simulator presentation deadline expired");
     try {
-      await Promise.race(contenders);
-    } finally {
-      if (timeoutHandle) {
-        this.timer.clearTimeout(timeoutHandle);
-      }
-      if (signal && abortListener) {
-        signal.removeEventListener("abort", abortListener);
+      await raceWithDeadline(presentation, {
+        timer: this.timer,
+        timeoutMs: remainingMs,
+        signal,
+        label: "Simulator presentation",
+        timeoutError: () => timeout,
+      });
+    } catch (error) {
+      if (error !== timeout && !signal?.aborted) {
+        throw error;
       }
     }
   }
@@ -1244,36 +1211,16 @@ export class SimCtlClient implements SimCtl {
       return release;
     });
 
-    let timeoutHandle: NodeJS.Timeout | undefined;
-    let abortListener: (() => void) | undefined;
-    const contenders: Array<Promise<() => void>> = [acquirePromise];
-    if (deadlineMs !== undefined) {
-      const remainingMs = Math.max(0, deadlineMs - this.timer.now());
-      contenders.push(
-        new Promise<never>((_resolve, reject) => {
-          timeoutHandle = this.timer.setTimeout(
-            () => reject(new Error(`Timed out waiting to ${operation} iOS simulator ${udid}`)),
-            remainingMs,
-          );
-        }),
-      );
-    }
-    if (signal) {
-      contenders.push(
-        new Promise<never>((_resolve, reject) => {
-          abortListener = () =>
-            reject(
-              signal.reason ??
-                new ActionableError(`iOS simulator ${operation} aborted for ${udid}`),
-            );
-          signal.addEventListener("abort", abortListener, { once: true });
-        }),
-      );
-    }
-
     let acquired = false;
     try {
-      const release = await Promise.race(contenders);
+      const release = await raceWithDeadline(acquirePromise, {
+        timer: this.timer,
+        timeoutMs:
+          deadlineMs === undefined ? undefined : Math.max(0, deadlineMs - this.timer.now()),
+        signal,
+        label: `iOS simulator ${operation}`,
+        timeoutError: () => new Error(`Timed out waiting to ${operation} iOS simulator ${udid}`),
+      });
       acquired = true;
       acquiredRelease = undefined;
       return {
@@ -1286,12 +1233,6 @@ export class SimCtlClient implements SimCtl {
         const release = acquiredRelease;
         acquiredRelease = undefined;
         this.releaseSimulatorBoot(udid, state, release);
-      }
-      if (timeoutHandle) {
-        this.timer.clearTimeout(timeoutHandle);
-      }
-      if (signal && abortListener) {
-        signal.removeEventListener("abort", abortListener);
       }
     }
   }
@@ -1570,28 +1511,18 @@ export class SimCtlClient implements SimCtl {
       await this.timer.sleep(boundedDelayMs);
       return;
     }
-    let onAbort: (() => void) | undefined;
     let delayHandle: NodeJS.Timeout | undefined;
     try {
-      await Promise.race([
+      await raceWithDeadline(
         new Promise<void>((resolve) => {
           delayHandle = this.timer.setTimeout(resolve, boundedDelayMs);
         }),
-        new Promise<never>((_resolve, reject) => {
-          onAbort = () => reject(signal.reason);
-          signal.addEventListener("abort", onAbort, { once: true });
-          if (signal.aborted) {
-            onAbort();
-          }
-        }),
-      ]);
+        { timer: this.timer, signal, label: "iOS simulator boot retry" },
+      );
       signal.throwIfAborted();
     } finally {
       if (delayHandle) {
         this.timer.clearTimeout(delayHandle);
-      }
-      if (onAbort) {
-        signal.removeEventListener("abort", onAbort);
       }
     }
   }
@@ -1963,38 +1894,14 @@ export class SimCtlClient implements SimCtl {
       return shared;
     }
 
-    let timeoutHandle: NodeJS.Timeout | undefined;
-    let abortListener: (() => void) | undefined;
-    const contenders: Array<Promise<DeviceInfo[]>> = [shared];
-    if (timeoutMs !== undefined) {
-      contenders.push(
-        new Promise<never>((_resolve, reject) => {
-          timeoutHandle = this.timer.setTimeout(() => {
-            reject(new Error(`Timed out waiting for iOS simulator listing after ${timeoutMs}ms`));
-          }, timeoutMs);
-        }),
-      );
-    }
-    if (signal) {
-      contenders.push(
-        new Promise<never>((_resolve, reject) => {
-          abortListener = () =>
-            reject(signal.reason ?? new ActionableError("iOS simulator listing aborted"));
-          signal.addEventListener("abort", abortListener, { once: true });
-        }),
-      );
-    }
-
-    try {
-      return await Promise.race(contenders);
-    } finally {
-      if (timeoutHandle) {
-        this.timer.clearTimeout(timeoutHandle);
-      }
-      if (signal && abortListener) {
-        signal.removeEventListener("abort", abortListener);
-      }
-    }
+    return await raceWithDeadline(shared, {
+      timer: this.timer,
+      timeoutMs,
+      signal,
+      label: "iOS simulator listing",
+      timeoutError: () =>
+        new Error(`Timed out waiting for iOS simulator listing after ${timeoutMs}ms`),
+    });
   }
 
   /** Map a raw `simctl list devices --json` payload into sorted {@link DeviceInfo} records. */
@@ -2079,38 +1986,13 @@ export class SimCtlClient implements SimCtl {
     remainingMs: number | undefined,
     signal: AbortSignal | undefined,
   ): Promise<T> {
-    let timeoutHandle: NodeJS.Timeout | undefined;
-    let abortListener: (() => void) | undefined;
-    const contenders: Array<Promise<T>> = [operation];
-    if (remainingMs !== undefined) {
-      contenders.push(
-        new Promise<never>((_resolve, reject) => {
-          timeoutHandle = this.timer.setTimeout(
-            () => reject(new Error(`Timed out reading iOS simulator device type profile`)),
-            remainingMs,
-          );
-        }),
-      );
-    }
-    if (signal) {
-      contenders.push(
-        new Promise<never>((_resolve, reject) => {
-          abortListener = () =>
-            reject(signal.reason ?? new Error("iOS simulator profile lookup aborted"));
-          signal.addEventListener("abort", abortListener, { once: true });
-        }),
-      );
-    }
-    try {
-      return await Promise.race(contenders);
-    } finally {
-      if (timeoutHandle) {
-        this.timer.clearTimeout(timeoutHandle);
-      }
-      if (signal && abortListener) {
-        signal.removeEventListener("abort", abortListener);
-      }
-    }
+    return await raceWithDeadline(operation, {
+      timer: this.timer,
+      timeoutMs: remainingMs,
+      signal,
+      label: "iOS simulator device type profile",
+      timeoutError: () => new Error("Timed out reading iOS simulator device type profile"),
+    });
   }
 
   /** Write a successful physical listing unless invalidation or a newer success superseded it. */

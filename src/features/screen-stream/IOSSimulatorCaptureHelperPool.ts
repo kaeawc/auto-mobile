@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events";
 import { logger } from "../../utils/logger";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import {
   IOSScreenCaptureHelper,
   type CapturePermission,
@@ -402,21 +403,23 @@ export class IOSSimulatorCaptureHelperPool {
         logger.debug(`[IOSSimulatorCaptureHelperPool] helper stop failed after timeout: ${error}`);
       }
     });
-    let timeout: NodeJS.Timeout | undefined;
-    const timedOut = new Promise<void>((resolve) => {
-      timeout = this.timer.setTimeout(() => {
-        didTimeOut = true;
-        logger.warn(
-          `[IOSSimulatorCaptureHelperPool] helper stop exceeded ${IOS_SIMULATOR_HELPER_STOP_TIMEOUT_MS}ms`,
-        );
-        resolve();
-      }, IOS_SIMULATOR_HELPER_STOP_TIMEOUT_MS);
-    });
+    const timeout = new Error("Helper stop deadline expired");
     try {
-      await Promise.race([stop, timedOut]);
-    } finally {
-      if (timeout) {
-        this.timer.clearTimeout(timeout);
+      await raceWithDeadline(stop, {
+        timer: this.timer,
+        timeoutMs: IOS_SIMULATOR_HELPER_STOP_TIMEOUT_MS,
+        label: "Helper stop",
+        timeoutError: () => timeout,
+        onTimeout: () => {
+          didTimeOut = true;
+          logger.warn(
+            `[IOSSimulatorCaptureHelperPool] helper stop exceeded ${IOS_SIMULATOR_HELPER_STOP_TIMEOUT_MS}ms`,
+          );
+        },
+      });
+    } catch (error) {
+      if (error !== timeout) {
+        throw error;
       }
     }
   }

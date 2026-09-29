@@ -1050,30 +1050,16 @@ export class LaunchApp extends BaseVisualChange {
     if (!signal) {
       return await preflight;
     }
-    let abortListener: (() => void) | undefined;
     try {
       signal.throwIfAborted();
-      const aborted = new Promise<never>((_resolve, reject) => {
-        abortListener = () => {
-          try {
-            signal.throwIfAborted();
-          } catch (error) {
-            reject(error);
-          }
-        };
-        signal.addEventListener("abort", abortListener, { once: true });
-        if (signal.aborted) {
-          abortListener();
-        }
+      return await raceWithDeadline(preflight, {
+        timer: this.timer,
+        signal,
+        label: "Android preflight",
       });
-      return await Promise.race([preflight, aborted]);
     } catch (error) {
       await this.awaitAndroidPreflightSettlement(preflight);
       throw error;
-    } finally {
-      if (abortListener) {
-        signal.removeEventListener("abort", abortListener);
-      }
     }
   }
 
@@ -1085,17 +1071,9 @@ export class LaunchApp extends BaseVisualChange {
     if (!signal) {
       return await retarget;
     }
-    let abortListener: (() => void) | undefined;
     try {
       signal.throwIfAborted();
-      const aborted = new Promise<never>((_resolve, reject) => {
-        abortListener = () => reject(signal.reason);
-        signal.addEventListener("abort", abortListener, { once: true });
-        if (signal.aborted) {
-          abortListener();
-        }
-      });
-      return await Promise.race([retarget, aborted]);
+      return await raceWithDeadline(retarget, { timer: this.timer, signal, label: "iOS retarget" });
     } catch (error) {
       if (!signal.aborted) {
         throw error;
@@ -1109,10 +1087,6 @@ export class LaunchApp extends BaseVisualChange {
         await retarget.catch(() => undefined);
       }
       throw error;
-    } finally {
-      if (abortListener) {
-        signal.removeEventListener("abort", abortListener);
-      }
     }
   }
 
@@ -1121,9 +1095,9 @@ export class LaunchApp extends BaseVisualChange {
     gracePeriodMs: number,
   ): Promise<boolean> {
     let settled = false;
-    let timeoutHandle: NodeJS.Timeout | undefined;
+    const timeout = new Error("Promise settlement grace expired");
     try {
-      await Promise.race([
+      await raceWithDeadline(
         promise.then(
           () => {
             settled = true;
@@ -1132,36 +1106,39 @@ export class LaunchApp extends BaseVisualChange {
             settled = true;
           },
         ),
-        new Promise<void>((resolve) => {
-          timeoutHandle = this.timer.setTimeout(resolve, gracePeriodMs);
-        }),
-      ]);
-      return settled;
-    } finally {
-      if (timeoutHandle) {
-        this.timer.clearTimeout(timeoutHandle);
+        {
+          timer: this.timer,
+          timeoutMs: gracePeriodMs,
+          label: "Promise settlement",
+          timeoutError: () => timeout,
+        },
+      );
+    } catch (error) {
+      if (error !== timeout) {
+        throw error;
       }
     }
+    return settled;
   }
 
   private async awaitAndroidPreflightSettlement(preflight: Promise<unknown>): Promise<void> {
-    let timeoutHandle: NodeJS.Timeout | undefined;
+    const timeout = new Error("Android preflight settlement grace expired");
     try {
-      await Promise.race([
+      await raceWithDeadline(
         preflight.then(
           () => undefined,
           () => undefined,
         ),
-        new Promise<void>((resolve) => {
-          timeoutHandle = this.timer.setTimeout(
-            resolve,
-            ANDROID_PREFLIGHT_ABORT_SETTLEMENT_GRACE_MS,
-          );
-        }),
-      ]);
-    } finally {
-      if (timeoutHandle) {
-        this.timer.clearTimeout(timeoutHandle);
+        {
+          timer: this.timer,
+          timeoutMs: ANDROID_PREFLIGHT_ABORT_SETTLEMENT_GRACE_MS,
+          label: "Android preflight settlement",
+          timeoutError: () => timeout,
+        },
+      );
+    } catch (error) {
+      if (error !== timeout) {
+        throw error;
       }
     }
   }

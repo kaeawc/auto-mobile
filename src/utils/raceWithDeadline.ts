@@ -8,6 +8,8 @@ interface RaceWithDeadlineOptions {
   label: string;
   /** Opt into phase-labelled cancellation when downstream code does not classify raw abort reasons. */
   relabelDefaultAbort?: boolean;
+  timeoutError?: () => unknown;
+  onTimeout?: () => void;
 }
 
 function abortReason(signal: AbortSignal, label: string, relabelDefaultAbort: boolean): unknown {
@@ -33,7 +35,15 @@ function abortReason(signal: AbortSignal, label: string, relabelDefaultAbort: bo
  */
 export async function raceWithDeadline<T>(
   operation: Promise<T>,
-  { timer, timeoutMs, signal, label, relabelDefaultAbort = false }: RaceWithDeadlineOptions,
+  {
+    timer,
+    timeoutMs,
+    signal,
+    label,
+    relabelDefaultAbort = false,
+    timeoutError,
+    onTimeout,
+  }: RaceWithDeadlineOptions,
 ): Promise<T> {
   // A losing operation may still reject after the race has settled.
   void operation.then(undefined, () => {});
@@ -57,10 +67,12 @@ export async function raceWithDeadline<T>(
     timeoutMs === undefined
       ? undefined
       : new Promise<never>((_resolve, reject) => {
-          timeoutHandle = timer.setTimeout(
-            () => reject(new ActionableError(`${label} timed out after ${timeoutMs}ms`)),
-            timeoutMs,
-          );
+          timeoutHandle = timer.setTimeout(() => {
+            reject(
+              timeoutError?.() ?? new ActionableError(`${label} timed out after ${timeoutMs}ms`),
+            );
+            onTimeout?.();
+          }, timeoutMs);
         });
 
   try {

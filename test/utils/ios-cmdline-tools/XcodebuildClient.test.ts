@@ -333,7 +333,7 @@ describe("XcodebuildClient streaming runner", () => {
       settled = true;
     });
 
-    for (let turn = 0; turn < 5 && groupKills.length === 0; turn++) {
+    for (let turn = 0; turn < 20 && groupKills.length === 0; turn++) {
       timer.advanceTime(0);
       await Promise.resolve();
     }
@@ -377,12 +377,12 @@ describe("XcodebuildClient streaming runner", () => {
       startupSignal: startup.signal,
     });
 
-    for (let turn = 0; turn < 5 && groupKills.length === 0; turn++) {
+    for (let turn = 0; turn < 20 && groupKills.length === 0; turn++) {
       timer.advanceTime(0);
       await Promise.resolve();
     }
     timer.advanceTime(5000);
-    for (let turn = 0; turn < 5 && directKillSignals.length === 0; turn++) {
+    for (let turn = 0; turn < 20 && directKillSignals.length === 0; turn++) {
       await Promise.resolve();
     }
     timer.advanceTime(5000);

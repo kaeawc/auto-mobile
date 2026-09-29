@@ -72,7 +72,7 @@ function encodedOptions(windowID = 42): IosScreenCaptureHelperOptions {
   };
 }
 
-async function flushMicrotasks(count = 5): Promise<void> {
+async function flushMicrotasks(count = 10): Promise<void> {
   for (let index = 0; index < count; index++) {
     await Promise.resolve();
   }

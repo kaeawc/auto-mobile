@@ -3,6 +3,7 @@ import { ActionableError, type ExecResult } from "../../models";
 import { runExecSeam } from "../ExecSeam";
 import { execFileAsync as sharedExecFileAsync } from "../HostCommandExecutor";
 import { defaultTimer, type Timer } from "../SystemTimer";
+import { raceWithDeadline } from "../raceWithDeadline";
 import { PlistClient } from "./PlistClient";
 
 export type PlistDictionary = Readonly<Record<string, unknown>>;
@@ -98,27 +99,14 @@ export class AppBundleMetadataClient implements AppBundleMetadata {
       ["-d", "--entitlements", ":-", request.appBundlePath],
       controller.signal,
     );
-    command.catch(() => {
-      /* consumed by the awaited command below */
+    return await raceWithDeadline(command, {
+      timer: this.timer,
+      timeoutMs,
+      label: "App-bundle entitlement inspection",
+      timeoutError: () =>
+        new ActionableError(`App-bundle entitlement inspection timed out after ${timeoutMs}ms.`),
+      onTimeout: () => controller.abort(),
     });
-    let timeout: NodeJS.Timeout | undefined;
-    try {
-      const timed = new Promise<never>((_, reject) => {
-        timeout = this.timer.setTimeout(() => {
-          controller.abort();
-          reject(
-            new ActionableError(
-              `App-bundle entitlement inspection timed out after ${timeoutMs}ms.`,
-            ),
-          );
-        }, timeoutMs);
-      });
-      return await Promise.race([command, timed]);
-    } finally {
-      if (timeout) {
-        this.timer.clearTimeout(timeout);
-      }
-    }
   }
 
   private async parseEntitlements(output: ExecResult): Promise<PlistDictionary> {

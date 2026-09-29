@@ -11,8 +11,6 @@ const ALLOWED_IMPORTERS = new Set([
   "src/daemon/devicePool.ts",
   "src/daemon/manager.ts",
   "src/daemon/processTable.ts",
-  "src/features/debug/SimulatorHighlights.ts",
-  "src/features/screen-stream/IOSScreenCaptureHelper.ts",
   "src/features/webrtc/processSpawner.ts",
   "src/server/deviceToolsProvisioning.ts",
   "src/server/deviceToolsStartDevice.ts",
@@ -25,12 +23,6 @@ const ALLOWED_IMPORTERS = new Set([
   "src/utils/android-cmdline-tools/SdkManagerClient.ts",
   "src/utils/deviceBootService.ts",
   "src/utils/deviceUtils.ts",
-  "src/utils/image/webp/WebpBinaryResolver.ts",
-  "src/utils/ios-cmdline-tools/CtrlProxyCodesignVerifier.ts",
-  "src/utils/ios-cmdline-tools/PlistClient.ts",
-  "src/utils/ios-cmdline-tools/SimCtlClient.ts",
-  "src/utils/ios-cmdline-tools/XcodebuildClient.ts",
-  "src/utils/media/FfmpegClient.ts",
 ]);
 
 interface Violation {

@@ -1,5 +1,4 @@
 import { errorMessage } from "../../describeUnknownError";
-import type { ChildProcess } from "node:child_process";
 import { constants as fsConstants, existsSync } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
@@ -358,7 +357,7 @@ async function isExecutableFile(filePath: string, platform: NodeJS.Platform): Pr
 }
 
 async function waitForCompletion(
-  child: ChildProcess,
+  child: ReturnType<HostProcessExecutor["spawn"]>,
   stdin: Writable,
   toolName: WebpBinary,
   envVar: string,

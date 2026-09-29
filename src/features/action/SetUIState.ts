@@ -560,9 +560,15 @@ export class SetUIState extends BaseVisualChange {
           logger.warn(
             `[SetUIState] Field failed, stopping: ${this.describeSelector(fieldSpec.selector)}`,
           );
+          const notAttemptedReason = `Not attempted: setUIState stopped after field ${this.describeSelector(fieldSpec.selector)} failed`;
           return {
             success: false,
-            fields: this.collectResults(fieldResults, options.fields, processed),
+            fields: this.collectResults(
+              fieldResults,
+              options.fields,
+              processed,
+              notAttemptedReason,
+            ),
             totalAttempts,
             observation: lastObservation,
             error:

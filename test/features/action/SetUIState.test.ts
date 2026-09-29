@@ -407,6 +407,72 @@ describe("SetUIState", () => {
   });
 
   describe("fail fast", () => {
+    test("marks fields after a failed input as not attempted", async () => {
+      const hierarchy: ViewHierarchyResult = {
+        hierarchy: {
+          node: [
+            {
+              $: {},
+              node: [1, 2, 3, 4].map((index) => ({
+                $: {
+                  "resource-id": `field${index}`,
+                  text: "",
+                  class: "android.widget.EditText",
+                  bounds: { left: 0, top: index * 60, right: 100, bottom: index * 60 + 50 },
+                },
+              })),
+            },
+          ],
+        },
+      };
+      const verifiedFirstField: ViewHierarchyResult = {
+        hierarchy: {
+          node: [
+            {
+              $: {},
+              node: [1, 2, 3, 4].map((index) => ({
+                $: {
+                  "resource-id": `field${index}`,
+                  text: index === 1 ? "first" : "",
+                  class: "android.widget.EditText",
+                  bounds: { left: 0, top: index * 60, right: 100, bottom: index * 60 + 50 },
+                },
+              })),
+            },
+          ],
+        },
+      };
+      let observeCalls = 0;
+      fakeObserve.setResultFactory(() => {
+        observeCalls++;
+        return createObserveResult(observeCalls === 1 ? hierarchy : verifiedFirstField);
+      });
+      for (let index = 1; index <= 4; index++) {
+        fakeFieldTypeDetector.setFieldType(`field${index}`, "text");
+      }
+      fakeInput.setResultForText("second", { success: false, text: "", error: "Input rejected" });
+
+      const result = await createSetUIState().execute({
+        fields: [
+          { selector: { elementId: "field1" }, value: "first" },
+          { selector: { elementId: "field2" }, value: "second" },
+          { selector: { elementId: "field3" }, value: "third" },
+          { selector: { elementId: "field4" }, value: "fourth" },
+        ],
+      });
+
+      expect(result.fields[0].success).toBe(true);
+      expect(result.fields[0].notAttempted).toBeFalsy();
+      expect(result.fields[1].success).toBe(false);
+      expect(result.fields[1].notAttempted).toBeFalsy();
+      expect(result.fields[1].error).toContain("Input rejected");
+      for (const field of result.fields.slice(2)) {
+        expect(field.notAttempted).toBe(true);
+        expect(field.error).toContain("setUIState stopped after field");
+        expect(field.error).not.toContain("Element not found");
+      }
+    });
+
     test("stops processing fields on first failure", async () => {
       const hierarchy = createHierarchyWithElement({
         "resource-id": "field1",

@@ -24,6 +24,15 @@ teardown() {
   [[ "$output" == *"no new upward imports"* ]]
 }
 
+@test "allows the current utils import baseline with CRLF line endings" {
+  awk '{ printf "%s\r\n", $0 }' "$SAVED_BASELINE" > "$BASELINE"
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"no new upward imports"* ]]
+}
+
 @test "rejects a new upward import edge" {
   printf '%s\n' 'import type { NewThing } from "../daemon/somethingNew";' > "$FIXTURE"
 

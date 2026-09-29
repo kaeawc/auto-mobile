@@ -14,7 +14,7 @@ interface Violation {
 // `sourceFiles` and `relative` yield OS separators (backslashes on Windows), but
 // the committed baseline uses forward slashes; normalize both edge paths to match.
 export function toPosixPath(path: string): string {
-  return path.replace(/\\/g, "/");
+  return path.replace(/\\/g, "/").replace(/\r/g, "");
 }
 
 function sourceFiles(directory: string): string[] {
@@ -90,7 +90,7 @@ if (import.meta.main) {
       .flatMap(findViolations)
       .map(({ file, target }) => `${toPosixPath(file)} -> ${toPosixPath(target)}`),
   );
-  const baseline = new Set(readFileSync(BASELINE, "utf8").split("\n").filter(Boolean));
+  const baseline = new Set(readFileSync(BASELINE, "utf8").split(/\r?\n/).filter(Boolean));
   const newEdges = [...edges].filter((edge) => !baseline.has(edge)).sort();
 
   if (

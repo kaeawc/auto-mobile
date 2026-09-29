@@ -14,6 +14,7 @@ import { BootedDevice, DeviceInfo, ExecResult, ActionableError } from "../../mod
 import { AdbClientFactory, unadmittedAdbClientFactory } from "./AdbClientFactory";
 import { arch } from "os";
 import { detectAndroidCommandLineTools, getBestAndroidToolsLocation } from "./detection";
+import { resolveAndroidSdkRoot } from "./androidSdkRoot";
 import { defaultTimer, Timer } from "../SystemTimer";
 import { combineAbortSignals } from "../AbortContext";
 import { runDetachedFromPerf, trackAmbient } from "../PerfContext";
@@ -753,8 +754,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
    * @returns The path to the emulator
    */
   private getFallbackEmulatorPath(): string {
-    const androidHome =
-      process.env.ANDROID_HOME || process.env.ANDROID_SDK_ROOT || process.env.ANDROID_SDK_HOME;
+    const androidHome = resolveAndroidSdkRoot(process.env);
     if (androidHome) {
       return `${androidHome}/emulator/emulator`;
     }
@@ -773,8 +773,12 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     const potentialPaths: string[] = [];
 
     // 1. Check environment variables first (highest priority)
-    const androidHome =
-      process.env.ANDROID_HOME || process.env.ANDROID_SDK_ROOT || process.env.ANDROID_SDK_HOME;
+    const androidHome = resolveAndroidSdkRoot(
+      process.env,
+      (candidate) =>
+        existsSync(path.join(candidate, "emulator", "emulator")) ||
+        existsSync(path.join(candidate, "emulator", "emulator-arm64-v8a")),
+    );
     if (androidHome) {
       potentialPaths.push(`${androidHome}/emulator/emulator`);
       potentialPaths.push(`${androidHome}/emulator/emulator-arm64-v8a`);

@@ -438,12 +438,98 @@ describe("waitForObservation DSL branch", () => {
 // Back-compat: the legacy element-appear waitFor form is untouched (AC4)
 // ---------------------------------------------------------------------------
 describe("waitFor back-compat", () => {
+  test("legacy waitFor retains a first-poll match when settling exceeds the deadline", async () => {
+    const timer = new FakeTimer();
+    const observeScreen = new FakeObserveScreen();
+    observeScreen.setObserveResult(() => {
+      timer.advanceTime(300);
+      return makeObservation([node({ text: "Sign in or register" })], 10);
+    });
+
+    const outcome = await waitForObservation(
+      observeScreen,
+      { text: "Sign in or register", settled: { quietPeriodMs: 200 }, timeoutMs: 300 },
+      undefined,
+      false,
+      timer,
+    );
+
+    expect(outcome.polls).toBe(1);
+    expect(outcome.matched).toBe(true);
+    expect(outcome.settled).toBe(false);
+    expect(outcome.timedOut).toBe(true);
+    expect(outcome.awaitedElement?.text).toBe("Sign in or register");
+    expect(outcome.matchedElement?.text).toBe("Sign in or register");
+  });
+
+  test("legacy waitFor retains the last match when the hierarchy never settles", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const observeScreen = new FakeObserveScreen();
+    observeScreen.setObserveResult((index) =>
+      makeObservation(
+        [node({ text: "Sign in or register" }), node({ text: String(index) })],
+        10 + index,
+      ),
+    );
+
+    const outcome = await waitForObservation(
+      observeScreen,
+      { text: "Sign in or register", settled: { quietPeriodMs: 200 }, timeoutMs: 300 },
+      undefined,
+      false,
+      timer,
+    );
+
+    expect(outcome.polls).toBe(4);
+    expect(outcome.matched).toBe(true);
+    expect(outcome.settled).toBe(false);
+    expect(outcome.timedOut).toBe(true);
+    expect(outcome.awaitedElement?.text).toBe("Sign in or register");
+    expect(outcome.matchedElement?.text).toBe("Sign in or register");
+  });
+
+  test("legacy waitFor clears element evidence when the last predicate fails", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const observeScreen = new FakeObserveScreen();
+    observeScreen.setObserveResult((index) => ({
+      ...makeObservation([node({ "resource-id": "submit", text: String(index) })], 10 + index),
+      activeWindow: {
+        appId: index < 3 ? "com.example" : "com.other",
+        activityName: ".Main",
+        layoutSeqSum: 0,
+      },
+    }));
+
+    const outcome = await waitForObservation(
+      observeScreen,
+      {
+        elementId: "submit",
+        activeWindow: { appId: "com.example" },
+        settled: { quietPeriodMs: 200 },
+        timeoutMs: 300,
+      },
+      undefined,
+      false,
+      timer,
+    );
+
+    expect(outcome.polls).toBe(4);
+    expect(outcome.matched).toBe(false);
+    expect(outcome.settled).toBe(false);
+    expect(outcome.timedOut).toBe(true);
+    expect(outcome.awaitedElement).toBeUndefined();
+    expect(outcome.matchedElement).toBeUndefined();
+  });
+
   test("legacy waitFor reports settled when its quiet gate succeeds", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const observeScreen = new FakeObserveScreen();
-    const observation = makeObservation([node({ "resource-id": "submit" })], 10);
-    observeScreen.setObserveResult(observation);
+    observeScreen.setObserveResult((index) =>
+      makeObservation([node({ "resource-id": "submit" })], 10 + index),
+    );
 
     const outcome = await waitForObservation(
       observeScreen,

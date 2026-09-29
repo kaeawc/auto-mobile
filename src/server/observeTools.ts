@@ -13,6 +13,7 @@ import type {
 } from "../features/observe/interfaces/ObserveScreen";
 import { RealSettleObserve } from "../features/observe/SettleObserve";
 import { RealWaitForCondition } from "../features/observe/WaitForCondition";
+import { hierarchyUpdatedAtToMillis } from "../features/observe/observeTimestamp";
 import type { ConditionPredicate } from "../features/observe/interfaces/WaitForCondition";
 import {
   appear,
@@ -1194,13 +1195,13 @@ export const waitForObservation = async (
   // in, `complete` captures exactly one screenshot from the terminal state.
   const skipPollingOverhead = !serverConfig.isWaitForPollingOverheadEnabled();
 
-  const observeOnce = () =>
+  const observeOnce = (minTimestamp: number) =>
     observeScreen.execute({
       queryOptions,
       timeoutMs: Math.max(0, timeoutMs - (timer.now() - startTime)),
       perf: createGlobalPerformanceTracker(),
       skipWaitForFresh: false,
-      minTimestamp: startTime,
+      minTimestamp,
       signal,
       skipBackStack: skipPollingOverhead || skipBackStack,
       skipScreenshot: true,
@@ -1228,7 +1229,12 @@ export const waitForObservation = async (
   };
 
   throwIfAborted(signal);
-  let observation = await observeOnce();
+  // Evaluate the current cache on the first poll, then use its device-clock
+  // timestamp to request a strictly newer hierarchy on later polls.
+  let observation = await observeOnce(0);
+  const baselineTimestamp = hierarchyUpdatedAtToMillis(observation.viewHierarchy);
+  const minTimestamp =
+    baselineTimestamp !== undefined && baselineTimestamp > 0 ? baselineTimestamp + 1 : 0;
   let polls = 1;
   const modes = new Map<string, MatchMode>();
   let waitEvaluation = evaluateWaitForObservation(finder, waitFor, observation, platform, modes);
@@ -1256,13 +1262,15 @@ export const waitForObservation = async (
     const waitMs = timer.now() - startTime;
     return complete({
       observation,
+      awaitedElement: waitEvaluation.matched ? waitEvaluation.awaitedElement : undefined,
       awaitDuration: waitMs,
       awaitTimeout: true,
-      matched: false,
+      matched: waitEvaluation.matched,
       settled: settled ? false : undefined,
       timedOut: true,
       polls,
       waitMs,
+      matchedElement: waitEvaluation.matched ? waitEvaluation.awaitedElement : undefined,
     });
   }
 
@@ -1270,9 +1278,15 @@ export const waitForObservation = async (
     await timer.sleep(WAIT_FOR_POLL_INTERVAL_MS);
     throwIfAborted(signal);
 
-    observation = await observeOnce();
+    observation = await observeOnce(minTimestamp);
     polls++;
-    waitEvaluation = evaluateWaitForObservation(finder, waitFor, observation, platform, modes);
+    const observedTimestamp = hierarchyUpdatedAtToMillis(observation.viewHierarchy);
+    // A timed-out delegate may return its old cache despite the requested
+    // floor. It must not satisfy waitFor as post-invocation evidence.
+    waitEvaluation =
+      minTimestamp > 0 && (observedTimestamp === undefined || observedTimestamp < minTimestamp)
+        ? { matched: false, awaitedElement: undefined }
+        : evaluateWaitForObservation(finder, waitFor, observation, platform, modes);
 
     if (waitEvaluation.matched) {
       if (settleReady(observation)) {
@@ -1298,13 +1312,15 @@ export const waitForObservation = async (
   const waitMs = timer.now() - startTime;
   return complete({
     observation,
+    awaitedElement: waitEvaluation.matched ? waitEvaluation.awaitedElement : undefined,
     awaitDuration: waitMs,
     awaitTimeout: true,
-    matched: false,
+    matched: waitEvaluation.matched,
     settled: settled ? false : undefined,
     timedOut: true,
     polls,
     waitMs,
+    matchedElement: waitEvaluation.matched ? waitEvaluation.awaitedElement : undefined,
   });
 };
 

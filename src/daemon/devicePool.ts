@@ -2838,12 +2838,14 @@ export class DevicePool {
     deferRecovery: boolean = false,
     assignmentLockHeld: boolean = false,
     idleEviction: boolean = false,
+    discovery?: BootedDeviceDiscovery,
   ): Promise<boolean> {
     const present = await this.ensurePooledDevicePresent(
       device,
       deferRecovery,
       assignmentLockHeld,
       idleEviction,
+      discovery,
     );
     return present && this.isPooledDeviceIdentityAssignable(device);
   }
@@ -2853,15 +2855,13 @@ export class DevicePool {
     deferRecovery: boolean,
     assignmentLockHeld: boolean,
     idleEviction: boolean,
+    snapshot?: BootedDeviceDiscovery,
   ): Promise<boolean> {
     if (!this.shouldValidatePooledDevicePresence(device)) {
       return true;
     }
 
-    resetAdbDeviceListCache();
-    resetBootedDevicesResourceCache();
-    resetAndroidDeviceImageResourceCache();
-    const discovery = await this.deviceManager.getBootedDevicesDetailed(device.platform);
+    const discovery = snapshot ?? (await this.takeFreshPresenceDiscovery(device.platform));
     if (!discovery.succeededPlatforms.has(device.platform)) {
       logger.warn(
         `Retaining ${device.id}: ${device.platform} discovery did not succeed during assignment liveness check`,
@@ -2916,6 +2916,18 @@ export class DevicePool {
     }
     await this.evictMissingPooledDevice(device, "not present in adb devices", true);
     return false;
+  }
+
+  /**
+   * One cache-busted discovery sweep for presence checks. The adb device-list
+   * cache is reset so the answer reflects the transport right now, not a list up
+   * to one TTL old.
+   */
+  private async takeFreshPresenceDiscovery(platform: Platform): Promise<BootedDeviceDiscovery> {
+    resetAdbDeviceListCache();
+    resetBootedDevicesResourceCache();
+    resetAndroidDeviceImageResourceCache();
+    return await this.deviceManager.getBootedDevicesDetailed(platform);
   }
 
   /**
@@ -5553,6 +5565,12 @@ export class DevicePool {
       : undefined;
     let device = this.selectIdleDevice(candidates);
     let livenessUnknown = false;
+    // One fresh Android sweep per selection pass, mirroring the iOS snapshot
+    // above: it already answers presence for every candidate, so a rejected
+    // candidate must not cost another cache-busted `adb devices -l` while
+    // assignmentMutex is held (#6546). Taken lazily, inside the mutex, so it is
+    // never older than the candidate entries it judges.
+    let androidPresence: BootedDeviceDiscovery | undefined;
 
     while (device) {
       const skippedDeviceId = device.id;
@@ -5567,7 +5585,10 @@ export class DevicePool {
         continue;
       }
       if (this.shouldValidatePooledDevicePresence(device)) {
-        if (await this.ensurePooledDevicePresentForUse(device, true, true)) {
+        androidPresence ??= await this.takeFreshPresenceDiscovery("android");
+        if (
+          await this.ensurePooledDevicePresentForUse(device, true, true, false, androidPresence)
+        ) {
           return { device, livenessUnknown };
         }
         candidates = candidates.filter((candidate) => candidate.id !== skippedDeviceId);

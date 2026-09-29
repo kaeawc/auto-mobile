@@ -249,6 +249,7 @@ class PersistentSocketClient {
     method: string,
     params: Record<string, unknown>,
     timeoutMs?: number,
+    clientDeadlineMs = SOCKET_REQUEST_DEADLINE_MS,
   ): Promise<DaemonResponse> {
     const id = randomUUID();
     this.socket.write(
@@ -273,10 +274,10 @@ class PersistentSocketClient {
         this.socket.destroy();
         reject(
           new Error(
-            `No response to ${method} within ${SOCKET_REQUEST_DEADLINE_MS}ms — bounded socket-test deadline hit`,
+            `No response to ${method} within ${clientDeadlineMs}ms — bounded socket-test deadline hit`,
           ),
         );
-      }, SOCKET_REQUEST_DEADLINE_MS);
+      }, clientDeadlineMs);
       this.waiters.set(id, (response) => {
         defaultTimer.clearTimeout(deadline);
         resolve(response);
@@ -828,10 +829,15 @@ describe("UnixSocketServer MCP forward serialization", () => {
     const client = new PersistentSocketClient();
     await client.connect(socketPath);
     try {
-      const first = client.request("tools/call", {
-        name: "tapOn",
-        arguments: { deviceId: "device-1" },
-      });
+      // This response is deliberately held until the other request completes.
+      // Its watchdog must cover both phases; the other request keeps its own
+      // 10-second bound so a stalled concurrent forward still fails promptly.
+      const first = client.request(
+        "tools/call",
+        { name: "tapOn", arguments: { deviceId: "device-1" } },
+        undefined,
+        2 * SOCKET_REQUEST_DEADLINE_MS,
+      );
       await firstCallStarted.promise;
       const other = client.request(
         "tools/call",

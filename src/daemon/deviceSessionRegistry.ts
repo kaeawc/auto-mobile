@@ -88,9 +88,9 @@ export class DeviceSessionRegistry {
     try {
       this.lifecycleListener?.onSessionStarted(record);
     } catch (error) {
-      // A lifecycle observer must never break identity bookkeeping — swallow and
-      // keep the registry authoritative; trace at debug for diagnosis.
-      logger.debug(`[DeviceSessionRegistry] onSessionStarted listener threw: ${error}`);
+      // A lifecycle observer must never break identity bookkeeping; warn so
+      // persistent delivery failures remain visible at the default log level.
+      logger.warn(`[DeviceSessionRegistry] onSessionStarted listener threw: ${error}`);
     }
   }
 
@@ -98,8 +98,8 @@ export class DeviceSessionRegistry {
     try {
       this.lifecycleListener?.onSessionEnded(record);
     } catch (error) {
-      // See emitStarted: swallow observer faults, keep the registry authoritative.
-      logger.debug(`[DeviceSessionRegistry] onSessionEnded listener threw: ${error}`);
+      // See emitStarted: preserve registry bookkeeping and surface delivery faults.
+      logger.warn(`[DeviceSessionRegistry] onSessionEnded listener threw: ${error}`);
     }
   }
 

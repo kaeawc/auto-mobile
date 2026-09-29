@@ -712,11 +712,11 @@ describe("UnixSocketServer MCP forward serialization", () => {
         const contexts = Array.from(
           (
             server as unknown as {
-              sessions: Map<string, { requestQueue: unknown[] }>;
+              sessions: Map<string, { requestQueue: { pendingCount: number } }>;
             }
           ).sessions.values(),
         );
-        if (contexts.some((context) => context.requestQueue.length > 0)) {
+        if (contexts.some((context) => context.requestQueue.pendingCount > 0)) {
           break;
         }
         await new Promise<void>((resolve) => setImmediate(resolve));
@@ -724,10 +724,10 @@ describe("UnixSocketServer MCP forward serialization", () => {
       const queuedRequestCount = Array.from(
         (
           server as unknown as {
-            sessions: Map<string, { requestQueue: unknown[] }>;
+            sessions: Map<string, { requestQueue: { pendingCount: number } }>;
           }
         ).sessions.values(),
-      ).reduce((count, context) => count + context.requestQueue.length, 0);
+      ).reduce((count, context) => count + context.requestQueue.pendingCount, 0);
       expect(queuedRequestCount).toBe(1);
 
       fakeTimer.advanceTime(501);
@@ -743,6 +743,108 @@ describe("UnixSocketServer MCP forward serialization", () => {
         error: expect.stringContaining("MCP timeout"),
       });
       expect(callCount).toBe(1);
+    } finally {
+      client.close();
+    }
+  });
+
+  async function restartWithFakeTimer(prefix: string): Promise<void> {
+    await server.close();
+    socketPath = join(tmpdir(), `${prefix}-${randomUUID()}.sock`);
+    fakeTimer = new FakeTimer();
+    server = new UnixSocketServer(
+      socketPath,
+      "http://localhost:0/mcp",
+      createFakeDaemonState(sessionDevices, sessionDeviceLabels, mcpAutolockSessions),
+      fakeTimer,
+    );
+    await server.start();
+  }
+
+  test("runs calls for different devices on one socket concurrently (#6387)", async () => {
+    await restartWithFakeTimer("mcp-per-device-admission");
+    const started = new Map<string, PromiseWithResolvers<void>>([
+      ["device-1", Promise.withResolvers<void>()],
+      ["device-2", Promise.withResolvers<void>()],
+    ]);
+    const release = Promise.withResolvers<void>();
+    server.mcpClientFactory = async () => ({
+      listTools: async () => ({ tools: [] }),
+      callTool: async (params: { arguments?: { deviceId?: string } }) => {
+        started.get(params.arguments?.deviceId ?? "")?.resolve();
+        await release.promise;
+        return { content: [] };
+      },
+      listResources: async () => ({ resources: [] }),
+      readResource: async () => ({ contents: [] }),
+      listResourceTemplates: async () => ({ resourceTemplates: [] }),
+      close: async () => {},
+    });
+
+    const client = new PersistentSocketClient();
+    await client.connect(socketPath);
+    try {
+      const first = client.request("tools/call", {
+        name: "tapOn",
+        arguments: { deviceId: "device-1" },
+      });
+      const second = client.request("tools/call", {
+        name: "tapOn",
+        arguments: { deviceId: "device-2" },
+      });
+      // Both enter callTool before either resolves: the device-2 call is not
+      // held behind the in-flight device-1 call on the shared socket.
+      await Promise.all([started.get("device-1")!.promise, started.get("device-2")!.promise]);
+      release.resolve();
+      await expect(first).resolves.toMatchObject({ success: true });
+      await expect(second).resolves.toMatchObject({ success: true });
+    } finally {
+      client.close();
+    }
+  });
+
+  test("does not charge another device's in-flight call against a queued call's timeout (#6387)", async () => {
+    await restartWithFakeTimer("mcp-per-device-deadline");
+    const firstCallStarted = Promise.withResolvers<void>();
+    const releaseFirstCall = Promise.withResolvers<void>();
+    const calledDevices: string[] = [];
+    server.mcpClientFactory = async () => ({
+      listTools: async () => ({ tools: [] }),
+      callTool: async (params: { arguments?: { deviceId?: string } }) => {
+        const deviceId = params.arguments?.deviceId ?? "";
+        calledDevices.push(deviceId);
+        if (deviceId === "device-1") {
+          firstCallStarted.resolve();
+          await releaseFirstCall.promise;
+        }
+        return { content: [] };
+      },
+      listResources: async () => ({ resources: [] }),
+      readResource: async () => ({ contents: [] }),
+      listResourceTemplates: async () => ({ resourceTemplates: [] }),
+      close: async () => {},
+    });
+
+    const client = new PersistentSocketClient();
+    await client.connect(socketPath);
+    try {
+      const first = client.request("tools/call", {
+        name: "tapOn",
+        arguments: { deviceId: "device-1" },
+      });
+      await firstCallStarted.promise;
+      const other = client.request(
+        "tools/call",
+        { name: "tapOn", arguments: { deviceId: "device-2" } },
+        500,
+      );
+      // The device-2 call starts on receipt, so its budget is measured from its
+      // own start, not from how long device-1 keeps the socket busy.
+      await expect(other).resolves.toMatchObject({ success: true });
+      fakeTimer.advanceTime(501);
+      releaseFirstCall.resolve();
+      await expect(first).resolves.toMatchObject({ success: true });
+      expect(calledDevices).toEqual(["device-1", "device-2"]);
     } finally {
       client.close();
     }

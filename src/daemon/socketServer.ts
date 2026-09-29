@@ -45,6 +45,7 @@ import {
   INTERNAL_LIVE_DEADLINE_KEY_PARAM,
   DAEMON_SHUTTING_DOWN_ERROR_MESSAGE,
 } from "./constants";
+import { resolveSocketAdmissionLane, SocketRequestAdmissionQueue } from "./socketRequestAdmission";
 import { daemonShuttingDownFailure, isDaemonShuttingDownToolResult } from "./daemonShutdownOutcome";
 import { registerLiveDeadline, unregisterLiveDeadline } from "./liveDeadlineRegistry";
 import {
@@ -923,8 +924,7 @@ export class UnixSocketServer {
     const session: SessionContext = {
       sessionId,
       createdAt: this.timer.now(),
-      requestQueue: [],
-      processing: false,
+      requestQueue: new SocketRequestAdmissionQueue(),
     };
 
     this.sessions.set(sessionId, session);
@@ -1268,8 +1268,9 @@ export class UnixSocketServer {
     const deadline = new ProgressExtendableDeadline(receivedAtMs, totalTimeoutMs);
     let activeRequestSignal: AbortSignal | undefined;
 
-    // Enqueue request to maintain order
-    return this.enqueueRequest(session, async () => {
+    // Admit through the socket's queue: same-lane requests keep arrival order, while an
+    // explicit-device call does not wait behind another device's call (issue #6387).
+    return session.requestQueue.run(resolveSocketAdmissionLane(request), async () => {
       try {
         if (request.method.startsWith("daemon/")) {
           const daemonResponse = await handleDaemonRequest(request, this.daemonState);
@@ -5971,49 +5972,6 @@ export class UnixSocketServer {
     const created = this.appendTextFactory(device);
     this.appendTextInputs.set(device.deviceId, { input: created, incarnationToken });
     return { input: created, fromCache: false };
-  }
-
-  /**
-   * Enqueue a request in the session to maintain sequential order
-   */
-  private async enqueueRequest<T>(session: SessionContext, handler: () => Promise<T>): Promise<T> {
-    return new Promise((resolve, reject) => {
-      session.requestQueue.push(async () => {
-        try {
-          const result = await handler();
-          resolve(result);
-        } catch (error) {
-          reject(error);
-        }
-      });
-
-      // Process queue if not already processing
-      if (!session.processing) {
-        this.processQueue(session);
-      }
-    });
-  }
-
-  /**
-   * Process queued requests sequentially
-   */
-  private async processQueue(session: SessionContext): Promise<void> {
-    if (session.processing || session.requestQueue.length === 0) {
-      return;
-    }
-
-    session.processing = true;
-
-    while (session.requestQueue.length > 0) {
-      const handler = session.requestQueue.shift()!;
-      try {
-        await handler();
-      } catch (error) {
-        logger.error(`Error processing queued request:`, error);
-      }
-    }
-
-    session.processing = false;
   }
 
   /**

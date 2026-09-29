@@ -97,8 +97,8 @@ export interface SystemTrayIosClient {
     x2: number,
     y2: number,
     duration?: number,
-  ): Promise<{ success: boolean }>;
-  requestTapCoordinates(x: number, y: number): Promise<{ success: boolean }>;
+  ): Promise<{ success: boolean; error?: string }>;
+  requestTapCoordinates(x: number, y: number): Promise<{ success: boolean; error?: string }>;
 }
 
 export interface SystemTrayDependencies {
@@ -125,11 +125,11 @@ const defaultIosClientFactory: (device: BootedDevice) => SystemTrayIosClient = (
   return {
     requestSwipe: async (x1, y1, x2, y2, duration) => {
       const result = await client.requestSwipe(x1, y1, x2, y2, duration);
-      return { success: result.success };
+      return { success: result.success, error: result.error };
     },
     requestTapCoordinates: async (x, y) => {
       const result = await client.requestTapCoordinates(x, y);
-      return { success: result.success };
+      return { success: result.success, error: result.error };
     },
   };
 };
@@ -1517,7 +1517,7 @@ export const ensureSystemTrayOpen = async (
 
   return {
     observation: awaitedObservation ?? observation,
-    opened: true,
+    opened: detector.isTrayOpen((awaitedObservation ?? observation).viewHierarchy),
     skipped: false,
     minTimestamp,
   };
@@ -1555,7 +1555,7 @@ export const ensureSystemTrayClosed = async (
 
   return {
     observation: awaitedObservation ?? observation,
-    closed: true,
+    closed: !detector.isTrayOpen((awaitedObservation ?? observation).viewHierarchy),
     skipped: false,
     minTimestamp,
   };

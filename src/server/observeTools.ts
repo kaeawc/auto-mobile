@@ -719,6 +719,7 @@ const runWaitForConditionDsl = async (
     let polls = outcome.polls;
     let matchedElement = outcome.matchedElement;
     let awaitedElement = outcome.awaitedElement;
+    let conditionMatched = true;
     while (timer.now() - startTime < timeoutMs) {
       if (matchedHash !== null && timer.now() - quietStart >= settled.quietPeriodMs) {
         return {
@@ -750,12 +751,14 @@ const runWaitForConditionDsl = async (
       if (recheck) {
         const evaluation = recheck(observation);
         if (!evaluation.matched) {
+          conditionMatched = false;
           matchedHash = null;
           quietStart = timer.now();
           matchedElement = undefined;
           awaitedElement = undefined;
           continue;
         }
+        conditionMatched = true;
         matchedElement = evaluation.matchedElement;
         awaitedElement = evaluation.matchedElement;
       }
@@ -768,11 +771,11 @@ const runWaitForConditionDsl = async (
     return {
       ...outcome,
       observation,
-      matchedElement: undefined,
-      awaitedElement: undefined,
+      matchedElement,
+      awaitedElement,
       settled: false,
       timedOut: true,
-      matched: false,
+      matched: conditionMatched,
       awaitTimeout: true,
       waitMs: timer.now() - startTime,
       awaitDuration: timer.now() - startTime,

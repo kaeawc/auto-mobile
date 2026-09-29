@@ -42,6 +42,7 @@ import {
   type SimulatorDeviceTypeProfile,
   type SimulatorDeviceTypeProfileSource,
 } from "./SimulatorDeviceTypeProfiles";
+import { parseSimulatorDisplays, type SimulatorDisplay } from "./SimulatorDisplays";
 
 const COMMAND_SETTLEMENT_GRACE_MS = 1_000;
 const SIMCTL_AVAILABILITY_PROBE_TIMEOUT_MS = 10_000;
@@ -308,6 +309,11 @@ export interface SimCtl {
    * @returns Promise with screen dimensions
    */
   getScreenSize(deviceId?: string, timeoutMs?: number): Promise<ScreenSize>;
+  enumerateDisplays(
+    deviceId: string,
+    timeoutMs?: number,
+    signal?: AbortSignal,
+  ): Promise<SimulatorDisplay[]>;
 
   /**
    * Set the simulator appearance
@@ -1968,6 +1974,7 @@ export class SimCtlClient implements SimCtl {
         const profile = device.deviceTypeIdentifier
           ? await this.profileForDeviceType(device.deviceTypeIdentifier, deadlineMs, signal)
           : null;
+        const displays = await this.displaysForBootedSimulator(device, deadlineMs, signal);
         devices.push({
           name: device.name,
           platform: "ios",
@@ -1989,6 +1996,18 @@ export class SimCtlClient implements SimCtl {
           screenWidth: profile?.pixelWidth ?? undefined,
           screenHeight: profile?.pixelHeight ?? undefined,
           screenDensity: profile?.dpi ?? undefined,
+          ...(displays.length > 1
+            ? {
+                displays: displays.map((display) => ({
+                  id: display.id,
+                  name: display.name,
+                  width: display.width,
+                  height: display.height,
+                  density: null,
+                  units: "physical-pixels" as const,
+                })),
+              }
+            : {}),
           capabilityInventory: iosSimulatorCapabilityInventory({
             isAvailable: device.isAvailable,
             availabilityError: device.availabilityError,
@@ -1999,6 +2018,32 @@ export class SimCtlClient implements SimCtl {
     }
     devices.sort((a, b) => (a.deviceId || "").localeCompare(b.deviceId || ""));
     return devices;
+  }
+
+  private async displaysForBootedSimulator(
+    device: AppleDevice,
+    deadlineMs: number | undefined,
+    signal: AbortSignal | undefined,
+  ): Promise<SimulatorDisplay[]> {
+    if (device.state !== "Booted") {
+      return [];
+    }
+    const remainingMs = deadlineMs === undefined ? undefined : deadlineMs - this.timer.now();
+    if (remainingMs !== undefined && remainingMs <= 0) {
+      return [];
+    }
+    try {
+      return await this.enumerateDisplays(device.udid, remainingMs, signal);
+    } catch (error) {
+      if (signal?.aborted) {
+        throw error;
+      }
+      // Optional display enrichment cannot make the device inventory unavailable.
+      logger.debug(
+        `Failed to enumerate simulator displays for ${device.udid}: ${errorMessage(error)}`,
+      );
+      return [];
+    }
   }
 
   private async profileForDeviceType(
@@ -2593,94 +2638,26 @@ export class SimCtlClient implements SimCtl {
 
     logger.info(`[iOS] Getting screen size for simulator ${targetDevice}`);
 
-    // Use simctl io enumerate to get display information
-    const result = await this.executeCommandArgs(["io", targetDevice, "enumerate"], timeoutMs);
-
-    // Parse the text output to find LCD screen information
-    const lines = result.stdout.split("\n");
-    let inLCDScreen = false;
-    // Accumulated per-section so a later section's fields can never mix with
-    // an earlier section's fields (issue #6584). Reset whenever a new LCD
-    // section starts.
-    let sectionWidth = 0;
-    let sectionHeight = 0;
-    let sectionUiScale: number | null = null;
-
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i].trim();
-
-      // Look for LCD screen section
-      if (line.includes("LCD:") || line.includes("Screen Type: Integrated")) {
-        if (!inLCDScreen) {
-          // The two markers can both occur in one LCD section. Reset only when
-          // entering a section, otherwise a later marker would discard fields
-          // already read from the same section.
-          sectionWidth = 0;
-          sectionHeight = 0;
-          sectionUiScale = null;
-        }
-        inLCDScreen = true;
-        continue;
-      }
-
-      // If we're in the LCD screen section, look for Pixel Size and UI Scale
-      if (inLCDScreen) {
-        if (line.includes("Pixel Size:")) {
-          // Extract dimensions from format "Pixel Size: {1179, 2556}"
-          const pixelSizeMatch = line.match(/Pixel Size:\s*\{(\d+),\s*(\d+)\}/);
-          if (pixelSizeMatch) {
-            sectionWidth = parseInt(pixelSizeMatch[1], 10);
-            sectionHeight = parseInt(pixelSizeMatch[2], 10);
-          }
-        }
-
-        if (line.includes("Preferred UI Scale:")) {
-          // Extract UI scale from format "Preferred UI Scale: 3"
-          const uiScaleMatch = line.match(/Preferred UI Scale:\s*(\d+(?:\.\d+)?)/);
-          if (uiScaleMatch) {
-            sectionUiScale = parseFloat(uiScaleMatch[1]);
-          }
-        }
-      }
-
-      // Section closes at the next Port: line. Only commit the accumulated
-      // values, and stop scanning, once this section carries both a pixel
-      // size and a UI scale — never let a later, incomplete section overwrite
-      // or blend with an earlier complete one.
-      if (line.startsWith("Port:") && inLCDScreen) {
-        if (
-          sectionWidth > 0 &&
-          sectionHeight > 0 &&
-          sectionUiScale !== null &&
-          sectionUiScale > 0
-        ) {
-          return {
-            width: Math.round(sectionWidth / sectionUiScale),
-            height: Math.round(sectionHeight / sectionUiScale),
-          } as ScreenSize;
-        }
-        inLCDScreen = false;
-      }
-    }
-
-    // The last LCD section in `simctl io enumerate` output is not always
-    // followed by a trailing "Port:" line, so a complete in-progress section
-    // (both pixel size and UI scale collected) must also be finalized here at
-    // EOF rather than only ever being finalized by the "Port:" sentinel above.
-    if (
-      inLCDScreen &&
-      sectionWidth > 0 &&
-      sectionHeight > 0 &&
-      sectionUiScale !== null &&
-      sectionUiScale > 0
-    ) {
+    const display = (await this.enumerateDisplays(targetDevice, timeoutMs)).find(
+      (candidate) => candidate.uiScale !== null,
+    );
+    if (display?.uiScale) {
       return {
-        width: Math.round(sectionWidth / sectionUiScale),
-        height: Math.round(sectionHeight / sectionUiScale),
-      } as ScreenSize;
+        width: Math.round(display.width / display.uiScale),
+        height: Math.round(display.height / display.uiScale),
+      };
     }
 
     throw new ActionableError("Unable to determine screen size from provided data.");
+  }
+
+  async enumerateDisplays(
+    deviceId: string,
+    timeoutMs?: number,
+    signal?: AbortSignal,
+  ): Promise<SimulatorDisplay[]> {
+    const result = await this.executeCommandArgs(["io", deviceId, "enumerate"], timeoutMs, signal);
+    return parseSimulatorDisplays(result.stdout);
   }
 
   async setAppearance(mode: "light" | "dark", deviceId?: string): Promise<void> {

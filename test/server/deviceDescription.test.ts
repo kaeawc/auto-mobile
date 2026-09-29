@@ -34,6 +34,7 @@ const projectionKeys = {
   apiLevel: true,
   runtimeId: true,
   display: true,
+  displays: true,
   capabilityInventory: true,
   image: true,
   availabilityError: true,
@@ -120,6 +121,46 @@ const iosImage: DeviceDescriptionInput = {
 };
 
 describe("device description projections", () => {
+  test("preserves optional simulator displays in the listDevices output schema", () => {
+    const description = describeDevice({
+      kind: "image",
+      image: {
+        name: "iPhone Duo",
+        platform: "ios",
+        deviceId: "DUO-UDID",
+        isRunning: true,
+        screenWidth: 2007,
+        screenHeight: 2853,
+        screenDensity: 460,
+        displays: [
+          {
+            id: "0",
+            name: "primary",
+            width: 2007,
+            height: 2853,
+            density: null,
+            units: "physical-pixels",
+          },
+          {
+            id: "1",
+            name: "primary-1",
+            width: 1398,
+            height: 2034,
+            density: null,
+            units: "physical-pixels",
+          },
+        ],
+      },
+    });
+    expect(description.display).toEqual({
+      width: 2007,
+      height: 2853,
+      density: 460,
+      units: "physical-pixels",
+    });
+    expect(listDevicesEntrySchema.parse(description).displays).toHaveLength(2);
+  });
+
   test.each([
     [androidImage, { width: 1080, height: 2424, density: 420 }],
     [
@@ -157,7 +198,11 @@ describe("device description projections", () => {
     expect(description.display.density).toBeNull();
     expect(description.runtime.session).toBeNull();
     expect(description.runtime.locked).toBeNull();
-    expect(Object.keys(description).sort()).toEqual(Object.keys(projectionKeys).sort());
+    expect(Object.keys(description).sort()).toEqual(
+      Object.keys(projectionKeys)
+        .filter((key) => key !== "displays")
+        .sort(),
+    );
   });
 
   test("uses configured Android facts when no image was admitted to the booted device", () => {

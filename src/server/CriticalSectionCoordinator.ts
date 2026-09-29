@@ -1,6 +1,14 @@
 import { Mutex } from "async-mutex";
+import { ActionableError } from "../models";
 import { logger } from "../utils/logger";
 import { defaultTimer, Timer } from "../utils/SystemTimer";
+
+interface BarrierWaiter {
+  deviceId: string;
+  resolve: () => void;
+  reject: (error: Error) => void;
+  timerHandle: NodeJS.Timeout;
+}
 
 /**
  * Coordinates critical sections across multiple devices using global locks.
@@ -12,8 +20,9 @@ export class CriticalSectionCoordinator {
   private locks: Map<string, Mutex>;
   private barrierCounts: Map<string, Set<string>>; // lock -> set of device IDs that have arrived
   private expectedDeviceCounts: Map<string, number>; // lock -> expected device count
-  private barrierResolvers: Map<string, Array<() => void>>; // lock -> resolvers waiting at barrier
+  private barrierResolvers: Map<string, BarrierWaiter[]>; // lock -> waiters waiting at barrier
   private cleanupTimers: Map<string, NodeJS.Timeout>; // lock -> cleanup timeout
+  private keyGenerations: Map<string, number>;
   private readonly BARRIER_TIMEOUT_MS = 30000; // 30 seconds
   private readonly LOCK_CLEANUP_DELAY_MS = 5000; // 5 seconds after last device
 
@@ -35,6 +44,7 @@ export class CriticalSectionCoordinator {
     this.expectedDeviceCounts = new Map();
     this.barrierResolvers = new Map();
     this.cleanupTimers = new Map();
+    this.keyGenerations = new Map();
   }
 
   public static getInstance(): CriticalSectionCoordinator {
@@ -119,7 +129,7 @@ export class CriticalSectionCoordinator {
     }
 
     // Wait at barrier
-    await this.waitAtBarrier(key, deviceId, timeout, lock);
+    const generation = await this.waitAtBarrier(key, deviceId, timeout, lock);
 
     // Acquire the mutex for serial execution
     logger.debug(`Device ${deviceId} acquiring lock "${lock}"`);
@@ -131,7 +141,7 @@ export class CriticalSectionCoordinator {
     return () => {
       logger.debug(`Device ${deviceId} releasing lock "${lock}"`);
       release();
-      this.scheduleCleanup(key);
+      this.scheduleCleanup(key, generation);
     };
   }
 
@@ -155,8 +165,8 @@ export class CriticalSectionCoordinator {
   ): Promise<void> {
     this.registerExpectedDevices(lock, deviceCount, namespace);
     const key = this.scopedKey(lock, namespace);
-    await this.waitAtBarrier(key, deviceId, timeout, lock);
-    this.scheduleCleanup(key);
+    const generation = await this.waitAtBarrier(key, deviceId, timeout, lock);
+    this.scheduleCleanup(key, generation);
   }
 
   /**
@@ -171,7 +181,7 @@ export class CriticalSectionCoordinator {
     deviceId: string,
     timeout: number,
     label: string,
-  ): Promise<void> {
+  ): Promise<number> {
     const expectedCount = this.expectedDeviceCounts.get(key);
 
     if (expectedCount === undefined) {
@@ -195,6 +205,10 @@ export class CriticalSectionCoordinator {
       );
     }
 
+    if (arrivedDevices.size === 0) {
+      this.bumpGeneration(key);
+    }
+    const generation = this.currentGeneration(key);
     arrivedDevices.add(deviceId);
     const currentCount = arrivedDevices.size;
 
@@ -210,62 +224,62 @@ export class CriticalSectionCoordinator {
       this.barrierResolvers.set(key, []);
 
       // Release all waiting devices
-      for (const resolve of resolvers) {
-        resolve();
+      for (const waiter of resolvers) {
+        this.timer.clearTimeout(waiter.timerHandle);
+        waiter.resolve();
       }
 
       // Clear barrier state for potential reuse
       arrivedDevices.clear();
 
-      return;
+      return generation;
     }
 
     // Wait for other devices to arrive
     await new Promise<void>((resolve, reject) => {
-      // Add to waiters
-      const resolvers = this.barrierResolvers.get(key) || [];
-      resolvers.push(resolve);
-      this.barrierResolvers.set(key, resolvers);
+      const waiterRecord: BarrierWaiter = {
+        deviceId,
+        resolve,
+        reject,
+        timerHandle: this.timer.setTimeout(() => {
+          const currentResolvers = this.barrierResolvers.get(key) || [];
+          const index = currentResolvers.indexOf(waiterRecord);
+          if (index > -1) {
+            currentResolvers.splice(index, 1);
+          }
+          const arrivedCount = this.barrierCounts.get(key)?.size || 0;
+          this.barrierCounts.get(key)?.delete(deviceId);
 
-      // Set timeout
-      const timer = this.timer.setTimeout(() => {
-        // Remove this resolver
-        const currentResolvers = this.barrierResolvers.get(key) || [];
-        const index = currentResolvers.indexOf(resolve);
-        if (index > -1) {
-          currentResolvers.splice(index, 1);
-        }
-
-        const arrivedCount = this.barrierCounts.get(key)?.size || 0;
-        reject(
-          new Error(
-            `Timeout waiting for critical section "${label}". ` +
-              `${arrivedCount}/${expectedCount} devices arrived after ${timeout}ms. ` +
-              `Missing devices may have failed or not reached the critical section.`,
-          ),
-        );
-      }, timeout);
-
-      // Store the timeout so we can clear it if resolved normally
-      const originalResolve = resolve;
-      const wrappedResolve = () => {
-        this.timer.clearTimeout(timer);
-        originalResolve();
+          reject(
+            new Error(
+              `Timeout waiting for critical section "${label}". ` +
+                `${arrivedCount}/${expectedCount} devices arrived after ${timeout}ms. ` +
+                `Missing devices may have failed or not reached the critical section.`,
+            ),
+          );
+        }, timeout),
       };
-
-      // Replace the resolver with the wrapped version
-      const currentResolvers = this.barrierResolvers.get(key) || [];
-      const resolverIndex = currentResolvers.indexOf(resolve);
-      if (resolverIndex > -1) {
-        currentResolvers[resolverIndex] = wrappedResolve;
-      }
+      const resolvers = this.barrierResolvers.get(key) || [];
+      resolvers.push(waiterRecord);
+      this.barrierResolvers.set(key, resolvers);
     });
+    return generation;
+  }
+
+  private currentGeneration(key: string): number {
+    return this.keyGenerations.get(key) ?? 0;
+  }
+
+  private bumpGeneration(key: string): number {
+    const next = this.currentGeneration(key) + 1;
+    this.keyGenerations.set(key, next);
+    return next;
   }
 
   /**
    * Schedule cleanup of lock resources after all devices have finished.
    */
-  private scheduleCleanup(key: string): void {
+  private scheduleCleanup(key: string, generation: number): void {
     const existingTimer = this.cleanupTimers.get(key);
     if (existingTimer) {
       this.timer.clearTimeout(existingTimer);
@@ -273,6 +287,10 @@ export class CriticalSectionCoordinator {
 
     // Schedule new cleanup
     const timer = this.timer.setTimeout(() => {
+      if (this.currentGeneration(key) !== generation) {
+        this.cleanupTimers.delete(key);
+        return;
+      }
       logger.debug(`Cleaning up lock resources for "${key}"`);
       this.locks.delete(key);
       this.barrierCounts.delete(key);
@@ -297,6 +315,15 @@ export class CriticalSectionCoordinator {
     const existingTimer = this.cleanupTimers.get(key);
     if (existingTimer) {
       this.timer.clearTimeout(existingTimer);
+    }
+
+    for (const waiter of this.barrierResolvers.get(key) || []) {
+      this.timer.clearTimeout(waiter.timerHandle);
+      waiter.reject(
+        new ActionableError(
+          `Critical section "${lock}" was force-cleaned up because a peer likely failed.`,
+        ),
+      );
     }
 
     this.locks.delete(key);

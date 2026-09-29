@@ -351,6 +351,77 @@ describe("Storage Tools Registration", () => {
     });
   });
 
+  test("key-value schemas require either name or fileName with clear guidance", () => {
+    registerStorageTools();
+
+    const cases: Array<{ name: string; input: Record<string, unknown> }> = [
+      {
+        name: "setKeyValue",
+        input: {
+          platform: "android",
+          appId: "com.example.app",
+          key: "dark_mode",
+          value: "true",
+          type: "BOOLEAN",
+        },
+      },
+      {
+        name: "removeKeyValue",
+        input: {
+          platform: "android",
+          appId: "com.example.app",
+          key: "dark_mode",
+        },
+      },
+      {
+        name: "clearKeyValueFile",
+        input: { platform: "android", appId: "com.example.app" },
+      },
+    ];
+    const expectedMessage =
+      "Provide either `name` (iOS UserDefaults suite / Android SharedPreferences name) or `fileName`";
+
+    for (const { name, input } of cases) {
+      const tool = ToolRegistry.getTool(name);
+      const result = tool!.schema.safeParse(input);
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues.map((issue) => issue.message)).toContain(expectedMessage);
+      }
+
+      const definition = ToolRegistry.getToolDefinitions().find((item) => item.name === name);
+      expect(definition?.inputSchema.description).toBe(expectedMessage);
+    }
+  });
+
+  test("key-value schemas accept name-only and fileName-only inputs", () => {
+    registerStorageTools();
+
+    const cases: Array<{ name: string; input: Record<string, unknown> }> = [
+      {
+        name: "setKeyValue",
+        input: {
+          platform: "android",
+          appId: "com.example.app",
+          key: "dark_mode",
+          value: "true",
+          type: "BOOLEAN",
+        },
+      },
+      {
+        name: "removeKeyValue",
+        input: { platform: "android", appId: "com.example.app", key: "dark_mode" },
+      },
+      { name: "clearKeyValueFile", input: { platform: "android", appId: "com.example.app" } },
+    ];
+
+    for (const { name, input } of cases) {
+      const tool = ToolRegistry.getTool(name);
+      expect(tool!.schema.safeParse({ ...input, name: "preferences" }).success).toBe(true);
+      expect(tool!.schema.safeParse({ ...input, fileName: "preferences" }).success).toBe(true);
+    }
+  });
+
   // The setKeyValue MCP-tool handler runs args.type through validateTypeForPlatform
   // before dispatch; the daemon `ide/setKeyValue` socket handler now reuses the same
   // guard (issue #5022). These pin the shared guidance both paths depend on.

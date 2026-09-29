@@ -2,7 +2,11 @@ import { toActionableError } from "../models/ActionableError";
 import { z } from "zod/v4";
 import { ToolRegistry } from "./toolRegistry";
 import { ActionableError, BootedDevice } from "../models";
-import { addDeviceTargetingToSchema, withAppIdAliases } from "./toolSchemaHelpers";
+import {
+  addDeviceTargetingToSchema,
+  withAppIdAliases,
+  withPostFlattenJsonSchemaOverride,
+} from "./toolSchemaHelpers";
 import { createJSONToolResponse } from "../utils/toolUtils";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
@@ -162,89 +166,87 @@ interface GetDataStoreArgs {
 }
 
 const legacyFileNameDescription = "Deprecated alias for name";
+const storageNameRequiredMessage =
+  "Provide either `name` (iOS UserDefaults suite / Android SharedPreferences name) or `fileName`";
+
+function requireStorageName<T extends z.ZodTypeAny>(schema: T): T {
+  return schema.superRefine((args, ctx) => {
+    const hasName =
+      typeof args === "object" && args !== null && "name" in args && args.name !== undefined;
+    const hasFileName =
+      typeof args === "object" &&
+      args !== null &&
+      "fileName" in args &&
+      args.fileName !== undefined;
+    if (!hasName && !hasFileName) {
+      ctx.addIssue({ code: "custom", message: storageNameRequiredMessage });
+    }
+  });
+}
+
+function advertiseStorageNameRequirement<T extends z.ZodTypeAny>(schema: T): T {
+  return withPostFlattenJsonSchemaOverride(schema, (jsonSchema) => {
+    jsonSchema.description = storageNameRequiredMessage;
+  });
+}
 
 function resolveStorageName(args: { name?: string; fileName?: string }): string {
   return args.name ?? args.fileName!;
 }
 
 // Schema for setKeyValue tool
-const setKeyValueSchema = withAppIdAliases(
-  z.union([
-    addDeviceTargetingToSchema(
-      z
-        .object({
-          appId: z.string(),
-          name: z.string().describe(STORAGE_NAME_DESCRIPTION),
-          fileName: z.string().optional().describe(legacyFileNameDescription),
-          key: z.string().describe("Key"),
-          value: z.string().nullable().describe("Value string; null clears"),
-          type: z.enum(KEY_VALUE_TYPES).describe("Value type"),
-        })
-        .strict(),
+const setKeyValueSchema = advertiseStorageNameRequirement(
+  withAppIdAliases(
+    requireStorageName(
+      addDeviceTargetingToSchema(
+        z
+          .object({
+            appId: z.string(),
+            name: z.string().optional().describe(STORAGE_NAME_DESCRIPTION),
+            fileName: z.string().optional().describe(legacyFileNameDescription),
+            key: z.string().describe("Key"),
+            value: z.string().nullable().describe("Value string; null clears"),
+            type: z.enum(KEY_VALUE_TYPES).describe("Value type"),
+          })
+          .strict(),
+      ),
     ),
-    addDeviceTargetingToSchema(
-      z
-        .object({
-          appId: z.string(),
-          name: z.string().optional().describe(STORAGE_NAME_DESCRIPTION),
-          fileName: z.string().describe(legacyFileNameDescription),
-          key: z.string().describe("Key"),
-          value: z.string().nullable().describe("Value string; null clears"),
-          type: z.enum(KEY_VALUE_TYPES).describe("Value type"),
-        })
-        .strict(),
-    ),
-  ]),
+  ),
 );
 
 // Schema for removeKeyValue tool
-const removeKeyValueSchema = withAppIdAliases(
-  z.union([
-    addDeviceTargetingToSchema(
-      z
-        .object({
-          appId: z.string(),
-          name: z.string().describe(STORAGE_NAME_DESCRIPTION),
-          fileName: z.string().optional().describe(legacyFileNameDescription),
-          key: z.string().describe("Key"),
-        })
-        .strict(),
+const removeKeyValueSchema = advertiseStorageNameRequirement(
+  withAppIdAliases(
+    requireStorageName(
+      addDeviceTargetingToSchema(
+        z
+          .object({
+            appId: z.string(),
+            name: z.string().optional().describe(STORAGE_NAME_DESCRIPTION),
+            fileName: z.string().optional().describe(legacyFileNameDescription),
+            key: z.string().describe("Key"),
+          })
+          .strict(),
+      ),
     ),
-    addDeviceTargetingToSchema(
-      z
-        .object({
-          appId: z.string(),
-          name: z.string().optional().describe(STORAGE_NAME_DESCRIPTION),
-          fileName: z.string().describe(legacyFileNameDescription),
-          key: z.string().describe("Key"),
-        })
-        .strict(),
-    ),
-  ]),
+  ),
 );
 
 // Schema for clearKeyValueFile tool
-const clearKeyValueFileSchema = withAppIdAliases(
-  z.union([
-    addDeviceTargetingToSchema(
-      z
-        .object({
-          appId: z.string(),
-          name: z.string().describe(STORAGE_NAME_DESCRIPTION),
-          fileName: z.string().optional().describe(legacyFileNameDescription),
-        })
-        .strict(),
+const clearKeyValueFileSchema = advertiseStorageNameRequirement(
+  withAppIdAliases(
+    requireStorageName(
+      addDeviceTargetingToSchema(
+        z
+          .object({
+            appId: z.string(),
+            name: z.string().optional().describe(STORAGE_NAME_DESCRIPTION),
+            fileName: z.string().optional().describe(legacyFileNameDescription),
+          })
+          .strict(),
+      ),
     ),
-    addDeviceTargetingToSchema(
-      z
-        .object({
-          appId: z.string(),
-          name: z.string().optional().describe(STORAGE_NAME_DESCRIPTION),
-          fileName: z.string().describe(legacyFileNameDescription),
-        })
-        .strict(),
-    ),
-  ]),
+  ),
 );
 
 interface SetKeyValueArgs {

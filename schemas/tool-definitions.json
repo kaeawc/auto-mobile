@@ -662,7 +662,8 @@
         }
       },
       "required": ["appId"],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "description": "Provide either `name` (iOS UserDefaults suite / Android SharedPreferences name) or `fileName`"
     },
     "_meta": {
       "automobile/embeddedSdkOnly": true
@@ -10009,7 +10010,8 @@
         }
       },
       "required": ["appId", "key"],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "description": "Provide either `name` (iOS UserDefaults suite / Android SharedPreferences name) or `fileName`"
     },
     "_meta": {
       "automobile/embeddedSdkOnly": true
@@ -11247,7 +11249,8 @@
         }
       },
       "required": ["appId", "key", "value", "type"],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "description": "Provide either `name` (iOS UserDefaults suite / Android SharedPreferences name) or `fileName`"
     },
     "_meta": {
       "automobile/embeddedSdkOnly": true

@@ -5,25 +5,25 @@ import {
 } from "../../../src/features/action/androidPreTapStablePolicy";
 
 describe("androidPreTapConsecutiveStableMatchesRequired", () => {
-  test("elementId-only tap uses one consecutive match", () => {
+  test("elementId-only tap uses strict consecutive matches", () => {
     expect(
       androidPreTapConsecutiveStableMatchesRequired({
         elementId: "com.app:id/avatarButton",
         action: "tap",
       }),
-    ).toBe(1);
+    ).toBe(ANDROID_PRE_TAP_STABLE_MATCHES_STRICT);
   });
 
-  test("plain text tap uses one consecutive match", () => {
+  test("plain text tap uses strict consecutive matches", () => {
     expect(
       androidPreTapConsecutiveStableMatchesRequired({
         text: "Jane Smith",
         action: "tap",
       }),
-    ).toBe(1);
+    ).toBe(ANDROID_PRE_TAP_STABLE_MATCHES_STRICT);
   });
 
-  test("sibling tap uses strict matches (tapping adjacent element is churn-prone)", () => {
+  test("sibling tap uses strict matches", () => {
     expect(
       androidPreTapConsecutiveStableMatchesRequired({
         text: "Accept Terms",
@@ -43,30 +43,28 @@ describe("androidPreTapConsecutiveStableMatchesRequired", () => {
     ).toBe(ANDROID_PRE_TAP_STABLE_MATCHES_STRICT);
   });
 
-  test("sibling: false uses one match", () => {
+  test("sibling: false uses strict matches", () => {
     expect(
       androidPreTapConsecutiveStableMatchesRequired({
         text: "Login",
         sibling: false,
         action: "tap",
       }),
-    ).toBe(1);
+    ).toBe(ANDROID_PRE_TAP_STABLE_MATCHES_STRICT);
   });
 
-  // Full specification. Only a strict boolean `true` takes the strict path (2);
-  // every other value — including untyped MCP coercions like the number 1 or the
-  // string "true" — takes the lax single-match path (1). This pins that a loosely
-  // typed sibling flag can never silently loosen churn tolerance.
+  // Every selector kind requires strict consecutive matches, regardless of the
+  // sibling value or untyped MCP coercions.
   test.each<[string, unknown, number]>([
     ["boolean true", true, ANDROID_PRE_TAP_STABLE_MATCHES_STRICT],
-    ["boolean false", false, 1],
-    ["undefined", undefined, 1],
-    ["number 1", 1, 1],
-    ["number 0", 0, 1],
-    ["string 'true'", "true", 1],
-    ["string 'false'", "false", 1],
-    ["null", null, 1],
-    ["empty string", "", 1],
+    ["boolean false", false, ANDROID_PRE_TAP_STABLE_MATCHES_STRICT],
+    ["undefined", undefined, ANDROID_PRE_TAP_STABLE_MATCHES_STRICT],
+    ["number 1", 1, ANDROID_PRE_TAP_STABLE_MATCHES_STRICT],
+    ["number 0", 0, ANDROID_PRE_TAP_STABLE_MATCHES_STRICT],
+    ["string 'true'", "true", ANDROID_PRE_TAP_STABLE_MATCHES_STRICT],
+    ["string 'false'", "false", ANDROID_PRE_TAP_STABLE_MATCHES_STRICT],
+    ["null", null, ANDROID_PRE_TAP_STABLE_MATCHES_STRICT],
+    ["empty string", "", ANDROID_PRE_TAP_STABLE_MATCHES_STRICT],
   ])("sibling=%s resolves to %i consecutive matches", (_name, sibling, expected) => {
     expect(
       androidPreTapConsecutiveStableMatchesRequired({

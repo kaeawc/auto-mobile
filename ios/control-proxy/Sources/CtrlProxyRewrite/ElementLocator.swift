@@ -66,6 +66,16 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
         /// SpringBoard-fallback flag, last-switch time). A main-actor `struct` value — the
         /// reference's cross-thread lock is unnecessary inside a single isolation domain.
         private var tracker = ForegroundTracker()
+        private var appSwitcherMayBeVisible = false
+
+        /// Recent apps is SpringBoard UI even while its cards report their apps as foreground.
+        func noteAppSwitcherOpened() {
+            appSwitcherMayBeVisible = true
+        }
+
+        func clearAppSwitcherHint() {
+            appSwitcherMayBeVisible = false
+        }
 
         /// Bundle id of the app currently being observed.
         public var foregroundBundleId: String? { tracker.bundleId }
@@ -145,6 +155,7 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
         /// Explicitly switch the tracked foreground app to the given bundle ID, clearing caches.
         /// Called by CommandHandler after state-changing operations (launch, terminate, home).
         public func switchForegroundApp(bundleId: String) {
+            clearAppSwitcherHint()
             let isSpringboard = bundleId == "com.apple.springboard"
             let app: XCUIApplication = isSpringboard ? springboard : XCUIApplication(bundleIdentifier: bundleId)
             let previousBundleId = tracker.switchForeground(
@@ -221,6 +232,26 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
             let isCurrentAppInForeground = (stateInfo.currentAppState ?? 0) >=
                 4 // .runningForeground only (3 = .runningBackground)
             let isCurrentAppSpringboard = stateInfo.currentBundleId == "com.apple.springboard"
+
+            if appSwitcherMayBeVisible {
+                let switcherVisible = stateInfo.springboardState >= 3 &&
+                    catchingObjCExceptionNonThrowing({
+                        AppSwitcherDetector.isVisible(in: springboard)
+                    }, fallback: false)
+                if Self.foregroundBundleId(
+                    from: trackedBundleId.map { [$0] } ?? [],
+                    springboardRunning: stateInfo.springboardState >= 3,
+                    switcherVisible: switcherVisible
+                ) == "com.apple.springboard" {
+                    if tracker.bundleId != "com.apple.springboard" {
+                        switchForegroundApp(bundleId: "com.apple.springboard")
+                        appSwitcherMayBeVisible = true
+                    }
+                    return
+                }
+                // A dismissed switcher must not keep the previous app hidden.
+                appSwitcherMayBeVisible = false
+            }
 
             // Springboard reports as foreground even when another app is on top,
             // so we always re-detect unless a non-springboard app is confirmed foreground
@@ -1449,6 +1480,9 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
         /// Non-iOS stub implementation
         public init() {}
 
+        func noteAppSwitcherOpened() {}
+        func clearAppSwitcherHint() {}
+
         public func getViewHierarchy(disableAllFiltering _: Bool = false) throws -> ViewHierarchy {
             return ViewHierarchy(
                 packageName: nil,
@@ -1558,6 +1592,18 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
             return nil
         }
         return "com.apple.Spotlight"
+    }
+
+    /// Choose SpringBoard for a visible switcher before considering its app cards.
+    nonisolated static func foregroundBundleId(
+        from candidates: [String],
+        springboardRunning: Bool,
+        switcherVisible: Bool
+    )
+        -> String?
+    {
+        if springboardRunning, switcherVisible { return "com.apple.springboard" }
+        return candidates.first { $0 != "com.apple.springboard" }
     }
 
     // MARK: - Same-Type Child Collapsing & Sibling Dedup

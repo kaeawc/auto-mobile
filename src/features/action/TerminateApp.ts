@@ -1,3 +1,4 @@
+import { packageListingContains } from "../../utils/android-cmdline-tools/shellOutputHeuristics";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { AndroidUserTargetResolver } from "../../utils/android-cmdline-tools/AndroidUserTargetResolver";
@@ -143,14 +144,14 @@ export class TerminateApp extends BaseVisualChange {
             logger.debug(`[TerminateApp] CtrlProxy install check failed: ${error}`, error);
           }
           try {
-            const isInstalledCmd = `shell pm list packages --user ${targetUserId} -f ${shellQuote(packageName)} | grep -c ${shellQuote(packageName)}`;
+            const isInstalledCmd = `shell pm list packages --user ${targetUserId}`;
             const isInstalledOutput = await this.adb.executeCommand(
               isInstalledCmd,
               undefined,
               undefined,
               true,
             );
-            return parseInt(isInstalledOutput.trim(), 10) > 0;
+            return packageListingContains(isInstalledOutput.stdout, packageName);
           } catch (error) {
             // Both the CtrlProxy call and this shell fallback failed; treating the
             // app as not installed is the safe default for a terminate/uninstall flow.

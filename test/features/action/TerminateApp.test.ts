@@ -304,8 +304,8 @@ describe("TerminateApp (Android)", () => {
     fakeAdb.setForegroundApp({ packageName: "com.example.app", userId: 0 });
     fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 0x4000, running: true }]);
     fakeAdb.setCommandResult(
-      "shell pm list packages --user 0 -f 'com.example.app' | grep -c 'com.example.app'",
-      "1",
+      "shell pm list packages --user 0",
+      "package:com.example.app\npackage:com.android.settings",
     );
     fakeAdb.setCommandResult("shell dumpsys activity processes", "3220:com.example.app/u0a123");
     fakeAdb.setCommandResult("shell am force-stop --user 0 'com.example.app'", "");
@@ -325,8 +325,8 @@ describe("TerminateApp (Android)", () => {
     fakeAdb.setForegroundApp({ packageName: "com.android.settings", userId: 0 });
     fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 0x4000, running: true }]);
     fakeAdb.setCommandResult(
-      "shell pm list packages --user 0 -f 'com.android.settings' | grep -c 'com.android.settings'",
-      "1",
+      "shell pm list packages --user 0",
+      "package:com.example.app\npackage:com.android.settings",
     );
     fakeAdb.setCommandResult(
       "shell dumpsys activity processes",
@@ -348,8 +348,8 @@ describe("TerminateApp (Android)", () => {
     fakeAdb.setForegroundApp({ packageName: "com.example.app", userId: 0 });
     fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 0x4000, running: true }]);
     fakeAdb.setCommandResult(
-      "shell pm list packages --user 0 -f 'com.example.app' | grep -c 'com.example.app'",
-      "1",
+      "shell pm list packages --user 0",
+      "package:com.example.app\npackage:com.android.settings",
     );
     fakeAdb.setCommandResult("shell dumpsys activity processes", "3220:com.example.app/u0a123");
     fakeAdb.setCommandResult("shell am force-stop --user 0 'com.example.app'", "");
@@ -384,8 +384,8 @@ describe("TerminateApp (Android)", () => {
     fakeAdb.setForegroundApp(null);
     fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 0x4000, running: true }]);
     fakeAdb.setCommandResult(
-      "shell pm list packages --user 0 -f 'com.example.app' | grep -c 'com.example.app'",
-      "1",
+      "shell pm list packages --user 0",
+      "package:com.example.app\npackage:com.android.settings",
     );
     fakeAdb.setCommandResult("shell dumpsys activity processes", "3271:com.example.other/u0a123");
 
@@ -415,10 +415,7 @@ describe("TerminateApp (Android)", () => {
   test("does not invalidate the cache when the package is not installed (issue #5867)", async () => {
     fakeAdb.setForegroundApp(null);
     fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 0x4000, running: true }]);
-    fakeAdb.setCommandResult(
-      "shell pm list packages --user 0 -f 'com.example.app' | grep -c 'com.example.app'",
-      "0",
-    );
+    fakeAdb.setCommandResult("shell pm list packages --user 0", "");
 
     const invalidated: BootedDevice[] = [];
     const cacheInvalidator = {
@@ -441,13 +438,10 @@ describe("TerminateApp (Android)", () => {
     expect(invalidated).toHaveLength(0);
   });
 
-  test("returns not installed when package is missing", async () => {
+  test("returns not installed when only a prefix-superset package exists", async () => {
     fakeAdb.setForegroundApp(null);
     fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 0x4000, running: true }]);
-    fakeAdb.setCommandResult(
-      "shell pm list packages --user 0 -f 'com.example.app' | grep -c 'com.example.app'",
-      "0",
-    );
+    fakeAdb.setCommandResult("shell pm list packages --user 0", "package:com.example.app2");
 
     const terminateApp = new TerminateApp(androidDevice, fakeAdb as any, null, fakeTimer);
     const result = await terminateApp.execute("com.example.app", { skipObservation: true });
@@ -464,8 +458,8 @@ describe("TerminateApp (Android)", () => {
     fakeAdb.setForegroundApp(null);
     fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 0x4000, running: true }]);
     fakeAdb.setCommandResult(
-      "shell pm list packages --user 0 -f 'com.example.app' | grep -c 'com.example.app'",
-      "1",
+      "shell pm list packages --user 0",
+      "package:com.example.app\npackage:com.android.settings",
     );
     // grep exits 1 when there are no matching processes. This is the expected
     // signal that the installed app is already stopped, not an ADB failure.
@@ -493,8 +487,8 @@ describe("TerminateApp (Android)", () => {
     fakeAdb.setForegroundApp(null);
     fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 0x4000, running: true }]);
     fakeAdb.setCommandResult(
-      "shell pm list packages --user 0 -f 'com.example.app' | grep -c 'com.example.app'",
-      "1",
+      "shell pm list packages --user 0",
+      "package:com.example.app\npackage:com.android.settings",
     );
     fakeAdb.setCommandError("shell dumpsys activity processes", new Error("dumpsys unavailable"));
 
@@ -506,15 +500,12 @@ describe("TerminateApp (Android)", () => {
     expect(fakeAdb.wasCommandExecuted("force-stop")).toBe(false);
   });
 
-  test("treats grep -c failure as not installed instead of throwing", async () => {
+  test("treats package-list query failure as not installed", async () => {
     fakeAdb.setForegroundApp(null);
     fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 0x4000, running: true }]);
-    // Simulate the install-probe shell command throwing (grep -c exits 1 when the
-    // package is absent). The error key MUST be the exact command string — the
-    // fake matches errors by exact command, so a substring key never fires and
-    // the catch-and-degrade path stays untested (issue #4169 item 5).
+    // Query failures follow the existing safe not-installed fallback.
     fakeAdb.setCommandError(
-      "shell pm list packages --user 0 -f 'com.example.app' | grep -c 'com.example.app'",
+      "shell pm list packages --user 0",
       new Error("Command failed with exit code 1"),
     );
 
@@ -717,8 +708,8 @@ describe("TerminateApp (observed interaction, perf-tree ownership)", () => {
     fakeAdb.setForegroundApp({ packageName: "com.example.app", userId: 0 });
     fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 0x4000, running: true }]);
     fakeAdb.setCommandResult(
-      "shell pm list packages --user 0 -f 'com.example.app' | grep -c 'com.example.app'",
-      "1",
+      "shell pm list packages --user 0",
+      "package:com.example.app\npackage:com.android.settings",
     );
     fakeAdb.setCommandResult("shell dumpsys activity processes", "3220:com.example.app/u0a123");
     fakeAdb.setCommandResult("shell am force-stop --user 0 'com.example.app'", "");

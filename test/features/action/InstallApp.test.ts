@@ -192,10 +192,7 @@ describe("InstallApp", () => {
       { userId: 0, name: "Owner", flags: 0x13, running: true },
       { userId: 10, name: "Work", flags: 0x30, running: true },
     ]);
-    fakeAdb.setCommandResponse(
-      "shell pm list packages --user 10 -f com.example.app",
-      createExecResult("0"),
-    );
+    fakeAdb.setCommandResponse("shell pm list packages --user 10", createExecResult(""));
     fakeAdb.setCommandResponse(`install --user 10 -r "${apkPath}"`, createExecResult("Success"));
 
     const installApp = new InstallApp(device, fakeAdbFactory, fakeHost, fakeLocator, () => perf);
@@ -234,10 +231,7 @@ describe("InstallApp", () => {
       createExecResult("package: name='com.example.app' versionCode='1'"),
     );
     fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 0x13, running: true }]);
-    fakeAdb.setCommandResponse(
-      "shell pm list packages --user 0 -f 'com.example.app'",
-      createExecResult("0"),
-    );
+    fakeAdb.setCommandResponse("shell pm list packages --user 0", createExecResult(""));
     fakeAdb.setCommandResponse(`install --user 0 -r "${apkPath}"`, createExecResult("Success"));
 
     const result = await new InstallApp(device, fakeAdbFactory, fakeHost, fakeLocator, () =>
@@ -256,10 +250,7 @@ describe("InstallApp", () => {
       createExecResult("package: name='com.example.app' versionCode='1'"),
     );
     fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 0x13, running: true }]);
-    fakeAdb.setCommandResponse(
-      "shell pm list packages --user 0 -f 'com.example.app'",
-      createExecResult("0"),
-    );
+    fakeAdb.setCommandResponse("shell pm list packages --user 0", createExecResult(""));
     fakeAdb.setCommandResponse(`install --user 0 -r "${apkPath}"`, createExecResult("Success"));
 
     const result = await new InstallApp(device, fakeAdbFactory, fakeHost, fakeLocator, () =>
@@ -287,10 +278,7 @@ describe("InstallApp", () => {
       createExecResult("package: name='com.example.app' versionCode='1'"),
     );
     fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 0x13, running: true }]);
-    fakeAdb.setCommandResponse(
-      "shell pm list packages --user 0 -f 'com.example.app'",
-      createExecResult("0"),
-    );
+    fakeAdb.setCommandResponse("shell pm list packages --user 0", createExecResult(""));
     fakeAdb.setCommandResponse(`install --user 0 -r "${apkPath}"`, createExecResult("Success"));
 
     const installApp = new InstallApp(
@@ -625,10 +613,7 @@ describe("InstallApp", () => {
       "aapt2",
       createExecResult("package: name='com.example.app' versionCode='1'"),
     );
-    fakeAdb.setCommandResponse(
-      "shell pm list packages --user 0 -f 'com.example.app'",
-      createExecResult("0"),
-    );
+    fakeAdb.setCommandResponse("shell pm list packages --user 0", createExecResult(""));
 
     const expectedAbsolute = path.resolve(process.cwd(), "relative", "path", "app.apk");
     fakeAdb.setCommandResponse(
@@ -654,10 +639,7 @@ describe("InstallApp", () => {
       "aapt2",
       createExecResult("package: name='com.example.app' versionCode='1'"),
     );
-    fakeAdb.setCommandResponse(
-      "shell pm list packages --user 0 -f 'com.example.app'",
-      createExecResult("0"),
-    );
+    fakeAdb.setCommandResponse("shell pm list packages --user 0", createExecResult(""));
 
     const expectedAbsolute = path.resolve(launchCwd, "relative", "path", "app.apk");
     fakeAdb.setCommandResponse(
@@ -852,7 +834,7 @@ describe("InstallApp", () => {
     );
   });
 
-  test("treats grep -c failure as not installed instead of throwing", async () => {
+  test("does not match a prefix-superset package in the package listing", async () => {
     const apkPath = "/tmp/app-debug.apk";
     const perf = createPerformanceTracker(true, fakeTimer);
     const debugSpy = spyOn(logger, "debug").mockImplementation(() => {});
@@ -864,9 +846,11 @@ describe("InstallApp", () => {
     );
 
     fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 13, running: true }]);
-    // Simulate grep -c exiting with code 1 when package is not found
-    const grepError = new Error("Command failed with exit code 1");
-    fakeAdb.setCommandError("grep -c 'com.example.app'", grepError);
+    fakeAdb.setCommandResponse(
+      "shell pm list packages --user 0",
+      createExecResult("package:com.example.app2"),
+    );
+
     fakeAdb.setCommandResponse(`install --user 0 -r "${apkPath}"`, createExecResult("Success"));
 
     const installApp = new InstallApp(device, fakeAdbFactory, fakeHost, fakeLocator, () => perf);
@@ -876,11 +860,8 @@ describe("InstallApp", () => {
       expect(result.success).toBe(true);
       expect(result.upgrade).toBe(false);
       expect(result.packageName).toBe("com.example.app");
-      expect(fakeAdb.wasCommandExecuted("grep -c 'com.example.app'")).toBe(true);
-      expect(debugSpy).toHaveBeenCalledWith(
-        `src/features/action/InstallApp.ts fallback failed: ${grepError}`,
-        grepError,
-      );
+      expect(fakeAdb.wasCommandExecuted("shell pm list packages --user 0")).toBe(true);
+      expect(debugSpy).not.toHaveBeenCalled();
     } finally {
       debugSpy.mockRestore();
     }
@@ -896,8 +877,8 @@ describe("InstallApp", () => {
       createExecResult("package: name='com.example.app' versionCode='2'"),
     );
     fakeAdb.setCommandResponse(
-      "shell pm list packages --user 0 -f 'com.example.app'",
-      createExecResult("1"),
+      "shell pm list packages --user 0",
+      createExecResult("package:com.example.app"),
     );
     fakeAdb.setCommandResponse(`install --user 0 -r "${apkPath}"`, createExecResult("Success"));
 
@@ -917,10 +898,7 @@ describe("InstallApp", () => {
       "aapt2",
       createExecResult("package: name='com.example.app' versionCode='1'"),
     );
-    fakeAdb.setCommandResponse(
-      "shell pm list packages --user 0 -f 'com.example.app'",
-      createExecResult("0"),
-    );
+    fakeAdb.setCommandResponse("shell pm list packages --user 0", createExecResult(""));
     fakeAdb.setCommandResponse('install --user 0 -r "/tmp/app.APK"', createExecResult("Success"));
 
     const installApp = new InstallApp(device, fakeAdbFactory, fakeHost, fakeLocator, () => perf);
@@ -960,8 +938,8 @@ describe("InstallApp", () => {
     );
     fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 13, running: true }]);
     fakeAdb.setCommandResponse(
-      "shell pm list packages --user 0 -f 'com.example.app'",
-      createExecResult("1"),
+      "shell pm list packages --user 0",
+      createExecResult("package:com.example.app"),
     );
     fakeAdb.setCommandResponseSequence(`install --user 0 -r "${apkPath}"`, [
       createExecResult("", "Failure [INSTALL_FAILED_VERSION_DOWNGRADE]"),
@@ -988,6 +966,12 @@ describe("InstallApp", () => {
     expect(result.warning).toContain("uninstalled it and reinstalled");
     expect(fakeAdb.wasCommandExecuted("uninstall com.example.app")).toBe(true);
     expect(
+      fakeAdb
+        .getCommandCalls()
+        .filter((call) => call.command.startsWith("install "))
+        .map((call) => call.noRetry),
+    ).toEqual([true, true]);
+    expect(
       fakeAdb.getCommandCalls().find((call) => call.command.startsWith("uninstall "))?.timeoutMs,
     ).toBe(120_000);
     expect(repo.markStaleCalls).toBe(2);
@@ -1006,8 +990,8 @@ describe("InstallApp", () => {
     );
     fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 13, running: true }]);
     fakeAdb.setCommandResponse(
-      "shell pm list packages --user 0 -f 'com.example.app'",
-      createExecResult("1"),
+      "shell pm list packages --user 0",
+      createExecResult("package:com.example.app"),
     );
     fakeAdb.setCommandResponseSequence(`install --user 0 -r "${apkPath}"`, [
       createExecResult("", "Failure [INSTALL_FAILED_VERSION_DOWNGRADE]"),
@@ -1057,10 +1041,7 @@ describe("InstallApp", () => {
       "aapt2",
       createExecResult("package: name='com.example.app' versionCode='1'"),
     );
-    fakeAdb.setCommandResponse(
-      "shell pm list packages --user 0 -f 'com.example.app'",
-      createExecResult("0"),
-    );
+    fakeAdb.setCommandResponse("shell pm list packages --user 0", createExecResult(""));
     fakeAdb.setCommandError(
       `install --user 0 -r "${apkPath}"`,
       new Error("Failure [INSTALL_FAILED_INVALID_APK]"),

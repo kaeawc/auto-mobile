@@ -9,3 +9,8 @@ export function outputLooksLikeShellFailure(stdout: string, stderr: string): boo
   }
   return /exception|error:/i.test(combined);
 }
+
+/** Match an exact package entry from `pm list packages` output. */
+export function packageListingContains(stdout: string, packageName: string): boolean {
+  return stdout.split("\n").some((line) => line.trim() === `package:${packageName}`);
+}

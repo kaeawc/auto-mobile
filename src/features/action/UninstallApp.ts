@@ -1,3 +1,4 @@
+import { packageListingContains } from "../../utils/android-cmdline-tools/shellOutputHeuristics";
 import { unsupportedPlatformError } from "../../models/ActionableError";
 import { errorMessage } from "../../utils/describeUnknownError";
 import {
@@ -465,7 +466,7 @@ export class UninstallApp {
       true,
       signal,
     );
-    return result.stdout.split("\n").some((line) => line.trim() === `package:${packageName}`);
+    return packageListingContains(result.stdout, packageName);
   }
 
   private async markInstalledAppsCacheStale(): Promise<void> {

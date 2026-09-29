@@ -1084,6 +1084,17 @@ export class DaemonMcpProxy {
     // closed transport (the old pre-await placement flipped before this await, so
     // close() ran last). Mirrors the closing rechecks above.
     this.throwIfClosing();
+    // Fence the flip to the transport this attempt established (#6389): a socket
+    // close during the establishment heartbeat already ran resetConnection() and
+    // nulled the client, and the best-effort heartbeat swallowed the rejection.
+    // Publishing connected=true now would pair the flag with a null client. No
+    // request was dispatched on the lost transport, so surface it as a preflight
+    // failure that withRecoverableReconnect reconnects from.
+    if (this.client !== client) {
+      throw new DaemonPreflightConnectionError(
+        new DaemonUnavailableError("Daemon socket closed during connection establishment"),
+      );
+    }
     this.connected = true;
     this.cancelBackgroundConnectRetry();
 
@@ -2483,7 +2494,7 @@ export class DaemonMcpProxy {
       const forwardedParams = this.withToolSelectionProfile(this.withBoundSessionUuid({}));
       const result = await this.withRecoverableReconnect(
         () =>
-          this.client!.callDaemonMethod(
+          this.requireClient().callDaemonMethod(
             "tools/list",
             this.withToolSelectionProfile(forwardedParams),
           ),
@@ -2573,7 +2584,7 @@ export class DaemonMcpProxy {
       const result = await this.withRecoverableReconnect(
         () => {
           this.throwIfForwardedSessionReleasedSince(forwardedArgs, callReleaseEpoch);
-          const client = this.client!;
+          const client = this.requireClient();
           return client.callTool(
             name,
             this.withToolSelectionProfile(forwardedArgs),
@@ -2998,6 +3009,18 @@ export class DaemonMcpProxy {
     return this.client !== null;
   }
 
+  /**
+   * The live client for an operation closure. A socket close can land between
+   * ensureConnected() resolving and the closure running (#6389); report that as
+   * a recoverable DaemonUnavailableError rather than a TypeError on null.
+   */
+  private requireClient(): DaemonClientLike {
+    if (!this.client) {
+      throw new DaemonUnavailableError("Daemon socket connection is not established");
+    }
+    return this.client;
+  }
+
   private startBoundSessionHeartbeat(): void {
     if (
       this.boundSessionUuid &&
@@ -3225,7 +3248,7 @@ export class DaemonMcpProxy {
       const claimLivenessOwnership = !this.livenessOwnershipClaimSent;
       await this.withRecoverableReconnect(
         () =>
-          this.client!.callDaemonMethod(
+          this.requireClient().callDaemonMethod(
             DAEMON_HEARTBEAT_METHOD,
             this.boundSessionHeartbeatParams(sessionUuid, claimLivenessOwnership),
           ),
@@ -3691,7 +3714,7 @@ export class DaemonMcpProxy {
       const discoveryEpoch = this.discoveryEpoch;
       const forwardedParams = this.withBoundSessionUuid({});
       const result = await this.withRecoverableReconnect(
-        () => this.client!.callDaemonMethod("resources/list", forwardedParams),
+        () => this.requireClient().callDaemonMethod("resources/list", forwardedParams),
         this.sessionUuidFromArgs(forwardedParams),
       );
       const resources = result?.resources ?? [];
@@ -3721,7 +3744,7 @@ export class DaemonMcpProxy {
       const discoveryEpoch = this.discoveryEpoch;
       const forwardedParams = this.withBoundSessionUuid({});
       const result = await this.withRecoverableReconnect(
-        () => this.client!.callDaemonMethod("resources/list-templates", forwardedParams),
+        () => this.requireClient().callDaemonMethod("resources/list-templates", forwardedParams),
         this.sessionUuidFromArgs(forwardedParams),
       );
       const templates = result?.resourceTemplates ?? [];
@@ -3801,7 +3824,7 @@ export class DaemonMcpProxy {
           }
         : (ownerForwardedParams ?? this.withBoundSessionUuid({}));
     return await this.withRecoverableReconnect(
-      () => this.client!.readResource(uri, forwardedParams),
+      () => this.requireClient().readResource(uri, forwardedParams),
       this.sessionUuidFromArgs(forwardedParams),
       allowReleasedSession,
     );

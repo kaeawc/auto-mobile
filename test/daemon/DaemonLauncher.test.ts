@@ -1,54 +1,12 @@
+import { FakeDaemonSpawner } from "../fakes/FakeDaemonSpawner";
 import { describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { EventEmitter } from "node:events";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, win32 } from "node:path";
-import type { ChildProcess, SpawnOptions } from "node:child_process";
-import {
-  DaemonLauncher,
-  isDaemonEntryScriptPath,
-  type DaemonProcessSpawner,
-} from "../../src/daemon/DaemonLauncher";
+import { DaemonLauncher, isDaemonEntryScriptPath } from "../../src/daemon/DaemonLauncher";
 import { DAEMON_SHUTDOWN_TIMEOUT_MS } from "../../src/daemon/constants";
 import { FakeTimer } from "../fakes/FakeTimer";
-
-class FakeDaemonProcess extends EventEmitter {
-  pid = 12345;
-  exitCode: number | null = null;
-  signalCode: NodeJS.Signals | null = null;
-  killed = false;
-  readonly signals: NodeJS.Signals[] = [];
-  exitOnSignal: NodeJS.Signals | undefined;
-  emitExitImmediately = true;
-
-  unref(): void {}
-
-  kill(signal: NodeJS.Signals): boolean {
-    this.killed = true;
-    this.signals.push(signal);
-    if (this.exitOnSignal === signal && this.emitExitImmediately) {
-      this.emitExit(signal);
-    }
-    return true;
-  }
-
-  emitExit(signal: NodeJS.Signals): void {
-    this.exitCode = 0;
-    this.signalCode = signal;
-    this.emit("exit", 0, signal);
-  }
-}
-
-class FakeDaemonSpawner implements DaemonProcessSpawner {
-  readonly calls: Array<{ command: string; args: string[]; options: SpawnOptions }> = [];
-  readonly process = new FakeDaemonProcess();
-
-  spawn(command: string, args: string[], options: SpawnOptions): ChildProcess {
-    this.calls.push({ command, args, options });
-    return this.process as ChildProcess;
-  }
-}
 
 describe("DaemonLauncher", () => {
   test("matches only the active absolute source entry point", () => {

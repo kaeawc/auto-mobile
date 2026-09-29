@@ -1,3 +1,4 @@
+import { FakeHierarchyCollector } from "../../fakes/FakeHierarchyCollector";
 import { FakeDeviceStateCollector } from "../../fakes/FakeDeviceStateCollector";
 import { FakeScreenshotRecorder } from "../../fakes/FakeScreenshotRecorder";
 import {
@@ -27,37 +28,6 @@ import type { PerformanceAuditor } from "../../../src/features/observe/audits/Pe
 import type { AccessibilityAuditor } from "../../../src/features/observe/audits/AccessibilityAuditor";
 import type { AccessibilityStateDetector } from "../../../src/features/observe/audits/AccessibilityStateDetector";
 import type { BootedDevice, ObserveResult } from "../../../src/models";
-
-class FakeHierarchyCollector implements Pick<
-  HierarchyCollector,
-  "collect" | "collectRaw" | "extractScreenSize"
-> {
-  constructor(
-    private foregroundActivity: string | null = "com.example/.MainActivity",
-    private failure?: ActionableError,
-  ) {}
-
-  async collect(result: ObserveResult, ...args: unknown[]): Promise<void> {
-    if (this.failure) {
-      throw this.failure;
-    }
-    result.viewHierarchy =
-      (args[6] as ViewHierarchyResult | undefined) ??
-      ({
-        hierarchy: {},
-        screenWidth: 1080,
-        screenHeight: 1920,
-        wakefulness: "Awake",
-        ...(this.foregroundActivity ? { foregroundActivity: this.foregroundActivity } : {}),
-      } as any);
-  }
-
-  async collectRaw(): Promise<void> {}
-
-  extractScreenSize(): { width: number; height: number } | null {
-    return { width: 1080, height: 1920 };
-  }
-}
 
 class NoOpAuditor implements Pick<
   PerformanceAuditor & AccessibilityAuditor & AccessibilityStateDetector,

@@ -177,7 +177,13 @@ export function isDaemonEntryScriptPath(
 }
 
 export interface DaemonProcessSpawner {
-  spawn(command: string, args: string[], options: SpawnOptions): ChildProcess;
+  spawn(command: string, args: string[], options: SpawnOptions): DaemonLaunchedProcess;
+}
+
+/** Process surface used during daemon startup and stderr relay. */
+export interface DaemonLaunchedProcess extends TrackedChildProcess {
+  unref(): void;
+  stderr: Pick<NonNullable<ChildProcess["stderr"]>, "on" | "off" | "pause" | "resume"> | null;
 }
 
 /** Injectable synchronous argv-first boundary for bounded daemon process probes. */
@@ -220,7 +226,7 @@ export interface DaemonLaunchRequest {
   args: string[];
   spawnOptions: SpawnOptions;
   /** Attaches any stream relays before readiness probes can complete. */
-  onSpawn?: (daemonProcess: ChildProcess) => void;
+  onSpawn?: (daemonProcess: DaemonLaunchedProcess) => void;
   timeoutMs: number;
   waitForReady: (timeoutMs: number, signal: AbortSignal) => Promise<boolean>;
   /**
@@ -420,7 +426,7 @@ export class DaemonLauncher {
         // Keep startup ownership until the child has actually exited. Detached
         // POSIX launchers also keep process-group escalation armed after their
         // package-runner wrapper exits, so the daemon descendant is reaped.
-        const tracker = trackProcess(daemonProcess as TrackedChildProcess);
+        const tracker = trackProcess(daemonProcess);
         await this.stopTimedOutProcess(
           tracker.process,
           tracker.exitPromise,

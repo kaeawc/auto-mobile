@@ -5,6 +5,7 @@ import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/Adb
 import type { AdbExecutor } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { ExecResult } from "../../src/models";
 import type { BootedDevice } from "../../src/models";
+import { logger } from "../../src/utils/logger";
 
 /**
  * Unit coverage for KeepScreenAwakeManager (previously only tested indirectly
@@ -25,9 +26,10 @@ const execResult = (stdout: string): ExecResult => ({
 
 interface FakeAdbOptions {
   // command substring -> stdout to return
-  responses?: Array<{ match: string; stdout: string }>;
+  responses?: Array<{ match: string; stdout: string | string[] }>;
   // command substrings that should reject (simulate command failure)
   reject?: string[];
+  rejectAt?: Array<{ match: string; occurrence: number }>;
 }
 
 class FakeAdb implements Partial<AdbExecutor> {
@@ -36,11 +38,21 @@ class FakeAdb implements Partial<AdbExecutor> {
 
   async executeCommand(command: string): Promise<ExecResult> {
     this.calls.push(command);
+    const occurrences = this.calls.filter((call) => call.includes(command)).length;
     if (this.opts.reject?.some((r) => command.includes(r))) {
       throw new Error(`fake adb: command failed: ${command}`);
     }
+    if (
+      this.opts.rejectAt?.some((r) => command.includes(r.match) && occurrences === r.occurrence)
+    ) {
+      throw new Error(`fake adb: command failed: ${command}`);
+    }
     const hit = this.opts.responses?.find((r) => command.includes(r.match));
-    return execResult(hit ? hit.stdout : "");
+    if (!hit) {
+      return execResult("");
+    }
+    const stdout = Array.isArray(hit.stdout) ? (hit.stdout.shift() ?? "") : hit.stdout;
+    return execResult(stdout);
   }
 
   called(substring: string): boolean {
@@ -117,11 +129,11 @@ describe("KeepScreenAwakeManager", () => {
     expect(state.skipReason).toBe("detection_failed");
   });
 
-  test("physical device: uses svc stayon when it succeeds (method 'svc')", async () => {
+  test("physical device: verifies svc stayon read-back before reporting success", async () => {
     const adb = new FakeAdb({
       responses: [
         { match: "getprop ro.kernel.qemu", stdout: "0" }, // physical
-        { match: "settings get global stay_on_while_plugged_in", stdout: "0" },
+        { match: "settings get global stay_on_while_plugged_in", stdout: ["0", "7"] },
       ],
       // svc power stayon true resolves (not in reject list)
     });
@@ -136,6 +148,47 @@ describe("KeepScreenAwakeManager", () => {
     expect(adb.called("shell svc power stayon true")).toBe(true);
     // Should not have fallen back to the settings put path.
     expect(adb.called("settings put system screen_off_timeout")).toBe(false);
+  });
+
+  test("falls back when svc exits successfully but stay-on remains disabled", async () => {
+    const warning = spyOn(logger, "warn").mockImplementation(() => {});
+    const adb = new FakeAdb({
+      responses: [
+        { match: "getprop ro.kernel.qemu", stdout: "0" },
+        { match: "settings get global stay_on_while_plugged_in", stdout: ["0", "0", "0"] },
+        { match: "settings get system screen_off_timeout", stdout: "120000" },
+      ],
+    });
+    const mgr = new KeepScreenAwakeManager(physicalDevice, makeFactory(adb));
+
+    const state = await mgr.apply(true);
+
+    expect(state.applied).toBe(true);
+    expect(state.method).toBe("settings");
+    expect(adb.called("settings put global stay_on_while_plugged_in 7")).toBe(true);
+    expect(warning).toHaveBeenCalled();
+    warning.mockRestore();
+  });
+
+  test("warns and falls back when svc stayon read-back fails", async () => {
+    const warning = spyOn(logger, "warn").mockImplementation(() => {});
+    const adb = new FakeAdb({
+      responses: [
+        { match: "getprop ro.kernel.qemu", stdout: "0" },
+        { match: "settings get global stay_on_while_plugged_in", stdout: ["0", "0"] },
+        { match: "settings get system screen_off_timeout", stdout: "120000" },
+      ],
+      rejectAt: [{ match: "settings get global stay_on_while_plugged_in", occurrence: 2 }],
+    });
+    const mgr = new KeepScreenAwakeManager(physicalDevice, makeFactory(adb));
+
+    const state = await mgr.apply(true);
+
+    expect(state.applied).toBe(true);
+    expect(state.method).toBe("settings");
+    expect(adb.called("settings put global stay_on_while_plugged_in 7")).toBe(true);
+    expect(warning).toHaveBeenCalled();
+    warning.mockRestore();
   });
 
   test("physical device: falls back to settings when svc stayon fails (method 'settings')", async () => {

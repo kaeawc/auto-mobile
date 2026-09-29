@@ -10,6 +10,9 @@ import ts from "typescript";
  */
 const FAKES_DIR = path.join(import.meta.dir);
 const EXPECTED_CONTRACT_TYPES: Record<string, string> = {
+  "FakeProcess.ts:FakeProcess": "ProcessLifecycleProcess",
+  "FakeToolSelectionProfileProvenanceStore.ts:FakeToolSelectionProfileProvenanceStore":
+    "ToolSelectionProfileProvenanceStore",
   "FakeAdbClient.ts:FakeAdbClient": "AdbExecutor",
   "FakeDeviceSnapshotConfigRepository.ts:FakeDeviceSnapshotConfigRepository": "ConfigRepository",
   "FakeDeviceSnapshotRepository.ts:FakeDeviceSnapshotRepository": "DeviceSnapshotRepository",

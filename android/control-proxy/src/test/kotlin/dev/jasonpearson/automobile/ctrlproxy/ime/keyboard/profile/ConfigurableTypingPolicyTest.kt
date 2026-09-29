@@ -60,6 +60,40 @@ class ConfigurableTypingPolicyTest {
   }
 
   @Test
+  fun `direct profile preserves unicode corpus without lone UTF-16 surrogates`() {
+    unicodeCorpus().forEach { input ->
+      val editor = FakeEditor()
+      val ops = policy(KeyboardProfiles.DIRECT).onText(input, editor.snapshot())
+      val commits = ops.filterIsInstance<ImeOp.CommitText>().map(ImeOp.CommitText::text)
+
+      assertTrue(
+        "A commit contained a lone UTF-16 surrogate for input: $input",
+        commits.all { it.hasWellFormedUtf16() },
+      )
+      editor.apply(ops)
+      assertEquals(input, editor.text)
+    }
+  }
+
+  @Test
+  fun `direct profile keeps grapheme sequences whole as tracked for issue 7999`() {
+    val graphemes = listOf("1️⃣", "e\u0301", "👨‍👩‍👧", "🇯🇵", "👍🏽", "🏳️‍🌈", "👩🏽‍💻")
+
+    graphemes.forEach { grapheme ->
+      val editor = FakeEditor()
+      val commits =
+        policy(KeyboardProfiles.DIRECT)
+          .onText(grapheme, editor.snapshot())
+          .filterIsInstance<ImeOp.CommitText>()
+          .map(ImeOp.CommitText::text)
+
+      assertEquals(listOf(grapheme), commits)
+      editor.apply(commits.map(ImeOp::CommitText))
+      assertEquals(grapheme, editor.text)
+    }
+  }
+
+  @Test
   fun `gboard composes words and commits whole emoji graphemes`() {
     val cases =
       listOf(
@@ -485,6 +519,34 @@ class ConfigurableTypingPolicyTest {
   }
 
   private fun policy(profile: KeyboardProfile) = ConfigurableTypingPolicy(profile.behavior)
+
+  private fun unicodeCorpus() =
+    listOf(
+      "a😀b👍🏽c👨‍👩‍👧d🇯🇵e❤️fé日本",
+      "1️⃣",
+      "e\u0301",
+      "🏳️‍🌈",
+      "👩🏽‍💻",
+      "ไทย",
+      "हिन्दी",
+      "مرحبا",
+      "한국어",
+    )
+
+  private fun String.hasWellFormedUtf16(): Boolean {
+    var index = 0
+    while (index < length) {
+      when {
+        this[index].isHighSurrogate() -> {
+          if (index + 1 >= length || !this[index + 1].isLowSurrogate()) return false
+          index += 2
+        }
+        this[index].isLowSurrogate() -> return false
+        else -> index++
+      }
+    }
+    return true
+  }
 
   private fun type(policy: TypingPolicy, editor: FakeEditor, text: String) {
     editor.apply(policy.onText(text, editor.snapshot()))

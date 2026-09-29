@@ -14,6 +14,7 @@ import {
   setElementProvenance,
   setCapturedKeyboard,
   setUncollectedWrappers,
+  setHierarchyNodeSource,
 } from "./output/elementProvenance";
 
 export interface ObserveElementCollector {
@@ -117,6 +118,9 @@ export class DefaultObserveElementCollector implements ObserveElementCollector {
       const { properties: nodeProperties, depth } = searchable;
       // Public observe descriptors remain independently owned by each collection.
       const parsedNode = searchable.element ? structuredClone(searchable.element) : undefined;
+      if (parsedNode) {
+        setHierarchyNodeSource(parsedNode, searchable.source);
+      }
       keyboardRoot = nextKeyboardRoot(
         keyboardRoot,
         nodeProperties.extras?.["automobile:imePackage"],

@@ -1,20 +1,26 @@
 import { describe, expect, test } from "bun:test";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
-import type { Element, ObserveResult } from "../../../src/models";
+import type { ObserveResult } from "../../../src/models";
 import type { AdbExecutor } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeElementSelector } from "../../fakes/FakeElementSelector";
 import { FakeTapStrategy } from "../../fakes/FakeTapStrategy";
 import { FakeTimer } from "../../fakes/FakeTimer";
-import { imeOcclusionHierarchy } from "../../fixtures/observe/imeOcclusion";
+import {
+  imeOcclusionHierarchy,
+  sharedBoundsImeHierarchy,
+} from "../../fixtures/observe/imeOcclusion";
+import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
+import type { ViewHierarchyResult } from "../../../src/models/ViewHierarchyResult";
 
 async function executeAt(
   label: string,
   withIme = true,
   platform: "android" | "ios" = "android",
   sameRoot = false,
+  fixture?: ViewHierarchyResult,
 ) {
-  const hierarchy = imeOcclusionHierarchy(withIme);
+  const hierarchy = fixture ?? imeOcclusionHierarchy(withIme);
   const keyboard = hierarchy.windows?.[0]?.hierarchy.node;
   if (keyboard && platform === "ios") {
     keyboard.$ = { class: "UIKeyboard" };
@@ -27,11 +33,16 @@ async function executeAt(
     hierarchy.hierarchy.node?.node?.push(keyboard);
     hierarchy.windows = [];
   }
-  const source = hierarchy.hierarchy.node?.node?.find((node) => node.$?.text === label);
+  const source =
+    hierarchy.hierarchy.node?.node?.find((node) => node.$?.text === label) ??
+    hierarchy.windows?.[0]?.hierarchy.node?.node?.find((node) => node.$?.text === label);
   if (!source?.$?.bounds) {
     throw new Error(`Missing fixture node ${label}`);
   }
-  const element = source.$ as Element;
+  const element = new DefaultElementParser().parseNodeBounds(source);
+  if (!element) {
+    throw new Error(`Invalid fixture bounds for ${label}`);
+  }
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
   const adb = Object.assign(new FakeAdbExecutor(), {
@@ -75,6 +86,31 @@ async function executeAt(
 }
 
 describe("tapOn Android IME occlusion", () => {
+  test("refuses text-selected app content behind an anonymous equal-bounds IME key", async () => {
+    const { result, points } = await executeAt(
+      "Continue as Guest",
+      true,
+      "android",
+      false,
+      sharedBoundsImeHierarchy(),
+    );
+    expect(points).toEqual([]);
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("covered by the soft keyboard");
+  });
+
+  test("allows a genuinely selected equal-bounds IME key", async () => {
+    const { result, points } = await executeAt(
+      "Q",
+      true,
+      "android",
+      false,
+      sharedBoundsImeHierarchy(),
+    );
+    expect(result.success).toBe(true);
+    expect(points).toEqual([{ x: 200, y: 175 }]);
+  });
+
   test("fully covered app element fails without dispatching a tap", async () => {
     const { result, points } = await executeAt("Continue as Guest");
     expect(points).toEqual([]);

@@ -4,6 +4,9 @@ import type { ObserveResult } from "../../../../src/models/ObserveResult";
 import type { ViewHierarchyNode } from "../../../../src/models/ViewHierarchyResult";
 import { DefaultObserveElementCollector } from "../../../../src/features/observe/ObserveElementCollector";
 import { sanitizeObserveResult } from "../../../../src/features/observe/output/ObserveResultOutput";
+import { getImeOccluderForElement } from "../../../../src/features/observe/output/SkeletonProjection";
+import { DefaultElementParser } from "../../../../src/features/utility/ElementParser";
+import { sharedBoundsImeHierarchy } from "../../../fixtures/observe/imeOcclusion";
 
 function observation(platform: "android" | "ios" = "android", keyboard = true): ObserveResult {
   const node = (text: string): ViewHierarchyNode => ({
@@ -47,6 +50,19 @@ function observation(platform: "android" | "ios" = "android", keyboard = true): 
 }
 
 describe("Android keyboard output projection", () => {
+  test("resolves equal-bounds anonymous app and IME nodes by hierarchy identity", () => {
+    const hierarchy = sharedBoundsImeHierarchy();
+    const elements = new DefaultObserveElementCollector().collect(hierarchy, "android")!;
+    const parser = new DefaultElementParser();
+    const app = parser.parseNodeBounds(hierarchy.hierarchy.node!.node![0])!;
+    const key = parser.parseNodeBounds(hierarchy.windows![0].hierarchy.node!.node![0])!;
+    expect(elements.clickable[0].bounds).toEqual(elements.text[0].bounds);
+    expect(elements.clickable[0]["resource-id"]).toBeUndefined();
+    expect(elements.text[0]["resource-id"]).toBeUndefined();
+    expect(getImeOccluderForElement(elements, app)?.bounds).toEqual([100, 160, 300, 190]);
+    expect(getImeOccluderForElement(elements, key)).toBeUndefined();
+  });
+
   test("reports a captured keyboard even without accessible keys", () => {
     const source = observation();
     source.viewHierarchy!.hierarchy.node!.node![1].node = [];

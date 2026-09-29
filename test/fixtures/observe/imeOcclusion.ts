@@ -44,3 +44,26 @@ export function imeOcclusionHierarchy(withIme = true): ViewHierarchyResult {
       : [],
   };
 }
+
+/** Equal-bounds app text and anonymous clickable IME key from separate windows. */
+export function sharedBoundsImeHierarchy(): ViewHierarchyResult {
+  const bounds = { left: 100, top: 160, right: 300, bottom: 190 };
+  return {
+    hierarchy: {
+      node: {
+        $: {},
+        node: [{ $: { text: "Continue as Guest", bounds } }],
+      },
+    },
+    windows: [
+      {
+        hierarchy: {
+          node: {
+            $: { extras: { "automobile:imePackage": "com.example.keyboard" } },
+            node: [{ $: { text: "Q", clickable: true, bounds } }],
+          },
+        },
+      },
+    ],
+  };
+}

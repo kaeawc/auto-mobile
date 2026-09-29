@@ -12,6 +12,7 @@ import type { Affordance, ObserveResult, SkeletonElement } from "../../../models
 import {
   ElementProvenance,
   getElementProvenance,
+  getHierarchyNodeSource,
   getCapturedKeyboard,
   getUncollectedWrappers,
   isStrictAncestor,
@@ -767,6 +768,14 @@ function isBelowImeWindow(provenance: ElementProvenance | undefined, ime: ImeOcc
 }
 
 function isSameHierarchyNode(candidate: Element, target: Element): boolean {
+  if (candidate === target) {
+    return true;
+  }
+  const candidateSource = getHierarchyNodeSource(candidate);
+  const targetSource = getHierarchyNodeSource(target);
+  if (candidateSource && targetSource) {
+    return candidateSource === targetSource;
+  }
   return (
     candidate.bounds.left === target.bounds.left &&
     candidate.bounds.top === target.bounds.top &&

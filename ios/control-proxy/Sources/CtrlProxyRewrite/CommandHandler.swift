@@ -1215,6 +1215,20 @@ final class CommandHandler: CommandHandling {
 
     // MARK: - Device Control
 
+    private func reportedOrientation(previous: String, afterSize: (Int, Int)) -> String {
+        let portraitDisplay = afterSize.0 < afterSize.1
+        switch previous {
+        case "portrait", "portrait_upside_down":
+            return portraitDisplay ? previous : "landscape_left"
+        case "landscape_left", "landscape_right":
+            return portraitDisplay ? "portrait" : previous
+        case "unknown":
+            return "unknown"
+        default:
+            return portraitDisplay ? "portrait" : "landscape_left"
+        }
+    }
+
     private func handleRotate(_ request: RequestRotate, startTime: Date) async throws -> RotateResponse {
         let orientation = request.orientation
 
@@ -1267,7 +1281,7 @@ final class CommandHandler: CommandHandling {
                 success: true,
                 totalTimeMs: totalTimeMs(from: startTime),
                 previousOrientation: previousOrientation,
-                currentOrientation: beforeSize.0 < beforeSize.1 ? "portrait" : previousOrientation,
+                currentOrientation: reportedOrientation(previous: previousOrientation, afterSize: beforeSize),
                 value: value,
                 rotationPerformed: false
             )
@@ -1291,7 +1305,7 @@ final class CommandHandler: CommandHandling {
                 success: false,
                 totalTimeMs: totalTimeMs(from: startTime),
                 previousOrientation: previousOrientation,
-                currentOrientation: previousOrientation,
+                currentOrientation: reportedOrientation(previous: previousOrientation, afterSize: afterSize),
                 value: beforeSize.0 < beforeSize.1 ? 0 : 1,
                 rotationPerformed: false,
                 error: "Rotation is not supported on this display (the screen size did not change)"

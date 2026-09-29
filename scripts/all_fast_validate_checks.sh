@@ -39,6 +39,7 @@ add_check "element-resolution-ratchet" "bash \"$PROJECT_ROOT/scripts/check-eleme
 add_check "test-as-any-ratchet" "bash \"$PROJECT_ROOT/scripts/test-as-any-baseline.sh\"" "lint,conventions,typescript" "Forbid growth of test as-any assertions"
 add_check "node-format" "bun --cwd \"$PROJECT_ROOT\" run format:check" "format,typescript" "Check Node TypeScript formatting"
 add_check "yaml" "bun \"$PROJECT_ROOT/scripts/validate-yaml.ts\"" "config,yaml" "Validate test plan YAML files"
+add_check "ctrl-proxy-project-sources" "\"$PROJECT_ROOT/scripts/check-ctrl-proxy-project-sources.sh\"" "config,ios" "Check CtrlProxy Swift sources are in its Xcode project"
 add_check "schema-copy-drift" "bun \"$PROJECT_ROOT/scripts/check-schema-copy-drift.ts\"" "config,schema" "Detect drift between the canonical and Android copies of test-plan.schema.json"
 add_check "bun-version-coherence" "bun \"$PROJECT_ROOT/scripts/check-bun-version-coherence.ts\"" "config,dependencies" "Keep Bun versions aligned across package, workflows, Docker, and local development"
 add_check "xml" "\"$PROJECT_ROOT/scripts/xml/validate_xml.sh\"" "config,xml" "Validate XML files"

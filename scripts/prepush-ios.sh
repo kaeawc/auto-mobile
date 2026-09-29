@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # Fast, simulator-free iOS validation for a Swift change before it is pushed.
+# PREPUSH_IOS_SKIP_CTRL_PROXY_RUNNER_BUILD=1 skips the CtrlProxy Xcode runner
+# compile for ios/control-proxy/Sources changes when a local Xcode build is unavailable.
 set -euo pipefail
 
 usage() {
@@ -7,7 +9,8 @@ usage() {
 Usage: scripts/prepush-ios.sh
 
 Runs the pinned SwiftFormat lint, SwiftLint, XCTestRunner build, and its
-simulator-free XCTestRunnerTests subset. Run it from any directory.
+simulator-free XCTestRunnerTests subset. CtrlProxy source changes also compile
+the Xcode UI test runner. Run it from any directory.
 EOF
 }
 
@@ -69,6 +72,14 @@ if [[ ${git_diff_status} -ne 0 ]]; then
   echo "prepush-ios.sh: git diff against '${base_ref}' failed" >&2
   exit 1
 fi
+
+ctrl_proxy_sources_changed=false
+for swift_file in ${swift_files[@]+"${swift_files[@]}"}; do
+  if [[ "${swift_file}" == "${project_root}/ios/control-proxy/Sources/"* ]]; then
+    ctrl_proxy_sources_changed=true
+    break
+  fi
+done
 
 if [[ ${#swift_files[@]} -eq 0 ]]; then
   echo "No changed Swift files relative to ${base_ref}; skipping SwiftFormat and SwiftLint."
@@ -153,4 +164,10 @@ fi
 if [[ ${EXECUTED_TESTS} -eq 0 ]]; then
   echo "prepush-ios.sh: XCTestRunnerTests filter executed 0 tests; check the --filter expression" >&2
   exit 1
+fi
+
+if [[ "${ctrl_proxy_sources_changed}" == true && "${PREPUSH_IOS_SKIP_CTRL_PROXY_RUNNER_BUILD:-0}" != 1 ]]; then
+  echo "Compiling CtrlProxy iOS UI test runner for changed Sources"
+  AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA="${AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA:-${project_root}/scratch/ctrl-proxy-prepush-derived-data}" \
+    "${project_root}/scripts/ios/ctrl-proxy-build-for-testing.sh"
 fi

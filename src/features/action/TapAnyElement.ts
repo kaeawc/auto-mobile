@@ -1,8 +1,10 @@
 import { unsupportedPlatformError } from "../../models/ActionableError";
 import {
   DefaultHierarchyCapture,
+  getHierarchySnapshot,
   identifyObservedHierarchy,
   type HierarchyCapture,
+  type HierarchySnapshot,
 } from "../observe/HierarchyCapture";
 import { extractHierarchyScreenSize } from "../observe/hierarchyScreenSize";
 import type { TapAnyElementResult } from "../../models/TapAnyElementResult";
@@ -83,6 +85,11 @@ type RefreshViewHierarchy = (
   screenSize?: ObserveResult["screenSize"],
   signal?: AbortSignal,
 ) => Promise<ViewHierarchyResult | null>;
+
+interface CapturedTapTarget {
+  element: Element;
+  capture: HierarchySnapshot;
+}
 
 /**
  * Headroom added to a long-press duration when sizing the CtrlProxy request
@@ -479,10 +486,12 @@ export class TapAnyElement extends BaseVisualChange {
     x: number,
     y: number,
     durationMs: number,
-    element: Element,
+    target: CapturedTapTarget,
     signal?: AbortSignal,
   ): Promise<void> {
+    const { element, capture } = target;
     this.beforeAndroidTapForTesting?.();
+    this.assertSelectedCapture(capture);
     const talkBackEnabled =
       element["hierarchy-source"] !== "uiautomator" &&
       (await this.accessibilityDetector.detectMethod(
@@ -632,7 +641,7 @@ export class TapAnyElement extends BaseVisualChange {
 
   private async retryAndroidTapIfNoChange(
     preTapHash: string | null,
-    element: Element,
+    target: CapturedTapTarget,
     action: TapAnyElementOptions["action"],
     durationMs: number,
     screenSize?: ObserveResult["screenSize"],
@@ -654,22 +663,23 @@ export class TapAnyElement extends BaseVisualChange {
     if (probe.status === "changed") {
       return;
     }
-    // The first tap was unobserved. Like tapOn, retry exactly once after debounce.
-    const retryElement =
-      this.findClickableElement({ action }, probe.hierarchy, screenSize).element ?? element;
-    const retryPoint = this.geometry.getElementCenter(retryElement);
+    // The first tap was unobserved. Retry the same captured target once after debounce.
+    const retryPoint = this.geometry.getElementCenter(target.element);
     logger.warn(
       `[TapAnyElement] Hierarchy unchanged after tap at (${retryPoint.x}, ${retryPoint.y}); retrying`,
     );
     await this.timer.sleep(PRE_RETRY_DELAY_MS);
-    await this.executeAndroidTap(
-      action,
-      retryPoint.x,
-      retryPoint.y,
-      durationMs,
-      retryElement,
-      signal,
-    );
+    await this.executeAndroidTap(action, retryPoint.x, retryPoint.y, durationMs, target, signal);
+  }
+
+  private assertSelectedCapture(selectedCapture: HierarchySnapshot): void {
+    const dispatchCapture = getHierarchySnapshot(selectedCapture.hierarchy);
+    if (
+      dispatchCapture?.captureId !== selectedCapture.captureId ||
+      dispatchCapture.hierarchy !== selectedCapture.hierarchy
+    ) {
+      throw new ActionableError("Selected hierarchy capture changed before tap dispatch");
+    }
   }
 
   private createErrorResult(action: string, error: string): TapOnElementResult {
@@ -1239,7 +1249,7 @@ export class TapAnyElement extends BaseVisualChange {
               found = this.findClickableElement(
                 options,
                 selectedCapture.hierarchy,
-                extractHierarchyScreenSize(selectedCapture.hierarchy) ?? observeResult.screenSize,
+                extractHierarchyScreenSize(selectedCapture.hierarchy) ?? undefined,
               );
               element = found.element;
               containerFoundEver = containerFoundEver || found.containerFound;
@@ -1265,6 +1275,7 @@ export class TapAnyElement extends BaseVisualChange {
           }
 
           const tapPoint = this.geometry.getElementCenter(element);
+          const target = { element, capture: selectedCapture };
           const action = options.action;
           const longPressDuration = this.getLongPressDuration(options);
 
@@ -1282,12 +1293,12 @@ export class TapAnyElement extends BaseVisualChange {
                 tapPoint.x,
                 tapPoint.y,
                 longPressDuration,
-                element,
+                target,
                 signal,
               );
               await this.retryAndroidTapIfNoChange(
                 preTapHash,
-                element,
+                target,
                 action,
                 longPressDuration,
                 observeResult.screenSize,
@@ -1296,6 +1307,7 @@ export class TapAnyElement extends BaseVisualChange {
               break;
             }
             case "ios":
+              this.assertSelectedCapture(selectedCapture);
               await this.executeIosTap(
                 action,
                 tapPoint.x,
@@ -1346,6 +1358,7 @@ export class TapAnyElement extends BaseVisualChange {
     } catch (error) {
       perf.end();
       const errorMsg = errorMessage(error);
+      logger.warn(`[TapAnyElement] Tap failed: ${errorMsg}`, error);
       return {
         success: false,
         action: options.action,

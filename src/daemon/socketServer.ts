@@ -273,6 +273,7 @@ export const DAEMON_ACCEPTANCE_RESTART_ADMISSION_TTL_MS = 15_000;
 const DAEMON_REQUEST_HANDLER_DRAIN_TIMEOUT_MS = 1_000;
 /** Keep shutdown bounded if a client cannot flush a release notification. */
 const DAEMON_NOTIFICATION_WRITE_DRAIN_TIMEOUT_MS = 1_000;
+const DAEMON_RPC_SOCKET_MAX_QUEUED_BYTES = 1024 * 1024;
 
 /**
  * The loopback MCP HTTP server answers an unknown `mcp-session-id` with 404
@@ -698,6 +699,10 @@ export class UnixSocketServer {
   private sessions: Map<string, SessionContext> = new Map();
   /** Live client sockets by session ID, for server-pushed notification frames (issue #3223). */
   private clientSockets: Map<string, Socket> = new Map();
+  private readonly backpressuredSocketIdle = new WeakMap<
+    Socket,
+    { start: () => void; refresh: () => void }
+  >();
   /** Request handlers that can continue after their client socket is destroyed. */
   private activeRequestHandlers: Set<Promise<void>> = new Set();
   /** Parsed requests awaiting their one terminal response, including queued requests. */
@@ -1041,6 +1046,8 @@ export class UnixSocketServer {
     let buffer = "";
     const decoder = new TextDecoder();
 
+    // Ordinary idle sockets retain Node's timeout. Once a write backpressures,
+    // writes must no longer extend the lifetime of a peer that is not reading.
     socket.setTimeout(DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS);
     socket.on("timeout", () => {
       logger.warn(
@@ -1048,6 +1055,32 @@ export class UnixSocketServer {
       );
       socket.destroy();
     });
+    const armIdleTimeout = (): NodeJS.Timeout =>
+      this.timer.setTimeout(() => {
+        logger.warn(
+          `Daemon RPC socket ${sessionId} idle timeout after ${DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS}ms, destroying`,
+        );
+        socket.destroy();
+      }, DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS);
+    let idleTimeout: NodeJS.Timeout | undefined;
+    const refreshIdle = (): void => {
+      if (!idleTimeout || socket.destroyed) {
+        return;
+      }
+      this.timer.clearTimeout(idleTimeout);
+      idleTimeout = armIdleTimeout();
+    };
+    this.backpressuredSocketIdle.set(socket, {
+      start: () => {
+        if (idleTimeout || socket.destroyed) {
+          return;
+        }
+        socket.setTimeout(0);
+        idleTimeout = armIdleTimeout();
+      },
+      refresh: refreshIdle,
+    });
+    socket.on("drain", refreshIdle);
 
     if (this.onFrameTrace) {
       socket.on("drain", () => this.traceFrame("socket_drain", "*"));
@@ -1057,6 +1090,7 @@ export class UnixSocketServer {
     }
 
     socket.on("data", (data) => {
+      refreshIdle();
       const receivedAtMs = this.timer.now();
       buffer += typeof data === "string" ? data : decoder.decode(data, { stream: true });
 
@@ -1075,6 +1109,10 @@ export class UnixSocketServer {
     });
 
     socket.on("close", (hadError) => {
+      if (idleTimeout) {
+        this.timer.clearTimeout(idleTimeout);
+      }
+      this.backpressuredSocketIdle.delete(socket);
       if (this.onFrameTrace) {
         this.traceFrame("socket_close", "*", undefined, undefined, { hadError });
       }
@@ -1434,14 +1472,28 @@ export class UnixSocketServer {
     }
     try {
       const payload = JSON.stringify(frame) + "\n";
-      const ok = socket.write(payload, onFlushed);
+      const byteLength = Buffer.byteLength(payload);
+      if (socket.writableLength + byteLength > DAEMON_RPC_SOCKET_MAX_QUEUED_BYTES) {
+        const error = new Error(
+          `Daemon RPC socket queued bytes exceeded ${DAEMON_RPC_SOCKET_MAX_QUEUED_BYTES}`,
+        );
+        logger.warn(`Daemon RPC socket ${sessionId} write queue exceeded limit; destroying`);
+        onFlushed?.(error);
+        socket.destroy();
+        return;
+      }
+      const ok = socket.write(payload, (error) => {
+        if (!error && !socket.destroyed && socket.writableLength === 0) {
+          this.backpressuredSocketIdle.get(socket)?.refresh();
+        }
+        onFlushed?.(error);
+      });
       if (onWritten) {
-        onWritten(socket.writableLength, Buffer.byteLength(payload));
+        onWritten(socket.writableLength, byteLength);
       }
       if (!ok) {
-        logger.debug(
-          `Daemon RPC socket ${sessionId} backpressured; awaiting drain (idle timeout still armed)`,
-        );
+        this.backpressuredSocketIdle.get(socket)?.start();
+        logger.debug(`Daemon RPC socket ${sessionId} backpressured; awaiting drain`);
       }
     } catch (error) {
       onFlushed?.(error instanceof Error ? error : new Error(errorMessage(error)));

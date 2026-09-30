@@ -160,7 +160,7 @@ describe("LaunchApp", () => {
         detectTargetUserId: () => trackAmbient("adb shell cmd user", async () => 0),
       },
       installedAppsProvider: {
-        listInstalledApps: async () => [packageName],
+        listInstalledApps: async () => ({ apps: [packageName], successful: true }),
       },
       performanceTrackerFactory: () => new DefaultPerformanceTracker(fakeTimer),
     });
@@ -1021,7 +1021,7 @@ describe("LaunchApp", () => {
       device.deviceId,
       `device-disconnected:${device.deviceId}`,
     );
-    const installedApps = Promise.withResolvers<string[]>();
+    const installedApps = Promise.withResolvers<{ apps: string[]; successful: boolean }>();
     const events: string[] = [];
     const receivedSignals: AbortSignal[] = [];
     const cancellableLaunch = new LaunchApp(device, fakeAdb as unknown as any, null, fakeTimer, {
@@ -1073,7 +1073,7 @@ describe("LaunchApp", () => {
     expect(receivedSignals).toEqual([controller.signal, controller.signal]);
     expect(events).toEqual(["paused"]);
 
-    installedApps.resolve([]);
+    installedApps.resolve({ apps: [], successful: true });
     await expect(result).rejects.toBe(deviceLoss);
     expect(events).toEqual(["paused", "resumed"]);
     expect(hasStartedAppLaunch()).toBe(false);
@@ -1978,6 +1978,36 @@ describe("LaunchApp", () => {
     expect(result.userId).toBe(10);
   });
 
+  test("reports an Android listing failure instead of claiming the app is absent", async () => {
+    fakeTimer.enableAutoAdvance();
+    const installedAppsProvider = new FakeInstalledAppsProvider(fakeTimer, {
+      successful: false,
+      error: new Error("adb package listing failed"),
+    });
+    const action = new LaunchApp(device, fakeAdb, null, fakeTimer, {
+      installedAppsProvider,
+    });
+
+    await expect(action.execute(packageName, false, false)).rejects.toThrow(
+      "Could not determine whether com.example.app is installed: adb package listing failed",
+    );
+    expect(hasStartedAppLaunch()).toBe(false);
+  });
+
+  test("rejects an incomplete Android listing even when it contains the app", async () => {
+    fakeTimer.enableAutoAdvance();
+    const action = new LaunchApp(device, fakeAdb, null, fakeTimer, {
+      installedAppsProvider: {
+        listInstalledApps: async () => ({ apps: [packageName], successful: false }),
+      },
+    });
+
+    await expect(action.execute(packageName, false, false)).rejects.toThrow(
+      "Could not determine whether com.example.app is installed: installed-app listing did not complete successfully",
+    );
+    expect(hasStartedAppLaunch()).toBe(false);
+  });
+
   test("waits for both preflight tasks to settle when one fails", async () => {
     const targetUserDetector = new FakeTargetUserDetector(fakeTimer, {
       delayMs: 50,
@@ -2112,7 +2142,12 @@ describe("LaunchApp", () => {
     const userBundleId = "com.example.myapp";
     const systemBundleId = "com.apple.Preferences";
 
-    function createIOSTestHarness(opts: { bundleId: string; launchSuccess?: boolean }) {
+    function createIOSTestHarness(opts: {
+      bundleId: string;
+      launchSuccess?: boolean;
+      listingSuccessful?: boolean;
+      installedApps?: string[];
+    }) {
       const iosDevice: BootedDevice = {
         name: "test-ios",
         platform: "ios",
@@ -2145,7 +2180,8 @@ describe("LaunchApp", () => {
       });
 
       const installedApps = new FakeInstalledAppsProvider(fakeTimer, {
-        installedApps: [opts.bundleId],
+        installedApps: opts.installedApps ?? [opts.bundleId],
+        successful: opts.listingSuccessful,
       });
 
       const fakeSimctl = {
@@ -2171,6 +2207,7 @@ describe("LaunchApp", () => {
       return {
         iosLaunchApp,
         fakeCtrlProxy,
+        installedApps,
         targetBundleIdCalls,
         cleanup: () => {
           ctrlProxySpy.mockRestore();
@@ -2257,6 +2294,48 @@ describe("LaunchApp", () => {
 
         expect(result.success).toBe(true);
         expect(fakeCtrlProxy.getLaunchAppHistory()).toEqual([userBundleId]);
+      } finally {
+        cleanup();
+      }
+    });
+
+    test("preserves the simctl launch error when the fallback app listing fails", async () => {
+      fakeTimer.enableAutoAdvance();
+      const { iosLaunchApp, installedApps, cleanup } = createIOSTestHarness({
+        bundleId: userBundleId,
+        launchSuccess: false,
+        listingSuccessful: false,
+      });
+
+      try {
+        const result = await iosLaunchApp.execute(userBundleId, false, false);
+        expect(result).toMatchObject({
+          success: false,
+          packageName: userBundleId,
+          error: "simctl launch failed",
+        });
+        expect(installedApps.getCallCount()).toBe(1);
+      } finally {
+        cleanup();
+      }
+    });
+
+    test("reports a missing iOS simulator app after a successful empty listing", async () => {
+      fakeTimer.enableAutoAdvance();
+      const { iosLaunchApp, installedApps, cleanup } = createIOSTestHarness({
+        bundleId: userBundleId,
+        launchSuccess: false,
+        installedApps: [],
+      });
+
+      try {
+        const result = await iosLaunchApp.execute(userBundleId, false, false);
+        expect(result).toMatchObject({
+          success: false,
+          packageName: userBundleId,
+          error: "App is not installed",
+        });
+        expect(installedApps.getCallCount()).toBe(1);
       } finally {
         cleanup();
       }

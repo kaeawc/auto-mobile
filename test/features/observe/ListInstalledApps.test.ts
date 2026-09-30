@@ -1507,6 +1507,7 @@ describe("ListInstalledApps physical iOS devices", function () {
     await expect(list.executeIosDetailedResult()).resolves.toEqual({
       apps: [],
       successful: false,
+      error: lister.failure,
     });
   });
 

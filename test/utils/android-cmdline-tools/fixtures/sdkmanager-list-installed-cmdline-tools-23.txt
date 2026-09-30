@@ -1,0 +1,28 @@
+Installed packages:
+  build-tools/30.0.3                                               30.0.3            Android SDK Build-Tools 30.0.3         
+  build-tools/33.0.1                                               33.0.1            Android SDK Build-Tools 33.0.1         
+  build-tools/34.0.0                                               34.0.0            Android SDK Build-Tools 34             
+  build-tools/35.0.0                                               35.0.0            Android SDK Build-Tools 35             
+  build-tools/35.0.1                                               35.0.1            Android SDK Build-Tools 35.0.1         
+  build-tools/36.0.0                                               36.0.0            Android SDK Build-Tools 36             
+  cmdline-tools/latest                                             23.0.0            Android SDK Command-line Tools (latest)
+  emulator                                                         37.1.11           Android Emulator                       
+  ndk/26.1.10909125                                                26.1.10909125     NDK (Side by side) 26.1.10909125       
+  ndk/27.0.12077973                                                27.0.12077973     NDK (Side by side) 27.0.12077973       
+  ndk/27.2.12479018                                                27.2.12479018     NDK (Side by side) 27.2.12479018       
+  platform-tools                                                   37.0.1            Android SDK Platform-Tools             
+  platforms/android-29                                             5.0.0             Android SDK Platform 29                
+  platforms/android-31                                             1.0.0             Android SDK Platform 31                
+  platforms/android-32                                             1.0.0             Android SDK Platform 32                
+  platforms/android-34                                             3.0.0             Android SDK Platform 34                
+  platforms/android-35                                             2.0.0             Android SDK Platform 35                
+  platforms/android-36                                             2.0.0             Android SDK Platform 36                
+  platforms/android-37.0                                           2.0.0             Android SDK Platform 37.0              
+  sources/android-34                                               2.0.0             Sources for Android 34                 
+  sources/android-35                                               1.0.0             Sources for Android 35                 
+  system-images/android-36/google_apis/arm64-v8a                   7.0.0             Google APIs ARM 64 v8a System Image    
+  system-images/android-36/google_apis_playstore/arm64-v8a         7.0.0             Google Play ARM 64 v8a System Image    
+
+A new version of Android CLI is available (1.0.16457483).
+Please run 'android update' to install it.
+

@@ -1,4 +1,6 @@
 import { expect, describe, test, beforeEach } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { AvdManagerDependencies } from "../../../src/utils/android-cmdline-tools/avdmanager";
 import { AvdManagerClient } from "../../../src/utils/android-cmdline-tools/AvdManagerClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -329,6 +331,107 @@ Available Packages:
       expect(result[0].packageName).toBe("system-images;android-34;google_apis;arm64-v8a");
       expect(result[0].apiLevel).toBe(34);
       expect(result[0].abi).toBe("arm64-v8a");
+    });
+
+    describe("sdkmanager cmdline-tools 23.0.0, 1.0.16261425, captured 2026-09-30", () => {
+      test("parses the real --list_installed output and uses the installed-only flag", async () => {
+        const mockDeps = createDependencies();
+        const fakeTimer = createFakeTimer();
+        const output = readFileSync(
+          join(import.meta.dir, "fixtures", "sdkmanager-list-installed-cmdline-tools-23.txt"),
+          "utf8",
+        );
+        const originalSpawn = mockDeps.spawn;
+        const receivedArgs: string[][] = [];
+        mockDeps.spawn = (command: string, args: string[], options?: any) => {
+          receivedArgs.push(args);
+          const child: any = originalSpawn(command, args, options);
+          fakeTimer.setTimeout(() => {
+            child.triggerStdout(Buffer.from(output));
+            child.triggerClose(0);
+          }, 0);
+          return child;
+        };
+
+        const result = await resolveWithFakeTimer(
+          fakeTimer,
+          avdmanager.listInstalledSystemImages(undefined, mockDeps),
+        );
+
+        expect(receivedArgs).toEqual([["--list_installed"]]);
+        expect(
+          result.map((image: any) => ({
+            packageName: image.packageName,
+            apiLevel: image.apiLevel,
+            abi: image.abi,
+            tag: image.tag,
+          })),
+        ).toEqual([
+          {
+            packageName: "system-images;android-36;google_apis;arm64-v8a",
+            apiLevel: 36,
+            abi: "arm64-v8a",
+            tag: "google_apis",
+          },
+          {
+            packageName: "system-images;android-36;google_apis_playstore;arm64-v8a",
+            apiLevel: 36,
+            abi: "arm64-v8a",
+            tag: "google_apis_playstore",
+          },
+        ]);
+      });
+    });
+
+    test("falls back to --list and warns when --list_installed is unsupported", async () => {
+      const mockDeps = createDependencies();
+      const fakeTimer = createFakeTimer();
+      const originalSpawn = mockDeps.spawn;
+      const receivedArgs: string[][] = [];
+      const warnings: string[] = [];
+      mockDeps.logger.warn = (message: string) => warnings.push(message);
+      mockDeps.spawn = (command: string, args: string[], options?: any) => {
+        receivedArgs.push(args);
+        const child: any = originalSpawn(command, args, options);
+        fakeTimer.setTimeout(() => {
+          if (receivedArgs.length === 1) {
+            child.triggerStderr(Buffer.from("Error: Unknown option --list_installed"));
+            child.triggerClose(1);
+          } else {
+            child.triggerStdout(Buffer.from(SDKMANAGER_LIST_OUTPUT));
+            child.triggerClose(0);
+          }
+        }, 0);
+        return child;
+      };
+
+      const result = await resolveWithFakeTimer(
+        fakeTimer,
+        avdmanager.listInstalledSystemImages(undefined, mockDeps),
+      );
+
+      expect(receivedArgs).toEqual([["--list_installed"], ["--list"]]);
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain("falling back");
+      expect(result.map((image: any) => image.apiLevel)).toEqual([34]);
+    });
+
+    test("throws for failures unrelated to an unsupported option", async () => {
+      const mockDeps = createDependencies();
+      const fakeTimer = createFakeTimer();
+      const originalSpawn = mockDeps.spawn;
+      mockDeps.spawn = (command: string, args: string[], options?: any) => {
+        const child: any = originalSpawn(command, args, options);
+        fakeTimer.setTimeout(() => {
+          child.triggerStderr(Buffer.from("Repository unavailable"));
+          child.triggerClose(1);
+        }, 0);
+        return child;
+      };
+
+      await expect(
+        resolveWithFakeTimer(fakeTimer, avdmanager.listInstalledSystemImages(undefined, mockDeps)),
+      ).rejects.toThrow("Repository unavailable");
     });
 
     test("listSystemImages still returns only the available section", async () => {

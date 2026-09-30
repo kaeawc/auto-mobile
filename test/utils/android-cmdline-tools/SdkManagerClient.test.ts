@@ -114,6 +114,20 @@ describe("SdkManagerClient", () => {
     ]);
   });
 
+  test("lists installed packages with the local command deadline", async () => {
+    const { client, child, spawns, timer } = createClient();
+    const controller = new AbortController();
+    const pending = client.listInstalled({ signal: controller.signal });
+    await settleSpawn();
+    expect(timer.getPendingTimeouts()).toContain(60_000);
+    child.stdoutText("Installed packages:\n");
+    child.close(0);
+
+    await expect(pending).resolves.toMatchObject({ exitCode: 0 });
+    expect(spawns[0]?.args).toEqual(["--list_installed"]);
+    expect(spawns[0]?.options).toEqual(expect.objectContaining({ shell: false }));
+  });
+
   test("reads the sdkmanager version through the same argv boundary", async () => {
     const { client, child, spawns } = createClient();
     const pending = client.getVersion();

@@ -90,7 +90,19 @@ export async function listInstalledSystemImages(
   dependencies = createDefaultDependencies(),
   signal?: AbortSignal,
 ): Promise<SystemImage[]> {
-  const result = await createSdkManagerClient(dependencies).list({ signal });
+  const client = createSdkManagerClient(dependencies);
+  let result = await client.listInstalled({ signal });
+  if (result.exitCode !== 0) {
+    const diagnostics = `${result.stdout}\n${result.stderr}`;
+    if (/unknown option|unrecognized option|invalid option|unknown argument/i.test(diagnostics)) {
+      dependencies.logger.warn(
+        "sdkmanager --list_installed is not supported; falling back to sdkmanager --list",
+      );
+      result = await client.list({ signal });
+    } else {
+      throw new Error(`Failed to list installed system images: ${failureDiagnostics(result)}`);
+    }
+  }
   if (result.exitCode !== 0) {
     throw new Error(`Failed to list installed system images: ${failureDiagnostics(result)}`);
   }
@@ -179,40 +191,62 @@ export function parseSystemImages(
   let currentSection: SdkManagerSection | null = null;
   for (const line of output.split("\n")) {
     const trimmedLine = line.trim();
-    if (trimmedLine.includes("Available Packages:")) {
-      currentSection = "available";
+    const headerSection = parseSystemImageSectionHeader(trimmedLine);
+    if (headerSection !== undefined) {
+      currentSection = headerSection;
       continue;
     }
-    if (trimmedLine.includes("Installed packages:")) {
-      currentSection = "installed";
+    if (currentSection !== section) {
       continue;
     }
-    if (trimmedLine.includes("Available Updates:")) {
-      currentSection = null;
+    const image = parseSystemImageRow(trimmedLine);
+    if (!image || (filter && !matchesFilter(image, filter))) {
       continue;
     }
-    if (currentSection !== section || !trimmedLine.startsWith("system-images;")) {
-      continue;
-    }
-    const parts = trimmedLine.split(/\s+/);
-    const packageName = parts[0].split("|")[0];
-    const parsedRuntime = parseAndroidSystemImageRuntime(packageName);
-    if (!parsedRuntime) {
-      continue;
-    }
-    const image: SystemImage = {
-      packageName,
-      apiLevel: parsedRuntime.apiLevel,
-      apiIdentifier: parsedRuntime.apiIdentifier,
-      tag: parsedRuntime.tag,
-      abi: parsedRuntime.abi,
-      versionInfo: parts.slice(1).join(" "),
-    };
-    if (!filter || matchesFilter(image, filter)) {
-      images.push(image);
-    }
+    images.push(image);
   }
   return images;
+}
+
+function parseSystemImageSectionHeader(line: string): SdkManagerSection | null | undefined {
+  const normalizedLine = line.toLowerCase();
+  if (normalizedLine.includes("available packages:")) {
+    return "available";
+  }
+  if (normalizedLine.includes("installed packages:")) {
+    return "installed";
+  }
+  if (normalizedLine.includes("available updates:")) {
+    return null;
+  }
+  return undefined;
+}
+
+function parseSystemImageRow(line: string): SystemImage | undefined {
+  if (/^(?:path\s*\|\s*version|[-|\s]+)$/i.test(line)) {
+    return undefined;
+  }
+  const pipeIndex = line.indexOf("|");
+  const rawPackageName = (pipeIndex >= 0 ? line.slice(0, pipeIndex) : line).trim().split(/\s+/)[0];
+  if (
+    !rawPackageName ||
+    (!rawPackageName.startsWith("system-images/") && !rawPackageName.startsWith("system-images;"))
+  ) {
+    return undefined;
+  }
+  const packageName = rawPackageName.replaceAll("/", ";");
+  const parsedRuntime = parseAndroidSystemImageRuntime(packageName);
+  if (!parsedRuntime) {
+    return undefined;
+  }
+  return {
+    packageName,
+    apiLevel: parsedRuntime.apiLevel,
+    apiIdentifier: parsedRuntime.apiIdentifier,
+    tag: parsedRuntime.tag,
+    abi: parsedRuntime.abi,
+    versionInfo: line.split(/\s+/).slice(1).join(" "),
+  };
 }
 
 function matchesFilter(image: SystemImage, filter: SystemImageFilter): boolean {

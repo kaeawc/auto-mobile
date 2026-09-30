@@ -3264,7 +3264,7 @@ async function readTeardownAbsenceFailure(
   return teardownInventoryVerificationFailure(context, target, inventory);
 }
 
-function createTeardownVerificationDeadlineFailure(
+export function createTeardownVerificationDeadlineFailure(
   context: TeardownContext,
   target: TeardownResolvedTarget,
   lastFailure?: TeardownToolResponse,
@@ -3341,6 +3341,7 @@ export async function verifyTeardownAbsence(
   context: TeardownContext,
   target: TeardownResolvedTarget,
   stop: "accepted" | "not_required",
+  onFailure?: (failure: TeardownToolResponse) => void,
 ): Promise<TeardownToolResponse> {
   let lastFailure: TeardownToolResponse | undefined;
   for (;;) {
@@ -3373,6 +3374,7 @@ export async function verifyTeardownAbsence(
       );
     }
     lastFailure = failure;
+    onFailure?.(failure);
 
     const remainingMs = context.deadlineMs - context.dependencies.timer.now();
     if (remainingMs <= 0) {

@@ -1425,6 +1425,10 @@ export class LaunchApp extends BaseVisualChange {
     coldBoot?: boolean,
   ): string {
     const activeWindow = latestObservation.activeWindow;
+    if (latestObservation.deviceLock?.locked === true) {
+      return "the device is locked; call `wakeAndUnlock` first.";
+    }
+
     if (activeWindow?.appId === "com.android.systemui" && activeWindow.systemOverlay === true) {
       return "the system UI (notification shade) is covering the app.";
     }

@@ -890,6 +890,31 @@ describe("LaunchApp", () => {
     expect(result.error).not.toContain("coldBoot: true");
   });
 
+  test("reports a locked device instead of blaming the notification shade", async () => {
+    fakeTimer.enableAutoAdvance();
+    const keyguardObservation = {
+      ...createObserveResult(),
+      activeWindow: {
+        appId: "com.android.systemui",
+        activityName: "Keyguard",
+        layoutSeqSum: 1,
+        systemOverlay: true,
+      },
+      deviceLock: { locked: true, keyguardShowing: true, secure: true },
+    };
+
+    fakeAdb.setForegroundApp({ packageName, userId: 0 });
+    fakeAdb.setCommandResponse("shell dumpsys activity processes", { stdout: "0\n", stderr: "" });
+    fakeObserveScreen.setObserveResult(() => keyguardObservation);
+
+    const result = await launchApp.execute(packageName, false, true);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("device is locked");
+    expect(result.error).toContain("wakeAndUnlock");
+    expect(result.error).not.toContain("notification shade");
+  });
+
   test("reports the actual foreground blocker after cold boot launch verification times out", async () => {
     fakeTimer.enableAutoAdvance();
     const otherPackageName = "com.example.other";

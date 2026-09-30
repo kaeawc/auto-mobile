@@ -7,6 +7,7 @@ import type { BootedDevice, ObserveResult } from "../../../src/models";
 import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
+import type { AdbClient } from "../../../src/utils/android-cmdline-tools/AdbClient";
 import { FakeDeviceAppTerminator } from "../../fakes/FakeDeviceAppTerminator";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
@@ -319,6 +320,25 @@ describe("TerminateApp (Android)", () => {
     expect(result.wasForeground).toBe(true);
     expect(result.userId).toBe(0);
     expect(fakeAdb.wasCommandExecuted("force-stop")).toBe(true);
+  });
+
+  test("checks Android running state through the shared process-state command", async () => {
+    fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 0x4000, running: true }]);
+    fakeAdb.setCommandResult("shell pm list packages --user 0", "package:com.example.app");
+    fakeAdb.setCommandResult("shell dumpsys activity processes", "no processes");
+
+    await new TerminateApp(androidDevice, fakeAdb as unknown as AdbClient, null, fakeTimer).execute(
+      "com.example.app",
+      { skipObservation: true },
+    );
+
+    expect(fakeAdb.getCommandCalls()).toContainEqual(
+      expect.objectContaining({
+        command: "shell dumpsys activity processes",
+        timeoutMs: 5_000,
+        noRetry: true,
+      }),
+    );
   });
 
   test("terminates an installed app running under a numeric system UID", async () => {

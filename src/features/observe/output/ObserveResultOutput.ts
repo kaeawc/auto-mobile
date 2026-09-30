@@ -667,6 +667,8 @@ export interface ObserveDiff {
    * can build the observation-scoped screenshot resource URI.
    */
   deviceId?: string;
+  /** Physical panel represented by the post-action observation. */
+  display?: ObserveResult["display"];
   /**
    * Fully-encoded observation-scoped screenshot resource URI for the post-action
    * observation (issue #7018), built from `deviceId` + `observationId` via the

@@ -43,6 +43,12 @@ describe("ObserveScreen", function () {
       expect(result).toHaveProperty("updatedAt");
       expect(result).toHaveProperty("screenSize");
       expect(result).toHaveProperty("systemInsets");
+      expect(result.display).toEqual({
+        key: "0",
+        role: "unknown",
+        posture: "unknown",
+        generation: 0,
+      });
 
       expect(typeof result.updatedAt).toBe("string");
       expect(result.screenSize).toEqual({ width: 0, height: 0 });
@@ -180,6 +186,12 @@ describe("ObserveScreen", function () {
         const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
 
         expect(result.screenSize).toMatchObject({ width: 1080, height: 1920 });
+        expect(result.display).toEqual({
+          key: "0",
+          role: "unknown",
+          posture: "unknown",
+          generation: 0,
+        });
         expect(result.screenSize.units).toBe("physical-pixels");
         expect(result.elements?.clickable).toHaveLength(1);
         expect(result.elements?.clickable[0]["resource-id"]).toBe("com.example:id/action");
@@ -550,6 +562,12 @@ describe("ObserveScreen", function () {
         const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
 
         expect(result.screenSize).toMatchObject({ width: 402, height: 874 });
+        expect(result.display).toEqual({
+          key: "0",
+          role: "unknown",
+          posture: "unknown",
+          generation: 0,
+        });
         expect(result.screenSize.units).toBe("points");
         expect(result.screenIdentity?.platform).toBe("ios");
         expect(result.screenIdentity?.source).toBe("heuristic");

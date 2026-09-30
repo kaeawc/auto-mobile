@@ -56,11 +56,12 @@ export class DeviceStateCollector {
     result: ObserveResult,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     signal?: AbortSignal,
+    displayId: number = 0,
   ): Promise<void> {
     const { backStack, timer } = this.opts;
     try {
       const backStackStart = timer.now();
-      const backStackInfo = await backStack.execute(perf, signal);
+      const backStackInfo = await backStack.execute(perf, signal, displayId);
       result.backStack = backStackInfo;
       logger.debug(`Back stack retrieval took ${timer.now() - backStackStart}ms`);
     } catch (error) {

@@ -4697,6 +4697,37 @@
           "description": "Resolved device this observation ran against; join key (with observationId) for the observation-scoped screenshot resource.",
           "type": "string"
         },
+        "display": {
+          "type": "object",
+          "properties": {
+            "key": {
+              "type": "string"
+            },
+            "role": {
+              "type": "string",
+              "enum": ["inner", "cover", "rear", "external", "unknown"]
+            },
+            "posture": {
+              "type": "string",
+              "enum": [
+                "closed",
+                "half_opened",
+                "opened",
+                "rear_display",
+                "flipped",
+                "tent",
+                "unknown"
+              ]
+            },
+            "generation": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": ["key", "role", "posture", "generation"],
+          "additionalProperties": false
+        },
         "observationScreenshotResourceUri": {
           "description": "Fully-encoded automobile:observation/{deviceId}/{observationId}/screenshot resource URI for this observation.",
           "type": "string"
@@ -8065,7 +8096,7 @@
       },
       "then": {},
       "else": {
-        "required": ["observationId", "deviceId"]
+        "required": ["observationId", "deviceId", "display"]
       }
     },
     "_meta": {
@@ -13048,6 +13079,37 @@
                   "description": "Resolved device this observation ran against; join key (with observationId) for the observation-scoped screenshot resource.",
                   "type": "string"
                 },
+                "display": {
+                  "type": "object",
+                  "properties": {
+                    "key": {
+                      "type": "string"
+                    },
+                    "role": {
+                      "type": "string",
+                      "enum": ["inner", "cover", "rear", "external", "unknown"]
+                    },
+                    "posture": {
+                      "type": "string",
+                      "enum": [
+                        "closed",
+                        "half_opened",
+                        "opened",
+                        "rear_display",
+                        "flipped",
+                        "tent",
+                        "unknown"
+                      ]
+                    },
+                    "generation": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": ["key", "role", "posture", "generation"],
+                  "additionalProperties": false
+                },
                 "observationScreenshotResourceUri": {
                   "description": "Fully-encoded automobile:observation/{deviceId}/{observationId}/screenshot resource URI for this observation.",
                   "type": "string"
@@ -13876,6 +13938,7 @@
                 "isDiff",
                 "observationId",
                 "deviceId",
+                "display",
                 "skeleton",
                 "added",
                 "removed",
@@ -13897,6 +13960,37 @@
                 "deviceId": {
                   "description": "Resolved device this observation ran against; join key (with observationId) for the observation-scoped screenshot resource.",
                   "type": "string"
+                },
+                "display": {
+                  "type": "object",
+                  "properties": {
+                    "key": {
+                      "type": "string"
+                    },
+                    "role": {
+                      "type": "string",
+                      "enum": ["inner", "cover", "rear", "external", "unknown"]
+                    },
+                    "posture": {
+                      "type": "string",
+                      "enum": [
+                        "closed",
+                        "half_opened",
+                        "opened",
+                        "rear_display",
+                        "flipped",
+                        "tent",
+                        "unknown"
+                      ]
+                    },
+                    "generation": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": ["key", "role", "posture", "generation"],
+                  "additionalProperties": false
                 },
                 "observationScreenshotResourceUri": {
                   "description": "Fully-encoded automobile:observation/{deviceId}/{observationId}/screenshot resource URI for this observation.",
@@ -15166,7 +15260,7 @@
                   "const": "settled_capture_adopted"
                 }
               },
-              "required": ["observationId", "deviceId"],
+              "required": ["observationId", "deviceId", "display"],
               "additionalProperties": {}
             },
             {

@@ -1290,6 +1290,7 @@ describe("finalizeToolResponse", () => {
         ...sameScreenObserve(),
         observationId: "passthrough-observation",
         deviceId: "emulator-5554",
+        display: { key: "0", role: "unknown", posture: "unknown", generation: 0 },
         freshness,
         screenshotSettled: true,
         screenshotSettledError: "Settled screenshot capture timed out",

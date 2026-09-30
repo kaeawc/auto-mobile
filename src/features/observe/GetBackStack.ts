@@ -536,8 +536,8 @@ export class GetBackStack implements BackStack {
    * @param dumpsysOutput - Raw dumpsys output
    * @returns Current ActivityInfo or undefined
    */
-  private getCurrentActivity(dumpsysOutput: string): ActivityInfo | undefined {
-    const scoped = parseResumedActivityForDisplay(dumpsysOutput);
+  private getCurrentActivity(dumpsysOutput: string, displayId: number): ActivityInfo | undefined {
+    const scoped = parseResumedActivityForDisplay(dumpsysOutput, displayId);
     if (scoped.displayCount > 0) {
       return scoped.activity
         ? { name: scoped.activity.activityName, taskId: scoped.activity.taskId }
@@ -582,6 +582,7 @@ export class GetBackStack implements BackStack {
   async execute(
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     signal?: AbortSignal,
+    displayId: number = 0,
   ): Promise<BackStackInfo> {
     const startTime = this.timer.now();
 
@@ -604,7 +605,7 @@ export class GetBackStack implements BackStack {
         Promise.all([
           Promise.resolve(this.parseActivities(dumpsysOutput.stdout)),
           Promise.resolve(this.parseTasks(dumpsysOutput.stdout)),
-          Promise.resolve(this.getCurrentActivity(dumpsysOutput.stdout)),
+          Promise.resolve(this.getCurrentActivity(dumpsysOutput.stdout, displayId)),
         ]),
       );
 

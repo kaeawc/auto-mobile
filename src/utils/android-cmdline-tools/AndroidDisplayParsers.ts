@@ -52,3 +52,12 @@ export function parseAndroidDisplayInfos(output: string): AndroidDisplayInfo[] {
   }
   return records;
 }
+
+/** Map a physical panel key back to Android's current logical display id. */
+export function logicalDisplayIdForPanel(
+  infos: readonly AndroidDisplayInfo[],
+  panelKey: string,
+): number | undefined {
+  const info = infos.find((entry) => entry.uniqueId?.split(":").slice(1).join(":") === panelKey);
+  return info ? Number(info.logicalId) : undefined;
+}

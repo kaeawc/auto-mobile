@@ -62,7 +62,13 @@ describe("IOSCtrlProxyClient observation-stream provenance", () => {
     screenWidth: number,
     screenHeight: number,
     screenScale: number,
-  ): void => {
+  ): { captureSequence?: number } => {
+    const source: {
+      screenWidth: number;
+      screenHeight: number;
+      screenScale: number;
+      captureSequence?: number;
+    } = { screenWidth, screenHeight, screenScale };
     (
       ctrlProxyClient as unknown as {
         pushHierarchyToObservationStream(
@@ -70,10 +76,8 @@ describe("IOSCtrlProxyClient observation-stream provenance", () => {
           source: { screenWidth: number; screenHeight: number; screenScale: number },
         ): void;
       }
-    ).pushHierarchyToObservationStream(
-      { hierarchy: {} },
-      { screenWidth, screenHeight, screenScale },
-    );
+    ).pushHierarchyToObservationStream({ hierarchy: {} }, source);
+    return source;
   };
 
   const setStaleCache = (screenWidth: number, screenHeight: number, screenScale: number): void => {
@@ -115,12 +119,13 @@ describe("IOSCtrlProxyClient observation-stream provenance", () => {
       }
     ).screenGeometry;
 
-    forwardHierarchy(390, 844, 3);
+    const forwarded = forwardHierarchy(390, 844, 3);
     expect(geometry.bind()).toEqual({
       captureSequence: expect.any(Number),
       width: 1170,
       height: 2532,
     });
+    expect(forwarded.captureSequence).toBe(geometry.bind()?.captureSequence);
 
     setStaleCache(390, 844, 3);
     forwardHierarchy(320, 693, 3);

@@ -103,6 +103,8 @@ export interface AccessibilityNodeSelector {
  * Interface for accessibility hierarchy data from the device.
  */
 export interface AccessibilityHierarchy {
+  /** Daemon sequence assigned when this capture was forwarded to the observation stream. */
+  captureSequence?: number;
   updatedAt: number;
   packageName: string;
   /** Android user that owns the accessibility service that captured this hierarchy. */

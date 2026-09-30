@@ -1312,6 +1312,7 @@ const defaultAndroidServiceManagerFactory: AndroidServiceManagerFactory = (devic
 const CTRL_PROXY_CLIENT_PURPOSE = "to drive the device through CtrlProxy";
 
 export class AndroidCtrlProxyClient extends DeviceServiceClient implements AndroidCtrlProxy {
+  private readonly streamedCaptureSequences = new WeakMap<object, number>();
   private static readonly DEFAULT_HIERARCHY_BROADCAST_INTERVAL_MS = 250;
 
   private device: BootedDevice;
@@ -2638,7 +2639,12 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   convertToViewHierarchyResult(
     accessibilityHierarchy: AccessibilityHierarchy,
   ): ViewHierarchyResult {
-    return this.hierarchy.convertToViewHierarchyResult(accessibilityHierarchy);
+    const result = this.hierarchy.convertToViewHierarchyResult(accessibilityHierarchy);
+    const captureSequence = this.streamedCaptureSequences.get(accessibilityHierarchy);
+    if (captureSequence !== undefined) {
+      result.captureSequence = captureSequence;
+    }
+    return result;
   }
 
   hasCachedHierarchy(): boolean {
@@ -5217,6 +5223,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       // bound to it. A null return (no subscribers), a throw, or a missing server all leave the
       // geometry untracked, and the daemon then omits the identity so a control client fails closed.
       if (captureSequence !== null) {
+        hierarchy.captureSequence = captureSequence;
+        this.streamedCaptureSequences.set(hierarchy, captureSequence);
         this.screenGeometry.markForwarded(captureSequence);
       }
     } catch (error) {

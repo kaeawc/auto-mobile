@@ -11,5 +11,9 @@ export interface BackStack {
    * @param signal - Optional abort signal
    * @returns Promise with BackStackInfo containing activities, tasks, and current activity
    */
-  execute(perf?: PerformanceTracker, signal?: AbortSignal): Promise<BackStackInfo>;
+  execute(
+    perf?: PerformanceTracker,
+    signal?: AbortSignal,
+    displayId?: number,
+  ): Promise<BackStackInfo>;
 }

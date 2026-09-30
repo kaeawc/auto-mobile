@@ -84,6 +84,7 @@ import {
   WAIT_BUTTON_RESOURCE_ID,
 } from "../../utils/androidSystemUiAnr";
 import { DaemonState } from "../../daemon/daemonState";
+import { ObservedAndroidDisplayCache, observedIosDisplay } from "./ObservationDisplay";
 
 /**
  * Observe command class that combines screen details, view hierarchy and screenshot.
@@ -505,6 +506,7 @@ export class RealObserveScreen implements ObserveScreen {
   private adb: AdbExecutor;
   private adbFactory: AdbClientFactory;
   private timer: Timer;
+  private readonly observedAndroidDisplayCache: ObservedAndroidDisplayCache;
   private idGenerator: IdGenerator;
 
   private viewHierarchy: ViewHierarchyInterface;
@@ -611,6 +613,7 @@ export class RealObserveScreen implements ObserveScreen {
     this.adbFactory = adbFactory;
     this.adb = adbFactory.create(device);
     this.timer = timer;
+    this.observedAndroidDisplayCache = new ObservedAndroidDisplayCache(timer);
     this.idGenerator = idGenerator;
 
     // Data sources (either injected or default)
@@ -778,6 +781,13 @@ export class RealObserveScreen implements ObserveScreen {
       throwIfAborted(signal);
 
       const result = this.createBaseResult();
+      const observedAndroid =
+        this.device.platform === "android"
+          ? await this.observedAndroidDisplayCache.resolve(this.device, this.adb, signal)
+          : undefined;
+      if (observedAndroid) {
+        result.display = observedAndroid.display;
+      }
 
       // Capture the device's cache generation before the hierarchy is captured so
       // a concurrent invalidation (e.g. terminateApp force-stop) that lands while
@@ -828,6 +838,7 @@ export class RealObserveScreen implements ObserveScreen {
         options?.skipRecompositionTracking === true,
         capturedHierarchy,
         options?.timeoutMs,
+        observedAndroid?.logicalId ?? 0,
       );
 
       // A caller may omit back-stack collection for an intermediate capture.
@@ -838,6 +849,7 @@ export class RealObserveScreen implements ObserveScreen {
         (result.backStack?.displayCount ?? 0) < 2 &&
         sampledForeground !== null &&
         (sampledForeground.displayCount ?? 0) > 1 &&
+        observedAndroid?.logicalId === 0 &&
         sampledForeground.packageName === result.viewHierarchy?.packageName &&
         sampledForeground.activityName &&
         result.activeWindow
@@ -1003,6 +1015,14 @@ export class RealObserveScreen implements ObserveScreen {
         ),
       });
 
+      // Reconciliation may replace the captured hierarchy. Stamp its final
+      // panel and the forwarded sequence belonging to that exact hierarchy.
+      if (this.device.platform === "ios") {
+        result.display = observedIosDisplay(this.device, result.viewHierarchy);
+      } else {
+        // Zero means no forwarded captureSequence was assigned, not a second counter.
+        result.display.generation = result.viewHierarchy?.captureSequence ?? 0;
+      }
       this.identifyCapture(result, options?.freshness ?? "cached-ok");
 
       // Intermediate settle polls are read-only. Their adopted terminal result
@@ -1226,6 +1246,9 @@ export class RealObserveScreen implements ObserveScreen {
       // resolved id is surfaced so the serialization chokepoint can build the
       // observation-scoped screenshot resource URI (which needs deviceId too).
       deviceId: this.device.deviceId,
+      // Discovery omits single-panel inventory; logical display "0" is the
+      // stable fallback until a physical panel can be identified.
+      display: { key: "0", role: "unknown", posture: "unknown", generation: 0 },
       // Derive the timestamp from the injected timer so the source is pinnable
       // in tests instead of the real wall clock (issue #4172 item 9).
       updatedAt: new Date(this.timer.now()).toISOString(),
@@ -1298,6 +1321,7 @@ export class RealObserveScreen implements ObserveScreen {
     readOnly: boolean = false,
     capturedHierarchy?: ViewHierarchyResult,
     timeoutMs?: number,
+    displayId: number = 0,
   ): Promise<void> {
     switch (this.device.platform) {
       case "android":
@@ -1368,7 +1392,7 @@ export class RealObserveScreen implements ObserveScreen {
             // tracks' timings (issue #6706).
             parallelTasks.push(
               perf.track("backStack", () =>
-                this.deviceStateCollector.collectBackStack(result, perf.fork(), signal),
+                this.deviceStateCollector.collectBackStack(result, perf.fork(), signal, displayId),
               ),
             );
           }
@@ -1394,7 +1418,7 @@ export class RealObserveScreen implements ObserveScreen {
             // tracks on the same shared tracker.
             tasks.push(
               perf.track("backStack", () =>
-                this.deviceStateCollector.collectBackStack(result, perf.fork(), signal),
+                this.deviceStateCollector.collectBackStack(result, perf.fork(), signal, displayId),
               ),
             );
           }
@@ -1434,8 +1458,8 @@ export class RealObserveScreen implements ObserveScreen {
 
         // CtrlProxy pairs the captured root package with the last window-state
         // class it heard, which may belong to another display. The back-stack
-        // dump already sampled above scopes its resumed activity to display 0,
-        // the display used by this hierarchy and screenshot. Only use it when
+        // dump already sampled above scopes its resumed activity to the logical
+        // display mapped from `result.display.key`. Only use it when
         // the activity belongs to the captured hierarchy's app.
         if ((result.backStack?.displayCount ?? 0) > 1 && result.activeWindow) {
           const scopedActivity = resolveBackStackActivityAttribution(result);

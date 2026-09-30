@@ -71,6 +71,8 @@ export interface CtrlProxyNode {
  * Interface for iOS view hierarchy (matching Android format)
  */
 export interface XCTestHierarchy {
+  /** Daemon sequence assigned when this capture was forwarded to the observation stream. */
+  captureSequence?: number;
   updatedAt: number;
   packageName: string;
   hierarchy: CtrlProxyNode;

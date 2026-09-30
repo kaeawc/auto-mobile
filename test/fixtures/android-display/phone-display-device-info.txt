@@ -1,0 +1,3 @@
+  mDisplayDevices=[
+    DisplayDeviceInfo{"Built-in Screen", uniqueId="local:4619827259835644672", 1080 x 2400, modeId 1, defaultModeId 1, supportedModes [{id=1, width=1080, height=2400, fps=60.0}], touch INTERNAL, type INTERNAL}
+  ]

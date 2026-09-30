@@ -208,7 +208,10 @@ describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
       "dumpsys SurfaceFlinger --display-id",
       execResult(fixture("fold-surfaceflinger.txt")),
     );
-    adb.setCommandResponse("cmd display get-displays", execResult(fixture("fold-displays.txt")));
+    adb.setCommandResponse(
+      "dumpsys display",
+      execResult(fixture("fold-open-display-device-info.txt")),
+    );
     adb.setCommandResponse("cmd device_state print-states", execResult(fixture("fold-states.txt")));
     const client = new AndroidEmulatorClient(
       null,
@@ -413,7 +416,7 @@ describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
     expect(adb.getExecutedCommands()).toEqual([
       "emu avd name",
       "shell dumpsys SurfaceFlinger --display-id",
-      "shell cmd display get-displays",
+      "shell dumpsys display",
       "shell cmd device_state print-states",
     ]);
   });
@@ -621,7 +624,7 @@ describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
       "shell getprop ro.product.model",
       "shell getprop ro.product.cpu.abi",
       "shell dumpsys SurfaceFlinger --display-id",
-      "shell cmd display get-displays",
+      "shell dumpsys display",
       "shell cmd device_state print-states",
     ]);
   });
@@ -719,7 +722,7 @@ describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
     });
     expect(adb.getExecutedCommands()).toEqual([
       "shell dumpsys SurfaceFlinger --display-id",
-      "shell cmd display get-displays",
+      "shell dumpsys display",
       "shell cmd device_state print-states",
     ]);
   });

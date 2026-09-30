@@ -39,6 +39,24 @@ function makeExecResult(stdout: string) {
   };
 }
 
+class FailOnceOnSecondHierarchyDumpAdb extends FakeAdbExecutor {
+  private hierarchyDumpCount = 0;
+
+  override async executeCommand(
+    ...args: Parameters<FakeAdbExecutor["executeCommand"]>
+  ): ReturnType<FakeAdbExecutor["executeCommand"]> {
+    const [command] = args;
+    const result = await super.executeCommand(...args);
+    if (command === "shell uiautomator dump /sdcard/window_dump.xml") {
+      this.hierarchyDumpCount++;
+      if (this.hierarchyDumpCount === 2) {
+        throw new Error("temporary post-tap dump failure");
+      }
+    }
+    return result;
+  }
+}
+
 describe("TalkBackToggle", () => {
   let fakeAdb: FakeAdbExecutor;
   let fakeDetector: FakeAccessibilityDetector;
@@ -205,6 +223,119 @@ describe("TalkBackToggle", () => {
 
       // Center of [180,684][540,740] = (360, 712)
       expect(fakeAdb.wasCommandExecuted("shell input tap 360 712")).toBe(true);
+    });
+
+    test("returns a typed failure when the permission dialog persists through all retries", async () => {
+      fakeAdb.setCommandResponse(
+        "shell cat /sdcard/window_dump.xml",
+        makeExecResult(DIALOG_XML_WITH_BUTTON1),
+      );
+      fakeDetector.enqueueDetectMethodResults("unknown");
+
+      const toggle = new TalkBackToggle(
+        ANDROID_DEVICE,
+        fakeAdb,
+        fakeDetector,
+        fakeTimer,
+        fakeSecureSettings,
+      );
+      const result = await toggle.toggle(true);
+
+      expect(result.supported).toBe(true);
+      expect(result.applied).toBe(false);
+      expect(result.reason).toContain(
+        "TalkBack permission dialog dismissal could not be confirmed",
+      );
+      expect(
+        fakeAdb.getCommandCalls().filter((call) => call.command === "shell input tap 360 712"),
+      ).toHaveLength(4);
+      expect(
+        fakeAdb
+          .getCommandCalls()
+          .filter((call) => call.command === "shell uiautomator dump /sdcard/window_dump.xml"),
+      ).toHaveLength(5);
+      expect(fakeTimer.getSleepHistory()).toEqual([500, 500, 500]);
+    });
+
+    test("confirms dismissal from the second hierarchy dump after one tap", async () => {
+      fakeAdb.setCommandResponseSequence("shell cat /sdcard/window_dump.xml", [
+        makeExecResult(DIALOG_XML_WITH_BUTTON1),
+        makeExecResult(""),
+      ]);
+      fakeDetector.enqueueDetectMethodResults("unknown", "talkback");
+
+      const toggle = new TalkBackToggle(
+        ANDROID_DEVICE,
+        fakeAdb,
+        fakeDetector,
+        fakeTimer,
+        fakeSecureSettings,
+      );
+      const result = await toggle.toggle(true);
+
+      expect(result.applied).toBe(true);
+      expect(
+        fakeAdb.getCommandCalls().filter((call) => call.command === "shell input tap 360 712"),
+      ).toHaveLength(1);
+      expect(
+        fakeAdb
+          .getCommandCalls()
+          .filter((call) => call.command === "shell uiautomator dump /sdcard/window_dump.xml"),
+      ).toHaveLength(2);
+    });
+
+    test("continues after a post-tap hierarchy dump failure and confirms dismissal", async () => {
+      fakeAdb = new FailOnceOnSecondHierarchyDumpAdb();
+      fakeAdb.setCommandResponse(
+        "pm list packages com.google.android.marvin.talkback",
+        makeExecResult(PACKAGE_LIST_WITH_TALKBACK),
+      );
+      fakeAdb.setCommandResponseSequence("shell cat /sdcard/window_dump.xml", [
+        makeExecResult(DIALOG_XML_WITH_BUTTON1),
+        makeExecResult(""),
+      ]);
+      fakeDetector.enqueueDetectMethodResults("unknown", "talkback");
+
+      const toggle = new TalkBackToggle(
+        ANDROID_DEVICE,
+        fakeAdb,
+        fakeDetector,
+        fakeTimer,
+        fakeSecureSettings,
+      );
+      const result = await toggle.toggle(true);
+
+      expect(result.applied).toBe(true);
+      expect(fakeTimer.getSleepHistory()).toEqual([500]);
+      expect(
+        fakeAdb
+          .getCommandCalls()
+          .filter((call) => call.command === "shell uiautomator dump /sdcard/window_dump.xml"),
+      ).toHaveLength(3);
+    });
+
+    test("returns a typed failure when every hierarchy dump throws", async () => {
+      fakeAdb.setCommandError(
+        "shell uiautomator dump /sdcard/window_dump.xml",
+        new Error("hierarchy dump failed"),
+      );
+      fakeDetector.enqueueDetectMethodResults("unknown");
+
+      const toggle = new TalkBackToggle(
+        ANDROID_DEVICE,
+        fakeAdb,
+        fakeDetector,
+        fakeTimer,
+        fakeSecureSettings,
+      );
+      const result = await toggle.toggle(true);
+
+      expect(result.supported).toBe(true);
+      expect(result.applied).toBe(false);
+      expect(result.reason).toContain(
+        "TalkBack permission dialog dismissal could not be confirmed",
+      );
+      expect(fakeTimer.getSleepHistory()).toEqual([500, 500, 500]);
     });
 
     test("taps Allow button on non-English locale using resource-id", async () => {

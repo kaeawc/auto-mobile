@@ -12,6 +12,7 @@ import {
   shutdownTimeoutError,
 } from "./deviceToolsShutdown";
 import { errorMessage } from "../utils/describeUnknownError";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { createHash } from "node:crypto";
 import { z } from "zod/v4";
 import { androidAvdConfigurationSchema } from "../models/AndroidAvdConfiguration";
@@ -1375,21 +1376,18 @@ export async function settleWithin(
   timer: Timer,
   boundMs: number,
 ): Promise<void> {
-  let timeout: NodeJS.Timeout | undefined;
-  const deadline = new Promise<void>((resolve) => {
-    timeout = timer.setTimeout(resolve, boundMs);
-  });
+  const deadline = new Error("Settlement wait timed out");
   try {
-    await Promise.race([
+    await raceWithDeadline(
       operation.then(
         () => undefined,
         () => undefined,
       ),
-      deadline,
-    ]);
-  } finally {
-    if (timeout !== undefined) {
-      timer.clearTimeout(timeout);
+      { timer, timeoutMs: boundMs, label: "Settlement wait", timeoutError: () => deadline },
+    );
+  } catch (error) {
+    if (error !== deadline) {
+      throw error;
     }
   }
 }
@@ -3699,19 +3697,11 @@ export async function waitForSharedOperation<T>(
     throw signal.reason;
   }
 
-  let removeAbortListener: (() => void) | undefined;
-  try {
-    return await Promise.race([
-      promise,
-      new Promise<never>((_resolve, reject) => {
-        const rejectForAbort = () => reject(signal.reason);
-        signal.addEventListener("abort", rejectForAbort, { once: true });
-        removeAbortListener = () => signal.removeEventListener("abort", rejectForAbort);
-      }),
-    ]);
-  } finally {
-    removeAbortListener?.();
-  }
+  return await raceWithDeadline(promise, {
+    timer: defaultTimer,
+    signal,
+    label: "Shared provision operation",
+  });
 }
 
 /**
@@ -4104,18 +4094,22 @@ async function awaitColdBootSettlement(
  * when the grace expired.
  */
 async function raceColdBootExit(settlement: Promise<void>, timer: Timer): Promise<boolean> {
-  let timeoutHandle: NodeJS.Timeout | undefined;
+  const deadline = new Error("Cold boot exit wait timed out");
   try {
-    return await Promise.race([
+    return await raceWithDeadline(
       settlement.then(() => true),
-      new Promise<boolean>((resolve) => {
-        timeoutHandle = timer.setTimeout(() => resolve(false), COLD_BOOT_SETTLEMENT_GRACE_MS);
-      }),
-    ]);
-  } finally {
-    if (timeoutHandle) {
-      timer.clearTimeout(timeoutHandle);
+      {
+        timer,
+        timeoutMs: COLD_BOOT_SETTLEMENT_GRACE_MS,
+        label: "Cold boot exit",
+        timeoutError: () => deadline,
+      },
+    );
+  } catch (error) {
+    if (error === deadline) {
+      return false;
     }
+    throw error;
   }
 }
 

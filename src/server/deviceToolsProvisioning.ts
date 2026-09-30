@@ -1,4 +1,5 @@
 import { errorMessage } from "../utils/describeUnknownError";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { ProgressCallback } from "./toolRegistry";
 import type { DeviceResourceConfigurationResult } from "../models/DeviceResourceConfiguration";
 import { PlatformDeviceManager } from "../utils/deviceUtils";
@@ -1195,21 +1196,25 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
     if (remainingMs <= 0) {
       return false;
     }
-    let timeoutHandle: NodeJS.Timeout | undefined;
+    const deadline = new Error("Provision rollback settlement wait timed out");
     try {
-      return await Promise.race([
+      return await raceWithDeadline(
         settlement.then(
           () => true,
           () => true,
         ),
-        new Promise<boolean>((resolve) => {
-          timeoutHandle = deps.timer.setTimeout(() => resolve(false), remainingMs);
-        }),
-      ]);
-    } finally {
-      if (timeoutHandle) {
-        deps.timer.clearTimeout(timeoutHandle);
+        {
+          timer: deps.timer,
+          timeoutMs: remainingMs,
+          label: "Provision rollback settlement",
+          timeoutError: () => deadline,
+        },
+      );
+    } catch (error) {
+      if (error === deadline) {
+        return false;
       }
+      throw error;
     }
   }
 

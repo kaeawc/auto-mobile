@@ -1,5 +1,6 @@
 import { errorMessage } from "../utils/describeUnknownError";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { AndroidAvdProvenanceCache } from "../utils/AndroidAvdProvenanceCache";
 import { ResourceRegistry, ResourceContent } from "./resourceRegistry";
 import { MultiPlatformDeviceManager, PlatformDeviceManager } from "../utils/deviceUtils";
@@ -437,11 +438,11 @@ async function computeAndroidResource(
   // path is not valid". Device profiles come from `avdmanager list device`,
   // which are the profile ids AVD creation accepts.
   const controller = new AbortController();
-  let timeoutHandle: NodeJS.Timeout | undefined;
   let timedOut = false;
   let completedInventory: AndroidConfiguredInventoryResult | undefined;
   try {
-    return await Promise.race([
+    let timeoutError: Error | undefined;
+    return await raceWithDeadline(
       buildAndroidResourceResult(
         deviceManager,
         avdManager,
@@ -451,18 +452,21 @@ async function computeAndroidResource(
           completedInventory = inventory;
         },
       ),
-      new Promise<never>((_resolve, reject) => {
-        timeoutHandle = timer.setTimeout(() => {
-          timedOut = true;
-          const error = new Error(
+      {
+        timer,
+        timeoutMs: budgetMs,
+        label: "Android device-image resource generation",
+        timeoutError: () =>
+          (timeoutError = new Error(
             `Android device-image resource generation exceeded ${budgetMs}ms`,
-          );
+          )),
+        onTimeout: () => {
+          timedOut = true;
           // Cancel every in-flight avdmanager/sdkmanager child so none keep running.
-          controller.abort(error);
-          reject(error);
-        }, budgetMs);
-      }),
-    ]);
+          controller.abort(timeoutError);
+        },
+      },
+    );
   } catch (error) {
     if (timedOut) {
       logger.warn(
@@ -498,10 +502,6 @@ async function computeAndroidResource(
         "Android configured-device inventory did not complete.",
       ),
     };
-  } finally {
-    if (timeoutHandle) {
-      timer.clearTimeout(timeoutHandle);
-    }
   }
 }
 

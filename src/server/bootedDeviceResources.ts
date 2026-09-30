@@ -1,4 +1,5 @@
 import { errorMessage } from "../utils/describeUnknownError";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { ResourceRegistry, ResourceContent } from "./resourceRegistry";
 import { type DeviceDiscoveryError, PlatformDeviceManager } from "../utils/deviceUtils";
 import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
@@ -352,26 +353,24 @@ async function probeDeviceLock(
   device: BootedDevice,
   lockProbe: DeviceLockProbe,
 ): Promise<boolean | undefined> {
-  let timeoutHandle: NodeJS.Timeout | undefined;
+  const deadline = new Error("Lock-state probe timed out");
   try {
-    return await Promise.race([
-      lockProbe(device),
-      new Promise<undefined>((resolve) => {
-        timeoutHandle = defaultTimer.setTimeout(() => {
-          logger.warn(`[BootedDeviceResources] Lock-state timeout for ${device.deviceId}`);
-          resolve(undefined);
-        }, LOCK_STATE_TIMEOUT_MS);
-      }),
-    ]);
+    return await raceWithDeadline(lockProbe(device), {
+      timer: defaultTimer,
+      timeoutMs: LOCK_STATE_TIMEOUT_MS,
+      label: "Lock-state probe",
+      timeoutError: () => deadline,
+      onTimeout: () =>
+        logger.warn(`[BootedDeviceResources] Lock-state timeout for ${device.deviceId}`),
+    });
   } catch (error) {
+    if (error === deadline) {
+      return undefined;
+    }
     logger.warn(
       `[BootedDeviceResources] Failed to query lock state for ${device.deviceId}: ${error}`,
     );
     return undefined;
-  } finally {
-    if (timeoutHandle) {
-      defaultTimer.clearTimeout(timeoutHandle);
-    }
   }
 }
 
@@ -903,15 +902,15 @@ async function probeBootCompletionWithBudget(
   deadlineMs: number,
   timer: Timer,
 ): Promise<string | null> {
-  let timeoutHandle: NodeJS.Timeout | undefined;
   const controller = new AbortController();
+  const timeout = new Error("Boot completion probe timed out");
   try {
     return await withRemainingBudget(
       deadlineMs,
       timer,
       undefined,
       async (_signal, remainingMs) =>
-        await Promise.race([
+        await raceWithDeadline(
           factory
             .create(probeTarget(device))
             .executeCommand(
@@ -922,26 +921,28 @@ async function probeBootCompletionWithBudget(
               controller.signal,
             )
             .then((result) => result.stdout.trim()),
-          new Promise<null>((resolve) => {
-            timeoutHandle = timer.setTimeout(() => {
+          {
+            timer,
+            timeoutMs: remainingMs,
+            label: "Boot completion probe",
+            timeoutError: () => timeout,
+            onTimeout: () => {
               controller.abort();
               logger.warn(
                 `[BootedDeviceResources] Boot completion probe timed out for ${device.runtime.deviceId}`,
               );
-              resolve(null);
-            }, remainingMs);
-          }),
-        ]),
+            },
+          },
+        ),
     );
   } catch (error) {
+    if (error === timeout) {
+      return null;
+    }
     logger.warn(
       `[BootedDeviceResources] Boot completion probe failed for ${device.runtime.deviceId}: ${errorMessage(error)}`,
     );
     return null;
-  } finally {
-    if (timeoutHandle) {
-      timer.clearTimeout(timeoutHandle);
-    }
   }
 }
 
@@ -1017,23 +1018,30 @@ export async function probeServiceStatusWithBudget(
   deadlineMs: number,
   timer: Timer = defaultTimer,
 ): Promise<ServiceStatusProbeOutcome> {
-  let timeoutHandle: NodeJS.Timeout | undefined;
   try {
     return await withRemainingBudget(deadlineMs, timer, undefined, async (_signal, remainingMs) => {
       type Race =
         | { kind: "settled"; status: DeviceServiceStatus | undefined }
-        | { kind: "failed"; error: unknown }
-        | { kind: "timeout" };
-      const raced = await Promise.race<Race>([
-        probe(device).then(
-          (status) => ({ kind: "settled", status }),
-          (error) => ({ kind: "failed", error }),
-        ),
-        new Promise<Race>((resolve) => {
-          timeoutHandle = timer.setTimeout(() => resolve({ kind: "timeout" }), remainingMs);
-        }),
-      ]);
-      if (raced.kind === "timeout") {
+        | { kind: "failed"; error: unknown };
+      const timeout = new Error("Service status probe timed out");
+      let raced: Race;
+      try {
+        raced = await raceWithDeadline(
+          probe(device).then(
+            (status): Race => ({ kind: "settled", status }),
+            (error): Race => ({ kind: "failed", error }),
+          ),
+          {
+            timer,
+            timeoutMs: remainingMs,
+            label: "Service status probe",
+            timeoutError: () => timeout,
+          },
+        );
+      } catch (error) {
+        if (error !== timeout) {
+          throw error;
+        }
         logger.warn(`[BootedDeviceResources] Service status timeout for ${device.deviceId}`);
         return {
           diagnostic: {
@@ -1059,10 +1067,6 @@ export async function probeServiceStatusWithBudget(
       `[BootedDeviceResources] Service status budget elapsed for ${device.deviceId}: ${reason}`,
     );
     return { diagnostic: { state: "timeout", reason } };
-  } finally {
-    if (timeoutHandle) {
-      timer.clearTimeout(timeoutHandle);
-    }
   }
 }
 
@@ -1174,34 +1178,30 @@ export async function probeDeviceOrientation(
   deadlineMs: number,
   timer: Timer,
 ): Promise<"portrait" | "landscape" | null> {
-  let timeoutHandle: NodeJS.Timeout | undefined;
+  const timeout = new Error(`[BootedDeviceResources] Orientation timeout for ${device.deviceId}`);
   try {
     return await withRemainingBudget(deadlineMs, timer, undefined, async (_signal, remainingMs) => {
       const controller = new AbortController();
-      return await Promise.race([
-        reader.readOrientation(device, controller.signal),
-        new Promise<null>((resolve) => {
-          timeoutHandle = timer.setTimeout(() => {
-            const error = new Error(
-              `[BootedDeviceResources] Orientation timeout for ${device.deviceId}`,
-            );
-            controller.abort(error);
-            logger.warn(error.message);
-            resolve(null);
-          }, remainingMs);
-        }),
-      ]);
+      return await raceWithDeadline(reader.readOrientation(device, controller.signal), {
+        timer,
+        timeoutMs: remainingMs,
+        label: "Orientation probe",
+        timeoutError: () => timeout,
+        onTimeout: () => {
+          controller.abort(timeout);
+          logger.warn(timeout.message);
+        },
+      });
     });
   } catch (error) {
+    if (error === timeout) {
+      return null;
+    }
     logger.warn(
       `[BootedDeviceResources] Failed to query orientation for ${device.deviceId}: ${errorMessage(error)}`,
       error,
     );
     return null;
-  } finally {
-    if (timeoutHandle) {
-      timer.clearTimeout(timeoutHandle);
-    }
   }
 }
 
@@ -1385,29 +1385,27 @@ async function getCtrlProxyVersion(
   versionLookup: CtrlProxyVersionLookup,
   timer: Timer = defaultTimer,
 ): Promise<CtrlProxyVersionInfo | undefined> {
-  let timeoutHandle: NodeJS.Timeout | undefined;
+  const timeout = new Error("CtrlProxy version lookup timed out");
   try {
-    return await Promise.race([
-      versionLookup.getVersion(device),
-      new Promise<undefined>((resolve) => {
-        timeoutHandle = timer.setTimeout(() => {
-          logger.debug(
-            `[BootedDeviceResources] CtrlProxy version lookup timed out for ${device.deviceId}`,
-          );
-          resolve(undefined);
-        }, CTRL_PROXY_VERSION_TIMEOUT_MS);
-      }),
-    ]);
+    return await raceWithDeadline(versionLookup.getVersion(device), {
+      timer,
+      timeoutMs: CTRL_PROXY_VERSION_TIMEOUT_MS,
+      label: "CtrlProxy version lookup",
+      timeoutError: () => timeout,
+      onTimeout: () =>
+        logger.debug(
+          `[BootedDeviceResources] CtrlProxy version lookup timed out for ${device.deviceId}`,
+        ),
+    });
   } catch (error) {
+    if (error === timeout) {
+      return undefined;
+    }
     // Injected best-effort metadata lookups must not make service-status reads fail.
     logger.debug(
       `[BootedDeviceResources] CtrlProxy version lookup failed for ${device.deviceId}: ${error}`,
     );
     return undefined;
-  } finally {
-    if (timeoutHandle) {
-      timer.clearTimeout(timeoutHandle);
-    }
   }
 }
 

@@ -7965,12 +7965,13 @@ describe("DevicePool", () => {
         options?: DiscoveryReconcileOptions,
       ) => Promise<void>;
       const poolWithReconciler = devicePool as unknown as {
-        reconcileObservedPooledIdentity: ReconcileObservedPooledIdentity;
+        runtimeIdentity: { reconcileObservedPooledIdentity: ReconcileObservedPooledIdentity };
       };
+      const runtimeIdentity = poolWithReconciler.runtimeIdentity;
       const reconcileObservedPooledIdentity =
-        poolWithReconciler.reconcileObservedPooledIdentity.bind(devicePool);
+        runtimeIdentity.reconcileObservedPooledIdentity.bind(runtimeIdentity);
       let processedDevices = 0;
-      poolWithReconciler.reconcileObservedPooledIdentity = async (pooled, device, options) => {
+      runtimeIdentity.reconcileObservedPooledIdentity = async (pooled, device, options) => {
         await reconcileObservedPooledIdentity(pooled, device, options);
         processedDevices++;
         if (processedDevices === 1) {
@@ -8713,7 +8714,9 @@ describe("DevicePool", () => {
           bootedDevice: BootedDevice,
         ): Promise<boolean>;
         clearDeviceSessionCache(deviceId: string): Promise<void>;
-        pendingIdentityReplacementUnresolvedObservations: Map<string, { observedAt?: number }>;
+        runtimeIdentity: {
+          getPendingUnresolvedEvidence(deviceId: string): { observedAt?: number } | undefined;
+        };
       };
       const internals = devicePool as unknown as DevicePoolInternals;
       const cacheCleanupStarted = Promise.withResolvers<void>();
@@ -8738,8 +8741,7 @@ describe("DevicePool", () => {
         await devicePool.reconcileDiscoveryObservation([resolvedReplacement], "test:resolved");
 
         expect(
-          internals.pendingIdentityReplacementUnresolvedObservations.get(device.deviceId)
-            ?.observedAt,
+          internals.runtimeIdentity.getPendingUnresolvedEvidence(device.deviceId)?.observedAt,
         ).toBe(4);
 
         finishCacheCleanup.resolve();

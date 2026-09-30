@@ -55,9 +55,14 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
   const ALLOWLIST: Readonly<Record<string, Allowed>> = {
     // --- The funnel itself, and its producers -------------------------------
     "src/daemon/devicePool.ts": {
-      calls: 5,
+      calls: 4,
       reason:
-        "The pool IS the funnel: refresh sweep and remaining discovery checks reconcile through the pool.",
+        "The pool routes discovery through the identity collaborator before reading pooled identity.",
+    },
+    "src/daemon/deviceRuntimeIdentity.ts": {
+      calls: 1,
+      reason:
+        "Bounded AVD-name rediscovery moved from devicePool; it reconciles observations through the identity collaborator.",
     },
     "src/daemon/missingDeviceLiveness.ts": {
       calls: 1,
@@ -332,7 +337,10 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
   });
 
   test("the funnel and its wrapper exist under their canonical names", () => {
-    expect(devicePoolSource).toMatch(/async reconcileDiscoveryObservation\(/);
+    expect(devicePoolSource).toMatch(/reconcileDiscoveryObservation\(/);
+    expect(
+      blankComments(readFileSync(join(ROOT, "src/daemon/deviceRuntimeIdentity.ts"), "utf8")),
+    ).toMatch(/async reconcileDiscoveryObservation\(/);
     expect(discoveryReconcileSource).toMatch(
       /export async function reconcileDiscoveryObservation\(/,
     );

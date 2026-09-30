@@ -46,7 +46,9 @@ extension DaemonManager {
     static func classifyDaemonSubcommandOutcome(
         _ outcome: DaemonSubcommandOutcome,
         packageRunner: Bool
-    ) -> DaemonSubcommandOutcome {
+    )
+        -> DaemonSubcommandOutcome
+    {
         guard packageRunner, case let .failed(stderr) = outcome else { return outcome }
         return .packageFailed(stderr: stderr)
     }
@@ -199,9 +201,9 @@ extension DaemonManager {
             daemonBuildId: runtime.readDaemonBuildId(),
             daemonEntryScript: runtime.readDaemonEntryScript(),
             repoRoot: repoRoot
-            ) || requiresAssetVersionPinFailure(
-                daemonAssetVersion: runtime.readDaemonAssetVersion(),
-                callerPinnedVersion: callerAssetVersion
+        ) || requiresAssetVersionPinFailure(
+            daemonAssetVersion: runtime.readDaemonAssetVersion(),
+            callerPinnedVersion: callerAssetVersion
         ) {
             PerfTimer.log("ensureDaemonRunning: daemon still differs from runner after launch")
             if requiresAssetVersionPinFailure(
@@ -216,16 +218,43 @@ extension DaemonManager {
     }
 
     public static func waitForDaemon(timeoutSeconds: TimeInterval) -> Bool {
+        waitForDaemon(timeoutSeconds: timeoutSeconds, connector: SystemDaemonSocketConnector())
+    }
+
+    static func waitForDaemon(timeoutSeconds: TimeInterval, connector: DaemonSocketConnector) -> Bool {
+        waitForDaemon(
+            timeoutSeconds: timeoutSeconds,
+            isDaemonRunning: isDaemonRunning,
+            socketExists: { FileManager.default.fileExists(atPath: socketPath) },
+            socketPath: socketPath,
+            connector: connector
+        )
+    }
+
+    static func waitForDaemon(
+        timeoutSeconds: TimeInterval,
+        isDaemonRunning: () -> Bool,
+        socketExists: () -> Bool,
+        socketPath: String,
+        connector: DaemonSocketConnector,
+        now: () -> Date = { Date() },
+        sleep: (TimeInterval) -> Void = { Thread.sleep(forTimeInterval: $0) }
+    )
+        -> Bool
+    {
         PerfTimer.log("waitForDaemon: timeout=\(timeoutSeconds)s")
-        let deadline = Date().addingTimeInterval(timeoutSeconds)
+        let deadline = now().addingTimeInterval(timeoutSeconds)
         var pollCount = 0
-        while Date() < deadline {
+        while now() < deadline {
             pollCount += 1
-            if isDaemonRunning() && FileManager.default.fileExists(atPath: socketPath) {
+            let remainingTime = deadline.timeIntervalSince(now())
+            if remainingTime > 0, isDaemonRunning(), socketExists(),
+               connector.connectAndClose(socketPath: socketPath, timeout: remainingTime)
+            {
                 PerfTimer.log("waitForDaemon: ready after \(pollCount) polls")
                 return true
             }
-            Thread.sleep(forTimeInterval: 0.2)
+            sleep(0.2)
         }
         PerfTimer.log("waitForDaemon: TIMEOUT after \(pollCount) polls")
         return false

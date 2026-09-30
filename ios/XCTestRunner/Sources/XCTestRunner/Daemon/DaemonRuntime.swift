@@ -15,3 +15,8 @@ protocol DaemonRuntime {
     ) -> DaemonSubcommandOutcome
     func waitForDaemon(timeoutSeconds: TimeInterval) -> Bool
 }
+
+/// Observation-only connection probe used by daemon readiness polling.
+protocol DaemonSocketConnector {
+    func connectAndClose(socketPath: String, timeout: TimeInterval) -> Bool
+}

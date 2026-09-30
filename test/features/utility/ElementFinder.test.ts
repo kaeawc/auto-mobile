@@ -3,6 +3,7 @@ import { DefaultElementFinder } from "../../../src/features/utility/ElementFinde
 import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
 import { DefaultTextMatcher } from "../../../src/features/utility/TextMatcher";
 import type { ViewHierarchyResult } from "../../../src/models";
+import { innerBounds, nestedClickableHierarchy } from "../../fixtures/nestedClickableHierarchy";
 
 // Use real implementations — they're pure and fast
 const parser = new DefaultElementParser();
@@ -27,6 +28,11 @@ function makeHierarchy(nodes: any): ViewHierarchyResult {
 }
 
 describe("DefaultElementFinder", () => {
+  test("chooses the nearest nested clickable ancestor for a matching label", () => {
+    const matches = finder.findClickableParentsContainingText(nestedClickableHierarchy, "Wi-Fi");
+    expect(matches.map((match) => match.bounds)).toEqual([innerBounds]);
+  });
+
   describe("findElementsByText", () => {
     test("returns empty for null hierarchy", () => {
       expect(finder.findElementsByText(null as any, "Login")).toEqual([]);

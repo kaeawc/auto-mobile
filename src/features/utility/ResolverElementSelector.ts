@@ -178,13 +178,7 @@ export class ResolverElementSelector implements ElementSelector {
     if (!result.error && !result.chosen && options.intentAction === "long-press") {
       return this.select(capture, selector, { ...options, intentAction: "tap" });
     }
-    return this.selectionResult(
-      result,
-      capture,
-      options.strategy ?? "first",
-      options.intentAction,
-      selector,
-    );
+    return this.selectionResult(result, capture, options.strategy ?? "first", selector);
   }
 
   private snapshotId(capture: ViewHierarchyResult): string {
@@ -234,15 +228,11 @@ export class ResolverElementSelector implements ElementSelector {
     result: ElementResolution,
     capture: ViewHierarchyResult,
     strategy: "first" | "random",
-    action?: ResolutionAction,
     selector?: ResolverSelector,
   ): ElementSelectionResult {
     const source = matchedSourceNode(result, selector);
     return {
-      element:
-        action === "highlight" && result.chosen && source?.element
-          ? source.element
-          : (result.chosen?.element ?? null),
+      element: result.chosen?.element ?? null,
       ...(source?.element ? { matchedElement: source.element } : {}),
       ...(getHierarchySnapshot(capture)
         ? { captureId: getHierarchySnapshot(capture)!.captureId }

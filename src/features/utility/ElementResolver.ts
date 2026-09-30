@@ -31,6 +31,10 @@ export type ResolutionAction =
   | "focus"
   | "highlight"
   | "drag";
+
+function usesClickablePromotion(action: ResolutionAction): boolean {
+  return action === "tap" || action === "long-press" || action === "highlight";
+}
 export interface ResolverSnapshot {
   id: string;
   nodes: readonly SearchableEntry[];
@@ -126,8 +130,35 @@ function centerWithinViewport(
   return x >= 0 && y >= 0 && x <= viewport.width && y <= viewport.height;
 }
 
-function hasVisibleBounds(node: SearchableEntry, intent: ResolutionIntent): boolean {
+function hasVisibleBounds(
+  node: SearchableEntry,
+  intent: Pick<ResolutionIntent, "viewport">,
+): boolean {
   return !!node.bounds && (!intent.viewport || centerWithinViewport(node.bounds, intent.viewport));
+}
+
+/** Choose the nearest actionable node, preserving the matched node separately. */
+export function promoteClickableAncestor(
+  node: SearchableEntry,
+  nodes: readonly SearchableEntry[],
+  intent: Pick<ResolutionIntent, "action" | "requireResourceId" | "viewport">,
+  scope?: SearchableEntry,
+): SearchableEntry | null {
+  const action = intent.action === "long-press" ? "long-press" : "tap";
+  let candidate: SearchableEntry | undefined = node;
+  while (candidate && candidate !== scope) {
+    if (
+      hasVisibleBounds(candidate, intent) &&
+      (!intent.requireResourceId || candidate.nativeId) &&
+      (action === "long-press"
+        ? candidate.affordances.includes("long-press")
+        : candidate.affordances.includes("tap") || candidate.affordances.includes("toggle"))
+    ) {
+      return candidate;
+    }
+    candidate = candidate.parentIndex === undefined ? undefined : nodes[candidate.parentIndex];
+  }
+  return null;
 }
 
 function semanticActionsForIntent(intent: ResolutionIntent): SearchableEntry["affordances"] {
@@ -461,6 +492,9 @@ export class ElementResolver {
     if (intent.action === "focus-input") {
       return this.focusInputTarget(node, snapshot, intent, scope);
     }
+    if (usesClickablePromotion(intent.action)) {
+      return this.clickableActionTarget(node, snapshot, intent, scope);
+    }
     if (eligible(node, intent)) {
       return node;
     }
@@ -476,6 +510,16 @@ export class ElementResolver {
       parent = ancestor.parentIndex;
     }
     return null;
+  }
+
+  private clickableActionTarget(
+    node: SearchableEntry,
+    snapshot: ResolverSnapshot,
+    intent: ResolutionIntent,
+    scope?: SearchableEntry,
+  ): SearchableEntry | null {
+    const promoted = promoteClickableAncestor(node, snapshot.nodes, intent, scope);
+    return intent.action === "highlight" && !promoted && eligible(node, intent) ? node : promoted;
   }
 
   private focusInputTarget(
@@ -632,6 +676,9 @@ export class ElementResolver {
   ): SearchableEntry {
     if (intent.action === "focus-input") {
       return this.actionTarget(node, snapshot, intent, scope) ?? node;
+    }
+    if (usesClickablePromotion(intent.action)) {
+      return promoteClickableAncestor(node, snapshot.nodes, intent, scope) ?? node;
     }
     if (node.affordances.length > 0) {
       return node;

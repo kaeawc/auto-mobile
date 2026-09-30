@@ -127,10 +127,11 @@ Use `ime` or `a11y` for emoji and other Unicode text when complete grapheme
 delivery matters. `auto` uses the IME when available, but its Android insertion
 fallback can split graphemes across key events and accessibility inserts.
 `SendKeysCommandResult.textLength` counts Unicode code points, rather than
-graphemes or UTF-16 code units. On iOS, XCUITest
-typing can depend on the simulator's **Connect Hardware Keyboard** setting and
-active keyboard language; non-Latin keyboard configurations are not covered by
-the simulator-free tests.
+graphemes or UTF-16 code units. On iOS, XCUITest `typeText` supplies the text
+independently of the active keyboard layout; the UI regression corpus checks
+non-Latin strings with the simulator's current keyboard configuration, but does
+not switch among keyboard layouts. If simulator typing does not enter text,
+check the **Connect Hardware Keyboard** setting.
 
 #### Unicode behavior by `sendKeys` mode
 

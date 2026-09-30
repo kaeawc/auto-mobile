@@ -1,6 +1,7 @@
 import { Worker } from "node:worker_threads";
 import { getDatabasePath, getMigrationsError } from "./database";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
 
 const DATABASE_HEALTH_PROBE_TIMEOUT_MS = 1_000;
 const DATABASE_HEALTH_PROBE_BUSY_TIMEOUT_MS = 50;
@@ -100,25 +101,14 @@ export class DefaultDatabaseHealthProbe implements DatabaseHealthProbe {
     // race, abandon any in-flight worker round-trip so pendingRequest never
     // outlives check() and a subsequent check() always attempts a fresh
     // probe instead of short-circuiting on "already running".
-    let timeoutHandle: NodeJS.Timeout | null = null;
-    try {
-      await Promise.race([
-        this.executeSelectOne(),
-        new Promise<never>((_, reject) => {
-          timeoutHandle = this.timer.setTimeout(() => {
-            this.abandonPendingWorkerRequest();
-            reject(new Error(`Database health probe timed out after ${this.timeoutMs}ms`));
-          }, this.timeoutMs);
-          if (typeof (timeoutHandle as { unref?: () => void }).unref === "function") {
-            (timeoutHandle as { unref: () => void }).unref();
-          }
-        }),
-      ]);
-    } finally {
-      if (timeoutHandle) {
-        this.timer.clearTimeout(timeoutHandle);
-      }
-    }
+    await raceWithDeadline(this.executeSelectOne(), {
+      timer: this.timer,
+      timeoutMs: this.timeoutMs,
+      unref: true,
+      label: "Database health probe",
+      timeoutError: () => new Error(`Database health probe timed out after ${this.timeoutMs}ms`),
+      onTimeout: () => this.abandonPendingWorkerRequest(),
+    });
   }
 
   async dispose(): Promise<void> {

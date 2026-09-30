@@ -309,7 +309,7 @@ export class OpenURL extends BaseVisualChange {
           {
             read: () =>
               this.observeScreen.execute({
-                skipWaitForFresh: false,
+                freshness: "fresh",
                 minTimestamp: openedAt,
                 skipScreenshot: true,
                 skipAccessibilityAudit: true,

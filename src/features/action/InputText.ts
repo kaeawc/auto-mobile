@@ -1001,7 +1001,7 @@ export class InputText extends BaseVisualChange {
           : timestampResult.timestampMs;
     }
     const refreshedObserveResult = await this.observeScreen.execute({
-      skipWaitForFresh: false,
+      freshness: "fresh",
       minTimestamp,
       signal,
     });

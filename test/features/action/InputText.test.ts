@@ -629,7 +629,7 @@ describe("InputText", () => {
     expect(result.method).toBe("eventOnly");
     expect(observeScreen.getGetMostRecentCachedObserveResultCallCount()).toBe(1);
     expect(observeScreen.getExecuteCallCount()).toBe(2);
-    expect(observeScreen.getExecuteOptions()[0]?.skipWaitForFresh).toBe(false);
+    expect(observeScreen.getExecuteOptions()[0]?.freshness).toBe("fresh");
     expect(inputCommands(factory)).toEqual([
       "shell input keyevent KEYCODE_MOVE_END",
       "shell input keyevent KEYCODE_DEL",
@@ -669,7 +669,7 @@ describe("InputText", () => {
     expect(result.success).toBe(false);
     expect(result.error).toBe("eventOnly requires a focused editable field");
     expect(observeScreen.getExecuteCallCount()).toBe(1);
-    expect(observeScreen.getExecuteOptions()[0]?.skipWaitForFresh).toBe(false);
+    expect(observeScreen.getExecuteOptions()[0]?.freshness).toBe("fresh");
     expect(observeScreen.getExecuteOptions()[0]?.minTimestamp).toBe(43);
   });
 

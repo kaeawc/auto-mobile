@@ -110,7 +110,7 @@ describe("TapAtCoordinate", () => {
     expect(result).toMatchObject({ success: true, x: 2, y: 3 });
     expect(androidDispatches).toEqual([{ x: 2, y: 3, frameContext: "frame-123" }]);
     expect(observeScreen.getGetMostRecentCachedObserveResultCallCount()).toBe(0);
-    expect(observeScreen.getExecuteOptions()[0]?.skipWaitForFresh).toBeUndefined();
+    expect(observeScreen.getExecuteOptions()[0]?.freshness).toBe("cached-ok");
   });
 
   test("accepts fractional Android coordinates just inside the right edge and clamps to the last pixel", async () => {
@@ -413,6 +413,12 @@ describe("TapAtCoordinate", () => {
       { x: 20, y: 30, frameContext: "epoch:2" },
     ]);
     expect(observeScreen.getExecuteCallCount()).toBe(3);
+    expect(
+      observeScreen
+        .getExecuteOptions()
+        .slice(0, 2)
+        .map((options) => options.freshness),
+    ).toEqual(["cached-ok", "cached-ok"]);
     expect(adb.wasCommandExecuted("shell input touchscreen tap 20 30")).toBe(false);
   });
 

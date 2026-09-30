@@ -2083,6 +2083,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         consecutiveStable = 1;
       }
       prevBounds = b;
+      const refreshedCaptureId = getHierarchySnapshot(freshHierarchy)?.captureId;
       best = {
         viewHierarchy: freshHierarchy,
         tapElement: refreshed.element,
@@ -2090,7 +2091,9 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         // Carry the refreshed selection so the caller can rebuild selectedElement
         // metadata (bounds/indexInMatches/totalMatches) from the node actually
         // tapped, not the stale pre-refresh selection (#5888).
-        selection: refind.selection,
+        selection: refreshedCaptureId
+          ? { ...refind.selection, captureId: refreshedCaptureId }
+          : refind.selection,
       };
 
       if (consecutiveStable >= stableMatchesRequired) {
@@ -2874,6 +2877,11 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
             // The pre-tap stability resolver always returns a hierarchy it just
             // re-captured live from the device, so its freshness is realigned.
             this.replaceObservationHierarchy(observeResult, stable.viewHierarchy, true);
+            // This observation now describes the refreshed capture used for the
+            // tap, rather than the earlier hierarchy used to start resolution.
+            if (stable.selection.captureId) {
+              observeResult.observationId = stable.selection.captureId;
+            }
             viewHierarchy = stable.viewHierarchy;
             tapElement = stable.tapElement;
             finalSelection = stable.selection;

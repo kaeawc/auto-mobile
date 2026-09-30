@@ -223,7 +223,7 @@ export class ClearText extends BaseVisualChange {
     }
 
     const refreshedObserveResult = await this.observeScreen.execute({
-      skipWaitForFresh: false,
+      freshness: "fresh",
       minTimestamp,
     });
     const refreshedViewHierarchy = refreshedObserveResult.viewHierarchy;

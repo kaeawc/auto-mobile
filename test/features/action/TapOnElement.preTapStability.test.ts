@@ -16,6 +16,7 @@ import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeElementSelector } from "../../fakes/FakeElementSelector";
 import { FakeTapStrategy } from "../../fakes/FakeTapStrategy";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { identifyObservedHierarchy } from "../../../src/features/observe/HierarchyCapture";
 import type { AdbExecutor } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 
 const STABLE_BOUNDS: Element["bounds"] = { left: 10, top: 20, right: 110, bottom: 70 };
@@ -191,6 +192,24 @@ async function executeFocusWithDuplicateEmail(
   const after: ViewHierarchyResult = {
     hierarchy: { node: { $: {}, node: [hierarchyNode(clickable), hierarchyNode(focused)] } },
   };
+  if (moveDuringStability) {
+    identifyObservedHierarchy(
+      "android",
+      before,
+      "cached-ok",
+      undefined,
+      undefined,
+      "initial-capture",
+    );
+    identifyObservedHierarchy(
+      "android",
+      stableHierarchy,
+      "fresh",
+      undefined,
+      undefined,
+      "stable-capture",
+    );
+  }
   const selector = new FakeElementSelector();
   const selectionIntents: string[] = [];
   selector.selectByText = (hierarchy, _text, options) => {
@@ -225,8 +244,10 @@ async function executeFocusWithDuplicateEmail(
     },
   );
   const tapped: Element[] = [];
+  const sourceObservation = makeFocusObservation(before);
+  sourceObservation.observationId = "initial-capture";
   tap.observedInteraction = async (action) => ({
-    ...(await action(makeFocusObservation(before))),
+    ...(await action(sourceObservation)),
     observation: makeFocusObservation(after),
   });
   tap.refreshViewHierarchy = async () => (moveDuringStability ? stableHierarchy : before);
@@ -250,7 +271,15 @@ async function executeFocusWithDuplicateEmail(
   tap.enforceFreshnessConsistencyWithEffect = () => {};
 
   const result = await tap.execute({ text: "Email", action: "focus", index: 0, [flag]: true });
-  return { result, tapped, clickable, editable, stableEditable, selectionIntents };
+  return {
+    result,
+    tapped,
+    clickable,
+    editable,
+    stableEditable,
+    selectionIntents,
+    sourceObservation,
+  };
 }
 
 describe("focus intent through pre-tap stability", () => {
@@ -288,6 +317,17 @@ describe("focus intent through pre-tap stability", () => {
       expect(result.success).toBe(true);
     },
   );
+
+  test("pre-tap stability reports the refreshed capture identity", async () => {
+    const { result, sourceObservation } = await executeFocusWithDuplicateEmail(
+      "preTapStability",
+      true,
+    );
+
+    expect(result.success).toBe(true);
+    expect(sourceObservation.observationId).toBe("stable-capture");
+    expect(result.selectedElement?.captureId).toBe("stable-capture");
+  });
 });
 
 describe("resolveAndroidStableTapTargetAfterRefreshes", () => {

@@ -1225,7 +1225,7 @@ export class LaunchApp extends BaseVisualChange {
       );
       await this.timer.sleep(pollIntervalMs);
       latestObservation = await this.observeScreen.execute({
-        skipWaitForFresh: false,
+        freshness: "fresh",
         signal,
         skipScreenshot: true,
         skipAccessibilityAudit: true,
@@ -1321,7 +1321,7 @@ export class LaunchApp extends BaseVisualChange {
 
     try {
       const observation = await this.observeScreen.execute({
-        skipWaitForFresh: false,
+        freshness: "fresh",
         signal,
         skipScreenshot: true,
         skipAccessibilityAudit: true,

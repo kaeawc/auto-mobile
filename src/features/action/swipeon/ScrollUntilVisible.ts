@@ -143,6 +143,7 @@ export class ScrollUntilVisible {
     // Get initial observation
     let lastObservation = await perf.track("initialObserve", () =>
       this.deps.observeScreen.execute({
+        freshness: "cached-ok",
         skipScreenshot: true,
         skipAccessibilityAudit: true,
       }),
@@ -401,6 +402,7 @@ export class ScrollUntilVisible {
           `[SwipeOn] Iteration ${scrollIteration}: stale unchanged observation; re-observing once before scroll-end decision`,
         );
         lastObservation = await this.deps.observeScreen.execute({
+          freshness: "cached-ok",
           skipScreenshot: true,
           skipAccessibilityAudit: true,
         });
@@ -557,6 +559,7 @@ export class ScrollUntilVisible {
           // separate action-only conversion.
           latestViewHierarchy = (
             await this.deps.observeScreen.execute({
+              freshness: "cached-ok",
               skipScreenshot: true,
               skipAccessibilityAudit: true,
             })
@@ -757,6 +760,7 @@ export class ScrollUntilVisible {
     return waitForScrollIdle(currentObservation, {
       observe: () =>
         this.deps.observeScreen.execute({
+          freshness: "cached-ok",
           skipScreenshot: true,
           skipAccessibilityAudit: true,
         }),

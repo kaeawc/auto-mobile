@@ -342,7 +342,7 @@ describe("SendKeys", () => {
     expect(result.commands[0]).not.toHaveProperty("text");
     expect(observer.calls).toBe(1);
     expect(observer.options).toEqual([
-      { signal: undefined, skipWaitForFresh: false, minTimestamp: 1234 },
+      { signal: undefined, freshness: "fresh", minTimestamp: 1234 },
     ]);
   });
 
@@ -475,7 +475,7 @@ describe("SendKeys", () => {
     expect(type).not.toHaveBeenCalled();
     expect(observer.calls).toBe(1);
     expect(observer.options).toEqual([
-      { signal: undefined, skipWaitForFresh: false, minTimestamp: undefined },
+      { signal: undefined, freshness: "fresh", minTimestamp: undefined },
     ]);
   });
 

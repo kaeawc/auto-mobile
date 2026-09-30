@@ -7,7 +7,7 @@ import type { ScreenshotMode } from "../automaticScreenshotPolicy";
 export interface ObserveScreenExecuteOptions {
   queryOptions?: ViewHierarchyQueryOptions;
   perf?: PerformanceTracker;
-  /** Explicit internal capture policy; omitted preserves legacy wait options. */
+  /** Explicit internal capture policy, including the collector fallback wait. */
   freshness?: HierarchyCaptureRequest["freshness"];
   /** Bounds an explicitly requested hierarchy capture. */
   timeoutMs?: number;

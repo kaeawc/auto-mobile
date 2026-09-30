@@ -130,7 +130,10 @@ describe("ClearText Android ADB fallback", () => {
     });
 
     expect(result.success).toBe(true);
-    expect(refreshSpy).toHaveBeenCalledWith({ skipWaitForFresh: false, minTimestamp: 101 });
+    expect(refreshSpy).toHaveBeenCalledWith({
+      freshness: "fresh",
+      minTimestamp: 101,
+    });
     expect(fakeAdb.getExecutedCommands()).toEqual([]);
   });
 

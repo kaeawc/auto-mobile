@@ -175,9 +175,9 @@ export class BaseVisualChange {
           const cached = await this.observeScreen.getMostRecentCachedObserveResult();
           if (!cached?.viewHierarchy || cached.viewHierarchy.hierarchy.error) {
             return this.observeScreen.execute({
+              freshness: "cached-ok",
               queryOptions: options.queryOptions,
               perf,
-              skipWaitForFresh: true,
               signal: options.signal,
             });
           }
@@ -186,9 +186,9 @@ export class BaseVisualChange {
       } catch {
         previousObserveResult = await perf.track("getPreviousObserveFallback", async () => {
           return this.observeScreen.execute({
+            freshness: "cached-ok",
             queryOptions: options.queryOptions,
             perf,
-            skipWaitForFresh: true,
             signal: options.signal,
           });
         });
@@ -421,12 +421,11 @@ export class BaseVisualChange {
     const previousHash = hierarchyFingerprint(previousObserveResult?.viewHierarchy);
 
     perf.serial("finalObserve");
-    // Wait for fresh data from accessibility service (skipWaitForFresh=false)
-    // This ensures we get observation data that reflects the action that just completed
+    // Capture fresh data that reflects the action that just completed.
     let latestObservation = await this.observeScreen.execute({
+      freshness: "fresh",
       queryOptions: options.queryOptions,
       perf,
-      skipWaitForFresh: false,
       minTimestamp,
       signal: options.signal,
       // Retries collect hierarchy only. If enabled, visual evidence is captured
@@ -462,9 +461,9 @@ export class BaseVisualChange {
       await this.timer.sleep(delayMs);
       perf.serial(`finalObserve_retry_${attempt + 1}`);
       latestObservation = await this.observeScreen.execute({
+        freshness: "fresh",
         queryOptions: options.queryOptions,
         perf,
-        skipWaitForFresh: false,
         minTimestamp,
         signal: options.signal,
         skipScreenshot: true,

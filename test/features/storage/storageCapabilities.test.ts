@@ -104,15 +104,41 @@ describe("AC2: platform-qualified domains", () => {
     }
   });
 
-  it("user_files staging is available on Android but list/read have no surface yet", () => {
+  it("user_files listing, reading, and staging are available with an active Android profile", () => {
     const report = computeStorageCapabilities(
       ctx({ platform: "android", activeUserProfile: true }),
     );
-    // Staging into shared storage is backed by putAppFile user_files providers.
+    // putAppFile/stageSharedStorage and the shared-storage resource templates back these operations.
     expect(isStorageOperationAvailable(report, "user_files", "write")).toBe(true);
-    // No AutoMobile listing/read surface exists for shared storage yet.
-    expect(findOperationCapability(report, "user_files", "list")?.state).toBe("unavailable");
-    expect(findOperationCapability(report, "user_files", "read")?.state).toBe("unavailable");
+    for (const operation of ["list", "read"] as const) {
+      const capability = findOperationCapability(report, "user_files", operation)!;
+      expect(capability.state).toBe("supported");
+      expect(capability.reason).toContain("MCP resource template");
+    }
+    const userFiles = report.domains.find((domain) => domain.domain === "user_files")!;
+    expect(userFiles.note).toContain("Downloads Namespace Files");
+    expect(userFiles.note).toContain("Downloads Namespace File");
+    expect(userFiles.note).toContain(
+      "automobile:devices/{deviceId}/downloads/{namespace}[/{path}]",
+    );
+  });
+
+  it("user_files listing and reading are partial when the active Android profile is unverified", () => {
+    const report = computeStorageCapabilities(ctx({ activeUserProfile: undefined }));
+    for (const operation of ["list", "read"] as const) {
+      const capability = findOperationCapability(report, "user_files", operation)!;
+      expect(capability.state).toBe("partial");
+      expect(capability.prerequisites).toContain("active Android user/profile");
+    }
+  });
+
+  it("user_files listing and reading are unavailable without an active Android profile", () => {
+    const report = computeStorageCapabilities(ctx({ activeUserProfile: false }));
+    for (const operation of ["list", "read"] as const) {
+      const capability = findOperationCapability(report, "user_files", operation)!;
+      expect(capability.state).toBe("unavailable");
+      expect(capability.reason).toBe("Missing prerequisite: active Android user/profile.");
+    }
   });
 
   it("app_containers is supported on iOS simulator", () => {

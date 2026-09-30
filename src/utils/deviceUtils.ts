@@ -614,40 +614,33 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     const freshDeviceIds = new Set<string>();
     const discoveryErrors: Partial<Record<Platform, DeviceDiscoveryError>> = {};
 
-    if (platform === "android" || platform === "either") {
-      const android = await this.discoverBootedAndroidDevices(options);
-      devices.push(...android.devices);
-      if (android.error) {
-        discoveryErrors.android = android.error;
-      } else {
-        succeededPlatforms.add("android");
-        succeededSources.add("android");
-        // adb has no retention replay: a listed device was listed just now.
-        for (const emulator of android.devices) {
-          freshDeviceIds.add(emulator.deviceId);
-        }
-      }
+    const [android, ios] = await Promise.all([
+      platform === "android" || platform === "either"
+        ? this.discoverBootedAndroidDevices(options)
+        : undefined,
+      platform === "ios" || platform === "either"
+        ? this.discoverBootedIosDevices(options)
+        : undefined,
+    ]);
+
+    if (android) {
+      this.appendAndroidBootedDiscovery(android, {
+        devices,
+        succeededPlatforms,
+        succeededSources,
+        freshDeviceIds,
+        discoveryErrors,
+      });
     }
 
-    if (platform === "ios" || platform === "either") {
-      const ios = await this.discoverBootedIosDevices(options);
-      // Physical devices that devicectl confirmed are reported even when
-      // simulator discovery failed, and vice versa. `succeededPlatforms.ios`
-      // still means "simctl completed" for the platform-level consumers that
-      // predate #5683; the per-source set is what lets a consumer decide an
-      // individual device without over-reading either failure.
-      devices.push(...ios.devices);
-      for (const source of iosSucceededSources(ios)) {
-        succeededSources.add(source);
-      }
-      if (ios.simulatorsSucceeded) {
-        succeededPlatforms.add("ios");
-      } else if (ios.error) {
-        discoveryErrors.ios = ios.error;
-      }
-      for (const deviceId of ios.freshDeviceIds) {
-        freshDeviceIds.add(deviceId);
-      }
+    if (ios) {
+      this.appendIosBootedDiscovery(ios, {
+        devices,
+        succeededPlatforms,
+        succeededSources,
+        freshDeviceIds,
+        discoveryErrors,
+      });
     }
 
     return {
@@ -657,6 +650,50 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
       freshDeviceIds,
       discoveryErrors,
     };
+  }
+
+  private appendAndroidBootedDiscovery(
+    android: { devices: BootedDevice[]; error?: DeviceDiscoveryError },
+    result: BootedDeviceDiscovery & {
+      succeededSources: Set<DiscoverySource>;
+      freshDeviceIds: Set<string>;
+      discoveryErrors: Partial<Record<Platform, DeviceDiscoveryError>>;
+    },
+  ): void {
+    result.devices.push(...android.devices);
+    if (android.error) {
+      result.discoveryErrors.android = android.error;
+      return;
+    }
+    result.succeededPlatforms.add("android");
+    result.succeededSources.add("android");
+    // adb has no retention replay: a listed device was listed just now.
+    for (const emulator of android.devices) {
+      result.freshDeviceIds.add(emulator.deviceId);
+    }
+  }
+
+  private appendIosBootedDiscovery(
+    ios: Awaited<ReturnType<MultiPlatformDeviceManager["discoverBootedIosDevices"]>>,
+    result: BootedDeviceDiscovery & {
+      succeededSources: Set<DiscoverySource>;
+      freshDeviceIds: Set<string>;
+      discoveryErrors: Partial<Record<Platform, DeviceDiscoveryError>>;
+    },
+  ): void {
+    // Physical devices confirmed by devicectl survive simulator discovery failure.
+    result.devices.push(...ios.devices);
+    for (const source of iosSucceededSources(ios)) {
+      result.succeededSources.add(source);
+    }
+    if (ios.simulatorsSucceeded) {
+      result.succeededPlatforms.add("ios");
+    } else if (ios.error) {
+      result.discoveryErrors.ios = ios.error;
+    }
+    for (const deviceId of ios.freshDeviceIds) {
+      result.freshDeviceIds.add(deviceId);
+    }
   }
 
   /**
@@ -691,45 +728,89 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     const succeededPlatforms = new Set<Platform>();
     const discoveryErrors: Partial<Record<Platform, DeviceDiscoveryError>> = {};
 
-    if (platform === "android" || platform === "either") {
-      try {
-        devices.push(...(await this.listAndroidDeviceImages(options.signal)));
+    const [android, ios] = await Promise.all([
+      platform === "android" || platform === "either"
+        ? this.discoverAndroidDeviceImages(options.signal)
+        : undefined,
+      platform === "ios" || platform === "either"
+        ? this.discoverIosDeviceImages(options)
+        : undefined,
+    ]);
+
+    if (android) {
+      devices.push(...android.devices);
+      if (android.error) {
+        discoveryErrors.android = android.error;
+      }
+      if (android.succeeded) {
         succeededPlatforms.add("android");
-      } catch (error) {
-        logger.warn(`[DeviceManager] Android device inventory failed: ${error}`);
-        discoveryErrors.android = {
-          code: "failed",
-          message: `Android device inventory failed: ${errorMessage(error)}`,
-        };
       }
     }
 
-    if (platform === "ios" || platform === "either") {
-      if (!(await this.canDiscoverIosLocally(options.signal))) {
-        discoveryErrors.ios = {
-          code: "unavailable",
-          message: "iOS device inventory is unavailable.",
-        };
-      } else {
-        try {
-          devices.push(
-            ...(await this.simctl.listSimulatorImages(undefined, {
-              bypassCache: options.bypassIosDeviceListCache,
-              signal: combineWithAmbientAbort(options.signal),
-            })),
-          );
-          succeededPlatforms.add("ios");
-        } catch (error) {
-          logger.warn(`[DeviceManager] iOS device inventory failed: ${error}`);
-          discoveryErrors.ios = {
-            code: "failed",
-            message: `iOS device inventory failed: ${errorMessage(error)}`,
-          };
-        }
+    if (ios) {
+      devices.push(...ios.devices);
+      if (ios.error) {
+        discoveryErrors.ios = ios.error;
+      }
+      if (ios.succeeded) {
+        succeededPlatforms.add("ios");
       }
     }
 
     return { devices, succeededPlatforms, discoveryErrors };
+  }
+
+  private async discoverAndroidDeviceImages(signal?: AbortSignal): Promise<{
+    devices: DeviceInfo[];
+    succeeded: boolean;
+    error?: DeviceDiscoveryError;
+  }> {
+    try {
+      return { devices: await this.listAndroidDeviceImages(signal), succeeded: true };
+    } catch (error) {
+      logger.warn(`[DeviceManager] Android device inventory failed: ${error}`);
+      return {
+        devices: [],
+        succeeded: false,
+        error: {
+          code: "failed",
+          message: `Android device inventory failed: ${errorMessage(error)}`,
+        },
+      };
+    }
+  }
+
+  private async discoverIosDeviceImages(options: DeviceImageDiscoveryOptions): Promise<{
+    devices: DeviceInfo[];
+    succeeded: boolean;
+    error?: DeviceDiscoveryError;
+  }> {
+    if (!(await this.canDiscoverIosLocally(options.signal))) {
+      return {
+        devices: [],
+        succeeded: false,
+        error: { code: "unavailable", message: "iOS device inventory is unavailable." },
+      };
+    }
+    try {
+      return {
+        devices: await this.simctl.listSimulatorImages(undefined, {
+          bypassCache: options.bypassIosDeviceListCache,
+          signal: combineWithAmbientAbort(options.signal),
+        }),
+        succeeded: true,
+      };
+    } catch (error) {
+      logger.warn(`[DeviceManager] iOS device inventory failed: ${error}`);
+      return {
+        devices: [],
+        succeeded: false,
+        error: {
+          code: "failed",
+          message: `iOS device inventory failed: ${errorMessage(error)}`,
+        },
+      };
+    }
   }
 
   private async discoverBootedAndroidDevices(

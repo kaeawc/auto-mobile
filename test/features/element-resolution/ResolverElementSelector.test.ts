@@ -56,6 +56,28 @@ test("raw element search uses attached raw nodes even with an actionable snapsho
   );
 });
 
+test("iOS observed selectors cannot reopen an attached offscreen raw tree", () => {
+  const visible = {
+    screenWidth: 100,
+    screenHeight: 100,
+    hierarchy: {
+      node: { bounds, clickable: true, text: "Visible", "resource-id": "visible" },
+    },
+  };
+  const raw = {
+    hierarchy: {
+      node: { bounds: [0, 500, 20, 520], clickable: true, text: "Hidden", "resource-id": "hidden" },
+    },
+  };
+  identifyObservedHierarchy("ios", visible, "cached-ok");
+  attachRawViewHierarchy(visible, raw);
+  serverConfig.setRawElementSearchEnabled(true);
+  const selector = new ResolverElementSelector();
+  expect(selector.selectByText(visible, "Visible").element?.["resource-id"]).toBe("visible");
+  expect(selector.selectByText(visible, "Hidden").element).toBeNull();
+  expect(selector.hasContainer(visible, { elementId: "hidden" })).toBe(false);
+});
+
 test("adapter fails ambiguity before returning any action target", () => {
   const capture = {
     hierarchy: {

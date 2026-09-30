@@ -122,13 +122,16 @@ export class DefaultHierarchyCapture implements HierarchyCapture {
 
   async capture(request: HierarchyCaptureRequest): Promise<HierarchySnapshot> {
     request.signal?.throwIfAborted();
-    const source = await this.read(request);
+    // iOS raw search shares the displayed, offscreen-projected capture. Android
+    // retains its explicit raw diagnostic projection.
+    const searchRaw = this.platform === "android" && request.searchRaw === true;
+    const source = await this.read({ ...request, searchRaw });
     request.signal?.throwIfAborted();
     if (source.hierarchy?.error) {
       throw new ActionableError(`Unable to capture hierarchy: ${source.hierarchy.error}`);
     }
     this.validateTimestampFloor(source, request.minTimestamp);
-    const snapshots = request.searchRaw ? this.rawSearchSnapshots : this.snapshots;
+    const snapshots = searchRaw ? this.rawSearchSnapshots : this.snapshots;
     let snapshot = snapshots.get(source);
     if (!snapshot) {
       // Spread deliberately drops the non-enumerable raw-search carrier. The
@@ -140,8 +143,8 @@ export class DefaultHierarchyCapture implements HierarchyCapture {
         updatedAt: source.updatedAt,
         receivedAt: source.receivedAt ?? this.timer.now(),
         hierarchy,
-        nodes: this.projectNodes(source, hierarchy, request.searchRaw),
-        searchRaw: request.searchRaw,
+        nodes: this.projectNodes(source, hierarchy, searchRaw),
+        searchRaw,
       };
       snapshots.set(source, snapshot);
     }

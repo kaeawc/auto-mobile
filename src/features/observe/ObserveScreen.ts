@@ -42,7 +42,7 @@ import { PredictiveUIState } from "./PredictiveUIState";
 import { ScreenshotJobTracker } from "../../utils/ScreenshotJobTracker";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { defaultIdGenerator, type IdGenerator } from "../../utils/IdGenerator";
-import { attachRawViewHierarchy } from "../../utils/viewHierarchySearch";
+import { projectActionableHierarchy } from "./HierarchyNormalization";
 import type { ObserveScreen, ObserveScreenExecuteOptions } from "./interfaces/ObserveScreen";
 import type { ObserveScreenDependencies } from "./ObserveScreenDependencies";
 import type { ViewHierarchy as ViewHierarchyInterface } from "./interfaces/ViewHierarchy";
@@ -1456,8 +1456,7 @@ export class RealObserveScreen implements ObserveScreen {
           result.rotation = result.viewHierarchy.rotation;
         }
 
-        // Filter offscreen nodes to keep payload small. Original hierarchy stays
-        // attached for raw element search when enabled.
+        // Use the same iOS visibility projection as action and diagnostic captures.
         if (result.viewHierarchy && result.screenSize?.width > 0 && result.screenSize?.height > 0) {
           // Reconcile the duplicated viewHierarchy.screenWidth/screenHeight fields
           // with the authoritative screenSize before filtering (which preserves
@@ -1470,15 +1469,8 @@ export class RealObserveScreen implements ObserveScreen {
           );
 
           const rawHierarchy = result.viewHierarchy;
-          result.viewHierarchy = this.viewHierarchy.filterOffscreenNodes(
-            rawHierarchy,
-            result.screenSize.width,
-            result.screenSize.height,
-          );
+          result.viewHierarchy = projectActionableHierarchy("ios", rawHierarchy);
           inheritHierarchySnapshot(rawHierarchy, result.viewHierarchy);
-          if (serverConfig.isRawElementSearchEnabled()) {
-            attachRawViewHierarchy(result.viewHierarchy, rawHierarchy);
-          }
         }
 
         // Populate activeWindow from view hierarchy packageName if not already set.

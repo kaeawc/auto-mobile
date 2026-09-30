@@ -1,4 +1,5 @@
 import { ViewHierarchyCaptureReader } from "../../../src/features/observe/ViewHierarchyCaptureReader";
+import { projectActionableHierarchy } from "../../../src/features/observe/HierarchyNormalization";
 import { RealSettleObserve } from "../../../src/features/observe/SettleObserve";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { describe, expect, test } from "bun:test";
@@ -96,6 +97,34 @@ describe("hierarchy capture freshness policy", () => {
     const result = await capture.capture({ freshness: "cached-ok" });
     expect(result.nodes[0].bounds?.left).toBe(0);
     expect(resolveViewHierarchyForSearch(result.hierarchy)).toBe(result.hierarchy);
+  });
+  test("iOS raw mode keeps the same visible candidates and bounds", async () => {
+    const reader = new FakeReader();
+    reader.fresh = {
+      screenWidth: 100,
+      screenHeight: 100,
+      hierarchy: {
+        node: [
+          { text: "Visible", bounds: [10, 10, 30, 30], clickable: true },
+          { text: "Hidden", bounds: [10, 500, 30, 520], clickable: true },
+        ],
+      },
+    };
+    attachRawViewHierarchy(reader.fresh, hierarchy(5000));
+    reader.projectVisible = (value) => projectActionableHierarchy("ios", value);
+    const capture = new DefaultHierarchyCapture(
+      "ios",
+      reader,
+      new FakeTimer(),
+      new CountingIdGenerator(),
+    );
+    const visible = await capture.capture({ freshness: "fresh" });
+    const rawRequested = await capture.capture({ freshness: "fresh", searchRaw: true });
+    expect(rawRequested.nodes).toBe(visible.nodes);
+    expect(rawRequested.nodes.map((node) => [node.label, node.bounds?.left])).toEqual([
+      ["Visible", 10],
+    ]);
+    expect(rawRequested.searchRaw).toBe(false);
   });
   test("diagnostic raw search projects attached nodes without widening actionable snapshots", async () => {
     const reader = new FakeReader();

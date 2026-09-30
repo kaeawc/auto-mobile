@@ -53,7 +53,7 @@ interface DebugSearchOptions {
 
 export class DebugSearch {
   constructor(
-    device: BootedDevice,
+    private readonly device: BootedDevice,
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
     private readonly timer: Timer = defaultTimer,
     private readonly resolver: Pick<ElementResolver, "resolve"> = new ElementResolver(),
@@ -66,7 +66,7 @@ export class DebugSearch {
     const timestamp = this.timer.now();
     const snapshot = await this.capture.capture({
       freshness: "fresh",
-      searchRaw: serverConfig.isRawElementSearchEnabled(),
+      searchRaw: this.device.platform === "android" && serverConfig.isRawElementSearchEnabled(),
     });
     const nodes = snapshot.nodes;
     const requestedMatch =

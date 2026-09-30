@@ -24,20 +24,19 @@ export class FocusElementMatcher {
       return null;
     }
 
-    const matches = elements
-      .map((element, index) => ({ element, index }))
-      .filter(({ element }) => this.matchesSelector(element, selector, options));
+    const exactMatches = this.findMatches(elements, selector, { ...options, partialMatch: false });
+    const matches =
+      exactMatches.length > 0 || options.partialMatch === false
+        ? exactMatches
+        : this.findMatches(elements, selector, { ...options, partialMatch: true });
 
     if (matches.length === 0) {
       return null;
     }
 
-    // If bounds are provided in selector and there are multiple matches,
-    // prefer the element with matching bounds (for disambiguation in lists)
     if (selector.bounds && matches.length > 1) {
-      const boundsMatch = matches.find(({ element }) =>
-        this.boundsMatch(element, selector.bounds!),
-      );
+      const bounds = selector.bounds;
+      const boundsMatch = matches.find(({ element }) => this.boundsMatch(element, bounds));
       if (boundsMatch) {
         return boundsMatch.index;
       }
@@ -129,10 +128,48 @@ export class FocusElementMatcher {
     return true;
   }
 
+  matchesFocusedTarget(
+    focused: Element,
+    elements: Element[],
+    selector: FocusElementSelector,
+  ): boolean {
+    const exactMatches = elements.filter((element) => this.matchesSelector(element, selector));
+    const partialMatch = exactMatches.length === 0;
+    const matches = partialMatch
+      ? elements.filter((element) =>
+          this.matchesSelector(element, selector, { partialMatch: true }),
+        )
+      : exactMatches;
+
+    if (!this.matchesSelector(focused, selector, { partialMatch })) {
+      return false;
+    }
+    if (matches.length === 1) {
+      return true;
+    }
+
+    const preferred = this.preferredBoundsMatch(matches, selector);
+    return (
+      preferred !== null &&
+      preferred.bounds !== undefined &&
+      this.boundsMatch(focused, preferred.bounds)
+    );
+  }
+
   private createTextMatcher(text: string, options: TextMatchOptions): (input?: string) => boolean {
-    const partialMatch = options.partialMatch ?? true;
+    const partialMatch = options.partialMatch ?? false;
     const caseSensitive = options.caseSensitive ?? false;
     return this.textMatcher.createTextMatcher(text, partialMatch, caseSensitive);
+  }
+
+  private findMatches(
+    elements: Element[],
+    selector: FocusElementSelector,
+    options: TextMatchOptions,
+  ): { element: Element; index: number }[] {
+    return elements.flatMap((element, index) =>
+      this.matchesSelector(element, selector, options) ? [{ element, index }] : [],
+    );
   }
 
   private findIndexByValue(
@@ -198,5 +235,45 @@ export class FocusElementMatcher {
       element.bounds.right === bounds.right &&
       element.bounds.bottom === bounds.bottom
     );
+  }
+
+  private preferredBoundsMatch(
+    elements: Element[],
+    selector: FocusElementSelector,
+  ): Element | null {
+    const bounds = selector.bounds;
+    if (!bounds) {
+      return null;
+    }
+
+    const exactBoundsMatch = elements.find((element) => this.boundsMatch(element, bounds));
+    if (exactBoundsMatch) {
+      return exactBoundsMatch;
+    }
+
+    let closest: Element | null = null;
+    let closestDistance = Number.POSITIVE_INFINITY;
+    for (const element of elements) {
+      if (!element.bounds) {
+        continue;
+      }
+      const distance = this.boundsDistance(element.bounds, bounds);
+      if (distance < closestDistance) {
+        closest = element;
+        closestDistance = distance;
+      }
+    }
+    return closest;
+  }
+
+  private boundsDistance(
+    left: { left: number; top: number; right: number; bottom: number },
+    right: { left: number; top: number; right: number; bottom: number },
+  ): number {
+    const leftCenterX = (left.left + left.right) / 2;
+    const leftCenterY = (left.top + left.bottom) / 2;
+    const rightCenterX = (right.left + right.right) / 2;
+    const rightCenterY = (right.top + right.bottom) / 2;
+    return (leftCenterX - rightCenterX) ** 2 + (leftCenterY - rightCenterY) ** 2;
   }
 }

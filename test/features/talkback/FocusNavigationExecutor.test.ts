@@ -173,6 +173,81 @@ describe("FocusNavigationExecutor", () => {
     expect(driver.getSwipeCount()).toBe(0);
   });
 
+  test("reaches a unique target after it moved from the selector bounds", async () => {
+    const timer = new FakeTimer();
+    const driver = new FakeFocusNavigationDriver();
+    const movedTarget = { text: "Save", bounds: makeElement("a", 1).bounds };
+    driver.setElements([movedTarget], 0);
+    const executor = new FocusNavigationExecutor({
+      timer,
+      driverFactory: { createDriver: () => driver },
+    });
+
+    await expect(
+      executor.navigateToElement(
+        "device-1",
+        { text: "Save", bounds: makeElement("a", 0).bounds },
+        { currentFocusIndex: 0, targetFocusIndex: 0, swipeCount: 0, direction: "forward" },
+        { swipeDelay: 0 },
+      ),
+    ).resolves.toBe(true);
+    expect(driver.getSwipeCount()).toBe(0);
+  });
+
+  test("continues past a substring match with different bounds on a zero-swipe path", async () => {
+    const timer = new FakeTimer();
+    const driver = new FakeFocusNavigationDriver();
+    const first = { text: "Save as draft", bounds: makeElement("a", 0).bounds };
+    const target = { text: "Save", bounds: makeElement("b", 1).bounds };
+    driver.setElements([first, target], 0);
+    const executor = new FocusNavigationExecutor({
+      timer,
+      driverFactory: { createDriver: () => driver },
+    });
+
+    const resultPromise = executor.navigateToElement(
+      "device-1",
+      { text: "Save", bounds: target.bounds },
+      { currentFocusIndex: 0, targetFocusIndex: 1, swipeCount: 0, direction: "forward" },
+      { swipeDelay: 0 },
+    );
+    for (let i = 0; i < 10; i++) {
+      timer.advanceTime(100);
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+
+    await expect(resultPromise).resolves.toBe(true);
+    expect(driver.getSwipeCount()).toBe(1);
+    expect(driver.getFocusedElement()).toEqual(target);
+  });
+
+  test("does not accept the wrong duplicate label when selector bounds are stale", async () => {
+    const timer = new FakeTimer();
+    const driver = new FakeFocusNavigationDriver();
+    const wrong = { text: "Save", bounds: makeElement("a", 0).bounds };
+    const target = { text: "Save", bounds: makeElement("b", 1).bounds };
+    driver.setElements([wrong, target], 0);
+    const executor = new FocusNavigationExecutor({
+      timer,
+      driverFactory: { createDriver: () => driver },
+    });
+
+    const resultPromise = executor.navigateToElement(
+      "device-1",
+      { text: "Save", bounds: target.bounds },
+      { currentFocusIndex: 0, targetFocusIndex: 1, swipeCount: 0, direction: "forward" },
+      { swipeDelay: 0 },
+    );
+    for (let i = 0; i < 10; i++) {
+      timer.advanceTime(100);
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+
+    await expect(resultPromise).resolves.toBe(true);
+    expect(driver.getSwipeCount()).toBe(1);
+    expect(driver.getFocusedElement()).toEqual(target);
+  });
+
   test("recalculates and navigates when zero-swipe path but target is not yet focused", async () => {
     const timer = new FakeTimer();
     const driver = new FakeFocusNavigationDriver();

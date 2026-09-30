@@ -151,7 +151,7 @@ describe("FocusPathCalculator", () => {
     expect(path?.swipeCount).toBe(1);
   });
 
-  test("falls back to first visible match when bounds do not match any element", () => {
+  test("falls back to the first visible match when bounds are stale", () => {
     const calculator = new FocusPathCalculator();
     const orderedElements = [
       makeElement(0, {
@@ -174,7 +174,6 @@ describe("FocusPathCalculator", () => {
     const path = calculator.calculatePath(null, targetSelector, orderedElements);
 
     expect(path).not.toBeNull();
-    // Should fall back to first visible match (index 0)
     expect(path?.targetFocusIndex).toBe(0);
   });
 });

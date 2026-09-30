@@ -248,7 +248,9 @@ const waitForConditionDslSchema = z
     text: z
       .string()
       .optional()
-      .describe("Element text; for `textEquals` this is the exact expected value"),
+      .describe(
+        "Element text; appear tries normalized exact then substring matching, while textEquals requires the exact value",
+      ),
     pollMs: z.number().optional().describe("Poll interval ms (default 150)"),
     stableReads: z
       .number()

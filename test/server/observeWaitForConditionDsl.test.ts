@@ -150,6 +150,28 @@ describe("buildConditionPredicate", () => {
 // observe waitFor DSL path via the injectable waitForObservation seam (AC3)
 // ---------------------------------------------------------------------------
 describe("waitForObservation DSL branch", () => {
+  test("for:'appear' falls back to substring matching when no exact text node exists", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const observeScreen = new FakeObserveScreen();
+    observeScreen.setObserveSequence([
+      makeObservation([node({ text: "Account settings" })], 10),
+      makeObservation([node({ text: "Account settings" })], 20),
+    ]);
+
+    const outcome = await waitForObservation(
+      observeScreen,
+      { for: "appear", text: "Account" } satisfies WaitForWithSettled,
+      undefined,
+      false,
+      timer,
+    );
+
+    expect(outcome.matched).toBe(true);
+    expect(outcome.timedOut).toBe(false);
+    expect(outcome.matchedElement?.text).toBe("Account settings");
+  });
+
   test("for:'appear' applies the settled quiet period and returns its stable hierarchy", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();

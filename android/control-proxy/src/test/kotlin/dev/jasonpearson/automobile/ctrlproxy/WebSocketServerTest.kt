@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
+import dev.jasonpearson.automobile.ctrlproxy.perf.TimeProvider
 import dev.jasonpearson.automobile.protocol.ErrorResponse
 import dev.jasonpearson.automobile.protocol.HierarchyUpdateEvent
 import dev.jasonpearson.automobile.protocol.SetKeyboardProfileResult
@@ -411,6 +412,45 @@ class WebSocketServerTest {
 
     override suspend fun close(reason: CloseReason) = Unit
   }
+
+  @Test
+  fun `parsed log event keeps the exact wire frame for every client`() =
+    runTest(testScope.testScheduler) {
+      val clients = List(3) { RecordingTransport() }
+      clients.forEachIndexed { index, transport -> server.registerClient(index + 1, transport) }
+      val buffer = BoundedLogBuffer(capacity = 128, stats = CtrlProxyWorkStats())
+      val parser =
+        ThreadtimeLogLineParser(
+          object : TimeProvider {
+            override fun currentTimeMillis(): Long = 42L
+          }
+        )
+      var parses = 0
+      val reader =
+        LogcatReader(
+          onLogEvent = {},
+          hasConsumer = { server.getConnectionCount() > 0 },
+          tryDeliver = buffer::offer,
+          ownPid = { 1234 },
+          parser =
+            LogLineParser { line ->
+              parses++
+              parser.parse(line)
+            },
+        )
+
+      reader.handleLine("04-01 12:34:56.789  4321  5678 I MyApp: hello \"world\"")
+      val response = buffer.channel.tryReceive().getOrNull()
+      assertTrue(response is dev.jasonpearson.automobile.protocol.LogEventResponse)
+      server.broadcast(response!!)
+      runCurrent()
+
+      assertEquals(1, parses)
+      val expected =
+        """{"type":"log_event","timestamp":42,"event":{"level":4,"tag":"MyApp","message":"hello \"world\"","pid":4321,"tid":5678,"applicationId":null}}"""
+      clients.forEach { assertEquals(listOf(expected), it.messages) }
+      assertNull(buffer.channel.tryReceive().getOrNull())
+    }
 
   // ---------------------------------------------------------------------------
   // Error-envelope helpers (issue #2985) — pure, no network I/O.

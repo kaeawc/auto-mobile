@@ -2,12 +2,61 @@ package dev.jasonpearson.automobile.ctrlproxy
 
 import android.os.Process as AndroidProcess
 import android.util.Log
+import dev.jasonpearson.automobile.ctrlproxy.perf.SystemTimeProvider
+import dev.jasonpearson.automobile.ctrlproxy.perf.TimeProvider
 import dev.jasonpearson.automobile.protocol.LogEventData
 import dev.jasonpearson.automobile.protocol.LogEventResponse
 import dev.jasonpearson.automobile.protocol.WebSocketResponse
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import kotlinx.coroutines.channels.Channel
+
+/** Parses one logcat line before the resulting event enters the shared delivery queue. */
+internal fun interface LogLineParser {
+  fun parse(line: String): LogEventResponse?
+}
+
+internal class ThreadtimeLogLineParser(
+  private val timeProvider: TimeProvider = SystemTimeProvider()
+) : LogLineParser {
+  companion object {
+    /** Threadtime format: `MM-DD HH:MM:SS.mmm PID TID level tag: message`. */
+    private val THREADTIME_REGEX =
+      Regex(
+        """^(\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2}\.\d{3})\s+(\d+)\s+(\d+)\s+([VDIWEFA])\s+(.+?)\s*:\s(.*)$"""
+      )
+
+    private fun parseLevel(letter: String): Int =
+      when (letter) {
+        "V" -> 2
+        "D" -> 3
+        "I" -> 4
+        "W" -> 5
+        "E" -> 6
+        "F",
+        "A" -> 7
+        else -> 4
+      }
+  }
+
+  override fun parse(line: String): LogEventResponse? {
+    // Skip non-entry headers before the regex match.
+    if (line.length < 2 || !line[0].isDigit() || !line[1].isDigit()) return null
+    val match = THREADTIME_REGEX.matchEntire(line) ?: return null
+    val (_, _, pidStr, tidStr, levelStr, tag, message) = match.destructured
+    return LogEventResponse(
+      timestamp = timeProvider.currentTimeMillis(),
+      event =
+        LogEventData(
+          level = parseLevel(levelStr),
+          tag = tag.trim(),
+          message = message,
+          pid = pidStr.toIntOrNull() ?: 0,
+          tid = tidStr.toIntOrNull() ?: 0,
+        ),
+    )
+  }
+}
 
 /** Single-consumer, bounded log queue. Recent warnings/errors displace older queued lines. */
 internal class BoundedLogBuffer(
@@ -33,8 +82,8 @@ internal class BoundedLogBuffer(
  * threadtime format, and invokes [onLogEvent] for every successfully parsed entry.
  *
  * When no client is consuming logs ([hasConsumer] returns false), delivered lines are dropped
- * before the [THREADTIME_REGEX] match and [LogEventResponse] allocation, so a chatty device does
- * not pay for regex + allocation per log line that would be delivered to nobody.
+ * before the threadtime match and [LogEventResponse] allocation, so a chatty device does not pay
+ * for regex + allocation per log line that would be delivered to nobody.
  *
  * Lifecycle: [start] from onServiceConnected, [stop] from onDestroy. Auto-reconnects if the logcat
  * process dies unexpectedly.
@@ -49,34 +98,12 @@ internal constructor(
   private val tryDeliver: ((WebSocketResponse) -> Boolean)? = null,
   private val ownPid: () -> Int = { runCatching { AndroidProcess.myPid() }.getOrDefault(-1) },
   internal val stats: CtrlProxyWorkStats = CtrlProxyWorkStats(),
+  private val parser: LogLineParser = ThreadtimeLogLineParser(),
 ) {
   private val processId = ownPid()
 
   companion object {
     private const val TAG = "LogcatReader"
-
-    /**
-     * Threadtime format: `MM-DD HH:MM:SS.mmm PID TID level tag: message`
-     *
-     * Example: `04-01 12:34:56.789 1234 5678 D MyTag : Hello world`
-     */
-    private val THREADTIME_REGEX =
-      Regex(
-        """^(\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2}\.\d{3})\s+(\d+)\s+(\d+)\s+([VDIWEFA])\s+(.+?)\s*:\s(.*)$"""
-      )
-
-    /** Maps logcat level letters to Android Log level constants. */
-    private fun parseLevel(letter: String): Int =
-      when (letter) {
-        "V" -> 2 // Log.VERBOSE
-        "D" -> 3 // Log.DEBUG
-        "I" -> 4 // Log.INFO
-        "W" -> 5 // Log.WARN
-        "E" -> 6 // Log.ERROR
-        "F" -> 7 // Log.ASSERT (fatal)
-        "A" -> 7 // Log.ASSERT
-        else -> 4 // default to INFO
-      }
   }
 
   @Volatile private var running = false
@@ -161,7 +188,7 @@ internal constructor(
       stats.droppedInternalLogLines.incrementAndGet()
       return
     }
-    parseLine(line)?.let { response ->
+    parser.parse(line)?.let { response ->
       try {
         val accepted =
           tryDeliver?.invoke(response)
@@ -195,34 +222,5 @@ internal constructor(
       (line[index] == 'D' || line[index] == 'V') &&
       index + 1 < line.length &&
       line[index + 1] == ' '
-  }
-
-  /**
-   * Parse a single threadtime-formatted logcat line into a [LogEventResponse]. Returns null for
-   * lines that don't match the expected format (e.g., headers).
-   */
-  internal fun parseLine(line: String): LogEventResponse? {
-    // Cheap prefilter: every threadtime entry starts with a two-digit month ("MM-DD ..."). Header
-    // lines ("--------- beginning of main") and blanks never do, so this skips the full regex on
-    // the non-entry lines a chatty logcat interleaves.
-    if (line.length < 2 || !line[0].isDigit() || !line[1].isDigit()) return null
-    val match = THREADTIME_REGEX.matchEntire(line) ?: return null
-    val (_, _, pidStr, tidStr, levelStr, tag, message) = match.destructured
-
-    val pid = pidStr.toIntOrNull() ?: 0
-    val tid = tidStr.toIntOrNull() ?: 0
-    val level = parseLevel(levelStr)
-
-    return LogEventResponse(
-      timestamp = System.currentTimeMillis(),
-      event =
-        LogEventData(
-          level = level,
-          tag = tag.trim(),
-          message = message,
-          pid = pid,
-          tid = tid,
-        ),
-    )
   }
 }

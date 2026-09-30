@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
+import dev.jasonpearson.automobile.ctrlproxy.perf.TimeProvider
 import dev.jasonpearson.automobile.protocol.LogEventResponse
 import dev.jasonpearson.automobile.protocol.WebSocketResponse
 import org.junit.Assert.assertEquals
@@ -25,6 +26,61 @@ class LogcatReaderTest {
 
     fun onLogEvent(response: WebSocketResponse) {
       events.add(response)
+    }
+  }
+
+  private class FakeTime : TimeProvider {
+    override fun currentTimeMillis(): Long = 42L
+  }
+
+  private class CountingParser(
+    private val delegate: LogLineParser = ThreadtimeLogLineParser(FakeTime())
+  ) : LogLineParser {
+    var count = 0
+
+    override fun parse(line: String): LogEventResponse? {
+      count++
+      return delegate.parse(line)
+    }
+  }
+
+  @Test
+  fun `zero consumers skip parsing including application and own info`() {
+    val parser = CountingParser()
+    val reader =
+      LogcatReader(onLogEvent = {}, hasConsumer = { false }, ownPid = { 1234 }, parser = parser)
+
+    reader.handleLine("04-01 12:34:56.789  4321  5678 I MyApp: app info")
+    reader.handleLine("04-01 12:34:56.789  1234  5678 I CtrlProxy: internal info")
+
+    assertEquals(0, parser.count)
+  }
+
+  @Test
+  fun `application and own info are parsed once per line before fanout`() {
+    for (clientCount in listOf(1, 4)) {
+      val parser = CountingParser()
+      val clients = List(clientCount) { Recorder() }
+      val reader =
+        LogcatReader(
+          onLogEvent = { response -> clients.forEach { it.onLogEvent(response) } },
+          hasConsumer = { clients.isNotEmpty() },
+          ownPid = { 1234 },
+          parser = parser,
+        )
+
+      reader.handleLine("04-01 12:34:56.789  4321  5678 I MyApp: app info")
+      reader.handleLine("04-01 12:34:56.789  1234  5678 I CtrlProxy: internal info")
+
+      assertEquals(2, parser.count)
+      clients.forEach { client ->
+        assertEquals(2, client.events.size)
+        assertEquals(42L, (client.events[0] as LogEventResponse).timestamp)
+        assertEquals("app info", (client.events[0] as LogEventResponse).event.message)
+        assertEquals("internal info", (client.events[1] as LogEventResponse).event.message)
+        assertTrue(client.events[0] === clients[0].events[0])
+        assertTrue(client.events[1] === clients[0].events[1])
+      }
     }
   }
 
@@ -68,20 +124,20 @@ class LogcatReaderTest {
 
   @Test
   fun `parseLine parses a valid threadtime line`() {
-    val reader = LogcatReader(onLogEvent = {})
+    val parser = ThreadtimeLogLineParser(FakeTime())
 
-    val response = reader.parseLine(sampleLine)
+    val response = parser.parse(sampleLine)
 
     assertNotNull(response)
   }
 
   @Test
   fun `parseLine prefilter rejects non-entry lines without regex`() {
-    val reader = LogcatReader(onLogEvent = {})
+    val parser = ThreadtimeLogLineParser(FakeTime())
 
-    assertNull(reader.parseLine("--------- beginning of main"))
-    assertNull(reader.parseLine(""))
-    assertNull(reader.parseLine("not a log line"))
+    assertNull(parser.parse("--------- beginning of main"))
+    assertNull(parser.parse(""))
+    assertNull(parser.parse("not a log line"))
   }
 
   @Test

@@ -7,6 +7,11 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeAccessibilityDetector } from "../../fakes/FakeAccessibilityDetector";
 import { FakeTalkBackTapStrategy } from "../../fakes/FakeTalkBackTapStrategy";
 import { FakeTalkBackNavigationDriver } from "../../fakes/FakeTalkBackNavigationDriver";
+import {
+  getHierarchySnapshot,
+  identifyObservedHierarchy,
+  inheritHierarchySnapshot,
+} from "../../../src/features/observe/HierarchyCapture";
 import type {
   A11yTapCoordinatesResult,
   AccessibilityNodeSelector,
@@ -197,6 +202,7 @@ describe("TapAnyElement Android gesture dispatch", () => {
     talkBackEnabled = false,
     element = makeElement(),
   ) {
+    const observedHierarchy = { hierarchy: { node: { marker: "before" } } };
     const adb = new FakeAdbExecutor();
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
@@ -239,11 +245,21 @@ describe("TapAnyElement Android gesture dispatch", () => {
       },
     );
     tapAny.observedInteraction = (action) =>
-      action({ viewHierarchy: hierarchy, screenSize: { width: 500, height: 500 } });
+      action({ viewHierarchy: observedHierarchy, screenSize: { width: 500, height: 500 } });
     tapAny.setRefreshViewHierarchyForTesting(async () => ({
       hierarchy: { node: { marker: "after" } },
     }));
-    return { tapAny, adb, timer, detector, strategy, calls, adbTapCountAtRequest, semanticCalls };
+    return {
+      tapAny,
+      adb,
+      timer,
+      detector,
+      strategy,
+      calls,
+      adbTapCountAtRequest,
+      semanticCalls,
+      observedHierarchy,
+    };
   }
 
   test("tap uses CtrlProxy first and skips ADB when it succeeds", async () => {
@@ -308,6 +324,29 @@ describe("TapAnyElement Android gesture dispatch", () => {
     expect(calls).toHaveLength(2);
   });
 
+  test("rejects a changed capture before dispatching the selected target", async () => {
+    const { tapAny, adb, calls, timer, observedHierarchy } = setup();
+    tapAny.setBeforeAndroidTapForTesting(() => {
+      const selected = getHierarchySnapshot(observedHierarchy);
+      expect(selected).toBeDefined();
+      const replacement = identifyObservedHierarchy(
+        "android",
+        { hierarchy: { node: { marker: "replacement" } } },
+        "fresh",
+        timer,
+        undefined,
+        "replacement-capture",
+      );
+      inheritHierarchySnapshot(replacement.hierarchy, selected?.hierarchy);
+    });
+
+    const result = await tapAny.execute({ action: "tap" });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Selected hierarchy capture changed before tap dispatch");
+    expect(calls).toEqual([]);
+    expect(adb.getCommandCalls()).toEqual([]);
+  });
+
   test("double tap uses two CtrlProxy presses separated by 200ms", async () => {
     const { tapAny, timer, calls } = setup();
     const sleeps: number[] = [];
@@ -345,8 +384,8 @@ test.each([false, true])(
     const adb = new FakeAdbClient();
     const requests: string[] = [];
     const fresh = {
-      screenWidth: 500,
-      screenHeight: 500,
+      // A fresh capture without dimensions must not inherit the cached 100px screen.
+      ...(failFirstCapture ? {} : { screenWidth: 500, screenHeight: 500 }),
       hierarchy: {
         node: {
           bounds: { left: 0, top: 0, right: 500, bottom: 500 },

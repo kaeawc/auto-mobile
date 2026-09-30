@@ -499,6 +499,9 @@ describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
       new FakeAdbClientFactory(new FakeAdbExecutor()),
       config,
     );
+    // The command is faked; host SDK detection must not run on this path.
+    (client as unknown as { ensureEmulatorPath: () => Promise<string> }).ensureEmulatorPath =
+      async () => "emulator";
 
     await expect(client.listAvds()).resolves.toEqual([
       expect.objectContaining({

@@ -105,7 +105,6 @@ describe("Android emulator boot failure diagnostics", () => {
 
   test("reports a target that remains offline instead of waiting for the generic timeout", async () => {
     const timer = new FakeTimer();
-    timer.enableAutoAdvance();
     const adb = new FakeAdbExecutor();
     adb.getDeviceStates = async () => {
       if (timer.now() < 16_000) {
@@ -126,12 +125,8 @@ describe("Android emulator boot failure diagnostics", () => {
     process.env.EMULATOR_POLLING_INTERVAL_MS = "500";
 
     try {
-      const booted = await client.waitForEmulatorReady(
-        "Pixel_9_Pro",
-        20_000,
-        null,
-        "emulator-5554",
-      );
+      const readiness = client.waitForEmulatorReady("Pixel_9_Pro", 20_000, null, "emulator-5554");
+      const booted = await timer.resolvePromise(readiness, 500);
       expect(booted.deviceId).toBe("emulator-5554");
     } finally {
       if (previousPollingInterval === undefined) {

@@ -11,6 +11,8 @@ import type { PlatformDeviceManager } from "./deviceUtils";
 import { SimCtlClient } from "./ios-cmdline-tools/SimCtlClient";
 import { iosVersionStringFromRuntimeId } from "./ios-cmdline-tools/iosVersion";
 import { logger } from "./logger";
+import { defaultTimer } from "./SystemTimer";
+import { raceWithDeadline } from "./raceWithDeadline";
 
 const CI_SIMULATOR_NAME = "AutoMobile CI iPhone";
 
@@ -95,20 +97,17 @@ export class CiIosBootRecovery implements DeviceBootRecovery {
       return;
     }
     this.throwIfCancelled(signal);
-    let rejectCancellation!: (error: ActionableError) => void;
-    const cancellation = new Promise<never>((_resolve, reject) => {
-      rejectCancellation = reject;
-    });
-    const cancel = () => {
-      rejectCancellation(
-        new ActionableError("startDevice cancelled while recovering the CI iOS simulator"),
-      );
-    };
-    signal.addEventListener("abort", cancel, { once: true });
     try {
-      await Promise.race([actionPromise, cancellation]);
-    } finally {
-      signal.removeEventListener("abort", cancel);
+      await raceWithDeadline(actionPromise, {
+        timer: defaultTimer,
+        signal,
+        label: "CI iOS simulator recovery",
+      });
+    } catch (error) {
+      if (signal.aborted) {
+        throw new ActionableError("startDevice cancelled while recovering the CI iOS simulator");
+      }
+      throw error;
     }
   }
 }

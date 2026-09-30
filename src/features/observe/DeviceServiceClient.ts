@@ -22,6 +22,7 @@ import type { PerformanceTracker } from "../../utils/PerformanceTracker";
 import { NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import type { Timer } from "../../utils/SystemTimer";
 import { defaultTimer } from "../../utils/SystemTimer";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { RequestManager } from "../../utils/RequestManager";
 import { RetryExecutor, defaultRetryExecutor } from "../../utils/retry/RetryExecutor";
 import type { CtrlProxyReconnectStatus } from "../../models/CtrlProxyReconnectStatus";
@@ -1180,27 +1181,25 @@ export abstract class DeviceServiceClient {
     if (signal?.aborted) {
       return "timed_out";
     }
-    let timeout: NodeJS.Timeout | undefined;
-    let onAbort: (() => void) | undefined;
-    const deadline = new Promise<"timed_out">((resolve) => {
-      timeout = this.timer.setTimeout(() => resolve("timed_out"), budgetMs);
-      onAbort = () => resolve("timed_out");
-      signal?.addEventListener("abort", onAbort, { once: true });
-    });
+    const timedOut = new Error("Recovery wait timed out");
     try {
-      return await Promise.race([
+      return await raceWithDeadline(
         recovery.then(
           (connected) => (connected ? "recovered" : "failed") as "recovered" | "failed",
         ),
-        deadline,
-      ]);
-    } finally {
-      if (timeout) {
-        this.timer.clearTimeout(timeout);
+        {
+          timer: this.timer,
+          timeoutMs: budgetMs,
+          signal,
+          label: "Recovery wait",
+          timeoutError: () => timedOut,
+        },
+      );
+    } catch (error) {
+      if (error === timedOut || signal?.aborted) {
+        return "timed_out";
       }
-      if (onAbort) {
-        signal?.removeEventListener("abort", onAbort);
-      }
+      throw error;
     }
   }
 

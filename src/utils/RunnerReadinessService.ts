@@ -12,6 +12,7 @@ import { isAndroidFrameworkUnavailable } from "./android-cmdline-tools/isAndroid
 import { compareIosVersions } from "./ios-cmdline-tools/iosVersion";
 import { DefaultRetryExecutor } from "./retry/RetryExecutor";
 import { defaultTimer, type Timer } from "./SystemTimer";
+import { raceWithDeadline } from "./raceWithDeadline";
 import {
   acquireDeviceReadinessLock,
   deviceReadinessLockKey,
@@ -1301,21 +1302,26 @@ export class RunnerReadinessService {
     const signal = context.signal
       ? AbortSignal.any([context.signal, controller.signal])
       : controller.signal;
-    let timeoutHandle: NodeJS.Timeout | undefined;
     try {
       const diagnosticPromise = getDiagnostic(context.device, signal);
       // The timeout returns first if an ADB diagnostic command hangs. Its
       // rejection after abort is intentionally observed below.
       void diagnosticPromise.catch(() => {});
-      const diagnostic = await Promise.race([
-        diagnosticPromise,
-        new Promise<undefined>((resolve) => {
-          timeoutHandle = this.dependencies.timer.setTimeout(() => {
-            controller.abort(new Error(`${phase} diagnostic timed out`));
-            resolve(undefined);
-          }, RUNNER_CONNECT_DIAGNOSTIC_TIMEOUT_MS);
-        }),
-      ]);
+      const timedOut = new Error(`${phase} diagnostic timed out`);
+      let diagnostic: T | undefined;
+      try {
+        diagnostic = await raceWithDeadline(diagnosticPromise, {
+          timer: this.dependencies.timer,
+          timeoutMs: RUNNER_CONNECT_DIAGNOSTIC_TIMEOUT_MS,
+          label: `${phase} diagnostic`,
+          timeoutError: () => timedOut,
+          onTimeout: () => controller.abort(timedOut),
+        });
+      } catch (error) {
+        if (error !== timedOut) {
+          throw error;
+        }
+      }
       if (!diagnostic) {
         return undefined;
       }
@@ -1324,10 +1330,6 @@ export class RunnerReadinessService {
       // This supplemental probe must not hide the original readiness timeout.
       logger.debug(`Failed to collect Android ${phase} diagnostic: ${errorMessage(error)}`);
       return undefined;
-    } finally {
-      if (timeoutHandle) {
-        this.dependencies.timer.clearTimeout(timeoutHandle);
-      }
     }
   }
 
@@ -1401,20 +1403,23 @@ export class RunnerReadinessService {
   }
 
   private async awaitAbortSettlement(operation: Promise<unknown>): Promise<void> {
-    let timeoutHandle: NodeJS.Timeout | undefined;
+    const timedOut = new Error("Abort settlement grace expired");
     try {
-      await Promise.race([
+      await raceWithDeadline(
         operation.then(
           () => undefined,
           () => undefined,
         ),
-        new Promise<void>((resolve) => {
-          timeoutHandle = this.dependencies.timer.setTimeout(resolve, ABORT_SETTLEMENT_GRACE_MS);
-        }),
-      ]);
-    } finally {
-      if (timeoutHandle) {
-        this.dependencies.timer.clearTimeout(timeoutHandle);
+        {
+          timer: this.dependencies.timer,
+          timeoutMs: ABORT_SETTLEMENT_GRACE_MS,
+          label: "Abort settlement grace",
+          timeoutError: () => timedOut,
+        },
+      );
+    } catch (error) {
+      if (error !== timedOut) {
+        throw error;
       }
     }
   }

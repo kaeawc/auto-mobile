@@ -9,6 +9,7 @@ import {
   type PerformanceTracker,
 } from "./PerformanceTracker";
 import { Timer, defaultTimer } from "./SystemTimer";
+import { raceWithDeadline } from "./raceWithDeadline";
 import { IosCtrlProxyBuilder, type CtrlProxyIosBuildResult } from "./IosCtrlProxyBuilder";
 import { checkIosCtrlProxyOverride } from "./iosCtrlProxyOverride";
 import { ActionableError, toActionableError } from "../models/ActionableError";
@@ -864,7 +865,6 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     runnerPid: number,
     deadlineMs: number,
   ): Promise<boolean> {
-    let timeout: NodeJS.Timeout | undefined;
     try {
       return await withRemainingBudget(
         deadlineMs,
@@ -872,17 +872,28 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         undefined,
         async (_signal, remainingMs) => {
           const probeBudgetMs = Math.min(FORCE_STOP_OWNERSHIP_CHECK_TIMEOUT_MS, remainingMs);
-          const fallbackToOwned = new Promise<RunnerOwnership>((resolve) => {
-            timeout = this.timer.setTimeout(() => resolve("owned"), probeBudgetMs);
-          });
-          const ownership = await Promise.race([
-            this.processClient.checkRunnerOwnership(
-              runnerPid,
-              this.device.deviceId,
-              this.timer.now() + probeBudgetMs,
-            ),
-            fallbackToOwned,
-          ]);
+          const timedOut = new Error("Runner ownership probe timed out");
+          let ownership: RunnerOwnership;
+          try {
+            ownership = await raceWithDeadline(
+              this.processClient.checkRunnerOwnership(
+                runnerPid,
+                this.device.deviceId,
+                this.timer.now() + probeBudgetMs,
+              ),
+              {
+                timer: this.timer,
+                timeoutMs: probeBudgetMs,
+                label: "Runner ownership probe",
+                timeoutError: () => timedOut,
+              },
+            );
+          } catch (error) {
+            if (error !== timedOut) {
+              throw error;
+            }
+            ownership = "owned";
+          }
           return ownership !== "foreign";
         },
       );
@@ -895,10 +906,6 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
           `assuming owned: ${errorMessage(error)}`,
       );
       return true;
-    } finally {
-      if (timeout) {
-        this.timer.clearTimeout(timeout);
-      }
     }
   }
 

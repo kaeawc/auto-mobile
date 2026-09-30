@@ -41,6 +41,7 @@ import { AndroidCtrlProxyManager } from "../../../utils/CtrlProxyManager";
 import type { ProxySetupResult } from "../../../utils/interfaces/ProxyManager";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
 import { Timer, defaultTimer } from "../../../utils/SystemTimer";
+import { raceWithDeadline } from "../../../utils/raceWithDeadline";
 import { fixedBackoff } from "../../../utils/Backoff";
 import { ForcedRestartBudget } from "../../../utils/ctrlProxy/ForcedRestartBudget";
 import {
@@ -5641,16 +5642,11 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     if (!signal) {
       return work();
     }
-    let onAbort!: () => void;
-    const aborted = new Promise<never>((_resolve, reject) => {
-      onAbort = () => reject(signal.reason ?? new Error(OPERATION_CANCELLED_MESSAGE));
-      signal.addEventListener("abort", onAbort, { once: true });
+    return raceWithDeadline(work(), {
+      timer: this.timer,
+      signal,
+      label: "Android CtrlProxy action",
     });
-    try {
-      return await Promise.race([aborted, work()]);
-    } finally {
-      signal.removeEventListener("abort", onAbort);
-    }
   }
 
   private async waitForHandshake(

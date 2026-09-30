@@ -2,6 +2,7 @@ import { errorMessage } from "./describeUnknownError";
 import { logger } from "./logger";
 import { ScreenshotResult } from "../models/ScreenshotResult";
 import { Timer, defaultTimer } from "./SystemTimer";
+import { raceWithDeadline } from "./raceWithDeadline";
 import { defaultIdGenerator, type IdGenerator, createTimestampedId } from "./IdGenerator";
 import { OPERATION_CANCELLED_MESSAGE } from "./constants";
 
@@ -335,17 +336,19 @@ export class ScreenshotJobTracker {
       return null;
     }
 
-    let timeoutId: NodeJS.Timeout | undefined;
-    const timeoutPromise = new Promise<null>((resolve) => {
-      timeoutId = ScreenshotJobTracker.timer.setTimeout(() => resolve(null), timeoutMs);
-    });
-
+    const timedOut = new Error("Screenshot completion timed out");
     try {
-      return await Promise.race([entry.promise, timeoutPromise]);
-    } finally {
-      if (timeoutId) {
-        ScreenshotJobTracker.timer.clearTimeout(timeoutId);
+      return await raceWithDeadline(entry.promise, {
+        timer: ScreenshotJobTracker.timer,
+        timeoutMs,
+        label: "Screenshot completion",
+        timeoutError: () => timedOut,
+      });
+    } catch (error) {
+      if (error === timedOut) {
+        return null;
       }
+      throw error;
     }
   }
 

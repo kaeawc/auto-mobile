@@ -5,6 +5,11 @@ export function inheritsOwnerLabel(affordances: Iterable<Affordance>): boolean {
   return [...affordances].some((action) => action === "toggle" || action === "scroll");
 }
 
+/** The label emitted by the skeleton; keep internal whitespace and length intact. */
+export function displayedSearchableLabel(label: string | undefined): string | undefined {
+  return label?.trim();
+}
+
 /** Fold a row's ordered descendant labels identically for display and resolution. */
 export function foldSearchableLabels(
   row: { label?: string; sublabel?: string },

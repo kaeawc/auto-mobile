@@ -22,6 +22,13 @@ describe("searchable node derivation", () => {
     expect(node.className).toBe("TextView");
   });
 
+  test("captures the skeleton's trimmed label alongside the raw text field", () => {
+    const node = toSearchable({ text: "  Save  ", clickable: true, bounds });
+    expect(node.label).toBe("  Save  ");
+    expect(node.displayedLabel).toBe("Save");
+    expect(node.textFields).toEqual(["Save", "  Save  "]);
+  });
+
   test("editable value and accessible label remain searchable", () => {
     const node = toSearchable({
       bounds,

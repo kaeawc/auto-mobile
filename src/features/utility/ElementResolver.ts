@@ -69,7 +69,12 @@ export interface ElementResolution {
   snapshotNodes?: readonly SearchableEntry[];
   indexInMatches?: number;
   candidates: SearchableEntry[];
-  matches: { node: SearchableEntry; kind: MatchKind; sourceNodes?: SearchableEntry[] }[];
+  matches: {
+    node: SearchableEntry;
+    kind: MatchKind;
+    sourceNodes?: SearchableEntry[];
+    textOrigin?: "raw" | "displayed";
+  }[];
   matchMode: MatchMode;
   scope?: SearchableEntry;
   error?: string;
@@ -99,9 +104,10 @@ export function matchedSourceNode(
   );
 }
 
-function normalize(value: string, caseSensitive = false): string {
+function normalize(value: string, caseSensitive = false, collapseWhitespace = true): string {
   const normalized = normalizeQuotes(value).trim();
-  return caseSensitive ? normalized : normalized.toLowerCase();
+  const text = collapseWhitespace ? normalized.replace(/\s+/g, " ") : normalized;
+  return caseSensitive ? text : text.toLowerCase();
 }
 
 function qualifiedId(id: string): { packageName: string; name: string } | undefined {
@@ -400,6 +406,9 @@ export class ElementResolver {
     actionTarget: (node: SearchableEntry | undefined) => SearchableEntry | null,
     intent: ResolutionIntent,
   ): ElementResolution {
+    const rawTextMatch = new Set(
+      result.matches.filter((match) => match.textOrigin === "raw").map((match) => match.node),
+    );
     const actionable = [
       ...new Set(
         result.candidates
@@ -424,6 +433,9 @@ export class ElementResolver {
                 Number(!b.affordances.includes("tap") && !b.affordances.includes("toggle"))
               : 0) ||
             a.windowRank - b.windowRank ||
+            // Within the exact tier and window, a real text field wins over a
+            // displayed-form-only alias, preserving a formerly unique raw match.
+            Number(!rawTextMatch.has(a)) - Number(!rawTextMatch.has(b)) ||
             (a.bounds ? boundsArea(a.bounds) : Infinity) -
               (b.bounds ? boundsArea(b.bounds) : Infinity) ||
             a.index - b.index,
@@ -654,6 +666,9 @@ export class ElementResolver {
       const existing = unique.get(target.index);
       const sourceNodes = match.sourceNodes ?? [match.node];
       if (existing) {
+        if (match.textOrigin === "raw") {
+          existing.textOrigin = "raw";
+        }
         existing.sourceNodes = [
           ...new Set([...(existing.sourceNodes ?? [existing.node]), ...sourceNodes]),
         ];
@@ -763,6 +778,13 @@ export class ElementResolver {
       matches: matches.map((node) => ({
         node,
         kind: matchMode === "exact" ? "text-exact" : matchMode,
+        textOrigin:
+          matchMode === "exact" &&
+          Object.values(node.textSources).some(
+            (value) => normalize(value, selector.caseSensitive) === query,
+          )
+            ? "raw"
+            : "displayed",
       })),
       matchMode,
     };
@@ -800,11 +822,11 @@ export class ElementResolver {
       };
     }
     if (matchMode === "contains") {
-      const normalizedQuery = normalize(query, caseSensitive);
+      const normalizedQuery = normalize(query, caseSensitive, false);
       return {
         matches: nodes
           .filter((node) =>
-            normalize(node.elementId ?? "", caseSensitive).includes(normalizedQuery),
+            normalize(node.elementId ?? "", caseSensitive, false).includes(normalizedQuery),
           )
           .map((node) => ({ node, kind: "contains" })),
         matchMode,

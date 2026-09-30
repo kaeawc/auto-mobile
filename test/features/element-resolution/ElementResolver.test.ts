@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { ElementResolver } from "../../../src/features/utility/ElementResolver";
 import { SearchableHierarchy } from "../../../src/features/utility/SearchableNode";
+import { DefaultObserveElementCollector } from "../../../src/features/observe/ObserveElementCollector";
+import { projectSkeleton } from "../../../src/features/observe/output/SkeletonProjection";
+import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
+import type { ViewHierarchyResult } from "../../../src/models";
 
 const bounds = { left: 0, top: 0, right: 100, bottom: 100 };
 const node = (id: string, text = "", extra = {}) => ({
@@ -211,6 +215,85 @@ test("the folded and trimmed displayed label resolves exactly to its row", () =>
   expect(result.chosen?.nativeId).toBe("alarm");
   expect(result.chosen?.label).toBe("8:30 AM Alarm");
   expect(result.matchMode).toBe("exact");
+});
+
+test("labels copied from skeleton resolve hoisted, whitespace-normalized, and upstream-truncated rows", () => {
+  const truncated = `${"A long notification title ".repeat(7)}…`;
+  const hierarchy: ViewHierarchyResult = {
+    hierarchy: {
+      node: [
+        {
+          "resource-id": "app:id/hoisted",
+          clickable: true,
+          bounds: { left: 0, top: 0, right: 200, bottom: 60 },
+          node: [
+            { text: "  Save settings  ", bounds: { left: 10, top: 10, right: 160, bottom: 30 } },
+            { text: "  Now  ", bounds: { left: 10, top: 30, right: 80, bottom: 50 } },
+          ],
+        },
+        {
+          "resource-id": "app:id/spaced",
+          clickable: true,
+          bounds: { left: 0, top: 70, right: 200, bottom: 130 },
+          node: [
+            {
+              text: "  Wi-Fi   and\nBluetooth  ",
+              bounds: { left: 10, top: 80, right: 190, bottom: 120 },
+            },
+          ],
+        },
+        {
+          "resource-id": "app:id/truncated",
+          "content-desc": " details",
+          clickable: true,
+          bounds: { left: 0, top: 140, right: 200, bottom: 200 },
+          node: [{ text: truncated, bounds: { left: 10, top: 150, right: 190, bottom: 190 } }],
+        },
+      ],
+    },
+  };
+  const rows = projectSkeleton(
+    new DefaultObserveElementCollector().collect(hierarchy, "android")!,
+  ).skeleton;
+  const capture = { id: "displayed-labels", nodes: new SearchableHierarchy().project(hierarchy) };
+  const publicSelector = new ResolverElementSelector();
+  for (const [id, expectedLabel] of [
+    ["app:id/hoisted", "Save settings"],
+    ["app:id/spaced", "Wi-Fi   and\nBluetooth"],
+    ["app:id/truncated", `${truncated} details`],
+  ]) {
+    const displayed = rows.find((row) => row.elementId === id)?.label;
+    expect(displayed).toBe(expectedLabel);
+    const result = resolver.resolve(capture, { text: displayed!, match: "exact" }, tap);
+    expect(result.matchMode).toBe("exact");
+    expect(result.chosen?.nativeId).toBe(id);
+    expect(
+      publicSelector.selectByText(hierarchy, displayed!, { partialMatch: false }).element?.bounds,
+    ).toEqual(result.chosen?.bounds);
+  }
+  expect(
+    resolver.resolve(capture, { text: "Wi-Fi and Bluetooth", match: "exact" }, tap).chosen
+      ?.nativeId,
+  ).toBe("app:id/spaced");
+  const fallback = resolver.resolve(capture, { text: "settings" }, tap);
+  expect(fallback.matchMode).toBe("contains");
+  expect(fallback.chosen?.nativeId).toBe("app:id/hoisted");
+  expect(
+    resolver.resolve(capture, { text: "settings" }, { ...tap, negative: true }).chosen,
+  ).toBeNull();
+});
+
+test("a raw exact text match wins over a smaller displayed-only folded alias in its window", () => {
+  const capture = snapshot([
+    node("raw", "Save details", { bounds: { left: 0, top: 0, right: 200, bottom: 80 } }),
+    node("folded", " details", {
+      bounds: { left: 0, top: 90, right: 100, bottom: 130 },
+      node: [{ text: "Save", bounds: { left: 5, top: 95, right: 50, bottom: 120 } }],
+    }),
+  ]);
+  const result = resolver.resolve(capture, { text: "Save details" }, tap);
+  expect(result.candidates.map((candidate) => candidate.nativeId)).toEqual(["raw", "folded"]);
+  expect(result.chosen?.nativeId).toBe("raw");
 });
 
 test("sibling scope stays in the anchor's nearest row", () => {

@@ -1,4 +1,8 @@
-import { foldSearchableLabels, inheritsOwnerLabel } from "./SearchableLabels";
+import {
+  displayedSearchableLabel,
+  foldSearchableLabels,
+  inheritsOwnerLabel,
+} from "./SearchableLabels";
 import type { ViewHierarchyNode, ViewHierarchyResult } from "../../models";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
 import { DefaultElementParser } from "./ElementParser";
@@ -21,6 +25,7 @@ export interface SearchableNode {
   nodeKey?: string;
   elementId?: string;
   label?: string;
+  displayedLabel?: string;
   textFields: readonly string[];
   textSources: Readonly<Record<string, string>>;
   capturedTextLength?: number;
@@ -85,6 +90,7 @@ export function toSearchable(properties: SearchableProperties): SearchableNode {
     description,
     accessibleLabel,
   ].find(Boolean);
+  const displayedLabel = displayedSearchableLabel(label);
   const parsedBounds = parseBounds(properties.bounds);
   const bounds =
     parsedBounds && Object.values(parsedBounds).every(Number.isFinite) ? parsedBounds : undefined;
@@ -98,6 +104,7 @@ export function toSearchable(properties: SearchableProperties): SearchableNode {
     nodeKey,
     elementId: nativeId ?? nodeKey,
     label,
+    displayedLabel,
     accessibleLabel,
     textSources: Object.fromEntries(
       Object.entries({
@@ -110,7 +117,7 @@ export function toSearchable(properties: SearchableProperties): SearchableNode {
     capturedTextLength: typeof properties.text === "string" ? properties.text.length : undefined,
     textFields: [
       ...new Set(
-        [label, value, text, description, accessibleLabel].filter(
+        [displayedLabel, label, value, text, description, accessibleLabel].filter(
           (field): field is string => field !== undefined,
         ),
       ),
@@ -220,10 +227,11 @@ function hoistSearchableLabels(entries: SearchableEntry[]): void {
       ...new Set(texts.map((text) => text.label!).filter((label) => label !== row.label)),
     ];
     const folded = foldSearchableLabels(row, parts);
-    row.label = folded.label?.trim();
+    row.displayedLabel = displayedSearchableLabel(folded.label);
+    row.label = row.displayedLabel;
     row.textFields = [
       ...new Set(
-        [row.label, ...row.textFields, ...parts].filter(
+        [row.displayedLabel, ...row.textFields, ...parts].filter(
           (field): field is string => field !== undefined,
         ),
       ),
@@ -243,7 +251,8 @@ function attributeSearchableLabels(entries: SearchableEntry[]): void {
       const ancestor = entries[parent];
       if (labelled.has(ancestor)) {
         entry.label = ancestor.label;
-        entry.textFields = [...entry.textFields, ancestor.label!];
+        entry.displayedLabel = ancestor.displayedLabel;
+        entry.textFields = [...entry.textFields, ancestor.displayedLabel!];
         break;
       }
       parent = ancestor.parentIndex;

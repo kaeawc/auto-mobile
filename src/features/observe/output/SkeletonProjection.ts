@@ -1,4 +1,8 @@
-import { foldSearchableLabels, inheritsOwnerLabel } from "../../utility/SearchableLabels";
+import {
+  displayedSearchableLabel,
+  foldSearchableLabels,
+  inheritsOwnerLabel,
+} from "../../utility/SearchableLabels";
 import { toSearchable } from "../../utility/SearchableNode";
 import { normalizeQuotes } from "../../utility/TextMatcher";
 import type { Element } from "../../../models/Element";
@@ -129,13 +133,13 @@ export function projectSkeletonElement(element: Element): SkeletonElement | unde
   if (!bounds) {
     return undefined;
   }
-  const { affordances, elementId, label, testTag } = toSkeletonSearchable(element);
+  const { affordances, elementId, displayedLabel, testTag } = toSkeletonSearchable(element);
   const entry: SkeletonElement = { bounds, affordances };
   if (elementId !== undefined) {
     entry.elementId = elementId;
   }
-  if (label !== undefined) {
-    entry.label = label.trim();
+  if (displayedLabel !== undefined) {
+    entry.label = displayedLabel;
   }
   if (testTag !== undefined) {
     entry.testTag = testTag;
@@ -462,7 +466,7 @@ function toSkeletonEntry(acc: SkeletonAccumulator): SkeletonElement {
     // {@link applyHoistedLabels} has folded in the identifying descendant
     // text, and a container with no hoist candidates at all never runs that
     // fold in the first place.
-    entry.label = acc.label.trim();
+    entry.label = displayedSearchableLabel(acc.label);
   }
   if (acc.sublabel !== undefined) {
     entry.sublabel = acc.sublabel.trim();

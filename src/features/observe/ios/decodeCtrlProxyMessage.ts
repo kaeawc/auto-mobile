@@ -107,7 +107,6 @@ export function decodeCtrlProxyMessage(message: WebSocketMessage): DecodedCtrlPr
     case "append_text_result":
     case "clear_text_result":
     case "select_all_result":
-    case "press_key_result":
     case "press_button_result":
     case "press_home_result":
     case "press_back_result":
@@ -118,6 +117,16 @@ export function decodeCtrlProxyMessage(message: WebSocketMessage): DecodedCtrlPr
         success: message.success ?? true,
         totalTimeMs: message.totalTimeMs ?? 0,
         error: message.error,
+        perfTiming: message.perfTiming,
+      };
+      break;
+
+    case "press_key_result":
+      result = {
+        success: message.success ?? true,
+        totalTimeMs: message.totalTimeMs ?? 0,
+        error: message.error,
+        verified: message.verified,
         perfTiming: message.perfTiming,
       };
       break;

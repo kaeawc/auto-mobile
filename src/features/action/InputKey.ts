@@ -57,6 +57,7 @@ export interface InputKeyResult {
   success: boolean;
   key: InputKeyName;
   keyCode: string;
+  verified?: boolean;
   error?: string;
 }
 
@@ -72,7 +73,7 @@ export interface InputKeyIosClient {
     key: InputKeyName,
     modifiers: InputKeyModifier[],
     timeoutMs?: number,
-  ): Promise<{ success: boolean; error?: string }>;
+  ): Promise<{ success: boolean; error?: string; verified?: boolean }>;
 }
 
 export type InputKeyIosClientFactory = (device: BootedDevice) => InputKeyIosClient;
@@ -258,6 +259,7 @@ export class InputKey {
         success: result.success,
         key,
         keyCode: key,
+        ...(result.verified === undefined ? {} : { verified: result.verified }),
         ...(result.error ? { error: result.error } : {}),
       };
     } catch (error) {

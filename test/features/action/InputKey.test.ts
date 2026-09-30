@@ -24,6 +24,31 @@ function createAdbFactory(fakeAdb: FakeAdbExecutor): AdbClientFactory {
 }
 
 describe("InputKey", () => {
+  test("preserves an iOS arrow failure and an unverified result from the runner", async () => {
+    let response = {
+      success: false,
+      error:
+        "arrow keys have no effect on this iOS runtime; use Cmd+arrow (line start/end) or sendKeys text editing instead",
+      verified: undefined as boolean | undefined,
+    };
+    const requestPressKey = mock(async () => response);
+    const inputKey = new InputKey(
+      iosDevice,
+      createAdbFactory(new FakeAdbExecutor()),
+      undefined,
+      new FakeTimer(),
+      () => ({ requestPressKey }),
+    );
+
+    expect(await inputKey.press("arrow_left")).toMatchObject({
+      success: false,
+      error:
+        "arrow keys have no effect on this iOS runtime; use Cmd+arrow (line start/end) or sendKeys text editing instead",
+    });
+    response = { success: true, error: undefined, verified: false };
+    expect(await inputKey.press("arrow_left")).toMatchObject({ success: true, verified: false });
+  });
+
   test("sends supported Android keys through ADB keyevent with the caller timeout", async () => {
     const fakeAdb = new FakeAdbExecutor();
     // Inject a FakeTimer so `now()` is constant: with the real timer, a 1ms tick between the two

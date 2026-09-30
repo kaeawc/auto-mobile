@@ -346,6 +346,72 @@ describe("SendKeys", () => {
     ]);
   });
 
+  test("stops iOS sendKeys at a failed arrow and reports the runner message", async () => {
+    const observer = createObserver();
+    const { client, calls } = createTextClient();
+    const inputKey: SendKeysInputKey = {
+      press: async () => ({
+        success: false,
+        key: "arrow_left",
+        keyCode: "arrow_left",
+        error:
+          "arrow keys have no effect on this iOS runtime; use Cmd+arrow (line start/end) or sendKeys text editing instead",
+      }),
+    };
+    const executor = new DefaultSendKeysCommandExecutor(
+      iosDevice,
+      createAdbFactory(new FakeAdbExecutor()),
+      observer,
+      { textClient: client, inputKey },
+    );
+    const sendKeys = new SendKeys(iosDevice, undefined, {
+      executor,
+      observer,
+      timestampProvider: { now: async () => 0 },
+    });
+
+    const result = await sendKeys.execute([
+      { action: "key", key: "arrow_left" },
+      { action: "type", text: "Z" },
+    ]);
+
+    expect(result).toMatchObject({
+      success: false,
+      completedCommands: 0,
+      failedIndex: 0,
+      error:
+        "arrow keys have no effect on this iOS runtime; use Cmd+arrow (line start/end) or sendKeys text editing instead",
+      commands: [
+        {
+          success: false,
+          error:
+            "arrow keys have no effect on this iOS runtime; use Cmd+arrow (line start/end) or sendKeys text editing instead",
+        },
+      ],
+    });
+    expect(calls).toEqual([]);
+  });
+
+  test("marks an uncheckable iOS arrow step as unverified", async () => {
+    const observer = createObserver();
+    const executor = new DefaultSendKeysCommandExecutor(
+      iosDevice,
+      createAdbFactory(new FakeAdbExecutor()),
+      observer,
+      { inputKey: { press: async () => ({ success: true, verified: false }) } },
+    );
+    const sendKeys = new SendKeys(iosDevice, undefined, {
+      executor,
+      observer,
+      timestampProvider: { now: async () => 0 },
+    });
+
+    expect(await sendKeys.execute([{ action: "key", key: "arrow_right" }])).toMatchObject({
+      success: true,
+      commands: [{ success: true, verified: false }],
+    });
+  });
+
   test("accepts a hierarchy pushed before command delivery returns", async () => {
     let deviceTime = 1000;
     const pushedObservation = { timestamp: 1001 } as ObserveResult;

@@ -11,7 +11,9 @@ import {
   extractAllElements,
   getElementKey,
   filterUnexhaustedElements,
+  tapSelectorFor,
 } from "../../../src/features/navigation/ExploreElementExtraction";
+import type { ElementSelector } from "../../../src/utils/interfaces/ElementSelector";
 import type { TrackedElement } from "../../../src/features/navigation/ExploreTypes";
 
 describe("ExploreElementExtraction", () => {
@@ -62,6 +64,85 @@ describe("ExploreElementExtraction", () => {
       bounds: { left: 0, top: 0, right: 100, bottom: 50 },
     };
   }
+
+  describe("tapSelectorFor", () => {
+    test("keeps a unique occurrence unindexed", () => {
+      const element = createMockElement();
+      const selector = {
+        selectByResourceId: () => ({
+          element,
+          indexInMatches: 0,
+          totalMatches: 1,
+          strategy: "first" as const,
+        }),
+        selectByText: () => ({
+          element,
+          indexInMatches: 0,
+          totalMatches: 1,
+          strategy: "first" as const,
+        }),
+      } as ElementSelector;
+
+      expect(tapSelectorFor(element, createMockViewHierarchy(), selector)).toEqual({
+        elementId: "com.test:id/button",
+      });
+    });
+
+    test("finds an occurrence beyond the unindexed match count", () => {
+      const occurrences = [
+        createMockElement({ bounds: { left: 0, top: 0, right: 20, bottom: 20 } }),
+        createMockElement({ bounds: { left: 0, top: 20, right: 20, bottom: 40 } }),
+        createMockElement({ bounds: { left: 0, top: 40, right: 20, bottom: 60 } }),
+      ];
+      const selector = {
+        selectByResourceId: (_hierarchy: unknown, _id: string, options?: { index?: number }) => ({
+          element:
+            options?.index === undefined ? occurrences[0] : (occurrences[options.index] ?? null),
+          indexInMatches: options?.index ?? 0,
+          totalMatches: options?.index === undefined ? 2 : 3,
+          strategy: "first" as const,
+        }),
+        selectByText: (_hierarchy: unknown, _text: string) => ({
+          element: null,
+          indexInMatches: -1,
+          totalMatches: 2,
+          strategy: "first" as const,
+        }),
+      } as ElementSelector;
+
+      expect(tapSelectorFor(occurrences[2], createMockViewHierarchy(), selector)).toEqual({
+        elementId: "com.test:id/button",
+        index: 2,
+      });
+    });
+
+    test("keeps a simple repeated occurrence index", () => {
+      const occurrences = [
+        createMockElement({ bounds: { left: 0, top: 0, right: 20, bottom: 20 } }),
+        createMockElement({ bounds: { left: 0, top: 20, right: 20, bottom: 40 } }),
+      ];
+      const selector = {
+        selectByResourceId: (_hierarchy: unknown, _id: string, options?: { index?: number }) => ({
+          element:
+            options?.index === undefined ? occurrences[0] : (occurrences[options.index] ?? null),
+          indexInMatches: options?.index ?? 0,
+          totalMatches: 2,
+          strategy: "first" as const,
+        }),
+        selectByText: (_hierarchy: unknown, _text: string) => ({
+          element: null,
+          indexInMatches: -1,
+          totalMatches: 2,
+          strategy: "first" as const,
+        }),
+      } as ElementSelector;
+
+      expect(tapSelectorFor(occurrences[1], createMockViewHierarchy(), selector)).toEqual({
+        elementId: "com.test:id/button",
+        index: 1,
+      });
+    });
+  });
 
   describe("isNavigationCandidate", () => {
     test("should accept clickable and enabled elements", () => {

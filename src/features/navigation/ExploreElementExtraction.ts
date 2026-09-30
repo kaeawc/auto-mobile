@@ -217,7 +217,7 @@ export function tapSelectorFor(
 
 /** Position of `element` among the selector's on-screen matches, located by bounds. */
 function occurrenceIndex(select: SelectOccurrence, element: Element): { index?: number } {
-  const total = select().totalMatches;
+  const total = select(0).totalMatches;
   for (let index = 0; index < total; index++) {
     const match = select(index).element;
     if (!match) {

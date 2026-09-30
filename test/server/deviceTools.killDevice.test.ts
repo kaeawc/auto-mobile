@@ -566,6 +566,18 @@ class AlreadyStoppedKillDeviceManager extends FailingKillDeviceManager {
   }
 }
 
+class ConfirmedLateIosShutdownManager extends SuccessfulKillDeviceManager {
+  constructor(private readonly timer: FakeTimer) {
+    super();
+  }
+
+  override async killDevice(device: BootedDevice): Promise<void> {
+    this.setBootedDevices("ios", []);
+    this.timer.setCurrentTime(30_000);
+    throw new Error("Command timed out after 1ms: xcrun simctl list devices --json");
+  }
+}
+
 class FakeDeviceSessionRepository extends DeviceSessionRepository {
   override async getSession(): Promise<undefined> {
     return undefined;
@@ -4458,7 +4470,6 @@ describe("killDevice handler", () => {
   test.each([
     ["android", "Emulator 'forge-ivory-crown' is not running"],
     ["android", "adb: device 'emulator-5554' not found"],
-    ["ios", "Unable to shutdown device: device is already shut down"],
   ] as const)(
     "returns a structured terminal error for an already-stopped %s device",
     async (platform, message) => {
@@ -4527,6 +4538,68 @@ describe("killDevice handler", () => {
       }
     },
   );
+
+  test("returns success when an iOS shutdown is confirmed after its command deadline", async () => {
+    const timer = new FakeTimer();
+    const lateManager = new ConfirmedLateIosShutdownManager(timer);
+    manager = lateManager;
+    setDeviceToolsDependencies({ deviceManagerFactory: () => lateManager, timer });
+    const device: BootedDevice = { name: "iPhone 16", platform: "ios", deviceId: "IOS-UDID" };
+
+    const response = await ToolRegistry.getTool("killDevice")!.handler({ device });
+
+    expect(response.isError).not.toBe(true);
+    expect(JSON.parse(response.content[0].text).message).toContain("shutdown successfully");
+  });
+
+  test("treats CoreSimulator 405 Shutdown as an idempotent iOS kill", async () => {
+    manager = new AlreadyStoppedKillDeviceManager(
+      "(domain=com.apple.CoreSimulator.SimError, code=405): Unable to shutdown device in current state: Shutdown",
+    );
+    setDeviceToolsDependencies({ deviceManagerFactory: () => manager });
+    const device: BootedDevice = { name: "iPhone 16", platform: "ios", deviceId: "IOS-UDID" };
+
+    const response = await ToolRegistry.getTool("killDevice")!.handler({ device });
+
+    expect(response.isError).not.toBe(true);
+    expect(JSON.parse(response.content[0].text).message).toContain("already shut down");
+  });
+
+  test("kill followed by immediate getApple boots a simulator with suspended runner state", async () => {
+    const timer = new FakeTimer();
+    const iosManager = new SuccessfulKillDeviceManager();
+    manager = iosManager;
+    const device: BootedDevice = { name: "iPhone 16", platform: "ios", deviceId: "IOS-UDID" };
+    iosManager.setBootedDevices("ios", [device]);
+    iosManager.setDeviceImages("ios", [{ ...device, isRunning: true, source: "local" }]);
+    let runnerWasRearmed = false;
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => iosManager,
+      timer,
+      ensureCtrlProxyReady: async () => {
+        runnerWasRearmed =
+          IOSCtrlProxyManager.getExistingInstance(device.deviceId)
+            ?.getForcedRestartBudget()
+            .snapshot().state !== "suspended";
+      },
+    });
+
+    const kill = await ToolRegistry.getTool("killDevice")!.handler({ device });
+    expect(kill.isError).not.toBe(true);
+    const ctrlProxy = IOSCtrlProxyManager.getExistingInstance(device.deviceId);
+    expect(ctrlProxy).toBeDefined();
+    await ctrlProxy!.suspendForDeviceRemoval();
+
+    const getApple = ToolRegistry.getTool("getApple");
+    if (!getApple) {
+      throw new Error("getApple not registered");
+    }
+    const response = await getApple.handler({ deviceId: device.deviceId });
+
+    expect(response.isError).not.toBe(true);
+    expect(JSON.parse(response.content[0].text).acquisition).toBe("cold-boot");
+    expect(runnerWasRearmed).toBe(true);
+  });
 
   test("keeps recording-list failures as actionable errors", async () => {
     await setVideoRecordingManagerDependencies({

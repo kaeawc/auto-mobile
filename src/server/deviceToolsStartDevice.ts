@@ -8,6 +8,7 @@ import type { DeviceReadinessLevel } from "../utils/DeviceSessionManager";
 import type { DeviceReadinessReservation } from "../daemon/devicePool";
 import { DeviceBootService, type DeviceBootResult } from "../devices/deviceBootService";
 import { IOSCtrlProxyClient } from "../features/observe/ios/IOSCtrlProxyClient";
+import { IOSCtrlProxyManager } from "../ctrlProxy/IOSCtrlProxyManager";
 import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
 import { logger } from "../utils/logger";
 import { createPerformanceTracker } from "../utils/PerformanceTracker";
@@ -184,6 +185,14 @@ export function createStartDeviceHandlers(hooks: StartDeviceHooks) {
     // A new incarnation must not inherit a prior intentional-shutdown marker
     // while its per-device runner setup is in flight.
     clearColdBootShutdownMarker(state.boot.source, state.boot.device.deviceId);
+
+    if (state.boot.device.platform === "ios") {
+      IOSCtrlProxyClient.resumeAfterDeviceStart(state.boot.device.deviceId);
+      // Removal cleanup can still be draining after simctl reports the new boot.
+      await IOSCtrlProxyManager.getExistingInstance(
+        state.boot.device.deviceId,
+      )?.rearmAfterDeviceReappearance();
+    }
 
     const ctrlProxySetup = deps.ensureCtrlProxyReady ?? ensureCtrlProxyReady;
     // #6280 P2 follow-up: mark this device's readiness lock key as having an
@@ -394,6 +403,9 @@ export function createStartDeviceHandlers(hooks: StartDeviceHooks) {
       }
       if (request.device.platform === "ios") {
         IOSCtrlProxyClient.resumeAfterDeviceStart(request.device.deviceId);
+        await IOSCtrlProxyManager.getExistingInstance(
+          request.device.deviceId,
+        )?.rearmAfterDeviceReappearance();
       } else if (request.device.platform === "android") {
         AndroidCtrlProxyClient.resumeAfterDeviceStart(request.device.deviceId);
       }

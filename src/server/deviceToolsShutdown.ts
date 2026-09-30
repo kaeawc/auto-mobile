@@ -43,6 +43,7 @@ import type { DeviceToolsDependencies, KillDeviceArgs, PooledAvdKillIdentity } f
 
 export const DEVICE_SHUTDOWN_POLL_INTERVAL_MS = 1_000;
 const DEVICE_SHUTDOWN_POST_RELEASE_RECHECK_TIMEOUT_MS = 1_000;
+const IOS_SHUTDOWN_CONFIRMATION_MIN_MS = 2_000;
 const DEVICE_SHUTDOWN_DISCOVERY_RECHECK_BACKOFF = fixedBackoff(1_000);
 export const DEVICE_SHUTDOWN_TERMINAL_RELEASE_RETRIES = 2;
 
@@ -80,6 +81,15 @@ export function createKillDeviceResponse(
   alreadyStoppedMessage?: string,
 ) {
   if (alreadyStoppedMessage !== undefined) {
+    if (args.device.platform === "ios") {
+      return createStructuredToolResponse({
+        message: `ios '${args.device.name}' already shut down`,
+        udid: args.device.deviceId,
+        name: args.device.name,
+        timing,
+        platform: args.device.platform,
+      });
+    }
     return createToolErrorResponse(DEVICE_ALREADY_STOPPED_ERROR_CODE, alreadyStoppedMessage);
   }
 
@@ -692,6 +702,7 @@ async function getShutdownDiscovery(
       operation: async () => {
         const discovery = await deviceManager.getBootedDevicesDetailed(device.platform, {
           bypassAndroidDeviceListCache: true,
+          ...(device.platform === "ios" ? { bypassIosDeviceListCache: true } : {}),
           ...(skipAndroidNameEnrichment ? { skipAndroidNameEnrichment: true } : {}),
         });
         // FUNNEL 1: the kill/teardown preflight decides whether the pooled AVD
@@ -1323,6 +1334,97 @@ interface KillProcessAndRetireOwnershipOptions {
   ) => void;
 }
 
+async function confirmIosShutdownAfterTimeout(
+  context: ShutdownDiscoveryContext,
+  error: unknown,
+  platformCommandSettled: boolean,
+): Promise<boolean> {
+  if (
+    context.device.platform !== "ios" ||
+    !platformCommandSettled ||
+    (!isShutdownTimeoutError(error) && !String(error).includes("Command timed out"))
+  ) {
+    return false;
+  }
+  // simctl accepted shutdown, then its state read consumed the last command
+  // millisecond. Use a fresh, uncached observation and a dedicated budget.
+  try {
+    const discovery = await getShutdownDiscovery({
+      ...context,
+      deadlineMs: context.timer.now() + IOS_SHUTDOWN_CONFIRMATION_MIN_MS,
+      timeoutMs: IOS_SHUTDOWN_CONFIRMATION_MIN_MS,
+    });
+    return (
+      discovery.succeededPlatforms.has("ios") && !findDiscoveredDevice(discovery, context.device)
+    );
+  } catch (confirmationError) {
+    logger.warn(
+      `[DeviceTools] iOS shutdown confirmation failed for ${context.device.deviceId}: ${confirmationError}`,
+      confirmationError,
+    );
+    return false;
+  }
+}
+
+async function handleUnconfirmedKillCommandError(
+  error: unknown,
+  context: ShutdownDiscoveryContext & {
+    expectedPooledDevice: PooledDevice | null;
+    devicePool: DevicePool | undefined;
+    platformShutdown: Promise<BootedDevice | void> | undefined;
+    platformShutdownSettled: boolean;
+    retainReservationUntil: KillProcessAndRetireOwnershipOptions["retainReservationUntil"];
+    releaseShutdownReservation: () => Promise<void>;
+    androidObserverState: AndroidObserverShutdownState;
+  },
+): Promise<string | undefined> {
+  const {
+    device,
+    devicePool,
+    requestAbortSignal,
+    expectedPooledDevice,
+    platformShutdown,
+    platformShutdownSettled,
+    retainReservationUntil,
+    releaseShutdownReservation,
+    androidObserverState,
+    deviceManager,
+    timer,
+    deadlineMs,
+    timeoutMs,
+  } = context;
+  const keepIntentionalShutdown = shouldKeepIntentionalShutdownAfterCommandError(
+    error,
+    requestAbortSignal,
+  );
+  retainLatePlatformShutdown(
+    platformShutdown,
+    platformShutdownSettled,
+    retainReservationUntil,
+    async () => {
+      if (!keepIntentionalShutdown || !expectedPooledDevice || !devicePool) {
+        return;
+      }
+      devicePool.noteLatePlatformShutdownSettled(expectedPooledDevice);
+      // A late command failure cannot distinguish platform failure from cancellation.
+    },
+  );
+  if (
+    !keepIntentionalShutdown &&
+    !isAlreadyStoppedDeviceError(device.platform, device.deviceId, error)
+  ) {
+    devicePool?.clearIntentionalShutdown(device.deviceId);
+    await releaseShutdownReservation();
+  }
+  await resumeCtrlProxyAfterUnconfirmedFailure(device, error, requestAbortSignal);
+  await restoreAndroidObserverAfterCommandFailure(
+    { deviceManager, device, timer, shutdownDeadlineMs: deadlineMs, requestAbortSignal, timeoutMs },
+    androidObserverState,
+    error,
+  );
+  return handleShutdownCommandError(device, error, devicePool, keepIntentionalShutdown);
+}
+
 async function killProcessAndRetireOwnership(
   context: ShutdownEntryContext &
     Pick<
@@ -1352,6 +1454,7 @@ async function killProcessAndRetireOwnership(
 
   let shutdownDevice = device;
   let alreadyStoppedMessage: string | undefined;
+  let confirmedAfterCommandError = false;
   let platformShutdown: Promise<BootedDevice | void> | undefined;
   let platformShutdownSettled = false;
   perf.startOperation("killProcess");
@@ -1376,52 +1479,35 @@ async function killProcessAndRetireOwnership(
     );
     shutdownDevice = killedDevice ?? device;
   } catch (error) {
-    const keepIntentionalShutdown = shouldKeepIntentionalShutdownAfterCommandError(
-      error,
-      requestAbortSignal,
-    );
-    retainLatePlatformShutdown(
-      platformShutdown,
-      platformShutdownSettled,
-      retainReservationUntil,
-      async () => {
-        if (!keepIntentionalShutdown || !expectedPooledDevice || !devicePool) {
-          return;
-        }
-        devicePool.noteLatePlatformShutdownSettled(expectedPooledDevice);
-        // Our deadline or abort already fired. The raw late error cannot
-        // distinguish platform failure from our cancellation. An immediate
-        // refresh could observe the still-booted device and lift the fence
-        // before its late exit; wait for an independent later observation.
-      },
-    );
-    if (
-      !keepIntentionalShutdown &&
-      !isAlreadyStoppedDeviceError(device.platform, device.deviceId, error)
-    ) {
-      // This command has settled. Drop our fence before testing for another kill's fence.
-      devicePool?.clearIntentionalShutdown(device.deviceId);
-      await releaseShutdownReservation();
-    }
-    await resumeCtrlProxyAfterUnconfirmedFailure(device, error, requestAbortSignal);
-    await restoreAndroidObserverAfterCommandFailure(
+    confirmedAfterCommandError = await confirmIosShutdownAfterTimeout(
       {
         deviceManager,
         device,
         timer: dependencies.timer,
-        shutdownDeadlineMs,
+        deadlineMs: shutdownDeadlineMs,
         requestAbortSignal,
         timeoutMs,
       },
-      androidObserverState,
       error,
+      platformShutdownSettled,
     );
-    alreadyStoppedMessage = handleShutdownCommandError(
-      device,
-      error,
-      devicePool,
-      keepIntentionalShutdown,
-    );
+    if (!confirmedAfterCommandError) {
+      alreadyStoppedMessage = await handleUnconfirmedKillCommandError(error, {
+        deviceManager,
+        device,
+        timer: dependencies.timer,
+        deadlineMs: shutdownDeadlineMs,
+        requestAbortSignal,
+        timeoutMs,
+        expectedPooledDevice,
+        devicePool,
+        platformShutdown,
+        platformShutdownSettled,
+        retainReservationUntil,
+        releaseShutdownReservation,
+        androidObserverState,
+      });
+    }
   }
   perf.endOperation("killProcess");
 
@@ -1432,17 +1518,23 @@ async function killProcessAndRetireOwnership(
   let shutdownWasConfirmed = false;
   try {
     perf.startOperation("waitForShutdown");
-    const observedReplacement = await waitForDeviceShutdown(
-      {
-        deviceManager,
-        device: shutdownDevice,
-        timer: dependencies.timer,
-        deadlineMs: shutdownDeadlineMs,
-        requestAbortSignal,
-        timeoutMs,
-      },
-      force,
-    );
+    const confirmationDeadlineMs =
+      device.platform === "ios"
+        ? Math.max(shutdownDeadlineMs, dependencies.timer.now() + IOS_SHUTDOWN_CONFIRMATION_MIN_MS)
+        : shutdownDeadlineMs;
+    const observedReplacement = confirmedAfterCommandError
+      ? undefined
+      : await waitForDeviceShutdown(
+          {
+            deviceManager,
+            device: shutdownDevice,
+            timer: dependencies.timer,
+            deadlineMs: confirmationDeadlineMs,
+            requestAbortSignal,
+            timeoutMs,
+          },
+          force,
+        );
     perf.endOperation("waitForShutdown");
     shutdownWasConfirmed = true;
 

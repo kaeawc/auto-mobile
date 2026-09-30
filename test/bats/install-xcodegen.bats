@@ -144,6 +144,27 @@ EOF
   [ -d "$fallback_home/.local/share/xcodegen" ]
 }
 
+@test "falls back when an existing share directory is not writable" {
+  local fallback_home="$BATS_TEST_TMPDIR/home"
+  mkdir -p "$PREFIX/bin" "$PREFIX/share" "$fallback_home"
+  chmod a-w "$PREFIX/share"
+  cat > "$STUB_DIR/mkdir" <<EOF
+#!/bin/bash
+printf '%s\\n' "\$*" >> "$STUB_DIR/mkdir.log"
+exec /bin/mkdir "\$@"
+EOF
+  chmod +x "$STUB_DIR/mkdir"
+  stub_download "2.46.0"
+
+  run env PATH="$STUB_DIR:/usr/bin:/bin" HOME="$fallback_home" XCODEGEN_PREFIX="$PREFIX" \
+      XCODEGEN_RELEASE_SHA256="$ARCHIVE_SHA" bash "$SCRIPT"
+
+  [ "$status" -eq 0 ]
+  grep -Fq "$PREFIX/bin $PREFIX/share" "$STUB_DIR/mkdir.log"
+  [ -x "$fallback_home/.local/bin/xcodegen" ]
+  [ -d "$fallback_home/.local/share/xcodegen" ]
+}
+
 @test "replaces a skewed version — the #3975 shape" {
   stub_xcodegen "2.45.4"
   stub_download "2.46.0"
@@ -202,6 +223,7 @@ EOF
   # re-uploaded xcodegen.zip under the same tag would still report the pinned
   # version and pass the gate while generating different bytes — #3975 with the
   # guard green. The digest is what makes the pin actually byte-exact.
+  # shellcheck disable=SC1090
   source "$VERSION_FILE"
   [[ "$XCODEGEN_RELEASE_URL" == *"/${XCODEGEN_VERSION}/"* ]]
   [[ "$XCODEGEN_RELEASE_SHA256" =~ ^[0-9a-f]{64}$ ]]

@@ -32,7 +32,7 @@ describe("Android physical display inventory", () => {
     expect(await readAndroidDeviceDisplays(adb)).toEqual({
       panels: [
         { key: "4619827259835644672", role: "inner", sizePx: { width: 2076, height: 2152 } },
-        { key: "4619827259835644673", role: "cover", sizePx: { width: 1080, height: 2364 } },
+        { key: "4619827551948147201", role: "cover", sizePx: { width: 1080, height: 2364 } },
       ],
       postures: ["closed", "half_opened", "opened", "rear_display"],
     });
@@ -62,7 +62,7 @@ describe("Android physical display inventory", () => {
       )?.panels,
     ).toEqual([
       { key: "4619827259835644672", role: "inner", sizePx: { width: 2256, height: 2504 } },
-      { key: "4619827259835644673", role: "cover", sizePx: { width: 1080, height: 2520 } },
+      { key: "4619827551948147201", role: "cover", sizePx: { width: 1080, height: 2520 } },
     ]);
   });
 
@@ -106,6 +106,21 @@ describe("Android physical display inventory", () => {
     expect(parseAndroidDeviceDisplays(physical, infos, "Supported states: []")?.panels).toEqual([
       { key: "4619827259835644672", role: "unknown", sizePx: { width: 1080, height: 2400 } },
       { key: "4619827259835644679", role: "external", sizePx: { width: 1920, height: 1080 } },
+    ]);
+  });
+
+  test("parses API 36 colon separators and punctuation inside display names", () => {
+    const physical =
+      'Display 4619827259835644672 (HWC display 0): port=0 pnpId=GOO displayName="Inner"\n' +
+      'Display 4619827551948147201 (HWC display 1): port=1 pnpId=GOO displayName="Cover"\n';
+    const infos = [
+      'DisplayDeviceInfo{"Inner, Fold: OLED": uniqueId="local:4619827259835644672", 2076 x 2152, density 420, touch INTERNAL, type INTERNAL, FLAG_DEFAULT_DISPLAY}',
+      'DisplayDeviceInfo{"Cover, Outer: OLED", uniqueId="local:4619827551948147201", 1080 x 2364, density 420, touch INTERNAL, type INTERNAL, FLAG_DEFAULT_DISPLAY}',
+    ].join("\n");
+
+    expect(parseAndroidDeviceDisplays(physical, infos, "Supported states: []")?.panels).toEqual([
+      { key: "4619827259835644672", role: "inner", sizePx: { width: 2076, height: 2152 } },
+      { key: "4619827551948147201", role: "cover", sizePx: { width: 1080, height: 2364 } },
     ]);
   });
 });

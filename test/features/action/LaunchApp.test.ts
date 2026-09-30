@@ -1449,6 +1449,59 @@ describe("LaunchApp", () => {
     expect(fakeAdb.wasCommandExecuted(`shell monkey -p '${packageName}' --user 0 1`)).toBe(true);
   });
 
+  test("does not launch Android when clearing app data fails for a running app", async () => {
+    fakeTimer.enableAutoAdvance();
+    fakeAdb.setForegroundApp({ packageName, userId: 0 });
+    fakeAdb.setCommandResponse("shell dumpsys activity processes", {
+      stdout: "123:com.example.app/u0a123\n",
+      stderr: "",
+    });
+    const launchWithFailedClear = new LaunchApp(device, fakeAdb, null, fakeTimer, {
+      createAndroidClearAppData: () => ({
+        execute: async () => ({
+          success: false,
+          packageName,
+          error: "Failed to clear application data: Failed",
+        }),
+      }),
+    });
+
+    const result = await launchWithFailedClear.execute(packageName, true, false);
+
+    expect(result).toMatchObject({
+      success: false,
+      packageName,
+      userId: 0,
+      error: "Failed to clear app data: Failed to clear application data: Failed",
+    });
+    expect(fakeAdb.wasCommandExecuted(`shell monkey -p '${packageName}' --user 0 1`)).toBe(false);
+  });
+
+  test("does not launch Android when clearing app data fails for a stopped app", async () => {
+    fakeTimer.enableAutoAdvance();
+    fakeAdb.setForegroundApp({ packageName, userId: 0 });
+    fakeAdb.setCommandResponse("shell dumpsys activity processes", { stdout: "0\n", stderr: "" });
+    const launchWithFailedClear = new LaunchApp(device, fakeAdb, null, fakeTimer, {
+      createAndroidClearAppData: () => ({
+        execute: async () => ({
+          success: false,
+          packageName,
+          error: "Failed to clear application data: Failed",
+        }),
+      }),
+    });
+
+    const result = await launchWithFailedClear.execute(packageName, true, false);
+
+    expect(result).toMatchObject({
+      success: false,
+      packageName,
+      userId: 0,
+      error: "Failed to clear app data: Failed to clear application data: Failed",
+    });
+    expect(fakeAdb.wasCommandExecuted(`shell monkey -p '${packageName}' --user 0 1`)).toBe(false);
+  });
+
   test("clears Android app data through the injected action before relaunch when not running", async () => {
     fakeTimer.enableAutoAdvance();
     fakeAdb.setForegroundApp({ packageName, userId: 0 });

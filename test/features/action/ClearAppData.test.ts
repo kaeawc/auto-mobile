@@ -22,6 +22,7 @@ describe("ClearAppData", () => {
   describe("android", () => {
     test("clears the explicitly requested Android user", async () => {
       const adb = new FakeAdbExecutor();
+      adb.setCommandResponse("shell pm clear --user 10", { stdout: "Success\n", stderr: "" });
       const clearAppData = new ClearAppData(device, adbFactoryFor(adb));
 
       const result = await clearAppData.execute("com.example.app", 10);
@@ -33,6 +34,7 @@ describe("ClearAppData", () => {
 
     test("uses the package foreground user when no user is explicitly requested", async () => {
       const adb = new FakeAdbExecutor();
+      adb.setCommandResponse("shell pm clear --user 11", { stdout: "Success\n", stderr: "" });
       adb.setForegroundApp({ packageName: "com.example.app", userId: 11 });
       const clearAppData = new ClearAppData(device, adbFactoryFor(adb));
 
@@ -42,7 +44,55 @@ describe("ClearAppData", () => {
       expect(adb.getExecutedCommands()).toEqual(["shell pm clear --user 11 'com.example.app'"]);
     });
 
-    test("returns a stable failure result when pm clear fails", async () => {
+    test("returns failure when pm clear prints Failed despite resolving successfully", async () => {
+      const adb = new FakeAdbExecutor();
+      adb.setCommandResponse("shell pm clear --user 10", { stdout: "Failed\n", stderr: "" });
+      const clearAppData = new ClearAppData(device, adbFactoryFor(adb));
+
+      const result = await clearAppData.execute("com.example.app", 10);
+
+      expect(result).toEqual({
+        success: false,
+        packageName: "com.example.app",
+        userId: 10,
+        error: "Failed to clear application data: Failed",
+      });
+    });
+
+    test("returns failure for synthetic unexpected pm clear output", async () => {
+      const output = "Unexpected synthetic output";
+      const adb = new FakeAdbExecutor();
+      adb.setCommandResponse("shell pm clear --user 10", { stdout: output, stderr: "" });
+      const clearAppData = new ClearAppData(device, adbFactoryFor(adb));
+
+      const result = await clearAppData.execute("com.example.app", 10);
+
+      expect(result).toEqual({
+        success: false,
+        packageName: "com.example.app",
+        userId: 10,
+        error: `Failed to clear application data: ${output}`,
+      });
+    });
+
+    test("succeeds when stdout is Success despite an unrelated stderr warning", async () => {
+      const adb = new FakeAdbExecutor();
+      adb.setCommandResponse("shell pm clear --user 10", {
+        stdout: "  Success  \n",
+        stderr: "unrelated warning\n",
+      });
+      const clearAppData = new ClearAppData(device, adbFactoryFor(adb));
+
+      const result = await clearAppData.execute("com.example.app", 10);
+
+      expect(result).toEqual({
+        success: true,
+        packageName: "com.example.app",
+        userId: 10,
+      });
+    });
+
+    test("returns a failure result when the adb command throws", async () => {
       const adb = new FakeAdbExecutor();
       adb.setCommandError("shell pm clear --user 10 'com.example.app'", new Error("adb failed"));
       const clearAppData = new ClearAppData(device, adbFactoryFor(adb));
@@ -53,7 +103,7 @@ describe("ClearAppData", () => {
         success: false,
         packageName: "com.example.app",
         userId: 10,
-        error: "Failed to clear application data",
+        error: "Failed to clear application data: adb failed",
       });
     });
   });

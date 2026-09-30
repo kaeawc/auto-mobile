@@ -95,27 +95,38 @@ export class ClearAppData {
 
     try {
       // pm clear both clears data AND stops the app, no need for separate force-stop
-      await perf.track("pmClear", async () => {
-        await adb.executeCommand(
+      const result = await perf.track("pmClear", async () => {
+        return await adb.executeCommand(
           `shell pm clear --user ${targetUserId} ${shellQuote(packageName)}`,
           CLEAR_APP_DATA_TIMEOUT_MS,
         );
-        logger.info(`Clearing app data was successful for user ${targetUserId}`);
       });
 
+      const output = `${result.stdout}${result.stderr}`.trim();
+      const succeeded = result.stdout.split(/\r?\n/).some((line) => line.trim() === "Success");
+      if (!succeeded) {
+        const error = `Failed to clear application data: ${output || "pm clear returned no output"}`;
+        logger.warn(`[ClearAppData] ${error}`);
+        perf.end();
+        return { success: false, packageName, userId: targetUserId, error };
+      }
+
+      logger.info(`Clearing app data was successful for user ${targetUserId}`);
       perf.end();
       return {
         success: true,
         packageName,
         userId: targetUserId,
       };
-    } catch {
+    } catch (error) {
+      const message = errorMessage(error);
+      logger.warn(`[ClearAppData] Failed to clear application data: ${message}`, error);
       perf.end();
       return {
         success: false,
         packageName,
         userId: targetUserId,
-        error: "Failed to clear application data",
+        error: `Failed to clear application data: ${message}`,
       };
     }
   }

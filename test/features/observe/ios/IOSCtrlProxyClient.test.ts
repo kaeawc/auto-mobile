@@ -3508,7 +3508,7 @@ describe("IOSCtrlProxyClient", function () {
       await IOSCtrlProxyClient.retireInstance(testDevice.deviceId);
       expect(String(await screenshotResult)).toContain("WebSocket connection closed");
       const duringKill = IOSCtrlProxyClient.getInstance(testDevice);
-      expect(duringKill).toBe(client);
+      expect(duringKill).not.toBe(client);
       expect(await duringKill.ensureConnected()).toBe(false);
       expect(restarts).toBe(0);
     });

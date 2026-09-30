@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
+import java.util.ArrayDeque
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -73,6 +74,47 @@ class GestureStreamSessionTest {
           finishedError = error
         },
       )
+  }
+
+  private data class Ack(val requestId: String?, val success: Boolean, val error: String?)
+
+  private class RouterHarness {
+    private val gestureQueue = ArrayDeque<() -> Unit>()
+    val dispatchers = mutableListOf<FakeStrokeDispatcher>()
+    val acks = mutableListOf<Ack>()
+    val router =
+      GestureStreamRouter(
+        runOnGestureThread = { gestureQueue.addLast(it) },
+        newSession = { onFinished ->
+          val dispatcher = FakeStrokeDispatcher()
+          dispatchers.add(dispatcher)
+          GestureStreamSession(
+            coordinator = GestureStreamCoordinator(),
+            dispatcher = dispatcher,
+            runOnGestureThread = { gestureQueue.addLast(it) },
+            onFinished = onFinished,
+          )
+        },
+        onResult = { requestId, success, error -> acks.add(Ack(requestId, success, error)) },
+      )
+
+    fun drain() {
+      while (gestureQueue.isNotEmpty()) gestureQueue.removeFirst()()
+    }
+
+    fun pendingEndCount(): Int {
+      var count = -1
+      router.pendingEndCount { count = it }
+      drain()
+      return count
+    }
+
+    fun terminalFailureCount(): Int {
+      var count = -1
+      router.terminalFailureCount { count = it }
+      drain()
+      return count
+    }
   }
 
   @Test
@@ -151,19 +193,128 @@ class GestureStreamSessionTest {
   }
 
   @Test
-  fun `the registry routes by gesture id and drops on removal`() {
-    val registry = GestureStreamRegistry()
-    val h = Session()
+  fun `end queued before a failure gets the actual result exactly once`() {
+    val h = RouterHarness()
+    h.router.start("start", "g1", 1f, 2f)
+    h.drain()
+    assertEquals(listOf(Ack("start", true, null)), h.acks)
 
-    assertFalse(registry.contains("g1"))
-    registry.register("g1", h.session)
-    assertTrue(registry.contains("g1"))
-    assertEquals(h.session, registry.get("g1"))
-    assertEquals(listOf("g1"), registry.activeIds())
+    // The end was received on IO, but its routing work has not run yet. The gesture callback
+    // finishes first on the gesture thread; the queued end must consume that result.
+    h.router.end("end", "g1", 3f, 4f, cancel = false)
+    h.dispatchers.single().failLast("dispatch cancelled")
+    h.drain()
 
-    assertEquals(h.session, registry.remove("g1"))
-    assertFalse(registry.contains("g1"))
-    assertNull(registry.get("g1"))
-    assertTrue(registry.activeIds().isEmpty())
+    assertEquals(
+      listOf(Ack("end", false, "dispatch cancelled")),
+      h.acks.filter { it.requestId == "end" },
+    )
+    assertEquals(0, h.pendingEndCount())
+    assertEquals(0, h.terminalFailureCount())
+  }
+
+  @Test
+  fun `end strictly after a finished session receives its failure`() {
+    val h = RouterHarness()
+    h.router.start("start", "g1", 1f, 2f)
+    h.drain()
+    h.dispatchers.single().failLast("framework cancelled")
+    h.router.end("end", "g1", 3f, 4f, cancel = false)
+    h.router.end("late-end", "g1", 3f, 4f, cancel = false)
+    h.drain()
+
+    assertEquals(
+      listOf(
+        Ack("start", true, null),
+        Ack("end", false, "framework cancelled"),
+        Ack("late-end", true, null),
+      ),
+      h.acks,
+    )
+    assertEquals(0, h.pendingEndCount())
+    assertEquals(0, h.terminalFailureCount())
+  }
+
+  @Test
+  fun `unclaimed failures evict the oldest after sixteen entries`() {
+    val h = RouterHarness()
+    repeat(17) { index ->
+      h.router.start("start-$index", "g$index", 1f, 2f)
+      h.drain()
+      h.dispatchers.last().failLast("failure $index")
+    }
+    assertEquals(16, h.terminalFailureCount())
+
+    h.router.end("evicted", "g0", 3f, 4f, cancel = false)
+    h.router.end("recent", "g16", 3f, 4f, cancel = false)
+    h.drain()
+
+    assertEquals(Ack("evicted", true, null), h.acks.last { it.requestId == "evicted" })
+    assertEquals(Ack("recent", false, "failure 16"), h.acks.last { it.requestId == "recent" })
+    assertEquals(15, h.terminalFailureCount())
+  }
+
+  @Test
+  fun `end registered before a failure receives one correlated failure`() {
+    val h = RouterHarness()
+    h.router.start("start", "g1", 1f, 2f)
+    h.drain()
+    h.router.end("end", "g1", 3f, 4f, cancel = false)
+    h.drain()
+    assertEquals(1, h.pendingEndCount())
+
+    h.dispatchers.single().failLast("lift cancelled")
+
+    assertEquals(listOf(Ack("start", true, null), Ack("end", false, "lift cancelled")), h.acks)
+    assertEquals(0, h.pendingEndCount())
+  }
+
+  @Test
+  fun `queued start and ends give each waiter one result and leave no pending ids`() {
+    val h = RouterHarness()
+    // Simulate WebSocket calls from two producers before the gesture thread drains its queue.
+    h.router.start("start", "g1", 1f, 2f)
+    h.router.start("duplicate", "g1", 1f, 2f)
+    h.router.end("end-1", "g1", 3f, 4f, cancel = false)
+    h.router.end("end-2", "g1", 3f, 4f, cancel = false)
+    h.drain()
+    assertEquals(2, h.pendingEndCount())
+
+    h.dispatchers.single().completeLast() // initial press -> lift
+    h.dispatchers.single().completeLast() // lift -> terminal callback
+
+    assertEquals(
+      listOf(
+        Ack("start", true, null),
+        Ack("duplicate", false, "Gesture g1 is already active"),
+        Ack("end-1", true, null),
+        Ack("end-2", true, null),
+      ),
+      h.acks,
+    )
+    assertEquals(1, h.dispatchers.size)
+    assertEquals(0, h.pendingEndCount())
+
+    // Reusing the id must not replay an old end request.
+    h.router.start("next", "g1", 5f, 6f)
+    h.drain()
+    h.dispatchers.last().failLast("second gesture failed")
+    assertEquals(1, h.acks.count { it.requestId == "end-1" })
+    assertEquals(1, h.acks.count { it.requestId == "end-2" })
+  }
+
+  @Test
+  fun `teardown clears pending ends without retaining session state`() {
+    val h = RouterHarness()
+    h.router.start("start", "g1", 1f, 2f)
+    h.drain()
+    h.router.end("end", "g1", 3f, 4f, cancel = false)
+    h.drain()
+    assertEquals(1, h.pendingEndCount())
+
+    h.router.close()
+    h.drain()
+    assertEquals(0, h.pendingEndCount())
+    assertEquals(0, h.terminalFailureCount())
   }
 }

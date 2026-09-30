@@ -579,16 +579,19 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   private val gestureHandlerThread = HandlerThread("automobile-gesture-dispatch").apply { start() }
   private val gestureHandler = Handler(gestureHandlerThread.looper)
 
-  /** Active streamed gestures, keyed by their wire `gestureId`. */
-  private val gestureStreamRegistry = GestureStreamRegistry()
-
-  /**
-   * The `requestId` of the `request_gesture_end` awaiting each gesture's terminal result, so the
-   * asynchronous lift completion broadcasts back to the end request that is waiting for it (start
-   * and move are acked immediately). Concurrent because it is written on IO and read on the gesture
-   * thread.
-   */
-  private val gestureEndRequestIds = java.util.concurrent.ConcurrentHashMap<String, String>()
+  private val gestureStreamRouter =
+    GestureStreamRouter(
+      runOnGestureThread = { gestureHandler.post(it) },
+      newSession = { onFinished ->
+        GestureStreamSession(
+          coordinator = GestureStreamCoordinator(),
+          dispatcher = AccessibilityStrokeDispatcher(),
+          runOnGestureThread = { gestureHandler.post(it) },
+          onFinished = onFinished,
+        )
+      },
+      onResult = ::broadcastGestureResult,
+    )
 
   private class ImeCommitState {
     val cancelled = AtomicBoolean(false)
@@ -1669,6 +1672,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       Log.d(TAG, "WebSocket server stopped")
     }
 
+    gestureStreamRouter.close { gestureHandlerThread.quitSafely() }
     Log.d(TAG, "AutoMobile Accessibility Service destroyed")
     serviceScope.cancel()
   }
@@ -1796,38 +1800,11 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       broadcastGestureResult(requestId, false, "Streaming gestures require Android 8.0 (API 26)")
       return
     }
-    if (gestureStreamRegistry.contains(gestureId)) {
-      broadcastGestureResult(requestId, false, "Gesture $gestureId is already active")
-      return
-    }
-    val session =
-      GestureStreamSession(
-        coordinator = GestureStreamCoordinator(),
-        dispatcher = AccessibilityStrokeDispatcher(),
-        runOnGestureThread = { gestureHandler.post(it) },
-        onFinished = { success, error ->
-          gestureStreamRegistry.remove(gestureId)
-          // The end request (if any) is the one awaiting the terminal lift result.
-          val endRequestId = gestureEndRequestIds.remove(gestureId)
-          broadcastGestureResult(endRequestId, success, error)
-        },
-      )
-    gestureStreamRegistry.register(gestureId, session)
-    session.start(x.toFloat(), y.toFloat())
-    // Ack the down immediately; the terminal result is delivered on the matching end.
-    broadcastGestureResult(requestId, true, null)
+    gestureStreamRouter.start(requestId, gestureId, x.toFloat(), y.toFloat())
   }
 
   override fun requestGestureMove(requestId: String?, gestureId: String, x: Double, y: Double) {
-    val session = gestureStreamRegistry.get(gestureId)
-    if (session == null) {
-      // A move after the gesture already ended (a late/raced frame) is a benign no-op, not a client
-      // error; acking success keeps the stream from surfacing a spurious failure.
-      broadcastGestureResult(requestId, true, null)
-      return
-    }
-    session.move(x.toFloat(), y.toFloat())
-    broadcastGestureResult(requestId, true, null)
+    gestureStreamRouter.move(requestId, gestureId, x.toFloat(), y.toFloat())
   }
 
   override fun requestGestureEnd(
@@ -1837,16 +1814,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     y: Double,
     cancel: Boolean,
   ) {
-    val session = gestureStreamRegistry.get(gestureId)
-    if (session == null) {
-      // The gesture already finished (e.g. it hit the runner's duration ceiling first). Idempotent.
-      broadcastGestureResult(requestId, true, null)
-      return
-    }
-    // Record which request awaits the terminal lift before asking the session to end, so the
-    // finish callback broadcasts to it.
-    if (requestId != null) gestureEndRequestIds[gestureId] = requestId
-    session.end(x.toFloat(), y.toFloat(), cancel)
+    gestureStreamRouter.end(requestId, gestureId, x.toFloat(), y.toFloat(), cancel)
   }
 
   /** Ack one streamed-gesture request, reusing the shared `swipe_result` frame. */

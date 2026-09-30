@@ -124,6 +124,17 @@ export class SdkManagerClient {
     );
   }
 
+  async listInstalled(options: SdkManagerExecutionOptions = {}): Promise<SdkManagerCommandResult> {
+    return this.run(
+      ["--list_installed"],
+      {
+        timeoutMs: LOCAL_COMMAND_TIMEOUT_MS,
+        maxStdoutChars: UNBOUNDED_STDOUT_CHARS,
+      },
+      options,
+    );
+  }
+
   /** Return the installed sdkmanager command-line tools version. */
   async getVersion(options: SdkManagerExecutionOptions = {}): Promise<SdkManagerCommandResult> {
     return this.run(

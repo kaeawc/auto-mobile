@@ -15,7 +15,7 @@ import {
   type DeviceDiscoveryError,
   type PlatformDeviceManager,
   waitForDeviceReadyOrCancel,
-} from "../utils/deviceUtils";
+} from "./deviceUtils";
 import {
   describeDisplayRequirements,
   matchesDeviceCriteria,

@@ -2,7 +2,7 @@ import { logger } from "../utils/logger";
 import { resetAdbDeviceListCache } from "../utils/android-cmdline-tools/AdbClient";
 import { resetBootedDevicesResourceCache } from "../server/bootedDeviceResources";
 import { resetAndroidDeviceImageResourceCache } from "../server/deviceImageResources";
-import type { PlatformDeviceManager } from "../utils/deviceUtils";
+import type { PlatformDeviceManager } from "../devices/deviceUtils";
 import type { BootedDevice, DeviceInfo } from "../models";
 import type { DeviceRecoveryPolicy } from "./poolConfig";
 import type { PooledDevice } from "./devicePool";

@@ -6,8 +6,8 @@ import {
   resolveIosProvisioningSelection,
 } from "./deviceProvisioning";
 import type { DeviceProvisioner } from "./deviceProvisioning";
-import { MultiPlatformDeviceManager } from "../utils/deviceUtils";
-import type { PlatformDeviceManager } from "../utils/deviceUtils";
+import { MultiPlatformDeviceManager } from "./deviceUtils";
+import type { PlatformDeviceManager } from "./deviceUtils";
 import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
 import { iosVersionStringFromRuntimeId } from "../utils/ios-cmdline-tools/iosVersion";
 import { logger } from "../utils/logger";

@@ -84,7 +84,7 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
       reason:
         "Autolock checks whether a requested device is booted, then adds it through the pool port before reading pooled identity.",
     },
-    "src/utils/deviceUtils.ts": {
+    "src/devices/deviceUtils.ts": {
       calls: 9,
       reason:
         "PlatformDeviceManager — declares and implements the discovery API. The ninth call is " +

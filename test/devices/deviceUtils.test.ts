@@ -1,5 +1,5 @@
 import { describe, expect, spyOn, test } from "bun:test";
-import { MultiPlatformDeviceManager } from "../../src/utils/deviceUtils";
+import { MultiPlatformDeviceManager } from "../../src/devices/deviceUtils";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
 import { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { FakeAdbClient } from "../fakes/FakeAdbClient";

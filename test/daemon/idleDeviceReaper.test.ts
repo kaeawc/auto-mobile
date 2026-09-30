@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { IdleDeviceReaper, type IdleDeviceReaperPoolPort } from "../../src/daemon/idleDeviceReaper";
 import type { PooledDevice } from "../../src/daemon/devicePool";
-import type { BootedDeviceDiscovery } from "../../src/utils/deviceUtils";
+import type { BootedDeviceDiscovery } from "../../src/devices/deviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 const simulatorId = "11111111-2222-3333-4444-555555555555";

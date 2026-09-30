@@ -1,14 +1,14 @@
 import { logger } from "../utils/logger";
 import { Mutex } from "async-mutex";
 import type { BootedDevice, Platform } from "../models";
-import type { BootedDeviceDiscovery, PlatformDeviceManager } from "../utils/deviceUtils";
+import type { BootedDeviceDiscovery, PlatformDeviceManager } from "../devices/deviceUtils";
 import { resetAdbDeviceListCache } from "../utils/android-cmdline-tools/AdbClient";
 import { resetBootedDevicesResourceCache } from "../server/bootedDeviceResources";
 import { resetAndroidDeviceImageResourceCache } from "../server/deviceImageResources";
 import { consolePortFromSerial } from "../utils/android-cmdline-tools/EmulatorConsoleClient";
 import { didSourceSucceedForDevice, type DiscoverySource } from "../utils/discoverySource";
 import type { PooledDevice, SessionRecoveryPreparation } from "./devicePool";
-import type { IdentityComparison } from "./deviceIdentityEvidence";
+import type { IdentityComparison } from "../devices/deviceIdentityEvidence";
 
 const REFRESH_MISSING_DEVICE_MISS_THRESHOLD = 2;
 type IdentityObservation = Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">;

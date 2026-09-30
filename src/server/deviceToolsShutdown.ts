@@ -1,7 +1,7 @@
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import { isAndroidEmulatorSerial } from "../utils/androidSerial";
 import { ActionableError, type BootedDevice, type SomePlatform } from "../models";
-import type { BootedDeviceDiscovery, PlatformDeviceManager } from "../utils/deviceUtils";
+import type { BootedDeviceDiscovery, PlatformDeviceManager } from "../devices/deviceUtils";
 import type { Timer } from "../utils/SystemTimer";
 import { fixedBackoff } from "../utils/Backoff";
 import { getAbortSignal } from "../utils/AbortContext";

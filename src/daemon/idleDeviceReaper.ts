@@ -1,7 +1,7 @@
 import { logger } from "../utils/logger";
 import { didSourceSucceedForDevice } from "../utils/discoverySource";
 import { isIosPhysicalUdid } from "../utils/ios-cmdline-tools/iosDeviceType";
-import type { PlatformDeviceManager } from "../utils/deviceUtils";
+import type { PlatformDeviceManager } from "../devices/deviceUtils";
 import type { PooledDevice } from "./devicePool";
 
 /**

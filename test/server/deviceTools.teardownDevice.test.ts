@@ -51,7 +51,7 @@ import type {
   BootedDeviceDiscoveryOptions,
   DeviceDestroyOptions,
   DeviceShutdownOptions,
-} from "../../src/utils/deviceUtils";
+} from "../../src/devices/deviceUtils";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeAvdManager } from "../fakes/FakeAvdManager";
 import { FakeDeviceTeardownOperationStore } from "../fakes/FakeDeviceTeardownOperationStore";

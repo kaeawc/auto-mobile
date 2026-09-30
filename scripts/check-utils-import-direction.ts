@@ -4,7 +4,7 @@ import ts from "typescript";
 
 const SOURCE_ROOT = "src/utils";
 const BASELINE = "scripts/utils-import-direction-baseline.txt";
-const ALLOWED_TIERS = new Set(["utils", "ctrlProxy", "models", "constants"]);
+const ALLOWED_TIERS = new Set(["utils", "devices", "ctrlProxy", "models", "constants"]);
 
 interface Violation {
   readonly file: string;

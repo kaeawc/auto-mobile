@@ -4,7 +4,7 @@ import { getAbortSignal, throwIfRequestAborted } from "../utils/AbortContext";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { defaultTimer } from "../utils/SystemTimer";
 import { type IdGenerator } from "../utils/IdGenerator";
-import type { PlatformDeviceManager } from "../utils/deviceUtils";
+import type { PlatformDeviceManager } from "../devices/deviceUtils";
 import type { DeviceReadinessLevel } from "../utils/DeviceSessionManager";
 import { getDevicePoolTimeoutMs, isDevicePoolAutolockEnabled } from "./poolConfig";
 import type { DeviceSessionRepository } from "../db/deviceSessionRepository";
@@ -14,7 +14,7 @@ import type {
   PooledDevice,
   SessionAssignmentSnapshot,
 } from "./devicePool";
-import type { IdentityEvidence } from "./deviceIdentityEvidence";
+import type { IdentityEvidence } from "../devices/deviceIdentityEvidence";
 
 export type AutolockClient = { mcpSessionId?: string; expectedSessionId?: string };
 

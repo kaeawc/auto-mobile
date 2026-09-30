@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { listBootedDevicesForResource } from "../../src/server/resourceDeviceResolver";
 import type { BootedDevice } from "../../src/models";
-import type { PlatformDeviceManager } from "../../src/utils/deviceUtils";
+import type { PlatformDeviceManager } from "../../src/devices/deviceUtils";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { DaemonState } from "../../src/daemon/daemonState";
 import {

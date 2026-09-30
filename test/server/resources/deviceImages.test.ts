@@ -16,7 +16,7 @@ import type {
   AppleDeviceType,
 } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
 import type { AvdManager } from "../../../src/utils/android-cmdline-tools/interfaces/AvdManager";
-import type { DeviceImageDiscovery, PlatformDeviceManager } from "../../../src/utils/deviceUtils";
+import type { DeviceImageDiscovery, PlatformDeviceManager } from "../../../src/devices/deviceUtils";
 import { AndroidAvdProvenanceCache } from "../../../src/utils/AndroidAvdProvenanceCache";
 import { ResourceRegistry } from "../../../src/server/resourceRegistry";
 import { spyOn } from "bun:test";

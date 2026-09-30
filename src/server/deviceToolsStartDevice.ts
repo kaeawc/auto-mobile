@@ -1,7 +1,7 @@
 import type { HostChildProcess as ChildProcess } from "../utils/HostCommandExecutor";
 import { ActionableError, BootedDevice, DeviceInfo } from "../models";
 import type { DeviceMatcher } from "../utils/deviceMatcher";
-import { PlatformDeviceManager } from "../utils/deviceUtils";
+import { PlatformDeviceManager } from "../devices/deviceUtils";
 import { DEVICE_POOL_MATCHING, isDevicePoolAutolockEnabled } from "../daemon/poolConfig";
 import { DaemonState } from "../daemon/daemonState";
 import type { DeviceReadinessLevel } from "../utils/DeviceSessionManager";

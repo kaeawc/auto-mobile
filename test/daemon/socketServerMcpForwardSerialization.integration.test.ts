@@ -27,7 +27,7 @@ import {
   AdbClient,
   resetAdbDeviceListCache,
 } from "../../src/utils/android-cmdline-tools/AdbClient";
-import { MultiPlatformDeviceManager } from "../../src/utils/deviceUtils";
+import { MultiPlatformDeviceManager } from "../../src/devices/deviceUtils";
 import type { AndroidEmulatorClient } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import type { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
 import type { ExecResult } from "../../src/models";

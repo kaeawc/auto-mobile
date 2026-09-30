@@ -1,7 +1,7 @@
 import { logger } from "../utils/logger";
 import { Mutex } from "async-mutex";
 import type { BootedDevice, Platform } from "../models";
-import type { BootedDeviceDiscovery, PlatformDeviceManager } from "../utils/deviceUtils";
+import type { BootedDeviceDiscovery, PlatformDeviceManager } from "../devices/deviceUtils";
 import type { Timer } from "../utils/SystemTimer";
 import { createGlobalPerformanceTracker } from "../utils/PerformanceTracker";
 import {
@@ -11,7 +11,7 @@ import {
 } from "../utils/discoverySource";
 import type { DeviceCriteriaMatcher } from "./DeviceCriteriaMatcher";
 import type { PooledDevice } from "./devicePool";
-import type { IdentityEvidence } from "./deviceIdentityEvidence";
+import type { IdentityEvidence } from "../devices/deviceIdentityEvidence";
 
 export interface DevicePoolRefreshResult {
   addedCount: number;

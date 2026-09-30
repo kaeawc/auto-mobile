@@ -49,6 +49,7 @@ teardown() {
     'const lazy = await import("../features/dynamicNew");' \
     'const { z } = require("../db/requireNew") as typeof import("../db/requireNew");' \
     'import type { Safe } from "../ctrlProxy/futureModule";' \
+    'import type { Device } from "../devices/futureModule";' \
     > "$FIXTURE"
 
   run bash "$SCRIPT"
@@ -59,6 +60,7 @@ teardown() {
   [[ "$output" == *"src/features/dynamicNew"* ]]
   [[ "$output" == *"src/db/requireNew"* ]]
   [[ "$output" != *"src/ctrlProxy/futureModule"* ]]
+  [[ "$output" != *"src/devices/futureModule"* ]]
 }
 
 @test "update removes stale edges from the baseline" {

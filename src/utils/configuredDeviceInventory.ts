@@ -1,5 +1,5 @@
 import type { BootedDevice, DeviceInfo, Platform } from "../models";
-import type { DeviceImageDiscovery } from "./deviceUtils";
+import type { DeviceImageDiscovery } from "../devices/deviceUtils";
 import { isAndroidEmulatorSerial } from "./androidSerial";
 import {
   describeDevice,

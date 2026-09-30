@@ -1,7 +1,7 @@
 import { errorMessage } from "../utils/describeUnknownError";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { ResourceRegistry, ResourceContent } from "./resourceRegistry";
-import { type DeviceDiscoveryError, PlatformDeviceManager } from "../utils/deviceUtils";
+import { type DeviceDiscoveryError, PlatformDeviceManager } from "../devices/deviceUtils";
 import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
 import {
   configuredImageForBootedDevice,

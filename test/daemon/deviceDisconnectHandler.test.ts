@@ -5,7 +5,7 @@ import {
   type DeviceDisconnectPoolPort,
 } from "../../src/daemon/deviceDisconnectHandler";
 import type { PooledDevice } from "../../src/daemon/devicePool";
-import type { BootedDeviceDiscovery } from "../../src/utils/deviceUtils";
+import type { BootedDeviceDiscovery } from "../../src/devices/deviceUtils";
 import type { DeviceInfo } from "../../src/models";
 import { FakeTimer } from "../fakes/FakeTimer";
 

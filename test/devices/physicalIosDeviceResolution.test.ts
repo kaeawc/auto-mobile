@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { MultiPlatformDeviceManager } from "../../src/utils/deviceUtils";
+import { MultiPlatformDeviceManager } from "../../src/devices/deviceUtils";
 import { ListInstalledApps } from "../../src/features/observe/ListInstalledApps";
 import type { BootedDevice } from "../../src/models";
 import type { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";

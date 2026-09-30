@@ -97,26 +97,26 @@ describe("requireBootedDevice integration with factories", () => {
   });
 
   test("AndroidCtrlProxyManager.getInstance throws on bare deviceId string", async () => {
-    const { AndroidCtrlProxyManager } = await import("../../src/utils/CtrlProxyManager");
+    const { AndroidCtrlProxyManager } = await import("../../src/ctrlProxy/CtrlProxyManager");
     expect(() => AndroidCtrlProxyManager.getInstance("emulator-5554" as never)).toThrow(
       /AndroidCtrlProxyManager\.getInstance: expected BootedDevice/,
     );
   });
 
   test("AndroidCtrlProxyManager.getInstance throws on empty object", async () => {
-    const { AndroidCtrlProxyManager } = await import("../../src/utils/CtrlProxyManager");
+    const { AndroidCtrlProxyManager } = await import("../../src/ctrlProxy/CtrlProxyManager");
     expect(() => AndroidCtrlProxyManager.getInstance({} as never)).toThrow(/expected BootedDevice/);
   });
 
   test("IOSCtrlProxyManager.getInstance throws on bare deviceId string", async () => {
-    const { IOSCtrlProxyManager } = await import("../../src/utils/IOSCtrlProxyManager");
+    const { IOSCtrlProxyManager } = await import("../../src/ctrlProxy/IOSCtrlProxyManager");
     expect(() => IOSCtrlProxyManager.getInstance("ABCDEF" as never)).toThrow(
       /IOSCtrlProxyManager\.getInstance: expected BootedDevice/,
     );
   });
 
   test("IOSCtrlProxyManager.getInstance throws on empty object", async () => {
-    const { IOSCtrlProxyManager } = await import("../../src/utils/IOSCtrlProxyManager");
+    const { IOSCtrlProxyManager } = await import("../../src/ctrlProxy/IOSCtrlProxyManager");
     expect(() => IOSCtrlProxyManager.getInstance({} as never)).toThrow(/expected BootedDevice/);
   });
 });

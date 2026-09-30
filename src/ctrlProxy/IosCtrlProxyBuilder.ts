@@ -1,9 +1,9 @@
-import { errorMessage } from "./describeUnknownError";
+import { errorMessage } from "../utils/describeUnknownError";
 import * as fs from "fs/promises";
 import * as path from "path";
-import { logger } from "./logger";
-import { defaultTimer, type Timer } from "./SystemTimer";
-import { NoOpPerformanceTracker, type PerformanceTracker } from "./PerformanceTracker";
+import { logger } from "../utils/logger";
+import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { NoOpPerformanceTracker, type PerformanceTracker } from "../utils/PerformanceTracker";
 import {
   IOS_CTRL_PROXY_APP_HASH,
   LATEST_RELEASE_VERSION,
@@ -22,28 +22,28 @@ import {
 import {
   DefaultIOSCtrlProxyBundleDownloader,
   type CtrlProxyIosBundleDownloader,
-} from "./IOSCtrlProxyBundleDownloader";
-import { hashAppBundle } from "./ios-cmdline-tools/AppBundleHasher";
-import { resolvePathFromDaemonLaunchWorkingDirectory } from "./workingDirectory";
-import { getSharedAutoMobileDir, getTempDir } from "./tempDir";
-import { ensureSecureDir } from "./filesystem/securePermissions";
+} from "../utils/IOSCtrlProxyBundleDownloader";
+import { hashAppBundle } from "../utils/ios-cmdline-tools/AppBundleHasher";
+import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
+import { getSharedAutoMobileDir, getTempDir } from "../utils/tempDir";
+import { ensureSecureDir } from "../utils/filesystem/securePermissions";
 import {
   buildPlist,
   injectUITestEnvironment,
   parsePlist,
   type PlistValue,
-} from "./ios-cmdline-tools/XctestrunPlist";
+} from "../utils/ios-cmdline-tools/XctestrunPlist";
 import { ActionableError, toActionableError } from "../models/ActionableError";
-import { SKIP_CTRL_PROXY_DOWNLOAD_ENV, isTruthyEnvValue } from "./ctrlProxyDownloadControl";
+import { SKIP_CTRL_PROXY_DOWNLOAD_ENV, isTruthyEnvValue } from "../utils/ctrlProxyDownloadControl";
 import {
   type IosPrerequisiteDetector,
   DefaultIosPrerequisiteDetector,
-} from "./ios-cmdline-tools/IosPrerequisiteDetector";
+} from "../utils/ios-cmdline-tools/IosPrerequisiteDetector";
 import {
   type CodesignVerificationOutcome,
   type CtrlProxyCodesignVerifier,
   DefaultCtrlProxyCodesignVerifier,
-} from "./ios-cmdline-tools/CtrlProxyCodesignVerifier";
+} from "../utils/ios-cmdline-tools/CtrlProxyCodesignVerifier";
 
 /**
  * When truthy (`1`/`true`), a failed `codesign --verify`, a failed
@@ -411,7 +411,7 @@ export class IosCtrlProxyBuilder {
     } catch (error) {
       // Build products directory doesn't exist yet (no build has run); null tells the
       // caller to trigger a build rather than treating this as a hard failure.
-      logger.debug(`src/utils/IosCtrlProxyBuilder.ts fallback failed: ${error}`, error);
+      logger.debug(`src/ctrlProxy/IosCtrlProxyBuilder.ts fallback failed: ${error}`, error);
       return null;
     }
   }
@@ -474,7 +474,7 @@ export class IosCtrlProxyBuilder {
     } catch (error) {
       // Products directory listing/stat failed (e.g. not built yet); reporting no
       // xctestrun path lets the caller fall back to triggering a build.
-      logger.debug(`src/utils/IosCtrlProxyBuilder.ts fallback failed: ${error}`, error);
+      logger.debug(`src/ctrlProxy/IosCtrlProxyBuilder.ts fallback failed: ${error}`, error);
       return null;
     }
   }
@@ -848,7 +848,7 @@ export class IosCtrlProxyBuilder {
     } catch (error) {
       // Background prefetch already failed and recorded its error via getPrefetchError();
       // returning null here just means "no prefetched result", callers build on demand.
-      logger.debug(`src/utils/IosCtrlProxyBuilder.ts fallback failed: ${error}`, error);
+      logger.debug(`src/ctrlProxy/IosCtrlProxyBuilder.ts fallback failed: ${error}`, error);
       return null;
     }
   }
@@ -927,7 +927,7 @@ export class IosCtrlProxyBuilder {
     } catch (error) {
       // Hashing the app bundle failed (e.g. bundle missing/unreadable); hash is only
       // used for compat checks, so null just skips that optimization.
-      logger.debug(`src/utils/IosCtrlProxyBuilder.ts fallback failed: ${error}`, error);
+      logger.debug(`src/ctrlProxy/IosCtrlProxyBuilder.ts fallback failed: ${error}`, error);
       return null;
     }
   }
@@ -952,7 +952,7 @@ export class IosCtrlProxyBuilder {
     } catch (error) {
       // Runner binary not present in the build products dir; null tells the caller
       // the UI test runner hasn't been built yet rather than throwing.
-      logger.debug(`src/utils/IosCtrlProxyBuilder.ts fallback failed: ${error}`, error);
+      logger.debug(`src/ctrlProxy/IosCtrlProxyBuilder.ts fallback failed: ${error}`, error);
       return null;
     }
   }
@@ -1110,7 +1110,7 @@ export class IosCtrlProxyBuilder {
     } catch (error) {
       // fs.stat failed because the cached bundle file doesn't exist (or isn't
       // readable); treat it as invalid so the caller re-downloads it.
-      logger.debug(`src/utils/IosCtrlProxyBuilder.ts fallback failed: ${error}`, error);
+      logger.debug(`src/ctrlProxy/IosCtrlProxyBuilder.ts fallback failed: ${error}`, error);
       return false;
     }
 
@@ -1225,7 +1225,7 @@ export class IosCtrlProxyBuilder {
     } catch (error) {
       // Metadata file is missing or its JSON is malformed/stale; null just means
       // "no cached metadata", so the caller recomputes it from the bundle.
-      logger.debug(`src/utils/IosCtrlProxyBuilder.ts fallback failed: ${error}`, error);
+      logger.debug(`src/ctrlProxy/IosCtrlProxyBuilder.ts fallback failed: ${error}`, error);
       return null;
     }
   }
@@ -1589,7 +1589,7 @@ export class IosCtrlProxyBuilder {
     } catch (error) {
       // Runner app not present yet (not built/extracted); null lets the caller
       // skip codesign rather than treating a missing bundle as a hard failure.
-      logger.debug(`src/utils/IosCtrlProxyBuilder.ts fallback failed: ${error}`, error);
+      logger.debug(`src/ctrlProxy/IosCtrlProxyBuilder.ts fallback failed: ${error}`, error);
       return null;
     }
   }

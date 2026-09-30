@@ -77,8 +77,8 @@ import {
   syncInstalledAppResources,
 } from "./appResources";
 import { stopSegmentedVideoRecordingsForDevice } from "./videoRecordingTools";
-import { IOSCtrlProxyManager } from "../utils/IOSCtrlProxyManager";
-import { AndroidCtrlProxyManager } from "../utils/CtrlProxyManager";
+import { IOSCtrlProxyManager } from "../ctrlProxy/IOSCtrlProxyManager";
+import { AndroidCtrlProxyManager } from "../ctrlProxy/CtrlProxyManager";
 import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
 import { logger } from "../utils/logger";
 import { createPerformanceTracker } from "../utils/PerformanceTracker";

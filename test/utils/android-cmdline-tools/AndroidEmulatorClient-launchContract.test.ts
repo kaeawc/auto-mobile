@@ -11,7 +11,7 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
-import type { HostPortAvailabilityChecker } from "../../../src/utils/ios/IOSHostPortAvailabilityChecker";
+import type { HostPortAvailabilityChecker } from "../../../src/ctrlProxy/ios/IOSHostPortAvailabilityChecker";
 
 const execResult = (stdout = ""): ExecResult => ({
   stdout,

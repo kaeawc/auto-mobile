@@ -20,7 +20,7 @@ import {
 import { getMcpServerVersion } from "../../src/utils/mcpVersion";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
-import { AndroidCtrlProxyManager } from "../../src/utils/CtrlProxyManager";
+import { AndroidCtrlProxyManager } from "../../src/ctrlProxy/CtrlProxyManager";
 import * as fs from "fs/promises";
 import * as path from "path";
 import AdmZip from "adm-zip";

@@ -4,7 +4,7 @@ import ts from "typescript";
 import { executionBoundaryAst } from "./lib/executionBoundaryAst";
 
 const SOURCE_ROOT = "src";
-const OWNER = "src/utils/ios/IosCtrlProxyProcessClient.ts";
+const OWNER = "src/ctrlProxy/ios/IosCtrlProxyProcessClient.ts";
 const PROCESS_TOOLS = new Set(["ps", "pgrep", "kill", "lsof"]);
 const SHELLS = new Set(["sh", "/bin/sh", "bash", "/bin/bash", "zsh", "/bin/zsh"]);
 const EXCEPTIONS = new Map<string, string>([

@@ -1,6 +1,6 @@
 import { expect, spyOn, test } from "bun:test";
 import type { BootedDevice } from "../../src/models";
-import { IOSCtrlProxyManager } from "../../src/utils/IOSCtrlProxyManager";
+import { IOSCtrlProxyManager } from "../../src/ctrlProxy/IOSCtrlProxyManager";
 import { FakeProcessExecutor } from "../fakes/FakeProcessExecutor";
 import { FakeTimer } from "../fakes/FakeTimer";
 

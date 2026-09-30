@@ -3,8 +3,8 @@ import { AdbExecutor } from "../../src/utils/android-cmdline-tools/interfaces/Ad
 import { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { AndroidEmulatorClient } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import { PlatformDeviceManager } from "../../src/utils/interfaces/DeviceUtils";
-import { CtrlProxyManager } from "../../src/utils/CtrlProxyManager";
-import { CtrlProxyIosManager } from "../../src/utils/IOSCtrlProxyManager";
+import { CtrlProxyManager } from "../../src/ctrlProxy/CtrlProxyManager";
+import { CtrlProxyIosManager } from "../../src/ctrlProxy/IOSCtrlProxyManager";
 import type { AndroidCtrlProxy } from "../../src/features/observe/android/AndroidCtrlProxyClient";
 import type { IOSCtrlProxy } from "../../src/features/observe/ios/IOSCtrlProxyClient";
 import type { Window } from "../../src/features/observe/interfaces/Window";

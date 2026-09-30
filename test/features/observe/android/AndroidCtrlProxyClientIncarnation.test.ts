@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android/AndroidCtrlProxyClient";
-import { AndroidCtrlProxyManager } from "../../../../src/utils/CtrlProxyManager";
+import { AndroidCtrlProxyManager } from "../../../../src/ctrlProxy/CtrlProxyManager";
 import type { BootedDevice } from "../../../../src/models";
 import { FakeAdbClientFactory } from "../../../fakes/FakeAdbClientFactory";
 

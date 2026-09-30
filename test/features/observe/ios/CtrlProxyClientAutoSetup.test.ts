@@ -14,7 +14,7 @@ import type {
   ServiceManagerFactory,
   BootedDeviceLister,
 } from "../../../../src/features/observe/ios/IOSCtrlProxyClient";
-import { IOSCtrlProxyManager } from "../../../../src/utils/IOSCtrlProxyManager";
+import { IOSCtrlProxyManager } from "../../../../src/ctrlProxy/IOSCtrlProxyManager";
 
 function deferred(): { promise: Promise<void>; resolve: () => void } {
   let resolve!: () => void;

@@ -42,7 +42,7 @@ import { DaemonState } from "../../../src/daemon/daemonState";
 import { DevicePool } from "../../../src/daemon/devicePool";
 import { DeviceSessionRegistry } from "../../../src/daemon/deviceSessionRegistry";
 import { SessionManager } from "../../../src/daemon/sessionManager";
-import { IOSCtrlProxyManager } from "../../../src/utils/IOSCtrlProxyManager";
+import { IOSCtrlProxyManager } from "../../../src/ctrlProxy/IOSCtrlProxyManager";
 import { describeDevice, listDevicesEntrySchema } from "../../../src/server/deviceDescription";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { getAndroidAppMetadataViaAdb } from "../../../src/features/observe/GetAppMetadata";

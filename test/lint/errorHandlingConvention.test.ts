@@ -400,7 +400,7 @@ export function parse(): string | null {
       "src/utils/SystemTimer.ts",
       "src/doctor/checks/android.ts",
       "src/doctor/checks/automobile.ts",
-      "src/utils/CtrlProxyManager.ts",
+      "src/ctrlProxy/CtrlProxyManager.ts",
     ];
 
     for (const filePath of sourcePaths) {

@@ -9,7 +9,7 @@ import {
   DeviceUrlLauncher,
 } from "../../utils/ios-cmdline-tools/DeviceAppManager";
 import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
-import { IOSCtrlProxyManager } from "../../utils/IOSCtrlProxyManager";
+import { IOSCtrlProxyManager } from "../../ctrlProxy/IOSCtrlProxyManager";
 import { logger } from "../../utils/logger";
 import { shellQuote } from "../../utils/shellQuote";
 import { LaunchApp } from "./LaunchApp";

@@ -1,4 +1,4 @@
-import { CtrlProxyManager } from "../../src/utils/CtrlProxyManager";
+import { CtrlProxyManager } from "../../src/ctrlProxy/CtrlProxyManager";
 
 /**
  * Fake implementation of CtrlProxyManager for testing

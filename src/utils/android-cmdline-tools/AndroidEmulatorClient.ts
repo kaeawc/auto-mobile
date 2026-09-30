@@ -24,7 +24,7 @@ import { createGlobalPerformanceTracker } from "../PerformanceTracker";
 import {
   TcpHostPortAvailabilityChecker,
   type HostPortAvailabilityChecker,
-} from "../ios/IOSHostPortAvailabilityChecker";
+} from "../../ctrlProxy/ios/IOSHostPortAvailabilityChecker";
 import type { AvdConfig, AvdConfigReader } from "./AvdConfigReader";
 import { FileAvdConfigReader, MIN_AVD_RAM_MB } from "./AvdConfigReader";
 import { parseAndroidSystemImageRuntime } from "./AndroidSystemImageRuntime";

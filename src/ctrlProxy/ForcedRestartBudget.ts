@@ -1,5 +1,5 @@
-import { exponentialBackoff, type BackoffPolicy } from "../Backoff";
-import { defaultTimer, type Timer } from "../SystemTimer";
+import { exponentialBackoff, type BackoffPolicy } from "../utils/Backoff";
+import { defaultTimer, type Timer } from "../utils/SystemTimer";
 
 export interface ForcedRestartSnapshot {
   readonly state: "idle" | "backoff" | "exhausted" | "suspended";

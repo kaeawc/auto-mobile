@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "fs/promises";
 import os from "os";
 import * as path from "path";
-import { AndroidCtrlProxyManager } from "../../src/utils/CtrlProxyManager";
+import { AndroidCtrlProxyManager } from "../../src/ctrlProxy/CtrlProxyManager";
 import type { AndroidPrerequisiteDetector } from "../../src/utils/android-cmdline-tools/AndroidPrerequisiteDetector";
 import { FakeFileDownloader } from "../fakes/FakeFileDownloader";
 

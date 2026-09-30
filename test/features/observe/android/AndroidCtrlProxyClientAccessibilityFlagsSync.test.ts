@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
-import { AndroidCtrlProxyManager } from "../../../../src/utils/CtrlProxyManager";
+import { AndroidCtrlProxyManager } from "../../../../src/ctrlProxy/CtrlProxyManager";
 import { serverConfig } from "../../../../src/utils/ServerConfig";
 import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
 import { FakeAdbClientFactory } from "../../../fakes/FakeAdbClientFactory";

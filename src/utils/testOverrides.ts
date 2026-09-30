@@ -1,7 +1,7 @@
 import type { BootedDevice } from "../models";
 import type { PerformanceTracker } from "./PerformanceTracker";
 import type { ProxySetupResult } from "./interfaces/ProxyManager";
-import type { HostPortAvailabilityChecker } from "./ios/IOSHostPortAvailabilityChecker";
+import type { HostPortAvailabilityChecker } from "../ctrlProxy/ios/IOSHostPortAvailabilityChecker";
 
 /** The narrow readiness seam used by ToolExecutionContext. */
 export interface DeviceReadinessProxyDriver {

@@ -21,7 +21,7 @@ import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { FakeDeviceAppLauncher } from "../../fakes/FakeDeviceAppLauncher";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
-import { IOSCtrlProxyManager } from "../../../src/utils/IOSCtrlProxyManager";
+import { IOSCtrlProxyManager } from "../../../src/ctrlProxy/IOSCtrlProxyManager";
 import { DeviceLostError } from "../../../src/server/deviceLossOutcome";
 import { PortManager } from "../../../src/utils/PortManager";
 

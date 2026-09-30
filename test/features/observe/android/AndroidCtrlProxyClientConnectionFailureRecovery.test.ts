@@ -12,7 +12,7 @@ import {
   FakeWebSocket,
 } from "../../../fakes/FakeWebSocket";
 import { FakeTimer } from "../../../fakes/FakeTimer";
-import { ForcedRestartBudget } from "../../../../src/utils/ctrlProxy/ForcedRestartBudget";
+import { ForcedRestartBudget } from "../../../../src/ctrlProxy/ForcedRestartBudget";
 
 /**
  * Regression coverage (issue #7532): AndroidCtrlProxyClient never escalated

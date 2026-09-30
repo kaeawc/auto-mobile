@@ -1,5 +1,5 @@
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
-import { AndroidCtrlProxyManager } from "../../utils/CtrlProxyManager";
+import { AndroidCtrlProxyManager } from "../../ctrlProxy/CtrlProxyManager";
 import { logger } from "../../utils/logger";
 import { withAndroidImeLock } from "./androidImeLock";
 

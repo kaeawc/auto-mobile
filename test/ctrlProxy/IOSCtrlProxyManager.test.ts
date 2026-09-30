@@ -5,15 +5,15 @@ import {
   STARTUP_ORPHAN_RUNNER_REAP_DEADLINE_MS,
   MAX_STARTUP_ORPHAN_RUNNER_CANDIDATES,
   type CtrlProxyStartOptions,
-} from "../../src/utils/IOSCtrlProxyManager";
+} from "../../src/ctrlProxy/IOSCtrlProxyManager";
 import { BootedDevice } from "../../src/models";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeProcessExecutor } from "../fakes/FakeProcessExecutor";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { createExecResult } from "../../src/utils/execResult";
 import { PortManager } from "../../src/utils/PortManager";
-import { IosCtrlProxyBuilder } from "../../src/utils/IosCtrlProxyBuilder";
-import { IosCtrlProxyProcessClient } from "../../src/utils/ios/IosCtrlProxyProcessClient";
+import { IosCtrlProxyBuilder } from "../../src/ctrlProxy/IosCtrlProxyBuilder";
+import { IosCtrlProxyProcessClient } from "../../src/ctrlProxy/ios/IosCtrlProxyProcessClient";
 import { logger } from "../../src/utils/logger";
 import { NoOpPerformanceTracker } from "../../src/utils/PerformanceTracker";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
@@ -180,7 +180,7 @@ function createFakeBuilder(xctestrunPath = "/tmp/CtrlProxy.xctestrun") {
     needsRebuild: async () => false,
     build: async () => ({ success: true, message: "built" }),
     getExpectedAppHash: () => null,
-  } as unknown as import("../../src/utils/IosCtrlProxyBuilder").IosCtrlProxyBuilder;
+  } as unknown as import("../../src/ctrlProxy/IosCtrlProxyBuilder").IosCtrlProxyBuilder;
 }
 
 describe("IOSCtrlProxyManager", function () {
@@ -1739,7 +1739,7 @@ describe("IOSCtrlProxyManager", function () {
         getRunnerBinaryPath: async () => null,
         verifyRunnerBinaryBeforeLaunch: async () => {},
         writeRunnerEnvironment: fakeWriteRunnerEnvironment,
-      } as unknown as import("../../src/utils/IosCtrlProxyBuilder").IosCtrlProxyBuilder;
+      } as unknown as import("../../src/ctrlProxy/IosCtrlProxyBuilder").IosCtrlProxyBuilder;
       const manager = IOSCtrlProxyManager.createForTestingWithDeps(
         testDevice,
         fakeTimer,
@@ -2040,7 +2040,7 @@ describe("IOSCtrlProxyManager", function () {
           ...createFakeBuilder(),
           needsRebuild: async () => true,
           build: async () => ({ success: false, message: "fake rebuild unavailable" }),
-        } as unknown as import("../../src/utils/IosCtrlProxyBuilder").IosCtrlProxyBuilder,
+        } as unknown as import("../../src/ctrlProxy/IosCtrlProxyBuilder").IosCtrlProxyBuilder,
         fakeExecutor,
         undefined,
         { getInstalledAppBundleHash: async () => null } as unknown as DeviceAppManager,
@@ -2084,7 +2084,7 @@ describe("IOSCtrlProxyManager", function () {
           ...createFakeBuilder(),
           needsRebuild: async () => true,
           build: async () => ({ success: false, message: "fake rebuild unavailable" }),
-        } as unknown as import("../../src/utils/IosCtrlProxyBuilder").IosCtrlProxyBuilder,
+        } as unknown as import("../../src/ctrlProxy/IosCtrlProxyBuilder").IosCtrlProxyBuilder,
         fakeExecutor,
         undefined,
         { getInstalledAppBundleHash: async () => null } as unknown as DeviceAppManager,
@@ -2117,7 +2117,7 @@ describe("IOSCtrlProxyManager", function () {
           ...createFakeBuilder(),
           needsRebuild: async () => true,
           build: async () => ({ success: false, message: "fake rebuild unavailable" }),
-        } as unknown as import("../../src/utils/IosCtrlProxyBuilder").IosCtrlProxyBuilder,
+        } as unknown as import("../../src/ctrlProxy/IosCtrlProxyBuilder").IosCtrlProxyBuilder,
         fakeExecutor,
         undefined,
         { getInstalledAppBundleHash: async () => null } as unknown as DeviceAppManager,
@@ -3834,7 +3834,7 @@ describe("IOSCtrlProxyManager", function () {
         getRunnerBinaryPath: async () => null,
         verifyRunnerBinaryBeforeLaunch: async () => {},
         writeRunnerEnvironment: fakeWriteRunnerEnvironment,
-      } as unknown as import("../../src/utils/IosCtrlProxyBuilder").IosCtrlProxyBuilder;
+      } as unknown as import("../../src/ctrlProxy/IosCtrlProxyBuilder").IosCtrlProxyBuilder;
 
       const manager = IOSCtrlProxyManager.createForTestingWithDeps(
         testDevice,
@@ -3856,7 +3856,7 @@ describe("IOSCtrlProxyManager", function () {
         getRunnerBinaryPath: async () => null,
         verifyRunnerBinaryBeforeLaunch: async () => {},
         writeRunnerEnvironment: fakeWriteRunnerEnvironment,
-      } as unknown as import("../../src/utils/IosCtrlProxyBuilder").IosCtrlProxyBuilder;
+      } as unknown as import("../../src/ctrlProxy/IosCtrlProxyBuilder").IosCtrlProxyBuilder;
 
       const manager = IOSCtrlProxyManager.createForTestingWithDeps(
         testDevice,
@@ -3890,7 +3890,7 @@ describe("IOSCtrlProxyManager", function () {
           getRunnerBinaryPath: async () => null,
           verifyRunnerBinaryBeforeLaunch: async () => {},
           writeRunnerEnvironment: fakeWriteRunnerEnvironment,
-        } as unknown as import("../../src/utils/IosCtrlProxyBuilder").IosCtrlProxyBuilder;
+        } as unknown as import("../../src/ctrlProxy/IosCtrlProxyBuilder").IosCtrlProxyBuilder;
         const manager = IOSCtrlProxyManager.createForTestingWithDeps(
           testDevice,
           fakeTimer,
@@ -3929,7 +3929,7 @@ describe("IOSCtrlProxyManager", function () {
             getRunnerBinaryPath: async () => null,
             verifyRunnerBinaryBeforeLaunch: async () => {},
             writeRunnerEnvironment: fakeWriteRunnerEnvironment,
-          } as unknown as import("../../src/utils/IosCtrlProxyBuilder").IosCtrlProxyBuilder;
+          } as unknown as import("../../src/ctrlProxy/IosCtrlProxyBuilder").IosCtrlProxyBuilder;
           const manager = IOSCtrlProxyManager.createForTestingWithDeps(
             testDevice,
             fakeTimer,
@@ -3967,7 +3967,7 @@ describe("IOSCtrlProxyManager", function () {
           getRunnerBinaryPath: async () => null,
           verifyRunnerBinaryBeforeLaunch: async () => {},
           writeRunnerEnvironment: fakeWriteRunnerEnvironment,
-        } as unknown as import("../../src/utils/IosCtrlProxyBuilder").IosCtrlProxyBuilder;
+        } as unknown as import("../../src/ctrlProxy/IosCtrlProxyBuilder").IosCtrlProxyBuilder;
         const manager = IOSCtrlProxyManager.createForTestingWithDeps(
           testDevice,
           fakeTimer,
@@ -3997,7 +3997,7 @@ describe("IOSCtrlProxyManager", function () {
         getRunnerBinaryPath: async () => null,
         verifyRunnerBinaryBeforeLaunch: async () => {},
         writeRunnerEnvironment: fakeWriteRunnerEnvironment,
-      } as unknown as import("../../src/utils/IosCtrlProxyBuilder").IosCtrlProxyBuilder;
+      } as unknown as import("../../src/ctrlProxy/IosCtrlProxyBuilder").IosCtrlProxyBuilder;
       const manager = IOSCtrlProxyManager.createForTestingWithDeps(
         testDevice,
         fakeTimer,
@@ -4303,7 +4303,7 @@ describe("IOSCtrlProxyManager", function () {
         getRunnerBinaryPath: async () => null,
         verifyRunnerBinaryBeforeLaunch: async () => {},
         writeRunnerEnvironment: fakeWriteRunnerEnvironment,
-      } as unknown as import("../../src/utils/IosCtrlProxyBuilder").IosCtrlProxyBuilder;
+      } as unknown as import("../../src/ctrlProxy/IosCtrlProxyBuilder").IosCtrlProxyBuilder;
       const manager = IOSCtrlProxyManager.createForTestingWithDeps(
         testDevice,
         fakeTimer,
@@ -4341,7 +4341,7 @@ describe("IOSCtrlProxyManager", function () {
         getRunnerBinaryPath: async () => null,
         verifyRunnerBinaryBeforeLaunch: async () => {},
         writeRunnerEnvironment: fakeWriteRunnerEnvironment,
-      } as unknown as import("../../src/utils/IosCtrlProxyBuilder").IosCtrlProxyBuilder;
+      } as unknown as import("../../src/ctrlProxy/IosCtrlProxyBuilder").IosCtrlProxyBuilder;
       const manager = IOSCtrlProxyManager.createForTestingWithDeps(
         testDevice,
         fakeTimer,
@@ -4381,7 +4381,7 @@ describe("IOSCtrlProxyManager", function () {
         getRunnerBinaryPath: async () => null,
         verifyRunnerBinaryBeforeLaunch: async () => {},
         writeRunnerEnvironment: fakeWriteRunnerEnvironment,
-      } as unknown as import("../../src/utils/IosCtrlProxyBuilder").IosCtrlProxyBuilder;
+      } as unknown as import("../../src/ctrlProxy/IosCtrlProxyBuilder").IosCtrlProxyBuilder;
       const manager = IOSCtrlProxyManager.createForTestingWithDeps(
         testDevice,
         fakeTimer,
@@ -4414,7 +4414,7 @@ describe("IOSCtrlProxyManager", function () {
         getRunnerBinaryPath: async () => null,
         verifyRunnerBinaryBeforeLaunch: async () => {},
         writeRunnerEnvironment: fakeWriteRunnerEnvironment,
-      } as unknown as import("../../src/utils/IosCtrlProxyBuilder").IosCtrlProxyBuilder;
+      } as unknown as import("../../src/ctrlProxy/IosCtrlProxyBuilder").IosCtrlProxyBuilder;
       const manager = IOSCtrlProxyManager.createForTestingWithDeps(
         testDevice,
         fakeTimer,
@@ -4461,7 +4461,7 @@ describe("IOSCtrlProxyManager", function () {
             writeCalls.push({ xctestrunPath, env, deviceId });
             return "/tmp/automobile-runner-SIM.xctestrun";
           },
-        } as unknown as import("../../src/utils/IosCtrlProxyBuilder").IosCtrlProxyBuilder;
+        } as unknown as import("../../src/ctrlProxy/IosCtrlProxyBuilder").IosCtrlProxyBuilder;
         const manager = IOSCtrlProxyManager.createForTestingWithDeps(
           testDevice,
           fakeTimer,
@@ -4515,7 +4515,7 @@ describe("IOSCtrlProxyManager", function () {
           getRunnerBinaryPath: async () => null,
           verifyRunnerBinaryBeforeLaunch: async () => {},
           writeRunnerEnvironment: fakeWriteRunnerEnvironment,
-        } as unknown as import("../../src/utils/IosCtrlProxyBuilder").IosCtrlProxyBuilder;
+        } as unknown as import("../../src/ctrlProxy/IosCtrlProxyBuilder").IosCtrlProxyBuilder;
         const manager = IOSCtrlProxyManager.createForTestingWithDeps(
           testDevice,
           fakeTimer,
@@ -4578,7 +4578,7 @@ describe("IOSCtrlProxyManager", function () {
           getRunnerBinaryPath: async () => null,
           verifyRunnerBinaryBeforeLaunch: async () => {},
           writeRunnerEnvironment: fakeWriteRunnerEnvironment,
-        } as unknown as import("../../src/utils/IosCtrlProxyBuilder").IosCtrlProxyBuilder;
+        } as unknown as import("../../src/ctrlProxy/IosCtrlProxyBuilder").IosCtrlProxyBuilder;
         const manager = IOSCtrlProxyManager.createForTestingWithDeps(
           testDevice,
           fakeTimer,
@@ -4879,7 +4879,7 @@ describe("IOSCtrlProxyManager", function () {
           getRunnerBinaryPath: async () => null,
           verifyRunnerBinaryBeforeLaunch: async () => {},
           writeRunnerEnvironment: fakeWriteRunnerEnvironment,
-        } as unknown as import("../../src/utils/IosCtrlProxyBuilder").IosCtrlProxyBuilder;
+        } as unknown as import("../../src/ctrlProxy/IosCtrlProxyBuilder").IosCtrlProxyBuilder;
         const manager = IOSCtrlProxyManager.createForTestingWithDeps(
           testDevice,
           fakeTimer,

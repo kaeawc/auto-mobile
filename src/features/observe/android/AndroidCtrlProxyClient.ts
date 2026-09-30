@@ -37,13 +37,13 @@ import {
 } from "../../../models";
 import { ViewHierarchyQueryOptions } from "../../../models/ViewHierarchyQueryOptions";
 import { readScreenScaleMetadata } from "../../../models/ScreenScaleMetadata";
-import { AndroidCtrlProxyManager } from "../../../utils/CtrlProxyManager";
+import { AndroidCtrlProxyManager } from "../../../ctrlProxy/CtrlProxyManager";
 import type { ProxySetupResult } from "../../../utils/interfaces/ProxyManager";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
 import { Timer, defaultTimer } from "../../../utils/SystemTimer";
 import { raceWithDeadline } from "../../../utils/raceWithDeadline";
 import { fixedBackoff } from "../../../utils/Backoff";
-import { ForcedRestartBudget } from "../../../utils/ctrlProxy/ForcedRestartBudget";
+import { ForcedRestartBudget } from "../../../ctrlProxy/ForcedRestartBudget";
 import {
   NavigationGraphManager,
   NavigationEvent,

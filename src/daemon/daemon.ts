@@ -9,7 +9,7 @@ import { ActionableError } from "../models/ActionableError";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { createMcpServer } from "../server";
 import { logger } from "../utils/logger";
-import { IOSCtrlProxyManager } from "../utils/IOSCtrlProxyManager";
+import { IOSCtrlProxyManager } from "../ctrlProxy/IOSCtrlProxyManager";
 import { AndroidOfflineProbeError } from "../utils/android-cmdline-tools/AndroidEmulatorClient";
 import { MultiPlatformDeviceManager } from "../utils/deviceUtils";
 import { UnixSocketServer } from "./socketServer";
@@ -153,7 +153,7 @@ import { InstalledAppsRepository } from "../db/installedAppsRepository";
 import { DeviceSessionRepository } from "../db/deviceSessionRepository";
 import { EmulatorLossIncidentRepository } from "../db/emulatorLossIncidentRepository";
 import { DeviceSessionManager } from "../utils/DeviceSessionManager";
-import { IosCtrlProxyBuilder } from "../utils/IosCtrlProxyBuilder";
+import { IosCtrlProxyBuilder } from "../ctrlProxy/IosCtrlProxyBuilder";
 import { initializeIosCtrlProxyAtStartup } from "./iosStartupInit";
 import {
   startAppearanceSyncScheduler,

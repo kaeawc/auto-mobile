@@ -32,10 +32,10 @@ import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClien
 import type { AdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
 import { getAndroidAppMetadataViaAdb } from "../features/observe/GetAppMetadata";
-import { AndroidCtrlProxyManager } from "../utils/CtrlProxyManager";
-import { IOSCtrlProxyManager } from "../utils/IOSCtrlProxyManager";
-import type { CtrlProxyHealthCheckResult } from "../utils/ios/IosCtrlProxyHealthClient";
-import { IosCtrlProxyBuilder } from "../utils/IosCtrlProxyBuilder";
+import { AndroidCtrlProxyManager } from "../ctrlProxy/CtrlProxyManager";
+import { IOSCtrlProxyManager } from "../ctrlProxy/IOSCtrlProxyManager";
+import type { CtrlProxyHealthCheckResult } from "../ctrlProxy/ios/IosCtrlProxyHealthClient";
+import { IosCtrlProxyBuilder } from "../ctrlProxy/IosCtrlProxyBuilder";
 import {
   IOSCtrlProxyClient,
   IOS_RUNNER_FEATURE_COMMANDS,

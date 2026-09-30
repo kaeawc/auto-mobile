@@ -33,7 +33,7 @@ import {
 import { serverConfig } from "../../utils/ServerConfig";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { IOSCtrlProxyClient } from "../observe/ios";
-import { IOSCtrlProxyManager } from "../../utils/IOSCtrlProxyManager";
+import { IOSCtrlProxyManager } from "../../ctrlProxy/IOSCtrlProxyManager";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { readAndroidPackageProcesses } from "../../utils/android-cmdline-tools/androidProcessState";
 import { errorMessage } from "../../utils/describeUnknownError";

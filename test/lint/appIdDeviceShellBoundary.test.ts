@@ -14,7 +14,7 @@ const GUARDED_FILES = [
   "src/features/action/RestoreSnapshot.ts",
   "src/features/database/DatabaseInspector.ts",
   "src/utils/ContentHashProvider.ts",
-  "src/utils/CtrlProxyManager.ts",
+  "src/ctrlProxy/CtrlProxyManager.ts",
   "src/utils/AppLifecycleMonitor.ts",
   "src/utils/DeepLinkManager.ts",
   "src/server/systemTrayHelpers.ts",

@@ -3,7 +3,7 @@ import {
   IosCtrlProxyHealthClient,
   isValidCtrlProxyPort,
   type CtrlProxyHealthContext,
-} from "../../../src/utils/ios/IosCtrlProxyHealthClient";
+} from "../../../src/ctrlProxy/ios/IosCtrlProxyHealthClient";
 import { FakeProcessExecutor } from "../../fakes/FakeProcessExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import type { ExecResult } from "../../../src/models";

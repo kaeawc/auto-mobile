@@ -14,8 +14,8 @@ import { DefaultHostCommandExecutor } from "../../utils/HostCommandExecutor";
 import { logger, type Logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { resolveAssetVersion, resolvePinnedVersion } from "../../constants/release";
-import { IosCtrlProxyBuilder } from "../../utils/IosCtrlProxyBuilder";
-import { IOSCtrlProxyManager } from "../../utils/IOSCtrlProxyManager";
+import { IosCtrlProxyBuilder } from "../../ctrlProxy/IosCtrlProxyBuilder";
+import { IOSCtrlProxyManager } from "../../ctrlProxy/IOSCtrlProxyManager";
 import {
   IOSCtrlProxyClient,
   IOS_RUNNER_FEATURE_COMMANDS,

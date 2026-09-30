@@ -18,7 +18,7 @@ import { ActionableError } from "../../../models/ActionableError";
 import type { IosHierarchyUnavailableReason } from "../../../models/ViewHierarchyResult";
 import { logger } from "../../../utils/logger";
 import { errorMessage } from "../../../utils/describeUnknownError";
-import { ForcedRestartBudget } from "../../../utils/ctrlProxy/ForcedRestartBudget";
+import { ForcedRestartBudget } from "../../../ctrlProxy/ForcedRestartBudget";
 import {
   BootedDevice,
   HighlightShape,
@@ -39,7 +39,7 @@ import {
   IOSCtrlProxyManager,
   CtrlProxyIosManager,
   type CtrlProxyIosSetupResult,
-} from "../../../utils/IOSCtrlProxyManager";
+} from "../../../ctrlProxy/IOSCtrlProxyManager";
 import { PlatformDeviceManagerFactory } from "../../../utils/factories/PlatformDeviceManagerFactory";
 import { NavigationGraphManager } from "../../navigation/NavigationGraphManager";
 import { serverConfig } from "../../../utils/ServerConfig";

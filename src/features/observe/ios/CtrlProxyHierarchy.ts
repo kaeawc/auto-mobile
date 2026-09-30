@@ -788,7 +788,7 @@ export class CtrlProxyHierarchy {
       }
 
       // Skip false boolean values
-      if (booleanFields.includes(key) && value === "false") {
+      if (key !== "enabled" && booleanFields.includes(key) && value === "false") {
         continue;
       }
 

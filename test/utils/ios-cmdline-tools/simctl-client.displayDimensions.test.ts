@@ -11,6 +11,7 @@ const duoEnumerate = loadDuoEnumerate();
 describe("SimCtlClient display dimension enrichment", () => {
   test("publishes profile dimensions and both enumerated Duo screens", async () => {
     const typeId = "com.apple.CoreSimulator.SimDeviceType.iPhone-Duo";
+    const timer = new FakeTimer();
     const commands: string[] = [];
     const simctl = new SimCtlClient(
       null,
@@ -36,7 +37,7 @@ describe("SimCtlClient display dimension enrichment", () => {
           "",
         );
       },
-      undefined,
+      timer,
       "darwin",
       undefined,
       undefined,

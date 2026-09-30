@@ -859,6 +859,7 @@ describe("AndroidCtrlProxyClient", function () {
     const setupConnectedCapturingClient = async (): Promise<{
       client: AndroidCtrlProxyClient;
       socket: CapturingWebSocket;
+      timer: FakeTimer;
     }> => {
       await accessibilityServiceClient.close();
       AndroidCtrlProxyClient.resetInstances();
@@ -883,7 +884,7 @@ describe("AndroidCtrlProxyClient", function () {
       if (!socket) {
         throw new Error("Expected capturing CtrlProxy socket");
       }
-      return { client: accessibilityServiceClient, socket };
+      return { client: accessibilityServiceClient, socket, timer: localTimer };
     };
 
     const countScreenshotRequests = (socket: CapturingWebSocket): number =>
@@ -964,8 +965,8 @@ describe("AndroidCtrlProxyClient", function () {
       await capturePromise;
     };
 
-    test("latches to permanent ADB fallback after three consecutive a11y screenshot failures", async function () {
-      const { client, socket } = await setupConnectedCapturingClient();
+    test("latches to ADB fallback after three consecutive a11y screenshot failures", async function () {
+      const { client, socket, timer } = await setupConnectedCapturingClient();
 
       await driveFailureTolerant(client, socket);
       await driveFailureTolerant(client, socket);
@@ -973,12 +974,50 @@ describe("AndroidCtrlProxyClient", function () {
 
       expect(client.a11yScreenshotSupported).toBe(false);
 
-      // Once latched, a further capture must NOT send another a11y request — it goes straight to ADB.
+      // Before the cooldown expires, captures still go straight to ADB.
       const requestsBefore = countScreenshotRequests(socket);
       const result = await client.captureScreenshotForObservationStream();
       await flushPromises();
       expect(countScreenshotRequests(socket)).toBe(requestsBefore);
       expect(result.screenshotCaptureSource).toBe("android_adb_screencap");
+
+      timer.advanceTime(59_999);
+      await client.captureScreenshotForObservationStream();
+      expect(countScreenshotRequests(socket)).toBe(requestsBefore);
+    });
+
+    test("re-probes after the cooldown and re-latches after one failed probe", async function () {
+      const { client, socket, timer } = await setupConnectedCapturingClient();
+
+      await driveFailureTolerant(client, socket);
+      await driveFailureTolerant(client, socket);
+      await driveFailureTolerant(client, socket);
+      expect(client.a11yScreenshotSupported).toBe(false);
+
+      timer.advanceTime(60_000);
+      const requestsBefore = countScreenshotRequests(socket);
+      await driveA11yScreenshot(client, socket, { kind: "error" });
+
+      expect(countScreenshotRequests(socket)).toBe(requestsBefore + 1);
+      expect(client.a11yScreenshotSupported).toBe(false);
+    });
+
+    test("resets the a11y screenshot latch when the service reconnects", async function () {
+      const { client, socket } = await setupConnectedCapturingClient();
+
+      await driveFailureTolerant(client, socket);
+      await driveFailureTolerant(client, socket);
+      await driveFailureTolerant(client, socket);
+      expect(client.a11yScreenshotSupported).toBe(false);
+
+      // Exercise the same successful-connection hook used after a replacement/reconnect.
+      client["onConnectionEstablished"]();
+      expect(client.a11yScreenshotSupported).toBe(null);
+
+      const requestsBefore = countScreenshotRequests(socket);
+      await driveA11yScreenshot(client, socket, { kind: "error" });
+      expect(countScreenshotRequests(socket)).toBe(requestsBefore + 1);
+      expect(client.a11yScreenshotSupported).toBe(null);
     });
 
     test("keeps attempting a11y screenshots after only two consecutive failures", async function () {

@@ -166,24 +166,23 @@ describe("Daemon startup device discovery", () => {
     });
   });
 
-  test("live acceptance skips pool-wide iOS CtrlProxy warm-up", async () => {
+  test("a configured acceptance secret skips pool-wide iOS CtrlProxy warm-up", async () => {
     const previousSecret = process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV];
-    process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV] =
-      "live-acceptance-startup-secret-012345678901234567890";
     const getInstanceSpy = spyOn(DeviceSessionManager, "getInstance");
     try {
-      const daemon = buildDaemon(new FakeTimer());
-      const internals = daemon as unknown as DaemonStartupInternals;
-      await internals.devicePool.initializeWithDevices([
-        {
-          deviceId: "unrelated-simulator",
-          name: "Unrelated iPhone",
-          platform: "ios",
-        },
-      ]);
-
-      await internals.initializeIosServices();
-
+      for (const secret of ["live-acceptance-startup-secret-012345678901234567890", "short", ""]) {
+        process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV] = secret;
+        const daemon = buildDaemon(new FakeTimer());
+        const internals = daemon as unknown as DaemonStartupInternals;
+        await internals.devicePool.initializeWithDevices([
+          {
+            deviceId: "unrelated-simulator",
+            name: "Unrelated iPhone",
+            platform: "ios",
+          },
+        ]);
+        await internals.initializeIosServices();
+      }
       expect(getInstanceSpy).not.toHaveBeenCalled();
     } finally {
       getInstanceSpy.mockRestore();
@@ -191,6 +190,46 @@ describe("Daemon startup device discovery", () => {
         delete process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV];
       } else {
         process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV] = previousSecret;
+      }
+    }
+  });
+
+  test("iOS startup warm-up respects the explicit device allowlist", async () => {
+    const previousSecret = process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV];
+    const previousAllowlist = process.env.AUTOMOBILE_IOS_WARMUP_DEVICES;
+    delete process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV];
+    const verifiedDeviceIds: string[] = [];
+    const getInstanceSpy = spyOn(DeviceSessionManager, "getInstance").mockReturnValue({
+      verifyIosDevice: async (deviceId: string) => {
+        verifiedDeviceIds.push(deviceId);
+      },
+    } as unknown as DeviceSessionManager);
+    const pendingPrefetchSpy = spyOn(IosCtrlProxyBuilder, "pendingPrefetch").mockReturnValue(null);
+    try {
+      for (const allowlist of [" sim-a, missing, sim-a ", ""]) {
+        process.env.AUTOMOBILE_IOS_WARMUP_DEVICES = allowlist;
+        const daemon = buildDaemon(new FakeTimer());
+        const internals = daemon as unknown as DaemonStartupInternals;
+        await internals.devicePool.initializeWithDevices([
+          { deviceId: "sim-a", name: "First iPhone", platform: "ios" },
+          { deviceId: "sim-b", name: "Second iPhone", platform: "ios" },
+          { deviceId: "android-a", name: "Pixel", platform: "android" },
+        ]);
+        await internals.initializeIosServices();
+      }
+      expect(verifiedDeviceIds).toEqual(["sim-a"]);
+    } finally {
+      pendingPrefetchSpy.mockRestore();
+      getInstanceSpy.mockRestore();
+      if (previousSecret === undefined) {
+        delete process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV];
+      } else {
+        process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV] = previousSecret;
+      }
+      if (previousAllowlist === undefined) {
+        delete process.env.AUTOMOBILE_IOS_WARMUP_DEVICES;
+      } else {
+        process.env.AUTOMOBILE_IOS_WARMUP_DEVICES = previousAllowlist;
       }
     }
   });

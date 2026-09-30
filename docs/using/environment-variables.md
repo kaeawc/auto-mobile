@@ -123,6 +123,18 @@ export AUTOMOBILE_OBSERVE_SETTLED_SCREENSHOT=true
 
 ## Device behavior
 
+At daemon startup, AutoMobile warms CtrlProxy on every already booted iOS
+device by default. Set `AUTOMOBILE_IOS_WARMUP_DEVICES` to a comma-separated
+list of simulator UDIDs to warm only those devices. An empty value disables
+pool-wide iOS warm-up. This setting affects startup only; an explicit device
+acquisition and an existing device's runner restart can still start CtrlProxy
+for that device. Setting `AUTOMOBILE_DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET`
+also disables pool-wide warm-up, regardless of the allowlist.
+
+```bash
+export AUTOMOBILE_IOS_WARMUP_DEVICES=00000000-0000-0000-0000-000000000001
+```
+
 AutoMobile does not create an emulator or simulator by default. The legacy
 compatibility path can opt in:
 

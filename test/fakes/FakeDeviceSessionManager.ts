@@ -24,6 +24,10 @@ export class FakeDeviceSessionManager implements DeviceSessionManager {
   private setCurrentDeviceCalls: BootedDevice[] = [];
   private ensureDeviceReadyCalls: number = 0;
   private detectConnectedPlatformsCalls: number = 0;
+  private detectConnectedPlatformsSignals: (AbortSignal | undefined)[] = [];
+  private detectConnectedPlatformsHook:
+    | ((signal?: AbortSignal) => Promise<BootedDevice[]>)
+    | undefined;
   private verificationAttempts: Map<string, number> = new Map();
   private deviceVerificationCalls: Map<string, Platform> = new Map();
   private lastOptions: DeviceReadyOptions | undefined;
@@ -181,6 +185,7 @@ export class FakeDeviceSessionManager implements DeviceSessionManager {
     this.setCurrentDeviceCalls = [];
     this.ensureDeviceReadyCalls = 0;
     this.detectConnectedPlatformsCalls = 0;
+    this.detectConnectedPlatformsSignals = [];
     this.verificationAttempts.clear();
     this.deviceVerificationCalls.clear();
     this.lastOptions = undefined;
@@ -211,6 +216,10 @@ export class FakeDeviceSessionManager implements DeviceSessionManager {
     this.lastOptions = options;
     this.lastEnsureDeviceReadyPlatform = platform;
     this.lastEnsureDeviceReadyDeviceId = providedDeviceId;
+
+    if (options?.getConnectedPlatforms) {
+      await options.getConnectedPlatforms();
+    }
 
     if (this.simulateDisconnection) {
       throw new ActionableError("Device disconnected during verification");
@@ -280,14 +289,30 @@ export class FakeDeviceSessionManager implements DeviceSessionManager {
     return this.detectConnectedPlatformsCalls;
   }
 
-  async detectConnectedPlatforms(): Promise<BootedDevice[]> {
+  getDetectConnectedPlatformsSignals(): (AbortSignal | undefined)[] {
+    return [...this.detectConnectedPlatformsSignals];
+  }
+
+  setDetectConnectedPlatformsHook(
+    hook: ((signal?: AbortSignal) => Promise<BootedDevice[]>) | undefined,
+  ): void {
+    this.detectConnectedPlatformsHook = hook;
+  }
+
+  async detectConnectedPlatforms(signal?: AbortSignal): Promise<BootedDevice[]> {
     this.detectConnectedPlatformsCalls++;
+    this.detectConnectedPlatformsSignals.push(signal);
+    signal?.throwIfAborted();
 
     if (this.simulateDisconnection) {
       return [];
     }
 
-    return [...this.connectedPlatforms];
+    const devices = this.detectConnectedPlatformsHook
+      ? await this.detectConnectedPlatformsHook(signal)
+      : [...this.connectedPlatforms];
+    signal?.throwIfAborted();
+    return devices;
   }
 
   async verifyDevice(

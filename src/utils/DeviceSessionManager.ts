@@ -257,7 +257,7 @@ export interface DeviceSessionManager {
   /**
    * Detect the platform of connected devices
    */
-  detectConnectedPlatforms(): Promise<BootedDevice[]>;
+  detectConnectedPlatforms(signal?: AbortSignal): Promise<BootedDevice[]>;
 
   /**
    * Verify a specific device is connected and ready for the given platform.
@@ -321,6 +321,8 @@ export type ResolvedDeviceIdentity = Pick<BootedDevice, "deviceId" | "name" | "o
 export interface DeviceReadyOptions {
   skipCtrlProxyDownload?: boolean;
   signal?: AbortSignal;
+  /** Reuses device discovery already started by the current target resolution. */
+  getConnectedPlatforms?: () => Promise<BootedDevice[]>;
   /**
    * `booted` verifies only that the target is connected and booted.
    * `automationReady` additionally prepares CtrlProxy. Defaults to
@@ -518,7 +520,9 @@ export class DeviceSessionManager implements DeviceSessionManager {
     }
 
     // Detect all connected devices
-    const connectedPlatforms = await this.detectConnectedPlatforms();
+    const connectedPlatforms = await (options?.getConnectedPlatforms
+      ? options.getConnectedPlatforms()
+      : this.detectConnectedPlatforms(options?.signal));
     logger.info(`Found ${connectedPlatforms.length} connectedPlatform devices`);
     const androidDevices = connectedPlatforms.filter((device) => device.platform === "android");
     logger.info(`Found ${androidDevices.length} android devices`);

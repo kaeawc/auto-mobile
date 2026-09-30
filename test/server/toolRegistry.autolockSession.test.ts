@@ -117,6 +117,45 @@ describe("ToolRegistry autolock session enforcement", () => {
     const response = await tool.handler({ platform: "android" });
     expect(response).toEqual({ success: true });
     expect(fakeDeviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(1);
+    expect(fakeDeviceSessionManager.getDetectConnectedPlatformsCallCount()).toBe(1);
+  });
+
+  test("shares one cancellable device scan across untargeted resolution", async () => {
+    setAutolock(true);
+    fakeDeviceSessionManager.setConnectedDevices([androidA]);
+    const tool = registerTool("autolockCancellableSingleAndroid");
+    const controller = new AbortController();
+
+    const response = await tool.handler({ platform: "android" }, undefined, controller.signal);
+
+    expect(response).toEqual({ success: true });
+    expect(fakeDeviceSessionManager.getDetectConnectedPlatformsCallCount()).toBe(1);
+    expect(fakeDeviceSessionManager.getDetectConnectedPlatformsSignals()).toEqual([
+      controller.signal,
+    ]);
+  });
+
+  test("an abort during device discovery prevents further scans", async () => {
+    setAutolock(true);
+    fakeDeviceSessionManager.setConnectedDevices([androidA]);
+    let finishScan!: (devices: BootedDevice[]) => void;
+    fakeDeviceSessionManager.setDetectConnectedPlatformsHook(
+      () => new Promise((resolve) => (finishScan = resolve)),
+    );
+    const tool = registerTool("autolockAbortedDeviceScan");
+    const controller = new AbortController();
+
+    const call = tool.handler({ platform: "android" }, undefined, controller.signal);
+    expect(fakeDeviceSessionManager.getDetectConnectedPlatformsCallCount()).toBe(1);
+    expect(fakeDeviceSessionManager.getDetectConnectedPlatformsSignals()).toEqual([
+      controller.signal,
+    ]);
+    controller.abort();
+    finishScan([androidA]);
+
+    await expect(call).rejects.toThrow();
+    expect(fakeDeviceSessionManager.getDetectConnectedPlatformsCallCount()).toBe(1);
+    expect(fakeDeviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
   });
 
   test("requires an explicit target for multiple Android devices when autolock is disabled", async () => {

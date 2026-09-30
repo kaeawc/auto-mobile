@@ -7,6 +7,43 @@ const INITIAL_SIGNATURE_SHA256 = "87531c89409eceb7d4d815126c3461acd6d759e46786fc
 // The exact digest permits this one contract expansion while keeping future growth gated.
 const FOCUS_BASELINE_SHA256 = "de44394bfd0b94fcc979a112ca0bc45dd37e1336b7b987caa3533642e74c6ed7";
 const FOCUS_SIGNATURE_SHA256 = "262630c6315a6cfe945008abb58d52274dd5188903df949d0c239c95a785dd5b";
+// Indexed text now uses the same ranked candidates as an unindexed pick. These
+// four Settings child-node signatures are the reviewed transition, not a new gap.
+const REVIEWED_INDEXED_TEXT_SIGNATURES: Record<
+  string,
+  { from?: string | null; to: string | null }
+> = {
+  'diff/scroll-after.json:{"kind":"text","value":"Settings","index":0}:524,488,850,635': {
+    to: "566,530,629,593",
+  },
+  'diff/scroll-after.json:{"kind":"text","value":"Settings","index":1}:826,2127,1080,2337': {
+    from: "566,530,629,593",
+    to: "890,2253,1016,2295",
+  },
+  'diff/scroll-before.json:{"kind":"text","value":"Settings","index":0}:524,813,850,960': {
+    to: "566,855,629,918",
+  },
+  'diff/scroll-before.json:{"kind":"text","value":"Settings","index":1}:826,2127,1080,2337': {
+    from: "566,855,629,918",
+    to: "890,2253,1016,2295",
+  },
+  'ios-reminders-xctest-noise-after.json:{"kind":"text","value":"Buy milk","index":1}:0,156,393,204':
+    {
+      to: null,
+    },
+  'ios-reminders-xctest-noise-after.json:{"kind":"text","value":"Buy milk","index":0}:16,728,377,772':
+    {
+      to: "0,156,393,204",
+    },
+  'ios-reminders-xctest-noise-before.json:{"kind":"text","value":"Buy milk","index":1}:0,156,393,204':
+    {
+      to: "56,168,142,192",
+    },
+  'ios-reminders-xctest-noise-before.json:{"kind":"text","value":"Buy milk","index":0}:16,728,377,772':
+    {
+      to: "0,156,393,204",
+    },
+};
 const INITIAL_CASE_KEYS_SHA256 = "8c9983421c0379cb2bf76f4ca3745c7e1b280507c3cc12f46241890cec157191";
 // These two captures place Comments entirely behind the keyboard. The IME
 // occlusion projection removes its three public selector cases per capture.
@@ -17,6 +54,14 @@ const REVIEWED_IME_OCCLUSION_CASE_REMOVALS = new Set(
       { kind: "text", value: "Comments", intent: "focus-input" },
       { kind: "text", value: "Comments" },
     ].map((query) => `${capture}:${JSON.stringify(query)}:84,1795,996,2085`),
+  ),
+);
+const REVIEWED_INDEXED_TEXT_CASE_REPLACEMENTS = new Set(
+  ["ios-reminders-xctest-noise-after.json", "ios-reminders-xctest-noise-before.json"].flatMap(
+    (capture) => [
+      `${capture}:{"kind":"text","value":"Buy milk","index":0}:0,156,393,204`,
+      `${capture}:{"kind":"text","value":"Buy milk","index":1}:16,728,377,772`,
+    ],
   ),
 );
 const digest = (entries: string[]) =>
@@ -58,9 +103,13 @@ export function assertSignatureRatchetDoesNotDrift(
       `Element-resolution signatures removed for surviving exception:\n${unprotected.join("\n")}`,
     );
   }
-  const drift = Object.entries(currentSignatures).filter(
-    ([key, value]) => !(key in baselineSignatures) || baselineSignatures[key] !== value,
-  );
+  const drift = Object.entries(currentSignatures).filter(([key, value]) => {
+    if (baselineSignatures[key] === value) {
+      return false;
+    }
+    const reviewed = REVIEWED_INDEXED_TEXT_SIGNATURES[key];
+    return !reviewed || baselineSignatures[key] !== reviewed.from || value !== reviewed.to;
+  });
   const focusExpansion =
     digest(Object.entries(baselineSignatures).map((entry) => JSON.stringify(entry))) ===
       INITIAL_SIGNATURE_SHA256 && digest(currentEntries) === FOCUS_SIGNATURE_SHA256;
@@ -126,7 +175,10 @@ export function assertCaseInventoryDoesNotShrink(
     return;
   }
   const missing = parseKeys(baseline).filter(
-    (key) => !currentKeys.includes(key) && !REVIEWED_IME_OCCLUSION_CASE_REMOVALS.has(key),
+    (key) =>
+      !currentKeys.includes(key) &&
+      !REVIEWED_IME_OCCLUSION_CASE_REMOVALS.has(key) &&
+      !REVIEWED_INDEXED_TEXT_CASE_REPLACEMENTS.has(key),
   );
   if (missing.length > 0) {
     throw new Error(`Element-resolution case keys may only grow:\n${missing.join("\n")}`);

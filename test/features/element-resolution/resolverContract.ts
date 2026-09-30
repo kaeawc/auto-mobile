@@ -119,6 +119,12 @@ export function observedCandidates(
             ? row.testTag === query.value
             : row.label === query.value,
       )
+      .sort(
+        (a, b) =>
+          (a.index ?? 0) - (b.index ?? 0) ||
+          (a.bounds[2] - a.bounds[0]) * (a.bounds[3] - a.bounds[1]) -
+            (b.bounds[2] - b.bounds[0]) * (b.bounds[3] - b.bounds[1]),
+      )
       .map((row) => ({ elementId: row.elementId, bounds: row.bounds.join(",") }));
   }
   const peers = allCases.filter(
@@ -128,12 +134,14 @@ export function observedCandidates(
       query.value === testCase.query.value &&
       JSON.stringify(query.container) === JSON.stringify(testCase.query.container),
   );
-  const unique = new Map<string, CandidateIdentity>();
-  for (const { observed } of peers) {
+  const unique = new Map<string, { identity: CandidateIdentity; index?: number }>();
+  for (const { observed, query } of peers) {
     const identity = { elementId: observed.elementId, bounds: observed.bounds.join(",") };
-    unique.set(JSON.stringify(identity), identity);
+    unique.set(JSON.stringify(identity), { identity, index: query.index });
   }
-  const candidates = [...unique.values()];
+  const candidates = [...unique.values()]
+    .sort((a, b) => (a.index ?? 0) - (b.index ?? 0))
+    .map(({ identity }) => identity);
   // B1: both recorded text-input captures also contain the keyboard's Settings
   // button. It is intentionally summarized as <ime> by observe, not a skeleton
   // row. Pin its actual captured identity instead of allowing arbitrary extras.
@@ -142,7 +150,7 @@ export function observedCandidates(
     testCase.query.kind === "text" &&
     testCase.query.value === "Settings"
   ) {
-    candidates.push({
+    candidates.unshift({
       elementId: "f97bfc80-0c82-fbcc-3947-7df34f5e57f4",
       bounds: "620,1517,780,1633",
     });

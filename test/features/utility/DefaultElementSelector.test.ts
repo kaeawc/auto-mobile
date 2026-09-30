@@ -105,11 +105,11 @@ describe("DefaultElementSelector", () => {
     expect(match.totalMatches).toBe(2);
 
     expect(selector.selectByText(viewHierarchy, "Sign Out", { index: 0 }).element?.class).toBe(
-      "XCUIElementTypeStaticText",
+      "XCUIElementTypeButton",
     );
     expect(
       selector.selectByText(viewHierarchy, "Sign Out", { strategy: "random" }).element?.class,
-    ).toBe("XCUIElementTypeStaticText");
+    ).toBe("XCUIElementTypeButton");
   });
 
   test("preserves window z-order before preferring actionable matches", () => {
@@ -559,7 +559,7 @@ describe("selectByResourceId — index", () => {
   });
 
   // Two controls sharing one resource-id (a repeated per-row action), stacked
-  // top-to-bottom. `index` picks the Nth on-screen match in hierarchy order.
+  // top-to-bottom. `index` picks from the same ranked set as the default.
   const repeated = {
     hierarchy: {
       node: node(
@@ -592,10 +592,10 @@ describe("selectByResourceId — index", () => {
 
     expect(
       selector.selectByResourceId(repeated, "app:id/remove", { index: 0 }).element?.bounds.top,
-    ).toBe(0);
+    ).toBe(20);
     expect(
       selector.selectByResourceId(repeated, "app:id/remove", { index: 1 }).element?.bounds.top,
-    ).toBe(20);
+    ).toBe(0);
     // Out of range → no match, rather than silently grabbing another element.
     expect(selector.selectByResourceId(repeated, "app:id/remove", { index: 2 }).element).toBeNull();
     // No index → strategy default (first/smallest exact match) still applies.
@@ -612,17 +612,17 @@ describe("selectByResourceId — index", () => {
 });
 
 describe("selectByText — index", () => {
-  test("index uses hierarchy order even when area sorting would pick a later smaller match", () => {
+  test("index uses the default area ranking", () => {
     const selector = new DefaultElementSelector(new DefaultElementFinder(), () => 0);
     const viewHierarchy = createViewHierarchy([
       { bounds: { left: 0, top: 0, right: 100, bottom: 20 }, text: "Match" },
       { bounds: { left: 0, top: 20, right: 20, bottom: 30 }, text: "Match" },
     ]);
 
-    expect(selector.selectByText(viewHierarchy, "Match", { index: 0 }).element?.bounds.top).toBe(0);
-    expect(selector.selectByText(viewHierarchy, "Match", { index: 1 }).element?.bounds.top).toBe(
+    expect(selector.selectByText(viewHierarchy, "Match", { index: 0 }).element?.bounds.top).toBe(
       20,
     );
+    expect(selector.selectByText(viewHierarchy, "Match", { index: 1 }).element?.bounds.top).toBe(0);
     // No index → strategy default (first/smallest exact match) still applies.
     expect(
       selector.selectByText(viewHierarchy, "Match", { strategy: "first" }).element?.bounds.top,

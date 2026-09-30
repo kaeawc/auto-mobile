@@ -110,6 +110,17 @@ describe("pure element resolver", () => {
       ).chosen,
     ).toBeNull();
   });
+  test("duplicated id-less runner view IDs report ambiguity instead of picking a peer", () => {
+    for (const id of ["runner/path", "s2-short"]) {
+      const capture = snapshot([
+        { "view-id": id, bounds, clickable: true },
+        { "view-id": id, bounds: { ...bounds, top: 120, bottom: 220 }, clickable: true },
+      ]);
+      const result = resolver.resolve(capture, { elementId: id }, tap);
+      expect(result.chosen).toBeNull();
+      expect(result.error).toContain("ambiguous");
+    }
+  });
   test("explicit contains ID discovery reports contains rather than exact", () => {
     const result = resolver.resolve(
       snapshot([node("app:id/map_controls")]),
@@ -167,7 +178,8 @@ test("default selection keeps smallest eligible area within the topmost window",
     node("small", "Save", { bounds: { left: 0, top: 0, right: 20, bottom: 20 } }),
   ]);
   expect(resolver.resolve(capture, { text: "Save" }, tap).chosen?.nativeId).toBe("small");
-  expect(resolver.resolve(capture, { text: "Save", index: 0 }, tap).chosen?.nativeId).toBe("large");
+  expect(resolver.resolve(capture, { text: "Save", index: 0 }, tap).chosen?.nativeId).toBe("small");
+  expect(resolver.resolve(capture, { text: "Save", index: 1 }, tap).chosen?.nativeId).toBe("large");
 });
 
 test("newer captures require matching identity proof for references", () => {

@@ -5,6 +5,7 @@ import {
 } from "../../utility/SearchableLabels";
 import { toSearchable } from "../../utility/SearchableNode";
 import { normalizeQuotes } from "../../utility/TextMatcher";
+import { compareSelectionRank } from "../../utility/selectionRank";
 import type { Element } from "../../../models/Element";
 import { isTruthy } from "../../../models/Element";
 import {
@@ -487,14 +488,15 @@ function toSkeletonEntry(acc: SkeletonAccumulator): SkeletonElement {
 }
 
 /** Rank duplicate indexes by the live selector's topmost-window-first order. */
-function byHierarchyOrder(a: SkeletonAccumulator, b: SkeletonAccumulator): number {
-  if (a.provenance && b.provenance) {
-    return (
-      (a.provenance.windowRank ?? Infinity) - (b.provenance.windowRank ?? Infinity) ||
-      a.provenance.enter - b.provenance.enter
-    );
-  }
-  return byReadingOrder(a, b);
+function bySelectorRank(a: SkeletonAccumulator, b: SkeletonAccumulator): number {
+  const rank = (entry: SkeletonAccumulator) => ({
+    windowRank: entry.provenance?.windowRank ?? 0,
+    area: area(entry.bounds),
+    order: entry.provenance?.enter ?? 0,
+    interactive: entry.affordances.size > 0,
+    input: entry.affordances.has("input"),
+  });
+  return compareSelectionRank(rank(a), rank(b)) || byReadingOrder(a, b);
 }
 
 /**
@@ -503,8 +505,7 @@ function byHierarchyOrder(a: SkeletonAccumulator, b: SkeletonAccumulator): numbe
  * `tapOn({ selector: { elementId }, index: entry.index })` instead of
  * guessing against the undocumented default `selectionStrategy: "first"`.
  * Id-less rows with repeated labels also receive a text-selector index.
- * See {@link byHierarchyOrder} for why ranking by window then `enter` reproduces
- * `tapOn.index` verbatim.
+ * Rank by window, action preference, area, then hierarchy order, as resolution does.
  */
 function isSelectableForReplay(
   entry: SkeletonAccumulator,
@@ -556,7 +557,7 @@ function assignDuplicateIndexes(
     if (group.length < 2) {
       continue;
     }
-    group.sort(byHierarchyOrder);
+    group.sort(bySelectorRank);
     group.forEach((entry, position) => {
       entry.index = position;
     });
@@ -565,7 +566,7 @@ function assignDuplicateIndexes(
     if (group.length < 2) {
       continue;
     }
-    group.sort(byHierarchyOrder);
+    group.sort(bySelectorRank);
     group.forEach((entry, position) => {
       if (entry.elementId === undefined) {
         entry.index = position;

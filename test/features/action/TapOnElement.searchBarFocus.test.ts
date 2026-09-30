@@ -126,6 +126,34 @@ describe("iOS search bar focus fixture", () => {
     ).toBe(true);
   });
 
+  test("verifies the indexed field against its own focused parent", () => {
+    const hierarchy = fixture(3);
+    const bars = hierarchy.hierarchy.node!.node!.slice(0, 3);
+    for (const [index, bar] of bars.entries()) {
+      bar.$.focused = index === 1;
+      bar.node![0].$["view-id"] = "search-field";
+      bar.node![0].$.role = "textfield";
+    }
+    const inner = new SearchableHierarchy()
+      .project(hierarchy)
+      .filter((node) => node.properties.class === "UISearchBarTextField")[1]?.element;
+    expect(inner).toBeDefined();
+    expect(
+      verifySelectedField(hierarchy, inner!, {
+        elementId: "search-field",
+        action: "focus",
+        index: 1,
+      }),
+    ).toBe(true);
+    expect(
+      verifySelectedField(hierarchy, inner!, {
+        elementId: "search-field",
+        action: "focus",
+        index: 0,
+      }),
+    ).toBe(false);
+  });
+
   test("accepts focus on the inner field when the editable parent is selected", () => {
     const hierarchy = fixture(1);
     const parent = new ResolverElementSelector().selectByText(hierarchy, "Search videos", {

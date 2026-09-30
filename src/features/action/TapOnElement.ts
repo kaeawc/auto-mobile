@@ -59,7 +59,12 @@ import { hierarchyFingerprint } from "../../utils/hierarchyFingerprint";
 import { ViewHierarchy } from "../observe/ViewHierarchy";
 import { serverConfig } from "../../utils/ServerConfig";
 import { refreshAndroidViewHierarchy } from "./refreshAndroidViewHierarchy";
-import { boundsEqual, boundsNearlyEqual, horizontalExtentNearlyEqual } from "../../utils/bounds";
+import {
+  boundsArea,
+  boundsEqual,
+  boundsNearlyEqual,
+  horizontalExtentNearlyEqual,
+} from "../../utils/bounds";
 import { androidPreTapConsecutiveStableMatchesRequired } from "./androidPreTapStablePolicy";
 import { isAndroidDocumentsUiRow } from "./androidCoordinateTapPolicy";
 import { androidViewHierarchyIndicatesLikelyBlockingLoading } from "../../utils/androidTransientLoading";
@@ -101,6 +106,7 @@ import { DefaultObserveElementCollector } from "../observe/ObserveElementCollect
 import { getImeOccluderForElement, tapPointOutsideIme } from "../observe/output/SkeletonProjection";
 import { getHierarchyNodeSource } from "../observe/output/elementProvenance";
 import { getScreenBounds } from "../../utils/screenBounds";
+import { compareSelectionRank } from "../utility/selectionRank";
 
 function intersectTapBounds(a: ElementBounds, b: ElementBounds): ElementBounds | null {
   const bounds = {
@@ -1688,11 +1694,14 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     identifier: { key: FocusIdentifierKey; value: string },
     selectedIndex?: number,
   ): boolean {
-    const selected = this.findElementInHierarchy(
-      { ...options, index: options.index ?? selectedIndex },
-      hierarchy,
-    ).selection.element;
     const nodes = new SearchableHierarchy().project(hierarchy);
+    const selected = this.findIndexedFocusSelection(
+      options,
+      hierarchy,
+      nodes,
+      identifier,
+      selectedIndex,
+    );
     const selectedSource = selected && getHierarchyNodeSource(selected);
     const selectedNode = nodes.find((node) => node.source === selectedSource);
     return Boolean(
@@ -1714,6 +1723,47 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         TapOnElement.ANDROID_PRE_TAP_BOUNDS_EPSILON_PX,
       ),
     );
+  }
+
+  private findIndexedFocusSelection(
+    options: TapOnElementOptions,
+    hierarchy: ViewHierarchyResult,
+    nodes: readonly SearchableEntry[],
+    identifier: { key: FocusIdentifierKey; value: string },
+    selectedIndex?: number,
+  ): Element | null {
+    // A known focus target may carry a view-id shared by several id-less fields.
+    // Public ID lookup rejects that ambiguous selector, so verify its selected
+    // occurrence within the capture without re-entering the public lookup.
+    const duplicateViewId =
+      identifier.key === "view-id" &&
+      options.elementId === identifier.value &&
+      nodes.filter((node) => node.nodeKey === identifier.value && !node.nativeId).length > 1;
+    const focusRank = (node: SearchableEntry) => ({
+      windowRank: node.windowRank,
+      area: node.bounds ? boundsArea(node.bounds) : Infinity,
+      order: node.index,
+      interactive: true,
+    });
+    if (duplicateViewId) {
+      return (
+        nodes
+          .filter(
+            (node) =>
+              node.nodeKey === identifier.value &&
+              !node.nativeId &&
+              node.element &&
+              isFocusEditableElement(node.properties),
+          )
+          .sort((a, b) => compareSelectionRank(focusRank(a), focusRank(b)))[
+          options.index ?? selectedIndex ?? 0
+        ]?.element ?? null
+      );
+    }
+    return this.findElementInHierarchy(
+      { ...options, index: options.index ?? selectedIndex },
+      hierarchy,
+    ).selection.element;
   }
 
   private isFocusedMatchingNode(
@@ -2443,7 +2493,6 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     if (container.text) {
       return this.elementSelector.selectByText(viewHierarchy, container.text, {
         intentAction: "inspect",
-        partialMatch: false,
         caseSensitive: false,
       }).element as Element | undefined;
     }

@@ -369,9 +369,9 @@ export const tapOnSchema = withJsonSchemaOverride(
           .nonnegative()
           .optional()
           .describe(
-            "0-based index to tap the Nth on-screen match (in hierarchy order, i.e. top-to-bottom " +
-              "for a vertical list) instead of applying " +
-              "selectionStrategy — for repeated controls with no unique text. Out of range → no match.",
+            "0-based index into the full candidate list, ranked by topmost window, then " +
+              "smallest eligible area. Index 0 is the default first pick when candidates share " +
+              "an action. Out of range → no match.",
           ),
         // A negative duration used to be accepted and silently degraded a
         // longPress into a plain tap (#5769); bound it like the sibling params.

@@ -20,6 +20,7 @@ import {
 import { ActionableError } from "../../models/ActionableError";
 import { isWithin, promoteClickableAncestor } from "./ElementResolver";
 import { SearchableHierarchy } from "./SearchableNode";
+import { compareSelectionRank } from "./selectionRank";
 
 /**
  * `assignStableViewIds` disambiguates structural duplicates with a descendant
@@ -108,11 +109,16 @@ function matchesResourceIdOrStableViewId(
   if (matchesResourceIdFieldOnly(nodeProperties, resourceId, bareResourceId, partialMatch)) {
     return true;
   }
-  if (syntheticStableViewIdBase(resourceId) !== null) {
-    const nodeViewId = nodeProperties["view-id"];
-    if (typeof nodeViewId === "string" && nodeViewId === resourceId) {
-      return true;
-    }
+  const nodeViewId = nodeProperties["view-id"];
+  const nodeResourceId = nodeProperties["resource-id"];
+  if (
+    typeof nodeViewId === "string" &&
+    nodeViewId.trim() !== "" &&
+    nodeViewId === resourceId &&
+    (typeof nodeResourceId !== "string" || nodeResourceId.trim() === "") &&
+    (!resourceId.startsWith("s-") || syntheticStableViewIdBase(resourceId) !== null)
+  ) {
+    return true;
   }
   return false;
 }
@@ -148,7 +154,10 @@ export class DefaultElementFinder implements ElementFinder {
     container: { elementId?: string; text?: string },
     matchesContainerText: ((input?: string) => boolean) | null,
     preferResourceIdOnly: boolean = false,
+    preferViewIdOnly: boolean = false,
   ): ViewHierarchyNode | null {
+    const bareElementId = container.elementId?.split("/").at(-1);
+    const fallbackId = bareElementId === container.elementId ? null : (bareElementId ?? null);
     for (const rootNode of rootNodes) {
       let containerNode: ViewHierarchyNode | null = null;
       this.parser.traverseNode(rootNode, (node: ViewHierarchyNode) => {
@@ -163,9 +172,13 @@ export class DefaultElementFinder implements ElementFinder {
 
         const elementIdMatches =
           container.elementId &&
-          (preferResourceIdOnly
-            ? matchesResourceIdFieldOnly(nodeProperties, container.elementId, null, false)
-            : matchesResourceIdOrStableViewId(nodeProperties, container.elementId, null, false));
+          this.matchesContainerId(
+            nodeProperties,
+            container.elementId,
+            fallbackId,
+            preferResourceIdOnly,
+            preferViewIdOnly,
+          );
 
         if (elementIdMatches) {
           containerNode = node;
@@ -190,6 +203,22 @@ export class DefaultElementFinder implements ElementFinder {
     return null;
   }
 
+  private matchesContainerId(
+    properties: Record<string, unknown>,
+    id: string,
+    fallbackId: string | null,
+    preferResourceIdOnly: boolean,
+    preferViewIdOnly: boolean,
+  ): boolean {
+    if (preferResourceIdOnly) {
+      return matchesResourceIdFieldOnly(properties, id, null, false);
+    }
+    if (preferViewIdOnly) {
+      return this.matchesIdLessViewId(properties, id);
+    }
+    return matchesResourceIdOrStableViewId(properties, id, fallbackId, false);
+  }
+
   private findContainerNodeInternal(
     viewHierarchy: ViewHierarchyResult,
     container: { elementId?: string; text?: string },
@@ -198,11 +227,12 @@ export class DefaultElementFinder implements ElementFinder {
       return null;
     }
 
+    const fullCaptureRoots = this.collectFullCaptureSearchRoots(viewHierarchy);
     let preferResourceIdOnly = false;
+    let preferViewIdOnly = false;
     if (container.elementId) {
       // A container selector has no enclosing scope of its own to resolve
       // first, so it is always checked against the whole capture.
-      const fullCaptureRoots = this.collectFullCaptureSearchRoots(viewHierarchy);
       this.assertStableViewIdSelectorNotAmbiguous(
         fullCaptureRoots,
         fullCaptureRoots,
@@ -216,22 +246,30 @@ export class DefaultElementFinder implements ElementFinder {
         fullCaptureRoots,
         container.elementId,
       );
+      preferViewIdOnly =
+        !preferResourceIdOnly &&
+        this.hasExactIdLessViewIdMatch(fullCaptureRoots, container.elementId);
     }
 
-    const matchesContainerText = container.text
-      ? this.textMatcher.createTextMatcher(container.text, true, false)
+    const exactText = container.text
+      ? this.textMatcher.createTextMatcher(container.text, false, false)
       : null;
-    const rootNodes = this.parser.extractRootNodes(viewHierarchy);
-    const containerInMain = this.findContainerNodeInRoots(
-      rootNodes,
-      container,
-      matchesContainerText,
-      preferResourceIdOnly,
-    );
-    if (containerInMain) {
-      return containerInMain;
+    let hasExactText = false;
+    if (exactText) {
+      for (const root of fullCaptureRoots) {
+        this.parser.traverseNode(root, (node) => {
+          const props = this.parser.extractNodeProperties(node);
+          hasExactText ||= [
+            props.text,
+            props["content-desc"],
+            props["ios-accessibility-label"],
+          ].some((value) => typeof value === "string" && exactText(value));
+        });
+      }
     }
-
+    const matchesContainerText = container.text
+      ? this.textMatcher.createTextMatcher(container.text, !hasExactText, false)
+      : null;
     const windowRootGroups = this.parser.extractWindowRootGroups(viewHierarchy, "topmost-first");
     for (const windowRoots of windowRootGroups) {
       const containerInWindow = this.findContainerNodeInRoots(
@@ -239,21 +277,31 @@ export class DefaultElementFinder implements ElementFinder {
         container,
         matchesContainerText,
         preferResourceIdOnly,
+        preferViewIdOnly,
       );
       if (containerInWindow) {
         return containerInWindow;
       }
     }
-
-    return null;
+    return this.findContainerNodeInRoots(
+      this.parser.extractRootNodes(viewHierarchy),
+      container,
+      matchesContainerText,
+      preferResourceIdOnly,
+      preferViewIdOnly,
+    );
   }
 
   private sortElementsByArea(elements: Element[]): void {
-    elements.sort((a, b) => {
-      const aArea = (a.bounds.right - a.bounds.left) * (a.bounds.bottom - a.bounds.top);
-      const bArea = (b.bounds.right - b.bounds.left) * (b.bounds.bottom - b.bounds.top);
-      return aArea - bArea;
+    const order = new Map(elements.map((element, index) => [element, index]));
+    const rank = (element: Element) => ({
+      windowRank: 0,
+      area:
+        (element.bounds.right - element.bounds.left) * (element.bounds.bottom - element.bounds.top),
+      order: order.get(element) ?? 0,
+      interactive: this.isClickableNode(element),
     });
+    elements.sort((a, b) => compareSelectionRank(rank(a), rank(b)));
   }
 
   /**
@@ -357,6 +405,7 @@ export class DefaultElementFinder implements ElementFinder {
     partialMatch: boolean,
     sortByArea: boolean = true,
     resourceIdFieldOnly: boolean = false,
+    viewIdFieldOnly: boolean = false,
   ): Element[] {
     const matches: Element[] = [];
     // Compose semantics (Modifier.testTag) surface via AccessibilityNodeInfo.viewIdResourceName
@@ -366,7 +415,10 @@ export class DefaultElementFinder implements ElementFinder {
     // never match a Compose-sourced node. This is not a fuzzy/partial match - the bare name is
     // the node's real, exact reported ID - so it applies regardless of the partialMatch flag.
     const idSeparatorIndex = resourceId.lastIndexOf("/");
-    const bareResourceId = idSeparatorIndex >= 0 ? resourceId.slice(idSeparatorIndex + 1) : null;
+    const bareResourceId =
+      !resourceIdFieldOnly && !viewIdFieldOnly && idSeparatorIndex >= 0
+        ? resourceId.slice(idSeparatorIndex + 1)
+        : null;
 
     for (const searchNode of rootNodes) {
       this.parser.traverseNode(searchNode, (node: any) => {
@@ -377,13 +429,15 @@ export class DefaultElementFinder implements ElementFinder {
         // PRRT_kwDOP-GF5M6fo13g, PRRT_kwDOP-GF5M6fo2Iq) - a real match must
         // never be unioned with, or out-competed by, a synthetic one.
         const isMatch = resourceIdFieldOnly
-          ? matchesResourceIdFieldOnly(nodeProperties, resourceId, bareResourceId, partialMatch)
-          : matchesResourceIdOrStableViewId(
-              nodeProperties,
-              resourceId,
-              bareResourceId,
-              partialMatch,
-            );
+          ? matchesResourceIdFieldOnly(nodeProperties, resourceId, null, false)
+          : viewIdFieldOnly
+            ? this.matchesIdLessViewId(nodeProperties, resourceId)
+            : matchesResourceIdOrStableViewId(
+                nodeProperties,
+                resourceId,
+                bareResourceId,
+                partialMatch,
+              );
         if (isMatch) {
           const parsedNode = this.parser.parseNodeBounds(node);
           if (parsedNode) {
@@ -557,6 +611,32 @@ export class DefaultElementFinder implements ElementFinder {
     return found;
   }
 
+  private matchesIdLessViewId(properties: Record<string, unknown>, id: string): boolean {
+    return (
+      properties["view-id"] === id &&
+      (typeof properties["resource-id"] !== "string" || properties["resource-id"].trim() === "") &&
+      (!id.startsWith("s-") || syntheticStableViewIdBase(id) !== null)
+    );
+  }
+
+  private hasExactIdLessViewIdMatch(searchRoots: ViewHierarchyNode[], id: string): boolean {
+    let found = false;
+    for (const root of searchRoots) {
+      this.parser.traverseNode(root, (node) => {
+        found ||= this.matchesIdLessViewId(this.parser.extractNodeProperties(node), id);
+      });
+    }
+    return found;
+  }
+
+  private preferIdLessViewId(
+    roots: ViewHierarchyNode[],
+    id: string,
+    preferResourceIdOnly: boolean,
+  ): boolean {
+    return !preferResourceIdOnly && this.hasExactIdLessViewIdMatch(roots, id);
+  }
+
   /**
    * Detect the pre-#6229 duplicate encoding: its first member used the bare
    * `s-<hash>` id while later members started at `-2`. The current producer
@@ -643,6 +723,7 @@ export class DefaultElementFinder implements ElementFinder {
   ): void {
     const base = syntheticStableViewIdBase(id);
     if (!base) {
+      this.assertPlainViewIdNotAmbiguous(activeScopeRoots, fullCaptureRoots, id);
       return;
     }
     if (this.hasExactResourceIdFieldMatch(activeScopeRoots, id)) {
@@ -682,6 +763,39 @@ export class DefaultElementFinder implements ElementFinder {
     }
   }
 
+  private assertPlainViewIdNotAmbiguous(
+    activeScopeRoots: ViewHierarchyNode[],
+    fullCaptureRoots: ViewHierarchyNode[],
+    id: string,
+  ): void {
+    if (this.hasExactResourceIdFieldMatch(activeScopeRoots, id)) {
+      return;
+    }
+    const seen = new Set<ViewHierarchyNode>();
+    let count = 0;
+    for (const root of fullCaptureRoots) {
+      this.parser.traverseNode(root, (node) => {
+        if (seen.has(node)) {
+          return;
+        }
+        seen.add(node);
+        const props = this.parser.extractNodeProperties(node);
+        if (
+          props["view-id"] === id &&
+          (typeof props["resource-id"] !== "string" || props["resource-id"].trim() === "")
+        ) {
+          count++;
+        }
+      });
+    }
+    if (count > 1) {
+      throw new ActionableError(
+        `Skeleton element id "${id}" is ambiguous in the current capture: ` +
+          `${count} id-less elements share this view-id. Use text with index instead.`,
+      );
+    }
+  }
+
   private isAndroidInputNode(props: Record<string, unknown>): boolean {
     return isEditableElementProperties(props);
   }
@@ -705,14 +819,17 @@ export class DefaultElementFinder implements ElementFinder {
   }
 
   private rankTextMatches(matches: Element[], selectionIntent?: TextSelectionIntent): Element[] {
-    matches.sort(
-      (a, b) =>
-        (selectionIntent === "tap"
-          ? Number(this.isAndroidInputNode(a)) - Number(this.isAndroidInputNode(b))
-          : selectionIntent === "focus-input"
-            ? Number(this.isAndroidInputNode(b)) - Number(this.isAndroidInputNode(a))
-            : 0) || Number(this.isClickableNode(b)) - Number(this.isClickableNode(a)),
-    );
+    const order = new Map(matches.map((element, index) => [element, index]));
+    const rank = (element: Element) => ({
+      windowRank: 0,
+      area:
+        (element.bounds.right - element.bounds.left) * (element.bounds.bottom - element.bounds.top),
+      order: order.get(element) ?? 0,
+      interactive: this.isClickableNode(element),
+      input: this.isAndroidInputNode(element),
+    });
+    const preferInput = selectionIntent === "tap" ? -1 : selectionIntent === "focus-input" ? 1 : 0;
+    matches.sort((a, b) => compareSelectionRank(rank(a), rank(b), true, preferInput));
     return matches;
   }
 
@@ -954,12 +1071,18 @@ export class DefaultElementFinder implements ElementFinder {
       // wins over a synthetic view-id match, never unioned with one (review
       // thread PRRT_kwDOP-GF5M6fo13g).
       const preferResourceIdOnly = this.hasExactResourceIdFieldMatch([containerNode], resourceId);
+      const preferViewIdOnly = this.preferIdLessViewId(
+        [containerNode],
+        resourceId,
+        preferResourceIdOnly,
+      );
       return this.collectResourceIdMatchesInRoots(
         [containerNode],
         resourceId,
         partialMatch,
         !preserveTraversalOrder,
         preferResourceIdOnly,
+        preferViewIdOnly,
       );
     }
 
@@ -968,6 +1091,11 @@ export class DefaultElementFinder implements ElementFinder {
     // encountered earlier in search order (review thread
     // PRRT_kwDOP-GF5M6fo2Iq).
     const preferResourceIdOnly = this.hasExactResourceIdFieldMatch(fullCaptureRoots, resourceId);
+    const preferViewIdOnly = this.preferIdLessViewId(
+      fullCaptureRoots,
+      resourceId,
+      preferResourceIdOnly,
+    );
 
     const rootNodes = this.parser.extractRootNodes(viewHierarchy);
     const mainMatches = this.collectResourceIdMatchesInRoots(
@@ -976,26 +1104,23 @@ export class DefaultElementFinder implements ElementFinder {
       partialMatch,
       !preserveTraversalOrder,
       preferResourceIdOnly,
+      preferViewIdOnly,
     );
-    if (mainMatches.length > 0) {
-      return mainMatches;
-    }
-
     const windowRootGroups = this.parser.extractWindowRootGroups(viewHierarchy, "topmost-first");
+    const allMatches: Element[] = [];
     for (const windowRoots of windowRootGroups) {
-      const windowMatches = this.collectResourceIdMatchesInRoots(
-        windowRoots,
-        resourceId,
-        partialMatch,
-        !preserveTraversalOrder,
-        preferResourceIdOnly,
+      allMatches.push(
+        ...this.collectResourceIdMatchesInRoots(
+          windowRoots,
+          resourceId,
+          partialMatch,
+          !preserveTraversalOrder,
+          preferResourceIdOnly,
+          preferViewIdOnly,
+        ),
       );
-      if (windowMatches.length > 0) {
-        return windowMatches;
-      }
     }
-
-    return [];
+    return [...allMatches, ...mainMatches];
   }
 
   /**
@@ -1052,23 +1177,14 @@ export class DefaultElementFinder implements ElementFinder {
       testTag,
       !preserveTraversalOrder,
     );
-    if (mainMatches.length > 0) {
-      return mainMatches;
-    }
-
     const windowRootGroups = this.parser.extractWindowRootGroups(viewHierarchy, "topmost-first");
+    const allMatches: Element[] = [];
     for (const windowRoots of windowRootGroups) {
-      const windowMatches = this.collectTestTagMatchesInRoots(
-        windowRoots,
-        testTag,
-        !preserveTraversalOrder,
+      allMatches.push(
+        ...this.collectTestTagMatchesInRoots(windowRoots, testTag, !preserveTraversalOrder),
       );
-      if (windowMatches.length > 0) {
-        return windowMatches;
-      }
     }
-
-    return [];
+    return [...allMatches, ...mainMatches];
   }
 
   /**
@@ -1570,27 +1686,15 @@ export class DefaultElementFinder implements ElementFinder {
       ? [containerNode]
       : this.parser.extractRootNodes(viewHierarchy);
 
-    const siblings = this.collectClickableSiblingsWithTextInRoots(searchRoots, matchesText);
-
-    if (siblings.length > 0) {
-      return siblings;
+    if (containerNode) {
+      return this.collectClickableSiblingsWithTextInRoots(searchRoots, matchesText);
     }
-
-    // Try window roots if no match in main hierarchy
-    if (!containerNode) {
-      const windowRootGroups = this.parser.extractWindowRootGroups(viewHierarchy, "topmost-first");
-      for (const windowRoots of windowRootGroups) {
-        const windowMatches = this.collectClickableSiblingsWithTextInRoots(
-          windowRoots,
-          matchesText,
-        );
-        if (windowMatches.length > 0) {
-          return windowMatches;
-        }
-      }
-    }
-
-    return [];
+    return [
+      ...this.parser
+        .extractWindowRootGroups(viewHierarchy, "topmost-first")
+        .flatMap((roots) => this.collectClickableSiblingsWithTextInRoots(roots, matchesText)),
+      ...this.collectClickableSiblingsWithTextInRoots(searchRoots, matchesText),
+    ];
   }
 
   findClickableSiblingsOfResourceId(
@@ -1638,6 +1742,11 @@ export class DefaultElementFinder implements ElementFinder {
       containerNode ? searchRoots : fullCaptureRoots,
       resourceId,
     );
+    const preferViewIdOnly = this.preferIdLessViewId(
+      containerNode ? searchRoots : fullCaptureRoots,
+      resourceId,
+      preferResourceIdOnly,
+    );
     this.assertStableViewIdSelectorNotAmbiguous(
       containerNode ? searchRoots : fullCaptureRoots,
       fullCaptureRoots,
@@ -1646,29 +1755,25 @@ export class DefaultElementFinder implements ElementFinder {
 
     const matchesId = (nodeProperties: Record<string, unknown>): boolean =>
       preferResourceIdOnly
-        ? matchesResourceIdFieldOnly(nodeProperties, resourceId, bareResourceId, partialMatch)
-        : matchesResourceIdOrStableViewId(nodeProperties, resourceId, bareResourceId, partialMatch);
+        ? matchesResourceIdFieldOnly(nodeProperties, resourceId, null, false)
+        : preferViewIdOnly
+          ? this.matchesIdLessViewId(nodeProperties, resourceId)
+          : matchesResourceIdOrStableViewId(
+              nodeProperties,
+              resourceId,
+              bareResourceId,
+              partialMatch,
+            );
 
-    const siblings = this.collectClickableSiblingsWithResourceIdInRoots(searchRoots, matchesId);
-
-    if (siblings.length > 0) {
-      return siblings;
+    if (containerNode) {
+      return this.collectClickableSiblingsWithResourceIdInRoots(searchRoots, matchesId);
     }
-
-    if (!containerNode) {
-      const windowRootGroups = this.parser.extractWindowRootGroups(viewHierarchy, "topmost-first");
-      for (const windowRoots of windowRootGroups) {
-        const windowMatches = this.collectClickableSiblingsWithResourceIdInRoots(
-          windowRoots,
-          matchesId,
-        );
-        if (windowMatches.length > 0) {
-          return windowMatches;
-        }
-      }
-    }
-
-    return [];
+    return [
+      ...this.parser
+        .extractWindowRootGroups(viewHierarchy, "topmost-first")
+        .flatMap((roots) => this.collectClickableSiblingsWithResourceIdInRoots(roots, matchesId)),
+      ...this.collectClickableSiblingsWithResourceIdInRoots(searchRoots, matchesId),
+    ];
   }
 
   private collectClickableSiblingsWithResourceIdInRoots(

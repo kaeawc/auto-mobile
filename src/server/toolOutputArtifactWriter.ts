@@ -19,6 +19,7 @@ import type {
 } from "./finalizeToolResponse";
 
 const SECURE_TOOL_OUTPUT_DIR_MODE = 0o700;
+const PRUNE_INTERVAL_MS = 60_000;
 
 export interface ToolOutputArtifactFileSystem {
   ensureDirectory(dirPath: string): void;
@@ -92,6 +93,8 @@ export class JsonToolOutputArtifactWriter implements ObservationArtifactWriter {
   private readonly timer: Timer;
   private readonly retention: ToolOutputArtifactRetention | undefined;
   private readonly ledger: ToolOutputArtifactLedger;
+  private directoryValidated = false;
+  private lastPruneTimeMs: number | undefined;
 
   constructor(options: JsonToolOutputArtifactWriterOptions) {
     this.outputDirectory = resolvePathFromDaemonLaunchWorkingDirectory(options.outputDirectory);
@@ -106,9 +109,12 @@ export class JsonToolOutputArtifactWriter implements ObservationArtifactWriter {
 
   writeJsonArtifact(input: ObservationArtifactWriteInput): ObservationArtifactMetadata {
     try {
-      this.fileSystem.ensureDirectory(this.outputDirectory);
-      this.fileSystem.assertWritableDirectory(this.outputDirectory);
-      this.pruneOldArtifacts();
+      if (!this.directoryValidated) {
+        this.fileSystem.ensureDirectory(this.outputDirectory);
+        this.fileSystem.assertWritableDirectory(this.outputDirectory);
+        this.directoryValidated = true;
+      }
+      this.pruneOldArtifactsIfDue();
 
       const content = serializeArtifactContent(input);
       const filename = `${Math.trunc(this.timer.now())}-${safeFilenameSegment(input.tool)}-${safeFilenameSegment(this.idGenerator.next())}.json`;
@@ -134,8 +140,22 @@ export class JsonToolOutputArtifactWriter implements ObservationArtifactWriter {
         },
       };
     } catch (error) {
+      // Re-check directory state on the next write after any failed filesystem operation.
+      this.directoryValidated = false;
       throw toActionableError(error, `Failed to write ${input.payload} artifact for ${input.tool}`);
     }
+  }
+
+  private pruneOldArtifactsIfDue(): void {
+    if (!this.retention) {
+      return;
+    }
+    const nowMs = this.timer.now();
+    if (this.lastPruneTimeMs !== undefined && nowMs - this.lastPruneTimeMs < PRUNE_INTERVAL_MS) {
+      return;
+    }
+    this.lastPruneTimeMs = nowMs;
+    this.pruneOldArtifacts();
   }
 
   private pruneOldArtifacts(): void {
@@ -161,7 +181,7 @@ export class JsonToolOutputArtifactWriter implements ObservationArtifactWriter {
       const filesToDelete = new Set([...expired, ...overflow].map((entry) => entry.path));
 
       for (const filePath of filesToDelete) {
-        this.fileSystem.deleteFile(filePath);
+        this.deletePrunedFile(filePath);
         // Keep provenance in lockstep so a pruned file stops resolving (#5917).
         this.ledger.forget(filePath);
       }
@@ -169,6 +189,22 @@ export class JsonToolOutputArtifactWriter implements ObservationArtifactWriter {
       logger.warn(`Failed to prune old tool output artifacts: ${error}`, error);
     }
   }
+
+  private deletePrunedFile(filePath: string): void {
+    try {
+      this.fileSystem.deleteFile(filePath);
+    } catch (error) {
+      if (!isEnoent(error)) {
+        throw error;
+      }
+      // Another concurrent prune may already have removed this selected file.
+      logger.debug(`Artifact already removed during prune: ${filePath}`);
+    }
+  }
+}
+
+function isEnoent(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
 }
 
 /**

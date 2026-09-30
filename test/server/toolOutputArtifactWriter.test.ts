@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import path from "node:path";
 import {
   JsonToolOutputArtifactWriter,
@@ -11,6 +11,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../src/utils/workingDirectory";
 import { ToolOutputArtifactLedger } from "../../src/server/toolOutputArtifactLedger";
 import { createHash } from "node:crypto";
+import { logger } from "../../src/utils/logger";
 
 class FakeArtifactFileSystem implements ToolOutputArtifactFileSystem {
   ensureCalls: string[] = [];
@@ -92,7 +93,7 @@ describe("JsonToolOutputArtifactWriter", () => {
     }
   });
 
-  test("writes JSON artifacts with deterministic metadata and validates per call", () => {
+  test("writes JSON artifacts with deterministic metadata and caches directory validation", () => {
     const fileSystem = new FakeArtifactFileSystem();
     const idGenerator = new FakeIdGenerator(["id/1", "id/2"]);
     const timer = new FakeTimer();
@@ -118,8 +119,8 @@ describe("JsonToolOutputArtifactWriter", () => {
 
     const firstPath = path.join(outputDirectory, "1234-tapOn-id_1.json");
     const secondPath = path.join(outputDirectory, "1234-tapOn-id_2.json");
-    expect(fileSystem.ensureCalls).toEqual([outputDirectory, outputDirectory]);
-    expect(fileSystem.assertWritableCalls).toEqual([outputDirectory, outputDirectory]);
+    expect(fileSystem.ensureCalls).toEqual([outputDirectory]);
+    expect(fileSystem.assertWritableCalls).toEqual([outputDirectory]);
     expect(fileSystem.writes[0]).toEqual({
       path: firstPath,
       content: stringifyToolResponse({ viewHierarchy: { hierarchy: { node: { text: "Hello" } } } }),
@@ -141,6 +142,26 @@ describe("JsonToolOutputArtifactWriter", () => {
     expect(second.artifact.resourceUri).toBe("automobile:tool-output/1234-tapOn-id_2.json");
     expect(fileSystem.listCalls).toEqual([]);
     expect(fileSystem.deleteCalls).toEqual([]);
+  });
+
+  test("bounds directory validation and prune passes across repeated writes", () => {
+    const fileSystem = new FakeArtifactFileSystem();
+    const timer = new FakeTimer();
+    const writer = new JsonToolOutputArtifactWriter({
+      outputDirectory: "/tmp/artifacts",
+      fileSystem,
+      idGenerator: new FakeIdGenerator(Array.from({ length: 100 }, (_, index) => `id-${index}`)),
+      timer,
+      retention: { maxAgeMs: 1_000, maxFiles: 500, overflowMinAgeMs: 500 },
+    });
+
+    for (let index = 0; index < 100; index += 1) {
+      writer.writeJsonArtifact({ tool: "observe", payload: "ObserveResult", data: { index } });
+    }
+
+    expect(fileSystem.ensureCalls).toHaveLength(1);
+    expect(fileSystem.assertWritableCalls).toHaveLength(1);
+    expect(fileSystem.listCalls).toHaveLength(1);
   });
 
   test("records every issued artifact in the provenance ledger (#5917)", () => {
@@ -213,6 +234,57 @@ describe("JsonToolOutputArtifactWriter", () => {
     expect(fileSystem.deleteCalls).toEqual([stalePath]);
     // A pruned file is no longer resolvable through the ledger.
     expect(ledger.resolve("old-observe.json")).toBeUndefined();
+  });
+
+  test("prunes expired files again after the timer interval", () => {
+    const fileSystem = new FakeArtifactFileSystem();
+    const timer = new FakeTimer();
+    timer.setCurrentTime(10_000);
+    const outputDirectory = path.resolve("/tmp/auto-mobile artifacts");
+    const stalePath = path.join(outputDirectory, "old-observe.json");
+    const writer = new JsonToolOutputArtifactWriter({
+      outputDirectory,
+      fileSystem,
+      idGenerator: new FakeIdGenerator(["one", "two"]),
+      timer,
+      retention: { maxAgeMs: 1_000, maxFiles: 500, overflowMinAgeMs: 500 },
+    });
+    writer.writeJsonArtifact({ tool: "observe", payload: "ObserveResult", data: {} });
+    fileSystem.entries = [
+      { path: stalePath, name: "old-observe.json", isFile: true, mtimeMs: 1_000 },
+    ];
+    timer.advanceTime(60_000);
+    writer.writeJsonArtifact({ tool: "observe", payload: "ObserveResult", data: {} });
+    expect(fileSystem.listCalls).toHaveLength(2);
+    expect(fileSystem.deleteCalls).toEqual([stalePath]);
+  });
+
+  test("logs a concurrent ENOENT prune race at debug", () => {
+    const fileSystem = new FakeArtifactFileSystem();
+    const stalePath = "/tmp/artifacts/stale.json";
+    fileSystem.entries = [{ path: stalePath, name: "stale.json", isFile: true, mtimeMs: 0 }];
+    fileSystem.deleteFile = () => {
+      throw Object.assign(new Error("gone"), { code: "ENOENT" });
+    };
+    const debug = spyOn(logger, "debug").mockImplementation(() => {});
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const timer = new FakeTimer();
+      timer.setCurrentTime(10);
+      const writer = new JsonToolOutputArtifactWriter({
+        outputDirectory: "/tmp/artifacts",
+        fileSystem,
+        idGenerator: new FakeIdGenerator(["id"]),
+        timer,
+        retention: { maxAgeMs: 1, maxFiles: 500, overflowMinAgeMs: 1 },
+      });
+      writer.writeJsonArtifact({ tool: "observe", payload: "ObserveResult", data: {} });
+      expect(debug).toHaveBeenCalled();
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      debug.mockRestore();
+      warn.mockRestore();
+    }
   });
 
   test("prunes stale JSON artifacts when retention is configured", () => {

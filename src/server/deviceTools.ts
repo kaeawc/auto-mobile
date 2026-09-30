@@ -167,7 +167,7 @@ import {
   type VirtualDeviceLifecycleLease,
   type VirtualDeviceLifecycleOperation,
 } from "../utils/virtualDeviceLifecycleCoordinator";
-import { DeviceTeardownService } from "../utils/deviceTeardownService";
+import { DeviceTeardownService } from "../devices/deviceTeardownService";
 import { hasMutableDisplayName } from "../utils/ios-cmdline-tools/iosDeviceType";
 import { isAndroidEmulatorSerial } from "../utils/androidSerial";
 import { DISPLAY_CUTOUT_PREFERENCES } from "../utils/displayCutout";

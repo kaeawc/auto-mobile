@@ -1,12 +1,12 @@
 import { ActionableError, toActionableError } from "../models";
 import type { DeviceTeardownOperationStore } from "../db/deviceTeardownOperationRepository";
-import { defaultIdGenerator, type IdGenerator } from "./IdGenerator";
-import type { Timer } from "./SystemTimer";
+import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
+import type { Timer } from "../utils/SystemTimer";
 import type {
   StableVirtualDeviceIdentity,
   VirtualDeviceLifecycleCoordinator,
   VirtualDeviceLifecycleLease,
-} from "./virtualDeviceLifecycleCoordinator";
+} from "../utils/virtualDeviceLifecycleCoordinator";
 
 export type DeviceTeardownPhase = "precondition" | "stop" | "destroy" | "verification";
 

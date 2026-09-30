@@ -474,6 +474,66 @@ describe("DefaultDeviceMatcher.matchBootedDevice", () => {
     expect(result?.deviceId).toBe("2");
   });
 
+  it("matches panel minimum and posture from booted inventory, independently of foldable form factor", () => {
+    const panel = { key: "inner", role: "inner" as const, sizePx: { width: 100, height: 100 } };
+    const devices = [
+      bootedDevice({
+        deviceId: "posture-only",
+        formFactor: "foldable",
+        displays: { panels: [panel], postures: ["half_opened"] },
+      }),
+      bootedDevice({
+        deviceId: "two-panel",
+        formFactor: "foldable",
+        displays: {
+          panels: [panel, { ...panel, key: "cover", role: "cover" }],
+          postures: ["rear_display"],
+        },
+      }),
+    ];
+
+    expect(
+      matcher.matchBootedDevice({ platform: "android", formFactor: "foldable" }, devices, "LATEST")
+        ?.deviceId,
+    ).toBe("posture-only");
+    expect(
+      matcher.matchBootedDevice({ platform: "android", requires: { panels: 2 } }, devices, "LATEST")
+        ?.deviceId,
+    ).toBe("two-panel");
+    expect(
+      matcher.matchBootedDevice(
+        { platform: "android", requires: { posture: "half_opened" } },
+        devices,
+        "LATEST",
+      )?.deviceId,
+    ).toBe("posture-only");
+    expect(
+      matcher.matchBootedDevice(
+        { platform: "android", requires: { panels: 2, posture: "half_opened" } },
+        devices,
+        "LATEST",
+      ),
+    ).toBeNull();
+  });
+
+  it("does not infer unbooted AVD panel or posture support from foldable form factor", () => {
+    const images = [deviceImage({ name: "Fold", formFactor: "foldable" })];
+    expect(
+      matcher.matchDeviceImage({ platform: "android", formFactor: "foldable" }, images, "LATEST")
+        ?.name,
+    ).toBe("Fold");
+    expect(
+      matcher.matchDeviceImage({ platform: "android", requires: { panels: 2 } }, images, "LATEST"),
+    ).toBeNull();
+    expect(
+      matcher.matchDeviceImage(
+        { platform: "android", requires: { posture: "rear_display" } },
+        images,
+        "LATEST",
+      ),
+    ).toBeNull();
+  });
+
   it("filters by screenSize with tolerance", () => {
     const devices = [
       bootedDevice({ deviceId: "1", screenWidth: 1080, screenHeight: 2400, osVersion: "14" }),

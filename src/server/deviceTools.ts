@@ -47,7 +47,7 @@ import {
 } from "../utils/deviceUtils";
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import { ActionableError, BootedDevice, DeviceInfo, Platform, SomePlatform } from "../models";
-import type { FormFactor } from "../models/DeviceMatchCriteria";
+import type { DeviceMatchCriteria, FormFactor } from "../models/DeviceMatchCriteria";
 import {
   BOOTED_DEVICE_RESOURCE_URIS,
   notifyBootedDeviceResourcesUpdated,
@@ -216,6 +216,16 @@ export const listDeviceImagesSchema = z
 export const listDevicesSchema = z
   .object({
     platform: platformSchema.optional(),
+    requires: z
+      .object({
+        panels: z.number().int().positive().optional(),
+        posture: z
+          .enum(["closed", "half_opened", "opened", "rear_display", "flipped", "tent", "unknown"])
+          .optional(),
+      })
+      .strict()
+      .optional()
+      .describe("Filter booted devices by display inventory capabilities"),
   })
   .strict();
 
@@ -268,7 +278,18 @@ const startDeviceParametersSchema = z.object({
     .describe(
       "Exact Android Virtual Device name. Unlike name, this never selects a substring-matching AVD.",
     ),
-  formFactor: z.enum(["phone", "tablet"]).optional().describe("Device form factor"),
+  formFactor: z.enum(["phone", "tablet", "foldable"]).optional().describe("Device form factor"),
+  requires: z
+    .object({
+      panels: z.number().int().positive().optional().describe("Minimum number of display panels"),
+      posture: z
+        .enum(["closed", "half_opened", "opened", "rear_display", "flipped", "tent", "unknown"])
+        .optional()
+        .describe("Supported device posture"),
+    })
+    .strict()
+    .optional()
+    .describe("Required display capabilities from device inventory"),
   screenSize: z
     .object({
       width: z.number().describe("Screen width in pixels"),
@@ -398,6 +419,7 @@ function validateDevicePreparationTimeout(
 // combinators), so it cannot be advertised in the flat object schema.
 export const getAndroidSchema = devicePreparationTimeoutSchema
   .extend({
+    requires: startDeviceParametersSchema.shape.requires,
     avdName: z
       .string()
       .min(1)
@@ -792,6 +814,7 @@ export interface StartDeviceArgs {
   /** Exact Android AVD identity for callers that must never match a sibling by substring. */
   avdName?: string;
   formFactor?: FormFactor;
+  requires?: DeviceMatchCriteria["requires"];
   screenSize?: { width: number; height: number };
   deviceId?: string;
   preferRunning?: boolean;
@@ -808,6 +831,7 @@ export interface StartDeviceArgs {
 export interface GetAndroidArgs {
   avdName?: string;
   deviceId?: string;
+  requires?: DeviceMatchCriteria["requires"];
   bootTimeoutMs?: number;
   automationReadyTimeoutMs?: number;
 }
@@ -1148,6 +1172,7 @@ export interface ListDeviceImagesArgs {
 
 export interface ListDevicesArgs {
   platform?: "android" | "ios";
+  requires?: DeviceMatchCriteria["requires"];
 }
 
 export function acceptancePresentationOrder(

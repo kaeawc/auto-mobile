@@ -312,6 +312,15 @@ are supported only on Android.
 
 ### Acquiring a device: `avdName`, `udid`, and the `deviceId` alias
 
+`startDevice`, `getAndroid`, and `listDevices` accept `requires: { panels?: number; posture?:
+Posture }`. `panels` is a minimum; `posture` must appear in the device's supported
+postures. A `foldable` form factor alone does not imply two panels: some foldable
+AVDs only change posture on one panel. Booted devices use their display inventory.
+`listDevices` filters its booted results. For an unbooted AVD without known display profile metadata, panel and posture
+support is unknown until booted, so capability matching will not select it.
+When no device qualifies, acquisition reports the requested capabilities and
+the candidates' known support.
+
 `getAndroid` and `getApple` each accept two ways to name a target; pass one.
 
 - **`getAndroid`** — `avdName` names a configured Android Virtual Device (the

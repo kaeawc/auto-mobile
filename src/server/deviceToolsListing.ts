@@ -10,6 +10,7 @@ import { createStructuredToolResponse } from "../utils/toolUtils";
 import { reconcileDiscoveryObservation } from "../daemon/discoveryReconcile";
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
+import { describeDisplayRequirements, matchesDeviceCriteria } from "../utils/deviceMatcher";
 import {
   acceptancePresentationOrder,
   androidProvenanceByAvdName,
@@ -21,6 +22,28 @@ import {
   listDevicePayloads,
 } from "./deviceTools";
 import type { ListDeviceImagesArgs, ListDevicesArgs } from "./deviceTools";
+
+function selectBootedDevices(
+  booted: BootedDevice[],
+  args: ListDevicesArgs,
+  discoveryComplete: boolean,
+): BootedDevice[] {
+  if (args.requires?.panels === undefined && args.requires?.posture === undefined) {
+    return booted;
+  }
+  const matching = booted.filter((device) =>
+    matchesDeviceCriteria(device, { platform: device.platform, requires: args.requires }),
+  );
+  if (matching.length === 0 && discoveryComplete) {
+    throw new ActionableError(
+      describeDisplayRequirements(
+        { platform: args.platform ?? "android", requires: args.requires },
+        booted,
+      ),
+    );
+  }
+  return matching;
+}
 
 export function createListingHandlers() {
   // List AVDs handler
@@ -120,13 +143,14 @@ export function createListingHandlers() {
         : {}),
     };
 
+    const matchingBooted = selectBootedDevices(booted, args, discovery.complete);
     const configuredImages = await configuredImagesForBootedDevices(
       deviceManager,
       deps.avdManagerFactory(),
-      booted,
+      matchingBooted,
       deps.timer,
     );
-    const devices = listDevicePayloads(booted, initializedDevicePool(), configuredImages);
+    const devices = listDevicePayloads(matchingBooted, initializedDevicePool(), configuredImages);
     const platformFilter = args.platform ? ` (${args.platform} only)` : "";
 
     return createStructuredToolResponse({

@@ -152,6 +152,22 @@ final class PressKeyTests: XCTestCase {
         )
     }
 
+    func testArrowBudgetReservesTimeForEachRemainingOperation() {
+        let allows = GesturePerformer.arrowBudgetAllows
+        XCTAssertTrue(allows(0, .initialProbe))
+        XCTAssertTrue(allows(800, .initialProbe))
+        XCTAssertFalse(allows(801, .initialProbe))
+        XCTAssertTrue(allows(1700, .appKey))
+        XCTAssertFalse(allows(1701, .appKey))
+        XCTAssertTrue(allows(2300, .outcomeProbe))
+        XCTAssertFalse(allows(2301, .outcomeProbe))
+        XCTAssertTrue(allows(1500, .retry))
+        XCTAssertFalse(allows(1501, .retry))
+        XCTAssertFalse(allows(3500, .outcomeProbe))
+        XCTAssertTrue(allows(3499, .completion))
+        XCTAssertFalse(allows(3500, .completion))
+    }
+
     func testDecodePreservesKeyAndModifiersAndResponseType() throws {
         let request = try JSONDecoder().decode(WebSocketRequest.self, from: Data(
             #"{"type":"request_press_key","requestId":"key-1","key":"tab","modifiers":["shift","meta"]}"#.utf8

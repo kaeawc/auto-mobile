@@ -218,11 +218,20 @@
                 return error(statusCode: 404, code: "unknown_database_path")
             }
 
-            if !isReadOnlyQuery(request.query)
+            let classification = SQLiteDatabaseDriver.classifySQL(
+                databasePath: request.databasePath,
+                query: request.query,
+                allowSyntaxFallback: !(driver is SQLiteDatabaseDriver)
+            )
+            if classification.hasMultipleStatements {
+                return error(statusCode: 400, code: "multiple_statements_not_supported")
+            }
+            if !classification.readOnly
                 && !DatabaseInspector.shared.canMutate(
                     sessionId: request.sessionId,
                     currentSessionId: AutoMobileSDK.shared.currentSessionId()
-                ) {
+                )
+            {
                 return error(statusCode: 403, code: "mutation_not_authorized")
             }
             let result = driver.executeSQL(databasePath: request.databasePath, query: request.query)
@@ -282,7 +291,9 @@
         private func encodeBoundedTableData(
             _ payload: SdkTableDataPayload,
             maxBytes: Int
-        ) -> SdkRouteResponse {
+        )
+            -> SdkRouteResponse
+        {
             var rows = payload.rows
             while true {
                 let candidate = SdkTableDataPayload(
@@ -307,7 +318,9 @@
         private func encodeBoundedExecuteSql(
             _ payload: SdkExecuteSqlPayload,
             maxBytes: Int
-        ) -> SdkRouteResponse {
+        )
+            -> SdkRouteResponse
+        {
             var rows = payload.rows ?? []
             while true {
                 let candidate = SdkExecuteSqlPayload(
@@ -339,18 +352,6 @@
             )
             let body = (try? JSONEncoder().encode(payload)) ?? Data("{\"error\":\"\(code)\"}".utf8)
             return SdkRouteResponse(statusCode: statusCode, body: body)
-        }
-
-        private func isReadOnlyQuery(_ query: String) -> Bool {
-            let keyword = query.trimmingCharacters(in: .whitespacesAndNewlines)
-                .split(whereSeparator: { $0 == " " || $0 == "\n" || $0 == "\t" })
-                .first?
-                .uppercased()
-            return keyword == "SELECT" || keyword == "EXPLAIN"
-                || keyword == "PRAGMA" && !query.contains("=")
-                || keyword == "WITH" && !query.localizedCaseInsensitiveContains("INSERT")
-                    && !query.localizedCaseInsensitiveContains("UPDATE")
-                    && !query.localizedCaseInsensitiveContains("DELETE")
         }
 
         private func boundRows(_ rows: [[String?]], maxBytes: Int) -> [[String?]] {

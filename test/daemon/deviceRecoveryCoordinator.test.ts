@@ -3,22 +3,127 @@ import {
   DeviceRecoveryCoordinator,
   type DeviceRecoveryPoolPort,
 } from "../../src/daemon/deviceRecoveryCoordinator";
-import type { AndroidRecoveryRecord } from "../../src/daemon/androidRecoveryRecordLedger";
+import { AndroidRecoveryRecordLedger } from "../../src/daemon/androidRecoveryRecordLedger";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 function harness() {
   const timer = new FakeTimer();
-  const records = new Map<string, AndroidRecoveryRecord>();
+  const ledger = new AndroidRecoveryRecordLedger(
+    { getDevice: () => null, getSession: () => null, clearAdbResetReservation: () => {} },
+    timer,
+  );
+  const records = ledger.recoveringSessionLosses;
+  const quarantined = new Set<string>();
+  const settlements = new Map<string, Promise<void>>();
   const port: DeviceRecoveryPoolPort = {
     getRecoveringSessionLosses: () => records,
     getTimer: () => timer,
+    getAndroidRecoveryRecordLedger: () => ledger,
+    getAdbServerResetQuarantinedSessions: () => quarantined,
+    getEmulatorLossRecoverySettlements: () => settlements,
+    hasReleasedDeviceCapture: () => false,
+    refreshEmulatorLossRecoverySettlement: async () => {},
+    settleEmulatorLossIncident: () => {},
+    completeEmulatorLossRecovery: async () => {},
+    releaseDisconnectedRecoverySessionWithRetry: async (_sessionId, _deviceId, _reason, attempt) =>
+      attempt(),
+    releaseDevice: async () => {},
   };
-  return { coordinator: new DeviceRecoveryCoordinator(port), records, timer };
+  return {
+    coordinator: new DeviceRecoveryCoordinator(port),
+    port,
+    records,
+    ledger,
+    quarantined,
+    timer,
+  };
 }
 
 const image = { name: "Pixel", platform: "android" as const, isRunning: false };
 
 describe("DeviceRecoveryCoordinator", () => {
+  test("record finalization clears image, quarantine, and the exact ledger generation", () => {
+    const { coordinator, records, quarantined } = harness();
+    coordinator.setRecoveringAndroidImage("Pixel", image);
+    const first = coordinator.startAndroidRecoveryRecord(
+      "session",
+      { deviceId: "emulator-5554", avdName: "Pixel" },
+      ["quarantine", "image"],
+    );
+    expect(quarantined.has("session")).toBe(true);
+    const replacement = coordinator.startAndroidRecoveryRecord(
+      "session",
+      { deviceId: "emulator-5556", avdName: "Pixel" },
+      ["quarantine", "image"],
+      true,
+    );
+    expect(coordinator.finalizeRecoveryRecord("session", first)).toBe(false);
+    expect(records.get("session")).toBe(replacement);
+    expect(coordinator.recoveringAndroidImages.has("Pixel")).toBe(true);
+    expect(coordinator.finalizeRecoveryRecord("session", replacement)).toBe(true);
+    expect(quarantined.has("session")).toBe(false);
+    expect(coordinator.recoveringAndroidImages.has("Pixel")).toBe(false);
+  });
+
+  test("terminal release publishes one retry flight before invoking the release", async () => {
+    const { coordinator, ledger, port, records } = harness();
+    const record = coordinator.startAndroidRecoveryRecord(
+      "session",
+      { deviceId: "emulator-5554" },
+      ["failed-release", "quarantine"],
+    );
+    const gate = Promise.withResolvers<string | null>();
+    let attempts = 0;
+    port.releaseDisconnectedRecoverySessionWithRetry = async (
+      _session,
+      _device,
+      _reason,
+      attempt,
+    ) => {
+      attempts++;
+      await attempt();
+      ledger.markAndroidRecoveryRecordReleased("session");
+    };
+    const first = coordinator.releaseFailedRecoveryOnExpiry(
+      "session",
+      "cleanup-expired",
+      () => gate.promise,
+    );
+    expect(coordinator.isSessionRecoveryInFlight("session")).toBe(true);
+    expect(
+      await coordinator.releaseFailedRecoveryOnExpiry(
+        "session",
+        "cleanup-expired",
+        () => gate.promise,
+      ),
+    ).toBe(null);
+    gate.resolve("emulator-5554");
+    expect(await first).toBe("emulator-5554");
+    expect(attempts).toBe(1);
+    expect(records.has("session")).toBe(false);
+    expect(record.state).toBe("finalized");
+  });
+
+  test("failed terminal release retains its fence until the FakeTimer retry deadline", async () => {
+    const { coordinator, port, records, timer } = harness();
+    const record = coordinator.startAndroidRecoveryRecord(
+      "session",
+      { deviceId: "emulator-5554" },
+      ["failed-release", "quarantine"],
+    );
+    port.releaseDisconnectedRecoverySessionWithRetry = async () => {
+      throw new Error("persistence failed");
+    };
+    await expect(
+      coordinator.releaseFailedRecoveryOnExpiry("session", "lazy-expiry", async () => null),
+    ).rejects.toThrow("persistence failed");
+    expect(records.get("session")).toBe(record);
+    expect(record.failedReleaseAttempts).toBe(1);
+    expect(coordinator.isSessionRecoveryInFlight("session")).toBe(true);
+    timer.advanceTime(5_000);
+    expect(coordinator.isSessionRecoveryInFlight("session")).toBe(false);
+  });
+
   test("image settlement releases a waiting startup and keeps the same promise on duplicate set", async () => {
     const { coordinator } = harness();
     coordinator.setRecoveringAndroidImage("Pixel", image);
